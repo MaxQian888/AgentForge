@@ -1,0 +1,4 @@
+interface:
+  display_name: "Go Echo Backend"
+  short_description: "Guide Go Echo backend work in layered app templates"
+  default_prompt: "Use $echo-go-backend to build or update the Go Echo backend in src-go while preserving this repository's layered template and current Echo major version."

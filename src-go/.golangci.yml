@@ -1,0 +1,18 @@
+# src-go/.golangci.yml
+# golangci-lint v2 configuration
+version: "2"
+
+linters:
+  default: none
+  enable:
+    - govet
+    - errcheck
+    - staticcheck
+  settings:
+    staticcheck:
+      checks:
+        - all
+
+issues:
+  max-same-issues: 0
+  max-issues-per-linter: 0

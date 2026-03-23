@@ -1,0 +1,110 @@
+name: Go CI
+
+# ============================================================================
+# Go Backend CI
+# ============================================================================
+# go-unit:        go vet + golangci-lint + unit tests (every push/PR)
+# go-integration: integration tests with real Postgres + Redis
+#                 (master pushes, PRs targeting master, workflow_call)
+# ============================================================================
+
+on:
+  pull_request:
+    branches:
+      - master
+      - develop
+  workflow_call:
+
+concurrency:
+  # For PR: group by ref so older runs are cancelled.
+  # For workflow_call: use run_id so parallel callers (ci.yml, release.yml)
+  # never cancel each other.
+  group: ${{ github.event_name == 'workflow_call' && github.run_id || format('go-ci-{0}', github.ref) }}
+  cancel-in-progress: ${{ github.event_name != 'workflow_call' }}
+
+jobs:
+  go-unit:
+    name: Go Unit Tests & Lint
+    runs-on: ubuntu-latest
+
+    defaults:
+      run:
+        working-directory: src-go
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: src-go/go.mod
+          cache: true
+          cache-dependency-path: src-go/go.sum
+
+      - name: Run go vet
+        run: go vet ./...
+
+      - name: Run golangci-lint
+        uses: golangci/golangci-lint-action@v9
+        with:
+          version: v2.11
+          working-directory: src-go
+          args: --timeout=5m
+
+      - name: Run unit tests
+        run: go test ./... -count=1 -race -timeout 120s
+
+  go-integration:
+    name: Go Integration Tests
+    runs-on: ubuntu-latest
+    if: >
+      github.ref == 'refs/heads/master' ||
+      github.base_ref == 'master' ||
+      github.event_name == 'workflow_call'
+
+    defaults:
+      run:
+        working-directory: src-go
+
+    services:
+      postgres:
+        image: postgres:16-alpine
+        env:
+          POSTGRES_USER: dev
+          POSTGRES_PASSWORD: dev
+          POSTGRES_DB: appdb_test
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd pg_isready
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 5
+
+      redis:
+        image: redis:7-alpine
+        ports:
+          - 6379:6379
+        options: >-
+          --health-cmd "redis-cli ping"
+          --health-interval 5s
+          --health-timeout 3s
+          --health-retries 5
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version-file: src-go/go.mod
+          cache: true
+          cache-dependency-path: src-go/go.sum
+
+      - name: Run integration tests
+        run: go test ./... -tags integration -count=1 -v
+        env:
+          TEST_POSTGRES_URL: postgres://dev:dev@localhost:5432/appdb_test?sslmode=disable
+          TEST_REDIS_URL: redis://localhost:6379

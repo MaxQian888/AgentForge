@@ -1,0 +1,63 @@
+name: CI/CD Pipeline
+
+# ============================================================================
+# CI/CD Pipeline Orchestrator
+# ============================================================================
+# This is the main CI/CD pipeline that orchestrates smaller, modular workflows.
+# Each workflow can also be run independently for better maintainability.
+#
+# Workflow Structure:
+# ├── quality.yml     - Code quality & security checks (ESLint, TypeScript, audit)
+# ├── test.yml        - Test suite with coverage & Next.js build
+# ├── build-tauri.yml - Tauri desktop app builds (Windows, macOS, Linux)
+# ├── deploy.yml      - Deployment workflows (optional, disabled by default)
+# └── release.yml     - GitHub release creation (triggered by version tags)
+#
+# This workflow works OUT-OF-THE-BOX without requiring any secrets.
+# See CI_CD.md for detailed setup instructions for optional features.
+# ============================================================================
+
+on:
+  push:
+    branches:
+      - master
+      - develop
+  pull_request:
+    branches:
+      - master
+      - develop
+
+permissions:
+  contents: read
+  pull-requests: write
+  checks: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  # Step 1: Code Quality Checks
+  quality:
+    name: Quality
+    uses: ./.github/workflows/quality.yml
+
+  # Step 2: Frontend Test Suite & Build
+  test:
+    name: Test
+    permissions:
+      contents: read
+      pull-requests: write
+      checks: write
+    uses: ./.github/workflows/test.yml
+
+  # Step 3: Go Backend CI (lint + unit + integration)
+  go-ci:
+    name: Go CI
+    uses: ./.github/workflows/go-ci.yml
+
+  # Step 4: Build Tauri Desktop Apps (after all checks pass)
+  build-tauri:
+    name: Build Tauri
+    needs: [quality, test, go-ci]
+    uses: ./.github/workflows/build-tauri.yml

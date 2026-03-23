@@ -1,0 +1,70 @@
+// Package middleware provides Echo middleware for authentication and request processing.
+package middleware
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"net/http"
+	"strings"
+
+	"github.com/golang-jwt/jwt/v5"
+	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/service"
+)
+
+// TokenBlacklist defines the interface for checking revoked tokens.
+type TokenBlacklist interface {
+	IsBlacklisted(ctx context.Context, jti string) (bool, error)
+}
+
+// JWTContextKey is used to store parsed claims in echo.Context.
+const JWTContextKey = "jwt_claims"
+
+// JWTMiddleware validates the Bearer token and checks the blacklist.
+func JWTMiddleware(secret string, blacklist TokenBlacklist) echo.MiddlewareFunc {
+	return func(next echo.HandlerFunc) echo.HandlerFunc {
+		return func(c echo.Context) error {
+			authHeader := c.Request().Header.Get("Authorization")
+			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
+				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "missing or invalid authorization header"})
+			}
+
+			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
+			claims := &service.Claims{}
+
+			token, err := jwt.ParseWithClaims(tokenStr, claims, func(t *jwt.Token) (interface{}, error) {
+				if _, ok := t.Method.(*jwt.SigningMethodHMAC); !ok {
+					return nil, fmt.Errorf("unexpected signing method: %v", t.Header["alg"])
+				}
+				return []byte(secret), nil
+			})
+
+			if err != nil || !token.Valid {
+				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "invalid or expired token"})
+			}
+
+			// Check blacklist
+			blacklisted, err := blacklist.IsBlacklisted(c.Request().Context(), claims.JTI)
+			if err != nil {
+				return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "internal server error"})
+			}
+			if blacklisted {
+				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "token has been revoked"})
+			}
+
+			c.Set(JWTContextKey, claims)
+			return next(c)
+		}
+	}
+}
+
+// GetClaims extracts JWT claims from the echo context.
+func GetClaims(c echo.Context) (*service.Claims, error) {
+	claims, ok := c.Get(JWTContextKey).(*service.Claims)
+	if !ok || claims == nil {
+		return nil, errors.New("no JWT claims in context")
+	}
+	return claims, nil
+}

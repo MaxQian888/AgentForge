@@ -1,0 +1,62 @@
+# Development dependencies for the Go backend.
+# Usage: docker compose up -d
+#
+# Then start the backend:
+#   cd src-go && go run ./cmd/server
+#
+# Or with custom env:
+#   cd src-go && cp .env.example .env  # edit .env as needed
+#   cd src-go && go run ./cmd/server
+
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: rg-starter-postgres
+    environment:
+      POSTGRES_USER: dev
+      POSTGRES_PASSWORD: dev
+      POSTGRES_DB: appdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U dev -d appdb"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: rg-starter-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 5
+
+  # Uncomment to run the Go backend as a container
+  # server:
+  #   build:
+  #     context: ./src-go
+  #     dockerfile: Dockerfile
+  #   ports:
+  #     - "7777:7777"
+  #   environment:
+  #     POSTGRES_URL: postgres://dev:dev@postgres:5432/appdb?sslmode=disable
+  #     REDIS_URL: redis://redis:6379
+  #     JWT_SECRET: change-me-in-production-at-least-32-chars
+  #     ENV: development
+  #   depends_on:
+  #     postgres:
+  #       condition: service_healthy
+  #     redis:
+  #       condition: service_healthy
+
+volumes:
+  postgres_data:
+  redis_data:
