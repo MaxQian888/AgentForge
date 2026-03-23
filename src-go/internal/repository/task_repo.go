@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	"github.com/jackc/pgx/v5"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
 
@@ -65,6 +66,18 @@ func (r *TaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Task
 	t, err := scanTask(r.db.QueryRow(ctx, query, id))
 	if err != nil {
 		return nil, fmt.Errorf("get task by id: %w", err)
+	}
+	return t, nil
+}
+
+func (r *TaskRepository) GetByPRURL(ctx context.Context, prURL string) (*model.Task, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	query := `SELECT ` + taskColumns + ` FROM tasks WHERE pr_url = $1 ORDER BY updated_at DESC LIMIT 1`
+	t, err := scanTask(r.db.QueryRow(ctx, query, prURL))
+	if err != nil {
+		return nil, fmt.Errorf("get task by pr url: %w", err)
 	}
 	return t, nil
 }
@@ -218,4 +231,127 @@ func (r *TaskRepository) UpdateAssignee(ctx context.Context, id uuid.UUID, assig
 		return fmt.Errorf("update task assignee: %w", err)
 	}
 	return nil
+}
+
+func (r *TaskRepository) UpdateRuntime(ctx context.Context, id uuid.UUID, branch, worktreePath, sessionID string) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	query := `UPDATE tasks SET
+		agent_branch = $1,
+		agent_worktree = $2,
+		agent_session_id = $3,
+		updated_at = NOW()
+		WHERE id = $4`
+	_, err := r.db.Exec(ctx, query, branch, worktreePath, sessionID, id)
+	if err != nil {
+		return fmt.Errorf("update task runtime: %w", err)
+	}
+	return nil
+}
+
+func (r *TaskRepository) ClearRuntime(ctx context.Context, id uuid.UUID) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	query := `UPDATE tasks SET
+		agent_branch = '',
+		agent_worktree = '',
+		agent_session_id = '',
+		updated_at = NOW()
+		WHERE id = $1`
+	_, err := r.db.Exec(ctx, query, id)
+	if err != nil {
+		return fmt.Errorf("clear task runtime: %w", err)
+	}
+	return nil
+}
+
+func (r *TaskRepository) HasChildren(ctx context.Context, parentID uuid.UUID) (bool, error) {
+	if r.db == nil {
+		return false, ErrDatabaseUnavailable
+	}
+	var count int
+	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE parent_id = $1`, parentID).Scan(&count); err != nil {
+		return false, fmt.Errorf("count child tasks: %w", err)
+	}
+	return count > 0, nil
+}
+
+func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.TaskChildInput) ([]*model.Task, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	if len(inputs) == 0 {
+		return []*model.Task{}, nil
+	}
+
+	type beginner interface {
+		Begin(context.Context) (pgx.Tx, error)
+	}
+
+	var (
+		executor DBTX = r.db
+		tx       pgx.Tx
+		err      error
+		commit   bool
+	)
+	if b, ok := r.db.(beginner); ok {
+		tx, err = b.Begin(ctx)
+		if err != nil {
+			return nil, fmt.Errorf("begin child task transaction: %w", err)
+		}
+		executor = tx
+		defer func() {
+			if !commit {
+				_ = tx.Rollback(ctx)
+			}
+		}()
+	}
+
+	created := make([]*model.Task, 0, len(inputs))
+	query := `
+		INSERT INTO tasks (id, project_id, parent_id, sprint_id, title, description, status, priority,
+			assignee_id, assignee_type, reporter_id, labels, budget_usd, spent_usd,
+			agent_branch, agent_worktree, agent_session_id, pr_url, pr_number,
+			blocked_by, created_at, updated_at, completed_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW(),NOW(),$21)
+	`
+
+	for _, input := range inputs {
+		task := &model.Task{
+			ID:          uuid.New(),
+			ProjectID:   input.ProjectID,
+			ParentID:    &input.ParentID,
+			SprintID:    input.SprintID,
+			Title:       input.Title,
+			Description: input.Description,
+			Status:      model.TaskStatusInbox,
+			Priority:    input.Priority,
+			ReporterID:  input.ReporterID,
+			Labels:      append([]string(nil), input.Labels...),
+			BudgetUsd:   input.BudgetUSD,
+			BlockedBy:   []string{},
+		}
+
+		_, err := executor.Exec(ctx, query,
+			task.ID, task.ProjectID, task.ParentID, task.SprintID, task.Title, task.Description,
+			task.Status, task.Priority, task.AssigneeID, task.AssigneeType, task.ReporterID,
+			task.Labels, task.BudgetUsd, task.SpentUsd, task.AgentBranch, task.AgentWorktree,
+			task.AgentSessionID, task.PRUrl, task.PRNumber, task.BlockedBy, task.CompletedAt,
+		)
+		if err != nil {
+			return nil, fmt.Errorf("create child task: %w", err)
+		}
+		created = append(created, task)
+	}
+
+	if tx != nil {
+		if err := tx.Commit(ctx); err != nil {
+			return nil, fmt.Errorf("commit child task transaction: %w", err)
+		}
+		commit = true
+	}
+
+	return created, nil
 }

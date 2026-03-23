@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"fmt"
 	"log"
 	"os"
 	"os/signal"
@@ -11,28 +12,40 @@ import (
 	"github.com/agentforge/im-bridge/commands"
 	"github.com/agentforge/im-bridge/core"
 	"github.com/agentforge/im-bridge/notify"
+	"github.com/agentforge/im-bridge/platform/dingtalk"
 	"github.com/agentforge/im-bridge/platform/feishu"
+	"github.com/agentforge/im-bridge/platform/slack"
 )
 
 type config struct {
-	APIBase    string
-	ProjectID  string
-	APIKey     string
-	FeishuApp  string
-	FeishuSec  string
-	NotifyPort string
-	TestPort   string
+	APIBase           string
+	ProjectID         string
+	APIKey            string
+	Platform          string
+	FeishuApp         string
+	FeishuSec         string
+	SlackBotToken     string
+	SlackAppToken     string
+	DingTalkAppKey    string
+	DingTalkAppSecret string
+	NotifyPort        string
+	TestPort          string
 }
 
 func loadConfig() *config {
 	return &config{
-		APIBase:    envOrDefault("AGENTFORGE_API_BASE", "http://localhost:7777"),
-		ProjectID:  envOrDefault("AGENTFORGE_PROJECT_ID", "default-project"),
-		APIKey:     envOrDefault("AGENTFORGE_API_KEY", ""),
-		FeishuApp:  os.Getenv("FEISHU_APP_ID"),
-		FeishuSec:  os.Getenv("FEISHU_APP_SECRET"),
-		NotifyPort: envOrDefault("NOTIFY_PORT", "7779"),
-		TestPort:   envOrDefault("TEST_PORT", "7780"),
+		APIBase:           envOrDefault("AGENTFORGE_API_BASE", "http://localhost:7777"),
+		ProjectID:         envOrDefault("AGENTFORGE_PROJECT_ID", "default-project"),
+		APIKey:            envOrDefault("AGENTFORGE_API_KEY", ""),
+		Platform:          envOrDefault("IM_PLATFORM", "feishu"),
+		FeishuApp:         os.Getenv("FEISHU_APP_ID"),
+		FeishuSec:         os.Getenv("FEISHU_APP_SECRET"),
+		SlackBotToken:     os.Getenv("SLACK_BOT_TOKEN"),
+		SlackAppToken:     os.Getenv("SLACK_APP_TOKEN"),
+		DingTalkAppKey:    os.Getenv("DINGTALK_APP_KEY"),
+		DingTalkAppSecret: os.Getenv("DINGTALK_APP_SECRET"),
+		NotifyPort:        envOrDefault("NOTIFY_PORT", "7779"),
+		TestPort:          envOrDefault("TEST_PORT", "7780"),
 	}
 }
 
@@ -43,21 +56,43 @@ func envOrDefault(key, fallback string) string {
 	return fallback
 }
 
+func selectPlatform(cfg *config) (core.Platform, error) {
+	switch core.NormalizePlatformName(cfg.Platform) {
+	case "feishu":
+		if cfg.FeishuApp != "" && cfg.FeishuSec != "" {
+			log.Printf("[main] Selected platform feishu with configured credentials; using local stub adapter on :%s until live transport is integrated", cfg.TestPort)
+		} else {
+			log.Printf("[main] Selected platform feishu without credentials; using local stub adapter on :%s", cfg.TestPort)
+		}
+		return feishu.NewStub(cfg.TestPort), nil
+	case "slack":
+		if cfg.SlackBotToken == "" || cfg.SlackAppToken == "" {
+			return nil, fmt.Errorf("selected platform slack requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN")
+		}
+		log.Printf("[main] Selected platform slack; using local stub adapter on :%s", cfg.TestPort)
+		return slack.NewStub(cfg.TestPort), nil
+	case "dingtalk":
+		if cfg.DingTalkAppKey == "" || cfg.DingTalkAppSecret == "" {
+			return nil, fmt.Errorf("selected platform dingtalk requires DINGTALK_APP_KEY and DINGTALK_APP_SECRET")
+		}
+		log.Printf("[main] Selected platform dingtalk; using local stub adapter on :%s", cfg.TestPort)
+		return dingtalk.NewStub(cfg.TestPort), nil
+	default:
+		return nil, fmt.Errorf("unsupported IM_PLATFORM %q", cfg.Platform)
+	}
+}
+
 func main() {
 	cfg := loadConfig()
 
-	// Create API client.
-	apiClient := client.NewAgentForgeClient(cfg.APIBase, cfg.ProjectID, cfg.APIKey)
-
-	// Create platform: real Feishu or stub for testing.
-	var platform core.Platform
-	if cfg.FeishuApp != "" {
-		log.Println("[main] Feishu credentials detected, but full SDK not yet integrated. Using stub.")
-		platform = feishu.NewStub(cfg.TestPort)
-	} else {
-		log.Println("[main] No Feishu credentials, starting in stub/test mode")
-		platform = feishu.NewStub(cfg.TestPort)
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		log.Fatalf("[main] Invalid IM bridge configuration: %v", err)
 	}
+	log.Printf("[main] IM platform selected: %s", core.NormalizePlatformName(platform.Name()))
+
+	// Create API client.
+	apiClient := client.NewAgentForgeClient(cfg.APIBase, cfg.ProjectID, cfg.APIKey).WithSource(platform.Name())
 
 	// Create engine and register commands.
 	engine := core.NewEngine(platform)
@@ -85,7 +120,7 @@ func main() {
 	if err := engine.Start(); err != nil {
 		log.Fatalf("[main] Failed to start engine: %v", err)
 	}
-	log.Println("[main] IM Bridge started successfully")
+	log.Printf("[main] IM Bridge started successfully (platform=%s notify_port=%s test_port=%s)", core.NormalizePlatformName(platform.Name()), cfg.NotifyPort, cfg.TestPort)
 
 	// Wait for shutdown signal.
 	sig := make(chan os.Signal, 1)

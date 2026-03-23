@@ -12,7 +12,7 @@ import (
 
 // Notification is the payload sent from the Go backend.
 type Notification struct {
-	Type           string     `json:"type"`     // e.g., "task_completed", "agent_finished", "cost_alert"
+	Type           string     `json:"type"` // e.g., "task_completed", "agent_finished", "cost_alert"
 	TargetIMUserID string     `json:"target_im_user_id"`
 	TargetChatID   string     `json:"target_chat_id"`
 	Platform       string     `json:"platform"` // "feishu", "slack", etc.
@@ -65,6 +65,17 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	var n Notification
 	if err := json.NewDecoder(req.Body).Decode(&n); err != nil {
 		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+
+	notificationPlatform := core.NormalizePlatformName(n.Platform)
+	activePlatform := core.NormalizePlatformName(r.platform.Name())
+	if notificationPlatform == "" {
+		http.Error(w, "notification platform is required", http.StatusBadRequest)
+		return
+	}
+	if notificationPlatform != activePlatform {
+		http.Error(w, fmt.Sprintf("notification platform %q does not match active platform %q", notificationPlatform, activePlatform), http.StatusConflict)
 		return
 	}
 

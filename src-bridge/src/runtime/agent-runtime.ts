@@ -6,6 +6,7 @@ export class AgentRuntime {
   readonly taskId: string;
   readonly sessionId: string;
   readonly abortController: AbortController;
+  readonly createdAt: number;
   status: RuntimeStatus;
   turnNumber: number;
   spentUsd: number;
@@ -16,6 +17,7 @@ export class AgentRuntime {
     this.taskId = taskId;
     this.sessionId = sessionId;
     this.abortController = new AbortController();
+    this.createdAt = Date.now();
     this.status = "starting";
     this.turnNumber = 0;
     this.spentUsd = 0;

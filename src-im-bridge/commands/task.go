@@ -9,12 +9,14 @@ import (
 	"github.com/agentforge/im-bridge/core"
 )
 
+const taskUsage = "用法: /task create|list|status|assign|decompose"
+
 // RegisterTaskCommands registers /task sub-commands on the engine.
 func RegisterTaskCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
 	engine.RegisterCommand("/task", func(p core.Platform, msg *core.Message, args string) {
 		parts := strings.SplitN(strings.TrimSpace(args), " ", 2)
 		if len(parts) == 0 || parts[0] == "" {
-			_ = p.Reply(context.Background(), msg.ReplyCtx, "用法: /task create|list|status|assign")
+			_ = p.Reply(context.Background(), msg.ReplyCtx, taskUsage)
 			return
 		}
 		subCmd := parts[0]
@@ -24,17 +26,20 @@ func RegisterTaskCommands(engine *core.Engine, apiClient *client.AgentForgeClien
 		}
 
 		ctx := context.Background()
+		scopedClient := apiClient.WithSource(msg.Platform)
 		switch subCmd {
 		case "create":
-			handleTaskCreate(ctx, p, msg, apiClient, subArgs)
+			handleTaskCreate(ctx, p, msg, scopedClient, subArgs)
 		case "list":
-			handleTaskList(ctx, p, msg, apiClient, subArgs)
+			handleTaskList(ctx, p, msg, scopedClient, subArgs)
 		case "status":
-			handleTaskStatus(ctx, p, msg, apiClient, subArgs)
+			handleTaskStatus(ctx, p, msg, scopedClient, subArgs)
 		case "assign":
-			handleTaskAssign(ctx, p, msg, apiClient, subArgs)
+			handleTaskAssign(ctx, p, msg, scopedClient, subArgs)
+		case "decompose":
+			handleTaskDecompose(ctx, p, msg, scopedClient, subArgs)
 		default:
-			_ = p.Reply(ctx, msg.ReplyCtx, "用法: /task create|list|status|assign")
+			_ = p.Reply(ctx, msg.ReplyCtx, taskUsage)
 		}
 	})
 }
@@ -110,6 +115,32 @@ func handleTaskAssign(ctx context.Context, p core.Platform, msg *core.Message, c
 		return
 	}
 	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已将任务 #%s 分配给 %s", shortID(task.ID), task.AssigneeName))
+}
+
+func handleTaskDecompose(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, taskID string) {
+	if strings.TrimSpace(taskID) == "" {
+		_ = p.Reply(ctx, msg.ReplyCtx, "用法: /task decompose <task-id>")
+		return
+	}
+
+	_ = p.Reply(ctx, msg.ReplyCtx, "正在分解任务，请稍候...")
+
+	result, err := c.DecomposeTask(ctx, strings.TrimSpace(taskID))
+	if err != nil {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("任务分解失败: %v\n未创建任何子任务，请稍后重试。", err))
+		return
+	}
+
+	var sb strings.Builder
+	sb.WriteString(fmt.Sprintf("任务分解完成: #%s %s\n", shortID(result.ParentTask.ID), result.ParentTask.Title))
+	sb.WriteString(fmt.Sprintf("摘要: %s\n", result.Summary))
+	sb.WriteString("子任务:\n")
+	for i, subtask := range result.Subtasks {
+		sb.WriteString(fmt.Sprintf("%d. #%s [%s/%s] %s\n",
+			i+1, shortID(subtask.ID), subtask.Status, subtask.Priority, subtask.Title))
+	}
+
+	_ = p.Reply(ctx, msg.ReplyCtx, strings.TrimRight(sb.String(), "\n"))
 }
 
 func buildTaskCard(task *client.Task) *core.Card {

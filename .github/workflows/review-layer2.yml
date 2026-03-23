@@ -1,0 +1,79 @@
+name: Agent PR Deep Review
+
+on:
+  workflow_run:
+    workflows: ["Agent PR Review"]
+    types: [completed]
+
+jobs:
+  trigger-deep-review:
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
+    runs-on: ubuntu-latest
+    permissions:
+      actions: read
+      contents: read
+      pull-requests: read
+    steps:
+      - name: Download Layer 1 review metadata
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          RUN_ID="${{ github.event.workflow_run.id }}"
+          gh api "repos/${{ github.repository }}/actions/runs/${RUN_ID}/artifacts" > artifacts.json
+          ARTIFACT_URL=$(jq -r '.artifacts[] | select(.name=="layer1-review-decision") | .archive_download_url' artifacts.json)
+
+          if [[ -z "${ARTIFACT_URL}" || "${ARTIFACT_URL}" == "null" ]]; then
+            echo "No Layer 1 review decision artifact found; skipping Layer 2 trigger."
+            exit 0
+          fi
+
+          gh api "${ARTIFACT_URL}" > layer1-review.zip
+          unzip -o layer1-review.zip -d layer1-review-artifact
+
+      - name: Trigger AgentForge Layer 2 deep review
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          AGENTFORGE_API_URL: ${{ secrets.AGENTFORGE_API_URL }}
+          AGENTFORGE_TOKEN: ${{ secrets.AGENTFORGE_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          METADATA_FILE="layer1-review-artifact/review-decision.json"
+
+          if [[ ! -f "${METADATA_FILE}" ]]; then
+            echo "No review-decision.json found; skipping."
+            exit 0
+          fi
+
+          NEEDS_DEEP=$(jq -r '.needs_deep_review' "${METADATA_FILE}")
+          if [[ "${NEEDS_DEEP}" != "true" ]]; then
+            echo "Layer 1 did not request deep review; skipping."
+            exit 0
+          fi
+
+          REPOSITORY=$(jq -r '.repository' "${METADATA_FILE}")
+          PR_URL=$(jq -r '.pr_url' "${METADATA_FILE}")
+          PR_NUMBER=$(jq -r '.pr_number' "${METADATA_FILE}")
+          DIFF=$(gh api "repos/${REPOSITORY}/pulls/${PR_NUMBER}" -H "Accept: application/vnd.github.v3.diff")
+
+          jq -n \
+            --arg prUrl "${PR_URL}" \
+            --arg trigger "layer1" \
+            --arg diff "${DIFF}" \
+            --argjson prNumber "${PR_NUMBER}" \
+            --argjson dimensions '["logic","security","performance","compliance"]' \
+            '{
+              prUrl: $prUrl,
+              prNumber: $prNumber,
+              trigger: $trigger,
+              diff: $diff,
+              dimensions: $dimensions
+            }' > deep-review-request.json
+
+          curl --fail --show-error --silent \
+            -X POST "${AGENTFORGE_API_URL}/api/v1/reviews/trigger" \
+            -H "Authorization: Bearer ${AGENTFORGE_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data @deep-review-request.json

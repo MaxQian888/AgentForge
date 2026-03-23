@@ -1,0 +1,27 @@
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: web-search
+  name: Web Search
+  version: 0.1.0
+  description: Built-in MCP tool plugin example for web search style capabilities.
+  tags:
+    - builtin
+    - tool
+    - search
+spec:
+  runtime: mcp
+  transport: stdio
+  command: npx
+  args:
+    - -y
+    - "@agentforge/plugin-web-search"
+permissions:
+  network:
+    required: true
+    domains:
+      - api.openai.com
+      - search.example.com
+source:
+  type: builtin
+  path: ./plugins/tools/web-search/manifest.yaml

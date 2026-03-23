@@ -13,6 +13,7 @@ const helpText = `AgentForge IM 助手
   /task list [状态]        — 查看任务列表
   /task status <task-id>   — 查看任务详情
   /task assign <id> <人员> — 分配任务
+  /task decompose <id>     — AI 分解现有任务
 
   /agent list              — 查看 Agent 池状态
   /agent spawn <task-id>   — 为任务启动 Agent

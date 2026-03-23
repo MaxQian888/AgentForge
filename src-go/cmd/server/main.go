@@ -11,11 +11,14 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/server"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/version"
+	"github.com/react-go-quick-starter/server/internal/worktree"
+	"github.com/react-go-quick-starter/server/internal/ws"
 	"github.com/react-go-quick-starter/server/migrations"
 	"github.com/react-go-quick-starter/server/pkg/database"
 )
@@ -91,11 +94,17 @@ func main() {
 	taskRepo := repository.NewTaskRepository(db)
 	agentRunRepo := repository.NewAgentRunRepository(db)
 	notifRepo := repository.NewNotificationRepository(db)
+	reviewRepo := repository.NewReviewRepository(db)
+	hub := ws.NewHub()
+	go hub.Run()
+	bridgeClient := bridge.NewClient(cfg.BridgeURL)
+	worktreeMgr := worktree.NewManager(cfg.WorktreeBasePath, cfg.RepoBasePath)
+	agentSvc := service.NewAgentService(agentRunRepo, taskRepo, projectRepo, hub, bridgeClient, worktreeMgr)
 
 	// Create Echo instance and register routes
 	e := server.New(cfg, cacheRepo)
 	server.RegisterRoutes(e, cfg, authSvc, cacheRepo,
-		projectRepo, memberRepo, sprintRepo, taskRepo, agentRunRepo, notifRepo,
+		projectRepo, memberRepo, sprintRepo, taskRepo, agentRunRepo, notifRepo, reviewRepo, hub, bridgeClient, agentSvc,
 	)
 
 	// Graceful shutdown on SIGINT / SIGTERM

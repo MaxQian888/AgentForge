@@ -13,6 +13,27 @@ export interface ExecuteRequest {
   role_config?: RoleConfig;
 }
 
+/** Request from Go Orchestrator to decompose an existing task. */
+export interface DecomposeTaskRequest {
+  task_id: string;
+  title: string;
+  description: string;
+  priority: "critical" | "high" | "medium" | "low";
+}
+
+/** One child task returned from decomposition. */
+export interface DecomposeSubtask {
+  title: string;
+  description: string;
+  priority: "critical" | "high" | "medium" | "low";
+}
+
+/** Structured decomposition result returned to Go. */
+export interface DecomposeTaskResponse {
+  summary: string;
+  subtasks: DecomposeSubtask[];
+}
+
 /** Role-based configuration for agent persona injection. */
 export interface RoleConfig {
   name: string;

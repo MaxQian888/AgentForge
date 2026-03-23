@@ -139,6 +139,24 @@ type AssignRequest struct {
 	AssigneeType string `json:"assigneeType" validate:"required,oneof=human agent"`
 }
 
+type TaskDecompositionResponse struct {
+	ParentTask TaskDTO   `json:"parentTask"`
+	Summary    string    `json:"summary"`
+	Subtasks   []TaskDTO `json:"subtasks"`
+}
+
+type TaskChildInput struct {
+	ParentID    uuid.UUID
+	ProjectID   uuid.UUID
+	SprintID    *uuid.UUID
+	ReporterID  *uuid.UUID
+	Title       string
+	Description string
+	Priority    string
+	Labels      []string
+	BudgetUSD   float64
+}
+
 func (t *Task) ToDTO() TaskDTO {
 	dto := TaskDTO{
 		ID:             t.ID.String(),

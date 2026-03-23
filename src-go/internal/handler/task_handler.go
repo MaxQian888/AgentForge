@@ -1,6 +1,8 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
@@ -9,14 +11,24 @@ import (
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type TaskHandler struct {
-	repo *repository.TaskRepository
+	repo        *repository.TaskRepository
+	decomposer  taskDecomposer
 }
 
-func NewTaskHandler(repo *repository.TaskRepository) *TaskHandler {
-	return &TaskHandler{repo: repo}
+type taskDecomposer interface {
+	Decompose(ctx context.Context, taskID uuid.UUID) (*model.TaskDecompositionResponse, error)
+}
+
+func NewTaskHandler(repo *repository.TaskRepository, decomposer ...taskDecomposer) *TaskHandler {
+	handler := &TaskHandler{repo: repo}
+	if len(decomposer) > 0 {
+		handler.decomposer = decomposer[0]
+	}
+	return handler
 }
 
 func (h *TaskHandler) Create(c echo.Context) error {
@@ -185,4 +197,29 @@ func (h *TaskHandler) Assign(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch task"})
 	}
 	return c.JSON(http.StatusOK, task.ToDTO())
+}
+
+func (h *TaskHandler) Decompose(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+	}
+	if h.decomposer == nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "task decomposer unavailable"})
+	}
+
+	result, err := h.decomposer.Decompose(c.Request().Context(), id)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrTaskNotFound):
+			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "task not found"})
+		case errors.Is(err, service.ErrTaskAlreadyDecomposed):
+			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: "task already has child tasks"})
+		case errors.Is(err, service.ErrInvalidTaskDecomposition):
+			return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "invalid task decomposition"})
+		default:
+			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to decompose task"})
+		}
+	}
+	return c.JSON(http.StatusOK, result)
 }

@@ -12,10 +12,11 @@
     "declaration": true,
     "resolveJsonModule": true,
     "isolatedModules": true,
+    "types": ["bun"],
     "noUnusedLocals": true,
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src/**/*.ts"],
+  "include": ["src/**/*.ts", "src/**/*.d.ts"],
   "exclude": ["node_modules", "dist"]
 }

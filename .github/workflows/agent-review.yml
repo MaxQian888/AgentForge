@@ -27,3 +27,32 @@ jobs:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           trigger_phrase: ""
           review_on_open: true
+      - name: Persist Layer 1 escalation metadata
+        if: always()
+        shell: bash
+        run: |
+          mkdir -p .review-metadata
+          jq -n \
+            --arg pr_url "${{ github.event.pull_request.html_url }}" \
+            --arg repository "${{ github.repository }}" \
+            --arg title "${{ github.event.pull_request.title }}" \
+            --arg body "${{ github.event.pull_request.body }}" \
+            --arg head_ref "${{ github.head_ref }}" \
+            --arg reason "agent_branch" \
+            --argjson pr_number "${{ github.event.pull_request.number }}" \
+            '{
+              needs_deep_review: true,
+              reason: $reason,
+              pr_url: $pr_url,
+              pr_number: $pr_number,
+              repository: $repository,
+              title: $title,
+              body: $body,
+              head_ref: $head_ref
+            }' > .review-metadata/review-decision.json
+      - name: Upload Layer 1 review decision
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: layer1-review-decision
+          path: .review-metadata/review-decision.json

@@ -1,21 +1,30 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"net/http"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
-type AgentHandler struct {
-	repo *repository.AgentRunRepository
+type AgentRuntimeService interface {
+	Spawn(ctx context.Context, taskID, memberID uuid.UUID, provider, modelName string, budgetUsd float64) (*model.AgentRun, error)
+	ListActive(ctx context.Context) ([]*model.AgentRun, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*model.AgentRun, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+	Cancel(ctx context.Context, id uuid.UUID, reason string) error
 }
 
-func NewAgentHandler(repo *repository.AgentRunRepository) *AgentHandler {
-	return &AgentHandler{repo: repo}
+type AgentHandler struct {
+	service AgentRuntimeService
+}
+
+func NewAgentHandler(service AgentRuntimeService) *AgentHandler {
+	return &AgentHandler{service: service}
 }
 
 type SpawnAgentRequest struct {
@@ -43,24 +52,23 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid member ID"})
 	}
 
-	run := &model.AgentRun{
-		ID:        uuid.New(),
-		TaskID:    taskID,
-		MemberID:  memberID,
-		Status:    model.AgentRunStatusStarting,
-		Provider:  req.Provider,
-		Model:     req.Model,
-		StartedAt: time.Now().UTC(),
+	run, err := h.service.Spawn(c.Request().Context(), taskID, memberID, req.Provider, req.Model, 0)
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrAgentAlreadyRunning):
+			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
+		case errors.Is(err, service.ErrAgentTaskNotFound), errors.Is(err, service.ErrAgentProjectNotFound):
+			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: err.Error()})
+		default:
+			return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "failed to start agent run"})
+		}
 	}
 
-	if err := h.repo.Create(c.Request().Context(), run); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create agent run"})
-	}
 	return c.JSON(http.StatusCreated, run.ToDTO())
 }
 
 func (h *AgentHandler) List(c echo.Context) error {
-	runs, err := h.repo.ListActive(c.Request().Context())
+	runs, err := h.service.ListActive(c.Request().Context())
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list agent runs"})
 	}
@@ -76,7 +84,7 @@ func (h *AgentHandler) Get(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid agent run ID"})
 	}
-	run, err := h.repo.GetByID(c.Request().Context(), id)
+	run, err := h.service.GetByID(c.Request().Context(), id)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "agent run not found"})
 	}
@@ -92,7 +100,27 @@ func (h *AgentHandler) Resume(c echo.Context) error {
 }
 
 func (h *AgentHandler) Kill(c echo.Context) error {
-	return h.updateStatus(c, model.AgentRunStatusCancelled)
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid agent run ID"})
+	}
+
+	if err := h.service.Cancel(c.Request().Context(), id, "killed_by_user"); err != nil {
+		switch {
+		case errors.Is(err, service.ErrAgentNotFound):
+			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: err.Error()})
+		case errors.Is(err, service.ErrAgentNotRunning):
+			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
+		default:
+			return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "failed to cancel agent run"})
+		}
+	}
+
+	run, err := h.service.GetByID(c.Request().Context(), id)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch agent run"})
+	}
+	return c.JSON(http.StatusOK, run.ToDTO())
 }
 
 func (h *AgentHandler) updateStatus(c echo.Context, status string) error {
@@ -100,10 +128,17 @@ func (h *AgentHandler) updateStatus(c echo.Context, status string) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid agent run ID"})
 	}
-	if err := h.repo.UpdateStatus(c.Request().Context(), id, status); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update agent run status"})
+	if err := h.service.UpdateStatus(c.Request().Context(), id, status); err != nil {
+		switch {
+		case errors.Is(err, service.ErrAgentNotFound):
+			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: err.Error()})
+		case errors.Is(err, service.ErrAgentNotRunning):
+			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
+		default:
+			return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "failed to update agent run status"})
+		}
 	}
-	run, err := h.repo.GetByID(c.Request().Context(), id)
+	run, err := h.service.GetByID(c.Request().Context(), id)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch agent run"})
 	}

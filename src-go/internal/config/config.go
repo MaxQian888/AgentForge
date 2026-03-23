@@ -18,9 +18,11 @@ type Config struct {
 	AllowOrigins      []string
 	Env               string
 	BridgeURL         string
+	AgentForgeToken   string
 	WorktreeBasePath  string
 	RepoBasePath      string
 	RolesDir          string
+	PluginsDir        string
 	MaxActiveAgents   int
 	DefaultTaskBudget float64
 }
@@ -42,9 +44,11 @@ func Load() *Config {
 	viper.SetDefault("ALLOW_ORIGINS", "http://localhost:3000,tauri://localhost,http://localhost:1420")
 	viper.SetDefault("REDIS_URL", "redis://localhost:6379")
 	viper.SetDefault("BRIDGE_URL", "http://localhost:7778")
+	viper.SetDefault("AGENTFORGE_TOKEN", "")
 	viper.SetDefault("WORKTREE_BASE_PATH", "./data/worktrees")
 	viper.SetDefault("REPO_BASE_PATH", "./data/repos")
 	viper.SetDefault("ROLES_DIR", "./roles")
+	viper.SetDefault("PLUGINS_DIR", "./plugins")
 	viper.SetDefault("MAX_ACTIVE_AGENTS", 20)
 	viper.SetDefault("DEFAULT_TASK_BUDGET", 5.0)
 
@@ -66,9 +70,11 @@ func Load() *Config {
 		AllowOrigins:      origins,
 		Env:               viper.GetString("ENV"),
 		BridgeURL:         viper.GetString("BRIDGE_URL"),
+		AgentForgeToken:   viper.GetString("AGENTFORGE_TOKEN"),
 		WorktreeBasePath:  viper.GetString("WORKTREE_BASE_PATH"),
 		RepoBasePath:      viper.GetString("REPO_BASE_PATH"),
 		RolesDir:          viper.GetString("ROLES_DIR"),
+		PluginsDir:        viper.GetString("PLUGINS_DIR"),
 		MaxActiveAgents:   viper.GetInt("MAX_ACTIVE_AGENTS"),
 		DefaultTaskBudget: viper.GetFloat64("DEFAULT_TASK_BUDGET"),
 	}

@@ -4,7 +4,7 @@ export class SessionManager {
   private snapshots: Map<string, SessionSnapshot> = new Map();
 
   save(taskId: string, snapshot: SessionSnapshot): void {
-    this.snapshots.set(taskId, { ...snapshot, updated_at: Date.now() });
+    this.snapshots.set(taskId, { ...snapshot });
   }
 
   restore(taskId: string): SessionSnapshot | null {

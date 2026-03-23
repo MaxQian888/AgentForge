@@ -8,6 +8,8 @@ import (
 	"io"
 	"net/http"
 	"time"
+
+	"github.com/agentforge/im-bridge/core"
 )
 
 // AgentForgeClient communicates with the AgentForge Go backend API.
@@ -16,6 +18,7 @@ type AgentForgeClient struct {
 	projectID string
 	apiKey    string
 	client    *http.Client
+	imSource  string
 }
 
 // NewAgentForgeClient creates a new API client.
@@ -25,7 +28,17 @@ func NewAgentForgeClient(baseURL, projectID, apiKey string) *AgentForgeClient {
 		projectID: projectID,
 		apiKey:    apiKey,
 		client:    &http.Client{Timeout: 30 * time.Second},
+		imSource:  "feishu",
 	}
+}
+
+// WithSource returns a shallow copy that tags outbound requests with the given IM source.
+func (c *AgentForgeClient) WithSource(source string) *AgentForgeClient {
+	clone := *c
+	if normalized := core.NormalizePlatformName(source); normalized != "" {
+		clone.imSource = normalized
+	}
+	return &clone
 }
 
 // --- Task operations ---
@@ -102,6 +115,23 @@ func (c *AgentForgeClient) AssignTask(ctx context.Context, taskID, assignee stri
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return &task, nil
+}
+
+// DecomposeTask triggers AI task decomposition for an existing task.
+func (c *AgentForgeClient) DecomposeTask(ctx context.Context, taskID string) (*TaskDecompositionResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/tasks/"+taskID+"/decompose", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, c.readError(resp)
+	}
+	var result TaskDecompositionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &result, nil
 }
 
 // --- Agent operations ---
@@ -199,7 +229,7 @@ func (c *AgentForgeClient) doRequest(ctx context.Context, method, path string, b
 	}
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
-	req.Header.Set("X-IM-Source", "feishu")
+	req.Header.Set("X-IM-Source", c.imSource)
 	return c.client.Do(req)
 }
 
@@ -213,6 +243,8 @@ func (c *AgentForgeClient) readError(resp *http.Response) error {
 // Task represents an AgentForge task.
 type Task struct {
 	ID           string  `json:"id"`
+	ProjectID    string  `json:"projectId"`
+	ParentID     *string `json:"parentId,omitempty"`
 	Title        string  `json:"title"`
 	Description  string  `json:"description"`
 	Status       string  `json:"status"`
@@ -221,6 +253,16 @@ type Task struct {
 	SpentUsd     float64 `json:"spent_usd"`
 	BudgetUsd    float64 `json:"budget_usd"`
 	PRUrl        string  `json:"pr_url"`
+}
+
+// TaskDecompositionItem represents one created subtask returned from decomposition.
+type TaskDecompositionItem = Task
+
+// TaskDecompositionResponse is returned after a task is decomposed.
+type TaskDecompositionResponse struct {
+	ParentTask Task                    `json:"parentTask"`
+	Summary    string                  `json:"summary"`
+	Subtasks   []TaskDecompositionItem `json:"subtasks"`
 }
 
 // AgentRun represents an AI agent execution.

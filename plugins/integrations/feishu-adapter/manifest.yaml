@@ -1,0 +1,24 @@
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: feishu-adapter
+  name: Feishu Adapter
+  version: 0.1.0
+  description: Built-in Go integration plugin example for IM event ingestion and outbound delivery.
+  tags:
+    - builtin
+    - integration
+    - im
+spec:
+  runtime: go-plugin
+  binary: ./bin/feishu-adapter
+  config:
+    mode: webhook
+permissions:
+  network:
+    required: true
+    domains:
+      - open.feishu.cn
+source:
+  type: builtin
+  path: ./plugins/integrations/feishu-adapter/manifest.yaml

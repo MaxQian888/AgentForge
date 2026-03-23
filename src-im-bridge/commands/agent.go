@@ -24,9 +24,10 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 		}
 
 		ctx := context.Background()
+		scopedClient := apiClient.WithSource(msg.Platform)
 		switch subCmd {
 		case "list":
-			status, err := apiClient.GetAgentPoolStatus(ctx)
+			status, err := scopedClient.GetAgentPoolStatus(ctx)
 			if err != nil {
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取 Agent 状态失败: %v", err))
 				return
@@ -38,7 +39,7 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				_ = p.Reply(ctx, msg.ReplyCtx, "用法: /agent spawn <task-id>")
 				return
 			}
-			run, err := apiClient.SpawnAgent(ctx, subArgs)
+			run, err := scopedClient.SpawnAgent(ctx, subArgs)
 			if err != nil {
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("启动 Agent 失败: %v", err))
 				return

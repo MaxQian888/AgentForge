@@ -68,6 +68,32 @@
 | Extism WASM 是跨语言插件的最佳方案 | 长期引入 |
 | 插件市场 + 审核是成熟生态的标配 | 分阶段建设 |
 
+### 1.4 当前 OpenSpec MVP 实现边界
+
+这份架构文档覆盖的是插件系统的长期蓝图，但当前 OpenSpec 变更 `establish-plugin-runtime-and-registry` 只落地“统一契约 + 双宿主运行时映射 + Go 权威注册中心”这一层最小闭环，不等同于整套插件生态已经全部实现。
+
+本次 MVP 的可执行插件映射固定为：
+
+| 插件类型 | 第一阶段允许运行时 | 宿主 | 当前状态 |
+|---|---|---|---|
+| `ToolPlugin` | `mcp` | TS Bridge | 本次实现 |
+| `IntegrationPlugin` | `go-plugin` | Go Orchestrator | 本次实现注册与生命周期同步，执行面保留最小运行时占位 |
+| `RolePlugin` | `declarative` | Go Registry / 配置层 | 仅声明兼容，不进入执行运行时 |
+| `WorkflowPlugin` | `go-plugin` | Go Orchestrator | 仅保留契约兼容，本次不实现执行引擎 |
+| `ReviewPlugin` | `mcp` | TS Bridge | 仅保留契约兼容，本次不实现完整审查执行链 |
+
+当前实现同时明确拒绝不受支持的 `kind/runtime` 组合，例如 `ToolPlugin + go-plugin`、`IntegrationPlugin + mcp`。禁用态插件不会被激活；TS Bridge 和 Go Orchestrator 都只使用统一的生命周期语义：`installed`、`enabled`、`activating`、`active`、`degraded`、`disabled`。
+
+本次 OpenSpec 明确延后的事项包括：
+
+- 远程插件注册中心与完整插件市场
+- 插件签名校验、审核流和供应链安全策略
+- `Extism WASM Runtime` 与其他跨语言运行时分发方案
+- 完整 Plugin SDK、脚手架与开发者门户
+- 多实例分布式插件编排、远程托管和 Serverless 运行时
+
+因此，下面各章节里涉及的 Registry、市场、WASM、Redis Streams、全量 Workflow/Review 执行器等内容，应视为后续阶段设计储备，而不是当前仓库已经交付的 MVP 范围。
+
 ---
 
 ## 二、四层运行时架构

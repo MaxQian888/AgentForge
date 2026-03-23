@@ -45,6 +45,9 @@ func TestLoad_Defaults(t *testing.T) {
 	if len(cfg.AllowOrigins) == 0 {
 		t.Error("AllowOrigins: want non-empty slice, got empty")
 	}
+	if cfg.PluginsDir != "./plugins" {
+		t.Errorf("PluginsDir: want ./plugins, got %s", cfg.PluginsDir)
+	}
 }
 
 func TestLoad_PortEnvOverride(t *testing.T) {

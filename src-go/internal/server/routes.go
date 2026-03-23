@@ -1,6 +1,9 @@
 package server
 
 import (
+	"context"
+
+	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/react-go-quick-starter/server/internal/config"
@@ -9,7 +12,36 @@ import (
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/version"
+	"github.com/react-go-quick-starter/server/internal/ws"
 )
+
+type taskDecompositionBridgeAdapter struct {
+	client *bridge.Client
+}
+
+func (a taskDecompositionBridgeAdapter) DecomposeTask(ctx context.Context, req service.BridgeDecomposeRequest) (*service.BridgeDecomposeResponse, error) {
+	resp, err := a.client.DecomposeTask(ctx, bridge.DecomposeRequest{
+		TaskID:      req.TaskID,
+		Title:       req.Title,
+		Description: req.Description,
+		Priority:    req.Priority,
+	})
+	if err != nil {
+		return nil, err
+	}
+	subtasks := make([]service.BridgeDecomposeSubtask, 0, len(resp.Subtasks))
+	for _, item := range resp.Subtasks {
+		subtasks = append(subtasks, service.BridgeDecomposeSubtask{
+			Title:       item.Title,
+			Description: item.Description,
+			Priority:    item.Priority,
+		})
+	}
+	return &service.BridgeDecomposeResponse{
+		Summary:  resp.Summary,
+		Subtasks: subtasks,
+	}, nil
+}
 
 func RegisterRoutes(
 	e *echo.Echo,
@@ -22,8 +54,16 @@ func RegisterRoutes(
 	taskRepo *repository.TaskRepository,
 	agentRunRepo *repository.AgentRunRepository,
 	notifRepo *repository.NotificationRepository,
+	reviewRepo *repository.ReviewRepository,
+	hub *ws.Hub,
+	bridgeClient *bridge.Client,
+	agentSvc *service.AgentService,
 ) {
 	jwtMw := appMiddleware.JWTMiddleware(cfg.JWTSecret, cache)
+	reviewTriggerMw := appMiddleware.ReviewTriggerAuthMiddleware(cfg.JWTSecret, cache, cfg.AgentForgeToken)
+	notificationSvc := service.NewNotificationService(notifRepo, hub)
+	reviewSvc := service.NewReviewService(reviewRepo, taskRepo, notificationSvc, hub, bridgeClient)
+	taskDecomposeSvc := service.NewTaskDecompositionService(taskRepo, taskDecompositionBridgeAdapter{client: bridgeClient})
 
 	// Health
 	healthH := handler.NewHealthHandler(version.Version, version.Commit, version.BuildDate, cfg.Env)
@@ -47,21 +87,29 @@ func RegisterRoutes(
 	users.GET("/me", authH.GetMe)
 
 	// WebSocket
-	wsH := handler.NewWSHandler(cfg.JWTSecret)
+	wsH := ws.NewHandler(hub, cfg.JWTSecret)
 	e.GET("/ws", wsH.HandleWS)
 
 	// --- New resource handlers ---
 	projectH := handler.NewProjectHandler(projectRepo)
 	memberH := handler.NewMemberHandler(memberRepo)
 	sprintH := handler.NewSprintHandler(sprintRepo)
-	taskH := handler.NewTaskHandler(taskRepo)
-	agentH := handler.NewAgentHandler(agentRunRepo)
+	taskH := handler.NewTaskHandler(taskRepo, taskDecomposeSvc)
+	agentH := handler.NewAgentHandler(agentSvc)
 	notifH := handler.NewNotificationHandler(notifRepo)
 	costH := handler.NewCostHandler(agentRunRepo)
 	roleH := handler.NewRoleHandler(cfg.RolesDir)
+	reviewH := handler.NewReviewHandler(reviewSvc)
+	pluginSvc := service.NewPluginService(
+		repository.NewPluginRegistryRepository(),
+		bridgeClient,
+		cfg.PluginsDir,
+	)
+	pluginH := handler.NewPluginHandler(pluginSvc)
 
 	// JWT protected routes
 	protected := v1.Group("", jwtMw)
+	v1.POST("/reviews/trigger", reviewH.Trigger, reviewTriggerMw)
 
 	// Projects
 	protected.POST("/projects", projectH.Create)
@@ -85,6 +133,7 @@ func RegisterRoutes(
 	protected.DELETE("/tasks/:id", taskH.Delete)
 	protected.POST("/tasks/:id/transition", taskH.Transition)
 	protected.POST("/tasks/:id/assign", taskH.Assign)
+	protected.POST("/tasks/:id/decompose", taskH.Decompose)
 
 	// Member update
 	protected.PUT("/members/:id", memberH.Update)
@@ -100,6 +149,9 @@ func RegisterRoutes(
 	// Notifications
 	protected.GET("/notifications", notifH.List)
 	protected.PUT("/notifications/:id/read", notifH.MarkRead)
+	protected.GET("/reviews/:id", reviewH.Get)
+	protected.GET("/tasks/:taskId/reviews", reviewH.ListByTask)
+	protected.POST("/reviews/:id/complete", reviewH.Complete)
 
 	// Cost
 	protected.GET("/stats/cost", costH.GetStats)
@@ -109,4 +161,17 @@ func RegisterRoutes(
 	protected.GET("/roles/:id", roleH.Get)
 	protected.POST("/roles", roleH.Create)
 	protected.PUT("/roles/:id", roleH.Update)
+
+	// Plugins
+	protected.POST("/plugins/discover/builtin", pluginH.DiscoverBuiltIns)
+	protected.POST("/plugins/install", pluginH.InstallLocal)
+	protected.GET("/plugins", pluginH.List)
+	protected.POST("/plugins/:id/enable", pluginH.Enable)
+	protected.POST("/plugins/:id/disable", pluginH.Disable)
+	protected.POST("/plugins/:id/activate", pluginH.Activate)
+	protected.GET("/plugins/:id/health", pluginH.Health)
+	protected.POST("/plugins/:id/restart", pluginH.Restart)
+
+	// Bridge-to-registry runtime sync
+	e.POST("/internal/plugins/runtime-state", pluginH.SyncRuntimeState)
 }
