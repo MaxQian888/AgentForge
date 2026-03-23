@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 )
 
@@ -33,8 +34,8 @@ func TestDecomposeTask_CallsEndpointAndParsesResponse(t *testing.T) {
 	const taskID = "task-123"
 
 	type responseBody struct {
-		ParentTask Task                   `json:"parentTask"`
-		Summary    string                 `json:"summary"`
+		ParentTask Task                    `json:"parentTask"`
+		Summary    string                  `json:"summary"`
 		Subtasks   []TaskDecompositionItem `json:"subtasks"`
 	}
 
@@ -91,5 +92,353 @@ func TestDecomposeTask_CallsEndpointAndParsesResponse(t *testing.T) {
 	}
 	if result.Subtasks[0].Title != "实现 API client" {
 		t.Fatalf("first subtask title = %q", result.Subtasks[0].Title)
+	}
+}
+
+func TestCreateTask_SendsProjectPayloadAndParsesResponse(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+	var gotBody map[string]string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Task{ID: "task-1", Title: "Bridge rollout"})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	task, err := client.CreateTask(context.Background(), "Bridge rollout", "desc")
+	if err != nil {
+		t.Fatalf("CreateTask error: %v", err)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/api/v1/tasks" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if gotBody["title"] != "Bridge rollout" || gotBody["description"] != "desc" || gotBody["project_id"] != "proj" {
+		t.Fatalf("body = %+v", gotBody)
+	}
+	if task.ID != "task-1" || task.Title != "Bridge rollout" {
+		t.Fatalf("task = %+v", task)
+	}
+}
+
+func TestCreateTask_ReturnsDecodeErrorForInvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{"))
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	_, err := client.CreateTask(context.Background(), "Bridge rollout", "desc")
+	if err == nil {
+		t.Fatal("expected CreateTask to fail")
+	}
+	if !strings.Contains(err.Error(), "decode response") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestListTasks_AppendsStatusFilterAndParsesTasks(t *testing.T) {
+	var gotQuery string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotQuery = r.URL.RawQuery
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]Task{{ID: "task-1", Status: "triaged", Title: "Bridge rollout"}})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	tasks, err := client.ListTasks(context.Background(), "triaged")
+	if err != nil {
+		t.Fatalf("ListTasks error: %v", err)
+	}
+
+	if gotQuery != "project_id=proj&status=triaged" {
+		t.Fatalf("query = %q", gotQuery)
+	}
+	if len(tasks) != 1 || tasks[0].ID != "task-1" {
+		t.Fatalf("tasks = %+v", tasks)
+	}
+}
+
+func TestListTasks_ReturnsDecodeErrorForInvalidJSON(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte("{"))
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	_, err := client.ListTasks(context.Background(), "")
+	if err == nil {
+		t.Fatal("expected ListTasks to fail")
+	}
+	if !strings.Contains(err.Error(), "decode response") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGetTask_ReturnsAPIErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"not found"}`, http.StatusNotFound)
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	_, err := client.GetTask(context.Background(), "task-404")
+	if err == nil {
+		t.Fatal("expected GetTask to fail")
+	}
+	if !strings.Contains(err.Error(), "API error 404") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGetTask_ParsesSuccessfulResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/tasks/task-1" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Task{ID: "task-1", Title: "Bridge rollout"})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	task, err := client.GetTask(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("GetTask error: %v", err)
+	}
+	if task.ID != "task-1" || task.Title != "Bridge rollout" {
+		t.Fatalf("task = %+v", task)
+	}
+}
+
+func TestAssignTask_SendsPatchPayloadAndParsesTask(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+	var gotBody map[string]string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Task{ID: "task-1", AssigneeName: "Alice"})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	task, err := client.AssignTask(context.Background(), "task-1", "Alice")
+	if err != nil {
+		t.Fatalf("AssignTask error: %v", err)
+	}
+
+	if gotMethod != http.MethodPatch {
+		t.Fatalf("method = %s, want PATCH", gotMethod)
+	}
+	if gotPath != "/api/v1/tasks/task-1/assign" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if gotBody["assignee"] != "Alice" {
+		t.Fatalf("body = %+v", gotBody)
+	}
+	if task.AssigneeName != "Alice" {
+		t.Fatalf("task = %+v", task)
+	}
+}
+
+func TestSpawnAgent_CallsEndpointAndParsesRun(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+	var gotBody map[string]string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(AgentRun{ID: "run-1", TaskID: "task-1", Status: "starting"})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	run, err := client.SpawnAgent(context.Background(), "task-1")
+	if err != nil {
+		t.Fatalf("SpawnAgent error: %v", err)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/api/v1/agents/spawn" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if gotBody["task_id"] != "task-1" {
+		t.Fatalf("body = %+v", gotBody)
+	}
+	if run.ID != "run-1" || run.TaskID != "task-1" {
+		t.Fatalf("run = %+v", run)
+	}
+}
+
+func TestSpawnAgent_ReturnsAPIErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "spawn failed", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	_, err := client.SpawnAgent(context.Background(), "task-1")
+	if err == nil {
+		t.Fatal("expected SpawnAgent to fail")
+	}
+	if !strings.Contains(err.Error(), "API error 502") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestGetAgentPoolStatus_ParsesResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(PoolStatus{ActiveAgents: 3, MaxAgents: 10})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	status, err := client.GetAgentPoolStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetAgentPoolStatus error: %v", err)
+	}
+	if status.ActiveAgents != 3 || status.MaxAgents != 10 {
+		t.Fatalf("status = %+v", status)
+	}
+}
+
+func TestGetCostStats_ParsesResponse(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(CostStats{
+			TotalUsd:   11.1,
+			BudgetUsd:  20.2,
+			DailyUsd:   1.1,
+			WeeklyUsd:  4.4,
+			MonthlyUsd: 11.1,
+		})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	stats, err := client.GetCostStats(context.Background())
+	if err != nil {
+		t.Fatalf("GetCostStats error: %v", err)
+	}
+	if stats.TotalUsd != 11.1 || stats.BudgetUsd != 20.2 {
+		t.Fatalf("stats = %+v", stats)
+	}
+}
+
+func TestGetCostStats_ReturnsAPIErrors(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "costs failed", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	_, err := client.GetCostStats(context.Background())
+	if err == nil {
+		t.Fatal("expected GetCostStats to fail")
+	}
+	if !strings.Contains(err.Error(), "API error 502") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSendNLU_SendsIntentPayloadAndParsesReply(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+	var gotBody map[string]string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"reply": "task created"})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	reply, err := client.SendNLU(context.Background(), "create task", "user-1")
+	if err != nil {
+		t.Fatalf("SendNLU error: %v", err)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/api/v1/intent" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if gotBody["text"] != "create task" || gotBody["user_id"] != "user-1" || gotBody["project_id"] != "proj" {
+		t.Fatalf("body = %+v", gotBody)
+	}
+	if reply != "task created" {
+		t.Fatalf("reply = %q", reply)
+	}
+}
+
+func TestWithSource_LeavesExistingSourceWhenNormalizationReturnsEmpty(t *testing.T) {
+	client := NewAgentForgeClient("http://example.test", "proj", "secret").WithSource("slack-stub")
+
+	scoped := client.WithSource("   ")
+	if scoped.imSource != "slack" {
+		t.Fatalf("imSource = %q, want slack", scoped.imSource)
+	}
+}
+
+func TestDoRequest_RejectsUnmarshalableBody(t *testing.T) {
+	client := NewAgentForgeClient("http://example.test", "proj", "secret")
+
+	_, err := client.doRequest(context.Background(), http.MethodPost, "/bad", make(chan int))
+	if err == nil {
+		t.Fatal("expected doRequest to fail")
+	}
+	if !strings.Contains(err.Error(), "marshal body") {
+		t.Fatalf("err = %v", err)
 	}
 }

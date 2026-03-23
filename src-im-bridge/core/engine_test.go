@@ -10,11 +10,19 @@ import (
 type mockPlatform struct {
 	mu      sync.Mutex
 	replies []string
+	started MessageHandler
+	stopped bool
 }
 
 func (m *mockPlatform) Name() string { return "mock" }
-func (m *mockPlatform) Start(handler MessageHandler) error { return nil }
-func (m *mockPlatform) Stop() error                        { return nil }
+func (m *mockPlatform) Start(handler MessageHandler) error {
+	m.started = handler
+	return nil
+}
+func (m *mockPlatform) Stop() error {
+	m.stopped = true
+	return nil
+}
 func (m *mockPlatform) Send(ctx context.Context, chatID string, content string) error {
 	m.mu.Lock()
 	m.replies = append(m.replies, content)
@@ -96,5 +104,29 @@ func TestEngine_DefaultHelp(t *testing.T) {
 	}
 	if p.replies[0] == "" {
 		t.Error("expected non-empty help reply")
+	}
+}
+
+func TestEngine_StartDelegatesToPlatform(t *testing.T) {
+	p := &mockPlatform{}
+	e := NewEngine(p)
+
+	if err := e.Start(); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	if p.started == nil {
+		t.Fatal("expected platform Start to receive handler")
+	}
+}
+
+func TestEngine_StopDelegatesToPlatform(t *testing.T) {
+	p := &mockPlatform{}
+	e := NewEngine(p)
+
+	if err := e.Stop(); err != nil {
+		t.Fatalf("Stop error: %v", err)
+	}
+	if !p.stopped {
+		t.Fatal("expected platform Stop to be called")
 	}
 }

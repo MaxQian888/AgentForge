@@ -18,15 +18,293 @@ type taskTestPlatform struct {
 	replies []string
 }
 
-func (p *taskTestPlatform) Name() string { return "slack-stub" }
-func (p *taskTestPlatform) Start(handler core.MessageHandler) error { return nil }
-func (p *taskTestPlatform) Stop() error { return nil }
+type taskCardPlatform struct {
+	taskTestPlatform
+	cards []*core.Card
+}
+
+func (p *taskTestPlatform) Name() string                                                  { return "slack-stub" }
+func (p *taskTestPlatform) Start(handler core.MessageHandler) error                       { return nil }
+func (p *taskTestPlatform) Stop() error                                                   { return nil }
 func (p *taskTestPlatform) Send(ctx context.Context, chatID string, content string) error { return nil }
 func (p *taskTestPlatform) Reply(ctx context.Context, replyCtx any, content string) error {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	p.replies = append(p.replies, content)
 	return nil
+}
+func (p *taskCardPlatform) SendCard(ctx context.Context, chatID string, card *core.Card) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cards = append(p.cards, card)
+	return nil
+}
+func (p *taskCardPlatform) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) error {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	p.cards = append(p.cards, card)
+	return nil
+}
+
+func TestTaskCommand_CreateRequiresTitle(t *testing.T) {
+	apiClient := client.NewAgentForgeClient("http://example.test", "proj", "secret")
+	platform := &taskCardPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task create",
+	})
+
+	if len(platform.replies) != 1 || platform.replies[0] != "用法: /task create <标题>" {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+}
+
+func TestTaskCommand_CreateRepliesWithCardWhenSupported(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/v1/tasks" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if got := r.Header.Get("X-IM-Source"); got != "slack" {
+			t.Fatalf("X-IM-Source = %q, want slack", got)
+		}
+
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["title"] != "Bridge rollout" {
+			t.Fatalf("title = %q", body["title"])
+		}
+		if body["project_id"] != "proj" {
+			t.Fatalf("project_id = %q", body["project_id"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&client.Task{
+			ID:           "task-123456",
+			Title:        "Bridge rollout",
+			Status:       "triaged",
+			Priority:     "high",
+			AssigneeName: "Agent Smith",
+			SpentUsd:     1.25,
+			BudgetUsd:    3.5,
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskCardPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task create Bridge rollout",
+	})
+
+	if len(platform.replies) != 0 {
+		t.Fatalf("replies = %v, want no plain replies", platform.replies)
+	}
+	if len(platform.cards) != 1 {
+		t.Fatalf("cards len = %d, want 1", len(platform.cards))
+	}
+	if platform.cards[0].Title != "任务 #task-123" {
+		t.Fatalf("card title = %q", platform.cards[0].Title)
+	}
+	if len(platform.cards[0].Buttons) != 2 {
+		t.Fatalf("buttons = %+v", platform.cards[0].Buttons)
+	}
+}
+
+func TestTaskCommand_ListIncludesAssigneeAndCount(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/v1/tasks" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if got := r.URL.Query().Get("project_id"); got != "proj" {
+			t.Fatalf("project_id = %q", got)
+		}
+		if got := r.URL.Query().Get("status"); got != "triaged" {
+			t.Fatalf("status = %q", got)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]client.Task{
+			{ID: "task-123456", Title: "Bridge rollout", Status: "triaged", AssigneeName: "Alice"},
+			{ID: "task-789012", Title: "CLI polish", Status: "inbox"},
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskCardPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task list triaged",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "任务列表 (2)") {
+		t.Fatalf("reply = %q", platform.replies[0])
+	}
+	if !strings.Contains(platform.replies[0], "(@Alice)") {
+		t.Fatalf("reply = %q, want assignee mention", platform.replies[0])
+	}
+}
+
+func TestTaskCommand_ListHandlesEmptyTasks(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]client.Task{})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskCardPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task list",
+	})
+
+	if len(platform.replies) != 1 || platform.replies[0] != "暂无任务" {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+}
+
+func TestTaskCommand_StatusRequiresTaskID(t *testing.T) {
+	apiClient := client.NewAgentForgeClient("http://example.test", "proj", "secret")
+	platform := &taskCardPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task status",
+	})
+
+	if len(platform.replies) != 1 || platform.replies[0] != "用法: /task status <task-id>" {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+}
+
+func TestTaskCommand_StatusRepliesWithCardWhenSupported(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/v1/tasks/task-123" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&client.Task{
+			ID:           "task-123456",
+			Title:        "Bridge rollout",
+			Status:       "triaged",
+			Priority:     "high",
+			AssigneeName: "Alice",
+			SpentUsd:     1.25,
+			BudgetUsd:    3.5,
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskCardPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task status task-123",
+	})
+
+	if len(platform.cards) != 1 {
+		t.Fatalf("cards len = %d, want 1", len(platform.cards))
+	}
+	card := platform.cards[0]
+	if card.Title != "任务 #task-123" {
+		t.Fatalf("card title = %q", card.Title)
+	}
+	if len(card.Fields) < 4 {
+		t.Fatalf("fields = %+v", card.Fields)
+	}
+}
+
+func TestTaskCommand_AssignRequiresTaskIDAndAssignee(t *testing.T) {
+	apiClient := client.NewAgentForgeClient("http://example.test", "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task assign task-123",
+	})
+
+	if len(platform.replies) != 1 || platform.replies[0] != "用法: /task assign <task-id> <assignee>" {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+}
+
+func TestTaskCommand_AssignRepliesWithAssignee(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPatch {
+			t.Fatalf("method = %s, want PATCH", r.Method)
+		}
+		if r.URL.Path != "/api/v1/tasks/task-123/assign" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["assignee"] != "Alice" {
+			t.Fatalf("assignee = %q", body["assignee"])
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&client.Task{
+			ID:           "task-123456",
+			AssigneeName: "Alice",
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task assign task-123 Alice",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "已将任务 #task-123 分配给 Alice") {
+		t.Fatalf("reply = %q", platform.replies[0])
+	}
 }
 
 func TestTaskCommand_DecomposeSuccess(t *testing.T) {
