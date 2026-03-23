@@ -22,8 +22,10 @@ func testConfig() *config.Config {
 		JWTRefreshTTL: 7 * 24 * time.Hour,
 		AllowOrigins:  []string{"http://localhost:3000"},
 		Env:           "development",
+		RolesDir:      "./roles",
 	}
 }
+
 
 func TestNew_Development(t *testing.T) {
 	cfg := testConfig()
@@ -56,7 +58,14 @@ func TestRegisterRoutes_HealthEndpoint(t *testing.T) {
 	authSvc := service.NewAuthService(userRepo, cache, cfg)
 
 	e := server.New(cfg, cache)
-	server.RegisterRoutes(e, cfg, authSvc, cache)
+	server.RegisterRoutes(e, cfg, authSvc, cache,
+		repository.NewProjectRepository(nil),
+		repository.NewMemberRepository(nil),
+		repository.NewSprintRepository(nil),
+		repository.NewTaskRepository(nil),
+		repository.NewAgentRunRepository(nil),
+		repository.NewNotificationRepository(nil),
+	)
 
 	// Test /health
 	req := httptest.NewRequest(http.MethodGet, "/health", nil)
@@ -81,7 +90,14 @@ func TestRegisterRoutes_HealthV1Endpoint(t *testing.T) {
 	authSvc := service.NewAuthService(userRepo, cache, cfg)
 
 	e := server.New(cfg, cache)
-	server.RegisterRoutes(e, cfg, authSvc, cache)
+	server.RegisterRoutes(e, cfg, authSvc, cache,
+		repository.NewProjectRepository(nil),
+		repository.NewMemberRepository(nil),
+		repository.NewSprintRepository(nil),
+		repository.NewTaskRepository(nil),
+		repository.NewAgentRunRepository(nil),
+		repository.NewNotificationRepository(nil),
+	)
 
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/health", nil)
 	rec := httptest.NewRecorder()
@@ -105,7 +121,14 @@ func TestRegisterRoutes_AuthRegister(t *testing.T) {
 	authSvc := service.NewAuthService(userRepo, cache, cfg)
 
 	e := server.New(cfg, cache)
-	server.RegisterRoutes(e, cfg, authSvc, cache)
+	server.RegisterRoutes(e, cfg, authSvc, cache,
+		repository.NewProjectRepository(nil),
+		repository.NewMemberRepository(nil),
+		repository.NewSprintRepository(nil),
+		repository.NewTaskRepository(nil),
+		repository.NewAgentRunRepository(nil),
+		repository.NewNotificationRepository(nil),
+	)
 
 	// DB is nil so it should fail gracefully, not panic
 	body := `{"email":"test@example.com","password":"password123","name":"Test"}`
@@ -127,7 +150,14 @@ func TestRegisterRoutes_AuthLogin(t *testing.T) {
 	authSvc := service.NewAuthService(userRepo, cache, cfg)
 
 	e := server.New(cfg, cache)
-	server.RegisterRoutes(e, cfg, authSvc, cache)
+	server.RegisterRoutes(e, cfg, authSvc, cache,
+		repository.NewProjectRepository(nil),
+		repository.NewMemberRepository(nil),
+		repository.NewSprintRepository(nil),
+		repository.NewTaskRepository(nil),
+		repository.NewAgentRunRepository(nil),
+		repository.NewNotificationRepository(nil),
+	)
 
 	body := `{"email":"test@example.com","password":"password123"}`
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/login", strings.NewReader(body))
@@ -148,7 +178,14 @@ func TestRegisterRoutes_ProtectedEndpointWithoutAuth(t *testing.T) {
 	authSvc := service.NewAuthService(userRepo, cache, cfg)
 
 	e := server.New(cfg, cache)
-	server.RegisterRoutes(e, cfg, authSvc, cache)
+	server.RegisterRoutes(e, cfg, authSvc, cache,
+		repository.NewProjectRepository(nil),
+		repository.NewMemberRepository(nil),
+		repository.NewSprintRepository(nil),
+		repository.NewTaskRepository(nil),
+		repository.NewAgentRunRepository(nil),
+		repository.NewNotificationRepository(nil),
+	)
 
 	// /api/v1/users/me without auth
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/users/me", nil)
@@ -167,7 +204,14 @@ func TestRegisterRoutes_LogoutWithoutAuth(t *testing.T) {
 	authSvc := service.NewAuthService(userRepo, cache, cfg)
 
 	e := server.New(cfg, cache)
-	server.RegisterRoutes(e, cfg, authSvc, cache)
+	server.RegisterRoutes(e, cfg, authSvc, cache,
+		repository.NewProjectRepository(nil),
+		repository.NewMemberRepository(nil),
+		repository.NewSprintRepository(nil),
+		repository.NewTaskRepository(nil),
+		repository.NewAgentRunRepository(nil),
+		repository.NewNotificationRepository(nil),
+	)
 
 	req := httptest.NewRequest(http.MethodPost, "/api/v1/auth/logout", nil)
 	rec := httptest.NewRecorder()
@@ -185,7 +229,14 @@ func TestRegisterRoutes_WSWithoutToken(t *testing.T) {
 	authSvc := service.NewAuthService(userRepo, cache, cfg)
 
 	e := server.New(cfg, cache)
-	server.RegisterRoutes(e, cfg, authSvc, cache)
+	server.RegisterRoutes(e, cfg, authSvc, cache,
+		repository.NewProjectRepository(nil),
+		repository.NewMemberRepository(nil),
+		repository.NewSprintRepository(nil),
+		repository.NewTaskRepository(nil),
+		repository.NewAgentRunRepository(nil),
+		repository.NewNotificationRepository(nil),
+	)
 
 	req := httptest.NewRequest(http.MethodGet, "/ws", nil)
 	rec := httptest.NewRecorder()
@@ -203,7 +254,14 @@ func TestRegisterRoutes_NotFound(t *testing.T) {
 	authSvc := service.NewAuthService(userRepo, cache, cfg)
 
 	e := server.New(cfg, cache)
-	server.RegisterRoutes(e, cfg, authSvc, cache)
+	server.RegisterRoutes(e, cfg, authSvc, cache,
+		repository.NewProjectRepository(nil),
+		repository.NewMemberRepository(nil),
+		repository.NewSprintRepository(nil),
+		repository.NewTaskRepository(nil),
+		repository.NewAgentRunRepository(nil),
+		repository.NewNotificationRepository(nil),
+	)
 
 	req := httptest.NewRequest(http.MethodGet, "/nonexistent", nil)
 	rec := httptest.NewRecorder()

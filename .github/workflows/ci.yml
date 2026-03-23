@@ -56,8 +56,37 @@ jobs:
     name: Go CI
     uses: ./.github/workflows/go-ci.yml
 
-  # Step 4: Build Tauri Desktop Apps (after all checks pass)
+  # Step 4: TypeScript Bridge typecheck
+  bridge-typecheck:
+    name: Bridge Typecheck
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: oven-sh/setup-bun@v2
+      - run: bun install --frozen-lockfile
+      - run: bun run typecheck
+
+  # Step 5: IM Bridge build check
+  im-bridge-build:
+    name: IM Bridge Build
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: src-im-bridge
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: src-im-bridge/go.mod
+          cache: true
+          cache-dependency-path: src-im-bridge/go.sum
+      - run: go build ./...
+
+  # Step 6: Build Tauri Desktop Apps (after all checks pass)
   build-tauri:
     name: Build Tauri
-    needs: [quality, test, go-ci]
+    needs: [quality, test, go-ci, bridge-typecheck, im-bridge-build]
     uses: ./.github/workflows/build-tauri.yml

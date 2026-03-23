@@ -85,9 +85,18 @@ func main() {
 	cacheRepo := repository.NewCacheRepository(rdb)
 	authSvc := service.NewAuthService(userRepo, cacheRepo, cfg)
 
+	projectRepo := repository.NewProjectRepository(db)
+	memberRepo := repository.NewMemberRepository(db)
+	sprintRepo := repository.NewSprintRepository(db)
+	taskRepo := repository.NewTaskRepository(db)
+	agentRunRepo := repository.NewAgentRunRepository(db)
+	notifRepo := repository.NewNotificationRepository(db)
+
 	// Create Echo instance and register routes
 	e := server.New(cfg, cacheRepo)
-	server.RegisterRoutes(e, cfg, authSvc, cacheRepo)
+	server.RegisterRoutes(e, cfg, authSvc, cacheRepo,
+		projectRepo, memberRepo, sprintRepo, taskRepo, agentRunRepo, notifRepo,
+	)
 
 	// Graceful shutdown on SIGINT / SIGTERM
 	quit := make(chan os.Signal, 1)

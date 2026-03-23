@@ -1,0 +1,18 @@
+# Extended dev environment: PostgreSQL + Redis + TS Bridge
+# Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
+
+services:
+  bridge:
+    build:
+      context: ./src-bridge
+      dockerfile: Dockerfile
+    container_name: agentforge-bridge
+    ports:
+      - "7800:7800"
+    environment:
+      PORT: "7800"
+      GO_BACKEND_URL: "http://host.docker.internal:7777"
+      WS_URL: "ws://host.docker.internal:7777/ws"
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
