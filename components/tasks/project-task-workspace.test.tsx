@@ -1,6 +1,7 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectTaskWorkspace } from "./project-task-workspace";
+import type { Notification } from "@/lib/stores/notification-store";
 import type { Task } from "@/lib/stores/task-store";
 import {
   createDefaultTaskWorkspaceFilters,
@@ -126,6 +127,18 @@ const tasks: Task[] = [
   },
 ];
 
+const notifications: Notification[] = [
+  {
+    id: "alert-1",
+    type: "task_progress_stalled",
+    title: "Task stalled: Implement timeline view",
+    message: "Implement timeline view is stalled.",
+    href: "/project?id=project-1#task-task-1",
+    read: false,
+    createdAt: "2026-03-24T12:00:00.000Z",
+  },
+];
+
 describe("ProjectTaskWorkspace", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/project?id=project-1");
@@ -136,6 +149,27 @@ describe("ProjectTaskWorkspace", () => {
     });
   });
 
+  function renderWorkspace(
+    overrides: Partial<React.ComponentProps<typeof ProjectTaskWorkspace>> = {}
+  ) {
+    return render(
+      <ProjectTaskWorkspace
+        projectId="project-1"
+        tasks={tasks}
+        loading={false}
+        error={null}
+        realtimeConnected
+        notifications={notifications}
+        onRetry={jest.fn()}
+        onTaskOpen={jest.fn()}
+        onTaskStatusChange={jest.fn()}
+        onTaskScheduleChange={jest.fn()}
+        onTaskSave={jest.fn()}
+        {...overrides}
+      />
+    );
+  }
+
   function getLastOnDragEnd() {
     return (jest.requireMock("@hello-pangea/dnd") as DndMock).__getLastOnDragEnd();
   }
@@ -144,17 +178,7 @@ describe("ProjectTaskWorkspace", () => {
     const user = userEvent.setup();
     const onTaskOpen = jest.fn();
 
-    render(
-      <ProjectTaskWorkspace
-        tasks={tasks}
-        loading={false}
-        error={null}
-        onRetry={jest.fn()}
-        onTaskOpen={onTaskOpen}
-        onTaskStatusChange={jest.fn()}
-        onTaskScheduleChange={jest.fn()}
-      />
-    );
+    renderWorkspace({ onTaskOpen });
 
     await user.type(screen.getByLabelText("Search tasks"), "calendar");
     await user.click(screen.getByRole("tab", { name: "List" }));
@@ -175,17 +199,7 @@ describe("ProjectTaskWorkspace", () => {
   });
 
   it("shows an explicit empty state when the project has no tasks", () => {
-    render(
-      <ProjectTaskWorkspace
-        tasks={[]}
-        loading={false}
-        error={null}
-        onRetry={jest.fn()}
-        onTaskOpen={jest.fn()}
-        onTaskStatusChange={jest.fn()}
-        onTaskScheduleChange={jest.fn()}
-      />
-    );
+    renderWorkspace({ tasks: [] });
 
     expect(screen.getByText("No tasks yet")).toBeInTheDocument();
     expect(
@@ -198,17 +212,7 @@ describe("ProjectTaskWorkspace", () => {
   it("persists board drag updates through the shared status callback", async () => {
     const onTaskStatusChange = jest.fn().mockResolvedValue(undefined);
 
-    render(
-      <ProjectTaskWorkspace
-        tasks={tasks}
-        loading={false}
-        error={null}
-        onRetry={jest.fn()}
-        onTaskOpen={jest.fn()}
-        onTaskStatusChange={onTaskStatusChange}
-        onTaskScheduleChange={jest.fn()}
-      />
-    );
+    renderWorkspace({ onTaskStatusChange });
 
     const onDragEnd = getLastOnDragEnd();
 
@@ -227,17 +231,7 @@ describe("ProjectTaskWorkspace", () => {
     const user = userEvent.setup();
     const onTaskScheduleChange = jest.fn().mockResolvedValue(undefined);
 
-    render(
-      <ProjectTaskWorkspace
-        tasks={tasks}
-        loading={false}
-        error={null}
-        onRetry={jest.fn()}
-        onTaskOpen={jest.fn()}
-        onTaskStatusChange={jest.fn()}
-        onTaskScheduleChange={onTaskScheduleChange}
-      />
-    );
+    renderWorkspace({ onTaskScheduleChange });
 
     await user.click(screen.getByRole("tab", { name: "Timeline" }));
 
@@ -263,17 +257,7 @@ describe("ProjectTaskWorkspace", () => {
   it("renders progress health signals in the list workspace view", async () => {
     const user = userEvent.setup();
 
-    render(
-      <ProjectTaskWorkspace
-        tasks={tasks}
-        loading={false}
-        error={null}
-        onRetry={jest.fn()}
-        onTaskOpen={jest.fn()}
-        onTaskStatusChange={jest.fn()}
-        onTaskScheduleChange={jest.fn()}
-      />
-    );
+    renderWorkspace();
 
     await user.click(screen.getByRole("tab", { name: "List" }));
 
@@ -281,5 +265,39 @@ describe("ProjectTaskWorkspace", () => {
     expect(screen.getByText("No recent update")).toBeInTheDocument();
     expect(screen.getByText("At risk")).toBeInTheDocument();
     expect(screen.getByText("No assignee")).toBeInTheDocument();
+  });
+
+  it("shows a retryable load error and keeps the workspace shell mounted", () => {
+    renderWorkspace({
+      tasks: [],
+      error: "Unable to load tasks",
+    });
+
+    expect(screen.getByText("Task Workspace")).toBeInTheDocument();
+    expect(screen.getAllByText("Unable to load tasks")).not.toHaveLength(0);
+    expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
+  });
+
+  it("keeps the selected task in the context rail when current filters hide it", async () => {
+    const user = userEvent.setup();
+
+    useTaskWorkspaceStore.setState({
+      viewMode: "board",
+      filters: createDefaultTaskWorkspaceFilters(),
+      selectedTaskId: "task-1",
+    });
+
+    renderWorkspace();
+
+    await user.type(screen.getByLabelText("Search tasks"), "calendar");
+
+    expect(screen.getByText(/outside the current filters/i)).toBeInTheDocument();
+    expect(screen.getByDisplayValue("Implement timeline view")).toBeInTheDocument();
+  });
+
+  it("shows degraded realtime state in the context rail when websocket is disconnected", () => {
+    renderWorkspace({ realtimeConnected: false });
+
+    expect(screen.getByText(/realtime updates unavailable/i)).toBeInTheDocument();
   });
 });

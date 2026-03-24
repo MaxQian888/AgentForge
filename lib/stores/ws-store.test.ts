@@ -34,7 +34,7 @@ import { useWSStore } from "./ws-store";
 
 describe("useWSStore", () => {
   beforeEach(() => {
-    useTaskStore.setState({ tasks: [], loading: false });
+    useTaskStore.setState({ tasks: [], loading: false, error: null });
     useNotificationStore.setState({ notifications: [], unreadCount: 0 });
     useDashboardStore.setState({
       summary: null,
@@ -49,6 +49,21 @@ describe("useWSStore", () => {
       sectionErrors: {},
     });
     useWSStore.getState().disconnect();
+  });
+
+  it("tracks websocket connection degradation explicitly", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+
+    client?.emit("connected", null);
+    expect(useWSStore.getState().connected).toBe(true);
+
+    client?.emit("disconnected", null);
+    expect(useWSStore.getState().connected).toBe(false);
   });
 
   it("applies progress updates and notifications from websocket payload envelopes", () => {

@@ -20,14 +20,14 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
-import { TaskDetailPanel } from "@/components/kanban/task-detail-panel";
 import { ProjectTaskWorkspace } from "@/components/tasks/project-task-workspace";
 import { useProjectStore } from "@/lib/stores/project-store";
+import { useNotificationStore } from "@/lib/stores/notification-store";
 import {
   useTaskStore,
   type TaskPriority,
 } from "@/lib/stores/task-store";
-import { useTaskWorkspaceStore } from "@/lib/stores/task-workspace-store";
+import { useWSStore } from "@/lib/stores/ws-store";
 
 function CreateTaskDialog({ projectId }: { projectId: string }) {
   const createTask = useTaskStore((state) => state.createTask);
@@ -98,16 +98,16 @@ function ProjectView() {
   const router = useRouter();
   const projectId = searchParams.get("id");
   const loading = useTaskStore((state) => state.loading);
+  const error = useTaskStore((state) => state.error);
   const tasks = useTaskStore((state) => state.tasks);
   const fetchTasks = useTaskStore((state) => state.fetchTasks);
   const updateTask = useTaskStore((state) => state.updateTask);
   const transitionTask = useTaskStore((state) => state.transitionTask);
-  const selectedTaskId = useTaskWorkspaceStore((state) => state.selectedTaskId);
-  const selectTask = useTaskWorkspaceStore((state) => state.selectTask);
+  const notifications = useNotificationStore((state) => state.notifications);
+  const realtimeConnected = useWSStore((state) => state.connected);
   const project = useProjectStore((state) =>
     state.projects.find((item) => item.id === projectId)
   );
-  const [panelOpen, setPanelOpen] = useState(false);
 
   useEffect(() => {
     if (!projectId) {
@@ -122,11 +122,6 @@ function ProjectView() {
     [projectId, tasks]
   );
 
-  const selectedTask = useMemo(
-    () => projectTasks.find((task) => task.id === selectedTaskId) ?? null,
-    [projectTasks, selectedTaskId]
-  );
-
   if (!projectId) return null;
 
   return (
@@ -139,28 +134,17 @@ function ProjectView() {
       </div>
 
       <ProjectTaskWorkspace
+        projectId={projectId}
         tasks={projectTasks}
         loading={loading}
-        error={null}
+        error={error}
+        realtimeConnected={realtimeConnected}
+        notifications={notifications}
         onRetry={() => void fetchTasks(projectId)}
-        onTaskOpen={(taskId) => {
-          selectTask(taskId);
-          setPanelOpen(true);
-        }}
+        onTaskOpen={() => undefined}
         onTaskStatusChange={transitionTask}
         onTaskScheduleChange={(taskId, changes) => updateTask(taskId, changes)}
-      />
-
-      <TaskDetailPanel
-        key={selectedTask?.id ?? "task-detail-panel"}
-        task={selectedTask}
-        open={panelOpen}
-        onOpenChange={(open) => {
-          setPanelOpen(open);
-          if (!open) {
-            selectTask(null);
-          }
-        }}
+        onTaskSave={updateTask}
       />
     </div>
   );
