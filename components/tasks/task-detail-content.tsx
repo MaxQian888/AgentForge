@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -94,16 +94,6 @@ export function TaskDetailContent({
   const [plannedStartDate, setPlannedStartDate] = useState(initialDraft.plannedStartDate);
   const [plannedEndDate, setPlannedEndDate] = useState(initialDraft.plannedEndDate);
   const [planningError, setPlanningError] = useState<string | null>(null);
-
-  useEffect(() => {
-    const nextDraft = getTaskDraft(task);
-    setTitle(nextDraft.title);
-    setDescription(nextDraft.description);
-    setPriority(nextDraft.priority);
-    setPlannedStartDate(nextDraft.plannedStartDate);
-    setPlannedEndDate(nextDraft.plannedEndDate);
-    setPlanningError(null);
-  }, [task]);
 
   const handleSave = async () => {
     const planning = normalizePlanningInput({
