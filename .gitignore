@@ -54,3 +54,5 @@ src-tauri/binaries/server*
 
 # Go build cache
 src-go/.env
+
+.superpowers

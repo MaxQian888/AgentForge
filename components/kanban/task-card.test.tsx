@@ -1,5 +1,18 @@
+import type { ReactNode } from "react";
+
+type MockDraggableChildrenProps = {
+  children: (
+    provided: {
+      innerRef: () => void;
+      draggableProps: Record<string, unknown>;
+      dragHandleProps: Record<string, unknown>;
+    },
+    snapshot: { isDragging: boolean },
+  ) => ReactNode;
+};
+
 jest.mock("@hello-pangea/dnd", () => ({
-  Draggable: ({ children }: { children: (provided: any, snapshot: any) => React.ReactNode }) =>
+  Draggable: ({ children }: MockDraggableChildrenProps) =>
     children(
       {
         innerRef: jest.fn(),

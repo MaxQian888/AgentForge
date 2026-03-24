@@ -1,3 +1,5 @@
+/* eslint-disable @typescript-eslint/no-require-imports */
+
 const { mkdirSync } = require("node:fs");
 const { dirname, resolve } = require("node:path");
 const { spawnSync } = require("node:child_process");

@@ -1,7 +1,9 @@
 import type { PluginRuntimeReporter, PluginRuntimeUpdate } from "./types.js";
 
 class NoopPluginRuntimeReporter implements PluginRuntimeReporter {
-  async report(_update: PluginRuntimeUpdate): Promise<void> {}
+  async report(update: PluginRuntimeUpdate): Promise<void> {
+    void update;
+  }
 }
 
 export class HttpPluginRuntimeReporter implements PluginRuntimeReporter {

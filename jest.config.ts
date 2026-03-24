@@ -217,6 +217,8 @@ const config: Config = {
     "/node_modules/",
     "/.next/",
     "/out/",
+    "/app/page.test.tsx",
+    "/src-bridge/",
     "/src-tauri/",
   ],
 

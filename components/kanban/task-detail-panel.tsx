@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useState } from "react";
 import { Sheet, SheetContent, SheetHeader, SheetTitle } from "@/components/ui/sheet";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -78,6 +78,16 @@ function toPlanningWindow(startDate: string, endDate: string) {
   };
 }
 
+function getTaskDraft(task: Task | null) {
+  return {
+    title: task?.title ?? "",
+    description: task?.description ?? "",
+    priority: task?.priority ?? "medium",
+    plannedStartDate: toDateInputValue(task?.plannedStartAt ?? null),
+    plannedEndDate: toDateInputValue(task?.plannedEndAt ?? null),
+  };
+}
+
 export function TaskDetailPanel({
   task,
   open,
@@ -85,19 +95,12 @@ export function TaskDetailPanel({
 }: TaskDetailPanelProps) {
   const updateTask = useTaskStore((state) => state.updateTask);
   const transitionTask = useTaskStore((state) => state.transitionTask);
-  const [title, setTitle] = useState("");
-  const [description, setDescription] = useState("");
-  const [priority, setPriority] = useState<TaskPriority>("medium");
-  const [plannedStartDate, setPlannedStartDate] = useState("");
-  const [plannedEndDate, setPlannedEndDate] = useState("");
-
-  useEffect(() => {
-    setTitle(task?.title ?? "");
-    setDescription(task?.description ?? "");
-    setPriority(task?.priority ?? "medium");
-    setPlannedStartDate(toDateInputValue(task?.plannedStartAt ?? null));
-    setPlannedEndDate(toDateInputValue(task?.plannedEndAt ?? null));
-  }, [task]);
+  const initialDraft = getTaskDraft(task);
+  const [title, setTitle] = useState(initialDraft.title);
+  const [description, setDescription] = useState(initialDraft.description);
+  const [priority, setPriority] = useState<TaskPriority>(initialDraft.priority);
+  const [plannedStartDate, setPlannedStartDate] = useState(initialDraft.plannedStartDate);
+  const [plannedEndDate, setPlannedEndDate] = useState(initialDraft.plannedEndDate);
 
   if (!task) return null;
 

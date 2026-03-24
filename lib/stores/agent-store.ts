@@ -32,7 +32,7 @@ interface AgentState {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
-export const useAgentStore = create<AgentState>()((set, get) => ({
+export const useAgentStore = create<AgentState>()((set) => ({
   agents: [],
   agentOutputs: new Map(),
   loading: false,

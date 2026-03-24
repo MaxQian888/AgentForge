@@ -3,7 +3,7 @@ jest.mock("@/lib/ws-client", () => {
     static instances: MockWSClient[] = [];
     handlers = new Map<string, (payload: unknown) => void>();
 
-    constructor(_url: string, _token: string) {
+    constructor() {
       MockWSClient.instances.push(this);
     }
 

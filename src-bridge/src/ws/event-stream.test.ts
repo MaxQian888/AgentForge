@@ -1,6 +1,24 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { EventStreamer } from "./event-stream.js";
 
+type TestSocket = {
+  readyState: number;
+  send?: (payload: string) => void;
+  ping?: () => void;
+  close?: () => void;
+};
+
+type TestableEventStreamer = {
+  ws: TestSocket | null;
+  reconnectDelay: number;
+  reconnectTimer: ReturnType<typeof setTimeout> | null;
+  connect: () => void;
+  send: EventStreamer["send"];
+  close: () => void;
+  startHeartbeat: () => void;
+  scheduleReconnect: () => void;
+};
+
 const originalConsoleWarn = console.warn;
 const originalConsoleLog = console.log;
 const originalSetTimeout = globalThis.setTimeout;
@@ -19,7 +37,9 @@ afterEach(() => {
 
 describe("EventStreamer", () => {
   test("sends websocket payloads only when the socket is open", () => {
-    const streamer = new EventStreamer("ws://localhost:7777/ws/bridge") as any;
+    const streamer = new EventStreamer(
+      "ws://localhost:7777/ws/bridge",
+    ) as unknown as TestableEventStreamer;
     const sent: string[] = [];
     const warnings: string[] = [];
 
@@ -64,7 +84,9 @@ describe("EventStreamer", () => {
   });
 
   test("starts heartbeats, schedules reconnects with backoff, and closes cleanly", () => {
-    const streamer = new EventStreamer("ws://localhost:7777/ws/bridge") as any;
+    const streamer = new EventStreamer(
+      "ws://localhost:7777/ws/bridge",
+    ) as unknown as TestableEventStreamer;
     let intervalCleared = false;
     let timeoutCleared = false;
     let reconnectDelay: number | undefined;

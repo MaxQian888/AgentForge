@@ -43,6 +43,34 @@ jest.mock('next/navigation', () => ({
   },
 }));
 
+class MockResizeObserver {
+  observe() {}
+  unobserve() {}
+  disconnect() {}
+}
+
+if (typeof global.ResizeObserver === "undefined") {
+  global.ResizeObserver = MockResizeObserver as typeof ResizeObserver;
+}
+
+if (typeof Element !== "undefined") {
+  if (!Element.prototype.hasPointerCapture) {
+    Element.prototype.hasPointerCapture = () => false;
+  }
+
+  if (!Element.prototype.setPointerCapture) {
+    Element.prototype.setPointerCapture = () => {};
+  }
+
+  if (!Element.prototype.releasePointerCapture) {
+    Element.prototype.releasePointerCapture = () => {};
+  }
+
+  if (!Element.prototype.scrollIntoView) {
+    Element.prototype.scrollIntoView = () => {};
+  }
+}
+
 // Suppress console errors in tests (optional)
 // global.console = {
 //   ...console,

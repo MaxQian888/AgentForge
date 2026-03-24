@@ -311,9 +311,11 @@ function getDefaultApp(): Hono {
   return defaultApp;
 }
 
-export default {
+const defaultBridgeApp = {
   port,
   fetch(...args: Parameters<Hono["fetch"]>): ReturnType<Hono["fetch"]> {
     return getDefaultApp().fetch(...args);
   },
 };
+
+export default defaultBridgeApp;
