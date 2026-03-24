@@ -129,6 +129,82 @@ func TestClientCancelUsesCanonicalBridgeContract(t *testing.T) {
 	}
 }
 
+func TestClientPauseAndResumeUseCanonicalBridgeContract(t *testing.T) {
+	t.Parallel()
+
+	var (
+		pausePath  string
+		pauseBody  map[string]any
+		resumePath string
+		resumeBody map[string]any
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		switch r.URL.Path {
+		case "/bridge/pause":
+			pausePath = r.URL.Path
+			if err := json.NewDecoder(r.Body).Decode(&pauseBody); err != nil {
+				t.Fatalf("decode pause request body: %v", err)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"success":true,"session_id":"session-123","status":"paused"}`))
+		case "/bridge/resume":
+			resumePath = r.URL.Path
+			if err := json.NewDecoder(r.Body).Decode(&resumeBody); err != nil {
+				t.Fatalf("decode resume request body: %v", err)
+			}
+			w.WriteHeader(http.StatusOK)
+			_, _ = w.Write([]byte(`{"session_id":"session-123","resumed":true}`))
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	pauseResp, err := client.Pause(context.Background(), "task-123", "user requested pause")
+	if err != nil {
+		t.Fatalf("Pause() error: %v", err)
+	}
+	resumeResp, err := client.Resume(context.Background(), ExecuteRequest{
+		TaskID:         "task-123",
+		SessionID:      "session-123",
+		Prompt:         "Resume task-123",
+		WorktreePath:   "D:/Project/AgentForge",
+		BranchName:     "agent/task-123",
+		SystemPrompt:   "",
+		MaxTurns:       8,
+		BudgetUSD:      2,
+		AllowedTools:   []string{"Read"},
+		PermissionMode: "default",
+		Runtime:        "codex",
+	})
+	if err != nil {
+		t.Fatalf("Resume() error: %v", err)
+	}
+
+	if pausePath != "/bridge/pause" {
+		t.Fatalf("expected /bridge/pause, got %s", pausePath)
+	}
+	if pauseBody["task_id"] != "task-123" || pauseBody["reason"] != "user requested pause" {
+		t.Fatalf("expected snake_case pause payload, got %#v", pauseBody)
+	}
+	if pauseResp.SessionID != "session-123" || pauseResp.Status != "paused" {
+		t.Fatalf("unexpected pause response: %#v", pauseResp)
+	}
+
+	if resumePath != "/bridge/resume" {
+		t.Fatalf("expected /bridge/resume, got %s", resumePath)
+	}
+	if resumeBody["task_id"] != "task-123" || resumeBody["session_id"] != "session-123" {
+		t.Fatalf("expected snake_case resume payload, got %#v", resumeBody)
+	}
+	if resumeResp.SessionID != "session-123" || !resumeResp.Resumed {
+		t.Fatalf("unexpected resume response: %#v", resumeResp)
+	}
+}
+
 func TestClientHealthAndStatusUseBridgeRoutes(t *testing.T) {
 	t.Parallel()
 
@@ -149,6 +225,9 @@ func TestClientHealthAndStatusUseBridgeRoutes(t *testing.T) {
 				"last_tool":        "Read",
 				"last_activity_ms": 1234567890,
 				"spent_usd":        0.12,
+				"runtime":          "codex",
+				"provider":         "openai",
+				"model":            "gpt-5-codex",
 			})
 		case "/bridge/health":
 			healthPath = r.URL.Path
@@ -177,6 +256,67 @@ func TestClientHealthAndStatusUseBridgeRoutes(t *testing.T) {
 	}
 	if status.State != "running" || status.TurnNumber != 3 || status.LastTool != "Read" {
 		t.Fatalf("unexpected status response: %#v", status)
+	}
+	if status.Runtime != "codex" || status.Provider != "openai" || status.Model != "gpt-5-codex" {
+		t.Fatalf("expected runtime identity in status response, got %#v", status)
+	}
+}
+
+func TestClientGetRuntimeCatalogUsesBridgeRoute(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"default_runtime": "claude_code",
+			"runtimes": []map[string]any{
+				{
+					"key":                  "claude_code",
+					"default_provider":     "anthropic",
+					"compatible_providers": []string{"anthropic"},
+					"default_model":        "claude-sonnet-4-5",
+					"available":            true,
+					"diagnostics":          []map[string]any{},
+				},
+				{
+					"key":                  "codex",
+					"default_provider":     "openai",
+					"compatible_providers": []string{"openai", "codex"},
+					"default_model":        "gpt-5-codex",
+					"available":            false,
+					"diagnostics": []map[string]any{
+						{
+							"code":     "missing_executable",
+							"message":  "Executable not found for runtime codex",
+							"blocking": true,
+						},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	catalog, err := client.GetRuntimeCatalog(context.Background())
+	if err != nil {
+		t.Fatalf("GetRuntimeCatalog() error: %v", err)
+	}
+
+	if gotPath != "/bridge/runtimes" {
+		t.Fatalf("expected canonical runtime catalog route, got %s", gotPath)
+	}
+	if catalog.DefaultRuntime != "claude_code" {
+		t.Fatalf("default runtime = %s, want claude_code", catalog.DefaultRuntime)
+	}
+	if len(catalog.Runtimes) != 2 {
+		t.Fatalf("runtime count = %d, want 2", len(catalog.Runtimes))
+	}
+	if catalog.Runtimes[1].DefaultProvider != "openai" {
+		t.Fatalf("codex default provider = %s, want openai", catalog.Runtimes[1].DefaultProvider)
 	}
 }
 

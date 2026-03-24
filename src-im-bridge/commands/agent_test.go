@@ -22,7 +22,7 @@ func TestAgentCommand_RequiresSubcommand(t *testing.T) {
 		Content:  "/agent",
 	})
 
-	if len(platform.replies) != 1 || platform.replies[0] != "用法: /agent list|spawn <task-id>" {
+	if len(platform.replies) != 1 || platform.replies[0] != "用法: /agent list|spawn|run|logs <参数>" {
 		t.Fatalf("replies = %v", platform.replies)
 	}
 }

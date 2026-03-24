@@ -48,6 +48,12 @@ describe("useMemberStore", () => {
           role: "code-reviewer",
           email: "",
           avatarUrl: "",
+          agentConfig: JSON.stringify({
+            roleId: "frontend-developer",
+            runtime: "codex",
+            provider: "openai",
+            model: "gpt-5-codex",
+          }),
           skills: ["review"],
           isActive: false,
           createdAt: "2026-03-20T10:00:00.000Z",
@@ -68,6 +74,112 @@ describe("useMemberStore", () => {
       id: "member-2",
       status: "inactive",
       typeLabel: "Agent",
+      roleBindingLabel: "frontend-developer",
+      readinessState: "ready",
+      agentProfile: expect.objectContaining({
+        runtime: "codex",
+        provider: "openai",
+      }),
+    });
+  });
+
+  it("serializes and persists agent profile changes during create and update", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          id: "member-2",
+          projectId: "project-1",
+          name: "Review Bot",
+          type: "agent",
+          role: "code-reviewer",
+          email: "",
+          avatarUrl: "",
+          agentConfig: JSON.stringify({
+            roleId: "frontend-developer",
+            runtime: "codex",
+            provider: "openai",
+            model: "gpt-5-codex",
+            maxBudgetUsd: 6.5,
+          }),
+          skills: ["review", "typescript"],
+          isActive: true,
+          createdAt: "2026-03-20T10:00:00.000Z",
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          id: "member-2",
+          projectId: "project-1",
+          name: "Review Bot",
+          type: "agent",
+          role: "code-reviewer",
+          email: "",
+          avatarUrl: "",
+          agentConfig: JSON.stringify({
+            roleId: "frontend-developer",
+            runtime: "codex",
+            provider: "openai",
+            model: "gpt-5-codex",
+            maxBudgetUsd: 7,
+            notes: "keep reviews concise",
+          }),
+          skills: ["review", "typescript", "security"],
+          isActive: true,
+          createdAt: "2026-03-20T10:00:00.000Z",
+        }),
+      );
+
+    await useMemberStore.getState().createMember("project-1", {
+      name: "Review Bot",
+      type: "agent",
+      role: "code-reviewer",
+      skills: ["review", "typescript"],
+      agentProfile: {
+        roleId: "frontend-developer",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        maxBudgetUsd: "6.5",
+        notes: "",
+      },
+    });
+
+    await useMemberStore.getState().updateMember("member-2", "project-1", {
+      skills: ["review", "typescript", "security"],
+      agentProfile: {
+        roleId: "frontend-developer",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        maxBudgetUsd: "7",
+        notes: "keep reviews concise",
+      },
+    });
+
+    const createBody = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit)?.body as string);
+    expect(createBody).toMatchObject({
+      type: "agent",
+      skills: ["review", "typescript"],
+      agentConfig: JSON.stringify({
+        roleId: "frontend-developer",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        maxBudgetUsd: 6.5,
+      }),
+    });
+
+    const updateBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit)?.body as string);
+    expect(updateBody).toMatchObject({
+      skills: ["review", "typescript", "security"],
+      agentConfig: JSON.stringify({
+        roleId: "frontend-developer",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        maxBudgetUsd: 7,
+        notes: "keep reviews concise",
+      }),
     });
   });
 });

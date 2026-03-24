@@ -18,6 +18,9 @@ pub fn run() {
     const BACKEND_PORT: u16 = 7777;
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_notification::init())
+        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .manage(BackendState {
@@ -32,12 +35,14 @@ pub fn run() {
             let sidecar_cmd = match shell.sidecar("server") {
                 Ok(cmd) => cmd,
                 Err(e) => {
-                    log::warn!("server sidecar not configured: {}. Running without backend.", e);
+                    log::warn!(
+                        "server sidecar not configured: {}. Running without backend.",
+                        e
+                    );
                     return Ok(());
                 }
             };
-            match sidecar_cmd.args(["--port", &port_arg]).spawn()
-            {
+            match sidecar_cmd.args(["--port", &port_arg]).spawn() {
                 Ok((mut rx, _child)) => {
                     // Log sidecar stdout/stderr in background
                     tauri::async_runtime::spawn(async move {
@@ -63,7 +68,10 @@ pub fn run() {
                     });
                 }
                 Err(e) => {
-                    log::warn!("Could not spawn Go sidecar: {}. Running without backend.", e);
+                    log::warn!(
+                        "Could not spawn Go sidecar: {}. Running without backend.",
+                        e
+                    );
                 }
             }
 

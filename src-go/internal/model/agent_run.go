@@ -12,6 +12,7 @@ type AgentRun struct {
 	MemberID        uuid.UUID  `db:"member_id"`
 	RoleID          string     `db:"role_id"`
 	Status          string     `db:"status"`
+	Runtime         string     `db:"runtime"`
 	Provider        string     `db:"provider"`
 	Model           string     `db:"model"`
 	InputTokens     int64      `db:"input_tokens"`
@@ -24,6 +25,8 @@ type AgentRun struct {
 	CompletedAt     *time.Time `db:"completed_at"`
 	CreatedAt       time.Time  `db:"created_at"`
 	UpdatedAt       time.Time  `db:"updated_at"`
+	TeamID          *uuid.UUID `db:"team_id"`
+	TeamRole        string     `db:"team_role"`
 }
 
 const (
@@ -42,6 +45,7 @@ type AgentRunDTO struct {
 	MemberID        string  `json:"memberId"`
 	RoleID          string  `json:"roleId,omitempty"`
 	Status          string  `json:"status"`
+	Runtime         string  `json:"runtime"`
 	Provider        string  `json:"provider"`
 	Model           string  `json:"model"`
 	InputTokens     int64   `json:"inputTokens"`
@@ -53,6 +57,104 @@ type AgentRunDTO struct {
 	StartedAt       string  `json:"startedAt"`
 	CompletedAt     *string `json:"completedAt,omitempty"`
 	CreatedAt       string  `json:"createdAt"`
+	TeamID          *string `json:"teamId,omitempty"`
+	TeamRole        string  `json:"teamRole,omitempty"`
+}
+
+type AgentRunSummaryDTO struct {
+	ID              string  `json:"id"`
+	TaskID          string  `json:"taskId"`
+	TaskTitle       string  `json:"taskTitle"`
+	MemberID        string  `json:"memberId"`
+	RoleID          string  `json:"roleId,omitempty"`
+	RoleName        string  `json:"roleName"`
+	Status          string  `json:"status"`
+	Runtime         string  `json:"runtime"`
+	Provider        string  `json:"provider"`
+	Model           string  `json:"model"`
+	InputTokens     int64   `json:"inputTokens"`
+	OutputTokens    int64   `json:"outputTokens"`
+	CacheReadTokens int64   `json:"cacheReadTokens"`
+	CostUsd         float64 `json:"costUsd"`
+	BudgetUsd       float64 `json:"budgetUsd"`
+	TurnCount       int     `json:"turnCount"`
+	WorktreePath    string  `json:"worktreePath"`
+	BranchName      string  `json:"branchName"`
+	SessionID       string  `json:"sessionId"`
+	LastActivityAt  string  `json:"lastActivityAt"`
+	StartedAt       string  `json:"startedAt"`
+	CreatedAt       string  `json:"createdAt"`
+	CompletedAt     *string `json:"completedAt,omitempty"`
+	CanResume       bool    `json:"canResume"`
+	MemoryStatus    string  `json:"memoryStatus"`
+	TeamID          *string `json:"teamId,omitempty"`
+	TeamRole        string  `json:"teamRole,omitempty"`
+}
+
+type AgentPoolStatsDTO struct {
+	Active          int `json:"active"`
+	Max             int `json:"max"`
+	Available       int `json:"available"`
+	PausedResumable int `json:"pausedResumable"`
+}
+
+// CostSummaryDTO aggregates cost metrics across multiple agent runs.
+type CostSummaryDTO struct {
+	TotalCostUsd         float64 `json:"totalCostUsd"`
+	TotalInputTokens     int64   `json:"totalInputTokens"`
+	TotalOutputTokens    int64   `json:"totalOutputTokens"`
+	TotalCacheReadTokens int64   `json:"totalCacheReadTokens"`
+	TotalTurns           int     `json:"totalTurns"`
+	RunCount             int     `json:"runCount"`
+}
+
+// CostTimeSeriesDTO represents a cost data point over time.
+type CostTimeSeriesDTO struct {
+	Date    string  `json:"date"`
+	CostUsd float64 `json:"costUsd"`
+	Runs    int     `json:"runs"`
+}
+
+// CostGroupDTO represents cost data grouped by a dimension.
+type CostGroupDTO struct {
+	GroupID string         `json:"groupId"`
+	Label   string         `json:"label"`
+	Summary CostSummaryDTO `json:"summary"`
+}
+
+// VelocityPointDTO represents task completion data for a single time period.
+type VelocityPointDTO struct {
+	Period         string  `json:"period"`
+	TasksCompleted int     `json:"tasksCompleted"`
+	AvgCycleTimeH  float64 `json:"avgCycleTimeHours"`
+}
+
+// VelocityStatsDTO contains development velocity statistics.
+type VelocityStatsDTO struct {
+	Points         []VelocityPointDTO `json:"points"`
+	TotalCompleted int                `json:"totalCompleted"`
+	AvgPerDay      float64            `json:"avgPerDay"`
+}
+
+// AgentPerformanceEntryDTO represents performance data for a single agent role.
+type AgentPerformanceEntryDTO struct {
+	RoleID       string  `json:"roleId"`
+	RunCount     int     `json:"runCount"`
+	SuccessRate  float64 `json:"successRate"`
+	AvgCostUsd   float64 `json:"avgCostUsd"`
+	AvgDurationS float64 `json:"avgDurationSeconds"`
+	TotalCostUsd float64 `json:"totalCostUsd"`
+}
+
+// AgentPerformanceDTO contains agent performance statistics.
+type AgentPerformanceDTO struct {
+	Entries []AgentPerformanceEntryDTO `json:"entries"`
+}
+
+type AgentLogEntry struct {
+	Timestamp string `json:"timestamp"`
+	Content   string `json:"content"`
+	Type      string `json:"type"` // "output", "tool_call", "tool_result", "error", "status"
 }
 
 func (a *AgentRun) ToDTO() AgentRunDTO {
@@ -62,6 +164,7 @@ func (a *AgentRun) ToDTO() AgentRunDTO {
 		MemberID:        a.MemberID.String(),
 		RoleID:          a.RoleID,
 		Status:          a.Status,
+		Runtime:         a.Runtime,
 		Provider:        a.Provider,
 		Model:           a.Model,
 		InputTokens:     a.InputTokens,
@@ -76,6 +179,11 @@ func (a *AgentRun) ToDTO() AgentRunDTO {
 	if a.CompletedAt != nil {
 		s := a.CompletedAt.Format(time.RFC3339)
 		dto.CompletedAt = &s
+	}
+	dto.TeamRole = a.TeamRole
+	if a.TeamID != nil {
+		s := a.TeamID.String()
+		dto.TeamID = &s
 	}
 	return dto
 }

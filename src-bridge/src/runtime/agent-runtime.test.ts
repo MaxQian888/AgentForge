@@ -17,12 +17,12 @@ describe("AgentRuntime", () => {
     });
   });
 
-  test("marks the runtime as failed when cancelled", () => {
+  test("marks the runtime as cancelled when cancelled", () => {
     const runtime = new AgentRuntime("task-456", "session-456");
 
     runtime.cancel();
 
-    expect(runtime.status).toBe("failed");
+    expect(runtime.status).toBe("cancelled");
     expect(runtime.abortController.signal.aborted).toBe(true);
   });
 });

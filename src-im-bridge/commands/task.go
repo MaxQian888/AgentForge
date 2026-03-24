@@ -26,7 +26,7 @@ func RegisterTaskCommands(engine *core.Engine, apiClient *client.AgentForgeClien
 		}
 
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform)
+		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		switch subCmd {
 		case "create":
 			handleTaskCreate(ctx, p, msg, scopedClient, subArgs)
@@ -120,6 +120,18 @@ func handleTaskAssign(ctx context.Context, p core.Platform, msg *core.Message, c
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("分配失败: %v", err))
 		return
 	}
+	if msg.ReplyTarget != nil {
+		binding := client.IMActionBinding{
+			Platform:    msg.Platform,
+			ProjectID:   result.Task.ProjectID,
+			TaskID:      result.Task.ID,
+			ReplyTarget: msg.ReplyTarget,
+		}
+		if result.Dispatch.Run != nil {
+			binding.RunID = result.Dispatch.Run.ID
+		}
+		_ = c.BindActionContext(ctx, binding)
+	}
 
 	_ = p.Reply(ctx, msg.ReplyCtx, formatTaskDispatchReply(result, member.Name))
 }
@@ -136,6 +148,14 @@ func handleTaskDecompose(ctx context.Context, p core.Platform, msg *core.Message
 	if err != nil {
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("任务分解失败: %v\n未创建任何子任务，请稍后重试。", err))
 		return
+	}
+	if msg.ReplyTarget != nil {
+		_ = c.BindActionContext(ctx, client.IMActionBinding{
+			Platform:    msg.Platform,
+			ProjectID:   result.ParentTask.ProjectID,
+			TaskID:      result.ParentTask.ID,
+			ReplyTarget: msg.ReplyTarget,
+		})
 	}
 
 	var sb strings.Builder

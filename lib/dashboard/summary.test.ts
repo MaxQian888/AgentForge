@@ -92,6 +92,13 @@ describe("dashboard summary helpers", () => {
       type: "agent",
       role: "code-reviewer",
       email: "",
+      agentConfig: JSON.stringify({
+        roleId: "frontend-developer",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        maxBudgetUsd: 9.5,
+      }),
       skills: ["review", "security"],
       isActive: true,
       createdAt: "2026-03-01T08:00:00.000Z",
@@ -179,12 +186,49 @@ describe("dashboard summary helpers", () => {
     expect(roster[1]).toMatchObject({
       id: "member-agent-1",
       type: "agent",
+      roleBindingLabel: "frontend-developer",
+      readinessLabel: "Ready",
+      readinessState: "ready",
+      agentProfile: expect.objectContaining({
+        roleId: "frontend-developer",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        maxBudgetUsd: 9.5,
+      }),
       workload: {
         assignedTasks: 1,
         inProgressTasks: 1,
         inReviewTasks: 0,
         activeAgentRuns: 1,
       },
+    });
+  });
+
+  it("marks agent members as incomplete when profile config is missing role linkage", () => {
+    const roster = summarizeMemberRoster({
+      members: [
+        {
+          ...members[1],
+          id: "member-agent-2",
+          name: "Builder Bot",
+          agentConfig: JSON.stringify({
+            runtime: "codex",
+            provider: "openai",
+            model: "gpt-5-codex",
+          }),
+        },
+      ],
+      tasks: [],
+      agents: [],
+      activity: [],
+    });
+
+    expect(roster[0]).toMatchObject({
+      id: "member-agent-2",
+      readinessState: "incomplete",
+      readinessLabel: "Needs role binding",
+      roleBindingLabel: "Unbound role",
     });
   });
 });

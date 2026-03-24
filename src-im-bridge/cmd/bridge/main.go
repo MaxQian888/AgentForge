@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"github.com/agentforge/im-bridge/client"
 	"github.com/agentforge/im-bridge/commands"
@@ -18,6 +19,10 @@ type config struct {
 	APIBase                 string
 	ProjectID               string
 	APIKey                  string
+	BridgeIDFile            string
+	ControlSharedSecret     string
+	HeartbeatInterval       time.Duration
+	ControlReconnectDelay   time.Duration
 	Platform                string
 	TransportMode           string
 	FeishuApp               string
@@ -43,6 +48,10 @@ func loadConfig() *config {
 		APIBase:                 envOrDefault("AGENTFORGE_API_BASE", "http://localhost:7777"),
 		ProjectID:               envOrDefault("AGENTFORGE_PROJECT_ID", "default-project"),
 		APIKey:                  envOrDefault("AGENTFORGE_API_KEY", ""),
+		BridgeIDFile:            envOrDefault("IM_BRIDGE_ID_FILE", ".agentforge/im-bridge-id"),
+		ControlSharedSecret:     os.Getenv("IM_CONTROL_SHARED_SECRET"),
+		HeartbeatInterval:       durationEnvOrDefault("IM_BRIDGE_HEARTBEAT_INTERVAL", 30*time.Second),
+		ControlReconnectDelay:   durationEnvOrDefault("IM_BRIDGE_RECONNECT_DELAY", 3*time.Second),
 		Platform:                envOrDefault("IM_PLATFORM", "feishu"),
 		TransportMode:           envOrDefault("IM_TRANSPORT_MODE", transportModeStub),
 		FeishuApp:               os.Getenv("FEISHU_APP_ID"),
@@ -67,6 +76,15 @@ func loadConfig() *config {
 func envOrDefault(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+func durationEnvOrDefault(key string, fallback time.Duration) time.Duration {
+	if raw := os.Getenv(key); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil {
+			return parsed
+		}
 	}
 	return fallback
 }
@@ -113,25 +131,52 @@ func main() {
 	}
 	log.Printf("[main] IM platform selected: %s", core.NormalizePlatformName(platform.Name()))
 
+	bridgeID, err := loadOrCreateBridgeID(cfg.BridgeIDFile)
+	if err != nil {
+		log.Fatalf("[main] Failed to initialize bridge id: %v", err)
+	}
+
 	// Create API client.
-	apiClient := client.NewAgentForgeClient(cfg.APIBase, cfg.ProjectID, cfg.APIKey).WithPlatform(platform)
+	apiClient := client.NewAgentForgeClient(cfg.APIBase, cfg.ProjectID, cfg.APIKey).WithPlatform(platform).WithBridgeContext(bridgeID, nil)
 
 	// Create engine and register commands.
 	engine := core.NewEngine(platform)
 
+	// Configure rate limiter: 20 commands per minute per user (configurable via env).
+	rateLimitRate := 20
+	if v := os.Getenv("RATE_LIMIT_RATE"); v != "" {
+		if n, err := fmt.Sscanf(v, "%d", &rateLimitRate); n == 0 || err != nil {
+			rateLimitRate = 20
+		}
+	}
+	engine.SetRateLimiter(core.NewRateLimiter(rateLimitRate, time.Minute))
+
 	commands.RegisterTaskCommands(engine, apiClient)
 	commands.RegisterAgentCommands(engine, apiClient)
 	commands.RegisterCostCommands(engine, apiClient)
+	commands.RegisterReviewCommands(engine, apiClient)
+	commands.RegisterSprintCommands(engine, apiClient)
 	commands.RegisterHelpCommand(engine)
 
-	// Natural language fallback.
+	// Natural language fallback: call NLU intent classification via Go backend.
 	engine.SetFallback(func(p core.Platform, msg *core.Message) {
-		_ = p.Reply(context.Background(), msg.ReplyCtx,
-			"自然语言理解功能即将推出。目前请使用 /task create <标题> 创建任务。发送 /help 查看所有命令。")
+		ctx := context.Background()
+		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext(bridgeID, msg.ReplyTarget)
+		reply, err := scopedClient.SendNLU(ctx, msg.Content, msg.UserID)
+		if err != nil || reply == "" {
+			reply = "理解失败，请使用 /help 查看可用命令。"
+		}
+		_ = p.Reply(ctx, msg.ReplyCtx, reply)
 	})
+
+	runtimeControl := newBridgeRuntimeControl(cfg, bridgeID, platform, apiClient)
+	if err := runtimeControl.Start(context.Background()); err != nil {
+		log.Fatalf("[main] Failed to start runtime control plane: %v", err)
+	}
 
 	// Start notification receiver in background.
 	notifyServer := notify.NewReceiver(platform, cfg.NotifyPort)
+	notifyServer.SetSharedSecret(cfg.ControlSharedSecret)
 	go func() {
 		if err := notifyServer.Start(); err != nil {
 			log.Printf("[main] Notification receiver error: %v", err)
@@ -151,6 +196,7 @@ func main() {
 
 	log.Println("[main] Shutting down...")
 	_ = engine.Stop()
+	_ = runtimeControl.Stop(context.Background())
 	_ = notifyServer.Stop()
 	log.Println("[main] Goodbye")
 }

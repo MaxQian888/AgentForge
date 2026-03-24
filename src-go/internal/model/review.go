@@ -90,6 +90,15 @@ type CompleteReviewRequest struct {
 	CostUSD        float64         `json:"costUsd"`
 }
 
+type ApproveReviewRequest struct {
+	Comment string `json:"comment"`
+}
+
+type RejectReviewRequest struct {
+	Comment string `json:"comment"`
+	Reason  string `json:"reason" validate:"required"`
+}
+
 func (r *Review) ToDTO() ReviewDTO {
 	return ReviewDTO{
 		ID:             r.ID.String(),

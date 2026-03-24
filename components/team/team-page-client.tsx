@@ -13,9 +13,7 @@ export function TeamPageClient() {
   const searchParams = useSearchParams();
   const requestedProjectId = searchParams.get("project");
 
-  const projects = useDashboardStore((state) =>
-    state.projects.map((project) => ({ id: project.id, name: project.name }))
-  );
+  const dashboardProjects = useDashboardStore((state) => state.projects);
   const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
   const members = useDashboardStore((state) => state.members);
   const tasks = useDashboardStore((state) => state.tasks);
@@ -29,6 +27,14 @@ export function TeamPageClient() {
   const updateMember = useMemberStore((state) => state.updateMember);
 
   const activeProjectId = requestedProjectId ?? selectedProjectId;
+  const projects = useMemo(
+    () =>
+      dashboardProjects.map((project) => ({
+        id: project.id,
+        name: project.name,
+      })),
+    [dashboardProjects]
+  );
 
   useEffect(() => {
     void fetchSummary({ projectId: requestedProjectId });

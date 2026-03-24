@@ -58,13 +58,18 @@ var validTransitions = map[string][]string{
 	TaskStatusInProgress:       {TaskStatusInReview, TaskStatusBlocked, TaskStatusCancelled, TaskStatusBudgetExceeded},
 	TaskStatusInReview:         {TaskStatusDone, TaskStatusChangesRequested, TaskStatusCancelled},
 	TaskStatusChangesRequested: {TaskStatusInProgress, TaskStatusCancelled},
-	TaskStatusBlocked:          {TaskStatusInProgress, TaskStatusCancelled},
+	TaskStatusBlocked:          {TaskStatusTriaged, TaskStatusAssigned, TaskStatusInProgress, TaskStatusCancelled},
 	TaskStatusBudgetExceeded:   {TaskStatusInProgress, TaskStatusCancelled},
 }
 
 // ValidateTransition checks whether a status transition is allowed.
-func ValidateTransition(from, to string) error {
-	allowed, ok := validTransitions[from]
+// An optional custom transitions map can override the defaults.
+func ValidateTransition(from, to string, customTransitions ...map[string][]string) error {
+	transitions := validTransitions
+	if len(customTransitions) > 0 && customTransitions[0] != nil {
+		transitions = customTransitions[0]
+	}
+	allowed, ok := transitions[from]
 	if !ok {
 		return fmt.Errorf("unknown status: %s", from)
 	}
@@ -77,32 +82,33 @@ func ValidateTransition(from, to string) error {
 }
 
 type TaskDTO struct {
-	ID             string   `json:"id"`
-	ProjectID      string   `json:"projectId"`
-	ParentID       *string  `json:"parentId,omitempty"`
-	SprintID       *string  `json:"sprintId,omitempty"`
-	Title          string   `json:"title"`
-	Description    string   `json:"description"`
-	Status         string   `json:"status"`
-	Priority       string   `json:"priority"`
-	AssigneeID     *string  `json:"assigneeId,omitempty"`
-	AssigneeType   string   `json:"assigneeType"`
-	ReporterID     *string  `json:"reporterId,omitempty"`
-	Labels         []string `json:"labels"`
-	BudgetUsd      float64  `json:"budgetUsd"`
-	SpentUsd       float64  `json:"spentUsd"`
-	AgentBranch    string   `json:"agentBranch"`
-	AgentWorktree  string   `json:"agentWorktree"`
-	AgentSessionID string   `json:"agentSessionId"`
-	PRUrl          string   `json:"prUrl"`
-	PRNumber       int      `json:"prNumber"`
-	BlockedBy      []string `json:"blockedBy"`
-	PlannedStartAt *string  `json:"plannedStartAt,omitempty"`
-	PlannedEndAt   *string  `json:"plannedEndAt,omitempty"`
+	ID             string                   `json:"id"`
+	ProjectID      string                   `json:"projectId"`
+	ParentID       *string                  `json:"parentId,omitempty"`
+	SprintID       *string                  `json:"sprintId,omitempty"`
+	ExecutionMode  string                   `json:"executionMode,omitempty"`
+	Title          string                   `json:"title"`
+	Description    string                   `json:"description"`
+	Status         string                   `json:"status"`
+	Priority       string                   `json:"priority"`
+	AssigneeID     *string                  `json:"assigneeId,omitempty"`
+	AssigneeType   string                   `json:"assigneeType"`
+	ReporterID     *string                  `json:"reporterId,omitempty"`
+	Labels         []string                 `json:"labels"`
+	BudgetUsd      float64                  `json:"budgetUsd"`
+	SpentUsd       float64                  `json:"spentUsd"`
+	AgentBranch    string                   `json:"agentBranch"`
+	AgentWorktree  string                   `json:"agentWorktree"`
+	AgentSessionID string                   `json:"agentSessionId"`
+	PRUrl          string                   `json:"prUrl"`
+	PRNumber       int                      `json:"prNumber"`
+	BlockedBy      []string                 `json:"blockedBy"`
+	PlannedStartAt *string                  `json:"plannedStartAt,omitempty"`
+	PlannedEndAt   *string                  `json:"plannedEndAt,omitempty"`
 	Progress       *TaskProgressSnapshotDTO `json:"progress,omitempty"`
-	CreatedAt      string   `json:"createdAt"`
-	UpdatedAt      string   `json:"updatedAt"`
-	CompletedAt    *string  `json:"completedAt,omitempty"`
+	CreatedAt      string                   `json:"createdAt"`
+	UpdatedAt      string                   `json:"updatedAt"`
+	CompletedAt    *string                  `json:"completedAt,omitempty"`
 }
 
 type CreateTaskRequest struct {
@@ -118,14 +124,15 @@ type CreateTaskRequest struct {
 }
 
 type UpdateTaskRequest struct {
-	Title          *string  `json:"title"`
-	Description    *string  `json:"description"`
-	Priority       *string  `json:"priority"`
-	SprintID       *string  `json:"sprintId"`
-	Labels         []string `json:"labels"`
-	BudgetUsd      *float64 `json:"budgetUsd"`
-	PlannedStartAt *string  `json:"plannedStartAt"`
-	PlannedEndAt   *string  `json:"plannedEndAt"`
+	Title          *string   `json:"title"`
+	Description    *string   `json:"description"`
+	Priority       *string   `json:"priority"`
+	SprintID       *string   `json:"sprintId"`
+	Labels         []string  `json:"labels"`
+	BlockedBy      *[]string `json:"blockedBy"`
+	BudgetUsd      *float64  `json:"budgetUsd"`
+	PlannedStartAt *string   `json:"plannedStartAt"`
+	PlannedEndAt   *string   `json:"plannedEndAt"`
 }
 
 type TaskListQuery struct {
@@ -171,6 +178,7 @@ func (t *Task) ToDTO() TaskDTO {
 	dto := TaskDTO{
 		ID:             t.ID.String(),
 		ProjectID:      t.ProjectID.String(),
+		ExecutionMode:  deriveTaskExecutionMode(t.Labels),
 		Title:          t.Title,
 		Description:    t.Description,
 		Status:         t.Status,
@@ -218,4 +226,16 @@ func (t *Task) ToDTO() TaskDTO {
 	}
 	dto.Progress = t.Progress.ToDTO()
 	return dto
+}
+
+func deriveTaskExecutionMode(labels []string) string {
+	for _, label := range labels {
+		switch label {
+		case "execution:agent":
+			return "agent"
+		case "execution:human":
+			return "human"
+		}
+	}
+	return ""
 }

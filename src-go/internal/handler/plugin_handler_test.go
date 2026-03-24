@@ -13,6 +13,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/handler"
 	"github.com/react-go-quick-starter/server/internal/model"
+	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
@@ -21,6 +22,10 @@ type handlerRuntimeClient struct{}
 
 type handlerGoRuntime struct {
 	result map[string]any
+}
+
+type handlerRoleStore struct {
+	roles map[string]*rolepkg.Manifest
 }
 
 func (handlerRuntimeClient) RegisterToolPlugin(_ context.Context, manifest model.PluginManifest) (*model.PluginRuntimeStatus, error) {
@@ -100,6 +105,17 @@ func (h *handlerGoRuntime) Invoke(_ context.Context, _ model.PluginRecord, _ str
 	return h.result, nil
 }
 
+func (s *handlerRoleStore) Get(id string) (*rolepkg.Manifest, error) {
+	if s == nil || s.roles == nil {
+		return nil, os.ErrNotExist
+	}
+	role, ok := s.roles[id]
+	if !ok {
+		return nil, os.ErrNotExist
+	}
+	return role, nil
+}
+
 func writePluginManifest(t *testing.T, dir string, relative string, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, relative)
@@ -118,9 +134,27 @@ func newPluginHandler(t *testing.T, pluginsDir string) *handler.PluginHandler {
 	return handler.NewPluginHandler(svc)
 }
 
+func newPluginHandlerWithRegistry(t *testing.T, repo service.PluginRegistry, pluginsDir string) *handler.PluginHandler {
+	t.Helper()
+	svc := service.NewPluginService(repo, handlerRuntimeClient{}, nil, pluginsDir)
+	return handler.NewPluginHandler(svc)
+}
+
 func newPluginHandlerWithGoRuntime(t *testing.T, pluginsDir string, goRuntime service.GoPluginRuntime) *handler.PluginHandler {
 	t.Helper()
 	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), handlerRuntimeClient{}, goRuntime, pluginsDir)
+	return handler.NewPluginHandler(svc)
+}
+
+func newPluginHandlerWithWorkflowDeps(
+	t *testing.T,
+	repo service.PluginRegistry,
+	pluginsDir string,
+	goRuntime service.GoPluginRuntime,
+	roleStore service.PluginRoleStore,
+) *handler.PluginHandler {
+	t.Helper()
+	svc := service.NewPluginService(repo, handlerRuntimeClient{}, goRuntime, pluginsDir).WithRoleStore(roleStore)
 	return handler.NewPluginHandler(svc)
 }
 
@@ -309,5 +343,378 @@ spec:
 	}
 	if response.Result["status"] != "sent" {
 		t.Fatalf("expected sent result, got %+v", response.Result)
+	}
+}
+
+func TestPluginHandler_MarketplaceReturnsManifestBackedCatalog(t *testing.T) {
+	pluginsDir := t.TempDir()
+	writePluginManifest(t, pluginsDir, "integrations/feishu/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: feishu
+  name: Feishu
+  version: 1.0.0
+  description: Built-in Feishu adapter
+spec:
+  runtime: wasm
+  module: ./dist/feishu.wasm
+  abiVersion: v1
+`)
+
+	h := newPluginHandler(t, pluginsDir)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/plugins/marketplace", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.Marketplace(c); err != nil {
+		t.Fatalf("marketplace: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var plugins []model.MarketplacePluginDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &plugins); err != nil {
+		t.Fatalf("decode marketplace response: %v", err)
+	}
+	if len(plugins) != 1 {
+		t.Fatalf("len(plugins) = %d, want 1", len(plugins))
+	}
+	if plugins[0].ID != "feishu" {
+		t.Fatalf("catalog id = %q, want feishu", plugins[0].ID)
+	}
+	if plugins[0].InstallURL == "" {
+		t.Fatal("expected install url to be populated from the manifest path")
+	}
+}
+
+func TestPluginHandler_ListEventsReturnsAuditTrail(t *testing.T) {
+	pluginsDir := t.TempDir()
+	manifestPath := writePluginManifest(t, pluginsDir, "local/feishu.yaml", `
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: feishu
+  name: Feishu
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/feishu.wasm
+  abiVersion: v1
+`)
+
+	h := newPluginHandlerWithGoRuntime(t, pluginsDir, &handlerGoRuntime{})
+	e := echo.New()
+
+	installBody, _ := json.Marshal(map[string]string{"path": manifestPath})
+	installReq := httptest.NewRequest(http.MethodPost, "/plugins/install", bytes.NewReader(installBody))
+	installReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	installRec := httptest.NewRecorder()
+	installCtx := e.NewContext(installReq, installRec)
+	if err := h.InstallLocal(installCtx); err != nil {
+		t.Fatalf("install local: %v", err)
+	}
+
+	activateReq := httptest.NewRequest(http.MethodPost, "/plugins/feishu/activate", nil)
+	activateRec := httptest.NewRecorder()
+	activateCtx := e.NewContext(activateReq, activateRec)
+	activateCtx.SetParamNames("id")
+	activateCtx.SetParamValues("feishu")
+	if err := h.Activate(activateCtx); err != nil {
+		t.Fatalf("activate plugin: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodGet, "/plugins/feishu/events", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("feishu")
+
+	if err := h.ListEvents(c); err != nil {
+		t.Fatalf("list plugin events: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var events []model.PluginEventRecord
+	if err := json.Unmarshal(rec.Body.Bytes(), &events); err != nil {
+		t.Fatalf("decode events response: %v", err)
+	}
+	if len(events) == 0 {
+		t.Fatal("expected non-empty plugin event list")
+	}
+	if events[0].PluginID != "feishu" {
+		t.Fatalf("event plugin id = %q, want feishu", events[0].PluginID)
+	}
+}
+
+func TestPluginHandler_ListSupportsSourceAndTrustFilters(t *testing.T) {
+	pluginsDir := t.TempDir()
+	repo := repository.NewPluginRegistryRepository()
+	ctx := context.Background()
+
+	records := []*model.PluginRecord{
+		{
+			PluginManifest: model.PluginManifest{
+				APIVersion: "agentforge/v1",
+				Kind:       model.PluginKindReview,
+				Metadata: model.PluginMetadata{
+					ID:      "review.typescript",
+					Name:    "TypeScript Review",
+					Version: "1.0.0",
+				},
+				Spec: model.PluginSpec{
+					Runtime: model.PluginRuntimeMCP,
+					Review: &model.ReviewPluginSpec{
+						Entrypoint: "review:run",
+						Triggers: model.ReviewPluginTrigger{
+							Events: []string{"pull_request.updated"},
+						},
+						Output: model.ReviewPluginOutput{Format: "findings/v1"},
+					},
+				},
+				Source: model.PluginSource{
+					Type:    model.PluginSourceNPM,
+					Package: "@agentforge/review-typescript",
+					Trust: &model.PluginTrustMetadata{
+						Status: model.PluginTrustVerified,
+					},
+				},
+			},
+			LifecycleState: model.PluginStateEnabled,
+			RuntimeHost:    model.PluginHostTSBridge,
+		},
+		{
+			PluginManifest: model.PluginManifest{
+				APIVersion: "agentforge/v1",
+				Kind:       model.PluginKindTool,
+				Metadata: model.PluginMetadata{
+					ID:      "tool.local",
+					Name:    "Local Tool",
+					Version: "1.0.0",
+				},
+				Spec: model.PluginSpec{
+					Runtime: model.PluginRuntimeMCP,
+				},
+				Source: model.PluginSource{
+					Type: model.PluginSourceLocal,
+					Path: "./plugins/tool/manifest.yaml",
+					Trust: &model.PluginTrustMetadata{
+						Status: model.PluginTrustUntrusted,
+					},
+				},
+			},
+			LifecycleState: model.PluginStateInstalled,
+			RuntimeHost:    model.PluginHostTSBridge,
+		},
+	}
+
+	for _, record := range records {
+		if err := repo.Save(ctx, record); err != nil {
+			t.Fatalf("save plugin record %s: %v", record.Metadata.ID, err)
+		}
+	}
+
+	h := newPluginHandlerWithRegistry(t, repo, pluginsDir)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/plugins?source=npm&trust=verified", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.List(c); err != nil {
+		t.Fatalf("list plugins: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var listed []model.PluginRecord
+	if err := json.Unmarshal(rec.Body.Bytes(), &listed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(listed) != 1 {
+		t.Fatalf("len(listed) = %d, want 1", len(listed))
+	}
+	if listed[0].Metadata.ID != "review.typescript" {
+		t.Fatalf("listed plugin id = %q, want review.typescript", listed[0].Metadata.ID)
+	}
+}
+
+func TestPluginHandler_InstallSequentialWorkflowAndActivateThroughGoRuntime(t *testing.T) {
+	pluginsDir := t.TempDir()
+	manifestPath := writePluginManifest(t, pluginsDir, "local/release-train.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: release-train
+  name: Release Train
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/release-train.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: coder
+      - id: reviewer
+    steps:
+      - id: implement
+        role: coder
+        action: agent
+        next: [review]
+      - id: review
+        role: reviewer
+        action: review
+`)
+
+	roleStore := &handlerRoleStore{
+		roles: map[string]*rolepkg.Manifest{
+			"coder": {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+			"reviewer": {Metadata: model.RoleMetadata{ID: "reviewer", Name: "Reviewer"}},
+		},
+	}
+	goRuntime := &handlerGoRuntime{}
+	h := newPluginHandlerWithWorkflowDeps(t, repository.NewPluginRegistryRepository(), pluginsDir, goRuntime, roleStore)
+	e := echo.New()
+
+	body, _ := json.Marshal(map[string]string{"path": manifestPath})
+	req := httptest.NewRequest(http.MethodPost, "/plugins/install", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.InstallLocal(c); err != nil {
+		t.Fatalf("install workflow: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+
+	activateReq := httptest.NewRequest(http.MethodPost, "/plugins/release-train/activate", nil)
+	activateRec := httptest.NewRecorder()
+	activateCtx := e.NewContext(activateReq, activateRec)
+	activateCtx.SetParamNames("id")
+	activateCtx.SetParamValues("release-train")
+	if err := h.Activate(activateCtx); err != nil {
+		t.Fatalf("activate workflow: %v", err)
+	}
+	if activateRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", activateRec.Code)
+	}
+}
+
+func TestPluginHandler_InstallWorkflowRejectsUnknownRoleAndInvalidTransition(t *testing.T) {
+	pluginsDir := t.TempDir()
+	manifestPath := writePluginManifest(t, pluginsDir, "local/broken-release-train.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: broken-release-train
+  name: Broken Release Train
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/release-train.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: coder
+    steps:
+      - id: implement
+        role: coder
+        action: agent
+        next: [missing-review]
+      - id: review
+        role: reviewer
+        action: review
+`)
+
+	roleStore := &handlerRoleStore{
+		roles: map[string]*rolepkg.Manifest{
+			"coder": {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+		},
+	}
+	h := newPluginHandlerWithWorkflowDeps(t, repository.NewPluginRegistryRepository(), pluginsDir, &handlerGoRuntime{}, roleStore)
+	e := echo.New()
+
+	body, _ := json.Marshal(map[string]string{"path": manifestPath})
+	req := httptest.NewRequest(http.MethodPost, "/plugins/install", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.InstallLocal(c); err != nil {
+		t.Fatalf("install workflow: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", rec.Code)
+	}
+	if !bytes.Contains(rec.Body.Bytes(), []byte("unknown workflow role reference")) &&
+		!bytes.Contains(rec.Body.Bytes(), []byte("unknown workflow step transition")) {
+		t.Fatalf("expected workflow validation error, got %s", rec.Body.String())
+	}
+}
+
+func TestPluginHandler_ActivateUnsupportedWorkflowModeReturnsExplicitError(t *testing.T) {
+	pluginsDir := t.TempDir()
+	manifestPath := writePluginManifest(t, pluginsDir, "local/hierarchical-release-train.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: hierarchical-release-train
+  name: Hierarchical Release Train
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/release-train.wasm
+  abiVersion: v1
+  workflow:
+    process: hierarchical
+    roles:
+      - id: coder
+    steps:
+      - id: implement
+        role: coder
+        action: agent
+`)
+
+	roleStore := &handlerRoleStore{
+		roles: map[string]*rolepkg.Manifest{
+			"coder": {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+		},
+	}
+	h := newPluginHandlerWithWorkflowDeps(t, repository.NewPluginRegistryRepository(), pluginsDir, &handlerGoRuntime{}, roleStore)
+	e := echo.New()
+
+	body, _ := json.Marshal(map[string]string{"path": manifestPath})
+	req := httptest.NewRequest(http.MethodPost, "/plugins/install", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	if err := h.InstallLocal(c); err != nil {
+		t.Fatalf("install workflow: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+
+	activateReq := httptest.NewRequest(http.MethodPost, "/plugins/hierarchical-release-train/activate", nil)
+	activateRec := httptest.NewRecorder()
+	activateCtx := e.NewContext(activateReq, activateRec)
+	activateCtx.SetParamNames("id")
+	activateCtx.SetParamValues("hierarchical-release-train")
+	if err := h.Activate(activateCtx); err != nil {
+		t.Fatalf("activate workflow: %v", err)
+	}
+	if activateRec.Code != http.StatusBadRequest {
+		t.Fatalf("expected 400, got %d", activateRec.Code)
+	}
+	if !bytes.Contains(activateRec.Body.Bytes(), []byte("unsupported workflow process")) {
+		t.Fatalf("expected unsupported workflow error, got %s", activateRec.Body.String())
 	}
 }

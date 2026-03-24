@@ -10,6 +10,10 @@ describe("useTaskWorkspaceStore", () => {
       filters: createDefaultTaskWorkspaceFilters(),
       selectedTaskId: null,
       contextRailDisplay: "expanded",
+      displayOptions: {
+        density: "comfortable",
+        showDescriptions: true,
+      },
     });
   });
 
@@ -22,6 +26,7 @@ describe("useTaskWorkspaceStore", () => {
     store.setPriority("high");
     store.setAssigneeId("member-1");
     store.setPlanning("scheduled");
+    store.setDependency("blocked");
     store.selectTask("task-1");
     store.setContextRailDisplay("collapsed");
 
@@ -34,8 +39,32 @@ describe("useTaskWorkspaceStore", () => {
       priority: "high",
       assigneeId: "member-1",
       planning: "scheduled",
+      dependency: "blocked",
     });
     expect(state.selectedTaskId).toBe("task-1");
     expect(state.contextRailDisplay).toBe("collapsed");
+  });
+
+  it("supports dependencies view mode", () => {
+    const store = useTaskWorkspaceStore.getState();
+    store.setViewMode("dependencies");
+    expect(useTaskWorkspaceStore.getState().viewMode).toBe("dependencies");
+  });
+
+  it("tracks shared display options separately from filters", () => {
+    const store = useTaskWorkspaceStore.getState();
+
+    store.setDensity("compact");
+    store.setShowDescriptions(false);
+    store.setSearch("calendar");
+    store.resetFilters();
+
+    const state = useTaskWorkspaceStore.getState();
+
+    expect(state.filters).toEqual(createDefaultTaskWorkspaceFilters());
+    expect(state.displayOptions).toEqual({
+      density: "compact",
+      showDescriptions: false,
+    });
   });
 });

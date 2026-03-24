@@ -123,7 +123,6 @@ function emitCommandRuntimeEvent(
               req.model,
             );
 
-      const incrementalCost = Math.max(nextSpent - runtime.spentUsd, 0);
       runtime.spentUsd = nextSpent;
 
       streamer.send({
@@ -135,8 +134,9 @@ function emitCommandRuntimeEvent(
           input_tokens: inputTokens,
           output_tokens: outputTokens,
           cache_read_tokens: cacheReadTokens,
-          cost_usd: incrementalCost,
+          cost_usd: runtime.spentUsd,
           budget_remaining_usd: Math.max(req.budget_usd - runtime.spentUsd, 0),
+          turn_number: runtime.turnNumber,
         },
       });
       return;

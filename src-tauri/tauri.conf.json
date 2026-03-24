@@ -1,20 +1,23 @@
 {
   "$schema": "../node_modules/@tauri-apps/cli/config.schema.json",
-  "productName": "react-quick-starter",
+  "productName": "AgentForge",
   "version": "0.1.0",
-  "identifier": "com.reactquickstarter.desktop",
+  "identifier": "dev.agentforge.desktop",
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
     "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build:backend && pnpm build"
+    "beforeBuildCommand": "pnpm build:backend && pnpm build:bridge && pnpm build"
   },
   "app": {
     "windows": [
       {
-        "title": "react-quick-starter",
-        "width": 800,
-        "height": 600,
+        "label": "main",
+        "title": "AgentForge",
+        "width": 1440,
+        "height": 920,
+        "minWidth": 1200,
+        "minHeight": 760,
         "resizable": true,
         "fullscreen": false
       }
@@ -33,7 +36,10 @@
       "icons/icon.icns",
       "icons/icon.ico"
     ],
-    "externalBin": ["binaries/server"],
+    "externalBin": [
+      "binaries/server",
+      "binaries/bridge"
+    ],
     "windows": {
       "certificateThumbprint": null,
       "digestAlgorithm": "sha256",

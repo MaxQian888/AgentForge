@@ -40,6 +40,14 @@ func (m *reviewServiceMock) GetByTask(_ context.Context, _ uuid.UUID) ([]*model.
 	return m.reviews, nil
 }
 
+func (m *reviewServiceMock) Approve(_ context.Context, _ uuid.UUID, _ string) (*model.Review, error) {
+	return m.review, nil
+}
+
+func (m *reviewServiceMock) Reject(_ context.Context, _ uuid.UUID, _, _ string) (*model.Review, error) {
+	return m.review, nil
+}
+
 type reviewValidator struct {
 	validator *validator.Validate
 }

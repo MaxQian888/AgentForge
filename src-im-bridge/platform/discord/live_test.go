@@ -103,6 +103,9 @@ func TestLive_StartAcknowledgesInteractionBeforeDispatchAndSyncsCommands(t *test
 	if replyCtx.InteractionToken != "interaction-token" || replyCtx.ChannelID != "channel-1" {
 		t.Fatalf("ReplyCtx = %+v", replyCtx)
 	}
+	if gotMessage.ReplyTarget == nil || gotMessage.ReplyTarget.ChannelID != "channel-1" || gotMessage.ReplyTarget.InteractionToken != "interaction-token" {
+		t.Fatalf("ReplyTarget = %+v", gotMessage.ReplyTarget)
+	}
 }
 
 func TestLive_ReplyAndSendUseDiscordClients(t *testing.T) {

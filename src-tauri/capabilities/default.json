@@ -9,7 +9,13 @@
     "core:default",
     {
       "identifier": "shell:allow-execute",
-      "allow": [{ "name": "server", "sidecar": true }]
-    }
+      "allow": [
+        {
+          "name": "server",
+          "sidecar": true
+        }
+      ]
+    },
+    "dialog:default"
   ]
 }

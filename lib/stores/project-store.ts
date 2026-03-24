@@ -11,6 +11,9 @@ export interface Project {
   taskCount: number;
   agentCount: number;
   createdAt: string;
+  repoUrl?: string;
+  defaultBranch?: string;
+  slug?: string;
 }
 
 interface ProjectState {
@@ -20,9 +23,20 @@ interface ProjectState {
   fetchProjects: () => Promise<void>;
   setCurrentProject: (id: string) => void;
   createProject: (data: { name: string; description: string }) => Promise<void>;
+  updateProject: (id: string, data: Partial<Pick<Project, "name" | "description" | "repoUrl" | "defaultBranch">>) => Promise<void>;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
+
+function toProjectSlug(name: string) {
+  const normalized = name
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+
+  return normalized || "project";
+}
 
 export const useProjectStore = create<ProjectState>()((set, get) => ({
   projects: [],
@@ -53,9 +67,27 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
     const api = createApiClient(API_URL);
     const { data: project } = await api.post<Project>(
       "/api/v1/projects",
-      data,
+      {
+        ...data,
+        slug: toProjectSlug(data.name),
+      },
       { token }
     );
     set((s) => ({ projects: [...s.projects, project] }));
+  },
+
+  updateProject: async (id, data) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    const api = createApiClient(API_URL);
+    const { data: updated } = await api.put<Project>(
+      `/api/v1/projects/${id}`,
+      data,
+      { token }
+    );
+    set((s) => ({
+      projects: s.projects.map((p) => (p.id === id ? updated : p)),
+      currentProject: s.currentProject?.id === id ? updated : s.currentProject,
+    }));
   },
 }));

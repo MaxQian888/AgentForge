@@ -14,6 +14,8 @@ type Notification struct {
 	Body      string    `db:"body"`
 	Data      string    `db:"data"` // JSON string with extra context
 	IsRead    bool      `db:"is_read"`
+	Channel   string    `db:"channel"`
+	Sent      bool      `db:"sent"`
 	CreatedAt time.Time `db:"created_at"`
 }
 
@@ -31,6 +33,13 @@ const (
 	NotificationTypeTaskProgressRecovered = "task_progress_recovered"
 )
 
+const (
+	NotificationChannelInApp  = "in_app"
+	NotificationChannelFeishu = "feishu"
+	NotificationChannelSlack  = "slack"
+	NotificationChannelIM     = "im"
+)
+
 type NotificationDTO struct {
 	ID        string `json:"id"`
 	TargetID  string `json:"targetId"`
@@ -39,6 +48,8 @@ type NotificationDTO struct {
 	Body      string `json:"body"`
 	Data      string `json:"data"`
 	IsRead    bool   `json:"isRead"`
+	Channel   string `json:"channel"`
+	Sent      bool   `json:"sent"`
 	CreatedAt string `json:"createdAt"`
 }
 
@@ -51,6 +62,8 @@ func (n *Notification) ToDTO() NotificationDTO {
 		Body:      n.Body,
 		Data:      n.Data,
 		IsRead:    n.IsRead,
+		Channel:   n.Channel,
+		Sent:      n.Sent,
 		CreatedAt: n.CreatedAt.Format(time.RFC3339),
 	}
 }

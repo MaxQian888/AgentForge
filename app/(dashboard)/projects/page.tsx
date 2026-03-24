@@ -11,6 +11,7 @@ import { Label } from "@/components/ui/label";
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogHeader,
   DialogTitle,
   DialogTrigger,
@@ -42,6 +43,9 @@ function CreateProjectDialog() {
       <DialogContent>
         <DialogHeader>
           <DialogTitle>Create Project</DialogTitle>
+          <DialogDescription>
+            Set up the project name and purpose before tasks, members, and agents are attached.
+          </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">

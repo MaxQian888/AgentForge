@@ -69,6 +69,36 @@ func ValidateManifest(manifest *model.PluginManifest) error {
 			return fmt.Errorf("integration plugin runtime wasm requires spec.abiVersion")
 		}
 	}
+	if manifest.Kind == model.PluginKindWorkflow {
+		if manifest.Spec.Runtime == model.PluginRuntimeWASM {
+			if strings.TrimSpace(manifest.Spec.Module) == "" {
+				return fmt.Errorf("workflow plugin runtime wasm requires spec.module")
+			}
+			if strings.TrimSpace(manifest.Spec.ABIVersion) == "" {
+				return fmt.Errorf("workflow plugin runtime wasm requires spec.abiVersion")
+			}
+		}
+		if manifest.Spec.Workflow == nil {
+			return fmt.Errorf("workflow plugin requires spec.workflow")
+		}
+		if strings.TrimSpace(string(manifest.Spec.Workflow.Process)) == "" {
+			return fmt.Errorf("workflow plugin requires spec.workflow.process")
+		}
+		if len(manifest.Spec.Workflow.Steps) == 0 {
+			return fmt.Errorf("workflow plugin requires at least one workflow step")
+		}
+	}
+	if manifest.Kind == model.PluginKindReview {
+		if manifest.Spec.Review == nil {
+			return fmt.Errorf("review plugin requires spec.review")
+		}
+		if len(manifest.Spec.Review.Triggers.Events) == 0 {
+			return fmt.Errorf("review plugin requires at least one trigger event")
+		}
+		if strings.TrimSpace(manifest.Spec.Review.Output.Format) == "" {
+			return fmt.Errorf("review plugin requires spec.review.output.format")
+		}
+	}
 
 	return nil
 }
@@ -80,7 +110,7 @@ func isAllowedRuntime(kind model.PluginKind, runtime model.PluginRuntime) bool {
 	case model.PluginKindTool:
 		return runtime == model.PluginRuntimeMCP
 	case model.PluginKindWorkflow:
-		return runtime == model.PluginRuntimeGoPlugin
+		return runtime == model.PluginRuntimeWASM
 	case model.PluginKindIntegration:
 		return runtime == model.PluginRuntimeGoPlugin || runtime == model.PluginRuntimeWASM
 	case model.PluginKindReview:

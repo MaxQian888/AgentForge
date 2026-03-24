@@ -40,8 +40,12 @@ func registerTestRoutes(e *echo.Echo, cfg *config.Config, authSvc *service.AuthS
 		repository.NewAgentRunRepository(nil),
 		repository.NewNotificationRepository(nil),
 		repository.NewReviewRepository(nil),
+		repository.NewWorkflowRepository(nil),
+		repository.NewAgentTeamRepository(nil),
+		repository.NewAgentMemoryRepository(nil),
 		ws.NewHub(),
 		bridge.NewClient("http://localhost:7778"),
+		nil,
 		nil,
 	)
 }
@@ -209,6 +213,35 @@ func TestRegisterRoutes_PluginsWithoutAuth(t *testing.T) {
 
 	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusNotFound {
 		t.Errorf("GET /api/v1/plugins: expected 401 or 404, got %d", rec.Code)
+	}
+}
+
+func TestRegisterRoutes_PluginControlPlaneCompatibilityRoutesPresent(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	expected := map[string]struct{}{
+		http.MethodGet + " /api/v1/plugins/discover":      {},
+		http.MethodPut + " /api/v1/plugins/:id/enable":    {},
+		http.MethodPut + " /api/v1/plugins/:id/disable":   {},
+		http.MethodGet + " /api/v1/plugins/:id/events":    {},
+		http.MethodPost + " /api/v1/plugins/discover/builtin": {},
+		http.MethodPost + " /api/v1/plugins/:id/enable":   {},
+		http.MethodPost + " /api/v1/plugins/:id/disable":  {},
+	}
+
+	routes := e.Routes()
+	for _, route := range routes {
+		delete(expected, route.Method+" "+route.Path)
+	}
+
+	if len(expected) != 0 {
+		t.Fatalf("expected plugin compatibility routes to be registered, missing: %+v", expected)
 	}
 }
 

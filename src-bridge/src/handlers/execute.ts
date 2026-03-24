@@ -14,6 +14,7 @@ import {
   type ClaudeRuntimeDeps,
 } from "./claude-runtime.js";
 import type { CommandRuntimeRunner } from "./command-runtime.js";
+import type { ToolPluginManager } from "../plugins/tool-plugin-manager.js";
 
 function defaultSystemPrompt(taskId: string): string {
   return `You are a coding agent working on task ${taskId}. Follow best practices and write clean, well-tested code.`;
@@ -23,6 +24,7 @@ interface ExecuteDeps extends ClaudeRuntimeDeps, AgentRuntimeRegistryOptions {
   awaitCompletion?: boolean;
   commandRuntimeRunner?: CommandRuntimeRunner;
   runtimeRegistry?: AgentRuntimeRegistry;
+  pluginManager?: ToolPluginManager;
 }
 
 type EventSink = Pick<EventStreamer, "send">;
@@ -45,11 +47,22 @@ export async function handleExecute(
     });
   const { adapter, request } = runtimeRegistry.resolveExecute(req);
   const runtime = pool.acquire(request.task_id, request.session_id);
+  runtime.bindRequest(request);
 
   const systemPrompt = buildSystemPrompt(
     request.system_prompt || defaultSystemPrompt(request.task_id),
     request.role_config,
   );
+
+  // Resolve active MCP tool plugins for agent execution
+  if (deps.pluginManager) {
+    const toolPluginIds = request.role_config?.tools ?? [];
+    const allPlugins = deps.pluginManager.list();
+    const activePlugins = allPlugins.filter(
+      (p) => p.lifecycle_state === "active" && (toolPluginIds.length === 0 || toolPluginIds.includes(p.metadata.id)),
+    );
+    deps.activePlugins = activePlugins;
+  }
 
   streamer.send({
     task_id: request.task_id,
@@ -105,6 +118,13 @@ async function executeAgent(
     data: { old_status: "starting", new_status: "running" },
   });
 
+  // Auto session snapshots every 5 minutes
+  const autoSnapshotInterval = setInterval(() => {
+    if (runtime.status === "running") {
+      persistRuntimeSnapshot(runtime, req, streamer, deps.sessionManager, now);
+    }
+  }, 300_000);
+
   try {
     await adapter.execute(runtime, streamer, req, systemPrompt);
 
@@ -118,15 +138,54 @@ async function executeAgent(
       data: { old_status: "running", new_status: "completed", reason: "end_turn" },
     });
   } catch (err: unknown) {
-    runtime.status = "failed";
+    runtime.status = classifyTerminalStatus(runtime, err);
     const classified = classifyError(err);
+    if (runtime.status !== "paused") {
+      streamer.send({
+        task_id: req.task_id,
+        session_id: req.session_id,
+        timestamp_ms: now(),
+        type: "error",
+        data: classified,
+      });
+    }
+    persistRuntimeSnapshot(runtime, req, streamer, deps.sessionManager, now);
+    const reason =
+      runtime.status === "paused"
+        ? "user_requested_pause"
+        : runtime.status === "budget_exceeded"
+          ? "budget_exceeded"
+          : runtime.status === "cancelled"
+            ? "cancelled_by_user"
+            : "runtime_error";
     streamer.send({
       task_id: req.task_id,
       session_id: req.session_id,
       timestamp_ms: now(),
-      type: "error",
-      data: classified,
+      type: "status_change",
+      data: { old_status: "running", new_status: runtime.status, reason },
     });
-    persistRuntimeSnapshot(runtime, req, streamer, deps.sessionManager, now);
+  } finally {
+    clearInterval(autoSnapshotInterval);
   }
+}
+
+function classifyTerminalStatus(
+  runtime: AgentRuntime,
+  err: unknown,
+): AgentRuntime["status"] {
+  if (runtime.status === "paused") {
+    return "paused";
+  }
+
+  const reason = runtime.abortController.signal.reason;
+  const message = err instanceof Error ? err.message : String(err);
+
+  if (reason === "budget_exceeded" || message.includes("budget exceeded")) {
+    return "budget_exceeded";
+  }
+  if (reason === "cancelled_by_user") {
+    return "cancelled";
+  }
+  return "failed";
 }

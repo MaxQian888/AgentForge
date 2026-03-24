@@ -11,10 +11,11 @@ type CommandHandler func(p Platform, msg *Message, args string)
 
 // Engine routes incoming messages to command handlers or a fallback.
 type Engine struct {
-	mu       sync.RWMutex
-	commands map[string]CommandHandler
-	platform Platform
-	fallback func(p Platform, msg *Message)
+	mu          sync.RWMutex
+	commands    map[string]CommandHandler
+	platform    Platform
+	fallback    func(p Platform, msg *Message)
+	rateLimiter *RateLimiter
 }
 
 // NewEngine creates an engine bound to a specific platform.
@@ -23,6 +24,11 @@ func NewEngine(platform Platform) *Engine {
 		commands: make(map[string]CommandHandler),
 		platform: platform,
 	}
+}
+
+// SetRateLimiter sets the rate limiter for the engine.
+func (e *Engine) SetRateLimiter(rl *RateLimiter) {
+	e.rateLimiter = rl
 }
 
 // RegisterCommand registers a slash command handler (e.g. "/task").
@@ -40,6 +46,18 @@ func (e *Engine) SetFallback(handler func(p Platform, msg *Message)) {
 // HandleMessage routes a message to the appropriate handler.
 func (e *Engine) HandleMessage(p Platform, msg *Message) {
 	content := strings.TrimSpace(msg.Content)
+
+	// Rate limit check.
+	if e.rateLimiter != nil {
+		key := msg.SessionKey
+		if key == "" {
+			key = msg.Platform + ":" + msg.ChatID + ":" + msg.UserID
+		}
+		if !e.rateLimiter.Allow(key) {
+			_ = p.Reply(context.Background(), msg.ReplyCtx, "操作过于频繁，请稍后再试。")
+			return
+		}
+	}
 
 	// Check for slash commands.
 	if strings.HasPrefix(content, "/") {

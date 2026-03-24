@@ -2,7 +2,7 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
-import { Bot } from "lucide-react";
+import { Bot, Network } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import {
@@ -17,23 +17,60 @@ import { cn } from "@/lib/utils";
 import { useAgentStore, type AgentStatus } from "@/lib/stores/agent-store";
 
 const statusColors: Record<AgentStatus, string> = {
+  starting: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
   running: "bg-green-500/15 text-green-700 dark:text-green-400",
   paused: "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400",
   completed: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
   failed: "bg-red-500/15 text-red-700 dark:text-red-400",
-  killed: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400",
+  cancelled: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400",
+  budget_exceeded: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
 };
 
 export default function AgentsPage() {
-  const { agents, fetchAgents, loading } = useAgentStore();
+  const { agents, fetchAgents, fetchPool, pool, loading } = useAgentStore();
 
   useEffect(() => {
     fetchAgents();
-  }, [fetchAgents]);
+    fetchPool();
+  }, [fetchAgents, fetchPool]);
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold">Agent Monitor</h1>
+      <div className="flex items-center justify-between">
+        <h1 className="text-2xl font-bold">Agent Monitor</h1>
+        <Link
+          href="/teams"
+          className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
+        >
+          <Network className="size-4" />
+          Agent Teams
+        </Link>
+      </div>
+
+      {pool ? (
+        <div className="grid gap-4 sm:grid-cols-3">
+          <Card>
+            <CardContent className="py-4">
+              <p className="text-sm text-muted-foreground">Active Slots</p>
+              <p className="text-2xl font-bold">
+                {pool.active} / {pool.max}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <p className="text-sm text-muted-foreground">Available Slots</p>
+              <p className="text-2xl font-bold">{pool.available}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <p className="text-sm text-muted-foreground">Paused Sessions</p>
+              <p className="text-2xl font-bold">{pool.pausedResumable}</p>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
 
       {loading ? (
         <p className="text-muted-foreground">Loading agents...</p>

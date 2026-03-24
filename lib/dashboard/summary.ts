@@ -1,3 +1,10 @@
+import {
+  buildAgentProfileSummary,
+  getAgentProfileReadiness,
+  parseAgentProfile,
+  type AgentProfile,
+} from "@/lib/team/agent-profile";
+
 export type DashboardTaskStatus =
   | "inbox"
   | "triaged"
@@ -51,6 +58,7 @@ export interface DashboardMemberSource {
   role: string;
   email: string;
   avatarUrl?: string;
+  agentConfig?: string;
   skills: string[];
   isActive: boolean;
   createdAt: string;
@@ -87,6 +95,12 @@ export interface TeamMember {
   createdAt: string;
   lastActivityAt: string | null;
   workload: TeamMemberWorkload;
+  agentProfile?: AgentProfile | null;
+  roleBindingLabel?: string | null;
+  readinessState?: "ready" | "incomplete" | null;
+  readinessLabel?: string | null;
+  readinessMissing?: string[];
+  agentSummary?: string[];
 }
 
 export interface DashboardActivityItem {
@@ -177,6 +191,11 @@ function formatProgressReason(reason: string): string {
 }
 
 export function normalizeTeamMember(member: DashboardMemberSource): TeamMember {
+  const agentProfile =
+    member.type === "agent" ? parseAgentProfile(member.agentConfig) : null;
+  const readiness =
+    member.type === "agent" ? getAgentProfileReadiness(agentProfile) : null;
+
   return {
     id: member.id,
     projectId: member.projectId,
@@ -197,6 +216,16 @@ export function normalizeTeamMember(member: DashboardMemberSource): TeamMember {
       inReviewTasks: 0,
       activeAgentRuns: 0,
     },
+    agentProfile,
+    roleBindingLabel:
+      member.type === "agent"
+        ? agentProfile?.roleId || "Unbound role"
+        : null,
+    readinessState: readiness?.state ?? null,
+    readinessLabel: readiness?.label ?? null,
+    readinessMissing: readiness?.missing ?? [],
+    agentSummary:
+      member.type === "agent" ? buildAgentProfileSummary(agentProfile) : [],
   };
 }
 

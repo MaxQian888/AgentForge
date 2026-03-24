@@ -17,6 +17,14 @@ const helpText = `AgentForge IM 助手
 
   /agent list              — 查看 Agent 池状态
   /agent spawn <task-id>   — 为任务启动 Agent
+  /agent run <描述>        — 创建任务并自动启动 Agent
+  /agent logs <run-id>     — 查看 Agent 执行日志
+
+  /review <pr-url>         — 触发代码审查
+  /review status <id>      — 查看审查状态
+
+  /sprint status           — 查看当前 Sprint
+  /sprint burndown         — 查看燃尽图
 
   /cost                    — 查看费用统计
 

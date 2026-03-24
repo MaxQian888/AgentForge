@@ -159,14 +159,16 @@ describe("handleExecute", () => {
       "status_change",
       "output",
       "cost_update",
+      "cost_update",  // budget warning at 80% threshold
       "error",
       "snapshot",
+      "status_change",
     ]);
 
     expect(sessionManager.restore(request.task_id)).toMatchObject({
       task_id: request.task_id,
       session_id: request.session_id,
-      status: "failed",
+      status: "budget_exceeded",
     });
     expect(pool.get(request.task_id)).toBeUndefined();
   });

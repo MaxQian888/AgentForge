@@ -9,7 +9,6 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
@@ -54,7 +53,7 @@ func NewAuthService(userRepo UserRepository, cacheRepo CacheRepository, cfg *con
 func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) (*model.AuthResponse, error) {
 	// Check if email already exists
 	existing, err := s.userRepo.GetByEmail(ctx, req.Email)
-	if err != nil && !errors.Is(err, pgx.ErrNoRows) {
+	if err != nil && !errors.Is(err, repository.ErrNotFound) {
 		return nil, fmt.Errorf("check existing user: %w", err)
 	}
 	if existing != nil {
@@ -85,7 +84,7 @@ func (s *AuthService) Register(ctx context.Context, req *model.RegisterRequest) 
 func (s *AuthService) Login(ctx context.Context, req *model.LoginRequest) (*model.AuthResponse, error) {
 	user, err := s.userRepo.GetByEmail(ctx, req.Email)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrInvalidCredentials
 		}
 		return nil, fmt.Errorf("get user: %w", err)
@@ -128,7 +127,7 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*model.
 	}
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return nil, ErrInvalidToken
 		}
 		return nil, fmt.Errorf("get user: %w", err)
@@ -164,7 +163,7 @@ func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (model.
 
 	user, err := s.userRepo.GetByID(ctx, parsedID)
 	if err != nil {
-		if errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, repository.ErrNotFound) {
 			return model.UserDTO{}, ErrInvalidToken
 		}
 		return model.UserDTO{}, fmt.Errorf("get user: %w", err)

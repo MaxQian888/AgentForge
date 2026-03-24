@@ -1,15 +1,25 @@
 "use client";
 
-import { useMemo } from "react";
+import { useEffect, useMemo } from "react";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent } from "@/components/ui/card";
 import { TaskContextRail } from "./task-context-rail";
 import { TaskWorkspaceMain } from "./task-workspace-main";
 import {
   buildContextRailState,
   type TaskContextRailSelectionState,
 } from "@/lib/tasks/task-context-rail";
+import type { TeamMember } from "@/lib/dashboard/summary";
+import type { Agent } from "@/lib/stores/agent-store";
+import type { Sprint, SprintMetrics } from "@/lib/stores/sprint-store";
 import { filterTasksForWorkspace } from "@/lib/tasks/task-workspace";
+import { cn } from "@/lib/utils";
 import type { Notification } from "@/lib/stores/notification-store";
-import type { Task, TaskStatus } from "@/lib/stores/task-store";
+import type {
+  Task,
+  TaskDecompositionResult,
+  TaskStatus,
+} from "@/lib/stores/task-store";
 import { useTaskWorkspaceStore } from "@/lib/stores/task-workspace-store";
 
 interface ProjectTaskWorkspaceProps {
@@ -19,6 +29,11 @@ interface ProjectTaskWorkspaceProps {
   error: string | null;
   realtimeConnected: boolean;
   notifications: Notification[];
+  members: TeamMember[];
+  agents: Agent[];
+  sprints: Sprint[];
+  sprintMetrics: SprintMetrics | null;
+  sprintMetricsLoading: boolean;
   onRetry: () => void;
   onTaskOpen: (taskId: string) => void;
   onTaskStatusChange: (
@@ -30,6 +45,15 @@ interface ProjectTaskWorkspaceProps {
     changes: { plannedStartAt: string; plannedEndAt: string }
   ) => Promise<void> | void;
   onTaskSave: (taskId: string, data: Partial<Task>) => Promise<void> | void;
+  onTaskAssign: (
+    taskId: string,
+    assigneeId: string,
+    assigneeType: "human" | "agent"
+  ) => Promise<void> | void;
+  onTaskDecompose?: (
+    taskId: string
+  ) => Promise<TaskDecompositionResult | null> | TaskDecompositionResult | null | void;
+  onSprintFilterChange?: (sprintId: string | "all") => void;
 }
 
 export function ProjectTaskWorkspace({
@@ -39,19 +63,41 @@ export function ProjectTaskWorkspace({
   error,
   realtimeConnected,
   notifications,
+  members,
+  agents,
+  sprints,
+  sprintMetrics,
+  sprintMetricsLoading,
   onRetry,
   onTaskOpen,
   onTaskStatusChange,
   onTaskScheduleChange,
   onTaskSave,
+  onTaskAssign,
+  onTaskDecompose,
+  onSprintFilterChange,
 }: ProjectTaskWorkspaceProps) {
   const filters = useTaskWorkspaceStore((state) => state.filters);
   const selectedTaskId = useTaskWorkspaceStore((state) => state.selectedTaskId);
+  const selectTask = useTaskWorkspaceStore((state) => state.selectTask);
+  const resetFilters = useTaskWorkspaceStore((state) => state.resetFilters);
+  const contextRailDisplay = useTaskWorkspaceStore(
+    (state) => state.contextRailDisplay
+  );
+  const setContextRailDisplay = useTaskWorkspaceStore(
+    (state) => state.setContextRailDisplay
+  );
 
   const filteredTasks = useMemo(
     () => filterTasksForWorkspace(tasks, filters),
     [tasks, filters]
   );
+
+  useEffect(() => {
+    if (selectedTaskId && !tasks.some((task) => task.id === selectedTaskId)) {
+      selectTask(null);
+    }
+  }, [selectedTaskId, selectTask, tasks]);
 
   const rail = useMemo(
     () =>
@@ -61,30 +107,91 @@ export function ProjectTaskWorkspace({
         selectedTaskId,
         projectId,
         notifications,
+        agents,
       }),
-    [filteredTasks, notifications, projectId, selectedTaskId, tasks]
+    [agents, filteredTasks, notifications, projectId, selectedTaskId, tasks]
   );
 
   return (
-    <div className="grid gap-4 xl:grid-cols-[minmax(0,1fr)_360px]">
+    <div
+      className={cn(
+        "grid gap-4",
+        contextRailDisplay === "expanded"
+          ? "xl:grid-cols-[minmax(0,1fr)_360px]"
+          : "xl:grid-cols-[minmax(0,1fr)_120px]"
+      )}
+    >
       <TaskWorkspaceMain
         tasks={tasks}
+        sprints={sprints}
+        sprintMetrics={sprintMetrics}
+        sprintMetricsLoading={sprintMetricsLoading}
         loading={loading}
         error={error}
+        realtimeConnected={realtimeConnected}
         onRetry={onRetry}
         onTaskOpen={onTaskOpen}
         onTaskStatusChange={onTaskStatusChange}
         onTaskScheduleChange={onTaskScheduleChange}
+        onSprintFilterChange={onSprintFilterChange}
       />
-      <TaskContextRail
-        selectionState={rail.selectionState as TaskContextRailSelectionState}
-        selectedTask={rail.selectedTask}
-        counts={rail.counts}
-        alerts={rail.alerts}
-        realtimeState={realtimeConnected ? "live" : "degraded"}
-        onTaskSave={onTaskSave}
-        onTaskStatusChange={onTaskStatusChange}
-      />
+      {contextRailDisplay === "expanded" ? (
+        <div className="flex flex-col gap-3">
+          <div className="flex justify-end">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setContextRailDisplay("collapsed")}
+            >
+              Collapse context rail
+            </Button>
+          </div>
+          <TaskContextRail
+            selectionState={rail.selectionState as TaskContextRailSelectionState}
+            selectedTask={rail.selectedTask}
+            counts={rail.counts}
+            dependencySummary={rail.dependencySummary}
+            costSummary={rail.costSummary}
+            alerts={rail.alerts}
+            realtimeState={realtimeConnected ? "live" : "degraded"}
+            tasks={tasks}
+            members={members}
+            agents={agents}
+            sprints={sprints}
+            onTaskSave={onTaskSave}
+            onTaskAssign={onTaskAssign}
+            onTaskStatusChange={onTaskStatusChange}
+            onTaskDecompose={onTaskDecompose}
+            onResetFilters={resetFilters}
+          />
+        </div>
+      ) : (
+        <Card className="h-fit">
+          <CardContent className="flex flex-col gap-3 px-4 py-4">
+            <Button
+              type="button"
+              size="sm"
+              variant="outline"
+              onClick={() => setContextRailDisplay("expanded")}
+            >
+              Expand context rail
+            </Button>
+            <div className="text-xs text-muted-foreground">
+              {rail.selectedTask ? `Selected: ${rail.selectedTask.title}` : "No task selected"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {realtimeConnected ? "Realtime live" : "Realtime degraded"}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              Stalled {rail.counts.stalled}
+            </div>
+            <div className="text-xs text-muted-foreground">
+              {rail.alerts.length} recent alerts
+            </div>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

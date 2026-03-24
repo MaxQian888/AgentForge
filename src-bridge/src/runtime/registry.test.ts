@@ -19,6 +19,63 @@ function createRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteRequest 
 }
 
 describe("agent runtime registry", () => {
+  test("publishes runtime catalog metadata and readiness diagnostics", () => {
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        return command === "codex" ? "C:/mock/codex.exe" : null;
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "";
+          case "CLAUDE_CODE_RUNTIME_MODEL":
+            return "claude-sonnet-4-5";
+          case "CODEX_RUNTIME_MODEL":
+            return "gpt-5-codex";
+          case "OPENCODE_RUNTIME_MODEL":
+            return "opencode-default";
+          default:
+            return undefined;
+        }
+      },
+    });
+
+    const catalog = registry.getCatalog();
+    expect(catalog.defaultRuntime).toBe("claude_code");
+    expect(catalog.runtimes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "claude_code",
+          defaultProvider: "anthropic",
+          compatibleProviders: ["anthropic"],
+          defaultModel: "claude-sonnet-4-5",
+          available: false,
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({ code: "missing_credentials" }),
+          ]),
+        }),
+        expect.objectContaining({
+          key: "codex",
+          defaultProvider: "openai",
+          compatibleProviders: ["openai", "codex"],
+          defaultModel: "gpt-5-codex",
+          available: true,
+          diagnostics: [],
+        }),
+        expect.objectContaining({
+          key: "opencode",
+          defaultProvider: "opencode",
+          compatibleProviders: ["opencode"],
+          defaultModel: "opencode-default",
+          available: false,
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({ code: "missing_executable" }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
   test("uses injected env lookup for runtime defaults and command discovery", () => {
     const lookedUpCommands: string[] = [];
     const previousCodexCommand = process.env.CODEX_RUNTIME_COMMAND;
@@ -87,9 +144,26 @@ describe("agent runtime registry", () => {
       registry.resolveExecute(createRequest({ provider: "opencode" })).request.runtime,
     ).toBe("opencode");
     expect(
-      registry.resolveExecute(createRequest({ runtime: "codex", provider: "anthropic" })).request
+      registry.resolveExecute(createRequest({ runtime: "codex", provider: "openai" })).request
         .runtime,
     ).toBe("codex");
+  });
+
+  test("rejects explicit runtime/provider combinations that are incompatible", () => {
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        return `C:/mock/${command}.exe`;
+      },
+      envLookup() {
+        return "test-token";
+      },
+    });
+
+    expect(() =>
+      registry.resolveExecute(
+        createRequest({ runtime: "codex", provider: "anthropic", model: "gpt-5-codex" }),
+      ),
+    ).toThrow("Runtime codex is incompatible with provider anthropic");
   });
 
   test("rejects unknown runtime hints and missing runtime executables", () => {

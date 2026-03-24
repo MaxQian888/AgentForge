@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/agentforge/im-bridge/core"
@@ -19,6 +20,8 @@ type AgentForgeClient struct {
 	apiKey    string
 	client    *http.Client
 	imSource  string
+	bridgeID  string
+	replyTarget *core.ReplyTarget
 }
 
 // NewAgentForgeClient creates a new API client.
@@ -47,6 +50,28 @@ func (c *AgentForgeClient) WithPlatform(platform core.Platform) *AgentForgeClien
 	return c.WithSource(core.MetadataForPlatform(platform).Source)
 }
 
+// WithBridgeContext returns a shallow copy tagged with the runtime bridge id and
+// the current reply target for asynchronous progress delivery.
+func (c *AgentForgeClient) WithBridgeContext(bridgeID string, replyTarget *core.ReplyTarget) *AgentForgeClient {
+	clone := *c
+	if strings.TrimSpace(bridgeID) != "" {
+		clone.bridgeID = strings.TrimSpace(bridgeID)
+	}
+	if replyTarget != nil {
+		targetCopy := *replyTarget
+		if replyTarget.Metadata != nil {
+			targetCopy.Metadata = make(map[string]string, len(replyTarget.Metadata))
+			for key, value := range replyTarget.Metadata {
+				targetCopy.Metadata[key] = value
+			}
+		}
+		clone.replyTarget = &targetCopy
+	} else {
+		clone.replyTarget = nil
+	}
+	return &clone
+}
+
 // --- Task operations ---
 
 // CreateTask creates a new task via the AgentForge API.
@@ -57,7 +82,7 @@ func (c *AgentForgeClient) CreateTask(ctx context.Context, title, description st
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
 		return nil, c.readError(resp)
 	}
 	var task Task
@@ -133,7 +158,7 @@ func (c *AgentForgeClient) DecomposeTask(ctx context.Context, taskID string) (*T
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
 		return nil, c.readError(resp)
 	}
 	var result TaskDecompositionResponse
@@ -153,7 +178,7 @@ func (c *AgentForgeClient) SpawnAgent(ctx context.Context, taskID string) (*Task
 		return nil, err
 	}
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
 		return nil, c.readError(resp)
 	}
 	var result TaskDispatchResponse
@@ -216,6 +241,117 @@ func (c *AgentForgeClient) GetCostStats(ctx context.Context) (*CostStats, error)
 	return &stats, nil
 }
 
+// --- Review operations ---
+
+// TriggerReview triggers a code review for a PR URL.
+func (c *AgentForgeClient) TriggerReview(ctx context.Context, prURL string) (*Review, error) {
+	body := map[string]string{"prUrl": prURL, "projectId": c.projectID}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/reviews/trigger", body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, c.readError(resp)
+	}
+	var review Review
+	if err := json.NewDecoder(resp.Body).Decode(&review); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &review, nil
+}
+
+// GetReview retrieves a review by ID.
+func (c *AgentForgeClient) GetReview(ctx context.Context, reviewID string) (*Review, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/reviews/"+reviewID, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var review Review
+	if err := json.NewDecoder(resp.Body).Decode(&review); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &review, nil
+}
+
+// --- Sprint operations ---
+
+// GetCurrentSprint returns the active sprint for the project.
+func (c *AgentForgeClient) GetCurrentSprint(ctx context.Context) (*Sprint, error) {
+	path := fmt.Sprintf("/api/v1/projects/%s/sprints?status=active", c.projectID)
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var sprints []Sprint
+	if err := json.NewDecoder(resp.Body).Decode(&sprints); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	if len(sprints) == 0 {
+		return nil, fmt.Errorf("no active sprint found")
+	}
+	return &sprints[0], nil
+}
+
+// GetSprintBurndown returns burndown metrics for a sprint.
+func (c *AgentForgeClient) GetSprintBurndown(ctx context.Context, sprintID string) (*SprintMetrics, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/sprints/"+sprintID+"/burndown", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var metrics SprintMetrics
+	if err := json.NewDecoder(resp.Body).Decode(&metrics); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &metrics, nil
+}
+
+// --- Quick Agent Run ---
+
+// QuickAgentRun creates a task and spawns an agent in one step.
+func (c *AgentForgeClient) QuickAgentRun(ctx context.Context, prompt string) (*TaskDispatchResponse, error) {
+	// Step 1: create a task from the prompt.
+	task, err := c.CreateTask(ctx, prompt, prompt)
+	if err != nil {
+		return nil, fmt.Errorf("create task: %w", err)
+	}
+	// Step 2: spawn an agent for the task.
+	result, err := c.SpawnAgent(ctx, task.ID)
+	if err != nil {
+		return nil, fmt.Errorf("spawn agent: %w", err)
+	}
+	return result, nil
+}
+
+// GetAgentLogs retrieves recent log entries for an agent run.
+func (c *AgentForgeClient) GetAgentLogs(ctx context.Context, runID string) ([]AgentLogEntry, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/agents/"+runID+"/logs", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var logs []AgentLogEntry
+	if err := json.NewDecoder(resp.Body).Decode(&logs); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return logs, nil
+}
+
 // --- NLU ---
 
 // SendNLU sends a natural language message to the intent endpoint.
@@ -238,6 +374,75 @@ func (c *AgentForgeClient) SendNLU(ctx context.Context, text, userID string) (st
 	return result.Reply, nil
 }
 
+func (c *AgentForgeClient) RegisterBridge(ctx context.Context, req BridgeRegistration) (*BridgeInstance, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/im/bridge/register", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var instance BridgeInstance
+	if err := json.NewDecoder(resp.Body).Decode(&instance); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &instance, nil
+}
+
+func (c *AgentForgeClient) HeartbeatBridge(ctx context.Context, bridgeID string) (*BridgeHeartbeat, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/im/bridge/heartbeat", map[string]string{
+		"bridgeId": bridgeID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var heartbeat BridgeHeartbeat
+	if err := json.NewDecoder(resp.Body).Decode(&heartbeat); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &heartbeat, nil
+}
+
+func (c *AgentForgeClient) UnregisterBridge(ctx context.Context, bridgeID string) error {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/im/bridge/unregister", map[string]string{
+		"bridgeId": bridgeID,
+	})
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return c.readError(resp)
+	}
+	return nil
+}
+
+func (c *AgentForgeClient) BindActionContext(ctx context.Context, binding IMActionBinding) error {
+	if binding.Platform == "" {
+		binding.Platform = c.imSource
+	}
+	if binding.BridgeID == "" {
+		binding.BridgeID = c.bridgeID
+	}
+	if binding.ReplyTarget == nil {
+		binding.ReplyTarget = c.replyTarget
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/im/bridge/bind", binding)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return c.readError(resp)
+	}
+	return nil
+}
+
 // --- Helpers ---
 
 func (c *AgentForgeClient) doRequest(ctx context.Context, method, path string, body any) (*http.Response, error) {
@@ -256,6 +461,14 @@ func (c *AgentForgeClient) doRequest(ctx context.Context, method, path string, b
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Authorization", "Bearer "+c.apiKey)
 	req.Header.Set("X-IM-Source", c.imSource)
+	if c.bridgeID != "" {
+		req.Header.Set("X-IM-Bridge-ID", c.bridgeID)
+	}
+	if c.replyTarget != nil {
+		if encoded, err := json.Marshal(c.replyTarget); err == nil {
+			req.Header.Set("X-IM-Reply-Target", string(encoded))
+		}
+	}
 	return c.client.Do(req)
 }
 
@@ -333,4 +546,88 @@ type CostStats struct {
 	DailyUsd   float64 `json:"daily_usd"`
 	WeeklyUsd  float64 `json:"weekly_usd"`
 	MonthlyUsd float64 `json:"monthly_usd"`
+}
+
+// Review represents an AgentForge code review.
+type Review struct {
+	ID             string  `json:"id"`
+	TaskID         string  `json:"taskId"`
+	PRURL          string  `json:"prUrl"`
+	Status         string  `json:"status"`
+	RiskLevel      string  `json:"riskLevel"`
+	Summary        string  `json:"summary"`
+	Recommendation string  `json:"recommendation"`
+	CostUSD        float64 `json:"costUsd"`
+}
+
+// Sprint represents an AgentForge sprint.
+type Sprint struct {
+	ID             string  `json:"id"`
+	Name           string  `json:"name"`
+	StartDate      string  `json:"startDate"`
+	EndDate        string  `json:"endDate"`
+	Status         string  `json:"status"`
+	TotalBudgetUsd float64 `json:"totalBudgetUsd"`
+	SpentUsd       float64 `json:"spentUsd"`
+}
+
+// SprintMetrics represents burndown metrics for a sprint.
+type SprintMetrics struct {
+	Sprint          Sprint          `json:"sprint"`
+	PlannedTasks    int             `json:"plannedTasks"`
+	CompletedTasks  int             `json:"completedTasks"`
+	RemainingTasks  int             `json:"remainingTasks"`
+	CompletionRate  float64         `json:"completionRate"`
+	VelocityPerWeek float64        `json:"velocityPerWeek"`
+	Burndown        []BurndownPoint `json:"burndown"`
+}
+
+// BurndownPoint represents a single data point in a burndown chart.
+type BurndownPoint struct {
+	Date           string `json:"date"`
+	RemainingTasks int    `json:"remainingTasks"`
+	CompletedTasks int    `json:"completedTasks"`
+}
+
+// AgentLogEntry represents a single log entry from an agent run.
+type AgentLogEntry struct {
+	Timestamp string `json:"timestamp"`
+	Type      string `json:"type"`
+	Content   string `json:"content"`
+}
+
+type BridgeRegistration struct {
+	BridgeID      string            `json:"bridgeId"`
+	Platform      string            `json:"platform"`
+	Transport     string            `json:"transport"`
+	ProjectIDs    []string          `json:"projectIds,omitempty"`
+	Capabilities  map[string]bool   `json:"capabilities,omitempty"`
+	CallbackPaths []string          `json:"callbackPaths,omitempty"`
+	Metadata      map[string]string `json:"metadata,omitempty"`
+}
+
+type BridgeInstance struct {
+	BridgeID   string `json:"bridgeId"`
+	Platform   string `json:"platform"`
+	Transport  string `json:"transport"`
+	LastSeenAt string `json:"lastSeenAt"`
+	ExpiresAt  string `json:"expiresAt"`
+	Status     string `json:"status"`
+}
+
+type BridgeHeartbeat struct {
+	BridgeID   string `json:"bridgeId"`
+	LastSeenAt string `json:"lastSeenAt"`
+	ExpiresAt  string `json:"expiresAt"`
+	Status     string `json:"status"`
+}
+
+type IMActionBinding struct {
+	BridgeID    string            `json:"bridgeId"`
+	Platform    string            `json:"platform"`
+	ProjectID   string            `json:"projectId,omitempty"`
+	TaskID      string            `json:"taskId,omitempty"`
+	RunID       string            `json:"runId,omitempty"`
+	ReviewID    string            `json:"reviewId,omitempty"`
+	ReplyTarget *core.ReplyTarget `json:"replyTarget,omitempty"`
 }

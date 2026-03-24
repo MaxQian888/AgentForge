@@ -14,6 +14,8 @@ import (
 
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
+	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
+	"github.com/react-go-quick-starter/server/internal/pool"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/server"
@@ -86,6 +88,7 @@ func main() {
 	}
 
 	// Wire up dependencies
+	repoDB := repository.NewGormDBTX(db)
 	userRepo := repository.NewUserRepository(db)
 	cacheRepo := repository.NewCacheRepository(rdb)
 	authSvc := service.NewAuthService(userRepo, cacheRepo, cfg)
@@ -93,11 +96,14 @@ func main() {
 	projectRepo := repository.NewProjectRepository(db)
 	memberRepo := repository.NewMemberRepository(db)
 	sprintRepo := repository.NewSprintRepository(db)
-	taskRepo := repository.NewTaskRepository(db)
-	taskProgressRepo := repository.NewTaskProgressRepository(db)
-	agentRunRepo := repository.NewAgentRunRepository(db)
+	taskRepo := repository.NewTaskRepository(repoDB)
+	taskProgressRepo := repository.NewTaskProgressRepository(repoDB)
+	agentRunRepo := repository.NewAgentRunRepository(repoDB)
 	notifRepo := repository.NewNotificationRepository(db)
-	reviewRepo := repository.NewReviewRepository(db)
+	reviewRepo := repository.NewReviewRepository(repoDB)
+	workflowRepo := repository.NewWorkflowRepository(db)
+	teamRepo := repository.NewAgentTeamRepository(repoDB)
+	memoryRepo := repository.NewAgentMemoryRepository(repoDB)
 	hub := ws.NewHub()
 	go hub.Run()
 	bridgeClient := bridge.NewClient(cfg.BridgeURL)
@@ -105,11 +111,21 @@ func main() {
 	runStartupWorktreeSweep(cfg, worktreeMgr)
 	roleStore := role.NewFileStore(cfg.RolesDir)
 	agentSvc := service.NewAgentService(agentRunRepo, taskRepo, projectRepo, hub, bridgeClient, worktreeMgr, roleStore)
+	agentSvc.SetPool(pool.NewPool(cfg.MaxActiveAgents))
+	pluginSvc := service.NewPluginService(
+		repository.NewPluginRegistryRepository(repoDB),
+		bridgeClient,
+		pluginruntime.NewWASMRuntimeManager(),
+		cfg.PluginsDir,
+	).
+		WithInstanceStore(repository.NewPluginInstanceRepository(repoDB)).
+		WithEventStore(repository.NewPluginEventRepository(repoDB)).
+		WithBroadcaster(ws.NewPluginEventBroadcaster(hub))
 
 	// Create Echo instance and register routes
 	e := server.New(cfg, cacheRepo)
 	taskProgressSvc := server.RegisterRoutes(e, cfg, authSvc, cacheRepo,
-		projectRepo, memberRepo, sprintRepo, taskRepo, taskProgressRepo, agentRunRepo, notifRepo, reviewRepo, hub, bridgeClient, agentSvc,
+		projectRepo, memberRepo, sprintRepo, taskRepo, taskProgressRepo, agentRunRepo, notifRepo, reviewRepo, workflowRepo, teamRepo, memoryRepo, hub, bridgeClient, pluginSvc, agentSvc,
 	)
 	detectorCtx, detectorCancel := context.WithCancel(context.Background())
 	defer detectorCancel()
@@ -131,7 +147,9 @@ func main() {
 			slog.Error("server shutdown error", "error", err)
 		}
 		if db != nil {
-			db.Close()
+			if err := database.ClosePostgres(db); err != nil {
+				slog.Warn("postgres close error", "error", err)
+			}
 		}
 		if rdb != nil {
 			_ = rdb.Close()

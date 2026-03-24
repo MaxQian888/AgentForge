@@ -26,6 +26,38 @@ type PluginSourceType string
 const (
 	PluginSourceBuiltin PluginSourceType = "builtin"
 	PluginSourceLocal   PluginSourceType = "local"
+	PluginSourceGit     PluginSourceType = "git"
+	PluginSourceNPM     PluginSourceType = "npm"
+	PluginSourceCatalog PluginSourceType = "catalog"
+)
+
+type PluginTrustState string
+
+const (
+	PluginTrustUnknown   PluginTrustState = "unknown"
+	PluginTrustVerified  PluginTrustState = "verified"
+	PluginTrustUntrusted PluginTrustState = "untrusted"
+)
+
+type PluginApprovalState string
+
+const (
+	PluginApprovalNotRequired PluginApprovalState = "not-required"
+	PluginApprovalPending     PluginApprovalState = "pending"
+	PluginApprovalApproved    PluginApprovalState = "approved"
+	PluginApprovalRejected    PluginApprovalState = "rejected"
+)
+
+type PluginLifecycleOperation string
+
+const (
+	PluginOpInstall    PluginLifecycleOperation = "install"
+	PluginOpEnable     PluginLifecycleOperation = "enable"
+	PluginOpActivate   PluginLifecycleOperation = "activate"
+	PluginOpDeactivate PluginLifecycleOperation = "deactivate"
+	PluginOpDisable    PluginLifecycleOperation = "disable"
+	PluginOpUninstall  PluginLifecycleOperation = "uninstall"
+	PluginOpUpdate     PluginLifecycleOperation = "update"
 )
 
 type PluginLifecycleState string
@@ -64,17 +96,77 @@ type PluginMetadata struct {
 }
 
 type PluginSpec struct {
-	Runtime      PluginRuntime  `yaml:"runtime" json:"runtime"`
-	Transport    string         `yaml:"transport,omitempty" json:"transport,omitempty"`
-	Command      string         `yaml:"command,omitempty" json:"command,omitempty"`
-	Args         []string       `yaml:"args,omitempty" json:"args,omitempty"`
-	URL          string         `yaml:"url,omitempty" json:"url,omitempty"`
-	Binary       string         `yaml:"binary,omitempty" json:"binary,omitempty"`
-	Module       string         `yaml:"module,omitempty" json:"module,omitempty"`
-	ABIVersion   string         `yaml:"abiVersion,omitempty" json:"abiVersion,omitempty"`
-	Capabilities []string       `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
-	Config       map[string]any `yaml:"config,omitempty" json:"config,omitempty"`
-	Extra        map[string]any `yaml:",inline" json:"extra,omitempty"`
+	Runtime      PluginRuntime       `yaml:"runtime" json:"runtime"`
+	Transport    string              `yaml:"transport,omitempty" json:"transport,omitempty"`
+	Command      string              `yaml:"command,omitempty" json:"command,omitempty"`
+	Args         []string            `yaml:"args,omitempty" json:"args,omitempty"`
+	URL          string              `yaml:"url,omitempty" json:"url,omitempty"`
+	Binary       string              `yaml:"binary,omitempty" json:"binary,omitempty"`
+	Module       string              `yaml:"module,omitempty" json:"module,omitempty"`
+	ABIVersion   string              `yaml:"abiVersion,omitempty" json:"abiVersion,omitempty"`
+	Capabilities []string            `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	Config       map[string]any      `yaml:"config,omitempty" json:"config,omitempty"`
+	Workflow     *WorkflowPluginSpec `yaml:"workflow,omitempty" json:"workflow,omitempty"`
+	Review       *ReviewPluginSpec   `yaml:"review,omitempty" json:"review,omitempty"`
+	Extra        map[string]any      `yaml:",inline" json:"extra,omitempty"`
+}
+
+type WorkflowProcessMode string
+
+const (
+	WorkflowProcessSequential   WorkflowProcessMode = "sequential"
+	WorkflowProcessHierarchical WorkflowProcessMode = "hierarchical"
+	WorkflowProcessEventDriven  WorkflowProcessMode = "event-driven"
+)
+
+type WorkflowActionType string
+
+const (
+	WorkflowActionAgent  WorkflowActionType = "agent"
+	WorkflowActionReview WorkflowActionType = "review"
+	WorkflowActionTask   WorkflowActionType = "task"
+)
+
+type WorkflowPluginSpec struct {
+	Process  WorkflowProcessMode      `yaml:"process" json:"process"`
+	Roles    []WorkflowRoleBinding    `yaml:"roles,omitempty" json:"roles,omitempty"`
+	Steps    []WorkflowStepDefinition `yaml:"steps,omitempty" json:"steps,omitempty"`
+	Triggers []PluginWorkflowTrigger  `yaml:"triggers,omitempty" json:"triggers,omitempty"`
+	Limits   *WorkflowExecutionLimits `yaml:"limits,omitempty" json:"limits,omitempty"`
+}
+
+type WorkflowRoleBinding struct {
+	ID string `yaml:"id" json:"id"`
+}
+
+type WorkflowStepDefinition struct {
+	ID     string             `yaml:"id" json:"id"`
+	Role   string             `yaml:"role" json:"role"`
+	Action WorkflowActionType `yaml:"action" json:"action"`
+	Next   []string           `yaml:"next,omitempty" json:"next,omitempty"`
+}
+
+type PluginWorkflowTrigger struct {
+	Event string `yaml:"event,omitempty" json:"event,omitempty"`
+}
+
+type WorkflowExecutionLimits struct {
+	MaxRetries int `yaml:"maxRetries,omitempty" json:"maxRetries,omitempty"`
+}
+
+type ReviewPluginSpec struct {
+	Entrypoint string              `yaml:"entrypoint,omitempty" json:"entrypoint,omitempty"`
+	Triggers   ReviewPluginTrigger `yaml:"triggers" json:"triggers"`
+	Output     ReviewPluginOutput  `yaml:"output" json:"output"`
+}
+
+type ReviewPluginTrigger struct {
+	Events       []string `yaml:"events,omitempty" json:"events,omitempty"`
+	FilePatterns []string `yaml:"filePatterns,omitempty" json:"filePatterns,omitempty"`
+}
+
+type ReviewPluginOutput struct {
+	Format string `yaml:"format" json:"format"`
 }
 
 type PluginRuntimeMetadata struct {
@@ -98,24 +190,57 @@ type PluginFilesystemPermission struct {
 }
 
 type PluginSource struct {
-	Type PluginSourceType `yaml:"type,omitempty" json:"type"`
-	Path string           `yaml:"path,omitempty" json:"path,omitempty"`
+	Type       PluginSourceType       `yaml:"type,omitempty" json:"type"`
+	Path       string                 `yaml:"path,omitempty" json:"path,omitempty"`
+	Repository string                 `yaml:"repository,omitempty" json:"repository,omitempty"`
+	Ref        string                 `yaml:"ref,omitempty" json:"ref,omitempty"`
+	Package    string                 `yaml:"package,omitempty" json:"package,omitempty"`
+	Version    string                 `yaml:"version,omitempty" json:"version,omitempty"`
+	Registry   string                 `yaml:"registry,omitempty" json:"registry,omitempty"`
+	Catalog    string                 `yaml:"catalog,omitempty" json:"catalog,omitempty"`
+	Entry      string                 `yaml:"entry,omitempty" json:"entry,omitempty"`
+	Digest     string                 `yaml:"digest,omitempty" json:"digest,omitempty"`
+	Signature  string                 `yaml:"signature,omitempty" json:"signature,omitempty"`
+	Trust      *PluginTrustMetadata   `yaml:"trust,omitempty" json:"trust,omitempty"`
+	Release    *PluginReleaseMetadata `yaml:"release,omitempty" json:"release,omitempty"`
+}
+
+type PluginTrustMetadata struct {
+	Status        PluginTrustState    `yaml:"status,omitempty" json:"status,omitempty"`
+	ApprovalState PluginApprovalState `yaml:"approvalState,omitempty" json:"approvalState,omitempty"`
+	Source        string              `yaml:"source,omitempty" json:"source,omitempty"`
+	VerifiedAt    *time.Time          `yaml:"verifiedAt,omitempty" json:"verifiedAt,omitempty"`
+	ApprovedBy    string              `yaml:"approvedBy,omitempty" json:"approvedBy,omitempty"`
+	ApprovedAt    *time.Time          `yaml:"approvedAt,omitempty" json:"approvedAt,omitempty"`
+	Reason        string              `yaml:"reason,omitempty" json:"reason,omitempty"`
+}
+
+type PluginReleaseMetadata struct {
+	Version          string     `yaml:"version,omitempty" json:"version,omitempty"`
+	Channel          string     `yaml:"channel,omitempty" json:"channel,omitempty"`
+	Artifact         string     `yaml:"artifact,omitempty" json:"artifact,omitempty"`
+	NotesURL         string     `yaml:"notesUrl,omitempty" json:"notesUrl,omitempty"`
+	PublishedAt      *time.Time `yaml:"publishedAt,omitempty" json:"publishedAt,omitempty"`
+	AvailableVersion string     `yaml:"availableVersion,omitempty" json:"availableVersion,omitempty"`
 }
 
 type PluginRecord struct {
 	PluginManifest
-	LifecycleState     PluginLifecycleState   `json:"lifecycle_state"`
-	RuntimeHost        PluginRuntimeHost      `json:"runtime_host,omitempty"`
-	LastHealthAt       *time.Time             `json:"last_health_at,omitempty"`
-	LastError          string                 `json:"last_error,omitempty"`
-	RestartCount       int                    `json:"restart_count"`
-	ResolvedSourcePath string                 `json:"resolved_source_path,omitempty"`
-	RuntimeMetadata    *PluginRuntimeMetadata `json:"runtime_metadata,omitempty"`
+	LifecycleState     PluginLifecycleState    `json:"lifecycle_state"`
+	RuntimeHost        PluginRuntimeHost       `json:"runtime_host,omitempty"`
+	LastHealthAt       *time.Time              `json:"last_health_at,omitempty"`
+	LastError          string                  `json:"last_error,omitempty"`
+	RestartCount       int                     `json:"restart_count"`
+	ResolvedSourcePath string                  `json:"resolved_source_path,omitempty"`
+	RuntimeMetadata    *PluginRuntimeMetadata  `json:"runtime_metadata,omitempty"`
+	CurrentInstance    *PluginInstanceSnapshot `json:"current_instance,omitempty"`
 }
 
 type PluginFilter struct {
 	Kind           PluginKind
 	LifecycleState PluginLifecycleState
+	SourceType     PluginSourceType
+	TrustState     PluginTrustState
 }
 
 type PluginRuntimeStatus struct {
@@ -127,4 +252,76 @@ type PluginRuntimeStatus struct {
 	RestartCount       int                    `json:"restart_count"`
 	ResolvedSourcePath string                 `json:"resolved_source_path,omitempty"`
 	RuntimeMetadata    *PluginRuntimeMetadata `json:"runtime_metadata,omitempty"`
+}
+
+type PluginInstanceSnapshot struct {
+	PluginID           string                 `json:"plugin_id"`
+	ProjectID          string                 `json:"project_id,omitempty"`
+	RuntimeHost        PluginRuntimeHost      `json:"runtime_host"`
+	LifecycleState     PluginLifecycleState   `json:"lifecycle_state"`
+	ResolvedSourcePath string                 `json:"resolved_source_path,omitempty"`
+	RuntimeMetadata    *PluginRuntimeMetadata `json:"runtime_metadata,omitempty"`
+	RestartCount       int                    `json:"restart_count"`
+	LastHealthAt       *time.Time             `json:"last_health_at,omitempty"`
+	LastError          string                 `json:"last_error,omitempty"`
+	CreatedAt          time.Time              `json:"created_at,omitempty"`
+	UpdatedAt          time.Time              `json:"updated_at,omitempty"`
+}
+
+type PluginEventType string
+
+const (
+	PluginEventInstalled   PluginEventType = "installed"
+	PluginEventEnabled     PluginEventType = "enabled"
+	PluginEventDisabled    PluginEventType = "disabled"
+	PluginEventActivating  PluginEventType = "activating"
+	PluginEventActivated   PluginEventType = "activated"
+	PluginEventRuntimeSync PluginEventType = "runtime_sync"
+	PluginEventHealth      PluginEventType = "health"
+	PluginEventRestarted   PluginEventType = "restarted"
+	PluginEventInvoked     PluginEventType = "invoked"
+	PluginEventUninstalled PluginEventType = "uninstalled"
+	PluginEventFailed      PluginEventType = "failed"
+)
+
+type PluginEventSource string
+
+const (
+	PluginEventSourceControlPlane PluginEventSource = "control-plane"
+	PluginEventSourceTSBridge     PluginEventSource = "ts-bridge"
+	PluginEventSourceGoRuntime    PluginEventSource = "go-runtime"
+	PluginEventSourceOperator     PluginEventSource = "operator"
+)
+
+type PluginEventRecord struct {
+	ID             string               `json:"id"`
+	PluginID       string               `json:"plugin_id"`
+	EventType      PluginEventType      `json:"event_type"`
+	EventSource    PluginEventSource    `json:"event_source"`
+	LifecycleState PluginLifecycleState `json:"lifecycle_state,omitempty"`
+	Summary        string               `json:"summary,omitempty"`
+	Payload        map[string]any       `json:"payload,omitempty"`
+	CreatedAt      time.Time            `json:"created_at,omitempty"`
+}
+
+// UpdatePluginConfigRequest is the request body for updating plugin configuration.
+type UpdatePluginConfigRequest struct {
+	Config map[string]interface{} `json:"config" validate:"required"`
+}
+
+// MarketplacePluginDTO represents a plugin available in the marketplace.
+type MarketplacePluginDTO struct {
+	ID            string                 `json:"id"`
+	Name          string                 `json:"name"`
+	Description   string                 `json:"description"`
+	Version       string                 `json:"version"`
+	Author        string                 `json:"author"`
+	Kind          string                 `json:"kind"`
+	InstallURL    string                 `json:"installUrl"`
+	Installed     bool                   `json:"installed"`
+	SourceType    string                 `json:"sourceType,omitempty"`
+	Runtime       string                 `json:"runtime,omitempty"`
+	TrustStatus   PluginTrustState       `json:"trustStatus,omitempty"`
+	ApprovalState PluginApprovalState    `json:"approvalState,omitempty"`
+	Release       *PluginReleaseMetadata `json:"release,omitempty"`
 }

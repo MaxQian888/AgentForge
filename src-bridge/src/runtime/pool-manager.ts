@@ -35,6 +35,11 @@ export class RuntimePoolManager {
     return Array.from(this.runtimes.values()).map((r) => r.toStatus());
   }
 
+  /** Return all runtime objects (for graceful shutdown snapshot saving). */
+  listRuntimes(): AgentRuntime[] {
+    return Array.from(this.runtimes.values());
+  }
+
   stats(): { active: number; max: number } {
     return { active: this.runtimes.size, max: this.maxConcurrent };
   }

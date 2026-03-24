@@ -15,9 +15,13 @@ import (
 type AgentRuntimeService interface {
 	Spawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error)
 	ListActive(ctx context.Context) ([]*model.AgentRun, error)
+	ListSummaries(ctx context.Context) ([]model.AgentRunSummaryDTO, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.AgentRun, error)
+	GetSummary(ctx context.Context, id uuid.UUID) (*model.AgentRunSummaryDTO, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	Cancel(ctx context.Context, id uuid.UUID, reason string) error
+	PoolStats(ctx context.Context) model.AgentPoolStatsDTO
+	GetLogs(ctx context.Context, id uuid.UUID) ([]model.AgentLogEntry, error)
 }
 
 type AgentHandler struct {
@@ -45,6 +49,7 @@ type SpawnAgentRequest struct {
 	Provider string `json:"provider"`
 	Model    string `json:"model"`
 	RoleID   string `json:"roleId"`
+	MaxBudgetUsd float64 `json:"maxBudgetUsd"`
 }
 
 func (h *AgentHandler) Spawn(c echo.Context) error {
@@ -77,7 +82,7 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 			Provider:  req.Provider,
 			Model:     req.Model,
 			RoleID:    req.RoleID,
-			BudgetUSD: 0,
+			BudgetUSD: req.MaxBudgetUsd,
 		})
 		if err != nil {
 			switch {
@@ -100,10 +105,12 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid member ID"})
 	}
 
-	run, err := h.service.Spawn(c.Request().Context(), taskID, memberID, req.Runtime, req.Provider, req.Model, 0, req.RoleID)
+	run, err := h.service.Spawn(c.Request().Context(), taskID, memberID, req.Runtime, req.Provider, req.Model, req.MaxBudgetUsd, req.RoleID)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrAgentAlreadyRunning):
+			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
+		case errors.Is(err, service.ErrAgentPoolFull):
 			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
 		case errors.Is(err, service.ErrAgentWorktreeUnavailable):
 			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
@@ -116,19 +123,19 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 		}
 	}
 
+	summary, summaryErr := h.service.GetSummary(c.Request().Context(), run.ID)
+	if summaryErr == nil && summary != nil {
+		return c.JSON(http.StatusCreated, summary)
+	}
 	return c.JSON(http.StatusCreated, run.ToDTO())
 }
 
 func (h *AgentHandler) List(c echo.Context) error {
-	runs, err := h.service.ListActive(c.Request().Context())
+	runs, err := h.service.ListSummaries(c.Request().Context())
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list agent runs"})
 	}
-	dtos := make([]model.AgentRunDTO, 0, len(runs))
-	for _, r := range runs {
-		dtos = append(dtos, r.ToDTO())
-	}
-	return c.JSON(http.StatusOK, dtos)
+	return c.JSON(http.StatusOK, runs)
 }
 
 func (h *AgentHandler) Get(c echo.Context) error {
@@ -136,11 +143,15 @@ func (h *AgentHandler) Get(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid agent run ID"})
 	}
-	run, err := h.service.GetByID(c.Request().Context(), id)
+	run, err := h.service.GetSummary(c.Request().Context(), id)
 	if err != nil {
 		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "agent run not found"})
 	}
-	return c.JSON(http.StatusOK, run.ToDTO())
+	return c.JSON(http.StatusOK, run)
+}
+
+func (h *AgentHandler) Pool(c echo.Context) error {
+	return c.JSON(http.StatusOK, h.service.PoolStats(c.Request().Context()))
 }
 
 func (h *AgentHandler) Pause(c echo.Context) error {
@@ -172,7 +183,26 @@ func (h *AgentHandler) Kill(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch agent run"})
 	}
+	summary, summaryErr := h.service.GetSummary(c.Request().Context(), run.ID)
+	if summaryErr == nil && summary != nil {
+		return c.JSON(http.StatusOK, summary)
+	}
 	return c.JSON(http.StatusOK, run.ToDTO())
+}
+
+func (h *AgentHandler) Logs(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid agent run ID"})
+	}
+	logs, err := h.service.GetLogs(c.Request().Context(), id)
+	if err != nil {
+		if errors.Is(err, service.ErrAgentNotFound) {
+			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "agent run not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to get agent logs"})
+	}
+	return c.JSON(http.StatusOK, logs)
 }
 
 func (h *AgentHandler) updateStatus(c echo.Context, status string) error {
@@ -193,6 +223,10 @@ func (h *AgentHandler) updateStatus(c echo.Context, status string) error {
 	run, err := h.service.GetByID(c.Request().Context(), id)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch agent run"})
+	}
+	summary, summaryErr := h.service.GetSummary(c.Request().Context(), run.ID)
+	if summaryErr == nil && summary != nil {
+		return c.JSON(http.StatusOK, summary)
 	}
 	return c.JSON(http.StatusOK, run.ToDTO())
 }

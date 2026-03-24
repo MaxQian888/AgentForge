@@ -1,4 +1,5 @@
 export type AgentRuntimeKey = "claude_code" | "codex" | "opencode";
+export type DecomposeExecutionMode = "human" | "agent";
 
 /** Request from Go Orchestrator to execute an agent task. */
 export interface ExecuteRequest {
@@ -13,9 +14,16 @@ export interface ExecuteRequest {
   system_prompt: string;
   max_turns: number;
   budget_usd: number;
+  warn_threshold?: number;
   allowed_tools: string[];
   permission_mode: string;
   role_config?: RoleConfig;
+  team_id?: string;
+  team_role?: string;  // "planner" | "coder" | "reviewer"
+}
+
+export interface ResumeRequest {
+  task_id: string;
 }
 
 /** Request from Go Orchestrator to decompose an existing task. */
@@ -33,6 +41,7 @@ export interface DecomposeSubtask {
   title: string;
   description: string;
   priority: "critical" | "high" | "medium" | "low";
+  executionMode: DecomposeExecutionMode;
 }
 
 /** Structured decomposition result returned to Go. */
@@ -53,6 +62,12 @@ export interface RoleConfig {
   max_budget_usd: number;
   max_turns: number;
   permission_mode: string;
+  /** MCP Server plugin IDs this role should use. */
+  tools?: string[];
+  /** Knowledge content to inject into the system prompt. */
+  knowledge_context?: string;
+  /** Output filters to apply (e.g., "no_credentials", "no_pii"). */
+  output_filters?: string[];
 }
 
 /** Event envelope sent to Go Orchestrator via WebSocket. */
@@ -71,16 +86,60 @@ export type AgentEventType =
   | "status_change"
   | "cost_update"
   | "error"
-  | "snapshot";
+  | "snapshot"
+  | "heartbeat"
+  // PRD agent-prefixed aliases (Go can match either format)
+  | "agent.output"
+  | "agent.tool_call"
+  | "agent.tool_result"
+  | "agent.status"
+  | "agent.cost"
+  | "agent.error"
+  | "agent.snapshot"
+  // Plugin lifecycle & tool execution events
+  | "tool.status_change"
+  | "tool.call_log";
 
 /** Current status of an agent runtime. */
 export interface AgentStatus {
   task_id: string;
-  state: "idle" | "starting" | "running" | "paused" | "completed" | "failed";
+  state:
+    | "idle"
+    | "starting"
+    | "running"
+    | "paused"
+    | "completed"
+    | "failed"
+    | "cancelled"
+    | "budget_exceeded";
   turn_number: number;
   last_tool: string;
   last_activity_ms: number;
   spent_usd: number;
+  runtime: AgentRuntimeKey;
+  provider: string;
+  model: string;
+}
+
+export interface RuntimeDiagnostic {
+  code: "missing_credentials" | "missing_executable" | "incompatible_provider";
+  message: string;
+  blocking: boolean;
+}
+
+export interface RuntimeCatalogEntry {
+  key: AgentRuntimeKey;
+  label: string;
+  defaultProvider: string;
+  compatibleProviders: string[];
+  defaultModel?: string;
+  available: boolean;
+  diagnostics: RuntimeDiagnostic[];
+}
+
+export interface RuntimeCatalog {
+  defaultRuntime: AgentRuntimeKey;
+  runtimes: RuntimeCatalogEntry[];
 }
 
 /** Health check response. */
@@ -98,6 +157,7 @@ export interface CostUpdate {
   cache_read_tokens: number;
   cost_usd: number;
   budget_remaining_usd: number;
+  turn_number: number;
 }
 
 /** Cancel request from Go Orchestrator. */
@@ -115,4 +175,5 @@ export interface SessionSnapshot {
   spent_usd: number;
   created_at: number;
   updated_at: number;
+  request?: ExecuteRequest;
 }

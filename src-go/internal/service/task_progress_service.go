@@ -541,17 +541,27 @@ type HTTPTaskProgressIMNotifier struct {
 	endpoint     string
 	platform     string
 	targetChatID string
+	deliverySecret string
 }
 
-func NewHTTPTaskProgressIMNotifier(endpoint, platform, targetChatID string) *HTTPTaskProgressIMNotifier {
+type IMBoundProgressNotifier interface {
+	QueueBoundProgress(ctx context.Context, req IMBoundProgressRequest) (bool, error)
+}
+
+func NewHTTPTaskProgressIMNotifier(endpoint, platform, targetChatID string, deliverySecret ...string) *HTTPTaskProgressIMNotifier {
 	if strings.TrimSpace(endpoint) == "" || strings.TrimSpace(platform) == "" || strings.TrimSpace(targetChatID) == "" {
 		return nil
+	}
+	secret := ""
+	if len(deliverySecret) > 0 {
+		secret = strings.TrimSpace(deliverySecret[0])
 	}
 	return &HTTPTaskProgressIMNotifier{
 		client:       &http.Client{Timeout: 10 * time.Second},
 		endpoint:     strings.TrimRight(strings.TrimSpace(endpoint), "/"),
 		platform:     strings.TrimSpace(platform),
 		targetChatID: strings.TrimSpace(targetChatID),
+		deliverySecret: secret,
 	}
 }
 
@@ -582,6 +592,7 @@ func (n *HTTPTaskProgressIMNotifier) NotifyTaskProgress(ctx context.Context, tas
 		return fmt.Errorf("build im notify request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	applyCompatibilityDeliveryHeaders(req, "/im/notify", bodyBytes, n.deliverySecret)
 
 	resp, err := n.client.Do(req)
 	if err != nil {
@@ -593,4 +604,57 @@ func (n *HTTPTaskProgressIMNotifier) NotifyTaskProgress(ctx context.Context, tas
 		return fmt.Errorf("im notify returned status %d", resp.StatusCode)
 	}
 	return nil
+}
+
+type ControlPlaneTaskProgressIMNotifier struct {
+	control IMBoundProgressNotifier
+}
+
+func NewControlPlaneTaskProgressIMNotifier(control IMBoundProgressNotifier) *ControlPlaneTaskProgressIMNotifier {
+	if control == nil {
+		return nil
+	}
+	return &ControlPlaneTaskProgressIMNotifier{control: control}
+}
+
+func (n *ControlPlaneTaskProgressIMNotifier) NotifyTaskProgress(ctx context.Context, task *model.Task, snapshot *model.TaskProgressSnapshot, title, body string) error {
+	if n == nil || n.control == nil || task == nil || snapshot == nil {
+		return nil
+	}
+	_, err := n.control.QueueBoundProgress(ctx, IMBoundProgressRequest{
+		TaskID:  task.ID.String(),
+		Kind:    IMDeliveryKindProgress,
+		Content: fmt.Sprintf("%s\n%s\nTask: %s\nStatus: %s\nHealth: %s", title, body, task.Title, task.Status, snapshot.HealthStatus),
+	})
+	return err
+}
+
+type MultiTaskProgressIMNotifier struct {
+	notifiers []TaskProgressIMNotifier
+}
+
+func NewMultiTaskProgressIMNotifier(notifiers ...TaskProgressIMNotifier) *MultiTaskProgressIMNotifier {
+	filtered := make([]TaskProgressIMNotifier, 0, len(notifiers))
+	for _, notifier := range notifiers {
+		if notifier != nil {
+			filtered = append(filtered, notifier)
+		}
+	}
+	if len(filtered) == 0 {
+		return nil
+	}
+	return &MultiTaskProgressIMNotifier{notifiers: filtered}
+}
+
+func (n *MultiTaskProgressIMNotifier) NotifyTaskProgress(ctx context.Context, task *model.Task, snapshot *model.TaskProgressSnapshot, title, body string) error {
+	if n == nil {
+		return nil
+	}
+	var firstErr error
+	for _, notifier := range n.notifiers {
+		if err := notifier.NotifyTaskProgress(ctx, task, snapshot, title, body); err != nil && firstErr == nil {
+			firstErr = err
+		}
+	}
+	return firstErr
 }

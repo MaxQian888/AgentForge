@@ -134,6 +134,17 @@ func (l *Live) Name() string { return "slack-live" }
 
 func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
 
+func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
+	if target == nil {
+		return nil
+	}
+	return replyContext{
+		ChannelID:   firstNonEmpty(target.ChannelID, target.ChatID),
+		ThreadTS:    target.ThreadID,
+		ResponseURL: target.ResponseURL,
+	}
+}
+
 func (l *Live) Start(handler core.MessageHandler) error {
 	if handler == nil {
 		return errors.New("message handler is required")
@@ -397,6 +408,13 @@ func normalizeSlashCommand(command *goslack.SlashCommand) *core.Message {
 			ChannelID:   command.ChannelID,
 			ResponseURL: command.ResponseURL,
 		},
+		ReplyTarget: &core.ReplyTarget{
+			Platform:    liveMetadata.Source,
+			ChatID:      command.ChannelID,
+			ChannelID:   command.ChannelID,
+			ResponseURL: command.ResponseURL,
+			UseReply:    true,
+		},
 		Timestamp: time.Now(),
 		IsGroup:   !isDirectSlackChannel(command.ChannelID),
 	}
@@ -419,6 +437,13 @@ func normalizeEventsAPI(eventsAPI *slackevents.EventsAPIEvent) (*core.Message, e
 				ChannelID: event.Channel,
 				ThreadTS:  event.ThreadTimeStamp,
 			},
+			ReplyTarget: &core.ReplyTarget{
+				Platform:  liveMetadata.Source,
+				ChatID:    event.Channel,
+				ChannelID: event.Channel,
+				ThreadID:  event.ThreadTimeStamp,
+				UseReply:  true,
+			},
 			Timestamp: parseSlackTimestamp(event.TimeStamp),
 			IsGroup:   true,
 		}, nil
@@ -435,6 +460,13 @@ func normalizeEventsAPI(eventsAPI *slackevents.EventsAPIEvent) (*core.Message, e
 			ReplyCtx: replyContext{
 				ChannelID: event.Channel,
 				ThreadTS:  event.ThreadTimeStamp,
+			},
+			ReplyTarget: &core.ReplyTarget{
+				Platform:  liveMetadata.Source,
+				ChatID:    event.Channel,
+				ChannelID: event.Channel,
+				ThreadID:  event.ThreadTimeStamp,
+				UseReply:  true,
 			},
 			Timestamp: parseSlackTimestamp(event.TimeStamp),
 			IsGroup:   event.ChannelType != "im",
@@ -554,6 +586,15 @@ func parseSlackTimestamp(raw string) time.Time {
 
 func isDirectSlackChannel(channelID string) bool {
 	return strings.HasPrefix(channelID, "D")
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }
 
 func normalizeButtonStyle(style string) goslack.Style {

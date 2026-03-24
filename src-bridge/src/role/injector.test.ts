@@ -30,4 +30,18 @@ describe("role injector", () => {
     expect(filterTools(["Read", "Edit", "Bash"], roleConfig)).toEqual(["Read", "Bash"]);
     expect(filterTools(["Read", "Edit"], undefined)).toEqual(["Read", "Edit"]);
   });
+
+  test("injects knowledge_context into system prompt when present", () => {
+    const roleWithKnowledge = {
+      ...roleConfig,
+      knowledge_context: "This project uses TypeScript strict mode.",
+    };
+    const prompt = buildSystemPrompt("Base prompt", roleWithKnowledge);
+    expect(prompt).toContain("## Knowledge Context\nThis project uses TypeScript strict mode.");
+  });
+
+  test("omits knowledge_context section when not set", () => {
+    const prompt = buildSystemPrompt("Base prompt", roleConfig);
+    expect(prompt).not.toContain("Knowledge Context");
+  });
 });

@@ -32,9 +32,10 @@ type BridgeDecomposeRequest struct {
 }
 
 type BridgeDecomposeSubtask struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Priority    string `json:"priority"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	Priority      string `json:"priority"`
+	ExecutionMode string `json:"executionMode"`
 }
 
 type BridgeDecomposeResponse struct {
@@ -96,7 +97,7 @@ func (s *TaskDecompositionService) Decompose(ctx context.Context, taskID uuid.UU
 			Title:       strings.TrimSpace(subtask.Title),
 			Description: strings.TrimSpace(subtask.Description),
 			Priority:    normalizeTaskPriority(subtask.Priority, normalizeTaskPriority(parent.Priority, "medium")),
-			Labels:      append([]string(nil), parent.Labels...),
+			Labels:      withExecutionModeLabel(parent.Labels, subtask.ExecutionMode),
 			BudgetUSD:   0,
 		})
 	}
@@ -128,6 +129,9 @@ func validateTaskDecomposition(result *BridgeDecomposeResponse) error {
 		if strings.TrimSpace(subtask.Title) == "" || strings.TrimSpace(subtask.Description) == "" {
 			return ErrInvalidTaskDecomposition
 		}
+		if normalizeExecutionMode(subtask.ExecutionMode) == "" {
+			return ErrInvalidTaskDecomposition
+		}
 	}
 	return nil
 }
@@ -150,4 +154,32 @@ func normalizeTaskPriority(priority string, fallback string) string {
 			return "medium"
 		}
 	}
+}
+
+func normalizeExecutionMode(mode string) string {
+	switch strings.ToLower(strings.TrimSpace(mode)) {
+	case "agent":
+		return "agent"
+	case "human":
+		return "human"
+	default:
+		return ""
+	}
+}
+
+func withExecutionModeLabel(labels []string, mode string) []string {
+	result := make([]string, 0, len(labels)+1)
+	for _, label := range labels {
+		if strings.HasPrefix(label, "execution:") {
+			continue
+		}
+		result = append(result, label)
+	}
+
+	normalizedMode := normalizeExecutionMode(mode)
+	if normalizedMode != "" {
+		result = append(result, "execution:"+normalizedMode)
+	}
+
+	return result
 }

@@ -24,3 +24,15 @@ type CardSender interface {
 type MessageUpdater interface {
 	UpdateMessage(ctx context.Context, replyCtx any, content string) error
 }
+
+// ReplyTargetResolver converts a serialized reply target back into the
+// platform-specific reply context needed by Reply/UpdateMessage.
+type ReplyTargetResolver interface {
+	ReplyContextFromTarget(target *ReplyTarget) any
+}
+
+// TypingIndicator is an optional interface for platforms that support typing indicators.
+type TypingIndicator interface {
+	StartTyping(ctx context.Context, chatID string) error
+	StopTyping(ctx context.Context, chatID string) error
+}

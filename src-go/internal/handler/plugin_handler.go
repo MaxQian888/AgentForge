@@ -2,6 +2,7 @@ package handler
 
 import (
 	"net/http"
+	"strconv"
 
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -43,6 +44,8 @@ func (h *PluginHandler) List(c echo.Context) error {
 	records, err := h.service.List(c.Request().Context(), service.PluginListFilter{
 		Kind:           model.PluginKind(c.QueryParam("kind")),
 		LifecycleState: model.PluginLifecycleState(c.QueryParam("state")),
+		SourceType:     model.PluginSourceType(c.QueryParam("source")),
+		TrustState:     model.PluginTrustState(c.QueryParam("trust")),
 	})
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
@@ -111,6 +114,58 @@ func (h *PluginHandler) Invoke(c echo.Context) error {
 		"operation": req.Operation,
 		"result":    result,
 	})
+}
+
+func (h *PluginHandler) Uninstall(c echo.Context) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "plugin id required"})
+	}
+	if err := h.service.Uninstall(c.Request().Context(), id); err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "plugin uninstalled"})
+}
+
+func (h *PluginHandler) UpdateConfig(c echo.Context) error {
+	id := c.Param("id")
+	if id == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "plugin id required"})
+	}
+	req := new(model.UpdatePluginConfigRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+	rec, err := h.service.UpdateConfig(c.Request().Context(), id, req.Config)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, rec)
+}
+
+func (h *PluginHandler) Marketplace(c echo.Context) error {
+	plugins, err := h.service.ListMarketplace(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list marketplace"})
+	}
+	return c.JSON(http.StatusOK, plugins)
+}
+
+func (h *PluginHandler) ListEvents(c echo.Context) error {
+	limit := 20
+	if raw := c.QueryParam("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "limit must be a positive integer"})
+		}
+		limit = parsed
+	}
+
+	events, err := h.service.ListEvents(c.Request().Context(), c.Param("id"), limit)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, events)
 }
 
 func (h *PluginHandler) SyncRuntimeState(c echo.Context) error {

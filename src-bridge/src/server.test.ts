@@ -39,11 +39,13 @@ describe("bridge decompose route", () => {
             title: "Add bridge decompose route",
             description: "Create request and response schemas for bridge decomposition.",
             priority: "high",
+            executionMode: "agent",
           },
           {
             title: "Wire Go task API",
             description: "Call the bridge and persist the generated child tasks.",
             priority: "medium",
+            executionMode: "human",
           },
         ],
       }),
@@ -63,11 +65,13 @@ describe("bridge decompose route", () => {
           title: "Add bridge decompose route",
           description: "Create request and response schemas for bridge decomposition.",
           priority: "high",
+          executionMode: "agent",
         },
         {
           title: "Wire Go task API",
           description: "Call the bridge and persist the generated child tasks.",
           priority: "medium",
+          executionMode: "human",
         },
       ],
     });
@@ -131,6 +135,7 @@ describe("bridge decompose route", () => {
               title: "",
               description: "Missing title should fail output validation.",
               priority: "urgent",
+              executionMode: "agent",
             },
           ],
         }) as never,
@@ -150,6 +155,47 @@ describe("bridge decompose route", () => {
 });
 
 describe("bridge execute route", () => {
+  test("exposes runtime catalog metadata and readiness diagnostics", async () => {
+    const app = createApp({
+      executableLookup(command) {
+        return command === "codex" ? "C:/mock/codex.exe" : null;
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "";
+          case "CLAUDE_CODE_RUNTIME_MODEL":
+            return "claude-sonnet-4-5";
+          case "CODEX_RUNTIME_MODEL":
+            return "gpt-5-codex";
+          default:
+            return undefined;
+        }
+      },
+    });
+
+    const response = await app.request("/bridge/runtimes");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      default_runtime: "claude_code",
+      runtimes: expect.arrayContaining([
+        expect.objectContaining({
+          key: "claude_code",
+          default_provider: "anthropic",
+          compatible_providers: ["anthropic"],
+          available: false,
+        }),
+        expect.objectContaining({
+          key: "codex",
+          default_provider: "openai",
+          compatible_providers: ["openai", "codex"],
+          available: true,
+        }),
+      ]),
+    });
+  });
+
   test("persists continuity state when the execute route runs to completion", async () => {
     const sessionManager = new SessionManager();
     const app = createApp({
@@ -267,6 +313,8 @@ describe("bridge execute route", () => {
     expect(await runningStatusResponse.json()).toMatchObject({
       task_id: "task-456",
       state: "running",
+      runtime: "claude_code",
+      provider: "anthropic",
     });
 
     const healthWhileRunning = await app.request("/bridge/health");
@@ -294,7 +342,7 @@ describe("bridge execute route", () => {
     expect(sessionManager.restore("task-456")).toMatchObject({
       task_id: "task-456",
       session_id: "session-456",
-      status: "failed",
+      status: "cancelled",
     });
     expect(events).toContain("error");
     expect(events).toContain("snapshot");
@@ -360,6 +408,50 @@ describe("bridge execute route", () => {
       error: "Provider openai does not support agent_execution",
     });
     expect(pool.get("task-unsupported")).toBeUndefined();
+  });
+
+  test("rejects explicit runtime and provider combinations before runtime acquisition", async () => {
+    const pool = new RuntimePoolManager(1);
+    const app = createApp({
+      pool,
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+      executableLookup(command) {
+        return `C:/mock/${command}.exe`;
+      },
+      envLookup() {
+        return "test-token";
+      },
+    });
+
+    const response = await app.request("/bridge/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-incompatible-runtime-provider",
+        session_id: "session-incompatible-runtime-provider",
+        runtime: "codex",
+        provider: "anthropic",
+        model: "gpt-5-codex",
+        prompt: "Run with an incompatible runtime/provider pair.",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-incompatible-runtime-provider",
+        system_prompt: "",
+        max_turns: 8,
+        budget_usd: 2,
+        allowed_tools: ["Read"],
+        permission_mode: "default",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "Runtime codex is incompatible with provider anthropic",
+    });
+    expect(pool.get("task-incompatible-runtime-provider")).toBeUndefined();
   });
 
   test("returns a configuration error when claude_code credentials are missing", async () => {
@@ -445,6 +537,112 @@ describe("bridge execute route", () => {
         process.env.ANTHROPIC_API_KEY = previousApiKey;
       }
     }
+  });
+
+  test("pauses a runtime into a resumable snapshot and resumes it with the persisted request", async () => {
+    const pool = new RuntimePoolManager(1);
+    const sessionManager = new SessionManager();
+    const executedPrompts: string[] = [];
+
+    const app = createApp({
+      pool,
+      sessionManager,
+      queryRunner: async function* ({ prompt, options }) {
+        executedPrompts.push(prompt);
+        const abortController = options?.abortController as AbortController | undefined;
+
+        yield {
+          type: "assistant",
+          session_id: "session-pause",
+          message: {
+            content: [{ type: "text", text: `Working on ${prompt}` }],
+          },
+        };
+
+        while (!abortController?.signal.aborted) {
+          await Bun.sleep(5);
+        }
+
+        if (abortController.signal.reason === "paused_by_user") {
+          throw new Error("paused by user");
+        }
+
+        yield {
+          type: "result",
+          session_id: "session-pause",
+          subtype: "success",
+          result: "Resumed successfully",
+          stop_reason: "end_turn",
+          total_cost_usd: 0.02,
+          usage: {
+            input_tokens: 50,
+            output_tokens: 25,
+            cache_read_input_tokens: 0,
+          },
+        };
+      },
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+    });
+
+    const executeResponse = await app.request("/bridge/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-pause",
+        session_id: "session-pause",
+        prompt: "Pause and resume the runtime",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-pause",
+        system_prompt: "",
+        max_turns: 8,
+        budget_usd: 2,
+        allowed_tools: ["Read"],
+        permission_mode: "default",
+      }),
+    });
+
+    expect(executeResponse.status).toBe(200);
+
+    const pauseResponse = await app.request("/bridge/pause", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-pause",
+        reason: "user requested pause",
+      }),
+    });
+
+    expect(pauseResponse.status).toBe(200);
+    expect(await pauseResponse.json()).toEqual({
+      success: true,
+      session_id: "session-pause",
+      status: "paused",
+    });
+
+    await waitFor(() => sessionManager.restore("task-pause")?.status === "paused");
+    expect(pool.get("task-pause")).toBeUndefined();
+
+    const resumeResponse = await app.request("/bridge/resume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-pause",
+      }),
+    });
+
+    expect(resumeResponse.status).toBe(200);
+    expect(await resumeResponse.json()).toEqual({
+      session_id: "session-pause",
+      resumed: true,
+    });
+    expect(executedPrompts).toEqual([
+      "Pause and resume the runtime",
+      "Pause and resume the runtime",
+    ]);
   });
 });
 

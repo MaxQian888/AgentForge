@@ -29,6 +29,8 @@ const taskColumns = `tasks.id, tasks.project_id, tasks.parent_id, tasks.sprint_i
 func scanTask(row interface{ Scan(dest ...any) error }) (*model.Task, error) {
 	t := &model.Task{}
 	var (
+		assigneeType       *string
+		blockedByIDs       []uuid.UUID
 		lastActivityAt     *time.Time
 		lastActivitySource *string
 		lastTransitionAt   *time.Time
@@ -43,13 +45,22 @@ func scanTask(row interface{ Scan(dest ...any) error }) (*model.Task, error) {
 	)
 	err := row.Scan(
 		&t.ID, &t.ProjectID, &t.ParentID, &t.SprintID, &t.Title, &t.Description,
-		&t.Status, &t.Priority, &t.AssigneeID, &t.AssigneeType, &t.ReporterID,
+		&t.Status, &t.Priority, &t.AssigneeID, &assigneeType, &t.ReporterID,
 		&t.Labels, &t.BudgetUsd, &t.SpentUsd, &t.AgentBranch, &t.AgentWorktree,
-		&t.AgentSessionID, &t.PRUrl, &t.PRNumber, &t.BlockedBy, &t.PlannedStartAt, &t.PlannedEndAt,
+		&t.AgentSessionID, &t.PRUrl, &t.PRNumber, &blockedByIDs, &t.PlannedStartAt, &t.PlannedEndAt,
 		&t.CreatedAt, &t.UpdatedAt, &t.CompletedAt,
 		&lastActivityAt, &lastActivitySource, &lastTransitionAt, &healthStatus, &riskReason,
 		&riskSinceAt, &lastAlertState, &lastAlertAt, &lastRecoveredAt, &progressCreatedAt, &progressUpdatedAt,
 	)
+	if err == nil {
+		if assigneeType != nil {
+			t.AssigneeType = *assigneeType
+		}
+		t.BlockedBy = make([]string, 0, len(blockedByIDs))
+		for _, id := range blockedByIDs {
+			t.BlockedBy = append(t.BlockedBy, id.String())
+		}
+	}
 	if err == nil && lastActivityAt != nil && lastActivitySource != nil && lastTransitionAt != nil && healthStatus != nil && riskReason != nil && lastAlertState != nil && progressCreatedAt != nil && progressUpdatedAt != nil {
 		t.Progress = &model.TaskProgressSnapshot{
 			TaskID:             t.ID,
@@ -73,6 +84,10 @@ func (r *TaskRepository) Create(ctx context.Context, task *model.Task) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
+	blockedByIDs, err := normalizeTaskBlockedBy(task.BlockedBy)
+	if err != nil {
+		return fmt.Errorf("create task: %w", err)
+	}
 	query := `
 		INSERT INTO tasks (id, project_id, parent_id, sprint_id, title, description, status, priority,
 			assignee_id, assignee_type, reporter_id, labels, budget_usd, spent_usd,
@@ -80,11 +95,11 @@ func (r *TaskRepository) Create(ctx context.Context, task *model.Task) error {
 			blocked_by, planned_start_at, planned_end_at, created_at, updated_at, completed_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW(),NOW(),$23)
 	`
-	_, err := r.db.Exec(ctx, query,
+	_, err = r.db.Exec(ctx, query,
 		task.ID, task.ProjectID, task.ParentID, task.SprintID, task.Title, task.Description,
-		task.Status, task.Priority, task.AssigneeID, task.AssigneeType, task.ReporterID,
+		task.Status, task.Priority, task.AssigneeID, nullableString(task.AssigneeType), task.ReporterID,
 		task.Labels, task.BudgetUsd, task.SpentUsd, task.AgentBranch, task.AgentWorktree,
-		task.AgentSessionID, task.PRUrl, task.PRNumber, task.BlockedBy, task.PlannedStartAt, task.PlannedEndAt, task.CompletedAt,
+		task.AgentSessionID, task.PRUrl, task.PRNumber, blockedByIDs, task.PlannedStartAt, task.PlannedEndAt, task.CompletedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create task: %w", err)
@@ -201,26 +216,76 @@ func (r *TaskRepository) List(ctx context.Context, projectID uuid.UUID, q model.
 	return tasks, total, rows.Err()
 }
 
+func (r *TaskRepository) ListBySprint(ctx context.Context, projectID uuid.UUID, sprintID uuid.UUID) ([]*model.Task, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	query := `SELECT ` + taskColumns + ` FROM tasks
+		LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id
+		WHERE tasks.project_id = $1 AND tasks.sprint_id = $2
+		ORDER BY tasks.created_at ASC`
+	rows, err := r.db.Query(ctx, query, projectID, sprintID)
+	if err != nil {
+		return nil, fmt.Errorf("list sprint tasks: %w", err)
+	}
+	defer rows.Close()
+
+	tasks := make([]*model.Task, 0)
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan sprint task: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
 func (r *TaskRepository) Update(ctx context.Context, id uuid.UUID, req *model.UpdateTaskRequest) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
+	}
+	blockedByIDs, err := normalizeOptionalTaskBlockedBy(req.BlockedBy)
+	if err != nil {
+		return fmt.Errorf("update task: %w", err)
 	}
 	query := `UPDATE tasks SET
 		title = COALESCE($1, title),
 		description = COALESCE($2, description),
 		priority = COALESCE($3, priority),
 		budget_usd = COALESCE($4, budget_usd),
-		planned_start_at = CASE
-			WHEN $5::text IS NULL THEN planned_start_at
-			ELSE NULLIF($5::text, '')::timestamptz
+		sprint_id = CASE
+			WHEN $5::text IS NULL THEN sprint_id
+			ELSE NULLIF($5::text, '')::uuid
 		END,
-		planned_end_at = CASE
-			WHEN $6::text IS NULL THEN planned_end_at
+		planned_start_at = CASE
+			WHEN $6::text IS NULL THEN planned_start_at
 			ELSE NULLIF($6::text, '')::timestamptz
 		END,
+		planned_end_at = CASE
+			WHEN $7::text IS NULL THEN planned_end_at
+			ELSE NULLIF($7::text, '')::timestamptz
+		END,
+		blocked_by = CASE
+			WHEN $8::uuid[] IS NULL THEN blocked_by
+			ELSE $8::uuid[]
+		END,
 		updated_at = NOW()
-		WHERE id = $7`
-	_, err := r.db.Exec(ctx, query, req.Title, req.Description, req.Priority, req.BudgetUsd, req.PlannedStartAt, req.PlannedEndAt, id)
+		WHERE id = $9`
+	_, err = r.db.Exec(
+		ctx,
+		query,
+		req.Title,
+		req.Description,
+		req.Priority,
+		req.BudgetUsd,
+		req.SprintID,
+		req.PlannedStartAt,
+		req.PlannedEndAt,
+		blockedByIDs,
+		id,
+	)
 	if err != nil {
 		return fmt.Errorf("update task: %w", err)
 	}
@@ -309,6 +374,25 @@ func (r *TaskRepository) ClearRuntime(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func (r *TaskRepository) UpdateSpent(ctx context.Context, id uuid.UUID, spentUsd float64, status string) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	query := `UPDATE tasks SET
+		spent_usd = $1,
+		status = CASE
+			WHEN $2 = '' THEN status
+			ELSE $2
+		END,
+		updated_at = NOW()
+		WHERE id = $3`
+	_, err := r.db.Exec(ctx, query, spentUsd, status, id)
+	if err != nil {
+		return fmt.Errorf("update task spent: %w", err)
+	}
+	return nil
+}
+
 func (r *TaskRepository) ListOpenForProgress(ctx context.Context) ([]*model.Task, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
@@ -344,6 +428,32 @@ func (r *TaskRepository) HasChildren(ctx context.Context, parentID uuid.UUID) (b
 		return false, fmt.Errorf("count child tasks: %w", err)
 	}
 	return count > 0, nil
+}
+
+func (r *TaskRepository) ListDependents(ctx context.Context, blockerID uuid.UUID) ([]*model.Task, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	query := `SELECT ` + taskColumns + ` FROM tasks
+		LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id
+		WHERE $1 = ANY(tasks.blocked_by)
+		ORDER BY tasks.updated_at DESC`
+	rows, err := r.db.Query(ctx, query, blockerID)
+	if err != nil {
+		return nil, fmt.Errorf("list dependents: %w", err)
+	}
+	defer rows.Close()
+
+	dependents := make([]*model.Task, 0)
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan dependent task: %w", err)
+		}
+		dependents = append(dependents, task)
+	}
+	return dependents, rows.Err()
 }
 
 func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.TaskChildInput) ([]*model.Task, error) {
@@ -401,12 +511,16 @@ func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.Task
 			BudgetUsd:   input.BudgetUSD,
 			BlockedBy:   []string{},
 		}
+		blockedByIDs, err := normalizeTaskBlockedBy(task.BlockedBy)
+		if err != nil {
+			return nil, fmt.Errorf("create child task: %w", err)
+		}
 
-		_, err := executor.Exec(ctx, query,
+		_, err = executor.Exec(ctx, query,
 			task.ID, task.ProjectID, task.ParentID, task.SprintID, task.Title, task.Description,
-			task.Status, task.Priority, task.AssigneeID, task.AssigneeType, task.ReporterID,
+			task.Status, task.Priority, task.AssigneeID, nullableString(task.AssigneeType), task.ReporterID,
 			task.Labels, task.BudgetUsd, task.SpentUsd, task.AgentBranch, task.AgentWorktree,
-			task.AgentSessionID, task.PRUrl, task.PRNumber, task.BlockedBy, task.PlannedStartAt, task.PlannedEndAt, task.CompletedAt,
+			task.AgentSessionID, task.PRUrl, task.PRNumber, blockedByIDs, task.PlannedStartAt, task.PlannedEndAt, task.CompletedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("create child task: %w", err)
@@ -422,4 +536,76 @@ func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.Task
 	}
 
 	return created, nil
+}
+
+func nullableString(value string) any {
+	if strings.TrimSpace(value) == "" {
+		return nil
+	}
+	return value
+}
+
+func normalizeOptionalTaskBlockedBy(blockedBy *[]string) (any, error) {
+	if blockedBy == nil {
+		return nil, nil
+	}
+	return normalizeTaskBlockedBy(*blockedBy)
+}
+
+// TaskDateCount holds a count for a specific date.
+type TaskDateCount struct {
+	Date  time.Time
+	Count int
+}
+
+func (r *TaskRepository) CountCompletedByDateRange(ctx context.Context, from, to time.Time, projectID *uuid.UUID) ([]TaskDateCount, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	query := `SELECT COALESCE(completed_at, updated_at)::date AS d, COUNT(*) AS cnt
+		FROM tasks
+		WHERE status = 'done'
+		AND COALESCE(completed_at, updated_at) BETWEEN $1 AND $2`
+	args := []interface{}{from, to}
+	if projectID != nil {
+		query += ` AND project_id = $3`
+		args = append(args, *projectID)
+	}
+	query += ` GROUP BY d ORDER BY d`
+
+	rows, err := r.db.Query(ctx, query, args...)
+	if err != nil {
+		return nil, fmt.Errorf("count completed by date range: %w", err)
+	}
+	defer rows.Close()
+
+	var results []TaskDateCount
+	for rows.Next() {
+		var tc TaskDateCount
+		if err := rows.Scan(&tc.Date, &tc.Count); err != nil {
+			return nil, fmt.Errorf("scan task date count: %w", err)
+		}
+		results = append(results, tc)
+	}
+	return results, rows.Err()
+}
+
+func normalizeTaskBlockedBy(blockedBy []string) ([]uuid.UUID, error) {
+	if len(blockedBy) == 0 {
+		return []uuid.UUID{}, nil
+	}
+
+	ids := make([]uuid.UUID, 0, len(blockedBy))
+	for _, rawID := range blockedBy {
+		trimmed := strings.TrimSpace(rawID)
+		if trimmed == "" {
+			return nil, fmt.Errorf("blockedBy contains an empty task id")
+		}
+		parsedID, err := uuid.Parse(trimmed)
+		if err != nil {
+			return nil, fmt.Errorf("blockedBy contains an invalid task id %q: %w", rawID, err)
+		}
+		ids = append(ids, parsedID)
+	}
+	return ids, nil
 }

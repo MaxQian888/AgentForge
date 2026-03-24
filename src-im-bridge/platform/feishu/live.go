@@ -132,6 +132,16 @@ func (l *Live) Name() string { return "feishu-live" }
 
 func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
 
+func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
+	if target == nil {
+		return nil
+	}
+	return replyContext{
+		MessageID: strings.TrimSpace(target.MessageID),
+		ChatID:    firstNonEmpty(target.ChatID, target.ChannelID),
+	}
+}
+
 func (l *Live) HTTPCallbackHandler() http.Handler { return l.callbackHTTP }
 
 func (l *Live) Start(handler core.MessageHandler) error {
@@ -337,6 +347,13 @@ func normalizeIncomingMessage(event *larkim.P2MessageReceiveV1) (*core.Message, 
 			MessageID: value(message.MessageId),
 			ChatID:    chatID,
 		},
+		ReplyTarget: &core.ReplyTarget{
+			Platform:  liveMetadata.Source,
+			ChatID:    chatID,
+			ChannelID: chatID,
+			MessageID: value(message.MessageId),
+			UseReply:  true,
+		},
 		Timestamp: parseUnixMillis(value(message.CreateTime)),
 		IsGroup:   value(message.ChatType) != "p2p",
 	}, nil
@@ -521,4 +538,13 @@ func value(raw *string) string {
 		return ""
 	}
 	return *raw
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

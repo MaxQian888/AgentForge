@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense } from "react";
+import { useEffect } from "react";
 import { useSearchParams, useRouter } from "next/navigation";
 import { Pause, Play, Skull } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -21,8 +22,16 @@ function AgentView() {
   const outputs = useAgentStore((s) =>
     agentId ? s.agentOutputs.get(agentId) ?? [] : []
   );
+  const fetchAgent = useAgentStore((s) => s.fetchAgent);
   const pauseAgent = useAgentStore((s) => s.pauseAgent);
+  const resumeAgent = useAgentStore((s) => s.resumeAgent);
   const killAgent = useAgentStore((s) => s.killAgent);
+
+  useEffect(() => {
+    if (agentId) {
+      void fetchAgent(agentId);
+    }
+  }, [agentId, fetchAgent]);
 
   if (!agentId) {
     router.replace("/agents");
@@ -58,7 +67,7 @@ function AgentView() {
             </Button>
           )}
           {agent.status === "paused" && (
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={() => resumeAgent(agent.id)}>
               <Play className="mr-1 size-4" />
               Resume
             </Button>

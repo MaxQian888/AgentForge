@@ -159,6 +159,8 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 		switch {
 		case errors.Is(err, ErrAgentAlreadyRunning):
 			return s.blockedResult(ctx, task, "task already has an active agent run"), nil
+		case errors.Is(err, ErrAgentPoolFull):
+			return s.blockedResult(ctx, task, "agent pool is at capacity"), nil
 		case errors.Is(err, ErrAgentWorktreeUnavailable):
 			return s.blockedResult(ctx, task, "agent dispatch is blocked by worktree availability"), nil
 		default:

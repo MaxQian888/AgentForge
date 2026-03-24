@@ -9,6 +9,7 @@ const tasks: Task[] = [
   {
     id: "task-1",
     projectId: "project-1",
+    sprintId: "sprint-1",
     title: "Implement timeline view",
     description: "Build the horizontal planning lane.",
     status: "in_progress",
@@ -17,7 +18,12 @@ const tasks: Task[] = [
     assigneeType: "human",
     assigneeName: "Alice",
     cost: 2.5,
+    budgetUsd: 6,
     spentUsd: 2.5,
+    agentBranch: "",
+    agentWorktree: "",
+    agentSessionId: "",
+    blockedBy: [],
     plannedStartAt: "2026-03-25T09:00:00.000Z",
     plannedEndAt: "2026-03-27T18:00:00.000Z",
     createdAt: "2026-03-24T09:00:00.000Z",
@@ -26,6 +32,7 @@ const tasks: Task[] = [
   {
     id: "task-2",
     projectId: "project-1",
+    sprintId: "sprint-2",
     title: "Calendar polish",
     description: "Keep unscheduled tasks visible.",
     status: "triaged",
@@ -34,7 +41,12 @@ const tasks: Task[] = [
     assigneeType: null,
     assigneeName: null,
     cost: null,
+    budgetUsd: 0,
     spentUsd: 0,
+    agentBranch: "",
+    agentWorktree: "",
+    agentSessionId: "",
+    blockedBy: ["task-1"],
     plannedStartAt: null,
     plannedEndAt: null,
     createdAt: "2026-03-24T10:00:00.000Z",
@@ -47,6 +59,24 @@ describe("task workspace helpers", () => {
     const filters = createDefaultTaskWorkspaceFilters();
     filters.search = "calendar";
     filters.planning = "unscheduled";
+
+    expect(filterTasksForWorkspace(tasks, filters)).toEqual([
+      expect.objectContaining({ id: "task-2" }),
+    ]);
+  });
+
+  it("can focus the workspace on blocked tasks only", () => {
+    const filters = createDefaultTaskWorkspaceFilters();
+    filters.dependency = "blocked";
+
+    expect(filterTasksForWorkspace(tasks, filters)).toEqual([
+      expect.objectContaining({ id: "task-2" }),
+    ]);
+  });
+
+  it("can scope the workspace to a single sprint", () => {
+    const filters = createDefaultTaskWorkspaceFilters();
+    filters.sprintId = "sprint-2";
 
     expect(filterTasksForWorkspace(tasks, filters)).toEqual([
       expect.objectContaining({ id: "task-2" }),

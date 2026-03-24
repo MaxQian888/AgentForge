@@ -6,13 +6,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"gorm.io/gorm"
 )
 
 type ProjectRepository struct {
-	db DBTX
+	db *gorm.DB
 }
 
-func NewProjectRepository(db DBTX) *ProjectRepository {
+func NewProjectRepository(db *gorm.DB) *ProjectRepository {
 	return &ProjectRepository{db: db}
 }
 
@@ -20,13 +21,7 @@ func (r *ProjectRepository) Create(ctx context.Context, project *model.Project) 
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	query := `
-		INSERT INTO projects (id, name, slug, description, repo_url, default_branch, settings, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-	`
-	_, err := r.db.Exec(ctx, query, project.ID, project.Name, project.Slug, project.Description,
-		project.RepoURL, project.DefaultBranch, project.Settings)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Create(newProjectRecord(project)).Error; err != nil {
 		return fmt.Errorf("create project: %w", err)
 	}
 	return nil
@@ -36,73 +31,94 @@ func (r *ProjectRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.P
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT id, name, slug, description, repo_url, default_branch, settings, created_at, updated_at
-		FROM projects WHERE id = $1`
-	p := &model.Project{}
-	err := r.db.QueryRow(ctx, query, id).Scan(
-		&p.ID, &p.Name, &p.Slug, &p.Description, &p.RepoURL, &p.DefaultBranch,
-		&p.Settings, &p.CreatedAt, &p.UpdatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("get project by id: %w", err)
+
+	var record projectRecord
+	if err := r.db.WithContext(ctx).Where("id = ?", id).Take(&record).Error; err != nil {
+		return nil, fmt.Errorf("get project by id: %w", normalizeRepositoryError(err))
 	}
-	return p, nil
+	return record.toModel(), nil
 }
 
 func (r *ProjectRepository) GetBySlug(ctx context.Context, slug string) (*model.Project, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT id, name, slug, description, repo_url, default_branch, settings, created_at, updated_at
-		FROM projects WHERE slug = $1`
-	p := &model.Project{}
-	err := r.db.QueryRow(ctx, query, slug).Scan(
-		&p.ID, &p.Name, &p.Slug, &p.Description, &p.RepoURL, &p.DefaultBranch,
-		&p.Settings, &p.CreatedAt, &p.UpdatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("get project by slug: %w", err)
+
+	var record projectRecord
+	if err := r.db.WithContext(ctx).Where("slug = ?", slug).Take(&record).Error; err != nil {
+		return nil, fmt.Errorf("get project by slug: %w", normalizeRepositoryError(err))
 	}
-	return p, nil
+	return record.toModel(), nil
 }
 
 func (r *ProjectRepository) List(ctx context.Context) ([]*model.Project, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT id, name, slug, description, repo_url, default_branch, settings, created_at, updated_at
-		FROM projects ORDER BY created_at DESC`
-	rows, err := r.db.Query(ctx, query)
-	if err != nil {
+
+	var records []projectRecord
+	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
-	defer rows.Close()
 
-	var projects []*model.Project
-	for rows.Next() {
-		p := &model.Project{}
-		if err := rows.Scan(&p.ID, &p.Name, &p.Slug, &p.Description, &p.RepoURL,
-			&p.DefaultBranch, &p.Settings, &p.CreatedAt, &p.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan project: %w", err)
-		}
-		projects = append(projects, p)
+	projects := make([]*model.Project, 0, len(records))
+	for i := range records {
+		projects = append(projects, records[i].toModel())
 	}
-	return projects, rows.Err()
+	return projects, nil
 }
 
 func (r *ProjectRepository) Update(ctx context.Context, id uuid.UUID, req *model.UpdateProjectRequest) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	query := `UPDATE projects SET
-		name = COALESCE($1, name),
-		description = COALESCE($2, description),
-		repo_url = COALESCE($3, repo_url),
-		updated_at = NOW()
-		WHERE id = $4`
-	_, err := r.db.Exec(ctx, query, req.Name, req.Description, req.RepoURL, id)
+
+	project, err := r.GetByID(ctx, id)
 	if err != nil {
+		return err
+	}
+	settingsJSON, err := model.MergeProjectSettings(project.Settings, req.Settings)
+	if err != nil {
+		return fmt.Errorf("merge project settings: %w", err)
+	}
+
+	updates := map[string]any{
+		"settings": newJSONText(settingsJSON, "{}"),
+	}
+	if req.Name != nil {
+		updates["name"] = *req.Name
+	}
+	if req.Description != nil {
+		updates["description"] = *req.Description
+	}
+	if req.RepoURL != nil {
+		updates["repo_url"] = *req.RepoURL
+	}
+	if req.DefaultBranch != nil {
+		updates["default_branch"] = *req.DefaultBranch
+	}
+
+	if err := r.db.WithContext(ctx).
+		Model(&projectRecord{}).
+		Where("id = ?", id).
+		Updates(updates).
+		Error; err != nil {
 		return fmt.Errorf("update project: %w", err)
+	}
+	return nil
+}
+
+func (r *ProjectRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+
+	result := r.db.WithContext(ctx).Delete(&projectRecord{}, "id = ?", id)
+	if result.Error != nil {
+		return fmt.Errorf("delete project: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("delete project: %w", ErrNotFound)
 	}
 	return nil
 }

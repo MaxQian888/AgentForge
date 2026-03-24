@@ -1,20 +1,27 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 type MemberHandler struct {
-	repo *repository.MemberRepository
+	repo memberRepository
 }
 
-func NewMemberHandler(repo *repository.MemberRepository) *MemberHandler {
+type memberRepository interface {
+	Create(ctx context.Context, member *model.Member) error
+	ListByProject(ctx context.Context, projectID uuid.UUID) ([]*model.Member, error)
+	Update(ctx context.Context, id uuid.UUID, req *model.UpdateMemberRequest) error
+	GetByID(ctx context.Context, id uuid.UUID) (*model.Member, error)
+}
+
+func NewMemberHandler(repo memberRepository) *MemberHandler {
 	return &MemberHandler{repo: repo}
 }
 

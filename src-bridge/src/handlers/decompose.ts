@@ -20,9 +20,10 @@ export type DecomposeTaskExecutor = (
 export function buildDecompositionPrompt(req: DecomposeTaskRequest): string {
   return [
     "You are decomposing an engineering task into implementation-ready subtasks.",
-    "Return valid JSON only with this shape: {\"summary\": string, \"subtasks\": [{\"title\": string, \"description\": string, \"priority\": \"critical\"|\"high\"|\"medium\"|\"low\"}]}",
+    "Return valid JSON only with this shape: {\"summary\": string, \"subtasks\": [{\"title\": string, \"description\": string, \"priority\": \"critical\"|\"high\"|\"medium\"|\"low\", \"executionMode\": \"human\"|\"agent\"}]}",
     "Return a concise summary and a small ordered list of subtasks.",
-    "Each subtask must have a title, description, and one priority from critical/high/medium/low.",
+    "Each subtask must have a title, description, one priority from critical/high/medium/low, and one executionMode of human or agent.",
+    "Use executionMode=agent for repetitive, well-bounded implementation work. Use executionMode=human for tasks that need architecture judgment, product coordination, security review, or stakeholder decisions.",
     `Task ID: ${req.task_id}`,
     `Title: ${req.title}`,
     `Priority: ${req.priority}`,

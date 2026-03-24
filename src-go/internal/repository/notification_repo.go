@@ -6,28 +6,22 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"gorm.io/gorm"
 )
 
 type NotificationRepository struct {
-	db DBTX
+	db *gorm.DB
 }
 
-func NewNotificationRepository(db DBTX) *NotificationRepository {
+func NewNotificationRepository(db *gorm.DB) *NotificationRepository {
 	return &NotificationRepository{db: db}
 }
-
-const notificationColumns = `id, target_id, type, title, body, data, is_read, created_at`
 
 func (r *NotificationRepository) Create(ctx context.Context, n *model.Notification) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	query := `
-		INSERT INTO notifications (id, target_id, type, title, body, data, is_read, created_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
-	`
-	_, err := r.db.Exec(ctx, query, n.ID, n.TargetID, n.Type, n.Title, n.Body, n.Data, n.IsRead)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Create(newNotificationRecord(n)).Error; err != nil {
 		return fmt.Errorf("create notification: %w", err)
 	}
 	return nil
@@ -38,39 +32,51 @@ func (r *NotificationRepository) ListByTarget(ctx context.Context, targetID uuid
 		return nil, ErrDatabaseUnavailable
 	}
 
-	query := `SELECT ` + notificationColumns + ` FROM notifications WHERE target_id = $1`
-	if unreadOnly {
-		query += ` AND is_read = false`
-	}
 	if limit <= 0 {
 		limit = 50
 	}
-	query += fmt.Sprintf(` ORDER BY created_at DESC LIMIT %d`, limit)
 
-	rows, err := r.db.Query(ctx, query, targetID)
-	if err != nil {
+	query := r.db.WithContext(ctx).Where("target_id = ?", targetID)
+	if unreadOnly {
+		query = query.Where("is_read = ?", false)
+	}
+
+	var records []notificationRecord
+	if err := applyPagination(query.Order("created_at DESC"), limit, 0).Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list notifications: %w", err)
 	}
-	defer rows.Close()
 
-	var notifications []*model.Notification
-	for rows.Next() {
-		n := &model.Notification{}
-		if err := rows.Scan(&n.ID, &n.TargetID, &n.Type, &n.Title, &n.Body, &n.Data, &n.IsRead, &n.CreatedAt); err != nil {
-			return nil, fmt.Errorf("scan notification: %w", err)
-		}
-		notifications = append(notifications, n)
+	notifications := make([]*model.Notification, 0, len(records))
+	for i := range records {
+		notifications = append(notifications, records[i].toModel())
 	}
-	return notifications, rows.Err()
+	return notifications, nil
 }
 
 func (r *NotificationRepository) MarkRead(ctx context.Context, id uuid.UUID) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	_, err := r.db.Exec(ctx, `UPDATE notifications SET is_read = true WHERE id = $1`, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).
+		Model(&notificationRecord{}).
+		Where("id = ?", id).
+		Update("is_read", true).
+		Error; err != nil {
 		return fmt.Errorf("mark notification read: %w", err)
+	}
+	return nil
+}
+
+func (r *NotificationRepository) MarkSent(ctx context.Context, id uuid.UUID) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&notificationRecord{}).
+		Where("id = ?", id).
+		Update("sent", true).
+		Error; err != nil {
+		return fmt.Errorf("mark notification sent: %w", err)
 	}
 	return nil
 }
@@ -79,8 +85,11 @@ func (r *NotificationRepository) MarkAllRead(ctx context.Context, targetID uuid.
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	_, err := r.db.Exec(ctx, `UPDATE notifications SET is_read = true WHERE target_id = $1 AND is_read = false`, targetID)
-	if err != nil {
+	if err := r.db.WithContext(ctx).
+		Model(&notificationRecord{}).
+		Where("target_id = ? AND is_read = ?", targetID, false).
+		Update("is_read", true).
+		Error; err != nil {
 		return fmt.Errorf("mark all notifications read: %w", err)
 	}
 	return nil

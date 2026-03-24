@@ -8,6 +8,7 @@ import {
   type DropResult,
 } from "@hello-pangea/dnd";
 import { Board } from "@/components/kanban/board";
+import { TaskDependencyGraph } from "@/components/tasks/task-dependency-graph";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -29,16 +30,25 @@ import {
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import {
   filterTasksForWorkspace,
+  type TaskDependencyFilter,
   getRescheduledPlanningWindow,
   type TaskViewMode,
 } from "@/lib/tasks/task-workspace";
+import type { Sprint, SprintMetrics } from "@/lib/stores/sprint-store";
+import { BurndownChart } from "@/components/sprint/burndown-chart";
+import { getTaskDependencyState } from "@/lib/tasks/task-dependencies";
 import { useTaskWorkspaceStore } from "@/lib/stores/task-workspace-store";
+import { cn } from "@/lib/utils";
 import type { Task, TaskPriority, TaskStatus } from "@/lib/stores/task-store";
 
 interface ProjectTaskWorkspaceProps {
   tasks: Task[];
+  sprints: Sprint[];
+  sprintMetrics: SprintMetrics | null;
+  sprintMetricsLoading: boolean;
   loading: boolean;
   error: string | null;
+  realtimeConnected: boolean;
   onRetry: () => void;
   onTaskOpen: (taskId: string) => void;
   onTaskStatusChange: (
@@ -49,6 +59,7 @@ interface ProjectTaskWorkspaceProps {
     taskId: string,
     changes: { plannedStartAt: string; plannedEndAt: string }
   ) => Promise<void> | void;
+  onSprintFilterChange?: (sprintId: string | "all") => void;
 }
 
 function formatDateKey(value: string | Date): string {
@@ -122,6 +133,14 @@ function priorityOptions(): Array<"all" | TaskPriority> {
   return ["all", "urgent", "high", "medium", "low"];
 }
 
+function dependencyOptions(): Array<{ value: TaskDependencyFilter; label: string }> {
+  return [
+    { value: "all", label: "all" },
+    { value: "blocked", label: "blocked" },
+    { value: "ready_to_unblock", label: "ready to unblock" },
+  ];
+}
+
 function assigneeOptions(tasks: Task[]): Array<{ value: string; label: string }> {
   const seen = new Map<string, string>();
   for (const task of tasks) {
@@ -130,6 +149,247 @@ function assigneeOptions(tasks: Task[]): Array<{ value: string; label: string }>
     }
   }
   return Array.from(seen.entries()).map(([value, label]) => ({ value, label }));
+}
+
+function sprintOptions(sprints: Sprint[]): Array<{ value: string; label: string }> {
+  return sprints.map((sprint) => ({
+    value: sprint.id,
+    label: sprint.name,
+  }));
+}
+
+function formatSprintStatus(status: Sprint["status"]): string {
+  switch (status) {
+    case "active":
+      return "Active";
+    case "planning":
+      return "Planning";
+    case "closed":
+      return "Closed";
+    default:
+      return status;
+  }
+}
+
+function formatSprintRange(sprint: Sprint): string {
+  return `${formatDateKey(sprint.startDate)} -> ${formatDateKey(sprint.endDate)}`;
+}
+
+function getActiveFilterChips(
+  filters: ReturnType<typeof useTaskWorkspaceStore.getState>["filters"],
+  tasks: Task[],
+  sprints: Sprint[]
+): Array<{
+  key: string;
+  label: string;
+  clearLabel: string;
+  onClear: (
+    setSearch: (search: string) => void,
+    setStatus: (status: "all" | TaskStatus) => void,
+    setPriority: (priority: "all" | TaskPriority) => void,
+    setAssigneeId: (assigneeId: string | "all") => void,
+    setSprintId: (sprintId: string | "all") => void,
+    setPlanning: (
+      planning: "all" | "scheduled" | "unscheduled"
+    ) => void,
+    setDependency: (dependency: TaskDependencyFilter) => void
+  ) => void;
+}> {
+  const chips: Array<{
+    key: string;
+    label: string;
+    clearLabel: string;
+    onClear: (
+      setSearch: (search: string) => void,
+      setStatus: (status: "all" | TaskStatus) => void,
+      setPriority: (priority: "all" | TaskPriority) => void,
+      setAssigneeId: (assigneeId: string | "all") => void,
+      setSprintId: (sprintId: string | "all") => void,
+      setPlanning: (
+        planning: "all" | "scheduled" | "unscheduled"
+      ) => void,
+      setDependency: (dependency: TaskDependencyFilter) => void
+    ) => void;
+  }> = [];
+
+  if (filters.search.trim()) {
+    chips.push({
+      key: "search",
+      label: `search: ${filters.search.trim()}`,
+      clearLabel: `Clear filter search "${filters.search.trim()}"`,
+      onClear: (clearSearch) => clearSearch(""),
+    });
+  }
+
+  if (filters.status !== "all") {
+    chips.push({
+      key: "status",
+      label: `status: ${filters.status}`,
+      clearLabel: `Clear filter status "${filters.status}"`,
+      onClear: (_clearSearch, clearStatus) => clearStatus("all"),
+    });
+  }
+
+  if (filters.priority !== "all") {
+    chips.push({
+      key: "priority",
+      label: `priority: ${filters.priority}`,
+      clearLabel: `Clear filter priority "${filters.priority}"`,
+      onClear: (_clearSearch, _clearStatus, clearPriority) => clearPriority("all"),
+    });
+  }
+
+  if (filters.assigneeId !== "all") {
+    const assigneeLabel =
+      assigneeOptions(tasks).find((option) => option.value === filters.assigneeId)?.label ??
+      filters.assigneeId;
+
+    chips.push({
+      key: "assignee",
+      label: `assignee: ${assigneeLabel}`,
+      clearLabel: `Clear filter assignee "${assigneeLabel}"`,
+      onClear: (_clearSearch, _clearStatus, _clearPriority, clearAssignee) =>
+        clearAssignee("all"),
+    });
+  }
+
+  if (filters.sprintId !== "all") {
+    const sprintLabel =
+      sprintOptions(sprints).find((option) => option.value === filters.sprintId)?.label ??
+      filters.sprintId;
+
+    chips.push({
+      key: "sprint",
+      label: `sprint: ${sprintLabel}`,
+      clearLabel: `Clear filter sprint "${sprintLabel}"`,
+      onClear: (
+        _clearSearch,
+        _clearStatus,
+        _clearPriority,
+        _clearAssignee,
+        clearSprint
+      ) => clearSprint("all"),
+    });
+  }
+
+  if (filters.planning !== "all") {
+    chips.push({
+      key: "planning",
+      label: `planning: ${filters.planning}`,
+      clearLabel: `Clear filter planning "${filters.planning}"`,
+      onClear: (
+        _clearSearch,
+        _clearStatus,
+        _clearPriority,
+        _clearAssignee,
+        _clearSprint,
+        clearPlanning
+      ) => clearPlanning("all"),
+    });
+  }
+
+  if (filters.dependency !== "all") {
+    chips.push({
+      key: "dependency",
+      label: `dependencies: ${filters.dependency}`,
+      clearLabel: `Clear filter dependencies "${filters.dependency}"`,
+      onClear: (
+        _clearSearch,
+        _clearStatus,
+        _clearPriority,
+        _clearAssignee,
+        _clearSprint,
+        _clearPlanning,
+        clearDependency
+      ) => clearDependency("all"),
+    });
+  }
+
+  return chips;
+}
+
+function SprintOverview({
+  sprints,
+  sprintMetrics,
+  sprintMetricsLoading,
+}: {
+  sprints: Sprint[];
+  sprintMetrics: SprintMetrics | null;
+  sprintMetricsLoading: boolean;
+}) {
+  if (sprints.length === 0) {
+    return null;
+  }
+
+  const activeSprint =
+    sprintMetrics?.sprint ?? sprints.find((sprint) => sprint.status === "active") ?? sprints[0];
+
+  return (
+    <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
+      <Card className="gap-3">
+        <CardHeader className="px-4">
+          <CardTitle className="text-base">Sprint overview</CardTitle>
+          <CardDescription>
+            Track current cycle scope, burndown progress, and delivery velocity in one place.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-3 px-4">
+          <div className="flex flex-wrap items-center gap-2">
+            <span className="text-sm font-medium">{activeSprint.name}</span>
+            <Badge variant="secondary">{formatSprintStatus(activeSprint.status)}</Badge>
+            <Badge variant="outline">{formatSprintRange(activeSprint)}</Badge>
+          </div>
+          {sprintMetricsLoading ? (
+            <div className="text-sm text-muted-foreground">Loading sprint metrics...</div>
+          ) : sprintMetrics ? (
+            <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
+              <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+                <div className="text-xs text-muted-foreground">Completion</div>
+                <div className="text-lg font-semibold">
+                  {sprintMetrics.completionRate.toFixed(2)}%
+                </div>
+              </div>
+              <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+                <div className="text-xs text-muted-foreground">Remaining</div>
+                <div className="text-lg font-semibold">{sprintMetrics.remainingTasks}</div>
+              </div>
+              <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+                <div className="text-xs text-muted-foreground">Velocity</div>
+                <div className="text-lg font-semibold">
+                  {sprintMetrics.velocityPerWeek.toFixed(2)}/wk
+                </div>
+              </div>
+              <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
+                <div className="text-xs text-muted-foreground">Task spend</div>
+                <div className="text-lg font-semibold">
+                  ${sprintMetrics.taskSpentUsd.toFixed(2)}
+                </div>
+              </div>
+            </div>
+          ) : (
+            <div className="text-sm text-muted-foreground">
+              Select a sprint to load burndown and velocity metrics.
+            </div>
+          )}
+        </CardContent>
+      </Card>
+
+      <Card className="gap-3">
+        <CardHeader className="px-4">
+          <CardTitle className="text-base">Burndown</CardTitle>
+          <CardDescription>
+            Velocity {sprintMetrics ? `${sprintMetrics.velocityPerWeek.toFixed(2)}/wk` : "--"}
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="px-4">
+          <BurndownChart
+            burndown={sprintMetrics?.burndown ?? []}
+            plannedTasks={sprintMetrics?.plannedTasks ?? 0}
+          />
+        </CardContent>
+      </Card>
+    </div>
+  );
 }
 
 function EmptyState({
@@ -151,9 +411,17 @@ function EmptyState({
 
 function ListView({
   tasks,
+  allTasks,
+  selectedTaskId,
+  density,
+  showDescriptions,
   onTaskOpen,
 }: {
   tasks: Task[];
+  allTasks: Task[];
+  selectedTaskId: string | null;
+  density: "comfortable" | "compact";
+  showDescriptions: boolean;
   onTaskOpen: (taskId: string) => void;
 }) {
   return (
@@ -171,10 +439,47 @@ function ListView({
       </TableHeader>
       <TableBody>
         {tasks.map((task) => (
-          <TableRow key={task.id}>
+          <TableRow
+            key={task.id}
+            data-task-id={task.id}
+            data-selected={task.id === selectedTaskId ? "true" : "false"}
+            className={cn(
+              task.id === selectedTaskId && "bg-accent/40 hover:bg-accent/50"
+            )}
+          >
             <TableCell>
-              <div className="font-medium">{task.title}</div>
-              <div className="text-xs text-muted-foreground">{task.description}</div>
+              <div className={cn("flex flex-col", density === "compact" ? "gap-0.5" : "gap-1")}>
+                <div className="font-medium">{task.title}</div>
+                {showDescriptions ? (
+                  <div className="text-xs text-muted-foreground">{task.description}</div>
+                ) : null}
+                {(() => {
+                  const dependencyState = getTaskDependencyState(task, allTasks);
+
+                  if (dependencyState.state === "blocked") {
+                    return (
+                      <span className="text-xs text-amber-700 dark:text-amber-300">
+                        Blocked by dependency
+                      </span>
+                    );
+                  }
+                  if (dependencyState.state === "ready_to_unblock") {
+                    return (
+                      <span className="text-xs text-emerald-700 dark:text-emerald-300">
+                        Ready to unblock
+                      </span>
+                    );
+                  }
+                  if (dependencyState.blockedTasks.length > 0) {
+                    return (
+                      <span className="text-xs text-muted-foreground">
+                        Blocks {dependencyState.blockedTasks.length} downstream
+                      </span>
+                    );
+                  }
+                  return null;
+                })()}
+              </div>
             </TableCell>
             <TableCell>{task.status}</TableCell>
             <TableCell>
@@ -220,10 +525,14 @@ function ListView({
 function PlanningTaskChip({
   task,
   index,
+  isSelected,
+  density,
   onTaskOpen,
 }: {
   task: Task;
   index: number;
+  isSelected: boolean;
+  density: "comfortable" | "compact";
   onTaskOpen: (taskId: string) => void;
 }) {
   return (
@@ -233,9 +542,14 @@ function PlanningTaskChip({
           ref={provided.innerRef}
           {...provided.draggableProps}
           {...provided.dragHandleProps}
-          className={`w-full rounded-md border px-2 py-1 text-left text-sm ${
-            snapshot.isDragging ? "bg-accent" : "bg-background"
-          }`}
+          data-task-id={task.id}
+          data-selected={isSelected ? "true" : "false"}
+          className={cn(
+            "w-full rounded-md border text-left text-sm",
+            density === "compact" ? "px-2 py-1" : "px-2.5 py-1.5",
+            snapshot.isDragging ? "bg-accent" : "bg-background",
+            isSelected && "border-primary/40 ring-2 ring-primary/25"
+          )}
           onClick={() => onTaskOpen(task.id)}
           type="button"
         >
@@ -251,12 +565,16 @@ function PlanningTaskChip({
 
 function PlanningBoard({
   tasks,
+  selectedTaskId,
+  density,
   dateKeys,
   droppablePrefix,
   onTaskOpen,
   onTaskScheduleChange,
 }: {
   tasks: Task[];
+  selectedTaskId: string | null;
+  density: "comfortable" | "compact";
   dateKeys: string[];
   droppablePrefix: "timeline" | "calendar";
   onTaskOpen: (taskId: string) => void;
@@ -343,6 +661,8 @@ function PlanningBoard({
                           key={task.id}
                           task={task}
                           index={index}
+                          isSelected={task.id === selectedTaskId}
+                          density={density}
                           onTaskOpen={onTaskOpen}
                         />
                       ))}
@@ -377,6 +697,8 @@ function PlanningBoard({
                       key={task.id}
                       task={task}
                       index={index}
+                      isSelected={task.id === selectedTaskId}
+                      density={density}
                       onTaskOpen={onTaskOpen}
                     />
                   ))}
@@ -398,6 +720,8 @@ function PlanningBoard({
 
 function TimelineView(props: {
   tasks: Task[];
+  selectedTaskId: string | null;
+  density: "comfortable" | "compact";
   onTaskOpen: (taskId: string) => void;
   onTaskScheduleChange: (
     taskId: string,
@@ -422,6 +746,8 @@ function TimelineView(props: {
 
 function CalendarView(props: {
   tasks: Task[];
+  selectedTaskId: string | null;
+  density: "comfortable" | "compact";
   onTaskOpen: (taskId: string) => void;
   onTaskScheduleChange: (
     taskId: string,
@@ -449,27 +775,42 @@ function CalendarView(props: {
 
 export function TaskWorkspaceMain({
   tasks,
+  sprints,
+  sprintMetrics,
+  sprintMetricsLoading,
   loading,
   error,
+  realtimeConnected,
   onRetry,
   onTaskOpen,
   onTaskStatusChange,
   onTaskScheduleChange,
+  onSprintFilterChange,
 }: ProjectTaskWorkspaceProps) {
   const viewMode = useTaskWorkspaceStore((state) => state.viewMode);
   const filters = useTaskWorkspaceStore((state) => state.filters);
+  const selectedTaskId = useTaskWorkspaceStore((state) => state.selectedTaskId);
+  const displayOptions = useTaskWorkspaceStore((state) => state.displayOptions);
   const setViewMode = useTaskWorkspaceStore((state) => state.setViewMode);
   const setSearch = useTaskWorkspaceStore((state) => state.setSearch);
   const setStatus = useTaskWorkspaceStore((state) => state.setStatus);
   const setPriority = useTaskWorkspaceStore((state) => state.setPriority);
   const setAssigneeId = useTaskWorkspaceStore((state) => state.setAssigneeId);
+  const setSprintId = useTaskWorkspaceStore((state) => state.setSprintId);
   const setPlanning = useTaskWorkspaceStore((state) => state.setPlanning);
+  const setDependency = useTaskWorkspaceStore((state) => state.setDependency);
+  const setDensity = useTaskWorkspaceStore((state) => state.setDensity);
+  const setShowDescriptions = useTaskWorkspaceStore((state) => state.setShowDescriptions);
   const resetFilters = useTaskWorkspaceStore((state) => state.resetFilters);
   const selectTask = useTaskWorkspaceStore((state) => state.selectTask);
 
   const filteredTasks = useMemo(
     () => filterTasksForWorkspace(tasks, filters),
     [tasks, filters]
+  );
+  const activeFilterChips = useMemo(
+    () => getActiveFilterChips(filters, tasks, sprints),
+    [filters, sprints, tasks]
   );
 
   const handleTaskOpen = (taskId: string) => {
@@ -516,11 +857,22 @@ export function TaskWorkspaceMain({
 
     switch (mode) {
       case "list":
-        return <ListView tasks={filteredTasks} onTaskOpen={handleTaskOpen} />;
+        return (
+          <ListView
+            tasks={filteredTasks}
+            allTasks={tasks}
+            selectedTaskId={selectedTaskId}
+            density={displayOptions.density}
+            showDescriptions={displayOptions.showDescriptions}
+            onTaskOpen={handleTaskOpen}
+          />
+        );
       case "timeline":
         return (
           <TimelineView
             tasks={filteredTasks}
+            selectedTaskId={selectedTaskId}
+            density={displayOptions.density}
             onTaskOpen={handleTaskOpen}
             onTaskScheduleChange={onTaskScheduleChange}
           />
@@ -529,8 +881,17 @@ export function TaskWorkspaceMain({
         return (
           <CalendarView
             tasks={filteredTasks}
+            selectedTaskId={selectedTaskId}
+            density={displayOptions.density}
             onTaskOpen={handleTaskOpen}
             onTaskScheduleChange={onTaskScheduleChange}
+          />
+        );
+      case "dependencies":
+        return (
+          <TaskDependencyGraph
+            tasks={filteredTasks}
+            onTaskClick={handleTaskOpen}
           />
         );
       case "board":
@@ -538,6 +899,8 @@ export function TaskWorkspaceMain({
         return (
           <Board
             tasks={filteredTasks}
+            selectedTaskId={selectedTaskId}
+            displayOptions={displayOptions}
             onTaskClick={(task) => handleTaskOpen(task.id)}
             onTaskStatusChange={onTaskStatusChange}
           />
@@ -555,17 +918,29 @@ export function TaskWorkspaceMain({
               One project-scoped workspace for Board, List, Timeline, and Calendar views.
             </CardDescription>
           </div>
-          <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as TaskViewMode)}>
-            <TabsList>
-              <TabsTrigger value="board">Board</TabsTrigger>
-              <TabsTrigger value="list">List</TabsTrigger>
-              <TabsTrigger value="timeline">Timeline</TabsTrigger>
-              <TabsTrigger value="calendar">Calendar</TabsTrigger>
-            </TabsList>
-          </Tabs>
+          <div className="flex flex-wrap items-center gap-3">
+            <Badge variant={realtimeConnected ? "secondary" : "outline"}>
+              {realtimeConnected ? "Realtime live" : "Live alerts paused"}
+            </Badge>
+            <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as TaskViewMode)}>
+              <TabsList>
+                <TabsTrigger value="board">Board</TabsTrigger>
+                <TabsTrigger value="list">List</TabsTrigger>
+                <TabsTrigger value="timeline">Timeline</TabsTrigger>
+                <TabsTrigger value="calendar">Calendar</TabsTrigger>
+                <TabsTrigger value="dependencies">Dependencies</TabsTrigger>
+              </TabsList>
+            </Tabs>
+          </div>
         </div>
 
-        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-5">
+        <SprintOverview
+          sprints={sprints}
+          sprintMetrics={sprintMetrics}
+          sprintMetricsLoading={sprintMetricsLoading}
+        />
+
+        <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
           <label className="flex flex-col gap-2 text-sm font-medium">
             Search tasks
             <Input
@@ -623,6 +998,27 @@ export function TaskWorkspaceMain({
           </label>
 
           <label className="flex flex-col gap-2 text-sm font-medium">
+            Sprint
+            <select
+              aria-label="Sprint"
+              className="h-10 rounded-md border bg-background px-3 text-sm"
+              value={filters.sprintId}
+              onChange={(event) => {
+                const nextValue = event.target.value as string | "all";
+                setSprintId(nextValue);
+                onSprintFilterChange?.(nextValue);
+              }}
+            >
+              <option value="all">all</option>
+              {sprintOptions(sprints).map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
+
+          <label className="flex flex-col gap-2 text-sm font-medium">
             Planning
             <select
               className="h-10 rounded-md border bg-background px-3 text-sm"
@@ -641,6 +1037,24 @@ export function TaskWorkspaceMain({
               <option value="unscheduled">unscheduled</option>
             </select>
           </label>
+
+          <label className="flex flex-col gap-2 text-sm font-medium">
+            Dependencies
+            <select
+              aria-label="Dependencies"
+              className="h-10 rounded-md border bg-background px-3 text-sm"
+              value={filters.dependency}
+              onChange={(event) =>
+                setDependency(event.target.value as TaskDependencyFilter)
+              }
+            >
+              {dependencyOptions().map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label}
+                </option>
+              ))}
+            </select>
+          </label>
         </div>
 
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
@@ -652,6 +1066,62 @@ export function TaskWorkspaceMain({
             onClick={resetFilters}
           >
             Reset filters
+          </Button>
+        </div>
+
+        {activeFilterChips.length > 0 ? (
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            <span className="text-muted-foreground">Active filters</span>
+            {activeFilterChips.map((chip) => (
+              <Button
+                key={chip.key}
+                type="button"
+                size="sm"
+                variant="outline"
+                aria-label={chip.clearLabel}
+                onClick={() =>
+                  chip.onClear(
+                    setSearch,
+                    setStatus,
+                    setPriority,
+                    setAssigneeId,
+                    setSprintId,
+                    setPlanning,
+                    setDependency
+                  )
+                }
+              >
+                {chip.label}
+              </Button>
+            ))}
+          </div>
+        ) : null}
+
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          <span className="text-muted-foreground">Display</span>
+          <Button
+            type="button"
+            size="sm"
+            variant={displayOptions.density === "comfortable" ? "secondary" : "outline"}
+            onClick={() => setDensity("comfortable")}
+          >
+            Comfortable
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant={displayOptions.density === "compact" ? "secondary" : "outline"}
+            onClick={() => setDensity("compact")}
+          >
+            Compact
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setShowDescriptions(!displayOptions.showDescriptions)}
+          >
+            {displayOptions.showDescriptions ? "Hide descriptions" : "Show descriptions"}
           </Button>
         </div>
       </CardHeader>

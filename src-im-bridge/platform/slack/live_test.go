@@ -70,6 +70,9 @@ func TestLive_StartAcknowledgesSlashCommandBeforeDispatch(t *testing.T) {
 	if replyCtx.ChannelID != "C456" || replyCtx.ResponseURL != "" {
 		t.Fatalf("ReplyCtx = %+v", replyCtx)
 	}
+	if got.ReplyTarget == nil || got.ReplyTarget.ChannelID != "C456" || !got.ReplyTarget.UseReply {
+		t.Fatalf("ReplyTarget = %+v", got.ReplyTarget)
+	}
 }
 
 func TestLive_StartNormalizesAppMentionEvent(t *testing.T) {
@@ -121,6 +124,9 @@ func TestLive_StartNormalizesAppMentionEvent(t *testing.T) {
 	}
 	if replyCtx.ThreadTS != "1700000000.100000" {
 		t.Fatalf("ReplyCtx = %+v", replyCtx)
+	}
+	if got.ReplyTarget == nil || got.ReplyTarget.ChannelID != "C456" || got.ReplyTarget.ThreadID != "1700000000.100000" {
+		t.Fatalf("ReplyTarget = %+v", got.ReplyTarget)
 	}
 }
 

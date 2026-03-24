@@ -42,6 +42,12 @@ func (f *fakeTaskDecompositionRepo) CreateChildren(ctx context.Context, inputs [
 		return nil, f.createErr
 	}
 	if f.createResult != nil {
+		for index := range f.createResult {
+			if index >= len(inputs) {
+				break
+			}
+			f.createResult[index].Labels = append([]string(nil), inputs[index].Labels...)
+		}
 		return f.createResult, nil
 	}
 	return nil, nil
@@ -86,8 +92,8 @@ func TestTaskDecompositionService_DecomposeSuccess(t *testing.T) {
 		resp: &BridgeDecomposeResponse{
 			Summary: "Break the work into bridge and integration steps.",
 			Subtasks: []BridgeDecomposeSubtask{
-				{Title: "Bridge route", Description: "Add /bridge/decompose", Priority: "invalid"},
-				{Title: "IM command", Description: "Add /task decompose", Priority: "medium"},
+				{Title: "Bridge route", Description: "Add /bridge/decompose", Priority: "invalid", ExecutionMode: "agent"},
+				{Title: "IM command", Description: "Add /task decompose", Priority: "medium", ExecutionMode: "human"},
 			},
 		},
 	}
@@ -114,11 +120,23 @@ func TestTaskDecompositionService_DecomposeSuccess(t *testing.T) {
 	if repo.createInputs[0].Priority != parent.Priority {
 		t.Errorf("invalid priority should fall back to parent priority %q, got %q", parent.Priority, repo.createInputs[0].Priority)
 	}
+	if !containsLabel(repo.createInputs[0].Labels, "execution:agent") {
+		t.Errorf("expected first child labels to include agent execution recommendation, got %v", repo.createInputs[0].Labels)
+	}
+	if !containsLabel(repo.createInputs[1].Labels, "execution:human") {
+		t.Errorf("expected second child labels to include human execution recommendation, got %v", repo.createInputs[1].Labels)
+	}
 	if result.ParentTask.ID != parentID.String() {
 		t.Errorf("parent task id = %q, want %q", result.ParentTask.ID, parentID.String())
 	}
 	if len(result.Subtasks) != 2 {
 		t.Fatalf("expected 2 subtasks in response, got %d", len(result.Subtasks))
+	}
+	if result.Subtasks[0].ExecutionMode != "agent" {
+		t.Errorf("first subtask execution mode = %q, want %q", result.Subtasks[0].ExecutionMode, "agent")
+	}
+	if result.Subtasks[1].ExecutionMode != "human" {
+		t.Errorf("second subtask execution mode = %q, want %q", result.Subtasks[1].ExecutionMode, "human")
 	}
 }
 
@@ -177,7 +195,7 @@ func TestTaskDecompositionService_DoesNotPersistPartialChildrenOnCreateFailure(t
 		resp: &BridgeDecomposeResponse{
 			Summary: "A single child should be rejected atomically.",
 			Subtasks: []BridgeDecomposeSubtask{
-				{Title: "Child", Description: "Only child", Priority: "low"},
+				{Title: "Child", Description: "Only child", Priority: "low", ExecutionMode: "agent"},
 			},
 		},
 	}
@@ -194,4 +212,13 @@ func TestTaskDecompositionService_DoesNotPersistPartialChildrenOnCreateFailure(t
 	if repo.createResult != nil {
 		t.Fatalf("expected no persisted child results on failure")
 	}
+}
+
+func containsLabel(labels []string, expected string) bool {
+	for _, label := range labels {
+		if label == expected {
+			return true
+		}
+	}
+	return false
 }

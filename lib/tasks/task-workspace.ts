@@ -1,7 +1,9 @@
 import type { Task, TaskPriority, TaskStatus } from "@/lib/stores/task-store";
+import { getTaskDependencyState } from "./task-dependencies";
 
-export type TaskViewMode = "board" | "list" | "timeline" | "calendar";
+export type TaskViewMode = "board" | "list" | "timeline" | "calendar" | "dependencies";
 export type TaskPlanningFilter = "all" | "scheduled" | "unscheduled";
+export type TaskDependencyFilter = "all" | "blocked" | "ready_to_unblock";
 export type TaskFilterOption<T extends string> = "all" | T;
 
 export interface TaskWorkspaceFilters {
@@ -9,7 +11,9 @@ export interface TaskWorkspaceFilters {
   status: TaskFilterOption<TaskStatus>;
   priority: TaskFilterOption<TaskPriority>;
   assigneeId: string | "all";
+  sprintId: string | "all";
   planning: TaskPlanningFilter;
+  dependency: TaskDependencyFilter;
 }
 
 export function createDefaultTaskWorkspaceFilters(): TaskWorkspaceFilters {
@@ -18,7 +22,9 @@ export function createDefaultTaskWorkspaceFilters(): TaskWorkspaceFilters {
     status: "all",
     priority: "all",
     assigneeId: "all",
+    sprintId: "all",
     planning: "all",
+    dependency: "all",
   };
 }
 
@@ -47,7 +53,16 @@ export function filterTasksForWorkspace(
     if (filters.assigneeId !== "all" && task.assigneeId !== filters.assigneeId) {
       return false;
     }
+    if (filters.sprintId !== "all" && task.sprintId !== filters.sprintId) {
+      return false;
+    }
     if (filters.planning !== "all" && taskPlanningState(task) !== filters.planning) {
+      return false;
+    }
+    if (
+      filters.dependency !== "all" &&
+      getTaskDependencyState(task, tasks).state !== filters.dependency
+    ) {
       return false;
     }
     return true;

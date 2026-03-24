@@ -33,6 +33,9 @@ describe("TaskCard", () => {
     render(
       <TaskCard
         index={0}
+        isSelected={false}
+        density="comfortable"
+        showDescription={true}
         onClick={onClick}
         task={{
           id: "task-1",
@@ -45,7 +48,12 @@ describe("TaskCard", () => {
           assigneeType: "human",
           assigneeName: "Alice",
           cost: 3.5,
+          budgetUsd: 5,
           spentUsd: 3.5,
+          agentBranch: "",
+          agentWorktree: "",
+          agentSessionId: "",
+          blockedBy: [],
           plannedStartAt: null,
           plannedEndAt: null,
           progress: {

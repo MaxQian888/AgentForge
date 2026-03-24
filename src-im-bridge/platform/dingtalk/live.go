@@ -161,6 +161,18 @@ func (l *Live) Name() string { return "dingtalk-live" }
 
 func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
 
+func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
+	if target == nil {
+		return nil
+	}
+	return replyContext{
+		SessionWebhook:   strings.TrimSpace(target.SessionWebhook),
+		ConversationID:   firstNonEmpty(target.ConversationID, target.ChatID, target.ChannelID),
+		ConversationType: metadataValue(target.Metadata, "conversation_type"),
+		UserID:           strings.TrimSpace(target.UserID),
+	}
+}
+
 func (l *Live) Start(handler core.MessageHandler) error {
 	if handler == nil {
 		return errors.New("message handler is required")
@@ -410,6 +422,18 @@ func normalizeIncomingMessage(incoming chatbotMessage) (*core.Message, error) {
 			ConversationType: strings.TrimSpace(incoming.ConversationType),
 			UserID:           userID,
 		},
+		ReplyTarget: &core.ReplyTarget{
+			Platform:       liveMetadata.Source,
+			ChatID:         conversationID,
+			ChannelID:      conversationID,
+			ConversationID: conversationID,
+			SessionWebhook: strings.TrimSpace(incoming.SessionWebhook),
+			UserID:         userID,
+			UseReply:       true,
+			Metadata: map[string]string{
+				"conversation_type": strings.TrimSpace(incoming.ConversationType),
+			},
+		},
 		Timestamp: incoming.CreatedAt,
 		IsGroup:   strings.TrimSpace(incoming.ConversationType) == "2",
 	}, nil
@@ -470,6 +494,22 @@ func resolveDirectSendTarget(raw string) (directSendTarget, error) {
 func isWebhookTarget(raw string) bool {
 	parsed, err := url.Parse(strings.TrimSpace(raw))
 	return err == nil && parsed != nil && (parsed.Scheme == "http" || parsed.Scheme == "https") && parsed.Host != ""
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func metadataValue(metadata map[string]string, key string) string {
+	if metadata == nil {
+		return ""
+	}
+	return strings.TrimSpace(metadata[key])
 }
 
 func parseUnixMillis(raw int64) time.Time {

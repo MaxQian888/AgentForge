@@ -22,6 +22,15 @@ func TestValidateTransition(t *testing.T) {
 		}
 	})
 
+	t.Run("allows blocked tasks to return to triaged or assigned when dependencies clear", func(t *testing.T) {
+		if err := model.ValidateTransition(model.TaskStatusBlocked, model.TaskStatusTriaged); err != nil {
+			t.Fatalf("ValidateTransition(blocked -> triaged) error = %v, want nil", err)
+		}
+		if err := model.ValidateTransition(model.TaskStatusBlocked, model.TaskStatusAssigned); err != nil {
+			t.Fatalf("ValidateTransition(blocked -> assigned) error = %v, want nil", err)
+		}
+	})
+
 	t.Run("rejects unknown source status", func(t *testing.T) {
 		err := model.ValidateTransition("mystery", model.TaskStatusDone)
 		if err == nil {
@@ -84,7 +93,7 @@ func TestTaskToDTOWithOptionalFields(t *testing.T) {
 		AssigneeID:     &assigneeID,
 		AssigneeType:   "agent",
 		ReporterID:     &reporterID,
-		Labels:         []string{"backend", "tests"},
+			Labels:         []string{"backend", "tests", "execution:agent"},
 		BudgetUsd:      12.5,
 		SpentUsd:       8.25,
 		AgentBranch:    "feat/tests",
@@ -107,6 +116,9 @@ func TestTaskToDTOWithOptionalFields(t *testing.T) {
 	}
 	if dto.ParentID == nil || *dto.ParentID != parentID.String() {
 		t.Fatalf("ParentID = %v, want %s", dto.ParentID, parentID.String())
+	}
+	if dto.ExecutionMode != "agent" {
+		t.Fatalf("ExecutionMode = %q, want %q", dto.ExecutionMode, "agent")
 	}
 	if dto.SprintID == nil || *dto.SprintID != sprintID.String() {
 		t.Fatalf("SprintID = %v, want %s", dto.SprintID, sprintID.String())

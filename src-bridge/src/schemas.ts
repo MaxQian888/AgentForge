@@ -11,6 +11,9 @@ export const RoleConfigSchema = z.object({
   max_budget_usd: z.number().positive(),
   max_turns: z.number().int().positive(),
   permission_mode: z.string(),
+  tools: z.array(z.string()).optional(),
+  knowledge_context: z.string().optional(),
+  output_filters: z.array(z.string()).optional(),
 }).strict();
 
 export const ExecuteRequestSchema = z.object({
@@ -25,9 +28,12 @@ export const ExecuteRequestSchema = z.object({
   system_prompt: z.string().default(""),
   max_turns: z.number().int().positive().default(50),
   budget_usd: z.number().positive().default(1.0),
+  warn_threshold: z.number().min(0).max(1).optional(),
   allowed_tools: z.array(z.string()).default([]),
   permission_mode: z.string().default("default"),
   role_config: RoleConfigSchema.optional(),
+  team_id: z.string().optional(),
+  team_role: z.string().optional(),
 });
 
 export const DecomposeTaskRequestSchema = z.object({
@@ -43,6 +49,7 @@ export const DecomposeSubtaskSchema = z.object({
   title: z.string().min(1),
   description: z.string().min(1),
   priority: z.enum(["critical", "high", "medium", "low"]),
+  executionMode: z.enum(["human", "agent"]),
 });
 
 export const DecomposeTaskResponseSchema = z.object({
@@ -53,6 +60,10 @@ export const DecomposeTaskResponseSchema = z.object({
 export const CancelRequestSchema = z.object({
   task_id: z.string().min(1),
   reason: z.string().optional(),
+});
+
+export const ResumeRequestSchema = z.object({
+  task_id: z.string().min(1),
 });
 
 export const ReviewDimensionSchema = z.enum([

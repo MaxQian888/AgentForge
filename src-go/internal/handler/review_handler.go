@@ -14,6 +14,8 @@ import (
 type ReviewService interface {
 	Trigger(ctx context.Context, req *model.TriggerReviewRequest) (*model.Review, error)
 	Complete(ctx context.Context, id uuid.UUID, req *model.CompleteReviewRequest) (*model.Review, error)
+	Approve(ctx context.Context, id uuid.UUID, comment string) (*model.Review, error)
+	Reject(ctx context.Context, id uuid.UUID, reason, comment string) (*model.Review, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Review, error)
 	GetByTask(ctx context.Context, taskID uuid.UUID) ([]*model.Review, error)
 }
@@ -92,6 +94,45 @@ func (h *ReviewHandler) ListByTask(c echo.Context) error {
 		dtos = append(dtos, review.ToDTO())
 	}
 	return c.JSON(http.StatusOK, dtos)
+}
+
+func (h *ReviewHandler) Approve(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid review ID"})
+	}
+
+	req := new(model.ApproveReviewRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+
+	review, err := h.service.Approve(c.Request().Context(), id, req.Comment)
+	if err != nil {
+		return h.handleServiceError(c, err)
+	}
+	return c.JSON(http.StatusOK, review.ToDTO())
+}
+
+func (h *ReviewHandler) Reject(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid review ID"})
+	}
+
+	req := new(model.RejectReviewRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+
+	review, err := h.service.Reject(c.Request().Context(), id, req.Reason, req.Comment)
+	if err != nil {
+		return h.handleServiceError(c, err)
+	}
+	return c.JSON(http.StatusOK, review.ToDTO())
 }
 
 func (h *ReviewHandler) handleServiceError(c echo.Context, err error) error {

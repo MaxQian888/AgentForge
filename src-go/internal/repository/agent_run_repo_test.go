@@ -47,6 +47,8 @@ func TestAgentRunRepository_CreatePersistsRoleID(t *testing.T) {
 			run.ErrorMessage,
 			run.StartedAt,
 			run.CompletedAt,
+			run.TeamID,
+			run.TeamRole,
 		).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 
@@ -78,10 +80,12 @@ func TestAgentRunRepository_GetByIDScansRoleID(t *testing.T) {
 		"id", "task_id", "member_id", "role_id", "status", "provider", "model",
 		"input_tokens", "output_tokens", "cache_read_tokens", "cost_usd", "turn_count",
 		"error_message", "started_at", "completed_at", "created_at", "updated_at",
+		"team_id", "team_role",
 	}).AddRow(
 		runID, taskID, memberID, roleID, model.AgentRunStatusRunning, "anthropic", "claude-sonnet",
 		int64(10), int64(12), int64(0), 0.42, 3,
 		"", startedAt, nil, createdAt, updatedAt,
+		nil, "",
 	)
 
 	mock.ExpectQuery("SELECT id, task_id, member_id, role_id, status, provider, model").

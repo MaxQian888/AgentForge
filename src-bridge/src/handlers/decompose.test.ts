@@ -22,6 +22,7 @@ describe("decompose handler", () => {
     expect(prompt).toContain("Title: Bridge task decomposition");
     expect(prompt).toContain("Priority: high");
     expect(prompt).toContain("Split the bridge feature into focused deliverables.");
+    expect(prompt).toContain("executionMode");
   });
 
   test("passes the resolved provider context to the executor", async () => {
@@ -39,6 +40,7 @@ describe("decompose handler", () => {
             title: "Clarify task contract",
             description: "Review the current interfaces and constraints.",
             priority: "high",
+            executionMode: "human",
           },
         ],
       };
@@ -73,6 +75,7 @@ describe("decompose handler", () => {
             title: "Add provider registry",
             description: "Introduce shared provider capability metadata.",
             priority: "high",
+            executionMode: "agent",
           },
         ],
       },
@@ -87,6 +90,7 @@ describe("decompose handler", () => {
           title: "Add provider registry",
           description: "Introduce shared provider capability metadata.",
           priority: "high",
+          executionMode: "agent",
         },
       ],
     });
@@ -144,6 +148,7 @@ describe("decompose handler", () => {
               title: "Authenticate Anthropic",
               description: "Allow auth token based configuration.",
               priority: "high",
+              executionMode: "agent",
             },
           ],
         },

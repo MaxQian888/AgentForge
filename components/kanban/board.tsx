@@ -3,6 +3,7 @@
 import { useMemo, useState } from "react";
 import { DragDropContext, type DropResult } from "@hello-pangea/dnd";
 import { Column } from "./column";
+import type { TaskWorkspaceDisplayOptions } from "@/lib/stores/task-workspace-store";
 import type { Task, TaskStatus } from "@/lib/stores/task-store";
 
 const columns: TaskStatus[] = [
@@ -10,12 +11,18 @@ const columns: TaskStatus[] = [
   "triaged",
   "assigned",
   "in_progress",
+  "blocked",
   "in_review",
+  "changes_requested",
   "done",
+  "cancelled",
+  "budget_exceeded",
 ];
 
 interface BoardProps {
   tasks: Task[];
+  selectedTaskId: string | null;
+  displayOptions: TaskWorkspaceDisplayOptions;
   onTaskClick: (task: Task) => void;
   onTaskStatusChange: (
     taskId: string,
@@ -25,6 +32,8 @@ interface BoardProps {
 
 export function Board({
   tasks,
+  selectedTaskId,
+  displayOptions,
   onTaskClick,
   onTaskStatusChange,
 }: BoardProps) {
@@ -36,8 +45,12 @@ export function Board({
       triaged: [],
       assigned: [],
       in_progress: [],
+      blocked: [],
       in_review: [],
+      changes_requested: [],
       done: [],
+      cancelled: [],
+      budget_exceeded: [],
     };
 
     for (const task of tasks) {
@@ -80,6 +93,8 @@ export function Board({
               key={status}
               status={status}
               tasks={grouped[status]}
+              selectedTaskId={selectedTaskId}
+              displayOptions={displayOptions}
               onTaskClick={onTaskClick}
             />
           ))}

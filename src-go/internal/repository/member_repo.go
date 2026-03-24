@@ -6,13 +6,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"gorm.io/gorm"
 )
 
 type MemberRepository struct {
-	db DBTX
+	db *gorm.DB
 }
 
-func NewMemberRepository(db DBTX) *MemberRepository {
+func NewMemberRepository(db *gorm.DB) *MemberRepository {
 	return &MemberRepository{db: db}
 }
 
@@ -20,13 +21,7 @@ func (r *MemberRepository) Create(ctx context.Context, member *model.Member) err
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	query := `
-		INSERT INTO members (id, project_id, user_id, name, type, role, email, avatar_url, agent_config, skills, is_active, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, NOW(), NOW())
-	`
-	_, err := r.db.Exec(ctx, query, member.ID, member.ProjectID, member.UserID, member.Name,
-		member.Type, member.Role, member.Email, member.AvatarURL, member.AgentConfig, member.Skills, member.IsActive)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Create(newMemberRecord(member)).Error; err != nil {
 		return fmt.Errorf("create member: %w", err)
 	}
 	return nil
@@ -36,57 +31,67 @@ func (r *MemberRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Me
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT id, project_id, user_id, name, type, role, email, avatar_url, agent_config, skills, is_active, created_at, updated_at
-		FROM members WHERE id = $1`
-	m := &model.Member{}
-	err := r.db.QueryRow(ctx, query, id).Scan(
-		&m.ID, &m.ProjectID, &m.UserID, &m.Name, &m.Type, &m.Role, &m.Email,
-		&m.AvatarURL, &m.AgentConfig, &m.Skills, &m.IsActive, &m.CreatedAt, &m.UpdatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("get member by id: %w", err)
+
+	var record memberRecord
+	if err := r.db.WithContext(ctx).Where("id = ?", id).Take(&record).Error; err != nil {
+		return nil, fmt.Errorf("get member by id: %w", normalizeRepositoryError(err))
 	}
-	return m, nil
+	return record.toModel(), nil
 }
 
 func (r *MemberRepository) ListByProject(ctx context.Context, projectID uuid.UUID) ([]*model.Member, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT id, project_id, user_id, name, type, role, email, avatar_url, agent_config, skills, is_active, created_at, updated_at
-		FROM members WHERE project_id = $1 ORDER BY created_at`
-	rows, err := r.db.Query(ctx, query, projectID)
-	if err != nil {
+
+	var records []memberRecord
+	if err := r.db.WithContext(ctx).
+		Where("project_id = ?", projectID).
+		Order("created_at").
+		Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list members: %w", err)
 	}
-	defer rows.Close()
 
-	var members []*model.Member
-	for rows.Next() {
-		m := &model.Member{}
-		if err := rows.Scan(&m.ID, &m.ProjectID, &m.UserID, &m.Name, &m.Type, &m.Role,
-			&m.Email, &m.AvatarURL, &m.AgentConfig, &m.Skills, &m.IsActive, &m.CreatedAt, &m.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan member: %w", err)
-		}
-		members = append(members, m)
+	members := make([]*model.Member, 0, len(records))
+	for i := range records {
+		members = append(members, records[i].toModel())
 	}
-	return members, rows.Err()
+	return members, nil
 }
 
 func (r *MemberRepository) Update(ctx context.Context, id uuid.UUID, req *model.UpdateMemberRequest) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	query := `UPDATE members SET
-		name = COALESCE($1, name),
-		role = COALESCE($2, role),
-		email = COALESCE($3, email),
-		agent_config = COALESCE($4, agent_config),
-		is_active = COALESCE($5, is_active),
-		updated_at = NOW()
-		WHERE id = $6`
-	_, err := r.db.Exec(ctx, query, req.Name, req.Role, req.Email, req.AgentConfig, req.IsActive, id)
-	if err != nil {
+
+	updates := map[string]any{}
+	if req.Name != nil {
+		updates["name"] = *req.Name
+	}
+	if req.Role != nil {
+		updates["role"] = *req.Role
+	}
+	if req.Email != nil {
+		updates["email"] = *req.Email
+	}
+	if req.AgentConfig != nil {
+		updates["agent_config"] = newJSONText(*req.AgentConfig, "{}")
+	}
+	if req.Skills != nil {
+		updates["skills"] = newStringList(*req.Skills)
+	}
+	if req.IsActive != nil {
+		updates["is_active"] = *req.IsActive
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+
+	if err := r.db.WithContext(ctx).
+		Model(&memberRecord{}).
+		Where("id = ?", id).
+		Updates(updates).
+		Error; err != nil {
 		return fmt.Errorf("update member: %w", err)
 	}
 	return nil
@@ -96,15 +101,12 @@ func (r *MemberRepository) GetByUserAndProject(ctx context.Context, userID, proj
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT id, project_id, user_id, name, type, role, email, avatar_url, agent_config, skills, is_active, created_at, updated_at
-		FROM members WHERE user_id = $1 AND project_id = $2`
-	m := &model.Member{}
-	err := r.db.QueryRow(ctx, query, userID, projectID).Scan(
-		&m.ID, &m.ProjectID, &m.UserID, &m.Name, &m.Type, &m.Role, &m.Email,
-		&m.AvatarURL, &m.AgentConfig, &m.Skills, &m.IsActive, &m.CreatedAt, &m.UpdatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("get member by user and project: %w", err)
+
+	var record memberRecord
+	if err := r.db.WithContext(ctx).
+		Where("user_id = ? AND project_id = ?", userID, projectID).
+		Take(&record).Error; err != nil {
+		return nil, fmt.Errorf("get member by user and project: %w", normalizeRepositoryError(err))
 	}
-	return m, nil
+	return record.toModel(), nil
 }

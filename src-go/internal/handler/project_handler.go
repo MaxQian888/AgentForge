@@ -83,3 +83,14 @@ func (h *ProjectHandler) Update(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, project.ToDTO())
 }
+
+func (h *ProjectHandler) Delete(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid project ID"})
+	}
+	if err := h.repo.Delete(c.Request().Context(), id); err != nil {
+		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "project not found"})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "project deleted"})
+}

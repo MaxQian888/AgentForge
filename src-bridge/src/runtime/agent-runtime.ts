@@ -1,6 +1,14 @@
 import type { AgentStatus } from "../types.js";
+import type { ExecuteRequest } from "../types.js";
 
-export type RuntimeStatus = "starting" | "running" | "paused" | "completed" | "failed";
+export type RuntimeStatus =
+  | "starting"
+  | "running"
+  | "paused"
+  | "completed"
+  | "failed"
+  | "cancelled"
+  | "budget_exceeded";
 
 export class AgentRuntime {
   readonly taskId: string;
@@ -12,6 +20,8 @@ export class AgentRuntime {
   spentUsd: number;
   lastActivity: number;
   lastTool: string;
+  request: ExecuteRequest | null;
+  budgetWarningEmitted: boolean;
 
   constructor(taskId: string, sessionId: string) {
     this.taskId = taskId;
@@ -23,14 +33,29 @@ export class AgentRuntime {
     this.spentUsd = 0;
     this.lastActivity = Date.now();
     this.lastTool = "";
+    this.request = null;
+    this.budgetWarningEmitted = false;
   }
 
-  cancel(): void {
-    this.abortController.abort();
-    this.status = "failed";
+  bindRequest(request: ExecuteRequest): void {
+    this.request = { ...request };
+  }
+
+  cancel(nextStatus: Extract<RuntimeStatus, "paused" | "cancelled" | "budget_exceeded" | "failed"> = "cancelled"): void {
+    this.abortController.abort(
+      nextStatus === "paused"
+        ? "paused_by_user"
+        : nextStatus === "budget_exceeded"
+          ? "budget_exceeded"
+          : "cancelled_by_user",
+    );
+    this.status = nextStatus;
   }
 
   toStatus(): AgentStatus {
+    const runtime = this.request?.runtime ?? "claude_code";
+    const provider = this.request?.provider ?? "";
+    const model = this.request?.model ?? "";
     return {
       task_id: this.taskId,
       state: this.status,
@@ -38,6 +63,9 @@ export class AgentRuntime {
       last_tool: this.lastTool,
       last_activity_ms: this.lastActivity,
       spent_usd: this.spentUsd,
+      runtime,
+      provider,
+      model,
     };
   }
 }

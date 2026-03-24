@@ -10,7 +10,7 @@ describe("classifyError", () => {
       },
       {
         input: new Error("rate_limit reached with 429"),
-        expected: { code: "RATE_LIMITED", retryable: true },
+        expected: { code: "RATE_LIMIT", retryable: true },
       },
       {
         input: new Error("cluster overloaded with 529"),
@@ -26,7 +26,7 @@ describe("classifyError", () => {
       },
       {
         input: new Error("authentication failed with 401"),
-        expected: { code: "AUTH_ERROR", retryable: false },
+        expected: { code: "AUTH_FAILED", retryable: false },
       },
       {
         input: "unexpected failure",

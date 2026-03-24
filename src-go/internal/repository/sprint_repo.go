@@ -6,13 +6,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"gorm.io/gorm"
 )
 
 type SprintRepository struct {
-	db DBTX
+	db *gorm.DB
 }
 
-func NewSprintRepository(db DBTX) *SprintRepository {
+func NewSprintRepository(db *gorm.DB) *SprintRepository {
 	return &SprintRepository{db: db}
 }
 
@@ -20,13 +21,7 @@ func (r *SprintRepository) Create(ctx context.Context, sprint *model.Sprint) err
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	query := `
-		INSERT INTO sprints (id, project_id, name, start_date, end_date, status, total_budget_usd, spent_usd, created_at, updated_at)
-		VALUES ($1, $2, $3, $4, $5, $6, $7, $8, NOW(), NOW())
-	`
-	_, err := r.db.Exec(ctx, query, sprint.ID, sprint.ProjectID, sprint.Name,
-		sprint.StartDate, sprint.EndDate, sprint.Status, sprint.TotalBudgetUsd, sprint.SpentUsd)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Create(newSprintRecord(sprint)).Error; err != nil {
 		return fmt.Errorf("create sprint: %w", err)
 	}
 	return nil
@@ -36,56 +31,69 @@ func (r *SprintRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Sp
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT id, project_id, name, start_date, end_date, status, total_budget_usd, spent_usd, created_at, updated_at
-		FROM sprints WHERE id = $1`
-	s := &model.Sprint{}
-	err := r.db.QueryRow(ctx, query, id).Scan(
-		&s.ID, &s.ProjectID, &s.Name, &s.StartDate, &s.EndDate,
-		&s.Status, &s.TotalBudgetUsd, &s.SpentUsd, &s.CreatedAt, &s.UpdatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("get sprint by id: %w", err)
+
+	var record sprintRecord
+	if err := r.db.WithContext(ctx).Where("id = ?", id).Take(&record).Error; err != nil {
+		return nil, fmt.Errorf("get sprint by id: %w", normalizeRepositoryError(err))
 	}
-	return s, nil
+	return record.toModel(), nil
 }
 
 func (r *SprintRepository) ListByProject(ctx context.Context, projectID uuid.UUID) ([]*model.Sprint, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT id, project_id, name, start_date, end_date, status, total_budget_usd, spent_usd, created_at, updated_at
-		FROM sprints WHERE project_id = $1 ORDER BY start_date DESC`
-	rows, err := r.db.Query(ctx, query, projectID)
-	if err != nil {
+
+	var records []sprintRecord
+	if err := r.db.WithContext(ctx).
+		Where("project_id = ?", projectID).
+		Order("start_date DESC").
+		Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list sprints: %w", err)
 	}
-	defer rows.Close()
 
-	var sprints []*model.Sprint
-	for rows.Next() {
-		s := &model.Sprint{}
-		if err := rows.Scan(&s.ID, &s.ProjectID, &s.Name, &s.StartDate, &s.EndDate,
-			&s.Status, &s.TotalBudgetUsd, &s.SpentUsd, &s.CreatedAt, &s.UpdatedAt); err != nil {
-			return nil, fmt.Errorf("scan sprint: %w", err)
-		}
-		sprints = append(sprints, s)
+	sprints := make([]*model.Sprint, 0, len(records))
+	for i := range records {
+		sprints = append(sprints, records[i].toModel())
 	}
-	return sprints, rows.Err()
+	return sprints, nil
+}
+
+func (r *SprintRepository) Update(ctx context.Context, sprint *model.Sprint) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+
+	result := r.db.WithContext(ctx).
+		Model(&sprintRecord{}).
+		Where("id = ?", sprint.ID).
+		Updates(map[string]any{
+			"name":             sprint.Name,
+			"start_date":       sprint.StartDate,
+			"end_date":         sprint.EndDate,
+			"status":           sprint.Status,
+			"total_budget_usd": sprint.TotalBudgetUsd,
+			"spent_usd":        sprint.SpentUsd,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("update sprint: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("update sprint: %w", ErrNotFound)
+	}
+	return nil
 }
 
 func (r *SprintRepository) GetActive(ctx context.Context, projectID uuid.UUID) (*model.Sprint, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT id, project_id, name, start_date, end_date, status, total_budget_usd, spent_usd, created_at, updated_at
-		FROM sprints WHERE project_id = $1 AND status = 'active' LIMIT 1`
-	s := &model.Sprint{}
-	err := r.db.QueryRow(ctx, query, projectID).Scan(
-		&s.ID, &s.ProjectID, &s.Name, &s.StartDate, &s.EndDate,
-		&s.Status, &s.TotalBudgetUsd, &s.SpentUsd, &s.CreatedAt, &s.UpdatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("get active sprint: %w", err)
+
+	var record sprintRecord
+	if err := r.db.WithContext(ctx).
+		Where("project_id = ? AND status = ?", projectID, "active").
+		Take(&record).Error; err != nil {
+		return nil, fmt.Errorf("get active sprint: %w", normalizeRepositoryError(err))
 	}
-	return s, nil
+	return record.toModel(), nil
 }

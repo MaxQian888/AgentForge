@@ -19,7 +19,11 @@ func TestNewPostgres_Connect(t *testing.T) {
 	if err != nil {
 		t.Fatalf("NewPostgres() error: %v", err)
 	}
-	defer pool.Close()
+	defer func() {
+		if err := database.ClosePostgres(pool); err != nil {
+			t.Fatalf("ClosePostgres() error: %v", err)
+		}
+	}()
 
 	// Ping is already done inside NewPostgres; reaching here means it worked.
 	t.Log("PostgreSQL connection OK")

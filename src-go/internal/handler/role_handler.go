@@ -76,6 +76,20 @@ func (h *RoleHandler) Update(c echo.Context) error {
 	return c.JSON(http.StatusOK, loadedRole)
 }
 
+func (h *RoleHandler) Delete(c echo.Context) error {
+	roleID := c.Param("id")
+	if roleID == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "role id required"})
+	}
+	if err := h.store.Delete(roleID); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "role not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete role"})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "role deleted"})
+}
+
 func firstRoleID(role model.RoleManifest) string {
 	if role.Metadata.ID != "" {
 		return role.Metadata.ID

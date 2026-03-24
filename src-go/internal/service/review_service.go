@@ -47,6 +47,7 @@ type ReviewService struct {
 	hub           *ws.Hub
 	bridge        ReviewBridgeClient
 	progress      *TaskProgressService
+	imProgress    IMBoundProgressNotifier
 }
 
 func NewReviewService(
@@ -69,6 +70,10 @@ func NewReviewService(
 		bridge:        bridge,
 		progress:      tracker,
 	}
+}
+
+func (s *ReviewService) SetIMProgressNotifier(notifier IMBoundProgressNotifier) {
+	s.imProgress = notifier
 }
 
 func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewRequest) (*model.Review, error) {
@@ -195,15 +200,46 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 		UpdateHealth:   true,
 		MarkTransition: true,
 	})
+	if s.imProgress != nil {
+		_, _ = s.imProgress.QueueBoundProgress(ctx, IMBoundProgressRequest{
+			TaskID:     task.ID.String(),
+			ReviewID:   review.ID.String(),
+			Kind:       IMDeliveryKindTerminal,
+			Content:    fmt.Sprintf("代码审查已完成。\nReview: %s\n状态: %s\n建议: %s", review.ID.String(), review.Status, review.Recommendation),
+			IsTerminal: true,
+		})
+	}
 	return review, nil
 }
 
 var _ interface {
 	Trigger(context.Context, *model.TriggerReviewRequest) (*model.Review, error)
 	Complete(context.Context, uuid.UUID, *model.CompleteReviewRequest) (*model.Review, error)
+	Approve(context.Context, uuid.UUID, string) (*model.Review, error)
+	Reject(context.Context, uuid.UUID, string, string) (*model.Review, error)
 	GetByID(context.Context, uuid.UUID) (*model.Review, error)
 	GetByTask(context.Context, uuid.UUID) ([]*model.Review, error)
 } = (*ReviewService)(nil)
+
+func (s *ReviewService) Approve(ctx context.Context, id uuid.UUID, comment string) (*model.Review, error) {
+	return s.Complete(ctx, id, &model.CompleteReviewRequest{
+		RiskLevel:      model.ReviewRiskLevelLow,
+		Summary:        comment,
+		Recommendation: model.ReviewRecommendationApprove,
+	})
+}
+
+func (s *ReviewService) Reject(ctx context.Context, id uuid.UUID, reason, comment string) (*model.Review, error) {
+	summary := reason
+	if comment != "" {
+		summary = reason + ": " + comment
+	}
+	return s.Complete(ctx, id, &model.CompleteReviewRequest{
+		RiskLevel:      model.ReviewRiskLevelHigh,
+		Summary:        summary,
+		Recommendation: model.ReviewRecommendationReject,
+	})
+}
 
 func (s *ReviewService) GetByID(ctx context.Context, id uuid.UUID) (*model.Review, error) {
 	review, err := s.reviews.GetByID(ctx, id)

@@ -169,6 +169,23 @@ export function DashboardOverview({
         })}
       </div>
 
+      <div className="flex flex-wrap gap-3">
+        <Button asChild>
+          <Link href={summary.scope.projectId ? `/project?id=${summary.scope.projectId}` : summary.links.projects}>
+            Create Task
+          </Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href={summary.links.agents}>Spawn Agent</Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href="/sprints">Manage Sprints</Link>
+        </Button>
+        <Button asChild variant="outline">
+          <Link href="/roles">Configure Roles</Link>
+        </Button>
+      </div>
+
       <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2">

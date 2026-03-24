@@ -1,5 +1,5 @@
 {
-  "name": "react-quick-starter",
+  "name": "agentforge",
   "version": "0.1.0",
   "private": true,
   "scripts": {
@@ -13,14 +13,20 @@
     "build:backend": "node scripts/build-backend.js",
     "build:backend:dev": "node scripts/build-backend.js --current-only",
     "build:plugin:wasm": "node scripts/build-go-wasm-plugin.js",
-    "tauri:dev": "pnpm build:backend:dev && pnpm tauri dev",
+    "build:bridge": "node scripts/build-bridge.js",
+    "build:bridge:dev": "node scripts/build-bridge.js --current-only",
+    "tauri:dev": "pnpm build:backend:dev && pnpm build:bridge:dev && pnpm tauri dev",
     "tauri:build": "pnpm tauri build",
-    "build:bridge": "cd src-bridge && bun install && bun run build"
+    "build:desktop": "pnpm build:backend && pnpm build:bridge && pnpm tauri build"
   },
   "dependencies": {
     "@hello-pangea/dnd": "^18.0.1",
     "@radix-ui/react-slot": "^1.2.4",
     "@tauri-apps/api": "^2.10.1",
+    "@tauri-apps/plugin-dialog": "~2.6.0",
+    "@tauri-apps/plugin-global-shortcut": "~2.3.1",
+    "@tauri-apps/plugin-notification": "~2.3.3",
+    "@tauri-apps/plugin-updater": "~2.10.0",
     "class-variance-authority": "^0.7.1",
     "clsx": "^2.1.1",
     "lucide-react": "^0.577.0",

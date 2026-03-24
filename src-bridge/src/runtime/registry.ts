@@ -8,7 +8,13 @@ import {
   type CommandRuntimeRunner,
 } from "../handlers/command-runtime.js";
 import type { AgentRuntime } from "./agent-runtime.js";
-import type { ExecuteRequest, AgentRuntimeKey } from "../types.js";
+import type {
+  ExecuteRequest,
+  AgentRuntimeKey,
+  RuntimeCatalog,
+  RuntimeCatalogEntry,
+  RuntimeDiagnostic,
+} from "../types.js";
 import type { EventStreamer } from "../ws/event-stream.js";
 
 type EventSink = Pick<EventStreamer, "send">;
@@ -19,7 +25,11 @@ export class UnsupportedRuntimeProviderError extends Error {}
 
 interface RuntimeAdapter {
   key: AgentRuntimeKey;
+  label: string;
+  defaultProvider: string;
+  compatibleProviders: string[];
   defaultModel?: string;
+  getDiagnostics(): RuntimeDiagnostic[];
   ensureAvailable(): void;
   execute(
     runtime: AgentRuntime,
@@ -49,6 +59,8 @@ export class AgentRuntimeRegistry {
       throw new UnknownRuntimeError(`Unknown runtime: ${runtimeKey}`);
     }
 
+    const provider = normalizeProvider(req.provider) || adapter.defaultProvider;
+    validateRuntimeProvider(runtimeKey, provider, adapter.compatibleProviders);
     adapter.ensureAvailable();
 
     return {
@@ -56,8 +68,27 @@ export class AgentRuntimeRegistry {
       request: {
         ...req,
         runtime: runtimeKey,
+        provider,
         model: req.model ?? adapter.defaultModel,
       },
+    };
+  }
+
+  getCatalog(): RuntimeCatalog {
+    return {
+      defaultRuntime: this.defaultRuntime,
+      runtimes: Object.values(this.adapters).map((adapter) => {
+        const diagnostics = adapter.getDiagnostics();
+        return {
+          key: adapter.key,
+          label: adapter.label,
+          defaultProvider: adapter.defaultProvider,
+          compatibleProviders: [...adapter.compatibleProviders],
+          defaultModel: adapter.defaultModel,
+          available: !diagnostics.some((diagnostic) => diagnostic.blocking),
+          diagnostics,
+        } satisfies RuntimeCatalogEntry;
+      }),
     };
   }
 }
@@ -71,18 +102,28 @@ export function createRuntimeRegistry(
   const adapters: Record<AgentRuntimeKey, RuntimeAdapter> = {
     claude_code: {
       key: "claude_code",
+      label: "Claude Code",
+      defaultProvider: "anthropic",
+      compatibleProviders: ["anthropic"],
       defaultModel: readEnvConfig(envLookup, "CLAUDE_CODE_RUNTIME_MODEL"),
-      ensureAvailable() {
+      getDiagnostics() {
         if (options.queryRunner) {
-          return;
+          return [];
         }
-
+        const diagnostics: RuntimeDiagnostic[] = [];
         const apiKey = envLookup("ANTHROPIC_API_KEY")?.trim();
         if (!apiKey) {
-          throw new RuntimeConfigurationError(
-            "Missing required environment variable for runtime claude_code: ANTHROPIC_API_KEY",
-          );
+          diagnostics.push({
+            code: "missing_credentials",
+            message:
+              "Missing required environment variable for runtime claude_code: ANTHROPIC_API_KEY",
+            blocking: true,
+          });
         }
+        return diagnostics;
+      },
+      ensureAvailable() {
+        assertDiagnosticsAvailable("claude_code", this.getDiagnostics());
       },
       async execute(runtime, streamer, req, systemPrompt) {
         await streamClaudeRuntime(runtime, streamer, req, systemPrompt, {
@@ -122,12 +163,25 @@ function createCommandAdapter(
 ): RuntimeAdapter {
   return {
     key,
+    label: key === "codex" ? "Codex" : "OpenCode",
+    defaultProvider: key === "codex" ? "openai" : "opencode",
+    compatibleProviders: key === "codex" ? ["openai", "codex"] : ["opencode"],
     defaultModel: options.defaultModel,
-    ensureAvailable() {
+    getDiagnostics() {
       const resolved = options.executableLookup(options.defaultCommand);
-      if (!resolved) {
-        throw new RuntimeConfigurationError(`Executable not found for runtime ${key}`);
+      if (resolved) {
+        return [];
       }
+      return [
+        {
+          code: "missing_executable",
+          message: `Executable not found for runtime ${key}`,
+          blocking: true,
+        },
+      ];
+    },
+    ensureAvailable() {
+      assertDiagnosticsAvailable(key, this.getDiagnostics());
     },
     async execute(runtime, streamer, req, systemPrompt) {
       await streamCommandRuntime(runtime, streamer, req, systemPrompt, {
@@ -152,10 +206,8 @@ function resolveRuntimeKey(
     return defaultRuntime;
   }
 
-  switch (req.provider) {
+  switch (normalizeProvider(req.provider)) {
     case "anthropic":
-    case "claude":
-    case "claude_code":
       return "claude_code";
     case "codex":
       return "codex";
@@ -166,6 +218,37 @@ function resolveRuntimeKey(
         `Provider ${req.provider} does not support agent_execution`,
       );
   }
+}
+
+function validateRuntimeProvider(
+  runtime: AgentRuntimeKey,
+  provider: string,
+  compatibleProviders: string[],
+): void {
+  if (compatibleProviders.includes(provider)) {
+    return;
+  }
+  throw new UnsupportedRuntimeProviderError(
+    `Runtime ${runtime} is incompatible with provider ${provider}`,
+  );
+}
+
+function assertDiagnosticsAvailable(
+  runtime: AgentRuntimeKey,
+  diagnostics: RuntimeDiagnostic[],
+): void {
+  const blocking = diagnostics.find((diagnostic) => diagnostic.blocking);
+  if (blocking) {
+    throw new RuntimeConfigurationError(blocking.message);
+  }
+  if (!diagnostics.length) {
+    return;
+  }
+  throw new RuntimeConfigurationError(`Runtime ${runtime} is not available`);
+}
+
+function normalizeProvider(provider: string | undefined): string {
+  return provider?.trim().toLowerCase() ?? "";
 }
 
 function validateRuntimeKey(runtime: string): asserts runtime is AgentRuntimeKey {

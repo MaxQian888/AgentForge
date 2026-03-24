@@ -36,6 +36,7 @@ type MemberDTO struct {
 	Role      string   `json:"role"`
 	Email     string   `json:"email"`
 	AvatarURL string   `json:"avatarUrl"`
+	AgentConfig string `json:"agentConfig,omitempty"`
 	Skills    []string `json:"skills"`
 	IsActive  bool     `json:"isActive"`
 	CreatedAt string   `json:"createdAt"`
@@ -55,7 +56,7 @@ type UpdateMemberRequest struct {
 	Role        *string  `json:"role"`
 	Email       *string  `json:"email"`
 	AgentConfig *string  `json:"agentConfig"`
-	Skills      []string `json:"skills"`
+	Skills      *[]string `json:"skills"`
 	IsActive    *bool    `json:"isActive"`
 }
 
@@ -68,6 +69,7 @@ func (m *Member) ToDTO() MemberDTO {
 		Role:      m.Role,
 		Email:     m.Email,
 		AvatarURL: m.AvatarURL,
+		AgentConfig: m.AgentConfig,
 		Skills:    m.Skills,
 		IsActive:  m.IsActive,
 		CreatedAt: m.CreatedAt.Format(time.RFC3339),

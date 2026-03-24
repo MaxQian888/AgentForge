@@ -8,6 +8,10 @@ import {
   type DashboardMemberSource,
   type TeamMember,
 } from "@/lib/dashboard/summary";
+import {
+  serializeAgentProfileDraft,
+  type AgentProfileDraft,
+} from "@/lib/team/agent-profile";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -17,6 +21,7 @@ export interface CreateMemberInput {
   role?: string;
   email?: string;
   skills?: string[];
+  agentProfile?: AgentProfileDraft;
   agentConfig?: string;
 }
 
@@ -24,6 +29,9 @@ export interface UpdateMemberInput {
   name?: string;
   role?: string;
   email?: string;
+  skills?: string[];
+  agentProfile?: AgentProfileDraft;
+  agentConfig?: string;
   isActive?: boolean;
 }
 
@@ -46,6 +54,16 @@ function getToken() {
 
 function normalizeMembers(members: DashboardMemberSource[]): TeamMember[] {
   return members.map(normalizeTeamMember);
+}
+
+function resolveAgentConfig(input: {
+  agentProfile?: AgentProfileDraft;
+  agentConfig?: string;
+}) {
+  if (input.agentProfile) {
+    return serializeAgentProfileDraft(input.agentProfile);
+  }
+  return input.agentConfig ?? "";
 }
 
 export const useMemberStore = create<MemberState>()((set) => ({
@@ -103,7 +121,7 @@ export const useMemberStore = create<MemberState>()((set) => ({
         role: input.role ?? "",
         email: input.email ?? "",
         skills: input.skills ?? [],
-        agentConfig: input.agentConfig ?? "",
+        agentConfig: resolveAgentConfig(input),
       },
       { token }
     );
@@ -131,6 +149,8 @@ export const useMemberStore = create<MemberState>()((set) => ({
         name: input.name,
         role: input.role,
         email: input.email,
+        skills: input.skills,
+        agentConfig: resolveAgentConfig(input),
         isActive: input.isActive,
       },
       { token }

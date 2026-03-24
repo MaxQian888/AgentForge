@@ -51,6 +51,17 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 	}
 }
 
+func (s *Stub) ReplyContextFromTarget(target *core.ReplyTarget) any {
+	if target == nil {
+		return nil
+	}
+	chatID := target.ChatID
+	if chatID == "" {
+		chatID = target.ChannelID
+	}
+	return &core.Message{ChatID: chatID, ReplyTarget: target}
+}
+
 func (s *Stub) Start(handler core.MessageHandler) error {
 	s.handler = handler
 
@@ -126,6 +137,13 @@ func (s *Stub) handleTestMessage(w http.ResponseWriter, r *http.Request) {
 		Content:    req.Content,
 		Timestamp:  time.Now(),
 		IsGroup:    req.IsGroup,
+		ReplyTarget: &core.ReplyTarget{
+			Platform:         "discord",
+			ChatID:           req.ChatID,
+			ChannelID:        req.ChatID,
+			InteractionToken: "stub-interaction-token",
+			UseReply:         true,
+		},
 	}
 	msg.ReplyCtx = msg
 

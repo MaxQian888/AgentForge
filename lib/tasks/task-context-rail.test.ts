@@ -1,4 +1,5 @@
 import type { Notification } from "@/lib/stores/notification-store";
+import type { Agent } from "@/lib/stores/agent-store";
 import type { Task } from "@/lib/stores/task-store";
 import { buildContextRailState } from "./task-context-rail";
 
@@ -13,7 +14,12 @@ const baseTask: Task = {
   assigneeType: "human",
   assigneeName: "Alice",
   cost: 3.5,
+  budgetUsd: 5,
   spentUsd: 3.5,
+  agentBranch: "",
+  agentWorktree: "",
+  agentSessionId: "",
+  blockedBy: [],
   plannedStartAt: "2026-03-25T09:00:00.000Z",
   plannedEndAt: "2026-03-27T18:00:00.000Z",
   progress: {
@@ -35,13 +41,14 @@ const unscheduledTask: Task = {
   ...baseTask,
   id: "task-2",
   title: "Calendar polish",
-  status: "triaged",
+  status: "blocked",
   priority: "medium",
   assigneeId: null,
   assigneeType: null,
   assigneeName: null,
   cost: null,
   spentUsd: 0,
+  blockedBy: ["task-1"],
   plannedStartAt: null,
   plannedEndAt: null,
   progress: {
@@ -50,6 +57,53 @@ const unscheduledTask: Task = {
     riskReason: "no_assignee",
   },
 };
+
+const completedTask: Task = {
+  ...baseTask,
+  id: "task-3",
+  title: "Ship task workspace",
+  status: "done",
+  cost: 4.25,
+  budgetUsd: 4,
+  spentUsd: 4.25,
+  blockedBy: [],
+};
+
+const readyTask: Task = {
+  ...baseTask,
+  id: "task-4",
+  title: "Polish rollout",
+  status: "blocked",
+  cost: 0,
+  spentUsd: 0,
+  blockedBy: ["task-3"],
+};
+
+const agents: Agent[] = [
+  {
+    id: "agent-1",
+    taskId: "task-1",
+    taskTitle: "Implement timeline view",
+    memberId: "member-2",
+    roleId: "frontend-agent",
+    roleName: "Frontend agent",
+    status: "running",
+    provider: "anthropic",
+    model: "claude-sonnet-4-6",
+    turns: 5,
+    cost: 1.75,
+    budget: 3,
+    worktreePath: "",
+    branchName: "agent/task-1",
+    sessionId: "session-1",
+    lastActivity: "2026-03-24T10:10:00.000Z",
+    startedAt: "2026-03-24T10:00:00.000Z",
+    createdAt: "2026-03-24T10:00:00.000Z",
+    completedAt: null,
+    canResume: true,
+    memoryStatus: "available",
+  },
+];
 
 const notifications: Notification[] = [
   {
@@ -82,6 +136,7 @@ describe("buildContextRailState", () => {
       selectedTaskId: "task-1",
       projectId: "project-1",
       notifications,
+      agents,
     });
 
     expect(result.selectionState).toBe("hidden_by_filter");
@@ -95,6 +150,7 @@ describe("buildContextRailState", () => {
       selectedTaskId: "task-missing",
       projectId: "project-1",
       notifications,
+      agents,
     });
 
     expect(result.selectionState).toBe("summary");
@@ -103,17 +159,18 @@ describe("buildContextRailState", () => {
 
   it("derives health counts and project-scoped progress alerts", () => {
     const result = buildContextRailState({
-      tasks: [baseTask, unscheduledTask],
-      filteredTasks: [baseTask, unscheduledTask],
+      tasks: [baseTask, unscheduledTask, completedTask, readyTask],
+      filteredTasks: [baseTask, unscheduledTask, completedTask, readyTask],
       selectedTaskId: null,
       projectId: "project-1",
       notifications,
+      agents,
     });
 
     expect(result.counts).toEqual({
       healthy: 0,
       warning: 1,
-      stalled: 1,
+      stalled: 3,
       unscheduled: 1,
     });
     expect(result.alerts).toEqual([
@@ -122,5 +179,18 @@ describe("buildContextRailState", () => {
         type: "task_progress_stalled",
       }),
     ]);
+    expect(result.dependencySummary).toEqual({
+      blocked: 1,
+      readyToUnblock: 1,
+    });
+    expect(result.costSummary).toEqual({
+      totalSpentUsd: 7.75,
+      totalBudgetUsd: 19,
+      budgetedTaskCount: 4,
+      overBudgetTaskCount: 1,
+      activeRunCostUsd: 1.75,
+      activeRunBudgetUsd: 3,
+      activeRunCount: 1,
+    });
   });
 });

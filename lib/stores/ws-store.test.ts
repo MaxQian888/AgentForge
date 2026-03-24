@@ -27,14 +27,22 @@ jest.mock("@/lib/ws-client", () => {
   return { WSClient: MockWSClient };
 });
 
+import { useAgentStore } from "./agent-store";
 import { useDashboardStore } from "./dashboard-store";
 import { useNotificationStore } from "./notification-store";
 import { useTaskStore } from "./task-store";
+import { useWorkflowStore } from "./workflow-store";
 import { useWSStore } from "./ws-store";
 
 describe("useWSStore", () => {
   beforeEach(() => {
     useTaskStore.setState({ tasks: [], loading: false, error: null });
+    useAgentStore.setState({
+      agents: [],
+      agentOutputs: new Map(),
+      pool: { active: 0, max: 2, available: 2, pausedResumable: 0 },
+      loading: false,
+    });
     useNotificationStore.setState({ notifications: [], unreadCount: 0 });
     useDashboardStore.setState({
       summary: null,
@@ -47,6 +55,13 @@ describe("useWSStore", () => {
       loading: false,
       error: null,
       sectionErrors: {},
+    });
+    useWorkflowStore.setState({
+      config: null,
+      loading: false,
+      saving: false,
+      error: null,
+      recentActivityByProject: {},
     });
     useWSStore.getState().disconnect();
   });
@@ -141,5 +156,141 @@ describe("useWSStore", () => {
         message: "Task Implement detector is stalled.",
       })
     );
+  });
+
+  it("hydrates agent output envelopes and keeps pool stats in sync with live agent events", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+    expect(client).toBeDefined();
+
+    client?.emit("agent.started", {
+      type: "agent.started",
+      payload: {
+        id: "run-1",
+        taskId: "task-1",
+        taskTitle: "Implement orchestration",
+        memberId: "member-1",
+        roleName: "Planner",
+        status: "running",
+        turnCount: 1,
+        costUsd: 0.2,
+        budgetUsd: 5,
+        createdAt: "2026-03-24T09:00:00.000Z",
+        startedAt: "2026-03-24T09:00:00.000Z",
+        lastActivityAt: "2026-03-24T09:00:00.000Z",
+      },
+    });
+
+    client?.emit("agent.output", {
+      type: "agent.output",
+      payload: {
+        agent_id: "run-1",
+        line: "Planning the implementation.",
+      },
+    });
+
+    client?.emit("agent.progress", {
+      type: "agent.progress",
+      payload: {
+        id: "run-1",
+        taskId: "task-1",
+        memberId: "member-1",
+        status: "paused",
+        createdAt: "2026-03-24T09:00:00.000Z",
+        startedAt: "2026-03-24T09:00:00.000Z",
+        lastActivityAt: "2026-03-24T09:10:00.000Z",
+        canResume: true,
+      },
+    });
+
+    expect(useAgentStore.getState().agentOutputs.get("run-1")).toEqual([
+      "Planning the implementation.",
+    ]);
+    expect(useAgentStore.getState().pool).toEqual({
+      active: 0,
+      max: 2,
+      available: 2,
+      pausedResumable: 1,
+    });
+  });
+
+  it("applies blocked dispatch envelopes so task views do not miss assignment failures", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+    expect(client).toBeDefined();
+
+    client?.emit("task.dispatch_blocked", {
+      type: "task.dispatch_blocked",
+      payload: {
+        task: {
+          id: "task-2",
+          projectId: "project-1",
+          title: "Dispatch stalled task",
+          description: "",
+          status: "assigned",
+          priority: "high",
+          assigneeId: "member-1",
+          assigneeType: "agent",
+          spentUsd: 0,
+          createdAt: "2026-03-24T09:00:00.000Z",
+          updatedAt: "2026-03-24T09:15:00.000Z",
+        },
+        dispatch: {
+          status: "blocked",
+          reason: "agent pool is at capacity",
+        },
+      },
+    });
+
+    expect(useTaskStore.getState().tasks[0]).toEqual(
+      expect.objectContaining({
+        id: "task-2",
+        status: "assigned",
+      }),
+    );
+    expect(useDashboardStore.getState().tasks[0]).toEqual(
+      expect.objectContaining({
+        id: "task-2",
+      }),
+    );
+  });
+
+  it("stores workflow trigger activity from websocket envelopes", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+    expect(client).toBeDefined();
+
+    client?.emit("workflow.trigger_fired", {
+      type: "workflow.trigger_fired",
+      projectId: "project-1",
+      payload: {
+        taskId: "task-3",
+        action: "notify",
+        from: "triaged",
+        to: "assigned",
+        config: { channel: "team" },
+      },
+    });
+
+    expect(useWorkflowStore.getState().recentActivityByProject["project-1"]).toEqual([
+      expect.objectContaining({
+        taskId: "task-3",
+        action: "notify",
+        from: "triaged",
+        to: "assigned",
+      }),
+    ]);
   });
 });

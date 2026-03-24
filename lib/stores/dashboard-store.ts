@@ -44,6 +44,7 @@ interface DashboardState {
   sectionErrors: Record<string, string>;
   fetchSummary: (options?: { projectId?: string | null; now?: string }) => Promise<void>;
   applyTaskUpdate: (task: DashboardTaskSource) => void;
+  applyAgentUpdate: (agent: DashboardAgentSource) => void;
   applyActivityNotification: (notification: {
     id: string;
     type: string;
@@ -254,6 +255,21 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
       return {
         tasks,
         summary: buildSummarySnapshot({ ...state, tasks }),
+      };
+    });
+  },
+
+  applyAgentUpdate: (agent) => {
+    set((state) => {
+      const existingIndex = state.agents.findIndex((item) => item.id === agent.id);
+      const agents =
+        existingIndex === -1
+          ? [...state.agents, agent]
+          : state.agents.map((item) => (item.id === agent.id ? { ...item, ...agent } : item));
+
+      return {
+        agents,
+        summary: buildSummarySnapshot({ ...state, agents }),
       };
     });
   },

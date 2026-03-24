@@ -46,10 +46,20 @@ function formatProgressReason(reason: string) {
 interface TaskCardProps {
   task: Task;
   index: number;
+  isSelected: boolean;
+  density: "comfortable" | "compact";
+  showDescription: boolean;
   onClick: () => void;
 }
 
-export function TaskCard({ task, index, onClick }: TaskCardProps) {
+export function TaskCard({
+  task,
+  index,
+  isSelected,
+  density,
+  showDescription,
+  onClick,
+}: TaskCardProps) {
   return (
     <Draggable draggableId={task.id} index={index}>
       {(provided, snapshot) => (
@@ -58,14 +68,23 @@ export function TaskCard({ task, index, onClick }: TaskCardProps) {
           {...provided.draggableProps}
           {...provided.dragHandleProps}
           onClick={onClick}
+          data-task-id={task.id}
+          data-selected={isSelected ? "true" : "false"}
           className={cn(
-            "cursor-pointer rounded-md border bg-card p-3 shadow-sm transition-shadow hover:shadow-md",
+            "cursor-pointer rounded-md border bg-card shadow-sm transition-shadow hover:shadow-md",
+            density === "compact" ? "p-2.5" : "p-3",
+            isSelected && "ring-2 ring-primary/25 border-primary/40",
             snapshot.isDragging && "shadow-lg ring-2 ring-primary/20"
           )}
         >
           <p className="mb-2 text-sm font-medium leading-snug">
             {task.title}
           </p>
+          {showDescription && task.description ? (
+            <p className="mb-2 text-xs text-muted-foreground">
+              {task.description}
+            </p>
+          ) : null}
           {task.progress && task.progress.healthStatus !== "healthy" && (
             <div className="mb-2 flex items-center gap-2">
               <Badge

@@ -6,7 +6,6 @@ import (
 	"net/http"
 	"time"
 
-	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -122,7 +121,7 @@ func (h *AuthHandler) GetMe(c echo.Context) error {
 
 	dto, err := h.authSvc.GetCurrentUser(c.Request().Context(), claims.UserID)
 	if err != nil {
-		if errors.Is(err, service.ErrInvalidToken) || errors.Is(err, pgx.ErrNoRows) {
+		if errors.Is(err, service.ErrInvalidToken) || errors.Is(err, repository.ErrNotFound) {
 			return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "unauthorized"})
 		}
 		if errors.Is(err, repository.ErrDatabaseUnavailable) {

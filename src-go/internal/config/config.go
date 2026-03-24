@@ -33,6 +33,9 @@ type Config struct {
 	IMNotifyURL                  string
 	IMNotifyPlatform             string
 	IMNotifyTargetChatID         string
+	IMControlSharedSecret        string
+	IMBridgeHeartbeatTTL         time.Duration
+	IMBridgeProgressInterval     time.Duration
 }
 
 func Load() *Config {
@@ -67,6 +70,9 @@ func Load() *Config {
 	viper.SetDefault("IM_NOTIFY_URL", "")
 	viper.SetDefault("IM_NOTIFY_PLATFORM", "")
 	viper.SetDefault("IM_NOTIFY_TARGET_CHAT_ID", "")
+	viper.SetDefault("IM_CONTROL_SHARED_SECRET", "")
+	viper.SetDefault("IM_BRIDGE_HEARTBEAT_TTL", "2m")
+	viper.SetDefault("IM_BRIDGE_PROGRESS_INTERVAL", "30s")
 
 	accessTTL, _ := time.ParseDuration(viper.GetString("JWT_ACCESS_TTL"))
 	refreshTTL, _ := time.ParseDuration(viper.GetString("JWT_REFRESH_TTL"))
@@ -74,6 +80,8 @@ func Load() *Config {
 	taskProgressStalledAfter, _ := time.ParseDuration(viper.GetString("TASK_PROGRESS_STALLED_AFTER"))
 	taskProgressAlertCooldown, _ := time.ParseDuration(viper.GetString("TASK_PROGRESS_ALERT_COOLDOWN"))
 	taskProgressDetectorInterval, _ := time.ParseDuration(viper.GetString("TASK_PROGRESS_DETECTOR_INTERVAL"))
+	imBridgeHeartbeatTTL, _ := time.ParseDuration(viper.GetString("IM_BRIDGE_HEARTBEAT_TTL"))
+	imBridgeProgressInterval, _ := time.ParseDuration(viper.GetString("IM_BRIDGE_PROGRESS_INTERVAL"))
 
 	origins := strings.Split(viper.GetString("ALLOW_ORIGINS"), ",")
 	for i, o := range origins {
@@ -109,5 +117,8 @@ func Load() *Config {
 		IMNotifyURL:                  viper.GetString("IM_NOTIFY_URL"),
 		IMNotifyPlatform:             viper.GetString("IM_NOTIFY_PLATFORM"),
 		IMNotifyTargetChatID:         viper.GetString("IM_NOTIFY_TARGET_CHAT_ID"),
+		IMControlSharedSecret:        viper.GetString("IM_CONTROL_SHARED_SECRET"),
+		IMBridgeHeartbeatTTL:         imBridgeHeartbeatTTL,
+		IMBridgeProgressInterval:     imBridgeProgressInterval,
 	}
 }

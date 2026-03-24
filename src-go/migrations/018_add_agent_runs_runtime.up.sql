@@ -1,0 +1,2 @@
+ALTER TABLE agent_runs
+ADD COLUMN IF NOT EXISTS runtime TEXT NOT NULL DEFAULT 'claude_code';

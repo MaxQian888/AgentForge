@@ -1,6 +1,10 @@
 package repository
 
-import "errors"
+import (
+	"errors"
+
+	"gorm.io/gorm"
+)
 
 var (
 	// ErrDatabaseUnavailable is returned when PostgreSQL is not connected.
@@ -10,3 +14,13 @@ var (
 	// ErrNotFound is returned when a requested record does not exist.
 	ErrNotFound = errors.New("record not found")
 )
+
+func normalizeRepositoryError(err error) error {
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, gorm.ErrRecordNotFound) {
+		return ErrNotFound
+	}
+	return err
+}

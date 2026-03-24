@@ -50,6 +50,16 @@ type ExecuteResponse struct {
 	SessionID string `json:"session_id"`
 }
 
+type PauseResponse struct {
+	SessionID string `json:"session_id"`
+	Status    string `json:"status"`
+}
+
+type ResumeResponse struct {
+	SessionID string `json:"session_id"`
+	Resumed   bool   `json:"resumed"`
+}
+
 // StatusResponse holds agent run status from the bridge.
 type StatusResponse struct {
 	TaskID         string  `json:"task_id"`
@@ -58,6 +68,30 @@ type StatusResponse struct {
 	LastTool       string  `json:"last_tool"`
 	LastActivityMS int64   `json:"last_activity_ms"`
 	SpentUSD       float64 `json:"spent_usd"`
+	Runtime        string  `json:"runtime"`
+	Provider       string  `json:"provider"`
+	Model          string  `json:"model"`
+}
+
+type RuntimeCatalogResponse struct {
+	DefaultRuntime string                   `json:"default_runtime"`
+	Runtimes       []RuntimeCatalogEntryDTO `json:"runtimes"`
+}
+
+type RuntimeCatalogEntryDTO struct {
+	Key                 string                 `json:"key"`
+	Label               string                 `json:"label"`
+	DefaultProvider     string                 `json:"default_provider"`
+	CompatibleProviders []string               `json:"compatible_providers"`
+	DefaultModel        string                 `json:"default_model"`
+	Available           bool                   `json:"available"`
+	Diagnostics         []RuntimeDiagnosticDTO `json:"diagnostics"`
+}
+
+type RuntimeDiagnosticDTO struct {
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Blocking bool   `json:"blocking"`
 }
 
 type DecomposeRequest struct {
@@ -70,9 +104,10 @@ type DecomposeRequest struct {
 }
 
 type DecomposeSubtask struct {
-	Title       string `json:"title"`
-	Description string `json:"description"`
-	Priority    string `json:"priority"`
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	Priority      string `json:"priority"`
+	ExecutionMode string `json:"executionMode"`
 }
 
 type DecomposeResponse struct {
@@ -171,6 +206,30 @@ func (c *Client) GetStatus(ctx context.Context, taskID string) (*StatusResponse,
 	return &result, nil
 }
 
+func (c *Client) GetRuntimeCatalog(ctx context.Context) (*RuntimeCatalogResponse, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/bridge/runtimes", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("bridge get runtime catalog: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("bridge runtime catalog returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result RuntimeCatalogResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode runtime catalog response: %w", err)
+	}
+	return &result, nil
+}
+
 // Cancel sends a cancel request to the bridge.
 func (c *Client) Cancel(ctx context.Context, taskID, reason string) error {
 	payload, _ := json.Marshal(map[string]string{"task_id": taskID, "reason": reason})
@@ -191,6 +250,64 @@ func (c *Client) Cancel(ctx context.Context, taskID, reason string) error {
 		return fmt.Errorf("bridge cancel returned %d: %s", resp.StatusCode, string(respBody))
 	}
 	return nil
+}
+
+// Pause requests the bridge to pause an active runtime while preserving resumable state.
+func (c *Client) Pause(ctx context.Context, taskID, reason string) (*PauseResponse, error) {
+	payload, _ := json.Marshal(map[string]string{"task_id": taskID, "reason": reason})
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/pause", bytes.NewReader(payload))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("bridge pause: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("bridge pause returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result PauseResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode pause response: %w", err)
+	}
+	return &result, nil
+}
+
+// Resume requests the bridge to resume a runtime from a persisted snapshot.
+func (c *Client) Resume(ctx context.Context, req ExecuteRequest) (*ResumeResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal resume request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/resume", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("bridge resume: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("bridge resume returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result ResumeResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode resume response: %w", err)
+	}
+	return &result, nil
 }
 
 // Health checks if the bridge is reachable.
@@ -239,6 +356,53 @@ func (c *Client) DecomposeTask(ctx context.Context, req DecomposeRequest) (*Deco
 	var result DecomposeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode decompose response: %w", err)
+	}
+	return &result, nil
+}
+
+// ClassifyIntentRequest is sent to the bridge for NLU intent classification.
+type ClassifyIntentRequest struct {
+	Text      string `json:"text"`
+	UserID    string `json:"user_id"`
+	ProjectID string `json:"project_id"`
+}
+
+// ClassifyIntentResponse is the NLU result from the bridge.
+type ClassifyIntentResponse struct {
+	Intent     string  `json:"intent"`
+	Command    string  `json:"command"`
+	Args       string  `json:"args"`
+	Confidence float64 `json:"confidence"`
+	Reply      string  `json:"reply,omitempty"`
+}
+
+// ClassifyIntent sends a natural language text to the bridge for intent classification.
+func (c *Client) ClassifyIntent(ctx context.Context, req ClassifyIntentRequest) (*ClassifyIntentResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal classify intent request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/classify-intent", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("bridge classify intent: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("bridge classify intent returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result ClassifyIntentResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode classify intent response: %w", err)
 	}
 	return &result, nil
 }

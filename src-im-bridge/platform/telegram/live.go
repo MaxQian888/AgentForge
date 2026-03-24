@@ -136,6 +136,15 @@ func (l *Live) Name() string { return "telegram-live" }
 
 func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
 
+func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
+	if target == nil {
+		return nil
+	}
+	chatID, _ := strconv.ParseInt(strings.TrimSpace(firstNonEmpty(target.ChatID, target.ChannelID)), 10, 64)
+	messageID, _ := strconv.Atoi(strings.TrimSpace(target.MessageID))
+	return replyContext{ChatID: chatID, MessageID: messageID}
+}
+
 func (l *Live) Start(handler core.MessageHandler) error {
 	if handler == nil {
 		return errors.New("message handler is required")
@@ -450,6 +459,13 @@ func normalizeIncomingUpdate(incoming update) (*core.Message, error) {
 		ReplyCtx: replyContext{
 			ChatID:    chatID,
 			MessageID: int(incoming.Message.MessageID),
+		},
+		ReplyTarget: &core.ReplyTarget{
+			Platform:  liveMetadata.Source,
+			ChatID:    strconv.FormatInt(chatID, 10),
+			ChannelID: strconv.FormatInt(chatID, 10),
+			MessageID: strconv.FormatInt(incoming.Message.MessageID, 10),
+			UseReply:  true,
 		},
 		Timestamp: time.Unix(incoming.Message.Date, 0),
 		IsGroup:   strings.TrimSpace(incoming.Message.Chat.Type) != "private",

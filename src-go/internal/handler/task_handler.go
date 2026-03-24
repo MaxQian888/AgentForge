@@ -5,25 +5,38 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
+	"github.com/react-go-quick-starter/server/internal/ws"
 )
 
 type TaskHandler struct {
-	repo       *repository.TaskRepository
+	repo       taskRepository
 	decomposer taskDecomposer
 	progress   taskProgressRecorder
 	dispatcher taskDispatcher
+	hub        *ws.Hub
 }
 
 type taskDecomposer interface {
 	Decompose(ctx context.Context, taskID uuid.UUID) (*model.TaskDecompositionResponse, error)
+}
+
+type taskRepository interface {
+	Create(ctx context.Context, task *model.Task) error
+	GetByID(ctx context.Context, id uuid.UUID) (*model.Task, error)
+	List(ctx context.Context, projectID uuid.UUID, q model.TaskListQuery) ([]*model.Task, int, error)
+	Update(ctx context.Context, id uuid.UUID, req *model.UpdateTaskRequest) error
+	Delete(ctx context.Context, id uuid.UUID) error
+	TransitionStatus(ctx context.Context, id uuid.UUID, newStatus string) error
+	UpdateAssignee(ctx context.Context, id uuid.UUID, assigneeID uuid.UUID, assigneeType string) error
+	ListDependents(ctx context.Context, blockerID uuid.UUID) ([]*model.Task, error)
 }
 
 type taskProgressRecorder interface {
@@ -34,7 +47,7 @@ type taskDispatcher interface {
 	Assign(ctx context.Context, taskID uuid.UUID, req *model.AssignRequest) (*model.TaskDispatchResponse, error)
 }
 
-func NewTaskHandler(repo *repository.TaskRepository, decomposer ...taskDecomposer) *TaskHandler {
+func NewTaskHandler(repo taskRepository, decomposer ...taskDecomposer) *TaskHandler {
 	handler := &TaskHandler{repo: repo}
 	if len(decomposer) > 0 {
 		handler.decomposer = decomposer[0]
@@ -49,6 +62,11 @@ func (h *TaskHandler) WithProgress(progress taskProgressRecorder) *TaskHandler {
 
 func (h *TaskHandler) WithDispatcher(dispatcher taskDispatcher) *TaskHandler {
 	h.dispatcher = dispatcher
+	return h
+}
+
+func (h *TaskHandler) WithHub(hub *ws.Hub) *TaskHandler {
+	h.hub = hub
 	return h
 }
 
@@ -183,12 +201,25 @@ func (h *TaskHandler) Update(c echo.Context) error {
 	if err := c.Bind(req); err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
 	}
+	if req.BlockedBy != nil {
+		sanitized, err := sanitizeBlockedByIDs(id, *req.BlockedBy)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+		}
+		req.BlockedBy = &sanitized
+	}
 	if err := h.repo.Update(c.Request().Context(), id, req); err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update task"})
 	}
 	task, err := h.repo.GetByID(c.Request().Context(), id)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch updated task"})
+	}
+	if req.BlockedBy != nil {
+		task, err = h.resolveReadyTaskState(c.Request().Context(), task)
+		if err != nil {
+			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to reconcile task dependencies"})
+		}
 	}
 	if h.progress != nil {
 		snapshot, progressErr := h.progress.RecordActivity(c.Request().Context(), task.ID, service.TaskActivityInput{
@@ -200,6 +231,7 @@ func (h *TaskHandler) Update(c echo.Context) error {
 			task.Progress = snapshot
 		}
 	}
+	h.broadcastTaskUpdated(task)
 	return c.JSON(http.StatusOK, task.ToDTO())
 }
 
@@ -243,6 +275,15 @@ func (h *TaskHandler) Transition(c echo.Context) error {
 		if progressErr == nil {
 			task.Progress = snapshot
 		}
+	}
+	updatedDependents, err := h.autoUnblockDependents(c.Request().Context(), task)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update dependent tasks"})
+	}
+	h.broadcastTaskTransitioned(task, req.Reason)
+	for _, dependent := range updatedDependents {
+		h.broadcastTaskUpdated(dependent)
+		h.broadcastDependencyResolved(dependent, task)
 	}
 	return c.JSON(http.StatusOK, task.ToDTO())
 }
@@ -318,4 +359,140 @@ func (h *TaskHandler) Decompose(c echo.Context) error {
 		}
 	}
 	return c.JSON(http.StatusOK, result)
+}
+
+func sanitizeBlockedByIDs(taskID uuid.UUID, blockedBy []string) ([]string, error) {
+	seen := make(map[string]struct{}, len(blockedBy))
+	sanitized := make([]string, 0, len(blockedBy))
+	for _, rawID := range blockedBy {
+		trimmed := strings.TrimSpace(rawID)
+		if trimmed == "" {
+			return nil, errors.New("blockedBy entries must be valid task IDs")
+		}
+		parsedID, err := uuid.Parse(trimmed)
+		if err != nil {
+			return nil, errors.New("blockedBy entries must be valid task IDs")
+		}
+		if parsedID == taskID {
+			return nil, errors.New("task cannot depend on itself")
+		}
+		normalized := parsedID.String()
+		if _, exists := seen[normalized]; exists {
+			continue
+		}
+		seen[normalized] = struct{}{}
+		sanitized = append(sanitized, normalized)
+	}
+	return sanitized, nil
+}
+
+func (h *TaskHandler) resolveReadyTaskState(ctx context.Context, task *model.Task) (*model.Task, error) {
+	if task == nil || task.Status != model.TaskStatusBlocked {
+		return task, nil
+	}
+	ready, err := h.hasNoRemainingBlockers(ctx, task)
+	if err != nil || !ready {
+		return task, err
+	}
+
+	nextStatus := model.TaskStatusTriaged
+	if task.AssigneeID != nil {
+		nextStatus = model.TaskStatusAssigned
+	}
+	if err := model.ValidateTransition(task.Status, nextStatus); err != nil {
+		return task, nil
+	}
+	if err := h.repo.TransitionStatus(ctx, task.ID, nextStatus); err != nil {
+		return nil, err
+	}
+	return h.repo.GetByID(ctx, task.ID)
+}
+
+func (h *TaskHandler) hasNoRemainingBlockers(ctx context.Context, task *model.Task) (bool, error) {
+	if task == nil || len(task.BlockedBy) == 0 {
+		return true, nil
+	}
+
+	for _, blockerID := range task.BlockedBy {
+		parsedID, err := uuid.Parse(blockerID)
+		if err != nil {
+			return false, nil
+		}
+		blocker, err := h.repo.GetByID(ctx, parsedID)
+		if err != nil {
+			return false, nil
+		}
+		if blocker.Status != model.TaskStatusDone {
+			return false, nil
+		}
+	}
+	return true, nil
+}
+
+func (h *TaskHandler) autoUnblockDependents(ctx context.Context, task *model.Task) ([]*model.Task, error) {
+	if task == nil || task.Status != model.TaskStatusDone {
+		return nil, nil
+	}
+
+	dependents, err := h.repo.ListDependents(ctx, task.ID)
+	if err != nil {
+		return nil, err
+	}
+
+	updated := make([]*model.Task, 0, len(dependents))
+	for _, dependent := range dependents {
+		if dependent == nil || dependent.Status != model.TaskStatusBlocked {
+			continue
+		}
+		nextTask, err := h.resolveReadyTaskState(ctx, dependent)
+		if err != nil {
+			return nil, err
+		}
+		if nextTask != nil && nextTask.Status != dependent.Status {
+			updated = append(updated, nextTask)
+		}
+	}
+	return updated, nil
+}
+
+func (h *TaskHandler) broadcastTaskUpdated(task *model.Task) {
+	if h.hub == nil || task == nil {
+		return
+	}
+	h.hub.BroadcastEvent(&ws.Event{
+		Type:      ws.EventTaskUpdated,
+		ProjectID: task.ProjectID.String(),
+		Payload: map[string]any{
+			"task": task.ToDTO(),
+		},
+	})
+}
+
+func (h *TaskHandler) broadcastDependencyResolved(dependent *model.Task, resolved *model.Task) {
+	if h.hub == nil || dependent == nil || resolved == nil {
+		return
+	}
+	h.hub.BroadcastEvent(&ws.Event{
+		Type:      ws.EventTaskDependencyResolved,
+		ProjectID: dependent.ProjectID.String(),
+		Payload: map[string]any{
+			"taskId":         dependent.ID.String(),
+			"resolvedTaskId": resolved.ID.String(),
+			"newStatus":      dependent.Status,
+		},
+	})
+}
+
+func (h *TaskHandler) broadcastTaskTransitioned(task *model.Task, reason string) {
+	if h.hub == nil || task == nil {
+		return
+	}
+	h.hub.BroadcastEvent(&ws.Event{
+		Type:      ws.EventTaskTransitioned,
+		ProjectID: task.ProjectID.String(),
+		Payload: map[string]any{
+			"task":   task.ToDTO(),
+			"reason": reason,
+		},
+	})
 }

@@ -1,0 +1,120 @@
+package handler
+
+import (
+	"context"
+	"net/http"
+
+	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/model"
+)
+
+type imService interface {
+	HandleIncoming(ctx context.Context, req *model.IMMessageRequest) (*model.IMMessageResponse, error)
+	HandleCommand(ctx context.Context, req *model.IMCommandRequest) (*model.IMCommandResponse, error)
+	HandleIntent(ctx context.Context, req *model.IMIntentRequest) (*model.IMIntentResponse, error)
+	HandleAction(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error)
+	Send(ctx context.Context, req *model.IMSendRequest) error
+	Notify(ctx context.Context, req *model.IMNotifyRequest) error
+}
+
+type IMHandler struct {
+	service imService
+}
+
+func NewIMHandler(svc imService) *IMHandler {
+	return &IMHandler{service: svc}
+}
+
+func (h *IMHandler) HandleMessage(c echo.Context) error {
+	req := new(model.IMMessageRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+
+	resp, err := h.service.HandleIncoming(c.Request().Context(), req)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *IMHandler) HandleCommand(c echo.Context) error {
+	req := new(model.IMCommandRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+
+	resp, err := h.service.HandleCommand(c.Request().Context(), req)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *IMHandler) Send(c echo.Context) error {
+	req := new(model.IMSendRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+
+	if err := h.service.Send(c.Request().Context(), req); err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "sent"})
+}
+
+func (h *IMHandler) Notify(c echo.Context) error {
+	req := new(model.IMNotifyRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+
+	if err := h.service.Notify(c.Request().Context(), req); err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "notification sent"})
+}
+
+func (h *IMHandler) HandleAction(c echo.Context) error {
+	req := new(model.IMActionRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+
+	resp, err := h.service.HandleAction(c.Request().Context(), req)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *IMHandler) HandleIntent(c echo.Context) error {
+	req := new(model.IMIntentRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+
+	resp, err := h.service.HandleIntent(c.Request().Context(), req)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
+}

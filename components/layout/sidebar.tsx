@@ -9,9 +9,13 @@ import {
   DollarSign,
   Shield,
   Users,
+  Network,
   Moon,
   Sun,
   Menu,
+  Timer,
+  Puzzle,
+  Settings,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
@@ -24,8 +28,12 @@ const navItems = [
   { href: "/projects", label: "Projects", icon: FolderKanban },
   { href: "/team", label: "Team", icon: Users },
   { href: "/agents", label: "Agents", icon: Bot },
+  { href: "/teams", label: "Teams", icon: Network },
+  { href: "/sprints", label: "Sprints", icon: Timer },
   { href: "/cost", label: "Cost", icon: DollarSign },
   { href: "/roles", label: "Roles", icon: Shield },
+  { href: "/plugins", label: "Plugins", icon: Puzzle },
+  { href: "/settings", label: "Settings", icon: Settings },
 ];
 
 function NavLinks({ onClick }: { onClick?: () => void }) {

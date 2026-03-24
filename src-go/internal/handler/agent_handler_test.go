@@ -69,8 +69,16 @@ func (m *mockAgentRuntimeService) ListActive(_ context.Context) ([]*model.AgentR
 	return []*model.AgentRun{}, nil
 }
 
+func (m *mockAgentRuntimeService) ListSummaries(_ context.Context) ([]model.AgentRunSummaryDTO, error) {
+	return []model.AgentRunSummaryDTO{}, nil
+}
+
 func (m *mockAgentRuntimeService) GetByID(_ context.Context, id uuid.UUID) (*model.AgentRun, error) {
 	return &model.AgentRun{ID: id, TaskID: uuid.New(), MemberID: uuid.New()}, nil
+}
+
+func (m *mockAgentRuntimeService) GetSummary(_ context.Context, id uuid.UUID) (*model.AgentRunSummaryDTO, error) {
+	return &model.AgentRunSummaryDTO{ID: id.String(), TaskID: uuid.New().String(), MemberID: uuid.New().String()}, nil
 }
 
 func (m *mockAgentRuntimeService) UpdateStatus(_ context.Context, id uuid.UUID, status string) error {
@@ -83,6 +91,14 @@ func (m *mockAgentRuntimeService) Cancel(_ context.Context, id uuid.UUID, reason
 	m.lastRunID = id
 	m.lastReason = reason
 	return m.cancelErr
+}
+
+func (m *mockAgentRuntimeService) PoolStats(_ context.Context) model.AgentPoolStatsDTO {
+	return model.AgentPoolStatsDTO{}
+}
+
+func (m *mockAgentRuntimeService) GetLogs(_ context.Context, _ uuid.UUID) ([]model.AgentLogEntry, error) {
+	return nil, nil
 }
 
 func (m *mockAgentTaskDispatcher) Spawn(_ context.Context, input service.DispatchSpawnInput) (*model.TaskDispatchResponse, error) {

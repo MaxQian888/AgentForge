@@ -234,6 +234,16 @@ func (l *Live) Name() string { return "discord-live" }
 
 func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
 
+func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
+	if target == nil {
+		return nil
+	}
+	return replyContext{
+		InteractionToken: strings.TrimSpace(target.InteractionToken),
+		ChannelID:        firstNonEmpty(target.ChannelID, target.ChatID),
+	}
+}
+
 func (l *Live) Start(handler core.MessageHandler) error {
 	if handler == nil {
 		return errors.New("message handler is required")
@@ -568,6 +578,13 @@ func normalizeInteraction(raw *interaction) (*core.Message, error) {
 		ReplyCtx: replyContext{
 			InteractionToken: strings.TrimSpace(raw.Token),
 			ChannelID:        strings.TrimSpace(raw.ChannelID),
+		},
+		ReplyTarget: &core.ReplyTarget{
+			Platform:         liveMetadata.Source,
+			ChatID:           strings.TrimSpace(raw.ChannelID),
+			ChannelID:        strings.TrimSpace(raw.ChannelID),
+			InteractionToken: strings.TrimSpace(raw.Token),
+			UseReply:         true,
 		},
 		Timestamp: time.Now(),
 		IsGroup:   strings.TrimSpace(raw.GuildID) != "",

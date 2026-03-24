@@ -1,14 +1,22 @@
+import type { TaskDependencySummary } from "@/lib/tasks/task-dependencies";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import type { TaskHealthCounts } from "@/lib/tasks/task-context-rail";
+import type {
+  TaskCostSummary,
+  TaskHealthCounts,
+} from "@/lib/tasks/task-context-rail";
 
 export interface TaskProgressSummaryProps {
   counts: TaskHealthCounts;
+  dependencySummary: TaskDependencySummary;
+  costSummary: TaskCostSummary;
   realtimeState: "live" | "degraded";
 }
 
 export function TaskProgressSummary({
   counts,
+  dependencySummary,
+  costSummary,
   realtimeState,
 }: TaskProgressSummaryProps) {
   return (
@@ -26,6 +34,21 @@ export function TaskProgressSummary({
         <div>Warning {counts.warning}</div>
         <div>Stalled {counts.stalled}</div>
         <div>Unscheduled {counts.unscheduled}</div>
+        <div>Blocked {dependencySummary.blocked}</div>
+        <div>Ready to unblock {dependencySummary.readyToUnblock}</div>
+        <div>
+          Task spend ${costSummary.totalSpentUsd.toFixed(2)} / $
+          {costSummary.totalBudgetUsd.toFixed(2)}
+        </div>
+        <div>
+          Active runs {costSummary.activeRunCount} using $
+          {costSummary.activeRunCostUsd.toFixed(2)} / $
+          {costSummary.activeRunBudgetUsd.toFixed(2)}
+        </div>
+        <div>
+          Budgeted tasks {costSummary.budgetedTaskCount}, over budget{" "}
+          {costSummary.overBudgetTaskCount}
+        </div>
         {realtimeState === "degraded" ? (
           <div className="text-muted-foreground">Realtime updates unavailable.</div>
         ) : null}

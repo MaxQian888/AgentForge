@@ -1,5 +1,10 @@
+import type { Agent } from "@/lib/stores/agent-store";
 import type { Notification } from "@/lib/stores/notification-store";
 import type { Task } from "@/lib/stores/task-store";
+import {
+  summarizeTaskDependencies,
+  type TaskDependencySummary,
+} from "./task-dependencies";
 
 export type TaskContextRailSelectionState =
   | "summary"
@@ -13,18 +18,31 @@ export interface TaskHealthCounts {
   unscheduled: number;
 }
 
+export interface TaskCostSummary {
+  totalSpentUsd: number;
+  totalBudgetUsd: number;
+  budgetedTaskCount: number;
+  overBudgetTaskCount: number;
+  activeRunCostUsd: number;
+  activeRunBudgetUsd: number;
+  activeRunCount: number;
+}
+
 export interface BuildContextRailStateInput {
   tasks: Task[];
   filteredTasks: Task[];
   selectedTaskId: string | null;
   projectId: string;
   notifications: Notification[];
+  agents: Agent[];
 }
 
 export interface TaskContextRailState {
   selectedTask: Task | null;
   selectionState: TaskContextRailSelectionState;
   counts: TaskHealthCounts;
+  dependencySummary: TaskDependencySummary;
+  costSummary: TaskCostSummary;
   alerts: Notification[];
 }
 
@@ -76,6 +94,30 @@ function selectProjectProgressAlerts(
   });
 }
 
+function summarizeTaskCosts(tasks: Task[], agents: Agent[]): TaskCostSummary {
+  const totalBudgetUsd = tasks.reduce(
+    (total, task) => total + (task.budgetUsd > 0 ? task.budgetUsd : 0),
+    0
+  );
+  const budgetedTaskCount = tasks.filter((task) => task.budgetUsd > 0).length;
+  const overBudgetTaskCount = tasks.filter(
+    (task) => task.budgetUsd > 0 && task.spentUsd >= task.budgetUsd
+  ).length;
+  const activeAgents = agents.filter(
+    (agent) => agent.status === "starting" || agent.status === "running"
+  );
+
+  return {
+    totalSpentUsd: tasks.reduce((total, task) => total + task.spentUsd, 0),
+    totalBudgetUsd,
+    budgetedTaskCount,
+    overBudgetTaskCount,
+    activeRunCostUsd: activeAgents.reduce((total, agent) => total + agent.cost, 0),
+    activeRunBudgetUsd: activeAgents.reduce((total, agent) => total + agent.budget, 0),
+    activeRunCount: activeAgents.length,
+  };
+}
+
 export function buildContextRailState(
   input: BuildContextRailStateInput
 ): TaskContextRailState {
@@ -93,6 +135,8 @@ export function buildContextRailState(
         ? "selected_visible"
         : "hidden_by_filter",
     counts: summarizeTaskHealth(input.tasks),
+    dependencySummary: summarizeTaskDependencies(input.tasks),
+    costSummary: summarizeTaskCosts(input.tasks, input.agents),
     alerts: selectProjectProgressAlerts(input.notifications, input.projectId),
   };
 }

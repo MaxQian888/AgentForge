@@ -17,6 +17,7 @@ type TestableEventStreamer = {
   close: () => void;
   startHeartbeat: () => void;
   scheduleReconnect: () => void;
+  bufferedCount: number;
 };
 
 const originalConsoleWarn = console.warn;
@@ -41,11 +42,6 @@ describe("EventStreamer", () => {
       "ws://localhost:7777/ws/bridge",
     ) as unknown as TestableEventStreamer;
     const sent: string[] = [];
-    const warnings: string[] = [];
-
-    console.warn = (...args: unknown[]) => {
-      warnings.push(args.join(" "));
-    };
 
     streamer.ws = {
       readyState: 1,
@@ -80,7 +76,78 @@ describe("EventStreamer", () => {
         data: { content: "hello" },
       }),
     ]);
-    expect(warnings[0]).toContain("Cannot send event");
+    // Events are now buffered when disconnected
+    expect(streamer.bufferedCount).toBe(1);
+  });
+
+  test("buffers events on disconnect and counts them correctly", () => {
+    const streamer = new EventStreamer(
+      "ws://localhost:7777/ws/bridge",
+    ) as unknown as TestableEventStreamer;
+
+    // No websocket at all
+    streamer.ws = null;
+
+    streamer.send({
+      task_id: "t1",
+      session_id: "s1",
+      timestamp_ms: 1,
+      type: "output",
+      data: { content: "a" },
+    });
+    streamer.send({
+      task_id: "t1",
+      session_id: "s1",
+      timestamp_ms: 2,
+      type: "output",
+      data: { content: "b" },
+    });
+
+    expect(streamer.bufferedCount).toBe(2);
+
+    // When reconnection fires and "open" event triggers flushBuffer,
+    // the buffered events will be sent. We test that by setting up
+    // the ws and calling the private flush via another send.
+    const sent: string[] = [];
+    streamer.ws = {
+      readyState: 1,
+      send(payload: string) { sent.push(payload); },
+    };
+
+    // Call send with a new event — this triggers flushBuffer
+    streamer.send({
+      task_id: "t1",
+      session_id: "s1",
+      timestamp_ms: 3,
+      type: "output",
+      data: { content: "c" },
+    });
+
+    // All 3 events should have been sent (2 flushed + 1 new)
+    expect(sent.length).toBe(3);
+    expect(streamer.bufferedCount).toBe(0);
+  });
+
+  test("ring buffer drops oldest events when full", () => {
+    const streamer = new EventStreamer(
+      "ws://localhost:7777/ws/bridge",
+      { maxBuffer: 2 },
+    ) as unknown as TestableEventStreamer;
+
+    streamer.ws = { readyState: 0 };
+
+    for (let i = 0; i < 5; i++) {
+      streamer.send({
+        task_id: "t1",
+        session_id: "s1",
+        timestamp_ms: i,
+        type: "output",
+        data: { i },
+      });
+    }
+
+    // Only the last 2 should remain
+    expect(streamer.bufferedCount).toBe(2);
   });
 
   test("starts heartbeats, schedules reconnects with backoff, and closes cleanly", () => {
@@ -91,7 +158,7 @@ describe("EventStreamer", () => {
     let timeoutCleared = false;
     let reconnectDelay: number | undefined;
     let reconnectInvoked = false;
-    let pingCount = 0;
+    let sendCount = 0;
     let closeCount = 0;
 
     console.log = () => {};
@@ -120,8 +187,8 @@ describe("EventStreamer", () => {
     };
     streamer.ws = {
       readyState: 1,
-      ping() {
-        pingCount += 1;
+      send() {
+        sendCount += 1;
       },
       close() {
         closeCount += 1;
@@ -133,7 +200,8 @@ describe("EventStreamer", () => {
     streamer.reconnectTimer = 222 as unknown as ReturnType<typeof setTimeout>;
     streamer.close();
 
-    expect(pingCount).toBe(1);
+    // Heartbeat now sends JSON instead of ping
+    expect(sendCount).toBe(1);
     expect(reconnectDelay).toBe(1000);
     expect(reconnectInvoked).toBe(true);
     expect(streamer.reconnectDelay).toBe(2000);

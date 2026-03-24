@@ -10,9 +10,14 @@ export type TaskStatus =
   | "assigned"
   | "in_progress"
   | "in_review"
-  | "done";
+  | "done"
+  | "blocked"
+  | "changes_requested"
+  | "cancelled"
+  | "budget_exceeded";
 
 export type TaskPriority = "urgent" | "high" | "medium" | "low";
+export type TaskExecutionMode = "human" | "agent";
 
 export type TaskProgressHealth = "healthy" | "warning" | "stalled";
 
@@ -31,6 +36,9 @@ export interface TaskProgress {
 export interface Task {
   id: string;
   projectId: string;
+  parentId?: string | null;
+  sprintId?: string | null;
+  executionMode?: TaskExecutionMode | null;
   title: string;
   description: string;
   status: TaskStatus;
@@ -39,7 +47,12 @@ export interface Task {
   assigneeType: "human" | "agent" | null;
   assigneeName: string | null;
   cost: number | null;
+  budgetUsd: number;
   spentUsd: number;
+  agentBranch: string;
+  agentWorktree: string;
+  agentSessionId: string;
+  blockedBy: string[];
   plannedStartAt: string | null;
   plannedEndAt: string | null;
   progress?: TaskProgress | null;
@@ -50,6 +63,9 @@ export interface Task {
 interface TaskApiShape {
   id: string;
   projectId: string;
+  parentId?: string | null;
+  sprintId?: string | null;
+  executionMode?: TaskExecutionMode | null;
   title: string;
   description: string;
   status: TaskStatus;
@@ -58,7 +74,12 @@ interface TaskApiShape {
   assigneeType?: "human" | "agent" | null;
   assigneeName?: string | null;
   cost?: number | null;
+  budgetUsd?: number | null;
   spentUsd?: number | null;
+  agentBranch?: string | null;
+  agentWorktree?: string | null;
+  agentSessionId?: string | null;
+  blockedBy?: string[] | null;
   plannedStartAt?: string | null;
   plannedEndAt?: string | null;
   progress?: Partial<TaskProgress> | null;
@@ -81,6 +102,18 @@ interface TaskDispatchResponse {
   };
 }
 
+export interface TaskDecompositionResult {
+  parentTask: Task;
+  summary: string;
+  subtasks: Task[];
+}
+
+interface TaskDecompositionApiResponse {
+  parentTask: TaskApiShape;
+  summary: string;
+  subtasks: TaskApiShape[];
+}
+
 interface TaskState {
   tasks: Task[];
   loading: boolean;
@@ -94,8 +127,10 @@ interface TaskState {
   assignTask: (
     id: string,
     assigneeId: string,
-    type: "human" | "agent"
+    type: "human" | "agent",
+    assigneeName?: string
   ) => Promise<void>;
+  decomposeTask: (id: string) => Promise<TaskDecompositionResult | null>;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -125,6 +160,9 @@ function normalizeTask(task: TaskApiShape): Task {
   return {
     id: task.id,
     projectId: task.projectId,
+    parentId: task.parentId ?? null,
+    sprintId: task.sprintId ?? null,
+    executionMode: task.executionMode ?? null,
     title: task.title,
     description: task.description,
     status: task.status,
@@ -133,7 +171,12 @@ function normalizeTask(task: TaskApiShape): Task {
     assigneeType: task.assigneeType ?? null,
     assigneeName: task.assigneeName ?? null,
     cost: task.cost ?? spentUsd ?? null,
+    budgetUsd: task.budgetUsd ?? 0,
     spentUsd,
+    agentBranch: task.agentBranch ?? "",
+    agentWorktree: task.agentWorktree ?? "",
+    agentSessionId: task.agentSessionId ?? "",
+    blockedBy: task.blockedBy ?? [],
     plannedStartAt: task.plannedStartAt ?? null,
     plannedEndAt: task.plannedEndAt ?? null,
     progress: normalizeTaskProgress(task.progress),
@@ -266,7 +309,7 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
     }
   },
 
-  assignTask: async (id, assigneeId, type) => {
+  assignTask: async (id, assigneeId, type, assigneeName) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
 
@@ -277,12 +320,45 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
       { token }
     );
     const task = extractTaskPayload(data);
+    const normalized = normalizeTask({
+      ...task,
+      assigneeName: task.assigneeName ?? assigneeName ?? null,
+    });
 
     set((state) => ({
       tasks: state.tasks.map((item) =>
-        item.id === id ? normalizeTask(task) : item
+        item.id === id ? normalized : item
       ),
     }));
+  },
+
+  decomposeTask: async (id) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+
+    const api = createApiClient(API_URL);
+    const { data } = await api.post<TaskDecompositionApiResponse>(
+      `/api/v1/tasks/${id}/decompose`,
+      {},
+      { token }
+    );
+
+    const parentTask = normalizeTask(data.parentTask);
+    const subtasks = data.subtasks.map(normalizeTask);
+
+    set((state) => {
+      let tasks = upsertNormalizedTask(state.tasks, parentTask);
+      for (const subtask of subtasks) {
+        tasks = upsertNormalizedTask(tasks, subtask);
+      }
+      return { tasks };
+    });
+
+    return {
+      parentTask,
+      summary: data.summary,
+      subtasks,
+    };
   },
 
   upsertTask: (task) => {

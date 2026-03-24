@@ -33,13 +33,15 @@ func TestUserRepository_CreateAndGetByEmail(t *testing.T) {
 		t.Skip("TEST_POSTGRES_URL not set — skipping integration test")
 	}
 
-	pool, err := database.NewPostgres(url)
+	db, err := database.NewPostgres(url)
 	if err != nil {
 		t.Fatalf("NewPostgres() error: %v", err)
 	}
-	defer pool.Close()
+	defer func() {
+		_ = database.ClosePostgres(db)
+	}()
 
-	repo := repository.NewUserRepository(pool)
+	repo := repository.NewUserRepository(db)
 	ctx := context.Background()
 
 	user := &model.User{
@@ -55,7 +57,7 @@ func TestUserRepository_CreateAndGetByEmail(t *testing.T) {
 
 	// Cleanup regardless of test outcome.
 	t.Cleanup(func() {
-		_, _ = pool.Exec(ctx, "DELETE FROM users WHERE id = $1", user.ID)
+		_ = db.WithContext(ctx).Exec("DELETE FROM users WHERE id = ?", user.ID).Error
 	})
 
 	found, err := repo.GetByEmail(ctx, user.Email)

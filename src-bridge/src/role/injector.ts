@@ -3,16 +3,19 @@ import type { RoleConfig } from "../types.js";
 export function buildSystemPrompt(basePrompt: string, roleConfig?: RoleConfig): string {
   if (!roleConfig) return basePrompt;
 
-  return `# Role: ${roleConfig.role}
-## Goal
-${roleConfig.goal}
-## Backstory
-${roleConfig.backstory}
+  const parts = [
+    `# Role: ${roleConfig.role}`,
+    `## Goal\n${roleConfig.goal}`,
+    `## Backstory\n${roleConfig.backstory}`,
+    roleConfig.system_prompt,
+  ];
 
-${roleConfig.system_prompt}
+  if (roleConfig.knowledge_context) {
+    parts.push(`## Knowledge Context\n${roleConfig.knowledge_context}`);
+  }
 
----
-${basePrompt}`;
+  parts.push("---", basePrompt);
+  return parts.join("\n\n");
 }
 
 export function filterTools(tools: string[], roleConfig?: RoleConfig): string[] {

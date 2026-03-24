@@ -74,6 +74,14 @@ func (s *FileStore) Save(manifest *Manifest) error {
 	return nil
 }
 
+func (s *FileStore) Delete(id string) error {
+	roleDir := filepath.Join(s.dir, id)
+	if _, err := os.Stat(roleDir); os.IsNotExist(err) {
+		return os.ErrNotExist
+	}
+	return os.RemoveAll(roleDir)
+}
+
 func (s *FileStore) loadRegistry(registry *Registry) error {
 	if registry == nil {
 		return fmt.Errorf("registry is required")

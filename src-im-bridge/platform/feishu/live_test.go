@@ -72,6 +72,9 @@ func TestLive_StartNormalizesInboundMessageFromLongConnection(t *testing.T) {
 	if replyCtx.MessageID != "msg-1" || replyCtx.ChatID != "chat-1" {
 		t.Fatalf("ReplyCtx = %+v", replyCtx)
 	}
+	if got.ReplyTarget == nil || got.ReplyTarget.ChatID != "chat-1" || got.ReplyTarget.MessageID != "msg-1" {
+		t.Fatalf("ReplyTarget = %+v", got.ReplyTarget)
+	}
 	if !got.IsGroup {
 		t.Fatal("expected group message")
 	}
