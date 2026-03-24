@@ -9,6 +9,7 @@ describe("useTaskWorkspaceStore", () => {
       viewMode: "board",
       filters: createDefaultTaskWorkspaceFilters(),
       selectedTaskId: null,
+      contextRailDisplay: "expanded",
     });
   });
 
@@ -22,6 +23,7 @@ describe("useTaskWorkspaceStore", () => {
     store.setAssigneeId("member-1");
     store.setPlanning("scheduled");
     store.selectTask("task-1");
+    store.setContextRailDisplay("collapsed");
 
     const state = useTaskWorkspaceStore.getState();
 
@@ -34,5 +36,6 @@ describe("useTaskWorkspaceStore", () => {
       planning: "scheduled",
     });
     expect(state.selectedTaskId).toBe("task-1");
+    expect(state.contextRailDisplay).toBe("collapsed");
   });
 });
