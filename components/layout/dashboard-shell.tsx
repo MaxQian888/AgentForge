@@ -6,6 +6,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { resolveBackendUrl } from "@/lib/backend-url";
 import { useAuthStore } from "@/lib/stores/auth-store";
+import { useNotificationStore } from "@/lib/stores/notification-store";
 import { useWSStore } from "@/lib/stores/ws-store";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
@@ -14,6 +15,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const status = useAuthStore((s) => s.status);
   const hasHydrated = useAuthStore((s) => s.hasHydrated);
   const bootstrapSession = useAuthStore((s) => s.bootstrapSession);
+  const fetchNotifications = useNotificationStore((s) => s.fetchNotifications);
   const connectWS = useWSStore((s) => s.connect);
   const disconnectWS = useWSStore((s) => s.disconnect);
 
@@ -58,6 +60,14 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       disconnectWS();
     };
   }, [accessToken, connectWS, disconnectWS, hasHydrated, status]);
+
+  useEffect(() => {
+    if (!hasHydrated || status !== "authenticated" || !accessToken) {
+      return;
+    }
+
+    void Promise.resolve(fetchNotifications()).catch(() => undefined);
+  }, [accessToken, fetchNotifications, hasHydrated, status]);
 
   if (!hasHydrated || status === "idle" || status === "checking") {
     return null;

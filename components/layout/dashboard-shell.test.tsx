@@ -7,6 +7,7 @@ import { useAuthStore } from "@/lib/stores/auth-store";
 const replaceMock = jest.fn();
 const connectMock = jest.fn();
 const disconnectMock = jest.fn();
+const fetchNotificationsMock = jest.fn();
 
 jest.mock("next/navigation", () => ({
   useRouter() {
@@ -39,11 +40,21 @@ jest.mock("@/lib/stores/ws-store", () => ({
     }),
 }));
 
+jest.mock("@/lib/stores/notification-store", () => ({
+  useNotificationStore: (
+    selector: (state: { fetchNotifications: typeof fetchNotificationsMock }) => unknown
+  ) =>
+    selector({
+      fetchNotifications: fetchNotificationsMock,
+    }),
+}));
+
 describe("DashboardShell", () => {
   beforeEach(() => {
     replaceMock.mockReset();
     connectMock.mockReset();
     disconnectMock.mockReset();
+    fetchNotificationsMock.mockReset();
     localStorage.clear();
     useAuthStore.setState({
       accessToken: null,
@@ -137,5 +148,30 @@ describe("DashboardShell", () => {
     unmount();
 
     expect(disconnectMock).toHaveBeenCalled();
+  });
+
+  it("fetches notifications after the dashboard shell authenticates", async () => {
+    fetchNotificationsMock.mockResolvedValue(undefined);
+    useAuthStore.setState({
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+      user: {
+        id: "user-1",
+        email: "test@example.com",
+        name: "Test User",
+      },
+      status: "authenticated",
+      hasHydrated: true,
+    } as never);
+
+    render(
+      <DashboardShell>
+        <div>secret dashboard</div>
+      </DashboardShell>
+    );
+
+    await waitFor(() => {
+      expect(fetchNotificationsMock).toHaveBeenCalledTimes(1);
+    });
   });
 });

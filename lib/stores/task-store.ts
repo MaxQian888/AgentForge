@@ -84,6 +84,7 @@ interface TaskDispatchResponse {
 interface TaskState {
   tasks: Task[];
   loading: boolean;
+  error: string | null;
   fetchTasks: (projectId: string) => Promise<void>;
   createTask: (data: Partial<Task>) => Promise<void>;
   updateTask: (id: string, data: Partial<Task>) => Promise<void>;
@@ -160,19 +161,22 @@ function upsertNormalizedTask(tasks: Task[], task: Task): Task[] {
 export const useTaskStore = create<TaskState>()((set, get) => ({
   tasks: [],
   loading: false,
+  error: null,
 
   fetchTasks: async (projectId) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
 
-    set({ loading: true });
+    set({ loading: true, error: null });
     try {
       const api = createApiClient(API_URL);
       const { data } = await api.get<TaskListResponse>(
         `/api/v1/projects/${projectId}/tasks`,
         { token }
       );
-      set({ tasks: data.items.map(normalizeTask) });
+      set({ tasks: data.items.map(normalizeTask), error: null });
+    } catch {
+      set({ error: "Unable to load tasks" });
     } finally {
       set({ loading: false });
     }

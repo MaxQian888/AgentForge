@@ -37,6 +37,7 @@ describe("useTaskStore", () => {
     useTaskStore.setState({
       tasks: [],
       loading: false,
+      error: null,
     });
   });
 
@@ -99,6 +100,15 @@ describe("useTaskStore", () => {
         },
       }),
     ]);
+  });
+
+  it("stores a retryable error when the project task load fails", async () => {
+    fetchMock.mockResolvedValueOnce(mockJsonResponse({ message: "boom" }, 500));
+
+    await useTaskStore.getState().fetchTasks("project-1");
+
+    expect(useTaskStore.getState().error).toBe("Unable to load tasks");
+    expect(useTaskStore.getState().loading).toBe(false);
   });
 
   it("posts board status transitions through the task transition endpoint", async () => {
