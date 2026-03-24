@@ -8,6 +8,7 @@ import {
   Bot,
   DollarSign,
   Shield,
+  Users,
   Moon,
   Sun,
   Menu,
@@ -16,11 +17,12 @@ import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
 import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useState } from "react";
 
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/projects", label: "Projects", icon: FolderKanban },
+  { href: "/team", label: "Team", icon: Users },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/cost", label: "Cost", icon: DollarSign },
   { href: "/roles", label: "Roles", icon: Shield },
@@ -59,11 +61,11 @@ function NavLinks({ onClick }: { onClick?: () => void }) {
 }
 
 function ThemeToggle() {
-  const [dark, setDark] = useState(false);
-
-  useEffect(() => {
-    setDark(document.documentElement.classList.contains("dark"));
-  }, []);
+  const [dark, setDark] = useState(
+    () =>
+      typeof document !== "undefined" &&
+      document.documentElement.classList.contains("dark")
+  );
 
   const toggle = useCallback(() => {
     document.documentElement.classList.toggle("dark");

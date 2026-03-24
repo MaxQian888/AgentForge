@@ -36,6 +36,7 @@ func registerTestRoutes(e *echo.Echo, cfg *config.Config, authSvc *service.AuthS
 		repository.NewMemberRepository(nil),
 		repository.NewSprintRepository(nil),
 		repository.NewTaskRepository(nil),
+		repository.NewTaskProgressRepository(nil),
 		repository.NewAgentRunRepository(nil),
 		repository.NewNotificationRepository(nil),
 		repository.NewReviewRepository(nil),
@@ -132,8 +133,8 @@ func TestRegisterRoutes_AuthRegister(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("POST /api/v1/auth/register: expected 500, got %d", rec.Code)
+	if rec.Code != http.StatusInternalServerError && rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("POST /api/v1/auth/register: expected 500 or 503, got %d", rec.Code)
 	}
 }
 
@@ -152,8 +153,8 @@ func TestRegisterRoutes_AuthLogin(t *testing.T) {
 	rec := httptest.NewRecorder()
 	e.ServeHTTP(rec, req)
 
-	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusInternalServerError {
-		t.Errorf("POST /api/v1/auth/login: expected 401 or 500, got %d", rec.Code)
+	if rec.Code != http.StatusUnauthorized && rec.Code != http.StatusInternalServerError && rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("POST /api/v1/auth/login: expected 401, 500, or 503, got %d", rec.Code)
 	}
 }
 

@@ -23,13 +23,18 @@ type Notification struct {
 // Receiver listens for notifications from the AgentForge backend and pushes them to IM.
 type Receiver struct {
 	platform core.Platform
+	metadata core.PlatformMetadata
 	port     string
 	server   *http.Server
 }
 
 // NewReceiver creates a notification receiver bound to a platform.
 func NewReceiver(platform core.Platform, port string) *Receiver {
-	return &Receiver{platform: platform, port: port}
+	return &Receiver{
+		platform: platform,
+		metadata: core.MetadataForPlatform(platform),
+		port:     port,
+	}
 }
 
 // Start begins listening for notifications.
@@ -38,7 +43,12 @@ func (r *Receiver) Start() error {
 	mux.HandleFunc("POST /im/notify", r.handleNotify)
 	mux.HandleFunc("GET /im/health", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(map[string]string{"status": "ok", "platform": r.platform.Name()})
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":                 "ok",
+			"platform":               r.platform.Name(),
+			"source":                 r.metadata.Source,
+			"supports_rich_messages": r.metadata.Capabilities.SupportsRichMessages,
+		})
 	})
 
 	r.server = &http.Server{
@@ -69,7 +79,7 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	}
 
 	notificationPlatform := core.NormalizePlatformName(n.Platform)
-	activePlatform := core.NormalizePlatformName(r.platform.Name())
+	activePlatform := r.metadata.Source
 	if notificationPlatform == "" {
 		http.Error(w, "notification platform is required", http.StatusBadRequest)
 		return
@@ -86,7 +96,7 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Try card first if available.
-	if n.Card != nil {
+	if n.Card != nil && r.metadata.Capabilities.SupportsRichMessages {
 		if cs, ok := r.platform.(core.CardSender); ok {
 			if err := cs.SendCard(ctx, chatID, n.Card); err != nil {
 				log.Printf("[notify] Failed to send card to %s: %v", chatID, err)

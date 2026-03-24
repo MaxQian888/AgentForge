@@ -58,10 +58,9 @@ func (r *CacheRepository) BlacklistToken(ctx context.Context, jti string, ttl ti
 }
 
 // IsBlacklisted checks if a token JTI has been revoked.
-// Returns false when cache is unavailable (fail-open in degraded mode).
 func (r *CacheRepository) IsBlacklisted(ctx context.Context, jti string) (bool, error) {
 	if r.client == nil {
-		return false, nil
+		return false, ErrCacheUnavailable
 	}
 	key := fmt.Sprintf("blacklist:%s", jti)
 	exists, err := r.client.Exists(ctx, key).Result()

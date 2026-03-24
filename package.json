@@ -12,6 +12,7 @@
     "test:coverage": "jest --coverage",
     "build:backend": "node scripts/build-backend.js",
     "build:backend:dev": "node scripts/build-backend.js --current-only",
+    "build:plugin:wasm": "node scripts/build-go-wasm-plugin.js",
     "tauri:dev": "pnpm build:backend:dev && pnpm tauri dev",
     "tauri:build": "pnpm tauri build",
     "build:bridge": "cd src-bridge && bun install && bun run build"

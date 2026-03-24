@@ -30,7 +30,7 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   loading: false,
 
   fetchProjects: async () => {
-    const token = useAuthStore.getState().token;
+    const token = useAuthStore.getState().accessToken;
     if (!token) return;
     set({ loading: true });
     try {
@@ -48,7 +48,7 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   },
 
   createProject: async (data) => {
-    const token = useAuthStore.getState().token;
+    const token = useAuthStore.getState().accessToken;
     if (!token) return;
     const api = createApiClient(API_URL);
     const { data: project } = await api.post<Project>(

@@ -58,14 +58,11 @@ func TestCacheRepository_BlacklistToken_NilClient(t *testing.T) {
 	}
 }
 
-func TestCacheRepository_IsBlacklisted_NilClient_FailOpen(t *testing.T) {
+func TestCacheRepository_IsBlacklisted_NilClient(t *testing.T) {
 	repo := repository.NewCacheRepository(nil)
-	blacklisted, err := repo.IsBlacklisted(context.Background(), "jti-1")
-	if err != nil {
-		t.Errorf("expected nil error for fail-open, got %v", err)
-	}
-	if blacklisted {
-		t.Error("expected false (fail-open) when cache unavailable")
+	_, err := repo.IsBlacklisted(context.Background(), "jti-1")
+	if err != repository.ErrCacheUnavailable {
+		t.Errorf("expected ErrCacheUnavailable, got %v", err)
 	}
 }
 

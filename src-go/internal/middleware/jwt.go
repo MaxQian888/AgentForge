@@ -11,6 +11,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
@@ -48,6 +49,9 @@ func JWTMiddleware(secret string, blacklist TokenBlacklist) echo.MiddlewareFunc 
 			// Check blacklist
 			blacklisted, err := blacklist.IsBlacklisted(c.Request().Context(), claims.JTI)
 			if err != nil {
+				if errors.Is(err, repository.ErrCacheUnavailable) {
+					return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "authentication service unavailable"})
+				}
 				return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "internal server error"})
 			}
 			if blacklisted {

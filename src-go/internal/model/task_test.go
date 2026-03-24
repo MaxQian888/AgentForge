@@ -30,6 +30,38 @@ func TestValidateTransition(t *testing.T) {
 	})
 }
 
+func TestTaskToDTO_IncludesProgressSnapshot(t *testing.T) {
+	task := &model.Task{
+		ID:        uuid.New(),
+		ProjectID: uuid.New(),
+		Title:     "Track progress health",
+		Status:    model.TaskStatusInProgress,
+		Priority:  "high",
+		CreatedAt: time.Date(2026, 3, 24, 10, 0, 0, 0, time.UTC),
+		UpdatedAt: time.Date(2026, 3, 24, 11, 0, 0, 0, time.UTC),
+		Progress: &model.TaskProgressSnapshot{
+			TaskID:             uuid.New(),
+			LastActivityAt:     time.Date(2026, 3, 24, 10, 30, 0, 0, time.UTC),
+			LastActivitySource: model.TaskProgressSourceAgentHeartbeat,
+			LastTransitionAt:   time.Date(2026, 3, 24, 10, 5, 0, 0, time.UTC),
+			HealthStatus:       model.TaskProgressHealthWarning,
+			RiskReason:         model.TaskProgressReasonAwaitingReview,
+		},
+	}
+
+	dto := task.ToDTO()
+
+	if dto.Progress == nil {
+		t.Fatal("expected progress DTO to be present")
+	}
+	if dto.Progress.HealthStatus != model.TaskProgressHealthWarning {
+		t.Fatalf("expected warning health, got %s", dto.Progress.HealthStatus)
+	}
+	if dto.Progress.LastActivitySource != model.TaskProgressSourceAgentHeartbeat {
+		t.Fatalf("expected agent heartbeat source, got %s", dto.Progress.LastActivitySource)
+	}
+}
+
 func TestTaskToDTOWithOptionalFields(t *testing.T) {
 	now := time.Date(2026, 3, 23, 14, 30, 0, 0, time.UTC)
 	parentID := uuid.New()
@@ -37,6 +69,8 @@ func TestTaskToDTOWithOptionalFields(t *testing.T) {
 	assigneeID := uuid.New()
 	reporterID := uuid.New()
 	completedAt := now.Add(2 * time.Hour)
+	plannedStartAt := now.Add(24 * time.Hour)
+	plannedEndAt := plannedStartAt.Add(48 * time.Hour)
 
 	task := &model.Task{
 		ID:             uuid.New(),
@@ -59,6 +93,8 @@ func TestTaskToDTOWithOptionalFields(t *testing.T) {
 		PRUrl:          "https://example.com/pulls/1",
 		PRNumber:       1,
 		BlockedBy:      []string{"task-0"},
+		PlannedStartAt: &plannedStartAt,
+		PlannedEndAt:   &plannedEndAt,
 		CreatedAt:      now,
 		UpdatedAt:      now.Add(time.Minute),
 		CompletedAt:    &completedAt,
@@ -84,6 +120,12 @@ func TestTaskToDTOWithOptionalFields(t *testing.T) {
 	if dto.CompletedAt == nil || *dto.CompletedAt != completedAt.Format(time.RFC3339) {
 		t.Fatalf("CompletedAt = %v, want %s", dto.CompletedAt, completedAt.Format(time.RFC3339))
 	}
+	if dto.PlannedStartAt == nil || *dto.PlannedStartAt != plannedStartAt.Format(time.RFC3339) {
+		t.Fatalf("PlannedStartAt = %v, want %s", dto.PlannedStartAt, plannedStartAt.Format(time.RFC3339))
+	}
+	if dto.PlannedEndAt == nil || *dto.PlannedEndAt != plannedEndAt.Format(time.RFC3339) {
+		t.Fatalf("PlannedEndAt = %v, want %s", dto.PlannedEndAt, plannedEndAt.Format(time.RFC3339))
+	}
 	if dto.CreatedAt != now.Format(time.RFC3339) || dto.UpdatedAt != now.Add(time.Minute).Format(time.RFC3339) {
 		t.Fatalf("unexpected timestamp formatting: created=%s updated=%s", dto.CreatedAt, dto.UpdatedAt)
 	}
@@ -103,7 +145,7 @@ func TestTaskToDTOWithoutOptionalFields(t *testing.T) {
 
 	dto := task.ToDTO()
 
-	if dto.ParentID != nil || dto.SprintID != nil || dto.AssigneeID != nil || dto.ReporterID != nil || dto.CompletedAt != nil {
+	if dto.ParentID != nil || dto.SprintID != nil || dto.AssigneeID != nil || dto.ReporterID != nil || dto.CompletedAt != nil || dto.PlannedStartAt != nil || dto.PlannedEndAt != nil {
 		t.Fatalf("expected optional fields to stay nil, got %+v", dto)
 	}
 	if dto.Title != "Minimal task" || dto.Status != model.TaskStatusInbox || dto.Priority != "low" {

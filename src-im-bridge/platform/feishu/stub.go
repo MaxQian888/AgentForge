@@ -51,6 +51,17 @@ func NewStub(port string) *Stub {
 
 func (s *Stub) Name() string { return "feishu-stub" }
 
+func (s *Stub) Metadata() core.PlatformMetadata {
+	return core.PlatformMetadata{
+		Source: "feishu",
+		Capabilities: core.PlatformCapabilities{
+			SupportsRichMessages:  true,
+			SupportsSlashCommands: true,
+			SupportsMentions:      true,
+		},
+	}
+}
+
 func (s *Stub) Start(handler core.MessageHandler) error {
 	s.handler = handler
 

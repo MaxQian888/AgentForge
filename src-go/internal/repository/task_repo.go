@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
@@ -18,20 +19,53 @@ func NewTaskRepository(db DBTX) *TaskRepository {
 	return &TaskRepository{db: db}
 }
 
-const taskColumns = `id, project_id, parent_id, sprint_id, title, description, status, priority,
-	assignee_id, assignee_type, reporter_id, labels, budget_usd, spent_usd,
-	agent_branch, agent_worktree, agent_session_id, pr_url, pr_number,
-	blocked_by, created_at, updated_at, completed_at`
+const taskColumns = `tasks.id, tasks.project_id, tasks.parent_id, tasks.sprint_id, tasks.title, tasks.description, tasks.status, tasks.priority,
+	tasks.assignee_id, tasks.assignee_type, tasks.reporter_id, tasks.labels, tasks.budget_usd, tasks.spent_usd,
+	tasks.agent_branch, tasks.agent_worktree, tasks.agent_session_id, tasks.pr_url, tasks.pr_number,
+	tasks.blocked_by, tasks.planned_start_at, tasks.planned_end_at, tasks.created_at, tasks.updated_at, tasks.completed_at,
+	tps.last_activity_at, tps.last_activity_source, tps.last_transition_at, tps.health_status, tps.risk_reason,
+	tps.risk_since_at, tps.last_alert_state, tps.last_alert_at, tps.last_recovered_at, tps.created_at, tps.updated_at`
 
 func scanTask(row interface{ Scan(dest ...any) error }) (*model.Task, error) {
 	t := &model.Task{}
+	var (
+		lastActivityAt     *time.Time
+		lastActivitySource *string
+		lastTransitionAt   *time.Time
+		healthStatus       *string
+		riskReason         *string
+		riskSinceAt        *time.Time
+		lastAlertState     *string
+		lastAlertAt        *time.Time
+		lastRecoveredAt    *time.Time
+		progressCreatedAt  *time.Time
+		progressUpdatedAt  *time.Time
+	)
 	err := row.Scan(
 		&t.ID, &t.ProjectID, &t.ParentID, &t.SprintID, &t.Title, &t.Description,
 		&t.Status, &t.Priority, &t.AssigneeID, &t.AssigneeType, &t.ReporterID,
 		&t.Labels, &t.BudgetUsd, &t.SpentUsd, &t.AgentBranch, &t.AgentWorktree,
-		&t.AgentSessionID, &t.PRUrl, &t.PRNumber, &t.BlockedBy,
+		&t.AgentSessionID, &t.PRUrl, &t.PRNumber, &t.BlockedBy, &t.PlannedStartAt, &t.PlannedEndAt,
 		&t.CreatedAt, &t.UpdatedAt, &t.CompletedAt,
+		&lastActivityAt, &lastActivitySource, &lastTransitionAt, &healthStatus, &riskReason,
+		&riskSinceAt, &lastAlertState, &lastAlertAt, &lastRecoveredAt, &progressCreatedAt, &progressUpdatedAt,
 	)
+	if err == nil && lastActivityAt != nil && lastActivitySource != nil && lastTransitionAt != nil && healthStatus != nil && riskReason != nil && lastAlertState != nil && progressCreatedAt != nil && progressUpdatedAt != nil {
+		t.Progress = &model.TaskProgressSnapshot{
+			TaskID:             t.ID,
+			LastActivityAt:     *lastActivityAt,
+			LastActivitySource: *lastActivitySource,
+			LastTransitionAt:   *lastTransitionAt,
+			HealthStatus:       *healthStatus,
+			RiskReason:         *riskReason,
+			RiskSinceAt:        riskSinceAt,
+			LastAlertState:     *lastAlertState,
+			LastAlertAt:        lastAlertAt,
+			LastRecoveredAt:    lastRecoveredAt,
+			CreatedAt:          *progressCreatedAt,
+			UpdatedAt:          *progressUpdatedAt,
+		}
+	}
 	return t, err
 }
 
@@ -43,14 +77,14 @@ func (r *TaskRepository) Create(ctx context.Context, task *model.Task) error {
 		INSERT INTO tasks (id, project_id, parent_id, sprint_id, title, description, status, priority,
 			assignee_id, assignee_type, reporter_id, labels, budget_usd, spent_usd,
 			agent_branch, agent_worktree, agent_session_id, pr_url, pr_number,
-			blocked_by, created_at, updated_at, completed_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW(),NOW(),$21)
+			blocked_by, planned_start_at, planned_end_at, created_at, updated_at, completed_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW(),NOW(),$23)
 	`
 	_, err := r.db.Exec(ctx, query,
 		task.ID, task.ProjectID, task.ParentID, task.SprintID, task.Title, task.Description,
 		task.Status, task.Priority, task.AssigneeID, task.AssigneeType, task.ReporterID,
 		task.Labels, task.BudgetUsd, task.SpentUsd, task.AgentBranch, task.AgentWorktree,
-		task.AgentSessionID, task.PRUrl, task.PRNumber, task.BlockedBy, task.CompletedAt,
+		task.AgentSessionID, task.PRUrl, task.PRNumber, task.BlockedBy, task.PlannedStartAt, task.PlannedEndAt, task.CompletedAt,
 	)
 	if err != nil {
 		return fmt.Errorf("create task: %w", err)
@@ -62,7 +96,7 @@ func (r *TaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Task
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT ` + taskColumns + ` FROM tasks WHERE id = $1`
+	query := `SELECT ` + taskColumns + ` FROM tasks LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id WHERE tasks.id = $1`
 	t, err := scanTask(r.db.QueryRow(ctx, query, id))
 	if err != nil {
 		return nil, fmt.Errorf("get task by id: %w", err)
@@ -74,7 +108,7 @@ func (r *TaskRepository) GetByPRURL(ctx context.Context, prURL string) (*model.T
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT ` + taskColumns + ` FROM tasks WHERE pr_url = $1 ORDER BY updated_at DESC LIMIT 1`
+	query := `SELECT ` + taskColumns + ` FROM tasks LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id WHERE tasks.pr_url = $1 ORDER BY tasks.updated_at DESC LIMIT 1`
 	t, err := scanTask(r.db.QueryRow(ctx, query, prURL))
 	if err != nil {
 		return nil, fmt.Errorf("get task by pr url: %w", err)
@@ -91,32 +125,32 @@ func (r *TaskRepository) List(ctx context.Context, projectID uuid.UUID, q model.
 	var args []any
 	argN := 1
 
-	where = append(where, fmt.Sprintf("project_id = $%d", argN))
+	where = append(where, fmt.Sprintf("tasks.project_id = $%d", argN))
 	args = append(args, projectID)
 	argN++
 
 	if q.Status != "" {
-		where = append(where, fmt.Sprintf("status = $%d", argN))
+		where = append(where, fmt.Sprintf("tasks.status = $%d", argN))
 		args = append(args, q.Status)
 		argN++
 	}
 	if q.AssigneeID != "" {
-		where = append(where, fmt.Sprintf("assignee_id = $%d", argN))
+		where = append(where, fmt.Sprintf("tasks.assignee_id = $%d", argN))
 		args = append(args, q.AssigneeID)
 		argN++
 	}
 	if q.SprintID != "" {
-		where = append(where, fmt.Sprintf("sprint_id = $%d", argN))
+		where = append(where, fmt.Sprintf("tasks.sprint_id = $%d", argN))
 		args = append(args, q.SprintID)
 		argN++
 	}
 	if q.Priority != "" {
-		where = append(where, fmt.Sprintf("priority = $%d", argN))
+		where = append(where, fmt.Sprintf("tasks.priority = $%d", argN))
 		args = append(args, q.Priority)
 		argN++
 	}
 	if q.Search != "" {
-		where = append(where, fmt.Sprintf("(title ILIKE $%d OR description ILIKE $%d)", argN, argN))
+		where = append(where, fmt.Sprintf("(tasks.title ILIKE $%d OR tasks.description ILIKE $%d)", argN, argN))
 		args = append(args, "%"+q.Search+"%")
 		argN++
 	}
@@ -131,7 +165,7 @@ func (r *TaskRepository) List(ctx context.Context, projectID uuid.UUID, q model.
 	}
 
 	// Sort.
-	sort := "created_at DESC"
+	sort := "tasks.created_at DESC"
 	if q.Sort != "" {
 		sort = q.Sort
 	}
@@ -147,7 +181,7 @@ func (r *TaskRepository) List(ctx context.Context, projectID uuid.UUID, q model.
 	}
 	offset := (page - 1) * limit
 
-	listQuery := fmt.Sprintf("SELECT %s FROM tasks %s ORDER BY %s LIMIT %d OFFSET %d",
+	listQuery := fmt.Sprintf("SELECT %s FROM tasks LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id %s ORDER BY %s LIMIT %d OFFSET %d",
 		taskColumns, whereClause, sort, limit, offset)
 
 	rows, err := r.db.Query(ctx, listQuery, args...)
@@ -176,9 +210,17 @@ func (r *TaskRepository) Update(ctx context.Context, id uuid.UUID, req *model.Up
 		description = COALESCE($2, description),
 		priority = COALESCE($3, priority),
 		budget_usd = COALESCE($4, budget_usd),
+		planned_start_at = CASE
+			WHEN $5::text IS NULL THEN planned_start_at
+			ELSE NULLIF($5::text, '')::timestamptz
+		END,
+		planned_end_at = CASE
+			WHEN $6::text IS NULL THEN planned_end_at
+			ELSE NULLIF($6::text, '')::timestamptz
+		END,
 		updated_at = NOW()
-		WHERE id = $5`
-	_, err := r.db.Exec(ctx, query, req.Title, req.Description, req.Priority, req.BudgetUsd, id)
+		WHERE id = $7`
+	_, err := r.db.Exec(ctx, query, req.Title, req.Description, req.Priority, req.BudgetUsd, req.PlannedStartAt, req.PlannedEndAt, id)
 	if err != nil {
 		return fmt.Errorf("update task: %w", err)
 	}
@@ -267,6 +309,32 @@ func (r *TaskRepository) ClearRuntime(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+func (r *TaskRepository) ListOpenForProgress(ctx context.Context) ([]*model.Task, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	query := `SELECT ` + taskColumns + ` FROM tasks
+		LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id
+		WHERE tasks.status NOT IN ($1, $2)
+		ORDER BY tasks.updated_at DESC`
+	rows, err := r.db.Query(ctx, query, model.TaskStatusDone, model.TaskStatusCancelled)
+	if err != nil {
+		return nil, fmt.Errorf("list open tasks for progress: %w", err)
+	}
+	defer rows.Close()
+
+	var tasks []*model.Task
+	for rows.Next() {
+		task, err := scanTask(rows)
+		if err != nil {
+			return nil, fmt.Errorf("scan task for progress: %w", err)
+		}
+		tasks = append(tasks, task)
+	}
+	return tasks, rows.Err()
+}
+
 func (r *TaskRepository) HasChildren(ctx context.Context, parentID uuid.UUID) (bool, error) {
 	if r.db == nil {
 		return false, ErrDatabaseUnavailable
@@ -314,8 +382,8 @@ func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.Task
 		INSERT INTO tasks (id, project_id, parent_id, sprint_id, title, description, status, priority,
 			assignee_id, assignee_type, reporter_id, labels, budget_usd, spent_usd,
 			agent_branch, agent_worktree, agent_session_id, pr_url, pr_number,
-			blocked_by, created_at, updated_at, completed_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,NOW(),NOW(),$21)
+			blocked_by, planned_start_at, planned_end_at, created_at, updated_at, completed_at)
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW(),NOW(),$23)
 	`
 
 	for _, input := range inputs {
@@ -338,7 +406,7 @@ func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.Task
 			task.ID, task.ProjectID, task.ParentID, task.SprintID, task.Title, task.Description,
 			task.Status, task.Priority, task.AssigneeID, task.AssigneeType, task.ReporterID,
 			task.Labels, task.BudgetUsd, task.SpentUsd, task.AgentBranch, task.AgentWorktree,
-			task.AgentSessionID, task.PRUrl, task.PRNumber, task.BlockedBy, task.CompletedAt,
+			task.AgentSessionID, task.PRUrl, task.PRNumber, task.BlockedBy, task.PlannedStartAt, task.PlannedEndAt, task.CompletedAt,
 		)
 		if err != nil {
 			return nil, fmt.Errorf("create child task: %w", err)

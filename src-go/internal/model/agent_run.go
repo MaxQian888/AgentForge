@@ -10,6 +10,7 @@ type AgentRun struct {
 	ID              uuid.UUID  `db:"id"`
 	TaskID          uuid.UUID  `db:"task_id"`
 	MemberID        uuid.UUID  `db:"member_id"`
+	RoleID          string     `db:"role_id"`
 	Status          string     `db:"status"`
 	Provider        string     `db:"provider"`
 	Model           string     `db:"model"`
@@ -39,6 +40,7 @@ type AgentRunDTO struct {
 	ID              string  `json:"id"`
 	TaskID          string  `json:"taskId"`
 	MemberID        string  `json:"memberId"`
+	RoleID          string  `json:"roleId,omitempty"`
 	Status          string  `json:"status"`
 	Provider        string  `json:"provider"`
 	Model           string  `json:"model"`
@@ -58,6 +60,7 @@ func (a *AgentRun) ToDTO() AgentRunDTO {
 		ID:              a.ID.String(),
 		TaskID:          a.TaskID.String(),
 		MemberID:        a.MemberID.String(),
+		RoleID:          a.RoleID,
 		Status:          a.Status,
 		Provider:        a.Provider,
 		Model:           a.Model,

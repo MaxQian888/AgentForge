@@ -12,40 +12,55 @@ import (
 	"github.com/agentforge/im-bridge/commands"
 	"github.com/agentforge/im-bridge/core"
 	"github.com/agentforge/im-bridge/notify"
-	"github.com/agentforge/im-bridge/platform/dingtalk"
-	"github.com/agentforge/im-bridge/platform/feishu"
-	"github.com/agentforge/im-bridge/platform/slack"
 )
 
 type config struct {
-	APIBase           string
-	ProjectID         string
-	APIKey            string
-	Platform          string
-	FeishuApp         string
-	FeishuSec         string
-	SlackBotToken     string
-	SlackAppToken     string
-	DingTalkAppKey    string
-	DingTalkAppSecret string
-	NotifyPort        string
-	TestPort          string
+	APIBase                 string
+	ProjectID               string
+	APIKey                  string
+	Platform                string
+	TransportMode           string
+	FeishuApp               string
+	FeishuSec               string
+	SlackBotToken           string
+	SlackAppToken           string
+	DingTalkAppKey          string
+	DingTalkAppSecret       string
+	TelegramBotToken        string
+	TelegramUpdateMode      string
+	TelegramWebhookURL      string
+	DiscordAppID            string
+	DiscordBotToken         string
+	DiscordPublicKey        string
+	DiscordInteractionsPort string
+	DiscordCommandGuildID   string
+	NotifyPort              string
+	TestPort                string
 }
 
 func loadConfig() *config {
 	return &config{
-		APIBase:           envOrDefault("AGENTFORGE_API_BASE", "http://localhost:7777"),
-		ProjectID:         envOrDefault("AGENTFORGE_PROJECT_ID", "default-project"),
-		APIKey:            envOrDefault("AGENTFORGE_API_KEY", ""),
-		Platform:          envOrDefault("IM_PLATFORM", "feishu"),
-		FeishuApp:         os.Getenv("FEISHU_APP_ID"),
-		FeishuSec:         os.Getenv("FEISHU_APP_SECRET"),
-		SlackBotToken:     os.Getenv("SLACK_BOT_TOKEN"),
-		SlackAppToken:     os.Getenv("SLACK_APP_TOKEN"),
-		DingTalkAppKey:    os.Getenv("DINGTALK_APP_KEY"),
-		DingTalkAppSecret: os.Getenv("DINGTALK_APP_SECRET"),
-		NotifyPort:        envOrDefault("NOTIFY_PORT", "7779"),
-		TestPort:          envOrDefault("TEST_PORT", "7780"),
+		APIBase:                 envOrDefault("AGENTFORGE_API_BASE", "http://localhost:7777"),
+		ProjectID:               envOrDefault("AGENTFORGE_PROJECT_ID", "default-project"),
+		APIKey:                  envOrDefault("AGENTFORGE_API_KEY", ""),
+		Platform:                envOrDefault("IM_PLATFORM", "feishu"),
+		TransportMode:           envOrDefault("IM_TRANSPORT_MODE", transportModeStub),
+		FeishuApp:               os.Getenv("FEISHU_APP_ID"),
+		FeishuSec:               os.Getenv("FEISHU_APP_SECRET"),
+		SlackBotToken:           os.Getenv("SLACK_BOT_TOKEN"),
+		SlackAppToken:           os.Getenv("SLACK_APP_TOKEN"),
+		DingTalkAppKey:          os.Getenv("DINGTALK_APP_KEY"),
+		DingTalkAppSecret:       os.Getenv("DINGTALK_APP_SECRET"),
+		TelegramBotToken:        os.Getenv("TELEGRAM_BOT_TOKEN"),
+		TelegramUpdateMode:      envOrDefault("TELEGRAM_UPDATE_MODE", "longpoll"),
+		TelegramWebhookURL:      os.Getenv("TELEGRAM_WEBHOOK_URL"),
+		DiscordAppID:            os.Getenv("DISCORD_APP_ID"),
+		DiscordBotToken:         os.Getenv("DISCORD_BOT_TOKEN"),
+		DiscordPublicKey:        os.Getenv("DISCORD_PUBLIC_KEY"),
+		DiscordInteractionsPort: os.Getenv("DISCORD_INTERACTIONS_PORT"),
+		DiscordCommandGuildID:   os.Getenv("DISCORD_COMMAND_GUILD_ID"),
+		NotifyPort:              envOrDefault("NOTIFY_PORT", "7779"),
+		TestPort:                envOrDefault("TEST_PORT", "7780"),
 	}
 }
 
@@ -57,29 +72,36 @@ func envOrDefault(key, fallback string) string {
 }
 
 func selectPlatform(cfg *config) (core.Platform, error) {
-	switch core.NormalizePlatformName(cfg.Platform) {
-	case "feishu":
-		if cfg.FeishuApp != "" && cfg.FeishuSec != "" {
-			log.Printf("[main] Selected platform feishu with configured credentials; using local stub adapter on :%s until live transport is integrated", cfg.TestPort)
-		} else {
-			log.Printf("[main] Selected platform feishu without credentials; using local stub adapter on :%s", cfg.TestPort)
-		}
-		return feishu.NewStub(cfg.TestPort), nil
-	case "slack":
-		if cfg.SlackBotToken == "" || cfg.SlackAppToken == "" {
-			return nil, fmt.Errorf("selected platform slack requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN")
-		}
-		log.Printf("[main] Selected platform slack; using local stub adapter on :%s", cfg.TestPort)
-		return slack.NewStub(cfg.TestPort), nil
-	case "dingtalk":
-		if cfg.DingTalkAppKey == "" || cfg.DingTalkAppSecret == "" {
-			return nil, fmt.Errorf("selected platform dingtalk requires DINGTALK_APP_KEY and DINGTALK_APP_SECRET")
-		}
-		log.Printf("[main] Selected platform dingtalk; using local stub adapter on :%s", cfg.TestPort)
-		return dingtalk.NewStub(cfg.TestPort), nil
-	default:
-		return nil, fmt.Errorf("unsupported IM_PLATFORM %q", cfg.Platform)
+	descriptor, err := lookupPlatformDescriptor(cfg.Platform)
+	if err != nil {
+		return nil, err
 	}
+
+	mode := normalizeTransportMode(cfg.TransportMode)
+	if mode != transportModeStub && mode != transportModeLive {
+		return nil, fmt.Errorf("unsupported IM_TRANSPORT_MODE %q", cfg.TransportMode)
+	}
+	if err := descriptor.ValidateConfig(cfg, mode); err != nil {
+		return nil, err
+	}
+
+	var factory platformFactory
+	switch mode {
+	case transportModeStub:
+		factory = descriptor.NewStub
+	case transportModeLive:
+		factory = descriptor.NewLive
+	}
+	if factory == nil {
+		return nil, fmt.Errorf("selected platform %s does not support %s transport", descriptor.Metadata.Source, mode)
+	}
+
+	platform, err := factory(cfg)
+	if err != nil {
+		return nil, err
+	}
+	log.Printf("[main] Selected platform %s using %s transport", descriptor.Metadata.Source, mode)
+	return platform, nil
 }
 
 func main() {
@@ -92,7 +114,7 @@ func main() {
 	log.Printf("[main] IM platform selected: %s", core.NormalizePlatformName(platform.Name()))
 
 	// Create API client.
-	apiClient := client.NewAgentForgeClient(cfg.APIBase, cfg.ProjectID, cfg.APIKey).WithSource(platform.Name())
+	apiClient := client.NewAgentForgeClient(cfg.APIBase, cfg.ProjectID, cfg.APIKey).WithPlatform(platform)
 
 	// Create engine and register commands.
 	engine := core.NewEngine(platform)
@@ -120,7 +142,7 @@ func main() {
 	if err := engine.Start(); err != nil {
 		log.Fatalf("[main] Failed to start engine: %v", err)
 	}
-	log.Printf("[main] IM Bridge started successfully (platform=%s notify_port=%s test_port=%s)", core.NormalizePlatformName(platform.Name()), cfg.NotifyPort, cfg.TestPort)
+	log.Printf("[main] IM Bridge started successfully (platform=%s transport=%s notify_port=%s test_port=%s)", core.NormalizePlatformName(platform.Name()), normalizeTransportMode(cfg.TransportMode), cfg.NotifyPort, cfg.TestPort)
 
 	// Wait for shutdown signal.
 	sig := make(chan os.Signal, 1)

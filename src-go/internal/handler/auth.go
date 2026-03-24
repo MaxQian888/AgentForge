@@ -6,9 +6,11 @@ import (
 	"net/http"
 	"time"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
@@ -35,6 +37,9 @@ func (h *AuthHandler) Register(c echo.Context) error {
 		if errors.Is(err, service.ErrEmailAlreadyExists) {
 			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: "email already exists"})
 		}
+		if errors.Is(err, repository.ErrDatabaseUnavailable) {
+			return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "authentication service unavailable"})
+		}
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "registration failed"})
 	}
 
@@ -54,6 +59,9 @@ func (h *AuthHandler) Login(c echo.Context) error {
 	if err != nil {
 		if errors.Is(err, service.ErrInvalidCredentials) {
 			return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "invalid email or password"})
+		}
+		if errors.Is(err, repository.ErrDatabaseUnavailable) {
+			return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "authentication service unavailable"})
 		}
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "login failed"})
 	}
@@ -75,6 +83,9 @@ func (h *AuthHandler) Refresh(c echo.Context) error {
 		if errors.Is(err, service.ErrInvalidToken) {
 			return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "invalid or expired refresh token"})
 		}
+		if errors.Is(err, repository.ErrCacheUnavailable) || errors.Is(err, repository.ErrDatabaseUnavailable) {
+			return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "authentication service unavailable"})
+		}
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "token refresh failed"})
 	}
 
@@ -94,6 +105,9 @@ func (h *AuthHandler) Logout(c echo.Context) error {
 	}
 
 	if err := h.authSvc.Logout(c.Request().Context(), claims.UserID, claims.JTI, remaining); err != nil {
+		if errors.Is(err, repository.ErrCacheUnavailable) {
+			return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "authentication service unavailable"})
+		}
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "logout failed"})
 	}
 
@@ -106,8 +120,16 @@ func (h *AuthHandler) GetMe(c echo.Context) error {
 		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "unauthorized"})
 	}
 
-	return c.JSON(http.StatusOK, model.UserDTO{
-		ID:    claims.UserID,
-		Email: claims.Email,
-	})
+	dto, err := h.authSvc.GetCurrentUser(c.Request().Context(), claims.UserID)
+	if err != nil {
+		if errors.Is(err, service.ErrInvalidToken) || errors.Is(err, pgx.ErrNoRows) {
+			return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "unauthorized"})
+		}
+		if errors.Is(err, repository.ErrDatabaseUnavailable) {
+			return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "authentication service unavailable"})
+		}
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to load user profile"})
+	}
+
+	return c.JSON(http.StatusOK, dto)
 }

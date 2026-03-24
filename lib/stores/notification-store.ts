@@ -5,10 +5,26 @@ import { useAuthStore } from "./auth-store";
 
 export interface Notification {
   id: string;
+  targetId?: string;
   type: string;
   title: string;
   message: string;
+  data?: string;
+  href?: string | null;
   read: boolean;
+  createdAt: string;
+}
+
+interface NotificationApiShape {
+  id: string;
+  targetId?: string;
+  type: string;
+  title: string;
+  body?: string;
+  message?: string;
+  data?: string;
+  isRead?: boolean;
+  read?: boolean;
   createdAt: string;
 }
 
@@ -17,25 +33,69 @@ interface NotificationState {
   unreadCount: number;
   fetchNotifications: () => Promise<void>;
   markRead: (id: string) => void;
-  addNotification: (n: Notification) => void;
+  addNotification: (n: NotificationApiShape | Notification) => void;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
+
+function extractHref(data?: string): string | null {
+  if (!data) {
+    return null;
+  }
+
+  try {
+    const parsed = JSON.parse(data) as { href?: string };
+    return typeof parsed.href === "string" ? parsed.href : null;
+  } catch {
+    return null;
+  }
+}
+
+function normalizeNotification(
+  notification: NotificationApiShape | Notification
+): Notification {
+  return {
+    id: notification.id,
+    targetId: "targetId" in notification ? notification.targetId : undefined,
+    type: notification.type,
+    title: notification.title,
+    message:
+      "message" in notification && typeof notification.message === "string"
+        ? notification.message
+        : "body" in notification && typeof notification.body === "string"
+          ? notification.body
+          : "",
+    data: "data" in notification ? notification.data : undefined,
+    href:
+      "href" in notification && typeof notification.href !== "undefined"
+        ? notification.href
+        : extractHref("data" in notification ? notification.data : undefined),
+    read:
+      "read" in notification && typeof notification.read === "boolean"
+        ? notification.read
+        : Boolean(notification.isRead),
+    createdAt: notification.createdAt,
+  };
+}
 
 export const useNotificationStore = create<NotificationState>()((set) => ({
   notifications: [],
   unreadCount: 0,
 
   fetchNotifications: async () => {
-    const token = useAuthStore.getState().token;
+    const token = useAuthStore.getState().accessToken;
     if (!token) return;
     const api = createApiClient(API_URL);
-    const { data } = await api.get<Notification[]>("/api/v1/notifications", {
-      token,
-    });
+    const { data } = await api.get<NotificationApiShape[]>(
+      "/api/v1/notifications",
+      {
+        token,
+      }
+    );
+    const notifications = data.map(normalizeNotification);
     set({
-      notifications: data,
-      unreadCount: data.filter((n) => !n.read).length,
+      notifications,
+      unreadCount: notifications.filter((n) => !n.read).length,
     });
   },
 
@@ -49,16 +109,17 @@ export const useNotificationStore = create<NotificationState>()((set) => ({
         unreadCount: notifications.filter((n) => !n.read).length,
       };
     });
-    const token = useAuthStore.getState().token;
+    const token = useAuthStore.getState().accessToken;
     if (!token) return;
     const api = createApiClient(API_URL);
     api.put(`/api/v1/notifications/${id}/read`, {}, { token });
   },
 
   addNotification: (n) => {
+    const normalized = normalizeNotification(n);
     set((s) => ({
-      notifications: [n, ...s.notifications],
-      unreadCount: s.unreadCount + (n.read ? 0 : 1),
+      notifications: [normalized, ...s.notifications],
+      unreadCount: s.unreadCount + (normalized.read ? 0 : 1),
     }));
   },
 }));

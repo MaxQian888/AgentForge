@@ -88,14 +88,17 @@ func TestAgentCommand_SpawnRepliesWithRunAndTask(t *testing.T) {
 		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
 			t.Fatalf("decode body: %v", err)
 		}
-		if body["task_id"] != "task-123" {
-			t.Fatalf("task_id = %q", body["task_id"])
+		if body["taskId"] != "task-123" {
+			t.Fatalf("taskId = %q", body["taskId"])
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(&client.AgentRun{
-			ID:     "run-123456",
-			TaskID: "task-123456",
+		_ = json.NewEncoder(w).Encode(&client.TaskDispatchResponse{
+			Task: client.Task{ID: "task-123456"},
+			Dispatch: client.DispatchOutcome{
+				Status: "started",
+				Run:    &client.AgentRun{ID: "run-123456", TaskID: "task-123456"},
+			},
 		})
 	}))
 	defer server.Close()

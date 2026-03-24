@@ -2,7 +2,13 @@ import { Hono } from "hono";
 import { RuntimePoolManager } from "./runtime/pool-manager.js";
 import { EventStreamer } from "./ws/event-stream.js";
 import { handleExecute } from "./handlers/execute.js";
+import type { CommandRuntimeRunner } from "./handlers/command-runtime.js";
 import type { QueryRunner } from "./handlers/claude-runtime.js";
+import {
+  RuntimeConfigurationError,
+  UnknownRuntimeError,
+  UnsupportedRuntimeProviderError,
+} from "./runtime/registry.js";
 import {
   ExecuteRequestSchema,
   CancelRequestSchema,
@@ -15,6 +21,12 @@ import { orchestrateDeepReview } from "./review/orchestrator.js";
 import { ToolPluginManager } from "./plugins/tool-plugin-manager.js";
 import { PluginRegisterRequestSchema } from "./plugins/schema.js";
 import { SessionManager } from "./session/manager.js";
+import {
+  MissingProviderCredentialsError,
+  resolveProviderSelection,
+  UnsupportedProviderCapabilityError,
+  UnknownProviderError,
+} from "./providers/registry.js";
 
 interface AppDeps {
   pool?: RuntimePoolManager;
@@ -23,8 +35,11 @@ interface AppDeps {
   connectStreamer?: boolean;
   awaitExecution?: boolean;
   queryRunner?: QueryRunner;
+  commandRuntimeRunner?: CommandRuntimeRunner;
   sessionManager?: SessionManager;
   now?: () => number;
+  executableLookup?: (command: string) => string | null;
+  envLookup?: (name: string) => string | undefined;
   decomposeTask?: DecomposeTaskExecutor;
   pluginManager?: ToolPluginManager;
 }
@@ -71,7 +86,10 @@ export function createApp(deps: AppDeps = {}): Hono {
       const result = await handleExecute(pool, streamer, parsed.data, {
         awaitCompletion: deps.awaitExecution,
         queryRunner: deps.queryRunner,
+        commandRuntimeRunner: deps.commandRuntimeRunner,
         sessionManager,
+        executableLookup: deps.executableLookup,
+        envLookup: deps.envLookup,
         now,
       });
       return c.json(result, 200);
@@ -82,6 +100,12 @@ export function createApp(deps: AppDeps = {}): Hono {
       }
       if (message.includes("already exists")) {
         return c.json({ error: message }, 409);
+      }
+      if (err instanceof UnknownRuntimeError || err instanceof UnsupportedRuntimeProviderError) {
+        return c.json({ error: message }, 400);
+      }
+      if (err instanceof RuntimeConfigurationError) {
+        return c.json({ error: message }, 503);
       }
       return c.json({ error: message }, 500);
     }
@@ -97,10 +121,20 @@ export function createApp(deps: AppDeps = {}): Hono {
           400,
         );
       }
-      const result = await handleDecompose(parsed.data, deps.decomposeTask);
+      const resolvedProvider = resolveProviderSelection("text_generation", parsed.data);
+      const result = await handleDecompose(parsed.data, resolvedProvider, deps.decomposeTask);
       return c.json(result, 200);
     } catch (err: unknown) {
       const message = err instanceof Error ? err.message : String(err);
+      if (
+        err instanceof UnknownProviderError ||
+        err instanceof UnsupportedProviderCapabilityError
+      ) {
+        return c.json({ error: message }, 400);
+      }
+      if (err instanceof MissingProviderCredentialsError) {
+        return c.json({ error: message }, 503);
+      }
       return c.json({ error: message }, 500);
     }
   });

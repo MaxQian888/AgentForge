@@ -3,7 +3,7 @@ import type { RoleConfig } from "../types.js";
 export function buildSystemPrompt(basePrompt: string, roleConfig?: RoleConfig): string {
   if (!roleConfig) return basePrompt;
 
-  return `# Role: ${roleConfig.name}
+  return `# Role: ${roleConfig.role}
 ## Goal
 ${roleConfig.goal}
 ## Backstory

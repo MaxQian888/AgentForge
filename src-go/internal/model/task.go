@@ -28,6 +28,9 @@ type Task struct {
 	PRUrl          string     `db:"pr_url"`
 	PRNumber       int        `db:"pr_number"`
 	BlockedBy      []string   `db:"blocked_by"`
+	PlannedStartAt *time.Time `db:"planned_start_at"`
+	PlannedEndAt   *time.Time `db:"planned_end_at"`
+	Progress       *TaskProgressSnapshot
 	CreatedAt      time.Time  `db:"created_at"`
 	UpdatedAt      time.Time  `db:"updated_at"`
 	CompletedAt    *time.Time `db:"completed_at"`
@@ -94,28 +97,35 @@ type TaskDTO struct {
 	PRUrl          string   `json:"prUrl"`
 	PRNumber       int      `json:"prNumber"`
 	BlockedBy      []string `json:"blockedBy"`
+	PlannedStartAt *string  `json:"plannedStartAt,omitempty"`
+	PlannedEndAt   *string  `json:"plannedEndAt,omitempty"`
+	Progress       *TaskProgressSnapshotDTO `json:"progress,omitempty"`
 	CreatedAt      string   `json:"createdAt"`
 	UpdatedAt      string   `json:"updatedAt"`
 	CompletedAt    *string  `json:"completedAt,omitempty"`
 }
 
 type CreateTaskRequest struct {
-	Title       string   `json:"title" validate:"required,min=1,max=200"`
-	Description string   `json:"description"`
-	Priority    string   `json:"priority" validate:"required,oneof=critical high medium low"`
-	ParentID    *string  `json:"parentId"`
-	SprintID    *string  `json:"sprintId"`
-	Labels      []string `json:"labels"`
-	BudgetUsd   float64  `json:"budgetUsd"`
+	Title          string   `json:"title" validate:"required,min=1,max=200"`
+	Description    string   `json:"description"`
+	Priority       string   `json:"priority" validate:"required,oneof=critical high medium low"`
+	ParentID       *string  `json:"parentId"`
+	SprintID       *string  `json:"sprintId"`
+	Labels         []string `json:"labels"`
+	BudgetUsd      float64  `json:"budgetUsd"`
+	PlannedStartAt *string  `json:"plannedStartAt"`
+	PlannedEndAt   *string  `json:"plannedEndAt"`
 }
 
 type UpdateTaskRequest struct {
-	Title       *string  `json:"title"`
-	Description *string  `json:"description"`
-	Priority    *string  `json:"priority"`
-	SprintID    *string  `json:"sprintId"`
-	Labels      []string `json:"labels"`
-	BudgetUsd   *float64 `json:"budgetUsd"`
+	Title          *string  `json:"title"`
+	Description    *string  `json:"description"`
+	Priority       *string  `json:"priority"`
+	SprintID       *string  `json:"sprintId"`
+	Labels         []string `json:"labels"`
+	BudgetUsd      *float64 `json:"budgetUsd"`
+	PlannedStartAt *string  `json:"plannedStartAt"`
+	PlannedEndAt   *string  `json:"plannedEndAt"`
 }
 
 type TaskListQuery struct {
@@ -198,5 +208,14 @@ func (t *Task) ToDTO() TaskDTO {
 		s := t.CompletedAt.Format(time.RFC3339)
 		dto.CompletedAt = &s
 	}
+	if t.PlannedStartAt != nil {
+		s := t.PlannedStartAt.Format(time.RFC3339)
+		dto.PlannedStartAt = &s
+	}
+	if t.PlannedEndAt != nil {
+		s := t.PlannedEndAt.Format(time.RFC3339)
+		dto.PlannedEndAt = &s
+	}
+	dto.Progress = t.Progress.ToDTO()
 	return dto
 }

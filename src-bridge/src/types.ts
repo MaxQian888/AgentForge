@@ -1,7 +1,12 @@
+export type AgentRuntimeKey = "claude_code" | "codex" | "opencode";
+
 /** Request from Go Orchestrator to execute an agent task. */
 export interface ExecuteRequest {
   task_id: string;
   session_id: string;
+  runtime?: AgentRuntimeKey;
+  provider?: string;
+  model?: string;
   prompt: string;
   worktree_path: string;
   branch_name: string;
@@ -19,6 +24,8 @@ export interface DecomposeTaskRequest {
   title: string;
   description: string;
   priority: "critical" | "high" | "medium" | "low";
+  provider?: string;
+  model?: string;
 }
 
 /** One child task returned from decomposition. */
@@ -36,12 +43,15 @@ export interface DecomposeTaskResponse {
 
 /** Role-based configuration for agent persona injection. */
 export interface RoleConfig {
+  role_id: string;
   name: string;
+  role: string;
   goal: string;
   backstory: string;
   system_prompt: string;
   allowed_tools: string[];
   max_budget_usd: number;
+  max_turns: number;
   permission_mode: string;
 }
 

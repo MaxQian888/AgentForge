@@ -10,3 +10,7 @@ type Identity = model.RoleIdentity
 type Capabilities = model.RoleCapabilities
 type Knowledge = model.RoleKnowledge
 type Security = model.RoleSecurity
+type RoleResponseStyle = model.RoleResponseStyle
+type RoleToolConfig = model.RoleToolConfig
+type RoleMCPServer = model.RoleMCPServer
+type ExecutionProfile = model.RoleExecutionProfile

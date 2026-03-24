@@ -3,12 +3,15 @@ import { buildSystemPrompt, filterTools } from "./injector.js";
 import type { RoleConfig } from "../types.js";
 
 const roleConfig: RoleConfig = {
+  role_id: "reviewer",
   name: "Reviewer",
+  role: "Senior Reviewer",
   goal: "Find risky changes",
   backstory: "A skeptical but helpful reviewer.",
   system_prompt: "Always explain why a suggestion matters.",
   allowed_tools: ["Read", "Bash"],
   max_budget_usd: 2,
+  max_turns: 12,
   permission_mode: "default",
 };
 
@@ -20,7 +23,7 @@ describe("role injector", () => {
   test("prepends role context and filters tools to the allow-list", () => {
     const prompt = buildSystemPrompt("Base prompt", roleConfig);
 
-    expect(prompt).toContain("# Role: Reviewer");
+    expect(prompt).toContain("# Role: Senior Reviewer");
     expect(prompt).toContain("## Goal");
     expect(prompt).toContain("Always explain why a suggestion matters.");
     expect(prompt).toContain("Base prompt");

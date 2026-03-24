@@ -82,6 +82,7 @@ Start here if you want the latest project narrative:
 - [`docs/part/REVIEW_PIPELINE_DESIGN.md`](./docs/part/REVIEW_PIPELINE_DESIGN.md): three-layer review architecture
 - [`docs/part/PLUGIN_SYSTEM_DESIGN.md`](./docs/part/PLUGIN_SYSTEM_DESIGN.md): target plugin system design
 - [`docs/part/PLUGIN_RESEARCH_TECH.md`](./docs/part/PLUGIN_RESEARCH_TECH.md): runtime and sandbox technology research for plugins
+- [`docs/GO_WASM_PLUGIN_RUNTIME.md`](./docs/GO_WASM_PLUGIN_RUNTIME.md): current Go-side WASM plugin runtime, SDK, and local verification flow
 - [`docs/part/PLUGIN_RESEARCH_PLATFORMS.md`](./docs/part/PLUGIN_RESEARCH_PLATFORMS.md): platform comparison for extension ecosystems
 - [`docs/part/TECHNICAL_CHALLENGES.md`](./docs/part/TECHNICAL_CHALLENGES.md): key engineering risks and mitigation paths
 - [`docs/part/DATA_AND_REALTIME_DESIGN.md`](./docs/part/DATA_AND_REALTIME_DESIGN.md): data model and realtime/event design
@@ -145,6 +146,29 @@ Useful backend commands:
 - `go build ./cmd/server`
 - `docker build -t agentforge-server .`
 
+### Auth And Session Notes
+
+The current auth flow is intentionally aligned across the frontend and Go backend:
+
+- The frontend persists the canonical session payload: `accessToken`, `refreshToken`, and `user`.
+- Protected dashboard routes do not trust a cached boolean alone. On bootstrap, the app validates the stored access token with `GET /api/v1/users/me`, attempts one `POST /api/v1/auth/refresh` when the access token is no longer authorized, and clears stale session state if recovery fails.
+- Web mode resolves the backend from `NEXT_PUBLIC_API_URL` and falls back to `http://localhost:7777`. Tauri mode uses the native `get_backend_url` command first, then falls back to the same default.
+- `POST /api/v1/auth/refresh` is rate-limited together with login and registration.
+
+For local backend auth config, create `src-go/.env` if you need overrides. Typical values are:
+
+```env
+PORT=7777
+ENV=development
+JWT_SECRET=change-me-in-production-at-least-32-chars
+JWT_ACCESS_TTL=15m
+JWT_REFRESH_TTL=168h
+ALLOW_ORIGINS=http://localhost:3000,tauri://localhost,http://localhost:1420
+REDIS_URL=redis://localhost:6379
+```
+
+Security note: PostgreSQL/Redis can still be absent at process startup for local development, but auth paths that depend on token revocation state do not silently degrade. If Redis or the token cache is unavailable, refresh, logout revocation, and blacklist-backed protected-route checks now fail closed instead of reporting success.
+
 ### 3. TypeScript Agent Bridge
 
 ```bash
@@ -157,6 +181,19 @@ Useful bridge commands:
 
 - `bun run dev`
 - `bun run build`
+- `bun run typecheck`
+
+Runtime notes:
+
+- `/bridge/execute` now accepts an optional `runtime` field with `claude_code`, `codex`, or `opencode`.
+- If `runtime` is omitted, the bridge defaults to `claude_code` and still maps legacy provider hints such as `anthropic`, `codex`, and `opencode`.
+- `claude_code` uses the built-in Claude-backed adapter and expects `ANTHROPIC_API_KEY`.
+- `codex` and `opencode` use command-based adapters. Set `CODEX_RUNTIME_COMMAND` or `OPENCODE_RUNTIME_COMMAND` to an executable on `PATH` (or an absolute path). Each command must read one JSON request from `stdin` and emit newline-delimited JSON events on `stdout`.
+- Command adapters normalize these event types into the canonical bridge stream: `assistant_text`, `tool_call`, `tool_result`, `usage`, and `error`.
+
+Focused verification for the bridge runtime layer:
+
+- `bun test src/schemas.test.ts src/handlers/execute.test.ts src/runtime/registry.test.ts src/server.test.ts`
 - `bun run typecheck`
 
 From the repo root, there is also:
@@ -203,6 +240,7 @@ pnpm tauri:build
 | `pnpm test:coverage` | Run Jest with coverage |
 | `pnpm build:backend` | Cross-compile Go sidecar binaries for Tauri |
 | `pnpm build:backend:dev` | Build the Go sidecar for the current platform |
+| `pnpm build:plugin:wasm` | Build the Go WASM sample plugin artifact |
 | `pnpm tauri:dev` | Build backend sidecar and start Tauri dev mode |
 | `pnpm tauri:build` | Build the desktop app |
 | `pnpm build:bridge` | Install and build the TS/Bun bridge |

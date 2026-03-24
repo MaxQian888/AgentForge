@@ -1,60 +1,95 @@
 # agent-sdk-bridge-runtime Specification
 
 ## Purpose
-Define the baseline contract for executing real Claude Agent SDK runs through the TypeScript bridge, including the canonical Go-to-bridge HTTP surface, runtime event normalization, budget and cancellation enforcement, and continuity state persistence for diagnostics and future resume work.
+Define the baseline contract for executing real Claude-backed runs through the TypeScript bridge, including the canonical Go-to-bridge HTTP surface, explicit runtime selection, runtime event normalization, budget and cancellation enforcement, provider/model capability alignment, normalized role execution profiles, and continuity state persistence for diagnostics and future resume work.
 ## Requirements
 ### Requirement: Bridge executes real Claude Agent SDK runs
-The TypeScript bridge SHALL execute agent work by invoking the real Claude Agent SDK for every accepted execute request, instead of emitting simulated placeholder steps. The bridge SHALL build the SDK request from the canonical execute payload, including prompt, worktree, system prompt, role configuration, allowed tools, permission mode, max turns, and budget context.
+The TypeScript bridge SHALL execute agent work by invoking the real Claude-backed runtime adapter for every accepted execute request that resolves to the `claude_code` runtime, instead of emitting simulated placeholder steps. The bridge SHALL build the backend launch request from the canonical execute payload, including runtime selection, prompt, worktree, system prompt, role configuration, allowed tools, permission mode, max turns, budget context, and any runtime-specific model hints.
 
-#### Scenario: Successful execute request starts a real runtime
-- **WHEN** the Go orchestrator sends a valid execute request and the bridge has runtime capacity
-- **THEN** the bridge starts a real Claude Agent SDK query for that task
-- **THEN** the bridge returns the session identifier for the started runtime
-- **THEN** the bridge emits lifecycle events that move the task from starting to running to a terminal state based on the SDK result
+#### Scenario: Successful execute request starts the Claude-backed runtime
+- **WHEN** the Go orchestrator sends a valid execute request that resolves to `claude_code` and the bridge has runtime capacity
+- **THEN** the bridge SHALL start the real Claude-backed adapter for that task
+- **THEN** the bridge SHALL return the session identifier for the started runtime
+- **THEN** the bridge SHALL emit lifecycle events that move the task from starting to running to a terminal state based on the adapter result
 
 #### Scenario: Execute request is rejected when the bridge is full
-- **WHEN** the Go orchestrator sends an execute request while the runtime pool is already at maximum capacity
-- **THEN** the bridge rejects the request with a capacity error
-- **THEN** the bridge does not create a new runtime entry for that task
+- **WHEN** the Go orchestrator sends an execute request for `claude_code` while the runtime pool is already at maximum capacity
+- **THEN** the bridge SHALL reject the request with a capacity error
+- **THEN** the bridge SHALL not create a new runtime entry for that task
 
 ### Requirement: Bridge and Go share one canonical execution contract
-The bridge runtime SHALL expose one canonical HTTP contract for execute, status, cancel, and health operations, and the Go bridge client MUST use that same contract without route or field-name drift.
+The bridge runtime SHALL expose one canonical HTTP contract for execute, status, cancel, and health operations, and the Go bridge client MUST use that same contract without route or field-name drift. The canonical execute contract MUST support explicit runtime selection while preserving defined backward-compatibility behavior for callers that do not yet send `runtime`.
 
 #### Scenario: Go queries runtime status through the canonical route
 - **WHEN** the Go bridge client requests the status of an active task
-- **THEN** the request targets the canonical bridge status endpoint and payload shape defined by this change
-- **THEN** the bridge returns the current runtime state, turn count, last tool, last activity timestamp, and spend for that task
+- **THEN** the request SHALL target the canonical bridge status endpoint and payload shape defined by this change
+- **THEN** the bridge SHALL return the current runtime state, turn count, last tool, last activity timestamp, and spend for that task
 
 #### Scenario: Invalid execute payload is rejected consistently
-- **WHEN** the Go bridge client sends an execute request that does not satisfy the bridge schema
-- **THEN** the bridge returns a validation error that identifies the payload issue
-- **THEN** the bridge does not start agent execution for that task
+- **WHEN** the Go bridge client sends an execute request that does not satisfy the bridge schema, including runtime selection rules
+- **THEN** the bridge SHALL return a validation error that identifies the payload issue
+- **THEN** the bridge SHALL not start agent execution for that task
 
 ### Requirement: Bridge normalizes SDK output into AgentForge runtime events
-The bridge SHALL translate Claude Agent SDK output into the existing AgentForge `AgentEvent` categories so the Go orchestrator receives structured output, tool activity, cost, status, error, and snapshot signals from a truthful runtime source.
+The bridge SHALL translate Claude-backed runtime output into the existing AgentForge `AgentEvent` categories so the Go orchestrator receives structured output, tool activity, cost, status, error, and snapshot signals from a truthful runtime source, even after Claude execution is routed through the shared runtime registry.
 
 #### Scenario: Assistant text and tool activity are streamed as structured events
-- **WHEN** the Claude Agent SDK emits assistant output and tool activity during a task
-- **THEN** the bridge emits `output` events for assistant text blocks
-- **THEN** the bridge emits `tool_call` and `tool_result` events with stable task and session identifiers when tool activity occurs
-- **THEN** the bridge updates runtime bookkeeping such as turn number, last tool, and last activity timestamp
+- **WHEN** the Claude-backed runtime emits assistant output and tool activity during a task
+- **THEN** the bridge SHALL emit `output` events for assistant text blocks
+- **THEN** the bridge SHALL emit `tool_call` and `tool_result` events with stable task and session identifiers when tool activity occurs
+- **THEN** the bridge SHALL update runtime bookkeeping such as turn number, last tool, and last activity timestamp
 
 #### Scenario: Usage data updates runtime cost tracking
-- **WHEN** the Claude Agent SDK returns usage data for an in-flight task
-- **THEN** the bridge emits a `cost_update` event with input, output, cache-read tokens, and calculated cost
-- **THEN** the bridge updates the runtime's accumulated spend so status queries reflect the latest known cost
+- **WHEN** the Claude-backed runtime returns usage data for an in-flight task
+- **THEN** the bridge SHALL emit a `cost_update` event with input, output, cache-read tokens, and calculated cost
+- **THEN** the bridge SHALL update the runtime's accumulated spend so status queries reflect the latest known cost
 
 ### Requirement: Bridge enforces cancellation and preserves continuity state
-The bridge SHALL abort active Claude Agent SDK execution when a cancel request, runtime abort, or local budget exhaustion occurs, and it SHALL preserve the latest known session continuity metadata for that task.
+The bridge SHALL abort active Claude-backed execution when a cancel request, runtime abort, or local budget exhaustion occurs, and it SHALL preserve the latest known session continuity metadata for that task even when the run was selected through the shared runtime registry.
 
 #### Scenario: Explicit cancel stops the active runtime
-- **WHEN** the Go orchestrator submits a cancel request for an active task
-- **THEN** the bridge aborts the corresponding Claude Agent SDK run through the runtime abort controller
-- **THEN** the bridge emits a terminal cancellation or failure event for that task
-- **THEN** the runtime is removed from the active pool after cleanup
+- **WHEN** the Go orchestrator submits a cancel request for an active `claude_code` task
+- **THEN** the bridge SHALL abort the corresponding Claude-backed run through the runtime abort controller
+- **THEN** the bridge SHALL emit a terminal cancellation or failure event for that task
+- **THEN** the runtime SHALL be removed from the active pool after cleanup
 
 #### Scenario: Budget exhaustion terminates execution locally
-- **WHEN** the bridge detects that the task's accumulated spend has reached or exceeded the task budget
-- **THEN** the bridge stops the active Claude Agent SDK run without waiting for Go to issue a separate cancel request
-- **THEN** the bridge emits an error or terminal event that identifies budget exhaustion
-- **THEN** the bridge stores the latest known session continuity metadata for diagnostics or future resume work
+- **WHEN** the bridge detects that the task's accumulated spend has reached or exceeded the task budget during a `claude_code` run
+- **THEN** the bridge SHALL stop the active Claude-backed run without waiting for Go to issue a separate cancel request
+- **THEN** the bridge SHALL emit an error or terminal event that identifies budget exhaustion
+- **THEN** the bridge SHALL store the latest known session continuity metadata for diagnostics or future resume work
+
+### Requirement: Agent execution honors the Bridge provider capability contract
+The TypeScript Bridge SHALL resolve `provider` and `model` for execute requests through the shared provider registry, and it MUST only start agent execution when the resolved provider supports the `agent_execution` capability.
+
+#### Scenario: Execute request uses the default supported provider
+- **WHEN** the Go orchestrator submits a valid execute request without an explicit provider override
+- **THEN** the Bridge SHALL resolve the default `agent_execution` provider and model from the registry
+- **THEN** the Bridge SHALL start the real Claude Agent SDK-backed runtime for that task
+
+#### Scenario: Execute request asks for an unsupported execution provider
+- **WHEN** the Go orchestrator submits an execute request whose resolved provider does not support `agent_execution`
+- **THEN** the Bridge SHALL reject the request before creating a runtime entry
+- **THEN** it SHALL return an explicit error instead of ignoring the provider field or silently switching runtimes
+
+### Requirement: Bridge execute requests accept normalized role execution profiles from Go
+The TypeScript bridge SHALL treat `role_config` in execute requests as a normalized execution profile produced by the Go role-loading pipeline rather than as a raw Role YAML document. The bridge MUST apply the projected role persona and tool constraints without needing to read YAML files, resolve inheritance, or interpret PRD-only role metadata locally.
+
+#### Scenario: Normalized role execution profile is honored
+- **WHEN** the Go orchestrator submits an execute request with a valid normalized `role_config`
+- **THEN** the bridge uses that projected role configuration when composing the effective system prompt and tool constraints for the runtime
+
+#### Scenario: Bridge does not need direct YAML access
+- **WHEN** the bridge receives a valid execute request whose role was loaded from disk by Go
+- **THEN** the bridge executes the task without reading the roles directory or parsing the source YAML itself
+
+### Requirement: Bridge rejects non-normalized role payloads
+The bridge SHALL validate `role_config` against the normalized execution-profile contract and MUST reject payloads that omit required execution fields or attempt to send raw nested Role YAML structures that belong to the Go-side role model.
+
+#### Scenario: Execute request with incomplete role execution data is rejected
+- **WHEN** the Go orchestrator submits an execute request whose `role_config` omits required normalized execution fields such as the projected role name or system prompt inputs
+- **THEN** the bridge returns a validation error and does not start execution
+
+#### Scenario: Raw YAML-shaped role payload is rejected
+- **WHEN** an execute request includes nested PRD role sections such as raw `metadata`, `knowledge`, or `security` objects where a normalized execution profile is expected
+- **THEN** the bridge rejects the payload instead of trying to interpret it as runtime configuration

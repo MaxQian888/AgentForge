@@ -12,10 +12,17 @@ import (
 	"strconv"
 	"testing"
 	"time"
+
+	"github.com/agentforge/im-bridge/platform/dingtalk"
+	"github.com/agentforge/im-bridge/platform/discord"
+	"github.com/agentforge/im-bridge/platform/feishu"
+	"github.com/agentforge/im-bridge/platform/slack"
+	"github.com/agentforge/im-bridge/platform/telegram"
 )
 
 func TestLoadConfig_ReadsExplicitPlatformSettings(t *testing.T) {
 	t.Setenv("IM_PLATFORM", "slack")
+	t.Setenv("IM_TRANSPORT_MODE", "stub")
 	t.Setenv("AGENTFORGE_API_BASE", "http://example.test")
 	t.Setenv("AGENTFORGE_PROJECT_ID", "proj-1")
 	t.Setenv("AGENTFORGE_API_KEY", "secret")
@@ -29,6 +36,9 @@ func TestLoadConfig_ReadsExplicitPlatformSettings(t *testing.T) {
 	if cfg.Platform != "slack" {
 		t.Fatalf("Platform = %q, want slack", cfg.Platform)
 	}
+	if cfg.TransportMode != "stub" {
+		t.Fatalf("TransportMode = %q, want stub", cfg.TransportMode)
+	}
 	if cfg.SlackBotToken != "xoxb-test" {
 		t.Fatalf("SlackBotToken = %q, want xoxb-test", cfg.SlackBotToken)
 	}
@@ -39,8 +49,9 @@ func TestLoadConfig_ReadsExplicitPlatformSettings(t *testing.T) {
 
 func TestSelectPlatform_RejectsMissingCredentials(t *testing.T) {
 	cfg := &config{
-		Platform: "dingtalk",
-		TestPort: "9010",
+		Platform:      "dingtalk",
+		TransportMode: "live",
+		TestPort:      "9010",
 	}
 
 	_, err := selectPlatform(cfg)
@@ -59,8 +70,9 @@ func TestEnvOrDefault_ReturnsFallbackForMissingValue(t *testing.T) {
 
 func TestSelectPlatform_ReturnsStubForFeishuWithoutCredentials(t *testing.T) {
 	cfg := &config{
-		Platform: "feishu",
-		TestPort: "9010",
+		Platform:      "feishu",
+		TransportMode: "stub",
+		TestPort:      "9010",
 	}
 
 	platform, err := selectPlatform(cfg)
@@ -72,9 +84,30 @@ func TestSelectPlatform_ReturnsStubForFeishuWithoutCredentials(t *testing.T) {
 	}
 }
 
+func TestSelectPlatform_ReturnsLiveFeishuAdapterWhenConfigured(t *testing.T) {
+	cfg := &config{
+		Platform:      "feishu",
+		TransportMode: "live",
+		FeishuApp:     "app-id",
+		FeishuSec:     "app-secret",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "feishu-live" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+	if _, ok := platform.(*feishu.Live); !ok {
+		t.Fatalf("platform type = %T, want *feishu.Live", platform)
+	}
+}
+
 func TestSelectPlatform_ReturnsStubForSlackWithCredentials(t *testing.T) {
 	cfg := &config{
 		Platform:      "slack",
+		TransportMode: "stub",
 		SlackBotToken: "xoxb-test",
 		SlackAppToken: "xapp-test",
 		TestPort:      "9010",
@@ -89,9 +122,30 @@ func TestSelectPlatform_ReturnsStubForSlackWithCredentials(t *testing.T) {
 	}
 }
 
+func TestSelectPlatform_ReturnsLiveSlackAdapterWhenConfigured(t *testing.T) {
+	cfg := &config{
+		Platform:      "slack",
+		TransportMode: "live",
+		SlackBotToken: "xoxb-test",
+		SlackAppToken: "xapp-test",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "slack-live" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+	if _, ok := platform.(*slack.Live); !ok {
+		t.Fatalf("platform type = %T, want *slack.Live", platform)
+	}
+}
+
 func TestSelectPlatform_ReturnsStubForDingTalkWithCredentials(t *testing.T) {
 	cfg := &config{
 		Platform:          "dingtalk",
+		TransportMode:     "stub",
 		DingTalkAppKey:    "ding-key",
 		DingTalkAppSecret: "ding-secret",
 		TestPort:          "9010",
@@ -106,15 +160,169 @@ func TestSelectPlatform_ReturnsStubForDingTalkWithCredentials(t *testing.T) {
 	}
 }
 
+func TestSelectPlatform_ReturnsLiveDingTalkAdapterWhenConfigured(t *testing.T) {
+	cfg := &config{
+		Platform:          "dingtalk",
+		TransportMode:     "live",
+		DingTalkAppKey:    "ding-key",
+		DingTalkAppSecret: "ding-secret",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "dingtalk-live" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+	if _, ok := platform.(*dingtalk.Live); !ok {
+		t.Fatalf("platform type = %T, want *dingtalk.Live", platform)
+	}
+}
+
+func TestSelectPlatform_ReturnsStubForTelegramWithoutLiveSettings(t *testing.T) {
+	cfg := &config{
+		Platform:      "telegram",
+		TransportMode: "stub",
+		TestPort:      "9010",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "telegram-stub" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+}
+
+func TestSelectPlatform_ReturnsLiveTelegramAdapterWhenConfigured(t *testing.T) {
+	cfg := &config{
+		Platform:           "telegram",
+		TransportMode:      "live",
+		TelegramBotToken:   "telegram-bot-token",
+		TelegramUpdateMode: "longpoll",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "telegram-live" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+	if _, ok := platform.(*telegram.Live); !ok {
+		t.Fatalf("platform type = %T, want *telegram.Live", platform)
+	}
+}
+
+func TestSelectPlatform_RejectsTelegramWebhookConfigForLongPollingMode(t *testing.T) {
+	cfg := &config{
+		Platform:           "telegram",
+		TransportMode:      "live",
+		TelegramBotToken:   "telegram-bot-token",
+		TelegramUpdateMode: "longpoll",
+		TelegramWebhookURL: "https://example.test/webhook",
+	}
+
+	_, err := selectPlatform(cfg)
+	if err == nil {
+		t.Fatal("expected telegram live selection to reject webhook config when long polling is selected")
+	}
+}
+
 func TestSelectPlatform_RejectsUnsupportedPlatform(t *testing.T) {
 	cfg := &config{
-		Platform: "discord",
-		TestPort: "9010",
+		Platform:      "teams",
+		TransportMode: "stub",
+		TestPort:      "9010",
 	}
 
 	_, err := selectPlatform(cfg)
 	if err == nil {
 		t.Fatal("expected unsupported platform to fail")
+	}
+}
+
+func TestSelectPlatform_AllowsStubModeWithoutProviderCredentials(t *testing.T) {
+	cfg := &config{
+		Platform:      "slack",
+		TransportMode: "stub",
+		TestPort:      "9010",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "slack-stub" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+}
+
+func TestSelectPlatform_ReturnsStubForDiscordWithoutLiveSettings(t *testing.T) {
+	cfg := &config{
+		Platform:      "discord",
+		TransportMode: "stub",
+		TestPort:      "9010",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "discord-stub" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+}
+
+func TestSelectPlatform_ReturnsLiveDiscordAdapterWhenConfigured(t *testing.T) {
+	cfg := &config{
+		Platform:                "discord",
+		TransportMode:           "live",
+		DiscordAppID:            "app-123",
+		DiscordBotToken:         "bot-token",
+		DiscordPublicKey:        "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		DiscordInteractionsPort: "9011",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "discord-live" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+	if _, ok := platform.(*discord.Live); !ok {
+		t.Fatalf("platform type = %T, want *discord.Live", platform)
+	}
+}
+
+func TestSelectPlatform_RejectsDiscordLiveWithoutInteractionPort(t *testing.T) {
+	cfg := &config{
+		Platform:         "discord",
+		TransportMode:    "live",
+		DiscordAppID:     "app-123",
+		DiscordBotToken:  "bot-token",
+		DiscordPublicKey: "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+	}
+
+	_, err := selectPlatform(cfg)
+	if err == nil {
+		t.Fatal("expected discord live selection to reject missing interaction port")
+	}
+}
+
+func TestLookupPlatformDescriptor_ReturnsCapabilities(t *testing.T) {
+	descriptor, err := lookupPlatformDescriptor("feishu")
+	if err != nil {
+		t.Fatalf("lookupPlatformDescriptor error: %v", err)
+	}
+	if descriptor.Metadata.Source != "feishu" {
+		t.Fatalf("source = %q, want feishu", descriptor.Metadata.Source)
+	}
+	if !descriptor.Metadata.Capabilities.SupportsMentions {
+		t.Fatal("expected feishu descriptor to support mentions")
 	}
 }
 

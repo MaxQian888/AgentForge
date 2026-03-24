@@ -15,19 +15,34 @@ import (
 
 // ExecuteRequest is sent to the bridge to start an agent session.
 type ExecuteRequest struct {
-	TaskID         string   `json:"task_id"`
-	SessionID      string   `json:"session_id"`
-	MemberID       string   `json:"member_id,omitempty"`
-	Provider       string   `json:"provider,omitempty"`
-	Model          string   `json:"model,omitempty"`
-	Prompt         string   `json:"prompt"`
-	WorktreePath   string   `json:"worktree_path"`
-	BranchName     string   `json:"branch_name"`
-	SystemPrompt   string   `json:"system_prompt,omitempty"`
-	MaxTurns       int      `json:"max_turns,omitempty"`
-	BudgetUSD      float64  `json:"budget_usd"`
-	AllowedTools   []string `json:"allowed_tools,omitempty"`
-	PermissionMode string   `json:"permission_mode,omitempty"`
+	TaskID         string      `json:"task_id"`
+	SessionID      string      `json:"session_id"`
+	MemberID       string      `json:"member_id,omitempty"`
+	Runtime        string      `json:"runtime,omitempty"`
+	Provider       string      `json:"provider,omitempty"`
+	Model          string      `json:"model,omitempty"`
+	Prompt         string      `json:"prompt"`
+	WorktreePath   string      `json:"worktree_path"`
+	BranchName     string      `json:"branch_name"`
+	SystemPrompt   string      `json:"system_prompt,omitempty"`
+	MaxTurns       int         `json:"max_turns,omitempty"`
+	BudgetUSD      float64     `json:"budget_usd"`
+	AllowedTools   []string    `json:"allowed_tools,omitempty"`
+	PermissionMode string      `json:"permission_mode,omitempty"`
+	RoleConfig     *RoleConfig `json:"role_config,omitempty"`
+}
+
+type RoleConfig struct {
+	RoleID         string   `json:"role_id"`
+	Name           string   `json:"name"`
+	Role           string   `json:"role"`
+	Goal           string   `json:"goal"`
+	Backstory      string   `json:"backstory"`
+	SystemPrompt   string   `json:"system_prompt"`
+	AllowedTools   []string `json:"allowed_tools"`
+	MaxBudgetUsd   float64  `json:"max_budget_usd"`
+	MaxTurns       int      `json:"max_turns"`
+	PermissionMode string   `json:"permission_mode"`
 }
 
 // ExecuteResponse is returned after an agent is started.
@@ -50,6 +65,8 @@ type DecomposeRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Priority    string `json:"priority"`
+	Provider    string `json:"provider,omitempty"`
+	Model       string `json:"model,omitempty"`
 }
 
 type DecomposeSubtask struct {
@@ -298,11 +315,13 @@ type pluginRecordResponse struct {
 	Metadata struct {
 		ID string `json:"id"`
 	} `json:"metadata"`
-	LifecycleState model.PluginLifecycleState `json:"lifecycle_state"`
-	RuntimeHost    model.PluginRuntimeHost    `json:"runtime_host"`
-	LastHealthAt   *time.Time                 `json:"last_health_at,omitempty"`
-	LastError      string                     `json:"last_error,omitempty"`
-	RestartCount   int                        `json:"restart_count"`
+	LifecycleState     model.PluginLifecycleState   `json:"lifecycle_state"`
+	RuntimeHost        model.PluginRuntimeHost      `json:"runtime_host"`
+	LastHealthAt       *time.Time                   `json:"last_health_at,omitempty"`
+	LastError          string                       `json:"last_error,omitempty"`
+	RestartCount       int                          `json:"restart_count"`
+	ResolvedSourcePath string                       `json:"resolved_source_path,omitempty"`
+	RuntimeMetadata    *model.PluginRuntimeMetadata `json:"runtime_metadata,omitempty"`
 }
 
 func (c *Client) doPluginRequest(ctx context.Context, method, path string, payload []byte) (*pluginRecordResponse, error) {
@@ -343,11 +362,13 @@ func pluginRuntimeStatusFromRecord(record *pluginRecordResponse) *model.PluginRu
 	}
 
 	return &model.PluginRuntimeStatus{
-		PluginID:       record.Metadata.ID,
-		Host:           record.RuntimeHost,
-		LifecycleState: record.LifecycleState,
-		LastHealthAt:   record.LastHealthAt,
-		LastError:      record.LastError,
-		RestartCount:   record.RestartCount,
+		PluginID:           record.Metadata.ID,
+		Host:               record.RuntimeHost,
+		LifecycleState:     record.LifecycleState,
+		LastHealthAt:       record.LastHealthAt,
+		LastError:          record.LastError,
+		RestartCount:       record.RestartCount,
+		ResolvedSourcePath: record.ResolvedSourcePath,
+		RuntimeMetadata:    record.RuntimeMetadata,
 	}
 }

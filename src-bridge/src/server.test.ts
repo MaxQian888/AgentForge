@@ -92,6 +92,35 @@ describe("bridge decompose route", () => {
     });
   });
 
+  test("rejects unknown decomposition providers before invoking the executor", async () => {
+    let called = false;
+    const app = createApp({
+      decomposeTask: async () => {
+        called = true;
+        return {
+          summary: "should not be returned",
+          subtasks: [],
+        };
+      },
+    });
+
+    const response = await app.request("/bridge/decompose", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        ...validRequest,
+        provider: "does-not-exist",
+        model: "missing-model",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "Unknown provider: does-not-exist",
+    });
+    expect(called).toBe(false);
+  });
+
   test("rejects invalid decomposition output", async () => {
     const app = createApp({
       decomposeTask: async () =>
@@ -278,6 +307,144 @@ describe("bridge execute route", () => {
       active_agents: 0,
       max_agents: 1,
     });
+  });
+
+  test("rejects execute requests for providers without agent execution support", async () => {
+    const pool = new RuntimePoolManager(1);
+    const app = createApp({
+      pool,
+      awaitExecution: true,
+      queryRunner: async function* () {
+        yield {
+          type: "result",
+          session_id: "session-unsupported",
+          subtype: "success",
+          result: "should not run",
+          stop_reason: "end_turn",
+          total_cost_usd: 0,
+          usage: {
+            input_tokens: 0,
+            output_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        };
+      },
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+    });
+
+    const response = await app.request("/bridge/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-unsupported",
+        session_id: "session-unsupported",
+        prompt: "Run with an unsupported runtime provider.",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-unsupported",
+        system_prompt: "",
+        max_turns: 8,
+        budget_usd: 2,
+        allowed_tools: ["Read"],
+        permission_mode: "default",
+        provider: "openai",
+        model: "gpt-5",
+      }),
+    });
+
+    expect(response.status).toBe(400);
+    expect(await response.json()).toMatchObject({
+      error: "Provider openai does not support agent_execution",
+    });
+    expect(pool.get("task-unsupported")).toBeUndefined();
+  });
+
+  test("returns a configuration error when claude_code credentials are missing", async () => {
+    const app = createApp({
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+      envLookup() {
+        return undefined;
+      },
+    });
+
+    const response = await app.request("/bridge/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-missing-claude-creds",
+        session_id: "session-missing-claude-creds",
+        runtime: "claude_code",
+        prompt: "Run with missing credentials.",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-missing-claude-creds",
+        system_prompt: "",
+        max_turns: 8,
+        budget_usd: 2,
+        allowed_tools: ["Read"],
+        permission_mode: "default",
+      }),
+    });
+
+    expect(response.status).toBe(503);
+    expect(await response.json()).toMatchObject({
+      error: "Missing required environment variable for runtime claude_code: ANTHROPIC_API_KEY",
+    });
+  });
+
+  test("honors injected envLookup before pool acquisition for claude runtime validation", async () => {
+    const previousApiKey = process.env.ANTHROPIC_API_KEY;
+    process.env.ANTHROPIC_API_KEY = "available-in-process-env";
+
+    try {
+      const app = createApp({
+        pool: new RuntimePoolManager(0),
+        streamer: {
+          close() {},
+          connect() {},
+          send() {},
+        } as never,
+        envLookup() {
+          return undefined;
+        },
+      });
+
+      const response = await app.request("/bridge/execute", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          task_id: "task-env-lookup-priority",
+          session_id: "session-env-lookup-priority",
+          runtime: "claude_code",
+          prompt: "Run with injected missing credentials.",
+          worktree_path: "D:/Project/AgentForge",
+          branch_name: "agent/task-env-lookup-priority",
+          system_prompt: "",
+          max_turns: 8,
+          budget_usd: 2,
+          allowed_tools: ["Read"],
+          permission_mode: "default",
+        }),
+      });
+
+      expect(response.status).toBe(503);
+      expect(await response.json()).toMatchObject({
+        error:
+          "Missing required environment variable for runtime claude_code: ANTHROPIC_API_KEY",
+      });
+    } finally {
+      if (previousApiKey === undefined) {
+        delete process.env.ANTHROPIC_API_KEY;
+      } else {
+        process.env.ANTHROPIC_API_KEY = previousApiKey;
+      }
+    }
   });
 });
 

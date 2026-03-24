@@ -63,10 +63,19 @@ pnpm tauri:build
 ```
 
 ### Backend Environment (src-go/.env)
-Copy `src-go/.env.example` to `src-go/.env` and configure:
+Create `src-go/.env` if you need local overrides. Common auth-related values:
 - `POSTGRES_URL` — PostgreSQL connection string
-- `REDIS_URL` — Redis connection string
-- `JWT_SECRET` — Must be set (min 32 chars recommended)
+- `REDIS_URL` — Redis connection string used for refresh-token storage and revocation checks
+- `JWT_SECRET` — Must be set in production (min 32 chars recommended)
+- `JWT_ACCESS_TTL=15m`
+- `JWT_REFRESH_TTL=168h`
+- `ALLOW_ORIGINS=http://localhost:3000,tauri://localhost,http://localhost:1420`
+
+Auth flow notes:
+- Frontend auth persists `accessToken`, `refreshToken`, and `user`, then revalidates sessions through `GET /api/v1/users/me`.
+- If the access token is no longer valid and a refresh token exists, the frontend attempts one `POST /api/v1/auth/refresh` before clearing the local session.
+- Auth requests resolve the backend URL through the shared resolver: `NEXT_PUBLIC_API_URL` in web mode, Tauri `get_backend_url` in desktop mode, then `http://localhost:7777` as fallback.
+- Refresh, logout revocation, and blacklist-backed protected-route checks now fail closed when Redis/token-cache state is unavailable; do not document or reintroduce silent success on cache failure.
 
 ## Architecture
 

@@ -4,6 +4,25 @@ import { WSClient } from "@/lib/ws-client";
 import { useTaskStore } from "./task-store";
 import { useAgentStore } from "./agent-store";
 import { useNotificationStore } from "./notification-store";
+import { useDashboardStore } from "./dashboard-store";
+
+interface WSEventEnvelope<T> {
+  type: string;
+  projectId?: string;
+  payload?: T;
+}
+
+function extractPayload<T>(data: unknown): T | null {
+  if (!data || typeof data !== "object") {
+    return null;
+  }
+
+  if ("payload" in data) {
+    return ((data as WSEventEnvelope<T>).payload ?? null) as T | null;
+  }
+
+  return data as T;
+}
 
 interface WSState {
   connected: boolean;
@@ -27,13 +46,74 @@ export const useWSStore = create<WSState>()((set) => ({
     client.on("disconnected", () => set({ connected: false }));
 
     client.on("task.updated", (data) => {
-      const payload = data as { task: { id: string; status: string } };
-      useTaskStore
-        .getState()
-        .transitionTask(
-          payload.task.id,
-          payload.task.status as import("./task-store").TaskStatus
-        );
+      const payload = extractPayload<{ task?: import("./task-store").Task }>(data);
+      if (!payload?.task) {
+        return;
+      }
+      useTaskStore.getState().upsertTask(payload.task);
+      useDashboardStore.getState().applyTaskUpdate(payload.task);
+    });
+
+    client.on("task.created", (data) => {
+      const payload = extractPayload<import("./task-store").Task>(data);
+      if (!payload) {
+        return;
+      }
+      useTaskStore.getState().upsertTask(payload);
+      useDashboardStore.getState().applyTaskUpdate(payload);
+    });
+
+    client.on("task.transitioned", (data) => {
+      const payload = extractPayload<{ task?: import("./task-store").Task }>(data);
+      if (!payload?.task) {
+        return;
+      }
+      useTaskStore.getState().upsertTask(payload.task);
+      useDashboardStore.getState().applyTaskUpdate(payload.task);
+    });
+
+    client.on("task.assigned", (data) => {
+      const payload = extractPayload<{ task?: import("./task-store").Task }>(data);
+      if (!payload?.task) {
+        return;
+      }
+      useTaskStore.getState().upsertTask(payload.task);
+      useDashboardStore.getState().applyTaskUpdate(payload.task);
+    });
+
+    client.on("task.deleted", (data) => {
+      const payload = extractPayload<{ id?: string }>(data);
+      if (!payload?.id) {
+        return;
+      }
+      useTaskStore.getState().removeTask(payload.id);
+    });
+
+    client.on("task.progress.updated", (data) => {
+      const payload = extractPayload<{ task?: import("./task-store").Task }>(data);
+      if (!payload?.task) {
+        return;
+      }
+      useTaskStore.getState().upsertTask(payload.task);
+      useDashboardStore.getState().applyTaskUpdate(payload.task);
+    });
+
+    client.on("task.progress.alerted", (data) => {
+      const payload = extractPayload<{ task?: import("./task-store").Task }>(data);
+      if (!payload?.task) {
+        return;
+      }
+      useTaskStore.getState().upsertTask(payload.task);
+      useDashboardStore.getState().applyTaskUpdate(payload.task);
+    });
+
+    client.on("task.progress.recovered", (data) => {
+      const payload = extractPayload<{ task?: import("./task-store").Task }>(data);
+      if (!payload?.task) {
+        return;
+      }
+      useTaskStore.getState().upsertTask(payload.task);
+      useDashboardStore.getState().applyTaskUpdate(payload.task);
     });
 
     client.on("agent.output", (data) => {
@@ -42,11 +122,14 @@ export const useWSStore = create<WSState>()((set) => ({
     });
 
     client.on("notification", (data) => {
-      useNotificationStore
-        .getState()
-        .addNotification(
-          data as import("./notification-store").Notification
-        );
+      const payload = extractPayload(data);
+      if (!payload) {
+        return;
+      }
+      useNotificationStore.getState().addNotification(payload as import("./notification-store").Notification);
+      useDashboardStore.getState().applyActivityNotification(
+        payload as import("./notification-store").Notification
+      );
     });
 
     client.connect();

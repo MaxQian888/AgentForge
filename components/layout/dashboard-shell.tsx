@@ -4,19 +4,66 @@ import { useEffect } from "react";
 import { useRouter } from "next/navigation";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
+import { resolveBackendUrl } from "@/lib/backend-url";
 import { useAuthStore } from "@/lib/stores/auth-store";
+import { useWSStore } from "@/lib/stores/ws-store";
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
-  const isAuthenticated = useAuthStore((s) => s.isAuthenticated);
+  const accessToken = useAuthStore((s) => s.accessToken);
+  const status = useAuthStore((s) => s.status);
+  const hasHydrated = useAuthStore((s) => s.hasHydrated);
+  const bootstrapSession = useAuthStore((s) => s.bootstrapSession);
+  const connectWS = useWSStore((s) => s.connect);
+  const disconnectWS = useWSStore((s) => s.disconnect);
 
   useEffect(() => {
-    if (!isAuthenticated) {
+    if (!hasHydrated) {
+      return;
+    }
+
+    if (status === "idle") {
+      void bootstrapSession();
+      return;
+    }
+
+    if (status === "unauthenticated") {
       router.replace("/login");
     }
-  }, [isAuthenticated, router]);
+  }, [bootstrapSession, hasHydrated, router, status]);
 
-  if (!isAuthenticated) {
+  useEffect(() => {
+    if (!hasHydrated || status !== "authenticated" || !accessToken) {
+      disconnectWS();
+      return;
+    }
+
+    let active = true;
+
+    void resolveBackendUrl()
+      .then((backendUrl) => {
+        if (!active) {
+          return;
+        }
+        connectWS(backendUrl.replace(/^http/, "ws") + "/ws", accessToken);
+      })
+      .catch(() => {
+        if (active) {
+          disconnectWS();
+        }
+      });
+
+    return () => {
+      active = false;
+      disconnectWS();
+    };
+  }, [accessToken, connectWS, disconnectWS, hasHydrated, status]);
+
+  if (!hasHydrated || status === "idle" || status === "checking") {
+    return null;
+  }
+
+  if (status !== "authenticated") {
     return null;
   }
 

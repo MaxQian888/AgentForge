@@ -11,9 +11,9 @@ import (
 )
 
 var (
-	ErrTaskNotFound              = errors.New("task not found")
-	ErrTaskAlreadyDecomposed     = errors.New("task already has child tasks")
-	ErrInvalidTaskDecomposition  = errors.New("invalid task decomposition")
+	ErrTaskNotFound             = errors.New("task not found")
+	ErrTaskAlreadyDecomposed    = errors.New("task already has child tasks")
+	ErrInvalidTaskDecomposition = errors.New("invalid task decomposition")
 )
 
 type TaskDecompositionRepository interface {
@@ -27,6 +27,8 @@ type BridgeDecomposeRequest struct {
 	Title       string `json:"title"`
 	Description string `json:"description"`
 	Priority    string `json:"priority"`
+	Provider    string `json:"provider,omitempty"`
+	Model       string `json:"model,omitempty"`
 }
 
 type BridgeDecomposeSubtask struct {

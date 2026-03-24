@@ -10,6 +10,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -62,6 +63,8 @@ type mockCacheRepo struct {
 	blacklist     map[string]bool
 	blacklistErr  error
 	setErr        error
+	getErr        error
+	deleteErr     error
 }
 
 func newMockCacheRepo() *mockCacheRepo {
@@ -80,6 +83,9 @@ func (m *mockCacheRepo) SetRefreshToken(_ context.Context, userID, token string,
 }
 
 func (m *mockCacheRepo) GetRefreshToken(_ context.Context, userID string) (string, error) {
+	if m.getErr != nil {
+		return "", m.getErr
+	}
 	t, ok := m.refreshTokens[userID]
 	if !ok {
 		return "", pgx.ErrNoRows
@@ -88,6 +94,9 @@ func (m *mockCacheRepo) GetRefreshToken(_ context.Context, userID string) (strin
 }
 
 func (m *mockCacheRepo) DeleteRefreshToken(_ context.Context, userID string) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
 	delete(m.refreshTokens, userID)
 	return nil
 }
@@ -354,6 +363,28 @@ func TestRefresh_TokenNotInCache(t *testing.T) {
 	}
 }
 
+func TestRefresh_CacheUnavailable(t *testing.T) {
+	userRepo := newMockUserRepo()
+	cacheRepo := newMockCacheRepo()
+	svc := service.NewAuthService(userRepo, cacheRepo, testConfig())
+
+	resp, err := svc.Register(context.Background(), &model.RegisterRequest{
+		Email:    "cache@example.com",
+		Password: "password123",
+		Name:     "Cache User",
+	})
+	if err != nil {
+		t.Fatalf("register error: %v", err)
+	}
+
+	cacheRepo.getErr = repository.ErrCacheUnavailable
+
+	_, err = svc.Refresh(context.Background(), resp.RefreshToken)
+	if !errors.Is(err, repository.ErrCacheUnavailable) {
+		t.Errorf("expected ErrCacheUnavailable, got %v", err)
+	}
+}
+
 // --- Logout Tests ---
 
 func TestLogout_Success(t *testing.T) {
@@ -390,5 +421,44 @@ func TestLogout_BlacklistError(t *testing.T) {
 	err := svc.Logout(context.Background(), "user-id", "jti", 15*time.Minute)
 	if err == nil {
 		t.Fatal("expected error from blacklist failure")
+	}
+}
+
+func TestLogout_DeleteRefreshTokenError(t *testing.T) {
+	userRepo := newMockUserRepo()
+	cacheRepo := newMockCacheRepo()
+	cacheRepo.deleteErr = repository.ErrCacheUnavailable
+	svc := service.NewAuthService(userRepo, cacheRepo, testConfig())
+
+	err := svc.Logout(context.Background(), "user-id", "jti", 15*time.Minute)
+	if !errors.Is(err, repository.ErrCacheUnavailable) {
+		t.Fatalf("expected ErrCacheUnavailable, got %v", err)
+	}
+}
+
+func TestGetCurrentUser_Success(t *testing.T) {
+	userRepo := newMockUserRepo()
+	cacheRepo := newMockCacheRepo()
+	svc := service.NewAuthService(userRepo, cacheRepo, testConfig())
+
+	user := seedUser(userRepo, "me@example.com", "password123", "Current User")
+
+	dto, err := svc.GetCurrentUser(context.Background(), user.ID.String())
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if dto.Name != "Current User" {
+		t.Fatalf("expected Current User, got %s", dto.Name)
+	}
+}
+
+func TestGetCurrentUser_UserMissing(t *testing.T) {
+	userRepo := newMockUserRepo()
+	cacheRepo := newMockCacheRepo()
+	svc := service.NewAuthService(userRepo, cacheRepo, testConfig())
+
+	_, err := svc.GetCurrentUser(context.Background(), uuid.New().String())
+	if err != service.ErrInvalidToken {
+		t.Fatalf("expected ErrInvalidToken, got %v", err)
 	}
 }

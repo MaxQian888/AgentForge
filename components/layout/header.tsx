@@ -87,7 +87,11 @@ export function Header() {
             <User className="mr-2 size-4" />
             {user?.name ?? "User"}
           </DropdownMenuItem>
-          <DropdownMenuItem onClick={logout}>
+          <DropdownMenuItem
+            onClick={() => {
+              void logout().catch(() => undefined);
+            }}
+          >
             <LogOut className="mr-2 size-4" />
             Logout
           </DropdownMenuItem>

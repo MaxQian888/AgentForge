@@ -16,7 +16,7 @@ func NewAgentRunRepository(db DBTX) *AgentRunRepository {
 	return &AgentRunRepository{db: db}
 }
 
-const agentRunColumns = `id, task_id, member_id, status, provider, model,
+const agentRunColumns = `id, task_id, member_id, role_id, status, provider, model,
 	input_tokens, output_tokens, cache_read_tokens, cost_usd, turn_count,
 	error_message, started_at, completed_at, created_at, updated_at`
 
@@ -25,13 +25,13 @@ func (r *AgentRunRepository) Create(ctx context.Context, run *model.AgentRun) er
 		return ErrDatabaseUnavailable
 	}
 	query := `
-		INSERT INTO agent_runs (id, task_id, member_id, status, provider, model,
+		INSERT INTO agent_runs (id, task_id, member_id, role_id, status, provider, model,
 			input_tokens, output_tokens, cache_read_tokens, cost_usd, turn_count,
 			error_message, started_at, completed_at, created_at, updated_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,NOW(),NOW())
+		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,NOW(),NOW())
 	`
 	_, err := r.db.Exec(ctx, query,
-		run.ID, run.TaskID, run.MemberID, run.Status, run.Provider, run.Model,
+		run.ID, run.TaskID, run.MemberID, run.RoleID, run.Status, run.Provider, run.Model,
 		run.InputTokens, run.OutputTokens, run.CacheReadTokens, run.CostUsd, run.TurnCount,
 		run.ErrorMessage, run.StartedAt, run.CompletedAt,
 	)
@@ -48,7 +48,7 @@ func (r *AgentRunRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.
 	query := `SELECT ` + agentRunColumns + ` FROM agent_runs WHERE id = $1`
 	run := &model.AgentRun{}
 	err := r.db.QueryRow(ctx, query, id).Scan(
-		&run.ID, &run.TaskID, &run.MemberID, &run.Status, &run.Provider, &run.Model,
+		&run.ID, &run.TaskID, &run.MemberID, &run.RoleID, &run.Status, &run.Provider, &run.Model,
 		&run.InputTokens, &run.OutputTokens, &run.CacheReadTokens, &run.CostUsd, &run.TurnCount,
 		&run.ErrorMessage, &run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
 	)
@@ -73,7 +73,7 @@ func (r *AgentRunRepository) GetByTask(ctx context.Context, taskID uuid.UUID) ([
 	for rows.Next() {
 		run := &model.AgentRun{}
 		if err := rows.Scan(
-			&run.ID, &run.TaskID, &run.MemberID, &run.Status, &run.Provider, &run.Model,
+			&run.ID, &run.TaskID, &run.MemberID, &run.RoleID, &run.Status, &run.Provider, &run.Model,
 			&run.InputTokens, &run.OutputTokens, &run.CacheReadTokens, &run.CostUsd, &run.TurnCount,
 			&run.ErrorMessage, &run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
 		); err != nil {
@@ -99,7 +99,7 @@ func (r *AgentRunRepository) ListActive(ctx context.Context) ([]*model.AgentRun,
 	for rows.Next() {
 		run := &model.AgentRun{}
 		if err := rows.Scan(
-			&run.ID, &run.TaskID, &run.MemberID, &run.Status, &run.Provider, &run.Model,
+			&run.ID, &run.TaskID, &run.MemberID, &run.RoleID, &run.Status, &run.Provider, &run.Model,
 			&run.InputTokens, &run.OutputTokens, &run.CacheReadTokens, &run.CostUsd, &run.TurnCount,
 			&run.ErrorMessage, &run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
 		); err != nil {

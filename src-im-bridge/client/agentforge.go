@@ -41,6 +41,12 @@ func (c *AgentForgeClient) WithSource(source string) *AgentForgeClient {
 	return &clone
 }
 
+// WithPlatform returns a shallow copy that tags outbound requests with the
+// normalized metadata source of the given platform.
+func (c *AgentForgeClient) WithPlatform(platform core.Platform) *AgentForgeClient {
+	return c.WithSource(core.MetadataForPlatform(platform).Source)
+}
+
 // --- Task operations ---
 
 // CreateTask creates a new task via the AgentForge API.
@@ -100,9 +106,12 @@ func (c *AgentForgeClient) GetTask(ctx context.Context, taskID string) (*Task, e
 }
 
 // AssignTask assigns a task to the given assignee.
-func (c *AgentForgeClient) AssignTask(ctx context.Context, taskID, assignee string) (*Task, error) {
-	body := map[string]string{"assignee": assignee}
-	resp, err := c.doRequest(ctx, http.MethodPatch, "/api/v1/tasks/"+taskID+"/assign", body)
+func (c *AgentForgeClient) AssignTask(ctx context.Context, taskID, assigneeID, assigneeType string) (*TaskDispatchResponse, error) {
+	body := map[string]string{
+		"assigneeId":   assigneeID,
+		"assigneeType": assigneeType,
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/tasks/"+taskID+"/assign", body)
 	if err != nil {
 		return nil, err
 	}
@@ -110,11 +119,11 @@ func (c *AgentForgeClient) AssignTask(ctx context.Context, taskID, assignee stri
 	if resp.StatusCode != http.StatusOK {
 		return nil, c.readError(resp)
 	}
-	var task Task
-	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+	var result TaskDispatchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	return &task, nil
+	return &result, nil
 }
 
 // DecomposeTask triggers AI task decomposition for an existing task.
@@ -137,8 +146,8 @@ func (c *AgentForgeClient) DecomposeTask(ctx context.Context, taskID string) (*T
 // --- Agent operations ---
 
 // SpawnAgent spawns an AI agent for a task.
-func (c *AgentForgeClient) SpawnAgent(ctx context.Context, taskID string) (*AgentRun, error) {
-	body := map[string]string{"task_id": taskID}
+func (c *AgentForgeClient) SpawnAgent(ctx context.Context, taskID string) (*TaskDispatchResponse, error) {
+	body := map[string]string{"taskId": taskID}
 	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/agents/spawn", body)
 	if err != nil {
 		return nil, err
@@ -147,11 +156,28 @@ func (c *AgentForgeClient) SpawnAgent(ctx context.Context, taskID string) (*Agen
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		return nil, c.readError(resp)
 	}
-	var run AgentRun
-	if err := json.NewDecoder(resp.Body).Decode(&run); err != nil {
+	var result TaskDispatchResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	return &run, nil
+	return &result, nil
+}
+
+// ListProjectMembers returns project members that can be used for command-side assignee resolution.
+func (c *AgentForgeClient) ListProjectMembers(ctx context.Context) ([]Member, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/members", c.projectID), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var members []Member
+	if err := json.NewDecoder(resp.Body).Decode(&members); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return members, nil
 }
 
 // GetAgentPoolStatus returns the current agent pool status.
@@ -249,10 +275,12 @@ type Task struct {
 	Description  string  `json:"description"`
 	Status       string  `json:"status"`
 	Priority     string  `json:"priority"`
-	AssigneeName string  `json:"assignee_name"`
-	SpentUsd     float64 `json:"spent_usd"`
-	BudgetUsd    float64 `json:"budget_usd"`
-	PRUrl        string  `json:"pr_url"`
+	AssigneeID   string  `json:"assigneeId,omitempty"`
+	AssigneeType string  `json:"assigneeType,omitempty"`
+	AssigneeName string  `json:"assigneeName"`
+	SpentUsd     float64 `json:"spentUsd"`
+	BudgetUsd    float64 `json:"budgetUsd"`
+	PRUrl        string  `json:"prUrl"`
 }
 
 // TaskDecompositionItem represents one created subtask returned from decomposition.
@@ -267,10 +295,29 @@ type TaskDecompositionResponse struct {
 
 // AgentRun represents an AI agent execution.
 type AgentRun struct {
-	ID      string  `json:"id"`
-	TaskID  string  `json:"task_id"`
-	Status  string  `json:"status"`
-	CostUsd float64 `json:"cost_usd"`
+	ID       string  `json:"id"`
+	TaskID   string  `json:"taskId"`
+	MemberID string  `json:"memberId,omitempty"`
+	Status   string  `json:"status"`
+	CostUsd  float64 `json:"costUsd"`
+}
+
+type DispatchOutcome struct {
+	Status string    `json:"status"`
+	Reason string    `json:"reason,omitempty"`
+	Run    *AgentRun `json:"run,omitempty"`
+}
+
+type TaskDispatchResponse struct {
+	Task     Task            `json:"task"`
+	Dispatch DispatchOutcome `json:"dispatch"`
+}
+
+type Member struct {
+	ID       string `json:"id"`
+	Name     string `json:"name"`
+	Type     string `json:"type"`
+	IsActive bool   `json:"isActive"`
 }
 
 // PoolStatus represents the agent pool status.

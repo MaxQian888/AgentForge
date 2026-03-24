@@ -7,6 +7,10 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+
+	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/platform/discord"
+	"github.com/agentforge/im-bridge/platform/telegram"
 )
 
 func TestWithSource_NormalizesHeaderValue(t *testing.T) {
@@ -232,7 +236,7 @@ func TestGetTask_ParsesSuccessfulResponse(t *testing.T) {
 	}
 }
 
-func TestAssignTask_SendsPatchPayloadAndParsesTask(t *testing.T) {
+func TestAssignTask_SendsCanonicalPayloadAndParsesDispatchResult(t *testing.T) {
 	var gotMethod string
 	var gotPath string
 	var gotBody map[string]string
@@ -245,32 +249,38 @@ func TestAssignTask_SendsPatchPayloadAndParsesTask(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(Task{ID: "task-1", AssigneeName: "Alice"})
+		_ = json.NewEncoder(w).Encode(TaskDispatchResponse{
+			Task: Task{ID: "task-1"},
+			Dispatch: DispatchOutcome{
+				Status: "started",
+				Run:    &AgentRun{ID: "run-1", TaskID: "task-1", Status: "running"},
+			},
+		})
 	}))
 	defer server.Close()
 
 	client := NewAgentForgeClient(server.URL, "proj", "secret")
 
-	task, err := client.AssignTask(context.Background(), "task-1", "Alice")
+	result, err := client.AssignTask(context.Background(), "task-1", "member-1", "agent")
 	if err != nil {
 		t.Fatalf("AssignTask error: %v", err)
 	}
 
-	if gotMethod != http.MethodPatch {
-		t.Fatalf("method = %s, want PATCH", gotMethod)
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
 	}
 	if gotPath != "/api/v1/tasks/task-1/assign" {
 		t.Fatalf("path = %s", gotPath)
 	}
-	if gotBody["assignee"] != "Alice" {
+	if gotBody["assigneeId"] != "member-1" || gotBody["assigneeType"] != "agent" {
 		t.Fatalf("body = %+v", gotBody)
 	}
-	if task.AssigneeName != "Alice" {
-		t.Fatalf("task = %+v", task)
+	if result.Dispatch.Status != "started" || result.Dispatch.Run == nil || result.Dispatch.Run.ID != "run-1" {
+		t.Fatalf("result = %+v", result)
 	}
 }
 
-func TestSpawnAgent_CallsEndpointAndParsesRun(t *testing.T) {
+func TestSpawnAgent_CallsEndpointAndParsesDispatchResult(t *testing.T) {
 	var gotMethod string
 	var gotPath string
 	var gotBody map[string]string
@@ -283,13 +293,19 @@ func TestSpawnAgent_CallsEndpointAndParsesRun(t *testing.T) {
 		}
 
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(AgentRun{ID: "run-1", TaskID: "task-1", Status: "starting"})
+		_ = json.NewEncoder(w).Encode(TaskDispatchResponse{
+			Task: Task{ID: "task-1"},
+			Dispatch: DispatchOutcome{
+				Status: "started",
+				Run:    &AgentRun{ID: "run-1", TaskID: "task-1", Status: "starting"},
+			},
+		})
 	}))
 	defer server.Close()
 
 	client := NewAgentForgeClient(server.URL, "proj", "secret")
 
-	run, err := client.SpawnAgent(context.Background(), "task-1")
+	result, err := client.SpawnAgent(context.Background(), "task-1")
 	if err != nil {
 		t.Fatalf("SpawnAgent error: %v", err)
 	}
@@ -300,11 +316,11 @@ func TestSpawnAgent_CallsEndpointAndParsesRun(t *testing.T) {
 	if gotPath != "/api/v1/agents/spawn" {
 		t.Fatalf("path = %s", gotPath)
 	}
-	if gotBody["task_id"] != "task-1" {
+	if gotBody["taskId"] != "task-1" {
 		t.Fatalf("body = %+v", gotBody)
 	}
-	if run.ID != "run-1" || run.TaskID != "task-1" {
-		t.Fatalf("run = %+v", run)
+	if result.Dispatch.Status != "started" || result.Dispatch.Run == nil || result.Dispatch.Run.ID != "run-1" {
+		t.Fatalf("result = %+v", result)
 	}
 }
 
@@ -431,6 +447,14 @@ func TestWithSource_LeavesExistingSourceWhenNormalizationReturnsEmpty(t *testing
 	}
 }
 
+func TestWithPlatform_UsesTelegramMetadataSource(t *testing.T) {
+	assertPlatformHeader(t, telegram.NewStub("0"), "telegram")
+}
+
+func TestWithPlatform_UsesDiscordMetadataSource(t *testing.T) {
+	assertPlatformHeader(t, discord.NewStub("0"), "discord")
+}
+
 func TestDoRequest_RejectsUnmarshalableBody(t *testing.T) {
 	client := NewAgentForgeClient("http://example.test", "proj", "secret")
 
@@ -440,5 +464,27 @@ func TestDoRequest_RejectsUnmarshalableBody(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "marshal body") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func assertPlatformHeader(t *testing.T, platform core.Platform, want string) {
+	t.Helper()
+
+	var gotSource string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotSource = r.Header.Get("X-IM-Source")
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret").WithPlatform(platform)
+	resp, err := client.doRequest(context.Background(), http.MethodGet, "/", nil)
+	if err != nil {
+		t.Fatalf("doRequest error: %v", err)
+	}
+	resp.Body.Close()
+
+	if gotSource != want {
+		t.Fatalf("X-IM-Source = %q, want %q", gotSource, want)
 	}
 }

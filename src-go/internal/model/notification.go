@@ -18,13 +18,17 @@ type Notification struct {
 }
 
 const (
-	NotificationTypeTaskCreated     = "task_created"
-	NotificationTypeTaskAssigned    = "task_assigned"
-	NotificationTypeAgentStarted    = "agent_started"
-	NotificationTypeAgentCompleted  = "agent_completed"
-	NotificationTypeAgentFailed     = "agent_failed"
-	NotificationTypeReviewCompleted = "review_completed"
-	NotificationTypeBudgetWarning   = "budget_warning"
+	NotificationTypeTaskCreated           = "task_created"
+	NotificationTypeTaskAssigned          = "task_assigned"
+	NotificationTypeTaskDispatchBlocked   = "task_dispatch_blocked"
+	NotificationTypeAgentStarted          = "agent_started"
+	NotificationTypeAgentCompleted        = "agent_completed"
+	NotificationTypeAgentFailed           = "agent_failed"
+	NotificationTypeReviewCompleted       = "review_completed"
+	NotificationTypeBudgetWarning         = "budget_warning"
+	NotificationTypeTaskProgressWarning   = "task_progress_warning"
+	NotificationTypeTaskProgressStalled   = "task_progress_stalled"
+	NotificationTypeTaskProgressRecovered = "task_progress_recovered"
 )
 
 type NotificationDTO struct {

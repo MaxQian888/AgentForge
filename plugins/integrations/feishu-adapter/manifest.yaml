@@ -10,8 +10,12 @@ metadata:
     - integration
     - im
 spec:
-  runtime: go-plugin
-  binary: ./bin/feishu-adapter
+  runtime: wasm
+  module: ./dist/feishu.wasm
+  abiVersion: v1
+  capabilities:
+    - health
+    - send_message
   config:
     mode: webhook
 permissions:

@@ -39,6 +39,51 @@ security:
   require_review: true
 `
 
+const canonicalRoleManifest = `
+apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: frontend-developer
+  name: Frontend Developer
+  version: 1.2.0
+  author: team-admin
+  tags: [development, frontend]
+  description: Frontend specialist
+identity:
+  role: Senior Frontend Developer
+  goal: Build reliable UI
+  backstory: You build maintainable frontend systems.
+capabilities:
+  packages: [web-development]
+  tools:
+    built_in: [Read, Edit, Bash]
+  max_concurrency: 2
+security:
+  permission_mode: default
+  allowed_paths: [app/, components/]
+`
+
+const legacyRoleManifest = `
+metadata:
+  name: frontend-developer
+  version: "1.0"
+  description: "Frontend development specialist for React and Next.js"
+  tags: [frontend, react, nextjs]
+identity:
+  goal: "Build responsive, accessible, and performant UI components and pages"
+  backstory: "You are a frontend engineer expert in React, Next.js, Tailwind CSS, and modern web standards"
+capabilities:
+  allowed_tools: [Read, Edit, Write, Bash, Glob, Grep]
+  max_turns: 30
+  max_budget_usd: 5.0
+knowledge:
+  system_prompt: |
+    You are a frontend developer.
+security:
+  permission_mode: "bypassPermissions"
+  allowed_paths: ["app/", "components/"]
+`
+
 func TestParse(t *testing.T) {
 	manifest, err := role.Parse([]byte(validRoleManifest))
 	if err != nil {
@@ -48,11 +93,66 @@ func TestParse(t *testing.T) {
 	if manifest.Metadata.Name != "reviewer" {
 		t.Errorf("Metadata.Name = %q, want reviewer", manifest.Metadata.Name)
 	}
+	if manifest.APIVersion != "agentforge/v1" {
+		t.Errorf("APIVersion = %q, want agentforge/v1", manifest.APIVersion)
+	}
+	if manifest.Kind != "Role" {
+		t.Errorf("Kind = %q, want Role", manifest.Kind)
+	}
+	if manifest.Metadata.ID != "reviewer" {
+		t.Errorf("Metadata.ID = %q, want reviewer", manifest.Metadata.ID)
+	}
 	if manifest.Capabilities.MaxConcurrency != 2 {
 		t.Errorf("Capabilities.MaxConcurrency = %d, want 2", manifest.Capabilities.MaxConcurrency)
 	}
+	if manifest.SystemPrompt != "Review carefully" {
+		t.Errorf("SystemPrompt = %q, want Review carefully", manifest.SystemPrompt)
+	}
 	if !manifest.Security.RequireReview {
 		t.Error("Security.RequireReview = false, want true")
+	}
+}
+
+func TestParseCanonicalManifestSupportsPRDShape(t *testing.T) {
+	manifest, err := role.Parse([]byte(canonicalRoleManifest))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if manifest.Metadata.ID != "frontend-developer" {
+		t.Fatalf("Metadata.ID = %q, want frontend-developer", manifest.Metadata.ID)
+	}
+	if manifest.Identity.Role != "Senior Frontend Developer" {
+		t.Fatalf("Identity.Role = %q, want Senior Frontend Developer", manifest.Identity.Role)
+	}
+	if manifest.SystemPrompt == "" {
+		t.Fatal("SystemPrompt = empty, want synthesized prompt")
+	}
+	if got := manifest.Capabilities.AllowedTools; len(got) != 3 || got[0] != "Read" {
+		t.Fatalf("AllowedTools = %v, want built_in tools to be normalized", got)
+	}
+}
+
+func TestParseLegacyManifestNormalizesCurrentFlatShape(t *testing.T) {
+	manifest, err := role.Parse([]byte(legacyRoleManifest))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if manifest.Metadata.ID != "frontend-developer" {
+		t.Fatalf("Metadata.ID = %q, want frontend-developer", manifest.Metadata.ID)
+	}
+	if manifest.Kind != "Role" {
+		t.Fatalf("Kind = %q, want Role", manifest.Kind)
+	}
+	if manifest.SystemPrompt != "You are a frontend developer." {
+		t.Fatalf("SystemPrompt = %q, want normalized knowledge.system_prompt", manifest.SystemPrompt)
+	}
+	if manifest.Capabilities.MaxTurns != 30 {
+		t.Fatalf("MaxTurns = %d, want 30", manifest.Capabilities.MaxTurns)
+	}
+	if manifest.Security.PermissionMode != "bypassPermissions" {
+		t.Fatalf("PermissionMode = %q, want bypassPermissions", manifest.Security.PermissionMode)
 	}
 }
 

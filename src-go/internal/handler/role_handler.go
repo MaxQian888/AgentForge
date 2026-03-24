@@ -1,172 +1,84 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"os"
-	"path/filepath"
-	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/model"
-	"gopkg.in/yaml.v3"
+	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 )
 
 type RoleHandler struct {
-	rolesDir string
+	store *rolepkg.FileStore
 }
 
 func NewRoleHandler(rolesDir string) *RoleHandler {
-	return &RoleHandler{rolesDir: rolesDir}
-}
-
-var presetRoles = []model.RoleManifest{
-	{
-		Metadata: model.RoleMetadata{
-			Name:        "backend-developer",
-			Version:     "1.0.0",
-			Description: "Backend developer specializing in Go and API development",
-			Tags:        []string{"go", "api", "backend"},
-		},
-		Identity: model.RoleIdentity{
-			Persona: "Senior backend developer",
-			Goals:   []string{"Write clean, tested Go code", "Design RESTful APIs"},
-		},
-		Capabilities: model.RoleCapabilities{
-			Languages:  []string{"go"},
-			Frameworks: []string{"echo", "gin"},
-		},
-	},
-	{
-		Metadata: model.RoleMetadata{
-			Name:        "frontend-developer",
-			Version:     "1.0.0",
-			Description: "Frontend developer specializing in React and TypeScript",
-			Tags:        []string{"react", "typescript", "frontend"},
-		},
-		Identity: model.RoleIdentity{
-			Persona: "Senior frontend developer",
-			Goals:   []string{"Build responsive UIs", "Write type-safe code"},
-		},
-		Capabilities: model.RoleCapabilities{
-			Languages:  []string{"typescript", "javascript"},
-			Frameworks: []string{"react", "nextjs"},
-		},
-	},
-	{
-		Metadata: model.RoleMetadata{
-			Name:        "code-reviewer",
-			Version:     "1.0.0",
-			Description: "Code review specialist focused on quality and best practices",
-			Tags:        []string{"review", "quality"},
-		},
-		Identity: model.RoleIdentity{
-			Persona: "Code review specialist",
-			Goals:   []string{"Ensure code quality", "Identify bugs and security issues"},
-		},
-	},
+	return &RoleHandler{store: rolepkg.NewFileStore(rolesDir)}
 }
 
 func (h *RoleHandler) List(c echo.Context) error {
-	roles := h.loadRoles()
+	roles, err := h.store.List()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to load roles"})
+	}
 	return c.JSON(http.StatusOK, roles)
 }
 
 func (h *RoleHandler) Get(c echo.Context) error {
 	roleID := c.Param("id")
-	roles := h.loadRoles()
-	for _, r := range roles {
-		if r.Metadata.Name == roleID {
-			return c.JSON(http.StatusOK, r)
+	loadedRole, err := h.store.Get(roleID)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "role not found"})
 		}
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to load role"})
 	}
-	return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "role not found"})
+	return c.JSON(http.StatusOK, loadedRole)
 }
 
 func (h *RoleHandler) Create(c echo.Context) error {
-	var role model.RoleManifest
-	if err := c.Bind(&role); err != nil {
+	var manifest model.RoleManifest
+	if err := c.Bind(&manifest); err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
 	}
-	if role.Metadata.Name == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "role name is required"})
+	if manifest.Metadata.ID == "" && manifest.Metadata.Name == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "role id or name is required"})
 	}
-
-	if err := os.MkdirAll(h.rolesDir, 0o755); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create roles directory"})
+	if err := h.store.Save((*rolepkg.Manifest)(&manifest)); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "failed to save role"})
 	}
-
-	data, err := yaml.Marshal(&role)
+	loadedRole, err := h.store.Get(firstRoleID(manifest))
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to marshal role"})
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to reload role"})
 	}
-
-	filePath := filepath.Join(h.rolesDir, role.Metadata.Name+".yaml")
-	if err := os.WriteFile(filePath, data, 0o644); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to save role"})
-	}
-
-	return c.JSON(http.StatusCreated, role)
+	return c.JSON(http.StatusCreated, loadedRole)
 }
 
 func (h *RoleHandler) Update(c echo.Context) error {
 	roleID := c.Param("id")
-	var role model.RoleManifest
-	if err := c.Bind(&role); err != nil {
+	var manifest model.RoleManifest
+	if err := c.Bind(&manifest); err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
 	}
-	role.Metadata.Name = roleID
-
-	if err := os.MkdirAll(h.rolesDir, 0o755); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create roles directory"})
+	manifest.Metadata.ID = roleID
+	if manifest.Metadata.Name == "" {
+		manifest.Metadata.Name = roleID
 	}
-
-	data, err := yaml.Marshal(&role)
+	if err := h.store.Save((*rolepkg.Manifest)(&manifest)); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "failed to save role"})
+	}
+	loadedRole, err := h.store.Get(roleID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to marshal role"})
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to reload role"})
 	}
-
-	filePath := filepath.Join(h.rolesDir, roleID+".yaml")
-	if err := os.WriteFile(filePath, data, 0o644); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to save role"})
-	}
-
-	return c.JSON(http.StatusOK, role)
+	return c.JSON(http.StatusOK, loadedRole)
 }
 
-func (h *RoleHandler) loadRoles() []model.RoleManifest {
-	roles := make([]model.RoleManifest, len(presetRoles))
-	copy(roles, presetRoles)
-
-	entries, err := os.ReadDir(h.rolesDir)
-	if err != nil {
-		return roles
+func firstRoleID(role model.RoleManifest) string {
+	if role.Metadata.ID != "" {
+		return role.Metadata.ID
 	}
-
-	for _, entry := range entries {
-		if entry.IsDir() || (!strings.HasSuffix(entry.Name(), ".yaml") && !strings.HasSuffix(entry.Name(), ".yml")) {
-			continue
-		}
-		data, err := os.ReadFile(filepath.Join(h.rolesDir, entry.Name()))
-		if err != nil {
-			continue
-		}
-		var role model.RoleManifest
-		if err := yaml.Unmarshal(data, &role); err != nil {
-			continue
-		}
-		// Replace preset if same name, otherwise append
-		replaced := false
-		for i, preset := range roles {
-			if preset.Metadata.Name == role.Metadata.Name {
-				roles[i] = role
-				replaced = true
-				break
-			}
-		}
-		if !replaced {
-			roles = append(roles, role)
-		}
-	}
-
-	return roles
+	return role.Metadata.Name
 }

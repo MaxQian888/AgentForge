@@ -36,6 +36,9 @@ func TestClientExecuteUsesCanonicalBridgeContract(t *testing.T) {
 	response, err := client.Execute(context.Background(), ExecuteRequest{
 		TaskID:         "task-123",
 		SessionID:      "session-123",
+		Runtime:        "opencode",
+		Provider:       "anthropic",
+		Model:          "claude-sonnet-4-5",
 		Prompt:         "Implement the OpenSpec change.",
 		WorktreePath:   "D:/Project/AgentForge",
 		BranchName:     "agent/task-123",
@@ -44,6 +47,18 @@ func TestClientExecuteUsesCanonicalBridgeContract(t *testing.T) {
 		BudgetUSD:      5,
 		AllowedTools:   []string{"Read", "Edit"},
 		PermissionMode: "default",
+		RoleConfig: &RoleConfig{
+			RoleID:         "frontend-developer",
+			Name:           "Frontend Developer",
+			Role:           "Senior Frontend Developer",
+			Goal:           "Build reliable UI",
+			Backstory:      "A frontend specialist",
+			SystemPrompt:   "You build safe UI.",
+			AllowedTools:   []string{"Read", "Edit"},
+			MaxBudgetUsd:   5,
+			MaxTurns:       20,
+			PermissionMode: "default",
+		},
 	})
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
@@ -61,11 +76,24 @@ func TestClientExecuteUsesCanonicalBridgeContract(t *testing.T) {
 	if gotBody["task_id"] != "task-123" {
 		t.Fatalf("expected task_id to be encoded in snake_case, got %#v", gotBody)
 	}
+	if gotBody["provider"] != "anthropic" || gotBody["model"] != "claude-sonnet-4-5" {
+		t.Fatalf("expected provider/model in request body, got %#v", gotBody)
+	}
+	if gotBody["runtime"] != "opencode" {
+		t.Fatalf("expected runtime in request body, got %#v", gotBody)
+	}
 	if gotBody["worktree_path"] != "D:/Project/AgentForge" {
 		t.Fatalf("expected worktree_path in request body, got %#v", gotBody)
 	}
 	if gotBody["permission_mode"] != "default" {
 		t.Fatalf("expected permission_mode in request body, got %#v", gotBody)
+	}
+	roleConfig, ok := gotBody["role_config"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected role_config payload, got %#v", gotBody["role_config"])
+	}
+	if roleConfig["role_id"] != "frontend-developer" {
+		t.Fatalf("expected role_id in normalized role_config, got %#v", roleConfig)
 	}
 }
 
@@ -149,5 +177,51 @@ func TestClientHealthAndStatusUseBridgeRoutes(t *testing.T) {
 	}
 	if status.State != "running" || status.TurnNumber != 3 || status.LastTool != "Read" {
 		t.Fatalf("unexpected status response: %#v", status)
+	}
+}
+
+func TestClientDecomposeIncludesProviderAndModelWhenSpecified(t *testing.T) {
+	t.Parallel()
+
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"summary": "Decomposed",
+			"subtasks": []map[string]any{
+				{
+					"title":       "One",
+					"description": "Two",
+					"priority":    "high",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.DecomposeTask(context.Background(), DecomposeRequest{
+		TaskID:      "task-123",
+		Title:       "Bridge",
+		Description: "Break the task down",
+		Priority:    "high",
+		Provider:    "openai",
+		Model:       "gpt-5",
+	})
+	if err != nil {
+		t.Fatalf("DecomposeTask() error: %v", err)
+	}
+
+	if gotBody["provider"] != "openai" {
+		t.Fatalf("expected provider in decompose payload, got %#v", gotBody)
+	}
+	if gotBody["model"] != "gpt-5" {
+		t.Fatalf("expected model in decompose payload, got %#v", gotBody)
 	}
 }

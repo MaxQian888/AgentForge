@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -15,12 +16,22 @@ import (
 )
 
 type TaskHandler struct {
-	repo        *repository.TaskRepository
-	decomposer  taskDecomposer
+	repo       *repository.TaskRepository
+	decomposer taskDecomposer
+	progress   taskProgressRecorder
+	dispatcher taskDispatcher
 }
 
 type taskDecomposer interface {
 	Decompose(ctx context.Context, taskID uuid.UUID) (*model.TaskDecompositionResponse, error)
+}
+
+type taskProgressRecorder interface {
+	RecordActivity(ctx context.Context, taskID uuid.UUID, input service.TaskActivityInput) (*model.TaskProgressSnapshot, error)
+}
+
+type taskDispatcher interface {
+	Assign(ctx context.Context, taskID uuid.UUID, req *model.AssignRequest) (*model.TaskDispatchResponse, error)
 }
 
 func NewTaskHandler(repo *repository.TaskRepository, decomposer ...taskDecomposer) *TaskHandler {
@@ -29,6 +40,16 @@ func NewTaskHandler(repo *repository.TaskRepository, decomposer ...taskDecompose
 		handler.decomposer = decomposer[0]
 	}
 	return handler
+}
+
+func (h *TaskHandler) WithProgress(progress taskProgressRecorder) *TaskHandler {
+	h.progress = progress
+	return h
+}
+
+func (h *TaskHandler) WithDispatcher(dispatcher taskDispatcher) *TaskHandler {
+	h.dispatcher = dispatcher
+	return h
 }
 
 func (h *TaskHandler) Create(c echo.Context) error {
@@ -43,14 +64,14 @@ func (h *TaskHandler) Create(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 
 	task := &model.Task{
-		ID:        uuid.New(),
-		ProjectID: projectID,
-		Title:     req.Title,
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Title:       req.Title,
 		Description: req.Description,
-		Status:    model.TaskStatusInbox,
-		Priority:  req.Priority,
-		Labels:    req.Labels,
-		BudgetUsd: req.BudgetUsd,
+		Status:      model.TaskStatusInbox,
+		Priority:    req.Priority,
+		Labels:      req.Labels,
+		BudgetUsd:   req.BudgetUsd,
 	}
 
 	if req.ParentID != nil {
@@ -67,9 +88,41 @@ func (h *TaskHandler) Create(c echo.Context) error {
 		}
 		task.SprintID = &sid
 	}
+	if req.PlannedStartAt != nil && *req.PlannedStartAt != "" {
+		plannedStartAt, err := time.Parse(time.RFC3339, *req.PlannedStartAt)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid planned start date"})
+		}
+		task.PlannedStartAt = &plannedStartAt
+	}
+	if req.PlannedEndAt != nil && *req.PlannedEndAt != "" {
+		plannedEndAt, err := time.Parse(time.RFC3339, *req.PlannedEndAt)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid planned end date"})
+		}
+		task.PlannedEndAt = &plannedEndAt
+	}
+	if task.PlannedStartAt != nil && task.PlannedEndAt != nil && task.PlannedEndAt.Before(*task.PlannedStartAt) {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "planned end date must be after planned start date"})
+	}
 
 	if err := h.repo.Create(c.Request().Context(), task); err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create task"})
+	}
+	task, err := h.repo.GetByID(c.Request().Context(), task.ID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch created task"})
+	}
+	if h.progress != nil {
+		snapshot, progressErr := h.progress.RecordActivity(c.Request().Context(), task.ID, service.TaskActivityInput{
+			Source:         model.TaskProgressSourceTaskCreated,
+			OccurredAt:     task.CreatedAt,
+			UpdateHealth:   true,
+			MarkTransition: true,
+		})
+		if progressErr == nil {
+			task.Progress = snapshot
+		}
 	}
 	return c.JSON(http.StatusCreated, task.ToDTO())
 }
@@ -137,6 +190,16 @@ func (h *TaskHandler) Update(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch updated task"})
 	}
+	if h.progress != nil {
+		snapshot, progressErr := h.progress.RecordActivity(c.Request().Context(), task.ID, service.TaskActivityInput{
+			Source:       model.TaskProgressSourceTaskUpdated,
+			OccurredAt:   task.UpdatedAt,
+			UpdateHealth: true,
+		})
+		if progressErr == nil {
+			task.Progress = snapshot
+		}
+	}
 	return c.JSON(http.StatusOK, task.ToDTO())
 }
 
@@ -170,6 +233,17 @@ func (h *TaskHandler) Transition(c echo.Context) error {
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch task"})
 	}
+	if h.progress != nil {
+		snapshot, progressErr := h.progress.RecordActivity(c.Request().Context(), task.ID, service.TaskActivityInput{
+			Source:         model.TaskProgressSourceTaskTransition,
+			OccurredAt:     task.UpdatedAt,
+			UpdateHealth:   true,
+			MarkTransition: true,
+		})
+		if progressErr == nil {
+			task.Progress = snapshot
+		}
+	}
 	return c.JSON(http.StatusOK, task.ToDTO())
 }
 
@@ -185,6 +259,18 @@ func (h *TaskHandler) Assign(c echo.Context) error {
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
+	if h.dispatcher != nil {
+		result, err := h.dispatcher.Assign(c.Request().Context(), id, req)
+		if err != nil {
+			switch {
+			case errors.Is(err, service.ErrAgentTaskNotFound):
+				return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "task not found"})
+			default:
+				return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to assign task"})
+			}
+		}
+		return c.JSON(http.StatusOK, result)
+	}
 	assigneeID, err := uuid.Parse(req.AssigneeID)
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid assignee ID"})
@@ -195,6 +281,16 @@ func (h *TaskHandler) Assign(c echo.Context) error {
 	task, err := h.repo.GetByID(c.Request().Context(), id)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch task"})
+	}
+	if h.progress != nil {
+		snapshot, progressErr := h.progress.RecordActivity(c.Request().Context(), task.ID, service.TaskActivityInput{
+			Source:       model.TaskProgressSourceTaskAssigned,
+			OccurredAt:   task.UpdatedAt,
+			UpdateHealth: true,
+		})
+		if progressErr == nil {
+			task.Progress = snapshot
+		}
 	}
 	return c.JSON(http.StatusOK, task.ToDTO())
 }

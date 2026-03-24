@@ -38,7 +38,7 @@ export const useAgentStore = create<AgentState>()((set, get) => ({
   loading: false,
 
   fetchAgents: async () => {
-    const token = useAuthStore.getState().token;
+    const token = useAuthStore.getState().accessToken;
     if (!token) return;
     set({ loading: true });
     try {
@@ -51,7 +51,7 @@ export const useAgentStore = create<AgentState>()((set, get) => ({
   },
 
   spawnAgent: async (taskId, memberId) => {
-    const token = useAuthStore.getState().token;
+    const token = useAuthStore.getState().accessToken;
     if (!token) return;
     const api = createApiClient(API_URL);
     const { data: agent } = await api.post<Agent>(
@@ -63,7 +63,7 @@ export const useAgentStore = create<AgentState>()((set, get) => ({
   },
 
   pauseAgent: async (id) => {
-    const token = useAuthStore.getState().token;
+    const token = useAuthStore.getState().accessToken;
     if (!token) return;
     const api = createApiClient(API_URL);
     await api.post(`/api/v1/agents/${id}/pause`, {}, { token });
@@ -75,7 +75,7 @@ export const useAgentStore = create<AgentState>()((set, get) => ({
   },
 
   killAgent: async (id) => {
-    const token = useAuthStore.getState().token;
+    const token = useAuthStore.getState().accessToken;
     if (!token) return;
     const api = createApiClient(API_URL);
     await api.post(`/api/v1/agents/${id}/kill`, {}, { token });

@@ -2,12 +2,12 @@ import { createApiClient, ApiError } from "./api-client";
 
 const BASE = "http://localhost:7777";
 
-function mockFetch(status: number, body: unknown) {
+function mockFetch(status: number, body: unknown): typeof fetch {
   return jest.fn().mockResolvedValue({
     ok: status >= 200 && status < 300,
     status,
     json: () => Promise.resolve(body),
-  });
+  }) as unknown as typeof fetch;
 }
 
 beforeEach(() => {
@@ -165,7 +165,7 @@ describe("createApiClient", () => {
         ok: false,
         status: 502,
         json: () => Promise.reject(new Error("bad json")),
-      });
+      }) as unknown as typeof fetch;
 
       try {
         await api.get("/bad");

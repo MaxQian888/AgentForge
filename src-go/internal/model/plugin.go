@@ -18,6 +18,7 @@ const (
 	PluginRuntimeDeclarative PluginRuntime = "declarative"
 	PluginRuntimeMCP         PluginRuntime = "mcp"
 	PluginRuntimeGoPlugin    PluginRuntime = "go-plugin"
+	PluginRuntimeWASM        PluginRuntime = "wasm"
 )
 
 type PluginSourceType string
@@ -63,14 +64,22 @@ type PluginMetadata struct {
 }
 
 type PluginSpec struct {
-	Runtime   PluginRuntime   `yaml:"runtime" json:"runtime"`
-	Transport string          `yaml:"transport,omitempty" json:"transport,omitempty"`
-	Command   string          `yaml:"command,omitempty" json:"command,omitempty"`
-	Args      []string        `yaml:"args,omitempty" json:"args,omitempty"`
-	URL       string          `yaml:"url,omitempty" json:"url,omitempty"`
-	Binary    string          `yaml:"binary,omitempty" json:"binary,omitempty"`
-	Config    map[string]any  `yaml:"config,omitempty" json:"config,omitempty"`
-	Extra     map[string]any  `yaml:",inline" json:"extra,omitempty"`
+	Runtime      PluginRuntime  `yaml:"runtime" json:"runtime"`
+	Transport    string         `yaml:"transport,omitempty" json:"transport,omitempty"`
+	Command      string         `yaml:"command,omitempty" json:"command,omitempty"`
+	Args         []string       `yaml:"args,omitempty" json:"args,omitempty"`
+	URL          string         `yaml:"url,omitempty" json:"url,omitempty"`
+	Binary       string         `yaml:"binary,omitempty" json:"binary,omitempty"`
+	Module       string         `yaml:"module,omitempty" json:"module,omitempty"`
+	ABIVersion   string         `yaml:"abiVersion,omitempty" json:"abiVersion,omitempty"`
+	Capabilities []string       `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+	Config       map[string]any `yaml:"config,omitempty" json:"config,omitempty"`
+	Extra        map[string]any `yaml:",inline" json:"extra,omitempty"`
+}
+
+type PluginRuntimeMetadata struct {
+	ABIVersion string `json:"abi_version,omitempty"`
+	Compatible bool   `json:"compatible"`
 }
 
 type PluginPermissions struct {
@@ -95,11 +104,13 @@ type PluginSource struct {
 
 type PluginRecord struct {
 	PluginManifest
-	LifecycleState PluginLifecycleState `json:"lifecycle_state"`
-	RuntimeHost    PluginRuntimeHost    `json:"runtime_host,omitempty"`
-	LastHealthAt   *time.Time           `json:"last_health_at,omitempty"`
-	LastError      string               `json:"last_error,omitempty"`
-	RestartCount   int                  `json:"restart_count"`
+	LifecycleState     PluginLifecycleState   `json:"lifecycle_state"`
+	RuntimeHost        PluginRuntimeHost      `json:"runtime_host,omitempty"`
+	LastHealthAt       *time.Time             `json:"last_health_at,omitempty"`
+	LastError          string                 `json:"last_error,omitempty"`
+	RestartCount       int                    `json:"restart_count"`
+	ResolvedSourcePath string                 `json:"resolved_source_path,omitempty"`
+	RuntimeMetadata    *PluginRuntimeMetadata `json:"runtime_metadata,omitempty"`
 }
 
 type PluginFilter struct {
@@ -108,10 +119,12 @@ type PluginFilter struct {
 }
 
 type PluginRuntimeStatus struct {
-	PluginID       string               `json:"plugin_id"`
-	Host           PluginRuntimeHost    `json:"host"`
-	LifecycleState PluginLifecycleState `json:"lifecycle_state"`
-	LastHealthAt   *time.Time           `json:"last_health_at,omitempty"`
-	LastError      string               `json:"last_error,omitempty"`
-	RestartCount   int                  `json:"restart_count"`
+	PluginID           string                 `json:"plugin_id"`
+	Host               PluginRuntimeHost      `json:"host"`
+	LifecycleState     PluginLifecycleState   `json:"lifecycle_state"`
+	LastHealthAt       *time.Time             `json:"last_health_at,omitempty"`
+	LastError          string                 `json:"last_error,omitempty"`
+	RestartCount       int                    `json:"restart_count"`
+	ResolvedSourcePath string                 `json:"resolved_source_path,omitempty"`
+	RuntimeMetadata    *PluginRuntimeMetadata `json:"runtime_metadata,omitempty"`
 }

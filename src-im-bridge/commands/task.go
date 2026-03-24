@@ -109,12 +109,19 @@ func handleTaskAssign(ctx context.Context, p core.Platform, msg *core.Message, c
 		_ = p.Reply(ctx, msg.ReplyCtx, "用法: /task assign <task-id> <assignee>")
 		return
 	}
-	task, err := c.AssignTask(ctx, parts[0], parts[1])
+	member, err := resolveProjectMember(ctx, c, parts[1])
 	if err != nil {
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("分配失败: %v", err))
 		return
 	}
-	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已将任务 #%s 分配给 %s", shortID(task.ID), task.AssigneeName))
+
+	result, err := c.AssignTask(ctx, parts[0], member.ID, member.Type)
+	if err != nil {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("分配失败: %v", err))
+		return
+	}
+
+	_ = p.Reply(ctx, msg.ReplyCtx, formatTaskDispatchReply(result, member.Name))
 }
 
 func handleTaskDecompose(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, taskID string) {
@@ -165,4 +172,40 @@ func shortID(id string) string {
 		return id[:8]
 	}
 	return id
+}
+
+func resolveProjectMember(ctx context.Context, c *client.AgentForgeClient, assignee string) (*client.Member, error) {
+	members, err := c.ListProjectMembers(ctx)
+	if err != nil {
+		return nil, err
+	}
+
+	query := strings.TrimSpace(assignee)
+	lowerQuery := strings.ToLower(query)
+	for i := range members {
+		member := &members[i]
+		if member.ID == query || strings.EqualFold(member.Name, query) || strings.ToLower(member.Name) == lowerQuery {
+			return member, nil
+		}
+	}
+
+	return nil, fmt.Errorf("未找到成员 %q", assignee)
+}
+
+func formatTaskDispatchReply(result *client.TaskDispatchResponse, assigneeName string) string {
+	taskID := shortID(result.Task.ID)
+	switch result.Dispatch.Status {
+	case "started":
+		if result.Dispatch.Run != nil {
+			return fmt.Sprintf("已将任务 #%s 分配给 %s，并启动 Agent #%s", taskID, assigneeName, shortID(result.Dispatch.Run.ID))
+		}
+		return fmt.Sprintf("已将任务 #%s 分配给 %s，并启动 Agent", taskID, assigneeName)
+	case "blocked":
+		if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
+			return fmt.Sprintf("已将任务 #%s 分配给 %s，但未启动 Agent：%s", taskID, assigneeName, reason)
+		}
+		return fmt.Sprintf("已将任务 #%s 分配给 %s，但未启动 Agent", taskID, assigneeName)
+	default:
+		return fmt.Sprintf("已将任务 #%s 分配给 %s", taskID, assigneeName)
+	}
 }

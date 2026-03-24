@@ -10,13 +10,13 @@ import (
 )
 
 type fakeTaskDecompositionRepo struct {
-	task          *model.Task
-	getErr        error
-	hasChildren   bool
+	task           *model.Task
+	getErr         error
+	hasChildren    bool
 	hasChildrenErr error
-	createErr     error
-	createInputs  []model.TaskChildInput
-	createResult  []*model.Task
+	createErr      error
+	createInputs   []model.TaskChildInput
+	createResult   []*model.Task
 }
 
 func (f *fakeTaskDecompositionRepo) GetByID(ctx context.Context, id uuid.UUID) (*model.Task, error) {
@@ -67,13 +67,13 @@ func TestTaskDecompositionService_DecomposeSuccess(t *testing.T) {
 	projectID := uuid.New()
 	sprintID := uuid.New()
 	parent := &model.Task{
-		ID:        parentID,
-		ProjectID: projectID,
-		SprintID:  &sprintID,
-		Title:     "Bridge task decomposition",
+		ID:          parentID,
+		ProjectID:   projectID,
+		SprintID:    &sprintID,
+		Title:       "Bridge task decomposition",
 		Description: "Implement decomposition across the bridge, Go API, and IM commands.",
-		Priority:  "high",
-		Status:    model.TaskStatusTriaged,
+		Priority:    "high",
+		Status:      model.TaskStatusTriaged,
 	}
 	child1 := &model.Task{ID: uuid.New(), ProjectID: projectID, ParentID: &parentID, SprintID: &sprintID, Title: "Bridge route", Description: "Add /bridge/decompose", Priority: "high", Status: model.TaskStatusInbox}
 	child2 := &model.Task{ID: uuid.New(), ProjectID: projectID, ParentID: &parentID, SprintID: &sprintID, Title: "IM command", Description: "Add /task decompose", Priority: "medium", Status: model.TaskStatusInbox}
@@ -101,6 +101,9 @@ func TestTaskDecompositionService_DecomposeSuccess(t *testing.T) {
 
 	if bridge.lastReq == nil || bridge.lastReq.TaskID != parentID.String() {
 		t.Fatalf("expected bridge request for parent task, got %+v", bridge.lastReq)
+	}
+	if bridge.lastReq.Provider != "" || bridge.lastReq.Model != "" {
+		t.Fatalf("expected default decomposition request to preserve empty provider/model overrides, got %+v", bridge.lastReq)
 	}
 	if len(repo.createInputs) != 2 {
 		t.Fatalf("expected 2 child inputs, got %d", len(repo.createInputs))

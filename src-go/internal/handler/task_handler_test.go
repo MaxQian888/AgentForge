@@ -6,8 +6,10 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 
+	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/handler"
@@ -19,6 +21,22 @@ type fakeTaskDecomposer struct {
 	result *model.TaskDecompositionResponse
 	err    error
 	lastID uuid.UUID
+}
+
+type fakeTaskDispatcher struct {
+	result *model.TaskDispatchResponse
+	err    error
+	lastID uuid.UUID
+	lastReq *model.AssignRequest
+}
+
+func (f *fakeTaskDispatcher) Assign(ctx context.Context, taskID uuid.UUID, req *model.AssignRequest) (*model.TaskDispatchResponse, error) {
+	f.lastID = taskID
+	f.lastReq = req
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.result, nil
 }
 
 func (f *fakeTaskDecomposer) Decompose(ctx context.Context, taskID uuid.UUID) (*model.TaskDecompositionResponse, error) {
@@ -122,4 +140,51 @@ func TestTaskHandler_DecomposeErrorMapping(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestTaskHandler_AssignReturnsStructuredDispatchResult(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	e := echo.New()
+	e.Validator = &agentTestValidator{validator: validator.New()}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID.String()+"/assign", strings.NewReader(`{"assigneeId":"`+memberID.String()+`","assigneeType":"agent"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v1/tasks/:id/assign")
+	c.SetParamNames("id")
+	c.SetParamValues(taskID.String())
+
+	dispatcher := &fakeTaskDispatcher{
+		result: &model.TaskDispatchResponse{
+			Task: model.TaskDTO{ID: taskID.String(), AssigneeID: ptr(memberID.String()), AssigneeType: model.MemberTypeAgent},
+			Dispatch: model.DispatchOutcome{
+				Status: model.DispatchStatusStarted,
+				Run:    &model.AgentRunDTO{ID: uuid.New().String(), TaskID: taskID.String(), MemberID: memberID.String()},
+			},
+		},
+	}
+
+	h := handler.NewTaskHandler(nil).WithDispatcher(dispatcher)
+	if err := h.Assign(c); err != nil {
+		t.Fatalf("Assign() error: %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	var body model.TaskDispatchResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+	if body.Dispatch.Status != model.DispatchStatusStarted {
+		t.Fatalf("dispatch = %+v", body.Dispatch)
+	}
+	if dispatcher.lastID != taskID || dispatcher.lastReq.AssigneeID != memberID.String() {
+		t.Fatalf("dispatcher called with %s / %+v", dispatcher.lastID, dispatcher.lastReq)
+	}
+}
+
+func ptr(value string) *string {
+	return &value
 }

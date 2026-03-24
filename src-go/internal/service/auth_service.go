@@ -12,6 +12,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/repository"
 	"golang.org/x/crypto/bcrypt"
 )
 
@@ -113,6 +114,9 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*model.
 
 	// Verify stored refresh token matches
 	stored, err := s.cacheRepo.GetRefreshToken(ctx, claims.UserID)
+	if errors.Is(err, repository.ErrCacheUnavailable) {
+		return nil, fmt.Errorf("load refresh token: %w", err)
+	}
 	if err != nil || stored != refreshToken {
 		return nil, ErrInvalidToken
 	}
@@ -124,11 +128,16 @@ func (s *AuthService) Refresh(ctx context.Context, refreshToken string) (*model.
 	}
 	user, err := s.userRepo.GetByID(ctx, userID)
 	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, ErrInvalidToken
+		}
 		return nil, fmt.Errorf("get user: %w", err)
 	}
 
 	// Delete old refresh token before issuing new ones
-	_ = s.cacheRepo.DeleteRefreshToken(ctx, claims.UserID)
+	if err := s.cacheRepo.DeleteRefreshToken(ctx, claims.UserID); err != nil {
+		return nil, fmt.Errorf("delete refresh token: %w", err)
+	}
 
 	return s.issueTokens(ctx, user)
 }
@@ -140,8 +149,28 @@ func (s *AuthService) Logout(ctx context.Context, userID, jti string, accessToke
 		return fmt.Errorf("blacklist token: %w", err)
 	}
 	// Remove refresh token
-	_ = s.cacheRepo.DeleteRefreshToken(ctx, userID)
+	if err := s.cacheRepo.DeleteRefreshToken(ctx, userID); err != nil {
+		return fmt.Errorf("delete refresh token: %w", err)
+	}
 	return nil
+}
+
+// GetCurrentUser loads the authoritative user profile for the authenticated subject.
+func (s *AuthService) GetCurrentUser(ctx context.Context, userID string) (model.UserDTO, error) {
+	parsedID, err := uuid.Parse(userID)
+	if err != nil {
+		return model.UserDTO{}, ErrInvalidToken
+	}
+
+	user, err := s.userRepo.GetByID(ctx, parsedID)
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return model.UserDTO{}, ErrInvalidToken
+		}
+		return model.UserDTO{}, fmt.Errorf("get user: %w", err)
+	}
+
+	return user.ToDTO(), nil
 }
 
 // issueTokens creates and stores access + refresh tokens for a user.

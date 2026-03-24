@@ -19,6 +19,10 @@ import (
 
 type handlerRuntimeClient struct{}
 
+type handlerGoRuntime struct {
+	result map[string]any
+}
+
 func (handlerRuntimeClient) RegisterToolPlugin(_ context.Context, manifest model.PluginManifest) (*model.PluginRuntimeStatus, error) {
 	return &model.PluginRuntimeStatus{
 		PluginID:       manifest.Metadata.ID,
@@ -52,6 +56,50 @@ func (handlerRuntimeClient) RestartToolPlugin(_ context.Context, pluginID string
 	}, nil
 }
 
+func (h *handlerGoRuntime) ActivatePlugin(_ context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error) {
+	return &model.PluginRuntimeStatus{
+		PluginID:       record.Metadata.ID,
+		Host:           model.PluginHostGoOrchestrator,
+		LifecycleState: model.PluginStateActive,
+		RuntimeMetadata: &model.PluginRuntimeMetadata{
+			ABIVersion: record.Spec.ABIVersion,
+			Compatible: true,
+		},
+	}, nil
+}
+
+func (h *handlerGoRuntime) CheckPluginHealth(_ context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error) {
+	return &model.PluginRuntimeStatus{
+		PluginID:       record.Metadata.ID,
+		Host:           model.PluginHostGoOrchestrator,
+		LifecycleState: model.PluginStateActive,
+		RuntimeMetadata: &model.PluginRuntimeMetadata{
+			ABIVersion: record.Spec.ABIVersion,
+			Compatible: true,
+		},
+	}, nil
+}
+
+func (h *handlerGoRuntime) RestartPlugin(_ context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error) {
+	return &model.PluginRuntimeStatus{
+		PluginID:       record.Metadata.ID,
+		Host:           model.PluginHostGoOrchestrator,
+		LifecycleState: model.PluginStateActive,
+		RestartCount:   1,
+		RuntimeMetadata: &model.PluginRuntimeMetadata{
+			ABIVersion: record.Spec.ABIVersion,
+			Compatible: true,
+		},
+	}, nil
+}
+
+func (h *handlerGoRuntime) Invoke(_ context.Context, _ model.PluginRecord, _ string, _ map[string]any) (map[string]any, error) {
+	if h.result == nil {
+		h.result = map[string]any{"status": "ok"}
+	}
+	return h.result, nil
+}
+
 func writePluginManifest(t *testing.T, dir string, relative string, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, relative)
@@ -66,7 +114,13 @@ func writePluginManifest(t *testing.T, dir string, relative string, content stri
 
 func newPluginHandler(t *testing.T, pluginsDir string) *handler.PluginHandler {
 	t.Helper()
-	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), handlerRuntimeClient{}, pluginsDir)
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), handlerRuntimeClient{}, nil, pluginsDir)
+	return handler.NewPluginHandler(svc)
+}
+
+func newPluginHandlerWithGoRuntime(t *testing.T, pluginsDir string, goRuntime service.GoPluginRuntime) *handler.PluginHandler {
+	t.Helper()
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), handlerRuntimeClient{}, goRuntime, pluginsDir)
 	return handler.NewPluginHandler(svc)
 }
 
@@ -131,8 +185,9 @@ metadata:
   name: Feishu
   version: 1.0.0
 spec:
-  runtime: go-plugin
-  binary: ./feishu-adapter
+  runtime: wasm
+  module: ./dist/feishu.wasm
+  abiVersion: v1
 `)
 
 	h := newPluginHandler(t, pluginsDir)
@@ -175,5 +230,84 @@ spec:
 	}
 	if record.RestartCount != 3 {
 		t.Fatalf("expected restart count 3, got %d", record.RestartCount)
+	}
+}
+
+func TestPluginHandler_InvokeIntegrationPlugin(t *testing.T) {
+	pluginsDir := t.TempDir()
+	manifestPath := writePluginManifest(t, pluginsDir, "local/feishu.yaml", `
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: feishu
+  name: Feishu
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/feishu.wasm
+  abiVersion: v1
+  capabilities: ["send_message"]
+`)
+
+	goRuntime := &handlerGoRuntime{
+		result: map[string]any{
+			"status": "sent",
+		},
+	}
+	h := newPluginHandlerWithGoRuntime(t, pluginsDir, goRuntime)
+	e := echo.New()
+
+	installBody, _ := json.Marshal(map[string]string{"path": manifestPath})
+	installReq := httptest.NewRequest(http.MethodPost, "/plugins/install", bytes.NewReader(installBody))
+	installReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	installRec := httptest.NewRecorder()
+	installCtx := e.NewContext(installReq, installRec)
+	if err := h.InstallLocal(installCtx); err != nil {
+		t.Fatalf("install local: %v", err)
+	}
+
+	activateReq := httptest.NewRequest(http.MethodPost, "/plugins/feishu/activate", nil)
+	activateRec := httptest.NewRecorder()
+	activateCtx := e.NewContext(activateReq, activateRec)
+	activateCtx.SetParamNames("id")
+	activateCtx.SetParamValues("feishu")
+	if err := h.Activate(activateCtx); err != nil {
+		t.Fatalf("activate plugin: %v", err)
+	}
+
+	body, _ := json.Marshal(map[string]any{
+		"operation": "send_message",
+		"payload": map[string]any{
+			"chat_id": "chat-1",
+			"content": "hello",
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/plugins/feishu/invoke", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("feishu")
+
+	if err := h.Invoke(c); err != nil {
+		t.Fatalf("invoke plugin: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", rec.Code)
+	}
+
+	var response struct {
+		PluginID  string         `json:"plugin_id"`
+		Operation string         `json:"operation"`
+		Result    map[string]any `json:"result"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode invoke response: %v", err)
+	}
+	if response.PluginID != "feishu" || response.Operation != "send_message" {
+		t.Fatalf("unexpected invoke response header: %+v", response)
+	}
+	if response.Result["status"] != "sent" {
+		t.Fatalf("expected sent result, got %+v", response.Result)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/platform/telegram"
 )
 
 type textOnlyPlatform struct {
@@ -53,6 +54,15 @@ func (p *cardPlatform) SendCard(ctx context.Context, chatID string, card *core.C
 
 func (p *cardPlatform) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) error {
 	return nil
+}
+
+type capabilityAwareCardPlatform struct {
+	cardPlatform
+	metadata core.PlatformMetadata
+}
+
+func (p *capabilityAwareCardPlatform) Metadata() core.PlatformMetadata {
+	return p.metadata
 }
 
 func TestReceiver_RejectsPlatformMismatch(t *testing.T) {
@@ -125,6 +135,43 @@ func TestReceiver_SendsCardWhenPlatformSupportsCards(t *testing.T) {
 	}
 	if len(p.cardTitles) != 1 || p.cardTitles[0] != "card title" {
 		t.Fatalf("cardTitles = %v, want [card title]", p.cardTitles)
+	}
+}
+
+func TestReceiver_FallsBackToTextWhenCapabilitiesDisableRichMessages(t *testing.T) {
+	p := &capabilityAwareCardPlatform{
+		cardPlatform: cardPlatform{textOnlyPlatform: textOnlyPlatform{name: "dingtalk-stub"}},
+		metadata: core.PlatformMetadata{
+			Source: "dingtalk",
+			Capabilities: core.PlatformCapabilities{
+				SupportsRichMessages: false,
+			},
+		},
+	}
+	r := NewReceiver(p, "0")
+
+	body, err := json.Marshal(Notification{
+		Platform:     "dingtalk",
+		TargetChatID: "chat-1",
+		Content:      "plain fallback",
+		Card:         core.NewCard().SetTitle("card title"),
+	})
+	if err != nil {
+		t.Fatalf("marshal notification: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/notify", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleNotify(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(p.cardTitles) != 0 {
+		t.Fatalf("cardTitles = %v, want []", p.cardTitles)
+	}
+	if len(p.sent) != 1 || p.sent[0] != "plain fallback" {
+		t.Fatalf("sent = %v, want plain fallback", p.sent)
 	}
 }
 
@@ -284,5 +331,54 @@ func TestReceiver_StopWithoutStartedServerIsNoop(t *testing.T) {
 
 	if err := r.Stop(); err != nil {
 		t.Fatalf("Stop error: %v", err)
+	}
+}
+
+func TestReceiver_HealthReportsNormalizedTelegramSourceAndCapabilities(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+
+	r := NewReceiver(telegram.NewStub("0"), strconv.Itoa(port))
+	done := make(chan error, 1)
+	go func() {
+		done <- r.Start()
+	}()
+
+	var resp *http.Response
+	for i := 0; i < 20; i++ {
+		resp, err = http.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/im/health")
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("health request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if payload["platform"] != "telegram-stub" {
+		t.Fatalf("platform = %v", payload["platform"])
+	}
+	if payload["source"] != "telegram" {
+		t.Fatalf("source = %v", payload["source"])
+	}
+	if payload["supports_rich_messages"] != false {
+		t.Fatalf("supports_rich_messages = %v", payload["supports_rich_messages"])
+	}
+
+	if err := r.Stop(); err != nil {
+		t.Fatalf("Stop error: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Start returned error after stop: %v", err)
 	}
 }

@@ -57,3 +57,51 @@ spec:
 		t.Fatal("expected invalid kind/runtime combination to fail")
 	}
 }
+
+func TestParse_ValidWASMIntegrationPluginManifest(t *testing.T) {
+	data := []byte(`
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: wasm-feishu
+  name: WASM Feishu
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/feishu.wasm
+  abiVersion: v1
+  capabilities: ["events:inbound", "messages:outbound"]
+`)
+
+	manifest, err := plugin.Parse(data)
+	if err != nil {
+		t.Fatalf("expected wasm manifest to parse, got error: %v", err)
+	}
+
+	if manifest.Spec.Runtime != model.PluginRuntimeWASM {
+		t.Fatalf("expected WASM runtime, got %s", manifest.Spec.Runtime)
+	}
+	if manifest.Spec.Module != "./dist/feishu.wasm" {
+		t.Fatalf("expected module path to be preserved, got %q", manifest.Spec.Module)
+	}
+	if manifest.Spec.ABIVersion != "v1" {
+		t.Fatalf("expected ABI version to be preserved, got %q", manifest.Spec.ABIVersion)
+	}
+}
+
+func TestParse_WASMIntegrationPluginRequiresModuleAndABIVersion(t *testing.T) {
+	data := []byte(`
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: wasm-feishu
+  name: WASM Feishu
+  version: 1.0.0
+spec:
+  runtime: wasm
+`)
+
+	if _, err := plugin.Parse(data); err == nil {
+		t.Fatal("expected wasm integration manifest without module and abiVersion to fail")
+	}
+}

@@ -265,27 +265,36 @@ func TestTaskCommand_AssignRequiresTaskIDAndAssignee(t *testing.T) {
 }
 
 func TestTaskCommand_AssignRepliesWithAssignee(t *testing.T) {
+	memberPayload := []map[string]any{
+		{"id": "member-1", "name": "Alice", "type": "agent", "isActive": true},
+	}
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.Method != http.MethodPatch {
-			t.Fatalf("method = %s, want PATCH", r.Method)
-		}
-		if r.URL.Path != "/api/v1/tasks/task-123/assign" {
-			t.Fatalf("path = %s", r.URL.Path)
-		}
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/proj/members":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(memberPayload)
+			return
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/tasks/task-123/assign":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body["assigneeId"] != "member-1" || body["assigneeType"] != "agent" {
+				t.Fatalf("assignment body = %+v", body)
+			}
 
-		var body map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode body: %v", err)
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(&client.TaskDispatchResponse{
+				Task: client.Task{ID: "task-123456"},
+				Dispatch: client.DispatchOutcome{
+					Status: "started",
+					Run:    &client.AgentRun{ID: "run-123456", TaskID: "task-123456"},
+				},
+			})
+			return
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
-		if body["assignee"] != "Alice" {
-			t.Fatalf("assignee = %q", body["assignee"])
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(&client.Task{
-			ID:           "task-123456",
-			AssigneeName: "Alice",
-		})
 	}))
 	defer server.Close()
 
@@ -302,7 +311,7 @@ func TestTaskCommand_AssignRepliesWithAssignee(t *testing.T) {
 	if len(platform.replies) != 1 {
 		t.Fatalf("replies = %v", platform.replies)
 	}
-	if !strings.Contains(platform.replies[0], "已将任务 #task-123 分配给 Alice") {
+	if !strings.Contains(platform.replies[0], "已将任务 #task-123 分配给 Alice，并启动 Agent #run-1234") {
 		t.Fatalf("reply = %q", platform.replies[0])
 	}
 }

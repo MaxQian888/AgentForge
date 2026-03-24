@@ -2,7 +2,6 @@ package middleware_test
 
 import (
 	"context"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -12,6 +11,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/middleware"
+	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
@@ -34,7 +34,7 @@ func (m *mockBlacklist) IsBlacklisted(_ context.Context, jti string) (bool, erro
 type errorBlacklist struct{}
 
 func (m *errorBlacklist) IsBlacklisted(_ context.Context, _ string) (bool, error) {
-	return false, errors.New("cache error")
+	return false, repository.ErrCacheUnavailable
 }
 
 // --- Helpers ---
@@ -198,8 +198,8 @@ func TestJWTMiddleware_BlacklistError(t *testing.T) {
 	if err := handler(c); err != nil {
 		t.Fatalf("handler error: %v", err)
 	}
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", rec.Code)
 	}
 }
 

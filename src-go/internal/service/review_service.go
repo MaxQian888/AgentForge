@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
@@ -45,6 +46,7 @@ type ReviewService struct {
 	notifications ReviewNotificationCreator
 	hub           *ws.Hub
 	bridge        ReviewBridgeClient
+	progress      *TaskProgressService
 }
 
 func NewReviewService(
@@ -53,13 +55,19 @@ func NewReviewService(
 	notifications ReviewNotificationCreator,
 	hub *ws.Hub,
 	bridge ReviewBridgeClient,
+	progress ...*TaskProgressService,
 ) *ReviewService {
+	var tracker *TaskProgressService
+	if len(progress) > 0 {
+		tracker = progress[0]
+	}
 	return &ReviewService{
 		reviews:       reviews,
 		tasks:         tasks,
 		notifications: notifications,
 		hub:           hub,
 		bridge:        bridge,
+		progress:      tracker,
 	}
 }
 
@@ -104,6 +112,12 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	}
 
 	s.broadcast(ws.EventReviewCreated, task.ProjectID.String(), review.ToDTO())
+	s.recordProgress(ctx, task.ID, TaskActivityInput{
+		Source:         model.TaskProgressSourceReviewCreated,
+		OccurredAt:     time.Now().UTC(),
+		UpdateHealth:   true,
+		MarkTransition: true,
+	})
 
 	if s.bridge == nil {
 		return review, nil
@@ -175,6 +189,12 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 	}
 
 	s.broadcast(ws.EventReviewCompleted, task.ProjectID.String(), review.ToDTO())
+	s.recordProgress(ctx, task.ID, TaskActivityInput{
+		Source:         model.TaskProgressSourceReviewComplete,
+		OccurredAt:     time.Now().UTC(),
+		UpdateHealth:   true,
+		MarkTransition: true,
+	})
 	return review, nil
 }
 
@@ -236,4 +256,11 @@ func (s *ReviewService) broadcast(eventType, projectID string, payload any) {
 		ProjectID: projectID,
 		Payload:   payload,
 	})
+}
+
+func (s *ReviewService) recordProgress(ctx context.Context, taskID uuid.UUID, input TaskActivityInput) {
+	if s.progress == nil {
+		return
+	}
+	_, _ = s.progress.RecordActivity(ctx, taskID, input)
 }

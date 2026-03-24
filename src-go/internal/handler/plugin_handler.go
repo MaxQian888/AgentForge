@@ -90,6 +90,29 @@ func (h *PluginHandler) Restart(c echo.Context) error {
 	return c.JSON(http.StatusOK, record)
 }
 
+func (h *PluginHandler) Invoke(c echo.Context) error {
+	var req struct {
+		Operation string         `json:"operation"`
+		Payload   map[string]any `json:"payload"`
+	}
+	if err := c.Bind(&req); err != nil || req.Operation == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "operation is required"})
+	}
+	if req.Payload == nil {
+		req.Payload = map[string]any{}
+	}
+
+	result, err := h.service.Invoke(c.Request().Context(), c.Param("id"), req.Operation, req.Payload)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"plugin_id": c.Param("id"),
+		"operation": req.Operation,
+		"result":    result,
+	})
+}
+
 func (h *PluginHandler) SyncRuntimeState(c echo.Context) error {
 	var update model.PluginRuntimeStatus
 	if err := c.Bind(&update); err != nil || update.PluginID == "" {

@@ -3,7 +3,6 @@ package handler_test
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -19,6 +18,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/handler"
 	"github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"golang.org/x/crypto/bcrypt"
 )
@@ -69,6 +69,8 @@ type mockCacheRepo struct {
 	refreshTokens map[string]string
 	blacklist     map[string]bool
 	blacklistErr  error
+	getErr        error
+	deleteErr     error
 }
 
 func newMockCacheRepo() *mockCacheRepo {
@@ -84,6 +86,9 @@ func (m *mockCacheRepo) SetRefreshToken(_ context.Context, userID, token string,
 }
 
 func (m *mockCacheRepo) GetRefreshToken(_ context.Context, userID string) (string, error) {
+	if m.getErr != nil {
+		return "", m.getErr
+	}
 	t, ok := m.refreshTokens[userID]
 	if !ok {
 		return "", pgx.ErrNoRows
@@ -92,6 +97,9 @@ func (m *mockCacheRepo) GetRefreshToken(_ context.Context, userID string) (strin
 }
 
 func (m *mockCacheRepo) DeleteRefreshToken(_ context.Context, userID string) error {
+	if m.deleteErr != nil {
+		return m.deleteErr
+	}
 	delete(m.refreshTokens, userID)
 	return nil
 }
@@ -420,6 +428,39 @@ func TestRefreshHandler_Success(t *testing.T) {
 	}
 }
 
+func TestRefreshHandler_CacheUnavailable(t *testing.T) {
+	e := setupEcho()
+	h, userRepo, cacheRepo := setupAuthHandlerWithMocks()
+
+	registerBody := `{"email":"refresh-cache@example.com","password":"password123","name":"Refresh User"}`
+	req1 := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(registerBody))
+	req1.Header.Set("Content-Type", "application/json")
+	rec1 := httptest.NewRecorder()
+	c1 := e.NewContext(req1, rec1)
+	_ = h.Register(c1)
+
+	var registerResp model.AuthResponse
+	_ = json.Unmarshal(rec1.Body.Bytes(), &registerResp)
+
+	cacheRepo.getErr = repository.ErrCacheUnavailable
+	for _, u := range userRepo.users {
+		if u.Email == "refresh-cache@example.com" {
+			break
+		}
+	}
+
+	refreshBody := `{"refreshToken":"` + registerResp.RefreshToken + `"}`
+	req2 := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(refreshBody))
+	req2.Header.Set("Content-Type", "application/json")
+	rec2 := httptest.NewRecorder()
+	c2 := e.NewContext(req2, rec2)
+	_ = h.Refresh(c2)
+
+	if rec2.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", rec2.Code)
+	}
+}
+
 // --- Logout Tests ---
 
 func TestLogoutHandler_NoClaims(t *testing.T) {
@@ -475,7 +516,7 @@ func TestLogoutHandler_ServiceError(t *testing.T) {
 	e := setupEcho()
 	userRepo := newMockUserRepo()
 	cacheRepo := newMockCacheRepo()
-	cacheRepo.blacklistErr = errors.New("redis down")
+	cacheRepo.blacklistErr = repository.ErrCacheUnavailable
 	cfg := testConfig()
 	authSvc := service.NewAuthService(userRepo, cacheRepo, cfg)
 	h := handler.NewAuthHandler(authSvc, cfg.JWTAccessTTL)
@@ -487,8 +528,8 @@ func TestLogoutHandler_ServiceError(t *testing.T) {
 	setJWTClaims(c, uuid.New().String(), "test@example.com", "jti-fail", time.Now().Add(15*time.Minute))
 
 	_ = h.Logout(c)
-	if rec.Code != http.StatusInternalServerError {
-		t.Errorf("expected 500, got %d", rec.Code)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Errorf("expected 503, got %d", rec.Code)
 	}
 }
 
@@ -508,14 +549,14 @@ func TestGetMeHandler_NoClaims(t *testing.T) {
 
 func TestGetMeHandler_Success(t *testing.T) {
 	e := setupEcho()
-	h, _, _ := setupAuthHandlerWithMocks()
+	h, userRepo, _ := setupAuthHandlerWithMocks()
 
 	req := httptest.NewRequest(http.MethodGet, "/", nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 
-	userID := uuid.New().String()
-	setJWTClaims(c, userID, "me@example.com", "jti-me", time.Now().Add(15*time.Minute))
+	user := seedUser(userRepo, "me@example.com", "password123", "Current User")
+	setJWTClaims(c, user.ID.String(), "stale@example.com", "jti-me", time.Now().Add(15*time.Minute))
 
 	_ = h.GetMe(c)
 	if rec.Code != http.StatusOK {
@@ -524,10 +565,29 @@ func TestGetMeHandler_Success(t *testing.T) {
 
 	var dto model.UserDTO
 	_ = json.Unmarshal(rec.Body.Bytes(), &dto)
-	if dto.ID != userID {
-		t.Errorf("expected ID %s, got %s", userID, dto.ID)
+	if dto.ID != user.ID.String() {
+		t.Errorf("expected ID %s, got %s", user.ID.String(), dto.ID)
 	}
 	if dto.Email != "me@example.com" {
 		t.Errorf("expected email me@example.com, got %s", dto.Email)
+	}
+	if dto.Name != "Current User" {
+		t.Errorf("expected Current User, got %s", dto.Name)
+	}
+}
+
+func TestGetMeHandler_UserMissing(t *testing.T) {
+	e := setupEcho()
+	h, _, _ := setupAuthHandlerWithMocks()
+
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	setJWTClaims(c, uuid.New().String(), "missing@example.com", "jti-missing", time.Now().Add(15*time.Minute))
+
+	_ = h.GetMe(c)
+	if rec.Code != http.StatusUnauthorized {
+		t.Errorf("expected 401, got %d", rec.Code)
 	}
 }

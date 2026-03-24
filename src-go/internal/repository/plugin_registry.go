@@ -75,6 +75,13 @@ func clonePluginRecord(record *model.PluginRecord) *model.PluginRecord {
 	if record.Spec.Args != nil {
 		cloned.Spec.Args = append([]string(nil), record.Spec.Args...)
 	}
+	if record.Spec.Capabilities != nil {
+		cloned.Spec.Capabilities = append([]string(nil), record.Spec.Capabilities...)
+	}
+	if record.RuntimeMetadata != nil {
+		metadata := *record.RuntimeMetadata
+		cloned.RuntimeMetadata = &metadata
+	}
 	if record.Permissions.Network != nil {
 		network := *record.Permissions.Network
 		network.Domains = append([]string(nil), network.Domains...)

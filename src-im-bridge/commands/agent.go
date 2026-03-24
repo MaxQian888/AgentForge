@@ -39,15 +39,32 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				_ = p.Reply(ctx, msg.ReplyCtx, "用法: /agent spawn <task-id>")
 				return
 			}
-			run, err := scopedClient.SpawnAgent(ctx, subArgs)
+			result, err := scopedClient.SpawnAgent(ctx, subArgs)
 			if err != nil {
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("启动 Agent 失败: %v", err))
 				return
 			}
-			_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已启动 Agent #%s 执行任务 %s",
-				shortID(run.ID), shortID(run.TaskID)))
+			_ = p.Reply(ctx, msg.ReplyCtx, formatAgentSpawnReply(result, subArgs))
 		default:
 			_ = p.Reply(ctx, msg.ReplyCtx, "用法: /agent list|spawn <task-id>")
 		}
 	})
+}
+
+func formatAgentSpawnReply(result *client.TaskDispatchResponse, requestedTaskID string) string {
+	switch result.Dispatch.Status {
+	case "started":
+		if result.Dispatch.Run != nil {
+			return fmt.Sprintf("已启动 Agent #%s 执行任务 %s",
+				shortID(result.Dispatch.Run.ID), shortID(result.Dispatch.Run.TaskID))
+		}
+		return fmt.Sprintf("已启动 Agent 执行任务 %s", shortID(requestedTaskID))
+	case "blocked":
+		if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
+			return fmt.Sprintf("未启动 Agent：%s", reason)
+		}
+		return "未启动 Agent"
+	default:
+		return fmt.Sprintf("任务 %s 当前未启动 Agent", shortID(requestedTaskID))
+	}
 }

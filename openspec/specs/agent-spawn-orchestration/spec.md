@@ -30,3 +30,32 @@ The system SHALL expose agent lifecycle events through the authenticated WebSock
 - **WHEN** a client is connected to the authenticated WebSocket endpoint for the task's project and a spawn request succeeds
 - **THEN** the backend broadcasts an `agent.started` event through the shared hub
 - **THEN** the connected client receives the event without sending an echo message first
+
+### Requirement: Agent spawn respects managed worktree guardrails
+The spawn flow SHALL acquire task workspaces through the managed worktree lifecycle before bridge execution begins. If worktree allocation is denied because of capacity, path ownership, or unrecoverable stale state, the system MUST fail the spawn without leaving ambiguous task runtime metadata.
+
+#### Scenario: Spawn surfaces worktree allocation denial
+- **WHEN** an authenticated spawn request reaches worktree allocation and the manager returns a capacity, ownership, or stale-state error
+- **THEN** the system does not mark the related task runtime as active
+- **THEN** the system does not persist branch, worktree, or session metadata for the failed allocation attempt
+- **THEN** the caller receives an error that reflects the worktree allocation failure
+
+#### Scenario: Spawn reuses the healthy managed workspace for the task
+- **WHEN** a spawn request targets a task whose canonical managed workspace already exists and is healthy
+- **THEN** the system reuses that managed workspace instead of creating another checkout
+- **THEN** the bridge execute request receives the canonical workspace path and branch for that task
+
+### Requirement: Manual spawn reuses task assignment context
+The system SHALL allow explicit agent spawn requests to reuse the task's current agent assignment context instead of requiring every caller to provide redundant member metadata. When a spawn request identifies a task but omits explicit member identity, the system MUST derive the dispatch target from the task's current assignee if that assignee is an active agent member for the same project.
+
+#### Scenario: Task-scoped spawn resolves the assigned agent member
+- **WHEN** a caller requests agent spawn for a task without explicitly providing `memberId`
+- **THEN** the system reads the task's current assignee context before startup
+- **THEN** the system starts runtime execution with that assigned agent member if the assignee is a valid active agent target
+- **THEN** the request reuses the same startup and compensation semantics as other spawn flows
+
+#### Scenario: Task-scoped spawn rejects tasks without a valid agent assignee
+- **WHEN** a caller requests agent spawn for a task that is not currently assigned to an active agent member
+- **THEN** the system MUST reject the request before runtime startup
+- **THEN** the system MUST NOT create a new agent run for that request
+- **THEN** the response explains that the task has no valid agent dispatch target

@@ -1,64 +1,104 @@
 # additional-im-platform-support Specification
 
 ## Purpose
-Define the baseline contract for extending the AgentForge IM Bridge beyond Feishu so Slack and DingTalk deployments can run the same command and notification flows with explicit platform selection, accurate backend source metadata, and safe rich-message fallback behavior.
+Define the live-transport and platform-capability contract for the AgentForge IM Bridge so Feishu, Slack, DingTalk, Telegram, and Discord can run the shared command and notification flows with explicit platform selection, accurate backend source metadata, provider-aware acknowledgement rules, and safe rich-message fallback behavior.
+
 ## Requirements
-### Requirement: Bridge runtime can start with Slack or DingTalk as the active platform
-The IM Bridge SHALL allow a deployment to select exactly one active IM platform per process, and that platform MAY be `feishu`, `slack`, or `dingtalk`. The runtime SHALL validate the required credentials for the selected platform before starting message handling or notification delivery.
+### Requirement: Bridge runtime can start with a supported live platform as the active platform
+The IM Bridge SHALL allow a deployment to select exactly one active IM platform per process, and that platform MAY be `feishu`, `slack`, `dingtalk`, `telegram`, or `discord`. The runtime SHALL validate the required credentials and transport-specific configuration for the selected platform before starting message handling or notification delivery, and SHALL fail with an actionable configuration error instead of silently falling back to another platform or a local stub when the runtime is configured for live transport.
 
-#### Scenario: Slack bridge starts with valid configuration
-- **WHEN** the bridge is configured with `IM_PLATFORM=slack` and all required Slack credentials are present
-- **THEN** the bridge starts a Slack platform adapter and registers the existing command engine against that adapter
+#### Scenario: Feishu bridge starts with valid live configuration
+- **WHEN** the bridge is configured with `IM_PLATFORM=feishu` and the required live transport credentials are present
+- **THEN** the bridge starts a Feishu live platform adapter
+- **AND** the existing command engine is registered against that adapter
 
-#### Scenario: DingTalk bridge starts with valid configuration
-- **WHEN** the bridge is configured with `IM_PLATFORM=dingtalk` and all required DingTalk credentials are present
-- **THEN** the bridge starts a DingTalk platform adapter and registers the existing command engine against that adapter
+#### Scenario: Telegram bridge starts with valid live configuration
+- **WHEN** the bridge is configured with `IM_PLATFORM=telegram` and the required Telegram bot credentials plus update intake configuration are present
+- **THEN** the bridge starts a Telegram live platform adapter
+- **AND** the bridge does not require another platform-specific adapter to be enabled in the same process
 
 #### Scenario: Selected platform configuration is incomplete
-- **WHEN** the bridge is configured for Slack or DingTalk but a required credential is missing
+- **WHEN** the bridge is configured for `slack`, `dingtalk`, `telegram`, or `discord` but a required credential or transport parameter is missing
 - **THEN** startup fails with an actionable configuration error
 - **AND** the bridge does not silently fall back to another platform implementation
 
-### Requirement: Core command handling remains platform-consistent across Slack and DingTalk
-The system SHALL translate Slack and DingTalk inbound events into `core.Message` values that preserve platform identity, user identity, chat identity, and message content so that the existing `/task`, `/agent`, `/cost`, `/help`, and `@AgentForge` flows execute with the same command semantics as the current bridge.
+### Requirement: Core command handling remains platform-consistent across supported platforms
+The system SHALL translate Feishu, Slack, DingTalk, Telegram, and Discord inbound events or interactions into `core.Message` values that preserve platform identity, user identity, chat identity, reply context, and message content so that the existing `/task`, `/agent`, `/cost`, `/help`, and `@AgentForge` fallback flows execute with consistent command semantics across all supported platforms.
 
-#### Scenario: Slack slash-style message routes to an existing command handler
-- **WHEN** a Slack message mapped into `core.Message` contains `/task list`
+#### Scenario: Telegram slash-style command routes to an existing handler
+- **WHEN** a Telegram inbound update is normalized into `core.Message` content containing `/task list`
 - **THEN** the engine invokes the registered `/task` command handler
-- **AND** the platform sends the resulting reply back to the originating Slack conversation
+- **AND** the platform sends the resulting reply back to the originating Telegram chat
 
-#### Scenario: DingTalk mention uses the existing fallback path
-- **WHEN** a DingTalk message mapped into `core.Message` mentions `@AgentForge` without matching a registered slash command
+#### Scenario: Discord interaction is normalized to an existing command
+- **WHEN** a Discord application command or interaction maps to the logical command `/agent spawn`
+- **THEN** the engine invokes the registered `/agent` command handler with the normalized arguments
+- **AND** the resulting response is delivered back through the originating Discord interaction context
+
+#### Scenario: Feishu mention uses the existing fallback path
+- **WHEN** a Feishu inbound message mentions `@AgentForge` without matching a registered slash command
 - **THEN** the engine invokes the configured fallback handler
-- **AND** the platform returns the fallback response to the originating DingTalk conversation
+- **AND** the platform returns the fallback response to the originating Feishu conversation
 
 ### Requirement: Platform source metadata is propagated to backend API calls
-IM Bridge requests to the AgentForge backend SHALL identify the actual source platform instead of hardcoding Feishu so that backend audit, routing, and downstream policy can distinguish Slack, DingTalk, and Feishu traffic.
+IM Bridge requests to the AgentForge backend SHALL identify the actual source platform instead of hardcoding Feishu so that backend audit, routing, notification policy, and downstream analytics can distinguish Feishu, Slack, DingTalk, Telegram, and Discord traffic.
 
-#### Scenario: Slack command call includes Slack as source
-- **WHEN** a user triggers a backend-backed command from Slack
-- **THEN** the bridge sends the backend request with source metadata identifying `slack`
+#### Scenario: Telegram command call includes Telegram as source
+- **WHEN** a user triggers a backend-backed command from Telegram
+- **THEN** the bridge sends the backend request with source metadata identifying `telegram`
 
-#### Scenario: DingTalk command call includes DingTalk as source
-- **WHEN** a user triggers a backend-backed command from DingTalk
-- **THEN** the bridge sends the backend request with source metadata identifying `dingtalk`
+#### Scenario: Discord command call includes Discord as source
+- **WHEN** a user triggers a backend-backed command from Discord
+- **THEN** the bridge sends the backend request with source metadata identifying `discord`
 
-### Requirement: Notifications respect platform matching and rich-message fallback
-The notification receiver SHALL only deliver a notification through the active platform instance when the notification platform matches the running bridge platform. If a notification includes structured card content and the active platform supports rich card delivery, the bridge SHALL send the card; otherwise it SHALL fall back to the plain-text notification content.
+#### Scenario: Active platform source remains stable outside inbound message context
+- **WHEN** the bridge issues a backend-backed request from logic that is scoped to the active platform instance but not a specific inbound message
+- **THEN** the request still carries the normalized active platform source value
 
-#### Scenario: Matching platform with card support sends structured content
+### Requirement: Notifications respect platform matching and capability-aware rich-message fallback
+The notification receiver SHALL only deliver a notification through the active platform instance when the notification platform matches the running bridge platform. If a notification includes structured content and the active platform advertises the corresponding rich-message capability, the bridge SHALL send the structured response; otherwise it SHALL fall back to the plain-text notification content.
+
+#### Scenario: Matching platform with rich-message support sends structured content
 - **WHEN** the notification receiver receives a notification whose platform matches the active bridge platform
-- **AND** the notification contains card content
-- **AND** the active platform implements `core.CardSender`
-- **THEN** the bridge sends the structured card message
+- **AND** the notification contains structured card, block, or component content
+- **AND** the active platform advertises the required rich-message capability
+- **THEN** the bridge sends the structured notification content
 
-#### Scenario: Matching platform without card support falls back to plain text
+#### Scenario: Matching platform without rich-message support falls back to plain text
 - **WHEN** the notification receiver receives a notification whose platform matches the active bridge platform
-- **AND** the notification contains card content
-- **AND** the active platform does not implement `core.CardSender`
+- **AND** the notification contains structured content
+- **AND** the active platform does not advertise the required rich-message capability
 - **THEN** the bridge sends the plain-text notification content instead
 
 #### Scenario: Mismatched platform notification is rejected
 - **WHEN** the notification receiver receives a notification whose platform does not match the active bridge platform
 - **THEN** the bridge rejects the delivery request with an explicit error
 - **AND** the notification is not sent to the wrong IM platform
+
+### Requirement: Live transports honor the official delivery model of the selected platform
+The bridge SHALL implement the live transport of each supported platform according to that platform's official delivery contract so that events, commands, and replies remain reliable under reconnect, retry, acknowledgement, and callback timing constraints.
+
+#### Scenario: Slack Socket Mode payload is acknowledged before command completion
+- **WHEN** a Slack Socket Mode envelope containing a command or interaction is received
+- **THEN** the bridge acknowledges the Slack envelope according to the Socket Mode contract
+- **AND** command execution may continue after the acknowledgement is sent
+
+#### Scenario: DingTalk live transport uses Stream mode by default
+- **WHEN** a DingTalk live deployment is created without an explicit override
+- **THEN** the bridge uses DingTalk Stream mode as the primary event intake mechanism
+- **AND** the deployment documentation reflects Stream mode as the default path
+
+#### Scenario: Telegram update intake chooses exactly one official model
+- **WHEN** a Telegram live deployment is configured
+- **THEN** the bridge uses exactly one update intake model from `getUpdates` long polling or `setWebhook`
+- **AND** the bridge rejects configurations that attempt to enable both models at the same time
+
+#### Scenario: Discord interaction meets provider response deadlines
+- **WHEN** a Discord interaction triggers a bridge command that cannot finish immediately
+- **THEN** the bridge sends the required initial interaction acknowledgement within the provider deadline
+- **AND** completes the user-visible response through the permitted follow-up interaction path
+
+#### Scenario: Feishu live transport prefers long connection where supported
+- **WHEN** a Feishu enterprise self-built application is configured for live transport
+- **THEN** the bridge uses Feishu long connection as the preferred event intake mode for supported event or callback types
+- **AND** documents any callback types that still require an HTTP endpoint

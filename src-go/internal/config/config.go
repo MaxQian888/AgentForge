@@ -9,22 +9,30 @@ import (
 )
 
 type Config struct {
-	Port              string
-	PostgresURL       string
-	RedisURL          string
-	JWTSecret         string
-	JWTAccessTTL      time.Duration
-	JWTRefreshTTL     time.Duration
-	AllowOrigins      []string
-	Env               string
-	BridgeURL         string
-	AgentForgeToken   string
-	WorktreeBasePath  string
-	RepoBasePath      string
-	RolesDir          string
-	PluginsDir        string
-	MaxActiveAgents   int
-	DefaultTaskBudget float64
+	Port                         string
+	PostgresURL                  string
+	RedisURL                     string
+	JWTSecret                    string
+	JWTAccessTTL                 time.Duration
+	JWTRefreshTTL                time.Duration
+	AllowOrigins                 []string
+	Env                          string
+	BridgeURL                    string
+	AgentForgeToken              string
+	WorktreeBasePath             string
+	RepoBasePath                 string
+	RolesDir                     string
+	PluginsDir                   string
+	MaxActiveAgents              int
+	DefaultTaskBudget            float64
+	TaskProgressWarningAfter     time.Duration
+	TaskProgressStalledAfter     time.Duration
+	TaskProgressAlertCooldown    time.Duration
+	TaskProgressDetectorInterval time.Duration
+	TaskProgressExemptStatuses   []string
+	IMNotifyURL                  string
+	IMNotifyPlatform             string
+	IMNotifyTargetChatID         string
 }
 
 func Load() *Config {
@@ -51,31 +59,55 @@ func Load() *Config {
 	viper.SetDefault("PLUGINS_DIR", "./plugins")
 	viper.SetDefault("MAX_ACTIVE_AGENTS", 20)
 	viper.SetDefault("DEFAULT_TASK_BUDGET", 5.0)
+	viper.SetDefault("TASK_PROGRESS_WARNING_AFTER", "2h")
+	viper.SetDefault("TASK_PROGRESS_STALLED_AFTER", "4h")
+	viper.SetDefault("TASK_PROGRESS_ALERT_COOLDOWN", "30m")
+	viper.SetDefault("TASK_PROGRESS_DETECTOR_INTERVAL", "1m")
+	viper.SetDefault("TASK_PROGRESS_EXEMPT_STATUSES", "blocked,done,cancelled")
+	viper.SetDefault("IM_NOTIFY_URL", "")
+	viper.SetDefault("IM_NOTIFY_PLATFORM", "")
+	viper.SetDefault("IM_NOTIFY_TARGET_CHAT_ID", "")
 
 	accessTTL, _ := time.ParseDuration(viper.GetString("JWT_ACCESS_TTL"))
 	refreshTTL, _ := time.ParseDuration(viper.GetString("JWT_REFRESH_TTL"))
+	taskProgressWarningAfter, _ := time.ParseDuration(viper.GetString("TASK_PROGRESS_WARNING_AFTER"))
+	taskProgressStalledAfter, _ := time.ParseDuration(viper.GetString("TASK_PROGRESS_STALLED_AFTER"))
+	taskProgressAlertCooldown, _ := time.ParseDuration(viper.GetString("TASK_PROGRESS_ALERT_COOLDOWN"))
+	taskProgressDetectorInterval, _ := time.ParseDuration(viper.GetString("TASK_PROGRESS_DETECTOR_INTERVAL"))
 
 	origins := strings.Split(viper.GetString("ALLOW_ORIGINS"), ",")
 	for i, o := range origins {
 		origins[i] = strings.TrimSpace(o)
 	}
+	exemptStatuses := strings.Split(viper.GetString("TASK_PROGRESS_EXEMPT_STATUSES"), ",")
+	for i, status := range exemptStatuses {
+		exemptStatuses[i] = strings.TrimSpace(status)
+	}
 
 	return &Config{
-		Port:              viper.GetString("PORT"),
-		PostgresURL:       viper.GetString("POSTGRES_URL"),
-		RedisURL:          viper.GetString("REDIS_URL"),
-		JWTSecret:         viper.GetString("JWT_SECRET"),
-		JWTAccessTTL:      accessTTL,
-		JWTRefreshTTL:     refreshTTL,
-		AllowOrigins:      origins,
-		Env:               viper.GetString("ENV"),
-		BridgeURL:         viper.GetString("BRIDGE_URL"),
-		AgentForgeToken:   viper.GetString("AGENTFORGE_TOKEN"),
-		WorktreeBasePath:  viper.GetString("WORKTREE_BASE_PATH"),
-		RepoBasePath:      viper.GetString("REPO_BASE_PATH"),
-		RolesDir:          viper.GetString("ROLES_DIR"),
-		PluginsDir:        viper.GetString("PLUGINS_DIR"),
-		MaxActiveAgents:   viper.GetInt("MAX_ACTIVE_AGENTS"),
-		DefaultTaskBudget: viper.GetFloat64("DEFAULT_TASK_BUDGET"),
+		Port:                         viper.GetString("PORT"),
+		PostgresURL:                  viper.GetString("POSTGRES_URL"),
+		RedisURL:                     viper.GetString("REDIS_URL"),
+		JWTSecret:                    viper.GetString("JWT_SECRET"),
+		JWTAccessTTL:                 accessTTL,
+		JWTRefreshTTL:                refreshTTL,
+		AllowOrigins:                 origins,
+		Env:                          viper.GetString("ENV"),
+		BridgeURL:                    viper.GetString("BRIDGE_URL"),
+		AgentForgeToken:              viper.GetString("AGENTFORGE_TOKEN"),
+		WorktreeBasePath:             viper.GetString("WORKTREE_BASE_PATH"),
+		RepoBasePath:                 viper.GetString("REPO_BASE_PATH"),
+		RolesDir:                     viper.GetString("ROLES_DIR"),
+		PluginsDir:                   viper.GetString("PLUGINS_DIR"),
+		MaxActiveAgents:              viper.GetInt("MAX_ACTIVE_AGENTS"),
+		DefaultTaskBudget:            viper.GetFloat64("DEFAULT_TASK_BUDGET"),
+		TaskProgressWarningAfter:     taskProgressWarningAfter,
+		TaskProgressStalledAfter:     taskProgressStalledAfter,
+		TaskProgressAlertCooldown:    taskProgressAlertCooldown,
+		TaskProgressDetectorInterval: taskProgressDetectorInterval,
+		TaskProgressExemptStatuses:   exemptStatuses,
+		IMNotifyURL:                  viper.GetString("IM_NOTIFY_URL"),
+		IMNotifyPlatform:             viper.GetString("IM_NOTIFY_PLATFORM"),
+		IMNotifyTargetChatID:         viper.GetString("IM_NOTIFY_TARGET_CHAT_ID"),
 	}
 }

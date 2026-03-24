@@ -42,6 +42,16 @@ func NewStub(port string) *Stub {
 
 func (s *Stub) Name() string { return "slack-stub" }
 
+func (s *Stub) Metadata() core.PlatformMetadata {
+	return core.PlatformMetadata{
+		Source: "slack",
+		Capabilities: core.PlatformCapabilities{
+			SupportsSlashCommands: true,
+			SupportsMentions:      true,
+		},
+	}
+}
+
 func (s *Stub) Start(handler core.MessageHandler) error {
 	s.handler = handler
 

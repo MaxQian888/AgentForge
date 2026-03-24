@@ -48,10 +48,87 @@ func TestRegistryLoadDirSkipsInvalidFilesAndSupportsLookup(t *testing.T) {
 	}
 }
 
+func TestRegistryLoadDirPrefersCanonicalRoleLayout(t *testing.T) {
+	dir := t.TempDir()
+	writeRoleFile(t, dir, "frontend-developer.yaml", legacyRoleManifest)
+	writeRoleFile(t, filepath.Join(dir, "frontend-developer"), "role.yaml", canonicalRoleManifest)
+
+	registry := role.NewRegistry()
+	if err := registry.LoadDir(dir); err != nil {
+		t.Fatalf("LoadDir() error = %v", err)
+	}
+
+	loaded, ok := registry.Get("frontend-developer")
+	if !ok {
+		t.Fatal("Get(frontend-developer) ok = false, want true")
+	}
+	if loaded.Metadata.Name != "Frontend Developer" {
+		t.Fatalf("Metadata.Name = %q, want canonical role name", loaded.Metadata.Name)
+	}
+}
+
+func TestRegistryLoadDirResolvesInheritanceWithStricterSecurity(t *testing.T) {
+	dir := t.TempDir()
+	writeRoleFile(t, filepath.Join(dir, "base-developer"), "role.yaml", `
+apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: base-developer
+  name: Base Developer
+  version: "1.0.0"
+identity:
+  role: Base Developer
+  goal: Build safely
+  backstory: Base role
+security:
+  permission_mode: bypassPermissions
+  allowed_paths: ["src/", "app/"]
+  max_budget_usd: 10
+`)
+	writeRoleFile(t, filepath.Join(dir, "frontend-developer"), "role.yaml", `
+apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: frontend-developer
+  name: Frontend Developer
+  version: "1.0.0"
+extends: base-developer
+identity:
+  role: Frontend Developer
+  goal: Build UI safely
+security:
+  permission_mode: default
+  allowed_paths: ["app/"]
+  max_budget_usd: 5
+`)
+
+	registry := role.NewRegistry()
+	if err := registry.LoadDir(dir); err != nil {
+		t.Fatalf("LoadDir() error = %v", err)
+	}
+
+	loaded, ok := registry.Get("frontend-developer")
+	if !ok {
+		t.Fatal("Get(frontend-developer) ok = false, want true")
+	}
+	if loaded.Identity.Backstory != "Base role" {
+		t.Fatalf("Backstory = %q, want inherited backstory", loaded.Identity.Backstory)
+	}
+	if loaded.Security.PermissionMode != "default" {
+		t.Fatalf("PermissionMode = %q, want stricter child value", loaded.Security.PermissionMode)
+	}
+	if loaded.Security.MaxBudgetUsd != 5 {
+		t.Fatalf("MaxBudgetUsd = %v, want 5", loaded.Security.MaxBudgetUsd)
+	}
+	if !slices.Equal(loaded.Security.AllowedPaths, []string{"app/"}) {
+		t.Fatalf("AllowedPaths = %v, want stricter child allowed_paths", loaded.Security.AllowedPaths)
+	}
+}
+
 func TestRegistryRegisterAndLoadDirErrors(t *testing.T) {
 	registry := role.NewRegistry()
 	registry.Register(&role.Manifest{
-		Metadata: role.Metadata{Name: "custom"},
+		Metadata: role.Metadata{ID: "custom", Name: "custom"},
 	})
 
 	if got := registry.Count(); got != 1 {
@@ -68,6 +145,9 @@ func TestRegistryRegisterAndLoadDirErrors(t *testing.T) {
 
 func writeRoleFile(t *testing.T, dir, name, content string) {
 	t.Helper()
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s) error = %v", dir, err)
+	}
 	if err := os.WriteFile(filepath.Join(dir, name), []byte(content), 0o600); err != nil {
 		t.Fatalf("WriteFile(%s) error = %v", name, err)
 	}

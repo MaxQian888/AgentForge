@@ -14,6 +14,7 @@ require (
 	github.com/pashagolub/pgxmock/v4 v4.9.0
 	github.com/redis/go-redis/v9 v9.18.0
 	github.com/spf13/viper v1.21.0
+	github.com/tetratelabs/wazero v1.11.0
 	golang.org/x/crypto v0.49.0
 	golang.org/x/net v0.52.0
 )

@@ -82,6 +82,7 @@ AgentForge/
 - [`docs/part/REVIEW_PIPELINE_DESIGN.md`](./docs/part/REVIEW_PIPELINE_DESIGN.md)：三层审查流水线设计
 - [`docs/part/PLUGIN_SYSTEM_DESIGN.md`](./docs/part/PLUGIN_SYSTEM_DESIGN.md)：插件系统目标设计
 - [`docs/part/PLUGIN_RESEARCH_TECH.md`](./docs/part/PLUGIN_RESEARCH_TECH.md)：插件运行时与沙箱技术调研
+- [`docs/GO_WASM_PLUGIN_RUNTIME.md`](./docs/GO_WASM_PLUGIN_RUNTIME.md)：当前仓库内 Go WASM 插件运行时、SDK 与本地验证说明
 - [`docs/part/PLUGIN_RESEARCH_PLATFORMS.md`](./docs/part/PLUGIN_RESEARCH_PLATFORMS.md)：主流平台扩展生态对比
 - [`docs/part/TECHNICAL_CHALLENGES.md`](./docs/part/TECHNICAL_CHALLENGES.md)：关键技术挑战与应对路径
 - [`docs/part/DATA_AND_REALTIME_DESIGN.md`](./docs/part/DATA_AND_REALTIME_DESIGN.md)：数据模型与实时系统设计
@@ -145,6 +146,29 @@ go run ./cmd/server
 - `go build ./cmd/server`
 - `docker build -t agentforge-server .`
 
+### 鉴权与会话说明
+
+当前鉴权链路已经按前后端统一契约收敛：
+
+- 前端持久化的标准会话载荷为 `accessToken`、`refreshToken` 和 `user`。
+- Dashboard 受保护路由不再只信任本地布尔值。应用启动或进入受保护区域时，会先调用 `GET /api/v1/users/me` 校验当前 access token；如果 access token 已失效且仍有 refresh token，则只会尝试一次 `POST /api/v1/auth/refresh`；恢复失败时会清空本地会话。
+- Web 模式优先使用 `NEXT_PUBLIC_API_URL` 作为后端地址，默认回落到 `http://localhost:7777`；Tauri 模式优先通过原生命令 `get_backend_url` 获取地址，再回落到同一个默认值。
+- `POST /api/v1/auth/refresh` 现在和登录、注册一起受认证限流保护。
+
+如果需要本地覆盖后端鉴权配置，请在 `src-go/.env` 中设置环境变量。常见值如下：
+
+```env
+PORT=7777
+ENV=development
+JWT_SECRET=change-me-in-production-at-least-32-chars
+JWT_ACCESS_TTL=15m
+JWT_REFRESH_TTL=168h
+ALLOW_ORIGINS=http://localhost:3000,tauri://localhost,http://localhost:1420
+REDIS_URL=redis://localhost:6379
+```
+
+安全语义说明：为了兼顾本地开发弹性与鉴权安全，PostgreSQL / Redis 仍可在进程启动时缺席，但凡依赖令牌撤销状态的鉴权路径都不会再静默降级。只要 Redis 或 token cache 不可用，refresh、logout 撤销写入，以及基于黑名单的受保护路由校验都会 fail closed，而不是假装成功。
+
 ### 3. TypeScript Agent Bridge
 
 ```bash
@@ -157,6 +181,20 @@ bun run dev
 
 - `bun run dev`
 - `bun run build`
+- `bun run typecheck`
+
+运行时说明：
+
+- `/bridge/execute` 现在支持可选的 `runtime` 字段，可用值为 `claude_code`、`codex`、`opencode`。
+- 如果省略 `runtime`，Bridge 会默认回退到 `claude_code`，并继续兼容旧的 provider 提示，如 `anthropic`、`codex`、`opencode`。
+- `claude_code` 使用内置的 Claude 运行时适配器，要求配置 `ANTHROPIC_API_KEY`。
+- `codex` 和 `opencode` 使用基于命令的运行时适配器。可通过 `CODEX_RUNTIME_COMMAND` 或 `OPENCODE_RUNTIME_COMMAND` 指向 `PATH` 上的可执行文件，或直接配置绝对路径。
+- 命令型 runtime 需要从 `stdin` 读取一份 JSON 请求，并从 `stdout` 输出按行分隔的 JSON 事件。
+- 命令型 runtime 会把这些事件归一化为 Bridge 的统一事件流：`assistant_text`、`tool_call`、`tool_result`、`usage`、`error`。
+
+针对 Bridge runtime 层的聚焦验证命令：
+
+- `bun test src/schemas.test.ts src/handlers/execute.test.ts src/runtime/registry.test.ts src/server.test.ts`
 - `bun run typecheck`
 
 根目录也提供了：
@@ -203,6 +241,7 @@ pnpm tauri:build
 | `pnpm test:coverage` | 运行带覆盖率的 Jest |
 | `pnpm build:backend` | 为 Tauri 交叉编译 Go sidecar |
 | `pnpm build:backend:dev` | 仅为当前平台构建 Go sidecar |
+| `pnpm build:plugin:wasm` | 构建 Go WASM 样例插件产物 |
 | `pnpm tauri:dev` | 构建后端 sidecar 并启动 Tauri 开发模式 |
 | `pnpm tauri:build` | 构建桌面应用 |
 | `pnpm build:bridge` | 安装并构建 TS/Bun Bridge |

@@ -1,0 +1,524 @@
+package feishu
+
+import (
+	"context"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"io"
+	"log"
+	"net/http"
+	"strings"
+	"sync"
+	"time"
+
+	lark "github.com/larksuite/oapi-sdk-go/v3"
+	larkevent "github.com/larksuite/oapi-sdk-go/v3/event"
+	larkdispatcher "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher"
+	larkcallback "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
+	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
+	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
+
+	"github.com/agentforge/im-bridge/core"
+)
+
+var liveMetadata = core.PlatformMetadata{
+	Source: "feishu",
+	Capabilities: core.PlatformCapabilities{
+		SupportsRichMessages:  true,
+		SupportsSlashCommands: true,
+		SupportsMentions:      true,
+	},
+}
+
+type replyContext struct {
+	MessageID string
+	ChatID    string
+}
+
+type eventRunner interface {
+	Start(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error) error
+	Stop(ctx context.Context) error
+}
+
+type messageClient interface {
+	Send(ctx context.Context, receiveIDType, receiveID, msgType, content string) error
+	Reply(ctx context.Context, messageID, msgType, content string) error
+}
+
+type LegacyCardCallbackHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)
+
+type LiveOption func(*Live) error
+
+// Live is the production Feishu platform adapter backed by long connection and
+// the Feishu IM APIs.
+type Live struct {
+	appID     string
+	appSecret string
+
+	runner         eventRunner
+	messages       messageClient
+	callbackHTTP   http.Handler
+	startCancel    context.CancelFunc
+	started        bool
+	startedContext context.Context
+	mu             sync.Mutex
+}
+
+func NewLive(appID, appSecret string, opts ...LiveOption) (*Live, error) {
+	if strings.TrimSpace(appID) == "" || strings.TrimSpace(appSecret) == "" {
+		return nil, errors.New("feishu live transport requires app id and app secret")
+	}
+
+	live := &Live{
+		appID:     appID,
+		appSecret: appSecret,
+		runner:    &sdkEventRunner{appID: appID, appSecret: appSecret},
+		messages:  &sdkMessageClient{client: lark.NewClient(appID, appSecret)},
+	}
+
+	for _, opt := range opts {
+		if err := opt(live); err != nil {
+			return nil, err
+		}
+	}
+	if live.runner == nil {
+		return nil, errors.New("feishu live transport requires an event runner")
+	}
+	if live.messages == nil {
+		return nil, errors.New("feishu live transport requires a message client")
+	}
+
+	return live, nil
+}
+
+func WithEventRunner(runner eventRunner) LiveOption {
+	return func(live *Live) error {
+		if runner == nil {
+			return errors.New("event runner cannot be nil")
+		}
+		live.runner = runner
+		return nil
+	}
+}
+
+func WithMessageClient(client messageClient) LiveOption {
+	return func(live *Live) error {
+		if client == nil {
+			return errors.New("message client cannot be nil")
+		}
+		live.messages = client
+		return nil
+	}
+}
+
+func WithLegacyCardCallbackHandler(verificationToken, eventEncryptKey string, handler LegacyCardCallbackHandler) LiveOption {
+	return func(live *Live) error {
+		if strings.TrimSpace(verificationToken) == "" {
+			return errors.New("legacy card callback requires verification token")
+		}
+		if handler == nil {
+			return errors.New("legacy card callback handler cannot be nil")
+		}
+
+		dispatcher := larkdispatcher.NewEventDispatcher(verificationToken, eventEncryptKey).
+			OnP2CardActionTrigger(handler)
+		live.callbackHTTP = newHTTPCallbackHandler(dispatcher)
+		return nil
+	}
+}
+
+func (l *Live) Name() string { return "feishu-live" }
+
+func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
+
+func (l *Live) HTTPCallbackHandler() http.Handler { return l.callbackHTTP }
+
+func (l *Live) Start(handler core.MessageHandler) error {
+	if handler == nil {
+		return errors.New("message handler is required")
+	}
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.started {
+		return nil
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	l.started = true
+	l.startCancel = cancel
+	l.startedContext = ctx
+
+	return l.runner.Start(ctx, func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
+		msg, err := normalizeIncomingMessage(event)
+		if err != nil {
+			log.Printf("[feishu-live] Ignoring inbound event: %v", err)
+			return nil
+		}
+		handler(l, msg)
+		return nil
+	})
+}
+
+func (l *Live) Reply(ctx context.Context, replyCtx any, content string) error {
+	payload, err := renderTextPayload(content)
+	if err != nil {
+		return err
+	}
+
+	replyTarget := toReplyContext(replyCtx)
+	if replyTarget.MessageID != "" {
+		return l.messages.Reply(ctx, replyTarget.MessageID, larkim.MsgTypeText, payload)
+	}
+	if replyTarget.ChatID == "" {
+		return errors.New("feishu reply requires message id or chat id")
+	}
+	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, replyTarget.ChatID, larkim.MsgTypeText, payload)
+}
+
+func (l *Live) Send(ctx context.Context, chatID string, content string) error {
+	if strings.TrimSpace(chatID) == "" {
+		return errors.New("feishu send requires chat id")
+	}
+
+	payload, err := renderTextPayload(content)
+	if err != nil {
+		return err
+	}
+	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, chatID, larkim.MsgTypeText, payload)
+}
+
+func (l *Live) SendCard(ctx context.Context, chatID string, card *core.Card) error {
+	if strings.TrimSpace(chatID) == "" {
+		return errors.New("feishu card send requires chat id")
+	}
+	payload, err := renderInteractiveCard(card)
+	if err != nil {
+		return err
+	}
+	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, chatID, larkim.MsgTypeInteractive, payload)
+}
+
+func (l *Live) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) error {
+	payload, err := renderInteractiveCard(card)
+	if err != nil {
+		return err
+	}
+
+	replyTarget := toReplyContext(replyCtx)
+	if replyTarget.MessageID != "" {
+		return l.messages.Reply(ctx, replyTarget.MessageID, larkim.MsgTypeInteractive, payload)
+	}
+	if replyTarget.ChatID == "" {
+		return errors.New("feishu reply card requires message id or chat id")
+	}
+	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, replyTarget.ChatID, larkim.MsgTypeInteractive, payload)
+}
+
+func (l *Live) Stop() error {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	if !l.started {
+		return nil
+	}
+	if l.startCancel != nil {
+		l.startCancel()
+	}
+	l.started = false
+	return l.runner.Stop(l.startedContext)
+}
+
+type sdkEventRunner struct {
+	appID     string
+	appSecret string
+}
+
+func (r *sdkEventRunner) Start(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error) error {
+	dispatcher := larkdispatcher.NewEventDispatcher("", "").OnP2MessageReceiveV1(handler)
+	client := larkws.NewClient(r.appID, r.appSecret, larkws.WithEventHandler(dispatcher))
+
+	go func() {
+		if err := client.Start(ctx); err != nil && ctx.Err() == nil {
+			log.Printf("[feishu-live] long connection stopped with error: %v", err)
+		}
+	}()
+	return nil
+}
+
+func (r *sdkEventRunner) Stop(context.Context) error {
+	// The upstream ws.Client does not expose a graceful Close/Stop API in the
+	// current SDK, so process shutdown is still driven by parent context
+	// cancellation and process exit.
+	return nil
+}
+
+type sdkMessageClient struct {
+	client *lark.Client
+}
+
+func (c *sdkMessageClient) Send(ctx context.Context, receiveIDType, receiveID, msgType, content string) error {
+	resp, err := c.client.Im.Message.Create(
+		ctx,
+		larkim.NewCreateMessageReqBuilder().
+			ReceiveIdType(receiveIDType).
+			Body(
+				larkim.NewCreateMessageReqBodyBuilder().
+					ReceiveId(receiveID).
+					MsgType(msgType).
+					Content(content).
+					Build(),
+			).
+			Build(),
+	)
+	if err != nil {
+		return err
+	}
+	if !resp.Success() {
+		return fmt.Errorf("feishu send failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	return nil
+}
+
+func (c *sdkMessageClient) Reply(ctx context.Context, messageID, msgType, content string) error {
+	resp, err := c.client.Im.Message.Reply(
+		ctx,
+		larkim.NewReplyMessageReqBuilder().
+			MessageId(messageID).
+			Body(
+				larkim.NewReplyMessageReqBodyBuilder().
+					MsgType(msgType).
+					Content(content).
+					Build(),
+			).
+			Build(),
+	)
+	if err != nil {
+		return err
+	}
+	if !resp.Success() {
+		return fmt.Errorf("feishu reply failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	return nil
+}
+
+func normalizeIncomingMessage(event *larkim.P2MessageReceiveV1) (*core.Message, error) {
+	if event == nil || event.Event == nil || event.Event.Message == nil {
+		return nil, errors.New("missing feishu message payload")
+	}
+
+	message := event.Event.Message
+	if value(message.MessageType) != larkim.MsgTypeText {
+		return nil, fmt.Errorf("unsupported feishu message type %q", value(message.MessageType))
+	}
+
+	chatID := value(message.ChatId)
+	if chatID == "" {
+		return nil, errors.New("missing feishu chat id")
+	}
+	userID := senderID(event.Event.Sender)
+	if userID == "" {
+		return nil, errors.New("missing feishu sender id")
+	}
+
+	content, err := decodeTextMessage(message.Content, message.Mentions)
+	if err != nil {
+		return nil, err
+	}
+
+	return &core.Message{
+		Platform:   liveMetadata.Source,
+		SessionKey: fmt.Sprintf("%s:%s:%s", liveMetadata.Source, chatID, userID),
+		UserID:     userID,
+		ChatID:     chatID,
+		Content:    content,
+		ReplyCtx: replyContext{
+			MessageID: value(message.MessageId),
+			ChatID:    chatID,
+		},
+		Timestamp: parseUnixMillis(value(message.CreateTime)),
+		IsGroup:   value(message.ChatType) != "p2p",
+	}, nil
+}
+
+func decodeTextMessage(raw *string, mentions []*larkim.MentionEvent) (string, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return "", errors.New("missing feishu text message content")
+	}
+
+	var payload struct {
+		Text string `json:"text"`
+	}
+	if err := json.Unmarshal([]byte(*raw), &payload); err != nil {
+		return "", fmt.Errorf("decode feishu text payload: %w", err)
+	}
+
+	text := payload.Text
+	for _, mention := range mentions {
+		key := value(mention.Key)
+		name := value(mention.Name)
+		if key == "" || name == "" {
+			continue
+		}
+		text = strings.ReplaceAll(text, key, "@"+strings.TrimPrefix(name, "@"))
+	}
+	return strings.TrimSpace(text), nil
+}
+
+func renderTextPayload(content string) (string, error) {
+	body, err := json.Marshal(map[string]string{
+		"text": content,
+	})
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+func renderInteractiveCard(card *core.Card) (string, error) {
+	if card == nil {
+		return "", errors.New("card is required")
+	}
+
+	elements := make([]map[string]any, 0, len(card.Fields)+1)
+	for _, field := range card.Fields {
+		elements = append(elements, map[string]any{
+			"tag": "div",
+			"text": map[string]any{
+				"tag":     "lark_md",
+				"content": fmt.Sprintf("**%s**\n%s", field.Label, field.Value),
+			},
+		})
+	}
+	if len(card.Buttons) > 0 {
+		actions := make([]map[string]any, 0, len(card.Buttons))
+		for _, button := range card.Buttons {
+			action := map[string]any{
+				"tag":  "button",
+				"text": map[string]any{"tag": "plain_text", "content": button.Text},
+				"type": normalizeButtonStyle(button.Style),
+			}
+			if strings.HasPrefix(button.Action, "link:") {
+				action["url"] = strings.TrimPrefix(button.Action, "link:")
+			} else if button.Action != "" {
+				action["value"] = map[string]any{"action": button.Action}
+			}
+			actions = append(actions, action)
+		}
+		elements = append(elements, map[string]any{
+			"tag":     "action",
+			"actions": actions,
+		})
+	}
+
+	payload := map[string]any{
+		"config": map[string]any{
+			"wide_screen_mode": true,
+		},
+		"header": map[string]any{
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": card.Title,
+			},
+		},
+		"elements": elements,
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(body), nil
+}
+
+func newHTTPCallbackHandler(dispatcher *larkdispatcher.EventDispatcher) http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		body, err := io.ReadAll(r.Body)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+
+		resp := dispatcher.Handle(r.Context(), &larkevent.EventReq{
+			Header:     r.Header.Clone(),
+			Body:       body,
+			RequestURI: r.RequestURI,
+		})
+		for key, values := range resp.Header {
+			for _, value := range values {
+				w.Header().Add(key, value)
+			}
+		}
+		w.WriteHeader(resp.StatusCode)
+		_, _ = w.Write(resp.Body)
+	})
+}
+
+func toReplyContext(replyCtx any) replyContext {
+	switch value := replyCtx.(type) {
+	case replyContext:
+		return value
+	case *replyContext:
+		if value == nil {
+			return replyContext{}
+		}
+		return *value
+	case *core.Message:
+		if value == nil {
+			return replyContext{}
+		}
+		if ctx, ok := value.ReplyCtx.(replyContext); ok {
+			return ctx
+		}
+		if ctx, ok := value.ReplyCtx.(*replyContext); ok && ctx != nil {
+			return *ctx
+		}
+		return replyContext{ChatID: value.ChatID}
+	default:
+		return replyContext{}
+	}
+}
+
+func senderID(sender *larkim.EventSender) string {
+	if sender == nil || sender.SenderId == nil {
+		return ""
+	}
+	if sender.SenderId.OpenId != nil && *sender.SenderId.OpenId != "" {
+		return *sender.SenderId.OpenId
+	}
+	if sender.SenderId.UserId != nil && *sender.SenderId.UserId != "" {
+		return *sender.SenderId.UserId
+	}
+	if sender.SenderId.UnionId != nil && *sender.SenderId.UnionId != "" {
+		return *sender.SenderId.UnionId
+	}
+	return ""
+}
+
+func parseUnixMillis(raw string) time.Time {
+	if raw == "" {
+		return time.Now()
+	}
+	millis, err := time.ParseDuration(raw + "ms")
+	if err != nil {
+		return time.Now()
+	}
+	return time.Unix(0, 0).Add(millis)
+}
+
+func normalizeButtonStyle(style string) string {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "primary", "danger", "default":
+		return strings.ToLower(strings.TrimSpace(style))
+	default:
+		return "default"
+	}
+}
+
+func value(raw *string) string {
+	if raw == nil {
+		return ""
+	}
+	return *raw
+}

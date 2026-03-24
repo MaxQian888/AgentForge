@@ -29,13 +29,26 @@ type mockAgentRuntimeService struct {
 	cancelErr   error
 	updateErr   error
 	lastTaskID  uuid.UUID
+	lastRuntime string
+	lastRoleID  string
 	lastRunID   uuid.UUID
 	lastReason  string
 	updateState string
 }
 
-func (m *mockAgentRuntimeService) Spawn(_ context.Context, taskID, memberID uuid.UUID, provider, modelName string, budgetUsd float64) (*model.AgentRun, error) {
+type mockAgentTaskDispatcher struct {
+	result       *model.TaskDispatchResponse
+	err          error
+	lastTaskID   uuid.UUID
+	lastMemberID *uuid.UUID
+	lastRuntime  string
+	lastRoleID   string
+}
+
+func (m *mockAgentRuntimeService) Spawn(_ context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error) {
 	m.lastTaskID = taskID
+	m.lastRuntime = runtime
+	m.lastRoleID = roleID
 	if m.spawnErr != nil {
 		return nil, m.spawnErr
 	}
@@ -72,6 +85,26 @@ func (m *mockAgentRuntimeService) Cancel(_ context.Context, id uuid.UUID, reason
 	return m.cancelErr
 }
 
+func (m *mockAgentTaskDispatcher) Spawn(_ context.Context, input service.DispatchSpawnInput) (*model.TaskDispatchResponse, error) {
+	m.lastTaskID = input.TaskID
+	m.lastMemberID = input.MemberID
+	m.lastRuntime = input.Runtime
+	m.lastRoleID = input.RoleID
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.result != nil {
+		return m.result, nil
+	}
+	return &model.TaskDispatchResponse{
+		Task: model.TaskDTO{ID: input.TaskID.String()},
+		Dispatch: model.DispatchOutcome{
+			Status: model.DispatchStatusStarted,
+			Run:    &model.AgentRunDTO{ID: uuid.New().String(), TaskID: input.TaskID.String()},
+		},
+	}, nil
+}
+
 func newAgentTestEcho() *echo.Echo {
 	e := echo.New()
 	e.Validator = &agentTestValidator{validator: validator.New()}
@@ -90,6 +123,67 @@ func TestAgentHandler_Spawn_MapsAlreadyRunningToConflict(t *testing.T) {
 	_ = h.Spawn(c)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+}
+
+func TestAgentHandler_Spawn_MapsWorktreeUnavailableToConflict(t *testing.T) {
+	e := newAgentTestEcho()
+	h := handler.NewAgentHandler(&mockAgentRuntimeService{spawnErr: service.ErrAgentWorktreeUnavailable})
+
+	req := httptest.NewRequest(http.MethodPost, "/agents/spawn", strings.NewReader(`{"taskId":"`+uuid.New().String()+`","memberId":"`+uuid.New().String()+`","provider":"anthropic","model":"sonnet"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	_ = h.Spawn(c)
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+}
+
+func TestAgentHandler_Spawn_ForwardsExplicitRuntime(t *testing.T) {
+	e := newAgentTestEcho()
+	mockSvc := &mockAgentRuntimeService{}
+	dispatcher := &mockAgentTaskDispatcher{}
+	h := handler.NewAgentHandler(mockSvc).WithDispatcher(dispatcher)
+
+	req := httptest.NewRequest(http.MethodPost, "/agents/spawn", strings.NewReader(`{"taskId":"`+uuid.New().String()+`","memberId":"`+uuid.New().String()+`","runtime":"codex","provider":"openai","model":"gpt-5-codex","roleId":"frontend-developer"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	_ = h.Spawn(c)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+	if dispatcher.lastRuntime != "codex" {
+		t.Fatalf("expected runtime codex, got %q", dispatcher.lastRuntime)
+	}
+	if dispatcher.lastRoleID != "frontend-developer" {
+		t.Fatalf("expected role id frontend-developer, got %q", dispatcher.lastRoleID)
+	}
+}
+
+func TestAgentHandler_Spawn_AllowsMissingMemberIDWhenDispatcherCanResolveTaskAssignee(t *testing.T) {
+	e := newAgentTestEcho()
+	dispatcher := &mockAgentTaskDispatcher{}
+	h := handler.NewAgentHandler(&mockAgentRuntimeService{}).WithDispatcher(dispatcher)
+
+	taskID := uuid.New()
+	req := httptest.NewRequest(http.MethodPost, "/agents/spawn", strings.NewReader(`{"taskId":"`+taskID.String()+`","runtime":"codex","roleId":"frontend-developer"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	_ = h.Spawn(c)
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+	if dispatcher.lastTaskID != taskID {
+		t.Fatalf("task id = %s, want %s", dispatcher.lastTaskID, taskID)
+	}
+	if dispatcher.lastMemberID != nil {
+		t.Fatalf("expected nil member id, got %v", *dispatcher.lastMemberID)
 	}
 }
 

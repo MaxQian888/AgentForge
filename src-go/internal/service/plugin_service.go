@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"io/fs"
 	"path/filepath"
-	"time"
 
 	"github.com/react-go-quick-starter/server/internal/model"
 	pluginparser "github.com/react-go-quick-starter/server/internal/plugin"
@@ -24,6 +23,13 @@ type ToolPluginRuntimeClient interface {
 	RestartToolPlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error)
 }
 
+type GoPluginRuntime interface {
+	ActivatePlugin(ctx context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error)
+	CheckPluginHealth(ctx context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error)
+	RestartPlugin(ctx context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error)
+	Invoke(ctx context.Context, record model.PluginRecord, operation string, payload map[string]any) (map[string]any, error)
+}
+
 type PluginListFilter struct {
 	Kind           model.PluginKind
 	LifecycleState model.PluginLifecycleState
@@ -32,13 +38,15 @@ type PluginListFilter struct {
 type PluginService struct {
 	repo          PluginRegistry
 	runtimeClient ToolPluginRuntimeClient
+	goRuntime     GoPluginRuntime
 	builtInsDir   string
 }
 
-func NewPluginService(repo PluginRegistry, runtimeClient ToolPluginRuntimeClient, builtInsDir string) *PluginService {
+func NewPluginService(repo PluginRegistry, runtimeClient ToolPluginRuntimeClient, goRuntime GoPluginRuntime, builtInsDir string) *PluginService {
 	return &PluginService{
 		repo:          repo,
 		runtimeClient: runtimeClient,
+		goRuntime:     goRuntime,
 		builtInsDir:   builtInsDir,
 	}
 }
@@ -81,12 +89,14 @@ func (s *PluginService) registerPath(ctx context.Context, path string, sourceTyp
 	}
 
 	record := &model.PluginRecord{
-		PluginManifest:  *manifest,
-		LifecycleState:  model.PluginStateInstalled,
-		RuntimeHost:     resolveRuntimeHost(manifest.Kind),
-		RestartCount:    0,
-		LastHealthAt:    nil,
-		LastError:       "",
+		PluginManifest:     *manifest,
+		LifecycleState:     model.PluginStateInstalled,
+		RuntimeHost:        resolveRuntimeHost(manifest.Kind),
+		RestartCount:       0,
+		LastHealthAt:       nil,
+		LastError:          "",
+		ResolvedSourcePath: resolveSourcePath(*manifest),
+		RuntimeMetadata:    initialRuntimeMetadata(*manifest),
 	}
 
 	if manifest.Kind == model.PluginKindTool && s.runtimeClient != nil {
@@ -155,11 +165,17 @@ func (s *PluginService) Activate(ctx context.Context, pluginID string) (*model.P
 		}
 		applyRuntimeStatus(record, *status)
 	case model.PluginKindIntegration:
-		now := time.Now().UTC()
-		record.LifecycleState = model.PluginStateActive
-		record.RuntimeHost = model.PluginHostGoOrchestrator
-		record.LastHealthAt = &now
-		record.LastError = ""
+		if record.Spec.Runtime == model.PluginRuntimeGoPlugin {
+			return nil, fmt.Errorf("legacy go-plugin integration plugin %s is no longer executable; migrate to runtime: wasm with spec.module and spec.abiVersion", pluginID)
+		}
+		if s.goRuntime == nil {
+			return nil, fmt.Errorf("go plugin runtime is not configured")
+		}
+		status, err := s.goRuntime.ActivatePlugin(ctx, *record)
+		if err != nil {
+			return nil, err
+		}
+		applyRuntimeStatus(record, *status)
 	default:
 		return nil, fmt.Errorf("plugin %s is not executable in the current phase", pluginID)
 	}
@@ -175,16 +191,36 @@ func (s *PluginService) CheckHealth(ctx context.Context, pluginID string) (*mode
 	if err != nil {
 		return nil, err
 	}
-	if record.Kind != model.PluginKindTool || s.runtimeClient == nil {
+	if record.Kind == model.PluginKindTool {
+		if s.runtimeClient == nil {
+			return record, nil
+		}
+		status, err := s.runtimeClient.CheckToolPluginHealth(ctx, pluginID)
+		if err != nil {
+			return nil, err
+		}
+		applyRuntimeStatus(record, *status)
+		if err := s.repo.Save(ctx, record); err != nil {
+			return nil, err
+		}
 		return record, nil
 	}
-	status, err := s.runtimeClient.CheckToolPluginHealth(ctx, pluginID)
-	if err != nil {
-		return nil, err
+	if record.Kind == model.PluginKindIntegration && record.Spec.Runtime == model.PluginRuntimeWASM {
+		if s.goRuntime == nil {
+			return record, nil
+		}
+		status, err := s.goRuntime.CheckPluginHealth(ctx, *record)
+		if err != nil {
+			return nil, err
+		}
+		applyRuntimeStatus(record, *status)
+		if err := s.repo.Save(ctx, record); err != nil {
+			return nil, err
+		}
+		return record, nil
 	}
-	applyRuntimeStatus(record, *status)
-	if err := s.repo.Save(ctx, record); err != nil {
-		return nil, err
+	if record.Kind != model.PluginKindTool {
+		return record, nil
 	}
 	return record, nil
 }
@@ -194,18 +230,35 @@ func (s *PluginService) Restart(ctx context.Context, pluginID string) (*model.Pl
 	if err != nil {
 		return nil, err
 	}
-	if record.Kind != model.PluginKindTool || s.runtimeClient == nil {
-		return nil, fmt.Errorf("plugin %s does not support restart through the TS bridge", pluginID)
+	if record.Kind == model.PluginKindTool {
+		if s.runtimeClient == nil {
+			return nil, fmt.Errorf("plugin %s does not support restart through the TS bridge", pluginID)
+		}
+		status, err := s.runtimeClient.RestartToolPlugin(ctx, pluginID)
+		if err != nil {
+			return nil, err
+		}
+		applyRuntimeStatus(record, *status)
+		if err := s.repo.Save(ctx, record); err != nil {
+			return nil, err
+		}
+		return record, nil
 	}
-	status, err := s.runtimeClient.RestartToolPlugin(ctx, pluginID)
-	if err != nil {
-		return nil, err
+	if record.Kind == model.PluginKindIntegration && record.Spec.Runtime == model.PluginRuntimeWASM {
+		if s.goRuntime == nil {
+			return nil, fmt.Errorf("plugin %s does not support restart because the Go runtime is not configured", pluginID)
+		}
+		status, err := s.goRuntime.RestartPlugin(ctx, *record)
+		if err != nil {
+			return nil, err
+		}
+		applyRuntimeStatus(record, *status)
+		if err := s.repo.Save(ctx, record); err != nil {
+			return nil, err
+		}
+		return record, nil
 	}
-	applyRuntimeStatus(record, *status)
-	if err := s.repo.Save(ctx, record); err != nil {
-		return nil, err
-	}
-	return record, nil
+	return nil, fmt.Errorf("plugin %s does not support restart through the configured runtimes", pluginID)
 }
 
 func (s *PluginService) ReportRuntimeState(ctx context.Context, pluginID string, status model.PluginRuntimeStatus) (*model.PluginRecord, error) {
@@ -221,6 +274,35 @@ func (s *PluginService) ReportRuntimeState(ctx context.Context, pluginID string,
 		return nil, err
 	}
 	return record, nil
+}
+
+func (s *PluginService) Invoke(ctx context.Context, pluginID, operation string, payload map[string]any) (map[string]any, error) {
+	record, err := s.repo.GetByID(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	if record.LifecycleState == model.PluginStateDisabled {
+		return nil, fmt.Errorf("plugin %s is disabled", pluginID)
+	}
+	if record.Kind != model.PluginKindIntegration || record.Spec.Runtime != model.PluginRuntimeWASM {
+		return nil, fmt.Errorf("plugin %s does not support Go runtime invocation", pluginID)
+	}
+	if record.LifecycleState != model.PluginStateActive {
+		return nil, fmt.Errorf("plugin %s must be active before invocation", pluginID)
+	}
+	if s.goRuntime == nil {
+		return nil, fmt.Errorf("go plugin runtime is not configured")
+	}
+
+	result, err := s.goRuntime.Invoke(ctx, *record, operation, payload)
+	if err != nil {
+		return nil, err
+	}
+	record.LastError = ""
+	if err := s.repo.Save(ctx, record); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func resolveRuntimeHost(kind model.PluginKind) model.PluginRuntimeHost {
@@ -241,5 +323,33 @@ func applyRuntimeStatus(record *model.PluginRecord, status model.PluginRuntimeSt
 	record.RestartCount = status.RestartCount
 	if status.LastHealthAt != nil {
 		record.LastHealthAt = status.LastHealthAt
+	}
+	if status.ResolvedSourcePath != "" {
+		record.ResolvedSourcePath = status.ResolvedSourcePath
+	}
+	if status.RuntimeMetadata != nil {
+		metadata := *status.RuntimeMetadata
+		record.RuntimeMetadata = &metadata
+	}
+}
+
+func resolveSourcePath(manifest model.PluginManifest) string {
+	switch manifest.Spec.Runtime {
+	case model.PluginRuntimeWASM:
+		return manifest.Spec.Module
+	case model.PluginRuntimeGoPlugin:
+		return manifest.Spec.Binary
+	default:
+		return manifest.Source.Path
+	}
+}
+
+func initialRuntimeMetadata(manifest model.PluginManifest) *model.PluginRuntimeMetadata {
+	if manifest.Spec.ABIVersion == "" {
+		return nil
+	}
+	return &model.PluginRuntimeMetadata{
+		ABIVersion: manifest.Spec.ABIVersion,
+		Compatible: true,
 	}
 }

@@ -16,6 +16,7 @@ function createRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteRequest 
     budget_usd: 5,
     allowed_tools: ["Read", "Edit"],
     permission_mode: "default",
+    runtime: "claude_code",
     ...overrides,
   };
 }
@@ -168,5 +169,212 @@ describe("handleExecute", () => {
       status: "failed",
     });
     expect(pool.get(request.task_id)).toBeUndefined();
+  });
+
+  test("rejects unknown runtimes before acquiring pool state", async () => {
+    const pool = new RuntimePoolManager(1);
+    const streamer = {
+      send() {},
+    };
+
+    await expect(
+      handleExecute(pool, streamer as never, createRequest({ runtime: "unknown_runtime" as never }), {
+        awaitCompletion: true,
+      }),
+    ).rejects.toThrow("Unknown runtime: unknown_runtime");
+
+    expect(pool.get("task-123")).toBeUndefined();
+  });
+
+  test("routes codex requests through the command runtime adapter", async () => {
+    const pool = new RuntimePoolManager(2);
+    const sessionManager = new SessionManager();
+    const events: Array<{ type: string; data: unknown }> = [];
+    const request = createRequest({
+      task_id: "task-codex",
+      session_id: "session-codex",
+      runtime: "codex",
+      provider: "codex",
+      model: "gpt-5-codex",
+    });
+    let invocation:
+      | {
+          runtime: "codex" | "opencode";
+          systemPrompt: string;
+          req: ExecuteRequest;
+        }
+      | undefined;
+
+    async function* commandRuntimeRunner(params: {
+      runtime: "codex" | "opencode";
+      systemPrompt: string;
+      req: ExecuteRequest;
+    }): AsyncGenerator<Record<string, unknown>, void> {
+      invocation = params;
+
+      yield {
+        type: "assistant_text",
+        content: "Planning Codex work.",
+      };
+
+      yield {
+        type: "tool_call",
+        tool_name: "Read",
+        tool_input: { file_path: "README.md" },
+        call_id: "codex-call-1",
+      };
+
+      yield {
+        type: "tool_result",
+        call_id: "codex-call-1",
+        output: "# README",
+        is_error: false,
+      };
+
+      yield {
+        type: "usage",
+        input_tokens: 120,
+        output_tokens: 45,
+        cache_read_tokens: 0,
+        cost_usd: 0.03,
+      };
+    }
+
+    const streamer = {
+      send(event: { type: string; data: unknown }) {
+        events.push(event);
+      },
+    };
+
+    const response = await handleExecute(pool, streamer as never, request, {
+      commandRuntimeRunner,
+      awaitCompletion: true,
+      executableLookup(command) {
+        return `C:/mock/${command}.exe`;
+      },
+      sessionManager,
+    });
+
+    expect(response).toEqual({ session_id: request.session_id });
+    expect(invocation).toMatchObject({
+      runtime: "codex",
+      req: {
+        task_id: request.task_id,
+        runtime: "codex",
+        provider: "codex",
+        model: "gpt-5-codex",
+      },
+    });
+    expect(events.map((event) => event.type)).toEqual([
+      "status_change",
+      "status_change",
+      "output",
+      "tool_call",
+      "tool_result",
+      "cost_update",
+      "snapshot",
+      "status_change",
+    ]);
+    expect(sessionManager.restore(request.task_id)).toMatchObject({
+      task_id: request.task_id,
+      session_id: request.session_id,
+      status: "completed",
+    });
+  });
+
+  test("routes opencode requests through the command runtime adapter with the same canonical events", async () => {
+    const pool = new RuntimePoolManager(2);
+    const sessionManager = new SessionManager();
+    const events: Array<{ type: string; data: unknown }> = [];
+    const request = createRequest({
+      task_id: "task-opencode",
+      session_id: "session-opencode",
+      runtime: "opencode",
+      provider: "opencode",
+      model: "opencode-default",
+    });
+    let invocation:
+      | {
+          runtime: "codex" | "opencode";
+          systemPrompt: string;
+          req: ExecuteRequest;
+        }
+      | undefined;
+
+    async function* commandRuntimeRunner(params: {
+      runtime: "codex" | "opencode";
+      systemPrompt: string;
+      req: ExecuteRequest;
+    }): AsyncGenerator<Record<string, unknown>, void> {
+      invocation = params;
+
+      yield {
+        type: "assistant_text",
+        content: "Planning OpenCode work.",
+      };
+
+      yield {
+        type: "tool_call",
+        tool_name: "Edit",
+        tool_input: { file_path: "README.md" },
+        call_id: "opencode-call-1",
+      };
+
+      yield {
+        type: "tool_result",
+        call_id: "opencode-call-1",
+        output: "patched",
+        is_error: false,
+      };
+
+      yield {
+        type: "usage",
+        input_tokens: 140,
+        output_tokens: 65,
+        cache_read_tokens: 5,
+        cost_usd: 0.04,
+      };
+    }
+
+    const streamer = {
+      send(event: { type: string; data: unknown }) {
+        events.push(event);
+      },
+    };
+
+    const response = await handleExecute(pool, streamer as never, request, {
+      commandRuntimeRunner,
+      awaitCompletion: true,
+      executableLookup(command) {
+        return `C:/mock/${command}.exe`;
+      },
+      sessionManager,
+    });
+
+    expect(response).toEqual({ session_id: request.session_id });
+    expect(invocation).toMatchObject({
+      runtime: "opencode",
+      req: {
+        task_id: request.task_id,
+        runtime: "opencode",
+        provider: "opencode",
+        model: "opencode-default",
+      },
+    });
+    expect(events.map((event) => event.type)).toEqual([
+      "status_change",
+      "status_change",
+      "output",
+      "tool_call",
+      "tool_result",
+      "cost_update",
+      "snapshot",
+      "status_change",
+    ]);
+    expect(sessionManager.restore(request.task_id)).toMatchObject({
+      task_id: request.task_id,
+      session_id: request.session_id,
+      status: "completed",
+    });
   });
 });

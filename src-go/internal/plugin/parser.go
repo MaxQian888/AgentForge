@@ -58,8 +58,16 @@ func ValidateManifest(manifest *model.PluginManifest) error {
 	if manifest.Kind == model.PluginKindTool && manifest.Spec.Transport == "stdio" && strings.TrimSpace(manifest.Spec.Command) == "" {
 		return fmt.Errorf("tool plugin stdio runtime requires spec.command")
 	}
-	if manifest.Kind == model.PluginKindIntegration && strings.TrimSpace(manifest.Spec.Binary) == "" {
+	if manifest.Kind == model.PluginKindIntegration && manifest.Spec.Runtime == model.PluginRuntimeGoPlugin && strings.TrimSpace(manifest.Spec.Binary) == "" {
 		return fmt.Errorf("integration plugin requires spec.binary")
+	}
+	if manifest.Kind == model.PluginKindIntegration && manifest.Spec.Runtime == model.PluginRuntimeWASM {
+		if strings.TrimSpace(manifest.Spec.Module) == "" {
+			return fmt.Errorf("integration plugin runtime wasm requires spec.module")
+		}
+		if strings.TrimSpace(manifest.Spec.ABIVersion) == "" {
+			return fmt.Errorf("integration plugin runtime wasm requires spec.abiVersion")
+		}
 	}
 
 	return nil
@@ -74,7 +82,7 @@ func isAllowedRuntime(kind model.PluginKind, runtime model.PluginRuntime) bool {
 	case model.PluginKindWorkflow:
 		return runtime == model.PluginRuntimeGoPlugin
 	case model.PluginKindIntegration:
-		return runtime == model.PluginRuntimeGoPlugin
+		return runtime == model.PluginRuntimeGoPlugin || runtime == model.PluginRuntimeWASM
 	case model.PluginKindReview:
 		return runtime == model.PluginRuntimeMCP
 	default:

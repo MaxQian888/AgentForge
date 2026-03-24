@@ -2,13 +2,15 @@ package server
 
 import (
 	"context"
+	"time"
 
-	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/handler"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
+	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/version"
@@ -25,6 +27,8 @@ func (a taskDecompositionBridgeAdapter) DecomposeTask(ctx context.Context, req s
 		Title:       req.Title,
 		Description: req.Description,
 		Priority:    req.Priority,
+		Provider:    req.Provider,
+		Model:       req.Model,
 	})
 	if err != nil {
 		return nil, err
@@ -52,17 +56,38 @@ func RegisterRoutes(
 	memberRepo *repository.MemberRepository,
 	sprintRepo *repository.SprintRepository,
 	taskRepo *repository.TaskRepository,
+	taskProgressRepo *repository.TaskProgressRepository,
 	agentRunRepo *repository.AgentRunRepository,
 	notifRepo *repository.NotificationRepository,
 	reviewRepo *repository.ReviewRepository,
 	hub *ws.Hub,
 	bridgeClient *bridge.Client,
 	agentSvc *service.AgentService,
-) {
+) *service.TaskProgressService {
 	jwtMw := appMiddleware.JWTMiddleware(cfg.JWTSecret, cache)
 	reviewTriggerMw := appMiddleware.ReviewTriggerAuthMiddleware(cfg.JWTSecret, cache, cfg.AgentForgeToken)
 	notificationSvc := service.NewNotificationService(notifRepo, hub)
-	reviewSvc := service.NewReviewService(reviewRepo, taskRepo, notificationSvc, hub, bridgeClient)
+	taskProgressSvc := service.NewTaskProgressService(
+		taskRepo,
+		taskProgressRepo,
+		notificationSvc,
+		hub,
+		service.TaskProgressConfig{
+			WarningAfter:     cfg.TaskProgressWarningAfter,
+			StalledAfter:     cfg.TaskProgressStalledAfter,
+			AlertCooldown:    cfg.TaskProgressAlertCooldown,
+			DetectorInterval: cfg.TaskProgressDetectorInterval,
+			ExemptStatuses:   cfg.TaskProgressExemptStatuses,
+		},
+		func() time.Time { return time.Now().UTC() },
+	)
+	if imNotifier := service.NewHTTPTaskProgressIMNotifier(cfg.IMNotifyURL, cfg.IMNotifyPlatform, cfg.IMNotifyTargetChatID); imNotifier != nil {
+		taskProgressSvc.SetIMNotifier(imNotifier)
+	}
+	if agentSvc != nil {
+		agentSvc.SetProgressTracker(taskProgressSvc)
+	}
+	reviewSvc := service.NewReviewService(reviewRepo, taskRepo, notificationSvc, hub, bridgeClient, taskProgressSvc)
 	taskDecomposeSvc := service.NewTaskDecompositionService(taskRepo, taskDecompositionBridgeAdapter{client: bridgeClient})
 
 	// Health
@@ -79,7 +104,7 @@ func RegisterRoutes(
 	auth := v1.Group("/auth")
 	auth.POST("/register", authH.Register, authRateLimiter)
 	auth.POST("/login", authH.Login, authRateLimiter)
-	auth.POST("/refresh", authH.Refresh)
+	auth.POST("/refresh", authH.Refresh, authRateLimiter)
 	auth.POST("/logout", authH.Logout, jwtMw)
 
 	// User routes (protected)
@@ -94,8 +119,12 @@ func RegisterRoutes(
 	projectH := handler.NewProjectHandler(projectRepo)
 	memberH := handler.NewMemberHandler(memberRepo)
 	sprintH := handler.NewSprintHandler(sprintRepo)
-	taskH := handler.NewTaskHandler(taskRepo, taskDecomposeSvc)
-	agentH := handler.NewAgentHandler(agentSvc)
+	taskH := handler.NewTaskHandler(taskRepo, taskDecomposeSvc).WithProgress(taskProgressSvc)
+	var agentRuntime handler.AgentRuntimeService
+	if agentSvc != nil {
+		agentRuntime = agentSvc
+	}
+	agentH := handler.NewAgentHandler(agentRuntime)
 	notifH := handler.NewNotificationHandler(notifRepo)
 	costH := handler.NewCostHandler(agentRunRepo)
 	roleH := handler.NewRoleHandler(cfg.RolesDir)
@@ -103,9 +132,15 @@ func RegisterRoutes(
 	pluginSvc := service.NewPluginService(
 		repository.NewPluginRegistryRepository(),
 		bridgeClient,
+		pluginruntime.NewWASMRuntimeManager(),
 		cfg.PluginsDir,
 	)
 	pluginH := handler.NewPluginHandler(pluginSvc)
+	if agentSvc != nil {
+		dispatchSvc := service.NewTaskDispatchService(taskRepo, memberRepo, agentSvc, hub, notificationSvc, taskProgressSvc)
+		taskH = taskH.WithDispatcher(dispatchSvc)
+		agentH = agentH.WithDispatcher(dispatchSvc)
+	}
 
 	// JWT protected routes
 	protected := v1.Group("", jwtMw)
@@ -171,7 +206,10 @@ func RegisterRoutes(
 	protected.POST("/plugins/:id/activate", pluginH.Activate)
 	protected.GET("/plugins/:id/health", pluginH.Health)
 	protected.POST("/plugins/:id/restart", pluginH.Restart)
+	protected.POST("/plugins/:id/invoke", pluginH.Invoke)
 
 	// Bridge-to-registry runtime sync
 	e.POST("/internal/plugins/runtime-state", pluginH.SyncRuntimeState)
+
+	return taskProgressSvc
 }

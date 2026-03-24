@@ -1,0 +1,231 @@
+package service_test
+
+import (
+	"context"
+	"testing"
+
+	"github.com/google/uuid"
+	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/service"
+	"github.com/react-go-quick-starter/server/internal/ws"
+)
+
+type mockDispatchTaskRepo struct {
+	task             *model.Task
+	updatedAssignee  uuid.UUID
+	updatedType      string
+	updateCalls      int
+	transitionCalls  int
+	transitionStatus string
+}
+
+func (m *mockDispatchTaskRepo) GetByID(_ context.Context, id uuid.UUID) (*model.Task, error) {
+	if m.task == nil || m.task.ID != id {
+		return nil, service.ErrAgentTaskNotFound
+	}
+	cloned := *m.task
+	return &cloned, nil
+}
+
+func (m *mockDispatchTaskRepo) UpdateAssignee(_ context.Context, _ uuid.UUID, assigneeID uuid.UUID, assigneeType string) error {
+	m.updateCalls++
+	m.updatedAssignee = assigneeID
+	m.updatedType = assigneeType
+	if m.task != nil {
+		m.task.AssigneeID = &assigneeID
+		m.task.AssigneeType = assigneeType
+	}
+	return nil
+}
+
+func (m *mockDispatchTaskRepo) TransitionStatus(_ context.Context, _ uuid.UUID, newStatus string) error {
+	m.transitionCalls++
+	m.transitionStatus = newStatus
+	if m.task != nil {
+		m.task.Status = newStatus
+	}
+	return nil
+}
+
+type mockDispatchMemberRepo struct {
+	member *model.Member
+}
+
+func (m *mockDispatchMemberRepo) GetByID(_ context.Context, id uuid.UUID) (*model.Member, error) {
+	if m.member == nil || m.member.ID != id {
+		return nil, service.ErrDispatchMemberNotFound
+	}
+	cloned := *m.member
+	return &cloned, nil
+}
+
+type mockDispatchRuntime struct {
+	run          *model.AgentRun
+	err          error
+	lastTaskID   uuid.UUID
+	lastMemberID uuid.UUID
+}
+
+func (m *mockDispatchRuntime) Spawn(_ context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error) {
+	m.lastTaskID = taskID
+	m.lastMemberID = memberID
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.run != nil {
+		return m.run, nil
+	}
+	return &model.AgentRun{
+		ID:       uuid.New(),
+		TaskID:   taskID,
+		MemberID: memberID,
+		Status:   model.AgentRunStatusRunning,
+	}, nil
+}
+
+func TestTaskDispatchService_AssignAgentStartsRuntime(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	memberID := uuid.New()
+	taskRepo := &mockDispatchTaskRepo{
+		task: &model.Task{
+			ID:        taskID,
+			ProjectID: projectID,
+			Title:     "Dispatch task",
+			Status:    model.TaskStatusTriaged,
+		},
+	}
+	memberRepo := &mockDispatchMemberRepo{
+		member: &model.Member{
+			ID:        memberID,
+			ProjectID: projectID,
+			Type:      model.MemberTypeAgent,
+			IsActive:  true,
+		},
+	}
+	runtime := &mockDispatchRuntime{
+		run: &model.AgentRun{
+			ID:       uuid.New(),
+			TaskID:   taskID,
+			MemberID: memberID,
+			Status:   model.AgentRunStatusRunning,
+		},
+	}
+
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil)
+
+	result, err := svc.Assign(context.Background(), taskID, &model.AssignRequest{
+		AssigneeID:   memberID.String(),
+		AssigneeType: model.MemberTypeAgent,
+	})
+	if err != nil {
+		t.Fatalf("Assign() error = %v", err)
+	}
+
+	if result.Dispatch.Status != model.DispatchStatusStarted {
+		t.Fatalf("dispatch result = %+v, want started", result.Dispatch)
+	}
+	if result.Dispatch.Run == nil || result.Dispatch.Run.MemberID != memberID.String() {
+		t.Fatalf("dispatch run = %+v", result.Dispatch.Run)
+	}
+	if taskRepo.updateCalls != 1 || taskRepo.updatedAssignee != memberID {
+		t.Fatalf("assignment persisted = %d/%s", taskRepo.updateCalls, taskRepo.updatedAssignee)
+	}
+	if taskRepo.transitionStatus != model.TaskStatusAssigned {
+		t.Fatalf("transition status = %q, want %q", taskRepo.transitionStatus, model.TaskStatusAssigned)
+	}
+	if runtime.lastTaskID != taskID || runtime.lastMemberID != memberID {
+		t.Fatalf("runtime spawn called with %s/%s", runtime.lastTaskID, runtime.lastMemberID)
+	}
+}
+
+func TestTaskDispatchService_AssignAgentReturnsBlockedWhenRunAlreadyActive(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	memberID := uuid.New()
+	taskRepo := &mockDispatchTaskRepo{
+		task: &model.Task{
+			ID:        taskID,
+			ProjectID: projectID,
+			Title:     "Dispatch task",
+			Status:    model.TaskStatusTriaged,
+		},
+	}
+	memberRepo := &mockDispatchMemberRepo{
+		member: &model.Member{
+			ID:        memberID,
+			ProjectID: projectID,
+			Type:      model.MemberTypeAgent,
+			IsActive:  true,
+		},
+	}
+	runtime := &mockDispatchRuntime{err: service.ErrAgentAlreadyRunning}
+
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil)
+
+	result, err := svc.Assign(context.Background(), taskID, &model.AssignRequest{
+		AssigneeID:   memberID.String(),
+		AssigneeType: model.MemberTypeAgent,
+	})
+	if err != nil {
+		t.Fatalf("Assign() error = %v", err)
+	}
+
+	if result.Dispatch.Status != model.DispatchStatusBlocked {
+		t.Fatalf("dispatch result = %+v, want blocked", result.Dispatch)
+	}
+	if result.Dispatch.Run != nil {
+		t.Fatalf("dispatch run = %+v, want nil", result.Dispatch.Run)
+	}
+	if taskRepo.updateCalls != 1 || taskRepo.updatedAssignee != memberID {
+		t.Fatalf("assignment persisted = %d/%s", taskRepo.updateCalls, taskRepo.updatedAssignee)
+	}
+}
+
+func TestTaskDispatchService_SpawnUsesAssignedAgentWhenMemberIDMissing(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	memberID := uuid.New()
+	taskRepo := &mockDispatchTaskRepo{
+		task: &model.Task{
+			ID:           taskID,
+			ProjectID:    projectID,
+			Title:        "Dispatch task",
+			Status:       model.TaskStatusAssigned,
+			AssigneeID:   &memberID,
+			AssigneeType: model.MemberTypeAgent,
+		},
+	}
+	memberRepo := &mockDispatchMemberRepo{
+		member: &model.Member{
+			ID:        memberID,
+			ProjectID: projectID,
+			Type:      model.MemberTypeAgent,
+			IsActive:  true,
+		},
+	}
+	runtime := &mockDispatchRuntime{
+		run: &model.AgentRun{
+			ID:       uuid.New(),
+			TaskID:   taskID,
+			MemberID: memberID,
+			Status:   model.AgentRunStatusRunning,
+		},
+	}
+
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil)
+
+	result, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
+		TaskID: taskID,
+	})
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+
+	if result.Dispatch.Status != model.DispatchStatusStarted {
+		t.Fatalf("dispatch result = %+v, want started", result.Dispatch)
+	}
+	if runtime.lastMemberID != memberID {
+		t.Fatalf("runtime member = %s, want %s", runtime.lastMemberID, memberID)
+	}
+}
