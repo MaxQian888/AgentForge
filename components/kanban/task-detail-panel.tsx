@@ -20,6 +20,7 @@ import {
   type TaskPriority,
   type TaskStatus,
 } from "@/lib/stores/task-store";
+import { normalizePlanningInput } from "@/lib/tasks/task-planning";
 
 const statuses: TaskStatus[] = [
   "inbox",
@@ -66,18 +67,6 @@ function toDateInputValue(value: string | null): string {
   return value ? value.slice(0, 10) : "";
 }
 
-function toPlanningWindow(startDate: string, endDate: string) {
-  const normalizedStart = startDate || endDate;
-  const normalizedEnd = endDate || startDate;
-
-  return {
-    plannedStartAt: normalizedStart
-      ? `${normalizedStart}T09:00:00.000Z`
-      : "",
-    plannedEndAt: normalizedEnd ? `${normalizedEnd}T18:00:00.000Z` : "",
-  };
-}
-
 function getTaskDraft(task: Task | null) {
   return {
     title: task?.title ?? "",
@@ -101,15 +90,35 @@ export function TaskDetailPanel({
   const [priority, setPriority] = useState<TaskPriority>(initialDraft.priority);
   const [plannedStartDate, setPlannedStartDate] = useState(initialDraft.plannedStartDate);
   const [plannedEndDate, setPlannedEndDate] = useState(initialDraft.plannedEndDate);
+  const [planningError, setPlanningError] = useState<string | null>(null);
 
   if (!task) return null;
 
   const handleSave = async () => {
+    const planning = normalizePlanningInput({
+      startDate: plannedStartDate,
+      endDate: plannedEndDate,
+    });
+
+    if (planning.kind === "invalid") {
+      setPlanningError("End date cannot be earlier than start date.");
+      return;
+    }
+
+    setPlanningError(null);
     await updateTask(task.id, {
       title,
       description,
       priority,
-      ...toPlanningWindow(plannedStartDate, plannedEndDate),
+      ...(planning.kind === "scheduled"
+        ? {
+            plannedStartAt: planning.plannedStartAt,
+            plannedEndAt: planning.plannedEndAt,
+          }
+        : {
+            plannedStartAt: null,
+            plannedEndAt: null,
+          }),
     });
     onOpenChange(false);
   };
@@ -185,7 +194,11 @@ export function TaskDetailPanel({
               <Input
                 type="date"
                 value={plannedStartDate}
-                onChange={(event) => setPlannedStartDate(event.target.value)}
+                aria-invalid={planningError ? true : undefined}
+                onChange={(event) => {
+                  setPlannedStartDate(event.target.value);
+                  setPlanningError(null);
+                }}
               />
             </div>
 
@@ -194,10 +207,18 @@ export function TaskDetailPanel({
               <Input
                 type="date"
                 value={plannedEndDate}
-                onChange={(event) => setPlannedEndDate(event.target.value)}
+                aria-invalid={planningError ? true : undefined}
+                onChange={(event) => {
+                  setPlannedEndDate(event.target.value);
+                  setPlanningError(null);
+                }}
               />
             </div>
           </div>
+
+          {planningError ? (
+            <div className="text-sm text-destructive">{planningError}</div>
+          ) : null}
 
           <Separator />
 
