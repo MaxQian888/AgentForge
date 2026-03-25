@@ -23,6 +23,7 @@ type Config struct {
 	RepoBasePath                 string
 	RolesDir                     string
 	PluginsDir                   string
+	SchedulerExecutionMode       string
 	MaxActiveAgents              int
 	DefaultTaskBudget            float64
 	TaskProgressWarningAfter     time.Duration
@@ -60,6 +61,7 @@ func Load() *Config {
 	viper.SetDefault("REPO_BASE_PATH", "./data/repos")
 	viper.SetDefault("ROLES_DIR", "./roles")
 	viper.SetDefault("PLUGINS_DIR", "./plugins")
+	viper.SetDefault("SCHEDULER_EXECUTION_MODE", "in_process")
 	viper.SetDefault("MAX_ACTIVE_AGENTS", 20)
 	viper.SetDefault("DEFAULT_TASK_BUDGET", 5.0)
 	viper.SetDefault("TASK_PROGRESS_WARNING_AFTER", "2h")
@@ -107,6 +109,7 @@ func Load() *Config {
 		RepoBasePath:                 viper.GetString("REPO_BASE_PATH"),
 		RolesDir:                     viper.GetString("ROLES_DIR"),
 		PluginsDir:                   viper.GetString("PLUGINS_DIR"),
+		SchedulerExecutionMode:       viper.GetString("SCHEDULER_EXECUTION_MODE"),
 		MaxActiveAgents:              viper.GetInt("MAX_ACTIVE_AGENTS"),
 		DefaultTaskBudget:            viper.GetFloat64("DEFAULT_TASK_BUDGET"),
 		TaskProgressWarningAfter:     taskProgressWarningAfter,

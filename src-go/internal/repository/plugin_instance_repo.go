@@ -8,16 +8,18 @@ import (
 	"time"
 
 	"github.com/react-go-quick-starter/server/internal/model"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type PluginInstanceRepository struct {
-	db        DBTX
+	db        *gorm.DB
 	mu        sync.RWMutex
 	snapshots map[string]*model.PluginInstanceSnapshot
 }
 
-func NewPluginInstanceRepository(db ...DBTX) *PluginInstanceRepository {
-	var conn DBTX
+func NewPluginInstanceRepository(db ...*gorm.DB) *PluginInstanceRepository {
+	var conn *gorm.DB
 	if len(db) > 0 {
 		conn = db[0]
 	}
@@ -25,6 +27,17 @@ func NewPluginInstanceRepository(db ...DBTX) *PluginInstanceRepository {
 		db:        conn,
 		snapshots: make(map[string]*model.PluginInstanceSnapshot),
 	}
+}
+
+func (r *PluginInstanceRepository) WithDB(db *gorm.DB) PluginInstanceDBBinder {
+	if r == nil {
+		return NewPluginInstanceRepository(db)
+	}
+	rebound := NewPluginInstanceRepository(db)
+	if db == nil {
+		rebound.snapshots = r.snapshots
+	}
+	return rebound
 }
 
 func (r *PluginInstanceRepository) UpsertCurrent(ctx context.Context, snapshot *model.PluginInstanceSnapshot) error {
@@ -52,40 +65,26 @@ func (r *PluginInstanceRepository) UpsertCurrent(ctx context.Context, snapshot *
 		return fmt.Errorf("marshal plugin instance runtime metadata: %w", err)
 	}
 
-	query := `
-		INSERT INTO plugin_instances (
-			plugin_id, project_id, runtime_host, lifecycle_state, resolved_source_path,
-			runtime_metadata, restart_count, last_health_at, last_error, created_at, updated_at
-		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
-		ON CONFLICT (plugin_id) DO UPDATE SET
-			project_id = EXCLUDED.project_id,
-			runtime_host = EXCLUDED.runtime_host,
-			lifecycle_state = EXCLUDED.lifecycle_state,
-			resolved_source_path = EXCLUDED.resolved_source_path,
-			runtime_metadata = EXCLUDED.runtime_metadata,
-			restart_count = EXCLUDED.restart_count,
-			last_health_at = EXCLUDED.last_health_at,
-			last_error = EXCLUDED.last_error,
-			updated_at = EXCLUDED.updated_at
-	`
+	row := &pluginInstanceRecordModel{
+		PluginID:           snapshot.PluginID,
+		ProjectID:          optionalPluginInstanceString(snapshot.ProjectID),
+		RuntimeHost:        string(snapshot.RuntimeHost),
+		LifecycleState:     string(snapshot.LifecycleState),
+		ResolvedSourcePath: optionalPluginInstanceString(snapshot.ResolvedSourcePath),
+		RuntimeMetadata:    newRawJSON(runtimeMetadata, "null"),
+		RestartCount:       snapshot.RestartCount,
+		LastHealthAt:       cloneTimePointer(snapshot.LastHealthAt),
+		LastError:          optionalPluginInstanceString(snapshot.LastError),
+		CreatedAt:          snapshot.CreatedAt,
+		UpdatedAt:          snapshot.UpdatedAt,
+	}
 
-	_, err = r.db.Exec(
-		ctx,
-		query,
-		snapshot.PluginID,
-		nullablePluginInstanceString(snapshot.ProjectID),
-		snapshot.RuntimeHost,
-		snapshot.LifecycleState,
-		nullablePluginInstanceString(snapshot.ResolvedSourcePath),
-		runtimeMetadata,
-		snapshot.RestartCount,
-		snapshot.LastHealthAt,
-		nullablePluginInstanceString(snapshot.LastError),
-		snapshot.CreatedAt,
-		snapshot.UpdatedAt,
-	)
-	if err != nil {
+	if err := r.db.WithContext(ctx).
+		Clauses(clause.OnConflict{
+			Columns:   []clause.Column{{Name: "plugin_id"}},
+			UpdateAll: true,
+		}).
+		Create(row).Error; err != nil {
 		return fmt.Errorf("upsert plugin instance snapshot: %w", err)
 	}
 	return nil
@@ -102,39 +101,11 @@ func (r *PluginInstanceRepository) GetCurrentByPluginID(ctx context.Context, plu
 		return clonePluginInstanceSnapshot(snapshot), nil
 	}
 
-	query := `
-		SELECT plugin_id, COALESCE(project_id, ''), runtime_host, lifecycle_state, COALESCE(resolved_source_path, ''),
-			runtime_metadata, restart_count, last_health_at, COALESCE(last_error, ''), created_at, updated_at
-		FROM plugin_instances
-		WHERE plugin_id = $1
-	`
-	var (
-		snapshot        model.PluginInstanceSnapshot
-		runtimeMetadata []byte
-	)
-	err := r.db.QueryRow(ctx, query, pluginID).Scan(
-		&snapshot.PluginID,
-		&snapshot.ProjectID,
-		&snapshot.RuntimeHost,
-		&snapshot.LifecycleState,
-		&snapshot.ResolvedSourcePath,
-		&runtimeMetadata,
-		&snapshot.RestartCount,
-		&snapshot.LastHealthAt,
-		&snapshot.LastError,
-		&snapshot.CreatedAt,
-		&snapshot.UpdatedAt,
-	)
-	if err != nil {
-		return nil, fmt.Errorf("get plugin instance snapshot: %w", err)
+	var row pluginInstanceRecordModel
+	if err := r.db.WithContext(ctx).Where("plugin_id = ?", pluginID).Take(&row).Error; err != nil {
+		return nil, fmt.Errorf("get plugin instance snapshot: %w", normalizeRepositoryError(err))
 	}
-	if len(runtimeMetadata) > 0 && string(runtimeMetadata) != "null" {
-		snapshot.RuntimeMetadata = &model.PluginRuntimeMetadata{}
-		if err := json.Unmarshal(runtimeMetadata, snapshot.RuntimeMetadata); err != nil {
-			return nil, fmt.Errorf("decode plugin instance runtime metadata: %w", err)
-		}
-	}
-	return &snapshot, nil
+	return row.toSnapshot()
 }
 
 func (r *PluginInstanceRepository) DeleteByPluginID(ctx context.Context, pluginID string) error {
@@ -148,11 +119,11 @@ func (r *PluginInstanceRepository) DeleteByPluginID(ctx context.Context, pluginI
 		return nil
 	}
 
-	result, err := r.db.Exec(ctx, `DELETE FROM plugin_instances WHERE plugin_id = $1`, pluginID)
-	if err != nil {
-		return fmt.Errorf("delete plugin instance snapshot: %w", err)
+	result := r.db.WithContext(ctx).Delete(&pluginInstanceRecordModel{}, "plugin_id = ?", pluginID)
+	if result.Error != nil {
+		return fmt.Errorf("delete plugin instance snapshot: %w", result.Error)
 	}
-	if result.RowsAffected() == 0 {
+	if result.RowsAffected == 0 {
 		return ErrNotFound
 	}
 	return nil
@@ -168,8 +139,7 @@ func clonePluginInstanceSnapshot(snapshot *model.PluginInstanceSnapshot) *model.
 		cloned.LastHealthAt = &ts
 	}
 	if snapshot.RuntimeMetadata != nil {
-		metadata := *snapshot.RuntimeMetadata
-		cloned.RuntimeMetadata = &metadata
+		cloned.RuntimeMetadata = clonePluginRuntimeMetadata(snapshot.RuntimeMetadata)
 	}
 	return &cloned
 }
@@ -179,4 +149,38 @@ func nullablePluginInstanceString(value string) any {
 		return nil
 	}
 	return value
+}
+
+func optionalPluginInstanceString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func (r *pluginInstanceRecordModel) toSnapshot() (*model.PluginInstanceSnapshot, error) {
+	if r == nil {
+		return nil, nil
+	}
+
+	snapshot := &model.PluginInstanceSnapshot{
+		PluginID:           r.PluginID,
+		ProjectID:          valueOrEmpty(r.ProjectID),
+		RuntimeHost:        model.PluginRuntimeHost(r.RuntimeHost),
+		LifecycleState:     model.PluginLifecycleState(r.LifecycleState),
+		ResolvedSourcePath: valueOrEmpty(r.ResolvedSourcePath),
+		RestartCount:       r.RestartCount,
+		LastHealthAt:       cloneTimePointer(r.LastHealthAt),
+		LastError:          valueOrEmpty(r.LastError),
+		CreatedAt:          r.CreatedAt,
+		UpdatedAt:          r.UpdatedAt,
+	}
+
+	if payload := r.RuntimeMetadata.Bytes("null"); len(payload) > 0 && string(payload) != "null" {
+		snapshot.RuntimeMetadata = &model.PluginRuntimeMetadata{}
+		if err := json.Unmarshal(payload, snapshot.RuntimeMetadata); err != nil {
+			return nil, fmt.Errorf("decode plugin instance runtime metadata: %w", err)
+		}
+	}
+	return snapshot, nil
 }

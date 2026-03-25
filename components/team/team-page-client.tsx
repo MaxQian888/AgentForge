@@ -5,6 +5,7 @@ import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { summarizeMemberRoster } from "@/lib/dashboard/summary";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useMemberStore, type CreateMemberInput, type UpdateMemberInput } from "@/lib/stores/member-store";
+import { useRoleStore } from "@/lib/stores/role-store";
 import { TeamManagement } from "./team-management";
 
 export function TeamPageClient() {
@@ -25,6 +26,8 @@ export function TeamPageClient() {
 
   const createMember = useMemberStore((state) => state.createMember);
   const updateMember = useMemberStore((state) => state.updateMember);
+  const roles = useRoleStore((state) => state.roles);
+  const fetchRoles = useRoleStore((state) => state.fetchRoles);
 
   const activeProjectId = requestedProjectId ?? selectedProjectId;
   const projects = useMemo(
@@ -39,6 +42,10 @@ export function TeamPageClient() {
   useEffect(() => {
     void fetchSummary({ projectId: requestedProjectId });
   }, [fetchSummary, requestedProjectId]);
+
+  useEffect(() => {
+    void fetchRoles();
+  }, [fetchRoles]);
 
   const roster = useMemo(
     () =>
@@ -74,6 +81,7 @@ export function TeamPageClient() {
       members={roster}
       loading={loading}
       error={error}
+      availableRoles={roles}
       onRetry={() => {
         void fetchSummary({ projectId: activeProjectId });
       }}

@@ -32,6 +32,7 @@ describe("useAgentStore", () => {
           roleId: "planner",
           roleName: "Planner",
           status: "paused",
+          runtime: "codex",
           provider: "codex",
           model: "gpt-5-codex",
           turnCount: 4,
@@ -68,6 +69,7 @@ describe("useAgentStore", () => {
         taskTitle: "Implement orchestration",
         roleName: "Planner",
         status: "paused",
+        runtime: "codex",
         turns: 4,
         cost: 1.25,
         budget: 5,
@@ -85,26 +87,35 @@ describe("useAgentStore", () => {
         ok: true,
         status: 201,
         json: async () => ({
-          id: "run-1",
-          taskId: "task-1",
-          taskTitle: "Implement orchestration",
-          memberId: "member-1",
-          roleId: "planner",
-          roleName: "Planner",
-          status: "running",
-          provider: "codex",
-          model: "gpt-5-codex",
-          turnCount: 1,
-          costUsd: 0.1,
-          budgetUsd: 5,
-          worktreePath: "D:/Project/AgentForge/data/worktrees/project/task-1",
-          branchName: "agent/task-1",
-          sessionId: "session-1",
-          lastActivityAt: "2026-03-24T10:00:00Z",
-          startedAt: "2026-03-24T09:00:00Z",
-          createdAt: "2026-03-24T09:00:00Z",
-          canResume: false,
-          memoryStatus: "warming",
+          task: {
+            id: "task-1",
+          },
+          dispatch: {
+            status: "started",
+            run: {
+              id: "run-1",
+              taskId: "task-1",
+              taskTitle: "Implement orchestration",
+              memberId: "member-1",
+              roleId: "planner",
+              roleName: "Planner",
+              status: "running",
+              runtime: "codex",
+              provider: "codex",
+              model: "gpt-5-codex",
+              turnCount: 1,
+              costUsd: 0.1,
+              budgetUsd: 5,
+              worktreePath: "D:/Project/AgentForge/data/worktrees/project/task-1",
+              branchName: "agent/task-1",
+              sessionId: "session-1",
+              lastActivityAt: "2026-03-24T10:00:00Z",
+              startedAt: "2026-03-24T09:00:00Z",
+              createdAt: "2026-03-24T09:00:00Z",
+              canResume: false,
+              memoryStatus: "warming",
+            },
+          },
         }),
       } as Response)
       .mockResolvedValueOnce({
@@ -149,6 +160,73 @@ describe("useAgentStore", () => {
       expect.objectContaining({
         method: "POST",
         body: JSON.stringify({}),
+      }),
+    );
+  });
+
+  it("keeps pool queue state when spawn is accepted into the queue", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 202,
+      json: async () => ({
+        task: {
+          id: "task-2",
+        },
+        dispatch: {
+          status: "queued",
+          reason: "agent pool is at capacity",
+          queue: {
+            entryId: "queue-1",
+            projectId: "project-1",
+            taskId: "task-2",
+            memberId: "member-2",
+            status: "queued",
+            reason: "agent pool is at capacity",
+            runtime: "codex",
+            provider: "openai",
+            model: "gpt-5-codex",
+            budgetUsd: 5,
+            createdAt: "2026-03-25T10:00:00Z",
+            updatedAt: "2026-03-25T10:00:00Z",
+          },
+        },
+      }),
+    } as Response);
+
+    useAgentStore.setState({
+      agents: [],
+      agentOutputs: new Map(),
+      pool: {
+        active: 1,
+        max: 2,
+        available: 1,
+        pausedResumable: 0,
+        queued: 0,
+        warm: 1,
+        degraded: false,
+        queue: [],
+      },
+      loading: false,
+    });
+
+    await useAgentStore.getState().spawnAgent("task-2", "member-2", {
+      runtime: "codex",
+      provider: "openai",
+      model: "gpt-5-codex",
+      maxBudgetUsd: 5,
+    });
+
+    expect(useAgentStore.getState().agents).toHaveLength(0);
+    expect(useAgentStore.getState().pool).toEqual(
+      expect.objectContaining({
+        queued: 1,
+        queue: [
+          expect.objectContaining({
+            entryId: "queue-1",
+            taskId: "task-2",
+            status: "queued",
+          }),
+        ],
       }),
     );
   });

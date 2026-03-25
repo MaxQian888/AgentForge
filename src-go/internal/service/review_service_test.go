@@ -113,9 +113,15 @@ func (m *mockReviewNotifications) Create(_ context.Context, _ uuid.UUID, ntype, 
 
 type mockReviewBridge struct {
 	response *bridgeclient.ReviewResponse
+	req      *bridgeclient.ReviewRequest
 }
 
-func (m *mockReviewBridge) Review(_ context.Context, _ bridgeclient.ReviewRequest) (*bridgeclient.ReviewResponse, error) {
+func (m *mockReviewBridge) Review(_ context.Context, req bridgeclient.ReviewRequest) (*bridgeclient.ReviewResponse, error) {
+	cloned := req
+	cloned.Dimensions = append([]string(nil), req.Dimensions...)
+	cloned.ChangedFiles = append([]string(nil), req.ChangedFiles...)
+	cloned.ReviewPlugins = append([]bridgeclient.ReviewPluginRequest(nil), req.ReviewPlugins...)
+	m.req = &cloned
 	return m.response, nil
 }
 
@@ -313,5 +319,250 @@ func TestReviewService_Trigger_DryRunPersistsResultAndBroadcastsEvents(t *testin
 	}
 	if completed.ProjectID != projectID.String() {
 		t.Fatalf("expected completed event project %s, got %s", projectID, completed.ProjectID)
+	}
+}
+
+func TestReviewService_Trigger_ForwardsMatchingReviewPluginPlanToBridge(t *testing.T) {
+	taskID := uuid.New()
+	taskRepo := &mockReviewTaskRepo{
+		task: &model.Task{
+			ID:        taskID,
+			ProjectID: uuid.New(),
+			Title:     "Review plugin selection",
+			Status:    model.TaskStatusInProgress,
+			PRUrl:     "https://github.com/acme/project/pull/88",
+		},
+	}
+	reviewRepo := newMockReviewRepo()
+	bridge := &mockReviewBridge{
+		response: &bridgeclient.ReviewResponse{
+			RiskLevel:      model.ReviewRiskLevelLow,
+			Summary:        "Deep review completed",
+			Recommendation: model.ReviewRecommendationApprove,
+			CostUSD:        0.12,
+		},
+	}
+
+	planner := service.NewReviewExecutionPlanner(reviewPluginCatalogStub{
+		records: []*model.PluginRecord{
+			{
+				PluginManifest: model.PluginManifest{
+					Kind: model.PluginKindReview,
+					Metadata: model.PluginMetadata{
+						ID:   "review.typescript",
+						Name: "TypeScript Review",
+					},
+					Spec: model.PluginSpec{
+						Runtime: model.PluginRuntimeMCP,
+						Review: &model.ReviewPluginSpec{
+							Entrypoint: "review:run",
+							Triggers: model.ReviewPluginTrigger{
+								Events:       []string{"pull_request.updated"},
+								FilePatterns: []string{"src/**/*.ts"},
+							},
+							Output: model.ReviewPluginOutput{Format: "findings/v1"},
+						},
+					},
+					Source: model.PluginSource{Type: model.PluginSourceNPM},
+				},
+				LifecycleState: model.PluginStateEnabled,
+			},
+		},
+	})
+
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), bridge).
+		WithExecutionPlanner(planner)
+
+	_, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
+		TaskID:   taskID.String(),
+		PRURL:    "https://github.com/acme/project/pull/88",
+		PRNumber: 88,
+		Trigger:  model.ReviewTriggerManual,
+		Diff: "diff --git a/src/plugins/runtime.ts b/src/plugins/runtime.ts\n" +
+			"index 111..222 100644\n" +
+			"--- a/src/plugins/runtime.ts\n" +
+			"+++ b/src/plugins/runtime.ts\n",
+	})
+	if err != nil {
+		t.Fatalf("Trigger() error = %v", err)
+	}
+
+	if bridge.req == nil {
+		t.Fatal("expected bridge request to be captured")
+	}
+	if bridge.req.TriggerEvent != "pull_request.updated" {
+		t.Fatalf("TriggerEvent = %q, want pull_request.updated", bridge.req.TriggerEvent)
+	}
+	if len(bridge.req.ChangedFiles) != 1 || bridge.req.ChangedFiles[0] != "src/plugins/runtime.ts" {
+		t.Fatalf("ChangedFiles = %#v, want [src/plugins/runtime.ts]", bridge.req.ChangedFiles)
+	}
+	if len(bridge.req.ReviewPlugins) != 1 || bridge.req.ReviewPlugins[0].PluginID != "review.typescript" {
+		t.Fatalf("ReviewPlugins = %#v, want review.typescript", bridge.req.ReviewPlugins)
+	}
+	if bridge.req.ReviewPlugins[0].OutputFormat != "findings/v1" {
+		t.Fatalf("OutputFormat = %q, want findings/v1", bridge.req.ReviewPlugins[0].OutputFormat)
+	}
+}
+
+func TestReviewService_Trigger_PersistsExecutionMetadataFromBridgeResponse(t *testing.T) {
+	taskID := uuid.New()
+	taskRepo := &mockReviewTaskRepo{
+		task: &model.Task{
+			ID:        taskID,
+			ProjectID: uuid.New(),
+			Title:     "Deep review metadata",
+			Status:    model.TaskStatusInProgress,
+			PRUrl:     "https://github.com/acme/project/pull/91",
+		},
+	}
+	reviewRepo := newMockReviewRepo()
+	bridge := &mockReviewBridge{
+		response: &bridgeclient.ReviewResponse{
+			RiskLevel:      model.ReviewRiskLevelHigh,
+			Summary:        "plugin-aware review completed",
+			Recommendation: model.ReviewRecommendationRequestChanges,
+			CostUSD:        0.23,
+			Findings: []model.ReviewFinding{
+				{Category: "security", Severity: "high", Message: "Potential secret exposure", Sources: []string{"security"}},
+				{Category: "architecture", Severity: "medium", Message: "Architecture drift", Sources: []string{"review.architecture"}},
+			},
+			DimensionResults: []bridgeclient.ReviewExecutionResult{
+				{Dimension: "security", SourceType: "builtin", Status: "completed", Summary: "Security found one issue"},
+				{Dimension: "review.architecture", SourceType: "plugin", PluginID: "review.architecture", DisplayName: "Architecture Review", Status: "failed", Summary: "Architecture plugin failed", Error: "timeout"},
+			},
+		},
+	}
+
+	planner := service.NewReviewExecutionPlanner(reviewPluginCatalogStub{
+		records: []*model.PluginRecord{
+			{
+				PluginManifest: model.PluginManifest{
+					Kind:     model.PluginKindReview,
+					Metadata: model.PluginMetadata{ID: "review.architecture", Name: "Architecture Review"},
+					Spec: model.PluginSpec{
+						Runtime: model.PluginRuntimeMCP,
+						Review: &model.ReviewPluginSpec{
+							Entrypoint: "review:run",
+							Triggers: model.ReviewPluginTrigger{
+								Events:       []string{"pull_request.updated"},
+								FilePatterns: []string{"src/**/*.go"},
+							},
+							Output: model.ReviewPluginOutput{Format: "findings/v1"},
+						},
+					},
+					Source: model.PluginSource{Type: model.PluginSourceLocal},
+				},
+				LifecycleState: model.PluginStateEnabled,
+			},
+		},
+	})
+
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), bridge).
+		WithExecutionPlanner(planner)
+
+	review, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
+		TaskID:   taskID.String(),
+		PRURL:    "https://github.com/acme/project/pull/91",
+		PRNumber: 91,
+		Trigger:  model.ReviewTriggerManual,
+		Diff: "diff --git a/src/server/routes.go b/src/server/routes.go\n" +
+			"index 111..222 100644\n" +
+			"--- a/src/server/routes.go\n" +
+			"+++ b/src/server/routes.go\n",
+	})
+	if err != nil {
+		t.Fatalf("Trigger() error = %v", err)
+	}
+
+	if review.ExecutionMetadata == nil {
+		t.Fatal("expected execution metadata on completed review")
+	}
+	if review.ExecutionMetadata.TriggerEvent != "pull_request.updated" {
+		t.Fatalf("TriggerEvent = %q, want pull_request.updated", review.ExecutionMetadata.TriggerEvent)
+	}
+	if len(review.ExecutionMetadata.Results) != 2 {
+		t.Fatalf("len(Results) = %d, want 2", len(review.ExecutionMetadata.Results))
+	}
+	if review.ExecutionMetadata.Results[1].Kind != model.ReviewExecutionKindPlugin {
+		t.Fatalf("Results[1].Kind = %q, want %q", review.ExecutionMetadata.Results[1].Kind, model.ReviewExecutionKindPlugin)
+	}
+	dto := review.ToDTO()
+	if dto.ExecutionMetadata == nil || len(dto.ExecutionMetadata.Results) != 2 {
+		t.Fatalf("expected execution metadata in DTO, got %+v", dto.ExecutionMetadata)
+	}
+}
+
+func TestReviewService_Trigger_BroadcastsExecutionMetadataInCompletedEvent(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	taskRepo := &mockReviewTaskRepo{
+		task: &model.Task{
+			ID:        taskID,
+			ProjectID: projectID,
+			Title:     "Review websocket metadata",
+			Status:    model.TaskStatusInProgress,
+			PRUrl:     "https://github.com/acme/project/pull/92",
+		},
+	}
+	reviewRepo := newMockReviewRepo()
+	hub := ws.NewHub()
+	eventCh := attachProjectListener(hub, projectID.String())
+	bridge := &mockReviewBridge{
+		response: &bridgeclient.ReviewResponse{
+			RiskLevel:      model.ReviewRiskLevelLow,
+			Summary:        "completed with plugin metadata",
+			Recommendation: model.ReviewRecommendationApprove,
+			CostUSD:        0.1,
+			DimensionResults: []bridgeclient.ReviewExecutionResult{
+				{Dimension: "security", SourceType: "builtin", Status: "completed", Summary: "Security ok"},
+				{Dimension: "review.architecture", SourceType: "plugin", PluginID: "review.architecture", Status: "failed", Summary: "Architecture plugin failed", Error: "timeout"},
+			},
+		},
+	}
+	planner := service.NewReviewExecutionPlanner(reviewPluginCatalogStub{
+		records: []*model.PluginRecord{
+			{
+				PluginManifest: model.PluginManifest{
+					Kind:     model.PluginKindReview,
+					Metadata: model.PluginMetadata{ID: "review.architecture", Name: "Architecture Review"},
+					Spec: model.PluginSpec{
+						Runtime: "mcp",
+						Review: &model.ReviewPluginSpec{
+							Entrypoint: "review:run",
+							Triggers:   model.ReviewPluginTrigger{Events: []string{"pull_request.updated"}},
+							Output:     model.ReviewPluginOutput{Format: "findings/v1"},
+						},
+					},
+				},
+				LifecycleState: model.PluginStateEnabled,
+			},
+		},
+	})
+
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, hub, bridge).
+		WithExecutionPlanner(planner)
+
+	if _, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
+		TaskID:   taskID.String(),
+		PRURL:    "https://github.com/acme/project/pull/92",
+		PRNumber: 92,
+		Trigger:  model.ReviewTriggerManual,
+	}); err != nil {
+		t.Fatalf("Trigger() error = %v", err)
+	}
+
+	_ = decodeReviewEvent(t, <-eventCh)
+	completed := decodeReviewEvent(t, <-eventCh)
+	payload, ok := completed.Payload.(map[string]any)
+	if !ok {
+		t.Fatalf("expected payload map, got %#v", completed.Payload)
+	}
+	executionMetadata, ok := payload["executionMetadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected executionMetadata in websocket payload, got %#v", payload["executionMetadata"])
+	}
+	results, ok := executionMetadata["results"].([]any)
+	if !ok || len(results) != 2 {
+		t.Fatalf("expected 2 execution results in websocket payload, got %#v", executionMetadata["results"])
 	}
 }

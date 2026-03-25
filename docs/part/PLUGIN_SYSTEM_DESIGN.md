@@ -1753,42 +1753,57 @@ await server.connect(transport);
 package main
 
 import (
-    "context"
+    "fmt"
+
     sdk "github.com/agentforge/plugin-sdk-go"
 )
 
 type FeishuAdapter struct{}
 
-func (f *FeishuAdapter) Describe() *sdk.PluginInfo {
-    return &sdk.PluginInfo{
-        ID:      "feishu-adapter",
-        Name:    "飞书集成",
-        Version: "1.0.0",
-        Type:    "im",
-    }
-}
-
-func (f *FeishuAdapter) Initialize(ctx context.Context, config map[string]string) error {
-    // 初始化飞书 SDK
-    return nil
-}
-
-func (f *FeishuAdapter) HandleInbound(ctx context.Context, event *sdk.InboundEvent) (*sdk.InboundResult, error) {
-    // 处理飞书消息
-    return &sdk.InboundResult{
-        Action: "create_task",
-        Data:   event.Payload,
+func (f *FeishuAdapter) Describe(ctx *sdk.Context) (*sdk.Descriptor, error) {
+    return &sdk.Descriptor{
+        APIVersion: "agentforge/v1",
+        Kind:       "IntegrationPlugin",
+        ID:         "feishu-adapter",
+        Name:       "飞书集成",
+        Version:    "1.0.0",
+        Runtime:    "wasm",
+        ABIVersion: sdk.ABIVersion,
+        Capabilities: []sdk.Capability{
+            {Name: "health"},
+            {Name: "send_message"},
+        },
     }, nil
 }
 
-func (f *FeishuAdapter) SendOutbound(ctx context.Context, msg *sdk.OutboundMessage) error {
-    // 发送消息到飞书
+func (f *FeishuAdapter) Init(ctx *sdk.Context) error {
     return nil
 }
 
-func main() {
-    sdk.Serve(&FeishuAdapter{})
+func (f *FeishuAdapter) Health(ctx *sdk.Context) (*sdk.Result, error) {
+    return sdk.Success(map[string]any{
+        "status": "ok",
+    }), nil
 }
+
+func (f *FeishuAdapter) Invoke(ctx *sdk.Context, invocation sdk.Invocation) (*sdk.Result, error) {
+    if invocation.Operation != "send_message" {
+        return nil, sdk.NewRuntimeError("unsupported_operation", fmt.Sprintf("unsupported operation %s", invocation.Operation))
+    }
+    return sdk.Success(map[string]any{
+        "status": "sent",
+    }), nil
+}
+
+var runtime = sdk.NewRuntime(&FeishuAdapter{})
+
+//go:wasmexport agentforge_abi_version
+func agentforgeABIVersion() uint64 { return sdk.ExportABIVersion(runtime) }
+
+//go:wasmexport agentforge_run
+func agentforgeRun() uint32 { return sdk.ExportRun(runtime) }
+
+func main() { sdk.Autorun(runtime) }
 ```
 
 ---
@@ -1914,6 +1929,94 @@ service PluginBridge {
   // TS 向 Go 报告工具发现结果
   rpc ReportToolDiscovery(ToolDiscoveryReport) returns (Empty);
 }
+```
+
+### 16.5 当前仓库已落地的 MCP 交互控制面（2026-03-25）
+
+当前实现延续 `Go 控制面 -> TS Bridge -> MCP Server` 的宿主边界，不开放前端直连 TS Bridge 的 MCP route。真实可用的 operator-facing 入口如下：
+
+#### Go 控制面 API（对前端/CLI/自动化开放）
+
+| 方法 | 路径 | 作用 |
+|------|------|------|
+| `POST` | `/api/v1/plugins/:id/mcp/refresh` | 刷新 ToolPlugin 的 MCP 能力面，返回工具/资源/提示词快照与能力计数 |
+| `POST` | `/api/v1/plugins/:id/mcp/tools/call` | 通过 Go 代理调用 MCP tool，入参 `tool_name` + `arguments` |
+| `POST` | `/api/v1/plugins/:id/mcp/resources/read` | 读取 MCP resource，入参 `uri` |
+| `POST` | `/api/v1/plugins/:id/mcp/prompts/get` | 获取 MCP prompt 预览，入参 `name` + `arguments` |
+
+这些接口只接受已注册且 `active` 的 `ToolPlugin`。Go 会先校验插件类型、宿主归属和必要字段，再调用 TS Bridge 内部 route。
+
+#### TS Bridge 内部路由（仅 Go 使用）
+
+| 方法 | 路径 | 说明 |
+|------|------|------|
+| `POST` | `/bridge/plugins/:id/mcp/refresh` | 刷新并返回 `mcp_capability_snapshot` |
+| `POST` | `/bridge/plugins/:id/mcp/tools/call` | 执行一次 typed tool call |
+| `POST` | `/bridge/plugins/:id/mcp/resources/read` | 执行一次 typed resource read |
+| `POST` | `/bridge/plugins/:id/mcp/prompts/get` | 执行一次 typed prompt get |
+
+#### 运行态元数据（当前权威字段）
+
+`ToolPlugin` 的权威运行态仍然保存在 Go 注册表记录里，但只持久化摘要，不持久化完整 MCP 响应体。当前 `runtime_metadata.mcp` 字段如下：
+
+```json
+{
+  "runtime_metadata": {
+    "mcp": {
+      "transport": "stdio",
+      "last_discovery_at": "2026-03-25T10:00:00Z",
+      "tool_count": 2,
+      "resource_count": 1,
+      "prompt_count": 1,
+      "latest_interaction": {
+        "operation": "call_tool",
+        "status": "succeeded",
+        "at": "2026-03-25T10:05:00Z",
+        "target": "search",
+        "summary": "found 3 files",
+        "error_code": "",
+        "error_message": ""
+      }
+    }
+  }
+}
+```
+
+约束如下：
+
+- `runtime_metadata.mcp` 只保存 transport、发现时间、能力计数和最近一次交互摘要。
+- 完整工具返回体、资源正文、prompt 消息不会写入注册表，只通过实时 API 返回。
+- Go 的 `/internal/plugins/runtime-state` 会接收 TS Bridge 上报的 `runtime_metadata.mcp`，并把它合并回同一条插件记录。
+
+#### 审计事件（当前事件类型）
+
+MCP 相关 operator 操作会写入插件审计流：
+
+- `mcp_discovery`: 能力刷新成功/失败，payload 包含 `operation=refresh`、状态、目标和截断摘要。
+- `mcp_interaction`: tool/resource/prompt 交互成功/失败，payload 包含 `operation`、`status`、`target`、`summary`、`error_code`、`error_message`。
+- `runtime_sync`: TS Bridge 通过 `/internal/plugins/runtime-state` 上报时的宿主级同步事件。
+
+推荐前端或诊断面板优先显示 `runtime_metadata.mcp.latest_interaction` 作为当前状态，再用 `plugin_events` 回看历史。
+
+#### 当前仓库的 scoped verification
+
+完成 MCP 控制面相关改动后，最小验证集合如下：
+
+```bash
+cd src-bridge
+bun test src/mcp/client-hub.test.ts
+bun test src/plugins/tool-plugin-manager.test.ts
+bun test src/server.tools.test.ts
+
+cd ../src-go
+go test ./internal/bridge ./internal/service ./internal/handler ./internal/server -count=1
+```
+
+如果需要只验证 MCP 控制面的新增 Go 覆盖面，可进一步收窄到：
+
+```bash
+cd src-go
+go test ./internal/bridge ./internal/service ./internal/handler ./internal/server -run 'TestClient(RefreshToolPluginMCPSurface|InvokeToolPluginMCPTool|ReadToolPluginMCPResource|GetToolPluginMCPPrompt)|TestPluginServiceControlPlane_(RefreshMCPPersistsSummaryAndAuditEvent|CallToolUpdatesLatestInteractionSummary|RuntimeStateSyncReconcilesMCPSummary)|TestPluginHandlerControlPlane_(MCPRefreshAndCallRoutes|MCPCallValidation|MCPResourceAndPromptRoutes)|TestRegisterRoutes_PluginControlPlaneCompatibilityRoutesPresent' -count=1
 ```
 
 ---

@@ -20,6 +20,12 @@ type CardSender interface {
 	ReplyCard(ctx context.Context, replyCtx any, card *Card) error
 }
 
+// StructuredSender is an optional interface for platforms that can natively
+// render structured message payloads without first converting to legacy cards.
+type StructuredSender interface {
+	SendStructured(ctx context.Context, chatID string, message *StructuredMessage) error
+}
+
 // MessageUpdater is an optional interface for platforms that support editing messages.
 type MessageUpdater interface {
 	UpdateMessage(ctx context.Context, replyCtx any, content string) error

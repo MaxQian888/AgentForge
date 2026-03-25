@@ -170,8 +170,135 @@ type ReviewPluginOutput struct {
 }
 
 type PluginRuntimeMetadata struct {
-	ABIVersion string `json:"abi_version,omitempty"`
-	Compatible bool   `json:"compatible"`
+	ABIVersion string                    `json:"abi_version,omitempty"`
+	Compatible bool                      `json:"compatible"`
+	MCP        *PluginMCPRuntimeMetadata `json:"mcp,omitempty"`
+}
+
+type MCPInteractionOperation string
+
+const (
+	MCPInteractionRefresh      MCPInteractionOperation = "refresh"
+	MCPInteractionCallTool     MCPInteractionOperation = "call_tool"
+	MCPInteractionReadResource MCPInteractionOperation = "read_resource"
+	MCPInteractionGetPrompt    MCPInteractionOperation = "get_prompt"
+)
+
+type MCPInteractionStatus string
+
+const (
+	MCPInteractionSucceeded MCPInteractionStatus = "succeeded"
+	MCPInteractionFailed    MCPInteractionStatus = "failed"
+)
+
+type MCPInteractionSummary struct {
+	Operation    MCPInteractionOperation `json:"operation"`
+	Status       MCPInteractionStatus    `json:"status"`
+	At           *time.Time              `json:"at,omitempty"`
+	Target       string                  `json:"target,omitempty"`
+	Summary      string                  `json:"summary,omitempty"`
+	ErrorCode    string                  `json:"error_code,omitempty"`
+	ErrorMessage string                  `json:"error_message,omitempty"`
+}
+
+type PluginMCPRuntimeMetadata struct {
+	Transport         string                 `json:"transport"`
+	LastDiscoveryAt   *time.Time             `json:"last_discovery_at,omitempty"`
+	ToolCount         int                    `json:"tool_count"`
+	ResourceCount     int                    `json:"resource_count"`
+	PromptCount       int                    `json:"prompt_count"`
+	LatestInteraction *MCPInteractionSummary `json:"latest_interaction,omitempty"`
+}
+
+type MCPCapabilityTool struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type MCPCapabilityResource struct {
+	URI  string `json:"uri"`
+	Name string `json:"name,omitempty"`
+}
+
+type MCPCapabilityPrompt struct {
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type PluginMCPCapabilitySnapshot struct {
+	Transport         string                  `json:"transport"`
+	LastDiscoveryAt   *time.Time              `json:"last_discovery_at,omitempty"`
+	ToolCount         int                     `json:"tool_count"`
+	ResourceCount     int                     `json:"resource_count"`
+	PromptCount       int                     `json:"prompt_count"`
+	Tools             []MCPCapabilityTool     `json:"tools,omitempty"`
+	Resources         []MCPCapabilityResource `json:"resources,omitempty"`
+	Prompts           []MCPCapabilityPrompt   `json:"prompts,omitempty"`
+	LatestInteraction *MCPInteractionSummary  `json:"latest_interaction,omitempty"`
+}
+
+type PluginMCPRefreshResult struct {
+	PluginID        string                      `json:"plugin_id"`
+	LifecycleState  PluginLifecycleState        `json:"lifecycle_state,omitempty"`
+	RuntimeHost     PluginRuntimeHost           `json:"runtime_host,omitempty"`
+	RuntimeMetadata *PluginRuntimeMetadata      `json:"runtime_metadata,omitempty"`
+	Snapshot        PluginMCPCapabilitySnapshot `json:"snapshot"`
+}
+
+type MCPContentBlock struct {
+	Type     string `json:"type,omitempty"`
+	Text     string `json:"text,omitempty"`
+	MIMEType string `json:"mimeType,omitempty"`
+	URI      string `json:"uri,omitempty"`
+}
+
+type MCPToolCallResult struct {
+	Content           []MCPContentBlock `json:"content,omitempty"`
+	IsError           bool              `json:"isError"`
+	StructuredContent map[string]any    `json:"structuredContent,omitempty"`
+}
+
+type PluginMCPToolCallResult struct {
+	PluginID  string            `json:"plugin_id"`
+	Operation string            `json:"operation"`
+	Result    MCPToolCallResult `json:"result"`
+}
+
+type MCPResourceContent struct {
+	URI      string `json:"uri,omitempty"`
+	MIMEType string `json:"mimeType,omitempty"`
+	Text     string `json:"text,omitempty"`
+}
+
+type MCPResourceReadResult struct {
+	Contents []MCPResourceContent `json:"contents,omitempty"`
+}
+
+type PluginMCPResourceReadResult struct {
+	PluginID  string                `json:"plugin_id"`
+	Operation string                `json:"operation"`
+	Result    MCPResourceReadResult `json:"result"`
+}
+
+type MCPPromptMessageContent struct {
+	Type string `json:"type,omitempty"`
+	Text string `json:"text,omitempty"`
+}
+
+type MCPPromptMessage struct {
+	Role    string                  `json:"role,omitempty"`
+	Content MCPPromptMessageContent `json:"content"`
+}
+
+type MCPPromptGetResult struct {
+	Description string             `json:"description,omitempty"`
+	Messages    []MCPPromptMessage `json:"messages,omitempty"`
+}
+
+type PluginMCPPromptResult struct {
+	PluginID  string             `json:"plugin_id"`
+	Operation string             `json:"operation"`
+	Result    MCPPromptGetResult `json:"result"`
 }
 
 type PluginPermissions struct {
@@ -271,17 +398,19 @@ type PluginInstanceSnapshot struct {
 type PluginEventType string
 
 const (
-	PluginEventInstalled   PluginEventType = "installed"
-	PluginEventEnabled     PluginEventType = "enabled"
-	PluginEventDisabled    PluginEventType = "disabled"
-	PluginEventActivating  PluginEventType = "activating"
-	PluginEventActivated   PluginEventType = "activated"
-	PluginEventRuntimeSync PluginEventType = "runtime_sync"
-	PluginEventHealth      PluginEventType = "health"
-	PluginEventRestarted   PluginEventType = "restarted"
-	PluginEventInvoked     PluginEventType = "invoked"
-	PluginEventUninstalled PluginEventType = "uninstalled"
-	PluginEventFailed      PluginEventType = "failed"
+	PluginEventInstalled      PluginEventType = "installed"
+	PluginEventEnabled        PluginEventType = "enabled"
+	PluginEventDisabled       PluginEventType = "disabled"
+	PluginEventActivating     PluginEventType = "activating"
+	PluginEventActivated      PluginEventType = "activated"
+	PluginEventMCPDiscovery   PluginEventType = "mcp_discovery"
+	PluginEventMCPInteraction PluginEventType = "mcp_interaction"
+	PluginEventRuntimeSync    PluginEventType = "runtime_sync"
+	PluginEventHealth         PluginEventType = "health"
+	PluginEventRestarted      PluginEventType = "restarted"
+	PluginEventInvoked        PluginEventType = "invoked"
+	PluginEventUninstalled    PluginEventType = "uninstalled"
+	PluginEventFailed         PluginEventType = "failed"
 )
 
 type PluginEventSource string

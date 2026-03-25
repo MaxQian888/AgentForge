@@ -466,3 +466,186 @@ type pluginEventRecordModel struct {
 }
 
 func (pluginEventRecordModel) TableName() string { return "plugin_events" }
+
+type scheduledJobRecord struct {
+	JobKey         string     `gorm:"column:job_key;primaryKey"`
+	Name           string     `gorm:"column:name"`
+	Scope          string     `gorm:"column:scope"`
+	Schedule       string     `gorm:"column:schedule"`
+	Enabled        bool       `gorm:"column:enabled"`
+	ExecutionMode  string     `gorm:"column:execution_mode"`
+	OverlapPolicy  string     `gorm:"column:overlap_policy"`
+	LastRunStatus  string     `gorm:"column:last_run_status"`
+	LastRunAt      *time.Time `gorm:"column:last_run_at"`
+	NextRunAt      *time.Time `gorm:"column:next_run_at"`
+	LastRunSummary *string    `gorm:"column:last_run_summary"`
+	LastError      *string    `gorm:"column:last_error"`
+	Config         jsonText   `gorm:"column:config;type:jsonb"`
+	CreatedAt      time.Time  `gorm:"column:created_at"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at"`
+}
+
+func (scheduledJobRecord) TableName() string { return "scheduled_jobs" }
+
+func newScheduledJobRecord(job *model.ScheduledJob) *scheduledJobRecord {
+	if job == nil {
+		return nil
+	}
+	return &scheduledJobRecord{
+		JobKey:         job.JobKey,
+		Name:           job.Name,
+		Scope:          string(job.Scope),
+		Schedule:       job.Schedule,
+		Enabled:        job.Enabled,
+		ExecutionMode:  string(job.ExecutionMode),
+		OverlapPolicy:  string(job.OverlapPolicy),
+		LastRunStatus:  string(job.LastRunStatus),
+		LastRunAt:      cloneTimePointer(job.LastRunAt),
+		NextRunAt:      cloneTimePointer(job.NextRunAt),
+		LastRunSummary: cloneStringPointer(optionalStringPointer(job.LastRunSummary)),
+		LastError:      cloneStringPointer(optionalStringPointer(job.LastError)),
+		Config:         newJSONText(job.Config, "{}"),
+		CreatedAt:      job.CreatedAt,
+		UpdatedAt:      job.UpdatedAt,
+	}
+}
+
+func (r *scheduledJobRecord) toModel() *model.ScheduledJob {
+	if r == nil {
+		return nil
+	}
+	return &model.ScheduledJob{
+		JobKey:         r.JobKey,
+		Name:           r.Name,
+		Scope:          model.ScheduledJobScope(r.Scope),
+		Schedule:       r.Schedule,
+		Enabled:        r.Enabled,
+		ExecutionMode:  model.ScheduledJobExecutionMode(r.ExecutionMode),
+		OverlapPolicy:  model.ScheduledJobOverlapPolicy(r.OverlapPolicy),
+		LastRunStatus:  model.ScheduledJobRunStatus(r.LastRunStatus),
+		LastRunAt:      cloneTimePointer(r.LastRunAt),
+		NextRunAt:      cloneTimePointer(r.NextRunAt),
+		LastRunSummary: valueOrEmpty(r.LastRunSummary),
+		LastError:      valueOrEmpty(r.LastError),
+		Config:         r.Config.String("{}"),
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
+	}
+}
+
+type scheduledJobRunRecord struct {
+	RunID         string     `gorm:"column:run_id;primaryKey"`
+	JobKey        string     `gorm:"column:job_key"`
+	TriggerSource string     `gorm:"column:trigger_source"`
+	Status        string     `gorm:"column:status"`
+	StartedAt     time.Time  `gorm:"column:started_at"`
+	FinishedAt    *time.Time `gorm:"column:finished_at"`
+	Summary       *string    `gorm:"column:summary"`
+	ErrorMessage  *string    `gorm:"column:error_message"`
+	Metrics       jsonText   `gorm:"column:metrics;type:jsonb"`
+	CreatedAt     time.Time  `gorm:"column:created_at"`
+	UpdatedAt     time.Time  `gorm:"column:updated_at"`
+}
+
+func (scheduledJobRunRecord) TableName() string { return "scheduled_job_runs" }
+
+func newScheduledJobRunRecord(run *model.ScheduledJobRun) *scheduledJobRunRecord {
+	if run == nil {
+		return nil
+	}
+	return &scheduledJobRunRecord{
+		RunID:         run.RunID,
+		JobKey:        run.JobKey,
+		TriggerSource: string(run.TriggerSource),
+		Status:        string(run.Status),
+		StartedAt:     run.StartedAt,
+		FinishedAt:    cloneTimePointer(run.FinishedAt),
+		Summary:       cloneStringPointer(optionalStringPointer(run.Summary)),
+		ErrorMessage:  cloneStringPointer(optionalStringPointer(run.ErrorMessage)),
+		Metrics:       newJSONText(run.Metrics, "{}"),
+		CreatedAt:     run.CreatedAt,
+		UpdatedAt:     run.UpdatedAt,
+	}
+}
+
+func (r *scheduledJobRunRecord) toModel() *model.ScheduledJobRun {
+	if r == nil {
+		return nil
+	}
+	return &model.ScheduledJobRun{
+		RunID:         r.RunID,
+		JobKey:        r.JobKey,
+		TriggerSource: model.ScheduledJobTriggerSource(r.TriggerSource),
+		Status:        model.ScheduledJobRunStatus(r.Status),
+		StartedAt:     r.StartedAt,
+		FinishedAt:    cloneTimePointer(r.FinishedAt),
+		Summary:       valueOrEmpty(r.Summary),
+		ErrorMessage:  valueOrEmpty(r.ErrorMessage),
+		Metrics:       r.Metrics.String("{}"),
+		CreatedAt:     r.CreatedAt,
+		UpdatedAt:     r.UpdatedAt,
+	}
+}
+
+type agentPoolQueueEntryRecord struct {
+	EntryID    string    `gorm:"column:entry_id;primaryKey"`
+	ProjectID  string    `gorm:"column:project_id"`
+	TaskID     string    `gorm:"column:task_id"`
+	MemberID   string    `gorm:"column:member_id"`
+	Status     string    `gorm:"column:status"`
+	Reason     string    `gorm:"column:reason"`
+	Runtime    string    `gorm:"column:runtime"`
+	Provider   string    `gorm:"column:provider"`
+	Model      string    `gorm:"column:model"`
+	RoleID     *string   `gorm:"column:role_id"`
+	BudgetUSD  float64   `gorm:"column:budget_usd"`
+	AgentRunID *string   `gorm:"column:agent_run_id"`
+	CreatedAt  time.Time `gorm:"column:created_at"`
+	UpdatedAt  time.Time `gorm:"column:updated_at"`
+}
+
+func (agentPoolQueueEntryRecord) TableName() string { return "agent_pool_queue_entries" }
+
+func newAgentPoolQueueEntryRecord(entry *model.AgentPoolQueueEntry) *agentPoolQueueEntryRecord {
+	if entry == nil {
+		return nil
+	}
+	return &agentPoolQueueEntryRecord{
+		EntryID:    entry.EntryID,
+		ProjectID:  entry.ProjectID,
+		TaskID:     entry.TaskID,
+		MemberID:   entry.MemberID,
+		Status:     string(entry.Status),
+		Reason:     entry.Reason,
+		Runtime:    entry.Runtime,
+		Provider:   entry.Provider,
+		Model:      entry.Model,
+		RoleID:     cloneStringPointer(optionalStringPointer(entry.RoleID)),
+		BudgetUSD:  entry.BudgetUSD,
+		AgentRunID: cloneStringPointer(entry.AgentRunID),
+		CreatedAt:  entry.CreatedAt,
+		UpdatedAt:  entry.UpdatedAt,
+	}
+}
+
+func (r *agentPoolQueueEntryRecord) toModel() *model.AgentPoolQueueEntry {
+	if r == nil {
+		return nil
+	}
+	return &model.AgentPoolQueueEntry{
+		EntryID:    r.EntryID,
+		ProjectID:  r.ProjectID,
+		TaskID:     r.TaskID,
+		MemberID:   r.MemberID,
+		Status:     model.AgentPoolQueueStatus(r.Status),
+		Reason:     r.Reason,
+		Runtime:    r.Runtime,
+		Provider:   r.Provider,
+		Model:      r.Model,
+		RoleID:     valueOrEmpty(r.RoleID),
+		BudgetUSD:  r.BudgetUSD,
+		AgentRunID: cloneStringPointer(r.AgentRunID),
+		CreatedAt:  r.CreatedAt,
+		UpdatedAt:  r.UpdatedAt,
+	}
+}

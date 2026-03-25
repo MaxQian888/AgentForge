@@ -3,13 +3,16 @@ import userEvent from "@testing-library/user-event";
 import { TeamPageClient } from "./team-page-client";
 import type { TeamMember } from "@/lib/dashboard/summary";
 import type { CreateMemberInput, UpdateMemberInput } from "@/lib/stores/member-store";
+import type { RoleManifest } from "@/lib/stores/role-store";
 
 const replace = jest.fn();
 const fetchSummary = jest.fn();
 const createMember = jest.fn();
 const updateMember = jest.fn();
+const fetchRoles = jest.fn();
 const summarizeMemberRoster = jest.fn();
 const teamManagementProjectsRefs: Array<Array<{ id: string; name: string }>> = [];
+const teamManagementRoleRefs: Array<RoleManifest[]> = [];
 
 const roster: TeamMember[] = [
   {
@@ -69,6 +72,52 @@ const memberState = {
   updateMember,
 };
 
+const roleState = {
+  roles: [
+    {
+      apiVersion: "agentforge/v1",
+      kind: "Role",
+      metadata: {
+        id: "frontend-developer",
+        name: "Frontend Developer",
+        version: "1.0.0",
+        description: "Builds UI",
+        author: "AgentForge",
+        tags: ["frontend"],
+      },
+      identity: {
+        role: "Senior Frontend Developer",
+        goal: "Ship UI",
+        backstory: "Frontend specialist",
+        systemPrompt: "Build accessible UI",
+        persona: "Helpful",
+        goals: ["Ship"],
+        constraints: ["Keep tests green"],
+      },
+      capabilities: {
+        allowedTools: ["Read", "Edit"],
+        languages: ["TypeScript"],
+        frameworks: ["Next.js"],
+        maxTurns: 20,
+        maxBudgetUsd: 5,
+      },
+      knowledge: {
+        repositories: ["app"],
+        documents: ["docs/PRD.md"],
+        patterns: ["ui"],
+      },
+      security: {
+        permissionMode: "default",
+        allowedPaths: ["app/"],
+        deniedPaths: [],
+        maxBudgetUsd: 5,
+        requireReview: true,
+      },
+    },
+  ] as RoleManifest[],
+  fetchRoles,
+};
+
 jest.mock("next/navigation", () => ({
   usePathname: () => "/team",
   useRouter: () => ({ replace }),
@@ -87,6 +136,11 @@ jest.mock("@/lib/stores/member-store", () => ({
     selector(memberState),
 }));
 
+jest.mock("@/lib/stores/role-store", () => ({
+  useRoleStore: (selector: (state: typeof roleState) => unknown) =>
+    selector(roleState),
+}));
+
 jest.mock("@/lib/dashboard/summary", () => ({
   summarizeMemberRoster: (...args: unknown[]) => summarizeMemberRoster(...args),
 }));
@@ -98,15 +152,18 @@ jest.mock("./team-management", () => ({
     onProjectChange,
     onCreateMember,
     onUpdateMember,
+    availableRoles,
   }: {
     projects: Array<{ id: string; name: string }>;
     members: TeamMember[];
     onProjectChange: (projectId: string) => void;
     onCreateMember: (input: CreateMemberInput) => Promise<void>;
     onUpdateMember: (memberId: string, input: UpdateMemberInput) => Promise<void>;
+    availableRoles: RoleManifest[];
   }) => (
     (() => {
       teamManagementProjectsRefs.push(projects);
+      teamManagementRoleRefs.push(availableRoles);
       return (
         <div>
           <span>{members[0]?.name}</span>
@@ -137,8 +194,10 @@ describe("TeamPageClient", () => {
     fetchSummary.mockReset();
     createMember.mockReset().mockResolvedValue(undefined);
     updateMember.mockReset().mockResolvedValue(undefined);
+    fetchRoles.mockReset().mockResolvedValue(undefined);
     summarizeMemberRoster.mockReset().mockReturnValue(roster);
     teamManagementProjectsRefs.length = 0;
+    teamManagementRoleRefs.length = 0;
   });
 
   it("keeps project options referentially stable when dashboard state is unchanged", async () => {
@@ -160,12 +219,14 @@ describe("TeamPageClient", () => {
     });
 
     expect(fetchSummary).toHaveBeenCalledWith({ projectId: "project-1" });
+    expect(fetchRoles).toHaveBeenCalled();
     expect(summarizeMemberRoster).toHaveBeenCalledWith({
       members: dashboardState.members,
       tasks: dashboardState.tasks,
       agents: dashboardState.agents,
       activity: dashboardState.activity,
     });
+    expect(teamManagementRoleRefs[0]?.[0]?.metadata.id).toBe("frontend-developer");
     expect(screen.getByText("Alice")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Switch Project" }));

@@ -46,6 +46,11 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 	return core.PlatformMetadata{
 		Source: "dingtalk",
 		Capabilities: core.PlatformCapabilities{
+			CommandSurface:        core.CommandSurfaceMixed,
+			StructuredSurface:     core.StructuredSurfaceActionCard,
+			AsyncUpdateModes:      []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateSessionWebhook},
+			ActionCallbackMode:    core.ActionCallbackWebhook,
+			MessageScopes:         []core.MessageScope{core.MessageScopeChat},
 			SupportsSlashCommands: true,
 			SupportsMentions:      true,
 		},

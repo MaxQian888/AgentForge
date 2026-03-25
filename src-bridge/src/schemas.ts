@@ -81,5 +81,22 @@ export const DeepReviewRequestSchema = z.object({
   title: z.string().optional(),
   description: z.string().optional(),
   diff: z.string().optional(),
+  trigger_event: z.string().min(1).optional(),
+  changed_files: z.array(z.string().min(1)).optional(),
   dimensions: z.array(ReviewDimensionSchema).optional(),
+  review_plugins: z.array(
+    z.object({
+      plugin_id: z.string().min(1),
+      name: z.string().min(1),
+      entrypoint: z.string().min(1).optional(),
+      source_type: z.string().min(1).optional(),
+      transport: z.enum(["stdio", "http"]).optional(),
+      command: z.string().min(1).optional(),
+      args: z.array(z.string()).optional(),
+      url: z.string().url().optional(),
+      events: z.array(z.string().min(1)).optional(),
+      file_patterns: z.array(z.string().min(1)).optional(),
+      output_format: z.string().min(1).optional(),
+    }),
+  ).optional(),
 });

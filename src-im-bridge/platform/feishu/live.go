@@ -20,11 +20,21 @@ import (
 	larkws "github.com/larksuite/oapi-sdk-go/v3/ws"
 
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/notify"
 )
 
 var liveMetadata = core.PlatformMetadata{
 	Source: "feishu",
 	Capabilities: core.PlatformCapabilities{
+		CommandSurface:     core.CommandSurfaceMixed,
+		StructuredSurface:  core.StructuredSurfaceCards,
+		AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateDeferredCardUpdate},
+		ActionCallbackMode: core.ActionCallbackWebhook,
+		MessageScopes:      []core.MessageScope{core.MessageScopeChat, core.MessageScopeThread},
+		Mutability: core.MutabilitySemantics{
+			CanEdit:        true,
+			PrefersInPlace: true,
+		},
 		SupportsRichMessages:  true,
 		SupportsSlashCommands: true,
 		SupportsMentions:      true,
@@ -39,6 +49,14 @@ type replyContext struct {
 type eventRunner interface {
 	Start(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error) error
 	Stop(ctx context.Context) error
+}
+
+type cardActionEventRunner interface {
+	StartWithCardActions(
+		ctx context.Context,
+		handler func(context.Context, *larkim.P2MessageReceiveV1) error,
+		cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error),
+	) error
 }
 
 type messageClient interface {
@@ -59,6 +77,7 @@ type Live struct {
 	runner         eventRunner
 	messages       messageClient
 	callbackHTTP   http.Handler
+	actionHandler  notify.ActionHandler
 	startCancel    context.CancelFunc
 	started        bool
 	startedContext context.Context
@@ -132,6 +151,10 @@ func (l *Live) Name() string { return "feishu-live" }
 
 func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
 
+func (l *Live) SetActionHandler(handler notify.ActionHandler) {
+	l.actionHandler = handler
+}
+
 func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
 	if target == nil {
 		return nil
@@ -159,6 +182,18 @@ func (l *Live) Start(handler core.MessageHandler) error {
 	l.started = true
 	l.startCancel = cancel
 	l.startedContext = ctx
+
+	if runner, ok := l.runner.(cardActionEventRunner); ok && l.actionHandler != nil {
+		return runner.StartWithCardActions(ctx, func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
+			msg, err := normalizeIncomingMessage(event)
+			if err != nil {
+				log.Printf("[feishu-live] Ignoring inbound event: %v", err)
+				return nil
+			}
+			handler(l, msg)
+			return nil
+		}, l.handleCardAction)
+	}
 
 	return l.runner.Start(ctx, func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 		msg, err := normalizeIncomingMessage(event)
@@ -246,7 +281,14 @@ type sdkEventRunner struct {
 }
 
 func (r *sdkEventRunner) Start(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error) error {
+	return r.StartWithCardActions(ctx, handler, nil)
+}
+
+func (r *sdkEventRunner) StartWithCardActions(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error, cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)) error {
 	dispatcher := larkdispatcher.NewEventDispatcher("", "").OnP2MessageReceiveV1(handler)
+	if cardActionHandler != nil {
+		dispatcher = dispatcher.OnP2CardActionTrigger(cardActionHandler)
+	}
 	client := larkws.NewClient(r.appID, r.appSecret, larkws.WithEventHandler(dispatcher))
 
 	go func() {
@@ -356,6 +398,79 @@ func normalizeIncomingMessage(event *larkim.P2MessageReceiveV1) (*core.Message, 
 		},
 		Timestamp: parseUnixMillis(value(message.CreateTime)),
 		IsGroup:   value(message.ChatType) != "p2p",
+	}, nil
+}
+
+func (l *Live) handleCardAction(ctx context.Context, event *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error) {
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		if errors.Is(err, errIgnoreCardAction) {
+			return &larkcallback.CardActionTriggerResponse{}, nil
+		}
+		return nil, err
+	}
+	if l.actionHandler == nil || req == nil {
+		return &larkcallback.CardActionTriggerResponse{}, nil
+	}
+
+	result, err := l.actionHandler.HandleAction(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || strings.TrimSpace(result.Result) == "" {
+		return &larkcallback.CardActionTriggerResponse{}, nil
+	}
+	return &larkcallback.CardActionTriggerResponse{
+		Toast: &larkcallback.Toast{
+			Type:    "info",
+			Content: strings.TrimSpace(result.Result),
+		},
+	}, nil
+}
+
+var errIgnoreCardAction = errors.New("ignore feishu card action")
+
+func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*notify.ActionRequest, error) {
+	if event == nil || event.Event == nil || event.Event.Action == nil {
+		return nil, errors.New("missing feishu card action payload")
+	}
+
+	actionValue := feishuActionReference(event.Event.Action.Value)
+	action, entityID, ok := core.ParseActionReference(actionValue)
+	if !ok {
+		return nil, errIgnoreCardAction
+	}
+
+	chatID := ""
+	messageID := ""
+	if event.Event.Context != nil {
+		chatID = strings.TrimSpace(event.Event.Context.OpenChatID)
+		messageID = strings.TrimSpace(event.Event.Context.OpenMessageID)
+	}
+	replyTarget := &core.ReplyTarget{
+		Platform:          liveMetadata.Source,
+		ChatID:            chatID,
+		ChannelID:         chatID,
+		MessageID:         messageID,
+		CallbackToken:     strings.TrimSpace(event.Event.Token),
+		UseReply:          true,
+		PreferredRenderer: string(liveMetadata.Capabilities.StructuredSurface),
+		ProgressMode:      string(core.AsyncUpdateDeferredCardUpdate),
+	}
+	metadata := map[string]string{
+		"source":        "card.action.trigger",
+		"host":          strings.TrimSpace(event.Event.Host),
+		"delivery_type": strings.TrimSpace(event.Event.DeliveryType),
+	}
+
+	return &notify.ActionRequest{
+		Platform:    liveMetadata.Source,
+		Action:      action,
+		EntityID:    entityID,
+		ChatID:      chatID,
+		UserID:      feishuOperatorID(event.Event.Operator),
+		ReplyTarget: replyTarget,
+		Metadata:    compactMetadata(metadata),
 	}, nil
 }
 
@@ -533,6 +648,34 @@ func normalizeButtonStyle(style string) string {
 	}
 }
 
+func feishuActionReference(values map[string]interface{}) string {
+	if len(values) == 0 {
+		return ""
+	}
+	if action, ok := values["action"].(string); ok {
+		return strings.TrimSpace(action)
+	}
+	if action, ok := values["action_id"].(string); ok {
+		return strings.TrimSpace(action)
+	}
+	return ""
+}
+
+func feishuOperatorID(operator *larkcallback.Operator) string {
+	if operator == nil {
+		return ""
+	}
+	if trimmed := strings.TrimSpace(operator.OpenID); trimmed != "" {
+		return trimmed
+	}
+	if operator.UserID != nil {
+		if trimmed := strings.TrimSpace(*operator.UserID); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
 func value(raw *string) string {
 	if raw == nil {
 		return ""
@@ -547,4 +690,22 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func compactMetadata(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	metadata := make(map[string]string, len(values))
+	for key, value := range values {
+		if trimmedKey := strings.TrimSpace(key); trimmedKey != "" {
+			if trimmedValue := strings.TrimSpace(value); trimmedValue != "" {
+				metadata[trimmedKey] = trimmedValue
+			}
+		}
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
 }

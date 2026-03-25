@@ -21,6 +21,9 @@ export interface AgentTeam {
   name: string;
   status: TeamStatus;
   strategy: string;
+  runtime: string;
+  provider: string;
+  model: string;
   plannerRunId?: string;
   reviewerRunId?: string;
   coderRunIds: string[];
@@ -34,6 +37,7 @@ export interface AgentTeam {
 export interface StartTeamOptions {
   strategy?: string;
   totalBudgetUsd?: number;
+  runtime?: string;
   provider?: string;
   model?: string;
 }
@@ -70,6 +74,9 @@ export function normalizeTeam(raw: Record<string, unknown>): AgentTeam {
     name: String(raw.name ?? ""),
     status: (typeof raw.status === "string" ? raw.status : "pending") as TeamStatus,
     strategy: String(raw.strategy ?? ""),
+    runtime: String(raw.runtime ?? ""),
+    provider: String(raw.provider ?? ""),
+    model: String(raw.model ?? ""),
     plannerRunId: typeof raw.plannerRunId === "string" ? raw.plannerRunId : undefined,
     reviewerRunId: typeof raw.reviewerRunId === "string" ? raw.reviewerRunId : undefined,
     coderRunIds,
@@ -138,6 +145,7 @@ export const useTeamStore = create<TeamState>()((set) => ({
         memberId,
         strategy: options.strategy,
         totalBudgetUsd: options.totalBudgetUsd,
+        runtime: options.runtime,
         provider: options.provider,
         model: options.model,
       },

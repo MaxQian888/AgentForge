@@ -80,6 +80,7 @@ type rawRoleCapabilities struct {
 	Packages       []string          `yaml:"packages"`
 	AllowedTools   []string          `yaml:"allowed_tools"`
 	Tools          yaml.Node         `yaml:"tools"`
+	Skills         []model.RoleSkillReference `yaml:"skills"`
 	Languages      []string          `yaml:"languages"`
 	Frameworks     []string          `yaml:"frameworks"`
 	MaxConcurrency int               `yaml:"max_concurrency"`
@@ -132,6 +133,7 @@ func normalizeRoleManifest(raw rawRoleManifest) (*Manifest, error) {
 		Capabilities: model.RoleCapabilities{
 			Packages:       append([]string(nil), raw.Capabilities.Packages...),
 			AllowedTools:   append([]string(nil), raw.Capabilities.AllowedTools...),
+			Skills:         append([]model.RoleSkillReference(nil), raw.Capabilities.Skills...),
 			Languages:      append([]string(nil), raw.Capabilities.Languages...),
 			Frameworks:     append([]string(nil), raw.Capabilities.Frameworks...),
 			MaxConcurrency: raw.Capabilities.MaxConcurrency,
@@ -241,6 +243,11 @@ func finalizeRoleManifest(manifest *Manifest) error {
 	if len(manifest.Capabilities.Tools) == 0 {
 		manifest.Capabilities.Tools = append([]string(nil), manifest.Capabilities.AllowedTools...)
 	}
+	skills, err := normalizeSkillReferences(manifest.Capabilities.Skills)
+	if err != nil {
+		return err
+	}
+	manifest.Capabilities.Skills = skills
 
 	return nil
 }
@@ -290,4 +297,29 @@ func cloneStringMap(input map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func normalizeSkillReferences(input []model.RoleSkillReference) ([]model.RoleSkillReference, error) {
+	if len(input) == 0 {
+		return nil, nil
+	}
+
+	normalized := make([]model.RoleSkillReference, 0, len(input))
+	seen := make(map[string]struct{}, len(input))
+	for _, item := range input {
+		path := strings.TrimSpace(item.Path)
+		if path == "" {
+			return nil, fmt.Errorf("role capability skill path cannot be blank")
+		}
+		if _, ok := seen[path]; ok {
+			return nil, fmt.Errorf("duplicate role capability skill path %q", path)
+		}
+		seen[path] = struct{}{}
+		normalized = append(normalized, model.RoleSkillReference{
+			Path:     path,
+			AutoLoad: item.AutoLoad,
+		})
+	}
+
+	return normalized, nil
 }

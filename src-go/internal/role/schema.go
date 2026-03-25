@@ -13,4 +13,5 @@ type Security = model.RoleSecurity
 type RoleResponseStyle = model.RoleResponseStyle
 type RoleToolConfig = model.RoleToolConfig
 type RoleMCPServer = model.RoleMCPServer
+type RoleSkillReference = model.RoleSkillReference
 type ExecutionProfile = model.RoleExecutionProfile

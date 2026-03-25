@@ -325,6 +325,15 @@ describe("bridge execute route", () => {
       max_agents: 1,
     });
 
+    const poolWhileRunning = await app.request("/bridge/pool");
+    expect(poolWhileRunning.status).toBe(200);
+    expect(await poolWhileRunning.json()).toMatchObject({
+      active: 1,
+      max: 1,
+      cold_starts: 1,
+      warm_reuse_hits: 0,
+    });
+
     const cancelResponse = await app.request("/bridge/cancel", {
       method: "POST",
       headers: { "content-type": "application/json" },
@@ -354,6 +363,14 @@ describe("bridge execute route", () => {
       status: "SERVING",
       active_agents: 0,
       max_agents: 1,
+    });
+
+    const poolAfterCancel = await app.request("/bridge/pool");
+    expect(poolAfterCancel.status).toBe(200);
+    expect(await poolAfterCancel.json()).toMatchObject({
+      active: 0,
+      max: 1,
+      warm_available: 1,
     });
   });
 

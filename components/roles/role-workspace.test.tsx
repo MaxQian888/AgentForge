@@ -27,6 +27,10 @@ const frontendRole: RoleManifest = {
     allowedTools: ["Read", "Edit"],
     languages: ["TypeScript"],
     frameworks: ["Next.js"],
+    skills: [
+      { path: "skills/react", autoLoad: true },
+      { path: "skills/testing", autoLoad: false },
+    ],
     maxTurns: 24,
     maxBudgetUsd: 6,
   },
@@ -80,6 +84,7 @@ describe("RoleWorkspace", () => {
     expect(screen.getByText("Execution Summary")).toBeInTheDocument();
     expect(screen.getByText("Ship a great dashboard UX")).toBeInTheDocument();
     expect(screen.getByText("Read, Edit")).toBeInTheDocument();
+    expect(screen.getByText("1 auto-load / 1 on-demand")).toBeInTheDocument();
     expect(screen.getByText("Review required")).toBeInTheDocument();
   });
 
@@ -103,7 +108,36 @@ describe("RoleWorkspace", () => {
     expect(screen.getByDisplayValue("1.2.0")).toBeInTheDocument();
     expect(screen.getByText("Identity")).toBeInTheDocument();
     expect(screen.getByText("Capabilities")).toBeInTheDocument();
+    expect(screen.getAllByText("Skills").length).toBeGreaterThan(0);
+    expect(screen.getByDisplayValue("skills/react")).toBeInTheDocument();
+    expect(screen.getByDisplayValue("skills/testing")).toBeInTheDocument();
     expect(screen.getByText("Knowledge")).toBeInTheDocument();
     expect(screen.getByText("Security")).toBeInTheDocument();
+  });
+
+  it("blocks save when duplicate skill paths are present", async () => {
+    const user = userEvent.setup();
+    const onCreateRole = jest.fn().mockResolvedValue(undefined);
+
+    render(
+      <RoleWorkspace
+        roles={[frontendRole]}
+        loading={false}
+        error={null}
+        onCreateRole={onCreateRole}
+        onUpdateRole={jest.fn().mockResolvedValue(undefined)}
+        onDeleteRole={jest.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "New Role" }));
+    await user.selectOptions(screen.getByLabelText("Start from template"), "frontend-developer");
+    const skillInputs = screen.getAllByLabelText("Skill Path");
+    await user.clear(skillInputs[1]!);
+    await user.type(skillInputs[1]!, "skills/react");
+    await user.click(screen.getByRole("button", { name: "Save Role" }));
+
+    expect(onCreateRole).not.toHaveBeenCalled();
+    expect(await screen.findByText("Skill paths must be unique.")).toBeInTheDocument();
   });
 });

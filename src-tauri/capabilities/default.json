@@ -13,6 +13,10 @@
         {
           "name": "server",
           "sidecar": true
+        },
+        {
+          "name": "bridge",
+          "sidecar": true
         }
       ]
     },

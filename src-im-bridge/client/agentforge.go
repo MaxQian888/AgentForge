@@ -15,12 +15,12 @@ import (
 
 // AgentForgeClient communicates with the AgentForge Go backend API.
 type AgentForgeClient struct {
-	baseURL   string
-	projectID string
-	apiKey    string
-	client    *http.Client
-	imSource  string
-	bridgeID  string
+	baseURL     string
+	projectID   string
+	apiKey      string
+	client      *http.Client
+	imSource    string
+	bridgeID    string
 	replyTarget *core.ReplyTarget
 }
 
@@ -374,6 +374,33 @@ func (c *AgentForgeClient) SendNLU(ctx context.Context, text, userID string) (st
 	return result.Reply, nil
 }
 
+func (c *AgentForgeClient) HandleIMAction(ctx context.Context, req IMActionRequest) (*IMActionResponse, error) {
+	if strings.TrimSpace(req.Platform) == "" {
+		req.Platform = c.imSource
+	}
+	if strings.TrimSpace(req.BridgeID) == "" {
+		req.BridgeID = c.bridgeID
+	}
+	if req.ReplyTarget == nil {
+		req.ReplyTarget = c.replyTarget
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/im/action", req)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, c.readError(resp)
+	}
+
+	var result IMActionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &result, nil
+}
+
 func (c *AgentForgeClient) RegisterBridge(ctx context.Context, req BridgeRegistration) (*BridgeInstance, error) {
 	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/im/bridge/register", req)
 	if err != nil {
@@ -578,7 +605,7 @@ type SprintMetrics struct {
 	CompletedTasks  int             `json:"completedTasks"`
 	RemainingTasks  int             `json:"remainingTasks"`
 	CompletionRate  float64         `json:"completionRate"`
-	VelocityPerWeek float64        `json:"velocityPerWeek"`
+	VelocityPerWeek float64         `json:"velocityPerWeek"`
 	Burndown        []BurndownPoint `json:"burndown"`
 }
 
@@ -597,22 +624,24 @@ type AgentLogEntry struct {
 }
 
 type BridgeRegistration struct {
-	BridgeID      string            `json:"bridgeId"`
-	Platform      string            `json:"platform"`
-	Transport     string            `json:"transport"`
-	ProjectIDs    []string          `json:"projectIds,omitempty"`
-	Capabilities  map[string]bool   `json:"capabilities,omitempty"`
-	CallbackPaths []string          `json:"callbackPaths,omitempty"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	BridgeID         string            `json:"bridgeId"`
+	Platform         string            `json:"platform"`
+	Transport        string            `json:"transport"`
+	ProjectIDs       []string          `json:"projectIds,omitempty"`
+	Capabilities     map[string]bool   `json:"capabilities,omitempty"`
+	CapabilityMatrix map[string]any    `json:"capabilityMatrix,omitempty"`
+	CallbackPaths    []string          `json:"callbackPaths,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
 }
 
 type BridgeInstance struct {
-	BridgeID   string `json:"bridgeId"`
-	Platform   string `json:"platform"`
-	Transport  string `json:"transport"`
-	LastSeenAt string `json:"lastSeenAt"`
-	ExpiresAt  string `json:"expiresAt"`
-	Status     string `json:"status"`
+	BridgeID         string         `json:"bridgeId"`
+	Platform         string         `json:"platform"`
+	Transport        string         `json:"transport"`
+	CapabilityMatrix map[string]any `json:"capabilityMatrix,omitempty"`
+	LastSeenAt       string         `json:"lastSeenAt"`
+	ExpiresAt        string         `json:"expiresAt"`
+	Status           string         `json:"status"`
 }
 
 type BridgeHeartbeat struct {
@@ -630,4 +659,22 @@ type IMActionBinding struct {
 	RunID       string            `json:"runId,omitempty"`
 	ReviewID    string            `json:"reviewId,omitempty"`
 	ReplyTarget *core.ReplyTarget `json:"replyTarget,omitempty"`
+}
+
+type IMActionRequest struct {
+	Platform    string            `json:"platform"`
+	Action      string            `json:"action"`
+	EntityID    string            `json:"entityId"`
+	ChannelID   string            `json:"channelId"`
+	UserID      string            `json:"userId,omitempty"`
+	BridgeID    string            `json:"bridgeId,omitempty"`
+	ReplyTarget *core.ReplyTarget `json:"replyTarget,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+type IMActionResponse struct {
+	Result      string            `json:"result"`
+	Success     bool              `json:"success"`
+	ReplyTarget *core.ReplyTarget `json:"replyTarget,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }

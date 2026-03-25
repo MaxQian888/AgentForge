@@ -169,6 +169,35 @@ describe("plugin schemas", () => {
     expect(review.success).toBe(true);
   });
 
+  test("rejects review manifests with unsupported output formats", () => {
+    const review = PluginManifestSchema.safeParse({
+      apiVersion: "agentforge.dev/v1",
+      kind: "ReviewPlugin",
+      metadata: {
+        id: "review.comments",
+        name: "Review Comments",
+        version: "1.0.0",
+      },
+      spec: {
+        runtime: "mcp",
+        transport: "stdio",
+        command: "node",
+        args: ["dist/review.js"],
+        review: {
+          entrypoint: "review:run",
+          triggers: {
+            events: ["pull_request.updated"],
+          },
+          output: {
+            format: "github-review-comments",
+          },
+        },
+      },
+    });
+
+    expect(review.success).toBe(false);
+  });
+
   test("rejects workflow manifests that still declare the legacy go-plugin runtime", () => {
     const workflow = PluginManifestSchema.safeParse({
       apiVersion: "agentforge.dev/v1",

@@ -96,6 +96,8 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 		statusCode := http.StatusOK
 		if result.Dispatch.Status == model.DispatchStatusStarted {
 			statusCode = http.StatusCreated
+		} else if result.Dispatch.Status == model.DispatchStatusQueued {
+			statusCode = http.StatusAccepted
 		}
 		return c.JSON(statusCode, result)
 	}

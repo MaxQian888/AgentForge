@@ -210,6 +210,32 @@ source:
 	}
 }
 
+func TestParse_ReviewPluginRejectsUnsupportedOutputFormat(t *testing.T) {
+	data := []byte(`
+apiVersion: agentforge/v1
+kind: ReviewPlugin
+metadata:
+  id: review-comments
+  name: Review Comments
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["dist/review.js"]
+  review:
+    entrypoint: review:run
+    triggers:
+      events: ["pull_request.updated"]
+    output:
+      format: github-review-comments
+`)
+
+	if _, err := plugin.Parse(data); err == nil {
+		t.Fatal("expected unsupported review output format to fail")
+	}
+}
+
 func TestParse_WorkflowPluginRejectsLegacyGoPluginRuntime(t *testing.T) {
 	data := []byte(`
 apiVersion: agentforge/v1

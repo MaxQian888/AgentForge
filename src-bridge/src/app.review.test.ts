@@ -26,6 +26,8 @@ describe("POST /bridge/review", () => {
         title: "Add auth flow",
         description: "Implements auth and adds eval()",
         diff: "const token = process.env.API_TOKEN; eval(userInput);",
+        trigger_event: "pull_request.updated",
+        changed_files: ["src/auth.ts"],
         dimensions: ["logic", "security", "performance", "compliance"],
       }),
     });

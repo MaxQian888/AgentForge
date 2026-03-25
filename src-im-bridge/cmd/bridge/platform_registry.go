@@ -36,6 +36,20 @@ func normalizeTransportMode(mode string) string {
 
 func platformDescriptors() map[string]platformDescriptor {
 	return map[string]platformDescriptor{
+		"wecom": {
+			Metadata: core.PlatformMetadata{
+				Source: "wecom",
+				Capabilities: core.PlatformCapabilities{
+					CommandSurface:     core.CommandSurfaceNone,
+					StructuredSurface:  core.StructuredSurfaceNone,
+					ActionCallbackMode: core.ActionCallbackNone,
+					MessageScopes:      []core.MessageScope{core.MessageScopeChat},
+				},
+			},
+			ValidateConfig: func(cfg *config, mode string) error {
+				return fmt.Errorf("selected platform wecom is planned but not yet runnable; adapter, capability matrix, and runtime wiring are still pending")
+			},
+		},
 		"feishu": {
 			Metadata: feishu.NewStub("0").Metadata(),
 			ValidateConfig: func(cfg *config, mode string) error {

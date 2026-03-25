@@ -7,19 +7,34 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"gorm.io/gorm"
 )
 
 type AgentRunRepository struct {
-	db DBTX
+	db *gorm.DB
 }
 
-func NewAgentRunRepository(db DBTX) *AgentRunRepository {
+func NewAgentRunRepository(db *gorm.DB) *AgentRunRepository {
 	return &AgentRunRepository{db: db}
 }
 
 const agentRunColumns = `id, task_id, member_id, role_id, status, runtime, provider, model,
 	input_tokens, output_tokens, cache_read_tokens, cost_usd, turn_count,
 	error_message, started_at, completed_at, created_at, updated_at, team_id, team_role`
+
+func scanAgentRun(row interface{ Scan(dest ...any) error }) (*model.AgentRun, error) {
+	run := &model.AgentRun{}
+	err := row.Scan(
+		&run.ID, &run.TaskID, &run.MemberID, &run.RoleID, &run.Status, &run.Runtime, &run.Provider, &run.Model,
+		&run.InputTokens, &run.OutputTokens, &run.CacheReadTokens, &run.CostUsd, &run.TurnCount,
+		&run.ErrorMessage, &run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
+		&run.TeamID, &run.TeamRole,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return run, nil
+}
 
 func (r *AgentRunRepository) Create(ctx context.Context, run *model.AgentRun) error {
 	if r.db == nil {
@@ -31,12 +46,12 @@ func (r *AgentRunRepository) Create(ctx context.Context, run *model.AgentRun) er
 			error_message, started_at, completed_at, created_at, updated_at, team_id, team_role)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,NOW(),NOW(),$17,$18)
 	`
-	_, err := r.db.Exec(ctx, query,
+	if err := r.db.WithContext(ctx).Exec(
+		query,
 		run.ID, run.TaskID, run.MemberID, run.RoleID, run.Status, run.Runtime, run.Provider, run.Model,
 		run.InputTokens, run.OutputTokens, run.CacheReadTokens, run.CostUsd, run.TurnCount,
 		run.ErrorMessage, run.StartedAt, run.CompletedAt, run.TeamID, run.TeamRole,
-	)
-	if err != nil {
+	).Error; err != nil {
 		return fmt.Errorf("create agent run: %w", err)
 	}
 	return nil
@@ -47,15 +62,9 @@ func (r *AgentRunRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.
 		return nil, ErrDatabaseUnavailable
 	}
 	query := `SELECT ` + agentRunColumns + ` FROM agent_runs WHERE id = $1`
-	run := &model.AgentRun{}
-	err := r.db.QueryRow(ctx, query, id).Scan(
-		&run.ID, &run.TaskID, &run.MemberID, &run.RoleID, &run.Status, &run.Runtime, &run.Provider, &run.Model,
-		&run.InputTokens, &run.OutputTokens, &run.CacheReadTokens, &run.CostUsd, &run.TurnCount,
-		&run.ErrorMessage, &run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
-		&run.TeamID, &run.TeamRole,
-	)
+	run, err := scanAgentRun(r.db.WithContext(ctx).Raw(query, id).Row())
 	if err != nil {
-		return nil, fmt.Errorf("get agent run by id: %w", err)
+		return nil, fmt.Errorf("get agent run by id: %w", normalizeRepositoryError(err))
 	}
 	return run, nil
 }
@@ -65,7 +74,7 @@ func (r *AgentRunRepository) GetByTask(ctx context.Context, taskID uuid.UUID) ([
 		return nil, ErrDatabaseUnavailable
 	}
 	query := `SELECT ` + agentRunColumns + ` FROM agent_runs WHERE task_id = $1 ORDER BY created_at DESC`
-	rows, err := r.db.Query(ctx, query, taskID)
+	rows, err := r.db.WithContext(ctx).Raw(query, taskID).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("get agent runs by task: %w", err)
 	}
@@ -73,13 +82,8 @@ func (r *AgentRunRepository) GetByTask(ctx context.Context, taskID uuid.UUID) ([
 
 	var runs []*model.AgentRun
 	for rows.Next() {
-		run := &model.AgentRun{}
-		if err := rows.Scan(
-			&run.ID, &run.TaskID, &run.MemberID, &run.RoleID, &run.Status, &run.Runtime, &run.Provider, &run.Model,
-			&run.InputTokens, &run.OutputTokens, &run.CacheReadTokens, &run.CostUsd, &run.TurnCount,
-			&run.ErrorMessage, &run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
-			&run.TeamID, &run.TeamRole,
-		); err != nil {
+		run, err := scanAgentRun(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan agent run: %w", err)
 		}
 		runs = append(runs, run)
@@ -92,7 +96,7 @@ func (r *AgentRunRepository) ListActive(ctx context.Context) ([]*model.AgentRun,
 		return nil, ErrDatabaseUnavailable
 	}
 	query := `SELECT ` + agentRunColumns + ` FROM agent_runs WHERE status IN ('starting', 'running', 'paused') ORDER BY created_at`
-	rows, err := r.db.Query(ctx, query)
+	rows, err := r.db.WithContext(ctx).Raw(query).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("list active agent runs: %w", err)
 	}
@@ -100,13 +104,8 @@ func (r *AgentRunRepository) ListActive(ctx context.Context) ([]*model.AgentRun,
 
 	var runs []*model.AgentRun
 	for rows.Next() {
-		run := &model.AgentRun{}
-		if err := rows.Scan(
-			&run.ID, &run.TaskID, &run.MemberID, &run.RoleID, &run.Status, &run.Runtime, &run.Provider, &run.Model,
-			&run.InputTokens, &run.OutputTokens, &run.CacheReadTokens, &run.CostUsd, &run.TurnCount,
-			&run.ErrorMessage, &run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
-			&run.TeamID, &run.TeamRole,
-		); err != nil {
+		run, err := scanAgentRun(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan agent run: %w", err)
 		}
 		runs = append(runs, run)
@@ -119,8 +118,7 @@ func (r *AgentRunRepository) UpdateStatus(ctx context.Context, id uuid.UUID, sta
 		return ErrDatabaseUnavailable
 	}
 	query := `UPDATE agent_runs SET status = $1, updated_at = NOW() WHERE id = $2`
-	_, err := r.db.Exec(ctx, query, status, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Exec(query, status, id).Error; err != nil {
 		return fmt.Errorf("update agent run status: %w", err)
 	}
 	return nil
@@ -133,7 +131,7 @@ func (r *AgentRunRepository) ListByProject(ctx context.Context, projectID uuid.U
 	query := `SELECT ` + agentRunColumns + ` FROM agent_runs ar
 		JOIN tasks t ON ar.task_id = t.id
 		WHERE t.project_id = $1 ORDER BY ar.created_at DESC`
-	rows, err := r.db.Query(ctx, query, projectID)
+	rows, err := r.db.WithContext(ctx).Raw(query, projectID).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("list agent runs by project: %w", err)
 	}
@@ -141,13 +139,8 @@ func (r *AgentRunRepository) ListByProject(ctx context.Context, projectID uuid.U
 
 	var runs []*model.AgentRun
 	for rows.Next() {
-		run := &model.AgentRun{}
-		if err := rows.Scan(
-			&run.ID, &run.TaskID, &run.MemberID, &run.RoleID, &run.Status, &run.Runtime, &run.Provider, &run.Model,
-			&run.InputTokens, &run.OutputTokens, &run.CacheReadTokens, &run.CostUsd, &run.TurnCount,
-			&run.ErrorMessage, &run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
-			&run.TeamID, &run.TeamRole,
-		); err != nil {
+		run, err := scanAgentRun(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan agent run: %w", err)
 		}
 		runs = append(runs, run)
@@ -162,7 +155,7 @@ func (r *AgentRunRepository) ListBySprint(ctx context.Context, sprintID uuid.UUI
 	query := `SELECT ` + agentRunColumns + ` FROM agent_runs ar
 		JOIN tasks t ON ar.task_id = t.id
 		WHERE t.sprint_id = $1 ORDER BY ar.created_at DESC`
-	rows, err := r.db.Query(ctx, query, sprintID)
+	rows, err := r.db.WithContext(ctx).Raw(query, sprintID).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("list agent runs by sprint: %w", err)
 	}
@@ -170,13 +163,8 @@ func (r *AgentRunRepository) ListBySprint(ctx context.Context, sprintID uuid.UUI
 
 	var runs []*model.AgentRun
 	for rows.Next() {
-		run := &model.AgentRun{}
-		if err := rows.Scan(
-			&run.ID, &run.TaskID, &run.MemberID, &run.RoleID, &run.Status, &run.Runtime, &run.Provider, &run.Model,
-			&run.InputTokens, &run.OutputTokens, &run.CacheReadTokens, &run.CostUsd, &run.TurnCount,
-			&run.ErrorMessage, &run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
-			&run.TeamID, &run.TeamRole,
-		); err != nil {
+		run, err := scanAgentRun(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan agent run: %w", err)
 		}
 		runs = append(runs, run)
@@ -199,7 +187,7 @@ func (r *AgentRunRepository) AggregateByProject(ctx context.Context, projectID u
 		JOIN tasks t ON ar.task_id = t.id
 		WHERE t.project_id = $1`
 	s := &model.CostSummaryDTO{}
-	err := r.db.QueryRow(ctx, query, projectID).Scan(
+	err := r.db.WithContext(ctx).Raw(query, projectID).Row().Scan(
 		&s.TotalCostUsd, &s.TotalInputTokens, &s.TotalOutputTokens,
 		&s.TotalCacheReadTokens, &s.TotalTurns, &s.RunCount,
 	)
@@ -214,7 +202,7 @@ func (r *AgentRunRepository) ListByTeam(ctx context.Context, teamID uuid.UUID) (
 		return nil, ErrDatabaseUnavailable
 	}
 	query := `SELECT ` + agentRunColumns + ` FROM agent_runs WHERE team_id = $1 ORDER BY created_at`
-	rows, err := r.db.Query(ctx, query, teamID)
+	rows, err := r.db.WithContext(ctx).Raw(query, teamID).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("list agent runs by team: %w", err)
 	}
@@ -222,13 +210,8 @@ func (r *AgentRunRepository) ListByTeam(ctx context.Context, teamID uuid.UUID) (
 
 	var runs []*model.AgentRun
 	for rows.Next() {
-		run := &model.AgentRun{}
-		if err := rows.Scan(
-			&run.ID, &run.TaskID, &run.MemberID, &run.RoleID, &run.Status, &run.Runtime, &run.Provider, &run.Model,
-			&run.InputTokens, &run.OutputTokens, &run.CacheReadTokens, &run.CostUsd, &run.TurnCount,
-			&run.ErrorMessage, &run.StartedAt, &run.CompletedAt, &run.CreatedAt, &run.UpdatedAt,
-			&run.TeamID, &run.TeamRole,
-		); err != nil {
+		run, err := scanAgentRun(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan agent run: %w", err)
 		}
 		runs = append(runs, run)
@@ -241,8 +224,7 @@ func (r *AgentRunRepository) SetTeamFields(ctx context.Context, id uuid.UUID, te
 		return ErrDatabaseUnavailable
 	}
 	query := `UPDATE agent_runs SET team_id = $1, team_role = $2, updated_at = NOW() WHERE id = $3`
-	_, err := r.db.Exec(ctx, query, teamID, teamRole, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Exec(query, teamID, teamRole, id).Error; err != nil {
 		return fmt.Errorf("set agent run team fields: %w", err)
 	}
 	return nil
@@ -279,7 +261,7 @@ func (r *AgentRunRepository) AggregatePerformance(ctx context.Context, from, to 
 	}
 	query += ` GROUP BY ar.role_id ORDER BY total_runs DESC`
 
-	rows, err := r.db.Query(ctx, query, args...)
+	rows, err := r.db.WithContext(ctx).Raw(query, args...).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("aggregate agent performance: %w", err)
 	}
@@ -304,8 +286,7 @@ func (r *AgentRunRepository) UpdateCost(ctx context.Context, id uuid.UUID, input
 		input_tokens = $1, output_tokens = $2, cache_read_tokens = $3,
 		cost_usd = $4, turn_count = $5, updated_at = NOW()
 		WHERE id = $6`
-	_, err := r.db.Exec(ctx, query, inputTokens, outputTokens, cacheReadTokens, costUsd, turnCount, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Exec(query, inputTokens, outputTokens, cacheReadTokens, costUsd, turnCount, id).Error; err != nil {
 		return fmt.Errorf("update agent run cost: %w", err)
 	}
 	return nil

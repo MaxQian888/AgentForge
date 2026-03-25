@@ -14,10 +14,12 @@ import (
 
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
+	"github.com/react-go-quick-starter/server/internal/model"
 	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
 	"github.com/react-go-quick-starter/server/internal/pool"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/role"
+	"github.com/react-go-quick-starter/server/internal/scheduler"
 	"github.com/react-go-quick-starter/server/internal/server"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/version"
@@ -88,7 +90,6 @@ func main() {
 	}
 
 	// Wire up dependencies
-	repoDB := repository.NewGormDBTX(db)
 	userRepo := repository.NewUserRepository(db)
 	cacheRepo := repository.NewCacheRepository(rdb)
 	authSvc := service.NewAuthService(userRepo, cacheRepo, cfg)
@@ -96,14 +97,17 @@ func main() {
 	projectRepo := repository.NewProjectRepository(db)
 	memberRepo := repository.NewMemberRepository(db)
 	sprintRepo := repository.NewSprintRepository(db)
-	taskRepo := repository.NewTaskRepository(repoDB)
-	taskProgressRepo := repository.NewTaskProgressRepository(repoDB)
-	agentRunRepo := repository.NewAgentRunRepository(repoDB)
+	taskRepo := repository.NewTaskRepository(db)
+	taskProgressRepo := repository.NewTaskProgressRepository(db)
+	agentRunRepo := repository.NewAgentRunRepository(db)
+	agentPoolQueueRepo := repository.NewAgentPoolQueueRepository(db)
 	notifRepo := repository.NewNotificationRepository(db)
-	reviewRepo := repository.NewReviewRepository(repoDB)
+	reviewRepo := repository.NewReviewRepository(db)
 	workflowRepo := repository.NewWorkflowRepository(db)
-	teamRepo := repository.NewAgentTeamRepository(repoDB)
-	memoryRepo := repository.NewAgentMemoryRepository(repoDB)
+	teamRepo := repository.NewAgentTeamRepository(db)
+	memoryRepo := repository.NewAgentMemoryRepository(db)
+	scheduledJobRepo := repository.NewScheduledJobRepository(db)
+	scheduledJobRunRepo := repository.NewScheduledJobRunRepository(db)
 	hub := ws.NewHub()
 	go hub.Run()
 	bridgeClient := bridge.NewClient(cfg.BridgeURL)
@@ -112,26 +116,49 @@ func main() {
 	roleStore := role.NewFileStore(cfg.RolesDir)
 	agentSvc := service.NewAgentService(agentRunRepo, taskRepo, projectRepo, hub, bridgeClient, worktreeMgr, roleStore)
 	agentSvc.SetPool(pool.NewPool(cfg.MaxActiveAgents))
+	agentSvc.SetQueueStore(agentPoolQueueRepo)
 	pluginSvc := service.NewPluginService(
-		repository.NewPluginRegistryRepository(repoDB),
+		repository.NewPluginRegistryRepository(db),
 		bridgeClient,
 		pluginruntime.NewWASMRuntimeManager(),
 		cfg.PluginsDir,
 	).
-		WithInstanceStore(repository.NewPluginInstanceRepository(repoDB)).
-		WithEventStore(repository.NewPluginEventRepository(repoDB)).
+		WithInstanceStore(repository.NewPluginInstanceRepository(db)).
+		WithEventStore(repository.NewPluginEventRepository(db)).
 		WithBroadcaster(ws.NewPluginEventBroadcaster(hub))
+	schedulerRegistry := scheduler.NewRegistry(scheduledJobRepo, scheduler.BuiltInCatalog(scheduler.CatalogConfig{
+		TaskProgressDetectorInterval: cfg.TaskProgressDetectorInterval,
+		ExecutionMode:                schedulerExecutionMode(cfg.SchedulerExecutionMode),
+	}))
+	schedulerSvc := scheduler.NewService(scheduledJobRepo, scheduledJobRunRepo)
+	schedulerSvc.SetBroadcaster(ws.NewSchedulerEventBroadcaster(hub))
+	if _, err := schedulerRegistry.Reconcile(context.Background()); err != nil {
+		slog.Warn("scheduler registry reconcile failed", "error", err)
+	}
 
 	// Create Echo instance and register routes
 	e := server.New(cfg, cacheRepo)
 	taskProgressSvc := server.RegisterRoutes(e, cfg, authSvc, cacheRepo,
-		projectRepo, memberRepo, sprintRepo, taskRepo, taskProgressRepo, agentRunRepo, notifRepo, reviewRepo, workflowRepo, teamRepo, memoryRepo, hub, bridgeClient, pluginSvc, agentSvc,
+		projectRepo, memberRepo, sprintRepo, taskRepo, taskProgressRepo, agentRunRepo, notifRepo, reviewRepo, workflowRepo, teamRepo, memoryRepo, hub, bridgeClient, pluginSvc, agentSvc, schedulerSvc,
 	)
-	detectorCtx, detectorCancel := context.WithCancel(context.Background())
-	defer detectorCancel()
 	if taskProgressSvc != nil {
-		go runTaskProgressDetector(detectorCtx, cfg.TaskProgressDetectorInterval, taskProgressSvc)
+		schedulerSvc.RegisterHandler("task-progress-detector", scheduler.NewTaskProgressDetectorHandler(taskProgressSvc))
 	}
+	schedulerSvc.RegisterHandler(
+		"worktree-garbage-collector",
+		scheduler.NewWorktreeGarbageCollectorHandler(
+			scheduler.FileProjectSource{RepoBasePath: cfg.RepoBasePath},
+			worktreeMgr,
+		),
+	)
+	schedulerSvc.RegisterHandler("bridge-health-reconcile", scheduler.NewBridgeHealthReconcileHandler(bridgeClient))
+	schedulerSvc.RegisterHandler(
+		"cost-reconcile",
+		scheduler.NewCostReconcileHandler(projectRepo, taskRepo, teamRepo, agentRunRepo),
+	)
+	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
+	defer schedulerCancel()
+	go scheduler.RunLoop(schedulerCtx, 15*time.Second, schedulerSvc)
 
 	// Graceful shutdown on SIGINT / SIGTERM
 	quit := make(chan os.Signal, 1)
@@ -140,7 +167,7 @@ func main() {
 	go func() {
 		<-quit
 		slog.Info("shutting down server...")
-		detectorCancel()
+		schedulerCancel()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := e.Shutdown(ctx); err != nil {
@@ -267,22 +294,11 @@ func summarizeStartupWorktreeProject(ctx context.Context, manager startupSweepMa
 	}, nil
 }
 
-func runTaskProgressDetector(ctx context.Context, interval time.Duration, progressSvc *service.TaskProgressService) {
-	if progressSvc == nil || interval <= 0 {
-		return
-	}
-
-	ticker := time.NewTicker(interval)
-	defer ticker.Stop()
-
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			if _, err := progressSvc.EvaluateOpenTasks(ctx); err != nil {
-				slog.Warn("task progress detector tick failed", "error", err)
-			}
-		}
+func schedulerExecutionMode(value string) model.ScheduledJobExecutionMode {
+	switch value {
+	case string(model.ScheduledJobExecutionModeOSRegistered):
+		return model.ScheduledJobExecutionModeOSRegistered
+	default:
+		return model.ScheduledJobExecutionModeInProcess
 	}
 }

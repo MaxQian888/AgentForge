@@ -25,6 +25,8 @@ export type PluginLifecycleState =
   | "degraded"
   | "disabled";
 export type PluginRuntimeHost = "go-orchestrator" | "ts-bridge";
+export type MCPInteractionOperation = "refresh" | "call_tool" | "read_resource" | "get_prompt";
+export type MCPInteractionStatus = "succeeded" | "failed";
 
 export interface PluginManifest {
   apiVersion: string;
@@ -117,6 +119,7 @@ export interface PluginRecord {
   last_error?: string;
   restart_count: number;
   discovered_tools?: string[];
+  mcp_capability_snapshot?: MCPCapabilitySnapshot;
 }
 
 export interface PluginRuntimeUpdate {
@@ -126,6 +129,40 @@ export interface PluginRuntimeUpdate {
   last_health_at?: string;
   last_error?: string;
   restart_count: number;
+  runtime_metadata?: PluginRuntimeMetadata;
+}
+
+export interface MCPInteractionSummary {
+  operation: MCPInteractionOperation;
+  status: MCPInteractionStatus;
+  at: string;
+  target?: string;
+  summary?: string;
+  error_code?: string;
+  error_message?: string;
+}
+
+export interface MCPCapabilitySnapshot {
+  transport: "stdio" | "http";
+  last_discovery_at?: string;
+  tool_count: number;
+  resource_count: number;
+  prompt_count: number;
+  tools: Array<{ name: string; description?: string }>;
+  resources: Array<{ uri: string; name?: string }>;
+  prompts: Array<{ name: string; description?: string }>;
+  latest_interaction?: MCPInteractionSummary;
+}
+
+export interface PluginRuntimeMetadata {
+  mcp?: {
+    transport: "stdio" | "http";
+    last_discovery_at?: string;
+    tool_count: number;
+    resource_count: number;
+    prompt_count: number;
+    latest_interaction?: MCPInteractionSummary;
+  };
 }
 
 export interface PluginRuntimeReporter {

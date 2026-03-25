@@ -14,6 +14,9 @@ interface RoleCardProps {
 
 export function RoleCard({ role, onEdit, onDelete }: RoleCardProps) {
   const allowedTools = role.capabilities.allowedTools ?? role.capabilities.tools ?? [];
+  const skills = role.capabilities.skills ?? [];
+  const autoLoadCount = skills.filter((skill) => skill.autoLoad).length;
+  const onDemandCount = skills.length - autoLoadCount;
   const hasPathRestrictions =
     role.security.allowedPaths.length > 0 || role.security.deniedPaths.length > 0;
 
@@ -58,6 +61,12 @@ export function RoleCard({ role, onEdit, onDelete }: RoleCardProps) {
           ) : null}
           {role.capabilities.maxTurns != null ? (
             <p>Max turns: {role.capabilities.maxTurns}</p>
+          ) : null}
+          {skills.length > 0 ? (
+            <>
+              <p>Skills: {autoLoadCount} auto / {onDemandCount} on-demand</p>
+              <p>Key skills: {skills.slice(0, 3).map((skill) => skill.path).join(", ")}</p>
+            </>
           ) : null}
           {role.security.requireReview ? (
             <p>Review gate: required before execution</p>

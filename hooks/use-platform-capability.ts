@@ -11,6 +11,7 @@ export function usePlatformCapability() {
     registerShortcut: platformRuntime.registerShortcut,
     checkForUpdate: platformRuntime.checkForUpdate,
     getDesktopRuntimeStatus: platformRuntime.getDesktopRuntimeStatus,
+    getPluginRuntimeSummary: platformRuntime.getPluginRuntimeSummary,
     subscribeDesktopEvents: platformRuntime.subscribeDesktopEvents,
   };
 }

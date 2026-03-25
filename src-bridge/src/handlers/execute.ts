@@ -46,7 +46,7 @@ export async function handleExecute(
       now: deps.now,
     });
   const { adapter, request } = runtimeRegistry.resolveExecute(req);
-  const runtime = pool.acquire(request.task_id, request.session_id);
+  const runtime = pool.acquire(request.task_id, request.session_id, request.runtime ?? "claude_code");
   runtime.bindRequest(request);
 
   const systemPrompt = buildSystemPrompt(

@@ -438,6 +438,80 @@ func TestSendNLU_SendsIntentPayloadAndParsesReply(t *testing.T) {
 	}
 }
 
+func TestHandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(IMActionResponse{
+			Result: "Approved",
+			ReplyTarget: &core.ReplyTarget{
+				Platform:          "slack",
+				ChannelID:         "C123",
+				ThreadID:          "thread-1",
+				PreferredRenderer: "blocks",
+			},
+			Metadata: map[string]string{
+				"source": "block_actions",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret").WithSource("slack").WithBridgeContext("bridge-slack-1", &core.ReplyTarget{
+		Platform:  "slack",
+		ChannelID: "C123",
+		ThreadID:  "thread-1",
+	})
+
+	resp, err := client.HandleIMAction(context.Background(), IMActionRequest{
+		Action:    "approve",
+		EntityID:  "review-1",
+		ChannelID: "C123",
+		UserID:    "U123",
+		Metadata: map[string]string{
+			"source": "block_actions",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleIMAction error: %v", err)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/api/v1/im/action" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if gotBody["platform"] != "slack" {
+		t.Fatalf("platform = %v", gotBody["platform"])
+	}
+	if gotBody["bridgeId"] != "bridge-slack-1" {
+		t.Fatalf("bridgeId = %v", gotBody["bridgeId"])
+	}
+	replyTarget, ok := gotBody["replyTarget"].(map[string]any)
+	if !ok {
+		t.Fatalf("replyTarget = %#v", gotBody["replyTarget"])
+	}
+	if replyTarget["threadId"] != "thread-1" {
+		t.Fatalf("threadId = %v", replyTarget["threadId"])
+	}
+	if resp.ReplyTarget == nil || resp.ReplyTarget.PreferredRenderer != "blocks" {
+		t.Fatalf("ReplyTarget = %+v", resp.ReplyTarget)
+	}
+	if resp.Metadata["source"] != "block_actions" {
+		t.Fatalf("Metadata = %+v", resp.Metadata)
+	}
+}
+
 func TestWithSource_LeavesExistingSourceWhenNormalizationReturnsEmpty(t *testing.T) {
 	client := NewAgentForgeClient("http://example.test", "proj", "secret").WithSource("slack-stub")
 

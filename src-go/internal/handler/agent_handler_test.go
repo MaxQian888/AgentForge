@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/google/uuid"
@@ -200,6 +201,38 @@ func TestAgentHandler_Spawn_AllowsMissingMemberIDWhenDispatcherCanResolveTaskAss
 	}
 	if dispatcher.lastMemberID != nil {
 		t.Fatalf("expected nil member id, got %v", *dispatcher.lastMemberID)
+	}
+}
+
+func TestAgentHandler_Spawn_ReturnsAcceptedWhenDispatcherQueuesAdmission(t *testing.T) {
+	e := newAgentTestEcho()
+	dispatcher := &mockAgentTaskDispatcher{
+		result: &model.TaskDispatchResponse{
+			Task: model.TaskDTO{ID: uuid.New().String()},
+			Dispatch: model.DispatchOutcome{
+				Status: model.DispatchStatusQueued,
+				Reason: "agent pool is at capacity",
+				Queue: &model.AgentPoolQueueEntry{
+					EntryID:   uuid.NewString(),
+					TaskID:    uuid.NewString(),
+					MemberID:  uuid.NewString(),
+					Status:    model.AgentPoolQueueStatusQueued,
+					CreatedAt: time.Now().UTC(),
+					UpdatedAt: time.Now().UTC(),
+				},
+			},
+		},
+	}
+	h := handler.NewAgentHandler(&mockAgentRuntimeService{}).WithDispatcher(dispatcher)
+
+	req := httptest.NewRequest(http.MethodPost, "/agents/spawn", strings.NewReader(`{"taskId":"`+uuid.New().String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	_ = h.Spawn(c)
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
 	}
 }
 

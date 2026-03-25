@@ -55,6 +55,15 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 	return core.PlatformMetadata{
 		Source: "feishu",
 		Capabilities: core.PlatformCapabilities{
+			CommandSurface:     core.CommandSurfaceMixed,
+			StructuredSurface:  core.StructuredSurfaceCards,
+			AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateDeferredCardUpdate},
+			ActionCallbackMode: core.ActionCallbackWebhook,
+			MessageScopes:      []core.MessageScope{core.MessageScopeChat, core.MessageScopeThread},
+			Mutability: core.MutabilitySemantics{
+				CanEdit:        true,
+				PrefersInPlace: true,
+			},
 			SupportsRichMessages:  true,
 			SupportsSlashCommands: true,
 			SupportsMentions:      true,

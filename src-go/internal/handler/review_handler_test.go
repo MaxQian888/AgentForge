@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -108,5 +109,70 @@ func TestReviewHandler_Trigger_ReturnsAcceptedReview(t *testing.T) {
 	}
 	if svc.triggered == nil || svc.triggered.Trigger != model.ReviewTriggerAgent {
 		t.Fatalf("expected trigger request to be passed to service")
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	if _, ok := payload["executionMetadata"]; ok {
+		t.Fatalf("did not expect executionMetadata for review without metadata, got %#v", payload["executionMetadata"])
+	}
+}
+
+func TestReviewHandler_Trigger_ExposesExecutionMetadataInDTO(t *testing.T) {
+	e := echo.New()
+	e.Validator = &reviewValidator{validator: validator.New()}
+	now := time.Now()
+	review := &model.Review{
+		ID:       uuid.New(),
+		TaskID:   uuid.New(),
+		PRURL:    "https://github.com/acme/project/pull/14",
+		PRNumber: 14,
+		Layer:    model.ReviewLayerDeep,
+		Status:   model.ReviewStatusCompleted,
+		ExecutionMetadata: &model.ReviewExecutionMetadata{
+			TriggerEvent: "pull_request.updated",
+			ChangedFiles: []string{"src/server/routes.go"},
+			Results: []model.ReviewExecutionResult{
+				{ID: "security", Kind: model.ReviewExecutionKindBuiltinDimension, Status: model.ReviewExecutionStatusCompleted, Summary: "security ok"},
+				{ID: "review.architecture", Kind: model.ReviewExecutionKindPlugin, Status: model.ReviewExecutionStatusFailed, Summary: "plugin failed", Error: "timeout"},
+			},
+		},
+		RiskLevel:      model.ReviewRiskLevelHigh,
+		Summary:        "Deep review completed",
+		Recommendation: model.ReviewRecommendationRequestChanges,
+		CreatedAt:      now,
+		UpdatedAt:      now,
+	}
+	svc := &reviewServiceMock{review: review}
+	h := handler.NewReviewHandler(svc)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/reviews/trigger", strings.NewReader(`{"taskId":"`+review.TaskID.String()+`","prUrl":"https://github.com/acme/project/pull/14","prNumber":14,"trigger":"manual"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	if err := h.Trigger(c); err != nil {
+		t.Fatalf("Trigger() error: %v", err)
+	}
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("expected 202, got %d", rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response body: %v", err)
+	}
+	executionMetadata, ok := payload["executionMetadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected executionMetadata object, got %#v", payload["executionMetadata"])
+	}
+	if executionMetadata["triggerEvent"] != "pull_request.updated" {
+		t.Fatalf("triggerEvent = %#v, want pull_request.updated", executionMetadata["triggerEvent"])
+	}
+	results, ok := executionMetadata["results"].([]any)
+	if !ok || len(results) != 2 {
+		t.Fatalf("results = %#v, want 2 items", executionMetadata["results"])
 	}
 }

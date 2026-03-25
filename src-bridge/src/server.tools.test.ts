@@ -12,13 +12,33 @@ function createMockHub(): MCPClientHub {
       description: "Search repos",
       inputSchema: { type: "object" as const, properties: {} },
     };
+    const fakeResource = { uri: "file://guide.md", name: "guide.md" };
+    const fakePrompt = { name: "planner-template", description: "Plan work" };
     (hub as any).clients.set(pluginId, {
-      client: { close: async () => {} },
+      client: {
+        listTools: async () => ({ tools: [fakeTool] }),
+        listResources: async () => ({ resources: [fakeResource] }),
+        listPrompts: async () => ({ prompts: [fakePrompt] }),
+        callTool: async () => ({
+          content: [{ type: "text", text: "search complete" }],
+          structuredContent: { ok: true },
+        }),
+        readResource: async () => ({
+          contents: [{ uri: "file://guide.md", text: "guide body" }],
+        }),
+        getPrompt: async () => ({
+          description: "Plan work",
+          messages: [{ role: "user", content: { type: "text", text: "Plan the task" } }],
+        }),
+        close: async () => {},
+      },
       transport: {},
       config: _config,
       state: "active",
       connectedAt: Date.now(),
       tools: [fakeTool],
+      resources: [fakeResource],
+      prompts: [fakePrompt],
     });
     return [fakeTool];
   };
@@ -150,6 +170,98 @@ describe("bridge tool routes", () => {
     const body = await res.json();
     expect(body.lifecycle_state).toBe("active");
     expect(body.restart_count).toBe(1);
+
+    await pluginManager.dispose();
+  });
+
+  test("POST /bridge/plugins/:id/mcp/refresh returns refreshed capability metadata", async () => {
+    const mcpHub = createMockHub();
+    const pluginManager = new ToolPluginManager({ mcpHub });
+    const app = createApp({ pluginManager });
+
+    await app.request("/bridge/tools/install", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ manifest }),
+    });
+
+    const res = await app.request("/bridge/plugins/web-search/mcp/refresh", {
+      method: "POST",
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.mcp_capability_snapshot.tool_count).toBe(1);
+    expect(body.mcp_capability_snapshot.resource_count).toBe(1);
+    expect(body.mcp_capability_snapshot.prompt_count).toBe(1);
+
+    await pluginManager.dispose();
+  });
+
+  test("POST /bridge/plugins/:id/mcp/tools/call proxies tool invocation", async () => {
+    const mcpHub = createMockHub();
+    const pluginManager = new ToolPluginManager({ mcpHub });
+    const app = createApp({ pluginManager });
+
+    await app.request("/bridge/tools/install", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ manifest }),
+    });
+
+    const res = await app.request("/bridge/plugins/web-search/mcp/tools/call", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ tool_name: "search", arguments: { query: "bridge" } }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.result.structuredContent).toEqual({ ok: true });
+
+    await pluginManager.dispose();
+  });
+
+  test("POST /bridge/plugins/:id/mcp/resources/read proxies resource access", async () => {
+    const mcpHub = createMockHub();
+    const pluginManager = new ToolPluginManager({ mcpHub });
+    const app = createApp({ pluginManager });
+
+    await app.request("/bridge/tools/install", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ manifest }),
+    });
+
+    const res = await app.request("/bridge/plugins/web-search/mcp/resources/read", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ uri: "file://guide.md" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.result.contents[0].text).toBe("guide body");
+
+    await pluginManager.dispose();
+  });
+
+  test("POST /bridge/plugins/:id/mcp/prompts/get proxies prompt retrieval", async () => {
+    const mcpHub = createMockHub();
+    const pluginManager = new ToolPluginManager({ mcpHub });
+    const app = createApp({ pluginManager });
+
+    await app.request("/bridge/tools/install", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ manifest }),
+    });
+
+    const res = await app.request("/bridge/plugins/web-search/mcp/prompts/get", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ name: "planner-template" }),
+    });
+    expect(res.status).toBe(200);
+    const body = await res.json();
+    expect(body.result.description).toBe("Plan work");
 
     await pluginManager.dispose();
   });

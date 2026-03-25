@@ -1,16 +1,20 @@
 package slack
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
+	"net/http"
 	"strconv"
 	"strings"
 	"sync"
 	"time"
 
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/notify"
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 	"github.com/slack-go/slack/socketmode"
@@ -19,6 +23,11 @@ import (
 var liveMetadata = core.PlatformMetadata{
 	Source: "slack",
 	Capabilities: core.PlatformCapabilities{
+		CommandSurface:        core.CommandSurfaceMixed,
+		StructuredSurface:     core.StructuredSurfaceBlocks,
+		AsyncUpdateModes:      []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateThreadReply, core.AsyncUpdateFollowUp},
+		ActionCallbackMode:    core.ActionCallbackSocketPayload,
+		MessageScopes:         []core.MessageScope{core.MessageScopeChat, core.MessageScopeThread},
 		SupportsRichMessages:  true,
 		SupportsDeferredReply: true,
 		SupportsSlashCommands: true,
@@ -66,6 +75,10 @@ type messageClient interface {
 	PostMessage(ctx context.Context, message slackOutgoingMessage) error
 }
 
+type responseClient interface {
+	PostResponse(ctx context.Context, responseURL string, message slackOutgoingMessage) error
+}
+
 type LiveOption func(*Live) error
 
 // Live is the Slack production adapter backed by Socket Mode and chat.postMessage.
@@ -75,6 +88,9 @@ type Live struct {
 
 	runner   socketRunner
 	messages messageClient
+	responses responseClient
+
+	actionHandler notify.ActionHandler
 
 	startCancel context.CancelFunc
 	startCtx    context.Context
@@ -93,6 +109,9 @@ func NewLive(botToken, appToken string, opts ...LiveOption) (*Live, error) {
 		appToken: appToken,
 		runner:   &managedSocketRunner{client: socketmode.New(api)},
 		messages: &slackAPIMessageClient{client: api},
+		responses: &httpResponseClient{
+			client: &http.Client{Timeout: 15 * time.Second},
+		},
 	}
 
 	for _, opt := range opts {
@@ -105,6 +124,9 @@ func NewLive(botToken, appToken string, opts ...LiveOption) (*Live, error) {
 	}
 	if live.messages == nil {
 		return nil, errors.New("slack live transport requires a message client")
+	}
+	if live.responses == nil {
+		return nil, errors.New("slack live transport requires a response client")
 	}
 
 	return live, nil
@@ -130,9 +152,23 @@ func WithMessageClient(client messageClient) LiveOption {
 	}
 }
 
+func WithResponseClient(client responseClient) LiveOption {
+	return func(live *Live) error {
+		if client == nil {
+			return errors.New("response client cannot be nil")
+		}
+		live.responses = client
+		return nil
+	}
+}
+
 func (l *Live) Name() string { return "slack-live" }
 
 func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
+
+func (l *Live) SetActionHandler(handler notify.ActionHandler) {
+	l.actionHandler = handler
+}
 
 func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
 	if target == nil {
@@ -168,6 +204,17 @@ func (l *Live) Start(handler core.MessageHandler) error {
 			}
 		}
 
+		if err := l.handleActionEnvelope(ctx, envelope); err != nil {
+			if errors.Is(err, errIgnoreEnvelope) {
+				// fall through to normal message handling
+			} else {
+				log.Printf("[slack-live] Ignoring interactive action payload: %v", err)
+				return nil
+			}
+		} else if envelope.Type == socketEnvelopeInteractive {
+			return nil
+		}
+
 		msg, err := normalizeEnvelope(envelope)
 		if err != nil {
 			if errors.Is(err, errIgnoreEnvelope) {
@@ -186,6 +233,13 @@ func (l *Live) Reply(ctx context.Context, replyCtx any, content string) error {
 	target := toReplyContext(replyCtx)
 	if target.ChannelID == "" {
 		return errors.New("slack reply requires channel id")
+	}
+	if target.ResponseURL != "" {
+		return l.responses.PostResponse(ctx, target.ResponseURL, slackOutgoingMessage{
+			ChannelID: target.ChannelID,
+			ThreadTS:  target.ThreadTS,
+			Text:      content,
+		})
 	}
 	return l.messages.PostMessage(ctx, slackOutgoingMessage{
 		ChannelID: target.ChannelID,
@@ -227,6 +281,14 @@ func (l *Live) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) err
 	text, blocks, err := renderCardMessage(card)
 	if err != nil {
 		return err
+	}
+	if target.ResponseURL != "" {
+		return l.responses.PostResponse(ctx, target.ResponseURL, slackOutgoingMessage{
+			ChannelID: target.ChannelID,
+			ThreadTS:  target.ThreadTS,
+			Text:      text,
+			Blocks:    blocks,
+		})
 	}
 	return l.messages.PostMessage(ctx, slackOutgoingMessage{
 		ChannelID: target.ChannelID,
@@ -356,6 +418,10 @@ type slackAPIMessageClient struct {
 	client *goslack.Client
 }
 
+type httpResponseClient struct {
+	client *http.Client
+}
+
 func (c *slackAPIMessageClient) PostMessage(ctx context.Context, message slackOutgoingMessage) error {
 	if strings.TrimSpace(message.ChannelID) == "" {
 		return errors.New("channel id is required")
@@ -375,6 +441,42 @@ func (c *slackAPIMessageClient) PostMessage(ctx context.Context, message slackOu
 	return err
 }
 
+func (c *httpResponseClient) PostResponse(ctx context.Context, responseURL string, message slackOutgoingMessage) error {
+	if strings.TrimSpace(responseURL) == "" {
+		return errors.New("response url is required")
+	}
+
+	payload := map[string]any{
+		"text": message.Text,
+	}
+	if message.ThreadTS != "" {
+		payload["thread_ts"] = message.ThreadTS
+	}
+	if len(message.Blocks) > 0 {
+		payload["blocks"] = message.Blocks
+	}
+
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return fmt.Errorf("marshal slack response payload: %w", err)
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, responseURL, bytes.NewReader(body))
+	if err != nil {
+		return fmt.Errorf("create slack response request: %w", err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("send slack response url payload: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
+		return fmt.Errorf("slack response url returned %d", resp.StatusCode)
+	}
+	return nil
+}
+
 func normalizeEnvelope(envelope socketEnvelope) (*core.Message, error) {
 	switch envelope.Type {
 	case socketEnvelopeSlashCommand:
@@ -392,6 +494,153 @@ func normalizeEnvelope(envelope socketEnvelope) (*core.Message, error) {
 	default:
 		return nil, errIgnoreEnvelope
 	}
+}
+
+func (l *Live) handleActionEnvelope(ctx context.Context, envelope socketEnvelope) error {
+	req, err := normalizeActionEnvelope(envelope)
+	if err != nil {
+		return err
+	}
+	if req == nil || l.actionHandler == nil {
+		return nil
+	}
+
+	result, err := l.actionHandler.HandleAction(ctx, req)
+	if err != nil {
+		return err
+	}
+	if result == nil || strings.TrimSpace(result.Result) == "" || strings.TrimSpace(req.ChatID) == "" {
+		return nil
+	}
+
+	target := req.ReplyTarget
+	if result.ReplyTarget != nil {
+		target = result.ReplyTarget
+	}
+	_, err = core.DeliverText(ctx, l, l.Metadata(), target, req.ChatID, result.Result)
+	return err
+}
+
+func normalizeActionEnvelope(envelope socketEnvelope) (*notify.ActionRequest, error) {
+	if envelope.Type != socketEnvelopeInteractive {
+		return nil, errIgnoreEnvelope
+	}
+	if envelope.Interaction == nil {
+		return nil, errors.New("missing interaction payload")
+	}
+	return normalizeInteractionAction(envelope.Interaction)
+}
+
+func normalizeInteractionAction(interaction *goslack.InteractionCallback) (*notify.ActionRequest, error) {
+	if interaction == nil {
+		return nil, errors.New("missing interaction payload")
+	}
+
+	switch interaction.Type {
+	case goslack.InteractionTypeBlockActions:
+		return normalizeBlockAction(interaction)
+	case goslack.InteractionTypeViewSubmission:
+		return normalizeViewSubmission(interaction)
+	default:
+		return nil, errIgnoreEnvelope
+	}
+}
+
+func normalizeBlockAction(interaction *goslack.InteractionCallback) (*notify.ActionRequest, error) {
+	if len(interaction.ActionCallback.BlockActions) == 0 {
+		return nil, errors.New("slack block action missing actions")
+	}
+	actionPayload := interaction.ActionCallback.BlockActions[0]
+	action, entityID, ok := core.ParseActionReference(actionPayload.Value)
+	if !ok {
+		return nil, errIgnoreEnvelope
+	}
+
+	channelID := firstNonEmpty(interaction.Channel.ID, interaction.Container.ChannelID)
+	replyTarget := &core.ReplyTarget{
+		Platform:          liveMetadata.Source,
+		ChatID:            channelID,
+		ChannelID:         channelID,
+		ThreadID:          firstNonEmpty(interaction.Container.ThreadTs, interaction.Container.MessageTs),
+		ResponseURL:       strings.TrimSpace(interaction.ResponseURL),
+		UseReply:          true,
+		PreferredRenderer: string(liveMetadata.Capabilities.StructuredSurface),
+	}
+	metadata := map[string]string{
+		"source":     string(goslack.InteractionTypeBlockActions),
+		"trigger_id": strings.TrimSpace(interaction.TriggerID),
+	}
+	if actionID := strings.TrimSpace(actionPayload.ActionID); actionID != "" {
+		metadata["action_id"] = actionID
+	}
+	if blockID := strings.TrimSpace(actionPayload.BlockID); blockID != "" {
+		metadata["block_id"] = blockID
+	}
+	if callbackID := strings.TrimSpace(interaction.CallbackID); callbackID != "" {
+		metadata["callback_id"] = callbackID
+	}
+
+	return &notify.ActionRequest{
+		Platform:    liveMetadata.Source,
+		Action:      action,
+		EntityID:    entityID,
+		ChatID:      channelID,
+		UserID:      strings.TrimSpace(interaction.User.ID),
+		ReplyTarget: replyTarget,
+		Metadata:    compactMetadata(metadata),
+	}, nil
+}
+
+func normalizeViewSubmission(interaction *goslack.InteractionCallback) (*notify.ActionRequest, error) {
+	action, entityID, ok := core.ParseActionReference(firstNonEmpty(interaction.View.PrivateMetadata, interaction.CallbackID))
+	if !ok {
+		return nil, errIgnoreEnvelope
+	}
+
+	var responseInfo *goslack.ViewSubmissionCallbackResponseURL
+	if len(interaction.ViewSubmissionCallback.ResponseURLs) > 0 {
+		responseInfo = &interaction.ViewSubmissionCallback.ResponseURLs[0]
+	}
+	channelID := firstNonEmpty(
+		valueOrEmpty(responseInfo, func(v *goslack.ViewSubmissionCallbackResponseURL) string { return v.ChannelID }),
+		interaction.Channel.ID,
+		interaction.Container.ChannelID,
+	)
+	replyTarget := &core.ReplyTarget{
+		Platform:          liveMetadata.Source,
+		ChatID:            channelID,
+		ChannelID:         channelID,
+		ResponseURL:       firstNonEmpty(valueOrEmpty(responseInfo, func(v *goslack.ViewSubmissionCallbackResponseURL) string { return v.ResponseURL }), interaction.ResponseURL),
+		UseReply:          true,
+		PreferredRenderer: string(liveMetadata.Capabilities.StructuredSurface),
+	}
+	metadata := map[string]string{
+		"source":     string(goslack.InteractionTypeViewSubmission),
+		"trigger_id": strings.TrimSpace(interaction.TriggerID),
+		"view_id":    strings.TrimSpace(interaction.View.ID),
+		"view_hash":  strings.TrimSpace(interaction.View.Hash),
+	}
+	if callbackID := strings.TrimSpace(interaction.CallbackID); callbackID != "" {
+		metadata["callback_id"] = callbackID
+	}
+	if responseInfo != nil {
+		if blockID := strings.TrimSpace(responseInfo.BlockID); blockID != "" {
+			metadata["response_block_id"] = blockID
+		}
+		if actionID := strings.TrimSpace(responseInfo.ActionID); actionID != "" {
+			metadata["response_action_id"] = actionID
+		}
+	}
+
+	return &notify.ActionRequest{
+		Platform:    liveMetadata.Source,
+		Action:      action,
+		EntityID:    entityID,
+		ChatID:      channelID,
+		UserID:      strings.TrimSpace(interaction.User.ID),
+		ReplyTarget: replyTarget,
+		Metadata:    compactMetadata(metadata),
+	}, nil
 }
 
 func normalizeSlashCommand(command *goslack.SlashCommand) *core.Message {
@@ -606,4 +855,29 @@ func normalizeButtonStyle(style string) goslack.Style {
 	default:
 		return goslack.Style("")
 	}
+}
+
+func compactMetadata(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	metadata := make(map[string]string, len(values))
+	for key, value := range values {
+		if trimmedKey := strings.TrimSpace(key); trimmedKey != "" {
+			if trimmedValue := strings.TrimSpace(value); trimmedValue != "" {
+				metadata[trimmedKey] = trimmedValue
+			}
+		}
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
+}
+
+func valueOrEmpty[T any](value *T, getter func(*T) string) string {
+	if value == nil || getter == nil {
+		return ""
+	}
+	return strings.TrimSpace(getter(value))
 }

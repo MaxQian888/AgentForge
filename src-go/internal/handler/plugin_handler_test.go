@@ -10,11 +10,12 @@ import (
 	"path/filepath"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/handler"
 	"github.com/react-go-quick-starter/server/internal/model"
-	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/repository"
+	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
@@ -26,6 +27,10 @@ type handlerGoRuntime struct {
 
 type handlerRoleStore struct {
 	roles map[string]*rolepkg.Manifest
+}
+
+type handlerWorkflowExecutor struct {
+	calls []service.WorkflowStepExecutionRequest
 }
 
 func (handlerRuntimeClient) RegisterToolPlugin(_ context.Context, manifest model.PluginManifest) (*model.PluginRuntimeStatus, error) {
@@ -116,6 +121,16 @@ func (s *handlerRoleStore) Get(id string) (*rolepkg.Manifest, error) {
 	return role, nil
 }
 
+func (h *handlerWorkflowExecutor) Execute(_ context.Context, req service.WorkflowStepExecutionRequest) (*service.WorkflowStepExecutionResult, error) {
+	h.calls = append(h.calls, req)
+	return &service.WorkflowStepExecutionResult{
+		Output: map[string]any{
+			"step":   req.Step.ID,
+			"status": "ok",
+		},
+	}, nil
+}
+
 func writePluginManifest(t *testing.T, dir string, relative string, content string) string {
 	t.Helper()
 	path := filepath.Join(dir, relative)
@@ -156,6 +171,20 @@ func newPluginHandlerWithWorkflowDeps(
 	t.Helper()
 	svc := service.NewPluginService(repo, handlerRuntimeClient{}, goRuntime, pluginsDir).WithRoleStore(roleStore)
 	return handler.NewPluginHandler(svc)
+}
+
+func newPluginHandlerWithWorkflowRuntime(
+	t *testing.T,
+	repo service.PluginRegistry,
+	pluginsDir string,
+	goRuntime service.GoPluginRuntime,
+	roleStore service.PluginRoleStore,
+	executor service.WorkflowStepExecutor,
+) *handler.PluginHandler {
+	t.Helper()
+	svc := service.NewPluginService(repo, handlerRuntimeClient{}, goRuntime, pluginsDir).WithRoleStore(roleStore)
+	workflowSvc := service.NewWorkflowExecutionService(svc, repository.NewWorkflowPluginRunRepository(), roleStore, executor)
+	return handler.NewPluginHandler(svc).WithWorkflowExecution(workflowSvc)
 }
 
 func TestPluginHandler_InstallLocalAndList(t *testing.T) {
@@ -207,6 +236,47 @@ spec:
 	if len(records) != 1 || records[0].Metadata.ID != "repo-search" {
 		t.Fatalf("unexpected records: %+v", records)
 	}
+}
+
+func (handlerRuntimeClient) RefreshToolPluginMCPSurface(_ context.Context, pluginID string) (*model.PluginMCPRefreshResult, error) {
+	return &model.PluginMCPRefreshResult{
+		PluginID:       pluginID,
+		LifecycleState: model.PluginStateActive,
+		RuntimeHost:    model.PluginHostTSBridge,
+		Snapshot: model.PluginMCPCapabilitySnapshot{
+			Transport: "stdio",
+		},
+	}, nil
+}
+
+func (handlerRuntimeClient) InvokeToolPluginMCPTool(_ context.Context, pluginID, toolName string, args map[string]any) (*model.PluginMCPToolCallResult, error) {
+	return &model.PluginMCPToolCallResult{
+		PluginID:  pluginID,
+		Operation: string(model.MCPInteractionCallTool),
+		Result: model.MCPToolCallResult{
+			Content: []model.MCPContentBlock{{Type: "text", Text: toolName}},
+		},
+	}, nil
+}
+
+func (handlerRuntimeClient) ReadToolPluginMCPResource(_ context.Context, pluginID, uri string) (*model.PluginMCPResourceReadResult, error) {
+	return &model.PluginMCPResourceReadResult{
+		PluginID:  pluginID,
+		Operation: string(model.MCPInteractionReadResource),
+		Result: model.MCPResourceReadResult{
+			Contents: []model.MCPResourceContent{{URI: uri}},
+		},
+	}, nil
+}
+
+func (handlerRuntimeClient) GetToolPluginMCPPrompt(_ context.Context, pluginID, name string, args map[string]string) (*model.PluginMCPPromptResult, error) {
+	return &model.PluginMCPPromptResult{
+		PluginID:  pluginID,
+		Operation: string(model.MCPInteractionGetPrompt),
+		Result: model.MCPPromptGetResult{
+			Description: name,
+		},
+	}, nil
 }
 
 func TestPluginHandler_RuntimeStateSync(t *testing.T) {
@@ -573,7 +643,7 @@ spec:
 
 	roleStore := &handlerRoleStore{
 		roles: map[string]*rolepkg.Manifest{
-			"coder": {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+			"coder":    {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
 			"reviewer": {Metadata: model.RoleMetadata{ID: "reviewer", Name: "Reviewer"}},
 		},
 	}
@@ -716,5 +786,127 @@ spec:
 	}
 	if !bytes.Contains(activateRec.Body.Bytes(), []byte("unsupported workflow process")) {
 		t.Fatalf("expected unsupported workflow error, got %s", activateRec.Body.String())
+	}
+}
+
+func TestPluginHandler_StartWorkflowRunAndQueryStatus(t *testing.T) {
+	pluginsDir := t.TempDir()
+	manifestPath := writePluginManifest(t, pluginsDir, "local/release-train.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: release-train
+  name: Release Train
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/release-train.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: coder
+      - id: reviewer
+    steps:
+      - id: implement
+        role: coder
+        action: agent
+        next: [review]
+      - id: review
+        role: reviewer
+        action: review
+`)
+
+	roleStore := &handlerRoleStore{
+		roles: map[string]*rolepkg.Manifest{
+			"coder":    {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+			"reviewer": {Metadata: model.RoleMetadata{ID: "reviewer", Name: "Reviewer"}},
+		},
+	}
+	executor := &handlerWorkflowExecutor{}
+	h := newPluginHandlerWithWorkflowRuntime(t, repository.NewPluginRegistryRepository(), pluginsDir, &handlerGoRuntime{}, roleStore, executor)
+	e := echo.New()
+
+	installBody, _ := json.Marshal(map[string]string{"path": manifestPath})
+	installReq := httptest.NewRequest(http.MethodPost, "/plugins/install", bytes.NewReader(installBody))
+	installReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	installRec := httptest.NewRecorder()
+	installCtx := e.NewContext(installReq, installRec)
+	if err := h.InstallLocal(installCtx); err != nil {
+		t.Fatalf("install workflow: %v", err)
+	}
+
+	activateReq := httptest.NewRequest(http.MethodPost, "/plugins/release-train/activate", nil)
+	activateRec := httptest.NewRecorder()
+	activateCtx := e.NewContext(activateReq, activateRec)
+	activateCtx.SetParamNames("id")
+	activateCtx.SetParamValues("release-train")
+	if err := h.Activate(activateCtx); err != nil {
+		t.Fatalf("activate workflow: %v", err)
+	}
+
+	taskID := uuid.New()
+	memberID := uuid.New()
+	body, _ := json.Marshal(map[string]any{
+		"trigger": map[string]any{
+			"taskId":   taskID.String(),
+			"memberId": memberID.String(),
+		},
+	})
+	req := httptest.NewRequest(http.MethodPost, "/plugins/release-train/workflow-runs", bytes.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("release-train")
+
+	if err := h.StartWorkflowRun(c); err != nil {
+		t.Fatalf("start workflow run: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", rec.Code)
+	}
+
+	var run model.WorkflowPluginRun
+	if err := json.Unmarshal(rec.Body.Bytes(), &run); err != nil {
+		t.Fatalf("decode workflow run: %v", err)
+	}
+	if run.Status != model.WorkflowRunStatusCompleted {
+		t.Fatalf("workflow run status = %s, want completed", run.Status)
+	}
+	if len(executor.calls) != 2 {
+		t.Fatalf("len(executor.calls) = %d, want 2", len(executor.calls))
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/plugins/release-train/workflow-runs", nil)
+	listRec := httptest.NewRecorder()
+	listCtx := e.NewContext(listReq, listRec)
+	listCtx.SetParamNames("id")
+	listCtx.SetParamValues("release-train")
+	if err := h.ListWorkflowRuns(listCtx); err != nil {
+		t.Fatalf("list workflow runs: %v", err)
+	}
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", listRec.Code)
+	}
+
+	var runs []model.WorkflowPluginRun
+	if err := json.Unmarshal(listRec.Body.Bytes(), &runs); err != nil {
+		t.Fatalf("decode workflow run list: %v", err)
+	}
+	if len(runs) != 1 || runs[0].ID != run.ID {
+		t.Fatalf("unexpected workflow runs: %+v", runs)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/plugins/workflow-runs/"+run.ID.String(), nil)
+	getRec := httptest.NewRecorder()
+	getCtx := e.NewContext(getReq, getRec)
+	getCtx.SetParamNames("runId")
+	getCtx.SetParamValues(run.ID.String())
+	if err := h.GetWorkflowRun(getCtx); err != nil {
+		t.Fatalf("get workflow run: %v", err)
+	}
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", getRec.Code)
 	}
 }

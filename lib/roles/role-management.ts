@@ -1,5 +1,14 @@
 import type { RoleManifest } from "@/lib/stores/role-store";
 
+export interface RoleSkillDraft {
+  path: string;
+  autoLoad: boolean;
+}
+
+export interface SerializedRoleDraft extends Partial<RoleManifest> {
+  validationErrors?: string[];
+}
+
 export interface RoleDraft {
   roleId: string;
   name: string;
@@ -12,6 +21,7 @@ export interface RoleDraft {
   backstory: string;
   systemPrompt: string;
   allowedTools: string;
+  skillRows: RoleSkillDraft[];
   languages: string;
   frameworks: string;
   maxTurns: string;
@@ -31,6 +41,8 @@ export interface RoleExecutionSummary {
   budgetLabel: string;
   turnsLabel: string;
   permissionMode: string;
+  skillsLabel: string;
+  keySkillPaths: string[];
   safetyCues: string[];
 }
 
@@ -58,6 +70,10 @@ export function buildRoleDraft(role?: RoleManifest): RoleDraft {
     backstory: role?.identity.backstory ?? "",
     systemPrompt: role?.identity.systemPrompt ?? "",
     allowedTools: stringifyList(role?.capabilities.allowedTools),
+    skillRows: (role?.capabilities.skills ?? []).map((skill) => ({
+      path: skill.path,
+      autoLoad: skill.autoLoad,
+    })),
     languages: stringifyList(role?.capabilities.languages),
     frameworks: stringifyList(role?.capabilities.frameworks),
     maxTurns:
@@ -77,7 +93,9 @@ export function buildRoleDraft(role?: RoleManifest): RoleDraft {
 export function serializeRoleDraft(
   draft: RoleDraft,
   baseRole?: RoleManifest,
-): Partial<RoleManifest> {
+): SerializedRoleDraft {
+  const validationErrors = validateSkillRows(draft.skillRows);
+
   return {
     metadata: {
       ...(baseRole?.metadata ?? {
@@ -109,6 +127,10 @@ export function serializeRoleDraft(
         frameworks: [],
       }),
       allowedTools: parseList(draft.allowedTools),
+      skills: draft.skillRows.map((skill) => ({
+        path: skill.path.trim(),
+        autoLoad: skill.autoLoad,
+      })),
       languages: parseList(draft.languages),
       frameworks: parseList(draft.frameworks),
       maxTurns: draft.maxTurns ? Number(draft.maxTurns) : undefined,
@@ -137,6 +159,7 @@ export function serializeRoleDraft(
       requireReview: draft.requireReview,
     },
     extends: draft.extendsValue || undefined,
+    validationErrors: validationErrors.length > 0 ? validationErrors : undefined,
   };
 }
 
@@ -144,6 +167,11 @@ export function buildRoleExecutionSummary(draft: RoleDraft): RoleExecutionSummar
   const safetyCues: string[] = [];
   const allowedPaths = parseList(draft.allowedPaths);
   const deniedPaths = parseList(draft.deniedPaths);
+  const normalizedSkills = draft.skillRows
+    .map((skill) => ({ path: skill.path.trim(), autoLoad: skill.autoLoad }))
+    .filter((skill) => skill.path.length > 0);
+  const autoLoadCount = normalizedSkills.filter((skill) => skill.autoLoad).length;
+  const onDemandCount = normalizedSkills.length - autoLoadCount;
 
   if (draft.requireReview) {
     safetyCues.push("Review required");
@@ -161,6 +189,31 @@ export function buildRoleExecutionSummary(draft: RoleDraft): RoleExecutionSummar
     budgetLabel: draft.maxBudgetUsd ? `$${Number(draft.maxBudgetUsd).toFixed(2)}` : "Unbounded",
     turnsLabel: draft.maxTurns ? `${draft.maxTurns} turns` : "Default turns",
     permissionMode: draft.permissionMode || "default",
+    skillsLabel:
+      normalizedSkills.length > 0
+        ? `${autoLoadCount} auto-load / ${onDemandCount} on-demand`
+        : "No skills configured",
+    keySkillPaths: normalizedSkills.slice(0, 3).map((skill) => skill.path),
     safetyCues,
   };
+}
+
+function validateSkillRows(skillRows: RoleSkillDraft[]): string[] {
+  const errors: string[] = [];
+  const seen = new Set<string>();
+
+  for (const skill of skillRows) {
+    const path = skill.path.trim();
+    if (!path) {
+      errors.push("Skill path cannot be blank.");
+      continue;
+    }
+    if (seen.has(path)) {
+      errors.push("Skill paths must be unique.");
+      continue;
+    }
+    seen.add(path);
+  }
+
+  return Array.from(new Set(errors));
 }

@@ -61,8 +61,14 @@ jest.mock("@/lib/stores/team-store", () => ({
 }));
 
 jest.mock("@/lib/stores/project-store", () => ({
-  useProjectStore: (selector: (state: { currentProject: typeof currentProject }) => unknown) =>
-    selector({ currentProject }),
+  useProjectStore: (
+    selector: (state: { currentProject: typeof currentProject; projects: typeof currentProject[] }) => unknown
+  ) => selector({ currentProject, projects: [currentProject] }),
+}));
+
+jest.mock("@/lib/stores/dashboard-store", () => ({
+  useDashboardStore: (selector: (state: { selectedProjectId: string }) => unknown) =>
+    selector({ selectedProjectId: "project-1" }),
 }));
 
 jest.mock("@/components/ui/dialog", () => ({
@@ -83,7 +89,7 @@ jest.mock("@/components/ui/select", () => {
         if (!child) return;
         const contentChildren = child.props?.children;
         React.Children.forEach(contentChildren, (grandChild: any) => {
-          if (!grandChild) return;
+          if (!grandChild || grandChild.props?.value === undefined) return;
           options.push({
             value: grandChild.props.value,
             label: grandChild.props.children,
@@ -133,7 +139,9 @@ describe("StartTeamDialog", () => {
       );
     });
 
-    expect(screen.getByText("OpenCode CLI is not installed")).toBeInTheDocument();
+    expect(
+      screen.getByText((content) => content.includes("OpenCode CLI is not installed"))
+    ).toBeInTheDocument();
 
     const selects = screen.getAllByLabelText("team-runtime-select");
     await user.selectOptions(selects[0], "codex");

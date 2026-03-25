@@ -1,0 +1,10 @@
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: fixture-plugin
+  name: Fixture Plugin
+  version: 0.1.0
+spec:
+  runtime: wasm
+  module: ./dist/fixture.wasm
+  abiVersion: v1

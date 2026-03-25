@@ -7,15 +7,16 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/pkg/database"
+	"gorm.io/gorm"
 )
 
 type TaskRepository struct {
-	db DBTX
+	db *gorm.DB
 }
 
-func NewTaskRepository(db DBTX) *TaskRepository {
+func NewTaskRepository(db *gorm.DB) *TaskRepository {
 	return &TaskRepository{db: db}
 }
 
@@ -95,13 +96,13 @@ func (r *TaskRepository) Create(ctx context.Context, task *model.Task) error {
 			blocked_by, planned_start_at, planned_end_at, created_at, updated_at, completed_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW(),NOW(),$23)
 	`
-	_, err = r.db.Exec(ctx, query,
+	if err := r.db.WithContext(ctx).Exec(
+		query,
 		task.ID, task.ProjectID, task.ParentID, task.SprintID, task.Title, task.Description,
 		task.Status, task.Priority, task.AssigneeID, nullableString(task.AssigneeType), task.ReporterID,
 		task.Labels, task.BudgetUsd, task.SpentUsd, task.AgentBranch, task.AgentWorktree,
 		task.AgentSessionID, task.PRUrl, task.PRNumber, blockedByIDs, task.PlannedStartAt, task.PlannedEndAt, task.CompletedAt,
-	)
-	if err != nil {
+	).Error; err != nil {
 		return fmt.Errorf("create task: %w", err)
 	}
 	return nil
@@ -112,9 +113,9 @@ func (r *TaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Task
 		return nil, ErrDatabaseUnavailable
 	}
 	query := `SELECT ` + taskColumns + ` FROM tasks LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id WHERE tasks.id = $1`
-	t, err := scanTask(r.db.QueryRow(ctx, query, id))
+	t, err := scanTask(r.db.WithContext(ctx).Raw(query, id).Row())
 	if err != nil {
-		return nil, fmt.Errorf("get task by id: %w", err)
+		return nil, fmt.Errorf("get task by id: %w", normalizeRepositoryError(err))
 	}
 	return t, nil
 }
@@ -124,9 +125,9 @@ func (r *TaskRepository) GetByPRURL(ctx context.Context, prURL string) (*model.T
 		return nil, ErrDatabaseUnavailable
 	}
 	query := `SELECT ` + taskColumns + ` FROM tasks LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id WHERE tasks.pr_url = $1 ORDER BY tasks.updated_at DESC LIMIT 1`
-	t, err := scanTask(r.db.QueryRow(ctx, query, prURL))
+	t, err := scanTask(r.db.WithContext(ctx).Raw(query, prURL).Row())
 	if err != nil {
-		return nil, fmt.Errorf("get task by pr url: %w", err)
+		return nil, fmt.Errorf("get task by pr url: %w", normalizeRepositoryError(err))
 	}
 	return t, nil
 }
@@ -172,20 +173,17 @@ func (r *TaskRepository) List(ctx context.Context, projectID uuid.UUID, q model.
 
 	whereClause := "WHERE " + strings.Join(where, " AND ")
 
-	// Count total.
 	countQuery := "SELECT COUNT(*) FROM tasks " + whereClause
 	var total int
-	if err := r.db.QueryRow(ctx, countQuery, args...).Scan(&total); err != nil {
+	if err := r.db.WithContext(ctx).Raw(countQuery, args...).Row().Scan(&total); err != nil {
 		return nil, 0, fmt.Errorf("count tasks: %w", err)
 	}
 
-	// Sort.
 	sort := "tasks.created_at DESC"
 	if q.Sort != "" {
 		sort = q.Sort
 	}
 
-	// Pagination.
 	limit := q.Limit
 	if limit <= 0 {
 		limit = 20
@@ -199,7 +197,7 @@ func (r *TaskRepository) List(ctx context.Context, projectID uuid.UUID, q model.
 	listQuery := fmt.Sprintf("SELECT %s FROM tasks LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id %s ORDER BY %s LIMIT %d OFFSET %d",
 		taskColumns, whereClause, sort, limit, offset)
 
-	rows, err := r.db.Query(ctx, listQuery, args...)
+	rows, err := r.db.WithContext(ctx).Raw(listQuery, args...).Rows()
 	if err != nil {
 		return nil, 0, fmt.Errorf("list tasks: %w", err)
 	}
@@ -225,7 +223,7 @@ func (r *TaskRepository) ListBySprint(ctx context.Context, projectID uuid.UUID, 
 		LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id
 		WHERE tasks.project_id = $1 AND tasks.sprint_id = $2
 		ORDER BY tasks.created_at ASC`
-	rows, err := r.db.Query(ctx, query, projectID, sprintID)
+	rows, err := r.db.WithContext(ctx).Raw(query, projectID, sprintID).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("list sprint tasks: %w", err)
 	}
@@ -273,8 +271,7 @@ func (r *TaskRepository) Update(ctx context.Context, id uuid.UUID, req *model.Up
 		END,
 		updated_at = NOW()
 		WHERE id = $9`
-	_, err = r.db.Exec(
-		ctx,
+	if err := r.db.WithContext(ctx).Exec(
 		query,
 		req.Title,
 		req.Description,
@@ -285,8 +282,7 @@ func (r *TaskRepository) Update(ctx context.Context, id uuid.UUID, req *model.Up
 		req.PlannedEndAt,
 		blockedByIDs,
 		id,
-	)
-	if err != nil {
+	).Error; err != nil {
 		return fmt.Errorf("update task: %w", err)
 	}
 	return nil
@@ -296,8 +292,7 @@ func (r *TaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	_, err := r.db.Exec(ctx, `DELETE FROM tasks WHERE id = $1`, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Exec(`DELETE FROM tasks WHERE id = $1`, id).Error; err != nil {
 		return fmt.Errorf("delete task: %w", err)
 	}
 	return nil
@@ -307,11 +302,10 @@ func (r *TaskRepository) TransitionStatus(ctx context.Context, id uuid.UUID, new
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	// Get current status first.
+
 	var currentStatus string
-	err := r.db.QueryRow(ctx, `SELECT status FROM tasks WHERE id = $1`, id).Scan(&currentStatus)
-	if err != nil {
-		return fmt.Errorf("get task status: %w", err)
+	if err := r.db.WithContext(ctx).Raw(`SELECT status FROM tasks WHERE id = $1`, id).Row().Scan(&currentStatus); err != nil {
+		return fmt.Errorf("get task status: %w", normalizeRepositoryError(err))
 	}
 	if err := model.ValidateTransition(currentStatus, newStatus); err != nil {
 		return err
@@ -321,8 +315,7 @@ func (r *TaskRepository) TransitionStatus(ctx context.Context, id uuid.UUID, new
 	if newStatus == model.TaskStatusDone {
 		query = `UPDATE tasks SET status = $1, updated_at = NOW(), completed_at = NOW() WHERE id = $2`
 	}
-	_, err = r.db.Exec(ctx, query, newStatus, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Exec(query, newStatus, id).Error; err != nil {
 		return fmt.Errorf("transition task status: %w", err)
 	}
 	return nil
@@ -333,8 +326,7 @@ func (r *TaskRepository) UpdateAssignee(ctx context.Context, id uuid.UUID, assig
 		return ErrDatabaseUnavailable
 	}
 	query := `UPDATE tasks SET assignee_id = $1, assignee_type = $2, updated_at = NOW() WHERE id = $3`
-	_, err := r.db.Exec(ctx, query, assigneeID, assigneeType, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Exec(query, assigneeID, assigneeType, id).Error; err != nil {
 		return fmt.Errorf("update task assignee: %w", err)
 	}
 	return nil
@@ -350,8 +342,7 @@ func (r *TaskRepository) UpdateRuntime(ctx context.Context, id uuid.UUID, branch
 		agent_session_id = $3,
 		updated_at = NOW()
 		WHERE id = $4`
-	_, err := r.db.Exec(ctx, query, branch, worktreePath, sessionID, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Exec(query, branch, worktreePath, sessionID, id).Error; err != nil {
 		return fmt.Errorf("update task runtime: %w", err)
 	}
 	return nil
@@ -367,8 +358,7 @@ func (r *TaskRepository) ClearRuntime(ctx context.Context, id uuid.UUID) error {
 		agent_session_id = '',
 		updated_at = NOW()
 		WHERE id = $1`
-	_, err := r.db.Exec(ctx, query, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Exec(query, id).Error; err != nil {
 		return fmt.Errorf("clear task runtime: %w", err)
 	}
 	return nil
@@ -386,8 +376,7 @@ func (r *TaskRepository) UpdateSpent(ctx context.Context, id uuid.UUID, spentUsd
 		END,
 		updated_at = NOW()
 		WHERE id = $3`
-	_, err := r.db.Exec(ctx, query, spentUsd, status, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Exec(query, spentUsd, status, id).Error; err != nil {
 		return fmt.Errorf("update task spent: %w", err)
 	}
 	return nil
@@ -402,7 +391,7 @@ func (r *TaskRepository) ListOpenForProgress(ctx context.Context) ([]*model.Task
 		LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id
 		WHERE tasks.status NOT IN ($1, $2)
 		ORDER BY tasks.updated_at DESC`
-	rows, err := r.db.Query(ctx, query, model.TaskStatusDone, model.TaskStatusCancelled)
+	rows, err := r.db.WithContext(ctx).Raw(query, model.TaskStatusDone, model.TaskStatusCancelled).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("list open tasks for progress: %w", err)
 	}
@@ -424,7 +413,7 @@ func (r *TaskRepository) HasChildren(ctx context.Context, parentID uuid.UUID) (b
 		return false, ErrDatabaseUnavailable
 	}
 	var count int
-	if err := r.db.QueryRow(ctx, `SELECT COUNT(*) FROM tasks WHERE parent_id = $1`, parentID).Scan(&count); err != nil {
+	if err := r.db.WithContext(ctx).Raw(`SELECT COUNT(*) FROM tasks WHERE parent_id = $1`, parentID).Row().Scan(&count); err != nil {
 		return false, fmt.Errorf("count child tasks: %w", err)
 	}
 	return count > 0, nil
@@ -439,7 +428,7 @@ func (r *TaskRepository) ListDependents(ctx context.Context, blockerID uuid.UUID
 		LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id
 		WHERE $1 = ANY(tasks.blocked_by)
 		ORDER BY tasks.updated_at DESC`
-	rows, err := r.db.Query(ctx, query, blockerID)
+	rows, err := r.db.WithContext(ctx).Raw(query, blockerID).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("list dependents: %w", err)
 	}
@@ -464,29 +453,6 @@ func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.Task
 		return []*model.Task{}, nil
 	}
 
-	type beginner interface {
-		Begin(context.Context) (pgx.Tx, error)
-	}
-
-	var (
-		executor DBTX = r.db
-		tx       pgx.Tx
-		err      error
-		commit   bool
-	)
-	if b, ok := r.db.(beginner); ok {
-		tx, err = b.Begin(ctx)
-		if err != nil {
-			return nil, fmt.Errorf("begin child task transaction: %w", err)
-		}
-		executor = tx
-		defer func() {
-			if !commit {
-				_ = tx.Rollback(ctx)
-			}
-		}()
-	}
-
 	created := make([]*model.Task, 0, len(inputs))
 	query := `
 		INSERT INTO tasks (id, project_id, parent_id, sprint_id, title, description, status, priority,
@@ -496,43 +462,41 @@ func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.Task
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW(),NOW(),$23)
 	`
 
-	for _, input := range inputs {
-		task := &model.Task{
-			ID:          uuid.New(),
-			ProjectID:   input.ProjectID,
-			ParentID:    &input.ParentID,
-			SprintID:    input.SprintID,
-			Title:       input.Title,
-			Description: input.Description,
-			Status:      model.TaskStatusInbox,
-			Priority:    input.Priority,
-			ReporterID:  input.ReporterID,
-			Labels:      append([]string(nil), input.Labels...),
-			BudgetUsd:   input.BudgetUSD,
-			BlockedBy:   []string{},
+	err := database.WithTx(ctx, r.db, func(tx *gorm.DB) error {
+		for _, input := range inputs {
+			task := &model.Task{
+				ID:          uuid.New(),
+				ProjectID:   input.ProjectID,
+				ParentID:    &input.ParentID,
+				SprintID:    input.SprintID,
+				Title:       input.Title,
+				Description: input.Description,
+				Status:      model.TaskStatusInbox,
+				Priority:    input.Priority,
+				ReporterID:  input.ReporterID,
+				Labels:      append([]string(nil), input.Labels...),
+				BudgetUsd:   input.BudgetUSD,
+				BlockedBy:   []string{},
+			}
+			blockedByIDs, err := normalizeTaskBlockedBy(task.BlockedBy)
+			if err != nil {
+				return fmt.Errorf("create child task: %w", err)
+			}
+			if err := tx.WithContext(ctx).Exec(
+				query,
+				task.ID, task.ProjectID, task.ParentID, task.SprintID, task.Title, task.Description,
+				task.Status, task.Priority, task.AssigneeID, nullableString(task.AssigneeType), task.ReporterID,
+				task.Labels, task.BudgetUsd, task.SpentUsd, task.AgentBranch, task.AgentWorktree,
+				task.AgentSessionID, task.PRUrl, task.PRNumber, blockedByIDs, task.PlannedStartAt, task.PlannedEndAt, task.CompletedAt,
+			).Error; err != nil {
+				return fmt.Errorf("create child task: %w", err)
+			}
+			created = append(created, task)
 		}
-		blockedByIDs, err := normalizeTaskBlockedBy(task.BlockedBy)
-		if err != nil {
-			return nil, fmt.Errorf("create child task: %w", err)
-		}
-
-		_, err = executor.Exec(ctx, query,
-			task.ID, task.ProjectID, task.ParentID, task.SprintID, task.Title, task.Description,
-			task.Status, task.Priority, task.AssigneeID, nullableString(task.AssigneeType), task.ReporterID,
-			task.Labels, task.BudgetUsd, task.SpentUsd, task.AgentBranch, task.AgentWorktree,
-			task.AgentSessionID, task.PRUrl, task.PRNumber, blockedByIDs, task.PlannedStartAt, task.PlannedEndAt, task.CompletedAt,
-		)
-		if err != nil {
-			return nil, fmt.Errorf("create child task: %w", err)
-		}
-		created = append(created, task)
-	}
-
-	if tx != nil {
-		if err := tx.Commit(ctx); err != nil {
-			return nil, fmt.Errorf("commit child task transaction: %w", err)
-		}
-		commit = true
+		return nil
+	})
+	if err != nil {
+		return nil, err
 	}
 
 	return created, nil
@@ -552,7 +516,6 @@ func normalizeOptionalTaskBlockedBy(blockedBy *[]string) (any, error) {
 	return normalizeTaskBlockedBy(*blockedBy)
 }
 
-// TaskDateCount holds a count for a specific date.
 type TaskDateCount struct {
 	Date  time.Time
 	Count int
@@ -573,7 +536,7 @@ func (r *TaskRepository) CountCompletedByDateRange(ctx context.Context, from, to
 	}
 	query += ` GROUP BY d ORDER BY d`
 
-	rows, err := r.db.Query(ctx, query, args...)
+	rows, err := r.db.WithContext(ctx).Raw(query, args...).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("count completed by date range: %w", err)
 	}

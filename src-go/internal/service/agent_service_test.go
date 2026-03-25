@@ -15,7 +15,9 @@ import (
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
+	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/pool"
 	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/worktree"
@@ -103,6 +105,7 @@ type mockAgentBridge struct {
 	pauseTaskID  string
 	pauseReason  string
 	resumeReq    service.BridgeExecuteRequest
+	poolSummary  *bridgeclient.PoolSummaryResponse
 }
 
 func (m *mockAgentBridge) Execute(_ context.Context, req service.BridgeExecuteRequest) (*service.BridgeExecuteResponse, error) {
@@ -115,6 +118,10 @@ func (m *mockAgentBridge) Execute(_ context.Context, req service.BridgeExecuteRe
 
 func (m *mockAgentBridge) GetStatus(_ context.Context, _ string) (*service.BridgeStatusResponse, error) {
 	return nil, nil
+}
+
+func (m *mockAgentBridge) GetPoolSummary(_ context.Context) (*bridgeclient.PoolSummaryResponse, error) {
+	return m.poolSummary, nil
 }
 
 func (m *mockAgentBridge) Cancel(_ context.Context, taskID, reason string) error {
@@ -136,6 +143,7 @@ func (m *mockAgentBridge) Resume(_ context.Context, req service.BridgeExecuteReq
 
 type mockAgentTaskRepo struct {
 	task             *model.Task
+	tasks            map[uuid.UUID]*model.Task
 	updatedBranch    string
 	updatedWorktree  string
 	updatedSession   string
@@ -146,6 +154,14 @@ type mockAgentTaskRepo struct {
 }
 
 func (m *mockAgentTaskRepo) GetByID(_ context.Context, id uuid.UUID) (*model.Task, error) {
+	if m.tasks != nil {
+		task, ok := m.tasks[id]
+		if !ok {
+			return nil, service.ErrAgentTaskNotFound
+		}
+		cloned := *task
+		return &cloned, nil
+	}
 	if m.task == nil || m.task.ID != id {
 		return nil, service.ErrAgentTaskNotFound
 	}
@@ -153,10 +169,17 @@ func (m *mockAgentTaskRepo) GetByID(_ context.Context, id uuid.UUID) (*model.Tas
 	return &cloned, nil
 }
 
-func (m *mockAgentTaskRepo) UpdateRuntime(_ context.Context, _ uuid.UUID, branch, worktreePath, sessionID string) error {
+func (m *mockAgentTaskRepo) UpdateRuntime(_ context.Context, id uuid.UUID, branch, worktreePath, sessionID string) error {
 	m.updatedBranch = branch
 	m.updatedWorktree = worktreePath
 	m.updatedSession = sessionID
+	if m.tasks != nil {
+		if task, ok := m.tasks[id]; ok {
+			task.AgentBranch = branch
+			task.AgentWorktree = worktreePath
+			task.AgentSessionID = sessionID
+		}
+	}
 	if m.task != nil {
 		m.task.AgentBranch = branch
 		m.task.AgentWorktree = worktreePath
@@ -165,8 +188,15 @@ func (m *mockAgentTaskRepo) UpdateRuntime(_ context.Context, _ uuid.UUID, branch
 	return nil
 }
 
-func (m *mockAgentTaskRepo) ClearRuntime(_ context.Context, _ uuid.UUID) error {
+func (m *mockAgentTaskRepo) ClearRuntime(_ context.Context, id uuid.UUID) error {
 	m.clearCalls++
+	if m.tasks != nil {
+		if task, ok := m.tasks[id]; ok {
+			task.AgentBranch = ""
+			task.AgentWorktree = ""
+			task.AgentSessionID = ""
+		}
+	}
 	if m.task != nil {
 		m.task.AgentBranch = ""
 		m.task.AgentWorktree = ""
@@ -175,10 +205,18 @@ func (m *mockAgentTaskRepo) ClearRuntime(_ context.Context, _ uuid.UUID) error {
 	return nil
 }
 
-func (m *mockAgentTaskRepo) UpdateSpent(_ context.Context, _ uuid.UUID, spentUsd float64, status string) error {
+func (m *mockAgentTaskRepo) UpdateSpent(_ context.Context, id uuid.UUID, spentUsd float64, status string) error {
 	m.updateSpentCalls++
 	m.updatedSpent = spentUsd
 	m.updatedStatus = status
+	if m.tasks != nil {
+		if task, ok := m.tasks[id]; ok {
+			task.SpentUsd = spentUsd
+			if status != "" {
+				task.Status = status
+			}
+		}
+	}
 	if m.task != nil {
 		m.task.SpentUsd = spentUsd
 		if status != "" {
@@ -210,6 +248,107 @@ func (m *mockAgentRoleStore) Get(id string) (*rolepkg.Manifest, error) {
 		return &cloned, nil
 	}
 	return nil, os.ErrNotExist
+}
+
+type mockAgentQueueStore struct {
+	queued    []*model.AgentPoolQueueEntry
+	completed []string
+	next      *model.AgentPoolQueueEntry
+}
+
+func (m *mockAgentQueueStore) QueueAgentAdmission(_ context.Context, input service.QueueAgentAdmissionInput) (*model.AgentPoolQueueEntry, error) {
+	entry := &model.AgentPoolQueueEntry{
+		EntryID:    uuid.NewString(),
+		ProjectID:  input.ProjectID.String(),
+		TaskID:     input.TaskID.String(),
+		MemberID:   input.MemberID.String(),
+		Status:     model.AgentPoolQueueStatusQueued,
+		Reason:     "agent pool is at capacity",
+		Runtime:    input.Runtime,
+		Provider:   input.Provider,
+		Model:      input.Model,
+		RoleID:     input.RoleID,
+		BudgetUSD:  input.BudgetUSD,
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
+	}
+	m.queued = append(m.queued, entry)
+	return entry, nil
+}
+
+func (m *mockAgentQueueStore) CountQueuedByProject(_ context.Context, projectID uuid.UUID) (int, error) {
+	count := 0
+	for _, entry := range m.queued {
+		if entry.ProjectID == projectID.String() && entry.Status == model.AgentPoolQueueStatusQueued {
+			count++
+		}
+	}
+	return count, nil
+}
+
+func (m *mockAgentQueueStore) ListAllQueued(_ context.Context, limit int) ([]*model.AgentPoolQueueEntry, error) {
+	if limit <= 0 || limit > len(m.queued) {
+		limit = len(m.queued)
+	}
+	results := make([]*model.AgentPoolQueueEntry, 0, limit)
+	for i := 0; i < len(m.queued) && len(results) < limit; i++ {
+		entry := m.queued[i]
+		if entry == nil || entry.Status != model.AgentPoolQueueStatusQueued {
+			continue
+		}
+		cloned := *entry
+		results = append(results, &cloned)
+	}
+	return results, nil
+}
+
+func (m *mockAgentQueueStore) ListQueuedByProject(_ context.Context, projectID uuid.UUID, limit int) ([]*model.AgentPoolQueueEntry, error) {
+	if limit <= 0 {
+		limit = len(m.queued)
+	}
+	var results []*model.AgentPoolQueueEntry
+	for _, entry := range m.queued {
+		if entry.ProjectID == projectID.String() && entry.Status == model.AgentPoolQueueStatusQueued {
+			cloned := *entry
+			results = append(results, &cloned)
+			if len(results) == limit {
+				break
+			}
+		}
+	}
+	return results, nil
+}
+
+func (m *mockAgentQueueStore) ReserveNextQueuedByProject(_ context.Context, projectID uuid.UUID) (*model.AgentPoolQueueEntry, error) {
+	if m.next != nil && m.next.ProjectID == projectID.String() {
+		cloned := *m.next
+		return &cloned, nil
+	}
+	for _, entry := range m.queued {
+		if entry.ProjectID == projectID.String() && entry.Status == model.AgentPoolQueueStatusQueued {
+			entry.Status = model.AgentPoolQueueStatusAdmitted
+			cloned := *entry
+			return &cloned, nil
+		}
+	}
+	return nil, nil
+}
+
+func (m *mockAgentQueueStore) CompleteQueuedEntry(_ context.Context, entryID string, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID) error {
+	m.completed = append(m.completed, entryID+":"+string(status)+":"+reason)
+	for _, entry := range m.queued {
+		if entry.EntryID != entryID {
+			continue
+		}
+		entry.Status = status
+		entry.Reason = reason
+		if runID != nil {
+			id := runID.String()
+			entry.AgentRunID = &id
+		}
+		entry.UpdatedAt = time.Now().UTC()
+	}
+	return nil
 }
 
 type mockWorktreeManager struct {
@@ -923,6 +1062,115 @@ func TestAgentService_UpdateCost_BudgetExceededCancelsRunAndKeepsRuntimeForResum
 	}
 	if bridge.resumeReq.SessionID != taskRepo.task.AgentSessionID {
 		t.Fatalf("resume session = %s, want %s", bridge.resumeReq.SessionID, taskRepo.task.AgentSessionID)
+	}
+}
+
+func TestAgentService_PoolStatsIncludesQueuedEntries(t *testing.T) {
+	projectID := uuid.New()
+	queueStore := &mockAgentQueueStore{
+		queued: []*model.AgentPoolQueueEntry{
+			{
+				EntryID:   uuid.NewString(),
+				ProjectID: projectID.String(),
+				TaskID:    uuid.NewString(),
+				MemberID:  uuid.NewString(),
+				Status:    model.AgentPoolQueueStatusQueued,
+			},
+		},
+	}
+
+	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), &mockAgentBridge{
+		poolSummary: &bridgeclient.PoolSummaryResponse{
+			Active:        1,
+			Max:           2,
+			WarmTotal:     1,
+			WarmAvailable: 0,
+		},
+	}, &mockWorktreeManager{}, nil)
+	svc.SetPool(pool.NewPool(2))
+	svc.SetQueueStore(queueStore)
+
+	stats := svc.PoolStats(context.Background())
+	if stats.Queued != 1 {
+		t.Fatalf("queued = %d, want 1", stats.Queued)
+	}
+	if stats.Warm != 1 {
+		t.Fatalf("warm = %d, want 1", stats.Warm)
+	}
+}
+
+func TestAgentService_UpdateStatusPromotesQueuedAdmissionAfterTerminalRelease(t *testing.T) {
+	projectID := uuid.New()
+	runID := uuid.New()
+	completedTaskID := uuid.New()
+	queuedTaskID := uuid.New()
+	memberID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{
+		ID:       runID,
+		TaskID:   completedTaskID,
+		MemberID: memberID,
+		Status:   model.AgentRunStatusRunning,
+	}
+	taskRepo := &mockAgentTaskRepo{
+		tasks: map[uuid.UUID]*model.Task{
+			completedTaskID: {
+				ID:             completedTaskID,
+				ProjectID:      projectID,
+				Title:          "Completed task",
+				BudgetUsd:      5,
+				AgentBranch:    "agent/" + completedTaskID.String(),
+				AgentWorktree:  "/tmp/worktree/" + completedTaskID.String(),
+				AgentSessionID: "session-complete",
+			},
+			queuedTaskID: {
+				ID:          queuedTaskID,
+				ProjectID:   projectID,
+				Title:       "Queued task",
+				Description: "Should be promoted",
+				BudgetUsd:   4,
+			},
+		},
+	}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	bridge := &mockAgentBridge{}
+	worktrees := &mockWorktreeManager{
+		allocation: &worktree.Allocation{
+			ProjectSlug: "agentforge",
+			TaskID:      queuedTaskID.String(),
+			Branch:      "agent/" + queuedTaskID.String(),
+			Path:        "/tmp/worktree/" + queuedTaskID.String(),
+		},
+	}
+	queueStore := &mockAgentQueueStore{
+		next: &model.AgentPoolQueueEntry{
+			EntryID:    uuid.NewString(),
+			ProjectID:  projectID.String(),
+			TaskID:     queuedTaskID.String(),
+			MemberID:   memberID.String(),
+			Status:     model.AgentPoolQueueStatusQueued,
+			Runtime:    "codex",
+			Provider:   "openai",
+			Model:      "gpt-5-codex",
+			BudgetUSD:  4,
+			CreatedAt:  time.Now().UTC(),
+			UpdatedAt:  time.Now().UTC(),
+		},
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc.SetPool(pool.NewPool(2))
+	svc.SetQueueStore(queueStore)
+
+	if err := svc.UpdateStatus(context.Background(), runID, model.AgentRunStatusCompleted); err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+
+	if bridge.lastExecute.TaskID != queuedTaskID.String() {
+		t.Fatalf("bridge execute task id = %q, want %q", bridge.lastExecute.TaskID, queuedTaskID.String())
+	}
+	if len(queueStore.completed) == 0 {
+		t.Fatal("expected queued entry completion after promotion")
 	}
 }
 

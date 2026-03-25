@@ -1,6 +1,7 @@
 package role_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -57,6 +58,11 @@ capabilities:
   packages: [web-development]
   tools:
     built_in: [Read, Edit, Bash]
+  skills:
+    - path: skills/react
+      auto_load: true
+    - path: skills/testing
+      auto_load: false
   max_concurrency: 2
 security:
   permission_mode: default
@@ -131,6 +137,28 @@ func TestParseCanonicalManifestSupportsPRDShape(t *testing.T) {
 	if got := manifest.Capabilities.AllowedTools; len(got) != 3 || got[0] != "Read" {
 		t.Fatalf("AllowedTools = %v, want built_in tools to be normalized", got)
 	}
+
+	payload, err := json.Marshal(manifest)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	capabilities := decoded["capabilities"].(map[string]any)
+	skills, ok := capabilities["skills"].([]any)
+	if !ok || len(skills) != 2 {
+		t.Fatalf("capabilities.skills = %#v, want 2 structured skill entries", capabilities["skills"])
+	}
+	firstSkill := skills[0].(map[string]any)
+	if firstSkill["path"] != "skills/react" {
+		t.Fatalf("first skill path = %#v, want skills/react", firstSkill["path"])
+	}
+	if firstSkill["autoLoad"] != true {
+		t.Fatalf("first skill autoLoad = %#v, want true", firstSkill["autoLoad"])
+	}
 }
 
 func TestParseLegacyManifestNormalizesCurrentFlatShape(t *testing.T) {
@@ -189,5 +217,31 @@ func TestParseFileMissingPath(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "read role file") {
 		t.Fatalf("ParseFile() error = %q, want wrapped read message", err.Error())
+	}
+}
+
+func TestParseRejectsBlankOrDuplicateSkillPaths(t *testing.T) {
+	_, err := role.Parse([]byte(`
+apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: broken-role
+  name: Broken Role
+identity:
+  role: Broken Role
+capabilities:
+  skills:
+    - path: skills/react
+      auto_load: true
+    - path: " "
+      auto_load: false
+    - path: skills/react
+      auto_load: false
+`))
+	if err == nil {
+		t.Fatal("Parse() error = nil, want invalid skills failure")
+	}
+	if !strings.Contains(err.Error(), "skill") {
+		t.Fatalf("Parse() error = %q, want skill validation failure", err.Error())
 	}
 }

@@ -13,6 +13,7 @@ import {
   buildRoleExecutionSummary,
   serializeRoleDraft,
   type RoleDraft,
+  type RoleSkillDraft,
 } from "@/lib/roles/role-management";
 
 interface RoleWorkspaceProps {
@@ -102,9 +103,40 @@ export function RoleWorkspace({
     () => buildRoleExecutionSummary(draft),
     [draft],
   );
+  const draftValidationErrors = useMemo(
+    () => serializeRoleDraft(draft, selectedRole).validationErrors ?? [],
+    [draft, selectedRole],
+  );
 
   const updateDraft = <K extends keyof RoleDraft>(key: K, value: RoleDraft[K]) => {
     setDraft((current) => ({ ...current, [key]: value }));
+  };
+
+  const updateSkillRow = (
+    index: number,
+    field: keyof RoleSkillDraft,
+    value: RoleSkillDraft[keyof RoleSkillDraft],
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      skillRows: current.skillRows.map((skill, skillIndex) =>
+        skillIndex === index ? { ...skill, [field]: value } : skill,
+      ),
+    }));
+  };
+
+  const addSkillRow = () => {
+    setDraft((current) => ({
+      ...current,
+      skillRows: [...current.skillRows, { path: "", autoLoad: false }],
+    }));
+  };
+
+  const removeSkillRow = (index: number) => {
+    setDraft((current) => ({
+      ...current,
+      skillRows: current.skillRows.filter((_, skillIndex) => skillIndex !== index),
+    }));
   };
 
   const handleNewRole = () => {
@@ -144,10 +176,15 @@ export function RoleWorkspace({
     setSaving(true);
     try {
       const payload = serializeRoleDraft(draft, selectedRole);
+      if (payload.validationErrors && payload.validationErrors.length > 0) {
+        return;
+      }
+      const requestPayload = { ...payload };
+      delete requestPayload.validationErrors;
       if (mode === "edit" && selectedRole) {
-        await onUpdateRole(selectedRole.metadata.id, payload);
+        await onUpdateRole(selectedRole.metadata.id, requestPayload);
       } else {
-        await onCreateRole(payload);
+        await onCreateRole(requestPayload);
       }
     } finally {
       setSaving(false);
@@ -368,6 +405,72 @@ export function RoleWorkspace({
                 </div>
               </RoleSection>
 
+              <RoleSection title="Skills">
+                <div className="flex items-center justify-between">
+                  <p className="text-sm text-muted-foreground">
+                    Declare reusable skill references and whether they should auto-load for this role.
+                  </p>
+                  <Button type="button" variant="outline" size="sm" onClick={addSkillRow}>
+                    Add Skill
+                  </Button>
+                </div>
+                <div className="grid gap-4">
+                  {draft.skillRows.length > 0 ? (
+                    draft.skillRows.map((skill, index) => (
+                      <div
+                        key={`skill-row-${index}`}
+                        className="grid gap-3 rounded-md border p-3 md:grid-cols-[minmax(0,1fr)_auto_auto]"
+                      >
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`skill-path-${index}`}>Skill Path</Label>
+                          <Input
+                            id={`skill-path-${index}`}
+                            aria-label="Skill Path"
+                            value={skill.path}
+                            onChange={(event) => updateSkillRow(index, "path", event.target.value)}
+                            placeholder="skills/react"
+                          />
+                        </div>
+                        <div className="flex items-center gap-2 pt-7">
+                          <input
+                            id={`skill-auto-load-${index}`}
+                            type="checkbox"
+                            checked={skill.autoLoad}
+                            onChange={(event) =>
+                              updateSkillRow(index, "autoLoad", event.target.checked)
+                            }
+                          />
+                          <Label htmlFor={`skill-auto-load-${index}`}>Auto-load skill</Label>
+                        </div>
+                        <div className="flex items-center justify-end pt-6">
+                          <Button
+                            type="button"
+                            variant="ghost"
+                            size="sm"
+                            onClick={() => removeSkillRow(index)}
+                          >
+                            Remove
+                          </Button>
+                        </div>
+                      </div>
+                    ))
+                  ) : (
+                    <p className="text-sm text-muted-foreground">
+                      No skills configured for this role yet.
+                    </p>
+                  )}
+                </div>
+                {draftValidationErrors.length > 0 ? (
+                  <div className="grid gap-1">
+                    {draftValidationErrors.map((errorMessage) => (
+                      <p key={errorMessage} className="text-sm text-destructive">
+                        {errorMessage}
+                      </p>
+                    ))}
+                  </div>
+                ) : null}
+              </RoleSection>
+
               <RoleSection title="Knowledge">
                 <div className="grid gap-4 md:grid-cols-3">
                   <TextAreaField
@@ -450,7 +553,7 @@ export function RoleWorkspace({
           <CardHeader>
             <CardTitle>Execution Summary</CardTitle>
             <CardDescription>
-              Review the draft's execution intent and governance settings before saving.
+              Review the draft execution intent and governance settings before saving.
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-3 text-sm">
@@ -461,6 +564,15 @@ export function RoleWorkspace({
             <div>
               <p className="font-medium">Allowed tools</p>
               <p className="text-muted-foreground">{executionSummary.toolsLabel}</p>
+            </div>
+            <div>
+              <p className="font-medium">Skills</p>
+              <p className="text-muted-foreground">{executionSummary.skillsLabel}</p>
+              <p className="text-muted-foreground">
+                {executionSummary.keySkillPaths.length > 0
+                  ? executionSummary.keySkillPaths.join(", ")
+                  : "No key skills selected"}
+              </p>
             </div>
             <div className="grid gap-3 sm:grid-cols-2">
               <div>

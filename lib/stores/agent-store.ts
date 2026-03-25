@@ -23,6 +23,7 @@ interface AgentApiShape {
   roleId?: string;
   roleName?: string;
   status: AgentStatus;
+  runtime?: string;
   provider?: string;
   model?: string;
   inputTokens?: number;
@@ -44,6 +45,33 @@ interface AgentApiShape {
   teamRole?: string;
 }
 
+interface AgentPoolQueueEntry {
+  entryId: string;
+  projectId: string;
+  taskId: string;
+  memberId: string;
+  status: string;
+  reason: string;
+  runtime?: string;
+  provider?: string;
+  model?: string;
+  roleId?: string;
+  budgetUsd?: number;
+  agentRunId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+interface AgentDispatchResponse {
+  task?: { id: string };
+  dispatch?: {
+    status?: string;
+    reason?: string;
+    run?: AgentApiShape;
+    queue?: AgentPoolQueueEntry;
+  };
+}
+
 export interface Agent {
   id: string;
   taskId: string;
@@ -52,6 +80,7 @@ export interface Agent {
   roleId: string;
   roleName: string;
   status: AgentStatus;
+  runtime: string;
   provider: string;
   model: string;
   turns: number;
@@ -75,6 +104,10 @@ export interface AgentPoolSummary {
   max: number;
   available: number;
   pausedResumable: number;
+  queued?: number;
+  warm?: number;
+  degraded?: boolean;
+  queue?: AgentPoolQueueEntry[];
 }
 
 export interface SpawnAgentOptions {
@@ -116,6 +149,7 @@ function normalizeAgent(agent: AgentApiShape | Agent): Agent {
     roleId: agent.roleId ?? "",
     roleName: agent.roleName ?? agent.roleId ?? "Agent",
     status: agent.status,
+    runtime: agent.runtime ?? "",
     provider: agent.provider ?? "",
     model: agent.model ?? "",
     turns: agent.turnCount ?? 0,
@@ -172,6 +206,10 @@ function syncPoolWithAgents(
     max: pool.max,
     available: Math.max(pool.max - active, 0),
     pausedResumable,
+    queued: pool.queued ?? 0,
+    warm: pool.warm ?? 0,
+    degraded: pool.degraded ?? false,
+    queue: pool.queue ?? [],
   };
 }
 
@@ -222,7 +260,7 @@ export const useAgentStore = create<AgentState>()((set) => ({
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
     const api = createApiClient(API_URL);
-    const { data } = await api.post<AgentApiShape>(
+    const { data } = await api.post<AgentApiShape | AgentDispatchResponse>(
       "/api/v1/agents/spawn",
       {
         taskId,
@@ -235,7 +273,33 @@ export const useAgentStore = create<AgentState>()((set) => ({
       },
       { token }
     );
-    const agent = normalizeAgent(data);
+    if ("dispatch" in data && data.dispatch?.status === "queued" && data.dispatch.queue) {
+      set((state) => {
+        const currentPool = state.pool ?? {
+          active: 0,
+          max: 0,
+          available: 0,
+          pausedResumable: 0,
+          queued: 0,
+          warm: 0,
+          degraded: false,
+          queue: [],
+        };
+        const nextQueue = [...(currentPool.queue ?? []), data.dispatch.queue];
+        return {
+          pool: {
+            ...currentPool,
+            queued: nextQueue.length,
+            queue: nextQueue,
+          },
+        };
+      });
+      return;
+    }
+
+    const agentSource =
+      "dispatch" in data && data.dispatch?.run ? data.dispatch.run : (data as AgentApiShape);
+    const agent = normalizeAgent(agentSource);
     set((state) => {
       const agents = upsertAgents(state.agents, agent);
       return { agents, pool: syncPoolWithAgents(state.pool, agents) };

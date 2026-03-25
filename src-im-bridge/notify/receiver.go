@@ -4,8 +4,8 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"io"
 	"log"
@@ -18,17 +18,19 @@ import (
 
 // Notification is the payload sent from the Go backend.
 type Notification struct {
-	Type           string     `json:"type"` // e.g., "task_completed", "agent_finished", "cost_alert"
-	TargetIMUserID string     `json:"target_im_user_id"`
-	TargetChatID   string     `json:"target_chat_id"`
-	Platform       string     `json:"platform"` // "feishu", "slack", etc.
-	Content        string     `json:"content"`  // plain text fallback
-	Card           *core.Card `json:"card"`     // optional rich card
+	Type           string                  `json:"type"` // e.g., "task_completed", "agent_finished", "cost_alert"
+	TargetIMUserID string                  `json:"target_im_user_id"`
+	TargetChatID   string                  `json:"target_chat_id"`
+	Platform       string                  `json:"platform"` // "feishu", "slack", etc.
+	Content        string                  `json:"content"`  // plain text fallback
+	Card           *core.Card              `json:"card"`     // optional rich card
+	Structured     *core.StructuredMessage `json:"structured,omitempty"`
+	ReplyTarget    *core.ReplyTarget       `json:"replyTarget,omitempty"`
 }
 
 // ActionHandler processes button click actions from IM cards.
 type ActionHandler interface {
-	HandleAction(ctx context.Context, action, entityID, chatID string) (string, error)
+	HandleAction(ctx context.Context, req *ActionRequest) (*ActionResponse, error)
 }
 
 // Receiver listens for notifications from the AgentForge backend and pushes them to IM.
@@ -46,9 +48,9 @@ type Receiver struct {
 // NewReceiver creates a notification receiver bound to a platform.
 func NewReceiver(platform core.Platform, port string) *Receiver {
 	return &Receiver{
-		platform: platform,
-		metadata: core.MetadataForPlatform(platform),
-		port:     port,
+		platform:  platform,
+		metadata:  core.MetadataForPlatform(platform),
+		port:      port,
 		processed: make(map[string]struct{}),
 	}
 }
@@ -75,6 +77,7 @@ func (r *Receiver) Start() error {
 			"platform":               r.platform.Name(),
 			"source":                 r.metadata.Source,
 			"supports_rich_messages": r.metadata.Capabilities.SupportsRichMessages,
+			"capability_matrix":      r.metadata.Capabilities.Matrix(),
 		})
 	})
 
@@ -125,11 +128,29 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	if chatID == "" {
 		chatID = n.TargetIMUserID // fallback to DM
 	}
+	if n.Structured != nil {
+		if sender, ok := r.platform.(core.StructuredSender); ok {
+			if err := sender.SendStructured(ctx, chatID, n.Structured); err != nil {
+				log.Printf("[notify] Failed to send structured payload to %s: %v", chatID, err)
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]string{"status": "sent", "type": "structured"})
+			return
+		}
+		if n.Card == nil {
+			n.Card = n.Structured.LegacyCard()
+		}
+		if strings.TrimSpace(n.Content) == "" {
+			n.Content = n.Structured.FallbackText()
+		}
+	}
 
 	// Try card first if available.
 	if n.Card != nil && r.metadata.Capabilities.SupportsRichMessages {
-		if cs, ok := r.platform.(core.CardSender); ok {
-			if err := cs.SendCard(ctx, chatID, n.Card); err != nil {
+		if _, ok := r.platform.(core.CardSender); ok {
+			if _, err := core.DeliverCard(ctx, r.platform, r.metadata, n.ReplyTarget, chatID, n.Card); err != nil {
 				log.Printf("[notify] Failed to send card to %s: %v", chatID, err)
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
@@ -141,7 +162,7 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Fallback to plain text.
-	if err := r.platform.Send(ctx, chatID, n.Content); err != nil {
+	if _, err := core.DeliverText(ctx, r.platform, r.metadata, n.ReplyTarget, chatID, n.Content); err != nil {
 		log.Printf("[notify] Failed to send message to %s: %v", chatID, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -153,10 +174,11 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 
 // SendRequest is the payload for the /im/send endpoint.
 type SendRequest struct {
-	Platform string `json:"platform"`
-	ChatID   string `json:"chat_id"`
-	Content  string `json:"content"`
-	ThreadID string `json:"thread_id,omitempty"`
+	Platform    string            `json:"platform"`
+	ChatID      string            `json:"chat_id"`
+	Content     string            `json:"content"`
+	ThreadID    string            `json:"thread_id,omitempty"`
+	ReplyTarget *core.ReplyTarget `json:"replyTarget,omitempty"`
 }
 
 func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
@@ -184,7 +206,7 @@ func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
 	}
 
 	ctx := context.Background()
-	if err := r.platform.Send(ctx, chatID, s.Content); err != nil {
+	if _, err := core.DeliverText(ctx, r.platform, r.metadata, s.ReplyTarget, chatID, s.Content); err != nil {
 		log.Printf("[notify] Failed to send message to %s: %v", chatID, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
@@ -245,9 +267,21 @@ func verifyCompatibilitySignature(secret, method, path, deliveryID, timestamp st
 
 // ActionRequest is the payload for the /im/action endpoint.
 type ActionRequest struct {
-	Action   string `json:"action"`   // e.g. "assign-agent", "decompose"
-	EntityID string `json:"entity_id"`
-	ChatID   string `json:"chat_id"`
+	Platform    string            `json:"platform,omitempty"`
+	Action      string            `json:"action"` // e.g. "assign-agent", "decompose"
+	EntityID    string            `json:"entity_id"`
+	ChatID      string            `json:"chat_id"`
+	UserID      string            `json:"user_id,omitempty"`
+	BridgeID    string            `json:"bridge_id,omitempty"`
+	ReplyTarget *core.ReplyTarget `json:"replyTarget,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+// ActionResponse is the normalized result of an interactive action callback.
+type ActionResponse struct {
+	Result      string            `json:"result"`
+	ReplyTarget *core.ReplyTarget `json:"replyTarget,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
@@ -267,18 +301,32 @@ func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
 	}
 
 	ctx := context.Background()
-	result, err := r.actionHandler.HandleAction(ctx, a.Action, a.EntityID, a.ChatID)
+	result, err := r.actionHandler.HandleAction(ctx, &a)
 	if err != nil {
 		log.Printf("[notify] Action %s failed for %s: %v", a.Action, a.EntityID, err)
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
+	if result == nil {
+		result = &ActionResponse{}
+	}
 
 	// Send the result back to the chat if chatID is provided.
-	if a.ChatID != "" {
-		_ = r.platform.Send(ctx, a.ChatID, result)
+	if a.ChatID != "" && strings.TrimSpace(result.Result) != "" {
+		target := a.ReplyTarget
+		if result.ReplyTarget != nil {
+			target = result.ReplyTarget
+		}
+		if _, err := core.DeliverText(ctx, r.platform, r.metadata, target, a.ChatID, result.Result); err != nil {
+			log.Printf("[notify] Action response delivery failed for %s: %v", a.EntityID, err)
+		}
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "ok", "result": result})
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":      "ok",
+		"result":      result.Result,
+		"replyTarget": result.ReplyTarget,
+		"metadata":    result.Metadata,
+	})
 }

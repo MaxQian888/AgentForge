@@ -48,7 +48,7 @@ export default function AgentsPage() {
       </div>
 
       {pool ? (
-        <div className="grid gap-4 sm:grid-cols-3">
+        <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <Card>
             <CardContent className="py-4">
               <p className="text-sm text-muted-foreground">Active Slots</p>
@@ -69,6 +69,50 @@ export default function AgentsPage() {
               <p className="text-2xl font-bold">{pool.pausedResumable}</p>
             </CardContent>
           </Card>
+          <Card>
+            <CardContent className="py-4">
+              <p className="text-sm text-muted-foreground">Warm Slots</p>
+              <p className="text-2xl font-bold">{pool.warm ?? 0}</p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <p className="text-sm text-muted-foreground">Queued Admissions</p>
+              <p className="text-2xl font-bold">{pool.queued ?? 0}</p>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {pool?.queue?.length ? (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Queued Task</TableHead>
+                <TableHead>Runtime</TableHead>
+                <TableHead>Status</TableHead>
+                <TableHead>Reason</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pool.queue.map((entry) => (
+                <TableRow key={entry.entryId}>
+                  <TableCell className="font-medium">{entry.taskId}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {entry.runtime || "-"}
+                    <div>{entry.provider || "-"}</div>
+                  </TableCell>
+                  <TableCell>
+                    <Badge variant="secondary">{entry.status}</Badge>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {entry.reason || "-"}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
         </div>
       ) : null}
 
@@ -90,6 +134,7 @@ export default function AgentsPage() {
               <TableRow>
                 <TableHead>Task</TableHead>
                 <TableHead>Role</TableHead>
+                <TableHead>Runtime</TableHead>
                 <TableHead>Status</TableHead>
                 <TableHead className="text-right">Turns</TableHead>
                 <TableHead>Cost / Budget</TableHead>
@@ -113,6 +158,10 @@ export default function AgentsPage() {
                       </Link>
                     </TableCell>
                     <TableCell>{agent.roleName}</TableCell>
+                    <TableCell className="text-xs text-muted-foreground">
+                      {agent.runtime || "-"}
+                      <div>{agent.provider || "-"}</div>
+                    </TableCell>
                     <TableCell>
                       <Badge
                         variant="secondary"

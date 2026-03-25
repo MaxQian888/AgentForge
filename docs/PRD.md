@@ -4736,42 +4736,57 @@ await server.connect(transport);
 package main
 
 import (
-    "context"
+    "fmt"
+
     sdk "github.com/agentforge/plugin-sdk-go"
 )
 
 type FeishuAdapter struct{}
 
-func (f *FeishuAdapter) Describe() *sdk.PluginInfo {
-    return &sdk.PluginInfo{
-        ID:      "feishu-adapter",
-        Name:    "飞书集成",
-        Version: "1.0.0",
-        Type:    "im",
-    }
-}
-
-func (f *FeishuAdapter) Initialize(ctx context.Context, config map[string]string) error {
-    // 初始化飞书 SDK
-    return nil
-}
-
-func (f *FeishuAdapter) HandleInbound(ctx context.Context, event *sdk.InboundEvent) (*sdk.InboundResult, error) {
-    // 处理飞书消息
-    return &sdk.InboundResult{
-        Action: "create_task",
-        Data:   event.Payload,
+func (f *FeishuAdapter) Describe(ctx *sdk.Context) (*sdk.Descriptor, error) {
+    return &sdk.Descriptor{
+        APIVersion: "agentforge/v1",
+        Kind:       "IntegrationPlugin",
+        ID:         "feishu-adapter",
+        Name:       "飞书集成",
+        Version:    "1.0.0",
+        Runtime:    "wasm",
+        ABIVersion: sdk.ABIVersion,
+        Capabilities: []sdk.Capability{
+            {Name: "health"},
+            {Name: "send_message"},
+        },
     }, nil
 }
 
-func (f *FeishuAdapter) SendOutbound(ctx context.Context, msg *sdk.OutboundMessage) error {
-    // 发送消息到飞书
+func (f *FeishuAdapter) Init(ctx *sdk.Context) error {
     return nil
 }
 
-func main() {
-    sdk.Serve(&FeishuAdapter{})
+func (f *FeishuAdapter) Health(ctx *sdk.Context) (*sdk.Result, error) {
+    return sdk.Success(map[string]any{
+        "status": "ok",
+    }), nil
 }
+
+func (f *FeishuAdapter) Invoke(ctx *sdk.Context, invocation sdk.Invocation) (*sdk.Result, error) {
+    if invocation.Operation != "send_message" {
+        return nil, sdk.NewRuntimeError("unsupported_operation", fmt.Sprintf("unsupported operation %s", invocation.Operation))
+    }
+    return sdk.Success(map[string]any{
+        "status": "sent",
+    }), nil
+}
+
+var runtime = sdk.NewRuntime(&FeishuAdapter{})
+
+//go:wasmexport agentforge_abi_version
+func agentforgeABIVersion() uint64 { return sdk.ExportABIVersion(runtime) }
+
+//go:wasmexport agentforge_run
+func agentforgeRun() uint32 { return sdk.ExportRun(runtime) }
+
+func main() { sdk.Autorun(runtime) }
 ```
 
 ---

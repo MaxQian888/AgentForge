@@ -8,6 +8,7 @@ import (
 	"testing"
 
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/notify"
 	larkcallback "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 )
@@ -170,6 +171,78 @@ func TestLive_HTTPCallbackHandlerRequiresExplicitRegistration(t *testing.T) {
 	}
 }
 
+func TestLive_StartRoutesCardActionCallbackToActionHandler(t *testing.T) {
+	runner := &fakeEventRunner{}
+	sender := &fakeMessageClient{}
+	actions := &fakeFeishuActionHandler{}
+
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(runner), WithMessageClient(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+	live.SetActionHandler(actions)
+
+	if err := live.Start(func(p core.Platform, msg *core.Message) {
+		t.Fatalf("message handler should not receive card action callbacks: %+v", msg)
+	}); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	defer live.Stop()
+
+	resp, err := runner.dispatchCardAction(context.Background(), &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Token: "card-token-1",
+			Operator: &larkcallback.Operator{
+				OpenID: "ou_123",
+			},
+			Action: &larkcallback.CallBackAction{
+				Value: map[string]interface{}{
+					"action": "act:approve:review-1",
+				},
+			},
+			Context: &larkcallback.Context{
+				OpenMessageID: "om_123",
+				OpenChatID:    "oc_456",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("dispatchCardAction error: %v", err)
+	}
+
+	if len(actions.requests) != 1 {
+		t.Fatalf("requests = %+v, want 1 request", actions.requests)
+	}
+	req := actions.requests[0]
+	if req.Platform != "feishu" {
+		t.Fatalf("Platform = %q, want feishu", req.Platform)
+	}
+	if req.Action != "approve" || req.EntityID != "review-1" {
+		t.Fatalf("action request = %+v", req)
+	}
+	if req.ChatID != "oc_456" || req.UserID != "ou_123" {
+		t.Fatalf("chat/user = %+v", req)
+	}
+	if req.ReplyTarget == nil {
+		t.Fatal("expected reply target")
+	}
+	if req.ReplyTarget.MessageID != "om_123" || req.ReplyTarget.ChatID != "oc_456" {
+		t.Fatalf("ReplyTarget = %+v", req.ReplyTarget)
+	}
+	if req.ReplyTarget.CallbackToken != "card-token-1" {
+		t.Fatalf("CallbackToken = %q", req.ReplyTarget.CallbackToken)
+	}
+	if req.ReplyTarget.PreferredRenderer != "cards" || req.ReplyTarget.ProgressMode != "deferred_card_update" {
+		t.Fatalf("ReplyTarget = %+v", req.ReplyTarget)
+	}
+	if req.Metadata["source"] != "card.action.trigger" {
+		t.Fatalf("Metadata = %+v", req.Metadata)
+	}
+	if resp == nil || resp.Toast == nil || resp.Toast.Content != "Approved" {
+		t.Fatalf("callback response = %+v", resp)
+	}
+}
+
 func TestLive_StopReturnsRunnerError(t *testing.T) {
 	stopErr := errors.New("stop failed")
 	runner := &fakeEventRunner{stopErr: stopErr}
@@ -208,6 +281,7 @@ type fakeEventRunner struct {
 	started bool
 	stopped bool
 	handler func(context.Context, *larkim.P2MessageReceiveV1) error
+	cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)
 	stopErr error
 }
 
@@ -227,6 +301,20 @@ func (r *fakeEventRunner) dispatch(ctx context.Context, event *larkim.P2MessageR
 		return errors.New("handler not registered")
 	}
 	return r.handler(ctx, event)
+}
+
+func (r *fakeEventRunner) StartWithCardActions(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error, cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)) error {
+	r.started = true
+	r.handler = handler
+	r.cardActionHandler = cardActionHandler
+	return nil
+}
+
+func (r *fakeEventRunner) dispatchCardAction(ctx context.Context, event *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error) {
+	if r.cardActionHandler == nil {
+		return nil, errors.New("card action handler not registered")
+	}
+	return r.cardActionHandler(ctx, event)
 }
 
 type fakeMessageClient struct {
@@ -307,3 +395,12 @@ func decodeJSONMap(t *testing.T, raw string) map[string]any {
 func stringPtr(value string) *string { return &value }
 
 var _ http.Handler = http.HandlerFunc(func(http.ResponseWriter, *http.Request) {})
+
+type fakeFeishuActionHandler struct {
+	requests []*notify.ActionRequest
+}
+
+func (h *fakeFeishuActionHandler) HandleAction(ctx context.Context, req *notify.ActionRequest) (*notify.ActionResponse, error) {
+	h.requests = append(h.requests, req)
+	return &notify.ActionResponse{Result: "Approved"}, nil
+}

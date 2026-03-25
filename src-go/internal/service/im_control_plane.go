@@ -72,9 +72,9 @@ type IMControlPlane struct {
 	deliverySecret            string
 	now                       func() time.Time
 
-	instances map[string]*bridgeInstanceState
-	listeners map[string]IMBridgeDeliveryListener
-	pending   map[string][]*model.IMControlDelivery
+	instances  map[string]*bridgeInstanceState
+	listeners  map[string]IMBridgeDeliveryListener
+	pending    map[string][]*model.IMControlDelivery
 	nextCursor int64
 
 	actionByTask   map[string]*boundActionState
@@ -124,14 +124,15 @@ func (s *IMControlPlane) RegisterBridge(_ context.Context, req *IMBridgeRegister
 	defer s.mu.Unlock()
 
 	record := &model.IMBridgeInstance{
-		BridgeID:      strings.TrimSpace(req.BridgeID),
-		Platform:      normalizePlatform(req.Platform),
-		Transport:     strings.TrimSpace(req.Transport),
-		ProjectIDs:    dedupeStrings(req.ProjectIDs),
-		Capabilities:  cloneBoolMap(req.Capabilities),
-		CallbackPaths: dedupeStrings(req.CallbackPaths),
-		Metadata:      cloneStringMap(req.Metadata),
-		Status:        "online",
+		BridgeID:         strings.TrimSpace(req.BridgeID),
+		Platform:         normalizePlatform(req.Platform),
+		Transport:        strings.TrimSpace(req.Transport),
+		ProjectIDs:       dedupeStrings(req.ProjectIDs),
+		Capabilities:     cloneBoolMap(req.Capabilities),
+		CapabilityMatrix: cloneAnyMap(req.CapabilityMatrix),
+		CallbackPaths:    dedupeStrings(req.CallbackPaths),
+		Metadata:         cloneStringMap(req.Metadata),
+		Status:           "online",
 	}
 	s.applyHeartbeat(record)
 	s.instances[record.BridgeID] = &bridgeInstanceState{record: record}
@@ -470,6 +471,7 @@ func cloneBridgeInstance(record *model.IMBridgeInstance) *model.IMBridgeInstance
 	clone.ProjectIDs = append([]string(nil), record.ProjectIDs...)
 	clone.CallbackPaths = append([]string(nil), record.CallbackPaths...)
 	clone.Capabilities = cloneBoolMap(record.Capabilities)
+	clone.CapabilityMatrix = cloneAnyMap(record.CapabilityMatrix)
 	clone.Metadata = cloneStringMap(record.Metadata)
 	return &clone
 }
@@ -512,6 +514,45 @@ func cloneStringMap(input map[string]string) map[string]string {
 		output[key] = value
 	}
 	return output
+}
+
+func cloneAnyMap(input map[string]any) map[string]any {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make(map[string]any, len(input))
+	for key, value := range input {
+		output[key] = cloneAnyValue(value)
+	}
+	return output
+}
+
+func cloneAnySlice(input []any) []any {
+	if len(input) == 0 {
+		return nil
+	}
+	output := make([]any, 0, len(input))
+	for _, value := range input {
+		output = append(output, cloneAnyValue(value))
+	}
+	return output
+}
+
+func cloneAnyValue(value any) any {
+	switch typed := value.(type) {
+	case map[string]any:
+		return cloneAnyMap(typed)
+	case []any:
+		return cloneAnySlice(typed)
+	case []string:
+		cloned := make([]any, 0, len(typed))
+		for _, item := range typed {
+			cloned = append(cloned, item)
+		}
+		return cloned
+	default:
+		return typed
+	}
 }
 
 func dedupeStrings(values []string) []string {

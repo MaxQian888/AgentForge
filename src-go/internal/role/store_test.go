@@ -1,7 +1,9 @@
 package role_test
 
 import (
+	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/react-go-quick-starter/server/internal/role"
@@ -22,6 +24,15 @@ func TestFileStoreSaveAndListUseCanonicalLayout(t *testing.T) {
 
 	if _, err := role.ParseFile(filepath.Join(dir, "frontend-developer", "role.yaml")); err != nil {
 		t.Fatalf("ParseFile(canonical path) error = %v", err)
+	}
+
+	data, err := os.ReadFile(filepath.Join(dir, "frontend-developer", "role.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	content := string(data)
+	if !strings.Contains(content, "skills:") || !strings.Contains(content, "path: skills/react") {
+		t.Fatalf("saved canonical role missing structured skills block:\n%s", content)
 	}
 
 	roles, err := store.List()

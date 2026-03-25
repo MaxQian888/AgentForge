@@ -6,6 +6,7 @@ import { useAgentStore } from "./agent-store";
 import { useNotificationStore } from "./notification-store";
 import { useDashboardStore } from "./dashboard-store";
 import { useSprintStore, type Sprint } from "./sprint-store";
+import { useSchedulerStore } from "./scheduler-store";
 import { useTeamStore, normalizeTeam } from "./team-store";
 import { useWorkflowStore } from "./workflow-store";
 import type { Task } from "./task-store";
@@ -186,6 +187,7 @@ export const useWSStore = create<WSState>()((set) => ({
         roleId: typeof payload.roleId === "string" ? payload.roleId : "",
         roleName: typeof payload.roleName === "string" ? payload.roleName : undefined,
         status: (typeof payload.status === "string" ? payload.status : "running") as AgentStatus,
+        runtime: typeof payload.runtime === "string" ? payload.runtime : "",
         provider: typeof payload.provider === "string" ? payload.provider : "",
         model: typeof payload.model === "string" ? payload.model : "",
         inputTokens: Number(payload.inputTokens ?? 0),
@@ -242,6 +244,17 @@ export const useWSStore = create<WSState>()((set) => ({
         return;
       }
       useAgentStore.getState().appendOutput(agentId, line);
+    });
+
+    client.on("agent.pool.updated", (data) => {
+      const payload = extractPayload<AgentPoolSummary>(data);
+      if (!payload) {
+        return;
+      }
+      useAgentStore.setState((state) => ({
+        ...state,
+        pool: payload,
+      }));
     });
 
     client.on("budget.warning", (data) => {
@@ -306,6 +319,23 @@ export const useWSStore = create<WSState>()((set) => ({
             : undefined,
       });
     });
+
+    const applySchedulerEvent = (data: unknown) => {
+      const payload = extractPayload<{
+        job?: import("./scheduler-store").SchedulerJob;
+        run?: import("./scheduler-store").SchedulerJobRun;
+      }>(data);
+      if (payload?.job) {
+        useSchedulerStore.getState().upsertJob(payload.job);
+      }
+      if (payload?.run) {
+        useSchedulerStore.getState().recordRun(payload.run);
+      }
+    };
+
+    client.on("scheduler.job.updated", applySchedulerEvent);
+    client.on("scheduler.run.started", applySchedulerEvent);
+    client.on("scheduler.run.completed", applySchedulerEvent);
 
     client.on("sprint.updated", (data) => {
       const payload = extractPayload<{ sprint?: Sprint }>(data);

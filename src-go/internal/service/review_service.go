@@ -46,6 +46,7 @@ type ReviewService struct {
 	notifications ReviewNotificationCreator
 	hub           *ws.Hub
 	bridge        ReviewBridgeClient
+	planner       *ReviewExecutionPlanner
 	progress      *TaskProgressService
 	imProgress    IMBoundProgressNotifier
 }
@@ -76,6 +77,11 @@ func (s *ReviewService) SetIMProgressNotifier(notifier IMBoundProgressNotifier) 
 	s.imProgress = notifier
 }
 
+func (s *ReviewService) WithExecutionPlanner(planner *ReviewExecutionPlanner) *ReviewService {
+	s.planner = planner
+	return s
+}
+
 func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewRequest) (*model.Review, error) {
 	var (
 		task *model.Task
@@ -93,6 +99,11 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	}
 	if err != nil || task == nil {
 		return nil, ErrReviewTaskNotFound
+	}
+
+	executionPlan, err := s.buildExecutionPlan(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("build review execution plan: %w", err)
 	}
 
 	review := &model.Review{
@@ -129,14 +140,17 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	}
 
 	result, err := s.bridge.Review(ctx, bridgeclient.ReviewRequest{
-		ReviewID:    review.ID.String(),
-		TaskID:      task.ID.String(),
-		PRURL:       req.PRURL,
-		PRNumber:    req.PRNumber,
-		Title:       task.Title,
-		Description: task.Description,
-		Diff:        req.Diff,
-		Dimensions:  req.Dimensions,
+		ReviewID:      review.ID.String(),
+		TaskID:        task.ID.String(),
+		PRURL:         req.PRURL,
+		PRNumber:      req.PRNumber,
+		Title:         task.Title,
+		Description:   task.Description,
+		Diff:          req.Diff,
+		Dimensions:    executionPlan.Dimensions,
+		TriggerEvent:  executionPlan.TriggerEvent,
+		ChangedFiles:  executionPlan.ChangedFiles,
+		ReviewPlugins: reviewPluginRequestsFromPlan(executionPlan),
 	})
 	if err != nil {
 		_ = s.reviews.UpdateStatus(ctx, review.ID, model.ReviewStatusFailed)
@@ -144,11 +158,12 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	}
 
 	return s.Complete(ctx, review.ID, &model.CompleteReviewRequest{
-		RiskLevel:      result.RiskLevel,
-		Findings:       result.Findings,
-		Summary:        result.Summary,
-		Recommendation: result.Recommendation,
-		CostUSD:        result.CostUSD,
+		RiskLevel:         result.RiskLevel,
+		Findings:          result.Findings,
+		ExecutionMetadata: reviewExecutionMetadataFromBridge(executionPlan, result),
+		Summary:           result.Summary,
+		Recommendation:    result.Recommendation,
+		CostUSD:           result.CostUSD,
 	})
 }
 
@@ -166,6 +181,7 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 	review.Status = model.ReviewStatusCompleted
 	review.RiskLevel = req.RiskLevel
 	review.Findings = req.Findings
+	review.ExecutionMetadata = model.CloneReviewExecutionMetadata(req.ExecutionMetadata)
 	review.Summary = req.Summary
 	review.Recommendation = req.Recommendation
 	review.CostUSD = req.CostUSD
@@ -299,4 +315,77 @@ func (s *ReviewService) recordProgress(ctx context.Context, taskID uuid.UUID, in
 		return
 	}
 	_, _ = s.progress.RecordActivity(ctx, taskID, input)
+}
+
+func (s *ReviewService) buildExecutionPlan(ctx context.Context, req *model.TriggerReviewRequest) (*model.ReviewExecutionPlan, error) {
+	if s.planner == nil {
+		return &model.ReviewExecutionPlan{
+			TriggerEvent: deriveReviewTriggerEvent(req),
+			ChangedFiles: normalizeChangedFiles(req),
+			Dimensions:   normalizeReviewDimensions(req.Dimensions),
+			Plugins:      []model.ReviewExecutionPlugin{},
+		}, nil
+	}
+	return s.planner.BuildPlan(ctx, req)
+}
+
+func reviewPluginRequestsFromPlan(plan *model.ReviewExecutionPlan) []bridgeclient.ReviewPluginRequest {
+	if plan == nil || len(plan.Plugins) == 0 {
+		return nil
+	}
+
+	plugins := make([]bridgeclient.ReviewPluginRequest, 0, len(plan.Plugins))
+	for _, plugin := range plan.Plugins {
+		plugins = append(plugins, bridgeclient.ReviewPluginRequest{
+			PluginID:     plugin.ID,
+			Name:         plugin.Name,
+			Entrypoint:   plugin.Entrypoint,
+			SourceType:   string(plugin.SourceType),
+			Transport:    plugin.Transport,
+			Command:      plugin.Command,
+			Args:         append([]string(nil), plugin.Args...),
+			URL:          plugin.URL,
+			Events:       append([]string(nil), plugin.Events...),
+			FilePatterns: append([]string(nil), plugin.FilePatterns...),
+			OutputFormat: plugin.OutputFormat,
+		})
+	}
+	return plugins
+}
+
+func reviewExecutionMetadataFromBridge(plan *model.ReviewExecutionPlan, response *bridgeclient.ReviewResponse) *model.ReviewExecutionMetadata {
+	if plan == nil && response == nil {
+		return nil
+	}
+
+	metadata := &model.ReviewExecutionMetadata{}
+	if plan != nil {
+		metadata.TriggerEvent = plan.TriggerEvent
+		metadata.ChangedFiles = append([]string(nil), plan.ChangedFiles...)
+		metadata.Dimensions = append([]string(nil), plan.Dimensions...)
+	}
+	if response != nil && len(response.DimensionResults) > 0 {
+		metadata.Results = make([]model.ReviewExecutionResult, 0, len(response.DimensionResults))
+		for _, result := range response.DimensionResults {
+			item := model.ReviewExecutionResult{
+				ID:          result.Dimension,
+				Kind:        model.ReviewExecutionKindBuiltinDimension,
+				Status:      model.ReviewExecutionStatus(result.Status),
+				DisplayName: result.DisplayName,
+				Summary:     result.Summary,
+				Error:       result.Error,
+			}
+			if result.SourceType == "plugin" || result.PluginID != "" {
+				item.Kind = model.ReviewExecutionKindPlugin
+				if result.PluginID != "" {
+					item.ID = result.PluginID
+				}
+			}
+			metadata.Results = append(metadata.Results, item)
+		}
+	}
+	if metadata.TriggerEvent == "" && len(metadata.ChangedFiles) == 0 && len(metadata.Dimensions) == 0 && len(metadata.Results) == 0 {
+		return nil
+	}
+	return metadata
 }

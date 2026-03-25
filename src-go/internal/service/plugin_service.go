@@ -2,16 +2,20 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"strings"
+	"time"
 
 	"github.com/react-go-quick-starter/server/internal/model"
 	pluginparser "github.com/react-go-quick-starter/server/internal/plugin"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	rolepkg "github.com/react-go-quick-starter/server/internal/role"
+	"github.com/react-go-quick-starter/server/pkg/database"
+	"gorm.io/gorm"
 )
 
 type PluginRegistry interface {
@@ -41,6 +45,10 @@ type ToolPluginRuntimeClient interface {
 	ActivateToolPlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error)
 	CheckToolPluginHealth(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error)
 	RestartToolPlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error)
+	RefreshToolPluginMCPSurface(ctx context.Context, pluginID string) (*model.PluginMCPRefreshResult, error)
+	InvokeToolPluginMCPTool(ctx context.Context, pluginID, toolName string, args map[string]any) (*model.PluginMCPToolCallResult, error)
+	ReadToolPluginMCPResource(ctx context.Context, pluginID, uri string) (*model.PluginMCPResourceReadResult, error)
+	GetToolPluginMCPPrompt(ctx context.Context, pluginID, name string, args map[string]string) (*model.PluginMCPPromptResult, error)
 }
 
 type GoPluginRuntime interface {
@@ -66,6 +74,20 @@ type PluginListFilter struct {
 	TrustState     model.PluginTrustState
 }
 
+type pluginWriteStores struct {
+	repo             PluginRegistry
+	instanceStore    PluginInstanceStore
+	eventStore       PluginEventAuditStore
+	pendingBroadcast []*model.PluginEventRecord
+}
+
+type pluginTransactionalStores struct {
+	db            *gorm.DB
+	repo          repository.PluginRegistryDBBinder
+	instanceStore repository.PluginInstanceDBBinder
+	eventStore    repository.PluginEventDBBinder
+}
+
 type PluginService struct {
 	repo          PluginRegistry
 	instanceStore PluginInstanceStore
@@ -79,10 +101,11 @@ type PluginService struct {
 }
 
 func NewPluginService(repo PluginRegistry, runtimeClient ToolPluginRuntimeClient, goRuntime GoPluginRuntime, builtInsDir string) *PluginService {
+	instanceStore, eventStore := defaultPluginPersistenceStores(repo)
 	return &PluginService{
 		repo:          repo,
-		instanceStore: repository.NewPluginInstanceRepository(),
-		eventStore:    repository.NewPluginEventRepository(),
+		instanceStore: instanceStore,
+		eventStore:    eventStore,
 		runtimeClient: runtimeClient,
 		goRuntime:     goRuntime,
 		builtInsDir:   builtInsDir,
@@ -91,6 +114,14 @@ func NewPluginService(repo PluginRegistry, runtimeClient ToolPluginRuntimeClient
 			AllowFilesystem: true,
 		},
 	}
+}
+
+func defaultPluginPersistenceStores(repo PluginRegistry) (PluginInstanceStore, PluginEventAuditStore) {
+	if binder, ok := repo.(repository.PluginRegistryDBBinder); ok && binder.DB() != nil {
+		db := binder.DB()
+		return repository.NewPluginInstanceRepository(db), repository.NewPluginEventRepository(db)
+	}
+	return repository.NewPluginInstanceRepository(), repository.NewPluginEventRepository()
 }
 
 func (s *PluginService) WithInstanceStore(store PluginInstanceStore) *PluginService {
@@ -122,6 +153,156 @@ func (s *PluginService) WithRoleStore(store PluginRoleStore) *PluginService {
 func (s *PluginService) WithPolicy(policy PluginPolicy) *PluginService {
 	s.policy = policy
 	return s
+}
+
+func (s *PluginService) transactionalStores() (*pluginTransactionalStores, bool) {
+	repoBinder, ok := s.repo.(repository.PluginRegistryDBBinder)
+	if !ok || repoBinder.DB() == nil {
+		return nil, false
+	}
+
+	txStores := &pluginTransactionalStores{
+		db:   repoBinder.DB(),
+		repo: repoBinder,
+	}
+
+	if s.instanceStore != nil {
+		instanceBinder, ok := s.instanceStore.(repository.PluginInstanceDBBinder)
+		if !ok {
+			return nil, false
+		}
+		txStores.instanceStore = instanceBinder
+	}
+	if s.eventStore != nil {
+		eventBinder, ok := s.eventStore.(repository.PluginEventDBBinder)
+		if !ok {
+			return nil, false
+		}
+		txStores.eventStore = eventBinder
+	}
+	return txStores, true
+}
+
+func (s *PluginService) withWriteStores(ctx context.Context, fn func(stores *pluginWriteStores) error) error {
+	if txStores, ok := s.transactionalStores(); ok {
+		var stores *pluginWriteStores
+		err := database.WithTx(ctx, txStores.db, func(tx *gorm.DB) error {
+			stores = &pluginWriteStores{
+				repo: txStores.repo.WithDB(tx),
+			}
+			if txStores.instanceStore != nil {
+				stores.instanceStore = txStores.instanceStore.WithDB(tx)
+			}
+			if txStores.eventStore != nil {
+				stores.eventStore = txStores.eventStore.WithDB(tx)
+			}
+			return fn(stores)
+		})
+		if err != nil {
+			return err
+		}
+		stores.flushBroadcasts(s.broadcaster)
+		return nil
+	}
+
+	stores := &pluginWriteStores{
+		repo:          s.repo,
+		instanceStore: s.instanceStore,
+		eventStore:    s.eventStore,
+	}
+	if err := fn(stores); err != nil {
+		return err
+	}
+	stores.flushBroadcasts(s.broadcaster)
+	return nil
+}
+
+func (stores *pluginWriteStores) persistRecord(ctx context.Context, record *model.PluginRecord) error {
+	if err := stores.repo.Save(ctx, record); err != nil {
+		return err
+	}
+	if stores.instanceStore == nil {
+		return nil
+	}
+
+	snapshot := &model.PluginInstanceSnapshot{
+		PluginID:           record.Metadata.ID,
+		RuntimeHost:        record.RuntimeHost,
+		LifecycleState:     record.LifecycleState,
+		ResolvedSourcePath: record.ResolvedSourcePath,
+		RestartCount:       record.RestartCount,
+		LastHealthAt:       record.LastHealthAt,
+		LastError:          record.LastError,
+	}
+	if record.RuntimeMetadata != nil {
+		metadata := *record.RuntimeMetadata
+		snapshot.RuntimeMetadata = &metadata
+	}
+	return stores.instanceStore.UpsertCurrent(ctx, snapshot)
+}
+
+func (stores *pluginWriteStores) deletePlugin(ctx context.Context, pluginID string) error {
+	if stores.instanceStore != nil {
+		if err := stores.instanceStore.DeleteByPluginID(ctx, pluginID); err != nil && !errors.Is(err, repository.ErrNotFound) {
+			return err
+		}
+	}
+	return stores.repo.Delete(ctx, pluginID)
+}
+
+func (stores *pluginWriteStores) appendEvent(ctx context.Context, record *model.PluginRecord, eventType model.PluginEventType, source model.PluginEventSource, summary string, payload map[string]any) error {
+	if record == nil || stores.eventStore == nil {
+		return nil
+	}
+	event := newPluginEventRecord(record, eventType, source, summary, payload)
+	if err := stores.eventStore.Append(ctx, event); err != nil {
+		return err
+	}
+	stores.pendingBroadcast = append(stores.pendingBroadcast, event)
+	return nil
+}
+
+func (stores *pluginWriteStores) flushBroadcasts(broadcaster PluginEventBroadcaster) {
+	if broadcaster == nil {
+		return
+	}
+	for _, event := range stores.pendingBroadcast {
+		broadcaster.BroadcastPluginEvent(event)
+	}
+}
+
+func newPluginEventRecord(record *model.PluginRecord, eventType model.PluginEventType, source model.PluginEventSource, summary string, payload map[string]any) *model.PluginEventRecord {
+	return &model.PluginEventRecord{
+		PluginID:       record.Metadata.ID,
+		EventType:      eventType,
+		EventSource:    source,
+		LifecycleState: record.LifecycleState,
+		Summary:        summary,
+		Payload:        payload,
+	}
+}
+
+func (s *PluginService) persistRecordWithEvent(
+	ctx context.Context,
+	record *model.PluginRecord,
+	eventType model.PluginEventType,
+	source model.PluginEventSource,
+	summary string,
+	payload map[string]any,
+) error {
+	return s.withWriteStores(ctx, func(stores *pluginWriteStores) error {
+		if err := stores.persistRecord(ctx, record); err != nil {
+			return err
+		}
+		return stores.appendEvent(ctx, record, eventType, source, summary, payload)
+	})
+}
+
+func (s *PluginService) broadcastOnly(record *model.PluginRecord, eventType model.PluginEventType, source model.PluginEventSource, summary string, payload map[string]any) {
+	if record == nil || s.broadcaster == nil {
+		return
+	}
+	s.broadcaster.BroadcastPluginEvent(newPluginEventRecord(record, eventType, source, summary, payload))
 }
 
 func (s *PluginService) DiscoverBuiltIns(ctx context.Context) ([]*model.PluginRecord, error) {
@@ -188,10 +369,7 @@ func (s *PluginService) registerPath(ctx context.Context, path string, sourceTyp
 		applyRuntimeStatus(record, *status)
 	}
 
-	if err := s.persistRecord(ctx, record); err != nil {
-		return nil, err
-	}
-	if err := s.appendEvent(ctx, record, model.PluginEventInstalled, model.PluginEventSourceControlPlane, "plugin installed", map[string]any{
+	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventInstalled, model.PluginEventSourceControlPlane, "plugin installed", map[string]any{
 		"source_type": sourceType,
 		"source_path": resolvedPath,
 	}); err != nil {
@@ -218,6 +396,14 @@ func (s *PluginService) List(ctx context.Context, filter PluginListFilter) ([]*m
 	return hydrated, nil
 }
 
+func (s *PluginService) GetByID(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
+	record, err := s.repo.GetByID(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	return s.hydrateRecord(ctx, record), nil
+}
+
 func (s *PluginService) Enable(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
 	record, err := s.repo.GetByID(ctx, pluginID)
 	if err != nil {
@@ -225,10 +411,7 @@ func (s *PluginService) Enable(ctx context.Context, pluginID string) (*model.Plu
 	}
 	record.LifecycleState = model.PluginStateEnabled
 	record.LastError = ""
-	if err := s.persistRecord(ctx, record); err != nil {
-		return nil, err
-	}
-	if err := s.appendEvent(ctx, record, model.PluginEventEnabled, model.PluginEventSourceOperator, "plugin enabled", nil); err != nil {
+	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventEnabled, model.PluginEventSourceOperator, "plugin enabled", nil); err != nil {
 		return nil, err
 	}
 	return s.hydrateRecord(ctx, record), nil
@@ -240,10 +423,7 @@ func (s *PluginService) Disable(ctx context.Context, pluginID string) (*model.Pl
 		return nil, err
 	}
 	record.LifecycleState = model.PluginStateDisabled
-	if err := s.persistRecord(ctx, record); err != nil {
-		return nil, err
-	}
-	if err := s.appendEvent(ctx, record, model.PluginEventDisabled, model.PluginEventSourceOperator, "plugin disabled", nil); err != nil {
+	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventDisabled, model.PluginEventSourceOperator, "plugin disabled", nil); err != nil {
 		return nil, err
 	}
 	return s.hydrateRecord(ctx, record), nil
@@ -260,17 +440,13 @@ func (s *PluginService) Activate(ctx context.Context, pluginID string) (*model.P
 	if err := s.validateActivationPermissions(record); err != nil {
 		record.LastError = err.Error()
 		record.LifecycleState = model.PluginStateDegraded
-		_ = s.persistRecord(ctx, record)
-		_ = s.appendEvent(ctx, record, model.PluginEventFailed, model.PluginEventSourceControlPlane, err.Error(), map[string]any{"operation": "activate"})
+		_ = s.persistRecordWithEvent(ctx, record, model.PluginEventFailed, model.PluginEventSourceControlPlane, err.Error(), map[string]any{"operation": "activate"})
 		return nil, err
 	}
 
 	record.LifecycleState = model.PluginStateActivating
 	record.LastError = ""
-	if err := s.persistRecord(ctx, record); err != nil {
-		return nil, err
-	}
-	if err := s.appendEvent(ctx, record, model.PluginEventActivating, eventSourceForRecord(record), "plugin activating", nil); err != nil {
+	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventActivating, eventSourceForRecord(record), "plugin activating", nil); err != nil {
 		return nil, err
 	}
 
@@ -315,10 +491,7 @@ func (s *PluginService) Activate(ctx context.Context, pluginID string) (*model.P
 		return s.failActivation(ctx, record, fmt.Errorf("plugin %s is not executable in the current phase", pluginID))
 	}
 
-	if err := s.persistRecord(ctx, record); err != nil {
-		return nil, err
-	}
-	if err := s.appendEvent(ctx, record, model.PluginEventActivated, eventSourceForRecord(record), "plugin activated", nil); err != nil {
+	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventActivated, eventSourceForRecord(record), "plugin activated", nil); err != nil {
 		return nil, err
 	}
 	return s.hydrateRecord(ctx, record), nil
@@ -348,18 +521,14 @@ func (s *PluginService) CheckHealth(ctx context.Context, pluginID string) (*mode
 	if err != nil {
 		record.LifecycleState = model.PluginStateDegraded
 		record.LastError = err.Error()
-		if persistErr := s.persistRecord(ctx, record); persistErr != nil {
+		if persistErr := s.persistRecordWithEvent(ctx, record, model.PluginEventFailed, eventSourceForRecord(record), err.Error(), map[string]any{"operation": "health"}); persistErr != nil {
 			return nil, persistErr
 		}
-		_ = s.appendEvent(ctx, record, model.PluginEventFailed, eventSourceForRecord(record), err.Error(), map[string]any{"operation": "health"})
 		return nil, err
 	}
 
 	applyRuntimeStatus(record, *status)
-	if err := s.persistRecord(ctx, record); err != nil {
-		return nil, err
-	}
-	if err := s.appendEvent(ctx, record, model.PluginEventHealth, eventSourceForRecord(record), "plugin health updated", nil); err != nil {
+	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventHealth, eventSourceForRecord(record), "plugin health updated", nil); err != nil {
 		return nil, err
 	}
 	return s.hydrateRecord(ctx, record), nil
@@ -389,21 +558,128 @@ func (s *PluginService) Restart(ctx context.Context, pluginID string) (*model.Pl
 	if err != nil {
 		record.LifecycleState = model.PluginStateDegraded
 		record.LastError = err.Error()
-		if persistErr := s.persistRecord(ctx, record); persistErr != nil {
+		if persistErr := s.persistRecordWithEvent(ctx, record, model.PluginEventFailed, eventSourceForRecord(record), err.Error(), map[string]any{"operation": "restart"}); persistErr != nil {
 			return nil, persistErr
 		}
-		_ = s.appendEvent(ctx, record, model.PluginEventFailed, eventSourceForRecord(record), err.Error(), map[string]any{"operation": "restart"})
 		return nil, err
 	}
 
 	applyRuntimeStatus(record, *status)
-	if err := s.persistRecord(ctx, record); err != nil {
-		return nil, err
-	}
-	if err := s.appendEvent(ctx, record, model.PluginEventRestarted, eventSourceForRecord(record), "plugin restarted", nil); err != nil {
+	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventRestarted, eventSourceForRecord(record), "plugin restarted", nil); err != nil {
 		return nil, err
 	}
 	return s.hydrateRecord(ctx, record), nil
+}
+
+func (s *PluginService) RefreshMCP(ctx context.Context, pluginID string) (*model.PluginMCPRefreshResult, error) {
+	record, err := s.requireActiveToolPlugin(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+
+	result, err := s.runtimeClient.RefreshToolPluginMCPSurface(ctx, pluginID)
+	if err != nil {
+		s.recordMCPFailure(ctx, record, model.MCPInteractionRefresh, pluginID, "bridge_request_failed", err)
+		return nil, err
+	}
+
+	s.applyMCPRefresh(record, result)
+	if err := s.withWriteStores(ctx, func(stores *pluginWriteStores) error {
+		if err := stores.persistRecord(ctx, record); err != nil {
+			return err
+		}
+		return appendMCPEventWithStores(ctx, stores, record, model.PluginEventMCPDiscovery, model.MCPInteractionRefresh, model.MCPInteractionSucceeded, pluginID, s.summarizeRefreshResult(result), "", "")
+	}); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *PluginService) CallMCPTool(ctx context.Context, pluginID, toolName string, args map[string]any) (*model.PluginMCPToolCallResult, error) {
+	record, err := s.requireActiveToolPlugin(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(toolName) == "" {
+		err := fmt.Errorf("tool_name is required")
+		s.recordMCPFailure(ctx, record, model.MCPInteractionCallTool, toolName, "validation_failed", err)
+		return nil, err
+	}
+
+	result, err := s.runtimeClient.InvokeToolPluginMCPTool(ctx, pluginID, toolName, args)
+	if err != nil {
+		s.recordMCPFailure(ctx, record, model.MCPInteractionCallTool, toolName, "bridge_request_failed", err)
+		return nil, err
+	}
+
+	s.applyMCPLatestInteraction(record, model.MCPInteractionCallTool, model.MCPInteractionSucceeded, toolName, s.summarizeToolCallResult(result), "", "")
+	if err := s.withWriteStores(ctx, func(stores *pluginWriteStores) error {
+		if err := stores.persistRecord(ctx, record); err != nil {
+			return err
+		}
+		return appendMCPEventWithStores(ctx, stores, record, model.PluginEventMCPInteraction, model.MCPInteractionCallTool, model.MCPInteractionSucceeded, toolName, s.summarizeToolCallResult(result), "", "")
+	}); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *PluginService) ReadMCPResource(ctx context.Context, pluginID, uri string) (*model.PluginMCPResourceReadResult, error) {
+	record, err := s.requireActiveToolPlugin(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(uri) == "" {
+		err := fmt.Errorf("uri is required")
+		s.recordMCPFailure(ctx, record, model.MCPInteractionReadResource, uri, "validation_failed", err)
+		return nil, err
+	}
+
+	result, err := s.runtimeClient.ReadToolPluginMCPResource(ctx, pluginID, uri)
+	if err != nil {
+		s.recordMCPFailure(ctx, record, model.MCPInteractionReadResource, uri, "bridge_request_failed", err)
+		return nil, err
+	}
+
+	s.applyMCPLatestInteraction(record, model.MCPInteractionReadResource, model.MCPInteractionSucceeded, uri, s.summarizeResourceReadResult(result), "", "")
+	if err := s.withWriteStores(ctx, func(stores *pluginWriteStores) error {
+		if err := stores.persistRecord(ctx, record); err != nil {
+			return err
+		}
+		return appendMCPEventWithStores(ctx, stores, record, model.PluginEventMCPInteraction, model.MCPInteractionReadResource, model.MCPInteractionSucceeded, uri, s.summarizeResourceReadResult(result), "", "")
+	}); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (s *PluginService) GetMCPPrompt(ctx context.Context, pluginID, name string, args map[string]string) (*model.PluginMCPPromptResult, error) {
+	record, err := s.requireActiveToolPlugin(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(name) == "" {
+		err := fmt.Errorf("name is required")
+		s.recordMCPFailure(ctx, record, model.MCPInteractionGetPrompt, name, "validation_failed", err)
+		return nil, err
+	}
+
+	result, err := s.runtimeClient.GetToolPluginMCPPrompt(ctx, pluginID, name, args)
+	if err != nil {
+		s.recordMCPFailure(ctx, record, model.MCPInteractionGetPrompt, name, "bridge_request_failed", err)
+		return nil, err
+	}
+
+	s.applyMCPLatestInteraction(record, model.MCPInteractionGetPrompt, model.MCPInteractionSucceeded, name, s.summarizePromptResult(result), "", "")
+	if err := s.withWriteStores(ctx, func(stores *pluginWriteStores) error {
+		if err := stores.persistRecord(ctx, record); err != nil {
+			return err
+		}
+		return appendMCPEventWithStores(ctx, stores, record, model.PluginEventMCPInteraction, model.MCPInteractionGetPrompt, model.MCPInteractionSucceeded, name, s.summarizePromptResult(result), "", "")
+	}); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 func (s *PluginService) ReportRuntimeState(ctx context.Context, pluginID string, status model.PluginRuntimeStatus) (*model.PluginRecord, error) {
@@ -415,10 +691,23 @@ func (s *PluginService) ReportRuntimeState(ctx context.Context, pluginID string,
 		return nil, fmt.Errorf("runtime update plugin id mismatch: %s != %s", status.PluginID, pluginID)
 	}
 	applyRuntimeStatus(record, status)
-	if err := s.persistRecord(ctx, record); err != nil {
-		return nil, err
-	}
-	if err := s.appendEvent(ctx, record, model.PluginEventRuntimeSync, eventSourceFromHost(status.Host), "runtime state synchronized", nil); err != nil {
+	if err := s.withWriteStores(ctx, func(stores *pluginWriteStores) error {
+		if err := stores.persistRecord(ctx, record); err != nil {
+			return err
+		}
+		if status.RuntimeMetadata != nil && status.RuntimeMetadata.MCP != nil {
+			if interaction := status.RuntimeMetadata.MCP.LatestInteraction; interaction != nil {
+				if err := appendMCPEventWithStores(ctx, stores, record, model.PluginEventMCPInteraction, interaction.Operation, interaction.Status, interaction.Target, interaction.Summary, interaction.ErrorCode, interaction.ErrorMessage); err != nil {
+					return err
+				}
+			} else if status.RuntimeMetadata.MCP.LastDiscoveryAt != nil || status.RuntimeMetadata.MCP.ToolCount > 0 || status.RuntimeMetadata.MCP.ResourceCount > 0 || status.RuntimeMetadata.MCP.PromptCount > 0 {
+				if err := appendMCPEventWithStores(ctx, stores, record, model.PluginEventMCPDiscovery, model.MCPInteractionRefresh, model.MCPInteractionSucceeded, pluginID, s.summarizeMCPMetadata(status.RuntimeMetadata.MCP), "", ""); err != nil {
+					return err
+				}
+			}
+		}
+		return stores.appendEvent(ctx, record, model.PluginEventRuntimeSync, eventSourceFromHost(status.Host), "runtime state synchronized", nil)
+	}); err != nil {
 		return nil, err
 	}
 	return s.hydrateRecord(ctx, record), nil
@@ -443,10 +732,9 @@ func (s *PluginService) Invoke(ctx context.Context, pluginID, operation string, 
 	}
 	if err := s.validateInvocation(record, operation); err != nil {
 		record.LastError = err.Error()
-		if persistErr := s.persistRecord(ctx, record); persistErr != nil {
+		if persistErr := s.persistRecordWithEvent(ctx, record, model.PluginEventFailed, model.PluginEventSourceControlPlane, err.Error(), map[string]any{"operation": operation}); persistErr != nil {
 			return nil, persistErr
 		}
-		_ = s.appendEvent(ctx, record, model.PluginEventFailed, model.PluginEventSourceControlPlane, err.Error(), map[string]any{"operation": operation})
 		return nil, err
 	}
 
@@ -454,17 +742,13 @@ func (s *PluginService) Invoke(ctx context.Context, pluginID, operation string, 
 	if err != nil {
 		record.LifecycleState = model.PluginStateDegraded
 		record.LastError = err.Error()
-		if persistErr := s.persistRecord(ctx, record); persistErr != nil {
+		if persistErr := s.persistRecordWithEvent(ctx, record, model.PluginEventFailed, model.PluginEventSourceGoRuntime, err.Error(), map[string]any{"operation": operation}); persistErr != nil {
 			return nil, persistErr
 		}
-		_ = s.appendEvent(ctx, record, model.PluginEventFailed, model.PluginEventSourceGoRuntime, err.Error(), map[string]any{"operation": operation})
 		return nil, err
 	}
 	record.LastError = ""
-	if err := s.persistRecord(ctx, record); err != nil {
-		return nil, err
-	}
-	if err := s.appendEvent(ctx, record, model.PluginEventInvoked, model.PluginEventSourceGoRuntime, "plugin invoked", map[string]any{"operation": operation}); err != nil {
+	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventInvoked, model.PluginEventSourceGoRuntime, "plugin invoked", map[string]any{"operation": operation}); err != nil {
 		return nil, err
 	}
 	return result, nil
@@ -480,15 +764,15 @@ func (s *PluginService) Uninstall(ctx context.Context, id string) error {
 			return err
 		}
 	}
-	if err := s.repo.Delete(ctx, id); err != nil {
-		return fmt.Errorf("delete plugin: %w", err)
-	}
-	if s.instanceStore != nil {
-		_ = s.instanceStore.DeleteByPluginID(ctx, id)
-	}
-	if err := s.appendEvent(ctx, rec, model.PluginEventUninstalled, model.PluginEventSourceOperator, "plugin uninstalled", nil); err != nil {
+	if err := s.withWriteStores(ctx, func(stores *pluginWriteStores) error {
+		if err := stores.deletePlugin(ctx, id); err != nil {
+			return fmt.Errorf("delete plugin: %w", err)
+		}
+		return nil
+	}); err != nil {
 		return err
 	}
+	s.broadcastOnly(rec, model.PluginEventUninstalled, model.PluginEventSourceOperator, "plugin uninstalled", nil)
 	return nil
 }
 
@@ -561,37 +845,16 @@ func (s *PluginService) ListEvents(ctx context.Context, pluginID string, limit i
 func (s *PluginService) failActivation(ctx context.Context, record *model.PluginRecord, cause error) (*model.PluginRecord, error) {
 	record.LifecycleState = model.PluginStateDegraded
 	record.LastError = cause.Error()
-	if err := s.persistRecord(ctx, record); err != nil {
+	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventFailed, eventSourceForRecord(record), cause.Error(), map[string]any{"operation": "activate"}); err != nil {
 		return nil, err
 	}
-	_ = s.appendEvent(ctx, record, model.PluginEventFailed, eventSourceForRecord(record), cause.Error(), map[string]any{"operation": "activate"})
 	return nil, cause
 }
 
 func (s *PluginService) persistRecord(ctx context.Context, record *model.PluginRecord) error {
-	if err := s.repo.Save(ctx, record); err != nil {
-		return err
-	}
-	if s.instanceStore == nil {
-		return nil
-	}
-	snapshot := &model.PluginInstanceSnapshot{
-		PluginID:           record.Metadata.ID,
-		RuntimeHost:        record.RuntimeHost,
-		LifecycleState:     record.LifecycleState,
-		ResolvedSourcePath: record.ResolvedSourcePath,
-		RestartCount:       record.RestartCount,
-		LastHealthAt:       record.LastHealthAt,
-		LastError:          record.LastError,
-	}
-	if record.RuntimeMetadata != nil {
-		metadata := *record.RuntimeMetadata
-		snapshot.RuntimeMetadata = &metadata
-	}
-	if err := s.instanceStore.UpsertCurrent(ctx, snapshot); err != nil {
-		return err
-	}
-	return nil
+	return s.withWriteStores(ctx, func(stores *pluginWriteStores) error {
+		return stores.persistRecord(ctx, record)
+	})
 }
 
 func (s *PluginService) hydrateRecord(ctx context.Context, record *model.PluginRecord) *model.PluginRecord {
@@ -612,24 +875,9 @@ func (s *PluginService) hydrateRecord(ctx context.Context, record *model.PluginR
 }
 
 func (s *PluginService) appendEvent(ctx context.Context, record *model.PluginRecord, eventType model.PluginEventType, source model.PluginEventSource, summary string, payload map[string]any) error {
-	if record == nil || s.eventStore == nil {
-		return nil
-	}
-	event := &model.PluginEventRecord{
-		PluginID:       record.Metadata.ID,
-		EventType:      eventType,
-		EventSource:    source,
-		LifecycleState: record.LifecycleState,
-		Summary:        summary,
-		Payload:        payload,
-	}
-	if err := s.eventStore.Append(ctx, event); err != nil {
-		return err
-	}
-	if s.broadcaster != nil {
-		s.broadcaster.BroadcastPluginEvent(event)
-	}
-	return nil
+	return s.withWriteStores(ctx, func(stores *pluginWriteStores) error {
+		return stores.appendEvent(ctx, record, eventType, source, summary, payload)
+	})
 }
 
 func (s *PluginService) validateActivationPermissions(record *model.PluginRecord) error {
@@ -794,8 +1042,7 @@ func applyRuntimeStatus(record *model.PluginRecord, status model.PluginRuntimeSt
 		record.ResolvedSourcePath = status.ResolvedSourcePath
 	}
 	if status.RuntimeMetadata != nil {
-		metadata := *status.RuntimeMetadata
-		record.RuntimeMetadata = &metadata
+		record.RuntimeMetadata = clonePluginRuntimeMetadata(status.RuntimeMetadata)
 	}
 }
 
@@ -836,6 +1083,245 @@ func eventSourceFromHost(host model.PluginRuntimeHost) model.PluginEventSource {
 	default:
 		return model.PluginEventSourceControlPlane
 	}
+}
+
+func (s *PluginService) requireActiveToolPlugin(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
+	record, err := s.repo.GetByID(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	if record.Kind != model.PluginKindTool {
+		return nil, fmt.Errorf("plugin %s does not expose MCP interaction primitives", pluginID)
+	}
+	if s.runtimeClient == nil {
+		return nil, fmt.Errorf("tool runtime client is not configured")
+	}
+	if record.LifecycleState != model.PluginStateActive {
+		return nil, fmt.Errorf("plugin %s must be active before MCP interactions", pluginID)
+	}
+	if record.RuntimeHost != "" && record.RuntimeHost != model.PluginHostTSBridge {
+		return nil, fmt.Errorf("plugin %s is not hosted by the TS bridge", pluginID)
+	}
+	return record, nil
+}
+
+func (s *PluginService) applyMCPRefresh(record *model.PluginRecord, result *model.PluginMCPRefreshResult) {
+	if record == nil || result == nil {
+		return
+	}
+	if result.LifecycleState != "" {
+		record.LifecycleState = result.LifecycleState
+	}
+	if result.RuntimeHost != "" {
+		record.RuntimeHost = result.RuntimeHost
+	}
+	if result.RuntimeMetadata != nil {
+		record.RuntimeMetadata = clonePluginRuntimeMetadata(result.RuntimeMetadata)
+	}
+	metadata := s.ensureMCPRuntimeMetadata(record)
+	metadata.Transport = result.Snapshot.Transport
+	metadata.LastDiscoveryAt = cloneTimePointer(result.Snapshot.LastDiscoveryAt)
+	metadata.ToolCount = result.Snapshot.ToolCount
+	metadata.ResourceCount = result.Snapshot.ResourceCount
+	metadata.PromptCount = result.Snapshot.PromptCount
+	metadata.LatestInteraction = cloneMCPInteractionSummary(result.Snapshot.LatestInteraction)
+}
+
+func (s *PluginService) ensureMCPRuntimeMetadata(record *model.PluginRecord) *model.PluginMCPRuntimeMetadata {
+	if record.RuntimeMetadata == nil {
+		record.RuntimeMetadata = &model.PluginRuntimeMetadata{Compatible: true}
+	}
+	if record.RuntimeMetadata.MCP == nil {
+		record.RuntimeMetadata.MCP = &model.PluginMCPRuntimeMetadata{}
+	}
+	return record.RuntimeMetadata.MCP
+}
+
+func (s *PluginService) applyMCPLatestInteraction(
+	record *model.PluginRecord,
+	operation model.MCPInteractionOperation,
+	status model.MCPInteractionStatus,
+	target string,
+	summary string,
+	errorCode string,
+	errorMessage string,
+) {
+	metadata := s.ensureMCPRuntimeMetadata(record)
+	now := time.Now().UTC()
+	metadata.LatestInteraction = &model.MCPInteractionSummary{
+		Operation:    operation,
+		Status:       status,
+		At:           &now,
+		Target:       target,
+		Summary:      summary,
+		ErrorCode:    errorCode,
+		ErrorMessage: errorMessage,
+	}
+}
+
+func (s *PluginService) recordMCPFailure(ctx context.Context, record *model.PluginRecord, operation model.MCPInteractionOperation, target, errorCode string, err error) {
+	if record == nil || err == nil {
+		return
+	}
+	s.applyMCPLatestInteraction(record, operation, model.MCPInteractionFailed, target, err.Error(), errorCode, err.Error())
+	_ = s.withWriteStores(ctx, func(stores *pluginWriteStores) error {
+		if err := stores.persistRecord(ctx, record); err != nil {
+			return err
+		}
+		return appendMCPEventWithStores(ctx, stores, record, model.PluginEventMCPInteraction, operation, model.MCPInteractionFailed, target, err.Error(), errorCode, err.Error())
+	})
+}
+
+func (s *PluginService) appendMCPEvent(
+	ctx context.Context,
+	record *model.PluginRecord,
+	eventType model.PluginEventType,
+	operation model.MCPInteractionOperation,
+	status model.MCPInteractionStatus,
+	target string,
+	summary string,
+	errorCode string,
+	errorMessage string,
+) error {
+	payload := map[string]any{
+		"operation": operation,
+		"status":    status,
+		"target":    target,
+	}
+	if summary != "" {
+		payload["summary"] = summary
+	}
+	if errorCode != "" {
+		payload["error_code"] = errorCode
+	}
+	if errorMessage != "" {
+		payload["error_message"] = errorMessage
+	}
+	return s.appendEvent(ctx, record, eventType, model.PluginEventSourceOperator, summaryOrDefault(summary, string(operation)), payload)
+}
+
+func appendMCPEventWithStores(
+	ctx context.Context,
+	stores *pluginWriteStores,
+	record *model.PluginRecord,
+	eventType model.PluginEventType,
+	operation model.MCPInteractionOperation,
+	status model.MCPInteractionStatus,
+	target string,
+	summary string,
+	errorCode string,
+	errorMessage string,
+) error {
+	payload := map[string]any{
+		"operation": operation,
+		"status":    status,
+		"target":    target,
+	}
+	if summary != "" {
+		payload["summary"] = summary
+	}
+	if errorCode != "" {
+		payload["error_code"] = errorCode
+	}
+	if errorMessage != "" {
+		payload["error_message"] = errorMessage
+	}
+	return stores.appendEvent(ctx, record, eventType, model.PluginEventSourceOperator, summaryOrDefault(summary, string(operation)), payload)
+}
+
+func summaryOrDefault(summary string, fallback string) string {
+	if strings.TrimSpace(summary) != "" {
+		return summary
+	}
+	return fallback
+}
+
+func (s *PluginService) summarizeRefreshResult(result *model.PluginMCPRefreshResult) string {
+	if result == nil {
+		return ""
+	}
+	return fmt.Sprintf("tools=%d, resources=%d, prompts=%d", result.Snapshot.ToolCount, result.Snapshot.ResourceCount, result.Snapshot.PromptCount)
+}
+
+func (s *PluginService) summarizeToolCallResult(result *model.PluginMCPToolCallResult) string {
+	if result == nil {
+		return ""
+	}
+	for _, item := range result.Result.Content {
+		if strings.TrimSpace(item.Text) != "" {
+			return truncateSummary(item.Text)
+		}
+	}
+	return truncateSummary(fmt.Sprintf("tool result blocks=%d", len(result.Result.Content)))
+}
+
+func (s *PluginService) summarizeResourceReadResult(result *model.PluginMCPResourceReadResult) string {
+	if result == nil || len(result.Result.Contents) == 0 {
+		return ""
+	}
+	if result.Result.Contents[0].URI != "" {
+		return truncateSummary(result.Result.Contents[0].URI)
+	}
+	return truncateSummary(result.Result.Contents[0].Text)
+}
+
+func (s *PluginService) summarizePromptResult(result *model.PluginMCPPromptResult) string {
+	if result == nil {
+		return ""
+	}
+	if strings.TrimSpace(result.Result.Description) != "" {
+		return truncateSummary(result.Result.Description)
+	}
+	if len(result.Result.Messages) > 0 {
+		return truncateSummary(result.Result.Messages[0].Content.Text)
+	}
+	return ""
+}
+
+func (s *PluginService) summarizeMCPMetadata(metadata *model.PluginMCPRuntimeMetadata) string {
+	if metadata == nil {
+		return ""
+	}
+	return fmt.Sprintf("tools=%d, resources=%d, prompts=%d", metadata.ToolCount, metadata.ResourceCount, metadata.PromptCount)
+}
+
+func truncateSummary(value string) string {
+	value = strings.TrimSpace(value)
+	if len(value) <= 160 {
+		return value
+	}
+	return value[:160]
+}
+
+func clonePluginRuntimeMetadata(metadata *model.PluginRuntimeMetadata) *model.PluginRuntimeMetadata {
+	if metadata == nil {
+		return nil
+	}
+	cloned := *metadata
+	if metadata.MCP != nil {
+		mcp := *metadata.MCP
+		mcp.LastDiscoveryAt = cloneTimePointer(metadata.MCP.LastDiscoveryAt)
+		mcp.LatestInteraction = cloneMCPInteractionSummary(metadata.MCP.LatestInteraction)
+		cloned.MCP = &mcp
+	}
+	return &cloned
+}
+
+func cloneMCPInteractionSummary(summary *model.MCPInteractionSummary) *model.MCPInteractionSummary {
+	if summary == nil {
+		return nil
+	}
+	cloned := *summary
+	cloned.At = cloneTimePointer(summary.At)
+	return &cloned
+}
+
+func cloneTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
 }
 
 func marketplaceFromManifest(manifest model.PluginManifest, record *model.PluginRecord) model.MarketplacePluginDTO {

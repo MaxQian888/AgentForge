@@ -58,6 +58,47 @@ Go resolves that `roleId` through the unified YAML-backed role store before exec
 
 This is intentionally a minimal backend binding seam. It enables PRD-aligned role-to-agent runtime behavior without requiring the full frontend role-selection UI to exist yet.
 
+## Runtime Selection And Propagation
+
+Role binding now participates in a larger coding-agent runtime contract shared by project settings, agent launch, and Team launch flows.
+
+The resolved execution tuple is always:
+
+- `runtime`
+- `provider`
+- `model`
+
+Current supported coding-agent runtimes are:
+
+| Runtime | Provider Rules | Typical Use |
+| --- | --- | --- |
+| `claude_code` | only `anthropic` | Claude Code backed execution |
+| `codex` | `openai` or legacy-compatible `codex` | Codex-backed execution |
+| `opencode` | only `opencode` | OpenCode-backed execution |
+
+Go resolves this tuple from project defaults plus explicit launch overrides before it projects the role profile into Bridge `role_config`. That means role selection no longer silently falls back to a provider-only guess.
+
+## Team Lifecycle Consistency
+
+When a Team run starts, the resolved runtime/provider/model tuple is stored with the team config and reused for:
+
+- planner spawn
+- downstream coder spawn
+- reviewer spawn
+- retry flows
+
+This keeps Claude Code, Codex, and OpenCode support consistent across the full Team lifecycle instead of only applying the selection to the first planner phase.
+
+## Readiness Diagnostics
+
+Runtime readiness is exposed through the coding-agent catalog returned by the backend. UI surfaces should use that catalog to show:
+
+- missing API credentials
+- missing runtime executables
+- incompatible runtime/provider pairs
+
+This aligns with the PRD and plugin-system direction that runtime capability discovery belongs to the execution infrastructure, not to hard-coded frontend option lists.
+
 ## Inheritance
 
 Roles may use `extends` to inherit from another role.

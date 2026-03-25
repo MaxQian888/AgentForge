@@ -1,11 +1,19 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useProjectStore } from "@/lib/stores/project-store";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 
@@ -19,7 +27,11 @@ export default function SettingsPage() {
   const [description, setDescription] = useState("");
   const [repoUrl, setRepoUrl] = useState("");
   const [defaultBranch, setDefaultBranch] = useState("");
+  const [runtime, setRuntime] = useState("");
+  const [provider, setProvider] = useState("");
+  const [model, setModel] = useState("");
   const [saved, setSaved] = useState(false);
+  const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     void fetchProjects();
@@ -31,8 +43,51 @@ export default function SettingsPage() {
       setDescription(project.description ?? "");
       setRepoUrl(project.repoUrl ?? "");
       setDefaultBranch(project.defaultBranch ?? "main");
+      setRuntime(
+        project.settings?.codingAgent.runtime ||
+          project.codingAgentCatalog?.defaultSelection.runtime ||
+          ""
+      );
+      setProvider(
+        project.settings?.codingAgent.provider ||
+          project.codingAgentCatalog?.defaultSelection.provider ||
+          ""
+      );
+      setModel(
+        project.settings?.codingAgent.model ||
+          project.codingAgentCatalog?.defaultSelection.model ||
+          ""
+      );
     }
   }, [project]);
+
+  useEffect(() => {
+    return () => {
+      if (savedTimeoutRef.current) {
+        clearTimeout(savedTimeoutRef.current);
+      }
+    };
+  }, []);
+
+  const runtimeOptions = project?.codingAgentCatalog?.runtimes ?? [];
+  const selectedRuntime =
+    runtimeOptions.find((option) => option.runtime === runtime) ?? runtimeOptions[0];
+  const compatibleProviders = selectedRuntime?.compatibleProviders ?? [];
+  const selectedDiagnostics = selectedRuntime?.diagnostics ?? [];
+
+  const handleRuntimeChange = (nextRuntime: string) => {
+    setRuntime(nextRuntime);
+    const nextOption = runtimeOptions.find((option) => option.runtime === nextRuntime);
+    if (!nextOption) {
+      return;
+    }
+    setProvider(nextOption.defaultProvider);
+    setModel(nextOption.defaultModel);
+  };
+
+  const handleProviderChange = (nextProvider: string) => {
+    setProvider(nextProvider);
+  };
 
   const handleSave = async () => {
     if (!project) return;
@@ -41,9 +96,22 @@ export default function SettingsPage() {
       description,
       repoUrl,
       defaultBranch,
+      settings: {
+        codingAgent: {
+          runtime,
+          provider,
+          model,
+        },
+      },
     });
     setSaved(true);
-    setTimeout(() => setSaved(false), 2000);
+    if (savedTimeoutRef.current) {
+      clearTimeout(savedTimeoutRef.current);
+    }
+    savedTimeoutRef.current = setTimeout(() => {
+      setSaved(false);
+      savedTimeoutRef.current = null;
+    }, 2000);
   };
 
   if (!selectedProjectId) {
@@ -108,6 +176,90 @@ export default function SettingsPage() {
               value={defaultBranch}
               onChange={(e) => setDefaultBranch(e.target.value)}
             />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Coding Agent Defaults</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <div className="flex flex-col gap-2">
+              <Label>Runtime</Label>
+              <Select value={runtime} onValueChange={handleRuntimeChange}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {runtimeOptions.map((option) => (
+                    <SelectItem key={option.runtime} value={option.runtime}>
+                      {option.label}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Provider</Label>
+              <Select value={provider} onValueChange={handleProviderChange}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {compatibleProviders.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Model</Label>
+              <Input value={model} onChange={(e) => setModel(e.target.value)} />
+            </div>
+          </div>
+
+          {selectedDiagnostics.length > 0 && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              {selectedDiagnostics.map((diagnostic) => (
+                <p key={`${diagnostic.code}-${diagnostic.message}`}>
+                  {diagnostic.message}
+                </p>
+              ))}
+            </div>
+          )}
+
+          <div className="grid gap-3 md:grid-cols-2">
+            {runtimeOptions.map((option) => (
+              <div
+                key={option.runtime}
+                className="rounded-md border p-4 text-sm"
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div>
+                    <p className="font-medium">{option.label}</p>
+                    <p className="text-muted-foreground">
+                      {option.defaultProvider} / {option.defaultModel}
+                    </p>
+                  </div>
+                  <Badge variant={option.available ? "default" : "secondary"}>
+                    {option.available ? "Ready" : "Unavailable"}
+                  </Badge>
+                </div>
+                {option.diagnostics.length > 0 && (
+                  <div className="mt-3 space-y-1 text-xs text-muted-foreground">
+                    {option.diagnostics.map((diagnostic) => (
+                      <p key={`${option.runtime}-${diagnostic.code}`}>
+                        {diagnostic.message}
+                      </p>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
           </div>
         </CardContent>
       </Card>

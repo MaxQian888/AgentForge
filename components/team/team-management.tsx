@@ -17,7 +17,12 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { TeamMember } from "@/lib/dashboard/summary";
-import type { CreateMemberInput, UpdateMemberInput } from "@/lib/stores/member-store";
+import type {
+  CreateMemberInput,
+  UpdateMemberInput,
+} from "@/lib/stores/member-store";
+import type { RoleManifest } from "@/lib/stores/role-store";
+import type { AgentProfileDraft } from "@/lib/team/agent-profile";
 
 interface TeamProjectOption {
   id: string;
@@ -30,19 +35,195 @@ interface TeamManagementProps {
   members: TeamMember[];
   loading: boolean;
   error: string | null;
+  availableRoles: RoleManifest[];
   onRetry: () => void;
   onProjectChange: (projectId: string) => void;
   onCreateMember: (input: CreateMemberInput) => Promise<void>;
   onUpdateMember: (memberId: string, input: UpdateMemberInput) => Promise<void>;
 }
 
-const initialCreateState: CreateMemberInput = {
-  name: "",
-  type: "human",
-  role: "",
-  email: "",
-  skills: [],
+interface MemberFormState {
+  name: string;
+  type: "human" | "agent";
+  role: string;
+  email: string;
+  skillsInput: string;
+  isActive: boolean;
+  agentProfile: AgentProfileDraft;
+}
+
+const EMPTY_AGENT_PROFILE: AgentProfileDraft = {
+  roleId: "",
+  runtime: "",
+  provider: "",
+  model: "",
+  maxBudgetUsd: "",
+  notes: "",
 };
+
+function parseCommaList(input: string): string[] {
+  return input
+    .split(",")
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function hasAgentProfileInput(draft: AgentProfileDraft): boolean {
+  return Object.values(draft).some((value) => value.trim().length > 0);
+}
+
+function buildInitialCreateForm(): MemberFormState {
+  return {
+    name: "",
+    type: "human",
+    role: "",
+    email: "",
+    skillsInput: "",
+    isActive: true,
+    agentProfile: EMPTY_AGENT_PROFILE,
+  };
+}
+
+function buildEditForm(member: TeamMember): MemberFormState {
+  return {
+    name: member.name,
+    type: member.type,
+    role: member.role,
+    email: member.email,
+    skillsInput: member.skills.join(", "),
+    isActive: member.isActive,
+    agentProfile: {
+      roleId: member.agentProfile?.roleId ?? "",
+      runtime: member.agentProfile?.runtime ?? "",
+      provider: member.agentProfile?.provider ?? "",
+      model: member.agentProfile?.model ?? "",
+      maxBudgetUsd:
+        member.agentProfile?.maxBudgetUsd != null
+          ? String(member.agentProfile.maxBudgetUsd)
+          : "",
+      notes: member.agentProfile?.notes ?? "",
+    },
+  };
+}
+
+function RoleBindingSelect({
+  id,
+  label,
+  value,
+  availableRoles,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: string;
+  availableRoles: RoleManifest[];
+  onChange: (value: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor={id}>{label}</Label>
+      <select
+        id={id}
+        aria-label={label}
+        className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+        value={value}
+        onChange={(event) => onChange(event.target.value)}
+      >
+        <option value="">Unbound role</option>
+        {availableRoles.map((role) => (
+          <option key={role.metadata.id} value={role.metadata.id}>
+            {role.metadata.name}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+function AgentProfileFields({
+  mode,
+  availableRoles,
+  value,
+  onChange,
+}: {
+  mode: "create" | "edit";
+  availableRoles: RoleManifest[];
+  value: AgentProfileDraft;
+  onChange: (nextValue: AgentProfileDraft) => void;
+}) {
+  const prefix = mode === "edit" ? "Edit " : "";
+
+  return (
+    <div className="grid gap-4 md:grid-cols-2">
+      <RoleBindingSelect
+        id={mode === "edit" ? "edit-bound-role" : "bound-role"}
+        label={`${prefix}Bound Role`}
+        value={value.roleId}
+        availableRoles={availableRoles}
+        onChange={(roleId) => onChange({ ...value, roleId })}
+      />
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={mode === "edit" ? "edit-agent-budget" : "agent-budget"}>
+          {prefix}Agent Budget USD
+        </Label>
+        <Input
+          id={mode === "edit" ? "edit-agent-budget" : "agent-budget"}
+          aria-label={`${prefix}Agent Budget USD`}
+          value={value.maxBudgetUsd}
+          onChange={(event) =>
+            onChange({ ...value, maxBudgetUsd: event.target.value })
+          }
+        />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={mode === "edit" ? "edit-runtime" : "runtime"}>
+          {prefix}Runtime
+        </Label>
+        <Input
+          id={mode === "edit" ? "edit-runtime" : "runtime"}
+          aria-label={`${prefix}Runtime`}
+          value={value.runtime}
+          onChange={(event) => onChange({ ...value, runtime: event.target.value })}
+        />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={mode === "edit" ? "edit-provider" : "provider"}>
+          {prefix}Provider
+        </Label>
+        <Input
+          id={mode === "edit" ? "edit-provider" : "provider"}
+          aria-label={`${prefix}Provider`}
+          value={value.provider}
+          onChange={(event) => onChange({ ...value, provider: event.target.value })}
+        />
+      </div>
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={mode === "edit" ? "edit-model" : "model"}>
+          {prefix}Model
+        </Label>
+        <Input
+          id={mode === "edit" ? "edit-model" : "model"}
+          aria-label={`${prefix}Model`}
+          value={value.model}
+          onChange={(event) => onChange({ ...value, model: event.target.value })}
+        />
+      </div>
+      <div className="flex flex-col gap-2 md:col-span-2">
+        <Label htmlFor={mode === "edit" ? "edit-agent-notes" : "agent-notes"}>
+          {prefix}Agent Notes
+        </Label>
+        <textarea
+          id={mode === "edit" ? "edit-agent-notes" : "agent-notes"}
+          aria-label={`${prefix}Agent Notes`}
+          className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm"
+          rows={4}
+          value={value.notes}
+          onChange={(event) => onChange({ ...value, notes: event.target.value })}
+        />
+      </div>
+    </div>
+  );
+}
 
 export function TeamManagement({
   projects,
@@ -50,49 +231,69 @@ export function TeamManagement({
   members,
   loading,
   error,
+  availableRoles,
   onRetry,
   onProjectChange,
   onCreateMember,
   onUpdateMember,
 }: TeamManagementProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [createForm, setCreateForm] = useState<CreateMemberInput>(initialCreateState);
+  const [createForm, setCreateForm] = useState<MemberFormState>(() =>
+    buildInitialCreateForm(),
+  );
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
-  const [editForm, setEditForm] = useState<UpdateMemberInput & { name: string }>({
-    name: "",
-    role: "",
-    email: "",
-    isActive: true,
-  });
+  const [editForm, setEditForm] = useState<MemberFormState | null>(null);
 
   const selectedProjectName = useMemo(
-    () => projects.find((project) => project.id === selectedProjectId)?.name ?? "Team",
-    [projects, selectedProjectId]
+    () =>
+      projects.find((project) => project.id === selectedProjectId)?.name ?? "Team",
+    [projects, selectedProjectId],
+  );
+
+  const editingMember = useMemo(
+    () => members.find((member) => member.id === editingMemberId) ?? null,
+    [editingMemberId, members],
   );
 
   const handleCreateMember = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    await onCreateMember({
-      name: createForm.name,
+
+    const payload: CreateMemberInput = {
+      name: createForm.name.trim(),
       type: createForm.type,
-      role: createForm.role?.trim() ?? "",
-      email: createForm.email?.trim() ?? "",
-      skills: createForm.skills ?? [],
-    });
-    setCreateForm(initialCreateState);
+      role: createForm.role.trim(),
+      email: createForm.email.trim(),
+      skills: parseCommaList(createForm.skillsInput),
+    };
+
+    if (createForm.type === "agent" && hasAgentProfileInput(createForm.agentProfile)) {
+      payload.agentProfile = { ...createForm.agentProfile };
+    }
+
+    await onCreateMember(payload);
+    setCreateForm(buildInitialCreateForm());
     setShowCreateForm(false);
   };
 
   const handleEditMember = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!editingMemberId) return;
-    await onUpdateMember(editingMemberId, {
-      name: editForm.name,
-      role: editForm.role,
-      email: editForm.email,
+    if (!editingMemberId || !editForm) return;
+
+    const payload: UpdateMemberInput = {
+      name: editForm.name.trim(),
+      role: editForm.role.trim(),
+      email: editForm.email.trim(),
+      skills: parseCommaList(editForm.skillsInput),
       isActive: editForm.isActive,
-    });
+    };
+
+    if (editForm.type === "agent") {
+      payload.agentProfile = { ...editForm.agentProfile };
+    }
+
+    await onUpdateMember(editingMemberId, payload);
     setEditingMemberId(null);
+    setEditForm(null);
   };
 
   if (loading) {
@@ -180,7 +381,7 @@ export function TeamManagement({
                   onChange={(event) =>
                     setCreateForm((state) => ({
                       ...state,
-                      type: event.target.value as CreateMemberInput["type"],
+                      type: event.target.value as MemberFormState["type"],
                     }))
                   }
                 >
@@ -211,8 +412,39 @@ export function TeamManagement({
                   }
                 />
               </div>
+              {createForm.type === "agent" ? (
+                <>
+                  <div className="flex flex-col gap-2 md:col-span-2">
+                    <Label htmlFor="member-skills">Skills</Label>
+                    <Input
+                      id="member-skills"
+                      aria-label="Skills"
+                      value={createForm.skillsInput}
+                      onChange={(event) =>
+                        setCreateForm((state) => ({
+                          ...state,
+                          skillsInput: event.target.value,
+                        }))
+                      }
+                    />
+                  </div>
+                  <div className="md:col-span-2 rounded-lg border p-4">
+                    <h3 className="mb-4 text-sm font-semibold">Agent Profile</h3>
+                    <AgentProfileFields
+                      mode="create"
+                      availableRoles={availableRoles}
+                      value={createForm.agentProfile}
+                      onChange={(agentProfile) =>
+                        setCreateForm((state) => ({ ...state, agentProfile }))
+                      }
+                    />
+                  </div>
+                </>
+              ) : null}
               <div className="md:col-span-2">
-                <Button type="submit">Create Member</Button>
+                <Button type="submit" disabled={!createForm.name.trim()}>
+                  Create Member
+                </Button>
               </div>
             </form>
           </CardContent>
@@ -246,7 +478,7 @@ export function TeamManagement({
                   <TableHead>Member</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Role</TableHead>
-                  <TableHead>Status</TableHead>
+                  <TableHead>Agent Configuration</TableHead>
                   <TableHead>Skills</TableHead>
                   <TableHead>Workload</TableHead>
                   <TableHead>Links</TableHead>
@@ -257,7 +489,7 @@ export function TeamManagement({
                 {members.map((member) => (
                   <TableRow key={member.id}>
                     <TableCell>
-                      <div className="flex flex-col">
+                      <div className="flex flex-col gap-1">
                         <span className="font-medium">{member.name}</span>
                         <span className="text-xs text-muted-foreground">
                           {member.email || "No direct email"}
@@ -269,9 +501,32 @@ export function TeamManagement({
                     </TableCell>
                     <TableCell>{member.role}</TableCell>
                     <TableCell>
-                      <Badge variant={member.isActive ? "secondary" : "outline"}>
-                        {member.status}
-                      </Badge>
+                      {member.type === "agent" ? (
+                        <div className="flex flex-col gap-1 text-xs">
+                          <Badge
+                            variant={
+                              member.readinessState === "ready"
+                                ? "secondary"
+                                : "outline"
+                            }
+                            className="w-fit"
+                          >
+                            {member.readinessLabel ?? "Needs attention"}
+                          </Badge>
+                          <span className="text-muted-foreground">
+                            Bound role: {member.roleBindingLabel ?? "Unbound role"}
+                          </span>
+                          {member.agentSummary?.length ? (
+                            <span className="text-muted-foreground">
+                              {member.agentSummary.join(" • ")}
+                            </span>
+                          ) : null}
+                        </div>
+                      ) : (
+                        <span className="text-xs text-muted-foreground">
+                          Human-managed profile
+                        </span>
+                      )}
                     </TableCell>
                     <TableCell>{member.skills.join(", ") || "No skills tagged"}</TableCell>
                     <TableCell>
@@ -305,12 +560,7 @@ export function TeamManagement({
                         variant="outline"
                         onClick={() => {
                           setEditingMemberId(member.id);
-                          setEditForm({
-                            name: member.name,
-                            role: member.role,
-                            email: member.email,
-                            isActive: member.isActive,
-                          });
+                          setEditForm(buildEditForm(member));
                         }}
                       >
                         Edit {member.name}
@@ -324,7 +574,7 @@ export function TeamManagement({
         </Card>
       )}
 
-      {editingMemberId ? (
+      {editingMember && editForm ? (
         <Card>
           <CardHeader>
             <CardTitle>Edit Member</CardTitle>
@@ -338,7 +588,9 @@ export function TeamManagement({
                   aria-label="Edit Name"
                   value={editForm.name}
                   onChange={(event) =>
-                    setEditForm((state) => ({ ...state, name: event.target.value }))
+                    setEditForm((state) =>
+                      state ? { ...state, name: event.target.value } : state,
+                    )
                   }
                 />
               </div>
@@ -347,9 +599,11 @@ export function TeamManagement({
                 <Input
                   id="edit-role"
                   aria-label="Edit Role"
-                  value={editForm.role ?? ""}
+                  value={editForm.role}
                   onChange={(event) =>
-                    setEditForm((state) => ({ ...state, role: event.target.value }))
+                    setEditForm((state) =>
+                      state ? { ...state, role: event.target.value } : state,
+                    )
                   }
                 />
               </div>
@@ -359,9 +613,11 @@ export function TeamManagement({
                   id="edit-email"
                   aria-label="Edit Email"
                   type="email"
-                  value={editForm.email ?? ""}
+                  value={editForm.email}
                   onChange={(event) =>
-                    setEditForm((state) => ({ ...state, email: event.target.value }))
+                    setEditForm((state) =>
+                      state ? { ...state, email: event.target.value } : state,
+                    )
                   }
                 />
               </div>
@@ -370,22 +626,72 @@ export function TeamManagement({
                   id="edit-active"
                   aria-label="Edit Active"
                   type="checkbox"
-                  checked={editForm.isActive ?? false}
+                  checked={editForm.isActive}
                   onChange={(event) =>
-                    setEditForm((state) => ({
-                      ...state,
-                      isActive: event.target.checked,
-                    }))
+                    setEditForm((state) =>
+                      state ? { ...state, isActive: event.target.checked } : state,
+                    )
                   }
                 />
                 <Label htmlFor="edit-active">Active member</Label>
               </div>
-              <div className="md:col-span-2 flex gap-2">
+              {editForm.type === "agent" ? (
+                <>
+                  <div className="flex flex-col gap-2 md:col-span-2">
+                    <Label htmlFor="edit-skills">Edit Skills</Label>
+                    <Input
+                      id="edit-skills"
+                      aria-label="Edit Skills"
+                      value={editForm.skillsInput}
+                      onChange={(event) =>
+                        setEditForm((state) =>
+                          state
+                            ? { ...state, skillsInput: event.target.value }
+                            : state,
+                        )
+                      }
+                    />
+                  </div>
+                  <div className="md:col-span-2 rounded-lg border p-4">
+                    <h3 className="mb-4 text-sm font-semibold">
+                      Agent Profile Settings
+                    </h3>
+                    <AgentProfileFields
+                      mode="edit"
+                      availableRoles={availableRoles}
+                      value={editForm.agentProfile}
+                      onChange={(agentProfile) =>
+                        setEditForm((state) =>
+                          state ? { ...state, agentProfile } : state,
+                        )
+                      }
+                    />
+                  </div>
+                </>
+              ) : (
+                <div className="flex flex-col gap-2 md:col-span-2">
+                  <Label htmlFor="edit-skills">Edit Skills</Label>
+                  <Input
+                    id="edit-skills"
+                    aria-label="Edit Skills"
+                    value={editForm.skillsInput}
+                    onChange={(event) =>
+                      setEditForm((state) =>
+                        state ? { ...state, skillsInput: event.target.value } : state,
+                      )
+                    }
+                  />
+                </div>
+              )}
+              <div className="flex gap-2 md:col-span-2">
                 <Button type="submit">Save Member</Button>
                 <Button
                   type="button"
                   variant="ghost"
-                  onClick={() => setEditingMemberId(null)}
+                  onClick={() => {
+                    setEditingMemberId(null);
+                    setEditForm(null);
+                  }}
                 >
                   Cancel
                 </Button>

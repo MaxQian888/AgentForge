@@ -142,6 +142,17 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
 
       <TeamPipeline team={team} />
 
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-sm font-medium">
+            Resolved Runtime
+          </CardTitle>
+        </CardHeader>
+        <CardContent className="text-sm text-muted-foreground">
+          {team.runtime || "-"} / {team.provider || "-"} / {team.model || "-"}
+        </CardContent>
+      </Card>
+
       <div className="grid gap-4 sm:grid-cols-4">
         <Card>
           <CardHeader className="pb-2">

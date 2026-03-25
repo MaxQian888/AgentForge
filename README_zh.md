@@ -124,6 +124,10 @@ pnpm dev
 - `pnpm lint`
 - `pnpm test`
 - `pnpm test:coverage`
+- `pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
+- `pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health`
+- `pnpm plugin:dev`
+- `pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
 
 ### 2. Go 后端
 
@@ -203,6 +207,23 @@ bun run dev
 pnpm build:bridge
 ```
 
+### 3.5 插件作者本地工作流
+
+针对当前维护中的 Go WASM 样例插件，仓库现在提供了一条受支持的根级循环：
+
+```bash
+pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
+pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health
+pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
+```
+
+说明：
+
+- `plugin:build` 会从 manifest 解析受维护样例的产物路径；如果你在调别的 Go 宿主插件，也可以显式传 `--source` / `--output` 覆盖。
+- `plugin:debug` 不会发明另一套开发协议，而是直接复用真实的 `AGENTFORGE_AUTORUN`、`AGENTFORGE_OPERATION`、`AGENTFORGE_CONFIG`、`AGENTFORGE_CAPABILITIES`、`AGENTFORGE_PAYLOAD` 合同。
+- `plugin:verify` 目前只覆盖受维护样例的 smoke 路径，也就是 `build -> debug health`，它是聚焦验证，不替代更广的 Go/Bridge 测试。
+- `plugin:dev` 是最小插件开发栈命令，只负责 Go Orchestrator 和 TS Bridge；如果服务已经健康会直接复用，并通过 `http://127.0.0.1:7777/health` 与 `http://127.0.0.1:7778/health` 报告就绪状态。
+
 ### 4. IM Bridge 工作区
 
 ```bash
@@ -229,6 +250,19 @@ pnpm tauri:dev
 pnpm tauri:build
 ```
 
+当前 Tauri 桌面壳的能力契约如下：
+
+- Tauri 现在会同时监督两个必需 sidecar：`http://127.0.0.1:7777` 上的 Go Orchestrator，以及 `http://127.0.0.1:7778` 上的 TS Bridge。
+- 只有两个 sidecar 都通过健康检查后，桌面运行态才会被标记为 `ready`。异常退出会先做有界重启，超过阈值后才进入 `degraded`。
+- 前端桌面能力统一收敛到 `lib/platform-runtime.ts` 与 `hooks/use-platform-capability.ts`。当前已接入后端地址解析、桌面运行态查询、原生文件选择、系统通知、tray 更新、全局快捷键注册、更新检查，以及只读 runtime summary。
+- Web 模式下保留显式 fallback 语义：文件选择回退到浏览器 input，通知回退到 Web Notification API，tray 更新回退到页面标题更新，全局快捷键返回 `unsupported`，更新检查返回 `not_applicable`。
+- 插件页中的桌面运行态面板只是增强层。插件清单和生命周期操作仍然走现有后端控制面，后端仍是唯一业务真相来源。
+
+当前限制：
+
+- 桌面事件流目前归一化了 runtime、tray、shortcut、notification 和 updater 事件，但它不替代后端插件业务数据。
+- 更新检查目前只覆盖检测与事件上报，还没有在 Dashboard 中开放下载并安装流程。
+
 ## 根目录关键脚本
 
 | 命令 | 作用 |
@@ -242,9 +276,14 @@ pnpm tauri:build
 | `pnpm build:backend` | 为 Tauri 交叉编译 Go sidecar |
 | `pnpm build:backend:dev` | 仅为当前平台构建 Go sidecar |
 | `pnpm build:plugin:wasm` | 构建 Go WASM 样例插件产物 |
+| `pnpm plugin:build` | 按 manifest 构建受维护的 Go 宿主插件目标 |
+| `pnpm plugin:debug` | 通过真实 runtime envelope 本地调试 Go WASM 插件 |
+| `pnpm plugin:dev` | 启动或复用最小插件开发栈：Go Orchestrator + TS Bridge |
+| `pnpm plugin:verify` | 运行受维护样例的 smoke 工作流：build -> debug health |
 | `pnpm tauri:dev` | 构建后端 sidecar 并启动 Tauri 开发模式 |
 | `pnpm tauri:build` | 构建桌面应用 |
 | `pnpm build:bridge` | 安装并构建 TS/Bun Bridge |
+| `pnpm build:desktop` | 构建 backend + bridge sidecar 并打包桌面应用 |
 
 ## 技术栈快照
 

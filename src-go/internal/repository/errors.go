@@ -1,6 +1,7 @@
 package repository
 
 import (
+	"database/sql"
 	"errors"
 
 	"gorm.io/gorm"
@@ -18,6 +19,9 @@ var (
 func normalizeRepositoryError(err error) error {
 	if err == nil {
 		return nil
+	}
+	if errors.Is(err, sql.ErrNoRows) {
+		return ErrNotFound
 	}
 	if errors.Is(err, gorm.ErrRecordNotFound) {
 		return ErrNotFound

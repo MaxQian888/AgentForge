@@ -25,6 +25,10 @@ const frontendRole: RoleManifest = {
   },
   capabilities: {
     allowedTools: ["Read", "Edit"],
+    skills: [
+      { path: "skills/react", autoLoad: true },
+      { path: "skills/testing", autoLoad: false },
+    ],
     languages: ["TypeScript"],
     frameworks: ["Next.js"],
     maxTurns: 30,
@@ -75,6 +79,10 @@ describe("RoleFormDialog", () => {
         extends: "frontend-developer",
         capabilities: expect.objectContaining({
           allowedTools: ["Read", "Edit"],
+          skills: [
+            { path: "skills/react", autoLoad: true },
+            { path: "skills/testing", autoLoad: false },
+          ],
         }),
         security: expect.objectContaining({
           permissionMode: "bypassPermissions",
@@ -87,7 +95,9 @@ describe("RoleFormDialog", () => {
     );
   });
 
-  it("renders structured sections for identity, capabilities, knowledge, and security", () => {
+  it("renders structured sections for identity, capabilities, skills, knowledge, and security", async () => {
+    const user = userEvent.setup();
+
     render(
       <RoleFormDialog
         open
@@ -97,11 +107,15 @@ describe("RoleFormDialog", () => {
       />
     );
 
+    await user.selectOptions(screen.getByLabelText("Start from template"), "frontend-developer");
+
     expect(screen.getByText("Identity")).toBeInTheDocument();
     expect(screen.getByText("Capabilities")).toBeInTheDocument();
+    expect(screen.getByText("Skills")).toBeInTheDocument();
     expect(screen.getByText("Knowledge")).toBeInTheDocument();
     expect(screen.getByText("Security")).toBeInTheDocument();
     expect(screen.getByLabelText("Allowed Tools")).toBeInTheDocument();
+    expect(screen.getAllByLabelText("Skill Path").length).toBe(2);
     expect(screen.getByLabelText("Permission Mode")).toBeInTheDocument();
   });
 });

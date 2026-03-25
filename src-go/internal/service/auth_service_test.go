@@ -7,7 +7,6 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/jackc/pgx/v5"
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
@@ -41,7 +40,7 @@ func (m *mockUserRepo) GetByEmail(_ context.Context, email string) (*model.User,
 	}
 	u, ok := m.users[email]
 	if !ok {
-		return nil, pgx.ErrNoRows
+		return nil, repository.ErrNotFound
 	}
 	return u, nil
 }
@@ -55,7 +54,7 @@ func (m *mockUserRepo) GetByID(_ context.Context, id uuid.UUID) (*model.User, er
 			return u, nil
 		}
 	}
-	return nil, pgx.ErrNoRows
+	return nil, repository.ErrNotFound
 }
 
 type mockCacheRepo struct {
@@ -88,7 +87,7 @@ func (m *mockCacheRepo) GetRefreshToken(_ context.Context, userID string) (strin
 	}
 	t, ok := m.refreshTokens[userID]
 	if !ok {
-		return "", pgx.ErrNoRows
+		return "", repository.ErrNotFound
 	}
 	return t, nil
 }

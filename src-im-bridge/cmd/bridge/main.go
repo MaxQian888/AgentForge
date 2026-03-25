@@ -6,6 +6,7 @@ import (
 	"log"
 	"os"
 	"os/signal"
+	"strings"
 	"syscall"
 	"time"
 
@@ -14,6 +15,54 @@ import (
 	"github.com/agentforge/im-bridge/core"
 	"github.com/agentforge/im-bridge/notify"
 )
+
+type backendActionRelay struct {
+	client   *client.AgentForgeClient
+	bridgeID string
+}
+
+type platformActionHandlerSetter interface {
+	SetActionHandler(notify.ActionHandler)
+}
+
+func (r *backendActionRelay) HandleAction(ctx context.Context, req *notify.ActionRequest) (*notify.ActionResponse, error) {
+	if r == nil || r.client == nil || req == nil {
+		return nil, nil
+	}
+
+	scopedClient := r.client
+	if source := strings.TrimSpace(req.Platform); source != "" {
+		scopedClient = scopedClient.WithSource(source)
+	}
+	replyTarget := req.ReplyTarget
+	bridgeID := strings.TrimSpace(req.BridgeID)
+	if bridgeID == "" {
+		bridgeID = strings.TrimSpace(r.bridgeID)
+	}
+	scopedClient = scopedClient.WithBridgeContext(bridgeID, replyTarget)
+
+	resp, err := scopedClient.HandleIMAction(ctx, client.IMActionRequest{
+		Platform:    req.Platform,
+		Action:      req.Action,
+		EntityID:    req.EntityID,
+		ChannelID:   req.ChatID,
+		UserID:      req.UserID,
+		BridgeID:    bridgeID,
+		ReplyTarget: replyTarget,
+		Metadata:    req.Metadata,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if resp == nil {
+		return &notify.ActionResponse{}, nil
+	}
+	return &notify.ActionResponse{
+		Result:      resp.Result,
+		ReplyTarget: resp.ReplyTarget,
+		Metadata:    resp.Metadata,
+	}, nil
+}
 
 type config struct {
 	APIBase                 string
@@ -177,6 +226,12 @@ func main() {
 	// Start notification receiver in background.
 	notifyServer := notify.NewReceiver(platform, cfg.NotifyPort)
 	notifyServer.SetSharedSecret(cfg.ControlSharedSecret)
+	relay := &backendActionRelay{
+		client:   apiClient,
+		bridgeID: bridgeID,
+	}
+	notifyServer.SetActionHandler(relay)
+	configurePlatformActionCallbacks(platform, relay)
 	go func() {
 		if err := notifyServer.Start(); err != nil {
 			log.Printf("[main] Notification receiver error: %v", err)
@@ -199,4 +254,13 @@ func main() {
 	_ = runtimeControl.Stop(context.Background())
 	_ = notifyServer.Stop()
 	log.Println("[main] Goodbye")
+}
+
+func configurePlatformActionCallbacks(platform core.Platform, handler notify.ActionHandler) {
+	if platform == nil || handler == nil {
+		return
+	}
+	if setter, ok := platform.(platformActionHandlerSetter); ok {
+		setter.SetActionHandler(handler)
+	}
 }

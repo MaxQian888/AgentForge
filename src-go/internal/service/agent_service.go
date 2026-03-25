@@ -13,6 +13,7 @@ import (
 	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/pool"
+	"github.com/react-go-quick-starter/server/internal/repository"
 	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	worktreepkg "github.com/react-go-quick-starter/server/internal/worktree"
 	"github.com/react-go-quick-starter/server/internal/ws"
@@ -54,6 +55,7 @@ type AgentRoleStore interface {
 type BridgeClient interface {
 	Execute(ctx context.Context, req BridgeExecuteRequest) (*BridgeExecuteResponse, error)
 	GetStatus(ctx context.Context, taskID string) (*BridgeStatusResponse, error)
+	GetPoolSummary(ctx context.Context) (*bridgeclient.PoolSummaryResponse, error)
 	Cancel(ctx context.Context, taskID, reason string) error
 	Pause(ctx context.Context, taskID, reason string) (*BridgePauseResponse, error)
 	Resume(ctx context.Context, req BridgeExecuteRequest) (*BridgeResumeResponse, error)
@@ -64,6 +66,17 @@ type BridgeExecuteResponse = bridgeclient.ExecuteResponse
 type BridgeStatusResponse = bridgeclient.StatusResponse
 type BridgePauseResponse = bridgeclient.PauseResponse
 type BridgeResumeResponse = bridgeclient.ResumeResponse
+
+type QueueAgentAdmissionInput = repository.QueueAgentAdmissionRecord
+
+type AgentQueueStore interface {
+	QueueAgentAdmission(ctx context.Context, input QueueAgentAdmissionInput) (*model.AgentPoolQueueEntry, error)
+	CountQueuedByProject(ctx context.Context, projectID uuid.UUID) (int, error)
+	ListAllQueued(ctx context.Context, limit int) ([]*model.AgentPoolQueueEntry, error)
+	ListQueuedByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*model.AgentPoolQueueEntry, error)
+	ReserveNextQueuedByProject(ctx context.Context, projectID uuid.UUID) (*model.AgentPoolQueueEntry, error)
+	CompleteQueuedEntry(ctx context.Context, entryID string, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID) error
+}
 
 var (
 	ErrAgentAlreadyRunning      = errors.New("agent already running for this task")
@@ -87,6 +100,7 @@ type AgentService struct {
 	progress   *TaskProgressService
 	imProgress IMBoundProgressNotifier
 	pool       *pool.Pool
+	queueStore AgentQueueStore
 	teamSvc    *TeamService
 	memorySvc  *MemoryService
 }
@@ -125,6 +139,10 @@ func (s *AgentService) SetIMProgressNotifier(notifier IMBoundProgressNotifier) {
 
 func (s *AgentService) SetPool(agentPool *pool.Pool) {
 	s.pool = agentPool
+}
+
+func (s *AgentService) SetQueueStore(store AgentQueueStore) {
+	s.queueStore = store
 }
 
 func (s *AgentService) SetTeamService(ts *TeamService) {
@@ -281,6 +299,10 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 		}
 		if run.TeamID != nil && s.teamSvc != nil {
 			go s.teamSvc.ProcessRunCompletion(context.Background(), run)
+		}
+		s.promoteQueuedAdmission(ctx, run)
+		if projectID := s.lookupProjectID(ctx, run.TaskID); projectID != "" {
+			s.broadcastPoolStats(ctx, projectID)
 		}
 	}
 
@@ -507,12 +529,61 @@ func (s *AgentService) PoolStats(_ context.Context) model.AgentPoolStatsDTO {
 		}
 	}
 
-	return model.AgentPoolStatsDTO{
+	stats := model.AgentPoolStatsDTO{
 		Active:          s.pool.ActiveCount(),
 		Max:             s.pool.Available() + s.pool.ActiveCount(),
 		Available:       s.pool.Available(),
 		PausedResumable: pausedResumable,
 	}
+	if s.queueStore != nil {
+		if allQueued, err := s.queueStore.ListAllQueued(context.Background(), 10); err == nil {
+			stats.Queued = len(allQueued)
+			for _, entry := range allQueued {
+				if entry != nil {
+					stats.Queue = append(stats.Queue, *entry)
+				}
+			}
+		}
+	}
+	if s.bridge != nil {
+		if summary, err := s.bridge.GetPoolSummary(context.Background()); err == nil && summary != nil {
+			stats.Warm = summary.WarmTotal
+			stats.Degraded = summary.Degraded
+		} else if err != nil {
+			stats.Degraded = true
+		}
+	}
+	if s.queueStore != nil && s.taskRepo != nil {
+		projectIDs := make(map[uuid.UUID]struct{})
+		if runs, err := s.runRepo.ListActive(context.Background()); err == nil {
+			for _, run := range runs {
+				task, taskErr := s.taskRepo.GetByID(context.Background(), run.TaskID)
+				if taskErr == nil {
+					projectIDs[task.ProjectID] = struct{}{}
+				}
+			}
+		}
+		for projectID := range projectIDs {
+			if count, err := s.queueStore.CountQueuedByProject(context.Background(), projectID); err == nil {
+				stats.Queued += count
+			}
+			if queue, err := s.queueStore.ListQueuedByProject(context.Background(), projectID, 10); err == nil {
+				for _, entry := range queue {
+					if entry != nil {
+						stats.Queue = append(stats.Queue, *entry)
+					}
+				}
+			}
+		}
+	}
+	return stats
+}
+
+func (s *AgentService) QueueAgentAdmission(ctx context.Context, input QueueAgentAdmissionInput) (*model.AgentPoolQueueEntry, error) {
+	if s.queueStore == nil {
+		return nil, ErrAgentPoolFull
+	}
+	return s.queueStore.QueueAgentAdmission(ctx, input)
 }
 
 func (s *AgentService) failSpawn(ctx context.Context, run *model.AgentRun, task *model.Task, projectSlug string, allocation *worktreepkg.Allocation) error {
@@ -831,6 +902,56 @@ func (s *AgentService) releasePoolSlot(runID string) {
 		return
 	}
 	_ = s.pool.Release(runID)
+}
+
+func (s *AgentService) broadcastPoolStats(ctx context.Context, projectID string) {
+	if projectID == "" {
+		return
+	}
+	s.broadcastEvent(ws.EventAgentPoolUpdated, projectID, s.PoolStats(ctx))
+}
+
+func (s *AgentService) promoteQueuedAdmission(ctx context.Context, completedRun *model.AgentRun) {
+	if s.queueStore == nil || completedRun == nil || s.taskRepo == nil {
+		return
+	}
+
+	completedTask, err := s.taskRepo.GetByID(ctx, completedRun.TaskID)
+	if err != nil || completedTask == nil {
+		return
+	}
+
+	entry, err := s.queueStore.ReserveNextQueuedByProject(ctx, completedTask.ProjectID)
+	if err != nil || entry == nil {
+		return
+	}
+
+	taskID, err := uuid.Parse(entry.TaskID)
+	if err != nil {
+		_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusFailed, "invalid queued task id", nil)
+		return
+	}
+	memberID, err := uuid.Parse(entry.MemberID)
+	if err != nil {
+		_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusFailed, "invalid queued member id", nil)
+		return
+	}
+
+	run, err := s.Spawn(ctx, taskID, memberID, entry.Runtime, entry.Provider, entry.Model, entry.BudgetUSD, entry.RoleID)
+	if err != nil {
+		s.broadcastEvent(ws.EventAgentQueueFailed, completedTask.ProjectID.String(), map[string]any{
+			"queue": entry,
+			"error": err.Error(),
+		})
+		_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusFailed, err.Error(), nil)
+		return
+	}
+	s.broadcastEvent(ws.EventAgentQueuePromoted, completedTask.ProjectID.String(), map[string]any{
+		"queue": entry,
+		"run":   run.ToDTO(),
+	})
+	_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusPromoted, "started", &run.ID)
+	s.broadcastPoolStats(ctx, completedTask.ProjectID.String())
 }
 
 func (s *AgentService) resolveRoleConfig(roleID string) (*bridgeclient.RoleConfig, error) {

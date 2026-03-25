@@ -14,6 +14,7 @@ import {
   Sun,
   Menu,
   Timer,
+  RefreshCw,
   Puzzle,
   Settings,
 } from "lucide-react";
@@ -30,6 +31,7 @@ const navItems = [
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/teams", label: "Teams", icon: Network },
   { href: "/sprints", label: "Sprints", icon: Timer },
+  { href: "/scheduler", label: "Scheduler", icon: RefreshCw },
   { href: "/cost", label: "Cost", icon: DollarSign },
   { href: "/roles", label: "Roles", icon: Shield },
   { href: "/plugins", label: "Plugins", icon: Puzzle },

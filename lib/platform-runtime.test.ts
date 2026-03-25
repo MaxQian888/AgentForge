@@ -16,7 +16,7 @@ describe("platform-runtime", () => {
 
   it("resolves backend URL through the desktop command when Tauri is available", async () => {
     const invoke = jest
-      .fn<Promise<string>, [string, Record<string, unknown>?]>()
+      .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
       .mockResolvedValue("http://127.0.0.1:7779");
     const runtime = createPlatformRuntime({
       defaultBackendUrl: "http://localhost:7777",
@@ -28,6 +28,23 @@ describe("platform-runtime", () => {
       "http://127.0.0.1:7779",
     );
     expect(invoke).toHaveBeenCalledWith("get_backend_url");
+  });
+
+  it("returns an empty plugin runtime summary outside desktop mode", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => false,
+    });
+
+    await expect(runtime.getPluginRuntimeSummary()).resolves.toEqual({
+      activeRuntimeCount: 0,
+      backendHealthy: false,
+      bridgeHealthy: false,
+      bridgePluginCount: 0,
+      eventBridgeAvailable: false,
+      lastUpdatedAt: null,
+      warnings: [],
+    });
   });
 
   it("uses the web notification fallback when desktop APIs are unavailable", async () => {

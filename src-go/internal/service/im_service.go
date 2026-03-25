@@ -5,8 +5,8 @@ import (
 	"context"
 	"crypto/hmac"
 	"crypto/sha256"
-	"encoding/json"
 	"encoding/hex"
+	"encoding/json"
 	"fmt"
 	"log/slog"
 	"net/http"
@@ -41,12 +41,12 @@ type ClassifyIntentResponse struct {
 // IMService handles IM Bridge message processing, command dispatch,
 // and outbound message delivery.
 type IMService struct {
-	notifyURL  string
-	platform   string
-	httpClient *http.Client
-	classifier BridgeIntentClassifier
-	logger     *slog.Logger
-	controlPlane *IMControlPlane
+	notifyURL      string
+	platform       string
+	httpClient     *http.Client
+	classifier     BridgeIntentClassifier
+	logger         *slog.Logger
+	controlPlane   *IMControlPlane
 	deliverySecret string
 }
 
@@ -177,28 +177,38 @@ func (s *IMService) HandleAction(_ context.Context, req *model.IMActionRequest) 
 	switch req.Action {
 	case "assign-agent":
 		return &model.IMActionResponse{
-			Result:  fmt.Sprintf("Agent assignment requested for entity %s", req.EntityID),
-			Success: true,
+			Result:      fmt.Sprintf("Agent assignment requested for entity %s", req.EntityID),
+			Success:     true,
+			ReplyTarget: req.ReplyTarget,
+			Metadata:    cloneStringMap(req.Metadata),
 		}, nil
 	case "decompose":
 		return &model.IMActionResponse{
-			Result:  fmt.Sprintf("Task decomposition requested for %s", req.EntityID),
-			Success: true,
+			Result:      fmt.Sprintf("Task decomposition requested for %s", req.EntityID),
+			Success:     true,
+			ReplyTarget: req.ReplyTarget,
+			Metadata:    cloneStringMap(req.Metadata),
 		}, nil
 	case "approve":
 		return &model.IMActionResponse{
-			Result:  fmt.Sprintf("Approval recorded for %s", req.EntityID),
-			Success: true,
+			Result:      fmt.Sprintf("Approval recorded for %s", req.EntityID),
+			Success:     true,
+			ReplyTarget: req.ReplyTarget,
+			Metadata:    cloneStringMap(req.Metadata),
 		}, nil
 	case "request-changes":
 		return &model.IMActionResponse{
-			Result:  fmt.Sprintf("Change request recorded for %s", req.EntityID),
-			Success: true,
+			Result:      fmt.Sprintf("Change request recorded for %s", req.EntityID),
+			Success:     true,
+			ReplyTarget: req.ReplyTarget,
+			Metadata:    cloneStringMap(req.Metadata),
 		}, nil
 	default:
 		return &model.IMActionResponse{
-			Result:  fmt.Sprintf("Unknown action: %s", req.Action),
-			Success: false,
+			Result:      fmt.Sprintf("Unknown action: %s", req.Action),
+			Success:     false,
+			ReplyTarget: req.ReplyTarget,
+			Metadata:    cloneStringMap(req.Metadata),
 		}, nil
 	}
 }
@@ -226,13 +236,14 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 		return nil
 	}
 
-	payload := map[string]string{
-		"platform":   req.Platform,
-		"chat_id":    req.ChannelID,
-		"content":    req.Text,
-		"thread_id":  req.ThreadID,
+	compatPayload := map[string]any{
+		"platform":    req.Platform,
+		"chat_id":     req.ChannelID,
+		"content":     req.Text,
+		"thread_id":   req.ThreadID,
+		"replyTarget": req.ReplyTarget,
 	}
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(compatPayload)
 	if err != nil {
 		return fmt.Errorf("marshal IM send payload: %w", err)
 	}
@@ -281,10 +292,11 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 	}
 
 	payload := map[string]any{
-		"type":            req.Event,
-		"platform":        req.Platform,
-		"target_chat_id":  req.ChannelID,
-		"content":         fmt.Sprintf("%s\n%s", req.Title, req.Body),
+		"type":           req.Event,
+		"platform":       req.Platform,
+		"target_chat_id": req.ChannelID,
+		"content":        fmt.Sprintf("%s\n%s", req.Title, req.Body),
+		"replyTarget":    req.ReplyTarget,
 	}
 	body, err := json.Marshal(payload)
 	if err != nil {

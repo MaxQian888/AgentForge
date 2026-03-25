@@ -85,7 +85,7 @@ jest.mock("@/components/ui/select", () => {
         if (!child) return;
         const contentChildren = child.props?.children;
         React.Children.forEach(contentChildren, (grandChild: any) => {
-          if (!grandChild) return;
+          if (!grandChild || grandChild.props?.value === undefined) return;
           options.push({
             value: grandChild.props.value,
             label: grandChild.props.children,

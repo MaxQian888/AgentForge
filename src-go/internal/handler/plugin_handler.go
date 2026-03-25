@@ -1,20 +1,36 @@
 package handler
 
 import (
+	"context"
+	"errors"
 	"net/http"
 	"strconv"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type PluginHandler struct {
-	service *service.PluginService
+	service  *service.PluginService
+	workflow WorkflowExecutionRuntime
+}
+
+type WorkflowExecutionRuntime interface {
+	Start(ctx context.Context, pluginID string, req service.WorkflowExecutionRequest) (*model.WorkflowPluginRun, error)
+	GetRun(ctx context.Context, id uuid.UUID) (*model.WorkflowPluginRun, error)
+	ListRuns(ctx context.Context, pluginID string, limit int) ([]*model.WorkflowPluginRun, error)
 }
 
 func NewPluginHandler(service *service.PluginService) *PluginHandler {
 	return &PluginHandler{service: service}
+}
+
+func (h *PluginHandler) WithWorkflowExecution(workflow WorkflowExecutionRuntime) *PluginHandler {
+	h.workflow = workflow
+	return h
 }
 
 func (h *PluginHandler) DiscoverBuiltIns(c echo.Context) error {
@@ -116,6 +132,64 @@ func (h *PluginHandler) Invoke(c echo.Context) error {
 	})
 }
 
+func (h *PluginHandler) RefreshMCP(c echo.Context) error {
+	result, err := h.service.RefreshMCP(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+func (h *PluginHandler) CallMCPTool(c echo.Context) error {
+	var req struct {
+		ToolName  string         `json:"tool_name"`
+		Arguments map[string]any `json:"arguments"`
+	}
+	if err := c.Bind(&req); err != nil || req.ToolName == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "tool_name is required"})
+	}
+	if req.Arguments == nil {
+		req.Arguments = map[string]any{}
+	}
+
+	result, err := h.service.CallMCPTool(c.Request().Context(), c.Param("id"), req.ToolName, req.Arguments)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+func (h *PluginHandler) ReadMCPResource(c echo.Context) error {
+	var req struct {
+		URI string `json:"uri"`
+	}
+	if err := c.Bind(&req); err != nil || req.URI == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "uri is required"})
+	}
+
+	result, err := h.service.ReadMCPResource(c.Request().Context(), c.Param("id"), req.URI)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+func (h *PluginHandler) GetMCPPrompt(c echo.Context) error {
+	var req struct {
+		Name      string            `json:"name"`
+		Arguments map[string]string `json:"arguments"`
+	}
+	if err := c.Bind(&req); err != nil || req.Name == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "name is required"})
+	}
+
+	result, err := h.service.GetMCPPrompt(c.Request().Context(), c.Param("id"), req.Name, req.Arguments)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
 func (h *PluginHandler) Uninstall(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
@@ -166,6 +240,58 @@ func (h *PluginHandler) ListEvents(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
 	}
 	return c.JSON(http.StatusOK, events)
+}
+
+func (h *PluginHandler) StartWorkflowRun(c echo.Context) error {
+	if h.workflow == nil {
+		return c.JSON(http.StatusNotImplemented, model.ErrorResponse{Message: "workflow execution is not configured"})
+	}
+	var req service.WorkflowExecutionRequest
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid workflow execution request"})
+	}
+	run, err := h.workflow.Start(c.Request().Context(), c.Param("id"), req)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusCreated, run)
+}
+
+func (h *PluginHandler) ListWorkflowRuns(c echo.Context) error {
+	if h.workflow == nil {
+		return c.JSON(http.StatusNotImplemented, model.ErrorResponse{Message: "workflow execution is not configured"})
+	}
+	limit := 20
+	if raw := c.QueryParam("limit"); raw != "" {
+		parsed, err := strconv.Atoi(raw)
+		if err != nil || parsed <= 0 {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "limit must be a positive integer"})
+		}
+		limit = parsed
+	}
+	runs, err := h.workflow.ListRuns(c.Request().Context(), c.Param("id"), limit)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, runs)
+}
+
+func (h *PluginHandler) GetWorkflowRun(c echo.Context) error {
+	if h.workflow == nil {
+		return c.JSON(http.StatusNotImplemented, model.ErrorResponse{Message: "workflow execution is not configured"})
+	}
+	runID, err := uuid.Parse(c.Param("runId"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "runId must be a valid UUID"})
+	}
+	run, err := h.workflow.GetRun(c.Request().Context(), runID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: err.Error()})
+		}
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, run)
 }
 
 func (h *PluginHandler) SyncRuntimeState(c echo.Context) error {

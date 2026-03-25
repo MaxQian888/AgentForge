@@ -45,6 +45,15 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 	return core.PlatformMetadata{
 		Source: "discord",
 		Capabilities: core.PlatformCapabilities{
+			CommandSurface:     core.CommandSurfaceInteraction,
+			StructuredSurface:  core.StructuredSurfaceComponents,
+			AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateFollowUp, core.AsyncUpdateEdit},
+			ActionCallbackMode: core.ActionCallbackInteractionToken,
+			MessageScopes:      []core.MessageScope{core.MessageScopeInteractionScoped, core.MessageScopeChat},
+			Mutability: core.MutabilitySemantics{
+				CanEdit:        true,
+				PrefersInPlace: true,
+			},
 			SupportsDeferredReply: true,
 			SupportsSlashCommands: true,
 		},

@@ -108,6 +108,47 @@ func (f *fakePluginRuntimeClient) RestartToolPlugin(_ context.Context, pluginID 
 	return &status, nil
 }
 
+func (f *fakePluginRuntimeClient) RefreshToolPluginMCPSurface(_ context.Context, pluginID string) (*model.PluginMCPRefreshResult, error) {
+	return &model.PluginMCPRefreshResult{
+		PluginID:       pluginID,
+		LifecycleState: model.PluginStateActive,
+		RuntimeHost:    model.PluginHostTSBridge,
+		Snapshot: model.PluginMCPCapabilitySnapshot{
+			Transport: "stdio",
+		},
+	}, nil
+}
+
+func (f *fakePluginRuntimeClient) InvokeToolPluginMCPTool(_ context.Context, pluginID, toolName string, args map[string]any) (*model.PluginMCPToolCallResult, error) {
+	return &model.PluginMCPToolCallResult{
+		PluginID:  pluginID,
+		Operation: string(model.MCPInteractionCallTool),
+		Result: model.MCPToolCallResult{
+			Content: []model.MCPContentBlock{{Type: "text", Text: toolName}},
+		},
+	}, nil
+}
+
+func (f *fakePluginRuntimeClient) ReadToolPluginMCPResource(_ context.Context, pluginID, uri string) (*model.PluginMCPResourceReadResult, error) {
+	return &model.PluginMCPResourceReadResult{
+		PluginID:  pluginID,
+		Operation: string(model.MCPInteractionReadResource),
+		Result: model.MCPResourceReadResult{
+			Contents: []model.MCPResourceContent{{URI: uri}},
+		},
+	}, nil
+}
+
+func (f *fakePluginRuntimeClient) GetToolPluginMCPPrompt(_ context.Context, pluginID, name string, args map[string]string) (*model.PluginMCPPromptResult, error) {
+	return &model.PluginMCPPromptResult{
+		PluginID:  pluginID,
+		Operation: string(model.MCPInteractionGetPrompt),
+		Result: model.MCPPromptGetResult{
+			Description: name,
+		},
+	}, nil
+}
+
 func (f *fakeGoPluginRuntime) ActivatePlugin(_ context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error) {
 	f.activated = append(f.activated, record.Metadata.ID)
 	status := f.status

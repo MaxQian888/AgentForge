@@ -124,6 +124,10 @@ Useful root commands:
 - `pnpm lint`
 - `pnpm test`
 - `pnpm test:coverage`
+- `pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
+- `pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health`
+- `pnpm plugin:dev`
+- `pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
 
 ### 2. Go Backend
 
@@ -191,6 +195,43 @@ Runtime notes:
 - `codex` and `opencode` use command-based adapters. Set `CODEX_RUNTIME_COMMAND` or `OPENCODE_RUNTIME_COMMAND` to an executable on `PATH` (or an absolute path). Each command must read one JSON request from `stdin` and emit newline-delimited JSON events on `stdout`.
 - Command adapters normalize these event types into the canonical bridge stream: `assistant_text`, `tool_call`, `tool_result`, `usage`, and `error`.
 
+### Coding Agent Runtime Catalog
+
+In the current product contract, coding-agent execution is no longer "provider only". The runtime tuple is:
+
+- `runtime`: the actual execution backend (`claude_code`, `codex`, `opencode`)
+- `provider`: the provider alias allowed for that runtime
+- `model`: the concrete model string forwarded to the runtime
+
+Project settings, single-agent launches, and Team launches now share the same catalog-driven defaults exposed from the backend. This matches the PRD direction that the TS Bridge is the unified AI execution surface, while the Go orchestrator owns project-level policy and propagation.
+
+Current runtime compatibility rules:
+
+| Runtime | Default Provider | Compatible Providers | Default Model | Required Runtime Dependency |
+| --- | --- | --- | --- | --- |
+| `claude_code` | `anthropic` | `anthropic` | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
+| `codex` | `openai` | `openai`, `codex` | `gpt-5-codex` | `CODEX_RUNTIME_COMMAND` |
+| `opencode` | `opencode` | `opencode` | `opencode-default` | `OPENCODE_RUNTIME_COMMAND` |
+
+Bridge readiness diagnostics now surface missing credentials, missing executables, and incompatible runtime/provider combinations before launch. The project settings page and Team start dialog both consume that catalog instead of hard-coded Claude-only defaults.
+
+### Runtime Environment Variables
+
+These are the key environment variables for the coding-agent runtimes:
+
+```env
+# Claude Code runtime
+ANTHROPIC_API_KEY=...
+
+# Codex runtime adapter
+CODEX_RUNTIME_COMMAND=codex
+
+# OpenCode runtime adapter
+OPENCODE_RUNTIME_COMMAND=opencode
+```
+
+If you use a custom wrapper script or binary, point `CODEX_RUNTIME_COMMAND` or `OPENCODE_RUNTIME_COMMAND` at the full executable path. Project-level runtime selection does not replace these process-level requirements; it only determines which runtime tuple Go forwards to the Bridge.
+
 Focused verification for the bridge runtime layer:
 
 - `bun test src/schemas.test.ts src/handlers/execute.test.ts src/runtime/registry.test.ts src/server.test.ts`
@@ -201,6 +242,23 @@ From the repo root, there is also:
 ```bash
 pnpm build:bridge
 ```
+
+### 3.5 Plugin Authoring Workflow
+
+For the maintained Go WASM sample plugin, the repo now exposes a supported root-level loop:
+
+```bash
+pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
+pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health
+pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
+```
+
+Notes:
+
+- `plugin:build` resolves the maintained sample artifact path from the manifest and still supports `--source` / `--output` overrides when you are iterating on a different Go-hosted plugin target.
+- `plugin:debug` replays the real `AGENTFORGE_AUTORUN`, `AGENTFORGE_OPERATION`, `AGENTFORGE_CONFIG`, `AGENTFORGE_CAPABILITIES`, and `AGENTFORGE_PAYLOAD` contract through the Go WASM runtime instead of inventing a separate dev-only protocol.
+- `plugin:verify` currently runs the maintained sample smoke path only: `build -> debug health`. It is intentionally scoped and does not replace broader Go or bridge test suites.
+- `plugin:dev` is the minimal local plugin stack command. It only concerns the Go orchestrator and TS bridge, reuses them when already healthy, and reports readiness through `http://127.0.0.1:7777/health` and `http://127.0.0.1:7778/health`.
 
 ### 4. IM Bridge Workspace
 
@@ -228,6 +286,19 @@ Or build desktop artifacts:
 pnpm tauri:build
 ```
 
+Desktop capability contract in the current Tauri shell:
+
+- Tauri now supervises both required sidecars: the Go orchestrator on `http://127.0.0.1:7777` and the TS bridge on `http://127.0.0.1:7778`.
+- The desktop runtime is only reported as `ready` after both sidecars pass health checks. Unexpected exits trigger bounded restart attempts before the runtime is marked `degraded`.
+- Frontend desktop access is centralized through `lib/platform-runtime.ts` and `hooks/use-platform-capability.ts`. Supported desktop commands include backend URL resolution, runtime status, native file picking, system notifications, tray updates, global shortcut registration, update checks, and read-only runtime summary queries.
+- Web mode keeps explicit fallback semantics: file picking falls back to browser input, notifications fall back to the Web Notification API, tray updates fall back to document title updates, global shortcuts return `unsupported`, and update checks return `not_applicable`.
+- The plugin dashboard consumes desktop runtime telemetry as an additive status surface only. Plugin inventory and lifecycle actions remain on the existing backend control plane.
+
+Current limitations:
+
+- The desktop event stream currently normalizes runtime, tray, shortcut, notification, and updater events. It does not replace backend plugin business data.
+- Update checks currently cover detection and event reporting; they do not yet expose a download-and-install flow in the dashboard.
+
 ## Key Root Scripts
 
 | Command | Purpose |
@@ -241,9 +312,14 @@ pnpm tauri:build
 | `pnpm build:backend` | Cross-compile Go sidecar binaries for Tauri |
 | `pnpm build:backend:dev` | Build the Go sidecar for the current platform |
 | `pnpm build:plugin:wasm` | Build the Go WASM sample plugin artifact |
+| `pnpm plugin:build` | Build a maintained Go-hosted plugin target from a manifest |
+| `pnpm plugin:debug` | Run a local Go WASM plugin debug invocation through the real runtime envelope |
+| `pnpm plugin:dev` | Start or reuse the minimal plugin authoring stack: Go orchestrator + TS bridge |
+| `pnpm plugin:verify` | Run the maintained sample plugin smoke workflow: build -> debug health |
 | `pnpm tauri:dev` | Build backend sidecar and start Tauri dev mode |
 | `pnpm tauri:build` | Build the desktop app |
 | `pnpm build:bridge` | Install and build the TS/Bun bridge |
+| `pnpm build:desktop` | Build backend + bridge sidecars and package the desktop app |
 
 ## Tech Stack Snapshot
 

@@ -16,19 +16,30 @@ import (
 	"time"
 
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/notify"
 )
 
 const (
 	interactionTypePing               = 1
 	interactionTypeApplicationCommand = 2
+	interactionTypeMessageComponent   = 3
 
 	interactionCallbackTypePong                             = 1
 	interactionCallbackTypeChannelMessageWithSource         = 4
 	interactionCallbackTypeDeferredChannelMessageWithSource = 5
+	interactionCallbackTypeDeferredUpdateMessage            = 6
 
 	commandOptionTypeSubCommand      = 1
 	commandOptionTypeSubCommandGroup = 2
 	commandOptionTypeString          = 3
+
+	componentTypeActionRow = 1
+	componentTypeButton    = 2
+
+	componentStylePrimary   = 1
+	componentStyleSecondary = 2
+	componentStyleDanger    = 4
+	componentStyleLink      = 5
 
 	ephemeralMessageFlag = 1 << 6
 )
@@ -36,20 +47,30 @@ const (
 var liveMetadata = core.PlatformMetadata{
 	Source: "discord",
 	Capabilities: core.PlatformCapabilities{
+		CommandSurface:     core.CommandSurfaceInteraction,
+		StructuredSurface:  core.StructuredSurfaceComponents,
+		AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateFollowUp, core.AsyncUpdateEdit},
+		ActionCallbackMode: core.ActionCallbackInteractionToken,
+		MessageScopes:      []core.MessageScope{core.MessageScopeInteractionScoped, core.MessageScopeChat},
+		Mutability: core.MutabilitySemantics{
+			CanEdit:        true,
+			PrefersInPlace: true,
+		},
 		SupportsDeferredReply: true,
 		SupportsSlashCommands: true,
 	},
 }
 
 type interaction struct {
-	Type          int                     `json:"type"`
-	Token         string                  `json:"token,omitempty"`
-	ApplicationID string                  `json:"application_id,omitempty"`
-	GuildID       string                  `json:"guild_id,omitempty"`
-	ChannelID     string                  `json:"channel_id,omitempty"`
-	Member        *interactionMember      `json:"member,omitempty"`
-	User          *interactionUser        `json:"user,omitempty"`
-	Data          *applicationCommandData `json:"data,omitempty"`
+	Type          int                 `json:"type"`
+	Token         string              `json:"token,omitempty"`
+	ApplicationID string              `json:"application_id,omitempty"`
+	GuildID       string              `json:"guild_id,omitempty"`
+	ChannelID     string              `json:"channel_id,omitempty"`
+	Member        *interactionMember  `json:"member,omitempty"`
+	User          *interactionUser    `json:"user,omitempty"`
+	Data          *interactionData    `json:"data,omitempty"`
+	Message       *interactionMessage `json:"message,omitempty"`
 }
 
 type interactionMember struct {
@@ -62,24 +83,30 @@ type interactionUser struct {
 	GlobalName string `json:"global_name,omitempty"`
 }
 
-type applicationCommandData struct {
-	Name    string                     `json:"name"`
-	Options []applicationCommandOption `json:"options,omitempty"`
+type interactionMessage struct {
+	ID string `json:"id,omitempty"`
 }
 
-type applicationCommandOption struct {
-	Type        int                        `json:"type"`
-	Name        string                     `json:"name"`
-	Description string                     `json:"description,omitempty"`
-	Required    bool                       `json:"required,omitempty"`
-	Value       any                        `json:"value,omitempty"`
-	Options     []applicationCommandOption `json:"options,omitempty"`
+type interactionData struct {
+	Name          string                  `json:"name,omitempty"`
+	Options       []interactionDataOption `json:"options,omitempty"`
+	ComponentType int                     `json:"component_type,omitempty"`
+	CustomID      string                  `json:"custom_id,omitempty"`
+}
+
+type interactionDataOption struct {
+	Type        int                     `json:"type"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description,omitempty"`
+	Required    bool                    `json:"required,omitempty"`
+	Value       any                     `json:"value,omitempty"`
+	Options     []interactionDataOption `json:"options,omitempty"`
 }
 
 type applicationCommand struct {
-	Name        string                     `json:"name"`
-	Description string                     `json:"description"`
-	Options     []applicationCommandOption `json:"options,omitempty"`
+	Name        string                  `json:"name"`
+	Description string                  `json:"description"`
+	Options     []interactionDataOption `json:"options,omitempty"`
 }
 
 type interactionResponse struct {
@@ -93,13 +120,29 @@ type interactionResponseData struct {
 }
 
 type replyContext struct {
-	InteractionToken string
-	ChannelID        string
+	InteractionToken   string
+	ChannelID          string
+	OriginalResponseID string
 }
 
 type interactionEnvelope struct {
 	Interaction *interaction
 	Ack         func(interactionResponse) error
+}
+
+type discordComponent struct {
+	Type       int                `json:"type"`
+	Style      int                `json:"style,omitempty"`
+	Label      string             `json:"label,omitempty"`
+	CustomID   string             `json:"custom_id,omitempty"`
+	URL        string             `json:"url,omitempty"`
+	Components []discordComponent `json:"components,omitempty"`
+}
+
+type discordOutgoingMessage struct {
+	Content    string             `json:"content,omitempty"`
+	Flags      int                `json:"flags,omitempty"`
+	Components []discordComponent `json:"components,omitempty"`
 }
 
 type interactionRunner interface {
@@ -108,11 +151,15 @@ type interactionRunner interface {
 }
 
 type followupClient interface {
-	SendFollowup(ctx context.Context, appID, token, content string) error
+	SendFollowup(ctx context.Context, appID, token string, message discordOutgoingMessage) error
 }
 
 type channelClient interface {
-	SendChannelMessage(ctx context.Context, channelID, content string) error
+	SendChannelMessage(ctx context.Context, channelID string, message discordOutgoingMessage) error
+}
+
+type originalResponseClient interface {
+	EditOriginalResponse(ctx context.Context, appID, token string, message discordOutgoingMessage) error
 }
 
 type commandRegistrar interface {
@@ -131,7 +178,10 @@ type Live struct {
 	runner    interactionRunner
 	followups followupClient
 	channels  channelClient
+	originals originalResponseClient
 	registrar commandRegistrar
+
+	actionHandler notify.ActionHandler
 
 	startCtx    context.Context
 	startCancel context.CancelFunc
@@ -159,6 +209,7 @@ func NewLive(appID, botToken, publicKey, port string, opts ...LiveOption) (*Live
 		runner:    newHTTPInteractionRunner(publicKey, port),
 		followups: &discordFollowupClient{client: apiClient},
 		channels:  &discordChannelClient{client: apiClient},
+		originals: &discordOriginalResponseClient{client: apiClient},
 		registrar: &discordCommandRegistrar{client: apiClient},
 	}
 
@@ -175,6 +226,9 @@ func NewLive(appID, botToken, publicKey, port string, opts ...LiveOption) (*Live
 	}
 	if live.channels == nil {
 		return nil, errors.New("discord live transport requires a channel client")
+	}
+	if live.originals == nil {
+		return nil, errors.New("discord live transport requires an original response client")
 	}
 	if live.registrar == nil {
 		return nil, errors.New("discord live transport requires a command registrar")
@@ -213,6 +267,16 @@ func WithChannelClient(client channelClient) LiveOption {
 	}
 }
 
+func WithOriginalResponseClient(client originalResponseClient) LiveOption {
+	return func(live *Live) error {
+		if client == nil {
+			return errors.New("original response client cannot be nil")
+		}
+		live.originals = client
+		return nil
+	}
+}
+
 func WithCommandRegistrar(registrar commandRegistrar) LiveOption {
 	return func(live *Live) error {
 		if registrar == nil {
@@ -234,13 +298,18 @@ func (l *Live) Name() string { return "discord-live" }
 
 func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
 
+func (l *Live) SetActionHandler(handler notify.ActionHandler) {
+	l.actionHandler = handler
+}
+
 func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
 	if target == nil {
 		return nil
 	}
 	return replyContext{
-		InteractionToken: strings.TrimSpace(target.InteractionToken),
-		ChannelID:        firstNonEmpty(target.ChannelID, target.ChatID),
+		InteractionToken:   strings.TrimSpace(target.InteractionToken),
+		ChannelID:          firstNonEmpty(target.ChannelID, target.ChatID),
+		OriginalResponseID: firstNonEmpty(target.OriginalResponseID, "@original"),
 	}
 }
 
@@ -288,6 +357,16 @@ func (l *Live) Start(handler core.MessageHandler) error {
 			}
 			handler(l, msg)
 			return nil
+		case interactionTypeMessageComponent:
+			if envelope.Ack != nil {
+				if err := envelope.Ack(interactionResponse{Type: interactionCallbackTypeDeferredUpdateMessage}); err != nil {
+					return err
+				}
+			}
+			if err := l.handleComponentInteraction(ctx, envelope.Interaction); err != nil {
+				log.Printf("[discord-live] Ignoring component interaction: %v", err)
+			}
+			return nil
 		default:
 			if envelope.Ack != nil {
 				return envelope.Ack(interactionResponse{
@@ -311,11 +390,12 @@ func (l *Live) Start(handler core.MessageHandler) error {
 
 func (l *Live) Reply(ctx context.Context, rawReplyCtx any, content string) error {
 	reply := toReplyContext(rawReplyCtx)
+	message := discordOutgoingMessage{Content: content}
 	if strings.TrimSpace(reply.InteractionToken) != "" {
-		return l.followups.SendFollowup(ctx, l.appID, reply.InteractionToken, content)
+		return l.followups.SendFollowup(ctx, l.appID, reply.InteractionToken, message)
 	}
 	if strings.TrimSpace(reply.ChannelID) != "" {
-		return l.channels.SendChannelMessage(ctx, reply.ChannelID, content)
+		return l.channels.SendChannelMessage(ctx, reply.ChannelID, message)
 	}
 	return errors.New("discord reply requires interaction token or channel id")
 }
@@ -325,7 +405,26 @@ func (l *Live) Send(ctx context.Context, chatID string, content string) error {
 	if channelID == "" {
 		return errors.New("discord send requires channel id")
 	}
-	return l.channels.SendChannelMessage(ctx, channelID, content)
+	return l.channels.SendChannelMessage(ctx, channelID, discordOutgoingMessage{Content: content})
+}
+
+func (l *Live) UpdateMessage(ctx context.Context, rawReplyCtx any, content string) error {
+	reply := toReplyContext(rawReplyCtx)
+	if strings.TrimSpace(reply.InteractionToken) == "" {
+		return errors.New("discord update requires interaction token")
+	}
+	return l.originals.EditOriginalResponse(ctx, l.appID, reply.InteractionToken, discordOutgoingMessage{Content: content})
+}
+
+func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	channelID := strings.TrimSpace(chatID)
+	if channelID == "" {
+		return errors.New("discord send requires channel id")
+	}
+	return l.channels.SendChannelMessage(ctx, channelID, discordOutgoingMessage{
+		Content:    structuredFallbackText(message),
+		Components: buildMessageComponents(message),
+	})
 }
 
 func (l *Live) Stop() error {
@@ -340,6 +439,29 @@ func (l *Live) Stop() error {
 	}
 	l.started = false
 	return l.runner.Stop(l.startCtx)
+}
+
+func (l *Live) handleComponentInteraction(ctx context.Context, raw *interaction) error {
+	if l.actionHandler == nil {
+		return nil
+	}
+	req, err := normalizeComponentAction(raw)
+	if err != nil {
+		return err
+	}
+	result, err := l.actionHandler.HandleAction(ctx, req)
+	if err != nil {
+		return err
+	}
+	if result == nil || strings.TrimSpace(result.Result) == "" {
+		return nil
+	}
+	target := req.ReplyTarget
+	if result.ReplyTarget != nil {
+		target = result.ReplyTarget
+	}
+	_, err = core.DeliverText(ctx, l, l.Metadata(), target, req.ChatID, result.Result)
+	return err
 }
 
 type httpInteractionRunner struct {
@@ -482,26 +604,33 @@ type discordFollowupClient struct {
 	client *discordAPIClient
 }
 
-func (c *discordFollowupClient) SendFollowup(ctx context.Context, appID, token, content string) error {
+func (c *discordFollowupClient) SendFollowup(ctx context.Context, appID, token string, message discordOutgoingMessage) error {
 	if strings.TrimSpace(token) == "" {
 		return errors.New("discord followup requires interaction token")
 	}
-	return c.client.doJSON(ctx, http.MethodPost, "/webhooks/"+strings.TrimSpace(appID)+"/"+strings.TrimSpace(token), map[string]string{
-		"content": content,
-	}, false)
+	return c.client.doJSON(ctx, http.MethodPost, "/webhooks/"+strings.TrimSpace(appID)+"/"+strings.TrimSpace(token), message, false)
 }
 
 type discordChannelClient struct {
 	client *discordAPIClient
 }
 
-func (c *discordChannelClient) SendChannelMessage(ctx context.Context, channelID, content string) error {
+func (c *discordChannelClient) SendChannelMessage(ctx context.Context, channelID string, message discordOutgoingMessage) error {
 	if strings.TrimSpace(channelID) == "" {
 		return errors.New("discord channel send requires channel id")
 	}
-	return c.client.doJSON(ctx, http.MethodPost, "/channels/"+strings.TrimSpace(channelID)+"/messages", map[string]string{
-		"content": content,
-	}, true)
+	return c.client.doJSON(ctx, http.MethodPost, "/channels/"+strings.TrimSpace(channelID)+"/messages", message, true)
+}
+
+type discordOriginalResponseClient struct {
+	client *discordAPIClient
+}
+
+func (c *discordOriginalResponseClient) EditOriginalResponse(ctx context.Context, appID, token string, message discordOutgoingMessage) error {
+	if strings.TrimSpace(token) == "" {
+		return errors.New("discord original response update requires interaction token")
+	}
+	return c.client.doJSON(ctx, http.MethodPatch, "/webhooks/"+strings.TrimSpace(appID)+"/"+strings.TrimSpace(token)+"/messages/@original", message, false)
 }
 
 type discordCommandRegistrar struct {
@@ -521,7 +650,7 @@ func defaultApplicationCommands() []applicationCommand {
 		{
 			Name:        "task",
 			Description: "Run AgentForge task commands.",
-			Options: []applicationCommandOption{
+			Options: []interactionDataOption{
 				{
 					Type:        commandOptionTypeString,
 					Name:        "args",
@@ -532,7 +661,7 @@ func defaultApplicationCommands() []applicationCommand {
 		{
 			Name:        "agent",
 			Description: "Run AgentForge agent commands.",
-			Options: []applicationCommandOption{
+			Options: []interactionDataOption{
 				{
 					Type:        commandOptionTypeString,
 					Name:        "args",
@@ -576,18 +705,65 @@ func normalizeInteraction(raw *interaction) (*core.Message, error) {
 		ChatID:     strings.TrimSpace(raw.ChannelID),
 		Content:    content,
 		ReplyCtx: replyContext{
-			InteractionToken: strings.TrimSpace(raw.Token),
-			ChannelID:        strings.TrimSpace(raw.ChannelID),
+			InteractionToken:   strings.TrimSpace(raw.Token),
+			ChannelID:          strings.TrimSpace(raw.ChannelID),
+			OriginalResponseID: "@original",
 		},
 		ReplyTarget: &core.ReplyTarget{
-			Platform:         liveMetadata.Source,
-			ChatID:           strings.TrimSpace(raw.ChannelID),
-			ChannelID:        strings.TrimSpace(raw.ChannelID),
-			InteractionToken: strings.TrimSpace(raw.Token),
-			UseReply:         true,
+			Platform:           liveMetadata.Source,
+			ChatID:             strings.TrimSpace(raw.ChannelID),
+			ChannelID:          strings.TrimSpace(raw.ChannelID),
+			InteractionToken:   strings.TrimSpace(raw.Token),
+			OriginalResponseID: "@original",
+			UseReply:           true,
+			PreferEdit:         true,
 		},
 		Timestamp: time.Now(),
 		IsGroup:   strings.TrimSpace(raw.GuildID) != "",
+	}, nil
+}
+
+func normalizeComponentAction(raw *interaction) (*notify.ActionRequest, error) {
+	if raw == nil || raw.Data == nil {
+		return nil, errors.New("discord component interaction missing data")
+	}
+	user := interactionUserFromPayload(raw)
+	if user == nil || strings.TrimSpace(user.ID) == "" {
+		return nil, errors.New("discord interaction missing user id")
+	}
+
+	customID := strings.TrimSpace(raw.Data.CustomID)
+	action, entityID, ok := core.ParseActionReference(customID)
+	if !ok {
+		return nil, errors.New("discord component interaction missing action reference")
+	}
+
+	replyTarget := &core.ReplyTarget{
+		Platform:           liveMetadata.Source,
+		ChatID:             strings.TrimSpace(raw.ChannelID),
+		ChannelID:          strings.TrimSpace(raw.ChannelID),
+		MessageID:          valueOrEmpty(raw.Message, func(m *interactionMessage) string { return m.ID }),
+		InteractionToken:   strings.TrimSpace(raw.Token),
+		OriginalResponseID: "@original",
+		UserID:             strings.TrimSpace(user.ID),
+		UseReply:           true,
+		PreferEdit:         true,
+		PreferredRenderer:  string(liveMetadata.Capabilities.StructuredSurface),
+	}
+
+	return &notify.ActionRequest{
+		Platform:    liveMetadata.Source,
+		Action:      action,
+		EntityID:    entityID,
+		ChatID:      strings.TrimSpace(raw.ChannelID),
+		UserID:      strings.TrimSpace(user.ID),
+		ReplyTarget: replyTarget,
+		Metadata: compactMetadata(map[string]string{
+			"source":         "message_component",
+			"custom_id":      customID,
+			"component_type": fmt.Sprintf("%d", raw.Data.ComponentType),
+			"message_id":     valueOrEmpty(raw.Message, func(m *interactionMessage) string { return m.ID }),
+		}),
 	}, nil
 }
 
@@ -601,7 +777,7 @@ func interactionUserFromPayload(raw *interaction) *interactionUser {
 	return raw.User
 }
 
-func commandContent(data *applicationCommandData) (string, error) {
+func commandContent(data *interactionData) (string, error) {
 	command := strings.ToLower(strings.TrimSpace(data.Name))
 	if command == "" {
 		return "", errors.New("discord interaction missing command name")
@@ -612,7 +788,7 @@ func commandContent(data *applicationCommandData) (string, error) {
 	return strings.TrimSpace(strings.Join(parts, " ")), nil
 }
 
-func flattenCommandOptions(options []applicationCommandOption) []string {
+func flattenCommandOptions(options []interactionDataOption) []string {
 	parts := make([]string, 0)
 	for _, option := range options {
 		switch option.Type {
@@ -659,7 +835,13 @@ func toReplyContext(raw any) replyContext {
 		if ctx, ok := value.ReplyCtx.(*replyContext); ok && ctx != nil {
 			return *ctx
 		}
-		return replyContext{ChannelID: value.ChatID}
+		interactionToken := ""
+		originalResponseID := ""
+		if value.ReplyTarget != nil {
+			interactionToken = strings.TrimSpace(value.ReplyTarget.InteractionToken)
+			originalResponseID = strings.TrimSpace(value.ReplyTarget.OriginalResponseID)
+		}
+		return replyContext{InteractionToken: interactionToken, ChannelID: value.ChatID, OriginalResponseID: originalResponseID}
 	default:
 		return replyContext{}
 	}
@@ -697,6 +879,78 @@ func decodePublicKey(raw string) (ed25519.PublicKey, error) {
 	return ed25519.PublicKey(decoded), nil
 }
 
+func buildMessageComponents(message *core.StructuredMessage) []discordComponent {
+	if message == nil || len(message.Actions) == 0 {
+		return nil
+	}
+
+	rows := make([]discordComponent, 0, len(message.Actions))
+	for _, action := range message.Actions {
+		label := strings.TrimSpace(action.Label)
+		if label == "" {
+			continue
+		}
+		button := discordComponent{
+			Type:  componentTypeButton,
+			Label: label,
+		}
+		switch {
+		case strings.TrimSpace(action.URL) != "":
+			button.Style = componentStyleLink
+			button.URL = strings.TrimSpace(action.URL)
+		case strings.TrimSpace(action.ID) != "":
+			button.Style = discordComponentStyle(action.Style)
+			button.CustomID = strings.TrimSpace(action.ID)
+		default:
+			continue
+		}
+		rows = append(rows, discordComponent{
+			Type:       componentTypeActionRow,
+			Components: []discordComponent{button},
+		})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return rows
+}
+
+func structuredFallbackText(message *core.StructuredMessage) string {
+	if message == nil {
+		return ""
+	}
+	return strings.TrimSpace(message.FallbackText())
+}
+
+func discordComponentStyle(style core.ActionStyle) int {
+	switch style {
+	case core.ActionStylePrimary:
+		return componentStylePrimary
+	case core.ActionStyleDanger:
+		return componentStyleDanger
+	default:
+		return componentStyleSecondary
+	}
+}
+
+func compactMetadata(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	metadata := make(map[string]string, len(values))
+	for key, value := range values {
+		if trimmedKey := strings.TrimSpace(key); trimmedKey != "" {
+			if trimmedValue := strings.TrimSpace(value); trimmedValue != "" {
+				metadata[trimmedKey] = trimmedValue
+			}
+		}
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
@@ -704,4 +958,11 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func valueOrEmpty[T any](value *T, getter func(*T) string) string {
+	if value == nil || getter == nil {
+		return ""
+	}
+	return strings.TrimSpace(getter(value))
 }

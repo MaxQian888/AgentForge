@@ -1,6 +1,6 @@
 import type {
   DeepReviewResponse,
-  DimensionReviewResult,
+  ReviewExecutionResult,
   ReviewFinding,
   ReviewRecommendation,
   ReviewSeverity,
@@ -70,11 +70,11 @@ function recommendationFor(findings: ReviewFinding[], hadFailures: boolean): Rev
   return "approve";
 }
 
-export function aggregateReviewResults(results: DimensionReviewResult[]): DeepReviewResponse {
+export function aggregateReviewResults(results: ReviewExecutionResult[]): DeepReviewResponse {
   const allFindings = results.flatMap((result) =>
     result.findings.map((finding) => ({
       ...finding,
-      source: result.dimension,
+      source: result.plugin_id ?? result.dimension,
     })),
   );
   const dedupedFindings = dedupeFindings(allFindings);
@@ -83,10 +83,11 @@ export function aggregateReviewResults(results: DimensionReviewResult[]): DeepRe
   const recommendation = recommendationFor(dedupedFindings, failedDimensions.length > 0);
 
   const summaryParts = results.map((result) => {
+    const label = result.plugin_id ?? result.dimension;
     if (result.status === "failed") {
-      return `${result.dimension} failed: ${result.error ?? result.summary}`;
+      return `${label} failed: ${result.error ?? result.summary}`;
     }
-    return `${result.dimension}: ${result.summary}`;
+    return `${label}: ${result.summary}`;
   });
 
   return {

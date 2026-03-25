@@ -45,6 +45,15 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 	return core.PlatformMetadata{
 		Source: "telegram",
 		Capabilities: core.PlatformCapabilities{
+			CommandSurface:     core.CommandSurfaceMixed,
+			StructuredSurface:  core.StructuredSurfaceInlineKeyboard,
+			AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateEdit},
+			ActionCallbackMode: core.ActionCallbackQuery,
+			MessageScopes:      []core.MessageScope{core.MessageScopeChat, core.MessageScopeTopic},
+			Mutability: core.MutabilitySemantics{
+				CanEdit:        true,
+				PrefersInPlace: true,
+			},
 			SupportsSlashCommands: true,
 			SupportsMentions:      true,
 		},

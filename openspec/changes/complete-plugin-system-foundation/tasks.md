@@ -6,18 +6,18 @@
 ## 2. Workflow Plugin Runtime
 
 - [x] 2.1 Implement workflow plugin validation and registration for sequential workflows, including role reference checks, step-transition validation, and explicit unsupported-mode errors for non-executable process modes.
-- [ ] 2.2 Build the sequential workflow execution service that resolves role bindings, materializes step inputs and outputs, persists workflow run state, and records retry or failure outcomes.
-- [ ] 2.3 Add manual or internal workflow execution entrypoints plus query surfaces for workflow run status so operators can inspect in-progress and terminal workflow outcomes.
+- [x] 2.2 Build the sequential workflow execution service that resolves role bindings, materializes step inputs and outputs, persists workflow run state, and records retry or failure outcomes.
+- [x] 2.3 Add manual or internal workflow execution entrypoints plus query surfaces for workflow run status so operators can inspect in-progress and terminal workflow outcomes.
 
 ## 3. Review Plugin Execution
 
-- [ ] 3.1 Implement review plugin manifest loading, trigger matching, and execution-plan selection so enabled plugins can be chosen per review run by event and file patterns.
-- [ ] 3.2 Refactor the Layer 2 deep-review execution path so the built-in logic, security, performance, and compliance dimensions run through the same plugin-aware aggregation path as custom `ReviewPlugin` contributions.
-- [ ] 3.3 Persist plugin provenance and partial-failure metadata in review results, and expose the enriched review state through existing review APIs and real-time events.
+- [x] 3.1 Implement review plugin manifest loading, trigger matching, and execution-plan selection so enabled plugins can be chosen per review run by event and file patterns.
+- [x] 3.2 Refactor the Layer 2 deep-review execution path so the built-in logic, security, performance, and compliance dimensions run through the same plugin-aware aggregation path as custom `ReviewPlugin` contributions.
+- [x] 3.3 Persist plugin provenance and partial-failure metadata in review results, and expose the enriched review state through existing review APIs and real-time events.
 
 ## 4. SDK And Scaffolding
 
-- [ ] 4.1 Create the TypeScript plugin SDK package for Tool and Review plugins with manifest helpers, MCP bootstrap utilities, normalized review finding helpers, and a local test harness.
+- [x] 4.1 Create the TypeScript plugin SDK package for Tool and Review plugins with manifest helpers, MCP bootstrap utilities, normalized review finding helpers, and a local test harness.
 - [ ] 4.2 Extend the Go-hosted plugin SDK and build helpers so maintained samples or templates remain valid for current Go-hosted plugin contracts and repository verification.
 - [ ] 4.3 Implement the `create-plugin` scaffolding flow with type-specific templates, build scripts, validation hooks, and starter tests for supported plugin classes.
 

@@ -1,10 +1,10 @@
 import { describe, expect, test } from "bun:test";
 import { aggregateReviewResults } from "./aggregator.js";
-import type { DimensionReviewResult } from "./types.js";
+import type { ReviewExecutionResult } from "./types.js";
 
 describe("aggregateReviewResults", () => {
   test("deduplicates findings reported by multiple dimensions", () => {
-    const results: DimensionReviewResult[] = [
+    const results: ReviewExecutionResult[] = [
       {
         dimension: "logic",
         status: "completed",
@@ -43,7 +43,7 @@ describe("aggregateReviewResults", () => {
   });
 
   test("keeps successful findings when one dimension fails", () => {
-    const results: DimensionReviewResult[] = [
+    const results: ReviewExecutionResult[] = [
       {
         dimension: "logic",
         status: "failed",

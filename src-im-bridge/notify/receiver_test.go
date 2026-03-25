@@ -3,6 +3,9 @@ package notify
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"io"
@@ -10,24 +13,28 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
 	"github.com/agentforge/im-bridge/core"
-	"github.com/agentforge/im-bridge/platform/telegram"
 )
 
 type textOnlyPlatform struct {
 	name    string
 	sent    []string
 	chat    []string
+	replies []string
 	sendErr error
 }
 
-func (p *textOnlyPlatform) Name() string                                                  { return p.name }
-func (p *textOnlyPlatform) Start(handler core.MessageHandler) error                       { return nil }
-func (p *textOnlyPlatform) Reply(ctx context.Context, replyCtx any, content string) error { return nil }
-func (p *textOnlyPlatform) Stop() error                                                   { return nil }
+func (p *textOnlyPlatform) Name() string                            { return p.name }
+func (p *textOnlyPlatform) Start(handler core.MessageHandler) error { return nil }
+func (p *textOnlyPlatform) Reply(ctx context.Context, replyCtx any, content string) error {
+	p.replies = append(p.replies, content)
+	return nil
+}
+func (p *textOnlyPlatform) Stop() error { return nil }
 func (p *textOnlyPlatform) Send(ctx context.Context, chatID string, content string) error {
 	if p.sendErr != nil {
 		return p.sendErr
@@ -35,6 +42,14 @@ func (p *textOnlyPlatform) Send(ctx context.Context, chatID string, content stri
 	p.chat = append(p.chat, chatID)
 	p.sent = append(p.sent, content)
 	return nil
+}
+
+type replyAwareTextPlatform struct {
+	textOnlyPlatform
+}
+
+func (p *replyAwareTextPlatform) ReplyContextFromTarget(target *core.ReplyTarget) any {
+	return target
 }
 
 type cardPlatform struct {
@@ -63,6 +78,23 @@ type capabilityAwareCardPlatform struct {
 
 func (p *capabilityAwareCardPlatform) Metadata() core.PlatformMetadata {
 	return p.metadata
+}
+
+type capabilityAwareTextPlatform struct {
+	textOnlyPlatform
+	metadata core.PlatformMetadata
+}
+
+func (p *capabilityAwareTextPlatform) Metadata() core.PlatformMetadata {
+	return p.metadata
+}
+
+type replyTargetActionHandler struct {
+	response *ActionResponse
+}
+
+func (h *replyTargetActionHandler) HandleAction(ctx context.Context, req *ActionRequest) (*ActionResponse, error) {
+	return h.response, nil
 }
 
 func TestReceiver_RejectsPlatformMismatch(t *testing.T) {
@@ -342,7 +374,18 @@ func TestReceiver_HealthReportsNormalizedTelegramSourceAndCapabilities(t *testin
 	port := listener.Addr().(*net.TCPAddr).Port
 	listener.Close()
 
-	r := NewReceiver(telegram.NewStub("0"), strconv.Itoa(port))
+	r := NewReceiver(&capabilityAwareTextPlatform{
+		textOnlyPlatform: textOnlyPlatform{name: "telegram-stub"},
+		metadata: core.PlatformMetadata{
+			Source: "telegram",
+			Capabilities: core.PlatformCapabilities{
+				StructuredSurface:  core.StructuredSurfaceInlineKeyboard,
+				ActionCallbackMode: core.ActionCallbackQuery,
+				MessageScopes:      []core.MessageScope{core.MessageScopeChat, core.MessageScopeTopic},
+				SupportsMentions:   true,
+			},
+		},
+	}, strconv.Itoa(port))
 	done := make(chan error, 1)
 	go func() {
 		done <- r.Start()
@@ -374,6 +417,13 @@ func TestReceiver_HealthReportsNormalizedTelegramSourceAndCapabilities(t *testin
 	if payload["supports_rich_messages"] != false {
 		t.Fatalf("supports_rich_messages = %v", payload["supports_rich_messages"])
 	}
+	matrix, ok := payload["capability_matrix"].(map[string]any)
+	if !ok {
+		t.Fatalf("capability_matrix = %#v", payload["capability_matrix"])
+	}
+	if matrix["structuredSurface"] != "inline_keyboard" {
+		t.Fatalf("structuredSurface = %v", matrix["structuredSurface"])
+	}
 
 	if err := r.Stop(); err != nil {
 		t.Fatalf("Stop error: %v", err)
@@ -381,4 +431,149 @@ func TestReceiver_HealthReportsNormalizedTelegramSourceAndCapabilities(t *testin
 	if err := <-done; err != nil {
 		t.Fatalf("Start returned error after stop: %v", err)
 	}
+}
+
+func TestReceiver_RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured(t *testing.T) {
+	r := NewReceiver(&textOnlyPlatform{name: "slack-stub"}, "0")
+	r.SetSharedSecret("shared-secret")
+
+	body, err := json.Marshal(SendRequest{
+		Platform: "slack",
+		ChatID:   "chat-1",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("marshal send request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/send", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleSend(rec, req)
+
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
+func TestReceiver_SuppressesDuplicateSignedCompatibilityDelivery(t *testing.T) {
+	p := &textOnlyPlatform{name: "slack-stub"}
+	r := NewReceiver(p, "0")
+	r.SetSharedSecret("shared-secret")
+
+	body, err := json.Marshal(SendRequest{
+		Platform: "slack",
+		ChatID:   "chat-1",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("marshal send request: %v", err)
+	}
+
+	req1 := httptest.NewRequest(http.MethodPost, "/im/send", bytes.NewReader(body))
+	applySignedHeaders(req1, "/im/send", "delivery-1", body, "shared-secret")
+	rec1 := httptest.NewRecorder()
+	r.handleSend(rec1, req1)
+	if rec1.Code != http.StatusOK {
+		t.Fatalf("first status = %d, want %d", rec1.Code, http.StatusOK)
+	}
+
+	req2 := httptest.NewRequest(http.MethodPost, "/im/send", bytes.NewReader(body))
+	applySignedHeaders(req2, "/im/send", "delivery-1", body, "shared-secret")
+	rec2 := httptest.NewRecorder()
+	r.handleSend(rec2, req2)
+	if rec2.Code != http.StatusOK {
+		t.Fatalf("second status = %d, want %d", rec2.Code, http.StatusOK)
+	}
+	if len(p.sent) != 1 {
+		t.Fatalf("sent len = %d, want 1", len(p.sent))
+	}
+}
+
+func TestReceiver_FallsBackToStructuredTextWhenNativeStructuredSenderUnavailable(t *testing.T) {
+	p := &textOnlyPlatform{name: "telegram-stub"}
+	r := NewReceiver(p, "0")
+
+	body, err := json.Marshal(Notification{
+		Platform:     "telegram",
+		TargetChatID: "chat-1",
+		Structured: &core.StructuredMessage{
+			Title: "Task Update",
+			Body:  "Agent is still working.",
+			Fields: []core.StructuredField{
+				{Label: "Status", Value: "running"},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal notification: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/notify", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleNotify(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(p.sent) != 1 {
+		t.Fatalf("sent = %v", p.sent)
+	}
+	if p.sent[0] != "Task Update\nAgent is still working.\nStatus: running" {
+		t.Fatalf("fallback text = %q", p.sent[0])
+	}
+}
+
+func TestReceiver_ActionResponseUsesReplyTargetDelivery(t *testing.T) {
+	p := &replyAwareTextPlatform{textOnlyPlatform: textOnlyPlatform{name: "slack-stub"}}
+	r := NewReceiver(p, "0")
+	r.SetActionHandler(&replyTargetActionHandler{
+		response: &ActionResponse{
+			Result: "Approved",
+		},
+	})
+
+	body, err := json.Marshal(ActionRequest{
+		Platform: "slack",
+		Action:   "approve",
+		EntityID: "review-1",
+		ChatID:   "C123",
+		ReplyTarget: &core.ReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C123",
+			ThreadID:  "thread-1",
+			UseReply:  true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal action request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/action", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleAction(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(p.sent) != 0 {
+		t.Fatalf("expected reply strategy to avoid plain send fallback, got sent=%v", p.sent)
+	}
+	if len(p.replies) != 1 || p.replies[0] != "Approved" {
+		t.Fatalf("replies = %v", p.replies)
+	}
+}
+
+func applySignedHeaders(req *http.Request, path string, deliveryID string, body []byte, secret string) {
+	timestamp := "2026-03-25T00:00:00Z"
+	mac := hmac.New(sha256.New, []byte(secret))
+	_, _ = mac.Write([]byte(strings.Join([]string{
+		req.Method,
+		path,
+		deliveryID,
+		timestamp,
+		string(body),
+	}, "|")))
+	req.Header.Set("X-AgentForge-Delivery-Id", deliveryID)
+	req.Header.Set("X-AgentForge-Delivery-Timestamp", timestamp)
+	req.Header.Set("X-AgentForge-Signature", hex.EncodeToString(mac.Sum(nil)))
 }

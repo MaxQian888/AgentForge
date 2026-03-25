@@ -47,6 +47,7 @@ func registerTestRoutes(e *echo.Echo, cfg *config.Config, authSvc *service.AuthS
 		bridge.NewClient("http://localhost:7778"),
 		nil,
 		nil,
+		nil,
 	)
 }
 
@@ -226,13 +227,17 @@ func TestRegisterRoutes_PluginControlPlaneCompatibilityRoutesPresent(t *testing.
 	registerTestRoutes(e, cfg, authSvc, cache)
 
 	expected := map[string]struct{}{
-		http.MethodGet + " /api/v1/plugins/discover":      {},
-		http.MethodPut + " /api/v1/plugins/:id/enable":    {},
-		http.MethodPut + " /api/v1/plugins/:id/disable":   {},
-		http.MethodGet + " /api/v1/plugins/:id/events":    {},
-		http.MethodPost + " /api/v1/plugins/discover/builtin": {},
-		http.MethodPost + " /api/v1/plugins/:id/enable":   {},
-		http.MethodPost + " /api/v1/plugins/:id/disable":  {},
+		http.MethodGet + " /api/v1/plugins/discover":                {},
+		http.MethodPut + " /api/v1/plugins/:id/enable":              {},
+		http.MethodPut + " /api/v1/plugins/:id/disable":             {},
+		http.MethodGet + " /api/v1/plugins/:id/events":              {},
+		http.MethodPost + " /api/v1/plugins/:id/mcp/refresh":        {},
+		http.MethodPost + " /api/v1/plugins/:id/mcp/tools/call":     {},
+		http.MethodPost + " /api/v1/plugins/:id/mcp/resources/read": {},
+		http.MethodPost + " /api/v1/plugins/:id/mcp/prompts/get":    {},
+		http.MethodPost + " /api/v1/plugins/discover/builtin":       {},
+		http.MethodPost + " /api/v1/plugins/:id/enable":             {},
+		http.MethodPost + " /api/v1/plugins/:id/disable":            {},
 	}
 
 	routes := e.Routes()
@@ -242,6 +247,29 @@ func TestRegisterRoutes_PluginControlPlaneCompatibilityRoutesPresent(t *testing.
 
 	if len(expected) != 0 {
 		t.Fatalf("expected plugin compatibility routes to be registered, missing: %+v", expected)
+	}
+}
+
+func TestRegisterRoutes_InternalSchedulerRoutesPresent(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	expected := map[string]struct{}{
+		http.MethodGet + " /internal/scheduler/jobs":                  {},
+		http.MethodPost + " /internal/scheduler/jobs/:jobKey/trigger": {},
+	}
+
+	for _, route := range e.Routes() {
+		delete(expected, route.Method+" "+route.Path)
+	}
+
+	if len(expected) != 0 {
+		t.Fatalf("expected internal scheduler routes to be registered, missing: %+v", expected)
 	}
 }
 

@@ -46,6 +46,10 @@ function buildDraft(role?: RoleManifest) {
     backstory: role?.identity.backstory ?? "",
     systemPrompt: role?.identity.systemPrompt ?? "",
     allowedTools: stringifyList(role?.capabilities.allowedTools),
+    skills: (role?.capabilities.skills ?? []).map((skill) => ({
+      path: skill.path,
+      autoLoad: skill.autoLoad,
+    })),
     languages: stringifyList(role?.capabilities.languages),
     frameworks: stringifyList(role?.capabilities.frameworks),
     maxTurns:
@@ -82,6 +86,7 @@ export function RoleFormDialog({
   const [backstory, setBackstory] = useState("");
   const [systemPrompt, setSystemPrompt] = useState("");
   const [allowedTools, setAllowedTools] = useState("");
+  const [skills, setSkills] = useState<Array<{ path: string; autoLoad: boolean }>>([]);
   const [languages, setLanguages] = useState("");
   const [frameworks, setFrameworks] = useState("");
   const [maxTurns, setMaxTurns] = useState("");
@@ -114,6 +119,7 @@ export function RoleFormDialog({
     setBackstory(draft.backstory);
     setSystemPrompt(draft.systemPrompt);
     setAllowedTools(draft.allowedTools);
+    setSkills(draft.skills);
     setLanguages(draft.languages);
     setFrameworks(draft.frameworks);
     setMaxTurns(draft.maxTurns);
@@ -153,6 +159,7 @@ export function RoleFormDialog({
     setBackstory(draft.backstory);
     setSystemPrompt(draft.systemPrompt);
     setAllowedTools(draft.allowedTools);
+    setSkills(draft.skills);
     setLanguages(draft.languages);
     setFrameworks(draft.frameworks);
     setMaxTurns(draft.maxTurns);
@@ -206,6 +213,7 @@ export function RoleFormDialog({
             frameworks: [],
           }),
           allowedTools: parseList(allowedTools),
+          skills,
           languages: parseList(languages),
           frameworks: parseList(frameworks),
           maxTurns: maxTurns ? Number(maxTurns) : undefined,
@@ -441,6 +449,79 @@ export function RoleFormDialog({
                 />
               </div>
             </div>
+          </section>
+
+          <section className="grid gap-4 rounded-lg border p-4">
+            <div className="flex items-center justify-between">
+              <h3 className="text-sm font-semibold">Skills</h3>
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                onClick={() => setSkills((current) => [...current, { path: "", autoLoad: false }])}
+              >
+                Add Skill
+              </Button>
+            </div>
+            {skills.length > 0 ? (
+              <div className="grid gap-3">
+                {skills.map((skill, index) => (
+                  <div
+                    key={`dialog-skill-${index}`}
+                    className="grid gap-3 rounded-md border p-3 md:grid-cols-[minmax(0,1fr)_auto_auto]"
+                  >
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor={`dialog-skill-path-${index}`}>Skill Path</Label>
+                      <Input
+                        id={`dialog-skill-path-${index}`}
+                        aria-label="Skill Path"
+                        value={skill.path}
+                        onChange={(event) =>
+                          setSkills((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index ? { ...item, path: event.target.value } : item,
+                            ),
+                          )
+                        }
+                        placeholder="skills/react"
+                      />
+                    </div>
+                    <div className="flex items-end gap-2">
+                      <input
+                        id={`dialog-skill-auto-${index}`}
+                        type="checkbox"
+                        checked={skill.autoLoad}
+                        onChange={(event) =>
+                          setSkills((current) =>
+                            current.map((item, itemIndex) =>
+                              itemIndex === index
+                                ? { ...item, autoLoad: event.target.checked }
+                                : item,
+                            ),
+                          )
+                        }
+                        className="size-4 rounded border-input"
+                      />
+                      <Label htmlFor={`dialog-skill-auto-${index}`}>Auto-load skill</Label>
+                    </div>
+                    <div className="flex items-end justify-end">
+                      <Button
+                        type="button"
+                        variant="ghost"
+                        size="sm"
+                        onClick={() =>
+                          setSkills((current) => current.filter((_, itemIndex) => itemIndex !== index))
+                        }
+                      >
+                        Remove
+                      </Button>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : (
+              <p className="text-sm text-muted-foreground">No skills configured for this role.</p>
+            )}
           </section>
 
           <section className="grid gap-4 rounded-lg border p-4">

@@ -73,3 +73,47 @@ func TestPluginInstanceRepository_DeleteCurrentInMemory(t *testing.T) {
 		t.Fatal("expected deleted current instance lookup to fail")
 	}
 }
+
+func TestPluginInstanceRepository_ClonesNestedMCPMetadataInMemory(t *testing.T) {
+	ctx := context.Background()
+	repo := NewPluginInstanceRepository()
+
+	snapshot := &model.PluginInstanceSnapshot{
+		PluginID:       "repo-search",
+		RuntimeHost:    model.PluginHostTSBridge,
+		LifecycleState: model.PluginStateActive,
+		RuntimeMetadata: &model.PluginRuntimeMetadata{
+			Compatible: true,
+			MCP: &model.PluginMCPRuntimeMetadata{
+				Transport: "stdio",
+				ToolCount: 2,
+				LatestInteraction: &model.MCPInteractionSummary{
+					Operation: model.MCPInteractionRefresh,
+					Status:    model.MCPInteractionSucceeded,
+					Summary:   "tools=2",
+				},
+			},
+		},
+	}
+
+	if err := repo.UpsertCurrent(ctx, snapshot); err != nil {
+		t.Fatalf("upsert current: %v", err)
+	}
+
+	snapshot.RuntimeMetadata.MCP.ToolCount = 99
+	snapshot.RuntimeMetadata.MCP.LatestInteraction.Summary = "mutated"
+
+	loaded, err := repo.GetCurrentByPluginID(ctx, "repo-search")
+	if err != nil {
+		t.Fatalf("get current: %v", err)
+	}
+	if loaded.RuntimeMetadata == nil || loaded.RuntimeMetadata.MCP == nil {
+		t.Fatalf("expected MCP metadata, got %+v", loaded.RuntimeMetadata)
+	}
+	if loaded.RuntimeMetadata.MCP.ToolCount != 2 {
+		t.Fatalf("tool count = %d, want 2", loaded.RuntimeMetadata.MCP.ToolCount)
+	}
+	if loaded.RuntimeMetadata.MCP.LatestInteraction == nil || loaded.RuntimeMetadata.MCP.LatestInteraction.Summary != "tools=2" {
+		t.Fatalf("latest interaction = %+v, want preserved summary", loaded.RuntimeMetadata.MCP.LatestInteraction)
+	}
+}

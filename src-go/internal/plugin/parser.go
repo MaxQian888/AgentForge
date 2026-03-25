@@ -98,6 +98,9 @@ func ValidateManifest(manifest *model.PluginManifest) error {
 		if strings.TrimSpace(manifest.Spec.Review.Output.Format) == "" {
 			return fmt.Errorf("review plugin requires spec.review.output.format")
 		}
+		if manifest.Spec.Review.Output.Format != "findings/v1" {
+			return fmt.Errorf("review plugin output format %q is not supported; expected findings/v1", manifest.Spec.Review.Output.Format)
+		}
 	}
 
 	return nil

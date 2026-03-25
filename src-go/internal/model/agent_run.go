@@ -96,6 +96,10 @@ type AgentPoolStatsDTO struct {
 	Max             int `json:"max"`
 	Available       int `json:"available"`
 	PausedResumable int `json:"pausedResumable"`
+	Queued          int `json:"queued"`
+	Warm            int `json:"warm"`
+	Degraded        bool `json:"degraded"`
+	Queue           []AgentPoolQueueEntry `json:"queue,omitempty"`
 }
 
 // CostSummaryDTO aggregates cost metrics across multiple agent runs.

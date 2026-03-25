@@ -266,6 +266,7 @@ func mergeCapabilities(parent, child Capabilities) Capabilities {
 	if !isEmptyToolConfig(child.ToolConfig) {
 		merged.ToolConfig = child.ToolConfig
 	}
+	merged.Skills = mergeSkillReferences(parent.Skills, child.Skills)
 	if len(child.Languages) > 0 {
 		merged.Languages = mergeUniqueStrings(parent.Languages, child.Languages)
 	}
@@ -411,6 +412,7 @@ func cloneManifest(manifest *Manifest) *Manifest {
 	cloned.Capabilities.ToolConfig.BuiltIn = append([]string(nil), manifest.Capabilities.ToolConfig.BuiltIn...)
 	cloned.Capabilities.ToolConfig.External = append([]string(nil), manifest.Capabilities.ToolConfig.External...)
 	cloned.Capabilities.ToolConfig.MCPServers = append([]RoleMCPServer(nil), manifest.Capabilities.ToolConfig.MCPServers...)
+	cloned.Capabilities.Skills = append([]RoleSkillReference(nil), manifest.Capabilities.Skills...)
 	cloned.Capabilities.Languages = append([]string(nil), manifest.Capabilities.Languages...)
 	cloned.Capabilities.Frameworks = append([]string(nil), manifest.Capabilities.Frameworks...)
 	cloned.Capabilities.CustomSettings = cloneStringMap(manifest.Capabilities.CustomSettings)
@@ -435,4 +437,44 @@ func cloneManifest(manifest *Manifest) *Manifest {
 		cloned.Triggers = append([]map[string]any(nil), manifest.Triggers...)
 	}
 	return &cloned
+}
+
+func mergeSkillReferences(parent, child []RoleSkillReference) []RoleSkillReference {
+	if len(parent) == 0 && len(child) == 0 {
+		return nil
+	}
+
+	merged := make([]RoleSkillReference, 0, len(parent)+len(child))
+	indexByPath := make(map[string]int, len(parent)+len(child))
+
+	for _, item := range parent {
+		if item.Path == "" {
+			continue
+		}
+		indexByPath[item.Path] = len(merged)
+		merged = append(merged, RoleSkillReference{
+			Path:     item.Path,
+			AutoLoad: item.AutoLoad,
+		})
+	}
+
+	for _, item := range child {
+		if item.Path == "" {
+			continue
+		}
+
+		next := RoleSkillReference{
+			Path:     item.Path,
+			AutoLoad: item.AutoLoad,
+		}
+		if index, ok := indexByPath[item.Path]; ok {
+			merged[index] = next
+			continue
+		}
+
+		indexByPath[item.Path] = len(merged)
+		merged = append(merged, next)
+	}
+
+	return merged
 }

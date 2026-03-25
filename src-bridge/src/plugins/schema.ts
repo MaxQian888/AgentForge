@@ -51,7 +51,7 @@ const ReviewSpecSchema = z.object({
     filePatterns: z.array(z.string().min(1)).optional(),
   }),
   output: z.object({
-    format: z.string().min(1),
+    format: z.literal("findings/v1"),
   }),
 });
 

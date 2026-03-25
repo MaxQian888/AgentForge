@@ -34,6 +34,7 @@ import {
   UnknownProviderError,
 } from "./providers/registry.js";
 import { MCPClientHub } from "./mcp/client-hub.js";
+import { BunSchedulerAdapter } from "./scheduler/bun-cron-adapter.js";
 
 interface AppDeps {
   pool?: RuntimePoolManager;
@@ -49,6 +50,7 @@ interface AppDeps {
   envLookup?: (name: string) => string | undefined;
   decomposeTask?: DecomposeTaskExecutor;
   pluginManager?: ToolPluginManager;
+  schedulerAdapter?: Pick<BunSchedulerAdapter, "start" | "stop">;
 }
 
 function createDefaultPool(): RuntimePoolManager {
@@ -66,6 +68,12 @@ function createDefaultPluginManager(mcpHub?: MCPClientHub, streamer?: Pick<Event
 function createDefaultSessionManager(): SessionManager {
   return new SessionManager({
     baseDir: process.env.BRIDGE_SESSION_DIR,
+  });
+}
+
+function createDefaultSchedulerAdapter(): BunSchedulerAdapter {
+  return new BunSchedulerAdapter({
+    goApiUrl: process.env.GO_API_URL ?? "http://localhost:7777",
   });
 }
 
@@ -369,6 +377,10 @@ export function createApp(deps: AppDeps = {}): Hono {
     return Response.json(pool.listActive());
   }
 
+  function handlePoolRoute() {
+    return Response.json(pool.stats());
+  }
+
   function handleToolsListRoute() {
     const allTools = pluginManager.hub.discoverAllTools();
     return Response.json({
@@ -436,6 +448,91 @@ export function createApp(deps: AppDeps = {}): Hono {
     }
   }
 
+  async function handlePluginMcpRefreshRoute(c: Context) {
+    try {
+      const pluginId = c.req.param("id");
+      if (!pluginId) {
+        return c.json({ error: "plugin id is required" }, 400);
+      }
+      const record = await pluginManager.refreshCapabilitySurface(pluginId);
+      return c.json(record, 200);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 400);
+    }
+  }
+
+  async function handlePluginMcpToolCallRoute(c: Context) {
+    try {
+      const pluginId = c.req.param("id");
+      if (!pluginId) {
+        return c.json({ error: "plugin id is required" }, 400);
+      }
+      const body = await c.req.json();
+      const toolName = body?.tool_name;
+      const args = body?.arguments ?? {};
+      if (!toolName || typeof toolName !== "string") {
+        return c.json({ error: "tool_name is required" }, 400);
+      }
+      const result = await pluginManager.invokeTool(pluginId, toolName, args);
+      return c.json({
+        plugin_id: pluginId,
+        operation: "call_tool",
+        result,
+      }, 200);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 400);
+    }
+  }
+
+  async function handlePluginMcpResourceReadRoute(c: Context) {
+    try {
+      const pluginId = c.req.param("id");
+      if (!pluginId) {
+        return c.json({ error: "plugin id is required" }, 400);
+      }
+      const body = await c.req.json();
+      const uri = body?.uri;
+      if (!uri || typeof uri !== "string") {
+        return c.json({ error: "uri is required" }, 400);
+      }
+      const result = await pluginManager.readResource(pluginId, uri);
+      return c.json({
+        plugin_id: pluginId,
+        operation: "read_resource",
+        result,
+      }, 200);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 400);
+    }
+  }
+
+  async function handlePluginMcpPromptGetRoute(c: Context) {
+    try {
+      const pluginId = c.req.param("id");
+      if (!pluginId) {
+        return c.json({ error: "plugin id is required" }, 400);
+      }
+      const body = await c.req.json();
+      const name = body?.name;
+      const args = body?.arguments;
+      if (!name || typeof name !== "string") {
+        return c.json({ error: "name is required" }, 400);
+      }
+      const result = await pluginManager.getPrompt(pluginId, name, args);
+      return c.json({
+        plugin_id: pluginId,
+        operation: "get_prompt",
+        result,
+      }, 200);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 400);
+    }
+  }
+
   function handleProviderError(c: Context, err: unknown) {
     const message = err instanceof Error ? err.message : String(err);
     if (
@@ -488,6 +585,8 @@ export function createApp(deps: AppDeps = {}): Hono {
   app.get("/health", handleHealthRoute);
   app.get("/bridge/active", handleActiveRoute);
   app.get("/active", handleActiveRoute);
+  app.get("/bridge/pool", handlePoolRoute);
+  app.get("/pool", handlePoolRoute);
 
   // Plugin management (internal — no PRD alias needed)
   app.post("/bridge/plugins/register", async (c) => {
@@ -562,6 +661,11 @@ export function createApp(deps: AppDeps = {}): Hono {
     }
   });
 
+  app.post("/bridge/plugins/:id/mcp/refresh", handlePluginMcpRefreshRoute);
+  app.post("/bridge/plugins/:id/mcp/tools/call", handlePluginMcpToolCallRoute);
+  app.post("/bridge/plugins/:id/mcp/resources/read", handlePluginMcpResourceReadRoute);
+  app.post("/bridge/plugins/:id/mcp/prompts/get", handlePluginMcpPromptGetRoute);
+
   // Tool management
   app.get("/bridge/tools", handleToolsListRoute);
   app.get("/tools", handleToolsListRoute);
@@ -583,6 +687,7 @@ let defaultStreamer: EventStreamer | undefined;
 let defaultPool: RuntimePoolManager | undefined;
 let defaultPluginManager: ToolPluginManager | undefined;
 let defaultSessionManager: SessionManager | undefined;
+let defaultSchedulerAdapter: BunSchedulerAdapter | undefined;
 let signalHandlersRegistered = false;
 
 function getDefaultApp(): Hono {
@@ -591,6 +696,7 @@ function getDefaultApp(): Hono {
     defaultStreamer = createDefaultStreamer();
     defaultPool = createDefaultPool();
     defaultSessionManager = createDefaultSessionManager();
+    defaultSchedulerAdapter = createDefaultSchedulerAdapter();
     const mcpHub = new MCPClientHub({
       onToolCallLog: (log) => {
         defaultStreamer?.send({
@@ -609,6 +715,10 @@ function getDefaultApp(): Hono {
       connectStreamer: true,
       pluginManager: defaultPluginManager,
       sessionManager: defaultSessionManager,
+      schedulerAdapter: defaultSchedulerAdapter,
+    });
+    void defaultSchedulerAdapter.start().catch((error) => {
+      console.warn("[Bridge] Failed to start Bun scheduler adapter:", error);
     });
     if (!signalHandlersRegistered) {
       const gracefulShutdown = async (signal: string) => {
@@ -642,6 +752,15 @@ function getDefaultApp(): Hono {
             console.log("[Bridge] Plugin manager disposed");
           } catch (err) {
             console.error("[Bridge] Error disposing plugin manager:", err);
+          }
+        }
+
+        if (defaultSchedulerAdapter) {
+          try {
+            await defaultSchedulerAdapter.stop();
+            console.log("[Bridge] Scheduler adapter stopped");
+          } catch (err) {
+            console.error("[Bridge] Error stopping scheduler adapter:", err);
           }
         }
 

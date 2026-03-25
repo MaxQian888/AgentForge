@@ -5,18 +5,21 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"time"
 
 	"github.com/react-go-quick-starter/server/internal/model"
+	"gorm.io/gorm"
+	"gorm.io/gorm/clause"
 )
 
 type PluginRegistryRepository struct {
-	db      DBTX
+	db      *gorm.DB
 	mu      sync.RWMutex
 	records map[string]*model.PluginRecord
 }
 
-func NewPluginRegistryRepository(db ...DBTX) *PluginRegistryRepository {
-	var conn DBTX
+func NewPluginRegistryRepository(db ...*gorm.DB) *PluginRegistryRepository {
+	var conn *gorm.DB
 	if len(db) > 0 {
 		conn = db[0]
 	}
@@ -26,68 +29,39 @@ func NewPluginRegistryRepository(db ...DBTX) *PluginRegistryRepository {
 	}
 }
 
+func (r *PluginRegistryRepository) DB() *gorm.DB {
+	if r == nil {
+		return nil
+	}
+	return r.db
+}
+
+func (r *PluginRegistryRepository) WithDB(db *gorm.DB) PluginRegistryDBBinder {
+	if r == nil {
+		return NewPluginRegistryRepository(db)
+	}
+	rebound := NewPluginRegistryRepository(db)
+	if db == nil {
+		rebound.records = r.records
+	}
+	return rebound
+}
+
 func (r *PluginRegistryRepository) Save(ctx context.Context, record *model.PluginRecord) error {
 	if record == nil {
 		return fmt.Errorf("plugin record is required")
 	}
 	if r.db != nil {
-		manifest, err := json.Marshal(record.PluginManifest)
+		row, err := newPluginRecordModel(record)
 		if err != nil {
-			return fmt.Errorf("marshal plugin manifest: %w", err)
+			return err
 		}
-		runtimeMetadata, err := json.Marshal(record.RuntimeMetadata)
-		if err != nil {
-			return fmt.Errorf("marshal plugin runtime metadata: %w", err)
-		}
-		query := `
-			INSERT INTO plugins (
-				plugin_id, kind, name, version, description, tags, manifest,
-				source_type, source_path, runtime, lifecycle_state, runtime_host,
-				last_health_at, last_error, restart_count, resolved_source_path,
-				runtime_metadata, created_at, updated_at
-			)
-			VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,NOW(),NOW())
-			ON CONFLICT (plugin_id) DO UPDATE SET
-				kind = EXCLUDED.kind,
-				name = EXCLUDED.name,
-				version = EXCLUDED.version,
-				description = EXCLUDED.description,
-				tags = EXCLUDED.tags,
-				manifest = EXCLUDED.manifest,
-				source_type = EXCLUDED.source_type,
-				source_path = EXCLUDED.source_path,
-				runtime = EXCLUDED.runtime,
-				lifecycle_state = EXCLUDED.lifecycle_state,
-				runtime_host = EXCLUDED.runtime_host,
-				last_health_at = EXCLUDED.last_health_at,
-				last_error = EXCLUDED.last_error,
-				restart_count = EXCLUDED.restart_count,
-				resolved_source_path = EXCLUDED.resolved_source_path,
-				runtime_metadata = EXCLUDED.runtime_metadata,
-				updated_at = NOW()
-		`
-		_, err = r.db.Exec(
-			ctx,
-			query,
-			record.Metadata.ID,
-			record.Kind,
-			record.Metadata.Name,
-			record.Metadata.Version,
-			nullablePluginString(record.Metadata.Description),
-			record.Metadata.Tags,
-			manifest,
-			record.Source.Type,
-			nullablePluginString(record.Source.Path),
-			record.Spec.Runtime,
-			record.LifecycleState,
-			record.RuntimeHost,
-			record.LastHealthAt,
-			nullablePluginString(record.LastError),
-			record.RestartCount,
-			nullablePluginString(record.ResolvedSourcePath),
-			runtimeMetadata,
-		)
-		if err != nil {
+		if err := r.db.WithContext(ctx).
+			Clauses(clause.OnConflict{
+				Columns:   []clause.Column{{Name: "plugin_id"}},
+				UpdateAll: true,
+			}).
+			Create(row).Error; err != nil {
 			return fmt.Errorf("save plugin record: %w", err)
 		}
 		return nil
@@ -101,39 +75,11 @@ func (r *PluginRegistryRepository) Save(ctx context.Context, record *model.Plugi
 
 func (r *PluginRegistryRepository) GetByID(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
 	if r.db != nil {
-		query := `
-			SELECT manifest, lifecycle_state, runtime_host, last_health_at, COALESCE(last_error, ''),
-				restart_count, COALESCE(resolved_source_path, ''), runtime_metadata
-			FROM plugins
-			WHERE plugin_id = $1
-		`
-		var (
-			manifest        []byte
-			record          model.PluginRecord
-			runtimeMetadata []byte
-		)
-		if err := r.db.QueryRow(ctx, query, pluginID).Scan(
-			&manifest,
-			&record.LifecycleState,
-			&record.RuntimeHost,
-			&record.LastHealthAt,
-			&record.LastError,
-			&record.RestartCount,
-			&record.ResolvedSourcePath,
-			&runtimeMetadata,
-		); err != nil {
-			return nil, ErrNotFound
+		var row pluginRecordModel
+		if err := r.db.WithContext(ctx).Where("plugin_id = ?", pluginID).Take(&row).Error; err != nil {
+			return nil, normalizeRepositoryError(err)
 		}
-		if err := json.Unmarshal(manifest, &record.PluginManifest); err != nil {
-			return nil, fmt.Errorf("decode plugin manifest: %w", err)
-		}
-		if len(runtimeMetadata) > 0 && string(runtimeMetadata) != "null" {
-			record.RuntimeMetadata = &model.PluginRuntimeMetadata{}
-			if err := json.Unmarshal(runtimeMetadata, record.RuntimeMetadata); err != nil {
-				return nil, fmt.Errorf("decode plugin runtime metadata: %w", err)
-			}
-		}
-		return &record, nil
+		return row.toPluginRecord()
 	}
 
 	r.mu.RLock()
@@ -149,53 +95,31 @@ func (r *PluginRegistryRepository) GetByID(ctx context.Context, pluginID string)
 
 func (r *PluginRegistryRepository) List(ctx context.Context, filter model.PluginFilter) ([]*model.PluginRecord, error) {
 	if r.db != nil {
-		query := `
-			SELECT manifest, lifecycle_state, runtime_host, last_health_at, COALESCE(last_error, ''),
-				restart_count, COALESCE(resolved_source_path, ''), runtime_metadata
-			FROM plugins
-			WHERE ($1 = '' OR kind = $1) AND ($2 = '' OR lifecycle_state = $2)
-			ORDER BY plugin_id
-		`
-		rows, err := r.db.Query(ctx, query, filter.Kind, filter.LifecycleState)
-		if err != nil {
+		query := r.db.WithContext(ctx).Order("plugin_id ASC")
+		if filter.Kind != "" {
+			query = query.Where("kind = ?", string(filter.Kind))
+		}
+		if filter.LifecycleState != "" {
+			query = query.Where("lifecycle_state = ?", string(filter.LifecycleState))
+		}
+
+		var rows []pluginRecordModel
+		if err := query.Find(&rows).Error; err != nil {
 			return nil, fmt.Errorf("list plugin records: %w", err)
 		}
-		defer rows.Close()
 
-		records := make([]*model.PluginRecord, 0)
-		for rows.Next() {
-			var (
-				record          model.PluginRecord
-				manifest        []byte
-				runtimeMetadata []byte
-			)
-			if err := rows.Scan(
-				&manifest,
-				&record.LifecycleState,
-				&record.RuntimeHost,
-				&record.LastHealthAt,
-				&record.LastError,
-				&record.RestartCount,
-				&record.ResolvedSourcePath,
-				&runtimeMetadata,
-			); err != nil {
-				return nil, fmt.Errorf("scan plugin record: %w", err)
+		records := make([]*model.PluginRecord, 0, len(rows))
+		for _, row := range rows {
+			record, err := row.toPluginRecord()
+			if err != nil {
+				return nil, err
 			}
-			if err := json.Unmarshal(manifest, &record.PluginManifest); err != nil {
-				return nil, fmt.Errorf("decode plugin manifest: %w", err)
-			}
-			if len(runtimeMetadata) > 0 && string(runtimeMetadata) != "null" {
-				record.RuntimeMetadata = &model.PluginRuntimeMetadata{}
-				if err := json.Unmarshal(runtimeMetadata, record.RuntimeMetadata); err != nil {
-					return nil, fmt.Errorf("decode plugin runtime metadata: %w", err)
-				}
-			}
-			if !matchesPluginFilter(&record, filter) {
+			if !matchesPluginFilter(record, filter) {
 				continue
 			}
-			records = append(records, &record)
+			records = append(records, record)
 		}
-		return records, rows.Err()
+		return records, nil
 	}
 
 	r.mu.RLock()
@@ -220,11 +144,11 @@ func (r *PluginRegistryRepository) List(ctx context.Context, filter model.Plugin
 
 func (r *PluginRegistryRepository) Delete(ctx context.Context, pluginID string) error {
 	if r.db != nil {
-		result, err := r.db.Exec(ctx, `DELETE FROM plugins WHERE plugin_id = $1`, pluginID)
-		if err != nil {
-			return fmt.Errorf("delete plugin record: %w", err)
+		result := r.db.WithContext(ctx).Delete(&pluginRecordModel{}, "plugin_id = ?", pluginID)
+		if result.Error != nil {
+			return fmt.Errorf("delete plugin record: %w", result.Error)
 		}
-		if result.RowsAffected() == 0 {
+		if result.RowsAffected == 0 {
 			return ErrNotFound
 		}
 		return nil
@@ -282,8 +206,7 @@ func clonePluginRecord(record *model.PluginRecord) *model.PluginRecord {
 		cloned.Spec.Review = &review
 	}
 	if record.RuntimeMetadata != nil {
-		metadata := *record.RuntimeMetadata
-		cloned.RuntimeMetadata = &metadata
+		cloned.RuntimeMetadata = clonePluginRuntimeMetadata(record.RuntimeMetadata)
 	}
 	if record.CurrentInstance != nil {
 		cloned.CurrentInstance = clonePluginInstanceSnapshot(record.CurrentInstance)
@@ -318,6 +241,32 @@ func clonePluginRecord(record *model.PluginRecord) *model.PluginRecord {
 		}
 		cloned.Source.Release = &release
 	}
+	return &cloned
+}
+
+func clonePluginRuntimeMetadata(metadata *model.PluginRuntimeMetadata) *model.PluginRuntimeMetadata {
+	if metadata == nil {
+		return nil
+	}
+	cloned := *metadata
+	if metadata.MCP != nil {
+		mcp := *metadata.MCP
+		mcp.LastDiscoveryAt = clonePluginTimePointer(metadata.MCP.LastDiscoveryAt)
+		if metadata.MCP.LatestInteraction != nil {
+			interaction := *metadata.MCP.LatestInteraction
+			interaction.At = clonePluginTimePointer(metadata.MCP.LatestInteraction.At)
+			mcp.LatestInteraction = &interaction
+		}
+		cloned.MCP = &mcp
+	}
+	return &cloned
+}
+
+func clonePluginTimePointer(value *time.Time) *time.Time {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
 	return &cloned
 }
 
@@ -367,4 +316,72 @@ func nullablePluginLifecycleState(value model.PluginLifecycleState) any {
 		return nil
 	}
 	return value
+}
+
+func newPluginRecordModel(record *model.PluginRecord) (*pluginRecordModel, error) {
+	if record == nil {
+		return nil, fmt.Errorf("plugin record is required")
+	}
+
+	manifest, err := json.Marshal(record.PluginManifest)
+	if err != nil {
+		return nil, fmt.Errorf("marshal plugin manifest: %w", err)
+	}
+	runtimeMetadata, err := json.Marshal(record.RuntimeMetadata)
+	if err != nil {
+		return nil, fmt.Errorf("marshal plugin runtime metadata: %w", err)
+	}
+
+	return &pluginRecordModel{
+		PluginID:           record.Metadata.ID,
+		Kind:               string(record.Kind),
+		Name:               record.Metadata.Name,
+		Version:            record.Metadata.Version,
+		Description:        cloneStringPointer(optionalPluginString(record.Metadata.Description)),
+		Tags:               newStringList(record.Metadata.Tags),
+		Manifest:           newRawJSON(manifest, "{}"),
+		SourceType:         string(record.Source.Type),
+		SourcePath:         cloneStringPointer(optionalPluginString(record.Source.Path)),
+		Runtime:            string(record.Spec.Runtime),
+		LifecycleState:     string(record.LifecycleState),
+		RuntimeHost:        string(record.RuntimeHost),
+		LastHealthAt:       cloneTimePointer(record.LastHealthAt),
+		LastError:          cloneStringPointer(optionalPluginString(record.LastError)),
+		RestartCount:       record.RestartCount,
+		ResolvedSourcePath: cloneStringPointer(optionalPluginString(record.ResolvedSourcePath)),
+		RuntimeMetadata:    newRawJSON(runtimeMetadata, "null"),
+	}, nil
+}
+
+func (r *pluginRecordModel) toPluginRecord() (*model.PluginRecord, error) {
+	if r == nil {
+		return nil, nil
+	}
+
+	record := &model.PluginRecord{
+		LifecycleState:     model.PluginLifecycleState(r.LifecycleState),
+		RuntimeHost:        model.PluginRuntimeHost(r.RuntimeHost),
+		LastHealthAt:       cloneTimePointer(r.LastHealthAt),
+		LastError:          valueOrEmpty(r.LastError),
+		RestartCount:       r.RestartCount,
+		ResolvedSourcePath: valueOrEmpty(r.ResolvedSourcePath),
+	}
+
+	if err := json.Unmarshal(r.Manifest.Bytes("{}"), &record.PluginManifest); err != nil {
+		return nil, fmt.Errorf("decode plugin manifest: %w", err)
+	}
+	if payload := r.RuntimeMetadata.Bytes("null"); len(payload) > 0 && string(payload) != "null" {
+		record.RuntimeMetadata = &model.PluginRuntimeMetadata{}
+		if err := json.Unmarshal(payload, record.RuntimeMetadata); err != nil {
+			return nil, fmt.Errorf("decode plugin runtime metadata: %w", err)
+		}
+	}
+	return record, nil
+}
+
+func optionalPluginString(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
 }

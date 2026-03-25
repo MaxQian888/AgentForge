@@ -46,6 +46,11 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 	return core.PlatformMetadata{
 		Source: "slack",
 		Capabilities: core.PlatformCapabilities{
+			CommandSurface:        core.CommandSurfaceMixed,
+			StructuredSurface:     core.StructuredSurfaceBlocks,
+			AsyncUpdateModes:      []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateThreadReply, core.AsyncUpdateFollowUp},
+			ActionCallbackMode:    core.ActionCallbackSocketPayload,
+			MessageScopes:         []core.MessageScope{core.MessageScopeChat, core.MessageScopeThread},
 			SupportsSlashCommands: true,
 			SupportsMentions:      true,
 		},

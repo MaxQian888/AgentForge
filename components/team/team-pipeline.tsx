@@ -78,6 +78,7 @@ function AgentPhaseCard({
             <div className="flex items-center gap-4 text-xs text-muted-foreground">
               <span>Turns: {agent.turns}</span>
               <span>${agent.cost.toFixed(2)}</span>
+              <span>{agent.runtime || "-"}</span>
             </div>
           </div>
         ) : (
@@ -158,6 +159,7 @@ export function TeamPipeline({ team }: TeamPipelineProps) {
                       <div className="flex items-center gap-3 text-xs text-muted-foreground">
                         <span>Turns: {agent.turns}</span>
                         <span>${agent.cost.toFixed(2)}</span>
+                        <span>{agent.runtime || "-"}</span>
                       </div>
                     </div>
                   ))}

@@ -1,6 +1,7 @@
 package role_test
 
 import (
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"slices"
@@ -84,6 +85,12 @@ security:
   permission_mode: bypassPermissions
   allowed_paths: ["src/", "app/"]
   max_budget_usd: 10
+capabilities:
+  skills:
+    - path: skills/react
+      auto_load: true
+    - path: skills/typescript
+      auto_load: false
 `)
 	writeRoleFile(t, filepath.Join(dir, "frontend-developer"), "role.yaml", `
 apiVersion: agentforge/v1
@@ -100,6 +107,12 @@ security:
   permission_mode: default
   allowed_paths: ["app/"]
   max_budget_usd: 5
+capabilities:
+  skills:
+    - path: skills/react
+      auto_load: false
+    - path: skills/testing
+      auto_load: true
 `)
 
 	registry := role.NewRegistry()
@@ -122,6 +135,32 @@ security:
 	}
 	if !slices.Equal(loaded.Security.AllowedPaths, []string{"app/"}) {
 		t.Fatalf("AllowedPaths = %v, want stricter child allowed_paths", loaded.Security.AllowedPaths)
+	}
+
+	payload, err := json.Marshal(loaded)
+	if err != nil {
+		t.Fatalf("Marshal() error = %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal(payload, &decoded); err != nil {
+		t.Fatalf("Unmarshal() error = %v", err)
+	}
+	capabilities := decoded["capabilities"].(map[string]any)
+	skills := capabilities["skills"].([]any)
+	if len(skills) != 3 {
+		t.Fatalf("resolved skills len = %d, want 3", len(skills))
+	}
+	first := skills[0].(map[string]any)
+	if first["path"] != "skills/react" || first["autoLoad"] != false {
+		t.Fatalf("first resolved skill = %#v, want child override for skills/react", first)
+	}
+	second := skills[1].(map[string]any)
+	if second["path"] != "skills/typescript" {
+		t.Fatalf("second resolved skill = %#v, want inherited skills/typescript", second)
+	}
+	third := skills[2].(map[string]any)
+	if third["path"] != "skills/testing" || third["autoLoad"] != true {
+		t.Fatalf("third resolved skill = %#v, want appended skills/testing", third)
 	}
 }
 

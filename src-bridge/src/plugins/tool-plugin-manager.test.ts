@@ -39,14 +39,34 @@ function createMockHub(): MCPClientHub {
   hub.connectServer = async (pluginId, _config) => {
     // Simulate discovered tools
     const fakeTool = { name: "search", description: "Search repos", inputSchema: { type: "object" as const, properties: {} } };
+    const fakeResource = { uri: "file://guide.md", name: "guide.md" };
+    const fakePrompt = { name: "planner-template", description: "Plan work" };
     // Access internal state via type cast
     const entry = {
-      client: {} as any,
+      client: {
+        listTools: async () => ({ tools: [fakeTool] }),
+        listResources: async () => ({ resources: [fakeResource] }),
+        listPrompts: async () => ({ prompts: [fakePrompt] }),
+        callTool: async () => ({
+          content: [{ type: "text", text: "search complete" }],
+          structuredContent: { ok: true },
+        }),
+        readResource: async () => ({
+          contents: [{ uri: "file://guide.md", text: "guide body" }],
+        }),
+        getPrompt: async () => ({
+          description: "Plan work",
+          messages: [{ role: "user", content: { type: "text", text: "Plan the task" } }],
+        }),
+        close: async () => {},
+      } as any,
       transport: {} as any,
       config: _config,
       state: "active" as const,
       connectedAt: Date.now(),
       tools: [fakeTool],
+      resources: [fakeResource],
+      prompts: [fakePrompt],
     };
     (hub as any).clients.set(pluginId, entry);
     return [fakeTool];
@@ -119,6 +139,42 @@ describe("tool plugin manager", () => {
     const activated = await manager.activate("repo-search");
 
     expect(activated.discovered_tools).toEqual(["search"]);
+  });
+
+  test("captures an MCP capability snapshot after activation and refresh", async () => {
+    manager = new ToolPluginManager({ reporter, mcpHub: createMockHub() });
+    await manager.register(validManifest);
+    await manager.enable("repo-search");
+    const activated = await manager.activate("repo-search");
+
+    expect(activated.mcp_capability_snapshot?.transport).toBe("stdio");
+    expect(activated.mcp_capability_snapshot?.tool_count).toBe(1);
+    expect(activated.mcp_capability_snapshot?.resource_count).toBe(1);
+    expect(activated.mcp_capability_snapshot?.prompt_count).toBe(1);
+
+    const refreshed = await manager.refreshCapabilitySurface("repo-search");
+    expect(refreshed.mcp_capability_snapshot?.last_discovery_at).toBeTruthy();
+    expect(refreshed.mcp_capability_snapshot?.latest_interaction?.operation).toBe("refresh");
+  });
+
+  test("updates latest interaction summaries for tool, resource, and prompt operations", async () => {
+    manager = new ToolPluginManager({ reporter, mcpHub: createMockHub() });
+    await manager.register(validManifest);
+    await manager.enable("repo-search");
+    await manager.activate("repo-search");
+
+    const toolResult = await manager.invokeTool("repo-search", "search", { query: "bridge" });
+    expect(toolResult.structuredContent).toEqual({ ok: true });
+
+    const resourceResult = await manager.readResource("repo-search", "file://guide.md");
+    expect(resourceResult.contents[0]?.text).toBe("guide body");
+
+    const promptResult = await manager.getPrompt("repo-search", "planner-template");
+    expect(promptResult.description).toBe("Plan work");
+
+    const record = manager.list()[0];
+    expect(record?.mcp_capability_snapshot?.latest_interaction?.operation).toBe("get_prompt");
+    expect(record?.mcp_capability_snapshot?.latest_interaction?.status).toBe("succeeded");
   });
 
   test("emits crash event via streamer on activation failure", async () => {

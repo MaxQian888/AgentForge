@@ -30,19 +30,45 @@ func TestIMControlPlane_RegistrationHeartbeatAndExpiry(t *testing.T) {
 		},
 	})
 
+	registrationMatrix := map[string]any{
+		"commandSurface":    "mixed",
+		"structuredSurface": "blocks",
+		"asyncUpdateModes":  []string{"reply", "thread_reply", "follow_up"},
+		"mutability": map[string]any{
+			"canEdit":        false,
+			"prefersInPlace": false,
+		},
+	}
+
 	instance, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
-		BridgeID:      "bridge-slack-1",
-		Platform:      "slack",
-		Transport:     "live",
-		ProjectIDs:    []string{"project-1"},
-		Capabilities:  map[string]bool{"supports_deferred_reply": true},
-		CallbackPaths: []string{"/im/notify"},
+		BridgeID:         "bridge-slack-1",
+		Platform:         "slack",
+		Transport:        "live",
+		ProjectIDs:       []string{"project-1"},
+		Capabilities:     map[string]bool{"supports_deferred_reply": true},
+		CapabilityMatrix: registrationMatrix,
+		CallbackPaths:    []string{"/im/notify"},
 	})
 	if err != nil {
 		t.Fatalf("RegisterBridge error: %v", err)
 	}
 	if instance.BridgeID != "bridge-slack-1" {
 		t.Fatalf("bridge id = %q", instance.BridgeID)
+	}
+	if instance.CapabilityMatrix["structuredSurface"] != "blocks" {
+		t.Fatalf("CapabilityMatrix = %#v", instance.CapabilityMatrix)
+	}
+	registrationMatrix["structuredSurface"] = "mutated"
+	registrationMatrix["mutability"].(map[string]any)["canEdit"] = true
+	if instance.CapabilityMatrix["structuredSurface"] != "blocks" {
+		t.Fatalf("stored CapabilityMatrix mutated with caller input: %#v", instance.CapabilityMatrix)
+	}
+	mutability, ok := instance.CapabilityMatrix["mutability"].(map[string]any)
+	if !ok {
+		t.Fatalf("mutability = %#v", instance.CapabilityMatrix["mutability"])
+	}
+	if mutability["canEdit"] != false {
+		t.Fatalf("mutability.canEdit = %#v", mutability["canEdit"])
 	}
 
 	selected, err := control.ResolveBridgeTarget("slack", "project-1", "")
@@ -51,6 +77,14 @@ func TestIMControlPlane_RegistrationHeartbeatAndExpiry(t *testing.T) {
 	}
 	if selected.BridgeID != "bridge-slack-1" {
 		t.Fatalf("selected bridge = %q", selected.BridgeID)
+	}
+	selected.CapabilityMatrix["structuredSurface"] = "components"
+	again, err := control.ResolveBridgeTarget("slack", "project-1", "")
+	if err != nil {
+		t.Fatalf("ResolveBridgeTarget second error: %v", err)
+	}
+	if again.CapabilityMatrix["structuredSurface"] != "blocks" {
+		t.Fatalf("resolved CapabilityMatrix leaked caller mutation: %#v", again.CapabilityMatrix)
 	}
 
 	now = now.Add(90 * time.Second)
@@ -101,9 +135,9 @@ func TestIMControlPlane_ReplayAndAckSuppressDuplicateDelivery(t *testing.T) {
 		Kind:           IMDeliveryKindProgress,
 		Content:        "Agent 已启动，正在处理中",
 		ReplyTarget: &model.IMReplyTarget{
-			Platform: "feishu",
-			ChatID:   "oc_123",
-			MessageID:"om_123",
+			Platform:  "feishu",
+			ChatID:    "oc_123",
+			MessageID: "om_123",
 		},
 	})
 	if err != nil {
@@ -165,19 +199,21 @@ func TestIMControlPlane_BindActionAndThrottleProgressHeartbeats(t *testing.T) {
 		TaskID:    "task-1",
 		RunID:     "run-1",
 		ReplyTarget: &model.IMReplyTarget{
-			Platform:         "discord",
-			ChannelID:        "channel-1",
-			InteractionToken: "token-1",
+			Platform:          "discord",
+			ChannelID:         "channel-1",
+			InteractionToken:  "token-1",
+			PreferredRenderer: "components",
+			ProgressMode:      "follow_up",
 		},
 	}); err != nil {
 		t.Fatalf("BindAction error: %v", err)
 	}
 
 	sent, err := control.QueueBoundProgress(context.Background(), IMBoundProgressRequest{
-		RunID:    "run-1",
-		TaskID:   "task-1",
-		Kind:     IMDeliveryKindProgress,
-		Content:  "Agent 仍在运行，继续处理中",
+		RunID:      "run-1",
+		TaskID:     "task-1",
+		Kind:       IMDeliveryKindProgress,
+		Content:    "Agent 仍在运行，继续处理中",
 		IsTerminal: false,
 	})
 	if err != nil {
@@ -188,10 +224,10 @@ func TestIMControlPlane_BindActionAndThrottleProgressHeartbeats(t *testing.T) {
 	}
 
 	sent, err = control.QueueBoundProgress(context.Background(), IMBoundProgressRequest{
-		RunID:    "run-1",
-		TaskID:   "task-1",
-		Kind:     IMDeliveryKindProgress,
-		Content:  "这条消息应该被节流",
+		RunID:      "run-1",
+		TaskID:     "task-1",
+		Kind:       IMDeliveryKindProgress,
+		Content:    "这条消息应该被节流",
 		IsTerminal: false,
 	})
 	if err != nil {
@@ -203,11 +239,11 @@ func TestIMControlPlane_BindActionAndThrottleProgressHeartbeats(t *testing.T) {
 
 	now = now.Add(31 * time.Second)
 	sent, err = control.QueueBoundProgress(context.Background(), IMBoundProgressRequest{
-		RunID:     "run-1",
-		TaskID:    "task-1",
-		Kind:      IMDeliveryKindTerminal,
-		Content:   "Agent 已完成，任务进入总结阶段",
-		IsTerminal:true,
+		RunID:      "run-1",
+		TaskID:     "task-1",
+		Kind:       IMDeliveryKindTerminal,
+		Content:    "Agent 已完成，任务进入总结阶段",
+		IsTerminal: true,
 	})
 	if err != nil {
 		t.Fatalf("QueueBoundProgress terminal error: %v", err)
@@ -218,6 +254,15 @@ func TestIMControlPlane_BindActionAndThrottleProgressHeartbeats(t *testing.T) {
 
 	if len(listener.deliveries) != 2 {
 		t.Fatalf("listener deliveries = %d, want 2", len(listener.deliveries))
+	}
+	if listener.deliveries[0].ReplyTarget == nil {
+		t.Fatal("expected preserved reply target")
+	}
+	if listener.deliveries[0].ReplyTarget.PreferredRenderer != "components" {
+		t.Fatalf("PreferredRenderer = %q", listener.deliveries[0].ReplyTarget.PreferredRenderer)
+	}
+	if listener.deliveries[0].ReplyTarget.ProgressMode != "follow_up" {
+		t.Fatalf("ProgressMode = %q", listener.deliveries[0].ReplyTarget.ProgressMode)
 	}
 	if listener.deliveries[1].Kind != IMDeliveryKindTerminal {
 		t.Fatalf("delivery kind = %q, want %q", listener.deliveries[1].Kind, IMDeliveryKindTerminal)

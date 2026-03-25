@@ -27,7 +27,7 @@ type bridgeRuntimeControl struct {
 	cancel context.CancelFunc
 	wg     sync.WaitGroup
 
-	cursorMu sync.Mutex
+	cursorMu   sync.Mutex
 	lastCursor int64
 }
 
@@ -44,20 +44,22 @@ func (c *bridgeRuntimeControl) Start(ctx context.Context) error {
 	if c == nil || c.client == nil || c.platform == nil {
 		return nil
 	}
+	metadata := core.MetadataForPlatform(c.platform)
 
 	registration := client.BridgeRegistration{
 		BridgeID:   c.bridgeID,
-		Platform:   core.MetadataForPlatform(c.platform).Source,
+		Platform:   metadata.Source,
 		Transport:  normalizeTransportMode(c.cfg.TransportMode),
 		ProjectIDs: []string{strings.TrimSpace(c.cfg.ProjectID)},
 		Capabilities: map[string]bool{
-			"supports_deferred_reply":  core.MetadataForPlatform(c.platform).Capabilities.SupportsDeferredReply,
-			"supports_rich_messages":   core.MetadataForPlatform(c.platform).Capabilities.SupportsRichMessages,
-			"requires_public_callback": core.MetadataForPlatform(c.platform).Capabilities.RequiresPublicCallback,
-			"supports_mentions":        core.MetadataForPlatform(c.platform).Capabilities.SupportsMentions,
-			"supports_slash_commands":  core.MetadataForPlatform(c.platform).Capabilities.SupportsSlashCommands,
+			"supports_deferred_reply":  metadata.Capabilities.SupportsDeferredReply,
+			"supports_rich_messages":   metadata.Capabilities.SupportsRichMessages,
+			"requires_public_callback": metadata.Capabilities.RequiresPublicCallback,
+			"supports_mentions":        metadata.Capabilities.SupportsMentions,
+			"supports_slash_commands":  metadata.Capabilities.SupportsSlashCommands,
 		},
-		CallbackPaths: []string{"/im/notify", "/im/send"},
+		CapabilityMatrix: metadata.Capabilities.Matrix(),
+		CallbackPaths:    []string{"/im/notify", "/im/send"},
 		Metadata: map[string]string{
 			"platform_name": c.platform.Name(),
 		},
@@ -173,27 +175,11 @@ func (c *bridgeRuntimeControl) applyDelivery(ctx context.Context, delivery *clie
 	if delivery == nil {
 		return nil
 	}
-
-	if delivery.ReplyTarget != nil {
-		if resolver, ok := c.platform.(core.ReplyTargetResolver); ok {
-			replyCtx := resolver.ReplyContextFromTarget(delivery.ReplyTarget)
-			if delivery.ReplyTarget.PreferEdit {
-				if updater, ok := c.platform.(core.MessageUpdater); ok {
-					return updater.UpdateMessage(ctx, replyCtx, delivery.Content)
-				}
-			}
-			return c.platform.Reply(ctx, replyCtx, delivery.Content)
-		}
-	}
-
 	targetChatID := strings.TrimSpace(delivery.TargetChatID)
-	if targetChatID == "" && delivery.ReplyTarget != nil {
-		targetChatID = firstNonEmpty(delivery.ReplyTarget.ChatID, delivery.ReplyTarget.ChannelID, delivery.ReplyTarget.ConversationID)
+	if _, err := core.DeliverText(ctx, c.platform, core.MetadataForPlatform(c.platform), delivery.ReplyTarget, targetChatID, delivery.Content); err != nil {
+		return err
 	}
-	if targetChatID == "" {
-		return errors.New("delivery missing target chat id")
-	}
-	return c.platform.Send(ctx, targetChatID, delivery.Content)
+	return nil
 }
 
 func (c *bridgeRuntimeControl) verifyDelivery(delivery *client.ControlDelivery) bool {

@@ -9,10 +9,10 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
+	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/ws"
-	"github.com/gorilla/websocket"
 )
 
 const wsTestSecret = "test-secret-at-least-32-characters-long"
@@ -71,6 +71,14 @@ func TestHandleWS_DeliversServerPushEvent(t *testing.T) {
 		t.Fatalf("dial websocket: %v", err)
 	}
 	defer conn.Close()
+
+	deadline := time.Now().Add(2 * time.Second)
+	for hub.ClientCount() != 1 {
+		if time.Now().After(deadline) {
+			t.Fatalf("expected websocket client to register, client count = %d", hub.ClientCount())
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
 
 	hub.BroadcastEvent(&ws.Event{
 		Type:      ws.EventAgentStarted,

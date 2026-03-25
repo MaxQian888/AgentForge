@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -80,6 +81,37 @@ func (m *mockDispatchRuntime) Spawn(_ context.Context, taskID, memberID uuid.UUI
 		TaskID:   taskID,
 		MemberID: memberID,
 		Status:   model.AgentRunStatusRunning,
+	}, nil
+}
+
+type mockDispatchQueueWriter struct {
+	entry *model.AgentPoolQueueEntry
+	err   error
+	last  service.QueueAgentAdmissionInput
+}
+
+func (m *mockDispatchQueueWriter) QueueAgentAdmission(_ context.Context, input service.QueueAgentAdmissionInput) (*model.AgentPoolQueueEntry, error) {
+	m.last = input
+	if m.err != nil {
+		return nil, m.err
+	}
+	if m.entry != nil {
+		return m.entry, nil
+	}
+	return &model.AgentPoolQueueEntry{
+		EntryID:    uuid.NewString(),
+		ProjectID:  input.ProjectID.String(),
+		TaskID:     input.TaskID.String(),
+		MemberID:   input.MemberID.String(),
+		Status:     model.AgentPoolQueueStatusQueued,
+		Reason:     "agent pool is at capacity",
+		Runtime:    input.Runtime,
+		Provider:   input.Provider,
+		Model:      input.Model,
+		RoleID:     input.RoleID,
+		BudgetUSD:  input.BudgetUSD,
+		CreatedAt:  time.Now().UTC(),
+		UpdatedAt:  time.Now().UTC(),
 	}, nil
 }
 
@@ -227,5 +259,52 @@ func TestTaskDispatchService_SpawnUsesAssignedAgentWhenMemberIDMissing(t *testin
 	}
 	if runtime.lastMemberID != memberID {
 		t.Fatalf("runtime member = %s, want %s", runtime.lastMemberID, memberID)
+	}
+}
+
+func TestTaskDispatchService_AssignAgentQueuesWhenPoolIsFull(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	memberID := uuid.New()
+	taskRepo := &mockDispatchTaskRepo{
+		task: &model.Task{
+			ID:        taskID,
+			ProjectID: projectID,
+			Title:     "Dispatch task",
+			Status:    model.TaskStatusTriaged,
+		},
+	}
+	memberRepo := &mockDispatchMemberRepo{
+		member: &model.Member{
+			ID:        memberID,
+			ProjectID: projectID,
+			Type:      model.MemberTypeAgent,
+			IsActive:  true,
+		},
+	}
+	runtime := &mockDispatchRuntime{err: service.ErrAgentPoolFull}
+	queueWriter := &mockDispatchQueueWriter{}
+
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).WithQueueWriter(queueWriter)
+
+	result, err := svc.Assign(context.Background(), taskID, &model.AssignRequest{
+		AssigneeID:   memberID.String(),
+		AssigneeType: model.MemberTypeAgent,
+	})
+	if err != nil {
+		t.Fatalf("Assign() error = %v", err)
+	}
+
+	if result.Dispatch.Status != model.DispatchStatusQueued {
+		t.Fatalf("dispatch result = %+v, want queued", result.Dispatch)
+	}
+	if result.Dispatch.Queue == nil {
+		t.Fatalf("dispatch queue payload = nil, want queue entry")
+	}
+	if result.Dispatch.Queue.TaskID != taskID.String() || result.Dispatch.Queue.MemberID != memberID.String() {
+		t.Fatalf("dispatch queue payload = %+v", result.Dispatch.Queue)
+	}
+	if queueWriter.last.TaskID != taskID || queueWriter.last.MemberID != memberID {
+		t.Fatalf("queue writer input = %+v", queueWriter.last)
 	}
 }

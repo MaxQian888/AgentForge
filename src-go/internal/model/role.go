@@ -44,12 +44,18 @@ type RoleCapabilities struct {
 	AllowedTools   []string          `yaml:"allowed_tools,omitempty" json:"allowedTools,omitempty"`
 	Tools          []string          `yaml:"-" json:"tools,omitempty"`
 	ToolConfig     RoleToolConfig    `yaml:"tools,omitempty" json:"toolConfig,omitempty"`
+	Skills         []RoleSkillReference `yaml:"skills,omitempty" json:"skills,omitempty"`
 	Languages      []string          `yaml:"languages" json:"languages"`
 	Frameworks     []string          `yaml:"frameworks" json:"frameworks"`
 	MaxConcurrency int               `yaml:"max_concurrency" json:"maxConcurrency"`
 	MaxTurns       int               `yaml:"max_turns,omitempty" json:"maxTurns,omitempty"`
 	MaxBudgetUsd   float64           `yaml:"max_budget_usd,omitempty" json:"maxBudgetUsd,omitempty"`
 	CustomSettings map[string]string `yaml:"custom_settings" json:"customSettings"`
+}
+
+type RoleSkillReference struct {
+	Path     string `yaml:"path" json:"path"`
+	AutoLoad bool   `yaml:"auto_load,omitempty" json:"autoLoad"`
 }
 
 type RoleKnowledge struct {

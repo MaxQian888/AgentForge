@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/notify"
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
 )
@@ -130,6 +131,167 @@ func TestLive_StartNormalizesAppMentionEvent(t *testing.T) {
 	}
 }
 
+func TestLive_StartRoutesBlockActionToActionHandler(t *testing.T) {
+	runner := &fakeSocketRunner{}
+	messages := &fakeSlackMessageClient{}
+	actions := &fakeSlackActionHandler{}
+
+	live, err := NewLive("xoxb-bot", "xapp-app", WithSocketRunner(runner), WithMessageClient(messages))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+	var order []string
+	live.SetActionHandler(actions)
+	actions.onHandle = func() {
+		order = append(order, "action")
+	}
+
+	if err := live.Start(func(p core.Platform, msg *core.Message) {
+		t.Fatalf("message handler should not receive interactive action payloads: %+v", msg)
+	}); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	defer live.Stop()
+
+	err = runner.dispatch(context.Background(), socketEnvelope{
+		Type: socketEnvelopeInteractive,
+		Ack: func(payload any) error {
+			order = append(order, "ack")
+			return nil
+		},
+		Interaction: &goslack.InteractionCallback{
+			Type:        goslack.InteractionTypeBlockActions,
+			ResponseURL: "https://hooks.slack.com/actions/test",
+			TriggerID:   "trigger-1",
+			Channel: goslack.Channel{
+				GroupConversation: goslack.GroupConversation{
+					Conversation: goslack.Conversation{ID: "C456"},
+				},
+			},
+			User: goslack.User{
+				ID:   "U123",
+				Name: "alice",
+			},
+			Container: goslack.Container{
+				ChannelID: "C456",
+				ThreadTs:  "1700000000.100000",
+			},
+			ActionCallback: goslack.ActionCallbacks{
+				BlockActions: []*goslack.BlockAction{
+					{
+						ActionID: "approve_button",
+						BlockID:  "review_actions",
+						Value:    "act:approve:review-1",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("dispatch error: %v", err)
+	}
+
+	if len(order) != 2 || order[0] != "ack" || order[1] != "action" {
+		t.Fatalf("order = %v, want ack before action", order)
+	}
+	if len(actions.requests) != 1 {
+		t.Fatalf("requests = %+v, want 1 request", actions.requests)
+	}
+
+	req := actions.requests[0]
+	if req.Platform != "slack" {
+		t.Fatalf("Platform = %q, want slack", req.Platform)
+	}
+	if req.Action != "approve" || req.EntityID != "review-1" {
+		t.Fatalf("action request = %+v", req)
+	}
+	if req.ChatID != "C456" || req.UserID != "U123" {
+		t.Fatalf("action request chat/user = %+v", req)
+	}
+	if req.ReplyTarget == nil {
+		t.Fatal("expected reply target")
+	}
+	if req.ReplyTarget.ChannelID != "C456" || req.ReplyTarget.ThreadID != "1700000000.100000" {
+		t.Fatalf("ReplyTarget = %+v", req.ReplyTarget)
+	}
+	if req.ReplyTarget.ResponseURL != "https://hooks.slack.com/actions/test" {
+		t.Fatalf("ResponseURL = %q", req.ReplyTarget.ResponseURL)
+	}
+	if req.ReplyTarget.PreferredRenderer != "blocks" || !req.ReplyTarget.UseReply {
+		t.Fatalf("ReplyTarget renderer/useReply = %+v", req.ReplyTarget)
+	}
+	if req.Metadata["source"] != "block_actions" || req.Metadata["action_id"] != "approve_button" || req.Metadata["block_id"] != "review_actions" {
+		t.Fatalf("Metadata = %+v", req.Metadata)
+	}
+}
+
+func TestLive_StartRoutesViewSubmissionToActionHandler(t *testing.T) {
+	runner := &fakeSocketRunner{}
+	actions := &fakeSlackActionHandler{}
+
+	live, err := NewLive("xoxb-bot", "xapp-app", WithSocketRunner(runner), WithMessageClient(&fakeSlackMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+	live.SetActionHandler(actions)
+
+	if err := live.Start(func(p core.Platform, msg *core.Message) {
+		t.Fatalf("message handler should not receive modal submission payloads: %+v", msg)
+	}); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	defer live.Stop()
+
+	err = runner.dispatch(context.Background(), socketEnvelope{
+		Type: socketEnvelopeInteractive,
+		Ack:  func(payload any) error { return nil },
+		Interaction: &goslack.InteractionCallback{
+			Type:      goslack.InteractionTypeViewSubmission,
+			TriggerID: "trigger-2",
+			User: goslack.User{
+				ID:   "U999",
+				Name: "bob",
+			},
+			View: goslack.View{
+				ID:              "V123",
+				PrivateMetadata: "act:request-changes:review-9",
+				Hash:            "hash-1",
+			},
+			ViewSubmissionCallback: goslack.ViewSubmissionCallback{
+				ResponseURLs: []goslack.ViewSubmissionCallbackResponseURL{
+					{
+						ChannelID:   "C999",
+						ResponseURL: "https://hooks.slack.com/actions/view",
+						BlockID:     "review_modal",
+						ActionID:    "submit_review",
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("dispatch error: %v", err)
+	}
+
+	if len(actions.requests) != 1 {
+		t.Fatalf("requests = %+v, want 1 request", actions.requests)
+	}
+
+	req := actions.requests[0]
+	if req.Action != "request-changes" || req.EntityID != "review-9" {
+		t.Fatalf("action request = %+v", req)
+	}
+	if req.ChatID != "C999" || req.UserID != "U999" {
+		t.Fatalf("action request chat/user = %+v", req)
+	}
+	if req.ReplyTarget == nil || req.ReplyTarget.ResponseURL != "https://hooks.slack.com/actions/view" || req.ReplyTarget.ChannelID != "C999" {
+		t.Fatalf("ReplyTarget = %+v", req.ReplyTarget)
+	}
+	if req.Metadata["source"] != "view_submission" || req.Metadata["view_id"] != "V123" || req.Metadata["view_hash"] != "hash-1" {
+		t.Fatalf("Metadata = %+v", req.Metadata)
+	}
+}
+
 func TestLive_ReplySendAndSendCardUseSlackMessageClient(t *testing.T) {
 	runner := &fakeSocketRunner{}
 	messages := &fakeSlackMessageClient{}
@@ -166,6 +328,42 @@ func TestLive_ReplySendAndSendCardUseSlackMessageClient(t *testing.T) {
 	}
 	if len(messages.posts[2].Blocks) == 0 {
 		t.Fatalf("card post = %+v", messages.posts[2])
+	}
+}
+
+func TestLive_ReplyUsesResponseURLWhenAvailable(t *testing.T) {
+	runner := &fakeSocketRunner{}
+	messages := &fakeSlackMessageClient{}
+	responses := &fakeSlackResponseClient{}
+
+	live, err := NewLive(
+		"xoxb-bot",
+		"xapp-app",
+		WithSocketRunner(runner),
+		WithMessageClient(messages),
+		WithResponseClient(responses),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	replyCtx := replyContext{
+		ChannelID:   "C111",
+		ThreadTS:    "1700000000.100000",
+		ResponseURL: "https://hooks.slack.com/actions/test",
+	}
+	if err := live.Reply(context.Background(), replyCtx, "hello"); err != nil {
+		t.Fatalf("Reply error: %v", err)
+	}
+
+	if len(messages.posts) != 0 {
+		t.Fatalf("expected response_url reply to avoid chat.postMessage, got posts=%+v", messages.posts)
+	}
+	if len(responses.calls) != 1 {
+		t.Fatalf("response calls = %+v", responses.calls)
+	}
+	if responses.calls[0].ResponseURL != "https://hooks.slack.com/actions/test" || responses.calls[0].Text != "hello" {
+		t.Fatalf("response call = %+v", responses.calls[0])
 	}
 }
 
@@ -231,4 +429,36 @@ type fakeSlackMessageClient struct {
 func (c *fakeSlackMessageClient) PostMessage(ctx context.Context, message slackOutgoingMessage) error {
 	c.posts = append(c.posts, message)
 	return nil
+}
+
+type fakeSlackResponseClient struct {
+	calls []fakeSlackResponseCall
+}
+
+type fakeSlackResponseCall struct {
+	ResponseURL string
+	Text        string
+	ThreadTS    string
+}
+
+func (c *fakeSlackResponseClient) PostResponse(ctx context.Context, responseURL string, message slackOutgoingMessage) error {
+	c.calls = append(c.calls, fakeSlackResponseCall{
+		ResponseURL: responseURL,
+		Text:        message.Text,
+		ThreadTS:    message.ThreadTS,
+	})
+	return nil
+}
+
+type fakeSlackActionHandler struct {
+	requests []*notify.ActionRequest
+	onHandle func()
+}
+
+func (h *fakeSlackActionHandler) HandleAction(ctx context.Context, req *notify.ActionRequest) (*notify.ActionResponse, error) {
+	if h.onHandle != nil {
+		h.onHandle()
+	}
+	h.requests = append(h.requests, req)
+	return &notify.ActionResponse{}, nil
 }

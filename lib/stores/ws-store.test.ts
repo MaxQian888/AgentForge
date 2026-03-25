@@ -30,6 +30,7 @@ jest.mock("@/lib/ws-client", () => {
 import { useAgentStore } from "./agent-store";
 import { useDashboardStore } from "./dashboard-store";
 import { useNotificationStore } from "./notification-store";
+import { useSchedulerStore } from "./scheduler-store";
 import { useTaskStore } from "./task-store";
 import { useWorkflowStore } from "./workflow-store";
 import { useWSStore } from "./ws-store";
@@ -62,6 +63,15 @@ describe("useWSStore", () => {
       saving: false,
       error: null,
       recentActivityByProject: {},
+    });
+    useSchedulerStore.setState({
+      jobs: [],
+      runsByJobKey: {},
+      draftSchedules: {},
+      selectedJobKey: null,
+      loading: false,
+      actionJobKey: null,
+      error: null,
     });
     useWSStore.getState().disconnect();
   });
@@ -210,12 +220,16 @@ describe("useWSStore", () => {
     expect(useAgentStore.getState().agentOutputs.get("run-1")).toEqual([
       "Planning the implementation.",
     ]);
-    expect(useAgentStore.getState().pool).toEqual({
-      active: 0,
-      max: 2,
-      available: 2,
-      pausedResumable: 1,
-    });
+    expect(useAgentStore.getState().pool).toEqual(
+      expect.objectContaining({
+        active: 0,
+        max: 2,
+        available: 2,
+        pausedResumable: 1,
+        queued: 0,
+        warm: 0,
+      }),
+    );
   });
 
   it("applies blocked dispatch envelopes so task views do not miss assignment failures", () => {
@@ -292,5 +306,114 @@ describe("useWSStore", () => {
         to: "assigned",
       }),
     ]);
+  });
+
+  it("hydrates scheduler job updates and run history from websocket envelopes", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+    expect(client).toBeDefined();
+
+    client?.emit("scheduler.job.updated", {
+      type: "scheduler.job.updated",
+      payload: {
+        job: {
+          jobKey: "task-progress-detector",
+          name: "Task progress detector",
+          scope: "system",
+          schedule: "0 * * * *",
+          enabled: false,
+          executionMode: "os_registered",
+          overlapPolicy: "skip",
+          lastRunStatus: "failed",
+          lastRunSummary: "bridge offline",
+          lastError: "bridge offline",
+          config: "{}",
+          createdAt: "2026-03-25T10:00:00.000Z",
+          updatedAt: "2026-03-25T11:00:00.000Z",
+        },
+      },
+    });
+
+    client?.emit("scheduler.run.completed", {
+      type: "scheduler.run.completed",
+      payload: {
+        run: {
+          runId: "run-1",
+          jobKey: "task-progress-detector",
+          triggerSource: "cron",
+          status: "failed",
+          startedAt: "2026-03-25T11:00:00.000Z",
+          finishedAt: "2026-03-25T11:00:03.000Z",
+          summary: "bridge offline",
+          errorMessage: "bridge offline",
+          metrics: "{}",
+          createdAt: "2026-03-25T11:00:00.000Z",
+          updatedAt: "2026-03-25T11:00:03.000Z",
+        },
+      },
+    });
+
+    expect(useSchedulerStore.getState().jobs).toEqual([
+      expect.objectContaining({
+        jobKey: "task-progress-detector",
+        enabled: false,
+        executionMode: "os_registered",
+      }),
+    ]);
+    expect(useSchedulerStore.getState().runsByJobKey["task-progress-detector"]).toEqual([
+      expect.objectContaining({
+        runId: "run-1",
+        triggerSource: "cron",
+        status: "failed",
+      }),
+    ]);
+  });
+
+  it("hydrates explicit agent pool summary updates from websocket envelopes", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+    expect(client).toBeDefined();
+
+    client?.emit("agent.pool.updated", {
+      type: "agent.pool.updated",
+      payload: {
+        active: 1,
+        max: 3,
+        available: 2,
+        pausedResumable: 0,
+        queued: 2,
+        warm: 1,
+        degraded: false,
+        queue: [
+          {
+            entryId: "queue-1",
+            taskId: "task-queued-1",
+            memberId: "member-1",
+            status: "queued",
+            reason: "agent pool is at capacity",
+            createdAt: "2026-03-25T12:00:00.000Z",
+            updatedAt: "2026-03-25T12:00:00.000Z",
+          },
+        ],
+      },
+    });
+
+    expect(useAgentStore.getState().pool).toEqual(
+      expect.objectContaining({
+        active: 1,
+        max: 3,
+        queued: 2,
+        warm: 1,
+        queue: [expect.objectContaining({ entryId: "queue-1" })],
+      }),
+    );
   });
 });

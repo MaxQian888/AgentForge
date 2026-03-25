@@ -2,6 +2,7 @@ package dingtalk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"log"
@@ -14,15 +15,22 @@ import (
 	dingtalkai "github.com/alibabacloud-go/dingtalk/ai_interaction_1_0"
 	dingtalkoauth "github.com/alibabacloud-go/dingtalk/oauth2_1_0"
 	teautil "github.com/alibabacloud-go/tea-utils/v2/service"
+	dingtalkcard "github.com/open-dingtalk/dingtalk-stream-sdk-go/card"
 	dingtalkchatbot "github.com/open-dingtalk/dingtalk-stream-sdk-go/chatbot"
 	dingtalkclient "github.com/open-dingtalk/dingtalk-stream-sdk-go/client"
 
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/notify"
 )
 
 var liveMetadata = core.PlatformMetadata{
 	Source: "dingtalk",
 	Capabilities: core.PlatformCapabilities{
+		CommandSurface:        core.CommandSurfaceMixed,
+		StructuredSurface:     core.StructuredSurfaceActionCard,
+		AsyncUpdateModes:      []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateSessionWebhook},
+		ActionCallbackMode:    core.ActionCallbackWebhook,
+		MessageScopes:         []core.MessageScope{core.MessageScopeChat},
 		SupportsSlashCommands: true,
 		SupportsMentions:      true,
 	},
@@ -57,6 +65,14 @@ type streamRunner interface {
 	Stop(ctx context.Context) error
 }
 
+type cardActionStreamRunner interface {
+	StartWithCardCallbacks(
+		ctx context.Context,
+		handler func(context.Context, chatbotMessage) error,
+		cardHandler func(context.Context, *dingtalkcard.CardRequest) (*dingtalkcard.CardResponse, error),
+	) error
+}
+
 type webhookReplier interface {
 	ReplyText(ctx context.Context, sessionWebhook string, content string) error
 }
@@ -80,6 +96,8 @@ type Live struct {
 	runner    streamRunner
 	webhook   webhookReplier
 	messenger directMessenger
+
+	actionHandler notify.ActionHandler
 
 	startCtx    context.Context
 	startCancel context.CancelFunc
@@ -161,6 +179,10 @@ func (l *Live) Name() string { return "dingtalk-live" }
 
 func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
 
+func (l *Live) SetActionHandler(handler notify.ActionHandler) {
+	l.actionHandler = handler
+}
+
 func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
 	if target == nil {
 		return nil
@@ -187,6 +209,23 @@ func (l *Live) Start(handler core.MessageHandler) error {
 	ctx, cancel := context.WithCancel(context.Background())
 	l.startCtx = ctx
 	l.startCancel = cancel
+
+	if runner, ok := l.runner.(cardActionStreamRunner); ok && l.actionHandler != nil {
+		if err := runner.StartWithCardCallbacks(ctx, func(ctx context.Context, incoming chatbotMessage) error {
+			msg, err := normalizeIncomingMessage(incoming)
+			if err != nil {
+				log.Printf("[dingtalk-live] Ignoring inbound message: %v", err)
+				return nil
+			}
+			handler(l, msg)
+			return nil
+		}, l.handleCardAction); err != nil {
+			cancel()
+			return err
+		}
+		l.started = true
+		return nil
+	}
 
 	if err := l.runner.Start(ctx, func(ctx context.Context, incoming chatbotMessage) error {
 		msg, err := normalizeIncomingMessage(incoming)
@@ -234,6 +273,10 @@ func (l *Live) Send(ctx context.Context, chatID string, content string) error {
 	return l.messenger.SendText(ctx, sendTarget, content)
 }
 
+func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	return l.Send(ctx, chatID, renderStructuredFallback(message))
+}
+
 func (l *Live) Stop() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -263,6 +306,10 @@ func newSDKStreamRunner(appKey, appSecret string) *sdkStreamRunner {
 }
 
 func (r *sdkStreamRunner) Start(ctx context.Context, handler func(context.Context, chatbotMessage) error) error {
+	return r.StartWithCardCallbacks(ctx, handler, nil)
+}
+
+func (r *sdkStreamRunner) StartWithCardCallbacks(ctx context.Context, handler func(context.Context, chatbotMessage) error, cardHandler func(context.Context, *dingtalkcard.CardRequest) (*dingtalkcard.CardResponse, error)) error {
 	r.client.RegisterChatBotCallbackRouter(func(ctx context.Context, data *dingtalkchatbot.BotCallbackDataModel) ([]byte, error) {
 		return []byte(""), handler(ctx, chatbotMessage{
 			ConversationID:    strings.TrimSpace(data.ConversationId),
@@ -276,6 +323,9 @@ func (r *sdkStreamRunner) Start(ctx context.Context, handler func(context.Contex
 			CreatedAt:         parseUnixMillis(data.CreateAt),
 		})
 	})
+	if cardHandler != nil {
+		r.client.RegisterCardCallbackRouter(cardHandler)
+	}
 	return r.client.Start(ctx)
 }
 
@@ -439,6 +489,84 @@ func normalizeIncomingMessage(incoming chatbotMessage) (*core.Message, error) {
 	}, nil
 }
 
+func (l *Live) handleCardAction(ctx context.Context, request *dingtalkcard.CardRequest) (*dingtalkcard.CardResponse, error) {
+	req, err := normalizeCardActionRequest(request)
+	if err != nil {
+		return &dingtalkcard.CardResponse{}, err
+	}
+	if req == nil || l.actionHandler == nil {
+		return &dingtalkcard.CardResponse{}, nil
+	}
+
+	result, err := l.actionHandler.HandleAction(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if result == nil || strings.TrimSpace(result.Result) == "" {
+		return &dingtalkcard.CardResponse{}, nil
+	}
+
+	target := req.ReplyTarget
+	if result.ReplyTarget != nil {
+		target = result.ReplyTarget
+	}
+	_, err = core.DeliverText(ctx, l, l.Metadata(), target, req.ChatID, result.Result)
+	if err != nil {
+		return nil, err
+	}
+	return &dingtalkcard.CardResponse{}, nil
+}
+
+func normalizeCardActionRequest(request *dingtalkcard.CardRequest) (*notify.ActionRequest, error) {
+	if request == nil {
+		return nil, errors.New("missing dingtalk card callback payload")
+	}
+
+	actionRef := firstNonEmpty(
+		request.GetActionString("action"),
+		request.GetActionString("action_id"),
+		firstActionID(request.CardActionData.CardPrivateData.ActionIdList),
+	)
+	action, entityID, ok := core.ParseActionReference(actionRef)
+	if !ok {
+		return nil, errors.New("missing dingtalk action reference")
+	}
+
+	callbackCtx := parseCardCallbackContext(request)
+	chatID := firstNonEmpty(callbackCtx.ConversationID, strings.TrimSpace(request.SpaceId))
+	replyTarget := &core.ReplyTarget{
+		Platform:          liveMetadata.Source,
+		ChatID:            chatID,
+		ChannelID:         chatID,
+		ConversationID:    chatID,
+		SessionWebhook:    callbackCtx.SessionWebhook,
+		UserID:            firstNonEmpty(strings.TrimSpace(request.UserId), callbackCtx.UserID),
+		UseReply:          true,
+		PreferredRenderer: string(liveMetadata.Capabilities.StructuredSurface),
+	}
+	metadata := compactMetadata(map[string]string{
+		"source":            "card_callback",
+		"space_type":        firstNonEmpty(strings.TrimSpace(request.SpaceType), callbackCtx.ConversationType),
+		"out_track_id":      strings.TrimSpace(request.OutTrackId),
+		"conversation_type": callbackCtx.ConversationType,
+	})
+	if len(metadata) > 0 {
+		replyTarget.Metadata = map[string]string{
+			"conversation_type": metadata["conversation_type"],
+		}
+	}
+
+	return &notify.ActionRequest{
+		Platform:    liveMetadata.Source,
+		Action:      action,
+		EntityID:    entityID,
+		ChatID:      chatID,
+		UserID:      firstNonEmpty(strings.TrimSpace(request.UserId), callbackCtx.UserID),
+		ReplyTarget: replyTarget,
+		Metadata:    metadata,
+	}, nil
+}
+
 func toReplyContext(raw any) replyContext {
 	switch value := raw.(type) {
 	case replyContext:
@@ -517,4 +645,95 @@ func parseUnixMillis(raw int64) time.Time {
 		return time.Now()
 	}
 	return time.UnixMilli(raw)
+}
+
+type cardCallbackContext struct {
+	SessionWebhook   string `json:"sessionWebhook"`
+	ConversationID   string `json:"conversationId"`
+	ConversationType string `json:"conversationType"`
+	UserID           string `json:"userId"`
+}
+
+func parseCardCallbackContext(request *dingtalkcard.CardRequest) cardCallbackContext {
+	if request == nil {
+		return cardCallbackContext{}
+	}
+
+	ctx := cardCallbackContext{
+		ConversationID:   strings.TrimSpace(request.SpaceId),
+		ConversationType: strings.TrimSpace(request.SpaceType),
+		UserID:           strings.TrimSpace(request.UserId),
+	}
+	if extension := strings.TrimSpace(request.Extension); extension != "" {
+		var decoded cardCallbackContext
+		if err := json.Unmarshal([]byte(extension), &decoded); err == nil {
+			ctx.SessionWebhook = firstNonEmpty(strings.TrimSpace(decoded.SessionWebhook), ctx.SessionWebhook)
+			ctx.ConversationID = firstNonEmpty(strings.TrimSpace(decoded.ConversationID), ctx.ConversationID)
+			ctx.ConversationType = firstNonEmpty(strings.TrimSpace(decoded.ConversationType), ctx.ConversationType)
+			ctx.UserID = firstNonEmpty(strings.TrimSpace(decoded.UserID), ctx.UserID)
+		}
+	}
+	if params := request.CardActionData.CardPrivateData.Params; len(params) > 0 {
+		ctx.SessionWebhook = firstNonEmpty(stringParam(params, "session_webhook"), stringParam(params, "sessionWebhook"), ctx.SessionWebhook)
+		ctx.ConversationID = firstNonEmpty(stringParam(params, "conversation_id"), stringParam(params, "conversationId"), ctx.ConversationID)
+		ctx.ConversationType = firstNonEmpty(stringParam(params, "conversation_type"), stringParam(params, "conversationType"), ctx.ConversationType)
+		ctx.UserID = firstNonEmpty(stringParam(params, "user_id"), stringParam(params, "userId"), ctx.UserID)
+	}
+	return ctx
+}
+
+func renderStructuredFallback(message *core.StructuredMessage) string {
+	if message == nil {
+		return ""
+	}
+	content := strings.TrimSpace(message.FallbackText())
+	if content == "" {
+		return ""
+	}
+	if len(message.Actions) > 0 {
+		content += "\n\nDingTalk ActionCard 暂未启用，已降级为文本。"
+	}
+	return content
+}
+
+func firstActionID(values []string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
+}
+
+func stringParam(values map[string]any, key string) string {
+	if len(values) == 0 {
+		return ""
+	}
+	raw, ok := values[key]
+	if !ok {
+		return ""
+	}
+	value, ok := raw.(string)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(value)
+}
+
+func compactMetadata(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	metadata := make(map[string]string, len(values))
+	for key, value := range values {
+		if trimmedKey := strings.TrimSpace(key); trimmedKey != "" {
+			if trimmedValue := strings.TrimSpace(value); trimmedValue != "" {
+				metadata[trimmedKey] = trimmedValue
+			}
+		}
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
 }

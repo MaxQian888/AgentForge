@@ -2,6 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TeamManagement } from "./team-management";
 import type { TeamMember } from "@/lib/dashboard/summary";
+import type { RoleManifest } from "@/lib/stores/role-store";
 
 describe("TeamManagement", () => {
   const projects = [
@@ -45,11 +46,66 @@ describe("TeamManagement", () => {
       status: "active",
       createdAt: "2026-03-20T10:00:00.000Z",
       lastActivityAt: "2026-03-24T08:30:00.000Z",
+      roleBindingLabel: "frontend-developer",
+      readinessState: "ready",
+      readinessLabel: "Ready",
+      agentSummary: ["codex", "openai", "gpt-5-codex"],
+      agentProfile: {
+        roleId: "frontend-developer",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        maxBudgetUsd: 8,
+        notes: "keep reviews concise",
+      },
       workload: {
         assignedTasks: 1,
         inProgressTasks: 1,
         inReviewTasks: 0,
         activeAgentRuns: 1,
+      },
+    },
+  ];
+
+  const availableRoles: RoleManifest[] = [
+    {
+      apiVersion: "agentforge/v1",
+      kind: "Role",
+      metadata: {
+        id: "frontend-developer",
+        name: "Frontend Developer",
+        version: "1.0.0",
+        description: "Builds UI",
+        author: "AgentForge",
+        tags: ["frontend"],
+      },
+      identity: {
+        role: "Senior Frontend Developer",
+        goal: "Ship UI",
+        backstory: "Frontend specialist",
+        systemPrompt: "Build accessible UI",
+        persona: "Helpful",
+        goals: ["Ship"],
+        constraints: ["Keep tests green"],
+      },
+      capabilities: {
+        allowedTools: ["Read", "Edit"],
+        languages: ["TypeScript"],
+        frameworks: ["Next.js"],
+        maxTurns: 20,
+        maxBudgetUsd: 5,
+      },
+      knowledge: {
+        repositories: ["app"],
+        documents: ["docs/PRD.md"],
+        patterns: ["ui"],
+      },
+      security: {
+        permissionMode: "default",
+        allowedPaths: ["app/"],
+        deniedPaths: [],
+        maxBudgetUsd: 5,
+        requireReview: true,
       },
     },
   ];
@@ -67,6 +123,7 @@ describe("TeamManagement", () => {
         members={members}
         loading={false}
         error={null}
+        availableRoles={availableRoles}
         onRetry={jest.fn()}
         onProjectChange={onProjectChange}
         onCreateMember={onCreateMember}
@@ -78,6 +135,8 @@ describe("TeamManagement", () => {
     expect(screen.getByText("Review Bot")).toBeInTheDocument();
     expect(screen.getByText("Human")).toBeInTheDocument();
     expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getByText("frontend-developer")).toBeInTheDocument();
+    expect(screen.getByText("Ready")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Project"), "project-2");
     expect(onProjectChange).toHaveBeenCalledWith("project-2");
@@ -97,16 +156,32 @@ describe("TeamManagement", () => {
       skills: [],
     });
 
-    await user.click(screen.getByRole("button", { name: "Edit Alice" }));
+    await user.click(screen.getByRole("button", { name: "Edit Review Bot" }));
     const editRole = screen.getByLabelText("Edit Role");
     await user.clear(editRole);
-    await user.type(editRole, "lead-frontend");
+    await user.type(editRole, "lead-reviewer");
+    const editSkills = screen.getByLabelText("Edit Skills");
+    await user.clear(editSkills);
+    await user.type(editSkills, "review, security, automation");
+    await user.selectOptions(screen.getByLabelText("Edit Bound Role"), "frontend-developer");
+    const editBudget = screen.getByLabelText("Edit Agent Budget USD");
+    await user.clear(editBudget);
+    await user.type(editBudget, "9");
     await user.click(screen.getByRole("button", { name: "Save Member" }));
 
-    expect(onUpdateMember).toHaveBeenCalledWith("member-1", {
-      name: "Alice",
-      role: "lead-frontend",
-      email: "alice@example.com",
+    expect(onUpdateMember).toHaveBeenCalledWith("member-2", {
+      name: "Review Bot",
+      role: "lead-reviewer",
+      email: "",
+      skills: ["review", "security", "automation"],
+      agentProfile: {
+        roleId: "frontend-developer",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        maxBudgetUsd: "9",
+        notes: "keep reviews concise",
+      },
       isActive: true,
     });
   });
@@ -119,6 +194,7 @@ describe("TeamManagement", () => {
         members={[]}
         loading={false}
         error={null}
+        availableRoles={availableRoles}
         onRetry={jest.fn()}
         onProjectChange={jest.fn()}
         onCreateMember={jest.fn()}

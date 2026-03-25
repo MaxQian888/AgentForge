@@ -107,6 +107,7 @@ func RegisterRoutes(
 	bridgeClient *bridge.Client,
 	pluginSvc *service.PluginService,
 	agentSvc *service.AgentService,
+	schedulerSvc handler.SchedulerService,
 ) *service.TaskProgressService {
 	jwtMw := appMiddleware.JWTMiddleware(cfg.JWTSecret, cache)
 	reviewTriggerMw := appMiddleware.ReviewTriggerAuthMiddleware(cfg.JWTSecret, cache, cfg.AgentForgeToken)
@@ -181,7 +182,7 @@ func RegisterRoutes(
 	e.GET("/ws/im-bridge", ws.NewIMControlHandler(imControlPlaneWSAdapter{control: imControlPlane}).HandleWS)
 
 	// --- New resource handlers ---
-	projectH := handler.NewProjectHandler(projectRepo)
+	projectH := handler.NewProjectHandler(projectRepo, bridgeClient)
 	memberH := handler.NewMemberHandler(memberRepo)
 	sprintH := handler.NewSprintHandler(sprintRepo, taskRepo).WithHub(hub)
 	taskH := handler.NewTaskHandler(taskRepo, taskDecomposeSvc).WithProgress(taskProgressSvc).WithHub(hub)
@@ -201,6 +202,7 @@ func RegisterRoutes(
 	teamH := handler.NewTeamHandler(teamRuntime)
 	memoryH := handler.NewMemoryHandler(memorySvc)
 	reviewH := handler.NewReviewHandler(reviewSvc)
+	workflowRoleStore := role.NewFileStore(cfg.RolesDir)
 	if pluginSvc == nil {
 		pluginSvc = service.NewPluginService(
 			repository.NewPluginRegistryRepository(),
@@ -210,14 +212,25 @@ func RegisterRoutes(
 		)
 	}
 	pluginSvc = pluginSvc.
-		WithRoleStore(role.NewFileStore(cfg.RolesDir)).
+		WithRoleStore(workflowRoleStore).
 		WithBroadcaster(ws.NewPluginEventBroadcaster(hub))
-	pluginH := handler.NewPluginHandler(pluginSvc)
+	reviewSvc.WithExecutionPlanner(service.NewReviewExecutionPlanner(pluginSvc))
+	var dispatchSvc *service.TaskDispatchService
 	if agentSvc != nil {
-		dispatchSvc := service.NewTaskDispatchService(taskRepo, memberRepo, agentSvc, hub, notificationSvc, taskProgressSvc)
+		dispatchSvc = service.NewTaskDispatchService(taskRepo, memberRepo, agentSvc, hub, notificationSvc, taskProgressSvc)
+		dispatchSvc = dispatchSvc.WithQueueWriter(agentSvc)
 		taskH = taskH.WithDispatcher(dispatchSvc)
 		agentH = agentH.WithDispatcher(dispatchSvc)
 	}
+	workflowRunRepo := repository.NewWorkflowPluginRunRepository()
+	workflowExec := service.NewWorkflowExecutionService(
+		pluginSvc,
+		workflowRunRepo,
+		workflowRoleStore,
+		service.NewWorkflowStepRouterExecutor(agentSvc, reviewSvc, dispatchSvc),
+	)
+	pluginH := handler.NewPluginHandler(pluginSvc).WithWorkflowExecution(workflowExec)
+	schedulerH := handler.NewSchedulerHandler(schedulerSvc)
 
 	// JWT protected routes
 	protected := v1.Group("", jwtMw)
@@ -278,6 +291,14 @@ func RegisterRoutes(
 	// Notifications
 	protected.GET("/notifications", notifH.List)
 	protected.PUT("/notifications/:id/read", notifH.MarkRead)
+
+	// Scheduler control plane
+	protected.GET("/scheduler/jobs", schedulerH.ListJobs)
+	protected.GET("/scheduler/jobs/:jobKey/runs", schedulerH.ListRuns)
+	protected.PUT("/scheduler/jobs/:jobKey", schedulerH.UpdateJob)
+	protected.POST("/scheduler/jobs/:jobKey/trigger", schedulerH.TriggerManual)
+	e.GET("/internal/scheduler/jobs", schedulerH.ListJobs)
+	e.POST("/internal/scheduler/jobs/:jobKey/trigger", schedulerH.TriggerCron)
 	protected.GET("/reviews/:id", reviewH.Get)
 	protected.GET("/tasks/:taskId/reviews", reviewH.ListByTask)
 	protected.POST("/reviews/:id/complete", reviewH.Complete)
@@ -316,7 +337,14 @@ func RegisterRoutes(
 	protected.GET("/plugins/:id/health", pluginH.Health)
 	protected.POST("/plugins/:id/restart", pluginH.Restart)
 	protected.POST("/plugins/:id/invoke", pluginH.Invoke)
+	protected.POST("/plugins/:id/mcp/refresh", pluginH.RefreshMCP)
+	protected.POST("/plugins/:id/mcp/tools/call", pluginH.CallMCPTool)
+	protected.POST("/plugins/:id/mcp/resources/read", pluginH.ReadMCPResource)
+	protected.POST("/plugins/:id/mcp/prompts/get", pluginH.GetMCPPrompt)
 	protected.GET("/plugins/:id/events", pluginH.ListEvents)
+	protected.POST("/plugins/:id/workflow-runs", pluginH.StartWorkflowRun)
+	protected.GET("/plugins/:id/workflow-runs", pluginH.ListWorkflowRuns)
+	protected.GET("/plugins/workflow-runs/:runId", pluginH.GetWorkflowRun)
 
 	// IM Bridge
 	imSvc := service.NewIMService(cfg.IMNotifyURL, cfg.IMNotifyPlatform, imControlPlane)

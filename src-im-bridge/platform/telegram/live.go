@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/notify"
 )
 
 const (
@@ -24,22 +25,40 @@ const (
 var liveMetadata = core.PlatformMetadata{
 	Source: "telegram",
 	Capabilities: core.PlatformCapabilities{
+		CommandSurface:     core.CommandSurfaceMixed,
+		StructuredSurface:  core.StructuredSurfaceInlineKeyboard,
+		AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateEdit},
+		ActionCallbackMode: core.ActionCallbackQuery,
+		MessageScopes:      []core.MessageScope{core.MessageScopeChat, core.MessageScopeTopic},
+		Mutability: core.MutabilitySemantics{
+			CanEdit:        true,
+			PrefersInPlace: true,
+		},
 		SupportsSlashCommands: true,
 		SupportsMentions:      true,
 	},
 }
 
 type update struct {
-	UpdateID int64    `json:"update_id"`
-	Message  *message `json:"message,omitempty"`
+	UpdateID      int64          `json:"update_id"`
+	Message       *message       `json:"message,omitempty"`
+	CallbackQuery *callbackQuery `json:"callback_query,omitempty"`
+}
+
+type callbackQuery struct {
+	ID      string   `json:"id"`
+	From    *user    `json:"from,omitempty"`
+	Message *message `json:"message,omitempty"`
+	Data    string   `json:"data,omitempty"`
 }
 
 type message struct {
-	MessageID int64 `json:"message_id"`
-	Date      int64 `json:"date"`
-	Text      string
-	From      *user `json:"from,omitempty"`
-	Chat      *chat `json:"chat,omitempty"`
+	MessageID       int64 `json:"message_id"`
+	MessageThreadID int64 `json:"message_thread_id,omitempty"`
+	Date            int64 `json:"date"`
+	Text            string
+	From            *user `json:"from,omitempty"`
+	Chat            *chat `json:"chat,omitempty"`
 }
 
 type user struct {
@@ -60,6 +79,7 @@ type chat struct {
 
 type replyContext struct {
 	ChatID    int64
+	TopicID   int64
 	MessageID int
 }
 
@@ -69,7 +89,10 @@ type updateRunner interface {
 }
 
 type sender interface {
-	SendText(ctx context.Context, chatID int64, replyToMessageID int, text string) error
+	SendText(ctx context.Context, chatID int64, topicID int64, replyToMessageID int, text string) error
+	EditText(ctx context.Context, chatID int64, messageID int, text string) error
+	AnswerCallbackQuery(ctx context.Context, callbackQueryID string, text string) error
+	SendStructured(ctx context.Context, chatID int64, topicID int64, text string, markup *inlineKeyboardMarkup) error
 }
 
 type LiveOption func(*Live) error
@@ -79,6 +102,8 @@ type Live struct {
 
 	runner updateRunner
 	sender sender
+
+	actionHandler notify.ActionHandler
 
 	startCtx    context.Context
 	startCancel context.CancelFunc
@@ -136,13 +161,22 @@ func (l *Live) Name() string { return "telegram-live" }
 
 func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
 
+func (l *Live) SetActionHandler(handler notify.ActionHandler) {
+	l.actionHandler = handler
+}
+
 func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
 	if target == nil {
 		return nil
 	}
 	chatID, _ := strconv.ParseInt(strings.TrimSpace(firstNonEmpty(target.ChatID, target.ChannelID)), 10, 64)
+	topicID, _ := strconv.ParseInt(strings.TrimSpace(target.TopicID), 10, 64)
 	messageID, _ := strconv.Atoi(strings.TrimSpace(target.MessageID))
-	return replyContext{ChatID: chatID, MessageID: messageID}
+	return replyContext{
+		ChatID:    chatID,
+		TopicID:   topicID,
+		MessageID: messageID,
+	}
 }
 
 func (l *Live) Start(handler core.MessageHandler) error {
@@ -161,6 +195,15 @@ func (l *Live) Start(handler core.MessageHandler) error {
 	l.startCancel = cancel
 
 	if err := l.runner.Start(ctx, func(ctx context.Context, incoming update) error {
+		handled, err := l.handleActionUpdate(ctx, incoming)
+		if err != nil {
+			log.Printf("[telegram-live] Ignoring callback query: %v", err)
+			return nil
+		}
+		if handled {
+			return nil
+		}
+
 		msg, err := normalizeIncomingUpdate(incoming)
 		if err != nil {
 			log.Printf("[telegram-live] Ignoring inbound update: %v", err)
@@ -182,7 +225,7 @@ func (l *Live) Reply(ctx context.Context, rawReplyCtx any, content string) error
 	if reply.ChatID == 0 {
 		return errors.New("telegram reply requires chat id")
 	}
-	return l.sender.SendText(ctx, reply.ChatID, reply.MessageID, content)
+	return l.sender.SendText(ctx, reply.ChatID, reply.TopicID, reply.MessageID, content)
 }
 
 func (l *Live) Send(ctx context.Context, chatID string, content string) error {
@@ -190,7 +233,23 @@ func (l *Live) Send(ctx context.Context, chatID string, content string) error {
 	if err != nil {
 		return err
 	}
-	return l.sender.SendText(ctx, target, 0, content)
+	return l.sender.SendText(ctx, target, 0, 0, content)
+}
+
+func (l *Live) UpdateMessage(ctx context.Context, rawReplyCtx any, content string) error {
+	reply := toReplyContext(rawReplyCtx)
+	if reply.ChatID == 0 || reply.MessageID == 0 {
+		return errors.New("telegram update requires chat id and message id")
+	}
+	return l.sender.EditText(ctx, reply.ChatID, reply.MessageID, content)
+}
+
+func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	target, err := parseChatID(chatID)
+	if err != nil {
+		return err
+	}
+	return l.sender.SendStructured(ctx, target, 0, structuredFallbackText(message), buildInlineKeyboardMarkup(message))
 }
 
 func (l *Live) Stop() error {
@@ -205,6 +264,42 @@ func (l *Live) Stop() error {
 	}
 	l.started = false
 	return l.runner.Stop(l.startCtx)
+}
+
+func (l *Live) handleActionUpdate(ctx context.Context, incoming update) (bool, error) {
+	if incoming.CallbackQuery == nil {
+		return false, nil
+	}
+
+	answerText := ""
+	if l.actionHandler == nil {
+		return true, l.sender.AnswerCallbackQuery(ctx, strings.TrimSpace(incoming.CallbackQuery.ID), answerText)
+	}
+
+	req, err := normalizeCallbackQueryAction(incoming.CallbackQuery)
+	if err != nil {
+		return true, err
+	}
+	result, err := l.actionHandler.HandleAction(ctx, req)
+	if err != nil {
+		return true, err
+	}
+	if result != nil {
+		answerText = strings.TrimSpace(result.Result)
+	}
+	if err := l.sender.AnswerCallbackQuery(ctx, strings.TrimSpace(incoming.CallbackQuery.ID), answerText); err != nil {
+		return true, err
+	}
+	if result == nil || strings.TrimSpace(result.Result) == "" {
+		return true, nil
+	}
+
+	target := req.ReplyTarget
+	if result.ReplyTarget != nil {
+		target = result.ReplyTarget
+	}
+	_, err = core.DeliverText(ctx, l, l.Metadata(), target, req.ChatID, result.Result)
+	return true, err
 }
 
 type longPollingRunner struct {
@@ -300,15 +395,45 @@ func newBotAPISender(botToken string) *botAPISender {
 	return &botAPISender{client: newBotAPIClient(botToken)}
 }
 
-func (s *botAPISender) SendText(ctx context.Context, chatID int64, replyToMessageID int, text string) error {
+func (s *botAPISender) SendText(ctx context.Context, chatID int64, topicID int64, replyToMessageID int, text string) error {
 	request := sendMessageRequest{
 		ChatID: chatID,
 		Text:   text,
+	}
+	if topicID > 0 {
+		request.MessageThreadID = topicID
 	}
 	if replyToMessageID > 0 {
 		request.ReplyParameters = &replyParameters{
 			MessageID: replyToMessageID,
 		}
+	}
+	return s.client.sendMessage(ctx, request)
+}
+
+func (s *botAPISender) EditText(ctx context.Context, chatID int64, messageID int, text string) error {
+	return s.client.editMessageText(ctx, editMessageTextRequest{
+		ChatID:    chatID,
+		MessageID: messageID,
+		Text:      text,
+	})
+}
+
+func (s *botAPISender) AnswerCallbackQuery(ctx context.Context, callbackQueryID string, text string) error {
+	return s.client.answerCallbackQuery(ctx, answerCallbackQueryRequest{
+		CallbackQueryID: callbackQueryID,
+		Text:            text,
+	})
+}
+
+func (s *botAPISender) SendStructured(ctx context.Context, chatID int64, topicID int64, text string, markup *inlineKeyboardMarkup) error {
+	request := sendMessageRequest{
+		ChatID:      chatID,
+		Text:        text,
+		ReplyMarkup: markup,
+	}
+	if topicID > 0 {
+		request.MessageThreadID = topicID
 	}
 	return s.client.sendMessage(ctx, request)
 }
@@ -344,13 +469,36 @@ type deleteWebhookRequest struct {
 }
 
 type sendMessageRequest struct {
-	ChatID          int64            `json:"chat_id"`
-	Text            string           `json:"text"`
-	ReplyParameters *replyParameters `json:"reply_parameters,omitempty"`
+	ChatID          int64                 `json:"chat_id"`
+	MessageThreadID int64                 `json:"message_thread_id,omitempty"`
+	Text            string                `json:"text"`
+	ReplyParameters *replyParameters      `json:"reply_parameters,omitempty"`
+	ReplyMarkup     *inlineKeyboardMarkup `json:"reply_markup,omitempty"`
+}
+
+type editMessageTextRequest struct {
+	ChatID    int64  `json:"chat_id"`
+	MessageID int    `json:"message_id"`
+	Text      string `json:"text"`
+}
+
+type answerCallbackQueryRequest struct {
+	CallbackQueryID string `json:"callback_query_id"`
+	Text            string `json:"text,omitempty"`
 }
 
 type replyParameters struct {
 	MessageID int `json:"message_id"`
+}
+
+type inlineKeyboardMarkup struct {
+	InlineKeyboard [][]inlineKeyboardButton `json:"inline_keyboard,omitempty"`
+}
+
+type inlineKeyboardButton struct {
+	Text         string `json:"text"`
+	URL          string `json:"url,omitempty"`
+	CallbackData string `json:"callback_data,omitempty"`
 }
 
 func (c *botAPIClient) deleteWebhook(ctx context.Context) error {
@@ -362,7 +510,7 @@ func (c *botAPIClient) getUpdates(ctx context.Context, offset int64) ([]update, 
 	request := getUpdatesRequest{
 		Offset:         offset,
 		Timeout:        50,
-		AllowedUpdates: []string{"message"},
+		AllowedUpdates: []string{"message", "callback_query"},
 	}
 	var response botAPIResponse[[]update]
 	if err := c.call(ctx, "getUpdates", request, &response); err != nil {
@@ -377,6 +525,22 @@ func (c *botAPIClient) sendMessage(ctx context.Context, request sendMessageReque
 	}
 	var response botAPIResponse[message]
 	return c.call(ctx, "sendMessage", request, &response)
+}
+
+func (c *botAPIClient) editMessageText(ctx context.Context, request editMessageTextRequest) error {
+	if strings.TrimSpace(request.Text) == "" {
+		return errors.New("telegram edit requires content")
+	}
+	var response botAPIResponse[message]
+	return c.call(ctx, "editMessageText", request, &response)
+}
+
+func (c *botAPIClient) answerCallbackQuery(ctx context.Context, request answerCallbackQueryRequest) error {
+	if strings.TrimSpace(request.CallbackQueryID) == "" {
+		return errors.New("telegram callback answer requires callback query id")
+	}
+	var response botAPIResponse[bool]
+	return c.call(ctx, "answerCallbackQuery", request, &response)
 }
 
 func (c *botAPIClient) call(ctx context.Context, method string, request any, response any) error {
@@ -419,7 +583,7 @@ func (c *botAPIClient) call(ctx context.Context, method string, request any, res
 		}
 	case *botAPIResponse[message]:
 		if !parsed.OK {
-			return errors.New(descriptionOrFallback(parsed.Description, "telegram sendMessage failed"))
+			return errors.New(descriptionOrFallback(parsed.Description, "telegram api request failed"))
 		}
 	}
 	return nil
@@ -429,46 +593,115 @@ func normalizeIncomingUpdate(incoming update) (*core.Message, error) {
 	if incoming.Message == nil {
 		return nil, errors.New("telegram update does not contain a message payload")
 	}
-	if incoming.Message.Chat == nil {
+	return normalizeIncomingMessage(incoming.Message)
+}
+
+func normalizeIncomingMessage(incoming *message) (*core.Message, error) {
+	if incoming == nil {
+		return nil, errors.New("telegram update does not contain a message payload")
+	}
+	if incoming.Chat == nil {
 		return nil, errors.New("telegram message missing chat")
 	}
-	if incoming.Message.From == nil {
+	if incoming.From == nil {
 		return nil, errors.New("telegram message missing sender")
 	}
 
-	content := strings.TrimSpace(incoming.Message.Text)
+	content := strings.TrimSpace(incoming.Text)
 	if content == "" {
 		return nil, errors.New("telegram message missing text content")
 	}
 
 	content = normalizeCommandText(content)
-	chatID := incoming.Message.Chat.ID
-	userID := incoming.Message.From.ID
+	chatID := incoming.Chat.ID
+	userID := incoming.From.ID
 	if chatID == 0 || userID == 0 {
 		return nil, errors.New("telegram message missing stable chat or user id")
 	}
 
+	replyCtx := replyContext{
+		ChatID:    chatID,
+		TopicID:   incoming.MessageThreadID,
+		MessageID: int(incoming.MessageID),
+	}
+	replyTarget := &core.ReplyTarget{
+		Platform:  liveMetadata.Source,
+		ChatID:    strconv.FormatInt(chatID, 10),
+		ChannelID: strconv.FormatInt(chatID, 10),
+		MessageID: strconv.FormatInt(incoming.MessageID, 10),
+		UseReply:  true,
+	}
+	if incoming.MessageThreadID > 0 {
+		replyTarget.TopicID = strconv.FormatInt(incoming.MessageThreadID, 10)
+	}
+
+	threadID := ""
+	if incoming.MessageThreadID > 0 {
+		threadID = strconv.FormatInt(incoming.MessageThreadID, 10)
+	}
+
 	return &core.Message{
-		Platform:   liveMetadata.Source,
-		SessionKey: fmt.Sprintf("%s:%d:%d", liveMetadata.Source, chatID, userID),
-		UserID:     strconv.FormatInt(userID, 10),
-		UserName:   firstNonEmpty(incoming.Message.From.Username, joinNames(incoming.Message.From.FirstName, incoming.Message.From.LastName)),
-		ChatID:     strconv.FormatInt(chatID, 10),
-		ChatName:   firstNonEmpty(incoming.Message.Chat.Title, incoming.Message.Chat.Username, joinNames(incoming.Message.Chat.FirstName, incoming.Message.Chat.LastName)),
-		Content:    content,
-		ReplyCtx: replyContext{
-			ChatID:    chatID,
-			MessageID: int(incoming.Message.MessageID),
-		},
-		ReplyTarget: &core.ReplyTarget{
-			Platform:  liveMetadata.Source,
-			ChatID:    strconv.FormatInt(chatID, 10),
-			ChannelID: strconv.FormatInt(chatID, 10),
-			MessageID: strconv.FormatInt(incoming.Message.MessageID, 10),
-			UseReply:  true,
-		},
-		Timestamp: time.Unix(incoming.Message.Date, 0),
-		IsGroup:   strings.TrimSpace(incoming.Message.Chat.Type) != "private",
+		Platform:    liveMetadata.Source,
+		SessionKey:  fmt.Sprintf("%s:%d:%d", liveMetadata.Source, chatID, userID),
+		UserID:      strconv.FormatInt(userID, 10),
+		UserName:    firstNonEmpty(incoming.From.Username, joinNames(incoming.From.FirstName, incoming.From.LastName)),
+		ChatID:      strconv.FormatInt(chatID, 10),
+		ChatName:    firstNonEmpty(incoming.Chat.Title, incoming.Chat.Username, joinNames(incoming.Chat.FirstName, incoming.Chat.LastName)),
+		Content:     content,
+		ReplyCtx:    replyCtx,
+		ReplyTarget: replyTarget,
+		Timestamp:   time.Unix(incoming.Date, 0),
+		IsGroup:     strings.TrimSpace(incoming.Chat.Type) != "private",
+		ThreadID:    threadID,
+	}, nil
+}
+
+func normalizeCallbackQueryAction(query *callbackQuery) (*notify.ActionRequest, error) {
+	if query == nil {
+		return nil, errors.New("telegram callback query missing payload")
+	}
+	if query.Message == nil {
+		return nil, errors.New("telegram callback query missing message")
+	}
+	if query.Message.Chat == nil {
+		return nil, errors.New("telegram callback query missing chat")
+	}
+	if query.From == nil {
+		return nil, errors.New("telegram callback query missing sender")
+	}
+
+	action, entityID, ok := core.ParseActionReference(query.Data)
+	if !ok {
+		return nil, errors.New("telegram callback query missing action reference")
+	}
+
+	chatID := strconv.FormatInt(query.Message.Chat.ID, 10)
+	replyTarget := &core.ReplyTarget{
+		Platform:          liveMetadata.Source,
+		ChatID:            chatID,
+		ChannelID:         chatID,
+		MessageID:         strconv.FormatInt(query.Message.MessageID, 10),
+		UserID:            strconv.FormatInt(query.From.ID, 10),
+		UseReply:          true,
+		PreferEdit:        true,
+		PreferredRenderer: string(liveMetadata.Capabilities.StructuredSurface),
+	}
+	if query.Message.MessageThreadID > 0 {
+		replyTarget.TopicID = strconv.FormatInt(query.Message.MessageThreadID, 10)
+	}
+
+	return &notify.ActionRequest{
+		Platform:    liveMetadata.Source,
+		Action:      action,
+		EntityID:    entityID,
+		ChatID:      chatID,
+		UserID:      strconv.FormatInt(query.From.ID, 10),
+		ReplyTarget: replyTarget,
+		Metadata: compactMetadata(map[string]string{
+			"source":            "callback_query",
+			"callback_query_id": strings.TrimSpace(query.ID),
+			"callback_data":     strings.TrimSpace(query.Data),
+		}),
 	}, nil
 }
 
@@ -492,7 +725,15 @@ func toReplyContext(raw any) replyContext {
 			return *ctx
 		}
 		chatID, _ := strconv.ParseInt(strings.TrimSpace(value.ChatID), 10, 64)
-		return replyContext{ChatID: chatID}
+		topicID, _ := strconv.ParseInt(strings.TrimSpace(value.ThreadID), 10, 64)
+		messageID := 0
+		if value.ReplyTarget != nil {
+			messageID, _ = strconv.Atoi(strings.TrimSpace(value.ReplyTarget.MessageID))
+			if topicID == 0 {
+				topicID, _ = strconv.ParseInt(strings.TrimSpace(value.ReplyTarget.TopicID), 10, 64)
+			}
+		}
+		return replyContext{ChatID: chatID, TopicID: topicID, MessageID: messageID}
 	default:
 		return replyContext{}
 	}
@@ -545,6 +786,41 @@ func normalizeCommandText(raw string) string {
 	return command + " " + args
 }
 
+func buildInlineKeyboardMarkup(message *core.StructuredMessage) *inlineKeyboardMarkup {
+	if message == nil || len(message.Actions) == 0 {
+		return nil
+	}
+
+	rows := make([][]inlineKeyboardButton, 0, len(message.Actions))
+	for _, action := range message.Actions {
+		label := strings.TrimSpace(action.Label)
+		if label == "" {
+			continue
+		}
+		button := inlineKeyboardButton{Text: label}
+		switch {
+		case strings.TrimSpace(action.URL) != "":
+			button.URL = strings.TrimSpace(action.URL)
+		case strings.TrimSpace(action.ID) != "":
+			button.CallbackData = strings.TrimSpace(action.ID)
+		default:
+			continue
+		}
+		rows = append(rows, []inlineKeyboardButton{button})
+	}
+	if len(rows) == 0 {
+		return nil
+	}
+	return &inlineKeyboardMarkup{InlineKeyboard: rows}
+}
+
+func structuredFallbackText(message *core.StructuredMessage) string {
+	if message == nil {
+		return ""
+	}
+	return strings.TrimSpace(message.FallbackText())
+}
+
 func firstNonEmpty(values ...string) string {
 	for _, value := range values {
 		if trimmed := strings.TrimSpace(value); trimmed != "" {
@@ -563,4 +839,22 @@ func descriptionOrFallback(description, fallback string) string {
 		return trimmed
 	}
 	return fallback
+}
+
+func compactMetadata(values map[string]string) map[string]string {
+	if len(values) == 0 {
+		return nil
+	}
+	metadata := make(map[string]string, len(values))
+	for key, value := range values {
+		if trimmedKey := strings.TrimSpace(key); trimmedKey != "" {
+			if trimmedValue := strings.TrimSpace(value); trimmedValue != "" {
+				metadata[trimmedKey] = trimmedValue
+			}
+		}
+	}
+	if len(metadata) == 0 {
+		return nil
+	}
+	return metadata
 }

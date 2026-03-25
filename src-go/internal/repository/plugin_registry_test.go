@@ -1,16 +1,15 @@
-package repository_test
+package repository
 
 import (
 	"context"
 	"testing"
 
 	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 func TestPluginRegistryRepository_PreservesExtendedSourceTrustAndReleaseMetadata(t *testing.T) {
 	ctx := context.Background()
-	repo := repository.NewPluginRegistryRepository()
+	repo := NewPluginRegistryRepository()
 
 	record := &model.PluginRecord{
 		PluginManifest: model.PluginManifest{
@@ -82,7 +81,7 @@ func TestPluginRegistryRepository_PreservesExtendedSourceTrustAndReleaseMetadata
 
 func TestPluginRegistryRepository_ListFiltersBySourceAndTrustState(t *testing.T) {
 	ctx := context.Background()
-	repo := repository.NewPluginRegistryRepository()
+	repo := NewPluginRegistryRepository()
 
 	records := []*model.PluginRecord{
 		{
@@ -159,5 +158,63 @@ func TestPluginRegistryRepository_ListFiltersBySourceAndTrustState(t *testing.T)
 	}
 	if filtered[0].Metadata.ID != "review.typescript" {
 		t.Fatalf("filtered plugin id = %q, want review.typescript", filtered[0].Metadata.ID)
+	}
+}
+
+func TestPluginRegistryRepository_PreservesMCPSummaryWithoutAliasingNestedMetadata(t *testing.T) {
+	ctx := context.Background()
+	repo := NewPluginRegistryRepository()
+
+	record := &model.PluginRecord{
+		PluginManifest: model.PluginManifest{
+			APIVersion: "agentforge/v1",
+			Kind:       model.PluginKindTool,
+			Metadata: model.PluginMetadata{
+				ID:      "repo-search",
+				Name:    "Repo Search",
+				Version: "1.0.0",
+			},
+			Spec: model.PluginSpec{
+				Runtime:   model.PluginRuntimeMCP,
+				Transport: "stdio",
+			},
+		},
+		LifecycleState: model.PluginStateActive,
+		RuntimeHost:    model.PluginHostTSBridge,
+		RuntimeMetadata: &model.PluginRuntimeMetadata{
+			Compatible: true,
+			MCP: &model.PluginMCPRuntimeMetadata{
+				Transport:     "stdio",
+				ToolCount:     2,
+				ResourceCount: 1,
+				PromptCount:   1,
+				LatestInteraction: &model.MCPInteractionSummary{
+					Operation: model.MCPInteractionCallTool,
+					Status:    model.MCPInteractionSucceeded,
+					Summary:   "found 3 files",
+				},
+			},
+		},
+	}
+
+	if err := repo.Save(ctx, record); err != nil {
+		t.Fatalf("save plugin record: %v", err)
+	}
+
+	record.RuntimeMetadata.MCP.ToolCount = 99
+	record.RuntimeMetadata.MCP.LatestInteraction.Summary = "mutated"
+
+	stored, err := repo.GetByID(ctx, record.Metadata.ID)
+	if err != nil {
+		t.Fatalf("get plugin record: %v", err)
+	}
+	if stored.RuntimeMetadata == nil || stored.RuntimeMetadata.MCP == nil {
+		t.Fatalf("expected MCP runtime metadata, got %+v", stored.RuntimeMetadata)
+	}
+	if stored.RuntimeMetadata.MCP.ToolCount != 2 {
+		t.Fatalf("tool count = %d, want 2", stored.RuntimeMetadata.MCP.ToolCount)
+	}
+	if stored.RuntimeMetadata.MCP.LatestInteraction == nil || stored.RuntimeMetadata.MCP.LatestInteraction.Summary != "found 3 files" {
+		t.Fatalf("latest interaction = %+v, want preserved summary", stored.RuntimeMetadata.MCP.LatestInteraction)
 	}
 }

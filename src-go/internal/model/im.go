@@ -34,43 +34,48 @@ type IMCommandResponse struct {
 
 // IMSendRequest sends a message to an IM channel.
 type IMSendRequest struct {
-	Platform  string `json:"platform" validate:"required"`
-	ChannelID string `json:"channelId" validate:"required"`
-	Text      string `json:"text" validate:"required"`
-	ThreadID  string `json:"threadId,omitempty"`
-	ProjectID string `json:"projectId,omitempty"`
-	BridgeID  string `json:"bridgeId,omitempty"`
-	DeliveryID string `json:"deliveryId,omitempty"`
+	Platform    string         `json:"platform" validate:"required"`
+	ChannelID   string         `json:"channelId" validate:"required"`
+	Text        string         `json:"text" validate:"required"`
+	ThreadID    string         `json:"threadId,omitempty"`
+	ProjectID   string         `json:"projectId,omitempty"`
+	BridgeID    string         `json:"bridgeId,omitempty"`
+	DeliveryID  string         `json:"deliveryId,omitempty"`
 	ReplyTarget *IMReplyTarget `json:"replyTarget,omitempty"`
 }
 
 // IMNotifyRequest sends a notification event to an IM channel.
 type IMNotifyRequest struct {
-	Platform  string `json:"platform" validate:"required"`
-	ChannelID string `json:"channelId" validate:"required"`
-	Event     string `json:"event" validate:"required"`
-	Title     string `json:"title"`
-	Body      string `json:"body"`
-	Data      any    `json:"data,omitempty"`
-	ProjectID string `json:"projectId,omitempty"`
-	BridgeID  string `json:"bridgeId,omitempty"`
-	DeliveryID string `json:"deliveryId,omitempty"`
+	Platform    string         `json:"platform" validate:"required"`
+	ChannelID   string         `json:"channelId" validate:"required"`
+	Event       string         `json:"event" validate:"required"`
+	Title       string         `json:"title"`
+	Body        string         `json:"body"`
+	Data        any            `json:"data,omitempty"`
+	ProjectID   string         `json:"projectId,omitempty"`
+	BridgeID    string         `json:"bridgeId,omitempty"`
+	DeliveryID  string         `json:"deliveryId,omitempty"`
 	ReplyTarget *IMReplyTarget `json:"replyTarget,omitempty"`
 }
 
 // IMActionRequest represents a button click callback from IM.
 type IMActionRequest struct {
-	Platform  string `json:"platform" validate:"required"`
-	Action    string `json:"action" validate:"required"`
-	EntityID  string `json:"entityId" validate:"required"`
-	ChannelID string `json:"channelId" validate:"required"`
-	UserID    string `json:"userId"`
+	Platform    string            `json:"platform" validate:"required"`
+	Action      string            `json:"action" validate:"required"`
+	EntityID    string            `json:"entityId" validate:"required"`
+	ChannelID   string            `json:"channelId" validate:"required"`
+	UserID      string            `json:"userId"`
+	BridgeID    string            `json:"bridgeId,omitempty"`
+	ReplyTarget *IMReplyTarget    `json:"replyTarget,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // IMActionResponse is the result of processing an IM button action.
 type IMActionResponse struct {
-	Result  string `json:"result"`
-	Success bool   `json:"success"`
+	Result      string            `json:"result"`
+	Success     bool              `json:"success"`
+	ReplyTarget *IMReplyTarget    `json:"replyTarget,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 // IMIntentRequest represents a natural language message for intent classification.
@@ -89,44 +94,51 @@ type IMIntentResponse struct {
 // IMReplyTarget preserves enough provider context to deliver asynchronous
 // progress or terminal updates back to the original IM conversation.
 type IMReplyTarget struct {
-	Platform         string            `json:"platform"`
-	ChatID           string            `json:"chatId,omitempty"`
-	ChannelID        string            `json:"channelId,omitempty"`
-	ThreadID         string            `json:"threadId,omitempty"`
-	MessageID        string            `json:"messageId,omitempty"`
-	InteractionToken string            `json:"interactionToken,omitempty"`
-	ResponseURL      string            `json:"responseUrl,omitempty"`
-	SessionWebhook   string            `json:"sessionWebhook,omitempty"`
-	ConversationID   string            `json:"conversationId,omitempty"`
-	UserID           string            `json:"userId,omitempty"`
-	UseReply         bool              `json:"useReply,omitempty"`
-	PreferEdit       bool              `json:"preferEdit,omitempty"`
-	Metadata         map[string]string `json:"metadata,omitempty"`
+	Platform           string            `json:"platform"`
+	ChatID             string            `json:"chatId,omitempty"`
+	ChannelID          string            `json:"channelId,omitempty"`
+	ThreadID           string            `json:"threadId,omitempty"`
+	MessageID          string            `json:"messageId,omitempty"`
+	InteractionToken   string            `json:"interactionToken,omitempty"`
+	OriginalResponseID string            `json:"originalResponseId,omitempty"`
+	CallbackToken      string            `json:"callbackToken,omitempty"`
+	ResponseURL        string            `json:"responseUrl,omitempty"`
+	SessionWebhook     string            `json:"sessionWebhook,omitempty"`
+	ConversationID     string            `json:"conversationId,omitempty"`
+	TopicID            string            `json:"topicId,omitempty"`
+	UserID             string            `json:"userId,omitempty"`
+	UseReply           bool              `json:"useReply,omitempty"`
+	PreferEdit         bool              `json:"preferEdit,omitempty"`
+	PreferredRenderer  string            `json:"preferredRenderer,omitempty"`
+	ProgressMode       string            `json:"progressMode,omitempty"`
+	Metadata           map[string]string `json:"metadata,omitempty"`
 }
 
 // IMBridgeRegisterRequest registers a Bridge runtime instance.
 type IMBridgeRegisterRequest struct {
-	BridgeID      string            `json:"bridgeId"`
-	Platform      string            `json:"platform"`
-	Transport     string            `json:"transport"`
-	ProjectIDs    []string          `json:"projectIds,omitempty"`
-	Capabilities  map[string]bool   `json:"capabilities,omitempty"`
-	CallbackPaths []string          `json:"callbackPaths,omitempty"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
+	BridgeID         string            `json:"bridgeId"`
+	Platform         string            `json:"platform"`
+	Transport        string            `json:"transport"`
+	ProjectIDs       []string          `json:"projectIds,omitempty"`
+	Capabilities     map[string]bool   `json:"capabilities,omitempty"`
+	CapabilityMatrix map[string]any    `json:"capabilityMatrix,omitempty"`
+	CallbackPaths    []string          `json:"callbackPaths,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
 }
 
 // IMBridgeInstance describes the server-side view of a registered Bridge.
 type IMBridgeInstance struct {
-	BridgeID      string            `json:"bridgeId"`
-	Platform      string            `json:"platform"`
-	Transport     string            `json:"transport"`
-	ProjectIDs    []string          `json:"projectIds,omitempty"`
-	Capabilities  map[string]bool   `json:"capabilities,omitempty"`
-	CallbackPaths []string          `json:"callbackPaths,omitempty"`
-	Metadata      map[string]string `json:"metadata,omitempty"`
-	LastSeenAt    string            `json:"lastSeenAt,omitempty"`
-	ExpiresAt     string            `json:"expiresAt,omitempty"`
-	Status        string            `json:"status,omitempty"`
+	BridgeID         string            `json:"bridgeId"`
+	Platform         string            `json:"platform"`
+	Transport        string            `json:"transport"`
+	ProjectIDs       []string          `json:"projectIds,omitempty"`
+	Capabilities     map[string]bool   `json:"capabilities,omitempty"`
+	CapabilityMatrix map[string]any    `json:"capabilityMatrix,omitempty"`
+	CallbackPaths    []string          `json:"callbackPaths,omitempty"`
+	Metadata         map[string]string `json:"metadata,omitempty"`
+	LastSeenAt       string            `json:"lastSeenAt,omitempty"`
+	ExpiresAt        string            `json:"expiresAt,omitempty"`
+	Status           string            `json:"status,omitempty"`
 }
 
 // IMBridgeHeartbeatResponse reports refreshed liveness.

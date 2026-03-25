@@ -2,20 +2,27 @@ package main
 
 import (
 	"fmt"
-	"os"
 
 	pluginsdk "github.com/react-go-quick-starter/server/plugin-sdk-go"
 )
 
 type samplePlugin struct{}
 
-func (samplePlugin) Describe(ctx *pluginsdk.Context) (map[string]any, error) {
+func (samplePlugin) Describe(ctx *pluginsdk.Context) (*pluginsdk.Descriptor, error) {
 	ctx.Log("info", "describe sample wasm plugin")
-	return map[string]any{
-		"id":           "feishu-adapter",
-		"name":         "Feishu Adapter",
-		"abiVersion":   pluginsdk.ABIVersion,
-		"capabilities": []string{"health", "send_message"},
+	return &pluginsdk.Descriptor{
+		APIVersion:  "agentforge/v1",
+		Kind:        "IntegrationPlugin",
+		ID:          "feishu-adapter",
+		Name:        "Feishu Adapter",
+		Version:     "0.1.0",
+		Runtime:     "wasm",
+		ABIVersion:  pluginsdk.ABIVersion,
+		Description: "Built-in Go integration plugin example for IM event ingestion and outbound delivery.",
+		Capabilities: []pluginsdk.Capability{
+			{Name: "health", Description: "Report plugin health and current mode"},
+			{Name: "send_message", Description: "Send a message payload to a chat target"},
+		},
 	}, nil
 }
 
@@ -24,24 +31,25 @@ func (samplePlugin) Init(ctx *pluginsdk.Context) error {
 	return nil
 }
 
-func (samplePlugin) Health(ctx *pluginsdk.Context) (map[string]any, error) {
-	return map[string]any{
+func (samplePlugin) Health(ctx *pluginsdk.Context) (*pluginsdk.Result, error) {
+	return pluginsdk.Success(map[string]any{
 		"status": "ok",
 		"mode":   ctx.ConfigString("mode"),
-	}, nil
+	}), nil
 }
 
-func (samplePlugin) Invoke(ctx *pluginsdk.Context, operation string, payload map[string]any) (map[string]any, error) {
-	switch operation {
+func (samplePlugin) Invoke(ctx *pluginsdk.Context, invocation pluginsdk.Invocation) (*pluginsdk.Result, error) {
+	switch invocation.Operation {
 	case "send_message":
-		return map[string]any{
+		return pluginsdk.Success(map[string]any{
 			"status":  "sent",
-			"chat_id": payload["chat_id"],
-			"content": payload["content"],
+			"chat_id": invocation.Payload["chat_id"],
+			"content": invocation.Payload["content"],
 			"mode":    ctx.ConfigString("mode"),
-		}, nil
+		}), nil
 	default:
-		return nil, fmt.Errorf("unsupported operation %s", operation)
+		return nil, pluginsdk.NewRuntimeError("unsupported_operation", fmt.Sprintf("unsupported operation %s", invocation.Operation)).
+			WithDetail("operation", invocation.Operation)
 	}
 }
 
@@ -49,16 +57,14 @@ var runtime = pluginsdk.NewRuntime(samplePlugin{})
 
 //go:wasmexport agentforge_abi_version
 func agentforgeABIVersion() uint64 {
-	return runtime.ABIVersion()
+	return pluginsdk.ExportABIVersion(runtime)
 }
 
 //go:wasmexport agentforge_run
 func agentforgeRun() uint32 {
-	return runtime.Run()
+	return pluginsdk.ExportRun(runtime)
 }
 
 func main() {
-	if pluginsdk.ShouldAutorun() {
-		os.Exit(int(runtime.Run()))
-	}
+	pluginsdk.Autorun(runtime)
 }

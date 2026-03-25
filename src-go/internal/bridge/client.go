@@ -73,6 +73,17 @@ type StatusResponse struct {
 	Model          string  `json:"model"`
 }
 
+type PoolSummaryResponse struct {
+	Active          int   `json:"active"`
+	Max             int   `json:"max"`
+	WarmTotal       int   `json:"warm_total"`
+	WarmAvailable   int   `json:"warm_available"`
+	WarmReuseHits   int   `json:"warm_reuse_hits"`
+	ColdStarts      int   `json:"cold_starts"`
+	LastReconcileAt int64 `json:"last_reconcile_at"`
+	Degraded        bool  `json:"degraded"`
+}
+
 type RuntimeCatalogResponse struct {
 	DefaultRuntime string                   `json:"default_runtime"`
 	Runtimes       []RuntimeCatalogEntryDTO `json:"runtimes"`
@@ -116,22 +127,50 @@ type DecomposeResponse struct {
 }
 
 type ReviewRequest struct {
-	ReviewID    string   `json:"review_id"`
-	TaskID      string   `json:"task_id"`
-	PRURL       string   `json:"pr_url"`
-	PRNumber    int      `json:"pr_number"`
-	Title       string   `json:"title"`
-	Description string   `json:"description"`
-	Diff        string   `json:"diff"`
-	Dimensions  []string `json:"dimensions"`
+	ReviewID      string                `json:"review_id"`
+	TaskID        string                `json:"task_id"`
+	PRURL         string                `json:"pr_url"`
+	PRNumber      int                   `json:"pr_number"`
+	Title         string                `json:"title"`
+	Description   string                `json:"description"`
+	Diff          string                `json:"diff"`
+	Dimensions    []string              `json:"dimensions"`
+	TriggerEvent  string                `json:"trigger_event,omitempty"`
+	ChangedFiles  []string              `json:"changed_files,omitempty"`
+	ReviewPlugins []ReviewPluginRequest `json:"review_plugins,omitempty"`
+}
+
+type ReviewPluginRequest struct {
+	PluginID     string   `json:"plugin_id"`
+	Name         string   `json:"name"`
+	Entrypoint   string   `json:"entrypoint,omitempty"`
+	SourceType   string   `json:"source_type,omitempty"`
+	Transport    string   `json:"transport,omitempty"`
+	Command      string   `json:"command,omitempty"`
+	Args         []string `json:"args,omitempty"`
+	URL          string   `json:"url,omitempty"`
+	Events       []string `json:"events,omitempty"`
+	FilePatterns []string `json:"file_patterns,omitempty"`
+	OutputFormat string   `json:"output_format,omitempty"`
+}
+
+type ReviewExecutionResult struct {
+	Dimension   string `json:"dimension"`
+	SourceType  string `json:"source_type,omitempty"`
+	PluginID    string `json:"plugin_id,omitempty"`
+	DisplayName string `json:"display_name,omitempty"`
+	Status      string `json:"status"`
+	Summary     string `json:"summary"`
+	Error       string `json:"error,omitempty"`
 }
 
 type ReviewResponse struct {
-	RiskLevel      string                `json:"risk_level"`
-	Findings       []model.ReviewFinding `json:"findings"`
-	Summary        string                `json:"summary"`
-	Recommendation string                `json:"recommendation"`
-	CostUSD        float64               `json:"cost_usd"`
+	RiskLevel        string                  `json:"risk_level"`
+	Findings         []model.ReviewFinding   `json:"findings"`
+	DimensionResults []ReviewExecutionResult `json:"dimension_results,omitempty"`
+	Summary          string                  `json:"summary"`
+	Recommendation   string                  `json:"recommendation"`
+	CostUSD          float64                 `json:"cost_usd"`
 }
 
 // Client is an HTTP client for the TypeScript bridge service.
@@ -202,6 +241,30 @@ func (c *Client) GetStatus(ctx context.Context, taskID string) (*StatusResponse,
 	var result StatusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode status response: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *Client) GetPoolSummary(ctx context.Context) (*PoolSummaryResponse, error) {
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/bridge/pool", nil)
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("bridge get pool summary: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("bridge pool summary returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result PoolSummaryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode pool summary response: %w", err)
 	}
 	return &result, nil
 }
@@ -475,17 +538,62 @@ func (c *Client) RestartToolPlugin(ctx context.Context, pluginID string) (*model
 	return pluginRuntimeStatusFromRecord(record), nil
 }
 
+func (c *Client) RefreshToolPluginMCPSurface(ctx context.Context, pluginID string) (*model.PluginMCPRefreshResult, error) {
+	record, err := c.doPluginRequest(ctx, http.MethodPost, "/bridge/plugins/"+pluginID+"/mcp/refresh", nil)
+	if err != nil {
+		return nil, err
+	}
+	return pluginMCPSurfaceFromRecord(record), nil
+}
+
+func (c *Client) InvokeToolPluginMCPTool(ctx context.Context, pluginID, toolName string, args map[string]any) (*model.PluginMCPToolCallResult, error) {
+	if args == nil {
+		args = map[string]any{}
+	}
+	var result model.PluginMCPToolCallResult
+	if err := c.doJSONRequest(ctx, http.MethodPost, "/bridge/plugins/"+pluginID+"/mcp/tools/call", map[string]any{
+		"tool_name": toolName,
+		"arguments": args,
+	}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Client) ReadToolPluginMCPResource(ctx context.Context, pluginID, uri string) (*model.PluginMCPResourceReadResult, error) {
+	var result model.PluginMCPResourceReadResult
+	if err := c.doJSONRequest(ctx, http.MethodPost, "/bridge/plugins/"+pluginID+"/mcp/resources/read", map[string]any{
+		"uri": uri,
+	}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Client) GetToolPluginMCPPrompt(ctx context.Context, pluginID, name string, args map[string]string) (*model.PluginMCPPromptResult, error) {
+	payload := map[string]any{"name": name}
+	if args != nil {
+		payload["arguments"] = args
+	}
+	var result model.PluginMCPPromptResult
+	if err := c.doJSONRequest(ctx, http.MethodPost, "/bridge/plugins/"+pluginID+"/mcp/prompts/get", payload, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 type pluginRecordResponse struct {
 	Metadata struct {
 		ID string `json:"id"`
 	} `json:"metadata"`
-	LifecycleState     model.PluginLifecycleState   `json:"lifecycle_state"`
-	RuntimeHost        model.PluginRuntimeHost      `json:"runtime_host"`
-	LastHealthAt       *time.Time                   `json:"last_health_at,omitempty"`
-	LastError          string                       `json:"last_error,omitempty"`
-	RestartCount       int                          `json:"restart_count"`
-	ResolvedSourcePath string                       `json:"resolved_source_path,omitempty"`
-	RuntimeMetadata    *model.PluginRuntimeMetadata `json:"runtime_metadata,omitempty"`
+	LifecycleState        model.PluginLifecycleState         `json:"lifecycle_state"`
+	RuntimeHost           model.PluginRuntimeHost            `json:"runtime_host"`
+	LastHealthAt          *time.Time                         `json:"last_health_at,omitempty"`
+	LastError             string                             `json:"last_error,omitempty"`
+	RestartCount          int                                `json:"restart_count"`
+	ResolvedSourcePath    string                             `json:"resolved_source_path,omitempty"`
+	RuntimeMetadata       *model.PluginRuntimeMetadata       `json:"runtime_metadata,omitempty"`
+	MCPCapabilitySnapshot *model.PluginMCPCapabilitySnapshot `json:"mcp_capability_snapshot,omitempty"`
 }
 
 func (c *Client) doPluginRequest(ctx context.Context, method, path string, payload []byte) (*pluginRecordResponse, error) {
@@ -535,4 +643,68 @@ func pluginRuntimeStatusFromRecord(record *pluginRecordResponse) *model.PluginRu
 		ResolvedSourcePath: record.ResolvedSourcePath,
 		RuntimeMetadata:    record.RuntimeMetadata,
 	}
+}
+
+func pluginMCPSurfaceFromRecord(record *pluginRecordResponse) *model.PluginMCPRefreshResult {
+	if record == nil {
+		return nil
+	}
+
+	snapshot := model.PluginMCPCapabilitySnapshot{}
+	if record.MCPCapabilitySnapshot != nil {
+		snapshot = *record.MCPCapabilitySnapshot
+	} else if record.RuntimeMetadata != nil && record.RuntimeMetadata.MCP != nil {
+		snapshot.Transport = record.RuntimeMetadata.MCP.Transport
+		snapshot.LastDiscoveryAt = record.RuntimeMetadata.MCP.LastDiscoveryAt
+		snapshot.ToolCount = record.RuntimeMetadata.MCP.ToolCount
+		snapshot.ResourceCount = record.RuntimeMetadata.MCP.ResourceCount
+		snapshot.PromptCount = record.RuntimeMetadata.MCP.PromptCount
+		snapshot.LatestInteraction = record.RuntimeMetadata.MCP.LatestInteraction
+	}
+
+	return &model.PluginMCPRefreshResult{
+		PluginID:        record.Metadata.ID,
+		LifecycleState:  record.LifecycleState,
+		RuntimeHost:     record.RuntimeHost,
+		RuntimeMetadata: record.RuntimeMetadata,
+		Snapshot:        snapshot,
+	}
+}
+
+func (c *Client) doJSONRequest(ctx context.Context, method, path string, payload any, out any) error {
+	var body io.Reader
+	if payload != nil {
+		encoded, err := json.Marshal(payload)
+		if err != nil {
+			return fmt.Errorf("marshal request payload: %w", err)
+		}
+		body = bytes.NewReader(encoded)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
+	if err != nil {
+		return fmt.Errorf("create request: %w", err)
+	}
+	if payload != nil {
+		httpReq.Header.Set("Content-Type", "application/json")
+	}
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return fmt.Errorf("bridge request %s %s: %w", method, path, err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		respBody, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("bridge request %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody))
+	}
+
+	if out == nil {
+		return nil
+	}
+	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		return fmt.Errorf("decode bridge response: %w", err)
+	}
+	return nil
 }

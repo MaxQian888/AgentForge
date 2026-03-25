@@ -7,18 +7,31 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"gorm.io/gorm"
 )
 
 type AgentMemoryRepository struct {
-	db DBTX
+	db *gorm.DB
 }
 
-func NewAgentMemoryRepository(db DBTX) *AgentMemoryRepository {
+func NewAgentMemoryRepository(db *gorm.DB) *AgentMemoryRepository {
 	return &AgentMemoryRepository{db: db}
 }
 
 const agentMemoryColumns = `id, project_id, scope, role_id, category, key, content,
 	metadata, relevance_score, access_count, last_accessed_at, created_at, updated_at`
+
+func scanAgentMemory(row interface{ Scan(dest ...any) error }) (*model.AgentMemory, error) {
+	mem := &model.AgentMemory{}
+	err := row.Scan(
+		&mem.ID, &mem.ProjectID, &mem.Scope, &mem.RoleID, &mem.Category, &mem.Key, &mem.Content,
+		&mem.Metadata, &mem.RelevanceScore, &mem.AccessCount, &mem.LastAccessedAt, &mem.CreatedAt, &mem.UpdatedAt,
+	)
+	if err != nil {
+		return nil, err
+	}
+	return mem, nil
+}
 
 func (r *AgentMemoryRepository) Create(ctx context.Context, mem *model.AgentMemory) error {
 	if r.db == nil {
@@ -29,11 +42,11 @@ func (r *AgentMemoryRepository) Create(ctx context.Context, mem *model.AgentMemo
 			metadata, relevance_score, access_count, last_accessed_at, created_at, updated_at)
 		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,NOW(),NOW())
 	`
-	_, err := r.db.Exec(ctx, query,
+	if err := r.db.WithContext(ctx).Exec(
+		query,
 		mem.ID, mem.ProjectID, mem.Scope, mem.RoleID, mem.Category, mem.Key, mem.Content,
 		mem.Metadata, mem.RelevanceScore, mem.AccessCount, mem.LastAccessedAt,
-	)
-	if err != nil {
+	).Error; err != nil {
 		return fmt.Errorf("create agent memory: %w", err)
 	}
 	return nil
@@ -44,13 +57,9 @@ func (r *AgentMemoryRepository) GetByID(ctx context.Context, id uuid.UUID) (*mod
 		return nil, ErrDatabaseUnavailable
 	}
 	query := `SELECT ` + agentMemoryColumns + ` FROM agent_memory WHERE id = $1`
-	mem := &model.AgentMemory{}
-	err := r.db.QueryRow(ctx, query, id).Scan(
-		&mem.ID, &mem.ProjectID, &mem.Scope, &mem.RoleID, &mem.Category, &mem.Key, &mem.Content,
-		&mem.Metadata, &mem.RelevanceScore, &mem.AccessCount, &mem.LastAccessedAt, &mem.CreatedAt, &mem.UpdatedAt,
-	)
+	mem, err := scanAgentMemory(r.db.WithContext(ctx).Raw(query, id).Row())
 	if err != nil {
-		return nil, fmt.Errorf("get agent memory by id: %w", err)
+		return nil, fmt.Errorf("get agent memory by id: %w", normalizeRepositoryError(err))
 	}
 	return mem, nil
 }
@@ -76,7 +85,7 @@ func (r *AgentMemoryRepository) ListByProject(ctx context.Context, projectID uui
 	}
 
 	query := `SELECT ` + agentMemoryColumns + ` FROM agent_memory WHERE ` + strings.Join(conditions, " AND ") + ` ORDER BY relevance_score DESC, created_at DESC`
-	rows, err := r.db.Query(ctx, query, args...)
+	rows, err := r.db.WithContext(ctx).Raw(query, args...).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("list agent memories by project: %w", err)
 	}
@@ -84,11 +93,8 @@ func (r *AgentMemoryRepository) ListByProject(ctx context.Context, projectID uui
 
 	var memories []*model.AgentMemory
 	for rows.Next() {
-		mem := &model.AgentMemory{}
-		if err := rows.Scan(
-			&mem.ID, &mem.ProjectID, &mem.Scope, &mem.RoleID, &mem.Category, &mem.Key, &mem.Content,
-			&mem.Metadata, &mem.RelevanceScore, &mem.AccessCount, &mem.LastAccessedAt, &mem.CreatedAt, &mem.UpdatedAt,
-		); err != nil {
+		mem, err := scanAgentMemory(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan agent memory: %w", err)
 		}
 		memories = append(memories, mem)
@@ -107,7 +113,7 @@ func (r *AgentMemoryRepository) Search(ctx context.Context, projectID uuid.UUID,
 		WHERE project_id = $1 AND (key ILIKE $2 OR content ILIKE $2)
 		ORDER BY relevance_score DESC, created_at DESC LIMIT $3`
 	pattern := "%" + query + "%"
-	rows, err := r.db.Query(ctx, searchQuery, projectID, pattern, limit)
+	rows, err := r.db.WithContext(ctx).Raw(searchQuery, projectID, pattern, limit).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("search agent memories: %w", err)
 	}
@@ -115,11 +121,8 @@ func (r *AgentMemoryRepository) Search(ctx context.Context, projectID uuid.UUID,
 
 	var memories []*model.AgentMemory
 	for rows.Next() {
-		mem := &model.AgentMemory{}
-		if err := rows.Scan(
-			&mem.ID, &mem.ProjectID, &mem.Scope, &mem.RoleID, &mem.Category, &mem.Key, &mem.Content,
-			&mem.Metadata, &mem.RelevanceScore, &mem.AccessCount, &mem.LastAccessedAt, &mem.CreatedAt, &mem.UpdatedAt,
-		); err != nil {
+		mem, err := scanAgentMemory(rows)
+		if err != nil {
 			return nil, fmt.Errorf("scan agent memory: %w", err)
 		}
 		memories = append(memories, mem)
@@ -132,8 +135,7 @@ func (r *AgentMemoryRepository) IncrementAccess(ctx context.Context, id uuid.UUI
 		return ErrDatabaseUnavailable
 	}
 	query := `UPDATE agent_memory SET access_count = access_count + 1, last_accessed_at = NOW(), updated_at = NOW() WHERE id = $1`
-	_, err := r.db.Exec(ctx, query, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Exec(query, id).Error; err != nil {
 		return fmt.Errorf("increment agent memory access: %w", err)
 	}
 	return nil
@@ -144,8 +146,7 @@ func (r *AgentMemoryRepository) Delete(ctx context.Context, id uuid.UUID) error 
 		return ErrDatabaseUnavailable
 	}
 	query := `DELETE FROM agent_memory WHERE id = $1`
-	_, err := r.db.Exec(ctx, query, id)
-	if err != nil {
+	if err := r.db.WithContext(ctx).Exec(query, id).Error; err != nil {
 		return fmt.Errorf("delete agent memory: %w", err)
 	}
 	return nil

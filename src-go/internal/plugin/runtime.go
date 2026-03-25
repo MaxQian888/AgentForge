@@ -39,7 +39,9 @@ type wasmEnvelope struct {
 	Operation string         `json:"operation"`
 	Data      map[string]any `json:"data"`
 	Error     *struct {
-		Message string `json:"message"`
+		Code    string         `json:"code,omitempty"`
+		Message string         `json:"message"`
+		Details map[string]any `json:"details,omitempty"`
 	} `json:"error,omitempty"`
 }
 
@@ -132,9 +134,25 @@ type executionResult struct {
 	data       map[string]any
 	modulePath string
 	abiVersion string
+	stdout     string
+	stderr     string
+	envelope   *wasmEnvelope
 }
 
-func (m *WASMRuntimeManager) execute(ctx context.Context, record model.PluginRecord, operation string, payload map[string]any) (*executionResult, error) {
+type DebugExecutionResult struct {
+	OK         bool           `json:"ok"`
+	Operation  string         `json:"operation"`
+	Data       map[string]any `json:"data,omitempty"`
+	Error      string         `json:"error,omitempty"`
+	ErrorCode  string         `json:"errorCode,omitempty"`
+	ErrorInfo  map[string]any `json:"errorInfo,omitempty"`
+	Stdout     string         `json:"stdout,omitempty"`
+	Stderr     string         `json:"stderr,omitempty"`
+	ModulePath string         `json:"modulePath,omitempty"`
+	ABIVersion string         `json:"abiVersion,omitempty"`
+}
+
+func (m *WASMRuntimeManager) runEnvelope(ctx context.Context, record model.PluginRecord, operation string, payload map[string]any) (*executionResult, error) {
 	modulePath := resolveModulePath(record)
 	if modulePath == "" {
 		return nil, fmt.Errorf("plugin %s is missing a wasm module path", record.Metadata.ID)
@@ -162,6 +180,7 @@ func (m *WASMRuntimeManager) execute(ctx context.Context, record model.PluginRec
 
 	configJSON, _ := json.Marshal(record.Spec.Config)
 	payloadJSON, _ := json.Marshal(payload)
+	capabilitiesJSON, _ := json.Marshal(record.Spec.Capabilities)
 	var stdout bytes.Buffer
 	var stderr bytes.Buffer
 
@@ -172,6 +191,7 @@ func (m *WASMRuntimeManager) execute(ctx context.Context, record model.PluginRec
 		WithEnv("AGENTFORGE_AUTORUN", "true").
 		WithEnv("AGENTFORGE_OPERATION", operation).
 		WithEnv("AGENTFORGE_CONFIG", string(configJSON)).
+		WithEnv("AGENTFORGE_CAPABILITIES", string(capabilitiesJSON)).
 		WithEnv("AGENTFORGE_PAYLOAD", string(payloadJSON))
 
 	_, err = runtime.InstantiateModule(ctx, compiled, moduleConfig)
@@ -182,12 +202,6 @@ func (m *WASMRuntimeManager) execute(ctx context.Context, record model.PluginRec
 	var envelope wasmEnvelope
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &envelope); err != nil {
 		return nil, fmt.Errorf("decode plugin %s output: %w (stdout=%q stderr=%q)", record.Metadata.ID, err, stdout.String(), stderr.String())
-	}
-	if !envelope.OK {
-		if envelope.Error != nil && envelope.Error.Message != "" {
-			return nil, errors.New(envelope.Error.Message)
-		}
-		return nil, fmt.Errorf("plugin %s operation %s returned a non-success envelope", record.Metadata.ID, operation)
 	}
 
 	abiVersion := record.Spec.ABIVersion
@@ -201,7 +215,62 @@ func (m *WASMRuntimeManager) execute(ctx context.Context, record model.PluginRec
 		data:       envelope.Data,
 		modulePath: modulePath,
 		abiVersion: abiVersion,
+		stdout:     stdout.String(),
+		stderr:     stderr.String(),
+		envelope:   &envelope,
 	}, nil
+}
+
+func (m *WASMRuntimeManager) execute(ctx context.Context, record model.PluginRecord, operation string, payload map[string]any) (*executionResult, error) {
+	result, err := m.runEnvelope(ctx, record, operation, payload)
+	if err != nil {
+		return nil, err
+	}
+	if result.envelope != nil && !result.envelope.OK {
+		if result.envelope.Error != nil && result.envelope.Error.Message != "" {
+			if result.envelope.Error.Code != "" {
+				return result, fmt.Errorf("%s: %s", result.envelope.Error.Code, result.envelope.Error.Message)
+			}
+			return result, errors.New(result.envelope.Error.Message)
+		}
+		return result, fmt.Errorf("plugin %s operation %s returned a non-success envelope", record.Metadata.ID, operation)
+	}
+	return result, nil
+}
+
+func (m *WASMRuntimeManager) DebugExecute(ctx context.Context, record model.PluginRecord, operation string, payload map[string]any) (*DebugExecutionResult, error) {
+	if operation != "describe" && operation != "init" && operation != "health" {
+		if err := ensureDeclaredCapability(record, operation); err != nil {
+			return &DebugExecutionResult{
+				OK:        false,
+				Operation: operation,
+				Error:     err.Error(),
+			}, nil
+		}
+	}
+
+	result, err := m.runEnvelope(ctx, record, operation, payload)
+	if err != nil {
+		return nil, err
+	}
+
+	debugResult := &DebugExecutionResult{
+		OK:         result.envelope != nil && result.envelope.OK,
+		Operation:  operation,
+		Data:       result.data,
+		Stdout:     result.stdout,
+		Stderr:     result.stderr,
+		ModulePath: result.modulePath,
+		ABIVersion: result.abiVersion,
+	}
+
+	if result.envelope != nil && result.envelope.Error != nil {
+		debugResult.Error = result.envelope.Error.Message
+		debugResult.ErrorCode = result.envelope.Error.Code
+		debugResult.ErrorInfo = result.envelope.Error.Details
+	}
+
+	return debugResult, nil
 }
 
 func verifyABIVersion(record model.PluginRecord, actual string) error {

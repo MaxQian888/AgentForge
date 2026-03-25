@@ -1,7 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Download, FolderOpen, Puzzle, RefreshCw } from "lucide-react";
+import {
+  BellRing,
+  Download,
+  FolderOpen,
+  MonitorCog,
+  Puzzle,
+  RefreshCw,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -15,6 +22,11 @@ import { Separator } from "@/components/ui/separator";
 import { PluginCard } from "@/components/plugins/plugin-card";
 import { PluginInstallDialog } from "@/components/plugins/plugin-install-dialog";
 import { PluginConfigDialog } from "@/components/plugins/plugin-config-dialog";
+import { usePlatformCapability } from "@/hooks/use-platform-capability";
+import type {
+  DesktopRuntimeStatus,
+  PluginRuntimeSummary,
+} from "@/lib/platform-runtime";
 import {
   filterMarketplaceEntries,
   filterPluginRecords,
@@ -22,6 +34,38 @@ import {
   type PluginPanelFilters,
   type PluginRecord,
 } from "@/lib/stores/plugin-store";
+
+const EMPTY_RUNTIME_STATUS: DesktopRuntimeStatus = {
+  overall: "stopped",
+  backend: {
+    label: "backend",
+    status: "stopped",
+    url: null,
+    pid: null,
+    restartCount: 0,
+    lastError: null,
+    lastStartedAt: null,
+  },
+  bridge: {
+    label: "bridge",
+    status: "stopped",
+    url: null,
+    pid: null,
+    restartCount: 0,
+    lastError: null,
+    lastStartedAt: null,
+  },
+};
+
+const EMPTY_PLUGIN_RUNTIME_SUMMARY: PluginRuntimeSummary = {
+  activeRuntimeCount: 0,
+  backendHealthy: false,
+  bridgeHealthy: false,
+  bridgePluginCount: 0,
+  eventBridgeAvailable: false,
+  lastUpdatedAt: null,
+  warnings: [],
+};
 
 function renderPermissions(plugin: PluginRecord): string {
   const permissions: string[] = [];
@@ -49,6 +93,18 @@ function renderPermissions(plugin: PluginRecord): string {
   return permissions.length > 0 ? permissions.join(" · ") : "No declared permissions";
 }
 
+function renderRuntimeTone(status: DesktopRuntimeStatus["overall"]): "default" | "destructive" | "secondary" {
+  if (status === "ready") {
+    return "default";
+  }
+
+  if (status === "degraded") {
+    return "destructive";
+  }
+
+  return "secondary";
+}
+
 export default function PluginsPage() {
   const plugins = usePluginStore((s) => s.plugins);
   const builtins = usePluginStore((s) => s.builtins);
@@ -64,11 +120,26 @@ export default function PluginsPage() {
   const setFilters = usePluginStore((s) => s.setFilters);
   const resetFilters = usePluginStore((s) => s.resetFilters);
   const selectPlugin = usePluginStore((s) => s.selectPlugin);
+  const {
+    checkForUpdate,
+    getDesktopRuntimeStatus,
+    getPluginRuntimeSummary,
+    isDesktop,
+    sendNotification,
+    subscribeDesktopEvents,
+    updateTray,
+  } = usePlatformCapability();
 
   const [installOpen, setInstallOpen] = useState(false);
   const [configPlugin, setConfigPlugin] = useState<PluginRecord | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState(filters.query);
+  const [desktopRuntime, setDesktopRuntime] =
+    useState<DesktopRuntimeStatus>(EMPTY_RUNTIME_STATUS);
+  const [pluginRuntimeSummary, setPluginRuntimeSummary] =
+    useState<PluginRuntimeSummary>(EMPTY_PLUGIN_RUNTIME_SUMMARY);
+  const [desktopMessage, setDesktopMessage] = useState<string | null>(null);
+  const [lastDesktopEvent, setLastDesktopEvent] = useState<string | null>(null);
 
   useEffect(() => {
     void fetchPlugins();
@@ -80,6 +151,101 @@ export default function PluginsPage() {
     setConfigPlugin(plugin);
     setConfigOpen(true);
   }, []);
+
+  const loadDesktopState = useCallback(async () => {
+    if (!isDesktop) {
+      setDesktopRuntime(EMPTY_RUNTIME_STATUS);
+      setPluginRuntimeSummary(EMPTY_PLUGIN_RUNTIME_SUMMARY);
+      return;
+    }
+
+    const [runtimeStatus, summary] = await Promise.all([
+      getDesktopRuntimeStatus(),
+      getPluginRuntimeSummary(),
+    ]);
+    setDesktopRuntime(runtimeStatus);
+    setPluginRuntimeSummary(summary);
+  }, [getDesktopRuntimeStatus, getPluginRuntimeSummary, isDesktop]);
+
+  useEffect(() => {
+    void loadDesktopState();
+  }, [loadDesktopState]);
+
+  useEffect(() => {
+    if (!isDesktop) {
+      return;
+    }
+
+    let disposed = false;
+    void subscribeDesktopEvents((event) => {
+      if (disposed) {
+        return;
+      }
+
+      if (event.runtime) {
+        setDesktopRuntime(event.runtime);
+      }
+      setLastDesktopEvent(event.type);
+
+      if (event.type === "runtime.updated" || event.type === "runtime.terminated") {
+        void loadDesktopState();
+      }
+    }).then((cleanup) => {
+      if (disposed) {
+        cleanup();
+        return;
+      }
+
+      cleanupRef = cleanup;
+    });
+
+    let cleanupRef = () => {};
+    return () => {
+      disposed = true;
+      cleanupRef();
+    };
+  }, [isDesktop, loadDesktopState, subscribeDesktopEvents]);
+
+  const handleDesktopNotification = useCallback(async () => {
+    const result = await sendNotification({
+      title: "AgentForge Desktop",
+      body: `Desktop runtime is currently ${desktopRuntime.overall}.`,
+    });
+
+    setDesktopMessage(
+      result.ok
+        ? `Notification sent through ${result.mode} mode.`
+        : result.error,
+    );
+  }, [desktopRuntime.overall, sendNotification]);
+
+  const handleTraySync = useCallback(async () => {
+    const result = await updateTray({
+      title: `AgentForge · ${desktopRuntime.overall}`,
+      tooltip: `Backend ${desktopRuntime.backend.status} / Bridge ${desktopRuntime.bridge.status}`,
+      visible: true,
+    });
+
+    setDesktopMessage(
+      result.ok
+        ? `Tray state synced through ${result.mode} mode.`
+        : result.error,
+    );
+  }, [
+    desktopRuntime.backend.status,
+    desktopRuntime.bridge.status,
+    desktopRuntime.overall,
+    updateTray,
+  ]);
+
+  const handleUpdateCheck = useCallback(async () => {
+    const result = await checkForUpdate();
+    setDesktopMessage(
+      result.ok
+        ? `Desktop update check completed in ${result.mode} mode.`
+        : result.error,
+    );
+  }, [checkForUpdate]);
 
   const filteredInstalled = useMemo(
     () => filterPluginRecords(plugins, filters),
@@ -158,6 +324,107 @@ export default function PluginsPage() {
           {error}
         </div>
       ) : null}
+
+      <Card>
+        <CardHeader>
+          <div className="flex flex-col gap-2 md:flex-row md:items-start md:justify-between">
+            <div>
+              <CardTitle className="flex items-center gap-2">
+                <MonitorCog className="size-4" />
+                Desktop runtime
+              </CardTitle>
+              <CardDescription>
+                Desktop telemetry is additive only. Plugin data below still comes from
+                the backend API as the authoritative source.
+              </CardDescription>
+            </div>
+            <Badge variant={renderRuntimeTone(desktopRuntime.overall)}>
+              {isDesktop ? desktopRuntime.overall : "web-fallback"}
+            </Badge>
+          </div>
+        </CardHeader>
+        <CardContent className="grid gap-4 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
+          <div className="grid gap-3 md:grid-cols-2">
+            {[desktopRuntime.backend, desktopRuntime.bridge].map((runtimeUnit) => (
+              <div
+                key={runtimeUnit.label}
+                className="rounded-lg border border-border/60 p-3 text-sm"
+              >
+                <div className="flex items-center justify-between gap-2">
+                  <p className="font-medium capitalize">{runtimeUnit.label}</p>
+                  <Badge variant={renderRuntimeTone(runtimeUnit.status)}>
+                    {runtimeUnit.status}
+                  </Badge>
+                </div>
+                <div className="mt-3 grid gap-2 text-muted-foreground">
+                  <p>URL: {runtimeUnit.url ?? "Unavailable"}</p>
+                  <p>PID: {runtimeUnit.pid ?? "Not running"}</p>
+                  <p>Restart count: {runtimeUnit.restartCount}</p>
+                  <p>
+                    Last start: {runtimeUnit.lastStartedAt ?? "Not started in this session"}
+                  </p>
+                  <p>Last error: {runtimeUnit.lastError ?? "No recent runtime errors"}</p>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          <div className="flex flex-col gap-3 rounded-lg border border-border/60 p-4 text-sm">
+            <div className="grid gap-2">
+              <p className="font-medium">Read-only desktop helper summary</p>
+              <p className="text-muted-foreground">
+                Bridge plugins: {pluginRuntimeSummary.bridgePluginCount}
+              </p>
+              <p className="text-muted-foreground">
+                Active bridge runtimes: {pluginRuntimeSummary.activeRuntimeCount}
+              </p>
+              <p className="text-muted-foreground">
+                Event bridge: {pluginRuntimeSummary.eventBridgeAvailable ? "available" : "unavailable"}
+              </p>
+              <p className="text-muted-foreground">
+                Last desktop event: {lastDesktopEvent ?? "No desktop events yet"}
+              </p>
+            </div>
+
+            {pluginRuntimeSummary.warnings.length > 0 ? (
+              <div className="rounded-md border border-border/60 bg-muted/40 px-3 py-2 text-xs text-muted-foreground">
+                {pluginRuntimeSummary.warnings.join(" ")}
+              </div>
+            ) : null}
+
+            <div className="flex flex-wrap gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleTraySync()}
+              >
+                Sync tray
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleUpdateCheck()}
+              >
+                Check update
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => void handleDesktopNotification()}
+              >
+                <BellRing className="mr-1 size-3.5" />
+                Notify
+              </Button>
+            </div>
+
+            {desktopMessage ? (
+              <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
+                {desktopMessage}
+              </div>
+            ) : null}
+          </div>
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

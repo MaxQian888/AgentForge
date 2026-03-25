@@ -2,12 +2,18 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PluginsPage from "./page";
 
+const checkForUpdate = jest.fn();
 const fetchPlugins = jest.fn();
 const discoverBuiltins = jest.fn();
 const fetchMarketplace = jest.fn();
+const getDesktopRuntimeStatus = jest.fn();
+const getPluginRuntimeSummary = jest.fn();
 const installLocal = jest.fn();
 const setFilters = jest.fn();
+const sendNotification = jest.fn();
 const selectPlugin = jest.fn();
+const subscribeDesktopEvents = jest.fn();
+const updateTray = jest.fn();
 
 const storeState = {
   plugins: [
@@ -83,14 +89,63 @@ jest.mock("@/lib/stores/plugin-store", () => ({
   filterMarketplaceEntries: (entries: typeof storeState.marketplace) => entries,
 }));
 
+jest.mock("@/hooks/use-platform-capability", () => ({
+  usePlatformCapability: () => ({
+    checkForUpdate,
+    getDesktopRuntimeStatus,
+    getPluginRuntimeSummary,
+    isDesktop: false,
+    sendNotification,
+    subscribeDesktopEvents,
+    updateTray,
+  }),
+}));
+
 describe("PluginsPage", () => {
   beforeEach(() => {
+    checkForUpdate.mockReset();
     fetchPlugins.mockReset();
     discoverBuiltins.mockReset();
     fetchMarketplace.mockReset();
+    getDesktopRuntimeStatus.mockReset();
+    getDesktopRuntimeStatus.mockResolvedValue({
+      overall: "stopped",
+      backend: {
+        label: "backend",
+        status: "stopped",
+        url: null,
+        pid: null,
+        restartCount: 0,
+        lastError: null,
+        lastStartedAt: null,
+      },
+      bridge: {
+        label: "bridge",
+        status: "stopped",
+        url: null,
+        pid: null,
+        restartCount: 0,
+        lastError: null,
+        lastStartedAt: null,
+      },
+    });
+    getPluginRuntimeSummary.mockReset();
+    getPluginRuntimeSummary.mockResolvedValue({
+      activeRuntimeCount: 0,
+      backendHealthy: false,
+      bridgeHealthy: false,
+      bridgePluginCount: 0,
+      eventBridgeAvailable: false,
+      lastUpdatedAt: null,
+      warnings: [],
+    });
     installLocal.mockReset();
+    sendNotification.mockReset();
     setFilters.mockReset();
     selectPlugin.mockReset();
+    subscribeDesktopEvents.mockReset();
+    subscribeDesktopEvents.mockResolvedValue(jest.fn());
+    updateTray.mockReset();
   });
 
   it("loads installed, builtin, and marketplace data on mount", () => {
@@ -104,6 +159,7 @@ describe("PluginsPage", () => {
   it("renders filter controls, marketplace, and selected plugin details", () => {
     render(<PluginsPage />);
 
+    expect(screen.getByText("Desktop runtime")).toBeInTheDocument();
     expect(screen.getByLabelText("Search plugins")).toBeInTheDocument();
     expect(screen.getByText("Marketplace")).toBeInTheDocument();
     expect(screen.getByText("Plugin details")).toBeInTheDocument();

@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"context"
 	"encoding/json"
 	"io"
 	"net"
@@ -13,6 +14,8 @@ import (
 	"testing"
 	"time"
 
+	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/notify"
 	"github.com/agentforge/im-bridge/platform/dingtalk"
 	"github.com/agentforge/im-bridge/platform/discord"
 	"github.com/agentforge/im-bridge/platform/feishu"
@@ -244,6 +247,22 @@ func TestSelectPlatform_RejectsUnsupportedPlatform(t *testing.T) {
 	}
 }
 
+func TestSelectPlatform_RejectsPlannedWecomRuntimeActivation(t *testing.T) {
+	cfg := &config{
+		Platform:      "wecom",
+		TransportMode: "stub",
+		TestPort:      "9010",
+	}
+
+	_, err := selectPlatform(cfg)
+	if err == nil {
+		t.Fatal("expected wecom selection to fail")
+	}
+	if err.Error() != "selected platform wecom is planned but not yet runnable; adapter, capability matrix, and runtime wiring are still pending" {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestSelectPlatform_AllowsStubModeWithoutProviderCredentials(t *testing.T) {
 	cfg := &config{
 		Platform:      "slack",
@@ -324,6 +343,34 @@ func TestLookupPlatformDescriptor_ReturnsCapabilities(t *testing.T) {
 	if !descriptor.Metadata.Capabilities.SupportsMentions {
 		t.Fatal("expected feishu descriptor to support mentions")
 	}
+}
+
+func TestLookupPlatformDescriptor_ReportsPlannedWecomGap(t *testing.T) {
+	descriptor, err := lookupPlatformDescriptor("wecom")
+	if err != nil {
+		t.Fatalf("lookupPlatformDescriptor error: %v", err)
+	}
+	if descriptor.Metadata.Source != "wecom" {
+		t.Fatalf("source = %q, want wecom", descriptor.Metadata.Source)
+	}
+	if descriptor.NewStub != nil || descriptor.NewLive != nil {
+		t.Fatalf("expected wecom to remain non-runnable, got NewStub=%v NewLive=%v", descriptor.NewStub, descriptor.NewLive)
+	}
+}
+
+func TestConfigurePlatformActionCallbacks_WiresSetterPlatforms(t *testing.T) {
+	mockPlatform := &actionHandlerAwarePlatform{}
+	handler := &noopActionHandler{}
+
+	configurePlatformActionCallbacks(mockPlatform, handler)
+
+	if mockPlatform.handler != handler {
+		t.Fatalf("handler = %#v, want %#v", mockPlatform.handler, handler)
+	}
+}
+
+func TestConfigurePlatformActionCallbacks_IgnoresPlainPlatforms(t *testing.T) {
+	configurePlatformActionCallbacks(&plainPlatform{}, &noopActionHandler{})
 }
 
 func TestMain_StartsBridgeAndShutsDownGracefully(t *testing.T) {
@@ -444,4 +491,39 @@ func waitForHTTP(t *testing.T, url string) *http.Response {
 
 	t.Fatalf("request %s failed: %v", url, lastErr)
 	return nil
+}
+
+type actionHandlerAwarePlatform struct {
+	handler notify.ActionHandler
+}
+
+func (p *actionHandlerAwarePlatform) Name() string                            { return "mock-platform" }
+func (p *actionHandlerAwarePlatform) Start(handler core.MessageHandler) error { return nil }
+func (p *actionHandlerAwarePlatform) Reply(ctx context.Context, replyCtx any, content string) error {
+	return nil
+}
+func (p *actionHandlerAwarePlatform) Send(ctx context.Context, chatID string, content string) error {
+	return nil
+}
+func (p *actionHandlerAwarePlatform) Stop() error { return nil }
+func (p *actionHandlerAwarePlatform) SetActionHandler(handler notify.ActionHandler) {
+	p.handler = handler
+}
+
+type plainPlatform struct{}
+
+func (p *plainPlatform) Name() string                            { return "plain-platform" }
+func (p *plainPlatform) Start(handler core.MessageHandler) error { return nil }
+func (p *plainPlatform) Reply(ctx context.Context, replyCtx any, content string) error {
+	return nil
+}
+func (p *plainPlatform) Send(ctx context.Context, chatID string, content string) error {
+	return nil
+}
+func (p *plainPlatform) Stop() error { return nil }
+
+type noopActionHandler struct{}
+
+func (h *noopActionHandler) HandleAction(ctx context.Context, req *notify.ActionRequest) (*notify.ActionResponse, error) {
+	return &notify.ActionResponse{}, nil
 }

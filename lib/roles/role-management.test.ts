@@ -29,6 +29,10 @@ const role: RoleManifest = {
     allowedTools: ["Read", "Edit"],
     languages: ["TypeScript"],
     frameworks: ["Next.js"],
+    skills: [
+      { path: "skills/react", autoLoad: true },
+      { path: "skills/testing", autoLoad: false },
+    ],
     maxTurns: 24,
     maxBudgetUsd: 6,
   },
@@ -54,6 +58,10 @@ describe("role management helpers", () => {
       version: "1.2.0",
       tagsInput: "frontend, ui",
       allowedTools: "Read, Edit",
+      skillRows: [
+        { path: "skills/react", autoLoad: true },
+        { path: "skills/testing", autoLoad: false },
+      ],
       permissionMode: "default",
       extendsValue: "coding-agent",
     });
@@ -67,6 +75,10 @@ describe("role management helpers", () => {
         name: "Frontend Developer Custom",
         maxBudgetUsd: "7.5",
         requireReview: false,
+        skillRows: [
+          { path: "skills/react", autoLoad: false },
+          { path: "skills/accessibility", autoLoad: true },
+        ],
       },
       role,
     );
@@ -78,6 +90,10 @@ describe("role management helpers", () => {
       }),
       capabilities: expect.objectContaining({
         allowedTools: ["Read", "Edit"],
+        skills: [
+          { path: "skills/react", autoLoad: false },
+          { path: "skills/accessibility", autoLoad: true },
+        ],
         maxBudgetUsd: 7.5,
       }),
       security: expect.objectContaining({
@@ -95,11 +111,34 @@ describe("role management helpers", () => {
       budgetLabel: "$6.00",
       turnsLabel: "24 turns",
       permissionMode: "default",
+      skillsLabel: "1 auto-load / 1 on-demand",
+      keySkillPaths: ["skills/react", "skills/testing"],
       safetyCues: [
         "Review required",
         "2 allowed paths",
         "1 denied path",
       ],
     });
+  });
+
+  it("flags invalid skill rows before submit", () => {
+    const payload = serializeRoleDraft(
+      {
+        ...buildRoleDraft(role),
+        skillRows: [
+          { path: "skills/react", autoLoad: true },
+          { path: "skills/react", autoLoad: false },
+          { path: " ", autoLoad: true },
+        ],
+      },
+      role,
+    );
+
+    expect(payload.validationErrors).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("unique"),
+        expect.stringContaining("blank"),
+      ]),
+    );
   });
 });

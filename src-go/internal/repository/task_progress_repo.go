@@ -7,13 +7,14 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"gorm.io/gorm"
 )
 
 type TaskProgressRepository struct {
-	db DBTX
+	db *gorm.DB
 }
 
-func NewTaskProgressRepository(db DBTX) *TaskProgressRepository {
+func NewTaskProgressRepository(db *gorm.DB) *TaskProgressRepository {
 	return &TaskProgressRepository{db: db}
 }
 
@@ -46,9 +47,9 @@ func (r *TaskProgressRepository) GetByTaskID(ctx context.Context, taskID uuid.UU
 	}
 
 	query := `SELECT ` + taskProgressColumns + ` FROM task_progress_snapshots WHERE task_id = $1`
-	snapshot, err := scanTaskProgress(r.db.QueryRow(ctx, query, taskID))
+	snapshot, err := scanTaskProgress(r.db.WithContext(ctx).Raw(query, taskID).Row())
 	if err != nil {
-		return nil, fmt.Errorf("get task progress snapshot: %w", err)
+		return nil, fmt.Errorf("get task progress snapshot: %w", normalizeRepositoryError(err))
 	}
 	return snapshot, nil
 }
@@ -87,8 +88,7 @@ func (r *TaskProgressRepository) Upsert(ctx context.Context, snapshot *model.Tas
 			updated_at = NOW()
 	`
 
-	_, err := r.db.Exec(
-		ctx,
+	if err := r.db.WithContext(ctx).Exec(
 		query,
 		snapshot.TaskID,
 		snapshot.LastActivityAt,
@@ -100,8 +100,7 @@ func (r *TaskProgressRepository) Upsert(ctx context.Context, snapshot *model.Tas
 		snapshot.LastAlertState,
 		snapshot.LastAlertAt,
 		snapshot.LastRecoveredAt,
-	)
-	if err != nil {
+	).Error; err != nil {
 		return fmt.Errorf("upsert task progress snapshot: %w", err)
 	}
 	return nil
@@ -123,7 +122,7 @@ func (r *TaskProgressRepository) ListByTaskIDs(ctx context.Context, taskIDs []uu
 	}
 
 	query := `SELECT ` + taskProgressColumns + ` FROM task_progress_snapshots WHERE task_id IN (` + strings.Join(placeholders, ", ") + `)`
-	rows, err := r.db.Query(ctx, query, args...)
+	rows, err := r.db.WithContext(ctx).Raw(query, args...).Rows()
 	if err != nil {
 		return nil, fmt.Errorf("list task progress snapshots: %w", err)
 	}

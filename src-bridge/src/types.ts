@@ -150,6 +150,17 @@ export interface HealthResponse {
   uptime_ms: number;
 }
 
+export interface RuntimePoolSummary {
+  active: number;
+  max: number;
+  warm_total: number;
+  warm_available: number;
+  warm_reuse_hits: number;
+  cold_starts: number;
+  last_reconcile_at: number;
+  degraded: boolean;
+}
+
 /** Cost update event data. */
 export interface CostUpdate {
   input_tokens: number;

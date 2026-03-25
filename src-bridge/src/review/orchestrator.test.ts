@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { orchestrateDeepReview } from "./orchestrator.js";
+import { createDeepReviewOrchestrator, orchestrateDeepReview } from "./orchestrator.js";
 
 describe("orchestrateDeepReview", () => {
   test("runs the default dimensions and aggregates their findings", async () => {
@@ -45,5 +45,87 @@ describe("orchestrateDeepReview", () => {
     expect(response.dimension_results[0]?.dimension).toBe("compliance");
     expect(response.findings).toHaveLength(1);
     expect(response.findings[0]?.category).toBe("compliance");
+  });
+
+  test("aggregates custom review plugin findings with built-in dimensions", async () => {
+    const runReview = createDeepReviewOrchestrator({
+      executeReviewPlugin: async (plugin) => ({
+        dimension: plugin.plugin_id,
+        source_type: "plugin",
+        plugin_id: plugin.plugin_id,
+        display_name: plugin.name,
+        status: "completed",
+        findings: [
+          {
+            category: "architecture",
+            severity: "high",
+            file: "src/server/routes.ts",
+            line: 18,
+            message: "Route registration bypasses the approved architecture boundary.",
+          },
+        ],
+        summary: "Architecture plugin found one issue.",
+      }),
+    });
+
+    const response = await runReview({
+      review_id: "review-789",
+      task_id: "task-789",
+      pr_url: "https://example.com/pr/789",
+      diff: "console.log('leftover debug');",
+      dimensions: ["compliance"],
+      review_plugins: [
+        {
+          plugin_id: "review.architecture",
+          name: "Architecture Review",
+          entrypoint: "review:run",
+          output_format: "findings/v1",
+        },
+      ],
+    });
+
+    expect(response.dimension_results).toHaveLength(2);
+    expect(response.dimension_results[1]?.plugin_id).toBe("review.architecture");
+    expect(response.findings).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ category: "compliance", sources: ["compliance"] }),
+        expect.objectContaining({ category: "architecture", sources: ["review.architecture"] }),
+      ]),
+    );
+  });
+
+  test("preserves plugin failures without discarding successful dimensions", async () => {
+    const runReview = createDeepReviewOrchestrator({
+      executeReviewPlugin: async () => {
+        throw new Error("review plugin timed out");
+      },
+    });
+
+    const response = await runReview({
+      review_id: "review-999",
+      task_id: "task-999",
+      pr_url: "https://example.com/pr/999",
+      diff: "console.log('leftover debug');",
+      dimensions: ["compliance"],
+      review_plugins: [
+        {
+          plugin_id: "review.architecture",
+          name: "Architecture Review",
+          entrypoint: "review:run",
+          output_format: "findings/v1",
+        },
+      ],
+    });
+
+    expect(response.dimension_results).toHaveLength(2);
+    expect(response.dimension_results[1]).toEqual(
+      expect.objectContaining({
+        plugin_id: "review.architecture",
+        source_type: "plugin",
+        status: "failed",
+      }),
+    );
+    expect(response.findings).toHaveLength(1);
+    expect(response.summary).toContain("review.architecture failed");
   });
 });

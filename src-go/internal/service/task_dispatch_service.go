@@ -29,6 +29,14 @@ type DispatchRuntimeService interface {
 	Spawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error)
 }
 
+type DispatchQueueWriter interface {
+	QueueAgentAdmission(ctx context.Context, input QueueAgentAdmissionInput) (*model.AgentPoolQueueEntry, error)
+}
+
+type dispatchPoolStatsProvider interface {
+	PoolStats(ctx context.Context) model.AgentPoolStatsDTO
+}
+
 type DispatchNotificationService interface {
 	Create(ctx context.Context, targetID uuid.UUID, ntype, title, body, data string) (*model.Notification, error)
 }
@@ -50,6 +58,7 @@ type TaskDispatchService struct {
 	hub           *ws.Hub
 	notifications DispatchNotificationService
 	progress      *TaskProgressService
+	queueWriter   DispatchQueueWriter
 }
 
 func NewTaskDispatchService(
@@ -68,6 +77,11 @@ func NewTaskDispatchService(
 		notifications: notifications,
 		progress:      progress,
 	}
+}
+
+func (s *TaskDispatchService) WithQueueWriter(queueWriter DispatchQueueWriter) *TaskDispatchService {
+	s.queueWriter = queueWriter
+	return s
 }
 
 func (s *TaskDispatchService) Assign(ctx context.Context, taskID uuid.UUID, req *model.AssignRequest) (*model.TaskDispatchResponse, error) {
@@ -160,7 +174,24 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 		case errors.Is(err, ErrAgentAlreadyRunning):
 			return s.blockedResult(ctx, task, "task already has an active agent run"), nil
 		case errors.Is(err, ErrAgentPoolFull):
-			return s.blockedResult(ctx, task, "agent pool is at capacity"), nil
+			if s.queueWriter == nil {
+				return s.blockedResult(ctx, task, "agent pool is at capacity"), nil
+			}
+			entry, queueErr := s.queueWriter.QueueAgentAdmission(ctx, QueueAgentAdmissionInput{
+				ProjectID: task.ProjectID,
+				TaskID:    task.ID,
+				MemberID:  memberID,
+				Runtime:   input.Runtime,
+				Provider:  input.Provider,
+				Model:     input.Model,
+				RoleID:    input.RoleID,
+				BudgetUSD: input.BudgetUSD,
+				Reason:    "agent pool is at capacity",
+			})
+			if queueErr != nil {
+				return s.blockedResult(ctx, task, "agent pool is at capacity"), nil
+			}
+			return s.queuedResult(task, entry, "agent pool is at capacity"), nil
 		case errors.Is(err, ErrAgentWorktreeUnavailable):
 			return s.blockedResult(ctx, task, "agent dispatch is blocked by worktree availability"), nil
 		default:
@@ -200,6 +231,24 @@ func (s *TaskDispatchService) blockedResult(ctx context.Context, task *model.Tas
 	}
 }
 
+func (s *TaskDispatchService) queuedResult(task *model.Task, entry *model.AgentPoolQueueEntry, reason string) *model.TaskDispatchResponse {
+	if task != nil {
+		s.broadcastDispatchQueued(task, entry, reason)
+	}
+	taskDTO := model.TaskDTO{}
+	if task != nil {
+		taskDTO = task.ToDTO()
+	}
+	return &model.TaskDispatchResponse{
+		Task: taskDTO,
+		Dispatch: model.DispatchOutcome{
+			Status: model.DispatchStatusQueued,
+			Reason: reason,
+			Queue:  entry,
+		},
+	}
+}
+
 func (s *TaskDispatchService) broadcastTaskAssigned(task *model.Task) {
 	if s.hub == nil || task == nil {
 		return
@@ -226,6 +275,31 @@ func (s *TaskDispatchService) broadcastDispatchBlocked(task *model.Task, reason 
 			},
 		},
 	})
+}
+
+func (s *TaskDispatchService) broadcastDispatchQueued(task *model.Task, entry *model.AgentPoolQueueEntry, reason string) {
+	if s.hub == nil || task == nil {
+		return
+	}
+	s.hub.BroadcastEvent(&ws.Event{
+		Type:      ws.EventAgentQueued,
+		ProjectID: task.ProjectID.String(),
+		Payload: map[string]any{
+			"task": task.ToDTO(),
+			"dispatch": model.DispatchOutcome{
+				Status: model.DispatchStatusQueued,
+				Reason: reason,
+				Queue:  entry,
+			},
+		},
+	})
+	if provider, ok := s.runtime.(dispatchPoolStatsProvider); ok {
+		s.hub.BroadcastEvent(&ws.Event{
+			Type:      ws.EventAgentPoolUpdated,
+			ProjectID: task.ProjectID.String(),
+			Payload:   provider.PoolStats(context.Background()),
+		})
+	}
 }
 
 func (s *TaskDispatchService) createBlockedNotification(ctx context.Context, task *model.Task, reason string) {

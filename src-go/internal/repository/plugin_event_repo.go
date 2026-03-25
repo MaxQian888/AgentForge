@@ -10,20 +10,32 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"gorm.io/gorm"
 )
 
 type PluginEventRepository struct {
-	db     DBTX
+	db     *gorm.DB
 	mu     sync.RWMutex
 	events []*model.PluginEventRecord
 }
 
-func NewPluginEventRepository(db ...DBTX) *PluginEventRepository {
-	var conn DBTX
+func NewPluginEventRepository(db ...*gorm.DB) *PluginEventRepository {
+	var conn *gorm.DB
 	if len(db) > 0 {
 		conn = db[0]
 	}
 	return &PluginEventRepository{db: conn, events: make([]*model.PluginEventRecord, 0)}
+}
+
+func (r *PluginEventRepository) WithDB(db *gorm.DB) PluginEventDBBinder {
+	if r == nil {
+		return NewPluginEventRepository(db)
+	}
+	rebound := NewPluginEventRepository(db)
+	if db == nil {
+		rebound.events = r.events
+	}
+	return rebound
 }
 
 func (r *PluginEventRepository) Append(ctx context.Context, event *model.PluginEventRecord) error {
@@ -52,25 +64,18 @@ func (r *PluginEventRepository) Append(ctx context.Context, event *model.PluginE
 		return fmt.Errorf("marshal plugin event payload: %w", err)
 	}
 
-	query := `
-		INSERT INTO plugin_events (
-			id, plugin_id, event_type, event_source, lifecycle_state, summary, payload, created_at
-		)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8)
-	`
-	_, err = r.db.Exec(
-		ctx,
-		query,
-		event.ID,
-			event.PluginID,
-			event.EventType,
-			event.EventSource,
-			nullablePluginLifecycleState(event.LifecycleState),
-			nullablePluginString(event.Summary),
-			payload,
-			event.CreatedAt,
-		)
-	if err != nil {
+	row := &pluginEventRecordModel{
+		ID:             event.ID,
+		PluginID:       event.PluginID,
+		EventType:      string(event.EventType),
+		EventSource:    string(event.EventSource),
+		LifecycleState: optionalPluginLifecycleState(event.LifecycleState),
+		Summary:        optionalPluginSummary(event.Summary),
+		Payload:        newRawJSON(payload, "{}"),
+		CreatedAt:      event.CreatedAt,
+	}
+
+	if err := r.db.WithContext(ctx).Create(row).Error; err != nil {
 		return fmt.Errorf("append plugin event: %w", err)
 	}
 	return nil
@@ -97,48 +102,22 @@ func (r *PluginEventRepository) ListByPluginID(ctx context.Context, pluginID str
 		return filtered, nil
 	}
 
-	query := `
-		SELECT id, plugin_id, event_type, event_source, COALESCE(lifecycle_state, ''), COALESCE(summary, ''),
-			payload, created_at
-		FROM plugin_events
-		WHERE plugin_id = $1
-		ORDER BY created_at DESC
-		LIMIT $2
-	`
-	rows, err := r.db.Query(ctx, query, pluginID, limit)
-	if err != nil {
+	var rows []pluginEventRecordModel
+	if err := r.db.WithContext(ctx).
+		Where("plugin_id = ?", pluginID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list plugin events: %w", err)
 	}
-	defer rows.Close()
 
-	events := make([]*model.PluginEventRecord, 0, limit)
-	for rows.Next() {
-		var (
-			event   model.PluginEventRecord
-			payload []byte
-		)
-		if err := rows.Scan(
-			&event.ID,
-			&event.PluginID,
-			&event.EventType,
-			&event.EventSource,
-			&event.LifecycleState,
-			&event.Summary,
-			&payload,
-			&event.CreatedAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan plugin event: %w", err)
+	events := make([]*model.PluginEventRecord, 0, len(rows))
+	for _, row := range rows {
+		event, err := row.toEventRecord()
+		if err != nil {
+			return nil, err
 		}
-		if len(payload) > 0 && string(payload) != "null" {
-			event.Payload = map[string]any{}
-			if err := json.Unmarshal(payload, &event.Payload); err != nil {
-				return nil, fmt.Errorf("decode plugin event payload: %w", err)
-			}
-		}
-		events = append(events, &event)
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
+		events = append(events, event)
 	}
 	return events, nil
 }
@@ -171,4 +150,43 @@ func mapsClone(src map[string]any) map[string]any {
 		dst[key] = value
 	}
 	return dst
+}
+
+func optionalPluginLifecycleState(value model.PluginLifecycleState) *string {
+	if value == "" {
+		return nil
+	}
+	stringValue := string(value)
+	return &stringValue
+}
+
+func optionalPluginSummary(value string) *string {
+	if value == "" {
+		return nil
+	}
+	return &value
+}
+
+func (r *pluginEventRecordModel) toEventRecord() (*model.PluginEventRecord, error) {
+	if r == nil {
+		return nil, nil
+	}
+
+	event := &model.PluginEventRecord{
+		ID:             r.ID,
+		PluginID:       r.PluginID,
+		EventType:      model.PluginEventType(r.EventType),
+		EventSource:    model.PluginEventSource(r.EventSource),
+		LifecycleState: model.PluginLifecycleState(valueOrEmpty(r.LifecycleState)),
+		Summary:        valueOrEmpty(r.Summary),
+		CreatedAt:      r.CreatedAt,
+	}
+
+	if payload := r.Payload.Bytes("{}"); len(payload) > 0 && string(payload) != "null" {
+		event.Payload = map[string]any{}
+		if err := json.Unmarshal(payload, &event.Payload); err != nil {
+			return nil, fmt.Errorf("decode plugin event payload: %w", err)
+		}
+	}
+	return event, nil
 }

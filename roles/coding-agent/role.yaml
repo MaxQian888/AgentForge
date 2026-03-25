@@ -19,6 +19,11 @@ system_prompt: |
 capabilities:
   tools:
     built_in: [Read, Edit, Write, Bash, Glob, Grep]
+  skills:
+    - path: skills/typescript
+      auto_load: true
+    - path: skills/testing
+      auto_load: false
   max_turns: 30
   max_budget_usd: 5.0
 security:

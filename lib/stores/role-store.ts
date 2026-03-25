@@ -31,10 +31,16 @@ export interface RoleIdentity {
 export interface RoleCapabilities {
   allowedTools?: string[];
   tools?: string[];
+  skills?: RoleSkillReference[];
   languages: string[];
   frameworks: string[];
   maxTurns?: number;
   maxBudgetUsd?: number;
+}
+
+export interface RoleSkillReference {
+  path: string;
+  autoLoad: boolean;
 }
 
 export interface RoleSecurity {

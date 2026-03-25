@@ -30,6 +30,9 @@ export function AgentCard({ agent }: AgentCardProps) {
         </Badge>
       </div>
       <p className="text-sm text-muted-foreground">{agent.taskTitle}</p>
+      <p className="text-xs text-muted-foreground">
+        Runtime: {agent.runtime || "-"} / {agent.provider || "-"} / {agent.model || "-"}
+      </p>
       <div className="flex items-center gap-4 text-xs text-muted-foreground">
         <span>Turns: {agent.turns}</span>
         <span>

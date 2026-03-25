@@ -89,6 +89,10 @@ func TestRoleHandlerCreatePersistsCanonicalRolePath(t *testing.T) {
 	  "systemPrompt": "You build safe UI.",
 	  "capabilities": {
 	    "allowedTools": ["Read", "Edit"],
+	    "skills": [
+	      { "path": "skills/react", "autoLoad": true },
+	      { "path": "skills/testing", "autoLoad": false }
+	    ],
 	    "maxTurns": 20
 	  },
 	  "security": {
@@ -113,5 +117,52 @@ func TestRoleHandlerCreatePersistsCanonicalRolePath(t *testing.T) {
 	canonicalPath := filepath.Join(dir, "frontend-developer", "role.yaml")
 	if _, err := os.Stat(canonicalPath); err != nil {
 		t.Fatalf("canonical role path missing: %v", err)
+	}
+
+	var created map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &created); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	capabilities := created["capabilities"].(map[string]any)
+	skills, ok := capabilities["skills"].([]any)
+	if !ok || len(skills) != 2 {
+		t.Fatalf("response capabilities.skills = %#v, want 2 structured entries", capabilities["skills"])
+	}
+}
+
+func TestRoleHandlerCreateRejectsDuplicateSkillPaths(t *testing.T) {
+	dir := t.TempDir()
+	e := echo.New()
+	body := `{
+	  "apiVersion": "agentforge/v1",
+	  "kind": "Role",
+	  "metadata": {
+	    "id": "broken-role",
+	    "name": "Broken Role",
+	    "version": "1.0.0"
+	  },
+	  "identity": {
+	    "role": "Broken Role",
+	    "goal": "Break role saving"
+	  },
+	  "capabilities": {
+	    "skills": [
+	      { "path": "skills/react", "autoLoad": true },
+	      { "path": "skills/react", "autoLoad": false }
+	    ]
+	  }
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/roles", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	h := handler.NewRoleHandler(dir)
+	if err := h.Create(ctx); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want 400", rec.Code)
 	}
 }

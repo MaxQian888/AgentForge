@@ -320,6 +320,41 @@ func TestClientGetRuntimeCatalogUsesBridgeRoute(t *testing.T) {
 	}
 }
 
+func TestClientGetPoolSummaryUsesCanonicalBridgeRoute(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"active":            1,
+			"max":               3,
+			"warm_total":        1,
+			"warm_available":    0,
+			"warm_reuse_hits":   2,
+			"cold_starts":       4,
+			"last_reconcile_at": 1742896800000,
+			"degraded":          false,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	summary, err := client.GetPoolSummary(context.Background())
+	if err != nil {
+		t.Fatalf("GetPoolSummary() error: %v", err)
+	}
+
+	if gotPath != "/bridge/pool" {
+		t.Fatalf("expected canonical pool route, got %s", gotPath)
+	}
+	if summary.Active != 1 || summary.Max != 3 || summary.WarmReuseHits != 2 {
+		t.Fatalf("unexpected pool summary: %+v", summary)
+	}
+}
+
 func TestClientDecomposeIncludesProviderAndModelWhenSpecified(t *testing.T) {
 	t.Parallel()
 
@@ -363,5 +398,305 @@ func TestClientDecomposeIncludesProviderAndModelWhenSpecified(t *testing.T) {
 	}
 	if gotBody["model"] != "gpt-5" {
 		t.Fatalf("expected model in decompose payload, got %#v", gotBody)
+	}
+}
+
+func TestClientReviewUsesCanonicalBridgeContract(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotPath string
+		gotBody map[string]any
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"risk_level":     "low",
+			"findings":       []map[string]any{},
+			"summary":        "Deep review completed",
+			"recommendation": "approve",
+			"cost_usd":       0.15,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.Review(context.Background(), ReviewRequest{
+		ReviewID:     "review-123",
+		TaskID:       "task-123",
+		PRURL:        "https://github.com/acme/project/pull/12",
+		PRNumber:     12,
+		Title:        "Review plugin selection",
+		Description:  "Ensures selected plugins are forwarded",
+		Diff:         "diff --git a/src/review.ts b/src/review.ts",
+		Dimensions:   []string{"logic", "security"},
+		TriggerEvent: "pull_request.updated",
+		ChangedFiles: []string{"src/review.ts"},
+		ReviewPlugins: []ReviewPluginRequest{
+			{
+				PluginID:     "review.typescript",
+				Name:         "TypeScript Review",
+				Entrypoint:   "review:run",
+				SourceType:   "npm",
+				Events:       []string{"pull_request.updated"},
+				FilePatterns: []string{"src/**/*.ts"},
+				OutputFormat: "findings/v1",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("Review() error: %v", err)
+	}
+
+	if gotPath != "/bridge/review" {
+		t.Fatalf("expected /bridge/review, got %s", gotPath)
+	}
+	if gotBody["trigger_event"] != "pull_request.updated" {
+		t.Fatalf("expected trigger_event in request body, got %#v", gotBody)
+	}
+	changedFiles, ok := gotBody["changed_files"].([]any)
+	if !ok || len(changedFiles) != 1 || changedFiles[0] != "src/review.ts" {
+		t.Fatalf("expected changed_files payload, got %#v", gotBody["changed_files"])
+	}
+	reviewPlugins, ok := gotBody["review_plugins"].([]any)
+	if !ok || len(reviewPlugins) != 1 {
+		t.Fatalf("expected review_plugins payload, got %#v", gotBody["review_plugins"])
+	}
+	plugin, ok := reviewPlugins[0].(map[string]any)
+	if !ok || plugin["plugin_id"] != "review.typescript" || plugin["output_format"] != "findings/v1" {
+		t.Fatalf("unexpected review plugin payload: %#v", reviewPlugins[0])
+	}
+}
+
+func TestClientRefreshToolPluginMCPSurfaceUsesCanonicalBridgeContract(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotPath   string
+		gotMethod string
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotMethod = r.Method
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"metadata": map[string]any{
+				"id": "repo-search",
+			},
+			"lifecycle_state": "active",
+			"runtime_host":    "ts-bridge",
+			"restart_count":   1,
+			"runtime_metadata": map[string]any{
+				"mcp": map[string]any{
+					"transport":         "stdio",
+					"last_discovery_at": "2026-03-25T10:00:00Z",
+					"tool_count":        2,
+					"resource_count":    1,
+					"prompt_count":      1,
+				},
+			},
+			"mcp_capability_snapshot": map[string]any{
+				"transport":         "stdio",
+				"last_discovery_at": "2026-03-25T10:00:00Z",
+				"tool_count":        2,
+				"resource_count":    1,
+				"prompt_count":      1,
+				"tools": []map[string]any{
+					{"name": "search", "description": "Search code"},
+				},
+				"resources": []map[string]any{
+					{"uri": "file://README.md", "name": "README"},
+				},
+				"prompts": []map[string]any{
+					{"name": "summarize", "description": "Summarize repository"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	surface, err := client.RefreshToolPluginMCPSurface(context.Background(), "repo-search")
+	if err != nil {
+		t.Fatalf("RefreshToolPluginMCPSurface() error: %v", err)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Fatalf("expected POST, got %s", gotMethod)
+	}
+	if gotPath != "/bridge/plugins/repo-search/mcp/refresh" {
+		t.Fatalf("expected MCP refresh route, got %s", gotPath)
+	}
+	if surface.PluginID != "repo-search" || surface.Snapshot.Transport != "stdio" {
+		t.Fatalf("unexpected MCP surface header: %+v", surface)
+	}
+	if len(surface.Snapshot.Tools) != 1 || surface.Snapshot.Tools[0].Name != "search" {
+		t.Fatalf("unexpected MCP tools: %+v", surface.Snapshot.Tools)
+	}
+	if surface.RuntimeMetadata == nil || surface.RuntimeMetadata.MCP == nil || surface.RuntimeMetadata.MCP.ToolCount != 2 {
+		t.Fatalf("expected runtime metadata summary, got %+v", surface.RuntimeMetadata)
+	}
+}
+
+func TestClientInvokeToolPluginMCPToolUsesCanonicalBridgeContract(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotPath string
+		gotBody map[string]any
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"plugin_id": "repo-search",
+			"operation": "call_tool",
+			"result": map[string]any{
+				"content": []map[string]any{
+					{"type": "text", "text": "found 3 files"},
+				},
+				"isError": false,
+				"structuredContent": map[string]any{
+					"count": 3,
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	result, err := client.InvokeToolPluginMCPTool(context.Background(), "repo-search", "search", map[string]any{
+		"query": "bridge client",
+	})
+	if err != nil {
+		t.Fatalf("InvokeToolPluginMCPTool() error: %v", err)
+	}
+
+	if gotPath != "/bridge/plugins/repo-search/mcp/tools/call" {
+		t.Fatalf("expected MCP tool call route, got %s", gotPath)
+	}
+	if gotBody["tool_name"] != "search" {
+		t.Fatalf("expected tool_name in request body, got %#v", gotBody)
+	}
+	args, ok := gotBody["arguments"].(map[string]any)
+	if !ok || args["query"] != "bridge client" {
+		t.Fatalf("expected arguments payload, got %#v", gotBody)
+	}
+	if result.PluginID != "repo-search" || result.Operation != "call_tool" || result.Result.IsError {
+		t.Fatalf("unexpected tool call result: %+v", result)
+	}
+}
+
+func TestClientReadToolPluginMCPResourceUsesCanonicalBridgeContract(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotPath string
+		gotBody map[string]any
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"plugin_id": "repo-search",
+			"operation": "read_resource",
+			"result": map[string]any{
+				"contents": []map[string]any{
+					{"uri": "file://README.md", "mimeType": "text/markdown", "text": "# README"},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	result, err := client.ReadToolPluginMCPResource(context.Background(), "repo-search", "file://README.md")
+	if err != nil {
+		t.Fatalf("ReadToolPluginMCPResource() error: %v", err)
+	}
+
+	if gotPath != "/bridge/plugins/repo-search/mcp/resources/read" {
+		t.Fatalf("expected MCP resource route, got %s", gotPath)
+	}
+	if gotBody["uri"] != "file://README.md" {
+		t.Fatalf("expected uri in request body, got %#v", gotBody)
+	}
+	if result.PluginID != "repo-search" || result.Operation != "read_resource" || len(result.Result.Contents) != 1 {
+		t.Fatalf("unexpected resource result: %+v", result)
+	}
+}
+
+func TestClientGetToolPluginMCPPromptUsesCanonicalBridgeContract(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotPath string
+		gotBody map[string]any
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"plugin_id": "repo-search",
+			"operation": "get_prompt",
+			"result": map[string]any{
+				"description": "Repository summary prompt",
+				"messages": []map[string]any{
+					{
+						"role": "user",
+						"content": map[string]any{
+							"type": "text",
+							"text": "Summarize repo-search",
+						},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	result, err := client.GetToolPluginMCPPrompt(context.Background(), "repo-search", "summarize", map[string]string{
+		"topic": "repo-search",
+	})
+	if err != nil {
+		t.Fatalf("GetToolPluginMCPPrompt() error: %v", err)
+	}
+
+	if gotPath != "/bridge/plugins/repo-search/mcp/prompts/get" {
+		t.Fatalf("expected MCP prompt route, got %s", gotPath)
+	}
+	if gotBody["name"] != "summarize" {
+		t.Fatalf("expected prompt name in request body, got %#v", gotBody)
+	}
+	args, ok := gotBody["arguments"].(map[string]any)
+	if !ok || args["topic"] != "repo-search" {
+		t.Fatalf("expected prompt arguments in request body, got %#v", gotBody)
+	}
+	if result.PluginID != "repo-search" || result.Operation != "get_prompt" || result.Result.Description != "Repository summary prompt" {
+		t.Fatalf("unexpected prompt result: %+v", result)
 	}
 }

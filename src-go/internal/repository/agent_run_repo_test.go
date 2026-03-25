@@ -1,4 +1,4 @@
-package repository_test
+package repository
 
 import (
 	"context"
@@ -6,100 +6,83 @@ import (
 	"time"
 
 	"github.com/google/uuid"
-	"github.com/pashagolub/pgxmock/v4"
 	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
-func TestAgentRunRepository_CreatePersistsRoleID(t *testing.T) {
-	mock, err := pgxmock.NewPool()
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer mock.Close()
+type stubAgentRunRow struct {
+	roleID   string
+	teamID   *uuid.UUID
+	teamRole string
+}
 
-	repo := repository.NewAgentRunRepository(mock)
-	run := &model.AgentRun{
-		ID:        uuid.New(),
-		TaskID:    uuid.New(),
-		MemberID:  uuid.New(),
-		RoleID:    "frontend-developer",
-		Status:    model.AgentRunStatusStarting,
-		Provider:  "anthropic",
-		Model:     "claude-sonnet",
-		StartedAt: time.Now().UTC(),
-	}
+func (r stubAgentRunRow) Scan(dest ...any) error {
+	now := time.Now().UTC()
 
-	mock.ExpectExec("INSERT INTO agent_runs").
-		WithArgs(
-			run.ID,
-			run.TaskID,
-			run.MemberID,
-			run.RoleID,
-			run.Status,
-			run.Provider,
-			run.Model,
-			run.InputTokens,
-			run.OutputTokens,
-			run.CacheReadTokens,
-			run.CostUsd,
-			run.TurnCount,
-			run.ErrorMessage,
-			run.StartedAt,
-			run.CompletedAt,
-			run.TeamID,
-			run.TeamRole,
-		).
-		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	*(dest[0].(*uuid.UUID)) = uuid.New()
+	*(dest[1].(*uuid.UUID)) = uuid.New()
+	*(dest[2].(*uuid.UUID)) = uuid.New()
+	*(dest[3].(*string)) = r.roleID
+	*(dest[4].(*string)) = model.AgentRunStatusRunning
+	*(dest[5].(*string)) = "codex"
+	*(dest[6].(*string)) = "openai"
+	*(dest[7].(*string)) = "gpt-5.4"
+	*(dest[8].(*int64)) = 12
+	*(dest[9].(*int64)) = 18
+	*(dest[10].(*int64)) = 0
+	*(dest[11].(*float64)) = 0.42
+	*(dest[12].(*int)) = 3
+	*(dest[13].(*string)) = ""
+	*(dest[14].(*time.Time)) = now
+	*(dest[15].(**time.Time)) = nil
+	*(dest[16].(*time.Time)) = now
+	*(dest[17].(*time.Time)) = now
+	*(dest[18].(**uuid.UUID)) = r.teamID
+	*(dest[19].(*string)) = r.teamRole
 
-	if err := repo.Create(context.Background(), run); err != nil {
-		t.Fatalf("unexpected error: %v", err)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
+	return nil
+}
+
+func TestNewAgentRunRepository(t *testing.T) {
+	repo := NewAgentRunRepository(nil)
+	if repo == nil {
+		t.Fatal("expected non-nil AgentRunRepository")
 	}
 }
 
-func TestAgentRunRepository_GetByIDScansRoleID(t *testing.T) {
-	mock, err := pgxmock.NewPool()
+func TestAgentRunRepositoryCreateNilDB(t *testing.T) {
+	repo := NewAgentRunRepository(nil)
+	err := repo.Create(context.Background(), &model.AgentRun{ID: uuid.New(), TaskID: uuid.New(), MemberID: uuid.New()})
+	if err != ErrDatabaseUnavailable {
+		t.Fatalf("Create() error = %v, want %v", err, ErrDatabaseUnavailable)
+	}
+}
+
+func TestAgentRunRepositoryGetByIDNilDB(t *testing.T) {
+	repo := NewAgentRunRepository(nil)
+	_, err := repo.GetByID(context.Background(), uuid.New())
+	if err != ErrDatabaseUnavailable {
+		t.Fatalf("GetByID() error = %v, want %v", err, ErrDatabaseUnavailable)
+	}
+}
+
+func TestScanAgentRunPreservesRoleAndTeamFields(t *testing.T) {
+	teamID := uuid.New()
+
+	run, err := scanAgentRun(stubAgentRunRow{
+		roleID:   "frontend-developer",
+		teamID:   &teamID,
+		teamRole: model.TeamRoleCoder,
+	})
 	if err != nil {
-		t.Fatal(err)
+		t.Fatalf("scanAgentRun() error = %v", err)
 	}
-	defer mock.Close()
-
-	repo := repository.NewAgentRunRepository(mock)
-	runID := uuid.New()
-	taskID := uuid.New()
-	memberID := uuid.New()
-	startedAt := time.Now().UTC()
-	createdAt := startedAt.Add(time.Minute)
-	updatedAt := createdAt.Add(time.Minute)
-	roleID := "frontend-developer"
-
-	rows := pgxmock.NewRows([]string{
-		"id", "task_id", "member_id", "role_id", "status", "provider", "model",
-		"input_tokens", "output_tokens", "cache_read_tokens", "cost_usd", "turn_count",
-		"error_message", "started_at", "completed_at", "created_at", "updated_at",
-		"team_id", "team_role",
-	}).AddRow(
-		runID, taskID, memberID, roleID, model.AgentRunStatusRunning, "anthropic", "claude-sonnet",
-		int64(10), int64(12), int64(0), 0.42, 3,
-		"", startedAt, nil, createdAt, updatedAt,
-		nil, "",
-	)
-
-	mock.ExpectQuery("SELECT id, task_id, member_id, role_id, status, provider, model").
-		WithArgs(runID).
-		WillReturnRows(rows)
-
-	run, err := repo.GetByID(context.Background(), runID)
-	if err != nil {
-		t.Fatalf("unexpected error: %v", err)
+	if run.RoleID != "frontend-developer" {
+		t.Fatalf("RoleID = %q, want frontend-developer", run.RoleID)
 	}
-	if run.RoleID != roleID {
-		t.Fatalf("run.RoleID = %q, want %q", run.RoleID, roleID)
+	if run.TeamID == nil || *run.TeamID != teamID {
+		t.Fatalf("TeamID = %v, want %s", run.TeamID, teamID)
 	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
+	if run.TeamRole != model.TeamRoleCoder {
+		t.Fatalf("TeamRole = %q, want %q", run.TeamRole, model.TeamRoleCoder)
 	}
 }

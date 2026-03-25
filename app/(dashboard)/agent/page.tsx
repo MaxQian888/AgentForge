@@ -99,6 +99,19 @@ function AgentView() {
         <Card>
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
+              Runtime
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-1 text-sm">
+            <p className="font-medium">{agent.runtime || "-"}</p>
+            <p className="text-muted-foreground">
+              {agent.provider || "-"} / {agent.model || "-"}
+            </p>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="text-sm font-medium text-muted-foreground">
               Turns
             </CardTitle>
           </CardHeader>
@@ -106,7 +119,7 @@ function AgentView() {
             <span className="text-2xl font-bold">{agent.turns}</span>
           </CardContent>
         </Card>
-        <Card>
+        <Card className="sm:col-span-3">
           <CardHeader className="pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
               Cost

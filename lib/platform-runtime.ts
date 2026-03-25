@@ -28,6 +28,16 @@ export interface DesktopRuntimeEvent {
   payload?: unknown;
 }
 
+export interface PluginRuntimeSummary {
+  activeRuntimeCount: number;
+  backendHealthy: boolean;
+  bridgeHealthy: boolean;
+  bridgePluginCount: number;
+  eventBridgeAvailable: boolean;
+  lastUpdatedAt: string | null;
+  warnings: string[];
+}
+
 export interface SelectFilesOptions {
   directory?: boolean;
   filters?: Array<{
@@ -70,10 +80,10 @@ export interface RegisterShortcutRequest {
 interface PlatformRuntimeDeps {
   defaultBackendUrl?: string;
   inputFactory?: () => HTMLInputElement;
-  invoke?: <T>(
+  invoke?: (
     command: string,
     args?: Record<string, unknown>,
-  ) => Promise<T>;
+  ) => Promise<unknown>;
   isDesktopEnv?: () => boolean;
   listen?: (
     event: string,
@@ -110,6 +120,18 @@ function defaultDesktopRuntimeStatus(): DesktopRuntimeStatus {
       lastError: null,
       lastStartedAt: null,
     },
+  };
+}
+
+function defaultPluginRuntimeSummary(): PluginRuntimeSummary {
+  return {
+    activeRuntimeCount: 0,
+    backendHealthy: false,
+    bridgeHealthy: false,
+    bridgePluginCount: 0,
+    eventBridgeAvailable: false,
+    lastUpdatedAt: null,
+    warnings: [],
   };
 }
 
@@ -250,7 +272,7 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
       }
 
       try {
-        return await getInvoke<string>("get_backend_url");
+        return (await getInvoke("get_backend_url")) as string;
       } catch {
         return defaultBackendUrl;
       }
@@ -261,11 +283,27 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
       }
 
       try {
-        return await getInvoke<DesktopRuntimeStatus>(
+        return (await getInvoke(
           "get_desktop_runtime_status",
-        );
+        )) as DesktopRuntimeStatus;
       } catch {
         return defaultDesktopRuntimeStatus();
+      }
+    },
+    async getPluginRuntimeSummary(): Promise<PluginRuntimeSummary> {
+      if (!getIsDesktopEnv()) {
+        return defaultPluginRuntimeSummary();
+      }
+
+      try {
+        return (await getInvoke(
+          "get_plugin_runtime_summary",
+        )) as PluginRuntimeSummary;
+      } catch {
+        return {
+          ...defaultPluginRuntimeSummary(),
+          warnings: ["Desktop plugin runtime summary is unavailable."],
+        };
       }
     },
     async subscribeDesktopEvents(
@@ -289,9 +327,9 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
     async selectFiles(options: SelectFilesOptions): Promise<SelectFilesResult> {
       if (getIsDesktopEnv()) {
         try {
-          const paths = await getInvoke<string[]>("select_files", {
+          const paths = (await getInvoke("select_files", {
             options,
-          });
+          })) as string[];
 
           if (!paths || paths.length === 0) {
             return {
@@ -326,7 +364,10 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
     }): Promise<PlatformResult> {
       if (getIsDesktopEnv()) {
         try {
-          await getInvoke("send_notification", payload);
+          await getInvoke(
+            "send_notification",
+            payload as Record<string, unknown>,
+          );
           return { ok: true, mode: "desktop" };
         } catch (error) {
           return {
@@ -371,7 +412,7 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
     }): Promise<PlatformResult> {
       if (getIsDesktopEnv()) {
         try {
-          await getInvoke("update_tray", payload);
+          await getInvoke("update_tray", payload as Record<string, unknown>);
           return { ok: true, mode: "desktop" };
         } catch (error) {
           return {
@@ -398,7 +439,10 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
       }
 
       try {
-        await getInvoke("register_shortcut", request);
+        await getInvoke(
+          "register_shortcut",
+          request as unknown as Record<string, unknown>,
+        );
         return { ok: true, mode: "desktop" };
       } catch (error) {
         return {

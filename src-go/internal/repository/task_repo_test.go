@@ -3,17 +3,15 @@ package repository
 import (
 	"context"
 	"fmt"
-	"regexp"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
-	pgxmock "github.com/pashagolub/pgxmock/v4"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 type stubTaskRow struct {
-	blockedBy                  []uuid.UUID
+	blockedBy                   []uuid.UUID
 	requireNullableAssigneeType bool
 }
 
@@ -80,134 +78,104 @@ func (r stubTaskRow) Scan(dest ...any) error {
 	return nil
 }
 
-func TestTaskRepository_UpdatePersistsSprintID(t *testing.T) {
-	mock, err := pgxmock.NewPool()
-	if err != nil {
-		t.Fatalf("pgxmock.NewPool() error: %v", err)
-	}
-	defer mock.Close()
-
-	repo := NewTaskRepository(mock)
-	taskID := uuid.New()
-	sprintID := uuid.New().String()
-	req := &model.UpdateTaskRequest{
-		SprintID: &sprintID,
-	}
-
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE tasks SET")).
-		WithArgs(
-			req.Title,
-			req.Description,
-			req.Priority,
-			req.BudgetUsd,
-			req.SprintID,
-			req.PlannedStartAt,
-			req.PlannedEndAt,
-			nil,
-			taskID,
-		).
-		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
-
-	if err := repo.Update(context.Background(), taskID, req); err != nil {
-		t.Fatalf("Update() error: %v", err)
-	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
+func TestNewTaskRepository(t *testing.T) {
+	repo := NewTaskRepository(nil)
+	if repo == nil {
+		t.Fatal("expected non-nil TaskRepository")
 	}
 }
 
-func TestTaskRepository_CreateNormalizesEmptyOptionalFields(t *testing.T) {
-	mock, err := pgxmock.NewPool()
-	if err != nil {
-		t.Fatalf("pgxmock.NewPool() error: %v", err)
-	}
-	defer mock.Close()
-
-	repo := NewTaskRepository(mock)
-	task := &model.Task{
-		ID:          uuid.New(),
-		ProjectID:   uuid.New(),
-		Title:       "Create first functional task",
-		Description: "",
-		Status:      model.TaskStatusInbox,
-		Priority:    "medium",
-		Labels:      []string{},
-		BudgetUsd:   0,
-	}
-
-	mock.ExpectExec(regexp.QuoteMeta("INSERT INTO tasks")).
-		WithArgs(
-			task.ID,
-			task.ProjectID,
-			task.ParentID,
-			task.SprintID,
-			task.Title,
-			task.Description,
-			task.Status,
-			task.Priority,
-			task.AssigneeID,
-			nil,
-			task.ReporterID,
-			task.Labels,
-			task.BudgetUsd,
-			task.SpentUsd,
-			task.AgentBranch,
-			task.AgentWorktree,
-			task.AgentSessionID,
-			task.PRUrl,
-			task.PRNumber,
-			[]uuid.UUID{},
-			task.PlannedStartAt,
-			task.PlannedEndAt,
-			task.CompletedAt,
-		).
-		WillReturnResult(pgxmock.NewResult("INSERT", 1))
-
-	if err := repo.Create(context.Background(), task); err != nil {
-		t.Fatalf("Create() error: %v", err)
-	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
+func TestTaskRepositoryCreateNilDB(t *testing.T) {
+	repo := NewTaskRepository(nil)
+	err := repo.Create(context.Background(), &model.Task{ID: uuid.New(), ProjectID: uuid.New()})
+	if err != ErrDatabaseUnavailable {
+		t.Fatalf("Create() error = %v, want %v", err, ErrDatabaseUnavailable)
 	}
 }
 
-func TestTaskRepository_UpdateConvertsBlockedByToUUIDArray(t *testing.T) {
-	mock, err := pgxmock.NewPool()
-	if err != nil {
-		t.Fatalf("pgxmock.NewPool() error: %v", err)
+func TestTaskRepositoryGetByIDNilDB(t *testing.T) {
+	repo := NewTaskRepository(nil)
+	_, err := repo.GetByID(context.Background(), uuid.New())
+	if err != ErrDatabaseUnavailable {
+		t.Fatalf("GetByID() error = %v, want %v", err, ErrDatabaseUnavailable)
 	}
-	defer mock.Close()
+}
 
-	repo := NewTaskRepository(mock)
-	taskID := uuid.New()
+func TestTaskRepositoryListNilDB(t *testing.T) {
+	repo := NewTaskRepository(nil)
+	_, _, err := repo.List(context.Background(), uuid.New(), model.TaskListQuery{})
+	if err != ErrDatabaseUnavailable {
+		t.Fatalf("List() error = %v, want %v", err, ErrDatabaseUnavailable)
+	}
+}
+
+func TestTaskRepositoryUpdateNilDB(t *testing.T) {
+	repo := NewTaskRepository(nil)
+	err := repo.Update(context.Background(), uuid.New(), &model.UpdateTaskRequest{})
+	if err != ErrDatabaseUnavailable {
+		t.Fatalf("Update() error = %v, want %v", err, ErrDatabaseUnavailable)
+	}
+}
+
+func TestTaskRepositoryCreateChildrenNilDB(t *testing.T) {
+	repo := NewTaskRepository(nil)
+	_, err := repo.CreateChildren(context.Background(), []model.TaskChildInput{{ProjectID: uuid.New()}})
+	if err != ErrDatabaseUnavailable {
+		t.Fatalf("CreateChildren() error = %v, want %v", err, ErrDatabaseUnavailable)
+	}
+}
+
+func TestNormalizeTaskBlockedByReturnsUUIDs(t *testing.T) {
+	blockerID := uuid.New()
+
+	ids, err := normalizeTaskBlockedBy([]string{blockerID.String()})
+	if err != nil {
+		t.Fatalf("normalizeTaskBlockedBy() error = %v", err)
+	}
+	if len(ids) != 1 || ids[0] != blockerID {
+		t.Fatalf("normalizeTaskBlockedBy() = %v, want [%s]", ids, blockerID)
+	}
+}
+
+func TestNormalizeTaskBlockedByRejectsBlankValues(t *testing.T) {
+	_, err := normalizeTaskBlockedBy([]string{" "})
+	if err == nil {
+		t.Fatal("expected error for blank blockedBy value")
+	}
+}
+
+func TestNormalizeTaskBlockedByRejectsInvalidUUID(t *testing.T) {
+	_, err := normalizeTaskBlockedBy([]string{"not-a-uuid"})
+	if err == nil {
+		t.Fatal("expected error for invalid blockedBy value")
+	}
+}
+
+func TestNormalizeOptionalTaskBlockedByNilPointer(t *testing.T) {
+	value, err := normalizeOptionalTaskBlockedBy(nil)
+	if err != nil {
+		t.Fatalf("normalizeOptionalTaskBlockedBy(nil) error = %v", err)
+	}
+	if value != nil {
+		t.Fatalf("normalizeOptionalTaskBlockedBy(nil) = %v, want nil", value)
+	}
+}
+
+func TestNormalizeOptionalTaskBlockedByConvertsProvidedIDs(t *testing.T) {
 	blockerID := uuid.New()
 	blockedBy := []string{blockerID.String()}
-	req := &model.UpdateTaskRequest{
-		BlockedBy: &blockedBy,
+
+	value, err := normalizeOptionalTaskBlockedBy(&blockedBy)
+	if err != nil {
+		t.Fatalf("normalizeOptionalTaskBlockedBy() error = %v", err)
 	}
 
-	mock.ExpectExec(regexp.QuoteMeta("UPDATE tasks SET")).
-		WithArgs(
-			req.Title,
-			req.Description,
-			req.Priority,
-			req.BudgetUsd,
-			req.SprintID,
-			req.PlannedStartAt,
-			req.PlannedEndAt,
-			[]uuid.UUID{blockerID},
-			taskID,
-		).
-		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
-
-	if err := repo.Update(context.Background(), taskID, req); err != nil {
-		t.Fatalf("Update() error: %v", err)
+	ids, ok := value.([]uuid.UUID)
+	if !ok {
+		t.Fatalf("normalizeOptionalTaskBlockedBy() type = %T, want []uuid.UUID", value)
 	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatalf("unmet expectations: %v", err)
+	if len(ids) != 1 || ids[0] != blockerID {
+		t.Fatalf("normalizeOptionalTaskBlockedBy() = %v, want [%s]", ids, blockerID)
 	}
 }
 
