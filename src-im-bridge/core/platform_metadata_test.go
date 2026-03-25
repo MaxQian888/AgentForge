@@ -151,3 +151,34 @@ func TestMetadataForPlatform_InfersRichMessagesFromCardSenderWithoutMetadataProv
 		t.Fatalf("StructuredSurface = %q, want %q", metadata.Capabilities.StructuredSurface, StructuredSurfaceActionCard)
 	}
 }
+
+func TestPlatformCapabilities_MatrixAndLookupHelpers(t *testing.T) {
+	capabilities := PlatformCapabilities{
+		CommandSurface:     CommandSurfaceMixed,
+		StructuredSurface:  StructuredSurfaceBlocks,
+		AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateFollowUp},
+		ActionCallbackMode: ActionCallbackSocketPayload,
+		MessageScopes:      []MessageScope{MessageScopeChat, MessageScopeThread},
+		Mutability: MutabilitySemantics{
+			CanEdit:        true,
+			PrefersInPlace: true,
+		},
+	}
+
+	matrix := capabilities.Matrix()
+	if matrix["commandSurface"] != "mixed" || matrix["structuredSurface"] != "blocks" {
+		t.Fatalf("matrix = %+v", matrix)
+	}
+	if !capabilities.HasAsyncUpdateMode(AsyncUpdateFollowUp) {
+		t.Fatal("expected async update mode to be found")
+	}
+	if capabilities.HasAsyncUpdateMode(AsyncUpdateSessionWebhook) {
+		t.Fatal("did not expect absent async update mode")
+	}
+	if !capabilities.HasMessageScope(MessageScopeThread) {
+		t.Fatal("expected message scope to be found")
+	}
+	if capabilities.HasMessageScope(MessageScopeTopic) {
+		t.Fatal("did not expect absent message scope")
+	}
+}

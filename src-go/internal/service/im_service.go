@@ -8,13 +8,13 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/sirupsen/logrus"
 )
 
 // BridgeIntentClassifier classifies natural language into structured intents.
@@ -45,7 +45,7 @@ type IMService struct {
 	platform       string
 	httpClient     *http.Client
 	classifier     BridgeIntentClassifier
-	logger         *slog.Logger
+	logger         *logrus.Logger
 	controlPlane   *IMControlPlane
 	deliverySecret string
 }
@@ -58,7 +58,7 @@ func NewIMService(notifyURL, platform string, controlPlane ...*IMControlPlane) *
 		httpClient: &http.Client{
 			Timeout: 15 * time.Second,
 		},
-		logger: slog.Default(),
+		logger: logrus.StandardLogger(),
 	}
 	if len(controlPlane) > 0 {
 		service.controlPlane = controlPlane[0]
@@ -80,12 +80,19 @@ func (s *IMService) SetDeliverySecret(secret string) {
 // Non-command messages are sent to the NLU classifier if available.
 func (s *IMService) HandleIncoming(ctx context.Context, req *model.IMMessageRequest) (*model.IMMessageResponse, error) {
 	text := strings.TrimSpace(req.Text)
+	entry := s.logger.WithFields(logrus.Fields{
+		"platform":  req.Platform,
+		"channelId": req.ChannelID,
+		"userId":    req.UserID,
+		"threadId":  req.ThreadID,
+	})
 
 	// Slash commands are handled by the IM Bridge engine directly;
 	// this endpoint only receives non-command messages forwarded by the bridge.
 	if strings.HasPrefix(text, "/") {
 		parts := strings.SplitN(text, " ", 2)
 		cmd := strings.TrimPrefix(parts[0], "/")
+		entry.WithField("command", cmd).Info("IM slash command forwarded to bridge")
 		return &model.IMMessageResponse{
 			Reply: fmt.Sprintf("Command '%s' received. Processing via AgentForge.", cmd),
 		}, nil
@@ -98,11 +105,17 @@ func (s *IMService) HandleIncoming(ctx context.Context, req *model.IMMessageRequ
 			UserID: req.UserID,
 		})
 		if err != nil {
-			s.logger.WarnContext(ctx, "classify intent failed, returning fallback", "error", err)
+			entry.WithError(err).Warn("IM intent classification failed, returning fallback")
 			return &model.IMMessageResponse{
 				Reply: "理解失败，请使用 /help 查看可用命令。",
 			}, nil
 		}
+		entry.WithFields(logrus.Fields{
+			"intent":     intentResp.Intent,
+			"command":    intentResp.Command,
+			"confidence": intentResp.Confidence,
+			"hasReply":   intentResp.Reply != "",
+		}).Info("IM intent classified")
 		if intentResp.Reply != "" {
 			return &model.IMMessageResponse{Reply: intentResp.Reply}, nil
 		}
@@ -112,6 +125,7 @@ func (s *IMService) HandleIncoming(ctx context.Context, req *model.IMMessageRequ
 	}
 
 	// No classifier available — return a helpful fallback.
+	entry.Warn("IM intent classification skipped: classifier unavailable")
 	return &model.IMMessageResponse{
 		Reply: "自然语言理解功能尚未就绪。请使用 /help 查看可用命令。",
 	}, nil
@@ -119,21 +133,34 @@ func (s *IMService) HandleIncoming(ctx context.Context, req *model.IMMessageRequ
 
 // HandleCommand dispatches a structured slash command to the appropriate handler.
 func (s *IMService) HandleCommand(_ context.Context, req *model.IMCommandRequest) (*model.IMCommandResponse, error) {
+	entry := s.logger.WithFields(logrus.Fields{
+		"platform":  req.Platform,
+		"channelId": req.ChannelID,
+		"userId":    req.UserID,
+		"command":   req.Command,
+	})
+
 	// The IM Bridge handles command execution directly via its own command engine
 	// and API client. This backend endpoint exists as a secondary route for
 	// webhook-based IM platforms that POST commands here directly.
 	switch req.Command {
 	case "task":
+		entry.Info("IM command acknowledged")
 		return &model.IMCommandResponse{Result: "Task command received. Use the IM Bridge for full execution.", Success: true}, nil
 	case "agent":
+		entry.Info("IM command acknowledged")
 		return &model.IMCommandResponse{Result: "Agent command received. Use the IM Bridge for full execution.", Success: true}, nil
 	case "review":
+		entry.Info("IM command acknowledged")
 		return &model.IMCommandResponse{Result: "Review command received. Use the IM Bridge for full execution.", Success: true}, nil
 	case "sprint":
+		entry.Info("IM command acknowledged")
 		return &model.IMCommandResponse{Result: "Sprint command received. Use the IM Bridge for full execution.", Success: true}, nil
 	case "cost":
+		entry.Info("IM command acknowledged")
 		return &model.IMCommandResponse{Result: "Cost command received. Use the IM Bridge for full execution.", Success: true}, nil
 	default:
+		entry.Warn("IM command rejected: unknown command")
 		return &model.IMCommandResponse{Result: fmt.Sprintf("Unknown command: %s", req.Command), Success: false}, nil
 	}
 }
@@ -141,7 +168,13 @@ func (s *IMService) HandleCommand(_ context.Context, req *model.IMCommandRequest
 // HandleIntent processes a natural language intent request from the IM Bridge.
 // This endpoint is called by the IM Bridge's NLU fallback handler.
 func (s *IMService) HandleIntent(ctx context.Context, req *model.IMIntentRequest) (*model.IMIntentResponse, error) {
+	entry := s.logger.WithFields(logrus.Fields{
+		"userId":    req.UserID,
+		"projectId": req.ProjectID,
+	})
+
 	if s.classifier == nil {
+		entry.Warn("IM intent request skipped: classifier unavailable")
 		return &model.IMIntentResponse{
 			Reply: "自然语言理解功能尚未就绪。请使用 /help 查看可用命令。",
 		}, nil
@@ -153,11 +186,17 @@ func (s *IMService) HandleIntent(ctx context.Context, req *model.IMIntentRequest
 		ProjectID: req.ProjectID,
 	})
 	if err != nil {
-		s.logger.WarnContext(ctx, "classify intent failed", "error", err)
+		entry.WithError(err).Warn("IM intent classification failed")
 		return &model.IMIntentResponse{
 			Reply: "理解失败，请使用 /help 查看可用命令。",
 		}, nil
 	}
+	entry.WithFields(logrus.Fields{
+		"intent":     intentResp.Intent,
+		"command":    intentResp.Command,
+		"confidence": intentResp.Confidence,
+		"hasReply":   intentResp.Reply != "",
+	}).Info("IM intent request classified")
 
 	reply := intentResp.Reply
 	if reply == "" {
@@ -171,11 +210,21 @@ func (s *IMService) HandleIntent(ctx context.Context, req *model.IMIntentRequest
 
 // HandleAction processes a button click action from an IM card.
 func (s *IMService) HandleAction(_ context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error) {
+	entry := s.logger.WithFields(logrus.Fields{
+		"platform":  req.Platform,
+		"channelId": req.ChannelID,
+		"userId":    req.UserID,
+		"bridgeId":  req.BridgeID,
+		"action":    req.Action,
+		"entityId":  req.EntityID,
+	})
+
 	// Actions follow the format "assign-agent", "decompose", "approve", etc.
 	// The IM Bridge handles the actual API calls; this endpoint provides a
 	// backend-side hook for direct webhook callbacks from IM platforms.
 	switch req.Action {
 	case "assign-agent":
+		entry.Info("IM action acknowledged")
 		return &model.IMActionResponse{
 			Result:      fmt.Sprintf("Agent assignment requested for entity %s", req.EntityID),
 			Success:     true,
@@ -183,6 +232,7 @@ func (s *IMService) HandleAction(_ context.Context, req *model.IMActionRequest) 
 			Metadata:    cloneStringMap(req.Metadata),
 		}, nil
 	case "decompose":
+		entry.Info("IM action acknowledged")
 		return &model.IMActionResponse{
 			Result:      fmt.Sprintf("Task decomposition requested for %s", req.EntityID),
 			Success:     true,
@@ -190,6 +240,7 @@ func (s *IMService) HandleAction(_ context.Context, req *model.IMActionRequest) 
 			Metadata:    cloneStringMap(req.Metadata),
 		}, nil
 	case "approve":
+		entry.Info("IM action acknowledged")
 		return &model.IMActionResponse{
 			Result:      fmt.Sprintf("Approval recorded for %s", req.EntityID),
 			Success:     true,
@@ -197,6 +248,7 @@ func (s *IMService) HandleAction(_ context.Context, req *model.IMActionRequest) 
 			Metadata:    cloneStringMap(req.Metadata),
 		}, nil
 	case "request-changes":
+		entry.Info("IM action acknowledged")
 		return &model.IMActionResponse{
 			Result:      fmt.Sprintf("Change request recorded for %s", req.EntityID),
 			Success:     true,
@@ -204,6 +256,7 @@ func (s *IMService) HandleAction(_ context.Context, req *model.IMActionRequest) 
 			Metadata:    cloneStringMap(req.Metadata),
 		}, nil
 	default:
+		entry.Warn("IM action rejected: unknown action")
 		return &model.IMActionResponse{
 			Result:      fmt.Sprintf("Unknown action: %s", req.Action),
 			Success:     false,
@@ -215,6 +268,16 @@ func (s *IMService) HandleAction(_ context.Context, req *model.IMActionRequest) 
 
 // Send delivers a message to an IM channel via the IM Bridge notification receiver.
 func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
+	entry := s.logger.WithFields(logrus.Fields{
+		"platform":       req.Platform,
+		"channelId":      req.ChannelID,
+		"projectId":      req.ProjectID,
+		"bridgeId":       req.BridgeID,
+		"deliveryId":     req.DeliveryID,
+		"hasReplyTarget": req.ReplyTarget != nil,
+		"hasThreadId":    strings.TrimSpace(req.ThreadID) != "",
+	})
+
 	if s.controlPlane != nil {
 		_, err := s.controlPlane.QueueDelivery(ctx, IMQueueDeliveryRequest{
 			TargetBridgeID: strings.TrimSpace(req.BridgeID),
@@ -226,13 +289,14 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 			ReplyTarget:    req.ReplyTarget,
 		})
 		if err == nil {
+			entry.Info("IM send queued via control plane")
 			return nil
 		}
-		s.logger.WarnContext(ctx, "IM control-plane send failed, falling back to compatibility HTTP", "error", err)
+		entry.WithError(err).Warn("IM control-plane send failed, falling back to compatibility HTTP")
 	}
 
 	if s.notifyURL == "" {
-		s.logger.WarnContext(ctx, "IM send skipped: no notify URL configured")
+		entry.Warn("IM send skipped: no notify URL configured")
 		return nil
 	}
 
@@ -257,18 +321,31 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
+		entry.WithError(err).Error("IM send compatibility HTTP failed")
 		return fmt.Errorf("IM send failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		entry.WithField("status", resp.StatusCode).Warn("IM send compatibility HTTP returned non-OK status")
 		return fmt.Errorf("IM send returned %d", resp.StatusCode)
 	}
+	entry.WithField("status", resp.StatusCode).Info("IM send delivered via compatibility HTTP")
 	return nil
 }
 
 // Notify delivers a notification event to an IM channel via the IM Bridge.
 func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) error {
+	entry := s.logger.WithFields(logrus.Fields{
+		"platform":       req.Platform,
+		"channelId":      req.ChannelID,
+		"projectId":      req.ProjectID,
+		"bridgeId":       req.BridgeID,
+		"deliveryId":     req.DeliveryID,
+		"event":          req.Event,
+		"hasReplyTarget": req.ReplyTarget != nil,
+	})
+
 	if s.controlPlane != nil {
 		content := strings.TrimSpace(strings.TrimSpace(req.Title) + "\n" + strings.TrimSpace(req.Body))
 		_, err := s.controlPlane.QueueDelivery(ctx, IMQueueDeliveryRequest{
@@ -281,13 +358,14 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 			ReplyTarget:    req.ReplyTarget,
 		})
 		if err == nil {
+			entry.Info("IM notify queued via control plane")
 			return nil
 		}
-		s.logger.WarnContext(ctx, "IM control-plane notify failed, falling back to compatibility HTTP", "error", err)
+		entry.WithError(err).Warn("IM control-plane notify failed, falling back to compatibility HTTP")
 	}
 
 	if s.notifyURL == "" {
-		s.logger.WarnContext(ctx, "IM notify skipped: no notify URL configured")
+		entry.Warn("IM notify skipped: no notify URL configured")
 		return nil
 	}
 
@@ -312,13 +390,16 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
+		entry.WithError(err).Error("IM notify compatibility HTTP failed")
 		return fmt.Errorf("IM notify failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		entry.WithField("status", resp.StatusCode).Warn("IM notify compatibility HTTP returned non-OK status")
 		return fmt.Errorf("IM notify returned %d", resp.StatusCode)
 	}
+	entry.WithField("status", resp.StatusCode).Info("IM notify delivered via compatibility HTTP")
 	return nil
 }
 

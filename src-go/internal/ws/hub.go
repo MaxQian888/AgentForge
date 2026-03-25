@@ -1,19 +1,29 @@
 package ws
 
 import (
-	"log/slog"
 	"sync"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/gorilla/websocket"
 )
 
 // Client represents a connected WebSocket client.
 type Client struct {
-	hub       *Hub
-	conn      *websocket.Conn
-	send      chan []byte
-	projectID string // filter events by project, empty = all
-	userID    string
+	hub        *Hub
+	conn       *websocket.Conn
+	send       chan []byte
+	projectID  string // filter events by project, empty = all
+	userID     string
+	remoteAddr string
+}
+
+func (c *Client) logFields() log.Fields {
+	return log.Fields{
+		"userId":     c.userID,
+		"projectId":  c.projectID,
+		"remoteAddr": c.remoteAddr,
+	}
 }
 
 // Hub maintains the set of active clients and broadcasts events.
@@ -42,8 +52,11 @@ func (h *Hub) Run() {
 		case client := <-h.register:
 			h.mu.Lock()
 			h.clients[client] = struct{}{}
+			clientCount := len(h.clients)
 			h.mu.Unlock()
-			slog.Debug("ws client connected", "user", client.userID, "project", client.projectID)
+			fields := client.logFields()
+			fields["clientCount"] = clientCount
+			log.WithFields(fields).Info("ws client registered")
 
 		case client := <-h.unregister:
 			h.mu.Lock()
@@ -51,8 +64,11 @@ func (h *Hub) Run() {
 				delete(h.clients, client)
 				close(client.send)
 			}
+			clientCount := len(h.clients)
 			h.mu.Unlock()
-			slog.Debug("ws client disconnected", "user", client.userID)
+			fields := client.logFields()
+			fields["clientCount"] = clientCount
+			log.WithFields(fields).Info("ws client unregistered")
 
 		case message := <-h.broadcast:
 			h.mu.RLock()
@@ -65,7 +81,11 @@ func (h *Hub) Run() {
 					h.mu.Lock()
 					delete(h.clients, client)
 					close(client.send)
+					clientCount := len(h.clients)
 					h.mu.Unlock()
+					fields := client.logFields()
+					fields["clientCount"] = clientCount
+					log.WithFields(fields).Warn("ws client dropped: slow consumer")
 					h.mu.RLock()
 				}
 			}

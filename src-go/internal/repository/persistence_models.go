@@ -2,6 +2,7 @@ package repository
 
 import (
 	"encoding/json"
+	"fmt"
 	"time"
 
 	"github.com/google/uuid"
@@ -585,6 +586,470 @@ func (r *scheduledJobRunRecord) toModel() *model.ScheduledJobRun {
 		CreatedAt:     r.CreatedAt,
 		UpdatedAt:     r.UpdatedAt,
 	}
+}
+
+type taskRecord struct {
+	ID             uuid.UUID  `gorm:"column:id;primaryKey"`
+	ProjectID      uuid.UUID  `gorm:"column:project_id"`
+	ParentID       *uuid.UUID `gorm:"column:parent_id"`
+	SprintID       *uuid.UUID `gorm:"column:sprint_id"`
+	Title          string     `gorm:"column:title"`
+	Description    string     `gorm:"column:description"`
+	Status         string     `gorm:"column:status"`
+	Priority       string     `gorm:"column:priority"`
+	AssigneeID     *uuid.UUID `gorm:"column:assignee_id"`
+	AssigneeType   *string    `gorm:"column:assignee_type"`
+	ReporterID     *uuid.UUID `gorm:"column:reporter_id"`
+	Labels         stringList `gorm:"column:labels;type:text[]"`
+	BudgetUsd      float64    `gorm:"column:budget_usd"`
+	SpentUsd       float64    `gorm:"column:spent_usd"`
+	AgentBranch    string     `gorm:"column:agent_branch"`
+	AgentWorktree  string     `gorm:"column:agent_worktree"`
+	AgentSessionID string     `gorm:"column:agent_session_id"`
+	PRUrl          string     `gorm:"column:pr_url"`
+	PRNumber       int        `gorm:"column:pr_number"`
+	BlockedBy      uuidList   `gorm:"column:blocked_by;type:uuid[]"`
+	PlannedStartAt *time.Time `gorm:"column:planned_start_at"`
+	PlannedEndAt   *time.Time `gorm:"column:planned_end_at"`
+	CreatedAt      time.Time  `gorm:"column:created_at"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at"`
+	CompletedAt    *time.Time `gorm:"column:completed_at"`
+}
+
+func (taskRecord) TableName() string { return "tasks" }
+
+func newTaskRecord(task *model.Task) *taskRecord {
+	if task == nil {
+		return nil
+	}
+	blockedByIDs := make([]uuid.UUID, 0, len(task.BlockedBy))
+	for _, raw := range task.BlockedBy {
+		if id, err := uuid.Parse(raw); err == nil {
+			blockedByIDs = append(blockedByIDs, id)
+		}
+	}
+	var assigneeType *string
+	if task.AssigneeType != "" {
+		assigneeType = &task.AssigneeType
+	}
+	return &taskRecord{
+		ID:             task.ID,
+		ProjectID:      task.ProjectID,
+		ParentID:       task.ParentID,
+		SprintID:       task.SprintID,
+		Title:          task.Title,
+		Description:    task.Description,
+		Status:         task.Status,
+		Priority:       task.Priority,
+		AssigneeID:     task.AssigneeID,
+		AssigneeType:   assigneeType,
+		ReporterID:     task.ReporterID,
+		Labels:         newStringList(task.Labels),
+		BudgetUsd:      task.BudgetUsd,
+		SpentUsd:       task.SpentUsd,
+		AgentBranch:    task.AgentBranch,
+		AgentWorktree:  task.AgentWorktree,
+		AgentSessionID: task.AgentSessionID,
+		PRUrl:          task.PRUrl,
+		PRNumber:       task.PRNumber,
+		BlockedBy:      newUUIDList(blockedByIDs),
+		PlannedStartAt: task.PlannedStartAt,
+		PlannedEndAt:   task.PlannedEndAt,
+		CreatedAt:      task.CreatedAt,
+		UpdatedAt:      task.UpdatedAt,
+		CompletedAt:    task.CompletedAt,
+	}
+}
+
+func (r *taskRecord) toModel() *model.Task {
+	if r == nil {
+		return nil
+	}
+	var assigneeType string
+	if r.AssigneeType != nil {
+		assigneeType = *r.AssigneeType
+	}
+	blockedByIDs := r.BlockedBy.Slice()
+	blockedBy := make([]string, 0, len(blockedByIDs))
+	for _, id := range blockedByIDs {
+		blockedBy = append(blockedBy, id.String())
+	}
+	return &model.Task{
+		ID:             r.ID,
+		ProjectID:      r.ProjectID,
+		ParentID:       r.ParentID,
+		SprintID:       r.SprintID,
+		Title:          r.Title,
+		Description:    r.Description,
+		Status:         r.Status,
+		Priority:       r.Priority,
+		AssigneeID:     r.AssigneeID,
+		AssigneeType:   assigneeType,
+		ReporterID:     r.ReporterID,
+		Labels:         r.Labels.Slice(),
+		BudgetUsd:      r.BudgetUsd,
+		SpentUsd:       r.SpentUsd,
+		AgentBranch:    r.AgentBranch,
+		AgentWorktree:  r.AgentWorktree,
+		AgentSessionID: r.AgentSessionID,
+		PRUrl:          r.PRUrl,
+		PRNumber:       r.PRNumber,
+		BlockedBy:      blockedBy,
+		PlannedStartAt: r.PlannedStartAt,
+		PlannedEndAt:   r.PlannedEndAt,
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
+		CompletedAt:    r.CompletedAt,
+	}
+}
+
+type taskProgressSnapshotRecord struct {
+	TaskID             uuid.UUID  `gorm:"column:task_id;primaryKey"`
+	LastActivityAt     time.Time  `gorm:"column:last_activity_at"`
+	LastActivitySource string     `gorm:"column:last_activity_source"`
+	LastTransitionAt   time.Time  `gorm:"column:last_transition_at"`
+	HealthStatus       string     `gorm:"column:health_status"`
+	RiskReason         string     `gorm:"column:risk_reason"`
+	RiskSinceAt        *time.Time `gorm:"column:risk_since_at"`
+	LastAlertState     string     `gorm:"column:last_alert_state"`
+	LastAlertAt        *time.Time `gorm:"column:last_alert_at"`
+	LastRecoveredAt    *time.Time `gorm:"column:last_recovered_at"`
+	CreatedAt          time.Time  `gorm:"column:created_at"`
+	UpdatedAt          time.Time  `gorm:"column:updated_at"`
+}
+
+func (taskProgressSnapshotRecord) TableName() string { return "task_progress_snapshots" }
+
+func newTaskProgressSnapshotRecord(s *model.TaskProgressSnapshot) *taskProgressSnapshotRecord {
+	if s == nil {
+		return nil
+	}
+	return &taskProgressSnapshotRecord{
+		TaskID:             s.TaskID,
+		LastActivityAt:     s.LastActivityAt,
+		LastActivitySource: s.LastActivitySource,
+		LastTransitionAt:   s.LastTransitionAt,
+		HealthStatus:       s.HealthStatus,
+		RiskReason:         s.RiskReason,
+		RiskSinceAt:        cloneTimePointer(s.RiskSinceAt),
+		LastAlertState:     s.LastAlertState,
+		LastAlertAt:        cloneTimePointer(s.LastAlertAt),
+		LastRecoveredAt:    cloneTimePointer(s.LastRecoveredAt),
+		CreatedAt:          s.CreatedAt,
+		UpdatedAt:          s.UpdatedAt,
+	}
+}
+
+func (r *taskProgressSnapshotRecord) toModel() *model.TaskProgressSnapshot {
+	if r == nil {
+		return nil
+	}
+	return &model.TaskProgressSnapshot{
+		TaskID:             r.TaskID,
+		LastActivityAt:     r.LastActivityAt,
+		LastActivitySource: r.LastActivitySource,
+		LastTransitionAt:   r.LastTransitionAt,
+		HealthStatus:       r.HealthStatus,
+		RiskReason:         r.RiskReason,
+		RiskSinceAt:        cloneTimePointer(r.RiskSinceAt),
+		LastAlertState:     r.LastAlertState,
+		LastAlertAt:        cloneTimePointer(r.LastAlertAt),
+		LastRecoveredAt:    cloneTimePointer(r.LastRecoveredAt),
+		CreatedAt:          r.CreatedAt,
+		UpdatedAt:          r.UpdatedAt,
+	}
+}
+
+type agentRunRecord struct {
+	ID              uuid.UUID  `gorm:"column:id;primaryKey"`
+	TaskID          uuid.UUID  `gorm:"column:task_id"`
+	MemberID        uuid.UUID  `gorm:"column:member_id"`
+	RoleID          string     `gorm:"column:role_id"`
+	Status          string     `gorm:"column:status"`
+	Runtime         string     `gorm:"column:runtime"`
+	Provider        string     `gorm:"column:provider"`
+	Model           string     `gorm:"column:model"`
+	InputTokens     int64      `gorm:"column:input_tokens"`
+	OutputTokens    int64      `gorm:"column:output_tokens"`
+	CacheReadTokens int64      `gorm:"column:cache_read_tokens"`
+	CostUsd         float64    `gorm:"column:cost_usd"`
+	TurnCount       int        `gorm:"column:turn_count"`
+	ErrorMessage    string     `gorm:"column:error_message"`
+	StartedAt       time.Time  `gorm:"column:started_at"`
+	CompletedAt     *time.Time `gorm:"column:completed_at"`
+	CreatedAt       time.Time  `gorm:"column:created_at"`
+	UpdatedAt       time.Time  `gorm:"column:updated_at"`
+	TeamID          *uuid.UUID `gorm:"column:team_id"`
+	TeamRole        string     `gorm:"column:team_role"`
+}
+
+func (agentRunRecord) TableName() string { return "agent_runs" }
+
+func newAgentRunRecord(run *model.AgentRun) *agentRunRecord {
+	if run == nil {
+		return nil
+	}
+	return &agentRunRecord{
+		ID:              run.ID,
+		TaskID:          run.TaskID,
+		MemberID:        run.MemberID,
+		RoleID:          run.RoleID,
+		Status:          run.Status,
+		Runtime:         run.Runtime,
+		Provider:        run.Provider,
+		Model:           run.Model,
+		InputTokens:     run.InputTokens,
+		OutputTokens:    run.OutputTokens,
+		CacheReadTokens: run.CacheReadTokens,
+		CostUsd:         run.CostUsd,
+		TurnCount:       run.TurnCount,
+		ErrorMessage:    run.ErrorMessage,
+		StartedAt:       run.StartedAt,
+		CompletedAt:     cloneTimePointer(run.CompletedAt),
+		CreatedAt:       run.CreatedAt,
+		UpdatedAt:       run.UpdatedAt,
+		TeamID:          run.TeamID,
+		TeamRole:        run.TeamRole,
+	}
+}
+
+func (r *agentRunRecord) toModel() *model.AgentRun {
+	if r == nil {
+		return nil
+	}
+	return &model.AgentRun{
+		ID:              r.ID,
+		TaskID:          r.TaskID,
+		MemberID:        r.MemberID,
+		RoleID:          r.RoleID,
+		Status:          r.Status,
+		Runtime:         r.Runtime,
+		Provider:        r.Provider,
+		Model:           r.Model,
+		InputTokens:     r.InputTokens,
+		OutputTokens:    r.OutputTokens,
+		CacheReadTokens: r.CacheReadTokens,
+		CostUsd:         r.CostUsd,
+		TurnCount:       r.TurnCount,
+		ErrorMessage:    r.ErrorMessage,
+		StartedAt:       r.StartedAt,
+		CompletedAt:     cloneTimePointer(r.CompletedAt),
+		CreatedAt:       r.CreatedAt,
+		UpdatedAt:       r.UpdatedAt,
+		TeamID:          r.TeamID,
+		TeamRole:        r.TeamRole,
+	}
+}
+
+type agentTeamRecord struct {
+	ID             uuid.UUID  `gorm:"column:id;primaryKey"`
+	ProjectID      uuid.UUID  `gorm:"column:project_id"`
+	TaskID         uuid.UUID  `gorm:"column:task_id"`
+	Name           string     `gorm:"column:name"`
+	Status         string     `gorm:"column:status"`
+	Strategy       string     `gorm:"column:strategy"`
+	PlannerRunID   *uuid.UUID `gorm:"column:planner_run_id"`
+	ReviewerRunID  *uuid.UUID `gorm:"column:reviewer_run_id"`
+	TotalBudgetUsd float64    `gorm:"column:total_budget_usd"`
+	TotalSpentUsd  float64    `gorm:"column:total_spent_usd"`
+	Config         jsonText   `gorm:"column:config;type:jsonb"`
+	ErrorMessage   string     `gorm:"column:error_message"`
+	CreatedAt      time.Time  `gorm:"column:created_at"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at"`
+}
+
+func (agentTeamRecord) TableName() string { return "agent_teams" }
+
+func newAgentTeamRecord(team *model.AgentTeam) *agentTeamRecord {
+	if team == nil {
+		return nil
+	}
+	return &agentTeamRecord{
+		ID:             team.ID,
+		ProjectID:      team.ProjectID,
+		TaskID:         team.TaskID,
+		Name:           team.Name,
+		Status:         team.Status,
+		Strategy:       team.Strategy,
+		PlannerRunID:   team.PlannerRunID,
+		ReviewerRunID:  team.ReviewerRunID,
+		TotalBudgetUsd: team.TotalBudgetUsd,
+		TotalSpentUsd:  team.TotalSpentUsd,
+		Config:         newJSONText(team.Config, "{}"),
+		ErrorMessage:   team.ErrorMessage,
+		CreatedAt:      team.CreatedAt,
+		UpdatedAt:      team.UpdatedAt,
+	}
+}
+
+func (r *agentTeamRecord) toModel() *model.AgentTeam {
+	if r == nil {
+		return nil
+	}
+	return &model.AgentTeam{
+		ID:             r.ID,
+		ProjectID:      r.ProjectID,
+		TaskID:         r.TaskID,
+		Name:           r.Name,
+		Status:         r.Status,
+		Strategy:       r.Strategy,
+		PlannerRunID:   r.PlannerRunID,
+		ReviewerRunID:  r.ReviewerRunID,
+		TotalBudgetUsd: r.TotalBudgetUsd,
+		TotalSpentUsd:  r.TotalSpentUsd,
+		Config:         r.Config.String("{}"),
+		ErrorMessage:   r.ErrorMessage,
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
+	}
+}
+
+type agentMemoryRecord struct {
+	ID             uuid.UUID  `gorm:"column:id;primaryKey"`
+	ProjectID      uuid.UUID  `gorm:"column:project_id"`
+	Scope          string     `gorm:"column:scope"`
+	RoleID         string     `gorm:"column:role_id"`
+	Category       string     `gorm:"column:category"`
+	Key            string     `gorm:"column:key"`
+	Content        string     `gorm:"column:content"`
+	Metadata       jsonText   `gorm:"column:metadata;type:jsonb"`
+	RelevanceScore float64    `gorm:"column:relevance_score"`
+	AccessCount    int        `gorm:"column:access_count"`
+	LastAccessedAt *time.Time `gorm:"column:last_accessed_at"`
+	CreatedAt      time.Time  `gorm:"column:created_at"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at"`
+}
+
+func (agentMemoryRecord) TableName() string { return "agent_memory" }
+
+func newAgentMemoryRecord(mem *model.AgentMemory) *agentMemoryRecord {
+	if mem == nil {
+		return nil
+	}
+	return &agentMemoryRecord{
+		ID:             mem.ID,
+		ProjectID:      mem.ProjectID,
+		Scope:          mem.Scope,
+		RoleID:         mem.RoleID,
+		Category:       mem.Category,
+		Key:            mem.Key,
+		Content:        mem.Content,
+		Metadata:       newJSONText(mem.Metadata, "{}"),
+		RelevanceScore: mem.RelevanceScore,
+		AccessCount:    mem.AccessCount,
+		LastAccessedAt: cloneTimePointer(mem.LastAccessedAt),
+		CreatedAt:      mem.CreatedAt,
+		UpdatedAt:      mem.UpdatedAt,
+	}
+}
+
+func (r *agentMemoryRecord) toModel() *model.AgentMemory {
+	if r == nil {
+		return nil
+	}
+	return &model.AgentMemory{
+		ID:             r.ID,
+		ProjectID:      r.ProjectID,
+		Scope:          r.Scope,
+		RoleID:         r.RoleID,
+		Category:       r.Category,
+		Key:            r.Key,
+		Content:        r.Content,
+		Metadata:       r.Metadata.String("{}"),
+		RelevanceScore: r.RelevanceScore,
+		AccessCount:    r.AccessCount,
+		LastAccessedAt: cloneTimePointer(r.LastAccessedAt),
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
+	}
+}
+
+type reviewRecord struct {
+	ID                uuid.UUID `gorm:"column:id;primaryKey"`
+	TaskID            uuid.UUID `gorm:"column:task_id"`
+	PRURL             string    `gorm:"column:pr_url"`
+	PRNumber          int       `gorm:"column:pr_number"`
+	Layer             int       `gorm:"column:layer"`
+	Status            string    `gorm:"column:status"`
+	RiskLevel         string    `gorm:"column:risk_level"`
+	Findings          rawJSON   `gorm:"column:findings;type:jsonb"`
+	ExecutionMetadata rawJSON   `gorm:"column:execution_metadata;type:jsonb"`
+	Summary           string    `gorm:"column:summary"`
+	Recommendation    string    `gorm:"column:recommendation"`
+	CostUSD           float64   `gorm:"column:cost_usd"`
+	CreatedAt         time.Time `gorm:"column:created_at"`
+	UpdatedAt         time.Time `gorm:"column:updated_at"`
+}
+
+func (reviewRecord) TableName() string { return "reviews" }
+
+func newReviewRecord(review *model.Review) (*reviewRecord, error) {
+	if review == nil {
+		return nil, nil
+	}
+	findingsJSON, err := json.Marshal(review.Findings)
+	if err != nil {
+		return nil, fmt.Errorf("marshal findings: %w", err)
+	}
+	if len(review.Findings) == 0 {
+		findingsJSON = []byte("[]")
+	}
+	executionMetadataJSON := []byte("{}")
+	if review.ExecutionMetadata != nil {
+		executionMetadataJSON, err = json.Marshal(review.ExecutionMetadata)
+		if err != nil {
+			return nil, fmt.Errorf("marshal execution metadata: %w", err)
+		}
+	}
+	return &reviewRecord{
+		ID:                review.ID,
+		TaskID:            review.TaskID,
+		PRURL:             review.PRURL,
+		PRNumber:          review.PRNumber,
+		Layer:             review.Layer,
+		Status:            review.Status,
+		RiskLevel:         review.RiskLevel,
+		Findings:          newRawJSON(findingsJSON, "[]"),
+		ExecutionMetadata: newRawJSON(executionMetadataJSON, "{}"),
+		Summary:           review.Summary,
+		Recommendation:    review.Recommendation,
+		CostUSD:           review.CostUSD,
+		CreatedAt:         review.CreatedAt,
+		UpdatedAt:         review.UpdatedAt,
+	}, nil
+}
+
+func (r *reviewRecord) toModel() (*model.Review, error) {
+	if r == nil {
+		return nil, nil
+	}
+	review := &model.Review{
+		ID:             r.ID,
+		TaskID:         r.TaskID,
+		PRURL:          r.PRURL,
+		PRNumber:       r.PRNumber,
+		Layer:          r.Layer,
+		Status:         r.Status,
+		RiskLevel:      r.RiskLevel,
+		Summary:        r.Summary,
+		Recommendation: r.Recommendation,
+		CostUSD:        r.CostUSD,
+		CreatedAt:      r.CreatedAt,
+		UpdatedAt:      r.UpdatedAt,
+	}
+	if findingsRaw := r.Findings.Bytes("[]"); len(findingsRaw) > 0 {
+		if err := json.Unmarshal(findingsRaw, &review.Findings); err != nil {
+			return nil, fmt.Errorf("unmarshal findings: %w", err)
+		}
+	}
+	if metaRaw := r.ExecutionMetadata.Bytes("{}"); len(metaRaw) > 0 && string(metaRaw) != "null" && string(metaRaw) != "{}" {
+		var metadata model.ReviewExecutionMetadata
+		if err := json.Unmarshal(metaRaw, &metadata); err != nil {
+			return nil, fmt.Errorf("unmarshal execution metadata: %w", err)
+		}
+		review.ExecutionMetadata = &metadata
+	}
+	return review, nil
 }
 
 type agentPoolQueueEntryRecord struct {

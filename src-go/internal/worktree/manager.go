@@ -10,6 +10,8 @@ import (
 	"path/filepath"
 	"sort"
 	"strings"
+
+	log "github.com/sirupsen/logrus"
 )
 
 var (
@@ -81,6 +83,12 @@ func (m *Manager) Prepare(ctx context.Context, projectSlug, taskID string) (*All
 		return nil, err
 	}
 	if inspection.Managed && !inspection.Stale {
+		log.WithFields(log.Fields{
+			"projectSlug": projectSlug,
+			"taskId":      taskID,
+			"branch":      inspection.Branch,
+			"path":        inspection.Path,
+		}).Info("worktree reused existing managed workspace")
 		return &Allocation{
 			ProjectSlug: projectSlug,
 			TaskID:      taskID,
@@ -90,9 +98,23 @@ func (m *Manager) Prepare(ctx context.Context, projectSlug, taskID string) (*All
 		}, nil
 	}
 	if inspection.Stale {
+		log.WithFields(log.Fields{
+			"projectSlug": projectSlug,
+			"taskId":      taskID,
+			"branch":      inspection.Branch,
+			"path":        inspection.Path,
+			"reason":      inspection.Reason,
+		}).Warn("worktree prepare blocked by stale managed state")
 		return nil, fmt.Errorf("%w: %s", ErrStaleState, inspection.Reason)
 	}
 	if inspection.Exists {
+		log.WithFields(log.Fields{
+			"projectSlug": projectSlug,
+			"taskId":      taskID,
+			"branch":      inspection.Branch,
+			"path":        inspection.Path,
+			"reason":      inspection.Reason,
+		}).Warn("worktree prepare blocked by path conflict")
 		return nil, fmt.Errorf("%w: %s", ErrPathConflict, inspection.Reason)
 	}
 
@@ -101,6 +123,11 @@ func (m *Manager) Prepare(ctx context.Context, projectSlug, taskID string) (*All
 		return nil, err
 	}
 	if m.maxActive > 0 && m.countManagedEntries(projectSlug, entries) >= m.maxActive {
+		log.WithFields(log.Fields{
+			"projectSlug": projectSlug,
+			"taskId":      taskID,
+			"maxActive":   m.maxActive,
+		}).Warn("worktree prepare blocked by capacity limit")
 		return nil, fmt.Errorf("%w: max_active=%d", ErrCapacityReached, m.maxActive)
 	}
 
@@ -117,8 +144,20 @@ func (m *Manager) Prepare(ctx context.Context, projectSlug, taskID string) (*All
 	cmd.Dir = repoPath
 	output, err := cmd.CombinedOutput()
 	if err != nil {
+		log.WithFields(log.Fields{
+			"projectSlug": projectSlug,
+			"taskId":      taskID,
+			"branch":      branch,
+			"path":        worktreePath,
+		}).WithError(err).Warn("worktree create failed")
 		return nil, fmt.Errorf("git worktree add: %s: %w", strings.TrimSpace(string(output)), err)
 	}
+	log.WithFields(log.Fields{
+		"projectSlug": projectSlug,
+		"taskId":      taskID,
+		"branch":      branch,
+		"path":        worktreePath,
+	}).Info("worktree created")
 
 	return &Allocation{
 		ProjectSlug: projectSlug,
@@ -134,6 +173,15 @@ func (m *Manager) Release(ctx context.Context, projectSlug, taskID string) error
 	if err != nil {
 		return err
 	}
+	log.WithFields(log.Fields{
+		"projectSlug": projectSlug,
+		"taskId":      taskID,
+		"branch":      inspection.Branch,
+		"path":        inspection.Path,
+		"exists":      inspection.Exists,
+		"managed":     inspection.Managed,
+		"stale":       inspection.Stale,
+	}).Info("worktree release started")
 
 	entries, err := m.listEntries(ctx, projectSlug)
 	if err != nil {
@@ -165,6 +213,12 @@ func (m *Manager) Release(ctx context.Context, projectSlug, taskID string) error
 			return err
 		}
 	}
+	log.WithFields(log.Fields{
+		"projectSlug": projectSlug,
+		"taskId":      taskID,
+		"branch":      inspection.Branch,
+		"path":        inspection.Path,
+	}).Info("worktree released")
 
 	return nil
 }
@@ -201,6 +255,12 @@ func (m *Manager) GarbageCollectAll(ctx context.Context, projectSlug string) ([]
 			return nil, err
 		}
 		cleaned = append(cleaned, *inspection)
+	}
+	if len(cleaned) > 0 {
+		log.WithFields(log.Fields{
+			"projectSlug":  projectSlug,
+			"cleanedCount": len(cleaned),
+		}).Info("worktree garbage collection completed")
 	}
 
 	return cleaned, nil

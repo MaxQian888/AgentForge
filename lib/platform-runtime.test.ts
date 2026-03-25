@@ -123,6 +123,124 @@ describe("platform-runtime", () => {
     });
   });
 
+  it("returns normalized update metadata when a desktop update is available", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      checkForDesktopUpdate: jest.fn().mockResolvedValue({
+        body: "Important fixes",
+        currentVersion: "0.1.0",
+        date: "2026-03-25T04:00:00.000Z",
+        downloadAndInstall: jest.fn(),
+        version: "0.2.0",
+      }),
+    });
+
+    await expect(runtime.checkForUpdate()).resolves.toEqual({
+      mode: "desktop",
+      ok: true,
+      status: "available",
+      update: {
+        currentVersion: "0.1.0",
+        notes: "Important fixes",
+        publishedAt: "2026-03-25T04:00:00.000Z",
+        version: "0.2.0",
+      },
+    });
+  });
+
+  it("downloads and installs a cached desktop update with normalized progress", async () => {
+    const downloadAndInstall = jest
+      .fn()
+      .mockImplementation(async (onEvent?: (event: unknown) => void) => {
+        onEvent?.({
+          event: "Started",
+          data: { contentLength: 2048 },
+        });
+        onEvent?.({
+          event: "Progress",
+          data: { chunkLength: 512 },
+        });
+        onEvent?.({
+          event: "Finished",
+        });
+      });
+
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      checkForDesktopUpdate: jest.fn().mockResolvedValue({
+        body: "Important fixes",
+        currentVersion: "0.1.0",
+        date: "2026-03-25T04:00:00.000Z",
+        downloadAndInstall,
+        version: "0.2.0",
+      }),
+    });
+
+    await runtime.checkForUpdate();
+
+    const progressEvents: unknown[] = [];
+    await expect(
+      runtime.installUpdate((event) => {
+        progressEvents.push(event);
+      }),
+    ).resolves.toEqual({
+      mode: "desktop",
+      ok: true,
+      status: "ready_to_relaunch",
+      update: {
+        currentVersion: "0.1.0",
+        notes: "Important fixes",
+        publishedAt: "2026-03-25T04:00:00.000Z",
+        version: "0.2.0",
+      },
+    });
+
+    expect(progressEvents).toEqual([
+      {
+        downloadedBytes: 0,
+        phase: "downloading",
+        totalBytes: 2048,
+      },
+      {
+        downloadedBytes: 512,
+        phase: "downloading",
+        totalBytes: 2048,
+      },
+      {
+        downloadedBytes: 512,
+        phase: "installing",
+        totalBytes: 2048,
+      },
+    ]);
+  });
+
+  it("relaunches the desktop app after an installed update is ready", async () => {
+    const relaunchDesktopApp = jest.fn().mockResolvedValue(undefined);
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      checkForDesktopUpdate: jest.fn().mockResolvedValue({
+        body: "Important fixes",
+        currentVersion: "0.1.0",
+        date: "2026-03-25T04:00:00.000Z",
+        downloadAndInstall: jest.fn().mockResolvedValue(undefined),
+        version: "0.2.0",
+      }),
+      relaunchDesktopApp,
+    });
+
+    await runtime.checkForUpdate();
+    await runtime.installUpdate();
+
+    await expect(runtime.relaunchToUpdate()).resolves.toEqual({
+      mode: "desktop",
+      ok: true,
+    });
+    expect(relaunchDesktopApp).toHaveBeenCalled();
+  });
+
   it("normalizes desktop runtime event subscriptions", async () => {
     const unlisten = jest.fn();
     const listen = jest

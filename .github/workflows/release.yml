@@ -51,6 +51,10 @@ jobs:
     name: Build Tauri
     needs: [quality, test, go-ci]
     uses: ./.github/workflows/build-tauri.yml
+    with:
+      updater-enabled: true
+      updater-pubkey: ${{ vars.TAURI_UPDATER_PUBKEY }}
+    secrets: inherit
 
   # Create the GitHub release
   create-release:
@@ -65,6 +69,11 @@ jobs:
       - name: Checkout code
         uses: actions/checkout@v6
 
+      - name: Setup Node.js
+        uses: actions/setup-node@v6
+        with:
+          node-version: 22
+
       - name: Download all artifacts
         uses: actions/download-artifact@v8
         with:
@@ -73,14 +82,30 @@ jobs:
       - name: Display structure of downloaded files
         run: ls -R artifacts/
 
+      - name: Build updater manifest
+        run: |
+          node scripts/build-updater-manifest.js \
+            --artifacts-root artifacts \
+            --base-download-url "${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}" \
+            --release-version "${{ github.ref_name }}" \
+            --output artifacts/latest.json
+
+      - name: Validate updater artifacts
+        run: |
+          node scripts/validate-updater-artifacts.js \
+            --artifacts-root artifacts \
+            --manifest artifacts/latest.json
+
       - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           draft: true
           generate_release_notes: true
           files: |
-            artifacts/**/*.AppImage
+            artifacts/**/*.AppImage*
             artifacts/**/*.deb
-            artifacts/**/*.msi
-            artifacts/**/*.exe
+            artifacts/**/*.msi*
+            artifacts/**/*.exe*
+            artifacts/**/*.app.tar.gz*
             artifacts/**/*.dmg
+            artifacts/latest.json

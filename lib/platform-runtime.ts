@@ -77,7 +77,50 @@ export interface RegisterShortcutRequest {
   event: string;
 }
 
+export interface DesktopUpdateInfo {
+  currentVersion: string | null;
+  notes: string | null;
+  publishedAt: string | null;
+  version: string;
+}
+
+export interface DesktopUpdateProgress {
+  downloadedBytes: number;
+  phase: "downloading" | "installing";
+  totalBytes: number | null;
+}
+
+export type PlatformUpdateResult =
+  | {
+      ok: true;
+      mode: "desktop";
+      status: "available" | "ready_to_relaunch";
+      update: DesktopUpdateInfo;
+    }
+  | {
+      ok: true;
+      mode: "desktop";
+      status: "up_to_date";
+      update?: undefined;
+    }
+  | {
+      ok: false;
+      reason: CapabilityFailureReason;
+      error: string;
+    };
+
+interface DesktopUpdateHandle {
+  body?: string;
+  currentVersion?: string;
+  date?: string | null;
+  downloadAndInstall: (
+    onEvent?: (event: unknown) => void,
+  ) => Promise<void>;
+  version: string;
+}
+
 interface PlatformRuntimeDeps {
+  checkForDesktopUpdate?: () => Promise<DesktopUpdateHandle | null>;
   defaultBackendUrl?: string;
   inputFactory?: () => HTMLInputElement;
   invoke?: (
@@ -90,6 +133,7 @@ interface PlatformRuntimeDeps {
     handler: (event: { payload: unknown }) => void,
   ) => Promise<() => void>;
   notifyWeb?: (title: string, options?: NotificationOptions) => void;
+  relaunchDesktopApp?: () => Promise<void>;
   requestNotificationPermission?: () => Promise<NotificationPermission>;
   setDocumentTitle?: (title: string) => void;
 }
@@ -153,6 +197,16 @@ async function importListen() {
   return listen;
 }
 
+async function importUpdaterCheck() {
+  const { check } = await import("@tauri-apps/plugin-updater");
+  return check;
+}
+
+async function importRelaunch() {
+  const { relaunch } = await import("@tauri-apps/plugin-process");
+  return relaunch;
+}
+
 function normalizeDesktopEvent(payload: unknown): DesktopRuntimeEvent | null {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -172,6 +226,21 @@ function normalizeDesktopEvent(payload: unknown): DesktopRuntimeEvent | null {
         : undefined,
     payload: typedPayload.payload,
   };
+}
+
+function normalizeDesktopUpdateInfo(
+  update: DesktopUpdateHandle,
+): DesktopUpdateInfo {
+  return {
+    currentVersion: update.currentVersion ?? null,
+    notes: update.body ?? null,
+    publishedAt: update.date ?? null,
+    version: update.version,
+  };
+}
+
+function normalizeUpdateError(error: unknown, fallback: string): string {
+  return error instanceof Error ? error.message : fallback;
 }
 
 function pickFilesFromBrowser(
@@ -260,6 +329,20 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
       }
     });
   const inputFactory = deps.inputFactory ?? createBrowserInput;
+  const checkForDesktopUpdate =
+    deps.checkForDesktopUpdate ??
+    (async () => {
+      const check = await importUpdaterCheck();
+      return (await check()) as DesktopUpdateHandle | null;
+    });
+  const relaunchDesktopApp =
+    deps.relaunchDesktopApp ??
+    (async () => {
+      const relaunch = await importRelaunch();
+      await relaunch();
+    });
+  let pendingDesktopUpdate: DesktopUpdateHandle | null = null;
+  let installedDesktopUpdate: DesktopUpdateHandle | null = null;
 
   return {
     defaultBackendUrl,
@@ -455,7 +538,7 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
         };
       }
     },
-    async checkForUpdate(): Promise<PlatformResult> {
+    async checkForUpdate(): Promise<PlatformUpdateResult> {
       if (!getIsDesktopEnv()) {
         return {
           ok: false,
@@ -465,14 +548,136 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
       }
 
       try {
-        await getInvoke("check_for_update");
+        const update = await checkForDesktopUpdate();
+
+        if (!update) {
+          pendingDesktopUpdate = null;
+          installedDesktopUpdate = null;
+          return { ok: true, mode: "desktop", status: "up_to_date" };
+        }
+
+        pendingDesktopUpdate = update;
+        installedDesktopUpdate = null;
+
+        return {
+          ok: true,
+          mode: "desktop",
+          status: "available",
+          update: normalizeDesktopUpdateInfo(update),
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          reason: "failed",
+          error: normalizeUpdateError(error, "Update check failed."),
+        };
+      }
+    },
+    async installUpdate(
+      onProgress?: (event: DesktopUpdateProgress) => void,
+    ): Promise<PlatformUpdateResult> {
+      if (!getIsDesktopEnv()) {
+        return {
+          ok: false,
+          reason: "not_applicable",
+          error: "Update installation only runs inside the desktop shell.",
+        };
+      }
+
+      if (!pendingDesktopUpdate) {
+        return {
+          ok: false,
+          reason: "failed",
+          error: "No desktop update is ready to install.",
+        };
+      }
+
+      const update = pendingDesktopUpdate;
+      let downloadedBytes = 0;
+      let totalBytes: number | null = null;
+
+      try {
+        await update.downloadAndInstall((event) => {
+          if (!onProgress || !event || typeof event !== "object") {
+            return;
+          }
+
+          const typedEvent = event as {
+            data?: { chunkLength?: number; contentLength?: number };
+            event?: string;
+          };
+
+          if (typedEvent.event === "Started") {
+            totalBytes = typedEvent.data?.contentLength ?? null;
+            onProgress({
+              downloadedBytes: 0,
+              phase: "downloading",
+              totalBytes,
+            });
+            return;
+          }
+
+          if (typedEvent.event === "Progress") {
+            downloadedBytes += typedEvent.data?.chunkLength ?? 0;
+            onProgress({
+              downloadedBytes,
+              phase: "downloading",
+              totalBytes,
+            });
+            return;
+          }
+
+          if (typedEvent.event === "Finished") {
+            onProgress({
+              downloadedBytes,
+              phase: "installing",
+              totalBytes,
+            });
+          }
+        });
+
+        pendingDesktopUpdate = null;
+        installedDesktopUpdate = update;
+
+        return {
+          ok: true,
+          mode: "desktop",
+          status: "ready_to_relaunch",
+          update: normalizeDesktopUpdateInfo(update),
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          reason: "failed",
+          error: normalizeUpdateError(error, "Update installation failed."),
+        };
+      }
+    },
+    async relaunchToUpdate(): Promise<PlatformResult> {
+      if (!getIsDesktopEnv()) {
+        return {
+          ok: false,
+          reason: "not_applicable",
+          error: "App relaunch only runs inside the desktop shell.",
+        };
+      }
+
+      if (!installedDesktopUpdate) {
+        return {
+          ok: false,
+          reason: "failed",
+          error: "No installed desktop update is waiting to relaunch.",
+        };
+      }
+
+      try {
+        await relaunchDesktopApp();
         return { ok: true, mode: "desktop" };
       } catch (error) {
         return {
           ok: false,
           reason: "failed",
-          error:
-            error instanceof Error ? error.message : "Update check failed.",
+          error: normalizeUpdateError(error, "App relaunch failed."),
         };
       }
     },

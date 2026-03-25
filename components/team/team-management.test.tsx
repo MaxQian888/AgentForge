@@ -207,4 +207,98 @@ describe("TeamManagement", () => {
       screen.getByRole("button", { name: "Add the first member" })
     ).toBeInTheDocument();
   });
+
+  it("shows loading and error states with retry support", async () => {
+    const user = userEvent.setup();
+    const onRetry = jest.fn();
+    const { rerender } = render(
+      <TeamManagement
+        projects={projects}
+        selectedProjectId="project-1"
+        members={members}
+        loading
+        error={null}
+        availableRoles={availableRoles}
+        onRetry={onRetry}
+        onProjectChange={jest.fn()}
+        onCreateMember={jest.fn()}
+        onUpdateMember={jest.fn()}
+      />
+    );
+
+    expect(screen.getByText("Loading team roster...")).toBeInTheDocument();
+
+    rerender(
+      <TeamManagement
+        projects={projects}
+        selectedProjectId="project-1"
+        members={members}
+        loading={false}
+        error="boom"
+        availableRoles={availableRoles}
+        onRetry={onRetry}
+        onProjectChange={jest.fn()}
+        onCreateMember={jest.fn()}
+        onUpdateMember={jest.fn()}
+      />
+    );
+
+    expect(screen.getByText("Team roster unavailable")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Retry Team Load" }));
+    expect(onRetry).toHaveBeenCalled();
+  });
+
+  it("includes agent profile data when creating an agent member and can cancel edit mode", async () => {
+    const user = userEvent.setup();
+    const onCreateMember = jest.fn().mockResolvedValue(undefined);
+
+    render(
+      <TeamManagement
+        projects={projects}
+        selectedProjectId="project-1"
+        members={members}
+        loading={false}
+        error={null}
+        availableRoles={availableRoles}
+        onRetry={jest.fn()}
+        onProjectChange={jest.fn()}
+        onCreateMember={onCreateMember}
+        onUpdateMember={jest.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Add Member" }));
+    await user.type(screen.getByLabelText("Member Name"), "Ops Bot");
+    await user.selectOptions(screen.getByLabelText("Member Type"), "agent");
+    await user.type(screen.getByLabelText("Role"), "ops-bot");
+    await user.type(screen.getByLabelText("Skills"), "ops, alerts");
+    await user.selectOptions(screen.getByLabelText("Bound Role"), "frontend-developer");
+    await user.type(screen.getByLabelText("Agent Budget USD"), "12");
+    await user.type(screen.getByLabelText("Runtime"), "codex");
+    await user.type(screen.getByLabelText("Provider"), "openai");
+    await user.type(screen.getByLabelText("Model"), "gpt-5-codex");
+    await user.type(screen.getByLabelText("Agent Notes"), "Handle incidents");
+    await user.click(screen.getByRole("button", { name: "Create Member" }));
+
+    expect(onCreateMember).toHaveBeenCalledWith({
+      name: "Ops Bot",
+      type: "agent",
+      role: "ops-bot",
+      email: "",
+      skills: ["ops", "alerts"],
+      agentProfile: {
+        roleId: "frontend-developer",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        maxBudgetUsd: "12",
+        notes: "Handle incidents",
+      },
+    });
+
+    await user.click(screen.getByRole("button", { name: "Edit Review Bot" }));
+    expect(screen.getByText("Edit Member")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(screen.queryByText("Edit Member")).not.toBeInTheDocument();
+  });
 });

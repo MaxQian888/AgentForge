@@ -2,38 +2,12 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
-	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
-
-type stubReviewRow struct {
-	findings          []byte
-	executionMetadata []byte
-}
-
-func (r stubReviewRow) Scan(dest ...any) error {
-	now := time.Now().UTC()
-
-	*(dest[0].(*uuid.UUID)) = uuid.New()
-	*(dest[1].(*uuid.UUID)) = uuid.New()
-	*(dest[2].(*string)) = "https://github.com/acme/project/pull/42"
-	*(dest[3].(*int)) = 42
-	*(dest[4].(*int)) = model.ReviewLayerDeep
-	*(dest[5].(*string)) = model.ReviewStatusCompleted
-	*(dest[6].(*string)) = model.ReviewRiskLevelHigh
-	*(dest[7].(*[]byte)) = append([]byte(nil), r.findings...)
-	*(dest[8].(*[]byte)) = append([]byte(nil), r.executionMetadata...)
-	*(dest[9].(*string)) = "High-risk secret exposure"
-	*(dest[10].(*string)) = model.ReviewRecommendationReject
-	*(dest[11].(*float64)) = 1.15
-	*(dest[12].(*time.Time)) = now
-	*(dest[13].(*time.Time)) = now
-
-	return nil
-}
 
 func TestNewReviewRepository(t *testing.T) {
 	repo := NewReviewRepository(nil)
@@ -58,57 +32,85 @@ func TestReviewRepositoryUpdateResultNilDB(t *testing.T) {
 	}
 }
 
-func TestMarshalFindingsEmptyArray(t *testing.T) {
-	data, err := marshalFindings(nil)
+func TestNewReviewRecordEmptyFindings(t *testing.T) {
+	record, err := newReviewRecord(&model.Review{
+		ID:     uuid.New(),
+		TaskID: uuid.New(),
+	})
 	if err != nil {
-		t.Fatalf("marshalFindings(nil) error = %v", err)
+		t.Fatalf("newReviewRecord() error = %v", err)
 	}
-	if string(data) != "[]" {
-		t.Fatalf("marshalFindings(nil) = %s, want []", string(data))
+	if string(record.Findings.Bytes("[]")) != "[]" {
+		t.Fatalf("Findings = %s, want []", string(record.Findings.Bytes("[]")))
 	}
 }
 
-func TestScanReviewUnmarshalsFindings(t *testing.T) {
-	review, err := scanReview(stubReviewRow{
-		findings: []byte(`[{"category":"security","severity":"high","message":"hardcoded secret"}]`),
-	})
+func TestReviewRecordRoundtripFindings(t *testing.T) {
+	review := &model.Review{
+		ID:     uuid.New(),
+		TaskID: uuid.New(),
+		Findings: []model.ReviewFinding{
+			{Category: "security", Severity: "high", Message: "hardcoded secret"},
+		},
+	}
+
+	record, err := newReviewRecord(review)
 	if err != nil {
-		t.Fatalf("scanReview() error = %v", err)
+		t.Fatalf("newReviewRecord() error = %v", err)
 	}
-	if len(review.Findings) != 1 {
-		t.Fatalf("len(Findings) = %d, want 1", len(review.Findings))
+
+	result, err := record.toModel()
+	if err != nil {
+		t.Fatalf("toModel() error = %v", err)
 	}
-	if review.Findings[0].Category != "security" {
-		t.Fatalf("Findings[0].Category = %q, want security", review.Findings[0].Category)
+	if len(result.Findings) != 1 {
+		t.Fatalf("len(Findings) = %d, want 1", len(result.Findings))
+	}
+	if result.Findings[0].Category != "security" {
+		t.Fatalf("Findings[0].Category = %q, want security", result.Findings[0].Category)
 	}
 }
 
-func TestScanReviewUnmarshalsExecutionMetadata(t *testing.T) {
-	review, err := scanReview(stubReviewRow{
-		findings: []byte(`[]`),
-		executionMetadata: []byte(`{
-			"triggerEvent":"pull_request.updated",
-			"changedFiles":["src/server/routes.go"],
-			"dimensions":["logic","security"],
-			"results":[
-				{"id":"logic","kind":"builtin_dimension","status":"completed","summary":"logic ok"},
-				{"id":"review.architecture","kind":"review_plugin","status":"failed","summary":"plugin failed","error":"timeout"}
-			]
-		}`),
-	})
-	if err != nil {
-		t.Fatalf("scanReview() error = %v", err)
+func TestReviewRecordRoundtripExecutionMetadata(t *testing.T) {
+	review := &model.Review{
+		ID:     uuid.New(),
+		TaskID: uuid.New(),
+		ExecutionMetadata: &model.ReviewExecutionMetadata{
+			TriggerEvent: "pull_request.updated",
+			ChangedFiles: []string{"src/server/routes.go"},
+			Dimensions:   []string{"logic", "security"},
+			Results: []model.ReviewExecutionResult{
+				{ID: "logic", Kind: model.ReviewExecutionKindBuiltinDimension, Status: model.ReviewExecutionStatusCompleted, Summary: "logic ok"},
+				{ID: "review.architecture", Kind: model.ReviewExecutionKindPlugin, Status: model.ReviewExecutionStatusFailed, Summary: "plugin failed", Error: "timeout"},
+			},
+		},
 	}
-	if review.ExecutionMetadata == nil {
+
+	record, err := newReviewRecord(review)
+	if err != nil {
+		t.Fatalf("newReviewRecord() error = %v", err)
+	}
+
+	// Verify the raw JSON was created
+	rawBytes := record.ExecutionMetadata.Bytes("{}")
+	if !json.Valid(rawBytes) {
+		t.Fatalf("ExecutionMetadata JSON is invalid: %s", string(rawBytes))
+	}
+
+	result, err := record.toModel()
+	if err != nil {
+		t.Fatalf("toModel() error = %v", err)
+	}
+	if result.ExecutionMetadata == nil {
 		t.Fatal("expected execution metadata to be populated")
 	}
-	if review.ExecutionMetadata.TriggerEvent != "pull_request.updated" {
-		t.Fatalf("TriggerEvent = %q, want pull_request.updated", review.ExecutionMetadata.TriggerEvent)
+	if result.ExecutionMetadata.TriggerEvent != "pull_request.updated" {
+		t.Fatalf("TriggerEvent = %q, want pull_request.updated", result.ExecutionMetadata.TriggerEvent)
 	}
-	if len(review.ExecutionMetadata.Results) != 2 {
-		t.Fatalf("len(Results) = %d, want 2", len(review.ExecutionMetadata.Results))
+	if len(result.ExecutionMetadata.Results) != 2 {
+		t.Fatalf("len(Results) = %d, want 2", len(result.ExecutionMetadata.Results))
 	}
-	if review.ExecutionMetadata.Results[1].ID != "review.architecture" {
-		t.Fatalf("Results[1].ID = %q, want review.architecture", review.ExecutionMetadata.Results[1].ID)
+	if result.ExecutionMetadata.Results[1].ID != "review.architecture" {
+		t.Fatalf("Results[1].ID = %q, want review.architecture", result.ExecutionMetadata.Results[1].ID)
 	}
 }

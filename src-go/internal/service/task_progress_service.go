@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
+	log "github.com/sirupsen/logrus"
 )
 
 var ErrTaskProgressSnapshotNotFound = errors.New("task progress snapshot not found")
@@ -60,6 +61,21 @@ type TaskProgressService struct {
 	now            func() time.Time
 	imNotifier     TaskProgressIMNotifier
 	exemptStatuses map[string]struct{}
+}
+
+func taskProgressLogFields(task *model.Task, snapshot *model.TaskProgressSnapshot) log.Fields {
+	fields := log.Fields{}
+	if task != nil {
+		fields["taskId"] = task.ID.String()
+		fields["projectId"] = task.ProjectID.String()
+		fields["taskStatus"] = task.Status
+	}
+	if snapshot != nil {
+		fields["healthStatus"] = snapshot.HealthStatus
+		fields["riskReason"] = snapshot.RiskReason
+		fields["lastActivitySource"] = snapshot.LastActivitySource
+	}
+	return fields
 }
 
 func NewTaskProgressService(
@@ -123,6 +139,19 @@ func (s *TaskProgressService) RecordActivity(ctx context.Context, taskID uuid.UU
 	if err := s.afterSnapshotMutation(ctx, task, snapshot, previous, created); err != nil {
 		return nil, err
 	}
+	log.WithFields(log.Fields{
+		"taskId":             taskID.String(),
+		"projectId":          task.ProjectID.String(),
+		"taskStatus":         task.Status,
+		"source":             input.Source,
+		"occurredAt":         now.Format(time.RFC3339),
+		"updateHealth":       input.UpdateHealth,
+		"markTransition":     input.MarkTransition,
+		"snapshotCreated":    created,
+		"healthStatus":       snapshot.HealthStatus,
+		"riskReason":         snapshot.RiskReason,
+		"lastActivitySource": snapshot.LastActivitySource,
+	}).Debug("task progress activity recorded")
 	return snapshot, nil
 }
 
@@ -180,11 +209,18 @@ func (s *TaskProgressService) afterSnapshotMutation(
 	task.Progress = snapshot
 
 	if !created && taskProgressSnapshotsEqual(previous, snapshot) {
+		log.WithFields(taskProgressLogFields(task, snapshot)).Debug("task progress unchanged after mutation")
 		return nil
 	}
 	if err := s.snapshotRepo.Upsert(ctx, snapshot); err != nil {
 		return fmt.Errorf("upsert task progress snapshot: %w", err)
 	}
+	fields := taskProgressLogFields(task, snapshot)
+	fields["transition"] = alertEvent
+	fields["snapshotCreated"] = created
+	fields["alertSent"] = alertSent
+	fields["recovered"] = recovered
+	log.WithFields(fields).Info("task progress snapshot updated")
 
 	s.broadcastProgressUpdate(task, snapshot, alertEvent)
 	if alertSent {
@@ -260,6 +296,7 @@ func (s *TaskProgressService) applyAlerting(
 		payload := mustJSONMarshal(taskProgressNotificationPayload(task, snapshot))
 		title := fmt.Sprintf("Task recovered: %s", task.Title)
 		body := fmt.Sprintf("Task %s is active again and no longer marked at risk.", task.Title)
+		log.WithFields(taskProgressLogFields(task, snapshot)).Info("task progress recovered")
 		s.notifyRecipients(ctx, task, model.NotificationTypeTaskProgressRecovered, title, body, payload)
 		s.notifyIM(ctx, task, snapshot, title, body)
 		return "recovered", false, true
@@ -285,6 +322,7 @@ func (s *TaskProgressService) applyAlerting(
 	snapshot.LastAlertAt = &alertAt
 	payload := mustJSONMarshal(taskProgressNotificationPayload(task, snapshot))
 	title, body, notificationType := buildTaskProgressAlertMessage(task, snapshot)
+	log.WithFields(taskProgressLogFields(task, snapshot)).WithField("notificationType", notificationType).Warn("task progress alert triggered")
 	s.notifyRecipients(ctx, task, notificationType, title, body, payload)
 	s.notifyIM(ctx, task, snapshot, title, body)
 	return "alerted", true, false
@@ -309,7 +347,14 @@ func (s *TaskProgressService) notifyRecipients(ctx context.Context, task *model.
 	}
 
 	for _, recipient := range recipients {
-		_, _ = s.notifications.Create(ctx, recipient, ntype, title, body, payload)
+		if _, err := s.notifications.Create(ctx, recipient, ntype, title, body, payload); err != nil {
+			log.WithFields(log.Fields{
+				"taskId":           task.ID.String(),
+				"projectId":        task.ProjectID.String(),
+				"recipientId":      recipient.String(),
+				"notificationType": ntype,
+			}).WithError(err).Warn("task progress notification creation failed")
+		}
 	}
 }
 
@@ -317,7 +362,9 @@ func (s *TaskProgressService) notifyIM(ctx context.Context, task *model.Task, sn
 	if s.imNotifier == nil {
 		return
 	}
-	_ = s.imNotifier.NotifyTaskProgress(ctx, task, snapshot, title, body)
+	if err := s.imNotifier.NotifyTaskProgress(ctx, task, snapshot, title, body); err != nil {
+		log.WithFields(taskProgressLogFields(task, snapshot)).WithError(err).Warn("task progress IM notify failed")
+	}
 }
 
 func (s *TaskProgressService) loadSnapshot(ctx context.Context, task *model.Task) (*model.TaskProgressSnapshot, bool, error) {
@@ -352,6 +399,7 @@ func (s *TaskProgressService) broadcastProgressUpdate(task *model.Task, snapshot
 	if s.hub == nil {
 		return
 	}
+	log.WithFields(taskProgressLogFields(task, snapshot)).WithField("transition", transition).Debug("task progress update broadcast")
 	task.Progress = snapshot
 	s.hub.BroadcastEvent(&ws.Event{
 		Type:      ws.EventTaskProgressUpdated,
@@ -371,6 +419,7 @@ func (s *TaskProgressService) broadcastProgressAlert(task *model.Task, snapshot 
 	if s.hub == nil {
 		return
 	}
+	log.WithFields(taskProgressLogFields(task, snapshot)).Warn("task progress alert broadcast")
 	task.Progress = snapshot
 	s.hub.BroadcastEvent(&ws.Event{
 		Type:      ws.EventTaskProgressAlerted,
@@ -387,6 +436,7 @@ func (s *TaskProgressService) broadcastProgressRecovered(task *model.Task, snaps
 	if s.hub == nil {
 		return
 	}
+	log.WithFields(taskProgressLogFields(task, snapshot)).Info("task progress recovery broadcast")
 	task.Progress = snapshot
 	s.hub.BroadcastEvent(&ws.Event{
 		Type:      ws.EventTaskProgressRecovered,
@@ -537,10 +587,10 @@ func mustJSONMarshal(value any) string {
 }
 
 type HTTPTaskProgressIMNotifier struct {
-	client       *http.Client
-	endpoint     string
-	platform     string
-	targetChatID string
+	client         *http.Client
+	endpoint       string
+	platform       string
+	targetChatID   string
 	deliverySecret string
 }
 
@@ -557,10 +607,10 @@ func NewHTTPTaskProgressIMNotifier(endpoint, platform, targetChatID string, deli
 		secret = strings.TrimSpace(deliverySecret[0])
 	}
 	return &HTTPTaskProgressIMNotifier{
-		client:       &http.Client{Timeout: 10 * time.Second},
-		endpoint:     strings.TrimRight(strings.TrimSpace(endpoint), "/"),
-		platform:     strings.TrimSpace(platform),
-		targetChatID: strings.TrimSpace(targetChatID),
+		client:         &http.Client{Timeout: 10 * time.Second},
+		endpoint:       strings.TrimRight(strings.TrimSpace(endpoint), "/"),
+		platform:       strings.TrimSpace(platform),
+		targetChatID:   strings.TrimSpace(targetChatID),
 		deliverySecret: secret,
 	}
 }
@@ -569,6 +619,9 @@ func (n *HTTPTaskProgressIMNotifier) NotifyTaskProgress(ctx context.Context, tas
 	if n == nil {
 		return nil
 	}
+	fields := taskProgressLogFields(task, snapshot)
+	fields["platform"] = n.platform
+	fields["targetChatId"] = n.targetChatID
 
 	payload := map[string]any{
 		"type":           "task_progress",
@@ -584,11 +637,13 @@ func (n *HTTPTaskProgressIMNotifier) NotifyTaskProgress(ctx context.Context, tas
 	}
 	bodyBytes, err := json.Marshal(payload)
 	if err != nil {
+		log.WithFields(fields).WithError(err).Warn("task progress HTTP IM notify marshal failed")
 		return fmt.Errorf("marshal im notify payload: %w", err)
 	}
 
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, n.endpoint+"/im/notify", bytes.NewReader(bodyBytes))
 	if err != nil {
+		log.WithFields(fields).WithError(err).Warn("task progress HTTP IM notify request creation failed")
 		return fmt.Errorf("build im notify request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
@@ -596,13 +651,16 @@ func (n *HTTPTaskProgressIMNotifier) NotifyTaskProgress(ctx context.Context, tas
 
 	resp, err := n.client.Do(req)
 	if err != nil {
+		log.WithFields(fields).WithError(err).Warn("task progress HTTP IM notify request failed")
 		return fmt.Errorf("send im notify request: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode >= http.StatusBadRequest {
+		log.WithFields(fields).WithField("status", resp.StatusCode).Warn("task progress HTTP IM notify returned non-OK status")
 		return fmt.Errorf("im notify returned status %d", resp.StatusCode)
 	}
+	log.WithFields(fields).WithField("status", resp.StatusCode).Debug("task progress HTTP IM notify delivered")
 	return nil
 }
 
@@ -621,11 +679,20 @@ func (n *ControlPlaneTaskProgressIMNotifier) NotifyTaskProgress(ctx context.Cont
 	if n == nil || n.control == nil || task == nil || snapshot == nil {
 		return nil
 	}
-	_, err := n.control.QueueBoundProgress(ctx, IMBoundProgressRequest{
+	queued, err := n.control.QueueBoundProgress(ctx, IMBoundProgressRequest{
 		TaskID:  task.ID.String(),
 		Kind:    IMDeliveryKindProgress,
 		Content: fmt.Sprintf("%s\n%s\nTask: %s\nStatus: %s\nHealth: %s", title, body, task.Title, task.Status, snapshot.HealthStatus),
 	})
+	fields := taskProgressLogFields(task, snapshot)
+	fields["queued"] = queued
+	if err != nil {
+		log.WithFields(fields).WithError(err).Warn("task progress control-plane IM notify failed")
+		return err
+	}
+	if queued {
+		log.WithFields(fields).Debug("task progress control-plane IM notify queued")
+	}
 	return err
 }
 

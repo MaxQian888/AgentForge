@@ -4,13 +4,14 @@ import (
 	"context"
 	"flag"
 	"fmt"
-	"log/slog"
 	"net/http"
 	"os"
 	"os/signal"
 	"sort"
 	"syscall"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
@@ -42,50 +43,55 @@ func main() {
 	cfg := config.Load()
 
 	// Set up structured logging
-	var logHandler slog.Handler
+	log.SetOutput(os.Stdout)
 	if cfg.Env == "production" {
-		logHandler = slog.NewJSONHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelWarn})
+		log.SetFormatter(&log.JSONFormatter{})
+		log.SetLevel(log.WarnLevel)
 	} else {
-		logHandler = slog.NewTextHandler(os.Stdout, &slog.HandlerOptions{Level: slog.LevelDebug})
+		log.SetFormatter(&log.TextFormatter{FullTimestamp: true})
+		log.SetLevel(log.DebugLevel)
 	}
-	slog.SetDefault(slog.New(logHandler))
 
-	slog.Info("starting server",
-		"version", version.Version,
-		"commit", version.Commit,
-		"buildDate", version.BuildDate,
-		"env", cfg.Env,
-	)
+	log.WithFields(log.Fields{
+		"version":   version.Version,
+		"commit":    version.Commit,
+		"buildDate": version.BuildDate,
+		"env":       cfg.Env,
+	}).Info("starting server")
 
 	// Dev fallback: auto-generate a secret so the server starts without config.
 	// NEVER use this in production.
 	if cfg.JWTSecret == "" {
 		if cfg.Env == "production" {
-			slog.Error("JWT_SECRET environment variable is required in production")
+			log.Error("JWT_SECRET environment variable is required in production")
 			os.Exit(1)
 		}
 		cfg.JWTSecret = "dev-secret-change-me-in-production-32ch"
-		slog.Warn("JWT_SECRET not set — using insecure dev default")
+		log.Warn("JWT_SECRET not set — using insecure dev default")
 	}
 
 	// Connect to PostgreSQL (optional — server starts in degraded mode if unavailable)
 	db, err := database.NewPostgres(cfg.PostgresURL)
 	if err != nil {
-		slog.Warn("PostgreSQL unavailable, auth endpoints will not work", "error", err)
+		log.WithError(err).Warn("PostgreSQL unavailable, auth endpoints will not work")
 		db = nil
+	} else {
+		log.Info("PostgreSQL connected")
 	}
 
 	// Connect to Redis (optional)
 	rdb, err := database.NewRedis(cfg.RedisURL)
 	if err != nil {
-		slog.Warn("Redis unavailable, token cache disabled", "error", err)
+		log.WithError(err).Warn("Redis unavailable, token cache disabled")
 		rdb = nil
+	} else {
+		log.Info("Redis connected")
 	}
 
 	// Run database migrations if DB is available
 	if db != nil {
 		if err := database.RunMigrations(cfg.PostgresURL, migrations.FS); err != nil {
-			slog.Warn("migration error", "error", err)
+			log.WithError(err).Warn("migration error")
 		}
 	}
 
@@ -133,7 +139,9 @@ func main() {
 	schedulerSvc := scheduler.NewService(scheduledJobRepo, scheduledJobRunRepo)
 	schedulerSvc.SetBroadcaster(ws.NewSchedulerEventBroadcaster(hub))
 	if _, err := schedulerRegistry.Reconcile(context.Background()); err != nil {
-		slog.Warn("scheduler registry reconcile failed", "error", err)
+		log.WithError(err).Warn("scheduler registry reconcile failed")
+	} else {
+		log.WithField("executionMode", cfg.SchedulerExecutionMode).Info("scheduler registry reconciled")
 	}
 
 	// Create Echo instance and register routes
@@ -156,6 +164,12 @@ func main() {
 		"cost-reconcile",
 		scheduler.NewCostReconcileHandler(projectRepo, taskRepo, teamRepo, agentRunRepo),
 	)
+	log.WithFields(log.Fields{
+		"bridgeUrl":         cfg.BridgeURL,
+		"rolesDir":          cfg.RolesDir,
+		"pluginsDir":        cfg.PluginsDir,
+		"schedulerInterval": "15s",
+	}).Info("backend dependencies wired")
 	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
 	defer schedulerCancel()
 	go scheduler.RunLoop(schedulerCtx, 15*time.Second, schedulerSvc)
@@ -166,16 +180,16 @@ func main() {
 
 	go func() {
 		<-quit
-		slog.Info("shutting down server...")
+		log.Info("shutting down server...")
 		schedulerCancel()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()
 		if err := e.Shutdown(ctx); err != nil {
-			slog.Error("server shutdown error", "error", err)
+			log.WithError(err).Error("server shutdown error")
 		}
 		if db != nil {
 			if err := database.ClosePostgres(db); err != nil {
-				slog.Warn("postgres close error", "error", err)
+				log.WithError(err).Warn("postgres close error")
 			}
 		}
 		if rdb != nil {
@@ -184,14 +198,14 @@ func main() {
 	}()
 
 	addr := fmt.Sprintf(":%s", cfg.Port)
-	slog.Info("server listening", "addr", addr)
+	log.WithField("addr", addr).Info("server listening")
 
 	if err := e.Start(addr); err != nil && err != http.ErrServerClosed {
-		slog.Error("server start failed", "error", err)
+		log.WithError(err).Error("server start failed")
 		os.Exit(1)
 	}
 
-	slog.Info("server stopped")
+	log.Info("server stopped")
 }
 
 type startupSweepManager interface {
@@ -216,32 +230,31 @@ func runStartupWorktreeSweep(cfg *config.Config, manager *worktree.Manager) {
 
 	projects, err := collectStartupWorktreeProjects(cfg.RepoBasePath)
 	if err != nil {
-		slog.Warn("worktree startup sweep skipped", "error", err)
+		log.WithError(err).Warn("worktree startup sweep skipped")
 		return
 	}
 
 	for _, projectSlug := range projects {
 		report, err := summarizeStartupWorktreeProject(ctx, manager, projectSlug)
 		if err != nil {
-			slog.Warn("worktree startup sweep failed", "project", projectSlug, "error", err)
+			log.WithError(err).WithField("project", projectSlug).Warn("worktree startup sweep failed")
 			continue
 		}
 		if report.TotalBefore == 0 && report.TotalAfter == 0 && report.Cleaned == 0 {
 			continue
 		}
-		slog.Info(
-			"worktree startup sweep inventory",
-			"project", report.ProjectSlug,
-			"total_before", report.TotalBefore,
-			"managed_before", report.ManagedBefore,
-			"stale_before", report.StaleBefore,
-			"cleaned", report.Cleaned,
-			"total_after", report.TotalAfter,
-			"managed_after", report.ManagedAfter,
-			"stale_after", report.StaleAfter,
-		)
+		log.WithFields(log.Fields{
+			"project":        report.ProjectSlug,
+			"total_before":   report.TotalBefore,
+			"managed_before": report.ManagedBefore,
+			"stale_before":   report.StaleBefore,
+			"cleaned":        report.Cleaned,
+			"total_after":    report.TotalAfter,
+			"managed_after":  report.ManagedAfter,
+			"stale_after":    report.StaleAfter,
+		}).Info("worktree startup sweep inventory")
 		if report.StaleAfter > 0 {
-			slog.Warn("worktree startup sweep left stale state behind", "project", report.ProjectSlug, "stale_after", report.StaleAfter)
+			log.WithFields(log.Fields{"project": report.ProjectSlug, "stale_after": report.StaleAfter}).Warn("worktree startup sweep left stale state behind")
 		}
 	}
 }

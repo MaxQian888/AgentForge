@@ -54,6 +54,10 @@ const currentProject = {
     ],
   },
 };
+const projectStoreState = {
+  currentProject,
+  projects: [currentProject],
+};
 
 jest.mock("@/lib/stores/team-store", () => ({
   useTeamStore: (selector: (state: { startTeam: typeof startTeam }) => unknown) =>
@@ -63,7 +67,7 @@ jest.mock("@/lib/stores/team-store", () => ({
 jest.mock("@/lib/stores/project-store", () => ({
   useProjectStore: (
     selector: (state: { currentProject: typeof currentProject; projects: typeof currentProject[] }) => unknown
-  ) => selector({ currentProject, projects: [currentProject] }),
+  ) => selector(projectStoreState),
 }));
 
 jest.mock("@/lib/stores/dashboard-store", () => ({
@@ -121,6 +125,8 @@ jest.mock("@/components/ui/select", () => {
 describe("StartTeamDialog", () => {
   beforeEach(() => {
     startTeam.mockReset().mockResolvedValue(undefined);
+    projectStoreState.currentProject = currentProject;
+    projectStoreState.projects = [currentProject];
   });
 
   it("uses project catalog defaults and blocks unavailable runtime selections", async () => {
@@ -156,5 +162,27 @@ describe("StartTeamDialog", () => {
         model: "gpt-5-codex",
       })
     );
+  });
+
+  it("switches runtime/provider defaults and blocks unavailable runtime submission", async () => {
+    const user = userEvent.setup();
+    render(
+      <StartTeamDialog
+        taskId="task-2"
+        taskTitle="Investigate runtime drift"
+        memberId="member-2"
+        open
+        onOpenChange={jest.fn()}
+      />
+    );
+
+    const selects = screen.getAllByLabelText("team-runtime-select");
+    await user.selectOptions(selects[0], "opencode");
+
+    expect(screen.getAllByText(/OpenCode CLI is not installed/)).toHaveLength(2);
+    expect(screen.getByRole("button", { name: "Start Team" })).toBeDisabled();
+
+    await user.selectOptions(selects[0], "codex");
+    expect(screen.getByRole("button", { name: "Start Team" })).not.toBeDisabled();
   });
 });

@@ -20,89 +20,38 @@ func NewTaskRepository(db *gorm.DB) *TaskRepository {
 	return &TaskRepository{db: db}
 }
 
-const taskColumns = `tasks.id, tasks.project_id, tasks.parent_id, tasks.sprint_id, tasks.title, tasks.description, tasks.status, tasks.priority,
-	tasks.assignee_id, tasks.assignee_type, tasks.reporter_id, tasks.labels, tasks.budget_usd, tasks.spent_usd,
-	tasks.agent_branch, tasks.agent_worktree, tasks.agent_session_id, tasks.pr_url, tasks.pr_number,
-	tasks.blocked_by, tasks.planned_start_at, tasks.planned_end_at, tasks.created_at, tasks.updated_at, tasks.completed_at,
-	tps.last_activity_at, tps.last_activity_source, tps.last_transition_at, tps.health_status, tps.risk_reason,
-	tps.risk_since_at, tps.last_alert_state, tps.last_alert_at, tps.last_recovered_at, tps.created_at, tps.updated_at`
-
-func scanTask(row interface{ Scan(dest ...any) error }) (*model.Task, error) {
-	t := &model.Task{}
-	var (
-		assigneeType       *string
-		blockedByIDs       []uuid.UUID
-		lastActivityAt     *time.Time
-		lastActivitySource *string
-		lastTransitionAt   *time.Time
-		healthStatus       *string
-		riskReason         *string
-		riskSinceAt        *time.Time
-		lastAlertState     *string
-		lastAlertAt        *time.Time
-		lastRecoveredAt    *time.Time
-		progressCreatedAt  *time.Time
-		progressUpdatedAt  *time.Time
-	)
-	err := row.Scan(
-		&t.ID, &t.ProjectID, &t.ParentID, &t.SprintID, &t.Title, &t.Description,
-		&t.Status, &t.Priority, &t.AssigneeID, &assigneeType, &t.ReporterID,
-		&t.Labels, &t.BudgetUsd, &t.SpentUsd, &t.AgentBranch, &t.AgentWorktree,
-		&t.AgentSessionID, &t.PRUrl, &t.PRNumber, &blockedByIDs, &t.PlannedStartAt, &t.PlannedEndAt,
-		&t.CreatedAt, &t.UpdatedAt, &t.CompletedAt,
-		&lastActivityAt, &lastActivitySource, &lastTransitionAt, &healthStatus, &riskReason,
-		&riskSinceAt, &lastAlertState, &lastAlertAt, &lastRecoveredAt, &progressCreatedAt, &progressUpdatedAt,
-	)
-	if err == nil {
-		if assigneeType != nil {
-			t.AssigneeType = *assigneeType
-		}
-		t.BlockedBy = make([]string, 0, len(blockedByIDs))
-		for _, id := range blockedByIDs {
-			t.BlockedBy = append(t.BlockedBy, id.String())
-		}
+// attachProgress batch-loads progress snapshots for the given tasks and attaches them.
+func (r *TaskRepository) attachProgress(ctx context.Context, tasks []*model.Task) error {
+	if len(tasks) == 0 {
+		return nil
 	}
-	if err == nil && lastActivityAt != nil && lastActivitySource != nil && lastTransitionAt != nil && healthStatus != nil && riskReason != nil && lastAlertState != nil && progressCreatedAt != nil && progressUpdatedAt != nil {
-		t.Progress = &model.TaskProgressSnapshot{
-			TaskID:             t.ID,
-			LastActivityAt:     *lastActivityAt,
-			LastActivitySource: *lastActivitySource,
-			LastTransitionAt:   *lastTransitionAt,
-			HealthStatus:       *healthStatus,
-			RiskReason:         *riskReason,
-			RiskSinceAt:        riskSinceAt,
-			LastAlertState:     *lastAlertState,
-			LastAlertAt:        lastAlertAt,
-			LastRecoveredAt:    lastRecoveredAt,
-			CreatedAt:          *progressCreatedAt,
-			UpdatedAt:          *progressUpdatedAt,
-		}
+	ids := make([]uuid.UUID, 0, len(tasks))
+	for _, t := range tasks {
+		ids = append(ids, t.ID)
 	}
-	return t, err
+	var snapshots []taskProgressSnapshotRecord
+	if err := r.db.WithContext(ctx).Where("task_id IN ?", ids).Find(&snapshots).Error; err != nil {
+		return err
+	}
+	snapshotMap := make(map[uuid.UUID]*model.TaskProgressSnapshot, len(snapshots))
+	for i := range snapshots {
+		snapshotMap[snapshots[i].TaskID] = snapshots[i].toModel()
+	}
+	for _, t := range tasks {
+		t.Progress = snapshotMap[t.ID]
+	}
+	return nil
 }
 
 func (r *TaskRepository) Create(ctx context.Context, task *model.Task) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	blockedByIDs, err := normalizeTaskBlockedBy(task.BlockedBy)
-	if err != nil {
+	if _, err := normalizeTaskBlockedBy(task.BlockedBy); err != nil {
 		return fmt.Errorf("create task: %w", err)
 	}
-	query := `
-		INSERT INTO tasks (id, project_id, parent_id, sprint_id, title, description, status, priority,
-			assignee_id, assignee_type, reporter_id, labels, budget_usd, spent_usd,
-			agent_branch, agent_worktree, agent_session_id, pr_url, pr_number,
-			blocked_by, planned_start_at, planned_end_at, created_at, updated_at, completed_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW(),NOW(),$23)
-	`
-	if err := r.db.WithContext(ctx).Exec(
-		query,
-		task.ID, task.ProjectID, task.ParentID, task.SprintID, task.Title, task.Description,
-		task.Status, task.Priority, task.AssigneeID, nullableString(task.AssigneeType), task.ReporterID,
-		task.Labels, task.BudgetUsd, task.SpentUsd, task.AgentBranch, task.AgentWorktree,
-		task.AgentSessionID, task.PRUrl, task.PRNumber, blockedByIDs, task.PlannedStartAt, task.PlannedEndAt, task.CompletedAt,
-	).Error; err != nil {
+	record := newTaskRecord(task)
+	if err := r.db.WithContext(ctx).Create(record).Error; err != nil {
 		return fmt.Errorf("create task: %w", err)
 	}
 	return nil
@@ -112,24 +61,32 @@ func (r *TaskRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Task
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT ` + taskColumns + ` FROM tasks LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id WHERE tasks.id = $1`
-	t, err := scanTask(r.db.WithContext(ctx).Raw(query, id).Row())
-	if err != nil {
+	var record taskRecord
+	if err := r.db.WithContext(ctx).Where("id = ?", id).Take(&record).Error; err != nil {
 		return nil, fmt.Errorf("get task by id: %w", normalizeRepositoryError(err))
 	}
-	return t, nil
+	task := record.toModel()
+	var progress taskProgressSnapshotRecord
+	if err := r.db.WithContext(ctx).Where("task_id = ?", id).Take(&progress).Error; err == nil {
+		task.Progress = progress.toModel()
+	}
+	return task, nil
 }
 
 func (r *TaskRepository) GetByPRURL(ctx context.Context, prURL string) (*model.Task, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	query := `SELECT ` + taskColumns + ` FROM tasks LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id WHERE tasks.pr_url = $1 ORDER BY tasks.updated_at DESC LIMIT 1`
-	t, err := scanTask(r.db.WithContext(ctx).Raw(query, prURL).Row())
-	if err != nil {
+	var record taskRecord
+	if err := r.db.WithContext(ctx).Where("pr_url = ?", prURL).Order("updated_at DESC").Take(&record).Error; err != nil {
 		return nil, fmt.Errorf("get task by pr url: %w", normalizeRepositoryError(err))
 	}
-	return t, nil
+	task := record.toModel()
+	var progress taskProgressSnapshotRecord
+	if err := r.db.WithContext(ctx).Where("task_id = ?", record.ID).Take(&progress).Error; err == nil {
+		task.Progress = progress.toModel()
+	}
+	return task, nil
 }
 
 func (r *TaskRepository) List(ctx context.Context, projectID uuid.UUID, q model.TaskListQuery) ([]*model.Task, int, error) {
@@ -137,49 +94,30 @@ func (r *TaskRepository) List(ctx context.Context, projectID uuid.UUID, q model.
 		return nil, 0, ErrDatabaseUnavailable
 	}
 
-	var where []string
-	var args []any
-	argN := 1
-
-	where = append(where, fmt.Sprintf("tasks.project_id = $%d", argN))
-	args = append(args, projectID)
-	argN++
-
+	query := r.db.WithContext(ctx).Where("project_id = ?", projectID)
 	if q.Status != "" {
-		where = append(where, fmt.Sprintf("tasks.status = $%d", argN))
-		args = append(args, q.Status)
-		argN++
+		query = query.Where("status = ?", q.Status)
 	}
 	if q.AssigneeID != "" {
-		where = append(where, fmt.Sprintf("tasks.assignee_id = $%d", argN))
-		args = append(args, q.AssigneeID)
-		argN++
+		query = query.Where("assignee_id = ?", q.AssigneeID)
 	}
 	if q.SprintID != "" {
-		where = append(where, fmt.Sprintf("tasks.sprint_id = $%d", argN))
-		args = append(args, q.SprintID)
-		argN++
+		query = query.Where("sprint_id = ?", q.SprintID)
 	}
 	if q.Priority != "" {
-		where = append(where, fmt.Sprintf("tasks.priority = $%d", argN))
-		args = append(args, q.Priority)
-		argN++
+		query = query.Where("priority = ?", q.Priority)
 	}
 	if q.Search != "" {
-		where = append(where, fmt.Sprintf("(tasks.title ILIKE $%d OR tasks.description ILIKE $%d)", argN, argN))
-		args = append(args, "%"+q.Search+"%")
-		argN++
+		search := "%" + q.Search + "%"
+		query = query.Where("(title ILIKE ? OR description ILIKE ?)", search, search)
 	}
 
-	whereClause := "WHERE " + strings.Join(where, " AND ")
-
-	countQuery := "SELECT COUNT(*) FROM tasks " + whereClause
-	var total int
-	if err := r.db.WithContext(ctx).Raw(countQuery, args...).Row().Scan(&total); err != nil {
+	var total int64
+	if err := query.Model(&taskRecord{}).Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("count tasks: %w", err)
 	}
 
-	sort := "tasks.created_at DESC"
+	sort := "created_at DESC"
 	if q.Sort != "" {
 		sort = q.Sort
 	}
@@ -194,24 +132,19 @@ func (r *TaskRepository) List(ctx context.Context, projectID uuid.UUID, q model.
 	}
 	offset := (page - 1) * limit
 
-	listQuery := fmt.Sprintf("SELECT %s FROM tasks LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id %s ORDER BY %s LIMIT %d OFFSET %d",
-		taskColumns, whereClause, sort, limit, offset)
-
-	rows, err := r.db.WithContext(ctx).Raw(listQuery, args...).Rows()
-	if err != nil {
+	var records []taskRecord
+	if err := query.Order(sort).Limit(limit).Offset(offset).Find(&records).Error; err != nil {
 		return nil, 0, fmt.Errorf("list tasks: %w", err)
 	}
-	defer rows.Close()
 
-	var tasks []*model.Task
-	for rows.Next() {
-		t, err := scanTask(rows)
-		if err != nil {
-			return nil, 0, fmt.Errorf("scan task: %w", err)
-		}
-		tasks = append(tasks, t)
+	tasks := make([]*model.Task, 0, len(records))
+	for i := range records {
+		tasks = append(tasks, records[i].toModel())
 	}
-	return tasks, total, rows.Err()
+	if err := r.attachProgress(ctx, tasks); err != nil {
+		return nil, 0, fmt.Errorf("attach progress: %w", err)
+	}
+	return tasks, int(total), nil
 }
 
 func (r *TaskRepository) ListBySprint(ctx context.Context, projectID uuid.UUID, sprintID uuid.UUID) ([]*model.Task, error) {
@@ -219,70 +152,90 @@ func (r *TaskRepository) ListBySprint(ctx context.Context, projectID uuid.UUID, 
 		return nil, ErrDatabaseUnavailable
 	}
 
-	query := `SELECT ` + taskColumns + ` FROM tasks
-		LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id
-		WHERE tasks.project_id = $1 AND tasks.sprint_id = $2
-		ORDER BY tasks.created_at ASC`
-	rows, err := r.db.WithContext(ctx).Raw(query, projectID, sprintID).Rows()
-	if err != nil {
+	var records []taskRecord
+	if err := r.db.WithContext(ctx).
+		Where("project_id = ? AND sprint_id = ?", projectID, sprintID).
+		Order("created_at ASC").
+		Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list sprint tasks: %w", err)
 	}
-	defer rows.Close()
 
-	tasks := make([]*model.Task, 0)
-	for rows.Next() {
-		task, err := scanTask(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan sprint task: %w", err)
-		}
-		tasks = append(tasks, task)
+	tasks := make([]*model.Task, 0, len(records))
+	for i := range records {
+		tasks = append(tasks, records[i].toModel())
 	}
-	return tasks, rows.Err()
+	if err := r.attachProgress(ctx, tasks); err != nil {
+		return nil, fmt.Errorf("attach progress: %w", err)
+	}
+	return tasks, nil
 }
 
 func (r *TaskRepository) Update(ctx context.Context, id uuid.UUID, req *model.UpdateTaskRequest) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	blockedByIDs, err := normalizeOptionalTaskBlockedBy(req.BlockedBy)
-	if err != nil {
-		return fmt.Errorf("update task: %w", err)
+
+	updates := map[string]any{}
+
+	if req.Title != nil {
+		updates["title"] = *req.Title
 	}
-	query := `UPDATE tasks SET
-		title = COALESCE($1, title),
-		description = COALESCE($2, description),
-		priority = COALESCE($3, priority),
-		budget_usd = COALESCE($4, budget_usd),
-		sprint_id = CASE
-			WHEN $5::text IS NULL THEN sprint_id
-			ELSE NULLIF($5::text, '')::uuid
-		END,
-		planned_start_at = CASE
-			WHEN $6::text IS NULL THEN planned_start_at
-			ELSE NULLIF($6::text, '')::timestamptz
-		END,
-		planned_end_at = CASE
-			WHEN $7::text IS NULL THEN planned_end_at
-			ELSE NULLIF($7::text, '')::timestamptz
-		END,
-		blocked_by = CASE
-			WHEN $8::uuid[] IS NULL THEN blocked_by
-			ELSE $8::uuid[]
-		END,
-		updated_at = NOW()
-		WHERE id = $9`
-	if err := r.db.WithContext(ctx).Exec(
-		query,
-		req.Title,
-		req.Description,
-		req.Priority,
-		req.BudgetUsd,
-		req.SprintID,
-		req.PlannedStartAt,
-		req.PlannedEndAt,
-		blockedByIDs,
-		id,
-	).Error; err != nil {
+	if req.Description != nil {
+		updates["description"] = *req.Description
+	}
+	if req.Priority != nil {
+		updates["priority"] = *req.Priority
+	}
+	if req.BudgetUsd != nil {
+		updates["budget_usd"] = *req.BudgetUsd
+	}
+	if req.SprintID != nil {
+		val := strings.TrimSpace(*req.SprintID)
+		if val == "" {
+			updates["sprint_id"] = nil
+		} else {
+			parsed, err := uuid.Parse(val)
+			if err != nil {
+				return fmt.Errorf("update task: invalid sprint_id %q: %w", val, err)
+			}
+			updates["sprint_id"] = parsed
+		}
+	}
+	if req.PlannedStartAt != nil {
+		val := strings.TrimSpace(*req.PlannedStartAt)
+		if val == "" {
+			updates["planned_start_at"] = nil
+		} else {
+			t, err := time.Parse(time.RFC3339, val)
+			if err != nil {
+				return fmt.Errorf("update task: invalid planned_start_at %q: %w", val, err)
+			}
+			updates["planned_start_at"] = t
+		}
+	}
+	if req.PlannedEndAt != nil {
+		val := strings.TrimSpace(*req.PlannedEndAt)
+		if val == "" {
+			updates["planned_end_at"] = nil
+		} else {
+			t, err := time.Parse(time.RFC3339, val)
+			if err != nil {
+				return fmt.Errorf("update task: invalid planned_end_at %q: %w", val, err)
+			}
+			updates["planned_end_at"] = t
+		}
+	}
+	if req.BlockedBy != nil {
+		blockedByIDs, err := normalizeTaskBlockedBy(*req.BlockedBy)
+		if err != nil {
+			return fmt.Errorf("update task: %w", err)
+		}
+		updates["blocked_by"] = blockedByIDs
+	}
+
+	updates["updated_at"] = gorm.Expr("NOW()")
+
+	if err := r.db.WithContext(ctx).Model(&taskRecord{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return fmt.Errorf("update task: %w", err)
 	}
 	return nil
@@ -292,7 +245,7 @@ func (r *TaskRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	if err := r.db.WithContext(ctx).Exec(`DELETE FROM tasks WHERE id = $1`, id).Error; err != nil {
+	if err := r.db.WithContext(ctx).Delete(&taskRecord{}, "id = ?", id).Error; err != nil {
 		return fmt.Errorf("delete task: %w", err)
 	}
 	return nil
@@ -303,19 +256,22 @@ func (r *TaskRepository) TransitionStatus(ctx context.Context, id uuid.UUID, new
 		return ErrDatabaseUnavailable
 	}
 
-	var currentStatus string
-	if err := r.db.WithContext(ctx).Raw(`SELECT status FROM tasks WHERE id = $1`, id).Row().Scan(&currentStatus); err != nil {
+	var current taskRecord
+	if err := r.db.WithContext(ctx).Select("status").Where("id = ?", id).Take(&current).Error; err != nil {
 		return fmt.Errorf("get task status: %w", normalizeRepositoryError(err))
 	}
-	if err := model.ValidateTransition(currentStatus, newStatus); err != nil {
+	if err := model.ValidateTransition(current.Status, newStatus); err != nil {
 		return err
 	}
 
-	query := `UPDATE tasks SET status = $1, updated_at = NOW() WHERE id = $2`
-	if newStatus == model.TaskStatusDone {
-		query = `UPDATE tasks SET status = $1, updated_at = NOW(), completed_at = NOW() WHERE id = $2`
+	updates := map[string]any{
+		"status":     newStatus,
+		"updated_at": gorm.Expr("NOW()"),
 	}
-	if err := r.db.WithContext(ctx).Exec(query, newStatus, id).Error; err != nil {
+	if newStatus == model.TaskStatusDone {
+		updates["completed_at"] = gorm.Expr("NOW()")
+	}
+	if err := r.db.WithContext(ctx).Model(&taskRecord{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return fmt.Errorf("transition task status: %w", err)
 	}
 	return nil
@@ -325,8 +281,11 @@ func (r *TaskRepository) UpdateAssignee(ctx context.Context, id uuid.UUID, assig
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	query := `UPDATE tasks SET assignee_id = $1, assignee_type = $2, updated_at = NOW() WHERE id = $3`
-	if err := r.db.WithContext(ctx).Exec(query, assigneeID, assigneeType, id).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&taskRecord{}).Where("id = ?", id).Updates(map[string]any{
+		"assignee_id":   assigneeID,
+		"assignee_type": assigneeType,
+		"updated_at":    gorm.Expr("NOW()"),
+	}).Error; err != nil {
 		return fmt.Errorf("update task assignee: %w", err)
 	}
 	return nil
@@ -336,13 +295,12 @@ func (r *TaskRepository) UpdateRuntime(ctx context.Context, id uuid.UUID, branch
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	query := `UPDATE tasks SET
-		agent_branch = $1,
-		agent_worktree = $2,
-		agent_session_id = $3,
-		updated_at = NOW()
-		WHERE id = $4`
-	if err := r.db.WithContext(ctx).Exec(query, branch, worktreePath, sessionID, id).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&taskRecord{}).Where("id = ?", id).Updates(map[string]any{
+		"agent_branch":     branch,
+		"agent_worktree":   worktreePath,
+		"agent_session_id": sessionID,
+		"updated_at":       gorm.Expr("NOW()"),
+	}).Error; err != nil {
 		return fmt.Errorf("update task runtime: %w", err)
 	}
 	return nil
@@ -352,13 +310,12 @@ func (r *TaskRepository) ClearRuntime(ctx context.Context, id uuid.UUID) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	query := `UPDATE tasks SET
-		agent_branch = '',
-		agent_worktree = '',
-		agent_session_id = '',
-		updated_at = NOW()
-		WHERE id = $1`
-	if err := r.db.WithContext(ctx).Exec(query, id).Error; err != nil {
+	if err := r.db.WithContext(ctx).Model(&taskRecord{}).Where("id = ?", id).Updates(map[string]any{
+		"agent_branch":     "",
+		"agent_worktree":   "",
+		"agent_session_id": "",
+		"updated_at":       gorm.Expr("NOW()"),
+	}).Error; err != nil {
 		return fmt.Errorf("clear task runtime: %w", err)
 	}
 	return nil
@@ -368,15 +325,14 @@ func (r *TaskRepository) UpdateSpent(ctx context.Context, id uuid.UUID, spentUsd
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	query := `UPDATE tasks SET
-		spent_usd = $1,
-		status = CASE
-			WHEN $2 = '' THEN status
-			ELSE $2
-		END,
-		updated_at = NOW()
-		WHERE id = $3`
-	if err := r.db.WithContext(ctx).Exec(query, spentUsd, status, id).Error; err != nil {
+	updates := map[string]any{
+		"spent_usd":  spentUsd,
+		"updated_at": gorm.Expr("NOW()"),
+	}
+	if status != "" {
+		updates["status"] = status
+	}
+	if err := r.db.WithContext(ctx).Model(&taskRecord{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return fmt.Errorf("update task spent: %w", err)
 	}
 	return nil
@@ -387,33 +343,30 @@ func (r *TaskRepository) ListOpenForProgress(ctx context.Context) ([]*model.Task
 		return nil, ErrDatabaseUnavailable
 	}
 
-	query := `SELECT ` + taskColumns + ` FROM tasks
-		LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id
-		WHERE tasks.status NOT IN ($1, $2)
-		ORDER BY tasks.updated_at DESC`
-	rows, err := r.db.WithContext(ctx).Raw(query, model.TaskStatusDone, model.TaskStatusCancelled).Rows()
-	if err != nil {
+	var records []taskRecord
+	if err := r.db.WithContext(ctx).
+		Where("status NOT IN ?", []string{model.TaskStatusDone, model.TaskStatusCancelled}).
+		Order("updated_at DESC").
+		Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list open tasks for progress: %w", err)
 	}
-	defer rows.Close()
 
-	var tasks []*model.Task
-	for rows.Next() {
-		task, err := scanTask(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan task for progress: %w", err)
-		}
-		tasks = append(tasks, task)
+	tasks := make([]*model.Task, 0, len(records))
+	for i := range records {
+		tasks = append(tasks, records[i].toModel())
 	}
-	return tasks, rows.Err()
+	if err := r.attachProgress(ctx, tasks); err != nil {
+		return nil, fmt.Errorf("attach progress: %w", err)
+	}
+	return tasks, nil
 }
 
 func (r *TaskRepository) HasChildren(ctx context.Context, parentID uuid.UUID) (bool, error) {
 	if r.db == nil {
 		return false, ErrDatabaseUnavailable
 	}
-	var count int
-	if err := r.db.WithContext(ctx).Raw(`SELECT COUNT(*) FROM tasks WHERE parent_id = $1`, parentID).Row().Scan(&count); err != nil {
+	var count int64
+	if err := r.db.WithContext(ctx).Model(&taskRecord{}).Where("parent_id = ?", parentID).Count(&count).Error; err != nil {
 		return false, fmt.Errorf("count child tasks: %w", err)
 	}
 	return count > 0, nil
@@ -424,25 +377,22 @@ func (r *TaskRepository) ListDependents(ctx context.Context, blockerID uuid.UUID
 		return nil, ErrDatabaseUnavailable
 	}
 
-	query := `SELECT ` + taskColumns + ` FROM tasks
-		LEFT JOIN task_progress_snapshots tps ON tps.task_id = tasks.id
-		WHERE $1 = ANY(tasks.blocked_by)
-		ORDER BY tasks.updated_at DESC`
-	rows, err := r.db.WithContext(ctx).Raw(query, blockerID).Rows()
-	if err != nil {
+	var records []taskRecord
+	if err := r.db.WithContext(ctx).
+		Where("? = ANY(blocked_by)", blockerID).
+		Order("updated_at DESC").
+		Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list dependents: %w", err)
 	}
-	defer rows.Close()
 
-	dependents := make([]*model.Task, 0)
-	for rows.Next() {
-		task, err := scanTask(rows)
-		if err != nil {
-			return nil, fmt.Errorf("scan dependent task: %w", err)
-		}
-		dependents = append(dependents, task)
+	tasks := make([]*model.Task, 0, len(records))
+	for i := range records {
+		tasks = append(tasks, records[i].toModel())
 	}
-	return dependents, rows.Err()
+	if err := r.attachProgress(ctx, tasks); err != nil {
+		return nil, fmt.Errorf("attach progress: %w", err)
+	}
+	return tasks, nil
 }
 
 func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.TaskChildInput) ([]*model.Task, error) {
@@ -454,13 +404,6 @@ func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.Task
 	}
 
 	created := make([]*model.Task, 0, len(inputs))
-	query := `
-		INSERT INTO tasks (id, project_id, parent_id, sprint_id, title, description, status, priority,
-			assignee_id, assignee_type, reporter_id, labels, budget_usd, spent_usd,
-			agent_branch, agent_worktree, agent_session_id, pr_url, pr_number,
-			blocked_by, planned_start_at, planned_end_at, created_at, updated_at, completed_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13,$14,$15,$16,$17,$18,$19,$20,$21,$22,NOW(),NOW(),$23)
-	`
 
 	err := database.WithTx(ctx, r.db, func(tx *gorm.DB) error {
 		for _, input := range inputs {
@@ -478,17 +421,11 @@ func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.Task
 				BudgetUsd:   input.BudgetUSD,
 				BlockedBy:   []string{},
 			}
-			blockedByIDs, err := normalizeTaskBlockedBy(task.BlockedBy)
-			if err != nil {
+			if _, err := normalizeTaskBlockedBy(task.BlockedBy); err != nil {
 				return fmt.Errorf("create child task: %w", err)
 			}
-			if err := tx.WithContext(ctx).Exec(
-				query,
-				task.ID, task.ProjectID, task.ParentID, task.SprintID, task.Title, task.Description,
-				task.Status, task.Priority, task.AssigneeID, nullableString(task.AssigneeType), task.ReporterID,
-				task.Labels, task.BudgetUsd, task.SpentUsd, task.AgentBranch, task.AgentWorktree,
-				task.AgentSessionID, task.PRUrl, task.PRNumber, blockedByIDs, task.PlannedStartAt, task.PlannedEndAt, task.CompletedAt,
-			).Error; err != nil {
+			record := newTaskRecord(task)
+			if err := tx.WithContext(ctx).Create(record).Error; err != nil {
 				return fmt.Errorf("create child task: %w", err)
 			}
 			created = append(created, task)
@@ -500,13 +437,6 @@ func (r *TaskRepository) CreateChildren(ctx context.Context, inputs []model.Task
 	}
 
 	return created, nil
-}
-
-func nullableString(value string) any {
-	if strings.TrimSpace(value) == "" {
-		return nil
-	}
-	return value
 }
 
 func normalizeOptionalTaskBlockedBy(blockedBy *[]string) (any, error) {

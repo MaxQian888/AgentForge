@@ -10,6 +10,7 @@ import (
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/model"
+	log "github.com/sirupsen/logrus"
 )
 
 type IMControlPlane interface {
@@ -33,7 +34,9 @@ func NewIMControlHandler(control IMControlPlane) *IMControlHandler {
 
 func (h *IMControlHandler) HandleWS(c echo.Context) error {
 	bridgeID := c.QueryParam("bridgeId")
+	remoteAddr := c.RealIP()
 	if bridgeID == "" {
+		log.WithField("remoteAddr", remoteAddr).Warn("IM control ws rejected: missing bridgeId")
 		return c.JSON(http.StatusBadRequest, map[string]string{"message": "missing bridgeId"})
 	}
 
@@ -41,6 +44,11 @@ func (h *IMControlHandler) HandleWS(c echo.Context) error {
 	if raw := c.QueryParam("afterCursor"); raw != "" {
 		parsed, err := strconv.ParseInt(raw, 10, 64)
 		if err != nil {
+			log.WithFields(log.Fields{
+				"remoteAddr":  remoteAddr,
+				"bridgeId":    bridgeID,
+				"afterCursor": raw,
+			}).WithError(err).Warn("IM control ws rejected: invalid afterCursor")
 			return c.JSON(http.StatusBadRequest, map[string]string{"message": "invalid afterCursor"})
 		}
 		afterCursor = parsed
@@ -48,20 +56,48 @@ func (h *IMControlHandler) HandleWS(c echo.Context) error {
 
 	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
+		log.WithFields(log.Fields{
+			"remoteAddr":  remoteAddr,
+			"bridgeId":    bridgeID,
+			"afterCursor": afterCursor,
+		}).WithError(err).Error("IM control ws upgrade failed")
 		return err
 	}
+	log.WithFields(log.Fields{
+		"remoteAddr":  remoteAddr,
+		"bridgeId":    bridgeID,
+		"afterCursor": afterCursor,
+	}).Info("IM control ws connected")
 
 	listener := &imBridgeWSListener{conn: conn}
 	replayed, err := h.control.AttachBridgeListener(c.Request().Context(), bridgeID, afterCursor, listener)
 	if err != nil {
 		conn.Close() //nolint:errcheck
+		log.WithFields(log.Fields{
+			"remoteAddr":  remoteAddr,
+			"bridgeId":    bridgeID,
+			"afterCursor": afterCursor,
+		}).WithError(err).Warn("IM control ws attach listener failed")
 		return c.JSON(http.StatusConflict, map[string]string{"message": err.Error()})
 	}
+	log.WithFields(log.Fields{
+		"remoteAddr":    remoteAddr,
+		"bridgeId":      bridgeID,
+		"afterCursor":   afterCursor,
+		"replayedCount": len(replayed),
+	}).Info("IM control ws listener attached")
 
 	for _, delivery := range replayed {
 		if err := listener.Send(c.Request().Context(), delivery); err != nil {
 			conn.Close() //nolint:errcheck
 			h.control.DetachBridgeListener(bridgeID)
+			log.WithFields(log.Fields{
+				"remoteAddr": remoteAddr,
+				"bridgeId":   bridgeID,
+				"cursor":     delivery.Cursor,
+				"deliveryId": delivery.DeliveryID,
+				"kind":       delivery.Kind,
+			}).WithError(err).Warn("IM control ws replay send failed")
 			return nil
 		}
 	}
@@ -69,6 +105,10 @@ func (h *IMControlHandler) HandleWS(c echo.Context) error {
 	defer func() {
 		h.control.DetachBridgeListener(bridgeID)
 		conn.Close() //nolint:errcheck
+		log.WithFields(log.Fields{
+			"remoteAddr": remoteAddr,
+			"bridgeId":   bridgeID,
+		}).Info("IM control ws disconnected")
 	}()
 
 	conn.SetReadLimit(maxMessageSize * 4)
@@ -82,20 +122,45 @@ func (h *IMControlHandler) HandleWS(c echo.Context) error {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				log.WithFields(log.Fields{
+					"remoteAddr": remoteAddr,
+					"bridgeId":   bridgeID,
+				}).Debug("IM control ws closed")
 				return nil
 			}
+			log.WithFields(log.Fields{
+				"remoteAddr": remoteAddr,
+				"bridgeId":   bridgeID,
+			}).WithError(err).Warn("IM control ws read failed")
 			return nil
 		}
 		var ack model.IMDeliveryAck
 		if err := json.Unmarshal(message, &ack); err != nil {
+			log.WithFields(log.Fields{
+				"remoteAddr": remoteAddr,
+				"bridgeId":   bridgeID,
+				"sizeBytes":  len(message),
+			}).WithError(err).Warn("IM control ws ignored invalid ack payload")
 			continue
 		}
 		if ack.BridgeID == "" {
 			ack.BridgeID = bridgeID
 		}
 		if err := h.control.AckDelivery(c.Request().Context(), ack.BridgeID, ack.Cursor, ack.DeliveryID); err != nil {
+			log.WithFields(log.Fields{
+				"remoteAddr": remoteAddr,
+				"bridgeId":   ack.BridgeID,
+				"cursor":     ack.Cursor,
+				"deliveryId": ack.DeliveryID,
+			}).WithError(err).Warn("IM control ws ack failed")
 			continue
 		}
+		log.WithFields(log.Fields{
+			"remoteAddr": remoteAddr,
+			"bridgeId":   ack.BridgeID,
+			"cursor":     ack.Cursor,
+			"deliveryId": ack.DeliveryID,
+		}).Debug("IM control ws ack recorded")
 	}
 }
 

@@ -10,6 +10,8 @@ export function usePlatformCapability() {
     updateTray: platformRuntime.updateTray,
     registerShortcut: platformRuntime.registerShortcut,
     checkForUpdate: platformRuntime.checkForUpdate,
+    installUpdate: platformRuntime.installUpdate,
+    relaunchToUpdate: platformRuntime.relaunchToUpdate,
     getDesktopRuntimeStatus: platformRuntime.getDesktopRuntimeStatus,
     getPluginRuntimeSummary: platformRuntime.getPluginRuntimeSummary,
     subscribeDesktopEvents: platformRuntime.subscribeDesktopEvents,

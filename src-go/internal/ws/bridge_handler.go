@@ -3,12 +3,12 @@ package ws
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 	"net/http"
 	"time"
 
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
+	log "github.com/sirupsen/logrus"
 )
 
 // BridgeEventProcessor projects runtime bridge events back into Go orchestration state.
@@ -26,16 +26,20 @@ func NewBridgeHandler(processor BridgeEventProcessor) *BridgeHandler {
 }
 
 func (h *BridgeHandler) HandleWS(c echo.Context) error {
+	remoteAddr := c.RealIP()
+
 	if h.processor == nil {
+		log.WithField("remoteAddr", remoteAddr).Warn("bridge ws rejected: processor unavailable")
 		return c.JSON(http.StatusServiceUnavailable, map[string]string{"message": "bridge processor unavailable"})
 	}
 
 	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
-		slog.Error("bridge ws upgrade failed", "error", err)
+		log.WithField("remoteAddr", remoteAddr).WithError(err).Error("bridge ws upgrade failed")
 		return err
 	}
 	defer conn.Close() //nolint:errcheck
+	log.WithField("remoteAddr", remoteAddr).Info("bridge ws connected")
 
 	conn.SetReadLimit(maxMessageSize * 8)
 	conn.SetReadDeadline(time.Now().Add(pongWait)) //nolint:errcheck
@@ -48,20 +52,29 @@ func (h *BridgeHandler) HandleWS(c echo.Context) error {
 		_, message, err := conn.ReadMessage()
 		if err != nil {
 			if websocket.IsCloseError(err, websocket.CloseNormalClosure, websocket.CloseGoingAway) {
+				log.WithField("remoteAddr", remoteAddr).Debug("bridge ws closed")
 				return nil
 			}
-			slog.Debug("bridge ws closed", "error", err)
+			log.WithField("remoteAddr", remoteAddr).WithError(err).Warn("bridge ws read failed")
 			return nil
 		}
 
 		var event BridgeAgentEvent
 		if err := json.Unmarshal(message, &event); err != nil {
-			slog.Warn("invalid bridge ws payload", "error", err)
+			log.WithFields(log.Fields{
+				"remoteAddr": remoteAddr,
+				"sizeBytes":  len(message),
+			}).WithError(err).Warn("invalid bridge ws payload")
 			continue
 		}
 
 		if err := h.processor.ProcessBridgeEvent(c.Request().Context(), &event); err != nil {
-			slog.Warn("bridge event processing failed", "task", event.TaskID, "type", event.Type, "error", err)
+			log.WithError(err).WithFields(log.Fields{
+				"remoteAddr": remoteAddr,
+				"taskId":     event.TaskID,
+				"sessionId":  event.SessionID,
+				"eventType":  event.Type,
+			}).Warn("bridge event processing failed")
 		}
 	}
 }

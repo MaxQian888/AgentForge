@@ -2,12 +2,13 @@ package role
 
 import (
 	"fmt"
-	"log/slog"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
 	"sync"
+
+	log "github.com/sirupsen/logrus"
 )
 
 // Registry holds loaded role manifests indexed by name.
@@ -44,11 +45,11 @@ func (r *Registry) LoadDir(dir string) error {
 
 		manifest, err := ParseFile(path)
 		if err != nil {
-			slog.Warn("skipping invalid canonical role file", "path", path, "error", err)
+			log.WithError(err).WithField("path", path).Warn("skipping invalid canonical role file")
 			continue
 		}
 		discovered[roleKey(manifest)] = manifest
-		slog.Info("discovered canonical role", "id", roleKey(manifest), "path", path)
+		log.WithFields(log.Fields{"id": roleKey(manifest), "path": path}).Info("discovered canonical role")
 	}
 
 	for _, entry := range entries {
@@ -63,24 +64,24 @@ func (r *Registry) LoadDir(dir string) error {
 		path := filepath.Join(dir, entry.Name())
 		manifest, err := ParseFile(path)
 		if err != nil {
-			slog.Warn("skipping invalid role file", "path", path, "error", err)
+			log.WithError(err).WithField("path", path).Warn("skipping invalid role file")
 			continue
 		}
 
 		key := roleKey(manifest)
 		if _, exists := discovered[key]; exists {
-			slog.Info("skipping legacy role because canonical manifest exists", "id", key, "path", path)
+			log.WithFields(log.Fields{"id": key, "path": path}).Info("skipping legacy role because canonical manifest exists")
 			continue
 		}
 		discovered[key] = manifest
-		slog.Info("discovered legacy role", "id", key, "path", path)
+		log.WithFields(log.Fields{"id": key, "path": path}).Info("discovered legacy role")
 	}
 
 	resolved := make(map[string]*Manifest, len(discovered))
 	for key := range discovered {
 		manifest, err := resolveManifest(key, discovered, resolved, make(map[string]bool))
 		if err != nil {
-			slog.Warn("skipping unresolved role", "id", key, "error", err)
+			log.WithError(err).WithField("id", key).Warn("skipping unresolved role")
 			continue
 		}
 		resolved[key] = manifest

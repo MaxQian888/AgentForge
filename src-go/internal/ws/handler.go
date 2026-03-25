@@ -2,7 +2,6 @@ package ws
 
 import (
 	"fmt"
-	"log/slog"
 	"net/http"
 	"strings"
 	"time"
@@ -10,6 +9,7 @@ import (
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -40,6 +40,9 @@ func NewHandler(hub *Hub, jwtSecret string) *Handler {
 
 // HandleWS upgrades the HTTP connection to a WebSocket and registers the client.
 func (h *Handler) HandleWS(c echo.Context) error {
+	remoteAddr := c.RealIP()
+	projectID := c.QueryParam("projectId")
+
 	// Accept token from query param or Authorization header.
 	token := c.QueryParam("token")
 	if token == "" {
@@ -49,6 +52,7 @@ func (h *Handler) HandleWS(c echo.Context) error {
 		}
 	}
 	if token == "" {
+		log.WithFields(log.Fields{"projectId": projectID, "remoteAddr": remoteAddr}).Warn("ws upgrade rejected: missing token")
 		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "missing token"})
 	}
 
@@ -61,25 +65,27 @@ func (h *Handler) HandleWS(c echo.Context) error {
 		return []byte(h.jwtSecret), nil
 	})
 	if err != nil {
+		log.WithFields(log.Fields{"projectId": projectID, "remoteAddr": remoteAddr}).WithError(err).Warn("ws upgrade rejected: invalid token")
 		return c.JSON(http.StatusUnauthorized, map[string]string{"message": "invalid token"})
 	}
 
 	userID, _ := claims.GetSubject()
-	projectID := c.QueryParam("projectId")
 
 	conn, err := upgrader.Upgrade(c.Response(), c.Request(), nil)
 	if err != nil {
-		slog.Error("ws upgrade failed", "error", err)
+		log.WithFields(log.Fields{"projectId": projectID, "remoteAddr": remoteAddr}).WithError(err).Error("ws upgrade failed")
 		return err
 	}
 
 	client := &Client{
-		hub:       h.hub,
-		conn:      conn,
-		send:      make(chan []byte, 256),
-		projectID: projectID,
-		userID:    userID,
+		hub:        h.hub,
+		conn:       conn,
+		send:       make(chan []byte, 256),
+		projectID:  projectID,
+		userID:     userID,
+		remoteAddr: remoteAddr,
 	}
+	log.WithFields(client.logFields()).Info("ws client upgraded")
 	h.hub.register <- client
 
 	go client.writePump()
@@ -94,7 +100,7 @@ func (c *Client) readPump() {
 		c.conn.Close() //nolint:errcheck
 	}()
 	c.conn.SetReadLimit(maxMessageSize)
-	c.conn.SetReadDeadline(time.Now().Add(pongWait))   //nolint:errcheck
+	c.conn.SetReadDeadline(time.Now().Add(pongWait)) //nolint:errcheck
 	c.conn.SetPongHandler(func(string) error {
 		c.conn.SetReadDeadline(time.Now().Add(pongWait)) //nolint:errcheck
 		return nil
@@ -102,6 +108,12 @@ func (c *Client) readPump() {
 	for {
 		_, _, err := c.conn.ReadMessage()
 		if err != nil {
+			entry := log.WithFields(c.logFields())
+			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
+				entry.WithError(err).Warn("ws client read failed")
+			} else {
+				entry.WithError(err).Debug("ws client closed")
+			}
 			break
 		}
 		// Client messages are currently ignored; server-push only.
@@ -120,15 +132,18 @@ func (c *Client) writePump() {
 		case message, ok := <-c.send:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait)) //nolint:errcheck
 			if !ok {
+				log.WithFields(c.logFields()).Debug("ws client send channel closed")
 				c.conn.WriteMessage(websocket.CloseMessage, []byte{}) //nolint:errcheck
 				return
 			}
 			if err := c.conn.WriteMessage(websocket.TextMessage, message); err != nil {
+				log.WithFields(c.logFields()).WithError(err).Warn("ws client write failed")
 				return
 			}
 		case <-ticker.C:
 			c.conn.SetWriteDeadline(time.Now().Add(writeWait)) //nolint:errcheck
 			if err := c.conn.WriteMessage(websocket.PingMessage, nil); err != nil {
+				log.WithFields(c.logFields()).WithError(err).Debug("ws client ping failed")
 				return
 			}
 		}

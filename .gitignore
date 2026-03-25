@@ -58,3 +58,5 @@ src-go/.env
 .superpowers
 .codex/dev-all-state.json
 .codex/runtime-logs/
+
+bridge-x86_64-pc-windows-msvc.exe

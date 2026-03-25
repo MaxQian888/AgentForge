@@ -4,12 +4,12 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"log/slog"
 	"strings"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
+	log "github.com/sirupsen/logrus"
 )
 
 var (
@@ -135,6 +135,17 @@ func (s *TeamService) StartTeam(ctx context.Context, input StartTeamInput) (*mod
 	if err := s.teamRepo.Create(ctx, team); err != nil {
 		return nil, fmt.Errorf("create team: %w", err)
 	}
+	log.WithFields(log.Fields{
+		"teamId":    team.ID.String(),
+		"projectId": task.ProjectID.String(),
+		"taskId":    task.ID.String(),
+		"strategy":  team.Strategy,
+		"teamName":  team.Name,
+		"runtime":   selection.Runtime,
+		"provider":  selection.Provider,
+		"model":     selection.Model,
+		"budgetUsd": team.TotalBudgetUsd,
+	}).Info("team created")
 
 	s.broadcastEvent(ws.EventTeamCreated, task.ProjectID.String(), team.ToDTO())
 
@@ -143,6 +154,7 @@ func (s *TeamService) StartTeam(ctx context.Context, input StartTeamInput) (*mod
 		return nil, fmt.Errorf("transition team to planning: %w", err)
 	}
 	team.Status = model.TeamStatusPlanning
+	log.WithFields(teamLogFields(team)).Info("team transitioned to planning")
 	s.broadcastEvent(ws.EventTeamPlanning, task.ProjectID.String(), team.ToDTO())
 
 	plannerBudget := team.TotalBudgetUsd * 0.2
@@ -152,11 +164,31 @@ func (s *TeamService) StartTeam(ctx context.Context, input StartTeamInput) (*mod
 
 	plannerRun, err := s.spawner.Spawn(ctx, task.ID, input.MemberID, selection.Runtime, selection.Provider, selection.Model, plannerBudget, "planner-agent")
 	if err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"teamId":    team.ID.String(),
+			"projectId": task.ProjectID.String(),
+			"taskId":    task.ID.String(),
+			"runtime":   selection.Runtime,
+			"provider":  selection.Provider,
+			"model":     selection.Model,
+			"budgetUsd": plannerBudget,
+		}).Error("team failed to spawn planner")
 		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, fmt.Sprintf("failed to spawn planner: %v", err))
 		team.Status = model.TeamStatusFailed
 		s.broadcastEvent(ws.EventTeamFailed, task.ProjectID.String(), team.ToDTO())
 		return nil, fmt.Errorf("spawn planner: %w", err)
 	}
+	log.WithFields(log.Fields{
+		"teamId":    team.ID.String(),
+		"projectId": task.ProjectID.String(),
+		"taskId":    task.ID.String(),
+		"runId":     plannerRun.ID.String(),
+		"role":      model.TeamRolePlanner,
+		"runtime":   selection.Runtime,
+		"provider":  selection.Provider,
+		"model":     selection.Model,
+		"budgetUsd": plannerBudget,
+	}).Info("team spawned planner")
 
 	if err := s.runRepo.SetTeamFields(ctx, plannerRun.ID, team.ID, model.TeamRolePlanner); err != nil {
 		return nil, fmt.Errorf("set planner team fields: %w", err)
@@ -178,13 +210,14 @@ func (s *TeamService) ProcessRunCompletion(ctx context.Context, run *model.Agent
 
 	team, err := s.teamRepo.GetByID(ctx, *run.TeamID)
 	if err != nil {
-		slog.Error("team service: failed to get team for run completion", "teamId", run.TeamID.String(), "error", err)
+		log.WithError(err).WithField("teamId", run.TeamID.String()).Error("team service: failed to get team for run completion")
 		return
 	}
 
 	if model.IsTerminalTeamStatus(team.Status) {
 		return
 	}
+	log.WithFields(teamRunLogFields(team, run)).Info("team run completion received")
 
 	// Update team cost
 	s.updateTeamCost(ctx, team)
@@ -197,7 +230,7 @@ func (s *TeamService) ProcessRunCompletion(ctx context.Context, run *model.Agent
 	case model.TeamRoleReviewer:
 		s.handleReviewerDone(ctx, team, run)
 	default:
-		slog.Warn("team service: unknown team role", "teamId", team.ID.String(), "runId", run.ID.String(), "role", run.TeamRole)
+		log.WithFields(teamRunLogFields(team, run)).Warn("team service: unknown team role")
 	}
 }
 
@@ -207,6 +240,7 @@ func (s *TeamService) handlePlannerDone(ctx context.Context, team *model.AgentTe
 		if run.ErrorMessage != "" {
 			errMsg = run.ErrorMessage
 		}
+		log.WithFields(teamRunLogFields(team, run)).WithField("errorMessage", errMsg).Warn("team planner run failed")
 		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, errMsg)
 		team.Status = model.TeamStatusFailed
 		s.broadcastEvent(ws.EventTeamFailed, team.ProjectID.String(), team.ToDTO())
@@ -215,26 +249,33 @@ func (s *TeamService) handlePlannerDone(ctx context.Context, team *model.AgentTe
 
 	// Transition to executing
 	if err := s.teamRepo.UpdateStatus(ctx, team.ID, model.TeamStatusExecuting); err != nil {
-		slog.Error("team service: failed to transition to executing", "teamId", team.ID.String(), "error", err)
+		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to transition to executing")
 		return
 	}
 	team.Status = model.TeamStatusExecuting
+	log.WithFields(teamRunLogFields(team, run)).Info("team transitioned to executing")
 	s.broadcastEvent(ws.EventTeamExecuting, team.ProjectID.String(), team.ToDTO())
 
 	// Get the parent task to find child tasks (planner should have created subtasks via decomposition)
 	task, err := s.taskRepo.GetByID(ctx, team.TaskID)
 	if err != nil {
-		slog.Error("team service: failed to get task", "teamId", team.ID.String(), "error", err)
+		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to get task")
 		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, "failed to get task for coder spawning")
 		return
 	}
 
 	hasChildren, err := s.taskRepo.HasChildren(ctx, task.ID)
 	if err != nil {
-		slog.Error("team service: failed to check children", "teamId", team.ID.String(), "error", err)
+		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to check children")
 		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, "failed to check subtasks")
 		return
 	}
+	log.WithFields(log.Fields{
+		"teamId":      team.ID.String(),
+		"projectId":   team.ProjectID.String(),
+		"taskId":      task.ID.String(),
+		"hasChildren": hasChildren,
+	}).Info("team planner output evaluated")
 
 	if !hasChildren {
 		// If planner didn't create subtasks, create a single child task for the work
@@ -252,10 +293,16 @@ func (s *TeamService) handlePlannerDone(ctx context.Context, team *model.AgentTe
 			},
 		})
 		if err != nil {
-			slog.Error("team service: failed to create default subtask", "teamId", team.ID.String(), "error", err)
+			log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to create default subtask")
 			_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, "failed to create subtasks")
 			return
 		}
+		log.WithFields(log.Fields{
+			"teamId":     team.ID.String(),
+			"projectId":  team.ProjectID.String(),
+			"taskId":     task.ID.String(),
+			"childCount": len(children),
+		}).Info("team created default subtasks")
 		s.spawnCodersForTasks(ctx, team, task, children)
 		return
 	}
@@ -279,14 +326,35 @@ func (s *TeamService) spawnCodersForTasks(ctx context.Context, team *model.Agent
 	}
 
 	selection := team.CodingAgentSelection()
+	log.WithFields(log.Fields{
+		"teamId":       team.ID.String(),
+		"projectId":    team.ProjectID.String(),
+		"parentTaskId": parentTask.ID.String(),
+		"childCount":   len(children),
+		"budgetUsd":    coderBudget,
+		"runtime":      selection.Runtime,
+		"provider":     selection.Provider,
+		"model":        selection.Model,
+	}).Info("team spawning coders for subtasks")
 	for _, child := range children {
 		coderRun, err := s.spawner.Spawn(ctx, child.ID, memberID, selection.Runtime, selection.Provider, selection.Model, coderBudget, "coding-agent")
 		if err != nil {
-			slog.Error("team service: failed to spawn coder", "teamId", team.ID.String(), "taskId", child.ID.String(), "error", err)
+			log.WithError(err).WithFields(log.Fields{"teamId": team.ID.String(), "taskId": child.ID.String()}).Error("team service: failed to spawn coder")
 			continue
 		}
+		log.WithFields(log.Fields{
+			"teamId":    team.ID.String(),
+			"projectId": team.ProjectID.String(),
+			"taskId":    child.ID.String(),
+			"runId":     coderRun.ID.String(),
+			"role":      model.TeamRoleCoder,
+			"budgetUsd": coderBudget,
+			"runtime":   selection.Runtime,
+			"provider":  selection.Provider,
+			"model":     selection.Model,
+		}).Info("team spawned coder")
 		if err := s.runRepo.SetTeamFields(ctx, coderRun.ID, team.ID, model.TeamRoleCoder); err != nil {
-			slog.Error("team service: failed to set coder team fields", "teamId", team.ID.String(), "runId", coderRun.ID.String(), "error", err)
+			log.WithError(err).WithFields(log.Fields{"teamId": team.ID.String(), "runId": coderRun.ID.String()}).Error("team service: failed to set coder team fields")
 		}
 	}
 }
@@ -305,14 +373,25 @@ func (s *TeamService) spawnCodersForTask(ctx context.Context, team *model.AgentT
 
 	coderRun, err := s.spawner.Spawn(ctx, task.ID, memberID, selection.Runtime, selection.Provider, selection.Model, coderBudget, "coding-agent")
 	if err != nil {
-		slog.Error("team service: failed to spawn coder for task", "teamId", team.ID.String(), "taskId", task.ID.String(), "error", err)
+		log.WithError(err).WithFields(log.Fields{"teamId": team.ID.String(), "taskId": task.ID.String()}).Error("team service: failed to spawn coder for task")
 		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, fmt.Sprintf("failed to spawn coder: %v", err))
 		team.Status = model.TeamStatusFailed
 		s.broadcastEvent(ws.EventTeamFailed, team.ProjectID.String(), team.ToDTO())
 		return
 	}
+	log.WithFields(log.Fields{
+		"teamId":    team.ID.String(),
+		"projectId": team.ProjectID.String(),
+		"taskId":    task.ID.String(),
+		"runId":     coderRun.ID.String(),
+		"role":      model.TeamRoleCoder,
+		"budgetUsd": coderBudget,
+		"runtime":   selection.Runtime,
+		"provider":  selection.Provider,
+		"model":     selection.Model,
+	}).Info("team spawned coder for task")
 	if err := s.runRepo.SetTeamFields(ctx, coderRun.ID, team.ID, model.TeamRoleCoder); err != nil {
-		slog.Error("team service: failed to set coder team fields", "teamId", team.ID.String(), "runId", coderRun.ID.String(), "error", err)
+		log.WithError(err).WithFields(log.Fields{"teamId": team.ID.String(), "runId": coderRun.ID.String()}).Error("team service: failed to set coder team fields")
 	}
 }
 
@@ -320,7 +399,7 @@ func (s *TeamService) handleCoderDone(ctx context.Context, team *model.AgentTeam
 	// Check if all coder runs for this team are done
 	runs, err := s.runRepo.ListByTeam(ctx, team.ID)
 	if err != nil {
-		slog.Error("team service: failed to list team runs", "teamId", team.ID.String(), "error", err)
+		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to list team runs")
 		return
 	}
 
@@ -340,10 +419,12 @@ func (s *TeamService) handleCoderDone(ctx context.Context, team *model.AgentTeam
 	}
 
 	if !allCodersDone {
+		log.WithFields(teamRunLogFields(team, run)).Debug("team waiting for remaining coder runs")
 		return
 	}
 
 	if anyCoderFailed {
+		log.WithFields(teamRunLogFields(team, run)).Warn("team failed because one or more coder runs failed")
 		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, "one or more coder runs failed")
 		team.Status = model.TeamStatusFailed
 		s.broadcastEvent(ws.EventTeamFailed, team.ProjectID.String(), team.ToDTO())
@@ -352,15 +433,16 @@ func (s *TeamService) handleCoderDone(ctx context.Context, team *model.AgentTeam
 
 	// All coders done successfully - spawn reviewer
 	if err := s.teamRepo.UpdateStatus(ctx, team.ID, model.TeamStatusReviewing); err != nil {
-		slog.Error("team service: failed to transition to reviewing", "teamId", team.ID.String(), "error", err)
+		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to transition to reviewing")
 		return
 	}
 	team.Status = model.TeamStatusReviewing
+	log.WithFields(teamRunLogFields(team, run)).Info("team transitioned to reviewing")
 	s.broadcastEvent(ws.EventTeamReviewing, team.ProjectID.String(), team.ToDTO())
 
 	task, err := s.taskRepo.GetByID(ctx, team.TaskID)
 	if err != nil {
-		slog.Error("team service: failed to get task for reviewer", "teamId", team.ID.String(), "error", err)
+		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to get task for reviewer")
 		return
 	}
 
@@ -377,28 +459,40 @@ func (s *TeamService) handleCoderDone(ctx context.Context, team *model.AgentTeam
 
 	reviewerRun, err := s.spawner.Spawn(ctx, task.ID, memberID, selection.Runtime, selection.Provider, selection.Model, reviewerBudget, "code-reviewer")
 	if err != nil {
-		slog.Error("team service: failed to spawn reviewer", "teamId", team.ID.String(), "error", err)
+		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to spawn reviewer")
 		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, fmt.Sprintf("failed to spawn reviewer: %v", err))
 		team.Status = model.TeamStatusFailed
 		s.broadcastEvent(ws.EventTeamFailed, team.ProjectID.String(), team.ToDTO())
 		return
 	}
+	log.WithFields(log.Fields{
+		"teamId":    team.ID.String(),
+		"projectId": team.ProjectID.String(),
+		"taskId":    task.ID.String(),
+		"runId":     reviewerRun.ID.String(),
+		"role":      model.TeamRoleReviewer,
+		"budgetUsd": reviewerBudget,
+		"runtime":   selection.Runtime,
+		"provider":  selection.Provider,
+		"model":     selection.Model,
+	}).Info("team spawned reviewer")
 
 	if err := s.runRepo.SetTeamFields(ctx, reviewerRun.ID, team.ID, model.TeamRoleReviewer); err != nil {
-		slog.Error("team service: failed to set reviewer team fields", "teamId", team.ID.String(), "error", err)
+		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to set reviewer team fields")
 	}
 	if err := s.teamRepo.SetReviewerRun(ctx, team.ID, reviewerRun.ID); err != nil {
-		slog.Error("team service: failed to set team reviewer run", "teamId", team.ID.String(), "error", err)
+		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to set team reviewer run")
 	}
 }
 
 func (s *TeamService) handleReviewerDone(ctx context.Context, team *model.AgentTeam, run *model.AgentRun) {
 	if run.Status == model.AgentRunStatusCompleted {
 		if err := s.teamRepo.UpdateStatus(ctx, team.ID, model.TeamStatusCompleted); err != nil {
-			slog.Error("team service: failed to mark team completed", "teamId", team.ID.String(), "error", err)
+			log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to mark team completed")
 			return
 		}
 		team.Status = model.TeamStatusCompleted
+		log.WithFields(teamRunLogFields(team, run)).Info("team completed")
 		s.broadcastEvent(ws.EventTeamCompleted, team.ProjectID.String(), team.ToDTO())
 
 		// Record learnings if memory service is available
@@ -413,6 +507,7 @@ func (s *TeamService) handleReviewerDone(ctx context.Context, team *model.AgentT
 		if run.ErrorMessage != "" {
 			errMsg = run.ErrorMessage
 		}
+		log.WithFields(teamRunLogFields(team, run)).WithField("errorMessage", errMsg).Warn("team reviewer run failed")
 		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, errMsg)
 		team.Status = model.TeamStatusFailed
 		s.broadcastEvent(ws.EventTeamFailed, team.ProjectID.String(), team.ToDTO())
@@ -429,8 +524,15 @@ func (s *TeamService) updateTeamCost(ctx context.Context, team *model.AgentTeam)
 		totalSpent += r.CostUsd
 	}
 	if err := s.teamRepo.UpdateSpent(ctx, team.ID, totalSpent); err != nil {
-		slog.Error("team service: failed to update team cost", "teamId", team.ID.String(), "error", err)
+		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to update team cost")
 	}
+	log.WithFields(log.Fields{
+		"teamId":    team.ID.String(),
+		"projectId": team.ProjectID.String(),
+		"taskId":    team.TaskID.String(),
+		"spentUsd":  totalSpent,
+		"budgetUsd": team.TotalBudgetUsd,
+	}).Info("team cost updated")
 	s.broadcastEvent(ws.EventTeamCostUpdate, team.ProjectID.String(), map[string]any{
 		"teamId": team.ID.String(),
 		"spent":  totalSpent,
@@ -458,7 +560,7 @@ func (s *TeamService) CancelTeam(ctx context.Context, teamID uuid.UUID) error {
 			continue
 		}
 		if err := s.spawner.Cancel(ctx, run.ID, "team_cancelled"); err != nil {
-			slog.Error("team service: failed to cancel run", "teamId", teamID.String(), "runId", run.ID.String(), "error", err)
+			log.WithError(err).WithFields(log.Fields{"teamId": teamID.String(), "runId": run.ID.String()}).Error("team service: failed to cancel run")
 		}
 	}
 
@@ -466,6 +568,7 @@ func (s *TeamService) CancelTeam(ctx context.Context, teamID uuid.UUID) error {
 		return fmt.Errorf("cancel team: %w", err)
 	}
 	team.Status = model.TeamStatusCancelled
+	log.WithFields(teamLogFields(team)).Info("team cancelled")
 	s.broadcastEvent(ws.EventTeamCancelled, team.ProjectID.String(), team.ToDTO())
 	return nil
 }
@@ -529,6 +632,17 @@ func (s *TeamService) RetryTeam(ctx context.Context, teamID uuid.UUID) error {
 		}
 		_ = s.runRepo.SetTeamFields(ctx, plannerRun.ID, teamID, model.TeamRolePlanner)
 		_ = s.teamRepo.SetPlannerRun(ctx, teamID, plannerRun.ID)
+		log.WithFields(log.Fields{
+			"teamId":    team.ID.String(),
+			"projectId": team.ProjectID.String(),
+			"taskId":    task.ID.String(),
+			"runId":     plannerRun.ID.String(),
+			"role":      model.TeamRolePlanner,
+			"budgetUsd": plannerBudget,
+			"runtime":   selection.Runtime,
+			"provider":  selection.Provider,
+			"model":     selection.Model,
+		}).Info("team retry spawned planner")
 		s.broadcastEvent(ws.EventTeamPlanning, team.ProjectID.String(), team.ToDTO())
 		return nil
 	}
@@ -538,6 +652,7 @@ func (s *TeamService) RetryTeam(ctx context.Context, teamID uuid.UUID) error {
 		if err := s.teamRepo.UpdateStatus(ctx, teamID, model.TeamStatusExecuting); err != nil {
 			return fmt.Errorf("retry team executing: %w", err)
 		}
+		log.WithFields(teamLogFields(team)).Info("team retry resumed executing phase")
 		s.broadcastEvent(ws.EventTeamExecuting, team.ProjectID.String(), team.ToDTO())
 		return nil
 	}
@@ -557,6 +672,17 @@ func (s *TeamService) RetryTeam(ctx context.Context, teamID uuid.UUID) error {
 	}
 	_ = s.runRepo.SetTeamFields(ctx, reviewerRun.ID, teamID, model.TeamRoleReviewer)
 	_ = s.teamRepo.SetReviewerRun(ctx, teamID, reviewerRun.ID)
+	log.WithFields(log.Fields{
+		"teamId":    team.ID.String(),
+		"projectId": team.ProjectID.String(),
+		"taskId":    task.ID.String(),
+		"runId":     reviewerRun.ID.String(),
+		"role":      model.TeamRoleReviewer,
+		"budgetUsd": reviewerBudget,
+		"runtime":   selection.Runtime,
+		"provider":  selection.Provider,
+		"model":     selection.Model,
+	}).Info("team retry spawned reviewer")
 	s.broadcastEvent(ws.EventTeamReviewing, team.ProjectID.String(), team.ToDTO())
 	return nil
 }
@@ -616,4 +742,33 @@ func (s *TeamService) broadcastEvent(eventType, projectID string, payload any) {
 		ProjectID: projectID,
 		Payload:   payload,
 	})
+}
+
+func teamLogFields(team *model.AgentTeam) log.Fields {
+	if team == nil {
+		return log.Fields{}
+	}
+
+	return log.Fields{
+		"teamId":     team.ID.String(),
+		"projectId":  team.ProjectID.String(),
+		"taskId":     team.TaskID.String(),
+		"teamStatus": team.Status,
+		"strategy":   team.Strategy,
+	}
+}
+
+func teamRunLogFields(team *model.AgentTeam, run *model.AgentRun) log.Fields {
+	fields := teamLogFields(team)
+	if run == nil {
+		return fields
+	}
+
+	fields["runId"] = run.ID.String()
+	fields["role"] = run.TeamRole
+	fields["runStatus"] = run.Status
+	if run.TaskID != uuid.Nil {
+		fields["runTaskId"] = run.TaskID.String()
+	}
+	return fields
 }

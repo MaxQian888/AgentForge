@@ -156,19 +156,6 @@ func (u *uuidList) Scan(src any) error {
 	return nil
 }
 
-type taskProgressSnapshotProjection struct {
-	TaskID             uuid.UUID  `gorm:"column:task_id"`
-	LastActivityAt     time.Time  `gorm:"column:last_activity_at"`
-	LastActivitySource string     `gorm:"column:last_activity_source"`
-	LastTransitionAt   time.Time  `gorm:"column:last_transition_at"`
-	HealthStatus       string     `gorm:"column:health_status"`
-	RiskReason         string     `gorm:"column:risk_reason"`
-	RiskSinceAt        *time.Time `gorm:"column:risk_since_at"`
-	LastAlertState     string     `gorm:"column:last_alert_state"`
-	LastAlertAt        *time.Time `gorm:"column:last_alert_at"`
-	LastRecoveredAt    *time.Time `gorm:"column:last_recovered_at"`
-}
-
 func normalizeJSONString(raw string, fallback string) string {
 	trimmed := strings.TrimSpace(raw)
 	if trimmed == "" {

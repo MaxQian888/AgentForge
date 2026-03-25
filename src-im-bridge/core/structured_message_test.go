@@ -58,3 +58,37 @@ func TestStructuredMessageFallbackTextIncludesTitleBodyFieldsAndActions(t *testi
 		}
 	}
 }
+
+func TestStructuredMessage_LegacyCardPreservesActionStyles(t *testing.T) {
+	card := (&StructuredMessage{
+		Title: "Review Ready",
+		Fields: []StructuredField{
+			{Label: "Risk", Value: "medium"},
+		},
+		Actions: []StructuredAction{
+			{ID: "approve", Label: "Approve", Style: ActionStylePrimary},
+			{ID: "reject", Label: "Reject", Style: ActionStyleDanger},
+			{URL: "https://example.test/reviews/42", Label: "Open"},
+		},
+	}).LegacyCard()
+
+	if card == nil {
+		t.Fatal("expected legacy card")
+	}
+	if card.Title != "Review Ready" {
+		t.Fatalf("title = %q", card.Title)
+	}
+	if len(card.Fields) != 1 {
+		t.Fatalf("fields = %+v", card.Fields)
+	}
+	if len(card.Buttons) != 3 {
+		t.Fatalf("buttons = %+v", card.Buttons)
+	}
+	if card.Buttons[0].Style != "primary" || card.Buttons[1].Style != "danger" || card.Buttons[2].Action != "link:https://example.test/reviews/42" {
+		t.Fatalf("buttons = %+v", card.Buttons)
+	}
+
+	if (*StructuredMessage)(nil).LegacyCard() != nil {
+		t.Fatal("expected nil structured message to return nil legacy card")
+	}
+}

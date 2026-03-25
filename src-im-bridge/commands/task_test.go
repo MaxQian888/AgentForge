@@ -398,3 +398,73 @@ func TestTaskCommand_DecomposeFailureExplainsNoSubtasksCreated(t *testing.T) {
 		t.Fatalf("final reply = %q, want no-subtasks explanation", platform.replies[1])
 	}
 }
+
+func TestTaskHelpers_BuildCardShortIDResolveMemberAndDispatchReply(t *testing.T) {
+	card := buildTaskCard(&client.Task{
+		ID:           "task-12345678",
+		Title:        "Bridge rollout",
+		Status:       "triaged",
+		Priority:     "high",
+		AssigneeName: "Alice",
+		SpentUsd:     1.25,
+		BudgetUsd:    3.5,
+	})
+	if card.Title != "任务 #task-123" {
+		t.Fatalf("title = %q", card.Title)
+	}
+	if len(card.Fields) != 5 {
+		t.Fatalf("fields = %+v", card.Fields)
+	}
+	if len(card.Buttons) != 2 || card.Buttons[0].Style != "primary" {
+		t.Fatalf("buttons = %+v", card.Buttons)
+	}
+
+	if got := shortID("task-12345678"); got != "task-123" {
+		t.Fatalf("shortID = %q", got)
+	}
+	if got := shortID("short"); got != "short" {
+		t.Fatalf("shortID short = %q", got)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode([]client.Member{
+			{ID: "member-1", Name: "Alice", Type: "agent", IsActive: true},
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	member, err := resolveProjectMember(context.Background(), apiClient, "alice")
+	if err != nil {
+		t.Fatalf("resolveProjectMember error: %v", err)
+	}
+	if member.ID != "member-1" {
+		t.Fatalf("member = %+v", member)
+	}
+	if _, err := resolveProjectMember(context.Background(), apiClient, "Bob"); err == nil {
+		t.Fatal("expected missing member to fail")
+	}
+
+	started := formatTaskDispatchReply(&client.TaskDispatchResponse{
+		Task: client.Task{ID: "task-12345678"},
+		Dispatch: client.DispatchOutcome{
+			Status: "started",
+			Run:    &client.AgentRun{ID: "run-12345678"},
+		},
+	}, "Alice")
+	if !strings.Contains(started, "启动 Agent #run-1234") {
+		t.Fatalf("started = %q", started)
+	}
+
+	blocked := formatTaskDispatchReply(&client.TaskDispatchResponse{
+		Task: client.Task{ID: "task-12345678"},
+		Dispatch: client.DispatchOutcome{
+			Status: "blocked",
+			Reason: "budget exceeded",
+		},
+	}, "Alice")
+	if blocked != "已将任务 #task-123 分配给 Alice，但未启动 Agent：budget exceeded" {
+		t.Fatalf("blocked = %q", blocked)
+	}
+}

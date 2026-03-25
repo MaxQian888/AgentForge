@@ -3,11 +3,11 @@ package service
 import (
 	"context"
 	"encoding/json"
-	"log/slog"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
+	log "github.com/sirupsen/logrus"
 )
 
 // WorkflowConfigProvider fetches workflow configuration for a project.
@@ -42,6 +42,13 @@ func (s *TaskWorkflowService) EvaluateTransition(ctx context.Context, task *mode
 		return nil
 	}
 
+	fields := log.Fields{
+		"taskId":     task.ID.String(),
+		"projectId":  task.ProjectID.String(),
+		"fromStatus": fromStatus,
+		"toStatus":   toStatus,
+	}
+
 	wfConfig, err := s.workflowRepo.GetByProject(ctx, task.ProjectID)
 	if err != nil {
 		return nil // no workflow configured — nothing to fire
@@ -50,7 +57,7 @@ func (s *TaskWorkflowService) EvaluateTransition(ctx context.Context, task *mode
 	var triggers []model.WorkflowTrigger
 	if len(wfConfig.Triggers) > 0 {
 		if err := json.Unmarshal(wfConfig.Triggers, &triggers); err != nil {
-			slog.Warn("failed to parse workflow triggers", "error", err, "projectId", task.ProjectID)
+			log.WithError(err).WithField("projectId", task.ProjectID).Warn("failed to parse workflow triggers")
 			return nil
 		}
 	}
@@ -60,9 +67,21 @@ func (s *TaskWorkflowService) EvaluateTransition(ctx context.Context, task *mode
 		if !matchesTrigger(trigger, fromStatus, toStatus) {
 			continue
 		}
+		triggerFields := log.Fields{
+			"taskId":     task.ID.String(),
+			"projectId":  task.ProjectID.String(),
+			"fromStatus": fromStatus,
+			"toStatus":   toStatus,
+			"action":     trigger.Action,
+		}
 		result := TriggerResult{Trigger: trigger, Fired: true}
+		log.WithFields(triggerFields).Info("workflow trigger matched")
 		s.executeTrigger(ctx, task, trigger)
 		results = append(results, result)
+	}
+	if len(results) > 0 {
+		fields["matchedTriggers"] = len(results)
+		log.WithFields(fields).Info("workflow transition evaluated with matches")
 	}
 	return results
 }
@@ -79,17 +98,28 @@ func matchesTrigger(trigger model.WorkflowTrigger, fromStatus, toStatus string) 
 }
 
 func (s *TaskWorkflowService) executeTrigger(ctx context.Context, task *model.Task, trigger model.WorkflowTrigger) {
+	fields := log.Fields{
+		"taskId":     task.ID.String(),
+		"projectId":  task.ProjectID.String(),
+		"action":     trigger.Action,
+		"fromStatus": trigger.FromStatus,
+		"toStatus":   trigger.ToStatus,
+	}
+
 	switch trigger.Action {
 	case "notify":
+		log.WithFields(fields).Info("workflow trigger fired")
 		s.broadcastTriggerFired(task, trigger)
 	case "auto_assign_agent":
 		// Broadcast event so the frontend or dispatcher can pick it up
+		log.WithFields(fields).Info("workflow trigger fired")
 		s.broadcastTriggerFired(task, trigger)
 	case "auto_transition":
 		// Broadcast event for the handler to process
+		log.WithFields(fields).Info("workflow trigger fired")
 		s.broadcastTriggerFired(task, trigger)
 	default:
-		slog.Warn("unknown workflow trigger action", "action", trigger.Action, "taskId", task.ID)
+		log.WithFields(fields).Warn("unknown workflow trigger action")
 	}
 }
 

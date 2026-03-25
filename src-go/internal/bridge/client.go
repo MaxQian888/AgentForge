@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/react-go-quick-starter/server/internal/model"
+	log "github.com/sirupsen/logrus"
 )
 
 // ExecuteRequest is sent to the bridge to start an agent session.
@@ -198,6 +199,26 @@ type Client struct {
 	httpClient *http.Client
 }
 
+func (c *Client) requestLogFields(method, path string) log.Fields {
+	return log.Fields{
+		"method":  method,
+		"path":    path,
+		"baseUrl": c.baseURL,
+	}
+}
+
+func logBridgeRequestResult(fields log.Fields, start time.Time, status int, err error, successMessage, failureMessage string) {
+	fields["durationMs"] = time.Since(start).Milliseconds()
+	if status > 0 {
+		fields["status"] = status
+	}
+	if err != nil {
+		log.WithFields(fields).WithError(err).Warn(failureMessage)
+		return
+	}
+	log.WithFields(fields).Info(successMessage)
+}
+
 // NewClient creates a new bridge client.
 func NewClient(baseURL string) *Client {
 	return &Client{
@@ -210,57 +231,82 @@ func NewClient(baseURL string) *Client {
 
 // Execute starts an agent session via the bridge.
 func (c *Client) Execute(ctx context.Context, req ExecuteRequest) (*ExecuteResponse, error) {
+	start := time.Now()
+	fields := c.requestLogFields(http.MethodPost, "/bridge/execute")
+	fields["taskId"] = req.TaskID
+	fields["sessionId"] = req.SessionID
+	fields["runtime"] = req.Runtime
+	fields["provider"] = req.Provider
+	fields["model"] = req.Model
+
 	body, err := json.Marshal(req)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge execute marshal failed")
 		return nil, fmt.Errorf("marshal execute request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/execute", bytes.NewReader(body))
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge execute request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge execute request failed")
 		return nil, fmt.Errorf("bridge execute: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge execute returned non-OK status"), "", "bridge execute returned non-OK status")
 		return nil, fmt.Errorf("bridge execute returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result ExecuteResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logBridgeRequestResult(fields, start, resp.StatusCode, err, "", "bridge execute decode failed")
 		return nil, fmt.Errorf("decode execute response: %w", err)
 	}
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge execute completed", "")
 	return &result, nil
 }
 
 // GetStatus queries the bridge for agent run status.
 func (c *Client) GetStatus(ctx context.Context, taskID string) (*StatusResponse, error) {
+	start := time.Now()
+	fields := c.requestLogFields(http.MethodGet, "/bridge/status/:taskId")
+	fields["taskId"] = taskID
+
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/bridge/status/"+taskID, nil)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge status request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge status request failed")
 		return nil, fmt.Errorf("bridge get status: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge status returned non-OK status"), "", "bridge status returned non-OK status")
 		return nil, fmt.Errorf("bridge status returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result StatusResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logBridgeRequestResult(fields, start, resp.StatusCode, err, "", "bridge status decode failed")
 		return nil, fmt.Errorf("decode status response: %w", err)
 	}
+	fields["state"] = result.State
+	fields["turnNumber"] = result.TurnNumber
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge status fetched", "")
 	return &result, nil
 }
 
@@ -314,161 +360,228 @@ func (c *Client) GetRuntimeCatalog(ctx context.Context) (*RuntimeCatalogResponse
 
 // Cancel sends a cancel request to the bridge.
 func (c *Client) Cancel(ctx context.Context, taskID, reason string) error {
+	start := time.Now()
+	fields := c.requestLogFields(http.MethodPost, "/bridge/cancel")
+	fields["taskId"] = taskID
+
 	payload, _ := json.Marshal(map[string]string{"task_id": taskID, "reason": reason})
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/cancel", bytes.NewReader(payload))
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge cancel request creation failed")
 		return fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge cancel request failed")
 		return fmt.Errorf("bridge cancel: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge cancel returned non-OK status"), "", "bridge cancel returned non-OK status")
 		return fmt.Errorf("bridge cancel returned %d: %s", resp.StatusCode, string(respBody))
 	}
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge cancel completed", "")
 	return nil
 }
 
 // Pause requests the bridge to pause an active runtime while preserving resumable state.
 func (c *Client) Pause(ctx context.Context, taskID, reason string) (*PauseResponse, error) {
+	start := time.Now()
+	fields := c.requestLogFields(http.MethodPost, "/bridge/pause")
+	fields["taskId"] = taskID
+
 	payload, _ := json.Marshal(map[string]string{"task_id": taskID, "reason": reason})
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/pause", bytes.NewReader(payload))
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge pause request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge pause request failed")
 		return nil, fmt.Errorf("bridge pause: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge pause returned non-OK status"), "", "bridge pause returned non-OK status")
 		return nil, fmt.Errorf("bridge pause returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result PauseResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logBridgeRequestResult(fields, start, resp.StatusCode, err, "", "bridge pause decode failed")
 		return nil, fmt.Errorf("decode pause response: %w", err)
 	}
+	fields["sessionId"] = result.SessionID
+	fields["state"] = result.Status
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge pause completed", "")
 	return &result, nil
 }
 
 // Resume requests the bridge to resume a runtime from a persisted snapshot.
 func (c *Client) Resume(ctx context.Context, req ExecuteRequest) (*ResumeResponse, error) {
+	start := time.Now()
+	fields := c.requestLogFields(http.MethodPost, "/bridge/resume")
+	fields["taskId"] = req.TaskID
+	fields["sessionId"] = req.SessionID
+	fields["runtime"] = req.Runtime
+	fields["provider"] = req.Provider
+	fields["model"] = req.Model
+
 	body, err := json.Marshal(req)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge resume marshal failed")
 		return nil, fmt.Errorf("marshal resume request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/resume", bytes.NewReader(body))
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge resume request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge resume request failed")
 		return nil, fmt.Errorf("bridge resume: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge resume returned non-OK status"), "", "bridge resume returned non-OK status")
 		return nil, fmt.Errorf("bridge resume returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result ResumeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logBridgeRequestResult(fields, start, resp.StatusCode, err, "", "bridge resume decode failed")
 		return nil, fmt.Errorf("decode resume response: %w", err)
 	}
+	fields["resumed"] = result.Resumed
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge resume completed", "")
 	return &result, nil
 }
 
 // Health checks if the bridge is reachable.
 func (c *Client) Health(ctx context.Context) error {
+	start := time.Now()
+	fields := c.requestLogFields(http.MethodGet, "/bridge/health")
+
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/bridge/health", nil)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge health request creation failed")
 		return fmt.Errorf("create request: %w", err)
 	}
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge health request failed")
 		return fmt.Errorf("bridge health: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge health returned non-OK status"), "", "bridge health returned non-OK status")
 		return fmt.Errorf("bridge unhealthy: status %d", resp.StatusCode)
 	}
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge health check passed", "")
 	return nil
 }
 
 // DecomposeTask requests a lightweight task decomposition from the bridge.
 func (c *Client) DecomposeTask(ctx context.Context, req DecomposeRequest) (*DecomposeResponse, error) {
+	start := time.Now()
+	fields := c.requestLogFields(http.MethodPost, "/bridge/decompose")
+	fields["taskId"] = req.TaskID
+	fields["provider"] = req.Provider
+	fields["model"] = req.Model
+
 	body, err := json.Marshal(req)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge decompose marshal failed")
 		return nil, fmt.Errorf("marshal decompose request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/decompose", bytes.NewReader(body))
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge decompose request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge decompose request failed")
 		return nil, fmt.Errorf("bridge decompose: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge decompose returned non-OK status"), "", "bridge decompose returned non-OK status")
 		return nil, fmt.Errorf("bridge decompose returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result DecomposeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logBridgeRequestResult(fields, start, resp.StatusCode, err, "", "bridge decompose decode failed")
 		return nil, fmt.Errorf("decode decompose response: %w", err)
 	}
+	fields["subtaskCount"] = len(result.Subtasks)
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge decompose completed", "")
 	return &result, nil
 }
 
 func (c *Client) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
+	start := time.Now()
+	fields := c.requestLogFields(http.MethodPost, "/bridge/generate")
+	fields["provider"] = req.Provider
+	fields["model"] = req.Model
+
 	body, err := json.Marshal(req)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge generate marshal failed")
 		return nil, fmt.Errorf("marshal generate request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/generate", bytes.NewReader(body))
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge generate request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge generate request failed")
 		return nil, fmt.Errorf("bridge generate: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge generate returned non-OK status"), "", "bridge generate returned non-OK status")
 		return nil, fmt.Errorf("bridge generate returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result GenerateResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logBridgeRequestResult(fields, start, resp.StatusCode, err, "", "bridge generate decode failed")
 		return nil, fmt.Errorf("decode generate response: %w", err)
 	}
+	fields["inputTokens"] = result.Usage.InputTokens
+	fields["outputTokens"] = result.Usage.OutputTokens
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge generate completed", "")
 	return &result, nil
 }
 
@@ -490,63 +603,92 @@ type ClassifyIntentResponse struct {
 
 // ClassifyIntent sends a natural language text to the bridge for intent classification.
 func (c *Client) ClassifyIntent(ctx context.Context, req ClassifyIntentRequest) (*ClassifyIntentResponse, error) {
+	start := time.Now()
+	fields := c.requestLogFields(http.MethodPost, "/bridge/classify-intent")
+	fields["userId"] = req.UserID
+	fields["projectId"] = req.ProjectID
+
 	body, err := json.Marshal(req)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge classify intent marshal failed")
 		return nil, fmt.Errorf("marshal classify intent request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/classify-intent", bytes.NewReader(body))
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge classify intent request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge classify intent request failed")
 		return nil, fmt.Errorf("bridge classify intent: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge classify intent returned non-OK status"), "", "bridge classify intent returned non-OK status")
 		return nil, fmt.Errorf("bridge classify intent returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result ClassifyIntentResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logBridgeRequestResult(fields, start, resp.StatusCode, err, "", "bridge classify intent decode failed")
 		return nil, fmt.Errorf("decode classify intent response: %w", err)
 	}
+	fields["intent"] = result.Intent
+	fields["command"] = result.Command
+	fields["confidence"] = result.Confidence
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge classify intent completed", "")
 	return &result, nil
 }
 
 // Review executes a Layer 2 deep review via the bridge.
 func (c *Client) Review(ctx context.Context, req ReviewRequest) (*ReviewResponse, error) {
+	start := time.Now()
+	fields := c.requestLogFields(http.MethodPost, "/bridge/review")
+	fields["reviewId"] = req.ReviewID
+	fields["taskId"] = req.TaskID
+	fields["dimensionCount"] = len(req.Dimensions)
+	fields["pluginCount"] = len(req.ReviewPlugins)
+
 	body, err := json.Marshal(req)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge review marshal failed")
 		return nil, fmt.Errorf("marshal review request: %w", err)
 	}
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/review", bytes.NewReader(body))
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge review request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
 	}
 	httpReq.Header.Set("Content-Type", "application/json")
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge review request failed")
 		return nil, fmt.Errorf("bridge review: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge review returned non-OK status"), "", "bridge review returned non-OK status")
 		return nil, fmt.Errorf("bridge review returned %d: %s", resp.StatusCode, string(respBody))
 	}
 
 	var result ReviewResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logBridgeRequestResult(fields, start, resp.StatusCode, err, "", "bridge review decode failed")
 		return nil, fmt.Errorf("decode review response: %w", err)
 	}
+	fields["riskLevel"] = result.RiskLevel
+	fields["findingCount"] = len(result.Findings)
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge review completed", "")
 	return &result, nil
 }
 
@@ -646,6 +788,8 @@ type pluginRecordResponse struct {
 }
 
 func (c *Client) doPluginRequest(ctx context.Context, method, path string, payload []byte) (*pluginRecordResponse, error) {
+	start := time.Now()
+	fields := c.requestLogFields(method, path)
 	var body io.Reader
 	if payload != nil {
 		body = bytes.NewReader(payload)
@@ -653,6 +797,7 @@ func (c *Client) doPluginRequest(ctx context.Context, method, path string, paylo
 
 	httpReq, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge plugin request creation failed")
 		return nil, fmt.Errorf("create plugin request: %w", err)
 	}
 	if payload != nil {
@@ -661,19 +806,25 @@ func (c *Client) doPluginRequest(ctx context.Context, method, path string, paylo
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge plugin request failed")
 		return nil, fmt.Errorf("plugin request %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge plugin request returned non-OK status"), "", "bridge plugin request returned non-OK status")
 		return nil, fmt.Errorf("plugin request %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody))
 	}
 
 	var result pluginRecordResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		logBridgeRequestResult(fields, start, resp.StatusCode, err, "", "bridge plugin response decode failed")
 		return nil, fmt.Errorf("decode plugin response: %w", err)
 	}
+	fields["pluginId"] = result.Metadata.ID
+	fields["lifecycleState"] = result.LifecycleState
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge plugin request completed", "")
 	return &result, nil
 }
 
@@ -721,10 +872,13 @@ func pluginMCPSurfaceFromRecord(record *pluginRecordResponse) *model.PluginMCPRe
 }
 
 func (c *Client) doJSONRequest(ctx context.Context, method, path string, payload any, out any) error {
+	start := time.Now()
+	fields := c.requestLogFields(method, path)
 	var body io.Reader
 	if payload != nil {
 		encoded, err := json.Marshal(payload)
 		if err != nil {
+			logBridgeRequestResult(fields, start, 0, err, "", "bridge JSON request marshal failed")
 			return fmt.Errorf("marshal request payload: %w", err)
 		}
 		body = bytes.NewReader(encoded)
@@ -732,6 +886,7 @@ func (c *Client) doJSONRequest(ctx context.Context, method, path string, payload
 
 	httpReq, err := http.NewRequestWithContext(ctx, method, c.baseURL+path, body)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge JSON request creation failed")
 		return fmt.Errorf("create request: %w", err)
 	}
 	if payload != nil {
@@ -740,20 +895,25 @@ func (c *Client) doJSONRequest(ctx context.Context, method, path string, payload
 
 	resp, err := c.httpClient.Do(httpReq)
 	if err != nil {
+		logBridgeRequestResult(fields, start, 0, err, "", "bridge JSON request failed")
 		return fmt.Errorf("bridge request %s %s: %w", method, path, err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
+		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge JSON request returned non-OK status"), "", "bridge JSON request returned non-OK status")
 		return fmt.Errorf("bridge request %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody))
 	}
 
 	if out == nil {
+		logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge JSON request completed", "")
 		return nil
 	}
 	if err := json.NewDecoder(resp.Body).Decode(out); err != nil {
+		logBridgeRequestResult(fields, start, resp.StatusCode, err, "", "bridge JSON response decode failed")
 		return fmt.Errorf("decode bridge response: %w", err)
 	}
+	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge JSON request completed", "")
 	return nil
 }

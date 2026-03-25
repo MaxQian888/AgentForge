@@ -11,6 +11,7 @@ import (
 	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
+	log "github.com/sirupsen/logrus"
 )
 
 var (
@@ -49,6 +50,23 @@ type ReviewService struct {
 	planner       *ReviewExecutionPlanner
 	progress      *TaskProgressService
 	imProgress    IMBoundProgressNotifier
+}
+
+func reviewLogFields(review *model.Review, task *model.Task) log.Fields {
+	fields := log.Fields{}
+	if review != nil {
+		fields["reviewId"] = review.ID.String()
+		fields["reviewStatus"] = review.Status
+		fields["riskLevel"] = review.RiskLevel
+		fields["recommendation"] = review.Recommendation
+		fields["prNumber"] = review.PRNumber
+	}
+	if task != nil {
+		fields["taskId"] = task.ID.String()
+		fields["projectId"] = task.ProjectID.String()
+		fields["taskStatus"] = task.Status
+	}
+	return fields
 }
 
 func NewReviewService(
@@ -100,11 +118,22 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	if err != nil || task == nil {
 		return nil, ErrReviewTaskNotFound
 	}
+	triggerFields := log.Fields{
+		"taskId":     task.ID.String(),
+		"projectId":  task.ProjectID.String(),
+		"taskStatus": task.Status,
+		"trigger":    req.Trigger,
+		"prUrl":      req.PRURL,
+		"prNumber":   req.PRNumber,
+	}
 
 	executionPlan, err := s.buildExecutionPlan(ctx, req)
 	if err != nil {
 		return nil, fmt.Errorf("build review execution plan: %w", err)
 	}
+	triggerFields["dimensionCount"] = len(executionPlan.Dimensions)
+	triggerFields["pluginCount"] = len(executionPlan.Plugins)
+	triggerFields["changedFileCount"] = len(executionPlan.ChangedFiles)
 
 	review := &model.Review{
 		ID:        uuid.New(),
@@ -119,12 +148,15 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	if err := s.reviews.Create(ctx, review); err != nil {
 		return nil, fmt.Errorf("create review: %w", err)
 	}
+	triggerFields["reviewId"] = review.ID.String()
+	log.WithFields(triggerFields).Info("review created")
 
 	if task.Status == model.TaskStatusInProgress {
 		if err := s.tasks.TransitionStatus(ctx, task.ID, model.TaskStatusInReview); err != nil {
 			return nil, fmt.Errorf("transition task to in_review: %w", err)
 		}
 		task.Status = model.TaskStatusInReview
+		log.WithFields(triggerFields).Info("task transitioned to in_review for review")
 	}
 
 	s.broadcast(ws.EventReviewCreated, task.ProjectID.String(), review.ToDTO())
@@ -136,6 +168,7 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	})
 
 	if s.bridge == nil {
+		log.WithFields(triggerFields).Debug("review trigger completed without bridge client")
 		return review, nil
 	}
 
@@ -154,8 +187,14 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	})
 	if err != nil {
 		_ = s.reviews.UpdateStatus(ctx, review.ID, model.ReviewStatusFailed)
+		log.WithFields(triggerFields).WithError(err).Warn("review bridge execution failed")
 		return nil, fmt.Errorf("bridge review: %w", err)
 	}
+	triggerFields["findingCount"] = len(result.Findings)
+	triggerFields["riskLevel"] = result.RiskLevel
+	triggerFields["recommendation"] = result.Recommendation
+	triggerFields["costUsd"] = result.CostUSD
+	log.WithFields(triggerFields).Info("review bridge execution completed")
 
 	return s.Complete(ctx, review.ID, &model.CompleteReviewRequest{
 		RiskLevel:         result.RiskLevel,
@@ -185,28 +224,36 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 	review.Summary = req.Summary
 	review.Recommendation = req.Recommendation
 	review.CostUSD = req.CostUSD
+	fields := reviewLogFields(review, task)
+	fields["findingCount"] = len(req.Findings)
+	fields["costUsd"] = req.CostUSD
 
 	if err := s.reviews.UpdateResult(ctx, review); err != nil {
 		return nil, fmt.Errorf("update review result: %w", err)
 	}
+	log.WithFields(fields).Info("review result stored")
 
 	targetStatus := mapRecommendationToTaskStatus(req.Recommendation)
 	if targetStatus != "" {
 		if err := s.transitionTaskForReview(ctx, task, targetStatus); err != nil {
+			log.WithFields(fields).WithError(err).Warn("review task transition failed")
 			return nil, err
 		}
+		fields["taskStatus"] = task.Status
 	}
 
 	if task.AssigneeID != nil && s.notifications != nil {
 		payload, _ := json.Marshal(review.ToDTO())
-		_, _ = s.notifications.Create(
+		if _, err := s.notifications.Create(
 			ctx,
 			*task.AssigneeID,
 			model.NotificationTypeReviewCompleted,
 			"Deep review completed",
 			fmt.Sprintf("Layer 2 review finished for task %s with recommendation %s", task.Title, review.Recommendation),
 			string(payload),
-		)
+		); err != nil {
+			log.WithFields(fields).WithField("assigneeId", task.AssigneeID.String()).WithError(err).Warn("review notification create failed")
+		}
 	}
 
 	s.broadcast(ws.EventReviewCompleted, task.ProjectID.String(), review.ToDTO())
@@ -217,14 +264,19 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 		MarkTransition: true,
 	})
 	if s.imProgress != nil {
-		_, _ = s.imProgress.QueueBoundProgress(ctx, IMBoundProgressRequest{
+		queued, err := s.imProgress.QueueBoundProgress(ctx, IMBoundProgressRequest{
 			TaskID:     task.ID.String(),
 			ReviewID:   review.ID.String(),
 			Kind:       IMDeliveryKindTerminal,
 			Content:    fmt.Sprintf("代码审查已完成。\nReview: %s\n状态: %s\n建议: %s", review.ID.String(), review.Status, review.Recommendation),
 			IsTerminal: true,
 		})
+		fields["imQueued"] = queued
+		if err != nil {
+			log.WithFields(fields).WithError(err).Warn("review IM progress queue failed")
+		}
 	}
+	log.WithFields(fields).Info("review completed")
 	return review, nil
 }
 
@@ -270,6 +322,12 @@ func (s *ReviewService) GetByTask(ctx context.Context, taskID uuid.UUID) ([]*mod
 }
 
 func (s *ReviewService) transitionTaskForReview(ctx context.Context, task *model.Task, targetStatus string) error {
+	fields := log.Fields{
+		"taskId":        task.ID.String(),
+		"projectId":     task.ProjectID.String(),
+		"currentStatus": task.Status,
+		"targetStatus":  targetStatus,
+	}
 	if task.Status == targetStatus {
 		return nil
 	}
@@ -278,11 +336,14 @@ func (s *ReviewService) transitionTaskForReview(ctx context.Context, task *model
 			return fmt.Errorf("transition task to in_review: %w", err)
 		}
 		task.Status = model.TaskStatusInReview
+		log.WithFields(fields).Info("review transitioned task to in_review")
 	}
 	if err := s.tasks.TransitionStatus(ctx, task.ID, targetStatus); err != nil {
 		return fmt.Errorf("transition task to %s: %w", targetStatus, err)
 	}
 	task.Status = targetStatus
+	fields["currentStatus"] = task.Status
+	log.WithFields(fields).Info("review transitioned task to final status")
 	return nil
 }
 
@@ -314,7 +375,15 @@ func (s *ReviewService) recordProgress(ctx context.Context, taskID uuid.UUID, in
 	if s.progress == nil {
 		return
 	}
-	_, _ = s.progress.RecordActivity(ctx, taskID, input)
+	if _, err := s.progress.RecordActivity(ctx, taskID, input); err != nil {
+		log.WithFields(log.Fields{
+			"taskId":         taskID.String(),
+			"source":         input.Source,
+			"occurredAt":     input.OccurredAt.Format(time.RFC3339),
+			"updateHealth":   input.UpdateHealth,
+			"markTransition": input.MarkTransition,
+		}).WithError(err).Warn("review progress recording failed")
+	}
 }
 
 func (s *ReviewService) buildExecutionPlan(ctx context.Context, req *model.TriggerReviewRequest) (*model.ReviewExecutionPlan, error) {

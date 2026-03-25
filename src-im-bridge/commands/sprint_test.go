@@ -262,3 +262,38 @@ func TestSprintCommand_BurndownAPIFailure(t *testing.T) {
 		t.Fatalf("reply = %q", platform.replies[0])
 	}
 }
+
+func TestBuildSprintCard_AndBurndownTextHelpers(t *testing.T) {
+	card := buildSprintCard(&client.Sprint{
+		Name:           "Sprint 7",
+		StartDate:      "2026-03-01",
+		EndDate:        "2026-03-14",
+		SpentUsd:       12.5,
+		TotalBudgetUsd: 40,
+		Status:         "active",
+	})
+	if card.Title != "Sprint: Sprint 7" {
+		t.Fatalf("title = %q", card.Title)
+	}
+	if len(card.Fields) != 4 {
+		t.Fatalf("fields = %+v", card.Fields)
+	}
+
+	text := buildBurndownText(&client.SprintMetrics{
+		Sprint:          client.Sprint{Name: "Sprint 7", StartDate: "2026-03-01", EndDate: "2026-03-14"},
+		PlannedTasks:    10,
+		CompletedTasks:  6,
+		CompletionRate:  0.6,
+		VelocityPerWeek: 3.5,
+		Burndown: []client.BurndownPoint{
+			{Date: "2026-03-01", RemainingTasks: 10},
+			{Date: "2026-03-02", RemainingTasks: 4},
+		},
+	})
+	if !strings.Contains(text, "进度: 6/10 任务 (60%)") {
+		t.Fatalf("text = %q", text)
+	}
+	if !strings.Contains(text, "03-01") || !strings.Contains(text, "03-02") {
+		t.Fatalf("text = %q", text)
+	}
+}

@@ -2,8 +2,9 @@ package scheduler
 
 import (
 	"context"
-	"log/slog"
 	"time"
+
+	log "github.com/sirupsen/logrus"
 )
 
 func RunLoop(ctx context.Context, pollInterval time.Duration, service *Service) {
@@ -23,7 +24,7 @@ func RunLoop(ctx context.Context, pollInterval time.Duration, service *Service) 
 			return
 		case <-ticker.C:
 			if _, err := service.RunDue(ctx); err != nil {
-				slog.Warn("scheduler loop tick failed", "error", err)
+				log.WithError(err).Warn("scheduler loop tick failed")
 			}
 		}
 	}

@@ -15,6 +15,7 @@ import (
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
+	log "github.com/sirupsen/logrus"
 )
 
 const (
@@ -82,6 +83,33 @@ type IMControlPlane struct {
 	actionByReview map[string]*boundActionState
 }
 
+func imBridgeFields(record *model.IMBridgeInstance) log.Fields {
+	if record == nil {
+		return log.Fields{}
+	}
+	return log.Fields{
+		"bridgeId":     record.BridgeID,
+		"platform":     record.Platform,
+		"transport":    record.Transport,
+		"status":       record.Status,
+		"projectCount": len(record.ProjectIDs),
+	}
+}
+
+func imDeliveryFields(delivery *model.IMControlDelivery) log.Fields {
+	if delivery == nil {
+		return log.Fields{}
+	}
+	return log.Fields{
+		"bridgeId":   delivery.TargetBridgeID,
+		"deliveryId": delivery.DeliveryID,
+		"cursor":     delivery.Cursor,
+		"platform":   delivery.Platform,
+		"projectId":  delivery.ProjectID,
+		"kind":       delivery.Kind,
+	}
+}
+
 type bridgeInstanceState struct {
 	record *model.IMBridgeInstance
 }
@@ -117,6 +145,7 @@ func NewIMControlPlane(cfg IMControlPlaneConfig) *IMControlPlane {
 
 func (s *IMControlPlane) RegisterBridge(_ context.Context, req *IMBridgeRegisterRequest) (*model.IMBridgeInstance, error) {
 	if req == nil || strings.TrimSpace(req.BridgeID) == "" {
+		log.Warn("IM control plane register rejected: missing bridge id")
 		return nil, ErrIMBridgeNotFound
 	}
 
@@ -136,6 +165,7 @@ func (s *IMControlPlane) RegisterBridge(_ context.Context, req *IMBridgeRegister
 	}
 	s.applyHeartbeat(record)
 	s.instances[record.BridgeID] = &bridgeInstanceState{record: record}
+	log.WithFields(imBridgeFields(record)).Info("IM control plane bridge registered")
 	return cloneBridgeInstance(record), nil
 }
 
@@ -145,9 +175,11 @@ func (s *IMControlPlane) RecordHeartbeat(_ context.Context, bridgeID string) (*m
 
 	instance, ok := s.instances[strings.TrimSpace(bridgeID)]
 	if !ok {
+		log.WithField("bridgeId", strings.TrimSpace(bridgeID)).Warn("IM control plane heartbeat failed: bridge not found")
 		return nil, ErrIMBridgeNotFound
 	}
 	s.applyHeartbeat(instance.record)
+	log.WithFields(imBridgeFields(instance.record)).Debug("IM control plane heartbeat recorded")
 	return &model.IMBridgeHeartbeatResponse{
 		BridgeID:   instance.record.BridgeID,
 		LastSeenAt: instance.record.LastSeenAt,
@@ -163,6 +195,7 @@ func (s *IMControlPlane) UnregisterBridge(_ context.Context, bridgeID string) er
 	bridgeID = strings.TrimSpace(bridgeID)
 	instance, ok := s.instances[bridgeID]
 	if !ok {
+		log.WithField("bridgeId", bridgeID).Warn("IM control plane unregister failed: bridge not found")
 		return ErrIMBridgeNotFound
 	}
 	instance.record.Status = "offline"
@@ -170,6 +203,7 @@ func (s *IMControlPlane) UnregisterBridge(_ context.Context, bridgeID string) er
 		_ = listener.Close()
 		delete(s.listeners, bridgeID)
 	}
+	log.WithFields(imBridgeFields(instance.record)).Info("IM control plane bridge unregistered")
 	return nil
 }
 
@@ -204,6 +238,10 @@ func (s *IMControlPlane) AttachBridgeListener(_ context.Context, bridgeID string
 			replayed = append(replayed, cloneDelivery(delivery))
 		}
 	}
+	fields := imBridgeFields(instance.record)
+	fields["afterCursor"] = afterCursor
+	fields["replayedCount"] = len(replayed)
+	log.WithFields(fields).Info("IM control plane listener attached")
 	return replayed, nil
 }
 
@@ -215,6 +253,7 @@ func (s *IMControlPlane) DetachBridgeListener(bridgeID string) {
 	if listener, exists := s.listeners[bridgeID]; exists {
 		_ = listener.Close()
 		delete(s.listeners, bridgeID)
+		log.WithField("bridgeId", bridgeID).Info("IM control plane listener detached")
 	}
 }
 
@@ -223,6 +262,12 @@ func (s *IMControlPlane) QueueDelivery(ctx context.Context, req IMQueueDeliveryR
 	instance, err := s.resolveBridgeLocked(normalizePlatform(req.Platform), strings.TrimSpace(req.ProjectID), strings.TrimSpace(req.TargetBridgeID))
 	if err != nil {
 		s.mu.Unlock()
+		log.WithFields(log.Fields{
+			"bridgeId":  strings.TrimSpace(req.TargetBridgeID),
+			"platform":  normalizePlatform(req.Platform),
+			"projectId": strings.TrimSpace(req.ProjectID),
+			"kind":      normalizeDeliveryKind(req.Kind),
+		}).WithError(err).Warn("IM control plane delivery target resolution failed")
 		return nil, err
 	}
 
@@ -245,11 +290,14 @@ func (s *IMControlPlane) QueueDelivery(ctx context.Context, req IMQueueDeliveryR
 	listener := s.listeners[instance.record.BridgeID]
 	cloned := cloneDelivery(delivery)
 	s.mu.Unlock()
+	log.WithFields(imDeliveryFields(cloned)).Info("IM control plane delivery queued")
 
 	if listener != nil {
 		if err := listener.Send(ctx, cloned); err != nil {
+			log.WithFields(imDeliveryFields(cloned)).WithError(err).Warn("IM control plane delivery push failed")
 			return nil, fmt.Errorf("send control-plane delivery: %w", err)
 		}
+		log.WithFields(imDeliveryFields(cloned)).Debug("IM control plane delivery pushed to live listener")
 	}
 	return cloned, nil
 }
@@ -260,6 +308,7 @@ func (s *IMControlPlane) AckDelivery(_ context.Context, bridgeID string, cursor 
 
 	bridgeID = strings.TrimSpace(bridgeID)
 	if _, ok := s.instances[bridgeID]; !ok {
+		log.WithField("bridgeId", bridgeID).Warn("IM control plane delivery ack failed: bridge not found")
 		return ErrIMBridgeNotFound
 	}
 
@@ -275,14 +324,22 @@ func (s *IMControlPlane) AckDelivery(_ context.Context, bridgeID string, cursor 
 		filtered = append(filtered, delivery)
 	}
 	s.pending[bridgeID] = filtered
+	log.WithFields(log.Fields{
+		"bridgeId":     bridgeID,
+		"cursor":       cursor,
+		"deliveryId":   strings.TrimSpace(deliveryID),
+		"pendingCount": len(filtered),
+	}).Debug("IM control plane delivery acknowledged")
 	return nil
 }
 
 func (s *IMControlPlane) BindAction(_ context.Context, binding *IMActionBinding) error {
 	if binding == nil {
+		log.Warn("IM control plane bind action rejected: empty binding")
 		return ErrIMActionBindingEmpty
 	}
 	if strings.TrimSpace(binding.TaskID) == "" && strings.TrimSpace(binding.RunID) == "" && strings.TrimSpace(binding.ReviewID) == "" {
+		log.WithField("bridgeId", strings.TrimSpace(binding.BridgeID)).Warn("IM control plane bind action rejected: missing entity ids")
 		return ErrIMActionBindingEmpty
 	}
 
@@ -301,6 +358,12 @@ func (s *IMControlPlane) BindAction(_ context.Context, binding *IMActionBinding)
 		},
 	}
 	if state.binding.ReplyTarget == nil {
+		log.WithFields(log.Fields{
+			"bridgeId": strings.TrimSpace(binding.BridgeID),
+			"taskId":   strings.TrimSpace(binding.TaskID),
+			"runId":    strings.TrimSpace(binding.RunID),
+			"reviewId": strings.TrimSpace(binding.ReviewID),
+		}).Warn("IM control plane bind action rejected: missing reply target")
 		return ErrIMActionBindingEmpty
 	}
 	if state.binding.TaskID != "" {
@@ -312,6 +375,14 @@ func (s *IMControlPlane) BindAction(_ context.Context, binding *IMActionBinding)
 	if state.binding.ReviewID != "" {
 		s.actionByReview[state.binding.ReviewID] = state
 	}
+	log.WithFields(log.Fields{
+		"bridgeId":  state.binding.BridgeID,
+		"platform":  state.binding.Platform,
+		"projectId": state.binding.ProjectID,
+		"taskId":    state.binding.TaskID,
+		"runId":     state.binding.RunID,
+		"reviewId":  state.binding.ReviewID,
+	}).Info("IM control plane action binding stored")
 	return nil
 }
 
@@ -320,12 +391,27 @@ func (s *IMControlPlane) QueueBoundProgress(ctx context.Context, req IMBoundProg
 	state := s.resolveBoundActionLocked(req.RunID, req.TaskID, req.ReviewID)
 	if state == nil || state.binding == nil || state.binding.ReplyTarget == nil {
 		s.mu.Unlock()
+		log.WithFields(log.Fields{
+			"taskId":     strings.TrimSpace(req.TaskID),
+			"runId":      strings.TrimSpace(req.RunID),
+			"reviewId":   strings.TrimSpace(req.ReviewID),
+			"kind":       normalizeDeliveryKind(req.Kind),
+			"isTerminal": req.IsTerminal,
+		}).Debug("IM control plane bound progress skipped: no binding")
 		return false, nil
 	}
 
 	now := s.now().UTC()
 	if !req.IsTerminal && !state.lastHeartbeatAt.IsZero() && now.Sub(state.lastHeartbeatAt) < s.progressHeartbeatInterval {
 		s.mu.Unlock()
+		log.WithFields(log.Fields{
+			"bridgeId":   state.binding.BridgeID,
+			"taskId":     state.binding.TaskID,
+			"runId":      state.binding.RunID,
+			"reviewId":   state.binding.ReviewID,
+			"kind":       normalizeDeliveryKind(req.Kind),
+			"isTerminal": req.IsTerminal,
+		}).Debug("IM control plane bound progress throttled")
 		return false, nil
 	}
 	if !req.IsTerminal {
@@ -349,8 +435,28 @@ func (s *IMControlPlane) QueueBoundProgress(ctx context.Context, req IMBoundProg
 		TargetChatID:   resolveTargetChatID(binding.ReplyTarget),
 	})
 	if err != nil {
+		log.WithFields(log.Fields{
+			"bridgeId":   binding.BridgeID,
+			"platform":   binding.Platform,
+			"projectId":  binding.ProjectID,
+			"taskId":     binding.TaskID,
+			"runId":      binding.RunID,
+			"reviewId":   binding.ReviewID,
+			"kind":       kind,
+			"isTerminal": req.IsTerminal,
+		}).WithError(err).Warn("IM control plane bound progress queue failed")
 		return false, err
 	}
+	log.WithFields(log.Fields{
+		"bridgeId":   binding.BridgeID,
+		"platform":   binding.Platform,
+		"projectId":  binding.ProjectID,
+		"taskId":     binding.TaskID,
+		"runId":      binding.RunID,
+		"reviewId":   binding.ReviewID,
+		"kind":       kind,
+		"isTerminal": req.IsTerminal,
+	}).Debug("IM control plane bound progress queued")
 	return true, nil
 }
 

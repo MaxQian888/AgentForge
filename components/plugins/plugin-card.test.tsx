@@ -76,6 +76,16 @@ const activeToolPlugin: PluginRecord = {
   restart_count: 2,
 };
 
+const enabledToolPlugin: PluginRecord = {
+  ...activeToolPlugin,
+  lifecycle_state: "enabled",
+};
+
+const installedToolPlugin: PluginRecord = {
+  ...activeToolPlugin,
+  lifecycle_state: "installed",
+};
+
 describe("PluginCard", () => {
   beforeEach(() => {
     enablePlugin.mockReset();
@@ -110,5 +120,40 @@ describe("PluginCard", () => {
     expect(checkHealth).toHaveBeenCalledWith("github-tool");
     expect(restartPlugin).toHaveBeenCalledWith("github-tool");
     expect(screen.getByText("Host: ts-bridge")).toBeInTheDocument();
+  });
+
+  it("supports activation, configuration, selection, disable, and uninstall flows", async () => {
+    const user = userEvent.setup();
+    const onConfigure = jest.fn();
+    const onSelect = jest.fn();
+
+    render(
+      <PluginCard
+        plugin={enabledToolPlugin}
+        onConfigure={onConfigure}
+        onSelect={onSelect}
+        selected
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Activate" }));
+    await user.click(screen.getByRole("button", { name: "Disable" }));
+    await user.click(screen.getByRole("button", { name: "Configure" }));
+    await user.click(screen.getByRole("button", { name: "Details" }));
+    await user.click(screen.getByRole("button", { name: "Uninstall" }));
+
+    expect(activatePlugin).toHaveBeenCalledWith("github-tool");
+    expect(disablePlugin).toHaveBeenCalledWith("github-tool");
+    expect(uninstallPlugin).toHaveBeenCalledWith("github-tool");
+    expect(onConfigure).toHaveBeenCalledWith(enabledToolPlugin);
+    expect(onSelect).toHaveBeenCalledWith(enabledToolPlugin);
+  });
+
+  it("explains installed executable plugins before they are enabled", () => {
+    render(<PluginCard plugin={installedToolPlugin} />);
+
+    expect(screen.getByText("Installed but not enabled yet.")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Enable" })).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Activate" })).not.toBeInTheDocument();
   });
 });

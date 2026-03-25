@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
 import {
   BellRing,
   Download,
@@ -24,7 +24,10 @@ import { PluginInstallDialog } from "@/components/plugins/plugin-install-dialog"
 import { PluginConfigDialog } from "@/components/plugins/plugin-config-dialog";
 import { usePlatformCapability } from "@/hooks/use-platform-capability";
 import type {
+  DesktopUpdateInfo,
+  DesktopUpdateProgress,
   DesktopRuntimeStatus,
+  PlatformUpdateResult,
   PluginRuntimeSummary,
 } from "@/lib/platform-runtime";
 import {
@@ -124,7 +127,9 @@ export default function PluginsPage() {
     checkForUpdate,
     getDesktopRuntimeStatus,
     getPluginRuntimeSummary,
+    installUpdate,
     isDesktop,
+    relaunchToUpdate,
     sendNotification,
     subscribeDesktopEvents,
     updateTray,
@@ -140,6 +145,10 @@ export default function PluginsPage() {
     useState<PluginRuntimeSummary>(EMPTY_PLUGIN_RUNTIME_SUMMARY);
   const [desktopMessage, setDesktopMessage] = useState<string | null>(null);
   const [lastDesktopEvent, setLastDesktopEvent] = useState<string | null>(null);
+  const [desktopUpdate, setDesktopUpdate] =
+    useState<PlatformUpdateResult | null>(null);
+  const [desktopUpdateProgress, setDesktopUpdateProgress] =
+    useState<DesktopUpdateProgress | null>(null);
 
   useEffect(() => {
     void fetchPlugins();
@@ -152,10 +161,8 @@ export default function PluginsPage() {
     setConfigOpen(true);
   }, []);
 
-  const loadDesktopState = useCallback(async () => {
+  const loadDesktopState = useEffectEvent(async () => {
     if (!isDesktop) {
-      setDesktopRuntime(EMPTY_RUNTIME_STATUS);
-      setPluginRuntimeSummary(EMPTY_PLUGIN_RUNTIME_SUMMARY);
       return;
     }
 
@@ -165,11 +172,11 @@ export default function PluginsPage() {
     ]);
     setDesktopRuntime(runtimeStatus);
     setPluginRuntimeSummary(summary);
-  }, [getDesktopRuntimeStatus, getPluginRuntimeSummary, isDesktop]);
+  });
 
   useEffect(() => {
     void loadDesktopState();
-  }, [loadDesktopState]);
+  }, []);
 
   useEffect(() => {
     if (!isDesktop) {
@@ -204,7 +211,7 @@ export default function PluginsPage() {
       disposed = true;
       cleanupRef();
     };
-  }, [isDesktop, loadDesktopState, subscribeDesktopEvents]);
+  }, [isDesktop, subscribeDesktopEvents]);
 
   const handleDesktopNotification = useCallback(async () => {
     const result = await sendNotification({
@@ -240,12 +247,46 @@ export default function PluginsPage() {
 
   const handleUpdateCheck = useCallback(async () => {
     const result = await checkForUpdate();
+    setDesktopUpdate(result);
+    setDesktopUpdateProgress(null);
     setDesktopMessage(
-      result.ok
-        ? `Desktop update check completed in ${result.mode} mode.`
-        : result.error,
+      !result.ok
+        ? result.error
+        : result.status === "available"
+          ? `Desktop update metadata refreshed in ${result.mode} mode.`
+          : "Desktop app is already up to date.",
     );
   }, [checkForUpdate]);
+
+  const handleInstallUpdate = useCallback(async () => {
+    const result = await installUpdate((event) => {
+      setDesktopUpdateProgress(event);
+    });
+
+    setDesktopUpdate(result);
+    setDesktopMessage(
+      result.ok
+        ? `Desktop update installation completed in ${result.mode} mode.`
+        : result.error,
+    );
+  }, [installUpdate]);
+
+  const handleRelaunchToUpdate = useCallback(async () => {
+    const result = await relaunchToUpdate();
+    setDesktopMessage(
+      result.ok
+        ? `Relaunch requested through ${result.mode} mode.`
+        : result.error,
+    );
+  }, [relaunchToUpdate]);
+
+  const activeDesktopUpdate: DesktopUpdateInfo | null =
+    desktopUpdate &&
+    desktopUpdate.ok &&
+    "update" in desktopUpdate &&
+    desktopUpdate.update
+      ? desktopUpdate.update
+      : null;
 
   const filteredInstalled = useMemo(
     () => filterPluginRecords(plugins, filters),
@@ -407,6 +448,25 @@ export default function PluginsPage() {
               >
                 Check update
               </Button>
+              {desktopUpdate?.ok && desktopUpdate.status === "available" ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleInstallUpdate()}
+                >
+                  Install update
+                </Button>
+              ) : null}
+              {desktopUpdate?.ok &&
+              desktopUpdate.status === "ready_to_relaunch" ? (
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => void handleRelaunchToUpdate()}
+                >
+                  Restart to update
+                </Button>
+              ) : null}
               <Button
                 variant="outline"
                 size="sm"
@@ -420,6 +480,34 @@ export default function PluginsPage() {
             {desktopMessage ? (
               <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-xs text-muted-foreground">
                 {desktopMessage}
+              </div>
+            ) : null}
+
+            {activeDesktopUpdate ? (
+              <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
+                <p className="font-medium text-foreground">
+                  {desktopUpdate?.ok && desktopUpdate.status === "ready_to_relaunch"
+                    ? `Update ${activeDesktopUpdate.version} installed and waiting for restart.`
+                    : `Update ${activeDesktopUpdate.version} is ready to install.`}
+                </p>
+                <p className="mt-1">
+                  Current version: {activeDesktopUpdate.currentVersion ?? "Unknown"}
+                </p>
+                {activeDesktopUpdate.publishedAt ? (
+                  <p className="mt-1">
+                    Published at: {activeDesktopUpdate.publishedAt}
+                  </p>
+                ) : null}
+                {activeDesktopUpdate.notes ? (
+                  <p className="mt-1">{activeDesktopUpdate.notes}</p>
+                ) : null}
+                {desktopUpdateProgress ? (
+                  <p className="mt-1">
+                    {desktopUpdateProgress.phase === "downloading"
+                      ? `Downloading ${desktopUpdateProgress.downloadedBytes} / ${desktopUpdateProgress.totalBytes ?? "unknown"} bytes`
+                      : "Installing downloaded update"}
+                  </p>
+                ) : null}
               </div>
             ) : null}
           </div>

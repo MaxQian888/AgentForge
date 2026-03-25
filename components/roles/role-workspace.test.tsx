@@ -255,4 +255,74 @@ describe("RoleWorkspace", () => {
     expect(await screen.findByText("A calm frontend specialist for dashboard polish.")).toBeInTheDocument();
     expect(screen.getByText("claude_code / anthropic / claude-sonnet-4-5")).toBeInTheDocument();
   });
+
+  it("updates an existing role with advanced workspace sections and can switch back to create mode", async () => {
+    const user = userEvent.setup();
+    const onUpdateRole = jest.fn().mockResolvedValue(undefined);
+
+    render(
+      <RoleWorkspace
+        roles={[frontendRole]}
+        loading={false}
+        error={null}
+        onCreateRole={jest.fn().mockResolvedValue(undefined)}
+        onUpdateRole={onUpdateRole}
+        onDeleteRole={jest.fn().mockResolvedValue(undefined)}
+        onPreviewRole={jest.fn().mockResolvedValue(undefined)}
+        onSandboxRole={jest.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Edit Frontend Developer" }));
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "Frontend Captain");
+    await user.type(screen.getByLabelText("Packages"), ", ui-kit");
+    await user.type(screen.getByLabelText("External Tools"), ", linear");
+    await user.clear(screen.getByLabelText("Persona"));
+    await user.type(screen.getByLabelText("Persona"), "precise");
+    await user.click(screen.getByRole("button", { name: "Add Shared Knowledge" }));
+    const knowledgeIds = screen.getAllByLabelText("Shared Knowledge ID");
+    const knowledgeTypes = screen.getAllByLabelText("Shared Knowledge Type");
+    await user.type(knowledgeIds[1]!, "team-playbook");
+    await user.type(knowledgeTypes[1]!, "doc");
+    await user.click(screen.getByRole("button", { name: "Add Trigger" }));
+    const triggerEvents = screen.getAllByLabelText("Trigger Event");
+    const triggerActions = screen.getAllByLabelText("Trigger Action");
+    const triggerConditions = screen.getAllByLabelText("Trigger Condition");
+    await user.type(triggerEvents[1]!, "task_blocked");
+    await user.type(triggerActions[1]!, "escalate");
+    await user.type(triggerConditions[1]!, "severity === 'high'");
+    await user.click(screen.getByRole("button", { name: "Save Role" }));
+
+    expect(onUpdateRole).toHaveBeenCalledWith(
+      "frontend-developer",
+      expect.objectContaining({
+        metadata: expect.objectContaining({ name: "Frontend Captain" }),
+        capabilities: expect.objectContaining({
+          packages: ["design-system", "ui-kit"],
+          toolConfig: expect.objectContaining({
+            external: ["figma", "linear"],
+          }),
+        }),
+        identity: expect.objectContaining({ persona: "precise" }),
+        knowledge: expect.objectContaining({
+          shared: expect.arrayContaining([
+            expect.objectContaining({ id: "design-guidelines" }),
+            expect.objectContaining({ id: "team-playbook", type: "doc" }),
+          ]),
+        }),
+        triggers: expect.arrayContaining([
+          expect.objectContaining({ event: "pr_created" }),
+          expect.objectContaining({
+            event: "task_blocked",
+            action: "escalate",
+            condition: "severity === 'high'",
+          }),
+        ]),
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Switch to Create" }));
+    expect(screen.getByText("Create Role")).toBeInTheDocument();
+  }, 15000);
 });

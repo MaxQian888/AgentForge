@@ -17,6 +17,7 @@ import (
 	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	worktreepkg "github.com/react-go-quick-starter/server/internal/worktree"
 	"github.com/react-go-quick-starter/server/internal/ws"
+	log "github.com/sirupsen/logrus"
 )
 
 // AgentRunRepository defines persistence for agent runs.
@@ -116,6 +117,32 @@ type AgentService struct {
 	memorySvc  *MemoryService
 }
 
+func agentRunLogFields(run *model.AgentRun) log.Fields {
+	if run == nil {
+		return log.Fields{}
+	}
+
+	fields := log.Fields{
+		"runId":     run.ID.String(),
+		"taskId":    run.TaskID.String(),
+		"memberId":  run.MemberID.String(),
+		"status":    run.Status,
+		"runtime":   run.Runtime,
+		"provider":  run.Provider,
+		"model":     run.Model,
+		"turnCount": run.TurnCount,
+		"costUsd":   run.CostUsd,
+		"teamRole":  run.TeamRole,
+	}
+	if run.TeamID != nil {
+		fields["teamId"] = run.TeamID.String()
+	}
+	if strings.TrimSpace(run.RoleID) != "" {
+		fields["roleId"] = run.RoleID
+	}
+	return fields
+}
+
 func NewAgentService(
 	runRepo AgentRunRepository,
 	taskRepo AgentTaskRepository,
@@ -188,6 +215,16 @@ func (s *AgentService) Spawn(ctx context.Context, taskID, memberID uuid.UUID, ru
 	if err != nil {
 		return nil, err
 	}
+	spawnFields := log.Fields{
+		"taskId":      taskID.String(),
+		"projectId":   task.ProjectID.String(),
+		"memberId":    memberID.String(),
+		"runtime":     selection.Runtime,
+		"provider":    selection.Provider,
+		"model":       selection.Model,
+		"budgetUsd":   budgetUsd,
+		"projectSlug": project.Slug,
+	}
 
 	resolvedRoleID := strings.TrimSpace(roleID)
 	roleConfig, err := s.resolveRoleConfig(resolvedRoleID)
@@ -218,12 +255,21 @@ func (s *AgentService) Spawn(ctx context.Context, taskID, memberID uuid.UUID, ru
 		s.releasePoolSlot(run.ID.String())
 		return nil, fmt.Errorf("create agent run: %w", err)
 	}
+	spawnFields["runId"] = run.ID.String()
+	if resolvedRoleID != "" {
+		spawnFields["roleId"] = resolvedRoleID
+	}
+	log.WithFields(spawnFields).Info("agent spawn persisted")
 
 	allocation, err := s.worktrees.Prepare(ctx, project.Slug, taskID.String())
 	if err != nil {
+		log.WithFields(spawnFields).WithError(err).Warn("agent spawn failed to prepare worktree")
 		_ = s.failSpawn(ctx, run, task, project.Slug, nil)
 		return nil, fmt.Errorf("%w: %w", ErrAgentWorktreeUnavailable, err)
 	}
+	spawnFields["worktreePath"] = allocation.Path
+	spawnFields["branchName"] = allocation.Branch
+	spawnFields["worktreeReused"] = allocation.Reused
 
 	sessionID := uuid.New().String()
 	resp, err := s.bridge.Execute(ctx, BridgeExecuteRequest{
@@ -243,23 +289,28 @@ func (s *AgentService) Spawn(ctx context.Context, taskID, memberID uuid.UUID, ru
 		RoleConfig:     roleConfig,
 	})
 	if err != nil {
+		log.WithFields(spawnFields).WithError(err).Warn("agent spawn bridge execute failed")
 		_ = s.failSpawn(ctx, run, task, project.Slug, allocation)
 		return nil, fmt.Errorf("start bridge execution: %w", err)
 	}
 	if resp != nil && resp.SessionID != "" {
 		sessionID = resp.SessionID
 	}
+	spawnFields["sessionId"] = sessionID
 
 	if err := s.taskRepo.UpdateRuntime(ctx, task.ID, allocation.Branch, allocation.Path, sessionID); err != nil {
+		log.WithFields(spawnFields).WithError(err).Warn("agent spawn failed to persist runtime")
 		_ = s.failSpawn(ctx, run, task, project.Slug, allocation)
 		return nil, fmt.Errorf("persist task runtime: %w", err)
 	}
 	if err := s.runRepo.UpdateStatus(ctx, run.ID, model.AgentRunStatusRunning); err != nil {
+		log.WithFields(spawnFields).WithError(err).Warn("agent spawn failed to mark run running")
 		_ = s.failSpawn(ctx, run, task, project.Slug, allocation)
 		return nil, fmt.Errorf("mark run running: %w", err)
 	}
 
 	run.Status = model.AgentRunStatusRunning
+	log.WithFields(spawnFields).Info("agent spawn started bridge runtime")
 	s.broadcastEvent(ws.EventAgentStarted, task.ProjectID.String(), run.ToDTO())
 	s.recordProgress(ctx, taskID, TaskActivityInput{
 		Source:       model.TaskProgressSourceAgentStarted,
@@ -275,6 +326,8 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 	if err != nil {
 		return ErrAgentNotFound
 	}
+	fields := agentRunLogFields(run)
+	fields["nextStatus"] = status
 
 	switch status {
 	case model.AgentRunStatusPaused:
@@ -292,6 +345,7 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 		return fmt.Errorf("update agent status: %w", err)
 	}
 	run.Status = status
+	log.WithFields(fields).Info("agent status updated")
 
 	eventType := ws.EventAgentProgress
 	switch status {
@@ -305,6 +359,7 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 		s.releasePoolSlot(run.ID.String())
 		if shouldReleaseTaskRuntime(status) {
 			if err := s.releaseTaskRuntime(ctx, run.TaskID); err != nil {
+				log.WithFields(fields).WithError(err).Warn("agent status update failed to release task runtime")
 				return fmt.Errorf("release managed worktree: %w", err)
 			}
 		}
@@ -346,6 +401,15 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 	if err != nil {
 		return err
 	}
+	costFields := agentRunLogFields(run)
+	costFields["inputTokens"] = inputTokens
+	costFields["outputTokens"] = outputTokens
+	costFields["cacheReadTokens"] = cacheReadTokens
+	costFields["reportedCostUsd"] = costUsd
+	costFields["reportedTurnCount"] = turnCount
+	costFields["projectId"] = task.ProjectID.String()
+	costFields["taskBudgetUsd"] = task.BudgetUsd
+	costFields["taskSpentUsd"] = totalSpent
 
 	nextTaskStatus := ""
 	if task.BudgetUsd > 0 && totalSpent >= task.BudgetUsd {
@@ -359,6 +423,9 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 	if err != nil {
 		return err
 	}
+	costFields["updatedTaskStatus"] = updatedTask.Status
+	costFields["updatedTaskSpentUsd"] = updatedTask.SpentUsd
+	log.WithFields(costFields).Info("agent cost updated")
 
 	s.broadcastEvent(ws.EventAgentCostUpdate, updatedTask.ProjectID.String(), run.ToDTO())
 	s.broadcastEvent(ws.EventTaskUpdated, updatedTask.ProjectID.String(), updatedTask.ToDTO())
@@ -368,6 +435,7 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 		currentRatio := updatedTask.SpentUsd / updatedTask.BudgetUsd
 
 		if previousRatio < 0.8 && currentRatio >= 0.8 && currentRatio < 1 {
+			log.WithFields(costFields).WithField("budgetPercent", currentRatio*100).Warn("agent cost crossed budget warning threshold")
 			s.broadcastBudgetEvent(ws.EventBudgetWarning, updatedTask, currentRatio*100)
 		}
 
@@ -375,6 +443,7 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 			if s.bridge != nil {
 				_ = s.bridge.Cancel(ctx, run.TaskID.String(), "budget_exceeded")
 			}
+			log.WithFields(costFields).WithField("budgetPercent", currentRatio*100).Warn("agent cost crossed budget exceeded threshold")
 			s.broadcastBudgetEvent(ws.EventBudgetExceeded, updatedTask, currentRatio*100)
 			if run.Status != model.AgentRunStatusBudgetExceeded {
 				if err := s.UpdateStatus(ctx, run.ID, model.AgentRunStatusBudgetExceeded); err != nil {
@@ -701,6 +770,17 @@ func (s *AgentService) failSpawn(ctx context.Context, run *model.AgentRun, task 
 	if err := s.runRepo.UpdateStatus(ctx, run.ID, model.AgentRunStatusFailed); err != nil {
 		return err
 	}
+	fields := agentRunLogFields(run)
+	fields["projectSlug"] = projectSlug
+	if task != nil {
+		fields["projectId"] = task.ProjectID.String()
+	}
+	if allocation != nil {
+		fields["worktreePath"] = allocation.Path
+		fields["branchName"] = allocation.Branch
+		fields["worktreeReused"] = allocation.Reused
+	}
+	log.WithFields(fields).Warn("agent spawn marked failed")
 	s.releasePoolSlot(run.ID.String())
 	run.Status = model.AgentRunStatusFailed
 	if s.taskRepo != nil {
@@ -726,12 +806,20 @@ func (s *AgentService) releaseTaskRuntime(ctx context.Context, taskID uuid.UUID)
 	if task.AgentBranch == "" && task.AgentWorktree == "" && task.AgentSessionID == "" {
 		return nil
 	}
+	fields := log.Fields{
+		"taskId":       taskID.String(),
+		"projectId":    task.ProjectID.String(),
+		"branchName":   task.AgentBranch,
+		"worktreePath": task.AgentWorktree,
+		"sessionId":    task.AgentSessionID,
+	}
 
 	if s.worktrees != nil && s.projects != nil {
 		project, err := s.projects.GetByID(ctx, task.ProjectID)
 		if err != nil {
 			return err
 		}
+		fields["projectSlug"] = project.Slug
 		canonicalBranch := s.worktrees.Branch(taskID.String())
 		canonicalPath := s.worktrees.Path(project.Slug, taskID.String())
 		if task.AgentBranch == canonicalBranch && task.AgentWorktree == canonicalPath {
@@ -741,6 +829,7 @@ func (s *AgentService) releaseTaskRuntime(ctx context.Context, taskID uuid.UUID)
 		}
 	}
 
+	log.WithFields(fields).Info("agent task runtime cleared")
 	return s.taskRepo.ClearRuntime(ctx, taskID)
 }
 
@@ -773,6 +862,7 @@ func (s *AgentService) pauseRun(ctx context.Context, run *model.AgentRun) error 
 		return fmt.Errorf("mark run paused: %w", err)
 	}
 	run.Status = model.AgentRunStatusPaused
+	log.WithFields(agentRunLogFields(run)).WithField("sessionId", sessionID).Info("agent runtime paused")
 	s.releasePoolSlot(run.ID.String())
 	s.broadcastEvent(ws.EventAgentProgress, s.lookupProjectID(ctx, run.TaskID), run.ToDTO())
 	return nil
@@ -832,6 +922,7 @@ func (s *AgentService) resumeRun(ctx context.Context, run *model.AgentRun) error
 		return fmt.Errorf("mark run resumed: %w", err)
 	}
 	run.Status = model.AgentRunStatusRunning
+	log.WithFields(agentRunLogFields(run)).WithField("sessionId", sessionID).Info("agent runtime resumed")
 	s.broadcastEvent(ws.EventAgentProgress, s.lookupProjectID(ctx, run.TaskID), run.ToDTO())
 	return nil
 }
@@ -865,7 +956,15 @@ func (s *AgentService) recordProgress(ctx context.Context, taskID uuid.UUID, inp
 	if input.OccurredAt.IsZero() {
 		input.OccurredAt = time.Now().UTC()
 	}
-	_, _ = s.progress.RecordActivity(ctx, taskID, input)
+	if _, err := s.progress.RecordActivity(ctx, taskID, input); err != nil {
+		log.WithFields(log.Fields{
+			"taskId":         taskID.String(),
+			"source":         input.Source,
+			"occurredAt":     input.OccurredAt.Format(time.RFC3339),
+			"updateHealth":   input.UpdateHealth,
+			"markTransition": input.MarkTransition,
+		}).WithError(err).Warn("agent progress recording failed")
+	}
 }
 
 func buildSpawnPrompt(task *model.Task) string {
@@ -1050,6 +1149,16 @@ func (s *AgentService) promoteQueuedAdmission(ctx context.Context, completedRun 
 
 	run, err := s.Spawn(ctx, taskID, memberID, entry.Runtime, entry.Provider, entry.Model, entry.BudgetUSD, entry.RoleID)
 	if err != nil {
+		log.WithFields(log.Fields{
+			"completedRunId": completedRun.ID.String(),
+			"queueEntryId":   entry.EntryID,
+			"projectId":      completedTask.ProjectID.String(),
+			"taskId":         entry.TaskID,
+			"memberId":       entry.MemberID,
+			"runtime":        entry.Runtime,
+			"provider":       entry.Provider,
+			"model":          entry.Model,
+		}).WithError(err).Warn("queued agent admission promotion failed")
 		s.broadcastEvent(ws.EventAgentQueueFailed, completedTask.ProjectID.String(), map[string]any{
 			"queue": entry,
 			"error": err.Error(),
@@ -1057,6 +1166,13 @@ func (s *AgentService) promoteQueuedAdmission(ctx context.Context, completedRun 
 		_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusFailed, err.Error(), nil)
 		return
 	}
+	log.WithFields(log.Fields{
+		"completedRunId": completedRun.ID.String(),
+		"queueEntryId":   entry.EntryID,
+		"projectId":      completedTask.ProjectID.String(),
+		"taskId":         entry.TaskID,
+		"promotedRunId":  run.ID.String(),
+	}).Info("queued agent admission promoted")
 	s.broadcastEvent(ws.EventAgentQueuePromoted, completedTask.ProjectID.String(), map[string]any{
 		"queue": entry,
 		"run":   run.ToDTO(),
@@ -1120,6 +1236,11 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		}
 		return err
 	}
+	eventFields := agentRunLogFields(run)
+	eventFields["bridgeTaskId"] = event.TaskID
+	eventFields["sessionId"] = event.SessionID
+	eventFields["eventType"] = event.Type
+	eventFields["timestampMs"] = event.TimestampMS
 
 	switch event.Type {
 	case ws.BridgeEventOutput:
@@ -1130,6 +1251,9 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		if strings.TrimSpace(payload.Content) == "" {
 			return nil
 		}
+		eventFields["turnNumber"] = payload.TurnNumber
+		eventFields["contentType"] = payload.ContentType
+		log.WithFields(eventFields).Debug("bridge output event received")
 		s.broadcastEvent(ws.EventAgentOutput, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":     run.ID.String(),
 			"task_id":      run.TaskID.String(),
@@ -1155,6 +1279,9 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		if isTerminalAgentStatus(run.Status) {
 			return nil
 		}
+		eventFields["turnNumber"] = payload.TurnNumber
+		eventFields["reportedCostUsd"] = payload.CostUSD
+		log.WithFields(eventFields).Debug("bridge cost event received")
 		return s.UpdateCost(ctx, run.ID, payload.InputTokens, payload.OutputTokens, payload.CacheReadTokens, payload.CostUSD, payload.TurnNumber)
 
 	case ws.BridgeEventStatusChange:
@@ -1166,6 +1293,9 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		if !ok || !isTerminalAgentStatus(nextStatus) || run.Status == nextStatus {
 			return nil
 		}
+		eventFields["oldStatus"] = payload.OldStatus
+		eventFields["newStatus"] = payload.NewStatus
+		log.WithFields(eventFields).Info("bridge terminal status event received")
 		return s.UpdateStatus(ctx, run.ID, nextStatus)
 	}
 
@@ -1228,13 +1358,23 @@ func (s *AgentService) notifyIMRunUpdate(ctx context.Context, run *model.AgentRu
 	if s.imProgress == nil || run == nil || strings.TrimSpace(content) == "" {
 		return
 	}
-	_, _ = s.imProgress.QueueBoundProgress(ctx, IMBoundProgressRequest{
+	queued, err := s.imProgress.QueueBoundProgress(ctx, IMBoundProgressRequest{
 		TaskID:     run.TaskID.String(),
 		RunID:      run.ID.String(),
 		Kind:       IMDeliveryKindProgress,
 		Content:    content,
 		IsTerminal: terminal,
 	})
+	fields := agentRunLogFields(run)
+	fields["terminal"] = terminal
+	fields["queued"] = queued
+	if err != nil {
+		log.WithFields(fields).WithError(err).Warn("agent IM progress notification failed")
+		return
+	}
+	if queued {
+		log.WithFields(fields).Debug("agent IM progress notification queued")
+	}
 }
 
 func summarizeBridgeOutput(content string, turnNumber int) string {

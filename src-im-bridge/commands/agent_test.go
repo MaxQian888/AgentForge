@@ -120,3 +120,44 @@ func TestAgentCommand_SpawnRepliesWithRunAndTask(t *testing.T) {
 		t.Fatalf("reply = %q", platform.replies[0])
 	}
 }
+
+func TestFormatAgentLogs_HandlesEmptyAndLongLists(t *testing.T) {
+	if got := formatAgentLogs(nil, "run-12345678"); got != "Agent #run-1234 暂无日志" {
+		t.Fatalf("empty logs reply = %q", got)
+	}
+
+	logs := make([]client.AgentLogEntry, 16)
+	for i := range logs {
+		logs[i] = client.AgentLogEntry{Timestamp: "2026-03-25T00:00:00Z", Type: "info", Content: "log line"}
+	}
+	got := formatAgentLogs(logs, "run-12345678")
+	if !strings.Contains(got, "Agent #run-1234 最近日志") {
+		t.Fatalf("logs reply = %q", got)
+	}
+	if !strings.Contains(got, "... 还有 1 条日志") {
+		t.Fatalf("logs reply = %q", got)
+	}
+}
+
+func TestFormatAgentSpawnReply_CoversDispatchBranches(t *testing.T) {
+	startedWithoutRun := formatAgentSpawnReply(&client.TaskDispatchResponse{
+		Dispatch: client.DispatchOutcome{Status: "started"},
+	}, "task-12345678")
+	if startedWithoutRun != "已启动 Agent 执行任务 task-123" {
+		t.Fatalf("startedWithoutRun = %q", startedWithoutRun)
+	}
+
+	blocked := formatAgentSpawnReply(&client.TaskDispatchResponse{
+		Dispatch: client.DispatchOutcome{Status: "blocked", Reason: "budget exceeded"},
+	}, "task-12345678")
+	if blocked != "未启动 Agent：budget exceeded" {
+		t.Fatalf("blocked = %q", blocked)
+	}
+
+	idle := formatAgentSpawnReply(&client.TaskDispatchResponse{
+		Dispatch: client.DispatchOutcome{Status: "queued"},
+	}, "task-12345678")
+	if idle != "任务 task-123 当前未启动 Agent" {
+		t.Fatalf("idle = %q", idle)
+	}
+}

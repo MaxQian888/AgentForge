@@ -98,8 +98,8 @@ func TestReviewCommand_TriggerReviewRepliesWithTextWithoutCardSupport(t *testing
 		w.Header().Set("Content-Type", "application/json")
 		w.WriteHeader(http.StatusAccepted)
 		_ = json.NewEncoder(w).Encode(&client.Review{
-			ID:    "review-12345678",
-			PRURL: "https://github.com/org/repo/pull/42",
+			ID:     "review-12345678",
+			PRURL:  "https://github.com/org/repo/pull/42",
 			Status: "pending",
 		})
 	}))
@@ -229,5 +229,24 @@ func TestReviewCommand_StatusFailure(t *testing.T) {
 	}
 	if !strings.Contains(platform.replies[0], "获取审查失败") {
 		t.Fatalf("reply = %q", platform.replies[0])
+	}
+}
+
+func TestBuildReviewCard_OmitsEmptyOptionalFields(t *testing.T) {
+	card := buildReviewCard(&client.Review{
+		ID:        "review-12345678",
+		PRURL:     "https://example.test/pr/1",
+		Status:    "pending",
+		RiskLevel: "medium",
+	})
+
+	if card.Title != "代码审查 #review-1" {
+		t.Fatalf("title = %q", card.Title)
+	}
+	if len(card.Fields) != 3 {
+		t.Fatalf("fields = %+v", card.Fields)
+	}
+	if len(card.Buttons) != 1 || card.Buttons[0].Action != "link:/reviews/review-12345678" {
+		t.Fatalf("buttons = %+v", card.Buttons)
 	}
 }

@@ -13,8 +13,6 @@ use tauri_plugin_shell::{
     process::{CommandChild, CommandEvent, TerminatedPayload},
     ShellExt,
 };
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-use tauri_plugin_updater::UpdaterExt;
 
 const BACKEND_LABEL: &str = "backend";
 const BACKEND_PORT: u16 = 7777;
@@ -64,15 +62,6 @@ struct DesktopEventPayload {
     shortcut: Option<String>,
     payload: Option<Value>,
     timestamp: String,
-}
-
-#[derive(Clone, Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct UpdateCheckPayload {
-    available: bool,
-    body: Option<String>,
-    date: Option<String>,
-    version: Option<String>,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -711,6 +700,20 @@ fn file_path_to_string(path: FilePath) -> Option<String> {
         .map(|resolved| resolved.to_string_lossy().into_owned())
 }
 
+#[cfg(not(any(target_os = "android", target_os = "ios")))]
+fn updater_plugin_builder() -> tauri_plugin_updater::Builder {
+    let mut builder = tauri_plugin_updater::Builder::new();
+    if let Some(pubkey) = std::env::var("TAURI_UPDATER_PUBKEY")
+        .ok()
+        .or_else(|| std::env::var("AGENTFORGE_TAURI_UPDATER_PUBKEY").ok())
+        .filter(|value| !value.trim().is_empty())
+    {
+        builder = builder.pubkey(pubkey);
+    }
+
+    builder
+}
+
 #[tauri::command]
 fn get_backend_url(state: State<'_, DesktopRuntimeManager>) -> String {
     state.backend_url()
@@ -912,63 +915,19 @@ fn unregister_shortcut<R: Runtime>(
     Ok(())
 }
 
-#[cfg(not(any(target_os = "android", target_os = "ios")))]
-#[tauri::command]
-async fn check_for_update<R: Runtime>(
-    app: AppHandle<R>,
-    state: State<'_, DesktopRuntimeManager>,
-) -> Result<UpdateCheckPayload, String> {
-    let update = app
-        .updater()
-        .map_err(|error| error.to_string())?
-        .check()
-        .await
-        .map_err(|error| error.to_string())?;
-
-    let payload = update
-        .map(|update| UpdateCheckPayload {
-            available: true,
-            body: update.body,
-            date: update.date.map(|date| date.to_string()),
-            version: Some(update.version),
-        })
-        .unwrap_or_default();
-
-    state.emit_system_event(
-        &app,
-        "update.checked",
-        "updater",
-        None,
-        Some(json!({
-            "available": payload.available,
-            "version": payload.version,
-        })),
-    );
-
-    Ok(payload)
-}
-
-#[cfg(any(target_os = "android", target_os = "ios"))]
-#[tauri::command]
-async fn check_for_update<R: Runtime>(
-    _app: AppHandle<R>,
-    _state: State<'_, DesktopRuntimeManager>,
-) -> Result<UpdateCheckPayload, String> {
-    Ok(UpdateCheckPayload::default())
-}
-
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let runtime_manager = DesktopRuntimeManager::new();
     let setup_manager = runtime_manager.clone();
 
     tauri::Builder::default()
+        .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
         .plugin(tauri_plugin_log::Builder::new().build())
         .plugin(tauri_plugin_shell::init())
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
-        .plugin(tauri_plugin_updater::Builder::new().build())
+        .plugin(updater_plugin_builder().build())
         .manage(runtime_manager)
         .setup(move |app| {
             if let Err(error) = setup_manager.ensure_tray(app.handle()) {
@@ -984,7 +943,6 @@ pub fn run() {
             Ok(())
         })
         .invoke_handler(tauri::generate_handler![
-            check_for_update,
             get_backend_url,
             get_desktop_runtime_status,
             get_plugin_runtime_summary,

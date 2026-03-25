@@ -118,4 +118,57 @@ describe("RoleFormDialog", () => {
     expect(screen.getAllByLabelText("Skill Path").length).toBe(2);
     expect(screen.getByLabelText("Permission Mode")).toBeInTheDocument();
   });
+
+  it("supports edit-mode updates, skill row management, and cancel", async () => {
+    const user = userEvent.setup();
+    const onSubmit = jest.fn().mockResolvedValue(undefined);
+    const onOpenChange = jest.fn();
+
+    render(
+      <RoleFormDialog
+        open
+        role={frontendRole}
+        onOpenChange={onOpenChange}
+        onSubmit={onSubmit}
+        availableRoles={[frontendRole]}
+      />
+    );
+
+    expect(screen.getByLabelText("Role ID")).toBeDisabled();
+    expect(screen.getByLabelText("Start from template")).toBeDisabled();
+
+    await user.clear(screen.getByLabelText("Name"));
+    await user.type(screen.getByLabelText("Name"), "Frontend Lead");
+    await user.clear(screen.getByLabelText("Allowed Tools"));
+    await user.type(screen.getByLabelText("Allowed Tools"), "Read, Edit, Web");
+    await user.click(screen.getByRole("button", { name: "Add Skill" }));
+    const skillInputs = screen.getAllByLabelText("Skill Path");
+    await user.type(skillInputs[2]!, "skills/accessibility");
+    const autoLoadChecks = screen.getAllByLabelText("Auto-load skill");
+    await user.click(autoLoadChecks[2]!);
+    await user.click(screen.getAllByRole("button", { name: "Remove" })[0]!);
+    await user.selectOptions(screen.getByLabelText("Permission Mode"), "acceptEdits");
+    await user.click(screen.getByLabelText("Require review before execution"));
+    await user.click(screen.getByRole("button", { name: "Update" }));
+
+    expect(onSubmit).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: expect.objectContaining({ name: "Frontend Lead" }),
+        capabilities: expect.objectContaining({
+          allowedTools: ["Read", "Edit", "Web"],
+          skills: [
+            { path: "skills/testing", autoLoad: false },
+            { path: "skills/accessibility", autoLoad: true },
+          ],
+        }),
+        security: expect.objectContaining({
+          permissionMode: "acceptEdits",
+          requireReview: false,
+        }),
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+    expect(onOpenChange).toHaveBeenCalledWith(false);
+  });
 });

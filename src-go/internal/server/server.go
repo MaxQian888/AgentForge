@@ -2,16 +2,16 @@
 package server
 
 import (
-	"log/slog"
 	"time"
 
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
-	"github.com/labstack/gommon/log"
+	echolog "github.com/labstack/gommon/log"
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/handler"
 	"github.com/react-go-quick-starter/server/internal/repository"
+	log "github.com/sirupsen/logrus"
 )
 
 type customValidator struct {
@@ -30,9 +30,9 @@ func New(cfg *config.Config, cache *repository.CacheRepository) *echo.Echo {
 	e.HTTPErrorHandler = handler.CustomHTTPErrorHandler
 
 	if cfg.Env == "production" {
-		e.Logger.SetLevel(log.WARN)
+		e.Logger.SetLevel(echolog.WARN)
 	} else {
-		e.Logger.SetLevel(log.DEBUG)
+		e.Logger.SetLevel(echolog.DEBUG)
 	}
 
 	// Middleware stack (order matters)
@@ -47,14 +47,19 @@ func New(cfg *config.Config, cache *repository.CacheRepository) *echo.Echo {
 		LogError:     true,
 		HandleError:  true,
 		LogValuesFunc: func(c echo.Context, v echomiddleware.RequestLoggerValues) error {
+			fields := log.Fields{
+				"method":     v.Method,
+				"uri":        v.URI,
+				"path":       c.Path(),
+				"status":     v.Status,
+				"latency_ms": v.Latency.Milliseconds(),
+				"reqid":      v.RequestID,
+				"remote_ip":  c.RealIP(),
+			}
 			if v.Error != nil {
-				slog.Error("request",
-					"method", v.Method, "uri", v.URI, "status", v.Status,
-					"latency_ms", v.Latency.Milliseconds(), "reqid", v.RequestID, "error", v.Error)
+				log.WithFields(fields).WithError(v.Error).Error("request")
 			} else {
-				slog.Info("request",
-					"method", v.Method, "uri", v.URI, "status", v.Status,
-					"latency_ms", v.Latency.Milliseconds(), "reqid", v.RequestID)
+				log.WithFields(fields).Info("request")
 			}
 			return nil
 		},

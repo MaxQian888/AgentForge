@@ -20,7 +20,14 @@ import {
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { Button } from "@/components/ui/button";
-import { Sheet, SheetContent, SheetTrigger } from "@/components/ui/sheet";
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+  SheetTrigger,
+} from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import { useCallback, useState } from "react";
 
@@ -117,6 +124,12 @@ export function MobileSidebar() {
         </Button>
       </SheetTrigger>
       <SheetContent side="left" className="w-56 p-0">
+        <SheetHeader className="sr-only">
+          <SheetTitle>Mobile navigation</SheetTitle>
+          <SheetDescription>
+            Browse the main AgentForge dashboard sections.
+          </SheetDescription>
+        </SheetHeader>
         <div className="flex h-14 items-center px-4 font-semibold">
           AgentForge
         </div>

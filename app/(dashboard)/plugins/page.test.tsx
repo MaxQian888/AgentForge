@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import PluginsPage from "./page";
 
 const checkForUpdate = jest.fn();
+const installUpdate = jest.fn();
 const fetchPlugins = jest.fn();
 const discoverBuiltins = jest.fn();
 const fetchMarketplace = jest.fn();
@@ -14,6 +15,7 @@ const sendNotification = jest.fn();
 const selectPlugin = jest.fn();
 const subscribeDesktopEvents = jest.fn();
 const updateTray = jest.fn();
+const relaunchToUpdate = jest.fn();
 
 const storeState = {
   plugins: [
@@ -92,9 +94,11 @@ jest.mock("@/lib/stores/plugin-store", () => ({
 jest.mock("@/hooks/use-platform-capability", () => ({
   usePlatformCapability: () => ({
     checkForUpdate,
+    installUpdate,
     getDesktopRuntimeStatus,
     getPluginRuntimeSummary,
     isDesktop: false,
+    relaunchToUpdate,
     sendNotification,
     subscribeDesktopEvents,
     updateTray,
@@ -104,6 +108,7 @@ jest.mock("@/hooks/use-platform-capability", () => ({
 describe("PluginsPage", () => {
   beforeEach(() => {
     checkForUpdate.mockReset();
+    installUpdate.mockReset();
     fetchPlugins.mockReset();
     discoverBuiltins.mockReset();
     fetchMarketplace.mockReset();
@@ -145,6 +150,7 @@ describe("PluginsPage", () => {
     selectPlugin.mockReset();
     subscribeDesktopEvents.mockReset();
     subscribeDesktopEvents.mockResolvedValue(jest.fn());
+    relaunchToUpdate.mockReset();
     updateTray.mockReset();
   });
 
@@ -174,5 +180,67 @@ describe("PluginsPage", () => {
     await user.type(screen.getByLabelText("Search plugins"), "git");
 
     expect(setFilters).toHaveBeenCalledWith({ query: "git" });
+  });
+
+  it("shows available desktop update metadata after a successful check", async () => {
+    const user = userEvent.setup();
+    checkForUpdate.mockResolvedValue({
+      mode: "desktop",
+      ok: true,
+      status: "available",
+      update: {
+        currentVersion: "0.1.0",
+        notes: "Important fixes",
+        publishedAt: "2026-03-25T04:00:00.000Z",
+        version: "0.2.0",
+      },
+    });
+
+    render(<PluginsPage />);
+    await user.click(screen.getByRole("button", { name: "Check update" }));
+
+    expect(
+      await screen.findByText("Update 0.2.0 is ready to install."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("Current version: 0.1.0")).toBeInTheDocument();
+    expect(screen.getByText("Important fixes")).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: "Install update" }),
+    ).toBeInTheDocument();
+  });
+
+  it("shows relaunch action after the desktop update installs", async () => {
+    const user = userEvent.setup();
+    checkForUpdate.mockResolvedValue({
+      mode: "desktop",
+      ok: true,
+      status: "available",
+      update: {
+        currentVersion: "0.1.0",
+        notes: "Important fixes",
+        publishedAt: "2026-03-25T04:00:00.000Z",
+        version: "0.2.0",
+      },
+    });
+    installUpdate.mockResolvedValue({
+      mode: "desktop",
+      ok: true,
+      status: "ready_to_relaunch",
+      update: {
+        currentVersion: "0.1.0",
+        notes: "Important fixes",
+        publishedAt: "2026-03-25T04:00:00.000Z",
+        version: "0.2.0",
+      },
+    });
+
+    render(<PluginsPage />);
+    await user.click(screen.getByRole("button", { name: "Check update" }));
+    await user.click(await screen.findByRole("button", { name: "Install update" }));
+
+    expect(installUpdate).toHaveBeenCalled();
+    expect(
+      await screen.findByRole("button", { name: "Restart to update" }),
+    ).toBeInTheDocument();
   });
 });
