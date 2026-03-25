@@ -43,6 +43,7 @@ type TeamAgentRunRepository interface {
 // TeamAgentSpawner spawns and cancels agent runs.
 type TeamAgentSpawner interface {
 	Spawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error)
+	SpawnForTeam(ctx context.Context, teamID uuid.UUID, teamRole string, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error)
 	Cancel(ctx context.Context, id uuid.UUID, reason string) error
 }
 
@@ -162,7 +163,7 @@ func (s *TeamService) StartTeam(ctx context.Context, input StartTeamInput) (*mod
 		plannerBudget = 1
 	}
 
-	plannerRun, err := s.spawner.Spawn(ctx, task.ID, input.MemberID, selection.Runtime, selection.Provider, selection.Model, plannerBudget, "planner-agent")
+	plannerRun, err := s.spawner.SpawnForTeam(ctx, team.ID, model.TeamRolePlanner, task.ID, input.MemberID, selection.Runtime, selection.Provider, selection.Model, plannerBudget, "planner-agent")
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{
 			"teamId":    team.ID.String(),
@@ -337,7 +338,7 @@ func (s *TeamService) spawnCodersForTasks(ctx context.Context, team *model.Agent
 		"model":        selection.Model,
 	}).Info("team spawning coders for subtasks")
 	for _, child := range children {
-		coderRun, err := s.spawner.Spawn(ctx, child.ID, memberID, selection.Runtime, selection.Provider, selection.Model, coderBudget, "coding-agent")
+		coderRun, err := s.spawner.SpawnForTeam(ctx, team.ID, model.TeamRoleCoder, child.ID, memberID, selection.Runtime, selection.Provider, selection.Model, coderBudget, "coding-agent")
 		if err != nil {
 			log.WithError(err).WithFields(log.Fields{"teamId": team.ID.String(), "taskId": child.ID.String()}).Error("team service: failed to spawn coder")
 			continue
@@ -371,7 +372,7 @@ func (s *TeamService) spawnCodersForTask(ctx context.Context, team *model.AgentT
 		coderBudget = 1
 	}
 
-	coderRun, err := s.spawner.Spawn(ctx, task.ID, memberID, selection.Runtime, selection.Provider, selection.Model, coderBudget, "coding-agent")
+	coderRun, err := s.spawner.SpawnForTeam(ctx, team.ID, model.TeamRoleCoder, task.ID, memberID, selection.Runtime, selection.Provider, selection.Model, coderBudget, "coding-agent")
 	if err != nil {
 		log.WithError(err).WithFields(log.Fields{"teamId": team.ID.String(), "taskId": task.ID.String()}).Error("team service: failed to spawn coder for task")
 		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, fmt.Sprintf("failed to spawn coder: %v", err))
@@ -457,7 +458,7 @@ func (s *TeamService) handleCoderDone(ctx context.Context, team *model.AgentTeam
 	}
 	selection := team.CodingAgentSelection()
 
-	reviewerRun, err := s.spawner.Spawn(ctx, task.ID, memberID, selection.Runtime, selection.Provider, selection.Model, reviewerBudget, "code-reviewer")
+	reviewerRun, err := s.spawner.SpawnForTeam(ctx, team.ID, model.TeamRoleReviewer, task.ID, memberID, selection.Runtime, selection.Provider, selection.Model, reviewerBudget, "code-reviewer")
 	if err != nil {
 		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to spawn reviewer")
 		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, fmt.Sprintf("failed to spawn reviewer: %v", err))
@@ -626,7 +627,7 @@ func (s *TeamService) RetryTeam(ctx context.Context, teamID uuid.UUID) error {
 			plannerBudget = 1
 		}
 		selection := team.CodingAgentSelection()
-		plannerRun, err := s.spawner.Spawn(ctx, task.ID, memberID, selection.Runtime, selection.Provider, selection.Model, plannerBudget, "planner-agent")
+		plannerRun, err := s.spawner.SpawnForTeam(ctx, teamID, model.TeamRolePlanner, task.ID, memberID, selection.Runtime, selection.Provider, selection.Model, plannerBudget, "planner-agent")
 		if err != nil {
 			return fmt.Errorf("retry spawn planner: %w", err)
 		}
@@ -666,7 +667,7 @@ func (s *TeamService) RetryTeam(ctx context.Context, teamID uuid.UUID) error {
 		reviewerBudget = 1
 	}
 	selection := team.CodingAgentSelection()
-	reviewerRun, err := s.spawner.Spawn(ctx, task.ID, memberID, selection.Runtime, selection.Provider, selection.Model, reviewerBudget, "code-reviewer")
+	reviewerRun, err := s.spawner.SpawnForTeam(ctx, teamID, model.TeamRoleReviewer, task.ID, memberID, selection.Runtime, selection.Provider, selection.Model, reviewerBudget, "code-reviewer")
 	if err != nil {
 		return fmt.Errorf("retry spawn reviewer: %w", err)
 	}

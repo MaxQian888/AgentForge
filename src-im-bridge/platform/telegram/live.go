@@ -7,8 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 	"strconv"
 	"strings"
 	"sync"
@@ -197,7 +198,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 	if err := l.runner.Start(ctx, func(ctx context.Context, incoming update) error {
 		handled, err := l.handleActionUpdate(ctx, incoming)
 		if err != nil {
-			log.Printf("[telegram-live] Ignoring callback query: %v", err)
+			log.WithField("component", "telegram-live").WithError(err).Warn("Ignoring callback query")
 			return nil
 		}
 		if handled {
@@ -206,7 +207,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 
 		msg, err := normalizeIncomingUpdate(incoming)
 		if err != nil {
-			log.Printf("[telegram-live] Ignoring inbound update: %v", err)
+			log.WithField("component", "telegram-live").WithError(err).Warn("Ignoring inbound update")
 			return nil
 		}
 		handler(l, msg)
@@ -347,7 +348,7 @@ func (r *longPollingRunner) Start(ctx context.Context, handler func(context.Cont
 				if pollCtx.Err() != nil {
 					return
 				}
-				log.Printf("[telegram-live] Long polling error: %v", err)
+				log.WithField("component", "telegram-live").WithError(err).Error("Long polling error")
 				select {
 				case <-time.After(time.Second):
 				case <-pollCtx.Done():
@@ -361,7 +362,7 @@ func (r *longPollingRunner) Start(ctx context.Context, handler func(context.Cont
 					offset = incoming.UpdateID + 1
 				}
 				if err := handler(pollCtx, incoming); err != nil {
-					log.Printf("[telegram-live] Handler error: %v", err)
+					log.WithField("component", "telegram-live").WithError(err).Error("Handler error")
 				}
 			}
 		}

@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 	"sync"
 	"time"
 
@@ -84,10 +85,10 @@ func (s *Stub) Start(handler core.MessageHandler) error {
 		Handler: mux,
 	}
 
-	log.Printf("[telegram-stub] Test server starting on :%s", s.port)
+	log.WithFields(log.Fields{"component": "telegram-stub", "port": s.port}).Info("Test server starting")
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("[telegram-stub] Server error: %v", err)
+			log.WithField("component", "telegram-stub").WithError(err).Error("Server error")
 		}
 	}()
 	return nil
@@ -109,7 +110,7 @@ func (s *Stub) Send(ctx context.Context, chatID string, content string) error {
 		Timestamp: time.Now(),
 	})
 	s.mu.Unlock()
-	log.Printf("[telegram-stub] Send to %s: %s", chatID, content)
+	log.WithFields(log.Fields{"component": "telegram-stub", "chat_id": chatID}).Info("Send: " + content)
 	return nil
 }
 

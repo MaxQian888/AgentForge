@@ -6,8 +6,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 	"strconv"
 	"strings"
 	"sync"
@@ -208,7 +209,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 			if errors.Is(err, errIgnoreEnvelope) {
 				// fall through to normal message handling
 			} else {
-				log.Printf("[slack-live] Ignoring interactive action payload: %v", err)
+				log.WithField("component", "slack-live").WithError(err).Warn("Ignoring interactive action payload")
 				return nil
 			}
 		} else if envelope.Type == socketEnvelopeInteractive {
@@ -220,7 +221,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 			if errors.Is(err, errIgnoreEnvelope) {
 				return nil
 			}
-			log.Printf("[slack-live] Ignoring inbound envelope: %v", err)
+			log.WithField("component", "slack-live").WithError(err).Warn("Ignoring inbound envelope")
 			return nil
 		}
 
@@ -325,7 +326,7 @@ func (r *managedSocketRunner) Start(ctx context.Context, handler func(context.Co
 	go r.consumeEvents(runCtx, handler)
 	go func() {
 		if err := r.client.RunContext(runCtx); err != nil && runCtx.Err() == nil {
-			log.Printf("[slack-live] socket mode stopped with error: %v", err)
+			log.WithField("component", "slack-live").WithError(err).Error("Socket mode stopped with error")
 		}
 	}()
 
@@ -351,16 +352,16 @@ func (r *managedSocketRunner) consumeEvents(ctx context.Context, handler func(co
 
 			switch evt.Type {
 			case socketmode.EventTypeConnecting:
-				log.Printf("[slack-live] Connecting to Slack Socket Mode")
+				log.WithField("component", "slack-live").Info("Connecting to Slack Socket Mode")
 			case socketmode.EventTypeConnected:
-				log.Printf("[slack-live] Connected to Slack Socket Mode")
+				log.WithField("component", "slack-live").Info("Connected to Slack Socket Mode")
 			case socketmode.EventTypeConnectionError:
-				log.Printf("[slack-live] Slack Socket Mode connection error: %+v", evt.Data)
+				log.WithField("component", "slack-live").WithField("data", evt.Data).Error("Slack Socket Mode connection error")
 			case socketmode.EventTypeDisconnect:
 				if evt.Request != nil {
-					log.Printf("[slack-live] Slack requested disconnect: reason=%s retry_reason=%s retry_attempt=%d", evt.Request.Reason, evt.Request.RetryReason, evt.Request.RetryAttempt)
+					log.WithFields(log.Fields{"component": "slack-live", "reason": evt.Request.Reason, "retry_reason": evt.Request.RetryReason, "retry_attempt": evt.Request.RetryAttempt}).Warn("Slack requested disconnect")
 				} else {
-					log.Printf("[slack-live] Slack requested disconnect")
+					log.WithField("component", "slack-live").Warn("Slack requested disconnect")
 				}
 			case socketmode.EventTypeSlashCommand:
 				command, ok := evt.Data.(goslack.SlashCommand)
@@ -372,7 +373,7 @@ func (r *managedSocketRunner) consumeEvents(ctx context.Context, handler func(co
 					Ack:          r.ackFn(*evt.Request),
 					SlashCommand: &command,
 				}); err != nil {
-					log.Printf("[slack-live] slash command handling failed: %v", err)
+					log.WithField("component", "slack-live").WithError(err).Error("Slash command handling failed")
 				}
 			case socketmode.EventTypeEventsAPI:
 				eventsAPI, ok := evt.Data.(slackevents.EventsAPIEvent)
@@ -384,7 +385,7 @@ func (r *managedSocketRunner) consumeEvents(ctx context.Context, handler func(co
 					Ack:       r.ackFn(*evt.Request),
 					EventsAPI: &eventsAPI,
 				}); err != nil {
-					log.Printf("[slack-live] events api handling failed: %v", err)
+					log.WithField("component", "slack-live").WithError(err).Error("Events API handling failed")
 				}
 			case socketmode.EventTypeInteractive:
 				interaction, ok := evt.Data.(goslack.InteractionCallback)
@@ -396,7 +397,7 @@ func (r *managedSocketRunner) consumeEvents(ctx context.Context, handler func(co
 					Ack:         r.ackFn(*evt.Request),
 					Interaction: &interaction,
 				}); err != nil {
-					log.Printf("[slack-live] interactive handling failed: %v", err)
+					log.WithField("component", "slack-live").WithError(err).Error("Interactive handling failed")
 				}
 			}
 		}

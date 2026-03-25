@@ -52,6 +52,32 @@ func (p *replyAwareTextPlatform) ReplyContextFromTarget(target *core.ReplyTarget
 	return target
 }
 
+type feishuActionNativePlatform struct {
+	replyAwareTextPlatform
+	metadata     core.PlatformMetadata
+	nativeSent   []*core.NativeMessage
+	nativeUpdate []*core.NativeMessage
+}
+
+func (p *feishuActionNativePlatform) Metadata() core.PlatformMetadata {
+	return p.metadata
+}
+
+func (p *feishuActionNativePlatform) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	p.nativeSent = append(p.nativeSent, message)
+	return nil
+}
+
+func (p *feishuActionNativePlatform) ReplyNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	p.nativeSent = append(p.nativeSent, message)
+	return nil
+}
+
+func (p *feishuActionNativePlatform) UpdateNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	p.nativeUpdate = append(p.nativeUpdate, message)
+	return nil
+}
+
 type cardPlatform struct {
 	textOnlyPlatform
 	cardTitles  []string
@@ -560,6 +586,127 @@ func TestReceiver_ActionResponseUsesReplyTargetDelivery(t *testing.T) {
 	}
 	if len(p.replies) != 1 || p.replies[0] != "Approved" {
 		t.Fatalf("replies = %v", p.replies)
+	}
+}
+
+func TestReceiver_ActionResponsePrefersFeishuDeferredNativeUpdate(t *testing.T) {
+	p := &feishuActionNativePlatform{
+		replyAwareTextPlatform: replyAwareTextPlatform{textOnlyPlatform: textOnlyPlatform{name: "feishu-live"}},
+		metadata: core.PlatformMetadata{
+			Source: "feishu",
+			Capabilities: core.PlatformCapabilities{
+				StructuredSurface:    core.StructuredSurfaceCards,
+				AsyncUpdateModes:     []core.AsyncUpdateMode{core.AsyncUpdateDeferredCardUpdate},
+				SupportsRichMessages: true,
+			},
+		},
+	}
+	r := NewReceiverWithMetadata(p, p.metadata, "0")
+	r.SetActionHandler(&replyTargetActionHandler{
+		response: &ActionResponse{
+			Result: "Native update completed",
+		},
+	})
+
+	body, err := json.Marshal(ActionRequest{
+		Platform: "feishu",
+		Action:   "approve",
+		EntityID: "review-1",
+		ChatID:   "oc_456",
+		ReplyTarget: &core.ReplyTarget{
+			Platform:      "feishu",
+			ChatID:        "oc_456",
+			MessageID:     "om_123",
+			CallbackToken: "card-token-1",
+			ProgressMode:  string(core.AsyncUpdateDeferredCardUpdate),
+			UseReply:      true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal action request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/action", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleAction(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(p.nativeUpdate) != 1 {
+		t.Fatalf("nativeUpdate = %d, want 1", len(p.nativeUpdate))
+	}
+	if len(p.replies) != 0 || len(p.sent) != 0 {
+		t.Fatalf("expected native update only, replies=%v sent=%v", p.replies, p.sent)
+	}
+	if p.nativeUpdate[0] == nil || p.nativeUpdate[0].FeishuCard == nil {
+		t.Fatalf("native update payload = %#v", p.nativeUpdate[0])
+	}
+	if p.nativeUpdate[0].FeishuCard.Mode != core.FeishuCardModeJSON {
+		t.Fatalf("native update mode = %q", p.nativeUpdate[0].FeishuCard.Mode)
+	}
+}
+
+func TestReceiver_ActionResponseRecordsFallbackReasonWhenFeishuDelayedUpdateContextMissing(t *testing.T) {
+	p := &feishuActionNativePlatform{
+		replyAwareTextPlatform: replyAwareTextPlatform{textOnlyPlatform: textOnlyPlatform{name: "feishu-live"}},
+		metadata: core.PlatformMetadata{
+			Source: "feishu",
+			Capabilities: core.PlatformCapabilities{
+				StructuredSurface:    core.StructuredSurfaceCards,
+				AsyncUpdateModes:     []core.AsyncUpdateMode{core.AsyncUpdateDeferredCardUpdate},
+				SupportsRichMessages: true,
+			},
+		},
+	}
+	r := NewReceiverWithMetadata(p, p.metadata, "0")
+	r.SetActionHandler(&replyTargetActionHandler{
+		response: &ActionResponse{
+			Result: "Fallback to text reply",
+		},
+	})
+
+	body, err := json.Marshal(ActionRequest{
+		Platform: "feishu",
+		Action:   "approve",
+		EntityID: "review-1",
+		ChatID:   "oc_456",
+		ReplyTarget: &core.ReplyTarget{
+			Platform:     "feishu",
+			ChatID:       "oc_456",
+			MessageID:    "om_123",
+			ProgressMode: string(core.AsyncUpdateDeferredCardUpdate),
+			UseReply:     true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal action request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/action", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleAction(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(p.nativeUpdate) != 0 {
+		t.Fatalf("nativeUpdate = %d, want 0", len(p.nativeUpdate))
+	}
+	if len(p.replies) != 1 || p.replies[0] != "Fallback to text reply" {
+		t.Fatalf("replies = %v", p.replies)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	metadata, ok := payload["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata = %#v", payload["metadata"])
+	}
+	if metadata["fallback_reason"] != "missing_delayed_update_context" {
+		t.Fatalf("metadata = %#v", metadata)
 	}
 }
 

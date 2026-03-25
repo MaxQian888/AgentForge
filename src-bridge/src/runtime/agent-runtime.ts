@@ -56,6 +56,9 @@ export class AgentRuntime {
     const runtime = this.request?.runtime ?? "claude_code";
     const provider = this.request?.provider ?? "";
     const model = this.request?.model ?? "";
+    const roleId = this.request?.role_config?.role_id;
+    const teamId = this.request?.team_id;
+    const teamRole = this.request?.team_role;
     return {
       task_id: this.taskId,
       state: this.status,
@@ -66,6 +69,9 @@ export class AgentRuntime {
       runtime,
       provider,
       model,
+      role_id: roleId,
+      team_id: teamId,
+      team_role: teamRole,
     };
   }
 }

@@ -155,6 +155,14 @@ func TestBridgeRuntimeControl_StartProcessesDeliveriesAndStopsCleanly(t *testing
 
 	platform := &runtimeTestPlatform{}
 	apiClient := client.NewAgentForgeClient(server.URL, "proj-1", "secret").WithPlatform(platform)
+	provider := &activeProvider{
+		Descriptor: providerDescriptor{
+			ID:       "slack",
+			Metadata: platform.Metadata(),
+		},
+		Platform:      platform,
+		TransportMode: "stub",
+	}
 	control := newBridgeRuntimeControl(&config{
 		APIBase:               server.URL,
 		ProjectID:             "proj-1",
@@ -162,7 +170,7 @@ func TestBridgeRuntimeControl_StartProcessesDeliveriesAndStopsCleanly(t *testing
 		ControlSharedSecret:   "shared-secret",
 		HeartbeatInterval:     10 * time.Millisecond,
 		ControlReconnectDelay: 10 * time.Millisecond,
-	}, "bridge-1", platform, apiClient)
+	}, "bridge-1", provider, apiClient)
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
@@ -208,6 +216,9 @@ func TestBridgeRuntimeControl_StartProcessesDeliveriesAndStopsCleanly(t *testing
 	}
 	if seen.lastReg.BridgeID != "bridge-1" || seen.lastReg.Platform != "slack" || seen.lastReg.Transport != "stub" {
 		t.Fatalf("register payload = %+v", seen.lastReg)
+	}
+	if seen.lastReg.Metadata["provider_id"] != "slack" {
+		t.Fatalf("register metadata = %+v", seen.lastReg.Metadata)
 	}
 	if len(seen.lastReg.CallbackPaths) != 2 || seen.lastReg.CallbackPaths[0] != "/im/notify" {
 		t.Fatalf("callback paths = %+v", seen.lastReg.CallbackPaths)

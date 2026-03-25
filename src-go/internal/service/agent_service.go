@@ -191,8 +191,24 @@ func (s *AgentService) SetMemoryService(ms *MemoryService) {
 	s.memorySvc = ms
 }
 
+type bridgeExecutionContext struct {
+	TeamID   *uuid.UUID
+	TeamRole string
+}
+
 // Spawn creates a run, provisions a worktree, starts bridge execution, and publishes lifecycle updates.
 func (s *AgentService) Spawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error) {
+	return s.spawnWithContext(ctx, taskID, memberID, runtime, provider, modelName, budgetUsd, roleID, nil)
+}
+
+func (s *AgentService) SpawnForTeam(ctx context.Context, teamID uuid.UUID, teamRole string, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error) {
+	return s.spawnWithContext(ctx, taskID, memberID, runtime, provider, modelName, budgetUsd, roleID, &bridgeExecutionContext{
+		TeamID:   &teamID,
+		TeamRole: teamRole,
+	})
+}
+
+func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string, execCtx *bridgeExecutionContext) (*model.AgentRun, error) {
 	runs, err := s.runRepo.GetByTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("check existing runs: %w", err)
@@ -243,6 +259,10 @@ func (s *AgentService) Spawn(ctx context.Context, taskID, memberID uuid.UUID, ru
 		Model:     selection.Model,
 		StartedAt: time.Now().UTC(),
 	}
+	if execCtx != nil {
+		run.TeamID = execCtx.TeamID
+		run.TeamRole = strings.TrimSpace(execCtx.TeamRole)
+	}
 	if s.pool != nil {
 		if err := s.pool.Acquire(run.ID.String(), taskID.String(), memberID.String()); err != nil {
 			if errors.Is(err, pool.ErrPoolFull) {
@@ -259,6 +279,12 @@ func (s *AgentService) Spawn(ctx context.Context, taskID, memberID uuid.UUID, ru
 	if resolvedRoleID != "" {
 		spawnFields["roleId"] = resolvedRoleID
 	}
+	if execCtx != nil && execCtx.TeamID != nil {
+		spawnFields["teamId"] = execCtx.TeamID.String()
+	}
+	if execCtx != nil && strings.TrimSpace(execCtx.TeamRole) != "" {
+		spawnFields["teamRole"] = strings.TrimSpace(execCtx.TeamRole)
+	}
 	log.WithFields(spawnFields).Info("agent spawn persisted")
 
 	allocation, err := s.worktrees.Prepare(ctx, project.Slug, taskID.String())
@@ -272,22 +298,20 @@ func (s *AgentService) Spawn(ctx context.Context, taskID, memberID uuid.UUID, ru
 	spawnFields["worktreeReused"] = allocation.Reused
 
 	sessionID := uuid.New().String()
-	resp, err := s.bridge.Execute(ctx, BridgeExecuteRequest{
-		TaskID:         taskID.String(),
-		SessionID:      sessionID,
-		MemberID:       memberID.String(),
-		Runtime:        selection.Runtime,
-		Provider:       selection.Provider,
-		Model:          selection.Model,
-		Prompt:         buildSpawnPrompt(task),
-		WorktreePath:   allocation.Path,
-		BranchName:     allocation.Branch,
-		MaxTurns:       resolveSpawnMaxTurns(roleConfig),
-		BudgetUSD:      resolveSpawnBudget(task.BudgetUsd, budgetUsd, roleConfig),
-		AllowedTools:   resolveSpawnAllowedTools(roleConfig),
-		PermissionMode: resolveSpawnPermissionMode(roleConfig),
-		RoleConfig:     roleConfig,
-	})
+	resp, err := s.bridge.Execute(ctx, buildBridgeExecuteRequest(
+		task,
+		memberID,
+		sessionID,
+		selection.Runtime,
+		selection.Provider,
+		selection.Model,
+		allocation.Branch,
+		allocation.Path,
+		roleConfig,
+		resolveSpawnBudget(task.BudgetUsd, budgetUsd, roleConfig),
+		run.TeamID,
+		run.TeamRole,
+	))
 	if err != nil {
 		log.WithFields(spawnFields).WithError(err).Warn("agent spawn bridge execute failed")
 		_ = s.failSpawn(ctx, run, task, project.Slug, allocation)
@@ -891,22 +915,20 @@ func (s *AgentService) resumeRun(ctx context.Context, run *model.AgentRun) error
 	if err != nil {
 		return err
 	}
-	req := BridgeExecuteRequest{
-		TaskID:         run.TaskID.String(),
-		SessionID:      task.AgentSessionID,
-		MemberID:       run.MemberID.String(),
-		Runtime:        resolveStoredRuntime(run),
-		Provider:       run.Provider,
-		Model:          run.Model,
-		Prompt:         buildSpawnPrompt(task),
-		WorktreePath:   task.AgentWorktree,
-		BranchName:     task.AgentBranch,
-		MaxTurns:       resolveSpawnMaxTurns(roleConfig),
-		BudgetUSD:      resolveSpawnBudget(task.BudgetUsd, 0, roleConfig),
-		AllowedTools:   resolveSpawnAllowedTools(roleConfig),
-		PermissionMode: resolveSpawnPermissionMode(roleConfig),
-		RoleConfig:     roleConfig,
-	}
+	req := buildBridgeExecuteRequest(
+		task,
+		run.MemberID,
+		task.AgentSessionID,
+		resolveStoredRuntime(run),
+		run.Provider,
+		run.Model,
+		task.AgentBranch,
+		task.AgentWorktree,
+		roleConfig,
+		resolveSpawnBudget(task.BudgetUsd, 0, roleConfig),
+		run.TeamID,
+		run.TeamRole,
+	)
 	resp, err := s.bridge.Resume(ctx, req)
 	if err != nil {
 		return fmt.Errorf("resume bridge runtime: %w", err)
@@ -975,6 +997,45 @@ func buildSpawnPrompt(task *model.Task) string {
 		prompt.WriteString(desc)
 	}
 	return prompt.String()
+}
+
+func buildBridgeExecuteRequest(
+	task *model.Task,
+	memberID uuid.UUID,
+	sessionID string,
+	runtime string,
+	provider string,
+	modelName string,
+	branchName string,
+	worktreePath string,
+	roleConfig *bridgeclient.RoleConfig,
+	budgetUSD float64,
+	teamID *uuid.UUID,
+	teamRole string,
+) BridgeExecuteRequest {
+	req := BridgeExecuteRequest{
+		TaskID:         task.ID.String(),
+		SessionID:      sessionID,
+		MemberID:       memberID.String(),
+		Runtime:        runtime,
+		Provider:       provider,
+		Model:          modelName,
+		Prompt:         buildSpawnPrompt(task),
+		WorktreePath:   worktreePath,
+		BranchName:     branchName,
+		MaxTurns:       resolveSpawnMaxTurns(roleConfig),
+		BudgetUSD:      budgetUSD,
+		AllowedTools:   resolveSpawnAllowedTools(roleConfig),
+		PermissionMode: resolveSpawnPermissionMode(roleConfig),
+		RoleConfig:     roleConfig,
+	}
+	if teamID != nil {
+		req.TeamID = teamID.String()
+	}
+	if trimmed := strings.TrimSpace(teamRole); trimmed != "" {
+		req.TeamRole = trimmed
+	}
+	return req
 }
 
 func resolveSpawnBudget(taskBudget, requestBudget float64, roleConfig *bridgeclient.RoleConfig) float64 {
@@ -1203,16 +1264,19 @@ func (s *AgentService) resolveRoleConfig(roleID string) (*bridgeclient.RoleConfi
 	}
 
 	return &bridgeclient.RoleConfig{
-		RoleID:         profile.RoleID,
-		Name:           profile.Name,
-		Role:           profile.Role,
-		Goal:           profile.Goal,
-		Backstory:      profile.Backstory,
-		SystemPrompt:   profile.SystemPrompt,
-		AllowedTools:   append([]string(nil), profile.AllowedTools...),
-		MaxBudgetUsd:   profile.MaxBudgetUsd,
-		MaxTurns:       profile.MaxTurns,
-		PermissionMode: profile.PermissionMode,
+		RoleID:           profile.RoleID,
+		Name:             profile.Name,
+		Role:             profile.Role,
+		Goal:             profile.Goal,
+		Backstory:        profile.Backstory,
+		SystemPrompt:     profile.SystemPrompt,
+		AllowedTools:     append([]string(nil), profile.AllowedTools...),
+		Tools:            append([]string(nil), profile.Tools...),
+		KnowledgeContext: profile.KnowledgeContext,
+		OutputFilters:    append([]string(nil), profile.OutputFilters...),
+		MaxBudgetUsd:     profile.MaxBudgetUsd,
+		MaxTurns:         profile.MaxTurns,
+		PermissionMode:   profile.PermissionMode,
 	}, nil
 }
 

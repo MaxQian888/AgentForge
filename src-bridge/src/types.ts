@@ -19,7 +19,7 @@ export interface ExecuteRequest {
   permission_mode: string;
   role_config?: RoleConfig;
   team_id?: string;
-  team_role?: string;  // "planner" | "coder" | "reviewer"
+  team_role?: "planner" | "coder" | "reviewer";
 }
 
 export interface ResumeRequest {
@@ -119,6 +119,9 @@ export interface AgentStatus {
   runtime: AgentRuntimeKey;
   provider: string;
   model: string;
+  role_id?: string;
+  team_id?: string;
+  team_role?: "planner" | "coder" | "reviewer";
 }
 
 export interface RuntimeDiagnostic {

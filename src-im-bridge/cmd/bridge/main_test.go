@@ -337,11 +337,20 @@ func TestLookupPlatformDescriptor_ReturnsCapabilities(t *testing.T) {
 	if err != nil {
 		t.Fatalf("lookupPlatformDescriptor error: %v", err)
 	}
+	if descriptor.ID != "feishu" {
+		t.Fatalf("id = %q, want feishu", descriptor.ID)
+	}
 	if descriptor.Metadata.Source != "feishu" {
 		t.Fatalf("source = %q, want feishu", descriptor.Metadata.Source)
 	}
 	if !descriptor.Metadata.Capabilities.SupportsMentions {
 		t.Fatal("expected feishu descriptor to support mentions")
+	}
+	if !descriptor.supportsTransport(transportModeStub) || !descriptor.supportsTransport(transportModeLive) {
+		t.Fatalf("supported transports = %+v", descriptor.SupportedTransportModes)
+	}
+	if descriptor.Features.FeishuCards == nil || !descriptor.Features.FeishuCards.SupportsTemplateCards || !descriptor.Features.FeishuCards.SupportsDelayedUpdates {
+		t.Fatalf("features = %+v", descriptor.Features)
 	}
 }
 
@@ -355,6 +364,35 @@ func TestLookupPlatformDescriptor_ReportsPlannedWecomGap(t *testing.T) {
 	}
 	if descriptor.NewStub != nil || descriptor.NewLive != nil {
 		t.Fatalf("expected wecom to remain non-runnable, got NewStub=%v NewLive=%v", descriptor.NewStub, descriptor.NewLive)
+	}
+	if descriptor.PlannedReason == "" {
+		t.Fatal("expected planned provider to include a planned reason")
+	}
+}
+
+func TestSelectProvider_ReturnsDescriptorBackedRuntime(t *testing.T) {
+	provider, err := selectProvider(&config{
+		Platform:      "slack",
+		TransportMode: "stub",
+		TestPort:      "9010",
+	})
+	if err != nil {
+		t.Fatalf("selectProvider error: %v", err)
+	}
+	if provider == nil {
+		t.Fatal("expected active provider")
+	}
+	if provider.Descriptor.ID != "slack" {
+		t.Fatalf("descriptor id = %q, want slack", provider.Descriptor.ID)
+	}
+	if provider.Source() != "slack" {
+		t.Fatalf("source = %q, want slack", provider.Source())
+	}
+	if provider.TransportMode != transportModeStub {
+		t.Fatalf("transport mode = %q, want %q", provider.TransportMode, transportModeStub)
+	}
+	if provider.Platform == nil || provider.Platform.Name() != "slack-stub" {
+		t.Fatalf("platform = %#v", provider.Platform)
 	}
 }
 

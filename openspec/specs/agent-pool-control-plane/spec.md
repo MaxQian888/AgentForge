@@ -2,7 +2,6 @@
 
 ## Purpose
 Define the canonical AgentPool control-plane requirements for queue-backed admission, pool diagnostics, queued promotion, and operator-facing visibility across Go orchestration, Bridge runtime summaries, and dashboard consumers.
-
 ## Requirements
 ### Requirement: AgentPool exposes one canonical capacity and diagnostics summary
 The system SHALL expose one canonical AgentPool control-plane summary per project that is authored by the Go admission service and enriched by Bridge runtime-pool diagnostics. The summary MUST include at least active slots, maximum slots, available slots, queued items, warm slots, paused-resumable runs, Bridge pool health, and recent warm-reuse versus cold-start counts.
@@ -58,3 +57,25 @@ The system SHALL expose AgentPool lifecycle changes through first-class APIs and
 - **WHEN** an authenticated operator requests the current queue roster for a project
 - **THEN** the system returns each queued entry with task identity, member identity, runtime tuple, enqueue time, queue reason, and current queue state
 - **THEN** the returned roster matches the same queue facts used by the admission control plane
+
+### Requirement: Queue lifecycle preserves latest guardrail verdict and admission context
+The system SHALL retain the runtime tuple, budget context, and latest dispatch guardrail verdict for each queue entry across queued, promoted, and failed states. Operator-facing queue and pool views MUST be able to tell whether an entry is still waiting because of recoverable guardrails or has failed promotion terminally.
+
+#### Scenario: Recoverable guardrail failure keeps a queue entry visible
+- **WHEN** a queued entry fails promotion revalidation because of a recoverable budget or transient infrastructure guardrail
+- **THEN** the queue entry remains in a visible queued state instead of being silently discarded
+- **THEN** the latest guardrail verdict is reflected in the queue entry's operator-facing data
+- **THEN** realtime pool lifecycle events make it clear that the entry is still queued rather than started or terminally failed
+
+#### Scenario: Terminal promotion failure preserves admission history
+- **WHEN** a queued entry fails promotion revalidation because task, member, or runtime ownership context is irrecoverably invalid
+- **THEN** the queue entry transitions to a terminal failed state
+- **THEN** operator-facing APIs and realtime events retain the original admission context together with the terminal failure reason
+- **THEN** consumers can distinguish this terminal failure from an entry that remains queued awaiting recovery
+
+#### Scenario: Promoted queue entry preserves its original dispatch tuple
+- **WHEN** a queued entry is successfully promoted into runtime startup
+- **THEN** the promotion uses the authoritative runtime, provider, model, role, and budget context stored for that admission
+- **THEN** the queue history remains traceable to the original queued request
+- **THEN** operator-facing lifecycle events can relate the promoted run back to the originating queue entry
+

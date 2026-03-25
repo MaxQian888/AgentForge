@@ -22,7 +22,7 @@ The system SHALL publish a capability matrix for each active IM platform that de
 - **AND** progress delivery can prefer low-noise message edits over repeated new messages when the reply target supports it
 
 ### Requirement: Asynchronous progress and completion updates SHALL use the platform-native update path before fallback
-For IM-initiated long-running actions, the system SHALL prefer the update path that is native to the originating platform and reply target. If a platform supports message edits, follow-ups, thread replies, session webhooks, or delayed card updates, the Bridge MUST use that strategy first. Only when the originating reply target or capability matrix does not support the preferred strategy MAY the system fall back to a new plain-text message.
+For IM-initiated long-running actions, the system SHALL prefer the update path that is native to the originating platform and reply target. If a platform supports message edits, follow-ups, thread replies, session webhooks, or delayed card updates, the Bridge MUST use that strategy first. Only when the originating reply target or capability matrix does not support the preferred strategy MAY the system fall back to a new plain-text message. For Feishu, the preferred path MUST distinguish between immediate callback responses and delayed card mutation so the Bridge does not collapse all card interactions into generic reply semantics.
 
 #### Scenario: Slack progress stays inside the originating thread
 - **WHEN** a Slack command or mention starts a long-running action with a preserved `thread_ts` or `response_url`
@@ -36,7 +36,7 @@ For IM-initiated long-running actions, the system SHALL prefer the update path t
 
 #### Scenario: Feishu card action prefers immediate or delayed card mutation
 - **WHEN** a Feishu card interaction starts a long-running action and the preserved reply target includes card update context
-- **THEN** the Bridge uses immediate card response or delayed card update within the provider-supported window before considering a plain-text fallback
+- **THEN** the Bridge first chooses an immediate callback response or a delayed card update within the provider-supported window before considering a plain-text fallback
 - **AND** users remain in the same card conversation context rather than receiving an unrelated duplicate notification
 
 #### Scenario: DingTalk uses session webhook when conversational reply is available
@@ -45,7 +45,7 @@ For IM-initiated long-running actions, the system SHALL prefer the update path t
 - **AND** it falls back to direct-send text only when the session-aware path is unavailable
 
 ### Requirement: Platform-native interactive callbacks SHALL normalize into one backend action contract
-The system SHALL normalize platform-native interactive inputs into one backend action contract that preserves action identity, entity identity, reply target, bridge identity, and provider-specific metadata. Buttons, modal submissions, select menus, inline keyboard callbacks, and card actions MUST all be convertible into the same action envelope so backend workflows can respond consistently regardless of provider.
+The system SHALL normalize platform-native interactive inputs into one backend action contract that preserves action identity, entity identity, reply target, bridge identity, and provider-specific metadata. Buttons, modal submissions, select menus, inline keyboard callbacks, and card actions MUST all be convertible into the same action envelope so backend workflows can respond consistently regardless of provider. For Feishu, the normalized envelope MUST preserve the current `card.action.trigger` interaction value, originating card or message identity, operator identity, and callback-response context required for immediate acknowledgement or delayed update without leaking raw Feishu callback parsing responsibilities upstream.
 
 #### Scenario: Slack block action preserves response context
 - **WHEN** a Slack Block Kit button or modal submission triggers an action
@@ -74,3 +74,4 @@ If a requested structured or interactive behavior is unsupported by the active p
 - **WHEN** a provider such as `wecom` is present in roadmap or model-level enums but does not yet have a live adapter and declared capability matrix
 - **THEN** the system marks that provider as not yet supported for runtime activation
 - **AND** operators can see that the absence is an explicit gap rather than an implicit silent fallback
+

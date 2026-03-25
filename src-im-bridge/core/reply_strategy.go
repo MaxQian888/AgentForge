@@ -24,6 +24,7 @@ type ReplyPlan struct {
 	Method          DeliveryMethod
 	TargetChatID    string
 	UsedReplyTarget bool
+	FallbackReason  string
 }
 
 // ResolveReplyPlan determines the preferred delivery path for a payload based
@@ -117,6 +118,60 @@ func DeliverCard(ctx context.Context, platform Platform, metadata PlatformMetada
 	return plan, sender.SendCard(ctx, plan.TargetChatID, card)
 }
 
+// DeliverNative routes a provider-native payload through the shared reply
+// strategy, preferring a native update path when the reply target indicates an
+// in-place mutation flow.
+func DeliverNative(ctx context.Context, platform Platform, metadata PlatformMetadata, target *ReplyTarget, fallbackChatID string, message *NativeMessage) (ReplyPlan, error) {
+	sender, ok := platform.(NativeMessageSender)
+	if !ok {
+		return ReplyPlan{}, errors.New("platform does not support native delivery")
+	}
+	if err := message.Validate(); err != nil {
+		return ReplyPlan{}, err
+	}
+
+	plan := ResolveReplyPlan(metadata, target, fallbackChatID)
+	_, hasUpdater := platform.(NativeMessageUpdater)
+	if target != nil &&
+		strings.TrimSpace(target.ProgressMode) == string(AsyncUpdateDeferredCardUpdate) &&
+		metadata.Capabilities.HasAsyncUpdateMode(AsyncUpdateDeferredCardUpdate) &&
+		plan.Method != DeliveryMethodDeferredCardUpdate &&
+		plan.FallbackReason == "" {
+		plan.FallbackReason = nativeFallbackReason(DeliveryMethodDeferredCardUpdate, target, nil, hasUpdater)
+	}
+	if plan.Method == DeliveryMethodSend {
+		if plan.TargetChatID == "" {
+			return plan, errors.New("delivery missing target chat id")
+		}
+		return plan, sender.SendNative(ctx, plan.TargetChatID, message)
+	}
+
+	replyCtx := restoreReplyContext(platform, target)
+	switch plan.Method {
+	case DeliveryMethodDeferredCardUpdate, DeliveryMethodEdit:
+		if updater, ok := platform.(NativeMessageUpdater); ok && replyCtx != nil {
+			if err := updater.UpdateNative(ctx, replyCtx, message); err == nil {
+				return plan, nil
+			} else {
+				plan.FallbackReason = err.Error()
+			}
+		} else {
+			plan.FallbackReason = nativeFallbackReason(plan.Method, target, replyCtx, ok)
+		}
+	}
+	if replyCtx != nil {
+		if plan.Method == DeliveryMethodDeferredCardUpdate || plan.Method == DeliveryMethodEdit {
+			plan.Method = DeliveryMethodReply
+		}
+		return plan, sender.ReplyNative(ctx, replyCtx, message)
+	}
+	if plan.TargetChatID == "" {
+		return plan, errors.New("delivery missing target chat id")
+	}
+	plan.Method = DeliveryMethodSend
+	return plan, sender.SendNative(ctx, plan.TargetChatID, message)
+}
+
 func restoreReplyContext(platform Platform, target *ReplyTarget) any {
 	if target == nil {
 		return nil
@@ -135,4 +190,31 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func nativeFallbackReason(method DeliveryMethod, target *ReplyTarget, replyCtx any, hasUpdater bool) string {
+	switch method {
+	case DeliveryMethodDeferredCardUpdate:
+		switch {
+		case target == nil || strings.TrimSpace(target.CallbackToken) == "":
+			return "feishu deferred card update unavailable: missing callback token"
+		case !hasUpdater:
+			return "feishu deferred card update unavailable: native updater not implemented"
+		case replyCtx == nil:
+			return "feishu deferred card update unavailable: reply context could not be restored"
+		default:
+			return "feishu deferred card update unavailable"
+		}
+	case DeliveryMethodEdit:
+		switch {
+		case !hasUpdater:
+			return "native message edit unavailable: native updater not implemented"
+		case replyCtx == nil:
+			return "native message edit unavailable: reply context could not be restored"
+		default:
+			return "native message edit unavailable"
+		}
+	default:
+		return ""
+	}
 }

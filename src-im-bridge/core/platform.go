@@ -26,6 +26,20 @@ type StructuredSender interface {
 	SendStructured(ctx context.Context, chatID string, message *StructuredMessage) error
 }
 
+// NativeMessageSender is an optional interface for platforms that support a
+// provider-native payload surface that cannot be faithfully represented as a
+// generic structured message.
+type NativeMessageSender interface {
+	SendNative(ctx context.Context, chatID string, message *NativeMessage) error
+	ReplyNative(ctx context.Context, replyCtx any, message *NativeMessage) error
+}
+
+// NativeMessageUpdater is an optional interface for platforms that can update
+// a previously-sent provider-native payload in place.
+type NativeMessageUpdater interface {
+	UpdateNative(ctx context.Context, replyCtx any, message *NativeMessage) error
+}
+
 // MessageUpdater is an optional interface for platforms that support editing messages.
 type MessageUpdater interface {
 	UpdateMessage(ctx context.Context, replyCtx any, content string) error

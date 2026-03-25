@@ -4,6 +4,7 @@ import {
   DecomposeTaskRequestSchema,
   DeepReviewRequestSchema,
   ExecuteRequestSchema,
+  ResumeRequestSchema,
 } from "./schemas.js";
 
 describe("bridge request schemas", () => {
@@ -85,10 +86,20 @@ describe("bridge request schemas", () => {
         max_budget_usd: 5,
         max_turns: 20,
         permission_mode: "default",
+        tools: ["github-tool"],
+        knowledge_context: "docs/PRD.md",
+        output_filters: ["no_pii"],
       },
+      team_id: "team-123",
+      team_role: "planner",
     });
 
     expect(parsed.role_config?.role_id).toBe("frontend-developer");
+    expect(parsed.role_config?.tools).toEqual(["github-tool"]);
+    expect(parsed.role_config?.knowledge_context).toBe("docs/PRD.md");
+    expect(parsed.role_config?.output_filters).toEqual(["no_pii"]);
+    expect(parsed.team_id).toBe("team-123");
+    expect(parsed.team_role).toBe("planner");
     expect(
       ExecuteRequestSchema.safeParse({
         task_id: "task-123",
@@ -103,6 +114,56 @@ describe("bridge request schemas", () => {
         },
       }).success,
     ).toBe(false);
+  });
+
+  test("rejects unsupported team roles", () => {
+    expect(
+      ExecuteRequestSchema.safeParse({
+        task_id: "task-123",
+        session_id: "session-123",
+        prompt: "Inspect the repository",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-123",
+        budget_usd: 1,
+        team_id: "team-123",
+        team_role: "lead",
+      }).success,
+    ).toBe(false);
+  });
+
+  test("accepts bounded team execution context on resume payloads", () => {
+    const parsed = ResumeRequestSchema.parse({
+      task_id: "task-123",
+      session_id: "session-123",
+      runtime: "codex",
+      provider: "openai",
+      model: "gpt-5-codex",
+      prompt: "Resume the runtime",
+      worktree_path: "D:/Project/AgentForge",
+      branch_name: "agent/task-123",
+      budget_usd: 1,
+      team_id: "team-123",
+      team_role: "reviewer",
+      role_config: {
+        role_id: "code-reviewer",
+        name: "Code Reviewer",
+        role: "Senior Reviewer",
+        goal: "Find risky changes",
+        backstory: "A skeptical reviewer",
+        system_prompt: "Review carefully.",
+        allowed_tools: ["Read"],
+        max_budget_usd: 3,
+        max_turns: 12,
+        permission_mode: "default",
+        tools: ["github-tool"],
+        knowledge_context: "docs/PRD.md",
+        output_filters: ["no_pii"],
+      },
+    });
+
+    expect(parsed.team_id).toBe("team-123");
+    expect(parsed.team_role).toBe("reviewer");
+    expect(parsed.role_config?.role_id).toBe("code-reviewer");
   });
 
   test("rejects invalid cancel and review payloads", () => {

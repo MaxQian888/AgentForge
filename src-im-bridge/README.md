@@ -4,6 +4,15 @@
 
 ## Platform Selection
 
+Startup now resolves `IM_PLATFORM` through a bridge-local provider contract rather than a hard-coded startup branch. Built-in providers still ship in-tree, but they now expose a normalized descriptor with:
+
+- provider id
+- supported transport modes
+- capability metadata consumed by health/control-plane/notify paths
+- optional provider-native extension declarations for richer message surfaces
+
+This keeps the current single-active-provider-per-process model intact while making future externalized IM providers or richer provider-specific capabilities easier to add without rewriting `main.go`.
+
 Set `IM_PLATFORM` to exactly one of:
 
 - `feishu`
@@ -57,11 +66,11 @@ Bridge startup now performs:
 
 On graceful shutdown the bridge unregisters itself. If the WebSocket drops, the bridge reconnects with the last acknowledged cursor so pending deliveries can be replayed without duplicating already-acked messages.
 
-## Current Adapter Mode
+## Current Provider Mode
 
-Every supported platform ships both a local stub adapter and a live transport path.
+Every supported platform currently ships as a built-in provider with both a local stub adapter and a live transport path.
 
-- `feishu`: stub + live long connection, card-capable
+- `feishu`: stub + live long connection, card-capable, native JSON/template card payload support, delayed card update support
 - `slack`: stub + live Socket Mode, Block Kit callbacks + `response_url`
 - `dingtalk`: stub + live Stream mode, session-webhook replies + explicit structured downgrade
 - `telegram`: stub + live long polling, inline keyboard + callback query + message edit
@@ -89,10 +98,18 @@ This now also applies to Telegram and Discord.
 
 Notifications received on `POST /im/notify` must include a `platform` field matching the active bridge platform:
 
+- matching platform + `NativeMessageSender` support: send provider-native payload first and report the actual delivery method plus any fallback reason
 - matching platform + `CardSender` support: send structured card
 - matching platform + `StructuredSender` support: send platform-native structured payload
 - matching platform without native structured support: fall back to plain text
 - mismatched platform: reject the notification request
+
+For Feishu specifically, the native payload surface now supports:
+
+- raw JSON interactive cards
+- template cards with `template_id`, optional `template_version_name`, and `template_variable`
+- delayed card updates through preserved callback token context when the originating reply target supports it
+- explicit `fallback_reason` reporting when delayed update cannot be used and the bridge has to fall back to a reply/send path
 
 Compatibility `POST /im/send` and `POST /im/notify` deliveries are now protected with:
 
@@ -106,7 +123,7 @@ When `IM_CONTROL_SHARED_SECRET` is configured, unsigned or invalidly signed comp
 
 | Platform | Preferred live transport | Structured surface | Native callback path | Async update preference | Current downgrade rule |
 | --- | --- | --- | --- | --- | --- |
-| Feishu | long connection | interactive cards | card action callback | immediate reply, delayed card update | falls back to text when card send is unavailable |
+| Feishu | long connection | interactive cards + template cards | card action callback | immediate toast/reply, delayed card update, native fallback reason reporting | falls back to reply/send when native card send or delayed update cannot be used |
 | Slack | Socket Mode | Block Kit | interactive payloads via Socket Mode | thread reply, `response_url`, follow-up | falls back to plain text only if blocks cannot be rendered |
 | DingTalk | Stream mode | ActionCard planned, text fallback active | Stream card callback | session webhook, then direct send | structured notifications explicitly degrade to text today |
 | Telegram | long polling | inline keyboard | callback query | reply or in-place edit | card-like content maps to text plus inline keyboard |
@@ -116,7 +133,7 @@ When `IM_CONTROL_SHARED_SECRET` is configured, unsigned or invalidly signed comp
 
 | Platform | Command surface | Reply target context preserved | Native action support | Native update support |
 | --- | --- | --- | --- | --- |
-| Feishu | slash + mention | chat, message, callback token | card action normalized into `/im/action` | reply or delayed card update |
+| Feishu | slash + mention | chat, message, callback token | `card.action.trigger` normalized into `/im/action` with delayed-update context | reply, native card send, or delayed card update |
 | Slack | slash + mention + interaction | channel, thread, `response_url` | block action and view submission normalized into `/im/action` | thread reply, `response_url`, follow-up |
 | DingTalk | mention + chatbot text | session webhook, conversation id, conversation type | card callback normalized when action reference is present | session webhook reply, conversation fallback |
 | Telegram | slash + mention | chat, message, topic | inline keyboard callback query normalized into `/im/action` | `sendMessage`, `editMessageText` |
@@ -140,9 +157,10 @@ Recommended scoped validation after adapter changes:
 ```powershell
 cd src-im-bridge
 go test ./platform/slack ./platform/feishu ./platform/telegram ./platform/discord ./platform/dingtalk -count=1
-go test ./core -run 'Test(ResolveReplyPlan_|DeliverText_|MetadataForPlatform_|StructuredMessageFallbackText|ReplyTarget_JSONRoundTrip)' -count=1
+go test ./core -run 'Test(ResolveReplyPlan_|DeliverText_|DeliverNative_|MetadataForPlatform_|StructuredMessageFallbackText|ReplyTarget_JSONRoundTrip|NativeMessage_)' -count=1
 go test ./client -run 'Test(HandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget|WithSource_NormalizesHeaderValue|WithPlatform_UsesTelegramMetadataSource)' -count=1
-go test ./notify -run 'TestReceiver_(ActionResponseUsesReplyTargetDelivery|HealthReportsNormalizedTelegramSourceAndCapabilities|FallsBackToStructuredTextWhenNativeStructuredSenderUnavailable|SuppressesDuplicateSignedCompatibilityDelivery|RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured)' -count=1
+go test ./notify -run 'TestReceiver_(ActionResponseUsesReplyTargetDelivery|HealthReportsNormalizedTelegramSourceAndCapabilities|FallsBackToStructuredTextWhenNativeStructuredSenderUnavailable|PrefersNativePayloadWhenPlatformSupportsIt|UsesDeferredNativeUpdateWhenFeishuReplyTargetSupportsIt|ReportsFallbackReasonWhenDeferredUpdateContextMissing|SuppressesDuplicateSignedCompatibilityDelivery|RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured)' -count=1
+go test ./cmd/bridge -run 'Test(SelectProvider_|SelectPlatform_|LookupPlatformDescriptor_|BridgeRuntimeControl_)' -count=1
 ```
 
 Detailed rollout, rollback, and manual verification guidance is documented in [platform-runbook.md](/d:/Project/AgentForge/src-im-bridge/docs/platform-runbook.md).

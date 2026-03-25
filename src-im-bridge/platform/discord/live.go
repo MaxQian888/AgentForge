@@ -9,8 +9,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 	"strings"
 	"sync"
 	"time"
@@ -352,7 +353,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 			}
 			msg, err := normalizeInteraction(envelope.Interaction)
 			if err != nil {
-				log.Printf("[discord-live] Ignoring inbound interaction: %v", err)
+				log.WithField("component", "discord-live").WithError(err).Warn("Ignoring inbound interaction")
 				return nil
 			}
 			handler(l, msg)
@@ -364,7 +365,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 				}
 			}
 			if err := l.handleComponentInteraction(ctx, envelope.Interaction); err != nil {
-				log.Printf("[discord-live] Ignoring component interaction: %v", err)
+				log.WithField("component", "discord-live").WithError(err).Warn("Ignoring component interaction")
 			}
 			return nil
 		default:
@@ -521,7 +522,7 @@ func (r *httpInteractionRunner) Start(ctx context.Context, handler func(context.
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			log.Printf("[discord-live] interaction handling failed after acknowledgement: %v", err)
+			log.WithField("component", "discord-live").WithError(err).Error("Interaction handling failed after acknowledgement")
 			return
 		}
 		if !acknowledged {
@@ -540,7 +541,7 @@ func (r *httpInteractionRunner) Start(ctx context.Context, handler func(context.
 	}()
 	go func() {
 		if err := r.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("[discord-live] interaction server stopped with error: %v", err)
+			log.WithField("component", "discord-live").WithError(err).Error("Interaction server stopped with error")
 		}
 	}()
 	return nil

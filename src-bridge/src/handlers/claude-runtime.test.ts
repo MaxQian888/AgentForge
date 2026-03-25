@@ -228,4 +228,56 @@ describe("claude runtime", () => {
       },
     });
   });
+
+  test("persists role and team execution identity inside the saved snapshot request", () => {
+    const runtime = new AgentRuntime("task-5", "session-5");
+    const sessionManager = new SessionManager();
+
+    persistRuntimeSnapshot(
+      runtime,
+      createRequest({
+        task_id: "task-5",
+        session_id: "session-5",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        team_id: "team-123",
+        team_role: "reviewer",
+        role_config: {
+          role_id: "code-reviewer",
+          name: "Code Reviewer",
+          role: "Senior Reviewer",
+          goal: "Find risky changes",
+          backstory: "A skeptical reviewer.",
+          system_prompt: "Review carefully.",
+          allowed_tools: ["Read"],
+          max_budget_usd: 3,
+          max_turns: 10,
+          permission_mode: "default",
+          tools: ["github-tool"],
+          knowledge_context: "docs/PRD.md",
+          output_filters: ["no_pii"],
+        },
+      }),
+      { send() {} },
+      sessionManager,
+      () => 1_234,
+    );
+
+    expect(sessionManager.restore("task-5")).toMatchObject({
+      request: {
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        team_id: "team-123",
+        team_role: "reviewer",
+        role_config: {
+          role_id: "code-reviewer",
+          tools: ["github-tool"],
+          knowledge_context: "docs/PRD.md",
+          output_filters: ["no_pii"],
+        },
+      },
+    });
+  });
 });

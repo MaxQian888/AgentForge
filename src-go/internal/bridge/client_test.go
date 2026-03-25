@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"testing"
 )
 
@@ -33,7 +34,7 @@ func TestClientExecuteUsesCanonicalBridgeContract(t *testing.T) {
 	defer server.Close()
 
 	client := NewClient(server.URL)
-	response, err := client.Execute(context.Background(), ExecuteRequest{
+	req := ExecuteRequest{
 		TaskID:         "task-123",
 		SessionID:      "session-123",
 		Runtime:        "opencode",
@@ -59,7 +60,14 @@ func TestClientExecuteUsesCanonicalBridgeContract(t *testing.T) {
 			MaxTurns:       20,
 			PermissionMode: "default",
 		},
-	})
+	}
+	setStringField(t, &req, "TeamID", "team-123")
+	setStringField(t, &req, "TeamRole", "planner")
+	setStringSliceField(t, req.RoleConfig, "Tools", []string{"github-tool", "web-search"})
+	setStringField(t, req.RoleConfig, "KnowledgeContext", "docs/PRD.md\nshared://design-guidelines")
+	setStringSliceField(t, req.RoleConfig, "OutputFilters", []string{"no_credentials", "no_pii"})
+
+	response, err := client.Execute(context.Background(), req)
 	if err != nil {
 		t.Fatalf("Execute() error: %v", err)
 	}
@@ -94,6 +102,18 @@ func TestClientExecuteUsesCanonicalBridgeContract(t *testing.T) {
 	}
 	if roleConfig["role_id"] != "frontend-developer" {
 		t.Fatalf("expected role_id in normalized role_config, got %#v", roleConfig)
+	}
+	if gotBody["team_id"] != "team-123" || gotBody["team_role"] != "planner" {
+		t.Fatalf("expected team context in execute payload, got %#v", gotBody)
+	}
+	if !reflect.DeepEqual(roleConfig["tools"], []any{"github-tool", "web-search"}) {
+		t.Fatalf("expected bridge tool ids in role_config, got %#v", roleConfig["tools"])
+	}
+	if roleConfig["knowledge_context"] != "docs/PRD.md\nshared://design-guidelines" {
+		t.Fatalf("expected knowledge_context in role_config, got %#v", roleConfig["knowledge_context"])
+	}
+	if !reflect.DeepEqual(roleConfig["output_filters"], []any{"no_credentials", "no_pii"}) {
+		t.Fatalf("expected output_filters in role_config, got %#v", roleConfig["output_filters"])
 	}
 }
 
@@ -228,6 +248,9 @@ func TestClientHealthAndStatusUseBridgeRoutes(t *testing.T) {
 				"runtime":          "codex",
 				"provider":         "openai",
 				"model":            "gpt-5-codex",
+				"role_id":          "frontend-developer",
+				"team_id":          "team-123",
+				"team_role":        "coder",
 			})
 		case "/bridge/health":
 			healthPath = r.URL.Path
@@ -260,6 +283,9 @@ func TestClientHealthAndStatusUseBridgeRoutes(t *testing.T) {
 	if status.Runtime != "codex" || status.Provider != "openai" || status.Model != "gpt-5-codex" {
 		t.Fatalf("expected runtime identity in status response, got %#v", status)
 	}
+	assertStructFieldString(t, status, "RoleID", "frontend-developer")
+	assertStructFieldString(t, status, "TeamID", "team-123")
+	assertStructFieldString(t, status, "TeamRole", "coder")
 }
 
 func TestClientGetRuntimeCatalogUsesBridgeRoute(t *testing.T) {
@@ -454,6 +480,60 @@ func TestClientGenerateUsesCanonicalBridgeContract(t *testing.T) {
 	}
 	if result.Text != "Sample response" || result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 8 {
 		t.Fatalf("unexpected generate result: %+v", result)
+	}
+}
+
+func setStringField(t *testing.T, target any, fieldName, value string) {
+	t.Helper()
+	rv := reflect.ValueOf(target)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		t.Fatalf("target must be a non-nil pointer, got %T", target)
+	}
+	field := rv.Elem().FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("expected field %s on %T", fieldName, target)
+	}
+	if !field.CanSet() || field.Kind() != reflect.String {
+		t.Fatalf("field %s on %T is not settable string", fieldName, target)
+	}
+	field.SetString(value)
+}
+
+func setStringSliceField(t *testing.T, target any, fieldName string, values []string) {
+	t.Helper()
+	rv := reflect.ValueOf(target)
+	if rv.Kind() != reflect.Pointer || rv.IsNil() {
+		t.Fatalf("target must be a non-nil pointer, got %T", target)
+	}
+	field := rv.Elem().FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("expected field %s on %T", fieldName, target)
+	}
+	if !field.CanSet() || field.Kind() != reflect.Slice {
+		t.Fatalf("field %s on %T is not settable slice", fieldName, target)
+	}
+	slice := reflect.MakeSlice(field.Type(), len(values), len(values))
+	for index, value := range values {
+		slice.Index(index).SetString(value)
+	}
+	field.Set(slice)
+}
+
+func assertStructFieldString(t *testing.T, target any, fieldName, want string) {
+	t.Helper()
+	rv := reflect.ValueOf(target)
+	if rv.Kind() == reflect.Pointer {
+		rv = rv.Elem()
+	}
+	field := rv.FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("expected field %s on %T", fieldName, target)
+	}
+	if field.Kind() != reflect.String {
+		t.Fatalf("field %s on %T is not a string", fieldName, target)
+	}
+	if got := field.String(); got != want {
+		t.Fatalf("%s = %q, want %q", fieldName, got, want)
 	}
 }
 

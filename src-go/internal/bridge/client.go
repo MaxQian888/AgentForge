@@ -19,6 +19,8 @@ type ExecuteRequest struct {
 	TaskID         string      `json:"task_id"`
 	SessionID      string      `json:"session_id"`
 	MemberID       string      `json:"member_id,omitempty"`
+	TeamID         string      `json:"team_id,omitempty"`
+	TeamRole       string      `json:"team_role,omitempty"`
 	Runtime        string      `json:"runtime,omitempty"`
 	Provider       string      `json:"provider,omitempty"`
 	Model          string      `json:"model,omitempty"`
@@ -34,16 +36,19 @@ type ExecuteRequest struct {
 }
 
 type RoleConfig struct {
-	RoleID         string   `json:"role_id"`
-	Name           string   `json:"name"`
-	Role           string   `json:"role"`
-	Goal           string   `json:"goal"`
-	Backstory      string   `json:"backstory"`
-	SystemPrompt   string   `json:"system_prompt"`
-	AllowedTools   []string `json:"allowed_tools"`
-	MaxBudgetUsd   float64  `json:"max_budget_usd"`
-	MaxTurns       int      `json:"max_turns"`
-	PermissionMode string   `json:"permission_mode"`
+	RoleID           string   `json:"role_id"`
+	Name             string   `json:"name"`
+	Role             string   `json:"role"`
+	Goal             string   `json:"goal"`
+	Backstory        string   `json:"backstory"`
+	SystemPrompt     string   `json:"system_prompt"`
+	AllowedTools     []string `json:"allowed_tools"`
+	Tools            []string `json:"tools,omitempty"`
+	KnowledgeContext string   `json:"knowledge_context,omitempty"`
+	OutputFilters    []string `json:"output_filters,omitempty"`
+	MaxBudgetUsd     float64  `json:"max_budget_usd"`
+	MaxTurns         int      `json:"max_turns"`
+	PermissionMode   string   `json:"permission_mode"`
 }
 
 // ExecuteResponse is returned after an agent is started.
@@ -72,6 +77,9 @@ type StatusResponse struct {
 	Runtime        string  `json:"runtime"`
 	Provider       string  `json:"provider"`
 	Model          string  `json:"model"`
+	RoleID         string  `json:"role_id,omitempty"`
+	TeamID         string  `json:"team_id,omitempty"`
+	TeamRole       string  `json:"team_role,omitempty"`
 }
 
 type PoolSummaryResponse struct {

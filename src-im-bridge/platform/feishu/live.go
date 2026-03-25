@@ -6,8 +6,9 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 	"strings"
 	"sync"
 	"time"
@@ -42,8 +43,9 @@ var liveMetadata = core.PlatformMetadata{
 }
 
 type replyContext struct {
-	MessageID string
-	ChatID    string
+	MessageID     string
+	ChatID        string
+	CallbackToken string
 }
 
 type eventRunner interface {
@@ -64,6 +66,10 @@ type messageClient interface {
 	Reply(ctx context.Context, messageID, msgType, content string) error
 }
 
+type cardUpdater interface {
+	Update(ctx context.Context, callbackToken string, message *core.NativeMessage) error
+}
+
 type LegacyCardCallbackHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)
 
 type LiveOption func(*Live) error
@@ -76,6 +82,7 @@ type Live struct {
 
 	runner         eventRunner
 	messages       messageClient
+	cardUpdater    cardUpdater
 	callbackHTTP   http.Handler
 	actionHandler  notify.ActionHandler
 	startCancel    context.CancelFunc
@@ -89,11 +96,18 @@ func NewLive(appID, appSecret string, opts ...LiveOption) (*Live, error) {
 		return nil, errors.New("feishu live transport requires app id and app secret")
 	}
 
+	sdkClient := lark.NewClient(appID, appSecret)
 	live := &Live{
 		appID:     appID,
 		appSecret: appSecret,
 		runner:    &sdkEventRunner{appID: appID, appSecret: appSecret},
-		messages:  &sdkMessageClient{client: lark.NewClient(appID, appSecret)},
+		messages:  &sdkMessageClient{client: sdkClient},
+		cardUpdater: &sdkCardUpdater{
+			client:     sdkClient,
+			appID:      appID,
+			appSecret:  appSecret,
+			httpClient: http.DefaultClient,
+		},
 	}
 
 	for _, opt := range opts {
@@ -131,6 +145,16 @@ func WithMessageClient(client messageClient) LiveOption {
 	}
 }
 
+func WithCardUpdater(updater cardUpdater) LiveOption {
+	return func(live *Live) error {
+		if updater == nil {
+			return errors.New("card updater cannot be nil")
+		}
+		live.cardUpdater = updater
+		return nil
+	}
+}
+
 func WithLegacyCardCallbackHandler(verificationToken, eventEncryptKey string, handler LegacyCardCallbackHandler) LiveOption {
 	return func(live *Live) error {
 		if strings.TrimSpace(verificationToken) == "" {
@@ -160,8 +184,9 @@ func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
 		return nil
 	}
 	return replyContext{
-		MessageID: strings.TrimSpace(target.MessageID),
-		ChatID:    firstNonEmpty(target.ChatID, target.ChannelID),
+		MessageID:     strings.TrimSpace(target.MessageID),
+		ChatID:        firstNonEmpty(target.ChatID, target.ChannelID),
+		CallbackToken: strings.TrimSpace(target.CallbackToken),
 	}
 }
 
@@ -187,7 +212,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 		return runner.StartWithCardActions(ctx, func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 			msg, err := normalizeIncomingMessage(event)
 			if err != nil {
-				log.Printf("[feishu-live] Ignoring inbound event: %v", err)
+				log.WithField("component", "feishu-live").WithError(err).Warn("Ignoring inbound event")
 				return nil
 			}
 			handler(l, msg)
@@ -198,7 +223,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 	return l.runner.Start(ctx, func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 		msg, err := normalizeIncomingMessage(event)
 		if err != nil {
-			log.Printf("[feishu-live] Ignoring inbound event: %v", err)
+			log.WithField("component", "feishu-live").WithError(err).Warn("Ignoring inbound event")
 			return nil
 		}
 		handler(l, msg)
@@ -261,6 +286,43 @@ func (l *Live) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) err
 	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, replyTarget.ChatID, larkim.MsgTypeInteractive, payload)
 }
 
+func (l *Live) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	if strings.TrimSpace(chatID) == "" {
+		return errors.New("feishu native send requires chat id")
+	}
+	payload, err := renderFeishuNativeContent(message)
+	if err != nil {
+		return err
+	}
+	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, chatID, larkim.MsgTypeInteractive, payload)
+}
+
+func (l *Live) ReplyNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	payload, err := renderFeishuNativeContent(message)
+	if err != nil {
+		return err
+	}
+	replyTarget := toReplyContext(replyCtx)
+	if replyTarget.MessageID != "" {
+		return l.messages.Reply(ctx, replyTarget.MessageID, larkim.MsgTypeInteractive, payload)
+	}
+	if replyTarget.ChatID == "" {
+		return errors.New("feishu native reply requires message id or chat id")
+	}
+	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, replyTarget.ChatID, larkim.MsgTypeInteractive, payload)
+}
+
+func (l *Live) UpdateNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	if l.cardUpdater == nil {
+		return errors.New("feishu native update requires a card updater")
+	}
+	replyTarget := toReplyContext(replyCtx)
+	if strings.TrimSpace(replyTarget.CallbackToken) == "" {
+		return errors.New("feishu native update requires callback token")
+	}
+	return l.cardUpdater.Update(ctx, replyTarget.CallbackToken, message)
+}
+
 func (l *Live) Stop() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -293,7 +355,7 @@ func (r *sdkEventRunner) StartWithCardActions(ctx context.Context, handler func(
 
 	go func() {
 		if err := client.Start(ctx); err != nil && ctx.Err() == nil {
-			log.Printf("[feishu-live] long connection stopped with error: %v", err)
+			log.WithField("component", "feishu-live").WithError(err).Error("Long connection stopped with error")
 		}
 	}()
 	return nil
@@ -386,8 +448,9 @@ func normalizeIncomingMessage(event *larkim.P2MessageReceiveV1) (*core.Message, 
 		ChatID:     chatID,
 		Content:    content,
 		ReplyCtx: replyContext{
-			MessageID: value(message.MessageId),
-			ChatID:    chatID,
+			MessageID:     value(message.MessageId),
+			ChatID:        chatID,
+			CallbackToken: "",
 		},
 		ReplyTarget: &core.ReplyTarget{
 			Platform:  liveMetadata.Source,
@@ -607,6 +670,15 @@ func toReplyContext(replyCtx any) replyContext {
 			return *ctx
 		}
 		return replyContext{ChatID: value.ChatID}
+	case *core.ReplyTarget:
+		if value == nil {
+			return replyContext{}
+		}
+		return replyContext{
+			MessageID:     strings.TrimSpace(value.MessageID),
+			ChatID:        firstNonEmpty(value.ChatID, value.ChannelID),
+			CallbackToken: strings.TrimSpace(value.CallbackToken),
+		}
 	default:
 		return replyContext{}
 	}

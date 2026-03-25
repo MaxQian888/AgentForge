@@ -224,6 +224,8 @@ message ExecuteTask {
   string permission_mode = 8;        // "bypassPermissions" | "acceptEdits"
   repeated McpServerConfig mcp_servers = 9;
   string session_snapshot = 10;       // 恢复用：上次会话快照 JSON
+  string team_id = 11;                // Team 流程中的显式团队身份
+  string team_role = 12;              // "planner" | "coder" | "reviewer"
 }
 
 message PauseTask {}
@@ -317,6 +319,12 @@ message AgentStatus {
   string last_tool = 4;
   int64 last_activity_ms = 5;
   double spent_usd = 6;
+  string runtime = 7;
+  string provider = 8;
+  string model = 9;
+  string role_id = 10;
+  string team_id = 11;
+  string team_role = 12;
 }
 
 message CancelRequest { string task_id = 1; string reason = 2; }

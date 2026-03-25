@@ -143,6 +143,8 @@ func (m *mockTeamAgentRunRepo) GetByID(_ context.Context, id uuid.UUID) (*model.
 }
 
 type teamSpawnCall struct {
+	teamID    uuid.UUID
+	teamRole  string
 	taskID    uuid.UUID
 	memberID  uuid.UUID
 	runtime   string
@@ -157,7 +159,17 @@ type mockTeamSpawner struct {
 }
 
 func (m *mockTeamSpawner) Spawn(_ context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error) {
+	return m.recordSpawn(uuid.Nil, "", taskID, memberID, runtime, provider, modelName, budgetUsd, roleID)
+}
+
+func (m *mockTeamSpawner) SpawnForTeam(_ context.Context, teamID uuid.UUID, teamRole string, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error) {
+	return m.recordSpawn(teamID, teamRole, taskID, memberID, runtime, provider, modelName, budgetUsd, roleID)
+}
+
+func (m *mockTeamSpawner) recordSpawn(teamID uuid.UUID, teamRole string, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error) {
 	call := teamSpawnCall{
+		teamID:    teamID,
+		teamRole:  teamRole,
 		taskID:    taskID,
 		memberID:  memberID,
 		runtime:   runtime,
@@ -277,6 +289,9 @@ func TestTeamService_StartTeamUsesProjectDefaultsAndPersistsRuntimeConfig(t *tes
 	if planner.runtime != "codex" || planner.provider != "openai" || planner.model != "gpt-5-codex" {
 		t.Fatalf("planner spawn selection = %#v", planner)
 	}
+	if planner.teamID != team.ID || planner.teamRole != model.TeamRolePlanner {
+		t.Fatalf("planner team context = %#v, want %s/%s", planner, team.ID, model.TeamRolePlanner)
+	}
 	if teamRepo.team == nil || !strings.Contains(teamRepo.team.Config, "\"runtime\":\"codex\"") {
 		t.Fatalf("team config = %q, want persisted runtime selection", teamRepo.team.Config)
 	}
@@ -332,5 +347,8 @@ func TestTeamService_ProcessRunCompletionPropagatesRuntimeConfigToCoders(t *test
 	}
 	if coder.runtime != "codex" || coder.provider != "openai" || coder.model != "gpt-5-codex" {
 		t.Fatalf("coder spawn selection = %#v", coder)
+	}
+	if coder.teamID != teamID || coder.teamRole != model.TeamRoleCoder {
+		t.Fatalf("coder team context = %#v, want %s/%s", coder, teamID, model.TeamRoleCoder)
 	}
 }

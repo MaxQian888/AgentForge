@@ -5,8 +5,9 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"net/url"
+
+	log "github.com/sirupsen/logrus"
 	"strings"
 	"sync"
 	"time"
@@ -214,7 +215,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 		if err := runner.StartWithCardCallbacks(ctx, func(ctx context.Context, incoming chatbotMessage) error {
 			msg, err := normalizeIncomingMessage(incoming)
 			if err != nil {
-				log.Printf("[dingtalk-live] Ignoring inbound message: %v", err)
+				log.WithField("component", "dingtalk-live").WithError(err).Warn("Ignoring inbound message")
 				return nil
 			}
 			handler(l, msg)
@@ -230,7 +231,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 	if err := l.runner.Start(ctx, func(ctx context.Context, incoming chatbotMessage) error {
 		msg, err := normalizeIncomingMessage(incoming)
 		if err != nil {
-			log.Printf("[dingtalk-live] Ignoring inbound message: %v", err)
+			log.WithField("component", "dingtalk-live").WithError(err).Warn("Ignoring inbound message")
 			return nil
 		}
 		handler(l, msg)

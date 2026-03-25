@@ -7,8 +7,9 @@ import (
 	"encoding/hex"
 	"errors"
 	"fmt"
-	"log"
 	"os"
+
+	log "github.com/sirupsen/logrus"
 	"path/filepath"
 	"strings"
 	"sync"
@@ -21,7 +22,7 @@ import (
 type bridgeRuntimeControl struct {
 	cfg      *config
 	bridgeID string
-	platform core.Platform
+	provider *activeProvider
 	client   *client.AgentForgeClient
 
 	cancel context.CancelFunc
@@ -31,25 +32,25 @@ type bridgeRuntimeControl struct {
 	lastCursor int64
 }
 
-func newBridgeRuntimeControl(cfg *config, bridgeID string, platform core.Platform, apiClient *client.AgentForgeClient) *bridgeRuntimeControl {
+func newBridgeRuntimeControl(cfg *config, bridgeID string, provider *activeProvider, apiClient *client.AgentForgeClient) *bridgeRuntimeControl {
 	return &bridgeRuntimeControl{
 		cfg:      cfg,
 		bridgeID: bridgeID,
-		platform: platform,
+		provider: provider,
 		client:   apiClient,
 	}
 }
 
 func (c *bridgeRuntimeControl) Start(ctx context.Context) error {
-	if c == nil || c.client == nil || c.platform == nil {
+	if c == nil || c.client == nil || c.provider == nil || c.provider.Platform == nil {
 		return nil
 	}
-	metadata := core.MetadataForPlatform(c.platform)
+	metadata := c.provider.Metadata()
 
 	registration := client.BridgeRegistration{
 		BridgeID:   c.bridgeID,
 		Platform:   metadata.Source,
-		Transport:  normalizeTransportMode(c.cfg.TransportMode),
+		Transport:  c.provider.TransportMode,
 		ProjectIDs: []string{strings.TrimSpace(c.cfg.ProjectID)},
 		Capabilities: map[string]bool{
 			"supports_deferred_reply":  metadata.Capabilities.SupportsDeferredReply,
@@ -61,7 +62,8 @@ func (c *bridgeRuntimeControl) Start(ctx context.Context) error {
 		CapabilityMatrix: metadata.Capabilities.Matrix(),
 		CallbackPaths:    []string{"/im/notify", "/im/send"},
 		Metadata: map[string]string{
-			"platform_name": c.platform.Name(),
+			"platform_name": c.provider.Platform.Name(),
+			"provider_id":   c.provider.Descriptor.ID,
 		},
 	}
 	if _, err := c.client.RegisterBridge(ctx, registration); err != nil {
@@ -106,7 +108,7 @@ func (c *bridgeRuntimeControl) heartbeatLoop(ctx context.Context) {
 			return
 		case <-ticker.C:
 			if _, err := c.client.HeartbeatBridge(ctx, c.bridgeID); err != nil {
-				log.Printf("[control-plane] heartbeat failed: %v", err)
+				log.WithField("component", "control-plane").WithError(err).Error("Heartbeat failed")
 			}
 		}
 	}
@@ -122,7 +124,7 @@ func (c *bridgeRuntimeControl) controlPlaneLoop(ctx context.Context) {
 
 		conn, err := client.DialControlPlane(ctx, c.cfg.APIBase, c.bridgeID, c.cursor())
 		if err != nil {
-			log.Printf("[control-plane] websocket connect failed: %v", err)
+			log.WithField("component", "control-plane").WithError(err).Error("WebSocket connect failed")
 			select {
 			case <-time.After(c.cfg.ControlReconnectDelay):
 				continue
@@ -132,7 +134,7 @@ func (c *bridgeRuntimeControl) controlPlaneLoop(ctx context.Context) {
 		}
 
 		if err := c.consumeDeliveries(ctx, conn); err != nil && ctx.Err() == nil {
-			log.Printf("[control-plane] websocket loop stopped: %v", err)
+			log.WithField("component", "control-plane").WithError(err).Warn("WebSocket loop stopped")
 		}
 		_ = conn.Close()
 
@@ -156,17 +158,23 @@ func (c *bridgeRuntimeControl) consumeDeliveries(ctx context.Context, conn *clie
 		if strings.TrimSpace(delivery.TargetBridgeID) != "" && strings.TrimSpace(delivery.TargetBridgeID) != c.bridgeID {
 			continue
 		}
+		if delivery.Cursor <= c.cursor() {
+			if err := conn.Ack(delivery.Cursor, delivery.DeliveryID); err != nil {
+				log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).WithError(err).Error("Duplicate ack failed")
+			}
+			continue
+		}
 		if !c.verifyDelivery(delivery) {
-			log.Printf("[control-plane] rejected delivery %s due to invalid signature", delivery.DeliveryID)
+			log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).Warn("Rejected delivery due to invalid signature")
 			continue
 		}
 		if err := c.applyDelivery(ctx, delivery); err != nil {
-			log.Printf("[control-plane] failed to apply delivery %s: %v", delivery.DeliveryID, err)
+			log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).WithError(err).Error("Failed to apply delivery")
 			continue
 		}
 		c.setCursor(delivery.Cursor)
 		if err := conn.Ack(delivery.Cursor, delivery.DeliveryID); err != nil {
-			log.Printf("[control-plane] ack failed for delivery %s: %v", delivery.DeliveryID, err)
+			log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).WithError(err).Error("Ack failed")
 		}
 	}
 }
@@ -176,7 +184,7 @@ func (c *bridgeRuntimeControl) applyDelivery(ctx context.Context, delivery *clie
 		return nil
 	}
 	targetChatID := strings.TrimSpace(delivery.TargetChatID)
-	if _, err := core.DeliverText(ctx, c.platform, core.MetadataForPlatform(c.platform), delivery.ReplyTarget, targetChatID, delivery.Content); err != nil {
+	if _, err := core.DeliverText(ctx, c.provider.Platform, c.provider.Metadata(), delivery.ReplyTarget, targetChatID, delivery.Content); err != nil {
 		return err
 	}
 	return nil

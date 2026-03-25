@@ -4,8 +4,9 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 	"sync"
 	"time"
 
@@ -22,6 +23,7 @@ type Stub struct {
 	mu      sync.Mutex
 	replies []stubReply
 	cards   []stubCardReply
+	native  []stubNativeReply
 }
 
 type stubReply struct {
@@ -34,6 +36,13 @@ type stubCardReply struct {
 	ChatID    string     `json:"chat_id,omitempty"`
 	Card      *core.Card `json:"card"`
 	Timestamp time.Time  `json:"timestamp"`
+}
+
+type stubNativeReply struct {
+	ChatID    string              `json:"chat_id,omitempty"`
+	Message   *core.NativeMessage `json:"message"`
+	Updated   bool                `json:"updated"`
+	Timestamp time.Time           `json:"timestamp"`
 }
 
 type stubMessageRequest struct {
@@ -96,10 +105,10 @@ func (s *Stub) Start(handler core.MessageHandler) error {
 		Handler: mux,
 	}
 
-	log.Printf("[feishu-stub] Test server starting on :%s", s.port)
+	log.WithFields(log.Fields{"component": "feishu-stub", "port": s.port}).Info("Test server starting")
 	go func() {
 		if err := s.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
-			log.Printf("[feishu-stub] Server error: %v", err)
+			log.WithField("component", "feishu-stub").WithError(err).Error("Server error")
 		}
 	}()
 	return nil
@@ -110,6 +119,9 @@ func (s *Stub) Reply(ctx context.Context, replyCtx any, content string) error {
 	if msg, ok := replyCtx.(*core.Message); ok {
 		chatID = msg.ChatID
 	}
+	if target, ok := replyCtx.(*core.ReplyTarget); ok {
+		chatID = firstNonEmpty(target.ChatID, target.ChannelID)
+	}
 	s.mu.Lock()
 	s.replies = append(s.replies, stubReply{
 		ChatID:    chatID,
@@ -117,7 +129,7 @@ func (s *Stub) Reply(ctx context.Context, replyCtx any, content string) error {
 		Timestamp: time.Now(),
 	})
 	s.mu.Unlock()
-	log.Printf("[feishu-stub] Reply to %s: %s", chatID, content)
+	log.WithFields(log.Fields{"component": "feishu-stub", "chat_id": chatID}).Info("Reply: " + content)
 	return nil
 }
 
@@ -129,7 +141,7 @@ func (s *Stub) Send(ctx context.Context, chatID string, content string) error {
 		Timestamp: time.Now(),
 	})
 	s.mu.Unlock()
-	log.Printf("[feishu-stub] Send to %s: %s", chatID, content)
+	log.WithFields(log.Fields{"component": "feishu-stub", "chat_id": chatID}).Info("Send: " + content)
 	return nil
 }
 
@@ -142,7 +154,7 @@ func (s *Stub) SendCard(ctx context.Context, chatID string, card *core.Card) err
 		Timestamp: time.Now(),
 	})
 	s.mu.Unlock()
-	log.Printf("[feishu-stub] SendCard to %s: %s", chatID, card.Title)
+	log.WithFields(log.Fields{"component": "feishu-stub", "chat_id": chatID, "card_title": card.Title}).Info("SendCard")
 	return nil
 }
 
@@ -152,6 +164,9 @@ func (s *Stub) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) err
 	if msg, ok := replyCtx.(*core.Message); ok {
 		chatID = msg.ChatID
 	}
+	if target, ok := replyCtx.(*core.ReplyTarget); ok {
+		chatID = firstNonEmpty(target.ChatID, target.ChannelID)
+	}
 	s.mu.Lock()
 	s.cards = append(s.cards, stubCardReply{
 		ChatID:    chatID,
@@ -159,7 +174,52 @@ func (s *Stub) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) err
 		Timestamp: time.Now(),
 	})
 	s.mu.Unlock()
-	log.Printf("[feishu-stub] ReplyCard to %s: %s", chatID, card.Title)
+	log.WithFields(log.Fields{"component": "feishu-stub", "chat_id": chatID, "card_title": card.Title}).Info("ReplyCard")
+	return nil
+}
+
+func (s *Stub) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	s.mu.Lock()
+	s.native = append(s.native, stubNativeReply{
+		ChatID:    chatID,
+		Message:   message,
+		Timestamp: time.Now(),
+	})
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Stub) ReplyNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	chatID := ""
+	if msg, ok := replyCtx.(*core.Message); ok {
+		chatID = msg.ChatID
+	}
+	if target, ok := replyCtx.(*core.ReplyTarget); ok {
+		chatID = firstNonEmpty(target.ChatID, target.ChannelID)
+	}
+	s.mu.Lock()
+	s.native = append(s.native, stubNativeReply{
+		ChatID:    chatID,
+		Message:   message,
+		Timestamp: time.Now(),
+	})
+	s.mu.Unlock()
+	return nil
+}
+
+func (s *Stub) UpdateNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	chatID := ""
+	if target, ok := replyCtx.(*core.ReplyTarget); ok {
+		chatID = firstNonEmpty(target.ChatID, target.ChannelID)
+	}
+	s.mu.Lock()
+	s.native = append(s.native, stubNativeReply{
+		ChatID:    chatID,
+		Message:   message,
+		Updated:   true,
+		Timestamp: time.Now(),
+	})
+	s.mu.Unlock()
 	return nil
 }
 
@@ -240,6 +300,7 @@ func (s *Stub) handleClearReplies(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.replies = nil
 	s.cards = nil
+	s.native = nil
 	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")

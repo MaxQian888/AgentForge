@@ -3,8 +3,9 @@ package main
 import (
 	"context"
 	"fmt"
-	"log"
 	"os"
+
+	log "github.com/sirupsen/logrus"
 	"os/signal"
 	"strings"
 	"syscall"
@@ -139,54 +140,31 @@ func durationEnvOrDefault(key string, fallback time.Duration) time.Duration {
 }
 
 func selectPlatform(cfg *config) (core.Platform, error) {
-	descriptor, err := lookupPlatformDescriptor(cfg.Platform)
+	provider, err := selectProvider(cfg)
 	if err != nil {
 		return nil, err
 	}
-
-	mode := normalizeTransportMode(cfg.TransportMode)
-	if mode != transportModeStub && mode != transportModeLive {
-		return nil, fmt.Errorf("unsupported IM_TRANSPORT_MODE %q", cfg.TransportMode)
-	}
-	if err := descriptor.ValidateConfig(cfg, mode); err != nil {
-		return nil, err
-	}
-
-	var factory platformFactory
-	switch mode {
-	case transportModeStub:
-		factory = descriptor.NewStub
-	case transportModeLive:
-		factory = descriptor.NewLive
-	}
-	if factory == nil {
-		return nil, fmt.Errorf("selected platform %s does not support %s transport", descriptor.Metadata.Source, mode)
-	}
-
-	platform, err := factory(cfg)
-	if err != nil {
-		return nil, err
-	}
-	log.Printf("[main] Selected platform %s using %s transport", descriptor.Metadata.Source, mode)
-	return platform, nil
+	log.WithFields(log.Fields{"component": "main", "platform": provider.Source(), "transport": provider.TransportMode}).Info("Selected platform")
+	return provider.Platform, nil
 }
 
 func main() {
 	cfg := loadConfig()
 
-	platform, err := selectPlatform(cfg)
+	provider, err := selectProvider(cfg)
 	if err != nil {
-		log.Fatalf("[main] Invalid IM bridge configuration: %v", err)
+		log.WithField("component", "main").WithError(err).Fatal("Invalid IM bridge configuration")
 	}
-	log.Printf("[main] IM platform selected: %s", core.NormalizePlatformName(platform.Name()))
+	platform := provider.Platform
+	log.WithFields(log.Fields{"component": "main", "platform": core.NormalizePlatformName(platform.Name())}).Info("IM platform selected")
 
 	bridgeID, err := loadOrCreateBridgeID(cfg.BridgeIDFile)
 	if err != nil {
-		log.Fatalf("[main] Failed to initialize bridge id: %v", err)
+		log.WithField("component", "main").WithError(err).Fatal("Failed to initialize bridge id")
 	}
 
 	// Create API client.
-	apiClient := client.NewAgentForgeClient(cfg.APIBase, cfg.ProjectID, cfg.APIKey).WithPlatform(platform).WithBridgeContext(bridgeID, nil)
+	apiClient := client.NewAgentForgeClient(cfg.APIBase, cfg.ProjectID, cfg.APIKey).WithSource(provider.Source()).WithBridgeContext(bridgeID, nil)
 
 	// Create engine and register commands.
 	engine := core.NewEngine(platform)
@@ -218,13 +196,13 @@ func main() {
 		_ = p.Reply(ctx, msg.ReplyCtx, reply)
 	})
 
-	runtimeControl := newBridgeRuntimeControl(cfg, bridgeID, platform, apiClient)
+	runtimeControl := newBridgeRuntimeControl(cfg, bridgeID, provider, apiClient)
 	if err := runtimeControl.Start(context.Background()); err != nil {
-		log.Fatalf("[main] Failed to start runtime control plane: %v", err)
+		log.WithField("component", "main").WithError(err).Fatal("Failed to start runtime control plane")
 	}
 
 	// Start notification receiver in background.
-	notifyServer := notify.NewReceiver(platform, cfg.NotifyPort)
+	notifyServer := notify.NewReceiverWithMetadata(platform, provider.Metadata(), cfg.NotifyPort)
 	notifyServer.SetSharedSecret(cfg.ControlSharedSecret)
 	relay := &backendActionRelay{
 		client:   apiClient,
@@ -234,26 +212,32 @@ func main() {
 	configurePlatformActionCallbacks(platform, relay)
 	go func() {
 		if err := notifyServer.Start(); err != nil {
-			log.Printf("[main] Notification receiver error: %v", err)
+			log.WithField("component", "main").WithError(err).Error("Notification receiver error")
 		}
 	}()
 
 	// Start engine (starts platform).
 	if err := engine.Start(); err != nil {
-		log.Fatalf("[main] Failed to start engine: %v", err)
+		log.WithField("component", "main").WithError(err).Fatal("Failed to start engine")
 	}
-	log.Printf("[main] IM Bridge started successfully (platform=%s transport=%s notify_port=%s test_port=%s)", core.NormalizePlatformName(platform.Name()), normalizeTransportMode(cfg.TransportMode), cfg.NotifyPort, cfg.TestPort)
+	log.WithFields(log.Fields{
+		"component":   "main",
+		"platform":    core.NormalizePlatformName(platform.Name()),
+		"transport":   normalizeTransportMode(cfg.TransportMode),
+		"notify_port": cfg.NotifyPort,
+		"test_port":   cfg.TestPort,
+	}).Info("IM Bridge started successfully")
 
 	// Wait for shutdown signal.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 
-	log.Println("[main] Shutting down...")
+	log.WithField("component", "main").Info("Shutting down...")
 	_ = engine.Stop()
 	_ = runtimeControl.Stop(context.Background())
 	_ = notifyServer.Stop()
-	log.Println("[main] Goodbye")
+	log.WithField("component", "main").Info("Goodbye")
 }
 
 func configurePlatformActionCallbacks(platform core.Platform, handler notify.ActionHandler) {

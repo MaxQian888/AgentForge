@@ -19,13 +19,6 @@ const (
 
 type platformFactory func(cfg *config) (core.Platform, error)
 
-type platformDescriptor struct {
-	Metadata       core.PlatformMetadata
-	ValidateConfig func(cfg *config, mode string) error
-	NewStub        platformFactory
-	NewLive        platformFactory
-}
-
 func normalizeTransportMode(mode string) string {
 	normalized := strings.ToLower(strings.TrimSpace(mode))
 	if normalized == "" {
@@ -34,9 +27,10 @@ func normalizeTransportMode(mode string) string {
 	return normalized
 }
 
-func platformDescriptors() map[string]platformDescriptor {
-	return map[string]platformDescriptor{
+func providerDescriptors() map[string]providerDescriptor {
+	return map[string]providerDescriptor{
 		"wecom": {
+			ID: "wecom",
 			Metadata: core.PlatformMetadata{
 				Source: "wecom",
 				Capabilities: core.PlatformCapabilities{
@@ -46,12 +40,20 @@ func platformDescriptors() map[string]platformDescriptor {
 					MessageScopes:      []core.MessageScope{core.MessageScopeChat},
 				},
 			},
-			ValidateConfig: func(cfg *config, mode string) error {
-				return fmt.Errorf("selected platform wecom is planned but not yet runnable; adapter, capability matrix, and runtime wiring are still pending")
-			},
+			SupportedTransportModes: []string{transportModeStub, transportModeLive},
+			PlannedReason:           "adapter, capability matrix, and runtime wiring are still pending",
 		},
 		"feishu": {
-			Metadata: feishu.NewStub("0").Metadata(),
+			ID:                      "feishu",
+			Metadata:                feishu.NewStub("0").Metadata(),
+			SupportedTransportModes: []string{transportModeStub, transportModeLive},
+			Features: providerFeatureSet{
+				FeishuCards: &feishuProviderFeatures{
+					SupportsJSONCards:      true,
+					SupportsTemplateCards:  true,
+					SupportsDelayedUpdates: true,
+				},
+			},
 			ValidateConfig: func(cfg *config, mode string) error {
 				if mode == transportModeLive && (cfg.FeishuApp == "" || cfg.FeishuSec == "") {
 					return fmt.Errorf("selected platform feishu requires FEISHU_APP_ID and FEISHU_APP_SECRET for live transport")
@@ -66,7 +68,9 @@ func platformDescriptors() map[string]platformDescriptor {
 			},
 		},
 		"slack": {
-			Metadata: slack.NewStub("0").Metadata(),
+			ID:                      "slack",
+			Metadata:                slack.NewStub("0").Metadata(),
+			SupportedTransportModes: []string{transportModeStub, transportModeLive},
 			ValidateConfig: func(cfg *config, mode string) error {
 				if mode == transportModeLive && (cfg.SlackBotToken == "" || cfg.SlackAppToken == "") {
 					return fmt.Errorf("selected platform slack requires SLACK_BOT_TOKEN and SLACK_APP_TOKEN for live transport")
@@ -81,7 +85,9 @@ func platformDescriptors() map[string]platformDescriptor {
 			},
 		},
 		"dingtalk": {
-			Metadata: dingtalk.NewStub("0").Metadata(),
+			ID:                      "dingtalk",
+			Metadata:                dingtalk.NewStub("0").Metadata(),
+			SupportedTransportModes: []string{transportModeStub, transportModeLive},
 			ValidateConfig: func(cfg *config, mode string) error {
 				if mode == transportModeLive && (cfg.DingTalkAppKey == "" || cfg.DingTalkAppSecret == "") {
 					return fmt.Errorf("selected platform dingtalk requires DINGTALK_APP_KEY and DINGTALK_APP_SECRET for live transport")
@@ -96,7 +102,9 @@ func platformDescriptors() map[string]platformDescriptor {
 			},
 		},
 		"telegram": {
-			Metadata: telegram.NewStub("0").Metadata(),
+			ID:                      "telegram",
+			Metadata:                telegram.NewStub("0").Metadata(),
+			SupportedTransportModes: []string{transportModeStub, transportModeLive},
 			ValidateConfig: func(cfg *config, mode string) error {
 				if mode != transportModeLive {
 					return nil
@@ -114,7 +122,9 @@ func platformDescriptors() map[string]platformDescriptor {
 			},
 		},
 		"discord": {
-			Metadata: discord.NewStub("0").Metadata(),
+			ID:                      "discord",
+			Metadata:                discord.NewStub("0").Metadata(),
+			SupportedTransportModes: []string{transportModeStub, transportModeLive},
 			ValidateConfig: func(cfg *config, mode string) error {
 				if mode != transportModeLive {
 					return nil
@@ -147,6 +157,10 @@ func platformDescriptors() map[string]platformDescriptor {
 	}
 }
 
+func platformDescriptors() map[string]platformDescriptor {
+	return providerDescriptors()
+}
+
 func telegramValidateConfig(updateMode, webhookURL string) error {
 	normalized := strings.ToLower(strings.TrimSpace(updateMode))
 	if normalized == "" {
@@ -159,13 +173,4 @@ func telegramValidateConfig(updateMode, webhookURL string) error {
 		return fmt.Errorf("telegram long polling cannot be combined with webhook configuration")
 	}
 	return nil
-}
-
-func lookupPlatformDescriptor(name string) (platformDescriptor, error) {
-	normalized := core.NormalizePlatformName(name)
-	descriptor, ok := platformDescriptors()[normalized]
-	if !ok {
-		return platformDescriptor{}, fmt.Errorf("unsupported IM_PLATFORM %q", name)
-	}
-	return descriptor, nil
 }

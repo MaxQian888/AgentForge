@@ -277,12 +277,77 @@ func TestLive_MetadataDeclaresFeishuCapabilities(t *testing.T) {
 	}
 }
 
+func TestLive_SendReplyAndUpdateNativePayloads(t *testing.T) {
+	runner := &fakeEventRunner{}
+	sender := &fakeMessageClient{}
+	updater := &fakeCardUpdater{}
+
+	live, err := NewLive(
+		"app-id",
+		"app-secret",
+		WithEventRunner(runner),
+		WithMessageClient(sender),
+		WithCardUpdater(updater),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	jsonMessage := &core.NativeMessage{
+		Platform: "feishu",
+		FeishuCard: &core.FeishuCardPayload{
+			Mode: core.FeishuCardModeJSON,
+			JSON: json.RawMessage(`{"header":{"title":{"tag":"plain_text","content":"Native"}}}`),
+		},
+	}
+	if err := live.SendNative(context.Background(), "chat-1", jsonMessage); err != nil {
+		t.Fatalf("SendNative error: %v", err)
+	}
+
+	templateMessage := &core.NativeMessage{
+		Platform: "feishu",
+		FeishuCard: &core.FeishuCardPayload{
+			Mode:                core.FeishuCardModeTemplate,
+			TemplateID:          "ctp_123",
+			TemplateVersionName: "1.0.0",
+			TemplateVariable: map[string]any{
+				"title": "Hello",
+			},
+		},
+	}
+	if err := live.ReplyNative(context.Background(), replyContext{MessageID: "msg-1", ChatID: "chat-1"}, templateMessage); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+	if err := live.UpdateNative(context.Background(), replyContext{ChatID: "chat-1", CallbackToken: "cb-token-1"}, templateMessage); err != nil {
+		t.Fatalf("UpdateNative error: %v", err)
+	}
+
+	if len(sender.sendCalls) != 1 || sender.sendCalls[0].MsgType != larkim.MsgTypeInteractive {
+		t.Fatalf("sendCalls = %+v", sender.sendCalls)
+	}
+	sendPayload := decodeJSONMap(t, sender.sendCalls[0].Content)
+	if sendPayload["header"] == nil {
+		t.Fatalf("send payload = %+v", sendPayload)
+	}
+
+	if len(sender.replyCalls) != 1 || sender.replyCalls[0].MsgType != larkim.MsgTypeInteractive {
+		t.Fatalf("replyCalls = %+v", sender.replyCalls)
+	}
+	replyPayload := decodeJSONMap(t, sender.replyCalls[0].Content)
+	if replyPayload["type"] != "template" {
+		t.Fatalf("reply payload = %+v", replyPayload)
+	}
+	if updater.callbackToken != "cb-token-1" || updater.message == nil || updater.message.FeishuCard == nil || updater.message.FeishuCard.TemplateID != "ctp_123" {
+		t.Fatalf("updater = %+v", updater)
+	}
+}
+
 type fakeEventRunner struct {
-	started bool
-	stopped bool
-	handler func(context.Context, *larkim.P2MessageReceiveV1) error
+	started           bool
+	stopped           bool
+	handler           func(context.Context, *larkim.P2MessageReceiveV1) error
 	cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)
-	stopErr error
+	stopErr           error
 }
 
 func (r *fakeEventRunner) Start(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error) error {
@@ -322,6 +387,11 @@ type fakeMessageClient struct {
 	replyCalls []fakeReplyCall
 }
 
+type fakeCardUpdater struct {
+	callbackToken string
+	message       *core.NativeMessage
+}
+
 type fakeSendCall struct {
 	ReceiveIDType string
 	ReceiveID     string
@@ -351,6 +421,12 @@ func (c *fakeMessageClient) Reply(ctx context.Context, messageID, msgType, conte
 		MsgType:   msgType,
 		Content:   content,
 	})
+	return nil
+}
+
+func (u *fakeCardUpdater) Update(ctx context.Context, callbackToken string, message *core.NativeMessage) error {
+	u.callbackToken = callbackToken
+	u.message = message
 	return nil
 }
 

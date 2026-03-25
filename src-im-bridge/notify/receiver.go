@@ -8,8 +8,9 @@ import (
 	"encoding/json"
 	"fmt"
 	"io"
-	"log"
 	"net/http"
+
+	log "github.com/sirupsen/logrus"
 	"strings"
 	"sync"
 
@@ -25,6 +26,7 @@ type Notification struct {
 	Content        string                  `json:"content"`  // plain text fallback
 	Card           *core.Card              `json:"card"`     // optional rich card
 	Structured     *core.StructuredMessage `json:"structured,omitempty"`
+	Native         *core.NativeMessage     `json:"native,omitempty"`
 	ReplyTarget    *core.ReplyTarget       `json:"replyTarget,omitempty"`
 }
 
@@ -47,9 +49,18 @@ type Receiver struct {
 
 // NewReceiver creates a notification receiver bound to a platform.
 func NewReceiver(platform core.Platform, port string) *Receiver {
+	return NewReceiverWithMetadata(platform, core.MetadataForPlatform(platform), port)
+}
+
+// NewReceiverWithMetadata creates a notification receiver bound to a platform
+// and explicit provider metadata.
+func NewReceiverWithMetadata(platform core.Platform, metadata core.PlatformMetadata, port string) *Receiver {
+	if metadata.Source == "" {
+		metadata = core.MetadataForPlatform(platform)
+	}
 	return &Receiver{
 		platform:  platform,
-		metadata:  core.MetadataForPlatform(platform),
+		metadata:  metadata,
 		port:      port,
 		processed: make(map[string]struct{}),
 	}
@@ -86,7 +97,7 @@ func (r *Receiver) Start() error {
 		Handler: mux,
 	}
 
-	log.Printf("[notify] Notification receiver starting on :%s", r.port)
+	log.WithFields(log.Fields{"component": "notify", "port": r.port}).Info("Notification receiver starting")
 	if err := r.server.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 		return fmt.Errorf("notification server: %w", err)
 	}
@@ -128,10 +139,34 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	if chatID == "" {
 		chatID = n.TargetIMUserID // fallback to DM
 	}
+	if n.Native != nil {
+		if strings.TrimSpace(n.Native.Platform) == "" {
+			n.Native.Platform = activePlatform
+		}
+		if _, ok := r.platform.(core.NativeMessageSender); ok {
+			plan, err := core.DeliverNative(ctx, r.platform, r.metadata, n.ReplyTarget, chatID, n.Native)
+			if err != nil {
+				log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send native payload")
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if strings.TrimSpace(plan.FallbackReason) != "" {
+				log.WithFields(log.Fields{"component": "notify", "chat_id": chatID, "fallback_reason": plan.FallbackReason}).Warn("Native payload fallback")
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status":          "sent",
+				"type":            "native",
+				"delivery_method": plan.Method,
+				"fallback_reason": strings.TrimSpace(plan.FallbackReason),
+			})
+			return
+		}
+	}
 	if n.Structured != nil {
 		if sender, ok := r.platform.(core.StructuredSender); ok {
 			if err := sender.SendStructured(ctx, chatID, n.Structured); err != nil {
-				log.Printf("[notify] Failed to send structured payload to %s: %v", chatID, err)
+				log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send structured payload")
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -151,7 +186,7 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	if n.Card != nil && r.metadata.Capabilities.SupportsRichMessages {
 		if _, ok := r.platform.(core.CardSender); ok {
 			if _, err := core.DeliverCard(ctx, r.platform, r.metadata, n.ReplyTarget, chatID, n.Card); err != nil {
-				log.Printf("[notify] Failed to send card to %s: %v", chatID, err)
+				log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send card")
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
@@ -163,7 +198,7 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 
 	// Fallback to plain text.
 	if _, err := core.DeliverText(ctx, r.platform, r.metadata, n.ReplyTarget, chatID, n.Content); err != nil {
-		log.Printf("[notify] Failed to send message to %s: %v", chatID, err)
+		log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send message")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -207,7 +242,7 @@ func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
 
 	ctx := context.Background()
 	if _, err := core.DeliverText(ctx, r.platform, r.metadata, s.ReplyTarget, chatID, s.Content); err != nil {
-		log.Printf("[notify] Failed to send message to %s: %v", chatID, err)
+		log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send message")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -279,9 +314,11 @@ type ActionRequest struct {
 
 // ActionResponse is the normalized result of an interactive action callback.
 type ActionResponse struct {
-	Result      string            `json:"result"`
-	ReplyTarget *core.ReplyTarget `json:"replyTarget,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	Result      string                  `json:"result"`
+	ReplyTarget *core.ReplyTarget       `json:"replyTarget,omitempty"`
+	Metadata    map[string]string       `json:"metadata,omitempty"`
+	Structured  *core.StructuredMessage `json:"structured,omitempty"`
+	Native      *core.NativeMessage     `json:"native,omitempty"`
 }
 
 func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
@@ -303,7 +340,7 @@ func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
 	ctx := context.Background()
 	result, err := r.actionHandler.HandleAction(ctx, &a)
 	if err != nil {
-		log.Printf("[notify] Action %s failed for %s: %v", a.Action, a.EntityID, err)
+		log.WithFields(log.Fields{"component": "notify", "action": a.Action, "entity_id": a.EntityID}).WithError(err).Error("Action failed")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -312,14 +349,32 @@ func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Send the result back to the chat if chatID is provided.
-	if a.ChatID != "" && strings.TrimSpace(result.Result) != "" {
+	if a.ChatID != "" && (strings.TrimSpace(result.Result) != "" || result.Native != nil) {
 		target := a.ReplyTarget
 		if result.ReplyTarget != nil {
 			target = result.ReplyTarget
 		}
-		if _, err := core.DeliverText(ctx, r.platform, r.metadata, target, a.ChatID, result.Result); err != nil {
-			log.Printf("[notify] Action response delivery failed for %s: %v", a.EntityID, err)
+		actionMetadata := cloneMetadata(result.Metadata)
+		nativeMessage, fallbackReason := r.resolveActionNativeMessage(result, target)
+		delivered := false
+		if nativeMessage != nil {
+			if _, err := core.DeliverNative(ctx, r.platform, r.metadata, target, a.ChatID, nativeMessage); err != nil {
+				fallbackReason = classifyNativeFallbackReason(err, target)
+				actionMetadata["fallback_reason"] = fallbackReason
+				log.WithFields(log.Fields{"component": "notify", "fallback_reason": fallbackReason}).WithError(err).Warn("Native action response fallback")
+			} else {
+				delivered = true
+			}
+		} else if fallbackReason != "" {
+			actionMetadata["fallback_reason"] = fallbackReason
 		}
+
+		if !delivered {
+			if _, err := core.DeliverText(ctx, r.platform, r.metadata, target, a.ChatID, result.Result); err != nil {
+				log.WithField("component", "notify").WithField("entity_id", a.EntityID).WithError(err).Error("Action response delivery failed")
+			}
+		}
+		result.Metadata = actionMetadata
 	}
 
 	w.Header().Set("Content-Type", "application/json")
@@ -329,4 +384,87 @@ func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
 		"replyTarget": result.ReplyTarget,
 		"metadata":    result.Metadata,
 	})
+}
+
+func (r *Receiver) resolveActionNativeMessage(result *ActionResponse, target *core.ReplyTarget) (*core.NativeMessage, string) {
+	if result == nil {
+		return nil, ""
+	}
+	if result.Native != nil {
+		if strings.TrimSpace(result.Native.Platform) == "" {
+			result.Native.Platform = r.metadata.Source
+		}
+		return result.Native, ""
+	}
+	if r.metadata.Source != "feishu" || target == nil {
+		return nil, ""
+	}
+	if strings.TrimSpace(target.ProgressMode) != string(core.AsyncUpdateDeferredCardUpdate) {
+		return nil, ""
+	}
+	if strings.TrimSpace(target.CallbackToken) == "" {
+		return nil, "missing_delayed_update_context"
+	}
+	if strings.TrimSpace(result.Result) == "" {
+		return nil, ""
+	}
+
+	cardJSON, err := json.Marshal(map[string]any{
+		"config": map[string]any{
+			"wide_screen_mode": true,
+		},
+		"header": map[string]any{
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": "AgentForge Update",
+			},
+		},
+		"elements": []map[string]any{
+			{
+				"tag": "div",
+				"text": map[string]any{
+					"tag":     "lark_md",
+					"content": strings.TrimSpace(result.Result),
+				},
+			},
+		},
+	})
+	if err != nil {
+		return nil, "native_payload_encode_failed"
+	}
+	return &core.NativeMessage{
+		Platform: "feishu",
+		FeishuCard: &core.FeishuCardPayload{
+			Mode: core.FeishuCardModeJSON,
+			JSON: cardJSON,
+		},
+	}, ""
+}
+
+func classifyNativeFallbackReason(err error, target *core.ReplyTarget) string {
+	if target == nil || strings.TrimSpace(target.CallbackToken) == "" {
+		return "missing_delayed_update_context"
+	}
+	message := strings.ToLower(strings.TrimSpace(err.Error()))
+	switch {
+	case strings.Contains(message, "expired"):
+		return "delayed_update_context_expired"
+	case strings.Contains(message, "exhaust") || strings.Contains(message, "used"):
+		return "delayed_update_context_exhausted"
+	case strings.Contains(message, "invalid") || strings.Contains(message, "token"):
+		return "invalid_delayed_update_context"
+	default:
+		return "native_update_failed"
+	}
+}
+
+func cloneMetadata(metadata map[string]string) map[string]string {
+	if len(metadata) == 0 {
+		return make(map[string]string)
+	}
+	cloned := make(map[string]string, len(metadata))
+	for key, value := range metadata {
+		cloned[key] = value
+	}
+	return cloned
 }

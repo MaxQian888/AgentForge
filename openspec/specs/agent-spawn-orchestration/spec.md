@@ -4,19 +4,20 @@
 Define the backend requirements for service-backed agent spawn orchestration, runtime state persistence, startup failure compensation, and authenticated WebSocket lifecycle delivery.
 ## Requirements
 ### Requirement: Agent spawn starts a real execution runtime
-The system SHALL turn an authenticated spawn request into an AgentPool admission flow that either starts a real runtime immediately or records a truthful queued admission outcome when capacity is temporarily unavailable. When the request is admitted immediately, the spawn flow MUST create a new agent run in `starting` state, provision an isolated worktree for the task, call the configured bridge execute endpoint, persist the resulting branch, worktree, and session identifiers on the task, and mark the run as `running` only after the bridge accepts the execution request.
+The system SHALL turn an authenticated spawn request into an AgentPool admission flow that either starts a real runtime immediately or records a truthful queued admission outcome when capacity is temporarily unavailable. When the request is admitted immediately, the spawn flow MUST create a new agent run in `starting` state, resolve the canonical execution context for that run, provision an isolated worktree, call the configured Bridge execute endpoint with the task, member, runtime and provider tuple, expanded role execution profile, and any applicable team execution context, persist the resulting branch, worktree, and session identifiers on the task, and mark the run as `running` only after the Bridge accepts the execution request.
 
 #### Scenario: Successful spawn provisions runtime state immediately
 - **WHEN** an authenticated client submits a valid spawn request for a task that has no active agent run and AgentPool admission has an available slot
 - **THEN** the system creates a new agent run in `starting` state
+- **THEN** the system resolves the execution context for that run, including role-derived runtime fields and any team-aware context that applies to the spawn
 - **THEN** the system provisions a worktree and deterministic agent branch for that task
-- **THEN** the system invokes the configured bridge execute API with the task, member, model, budget, and worktree context
+- **THEN** the system invokes the configured Bridge execute API with the canonical execution context and managed workspace information
 - **THEN** the system stores `agent_branch`, `agent_worktree`, and `agent_session_id` on the task
 - **THEN** the system updates the agent run status to `running`
 
 #### Scenario: Spawn request is queued by AgentPool admission
 - **WHEN** an authenticated client submits a valid spawn request for a task that has no active agent run but AgentPool admission has no immediate slot available
-- **THEN** the system records a queue entry for that spawn request
+- **THEN** the system records a queue entry for that spawn request that preserves the canonical runtime selection and role context needed for later admission
 - **THEN** the synchronous result reports that the request is `queued`
 - **THEN** the system MUST NOT create a real agent run until the queued request is later admitted
 
@@ -70,3 +71,25 @@ The system SHALL allow explicit agent spawn requests to reuse the task's current
 - **THEN** the system MUST reject the request before runtime startup
 - **THEN** the system MUST NOT create a new agent run for that request
 - **THEN** the response explains that the task has no valid agent dispatch target
+
+### Requirement: Manual spawn and queued promotion reuse dispatch control-plane guardrails
+The system SHALL route task-scoped manual spawn requests and queue promotions through the same dispatch control-plane preflight used by assignment-triggered dispatch. Manual spawn and promotion MUST reuse task/member context resolution, budget admission checks, worktree readiness, and structured non-started outcomes instead of bypassing the task-centered dispatch contract.
+
+#### Scenario: Manual spawn returns a structured queued outcome
+- **WHEN** an operator requests manual spawn for a task and AgentPool admission has no immediate slot available
+- **THEN** the synchronous spawn result returns `queued`
+- **THEN** the result includes the queue reference and resolved dispatch context used for that admission decision
+- **THEN** the system MUST NOT create a real agent run until that queued request is later admitted
+
+#### Scenario: Manual spawn is blocked by dispatch guardrails before runtime startup
+- **WHEN** an operator requests manual spawn for a task but dispatch preflight fails because of budget, task/member validity, or other control-plane guardrails
+- **THEN** the synchronous spawn result returns `blocked`
+- **THEN** the result carries the same machine-readable guardrail classification used by assignment-triggered dispatch
+- **THEN** the system MUST NOT create a new agent run for that request
+
+#### Scenario: Queue promotion revalidates the canonical dispatch preflight
+- **WHEN** a queued dispatch becomes eligible for promotion after capacity is released
+- **THEN** the system re-runs the canonical dispatch preflight before creating runtime state
+- **THEN** only a passing decision may create a new agent run and persist task runtime metadata
+- **THEN** a failing recheck is surfaced through the queue lifecycle without leaving ambiguous runtime state behind
+

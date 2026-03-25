@@ -72,20 +72,20 @@ The system SHALL expose list, get, create, and update behavior through one unifi
 - **THEN** a subsequent get or list operation returns the same advanced sections in normalized form instead of silently dropping them
 
 ### Requirement: Role manifests can be projected into execution profiles
-The system SHALL derive a normalized execution profile from a resolved role manifest for downstream agent execution. The execution profile MUST include the runtime-facing role data needed by the current execution contract, such as the effective role name, system prompt, tool allowlist, budget or turn limits, and permission mode, while preserving richer PRD-only fields in the stored role model.
+The system SHALL derive a normalized execution profile from a resolved role manifest for downstream agent execution. The execution profile MUST include the runtime-facing role data needed by the current Bridge contract, including the effective role identifier and name, system prompt, tool allowlist, bridge tool or plugin identifiers, injected knowledge context, output filters, budget or turn limits, and permission mode, while preserving richer PRD-only fields in the stored role model.
 
 #### Scenario: Execution profile is derived from a resolved role
 - **WHEN** the system resolves a valid role manifest for execution use
-- **THEN** it emits a normalized execution profile containing the runtime-facing prompt, tool, budget, and permission settings derived from that role
+- **THEN** it emits a normalized execution profile containing the runtime-facing prompt, tool allowlist, plugin identifiers, knowledge context, output filters, budget, turn, and permission settings derived from that role
 
 #### Scenario: Execution profile is built from the fully resolved role
 - **WHEN** a child role inherits settings from a parent role
-- **THEN** the derived execution profile reflects the post-merge effective values instead of only the child YAML fragment
+- **THEN** the derived execution profile reflects the post-merge effective values for prompt, tools, knowledge context, output filters, and guardrails instead of only the child YAML fragment
 
 #### Scenario: Non-runtime role metadata remains available without leaking into execution config
-- **WHEN** a role manifest contains collaboration, memory, or trigger metadata that the current runtime does not yet execute
+- **WHEN** a role manifest contains collaboration, memory, or trigger metadata that the current bridge runtime path does not yet execute
 - **THEN** the system preserves that metadata in the normalized role record
-- **THEN** the execution profile omits or ignores those unsupported fields rather than failing valid role loading
+- **THEN** the execution profile excludes those unsupported sections rather than silently dropping the stored data or sending raw YAML-shaped payloads to the Bridge
 
 ### Requirement: Agent spawn requests can bind a role reference that resolves in Go
 The Go orchestrator SHALL allow agent startup requests to reference an existing role by `roleId`, resolve that role through the unified YAML-backed role store, and forward the resulting normalized execution profile to the runtime bridge. The startup path MUST reject unknown role references before bridge execution begins, and persisted agent run records MUST retain the referenced `role_id` for later inspection.

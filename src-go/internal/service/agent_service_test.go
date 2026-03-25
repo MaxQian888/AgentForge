@@ -7,6 +7,7 @@ import (
 	"net/http/httptest"
 	"os"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -258,19 +259,19 @@ type mockAgentQueueStore struct {
 
 func (m *mockAgentQueueStore) QueueAgentAdmission(_ context.Context, input service.QueueAgentAdmissionInput) (*model.AgentPoolQueueEntry, error) {
 	entry := &model.AgentPoolQueueEntry{
-		EntryID:    uuid.NewString(),
-		ProjectID:  input.ProjectID.String(),
-		TaskID:     input.TaskID.String(),
-		MemberID:   input.MemberID.String(),
-		Status:     model.AgentPoolQueueStatusQueued,
-		Reason:     "agent pool is at capacity",
-		Runtime:    input.Runtime,
-		Provider:   input.Provider,
-		Model:      input.Model,
-		RoleID:     input.RoleID,
-		BudgetUSD:  input.BudgetUSD,
-		CreatedAt:  time.Now().UTC(),
-		UpdatedAt:  time.Now().UTC(),
+		EntryID:   uuid.NewString(),
+		ProjectID: input.ProjectID.String(),
+		TaskID:    input.TaskID.String(),
+		MemberID:  input.MemberID.String(),
+		Status:    model.AgentPoolQueueStatusQueued,
+		Reason:    "agent pool is at capacity",
+		Runtime:   input.Runtime,
+		Provider:  input.Provider,
+		Model:     input.Model,
+		RoleID:    input.RoleID,
+		BudgetUSD: input.BudgetUSD,
+		CreatedAt: time.Now().UTC(),
+		UpdatedAt: time.Now().UTC(),
 	}
 	m.queued = append(m.queued, entry)
 	return entry, nil
@@ -621,10 +622,20 @@ func TestAgentService_SpawnProjectsSelectedRoleIntoBridgeRequest(t *testing.T) {
 				Capabilities: model.RoleCapabilities{
 					AllowedTools: []string{"Read", "Edit", "Write"},
 					MaxTurns:     18,
+					ToolConfig: model.RoleToolConfig{
+						External: []string{"github-tool", "web-search"},
+					},
+				},
+				Knowledge: model.RoleKnowledge{
+					Documents: []string{"docs/PRD.md"},
+					Shared: []model.RoleKnowledgeSource{
+						{ID: "design-guidelines"},
+					},
 				},
 				Security: model.RoleSecurity{
 					MaxBudgetUsd:   3.5,
 					PermissionMode: "bypassPermissions",
+					OutputFilters:  []string{"no_credentials", "no_pii"},
 				},
 			},
 		},
@@ -660,6 +671,12 @@ func TestAgentService_SpawnProjectsSelectedRoleIntoBridgeRequest(t *testing.T) {
 	}
 	if len(bridge.lastExecute.AllowedTools) != 3 {
 		t.Fatalf("bridge allowed tools len = %d, want 3", len(bridge.lastExecute.AllowedTools))
+	}
+	assertBridgeRoleConfigStringSlice(t, bridge.lastExecute.RoleConfig, "Tools", []string{"github-tool", "web-search"})
+	assertBridgeRoleConfigStringSlice(t, bridge.lastExecute.RoleConfig, "OutputFilters", []string{"no_credentials", "no_pii"})
+	knowledgeContext := assertBridgeRoleConfigStringField(t, bridge.lastExecute.RoleConfig, "KnowledgeContext")
+	if !strings.Contains(knowledgeContext, "docs/PRD.md") {
+		t.Fatalf("KnowledgeContext = %q, want docs/PRD.md reference", knowledgeContext)
 	}
 }
 
@@ -743,6 +760,7 @@ func TestAgentService_PauseAndResumePreserveManagedRuntimeContext(t *testing.T) 
 	projectID := uuid.New()
 	runID := uuid.New()
 	repo := newMockAgentRunRepo()
+	teamID := uuid.New()
 	repo.runs[runID] = &model.AgentRun{
 		ID:       runID,
 		TaskID:   taskID,
@@ -751,6 +769,8 @@ func TestAgentService_PauseAndResumePreserveManagedRuntimeContext(t *testing.T) 
 		Status:   model.AgentRunStatusRunning,
 		Provider: "codex",
 		Model:    "gpt-5-codex",
+		TeamID:   &teamID,
+		TeamRole: model.TeamRoleCoder,
 	}
 	taskRepo := &mockAgentTaskRepo{task: &model.Task{
 		ID:             taskID,
@@ -796,6 +816,8 @@ func TestAgentService_PauseAndResumePreserveManagedRuntimeContext(t *testing.T) 
 	if bridge.resumeReq.Runtime != "codex" {
 		t.Fatalf("resume runtime = %s, want codex", bridge.resumeReq.Runtime)
 	}
+	assertBridgeExecuteStringField(t, bridge.resumeReq, "TeamID", teamID.String())
+	assertBridgeExecuteStringField(t, bridge.resumeReq, "TeamRole", model.TeamRoleCoder)
 	if status := repo.runs[runID].Status; status != model.AgentRunStatusRunning {
 		t.Fatalf("status after resume = %s, want %s", status, model.AgentRunStatusRunning)
 	}
@@ -838,6 +860,47 @@ func TestAgentService_ResumeUsesPersistedRuntimeIdentity(t *testing.T) {
 	if bridge.resumeReq.Runtime != "codex" || bridge.resumeReq.Provider != "openai" || bridge.resumeReq.Model != "gpt-5-codex" {
 		t.Fatalf("resume request selection = %#v", bridge.resumeReq)
 	}
+}
+
+func TestAgentService_SpawnForTeamIncludesTeamExecutionContext(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	teamID := uuid.New()
+	repo := newMockAgentRunRepo()
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Team-aware spawn",
+		Description: "Ensure bridge execute receives team context before startup",
+		BudgetUsd:   5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	bridge := &mockAgentBridge{}
+	worktrees := &mockWorktreeManager{
+		allocation: &worktree.Allocation{
+			ProjectSlug: "agentforge",
+			TaskID:      taskID.String(),
+			Branch:      "agent/" + taskID.String(),
+			Path:        "/tmp/worktree/" + taskID.String(),
+		},
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+
+	run, err := svc.SpawnForTeam(context.Background(), teamID, model.TeamRolePlanner, taskID, memberID, "codex", "openai", "gpt-5-codex", 5, "")
+	if err != nil {
+		t.Fatalf("SpawnForTeam() error = %v", err)
+	}
+
+	if run.TeamID == nil || *run.TeamID != teamID {
+		t.Fatalf("run.TeamID = %v, want %s", run.TeamID, teamID)
+	}
+	if run.TeamRole != model.TeamRolePlanner {
+		t.Fatalf("run.TeamRole = %q, want %q", run.TeamRole, model.TeamRolePlanner)
+	}
+	assertBridgeExecuteStringField(t, bridge.lastExecute, "TeamID", teamID.String())
+	assertBridgeExecuteStringField(t, bridge.lastExecute, "TeamRole", model.TeamRolePlanner)
 }
 
 func TestAgentService_ProcessBridgeEvent_UpdatesCostFromRuntimeEvent(t *testing.T) {
@@ -1183,21 +1246,50 @@ func TestAgentService_UpdateStatusPromotesQueuedAdmissionAfterTerminalRelease(t 
 	}
 	queueStore := &mockAgentQueueStore{
 		next: &model.AgentPoolQueueEntry{
-			EntryID:    uuid.NewString(),
-			ProjectID:  projectID.String(),
-			TaskID:     queuedTaskID.String(),
-			MemberID:   memberID.String(),
-			Status:     model.AgentPoolQueueStatusQueued,
-			Runtime:    "codex",
-			Provider:   "openai",
-			Model:      "gpt-5-codex",
-			BudgetUSD:  4,
-			CreatedAt:  time.Now().UTC(),
-			UpdatedAt:  time.Now().UTC(),
+			EntryID:   uuid.NewString(),
+			ProjectID: projectID.String(),
+			TaskID:    queuedTaskID.String(),
+			MemberID:  memberID.String(),
+			Status:    model.AgentPoolQueueStatusQueued,
+			Runtime:   "codex",
+			Provider:  "openai",
+			Model:     "gpt-5-codex",
+			RoleID:    "frontend-developer",
+			BudgetUSD: 4,
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	roleStore := &mockAgentRoleStore{
+		roles: map[string]*rolepkg.Manifest{
+			"frontend-developer": {
+				Metadata: model.RoleMetadata{
+					ID:   "frontend-developer",
+					Name: "Frontend Developer",
+				},
+				Identity: model.RoleIdentity{
+					Role:      "Senior Frontend Developer",
+					Goal:      "Build reliable UI",
+					Backstory: "A frontend specialist.",
+				},
+				SystemPrompt: "Keep UI consistent.",
+				Capabilities: model.RoleCapabilities{
+					AllowedTools: []string{"Read", "Edit"},
+					ToolConfig: model.RoleToolConfig{
+						External: []string{"github-tool"},
+					},
+					MaxTurns: 12,
+				},
+				Security: model.RoleSecurity{
+					PermissionMode: "default",
+					OutputFilters:  []string{"no_pii"},
+					MaxBudgetUsd:   4,
+				},
+			},
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, roleStore)
 	svc.SetPool(pool.NewPool(2))
 	svc.SetQueueStore(queueStore)
 
@@ -1208,8 +1300,52 @@ func TestAgentService_UpdateStatusPromotesQueuedAdmissionAfterTerminalRelease(t 
 	if bridge.lastExecute.TaskID != queuedTaskID.String() {
 		t.Fatalf("bridge execute task id = %q, want %q", bridge.lastExecute.TaskID, queuedTaskID.String())
 	}
+	if bridge.lastExecute.RoleConfig == nil || bridge.lastExecute.RoleConfig.RoleID != "frontend-developer" {
+		t.Fatalf("bridge execute role config = %#v, want frontend-developer", bridge.lastExecute.RoleConfig)
+	}
 	if len(queueStore.completed) == 0 {
 		t.Fatal("expected queued entry completion after promotion")
+	}
+}
+
+func assertBridgeRoleConfigStringSlice(t *testing.T, cfg *bridgeclient.RoleConfig, fieldName string, want []string) {
+	t.Helper()
+	if cfg == nil {
+		t.Fatal("expected non-nil role config")
+	}
+	rv := reflect.ValueOf(cfg).Elem().FieldByName(fieldName)
+	if !rv.IsValid() {
+		t.Fatalf("expected field %s on bridge role config", fieldName)
+	}
+	got := make([]string, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		got[i] = rv.Index(i).String()
+	}
+	if !reflect.DeepEqual(got, want) {
+		t.Fatalf("%s = %v, want %v", fieldName, got, want)
+	}
+}
+
+func assertBridgeRoleConfigStringField(t *testing.T, cfg *bridgeclient.RoleConfig, fieldName string) string {
+	t.Helper()
+	if cfg == nil {
+		t.Fatal("expected non-nil role config")
+	}
+	field := reflect.ValueOf(cfg).Elem().FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("expected field %s on bridge role config", fieldName)
+	}
+	return field.String()
+}
+
+func assertBridgeExecuteStringField(t *testing.T, req service.BridgeExecuteRequest, fieldName, want string) {
+	t.Helper()
+	field := reflect.ValueOf(req).FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("expected field %s on bridge execute request", fieldName)
+	}
+	if got := field.String(); got != want {
+		t.Fatalf("%s = %q, want %q", fieldName, got, want)
 	}
 }
 

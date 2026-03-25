@@ -33,7 +33,7 @@ export const ExecuteRequestSchema = z.object({
   permission_mode: z.string().default("default"),
   role_config: RoleConfigSchema.optional(),
   team_id: z.string().optional(),
-  team_role: z.string().optional(),
+  team_role: z.enum(["planner", "coder", "reviewer"]).optional(),
 });
 
 export const DecomposeTaskRequestSchema = z.object({
@@ -62,7 +62,7 @@ export const CancelRequestSchema = z.object({
   reason: z.string().optional(),
 });
 
-export const ResumeRequestSchema = z.object({
+export const ResumeRequestSchema = ExecuteRequestSchema.partial().extend({
   task_id: z.string().min(1),
 });
 
