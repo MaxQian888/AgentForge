@@ -74,6 +74,11 @@ type PluginListFilter struct {
 	TrustState     model.PluginTrustState
 }
 
+type PluginInstallRequest struct {
+	Path   string
+	Source *model.PluginSource
+}
+
 type pluginWriteStores struct {
 	repo             PluginRegistry
 	instanceStore    PluginInstanceStore
@@ -315,7 +320,13 @@ func (s *PluginService) DiscoverBuiltIns(ctx context.Context) ([]*model.PluginRe
 			return nil
 		}
 
-		record, regErr := s.registerPath(ctx, path, model.PluginSourceBuiltin)
+		record, regErr := s.Install(ctx, PluginInstallRequest{
+			Path: path,
+			Source: &model.PluginSource{
+				Type: model.PluginSourceBuiltin,
+				Path: path,
+			},
+		})
 		if regErr != nil {
 			return regErr
 		}
@@ -329,23 +340,26 @@ func (s *PluginService) DiscoverBuiltIns(ctx context.Context) ([]*model.PluginRe
 }
 
 func (s *PluginService) RegisterLocalPath(ctx context.Context, path string) (*model.PluginRecord, error) {
-	return s.registerPath(ctx, path, model.PluginSourceLocal)
+	return s.Install(ctx, PluginInstallRequest{
+		Path: path,
+		Source: &model.PluginSource{
+			Type: model.PluginSourceLocal,
+			Path: path,
+		},
+	})
 }
 
-func (s *PluginService) registerPath(ctx context.Context, path string, sourceType model.PluginSourceType) (*model.PluginRecord, error) {
-	resolvedPath := path
-	if info, statErr := os.Stat(path); statErr == nil && info.IsDir() {
-		resolvedPath = filepath.Join(path, "manifest.yaml")
+func (s *PluginService) Install(ctx context.Context, req PluginInstallRequest) (*model.PluginRecord, error) {
+	resolvedPath, err := resolveInstallManifestPath(req.Path)
+	if err != nil {
+		return nil, err
 	}
 
 	manifest, err := pluginparser.ParseFile(resolvedPath)
 	if err != nil {
 		return nil, err
 	}
-	manifest.Source = model.PluginSource{
-		Type: sourceType,
-		Path: resolvedPath,
-	}
+	manifest.Source = normalizePluginSource(manifest.Metadata.ID, manifest.Source, req.Source, resolvedPath)
 	if err := s.validateWorkflowManifest(manifest); err != nil {
 		return nil, err
 	}
@@ -369,8 +383,15 @@ func (s *PluginService) registerPath(ctx context.Context, path string, sourceTyp
 		applyRuntimeStatus(record, *status)
 	}
 
-	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventInstalled, model.PluginEventSourceControlPlane, "plugin installed", map[string]any{
-		"source_type": sourceType,
+	eventType := model.PluginEventInstalled
+	summary := "plugin installed"
+	if existing, getErr := s.repo.GetByID(ctx, record.Metadata.ID); getErr == nil && existing != nil {
+		eventType = model.PluginEventUpdated
+		summary = "plugin updated"
+	}
+
+	if err := s.persistRecordWithEvent(ctx, record, eventType, model.PluginEventSourceControlPlane, summary, map[string]any{
+		"source_type": manifest.Source.Type,
 		"source_path": resolvedPath,
 	}); err != nil {
 		return nil, err
@@ -404,9 +425,71 @@ func (s *PluginService) GetByID(ctx context.Context, pluginID string) (*model.Pl
 	return s.hydrateRecord(ctx, record), nil
 }
 
+func (s *PluginService) SearchCatalog(ctx context.Context, query string) ([]model.MarketplacePluginDTO, error) {
+	installed, err := s.repo.List(ctx, model.PluginFilter{})
+	if err != nil {
+		return nil, err
+	}
+	installedByID := make(map[string]*model.PluginRecord, len(installed))
+	for _, record := range installed {
+		installedByID[record.Metadata.ID] = record
+	}
+
+	catalogEntries := make([]model.MarketplacePluginDTO, 0)
+	needle := strings.ToLower(strings.TrimSpace(query))
+	err = filepath.WalkDir(s.builtInsDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || filepath.Base(path) != "manifest.yaml" {
+			return nil
+		}
+
+		manifest, parseErr := pluginparser.ParseFile(path)
+		if parseErr != nil {
+			return nil
+		}
+		manifest.Source = normalizePluginSource(manifest.Metadata.ID, manifest.Source, nil, path)
+		if needle != "" && !catalogMatchesQuery(*manifest, needle) {
+			return nil
+		}
+		catalogEntries = append(catalogEntries, marketplaceFromManifest(*manifest, installedByID[manifest.Metadata.ID]))
+		return nil
+	})
+	if err != nil {
+		return nil, fmt.Errorf("search plugin catalog: %w", err)
+	}
+
+	return catalogEntries, nil
+}
+
+func (s *PluginService) InstallCatalogEntry(ctx context.Context, entryID string) (*model.PluginRecord, error) {
+	manifestPath, manifest, err := s.findCatalogManifest(entryID)
+	if err != nil {
+		return nil, err
+	}
+	source := manifest.Source
+	if source.Type == "" {
+		source.Type = model.PluginSourceCatalog
+	}
+	if source.Entry == "" {
+		source.Entry = entryID
+	}
+	if source.Path == "" {
+		source.Path = manifestPath
+	}
+	return s.Install(ctx, PluginInstallRequest{
+		Path:   manifestPath,
+		Source: &source,
+	})
+}
+
 func (s *PluginService) Enable(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
 	record, err := s.repo.GetByID(ctx, pluginID)
 	if err != nil {
+		return nil, err
+	}
+	if err := validateExternalTrust(record); err != nil {
 		return nil, err
 	}
 	record.LifecycleState = model.PluginStateEnabled
@@ -429,6 +512,19 @@ func (s *PluginService) Disable(ctx context.Context, pluginID string) (*model.Pl
 	return s.hydrateRecord(ctx, record), nil
 }
 
+func (s *PluginService) Deactivate(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
+	record, err := s.repo.GetByID(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	record.LifecycleState = model.PluginStateEnabled
+	record.LastError = ""
+	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventDeactivated, model.PluginEventSourceOperator, "plugin deactivated", nil); err != nil {
+		return nil, err
+	}
+	return s.hydrateRecord(ctx, record), nil
+}
+
 func (s *PluginService) Activate(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
 	record, err := s.repo.GetByID(ctx, pluginID)
 	if err != nil {
@@ -436,6 +532,9 @@ func (s *PluginService) Activate(ctx context.Context, pluginID string) (*model.P
 	}
 	if record.LifecycleState == model.PluginStateDisabled {
 		return nil, fmt.Errorf("plugin %s is disabled", pluginID)
+	}
+	if err := validateExternalTrust(record); err != nil {
+		return nil, err
 	}
 	if err := s.validateActivationPermissions(record); err != nil {
 		record.LastError = err.Error()
@@ -754,6 +853,31 @@ func (s *PluginService) Invoke(ctx context.Context, pluginID, operation string, 
 	return result, nil
 }
 
+func (s *PluginService) Update(ctx context.Context, pluginID string, req PluginInstallRequest) (*model.PluginRecord, error) {
+	current, err := s.repo.GetByID(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+
+	updated, err := s.Install(ctx, req)
+	if err != nil {
+		return nil, err
+	}
+	if updated.Metadata.ID != pluginID {
+		return nil, fmt.Errorf("plugin identity mismatch during update: expected %s, got %s", pluginID, updated.Metadata.ID)
+	}
+
+	if err := s.appendEvent(ctx, updated, model.PluginEventUpdated, model.PluginEventSourceOperator, "plugin updated", map[string]any{
+		"previous_version": current.Metadata.Version,
+		"previous_digest":  current.Source.Digest,
+		"current_version":  updated.Metadata.Version,
+		"current_digest":   updated.Source.Digest,
+	}); err != nil {
+		return nil, err
+	}
+	return s.hydrateRecord(ctx, updated), nil
+}
+
 func (s *PluginService) Uninstall(ctx context.Context, id string) error {
 	rec, err := s.repo.GetByID(ctx, id)
 	if err != nil {
@@ -833,6 +957,40 @@ func (s *PluginService) ListMarketplace(ctx context.Context) ([]model.Marketplac
 		items = append(items, item)
 	}
 	return items, nil
+}
+
+func (s *PluginService) findCatalogManifest(entryID string) (string, *model.PluginManifest, error) {
+	var (
+		foundPath     string
+		foundManifest *model.PluginManifest
+	)
+
+	err := filepath.WalkDir(s.builtInsDir, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || filepath.Base(path) != "manifest.yaml" {
+			return nil
+		}
+
+		manifest, parseErr := pluginparser.ParseFile(path)
+		if parseErr != nil {
+			return nil
+		}
+		if manifest.Metadata.ID != entryID {
+			return nil
+		}
+		foundPath = path
+		foundManifest = manifest
+		return fs.SkipAll
+	})
+	if err != nil && !errors.Is(err, fs.SkipAll) {
+		return "", nil, fmt.Errorf("search plugin catalog: %w", err)
+	}
+	if foundManifest == nil {
+		return "", nil, repository.ErrNotFound
+	}
+	return foundPath, foundManifest, nil
 }
 
 func (s *PluginService) ListEvents(ctx context.Context, pluginID string, limit int) ([]*model.PluginEventRecord, error) {
@@ -1054,6 +1212,144 @@ func resolveSourcePath(manifest model.PluginManifest) string {
 		return manifest.Spec.Binary
 	default:
 		return manifest.Source.Path
+	}
+}
+
+func resolveInstallManifestPath(pathValue string) (string, error) {
+	if strings.TrimSpace(pathValue) == "" {
+		return "", fmt.Errorf("plugin manifest path is required")
+	}
+	resolvedPath := pathValue
+	if info, statErr := os.Stat(pathValue); statErr == nil && info.IsDir() {
+		resolvedPath = filepath.Join(pathValue, "manifest.yaml")
+	}
+	return resolvedPath, nil
+}
+
+func normalizePluginSource(pluginID string, existing model.PluginSource, override *model.PluginSource, manifestPath string) model.PluginSource {
+	source := existing
+	if override != nil {
+		if override.Type != "" {
+			source.Type = override.Type
+		}
+		if override.Path != "" {
+			source.Path = override.Path
+		}
+		if override.Repository != "" {
+			source.Repository = override.Repository
+		}
+		if override.Ref != "" {
+			source.Ref = override.Ref
+		}
+		if override.Package != "" {
+			source.Package = override.Package
+		}
+		if override.Version != "" {
+			source.Version = override.Version
+		}
+		if override.Registry != "" {
+			source.Registry = override.Registry
+		}
+		if override.Catalog != "" {
+			source.Catalog = override.Catalog
+		}
+		if override.Entry != "" {
+			source.Entry = override.Entry
+		}
+		if override.Digest != "" {
+			source.Digest = override.Digest
+		}
+		if override.Signature != "" {
+			source.Signature = override.Signature
+		}
+		if override.Trust != nil {
+			trust := *override.Trust
+			source.Trust = &trust
+		}
+		if override.Release != nil {
+			release := *override.Release
+			source.Release = &release
+		}
+	}
+	if source.Path == "" {
+		source.Path = manifestPath
+	}
+	if source.Type == "" {
+		source.Type = model.PluginSourceLocal
+	}
+	if source.Type == model.PluginSourceCatalog && source.Entry == "" {
+		source.Entry = pluginID
+	}
+	if isExternalSource(source.Type) {
+		source.Trust = normalizeExternalTrust(source)
+	}
+	return source
+}
+
+func normalizeExternalTrust(source model.PluginSource) *model.PluginTrustMetadata {
+	trust := &model.PluginTrustMetadata{}
+	if source.Trust != nil {
+		copied := *source.Trust
+		trust = &copied
+	}
+
+	if trust.ApprovalState == model.PluginApprovalRejected {
+		trust.Status = model.PluginTrustUntrusted
+		if trust.Reason == "" {
+			trust.Reason = "plugin approval was rejected"
+		}
+		return trust
+	}
+
+	if source.Digest != "" && (source.Signature != "" || trust.ApprovalState == model.PluginApprovalApproved) {
+		now := time.Now().UTC()
+		trust.Status = model.PluginTrustVerified
+		if trust.VerifiedAt == nil {
+			trust.VerifiedAt = &now
+		}
+		if trust.ApprovalState == "" {
+			if source.Signature != "" {
+				trust.ApprovalState = model.PluginApprovalNotRequired
+			} else {
+				trust.ApprovalState = model.PluginApprovalApproved
+			}
+		}
+		if trust.Source == "" {
+			if source.Signature != "" {
+				trust.Source = "signature"
+			} else {
+				trust.Source = "operator-approval"
+			}
+		}
+		return trust
+	}
+
+	trust.Status = model.PluginTrustUntrusted
+	if trust.ApprovalState == "" {
+		trust.ApprovalState = model.PluginApprovalPending
+	}
+	if trust.Reason == "" {
+		trust.Reason = "external plugins require digest plus signature or approved trust metadata before enablement"
+	}
+	return trust
+}
+
+func validateExternalTrust(record *model.PluginRecord) error {
+	if record == nil || !isExternalSource(record.Source.Type) {
+		return nil
+	}
+	if record.Source.Trust != nil && record.Source.Trust.Status == model.PluginTrustVerified {
+		return nil
+	}
+	return fmt.Errorf("plugin %s is untrusted and cannot be enabled until digest verification and signature or operator approval succeeds", record.Metadata.ID)
+}
+
+func isExternalSource(sourceType model.PluginSourceType) bool {
+	switch sourceType {
+	case model.PluginSourceGit, model.PluginSourceNPM, model.PluginSourceCatalog:
+		return true
+	default:
+		return false
 	}
 }
 
@@ -1322,6 +1618,27 @@ func cloneTimePointer(value *time.Time) *time.Time {
 	}
 	cloned := *value
 	return &cloned
+}
+
+func catalogMatchesQuery(manifest model.PluginManifest, needle string) bool {
+	if needle == "" {
+		return true
+	}
+	if strings.Contains(strings.ToLower(manifest.Metadata.ID), needle) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(manifest.Metadata.Name), needle) {
+		return true
+	}
+	if strings.Contains(strings.ToLower(manifest.Metadata.Description), needle) {
+		return true
+	}
+	for _, tag := range manifest.Metadata.Tags {
+		if strings.Contains(strings.ToLower(tag), needle) {
+			return true
+		}
+	}
+	return false
 }
 
 func marketplaceFromManifest(manifest model.PluginManifest, record *model.PluginRecord) model.MarketplacePluginDTO {

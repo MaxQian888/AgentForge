@@ -2,10 +2,11 @@
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 
-const { spawn, spawnSync } = require("node:child_process");
+const { spawn } = require("node:child_process");
 const { join } = require("node:path");
 const { setTimeout: delay } = require("node:timers/promises");
 const { getRepoRoot } = require("./plugin-dev-targets.js");
+const { isCommandAvailable } = require("./dev-workflow.js");
 
 function createServiceDefinitions({ repoRoot = getRepoRoot() } = {}) {
   return [
@@ -33,15 +34,6 @@ function createServiceDefinitions({ repoRoot = getRepoRoot() } = {}) {
       healthUrl: "http://127.0.0.1:7778/health",
     },
   ];
-}
-
-function isCommandAvailable(command) {
-  const result = spawnSync(command, ["--version"], {
-    stdio: "ignore",
-    shell: process.platform === "win32",
-  });
-
-  return result.status === 0;
 }
 
 function collectMissingPrerequisites(checks) {
@@ -179,7 +171,6 @@ module.exports = {
   collectMissingPrerequisites,
   createServiceDefinitions,
   ensureService,
-  isCommandAvailable,
   main,
   probeHealth,
   runPluginDevStack,

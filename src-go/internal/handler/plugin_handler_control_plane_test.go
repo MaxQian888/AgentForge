@@ -14,6 +14,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/handler"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
+	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
@@ -511,4 +512,174 @@ spec:
 	if promptRec.Code != http.StatusOK {
 		t.Fatalf("expected 200, got %d", promptRec.Code)
 	}
+}
+
+func TestPluginHandlerControlPlane_CatalogSearchAndInstallRoutes(t *testing.T) {
+	pluginsDir := t.TempDir()
+	writeControlPlaneManifest(t, pluginsDir, "catalog/review-typescript/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ReviewPlugin
+metadata:
+  id: review-typescript
+  name: TypeScript Review
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["review.js"]
+  review:
+    entrypoint: review:run
+    triggers:
+      events: ["pull_request.updated"]
+    output:
+      format: findings/v1
+source:
+  type: catalog
+  catalog: internal
+  entry: review-typescript
+  digest: sha256:review-typescript
+  signature: sigstore-bundle
+  trust:
+    status: verified
+    approvalState: approved
+`)
+
+	h := newControlPlanePluginHandler(pluginsDir, nil)
+	e := echo.New()
+
+	searchReq := httptest.NewRequest(http.MethodGet, "/plugins/catalog?q=typescript", nil)
+	searchRec := httptest.NewRecorder()
+	if err := h.SearchCatalog(e.NewContext(searchReq, searchRec)); err != nil {
+		t.Fatalf("search catalog: %v", err)
+	}
+	if searchRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", searchRec.Code)
+	}
+
+	installBody, _ := json.Marshal(map[string]string{"entry_id": "review-typescript"})
+	installReq := httptest.NewRequest(http.MethodPost, "/plugins/catalog/install", bytes.NewReader(installBody))
+	installReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	installRec := httptest.NewRecorder()
+	if err := h.InstallCatalogEntry(e.NewContext(installReq, installRec)); err != nil {
+		t.Fatalf("install catalog entry: %v", err)
+	}
+	if installRec.Code != http.StatusCreated {
+		t.Fatalf("expected 201, got %d", installRec.Code)
+	}
+}
+
+func TestPluginHandlerControlPlane_DeactivateAndUpdateRoutes(t *testing.T) {
+	pluginsDir := t.TempDir()
+	manifestPath := writeControlPlaneManifest(t, pluginsDir, "local/release-train-v1.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: release-train
+  name: Release Train
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/release-train.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: coder
+    steps:
+      - id: implement
+        role: coder
+        action: agent
+`)
+	updatedManifestPath := writeControlPlaneManifest(t, pluginsDir, "local/release-train-v2.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: release-train
+  name: Release Train
+  version: 1.1.0
+spec:
+  runtime: wasm
+  module: ./dist/release-train.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: coder
+    steps:
+      - id: implement
+        role: coder
+        action: agent
+`)
+
+	roleStore := &controlPlaneHandlerRoleStore{
+		roles: map[string]struct{}{"coder": {}},
+	}
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), controlPlaneRuntimeClient{}, controlPlaneGoRuntime{}, pluginsDir).
+		WithRoleStore(roleStore)
+	h := handler.NewPluginHandler(svc)
+	e := echo.New()
+
+	installBody, _ := json.Marshal(map[string]string{"path": manifestPath})
+	installReq := httptest.NewRequest(http.MethodPost, "/plugins/install", bytes.NewReader(installBody))
+	installReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	installRec := httptest.NewRecorder()
+	if err := h.InstallLocal(e.NewContext(installReq, installRec)); err != nil {
+		t.Fatalf("install workflow: %v", err)
+	}
+
+	activateReq := httptest.NewRequest(http.MethodPost, "/plugins/release-train/activate", nil)
+	activateRec := httptest.NewRecorder()
+	activateCtx := e.NewContext(activateReq, activateRec)
+	activateCtx.SetParamNames("id")
+	activateCtx.SetParamValues("release-train")
+	if err := h.Activate(activateCtx); err != nil {
+		t.Fatalf("activate workflow: %v", err)
+	}
+
+	deactivateReq := httptest.NewRequest(http.MethodPost, "/plugins/release-train/deactivate", nil)
+	deactivateRec := httptest.NewRecorder()
+	deactivateCtx := e.NewContext(deactivateReq, deactivateRec)
+	deactivateCtx.SetParamNames("id")
+	deactivateCtx.SetParamValues("release-train")
+	if err := h.Deactivate(deactivateCtx); err != nil {
+		t.Fatalf("deactivate workflow: %v", err)
+	}
+	if deactivateRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", deactivateRec.Code)
+	}
+
+	updateBody, _ := json.Marshal(map[string]any{
+		"path": updatedManifestPath,
+		"source": map[string]any{
+			"type":       "git",
+			"repository": "https://github.com/example/release-train.git",
+			"ref":        "refs/tags/v1.1.0",
+			"digest":     "sha256:release-train-v2",
+			"signature":  "sigstore-bundle",
+		},
+	})
+	updateReq := httptest.NewRequest(http.MethodPost, "/plugins/release-train/update", bytes.NewReader(updateBody))
+	updateReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	updateRec := httptest.NewRecorder()
+	updateCtx := e.NewContext(updateReq, updateRec)
+	updateCtx.SetParamNames("id")
+	updateCtx.SetParamValues("release-train")
+	if err := h.Update(updateCtx); err != nil {
+		t.Fatalf("update workflow: %v", err)
+	}
+	if updateRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", updateRec.Code)
+	}
+}
+
+type controlPlaneHandlerRoleStore struct {
+	roles map[string]struct{}
+}
+
+func (s *controlPlaneHandlerRoleStore) Get(id string) (*rolepkg.Manifest, error) {
+	if _, ok := s.roles[id]; !ok {
+		return nil, os.ErrNotExist
+	}
+	return &rolepkg.Manifest{Metadata: model.RoleMetadata{ID: id, Name: id}}, nil
 }

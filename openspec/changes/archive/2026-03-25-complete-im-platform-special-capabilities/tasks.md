@@ -28,5 +28,5 @@
 
 - [x] 5.1 Add focused unit and contract tests for capability-matrix resolution, reply-target restoration, and fallback selection across Slack, Discord, Telegram, Feishu, and DingTalk.
 - [x] 5.2 Add platform-focused adapter tests that cover native action callbacks and native update behavior for each current live provider instead of text-only happy paths.
-- [ ] 5.3 Update `src-im-bridge/README.md`, `src-im-bridge/docs/platform-runbook.md`, and related IM design notes with the new platform-feature matrix, downgrade rules, smoke-test steps, and explicit future-provider gaps.
-- [ ] 5.4 Run the relevant `src-im-bridge` and backend IM test suites plus scoped smoke validation, then capture any remaining provider-specific manual verification steps required before rollout.
+- [x] 5.3 Update `src-im-bridge/README.md`, `src-im-bridge/docs/platform-runbook.md`, and related IM design notes with the new platform-feature matrix, downgrade rules, smoke-test steps, and explicit future-provider gaps.
+- [x] 5.4 Run the relevant `src-im-bridge` and backend IM test suites plus scoped smoke validation, then capture any remaining provider-specific manual verification steps required before rollout.

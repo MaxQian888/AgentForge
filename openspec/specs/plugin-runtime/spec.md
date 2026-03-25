@@ -19,30 +19,38 @@ The system SHALL accept plugins through a unified manifest contract that include
 - **THEN** the platform rejects the plugin before activation and returns a validation error describing the incompatible combination
 
 ### Requirement: Runtime ownership is routed by plugin kind
-The system SHALL route executable plugins to the correct host runtime based on plugin kind. `ToolPlugin` instances MUST be activated through the TypeScript bridge runtime, and `IntegrationPlugin` instances that declare `runtime: wasm` MUST be activated through the Go orchestrator runtime. The registry MUST NOT mark a Go-hosted WASM plugin as `active` until the Go runtime has instantiated the referenced module and completed the SDK initialization handshake.
+The system SHALL route executable plugins to the correct host runtime based on plugin kind and declared runtime. `ToolPlugin` and `ReviewPlugin` instances that declare `runtime: mcp` MUST be activated through the TypeScript bridge runtime. `IntegrationPlugin` instances and any Go-hosted `WorkflowPlugin` instances that declare `runtime: wasm` MUST be activated through the Go orchestrator runtime. `RolePlugin` instances MUST remain declarative registry or configuration assets instead of executable runtimes. The registry MUST NOT mark any executable plugin as `active` until its owning runtime has instantiated the referenced module or transport and completed the required initialization handshake.
 
 #### Scenario: Tool plugin activates through the TS bridge
 - **WHEN** an enabled tool plugin is activated for first use
 - **THEN** the platform starts or connects the plugin through the TS bridge runtime instead of the Go orchestrator runtime
 
-#### Scenario: Integration WASM plugin activates through the Go runtime
-- **WHEN** an enabled integration plugin that declares `runtime: wasm` is activated
-- **THEN** the platform instantiates the referenced module through the Go WASM runtime instead of the TS bridge runtime
+#### Scenario: Review plugin activates through the TS bridge
+- **WHEN** an enabled review plugin that declares `runtime: mcp` is activated for a matching review run
+- **THEN** the platform starts or connects the plugin through the TS bridge runtime and does not route it to the Go orchestrator runtime
+
+#### Scenario: Workflow WASM plugin activates through the Go runtime
+- **WHEN** an enabled workflow plugin that declares `runtime: wasm` is activated for execution
+- **THEN** the platform instantiates the referenced module through the Go runtime instead of the TS bridge runtime
+
+#### Scenario: Role plugin never enters an executable runtime
+- **WHEN** the platform loads a role plugin definition
+- **THEN** it projects the role into registry and execution-profile records without attempting executable plugin activation
 
 ### Requirement: Plugin lifecycle state is tracked consistently
-The system SHALL expose a unified lifecycle state model for executable plugins with the states `installed`, `enabled`, `activating`, `active`, `degraded`, and `disabled`. The Go control plane MUST transition a plugin to `activating` when runtime startup begins, to `active` only after the owning runtime handshake succeeds and the current runtime instance snapshot is updated, and to `degraded` when initialization, invocation, permission validation, or health checks fail. The system MUST keep registry state and current instance snapshots consistent after activation succeeds, activation fails, restart succeeds, restart fails, runtime reconciliation, disable, and uninstall operations.
+The system SHALL expose a unified lifecycle state model for executable plugins with the states `installed`, `enabled`, `activating`, `active`, `degraded`, and `disabled`. The platform MUST drive those states through the lifecycle operations install, enable, activate, deactivate, disable, uninstall, and update. Deactivation from idle timeout or operator action MUST return a plugin to `enabled` without losing installed metadata. Update MUST preserve plugin identity while replacing version or source metadata and re-entering the enable or activate flow. Runtime failures during activation, execution, health checks, deactivation, or update MUST transition the plugin to `degraded` or keep it `disabled` with the last known error preserved.
 
-#### Scenario: Successful activation moves a plugin to active
-- **WHEN** an enabled plugin starts successfully and completes its host runtime handshake
-- **THEN** the platform records the plugin state as `active` and updates the current runtime instance snapshot to the active state
+#### Scenario: Idle plugin deactivates back to enabled
+- **WHEN** an active plugin is deactivated because of idle timeout or an operator deactivation request
+- **THEN** the platform stops the owning runtime instance and records the plugin lifecycle state as `enabled`
 
-#### Scenario: Failed module initialization degrades a WASM plugin
-- **WHEN** the Go host cannot instantiate a WASM plugin or the SDK initialization handshake returns an error
-- **THEN** the platform records the plugin state as `degraded`, preserves the last known error for operators, and updates the current runtime instance snapshot accordingly
+#### Scenario: Plugin update replaces the artifact and re-enters activation flow
+- **WHEN** an installed plugin is updated to a newer validated artifact
+- **THEN** the platform preserves the plugin identity, replaces the stored version or source metadata, and drives the plugin back through enable or activate according to the update policy
 
-#### Scenario: Disable clears executable lifecycle ownership
-- **WHEN** an operator disables an executable plugin
-- **THEN** the platform records the plugin state as `disabled` and marks the current runtime instance snapshot as no longer active
+#### Scenario: Failed activation degrades the plugin
+- **WHEN** an executable plugin fails activation, runtime initialization, or post-update health checks
+- **THEN** the platform records the plugin state as `degraded` and preserves the reported runtime error for operators
 
 ### Requirement: Runtime health details are published to the registry
 The system SHALL publish runtime health details for executable plugins, including last health timestamp, restart count, and last error summary, so that the registry can present an authoritative operational view. For TS-hosted `ToolPlugin` instances, the published operational details MUST also include the MCP interaction snapshot metadata needed for operators to understand transport mode, discovery freshness, capability counts, and the latest interaction outcome summary. For Go-hosted WASM plugins, the reported operational details MUST come from the active WASM runtime instance rather than optimistic state transitions, and MUST identify the runtime artifact or instance being monitored when such data is available.

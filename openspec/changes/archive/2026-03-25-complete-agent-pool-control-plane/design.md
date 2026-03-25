@@ -127,6 +127,12 @@ WebSocket 事件也需要新增 queue 相关事件，如 `agent.pool.updated`、
 - 可以临时关闭 queued admission，只保留 immediate start + blocked 模式，但仍保留新的 summary API 和 queue persistence 表结构。
 - 如果 Bridge warm-slot 实现出现不稳定，可先降级为 cold-start-only，同时保持控制面和 queue 语义不变。
 
+## Operator Notes
+
+- `POST /api/v1/agents/spawn` 在 dispatcher 路径下不再保证只返回已启动的 run；当池容量不足时会返回 `202 Accepted` 和 `dispatch.status=queued`。
+- `/api/v1/agents/pool` 现在是权威的 operator summary，包含 queued roster、warm count 和 degraded 标记；前端不应再只从 agent roster 推导这些数字。
+- Bridge 的 warm slot 目前是宿主侧摘要和 bookkeeping，不代表 Go 侧持有可直接操作的 runtime 对象；Go 只消费其 summary 和启动结果。
+
 ## Open Questions
 
 - queue entry 的事实源是独立表还是现有 task/agent runtime 表的扩展字段更合适？当前更偏向独立表，但实现前需要结合现有 repository 风格再确认。

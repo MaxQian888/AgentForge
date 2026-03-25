@@ -23,6 +23,7 @@ function AgentView() {
     agentId ? s.agentOutputs.get(agentId) ?? [] : []
   );
   const fetchAgent = useAgentStore((s) => s.fetchAgent);
+  const pool = useAgentStore((s) => s.pool);
   const pauseAgent = useAgentStore((s) => s.pauseAgent);
   const resumeAgent = useAgentStore((s) => s.resumeAgent);
   const killAgent = useAgentStore((s) => s.killAgent);
@@ -144,6 +145,33 @@ function AgentView() {
             </div>
           </CardContent>
         </Card>
+        {pool ? (
+          <Card className="sm:col-span-3">
+            <CardHeader className="pb-2">
+              <CardTitle className="text-sm font-medium text-muted-foreground">
+                Pool Snapshot
+              </CardTitle>
+            </CardHeader>
+            <CardContent className="grid gap-4 text-sm sm:grid-cols-4">
+              <div>
+                <p className="text-muted-foreground">Active</p>
+                <p className="text-xl font-semibold">{pool.active}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Available</p>
+                <p className="text-xl font-semibold">{pool.available}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Queued</p>
+                <p className="text-xl font-semibold">{pool.queued ?? 0}</p>
+              </div>
+              <div>
+                <p className="text-muted-foreground">Warm</p>
+                <p className="text-xl font-semibold">{pool.warm ?? 0}</p>
+              </div>
+            </CardContent>
+          </Card>
+        ) : null}
       </div>
 
       <Separator />

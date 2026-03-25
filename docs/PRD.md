@@ -3712,6 +3712,8 @@ overrides:
     remove: ["backend-development"]
 ```
 
+> 当前仓库实现说明：Go 侧现在不仅负责 Role YAML 解析和 execution profile 投影，也提供了 `POST /api/v1/roles/preview` 与 `POST /api/v1/roles/sandbox` 两个非持久化 authoring helper。它们用于在保存前查看 effective manifest、execution profile、runtime readiness，以及一次 bounded prompt probe，不会创建 agent run 或改写 canonical YAML。
+
 **JSON Schema（用于 API 验证）**：
 
 ```json
@@ -4690,6 +4692,13 @@ npx @agentforge/create-plugin
   ├── package.json
   ├── tsconfig.json
   └── README.md
+
+#### 4.14.3 当前仓库真相（2026-03-25）
+
+- 当前 repo 已经提供 repo-local `pnpm create-plugin -- --type <tool|review|workflow|integration> --name <name>`，对应实现位于 `scripts/create-plugin.js`，不是纯文档占位。
+- TypeScript 插件 SDK 当前位于 `src-bridge/src/plugin-sdk/`，覆盖 Tool/Review manifest helper、MCP bootstrap、normalized review finding/result helper、以及 local harness。
+- Go SDK 与构建辅助当前位于 `src-go/plugin-sdk-go/` 和根级 `plugin:build` / `plugin:debug` / `plugin:verify` 命令；Workflow starter 与 Integration starter 复用同一条 Go-hosted WASM authoring contract。
+- Go 控制面现在已经提供 catalog search/install、external source trust gate、update、deactivate 等 surface；公开 marketplace UI、远程拉取器和更强的签名链路仍属于后续阶段。
 
 ✓ 依赖安装完成
 ✓ 运行 `npm run dev` 开始开发

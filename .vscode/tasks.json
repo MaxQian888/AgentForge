@@ -111,6 +111,24 @@
         "showReuseMessage": false,
         "clear": false
       }
+    },
+    {
+      "label": "fullstack:dev",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["dev:all"]
+    },
+    {
+      "label": "fullstack:status",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["dev:all:status"]
+    },
+    {
+      "label": "fullstack:stop",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["dev:all:stop"]
     }
   ]
 }

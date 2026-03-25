@@ -107,6 +107,35 @@ Supporting repository docs:
 
 ## Getting Started
 
+### Full-stack Local Workflow
+
+If you want the repo-truthful local web development stack in one command, use:
+
+```bash
+pnpm dev:all
+```
+
+Helpful companion commands:
+
+- `pnpm dev:all:status`
+- `pnpm dev:all:logs`
+- `pnpm dev:all:stop`
+
+Current `dev:all` scope:
+
+- Starts or reuses local PostgreSQL + Redis through `docker compose` when they are not already reachable on `5432` / `6379`
+- Starts or reuses the Go Orchestrator on `http://127.0.0.1:7777/health`
+- Starts or reuses the TS Bridge on `http://127.0.0.1:7778/health`
+- Starts or reuses the Next.js frontend on `http://127.0.0.1:3000`
+- Persists repo-local runtime metadata in `.codex/dev-all-state.json`
+- Writes managed service logs under `.codex/runtime-logs/`
+
+Notes:
+
+- `dev:all` is intentionally the local web-mode workflow. It does not replace `pnpm tauri:dev`.
+- If a required port is occupied by a non-AgentForge listener, `dev:all` reports a conflict instead of starting a duplicate service.
+- This checkout currently does not include `.env.local.example` or `src-go/.env.example`; the workflow uses code defaults plus environment overrides instead of blocking on missing example files.
+
 ### 1. Frontend Dashboard
 
 ```bash
@@ -124,12 +153,15 @@ Useful root commands:
 - `pnpm lint`
 - `pnpm test`
 - `pnpm test:coverage`
+- `pnpm create-plugin -- --type tool --name echo-tool`
 - `pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
 - `pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health`
 - `pnpm plugin:dev`
 - `pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
 
 ### 2. Go Backend
+
+If you want the full local stack, prefer `pnpm dev:all`. The manual steps below remain useful when you are only debugging the Go service.
 
 From the repository root, start infrastructure if needed:
 
@@ -174,6 +206,8 @@ REDIS_URL=redis://localhost:6379
 Security note: PostgreSQL/Redis can still be absent at process startup for local development, but auth paths that depend on token revocation state do not silently degrade. If Redis or the token cache is unavailable, refresh, logout revocation, and blacklist-backed protected-route checks now fail closed instead of reporting success.
 
 ### 3. TypeScript Agent Bridge
+
+For normal full-stack local development, `pnpm dev:all` will start or reuse the bridge for you. The commands below remain the direct bridge-only workflow.
 
 ```bash
 cd src-bridge
@@ -245,7 +279,21 @@ pnpm build:bridge
 
 ### 3.5 Plugin Authoring Workflow
 
-For the maintained Go WASM sample plugin, the repo now exposes a supported root-level loop:
+For the maintained plugin authoring flow, the repo now exposes both scaffolded starters and the Go WASM sample loop:
+
+```bash
+pnpm create-plugin -- --type tool --name echo-tool
+pnpm create-plugin -- --type review --name typescript-review
+pnpm create-plugin -- --type workflow --name release-train
+```
+
+The generated starters are repo-local templates:
+
+- Tool and review scaffolds use the TypeScript plugin SDK in `src-bridge/src/plugin-sdk/`
+- Workflow and integration scaffolds generate a Go entrypoint under `src-go/cmd/<name>/` plus a manifest-backed plugin directory
+- Each scaffold includes starter tests or verification hooks so template drift is caught by repository tests
+
+For the maintained Go WASM sample plugin, the repo also keeps a supported root-level loop:
 
 ```bash
 pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
@@ -255,10 +303,12 @@ pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.ya
 
 Notes:
 
+- `create-plugin` is the current repo-local scaffolding entrypoint. It supports `tool`, `review`, `workflow`, and `integration` starters and writes files into the repository's real plugin directories instead of a detached demo layout.
 - `plugin:build` resolves the maintained sample artifact path from the manifest and still supports `--source` / `--output` overrides when you are iterating on a different Go-hosted plugin target.
 - `plugin:debug` replays the real `AGENTFORGE_AUTORUN`, `AGENTFORGE_OPERATION`, `AGENTFORGE_CONFIG`, `AGENTFORGE_CAPABILITIES`, and `AGENTFORGE_PAYLOAD` contract through the Go WASM runtime instead of inventing a separate dev-only protocol.
 - `plugin:verify` currently runs the maintained sample smoke path only: `build -> debug health`. It is intentionally scoped and does not replace broader Go or bridge test suites.
 - `plugin:dev` is the minimal local plugin stack command. It only concerns the Go orchestrator and TS bridge, reuses them when already healthy, and reports readiness through `http://127.0.0.1:7777/health` and `http://127.0.0.1:7778/health`.
+- The Go control plane now separates installable catalog entries from installed plugin records via `GET /api/v1/plugins/catalog` and `POST /api/v1/plugins/catalog/install`, while external `git`, `npm`, and `catalog` sources stay blocked from enablement until digest plus signature or explicit approval metadata mark them trusted.
 
 ### 4. IM Bridge Workspace
 
@@ -309,8 +359,13 @@ Current limitations:
 | `pnpm lint` | Run ESLint |
 | `pnpm test` | Run Jest |
 | `pnpm test:coverage` | Run Jest with coverage |
+| `pnpm create-plugin` | Scaffold a repo-local plugin starter for tool, review, workflow, or integration development |
 | `pnpm build:backend` | Cross-compile Go sidecar binaries for Tauri |
 | `pnpm build:backend:dev` | Build the Go sidecar for the current platform |
+| `pnpm dev:all` | Start or reuse the full local web development stack: compose infra + Go + TS bridge + frontend |
+| `pnpm dev:all:status` | Report source, health, ports, and known log paths for the local dev stack |
+| `pnpm dev:all:logs` | Show the repo-local log files tracked for the local dev stack |
+| `pnpm dev:all:stop` | Stop only the services managed by `dev:all` and preserve reused or external listeners |
 | `pnpm build:plugin:wasm` | Build the Go WASM sample plugin artifact |
 | `pnpm plugin:build` | Build a maintained Go-hosted plugin target from a manifest |
 | `pnpm plugin:debug` | Run a local Go WASM plugin debug invocation through the real runtime envelope |
@@ -331,7 +386,7 @@ Current limitations:
 
 ## Working Notes
 
-- Secrets should stay in local env files such as `.env.local` or service-specific `.env.example` copies
+- Secrets should stay in local env files such as `.env.local` or `src-go/.env`; do not rely on example env files being present in this checkout
 - `src-tauri/` should keep capability scope minimal
 - The repository includes both implementation work and design-stage artifacts, so do not assume every documented module is fully production-ready yet
 - When in doubt about project intent, prefer the PRD and architecture docs over the legacy starter phrasing still visible in some package/module names

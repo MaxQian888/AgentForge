@@ -114,6 +114,25 @@ type DecomposeRequest struct {
 	Model       string `json:"model,omitempty"`
 }
 
+type GenerateRequest struct {
+	Prompt       string  `json:"prompt"`
+	SystemPrompt string  `json:"system_prompt,omitempty"`
+	Provider     string  `json:"provider,omitempty"`
+	Model        string  `json:"model,omitempty"`
+	MaxTokens    int     `json:"max_tokens,omitempty"`
+	Temperature  float64 `json:"temperature,omitempty"`
+}
+
+type GenerateUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+type GenerateResponse struct {
+	Text  string        `json:"text"`
+	Usage GenerateUsage `json:"usage"`
+}
+
 type DecomposeSubtask struct {
 	Title         string `json:"title"`
 	Description   string `json:"description"`
@@ -419,6 +438,36 @@ func (c *Client) DecomposeTask(ctx context.Context, req DecomposeRequest) (*Deco
 	var result DecomposeResponse
 	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
 		return nil, fmt.Errorf("decode decompose response: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *Client) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
+	body, err := json.Marshal(req)
+	if err != nil {
+		return nil, fmt.Errorf("marshal generate request: %w", err)
+	}
+
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/generate", bytes.NewReader(body))
+	if err != nil {
+		return nil, fmt.Errorf("create request: %w", err)
+	}
+	httpReq.Header.Set("Content-Type", "application/json")
+
+	resp, err := c.httpClient.Do(httpReq)
+	if err != nil {
+		return nil, fmt.Errorf("bridge generate: %w", err)
+	}
+	defer resp.Body.Close()
+
+	if resp.StatusCode != http.StatusOK {
+		respBody, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("bridge generate returned %d: %s", resp.StatusCode, string(respBody))
+	}
+
+	var result GenerateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode generate response: %w", err)
 	}
 	return &result, nil
 }

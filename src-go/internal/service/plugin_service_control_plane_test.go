@@ -8,6 +8,7 @@ import (
 
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
+	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
@@ -564,4 +565,228 @@ spec:
 	if len(events) < 2 || events[1].EventType != model.PluginEventMCPInteraction {
 		t.Fatalf("expected MCP interaction audit event before runtime sync, got %+v", events)
 	}
+}
+
+func TestPluginServiceControlPlane_InstallExternalSourceBlocksEnableUntilTrusted(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	manifestPath := writeControlPlaneServiceManifest(t, pluginsDir, "external/review-typescript.yaml", `
+apiVersion: agentforge/v1
+kind: ReviewPlugin
+metadata:
+  id: review-typescript
+  name: TypeScript Review
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["review.js"]
+  review:
+    entrypoint: review:run
+    triggers:
+      events: ["pull_request.updated"]
+    output:
+      format: findings/v1
+`)
+
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &controlPlanePluginRuntimeClient{}, nil, pluginsDir)
+
+	record, err := svc.Install(ctx, service.PluginInstallRequest{
+		Path: manifestPath,
+		Source: &model.PluginSource{
+			Type:     model.PluginSourceNPM,
+			Package:  "@agentforge/review-typescript",
+			Version:  "1.0.0",
+			Registry: "https://registry.npmjs.org",
+			Digest:   "sha256:review-typescript",
+			Trust: &model.PluginTrustMetadata{
+				ApprovalState: model.PluginApprovalPending,
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("install external plugin: %v", err)
+	}
+	if record.Source.Type != model.PluginSourceNPM {
+		t.Fatalf("expected npm source type, got %s", record.Source.Type)
+	}
+	if record.Source.Trust == nil || record.Source.Trust.Status != model.PluginTrustUntrusted {
+		t.Fatalf("expected untrusted status, got %+v", record.Source.Trust)
+	}
+
+	if _, err := svc.Enable(ctx, record.Metadata.ID); err == nil {
+		t.Fatal("expected enable to be blocked for untrusted external plugin")
+	}
+}
+
+func TestPluginServiceControlPlane_SearchCatalogAndInstallEntry(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	writeControlPlaneServiceManifest(t, pluginsDir, "catalog/review-typescript/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ReviewPlugin
+metadata:
+  id: review-typescript
+  name: TypeScript Review
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["review.js"]
+  review:
+    entrypoint: review:run
+    triggers:
+      events: ["pull_request.updated"]
+    output:
+      format: findings/v1
+source:
+  type: catalog
+  catalog: internal
+  entry: review-typescript
+  digest: sha256:review-typescript
+  signature: sigstore-bundle
+  trust:
+    status: verified
+    approvalState: approved
+`)
+
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &controlPlanePluginRuntimeClient{}, nil, pluginsDir)
+
+	entries, err := svc.SearchCatalog(ctx, "typescript")
+	if err != nil {
+		t.Fatalf("search catalog: %v", err)
+	}
+	if len(entries) != 1 || entries[0].ID != "review-typescript" {
+		t.Fatalf("unexpected catalog entries: %+v", entries)
+	}
+	if entries[0].Installed {
+		t.Fatalf("expected catalog entry to be installable before install, got %+v", entries[0])
+	}
+
+	record, err := svc.InstallCatalogEntry(ctx, "review-typescript")
+	if err != nil {
+		t.Fatalf("install catalog entry: %v", err)
+	}
+	if record.Metadata.ID != "review-typescript" {
+		t.Fatalf("unexpected installed plugin id: %s", record.Metadata.ID)
+	}
+	if record.Source.Type != model.PluginSourceCatalog {
+		t.Fatalf("expected catalog source type, got %s", record.Source.Type)
+	}
+}
+
+func TestPluginServiceControlPlane_UpdatePreservesIdentityAndReleaseMetadata(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	initialPath := writeControlPlaneServiceManifest(t, pluginsDir, "git/release-train-v1.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: release-train
+  name: Release Train
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/release-train.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: coder
+    steps:
+      - id: implement
+        role: coder
+        action: agent
+`)
+	updatedPath := writeControlPlaneServiceManifest(t, pluginsDir, "git/release-train-v2.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: release-train
+  name: Release Train
+  version: 1.1.0
+spec:
+  runtime: wasm
+  module: ./dist/release-train.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: coder
+    steps:
+      - id: implement
+        role: coder
+        action: agent
+`)
+
+	roleStore := &controlPlaneRoleStore{
+		roles: map[string]struct{}{
+			"coder": {},
+		},
+	}
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &controlPlanePluginRuntimeClient{}, &controlPlaneGoRuntime{}, pluginsDir).
+		WithRoleStore(roleStore)
+
+	record, err := svc.Install(ctx, service.PluginInstallRequest{
+		Path: initialPath,
+		Source: &model.PluginSource{
+			Type:       model.PluginSourceGit,
+			Repository: "https://github.com/example/release-train.git",
+			Ref:        "refs/tags/v1.0.0",
+			Digest:     "sha256:release-train-v1",
+			Signature:  "sigstore-bundle",
+			Release: &model.PluginReleaseMetadata{
+				Version: "1.0.0",
+				Channel: "stable",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("install git plugin: %v", err)
+	}
+
+	updated, err := svc.Update(ctx, record.Metadata.ID, service.PluginInstallRequest{
+		Path: updatedPath,
+		Source: &model.PluginSource{
+			Type:       model.PluginSourceGit,
+			Repository: "https://github.com/example/release-train.git",
+			Ref:        "refs/tags/v1.1.0",
+			Digest:     "sha256:release-train-v2",
+			Signature:  "sigstore-bundle",
+			Release: &model.PluginReleaseMetadata{
+				Version:          "1.1.0",
+				Channel:          "stable",
+				AvailableVersion: "1.1.0",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("update plugin: %v", err)
+	}
+
+	if updated.Metadata.ID != "release-train" {
+		t.Fatalf("expected plugin identity to be preserved, got %s", updated.Metadata.ID)
+	}
+	if updated.Metadata.Version != "1.1.0" {
+		t.Fatalf("expected updated version 1.1.0, got %s", updated.Metadata.Version)
+	}
+	if updated.Source.Release == nil || updated.Source.Release.Version != "1.1.0" {
+		t.Fatalf("expected updated release metadata, got %+v", updated.Source.Release)
+	}
+	if updated.Source.Digest != "sha256:release-train-v2" {
+		t.Fatalf("expected updated digest, got %s", updated.Source.Digest)
+	}
+}
+
+type controlPlaneRoleStore struct {
+	roles map[string]struct{}
+}
+
+func (s *controlPlaneRoleStore) Get(id string) (*rolepkg.Manifest, error) {
+	if _, ok := s.roles[id]; !ok {
+		return nil, os.ErrNotExist
+	}
+	return &rolepkg.Manifest{Metadata: model.RoleMetadata{ID: id, Name: id}}, nil
 }

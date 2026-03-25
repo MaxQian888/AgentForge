@@ -4,7 +4,7 @@
 
 ## 当前范围
 
-- Go 宿主当前支持 `IntegrationPlugin + runtime: wasm`
+- Go 宿主当前的 Go SDK / build helper 链路同时覆盖 `IntegrationPlugin + runtime: wasm` 和 `WorkflowPlugin + runtime: wasm`
 - manifest 需要声明：
   - `spec.module`
   - `spec.abiVersion`
@@ -23,6 +23,7 @@
 
 - SDK：`src-go/plugin-sdk-go`
 - 样例插件：`src-go/cmd/sample-wasm-plugin`
+- 脚手架入口：`scripts/create-plugin.js`
 - 内置示例 manifest：`plugins/integrations/feishu-adapter/manifest.yaml`
 - 构建脚本：`scripts/build-go-wasm-plugin.js`
 - 调试脚本：`scripts/debug-go-wasm-plugin.js`
@@ -101,6 +102,10 @@ func main() { pluginsdk.Autorun(runtime) }
 当前 Go 后端暴露的集成插件管理入口包括：
 
 - `POST /api/v1/plugins/install`
+- `GET /api/v1/plugins/catalog`
+- `POST /api/v1/plugins/catalog/install`
+- `POST /api/v1/plugins/:id/update`
+- `POST /api/v1/plugins/:id/deactivate`
 - `POST /api/v1/plugins/:id/activate`
 - `GET /api/v1/plugins/:id/health`
 - `POST /api/v1/plugins/:id/restart`
@@ -117,6 +122,12 @@ func main() { pluginsdk.Autorun(runtime) }
   }
 }
 ```
+
+外部 source 的当前控制面语义：
+
+- `builtin` / `local` 仍可直接进入现有 install -> enable -> activate 流程
+- `git` / `npm` / `catalog` source 会在 install 时记录 digest、signature、approval、release metadata
+- 这些外部 source 只有在 digest + signature 或 operator approval 使 trust 状态变为 `verified` 后，才能继续 enable / activate
 
 ## 本地构建
 
@@ -151,6 +162,7 @@ pnpm plugin:build -- --manifest path/to/manifest.yaml --source ./cmd/sample-wasm
 - 受维护样例可以只给 manifest，因为脚本会通过 repo 内 target map 解析它的 Go build 入口。
 - 非受维护目标如果没有 target map，就必须显式传 `--source`。
 - `source.path` 仍然表示 manifest 来源，不会被误当成 `go build` 的包路径。
+- `pnpm create-plugin -- --type workflow --name <name>` / `integration` 会生成一条与这些 build helper 对齐的 repo-local starter，而不是另一套平行模板。
 
 `scripts/__fixtures__/invalid-go-wasm-plugin-manifest.yaml` 用来验证缺少 `spec.module` 时的提前失败语义。
 
@@ -226,6 +238,6 @@ go test plugin_service.go plugin_service_test.go
 
 ## 当前 Follow-up
 
-- 目前只落地了 Go 宿主的首版 WASM 原型，尚未扩展到 `WorkflowPlugin`
+- `WorkflowPlugin` 当前只支持 `process: sequential` 的执行路径；`hierarchical` 和 `event-driven` 仍会返回显式 unsupported error
 - SDK 仍然建立在 JSON envelope + WASI env transport 上；如果后续调用面继续扩大，可以再演进为更正式的 ABI/内存桥接
 - 仓库 `service` 目录还有其他并行工作线尚未收敛，因此更广的 `go test ./...` 仍可能被非本变更问题阻塞

@@ -82,6 +82,44 @@ func (s *FileStore) Delete(id string) error {
 	return os.RemoveAll(roleDir)
 }
 
+func (s *FileStore) Preview(roleID string, draft *Manifest) (*Manifest, *Manifest, error) {
+	registry := NewRegistry()
+	if err := s.loadRegistry(registry); err != nil {
+		return nil, nil, err
+	}
+
+	if draft == nil {
+		if roleID == "" {
+			return nil, nil, fmt.Errorf("role id or draft is required")
+		}
+		manifest, ok := registry.Get(roleID)
+		if !ok {
+			return nil, nil, os.ErrNotExist
+		}
+		cloned := cloneManifest(manifest)
+		return cloned, cloneManifest(cloned), nil
+	}
+
+	normalized := cloneManifest(draft)
+	if err := finalizeRoleManifest(normalized); err != nil {
+		return nil, nil, err
+	}
+
+	effective := cloneManifest(normalized)
+	if normalized.Extends != "" {
+		parent, ok := registry.Get(normalized.Extends)
+		if !ok {
+			return nil, nil, fmt.Errorf("extended role %s not found", normalized.Extends)
+		}
+		effective = mergeManifests(parent, normalized)
+		if err := finalizeRoleManifest(effective); err != nil {
+			return nil, nil, err
+		}
+	}
+
+	return normalized, effective, nil
+}
+
 func (s *FileStore) loadRegistry(registry *Registry) error {
 	if registry == nil {
 		return fmt.Errorf("registry is required")

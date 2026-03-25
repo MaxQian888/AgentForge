@@ -43,17 +43,43 @@ func (h *PluginHandler) DiscoverBuiltIns(c echo.Context) error {
 
 func (h *PluginHandler) InstallLocal(c echo.Context) error {
 	var req struct {
-		Path string `json:"path"`
+		Path    string              `json:"path"`
+		EntryID string              `json:"entry_id"`
+		Source  *model.PluginSource `json:"source"`
 	}
-	if err := c.Bind(&req); err != nil || req.Path == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "path is required"})
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid install request"})
 	}
 
-	record, err := h.service.RegisterLocalPath(c.Request().Context(), req.Path)
+	var (
+		record *model.PluginRecord
+		err    error
+	)
+	switch {
+	case req.EntryID != "":
+		record, err = h.service.InstallCatalogEntry(c.Request().Context(), req.EntryID)
+	case req.Path == "":
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "path or entry_id is required"})
+	case req.Source == nil || req.Source.Type == "" || req.Source.Type == model.PluginSourceLocal:
+		record, err = h.service.RegisterLocalPath(c.Request().Context(), req.Path)
+	default:
+		record, err = h.service.Install(c.Request().Context(), service.PluginInstallRequest{
+			Path:   req.Path,
+			Source: req.Source,
+		})
+	}
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
 	}
 	return c.JSON(http.StatusCreated, record)
+}
+
+func (h *PluginHandler) SearchCatalog(c echo.Context) error {
+	entries, err := h.service.SearchCatalog(c.Request().Context(), c.QueryParam("q"))
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, entries)
 }
 
 func (h *PluginHandler) List(c echo.Context) error {
@@ -79,6 +105,14 @@ func (h *PluginHandler) Enable(c echo.Context) error {
 
 func (h *PluginHandler) Disable(c echo.Context) error {
 	record, err := h.service.Disable(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, record)
+}
+
+func (h *PluginHandler) Deactivate(c echo.Context) error {
+	record, err := h.service.Deactivate(c.Request().Context(), c.Param("id"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
 	}
@@ -199,6 +233,38 @@ func (h *PluginHandler) Uninstall(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "plugin uninstalled"})
+}
+
+func (h *PluginHandler) Update(c echo.Context) error {
+	var req struct {
+		Path   string              `json:"path"`
+		Source *model.PluginSource `json:"source"`
+	}
+	if err := c.Bind(&req); err != nil || req.Path == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "path is required"})
+	}
+	record, err := h.service.Update(c.Request().Context(), c.Param("id"), service.PluginInstallRequest{
+		Path:   req.Path,
+		Source: req.Source,
+	})
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, record)
+}
+
+func (h *PluginHandler) InstallCatalogEntry(c echo.Context) error {
+	var req struct {
+		EntryID string `json:"entry_id"`
+	}
+	if err := c.Bind(&req); err != nil || req.EntryID == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "entry_id is required"})
+	}
+	record, err := h.service.InstallCatalogEntry(c.Request().Context(), req.EntryID)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusCreated, record)
 }
 
 func (h *PluginHandler) UpdateConfig(c echo.Context) error {

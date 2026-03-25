@@ -164,6 +164,90 @@ capabilities:
 	}
 }
 
+func TestRegistryLoadDirMergesAdvancedAuthoringSections(t *testing.T) {
+	dir := t.TempDir()
+	writeRoleFile(t, filepath.Join(dir, "base-role"), "role.yaml", `
+apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: base-role
+  name: Base Role
+identity:
+  role: Base Role
+capabilities:
+  packages: [shared]
+  tools:
+    built_in: [Read]
+knowledge:
+  shared:
+    - id: design-guidelines
+      type: vector
+      access: read
+security:
+  profile: development
+  allowed_paths: ["src/", "app/"]
+  output_filters: [no_pii]
+collaboration:
+  can_delegate_to: [frontend-developer]
+triggers:
+  - event: pr_created
+    action: notify
+`)
+	writeRoleFile(t, filepath.Join(dir, "child-role"), "role.yaml", `
+apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: child-role
+  name: Child Role
+extends: base-role
+identity:
+  role: Child Role
+capabilities:
+  packages: [review]
+  tools:
+    external: [figma]
+knowledge:
+  shared:
+    - id: child-guidelines
+      type: vector
+      access: read
+security:
+  profile: standard
+  allowed_paths: ["app/"]
+  output_filters: [no_credentials]
+collaboration:
+  accepts_delegation_from: [design-manager]
+triggers:
+  - event: pr_created
+    action: auto_review
+`)
+
+	registry := role.NewRegistry()
+	if err := registry.LoadDir(dir); err != nil {
+		t.Fatalf("LoadDir() error = %v", err)
+	}
+
+	loaded, ok := registry.Get("child-role")
+	if !ok {
+		t.Fatal("Get(child-role) ok = false, want true")
+	}
+	if got := loaded.Capabilities.Packages; len(got) != 2 || got[0] != "shared" || got[1] != "review" {
+		t.Fatalf("Capabilities.Packages = %v, want inherited + child package merge", got)
+	}
+	if got := loaded.Knowledge.Shared; len(got) != 2 {
+		t.Fatalf("Knowledge.Shared = %#v, want merged shared knowledge entries", got)
+	}
+	if got := loaded.Security.OutputFilters; len(got) != 2 {
+		t.Fatalf("Security.OutputFilters = %v, want merged output filters", got)
+	}
+	if loaded.Collaboration.AcceptsDelegationFrom[0] != "design-manager" {
+		t.Fatalf("AcceptsDelegationFrom = %v, want child collaboration field", loaded.Collaboration.AcceptsDelegationFrom)
+	}
+	if got := loaded.Triggers; len(got) != 2 {
+		t.Fatalf("Triggers = %#v, want merged trigger list", got)
+	}
+}
+
 func TestRegistryRegisterAndLoadDirErrors(t *testing.T) {
 	registry := role.NewRegistry()
 	registry.Register(&role.Manifest{

@@ -640,6 +640,13 @@ describe("bridge execute route", () => {
       status: "paused",
     });
 
+    const poolAfterPause = await app.request("/bridge/pool");
+    expect(poolAfterPause.status).toBe(200);
+    expect(await poolAfterPause.json()).toMatchObject({
+      active: 0,
+      warm_available: 1,
+    });
+
     await waitFor(() => sessionManager.restore("task-pause")?.status === "paused");
     expect(pool.get("task-pause")).toBeUndefined();
 
@@ -660,6 +667,14 @@ describe("bridge execute route", () => {
       "Pause and resume the runtime",
       "Pause and resume the runtime",
     ]);
+
+    const poolAfterResume = await app.request("/bridge/pool");
+    expect(poolAfterResume.status).toBe(200);
+    expect(await poolAfterResume.json()).toMatchObject({
+      active: 1,
+      warm_available: 0,
+      warm_reuse_hits: 1,
+    });
   });
 });
 

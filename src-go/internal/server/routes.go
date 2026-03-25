@@ -194,7 +194,7 @@ func RegisterRoutes(
 	notifH := handler.NewNotificationHandler(notifRepo)
 	workflowH := handler.NewWorkflowHandler(workflowRepo)
 	costH := handler.NewCostHandler(agentRunRepo)
-	roleH := handler.NewRoleHandler(cfg.RolesDir)
+	roleH := handler.NewRoleHandler(cfg.RolesDir).WithBridgeClient(bridgeClient)
 	var teamRuntime handler.TeamRuntimeService
 	if teamSvc != nil {
 		teamRuntime = teamSvc
@@ -320,17 +320,23 @@ func RegisterRoutes(
 	protected.POST("/roles", roleH.Create)
 	protected.PUT("/roles/:id", roleH.Update)
 	protected.DELETE("/roles/:id", roleH.Delete)
+	protected.POST("/roles/preview", roleH.Preview)
+	protected.POST("/roles/sandbox", roleH.Sandbox)
 
 	// Plugins
 	protected.GET("/plugins/discover", pluginH.DiscoverBuiltIns)
 	protected.POST("/plugins/discover/builtin", pluginH.DiscoverBuiltIns)
 	protected.POST("/plugins/install", pluginH.InstallLocal)
+	protected.GET("/plugins/catalog", pluginH.SearchCatalog)
+	protected.POST("/plugins/catalog/install", pluginH.InstallCatalogEntry)
 	protected.GET("/plugins/marketplace", pluginH.Marketplace)
 	protected.GET("/plugins", pluginH.List)
 	protected.DELETE("/plugins/:id", pluginH.Uninstall)
+	protected.POST("/plugins/:id/update", pluginH.Update)
 	protected.PUT("/plugins/:id/config", pluginH.UpdateConfig)
 	protected.PUT("/plugins/:id/enable", pluginH.Enable)
 	protected.POST("/plugins/:id/enable", pluginH.Enable)
+	protected.POST("/plugins/:id/deactivate", pluginH.Deactivate)
 	protected.PUT("/plugins/:id/disable", pluginH.Disable)
 	protected.POST("/plugins/:id/disable", pluginH.Disable)
 	protected.POST("/plugins/:id/activate", pluginH.Activate)

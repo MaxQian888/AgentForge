@@ -69,6 +69,93 @@ security:
   allowed_paths: [app/, components/]
 `
 
+const advancedRoleManifest = `
+apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: design-lead
+  name: Design Lead
+  version: 2.0.0
+  author: AgentForge
+  icon: palette
+  tags: [design, lead]
+identity:
+  role: Senior Design Lead
+  goal: Keep product UX coherent
+  backstory: You coordinate design systems and interaction quality.
+  persona: Collaborative design lead
+  goals: [Improve polish, align patterns]
+  constraints: [Do not invent unsupported tokens]
+  personality: patient
+  language: zh-CN
+  response_style:
+    tone: professional
+    verbosity: concise
+    format_preference: markdown
+capabilities:
+  packages: [design-system, review]
+  tools:
+    built_in: [Read, Edit]
+    external: [figma]
+    mcp_servers:
+      - name: design-mcp
+        url: http://localhost:3010/mcp
+  custom_settings:
+    approval_mode: guided
+knowledge:
+  repositories: [agentforge]
+  documents: [docs/PRD.md]
+  patterns: [design-system]
+  shared:
+    - id: design-guidelines
+      type: vector
+      access: read
+      description: Shared design guidelines
+  private:
+    - id: ux-notes
+      type: vector
+      sources: [knowledge/ux-notes.md]
+  memory:
+    short_term:
+      max_tokens: 64000
+    episodic:
+      enabled: true
+      retention_days: 45
+security:
+  profile: standard
+  permission_mode: default
+  allowed_paths: [app/, components/]
+  permissions:
+    file_access:
+      allowed_paths: [app/, components/]
+      denied_paths: [secrets/]
+    network:
+      allowed_domains: [figma.com]
+    code_execution:
+      sandbox: true
+      allowed_languages: [typescript]
+  output_filters: [no_pii, no_credentials]
+  resource_limits:
+    token_budget:
+      per_task: 50000
+    api_calls:
+      per_minute: 5
+    execution_time:
+      per_task: 30m
+    cost_limit:
+      per_task: "$5"
+collaboration:
+  can_delegate_to: [frontend-developer]
+  accepts_delegation_from: [product-manager]
+  communication:
+    preferred_channel: structured
+    report_format: markdown
+triggers:
+  - event: pr_created
+    action: auto_review
+    condition: "labels.includes('design')"
+`
+
 const legacyRoleManifest = `
 metadata:
   name: frontend-developer
@@ -158,6 +245,38 @@ func TestParseCanonicalManifestSupportsPRDShape(t *testing.T) {
 	}
 	if firstSkill["autoLoad"] != true {
 		t.Fatalf("first skill autoLoad = %#v, want true", firstSkill["autoLoad"])
+	}
+}
+
+func TestParseAdvancedManifestPreservesStructuredAuthoringFields(t *testing.T) {
+	manifest, err := role.Parse([]byte(advancedRoleManifest))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if manifest.Metadata.Icon != "palette" {
+		t.Fatalf("Metadata.Icon = %q, want palette", manifest.Metadata.Icon)
+	}
+	if manifest.Identity.ResponseStyle.FormatPreference != "markdown" {
+		t.Fatalf("ResponseStyle.FormatPreference = %q, want markdown", manifest.Identity.ResponseStyle.FormatPreference)
+	}
+	if got := manifest.Capabilities.ToolConfig.External; len(got) != 1 || got[0] != "figma" {
+		t.Fatalf("ToolConfig.External = %v, want [figma]", got)
+	}
+	if got := manifest.Knowledge.Shared; len(got) != 1 || got[0].ID != "design-guidelines" {
+		t.Fatalf("Knowledge.Shared = %#v, want shared knowledge entry", got)
+	}
+	if !manifest.Security.Permissions.CodeExecution.Sandbox {
+		t.Fatal("Security.Permissions.CodeExecution.Sandbox = false, want true")
+	}
+	if got := manifest.Security.OutputFilters; len(got) != 2 || got[0] != "no_pii" {
+		t.Fatalf("Security.OutputFilters = %v, want preserved filters", got)
+	}
+	if manifest.Collaboration.Communication.PreferredChannel != "structured" {
+		t.Fatalf("PreferredChannel = %q, want structured", manifest.Collaboration.Communication.PreferredChannel)
+	}
+	if got := manifest.Triggers; len(got) != 1 || got[0].Action != "auto_review" {
+		t.Fatalf("Triggers = %#v, want trigger action auto_review", got)
 	}
 }
 

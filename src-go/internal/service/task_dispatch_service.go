@@ -37,6 +37,10 @@ type dispatchPoolStatsProvider interface {
 	PoolStats(ctx context.Context) model.AgentPoolStatsDTO
 }
 
+type runtimeAdmissionSpawner interface {
+	RequestSpawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.TaskDispatchResponse, error)
+}
+
 type DispatchNotificationService interface {
 	Create(ctx context.Context, targetID uuid.UUID, ntype, title, body, data string) (*model.Notification, error)
 }
@@ -168,6 +172,10 @@ func (s *TaskDispatchService) Spawn(ctx context.Context, input DispatchSpawnInpu
 }
 
 func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task, memberID uuid.UUID, input DispatchSpawnInput) (*model.TaskDispatchResponse, error) {
+	if admissionSpawner, ok := s.runtime.(runtimeAdmissionSpawner); ok {
+		return admissionSpawner.RequestSpawn(ctx, task.ID, memberID, input.Runtime, input.Provider, input.Model, input.BudgetUSD, input.RoleID)
+	}
+
 	run, err := s.runtime.Spawn(ctx, task.ID, memberID, input.Runtime, input.Provider, input.Model, input.BudgetUSD, input.RoleID)
 	if err != nil {
 		switch {

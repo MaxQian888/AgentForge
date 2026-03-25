@@ -107,6 +107,35 @@ AgentForge/
 
 ## 快速开始
 
+### 全栈本地开发工作流
+
+如果你想一条命令拉起仓库当前真实的本地 Web 开发链路，可以直接运行：
+
+```bash
+pnpm dev:all
+```
+
+常用配套命令：
+
+- `pnpm dev:all:status`
+- `pnpm dev:all:logs`
+- `pnpm dev:all:stop`
+
+当前 `dev:all` 的覆盖范围：
+
+- 在 `5432` / `6379` 上不可用时，通过 `docker compose` 启动或复用本地 PostgreSQL 与 Redis
+- 启动或复用 `http://127.0.0.1:7777/health` 上的 Go Orchestrator
+- 启动或复用 `http://127.0.0.1:7778/health` 上的 TS Bridge
+- 启动或复用 `http://127.0.0.1:3000` 上的 Next.js 前端
+- 将 repo-local 运行态元数据写入 `.codex/dev-all-state.json`
+- 将托管服务日志写入 `.codex/runtime-logs/`
+
+说明：
+
+- `dev:all` 只覆盖本地 Web 模式开发，不替代 `pnpm tauri:dev`。
+- 如果必需端口已被非 AgentForge 进程占用，`dev:all` 会直接报告冲突，而不是重复启动一套服务。
+- 当前 checkout 不包含 `.env.local.example` 或 `src-go/.env.example`；工作流会优先使用代码默认值和环境变量覆盖，而不是把缺失示例文件当成阻塞条件。
+
 ### 1. 前端 Dashboard
 
 ```bash
@@ -124,12 +153,15 @@ pnpm dev
 - `pnpm lint`
 - `pnpm test`
 - `pnpm test:coverage`
+- `pnpm create-plugin -- --type tool --name echo-tool`
 - `pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
 - `pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health`
 - `pnpm plugin:dev`
 - `pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
 
 ### 2. Go 后端
+
+如果你只是想跑完整的本地联调链路，优先使用 `pnpm dev:all`。下面的命令仍然适合只调试 Go 服务本身。
 
 如果需要本地基础设施，先在仓库根目录启动：
 
@@ -175,6 +207,8 @@ REDIS_URL=redis://localhost:6379
 
 ### 3. TypeScript Agent Bridge
 
+在日常全栈本地开发里，`pnpm dev:all` 会自动启动或复用 Bridge。下面这些命令仍然是直接调试 Bridge 的入口。
+
 ```bash
 cd src-bridge
 bun install
@@ -209,7 +243,21 @@ pnpm build:bridge
 
 ### 3.5 插件作者本地工作流
 
-针对当前维护中的 Go WASM 样例插件，仓库现在提供了一条受支持的根级循环：
+当前仓库已经同时提供脚手架入口和 Go WASM 样例循环：
+
+```bash
+pnpm create-plugin -- --type tool --name echo-tool
+pnpm create-plugin -- --type review --name typescript-review
+pnpm create-plugin -- --type workflow --name release-train
+```
+
+这些脚手架直接落在 repo 的真实目录结构里：
+
+- Tool / Review 模板复用 `src-bridge/src/plugin-sdk/` 的 TypeScript SDK
+- Workflow / Integration 模板会同时生成 `src-go/cmd/<name>/` Go 入口和 manifest 驱动的插件目录
+- 每种模板都附带 starter test 或验证命令，避免模板和当前契约漂移
+
+针对当前维护中的 Go WASM 样例插件，仓库也保留一条受支持的根级循环：
 
 ```bash
 pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
@@ -219,10 +267,12 @@ pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.ya
 
 说明：
 
+- `create-plugin` 是当前 repo-local 的脚手架入口，支持 `tool`、`review`、`workflow`、`integration` 四类 starter，不再要求作者手工拼 manifest、入口文件和基础验证。
 - `plugin:build` 会从 manifest 解析受维护样例的产物路径；如果你在调别的 Go 宿主插件，也可以显式传 `--source` / `--output` 覆盖。
 - `plugin:debug` 不会发明另一套开发协议，而是直接复用真实的 `AGENTFORGE_AUTORUN`、`AGENTFORGE_OPERATION`、`AGENTFORGE_CONFIG`、`AGENTFORGE_CAPABILITIES`、`AGENTFORGE_PAYLOAD` 合同。
 - `plugin:verify` 目前只覆盖受维护样例的 smoke 路径，也就是 `build -> debug health`，它是聚焦验证，不替代更广的 Go/Bridge 测试。
 - `plugin:dev` 是最小插件开发栈命令，只负责 Go Orchestrator 和 TS Bridge；如果服务已经健康会直接复用，并通过 `http://127.0.0.1:7777/health` 与 `http://127.0.0.1:7778/health` 报告就绪状态。
+- Go 控制面现在把“可安装 catalog 条目”和“已安装插件记录”拆成独立 surface：`GET /api/v1/plugins/catalog` 用于搜索，`POST /api/v1/plugins/catalog/install` 用于从条目创建安装记录；外部 `git` / `npm` / `catalog` source 如果没有 digest + signature 或显式 approval，就会继续保持 blocked，不能 enable/activate。
 
 ### 4. IM Bridge 工作区
 
@@ -273,8 +323,13 @@ pnpm tauri:build
 | `pnpm lint` | 运行 ESLint |
 | `pnpm test` | 运行 Jest |
 | `pnpm test:coverage` | 运行带覆盖率的 Jest |
+| `pnpm create-plugin` | 为 tool、review、workflow、integration 生成 repo-local 插件脚手架 |
 | `pnpm build:backend` | 为 Tauri 交叉编译 Go sidecar |
 | `pnpm build:backend:dev` | 仅为当前平台构建 Go sidecar |
+| `pnpm dev:all` | 启动或复用完整本地 Web 开发栈：compose infra + Go + TS Bridge + frontend |
+| `pnpm dev:all:status` | 输出本地开发栈的来源、健康状态、端口与已知日志路径 |
+| `pnpm dev:all:logs` | 查看当前被 `dev:all` 跟踪的 repo-local 日志文件路径 |
+| `pnpm dev:all:stop` | 仅停止 `dev:all` 托管的服务，并保留复用的外部监听器 |
 | `pnpm build:plugin:wasm` | 构建 Go WASM 样例插件产物 |
 | `pnpm plugin:build` | 按 manifest 构建受维护的 Go 宿主插件目标 |
 | `pnpm plugin:debug` | 通过真实 runtime envelope 本地调试 Go WASM 插件 |
@@ -295,7 +350,7 @@ pnpm tauri:build
 
 ## 使用说明
 
-- 密钥与敏感配置应放在本地环境文件中，例如 `.env.local` 或各服务目录下的 `.env.example` 副本
+- 密钥与敏感配置应放在本地环境文件中，例如 `.env.local` 或 `src-go/.env`；不要假设当前 checkout 一定存在示例 env 文件
 - `src-tauri/` 应保持最小权限范围
 - 仓库同时包含真实实现与设计阶段文档，不应默认认为所有文档中的模块都已经完全落地
 - 如果你对项目意图有疑问，应优先看 PRD 和架构文档，而不是仍残留在部分包名/模块名里的旧 starter 表述

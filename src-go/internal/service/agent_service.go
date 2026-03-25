@@ -78,6 +78,17 @@ type AgentQueueStore interface {
 	CompleteQueuedEntry(ctx context.Context, entryID string, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID) error
 }
 
+type agentServiceQueueAdapter struct {
+	store AgentQueueStore
+}
+
+func (a agentServiceQueueAdapter) QueueAgentAdmission(ctx context.Context, input pool.QueueAdmissionInput) (*model.AgentPoolQueueEntry, error) {
+	if a.store == nil {
+		return nil, ErrAgentPoolFull
+	}
+	return a.store.QueueAgentAdmission(ctx, QueueAgentAdmissionInput(input))
+}
+
 var (
 	ErrAgentAlreadyRunning      = errors.New("agent already running for this task")
 	ErrAgentNotFound            = errors.New("agent run not found")
@@ -584,6 +595,106 @@ func (s *AgentService) QueueAgentAdmission(ctx context.Context, input QueueAgent
 		return nil, ErrAgentPoolFull
 	}
 	return s.queueStore.QueueAgentAdmission(ctx, input)
+}
+
+func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.TaskDispatchResponse, error) {
+	runs, err := s.runRepo.GetByTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("check existing runs: %w", err)
+	}
+	for _, r := range runs {
+		if r.Status == model.AgentRunStatusRunning || r.Status == model.AgentRunStatusStarting {
+			return nil, ErrAgentAlreadyRunning
+		}
+	}
+
+	task, err := s.taskRepo.GetByID(ctx, taskID)
+	if err != nil {
+		return nil, ErrAgentTaskNotFound
+	}
+	project, err := s.projects.GetByID(ctx, task.ProjectID)
+	if err != nil {
+		return nil, ErrAgentProjectNotFound
+	}
+	selection, err := ResolveProjectCodingAgentSelection(project, runtime, provider, modelName)
+	if err != nil {
+		return nil, err
+	}
+
+	resolvedRoleID := strings.TrimSpace(roleID)
+	if _, err := s.resolveRoleConfig(resolvedRoleID); err != nil {
+		return nil, err
+	}
+
+	controller := pool.NewAdmissionController(s.pool, agentServiceQueueAdapter{store: s.queueStore})
+	decision, err := controller.Decide(ctx, pool.QueueAdmissionInput{
+		ProjectID: task.ProjectID,
+		TaskID:    taskID,
+		MemberID:  memberID,
+		Runtime:   selection.Runtime,
+		Provider:  selection.Provider,
+		Model:     selection.Model,
+		RoleID:    resolvedRoleID,
+		BudgetUSD: budgetUsd,
+		Reason:    "agent pool is at capacity",
+	})
+	if err != nil {
+		return nil, err
+	}
+	if decision.Status == pool.AdmissionStatusQueued {
+		return &model.TaskDispatchResponse{
+			Task: task.ToDTO(),
+			Dispatch: model.DispatchOutcome{
+				Status: model.DispatchStatusQueued,
+				Reason: decision.Reason,
+				Queue:  decision.Queue,
+			},
+		}, nil
+	}
+	if decision.Status == pool.AdmissionStatusBlocked {
+		return &model.TaskDispatchResponse{
+			Task: task.ToDTO(),
+			Dispatch: model.DispatchOutcome{
+				Status: model.DispatchStatusBlocked,
+				Reason: decision.Reason,
+			},
+		}, nil
+	}
+
+	run, err := s.Spawn(ctx, taskID, memberID, runtime, provider, modelName, budgetUsd, roleID)
+	if err != nil {
+		if errors.Is(err, ErrAgentPoolFull) && s.queueStore != nil {
+			entry, queueErr := s.queueStore.QueueAgentAdmission(ctx, QueueAgentAdmissionInput{
+				ProjectID: task.ProjectID,
+				TaskID:    taskID,
+				MemberID:  memberID,
+				Runtime:   selection.Runtime,
+				Provider:  selection.Provider,
+				Model:     selection.Model,
+				RoleID:    resolvedRoleID,
+				BudgetUSD: budgetUsd,
+				Reason:    "agent pool is at capacity",
+			})
+			if queueErr == nil {
+				return &model.TaskDispatchResponse{
+					Task: task.ToDTO(),
+					Dispatch: model.DispatchOutcome{
+						Status: model.DispatchStatusQueued,
+						Reason: "agent pool is at capacity",
+						Queue:  entry,
+					},
+				}, nil
+			}
+		}
+		return nil, err
+	}
+	return &model.TaskDispatchResponse{
+		Task: task.ToDTO(),
+		Dispatch: model.DispatchOutcome{
+			Status: model.DispatchStatusStarted,
+			Run:    dtoPtr(run.ToDTO()),
+		},
+	}, nil
 }
 
 func (s *AgentService) failSpawn(ctx context.Context, run *model.AgentRun, task *model.Task, projectSlug string, allocation *worktreepkg.Allocation) error {

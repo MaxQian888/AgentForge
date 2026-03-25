@@ -18,16 +18,16 @@
 ## 4. SDK And Scaffolding
 
 - [x] 4.1 Create the TypeScript plugin SDK package for Tool and Review plugins with manifest helpers, MCP bootstrap utilities, normalized review finding helpers, and a local test harness.
-- [ ] 4.2 Extend the Go-hosted plugin SDK and build helpers so maintained samples or templates remain valid for current Go-hosted plugin contracts and repository verification.
-- [ ] 4.3 Implement the `create-plugin` scaffolding flow with type-specific templates, build scripts, validation hooks, and starter tests for supported plugin classes.
+- [x] 4.2 Extend the Go-hosted plugin SDK and build helpers so maintained samples or templates remain valid for current Go-hosted plugin contracts and repository verification.
+- [x] 4.3 Implement the `create-plugin` scaffolding flow with type-specific templates, build scripts, validation hooks, and starter tests for supported plugin classes.
 
 ## 5. Distribution And Trust
 
-- [ ] 5.1 Implement normalized install, update, deactivate, disable, uninstall, and source-record flows for built-in, local, Git, npm, and configured catalog sources.
-- [ ] 5.2 Add digest, signature, and approval verification handling so external plugins can be marked verified or blocked before activation.
-- [ ] 5.3 Add catalog search and install surfaces that let operators inspect installable plugin entries separately from installed plugin records while preserving release-history metadata in the registry.
+- [x] 5.1 Implement normalized install, update, deactivate, disable, uninstall, and source-record flows for built-in, local, Git, npm, and configured catalog sources.
+- [x] 5.2 Add digest, signature, and approval verification handling so external plugins can be marked verified or blocked before activation.
+- [x] 5.3 Add catalog search and install surfaces that let operators inspect installable plugin entries separately from installed plugin records while preserving release-history metadata in the registry.
 
 ## 6. Verification And Documentation
 
-- [ ] 6.1 Add repository validation coverage for workflow manifests, review plugin selection, SDK templates, scaffold output, and multi-source plugin install or trust scenarios.
-- [ ] 6.2 Update plugin-related documentation (`PRD`, plugin design docs, SDK usage docs, and operator guidance) so the repo documents the new contracts and current runtime truth instead of outdated placeholder behavior.
+- [x] 6.1 Add repository validation coverage for workflow manifests, review plugin selection, SDK templates, scaffold output, and multi-source plugin install or trust scenarios.
+- [x] 6.2 Update plugin-related documentation (`PRD`, plugin design docs, SDK usage docs, and operator guidance) so the repo documents the new contracts and current runtime truth instead of outdated placeholder behavior.

@@ -190,6 +190,8 @@ func mergeManifests(parent, child *Manifest) *Manifest {
 	merged.Capabilities = mergeCapabilities(parent.Capabilities, child.Capabilities)
 	merged.Knowledge = mergeKnowledge(parent.Knowledge, child.Knowledge)
 	merged.Security = mergeSecurity(parent.Security, child.Security)
+	merged.Collaboration = mergeCollaboration(parent.Collaboration, child.Collaboration)
+	merged.Triggers = mergeTriggers(parent.Triggers, child.Triggers)
 
 	return merged
 }
@@ -296,6 +298,9 @@ func mergeKnowledge(parent, child Knowledge) Knowledge {
 	if child.SystemPrompt != "" {
 		merged.SystemPrompt = child.SystemPrompt
 	}
+	merged.Shared = mergeKnowledgeSources(parent.Shared, child.Shared)
+	merged.Private = mergeKnowledgeSources(parent.Private, child.Private)
+	merged.Memory = mergeMemoryConfig(parent.Memory, child.Memory)
 	return merged
 }
 
@@ -310,6 +315,56 @@ func mergeSecurity(parent, child Security) Security {
 	merged.DeniedPaths = mergeUniqueStrings(parent.DeniedPaths, child.DeniedPaths)
 	merged.MaxBudgetUsd = smallerPositive(parent.MaxBudgetUsd, child.MaxBudgetUsd)
 	merged.RequireReview = parent.RequireReview || child.RequireReview
+	merged.Profile = stricterSecurityProfile(parent.Profile, child.Profile)
+	merged.Permissions = mergePermissions(parent.Permissions, child.Permissions)
+	merged.OutputFilters = mergeUniqueStrings(parent.OutputFilters, child.OutputFilters)
+	merged.ResourceLimits = mergeResourceLimits(parent.ResourceLimits, child.ResourceLimits)
+	return merged
+}
+
+func mergeCollaboration(parent, child RoleCollaboration) RoleCollaboration {
+	merged := parent
+	merged.CanDelegateTo = mergeUniqueStrings(parent.CanDelegateTo, child.CanDelegateTo)
+	merged.AcceptsDelegationFrom = mergeUniqueStrings(parent.AcceptsDelegationFrom, child.AcceptsDelegationFrom)
+	if child.Communication.PreferredChannel != "" {
+		merged.Communication.PreferredChannel = child.Communication.PreferredChannel
+	}
+	if child.Communication.ReportFormat != "" {
+		merged.Communication.ReportFormat = child.Communication.ReportFormat
+	}
+	if child.Communication.EscalationPolicy != "" {
+		merged.Communication.EscalationPolicy = child.Communication.EscalationPolicy
+	}
+	return merged
+}
+
+func mergeTriggers(parent, child []RoleTrigger) []RoleTrigger {
+	if len(parent) == 0 && len(child) == 0 {
+		return nil
+	}
+
+	merged := make([]RoleTrigger, 0, len(parent)+len(child))
+	indexByKey := make(map[string]int, len(parent)+len(child))
+	for _, item := range parent {
+		key := triggerKey(item)
+		if key == "" {
+			continue
+		}
+		indexByKey[key] = len(merged)
+		merged = append(merged, item)
+	}
+	for _, item := range child {
+		key := triggerKey(item)
+		if key == "" {
+			continue
+		}
+		if index, ok := indexByKey[key]; ok {
+			merged[index] = item
+			continue
+		}
+		indexByKey[key] = len(merged)
+		merged = append(merged, item)
+	}
 	return merged
 }
 
@@ -369,6 +424,19 @@ func smallerPositive(values ...float64) float64 {
 	return best
 }
 
+func smallerPositiveInt(values ...int) int {
+	best := 0
+	for _, value := range values {
+		if value <= 0 {
+			continue
+		}
+		if best == 0 || value < best {
+			best = value
+		}
+	}
+	return best
+}
+
 func mergeUniqueStrings(base, extra []string) []string {
 	if len(base) == 0 && len(extra) == 0 {
 		return nil
@@ -386,6 +454,135 @@ func mergeUniqueStrings(base, extra []string) []string {
 		result = append(result, item)
 	}
 	return result
+}
+
+func mergeKnowledgeSources(base, extra []RoleKnowledgeSource) []RoleKnowledgeSource {
+	if len(base) == 0 && len(extra) == 0 {
+		return nil
+	}
+
+	merged := make([]RoleKnowledgeSource, 0, len(base)+len(extra))
+	indexByKey := make(map[string]int, len(base)+len(extra))
+	for _, item := range base {
+		key := knowledgeSourceKey(item)
+		if key == "" {
+			continue
+		}
+		indexByKey[key] = len(merged)
+		merged = append(merged, item)
+	}
+	for _, item := range extra {
+		key := knowledgeSourceKey(item)
+		if key == "" {
+			continue
+		}
+		if index, ok := indexByKey[key]; ok {
+			merged[index] = item
+			continue
+		}
+		indexByKey[key] = len(merged)
+		merged = append(merged, item)
+	}
+	return merged
+}
+
+func mergeMemoryConfig(parent, child RoleMemoryConfig) RoleMemoryConfig {
+	merged := parent
+	if child.ShortTerm.MaxTokens > 0 {
+		merged.ShortTerm.MaxTokens = child.ShortTerm.MaxTokens
+	}
+	if child.Episodic.Enabled {
+		merged.Episodic.Enabled = true
+	}
+	if child.Episodic.RetentionDays > 0 {
+		merged.Episodic.RetentionDays = child.Episodic.RetentionDays
+	}
+	if child.Semantic.Enabled {
+		merged.Semantic.Enabled = true
+	}
+	if child.Semantic.AutoExtract {
+		merged.Semantic.AutoExtract = true
+	}
+	if child.Procedural.Enabled {
+		merged.Procedural.Enabled = true
+	}
+	if child.Procedural.LearnFromFeedback {
+		merged.Procedural.LearnFromFeedback = true
+	}
+	return merged
+}
+
+func mergePermissions(parent, child RolePermissions) RolePermissions {
+	merged := parent
+	merged.FileAccess.AllowedPaths = stricterAllowedPaths(parent.FileAccess.AllowedPaths, child.FileAccess.AllowedPaths)
+	merged.FileAccess.DeniedPaths = mergeUniqueStrings(parent.FileAccess.DeniedPaths, child.FileAccess.DeniedPaths)
+	merged.Network.AllowedDomains = stricterAllowedPaths(parent.Network.AllowedDomains, child.Network.AllowedDomains)
+	merged.CodeExecution.Sandbox = parent.CodeExecution.Sandbox || child.CodeExecution.Sandbox
+	merged.CodeExecution.AllowedLanguages = stricterAllowedPaths(parent.CodeExecution.AllowedLanguages, child.CodeExecution.AllowedLanguages)
+	return merged
+}
+
+func mergeResourceLimits(parent, child RoleResourceLimits) RoleResourceLimits {
+	merged := parent
+	merged.TokenBudget.PerTask = smallerPositiveInt(parent.TokenBudget.PerTask, child.TokenBudget.PerTask)
+	merged.TokenBudget.PerDay = smallerPositiveInt(parent.TokenBudget.PerDay, child.TokenBudget.PerDay)
+	merged.TokenBudget.PerMonth = smallerPositiveInt(parent.TokenBudget.PerMonth, child.TokenBudget.PerMonth)
+	merged.APICalls.PerMinute = smallerPositiveInt(parent.APICalls.PerMinute, child.APICalls.PerMinute)
+	merged.APICalls.PerHour = smallerPositiveInt(parent.APICalls.PerHour, child.APICalls.PerHour)
+	if child.ExecutionTime.PerTask != "" {
+		merged.ExecutionTime.PerTask = child.ExecutionTime.PerTask
+	}
+	if child.ExecutionTime.PerDay != "" {
+		merged.ExecutionTime.PerDay = child.ExecutionTime.PerDay
+	}
+	if child.CostLimit.PerTask != "" {
+		merged.CostLimit.PerTask = child.CostLimit.PerTask
+	}
+	if child.CostLimit.PerDay != "" {
+		merged.CostLimit.PerDay = child.CostLimit.PerDay
+	}
+	if child.CostLimit.AlertThreshold > 0 {
+		merged.CostLimit.AlertThreshold = child.CostLimit.AlertThreshold
+	}
+	return merged
+}
+
+func stricterSecurityProfile(parent, child string) string {
+	order := map[string]int{
+		"development":   1,
+		"standard":      2,
+		"high_security": 3,
+	}
+	if parent == "" {
+		return child
+	}
+	if child == "" {
+		return parent
+	}
+	if order[parent] >= order[child] {
+		return parent
+	}
+	return child
+}
+
+func knowledgeSourceKey(source RoleKnowledgeSource) string {
+	switch {
+	case source.ID != "":
+		return source.ID
+	case source.Description != "":
+		return source.Type + "|" + source.Access + "|" + source.Description
+	case len(source.Sources) > 0:
+		return source.Type + "|" + source.Access + "|" + strings.Join(source.Sources, ",")
+	default:
+		return source.Type + "|" + source.Access
+	}
+}
+
+func triggerKey(trigger RoleTrigger) string {
+	if trigger.Event == "" && trigger.Action == "" && trigger.Condition == "" {
+		return ""
+	}
+	return trigger.Event + "|" + trigger.Action + "|" + trigger.Condition
 }
 
 func roleKey(manifest *Manifest) string {
@@ -419,23 +616,32 @@ func cloneManifest(manifest *Manifest) *Manifest {
 	cloned.Knowledge.Repositories = append([]string(nil), manifest.Knowledge.Repositories...)
 	cloned.Knowledge.Documents = append([]string(nil), manifest.Knowledge.Documents...)
 	cloned.Knowledge.Patterns = append([]string(nil), manifest.Knowledge.Patterns...)
+	cloned.Knowledge.Shared = append([]RoleKnowledgeSource(nil), manifest.Knowledge.Shared...)
+	cloned.Knowledge.Private = append([]RoleKnowledgeSource(nil), manifest.Knowledge.Private...)
+	for index := range cloned.Knowledge.Shared {
+		cloned.Knowledge.Shared[index].Sources = append([]string(nil), manifest.Knowledge.Shared[index].Sources...)
+	}
+	for index := range cloned.Knowledge.Private {
+		cloned.Knowledge.Private[index].Sources = append([]string(nil), manifest.Knowledge.Private[index].Sources...)
+	}
 	cloned.Security.AllowedPaths = append([]string(nil), manifest.Security.AllowedPaths...)
 	cloned.Security.DeniedPaths = append([]string(nil), manifest.Security.DeniedPaths...)
+	cloned.Security.Permissions.FileAccess.AllowedPaths = append([]string(nil), manifest.Security.Permissions.FileAccess.AllowedPaths...)
+	cloned.Security.Permissions.FileAccess.DeniedPaths = append([]string(nil), manifest.Security.Permissions.FileAccess.DeniedPaths...)
+	cloned.Security.Permissions.Network.AllowedDomains = append([]string(nil), manifest.Security.Permissions.Network.AllowedDomains...)
+	cloned.Security.Permissions.CodeExecution.AllowedLanguages = append([]string(nil), manifest.Security.Permissions.CodeExecution.AllowedLanguages...)
+	cloned.Security.OutputFilters = append([]string(nil), manifest.Security.OutputFilters...)
 	if manifest.Overrides != nil {
 		cloned.Overrides = make(map[string]any, len(manifest.Overrides))
 		for key, value := range manifest.Overrides {
 			cloned.Overrides[key] = value
 		}
 	}
-	if manifest.Collaboration != nil {
-		cloned.Collaboration = make(map[string]any, len(manifest.Collaboration))
-		for key, value := range manifest.Collaboration {
-			cloned.Collaboration[key] = value
-		}
-	}
 	if manifest.Triggers != nil {
-		cloned.Triggers = append([]map[string]any(nil), manifest.Triggers...)
+		cloned.Triggers = append([]RoleTrigger(nil), manifest.Triggers...)
 	}
+	cloned.Collaboration.CanDelegateTo = append([]string(nil), manifest.Collaboration.CanDelegateTo...)
+	cloned.Collaboration.AcceptsDelegationFrom = append([]string(nil), manifest.Collaboration.AcceptsDelegationFrom...)
 	return &cloned
 }
 

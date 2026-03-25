@@ -22,9 +22,22 @@ const frontendRole: RoleManifest = {
     persona: "Helpful",
     goals: ["Improve workflows"],
     constraints: ["Keep tests green"],
+    personality: "patient",
+    language: "zh-CN",
+    responseStyle: {
+      tone: "professional",
+      verbosity: "concise",
+      formatPreference: "markdown",
+    },
   },
   capabilities: {
+    packages: ["design-system"],
     allowedTools: ["Read", "Edit"],
+    toolConfig: {
+      builtIn: ["Read", "Edit"],
+      external: ["figma"],
+      mcpServers: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
+    },
     languages: ["TypeScript"],
     frameworks: ["Next.js"],
     skills: [
@@ -38,14 +51,27 @@ const frontendRole: RoleManifest = {
     repositories: ["app", "components"],
     documents: ["docs/PRD.md"],
     patterns: ["responsive-layouts"],
+    shared: [{ id: "design-guidelines", type: "vector", access: "read" }],
   },
   security: {
+    profile: "standard",
     permissionMode: "default",
     allowedPaths: ["app/", "components/"],
     deniedPaths: ["secrets/"],
     maxBudgetUsd: 6,
     requireReview: true,
+    outputFilters: ["no_pii"],
   },
+  collaboration: {
+    canDelegateTo: ["frontend-developer"],
+    acceptsDelegationFrom: ["design-manager"],
+    communication: {
+      preferredChannel: "structured",
+      reportFormat: "markdown",
+      escalationPolicy: "auto",
+    },
+  },
+  triggers: [{ event: "pr_created", action: "auto_review", condition: "labels.includes('ui')" }],
   extends: "coding-agent",
 };
 
@@ -62,6 +88,8 @@ describe("RoleWorkspace", () => {
         onCreateRole={onCreateRole}
         onUpdateRole={jest.fn().mockResolvedValue(undefined)}
         onDeleteRole={jest.fn().mockResolvedValue(undefined)}
+        onPreviewRole={jest.fn().mockResolvedValue(undefined)}
+        onSandboxRole={jest.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -86,6 +114,8 @@ describe("RoleWorkspace", () => {
     expect(screen.getByText("Read, Edit")).toBeInTheDocument();
     expect(screen.getByText("1 auto-load / 1 on-demand")).toBeInTheDocument();
     expect(screen.getByText("Review required")).toBeInTheDocument();
+    expect(screen.getByText("Authoring Guide")).toBeInTheDocument();
+    expect(screen.getByText("YAML Preview")).toBeInTheDocument();
   });
 
   it("loads an existing role into structured workspace sections", async () => {
@@ -99,12 +129,14 @@ describe("RoleWorkspace", () => {
         onCreateRole={jest.fn().mockResolvedValue(undefined)}
         onUpdateRole={jest.fn().mockResolvedValue(undefined)}
         onDeleteRole={jest.fn().mockResolvedValue(undefined)}
+        onPreviewRole={jest.fn().mockResolvedValue(undefined)}
+        onSandboxRole={jest.fn().mockResolvedValue(undefined)}
       />,
     );
 
     await user.click(screen.getByRole("button", { name: "Edit Frontend Developer" }));
 
-    expect(screen.getByDisplayValue("frontend-developer")).toBeInTheDocument();
+    expect(screen.getByLabelText("Role ID")).toHaveValue("frontend-developer");
     expect(screen.getByDisplayValue("1.2.0")).toBeInTheDocument();
     expect(screen.getByText("Identity")).toBeInTheDocument();
     expect(screen.getByText("Capabilities")).toBeInTheDocument();
@@ -113,6 +145,9 @@ describe("RoleWorkspace", () => {
     expect(screen.getByDisplayValue("skills/testing")).toBeInTheDocument();
     expect(screen.getByText("Knowledge")).toBeInTheDocument();
     expect(screen.getByText("Security")).toBeInTheDocument();
+    expect(screen.getByText("Advanced Identity")).toBeInTheDocument();
+    expect(screen.getByText("Collaboration")).toBeInTheDocument();
+    expect(screen.getByText("Triggers")).toBeInTheDocument();
   });
 
   it("blocks save when duplicate skill paths are present", async () => {
@@ -127,6 +162,8 @@ describe("RoleWorkspace", () => {
         onCreateRole={onCreateRole}
         onUpdateRole={jest.fn().mockResolvedValue(undefined)}
         onDeleteRole={jest.fn().mockResolvedValue(undefined)}
+        onPreviewRole={jest.fn().mockResolvedValue(undefined)}
+        onSandboxRole={jest.fn().mockResolvedValue(undefined)}
       />,
     );
 
@@ -139,5 +176,83 @@ describe("RoleWorkspace", () => {
 
     expect(onCreateRole).not.toHaveBeenCalled();
     expect(await screen.findByText("Skill paths must be unique.")).toBeInTheDocument();
+  }, 10000);
+
+  it("submits preview and sandbox requests for the current draft and renders their results", async () => {
+    const user = userEvent.setup();
+    const onPreviewRole = jest.fn().mockResolvedValue({
+      normalizedManifest: frontendRole,
+      effectiveManifest: frontendRole,
+      executionProfile: {
+        role_id: "frontend-developer",
+        name: "Frontend Developer",
+        role: "Senior Frontend Developer",
+        goal: "Ship a great dashboard UX",
+        backstory: "A patient frontend specialist",
+        system_prompt: "Focus on clarity and accessibility.",
+        allowed_tools: ["Read", "Edit"],
+        max_budget_usd: 6,
+        max_turns: 24,
+        permission_mode: "default",
+      },
+    });
+    const onSandboxRole = jest.fn().mockResolvedValue({
+      normalizedManifest: frontendRole,
+      effectiveManifest: frontendRole,
+      executionProfile: {
+        role_id: "frontend-developer",
+        name: "Frontend Developer",
+        role: "Senior Frontend Developer",
+        goal: "Ship a great dashboard UX",
+        backstory: "A patient frontend specialist",
+        system_prompt: "Focus on clarity and accessibility.",
+        allowed_tools: ["Read", "Edit"],
+        max_budget_usd: 6,
+        max_turns: 24,
+        permission_mode: "default",
+      },
+      selection: {
+        runtime: "claude_code",
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+      },
+      probe: {
+        text: "A calm frontend specialist for dashboard polish.",
+        usage: { input_tokens: 12, output_tokens: 8 },
+      },
+    });
+
+    render(
+      <RoleWorkspace
+        roles={[frontendRole]}
+        loading={false}
+        error={null}
+        onCreateRole={jest.fn().mockResolvedValue(undefined)}
+        onUpdateRole={jest.fn().mockResolvedValue(undefined)}
+        onDeleteRole={jest.fn().mockResolvedValue(undefined)}
+        onPreviewRole={onPreviewRole}
+        onSandboxRole={onSandboxRole}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Preview Role Draft" }));
+    expect(onPreviewRole).toHaveBeenCalledWith(
+      expect.objectContaining({
+        draft: expect.objectContaining({
+          metadata: expect.objectContaining({ id: "" }),
+        }),
+      }),
+    );
+
+    await user.type(screen.getByLabelText("Sandbox Input"), "Summarize this role.");
+    await user.click(screen.getByRole("button", { name: "Run Sandbox Probe" }));
+    expect(onSandboxRole).toHaveBeenCalledWith(
+      expect.objectContaining({
+        input: "Summarize this role.",
+      }),
+    );
+
+    expect(await screen.findByText("A calm frontend specialist for dashboard polish.")).toBeInTheDocument();
+    expect(screen.getByText("claude_code / anthropic / claude-sonnet-4-5")).toBeInTheDocument();
   });
 });

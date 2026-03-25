@@ -46,3 +46,32 @@ func TestFileStoreSaveAndListUseCanonicalLayout(t *testing.T) {
 		t.Fatalf("List()[0].Metadata.ID = %q, want frontend-developer", roles[0].Metadata.ID)
 	}
 }
+
+func TestFileStoreSavePreservesAdvancedStructuredFields(t *testing.T) {
+	dir := t.TempDir()
+	store := role.NewFileStore(dir)
+
+	manifest, err := role.Parse([]byte(advancedRoleManifest))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	if err := store.Save(manifest); err != nil {
+		t.Fatalf("Save() error = %v", err)
+	}
+
+	reloaded, err := role.ParseFile(filepath.Join(dir, "design-lead", "role.yaml"))
+	if err != nil {
+		t.Fatalf("ParseFile() error = %v", err)
+	}
+
+	if got := reloaded.Knowledge.Shared; len(got) != 1 || got[0].ID != "design-guidelines" {
+		t.Fatalf("Knowledge.Shared = %#v, want persisted shared knowledge", got)
+	}
+	if reloaded.Security.Permissions.FileAccess.DeniedPaths[0] != "secrets/" {
+		t.Fatalf("DeniedPaths = %v, want persisted denied path", reloaded.Security.Permissions.FileAccess.DeniedPaths)
+	}
+	if got := reloaded.Triggers; len(got) != 1 || got[0].Event != "pr_created" {
+		t.Fatalf("Triggers = %#v, want persisted trigger", got)
+	}
+}

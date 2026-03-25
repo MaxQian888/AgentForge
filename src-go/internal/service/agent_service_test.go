@@ -1099,6 +1099,45 @@ func TestAgentService_PoolStatsIncludesQueuedEntries(t *testing.T) {
 	}
 }
 
+func TestAgentService_RequestSpawnQueuesWhenAdmissionHasNoImmediateSlot(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	repo := newMockAgentRunRepo()
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Queued spawn",
+		Description: "Queue instead of starting immediately",
+		BudgetUsd:   5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	queueStore := &mockAgentQueueStore{}
+	agentPool := pool.NewPool(1)
+	if err := agentPool.Acquire("run-existing", uuid.NewString(), uuid.NewString()); err != nil {
+		t.Fatalf("Acquire() error = %v", err)
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetPool(agentPool)
+	svc.SetQueueStore(queueStore)
+
+	result, err := svc.RequestSpawn(context.Background(), taskID, memberID, "codex", "openai", "gpt-5-codex", 5, "")
+	if err != nil {
+		t.Fatalf("RequestSpawn() error = %v", err)
+	}
+
+	if result.Dispatch.Status != model.DispatchStatusQueued {
+		t.Fatalf("dispatch = %+v, want queued", result.Dispatch)
+	}
+	if result.Dispatch.Queue == nil {
+		t.Fatal("expected queue payload for queued request")
+	}
+	if len(repo.runsByTask[taskID]) != 0 {
+		t.Fatalf("expected no real agent run to be created while queued, got %d", len(repo.runsByTask[taskID]))
+	}
+}
+
 func TestAgentService_UpdateStatusPromotesQueuedAdmissionAfterTerminalRelease(t *testing.T) {
 	projectID := uuid.New()
 	runID := uuid.New()

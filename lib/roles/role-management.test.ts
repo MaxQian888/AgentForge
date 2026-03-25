@@ -24,9 +24,22 @@ const role: RoleManifest = {
     persona: "Helpful",
     goals: ["Improve workflows"],
     constraints: ["Keep tests green"],
+    personality: "patient",
+    language: "zh-CN",
+    responseStyle: {
+      tone: "professional",
+      verbosity: "concise",
+      formatPreference: "markdown",
+    },
   },
   capabilities: {
+    packages: ["design-system"],
     allowedTools: ["Read", "Edit"],
+    toolConfig: {
+      builtIn: ["Read", "Edit"],
+      external: ["figma"],
+      mcpServers: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
+    },
     languages: ["TypeScript"],
     frameworks: ["Next.js"],
     skills: [
@@ -40,14 +53,27 @@ const role: RoleManifest = {
     repositories: ["app", "components"],
     documents: ["docs/PRD.md"],
     patterns: ["responsive-layouts"],
+    shared: [{ id: "design-guidelines", type: "vector", access: "read" }],
   },
   security: {
+    profile: "standard",
     permissionMode: "default",
     allowedPaths: ["app/", "components/"],
     deniedPaths: ["secrets/"],
     maxBudgetUsd: 6,
     requireReview: true,
+    outputFilters: ["no_pii"],
   },
+  collaboration: {
+    canDelegateTo: ["frontend-developer"],
+    acceptsDelegationFrom: ["design-manager"],
+    communication: {
+      preferredChannel: "structured",
+      reportFormat: "markdown",
+      escalationPolicy: "auto",
+    },
+  },
+  triggers: [{ event: "pr_created", action: "auto_review", condition: "labels.includes('ui')" }],
   extends: "coding-agent",
 };
 
@@ -57,12 +83,21 @@ describe("role management helpers", () => {
       roleId: "frontend-developer",
       version: "1.2.0",
       tagsInput: "frontend, ui",
+      icon: "",
       allowedTools: "Read, Edit",
+      packages: "design-system",
+      externalTools: "figma",
+      sharedKnowledgeRows: [{ id: "design-guidelines", type: "vector", access: "read", description: "", sourcesInput: "" }],
       skillRows: [
         { path: "skills/react", autoLoad: true },
         { path: "skills/testing", autoLoad: false },
       ],
       permissionMode: "default",
+      securityProfile: "standard",
+      outputFilters: "no_pii",
+      collaborationCanDelegateTo: "frontend-developer",
+      communicationPreferredChannel: "structured",
+      triggerRows: [{ event: "pr_created", action: "auto_review", condition: "labels.includes('ui')" }],
       extendsValue: "coding-agent",
     });
   });
@@ -73,8 +108,14 @@ describe("role management helpers", () => {
         ...buildRoleDraft(role),
         roleId: "frontend-developer-custom",
         name: "Frontend Developer Custom",
+        packages: "design-system, review",
+        externalTools: "figma, playwright",
         maxBudgetUsd: "7.5",
         requireReview: false,
+        sharedKnowledgeRows: [
+          { id: "design-guidelines", type: "vector", access: "read", description: "Shared", sourcesInput: "" },
+        ],
+        outputFilters: "no_pii, no_credentials",
         skillRows: [
           { path: "skills/react", autoLoad: false },
           { path: "skills/accessibility", autoLoad: true },
@@ -89,7 +130,11 @@ describe("role management helpers", () => {
         name: "Frontend Developer Custom",
       }),
       capabilities: expect.objectContaining({
+        packages: ["design-system", "review"],
         allowedTools: ["Read", "Edit"],
+        toolConfig: expect.objectContaining({
+          external: ["figma", "playwright"],
+        }),
         skills: [
           { path: "skills/react", autoLoad: false },
           { path: "skills/accessibility", autoLoad: true },
@@ -98,6 +143,10 @@ describe("role management helpers", () => {
       }),
       security: expect.objectContaining({
         requireReview: false,
+        outputFilters: ["no_pii", "no_credentials"],
+      }),
+      knowledge: expect.objectContaining({
+        shared: [{ id: "design-guidelines", type: "vector", access: "read", description: "Shared", sources: [] }],
       }),
     });
   });
@@ -117,6 +166,7 @@ describe("role management helpers", () => {
         "Review required",
         "2 allowed paths",
         "1 denied path",
+        "1 output filters",
       ],
     });
   });

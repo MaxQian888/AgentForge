@@ -56,3 +56,5 @@ src-tauri/binaries/server*
 src-go/.env
 
 .superpowers
+.codex/dev-all-state.json
+.codex/runtime-logs/

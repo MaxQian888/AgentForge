@@ -39,18 +39,18 @@ func Parse(data []byte) (*Manifest, error) {
 }
 
 type rawRoleManifest struct {
-	APIVersion    string                 `yaml:"apiVersion"`
-	Kind          string                 `yaml:"kind"`
-	Metadata      rawRoleMetadata        `yaml:"metadata"`
-	Identity      rawRoleIdentity        `yaml:"identity"`
-	SystemPrompt  string                 `yaml:"system_prompt"`
-	Capabilities  rawRoleCapabilities    `yaml:"capabilities"`
-	Knowledge     rawRoleKnowledge       `yaml:"knowledge"`
-	Security      rawRoleSecurity        `yaml:"security"`
-	Extends       string                 `yaml:"extends"`
-	Overrides     map[string]any         `yaml:"overrides"`
-	Collaboration map[string]any         `yaml:"collaboration"`
-	Triggers      []map[string]any       `yaml:"triggers"`
+	APIVersion    string              `yaml:"apiVersion"`
+	Kind          string              `yaml:"kind"`
+	Metadata      rawRoleMetadata     `yaml:"metadata"`
+	Identity      rawRoleIdentity     `yaml:"identity"`
+	SystemPrompt  string              `yaml:"system_prompt"`
+	Capabilities  rawRoleCapabilities `yaml:"capabilities"`
+	Knowledge     rawRoleKnowledge    `yaml:"knowledge"`
+	Security      rawRoleSecurity     `yaml:"security"`
+	Extends       string              `yaml:"extends"`
+	Overrides     map[string]any      `yaml:"overrides"`
+	Collaboration RoleCollaboration   `yaml:"collaboration"`
+	Triggers      []RoleTrigger       `yaml:"triggers"`
 }
 
 type rawRoleMetadata struct {
@@ -77,37 +77,44 @@ type rawRoleIdentity struct {
 }
 
 type rawRoleCapabilities struct {
-	Packages       []string          `yaml:"packages"`
-	AllowedTools   []string          `yaml:"allowed_tools"`
-	Tools          yaml.Node         `yaml:"tools"`
+	Packages       []string                   `yaml:"packages"`
+	AllowedTools   []string                   `yaml:"allowed_tools"`
+	Tools          yaml.Node                  `yaml:"tools"`
 	Skills         []model.RoleSkillReference `yaml:"skills"`
-	Languages      []string          `yaml:"languages"`
-	Frameworks     []string          `yaml:"frameworks"`
-	MaxConcurrency int               `yaml:"max_concurrency"`
-	MaxTurns       int               `yaml:"max_turns"`
-	MaxBudgetUsd   float64           `yaml:"max_budget_usd"`
-	CustomSettings map[string]string `yaml:"custom_settings"`
+	Languages      []string                   `yaml:"languages"`
+	Frameworks     []string                   `yaml:"frameworks"`
+	MaxConcurrency int                        `yaml:"max_concurrency"`
+	MaxTurns       int                        `yaml:"max_turns"`
+	MaxBudgetUsd   float64                    `yaml:"max_budget_usd"`
+	CustomSettings map[string]string          `yaml:"custom_settings"`
 }
 
 type rawRoleKnowledge struct {
-	Repositories []string `yaml:"repositories"`
-	Documents    []string `yaml:"documents"`
-	Patterns     []string `yaml:"patterns"`
-	SystemPrompt string   `yaml:"system_prompt"`
+	Repositories []string              `yaml:"repositories"`
+	Documents    []string              `yaml:"documents"`
+	Patterns     []string              `yaml:"patterns"`
+	SystemPrompt string                `yaml:"system_prompt"`
+	Shared       []RoleKnowledgeSource `yaml:"shared"`
+	Private      []RoleKnowledgeSource `yaml:"private"`
+	Memory       RoleMemoryConfig      `yaml:"memory"`
 }
 
 type rawRoleSecurity struct {
-	PermissionMode string   `yaml:"permission_mode"`
-	AllowedPaths   []string `yaml:"allowed_paths"`
-	DeniedPaths    []string `yaml:"denied_paths"`
-	MaxBudgetUsd   float64  `yaml:"max_budget_usd"`
-	RequireReview  bool     `yaml:"require_review"`
+	PermissionMode string             `yaml:"permission_mode"`
+	AllowedPaths   []string           `yaml:"allowed_paths"`
+	DeniedPaths    []string           `yaml:"denied_paths"`
+	MaxBudgetUsd   float64            `yaml:"max_budget_usd"`
+	RequireReview  bool               `yaml:"require_review"`
+	Profile        string             `yaml:"profile"`
+	Permissions    RolePermissions    `yaml:"permissions"`
+	OutputFilters  []string           `yaml:"output_filters"`
+	ResourceLimits RoleResourceLimits `yaml:"resource_limits"`
 }
 
 func normalizeRoleManifest(raw rawRoleManifest) (*Manifest, error) {
 	manifest := &Manifest{
-		APIVersion:    firstNonEmpty(raw.APIVersion, defaultAPIVersion),
-		Kind:          firstNonEmpty(raw.Kind, defaultKind),
+		APIVersion: firstNonEmpty(raw.APIVersion, defaultAPIVersion),
+		Kind:       firstNonEmpty(raw.Kind, defaultKind),
 		Metadata: model.RoleMetadata{
 			ID:          strings.TrimSpace(raw.Metadata.ID),
 			Name:        strings.TrimSpace(raw.Metadata.Name),
@@ -146,6 +153,9 @@ func normalizeRoleManifest(raw rawRoleManifest) (*Manifest, error) {
 			Documents:    append([]string(nil), raw.Knowledge.Documents...),
 			Patterns:     append([]string(nil), raw.Knowledge.Patterns...),
 			SystemPrompt: strings.TrimSpace(raw.Knowledge.SystemPrompt),
+			Shared:       append([]model.RoleKnowledgeSource(nil), raw.Knowledge.Shared...),
+			Private:      append([]model.RoleKnowledgeSource(nil), raw.Knowledge.Private...),
+			Memory:       raw.Knowledge.Memory,
 		},
 		Security: model.RoleSecurity{
 			PermissionMode: strings.TrimSpace(raw.Security.PermissionMode),
@@ -153,6 +163,10 @@ func normalizeRoleManifest(raw rawRoleManifest) (*Manifest, error) {
 			DeniedPaths:    append([]string(nil), raw.Security.DeniedPaths...),
 			MaxBudgetUsd:   raw.Security.MaxBudgetUsd,
 			RequireReview:  raw.Security.RequireReview,
+			Profile:        strings.TrimSpace(raw.Security.Profile),
+			Permissions:    raw.Security.Permissions,
+			OutputFilters:  append([]string(nil), raw.Security.OutputFilters...),
+			ResourceLimits: raw.Security.ResourceLimits,
 		},
 		Extends:       strings.TrimSpace(raw.Extends),
 		Overrides:     raw.Overrides,
@@ -248,6 +262,16 @@ func finalizeRoleManifest(manifest *Manifest) error {
 		return err
 	}
 	manifest.Capabilities.Skills = skills
+	manifest.Knowledge.Shared = normalizeKnowledgeSources(manifest.Knowledge.Shared)
+	manifest.Knowledge.Private = normalizeKnowledgeSources(manifest.Knowledge.Private)
+	manifest.Security.OutputFilters = normalizeStringSlice(manifest.Security.OutputFilters)
+	manifest.Security.Permissions.FileAccess.AllowedPaths = normalizeStringSlice(manifest.Security.Permissions.FileAccess.AllowedPaths)
+	manifest.Security.Permissions.FileAccess.DeniedPaths = normalizeStringSlice(manifest.Security.Permissions.FileAccess.DeniedPaths)
+	manifest.Security.Permissions.Network.AllowedDomains = normalizeStringSlice(manifest.Security.Permissions.Network.AllowedDomains)
+	manifest.Security.Permissions.CodeExecution.AllowedLanguages = normalizeStringSlice(manifest.Security.Permissions.CodeExecution.AllowedLanguages)
+	manifest.Collaboration.CanDelegateTo = normalizeStringSlice(manifest.Collaboration.CanDelegateTo)
+	manifest.Collaboration.AcceptsDelegationFrom = normalizeStringSlice(manifest.Collaboration.AcceptsDelegationFrom)
+	manifest.Triggers = normalizeTriggers(manifest.Triggers)
 
 	return nil
 }
@@ -322,4 +346,78 @@ func normalizeSkillReferences(input []model.RoleSkillReference) ([]model.RoleSki
 	}
 
 	return normalized, nil
+}
+
+func normalizeKnowledgeSources(input []model.RoleKnowledgeSource) []model.RoleKnowledgeSource {
+	if len(input) == 0 {
+		return nil
+	}
+
+	normalized := make([]model.RoleKnowledgeSource, 0, len(input))
+	for _, item := range input {
+		source := model.RoleKnowledgeSource{
+			ID:          strings.TrimSpace(item.ID),
+			Type:        strings.TrimSpace(item.Type),
+			Access:      strings.TrimSpace(item.Access),
+			Description: strings.TrimSpace(item.Description),
+			Sources:     normalizeStringSlice(item.Sources),
+		}
+		if source.ID == "" && source.Type == "" && source.Access == "" && source.Description == "" && len(source.Sources) == 0 {
+			continue
+		}
+		normalized = append(normalized, source)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func normalizeTriggers(input []model.RoleTrigger) []model.RoleTrigger {
+	if len(input) == 0 {
+		return nil
+	}
+
+	normalized := make([]model.RoleTrigger, 0, len(input))
+	for _, item := range input {
+		trigger := model.RoleTrigger{
+			Event:            strings.TrimSpace(item.Event),
+			Action:           strings.TrimSpace(item.Action),
+			Condition:        strings.TrimSpace(item.Condition),
+			AutoExecute:      item.AutoExecute,
+			RequiresApproval: item.RequiresApproval,
+		}
+		if trigger.Event == "" && trigger.Action == "" && trigger.Condition == "" && !trigger.AutoExecute && !trigger.RequiresApproval {
+			continue
+		}
+		normalized = append(normalized, trigger)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
+}
+
+func normalizeStringSlice(input []string) []string {
+	if len(input) == 0 {
+		return nil
+	}
+
+	normalized := make([]string, 0, len(input))
+	seen := make(map[string]struct{}, len(input))
+	for _, item := range input {
+		trimmed := strings.TrimSpace(item)
+		if trimmed == "" {
+			continue
+		}
+		if _, ok := seen[trimmed]; ok {
+			continue
+		}
+		seen[trimmed] = struct{}{}
+		normalized = append(normalized, trimmed)
+	}
+	if len(normalized) == 0 {
+		return nil
+	}
+	return normalized
 }

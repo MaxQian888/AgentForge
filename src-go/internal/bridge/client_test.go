@@ -401,6 +401,62 @@ func TestClientDecomposeIncludesProviderAndModelWhenSpecified(t *testing.T) {
 	}
 }
 
+func TestClientGenerateUsesCanonicalBridgeContract(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotPath string
+		gotBody map[string]any
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"text": "Sample response",
+			"usage": map[string]any{
+				"input_tokens":  12,
+				"output_tokens": 8,
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	result, err := client.Generate(context.Background(), GenerateRequest{
+		Prompt:       "How would you review this dashboard change?",
+		SystemPrompt: "You are a design lead.",
+		Provider:     "openai",
+		Model:        "gpt-5",
+		MaxTokens:    256,
+		Temperature:  0.2,
+	})
+	if err != nil {
+		t.Fatalf("Generate() error: %v", err)
+	}
+
+	if gotPath != "/bridge/generate" {
+		t.Fatalf("expected /bridge/generate, got %s", gotPath)
+	}
+	if gotBody["prompt"] != "How would you review this dashboard change?" {
+		t.Fatalf("expected prompt in request body, got %#v", gotBody)
+	}
+	if gotBody["system_prompt"] != "You are a design lead." {
+		t.Fatalf("expected system_prompt in request body, got %#v", gotBody)
+	}
+	if gotBody["provider"] != "openai" || gotBody["model"] != "gpt-5" {
+		t.Fatalf("expected provider/model in request body, got %#v", gotBody)
+	}
+	if result.Text != "Sample response" || result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 8 {
+		t.Fatalf("unexpected generate result: %+v", result)
+	}
+}
+
 func TestClientReviewUsesCanonicalBridgeContract(t *testing.T) {
 	t.Parallel()
 

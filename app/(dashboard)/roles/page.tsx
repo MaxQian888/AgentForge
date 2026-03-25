@@ -5,7 +5,17 @@ import { RoleWorkspace } from "@/components/roles/role-workspace";
 import { useRoleStore, type RoleManifest } from "@/lib/stores/role-store";
 
 export default function RolesPage() {
-  const { roles, loading, error, fetchRoles, createRole, updateRole, deleteRole } =
+  const {
+    roles,
+    loading,
+    error,
+    fetchRoles,
+    createRole,
+    updateRole,
+    deleteRole,
+    previewRole,
+    sandboxRole,
+  } =
     useRoleStore();
 
   useEffect(() => {
@@ -30,6 +40,8 @@ export default function RolesPage() {
           // error is set in the store
         }
       }}
+      onPreviewRole={previewRole}
+      onSandboxRole={sandboxRole}
     />
   );
 }
