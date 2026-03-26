@@ -24,6 +24,27 @@ export interface DashboardProject {
   createdAt: string;
 }
 
+export interface DashboardConfig {
+  id: string;
+  projectId: string;
+  name: string;
+  layout: unknown;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  widgets?: DashboardWidget[];
+}
+
+export interface DashboardWidget {
+  id: string;
+  dashboardId: string;
+  widgetType: string;
+  config: unknown;
+  position: unknown;
+  createdAt: string;
+  updatedAt: string;
+}
+
 interface TaskListResponse {
   items: DashboardTaskSource[];
   total: number;
@@ -35,6 +56,9 @@ interface DashboardState {
   summary: DashboardSummary | null;
   projects: DashboardProject[];
   selectedProjectId: string | null;
+  dashboardsByProject: Record<string, DashboardConfig[]>;
+  widgetsByDashboard: Record<string, DashboardWidget[]>;
+  widgetData: Record<string, unknown>;
   tasks: DashboardTaskSource[];
   members: DashboardMemberSource[];
   agents: DashboardAgentSource[];
@@ -43,6 +67,13 @@ interface DashboardState {
   error: string | null;
   sectionErrors: Record<string, string>;
   fetchSummary: (options?: { projectId?: string | null; now?: string }) => Promise<void>;
+  fetchDashboards: (projectId: string) => Promise<void>;
+  createDashboard: (projectId: string, input: { name: string; layout?: unknown }) => Promise<void>;
+  updateDashboard: (projectId: string, dashboardId: string, input: { name?: string; layout?: unknown }) => Promise<void>;
+  deleteDashboard: (projectId: string, dashboardId: string) => Promise<void>;
+  fetchWidgetData: (projectId: string, widgetType: string, config?: unknown) => Promise<unknown>;
+  saveWidget: (projectId: string, dashboardId: string, input: { id?: string; widgetType: string; config?: unknown; position?: unknown }) => Promise<void>;
+  deleteWidget: (projectId: string, dashboardId: string, widgetId: string) => Promise<void>;
   applyTaskUpdate: (task: DashboardTaskSource) => void;
   applyAgentUpdate: (agent: DashboardAgentSource) => void;
   applyActivityNotification: (notification: {
@@ -109,6 +140,9 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
   summary: null,
   projects: [],
   selectedProjectId: null,
+  dashboardsByProject: {},
+  widgetsByDashboard: {},
+  widgetData: {},
   tasks: [],
   members: [],
   agents: [],
@@ -238,6 +272,110 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
     } finally {
       set({ loading: false });
     }
+  },
+
+  fetchDashboards: async (projectId) => {
+    const token = getToken();
+    if (!token) return;
+    const api = createApiClient(API_URL);
+    const { data } = await api.get<DashboardConfig[]>(`/api/v1/projects/${projectId}/dashboards`, { token });
+    set((state) => ({
+      dashboardsByProject: { ...state.dashboardsByProject, [projectId]: data ?? [] },
+      widgetsByDashboard: {
+        ...state.widgetsByDashboard,
+        ...(data ?? []).reduce<Record<string, DashboardWidget[]>>((acc, item) => {
+          acc[item.id] = item.widgets ?? [];
+          return acc;
+        }, {}),
+      },
+    }));
+  },
+
+  createDashboard: async (projectId, input) => {
+    const token = getToken();
+    if (!token) return;
+    const api = createApiClient(API_URL);
+    const { data } = await api.post<DashboardConfig>(`/api/v1/projects/${projectId}/dashboards`, input, { token });
+    set((state) => ({
+      dashboardsByProject: {
+        ...state.dashboardsByProject,
+        [projectId]: [...(state.dashboardsByProject[projectId] ?? []), data],
+      },
+      widgetsByDashboard: { ...state.widgetsByDashboard, [data.id]: data.widgets ?? [] },
+    }));
+  },
+
+  updateDashboard: async (projectId, dashboardId, input) => {
+    const token = getToken();
+    if (!token) return;
+    const api = createApiClient(API_URL);
+    const { data } = await api.put<DashboardConfig>(`/api/v1/projects/${projectId}/dashboards/${dashboardId}`, input, { token });
+    set((state) => ({
+      dashboardsByProject: {
+        ...state.dashboardsByProject,
+        [projectId]: (state.dashboardsByProject[projectId] ?? []).map((item) => (item.id === dashboardId ? data : item)),
+      },
+    }));
+  },
+
+  deleteDashboard: async (projectId, dashboardId) => {
+    const token = getToken();
+    if (!token) return;
+    const api = createApiClient(API_URL);
+    await api.delete(`/api/v1/projects/${projectId}/dashboards/${dashboardId}`, { token });
+    set((state) => {
+      const nextWidgets = { ...state.widgetsByDashboard };
+      delete nextWidgets[dashboardId];
+      return {
+        dashboardsByProject: {
+          ...state.dashboardsByProject,
+          [projectId]: (state.dashboardsByProject[projectId] ?? []).filter((item) => item.id !== dashboardId),
+        },
+        widgetsByDashboard: nextWidgets,
+      };
+    });
+  },
+
+  fetchWidgetData: async (projectId, widgetType, config) => {
+    const token = getToken();
+    if (!token) return null;
+    const api = createApiClient(API_URL);
+    const query = config == null ? "" : `?config=${encodeURIComponent(JSON.stringify(config))}`;
+    const { data } = await api.get<unknown>(`/api/v1/projects/${projectId}/dashboard/widgets/${widgetType}${query}`, { token });
+    const key = `${projectId}:${widgetType}:${JSON.stringify(config ?? {})}`;
+    set((state) => ({
+      widgetData: { ...state.widgetData, [key]: data },
+    }));
+    return data;
+  },
+
+  saveWidget: async (projectId, dashboardId, input) => {
+    const token = getToken();
+    if (!token) return;
+    const api = createApiClient(API_URL);
+    const { data } = await api.post<DashboardWidget>(`/api/v1/projects/${projectId}/dashboards/${dashboardId}/widgets`, input, { token });
+    set((state) => ({
+      widgetsByDashboard: {
+        ...state.widgetsByDashboard,
+        [dashboardId]: [
+          ...(state.widgetsByDashboard[dashboardId] ?? []).filter((item) => item.id !== data.id),
+          data,
+        ],
+      },
+    }));
+  },
+
+  deleteWidget: async (projectId, dashboardId, widgetId) => {
+    const token = getToken();
+    if (!token) return;
+    const api = createApiClient(API_URL);
+    await api.delete(`/api/v1/projects/${projectId}/dashboards/${dashboardId}/widgets/${widgetId}`, { token });
+    set((state) => ({
+      widgetsByDashboard: {
+        ...state.widgetsByDashboard,
+        [dashboardId]: (state.widgetsByDashboard[dashboardId] ?? []).filter((item) => item.id !== widgetId),
+      },
+    }));
   },
 
   applyTaskUpdate: (task) => {

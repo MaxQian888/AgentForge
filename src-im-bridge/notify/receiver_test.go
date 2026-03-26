@@ -115,6 +115,56 @@ func (p *capabilityAwareTextPlatform) Metadata() core.PlatformMetadata {
 	return p.metadata
 }
 
+type structuredNotificationPlatform struct {
+	replyAwareTextPlatform
+	metadata   core.PlatformMetadata
+	structured []*core.StructuredMessage
+}
+
+func (p *structuredNotificationPlatform) Metadata() core.PlatformMetadata {
+	return p.metadata
+}
+
+func (p *structuredNotificationPlatform) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	p.chat = append(p.chat, chatID)
+	p.structured = append(p.structured, message)
+	return nil
+}
+
+type nativeNotificationPlatform struct {
+	textOnlyPlatform
+	metadata     core.PlatformMetadata
+	nativeSent   []*core.NativeMessage
+	nativeUpdate []*core.NativeMessage
+	updateErr    error
+}
+
+func (p *nativeNotificationPlatform) Metadata() core.PlatformMetadata {
+	return p.metadata
+}
+
+func (p *nativeNotificationPlatform) ReplyContextFromTarget(target *core.ReplyTarget) any {
+	return target
+}
+
+func (p *nativeNotificationPlatform) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	p.nativeSent = append(p.nativeSent, message)
+	return nil
+}
+
+func (p *nativeNotificationPlatform) ReplyNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	p.nativeSent = append(p.nativeSent, message)
+	return nil
+}
+
+func (p *nativeNotificationPlatform) UpdateNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	if p.updateErr != nil {
+		return p.updateErr
+	}
+	p.nativeUpdate = append(p.nativeUpdate, message)
+	return nil
+}
+
 type replyTargetActionHandler struct {
 	response *ActionResponse
 }
@@ -459,6 +509,77 @@ func TestReceiver_HealthReportsNormalizedTelegramSourceAndCapabilities(t *testin
 	}
 }
 
+func TestReceiver_HealthReportsNormalizedWeComSourceAndCapabilities(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+
+	r := NewReceiver(&capabilityAwareTextPlatform{
+		textOnlyPlatform: textOnlyPlatform{name: "wecom-live"},
+		metadata: core.PlatformMetadata{
+			Source: "wecom",
+			Capabilities: core.PlatformCapabilities{
+				StructuredSurface:      core.StructuredSurfaceCards,
+				ActionCallbackMode:     core.ActionCallbackWebhook,
+				AsyncUpdateModes:       []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateSessionWebhook},
+				MessageScopes:          []core.MessageScope{core.MessageScopeChat},
+				RequiresPublicCallback: true,
+				SupportsMentions:       true,
+				SupportsSlashCommands:  true,
+				SupportsRichMessages:   true,
+			},
+		},
+	}, strconv.Itoa(port))
+	done := make(chan error, 1)
+	go func() {
+		done <- r.Start()
+	}()
+
+	var resp *http.Response
+	for i := 0; i < 20; i++ {
+		resp, err = http.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/im/health")
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("health request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if payload["platform"] != "wecom-live" {
+		t.Fatalf("platform = %v", payload["platform"])
+	}
+	if payload["source"] != "wecom" {
+		t.Fatalf("source = %v", payload["source"])
+	}
+	if payload["supports_rich_messages"] != true {
+		t.Fatalf("supports_rich_messages = %v", payload["supports_rich_messages"])
+	}
+	matrix, ok := payload["capability_matrix"].(map[string]any)
+	if !ok {
+		t.Fatalf("capability_matrix = %#v", payload["capability_matrix"])
+	}
+	if matrix["structuredSurface"] != "cards" {
+		t.Fatalf("structuredSurface = %v", matrix["structuredSurface"])
+	}
+
+	if err := r.Stop(); err != nil {
+		t.Fatalf("Stop error: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Start returned error after stop: %v", err)
+	}
+}
+
 func TestReceiver_RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured(t *testing.T) {
 	r := NewReceiver(&textOnlyPlatform{name: "slack-stub"}, "0")
 	r.SetSharedSecret("shared-secret")
@@ -512,6 +633,131 @@ func TestReceiver_SuppressesDuplicateSignedCompatibilityDelivery(t *testing.T) {
 	}
 	if len(p.sent) != 1 {
 		t.Fatalf("sent len = %d, want 1", len(p.sent))
+	}
+}
+
+func TestReceiver_HandleSend_RequiresChatID(t *testing.T) {
+	r := NewReceiver(&textOnlyPlatform{name: "slack-stub"}, "0")
+
+	body, err := json.Marshal(SendRequest{
+		Platform: "slack",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("marshal send request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/send", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleSend(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}
+
+func TestReceiver_HandleSend_RejectsPlatformMismatch(t *testing.T) {
+	r := NewReceiver(&textOnlyPlatform{name: "slack-stub"}, "0")
+
+	body, err := json.Marshal(SendRequest{
+		Platform: "discord",
+		ChatID:   "chat-1",
+		Content:  "hello",
+	})
+	if err != nil {
+		t.Fatalf("marshal send request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/send", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleSend(rec, req)
+
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusConflict)
+	}
+}
+
+func TestReceiver_HandleSend_WritesStructuredReceipt(t *testing.T) {
+	p := &structuredNotificationPlatform{
+		replyAwareTextPlatform: replyAwareTextPlatform{textOnlyPlatform: textOnlyPlatform{name: "discord-stub"}},
+		metadata: core.PlatformMetadata{
+			Source: "discord",
+			Capabilities: core.PlatformCapabilities{
+				StructuredSurface: core.StructuredSurfaceComponents,
+			},
+		},
+	}
+	r := NewReceiverWithMetadata(p, p.metadata, "0")
+
+	body, err := json.Marshal(SendRequest{
+		Platform: "discord",
+		ChatID:   "channel-1",
+		Structured: &core.StructuredMessage{
+			Title: "Task Update",
+			Body:  "Agent is running.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal send request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/send", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleSend(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(p.structured) != 1 {
+		t.Fatalf("structured = %d, want 1", len(p.structured))
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload["type"] != "structured" || payload["delivery_method"] != string(core.DeliveryMethodSend) {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestReceiver_HandleAction_RequiresConfiguredHandler(t *testing.T) {
+	r := NewReceiver(&textOnlyPlatform{name: "slack-stub"}, "0")
+
+	body, err := json.Marshal(ActionRequest{
+		Action:   "approve",
+		EntityID: "review-1",
+		ChatID:   "chat-1",
+	})
+	if err != nil {
+		t.Fatalf("marshal action request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/action", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleAction(rec, req)
+
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusServiceUnavailable)
+	}
+}
+
+func TestReceiver_HandleAction_RequiresActionAndEntityID(t *testing.T) {
+	r := NewReceiver(&textOnlyPlatform{name: "slack-stub"}, "0")
+
+	body, err := json.Marshal(ActionRequest{
+		EntityID: "review-1",
+	})
+	if err != nil {
+		t.Fatalf("marshal action request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/action", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleAction(rec, req)
+
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
 	}
 }
 
@@ -707,6 +953,238 @@ func TestReceiver_ActionResponseRecordsFallbackReasonWhenFeishuDelayedUpdateCont
 	}
 	if metadata["fallback_reason"] != "missing_delayed_update_context" {
 		t.Fatalf("metadata = %#v", metadata)
+	}
+}
+
+func TestReceiver_PrefersNativePayloadWhenPlatformSupportsIt(t *testing.T) {
+	p := &nativeNotificationPlatform{
+		textOnlyPlatform: textOnlyPlatform{name: "feishu-stub"},
+		metadata: core.PlatformMetadata{
+			Source: "feishu",
+			Capabilities: core.PlatformCapabilities{
+				StructuredSurface:    core.StructuredSurfaceCards,
+				AsyncUpdateModes:     []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateDeferredCardUpdate},
+				SupportsRichMessages: true,
+			},
+		},
+	}
+	r := NewReceiver(p, "0")
+
+	body, err := json.Marshal(Notification{
+		Platform:     "feishu",
+		TargetChatID: "chat-1",
+		Content:      "fallback",
+		Native: &core.NativeMessage{
+			Platform: "feishu",
+			FeishuCard: &core.FeishuCardPayload{
+				Mode:       core.FeishuCardModeTemplate,
+				TemplateID: "ctp_native",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal notification: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/notify", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleNotify(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(p.nativeSent) != 1 {
+		t.Fatalf("nativeSent = %d, want 1", len(p.nativeSent))
+	}
+	if len(p.sent) != 0 {
+		t.Fatalf("text fallback should not be used, sent=%v", p.sent)
+	}
+}
+
+func TestReceiver_UsesDeferredNativeUpdateWhenFeishuReplyTargetSupportsIt(t *testing.T) {
+	p := &nativeNotificationPlatform{
+		textOnlyPlatform: textOnlyPlatform{name: "feishu-stub"},
+		metadata: core.PlatformMetadata{
+			Source: "feishu",
+			Capabilities: core.PlatformCapabilities{
+				StructuredSurface:    core.StructuredSurfaceCards,
+				AsyncUpdateModes:     []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateDeferredCardUpdate},
+				SupportsRichMessages: true,
+			},
+		},
+	}
+	r := NewReceiver(p, "0")
+
+	body, err := json.Marshal(Notification{
+		Platform:     "feishu",
+		TargetChatID: "chat-1",
+		Native: &core.NativeMessage{
+			Platform: "feishu",
+			FeishuCard: &core.FeishuCardPayload{
+				Mode:       core.FeishuCardModeTemplate,
+				TemplateID: "ctp_deferred",
+			},
+		},
+		ReplyTarget: &core.ReplyTarget{
+			Platform:      "feishu",
+			ChatID:        "chat-1",
+			CallbackToken: "cb-token-1",
+			ProgressMode:  string(core.AsyncUpdateDeferredCardUpdate),
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal notification: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/notify", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleNotify(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(p.nativeUpdate) != 1 {
+		t.Fatalf("nativeUpdate = %d, want 1", len(p.nativeUpdate))
+	}
+	if len(p.nativeSent) != 0 {
+		t.Fatalf("nativeSent = %d, want 0", len(p.nativeSent))
+	}
+}
+
+func TestReceiver_ReportsFallbackReasonWhenDeferredUpdateContextMissing(t *testing.T) {
+	p := &nativeNotificationPlatform{
+		textOnlyPlatform: textOnlyPlatform{name: "feishu-stub"},
+		metadata: core.PlatformMetadata{
+			Source: "feishu",
+			Capabilities: core.PlatformCapabilities{
+				StructuredSurface:    core.StructuredSurfaceCards,
+				AsyncUpdateModes:     []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateDeferredCardUpdate},
+				SupportsRichMessages: true,
+			},
+		},
+	}
+	r := NewReceiver(p, "0")
+
+	body, err := json.Marshal(Notification{
+		Platform:     "feishu",
+		TargetChatID: "chat-1",
+		Content:      "fallback text",
+		Native: &core.NativeMessage{
+			Platform: "feishu",
+			FeishuCard: &core.FeishuCardPayload{
+				Mode:       core.FeishuCardModeTemplate,
+				TemplateID: "ctp_missing",
+			},
+		},
+		ReplyTarget: &core.ReplyTarget{
+			Platform:     "feishu",
+			ChatID:       "chat-1",
+			ProgressMode: string(core.AsyncUpdateDeferredCardUpdate),
+			UseReply:     true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal notification: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/notify", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleNotify(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(p.nativeUpdate) != 0 {
+		t.Fatalf("nativeUpdate = %d, want 0", len(p.nativeUpdate))
+	}
+	if len(p.nativeSent) != 1 {
+		t.Fatalf("nativeSent = %d, want 1", len(p.nativeSent))
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response["delivery_method"] != string(core.DeliveryMethodReply) {
+		t.Fatalf("response = %+v", response)
+	}
+	if response["fallback_reason"] == "" {
+		t.Fatalf("response = %+v, want fallback_reason", response)
+	}
+}
+
+func TestClassifyNativeFallbackReason_MapsExpectedBuckets(t *testing.T) {
+	tests := []struct {
+		name   string
+		target *core.ReplyTarget
+		err    error
+		want   string
+	}{
+		{
+			name: "missing context",
+			err:  errors.New("anything"),
+			want: "missing_delayed_update_context",
+		},
+		{
+			name: "expired token",
+			target: &core.ReplyTarget{
+				CallbackToken: "cb-token-1",
+			},
+			err:  errors.New("callback expired"),
+			want: "delayed_update_context_expired",
+		},
+		{
+			name: "used token",
+			target: &core.ReplyTarget{
+				CallbackToken: "cb-token-1",
+			},
+			err:  errors.New("token already used"),
+			want: "delayed_update_context_exhausted",
+		},
+		{
+			name: "invalid token",
+			target: &core.ReplyTarget{
+				CallbackToken: "cb-token-1",
+			},
+			err:  errors.New("invalid callback token"),
+			want: "invalid_delayed_update_context",
+		},
+		{
+			name: "generic failure",
+			target: &core.ReplyTarget{
+				CallbackToken: "cb-token-1",
+			},
+			err:  errors.New("upstream timeout"),
+			want: "native_update_failed",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := classifyNativeFallbackReason(tc.err, tc.target); got != tc.want {
+				t.Fatalf("classifyNativeFallbackReason() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestCloneMetadata_ReturnsIndependentWritableCopy(t *testing.T) {
+	cloned := cloneMetadata(nil)
+	cloned["new"] = "value"
+	if len(cloned) != 1 {
+		t.Fatalf("cloneMetadata(nil) = %+v", cloned)
+	}
+
+	original := map[string]string{"status": "started"}
+	copy := cloneMetadata(original)
+	copy["status"] = "completed"
+	copy["new"] = "field"
+
+	if original["status"] != "started" {
+		t.Fatalf("original mutated = %+v", original)
+	}
+	if copy["status"] != "completed" || copy["new"] != "field" {
+		t.Fatalf("copy = %+v", copy)
 	}
 }
 

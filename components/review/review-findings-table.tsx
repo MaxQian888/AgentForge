@@ -39,6 +39,7 @@ export function ReviewFindingsTable({ findings }: ReviewFindingsTableProps) {
         <TableRow>
           <TableHead>Severity</TableHead>
           <TableHead>Category</TableHead>
+          <TableHead>Source</TableHead>
           <TableHead>File:Line</TableHead>
           <TableHead>Message</TableHead>
           <TableHead>Suggestion</TableHead>
@@ -58,6 +59,11 @@ export function ReviewFindingsTable({ findings }: ReviewFindingsTableProps) {
             <TableCell className="text-xs">
               {f.category}
               {f.subcategory ? ` / ${f.subcategory}` : ""}
+            </TableCell>
+            <TableCell className="text-xs text-muted-foreground">
+              {f.sources && f.sources.length > 1
+                ? `${f.sources[0]} +${f.sources.length - 1}`
+                : f.sources?.[0] ?? "-"}
             </TableCell>
             <TableCell className="font-mono text-xs">
               {f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "-"}

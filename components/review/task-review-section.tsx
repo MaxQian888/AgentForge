@@ -21,7 +21,7 @@ export function TaskReviewSection({ taskId }: TaskReviewSectionProps) {
     fetchReviewsByTask,
     triggerReview,
     approveReview,
-    rejectReview,
+    requestChanges,
   } = useReviewStore();
 
   const reviews = reviewsByTask[taskId] ?? [];
@@ -49,12 +49,12 @@ export function TaskReviewSection({ taskId }: TaskReviewSectionProps) {
     [taskId, approveReview, fetchReviewsByTask]
   );
 
-  const handleReject = useCallback(
-    async (id: string, reason: string) => {
-      await rejectReview(id, reason);
+  const handleRequestChanges = useCallback(
+    async (id: string, comment?: string) => {
+      await requestChanges(id, comment);
       fetchReviewsByTask(taskId);
     },
-    [taskId, rejectReview, fetchReviewsByTask]
+    [taskId, requestChanges, fetchReviewsByTask]
   );
 
   return (
@@ -115,7 +115,7 @@ export function TaskReviewSection({ taskId }: TaskReviewSectionProps) {
           reviews={reviews}
           onSelect={setSelected}
           onApprove={(id) => handleApprove(id)}
-          onReject={handleReject}
+          onRequestChanges={handleRequestChanges}
         />
       ) : (
         <div className="flex flex-col gap-2">
@@ -131,7 +131,7 @@ export function TaskReviewSection({ taskId }: TaskReviewSectionProps) {
           <ReviewDetailPanel
             review={selected}
             onApprove={handleApprove}
-            onReject={handleReject}
+            onRequestChanges={handleRequestChanges}
           />
         </div>
       )}

@@ -25,7 +25,7 @@ jest.mock("@blocknote/react", () => ({
       implementation: {
         render: (input: {
           block: { props?: { formula?: string } };
-        }) => JSX.Element;
+        }) => React.ReactElement;
       },
     ) => ({
       config,
@@ -43,7 +43,7 @@ describe("createFormulaBlock", () => {
   it("declares a formula block spec and renders KaTeX output safely", () => {
     const formulaBlock = createFormulaBlock as unknown as {
       config: unknown;
-      render: (input: { block: { props?: { formula?: string } } }) => JSX.Element;
+      render: (input: { block: { props?: { formula?: string } } }) => React.ReactElement;
     };
 
     expect(formulaBlock.config).toEqual(

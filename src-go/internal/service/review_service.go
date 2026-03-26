@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strconv"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -15,8 +17,9 @@ import (
 )
 
 var (
-	ErrReviewNotFound     = errors.New("review not found")
-	ErrReviewTaskNotFound = errors.New("review task not found")
+	ErrReviewNotFound          = errors.New("review not found")
+	ErrReviewTaskNotFound      = errors.New("review task not found")
+	ErrReviewInvalidTransition = errors.New("review transition is not allowed for current state")
 )
 
 type ReviewRepository interface {
@@ -34,6 +37,10 @@ type ReviewTaskRepository interface {
 	TransitionStatus(ctx context.Context, id uuid.UUID, newStatus string) error
 }
 
+type ReviewProjectRepository interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*model.Project, error)
+}
+
 type ReviewNotificationCreator interface {
 	Create(ctx context.Context, targetID uuid.UUID, ntype, title, body, data string) (*model.Notification, error)
 }
@@ -45,6 +52,7 @@ type ReviewBridgeClient interface {
 type ReviewService struct {
 	reviews       ReviewRepository
 	tasks         ReviewTaskRepository
+	projects      ReviewProjectRepository
 	notifications ReviewNotificationCreator
 	hub           *ws.Hub
 	bridge        ReviewBridgeClient
@@ -52,6 +60,10 @@ type ReviewService struct {
 	progress      *TaskProgressService
 	imProgress    IMBoundProgressNotifier
 	aggregation   *ReviewAggregationService
+	automation    AutomationEventEvaluator
+	links         entityLinkRepository
+	pages         wikiPageRepository
+	versions      pageVersionRepository
 }
 
 func reviewLogFields(review *model.Review, task *model.Task) log.Fields {
@@ -102,15 +114,32 @@ func (s *ReviewService) WithExecutionPlanner(planner *ReviewExecutionPlanner) *R
 	return s
 }
 
+func (s *ReviewService) WithProjectRepository(projects ReviewProjectRepository) *ReviewService {
+	s.projects = projects
+	return s
+}
+
 func (s *ReviewService) WithAggregationService(agg *ReviewAggregationService) *ReviewService {
 	s.aggregation = agg
 	return s
 }
 
+func (s *ReviewService) SetAutomationEvaluator(evaluator AutomationEventEvaluator) {
+	s.automation = evaluator
+}
+
+func (s *ReviewService) WithDocWriteback(links entityLinkRepository, pages wikiPageRepository, versions pageVersionRepository) *ReviewService {
+	s.links = links
+	s.pages = pages
+	s.versions = versions
+	return s
+}
+
 func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewRequest) (*model.Review, error) {
 	var (
-		task *model.Task
-		err  error
+		task      *model.Task
+		err       error
+		projectID uuid.UUID
 	)
 
 	if req.TaskID != "" {
@@ -122,16 +151,41 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	} else {
 		task, err = s.tasks.GetByPRURL(ctx, req.PRURL)
 	}
-	if err != nil || task == nil {
-		return nil, ErrReviewTaskNotFound
+	if err != nil {
+		task = nil
 	}
+
+	if task != nil {
+		projectID = task.ProjectID
+	}
+
+	detached := false
+	if task == nil {
+		if strings.TrimSpace(req.PRURL) == "" {
+			return nil, ErrReviewTaskNotFound
+		}
+		detached = true
+		if strings.TrimSpace(req.ProjectID) != "" {
+			parsedProjectID, parseErr := uuid.Parse(strings.TrimSpace(req.ProjectID))
+			if parseErr != nil {
+				return nil, fmt.Errorf("invalid project id: %w", parseErr)
+			}
+			projectID = parsedProjectID
+		}
+	}
+
 	triggerFields := log.Fields{
-		"taskId":     task.ID.String(),
-		"projectId":  task.ProjectID.String(),
-		"taskStatus": task.Status,
-		"trigger":    req.Trigger,
-		"prUrl":      req.PRURL,
-		"prNumber":   req.PRNumber,
+		"trigger":  req.Trigger,
+		"prUrl":    req.PRURL,
+		"prNumber": req.PRNumber,
+		"detached": detached,
+	}
+	if task != nil {
+		triggerFields["taskId"] = task.ID.String()
+		triggerFields["projectId"] = task.ProjectID.String()
+		triggerFields["taskStatus"] = task.Status
+	} else if projectID != uuid.Nil {
+		triggerFields["projectId"] = projectID.String()
 	}
 
 	executionPlan, err := s.buildExecutionPlan(ctx, req)
@@ -144,12 +198,15 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 
 	review := &model.Review{
 		ID:        uuid.New(),
-		TaskID:    task.ID,
+		TaskID:    uuid.Nil,
 		PRURL:     req.PRURL,
 		PRNumber:  req.PRNumber,
 		Layer:     model.ReviewLayerDeep,
 		Status:    model.ReviewStatusInProgress,
 		RiskLevel: model.ReviewRiskLevelLow,
+	}
+	if task != nil {
+		review.TaskID = task.ID
 	}
 
 	if err := s.reviews.Create(ctx, review); err != nil {
@@ -158,7 +215,7 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	triggerFields["reviewId"] = review.ID.String()
 	log.WithFields(triggerFields).Info("review created")
 
-	if task.Status == model.TaskStatusInProgress {
+	if task != nil && task.Status == model.TaskStatusInProgress {
 		if err := s.tasks.TransitionStatus(ctx, task.ID, model.TaskStatusInReview); err != nil {
 			return nil, fmt.Errorf("transition task to in_review: %w", err)
 		}
@@ -166,26 +223,38 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 		log.WithFields(triggerFields).Info("task transitioned to in_review for review")
 	}
 
-	s.broadcast(ws.EventReviewCreated, task.ProjectID.String(), review.ToDTO())
-	s.recordProgress(ctx, task.ID, TaskActivityInput{
-		Source:         model.TaskProgressSourceReviewCreated,
-		OccurredAt:     time.Now().UTC(),
-		UpdateHealth:   true,
-		MarkTransition: true,
-	})
+	if projectID != uuid.Nil {
+		s.broadcast(ws.EventReviewCreated, projectID.String(), review.ToDTO())
+	}
+	if task != nil {
+		s.recordProgress(ctx, task.ID, TaskActivityInput{
+			Source:         model.TaskProgressSourceReviewCreated,
+			OccurredAt:     time.Now().UTC(),
+			UpdateHealth:   true,
+			MarkTransition: true,
+		})
+	}
 
 	if s.bridge == nil {
 		log.WithFields(triggerFields).Debug("review trigger completed without bridge client")
 		return review, nil
 	}
 
+	taskID := ""
+	taskTitle := ""
+	taskDescription := ""
+	if task != nil {
+		taskID = task.ID.String()
+		taskTitle = task.Title
+		taskDescription = task.Description
+	}
 	result, err := s.bridge.Review(ctx, bridgeclient.ReviewRequest{
 		ReviewID:      review.ID.String(),
-		TaskID:        task.ID.String(),
+		TaskID:        taskID,
 		PRURL:         req.PRURL,
 		PRNumber:      req.PRNumber,
-		Title:         task.Title,
-		Description:   task.Description,
+		Title:         taskTitle,
+		Description:   taskDescription,
 		Diff:          req.Diff,
 		Dimensions:    executionPlan.Dimensions,
 		TriggerEvent:  executionPlan.TriggerEvent,
@@ -203,10 +272,18 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	triggerFields["costUsd"] = result.CostUSD
 	log.WithFields(triggerFields).Info("review bridge execution completed")
 
+	executionMetadata := reviewExecutionMetadataFromBridge(executionPlan, result)
+	if projectID != uuid.Nil {
+		if executionMetadata == nil {
+			executionMetadata = &model.ReviewExecutionMetadata{}
+		}
+		executionMetadata.ProjectID = projectID.String()
+	}
+
 	return s.Complete(ctx, review.ID, &model.CompleteReviewRequest{
 		RiskLevel:         result.RiskLevel,
 		Findings:          result.Findings,
-		ExecutionMetadata: reviewExecutionMetadataFromBridge(executionPlan, result),
+		ExecutionMetadata: executionMetadata,
 		Summary:           result.Summary,
 		Recommendation:    result.Recommendation,
 		CostUSD:           result.CostUSD,
@@ -219,37 +296,77 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 		return nil, ErrReviewNotFound
 	}
 
-	task, err := s.tasks.GetByID(ctx, review.TaskID)
-	if err != nil {
-		return nil, ErrReviewTaskNotFound
+	var task *model.Task
+	projectID := uuid.Nil
+	if review.TaskID != uuid.Nil {
+		task, err = s.tasks.GetByID(ctx, review.TaskID)
+		if err != nil {
+			return nil, ErrReviewTaskNotFound
+		}
+		projectID = task.ProjectID
 	}
 
 	review.Status = model.ReviewStatusCompleted
 	review.RiskLevel = req.RiskLevel
 	review.Findings = req.Findings
-	review.ExecutionMetadata = model.CloneReviewExecutionMetadata(req.ExecutionMetadata)
+	if req.ExecutionMetadata != nil {
+		review.ExecutionMetadata = model.CloneReviewExecutionMetadata(req.ExecutionMetadata)
+	}
+	if projectID == uuid.Nil {
+		projectID = projectIDFromMetadata(req.ExecutionMetadata, review.ExecutionMetadata)
+	}
+	if projectID != uuid.Nil {
+		if review.ExecutionMetadata == nil {
+			review.ExecutionMetadata = &model.ReviewExecutionMetadata{}
+		}
+		if strings.TrimSpace(review.ExecutionMetadata.ProjectID) == "" {
+			review.ExecutionMetadata.ProjectID = projectID.String()
+		}
+	}
 	review.Summary = req.Summary
 	review.Recommendation = req.Recommendation
 	review.CostUSD = req.CostUSD
 	fields := reviewLogFields(review, task)
 	fields["findingCount"] = len(req.Findings)
 	fields["costUsd"] = req.CostUSD
+	if projectID != uuid.Nil {
+		fields["projectId"] = projectID.String()
+	}
 
 	if err := s.reviews.UpdateResult(ctx, review); err != nil {
 		return nil, fmt.Errorf("update review result: %w", err)
 	}
 	log.WithFields(fields).Info("review result stored")
 
-	targetStatus := mapRecommendationToTaskStatus(req.Recommendation)
-	if targetStatus != "" {
-		if err := s.transitionTaskForReview(ctx, task, targetStatus); err != nil {
-			log.WithFields(fields).WithError(err).Warn("review task transition failed")
+	routePendingHuman, pendingReason := s.shouldRoutePendingHuman(ctx, projectID, review)
+	if routePendingHuman {
+		fields["pendingHumanReason"] = pendingReason
+		if err := s.RequestHumanApproval(ctx, review.ID); err != nil {
+			log.WithFields(fields).WithError(err).Warn("review pending_human transition failed")
 			return nil, err
 		}
-		fields["taskStatus"] = task.Status
+		latest, getErr := s.reviews.GetByID(ctx, review.ID)
+		if getErr == nil && latest != nil {
+			review = latest
+		} else {
+			review.Status = model.ReviewStatusPendingHuman
+		}
+		log.WithFields(fields).Info("review routed to pending_human")
+		return review, nil
 	}
 
-	if task.AssigneeID != nil && s.notifications != nil {
+	if task != nil {
+		targetStatus := mapRecommendationToTaskStatus(req.Recommendation)
+		if targetStatus != "" {
+			if err := s.transitionTaskForReview(ctx, task, targetStatus); err != nil {
+				log.WithFields(fields).WithError(err).Warn("review task transition failed")
+				return nil, err
+			}
+			fields["taskStatus"] = task.Status
+		}
+	}
+
+	if task != nil && task.AssigneeID != nil && s.notifications != nil {
 		payload, _ := json.Marshal(review.ToDTO())
 		if _, err := s.notifications.Create(
 			ctx,
@@ -263,42 +380,73 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 		}
 	}
 
-	s.broadcast(ws.EventReviewCompleted, task.ProjectID.String(), review.ToDTO())
-	s.recordProgress(ctx, task.ID, TaskActivityInput{
-		Source:         model.TaskProgressSourceReviewComplete,
-		OccurredAt:     time.Now().UTC(),
-		UpdateHealth:   true,
-		MarkTransition: true,
-	})
-	if s.imProgress != nil {
-		queued, err := s.imProgress.QueueBoundProgress(ctx, IMBoundProgressRequest{
-			TaskID:   task.ID.String(),
-			ReviewID: review.ID.String(),
-			Kind:     IMDeliveryKindTerminal,
-			Content:  fmt.Sprintf("代码审查已完成。\nReview: %s\n状态: %s\n建议: %s", review.ID.String(), review.Status, review.Recommendation),
-			Structured: &model.IMStructuredMessage{
-				Title: "Code Review Completed",
-				Body:  fmt.Sprintf("Review %s finished.", review.ID.String()),
-				Fields: []model.IMStructuredField{
-					{Label: "Review", Value: review.ID.String()},
-					{Label: "Status", Value: review.Status},
-					{Label: "Recommendation", Value: review.Recommendation},
-				},
-			},
-			IsTerminal: true,
+	if task != nil {
+		if docID, versionID, writebackErr := s.writeBackReviewFindings(ctx, task, review); writebackErr != nil {
+			log.WithFields(fields).WithField("writebackDocumentId", docID).WithError(writebackErr).Warn("review doc writeback failed")
+		} else if docID != "" {
+			fields["writebackDocumentId"] = docID
+			fields["writebackVersionId"] = versionID
+			log.WithFields(fields).Info("review doc writeback completed")
+		} else {
+			log.WithFields(fields).Info("review doc writeback skipped")
+		}
+	}
+
+	if projectID != uuid.Nil {
+		s.broadcast(ws.EventReviewCompleted, projectID.String(), review.ToDTO())
+	}
+	if task != nil {
+		s.recordProgress(ctx, task.ID, TaskActivityInput{
+			Source:         model.TaskProgressSourceReviewComplete,
+			OccurredAt:     time.Now().UTC(),
+			UpdateHealth:   true,
+			MarkTransition: true,
 		})
-		fields["imQueued"] = queued
-		if err != nil {
-			log.WithFields(fields).WithError(err).Warn("review IM progress queue failed")
+		if s.imProgress != nil {
+			queued, err := s.imProgress.QueueBoundProgress(ctx, IMBoundProgressRequest{
+				TaskID:   task.ID.String(),
+				ReviewID: review.ID.String(),
+				Kind:     IMDeliveryKindTerminal,
+				Content:  fmt.Sprintf("代码审查已完成。\nReview: %s\n状态: %s\n建议: %s", review.ID.String(), review.Status, review.Recommendation),
+				Structured: &model.IMStructuredMessage{
+					Title: "Code Review Completed",
+					Body:  fmt.Sprintf("Review %s finished.", review.ID.String()),
+					Fields: []model.IMStructuredField{
+						{Label: "Review", Value: review.ID.String()},
+						{Label: "Status", Value: review.Status},
+						{Label: "Recommendation", Value: review.Recommendation},
+					},
+				},
+				IsTerminal: true,
+			})
+			fields["imQueued"] = queued
+			if err != nil {
+				log.WithFields(fields).WithError(err).Warn("review IM progress queue failed")
+			}
 		}
 	}
 	// Trigger aggregation if service is available.
-	if s.aggregation != nil {
+	if s.aggregation != nil && task != nil {
 		if agg, aggErr := s.aggregation.Aggregate(ctx, review.TaskID); aggErr != nil {
 			log.WithFields(fields).WithError(aggErr).Warn("post-complete aggregation failed")
 		} else {
 			log.WithFields(fields).WithField("aggregationId", agg.ID.String()).Info("post-complete aggregation succeeded")
 		}
+	}
+	if s.automation != nil && task != nil {
+		taskID := task.ID
+		_ = s.automation.EvaluateRules(ctx, AutomationEvent{
+			EventType: model.AutomationEventReviewCompleted,
+			ProjectID: task.ProjectID,
+			TaskID:    &taskID,
+			Task:      task,
+			Data: map[string]any{
+				"review_id":      review.ID.String(),
+				"recommendation": review.Recommendation,
+				"risk_level":     review.RiskLevel,
+				"review_status":  review.Status,
+			},
+		})
 	}
 
 	log.WithFields(fields).Info("review completed")
@@ -307,29 +455,55 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 
 // IngestCIResult creates a review with Layer "ci" (Layer 1) from CI pipeline findings.
 func (s *ReviewService) IngestCIResult(ctx context.Context, req *model.CIReviewRequest) (*model.Review, error) {
-	taskID, err := uuid.Parse(req.TaskID)
-	if err != nil {
-		return nil, fmt.Errorf("invalid task id: %w", err)
+	var (
+		task *model.Task
+		err  error
+	)
+	if strings.TrimSpace(req.TaskID) != "" {
+		taskID, parseErr := uuid.Parse(strings.TrimSpace(req.TaskID))
+		if parseErr != nil {
+			return nil, fmt.Errorf("invalid task id: %w", parseErr)
+		}
+		task, err = s.tasks.GetByID(ctx, taskID)
+	} else {
+		task, err = s.tasks.GetByPRURL(ctx, req.PRURL)
 	}
-
-	task, err := s.tasks.GetByID(ctx, taskID)
 	if err != nil || task == nil {
 		return nil, ErrReviewTaskNotFound
 	}
 
-	// Determine risk level from CI status.
-	riskLevel := model.ReviewRiskLevelLow
-	recommendation := model.ReviewRecommendationApprove
-	if req.Status == "failure" || req.Status == "error" {
-		riskLevel = model.ReviewRiskLevelHigh
-		recommendation = model.ReviewRecommendationRequestChanges
+	needsDeepReview := false
+	if req.NeedsDeepReview != nil {
+		needsDeepReview = *req.NeedsDeepReview
+	}
+	if strings.EqualFold(req.Status, "failure") || strings.EqualFold(req.Status, "error") {
+		needsDeepReview = true
 	}
 	if len(req.Findings) > 0 {
+		needsDeepReview = true
+	}
+
+	// Determine risk level from CI status and escalation decision.
+	riskLevel := model.ReviewRiskLevelLow
+	recommendation := model.ReviewRecommendationApprove
+	if strings.EqualFold(req.Status, "failure") || strings.EqualFold(req.Status, "error") {
+		riskLevel = model.ReviewRiskLevelHigh
+		recommendation = model.ReviewRecommendationRequestChanges
+	} else if needsDeepReview {
 		riskLevel = model.ReviewRiskLevelMedium
 		recommendation = model.ReviewRecommendationRequestChanges
 	}
 
-	summary := fmt.Sprintf("CI result from %s: status=%s, findings=%d", req.CISystem, req.Status, len(req.Findings))
+	summary := fmt.Sprintf("CI result from %s: status=%s, findings=%d", strings.TrimSpace(req.CISystem), strings.TrimSpace(req.Status), len(req.Findings))
+	if reason := strings.TrimSpace(req.Reason); reason != "" {
+		summary += fmt.Sprintf(", reason=%s", reason)
+	}
+	if confidence := strings.TrimSpace(req.Confidence); confidence != "" {
+		summary += fmt.Sprintf(", confidence=%s", confidence)
+	}
+	if needsDeepReview {
+		summary += ", needs_deep_review=true"
+	}
 
 	review := &model.Review{
 		ID:             uuid.New(),
@@ -352,6 +526,7 @@ func (s *ReviewService) IngestCIResult(ctx context.Context, req *model.CIReviewR
 	fields := reviewLogFields(review, task)
 	fields["ciSystem"] = req.CISystem
 	fields["findingCount"] = len(req.Findings)
+	fields["needsDeepReview"] = needsDeepReview
 	log.WithFields(fields).Info("CI review ingested")
 
 	s.broadcast(ws.EventReviewCreated, task.ProjectID.String(), review.ToDTO())
@@ -376,9 +551,18 @@ func (s *ReviewService) RequestHumanApproval(ctx context.Context, reviewID uuid.
 		return ErrReviewNotFound
 	}
 
-	task, err := s.tasks.GetByID(ctx, review.TaskID)
-	if err != nil {
-		return ErrReviewTaskNotFound
+	var (
+		task      *model.Task
+		projectID uuid.UUID
+	)
+	if review.TaskID != uuid.Nil {
+		task, err = s.tasks.GetByID(ctx, review.TaskID)
+		if err != nil {
+			return ErrReviewTaskNotFound
+		}
+		projectID = task.ProjectID
+	} else {
+		projectID = projectIDFromMetadata(review.ExecutionMetadata)
 	}
 
 	if err := s.reviews.UpdateStatus(ctx, reviewID, model.ReviewStatusPendingHuman); err != nil {
@@ -389,9 +573,11 @@ func (s *ReviewService) RequestHumanApproval(ctx context.Context, reviewID uuid.
 	fields := reviewLogFields(review, task)
 	log.WithFields(fields).Info("review set to pending_human")
 
-	s.broadcast(ws.EventReviewPendingHuman, task.ProjectID.String(), review.ToDTO())
+	if projectID != uuid.Nil {
+		s.broadcast(ws.EventReviewPendingHuman, projectID.String(), review.ToDTO())
+	}
 
-	if task.AssigneeID != nil && s.notifications != nil {
+	if task != nil && task.AssigneeID != nil && s.notifications != nil {
 		payload, _ := json.Marshal(review.ToDTO())
 		if _, err := s.notifications.Create(
 			ctx,
@@ -414,6 +600,9 @@ func (s *ReviewService) RouteFixRequest(ctx context.Context, reviewID uuid.UUID)
 	review, err := s.reviews.GetByID(ctx, reviewID)
 	if err != nil {
 		return ErrReviewNotFound
+	}
+	if review.TaskID == uuid.Nil {
+		return nil
 	}
 
 	task, err := s.tasks.GetByID(ctx, review.TaskID)
@@ -440,6 +629,10 @@ func (s *ReviewService) RouteFixRequest(ctx context.Context, reviewID uuid.UUID)
 var _ interface {
 	Trigger(context.Context, *model.TriggerReviewRequest) (*model.Review, error)
 	Complete(context.Context, uuid.UUID, *model.CompleteReviewRequest) (*model.Review, error)
+	ApproveReview(context.Context, uuid.UUID, string, string) (*model.Review, error)
+	RequestChangesReview(context.Context, uuid.UUID, string, string) (*model.Review, error)
+	RejectReview(context.Context, uuid.UUID, string, string, string) (*model.Review, error)
+	MarkFalsePositive(context.Context, uuid.UUID, string, []string, string) (*model.Review, error)
 	Approve(context.Context, uuid.UUID, string) (*model.Review, error)
 	Reject(context.Context, uuid.UUID, string, string) (*model.Review, error)
 	GetByID(context.Context, uuid.UUID) (*model.Review, error)
@@ -450,24 +643,167 @@ var _ interface {
 	RouteFixRequest(context.Context, uuid.UUID) error
 } = (*ReviewService)(nil)
 
-func (s *ReviewService) Approve(ctx context.Context, id uuid.UUID, comment string) (*model.Review, error) {
-	return s.Complete(ctx, id, &model.CompleteReviewRequest{
-		RiskLevel:      model.ReviewRiskLevelLow,
-		Summary:        comment,
-		Recommendation: model.ReviewRecommendationApprove,
-	})
+func (s *ReviewService) ApproveReview(ctx context.Context, id uuid.UUID, actor, comment string) (*model.Review, error) {
+	return s.applyHumanTransition(ctx, id, actor, model.ReviewRecommendationApprove, strings.TrimSpace(comment))
 }
 
-func (s *ReviewService) Reject(ctx context.Context, id uuid.UUID, reason, comment string) (*model.Review, error) {
+func (s *ReviewService) RequestChangesReview(ctx context.Context, id uuid.UUID, actor, comment string) (*model.Review, error) {
+	return s.applyHumanTransition(ctx, id, actor, model.ReviewRecommendationRequestChanges, strings.TrimSpace(comment))
+}
+
+func (s *ReviewService) RejectReview(ctx context.Context, id uuid.UUID, actor, reason, comment string) (*model.Review, error) {
 	summary := reason
 	if comment != "" {
 		summary = reason + ": " + comment
 	}
-	return s.Complete(ctx, id, &model.CompleteReviewRequest{
-		RiskLevel:      model.ReviewRiskLevelHigh,
-		Summary:        summary,
-		Recommendation: model.ReviewRecommendationReject,
+	return s.applyHumanTransition(ctx, id, actor, model.ReviewRecommendationReject, strings.TrimSpace(summary))
+}
+
+func (s *ReviewService) MarkFalsePositive(ctx context.Context, reviewID uuid.UUID, actor string, findingIDs []string, reason string) (*model.Review, error) {
+	review, err := s.reviews.GetByID(ctx, reviewID)
+	if err != nil {
+		return nil, ErrReviewNotFound
+	}
+	if len(findingIDs) == 0 {
+		return nil, fmt.Errorf("at least one finding id is required")
+	}
+
+	targets := make(map[string]struct{}, len(findingIDs))
+	for _, findingID := range findingIDs {
+		trimmed := strings.TrimSpace(findingID)
+		if trimmed == "" {
+			continue
+		}
+		targets[trimmed] = struct{}{}
+	}
+	if len(targets) == 0 {
+		return nil, fmt.Errorf("at least one finding id is required")
+	}
+
+	updatedFindings := append([]model.ReviewFinding(nil), review.Findings...)
+	matchedCount := 0
+	for idx := range updatedFindings {
+		finding := updatedFindings[idx]
+		if _, ok := targets[finding.ID]; ok {
+			updatedFindings[idx].Dismissed = true
+			matchedCount++
+			continue
+		}
+		if _, ok := targets[strconv.Itoa(idx)]; ok {
+			updatedFindings[idx].Dismissed = true
+			matchedCount++
+		}
+	}
+	if matchedCount == 0 {
+		return nil, fmt.Errorf("no findings matched the provided ids")
+	}
+
+	review.Findings = updatedFindings
+	review.ExecutionMetadata = appendReviewDecision(review.ExecutionMetadata, model.ReviewDecision{
+		Actor:     normalizeReviewActor(actor),
+		Action:    "false_positive",
+		Comment:   strings.TrimSpace(reason),
+		Timestamp: time.Now().UTC(),
 	})
+	if err := s.reviews.UpdateResult(ctx, review); err != nil {
+		return nil, fmt.Errorf("update review false-positive state: %w", err)
+	}
+
+	projectID, _ := s.resolveReviewProject(ctx, review)
+	if projectID != uuid.Nil {
+		s.broadcast(ws.EventReviewUpdated, projectID.String(), review.ToDTO())
+	}
+	return review, nil
+}
+
+func (s *ReviewService) Approve(ctx context.Context, id uuid.UUID, comment string) (*model.Review, error) {
+	return s.ApproveReview(ctx, id, "api", comment)
+}
+
+func (s *ReviewService) Reject(ctx context.Context, id uuid.UUID, reason, comment string) (*model.Review, error) {
+	return s.RejectReview(ctx, id, "api", reason, comment)
+}
+
+func (s *ReviewService) applyHumanTransition(
+	ctx context.Context,
+	reviewID uuid.UUID,
+	actor string,
+	recommendation string,
+	comment string,
+) (*model.Review, error) {
+	review, err := s.reviews.GetByID(ctx, reviewID)
+	if err != nil {
+		return nil, ErrReviewNotFound
+	}
+	if review.Status != model.ReviewStatusPendingHuman {
+		return nil, ErrReviewInvalidTransition
+	}
+
+	review.ExecutionMetadata = appendReviewDecision(review.ExecutionMetadata, model.ReviewDecision{
+		Actor:     normalizeReviewActor(actor),
+		Action:    recommendation,
+		Comment:   comment,
+		Timestamp: time.Now().UTC(),
+	})
+	review.Recommendation = recommendation
+	review.Status = model.ReviewStatusCompleted
+	if recommendation == model.ReviewRecommendationReject {
+		review.Status = model.ReviewStatusFailed
+	}
+
+	if err := s.reviews.UpdateResult(ctx, review); err != nil {
+		return nil, fmt.Errorf("update review transition result: %w", err)
+	}
+
+	projectID, task := s.resolveReviewProject(ctx, review)
+	if task != nil {
+		targetStatus := mapRecommendationToTaskStatus(recommendation)
+		if targetStatus != "" {
+			if err := s.transitionTaskForReview(ctx, task, targetStatus); err != nil {
+				return nil, err
+			}
+		}
+	}
+
+	eventType := ws.EventReviewUpdated
+	if recommendation == model.ReviewRecommendationApprove {
+		eventType = ws.EventReviewCompleted
+	}
+	if projectID != uuid.Nil {
+		s.broadcast(eventType, projectID.String(), review.ToDTO())
+	}
+
+	return review, nil
+}
+
+func appendReviewDecision(metadata *model.ReviewExecutionMetadata, decision model.ReviewDecision) *model.ReviewExecutionMetadata {
+	cloned := model.CloneReviewExecutionMetadata(metadata)
+	if cloned == nil {
+		cloned = &model.ReviewExecutionMetadata{}
+	}
+	cloned.Decisions = append(cloned.Decisions, decision)
+	return cloned
+}
+
+func normalizeReviewActor(actor string) string {
+	trimmed := strings.TrimSpace(actor)
+	if trimmed == "" {
+		return "system"
+	}
+	return trimmed
+}
+
+func (s *ReviewService) resolveReviewProject(ctx context.Context, review *model.Review) (uuid.UUID, *model.Task) {
+	if review == nil {
+		return uuid.Nil, nil
+	}
+	if review.TaskID != uuid.Nil {
+		task, err := s.tasks.GetByID(ctx, review.TaskID)
+		if err == nil && task != nil {
+			return task.ProjectID, task
+		}
+	}
+	return projectIDFromMetadata(review.ExecutionMetadata), nil
 }
 
 func (s *ReviewService) GetByID(ctx context.Context, id uuid.UUID) (*model.Review, error) {
@@ -523,6 +859,92 @@ func mapRecommendationToTaskStatus(recommendation string) string {
 	default:
 		return ""
 	}
+}
+
+func (s *ReviewService) shouldRoutePendingHuman(ctx context.Context, projectID uuid.UUID, review *model.Review) (bool, string) {
+	if projectID == uuid.Nil || review == nil || s.projects == nil {
+		return false, ""
+	}
+
+	project, err := s.projects.GetByID(ctx, projectID)
+	if err != nil || project == nil {
+		return false, ""
+	}
+	policy := project.StoredSettings().ReviewPolicy
+	if policy.RequireManualApproval {
+		return true, "manual_approval_required"
+	}
+
+	threshold := strings.TrimSpace(policy.MinRiskLevelForBlock)
+	if threshold == "" {
+		return false, ""
+	}
+	if meetsRiskThreshold(reviewMaxSeverity(review), threshold) {
+		return true, "risk_threshold_exceeded"
+	}
+	return false, ""
+}
+
+func reviewMaxSeverity(review *model.Review) string {
+	if review == nil {
+		return ""
+	}
+	maxSeverity := strings.TrimSpace(review.RiskLevel)
+	for _, finding := range review.Findings {
+		if compareRiskSeverity(finding.Severity, maxSeverity) > 0 {
+			maxSeverity = finding.Severity
+		}
+	}
+	return strings.TrimSpace(maxSeverity)
+}
+
+func meetsRiskThreshold(actual, threshold string) bool {
+	return compareRiskSeverity(actual, threshold) >= 0
+}
+
+func compareRiskSeverity(left, right string) int {
+	leftScore := severityScore(left)
+	rightScore := severityScore(right)
+	switch {
+	case leftScore > rightScore:
+		return 1
+	case leftScore < rightScore:
+		return -1
+	default:
+		return 0
+	}
+}
+
+func severityScore(level string) int {
+	switch strings.TrimSpace(strings.ToLower(level)) {
+	case model.ReviewRiskLevelCritical:
+		return 4
+	case model.ReviewRiskLevelHigh:
+		return 3
+	case model.ReviewRiskLevelMedium:
+		return 2
+	case model.ReviewRiskLevelLow:
+		return 1
+	default:
+		return 0
+	}
+}
+
+func projectIDFromMetadata(metadata ...*model.ReviewExecutionMetadata) uuid.UUID {
+	for _, item := range metadata {
+		if item == nil {
+			continue
+		}
+		raw := strings.TrimSpace(item.ProjectID)
+		if raw == "" {
+			continue
+		}
+		id, err := uuid.Parse(raw)
+		if err == nil {
+			return id
+		}
+	}
+	return uuid.Nil
 }
 
 func (s *ReviewService) broadcast(eventType, projectID string, payload any) {
@@ -622,4 +1044,123 @@ func reviewExecutionMetadataFromBridge(plan *model.ReviewExecutionPlan, response
 		return nil
 	}
 	return metadata
+}
+
+func (s *ReviewService) writeBackReviewFindings(ctx context.Context, task *model.Task, review *model.Review) (string, string, error) {
+	if s.links == nil || s.pages == nil || s.versions == nil || task == nil || review == nil {
+		return "", "", nil
+	}
+
+	docLink, err := s.pickWritebackLink(ctx, task.ProjectID, task.ID)
+	if err != nil || docLink == nil {
+		return "", "", err
+	}
+
+	var lastErr error
+	for attempt := 0; attempt < 2; attempt++ {
+		page, err := s.pages.GetByID(ctx, docLink.TargetID)
+		if err != nil {
+			return docLink.TargetID.String(), "", err
+		}
+		version, err := s.createReviewSnapshot(ctx, page, review)
+		if err != nil {
+			return page.ID.String(), "", err
+		}
+		page.Content = appendReviewFindingsBlocks(page.Content, review)
+		page.ContentText = extractPlainText(page.Content)
+		page.UpdatedAt = time.Now().UTC()
+		if err := s.pages.Update(ctx, page); err != nil {
+			lastErr = err
+			if errors.Is(err, ErrWikiPageConflict) {
+				continue
+			}
+			return page.ID.String(), version.ID.String(), err
+		}
+		return page.ID.String(), version.ID.String(), nil
+	}
+
+	return docLink.TargetID.String(), "", lastErr
+}
+
+func (s *ReviewService) pickWritebackLink(ctx context.Context, projectID uuid.UUID, taskID uuid.UUID) (*model.EntityLink, error) {
+	links, err := s.links.ListBySource(ctx, projectID, model.EntityTypeTask, taskID)
+	if err != nil {
+		return nil, err
+	}
+	var requirement *model.EntityLink
+	var design *model.EntityLink
+	for _, link := range links {
+		if link.TargetType != model.EntityTypeWikiPage {
+			continue
+		}
+		switch link.LinkType {
+		case model.EntityLinkTypeRequirement:
+			if requirement == nil {
+				requirement = link
+			}
+		case model.EntityLinkTypeDesign:
+			if design == nil {
+				design = link
+			}
+		}
+	}
+	if requirement != nil {
+		return requirement, nil
+	}
+	return design, nil
+}
+
+func (s *ReviewService) createReviewSnapshot(ctx context.Context, page *model.WikiPage, review *model.Review) (*model.PageVersion, error) {
+	versions, err := s.versions.ListByPageID(ctx, page.ID)
+	if err != nil {
+		return nil, err
+	}
+	next := 1
+	if len(versions) > 0 {
+		next = versions[0].VersionNumber + 1
+	}
+	version := &model.PageVersion{
+		ID:            uuid.New(),
+		PageID:        page.ID,
+		VersionNumber: next,
+		Name:          fmt.Sprintf("Review v%d findings", next),
+		Content:       page.Content,
+		CreatedBy:     page.UpdatedBy,
+		CreatedAt:     time.Now().UTC(),
+	}
+	if err := s.versions.Create(ctx, version); err != nil {
+		return nil, err
+	}
+	return version, nil
+}
+
+func appendReviewFindingsBlocks(raw string, review *model.Review) string {
+	blocks := []map[string]any{}
+	if trimmed := strings.TrimSpace(raw); trimmed != "" {
+		_ = json.Unmarshal([]byte(trimmed), &blocks)
+	}
+	blocks = append(blocks,
+		map[string]any{
+			"id":      uuid.NewString(),
+			"type":    "heading",
+			"content": "Review Findings",
+		},
+		map[string]any{
+			"id":      uuid.NewString(),
+			"type":    "paragraph",
+			"content": review.Summary,
+		},
+	)
+	for _, finding := range review.Findings {
+		blocks = append(blocks, map[string]any{
+			"id":      uuid.NewString(),
+			"type":    "paragraph",
+			"content": fmt.Sprintf("[%s] %s", finding.Severity, finding.Message),
+		})
+	}
+	encoded, err := json.Marshal(blocks)
+	if err != nil {
+		return raw
+	}
+	return string(encoded)
 }

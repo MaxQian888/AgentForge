@@ -88,6 +88,7 @@ const agents: Agent[] = [
     roleId: "frontend-agent",
     roleName: "Frontend agent",
     status: "running",
+    runtime: "codex",
     provider: "anthropic",
     model: "claude-sonnet-4-6",
     turns: 5,

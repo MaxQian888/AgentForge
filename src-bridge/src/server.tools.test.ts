@@ -2,10 +2,12 @@ import { describe, expect, test } from "bun:test";
 import { createApp } from "./server.js";
 import { ToolPluginManager } from "./plugins/tool-plugin-manager.js";
 import { MCPClientHub } from "./mcp/client-hub.js";
+import type { MCPClientEntry } from "./mcp/types.js";
 import type { PluginManifest } from "./plugins/types.js";
 
 function createMockHub(): MCPClientHub {
   const hub = new MCPClientHub();
+  const clients = (hub as unknown as { clients: Map<string, MCPClientEntry> }).clients;
   hub.connectServer = async (pluginId, _config) => {
     const fakeTool = {
       name: "search",
@@ -14,7 +16,7 @@ function createMockHub(): MCPClientHub {
     };
     const fakeResource = { uri: "file://guide.md", name: "guide.md" };
     const fakePrompt = { name: "planner-template", description: "Plan work" };
-    (hub as any).clients.set(pluginId, {
+    clients.set(pluginId, {
       client: {
         listTools: async () => ({ tools: [fakeTool] }),
         listResources: async () => ({ resources: [fakeResource] }),
@@ -31,8 +33,12 @@ function createMockHub(): MCPClientHub {
           messages: [{ role: "user", content: { type: "text", text: "Plan the task" } }],
         }),
         close: async () => {},
-      },
-      transport: {},
+      } as unknown as MCPClientEntry["client"],
+      transport: {
+        start: async () => {},
+        send: async () => {},
+        close: async () => {},
+      } as unknown as MCPClientEntry["transport"],
       config: _config,
       state: "active",
       connectedAt: Date.now(),
@@ -43,7 +49,7 @@ function createMockHub(): MCPClientHub {
     return [fakeTool];
   };
   hub.disconnectServer = async (pluginId) => {
-    (hub as any).clients.delete(pluginId);
+    clients.delete(pluginId);
   };
   return hub;
 }

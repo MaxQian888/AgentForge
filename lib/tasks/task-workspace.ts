@@ -1,7 +1,7 @@
 import type { Task, TaskPriority, TaskStatus } from "@/lib/stores/task-store";
 import { getTaskDependencyState } from "./task-dependencies";
 
-export type TaskViewMode = "board" | "list" | "timeline" | "calendar" | "dependencies";
+export type TaskViewMode = "board" | "list" | "timeline" | "calendar" | "dependencies" | "roadmap";
 export type TaskPlanningFilter = "all" | "scheduled" | "unscheduled";
 export type TaskDependencyFilter = "all" | "blocked" | "ready_to_unblock";
 export type TaskFilterOption<T extends string> = "all" | T;

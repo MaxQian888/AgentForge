@@ -1,9 +1,9 @@
 const fetchReviewsByTask = jest.fn().mockResolvedValue(undefined);
 const triggerReview = jest.fn().mockResolvedValue(undefined);
 const approveReview = jest.fn().mockResolvedValue(undefined);
-const rejectReview = jest.fn().mockResolvedValue(undefined);
+const requestChanges = jest.fn().mockResolvedValue(undefined);
 
-const review = {
+const reviewFixture = {
   id: "review-1",
   taskId: "task-1",
   prUrl: "https://github.com/org/repo/pull/1",
@@ -20,13 +20,13 @@ const review = {
 };
 
 const storeState = {
-  reviewsByTask: { "task-1": [review] },
+  reviewsByTask: { "task-1": [reviewFixture] },
   loading: false,
   error: null,
   fetchReviewsByTask,
   triggerReview,
   approveReview,
-  rejectReview,
+  requestChanges,
 };
 
 jest.mock("@/lib/stores/review-store", () => ({
@@ -40,7 +40,7 @@ jest.mock("./review-list", () => ({
     onSelect,
   }: {
     reviews: typeof storeState.reviewsByTask["task-1"];
-    onSelect: (review: typeof review) => void;
+    onSelect: (review: typeof reviewFixture) => void;
   }) => (
     <div>
       <div data-testid="review-count">{reviews.length}</div>
@@ -64,7 +64,7 @@ describe("TaskReviewSection", () => {
     fetchReviewsByTask.mockClear();
     triggerReview.mockClear();
     approveReview.mockClear();
-    rejectReview.mockClear();
+    requestChanges.mockClear();
   });
 
   it("loads reviews, triggers new reviews, and switches into the detail view", async () => {

@@ -55,3 +55,21 @@ func (h *NotificationHandler) MarkRead(c echo.Context) error {
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "notification marked as read"})
 }
+
+func (h *NotificationHandler) MarkAllRead(c echo.Context) error {
+	claims, err := middleware.GetClaims(c)
+	if err != nil {
+		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "unauthorized"})
+	}
+
+	userID, err := uuid.Parse(claims.UserID)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid user ID"})
+	}
+
+	if err := h.repo.MarkAllRead(c.Request().Context(), userID); err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to mark notifications as read"})
+	}
+
+	return c.JSON(http.StatusOK, map[string]string{"message": "notifications marked as read"})
+}

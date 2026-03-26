@@ -33,6 +33,10 @@ type bridgeRuntimeControl struct {
 	lastCursor int64
 }
 
+type callbackPathProvider interface {
+	CallbackPaths() []string
+}
+
 func newBridgeRuntimeControl(cfg *config, bridgeID string, provider *activeProvider, apiClient *client.AgentForgeClient) *bridgeRuntimeControl {
 	return &bridgeRuntimeControl{
 		cfg:      cfg,
@@ -66,6 +70,15 @@ func (c *bridgeRuntimeControl) Start(ctx context.Context) error {
 			"platform_name": c.provider.Platform.Name(),
 			"provider_id":   c.provider.Descriptor.ID,
 		},
+	}
+	if provider, ok := c.provider.Platform.(callbackPathProvider); ok {
+		for _, path := range provider.CallbackPaths() {
+			trimmed := strings.TrimSpace(path)
+			if trimmed == "" {
+				continue
+			}
+			registration.CallbackPaths = append(registration.CallbackPaths, trimmed)
+		}
 	}
 	if _, err := c.client.RegisterBridge(ctx, registration); err != nil {
 		return fmt.Errorf("register bridge runtime: %w", err)

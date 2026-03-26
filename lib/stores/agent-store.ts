@@ -273,7 +273,11 @@ export const useAgentStore = create<AgentState>()((set) => ({
       },
       { token }
     );
-    if ("dispatch" in data && data.dispatch?.status === "queued" && data.dispatch.queue) {
+    const queuedDispatch =
+      "dispatch" in data && data.dispatch?.status === "queued"
+        ? data.dispatch.queue
+        : undefined;
+    if (queuedDispatch) {
       set((state) => {
         const currentPool = state.pool ?? {
           active: 0,
@@ -285,7 +289,7 @@ export const useAgentStore = create<AgentState>()((set) => ({
           degraded: false,
           queue: [],
         };
-        const nextQueue = [...(currentPool.queue ?? []), data.dispatch.queue];
+        const nextQueue = [...(currentPool.queue ?? []), queuedDispatch];
         return {
           pool: {
             ...currentPool,

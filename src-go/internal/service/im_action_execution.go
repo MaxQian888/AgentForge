@@ -31,23 +31,43 @@ type IMActionTaskDecomposer interface {
 
 type IMActionReviewer interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Review, error)
-	Approve(ctx context.Context, id uuid.UUID, comment string) (*model.Review, error)
-	Complete(ctx context.Context, id uuid.UUID, req *model.CompleteReviewRequest) (*model.Review, error)
+	ApproveReview(ctx context.Context, id uuid.UUID, actor, comment string) (*model.Review, error)
+	RequestChangesReview(ctx context.Context, id uuid.UUID, actor, comment string) (*model.Review, error)
 	RouteFixRequest(ctx context.Context, id uuid.UUID) error
+}
+
+type IMActionTaskCreator interface {
+	Create(ctx context.Context, projectID uuid.UUID, req *model.CreateTaskRequest, reporterID *uuid.UUID) (*model.Task, error)
+}
+
+type IMActionWikiCreator interface {
+	GetSpaceByProjectID(ctx context.Context, projectID uuid.UUID) (*model.WikiSpace, error)
+	CreatePage(ctx context.Context, projectID uuid.UUID, spaceID uuid.UUID, title string, parentID *uuid.UUID, content string, createdBy *uuid.UUID) (*model.WikiPage, error)
 }
 
 type BackendIMActionExecutor struct {
 	dispatcher IMActionTaskDispatcher
 	decomposer IMActionTaskDecomposer
 	reviewer   IMActionReviewer
+	taskMaker  IMActionTaskCreator
+	wikiMaker  IMActionWikiCreator
 }
 
-func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IMActionTaskDecomposer, reviewer IMActionReviewer) *BackendIMActionExecutor {
-	return &BackendIMActionExecutor{
+func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IMActionTaskDecomposer, reviewer IMActionReviewer, extras ...any) *BackendIMActionExecutor {
+	executor := &BackendIMActionExecutor{
 		dispatcher: dispatcher,
 		decomposer: decomposer,
 		reviewer:   reviewer,
 	}
+	for _, extra := range extras {
+		switch value := extra.(type) {
+		case IMActionTaskCreator:
+			executor.taskMaker = value
+		case IMActionWikiCreator:
+			executor.wikiMaker = value
+		}
+	}
+	return executor
 }
 
 func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error) {
@@ -60,6 +80,10 @@ func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActi
 		return e.executeAssignAgent(ctx, req), nil
 	case "decompose":
 		return e.executeDecompose(ctx, req), nil
+	case "save-as-doc":
+		return e.executeSaveAsDoc(ctx, req), nil
+	case "create-task":
+		return e.executeCreateTask(ctx, req), nil
 	case "approve":
 		return e.executeReviewAction(ctx, req, model.ReviewRecommendationApprove), nil
 	case "request-changes":
@@ -103,6 +127,55 @@ func (e *BackendIMActionExecutor) executeAssignAgent(ctx context.Context, req *m
 		task := result.Task
 		resp.Task = &task
 	}
+	return resp
+}
+
+func (e *BackendIMActionExecutor) executeSaveAsDoc(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	projectID, err := parseIMEntityUUID(req.EntityID)
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Invalid project identifier.", false)
+	}
+	if e.wikiMaker == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Wiki workflow is unavailable.", false)
+	}
+	space, err := e.wikiMaker.GetSpaceByProjectID(ctx, projectID)
+	if err != nil || space == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Wiki space not found.", false)
+	}
+	title := firstNonEmptyMetadata(req.Metadata, "IM Note", "title", "name")
+	body := firstNonEmptyMetadata(req.Metadata, "", "body", "text", "content")
+	page, err := e.wikiMaker.CreatePage(ctx, projectID, space.ID, title, nil, body, nil)
+	if err != nil || page == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Failed to save message as doc.", false)
+	}
+	resp := newIMActionResponse(req, model.IMActionStatusCompleted, fmt.Sprintf("Saved message as doc %s.", page.Title), true)
+	resp.Metadata["href"] = "/docs/" + page.ID.String()
+	return resp
+}
+
+func (e *BackendIMActionExecutor) executeCreateTask(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	projectID, err := parseIMEntityUUID(req.EntityID)
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Invalid project identifier.", false)
+	}
+	if e.taskMaker == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Task creation workflow is unavailable.", false)
+	}
+	title := firstNonEmptyMetadata(req.Metadata, "IM Task", "title", "name")
+	description := firstNonEmptyMetadata(req.Metadata, "", "body", "text", "content")
+	priority := firstNonEmptyMetadata(req.Metadata, "medium", "priority")
+	task, err := e.taskMaker.Create(ctx, projectID, &model.CreateTaskRequest{
+		Title:       title,
+		Description: description,
+		Priority:    priority,
+	}, nil)
+	if err != nil || task == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Failed to create task from message.", false)
+	}
+	resp := newIMActionResponse(req, model.IMActionStatusCompleted, fmt.Sprintf("Created task %s.", task.Title), true)
+	dto := task.ToDTO()
+	resp.Task = &dto
+	resp.Metadata["href"] = "/project?taskId=" + task.ID.String()
 	return resp
 }
 
@@ -154,15 +227,12 @@ func (e *BackendIMActionExecutor) executeReviewAction(ctx context.Context, req *
 	}
 
 	var updated *model.Review
+	actor := firstNonEmptyMetadata(req.Metadata, "im-action", "actor", "userId", "user_id")
 	switch recommendation {
 	case model.ReviewRecommendationApprove:
-		updated, err = e.reviewer.Approve(ctx, reviewID, firstMetadataValue(req.Metadata, "comment", "notes"))
+		updated, err = e.reviewer.ApproveReview(ctx, reviewID, actor, firstMetadataValue(req.Metadata, "comment", "notes"))
 	case model.ReviewRecommendationRequestChanges:
-		updated, err = e.reviewer.Complete(ctx, reviewID, &model.CompleteReviewRequest{
-			RiskLevel:      model.ReviewRiskLevelMedium,
-			Recommendation: model.ReviewRecommendationRequestChanges,
-			Summary:        firstMetadataValue(req.Metadata, "comment", "notes"),
-		})
+		updated, err = e.reviewer.RequestChangesReview(ctx, reviewID, actor, firstMetadataValue(req.Metadata, "comment", "notes"))
 		if err == nil {
 			if routeErr := e.reviewer.RouteFixRequest(ctx, reviewID); routeErr != nil {
 				metadata := cloneStringMap(req.Metadata)
@@ -260,6 +330,11 @@ func describeReviewOutcome(review *model.Review) string {
 func reviewActionBlockReason(review *model.Review, recommendation string) string {
 	if review == nil {
 		return "Review not found."
+	}
+	if recommendation == model.ReviewRecommendationApprove || recommendation == model.ReviewRecommendationRequestChanges {
+		if review.Status != model.ReviewStatusPendingHuman {
+			return fmt.Sprintf("Review %s is in %s state; only pending_human reviews can be updated interactively.", review.ID.String(), review.Status)
+		}
 	}
 	if review.Status == model.ReviewStatusCompleted {
 		if review.Recommendation == recommendation {

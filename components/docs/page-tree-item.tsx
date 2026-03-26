@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
 import type { DocsPageTreeNode } from "@/lib/stores/docs-store";
+import { buildDocsHref } from "@/lib/route-hrefs";
 
 export function PageTreeItem({
   node,
@@ -46,7 +47,7 @@ export function PageTreeItem({
           <ChevronRight className={`size-4 transition ${open ? "rotate-90" : ""}`} />
         </Button>
         <GripVertical className="size-4 text-muted-foreground" />
-        <Link href={`/docs/${node.id}`} className="flex-1 truncate text-sm font-medium">
+        <Link href={buildDocsHref(node.id)} className="flex-1 truncate text-sm font-medium">
           {node.title}
         </Link>
         <div className="flex opacity-0 transition group-hover:opacity-100">

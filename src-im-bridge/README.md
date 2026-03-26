@@ -21,8 +21,7 @@ Set `IM_PLATFORM` to exactly one of:
 - `dingtalk`
 - `telegram`
 - `discord`
-
-`wecom` currently remains a planned provider only. It appears in shared model enums for roadmap completeness, but `src-im-bridge` does not yet ship a runnable adapter or activation path for it.
+- `wecom`
 
 Set `IM_TRANSPORT_MODE` explicitly:
 
@@ -34,6 +33,7 @@ The bridge validates credentials for the selected platform before startup:
 - `feishu`: `FEISHU_APP_ID` and `FEISHU_APP_SECRET` for live long connection
 - `slack`: required `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN`
 - `dingtalk`: required `DINGTALK_APP_KEY` and `DINGTALK_APP_SECRET`
+- `wecom`: required `WECOM_CORP_ID`, `WECOM_AGENT_ID`, `WECOM_AGENT_SECRET`, `WECOM_CALLBACK_TOKEN`, and `WECOM_CALLBACK_PORT`; optional `WECOM_CALLBACK_PATH`
 - `telegram`: required `TELEGRAM_BOT_TOKEN`, optional `TELEGRAM_UPDATE_MODE=longpoll`, and no `TELEGRAM_WEBHOOK_URL`
 - `discord`: required `DISCORD_APP_ID`, `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`, and `DISCORD_INTERACTIONS_PORT`; optional `DISCORD_COMMAND_GUILD_ID`
 
@@ -76,7 +76,7 @@ Every supported platform currently ships as a built-in provider with both a loca
 - `dingtalk`: stub + live Stream mode, session-webhook replies + explicit structured downgrade
 - `telegram`: stub + live long polling, inline keyboard + callback query + message edit
 - `discord`: stub + live HTTP interactions, deferred reply + follow-up + original-response edit
-- `wecom`: planned only, intentionally not runnable until an adapter and declared capability matrix land
+- `wecom`: stub + live callback-driven inbound flow, `response_url` reply path, direct app-message send, and explicit structured-text fallback
 
 Stub adapters expose local test endpoints on `TEST_PORT`:
 
@@ -95,7 +95,7 @@ All supported platforms reuse the same command engine:
 - `@AgentForge ...` fallback
 
 The bridge propagates the active message platform to the backend through `X-IM-Source`, so Slack, DingTalk, and Feishu traffic can be distinguished downstream.
-This now also applies to Telegram and Discord.
+This now also applies to Telegram, Discord, and WeCom.
 
 Notifications received on `POST /im/notify` must include a `platform` field matching the active bridge platform:
 
@@ -163,6 +163,7 @@ When `IM_CONTROL_SHARED_SECRET` is configured, unsigned or invalidly signed comp
 | DingTalk | Stream mode | ActionCard planned, text fallback active | Stream card callback | session webhook, then direct send | structured notifications explicitly degrade to text today |
 | Telegram | long polling | inline keyboard | callback query | reply or in-place edit | card-like content maps to text plus inline keyboard, and formatted text falls back to plain text when MarkdownV2 is not selected or safe |
 | Discord | outgoing webhook interactions | message components | `/interactions` message component payloads | deferred ack, follow-up, original-response edit | unsupported component cases return explicit ephemeral ack |
+| WeCom | callback-driven app messaging | card-compatible structured profile with text fallback | webhook/callback message payload | `response_url` reply first, direct app send fallback | structured or richer payloads degrade to text with explicit fallback when the current path cannot honor a richer update |
 
 ## Native Interaction Matrix
 
@@ -173,6 +174,7 @@ When `IM_CONTROL_SHARED_SECRET` is configured, unsigned or invalidly signed comp
 | DingTalk | mention + chatbot text | session webhook, conversation id, conversation type | card callback normalized when action reference is present | session webhook reply, conversation fallback |
 | Telegram | slash + mention | chat, message, topic | inline keyboard callback query normalized into `/im/action` | `sendMessage`, `editMessageText`, segmented follow-up sends for oversized formatted updates |
 | Discord | slash + component | channel, interaction token, original response | message component `custom_id` normalized into `/im/action` | deferred ack, follow-up webhook, original response patch |
+| WeCom | callback text + mention | chat, user, `response_url` | callback messages normalize into the shared command surface | `response_url` reply, then direct app send |
 
 ## Rollout And Rollback
 
@@ -180,6 +182,7 @@ When `IM_CONTROL_SHARED_SECRET` is configured, unsigned or invalidly signed comp
 - Verify `/im/health`, backend bridge registration, one inbound command, one reply path, one control-plane replay, and one notification path before promoting a deployment.
 - For Discord, verify command sync completed and the interactions endpoint is reachable before exposing the deployment broadly.
 - For Telegram, remove webhook config before enabling long polling and verify callback queries can still be answered quickly enough to avoid stuck button spinners.
+- For WeCom, expose the configured callback endpoint and verify both callback delivery and direct app-message send before promoting the deployment.
 - For DingTalk, treat structured notifications as an explicit text downgrade until ActionCard sending is promoted from planned to active.
 - To roll back, first disable the control-plane WebSocket or clear `IM_CONTROL_SHARED_SECRET` if compatibility HTTP fallback is needed, then switch the deployment back to the previous platform or move the current platform to `IM_TRANSPORT_MODE=stub` for local diagnosis.
 
@@ -191,10 +194,10 @@ Recommended scoped validation after adapter changes:
 
 ```powershell
 cd src-im-bridge
-go test ./platform/slack ./platform/feishu ./platform/telegram ./platform/discord ./platform/dingtalk -count=1
+go test ./platform/slack ./platform/feishu ./platform/telegram ./platform/discord ./platform/dingtalk ./platform/wecom -count=1
 go test ./core -run 'Test(ResolveReplyPlan_|DeliverText_|DeliverNative_|MetadataForPlatform_|StructuredMessageFallbackText|ReplyTarget_JSONRoundTrip|NativeMessage_)' -count=1
-go test ./client -run 'Test(HandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget|HandleIMAction_ParsesCanonicalActionOutcome|WithSource_NormalizesHeaderValue|WithPlatform_UsesTelegramMetadataSource)' -count=1
-go test ./notify -run 'TestReceiver_(ActionResponseUsesReplyTargetDelivery|HealthReportsNormalizedTelegramSourceAndCapabilities|FallsBackToStructuredTextWhenNativeStructuredSenderUnavailable|PrefersNativePayloadWhenPlatformSupportsIt|UsesDeferredNativeUpdateWhenFeishuReplyTargetSupportsIt|ReportsFallbackReasonWhenDeferredUpdateContextMissing|SuppressesDuplicateSignedCompatibilityDelivery|RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured)' -count=1
+go test ./client -run 'Test(HandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget|HandleIMAction_ParsesCanonicalActionOutcome|WithSource_NormalizesHeaderValue|WithPlatform_UsesTelegramMetadataSource|WithPlatform_UsesWeComMetadataSource)' -count=1
+go test ./notify -run 'TestReceiver_(ActionResponseUsesReplyTargetDelivery|HealthReportsNormalizedTelegramSourceAndCapabilities|HealthReportsNormalizedWeComSourceAndCapabilities|FallsBackToStructuredTextWhenNativeStructuredSenderUnavailable|PrefersNativePayloadWhenPlatformSupportsIt|UsesDeferredNativeUpdateWhenFeishuReplyTargetSupportsIt|ReportsFallbackReasonWhenDeferredUpdateContextMissing|SuppressesDuplicateSignedCompatibilityDelivery|RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured)' -count=1
 go test ./cmd/bridge -run 'Test(SelectProvider_|SelectPlatform_|LookupPlatformDescriptor_|BridgeRuntimeControl_)' -count=1
 ```
 

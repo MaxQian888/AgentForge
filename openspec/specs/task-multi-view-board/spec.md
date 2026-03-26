@@ -72,3 +72,39 @@ The system SHALL support schedule-aware Timeline and Calendar views backed by ex
 - **WHEN** a task does not yet have a valid planning window
 - **THEN** the Timeline and Calendar experience makes that task's unscheduled state explicit instead of hiding it
 - **AND** the user can identify that additional planning is needed before it appears on the main schedule grid
+
+### Requirement: Custom field columns in views
+The task multi-view board SHALL render custom field values as columns in list and table views, and support filtering, sorting, and grouping by custom fields.
+
+#### Scenario: Custom field column in table view
+- **WHEN** a project has a custom field "Risk Level" and user enables it as a column in table view
+- **THEN** each task row displays the Risk Level value, editable inline
+
+#### Scenario: Filter by custom field in board view
+- **WHEN** user applies a filter "Risk Level = High" in any view
+- **THEN** only tasks with Risk Level set to "High" are displayed
+
+#### Scenario: Group by custom field
+- **WHEN** user groups the board view by "Module" custom field
+- **THEN** tasks are grouped into columns by their Module value, including an "Unset" column for tasks without a value
+
+### Requirement: Saved view integration
+The task multi-view board SHALL load and apply saved view configurations when a view is selected from the view switcher.
+
+#### Scenario: Apply saved view
+- **WHEN** user selects a saved view from the view switcher
+- **THEN** the workspace applies the view's layout type, filters, sorts, groups, and column configuration
+
+### Requirement: Linked Docs column in board views
+The task multi-view board SHALL support a "Linked Docs" optional column in list and table views displaying linked document titles.
+
+#### Scenario: Show Linked Docs column in table view
+- **WHEN** user enables the "Linked Docs" column in table view settings
+- **THEN** each task row displays the titles of linked documents as clickable chips
+
+### Requirement: Doc preview popover on task cards
+Task cards in all board views SHALL display a document preview popover when hovered over a linked-doc indicator.
+
+#### Scenario: Hover doc indicator on task card
+- **WHEN** user hovers over the document icon on a task card that has linked docs
+- **THEN** a popover shows the first linked document's title and first 3 lines of content, with a "View" link

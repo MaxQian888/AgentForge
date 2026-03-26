@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { ProjectTaskWorkspace } from "./project-task-workspace";
 import type { TeamMember } from "@/lib/dashboard/summary";
 import type { Agent } from "@/lib/stores/agent-store";
+import type { EntityLink } from "@/lib/stores/entity-link-store";
 import type { Notification } from "@/lib/stores/notification-store";
 import type { Task } from "@/lib/stores/task-store";
 import type { Sprint, SprintMetrics } from "@/lib/stores/sprint-store";
@@ -66,6 +67,106 @@ jest.mock("@hello-pangea/dnd", () => {
     __getLastOnDragEnd: () => lastOnDragEnd,
   };
 });
+
+jest.mock("@/lib/stores/auth-store", () => ({
+  useAuthStore: {
+    getState: () => ({ accessToken: "test-token" }),
+  },
+}));
+
+jest.mock("@/lib/stores/docs-store", () => ({
+  useDocsStore: (
+    selector: (state: { tree: []; fetchTree: jest.Mock }) => unknown
+  ) =>
+    selector({
+      tree: [],
+      fetchTree: jest.fn(),
+    }),
+  flattenDocsTree: () => [],
+}));
+
+type EntityLinkStoreSlice = {
+  linksByEntity: Record<string, EntityLink[]>;
+  fetchLinks: jest.Mock;
+  createLink: jest.Mock;
+  deleteLink: jest.Mock;
+};
+
+jest.mock("@/lib/stores/entity-link-store", () => ({
+  useEntityLinkStore: (selector: (state: EntityLinkStoreSlice) => unknown) =>
+    selector({
+      linksByEntity: {},
+      fetchLinks: jest.fn(),
+      createLink: jest.fn(),
+      deleteLink: jest.fn(),
+    }),
+}));
+
+jest.mock("@/lib/stores/task-comment-store", () => ({
+  useTaskCommentStore: (
+    selector: (state: {
+      commentsByTask: Record<string, unknown[]>;
+      fetchComments: jest.Mock;
+      createComment: jest.Mock;
+      setResolved: jest.Mock;
+    }) => unknown
+  ) =>
+    selector({
+      commentsByTask: {},
+      fetchComments: jest.fn(),
+      createComment: jest.fn(),
+      setResolved: jest.fn(),
+    }),
+}));
+
+jest.mock("@/lib/stores/custom-field-store", () => ({
+  useCustomFieldStore: (
+    selector: (state: {
+      definitionsByProject: Record<string, unknown[]>;
+      valuesByTask: Record<string, unknown[]>;
+      fetchDefinitions: jest.Mock;
+      fetchTaskValues: jest.Mock;
+    }) => unknown
+  ) =>
+    selector({
+      definitionsByProject: {},
+      valuesByTask: {},
+      fetchDefinitions: jest.fn(),
+      fetchTaskValues: jest.fn(),
+    }),
+}));
+
+jest.mock("@/lib/stores/saved-view-store", () => ({
+  useSavedViewStore: (
+    selector: (state: {
+      viewsByProject: Record<string, unknown[]>;
+      currentViewByProject: Record<string, string | null>;
+      fetchViews: jest.Mock;
+      selectView: jest.Mock;
+      setDefaultView: jest.Mock;
+    }) => unknown
+  ) =>
+    selector({
+      viewsByProject: {},
+      currentViewByProject: {},
+      fetchViews: jest.fn(),
+      selectView: jest.fn(),
+      setDefaultView: jest.fn(),
+    }),
+}));
+
+jest.mock("@/lib/stores/milestone-store", () => ({
+  useMilestoneStore: (
+    selector: (state: {
+      milestonesByProject: Record<string, unknown[]>;
+      fetchMilestones: jest.Mock;
+    }) => unknown
+  ) =>
+    selector({
+      milestonesByProject: {},
+      fetchMilestones: jest.fn(),
+    }),
+}));
 
 type DndMock = {
   __getLastOnDragEnd: () => ((result: unknown) => void | Promise<void>) | null;
@@ -251,6 +352,7 @@ describe("ProjectTaskWorkspace", () => {
       displayOptions: {
         density: "comfortable",
         showDescriptions: true,
+        showLinkedDocs: false,
       },
     });
   });
@@ -458,6 +560,7 @@ describe("ProjectTaskWorkspace", () => {
       displayOptions: {
         density: "comfortable",
         showDescriptions: true,
+        showLinkedDocs: false,
       },
     });
 
@@ -502,6 +605,7 @@ describe("ProjectTaskWorkspace", () => {
       displayOptions: {
         density: "comfortable",
         showDescriptions: true,
+        showLinkedDocs: false,
       },
     });
 
@@ -562,6 +666,7 @@ describe("ProjectTaskWorkspace", () => {
       displayOptions: {
         density: "comfortable",
         showDescriptions: true,
+        showLinkedDocs: false,
       },
     });
 

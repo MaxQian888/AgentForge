@@ -100,13 +100,6 @@ func (m *mockWikiHandlerService) GetPageContext(ctx echo.Context, pageID uuid.UU
 	}
 	return m.space, page, nil
 }
-func (m *mockWikiHandlerService) GetPageContext(ctx echo.Context, pageID uuid.UUID) (*model.WikiSpace, *model.WikiPage, error) {
-	page, err := m.GetPage(ctx, pageID)
-	if err != nil {
-		return nil, nil, err
-	}
-	return m.space, page, nil
-}
 func (m *mockWikiHandlerService) UpdatePage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID, title string, content string, contentText string, updatedBy *uuid.UUID, expectedUpdatedAt *time.Time) (*model.WikiPage, error) {
 	_ = ctx
 	_ = projectID
@@ -526,5 +519,51 @@ func TestWikiHandlerFavoriteAndPinEndpoints(t *testing.T) {
 	}
 	if pinRec.Code != http.StatusOK || !svc.pages[pageID].IsPinned {
 		t.Fatalf("TogglePinned() status=%d pinned=%v", pinRec.Code, svc.pages[pageID].IsPinned)
+	}
+}
+
+func TestWikiHandlerGetPageContext(t *testing.T) {
+	_, c, _, projectID, userID := newWikiTestContext(http.MethodGet, "/", "")
+	space := &model.WikiSpace{ID: uuid.New(), ProjectID: projectID, CreatedAt: time.Now().UTC()}
+	pageID := uuid.New()
+	svc := &mockWikiHandlerService{
+		space: space,
+		pages: map[uuid.UUID]*model.WikiPage{
+			pageID: {
+				ID:        pageID,
+				SpaceID:   space.ID,
+				Title:     "Runbook",
+				Path:      "/runbook",
+				CreatedAt: time.Now().UTC(),
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	h := &WikiHandler{service: svc}
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/wiki/pages/"+pageID.String(), nil)
+	rec := httptest.NewRecorder()
+	ctx := c.Echo().NewContext(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues(pageID.String())
+	ctx.Set(appMiddleware.ProjectIDContextKey, projectID)
+	ctx.Set(appMiddleware.JWTContextKey, &service.Claims{UserID: userID.String()})
+
+	if err := h.GetPageContext(ctx); err != nil {
+		t.Fatalf("GetPageContext() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GetPageContext() status = %d", rec.Code)
+	}
+
+	var payload model.WikiPageContextDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal page context: %v", err)
+	}
+	if payload.ProjectID != projectID.String() {
+		t.Fatalf("ProjectID = %q, want %q", payload.ProjectID, projectID.String())
+	}
+	if payload.Page.ID != pageID.String() {
+		t.Fatalf("Page.ID = %q, want %q", payload.Page.ID, pageID.String())
 	}
 }

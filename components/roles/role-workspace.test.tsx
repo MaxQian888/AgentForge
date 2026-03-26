@@ -75,7 +75,20 @@ const frontendRole: RoleManifest = {
   extends: "coding-agent",
 };
 
+function setViewport(width: number) {
+  Object.defineProperty(window, "innerWidth", {
+    configurable: true,
+    writable: true,
+    value: width,
+  });
+  window.dispatchEvent(new Event("resize"));
+}
+
 describe("RoleWorkspace", () => {
+  beforeEach(() => {
+    setViewport(1440);
+  });
+
   it("supports template-based creation with a live execution summary rail", async () => {
     const user = userEvent.setup();
     const onCreateRole = jest.fn().mockResolvedValue(undefined);
@@ -136,18 +149,20 @@ describe("RoleWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Edit Frontend Developer" }));
 
+    expect(screen.getByRole("button", { name: "Setup" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Identity" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Capabilities" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Knowledge" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Governance" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Review" })).toBeInTheDocument();
+    expect(screen.getByText("Current flow")).toBeInTheDocument();
+    expect(screen.getByText("Editing existing role")).toBeInTheDocument();
+    expect(screen.getByText("Inherited from coding-agent")).toBeInTheDocument();
     expect(screen.getByLabelText("Role ID")).toHaveValue("frontend-developer");
     expect(screen.getByDisplayValue("1.2.0")).toBeInTheDocument();
-    expect(screen.getByText("Identity")).toBeInTheDocument();
-    expect(screen.getByText("Capabilities")).toBeInTheDocument();
     expect(screen.getAllByText("Skills").length).toBeGreaterThan(0);
     expect(screen.getByDisplayValue("skills/react")).toBeInTheDocument();
     expect(screen.getByDisplayValue("skills/testing")).toBeInTheDocument();
-    expect(screen.getByText("Knowledge")).toBeInTheDocument();
-    expect(screen.getByText("Security")).toBeInTheDocument();
-    expect(screen.getByText("Advanced Identity")).toBeInTheDocument();
-    expect(screen.getByText("Collaboration")).toBeInTheDocument();
-    expect(screen.getByText("Triggers")).toBeInTheDocument();
   });
 
   it("blocks save when duplicate skill paths are present", async () => {
@@ -276,15 +291,19 @@ describe("RoleWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Edit Frontend Developer" }));
     await user.clear(screen.getByLabelText("Name"));
     await user.type(screen.getByLabelText("Name"), "Frontend Captain");
+    await user.click(screen.getByRole("button", { name: "Capabilities" }));
     await user.type(screen.getByLabelText("Packages"), ", ui-kit");
     await user.type(screen.getByLabelText("External Tools"), ", linear");
+    await user.click(screen.getByRole("button", { name: "Identity" }));
     await user.clear(screen.getByLabelText("Persona"));
     await user.type(screen.getByLabelText("Persona"), "precise");
+    await user.click(screen.getByRole("button", { name: "Knowledge" }));
     await user.click(screen.getByRole("button", { name: "Add Shared Knowledge" }));
     const knowledgeIds = screen.getAllByLabelText("Shared Knowledge ID");
     const knowledgeTypes = screen.getAllByLabelText("Shared Knowledge Type");
     await user.type(knowledgeIds[1]!, "team-playbook");
     await user.type(knowledgeTypes[1]!, "doc");
+    await user.click(screen.getByRole("button", { name: "Governance" }));
     await user.click(screen.getByRole("button", { name: "Add Trigger" }));
     const triggerEvents = screen.getAllByLabelText("Trigger Event");
     const triggerActions = screen.getAllByLabelText("Trigger Action");
@@ -325,4 +344,35 @@ describe("RoleWorkspace", () => {
     await user.click(screen.getByRole("button", { name: "Switch to Create" }));
     expect(screen.getByText("Create Role")).toBeInTheDocument();
   }, 15000);
+
+  it("keeps role library and review surfaces reachable on medium viewports", async () => {
+    setViewport(960);
+    const user = userEvent.setup();
+
+    render(
+      <RoleWorkspace
+        roles={[frontendRole]}
+        loading={false}
+        error={null}
+        onCreateRole={jest.fn().mockResolvedValue(undefined)}
+        onUpdateRole={jest.fn().mockResolvedValue(undefined)}
+        onDeleteRole={jest.fn().mockResolvedValue(undefined)}
+        onPreviewRole={jest.fn().mockResolvedValue(undefined)}
+        onSandboxRole={jest.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Show Role Library" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Show Review Panel" })).toBeInTheDocument();
+    expect(screen.queryByText("Role Library")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show Role Library" }));
+    expect(screen.getByText("Role Library")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Edit Frontend Developer" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Show Review Panel" }));
+    expect(screen.getByText("Execution Summary")).toBeInTheDocument();
+    expect(screen.getByText("YAML Preview")).toBeInTheDocument();
+    expect(screen.getByText("Preview And Sandbox")).toBeInTheDocument();
+  });
 });

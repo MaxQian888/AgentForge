@@ -67,7 +67,7 @@ func TestTaskCommand_CreateRepliesWithCardWhenSupported(t *testing.T) {
 		if r.Method != http.MethodPost {
 			t.Fatalf("method = %s, want POST", r.Method)
 		}
-		if r.URL.Path != "/api/v1/tasks" {
+		if r.URL.Path != "/api/v1/projects/proj/tasks" {
 			t.Fatalf("path = %s", r.URL.Path)
 		}
 		if got := r.Header.Get("X-IM-Source"); got != "slack" {
@@ -81,8 +81,8 @@ func TestTaskCommand_CreateRepliesWithCardWhenSupported(t *testing.T) {
 		if body["title"] != "Bridge rollout" {
 			t.Fatalf("title = %q", body["title"])
 		}
-		if body["project_id"] != "proj" {
-			t.Fatalf("project_id = %q", body["project_id"])
+		if _, exists := body["project_id"]; exists {
+			t.Fatalf("legacy project_id should not be sent: %+v", body)
 		}
 
 		w.Header().Set("Content-Type", "application/json")
@@ -127,11 +127,8 @@ func TestTaskCommand_ListIncludesAssigneeAndCount(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("method = %s, want GET", r.Method)
 		}
-		if r.URL.Path != "/api/v1/tasks" {
+		if r.URL.Path != "/api/v1/projects/proj/tasks" {
 			t.Fatalf("path = %s", r.URL.Path)
-		}
-		if got := r.URL.Query().Get("project_id"); got != "proj" {
-			t.Fatalf("project_id = %q", got)
 		}
 		if got := r.URL.Query().Get("status"); got != "triaged" {
 			t.Fatalf("status = %q", got)

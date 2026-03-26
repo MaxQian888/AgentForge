@@ -1,5 +1,5 @@
-import { render, screen, waitFor } from "@testing-library/react";
-import DocsPageDetail from "./page";
+import { act, render, screen, waitFor } from "@testing-library/react";
+import { DocsPageDetailClient } from "./page-client";
 
 const push = jest.fn();
 const setProjectId = jest.fn();
@@ -110,6 +110,22 @@ jest.mock("@/components/docs/comments-panel", () => ({
   CommentsPanel: () => <div data-testid="comments-panel" />,
 }));
 
+jest.mock("@/components/docs/related-tasks-panel", () => ({
+  RelatedTasksPanel: () => <div data-testid="related-tasks-panel" />,
+}));
+
+jest.mock("@/components/docs/task-link-picker", () => ({
+  TaskLinkPicker: () => <div data-testid="task-link-picker" />,
+}));
+
+jest.mock("@/components/docs/decompose-tasks-dialog", () => ({
+  DecomposeTasksDialog: () => <div data-testid="decompose-tasks-dialog" />,
+}));
+
+jest.mock("@/components/shared/backlinks-panel", () => ({
+  BacklinksPanel: () => <div data-testid="backlinks-panel" />,
+}));
+
 jest.mock("@/components/docs/editor-toolbar", () => ({
   EditorToolbar: ({ readonly }: { readonly?: boolean }) => (
     <div data-testid="editor-toolbar">{JSON.stringify({ readonly })}</div>
@@ -132,19 +148,45 @@ jest.mock("@/components/docs/version-viewer", () => ({
   ),
 }));
 
+jest.mock("@/lib/stores/entity-link-store", () => ({
+  useEntityLinkStore: (
+    selector: (state: {
+      linksByEntity: Record<string, unknown>;
+      fetchLinks: jest.Mock;
+      createLink: jest.Mock;
+      deleteLink: jest.Mock;
+    }) => unknown,
+  ) =>
+    selector({
+      linksByEntity: {},
+      fetchLinks: jest.fn(),
+      createLink: jest.fn(),
+      deleteLink: jest.fn(),
+    }),
+}));
+
+jest.mock("@/lib/stores/task-store", () => ({
+  useTaskStore: (selector?: (state: { tasks: unknown[]; fetchTasks: jest.Mock }) => unknown) => {
+    const state = {
+      tasks: [],
+      fetchTasks: jest.fn(),
+    };
+    return typeof selector === "function" ? selector(state) : state;
+  },
+}));
+
 describe("DocsPageDetail", () => {
   beforeEach(() => {
     jest.clearAllMocks();
     docsStoreState.projectId = null;
-    resolvePageContext.mockResolvedValue({
-      projectId: "project-2",
-      page: currentPage,
-    });
+    resolvePageContext.mockResolvedValue("project-2");
     window.history.pushState({}, "", "/docs/page-1?version=version-1&readonly=1");
   });
 
   it("resolves document context from the page id and renders shared versions as read-only", async () => {
-    render(<DocsPageDetail params={Promise.resolve({ pageId: "page-1" })} />);
+    await act(async () => {
+      render(<DocsPageDetailClient pageId="page-1" />);
+    });
 
     await waitFor(() => {
       expect(resolvePageContext).toHaveBeenCalledWith("page-1");
@@ -163,5 +205,9 @@ describe("DocsPageDetail", () => {
     expect(screen.getByTestId("editor-toolbar")).toHaveTextContent('"readonly":true');
     expect(screen.getByTestId("version-history-panel")).toHaveTextContent('"readonly":true');
     expect(screen.getByTestId("version-viewer")).toHaveTextContent("version-1");
+    expect(screen.getByTestId("related-tasks-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("backlinks-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("task-link-picker")).toBeInTheDocument();
+    expect(screen.getByTestId("decompose-tasks-dialog")).toBeInTheDocument();
   });
 });

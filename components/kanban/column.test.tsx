@@ -44,9 +44,7 @@ import type { Task } from "@/lib/stores/task-store";
 
 function makeTask(overrides: Partial<Task> & { id: string; title: string }): Task {
   return {
-    id: overrides.id,
     projectId: "project-1",
-    title: overrides.title,
     description: "",
     status: "in_progress",
     priority: "medium",
@@ -66,6 +64,8 @@ function makeTask(overrides: Partial<Task> & { id: string; title: string }): Tas
     createdAt: "2026-03-25T08:00:00.000Z",
     updatedAt: "2026-03-25T08:00:00.000Z",
     ...overrides,
+    id: overrides.id,
+    title: overrides.title,
   };
 }
 
@@ -83,7 +83,8 @@ describe("Column", () => {
         status="in_progress"
         tasks={tasks}
         selectedTaskId="task-2"
-        displayOptions={{ density: "comfortable", showDescriptions: true }}
+        displayOptions={{ density: "comfortable", showDescriptions: true, showLinkedDocs: false }}
+        linkedDocsByTask={{}}
         onTaskClick={onTaskClick}
       />,
     );

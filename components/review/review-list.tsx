@@ -11,6 +11,7 @@ const statusColors: Record<string, string> = {
   in_progress: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
   completed: "bg-emerald-500/15 text-emerald-700 dark:text-emerald-400",
   failed: "bg-red-500/15 text-red-700 dark:text-red-400",
+  pending_human: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
 };
 
 const riskColors: Record<string, string> = {
@@ -30,14 +31,14 @@ interface ReviewListProps {
   reviews: ReviewDTO[];
   onSelect: (review: ReviewDTO) => void;
   onApprove?: (id: string) => void;
-  onReject?: (id: string, reason: string) => void;
+  onRequestChanges?: (id: string, comment?: string) => void;
 }
 
 export function ReviewList({
   reviews,
   onSelect,
   onApprove,
-  onReject,
+  onRequestChanges,
 }: ReviewListProps) {
   if (reviews.length === 0) {
     return (
@@ -91,7 +92,7 @@ export function ReviewList({
                   {new Date(review.createdAt).toLocaleDateString()}
                 </span>
               </div>
-              {review.status === "completed" && (
+              {review.status === "pending_human" && (
                 <div
                   className="flex items-center gap-1"
                   onClick={(e) => e.stopPropagation()}
@@ -106,17 +107,17 @@ export function ReviewList({
                       Approve
                     </Button>
                   )}
-                  {onReject && (
+                  {onRequestChanges && (
                     <Button
                       size="sm"
                       variant="outline"
-                      className="h-6 text-xs text-red-600 dark:text-red-400"
+                      className="h-6 text-xs"
                       onClick={() => {
-                        const reason = window.prompt("Rejection reason:");
-                        if (reason) onReject(review.id, reason);
+                        const comment = window.prompt("Request changes comment:") ?? "";
+                        onRequestChanges(review.id, comment.trim() === "" ? undefined : comment.trim());
                       }}
                     >
-                      Reject
+                      Request Changes
                     </Button>
                   )}
                 </div>

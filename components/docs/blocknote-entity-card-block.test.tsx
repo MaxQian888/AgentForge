@@ -34,7 +34,7 @@ jest.mock("@blocknote/react", () => ({
           block: {
             props?: { entityType?: string; entityId?: string; label?: string };
           };
-        }) => JSX.Element;
+        }) => React.ReactElement;
       },
     ) => ({
       config,
@@ -53,7 +53,7 @@ describe("createEntityCardBlock", () => {
         block: {
           props?: { entityType?: string; entityId?: string; label?: string };
         };
-      }) => JSX.Element;
+      }) => React.ReactElement;
     };
 
     expect(entityCardBlock.config).toEqual(

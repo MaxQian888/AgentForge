@@ -121,6 +121,7 @@ describe("ProjectPage", () => {
       displayOptions: {
         density: "comfortable",
         showDescriptions: true,
+        showLinkedDocs: false,
       },
     });
   });

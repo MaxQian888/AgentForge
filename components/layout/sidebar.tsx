@@ -38,6 +38,7 @@ import { useCallback, useState } from "react";
 const navItems = [
   { href: "/", label: "Dashboard", icon: LayoutDashboard },
   { href: "/projects", label: "Projects", icon: FolderKanban },
+  { href: "/project/dashboard", label: "Project Dashboard", icon: LayoutDashboard },
   { href: "/team", label: "Team", icon: Users },
   { href: "/agents", label: "Agents", icon: Bot },
   { href: "/teams", label: "Teams", icon: Network },

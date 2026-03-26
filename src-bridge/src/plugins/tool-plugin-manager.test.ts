@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { ToolPluginManager } from "./tool-plugin-manager.js";
 import { MCPClientHub } from "../mcp/client-hub.js";
+import type { MCPClientEntry } from "../mcp/types.js";
 import type { PluginManifest, PluginRuntimeReporter } from "./types.js";
 
 const reporterCalls: unknown[] = [];
@@ -35,6 +36,7 @@ const validManifest: PluginManifest = {
 /** Minimal mock MCPClientHub that doesn't spawn real processes. */
 function createMockHub(): MCPClientHub {
   const hub = new MCPClientHub();
+  const clients = (hub as unknown as { clients: Map<string, MCPClientEntry> }).clients;
   // Override connectServer to skip real MCP handshake
   hub.connectServer = async (pluginId, _config) => {
     // Simulate discovered tools
@@ -59,8 +61,12 @@ function createMockHub(): MCPClientHub {
           messages: [{ role: "user", content: { type: "text", text: "Plan the task" } }],
         }),
         close: async () => {},
-      } as any,
-      transport: {} as any,
+      } as unknown as MCPClientEntry["client"],
+      transport: {
+        start: async () => {},
+        send: async () => {},
+        close: async () => {},
+      } as unknown as MCPClientEntry["transport"],
       config: _config,
       state: "active" as const,
       connectedAt: Date.now(),
@@ -68,11 +74,11 @@ function createMockHub(): MCPClientHub {
       resources: [fakeResource],
       prompts: [fakePrompt],
     };
-    (hub as any).clients.set(pluginId, entry);
+    clients.set(pluginId, entry);
     return [fakeTool];
   };
   hub.disconnectServer = async (pluginId) => {
-    (hub as any).clients.delete(pluginId);
+    clients.delete(pluginId);
   };
   return hub;
 }
@@ -194,11 +200,23 @@ describe("tool plugin manager", () => {
     // Events: enable→tool.status_change, activate→tool.status_change(activating),
     //         activate fail→tool.status_change(degraded), crash→error
     expect(crashEvents.length).toBe(4);
-    const crashEvent = crashEvents.find((e: any) => e.data?.code === "MCP_SERVER_CRASHED");
+    const crashEvent = crashEvents.find(
+      (event) =>
+        typeof event === "object" &&
+        event !== null &&
+        "data" in event &&
+        (event as { data?: { code?: string } }).data?.code === "MCP_SERVER_CRASHED"
+    );
     expect(crashEvent).toBeTruthy();
-    expect((crashEvent as any).data.code).toBe("MCP_SERVER_CRASHED");
+    expect((crashEvent as { data: { code: string } }).data.code).toBe("MCP_SERVER_CRASHED");
     // Verify tool.status_change events were emitted
-    const statusEvents = crashEvents.filter((e: any) => e.type === "tool.status_change");
+    const statusEvents = crashEvents.filter(
+      (event) =>
+        typeof event === "object" &&
+        event !== null &&
+        "type" in event &&
+        (event as { type?: string }).type === "tool.status_change"
+    );
     expect(statusEvents.length).toBe(3);
   });
 });

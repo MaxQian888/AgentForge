@@ -124,7 +124,8 @@ func TestCustomFieldHandler_CreateAndSetValue(t *testing.T) {
 	createCtx := e.NewContext(createReq, createRec)
 	createCtx.Set(appMiddleware.ProjectIDContextKey, projectID)
 
-	h := handler.NewCustomFieldHandler(svc)
+	automation := &fakeAutomationEvaluator{}
+	h := handler.NewCustomFieldHandler(svc).WithAutomation(automation)
 	if err := h.CreateDefinition(createCtx); err != nil {
 		t.Fatalf("CreateDefinition() error: %v", err)
 	}
@@ -152,5 +153,48 @@ func TestCustomFieldHandler_CreateAndSetValue(t *testing.T) {
 	}
 	if svc.setValue == nil || svc.setValue.TaskID != taskID || svc.setValue.FieldDefID != fieldID {
 		t.Fatalf("unexpected setValue input: %+v", svc.setValue)
+	}
+	if len(automation.events) != 1 || automation.events[0].EventType != model.AutomationEventTaskFieldChanged {
+		t.Fatalf("automation events = %+v", automation.events)
+	}
+	if got := automation.events[0].Data["value"]; got != "P0" {
+		t.Fatalf("automation value = %#v, want %q", got, "P0")
+	}
+	if got := automation.events[0].Data["current_value"]; got != "P0" {
+		t.Fatalf("automation current_value = %#v, want %q", got, "P0")
+	}
+}
+
+func TestCustomFieldHandler_ClearValuePublishesNullToAutomation(t *testing.T) {
+	projectID := uuid.New()
+	fieldID := uuid.New()
+	taskID := uuid.New()
+	svc := &customFieldServiceMock{}
+	automation := &fakeAutomationEvaluator{}
+	h := handler.NewCustomFieldHandler(svc).WithAutomation(automation)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodDelete, "/api/v1/projects/"+projectID.String()+"/tasks/"+taskID.String()+"/fields/"+fieldID.String(), nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(appMiddleware.ProjectIDContextKey, projectID)
+	c.SetPath("/api/v1/projects/:pid/tasks/:tid/fields/:fid")
+	c.SetParamNames("pid", "tid", "fid")
+	c.SetParamValues(projectID.String(), taskID.String(), fieldID.String())
+
+	if err := h.ClearTaskValue(c); err != nil {
+		t.Fatalf("ClearTaskValue() error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(automation.events) != 1 {
+		t.Fatalf("automation events = %+v", automation.events)
+	}
+	if got := automation.events[0].Data["value"]; got != nil {
+		t.Fatalf("automation value = %#v, want nil", got)
+	}
+	if got := automation.events[0].Data["current_value"]; got != nil {
+		t.Fatalf("automation current_value = %#v, want nil", got)
 	}
 }

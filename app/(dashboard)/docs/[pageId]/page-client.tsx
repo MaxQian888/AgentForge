@@ -1,0 +1,478 @@
+"use client";
+
+import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
+import { Copy } from "lucide-react";
+import { Button } from "@/components/ui/button";
+import { createApiClient } from "@/lib/api-client";
+import { useDashboardStore } from "@/lib/stores/dashboard-store";
+import { useDocsStore } from "@/lib/stores/docs-store";
+import { useAuthStore } from "@/lib/stores/auth-store";
+import { buildDocsHref } from "@/lib/route-hrefs";
+import { DocsSidebarPanel } from "@/components/docs/docs-sidebar-panel";
+import { BlockEditor } from "@/components/docs/block-editor";
+import { CommentsPanel } from "@/components/docs/comments-panel";
+import { DecomposeTasksDialog } from "@/components/docs/decompose-tasks-dialog";
+import { EditorToolbar } from "@/components/docs/editor-toolbar";
+import { RelatedTasksPanel, type RelatedTaskItem } from "@/components/docs/related-tasks-panel";
+import { TaskLinkPicker } from "@/components/docs/task-link-picker";
+import { TemplatePicker } from "@/components/docs/template-picker";
+import { VersionHistoryPanel } from "@/components/docs/version-history-panel";
+import { VersionViewer } from "@/components/docs/version-viewer";
+import { BacklinksPanel, type BacklinkItem } from "@/components/shared/backlinks-panel";
+import { useEntityLinkStore } from "@/lib/stores/entity-link-store";
+import { useTaskStore } from "@/lib/stores/task-store";
+
+export function DocsPageDetailClient({ pageId }: { pageId: string }) {
+  const router = useRouter();
+  const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
+  const {
+    projectId,
+    tree,
+    currentPage,
+    comments,
+    versions,
+    templates,
+    favorites,
+    recentAccess,
+    loading,
+    saving,
+    resolvePageContext,
+    setProjectId,
+    fetchTree,
+    fetchPageWorkspace,
+    createPageFromTemplate,
+    createTemplateFromPage,
+    createVersion,
+    restoreVersion,
+    createComment,
+    setCommentResolved,
+    movePage,
+    toggleFavorite,
+    togglePinned,
+    updatePage,
+  } = useDocsStore();
+  const [query, setQuery] = useState("");
+  const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
+  const [pickerOpen, setPickerOpen] = useState(false);
+  const [taskPickerOpen, setTaskPickerOpen] = useState(false);
+  const [decomposeOpen, setDecomposeOpen] = useState(false);
+  const [preselectedBlockIds, setPreselectedBlockIds] = useState<string[]>([]);
+  const [readonly, setReadonly] = useState(false);
+  const entityLinks = useEntityLinkStore(
+    (state) => (currentPage ? state.linksByEntity[`wiki_page:${currentPage.id}`] ?? [] : []),
+  );
+  const fetchEntityLinks = useEntityLinkStore((state) => state.fetchLinks);
+  const createEntityLink = useEntityLinkStore((state) => state.createLink);
+  const deleteEntityLink = useEntityLinkStore((state) => state.deleteLink);
+  const tasks = useTaskStore((state) => state.tasks);
+  const fetchTasks = useTaskStore((state) => state.fetchTasks);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydratePage = async () => {
+      const urlParams =
+        typeof window === "undefined"
+          ? new URLSearchParams()
+          : new URLSearchParams(window.location.search);
+      const requestedVersionId = urlParams.get("version");
+      const isReadonly = urlParams.get("readonly") === "1";
+
+      if (!cancelled) {
+        setSelectedVersionId(requestedVersionId);
+        setReadonly(isReadonly);
+      }
+
+      const resolvedProjectId = await resolvePageContext(pageId);
+      if (!resolvedProjectId || cancelled) {
+        return;
+      }
+      setProjectId(resolvedProjectId);
+      void fetchTree(resolvedProjectId);
+      void fetchPageWorkspace(resolvedProjectId, pageId);
+      void fetchTasks(resolvedProjectId);
+    };
+
+    void hydratePage();
+
+    return () => {
+      cancelled = true;
+    };
+  }, [fetchPageWorkspace, fetchTasks, fetchTree, pageId, resolvePageContext, selectedProjectId, setProjectId]);
+
+  useEffect(() => {
+    if (!(projectId ?? selectedProjectId) || !currentPage) {
+      return;
+    }
+    void fetchEntityLinks(projectId ?? selectedProjectId ?? "", "wiki_page", currentPage.id);
+  }, [currentPage, fetchEntityLinks, projectId, selectedProjectId]);
+
+  const selectedVersion = useMemo(
+    () => versions.find((version) => version.id === selectedVersionId) ?? versions[0] ?? null,
+    [selectedVersionId, versions]
+  );
+  const displayContent = readonly && selectedVersion ? selectedVersion.content : currentPage?.content ?? "[]";
+  const commentedBlockIds = useMemo(
+    () =>
+      comments
+        .map((comment) => comment.anchorBlockId)
+        .filter((value): value is string => Boolean(value)),
+    [comments]
+  );
+  const relatedTasks = useMemo<RelatedTaskItem[]>(() => {
+    return entityLinks
+      .filter((link) => link.targetType === "task" || link.sourceType === "task")
+        .map((link) => {
+          const taskId = link.sourceType === "task" ? link.sourceId : link.targetId;
+          const task = tasks.find((item) => item.id === taskId);
+          return {
+            linkId: link.id,
+            taskId,
+          title: task?.title ?? taskId,
+          status: task?.status ?? "unknown",
+          assigneeName: task?.assigneeName ?? null,
+          dueDate: task?.plannedEndAt ?? null,
+        };
+      });
+  }, [entityLinks, tasks]);
+  const currentPageId = currentPage?.id ?? null;
+  const backlinks = useMemo<BacklinkItem[]>(
+    () =>
+      currentPageId
+        ? entityLinks
+            .filter(
+              (link) =>
+                link.linkType === "mention" &&
+                link.targetType === "wiki_page" &&
+                link.targetId === currentPageId,
+            )
+            .map((link) => ({
+              linkId: link.id,
+              entityId: link.sourceId,
+              entityType: link.sourceType,
+              title:
+                link.sourceType === "task"
+                  ? tasks.find((task) => task.id === link.sourceId)?.title ?? link.sourceId
+                  : link.sourceId,
+            }))
+        : [],
+    [currentPageId, entityLinks, tasks],
+  );
+  const availableBlocks = useMemo(() => {
+    try {
+      const parsed = JSON.parse(currentPage?.content ?? "[]") as Array<Record<string, unknown>>;
+      return parsed
+        .map((block) => {
+          const content = block.content;
+          const text =
+            typeof content === "string"
+              ? content
+              : Array.isArray(content)
+                ? content
+                    .map((item) =>
+                      typeof item === "object" && item && "text" in item
+                        ? String((item as { text?: unknown }).text ?? "")
+                        : "",
+                    )
+                    .join(" ")
+                : "";
+          return {
+            id: String(block.id ?? ""),
+            text,
+          };
+        })
+        .filter((block) => block.id);
+    } catch {
+      return [];
+    }
+  }, [currentPage]);
+  const blockTaskCounts = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const link of entityLinks) {
+      if (link.linkType !== "requirement" || !link.anchorBlockId) {
+        continue;
+      }
+      counts.set(link.anchorBlockId, (counts.get(link.anchorBlockId) ?? 0) + 1);
+    }
+    return counts;
+  }, [entityLinks]);
+
+  if (loading && !currentPage) {
+    return <p className="text-sm text-muted-foreground">Loading document…</p>;
+  }
+
+  if (!currentPage) {
+    return (
+      <div className="flex flex-col gap-3">
+        <h1 className="text-2xl font-bold">Document not found</h1>
+        <Button variant="outline" onClick={() => router.push("/docs")}>
+          Back to Docs
+        </Button>
+      </div>
+    );
+  }
+
+  return (
+    <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)_360px]">
+      <DocsSidebarPanel
+        query={query}
+        onQueryChange={setQuery}
+        tree={tree}
+        currentPageId={currentPage.id}
+        favorites={favorites}
+        recentAccess={recentAccess}
+        onMovePage={(movedPageId, parentId, sortOrder) =>
+          void movePage({
+            projectId: projectId ?? selectedProjectId ?? "",
+            pageId: movedPageId,
+            parentId,
+            sortOrder,
+          })
+        }
+        onToggleFavorite={(targetPageId, favorite) =>
+          void toggleFavorite({
+            projectId: projectId ?? selectedProjectId ?? "",
+            pageId: targetPageId,
+            favorite,
+          })
+        }
+        onTogglePinned={(targetPageId, pinned) =>
+          void togglePinned({
+            projectId: projectId ?? selectedProjectId ?? "",
+            pageId: targetPageId,
+            pinned,
+          })
+        }
+      />
+
+      <div className="flex flex-col gap-4">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-3xl font-semibold">{currentPage.title}</h1>
+            <p className="text-sm text-muted-foreground">
+              {currentPage.path} · last updated{" "}
+              {new Date(
+                readonly && selectedVersion ? selectedVersion.createdAt : currentPage.updatedAt
+              ).toLocaleString()}
+            </p>
+          </div>
+          <div className="flex gap-2">
+            {!readonly ? (
+              <Button variant="outline" onClick={() => setPickerOpen(true)}>
+                New from Template
+              </Button>
+            ) : null}
+            {!readonly ? (
+              <Button variant="outline" onClick={() => setDecomposeOpen(true)}>
+                Create Tasks
+              </Button>
+            ) : null}
+            <Button
+              variant="outline"
+              onClick={() =>
+                void navigator.clipboard.writeText(`${window.location.origin}${buildDocsHref(currentPage.id)}`)
+              }
+            >
+              <Copy className="mr-1 size-4" />
+              Copy Link
+            </Button>
+          </div>
+        </div>
+
+        <EditorToolbar
+          readonly={readonly}
+          saving={saving}
+          onSaveVersion={() =>
+            void createVersion({
+              projectId: projectId ?? selectedProjectId ?? "",
+              pageId: currentPage.id,
+              name: `Snapshot ${new Date().toLocaleTimeString()}`,
+            })
+          }
+          onSaveTemplate={() =>
+            void createTemplateFromPage({
+              projectId: projectId ?? selectedProjectId ?? "",
+              pageId: currentPage.id,
+              name: `${currentPage.title} Template`,
+              category: currentPage.templateCategory || "custom",
+            })
+          }
+          onShareVersion={() => {
+            const versionId = selectedVersion?.id;
+            if (!versionId) return;
+            void navigator.clipboard.writeText(
+              `${window.location.origin}${buildDocsHref(currentPage.id)}?version=${versionId}&readonly=1`
+            );
+          }}
+        />
+
+        <BlockEditor
+          value={displayContent}
+          editable={!readonly}
+          commentedBlockIds={commentedBlockIds}
+          taskCountsByBlock={Object.fromEntries(blockTaskCounts.entries())}
+          onCreateTasksFromSelection={(blockIds) => {
+            setPreselectedBlockIds(blockIds);
+            setDecomposeOpen(true);
+          }}
+          onChange={(content, contentText) =>
+            readonly
+              ? undefined
+              : void updatePage({
+                  projectId: projectId ?? selectedProjectId ?? "",
+                  pageId: currentPage.id,
+                  title: currentPage.title,
+                  content,
+                  contentText,
+                  expectedUpdatedAt: currentPage.updatedAt,
+                })
+          }
+        />
+
+        {availableBlocks.length > 0 ? (
+          <div className="rounded-xl border border-border/60 bg-card/70 p-4">
+            <h2 className="text-base font-semibold">Block Task Counts</h2>
+            <div className="mt-3 space-y-2">
+              {availableBlocks.map((block) => (
+                <div
+                  key={block.id}
+                  className="flex items-center justify-between rounded-lg border border-border/60 bg-background px-3 py-2"
+                >
+                  <div className="min-w-0">
+                    <div className="font-medium">{block.id}</div>
+                    <div className="text-xs text-muted-foreground">{block.text}</div>
+                  </div>
+                  <Button type="button" size="sm" variant="outline">
+                    {blockTaskCounts.get(block.id) ?? 0} tasks
+                  </Button>
+                </div>
+              ))}
+            </div>
+          </div>
+        ) : null}
+      </div>
+
+      <div className="flex flex-col gap-4">
+        <RelatedTasksPanel
+          tasks={relatedTasks}
+          onAddTask={() => setTaskPickerOpen(true)}
+          onRemoveTask={(linkId) =>
+            void deleteEntityLink(projectId ?? selectedProjectId ?? "", "wiki_page", currentPage.id, linkId)
+          }
+        />
+        <BacklinksPanel items={backlinks} />
+        <VersionHistoryPanel
+          readonly={readonly}
+          versions={versions}
+          selectedVersionId={selectedVersionId}
+          onSelect={setSelectedVersionId}
+          onRestore={(versionId) =>
+            void restoreVersion({
+              projectId: projectId ?? selectedProjectId ?? "",
+              pageId: currentPage.id,
+              versionId,
+            })
+          }
+          onShare={(versionId) =>
+            void navigator.clipboard.writeText(
+              `${window.location.origin}${buildDocsHref(currentPage.id)}?version=${versionId}&readonly=1`
+            )
+          }
+        />
+        <VersionViewer version={selectedVersion} />
+        <CommentsPanel
+          readonly={readonly}
+          comments={comments}
+          onCreateComment={(body) =>
+            createComment({
+              projectId: projectId ?? selectedProjectId ?? "",
+              pageId: currentPage.id,
+              body,
+              mentions: "[]",
+            })
+          }
+          onResolve={(commentId) =>
+            void setCommentResolved({
+              projectId: projectId ?? selectedProjectId ?? "",
+              pageId: currentPage.id,
+              commentId,
+              resolved: true,
+            })
+          }
+          onReopen={(commentId) =>
+            void setCommentResolved({
+              projectId: projectId ?? selectedProjectId ?? "",
+              pageId: currentPage.id,
+              commentId,
+              resolved: false,
+            })
+          }
+          onCopyLink={(commentId) =>
+            void navigator.clipboard.writeText(
+              `${window.location.origin}${buildDocsHref(currentPage.id)}#comment-${commentId}`
+            )
+          }
+          mentionSuggestions={["alice", "bob", "carol"]}
+        />
+      </div>
+
+      <TemplatePicker
+        open={pickerOpen}
+        onOpenChange={setPickerOpen}
+        templates={templates}
+        onPick={(templateId) => {
+          void createPageFromTemplate({
+            projectId: projectId ?? selectedProjectId ?? "",
+            templateId,
+            title: "New document from template",
+          });
+          setPickerOpen(false);
+        }}
+      />
+      <TaskLinkPicker
+        open={taskPickerOpen}
+        onOpenChange={setTaskPickerOpen}
+        tasks={tasks.map((task) => ({
+          id: task.id,
+          title: task.title,
+          status: task.status,
+        }))}
+        onPick={(taskId) => {
+          void createEntityLink({
+            projectId: projectId ?? selectedProjectId ?? "",
+            sourceType: "wiki_page",
+            sourceId: currentPage.id,
+            targetType: "task",
+            targetId: taskId,
+            linkType: "design",
+          });
+          setTaskPickerOpen(false);
+        }}
+      />
+      <DecomposeTasksDialog
+        open={decomposeOpen}
+        onOpenChange={setDecomposeOpen}
+        blocks={availableBlocks}
+        tasks={tasks.map((task) => ({ id: task.id, title: task.title }))}
+        initialBlockIds={preselectedBlockIds}
+        onConfirm={({ blockIds, parentTaskId }) => {
+          const token = useAuthStore.getState().accessToken;
+          if (!token) {
+            return;
+          }
+          const api = createApiClient(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777");
+          void api.post(
+            `/api/v1/projects/${projectId ?? selectedProjectId ?? ""}/wiki/pages/${currentPage.id}/decompose-tasks`,
+            {
+              blockIds,
+              parentTaskId: parentTaskId ?? undefined,
+            },
+            { token },
+          );
+          setDecomposeOpen(false);
+        }}
+      />
+    </div>
+  );
+}

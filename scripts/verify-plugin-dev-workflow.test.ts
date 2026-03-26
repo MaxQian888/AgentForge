@@ -1,5 +1,7 @@
 /** @jest-environment node */
 
+export {};
+
 describe("verify-plugin-dev-workflow stage plan", () => {
   test("builds the maintained sample verification stages", () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -8,7 +10,7 @@ describe("verify-plugin-dev-workflow stage plan", () => {
     expect(
       createVerificationStages({
         manifestPath: "plugins/integrations/feishu-adapter/manifest.yaml",
-      }).map((stage) => stage.name),
+      }).map((stage: { name: string }) => stage.name),
     ).toEqual([
       "build",
       "debug-health",

@@ -520,7 +520,7 @@ func (s *Session) Close() error {
 
 **替换为：** Engine 需要理解 AgentForge 任务管理语义，支持：
 
-1. **斜杠命令** → 映射到 AgentForge API（`/task create` → `POST /api/v1/tasks`）
+1. **斜杠命令** → 映射到 AgentForge API（`/task create` → `POST /api/v1/projects/:pid/tasks`）
 2. **自然语言** → 先发送到 AI 意图识别，再路由到对应 API
 3. **通知推送** → AgentForge 后端主动推送消息到 IM（任务状态变更、审查完成等）
 
@@ -619,8 +619,9 @@ func (e *Engine) handleTaskCommand(p core.Platform, msg *core.Message, args stri
   │  POST /api/v1/im/command    ← 斜杠命令入口                │
   │  POST /api/v1/im/send       ← 主动发消息到 IM             │
   │  POST /api/v1/im/notify     ← 发通知到 IM                 │
-  │  GET  /api/v1/im/events     ← SSE 事件流（Agent 输出）    │
-  │  WS   /ws/v1/stream         ← WebSocket 双向通信          │
+  │  POST /api/v1/im/action     ← 交互动作入口                │
+  │  POST /api/v1/im/bridge/*   ← Bridge 控制面注册/心跳      │
+  │  WS   /ws/im-bridge         ← 定向投递/回放/进度流        │
   └────────────────────────────────────────────────────────────┘
 ```
 
@@ -651,7 +652,7 @@ AgentForge 后端:
     ├── AI 分析意图 → 任务分解
     ├── 创建 5 个子任务
     ├── 3 个标记 "适合 Agent"，2 个标记 "需要人工"
-    └── 通过 SSE/WebSocket 推送事件流:
+    └── 通过 IM Control Plane / WebSocket 推送事件流:
         Event{Type: "text", Content: "已拆解为 5 个子任务:\n1. ..."}
         Event{Type: "result", Done: true}
             ↓
@@ -667,7 +668,7 @@ Agent 完成编码 → PR #87 已创建 → 审查通过
     ↓
 AgentForge 后端:
     POST /api/v1/im/notify → 推送到 IM Bridge
-    或通过 WebSocket /ws/v1/stream 推送 notification.new 事件
+    或通过 WebSocket /ws/im-bridge 推送 notification.new / progress 事件
     {
         "type": "review_complete",
         "target_session": "feishu:{chatID}:{userID}",

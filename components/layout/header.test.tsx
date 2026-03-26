@@ -21,12 +21,15 @@ describe("Header", () => {
     const user = userEvent.setup();
     const logout = jest.fn().mockResolvedValue(undefined);
     const markRead = jest.fn();
+    const mockUseAuthStore = useAuthStore as unknown as jest.MockedFunction<typeof useAuthStore>;
+    const mockUseNotificationStore =
+      useNotificationStore as unknown as jest.MockedFunction<typeof useNotificationStore>;
 
-    (useAuthStore as jest.Mock).mockReturnValue({
+    mockUseAuthStore.mockReturnValue({
       user: { name: "Alice Johnson" },
       logout,
     });
-    (useNotificationStore as jest.Mock).mockReturnValue({
+    mockUseNotificationStore.mockReturnValue({
       notifications: [
         { id: "n-1", title: "Task stalled", message: "Review queue blocked." },
       ],

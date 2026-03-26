@@ -61,3 +61,10 @@ The notification delivery system SHALL support the following additional event ty
 #### Scenario: Version published notification
 - **WHEN** a named version is published for a wiki page a user has subscribed to
 - **THEN** the system delivers a notification with the page title, version name, and a deep link to the version
+
+### Requirement: Automation-triggered desktop notifications
+The desktop notification delivery system SHALL deliver notifications triggered by automation rule actions.
+
+#### Scenario: Automation sends desktop notification
+- **WHEN** an automation rule executes a send_notification action
+- **THEN** the system delivers a desktop notification to the specified user with the configured title, body, and deep link

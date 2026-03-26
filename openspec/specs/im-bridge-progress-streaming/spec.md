@@ -70,3 +70,21 @@ The IM bridge progress streaming system SHALL forward document-related events to
 #### Scenario: Comment mention forwarded to IM
 - **WHEN** a user is @-mentioned in a wiki comment and has IM notifications enabled
 - **THEN** the IM bridge sends a direct message to the user with the comment context and a link to the comment
+
+### Requirement: Automation-triggered IM messages
+The IM bridge progress streaming system SHALL deliver messages triggered by automation rule actions.
+
+#### Scenario: Automation sends IM message
+- **WHEN** an automation rule executes a send_im_message action with a channel and template
+- **THEN** the IM bridge renders the template with event context and sends the message to the specified channel
+
+### Requirement: IM actions for message-to-doc and message-to-task conversion
+The IM bridge SHALL support actions to convert an IM message into a wiki page or a task.
+
+#### Scenario: Convert message to doc page
+- **WHEN** user triggers the "Save as Doc" action on an IM message
+- **THEN** the IM bridge creates a wiki page in the project's doc space with the message content as the body, and replies with a link to the created page
+
+#### Scenario: Convert message to task
+- **WHEN** user triggers the "Create Task" action on an IM message
+- **THEN** the IM bridge creates a task in the project backlog with the message content as the description, sets origin=im, and replies with a link to the created task

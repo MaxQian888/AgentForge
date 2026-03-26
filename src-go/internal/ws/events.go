@@ -23,6 +23,7 @@ const (
 	EventAgentCostUpdate        = "agent.cost_update"
 	EventReviewCreated          = "review.created"
 	EventReviewCompleted        = "review.completed"
+	EventReviewUpdated          = "review.updated"
 	EventReviewPendingHuman     = "review.pending_human"
 	EventReviewFixRequested     = "review.fix_requested"
 	EventNotification           = "notification"

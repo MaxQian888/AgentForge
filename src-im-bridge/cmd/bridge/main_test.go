@@ -21,6 +21,7 @@ import (
 	"github.com/agentforge/im-bridge/platform/feishu"
 	"github.com/agentforge/im-bridge/platform/slack"
 	"github.com/agentforge/im-bridge/platform/telegram"
+	"github.com/agentforge/im-bridge/platform/wecom"
 )
 
 func TestLoadConfig_ReadsExplicitPlatformSettings(t *testing.T) {
@@ -47,6 +48,26 @@ func TestLoadConfig_ReadsExplicitPlatformSettings(t *testing.T) {
 	}
 	if cfg.SlackAppToken != "xapp-test" {
 		t.Fatalf("SlackAppToken = %q, want xapp-test", cfg.SlackAppToken)
+	}
+}
+
+func TestLoadConfig_ReadsWeComSettings(t *testing.T) {
+	t.Setenv("IM_PLATFORM", "wecom")
+	t.Setenv("IM_TRANSPORT_MODE", "live")
+	t.Setenv("WECOM_CORP_ID", "corp-id")
+	t.Setenv("WECOM_AGENT_ID", "1000002")
+	t.Setenv("WECOM_AGENT_SECRET", "agent-secret")
+	t.Setenv("WECOM_CALLBACK_TOKEN", "callback-token")
+	t.Setenv("WECOM_CALLBACK_PORT", "9080")
+	t.Setenv("WECOM_CALLBACK_PATH", "/wecom/callback")
+
+	cfg := loadConfig()
+
+	if cfg.Platform != "wecom" {
+		t.Fatalf("Platform = %q, want wecom", cfg.Platform)
+	}
+	if cfg.WeComCorpID != "corp-id" || cfg.WeComAgentID != "1000002" || cfg.WeComCallbackPath != "/wecom/callback" {
+		t.Fatalf("cfg = %+v", cfg)
 	}
 }
 
@@ -247,19 +268,61 @@ func TestSelectPlatform_RejectsUnsupportedPlatform(t *testing.T) {
 	}
 }
 
-func TestSelectPlatform_RejectsPlannedWecomRuntimeActivation(t *testing.T) {
+func TestSelectPlatform_ReturnsStubForWeComWithoutLiveSettings(t *testing.T) {
 	cfg := &config{
 		Platform:      "wecom",
 		TransportMode: "stub",
 		TestPort:      "9010",
 	}
 
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "wecom-stub" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+}
+
+func TestSelectPlatform_ReturnsLiveWeComAdapterWhenConfigured(t *testing.T) {
+	cfg := &config{
+		Platform:           "wecom",
+		TransportMode:      "live",
+		WeComCorpID:        "corp-id",
+		WeComAgentID:       "1000002",
+		WeComAgentSecret:   "agent-secret",
+		WeComCallbackToken: "callback-token",
+		WeComCallbackPort:  "9012",
+		WeComCallbackPath:  "/wecom/callback",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "wecom-live" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+	if _, ok := platform.(*wecom.Live); !ok {
+		t.Fatalf("platform type = %T, want *wecom.Live", platform)
+	}
+}
+
+func TestSelectPlatform_RejectsWeComLiveWithoutCallbackConfig(t *testing.T) {
+	cfg := &config{
+		Platform:         "wecom",
+		TransportMode:    "live",
+		WeComCorpID:      "corp-id",
+		WeComAgentID:     "1000002",
+		WeComAgentSecret: "agent-secret",
+	}
+
 	_, err := selectPlatform(cfg)
 	if err == nil {
-		t.Fatal("expected wecom selection to fail")
+		t.Fatal("expected wecom live selection to fail")
 	}
-	if err.Error() != "selected platform wecom is planned but not yet runnable; adapter, capability matrix, and runtime wiring are still pending" {
-		t.Fatalf("err = %v", err)
+	if err != nil && err.Error() == "" {
+		t.Fatal("expected actionable wecom config error")
 	}
 }
 
@@ -354,7 +417,7 @@ func TestLookupPlatformDescriptor_ReturnsCapabilities(t *testing.T) {
 	}
 }
 
-func TestLookupPlatformDescriptor_ReportsPlannedWecomGap(t *testing.T) {
+func TestLookupPlatformDescriptor_ReportsWeComCapabilities(t *testing.T) {
 	descriptor, err := lookupPlatformDescriptor("wecom")
 	if err != nil {
 		t.Fatalf("lookupPlatformDescriptor error: %v", err)
@@ -362,11 +425,14 @@ func TestLookupPlatformDescriptor_ReportsPlannedWecomGap(t *testing.T) {
 	if descriptor.Metadata.Source != "wecom" {
 		t.Fatalf("source = %q, want wecom", descriptor.Metadata.Source)
 	}
-	if descriptor.NewStub != nil || descriptor.NewLive != nil {
-		t.Fatalf("expected wecom to remain non-runnable, got NewStub=%v NewLive=%v", descriptor.NewStub, descriptor.NewLive)
+	if descriptor.NewStub == nil || descriptor.NewLive == nil {
+		t.Fatalf("expected wecom to be runnable, got NewStub=%v NewLive=%v", descriptor.NewStub, descriptor.NewLive)
 	}
-	if descriptor.PlannedReason == "" {
-		t.Fatal("expected planned provider to include a planned reason")
+	if descriptor.Metadata.Capabilities.ActionCallbackMode != core.ActionCallbackWebhook {
+		t.Fatalf("callback mode = %q", descriptor.Metadata.Capabilities.ActionCallbackMode)
+	}
+	if !descriptor.Metadata.Capabilities.RequiresPublicCallback {
+		t.Fatal("expected wecom live transport to require a public callback")
 	}
 }
 

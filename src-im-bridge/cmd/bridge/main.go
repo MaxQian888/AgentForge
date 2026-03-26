@@ -90,6 +90,12 @@ type config struct {
 	SlackAppToken           string
 	DingTalkAppKey          string
 	DingTalkAppSecret       string
+	WeComCorpID             string
+	WeComAgentID            string
+	WeComAgentSecret        string
+	WeComCallbackToken      string
+	WeComCallbackPort       string
+	WeComCallbackPath       string
 	TelegramBotToken        string
 	TelegramUpdateMode      string
 	TelegramWebhookURL      string
@@ -119,6 +125,12 @@ func loadConfig() *config {
 		SlackAppToken:           os.Getenv("SLACK_APP_TOKEN"),
 		DingTalkAppKey:          os.Getenv("DINGTALK_APP_KEY"),
 		DingTalkAppSecret:       os.Getenv("DINGTALK_APP_SECRET"),
+		WeComCorpID:             os.Getenv("WECOM_CORP_ID"),
+		WeComAgentID:            os.Getenv("WECOM_AGENT_ID"),
+		WeComAgentSecret:        os.Getenv("WECOM_AGENT_SECRET"),
+		WeComCallbackToken:      os.Getenv("WECOM_CALLBACK_TOKEN"),
+		WeComCallbackPort:       os.Getenv("WECOM_CALLBACK_PORT"),
+		WeComCallbackPath:       envOrDefault("WECOM_CALLBACK_PATH", "/wecom/callback"),
 		TelegramBotToken:        os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramUpdateMode:      envOrDefault("TELEGRAM_UPDATE_MODE", "longpoll"),
 		TelegramWebhookURL:      os.Getenv("TELEGRAM_WEBHOOK_URL"),

@@ -16,6 +16,11 @@ import type {
 const CLIENT_NAME = "agentforge-bridge";
 const CLIENT_VERSION = "0.1.0";
 
+type StdioProcessHandle = {
+  pid?: number;
+  on?: (event: "exit", listener: (code: number | null) => void) => void;
+};
+
 /**
  * Central hub managing all MCP server connections.
  * Handles connect/disconnect, tool discovery, tool invocation,
@@ -60,7 +65,7 @@ export class MCPClientHub {
 
       // Attempt to read PID from stdio transport's internal process
       if (config.transport === "stdio") {
-        const stdioT = transport as unknown as { _process?: { pid?: number; on?: Function } };
+        const stdioT = transport as { _process?: StdioProcessHandle };
         entry.pid = stdioT._process?.pid;
 
         // Attach crash detection for stdio processes

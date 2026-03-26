@@ -33,6 +33,7 @@ type TaskHandler struct {
 	recommender taskRecommender
 	hub         *ws.Hub
 	workflowSvc taskWorkflowEvaluator
+	automation  service.AutomationEventEvaluator
 }
 
 type taskDecomposer interface {
@@ -88,6 +89,11 @@ func (h *TaskHandler) WithWorkflowService(svc taskWorkflowEvaluator) *TaskHandle
 
 func (h *TaskHandler) WithRecommender(rec taskRecommender) *TaskHandler {
 	h.recommender = rec
+	return h
+}
+
+func (h *TaskHandler) WithAutomation(evaluator service.AutomationEventEvaluator) *TaskHandler {
+	h.automation = evaluator
 	return h
 }
 
@@ -283,6 +289,18 @@ func (h *TaskHandler) Update(c echo.Context) error {
 		}
 	}
 	h.broadcastTaskUpdated(task)
+	if h.automation != nil {
+		taskID := task.ID
+		_ = h.automation.EvaluateRules(c.Request().Context(), service.AutomationEvent{
+			EventType: model.AutomationEventTaskFieldChanged,
+			ProjectID: task.ProjectID,
+			TaskID:    &taskID,
+			Task:      task,
+			Data: map[string]any{
+				"field": "task",
+			},
+		})
+	}
 	return c.JSON(http.StatusOK, task.ToDTO())
 }
 
@@ -348,6 +366,20 @@ func (h *TaskHandler) Transition(c echo.Context) error {
 	if h.workflowSvc != nil && previousStatus != "" {
 		go h.workflowSvc.EvaluateTransition(context.Background(), task, previousStatus, req.Status)
 	}
+	if h.automation != nil {
+		taskID := task.ID
+		_ = h.automation.EvaluateRules(c.Request().Context(), service.AutomationEvent{
+			EventType: model.AutomationEventTaskStatusChanged,
+			ProjectID: task.ProjectID,
+			TaskID:    &taskID,
+			Task:      task,
+			Data: map[string]any{
+				"status":         task.Status,
+				"previousStatus": previousStatus,
+				"newStatus":      req.Status,
+			},
+		})
+	}
 
 	return c.JSON(http.StatusOK, task.ToDTO())
 }
@@ -396,6 +428,19 @@ func (h *TaskHandler) Assign(c echo.Context) error {
 		if progressErr == nil {
 			task.Progress = snapshot
 		}
+	}
+	if h.automation != nil {
+		taskID := task.ID
+		_ = h.automation.EvaluateRules(c.Request().Context(), service.AutomationEvent{
+			EventType: model.AutomationEventTaskAssigneeChanged,
+			ProjectID: task.ProjectID,
+			TaskID:    &taskID,
+			Task:      task,
+			Data: map[string]any{
+				"assignee_id":   req.AssigneeID,
+				"assignee_type": req.AssigneeType,
+			},
+		})
 	}
 	return c.JSON(http.StatusOK, task.ToDTO())
 }

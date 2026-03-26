@@ -1,10 +1,11 @@
 # additional-im-platform-support Specification
 
 ## Purpose
-Define the live-transport and platform-capability contract for the AgentForge IM Bridge so Feishu, Slack, DingTalk, Telegram, and Discord can run the shared command and notification flows with explicit platform selection, accurate backend source metadata, provider-aware acknowledgement rules, and safe rich-message fallback behavior.
+Define the live-transport and platform-capability contract for the AgentForge IM Bridge so Feishu, Slack, DingTalk, Telegram, Discord, and WeCom can run the shared command and notification flows with explicit platform selection, accurate backend source metadata, provider-aware acknowledgement rules, and safe rich-message fallback behavior.
+
 ## Requirements
 ### Requirement: Bridge runtime can start with a supported live platform as the active platform
-The IM Bridge SHALL allow a deployment to select exactly one active IM platform provider per process. The runtime SHALL resolve the requested `IM_PLATFORM` through the provider contract so built-in providers such as `feishu`, `slack`, `dingtalk`, `telegram`, and `discord`, plus future plugin-backed providers, share the same startup path. The runtime SHALL validate the required credentials and transport-specific configuration for the selected provider before starting message handling or notification delivery, and SHALL fail with an actionable configuration error instead of silently falling back to another provider or a local stub when the runtime is configured for live transport.
+The IM Bridge SHALL allow a deployment to select exactly one active IM platform provider per process. The runtime SHALL resolve the requested `IM_PLATFORM` through the provider contract so built-in providers such as `feishu`, `slack`, `dingtalk`, `telegram`, `discord`, and `wecom`, plus future plugin-backed providers, share the same startup path. The runtime SHALL validate the required credentials and transport-specific configuration for the selected provider before starting message handling or notification delivery, and SHALL fail with an actionable configuration error instead of silently falling back to another provider or a local stub when the runtime is configured for live transport.
 
 #### Scenario: Feishu bridge starts with valid live configuration
 - **WHEN** the bridge is configured with `IM_PLATFORM=feishu` and the required live transport credentials are present
@@ -16,8 +17,13 @@ The IM Bridge SHALL allow a deployment to select exactly one active IM platform 
 - **THEN** the bridge resolves and starts a Telegram live platform provider through the same shared provider contract
 - **AND** the bridge does not require another platform-specific adapter to be enabled in the same process
 
+#### Scenario: WeCom bridge starts with valid live configuration
+- **WHEN** the bridge is configured with `IM_PLATFORM=wecom` and the required WeCom application credentials plus callback configuration are present
+- **THEN** the bridge resolves and starts a WeCom live platform provider through the same shared provider contract
+- **AND** health and registration surfaces report WeCom as a supported active platform instead of a planned-only placeholder
+
 #### Scenario: Selected platform configuration is incomplete
-- **WHEN** the bridge is configured for `slack`, `dingtalk`, `telegram`, or `discord` but a required credential or transport parameter is missing
+- **WHEN** the bridge is configured for `slack`, `dingtalk`, `telegram`, `discord`, or `wecom` but a required credential or transport parameter is missing
 - **THEN** startup fails with an actionable configuration error
 - **AND** the bridge does not silently fall back to another platform implementation
 
@@ -27,7 +33,7 @@ The IM Bridge SHALL allow a deployment to select exactly one active IM platform 
 - **AND** operators can distinguish that explicit gap from a transient configuration failure
 
 ### Requirement: Core command handling remains platform-consistent across supported platforms
-The system SHALL translate Feishu, Slack, DingTalk, Telegram, and Discord inbound events or interactions into `core.Message` values that preserve platform identity, user identity, chat identity, reply context, and message content so that the existing `/task`, `/agent`, `/cost`, `/help`, and `@AgentForge` fallback flows execute with consistent command semantics across all supported platforms.
+The system SHALL translate Feishu, Slack, DingTalk, Telegram, Discord, and WeCom inbound events or interactions into `core.Message` values that preserve platform identity, user identity, chat identity, reply context, and message content so that the existing `/task`, `/agent`, `/cost`, `/help`, and `@AgentForge` fallback flows execute with consistent command semantics across all supported platforms.
 
 #### Scenario: Telegram slash-style command routes to an existing handler
 - **WHEN** a Telegram inbound update is normalized into `core.Message` content containing `/task list`
@@ -39,13 +45,18 @@ The system SHALL translate Feishu, Slack, DingTalk, Telegram, and Discord inboun
 - **THEN** the engine invokes the registered `/agent` command handler with the normalized arguments
 - **AND** the resulting response is delivered back through the originating Discord interaction context
 
+#### Scenario: WeCom callback event routes to the shared command engine
+- **WHEN** a WeCom inbound callback or application message is normalized into `core.Message` content containing `/help`
+- **THEN** the engine invokes the registered `/help` command handler through the same shared command path
+- **AND** the resulting response is sent back to the originating WeCom conversation context
+
 #### Scenario: Feishu mention uses the existing fallback path
 - **WHEN** a Feishu inbound message mentions `@AgentForge` without matching a registered slash command
 - **THEN** the engine invokes the configured fallback handler
 - **AND** the platform returns the fallback response to the originating Feishu conversation
 
 ### Requirement: Platform source metadata is propagated to backend API calls
-IM Bridge requests to the AgentForge backend SHALL identify the actual source platform instead of hardcoding Feishu so that backend audit, routing, notification policy, and downstream analytics can distinguish Feishu, Slack, DingTalk, Telegram, and Discord traffic.
+IM Bridge requests to the AgentForge backend SHALL identify the actual source platform instead of hardcoding Feishu so that backend audit, routing, notification policy, and downstream analytics can distinguish Feishu, Slack, DingTalk, Telegram, Discord, and WeCom traffic.
 
 #### Scenario: Telegram command call includes Telegram as source
 - **WHEN** a user triggers a backend-backed command from Telegram
@@ -73,6 +84,12 @@ The notification receiver SHALL only deliver a notification through the active p
 - **AND** the notification contains a preserved interaction target that supports deferred follow-up or original-response editing
 - **THEN** the Bridge delivers the update through the native Discord interaction path
 - **AND** it does not fall back to an unrelated plain chat send unless the preserved target is unusable
+
+#### Scenario: Matching WeCom delivery uses supported app-message rendering
+- **WHEN** the notification receiver receives a notification whose platform matches the active WeCom bridge
+- **AND** the notification contains structured or card-oriented content with a preserved WeCom reply target
+- **THEN** the Bridge resolves the delivery through the WeCom rendering profile into a supported app message or template-card path
+- **AND** it falls back to WeCom-supported plain text with explicit fallback metadata when the richer path cannot be honored
 
 #### Scenario: Matching platform without the required native capability falls back cleanly
 - **WHEN** the notification receiver receives a notification whose platform matches the active bridge platform
@@ -107,6 +124,11 @@ The bridge SHALL implement the live transport of each supported platform accordi
 - **WHEN** a Discord interaction triggers a bridge command that cannot finish immediately
 - **THEN** the bridge sends the required initial interaction acknowledgement within the provider deadline
 - **AND** completes the user-visible response through the permitted follow-up interaction path
+
+#### Scenario: WeCom live transport uses callback and application-message semantics
+- **WHEN** a WeCom enterprise application is configured for live transport
+- **THEN** the bridge uses the documented WeCom callback/event intake and application-message delivery model rather than a synthetic polling loop
+- **AND** the deployment documentation reflects the required callback exposure, token exchange, and supported update semantics for that path
 
 #### Scenario: Feishu live transport prefers long connection where supported
 - **WHEN** a Feishu enterprise self-built application is configured for live transport
@@ -143,4 +165,3 @@ The active IM platform runtime SHALL expose the delivery characteristics needed 
 - **WHEN** a platform supports deferred replies or editable progress updates
 - **THEN** the Bridge health or registration payload reports those capabilities
 - **AND** the backend can choose a compatible progress delivery strategy for that platform
-

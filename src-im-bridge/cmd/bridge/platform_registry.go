@@ -10,6 +10,7 @@ import (
 	"github.com/agentforge/im-bridge/platform/feishu"
 	"github.com/agentforge/im-bridge/platform/slack"
 	"github.com/agentforge/im-bridge/platform/telegram"
+	"github.com/agentforge/im-bridge/platform/wecom"
 )
 
 const (
@@ -30,18 +31,41 @@ func normalizeTransportMode(mode string) string {
 func providerDescriptors() map[string]providerDescriptor {
 	return map[string]providerDescriptor{
 		"wecom": {
-			ID: "wecom",
-			Metadata: core.PlatformMetadata{
-				Source: "wecom",
-				Capabilities: core.PlatformCapabilities{
-					CommandSurface:     core.CommandSurfaceNone,
-					StructuredSurface:  core.StructuredSurfaceNone,
-					ActionCallbackMode: core.ActionCallbackNone,
-					MessageScopes:      []core.MessageScope{core.MessageScopeChat},
-				},
-			},
+			ID:                      "wecom",
+			Metadata:                wecom.NewStub("0").Metadata(),
 			SupportedTransportModes: []string{transportModeStub, transportModeLive},
-			PlannedReason:           "adapter, capability matrix, and runtime wiring are still pending",
+			ValidateConfig: func(cfg *config, mode string) error {
+				if mode != transportModeLive {
+					return nil
+				}
+				switch {
+				case strings.TrimSpace(cfg.WeComCorpID) == "":
+					return fmt.Errorf("selected platform wecom requires WECOM_CORP_ID for live transport")
+				case strings.TrimSpace(cfg.WeComAgentID) == "":
+					return fmt.Errorf("selected platform wecom requires WECOM_AGENT_ID for live transport")
+				case strings.TrimSpace(cfg.WeComAgentSecret) == "":
+					return fmt.Errorf("selected platform wecom requires WECOM_AGENT_SECRET for live transport")
+				case strings.TrimSpace(cfg.WeComCallbackToken) == "":
+					return fmt.Errorf("selected platform wecom requires WECOM_CALLBACK_TOKEN for live transport")
+				case strings.TrimSpace(cfg.WeComCallbackPort) == "":
+					return fmt.Errorf("selected platform wecom requires WECOM_CALLBACK_PORT for live transport")
+				default:
+					return nil
+				}
+			},
+			NewStub: func(cfg *config) (core.Platform, error) {
+				return wecom.NewStub(cfg.TestPort), nil
+			},
+			NewLive: func(cfg *config) (core.Platform, error) {
+				return wecom.NewLive(
+					cfg.WeComCorpID,
+					cfg.WeComAgentID,
+					cfg.WeComAgentSecret,
+					cfg.WeComCallbackToken,
+					cfg.WeComCallbackPort,
+					cfg.WeComCallbackPath,
+				)
+			},
 		},
 		"feishu": {
 			ID:                      "feishu",

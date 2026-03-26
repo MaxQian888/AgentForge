@@ -92,6 +92,7 @@ describe("TaskWorkspaceMain", () => {
       displayOptions: {
         density: "comfortable",
         showDescriptions: true,
+        showLinkedDocs: false,
       },
     });
   });
@@ -105,6 +106,7 @@ describe("TaskWorkspaceMain", () => {
 
     render(
       <TaskWorkspaceMain
+        projectId="project-1"
         tasks={tasks}
         sprints={sprints}
         sprintMetrics={sprintMetrics}
@@ -149,6 +151,7 @@ describe("TaskWorkspaceMain", () => {
 
     render(
       <TaskWorkspaceMain
+        projectId="project-1"
         tasks={tasks}
         sprints={[]}
         sprintMetrics={null}

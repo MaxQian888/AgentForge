@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -154,6 +155,35 @@ func TestNewBridgeHealthReconcileHandler_PropagatesFailures(t *testing.T) {
 
 	if _, err := handler(context.Background(), &model.ScheduledJob{JobKey: "bridge-health-reconcile"}, &model.ScheduledJobRun{}); err == nil {
 		t.Fatal("handler() error = nil, want bridge health failure")
+	}
+}
+
+type automationDueDateCheckerStub struct {
+	thresholds []time.Duration
+	err        error
+}
+
+func (s *automationDueDateCheckerStub) CheckDueDateApproaching(_ context.Context, threshold time.Duration) error {
+	s.thresholds = append(s.thresholds, threshold)
+	return s.err
+}
+
+func TestNewAutomationDueDateDetectorHandler_ReturnsSummaryAndMetrics(t *testing.T) {
+	checker := &automationDueDateCheckerStub{}
+	handler := NewAutomationDueDateDetectorHandler(checker, 24*time.Hour)
+
+	result, err := handler(context.Background(), &model.ScheduledJob{JobKey: "automation-due-date-detector"}, &model.ScheduledJobRun{})
+	if err != nil {
+		t.Fatalf("handler() error = %v", err)
+	}
+	if len(checker.thresholds) != 1 || checker.thresholds[0] != 24*time.Hour {
+		t.Fatalf("thresholds = %+v", checker.thresholds)
+	}
+	if result == nil || result.Summary != "evaluated due-date automations within 24 hours" {
+		t.Fatalf("result = %+v", result)
+	}
+	if result.Metrics != `{"thresholdHours":24}` {
+		t.Fatalf("result.Metrics = %q", result.Metrics)
 	}
 }
 

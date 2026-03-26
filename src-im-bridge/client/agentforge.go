@@ -76,8 +76,8 @@ func (c *AgentForgeClient) WithBridgeContext(bridgeID string, replyTarget *core.
 
 // CreateTask creates a new task via the AgentForge API.
 func (c *AgentForgeClient) CreateTask(ctx context.Context, title, description string) (*Task, error) {
-	body := map[string]string{"title": title, "description": description, "project_id": c.projectID}
-	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/tasks", body)
+	body := map[string]string{"title": title, "description": description}
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/tasks", c.projectID), body)
 	if err != nil {
 		return nil, err
 	}
@@ -94,9 +94,9 @@ func (c *AgentForgeClient) CreateTask(ctx context.Context, title, description st
 
 // ListTasks lists tasks, optionally filtered by status.
 func (c *AgentForgeClient) ListTasks(ctx context.Context, filter string) ([]Task, error) {
-	path := fmt.Sprintf("/api/v1/tasks?project_id=%s", c.projectID)
+	path := fmt.Sprintf("/api/v1/projects/%s/tasks", c.projectID)
 	if filter != "" {
-		path += "&status=" + filter
+		path = fmt.Sprintf("%s?status=%s", path, filter)
 	}
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
@@ -226,7 +226,7 @@ func (c *AgentForgeClient) GetAgentPoolStatus(ctx context.Context) (*PoolStatus,
 
 // GetCostStats returns cost statistics for the project.
 func (c *AgentForgeClient) GetCostStats(ctx context.Context) (*CostStats, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/costs", c.projectID), nil)
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/stats/cost?projectId=%s", c.projectID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -247,6 +247,60 @@ func (c *AgentForgeClient) GetCostStats(ctx context.Context) (*CostStats, error)
 func (c *AgentForgeClient) TriggerReview(ctx context.Context, prURL string) (*Review, error) {
 	body := map[string]string{"prUrl": prURL, "projectId": c.projectID}
 	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/reviews/trigger", body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, c.readError(resp)
+	}
+	var review Review
+	if err := json.NewDecoder(resp.Body).Decode(&review); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &review, nil
+}
+
+// TriggerStandaloneDeepReview triggers a detached deep review for a PR URL.
+func (c *AgentForgeClient) TriggerStandaloneDeepReview(ctx context.Context, prURL string) (*Review, error) {
+	body := map[string]string{"prUrl": prURL, "projectId": c.projectID, "trigger": "manual"}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/reviews/trigger", body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, c.readError(resp)
+	}
+	var review Review
+	if err := json.NewDecoder(resp.Body).Decode(&review); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &review, nil
+}
+
+// ApproveReview approves a review that is waiting for human action.
+func (c *AgentForgeClient) ApproveReview(ctx context.Context, reviewID string, comment string) (*Review, error) {
+	body := map[string]string{"comment": comment}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/reviews/"+reviewID+"/approve", body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, c.readError(resp)
+	}
+	var review Review
+	if err := json.NewDecoder(resp.Body).Decode(&review); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &review, nil
+}
+
+// RequestChangesReview requests changes for a pending_human review.
+func (c *AgentForgeClient) RequestChangesReview(ctx context.Context, reviewID string, comment string) (*Review, error) {
+	body := map[string]string{"comment": comment}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/reviews/"+reviewID+"/request-changes", body)
 	if err != nil {
 		return nil, err
 	}

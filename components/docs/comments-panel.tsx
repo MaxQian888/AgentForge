@@ -12,6 +12,7 @@ export function CommentsPanel({
   onReopen,
   onCopyLink,
   mentionSuggestions = [],
+  readonly = false,
 }: {
   comments: DocsComment[];
   onCreateComment: (body: string) => void | Promise<void>;
@@ -19,6 +20,7 @@ export function CommentsPanel({
   onReopen?: (commentId: string) => void;
   onCopyLink?: (commentId: string) => void;
   mentionSuggestions?: string[];
+  readonly?: boolean;
 }) {
   const { roots, detached } = useMemo(() => {
     const rootComments = comments.filter((comment) => !comment.parentCommentId);
@@ -37,7 +39,13 @@ export function CommentsPanel({
         </p>
       </div>
 
-      <CommentInput onSubmit={onCreateComment} suggestions={mentionSuggestions} />
+      {readonly ? (
+        <p className="rounded-lg border border-dashed border-border/70 px-3 py-2 text-sm text-muted-foreground">
+          Shared snapshots are read-only. Open the live document to add or resolve comments.
+        </p>
+      ) : (
+        <CommentInput onSubmit={onCreateComment} suggestions={mentionSuggestions} />
+      )}
 
       <div className="flex flex-col gap-3">
         {roots.map((comment) => (
@@ -45,8 +53,8 @@ export function CommentsPanel({
             key={comment.id}
             comment={comment}
             replies={comments.filter((reply) => reply.parentCommentId === comment.id)}
-            onResolve={onResolve}
-            onReopen={onReopen}
+            onResolve={readonly ? undefined : onResolve}
+            onReopen={readonly ? undefined : onReopen}
             onCopyLink={onCopyLink}
           />
         ))}

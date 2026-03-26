@@ -13,6 +13,7 @@ describe("useTaskWorkspaceStore", () => {
       displayOptions: {
         density: "comfortable",
         showDescriptions: true,
+        showLinkedDocs: false,
       },
     });
   });
@@ -56,6 +57,7 @@ describe("useTaskWorkspaceStore", () => {
 
     store.setDensity("compact");
     store.setShowDescriptions(false);
+    store.setShowLinkedDocs(true);
     store.setSearch("calendar");
     store.resetFilters();
 
@@ -65,6 +67,7 @@ describe("useTaskWorkspaceStore", () => {
     expect(state.displayOptions).toEqual({
       density: "compact",
       showDescriptions: false,
+      showLinkedDocs: true,
     });
   });
 });

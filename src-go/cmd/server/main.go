@@ -155,6 +155,15 @@ func main() {
 	}))
 	schedulerSvc := scheduler.NewService(scheduledJobRepo, scheduledJobRunRepo)
 	schedulerSvc.SetBroadcaster(ws.NewSchedulerEventBroadcaster(hub))
+	automationSchedulerEngine := service.NewAutomationEngineService(
+		automationRuleRepo,
+		automationLogRepo,
+		taskRepo,
+		customFieldRepo,
+		service.NewNotificationService(notifRepo, hub),
+		service.NewIMService(cfg.IMNotifyURL, cfg.IMNotifyPlatform),
+		pluginSvc,
+	)
 	if _, err := schedulerRegistry.Reconcile(context.Background()); err != nil {
 		log.WithError(err).Warn("scheduler registry reconcile failed")
 	} else {
@@ -169,6 +178,7 @@ func main() {
 	if taskProgressSvc != nil {
 		schedulerSvc.RegisterHandler("task-progress-detector", scheduler.NewTaskProgressDetectorHandler(taskProgressSvc))
 	}
+	schedulerSvc.RegisterHandler("automation-due-date-detector", scheduler.NewAutomationDueDateDetectorHandler(automationSchedulerEngine, 24*time.Hour))
 	schedulerSvc.RegisterHandler(
 		"worktree-garbage-collector",
 		scheduler.NewWorktreeGarbageCollectorHandler(

@@ -270,6 +270,17 @@ type TogglePinnedRequest struct {
 	Pinned bool `json:"pinned"`
 }
 
+type DecomposeTasksFromPageRequest struct {
+	BlockIDs     []string `json:"blockIds" validate:"required,min=1,dive,min=1"`
+	ParentTaskID *string  `json:"parentTaskId,omitempty"`
+}
+
+type DecomposeTasksFromPageResponse struct {
+	PageID   string    `json:"pageId"`
+	BlockIDs []string  `json:"blockIds"`
+	Tasks    []TaskDTO `json:"tasks"`
+}
+
 func formatOptionalUUID(value *uuid.UUID) *string {
 	if value == nil {
 		return nil

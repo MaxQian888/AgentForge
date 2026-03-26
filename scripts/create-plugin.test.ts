@@ -1,10 +1,10 @@
 /** @jest-environment node */
 
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
-function readFile(filePath) {
+function readFile(filePath: string) {
   return fs.readFileSync(filePath, "utf8");
 }
 

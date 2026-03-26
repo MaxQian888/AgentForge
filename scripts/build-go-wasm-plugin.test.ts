@@ -1,6 +1,6 @@
 /** @jest-environment node */
 
-const path = require("node:path");
+import * as path from "node:path";
 
 describe("build-go-wasm-plugin target resolution", () => {
   test("resolves the maintained sample plugin from its manifest path", () => {

@@ -32,7 +32,7 @@ describe("Sidebar", () => {
     const { container } = render(<Sidebar />);
 
     const projectsLink = screen.getByRole("link", { name: /Projects/i });
-    const dashboardLink = screen.getByRole("link", { name: /Dashboard/i });
+    const dashboardLink = screen.getByRole("link", { name: /^Dashboard$/i });
     expect(projectsLink).toHaveClass("bg-accent");
     expect(dashboardLink).toHaveClass("text-muted-foreground");
 

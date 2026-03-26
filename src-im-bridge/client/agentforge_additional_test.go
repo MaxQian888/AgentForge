@@ -135,7 +135,7 @@ func TestQuickAgentRun_ComposesCreateAndSpawn(t *testing.T) {
 		calls = append(calls, r.URL.Path)
 		w.Header().Set("Content-Type", "application/json")
 		switch r.URL.Path {
-		case "/api/v1/tasks":
+		case "/api/v1/projects/proj-1/tasks":
 			_ = json.NewEncoder(w).Encode(Task{ID: "task-1", Title: "Bridge rollout"})
 		case "/api/v1/agents/spawn":
 			_ = json.NewEncoder(w).Encode(TaskDispatchResponse{
@@ -153,7 +153,7 @@ func TestQuickAgentRun_ComposesCreateAndSpawn(t *testing.T) {
 	if err != nil {
 		t.Fatalf("QuickAgentRun error: %v", err)
 	}
-	if len(calls) != 2 || calls[0] != "/api/v1/tasks" || calls[1] != "/api/v1/agents/spawn" {
+	if len(calls) != 2 || calls[0] != "/api/v1/projects/proj-1/tasks" || calls[1] != "/api/v1/agents/spawn" {
 		t.Fatalf("calls = %+v", calls)
 	}
 	if result.Dispatch.Run == nil || result.Dispatch.Run.ID != "run-1" {

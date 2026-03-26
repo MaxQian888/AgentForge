@@ -56,6 +56,15 @@ func BuiltInCatalog(cfg CatalogConfig) []CatalogEntry {
 			OverlapPolicy: model.ScheduledJobOverlapSkip,
 		},
 		{
+			JobKey:        "automation-due-date-detector",
+			Name:          "Automation due date detector",
+			Scope:         model.ScheduledJobScopeSystem,
+			Schedule:      "*/15 * * * *",
+			Enabled:       true,
+			ExecutionMode: executionMode,
+			OverlapPolicy: model.ScheduledJobOverlapSkip,
+		},
+		{
 			JobKey:        "scheduler-history-retention",
 			Name:          "Scheduler history retention",
 			Scope:         model.ScheduledJobScopeSystem,

@@ -27,7 +27,7 @@ describe("plugin SDK server helpers", () => {
           description: "Echo text back to the caller.",
           inputSchema: z.object({ text: z.string() }),
           execute: ({ text }) => ({
-            content: [{ type: "text", text }],
+            content: [{ type: "text", text: String(text) }],
           }),
         },
       ] as const,
@@ -47,7 +47,9 @@ describe("plugin SDK server helpers", () => {
         {
           title?: string;
           description?: string;
-          handler: (args: Record<string, unknown>) => Promise<{ content: Array<{ text: string }> }>;
+          handler: (args: Record<string, unknown>) => Promise<{
+            content: Array<{ type: string; text: string }>;
+          }>;
         }
       >;
     };
@@ -98,9 +100,9 @@ describe("plugin SDK server helpers", () => {
       async connect(transport: unknown) {
         receivedTransport = transport;
       },
-    };
+    } as unknown as Parameters<typeof connectPluginStdioServer>[0];
 
-    const connected = await connectPluginStdioServer(fakeServer as never);
+    const connected = await connectPluginStdioServer(fakeServer);
 
     expect(connected).toBe(fakeServer);
     expect(receivedTransport).toBeDefined();

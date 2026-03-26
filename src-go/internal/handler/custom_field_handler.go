@@ -2,12 +2,14 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type customFieldService interface {
@@ -22,10 +24,18 @@ type customFieldService interface {
 	GetValuesForTask(ctx context.Context, taskID uuid.UUID) ([]*model.CustomFieldValue, error)
 }
 
-type CustomFieldHandler struct{ service customFieldService }
+type CustomFieldHandler struct {
+	service    customFieldService
+	automation service.AutomationEventEvaluator
+}
 
 func NewCustomFieldHandler(service customFieldService) *CustomFieldHandler {
 	return &CustomFieldHandler{service: service}
+}
+
+func (h *CustomFieldHandler) WithAutomation(evaluator service.AutomationEventEvaluator) *CustomFieldHandler {
+	h.automation = evaluator
+	return h
 }
 
 func (h *CustomFieldHandler) ListDefinitions(c echo.Context) error {
@@ -179,6 +189,20 @@ func (h *CustomFieldHandler) SetTaskValue(c echo.Context) error {
 	if err := h.service.SetValue(c.Request().Context(), value); err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to set custom field value"})
 	}
+	if h.automation != nil {
+		decodedValue := decodeAutomationJSONValue(req.Value)
+		_ = h.automation.EvaluateRules(c.Request().Context(), service.AutomationEvent{
+			EventType: model.AutomationEventTaskFieldChanged,
+			ProjectID: projectID,
+			TaskID:    &taskID,
+			Data: map[string]any{
+				"field":         "cf:" + fieldID.String(),
+				"fieldDefId":    fieldID.String(),
+				"value":         decodedValue,
+				"current_value": decodedValue,
+			},
+		})
+	}
 	return c.JSON(http.StatusOK, value.ToDTO())
 }
 
@@ -194,5 +218,30 @@ func (h *CustomFieldHandler) ClearTaskValue(c echo.Context) error {
 	if err := h.service.ClearValue(c.Request().Context(), taskID, fieldID); err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to clear custom field value"})
 	}
+	if h.automation != nil {
+		projectID := appMiddleware.GetProjectID(c)
+		_ = h.automation.EvaluateRules(c.Request().Context(), service.AutomationEvent{
+			EventType: model.AutomationEventTaskFieldChanged,
+			ProjectID: projectID,
+			TaskID:    &taskID,
+			Data: map[string]any{
+				"field":         "cf:" + fieldID.String(),
+				"fieldDefId":    fieldID.String(),
+				"value":         nil,
+				"current_value": nil,
+			},
+		})
+	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "custom field value cleared"})
+}
+
+func decodeAutomationJSONValue(raw json.RawMessage) any {
+	if len(raw) == 0 {
+		return nil
+	}
+	var decoded any
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		return string(raw)
+	}
+	return decoded
 }

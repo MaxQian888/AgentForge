@@ -1128,6 +1128,34 @@ func TestAgentService_UpdateCost_BudgetExceededCancelsRunAndKeepsRuntimeForResum
 	}
 }
 
+func TestAgentService_UpdateCostEmitsAutomationBudgetEvent(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	runID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{ID: runID, TaskID: taskID, MemberID: memberID, Status: model.AgentRunStatusRunning, CostUsd: 3.5}
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Automation budget",
+		Status:    model.TaskStatusInProgress,
+		BudgetUsd: 5,
+		SpentUsd:  3.5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	automation := &automationEventProbe{}
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetAutomationEvaluator(automation)
+
+	if err := svc.UpdateCost(context.Background(), runID, 260, 80, 10, 4.2, 3); err != nil {
+		t.Fatalf("UpdateCost() error = %v", err)
+	}
+	if len(automation.events) != 1 || automation.events[0].EventType != model.AutomationEventBudgetThresholdReached {
+		t.Fatalf("automation events = %+v", automation.events)
+	}
+}
+
 func TestAgentService_PoolStatsIncludesQueuedEntries(t *testing.T) {
 	projectID := uuid.New()
 	queueStore := &mockAgentQueueStore{

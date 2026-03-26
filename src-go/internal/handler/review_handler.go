@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -15,6 +16,10 @@ import (
 type ReviewService interface {
 	Trigger(ctx context.Context, req *model.TriggerReviewRequest) (*model.Review, error)
 	Complete(ctx context.Context, id uuid.UUID, req *model.CompleteReviewRequest) (*model.Review, error)
+	ApproveReview(ctx context.Context, id uuid.UUID, actor, comment string) (*model.Review, error)
+	RequestChangesReview(ctx context.Context, id uuid.UUID, actor, comment string) (*model.Review, error)
+	RejectReview(ctx context.Context, id uuid.UUID, actor, reason, comment string) (*model.Review, error)
+	MarkFalsePositive(ctx context.Context, reviewID uuid.UUID, actor string, findingIDs []string, reason string) (*model.Review, error)
 	Approve(ctx context.Context, id uuid.UUID, comment string) (*model.Review, error)
 	Reject(ctx context.Context, id uuid.UUID, reason, comment string) (*model.Review, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Review, error)
@@ -25,21 +30,15 @@ type ReviewService interface {
 	RouteFixRequest(ctx context.Context, id uuid.UUID) error
 }
 
-type ReviewAggregationService interface {
-	MarkFalsePositive(ctx context.Context, reviewID uuid.UUID, findingIndex int, reason string) error
-}
-
 type ReviewHandler struct {
-	service     ReviewService
-	aggregation ReviewAggregationService
+	service ReviewService
 }
 
 func NewReviewHandler(svc ReviewService) *ReviewHandler {
 	return &ReviewHandler{service: svc}
 }
 
-func (h *ReviewHandler) WithAggregationService(agg ReviewAggregationService) *ReviewHandler {
-	h.aggregation = agg
+func (h *ReviewHandler) WithAggregationService(_ any) *ReviewHandler {
 	return h
 }
 
@@ -144,7 +143,7 @@ func (h *ReviewHandler) Approve(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
 	}
 
-	review, err := h.service.Approve(c.Request().Context(), id, req.Comment)
+	review, err := h.service.ApproveReview(c.Request().Context(), id, resolveReviewActor(c), req.Comment)
 	if err != nil {
 		return h.handleServiceError(c, err)
 	}
@@ -165,7 +164,7 @@ func (h *ReviewHandler) Reject(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 
-	review, err := h.service.Reject(c.Request().Context(), id, req.Reason, req.Comment)
+	review, err := h.service.RejectReview(c.Request().Context(), id, resolveReviewActor(c), req.Reason, req.Comment)
 	if err != nil {
 		return h.handleServiceError(c, err)
 	}
@@ -194,10 +193,12 @@ func (h *ReviewHandler) RequestChanges(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid review ID"})
 	}
 
-	review, err := h.service.Complete(c.Request().Context(), id, &model.CompleteReviewRequest{
-		RiskLevel:      model.ReviewRiskLevelMedium,
-		Recommendation: model.ReviewRecommendationRequestChanges,
-	})
+	req := new(model.RequestChangesReviewRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+
+	review, err := h.service.RequestChangesReview(c.Request().Context(), id, resolveReviewActor(c), req.Comment)
 	if err != nil {
 		return h.handleServiceError(c, err)
 	}
@@ -215,10 +216,6 @@ func (h *ReviewHandler) MarkFalsePositive(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid review ID"})
 	}
 
-	if h.aggregation == nil {
-		return c.JSON(http.StatusNotImplemented, model.ErrorResponse{Message: "aggregation service not available"})
-	}
-
 	req := new(model.MarkFalsePositiveRequest)
 	if err := c.Bind(req); err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
@@ -227,11 +224,12 @@ func (h *ReviewHandler) MarkFalsePositive(c echo.Context) error {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 
-	if err := h.aggregation.MarkFalsePositive(c.Request().Context(), id, req.FindingIndex, req.Reason); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	review, err := h.service.MarkFalsePositive(c.Request().Context(), id, resolveReviewActor(c), req.FindingIDs, req.Reason)
+	if err != nil {
+		return h.handleServiceError(c, err)
 	}
 
-	return c.JSON(http.StatusOK, map[string]string{"status": "ok"})
+	return c.JSON(http.StatusOK, review.ToDTO())
 }
 
 func (h *ReviewHandler) handleServiceError(c echo.Context, err error) error {
@@ -240,7 +238,27 @@ func (h *ReviewHandler) handleServiceError(c echo.Context, err error) error {
 		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "review not found"})
 	case errors.Is(err, service.ErrReviewTaskNotFound):
 		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "task not found"})
+	case errors.Is(err, service.ErrReviewInvalidTransition):
+		return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
 	default:
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
 	}
+}
+
+func resolveReviewActor(c echo.Context) string {
+	if c == nil {
+		return "api"
+	}
+	keys := []string{"user_id", "userId", "uid", "sub"}
+	for _, key := range keys {
+		raw := c.Get(key)
+		value, ok := raw.(string)
+		if !ok {
+			continue
+		}
+		if strings.TrimSpace(value) != "" {
+			return strings.TrimSpace(value)
+		}
+	}
+	return "api"
 }

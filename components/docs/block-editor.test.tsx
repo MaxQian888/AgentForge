@@ -4,12 +4,12 @@ jest.mock("next/dynamic", () => ({
   __esModule: true,
   default: jest.fn(
     (
-      _loader: unknown,
-      options: {
-        ssr?: boolean;
-        loading?: () => JSX.Element;
-      },
-    ) =>
+        _loader: unknown,
+        options: {
+          ssr?: boolean;
+          loading?: () => React.ReactElement;
+        },
+      ) =>
       function MockDynamicBlockEditor(props: {
         value: string;
         editable?: boolean;

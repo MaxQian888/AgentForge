@@ -49,15 +49,16 @@ func (f *fakeIMActionDecomposer) Decompose(ctx context.Context, taskID uuid.UUID
 }
 
 type fakeIMActionReviewer struct {
-	getCalls         int
-	approveCalls     int
-	completeCalls    int
-	routeFixCalls    int
-	review           *model.Review
-	approvedReview   *model.Review
-	completedReview  *model.Review
-	lastCompleteReq  *model.CompleteReviewRequest
-	lastApproveNotes string
+	getCalls            int
+	approveCalls        int
+	requestChangesCalls int
+	routeFixCalls       int
+	review              *model.Review
+	approvedReview      *model.Review
+	changesReview       *model.Review
+	lastApproveNotes    string
+	lastRequestComment  string
+	lastActor           string
 }
 
 func (f *fakeIMActionReviewer) GetByID(ctx context.Context, id uuid.UUID) (*model.Review, error) {
@@ -65,21 +66,58 @@ func (f *fakeIMActionReviewer) GetByID(ctx context.Context, id uuid.UUID) (*mode
 	return f.review, nil
 }
 
-func (f *fakeIMActionReviewer) Approve(ctx context.Context, id uuid.UUID, comment string) (*model.Review, error) {
+func (f *fakeIMActionReviewer) ApproveReview(ctx context.Context, id uuid.UUID, actor, comment string) (*model.Review, error) {
 	f.approveCalls++
+	f.lastActor = actor
 	f.lastApproveNotes = comment
 	return f.approvedReview, nil
 }
 
-func (f *fakeIMActionReviewer) Complete(ctx context.Context, id uuid.UUID, req *model.CompleteReviewRequest) (*model.Review, error) {
-	f.completeCalls++
-	f.lastCompleteReq = req
-	return f.completedReview, nil
+func (f *fakeIMActionReviewer) RequestChangesReview(ctx context.Context, id uuid.UUID, actor, comment string) (*model.Review, error) {
+	f.requestChangesCalls++
+	f.lastActor = actor
+	f.lastRequestComment = comment
+	return f.changesReview, nil
 }
 
 func (f *fakeIMActionReviewer) RouteFixRequest(ctx context.Context, id uuid.UUID) error {
 	f.routeFixCalls++
 	return nil
+}
+
+type fakeIMActionTaskCreator struct {
+	created *model.Task
+}
+
+func (f *fakeIMActionTaskCreator) Create(ctx context.Context, projectID uuid.UUID, req *model.CreateTaskRequest, reporterID *uuid.UUID) (*model.Task, error) {
+	f.created = &model.Task{
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Title:       req.Title,
+		Description: req.Description,
+		Status:      model.TaskStatusInbox,
+		Priority:    req.Priority,
+	}
+	return f.created, nil
+}
+
+type fakeIMActionWikiCreator struct {
+	space *model.WikiSpace
+	page  *model.WikiPage
+}
+
+func (f *fakeIMActionWikiCreator) GetSpaceByProjectID(ctx context.Context, projectID uuid.UUID) (*model.WikiSpace, error) {
+	return f.space, nil
+}
+
+func (f *fakeIMActionWikiCreator) CreatePage(ctx context.Context, projectID uuid.UUID, spaceID uuid.UUID, title string, parentID *uuid.UUID, content string, createdBy *uuid.UUID) (*model.WikiPage, error) {
+	f.page = &model.WikiPage{
+		ID:      uuid.New(),
+		SpaceID: spaceID,
+		Title:   title,
+		Content: content,
+	}
+	return f.page, nil
 }
 
 func TestBackendIMActionExecutor_AssignAgentUsesDispatchWorkflow(t *testing.T) {
@@ -148,8 +186,8 @@ func TestBackendIMActionExecutor_RequestChangesBlocksStaleCompletedReview(t *tes
 		t.Fatalf("Execute error: %v", err)
 	}
 
-	if reviewer.completeCalls != 0 {
-		t.Fatalf("completeCalls = %d, want 0", reviewer.completeCalls)
+	if reviewer.requestChangesCalls != 0 {
+		t.Fatalf("requestChangesCalls = %d, want 0", reviewer.requestChangesCalls)
 	}
 	if reviewer.routeFixCalls != 0 {
 		t.Fatalf("routeFixCalls = %d, want 0", reviewer.routeFixCalls)
@@ -202,7 +240,7 @@ func TestBackendIMActionExecutor_ApproveCompletesReview(t *testing.T) {
 	reviewer := &fakeIMActionReviewer{
 		review: &model.Review{
 			ID:     reviewID,
-			Status: model.ReviewStatusInProgress,
+			Status: model.ReviewStatusPendingHuman,
 		},
 		approvedReview: &model.Review{
 			ID:             reviewID,
@@ -228,6 +266,9 @@ func TestBackendIMActionExecutor_ApproveCompletesReview(t *testing.T) {
 	if reviewer.approveCalls != 1 {
 		t.Fatalf("approveCalls = %d", reviewer.approveCalls)
 	}
+	if reviewer.lastActor != "im-action" {
+		t.Fatalf("actor = %q, want im-action", reviewer.lastActor)
+	}
 	if reviewer.lastApproveNotes != "LGTM" {
 		t.Fatalf("approve comment = %q", reviewer.lastApproveNotes)
 	}
@@ -236,6 +277,106 @@ func TestBackendIMActionExecutor_ApproveCompletesReview(t *testing.T) {
 	}
 	if resp.Review == nil || resp.Review.Recommendation != model.ReviewRecommendationApprove {
 		t.Fatalf("review = %+v", resp.Review)
+	}
+}
+
+func TestBackendIMActionExecutor_RequestChangesUsesTransitionMethod(t *testing.T) {
+	reviewID := uuid.New()
+	reviewer := &fakeIMActionReviewer{
+		review: &model.Review{
+			ID:             reviewID,
+			Status:         model.ReviewStatusPendingHuman,
+			Recommendation: model.ReviewRecommendationApprove,
+		},
+		changesReview: &model.Review{
+			ID:             reviewID,
+			Status:         model.ReviewStatusCompleted,
+			Recommendation: model.ReviewRecommendationRequestChanges,
+		},
+	}
+
+	executor := NewBackendIMActionExecutor(nil, nil, reviewer)
+	resp, err := executor.Execute(context.Background(), &model.IMActionRequest{
+		Platform:  "slack",
+		Action:    "request-changes",
+		EntityID:  reviewID.String(),
+		ChannelID: "C123",
+		Metadata: map[string]string{
+			"comment": "Please tighten validation",
+			"actor":   "reviewer-42",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	if reviewer.requestChangesCalls != 1 {
+		t.Fatalf("requestChangesCalls = %d, want 1", reviewer.requestChangesCalls)
+	}
+	if reviewer.lastActor != "reviewer-42" {
+		t.Fatalf("actor = %q, want reviewer-42", reviewer.lastActor)
+	}
+	if reviewer.lastRequestComment != "Please tighten validation" {
+		t.Fatalf("comment = %q, want request-changes comment", reviewer.lastRequestComment)
+	}
+	if reviewer.routeFixCalls != 1 {
+		t.Fatalf("routeFixCalls = %d, want 1", reviewer.routeFixCalls)
+	}
+	if resp.Review == nil || resp.Review.Recommendation != model.ReviewRecommendationRequestChanges {
+		t.Fatalf("review = %+v", resp.Review)
+	}
+}
+
+func TestBackendIMActionExecutor_SaveAsDocCreatesWikiPage(t *testing.T) {
+	projectID := uuid.New()
+	wiki := &fakeIMActionWikiCreator{space: &model.WikiSpace{ID: uuid.New(), ProjectID: projectID}}
+	executor := NewBackendIMActionExecutor(nil, nil, nil, wiki)
+
+	resp, err := executor.Execute(context.Background(), &model.IMActionRequest{
+		Platform:  "slack",
+		Action:    "save-as-doc",
+		EntityID:  projectID.String(),
+		ChannelID: "C123",
+		Metadata: map[string]string{
+			"title": "Incident Notes",
+			"body":  "Captured from chat",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if wiki.page == nil || wiki.page.Title != "Incident Notes" {
+		t.Fatalf("page = %+v", wiki.page)
+	}
+	if resp.Status != model.IMActionStatusCompleted || resp.Metadata["href"] == "" {
+		t.Fatalf("response = %+v", resp)
+	}
+}
+
+func TestBackendIMActionExecutor_CreateTaskCreatesBacklogTask(t *testing.T) {
+	projectID := uuid.New()
+	taskCreator := &fakeIMActionTaskCreator{}
+	executor := NewBackendIMActionExecutor(nil, nil, nil, taskCreator)
+
+	resp, err := executor.Execute(context.Background(), &model.IMActionRequest{
+		Platform:  "slack",
+		Action:    "create-task",
+		EntityID:  projectID.String(),
+		ChannelID: "C123",
+		Metadata: map[string]string{
+			"title":    "Follow up",
+			"body":     "Created from message",
+			"priority": "high",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if taskCreator.created == nil || taskCreator.created.Title != "Follow up" {
+		t.Fatalf("created task = %+v", taskCreator.created)
+	}
+	if resp.Task == nil || resp.Task.Title != "Follow up" {
+		t.Fatalf("response task = %+v", resp.Task)
 	}
 }
 

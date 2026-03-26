@@ -1,16 +1,20 @@
 "use client";
 
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { FileText, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { flattenDocsTree, useDocsStore } from "@/lib/stores/docs-store";
+import { buildDocsHref } from "@/lib/route-hrefs";
 import { DocsSidebarPanel } from "@/components/docs/docs-sidebar-panel";
 import { TemplateCenter } from "@/components/docs/template-center";
 import { TemplatePicker } from "@/components/docs/template-picker";
+import { DocsPageDetailClient } from "./[pageId]/page-client";
 
 export default function DocsLandingPage() {
+  const searchParams = useSearchParams();
   const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
   const {
     tree,
@@ -29,6 +33,7 @@ export default function DocsLandingPage() {
   } = useDocsStore();
   const [query, setQuery] = useState("");
   const [pickerOpen, setPickerOpen] = useState(false);
+  const pageId = searchParams.get("pageId");
 
   useEffect(() => {
     if (!selectedProjectId) return;
@@ -41,6 +46,10 @@ export default function DocsLandingPage() {
 
   const allPages = useMemo(() => flattenDocsTree(tree), [tree]);
   const pinnedPages = useMemo(() => allPages.filter((page) => page.isPinned), [allPages]);
+
+  if (pageId) {
+    return <DocsPageDetailClient pageId={pageId} />;
+  }
 
   if (!selectedProjectId) {
     return (
@@ -61,14 +70,14 @@ export default function DocsLandingPage() {
         tree={tree}
         favorites={favorites}
         recentAccess={recentAccess}
-        onMovePage={(pageId, parentId, sortOrder) =>
-          void movePage({ projectId: selectedProjectId, pageId, parentId, sortOrder })
+        onMovePage={(targetPageId, parentId, sortOrder) =>
+          void movePage({ projectId: selectedProjectId, pageId: targetPageId, parentId, sortOrder })
         }
-        onToggleFavorite={(pageId, favorite) =>
-          void toggleFavorite({ projectId: selectedProjectId, pageId, favorite })
+        onToggleFavorite={(targetPageId, favorite) =>
+          void toggleFavorite({ projectId: selectedProjectId, pageId: targetPageId, favorite })
         }
-        onTogglePinned={(pageId, pinned) =>
-          void togglePinned({ projectId: selectedProjectId, pageId, pinned })
+        onTogglePinned={(targetPageId, pinned) =>
+          void togglePinned({ projectId: selectedProjectId, pageId: targetPageId, pinned })
         }
       />
 
@@ -103,7 +112,7 @@ export default function DocsLandingPage() {
             <h2 className="text-base font-semibold">Pinned</h2>
             <div className="mt-3 flex flex-col gap-2">
               {pinnedPages.map((page) => (
-                <Link key={page.id} href={`/docs/${page.id}`} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
+                <Link key={page.id} href={buildDocsHref(page.id)} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
                   {page.title}
                 </Link>
               ))}
@@ -120,7 +129,7 @@ export default function DocsLandingPage() {
                 const page = allPages.find((item) => item.id === favorite.pageId);
                 if (!page) return null;
                 return (
-                  <Link key={favorite.pageId} href={`/docs/${favorite.pageId}`} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
+                  <Link key={favorite.pageId} href={buildDocsHref(favorite.pageId)} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
                     {page.title}
                   </Link>
                 );
@@ -138,7 +147,7 @@ export default function DocsLandingPage() {
                 const page = allPages.find((item) => item.id === access.pageId);
                 if (!page) return null;
                 return (
-                  <Link key={`${access.pageId}-${access.accessedAt}`} href={`/docs/${access.pageId}`} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
+                  <Link key={`${access.pageId}-${access.accessedAt}`} href={buildDocsHref(access.pageId)} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
                     {page.title}
                   </Link>
                 );
@@ -170,7 +179,7 @@ export default function DocsLandingPage() {
             {allPages.map((page) => (
               <Link
                 key={page.id}
-                href={`/docs/${page.id}`}
+                href={buildDocsHref(page.id)}
                 className="rounded-xl border border-border/60 px-4 py-3 hover:bg-accent/40"
               >
                 <div className="font-medium">{page.title}</div>

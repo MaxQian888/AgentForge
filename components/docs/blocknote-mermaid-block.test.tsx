@@ -24,7 +24,7 @@ jest.mock("@blocknote/react", () => ({
       implementation: {
         render: (input: {
           block: { props?: { chart?: string } };
-        }) => JSX.Element;
+        }) => React.ReactElement;
       },
     ) => ({
       config,
@@ -51,7 +51,7 @@ describe("createMermaidBlock", () => {
 
     const mermaidBlock = createMermaidBlock as unknown as {
       config: unknown;
-      render: (input: { block: { props?: { chart?: string } } }) => JSX.Element;
+      render: (input: { block: { props?: { chart?: string } } }) => React.ReactElement;
     };
 
     expect(mermaidBlock.config).toEqual(
@@ -80,7 +80,7 @@ describe("createMermaidBlock", () => {
     mockRenderDiagram.mockRejectedValue(new Error("render failed"));
 
     const mermaidBlock = createMermaidBlock as unknown as {
-      render: (input: { block: { props?: { chart?: string } } }) => JSX.Element;
+      render: (input: { block: { props?: { chart?: string } } }) => React.ReactElement;
     };
 
     render(

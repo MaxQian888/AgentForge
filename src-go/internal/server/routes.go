@@ -4,12 +4,14 @@ import (
 	"context"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/handler"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
+	"github.com/react-go-quick-starter/server/internal/model"
 	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/role"
@@ -69,6 +71,19 @@ func (a taskDecompositionBridgeAdapter) DecomposeTask(ctx context.Context, req s
 		Summary:  resp.Summary,
 		Subtasks: subtasks,
 	}, nil
+}
+
+type docDecompositionWikiRepositoryAdapter struct {
+	pages  *repository.WikiPageRepository
+	spaces *repository.WikiSpaceRepository
+}
+
+func (a docDecompositionWikiRepositoryAdapter) GetByID(ctx context.Context, id uuid.UUID) (*model.WikiPage, error) {
+	return a.pages.GetByID(ctx, id)
+}
+
+func (a docDecompositionWikiRepositoryAdapter) GetSpaceByID(ctx context.Context, id uuid.UUID) (*model.WikiSpace, error) {
+	return a.spaces.GetByID(ctx, id)
 }
 
 type imControlPlaneWSAdapter struct {
@@ -176,11 +191,15 @@ func RegisterRoutes(
 	}
 	reviewSvc := service.NewReviewService(reviewRepo, taskRepo, notificationSvc, hub, bridgeClient, taskProgressSvc)
 	reviewSvc.SetIMProgressNotifier(imControlPlane)
+	reviewSvc.WithProjectRepository(projectRepo)
 	reviewAggSvc := service.NewReviewAggregationService(reviewRepo, reviewAggRepo, falsePosRepo, taskRepo)
 	reviewSvc.WithAggregationService(reviewAggSvc)
+	reviewSvc.WithDocWriteback(entityLinkRepo, wikiPageRepo, pageVersionRepo)
 	taskDecomposeSvc := service.NewTaskDecompositionService(taskRepo, taskDecompositionBridgeAdapter{client: bridgeClient})
+	docDecomposeSvc := service.NewDocDecompositionService(taskRepo, docDecompositionWikiRepositoryAdapter{pages: wikiPageRepo, spaces: wikiSpaceRepo}, entityLinkRepo)
 	entityLinkSvc := service.NewEntityLinkService(entityLinkRepo, taskRepo, wikiPageRepo).WithHub(hub)
 	taskCommentSvc := service.NewTaskCommentService(taskCommentRepo, memberRepo, notificationSvc, taskRepo).WithHub(hub)
+	taskSvc := service.NewTaskService(taskRepo, hub).WithEntityLinkSyncer(entityLinkSvc)
 	wikiSvc.WithEntityLinkSyncer(entityLinkSvc)
 
 	// Health
@@ -220,6 +239,7 @@ func RegisterRoutes(
 	wikiH := handler.NewWikiHandler(wikiSvc)
 	entityLinkH := handler.NewEntityLinkHandler(entityLinkSvc)
 	taskCommentH := handler.NewTaskCommentHandler(taskCommentSvc)
+	docDecomposeH := handler.NewDocDecompositionHandler(docDecomposeSvc)
 	var agentRuntime handler.AgentRuntimeService
 	if agentSvc != nil {
 		agentRuntime = agentSvc
@@ -256,6 +276,21 @@ func RegisterRoutes(
 	pluginSvc = pluginSvc.
 		WithRoleStore(workflowRoleStore).
 		WithBroadcaster(ws.NewPluginEventBroadcaster(hub))
+	automationEngine := service.NewAutomationEngineService(
+		automationRuleRepo,
+		automationLogRepo,
+		taskRepo,
+		customFieldRepo,
+		notificationSvc,
+		nil,
+		pluginSvc,
+	)
+	taskH = taskH.WithAutomation(automationEngine)
+	customFieldH = customFieldH.WithAutomation(automationEngine)
+	reviewSvc.SetAutomationEvaluator(automationEngine)
+	if agentSvc != nil {
+		agentSvc.SetAutomationEvaluator(automationEngine)
+	}
 	reviewSvc.WithExecutionPlanner(service.NewReviewExecutionPlanner(pluginSvc))
 	recommendSvc := service.NewAssignmentRecommender(taskRepo, memberRepo, agentRunRepo)
 	taskH = taskH.WithRecommender(recommendSvc)
@@ -358,6 +393,7 @@ func RegisterRoutes(
 	projectGroup.POST("/wiki/pages/:id/comments", wikiH.CreateComment)
 	projectGroup.PATCH("/wiki/pages/:id/comments/:cid", wikiH.UpdateComment)
 	projectGroup.DELETE("/wiki/pages/:id/comments/:cid", wikiH.DeleteComment)
+	projectGroup.POST("/wiki/pages/:id/decompose-tasks", docDecomposeH.Decompose)
 	projectGroup.GET("/wiki/templates", wikiH.ListTemplates)
 	projectGroup.POST("/wiki/pages/:id/templates", wikiH.CreateTemplateFromPage)
 	projectGroup.POST("/wiki/pages/from-template", wikiH.CreatePageFromTemplate)
@@ -375,6 +411,7 @@ func RegisterRoutes(
 	protected.POST("/tasks/:id/assign", taskH.Assign)
 	protected.GET("/tasks/:id/recommend-assignee", taskH.RecommendAssignee)
 	protected.POST("/tasks/:id/decompose", taskH.Decompose)
+	v1.GET("/forms/:slug", formH.GetBySlug)
 	v1.POST("/forms/:slug/submit", formH.Submit)
 
 	// Member update
@@ -400,6 +437,7 @@ func RegisterRoutes(
 	// Notifications
 	protected.GET("/notifications", notifH.List)
 	protected.PUT("/notifications/:id/read", notifH.MarkRead)
+	protected.PUT("/notifications/read-all", notifH.MarkAllRead)
 
 	// Scheduler control plane
 	protected.GET("/scheduler/jobs", schedulerH.ListJobs)
@@ -473,7 +511,8 @@ func RegisterRoutes(
 	if bridgeClient != nil {
 		imSvc.SetClassifier(bridgeIntentAdapter{client: bridgeClient})
 	}
-	imSvc.SetActionExecutor(service.NewBackendIMActionExecutor(dispatchSvc, taskDecomposeSvc, reviewSvc))
+	imSvc.SetActionExecutor(service.NewBackendIMActionExecutor(dispatchSvc, taskDecomposeSvc, reviewSvc, taskSvc, wikiSvc))
+	automationEngine.SetIMSender(imSvc)
 	wikiSvc.WithIMForwarder(imSvc, cfg.IMNotifyPlatform, cfg.IMNotifyTargetChatID)
 	imH := handler.NewIMHandler(imSvc)
 	imControlH := handler.NewIMControlHandler(imControlPlane)

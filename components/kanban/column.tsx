@@ -6,6 +6,7 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { TaskCard } from "./task-card";
 import type { TaskWorkspaceDisplayOptions } from "@/lib/stores/task-workspace-store";
 import type { Task, TaskStatus } from "@/lib/stores/task-store";
+import type { LinkedDocItem } from "@/components/tasks/linked-docs-panel";
 
 const columnLabels: Record<TaskStatus, string> = {
   inbox: "Inbox",
@@ -25,6 +26,7 @@ interface ColumnProps {
   tasks: Task[];
   selectedTaskId: string | null;
   displayOptions: TaskWorkspaceDisplayOptions;
+  linkedDocsByTask: Record<string, LinkedDocItem[]>;
   onTaskClick: (task: Task) => void;
 }
 
@@ -33,6 +35,7 @@ export function Column({
   tasks,
   selectedTaskId,
   displayOptions,
+  linkedDocsByTask,
   onTaskClick,
 }: ColumnProps) {
   return (
@@ -62,6 +65,7 @@ export function Column({
                   isSelected={task.id === selectedTaskId}
                   density={displayOptions.density}
                   showDescription={displayOptions.showDescriptions}
+                  linkedDocs={linkedDocsByTask[task.id] ?? []}
                   onClick={() => onTaskClick(task)}
                 />
               ))}

@@ -15,85 +15,83 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useProjectStore } from "@/lib/stores/project-store";
+import {
+  useProjectStore,
+  type Project,
+  type ProjectUpdateInput,
+} from "@/lib/stores/project-store";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
+import { FieldDefinitionEditor } from "@/components/fields/field-definition-editor";
+import { FormBuilder } from "@/components/forms/form-builder";
+import { RuleEditor } from "@/components/automations/rule-editor";
+import { RuleList } from "@/components/automations/rule-list";
+import { AutomationLogViewer } from "@/components/automations/automation-log-viewer";
 
-export default function SettingsPage() {
-  const { selectedProjectId } = useDashboardStore();
-  const { projects, fetchProjects, updateProject } = useProjectStore();
+type UpdateProject = (id: string, data: ProjectUpdateInput) => Promise<void>;
 
-  const project = projects.find((p) => p.id === selectedProjectId);
+function SettingsContent({
+  project,
+  updateProject,
+}: {
+  project: Project;
+  updateProject: UpdateProject;
+}) {
+  const initialRuntime =
+    project.settings?.codingAgent.runtime ||
+    project.codingAgentCatalog?.defaultSelection.runtime ||
+    "";
+  const initialProvider =
+    project.settings?.codingAgent.provider ||
+    project.codingAgentCatalog?.defaultSelection.provider ||
+    "";
+  const initialModel =
+    project.settings?.codingAgent.model ||
+    project.codingAgentCatalog?.defaultSelection.model ||
+    "";
 
-  const [name, setName] = useState("");
-  const [description, setDescription] = useState("");
-  const [repoUrl, setRepoUrl] = useState("");
-  const [defaultBranch, setDefaultBranch] = useState("");
-  const [runtime, setRuntime] = useState("");
-  const [provider, setProvider] = useState("");
-  const [model, setModel] = useState("");
-  const [maxTaskBudget, setMaxTaskBudget] = useState(0);
-  const [maxDailySpend, setMaxDailySpend] = useState(0);
-  const [alertThreshold, setAlertThreshold] = useState(80);
-  const [autoStopOnExceed, setAutoStopOnExceed] = useState(false);
-  const [autoTriggerOnPR, setAutoTriggerOnPR] = useState(false);
-  const [requiredLayers, setRequiredLayers] = useState("1");
-  const [minRiskLevelForBlock, setMinRiskLevelForBlock] = useState("critical");
-  const [requireManualApproval, setRequireManualApproval] = useState(false);
-  const [webhookUrl, setWebhookUrl] = useState("");
-  const [webhookSecret, setWebhookSecret] = useState("");
-  const [webhookEvents, setWebhookEvents] = useState<string[]>([]);
-  const [webhookActive, setWebhookActive] = useState(false);
+  const [name, setName] = useState(project.name);
+  const [description, setDescription] = useState(project.description ?? "");
+  const [repoUrl, setRepoUrl] = useState(project.repoUrl ?? "");
+  const [defaultBranch, setDefaultBranch] = useState(project.defaultBranch ?? "main");
+  const [runtime, setRuntime] = useState(initialRuntime);
+  const [provider, setProvider] = useState(initialProvider);
+  const [model, setModel] = useState(initialModel);
+  const [maxTaskBudget, setMaxTaskBudget] = useState(
+    project.settings?.budgetGovernance?.maxTaskBudgetUsd ?? 0
+  );
+  const [maxDailySpend, setMaxDailySpend] = useState(
+    project.settings?.budgetGovernance?.maxDailySpendUsd ?? 0
+  );
+  const [alertThreshold, setAlertThreshold] = useState(
+    project.settings?.budgetGovernance?.alertThresholdPercent ?? 80
+  );
+  const [autoStopOnExceed, setAutoStopOnExceed] = useState(
+    project.settings?.budgetGovernance?.autoStopOnExceed ?? false
+  );
+  const [autoTriggerOnPR, setAutoTriggerOnPR] = useState(
+    project.settings?.reviewPolicy?.autoTriggerOnPR ?? false
+  );
+  const [requiredLayers, setRequiredLayers] = useState(
+    project.settings?.reviewPolicy?.requiredLayers[0] ?? "layer1"
+  );
+  const [minRiskLevelForBlock, setMinRiskLevelForBlock] = useState(
+    project.settings?.reviewPolicy?.minRiskLevelForBlock ?? "critical"
+  );
+  const [requireManualApproval, setRequireManualApproval] = useState(
+    project.settings?.reviewPolicy?.requireManualApproval ?? false
+  );
+  const [webhookUrl, setWebhookUrl] = useState(project.settings?.webhook?.url ?? "");
+  const [webhookSecret, setWebhookSecret] = useState(
+    project.settings?.webhook?.secret ?? ""
+  );
+  const [webhookEvents, setWebhookEvents] = useState(
+    project.settings?.webhook?.events ?? []
+  );
+  const [webhookActive, setWebhookActive] = useState(
+    project.settings?.webhook?.active ?? false
+  );
   const [saved, setSaved] = useState(false);
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
-
-  useEffect(() => {
-    void fetchProjects();
-  }, [fetchProjects]);
-
-  useEffect(() => {
-    if (project) {
-      setName(project.name);
-      setDescription(project.description ?? "");
-      setRepoUrl(project.repoUrl ?? "");
-      setDefaultBranch(project.defaultBranch ?? "main");
-      setRuntime(
-        project.settings?.codingAgent.runtime ||
-          project.codingAgentCatalog?.defaultSelection.runtime ||
-          ""
-      );
-      setProvider(
-        project.settings?.codingAgent.provider ||
-          project.codingAgentCatalog?.defaultSelection.provider ||
-          ""
-      );
-      setModel(
-        project.settings?.codingAgent.model ||
-          project.codingAgentCatalog?.defaultSelection.model ||
-          ""
-      );
-      const bg = project.settings?.budgetGovernance;
-      if (bg) {
-        setMaxTaskBudget(bg.maxTaskBudgetUsd);
-        setMaxDailySpend(bg.maxDailySpendUsd);
-        setAlertThreshold(bg.alertThresholdPercent);
-        setAutoStopOnExceed(bg.autoStopOnExceed);
-      }
-      const rp = project.settings?.reviewPolicy;
-      if (rp) {
-        setAutoTriggerOnPR(rp.autoTriggerOnPR);
-        setRequiredLayers(String(rp.requiredLayers));
-        setMinRiskLevelForBlock(rp.minRiskLevelForBlock);
-        setRequireManualApproval(rp.requireManualApproval);
-      }
-      const wh = project.settings?.webhook;
-      if (wh) {
-        setWebhookUrl(wh.url);
-        setWebhookSecret(wh.secret);
-        setWebhookEvents(wh.events);
-        setWebhookActive(wh.active);
-      }
-    }
-  }, [project]);
 
   useEffect(() => {
     return () => {
@@ -103,7 +101,7 @@ export default function SettingsPage() {
     };
   }, []);
 
-  const runtimeOptions = project?.codingAgentCatalog?.runtimes ?? [];
+  const runtimeOptions = project.codingAgentCatalog?.runtimes ?? [];
   const selectedRuntime =
     runtimeOptions.find((option) => option.runtime === runtime) ?? runtimeOptions[0];
   const compatibleProviders = selectedRuntime?.compatibleProviders ?? [];
@@ -119,12 +117,7 @@ export default function SettingsPage() {
     setModel(nextOption.defaultModel);
   };
 
-  const handleProviderChange = (nextProvider: string) => {
-    setProvider(nextProvider);
-  };
-
   const handleSave = async () => {
-    if (!project) return;
     await updateProject(project.id, {
       name,
       description,
@@ -140,7 +133,7 @@ export default function SettingsPage() {
         },
         reviewPolicy: {
           autoTriggerOnPR,
-          requiredLayers: Number(requiredLayers),
+          requiredLayers: requiredLayers ? [requiredLayers] : [],
           minRiskLevelForBlock,
           requireManualApproval,
           enabledPluginDimensions: [],
@@ -163,26 +156,6 @@ export default function SettingsPage() {
     }, 2000);
   };
 
-  if (!selectedProjectId) {
-    return (
-      <div className="flex flex-col gap-6">
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-sm text-muted-foreground">
-          Select a project from the Dashboard to configure settings.
-        </p>
-      </div>
-    );
-  }
-
-  if (!project) {
-    return (
-      <div className="flex flex-col gap-6">
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-sm text-muted-foreground">Loading project...</p>
-      </div>
-    );
-  }
-
   return (
     <div className="flex flex-col gap-6">
       <h1 className="text-2xl font-bold">Project Settings</h1>
@@ -198,10 +171,7 @@ export default function SettingsPage() {
           </div>
           <div className="flex flex-col gap-2">
             <Label>Description</Label>
-            <Input
-              value={description}
-              onChange={(e) => setDescription(e.target.value)}
-            />
+            <Input value={description} onChange={(e) => setDescription(e.target.value)} />
           </div>
         </CardContent>
       </Card>
@@ -252,7 +222,7 @@ export default function SettingsPage() {
             </div>
             <div className="flex flex-col gap-2">
               <Label>Provider</Label>
-              <Select value={provider} onValueChange={handleProviderChange}>
+              <Select value={provider} onValueChange={setProvider}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -274,19 +244,14 @@ export default function SettingsPage() {
           {selectedDiagnostics.length > 0 && (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
               {selectedDiagnostics.map((diagnostic) => (
-                <p key={`${diagnostic.code}-${diagnostic.message}`}>
-                  {diagnostic.message}
-                </p>
+                <p key={`${diagnostic.code}-${diagnostic.message}`}>{diagnostic.message}</p>
               ))}
             </div>
           )}
 
           <div className="grid gap-3 md:grid-cols-2">
             {runtimeOptions.map((option) => (
-              <div
-                key={option.runtime}
-                className="rounded-md border p-4 text-sm"
-              >
+              <div key={option.runtime} className="rounded-md border p-4 text-sm">
                 <div className="flex items-center justify-between gap-3">
                   <div>
                     <p className="font-medium">{option.label}</p>
@@ -301,9 +266,7 @@ export default function SettingsPage() {
                 {option.diagnostics.length > 0 && (
                   <div className="mt-3 space-y-1 text-xs text-muted-foreground">
                     {option.diagnostics.map((diagnostic) => (
-                      <p key={`${option.runtime}-${diagnostic.code}`}>
-                        {diagnostic.message}
-                      </p>
+                      <p key={`${option.runtime}-${diagnostic.code}`}>{diagnostic.message}</p>
                     ))}
                   </div>
                 )}
@@ -358,7 +321,7 @@ export default function SettingsPage() {
               <Label>Auto-stop on Exceed</Label>
               <Select
                 value={autoStopOnExceed ? "yes" : "no"}
-                onValueChange={(v) => setAutoStopOnExceed(v === "yes")}
+                onValueChange={(value) => setAutoStopOnExceed(value === "yes")}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -386,7 +349,7 @@ export default function SettingsPage() {
               <Label>Auto-trigger on PR</Label>
               <Select
                 value={autoTriggerOnPR ? "yes" : "no"}
-                onValueChange={(v) => setAutoTriggerOnPR(v === "yes")}
+                onValueChange={(value) => setAutoTriggerOnPR(value === "yes")}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -404,9 +367,9 @@ export default function SettingsPage() {
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="1">Quick (Layer 1)</SelectItem>
-                  <SelectItem value="2">Deep (Layer 2)</SelectItem>
-                  <SelectItem value="3">Human (Layer 3)</SelectItem>
+                  <SelectItem value="layer1">Quick (Layer 1)</SelectItem>
+                  <SelectItem value="layer2">Deep (Layer 2)</SelectItem>
+                  <SelectItem value="layer3">Human (Layer 3)</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -414,10 +377,7 @@ export default function SettingsPage() {
           <div className="grid gap-4 md:grid-cols-2">
             <div className="flex flex-col gap-2">
               <Label>Min Risk Level to Block Merge</Label>
-              <Select
-                value={minRiskLevelForBlock}
-                onValueChange={setMinRiskLevelForBlock}
-              >
+              <Select value={minRiskLevelForBlock} onValueChange={setMinRiskLevelForBlock}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -432,7 +392,7 @@ export default function SettingsPage() {
               <Label>Require Manual Approval</Label>
               <Select
                 value={requireManualApproval ? "yes" : "no"}
-                onValueChange={(v) => setRequireManualApproval(v === "yes")}
+                onValueChange={(value) => setRequireManualApproval(value === "yes")}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -478,34 +438,30 @@ export default function SettingsPage() {
             <div className="flex flex-col gap-2">
               <Label>Events</Label>
               <div className="flex flex-wrap gap-2">
-                {["push", "pr_opened", "pr_merged", "review_completed"].map(
-                  (event) => (
-                    <Button
-                      key={event}
-                      type="button"
-                      size="sm"
-                      variant={
-                        webhookEvents.includes(event) ? "default" : "outline"
-                      }
-                      onClick={() =>
-                        setWebhookEvents((prev) =>
-                          prev.includes(event)
-                            ? prev.filter((e) => e !== event)
-                            : [...prev, event]
-                        )
-                      }
-                    >
-                      {event}
-                    </Button>
-                  )
-                )}
+                {["push", "pr_opened", "pr_merged", "review_completed"].map((event) => (
+                  <Button
+                    key={event}
+                    type="button"
+                    size="sm"
+                    variant={webhookEvents.includes(event) ? "default" : "outline"}
+                    onClick={() =>
+                      setWebhookEvents((current) =>
+                        current.includes(event)
+                          ? current.filter((item) => item !== event)
+                          : [...current, event]
+                      )
+                    }
+                  >
+                    {event}
+                  </Button>
+                ))}
               </div>
             </div>
             <div className="flex flex-col gap-2">
               <Label>Active</Label>
               <Select
                 value={webhookActive ? "yes" : "no"}
-                onValueChange={(v) => setWebhookActive(v === "yes")}
+                onValueChange={(value) => setWebhookActive(value === "yes")}
               >
                 <SelectTrigger>
                   <SelectValue />
@@ -530,7 +486,10 @@ export default function SettingsPage() {
         <CardContent className="space-y-4">
           <div className="grid gap-3 md:grid-cols-2">
             {runtimeOptions.map((option) => (
-              <div key={option.runtime} className="flex items-center justify-between rounded-md border p-3">
+              <div
+                key={option.runtime}
+                className="flex items-center justify-between rounded-md border p-3"
+              >
                 <span className="text-sm font-medium">{option.label}</span>
                 <Badge variant={option.available ? "default" : "secondary"}>
                   {option.available ? "Ready" : "Unavailable"}
@@ -538,9 +497,7 @@ export default function SettingsPage() {
               </div>
             ))}
             {runtimeOptions.length === 0 && (
-              <p className="text-sm text-muted-foreground">
-                No runtime information available.
-              </p>
+              <p className="text-sm text-muted-foreground">No runtime information available.</p>
             )}
           </div>
           <div className="flex gap-3">
@@ -551,6 +508,44 @@ export default function SettingsPage() {
               <Link href="/reviews">View Review Backlog</Link>
             </Button>
           </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Custom Fields</CardTitle>
+          <CardDescription>
+            Define project-specific properties for task detail and workspace views.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FieldDefinitionEditor projectId={project.id} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Forms</CardTitle>
+          <CardDescription>
+            Create intake forms that map to task properties and custom fields.
+          </CardDescription>
+        </CardHeader>
+        <CardContent>
+          <FormBuilder projectId={project.id} />
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Automations</CardTitle>
+          <CardDescription>
+            Configure event-driven rules and inspect recent automation activity.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-6">
+          <RuleEditor projectId={project.id} />
+          <RuleList projectId={project.id} />
+          <AutomationLogViewer projectId={project.id} />
         </CardContent>
       </Card>
 
@@ -568,4 +563,37 @@ export default function SettingsPage() {
       </div>
     </div>
   );
+}
+
+export default function SettingsPage() {
+  const { selectedProjectId } = useDashboardStore();
+  const { projects, fetchProjects, updateProject } = useProjectStore();
+
+  const project = projects.find((item) => item.id === selectedProjectId);
+
+  useEffect(() => {
+    void fetchProjects();
+  }, [fetchProjects]);
+
+  if (!selectedProjectId) {
+    return (
+      <div className="flex flex-col gap-6">
+        <h1 className="text-2xl font-bold">Settings</h1>
+        <p className="text-sm text-muted-foreground">
+          Select a project from the Dashboard to configure settings.
+        </p>
+      </div>
+    );
+  }
+
+  if (!project) {
+    return (
+      <div className="flex flex-col gap-6">
+        <h1 className="text-2xl font-bold">Settings</h1>
+        <p className="text-sm text-muted-foreground">Loading project...</p>
+      </div>
+    );
+  }
+
+  return <SettingsContent key={project.id} project={project} updateProject={updateProject} />;
 }

@@ -1,11 +1,5 @@
 name: Agent PR Review
 
-# ============================================================================
-# Automated review for PRs created by AI agents.
-# Triggers on PRs from branches prefixed with "agent/".
-# Uses Claude Code Action for Layer-1 code review.
-# ============================================================================
-
 on:
   pull_request:
     types: [opened, synchronize, ready_for_review]
@@ -21,28 +15,63 @@ jobs:
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
+
       - name: Claude Code Review
         uses: anthropics/claude-code-action@v1
         with:
           anthropic_api_key: ${{ secrets.ANTHROPIC_API_KEY }}
           trigger_phrase: ""
           review_on_open: true
-      - name: Persist Layer 1 escalation metadata
+
+      - name: Persist Layer 1 decision metadata
         if: always()
         shell: bash
         run: |
+          set -euo pipefail
           mkdir -p .review-metadata
+
+          FILES_CHANGED=${{ github.event.pull_request.changed_files }}
+          ADDITIONS=${{ github.event.pull_request.additions }}
+          DELETIONS=${{ github.event.pull_request.deletions }}
+          TOTAL_CHURN=$((ADDITIONS + DELETIONS))
+          LABELS='${{ toJson(github.event.pull_request.labels.*.name) }}'
+
+          HAS_PRIORITY_LABEL=$(echo "${LABELS}" | jq -e '
+            map(ascii_downcase)
+            | any(. == "security" or . == "security-review" or . == "deep-review")
+          ' >/dev/null && echo "true" || echo "false")
+
+          NEEDS_DEEP_REVIEW="false"
+          REASON="small_diff"
+          CONFIDENCE="low"
+          if [[ "${HAS_PRIORITY_LABEL}" == "true" ]]; then
+            NEEDS_DEEP_REVIEW="true"
+            REASON="priority_label"
+            CONFIDENCE="high"
+          elif [[ "${FILES_CHANGED}" -gt 20 ]]; then
+            NEEDS_DEEP_REVIEW="true"
+            REASON="large_file_count"
+            CONFIDENCE="medium"
+          elif [[ "${TOTAL_CHURN}" -gt 800 ]]; then
+            NEEDS_DEEP_REVIEW="true"
+            REASON="large_diff"
+            CONFIDENCE="medium"
+          fi
+
           jq -n \
             --arg pr_url "${{ github.event.pull_request.html_url }}" \
             --arg repository "${{ github.repository }}" \
             --arg title "${{ github.event.pull_request.title }}" \
             --arg body "${{ github.event.pull_request.body }}" \
             --arg head_ref "${{ github.head_ref }}" \
-            --arg reason "agent_branch" \
+            --arg reason "${REASON}" \
+            --arg confidence "${CONFIDENCE}" \
+            --argjson needs_deep_review "${NEEDS_DEEP_REVIEW}" \
             --argjson pr_number "${{ github.event.pull_request.number }}" \
             '{
-              needs_deep_review: true,
+              needs_deep_review: $needs_deep_review,
               reason: $reason,
+              confidence: $confidence,
               pr_url: $pr_url,
               pr_number: $pr_number,
               repository: $repository,
@@ -50,6 +79,59 @@ jobs:
               body: $body,
               head_ref: $head_ref
             }' > .review-metadata/review-decision.json
+
+      - name: Report Layer 1 decision to AgentForge
+        if: always()
+        env:
+          AGENTFORGE_API_URL: ${{ secrets.AGENTFORGE_API_URL }}
+          # Required repository secret for ci-result ingest:
+          AGENTFORGE_CI_TOKEN: ${{ secrets.AGENTFORGE_CI_TOKEN }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          METADATA_FILE=".review-metadata/review-decision.json"
+          if [[ ! -f "${METADATA_FILE}" ]]; then
+            echo "Layer 1 metadata not found; skipping ci-result report."
+            exit 0
+          fi
+          if [[ -z "${AGENTFORGE_API_URL}" || -z "${AGENTFORGE_CI_TOKEN}" ]]; then
+            echo "AGENTFORGE_API_URL or AGENTFORGE_CI_TOKEN is not set; skipping ci-result report."
+            exit 0
+          fi
+
+          NEEDS_DEEP_REVIEW=$(jq -r '.needs_deep_review' "${METADATA_FILE}")
+          REASON=$(jq -r '.reason' "${METADATA_FILE}")
+          CONFIDENCE=$(jq -r '.confidence' "${METADATA_FILE}")
+          PR_URL=$(jq -r '.pr_url' "${METADATA_FILE}")
+          STATUS="success"
+          if [[ "${NEEDS_DEEP_REVIEW}" == "true" ]]; then
+            STATUS="failure"
+          fi
+
+          jq -n \
+            --arg prUrl "${PR_URL}" \
+            --arg ciSystem "github-actions" \
+            --arg status "${STATUS}" \
+            --arg reason "${REASON}" \
+            --arg confidence "${CONFIDENCE}" \
+            --argjson needs_deep_review "${NEEDS_DEEP_REVIEW}" \
+            --argjson findings '[]' \
+            '{
+              prUrl: $prUrl,
+              ciSystem: $ciSystem,
+              status: $status,
+              needs_deep_review: $needs_deep_review,
+              reason: $reason,
+              confidence: $confidence,
+              findings: $findings
+            }' > .review-metadata/ci-result.json
+
+          curl --fail --show-error --silent \
+            -X POST "${AGENTFORGE_API_URL}/api/v1/reviews/ci-result" \
+            -H "Authorization: Bearer ${AGENTFORGE_CI_TOKEN}" \
+            -H "Content-Type: application/json" \
+            --data @.review-metadata/ci-result.json
+
       - name: Upload Layer 1 review decision
         if: always()
         uses: actions/upload-artifact@v4

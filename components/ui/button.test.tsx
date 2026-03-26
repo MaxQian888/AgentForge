@@ -1,3 +1,4 @@
+import Link from "next/link";
 import { render, screen } from "@testing-library/react";
 import { Button, buttonVariants } from "./button";
 
@@ -27,7 +28,7 @@ describe("Button", () => {
   it("supports asChild composition", () => {
     render(
       <Button asChild>
-        <a href="/docs">Docs</a>
+        <Link href="/docs">Docs</Link>
       </Button>
     );
 

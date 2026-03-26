@@ -9,7 +9,7 @@ import (
 	"github.com/agentforge/im-bridge/core"
 )
 
-const reviewUsage = "用法: /review <pr-url> 或 /review status <id>"
+const reviewUsage = "用法: /review <pr-url> | /review status <id> | /review deep <pr-url> | /review approve <id> | /review request-changes <id> [comment]"
 
 // RegisterReviewCommands registers /review sub-commands on the engine.
 func RegisterReviewCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
@@ -22,19 +22,24 @@ func RegisterReviewCommands(engine *core.Engine, apiClient *client.AgentForgeCli
 
 		ctx := context.Background()
 		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
-
-		parts := strings.SplitN(trimmed, " ", 2)
-		if parts[0] == "status" {
-			subArgs := ""
-			if len(parts) > 1 {
-				subArgs = strings.TrimSpace(parts[1])
-			}
-			handleReviewStatus(ctx, p, msg, scopedClient, subArgs)
+		parts := strings.Fields(trimmed)
+		if len(parts) == 0 {
+			_ = p.Reply(ctx, msg.ReplyCtx, reviewUsage)
 			return
 		}
 
-		// Otherwise treat the entire args as a PR URL.
-		handleReviewTrigger(ctx, p, msg, scopedClient, trimmed)
+		switch parts[0] {
+		case "status":
+			handleReviewStatus(ctx, p, msg, scopedClient, strings.TrimSpace(strings.TrimPrefix(trimmed, "status")))
+		case "deep":
+			handleReviewDeep(ctx, p, msg, scopedClient, strings.TrimSpace(strings.TrimPrefix(trimmed, "deep")))
+		case "approve":
+			handleReviewApprove(ctx, p, msg, scopedClient, strings.TrimSpace(strings.TrimPrefix(trimmed, "approve")))
+		case "request-changes":
+			handleReviewRequestChanges(ctx, p, msg, scopedClient, strings.TrimSpace(strings.TrimPrefix(trimmed, "request-changes")))
+		default:
+			handleReviewTrigger(ctx, p, msg, scopedClient, trimmed)
+		}
 	})
 }
 
@@ -46,24 +51,59 @@ func handleReviewTrigger(ctx context.Context, p core.Platform, msg *core.Message
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("触发审查失败: %v", err))
 		return
 	}
-	if msg.ReplyTarget != nil {
-		_ = c.BindActionContext(ctx, client.IMActionBinding{
-			Platform:    msg.Platform,
-			TaskID:      review.TaskID,
-			ReviewID:    review.ID,
-			ReplyTarget: msg.ReplyTarget,
-		})
-	}
-	if cs, ok := p.(core.CardSender); ok {
-		card := buildReviewCard(review)
-		_ = cs.ReplyCard(ctx, msg.ReplyCtx, card)
+	bindReviewActionContext(ctx, c, msg, review)
+	replyReview(ctx, p, msg, review, "已创建代码审查")
+}
+
+func handleReviewDeep(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, args string) {
+	prURL := strings.TrimSpace(args)
+	if prURL == "" {
+		_ = p.Reply(ctx, msg.ReplyCtx, "用法: /review deep <pr-url>")
 		return
 	}
-	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已创建代码审查 #%s\nPR: %s\n状态: %s",
-		shortID(review.ID), review.PRURL, review.Status))
+
+	_ = p.Reply(ctx, msg.ReplyCtx, "正在创建独立深度审查，请稍候...")
+	review, err := c.TriggerStandaloneDeepReview(ctx, prURL)
+	if err != nil {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("创建深度审查失败: %v", err))
+		return
+	}
+	bindReviewActionContext(ctx, c, msg, review)
+	replyReview(ctx, p, msg, review, "已创建深度审查")
+}
+
+func handleReviewApprove(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, args string) {
+	reviewID := strings.TrimSpace(args)
+	if reviewID == "" {
+		_ = p.Reply(ctx, msg.ReplyCtx, "用法: /review approve <review-id>")
+		return
+	}
+
+	review, err := c.ApproveReview(ctx, reviewID, "")
+	if err != nil {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("审批失败: %v", err))
+		return
+	}
+	replyReview(ctx, p, msg, review, "审查已批准")
+}
+
+func handleReviewRequestChanges(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, args string) {
+	reviewID, comment := parseReviewActionArgs(args)
+	if reviewID == "" {
+		_ = p.Reply(ctx, msg.ReplyCtx, "用法: /review request-changes <review-id> [comment]")
+		return
+	}
+
+	review, err := c.RequestChangesReview(ctx, reviewID, comment)
+	if err != nil {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("请求修改失败: %v", err))
+		return
+	}
+	replyReview(ctx, p, msg, review, "已提交修改请求")
 }
 
 func handleReviewStatus(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, reviewID string) {
+	reviewID = strings.TrimSpace(reviewID)
 	if reviewID == "" {
 		_ = p.Reply(ctx, msg.ReplyCtx, "用法: /review status <review-id>")
 		return
@@ -73,13 +113,55 @@ func handleReviewStatus(ctx context.Context, p core.Platform, msg *core.Message,
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取审查失败: %v", err))
 		return
 	}
+	replyReview(ctx, p, msg, review, "")
+}
+
+func parseReviewActionArgs(args string) (string, string) {
+	trimmed := strings.TrimSpace(args)
+	if trimmed == "" {
+		return "", ""
+	}
+	parts := strings.SplitN(trimmed, " ", 2)
+	reviewID := strings.TrimSpace(parts[0])
+	if len(parts) == 1 {
+		return reviewID, ""
+	}
+	return reviewID, strings.TrimSpace(parts[1])
+}
+
+func bindReviewActionContext(ctx context.Context, c *client.AgentForgeClient, msg *core.Message, review *client.Review) {
+	if review == nil || msg.ReplyTarget == nil {
+		return
+	}
+	_ = c.BindActionContext(ctx, client.IMActionBinding{
+		Platform:    msg.Platform,
+		TaskID:      review.TaskID,
+		ReviewID:    review.ID,
+		ReplyTarget: msg.ReplyTarget,
+	})
+}
+
+func replyReview(ctx context.Context, p core.Platform, msg *core.Message, review *client.Review, title string) {
+	if review == nil {
+		_ = p.Reply(ctx, msg.ReplyCtx, "审查结果为空")
+		return
+	}
 	if cs, ok := p.(core.CardSender); ok {
 		card := buildReviewCard(review)
 		_ = cs.ReplyCard(ctx, msg.ReplyCtx, card)
 		return
 	}
-	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("代码审查 #%s\nPR: %s\n状态: %s\n风险等级: %s\n摘要: %s\n建议: %s",
-		shortID(review.ID), review.PRURL, review.Status, review.RiskLevel, review.Summary, review.Recommendation))
+	prefix := ""
+	if strings.TrimSpace(title) != "" {
+		prefix = title + "\n"
+	}
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("%s代码审查 #%s\nPR: %s\n状态: %s\n建议: %s",
+		prefix,
+		shortID(review.ID),
+		review.PRURL,
+		review.Status,
+		review.Recommendation,
+	))
 }
 
 func buildReviewCard(review *client.Review) *core.Card {
@@ -97,6 +179,24 @@ func buildReviewCard(review *client.Review) *core.Card {
 	if review.CostUSD > 0 {
 		card.AddField("费用", fmt.Sprintf("$%.2f", review.CostUSD))
 	}
+
 	card.AddButton("查看详情", "link:/reviews/"+review.ID)
+	if review.Status == "pending_human" {
+		card.AddButton("Approve", "act:approve:"+review.ID)
+		card.AddButton("Request Changes", "act:request-changes:"+review.ID)
+	}
+	if isTerminalReviewStatus(review.Status) {
+		// Terminal cards intentionally keep only the details link.
+		return card
+	}
 	return card
+}
+
+func isTerminalReviewStatus(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "completed", "failed":
+		return true
+	default:
+		return false
+	}
 }

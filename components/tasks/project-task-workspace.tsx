@@ -21,6 +21,8 @@ import type {
   TaskStatus,
 } from "@/lib/stores/task-store";
 import { useTaskWorkspaceStore } from "@/lib/stores/task-workspace-store";
+import { useCustomFieldStore } from "@/lib/stores/custom-field-store";
+import { useSavedViewStore } from "@/lib/stores/saved-view-store";
 
 interface ProjectTaskWorkspaceProps {
   projectId: string;
@@ -92,6 +94,9 @@ export function ProjectTaskWorkspace({
   const setContextRailDisplay = useTaskWorkspaceStore(
     (state) => state.setContextRailDisplay
   );
+  const fetchDefinitions = useCustomFieldStore((state) => state.fetchDefinitions);
+  const fetchTaskValues = useCustomFieldStore((state) => state.fetchTaskValues);
+  const fetchViews = useSavedViewStore((state) => state.fetchViews);
 
   const filteredTasks = useMemo(
     () => filterTasksForWorkspace(tasks, filters),
@@ -103,6 +108,14 @@ export function ProjectTaskWorkspace({
       selectTask(null);
     }
   }, [selectedTaskId, selectTask, tasks]);
+
+  useEffect(() => {
+    void fetchDefinitions(projectId);
+    void fetchViews(projectId);
+    for (const task of tasks) {
+      void fetchTaskValues(projectId, task.id);
+    }
+  }, [fetchDefinitions, fetchTaskValues, fetchViews, projectId, tasks]);
 
   const rail = useMemo(
     () =>
@@ -127,6 +140,7 @@ export function ProjectTaskWorkspace({
       )}
     >
       <TaskWorkspaceMain
+        projectId={projectId}
         tasks={tasks}
         sprints={sprints}
         sprintMetrics={sprintMetrics}

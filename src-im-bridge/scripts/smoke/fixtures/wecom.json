@@ -1,0 +1,8 @@
+{
+  "content": "@AgentForge /help",
+  "user_id": "wecom-user-1",
+  "user_name": "WeCom User",
+  "chat_id": "wecom-chat-1",
+  "response_url": "https://work.weixin.qq.com/response",
+  "is_group": true
+}

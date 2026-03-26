@@ -10,12 +10,14 @@ export function VersionHistoryPanel({
   onSelect,
   onRestore,
   onShare,
+  readonly = false,
 }: {
   versions: DocsVersion[];
   selectedVersionId?: string | null;
   onSelect?: (versionId: string) => void;
   onRestore?: (versionId: string) => void;
   onShare?: (versionId: string) => void;
+  readonly?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card/70 p-4">
@@ -46,6 +48,7 @@ export function VersionHistoryPanel({
             <Button
               size="sm"
               variant="outline"
+              disabled={readonly}
               onClick={() => {
                 if (typeof window !== "undefined") {
                   const confirmed = window.confirm(

@@ -11,6 +11,7 @@ import (
 	"github.com/agentforge/im-bridge/core"
 	"github.com/agentforge/im-bridge/platform/discord"
 	"github.com/agentforge/im-bridge/platform/telegram"
+	"github.com/agentforge/im-bridge/platform/wecom"
 )
 
 func TestWithSource_NormalizesHeaderValue(t *testing.T) {
@@ -126,11 +127,14 @@ func TestCreateTask_SendsProjectPayloadAndParsesResponse(t *testing.T) {
 	if gotMethod != http.MethodPost {
 		t.Fatalf("method = %s, want POST", gotMethod)
 	}
-	if gotPath != "/api/v1/tasks" {
+	if gotPath != "/api/v1/projects/proj/tasks" {
 		t.Fatalf("path = %s", gotPath)
 	}
-	if gotBody["title"] != "Bridge rollout" || gotBody["description"] != "desc" || gotBody["project_id"] != "proj" {
+	if gotBody["title"] != "Bridge rollout" || gotBody["description"] != "desc" {
 		t.Fatalf("body = %+v", gotBody)
+	}
+	if _, exists := gotBody["project_id"]; exists {
+		t.Fatalf("body should not send legacy project_id field: %+v", gotBody)
 	}
 	if task.ID != "task-1" || task.Title != "Bridge rollout" {
 		t.Fatalf("task = %+v", task)
@@ -156,9 +160,11 @@ func TestCreateTask_ReturnsDecodeErrorForInvalidJSON(t *testing.T) {
 }
 
 func TestListTasks_AppendsStatusFilterAndParsesTasks(t *testing.T) {
+	var gotPath string
 	var gotQuery string
 
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode([]Task{{ID: "task-1", Status: "triaged", Title: "Bridge rollout"}})
@@ -172,7 +178,10 @@ func TestListTasks_AppendsStatusFilterAndParsesTasks(t *testing.T) {
 		t.Fatalf("ListTasks error: %v", err)
 	}
 
-	if gotQuery != "project_id=proj&status=triaged" {
+	if gotPath != "/api/v1/projects/proj/tasks" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotQuery != "status=triaged" {
 		t.Fatalf("query = %q", gotQuery)
 	}
 	if len(tasks) != 1 || tasks[0].ID != "task-1" {
@@ -360,7 +369,11 @@ func TestGetAgentPoolStatus_ParsesResponse(t *testing.T) {
 }
 
 func TestGetCostStats_ParsesResponse(t *testing.T) {
+	var gotPath string
+	var gotQuery string
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		gotQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
 		_ = json.NewEncoder(w).Encode(CostStats{
 			TotalUsd:   11.1,
@@ -377,6 +390,12 @@ func TestGetCostStats_ParsesResponse(t *testing.T) {
 	stats, err := client.GetCostStats(context.Background())
 	if err != nil {
 		t.Fatalf("GetCostStats error: %v", err)
+	}
+	if gotPath != "/api/v1/stats/cost" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotQuery != "projectId=proj" {
+		t.Fatalf("query = %q", gotQuery)
 	}
 	if stats.TotalUsd != 11.1 || stats.BudgetUsd != 20.2 {
 		t.Fatalf("stats = %+v", stats)
@@ -573,6 +592,10 @@ func TestWithPlatform_UsesDiscordMetadataSource(t *testing.T) {
 	assertPlatformHeader(t, discord.NewStub("0"), "discord")
 }
 
+func TestWithPlatform_UsesWeComMetadataSource(t *testing.T) {
+	assertPlatformHeader(t, wecom.NewStub("0"), "wecom")
+}
+
 func TestDoRequest_RejectsUnmarshalableBody(t *testing.T) {
 	client := NewAgentForgeClient("http://example.test", "proj", "secret")
 
@@ -582,6 +605,107 @@ func TestDoRequest_RejectsUnmarshalableBody(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "marshal body") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestTriggerStandaloneDeepReview_SendsManualTriggerPayload(t *testing.T) {
+	var gotBody map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/reviews/trigger" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Review{
+			ID:             "review-standalone",
+			PRURL:          "https://github.com/org/repo/pull/9",
+			Status:         "pending",
+			Recommendation: "approve",
+		})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj-1", "secret")
+	review, err := client.TriggerStandaloneDeepReview(context.Background(), "https://github.com/org/repo/pull/9")
+	if err != nil {
+		t.Fatalf("TriggerStandaloneDeepReview error: %v", err)
+	}
+	if gotBody["trigger"] != "manual" {
+		t.Fatalf("trigger = %q, want manual", gotBody["trigger"])
+	}
+	if gotBody["projectId"] != "proj-1" {
+		t.Fatalf("projectId = %q, want proj-1", gotBody["projectId"])
+	}
+	if review.ID != "review-standalone" {
+		t.Fatalf("review = %+v", review)
+	}
+}
+
+func TestApproveReview_CallsApproveEndpoint(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Review{
+			ID:             "review-1",
+			Status:         "completed",
+			Recommendation: "approve",
+		})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+	review, err := client.ApproveReview(context.Background(), "review-1", "LGTM")
+	if err != nil {
+		t.Fatalf("ApproveReview error: %v", err)
+	}
+	if gotPath != "/api/v1/reviews/review-1/approve" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotBody["comment"] != "LGTM" {
+		t.Fatalf("comment = %q", gotBody["comment"])
+	}
+	if review.Recommendation != "approve" {
+		t.Fatalf("review = %+v", review)
+	}
+}
+
+func TestRequestChangesReview_CallsRequestChangesEndpoint(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Review{
+			ID:             "review-2",
+			Status:         "completed",
+			Recommendation: "request_changes",
+		})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+	review, err := client.RequestChangesReview(context.Background(), "review-2", "Need more tests")
+	if err != nil {
+		t.Fatalf("RequestChangesReview error: %v", err)
+	}
+	if gotPath != "/api/v1/reviews/review-2/request-changes" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotBody["comment"] != "Need more tests" {
+		t.Fatalf("comment = %q", gotBody["comment"])
+	}
+	if review.Recommendation != "request_changes" {
+		t.Fatalf("review = %+v", review)
 	}
 }
 

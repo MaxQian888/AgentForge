@@ -83,4 +83,37 @@ describe("useNotificationStore", () => {
     );
     expect(useNotificationStore.getState().unreadCount).toBe(0);
   });
+
+  it("marks all notifications as read through the canonical endpoint", () => {
+    useNotificationStore.setState({
+      notifications: [
+        {
+          id: "notification-1",
+          type: "task_progress_stalled",
+          title: "Task stalled",
+          message: "Task stalled.",
+          read: false,
+          createdAt: "2026-03-26T09:00:00.000Z",
+        },
+      ],
+      unreadCount: 1,
+    });
+
+    fetchMock.mockResolvedValueOnce(mockJsonResponse({ message: "notifications marked as read" }));
+
+    useNotificationStore.getState().markAllRead();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:7777/api/v1/notifications/read-all",
+      expect.objectContaining({
+        method: "PUT",
+        headers: expect.objectContaining({
+          "Content-Type": "application/json",
+          Authorization: "Bearer test-token",
+        }),
+      }),
+    );
+    expect(useNotificationStore.getState().notifications[0]?.read).toBe(true);
+    expect(useNotificationStore.getState().unreadCount).toBe(0);
+  });
 });

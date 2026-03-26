@@ -10,6 +10,7 @@ import {
   type DocsPageTreeNode,
   type DocsRecentAccess,
 } from "@/lib/stores/docs-store";
+import { buildDocsHref } from "@/lib/route-hrefs";
 import { PageTree } from "./page-tree";
 
 export function DocsSidebarPanel({
@@ -80,7 +81,7 @@ export function DocsSidebarPanel({
           Favorites
         </div>
         {favoritePages.map((page) => (
-          <Link key={page.id} href={`/docs/${page.id}`} className="flex items-center gap-2 text-sm hover:text-primary">
+          <Link key={page.id} href={buildDocsHref(page.id)} className="flex items-center gap-2 text-sm hover:text-primary">
             <Star className="size-4 text-muted-foreground" />
             <span className="truncate">{page.title}</span>
           </Link>
@@ -96,7 +97,7 @@ export function DocsSidebarPanel({
           Recent
         </div>
         {recentPages.map((page) => (
-          <Link key={page.id} href={`/docs/${page.id}`} className="truncate text-sm hover:text-primary">
+          <Link key={page.id} href={buildDocsHref(page.id)} className="truncate text-sm hover:text-primary">
             {page.title}
           </Link>
         ))}

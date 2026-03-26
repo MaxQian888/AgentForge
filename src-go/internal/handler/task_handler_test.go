@@ -31,6 +31,15 @@ type fakeTaskRepo struct {
 	}
 }
 
+type fakeAutomationEvaluator struct {
+	events []service.AutomationEvent
+}
+
+func (f *fakeAutomationEvaluator) EvaluateRules(_ context.Context, event service.AutomationEvent) error {
+	f.events = append(f.events, event)
+	return nil
+}
+
 func (f *fakeTaskRepo) Create(context.Context, *model.Task) error {
 	return nil
 }
@@ -68,6 +77,15 @@ func (f *fakeTaskRepo) Update(_ context.Context, id uuid.UUID, req *model.Update
 
 func (f *fakeTaskRepo) Delete(context.Context, uuid.UUID) error {
 	return nil
+}
+
+func (f *fakeTaskRepo) ListOpenForProgress(context.Context) ([]*model.Task, error) {
+	out := make([]*model.Task, 0, len(f.tasks))
+	for _, task := range f.tasks {
+		cloned := *task
+		out = append(out, &cloned)
+	}
+	return out, nil
 }
 
 func (f *fakeTaskRepo) TransitionStatus(_ context.Context, id uuid.UUID, newStatus string) error {
@@ -439,6 +457,137 @@ func TestTaskHandler_TransitionDoneAutoUnblocksReadyDependents(t *testing.T) {
 	}
 	if repo.tasks[triagedDependentID].Status != model.TaskStatusTriaged {
 		t.Fatalf("triaged dependent status = %q, want %q", repo.tasks[triagedDependentID].Status, model.TaskStatusTriaged)
+	}
+}
+
+func TestTaskHandler_TransitionAndAssignEmitAutomationEvents(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	memberID := uuid.New()
+	repo := &fakeTaskRepo{
+		tasks: map[uuid.UUID]*model.Task{
+			taskID: {
+				ID:        taskID,
+				ProjectID: projectID,
+				Title:     "Automation source",
+				Status:    model.TaskStatusInProgress,
+				Priority:  "high",
+				CreatedAt: time.Now().Add(-time.Hour).UTC(),
+				UpdatedAt: time.Now().UTC(),
+			},
+		},
+	}
+	automation := &fakeAutomationEvaluator{}
+	e := echo.New()
+	e.Validator = &agentTestValidator{validator: validator.New()}
+
+	transitionReq := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID.String()+"/transition", strings.NewReader(`{"status":"done"}`))
+	transitionReq.Header.Set("Content-Type", "application/json")
+	transitionRec := httptest.NewRecorder()
+	transitionCtx := e.NewContext(transitionReq, transitionRec)
+	transitionCtx.SetPath("/api/v1/tasks/:id/transition")
+	transitionCtx.SetParamNames("id")
+	transitionCtx.SetParamValues(taskID.String())
+
+	h := handler.NewTaskHandler(repo).WithAutomation(automation)
+	if err := h.Transition(transitionCtx); err != nil {
+		t.Fatalf("Transition() error: %v", err)
+	}
+	if len(automation.events) != 1 || automation.events[0].EventType != model.AutomationEventTaskStatusChanged {
+		t.Fatalf("transition events = %+v", automation.events)
+	}
+
+	assignReq := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID.String()+"/assign", strings.NewReader(`{"assigneeId":"`+memberID.String()+`","assigneeType":"human"}`))
+	assignReq.Header.Set("Content-Type", "application/json")
+	assignRec := httptest.NewRecorder()
+	assignCtx := e.NewContext(assignReq, assignRec)
+	assignCtx.SetPath("/api/v1/tasks/:id/assign")
+	assignCtx.SetParamNames("id")
+	assignCtx.SetParamValues(taskID.String())
+
+	if err := h.Assign(assignCtx); err != nil {
+		t.Fatalf("Assign() error: %v", err)
+	}
+	if len(automation.events) != 2 || automation.events[1].EventType != model.AutomationEventTaskAssigneeChanged {
+		t.Fatalf("assign events = %+v", automation.events)
+	}
+}
+
+type automationRuleRepoBridge struct{ rules []*model.AutomationRule }
+
+func (r *automationRuleRepoBridge) ListByProjectAndEvent(_ context.Context, projectID uuid.UUID, eventType string) ([]*model.AutomationRule, error) {
+	result := make([]*model.AutomationRule, 0)
+	for _, rule := range r.rules {
+		if rule.ProjectID == projectID && rule.EventType == eventType {
+			result = append(result, rule)
+		}
+	}
+	return result, nil
+}
+
+type automationLogRepoBridge struct{ entries []*model.AutomationLog }
+
+func (r *automationLogRepoBridge) Create(_ context.Context, entry *model.AutomationLog) error {
+	r.entries = append(r.entries, entry)
+	return nil
+}
+
+type automationNotificationBridge struct{ title string }
+
+func (n *automationNotificationBridge) Create(_ context.Context, _ uuid.UUID, _, title, _, _ string) (*model.Notification, error) {
+	n.title = title
+	return &model.Notification{}, nil
+}
+
+func TestTaskHandler_TransitionRunsAutomationNotificationFlow(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	assigneeID := uuid.New()
+	repo := &fakeTaskRepo{
+		tasks: map[uuid.UUID]*model.Task{
+			taskID: {
+				ID:         taskID,
+				ProjectID:  projectID,
+				Title:      "Ship release",
+				Status:     model.TaskStatusInProgress,
+				Priority:   "high",
+				AssigneeID: &assigneeID,
+				CreatedAt:  time.Now().Add(-time.Hour).UTC(),
+				UpdatedAt:  time.Now().UTC(),
+			},
+		},
+	}
+	ruleRepo := &automationRuleRepoBridge{rules: []*model.AutomationRule{{
+		ID:         uuid.New(),
+		ProjectID:  projectID,
+		Enabled:    true,
+		EventType:  model.AutomationEventTaskStatusChanged,
+		Conditions: `[{"field":"status","op":"eq","value":"done"}]`,
+		Actions:    `[{"type":"send_notification","config":{"title":"Done","body":"Task finished"}}]`,
+	}}}
+	logRepo := &automationLogRepoBridge{}
+	notifs := &automationNotificationBridge{}
+	engine := service.NewAutomationEngineService(ruleRepo, logRepo, repo, nil, notifs, nil, nil)
+
+	e := echo.New()
+	e.Validator = &agentTestValidator{validator: validator.New()}
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/tasks/"+taskID.String()+"/transition", strings.NewReader(`{"status":"done"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v1/tasks/:id/transition")
+	c.SetParamNames("id")
+	c.SetParamValues(taskID.String())
+
+	h := handler.NewTaskHandler(repo).WithAutomation(engine)
+	if err := h.Transition(c); err != nil {
+		t.Fatalf("Transition() error: %v", err)
+	}
+	if notifs.title != "Done" {
+		t.Fatalf("notification title = %q", notifs.title)
+	}
+	if len(logRepo.entries) != 1 || logRepo.entries[0].Status != model.AutomationLogStatusSuccess {
+		t.Fatalf("automation logs = %+v", logRepo.entries)
 	}
 }
 

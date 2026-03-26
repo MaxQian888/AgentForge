@@ -33,6 +33,8 @@ describe("useReviewStore", () => {
     mockGetAuthState.mockReturnValue({ accessToken: "test-token" });
     useReviewStore.setState({
       reviewsByTask: {},
+      allReviews: [],
+      allReviewsLoading: false,
       loading: false,
       error: null,
     });
@@ -167,5 +169,112 @@ describe("useReviewStore", () => {
     });
 
     expect(mockCreateApiClient).not.toHaveBeenCalled();
+  });
+
+  it("submits request-changes transitions through the canonical endpoint", async () => {
+    const api = makeApiClient();
+    api.post.mockResolvedValueOnce({
+      data: {
+        id: "review-2",
+        taskId: "task-1",
+        prUrl: "https://example.com/pr/1",
+        prNumber: 1,
+        layer: 2,
+        status: "completed",
+        riskLevel: "medium",
+        findings: [],
+        summary: "needs changes",
+        recommendation: "request_changes",
+        costUsd: 0.4,
+        createdAt: "2026-03-25T10:00:00.000Z",
+        updatedAt: "2026-03-25T10:15:00.000Z",
+      },
+    });
+    mockCreateApiClient.mockReturnValue(api);
+
+    await useReviewStore.getState().requestChanges("review-2", "please update tests");
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/api/v1/reviews/review-2/request-changes",
+      { comment: "please update tests" },
+      { token: "test-token" },
+    );
+    expect(useReviewStore.getState().allReviews[0]).toEqual(
+      expect.objectContaining({
+        id: "review-2",
+        recommendation: "request_changes",
+      }),
+    );
+  });
+
+  it("posts false-positive findings using findingIds payload", async () => {
+    const api = makeApiClient();
+    api.post.mockResolvedValueOnce({
+      data: {
+        id: "review-3",
+        taskId: "task-9",
+        prUrl: "https://example.com/pr/9",
+        prNumber: 9,
+        layer: 2,
+        status: "completed",
+        riskLevel: "low",
+        findings: [{ id: "f1", category: "security", severity: "low", message: "ok", dismissed: true }],
+        summary: "false positive recorded",
+        recommendation: "approve",
+        costUsd: 0.1,
+        createdAt: "2026-03-25T10:00:00.000Z",
+        updatedAt: "2026-03-25T10:20:00.000Z",
+      },
+    });
+    mockCreateApiClient.mockReturnValue(api);
+
+    await useReviewStore
+      .getState()
+      .markFalsePositive("review-3", ["f1"], "known acceptable behavior");
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/api/v1/reviews/review-3/false-positive",
+      { findingIds: ["f1"], reason: "known acceptable behavior" },
+      { token: "test-token" },
+    );
+    expect(useReviewStore.getState().allReviews[0]?.id).toBe("review-3");
+  });
+
+  it("upserts websocket-driven review updates across all and task slices", () => {
+    useReviewStore.setState({
+      allReviews: [],
+      reviewsByTask: { "task-1": [] },
+    });
+
+    useReviewStore.getState().updateReview({
+      id: "review-live",
+      taskId: "task-1",
+      prUrl: "https://example.com/pr/live",
+      prNumber: 77,
+      layer: 2,
+      status: "pending_human",
+      riskLevel: "high",
+      findings: [],
+      summary: "waiting on human approval",
+      recommendation: "approve",
+      costUsd: 0.7,
+      createdAt: "2026-03-26T08:00:00.000Z",
+      updatedAt: "2026-03-26T08:10:00.000Z",
+      executionMetadata: {
+        decisions: [{ actor: "reviewer", action: "approve", comment: "ok", timestamp: "2026-03-26T08:10:00.000Z" }],
+      },
+    });
+
+    expect(useReviewStore.getState().allReviews[0]).toEqual(
+      expect.objectContaining({
+        id: "review-live",
+        status: "pending_human",
+      }),
+    );
+    expect(useReviewStore.getState().reviewsByTask["task-1"][0]).toEqual(
+      expect.objectContaining({
+        id: "review-live",
+      }),
+    );
   });
 });

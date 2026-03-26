@@ -17,7 +17,7 @@ const review: ReviewDTO = {
   prUrl: "https://github.com/org/repo/pull/1",
   prNumber: 1,
   layer: 2,
-  status: "completed",
+  status: "pending_human",
   riskLevel: "high",
   findings: [{ category: "security", severity: "high", message: "Fix auth guard." }],
   summary: "Guard checks are incomplete.",
@@ -28,13 +28,17 @@ const review: ReviewDTO = {
 };
 
 describe("ReviewDetailPanel", () => {
-  it("shows review metadata and supports approve/reject flows", async () => {
+  it("shows review metadata and supports pending_human actions", async () => {
     const user = userEvent.setup();
     const onApprove = jest.fn();
-    const onReject = jest.fn();
+    const onRequestChanges = jest.fn();
 
     render(
-      <ReviewDetailPanel review={review} onApprove={onApprove} onReject={onReject} />,
+      <ReviewDetailPanel
+        review={review}
+        onApprove={onApprove}
+        onRequestChanges={onRequestChanges}
+      />,
     );
 
     expect(screen.getByText("Layer 2 Review")).toBeInTheDocument();
@@ -50,12 +54,12 @@ describe("ReviewDetailPanel", () => {
     await user.click(screen.getByRole("button", { name: "Confirm Approve" }));
     expect(onApprove).toHaveBeenCalledWith("review-1", "Looks good after fixes");
 
-    await user.click(screen.getByRole("button", { name: "Reject" }));
-    const confirmReject = screen.getByRole("button", { name: "Confirm Reject" });
-    expect(confirmReject).toBeDisabled();
-    await user.type(screen.getByPlaceholderText("Rejection reason..."), "Still missing tests");
-    expect(confirmReject).not.toBeDisabled();
-    await user.click(confirmReject);
-    expect(onReject).toHaveBeenCalledWith("review-1", "Still missing tests");
+    await user.click(screen.getByRole("button", { name: "Request Changes" }));
+    await user.type(
+      screen.getByPlaceholderText("Describe what needs to change..."),
+      "Still missing tests",
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm Request Changes" }));
+    expect(onRequestChanges).toHaveBeenCalledWith("review-1", "Still missing tests");
   });
 });

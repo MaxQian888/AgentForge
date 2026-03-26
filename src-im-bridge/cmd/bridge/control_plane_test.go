@@ -317,6 +317,144 @@ func TestBridgeRuntimeControl_ApplyDeliveryUsesDeferredNativeUpdateForFeishuProg
 	}
 }
 
+func TestBridgeRuntimeControl_StartIncludesWeComCallbackPathInRegistration(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	type counts struct {
+		mu         sync.Mutex
+		lastReg    client.BridgeRegistration
+		registered bool
+	}
+	var seen counts
+	ackCh := make(chan client.ControlDeliveryAck, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/im/bridge/register":
+			var req client.BridgeRegistration
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode register: %v", err)
+			}
+			seen.mu.Lock()
+			seen.lastReg = req
+			seen.registered = true
+			seen.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(client.BridgeInstance{BridgeID: req.BridgeID, Status: "online"})
+		case "/api/v1/im/bridge/heartbeat":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(client.BridgeHeartbeat{BridgeID: "bridge-wecom-1", Status: "online"})
+		case "/api/v1/im/bridge/unregister":
+			w.WriteHeader(http.StatusOK)
+		case "/ws/im-bridge":
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Fatalf("Upgrade error: %v", err)
+			}
+			defer conn.Close()
+			delivery := client.ControlDelivery{
+				Cursor:         1,
+				DeliveryID:     "delivery-1",
+				TargetBridgeID: "bridge-wecom-1",
+				Platform:       "wecom",
+				Kind:           "task.progress",
+				Content:        "hello",
+				TargetChatID:   "chat-1",
+				Timestamp:      "2026-03-26T00:00:00Z",
+			}
+			if err := conn.WriteJSON(delivery); err != nil {
+				t.Fatalf("WriteJSON error: %v", err)
+			}
+			var ack client.ControlDeliveryAck
+			if err := conn.ReadJSON(&ack); err == nil {
+				ackCh <- ack
+			}
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	platform := &wecomRuntimeTestPlatform{}
+	apiClient := client.NewAgentForgeClient(server.URL, "proj-1", "secret").WithPlatform(platform)
+	provider := &activeProvider{
+		Descriptor: providerDescriptor{
+			ID:       "wecom",
+			Metadata: platform.Metadata(),
+		},
+		Platform:      platform,
+		TransportMode: "live",
+	}
+	control := newBridgeRuntimeControl(&config{
+		APIBase:               server.URL,
+		ProjectID:             "proj-1",
+		TransportMode:         "live",
+		HeartbeatInterval:     10 * time.Millisecond,
+		ControlReconnectDelay: 10 * time.Millisecond,
+	}, "bridge-wecom-1", provider, apiClient)
+
+	if err := control.Start(context.Background()); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	select {
+	case <-ackCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ack")
+	}
+	if err := control.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop error: %v", err)
+	}
+
+	seen.mu.Lock()
+	defer seen.mu.Unlock()
+	if !seen.registered {
+		t.Fatal("expected registration to occur")
+	}
+	if len(seen.lastReg.CallbackPaths) != 3 || seen.lastReg.CallbackPaths[2] != "/wecom/callback" {
+		t.Fatalf("callback paths = %+v", seen.lastReg.CallbackPaths)
+	}
+	if seen.lastReg.Capabilities["requires_public_callback"] != true {
+		t.Fatalf("capabilities = %+v", seen.lastReg.Capabilities)
+	}
+}
+
+func TestBridgeRuntimeControl_ApplyDeliveryUsesWeComResponseURLReplyTarget(t *testing.T) {
+	platform := &wecomRuntimeTestPlatform{}
+	control := &bridgeRuntimeControl{
+		cfg: &config{},
+		provider: &activeProvider{
+			Platform: platform,
+			Descriptor: providerDescriptor{
+				ID:       "wecom",
+				Metadata: platform.Metadata(),
+			},
+			TransportMode: "live",
+		},
+	}
+
+	err := control.applyDelivery(context.Background(), &client.ControlDelivery{
+		Platform:     "wecom",
+		TargetChatID: "chat-1",
+		Content:      "queued update",
+		ReplyTarget: &core.ReplyTarget{
+			Platform:       "wecom",
+			ChatID:         "chat-1",
+			SessionWebhook: "https://work.weixin.qq.com/response",
+			UserID:         "zhangsan",
+			UseReply:       true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("applyDelivery error: %v", err)
+	}
+	if len(platform.replies) != 1 || platform.replies[0] != "queued update" {
+		t.Fatalf("replies = %+v", platform.replies)
+	}
+	if len(platform.replyTargets) != 1 || platform.replyTargets[0] == nil || platform.replyTargets[0].SessionWebhook != "https://work.weixin.qq.com/response" {
+		t.Fatalf("reply targets = %+v", platform.replyTargets)
+	}
+}
+
 type runtimeTestPlatform struct {
 	mu           sync.Mutex
 	replies      []string
@@ -456,4 +594,30 @@ func (p *feishuDeferredRuntimeTestPlatform) SendNative(ctx context.Context, chat
 func (p *feishuDeferredRuntimeTestPlatform) ReplyNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
 	p.nativeUpdates = append(p.nativeUpdates, message)
 	return nil
+}
+
+type wecomRuntimeTestPlatform struct {
+	runtimeTestPlatform
+}
+
+func (p *wecomRuntimeTestPlatform) Name() string { return "wecom-live" }
+
+func (p *wecomRuntimeTestPlatform) Metadata() core.PlatformMetadata {
+	return core.PlatformMetadata{
+		Source: "wecom",
+		Capabilities: core.PlatformCapabilities{
+			StructuredSurface:      core.StructuredSurfaceCards,
+			ActionCallbackMode:     core.ActionCallbackWebhook,
+			AsyncUpdateModes:       []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateSessionWebhook},
+			MessageScopes:          []core.MessageScope{core.MessageScopeChat},
+			RequiresPublicCallback: true,
+			SupportsRichMessages:   true,
+			SupportsMentions:       true,
+			SupportsSlashCommands:  true,
+		},
+	}
+}
+
+func (p *wecomRuntimeTestPlatform) CallbackPaths() []string {
+	return []string{"/wecom/callback"}
 }

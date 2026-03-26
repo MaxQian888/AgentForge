@@ -7,6 +7,7 @@ import (
 )
 
 type ReviewFinding struct {
+	ID          string   `json:"id,omitempty"`
 	Category    string   `json:"category"`
 	Subcategory string   `json:"subcategory,omitempty"`
 	Severity    string   `json:"severity"`
@@ -16,6 +17,7 @@ type ReviewFinding struct {
 	Suggestion  string   `json:"suggestion,omitempty"`
 	CWE         string   `json:"cwe,omitempty"`
 	Sources     []string `json:"sources,omitempty"`
+	Dismissed   bool     `json:"dismissed,omitempty"`
 }
 
 type ReviewExecutionKind string
@@ -41,11 +43,20 @@ type ReviewExecutionResult struct {
 	Error       string                `json:"error,omitempty"`
 }
 
+type ReviewDecision struct {
+	Actor     string    `json:"actor"`
+	Action    string    `json:"action"`
+	Comment   string    `json:"comment"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
 type ReviewExecutionMetadata struct {
 	TriggerEvent string                  `json:"triggerEvent,omitempty"`
+	ProjectID    string                  `json:"projectId,omitempty"`
 	ChangedFiles []string                `json:"changedFiles,omitempty"`
 	Dimensions   []string                `json:"dimensions,omitempty"`
 	Results      []ReviewExecutionResult `json:"results,omitempty"`
+	Decisions    []ReviewDecision        `json:"decisions,omitempty"`
 }
 
 type Review struct {
@@ -110,6 +121,7 @@ type ReviewDTO struct {
 
 type TriggerReviewRequest struct {
 	TaskID       string   `json:"taskId"`
+	ProjectID    string   `json:"projectId,omitempty"`
 	PRURL        string   `json:"prUrl" validate:"required"`
 	PRNumber     int      `json:"prNumber"`
 	Trigger      string   `json:"trigger" validate:"required,oneof=agent layer1 manual"`
@@ -120,16 +132,19 @@ type TriggerReviewRequest struct {
 }
 
 type CIReviewRequest struct {
-	TaskID   string          `json:"taskId" validate:"required"`
-	PRURL    string          `json:"prUrl" validate:"required"`
-	CISystem string          `json:"ciSystem"`
-	Status   string          `json:"status"`
-	Findings []ReviewFinding `json:"findings"`
+	TaskID          string          `json:"taskId,omitempty"`
+	PRURL           string          `json:"prUrl" validate:"required"`
+	CISystem        string          `json:"ciSystem"`
+	Status          string          `json:"status"`
+	Findings        []ReviewFinding `json:"findings"`
+	NeedsDeepReview *bool           `json:"needs_deep_review,omitempty"`
+	Reason          string          `json:"reason,omitempty"`
+	Confidence      string          `json:"confidence,omitempty"`
 }
 
 type MarkFalsePositiveRequest struct {
-	FindingIndex int    `json:"findingIndex"`
-	Reason       string `json:"reason" validate:"required"`
+	FindingIDs []string `json:"findingIds" validate:"required,min=1,dive,required"`
+	Reason     string   `json:"reason" validate:"required"`
 }
 
 type ReviewExecutionPlugin struct {
@@ -171,10 +186,18 @@ type RejectReviewRequest struct {
 	Reason  string `json:"reason" validate:"required"`
 }
 
+type RequestChangesReviewRequest struct {
+	Comment string `json:"comment"`
+}
+
 func (r *Review) ToDTO() ReviewDTO {
+	taskID := ""
+	if r.TaskID != uuid.Nil {
+		taskID = r.TaskID.String()
+	}
 	return ReviewDTO{
 		ID:                r.ID.String(),
-		TaskID:            r.TaskID.String(),
+		TaskID:            taskID,
 		PRURL:             r.PRURL,
 		PRNumber:          r.PRNumber,
 		Layer:             r.Layer,
@@ -195,6 +218,7 @@ func CloneReviewExecutionMetadata(metadata *ReviewExecutionMetadata) *ReviewExec
 		return nil
 	}
 	cloned := *metadata
+	cloned.ProjectID = metadata.ProjectID
 	if metadata.ChangedFiles != nil {
 		cloned.ChangedFiles = append([]string(nil), metadata.ChangedFiles...)
 	}
@@ -203,6 +227,9 @@ func CloneReviewExecutionMetadata(metadata *ReviewExecutionMetadata) *ReviewExec
 	}
 	if metadata.Results != nil {
 		cloned.Results = append([]ReviewExecutionResult(nil), metadata.Results...)
+	}
+	if metadata.Decisions != nil {
+		cloned.Decisions = append([]ReviewDecision(nil), metadata.Decisions...)
 	}
 	return &cloned
 }

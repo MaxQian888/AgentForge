@@ -47,3 +47,17 @@ The system SHALL expose budget guardrail decisions as first-class dispatch facts
 - **THEN** the queue roster retains the original admission context for that entry
 - **THEN** the latest budget-blocked reason remains visible in operator-facing queue data
 - **THEN** realtime pool lifecycle events expose that the entry is still queued because of budget guardrails
+
+### Requirement: Budget threshold as automation event source
+The dispatch budget governance system SHALL emit a budget.threshold_reached event when budget consumption crosses configured thresholds.
+
+#### Scenario: Budget threshold event emitted
+- **WHEN** a project's budget consumption crosses 80% of the allocated budget
+- **THEN** the system emits a budget.threshold_reached event with the project ID, current consumption, and threshold percentage
+
+### Requirement: Budget data feeds dashboard widgets
+The dispatch budget governance system SHALL expose budget aggregation data to dashboard widget endpoints.
+
+#### Scenario: Budget consumption widget data
+- **WHEN** a budget_consumption widget requests data
+- **THEN** the budget governance service returns total allocated, total spent, per-agent breakdown, and daily spend trend

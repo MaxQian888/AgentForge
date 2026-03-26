@@ -1,6 +1,6 @@
 /** @jest-environment node */
 
-const path = require("node:path");
+import * as path from "node:path";
 
 describe("debug-go-wasm-plugin runtime envelope", () => {
   const manifestPath = path.join(

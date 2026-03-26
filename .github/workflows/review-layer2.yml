@@ -48,10 +48,13 @@ jobs:
           fi
 
           NEEDS_DEEP=$(jq -r '.needs_deep_review' "${METADATA_FILE}")
+          REASON=$(jq -r '.reason // ""' "${METADATA_FILE}")
+          CONFIDENCE=$(jq -r '.confidence // ""' "${METADATA_FILE}")
           if [[ "${NEEDS_DEEP}" != "true" ]]; then
             echo "Layer 1 did not request deep review; skipping."
             exit 0
           fi
+          echo "Layer 1 requested deep review (reason=${REASON}, confidence=${CONFIDENCE})."
 
           REPOSITORY=$(jq -r '.repository' "${METADATA_FILE}")
           PR_URL=$(jq -r '.pr_url' "${METADATA_FILE}")

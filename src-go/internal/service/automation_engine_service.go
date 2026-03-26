@@ -444,6 +444,9 @@ func (s *AutomationEngineService) writeAutomationLog(ctx context.Context, rule *
 }
 
 func stringValue(value any) string {
+	if value == nil {
+		return ""
+	}
 	return strings.TrimSpace(fmt.Sprint(value))
 }
 

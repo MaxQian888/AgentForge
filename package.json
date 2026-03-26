@@ -28,7 +28,13 @@
     "tauri:dev": "pnpm build:backend:dev && pnpm build:bridge:dev && pnpm tauri dev",
     "tauri:build": "pnpm tauri build",
     "build:desktop": "pnpm build:backend && pnpm build:bridge && pnpm tauri build",
-    "verify:updater-artifacts": "node scripts/validate-updater-artifacts.js"
+    "verify:updater-artifacts": "node scripts/validate-updater-artifacts.js",
+    "prepare": "husky"
+  },
+  "lint-staged": {
+    "*.{js,jsx,ts,tsx,mjs,cjs}": [
+      "pnpm exec eslint --fix --max-warnings=0"
+    ]
   },
   "dependencies": {
     "@blocknote/core": "0.47.3",
@@ -68,9 +74,11 @@
     "@types/react-dom": "^19.2.3",
     "eslint": "^9.39.4",
     "eslint-config-next": "16.0.0",
+    "husky": "^9.1.7",
     "jest": "^30.3.0",
     "jest-environment-jsdom": "^30.3.0",
     "jest-junit": "^16.0.0",
+    "lint-staged": "^16.4.0",
     "shadcn": "^4.1.0",
     "tailwindcss": "^4.2.2",
     "ts-jest": "^29.4.6",

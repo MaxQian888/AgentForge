@@ -170,4 +170,51 @@ describe("useDashboardStore", () => {
       }),
     ]);
   });
+
+  it("loads dashboards and widget data for project dashboards", async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockJsonResponse([
+        {
+          id: "dashboard-1",
+          projectId: "project-1",
+          name: "Sprint Overview",
+          layout: [],
+          createdBy: "user-1",
+          createdAt: "2026-03-20T10:00:00.000Z",
+          updatedAt: "2026-03-20T10:00:00.000Z",
+          widgets: [
+            {
+              id: "widget-1",
+              dashboardId: "dashboard-1",
+              widgetType: "throughput_chart",
+              config: {},
+              position: {},
+              createdAt: "2026-03-20T10:00:00.000Z",
+              updatedAt: "2026-03-20T10:00:00.000Z",
+            },
+          ],
+        },
+      ])
+    );
+
+    await useDashboardStore.getState().fetchDashboards("project-1");
+
+    fetchMock.mockResolvedValueOnce(
+      mockJsonResponse({
+        widgetType: "throughput_chart",
+        points: [{ date: "2026-03-24", count: 3 }],
+      })
+    );
+    const widgetData = await useDashboardStore.getState().fetchWidgetData("project-1", "throughput_chart", {
+      days: 7,
+    });
+
+    expect(useDashboardStore.getState().dashboardsByProject["project-1"]).toHaveLength(1);
+    expect(useDashboardStore.getState().widgetsByDashboard["dashboard-1"]).toHaveLength(1);
+    expect(widgetData).toEqual(
+      expect.objectContaining({
+        widgetType: "throughput_chart",
+      })
+    );
+  });
 });

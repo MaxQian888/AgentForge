@@ -6,8 +6,11 @@ import { useAgentStore } from "./agent-store";
 import { useNotificationStore } from "./notification-store";
 import { useDashboardStore } from "./dashboard-store";
 import { useDocsStore } from "./docs-store";
+import { useEntityLinkStore } from "./entity-link-store";
+import { useReviewStore } from "./review-store";
 import { useSprintStore, type Sprint } from "./sprint-store";
 import { useSchedulerStore } from "./scheduler-store";
+import { useTaskCommentStore } from "./task-comment-store";
 import { useTeamStore, normalizeTeam } from "./team-store";
 import { useWorkflowStore } from "./workflow-store";
 import type { Task } from "./task-store";
@@ -173,6 +176,31 @@ export const useWSStore = create<WSState>()((set) => ({
       useTaskStore.getState().upsertTask(payload.task);
       useDashboardStore.getState().applyTaskUpdate(payload.task);
     });
+
+    const applyReviewEvent = (data: unknown) => {
+      const payload = extractPayload<unknown>(data);
+      if (!payload || typeof payload !== "object") {
+        return;
+      }
+
+      let reviewPayload: unknown = payload;
+      if ("review" in payload && typeof (payload as { review?: unknown }).review === "object") {
+        reviewPayload = (payload as { review?: unknown }).review;
+      }
+      if (!reviewPayload || typeof reviewPayload !== "object") {
+        return;
+      }
+
+      const reviewID = (reviewPayload as { id?: unknown }).id;
+      if (typeof reviewID !== "string" || reviewID.trim() === "") {
+        return;
+      }
+      useReviewStore.getState().updateReview(reviewPayload as import("./review-store").ReviewDTO);
+    };
+
+    client.on("review.completed", applyReviewEvent);
+    client.on("review.pending_human", applyReviewEvent);
+    client.on("review.updated", applyReviewEvent);
 
     const applyAgentEvent = (data: unknown) => {
       const payload = extractPayload<Record<string, unknown>>(data);
@@ -409,6 +437,70 @@ export const useWSStore = create<WSState>()((set) => ({
       if (docsState.projectId && docsState.currentPage) {
         void docsState.fetchVersions(docsState.projectId, docsState.currentPage.id);
       }
+    });
+
+    client.on("link.created", (data) => {
+      const payload = extractPayload<Record<string, unknown>>(data);
+      if (!payload) {
+        return;
+      }
+      useEntityLinkStore.getState().upsertLink({
+        id: String(payload.id ?? ""),
+        projectId: String(payload.projectId ?? ""),
+        sourceType: String(payload.sourceType ?? ""),
+        sourceId: String(payload.sourceId ?? ""),
+        targetType: String(payload.targetType ?? ""),
+        targetId: String(payload.targetId ?? ""),
+        linkType: String(payload.linkType ?? ""),
+        anchorBlockId: typeof payload.anchorBlockId === "string" ? payload.anchorBlockId : null,
+        createdBy: String(payload.createdBy ?? ""),
+        createdAt: String(payload.createdAt ?? new Date().toISOString()),
+        deletedAt: typeof payload.deletedAt === "string" ? payload.deletedAt : null,
+      });
+    });
+
+    client.on("link.deleted", (data) => {
+      const payload = extractPayload<{ id?: string }>(data);
+      if (!payload?.id) {
+        return;
+      }
+      useEntityLinkStore.getState().removeLink(payload.id);
+    });
+
+    client.on("task_comment.created", (data) => {
+      const payload = extractPayload<Record<string, unknown>>(data);
+      if (!payload) {
+        return;
+      }
+      useTaskCommentStore.getState().upsertComment({
+        id: String(payload.id ?? ""),
+        taskId: String(payload.taskId ?? ""),
+        parentCommentId: typeof payload.parentCommentId === "string" ? payload.parentCommentId : null,
+        body: String(payload.body ?? ""),
+        mentions: Array.isArray(payload.mentions) ? payload.mentions.map(String) : [],
+        resolvedAt: typeof payload.resolvedAt === "string" ? payload.resolvedAt : null,
+        createdBy: String(payload.createdBy ?? ""),
+        createdAt: String(payload.createdAt ?? new Date().toISOString()),
+        updatedAt: String(payload.updatedAt ?? new Date().toISOString()),
+        deletedAt: typeof payload.deletedAt === "string" ? payload.deletedAt : null,
+      });
+    });
+
+    client.on("task_comment.resolved", (data) => {
+      const payload = extractPayload<Record<string, unknown>>(data);
+      if (!payload || typeof payload.taskId !== "string" || typeof payload.id !== "string") {
+        return;
+      }
+      const current =
+        useTaskCommentStore.getState().commentsByTask[payload.taskId] ?? [];
+      const match = current.find((comment) => comment.id === payload.id);
+      if (!match) {
+        return;
+      }
+      useTaskCommentStore.getState().upsertComment({
+        ...match,
+        resolvedAt: payload.resolved === true ? new Date().toISOString() : null,
+      });
     });
 
     client.connect();

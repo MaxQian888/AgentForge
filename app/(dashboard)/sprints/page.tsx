@@ -21,6 +21,10 @@ import {
   type SprintStatus,
 } from "@/lib/stores/sprint-store";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
+import { useMilestoneStore } from "@/lib/stores/milestone-store";
+import { MilestoneEditor } from "@/components/milestones/milestone-editor";
+
+const EMPTY_SPRINTS: Sprint[] = [];
 
 function statusVariant(status: SprintStatus): "default" | "secondary" | "outline" {
   switch (status) {
@@ -102,50 +106,51 @@ export default function SprintsPage() {
   } = useSprintStore();
 
   const projectId = selectedProjectId ?? "";
-  const sprints = sprintsByProject[projectId] ?? [];
+  const sprints = useMemo(
+    () => sprintsByProject[projectId] ?? EMPTY_SPRINTS,
+    [projectId, sprintsByProject]
+  );
   const loading = loadingByProject[projectId] ?? false;
   const [selectedSprintId, setSelectedSprintId] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [editSprint, setEditSprint] = useState<Sprint | null>(null);
+  const [milestoneOpen, setMilestoneOpen] = useState(false);
 
   const [formName, setFormName] = useState("");
   const [formStart, setFormStart] = useState("");
   const [formEnd, setFormEnd] = useState("");
   const [formBudget, setFormBudget] = useState("");
   const [formStatus, setFormStatus] = useState<SprintStatus>("planning");
+  const [formMilestoneId, setFormMilestoneId] = useState("");
+  const milestonesByProject = useMilestoneStore((state) => state.milestonesByProject);
+  const fetchMilestones = useMilestoneStore((state) => state.fetchMilestones);
+  const milestones = milestonesByProject[projectId] ?? [];
 
   useEffect(() => {
     if (projectId) {
       void fetchSprints(projectId);
+      void fetchMilestones(projectId);
     }
-  }, [fetchSprints, projectId]);
+  }, [fetchMilestones, fetchSprints, projectId]);
 
-  const selectedMetrics = selectedSprintId
-    ? metricsBySprintId[selectedSprintId]
+  const activeSprint = useMemo(() => sprints.find((s) => s.status === "active"), [sprints]);
+  const effectiveSelectedSprintId = selectedSprintId ?? activeSprint?.id ?? null;
+  const selectedMetrics = effectiveSelectedSprintId
+    ? metricsBySprintId[effectiveSelectedSprintId]
     : null;
 
   useEffect(() => {
-    if (selectedSprintId && projectId) {
-      void fetchSprintMetrics(projectId, selectedSprintId);
+    if (effectiveSelectedSprintId && projectId) {
+      void fetchSprintMetrics(projectId, effectiveSelectedSprintId);
     }
-  }, [fetchSprintMetrics, projectId, selectedSprintId]);
-
-  const activeSprint = useMemo(
-    () => sprints.find((s) => s.status === "active"),
-    [sprints]
-  );
-
-  useEffect(() => {
-    if (activeSprint && !selectedSprintId) {
-      setSelectedSprintId(activeSprint.id);
-    }
-  }, [activeSprint, selectedSprintId]);
+  }, [effectiveSelectedSprintId, fetchSprintMetrics, projectId]);
 
   const openCreate = () => {
     setFormName("");
     setFormStart("");
     setFormEnd("");
     setFormBudget("");
+    setFormMilestoneId("");
     setCreateOpen(true);
   };
 
@@ -154,6 +159,7 @@ export default function SprintsPage() {
     setFormStart(sprint.startDate.slice(0, 10));
     setFormEnd(sprint.endDate.slice(0, 10));
     setFormBudget(sprint.totalBudgetUsd.toString());
+    setFormMilestoneId(sprint.milestoneId ?? "");
     setFormStatus(sprint.status);
     setEditSprint(sprint);
   };
@@ -177,6 +183,7 @@ export default function SprintsPage() {
       endDate: formEnd,
       status: formStatus,
       totalBudgetUsd: parseFloat(formBudget) || 0,
+      milestoneId: formMilestoneId || null,
     });
     setEditSprint(null);
   };
@@ -196,10 +203,15 @@ export default function SprintsPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Sprint Management</h1>
-        <Button type="button" onClick={openCreate}>
-          <Plus className="mr-2 size-4" />
-          New Sprint
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button type="button" variant="outline" onClick={() => setMilestoneOpen(true)}>
+            New Milestone
+          </Button>
+          <Button type="button" onClick={openCreate}>
+            <Plus className="mr-2 size-4" />
+            New Sprint
+          </Button>
+        </div>
       </div>
 
       {loading && (
@@ -277,6 +289,21 @@ export default function SprintsPage() {
               <Label>Budget (USD)</Label>
               <Input type="number" step="0.01" value={formBudget} onChange={(e) => setFormBudget(e.target.value)} />
             </div>
+            <div className="flex flex-col gap-2">
+              <Label>Milestone</Label>
+              <select
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                value={formMilestoneId}
+                onChange={(e) => setFormMilestoneId(e.target.value)}
+              >
+                <option value="">No milestone</option>
+                {milestones.map((milestone) => (
+                  <option key={milestone.id} value={milestone.id}>
+                    {milestone.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
@@ -315,6 +342,21 @@ export default function SprintsPage() {
               <Input type="number" step="0.01" value={formBudget} onChange={(e) => setFormBudget(e.target.value)} />
             </div>
             <div className="flex flex-col gap-2">
+              <Label>Milestone</Label>
+              <select
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                value={formMilestoneId}
+                onChange={(e) => setFormMilestoneId(e.target.value)}
+              >
+                <option value="">No milestone</option>
+                {milestones.map((milestone) => (
+                  <option key={milestone.id} value={milestone.id}>
+                    {milestone.name}
+                  </option>
+                ))}
+              </select>
+            </div>
+            <div className="flex flex-col gap-2">
               <Label>Status</Label>
               <select
                 className="h-10 rounded-md border bg-background px-3 text-sm"
@@ -337,6 +379,12 @@ export default function SprintsPage() {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <MilestoneEditor
+        open={milestoneOpen}
+        onOpenChange={setMilestoneOpen}
+        projectId={projectId}
+      />
     </div>
   );
 }

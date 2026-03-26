@@ -1,6 +1,6 @@
 /** @jest-environment node */
 
-const path = require("node:path");
+import * as path from "node:path";
 
 describe("run-plugin-dev-stack service plan", () => {
   test("builds the minimal Go and Bridge service definitions", () => {

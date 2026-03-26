@@ -15,6 +15,8 @@ export function BlockEditor(props: {
   value: string;
   editable?: boolean;
   commentedBlockIds?: string[];
+  taskCountsByBlock?: Record<string, number>;
+  onCreateTasksFromSelection?: (blockIds: string[]) => void;
   onChange?: (content: string, contentText: string) => void;
 }) {
   return <DynamicBlockEditor {...props} />;

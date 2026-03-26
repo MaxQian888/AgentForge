@@ -5,6 +5,7 @@ import { DragDropContext, type DropResult } from "@hello-pangea/dnd";
 import { Column } from "./column";
 import type { TaskWorkspaceDisplayOptions } from "@/lib/stores/task-workspace-store";
 import type { Task, TaskStatus } from "@/lib/stores/task-store";
+import type { LinkedDocItem } from "@/components/tasks/linked-docs-panel";
 
 const columns: TaskStatus[] = [
   "inbox",
@@ -23,6 +24,7 @@ interface BoardProps {
   tasks: Task[];
   selectedTaskId: string | null;
   displayOptions: TaskWorkspaceDisplayOptions;
+  linkedDocsByTask?: Record<string, LinkedDocItem[]>;
   onTaskClick: (task: Task) => void;
   onTaskStatusChange: (
     taskId: string,
@@ -34,6 +36,7 @@ export function Board({
   tasks,
   selectedTaskId,
   displayOptions,
+  linkedDocsByTask = {},
   onTaskClick,
   onTaskStatusChange,
 }: BoardProps) {
@@ -95,6 +98,7 @@ export function Board({
               tasks={grouped[status]}
               selectedTaskId={selectedTaskId}
               displayOptions={displayOptions}
+              linkedDocsByTask={linkedDocsByTask}
               onTaskClick={onTaskClick}
             />
           ))}

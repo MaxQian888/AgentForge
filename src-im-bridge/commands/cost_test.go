@@ -16,8 +16,11 @@ func TestCostCommand_RepliesWithTextWithoutCardSupport(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("method = %s, want GET", r.Method)
 		}
-		if r.URL.Path != "/api/v1/projects/proj/costs" {
+		if r.URL.Path != "/api/v1/stats/cost" {
 			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if r.URL.RawQuery != "projectId=proj" {
+			t.Fatalf("query = %s", r.URL.RawQuery)
 		}
 
 		w.Header().Set("Content-Type", "application/json")

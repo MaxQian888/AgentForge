@@ -1,11 +1,90 @@
 const recommendTaskAssigneesMock = jest.fn();
 const getTaskDependencyStateMock = jest.fn();
 const normalizePlanningInputMock = jest.fn();
+type DocsStoreMockState = {
+  tree: never[];
+  fetchTree: jest.Mock;
+};
+type EntityLinkStoreMockState = {
+  linksByEntity: Record<string, unknown>;
+  fetchLinks: jest.Mock;
+  createLink: jest.Mock;
+  deleteLink: jest.Mock;
+};
+type TaskCommentStoreMockState = {
+  commentsByTask: Record<string, unknown>;
+  fetchComments: jest.Mock;
+  createComment: jest.Mock;
+  setResolved: jest.Mock;
+};
+type CustomFieldStoreMockState = {
+  definitionsByProject: Record<string, unknown>;
+  valuesByTask: Record<string, unknown>;
+  fetchDefinitions: jest.Mock;
+  fetchTaskValues: jest.Mock;
+};
+type MilestoneStoreMockState = {
+  milestonesByProject: Record<string, unknown>;
+  fetchMilestones: jest.Mock;
+};
 
 jest.mock("@/components/review/task-review-section", () => ({
   TaskReviewSection: ({ taskId }: { taskId: string }) => (
     <div data-testid="task-review-section">{taskId}</div>
   ),
+}));
+
+jest.mock("@/lib/stores/auth-store", () => ({
+  useAuthStore: {
+    getState: () => ({ accessToken: "test-token" }),
+  },
+}));
+
+jest.mock("@/lib/stores/docs-store", () => ({
+  useDocsStore: (selector: (state: DocsStoreMockState) => unknown) =>
+    selector({
+      tree: [],
+      fetchTree: jest.fn(),
+    }),
+  flattenDocsTree: () => [],
+}));
+
+jest.mock("@/lib/stores/entity-link-store", () => ({
+  useEntityLinkStore: (selector: (state: EntityLinkStoreMockState) => unknown) =>
+    selector({
+      linksByEntity: {},
+      fetchLinks: jest.fn(),
+      createLink: jest.fn(),
+      deleteLink: jest.fn(),
+    }),
+}));
+
+jest.mock("@/lib/stores/task-comment-store", () => ({
+  useTaskCommentStore: (selector: (state: TaskCommentStoreMockState) => unknown) =>
+    selector({
+      commentsByTask: {},
+      fetchComments: jest.fn(),
+      createComment: jest.fn(),
+      setResolved: jest.fn(),
+    }),
+}));
+
+jest.mock("@/lib/stores/custom-field-store", () => ({
+  useCustomFieldStore: (selector: (state: CustomFieldStoreMockState) => unknown) =>
+    selector({
+      definitionsByProject: {},
+      valuesByTask: {},
+      fetchDefinitions: jest.fn(),
+      fetchTaskValues: jest.fn(),
+    }),
+}));
+
+jest.mock("@/lib/stores/milestone-store", () => ({
+  useMilestoneStore: (selector: (state: MilestoneStoreMockState) => unknown) =>
+    selector({
+      milestonesByProject: {},
+      fetchMilestones: jest.fn(),
+    }),
 }));
 
 jest.mock("@/lib/tasks/task-assignment", () => ({
@@ -94,9 +173,7 @@ const sprints: Sprint[] = [
 
 function makeTask(overrides: Partial<Task> & { id: string; title: string }): Task {
   return {
-    id: overrides.id,
     projectId: "project-1",
-    title: overrides.title,
     description: "Implement the review dashboard.",
     status: "in_progress",
     priority: "high",
@@ -127,6 +204,8 @@ function makeTask(overrides: Partial<Task> & { id: string; title: string }): Tas
     createdAt: "2026-03-25T07:00:00.000Z",
     updatedAt: "2026-03-25T08:00:00.000Z",
     ...overrides,
+    id: overrides.id,
+    title: overrides.title,
   };
 }
 
@@ -208,6 +287,8 @@ describe("TaskDetailContent", () => {
     expect(screen.getByText("Reason: Awaiting review")).toBeInTheDocument();
     expect(screen.getByText("Branch: agent/task-1")).toBeInTheDocument();
     expect(screen.getByTestId("task-review-section")).toHaveTextContent("task-1");
+    expect(screen.getByTestId("linked-docs-panel")).toBeInTheDocument();
+    expect(screen.getByTestId("task-comments")).toBeInTheDocument();
 
     await user.clear(screen.getByLabelText("Title"));
     await user.type(screen.getByLabelText("Title"), "Build review dashboard");
@@ -231,6 +312,7 @@ describe("TaskDetailContent", () => {
         description: "Implement the review dashboard.",
         priority: "high",
         sprintId: "sprint-1",
+        milestoneId: null,
         blockedBy: ["task-2"],
         plannedStartAt: "2026-03-28T00:00:00.000Z",
         plannedEndAt: "2026-03-29T00:00:00.000Z",
@@ -238,3 +320,10 @@ describe("TaskDetailContent", () => {
     );
   });
 });
+jest.mock("./linked-docs-panel", () => ({
+  LinkedDocsPanel: () => <div data-testid="linked-docs-panel">linked-docs-panel</div>,
+}));
+
+jest.mock("./task-comments", () => ({
+  TaskComments: () => <div data-testid="task-comments">task-comments</div>,
+}));

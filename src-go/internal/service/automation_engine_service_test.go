@@ -100,7 +100,6 @@ func (p *stubAutomationPlugin) Invoke(_ context.Context, pluginID, operation str
 func TestAutomationEngineServiceExecutesActionsAndLogs(t *testing.T) {
 	projectID := uuid.New()
 	taskID := uuid.New()
-	targetID := uuid.New()
 	rule := &model.AutomationRule{
 		ID:         uuid.New(),
 		ProjectID:  projectID,
@@ -108,15 +107,12 @@ func TestAutomationEngineServiceExecutesActionsAndLogs(t *testing.T) {
 		Enabled:    true,
 		EventType:  model.AutomationEventTaskStatusChanged,
 		Conditions: `[{"field":"status","op":"eq","value":"done"}]`,
-		Actions:    `[{"type":"update_field","config":{"field":"priority","value":"critical"}},{"type":"send_notification","config":{"title":"Done","body":"Task finished"}},{"type":"send_im_message","config":{"platform":"slack","channelId":"C1","text":"{{task.title}} done"}},{"type":"invoke_plugin","config":{"pluginId":"plugin.test","operation":"notify","input":{"task":"x"}}}]`,
+		Actions:    `[{"type":"update_field","config":{"field":"priority","value":"critical"}}]`,
 	}
 	logs := &stubAutomationLogRepo{}
-	tasks := &stubAutomationTaskRepo{task: &model.Task{ID: taskID, ProjectID: projectID, Title: "Ship", Status: model.TaskStatusDone, Priority: "high", AssigneeID: &targetID}}
+	tasks := &stubAutomationTaskRepo{task: &model.Task{ID: taskID, ProjectID: projectID, Title: "Ship", Status: model.TaskStatusDone, Priority: "high"}}
 	fields := &stubAutomationFieldRepo{}
-	notifs := &stubAutomationNotifications{}
-	im := &stubAutomationIM{}
-	plugins := &stubAutomationPlugin{}
-	engine := NewAutomationEngineService(&stubAutomationRuleRepo{rules: []*model.AutomationRule{rule}}, logs, tasks, fields, notifs, im, plugins)
+	engine := NewAutomationEngineService(&stubAutomationRuleRepo{rules: []*model.AutomationRule{rule}}, logs, tasks, fields, nil, nil, nil)
 	engine.now = func() time.Time { return time.Date(2026, 3, 27, 0, 0, 0, 0, time.UTC) }
 
 	if err := engine.EvaluateRules(context.Background(), AutomationEvent{
@@ -131,11 +127,46 @@ func TestAutomationEngineServiceExecutesActionsAndLogs(t *testing.T) {
 	if tasks.updated == nil || tasks.updated.Priority == nil || *tasks.updated.Priority != "critical" {
 		t.Fatalf("priority update = %+v", tasks.updated)
 	}
-	if notifs.title != "Done" || im.sent == nil || plugins.pluginID != "plugin.test" {
-		t.Fatalf("actions not executed correctly: notif=%q im=%+v plugin=%s", notifs.title, im.sent, plugins.pluginID)
-	}
 	if len(logs.entries) != 1 || logs.entries[0].Status != model.AutomationLogStatusSuccess {
 		t.Fatalf("logs = %+v", logs.entries)
+	}
+}
+
+func TestAutomationEngineServiceExecutesNotificationIMAndPluginActions(t *testing.T) {
+	projectID := uuid.New()
+	taskID := uuid.New()
+	targetID := uuid.New()
+	rule := &model.AutomationRule{
+		ID:         uuid.New(),
+		ProjectID:  projectID,
+		Enabled:    true,
+		EventType:  model.AutomationEventTaskStatusChanged,
+		Conditions: `[]`,
+		Actions:    `[{"type":"send_notification","config":{"title":"Done","body":"Task finished","targetId":"` + targetID.String() + `"}},{"type":"send_im_message","config":{"platform":"slack","channelId":"C1","text":"{{task.title}} done"}},{"type":"invoke_plugin","config":{"pluginId":"plugin.test","operation":"notify","input":{"task":"x"}}}]`,
+	}
+	logs := &stubAutomationLogRepo{}
+	tasks := &stubAutomationTaskRepo{task: &model.Task{ID: taskID, ProjectID: projectID, Title: "Ship", Status: model.TaskStatusDone}}
+	notifs := &stubAutomationNotifications{}
+	im := &stubAutomationIM{}
+	plugins := &stubAutomationPlugin{}
+	engine := NewAutomationEngineService(&stubAutomationRuleRepo{rules: []*model.AutomationRule{rule}}, logs, tasks, nil, notifs, im, plugins)
+
+	if err := engine.EvaluateRules(context.Background(), AutomationEvent{
+		EventType: model.AutomationEventTaskStatusChanged,
+		ProjectID: projectID,
+		TaskID:    &taskID,
+		Task:      tasks.task,
+	}); err != nil {
+		t.Fatalf("EvaluateRules() error = %v", err)
+	}
+	if notifs.title != "Done" {
+		t.Fatalf("notification title = %q", notifs.title)
+	}
+	if im.sent == nil || im.sent.Text != "Ship done" {
+		t.Fatalf("im send = %+v", im.sent)
+	}
+	if plugins.pluginID != "plugin.test" || plugins.operation != "notify" {
+		t.Fatalf("plugin invoke = %s/%s", plugins.pluginID, plugins.operation)
 	}
 }
 

@@ -40,7 +40,7 @@ export interface BudgetGovernance {
 
 export interface ReviewPolicy {
   autoTriggerOnPR: boolean;
-  requiredLayers: number;
+  requiredLayers: string[];
   minRiskLevelForBlock: string;
   requireManualApproval: boolean;
   enabledPluginDimensions: string[];
@@ -183,8 +183,10 @@ function normalizeReviewPolicy(raw: unknown): ReviewPolicy | undefined {
   const rp = raw as Record<string, unknown>;
   return {
     autoTriggerOnPR: Boolean(rp.autoTriggerOnPR),
-    requiredLayers: typeof rp.requiredLayers === "number" ? rp.requiredLayers : 1,
-    minRiskLevelForBlock: typeof rp.minRiskLevelForBlock === "string" ? rp.minRiskLevelForBlock : "critical",
+    requiredLayers: Array.isArray(rp.requiredLayers)
+      ? rp.requiredLayers.map((item: unknown) => String(item))
+      : [],
+    minRiskLevelForBlock: typeof rp.minRiskLevelForBlock === "string" ? rp.minRiskLevelForBlock : "",
     requireManualApproval: Boolean(rp.requireManualApproval),
     enabledPluginDimensions: Array.isArray(rp.enabledPluginDimensions)
       ? rp.enabledPluginDimensions.map((item: unknown) => String(item))

@@ -6,16 +6,43 @@ import { useAuthStore } from "./auth-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
+export interface ReviewDecision {
+  actor: string;
+  action: string;
+  comment: string;
+  timestamp: string;
+}
+
+export interface ReviewExecutionResult {
+  id: string;
+  kind: string;
+  status: string;
+  displayName?: string;
+  summary?: string;
+  error?: string;
+}
+
+export interface ExecutionMetadata {
+  triggerEvent?: string;
+  projectId?: string;
+  changedFiles?: string[];
+  dimensions?: string[];
+  results?: ReviewExecutionResult[];
+  decisions?: ReviewDecision[];
+}
+
 export interface ReviewFinding {
+  id?: string;
   category: string;
   subcategory?: string;
-  severity: string; // "critical" | "high" | "medium" | "low" | "info"
+  severity: string;
   file?: string;
   line?: number;
   message: string;
   suggestion?: string;
   cwe?: string;
   sources?: string[];
+  dismissed?: boolean;
 }
 
 export interface ReviewDTO {
@@ -24,11 +51,12 @@ export interface ReviewDTO {
   prUrl: string;
   prNumber: number;
   layer: number;
-  status: string; // "pending" | "in_progress" | "completed" | "failed"
-  riskLevel: string; // "critical" | "high" | "medium" | "low"
+  status: string;
+  riskLevel: string;
   findings: ReviewFinding[];
+  executionMetadata?: ExecutionMetadata;
   summary: string;
-  recommendation: string; // "approve" | "request_changes" | "reject"
+  recommendation: string;
   costUsd: number;
   createdAt: string;
   updatedAt: string;
@@ -46,16 +74,39 @@ interface ReviewState {
   }) => Promise<void>;
   fetchReviewsByTask: (taskId: string) => Promise<void>;
   triggerReview: (data: {
-    taskId: string;
+    taskId?: string;
+    projectId?: string;
     prUrl: string;
     trigger: string;
+    diff?: string;
   }) => Promise<void>;
   approveReview: (id: string, comment?: string) => Promise<void>;
-  rejectReview: (
+  rejectReview: (id: string, reason: string, comment?: string) => Promise<void>;
+  requestChanges: (id: string, comment?: string) => Promise<void>;
+  markFalsePositive: (
     id: string,
+    findingIds: string[],
     reason: string,
-    comment?: string
   ) => Promise<void>;
+  updateReview: (review: ReviewDTO) => void;
+}
+
+function normalizeTaskID(taskId: string | undefined): string {
+  const trimmed = (taskId ?? "").trim();
+  if (!trimmed || trimmed === "00000000-0000-0000-0000-000000000000") {
+    return "";
+  }
+  return trimmed;
+}
+
+function upsertReviewList(list: ReviewDTO[], review: ReviewDTO): ReviewDTO[] {
+  const index = list.findIndex((item) => item.id === review.id);
+  if (index === -1) {
+    return [review, ...list];
+  }
+  const next = [...list];
+  next[index] = review;
+  return next;
 }
 
 export const useReviewStore = create<ReviewState>()((set, get) => ({
@@ -93,10 +144,9 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
     set({ loading: true, error: null });
     try {
       const api = createApiClient(API_URL);
-      const { data } = await api.get<ReviewDTO[]>(
-        `/api/v1/tasks/${taskId}/reviews`,
-        { token }
-      );
+      const { data } = await api.get<ReviewDTO[]>(`/api/v1/tasks/${taskId}/reviews`, {
+        token,
+      });
       set({
         reviewsByTask: { ...get().reviewsByTask, [taskId]: data ?? [] },
         error: null,
@@ -130,7 +180,14 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
     set({ loading: true, error: null });
     try {
       const api = createApiClient(API_URL);
-      await api.post(`/api/v1/reviews/${id}/approve`, { comment }, { token });
+      const { data } = await api.post<ReviewDTO>(
+        `/api/v1/reviews/${id}/approve`,
+        { comment },
+        { token },
+      );
+      if (data) {
+        get().updateReview(data);
+      }
     } catch {
       set({ error: "Unable to approve review" });
     } finally {
@@ -145,15 +202,90 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
     set({ loading: true, error: null });
     try {
       const api = createApiClient(API_URL);
-      await api.post(
+      const { data } = await api.post<ReviewDTO>(
         `/api/v1/reviews/${id}/reject`,
         { reason, comment },
-        { token }
+        { token },
       );
+      if (data) {
+        get().updateReview(data);
+      }
     } catch {
       set({ error: "Unable to reject review" });
     } finally {
       set({ loading: false });
     }
+  },
+
+  requestChanges: async (id, comment) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+
+    set({ loading: true, error: null });
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<ReviewDTO>(
+        `/api/v1/reviews/${id}/request-changes`,
+        { comment },
+        { token },
+      );
+      if (data) {
+        get().updateReview(data);
+      }
+    } catch {
+      set({ error: "Unable to request review changes" });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  markFalsePositive: async (id, findingIds, reason) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+
+    set({ loading: true, error: null });
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<ReviewDTO>(
+        `/api/v1/reviews/${id}/false-positive`,
+        { findingIds, reason },
+        { token },
+      );
+      if (data) {
+        get().updateReview(data);
+      }
+    } catch {
+      set({ error: "Unable to mark false positive finding" });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  updateReview: (review) => {
+    set((state) => {
+      const allReviews = upsertReviewList(state.allReviews, review);
+      const reviewsByTask = { ...state.reviewsByTask };
+      const taskID = normalizeTaskID(review.taskId);
+
+      if (taskID) {
+        reviewsByTask[taskID] = upsertReviewList(reviewsByTask[taskID] ?? [], review);
+      } else {
+        Object.keys(reviewsByTask).forEach((key) => {
+          const reviews = reviewsByTask[key];
+          if (!Array.isArray(reviews)) return;
+          const index = reviews.findIndex((item) => item.id === review.id);
+          if (index === -1) return;
+          const next = [...reviews];
+          next[index] = review;
+          reviewsByTask[key] = next;
+        });
+      }
+
+      return {
+        ...state,
+        allReviews,
+        reviewsByTask,
+      };
+    });
   },
 }));

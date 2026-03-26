@@ -30,8 +30,11 @@ jest.mock("@/lib/ws-client", () => {
 import { useAgentStore } from "./agent-store";
 import { useDashboardStore } from "./dashboard-store";
 import { useDocsStore } from "./docs-store";
+import { useEntityLinkStore } from "./entity-link-store";
 import { useNotificationStore } from "./notification-store";
+import { useReviewStore } from "./review-store";
 import { useSchedulerStore } from "./scheduler-store";
+import { useTaskCommentStore } from "./task-comment-store";
 import { useTaskStore } from "./task-store";
 import { useWorkflowStore } from "./workflow-store";
 import { useWSStore } from "./ws-store";
@@ -39,6 +42,13 @@ import { useWSStore } from "./ws-store";
 describe("useWSStore", () => {
   beforeEach(() => {
     useTaskStore.setState({ tasks: [], loading: false, error: null });
+    useReviewStore.setState({
+      reviewsByTask: {},
+      allReviews: [],
+      allReviewsLoading: false,
+      loading: false,
+      error: null,
+    });
     useAgentStore.setState({
       agents: [],
       agentOutputs: new Map(),
@@ -46,6 +56,8 @@ describe("useWSStore", () => {
       loading: false,
     });
     useNotificationStore.setState({ notifications: [], unreadCount: 0 });
+    useEntityLinkStore.setState({ linksByEntity: {}, loading: false, error: null });
+    useTaskCommentStore.setState({ commentsByTask: {}, loading: false, error: null });
     useDocsStore.setState({
       projectId: "project-1",
       tree: [],
@@ -369,6 +381,73 @@ describe("useWSStore", () => {
     ]);
   });
 
+  it("hydrates review stores from websocket review events", () => {
+    useReviewStore.setState({
+      reviewsByTask: { "task-1": [] },
+      allReviews: [],
+      allReviewsLoading: false,
+      loading: false,
+      error: null,
+    });
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+    expect(client).toBeDefined();
+
+    client?.emit("review.pending_human", {
+      type: "review.pending_human",
+      payload: {
+        id: "review-1",
+        taskId: "task-1",
+        prUrl: "https://example.com/pr/1",
+        prNumber: 1,
+        layer: 2,
+        status: "pending_human",
+        riskLevel: "high",
+        findings: [],
+        summary: "needs approval",
+        recommendation: "approve",
+        costUsd: 0.3,
+        createdAt: "2026-03-26T10:00:00.000Z",
+        updatedAt: "2026-03-26T10:05:00.000Z",
+      },
+    });
+
+    client?.emit("review.updated", {
+      type: "review.updated",
+      payload: {
+        id: "review-1",
+        taskId: "task-1",
+        prUrl: "https://example.com/pr/1",
+        prNumber: 1,
+        layer: 2,
+        status: "completed",
+        riskLevel: "medium",
+        findings: [],
+        summary: "approved by human",
+        recommendation: "approve",
+        costUsd: 0.3,
+        createdAt: "2026-03-26T10:00:00.000Z",
+        updatedAt: "2026-03-26T10:07:00.000Z",
+      },
+    });
+
+    expect(useReviewStore.getState().allReviews[0]).toEqual(
+      expect.objectContaining({
+        id: "review-1",
+        status: "completed",
+      }),
+    );
+    expect(useReviewStore.getState().reviewsByTask["task-1"][0]).toEqual(
+      expect.objectContaining({
+        id: "review-1",
+      }),
+    );
+  });
+
   it("hydrates scheduler job updates and run history from websocket envelopes", () => {
     useWSStore.getState().connect("ws://localhost:7777/ws", "token");
 
@@ -473,6 +552,53 @@ describe("useWSStore", () => {
     expect(fetchPage).toHaveBeenCalledWith("project-1", "page-1");
     expect(refreshComments).toHaveBeenCalled();
     expect(fetchVersions).toHaveBeenCalledWith("project-1", "page-1");
+  });
+
+  it("updates link and task-comment stores from websocket envelopes", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+    expect(client).toBeDefined();
+
+    client?.emit("link.created", {
+      type: "link.created",
+      projectId: "project-1",
+      payload: {
+        id: "link-1",
+        projectId: "project-1",
+        sourceType: "task",
+        sourceId: "task-1",
+        targetType: "wiki_page",
+        targetId: "page-1",
+        linkType: "requirement",
+        createdBy: "user-1",
+        createdAt: "2026-03-26T10:00:00.000Z",
+      },
+    });
+
+    client?.emit("task_comment.created", {
+      type: "task_comment.created",
+      projectId: "project-1",
+      payload: {
+        id: "comment-1",
+        taskId: "task-1",
+        body: "hello",
+        mentions: [],
+        createdBy: "user-1",
+        createdAt: "2026-03-26T10:01:00.000Z",
+        updatedAt: "2026-03-26T10:01:00.000Z",
+      },
+    });
+
+    expect(useEntityLinkStore.getState().linksByEntity["task:task-1"]).toEqual([
+      expect.objectContaining({ id: "link-1" }),
+    ]);
+    expect(useTaskCommentStore.getState().commentsByTask["task-1"]).toEqual([
+      expect.objectContaining({ id: "comment-1", body: "hello" }),
+    ]);
   });
 
   it("hydrates explicit agent pool summary updates from websocket envelopes", () => {

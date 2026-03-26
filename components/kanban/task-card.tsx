@@ -1,10 +1,21 @@
 "use client";
 
 import { Draggable } from "@hello-pangea/dnd";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import {
+  Popover,
+  PopoverContent,
+  PopoverDescription,
+  PopoverHeader,
+  PopoverTitle,
+  PopoverTrigger,
+} from "@/components/ui/popover";
 import type { Task, TaskPriority } from "@/lib/stores/task-store";
+import type { LinkedDocItem } from "@/components/tasks/linked-docs-panel";
+import { buildDocsHref } from "@/lib/route-hrefs";
 
 const priorityColors: Record<TaskPriority, string> = {
   urgent: "bg-red-500/15 text-red-700 dark:text-red-400",
@@ -49,6 +60,7 @@ interface TaskCardProps {
   isSelected: boolean;
   density: "comfortable" | "compact";
   showDescription: boolean;
+  linkedDocs?: LinkedDocItem[];
   onClick: () => void;
 }
 
@@ -58,8 +70,11 @@ export function TaskCard({
   isSelected,
   density,
   showDescription,
+  linkedDocs = [],
   onClick,
 }: TaskCardProps) {
+  const previewDoc = linkedDocs[0];
+
   return (
     <Draggable draggableId={task.id} index={index}>
       {(provided, snapshot) => (
@@ -106,6 +121,43 @@ export function TaskCard({
               {task.priority}
             </Badge>
             <div className="flex items-center gap-2">
+              {previewDoc ? (
+                <Popover>
+                  <PopoverTrigger asChild>
+                    <button
+                      type="button"
+                      aria-label={`Show linked docs for ${task.title}`}
+                      className="rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/40"
+                      onClick={(event) => event.stopPropagation()}
+                    >
+                      Docs {linkedDocs.length}
+                    </button>
+                  </PopoverTrigger>
+                  <PopoverContent
+                    onClick={(event) => event.stopPropagation()}
+                    onMouseDown={(event) => event.stopPropagation()}
+                  >
+                    <PopoverHeader>
+                      <PopoverTitle>{previewDoc.title}</PopoverTitle>
+                      <PopoverDescription>{previewDoc.linkType}</PopoverDescription>
+                    </PopoverHeader>
+                    {previewDoc.preview ? (
+                      <div className="mt-3 whitespace-pre-wrap text-xs text-muted-foreground">
+                        {previewDoc.preview.split("\n").slice(0, 3).join("\n")}
+                      </div>
+                    ) : null}
+                    <div className="mt-3">
+                      <Link
+                        href={buildDocsHref(previewDoc.pageId)}
+                        className="text-xs font-medium text-primary hover:underline"
+                        onClick={(event) => event.stopPropagation()}
+                      >
+                        View
+                      </Link>
+                    </div>
+                  </PopoverContent>
+                </Popover>
+              ) : null}
               {task.cost != null && (
                 <span className="text-xs text-muted-foreground">
                   ${task.cost.toFixed(2)}

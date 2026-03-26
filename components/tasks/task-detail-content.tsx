@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -16,18 +17,37 @@ import { Separator } from "@/components/ui/separator";
 import { Bot, Network } from "lucide-react";
 import { TaskReviewSection } from "@/components/review/task-review-section";
 import { StartTeamDialog } from "@/components/team/start-team-dialog";
+import { FieldValueCell } from "@/components/fields/field-value-cell";
+import { DocLinkPicker } from "./doc-link-picker";
+import { LinkedDocsPanel, type LinkedDocItem } from "./linked-docs-panel";
+import { TaskComments } from "./task-comments";
 import { recommendTaskAssignees } from "@/lib/tasks/task-assignment";
 import { getTaskDependencyState } from "@/lib/tasks/task-dependencies";
 import { normalizePlanningInput } from "@/lib/tasks/task-planning";
+import { createApiClient } from "@/lib/api-client";
+import { BacklinksPanel, type BacklinkItem } from "@/components/shared/backlinks-panel";
 import type { TeamMember } from "@/lib/dashboard/summary";
 import type { Agent } from "@/lib/stores/agent-store";
+import { flattenDocsTree, useDocsStore } from "@/lib/stores/docs-store";
+import { useEntityLinkStore } from "@/lib/stores/entity-link-store";
+import { useAuthStore } from "@/lib/stores/auth-store";
+import { useCustomFieldStore } from "@/lib/stores/custom-field-store";
+import { useMilestoneStore } from "@/lib/stores/milestone-store";
+import { buildDocsHref } from "@/lib/route-hrefs";
 import type { Sprint } from "@/lib/stores/sprint-store";
+import { useTaskCommentStore } from "@/lib/stores/task-comment-store";
 import type {
   Task,
   TaskDecompositionResult,
   TaskPriority,
   TaskStatus,
 } from "@/lib/stores/task-store";
+
+const EMPTY_LINKS: LinkedDocItem[] = [];
+const EMPTY_TASK_COMMENTS: import("@/lib/stores/task-comment-store").TaskComment[] = [];
+const EMPTY_CUSTOM_FIELDS: import("@/lib/stores/custom-field-store").CustomFieldDefinition[] = [];
+const EMPTY_CUSTOM_FIELD_VALUES: import("@/lib/stores/custom-field-store").CustomFieldValue[] = [];
+const EMPTY_MILESTONES: import("@/lib/stores/milestone-store").Milestone[] = [];
 
 const statuses: TaskStatus[] = [
   "inbox",
@@ -142,6 +162,20 @@ export function TaskDetailContent({
   onTaskDecompose,
   onSpawnAgent,
 }: TaskDetailContentProps) {
+  const docsTree = useDocsStore((state) => state.tree);
+  const fetchDocsTree = useDocsStore((state) => state.fetchTree);
+  const entityLinks = useEntityLinkStore(
+    (state) => state.linksByEntity[`task:${task.id}`] ?? EMPTY_LINKS,
+  );
+  const fetchEntityLinks = useEntityLinkStore((state) => state.fetchLinks);
+  const createEntityLink = useEntityLinkStore((state) => state.createLink);
+  const deleteEntityLink = useEntityLinkStore((state) => state.deleteLink);
+  const taskComments = useTaskCommentStore(
+    (state) => state.commentsByTask[task.id] ?? EMPTY_TASK_COMMENTS,
+  );
+  const fetchTaskComments = useTaskCommentStore((state) => state.fetchComments);
+  const createTaskComment = useTaskCommentStore((state) => state.createComment);
+  const setTaskCommentResolved = useTaskCommentStore((state) => state.setResolved);
   const initialDraft = getTaskDraft(task);
   const [title, setTitle] = useState(initialDraft.title);
   const [description, setDescription] = useState(initialDraft.description);
@@ -157,6 +191,8 @@ export function TaskDetailContent({
   const [isDecomposing, setIsDecomposing] = useState(false);
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
   const [isSpawningAgent, setIsSpawningAgent] = useState(false);
+  const [docPickerOpen, setDocPickerOpen] = useState(false);
+  const [linkedDocs, setLinkedDocs] = useState<LinkedDocItem[]>([]);
   const recommendations = useMemo(
     () => recommendTaskAssignees(task, members, tasks, agents),
     [agents, members, task, tasks]
@@ -200,9 +236,28 @@ export function TaskDetailContent({
   const [manualAssigneeId, setManualAssigneeId] = useState(
     task.assigneeId ?? recommendations[0]?.member.id ?? ""
   );
+  const definitionsByProject = useCustomFieldStore((state) => state.definitionsByProject);
+  const valuesByTaskMap = useCustomFieldStore((state) => state.valuesByTask);
+  const fetchCustomFieldDefinitions = useCustomFieldStore((state) => state.fetchDefinitions);
+  const fetchCustomFieldValues = useCustomFieldStore((state) => state.fetchTaskValues);
+  const milestonesByProject = useMilestoneStore((state) => state.milestonesByProject);
+  const fetchMilestones = useMilestoneStore((state) => state.fetchMilestones);
   const [assigningMemberId, setAssigningMemberId] = useState<string | null>(null);
+  const [milestoneId, setMilestoneId] = useState(task.milestoneId ?? "");
   const budgetRatio =
     task.budgetUsd > 0 ? Math.round((task.spentUsd / task.budgetUsd) * 100) : null;
+  const customFields = useMemo(
+    () => definitionsByProject[task.projectId] ?? EMPTY_CUSTOM_FIELDS,
+    [definitionsByProject, task.projectId]
+  );
+  const customFieldValues = useMemo(
+    () => valuesByTaskMap[task.id] ?? EMPTY_CUSTOM_FIELD_VALUES,
+    [task.id, valuesByTaskMap]
+  );
+  const milestones = useMemo(
+    () => milestonesByProject[task.projectId] ?? EMPTY_MILESTONES,
+    [milestonesByProject, task.projectId]
+  );
 
   useEffect(() => {
     setManualAssigneeId(task.assigneeId ?? recommendations[0]?.member.id ?? "");
@@ -217,11 +272,96 @@ export function TaskDetailContent({
   }, [task.id, task.sprintId]);
 
   useEffect(() => {
+    setMilestoneId(task.milestoneId ?? "");
+  }, [task.id, task.milestoneId]);
+
+  useEffect(() => {
     setDecompositionSummary(null);
     setDecompositionError(null);
     setGeneratedSubtasks([]);
     setIsDecomposing(false);
   }, [task.id]);
+
+  useEffect(() => {
+    void fetchCustomFieldDefinitions(task.projectId);
+    void fetchCustomFieldValues(task.projectId, task.id);
+    void fetchMilestones(task.projectId);
+  }, [fetchCustomFieldDefinitions, fetchCustomFieldValues, fetchMilestones, task.id, task.projectId]);
+
+  useEffect(() => {
+    void fetchEntityLinks(task.projectId, "task", task.id);
+    void fetchTaskComments(task.projectId, task.id);
+    void fetchDocsTree(task.projectId);
+  }, [fetchDocsTree, fetchEntityLinks, fetchTaskComments, task.id, task.projectId]);
+
+  useEffect(() => {
+    let cancelled = false;
+
+    const hydrateLinkedDocs = async () => {
+      const token = useAuthStore.getState().accessToken;
+      if (!token) {
+        setLinkedDocs([]);
+        return;
+      }
+      const api = createApiClient(
+        process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777",
+      );
+      const nextDocs: LinkedDocItem[] = [];
+      for (const link of entityLinks) {
+        if (link.targetType !== "wiki_page") {
+          continue;
+        }
+        try {
+          const { data } = await api.get<Record<string, unknown>>(
+            `/api/v1/projects/${task.projectId}/wiki/pages/${link.targetId}`,
+            { token },
+          );
+          const content = String(data.content ?? "[]");
+          nextDocs.push({
+            id: link.id,
+            pageId: link.targetId,
+            title: String(data.title ?? link.targetId),
+            linkType: link.linkType,
+            updatedAt: String(data.updatedAt ?? new Date().toISOString()),
+            preview: content.slice(0, 180),
+          });
+        } catch {
+          nextDocs.push({
+            id: link.id,
+            pageId: link.targetId,
+            title: link.targetId,
+            linkType: link.linkType,
+            updatedAt: new Date().toISOString(),
+          });
+        }
+      }
+      if (!cancelled) {
+        setLinkedDocs(nextDocs);
+      }
+    };
+
+    void hydrateLinkedDocs();
+    return () => {
+      cancelled = true;
+    };
+  }, [entityLinks, task.projectId]);
+  const backlinks = useMemo<BacklinkItem[]>(
+    () =>
+      entityLinks
+        .filter(
+          (link) =>
+            link.linkType === "mention" &&
+            link.targetType === "task" &&
+            link.targetId === task.id,
+        )
+        .map((link) => ({
+          linkId: link.id,
+          entityId: link.sourceId,
+          entityType: link.sourceType,
+          title: link.sourceId,
+        })),
+    [entityLinks, task.id],
+  );
 
   const handleSave = async () => {
     const planning = normalizePlanningInput({
@@ -240,6 +380,7 @@ export function TaskDetailContent({
       description,
       priority,
       sprintId: sprintId || null,
+      milestoneId: milestoneId || null,
       blockedBy,
       ...(planning.kind === "scheduled"
         ? {
@@ -368,6 +509,23 @@ export function TaskDetailContent({
           {sprints.map((sprint) => (
             <option key={sprint.id} value={sprint.id}>
               {sprint.name}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      <div className="flex flex-col gap-2">
+        <Label htmlFor={`task-detail-milestone-${task.id}`}>Milestone</Label>
+        <select
+          id={`task-detail-milestone-${task.id}`}
+          className="h-10 rounded-md border bg-background px-3 text-sm"
+          value={milestoneId}
+          onChange={(event) => setMilestoneId(event.target.value)}
+        >
+          <option value="">No milestone</option>
+          {milestones.map((milestone) => (
+            <option key={milestone.id} value={milestone.id}>
+              {milestone.name}
             </option>
           ))}
         </select>
@@ -567,6 +725,11 @@ export function TaskDetailContent({
         ) : (
           <Badge variant="outline">Backlog</Badge>
         )}
+        {task.milestoneId ? (
+          <Badge variant="outline">
+            Milestone: {milestones.find((milestone) => milestone.id === task.milestoneId)?.name ?? task.milestoneId}
+          </Badge>
+        ) : null}
         {budgetRatio != null ? (
           <Badge variant={budgetRatio >= 100 ? "destructive" : "secondary"}>
             Usage: {budgetRatio}%
@@ -601,6 +764,18 @@ export function TaskDetailContent({
           ) : null}
         </div>
       ) : null}
+
+      <LinkedDocsPanel
+        projectId={task.projectId}
+        taskId={task.id}
+        docs={linkedDocs}
+        onAddLink={() => setDocPickerOpen(true)}
+        onRemoveLink={(linkId) =>
+          void deleteEntityLink(task.projectId, "task", task.id, linkId)
+        }
+      />
+
+      <BacklinksPanel items={backlinks} />
 
       {dependencyState.blockers.length > 0 || dependencyState.blockedTasks.length > 0 ? (
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
@@ -664,6 +839,46 @@ export function TaskDetailContent({
         </div>
       ) : null}
 
+      {customFields.length > 0 ? (
+        <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
+          <div className="font-medium">Custom Properties</div>
+          <div className="mt-3 grid gap-3">
+            {customFields.map((field) => (
+              <div key={field.id} className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-3">
+                <Label>{field.name}</Label>
+                <FieldValueCell
+                  projectId={task.projectId}
+                  taskId={task.id}
+                  field={field}
+                  value={customFieldValues.find((item) => item.fieldDefId === field.id) ?? null}
+                />
+              </div>
+            ))}
+          </div>
+        </div>
+      ) : null}
+
+      {linkedDocs
+        .filter((doc) => doc.linkType === "requirement" || doc.linkType === "design")
+        .map((doc) => (
+          <div
+            key={`preview-${doc.id}`}
+            className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm"
+          >
+            <div className="flex items-center justify-between gap-2">
+              <div className="font-medium">Doc Preview: {doc.title}</div>
+              <Button asChild type="button" size="sm" variant="ghost">
+                <Link href={buildDocsHref(doc.pageId)}>View full page</Link>
+              </Button>
+            </div>
+            {doc.preview ? (
+              <div className="mt-2 rounded bg-background px-2 py-2 text-xs text-muted-foreground">
+                {doc.preview}
+              </div>
+            ) : null}
+          </div>
+        ))}
+
       <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
@@ -725,6 +940,34 @@ export function TaskDetailContent({
 
       <TaskReviewSection taskId={task.id} />
 
+      <TaskComments
+        comments={taskComments}
+        mentionSuggestions={members.map((member) => member.name.toLowerCase())}
+        onCreateComment={(body) =>
+          createTaskComment({
+            projectId: task.projectId,
+            taskId: task.id,
+            body,
+          })
+        }
+        onResolveComment={(commentId) =>
+          void setTaskCommentResolved({
+            projectId: task.projectId,
+            taskId: task.id,
+            commentId,
+            resolved: true,
+          })
+        }
+        onReopenComment={(commentId) =>
+          void setTaskCommentResolved({
+            projectId: task.projectId,
+            taskId: task.id,
+            commentId,
+            resolved: false,
+          })
+        }
+      />
+
       {task.assigneeId &&
         (task.status === "assigned" || task.status === "in_progress") ? (
         <div className="flex flex-wrap gap-2">
@@ -770,6 +1013,27 @@ export function TaskDetailContent({
       >
         Save Changes
       </Button>
+
+      <DocLinkPicker
+        open={docPickerOpen}
+        onOpenChange={setDocPickerOpen}
+        docs={flattenDocsTree(docsTree).map((doc) => ({
+          id: doc.id,
+          title: doc.title,
+          path: doc.path,
+        }))}
+        onPick={(pageId) => {
+          void createEntityLink({
+            projectId: task.projectId,
+            sourceType: "task",
+            sourceId: task.id,
+            targetType: "wiki_page",
+            targetId: pageId,
+            linkType: "requirement",
+          });
+          setDocPickerOpen(false);
+        }}
+      />
     </div>
   );
 }

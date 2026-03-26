@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -28,6 +29,10 @@ type WorktreeInventoryManager interface {
 
 type BridgeHealthChecker interface {
 	Health(ctx context.Context) error
+}
+
+type AutomationDueDateChecker interface {
+	CheckDueDateApproaching(ctx context.Context, threshold time.Duration) error
 }
 
 type CostReconcileProjectRepository interface {
@@ -160,6 +165,25 @@ func NewBridgeHealthReconcileHandler(health BridgeHealthChecker) Handler {
 		payload, _ := json.Marshal(map[string]bool{"healthy": true})
 		return &RunResult{
 			Summary: "bridge health check passed",
+			Metrics: string(payload),
+		}, nil
+	}
+}
+
+func NewAutomationDueDateDetectorHandler(checker AutomationDueDateChecker, threshold time.Duration) Handler {
+	return func(ctx context.Context, _ *model.ScheduledJob, _ *model.ScheduledJobRun) (*RunResult, error) {
+		if checker == nil {
+			return nil, fmt.Errorf("automation due date checker is required")
+		}
+		if threshold <= 0 {
+			threshold = 24 * time.Hour
+		}
+		if err := checker.CheckDueDateApproaching(ctx, threshold); err != nil {
+			return nil, err
+		}
+		payload, _ := json.Marshal(map[string]any{"thresholdHours": int(threshold.Hours())})
+		return &RunResult{
+			Summary: fmt.Sprintf("evaluated due-date automations within %d hours", int(threshold.Hours())),
 			Metrics: string(payload),
 		}, nil
 	}

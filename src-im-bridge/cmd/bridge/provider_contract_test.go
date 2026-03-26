@@ -128,10 +128,16 @@ func TestSelectProvider_RejectsUnsupportedTransportMode(t *testing.T) {
 	}
 }
 
-func TestSelectProvider_RejectsPlannedProvider(t *testing.T) {
-	_, err := selectProvider(&config{Platform: "wecom", TransportMode: transportModeStub})
-	if err == nil || !strings.Contains(err.Error(), "planned but not yet runnable") {
-		t.Fatalf("error = %v", err)
+func TestSelectProvider_ConstructsWeComStubPlatform(t *testing.T) {
+	provider, err := selectProvider(&config{Platform: "wecom", TransportMode: transportModeStub, TestPort: "0"})
+	if err != nil {
+		t.Fatalf("selectProvider error: %v", err)
+	}
+	if provider == nil || provider.Platform == nil {
+		t.Fatalf("provider = %+v", provider)
+	}
+	if provider.Source() != "wecom" {
+		t.Fatalf("source = %q, want wecom", provider.Source())
 	}
 }
 

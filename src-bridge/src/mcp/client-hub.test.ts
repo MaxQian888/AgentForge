@@ -1,7 +1,48 @@
 import { afterEach, describe, expect, test } from "bun:test";
 import { MCPClientHub } from "./client-hub.js";
+import type { MCPClientEntry } from "./types.js";
+import type { Client } from "@modelcontextprotocol/sdk/client/index.js";
+import type { Transport } from "@modelcontextprotocol/sdk/shared/transport.js";
+import type { Tool, Resource, Prompt } from "@modelcontextprotocol/sdk/types.js";
 
 let hub: MCPClientHub | undefined;
+
+function createMockTransport(): MCPClientEntry["transport"] {
+  return {
+    start: async () => {},
+    send: async () => {},
+    close: async () => {},
+  } as unknown as Transport;
+}
+
+function createMockClient(overrides: Partial<MCPClientEntry["client"]> = {}): MCPClientEntry["client"] {
+  return {
+    close: async () => {},
+    listTools: async () => ({ tools: [] as Tool[] }),
+    listResources: async () => ({ resources: [] as Resource[] }),
+    listPrompts: async () => ({ prompts: [] as Prompt[] }),
+    callTool: async () => ({ content: [] }),
+    readResource: async () => ({ contents: [] }),
+    getPrompt: async () => ({ messages: [] }),
+    ...overrides,
+  } as unknown as Client;
+}
+
+function createTool(name: string, description: string): Tool {
+  return {
+    name,
+    description,
+    inputSchema: { type: "object", properties: {} },
+  } as Tool;
+}
+
+function createResource(uri: string, name: string): Resource {
+  return { uri, name } as Resource;
+}
+
+function createPrompt(name: string, description: string): Prompt {
+  return { name, description } as Prompt;
+}
 
 afterEach(async () => {
   if (hub) {
@@ -57,14 +98,16 @@ describe("MCPClientHub", () => {
   test("markDegraded updates the entry state", async () => {
     hub = new MCPClientHub();
     // Manually inject an entry for testing
-    const clients = (hub as any).clients;
+    const clients = (hub as unknown as { clients: Map<string, MCPClientEntry> }).clients;
     clients.set("test-plugin", {
-      client: {},
-      transport: {},
+      client: createMockClient(),
+      transport: createMockTransport(),
       config: { pluginId: "test-plugin", transport: "stdio" },
       state: "active",
       connectedAt: Date.now(),
       tools: [],
+      resources: [],
+      prompts: [],
     });
 
     hub.markDegraded("test-plugin", "process crashed");
@@ -75,26 +118,30 @@ describe("MCPClientHub", () => {
 
   test("discoverAllTools aggregates tools from active servers", () => {
     hub = new MCPClientHub();
-    const clients = (hub as any).clients;
+    const clients = (hub as unknown as { clients: Map<string, MCPClientEntry> }).clients;
 
     clients.set("plugin-a", {
-      client: {},
-      transport: {},
+      client: createMockClient(),
+      transport: createMockTransport(),
       config: { pluginId: "plugin-a", transport: "stdio" },
       state: "active",
       connectedAt: Date.now(),
       tools: [
-        { name: "tool-1", description: "desc 1", inputSchema: {} },
-        { name: "tool-2", description: "desc 2", inputSchema: {} },
+        createTool("tool-1", "desc 1"),
+        createTool("tool-2", "desc 2"),
       ],
+      resources: [],
+      prompts: [],
     });
     clients.set("plugin-b", {
-      client: {},
-      transport: {},
+      client: createMockClient(),
+      transport: createMockTransport(),
       config: { pluginId: "plugin-b", transport: "http" },
       state: "degraded", // Not active — should be excluded
       connectedAt: Date.now(),
-      tools: [{ name: "tool-3", description: "desc 3", inputSchema: {} }],
+      tools: [createTool("tool-3", "desc 3")],
+      resources: [],
+      prompts: [],
     });
 
     const all = hub.discoverAllTools();
@@ -106,24 +153,28 @@ describe("MCPClientHub", () => {
 
   test("getAllServerStatuses returns statuses for all connected servers", () => {
     hub = new MCPClientHub();
-    const clients = (hub as any).clients;
+    const clients = (hub as unknown as { clients: Map<string, MCPClientEntry> }).clients;
 
     clients.set("s1", {
-      client: {},
-      transport: {},
+      client: createMockClient(),
+      transport: createMockTransport(),
       config: { pluginId: "s1", transport: "stdio" },
       state: "active",
       connectedAt: Date.now() - 5000,
-      tools: [{ name: "t1", inputSchema: {} }],
+      tools: [createTool("t1", "desc")],
+      resources: [],
+      prompts: [],
       pid: 1234,
     });
     clients.set("s2", {
-      client: {},
-      transport: {},
+      client: createMockClient(),
+      transport: createMockTransport(),
       config: { pluginId: "s2", transport: "http" },
       state: "connecting",
       connectedAt: Date.now(),
       tools: [],
+      resources: [],
+      prompts: [],
     });
 
     const statuses = hub.getAllServerStatuses();
@@ -137,21 +188,21 @@ describe("MCPClientHub", () => {
 
   test("refreshCapabilitySurface returns tools, resources, and prompts for an active plugin", async () => {
     hub = new MCPClientHub();
-    const clients = (hub as any).clients;
+    const clients = (hub as unknown as { clients: Map<string, MCPClientEntry> }).clients;
 
     clients.set("plugin-a", {
-      client: {
+      client: createMockClient({
         listTools: async () => ({
-          tools: [{ name: "tool-1", description: "desc 1", inputSchema: {} }],
+          tools: [createTool("tool-1", "desc 1")],
         }),
         listResources: async () => ({
-          resources: [{ uri: "file://guide.md", name: "guide.md" }],
+          resources: [createResource("file://guide.md", "guide.md")],
         }),
         listPrompts: async () => ({
-          prompts: [{ name: "planner-template", description: "Plan work" }],
+          prompts: [createPrompt("planner-template", "Plan work")],
         }),
-      },
-      transport: {},
+      }),
+      transport: createMockTransport(),
       config: { pluginId: "plugin-a", transport: "stdio" },
       state: "active",
       connectedAt: Date.now(),
@@ -170,16 +221,18 @@ describe("MCPClientHub", () => {
 
   test("dispose clears all connections", async () => {
     hub = new MCPClientHub();
-    const clients = (hub as any).clients;
+    const clients = (hub as unknown as { clients: Map<string, MCPClientEntry> }).clients;
     let closeCalled = false;
 
     clients.set("s1", {
-      client: { close: async () => { closeCalled = true; } },
-      transport: {},
+      client: createMockClient({ close: async () => { closeCalled = true; } }),
+      transport: createMockTransport(),
       config: { pluginId: "s1", transport: "stdio" },
       state: "active",
       connectedAt: Date.now(),
       tools: [],
+      resources: [],
+      prompts: [],
     });
 
     await hub.dispose();

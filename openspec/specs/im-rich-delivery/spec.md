@@ -2,6 +2,7 @@
 
 ## Purpose
 Define the canonical typed outbound IM delivery contract so text, structured, and provider-native payloads survive compatibility HTTP, control-plane queueing, replay, and explicit fallback reporting consistently.
+
 ## Requirements
 ### Requirement: Outbound IM deliveries SHALL use a canonical typed envelope
 The system SHALL represent outbound IM delivery through a canonical typed envelope instead of a text-only payload. That envelope MUST be able to carry plain text, structured content, provider-native content, reply-target information, delivery kind, and operator-visible fallback metadata so the same outbound message semantics survive direct notify, compatibility HTTP, queueing, and replay.
@@ -37,6 +38,11 @@ The canonical typed outbound IM envelope SHALL be resolved through the active pr
 - **THEN** the rendering step resolves the delivery into Telegram-supported text plus inline-keyboard output instead of an unsupported card payload
 - **AND** the resulting delivery receipt records that Telegram-native structured rendering was chosen through the provider profile
 
+#### Scenario: WeCom typed delivery becomes supported app-message content
+- **WHEN** a typed delivery containing structured or richer card intent targets WeCom
+- **THEN** the rendering step resolves the delivery into a WeCom-supported text, news-style, or template-card-compatible representation according to the active WeCom provider profile
+- **AND** transport execution does not require shared layers to special-case WeCom outside the provider contract
+
 #### Scenario: Feishu typed delivery becomes builder-owned native content
 - **WHEN** a typed delivery containing richer card intent targets Feishu
 - **THEN** the rendering step resolves the delivery through Feishu's provider-owned builders into JSON-card, template-card, or `lark_md`-backed output as appropriate
@@ -49,6 +55,11 @@ If the active provider profile changes the final delivery method by downgrading 
 - **WHEN** a Telegram-targeted delivery requests formatted text but the provider renderer cannot produce safe Markdown-aware output
 - **THEN** the Bridge falls back to Telegram plain text before sending the message
 - **AND** the delivery result records that the formatted path was skipped because the renderer selected a safe fallback
+
+#### Scenario: Unsupported WeCom richer update falls back to text with explicit reason
+- **WHEN** a WeCom-targeted delivery requests a richer card update or mutable path that the active WeCom reply target cannot honor
+- **THEN** the Bridge falls back to a WeCom-supported text or follow-up delivery before sending the message
+- **AND** the fallback metadata explains that the richer WeCom update plan was not usable
 
 #### Scenario: Incompatible mutable update becomes provider-aware follow-up
 - **WHEN** a reply target requests an in-place update that the active provider profile considers invalid for the current content or target

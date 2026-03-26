@@ -39,9 +39,17 @@ import { BurndownChart } from "@/components/sprint/burndown-chart";
 import { getTaskDependencyState } from "@/lib/tasks/task-dependencies";
 import { useTaskWorkspaceStore } from "@/lib/stores/task-workspace-store";
 import { cn } from "@/lib/utils";
+import { useCustomFieldStore } from "@/lib/stores/custom-field-store";
+import { useDocsStore, flattenDocsTree } from "@/lib/stores/docs-store";
+import { useEntityLinkStore } from "@/lib/stores/entity-link-store";
+import { FieldValueCell } from "@/components/fields/field-value-cell";
+import { ViewSwitcher } from "@/components/views/view-switcher";
+import { RoadmapView } from "@/components/milestones/roadmap-view";
 import type { Task, TaskPriority, TaskStatus } from "@/lib/stores/task-store";
+import type { LinkedDocItem } from "./linked-docs-panel";
 
 interface ProjectTaskWorkspaceProps {
+  projectId: string;
   tasks: Task[];
   sprints: Sprint[];
   sprintMetrics: SprintMetrics | null;
@@ -410,18 +418,28 @@ function EmptyState({
 }
 
 function ListView({
+  projectId,
   tasks,
   allTasks,
   selectedTaskId,
   density,
   showDescriptions,
+  showLinkedDocs,
+  customFields,
+  valuesByTask,
+  linkedDocsByTask,
   onTaskOpen,
 }: {
+  projectId: string;
   tasks: Task[];
   allTasks: Task[];
   selectedTaskId: string | null;
   density: "comfortable" | "compact";
   showDescriptions: boolean;
+  showLinkedDocs: boolean;
+  customFields: ReturnType<typeof useCustomFieldStore.getState>["definitionsByProject"][string];
+  valuesByTask: Record<string, ReturnType<typeof useCustomFieldStore.getState>["valuesByTask"][string]>;
+  linkedDocsByTask: Record<string, LinkedDocItem[]>;
   onTaskOpen: (taskId: string) => void;
 }) {
   return (
@@ -434,6 +452,10 @@ function ListView({
           <TableHead>Priority</TableHead>
           <TableHead>Assignee</TableHead>
           <TableHead>Planning</TableHead>
+          {showLinkedDocs ? <TableHead>Linked Docs</TableHead> : null}
+          {customFields.map((field) => (
+            <TableHead key={field.id}>{field.name}</TableHead>
+          ))}
           <TableHead className="text-right">Action</TableHead>
         </TableRow>
       </TableHeader>
@@ -506,6 +528,30 @@ function ListView({
             </TableCell>
             <TableCell>{task.assigneeName ?? "Unassigned"}</TableCell>
             <TableCell>{formatPlanningState(task)}</TableCell>
+            {showLinkedDocs ? (
+              <TableCell>
+                <div className="flex flex-wrap gap-1">
+                  {(linkedDocsByTask[task.id] ?? []).map((doc) => (
+                    <Badge key={doc.id} variant="outline">
+                      {doc.title}
+                    </Badge>
+                  ))}
+                  {(linkedDocsByTask[task.id] ?? []).length === 0 ? (
+                    <span className="text-xs text-muted-foreground">None</span>
+                  ) : null}
+                </div>
+              </TableCell>
+            ) : null}
+            {customFields.map((field) => (
+              <TableCell key={field.id}>
+                <FieldValueCell
+                  projectId={projectId}
+                  taskId={task.id}
+                  field={field}
+                  value={valuesByTask[task.id]?.find((item) => item.fieldDefId === field.id) ?? null}
+                />
+              </TableCell>
+            ))}
             <TableCell className="text-right">
               <Button
                 size="sm"
@@ -774,6 +820,7 @@ function CalendarView(props: {
 }
 
 export function TaskWorkspaceMain({
+  projectId,
   tasks,
   sprints,
   sprintMetrics,
@@ -801,13 +848,49 @@ export function TaskWorkspaceMain({
   const setDependency = useTaskWorkspaceStore((state) => state.setDependency);
   const setDensity = useTaskWorkspaceStore((state) => state.setDensity);
   const setShowDescriptions = useTaskWorkspaceStore((state) => state.setShowDescriptions);
+  const setShowLinkedDocs = useTaskWorkspaceStore((state) => state.setShowLinkedDocs);
   const resetFilters = useTaskWorkspaceStore((state) => state.resetFilters);
   const selectTask = useTaskWorkspaceStore((state) => state.selectTask);
+  const definitionsByProject = useCustomFieldStore((state) => state.definitionsByProject);
+  const valuesByTask = useCustomFieldStore((state) => state.valuesByTask);
+  const docsTree = useDocsStore((state) => state.tree);
+  const linksByEntity = useEntityLinkStore((state) => state.linksByEntity);
 
   const filteredTasks = useMemo(
     () => filterTasksForWorkspace(tasks, filters),
     [tasks, filters]
   );
+  const customFields = useMemo(
+    () => definitionsByProject[projectId] ?? [],
+    [definitionsByProject, projectId]
+  );
+  const docsById = useMemo(() => {
+    const map = new Map<string, ReturnType<typeof flattenDocsTree>[number]>();
+    for (const doc of flattenDocsTree(docsTree)) {
+      map.set(doc.id, doc);
+    }
+    return map;
+  }, [docsTree]);
+  const linkedDocsByTask = useMemo<Record<string, LinkedDocItem[]>>(() => {
+    const result: Record<string, LinkedDocItem[]> = {};
+    for (const task of tasks) {
+      const links = linksByEntity[`task:${task.id}`] ?? [];
+      result[task.id] = links
+        .filter((link) => link.targetType === "wiki_page")
+        .map((link) => {
+          const doc = docsById.get(link.targetId);
+          return {
+            id: link.id,
+            pageId: link.targetId,
+            title: doc?.title ?? link.targetId,
+            linkType: link.linkType,
+            updatedAt: doc?.updatedAt ?? new Date().toISOString(),
+            preview: doc?.contentText ?? "",
+          };
+        });
+    }
+    return result;
+  }, [docsById, linksByEntity, tasks]);
   const activeFilterChips = useMemo(
     () => getActiveFilterChips(filters, tasks, sprints),
     [filters, sprints, tasks]
@@ -859,11 +942,16 @@ export function TaskWorkspaceMain({
       case "list":
         return (
           <ListView
+            projectId={projectId}
             tasks={filteredTasks}
             allTasks={tasks}
             selectedTaskId={selectedTaskId}
             density={displayOptions.density}
             showDescriptions={displayOptions.showDescriptions}
+            showLinkedDocs={displayOptions.showLinkedDocs}
+            customFields={customFields}
+            valuesByTask={valuesByTask}
+            linkedDocsByTask={linkedDocsByTask}
             onTaskOpen={handleTaskOpen}
           />
         );
@@ -894,6 +982,14 @@ export function TaskWorkspaceMain({
             onTaskClick={handleTaskOpen}
           />
         );
+      case "roadmap":
+        return (
+          <RoadmapView
+            projectId={projectId}
+            tasks={filteredTasks}
+            sprints={sprints}
+          />
+        );
       case "board":
       default:
         return (
@@ -901,6 +997,7 @@ export function TaskWorkspaceMain({
             tasks={filteredTasks}
             selectedTaskId={selectedTaskId}
             displayOptions={displayOptions}
+            linkedDocsByTask={linkedDocsByTask}
             onTaskClick={(task) => handleTaskOpen(task.id)}
             onTaskStatusChange={onTaskStatusChange}
           />
@@ -919,6 +1016,7 @@ export function TaskWorkspaceMain({
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-3">
+            <ViewSwitcher projectId={projectId} />
             <Badge variant={realtimeConnected ? "secondary" : "outline"}>
               {realtimeConnected ? "Realtime live" : "Live alerts paused"}
             </Badge>
@@ -929,6 +1027,7 @@ export function TaskWorkspaceMain({
                 <TabsTrigger value="timeline">Timeline</TabsTrigger>
                 <TabsTrigger value="calendar">Calendar</TabsTrigger>
                 <TabsTrigger value="dependencies">Dependencies</TabsTrigger>
+                <TabsTrigger value="roadmap">Roadmap</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -1122,6 +1221,14 @@ export function TaskWorkspaceMain({
             onClick={() => setShowDescriptions(!displayOptions.showDescriptions)}
           >
             {displayOptions.showDescriptions ? "Hide descriptions" : "Show descriptions"}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={() => setShowLinkedDocs(!displayOptions.showLinkedDocs)}
+          >
+            {displayOptions.showLinkedDocs ? "Hide linked docs" : "Show linked docs"}
           </Button>
         </div>
       </CardHeader>

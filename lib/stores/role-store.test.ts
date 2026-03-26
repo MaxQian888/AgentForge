@@ -126,16 +126,15 @@ describe("useRoleStore", () => {
   it("creates a role and appends it to local state", async () => {
     const api = makeApiClient();
     const createdRole = makeRole("planner");
+    const createPayload = { metadata: { ...createdRole.metadata } };
     api.post.mockResolvedValueOnce({ data: createdRole });
     mockCreateApiClient.mockReturnValue(api);
 
-    await expect(
-      useRoleStore.getState().createRole({ metadata: { id: "planner" } }),
-    ).resolves.toEqual(createdRole);
+    await expect(useRoleStore.getState().createRole(createPayload)).resolves.toEqual(createdRole);
 
     expect(api.post).toHaveBeenCalledWith(
       "/api/v1/roles",
-      { metadata: { id: "planner" } },
+      createPayload,
       { token: "test-token" },
     );
     expect(useRoleStore.getState().roles).toEqual([
@@ -158,16 +157,22 @@ describe("useRoleStore", () => {
     api.put.mockResolvedValueOnce({ data: updatedRole });
     mockCreateApiClient.mockReturnValue(api);
     useRoleStore.setState({ roles: [originalRole] });
+    const updatePayload = {
+      metadata: {
+        ...originalRole.metadata,
+        name: "Frontend Lead",
+      },
+    };
 
     await expect(
       useRoleStore
         .getState()
-        .updateRole("frontend-developer", { metadata: { name: "Frontend Lead" } }),
+        .updateRole("frontend-developer", updatePayload),
     ).resolves.toEqual(updatedRole);
 
     expect(api.put).toHaveBeenCalledWith(
       "/api/v1/roles/frontend-developer",
-      { metadata: { name: "Frontend Lead" } },
+      updatePayload,
       { token: "test-token" },
     );
     expect(useRoleStore.getState().roles).toEqual([
@@ -197,19 +202,25 @@ describe("useRoleStore", () => {
 
   it("returns preview payloads from the preview endpoint", async () => {
     const api = makeApiClient();
+    const previewPayload = {
+      draft: {
+        metadata: {
+          ...makeRole("preview").metadata,
+          id: "",
+        },
+      },
+    };
     const preview = {
       validationIssues: [{ field: "metadata.id", message: "required" }],
     };
     api.post.mockResolvedValueOnce({ data: preview });
     mockCreateApiClient.mockReturnValue(api);
 
-    await expect(
-      useRoleStore.getState().previewRole({ draft: { metadata: { id: "" } } }),
-    ).resolves.toEqual(preview);
+    await expect(useRoleStore.getState().previewRole(previewPayload)).resolves.toEqual(preview);
 
     expect(api.post).toHaveBeenCalledWith(
       "/api/v1/roles/preview",
-      { draft: { metadata: { id: "" } } },
+      previewPayload,
       { token: "test-token" },
     );
   });
@@ -250,10 +261,11 @@ describe("useRoleStore", () => {
 
   it("throws when mutating role data without authentication", async () => {
     mockGetAuthState.mockReturnValueOnce({ accessToken: null, token: null });
+    const createPayload = { metadata: { ...makeRole("planner").metadata } };
 
-    await expect(
-      useRoleStore.getState().createRole({ metadata: { id: "planner" } }),
-    ).rejects.toThrow("Not authenticated");
+    await expect(useRoleStore.getState().createRole(createPayload)).rejects.toThrow(
+      "Not authenticated",
+    );
 
     expect(mockCreateApiClient).not.toHaveBeenCalled();
   });

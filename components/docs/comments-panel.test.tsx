@@ -106,4 +106,11 @@ describe("CommentsPanel", () => {
     expect(screen.getByText("Detached Comments")).toBeInTheDocument();
     expect(screen.getAllByText("Detached note")).toHaveLength(2);
   });
+
+  it("hides the comment input in readonly mode", () => {
+    render(<CommentsPanel comments={[makeComment()]} onCreateComment={jest.fn()} readonly />);
+
+    expect(screen.queryByRole("button", { name: "Mock Comment Input" })).not.toBeInTheDocument();
+    expect(screen.getByText(/Shared snapshots are read-only/i)).toBeInTheDocument();
+  });
 });

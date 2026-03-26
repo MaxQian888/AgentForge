@@ -25,6 +25,20 @@ type FormHandler struct{ service formService }
 
 func NewFormHandler(service formService) *FormHandler { return &FormHandler{service: service} }
 
+func (h *FormHandler) GetBySlug(c echo.Context) error {
+	slug := c.Param("slug")
+	form, err := h.service.GetFormBySlug(c.Request().Context(), slug)
+	if err != nil || form == nil {
+		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "form not found"})
+	}
+	if !form.IsPublic {
+		if _, claimsErr := claimsUserID(c); claimsErr != nil {
+			return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "authentication required"})
+		}
+	}
+	return c.JSON(http.StatusOK, form.ToDTO())
+}
+
 func (h *FormHandler) List(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	forms, err := h.service.ListForms(c.Request().Context(), projectID)

@@ -14,6 +14,7 @@ export interface Sprint {
   name: string;
   startDate: string;
   endDate: string;
+  milestoneId?: string | null;
   status: SprintStatus;
   totalBudgetUsd: number;
   spentUsd: number;
@@ -49,6 +50,7 @@ export interface UpdateSprintRequest {
   name?: string;
   startDate?: string;
   endDate?: string;
+  milestoneId?: string | null;
   status?: SprintStatus;
   totalBudgetUsd?: number;
 }

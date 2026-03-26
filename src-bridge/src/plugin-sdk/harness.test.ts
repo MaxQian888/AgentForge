@@ -11,7 +11,7 @@ import {
 
 function firstTextContent(result: { content: Array<{ type: string; text?: string }> }): string | undefined {
   const item = result.content.find((entry) => entry.type === "text");
-  return item?.text;
+  return typeof item?.text === "string" ? item.text : undefined;
 }
 
 describe("plugin SDK local harness", () => {
@@ -31,7 +31,7 @@ describe("plugin SDK local harness", () => {
           description: "Echo text back to the caller.",
           inputSchema: z.object({ text: z.string() }),
           execute: ({ text }) => ({
-            content: [{ type: "text", text }],
+            content: [{ type: "text", text: String(text) }],
           }),
         },
       ],

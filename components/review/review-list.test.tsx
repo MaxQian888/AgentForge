@@ -10,7 +10,7 @@ function makeReview(overrides: Partial<ReviewDTO> = {}): ReviewDTO {
     prUrl: "https://github.com/org/repo/pull/1",
     prNumber: 1,
     layer: 2,
-    status: "completed",
+    status: "pending_human",
     riskLevel: "high",
     findings: [],
     summary: "Critical checks completed.",
@@ -29,11 +29,11 @@ describe("ReviewList", () => {
     expect(screen.getByText("No reviews yet.")).toBeInTheDocument();
   });
 
-  it("lets users select, approve, and reject a completed review", async () => {
+  it("lets users select, approve, and request changes on a pending_human review", async () => {
     const user = userEvent.setup();
     const onSelect = jest.fn();
     const onApprove = jest.fn();
-    const onReject = jest.fn();
+    const onRequestChanges = jest.fn();
     const promptSpy = jest.spyOn(window, "prompt").mockReturnValue("Needs fixes");
 
     render(
@@ -41,7 +41,7 @@ describe("ReviewList", () => {
         reviews={[makeReview()]}
         onSelect={onSelect}
         onApprove={onApprove}
-        onReject={onReject}
+        onRequestChanges={onRequestChanges}
       />,
     );
 
@@ -52,8 +52,8 @@ describe("ReviewList", () => {
     expect(onApprove).toHaveBeenCalledWith("review-1");
     expect(onSelect).toHaveBeenCalledTimes(1);
 
-    await user.click(screen.getByRole("button", { name: "Reject" }));
-    expect(onReject).toHaveBeenCalledWith("review-1", "Needs fixes");
+    await user.click(screen.getByRole("button", { name: "Request Changes" }));
+    expect(onRequestChanges).toHaveBeenCalledWith("review-1", "Needs fixes");
 
     promptSpy.mockRestore();
   });

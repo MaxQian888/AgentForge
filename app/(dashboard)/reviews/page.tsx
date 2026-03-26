@@ -75,6 +75,7 @@ export default function ReviewsPage() {
               <SelectItem value="in_progress">In Progress</SelectItem>
               <SelectItem value="completed">Completed</SelectItem>
               <SelectItem value="failed">Failed</SelectItem>
+              <SelectItem value="pending_human">Pending Human</SelectItem>
             </SelectContent>
           </Select>
         </div>

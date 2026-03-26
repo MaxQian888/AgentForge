@@ -132,6 +132,7 @@ type AgentService struct {
 	memorySvc    *MemoryService
 	eventRepo    AgentEventRepository
 	sprintCostUp SprintCostUpdater
+	automation   AutomationEventEvaluator
 }
 
 func agentRunLogFields(run *model.AgentRun) log.Fields {
@@ -214,6 +215,10 @@ func (s *AgentService) SetEventRepository(repo AgentEventRepository) {
 
 func (s *AgentService) SetSprintCostUpdater(up SprintCostUpdater) {
 	s.sprintCostUp = up
+}
+
+func (s *AgentService) SetAutomationEvaluator(evaluator AutomationEventEvaluator) {
+	s.automation = evaluator
 }
 
 type bridgeExecutionContext struct {
@@ -531,6 +536,21 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 		if previousRatio < 0.8 && currentRatio >= 0.8 && currentRatio < 1 {
 			log.WithFields(costFields).WithField("budgetPercent", currentRatio*100).Warn("agent cost crossed budget warning threshold")
 			s.broadcastBudgetEvent(ws.EventBudgetWarning, updatedTask, currentRatio*100)
+			if s.automation != nil {
+				taskID := updatedTask.ID
+				_ = s.automation.EvaluateRules(ctx, AutomationEvent{
+					EventType: model.AutomationEventBudgetThresholdReached,
+					ProjectID: updatedTask.ProjectID,
+					TaskID:    &taskID,
+					Task:      updatedTask,
+					Data: map[string]any{
+						"threshold_percentage": 80,
+						"budget_percent":       currentRatio * 100,
+						"spent_usd":            updatedTask.SpentUsd,
+						"budget_usd":           updatedTask.BudgetUsd,
+					},
+				})
+			}
 		}
 
 		if previousRatio < 1 && currentRatio >= 1 {
@@ -539,6 +559,21 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 			}
 			log.WithFields(costFields).WithField("budgetPercent", currentRatio*100).Warn("agent cost crossed budget exceeded threshold")
 			s.broadcastBudgetEvent(ws.EventBudgetExceeded, updatedTask, currentRatio*100)
+			if s.automation != nil {
+				taskID := updatedTask.ID
+				_ = s.automation.EvaluateRules(ctx, AutomationEvent{
+					EventType: model.AutomationEventBudgetThresholdReached,
+					ProjectID: updatedTask.ProjectID,
+					TaskID:    &taskID,
+					Task:      updatedTask,
+					Data: map[string]any{
+						"threshold_percentage": 100,
+						"budget_percent":       currentRatio * 100,
+						"spent_usd":            updatedTask.SpentUsd,
+						"budget_usd":           updatedTask.BudgetUsd,
+					},
+				})
+			}
 			if run.Status != model.AgentRunStatusBudgetExceeded {
 				if err := s.UpdateStatus(ctx, run.ID, model.AgentRunStatusBudgetExceeded); err != nil {
 					return err

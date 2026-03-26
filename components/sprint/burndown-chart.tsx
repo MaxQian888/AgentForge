@@ -15,6 +15,23 @@ export function BurndownChart({ burndown, plannedTasks }: BurndownChartProps) {
 
   const points = burndown;
   const count = points.length;
+  const maxTasks = Math.max(plannedTasks, ...points.map((p) => p.remainingTasks), 0);
+  const yTicks = useMemo(() => {
+    const step = Math.max(1, Math.ceil(maxTasks / 4));
+    const ticks: number[] = [];
+    for (let v = 0; v <= maxTasks; v += step) ticks.push(v);
+    if (ticks[ticks.length - 1] !== maxTasks && maxTasks > 0) ticks.push(maxTasks);
+    return ticks;
+  }, [maxTasks]);
+  const xLabels = useMemo(() => {
+    if (count <= 3) return points.map((p, i) => ({ i, label: p.date.slice(5) }));
+    const mid = Math.floor(count / 2);
+    return [
+      { i: 0, label: points[0].date.slice(5) },
+      { i: mid, label: points[mid].date.slice(5) },
+      { i: count - 1, label: points[count - 1].date.slice(5) },
+    ];
+  }, [count, points]);
 
   if (count === 0) {
     return (
@@ -24,7 +41,6 @@ export function BurndownChart({ burndown, plannedTasks }: BurndownChartProps) {
     );
   }
 
-  const maxTasks = Math.max(plannedTasks, ...points.map((p) => p.remainingTasks));
   const viewWidth = 480;
   const viewHeight = 200;
   const chartW = viewWidth - PADDING.left - PADDING.right;
@@ -40,26 +56,6 @@ export function BurndownChart({ burndown, plannedTasks }: BurndownChartProps) {
   const actualLine = points
     .map((p, i) => `${i === 0 ? "M" : "L"} ${xScale(i)},${yScale(p.remainingTasks)}`)
     .join(" ");
-
-  // Y-axis ticks
-  const yTicks = useMemo(() => {
-    const step = Math.max(1, Math.ceil(maxTasks / 4));
-    const ticks: number[] = [];
-    for (let v = 0; v <= maxTasks; v += step) ticks.push(v);
-    if (ticks[ticks.length - 1] !== maxTasks && maxTasks > 0) ticks.push(maxTasks);
-    return ticks;
-  }, [maxTasks]);
-
-  // X-axis labels (show first, middle, last)
-  const xLabels = useMemo(() => {
-    if (count <= 3) return points.map((p, i) => ({ i, label: p.date.slice(5) }));
-    const mid = Math.floor(count / 2);
-    return [
-      { i: 0, label: points[0].date.slice(5) },
-      { i: mid, label: points[mid].date.slice(5) },
-      { i: count - 1, label: points[count - 1].date.slice(5) },
-    ];
-  }, [count, points]);
 
   const hoveredPoint = hovered !== null ? points[hovered] : null;
 

@@ -80,7 +80,8 @@ describe("Board", () => {
       <Board
         tasks={tasks}
         selectedTaskId={null}
-        displayOptions={{ density: "comfortable", showDescriptions: true }}
+        displayOptions={{ density: "comfortable", showDescriptions: true, showLinkedDocs: false }}
+        linkedDocsByTask={{}}
         onTaskClick={onTaskClick}
         onTaskStatusChange={jest.fn()}
       />,
@@ -100,7 +101,8 @@ describe("Board", () => {
       <Board
         tasks={[makeTask({ id: "task-1", title: "Build dashboard", status: "inbox" })]}
         selectedTaskId={null}
-        displayOptions={{ density: "comfortable", showDescriptions: true }}
+        displayOptions={{ density: "comfortable", showDescriptions: true, showLinkedDocs: false }}
+        linkedDocsByTask={{}}
         onTaskClick={jest.fn()}
         onTaskStatusChange={successChange}
       />,
@@ -121,7 +123,8 @@ describe("Board", () => {
       <Board
         tasks={[makeTask({ id: "task-2", title: "Review queues", status: "inbox" })]}
         selectedTaskId={null}
-        displayOptions={{ density: "comfortable", showDescriptions: true }}
+        displayOptions={{ density: "comfortable", showDescriptions: true, showLinkedDocs: false }}
+        linkedDocsByTask={{}}
         onTaskClick={jest.fn()}
         onTaskStatusChange={failingChange}
       />,

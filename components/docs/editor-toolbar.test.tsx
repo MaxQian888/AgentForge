@@ -27,5 +27,15 @@ describe("EditorToolbar", () => {
 
     rerender(<EditorToolbar onSaveVersion={onSaveVersion} saving />);
     expect(screen.getByRole("button", { name: /Save Version/i })).toBeDisabled();
+
+    rerender(
+      <EditorToolbar
+        onSaveVersion={onSaveVersion}
+        onSaveTemplate={onSaveTemplate}
+        readonly
+      />,
+    );
+    expect(screen.getByRole("button", { name: /Save Version/i })).toBeDisabled();
+    expect(screen.getByRole("button", { name: /Save as Template/i })).toBeDisabled();
   });
 });

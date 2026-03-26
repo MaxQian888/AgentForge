@@ -16,16 +16,17 @@ type BudgetSprintReader interface {
 
 // BudgetCheckResult represents the outcome of a budget governance check.
 type BudgetCheckResult struct {
-	Allowed        bool    `json:"allowed"`
-	Warning        bool    `json:"warning"`
-	WarningMessage string  `json:"warningMessage,omitempty"`
-	Reason         string  `json:"reason,omitempty"`
+	Allowed        bool   `json:"allowed"`
+	Warning        bool   `json:"warning"`
+	WarningMessage string `json:"warningMessage,omitempty"`
+	Reason         string `json:"reason,omitempty"`
 }
 
 // BudgetGovernanceService enforces budget limits at the sprint and project level.
 type BudgetGovernanceService struct {
 	sprintReader       BudgetSprintReader
 	projectBudgetLimit float64 // optional project-level cap; 0 means no cap
+	automation         AutomationEventEvaluator
 }
 
 // NewBudgetGovernanceService creates a new BudgetGovernanceService.
@@ -38,6 +39,10 @@ func NewBudgetGovernanceService(sprintReader BudgetSprintReader) *BudgetGovernan
 // SetProjectBudgetLimit sets an optional project-level budget cap in USD.
 func (s *BudgetGovernanceService) SetProjectBudgetLimit(limit float64) {
 	s.projectBudgetLimit = limit
+}
+
+func (s *BudgetGovernanceService) SetAutomationEvaluator(evaluator AutomationEventEvaluator) {
+	s.automation = evaluator
 }
 
 // CheckSprintBudget verifies that requestedUsd fits within the sprint's budget.
@@ -67,6 +72,18 @@ func (s *BudgetGovernanceService) CheckSprintBudget(ctx context.Context, sprintI
 
 	warningThreshold := sprint.TotalBudgetUsd * 0.80
 	if projectedTotal >= warningThreshold {
+		if s.automation != nil {
+			_ = s.automation.EvaluateRules(ctx, AutomationEvent{
+				EventType: model.AutomationEventBudgetThresholdReached,
+				ProjectID: sprint.ProjectID,
+				Data: map[string]any{
+					"threshold_percentage": 80,
+					"budget_percent":       (projectedTotal / sprint.TotalBudgetUsd) * 100,
+					"spent_usd":            projectedTotal,
+					"budget_usd":           sprint.TotalBudgetUsd,
+				},
+			})
+		}
 		return &BudgetCheckResult{
 			Allowed: true,
 			Warning: true,
@@ -112,6 +129,18 @@ func (s *BudgetGovernanceService) CheckProjectBudget(ctx context.Context, projec
 
 	warningThreshold := s.projectBudgetLimit * 0.80
 	if projectedTotal >= warningThreshold {
+		if s.automation != nil {
+			_ = s.automation.EvaluateRules(ctx, AutomationEvent{
+				EventType: model.AutomationEventBudgetThresholdReached,
+				ProjectID: projectID,
+				Data: map[string]any{
+					"threshold_percentage": 80,
+					"budget_percent":       (projectedTotal / s.projectBudgetLimit) * 100,
+					"spent_usd":            projectedTotal,
+					"budget_usd":           s.projectBudgetLimit,
+				},
+			})
+		}
 		return &BudgetCheckResult{
 			Allowed: true,
 			Warning: true,

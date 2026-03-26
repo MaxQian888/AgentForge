@@ -14,7 +14,7 @@ export interface SDKToolDefinition<InputSchema extends ToolSchema = ToolSchema> 
   title?: string;
   description?: string;
   inputSchema?: InputSchema;
-  execute: (args: any) => ToolExecuteResult;
+  execute: (args: ToolHandlerArgs) => ToolExecuteResult;
 }
 
 export interface ToolPluginDefinition {
@@ -25,7 +25,7 @@ export interface ToolPluginDefinition {
 export interface ReviewPluginDefinition<InputSchema extends ToolSchema = ToolSchema> {
   manifest: PluginManifest;
   inputSchema?: InputSchema;
-  executeReview: (args: any) => ToolExecuteResult;
+  executeReview: (args: ToolHandlerArgs) => ToolExecuteResult;
 }
 
 export type SDKPluginDefinition = ToolPluginDefinition | ReviewPluginDefinition;

@@ -75,4 +75,10 @@ describe("VersionHistoryPanel", () => {
     rerender(<VersionHistoryPanel versions={[]} />);
     expect(screen.getByText("No saved versions yet.")).toBeInTheDocument();
   });
+
+  it("disables restore actions in readonly mode", () => {
+    render(<VersionHistoryPanel versions={[makeVersion()]} readonly />);
+
+    expect(screen.getByRole("button", { name: "Restore" })).toBeDisabled();
+  });
 });

@@ -38,6 +38,7 @@ export interface Task {
   projectId: string;
   parentId?: string | null;
   sprintId?: string | null;
+  milestoneId?: string | null;
   executionMode?: TaskExecutionMode | null;
   title: string;
   description: string;
@@ -65,6 +66,7 @@ interface TaskApiShape {
   projectId: string;
   parentId?: string | null;
   sprintId?: string | null;
+  milestoneId?: string | null;
   executionMode?: TaskExecutionMode | null;
   title: string;
   description: string;
@@ -162,6 +164,7 @@ function normalizeTask(task: TaskApiShape): Task {
     projectId: task.projectId,
     parentId: task.parentId ?? null,
     sprintId: task.sprintId ?? null,
+    milestoneId: task.milestoneId ?? null,
     executionMode: task.executionMode ?? null,
     title: task.title,
     description: task.description,

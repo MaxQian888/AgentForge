@@ -132,6 +132,18 @@ func TestBuiltInCatalog_UsesStableJobKeysAndSchedules(t *testing.T) {
 	if catalog[0].JobKey != "task-progress-detector" {
 		t.Fatalf("catalog[0].JobKey = %q, want task-progress-detector", catalog[0].JobKey)
 	}
+	foundDueDate := false
+	for _, entry := range catalog {
+		if entry.JobKey == "automation-due-date-detector" {
+			foundDueDate = true
+			if entry.Schedule != "*/15 * * * *" {
+				t.Fatalf("automation-due-date-detector schedule = %q", entry.Schedule)
+			}
+		}
+	}
+	if !foundDueDate {
+		t.Fatal("expected automation-due-date-detector catalog entry")
+	}
 	if catalog[0].Schedule != "0 * * * *" {
 		t.Fatalf("catalog[0].Schedule = %q, want hourly schedule derived from config", catalog[0].Schedule)
 	}

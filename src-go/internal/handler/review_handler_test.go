@@ -49,7 +49,23 @@ func (m *reviewServiceMock) Approve(_ context.Context, _ uuid.UUID, _ string) (*
 	return m.review, nil
 }
 
+func (m *reviewServiceMock) ApproveReview(_ context.Context, _ uuid.UUID, _, _ string) (*model.Review, error) {
+	return m.review, nil
+}
+
+func (m *reviewServiceMock) RequestChangesReview(_ context.Context, _ uuid.UUID, _, _ string) (*model.Review, error) {
+	return m.review, nil
+}
+
 func (m *reviewServiceMock) Reject(_ context.Context, _ uuid.UUID, _, _ string) (*model.Review, error) {
+	return m.review, nil
+}
+
+func (m *reviewServiceMock) RejectReview(_ context.Context, _ uuid.UUID, _, _, _ string) (*model.Review, error) {
+	return m.review, nil
+}
+
+func (m *reviewServiceMock) MarkFalsePositive(_ context.Context, _ uuid.UUID, _ string, _ []string, _ string) (*model.Review, error) {
 	return m.review, nil
 }
 

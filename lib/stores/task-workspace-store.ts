@@ -16,6 +16,7 @@ export type TaskWorkspaceDensity = "comfortable" | "compact";
 export interface TaskWorkspaceDisplayOptions {
   density: TaskWorkspaceDensity;
   showDescriptions: boolean;
+  showLinkedDocs: boolean;
 }
 
 interface TaskWorkspaceState {
@@ -35,6 +36,8 @@ interface TaskWorkspaceState {
   setContextRailDisplay: (display: ContextRailDisplay) => void;
   setDensity: (density: TaskWorkspaceDensity) => void;
   setShowDescriptions: (showDescriptions: boolean) => void;
+  setShowLinkedDocs: (showLinkedDocs: boolean) => void;
+  applySavedViewConfig: (config: unknown) => void;
   resetFilters: () => void;
   selectTask: (taskId: string | null) => void;
 }
@@ -49,6 +52,7 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceState>()((set) => ({
   displayOptions: {
     density: "comfortable",
     showDescriptions: true,
+    showLinkedDocs: false,
   },
 
   setViewMode: (viewMode) => set({ viewMode }),
@@ -75,6 +79,48 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceState>()((set) => ({
     set((state) => ({
       displayOptions: { ...state.displayOptions, showDescriptions },
     })),
+  setShowLinkedDocs: (showLinkedDocs) =>
+    set((state) => ({
+      displayOptions: { ...state.displayOptions, showLinkedDocs },
+    })),
+  applySavedViewConfig: (config) =>
+    set((state) => {
+      if (!config || typeof config !== "object") {
+        return state;
+      }
+      const raw = config as Record<string, unknown>;
+      const nextFilters = { ...state.filters };
+      const layout = typeof raw.layout === "string" ? raw.layout : state.viewMode;
+      const filters = Array.isArray(raw.filters) ? raw.filters : [];
+      for (const entry of filters) {
+        if (!entry || typeof entry !== "object") continue;
+        const field = typeof (entry as { field?: unknown }).field === "string" ? (entry as { field: string }).field : "";
+        const value = (entry as { value?: unknown }).value;
+        switch (field) {
+          case "status":
+            nextFilters.status = typeof value === "string" ? (value as "all" | TaskStatus) : nextFilters.status;
+            break;
+          case "priority":
+            nextFilters.priority = typeof value === "string" ? (value as "all" | TaskPriority) : nextFilters.priority;
+            break;
+          case "assigneeId":
+          case "assignee_id":
+            nextFilters.assigneeId = typeof value === "string" ? value : nextFilters.assigneeId;
+            break;
+          case "sprintId":
+          case "sprint_id":
+            nextFilters.sprintId = typeof value === "string" ? value : nextFilters.sprintId;
+            break;
+          case "search":
+            nextFilters.search = typeof value === "string" ? value : nextFilters.search;
+            break;
+        }
+      }
+      return {
+        viewMode: layout as TaskViewMode,
+        filters: nextFilters,
+      };
+    }),
   resetFilters: () => set({ filters: createDefaultTaskWorkspaceFilters() }),
   selectTask: (selectedTaskId) => set({ selectedTaskId }),
 }));

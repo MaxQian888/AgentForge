@@ -16,12 +16,33 @@ type CodingAgentSelection struct {
 	Model    string `json:"model,omitempty"`
 }
 
+type ReviewPolicy struct {
+	RequiredLayers        []string `json:"requiredLayers"`
+	RequireManualApproval bool     `json:"requireManualApproval"`
+	MinRiskLevelForBlock string   `json:"minRiskLevelForBlock,omitempty" validate:"omitempty,oneof=critical high medium low"`
+}
+
+func DefaultReviewPolicy() ReviewPolicy {
+	return ReviewPolicy{
+		RequiredLayers:        []string{},
+		RequireManualApproval: false,
+		MinRiskLevelForBlock: "",
+	}
+}
+
 type ProjectStoredSettings struct {
-	CodingAgent CodingAgentSelection `json:"coding_agent,omitempty"`
+	CodingAgent  CodingAgentSelection `json:"coding_agent,omitempty"`
+	ReviewPolicy ReviewPolicy         `json:"review_policy,omitempty"`
 }
 
 type ProjectSettingsDTO struct {
-	CodingAgent CodingAgentSelection `json:"codingAgent"`
+	CodingAgent  CodingAgentSelection `json:"codingAgent"`
+	ReviewPolicy ReviewPolicy         `json:"reviewPolicy"`
+}
+
+type ProjectSettingsPatch struct {
+	CodingAgent  *CodingAgentSelection `json:"codingAgent,omitempty"`
+	ReviewPolicy *ReviewPolicy         `json:"reviewPolicy,omitempty"`
 }
 
 type CodingAgentDiagnosticDTO struct {
@@ -82,7 +103,7 @@ type UpdateProjectRequest struct {
 	Description   *string             `json:"description"`
 	RepoURL       *string             `json:"repoUrl"`
 	DefaultBranch *string             `json:"defaultBranch"`
-	Settings      *ProjectSettingsDTO `json:"settings"`
+	Settings      *ProjectSettingsPatch `json:"settings"`
 }
 
 func (p *Project) ToDTO() ProjectDTO {
@@ -105,8 +126,10 @@ func (p *Project) ToDTOWithCatalog(catalog *CodingAgentCatalogDTO) ProjectDTO {
 }
 
 func (p *Project) SettingsDTO() ProjectSettingsDTO {
+	settings := p.StoredSettings()
 	return ProjectSettingsDTO{
-		CodingAgent: p.StoredSettings().CodingAgent,
+		CodingAgent:  settings.CodingAgent,
+		ReviewPolicy: settings.ReviewPolicy,
 	}
 }
 
@@ -115,22 +138,32 @@ func (p *Project) StoredSettings() ProjectStoredSettings {
 }
 
 func ParseProjectStoredSettings(raw string) ProjectStoredSettings {
-	trimmed := strings.TrimSpace(raw)
-	if trimmed == "" {
-		return ProjectStoredSettings{}
+	settingsMap := parseSettingsMap(raw)
+	return ProjectStoredSettings{
+		CodingAgent:  parseCodingAgentSelection(firstSettingsValue(settingsMap, "coding_agent", "codingAgent")),
+		ReviewPolicy: parseReviewPolicy(firstSettingsValue(settingsMap, "review_policy", "reviewPolicy")),
 	}
-
-	var settings ProjectStoredSettings
-	if err := json.Unmarshal([]byte(trimmed), &settings); err != nil {
-		return ProjectStoredSettings{}
-	}
-	return settings
 }
 
-func MergeProjectSettings(raw string, next *ProjectSettingsDTO) (string, error) {
-	current := ParseProjectStoredSettings(raw)
+func MergeProjectSettings(raw string, next *ProjectSettingsPatch) (string, error) {
+	current := parseSettingsMap(raw)
 	if next != nil {
-		current.CodingAgent = next.CodingAgent
+		if next.CodingAgent != nil {
+			delete(current, "codingAgent")
+			current["coding_agent"] = map[string]any{
+				"runtime":  strings.TrimSpace(next.CodingAgent.Runtime),
+				"provider": strings.TrimSpace(next.CodingAgent.Provider),
+				"model":    strings.TrimSpace(next.CodingAgent.Model),
+			}
+		}
+		if next.ReviewPolicy != nil {
+			delete(current, "reviewPolicy")
+			current["review_policy"] = map[string]any{
+				"requiredLayers":        normalizeStringSliceFromStrings(next.ReviewPolicy.RequiredLayers),
+				"requireManualApproval": next.ReviewPolicy.RequireManualApproval,
+				"minRiskLevelForBlock":  strings.TrimSpace(next.ReviewPolicy.MinRiskLevelForBlock),
+			}
+		}
 	}
 
 	payload, err := json.Marshal(current)
@@ -138,4 +171,112 @@ func MergeProjectSettings(raw string, next *ProjectSettingsDTO) (string, error) 
 		return "", err
 	}
 	return string(payload), nil
+}
+
+func parseSettingsMap(raw string) map[string]any {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return map[string]any{}
+	}
+
+	settings := map[string]any{}
+	if err := json.Unmarshal([]byte(trimmed), &settings); err != nil {
+		return map[string]any{}
+	}
+	return settings
+}
+
+func firstSettingsValue(settings map[string]any, keys ...string) any {
+	if len(settings) == 0 {
+		return nil
+	}
+	for _, key := range keys {
+		if value, ok := settings[key]; ok {
+			return value
+		}
+	}
+	return nil
+}
+
+func parseCodingAgentSelection(raw any) CodingAgentSelection {
+	record, ok := raw.(map[string]any)
+	if !ok {
+		return CodingAgentSelection{}
+	}
+
+	selection := CodingAgentSelection{}
+	if runtime, ok := record["runtime"].(string); ok {
+		selection.Runtime = strings.TrimSpace(runtime)
+	}
+	if provider, ok := record["provider"].(string); ok {
+		selection.Provider = strings.TrimSpace(provider)
+	}
+	if modelName, ok := record["model"].(string); ok {
+		selection.Model = strings.TrimSpace(modelName)
+	}
+	return selection
+}
+
+func parseReviewPolicy(raw any) ReviewPolicy {
+	policy := DefaultReviewPolicy()
+	record, ok := raw.(map[string]any)
+	if !ok {
+		return policy
+	}
+
+	policy.RequiredLayers = normalizeStringSlice(anySlice(record["requiredLayers"]))
+	policy.RequireManualApproval = parseBool(record["requireManualApproval"])
+	if threshold, ok := record["minRiskLevelForBlock"].(string); ok {
+		policy.MinRiskLevelForBlock = strings.TrimSpace(threshold)
+	}
+	return policy
+}
+
+func parseBool(raw any) bool {
+	value, _ := raw.(bool)
+	return value
+}
+
+func anySlice(raw any) []any {
+	list, ok := raw.([]any)
+	if !ok {
+		return nil
+	}
+	return list
+}
+
+func normalizeStringSlice(values []any) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		text, ok := value.(string)
+		if !ok {
+			continue
+		}
+		trimmed := strings.TrimSpace(text)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
+}
+
+func normalizeStringSliceFromStrings(values []string) []string {
+	if len(values) == 0 {
+		return []string{}
+	}
+
+	normalized := make([]string, 0, len(values))
+	for _, value := range values {
+		trimmed := strings.TrimSpace(value)
+		if trimmed == "" {
+			continue
+		}
+		normalized = append(normalized, trimmed)
+	}
+	return normalized
 }

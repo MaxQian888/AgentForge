@@ -2,12 +2,16 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/ws"
 )
 
 type stubEntityLinkRepo struct {
@@ -250,4 +254,71 @@ func TestEntityLinkServiceSyncMentionLinksForSourceReplacesBacklinks(t *testing.
 	if links[0].TargetType != model.EntityTypeWikiPage || links[0].TargetID != newPageID || links[0].LinkType != model.EntityLinkTypeMention {
 		t.Fatalf("links[0] = %+v, want mention page %s", links[0], newPageID)
 	}
+}
+
+func TestEntityLinkServiceBroadcastsLifecycleEvents(t *testing.T) {
+	projectID := uuid.New()
+	taskID := uuid.New()
+	pageID := uuid.New()
+	repo := &stubEntityLinkRepo{}
+	hub := ws.NewHub()
+	eventCh := attachProjectListener(t, hub, projectID.String())
+	svc := NewEntityLinkService(repo, &stubEntityLinkTaskRepo{}, &stubEntityLinkWikiRepo{}).WithHub(hub)
+
+	link, err := svc.CreateLink(context.Background(), &CreateEntityLinkInput{
+		ProjectID:  projectID,
+		SourceType: model.EntityTypeTask,
+		SourceID:   taskID,
+		TargetType: model.EntityTypeWikiPage,
+		TargetID:   pageID,
+		LinkType:   model.EntityLinkTypeRequirement,
+		CreatedBy:  uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("CreateLink() error = %v", err)
+	}
+	if err := svc.DeleteLink(context.Background(), link.ID); err != nil {
+		t.Fatalf("DeleteLink() error = %v", err)
+	}
+
+	created := decodeEvent(t, <-eventCh)
+	deleted := decodeEvent(t, <-eventCh)
+	if created.Type != ws.EventLinkCreated {
+		t.Fatalf("created event type = %q, want %q", created.Type, ws.EventLinkCreated)
+	}
+	if deleted.Type != ws.EventLinkDeleted {
+		t.Fatalf("deleted event type = %q, want %q", deleted.Type, ws.EventLinkDeleted)
+	}
+}
+
+func attachProjectListener(t *testing.T, hub *ws.Hub, projectID string) chan []byte {
+	t.Helper()
+
+	client := &ws.Client{}
+	send := make(chan []byte, 8)
+
+	clientValue := reflect.ValueOf(client).Elem()
+
+	projectField := clientValue.FieldByName("projectID")
+	reflect.NewAt(projectField.Type(), unsafe.Pointer(projectField.UnsafeAddr())).Elem().SetString(projectID)
+
+	sendField := clientValue.FieldByName("send")
+	reflect.NewAt(sendField.Type(), unsafe.Pointer(sendField.UnsafeAddr())).Elem().Set(reflect.ValueOf(send))
+
+	hubValue := reflect.ValueOf(hub).Elem()
+	clientsField := hubValue.FieldByName("clients")
+	clientsMap := reflect.NewAt(clientsField.Type(), unsafe.Pointer(clientsField.UnsafeAddr())).Elem()
+	clientsMap.SetMapIndex(reflect.ValueOf(client), reflect.ValueOf(struct{}{}))
+
+	return send
+}
+
+func decodeEvent(t *testing.T, raw []byte) ws.Event {
+	t.Helper()
+
+	var event ws.Event
+	if err := json.Unmarshal(raw, &event); err != nil {
+		t.Fatalf("unmarshal ws event: %v", err)
+	}
+	return event
 }

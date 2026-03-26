@@ -2,11 +2,15 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"reflect"
 	"testing"
 	"time"
+	"unsafe"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/ws"
 )
 
 type stubTaskCommentRepo struct {
@@ -166,4 +170,71 @@ func TestExtractTaskCommentMentions(t *testing.T) {
 	if len(mentions) != 2 || mentions[0] != "alice" || mentions[1] != "bob-builder" {
 		t.Fatalf("ExtractTaskCommentMentions() = %v, want [alice bob-builder]", mentions)
 	}
+}
+
+func TestTaskCommentServiceBroadcastsLifecycleEvents(t *testing.T) {
+	projectID := uuid.New()
+	taskID := uuid.New()
+	repo := &stubTaskCommentRepo{}
+	memberRepo := &stubTaskCommentMemberRepo{}
+	hub := ws.NewHub()
+	eventCh := attachTaskCommentProjectListener(t, hub, projectID.String())
+	taskRepo := &stubEntityLinkTaskRepo{
+		tasks: map[uuid.UUID]*model.Task{
+			taskID: {ID: taskID, ProjectID: projectID, Title: "Task"},
+		},
+	}
+	svc := NewTaskCommentService(repo, memberRepo, nil, taskRepo).WithHub(hub)
+
+	comment, err := svc.CreateComment(context.Background(), &CreateTaskCommentInput{
+		ProjectID: projectID,
+		TaskID:    taskID,
+		Body:      "hello",
+		CreatedBy: uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("CreateComment() error = %v", err)
+	}
+	if _, err := svc.ResolveComment(context.Background(), comment.ID); err != nil {
+		t.Fatalf("ResolveComment() error = %v", err)
+	}
+
+	created := decodeTaskCommentEvent(t, <-eventCh)
+	resolved := decodeTaskCommentEvent(t, <-eventCh)
+	if created.Type != ws.EventTaskCommentCreated {
+		t.Fatalf("created event type = %q, want %q", created.Type, ws.EventTaskCommentCreated)
+	}
+	if resolved.Type != ws.EventTaskCommentResolved {
+		t.Fatalf("resolved event type = %q, want %q", resolved.Type, ws.EventTaskCommentResolved)
+	}
+}
+
+func attachTaskCommentProjectListener(t *testing.T, hub *ws.Hub, projectID string) chan []byte {
+	t.Helper()
+
+	client := &ws.Client{}
+	send := make(chan []byte, 8)
+
+	clientValue := reflect.ValueOf(client).Elem()
+	projectField := clientValue.FieldByName("projectID")
+	reflect.NewAt(projectField.Type(), unsafe.Pointer(projectField.UnsafeAddr())).Elem().SetString(projectID)
+	sendField := clientValue.FieldByName("send")
+	reflect.NewAt(sendField.Type(), unsafe.Pointer(sendField.UnsafeAddr())).Elem().Set(reflect.ValueOf(send))
+
+	hubValue := reflect.ValueOf(hub).Elem()
+	clientsField := hubValue.FieldByName("clients")
+	clientsMap := reflect.NewAt(clientsField.Type(), unsafe.Pointer(clientsField.UnsafeAddr())).Elem()
+	clientsMap.SetMapIndex(reflect.ValueOf(client), reflect.ValueOf(struct{}{}))
+
+	return send
+}
+
+func decodeTaskCommentEvent(t *testing.T, raw []byte) ws.Event {
+	t.Helper()
+
+	var event ws.Event
+	if err := json.Unmarshal(raw, &event); err != nil {
+		t.Fatalf("unmarshal ws event: %v", err)
+	}
+	return event
 }

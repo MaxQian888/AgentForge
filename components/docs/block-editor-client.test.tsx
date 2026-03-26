@@ -65,6 +65,7 @@ describe("BlockEditorClient", () => {
   it("builds the docs schema, syncs parsed content, and emits serialized changes", async () => {
     const user = userEvent.setup();
     const onChange = jest.fn();
+    const onCreateTasks = jest.fn();
     const value = JSON.stringify([{ id: "server-block", type: "paragraph" }]);
 
     render(
@@ -72,6 +73,7 @@ describe("BlockEditorClient", () => {
         value={value}
         editable={false}
         commentedBlockIds={["block-9", "block-10"]}
+        onCreateTasksFromSelection={onCreateTasks}
         onChange={onChange}
       />,
     );
@@ -94,6 +96,7 @@ describe("BlockEditorClient", () => {
       JSON.stringify(mockEditor.document),
       mockEditor.document.map((block) => JSON.stringify(block)).join("\n"),
     );
+    expect(onCreateTasks).not.toHaveBeenCalled();
   });
 
   it("passes undefined initial content and skips replacement for invalid JSON", () => {
@@ -108,5 +111,24 @@ describe("BlockEditorClient", () => {
     );
     expect(mockReplaceBlocks).not.toHaveBeenCalled();
     expect(screen.queryByText(/Inline comment anchors/)).not.toBeInTheDocument();
+  });
+
+  it("renders block task counts and forwards selected block ids for task creation", async () => {
+    const user = userEvent.setup();
+    const onCreateTasks = jest.fn();
+
+    render(
+      <BlockEditorClient
+        value='[{"id":"server-block","type":"paragraph"}]'
+        taskCountsByBlock={{ "block-1": 2 }}
+        onCreateTasksFromSelection={onCreateTasks}
+      />,
+    );
+
+    await user.click(screen.getByRole("checkbox", { name: /block-1/i }));
+    await user.click(screen.getByRole("button", { name: "Create Tasks" }));
+
+    expect(screen.getByText("2 tasks")).toBeInTheDocument();
+    expect(onCreateTasks).toHaveBeenCalledWith(["block-1"]);
   });
 });

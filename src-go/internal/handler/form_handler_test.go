@@ -110,6 +110,73 @@ func TestFormHandler_CreateAndSubmit(t *testing.T) {
 	}
 }
 
+func TestFormHandler_GetBySlugReturnsPublicForm(t *testing.T) {
+	e := echo.New()
+	svc := &formServiceMock{
+		form: &model.FormDefinition{
+			ID:           uuid.New(),
+			ProjectID:    uuid.New(),
+			Name:         "Bug Report",
+			Slug:         "bug-report",
+			Fields:       `[]`,
+			TargetStatus: model.TaskStatusInbox,
+			IsPublic:     true,
+			CreatedAt:    time.Now().UTC(),
+			UpdatedAt:    time.Now().UTC(),
+		},
+	}
+	h := handler.NewFormHandler(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/forms/bug-report", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v1/forms/:slug")
+	c.SetParamNames("slug")
+	c.SetParamValues("bug-report")
+
+	if err := h.GetBySlug(c); err != nil {
+		t.Fatalf("GetBySlug() error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if !strings.Contains(rec.Body.String(), `"slug":"bug-report"`) {
+		t.Fatalf("expected response body to include slug, got %s", rec.Body.String())
+	}
+}
+
+func TestFormHandler_GetBySlugRequiresAuthForPrivateForm(t *testing.T) {
+	e := echo.New()
+	svc := &formServiceMock{
+		form: &model.FormDefinition{
+			ID:           uuid.New(),
+			ProjectID:    uuid.New(),
+			Name:         "Private",
+			Slug:         "private",
+			Fields:       `[]`,
+			TargetStatus: model.TaskStatusInbox,
+			IsPublic:     false,
+			CreatedAt:    time.Now().UTC(),
+			UpdatedAt:    time.Now().UTC(),
+		},
+	}
+	h := handler.NewFormHandler(svc)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/forms/private", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v1/forms/:slug")
+	c.SetParamNames("slug")
+	c.SetParamValues("private")
+
+	if err := h.GetBySlug(c); err != nil {
+		t.Fatalf("GetBySlug() error: %v", err)
+	}
+	if rec.Code != http.StatusUnauthorized {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusUnauthorized)
+	}
+}
+
 func TestFormHandler_PrivateFormRequiresAuth(t *testing.T) {
 	e := echo.New()
 	e.Validator = &customFieldValidator{validator: validator.New()}

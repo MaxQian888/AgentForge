@@ -1,3 +1,4 @@
+import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SettingsPage from "./page";
@@ -76,19 +77,39 @@ jest.mock("@/lib/stores/project-store", () => ({
   useProjectStore: () => projectState,
 }));
 
+type SelectMockProps = {
+  value?: string;
+  onValueChange?: (value: string) => void;
+  disabled?: boolean;
+  children?: ReactNode;
+};
+
+type SelectItemElement = ReactElement<{ value?: string; children?: ReactNode }>;
+
+function readOptionLabel(node: ReactNode): string {
+  if (typeof node === "string") {
+    return node;
+  }
+  if (typeof node === "number") {
+    return String(node);
+  }
+  return "";
+}
+
 jest.mock("@/components/ui/select", () => {
-  const React = require("react");
   return {
-    Select: ({ value, onValueChange, disabled, children }: any) => {
+    Select: ({ value, onValueChange, disabled, children }: SelectMockProps) => {
       const options: Array<{ value: string; label: string }> = [];
-      React.Children.forEach(children, (child: any) => {
-        if (!child) return;
-        const contentChildren = child.props?.children;
-        React.Children.forEach(contentChildren, (grandChild: any) => {
-          if (!grandChild || grandChild.props?.value === undefined) return;
+      Children.forEach(children, (child) => {
+        if (!isValidElement(child)) return;
+        const contentChildren = (child as ReactElement<{ children?: ReactNode }>).props.children;
+        Children.forEach(contentChildren, (grandChild) => {
+          if (!isValidElement(grandChild)) return;
+          const item = grandChild as SelectItemElement;
+          if (item.props.value === undefined) return;
           options.push({
-            value: grandChild.props.value,
-            label: grandChild.props.children,
+            value: item.props.value,
+            label: readOptionLabel(item.props.children),
           });
         });
       });
@@ -107,10 +128,10 @@ jest.mock("@/components/ui/select", () => {
         </select>
       );
     },
-    SelectTrigger: ({ children }: any) => <>{children}</>,
+    SelectTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
     SelectValue: () => null,
-    SelectContent: ({ children }: any) => <>{children}</>,
-    SelectItem: ({ children }: any) => <>{children}</>,
+    SelectContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    SelectItem: ({ children }: { children?: ReactNode }) => <>{children}</>,
   };
 });
 

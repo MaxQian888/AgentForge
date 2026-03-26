@@ -1,7 +1,9 @@
 /** @jest-environment node */
 /* eslint-disable @typescript-eslint/no-require-imports */
 
-function setProcessPlatform(platform) {
+export {};
+
+function setProcessPlatform(platform: NodeJS.Platform) {
   Object.defineProperty(process, "platform", {
     value: platform,
     configurable: true,

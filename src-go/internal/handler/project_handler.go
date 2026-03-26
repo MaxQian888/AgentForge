@@ -116,6 +116,9 @@ func (h *ProjectHandler) Update(c echo.Context) error {
 	if err := c.Bind(req); err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
 	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
 	if err := h.repo.Update(c.Request().Context(), id, req); err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update project"})
 	}

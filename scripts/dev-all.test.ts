@@ -1,9 +1,9 @@
 /** @jest-environment node */
 /* eslint-disable @typescript-eslint/no-require-imports */
 
-const fs = require("node:fs");
-const os = require("node:os");
-const path = require("node:path");
+import * as fs from "node:fs";
+import * as os from "node:os";
+import * as path from "node:path";
 
 describe("dev-all workflow contract", () => {
   test("builds the full-stack service matrix and repo-local paths", () => {
@@ -24,7 +24,13 @@ describe("dev-all workflow contract", () => {
     });
 
     expect(
-      services.map((service) => ({
+      services.map((service: {
+        name: string;
+        kind: string;
+        start: { source: string };
+        port: number;
+        healthUrl: string | null;
+      }) => ({
         name: service.name,
         kind: service.kind,
         source: service.start.source,

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useMemo, useState } from "react";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -32,39 +32,46 @@ const recommendationLabels: Record<string, string> = {
 interface ReviewDetailPanelProps {
   review: ReviewDTO;
   onApprove?: (id: string, comment?: string) => void;
-  onReject?: (id: string, reason: string) => void;
+  onRequestChanges?: (id: string, comment?: string) => void;
 }
 
 export function ReviewDetailPanel({
   review,
   onApprove,
-  onReject,
+  onRequestChanges,
 }: ReviewDetailPanelProps) {
   const [approveComment, setApproveComment] = useState("");
-  const [rejectReason, setRejectReason] = useState("");
+  const [requestChangesComment, setRequestChangesComment] = useState("");
   const [showApproveForm, setShowApproveForm] = useState(false);
-  const [showRejectForm, setShowRejectForm] = useState(false);
+  const [showRequestChangesForm, setShowRequestChangesForm] = useState(false);
+
+  const changedFileCount = review.executionMetadata?.changedFiles?.length ?? 0;
+  const executionResults = review.executionMetadata?.results ?? [];
+  const decisions = review.executionMetadata?.decisions ?? [];
+  const hasExecutionMetadata = useMemo(() => {
+    return (
+      Boolean(review.executionMetadata?.triggerEvent) ||
+      changedFileCount > 0 ||
+      executionResults.length > 0
+    );
+  }, [review.executionMetadata?.triggerEvent, changedFileCount, executionResults.length]);
 
   const handleApprove = () => {
-    onApprove?.(review.id, approveComment || undefined);
+    onApprove?.(review.id, approveComment.trim() || undefined);
     setApproveComment("");
     setShowApproveForm(false);
   };
 
-  const handleReject = () => {
-    if (!rejectReason.trim()) return;
-    onReject?.(review.id, rejectReason);
-    setRejectReason("");
-    setShowRejectForm(false);
+  const handleRequestChanges = () => {
+    onRequestChanges?.(review.id, requestChangesComment.trim() || undefined);
+    setRequestChangesComment("");
+    setShowRequestChangesForm(false);
   };
 
   return (
     <div className="flex flex-col gap-4">
-      {/* Header */}
       <div className="flex items-center justify-between">
-        <h3 className="text-base font-semibold">
-          Layer {review.layer} Review
-        </h3>
+        <h3 className="text-base font-semibold">Layer {review.layer} Review</h3>
         <div className="flex items-center gap-1.5">
           <Badge
             variant="secondary"
@@ -76,36 +83,71 @@ export function ReviewDetailPanel({
             variant="secondary"
             className={cn(
               "text-xs",
-              recommendationColors[review.recommendation] ?? ""
+              recommendationColors[review.recommendation] ?? "",
             )}
           >
-            {recommendationLabels[review.recommendation] ??
-              review.recommendation}
+            {recommendationLabels[review.recommendation] ?? review.recommendation}
           </Badge>
         </div>
       </div>
 
-      {/* Summary */}
       <div>
-        <Label className="text-xs font-medium text-muted-foreground">
-          Summary
-        </Label>
+        <Label className="text-xs font-medium text-muted-foreground">Summary</Label>
         <p className="mt-1 text-sm">{review.summary || "No summary."}</p>
       </div>
 
-      {/* Meta */}
       <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-muted-foreground">
         <span>PR: {review.prUrl || `#${review.prNumber}`}</span>
         <span>Cost: ${review.costUsd.toFixed(2)}</span>
         <span>Status: {review.status.replace("_", " ")}</span>
-        <span>
-          Updated: {new Date(review.updatedAt).toLocaleString()}
-        </span>
+        <span>Updated: {new Date(review.updatedAt).toLocaleString()}</span>
       </div>
 
       <Separator />
 
-      {/* Findings */}
+      {hasExecutionMetadata && (
+        <>
+          <details className="rounded-md border p-3">
+            <summary className="cursor-pointer text-sm font-medium">
+              Execution Details
+            </summary>
+            <div className="mt-3 space-y-2 text-xs text-muted-foreground">
+              {review.executionMetadata?.triggerEvent && (
+                <div>
+                  <span className="font-medium text-foreground">Trigger:</span>{" "}
+                  {review.executionMetadata.triggerEvent}
+                </div>
+              )}
+              <div>
+                <span className="font-medium text-foreground">Changed Files:</span>{" "}
+                {changedFileCount}
+              </div>
+              {executionResults.length > 0 && (
+                <div className="space-y-1">
+                  <div className="font-medium text-foreground">Plugin / Dimension Results</div>
+                  <div className="space-y-1">
+                    {executionResults.map((result) => (
+                      <div
+                        key={`${result.kind}-${result.id}`}
+                        className="rounded border bg-muted/40 px-2 py-1"
+                      >
+                        <span className="font-medium text-foreground">
+                          {result.displayName || result.id}
+                        </span>{" "}
+                        <span>({result.kind})</span>{" "}
+                        <span className="uppercase">{result.status}</span>
+                        {result.summary ? <span> - {result.summary}</span> : null}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+          </details>
+          <Separator />
+        </>
+      )}
+
       <div>
         <Label className="text-xs font-medium text-muted-foreground">
           Findings ({review.findings?.length ?? 0})
@@ -115,18 +157,36 @@ export function ReviewDetailPanel({
         </div>
       </div>
 
-      {/* Actions */}
-      {review.status === "completed" && (onApprove || onReject) && (
+      {decisions.length > 0 && (
+        <>
+          <Separator />
+          <div className="space-y-2">
+            <Label className="text-xs font-medium text-muted-foreground">Decisions</Label>
+            <div className="space-y-2">
+              {decisions.map((decision, index) => (
+                <div key={`${decision.timestamp}-${index}`} className="rounded border p-2">
+                  <div className="text-xs font-medium">
+                    {decision.actor} - {decision.action}
+                  </div>
+                  <div className="text-xs text-muted-foreground">
+                    {new Date(decision.timestamp).toLocaleString()}
+                  </div>
+                  {decision.comment ? (
+                    <p className="mt-1 text-xs text-muted-foreground">{decision.comment}</p>
+                  ) : null}
+                </div>
+              ))}
+            </div>
+          </div>
+        </>
+      )}
+
+      {review.status === "pending_human" && (onApprove || onRequestChanges) && (
         <>
           <Separator />
           <div className="flex flex-col gap-2">
-            {/* Approve */}
-            {onApprove && !showApproveForm && !showRejectForm && (
-              <Button
-                variant="outline"
-                size="sm"
-                onClick={() => setShowApproveForm(true)}
-              >
+            {onApprove && !showApproveForm && !showRequestChangesForm && (
+              <Button variant="outline" size="sm" onClick={() => setShowApproveForm(true)}>
                 Approve
               </Button>
             )}
@@ -135,7 +195,7 @@ export function ReviewDetailPanel({
                 <Label className="text-xs">Comment (optional)</Label>
                 <Input
                   value={approveComment}
-                  onChange={(e) => setApproveComment(e.target.value)}
+                  onChange={(event) => setApproveComment(event.target.value)}
                   placeholder="Optional approval comment..."
                   className="h-8 text-sm"
                 />
@@ -154,39 +214,32 @@ export function ReviewDetailPanel({
               </div>
             )}
 
-            {/* Reject */}
-            {onReject && !showRejectForm && !showApproveForm && (
+            {onRequestChanges && !showRequestChangesForm && !showApproveForm && (
               <Button
                 variant="outline"
                 size="sm"
-                className="text-red-600 dark:text-red-400"
-                onClick={() => setShowRejectForm(true)}
+                onClick={() => setShowRequestChangesForm(true)}
               >
-                Reject
+                Request Changes
               </Button>
             )}
-            {showRejectForm && (
+            {showRequestChangesForm && (
               <div className="flex flex-col gap-2 rounded-md border p-3">
-                <Label className="text-xs">Reason (required)</Label>
+                <Label className="text-xs">Comment (optional)</Label>
                 <Input
-                  value={rejectReason}
-                  onChange={(e) => setRejectReason(e.target.value)}
-                  placeholder="Rejection reason..."
+                  value={requestChangesComment}
+                  onChange={(event) => setRequestChangesComment(event.target.value)}
+                  placeholder="Describe what needs to change..."
                   className="h-8 text-sm"
                 />
                 <div className="flex items-center gap-2">
-                  <Button
-                    size="sm"
-                    variant="destructive"
-                    onClick={handleReject}
-                    disabled={!rejectReason.trim()}
-                  >
-                    Confirm Reject
+                  <Button size="sm" onClick={handleRequestChanges}>
+                    Confirm Request Changes
                   </Button>
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => setShowRejectForm(false)}
+                    onClick={() => setShowRequestChangesForm(false)}
                   >
                     Cancel
                   </Button>

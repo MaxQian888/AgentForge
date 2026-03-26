@@ -2566,11 +2566,11 @@ flowchart TD
     subgraph IMBridge["cc-connect Fork (IM Bridge)"]
         Platform["platform/\n保留 10个IM适配器原封不动"]
         Engine["core/engine.go 改造\n· 斜杠命令解析 /task /agent /review /sprint\n· @AgentForge 自然语言意图识别\n· 通知推送 从后端接收→转发到IM"]
-        AgentAdapter["agent/agentforge/ 新建\n· HTTP Client → AgentForge API Gateway\n· SSE 接收 Agent 实时输出\n· WebSocket 接收通知推送"]
+        AgentAdapter["agent/agentforge/ 新建\n· HTTP Client → AgentForge API Gateway\n· 复用 IM Control Plane + 实时回传契约\n· WebSocket 接收定向投递与进度事件"]
     end
 
     subgraph APIGateway["AgentForge API Gateway\nGo · Echo v4"]
-        APIs["POST /api/v1/im/message  IM 消息入口\nPOST /api/v1/im/command  斜杠命令入口\nPOST /api/v1/im/send     主动发消息到 IM\nGET  /api/v1/im/events   SSE 事件流\nWS   /ws/v1/stream        WebSocket 双向通信"]
+        APIs["POST /api/v1/im/message            IM 消息入口\nPOST /api/v1/im/command            斜杠命令入口\nPOST /api/v1/im/action             交互动作入口\nPOST /api/v1/im/bridge/register    Bridge 注册\nPOST /api/v1/im/bridge/heartbeat   Bridge 心跳\nPOST /api/v1/im/bridge/unregister  Bridge 注销\nWS   /ws/im-bridge                 定向投递/回放/进度流"]
     end
 
     Feishu & Dingtalk & Slack & Telegram & Others --> Platform
@@ -6740,6 +6740,7 @@ PUT    /api/v1/members/:id                 更新成员信息
 # 通知
 GET    /api/v1/notifications               我的通知
 PUT    /api/v1/notifications/:id/read      标记已读
+PUT    /api/v1/notifications/read-all      全部标记已读
 
 # 统计
 GET    /api/v1/stats/cost                  成本统计
