@@ -282,6 +282,70 @@ export function summarizeMemberRoster(input: {
     .filter((member): member is TeamMember => Boolean(member));
 }
 
+export function enrichTeamMembers(input: {
+  members: TeamMember[];
+  tasks: DashboardTaskSource[];
+  agents: DashboardAgentSource[];
+  activity: DashboardActivitySource[];
+}): TeamMember[] {
+  const members = input.members.map((member) => ({
+    ...member,
+    skills: [...member.skills],
+    workload: {
+      assignedTasks: 0,
+      inProgressTasks: 0,
+      inReviewTasks: 0,
+      activeAgentRuns: 0,
+    },
+    lastActivityAt: null,
+    agentSummary: [...(member.agentSummary ?? [])],
+    readinessMissing: [...(member.readinessMissing ?? [])],
+  }));
+  const memberMap = new Map<string, TeamMember>(
+    members.map((member) => [member.id, member] satisfies [string, TeamMember])
+  );
+
+  for (const task of input.tasks) {
+    if (!task.assigneeId) continue;
+    const member = memberMap.get(task.assigneeId);
+    if (!member) continue;
+
+    member.workload.assignedTasks += 1;
+    if (task.status === "in_progress") {
+      member.workload.inProgressTasks += 1;
+    }
+    if (task.status === "in_review") {
+      member.workload.inReviewTasks += 1;
+    }
+    const taskTime = task.updatedAt || task.createdAt;
+    if (!member.lastActivityAt || toTime(taskTime) > toTime(member.lastActivityAt)) {
+      member.lastActivityAt = taskTime;
+    }
+  }
+
+  for (const agent of input.agents) {
+    if (!ACTIVE_AGENT_STATUSES.has(agent.status)) continue;
+    const member = memberMap.get(agent.memberId);
+    if (!member) continue;
+    member.workload.activeAgentRuns += 1;
+    if (!member.lastActivityAt || toTime(agent.updatedAt) > toTime(member.lastActivityAt)) {
+      member.lastActivityAt = agent.updatedAt || agent.startedAt || agent.createdAt;
+    }
+  }
+
+  for (const event of input.activity) {
+    const member = memberMap.get(event.targetId);
+    if (!member) continue;
+    if (!member.lastActivityAt || toTime(event.createdAt) > toTime(member.lastActivityAt)) {
+      member.lastActivityAt = event.createdAt;
+    }
+  }
+
+  return input.members
+    .map((member) => memberMap.get(member.id))
+    .filter((member): member is TeamMember => Boolean(member));
+}
+
 function buildActivityItems(
   activity: DashboardActivitySource[],
   scopeProjectId: string | null
@@ -477,7 +541,7 @@ export function buildDashboardSummary(
       projects: "/projects",
       team: input.scopeProjectId ? `/team?project=${input.scopeProjectId}` : "/team",
       agents: "/agents",
-      reviews: "/agents",
+      reviews: "/reviews",
     },
   };
 }

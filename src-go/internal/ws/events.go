@@ -23,6 +23,8 @@ const (
 	EventAgentCostUpdate        = "agent.cost_update"
 	EventReviewCreated          = "review.created"
 	EventReviewCompleted        = "review.completed"
+	EventReviewPendingHuman     = "review.pending_human"
+	EventReviewFixRequested     = "review.fix_requested"
 	EventNotification           = "notification"
 	EventBudgetWarning          = "budget.warning"
 	EventBudgetExceeded         = "budget.exceeded"
@@ -46,6 +48,17 @@ const (
 	EventSchedulerJobUpdated    = "scheduler.job.updated"
 	EventSchedulerRunStarted    = "scheduler.run.started"
 	EventSchedulerRunCompleted  = "scheduler.run.completed"
+	EventWikiPageCreated        = "wiki.page.created"
+	EventWikiPageUpdated        = "wiki.page.updated"
+	EventWikiPageMoved          = "wiki.page.moved"
+	EventWikiPageDeleted        = "wiki.page.deleted"
+	EventWikiCommentCreated     = "wiki.comment.created"
+	EventWikiCommentResolved    = "wiki.comment.resolved"
+	EventWikiVersionPublished   = "wiki.version.published"
+	EventLinkCreated            = "link.created"
+	EventLinkDeleted            = "link.deleted"
+	EventTaskCommentCreated     = "task_comment.created"
+	EventTaskCommentResolved    = "task_comment.resolved"
 )
 
 // Event types pushed from the TS bridge into Go orchestration.

@@ -41,3 +41,32 @@ The system SHALL emit a terminal update for every accepted long-running IM actio
 - **WHEN** a Bridge reconnects after a restart while a previously accepted action is still running
 - **THEN** it restores the latest known reply target and delivery state for that action
 - **AND** it resumes progress or terminal updates without posting a second "accepted" message for the same command
+
+### Requirement: Progress and terminal updates SHALL use the canonical typed delivery contract
+The system SHALL route IM-bound progress and terminal updates through the same canonical typed outbound delivery contract used by direct notifications. Bound progress delivery MUST preserve reply-target preferences, rich payload shape, and provider-native update options so asynchronous updates can continue to use edit, follow-up, thread, session-webhook, card-update, or structured reply paths after queueing and replay.
+
+#### Scenario: Discord terminal update keeps original-response edit semantics after queueing
+- **WHEN** a Discord-originated long-running action reaches a terminal state after its update has been queued through the control plane
+- **THEN** the queued terminal delivery preserves the interaction-scoped reply target and typed payload needed for original-response edit or follow-up
+- **AND** the Bridge does not degrade that terminal update to a new unrelated plain-text send unless the preserved target is unusable
+
+#### Scenario: Feishu progress replay preserves native update choice and fallback metadata
+- **WHEN** a Feishu long-running action uses delayed card update or another native progress path and the Bridge must replay pending deliveries after reconnect
+- **THEN** the replayed progress or terminal delivery retains the native payload or structured fallback choice encoded in the canonical delivery envelope
+- **AND** any fallback reason remains visible instead of being lost during replay
+
+#### Scenario: Text-only platform or target degrades explicitly through the same contract
+- **WHEN** a progress or terminal update is queued for a platform or reply target that cannot honor the preferred rich or mutable path
+- **THEN** the canonical delivery contract falls back to the supported text path
+- **AND** the fallback remains explicit and consistent with direct notification delivery semantics
+
+### Requirement: Document event streaming to IM
+The IM bridge progress streaming system SHALL forward document-related events to configured IM channels.
+
+#### Scenario: Page created event streamed to IM
+- **WHEN** a wiki page is created in a project with an IM channel configured for doc events
+- **THEN** the IM bridge sends a message to the channel with the page title, creator, and a link to the page
+
+#### Scenario: Comment mention forwarded to IM
+- **WHEN** a user is @-mentioned in a wiki comment and has IM notifications enabled
+- **THEN** the IM bridge sends a direct message to the user with the comment context and a link to the comment

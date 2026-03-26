@@ -23,6 +23,8 @@ import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useProjectStore } from "@/lib/stores/project-store";
 import { useTeamStore } from "@/lib/stores/team-store";
 
+const DEFAULT_TEAM_STRATEGY = "plan-code-review";
+
 interface StartTeamDialogProps {
   taskId: string;
   taskTitle: string;
@@ -60,7 +62,7 @@ export function StartTeamDialog({
   const [runtime, setRuntime] = useState(defaultSelection.runtime);
   const [provider, setProvider] = useState(defaultSelection.provider);
   const [model, setModel] = useState(defaultSelection.model);
-  const [strategy] = useState("planner_coder_reviewer");
+  const [strategy] = useState(DEFAULT_TEAM_STRATEGY);
   const [submitting, setSubmitting] = useState(false);
 
   const startTeam = useTeamStore((s) => s.startTeam);
@@ -203,7 +205,7 @@ export function StartTeamDialog({
                 <SelectValue />
               </SelectTrigger>
               <SelectContent>
-                <SelectItem value="planner_coder_reviewer">
+                <SelectItem value={DEFAULT_TEAM_STRATEGY}>
                   Planner &rarr; Coder &rarr; Reviewer
                 </SelectItem>
               </SelectContent>

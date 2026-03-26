@@ -97,6 +97,16 @@ func TestIMService_NotifyCompatibilityPayloadIncludesReplyTarget(t *testing.T) {
 
 func TestIMService_HandleActionPreservesReplyTargetAndMetadata(t *testing.T) {
 	svc := NewIMService("", "slack")
+	// Wire an executor that returns a successful response to test preservation.
+	svc.SetActionExecutor(IMActionExecutorFunc(func(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error) {
+		return &model.IMActionResponse{
+			Result:      "Approved",
+			Success:     true,
+			Status:      model.IMActionStatusCompleted,
+			ReplyTarget: req.ReplyTarget,
+			Metadata:    req.Metadata,
+		}, nil
+	}))
 
 	resp, err := svc.HandleAction(context.Background(), &model.IMActionRequest{
 		Platform:  "slack",
@@ -126,5 +136,93 @@ func TestIMService_HandleActionPreservesReplyTargetAndMetadata(t *testing.T) {
 	}
 	if resp.Metadata["source"] != "block_actions" {
 		t.Fatalf("Metadata = %+v", resp.Metadata)
+	}
+}
+
+func TestIMService_NotifyCompatibilityPayloadIncludesTypedDeliveryFields(t *testing.T) {
+	var payload map[string]any
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/im/notify" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	svc := NewIMService(server.URL, "slack")
+	err := svc.Notify(context.Background(), &model.IMNotifyRequest{
+		Platform:  "slack",
+		ChannelID: "C123",
+		Event:     "task_progress",
+		Title:     "Task Update",
+		Body:      "Still running",
+		Structured: &model.IMStructuredMessage{
+			Title: "Task Update",
+			Body:  "Still running",
+			Fields: []model.IMStructuredField{
+				{Label: "Status", Value: "running"},
+			},
+		},
+		Metadata: map[string]string{
+			"fallback_reason": "thread_reply_unavailable",
+		},
+		ReplyTarget: &model.IMReplyTarget{
+			Platform: "slack",
+			ChatID:   "C123",
+			ThreadID: "thread-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Notify error: %v", err)
+	}
+
+	structured, ok := payload["structured"].(map[string]any)
+	if !ok {
+		t.Fatalf("structured = %#v", payload["structured"])
+	}
+	if structured["title"] != "Task Update" {
+		t.Fatalf("structured title = %v", structured["title"])
+	}
+	metadata, ok := payload["metadata"].(map[string]any)
+	if !ok {
+		t.Fatalf("metadata = %#v", payload["metadata"])
+	}
+	if metadata["fallback_reason"] != "thread_reply_unavailable" {
+		t.Fatalf("metadata = %#v", metadata)
+	}
+}
+
+func TestIMService_HandleActionReturnsFailureWhenExecutorReturnsNil(t *testing.T) {
+	svc := NewIMService("", "", nil)
+	svc.SetActionExecutor(IMActionExecutorFunc(func(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error) {
+		return nil, nil // executor returns nil to signal unhandled action
+	}))
+
+	resp, err := svc.HandleAction(context.Background(), &model.IMActionRequest{
+		Action:   "unknown-action",
+		EntityID: "entity-1",
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C123",
+		},
+		Metadata: map[string]string{"source": "test"},
+	})
+	if err != nil {
+		t.Fatalf("HandleAction error: %v", err)
+	}
+	if resp.Success {
+		t.Fatal("expected Success=false for unhandled action")
+	}
+	if resp.Status != model.IMActionStatusFailed {
+		t.Fatalf("Status = %q, want %q", resp.Status, model.IMActionStatusFailed)
+	}
+	if resp.ReplyTarget == nil || resp.ReplyTarget.ChannelID != "C123" {
+		t.Fatalf("ReplyTarget not preserved: %+v", resp.ReplyTarget)
+	}
+	if resp.Metadata["source"] != "test" {
+		t.Fatalf("Metadata not preserved: %+v", resp.Metadata)
 	}
 }

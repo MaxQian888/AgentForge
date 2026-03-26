@@ -1,4 +1,5 @@
 /** @jest-environment node */
+/* eslint-disable @typescript-eslint/no-require-imports */
 
 const fs = require("node:fs");
 const os = require("node:os");
@@ -6,7 +7,6 @@ const path = require("node:path");
 
 describe("dev-all workflow contract", () => {
   test("builds the full-stack service matrix and repo-local paths", () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const {
       createDevAllServiceDefinitions,
       getDevAllPaths,
@@ -71,7 +71,6 @@ describe("dev-all workflow contract", () => {
   });
 
   test("reports an untracked but healthy service as external", () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { reconcileRuntimeState } = require("./dev-workflow.js");
 
     const report = reconcileRuntimeState({
@@ -99,7 +98,6 @@ describe("dev-all workflow contract", () => {
   });
 
   test("marks a tracked managed service as stale when the pid is gone", () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { reconcileRuntimeState } = require("./dev-workflow.js");
 
     const report = reconcileRuntimeState({
@@ -140,7 +138,6 @@ describe("dev-all workflow contract", () => {
   });
 
   test("creates a stop plan that only targets managed services", () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { createStopPlan } = require("./dev-workflow.js");
 
     const plan = createStopPlan({
@@ -188,7 +185,6 @@ describe("dev-all workflow contract", () => {
   });
 
   test("reads known log paths from the persisted runtime state", () => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { runDevAllLogs, getDevAllPaths } = require("./dev-all.js");
 
     const repoRoot = process.cwd();
@@ -255,8 +251,7 @@ describe("dev-all workflow contract", () => {
       };
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { runDevAllStart, getDevAllPaths } = require("./dev-all.js");
+    const { runDevAllStart } = require("./dev-all.js");
 
     const result = await runDevAllStart({ repoRoot });
 
@@ -271,6 +266,76 @@ describe("dev-all workflow contract", () => {
       ]),
     );
     expect(writeRuntimeState).toHaveBeenCalledTimes(1);
+  });
+
+  test("starts Docker Desktop and continues once docker compose becomes ready", async () => {
+    jest.resetModules();
+
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-devall-docker-start-"));
+    const writeRuntimeState = jest.fn();
+    const probeCounts = new Map();
+    const getDockerComposeAvailability = jest
+      .fn()
+      .mockReturnValueOnce({
+        ready: false,
+        dockerAvailable: true,
+        canAutoStart: true,
+        reason: "docker_desktop_not_ready",
+        detail: "Docker Desktop is installed but not ready",
+        dockerDesktopExecutablePath: "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe",
+      })
+      .mockReturnValueOnce({
+        ready: true,
+        dockerAvailable: true,
+        canAutoStart: true,
+        reason: null,
+        detail: null,
+        dockerDesktopExecutablePath: "C:\\Program Files\\Docker\\Docker\\Docker Desktop.exe",
+      });
+    const startDockerDesktop = jest.fn(() => ({
+      ok: true,
+      method: "docker-desktop-cli",
+    }));
+    const runCommandSync = jest.fn(() => ({ status: 0, stdout: "", stderr: "" }));
+
+    jest.doMock("./dev-workflow.js", () => {
+      const actual = jest.requireActual("./dev-workflow.js");
+      return {
+        ...actual,
+        getDockerComposeAvailability,
+        startDockerDesktop,
+        isCommandAvailable: jest.fn(() => true),
+        runCommandSync,
+        probeServiceHealth: jest.fn(async (service) => {
+          const count = probeCounts.get(service.name) ?? 0;
+          probeCounts.set(service.name, count + 1);
+
+          if (service.name === "postgres" || service.name === "redis") {
+            return count > 0;
+          }
+
+          return true;
+        }),
+        readRuntimeState: jest.fn(() => ({
+          version: 1,
+          services: {},
+        })),
+        writeRuntimeState,
+      };
+    });
+
+    const { runDevAllStart } = require("./dev-all.js");
+
+    const result = await runDevAllStart({ repoRoot });
+
+    expect(result.ok).toBe(true);
+    expect(getDockerComposeAvailability).toHaveBeenCalledTimes(2);
+    expect(startDockerDesktop).toHaveBeenCalledTimes(1);
+    expect(runCommandSync).toHaveBeenCalledWith(
+      "docker",
+      ["compose", "up", "-d", "postgres", "redis"],
+      expect.any(Object),
+    );
   });
 
   test("rejects unknown listener conflicts before starting a duplicate service", async () => {
@@ -295,7 +360,6 @@ describe("dev-all workflow contract", () => {
       };
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { runDevAllStart, getDevAllPaths } = require("./dev-all.js");
 
     const result = await runDevAllStart({ repoRoot });
@@ -326,6 +390,13 @@ describe("dev-all workflow contract", () => {
       return {
         ...actual,
         canUseDockerCompose: jest.fn(() => true),
+        getDockerComposeAvailability: jest.fn(() => ({
+          ready: true,
+          dockerAvailable: true,
+          canAutoStart: true,
+          reason: null,
+          detail: null,
+        })),
         isCommandAvailable: jest.fn(() => true),
         isPortListening: jest.fn(async (port) => port === 7777),
         runCommandSync: jest.fn(() => ({ status: 0, stdout: "", stderr: "" })),
@@ -347,7 +418,6 @@ describe("dev-all workflow contract", () => {
       };
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { runDevAllStart, getDevAllPaths } = require("./dev-all.js");
 
     const result = await runDevAllStart({ repoRoot });
@@ -410,7 +480,6 @@ describe("dev-all workflow contract", () => {
       };
     });
 
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { runDevAllStop } = require("./dev-all.js");
 
     const result = await runDevAllStop({ repoRoot });

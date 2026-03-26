@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
-import { summarizeMemberRoster } from "@/lib/dashboard/summary";
+import { enrichTeamMembers } from "@/lib/dashboard/summary";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useMemberStore, type CreateMemberInput, type UpdateMemberInput } from "@/lib/stores/member-store";
 import { useRoleStore } from "@/lib/stores/role-store";
@@ -13,17 +13,18 @@ export function TeamPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedProjectId = searchParams.get("project");
-
   const dashboardProjects = useDashboardStore((state) => state.projects);
   const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
-  const members = useDashboardStore((state) => state.members);
   const tasks = useDashboardStore((state) => state.tasks);
   const agents = useDashboardStore((state) => state.agents);
   const activity = useDashboardStore((state) => state.activity);
-  const loading = useDashboardStore((state) => state.loading);
-  const error = useDashboardStore((state) => state.error ?? state.sectionErrors.team ?? null);
+  const dashboardLoading = useDashboardStore((state) => state.loading);
   const fetchSummary = useDashboardStore((state) => state.fetchSummary);
 
+  const membersByProject = useMemberStore((state) => state.membersByProject);
+  const loadingByProject = useMemberStore((state) => state.loadingByProject);
+  const errorByProject = useMemberStore((state) => state.errorByProject);
+  const fetchMembers = useMemberStore((state) => state.fetchMembers);
   const createMember = useMemberStore((state) => state.createMember);
   const updateMember = useMemberStore((state) => state.updateMember);
   const roles = useRoleStore((state) => state.roles);
@@ -40,22 +41,32 @@ export function TeamPageClient() {
   );
 
   useEffect(() => {
-    void fetchSummary({ projectId: requestedProjectId });
-  }, [fetchSummary, requestedProjectId]);
+    void fetchSummary({ projectId: activeProjectId ?? requestedProjectId });
+  }, [activeProjectId, fetchSummary, requestedProjectId]);
+
+  useEffect(() => {
+    if (!activeProjectId) return;
+    void fetchMembers(activeProjectId);
+  }, [activeProjectId, fetchMembers]);
 
   useEffect(() => {
     void fetchRoles();
   }, [fetchRoles]);
 
+  const projectMembers = activeProjectId ? membersByProject[activeProjectId] ?? [] : [];
+  const loading = activeProjectId
+    ? Boolean(loadingByProject[activeProjectId]) || (dashboardLoading && projectMembers.length === 0)
+    : dashboardLoading;
+  const error = activeProjectId ? errorByProject[activeProjectId] ?? null : null;
   const roster = useMemo(
     () =>
-      summarizeMemberRoster({
-        members,
+      enrichTeamMembers({
+        members: projectMembers,
         tasks,
         agents,
         activity,
       }),
-    [activity, agents, members, tasks]
+    [activity, agents, projectMembers, tasks]
   );
 
   const handleProjectChange = (projectId: string) => {
@@ -65,12 +76,14 @@ export function TeamPageClient() {
   const handleCreateMember = async (input: CreateMemberInput) => {
     if (!activeProjectId) return;
     await createMember(activeProjectId, input);
+    await fetchMembers(activeProjectId);
     await fetchSummary({ projectId: activeProjectId });
   };
 
   const handleUpdateMember = async (memberId: string, input: UpdateMemberInput) => {
     if (!activeProjectId) return;
     await updateMember(memberId, activeProjectId, input);
+    await fetchMembers(activeProjectId);
     await fetchSummary({ projectId: activeProjectId });
   };
 
@@ -83,6 +96,9 @@ export function TeamPageClient() {
       error={error}
       availableRoles={roles}
       onRetry={() => {
+        if (activeProjectId) {
+          void fetchMembers(activeProjectId);
+        }
         void fetchSummary({ projectId: activeProjectId });
       }}
       onProjectChange={handleProjectChange}

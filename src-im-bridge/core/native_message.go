@@ -30,6 +30,61 @@ type FeishuCardPayload struct {
 	TemplateVariable    map[string]any  `json:"templateVariable,omitempty"`
 }
 
+func NewFeishuJSONCardMessage(payload map[string]any) (*NativeMessage, error) {
+	if len(payload) == 0 {
+		return nil, fmt.Errorf("feishu json card payload is required")
+	}
+	body, err := json.Marshal(payload)
+	if err != nil {
+		return nil, fmt.Errorf("encode feishu json card payload: %w", err)
+	}
+	message := &NativeMessage{
+		Platform: "feishu",
+		FeishuCard: &FeishuCardPayload{
+			Mode: FeishuCardModeJSON,
+			JSON: body,
+		},
+	}
+	return message, message.Validate()
+}
+
+func NewFeishuTemplateCardMessage(templateID, version string, variables map[string]any) (*NativeMessage, error) {
+	message := &NativeMessage{
+		Platform: "feishu",
+		FeishuCard: &FeishuCardPayload{
+			Mode:                FeishuCardModeTemplate,
+			TemplateID:          strings.TrimSpace(templateID),
+			TemplateVersionName: strings.TrimSpace(version),
+			TemplateVariable:    variables,
+		},
+	}
+	return message, message.Validate()
+}
+
+func NewFeishuMarkdownCardMessage(title, content string) (*NativeMessage, error) {
+	payload := map[string]any{
+		"config": map[string]any{
+			"wide_screen_mode": true,
+		},
+		"header": map[string]any{
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": strings.TrimSpace(title),
+			},
+		},
+		"elements": []map[string]any{
+			{
+				"tag": "div",
+				"text": map[string]any{
+					"tag":     "lark_md",
+					"content": strings.TrimSpace(content),
+				},
+			},
+		},
+	}
+	return NewFeishuJSONCardMessage(payload)
+}
+
 func (m *NativeMessage) NormalizedPlatform() string {
 	if m == nil {
 		return ""

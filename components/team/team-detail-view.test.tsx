@@ -41,6 +41,8 @@ const teamState = {
   fetchTeam,
   cancelTeam,
   retryTeam,
+  loadingById: {},
+  errorById: {},
 };
 
 const agentState = {
@@ -132,6 +134,7 @@ const useAgentStoreMock = jest.fn(
 jest.mock("@/lib/stores/team-store", () => ({
   useTeamStore: (selector: (state: typeof teamState) => unknown) =>
     useTeamStoreMock(selector),
+  getTeamStrategyLabel: () => "Planner → Coder → Reviewer",
 }));
 
 jest.mock("@/lib/stores/agent-store", () => ({
@@ -185,7 +188,7 @@ describe("TeamDetailView", () => {
   });
 
   it("shows a not-found state for unknown teams", () => {
-    const emptyTeamState = { ...teamState, teams: [] };
+    const emptyTeamState = { ...teamState, teams: [], loadingById: { "missing-team": false } };
     useTeamStoreMock.mockImplementationOnce(
       (selector: (state: typeof emptyTeamState) => unknown) =>
         selector(emptyTeamState),
@@ -193,5 +196,21 @@ describe("TeamDetailView", () => {
 
     render(<TeamDetailView teamId="missing-team" />);
     expect(screen.getByText("Team not found")).toBeInTheDocument();
+  });
+
+  it("shows a loading state while the team detail request is still in flight", () => {
+    const loadingTeamState = {
+      ...teamState,
+      teams: [],
+      loadingById: { "team-1": true },
+    };
+    useTeamStoreMock.mockImplementation(
+      (selector: (state: typeof loadingTeamState) => unknown) =>
+        selector(loadingTeamState),
+    );
+
+    render(<TeamDetailView teamId="team-1" />);
+    expect(screen.getByText("Loading team detail...")).toBeInTheDocument();
+    expect(screen.queryByText("Team not found")).not.toBeInTheDocument();
   });
 });

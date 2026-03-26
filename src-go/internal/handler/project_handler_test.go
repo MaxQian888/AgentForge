@@ -106,6 +106,29 @@ func (m *mockProjectRuntimeCatalogClient) GetRuntimeCatalog(_ context.Context) (
 	return m.response, nil
 }
 
+type mockProjectWikiBootstrap struct {
+	spaceCreatedFor uuid.UUID
+	templateSeeded  bool
+	deleteCalledFor uuid.UUID
+}
+
+func (m *mockProjectWikiBootstrap) CreateSpace(_ context.Context, projectID uuid.UUID) (*model.WikiSpace, error) {
+	m.spaceCreatedFor = projectID
+	return &model.WikiSpace{ID: uuid.New(), ProjectID: projectID}, nil
+}
+
+func (m *mockProjectWikiBootstrap) SeedBuiltInTemplates(_ context.Context, projectID uuid.UUID, spaceID uuid.UUID) ([]*model.WikiPage, error) {
+	_ = projectID
+	_ = spaceID
+	m.templateSeeded = true
+	return []*model.WikiPage{{ID: uuid.New(), SpaceID: spaceID, Title: "PRD"}}, nil
+}
+
+func (m *mockProjectWikiBootstrap) DeleteProjectSpace(_ context.Context, projectID uuid.UUID) error {
+	m.deleteCalledFor = projectID
+	return nil
+}
+
 func newProjectTestEcho() *echo.Echo {
 	e := echo.New()
 	e.Validator = &projectTestValidator{validator: validator.New()}
@@ -230,5 +253,39 @@ func TestProjectHandler_UpdateFallsBackToDefaultCatalogWhenBridgeUnavailable(t *
 	}
 	if len(body.CodingAgentCatalog.Runtimes) < 3 {
 		t.Fatalf("fallback runtime catalog = %+v", body.CodingAgentCatalog.Runtimes)
+	}
+}
+
+func TestProjectHandler_CreateBootstrapsWikiSpace(t *testing.T) {
+	repo := &mockProjectRepo{}
+	client := &mockProjectRuntimeCatalogClient{}
+	bootstrap := &mockProjectWikiBootstrap{}
+
+	e := newProjectTestEcho()
+	req := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/projects",
+		strings.NewReader(`{"name":"Docs","slug":"docs","description":"wiki"}`),
+	)
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	h := handler.NewProjectHandler(repo, client, bootstrap)
+	if err := h.Create(c); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+	if repo.lastCreate == nil {
+		t.Fatal("expected project create to be called")
+	}
+	if bootstrap.spaceCreatedFor != repo.lastCreate.ID {
+		t.Fatalf("space bootstrap project = %s, want %s", bootstrap.spaceCreatedFor, repo.lastCreate.ID)
+	}
+	if !bootstrap.templateSeeded {
+		t.Fatal("expected built-in templates to be seeded")
 	}
 }

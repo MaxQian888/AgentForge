@@ -1,0 +1,41 @@
+"use client";
+
+import type { DocsPageTreeNode } from "@/lib/stores/docs-store";
+import { PageTreeItem } from "./page-tree-item";
+
+export function PageTree({
+  nodes,
+  currentPageId,
+  onMovePage,
+  onToggleFavorite,
+  onTogglePinned,
+  onDeletePage,
+}: {
+  nodes: DocsPageTreeNode[];
+  currentPageId?: string | null;
+  onMovePage?: (pageId: string, parentId: string | null, sortOrder: number) => void;
+  onToggleFavorite?: (pageId: string, favorite: boolean) => void;
+  onTogglePinned?: (pageId: string, pinned: boolean) => void;
+  onDeletePage?: (pageId: string) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-1">
+      {nodes.map((node) => (
+        <PageTreeItem
+          key={node.id}
+          node={node}
+          currentPageId={currentPageId}
+          onMove={onMovePage}
+          onToggleFavorite={onToggleFavorite}
+          onTogglePinned={onTogglePinned}
+          onDelete={onDeletePage}
+        />
+      ))}
+      {nodes.length === 0 ? (
+        <div className="rounded-lg border border-dashed border-border/60 p-3 text-sm text-muted-foreground">
+          No pages yet. Create the first project doc to start the tree.
+        </div>
+      ) : null}
+    </div>
+  );
+}

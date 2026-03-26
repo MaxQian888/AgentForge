@@ -54,4 +54,33 @@ describe("useNotificationStore", () => {
     ]);
     expect(useNotificationStore.getState().unreadCount).toBe(1);
   });
+
+  it("upserts websocket replay notifications instead of duplicating them", () => {
+    useNotificationStore.getState().addNotification({
+      id: "notification-1",
+      type: "task_progress_stalled",
+      title: "Task stalled: Implement detector",
+      body: "Task Implement detector is stalled.",
+      createdAt: "2026-03-26T09:00:00.000Z",
+      isRead: false,
+    });
+
+    useNotificationStore.getState().addNotification({
+      id: "notification-1",
+      type: "task_progress_stalled",
+      title: "Task stalled: Implement detector",
+      body: "Task Implement detector is stalled.",
+      createdAt: "2026-03-26T09:00:00.000Z",
+      isRead: true,
+    });
+
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    expect(useNotificationStore.getState().notifications[0]).toEqual(
+      expect.objectContaining({
+        id: "notification-1",
+        read: true,
+      }),
+    );
+    expect(useNotificationStore.getState().unreadCount).toBe(0);
+  });
 });

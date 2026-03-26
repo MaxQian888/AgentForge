@@ -71,6 +71,7 @@ func (r *SprintRepository) Update(ctx context.Context, sprint *model.Sprint) err
 			"name":             sprint.Name,
 			"start_date":       sprint.StartDate,
 			"end_date":         sprint.EndDate,
+			"milestone_id":     sprint.MilestoneID,
 			"status":           sprint.Status,
 			"total_budget_usd": sprint.TotalBudgetUsd,
 			"spent_usd":        sprint.SpentUsd,
@@ -80,6 +81,36 @@ func (r *SprintRepository) Update(ctx context.Context, sprint *model.Sprint) err
 	}
 	if result.RowsAffected == 0 {
 		return fmt.Errorf("update sprint: %w", ErrNotFound)
+	}
+	return nil
+}
+
+// SumTaskSpent sums the spent_usd of all tasks in a sprint.
+func (r *SprintRepository) SumTaskSpent(ctx context.Context, sprintID uuid.UUID) (float64, error) {
+	if r.db == nil {
+		return 0, ErrDatabaseUnavailable
+	}
+	var total float64
+	if err := r.db.WithContext(ctx).
+		Table("tasks").
+		Where("sprint_id = ?", sprintID).
+		Select("COALESCE(SUM(spent_usd), 0)").
+		Scan(&total).Error; err != nil {
+		return 0, fmt.Errorf("sum task spent for sprint: %w", err)
+	}
+	return total, nil
+}
+
+// UpdateSpent updates the spent_usd field for a sprint.
+func (r *SprintRepository) UpdateSpent(ctx context.Context, sprintID uuid.UUID, spent float64) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&sprintRecord{}).
+		Where("id = ?", sprintID).
+		Update("spent_usd", spent).Error; err != nil {
+		return fmt.Errorf("update sprint spent: %w", err)
 	}
 	return nil
 }

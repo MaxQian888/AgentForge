@@ -1,182 +1,123 @@
-import {
-  filterMarketplaceEntries,
-  filterPluginRecords,
-  usePluginStore,
-  type MarketplacePluginEntry,
-  type PluginPanelFilters,
-  type PluginRecord,
-} from "./plugin-store";
-
-const mockGet = jest.fn();
-const mockPost = jest.fn();
-const mockPut = jest.fn();
-const mockDelete = jest.fn();
+const post = jest.fn();
+const get = jest.fn();
+const put = jest.fn();
+const del = jest.fn();
 
 jest.mock("@/lib/api-client", () => ({
-  createApiClient: () => ({
-    get: mockGet,
-    post: mockPost,
-    put: mockPut,
-    delete: mockDelete,
-  }),
+  createApiClient: jest.fn(() => ({
+    post,
+    get,
+    put,
+    delete: del,
+  })),
 }));
 
 jest.mock("./auth-store", () => ({
-  useAuthStore: { getState: () => ({ accessToken: "test-token" }) },
+  useAuthStore: {
+    getState: () => ({
+      accessToken: "test-token",
+    }),
+  },
 }));
 
-const samplePlugin: PluginRecord = {
-  apiVersion: "plugin.agentforge.dev/v1",
-  kind: "ToolPlugin",
-  metadata: {
-    id: "github-tool",
-    name: "GitHub Tool",
-    version: "1.0.0",
-    description: "GitHub integration",
-    tags: ["github", "tool"],
-  },
-  spec: {
-    runtime: "mcp",
-    command: "npx",
-    args: ["github-tool"],
-  },
-  permissions: {
-    network: { required: true, domains: ["api.github.com"] },
-  },
-  source: { type: "builtin" },
-  lifecycle_state: "active",
-  runtime_host: "ts-bridge",
-  restart_count: 2,
-  resolved_source_path: "/plugins/github-tool",
-};
+import {
+  DEFAULT_PLUGIN_PANEL_FILTERS,
+  usePluginStore,
+  type PluginRecord,
+} from "./plugin-store";
 
-const sampleFilters: PluginPanelFilters = {
-  query: "",
-  kind: "all",
-  lifecycleState: "all",
-  runtimeHost: "all",
-  sourceType: "all",
-};
+describe("plugin store control-plane actions", () => {
+  beforeEach(() => {
+    post.mockReset();
+    get.mockReset();
+    put.mockReset();
+    del.mockReset();
 
-beforeEach(() => {
-  usePluginStore.setState({
-    plugins: [],
-    builtins: [],
-    marketplace: [],
-    filters: sampleFilters,
-    selectedPluginId: null,
-    loading: false,
-    error: null,
-  });
-  mockGet.mockReset();
-  mockPost.mockReset();
-  mockPut.mockReset();
-  mockDelete.mockReset();
-});
-
-describe("usePluginStore", () => {
-  it("loads marketplace plugin entries", async () => {
-    const marketplace: MarketplacePluginEntry[] = [
-      {
-        id: "role-coder",
-        name: "Coder Role",
-        description: "Default coding role",
-        version: "1.0.0",
-        author: "AgentForge",
-        kind: "role",
-        installUrl: "",
-      },
-    ];
-
-    mockGet.mockResolvedValueOnce({ data: marketplace });
-
-    await usePluginStore.getState().fetchMarketplace();
-
-    expect(mockGet).toHaveBeenCalledWith("/api/v1/plugins/marketplace", {
-      token: "test-token",
+    usePluginStore.setState({
+      plugins: [],
+      builtins: [],
+      marketplace: [],
+      catalogResults: [],
+      catalogQuery: "",
+      events: {},
+      mcpSnapshots: {},
+      workflowRuns: {},
+      selectedWorkflowRunId: null,
+      filters: DEFAULT_PLUGIN_PANEL_FILTERS,
+      selectedPluginId: null,
+      loading: false,
+      error: null,
     });
-    expect(usePluginStore.getState().marketplace).toEqual(marketplace);
   });
 
-  it("tracks panel filters and selected plugin", () => {
-    usePluginStore.getState().setFilters({
-      kind: "ToolPlugin",
-      runtimeHost: "ts-bridge",
-      query: "github",
-    });
-    usePluginStore.getState().selectPlugin("github-tool");
-
-    expect(usePluginStore.getState().filters).toEqual({
-      ...sampleFilters,
-      kind: "ToolPlugin",
-      runtimeHost: "ts-bridge",
-      query: "github",
-    });
-    expect(usePluginStore.getState().selectedPluginId).toBe("github-tool");
-
-    usePluginStore.getState().resetFilters();
-    expect(usePluginStore.getState().filters).toEqual(sampleFilters);
-  });
-});
-
-describe("plugin panel filter helpers", () => {
-  it("filters installed plugin records by kind, state, host, source, and query", () => {
-    const results = filterPluginRecords(
-      [
-        samplePlugin,
-        {
-          ...samplePlugin,
-          metadata: {
-            ...samplePlugin.metadata,
-            id: "review-plugin",
-            name: "Review Plugin",
-          },
-          kind: "ReviewPlugin",
-          lifecycle_state: "disabled",
-          runtime_host: "ts-bridge",
-          source: { type: "local" },
+  it("uses tool_name when proxying MCP tool calls", async () => {
+    post.mockResolvedValue({
+      data: {
+        plugin_id: "repo-search",
+        operation: "call_tool",
+        result: {
+          content: [{ type: "text", text: "found 3 files" }],
+          isError: false,
         },
-      ],
-      {
-        query: "git",
-        kind: "ToolPlugin",
-        lifecycleState: "active",
-        runtimeHost: "ts-bridge",
-        sourceType: "builtin",
       },
-    );
-
-    expect(results).toEqual([samplePlugin]);
-  });
-
-  it("filters marketplace entries by kind and query without requiring install support", () => {
-    const entries: MarketplacePluginEntry[] = [
-      {
-        id: "role-coder",
-        name: "Coder Role",
-        description: "Coding role",
-        version: "1.0.0",
-        author: "AgentForge",
-        kind: "role",
-        installUrl: "",
-      },
-      {
-        id: "tool-github",
-        name: "GitHub Tool",
-        description: "GitHub MCP",
-        version: "1.0.0",
-        author: "AgentForge",
-        kind: "tool",
-        installUrl: "https://example.com/tool-github",
-      },
-    ];
-
-    const results = filterMarketplaceEntries(entries, {
-      ...sampleFilters,
-      query: "git",
-      kind: "all",
+      status: 200,
     });
 
-    expect(results).toEqual([entries[1]]);
+    const result = await usePluginStore
+      .getState()
+      .callMCPTool("repo-search", "search", { query: "bridge" });
+
+    expect(post).toHaveBeenCalledWith(
+      "/api/v1/plugins/repo-search/mcp/tools/call",
+      { tool_name: "search", arguments: { query: "bridge" } },
+      { token: "test-token" },
+    );
+    expect(result).toEqual({
+      content: [{ type: "text", text: "found 3 files" }],
+      isError: false,
+    });
+  });
+
+  it("uses the plugin source path and metadata when updating a plugin", async () => {
+    post.mockResolvedValue({
+      data: {},
+      status: 200,
+    });
+
+    const plugin: PluginRecord = {
+      apiVersion: "plugin.agentforge.dev/v1",
+      kind: "ToolPlugin",
+      metadata: {
+        id: "repo-search",
+        name: "Repo Search",
+        version: "1.0.0",
+      },
+      spec: {
+        runtime: "mcp",
+      },
+      permissions: {},
+      source: {
+        type: "local",
+        path: "/plugins/repo-search/manifest.yaml",
+        release: {
+          version: "1.0.0",
+          availableVersion: "1.1.0",
+        },
+      },
+      lifecycle_state: "active",
+      runtime_host: "ts-bridge",
+      restart_count: 0,
+    };
+
+    await usePluginStore.getState().updatePlugin(plugin);
+
+    expect(post).toHaveBeenCalledWith(
+      "/api/v1/plugins/repo-search/update",
+      {
+        path: "/plugins/repo-search/manifest.yaml",
+        source: plugin.source,
+      },
+      { token: "test-token" },
+    );
   });
 });

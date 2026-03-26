@@ -20,8 +20,10 @@ import {
 } from "@/components/ui/card";
 import { Separator } from "@/components/ui/separator";
 import { PluginCard } from "@/components/plugins/plugin-card";
+import { PluginDetailSidebar } from "@/components/plugins/plugin-detail-sidebar";
 import { PluginInstallDialog } from "@/components/plugins/plugin-install-dialog";
 import { PluginConfigDialog } from "@/components/plugins/plugin-config-dialog";
+import { PluginInvokeDialog } from "@/components/plugins/plugin-invoke-dialog";
 import { usePlatformCapability } from "@/hooks/use-platform-capability";
 import type {
   DesktopUpdateInfo,
@@ -70,32 +72,6 @@ const EMPTY_PLUGIN_RUNTIME_SUMMARY: PluginRuntimeSummary = {
   warnings: [],
 };
 
-function renderPermissions(plugin: PluginRecord): string {
-  const permissions: string[] = [];
-
-  if (plugin.permissions.network?.required) {
-    permissions.push(
-      `Network${
-        plugin.permissions.network.domains?.length
-          ? ` (${plugin.permissions.network.domains.join(", ")})`
-          : ""
-      }`,
-    );
-  }
-
-  if (plugin.permissions.filesystem?.required) {
-    permissions.push(
-      `Filesystem${
-        plugin.permissions.filesystem.allowed_paths?.length
-          ? ` (${plugin.permissions.filesystem.allowed_paths.join(", ")})`
-          : ""
-      }`,
-    );
-  }
-
-  return permissions.length > 0 ? permissions.join(" · ") : "No declared permissions";
-}
-
 function renderRuntimeTone(status: DesktopRuntimeStatus["overall"]): "default" | "destructive" | "secondary" {
   if (status === "ready") {
     return "default";
@@ -119,7 +95,7 @@ export default function PluginsPage() {
   const fetchPlugins = usePluginStore((s) => s.fetchPlugins);
   const discoverBuiltins = usePluginStore((s) => s.discoverBuiltins);
   const fetchMarketplace = usePluginStore((s) => s.fetchMarketplace);
-  const installLocal = usePluginStore((s) => s.installLocal);
+  const installFromCatalog = usePluginStore((s) => s.installFromCatalog);
   const setFilters = usePluginStore((s) => s.setFilters);
   const resetFilters = usePluginStore((s) => s.resetFilters);
   const selectPlugin = usePluginStore((s) => s.selectPlugin);
@@ -138,6 +114,8 @@ export default function PluginsPage() {
   const [installOpen, setInstallOpen] = useState(false);
   const [configPlugin, setConfigPlugin] = useState<PluginRecord | null>(null);
   const [configOpen, setConfigOpen] = useState(false);
+  const [invokePlugin, setInvokePlugin] = useState<PluginRecord | null>(null);
+  const [invokeOpen, setInvokeOpen] = useState(false);
   const [searchQuery, setSearchQuery] = useState(filters.query);
   const [desktopRuntime, setDesktopRuntime] =
     useState<DesktopRuntimeStatus>(EMPTY_RUNTIME_STATUS);
@@ -159,6 +137,11 @@ export default function PluginsPage() {
   const handleConfigure = useCallback((plugin: PluginRecord) => {
     setConfigPlugin(plugin);
     setConfigOpen(true);
+  }, []);
+
+  const handleInvoke = useCallback((plugin: PluginRecord) => {
+    setInvokePlugin(plugin);
+    setInvokeOpen(true);
   }, []);
 
   const loadDesktopState = useEffectEvent(async () => {
@@ -215,8 +198,13 @@ export default function PluginsPage() {
 
   const handleDesktopNotification = useCallback(async () => {
     const result = await sendNotification({
+      notificationId: `plugins-desktop-runtime-${desktopRuntime.overall}`,
+      type: "desktop.runtime.status",
       title: "AgentForge Desktop",
       body: `Desktop runtime is currently ${desktopRuntime.overall}.`,
+      href: "/plugins",
+      createdAt: new Date().toISOString(),
+      deliveryPolicy: "always",
     });
 
     setDesktopMessage(
@@ -308,7 +296,10 @@ export default function PluginsPage() {
   );
 
   const filteredMarketplace = useMemo(
-    () => filterMarketplaceEntries(marketplace, filters),
+    () =>
+      filterMarketplaceEntries(marketplace, filters).filter(
+        (entry) => entry.sourceType !== "builtin",
+      ),
     [marketplace, filters],
   );
 
@@ -661,6 +652,7 @@ export default function PluginsPage() {
                     key={plugin.metadata.id}
                     plugin={plugin}
                     onConfigure={handleConfigure}
+                    onInvoke={handleInvoke}
                     onSelect={(entry) => selectPlugin(entry.metadata.id)}
                     selected={selectedPlugin?.metadata.id === plugin.metadata.id}
                   />
@@ -715,11 +707,7 @@ export default function PluginsPage() {
                         variant="outline"
                         size="sm"
                         className="w-fit"
-                        onClick={() =>
-                          void installLocal(
-                            builtin.source.path ?? builtin.metadata.id,
-                          )
-                        }
+                        onClick={() => void installFromCatalog(builtin.metadata.id)}
                         disabled={loading}
                       >
                         <Download className="mr-1 size-3.5" />
@@ -765,11 +753,31 @@ export default function PluginsPage() {
                         {entry.description}
                       </p>
                       <div className="flex flex-wrap items-center gap-2">
-                        <Badge variant="secondary">Browse only</Badge>
-                        <span className="text-xs text-muted-foreground">
-                          Remote marketplace installation is not wired into the
-                          current platform contract yet.
-                        </span>
+                        {entry.installed ? (
+                          <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+                            Installed
+                          </Badge>
+                        ) : entry.sourceType === "builtin" ? (
+                          <Badge variant="secondary">Built-in</Badge>
+                        ) : entry.sourceType === "catalog" ? (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void installFromCatalog(entry.id)}
+                            disabled={loading}
+                          >
+                            <Download className="mr-1 size-3.5" />
+                            Install
+                          </Button>
+                        ) : (
+                          <>
+                            <Badge variant="secondary">Browse only</Badge>
+                            <span className="text-xs text-muted-foreground">
+                              Remote marketplace installation is not wired into the
+                              current platform contract yet.
+                            </span>
+                          </>
+                        )}
                       </div>
                     </CardContent>
                   </Card>
@@ -779,93 +787,7 @@ export default function PluginsPage() {
           </section>
         </div>
 
-        <Card className="h-fit">
-          <CardHeader>
-            <CardTitle>Plugin details</CardTitle>
-            <CardDescription>
-              Inspect runtime, permissions, health, and source metadata for the
-              selected installed plugin.
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="flex flex-col gap-4">
-            {selectedPlugin ? (
-              <>
-                <div className="flex items-start justify-between gap-3">
-                  <div>
-                    <h3 className="text-lg font-semibold">
-                      {selectedPlugin.metadata.name}
-                    </h3>
-                    <p className="text-sm text-muted-foreground">
-                      {selectedPlugin.metadata.description ||
-                        "No plugin description provided."}
-                    </p>
-                  </div>
-                  <Badge variant="secondary">
-                    {selectedPlugin.lifecycle_state}
-                  </Badge>
-                </div>
-
-                <div className="grid gap-3 text-sm">
-                  <div className="rounded-lg border border-border/60 p-3">
-                    <p className="font-medium">Runtime host</p>
-                    <p className="text-muted-foreground">
-                      {selectedPlugin.runtime_host ?? "Not executable"}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-border/60 p-3">
-                    <p className="font-medium">Runtime declaration</p>
-                    <p className="text-muted-foreground">
-                      {selectedPlugin.spec.runtime}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-border/60 p-3">
-                    <p className="font-medium">Permissions</p>
-                    <p className="text-muted-foreground">
-                      {renderPermissions(selectedPlugin)}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-border/60 p-3">
-                    <p className="font-medium">Resolved source path</p>
-                    <p className="text-muted-foreground">
-                      {selectedPlugin.resolved_source_path ??
-                        selectedPlugin.source.path ??
-                        "No resolved source path"}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-border/60 p-3">
-                    <p className="font-medium">Runtime metadata</p>
-                    <p className="text-muted-foreground">
-                      ABI {selectedPlugin.runtime_metadata?.abi_version ?? "n/a"} · Compatible{" "}
-                      {selectedPlugin.runtime_metadata?.compatible ? "yes" : "no"}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-border/60 p-3">
-                    <p className="font-medium">Restart count</p>
-                    <p className="text-muted-foreground">
-                      {selectedPlugin.restart_count}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-border/60 p-3">
-                    <p className="font-medium">Last health</p>
-                    <p className="text-muted-foreground">
-                      {selectedPlugin.last_health_at ?? "Not recorded yet"}
-                    </p>
-                  </div>
-                  <div className="rounded-lg border border-border/60 p-3">
-                    <p className="font-medium">Last error</p>
-                    <p className="text-muted-foreground">
-                      {selectedPlugin.last_error || "No recent runtime errors"}
-                    </p>
-                  </div>
-                </div>
-              </>
-            ) : (
-              <div className="rounded-md border border-dashed px-4 py-8 text-sm text-muted-foreground">
-                Select an installed plugin to inspect operational details.
-              </div>
-            )}
-          </CardContent>
-        </Card>
+        <PluginDetailSidebar plugin={selectedPlugin} />
       </div>
 
       <PluginInstallDialog open={installOpen} onOpenChange={setInstallOpen} />
@@ -873,6 +795,11 @@ export default function PluginsPage() {
         plugin={configPlugin}
         open={configOpen}
         onOpenChange={setConfigOpen}
+      />
+      <PluginInvokeDialog
+        plugin={invokePlugin}
+        open={invokeOpen}
+        onOpenChange={setInvokeOpen}
       />
     </div>
   );

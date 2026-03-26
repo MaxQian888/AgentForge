@@ -9,16 +9,17 @@ import (
 )
 
 type Sprint struct {
-	ID             uuid.UUID `db:"id"`
-	ProjectID      uuid.UUID `db:"project_id"`
-	Name           string    `db:"name"`
-	StartDate      time.Time `db:"start_date"`
-	EndDate        time.Time `db:"end_date"`
-	Status         string    `db:"status"`
-	TotalBudgetUsd float64  `db:"total_budget_usd"`
-	SpentUsd       float64   `db:"spent_usd"`
-	CreatedAt      time.Time `db:"created_at"`
-	UpdatedAt      time.Time `db:"updated_at"`
+	ID             uuid.UUID  `db:"id"`
+	ProjectID      uuid.UUID  `db:"project_id"`
+	Name           string     `db:"name"`
+	StartDate      time.Time  `db:"start_date"`
+	EndDate        time.Time  `db:"end_date"`
+	MilestoneID    *uuid.UUID `db:"milestone_id"`
+	Status         string     `db:"status"`
+	TotalBudgetUsd float64    `db:"total_budget_usd"`
+	SpentUsd       float64    `db:"spent_usd"`
+	CreatedAt      time.Time  `db:"created_at"`
+	UpdatedAt      time.Time  `db:"updated_at"`
 }
 
 const (
@@ -33,6 +34,7 @@ type SprintDTO struct {
 	Name           string  `json:"name"`
 	StartDate      string  `json:"startDate"`
 	EndDate        string  `json:"endDate"`
+	MilestoneID    *string `json:"milestoneId,omitempty"`
 	Status         string  `json:"status"`
 	TotalBudgetUsd float64 `json:"totalBudgetUsd"`
 	SpentUsd       float64 `json:"spentUsd"`
@@ -50,6 +52,7 @@ type UpdateSprintRequest struct {
 	Name           *string  `json:"name"`
 	StartDate      *string  `json:"startDate"`
 	EndDate        *string  `json:"endDate"`
+	MilestoneID    *string  `json:"milestoneId"`
 	Status         *string  `json:"status"`
 	TotalBudgetUsd *float64 `json:"totalBudgetUsd"`
 }
@@ -81,19 +84,19 @@ type SprintBurndownPointDTO struct {
 }
 
 type SprintMetricsDTO struct {
-	Sprint          SprintDTO               `json:"sprint"`
-	PlannedTasks    int                     `json:"plannedTasks"`
-	CompletedTasks  int                     `json:"completedTasks"`
-	RemainingTasks  int                     `json:"remainingTasks"`
-	CompletionRate  float64                 `json:"completionRate"`
-	VelocityPerWeek float64                 `json:"velocityPerWeek"`
-	TaskBudgetUsd   float64                 `json:"taskBudgetUsd"`
-	TaskSpentUsd    float64                 `json:"taskSpentUsd"`
+	Sprint          SprintDTO                `json:"sprint"`
+	PlannedTasks    int                      `json:"plannedTasks"`
+	CompletedTasks  int                      `json:"completedTasks"`
+	RemainingTasks  int                      `json:"remainingTasks"`
+	CompletionRate  float64                  `json:"completionRate"`
+	VelocityPerWeek float64                  `json:"velocityPerWeek"`
+	TaskBudgetUsd   float64                  `json:"taskBudgetUsd"`
+	TaskSpentUsd    float64                  `json:"taskSpentUsd"`
 	Burndown        []SprintBurndownPointDTO `json:"burndown"`
 }
 
 func (s *Sprint) ToDTO() SprintDTO {
-	return SprintDTO{
+	dto := SprintDTO{
 		ID:             s.ID.String(),
 		ProjectID:      s.ProjectID.String(),
 		Name:           s.Name,
@@ -104,6 +107,11 @@ func (s *Sprint) ToDTO() SprintDTO {
 		SpentUsd:       s.SpentUsd,
 		CreatedAt:      s.CreatedAt.Format(time.RFC3339),
 	}
+	if s.MilestoneID != nil {
+		value := s.MilestoneID.String()
+		dto.MilestoneID = &value
+	}
+	return dto
 }
 
 func BuildSprintMetricsDTO(sprint *Sprint, tasks []*Task, now time.Time) SprintMetricsDTO {

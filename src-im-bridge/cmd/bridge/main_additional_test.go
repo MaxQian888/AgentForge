@@ -80,6 +80,63 @@ func TestBackendActionRelay_HandleAction_UsesRequestPlatformAndBridgeContext(t *
 	}
 }
 
+func TestBackendActionRelay_ForwardsStructuredAndNative(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(client.IMActionResponse{
+			Result:  "Agent dispatched",
+			Success: true,
+			Status:  "started",
+			Structured: &core.StructuredMessage{
+				Title: "Agent Dispatched",
+				Body:  "Run run-1 started for task-1.",
+				Fields: []core.StructuredField{
+					{Label: "Task", Value: "task-1"},
+					{Label: "Run", Value: "run-1"},
+				},
+			},
+			Native: &core.NativeMessage{
+				Platform: "feishu",
+				FeishuCard: &core.FeishuCardPayload{
+					Mode: "json",
+					JSON: json.RawMessage(`{"header":{"title":{"tag":"plain_text","content":"Dispatched"}}}`),
+				},
+			},
+			Metadata: map[string]string{"action_status": "started"},
+		})
+	}))
+	defer server.Close()
+
+	relay := &backendActionRelay{
+		client:   client.NewAgentForgeClient(server.URL, "proj", "secret"),
+		bridgeID: "bridge-default",
+	}
+
+	resp, err := relay.HandleAction(context.Background(), &notify.ActionRequest{
+		Action:   "assign-agent",
+		EntityID: "task-1",
+		ChatID:   "C123",
+	})
+	if err != nil {
+		t.Fatalf("HandleAction error: %v", err)
+	}
+	if resp.Result != "Agent dispatched" {
+		t.Fatalf("Result = %q", resp.Result)
+	}
+	if resp.Structured == nil || resp.Structured.Title != "Agent Dispatched" {
+		t.Fatalf("Structured = %+v", resp.Structured)
+	}
+	if len(resp.Structured.Fields) != 2 {
+		t.Fatalf("Structured.Fields = %d, want 2", len(resp.Structured.Fields))
+	}
+	if resp.Native == nil || resp.Native.Platform != "feishu" {
+		t.Fatalf("Native = %+v", resp.Native)
+	}
+	if resp.Metadata["action_status"] != "started" {
+		t.Fatalf("Metadata = %+v", resp.Metadata)
+	}
+}
+
 func TestBackendActionRelay_HandleAction_NilInputsAreSafe(t *testing.T) {
 	var relay *backendActionRelay
 	resp, err := relay.HandleAction(context.Background(), nil)

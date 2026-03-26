@@ -234,6 +234,13 @@ func (m *mockTeamTaskRepo) CreateChildren(_ context.Context, inputs []model.Task
 	return children, nil
 }
 
+func (m *mockTeamTaskRepo) ListChildren(_ context.Context, parentID uuid.UUID) ([]*model.Task, error) {
+	if m.createdChildTasks != nil {
+		return m.createdChildTasks, nil
+	}
+	return nil, nil
+}
+
 type mockTeamProjectRepo struct {
 	project *model.Project
 }

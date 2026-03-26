@@ -1,5 +1,10 @@
 package model
 
+import (
+	"encoding/json"
+	"strings"
+)
+
 // IMMessageRequest represents an incoming IM message webhook.
 type IMMessageRequest struct {
 	Platform  string `json:"platform" validate:"required,oneof=feishu dingtalk slack telegram discord wecom"`
@@ -34,28 +39,34 @@ type IMCommandResponse struct {
 
 // IMSendRequest sends a message to an IM channel.
 type IMSendRequest struct {
-	Platform    string         `json:"platform" validate:"required"`
-	ChannelID   string         `json:"channelId" validate:"required"`
-	Text        string         `json:"text" validate:"required"`
-	ThreadID    string         `json:"threadId,omitempty"`
-	ProjectID   string         `json:"projectId,omitempty"`
-	BridgeID    string         `json:"bridgeId,omitempty"`
-	DeliveryID  string         `json:"deliveryId,omitempty"`
-	ReplyTarget *IMReplyTarget `json:"replyTarget,omitempty"`
+	Platform    string               `json:"platform" validate:"required"`
+	ChannelID   string               `json:"channelId" validate:"required"`
+	Text        string               `json:"text" validate:"required"`
+	ThreadID    string               `json:"threadId,omitempty"`
+	ProjectID   string               `json:"projectId,omitempty"`
+	BridgeID    string               `json:"bridgeId,omitempty"`
+	DeliveryID  string               `json:"deliveryId,omitempty"`
+	Structured  *IMStructuredMessage `json:"structured,omitempty"`
+	Native      *IMNativeMessage     `json:"native,omitempty"`
+	Metadata    map[string]string    `json:"metadata,omitempty"`
+	ReplyTarget *IMReplyTarget       `json:"replyTarget,omitempty"`
 }
 
 // IMNotifyRequest sends a notification event to an IM channel.
 type IMNotifyRequest struct {
-	Platform    string         `json:"platform" validate:"required"`
-	ChannelID   string         `json:"channelId" validate:"required"`
-	Event       string         `json:"event" validate:"required"`
-	Title       string         `json:"title"`
-	Body        string         `json:"body"`
-	Data        any            `json:"data,omitempty"`
-	ProjectID   string         `json:"projectId,omitempty"`
-	BridgeID    string         `json:"bridgeId,omitempty"`
-	DeliveryID  string         `json:"deliveryId,omitempty"`
-	ReplyTarget *IMReplyTarget `json:"replyTarget,omitempty"`
+	Platform    string               `json:"platform" validate:"required"`
+	ChannelID   string               `json:"channelId" validate:"required"`
+	Event       string               `json:"event" validate:"required"`
+	Title       string               `json:"title"`
+	Body        string               `json:"body"`
+	Data        any                  `json:"data,omitempty"`
+	ProjectID   string               `json:"projectId,omitempty"`
+	BridgeID    string               `json:"bridgeId,omitempty"`
+	DeliveryID  string               `json:"deliveryId,omitempty"`
+	Structured  *IMStructuredMessage `json:"structured,omitempty"`
+	Native      *IMNativeMessage     `json:"native,omitempty"`
+	Metadata    map[string]string    `json:"metadata,omitempty"`
+	ReplyTarget *IMReplyTarget       `json:"replyTarget,omitempty"`
 }
 
 // IMActionRequest represents a button click callback from IM.
@@ -72,11 +83,25 @@ type IMActionRequest struct {
 
 // IMActionResponse is the result of processing an IM button action.
 type IMActionResponse struct {
-	Result      string            `json:"result"`
-	Success     bool              `json:"success"`
-	ReplyTarget *IMReplyTarget    `json:"replyTarget,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	Result        string                     `json:"result"`
+	Success       bool                       `json:"success"`
+	Status        string                     `json:"status,omitempty"`
+	Task          *TaskDTO                   `json:"task,omitempty"`
+	Dispatch      *DispatchOutcome           `json:"dispatch,omitempty"`
+	Decomposition *TaskDecompositionResponse `json:"decomposition,omitempty"`
+	Review        *ReviewDTO                 `json:"review,omitempty"`
+	ReplyTarget   *IMReplyTarget             `json:"replyTarget,omitempty"`
+	Metadata      map[string]string          `json:"metadata,omitempty"`
+	Structured    *IMStructuredMessage       `json:"structured,omitempty"`
+	Native        *IMNativeMessage           `json:"native,omitempty"`
 }
+
+const (
+	IMActionStatusStarted   = "started"
+	IMActionStatusCompleted = "completed"
+	IMActionStatusBlocked   = "blocked"
+	IMActionStatusFailed    = "failed"
+)
 
 // IMIntentRequest represents a natural language message for intent classification.
 type IMIntentRequest struct {
@@ -112,6 +137,111 @@ type IMReplyTarget struct {
 	PreferredRenderer  string            `json:"preferredRenderer,omitempty"`
 	ProgressMode       string            `json:"progressMode,omitempty"`
 	Metadata           map[string]string `json:"metadata,omitempty"`
+}
+
+type IMStructuredField struct {
+	Label string `json:"label,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
+type IMStructuredAction struct {
+	ID    string `json:"id,omitempty"`
+	Label string `json:"label,omitempty"`
+	URL   string `json:"url,omitempty"`
+	Style string `json:"style,omitempty"`
+}
+
+type IMStructuredMessage struct {
+	Title   string               `json:"title,omitempty"`
+	Body    string               `json:"body,omitempty"`
+	Fields  []IMStructuredField  `json:"fields,omitempty"`
+	Actions []IMStructuredAction `json:"actions,omitempty"`
+}
+
+func (m *IMStructuredMessage) FallbackText() string {
+	if m == nil {
+		return ""
+	}
+	lines := make([]string, 0, 2+len(m.Fields)+len(m.Actions))
+	if title := strings.TrimSpace(m.Title); title != "" {
+		lines = append(lines, title)
+	}
+	if body := strings.TrimSpace(m.Body); body != "" {
+		lines = append(lines, body)
+	}
+	for _, field := range m.Fields {
+		label := strings.TrimSpace(field.Label)
+		value := strings.TrimSpace(field.Value)
+		switch {
+		case label == "" && value == "":
+			continue
+		case label == "":
+			lines = append(lines, value)
+		default:
+			lines = append(lines, label+": "+value)
+		}
+	}
+	for _, action := range m.Actions {
+		label := strings.TrimSpace(action.Label)
+		url := strings.TrimSpace(action.URL)
+		switch {
+		case label != "" && url != "":
+			lines = append(lines, label+": "+url)
+		case label != "":
+			lines = append(lines, label)
+		case url != "":
+			lines = append(lines, url)
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n"))
+}
+
+type IMNativeMessage struct {
+	Platform   string               `json:"platform,omitempty"`
+	FeishuCard *IMFeishuCardPayload `json:"feishuCard,omitempty"`
+}
+
+type IMFeishuCardPayload struct {
+	Mode                string          `json:"mode,omitempty"`
+	JSON                json.RawMessage `json:"json,omitempty"`
+	TemplateID          string          `json:"templateId,omitempty"`
+	TemplateVersionName string          `json:"templateVersionName,omitempty"`
+	TemplateVariable    map[string]any  `json:"templateVariable,omitempty"`
+}
+
+type IMChannel struct {
+	ID         string   `json:"id"`
+	Platform   string   `json:"platform"`
+	Name       string   `json:"name"`
+	ChannelID  string   `json:"channelId"`
+	WebhookURL string   `json:"webhookUrl"`
+	Events     []string `json:"events"`
+	Active     bool     `json:"active"`
+}
+
+type IMBridgeStatus struct {
+	Registered    bool     `json:"registered"`
+	LastHeartbeat *string  `json:"lastHeartbeat"`
+	Providers     []string `json:"providers"`
+	Health        string   `json:"health"`
+}
+
+type IMDeliveryStatus string
+
+const (
+	IMDeliveryStatusDelivered  IMDeliveryStatus = "delivered"
+	IMDeliveryStatusSuppressed IMDeliveryStatus = "suppressed"
+	IMDeliveryStatusFailed     IMDeliveryStatus = "failed"
+)
+
+type IMDelivery struct {
+	ID            string           `json:"id"`
+	ChannelID     string           `json:"channelId"`
+	Platform      string           `json:"platform"`
+	EventType     string           `json:"eventType"`
+	Status        IMDeliveryStatus `json:"status"`
+	FailureReason string           `json:"failureReason,omitempty"`
+	CreatedAt     string           `json:"createdAt"`
 }
 
 // IMBridgeRegisterRequest registers a Bridge runtime instance.
@@ -151,17 +281,20 @@ type IMBridgeHeartbeatResponse struct {
 
 // IMControlDelivery is the backend-to-Bridge control-plane payload.
 type IMControlDelivery struct {
-	Cursor         int64          `json:"cursor"`
-	DeliveryID     string         `json:"deliveryId"`
-	TargetBridgeID string         `json:"targetBridgeId"`
-	Platform       string         `json:"platform"`
-	ProjectID      string         `json:"projectId,omitempty"`
-	Kind           string         `json:"kind"`
-	Content        string         `json:"content"`
-	TargetChatID   string         `json:"targetChatId,omitempty"`
-	ReplyTarget    *IMReplyTarget `json:"replyTarget,omitempty"`
-	Timestamp      string         `json:"timestamp"`
-	Signature      string         `json:"signature,omitempty"`
+	Cursor         int64                `json:"cursor"`
+	DeliveryID     string               `json:"deliveryId"`
+	TargetBridgeID string               `json:"targetBridgeId"`
+	Platform       string               `json:"platform"`
+	ProjectID      string               `json:"projectId,omitempty"`
+	Kind           string               `json:"kind"`
+	Content        string               `json:"content"`
+	Structured     *IMStructuredMessage `json:"structured,omitempty"`
+	Native         *IMNativeMessage     `json:"native,omitempty"`
+	Metadata       map[string]string    `json:"metadata,omitempty"`
+	TargetChatID   string               `json:"targetChatId,omitempty"`
+	ReplyTarget    *IMReplyTarget       `json:"replyTarget,omitempty"`
+	Timestamp      string               `json:"timestamp"`
+	Signature      string               `json:"signature,omitempty"`
 }
 
 // IMDeliveryAck acknowledges the last successfully processed delivery cursor.

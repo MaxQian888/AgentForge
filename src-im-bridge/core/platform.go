@@ -26,6 +26,27 @@ type StructuredSender interface {
 	SendStructured(ctx context.Context, chatID string, message *StructuredMessage) error
 }
 
+// FormattedText captures a text payload with an explicit provider text mode.
+type FormattedText struct {
+	Content string
+	Format  TextFormatMode
+}
+
+// FormattedTextSender is an optional interface for platforms that support
+// provider-aware text formatting modes beyond plain text.
+type FormattedTextSender interface {
+	SendFormattedText(ctx context.Context, chatID string, message *FormattedText) error
+	ReplyFormattedText(ctx context.Context, replyCtx any, message *FormattedText) error
+	UpdateFormattedText(ctx context.Context, replyCtx any, message *FormattedText) error
+}
+
+// NativeTextMessageBuilder is an optional interface for platforms that can
+// build a provider-native richer message representation from plain completion
+// text.
+type NativeTextMessageBuilder interface {
+	BuildNativeTextMessage(title, content string) (*NativeMessage, error)
+}
+
 // NativeMessageSender is an optional interface for platforms that support a
 // provider-native payload surface that cannot be faithfully represented as a
 // generic structured message.

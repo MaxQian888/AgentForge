@@ -9,8 +9,8 @@ const replace = jest.fn();
 const fetchSummary = jest.fn();
 const createMember = jest.fn();
 const updateMember = jest.fn();
+const fetchMembers = jest.fn();
 const fetchRoles = jest.fn();
-const summarizeMemberRoster = jest.fn();
 const teamManagementProjectsRefs: Array<Array<{ id: string; name: string }>> = [];
 const teamManagementRoleRefs: Array<RoleManifest[]> = [];
 
@@ -44,20 +44,6 @@ const dashboardState = {
     { id: "project-2", name: "Bridge" },
   ],
   selectedProjectId: "project-1",
-  members: [
-    {
-      id: "member-1",
-      projectId: "project-1",
-      name: "Alice",
-      type: "human",
-      role: "frontend-developer",
-      email: "alice@example.com",
-      avatarUrl: "",
-      skills: ["react"],
-      isActive: true,
-      createdAt: "2026-03-24T08:00:00.000Z",
-    },
-  ],
   tasks: [],
   agents: [],
   activity: [],
@@ -68,6 +54,16 @@ const dashboardState = {
 };
 
 const memberState = {
+  membersByProject: {
+    "project-1": roster,
+  },
+  loadingByProject: {
+    "project-1": false,
+  },
+  errorByProject: {
+    "project-1": null,
+  },
+  fetchMembers,
   createMember,
   updateMember,
 };
@@ -141,10 +137,6 @@ jest.mock("@/lib/stores/role-store", () => ({
     selector(roleState),
 }));
 
-jest.mock("@/lib/dashboard/summary", () => ({
-  summarizeMemberRoster: (...args: unknown[]) => summarizeMemberRoster(...args),
-}));
-
 jest.mock("./team-management", () => ({
   TeamManagement: ({
     projects,
@@ -192,10 +184,10 @@ describe("TeamPageClient", () => {
   beforeEach(() => {
     replace.mockReset();
     fetchSummary.mockReset();
+    fetchMembers.mockReset().mockResolvedValue(undefined);
     createMember.mockReset().mockResolvedValue(undefined);
     updateMember.mockReset().mockResolvedValue(undefined);
     fetchRoles.mockReset().mockResolvedValue(undefined);
-    summarizeMemberRoster.mockReset().mockReturnValue(roster);
     teamManagementProjectsRefs.length = 0;
     teamManagementRoleRefs.length = 0;
   });
@@ -211,7 +203,7 @@ describe("TeamPageClient", () => {
     expect(teamManagementProjectsRefs[1]).toBe(teamManagementProjectsRefs[0]);
   });
 
-  it("reuses dashboard member summary data and refreshes after create or update flows", async () => {
+  it("loads project-scoped members and refreshes member data after create or update flows", async () => {
     const user = userEvent.setup();
 
     await act(async () => {
@@ -219,13 +211,8 @@ describe("TeamPageClient", () => {
     });
 
     expect(fetchSummary).toHaveBeenCalledWith({ projectId: "project-1" });
+    expect(fetchMembers).toHaveBeenCalledWith("project-1");
     expect(fetchRoles).toHaveBeenCalled();
-    expect(summarizeMemberRoster).toHaveBeenCalledWith({
-      members: dashboardState.members,
-      tasks: dashboardState.tasks,
-      agents: dashboardState.agents,
-      activity: dashboardState.activity,
-    });
     expect(teamManagementRoleRefs[0]?.[0]?.metadata.id).toBe("frontend-developer");
     expect(screen.getByText("Alice")).toBeInTheDocument();
 
@@ -237,12 +224,12 @@ describe("TeamPageClient", () => {
       name: "Bob",
       type: "human",
     });
-    expect(fetchSummary).toHaveBeenLastCalledWith({ projectId: "project-1" });
+    expect(fetchMembers).toHaveBeenLastCalledWith("project-1");
 
     await user.click(screen.getByRole("button", { name: "Update Member" }));
     expect(updateMember).toHaveBeenCalledWith("member-1", "project-1", {
       role: "lead-frontend",
     });
-    expect(fetchSummary).toHaveBeenLastCalledWith({ projectId: "project-1" });
+    expect(fetchMembers).toHaveBeenLastCalledWith("project-1");
   });
 });

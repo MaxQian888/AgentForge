@@ -72,6 +72,11 @@ function hasAgentProfileInput(draft: AgentProfileDraft): boolean {
   return Object.values(draft).some((value) => value.trim().length > 0);
 }
 
+function formatActivityTimestamp(value: string | null): string {
+  if (!value) return "No recent activity";
+  return `Last activity ${value.slice(0, 16).replace("T", " ")} UTC`;
+}
+
 function buildInitialCreateForm(): MemberFormState {
   return {
     name: "",
@@ -494,10 +499,20 @@ export function TeamManagement({
                         <span className="text-xs text-muted-foreground">
                           {member.email || "No direct email"}
                         </span>
+                        <span className="text-xs text-muted-foreground">
+                          {formatActivityTimestamp(member.lastActivityAt)}
+                        </span>
                       </div>
                     </TableCell>
                     <TableCell>
-                      <Badge variant="secondary">{member.typeLabel}</Badge>
+                      <div className="flex flex-col gap-1">
+                        <Badge variant="secondary" className="w-fit">
+                          {member.typeLabel}
+                        </Badge>
+                        <Badge variant={member.isActive ? "secondary" : "outline"} className="w-fit">
+                          {member.isActive ? "Active" : "Inactive"}
+                        </Badge>
+                      </div>
                     </TableCell>
                     <TableCell>{member.role}</TableCell>
                     <TableCell>

@@ -1,0 +1,491 @@
+package service
+
+import (
+	"context"
+	"encoding/json"
+	"fmt"
+	"strconv"
+	"strings"
+	"time"
+
+	"github.com/google/uuid"
+	"github.com/react-go-quick-starter/server/internal/model"
+)
+
+type AutomationEvent struct {
+	EventType             string
+	ProjectID             uuid.UUID
+	TaskID                *uuid.UUID
+	Task                  *model.Task
+	TriggeredByAutomation bool
+	Data                  map[string]any
+}
+
+type AutomationEventEvaluator interface {
+	EvaluateRules(ctx context.Context, event AutomationEvent) error
+}
+
+type automationRuleReader interface {
+	ListByProjectAndEvent(ctx context.Context, projectID uuid.UUID, eventType string) ([]*model.AutomationRule, error)
+}
+
+type automationLogWriter interface {
+	Create(ctx context.Context, entry *model.AutomationLog) error
+}
+
+type automationTaskRepository interface {
+	Create(ctx context.Context, task *model.Task) error
+	GetByID(ctx context.Context, id uuid.UUID) (*model.Task, error)
+	Update(ctx context.Context, id uuid.UUID, req *model.UpdateTaskRequest) error
+	TransitionStatus(ctx context.Context, id uuid.UUID, newStatus string) error
+	UpdateAssignee(ctx context.Context, id uuid.UUID, assigneeID uuid.UUID, assigneeType string) error
+	ListOpenForProgress(ctx context.Context) ([]*model.Task, error)
+}
+
+type automationCustomFieldWriter interface {
+	SetValue(ctx context.Context, value *model.CustomFieldValue) error
+}
+
+type automationNotificationSender interface {
+	Create(ctx context.Context, targetID uuid.UUID, ntype, title, body, data string) (*model.Notification, error)
+}
+
+type automationIMSender interface {
+	Send(ctx context.Context, req *model.IMSendRequest) error
+}
+
+type automationPluginInvoker interface {
+	Invoke(ctx context.Context, pluginID, operation string, payload map[string]any) (map[string]any, error)
+}
+
+type AutomationEngineService struct {
+	rules         automationRuleReader
+	logs          automationLogWriter
+	tasks         automationTaskRepository
+	customFields  automationCustomFieldWriter
+	notifications automationNotificationSender
+	im            automationIMSender
+	plugins       automationPluginInvoker
+	now           func() time.Time
+}
+
+func NewAutomationEngineService(
+	rules automationRuleReader,
+	logs automationLogWriter,
+	tasks automationTaskRepository,
+	customFields automationCustomFieldWriter,
+	notifications automationNotificationSender,
+	im automationIMSender,
+	plugins automationPluginInvoker,
+) *AutomationEngineService {
+	return &AutomationEngineService{
+		rules:         rules,
+		logs:          logs,
+		tasks:         tasks,
+		customFields:  customFields,
+		notifications: notifications,
+		im:            im,
+		plugins:       plugins,
+		now:           func() time.Time { return time.Now().UTC() },
+	}
+}
+
+func (s *AutomationEngineService) SetIMSender(im automationIMSender) { s.im = im }
+
+func (s *AutomationEngineService) EvaluateRules(ctx context.Context, event AutomationEvent) error {
+	if event.TriggeredByAutomation {
+		return nil
+	}
+	if event.ProjectID == uuid.Nil || strings.TrimSpace(event.EventType) == "" {
+		return nil
+	}
+
+	if event.Task == nil && event.TaskID != nil && s.tasks != nil {
+		task, err := s.tasks.GetByID(ctx, *event.TaskID)
+		if err != nil {
+			return fmt.Errorf("load automation task: %w", err)
+		}
+		event.Task = task
+	}
+
+	rules, err := s.rules.ListByProjectAndEvent(ctx, event.ProjectID, event.EventType)
+	if err != nil {
+		return fmt.Errorf("list automation rules: %w", err)
+	}
+	for _, rule := range rules {
+		if rule == nil || !rule.Enabled {
+			continue
+		}
+		conditions, err := decodeAutomationConditions(rule.Conditions)
+		if err != nil {
+			s.writeAutomationLog(ctx, rule, event, model.AutomationLogStatusFailed, map[string]any{"error": err.Error(), "stage": "decode_conditions"})
+			continue
+		}
+		matched, reason := s.conditionsMatch(event, conditions)
+		if !matched {
+			s.writeAutomationLog(ctx, rule, event, model.AutomationLogStatusSkipped, map[string]any{"reason": reason})
+			continue
+		}
+		actions, err := decodeAutomationActions(rule.Actions)
+		if err != nil {
+			s.writeAutomationLog(ctx, rule, event, model.AutomationLogStatusFailed, map[string]any{"error": err.Error(), "stage": "decode_actions"})
+			continue
+		}
+		if err := s.executeActions(ctx, event, actions); err != nil {
+			s.writeAutomationLog(ctx, rule, event, model.AutomationLogStatusFailed, map[string]any{"error": err.Error()})
+			continue
+		}
+		s.writeAutomationLog(ctx, rule, event, model.AutomationLogStatusSuccess, map[string]any{"actionCount": len(actions)})
+	}
+	return nil
+}
+
+func (s *AutomationEngineService) CheckDueDateApproaching(ctx context.Context, threshold time.Duration) error {
+	if s.tasks == nil {
+		return nil
+	}
+	tasks, err := s.tasks.ListOpenForProgress(ctx)
+	if err != nil {
+		return fmt.Errorf("list open tasks: %w", err)
+	}
+	now := s.now()
+	for _, task := range tasks {
+		if task == nil || task.PlannedEndAt == nil {
+			continue
+		}
+		if task.PlannedEndAt.Before(now) {
+			continue
+		}
+		if task.PlannedEndAt.Sub(now) <= threshold {
+			taskID := task.ID
+			_ = s.EvaluateRules(ctx, AutomationEvent{
+				EventType: model.AutomationEventTaskDueDateApproach,
+				ProjectID: task.ProjectID,
+				TaskID:    &taskID,
+				Task:      task,
+				Data: map[string]any{
+					"due_at":       task.PlannedEndAt.Format(time.RFC3339),
+					"threshold_ms": threshold.Milliseconds(),
+				},
+			})
+		}
+	}
+	return nil
+}
+
+type automationCondition struct {
+	Field string `json:"field"`
+	Op    string `json:"op"`
+	Value any    `json:"value"`
+}
+
+type automationAction struct {
+	Type   string         `json:"type"`
+	Config map[string]any `json:"config"`
+}
+
+func decodeAutomationConditions(raw string) ([]automationCondition, error) {
+	if strings.TrimSpace(raw) == "" {
+		return nil, nil
+	}
+	var conditions []automationCondition
+	if err := json.Unmarshal([]byte(raw), &conditions); err != nil {
+		return nil, err
+	}
+	return conditions, nil
+}
+
+func decodeAutomationActions(raw string) ([]automationAction, error) {
+	var actions []automationAction
+	if err := json.Unmarshal([]byte(defaultJSON(raw, "[]")), &actions); err != nil {
+		return nil, err
+	}
+	return actions, nil
+}
+
+func (s *AutomationEngineService) conditionsMatch(event AutomationEvent, conditions []automationCondition) (bool, string) {
+	for _, condition := range conditions {
+		actual := automationFieldValue(event, condition.Field)
+		if !compareAutomationValue(actual, condition.Op, condition.Value) {
+			return false, condition.Field
+		}
+	}
+	return true, ""
+}
+
+func automationFieldValue(event AutomationEvent, field string) any {
+	if event.Data != nil {
+		if value, ok := event.Data[field]; ok {
+			return value
+		}
+	}
+	switch field {
+	case "event_type":
+		return event.EventType
+	case "project_id":
+		return event.ProjectID.String()
+	case "task_id":
+		if event.TaskID != nil {
+			return event.TaskID.String()
+		}
+	}
+	if event.Task == nil {
+		return nil
+	}
+	switch field {
+	case "status":
+		return event.Task.Status
+	case "priority":
+		return event.Task.Priority
+	case "assignee_type":
+		return event.Task.AssigneeType
+	case "assignee_id":
+		if event.Task.AssigneeID != nil {
+			return event.Task.AssigneeID.String()
+		}
+		return ""
+	case "title":
+		return event.Task.Title
+	}
+	return nil
+}
+
+func compareAutomationValue(actual any, op string, expected any) bool {
+	switch strings.ToLower(strings.TrimSpace(op)) {
+	case "", "eq":
+		return fmt.Sprint(actual) == fmt.Sprint(expected)
+	case "ne":
+		return fmt.Sprint(actual) != fmt.Sprint(expected)
+	case "contains":
+		return strings.Contains(strings.ToLower(fmt.Sprint(actual)), strings.ToLower(fmt.Sprint(expected)))
+	case "gt", "gte", "lt", "lte":
+		actualFloat, errA := strconv.ParseFloat(fmt.Sprint(actual), 64)
+		expectedFloat, errB := strconv.ParseFloat(fmt.Sprint(expected), 64)
+		if errA != nil || errB != nil {
+			return false
+		}
+		switch strings.ToLower(op) {
+		case "gt":
+			return actualFloat > expectedFloat
+		case "gte":
+			return actualFloat >= expectedFloat
+		case "lt":
+			return actualFloat < expectedFloat
+		case "lte":
+			return actualFloat <= expectedFloat
+		}
+	}
+	return false
+}
+
+func (s *AutomationEngineService) executeActions(ctx context.Context, event AutomationEvent, actions []automationAction) error {
+	for _, action := range actions {
+		if err := s.executeAction(ctx, event, action); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *AutomationEngineService) executeAction(ctx context.Context, event AutomationEvent, action automationAction) error {
+	switch action.Type {
+	case "update_field":
+		return s.executeUpdateField(ctx, event, action.Config)
+	case "assign_user":
+		return s.executeAssignUser(ctx, event, action.Config)
+	case "send_notification":
+		return s.executeSendNotification(ctx, event, action.Config)
+	case "move_to_column":
+		return s.executeMoveToColumn(ctx, event, action.Config)
+	case "create_subtask":
+		return s.executeCreateSubtask(ctx, event, action.Config)
+	case "send_im_message":
+		return s.executeSendIMMessage(ctx, event, action.Config)
+	case "invoke_plugin":
+		return s.executeInvokePlugin(ctx, event, action.Config)
+	default:
+		return fmt.Errorf("unsupported automation action %q", action.Type)
+	}
+}
+
+func (s *AutomationEngineService) executeUpdateField(ctx context.Context, event AutomationEvent, config map[string]any) error {
+	if event.TaskID == nil {
+		return fmt.Errorf("update_field requires task context")
+	}
+	field := stringValue(config["field"])
+	value := config["value"]
+	switch {
+	case field == "status":
+		return s.tasks.TransitionStatus(ctx, *event.TaskID, fmt.Sprint(value))
+	case field == "priority":
+		val := fmt.Sprint(value)
+		return s.tasks.Update(ctx, *event.TaskID, &model.UpdateTaskRequest{Priority: &val})
+	case strings.HasPrefix(field, "cf:"):
+		fieldID, err := uuid.Parse(strings.TrimPrefix(field, "cf:"))
+		if err != nil {
+			return err
+		}
+		return s.customFields.SetValue(ctx, &model.CustomFieldValue{
+			ID:         uuid.New(),
+			TaskID:     *event.TaskID,
+			FieldDefID: fieldID,
+			Value:      marshalAutomationValue(value),
+			CreatedAt:  s.now(),
+			UpdatedAt:  s.now(),
+		})
+	default:
+		return fmt.Errorf("unsupported update_field target %q", field)
+	}
+}
+
+func (s *AutomationEngineService) executeAssignUser(ctx context.Context, event AutomationEvent, config map[string]any) error {
+	if event.TaskID == nil {
+		return fmt.Errorf("assign_user requires task context")
+	}
+	assigneeID, err := uuid.Parse(stringValue(config["assigneeId"]))
+	if err != nil {
+		return err
+	}
+	assigneeType := stringValue(config["assigneeType"])
+	if assigneeType == "" {
+		assigneeType = model.MemberTypeHuman
+	}
+	return s.tasks.UpdateAssignee(ctx, *event.TaskID, assigneeID, assigneeType)
+}
+
+func (s *AutomationEngineService) executeSendNotification(ctx context.Context, event AutomationEvent, config map[string]any) error {
+	if s.notifications == nil {
+		return nil
+	}
+	var targetID uuid.UUID
+	if raw := stringValue(config["targetId"]); raw != "" {
+		parsed, err := uuid.Parse(raw)
+		if err != nil {
+			return err
+		}
+		targetID = parsed
+	} else if event.Task != nil && event.Task.AssigneeID != nil {
+		targetID = *event.Task.AssigneeID
+	} else {
+		return nil
+	}
+	payload, _ := json.Marshal(map[string]any{"eventType": event.EventType, "taskId": stringPtrValue(event.TaskID)})
+	_, err := s.notifications.Create(ctx, targetID, model.NotificationTypeAutomationAction, stringValue(config["title"]), stringValue(config["body"]), string(payload))
+	return err
+}
+
+func (s *AutomationEngineService) executeMoveToColumn(ctx context.Context, event AutomationEvent, config map[string]any) error {
+	if event.TaskID == nil {
+		return fmt.Errorf("move_to_column requires task context")
+	}
+	return s.tasks.TransitionStatus(ctx, *event.TaskID, stringValue(config["status"]))
+}
+
+func (s *AutomationEngineService) executeCreateSubtask(ctx context.Context, event AutomationEvent, config map[string]any) error {
+	if event.Task == nil {
+		return fmt.Errorf("create_subtask requires task context")
+	}
+	parentID := event.Task.ID.String()
+	description := stringValue(config["description"])
+	priority := stringValue(config["priority"])
+	if priority == "" {
+		priority = event.Task.Priority
+	}
+	task := &model.Task{
+		ID:          uuid.New(),
+		ProjectID:   event.Task.ProjectID,
+		Title:       stringValue(config["title"]),
+		Description: description,
+		Status:      model.TaskStatusInbox,
+		Priority:    priority,
+		CreatedAt:   s.now(),
+		UpdatedAt:   s.now(),
+	}
+	if parentUUID, err := uuid.Parse(parentID); err == nil {
+		task.ParentID = &parentUUID
+	}
+	return s.tasks.Create(ctx, task)
+}
+
+func (s *AutomationEngineService) executeSendIMMessage(ctx context.Context, event AutomationEvent, config map[string]any) error {
+	if s.im == nil {
+		return nil
+	}
+	return s.im.Send(ctx, &model.IMSendRequest{
+		Platform:  stringValue(config["platform"]),
+		ChannelID: stringValue(config["channelId"]),
+		Text:      renderAutomationTemplate(stringValue(config["text"]), event),
+		ProjectID: event.ProjectID.String(),
+	})
+}
+
+func (s *AutomationEngineService) executeInvokePlugin(ctx context.Context, event AutomationEvent, config map[string]any) error {
+	if s.plugins == nil {
+		return nil
+	}
+	_, err := s.plugins.Invoke(ctx, stringValue(config["pluginId"]), stringValue(config["operation"]), mapValue(config["input"]))
+	return err
+}
+
+func (s *AutomationEngineService) writeAutomationLog(ctx context.Context, rule *model.AutomationRule, event AutomationEvent, status string, detail map[string]any) {
+	if s.logs == nil || rule == nil {
+		return
+	}
+	raw, _ := json.Marshal(detail)
+	_ = s.logs.Create(ctx, &model.AutomationLog{
+		ID:          uuid.New(),
+		RuleID:      rule.ID,
+		TaskID:      event.TaskID,
+		EventType:   event.EventType,
+		TriggeredAt: s.now(),
+		Status:      status,
+		Detail:      string(raw),
+	})
+}
+
+func stringValue(value any) string {
+	return strings.TrimSpace(fmt.Sprint(value))
+}
+
+func mapValue(value any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	if typed, ok := value.(map[string]any); ok {
+		return typed
+	}
+	return map[string]any{"value": value}
+}
+
+func marshalAutomationValue(value any) string {
+	raw, err := json.Marshal(value)
+	if err != nil {
+		return fmt.Sprintf("%q", fmt.Sprint(value))
+	}
+	return string(raw)
+}
+
+func renderAutomationTemplate(template string, event AutomationEvent) string {
+	result := template
+	if event.Task != nil {
+		result = strings.ReplaceAll(result, "{{task.id}}", event.Task.ID.String())
+		result = strings.ReplaceAll(result, "{{task.title}}", event.Task.Title)
+		result = strings.ReplaceAll(result, "{{task.status}}", event.Task.Status)
+	}
+	result = strings.ReplaceAll(result, "{{event.type}}", event.EventType)
+	return result
+}
+
+func defaultJSON(raw string, fallback string) string {
+	if strings.TrimSpace(raw) == "" {
+		return fallback
+	}
+	return raw
+}
+
+func stringPtrValue(value *uuid.UUID) string {
+	if value == nil {
+		return ""
+	}
+	return value.String()
+}

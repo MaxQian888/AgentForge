@@ -14,6 +14,7 @@ const (
 	WorkflowRunStatusCompleted WorkflowRunStatus = "completed"
 	WorkflowRunStatusFailed    WorkflowRunStatus = "failed"
 	WorkflowRunStatusCancelled WorkflowRunStatus = "cancelled"
+	WorkflowRunStatusPaused    WorkflowRunStatus = "paused"
 )
 
 type WorkflowStepRunStatus string

@@ -673,8 +673,15 @@ type IMActionRequest struct {
 }
 
 type IMActionResponse struct {
-	Result      string            `json:"result"`
-	Success     bool              `json:"success"`
-	ReplyTarget *core.ReplyTarget `json:"replyTarget,omitempty"`
-	Metadata    map[string]string `json:"metadata,omitempty"`
+	Result        string                     `json:"result"`
+	Success       bool                       `json:"success"`
+	Status        string                     `json:"status,omitempty"`
+	Task          *Task                      `json:"task,omitempty"`
+	Dispatch      *DispatchOutcome           `json:"dispatch,omitempty"`
+	Decomposition *TaskDecompositionResponse `json:"decomposition,omitempty"`
+	Review        *Review                    `json:"review,omitempty"`
+	ReplyTarget   *core.ReplyTarget          `json:"replyTarget,omitempty"`
+	Metadata      map[string]string          `json:"metadata,omitempty"`
+	Structured    *core.StructuredMessage    `json:"structured,omitempty"`
+	Native        *core.NativeMessage        `json:"native,omitempty"`
 }

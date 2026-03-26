@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -15,6 +16,11 @@ type imControlPlane interface {
 	UnregisterBridge(ctx context.Context, bridgeID string) error
 	BindAction(ctx context.Context, binding *model.IMActionBinding) error
 	AckDelivery(ctx context.Context, bridgeID string, cursor int64, deliveryID string) error
+	ListChannels(ctx context.Context) ([]*model.IMChannel, error)
+	UpsertChannel(ctx context.Context, channel *model.IMChannel) (*model.IMChannel, error)
+	DeleteChannel(ctx context.Context, channelID string) error
+	GetBridgeStatus(ctx context.Context) (*model.IMBridgeStatus, error)
+	ListDeliveryHistory(ctx context.Context) ([]*model.IMDelivery, error)
 }
 
 type IMControlHandler struct {
@@ -150,4 +156,54 @@ func (h *IMControlHandler) AckDelivery(c echo.Context) error {
 		"deliveryId": req.DeliveryID,
 	}).Debug("IM control delivery acknowledged")
 	return c.JSON(http.StatusOK, map[string]string{"message": "delivery acknowledged"})
+}
+
+func (h *IMControlHandler) ListChannels(c echo.Context) error {
+	channels, err := h.control.ListChannels(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, channels)
+}
+
+func (h *IMControlHandler) SaveChannel(c echo.Context) error {
+	req := new(model.IMChannel)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+	if id := strings.TrimSpace(c.Param("id")); id != "" {
+		req.ID = id
+	}
+	channel, err := h.control.UpsertChannel(c.Request().Context(), req)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	status := http.StatusOK
+	if c.Param("id") == "" {
+		status = http.StatusCreated
+	}
+	return c.JSON(status, channel)
+}
+
+func (h *IMControlHandler) DeleteChannel(c echo.Context) error {
+	if err := h.control.DeleteChannel(c.Request().Context(), c.Param("id")); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]string{"message": "channel deleted"})
+}
+
+func (h *IMControlHandler) GetStatus(c echo.Context) error {
+	status, err := h.control.GetBridgeStatus(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, status)
+}
+
+func (h *IMControlHandler) ListDeliveries(c echo.Context) error {
+	history, err := h.control.ListDeliveryHistory(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, history)
 }

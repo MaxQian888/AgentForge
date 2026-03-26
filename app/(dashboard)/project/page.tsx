@@ -132,6 +132,7 @@ function ProjectView() {
   const searchParams = useSearchParams();
   const router = useRouter();
   const projectId = searchParams.get("id");
+  const requestedMemberId = searchParams.get("member");
   const loading = useTaskStore((state) => state.loading);
   const error = useTaskStore((state) => state.error);
   const tasks = useTaskStore((state) => state.tasks);
@@ -141,12 +142,14 @@ function ProjectView() {
   const assignTask = useTaskStore((state) => state.assignTask);
   const decomposeTask = useTaskStore((state) => state.decomposeTask);
   const agents = useAgentStore((state) => state.agents);
+  const spawnAgent = useAgentStore((state) => state.spawnAgent);
   const fetchAgents = useAgentStore((state) => state.fetchAgents);
   const membersByProject = useMemberStore((state) => state.membersByProject);
   const fetchMembers = useMemberStore((state) => state.fetchMembers);
   const notifications = useNotificationStore((state) => state.notifications);
   const realtimeConnected = useWSStore((state) => state.connected);
   const sprintFilterId = useTaskWorkspaceStore((state) => state.filters.sprintId);
+  const setAssigneeId = useTaskWorkspaceStore((state) => state.setAssigneeId);
   const sprintsByProject = useSprintStore((state) => state.sprintsByProject);
   const metricsBySprintId = useSprintStore((state) => state.metricsBySprintId);
   const metricsLoadingBySprintId = useSprintStore(
@@ -215,6 +218,10 @@ function ProjectView() {
     void fetchSprintMetrics(projectId, metricsSprintId);
   }, [fetchSprintMetrics, metricsSprintId, projectId]);
 
+  useEffect(() => {
+    setAssigneeId(requestedMemberId ?? "all");
+  }, [requestedMemberId, setAssigneeId, projectId]);
+
   if (!projectId) return null;
 
   return (
@@ -245,6 +252,7 @@ function ProjectView() {
         onTaskSave={updateTask}
         onTaskAssign={handleTaskAssign}
         onTaskDecompose={decomposeTask}
+        onSpawnAgent={spawnAgent}
         onSprintFilterChange={(nextSprintId) => {
           if (nextSprintId === "all") {
             return;

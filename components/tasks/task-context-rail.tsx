@@ -60,6 +60,10 @@ export interface TaskContextRailProps {
   onTaskDecompose?: (
     taskId: string
   ) => Promise<TaskDecompositionResult | null> | TaskDecompositionResult | null | void;
+  onSpawnAgent?: (
+    taskId: string,
+    memberId: string
+  ) => Promise<void> | void;
   onResetFilters?: () => void;
 }
 
@@ -79,6 +83,7 @@ export function TaskContextRail({
   onTaskAssign,
   onTaskStatusChange,
   onTaskDecompose,
+  onSpawnAgent,
   onResetFilters,
 }: TaskContextRailProps) {
   const stalledTasks = tasks.filter(
@@ -197,6 +202,7 @@ export function TaskContextRail({
                 onTaskAssign={onTaskAssign}
                 onTaskStatusChange={onTaskStatusChange}
                 onTaskDecompose={onTaskDecompose}
+                onSpawnAgent={onSpawnAgent}
               />
             </div>
           )}

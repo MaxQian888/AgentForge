@@ -6,6 +6,8 @@ import type { PluginRecord } from "@/lib/stores/plugin-store";
 const enablePlugin = jest.fn();
 const disablePlugin = jest.fn();
 const activatePlugin = jest.fn();
+const deactivatePlugin = jest.fn();
+const updatePlugin = jest.fn();
 const uninstallPlugin = jest.fn();
 const updateConfig = jest.fn();
 const checkHealth = jest.fn();
@@ -17,6 +19,8 @@ jest.mock("@/lib/stores/plugin-store", () => ({
       enablePlugin: typeof enablePlugin;
       disablePlugin: typeof disablePlugin;
       activatePlugin: typeof activatePlugin;
+      deactivatePlugin: typeof deactivatePlugin;
+      updatePlugin: typeof updatePlugin;
       uninstallPlugin: typeof uninstallPlugin;
       updateConfig: typeof updateConfig;
       checkHealth: typeof checkHealth;
@@ -27,6 +31,8 @@ jest.mock("@/lib/stores/plugin-store", () => ({
       enablePlugin,
       disablePlugin,
       activatePlugin,
+      deactivatePlugin,
+      updatePlugin,
       uninstallPlugin,
       updateConfig,
       checkHealth,
@@ -86,11 +92,25 @@ const installedToolPlugin: PluginRecord = {
   lifecycle_state: "installed",
 };
 
+const updatableActiveToolPlugin: PluginRecord = {
+  ...activeToolPlugin,
+  source: {
+    type: "local",
+    path: "/plugins/github-tool/manifest.yaml",
+    release: {
+      version: "1.0.0",
+      availableVersion: "1.1.0",
+    },
+  },
+};
+
 describe("PluginCard", () => {
   beforeEach(() => {
     enablePlugin.mockReset();
     disablePlugin.mockReset();
     activatePlugin.mockReset();
+    deactivatePlugin.mockReset();
+    updatePlugin.mockReset();
     uninstallPlugin.mockReset();
     updateConfig.mockReset();
     checkHealth.mockReset();
@@ -155,5 +175,20 @@ describe("PluginCard", () => {
     expect(screen.getByText("Installed but not enabled yet.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Enable" })).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Activate" })).not.toBeInTheDocument();
+  });
+
+  it("supports deactivate, update, and invoke flows for active plugins with supported sources", async () => {
+    const user = userEvent.setup();
+    const onInvoke = jest.fn();
+
+    render(<PluginCard plugin={updatableActiveToolPlugin} onInvoke={onInvoke} />);
+
+    await user.click(screen.getByRole("button", { name: "Deactivate" }));
+    await user.click(screen.getByRole("button", { name: "Update" }));
+    await user.click(screen.getByRole("button", { name: "Invoke" }));
+
+    expect(deactivatePlugin).toHaveBeenCalledWith("github-tool");
+    expect(updatePlugin).toHaveBeenCalledWith(updatableActiveToolPlugin);
+    expect(onInvoke).toHaveBeenCalledWith(updatableActiveToolPlugin);
   });
 });

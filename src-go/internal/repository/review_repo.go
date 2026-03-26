@@ -71,6 +71,39 @@ func (r *ReviewRepository) GetByTask(ctx context.Context, taskID uuid.UUID) ([]*
 	return reviews, nil
 }
 
+func (r *ReviewRepository) ListAll(ctx context.Context, status, riskLevel string, limit int) ([]*model.Review, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+
+	q := r.db.WithContext(ctx).Order("created_at DESC").Limit(limit)
+	if status != "" {
+		q = q.Where("status = ?", status)
+	}
+	if riskLevel != "" {
+		q = q.Where("risk_level = ?", riskLevel)
+	}
+
+	var records []reviewRecord
+	if err := q.Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list all reviews: %w", err)
+	}
+
+	reviews := make([]*model.Review, 0, len(records))
+	for i := range records {
+		review, err := records[i].toModel()
+		if err != nil {
+			return nil, fmt.Errorf("scan review: %w", err)
+		}
+		reviews = append(reviews, review)
+	}
+	return reviews, nil
+}
+
 func (r *ReviewRepository) UpdateStatus(ctx context.Context, id uuid.UUID, status string) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable

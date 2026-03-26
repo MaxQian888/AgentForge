@@ -1,0 +1,70 @@
+package repository
+
+import (
+	"context"
+	"fmt"
+
+	"github.com/google/uuid"
+	"github.com/react-go-quick-starter/server/internal/model"
+	"gorm.io/gorm"
+)
+
+type AutomationLogRepository struct {
+	db *gorm.DB
+}
+
+func NewAutomationLogRepository(db *gorm.DB) *AutomationLogRepository {
+	return &AutomationLogRepository{db: db}
+}
+
+func (r *AutomationLogRepository) Create(ctx context.Context, entry *model.AutomationLog) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if err := r.db.WithContext(ctx).Create(newAutomationLogRecord(entry)).Error; err != nil {
+		return fmt.Errorf("create automation log: %w", err)
+	}
+	return nil
+}
+
+func (r *AutomationLogRepository) ListByProject(ctx context.Context, projectID uuid.UUID, query model.AutomationLogListQuery) ([]*model.AutomationLog, int, error) {
+	if r.db == nil {
+		return nil, 0, ErrDatabaseUnavailable
+	}
+	base := r.db.WithContext(ctx).
+		Table("automation_logs AS logs").
+		Joins("JOIN automation_rules AS rules ON rules.id = logs.rule_id").
+		Where("rules.project_id = ? AND rules.deleted_at IS NULL", projectID)
+	if query.EventType != "" {
+		base = base.Where("logs.event_type = ?", query.EventType)
+	}
+	if query.Status != "" {
+		base = base.Where("logs.status = ?", query.Status)
+	}
+
+	var total int64
+	if err := base.Count(&total).Error; err != nil {
+		return nil, 0, fmt.Errorf("count automation logs: %w", err)
+	}
+
+	limit := query.Limit
+	if limit <= 0 {
+		limit = 20
+	}
+	page := query.Page
+	if page <= 0 {
+		page = 1
+	}
+	offset := (page - 1) * limit
+
+	var records []automationLogRecord
+	if err := applyPagination(base.Order("logs.triggered_at DESC").Select("logs.*"), limit, offset).Scan(&records).Error; err != nil {
+		return nil, 0, fmt.Errorf("list automation logs: %w", err)
+	}
+
+	result := make([]*model.AutomationLog, 0, len(records))
+	for i := range records {
+		result = append(result, records[i].toModel())
+	}
+	return result, int(total), nil
+}

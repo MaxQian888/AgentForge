@@ -45,6 +45,9 @@ export interface StartTeamOptions {
 interface TeamState {
   teams: AgentTeam[];
   loading: boolean;
+  error: string | null;
+  loadingById: Record<string, boolean>;
+  errorById: Record<string, string | null>;
   fetchTeams: (projectId?: string) => Promise<void>;
   fetchTeam: (id: string) => Promise<AgentTeam | null>;
   startTeam: (taskId: string, memberId: string, options?: StartTeamOptions) => Promise<void>;
@@ -54,6 +57,31 @@ interface TeamState {
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
+
+export function normalizeTeamStrategy(strategy: unknown): string {
+  switch (String(strategy ?? "").trim()) {
+    case "planner_coder_reviewer":
+    case "planner-coder-reviewer":
+      return "plan-code-review";
+    default:
+      return String(strategy ?? "").trim();
+  }
+}
+
+export function getTeamStrategyLabel(strategy: string): string {
+  switch (normalizeTeamStrategy(strategy)) {
+    case "plan-code-review":
+      return "Planner → Coder → Reviewer";
+    case "wave-based":
+      return "Wave Based";
+    case "pipeline":
+      return "Pipeline";
+    case "swarm":
+      return "Swarm";
+    default:
+      return "Unknown strategy";
+  }
+}
 
 export function normalizeTeam(raw: Record<string, unknown>): AgentTeam {
   // Handle coderRunIds which may come as coderRuns (array of objects with id) or coderRunIds (array of strings)
@@ -73,7 +101,7 @@ export function normalizeTeam(raw: Record<string, unknown>): AgentTeam {
     taskTitle: String(raw.taskTitle ?? raw.taskId ?? ""),
     name: String(raw.name ?? ""),
     status: (typeof raw.status === "string" ? raw.status : "pending") as TeamStatus,
-    strategy: String(raw.strategy ?? ""),
+    strategy: normalizeTeamStrategy(raw.strategy),
     runtime: String(raw.runtime ?? ""),
     provider: String(raw.provider ?? ""),
     model: String(raw.model ?? ""),
@@ -108,17 +136,25 @@ function upsertTeams(teams: AgentTeam[], next: AgentTeam): AgentTeam[] {
 export const useTeamStore = create<TeamState>()((set) => ({
   teams: [],
   loading: false,
+  error: null,
+  loadingById: {},
+  errorById: {},
 
   fetchTeams: async (projectId) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
-    set({ loading: true });
+    set({ loading: true, error: null });
     try {
       const api = createApiClient(API_URL);
       const query = projectId ? `?projectId=${projectId}` : "";
       const { data } = await api.get<Record<string, unknown>[]>(`/api/v1/teams${query}`, { token });
       const teams = data.map(normalizeTeam);
-      set({ teams });
+      set({ teams, error: null });
+    } catch (error) {
+      set({
+        error: error instanceof Error ? error.message : "Failed to load teams",
+        teams: [],
+      });
     } finally {
       set({ loading: false });
     }
@@ -127,11 +163,32 @@ export const useTeamStore = create<TeamState>()((set) => ({
   fetchTeam: async (id) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return null;
+    set((state) => ({
+      loadingById: { ...state.loadingById, [id]: true },
+      errorById: { ...state.errorById, [id]: null },
+    }));
     const api = createApiClient(API_URL);
-    const { data } = await api.get<Record<string, unknown>>(`/api/v1/teams/${id}`, { token });
-    const team = normalizeTeam(data);
-    set((state) => ({ teams: upsertTeams(state.teams, team) }));
-    return team;
+    try {
+      const { data } = await api.get<Record<string, unknown>>(`/api/v1/teams/${id}`, { token });
+      const team = normalizeTeam(data);
+      set((state) => ({
+        teams: upsertTeams(state.teams, team),
+        errorById: { ...state.errorById, [id]: null },
+      }));
+      return team;
+    } catch (error) {
+      set((state) => ({
+        errorById: {
+          ...state.errorById,
+          [id]: error instanceof Error ? error.message : "Failed to load team detail",
+        },
+      }));
+      return null;
+    } finally {
+      set((state) => ({
+        loadingById: { ...state.loadingById, [id]: false },
+      }));
+    }
   },
 
   startTeam: async (taskId, memberId, options = {}) => {

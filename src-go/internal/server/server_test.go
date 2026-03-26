@@ -36,13 +36,30 @@ func registerTestRoutes(e *echo.Echo, cfg *config.Config, authSvc *service.AuthS
 		repository.NewMemberRepository(nil),
 		repository.NewSprintRepository(nil),
 		repository.NewTaskRepository(nil),
+		repository.NewEntityLinkRepository(nil),
+		repository.NewTaskCommentRepository(nil),
+		repository.NewCustomFieldRepository(nil),
+		repository.NewSavedViewRepository(nil),
+		repository.NewFormRepository(nil),
+		repository.NewAutomationRuleRepository(nil),
+		repository.NewAutomationLogRepository(nil),
+		repository.NewDashboardRepository(nil),
+		repository.NewMilestoneRepository(nil),
 		repository.NewTaskProgressRepository(nil),
 		repository.NewAgentRunRepository(nil),
 		repository.NewNotificationRepository(nil),
 		repository.NewReviewRepository(nil),
+		repository.NewReviewAggregationRepository(nil),
+		repository.NewFalsePositiveRepository(nil),
 		repository.NewWorkflowRepository(nil),
 		repository.NewAgentTeamRepository(nil),
 		repository.NewAgentMemoryRepository(nil),
+		repository.NewWikiSpaceRepository(nil),
+		repository.NewWikiPageRepository(nil),
+		repository.NewPageVersionRepository(nil),
+		repository.NewPageCommentRepository(nil),
+		repository.NewPageFavoriteRepository(nil),
+		repository.NewPageRecentAccessRepository(nil),
 		ws.NewHub(),
 		bridge.NewClient("http://localhost:7778"),
 		nil,
@@ -270,6 +287,131 @@ func TestRegisterRoutes_InternalSchedulerRoutesPresent(t *testing.T) {
 
 	if len(expected) != 0 {
 		t.Fatalf("expected internal scheduler routes to be registered, missing: %+v", expected)
+	}
+}
+
+func TestRegisterRoutes_FoundationWorkspaceRoutesPresent(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	expected := map[string]struct{}{
+		http.MethodGet + " /api/v1/projects/:pid/fields":                  {},
+		http.MethodPost + " /api/v1/projects/:pid/fields":                 {},
+		http.MethodPut + " /api/v1/projects/:pid/fields/reorder":          {},
+		http.MethodGet + " /api/v1/projects/:pid/views":                   {},
+		http.MethodPost + " /api/v1/projects/:pid/views":                  {},
+		http.MethodGet + " /api/v1/projects/:pid/forms":                   {},
+		http.MethodPost + " /api/v1/forms/:slug/submit":                   {},
+		http.MethodGet + " /api/v1/projects/:pid/automations":             {},
+		http.MethodGet + " /api/v1/projects/:pid/automations/logs":        {},
+		http.MethodGet + " /api/v1/projects/:pid/dashboards":              {},
+		http.MethodGet + " /api/v1/projects/:pid/dashboard/widgets/:type": {},
+		http.MethodGet + " /api/v1/projects/:pid/milestones":              {},
+	}
+
+	for _, route := range e.Routes() {
+		delete(expected, route.Method+" "+route.Path)
+	}
+	if len(expected) != 0 {
+		t.Fatalf("expected workspace foundation routes to be registered, missing: %+v", expected)
+	}
+}
+
+func TestRegisterRoutes_WikiRoutesPresent(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	expected := map[string]struct{}{
+		http.MethodGet + " /api/v1/projects/:pid/wiki/pages":                {},
+		http.MethodPost + " /api/v1/projects/:pid/wiki/pages":               {},
+		http.MethodGet + " /api/v1/projects/:pid/wiki/pages/:id":            {},
+		http.MethodPut + " /api/v1/projects/:pid/wiki/pages/:id":            {},
+		http.MethodDelete + " /api/v1/projects/:pid/wiki/pages/:id":         {},
+		http.MethodPatch + " /api/v1/projects/:pid/wiki/pages/:id/move":     {},
+		http.MethodGet + " /api/v1/projects/:pid/wiki/pages/:id/versions":   {},
+		http.MethodPost + " /api/v1/projects/:pid/wiki/pages/:id/versions":  {},
+		http.MethodGet + " /api/v1/projects/:pid/wiki/pages/:id/comments":   {},
+		http.MethodPost + " /api/v1/projects/:pid/wiki/pages/:id/comments":  {},
+		http.MethodGet + " /api/v1/projects/:pid/wiki/templates":            {},
+		http.MethodPost + " /api/v1/projects/:pid/wiki/pages/from-template": {},
+		http.MethodGet + " /api/v1/projects/:pid/wiki/favorites":            {},
+		http.MethodPut + " /api/v1/projects/:pid/wiki/pages/:id/favorite":   {},
+		http.MethodGet + " /api/v1/projects/:pid/wiki/recent":               {},
+		http.MethodPut + " /api/v1/projects/:pid/wiki/pages/:id/pin":        {},
+		http.MethodGet + " /api/v1/wiki/pages/:id":                          {},
+	}
+
+	for _, route := range e.Routes() {
+		delete(expected, route.Method+" "+route.Path)
+	}
+
+	if len(expected) != 0 {
+		t.Fatalf("expected wiki routes to be registered, missing: %+v", expected)
+	}
+}
+
+func TestRegisterRoutes_TaskLinkingRoutesPresent(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	expected := map[string]struct{}{
+		http.MethodPost + " /api/v1/projects/:pid/links":                      {},
+		http.MethodGet + " /api/v1/projects/:pid/links":                       {},
+		http.MethodDelete + " /api/v1/projects/:pid/links/:linkId":            {},
+		http.MethodGet + " /api/v1/projects/:pid/tasks/:tid/comments":         {},
+		http.MethodPost + " /api/v1/projects/:pid/tasks/:tid/comments":        {},
+		http.MethodPatch + " /api/v1/projects/:pid/tasks/:tid/comments/:cid":  {},
+		http.MethodDelete + " /api/v1/projects/:pid/tasks/:tid/comments/:cid": {},
+	}
+
+	for _, route := range e.Routes() {
+		delete(expected, route.Method+" "+route.Path)
+	}
+
+	if len(expected) != 0 {
+		t.Fatalf("expected task linking routes to be registered, missing: %+v", expected)
+	}
+}
+
+func TestRegisterRoutes_IMOperatorRoutesPresent(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	expected := map[string]struct{}{
+		http.MethodGet + " /api/v1/im/channels":        {},
+		http.MethodPost + " /api/v1/im/channels":       {},
+		http.MethodPut + " /api/v1/im/channels/:id":    {},
+		http.MethodDelete + " /api/v1/im/channels/:id": {},
+		http.MethodGet + " /api/v1/im/bridge/status":   {},
+		http.MethodGet + " /api/v1/im/deliveries":      {},
+	}
+
+	for _, route := range e.Routes() {
+		delete(expected, route.Method+" "+route.Path)
+	}
+
+	if len(expected) != 0 {
+		t.Fatalf("expected IM operator routes to be registered, missing: %+v", expected)
 	}
 }
 

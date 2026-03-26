@@ -306,6 +306,48 @@ func TestLive_MetadataDeclaresTelegramCapabilities(t *testing.T) {
 	if !metadata.Capabilities.SupportsMentions {
 		t.Fatal("expected mention capability")
 	}
+	foundMarkdown := false
+	for _, format := range metadata.Rendering.SupportedFormats {
+		if format == core.TextFormatMarkdownV2 {
+			foundMarkdown = true
+			break
+		}
+	}
+	if !foundMarkdown {
+		t.Fatalf("SupportedFormats = %+v, want markdown_v2", metadata.Rendering.SupportedFormats)
+	}
+}
+
+func TestLive_DeliverEnvelopeUsesFormattedTextWhenRequested(t *testing.T) {
+	runner := &fakeUpdateRunner{}
+	sender := &fakeSender{}
+
+	live, err := NewLive("bot-token", WithUpdateRunner(runner), WithSender(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	receipt, err := core.DeliverEnvelope(context.Background(), live, live.Metadata(), "-2001", &core.DeliveryEnvelope{
+		Content: "build *status*",
+		Metadata: map[string]string{
+			"text_format": "markdown_v2",
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope error: %v", err)
+	}
+	if receipt.Type != "text" || receipt.Method != core.DeliveryMethodSend {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+	if len(sender.calls) != 1 {
+		t.Fatalf("calls = %+v", sender.calls)
+	}
+	if sender.calls[0].ParseMode != "MarkdownV2" {
+		t.Fatalf("call = %+v", sender.calls[0])
+	}
+	if sender.calls[0].Text != `build \*status\*` {
+		t.Fatalf("text = %q", sender.calls[0].Text)
+	}
 }
 
 func TestNormalizeIncomingUpdateRejectsUnsupportedPayload(t *testing.T) {
@@ -363,12 +405,14 @@ type sendCall struct {
 	TopicID          int64
 	ReplyToMessageID int
 	Text             string
+	ParseMode        string
 }
 
 type editCall struct {
 	ChatID    int64
 	MessageID int
 	Text      string
+	ParseMode string
 }
 
 type callbackAnswerCall struct {
@@ -377,10 +421,11 @@ type callbackAnswerCall struct {
 }
 
 type structuredCall struct {
-	ChatID  int64
-	TopicID int64
-	Text    string
-	Markup  *inlineKeyboardMarkup
+	ChatID    int64
+	TopicID   int64
+	Text      string
+	ParseMode string
+	Markup    *inlineKeyboardMarkup
 }
 
 type fakeSender struct {
@@ -390,21 +435,23 @@ type fakeSender struct {
 	structuredCalls []structuredCall
 }
 
-func (s *fakeSender) SendText(ctx context.Context, chatID int64, topicID int64, replyToMessageID int, text string) error {
+func (s *fakeSender) SendText(ctx context.Context, chatID int64, topicID int64, replyToMessageID int, message telegramTextMessage) error {
 	s.calls = append(s.calls, sendCall{
 		ChatID:           chatID,
 		TopicID:          topicID,
 		ReplyToMessageID: replyToMessageID,
-		Text:             text,
+		Text:             message.Text,
+		ParseMode:        message.ParseMode,
 	})
 	return nil
 }
 
-func (s *fakeSender) EditText(ctx context.Context, chatID int64, messageID int, text string) error {
+func (s *fakeSender) EditText(ctx context.Context, chatID int64, messageID int, message telegramTextMessage) error {
 	s.edits = append(s.edits, editCall{
 		ChatID:    chatID,
 		MessageID: messageID,
-		Text:      text,
+		Text:      message.Text,
+		ParseMode: message.ParseMode,
 	})
 	return nil
 }
@@ -417,12 +464,13 @@ func (s *fakeSender) AnswerCallbackQuery(ctx context.Context, callbackQueryID st
 	return nil
 }
 
-func (s *fakeSender) SendStructured(ctx context.Context, chatID int64, topicID int64, text string, markup *inlineKeyboardMarkup) error {
+func (s *fakeSender) SendStructured(ctx context.Context, chatID int64, topicID int64, message telegramTextMessage, markup *inlineKeyboardMarkup) error {
 	s.structuredCalls = append(s.structuredCalls, structuredCall{
-		ChatID:  chatID,
-		TopicID: topicID,
-		Text:    text,
-		Markup:  markup,
+		ChatID:    chatID,
+		TopicID:   topicID,
+		Text:      message.Text,
+		ParseMode: message.ParseMode,
+		Markup:    markup,
 	})
 	return nil
 }

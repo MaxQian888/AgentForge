@@ -6,6 +6,8 @@ This runbook covers the live transport expectations, rollout steps, rollback ste
 
 The bridge now resolves providers through a local provider contract before startup. Built-in providers still live in-tree, but the runtime, `/im/health`, and control-plane surfaces now consume provider descriptor metadata instead of relying on startup-only hard-coded branches.
 
+That descriptor now also carries provider rendering-profile metadata. Delivery paths resolve a rendering plan before transport execution, so formatting decisions, mutable-update rules, and provider-specific richer builders stay aligned across `/im/send`, `/im/notify`, `/im/action`, and replay.
+
 ## Preferred Live Transport
 
 | Platform | Preferred transport | Required live credentials | Notes |
@@ -22,10 +24,10 @@ All platforms support `IM_TRANSPORT_MODE=stub` for local verification and `IM_TR
 
 | Platform | Structured surface | Action callback mode | Reply target restored | Preferred async update path | Explicit downgrade |
 | --- | --- | --- | --- | --- | --- |
-| Feishu | interactive cards, JSON cards, template cards | card callback | chat id, message id, callback token | immediate toast/reply first, delayed native card update when available | reply/send fallback with explicit fallback reason when delayed update cannot be used |
+| Feishu | interactive cards, JSON cards, template cards | card callback | chat id, message id, callback token | immediate toast/reply first, delayed native card update when available | reply/send fallback with explicit fallback reason when delayed update cannot be used; shared action completions use provider-owned richer text/card builders |
 | Slack | Block Kit | Socket Mode interactive payload | channel, thread, `response_url` | thread reply or `response_url` follow-up | plain text only if block rendering is unavailable |
 | DingTalk | ActionCard planned, text fallback active | Stream card callback | session webhook, conversation id, conversation type | session webhook first, direct send fallback | structured payloads are sent as explicit downgraded text today |
-| Telegram | inline keyboard | callback query | chat id, message id, `message_thread_id` topic | reply or `editMessageText` depending on target | card-like payloads collapse to text plus inline keyboard |
+| Telegram | inline keyboard | callback query | chat id, message id, `message_thread_id` topic | reply or `editMessageText` depending on target | card-like payloads collapse to text plus inline keyboard; optional MarkdownV2 delivery escapes content first and oversized formatted updates fall back to segmented replies |
 | Discord | message components | `/interactions` component payload | channel id, interaction token, original response id | deferred ack, follow-up, original response patch | unsupported interaction types return explicit ephemeral failure |
 
 ## Control-Plane Prerequisites
@@ -44,6 +46,14 @@ Operational expectations:
 3. Graceful shutdown unregisters the instance immediately
 4. WebSocket reconnect resumes from the last acked cursor instead of replaying already-processed deliveries
 
+Canonical delivery expectations:
+
+- direct `POST /im/send` and `POST /im/notify` requests may now carry `content`, `structured`, `native`, `replyTarget`, and `metadata`
+- replayed `/ws/im-bridge` deliveries preserve the same typed payload shape instead of flattening everything to text
+- `metadata.fallback_reason` and similar operator diagnostics must survive queueing, replay, and compatibility fallback
+- normalized `/im/action` callbacks now expect truthful backend states such as `started`, `completed`, `blocked`, or `failed`, rather than placeholder success text
+- when delivery metadata requests a supported formatted mode such as Telegram `text_format=markdown_v2`, the provider renderer applies escaping and transport-specific limits before issuing `sendMessage` or `editMessageText`
+
 ## Rollout Checklist
 
 1. Set `IM_PLATFORM` to a single platform and `IM_TRANSPORT_MODE=live`.
@@ -53,6 +63,7 @@ Operational expectations:
 5. Start the bridge and confirm `/im/health` reports the expected `platform`, normalized `source`, and capability matrix fields.
 6. Run a command path, a native action path, a control-plane replay path, and a notification path before promoting the deployment.
 7. For Feishu, verify both JSON-card and template-card notifications if the deployment depends on richer card payloads.
+8. For Telegram, verify one `text_format=markdown_v2` delivery and one oversized formatted completion so the segmented fallback path is exercised explicitly.
 
 ## Rollback Guidance
 
@@ -68,10 +79,10 @@ Operational expectations:
 
 | Platform | Startup check | Inbound check | Native action check | Reply/update check | Notification check | Stub smoke fixture |
 | --- | --- | --- | --- | --- | --- | --- |
-| Feishu | Bridge starts with `feishu-live`, registers a stable `bridge_id`, and `/im/health` source `feishu` | Send a message or mention to the app in a subscribed chat | Click a card button and confirm the callback reaches `/im/action` with message and callback metadata preserved | Confirm the card callback returns an immediate toast, and long-running work can later use the preserved callback token for delayed native card update | `POST /im/notify` with signed headers and `platform=feishu` can send JSON cards, template cards, or fallback replies depending on reply-target context | `scripts/smoke/fixtures/feishu.json` |
+| Feishu | Bridge starts with `feishu-live`, registers a stable `bridge_id`, and `/im/health` source `feishu` | Send a message or mention to the app in a subscribed chat | Click a card button and confirm the callback reaches `/im/action` with message and callback metadata preserved | Confirm the card callback returns an immediate toast, and long-running work can later use the preserved callback token for delayed native card update | `POST /im/notify` with signed headers and `platform=feishu` can send JSON cards, template cards, builder-owned richer text cards, or fallback replies depending on reply-target context | `scripts/smoke/fixtures/feishu.json` |
 | Slack | Bridge logs `slack-live`, registers, and Socket Mode connects cleanly | Trigger `/task list` or an app mention | Click a Block Kit button or submit a modal and confirm `/im/action` receives channel, thread, and `response_url` context | Confirm a threaded or `response_url` reply arrives after the Socket Mode ack | Matching Slack notification reaches the target channel, mismatched platform is rejected, replay stays in the original thread | `scripts/smoke/fixtures/slack.json` |
 | DingTalk | Bridge logs `dingtalk-live`, registers, and Stream intake starts | Send a bot message in a chat using Stream mode | Trigger a card callback payload and confirm it normalizes into `/im/action` with session webhook or conversation context | Confirm callback results use session webhook first, then conversation-scoped fallback when webhook is absent | Structured notifications fall back to explicit text when rich send is unavailable and duplicate `delivery_id` values are suppressed | `scripts/smoke/fixtures/dingtalk.json` |
-| Telegram | Bridge starts with `telegram-live`, registers, and no webhook env configured | Send `/task list` or `/help` to the bot while polling is running | Tap an inline keyboard button and confirm callback query metadata reaches `/im/action` | Confirm `answerCallbackQuery` clears the spinner and later completion edits or replies to the original message/topic | Matching Telegram notification sends plain text or inline keyboard to the configured chat id | `scripts/smoke/fixtures/telegram.json` |
+| Telegram | Bridge starts with `telegram-live`, registers, and no webhook env configured | Send `/task list` or `/help` to the bot while polling is running | Tap an inline keyboard button and confirm callback query metadata reaches `/im/action` | Confirm `answerCallbackQuery` clears the spinner and later completion edits or replies to the original message/topic; verify oversized formatted completion degrades to segmented replies | Matching Telegram notification sends plain text or inline keyboard to the configured chat id, and `text_format=markdown_v2` deliveries send escaped MarkdownV2 with `parse_mode` | `scripts/smoke/fixtures/telegram.json` |
 | Discord | Bridge starts with `discord-live`, registers, syncs commands, and listens on `/interactions` | Trigger `/agent` or `/help` from a guild or DM | Click a message component and confirm `/im/action` receives `custom_id`, interaction token, and original response context | Confirm the deferred ack is immediate and later progress edits the original response or posts a follow-up as expected | Matching Discord notification sends a channel message using the bot token and replay does not duplicate the first ack | `scripts/smoke/fixtures/discord.json` |
 
 ## Stub Smoke Usage
@@ -100,7 +111,7 @@ Recommended focused verification after native interaction changes:
 cd src-im-bridge
 go test ./platform/slack ./platform/feishu ./platform/telegram ./platform/discord ./platform/dingtalk -count=1
 go test ./core -run 'Test(ResolveReplyPlan_|DeliverText_|DeliverNative_|MetadataForPlatform_|StructuredMessageFallbackText|ReplyTarget_JSONRoundTrip|NativeMessage_)' -count=1
-go test ./client -run 'Test(HandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget|WithSource_NormalizesHeaderValue|WithPlatform_UsesTelegramMetadataSource)' -count=1
+go test ./client -run 'Test(HandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget|HandleIMAction_ParsesCanonicalActionOutcome|WithSource_NormalizesHeaderValue|WithPlatform_UsesTelegramMetadataSource)' -count=1
 go test ./notify -run 'TestReceiver_(ActionResponseUsesReplyTargetDelivery|HealthReportsNormalizedTelegramSourceAndCapabilities|FallsBackToStructuredTextWhenNativeStructuredSenderUnavailable|PrefersNativePayloadWhenPlatformSupportsIt|UsesDeferredNativeUpdateWhenFeishuReplyTargetSupportsIt|ReportsFallbackReasonWhenDeferredUpdateContextMissing|SuppressesDuplicateSignedCompatibilityDelivery|RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured)' -count=1
 go test ./cmd/bridge -run 'Test(ConfigurePlatformActionCallbacks_|SelectProvider_|SelectPlatform_|LookupPlatformDescriptor_|BridgeRuntimeControl_)' -count=1
 ```

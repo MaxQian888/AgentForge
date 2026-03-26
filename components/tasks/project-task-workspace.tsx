@@ -53,6 +53,10 @@ interface ProjectTaskWorkspaceProps {
   onTaskDecompose?: (
     taskId: string
   ) => Promise<TaskDecompositionResult | null> | TaskDecompositionResult | null | void;
+  onSpawnAgent?: (
+    taskId: string,
+    memberId: string
+  ) => Promise<void> | void;
   onSprintFilterChange?: (sprintId: string | "all") => void;
 }
 
@@ -75,6 +79,7 @@ export function ProjectTaskWorkspace({
   onTaskSave,
   onTaskAssign,
   onTaskDecompose,
+  onSpawnAgent,
   onSprintFilterChange,
 }: ProjectTaskWorkspaceProps) {
   const filters = useTaskWorkspaceStore((state) => state.filters);
@@ -163,6 +168,7 @@ export function ProjectTaskWorkspace({
             onTaskAssign={onTaskAssign}
             onTaskStatusChange={onTaskStatusChange}
             onTaskDecompose={onTaskDecompose}
+            onSpawnAgent={onSpawnAgent}
             onResetFilters={resetFilters}
           />
         </div>

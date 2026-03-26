@@ -31,6 +31,7 @@ export function TaskDetailPanel({
   const assignTask = useTaskStore((state) => state.assignTask);
   const transitionTask = useTaskStore((state) => state.transitionTask);
   const decomposeTask = useTaskStore((state) => state.decomposeTask);
+  const spawnAgent = useAgentStore((state) => state.spawnAgent);
   const members = useMemberStore(
     (state) => state.membersByProject[task?.projectId ?? ""] ?? []
   );
@@ -70,6 +71,7 @@ export function TaskDetailPanel({
           onTaskAssign={handleTaskAssign}
           onTaskStatusChange={transitionTask}
           onTaskDecompose={decomposeTask}
+          onSpawnAgent={spawnAgent}
         />
       </SheetContent>
     </Sheet>

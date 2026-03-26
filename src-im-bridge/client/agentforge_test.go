@@ -512,6 +512,50 @@ func TestHandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget(t *testing.T) 
 	}
 }
 
+func TestHandleIMAction_ParsesCanonicalActionOutcome(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(IMActionResponse{
+			Result:  "Task task-1 was dispatched and agent run run-1 started.",
+			Success: true,
+			Status:  "started",
+			Task: &Task{
+				ID:    "task-1",
+				Title: "Bridge rollout",
+			},
+			Dispatch: &DispatchOutcome{
+				Status: "started",
+				Run:    &AgentRun{ID: "run-1", TaskID: "task-1", Status: "running"},
+			},
+			Metadata: map[string]string{
+				"action_status": "started",
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+	resp, err := client.HandleIMAction(context.Background(), IMActionRequest{
+		Platform:  "slack",
+		Action:    "assign-agent",
+		EntityID:  "task-1",
+		ChannelID: "C123",
+	})
+	if err != nil {
+		t.Fatalf("HandleIMAction error: %v", err)
+	}
+
+	if resp.Status != "started" {
+		t.Fatalf("status = %q", resp.Status)
+	}
+	if resp.Task == nil || resp.Task.ID != "task-1" {
+		t.Fatalf("task = %+v", resp.Task)
+	}
+	if resp.Dispatch == nil || resp.Dispatch.Run == nil || resp.Dispatch.Run.ID != "run-1" {
+		t.Fatalf("dispatch = %+v", resp.Dispatch)
+	}
+}
+
 func TestWithSource_LeavesExistingSourceWhenNormalizationReturnsEmpty(t *testing.T) {
 	client := NewAgentForgeClient("http://example.test", "proj", "secret").WithSource("slack-stub")
 

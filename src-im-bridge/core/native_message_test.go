@@ -66,6 +66,39 @@ func TestNativeMessage_ValidateFeishuJSONAndTemplatePayloads(t *testing.T) {
 	}
 }
 
+func TestNativeMessage_ConstructorsBuildTypedFeishuMessages(t *testing.T) {
+	jsonMessage, err := NewFeishuJSONCardMessage(map[string]any{
+		"header": map[string]any{
+			"title": map[string]any{
+				"tag":     "plain_text",
+				"content": "Hello",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewFeishuJSONCardMessage error: %v", err)
+	}
+	if jsonMessage.FeishuCard == nil || jsonMessage.FeishuCard.Mode != FeishuCardModeJSON {
+		t.Fatalf("jsonMessage = %+v", jsonMessage)
+	}
+
+	templateMessage, err := NewFeishuTemplateCardMessage("ctp_123", "1.0.0", map[string]any{"status": "done"})
+	if err != nil {
+		t.Fatalf("NewFeishuTemplateCardMessage error: %v", err)
+	}
+	if templateMessage.FeishuCard == nil || templateMessage.FeishuCard.TemplateID != "ctp_123" {
+		t.Fatalf("templateMessage = %+v", templateMessage)
+	}
+
+	markdownMessage, err := NewFeishuMarkdownCardMessage("AgentForge Update", "Hello **world**")
+	if err != nil {
+		t.Fatalf("NewFeishuMarkdownCardMessage error: %v", err)
+	}
+	if markdownMessage.FeishuCard == nil || markdownMessage.FeishuCard.Mode != FeishuCardModeJSON {
+		t.Fatalf("markdownMessage = %+v", markdownMessage)
+	}
+}
+
 func TestDeliverNative_UsesUpdaterWhenDeferredCardUpdateIsPreferred(t *testing.T) {
 	platform := &nativeDeliveryTestPlatform{}
 	metadata := PlatformMetadata{

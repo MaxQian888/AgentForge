@@ -5,8 +5,12 @@
 const fs = require("node:fs");
 const net = require("node:net");
 const path = require("node:path");
-const { spawnSync } = require("node:child_process");
+const { spawn, spawnSync } = require("node:child_process");
 const { getRepoRoot } = require("./plugin-dev-targets.js");
+
+const DOCKER_INFO_TIMEOUT_MS = 10000;
+const DOCKER_DESKTOP_START_TIMEOUT_MS = 10000;
+const DOCKER_DESKTOP_STATUS_TIMEOUT_MS = 5000;
 
 function getWorkflowPaths({
   repoRoot = getRepoRoot(),
@@ -104,16 +108,185 @@ function isCommandAvailable(command, args = getCommandVersionArgs(command)) {
   return result.status === 0;
 }
 
-function canUseDockerCompose() {
-  if (!isCommandAvailable("docker")) {
-    return false;
+function getDockerDesktopExecutablePath() {
+  if (process.platform !== "win32") {
+    return null;
+  }
+
+  const candidates = [
+    process.env.ProgramFiles
+      ? path.join(process.env.ProgramFiles, "Docker", "Docker", "Docker Desktop.exe")
+      : null,
+    process.env.LocalAppData
+      ? path.join(process.env.LocalAppData, "Programs", "Docker", "Docker", "Docker Desktop.exe")
+      : null,
+  ].filter(Boolean);
+
+  return candidates.find((candidate) => fs.existsSync(candidate)) ?? null;
+}
+
+function getDockerComposeAvailability() {
+  const dockerDesktopExecutablePath = getDockerDesktopExecutablePath();
+  const dockerAvailable = isCommandAvailable("docker");
+
+  if (!dockerAvailable) {
+    return {
+      ready: false,
+      dockerAvailable: false,
+      canAutoStart: false,
+      reason: "docker_cli_missing",
+      detail: "docker CLI is unavailable",
+      dockerDesktopExecutablePath,
+      infoResult: null,
+    };
   }
 
   const infoResult = runCommandSync("docker", ["info"], {
-    stdio: "ignore",
+    encoding: "utf8",
+    timeout: DOCKER_INFO_TIMEOUT_MS,
   });
 
-  return infoResult.status === 0;
+  if (infoResult.status === 0) {
+    return {
+      ready: true,
+      dockerAvailable: true,
+      canAutoStart: process.platform === "win32" && Boolean(dockerDesktopExecutablePath),
+      reason: null,
+      detail: null,
+      dockerDesktopExecutablePath,
+      infoResult,
+    };
+  }
+
+  const canAutoStart = process.platform === "win32" && Boolean(dockerDesktopExecutablePath);
+  const desktopStatus = canAutoStart ? getDockerDesktopStatus() : null;
+  const timeoutDetail =
+    infoResult.error?.code === "ETIMEDOUT"
+      ? desktopStatus === "starting"
+        ? "Docker Desktop is still starting and the docker daemon is not ready yet"
+        : "docker daemon did not respond before the readiness timeout"
+      : null;
+  const daemonDetail =
+    infoResult.stderr?.trim() ||
+    infoResult.stdout?.trim() ||
+    (desktopStatus === "starting"
+      ? "Docker Desktop is still starting and the docker daemon is not ready yet"
+      : canAutoStart
+        ? "Docker Desktop is installed but not ready"
+        : "docker daemon is unavailable");
+
+  return {
+    ready: false,
+    dockerAvailable: true,
+    canAutoStart,
+    reason: canAutoStart ? "docker_desktop_not_ready" : "docker_daemon_unavailable",
+    detail: timeoutDetail ?? daemonDetail,
+    desktopStatus,
+    dockerDesktopExecutablePath,
+    infoResult,
+  };
+}
+
+function parseDockerDesktopStatus(output = "") {
+  const match = output.match(/Status\s+([a-z]+)/iu);
+  if (match) {
+    return match[1].toLowerCase();
+  }
+
+  if (/Could not retrieve status/iu.test(output)) {
+    return "stopped";
+  }
+
+  return null;
+}
+
+function getDockerDesktopStatus() {
+  if (process.platform !== "win32" || !isCommandAvailable("docker")) {
+    return null;
+  }
+
+  const statusResult = runCommandSync("docker", ["desktop", "status"], {
+    encoding: "utf8",
+    timeout: DOCKER_DESKTOP_STATUS_TIMEOUT_MS,
+  });
+
+  return parseDockerDesktopStatus(
+    `${statusResult.stdout ?? ""}\n${statusResult.stderr ?? ""}`.trim(),
+  );
+}
+
+function startDockerDesktop(availability = getDockerComposeAvailability()) {
+  if (!availability?.canAutoStart) {
+    return {
+      ok: false,
+      reason: "docker_desktop_unavailable",
+      detail: availability?.detail ?? "Docker Desktop auto-start is unavailable",
+    };
+  }
+
+  const desktopStatus = getDockerDesktopStatus();
+  if (desktopStatus && desktopStatus !== "stopped") {
+    return {
+      ok: true,
+      method: "desktop-status-wait",
+      desktopStatus,
+    };
+  }
+
+  const desktopStartResult = runCommandSync("docker", ["desktop", "start"], {
+    encoding: "utf8",
+    timeout: DOCKER_DESKTOP_START_TIMEOUT_MS,
+  });
+
+  if (desktopStartResult.status === 0 || desktopStartResult.error?.code === "ETIMEDOUT") {
+    return {
+      ok: true,
+      method: "docker-desktop-cli",
+    };
+  }
+
+  if (!availability.dockerDesktopExecutablePath) {
+    return {
+      ok: false,
+      reason: "docker_desktop_start_failed",
+      detail:
+        desktopStartResult.stderr?.trim() ||
+        desktopStartResult.stdout?.trim() ||
+        desktopStartResult.error?.message ||
+        availability.detail,
+    };
+  }
+
+  try {
+    const child = spawn(availability.dockerDesktopExecutablePath, [], {
+      detached: true,
+      shell: false,
+      stdio: "ignore",
+      windowsHide: true,
+    });
+    child.unref();
+
+    return {
+      ok: true,
+      method: "desktop-executable",
+      pid: child.pid ?? null,
+      executablePath: availability.dockerDesktopExecutablePath,
+    };
+  } catch (error) {
+    return {
+      ok: false,
+      reason: "docker_desktop_start_failed",
+      detail:
+        desktopStartResult.stderr?.trim() ||
+        desktopStartResult.stdout?.trim() ||
+        error.message ||
+        availability.detail,
+    };
+  }
+}
+
+function canUseDockerCompose() {
+  return getDockerComposeAvailability().ready;
 }
 
 function isProcessAlive(pid) {
@@ -260,6 +433,9 @@ module.exports = {
   createEmptyRuntimeState,
   createStopPlan,
   ensureDirectory,
+  getDockerComposeAvailability,
+  getDockerDesktopExecutablePath,
+  getDockerDesktopStatus,
   getCommandVersionArgs,
   getWorkflowPaths,
   isCommandAvailable,
@@ -271,5 +447,6 @@ module.exports = {
   readRuntimeState,
   reconcileRuntimeState,
   runCommandSync,
+  startDockerDesktop,
   writeRuntimeState,
 };

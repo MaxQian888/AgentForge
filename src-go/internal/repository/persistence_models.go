@@ -157,16 +157,17 @@ func (r *memberRecord) toModel() *model.Member {
 }
 
 type sprintRecord struct {
-	ID             uuid.UUID `gorm:"column:id;primaryKey"`
-	ProjectID      uuid.UUID `gorm:"column:project_id"`
-	Name           string    `gorm:"column:name"`
-	StartDate      time.Time `gorm:"column:start_date"`
-	EndDate        time.Time `gorm:"column:end_date"`
-	Status         string    `gorm:"column:status"`
-	TotalBudgetUsd float64   `gorm:"column:total_budget_usd"`
-	SpentUsd       float64   `gorm:"column:spent_usd"`
-	CreatedAt      time.Time `gorm:"column:created_at"`
-	UpdatedAt      time.Time `gorm:"column:updated_at"`
+	ID             uuid.UUID  `gorm:"column:id;primaryKey"`
+	ProjectID      uuid.UUID  `gorm:"column:project_id"`
+	Name           string     `gorm:"column:name"`
+	StartDate      time.Time  `gorm:"column:start_date"`
+	EndDate        time.Time  `gorm:"column:end_date"`
+	MilestoneID    *uuid.UUID `gorm:"column:milestone_id"`
+	Status         string     `gorm:"column:status"`
+	TotalBudgetUsd float64    `gorm:"column:total_budget_usd"`
+	SpentUsd       float64    `gorm:"column:spent_usd"`
+	CreatedAt      time.Time  `gorm:"column:created_at"`
+	UpdatedAt      time.Time  `gorm:"column:updated_at"`
 }
 
 func (sprintRecord) TableName() string { return "sprints" }
@@ -181,6 +182,7 @@ func newSprintRecord(sprint *model.Sprint) *sprintRecord {
 		Name:           sprint.Name,
 		StartDate:      sprint.StartDate,
 		EndDate:        sprint.EndDate,
+		MilestoneID:    cloneUUIDPointer(sprint.MilestoneID),
 		Status:         sprint.Status,
 		TotalBudgetUsd: sprint.TotalBudgetUsd,
 		SpentUsd:       sprint.SpentUsd,
@@ -199,6 +201,7 @@ func (r *sprintRecord) toModel() *model.Sprint {
 		Name:           r.Name,
 		StartDate:      r.StartDate,
 		EndDate:        r.EndDate,
+		MilestoneID:    cloneUUIDPointer(r.MilestoneID),
 		Status:         r.Status,
 		TotalBudgetUsd: r.TotalBudgetUsd,
 		SpentUsd:       r.SpentUsd,
@@ -593,6 +596,7 @@ type taskRecord struct {
 	ProjectID      uuid.UUID  `gorm:"column:project_id"`
 	ParentID       *uuid.UUID `gorm:"column:parent_id"`
 	SprintID       *uuid.UUID `gorm:"column:sprint_id"`
+	MilestoneID    *uuid.UUID `gorm:"column:milestone_id"`
 	Title          string     `gorm:"column:title"`
 	Description    string     `gorm:"column:description"`
 	Status         string     `gorm:"column:status"`
@@ -637,6 +641,7 @@ func newTaskRecord(task *model.Task) *taskRecord {
 		ProjectID:      task.ProjectID,
 		ParentID:       task.ParentID,
 		SprintID:       task.SprintID,
+		MilestoneID:    cloneUUIDPointer(task.MilestoneID),
 		Title:          task.Title,
 		Description:    task.Description,
 		Status:         task.Status,
@@ -679,6 +684,7 @@ func (r *taskRecord) toModel() *model.Task {
 		ProjectID:      r.ProjectID,
 		ParentID:       r.ParentID,
 		SprintID:       r.SprintID,
+		MilestoneID:    cloneUUIDPointer(r.MilestoneID),
 		Title:          r.Title,
 		Description:    r.Description,
 		Status:         r.Status,

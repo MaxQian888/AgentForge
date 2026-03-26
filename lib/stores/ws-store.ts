@@ -5,6 +5,7 @@ import { useTaskStore } from "./task-store";
 import { useAgentStore } from "./agent-store";
 import { useNotificationStore } from "./notification-store";
 import { useDashboardStore } from "./dashboard-store";
+import { useDocsStore } from "./docs-store";
 import { useSprintStore, type Sprint } from "./sprint-store";
 import { useSchedulerStore } from "./scheduler-store";
 import { useTeamStore, normalizeTeam } from "./team-store";
@@ -363,6 +364,52 @@ export const useWSStore = create<WSState>()((set) => ({
     client.on("team.failed", applyTeamEvent);
     client.on("team.cancelled", applyTeamEvent);
     client.on("team.cost_update", applyTeamEvent);
+
+    const refreshDocsTree = () => {
+      void useDocsStore.getState().refreshActiveProjectTree();
+    };
+
+    const refreshDocsPage = (pageId?: string) => {
+      const docsState = useDocsStore.getState();
+      if (!docsState.projectId || !docsState.currentPage) {
+        refreshDocsTree();
+        return;
+      }
+      void docsState.fetchPage(docsState.projectId, pageId ?? docsState.currentPage.id);
+      void docsState.fetchVersions(docsState.projectId, pageId ?? docsState.currentPage.id);
+      void docsState.fetchComments(docsState.projectId, pageId ?? docsState.currentPage.id);
+    };
+
+    client.on("wiki.page.created", (data) => {
+      const payload = extractPayload<{ id?: string }>(data);
+      refreshDocsTree();
+      if (payload?.id) {
+        refreshDocsPage(payload.id);
+      }
+    });
+    client.on("wiki.page.updated", (data) => {
+      const payload = extractPayload<{ id?: string }>(data);
+      refreshDocsTree();
+      refreshDocsPage(payload?.id);
+    });
+    client.on("wiki.page.moved", () => {
+      refreshDocsTree();
+    });
+    client.on("wiki.page.deleted", () => {
+      refreshDocsTree();
+    });
+    client.on("wiki.comment.created", () => {
+      void useDocsStore.getState().refreshActivePageComments();
+    });
+    client.on("wiki.comment.resolved", () => {
+      void useDocsStore.getState().refreshActivePageComments();
+    });
+    client.on("wiki.version.published", () => {
+      const docsState = useDocsStore.getState();
+      if (docsState.projectId && docsState.currentPage) {
+        void docsState.fetchVersions(docsState.projectId, docsState.currentPage.id);
+      }
+    });
 
     client.connect();
   },

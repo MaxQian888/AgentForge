@@ -96,13 +96,30 @@ func RegisterRoutes(
 	memberRepo *repository.MemberRepository,
 	sprintRepo *repository.SprintRepository,
 	taskRepo *repository.TaskRepository,
+	entityLinkRepo *repository.EntityLinkRepository,
+	taskCommentRepo *repository.TaskCommentRepository,
+	customFieldRepo *repository.CustomFieldRepository,
+	savedViewRepo *repository.SavedViewRepository,
+	formRepo *repository.FormRepository,
+	automationRuleRepo *repository.AutomationRuleRepository,
+	automationLogRepo *repository.AutomationLogRepository,
+	dashboardRepo *repository.DashboardRepository,
+	milestoneRepo *repository.MilestoneRepository,
 	taskProgressRepo *repository.TaskProgressRepository,
 	agentRunRepo *repository.AgentRunRepository,
 	notifRepo *repository.NotificationRepository,
 	reviewRepo *repository.ReviewRepository,
+	reviewAggRepo *repository.ReviewAggregationRepository,
+	falsePosRepo *repository.FalsePositiveRepository,
 	workflowRepo *repository.WorkflowRepository,
 	teamRepo *repository.AgentTeamRepository,
 	memoryRepo *repository.AgentMemoryRepository,
+	wikiSpaceRepo *repository.WikiSpaceRepository,
+	wikiPageRepo *repository.WikiPageRepository,
+	pageVersionRepo *repository.PageVersionRepository,
+	pageCommentRepo *repository.PageCommentRepository,
+	pageFavoriteRepo *repository.PageFavoriteRepository,
+	pageRecentAccessRepo *repository.PageRecentAccessRepository,
 	hub *ws.Hub,
 	bridgeClient *bridge.Client,
 	pluginSvc *service.PluginService,
@@ -137,6 +154,15 @@ func RegisterRoutes(
 	); notifier != nil {
 		taskProgressSvc.SetIMNotifier(notifier)
 	}
+	wikiSvc := service.NewWikiService(
+		wikiSpaceRepo,
+		wikiPageRepo,
+		pageVersionRepo,
+		pageCommentRepo,
+		pageFavoriteRepo,
+		pageRecentAccessRepo,
+		hub,
+	).WithNotificationCreator(notificationSvc)
 	if agentSvc != nil {
 		agentSvc.SetProgressTracker(taskProgressSvc)
 		agentSvc.SetIMProgressNotifier(imControlPlane)
@@ -150,7 +176,12 @@ func RegisterRoutes(
 	}
 	reviewSvc := service.NewReviewService(reviewRepo, taskRepo, notificationSvc, hub, bridgeClient, taskProgressSvc)
 	reviewSvc.SetIMProgressNotifier(imControlPlane)
+	reviewAggSvc := service.NewReviewAggregationService(reviewRepo, reviewAggRepo, falsePosRepo, taskRepo)
+	reviewSvc.WithAggregationService(reviewAggSvc)
 	taskDecomposeSvc := service.NewTaskDecompositionService(taskRepo, taskDecompositionBridgeAdapter{client: bridgeClient})
+	entityLinkSvc := service.NewEntityLinkService(entityLinkRepo, taskRepo, wikiPageRepo).WithHub(hub)
+	taskCommentSvc := service.NewTaskCommentService(taskCommentRepo, memberRepo, notificationSvc, taskRepo).WithHub(hub)
+	wikiSvc.WithEntityLinkSyncer(entityLinkSvc)
 
 	// Health
 	healthH := handler.NewHealthHandler(version.Version, version.Commit, version.BuildDate, cfg.Env)
@@ -182,10 +213,13 @@ func RegisterRoutes(
 	e.GET("/ws/im-bridge", ws.NewIMControlHandler(imControlPlaneWSAdapter{control: imControlPlane}).HandleWS)
 
 	// --- New resource handlers ---
-	projectH := handler.NewProjectHandler(projectRepo, bridgeClient)
+	projectH := handler.NewProjectHandler(projectRepo, bridgeClient, wikiSvc)
 	memberH := handler.NewMemberHandler(memberRepo)
 	sprintH := handler.NewSprintHandler(sprintRepo, taskRepo).WithHub(hub)
 	taskH := handler.NewTaskHandler(taskRepo, taskDecomposeSvc).WithProgress(taskProgressSvc).WithHub(hub)
+	wikiH := handler.NewWikiHandler(wikiSvc)
+	entityLinkH := handler.NewEntityLinkHandler(entityLinkSvc)
+	taskCommentH := handler.NewTaskCommentHandler(taskCommentSvc)
 	var agentRuntime handler.AgentRuntimeService
 	if agentSvc != nil {
 		agentRuntime = agentSvc
@@ -195,13 +229,21 @@ func RegisterRoutes(
 	workflowH := handler.NewWorkflowHandler(workflowRepo)
 	costH := handler.NewCostHandler(agentRunRepo)
 	roleH := handler.NewRoleHandler(cfg.RolesDir).WithBridgeClient(bridgeClient)
+	customFieldH := handler.NewCustomFieldHandler(service.NewCustomFieldService(customFieldRepo))
+	savedViewH := handler.NewSavedViewHandler(service.NewSavedViewService(savedViewRepo), memberRepo)
+	formH := handler.NewFormHandler(service.NewFormService(formRepo, taskRepo, customFieldRepo))
+	automationH := handler.NewAutomationHandler(automationRuleRepo, automationLogRepo)
+	milestoneH := handler.NewMilestoneHandler(service.NewMilestoneService(milestoneRepo, taskRepo, sprintRepo))
+	dashboardCrudSvc := service.NewDashboardService(dashboardRepo)
+	dashboardDataSvc := service.NewDashboardWidgetService(taskRepo, sprintRepo, agentRunRepo, cache)
+	dashboardH := handler.NewDashboardHandler(dashboardCrudSvc, dashboardDataSvc)
 	var teamRuntime handler.TeamRuntimeService
 	if teamSvc != nil {
 		teamRuntime = teamSvc
 	}
 	teamH := handler.NewTeamHandler(teamRuntime)
 	memoryH := handler.NewMemoryHandler(memorySvc)
-	reviewH := handler.NewReviewHandler(reviewSvc)
+	reviewH := handler.NewReviewHandler(reviewSvc).WithAggregationService(reviewAggSvc)
 	workflowRoleStore := role.NewFileStore(cfg.RolesDir)
 	if pluginSvc == nil {
 		pluginSvc = service.NewPluginService(
@@ -215,6 +257,8 @@ func RegisterRoutes(
 		WithRoleStore(workflowRoleStore).
 		WithBroadcaster(ws.NewPluginEventBroadcaster(hub))
 	reviewSvc.WithExecutionPlanner(service.NewReviewExecutionPlanner(pluginSvc))
+	recommendSvc := service.NewAssignmentRecommender(taskRepo, memberRepo, agentRunRepo)
+	taskH = taskH.WithRecommender(recommendSvc)
 	var dispatchSvc *service.TaskDispatchService
 	if agentSvc != nil {
 		dispatchSvc = service.NewTaskDispatchService(taskRepo, memberRepo, agentSvc, hub, notificationSvc, taskProgressSvc)
@@ -250,6 +294,47 @@ func RegisterRoutes(
 	projectGroup.GET("/members", memberH.List)
 	projectGroup.POST("/tasks", taskH.Create)
 	projectGroup.GET("/tasks", taskH.List)
+	projectGroup.POST("/links", entityLinkH.Create)
+	projectGroup.GET("/links", entityLinkH.List)
+	projectGroup.DELETE("/links/:linkId", entityLinkH.Delete)
+	projectGroup.GET("/tasks/:tid/comments", taskCommentH.List)
+	projectGroup.POST("/tasks/:tid/comments", taskCommentH.Create)
+	projectGroup.PATCH("/tasks/:tid/comments/:cid", taskCommentH.Update)
+	projectGroup.DELETE("/tasks/:tid/comments/:cid", taskCommentH.Delete)
+	projectGroup.GET("/fields", customFieldH.ListDefinitions)
+	projectGroup.POST("/fields", customFieldH.CreateDefinition)
+	projectGroup.PUT("/fields/reorder", customFieldH.ReorderDefinitions)
+	projectGroup.PUT("/fields/:fid", customFieldH.UpdateDefinition)
+	projectGroup.DELETE("/fields/:fid", customFieldH.DeleteDefinition)
+	projectGroup.GET("/tasks/:tid/fields", customFieldH.ListTaskValues)
+	projectGroup.PUT("/tasks/:tid/fields/:fid", customFieldH.SetTaskValue)
+	projectGroup.DELETE("/tasks/:tid/fields/:fid", customFieldH.ClearTaskValue)
+	projectGroup.GET("/views", savedViewH.List)
+	projectGroup.POST("/views", savedViewH.Create)
+	projectGroup.PUT("/views/:vid", savedViewH.Update)
+	projectGroup.DELETE("/views/:vid", savedViewH.Delete)
+	projectGroup.POST("/views/:vid/default", savedViewH.SetDefault)
+	projectGroup.GET("/forms", formH.List)
+	projectGroup.POST("/forms", formH.Create)
+	projectGroup.PUT("/forms/:formId", formH.Update)
+	projectGroup.DELETE("/forms/:formId", formH.Delete)
+	projectGroup.GET("/automations", automationH.ListRules)
+	projectGroup.POST("/automations", automationH.CreateRule)
+	projectGroup.PUT("/automations/:rid", automationH.UpdateRule)
+	projectGroup.DELETE("/automations/:rid", automationH.DeleteRule)
+	projectGroup.GET("/automations/logs", automationH.ListLogs)
+	projectGroup.GET("/dashboards", dashboardH.List)
+	projectGroup.POST("/dashboards", dashboardH.Create)
+	projectGroup.PUT("/dashboards/:did", dashboardH.Update)
+	projectGroup.DELETE("/dashboards/:did", dashboardH.Delete)
+	projectGroup.GET("/dashboards/:did/widgets", dashboardH.ListWidgets)
+	projectGroup.POST("/dashboards/:did/widgets", dashboardH.SaveWidget)
+	projectGroup.DELETE("/dashboards/:did/widgets/:wid", dashboardH.DeleteWidget)
+	projectGroup.GET("/dashboard/widgets/:type", dashboardH.WidgetData)
+	projectGroup.GET("/milestones", milestoneH.List)
+	projectGroup.POST("/milestones", milestoneH.Create)
+	projectGroup.PUT("/milestones/:mid", milestoneH.Update)
+	projectGroup.DELETE("/milestones/:mid", milestoneH.Delete)
 	projectGroup.POST("/sprints", sprintH.Create)
 	projectGroup.GET("/sprints", sprintH.List)
 	projectGroup.PUT("/sprints/:sid", sprintH.Update)
@@ -259,6 +344,28 @@ func RegisterRoutes(
 	projectGroup.POST("/memory", memoryH.Store)
 	projectGroup.GET("/memory", memoryH.Search)
 	projectGroup.DELETE("/memory/:mid", memoryH.Delete)
+	projectGroup.GET("/wiki/pages", wikiH.ListPages)
+	projectGroup.POST("/wiki/pages", wikiH.CreatePage)
+	projectGroup.GET("/wiki/pages/:id", wikiH.GetPage)
+	projectGroup.PUT("/wiki/pages/:id", wikiH.UpdatePage)
+	projectGroup.DELETE("/wiki/pages/:id", wikiH.DeletePage)
+	projectGroup.PATCH("/wiki/pages/:id/move", wikiH.MovePage)
+	projectGroup.GET("/wiki/pages/:id/versions", wikiH.ListVersions)
+	projectGroup.POST("/wiki/pages/:id/versions", wikiH.CreateVersion)
+	projectGroup.GET("/wiki/pages/:id/versions/:vid", wikiH.GetVersion)
+	projectGroup.POST("/wiki/pages/:id/versions/:vid/restore", wikiH.RestoreVersion)
+	projectGroup.GET("/wiki/pages/:id/comments", wikiH.ListComments)
+	projectGroup.POST("/wiki/pages/:id/comments", wikiH.CreateComment)
+	projectGroup.PATCH("/wiki/pages/:id/comments/:cid", wikiH.UpdateComment)
+	projectGroup.DELETE("/wiki/pages/:id/comments/:cid", wikiH.DeleteComment)
+	projectGroup.GET("/wiki/templates", wikiH.ListTemplates)
+	projectGroup.POST("/wiki/pages/:id/templates", wikiH.CreateTemplateFromPage)
+	projectGroup.POST("/wiki/pages/from-template", wikiH.CreatePageFromTemplate)
+	projectGroup.GET("/wiki/favorites", wikiH.ListFavorites)
+	projectGroup.PUT("/wiki/pages/:id/favorite", wikiH.ToggleFavorite)
+	projectGroup.GET("/wiki/recent", wikiH.ListRecentAccess)
+	projectGroup.PUT("/wiki/pages/:id/pin", wikiH.TogglePinned)
+	protected.GET("/wiki/pages/:id", wikiH.GetPageContext)
 
 	// Task operations (not project-scoped, task ID is unique)
 	protected.GET("/tasks/:id", taskH.Get)
@@ -266,7 +373,9 @@ func RegisterRoutes(
 	protected.DELETE("/tasks/:id", taskH.Delete)
 	protected.POST("/tasks/:id/transition", taskH.Transition)
 	protected.POST("/tasks/:id/assign", taskH.Assign)
+	protected.GET("/tasks/:id/recommend-assignee", taskH.RecommendAssignee)
 	protected.POST("/tasks/:id/decompose", taskH.Decompose)
+	v1.POST("/forms/:slug/submit", formH.Submit)
 
 	// Member update
 	protected.PUT("/members/:id", memberH.Update)
@@ -299,11 +408,15 @@ func RegisterRoutes(
 	protected.POST("/scheduler/jobs/:jobKey/trigger", schedulerH.TriggerManual)
 	e.GET("/internal/scheduler/jobs", schedulerH.ListJobs)
 	e.POST("/internal/scheduler/jobs/:jobKey/trigger", schedulerH.TriggerCron)
+	protected.GET("/reviews", reviewH.ListAll)
 	protected.GET("/reviews/:id", reviewH.Get)
 	protected.GET("/tasks/:taskId/reviews", reviewH.ListByTask)
 	protected.POST("/reviews/:id/complete", reviewH.Complete)
 	protected.POST("/reviews/:id/approve", reviewH.Approve)
 	protected.POST("/reviews/:id/reject", reviewH.Reject)
+	protected.POST("/reviews/:id/request-changes", reviewH.RequestChanges)
+	protected.POST("/reviews/:id/false-positive", reviewH.MarkFalsePositive)
+	v1.POST("/reviews/ci-result", reviewH.IngestCIResult, reviewTriggerMw)
 
 	// Cost & Stats
 	protected.GET("/stats/cost", costH.GetStats)
@@ -330,6 +443,8 @@ func RegisterRoutes(
 	protected.GET("/plugins/catalog", pluginH.SearchCatalog)
 	protected.POST("/plugins/catalog/install", pluginH.InstallCatalogEntry)
 	protected.GET("/plugins/marketplace", pluginH.Marketplace)
+	protected.GET("/plugins/marketplace/remote", pluginH.ListRemotePlugins)
+	protected.POST("/plugins/marketplace/:id/install-remote", pluginH.InstallRemotePlugin)
 	protected.GET("/plugins", pluginH.List)
 	protected.DELETE("/plugins/:id", pluginH.Uninstall)
 	protected.POST("/plugins/:id/update", pluginH.Update)
@@ -358,6 +473,8 @@ func RegisterRoutes(
 	if bridgeClient != nil {
 		imSvc.SetClassifier(bridgeIntentAdapter{client: bridgeClient})
 	}
+	imSvc.SetActionExecutor(service.NewBackendIMActionExecutor(dispatchSvc, taskDecomposeSvc, reviewSvc))
+	wikiSvc.WithIMForwarder(imSvc, cfg.IMNotifyPlatform, cfg.IMNotifyTargetChatID)
 	imH := handler.NewIMHandler(imSvc)
 	imControlH := handler.NewIMControlHandler(imControlPlane)
 	v1.POST("/im/message", imH.HandleMessage)
@@ -369,6 +486,12 @@ func RegisterRoutes(
 	v1.POST("/im/bridge/unregister", imControlH.Unregister)
 	v1.POST("/im/bridge/bind", imControlH.BindAction)
 	v1.POST("/im/bridge/ack", imControlH.AckDelivery)
+	protected.GET("/im/channels", imControlH.ListChannels)
+	protected.POST("/im/channels", imControlH.SaveChannel)
+	protected.PUT("/im/channels/:id", imControlH.SaveChannel)
+	protected.DELETE("/im/channels/:id", imControlH.DeleteChannel)
+	protected.GET("/im/bridge/status", imControlH.GetStatus)
+	protected.GET("/im/deliveries", imControlH.ListDeliveries)
 	protected.POST("/im/send", imH.Send)
 	protected.POST("/im/notify", imH.Notify)
 

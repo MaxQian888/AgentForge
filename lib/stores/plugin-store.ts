@@ -119,9 +119,179 @@ export interface PluginSource {
   };
 }
 
+/* ── MCP types ── */
+
+export interface MCPInteractionSummary {
+  operation: string;
+  status: string;
+  at?: string;
+  target?: string;
+  summary?: string;
+  error_code?: string;
+  error_message?: string;
+}
+
+export interface PluginMCPRuntimeMetadata {
+  transport: string;
+  last_discovery_at?: string;
+  tool_count: number;
+  resource_count: number;
+  prompt_count: number;
+  latest_interaction?: MCPInteractionSummary;
+}
+
+export interface MCPCapabilityTool {
+  name: string;
+  description?: string;
+}
+
+export interface MCPCapabilityResource {
+  uri: string;
+  name?: string;
+}
+
+export interface MCPCapabilityPrompt {
+  name: string;
+  description?: string;
+}
+
+export interface PluginMCPCapabilitySnapshot {
+  transport: string;
+  last_discovery_at?: string;
+  tool_count: number;
+  resource_count: number;
+  prompt_count: number;
+  tools?: MCPCapabilityTool[];
+  resources?: MCPCapabilityResource[];
+  prompts?: MCPCapabilityPrompt[];
+  latest_interaction?: MCPInteractionSummary;
+}
+
+export interface PluginMCPRefreshResult {
+  plugin_id: string;
+  lifecycle_state?: string;
+  runtime_host?: string;
+  runtime_metadata?: PluginRuntimeMetadata;
+  snapshot: PluginMCPCapabilitySnapshot;
+}
+
+export interface MCPToolCallResult {
+  content?: Array<{
+    type?: string;
+    text?: string;
+    mimeType?: string;
+    uri?: string;
+  }>;
+  isError: boolean;
+  structuredContent?: Record<string, unknown>;
+}
+
+export interface MCPResourceReadResult {
+  contents?: Array<{ uri?: string; mimeType?: string; text?: string }>;
+}
+
+export interface MCPPromptGetResult {
+  description?: string;
+  messages?: Array<{
+    role?: string;
+    content: { type?: string; text?: string };
+  }>;
+}
+
+/* ── Event types ── */
+
+export type PluginEventType =
+  | "installed"
+  | "enabled"
+  | "disabled"
+  | "deactivated"
+  | "activating"
+  | "activated"
+  | "updated"
+  | "mcp_discovery"
+  | "mcp_interaction"
+  | "runtime_sync"
+  | "health"
+  | "restarted"
+  | "invoked"
+  | "uninstalled"
+  | "failed";
+
+export type PluginEventSource =
+  | "control-plane"
+  | "ts-bridge"
+  | "go-runtime"
+  | "operator";
+
+export interface PluginEventRecord {
+  id: string;
+  plugin_id: string;
+  event_type: PluginEventType;
+  event_source: PluginEventSource;
+  lifecycle_state?: string;
+  summary?: string;
+  payload?: Record<string, unknown>;
+  created_at?: string;
+}
+
+/* ── Workflow run types ── */
+
+export type WorkflowRunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "cancelled";
+
+export type WorkflowStepRunStatus =
+  | "pending"
+  | "running"
+  | "completed"
+  | "failed"
+  | "skipped";
+
+export interface WorkflowStepAttempt {
+  attempt: number;
+  status: WorkflowStepRunStatus;
+  output?: Record<string, unknown>;
+  error?: string;
+  started_at: string;
+  completed_at?: string;
+}
+
+export interface WorkflowStepRun {
+  step_id: string;
+  role_id: string;
+  action: string;
+  status: WorkflowStepRunStatus;
+  input?: Record<string, unknown>;
+  output?: Record<string, unknown>;
+  retry_count: number;
+  error?: string;
+  attempts?: WorkflowStepAttempt[];
+  started_at?: string;
+  completed_at?: string;
+}
+
+export interface WorkflowPluginRun {
+  id: string;
+  plugin_id: string;
+  process: string;
+  status: WorkflowRunStatus;
+  trigger?: Record<string, unknown>;
+  current_step_id?: string;
+  steps?: WorkflowStepRun[];
+  error?: string;
+  started_at: string;
+  completed_at?: string;
+}
+
+/* ── Runtime metadata ── */
+
 export interface PluginRuntimeMetadata {
   abi_version?: string;
   compatible: boolean;
+  mcp?: PluginMCPRuntimeMetadata;
 }
 
 export interface PluginRecord {
@@ -148,6 +318,7 @@ export interface MarketplacePluginEntry {
   author: string;
   kind: string;
   installUrl?: string;
+  installed?: boolean;
   sourceType?: PluginSourceType;
   runtime?: PluginRuntime;
   trustStatus?: PluginTrustState;
@@ -258,6 +429,12 @@ interface PluginState {
   plugins: PluginRecord[];
   builtins: PluginRecord[];
   marketplace: MarketplacePluginEntry[];
+  catalogResults: MarketplacePluginEntry[];
+  catalogQuery: string;
+  events: Record<string, PluginEventRecord[]>;
+  mcpSnapshots: Record<string, PluginMCPCapabilitySnapshot>;
+  workflowRuns: Record<string, WorkflowPluginRun[]>;
+  selectedWorkflowRunId: string | null;
   filters: PluginPanelFilters;
   selectedPluginId: string | null;
   loading: boolean;
@@ -270,13 +447,46 @@ interface PluginState {
   enablePlugin: (id: string) => Promise<void>;
   disablePlugin: (id: string) => Promise<void>;
   activatePlugin: (id: string) => Promise<void>;
+  deactivatePlugin: (id: string) => Promise<void>;
   uninstallPlugin: (id: string) => Promise<void>;
+  updatePlugin: (plugin: PluginRecord) => Promise<void>;
   updateConfig: (id: string, config: Record<string, unknown>) => Promise<void>;
   checkHealth: (id: string) => Promise<void>;
   restartPlugin: (id: string) => Promise<void>;
+  invokePlugin: (
+    id: string,
+    operation: string,
+    payload?: Record<string, unknown>,
+  ) => Promise<Record<string, unknown> | null>;
+  searchCatalog: (query: string) => Promise<void>;
+  installFromCatalog: (entryId: string) => Promise<void>;
+  refreshMCP: (id: string) => Promise<PluginMCPRefreshResult | null>;
+  callMCPTool: (
+    id: string,
+    toolName: string,
+    args?: Record<string, unknown>,
+  ) => Promise<MCPToolCallResult | null>;
+  readMCPResource: (
+    id: string,
+    uri: string,
+  ) => Promise<MCPResourceReadResult | null>;
+  getMCPPrompt: (
+    id: string,
+    name: string,
+    args?: Record<string, string>,
+  ) => Promise<MCPPromptGetResult | null>;
+  fetchEvents: (id: string, limit?: number) => Promise<void>;
+  startWorkflowRun: (
+    id: string,
+    trigger?: Record<string, unknown>,
+  ) => Promise<void>;
+  fetchWorkflowRuns: (id: string) => Promise<void>;
+  fetchWorkflowRun: (runId: string) => Promise<void>;
+  setCatalogQuery: (query: string) => void;
   setFilters: (next: Partial<PluginPanelFilters>) => void;
   resetFilters: () => void;
   selectPlugin: (id: string | null) => void;
+  selectWorkflowRun: (id: string | null) => void;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -293,6 +503,12 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
   plugins: [],
   builtins: [],
   marketplace: [],
+  catalogResults: [],
+  catalogQuery: "",
+  events: {},
+  mcpSnapshots: {},
+  workflowRuns: {},
+  selectedWorkflowRunId: null,
   filters: DEFAULT_PLUGIN_PANEL_FILTERS,
   selectedPluginId: null,
   loading: false,
@@ -467,6 +683,273 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       set({ error: "Failed to restart plugin" });
     }
   },
+
+  deactivatePlugin: async (id) => {
+    const token = getToken();
+    if (!token) return;
+
+    set({ error: null });
+    try {
+      const api = getApi();
+      await api.post(`/api/v1/plugins/${id}/deactivate`, {}, { token });
+      await get().fetchPlugins();
+    } catch {
+      set({ error: "Failed to deactivate plugin" });
+    }
+  },
+
+  updatePlugin: async (plugin) => {
+    const token = getToken();
+    if (!token) return;
+
+    const path = plugin.source.path ?? plugin.resolved_source_path;
+    if (!path) {
+      set({ error: "No supported update source is available for this plugin" });
+      return;
+    }
+
+    set({ error: null });
+    try {
+      const api = getApi();
+      await api.post(
+        `/api/v1/plugins/${plugin.metadata.id}/update`,
+        { path, source: plugin.source },
+        { token },
+      );
+      await get().fetchPlugins();
+    } catch {
+      set({ error: "Failed to update plugin" });
+    }
+  },
+
+  invokePlugin: async (id, operation, payload) => {
+    const token = getToken();
+    if (!token) return null;
+
+    set({ error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.post<Record<string, unknown>>(
+        `/api/v1/plugins/${id}/invoke`,
+        { operation, payload: payload ?? {} },
+        { token },
+      );
+      return data ?? null;
+    } catch {
+      set({ error: "Failed to invoke plugin" });
+      return null;
+    }
+  },
+
+  searchCatalog: async (query) => {
+    const token = getToken();
+    if (!token) return;
+
+    set({ catalogQuery: query, error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.get<MarketplacePluginEntry[]>(
+        `/api/v1/plugins/catalog?q=${encodeURIComponent(query)}`,
+        { token },
+      );
+      set({ catalogResults: data ?? [] });
+    } catch {
+      set({ error: "Failed to search catalog" });
+    }
+  },
+
+  installFromCatalog: async (entryId) => {
+    const token = getToken();
+    if (!token) return;
+
+    set({ loading: true, error: null });
+    try {
+      const api = getApi();
+      await api.post(
+        "/api/v1/plugins/catalog/install",
+        { entry_id: entryId },
+        { token },
+      );
+      await get().fetchPlugins();
+    } catch {
+      set({ error: "Failed to install from catalog" });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  refreshMCP: async (id) => {
+    const token = getToken();
+    if (!token) return null;
+
+    set({ error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.post<PluginMCPRefreshResult>(
+        `/api/v1/plugins/${id}/mcp/refresh`,
+        {},
+        { token },
+      );
+      if (data?.snapshot) {
+        set((state) => ({
+          mcpSnapshots: { ...state.mcpSnapshots, [id]: data.snapshot },
+        }));
+      }
+      await get().fetchPlugins();
+      return data ?? null;
+    } catch {
+      set({ error: "MCP refresh failed" });
+      return null;
+    }
+  },
+
+  callMCPTool: async (id, toolName, args) => {
+    const token = getToken();
+    if (!token) return null;
+
+    set({ error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.post<{ result: MCPToolCallResult }>(
+        `/api/v1/plugins/${id}/mcp/tools/call`,
+        { tool_name: toolName, arguments: args ?? {} },
+        { token },
+      );
+      return data?.result ?? null;
+    } catch {
+      set({ error: "MCP tool call failed" });
+      return null;
+    }
+  },
+
+  readMCPResource: async (id, uri) => {
+    const token = getToken();
+    if (!token) return null;
+
+    set({ error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.post<{ result: MCPResourceReadResult }>(
+        `/api/v1/plugins/${id}/mcp/resources/read`,
+        { uri },
+        { token },
+      );
+      return data?.result ?? null;
+    } catch {
+      set({ error: "MCP resource read failed" });
+      return null;
+    }
+  },
+
+  getMCPPrompt: async (id, name, args) => {
+    const token = getToken();
+    if (!token) return null;
+
+    set({ error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.post<{ result: MCPPromptGetResult }>(
+        `/api/v1/plugins/${id}/mcp/prompts/get`,
+        { name, arguments: args ?? {} },
+        { token },
+      );
+      return data?.result ?? null;
+    } catch {
+      set({ error: "MCP prompt get failed" });
+      return null;
+    }
+  },
+
+  fetchEvents: async (id, limit = 50) => {
+    const token = getToken();
+    if (!token) return;
+
+    set({ error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.get<PluginEventRecord[]>(
+        `/api/v1/plugins/${id}/events?limit=${limit}`,
+        { token },
+      );
+      set((state) => ({
+        events: { ...state.events, [id]: data ?? [] },
+      }));
+    } catch {
+      set({ error: "Failed to load plugin events" });
+    }
+  },
+
+  startWorkflowRun: async (id, trigger) => {
+    const token = getToken();
+    if (!token) return;
+
+    set({ error: null });
+    try {
+      const api = getApi();
+      await api.post(
+        `/api/v1/plugins/${id}/workflow-runs`,
+        { trigger: trigger ?? {} },
+        { token },
+      );
+      await get().fetchWorkflowRuns(id);
+    } catch {
+      set({ error: "Failed to start workflow run" });
+    }
+  },
+
+  fetchWorkflowRuns: async (id) => {
+    const token = getToken();
+    if (!token) return;
+
+    set({ error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.get<WorkflowPluginRun[]>(
+        `/api/v1/plugins/${id}/workflow-runs`,
+        { token },
+      );
+      set((state) => ({
+        workflowRuns: { ...state.workflowRuns, [id]: data ?? [] },
+      }));
+    } catch {
+      set({ error: "Failed to load workflow runs" });
+    }
+  },
+
+  fetchWorkflowRun: async (runId) => {
+    const token = getToken();
+    if (!token) return;
+
+    set({ error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.get<WorkflowPluginRun>(
+        `/api/v1/plugins/workflow-runs/${runId}`,
+        { token },
+      );
+      if (data) {
+        set((state) => {
+          const existing = state.workflowRuns[data.plugin_id] ?? [];
+          const updated = existing.map((r) => (r.id === runId ? data : r));
+          if (!existing.some((r) => r.id === runId)) {
+            updated.push(data);
+          }
+          return {
+            workflowRuns: {
+              ...state.workflowRuns,
+              [data.plugin_id]: updated,
+            },
+          };
+        });
+      }
+    } catch {
+      set({ error: "Failed to load workflow run" });
+    }
+  },
+
+  setCatalogQuery: (query) => set({ catalogQuery: query }),
+
+  selectWorkflowRun: (id) => set({ selectedWorkflowRunId: id }),
 
   setFilters: (next) =>
     set((state) => ({

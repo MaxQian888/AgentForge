@@ -14,17 +14,20 @@ import (
 )
 
 type ControlDelivery struct {
-	Cursor         int64             `json:"cursor"`
-	DeliveryID     string            `json:"deliveryId"`
-	TargetBridgeID string            `json:"targetBridgeId"`
-	Platform       string            `json:"platform"`
-	ProjectID      string            `json:"projectId,omitempty"`
-	Kind           string            `json:"kind"`
-	Content        string            `json:"content"`
-	TargetChatID   string            `json:"targetChatId,omitempty"`
-	ReplyTarget    *core.ReplyTarget `json:"replyTarget,omitempty"`
-	Timestamp      string            `json:"timestamp"`
-	Signature      string            `json:"signature,omitempty"`
+	Cursor         int64                   `json:"cursor"`
+	DeliveryID     string                  `json:"deliveryId"`
+	TargetBridgeID string                  `json:"targetBridgeId"`
+	Platform       string                  `json:"platform"`
+	ProjectID      string                  `json:"projectId,omitempty"`
+	Kind           string                  `json:"kind"`
+	Content        string                  `json:"content"`
+	Structured     *core.StructuredMessage `json:"structured,omitempty"`
+	Native         *core.NativeMessage     `json:"native,omitempty"`
+	Metadata       map[string]string       `json:"metadata,omitempty"`
+	TargetChatID   string                  `json:"targetChatId,omitempty"`
+	ReplyTarget    *core.ReplyTarget       `json:"replyTarget,omitempty"`
+	Timestamp      string                  `json:"timestamp"`
+	Signature      string                  `json:"signature,omitempty"`
 }
 
 type ControlDeliveryAck struct {

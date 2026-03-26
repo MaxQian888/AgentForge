@@ -9,7 +9,6 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -235,6 +234,89 @@ func TestBridgeRuntimeControl_StartProcessesDeliveriesAndStopsCleanly(t *testing
 	}
 }
 
+func TestBridgeRuntimeControl_ApplyDeliveryPrefersTypedStructuredPayload(t *testing.T) {
+	platform := &structuredRuntimeTestPlatform{}
+	control := &bridgeRuntimeControl{
+		cfg: &config{},
+		provider: &activeProvider{
+			Platform: platform,
+			Descriptor: providerDescriptor{
+				ID:       "discord",
+				Metadata: platform.Metadata(),
+			},
+			TransportMode: "stub",
+		},
+	}
+
+	err := control.applyDelivery(context.Background(), &client.ControlDelivery{
+		Platform:     "discord",
+		TargetChatID: "channel-1",
+		Content:      "plain fallback",
+		Structured: &core.StructuredMessage{
+			Title: "Task Update",
+			Body:  "Agent is still running",
+		},
+		Metadata: map[string]string{
+			"fallback_reason": "structured_reply_unavailable",
+		},
+		ReplyTarget: &core.ReplyTarget{
+			Platform:         "discord",
+			ChannelID:        "channel-1",
+			InteractionToken: "token-1",
+			UseReply:         true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("applyDelivery error: %v", err)
+	}
+
+	if len(platform.structured) != 0 {
+		t.Fatalf("structured deliveries = %+v, want reply-aware fallback instead", platform.structured)
+	}
+	if len(platform.replies) != 1 || platform.replies[0] != "Task Update\nAgent is still running" {
+		t.Fatalf("replies = %+v", platform.replies)
+	}
+}
+
+func TestBridgeRuntimeControl_ApplyDeliveryUsesDeferredNativeUpdateForFeishuProgress(t *testing.T) {
+	platform := &feishuDeferredRuntimeTestPlatform{}
+	control := &bridgeRuntimeControl{
+		cfg: &config{},
+		provider: &activeProvider{
+			Platform: platform,
+			Descriptor: providerDescriptor{
+				ID:       "feishu",
+				Metadata: platform.Metadata(),
+			},
+			TransportMode: "stub",
+		},
+	}
+
+	err := control.applyDelivery(context.Background(), &client.ControlDelivery{
+		Platform:     "feishu",
+		TargetChatID: "oc_123",
+		Content:      "Agent 已完成最新阶段",
+		ReplyTarget: &core.ReplyTarget{
+			Platform:      "feishu",
+			ChatID:        "oc_123",
+			MessageID:     "om_123",
+			CallbackToken: "token-1",
+			ProgressMode:  string(core.AsyncUpdateDeferredCardUpdate),
+			UseReply:      true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("applyDelivery error: %v", err)
+	}
+
+	if len(platform.nativeUpdates) != 1 {
+		t.Fatalf("nativeUpdates = %d, want 1", len(platform.nativeUpdates))
+	}
+	if len(platform.replies) != 0 {
+		t.Fatalf("replies = %+v, want no text fallback", platform.replies)
+	}
+}
+
 type runtimeTestPlatform struct {
 	mu           sync.Mutex
 	replies      []string
@@ -286,18 +368,92 @@ func (p *runtimeTestPlatform) Send(ctx context.Context, chatID string, content s
 func (p *runtimeTestPlatform) Stop() error { return nil }
 
 func signDelivery(secret string, delivery client.ControlDelivery) string {
+	payload, err := json.Marshal(struct {
+		TargetBridgeID string                  `json:"targetBridgeId"`
+		Cursor         int64                   `json:"cursor"`
+		DeliveryID     string                  `json:"deliveryId"`
+		Platform       string                  `json:"platform"`
+		ProjectID      string                  `json:"projectId,omitempty"`
+		Kind           string                  `json:"kind"`
+		Content        string                  `json:"content,omitempty"`
+		Structured     *core.StructuredMessage `json:"structured,omitempty"`
+		Native         *core.NativeMessage     `json:"native,omitempty"`
+		Metadata       map[string]string       `json:"metadata,omitempty"`
+		TargetChatID   string                  `json:"targetChatId,omitempty"`
+		ReplyTarget    *core.ReplyTarget       `json:"replyTarget,omitempty"`
+		Timestamp      string                  `json:"timestamp"`
+	}{
+		TargetBridgeID: strings.TrimSpace(delivery.TargetBridgeID),
+		Cursor:         delivery.Cursor,
+		DeliveryID:     strings.TrimSpace(delivery.DeliveryID),
+		Platform:       core.NormalizePlatformName(delivery.Platform),
+		ProjectID:      strings.TrimSpace(delivery.ProjectID),
+		Kind:           strings.ToLower(strings.TrimSpace(delivery.Kind)),
+		Content:        strings.TrimSpace(delivery.Content),
+		Structured:     delivery.Structured,
+		Native:         delivery.Native,
+		Metadata:       delivery.Metadata,
+		TargetChatID:   strings.TrimSpace(delivery.TargetChatID),
+		ReplyTarget:    delivery.ReplyTarget,
+		Timestamp:      strings.TrimSpace(delivery.Timestamp),
+	})
+	if err != nil {
+		return ""
+	}
 	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(secret)))
-	_, _ = mac.Write([]byte(strings.Join([]string{
-		strings.TrimSpace(delivery.TargetBridgeID),
-		int64String(delivery.Cursor),
-		strings.TrimSpace(delivery.DeliveryID),
-		strings.TrimSpace(delivery.Kind),
-		strings.TrimSpace(delivery.Content),
-		strings.TrimSpace(delivery.Timestamp),
-	}, "|")))
+	_, _ = mac.Write(payload)
 	return hex.EncodeToString(mac.Sum(nil))
 }
 
-func int64String(value int64) string {
-	return strconv.FormatInt(value, 10)
+type structuredRuntimeTestPlatform struct {
+	runtimeTestPlatform
+	structured []*core.StructuredMessage
+}
+
+func (p *structuredRuntimeTestPlatform) Metadata() core.PlatformMetadata {
+	return core.PlatformMetadata{
+		Source: "discord",
+		Capabilities: core.PlatformCapabilities{
+			StructuredSurface:  core.StructuredSurfaceComponents,
+			ActionCallbackMode: core.ActionCallbackWebhook,
+			AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateFollowUp},
+			MessageScopes:      []core.MessageScope{core.MessageScopeChat},
+		},
+	}
+}
+
+func (p *structuredRuntimeTestPlatform) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	p.structured = append(p.structured, message)
+	return nil
+}
+
+type feishuDeferredRuntimeTestPlatform struct {
+	runtimeTestPlatform
+	nativeUpdates []*core.NativeMessage
+}
+
+func (p *feishuDeferredRuntimeTestPlatform) Metadata() core.PlatformMetadata {
+	return core.PlatformMetadata{
+		Source: "feishu",
+		Capabilities: core.PlatformCapabilities{
+			StructuredSurface:    core.StructuredSurfaceCards,
+			AsyncUpdateModes:     []core.AsyncUpdateMode{core.AsyncUpdateDeferredCardUpdate},
+			SupportsRichMessages: true,
+		},
+	}
+}
+
+func (p *feishuDeferredRuntimeTestPlatform) UpdateNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	p.nativeUpdates = append(p.nativeUpdates, message)
+	return nil
+}
+
+func (p *feishuDeferredRuntimeTestPlatform) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	p.nativeUpdates = append(p.nativeUpdates, message)
+	return nil
+}
+
+func (p *feishuDeferredRuntimeTestPlatform) ReplyNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	p.nativeUpdates = append(p.nativeUpdates, message)
+	return nil
 }

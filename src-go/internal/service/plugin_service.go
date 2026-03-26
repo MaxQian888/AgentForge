@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -62,6 +63,22 @@ type PluginRoleStore interface {
 	Get(id string) (*rolepkg.Manifest, error)
 }
 
+// RemoteRegistryClient fetches plugin catalogs and downloads from a remote registry.
+type RemoteRegistryClient interface {
+	FetchCatalog(ctx context.Context, registryURL string) ([]RemotePluginEntry, error)
+	Download(ctx context.Context, pluginID, version, registryURL string) (io.ReadCloser, error)
+}
+
+// RemotePluginEntry represents a plugin available in a remote registry.
+type RemotePluginEntry struct {
+	PluginID    string   `json:"pluginId"`
+	Name        string   `json:"name"`
+	Version     string   `json:"version"`
+	Description string   `json:"description"`
+	Author      string   `json:"author"`
+	Tags        []string `json:"tags"`
+}
+
 type PluginPolicy struct {
 	AllowNetwork    bool
 	AllowFilesystem bool
@@ -94,15 +111,17 @@ type pluginTransactionalStores struct {
 }
 
 type PluginService struct {
-	repo          PluginRegistry
-	instanceStore PluginInstanceStore
-	eventStore    PluginEventAuditStore
-	broadcaster   PluginEventBroadcaster
-	runtimeClient ToolPluginRuntimeClient
-	goRuntime     GoPluginRuntime
-	roleStore     PluginRoleStore
-	builtInsDir   string
-	policy        PluginPolicy
+	repo            PluginRegistry
+	instanceStore   PluginInstanceStore
+	eventStore      PluginEventAuditStore
+	broadcaster     PluginEventBroadcaster
+	runtimeClient   ToolPluginRuntimeClient
+	goRuntime       GoPluginRuntime
+	roleStore       PluginRoleStore
+	builtInsDir     string
+	policy          PluginPolicy
+	remoteRegistry  RemoteRegistryClient
+	registryURL     string
 }
 
 func NewPluginService(repo PluginRegistry, runtimeClient ToolPluginRuntimeClient, goRuntime GoPluginRuntime, builtInsDir string) *PluginService {
@@ -320,17 +339,24 @@ func (s *PluginService) DiscoverBuiltIns(ctx context.Context) ([]*model.PluginRe
 			return nil
 		}
 
-		record, regErr := s.Install(ctx, PluginInstallRequest{
-			Path: path,
-			Source: &model.PluginSource{
+		manifest, parseErr := pluginparser.ParseFile(path)
+		if parseErr != nil {
+			return parseErr
+		}
+		manifest.Source = normalizePluginSource(
+			manifest.Metadata.ID,
+			manifest.Source,
+			&model.PluginSource{
 				Type: model.PluginSourceBuiltin,
 				Path: path,
 			},
-		})
-		if regErr != nil {
-			return regErr
+			path,
+		)
+		if err := s.validateWorkflowManifest(manifest); err != nil {
+			return err
 		}
-		records = append(records, record)
+
+		records = append(records, s.hydrateRecord(ctx, buildPluginRecordFromManifest(*manifest)))
 		return nil
 	})
 	if err != nil {
@@ -364,16 +390,7 @@ func (s *PluginService) Install(ctx context.Context, req PluginInstallRequest) (
 		return nil, err
 	}
 
-	record := &model.PluginRecord{
-		PluginManifest:     *manifest,
-		LifecycleState:     model.PluginStateInstalled,
-		RuntimeHost:        resolveRuntimeHost(manifest.Kind),
-		RestartCount:       0,
-		LastHealthAt:       nil,
-		LastError:          "",
-		ResolvedSourcePath: resolveSourcePath(*manifest),
-		RuntimeMetadata:    initialRuntimeMetadata(*manifest),
-	}
+	record := buildPluginRecordFromManifest(*manifest)
 
 	if manifest.Kind == model.PluginKindTool && s.runtimeClient != nil {
 		status, err := s.runtimeClient.RegisterToolPlugin(ctx, *manifest)
@@ -959,6 +976,69 @@ func (s *PluginService) ListMarketplace(ctx context.Context) ([]model.Marketplac
 	return items, nil
 }
 
+// SetRemoteRegistry configures the remote registry client and URL.
+func (s *PluginService) SetRemoteRegistry(client RemoteRegistryClient, registryURL ...string) {
+	s.remoteRegistry = client
+	if len(registryURL) > 0 {
+		s.registryURL = registryURL[0]
+	}
+}
+
+// ListRemotePlugins fetches the catalog from the configured remote registry.
+func (s *PluginService) ListRemotePlugins(ctx context.Context) ([]RemotePluginEntry, error) {
+	if s.remoteRegistry == nil {
+		return nil, fmt.Errorf("remote registry client is not configured")
+	}
+	entries, err := s.remoteRegistry.FetchCatalog(ctx, s.registryURL)
+	if err != nil {
+		return nil, fmt.Errorf("fetch remote catalog: %w", err)
+	}
+	return entries, nil
+}
+
+// InstallFromRemote downloads a plugin from the remote registry and installs it locally.
+func (s *PluginService) InstallFromRemote(ctx context.Context, pluginID, version string) error {
+	if s.remoteRegistry == nil {
+		return fmt.Errorf("remote registry client is not configured")
+	}
+
+	reader, err := s.remoteRegistry.Download(ctx, pluginID, version, s.registryURL)
+	if err != nil {
+		return fmt.Errorf("download remote plugin %s@%s: %w", pluginID, version, err)
+	}
+	defer reader.Close()
+
+	// Write to a temporary directory and install from there.
+	tmpDir, err := os.MkdirTemp("", "agentforge-remote-plugin-*")
+	if err != nil {
+		return fmt.Errorf("create temp dir for remote plugin: %w", err)
+	}
+	defer os.RemoveAll(tmpDir)
+
+	manifestPath := filepath.Join(tmpDir, "manifest.yaml")
+	outFile, err := os.Create(manifestPath)
+	if err != nil {
+		return fmt.Errorf("create temp manifest file: %w", err)
+	}
+
+	if _, err := io.Copy(outFile, reader); err != nil {
+		outFile.Close()
+		return fmt.Errorf("write remote plugin manifest: %w", err)
+	}
+	outFile.Close()
+
+	_, err = s.Install(ctx, PluginInstallRequest{
+		Path: manifestPath,
+		Source: &model.PluginSource{
+			Type:     model.PluginSourceCatalog,
+			Registry: s.registryURL,
+			Entry:    pluginID,
+			Version:  version,
+		},
+	})
+	return err
+}
+
 func (s *PluginService) findCatalogManifest(entryID string) (string, *model.PluginManifest, error) {
 	var (
 		foundPath     string
@@ -1142,7 +1222,7 @@ func (s *PluginService) validateWorkflowManifest(manifest *model.PluginManifest)
 
 func isSupportedWorkflowAction(action model.WorkflowActionType) bool {
 	switch action {
-	case model.WorkflowActionAgent, model.WorkflowActionReview, model.WorkflowActionTask:
+	case model.WorkflowActionAgent, model.WorkflowActionReview, model.WorkflowActionTask, model.WorkflowActionWorkflow, model.WorkflowActionApproval:
 		return true
 	default:
 		return false
@@ -1150,7 +1230,15 @@ func isSupportedWorkflowAction(action model.WorkflowActionType) bool {
 }
 
 func isExecutableWorkflowProcess(process model.WorkflowProcessMode) bool {
-	return process == model.WorkflowProcessSequential
+	switch process {
+	case model.WorkflowProcessSequential,
+		model.WorkflowProcessHierarchical,
+		model.WorkflowProcessEventDriven,
+		model.WorkflowProcessWave:
+		return true
+	default:
+		return false
+	}
 }
 
 func unsupportedWorkflowProcessError(record *model.PluginRecord) error {
@@ -1158,7 +1246,7 @@ func unsupportedWorkflowProcessError(record *model.PluginRecord) error {
 		return fmt.Errorf("unsupported workflow process")
 	}
 	return fmt.Errorf(
-		"unsupported workflow process %q for plugin %s; only sequential workflows are executable in the current phase",
+		"unsupported workflow process %q for plugin %s; supported modes: sequential, hierarchical, event-driven, wave",
 		record.Spec.Workflow.Process,
 		record.Metadata.ID,
 	)
@@ -1183,6 +1271,19 @@ func resolveRuntimeHost(kind model.PluginKind) model.PluginRuntimeHost {
 		return model.PluginHostTSBridge
 	default:
 		return model.PluginHostGoOrchestrator
+	}
+}
+
+func buildPluginRecordFromManifest(manifest model.PluginManifest) *model.PluginRecord {
+	return &model.PluginRecord{
+		PluginManifest:     manifest,
+		LifecycleState:     model.PluginStateInstalled,
+		RuntimeHost:        resolveRuntimeHost(manifest.Kind),
+		RestartCount:       0,
+		LastHealthAt:       nil,
+		LastError:          "",
+		ResolvedSourcePath: resolveSourcePath(manifest),
+		RuntimeMetadata:    initialRuntimeMetadata(manifest),
 	}
 }
 

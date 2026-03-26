@@ -15,12 +15,14 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/handler"
+	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type fakeTaskRepo struct {
 	tasks          map[uuid.UUID]*model.Task
+	lastListQuery  model.TaskListQuery
 	lastUpdateID   uuid.UUID
 	lastUpdateReq  *model.UpdateTaskRequest
 	lastTransition []struct {
@@ -45,7 +47,8 @@ func (f *fakeTaskRepo) GetByID(_ context.Context, id uuid.UUID) (*model.Task, er
 	return &cloned, nil
 }
 
-func (f *fakeTaskRepo) List(context.Context, uuid.UUID, model.TaskListQuery) ([]*model.Task, int, error) {
+func (f *fakeTaskRepo) List(_ context.Context, _ uuid.UUID, q model.TaskListQuery) ([]*model.Task, int, error) {
+	f.lastListQuery = q
 	return nil, 0, nil
 }
 
@@ -332,6 +335,37 @@ func TestTaskHandler_UpdatePersistsBlockedBy(t *testing.T) {
 	}
 	if len(body.BlockedBy) != 1 || body.BlockedBy[0] != blockerID.String() {
 		t.Fatalf("response blockedBy = %v, want [%s]", body.BlockedBy, blockerID.String())
+	}
+}
+
+func TestTaskHandler_ListParsesCustomFieldQuery(t *testing.T) {
+	projectID := uuid.New()
+	repo := &fakeTaskRepo{tasks: map[uuid.UUID]*model.Task{}}
+	e := echo.New()
+	req := httptest.NewRequest(
+		http.MethodGet,
+		"/api/v1/projects/"+projectID.String()+"/tasks?customFieldFilters=%5B%7B%22fieldDefId%22%3A%22field-1%22%2C%22op%22%3A%22eq%22%2C%22value%22%3A%22P0%22%7D%5D&customFieldSort=%7B%22fieldDefId%22%3A%22field-1%22%2C%22direction%22%3A%22asc%22%7D",
+		nil,
+	)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(appMiddleware.ProjectIDContextKey, projectID)
+
+	h := handler.NewTaskHandler(repo)
+	if err := h.List(c); err != nil {
+		t.Fatalf("List() error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if len(repo.lastListQuery.CustomFieldFilters) != 1 {
+		t.Fatalf("len(CustomFieldFilters) = %d, want 1", len(repo.lastListQuery.CustomFieldFilters))
+	}
+	if repo.lastListQuery.CustomFieldFilters[0].Value != "P0" {
+		t.Fatalf("unexpected filter payload: %+v", repo.lastListQuery.CustomFieldFilters[0])
+	}
+	if repo.lastListQuery.CustomFieldSort == nil || repo.lastListQuery.CustomFieldSort.Direction != "asc" {
+		t.Fatalf("unexpected custom sort: %+v", repo.lastListQuery.CustomFieldSort)
 	}
 }
 

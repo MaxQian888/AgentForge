@@ -117,14 +117,17 @@ const (
 	WorkflowProcessSequential   WorkflowProcessMode = "sequential"
 	WorkflowProcessHierarchical WorkflowProcessMode = "hierarchical"
 	WorkflowProcessEventDriven  WorkflowProcessMode = "event-driven"
+	WorkflowProcessWave         WorkflowProcessMode = "wave"
 )
 
 type WorkflowActionType string
 
 const (
-	WorkflowActionAgent  WorkflowActionType = "agent"
-	WorkflowActionReview WorkflowActionType = "review"
-	WorkflowActionTask   WorkflowActionType = "task"
+	WorkflowActionAgent    WorkflowActionType = "agent"
+	WorkflowActionReview   WorkflowActionType = "review"
+	WorkflowActionTask     WorkflowActionType = "task"
+	WorkflowActionWorkflow WorkflowActionType = "workflow"
+	WorkflowActionApproval WorkflowActionType = "approval"
 )
 
 type WorkflowPluginSpec struct {
@@ -140,10 +143,12 @@ type WorkflowRoleBinding struct {
 }
 
 type WorkflowStepDefinition struct {
-	ID     string             `yaml:"id" json:"id"`
-	Role   string             `yaml:"role" json:"role"`
-	Action WorkflowActionType `yaml:"action" json:"action"`
-	Next   []string           `yaml:"next,omitempty" json:"next,omitempty"`
+	ID       string             `yaml:"id" json:"id"`
+	Role     string             `yaml:"role" json:"role"`
+	Action   WorkflowActionType `yaml:"action" json:"action"`
+	Next     []string           `yaml:"next,omitempty" json:"next,omitempty"`
+	Config   map[string]any     `yaml:"config,omitempty" json:"config,omitempty"`
+	Metadata map[string]any     `yaml:"metadata,omitempty" json:"metadata,omitempty"`
 }
 
 type PluginWorkflowTrigger struct {

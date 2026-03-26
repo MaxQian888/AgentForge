@@ -113,6 +113,18 @@ func TestMetadataForPlatform_DefaultsStructuredSurfaceAndMatrixFromLegacyCapabil
 	if metadata.Capabilities.ActionCallbackMode != ActionCallbackWebhook {
 		t.Fatalf("ActionCallbackMode = %q, want %q", metadata.Capabilities.ActionCallbackMode, ActionCallbackWebhook)
 	}
+	if metadata.Rendering.DefaultTextFormat != TextFormatPlainText {
+		t.Fatalf("DefaultTextFormat = %q, want %q", metadata.Rendering.DefaultTextFormat, TextFormatPlainText)
+	}
+	if metadata.Rendering.MaxTextLength != 30000 {
+		t.Fatalf("MaxTextLength = %d, want 30000", metadata.Rendering.MaxTextLength)
+	}
+	if !metadata.Rendering.UsesProviderOwnedBuilders {
+		t.Fatal("expected feishu rendering profile to use provider-owned builders")
+	}
+	if !hasTextFormat(metadata.Rendering.SupportedFormats, TextFormatLarkMD) {
+		t.Fatalf("SupportedFormats = %+v, want lark_md", metadata.Rendering.SupportedFormats)
+	}
 }
 
 type metadataCardPlatform struct {
@@ -180,5 +192,52 @@ func TestPlatformCapabilities_MatrixAndLookupHelpers(t *testing.T) {
 	}
 	if capabilities.HasMessageScope(MessageScopeTopic) {
 		t.Fatal("did not expect absent message scope")
+	}
+}
+
+func TestMetadataForPlatform_DefaultsTelegramRenderingProfile(t *testing.T) {
+	metadata := MetadataForPlatform(&metadataOnlyPlatform{
+		name: "telegram-stub",
+		metadata: PlatformMetadata{
+			Source: "telegram",
+			Capabilities: PlatformCapabilities{
+				StructuredSurface: StructuredSurfaceInlineKeyboard,
+				AsyncUpdateModes:  []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateEdit},
+				MessageScopes:     []MessageScope{MessageScopeChat, MessageScopeTopic},
+				Mutability: MutabilitySemantics{
+					CanEdit:        true,
+					PrefersInPlace: true,
+				},
+			},
+		},
+	})
+
+	if metadata.Rendering.DefaultTextFormat != TextFormatPlainText {
+		t.Fatalf("DefaultTextFormat = %q, want %q", metadata.Rendering.DefaultTextFormat, TextFormatPlainText)
+	}
+	if metadata.Rendering.MaxTextLength != 4096 {
+		t.Fatalf("MaxTextLength = %d, want 4096", metadata.Rendering.MaxTextLength)
+	}
+	if !metadata.Rendering.SupportsSegments {
+		t.Fatal("expected telegram rendering profile to support segments")
+	}
+	if metadata.Rendering.StructuredSurface != StructuredSurfaceInlineKeyboard {
+		t.Fatalf("StructuredSurface = %q, want %q", metadata.Rendering.StructuredSurface, StructuredSurfaceInlineKeyboard)
+	}
+	if !hasTextFormat(metadata.Rendering.SupportedFormats, TextFormatMarkdownV2) {
+		t.Fatalf("SupportedFormats = %+v, want markdown_v2", metadata.Rendering.SupportedFormats)
+	}
+}
+
+func TestNormalizeMetadata_UsesFallbackSourceForRenderingDefaults(t *testing.T) {
+	metadata := NormalizeMetadata(PlatformMetadata{}, "discord-live")
+	if metadata.Source != "discord" {
+		t.Fatalf("Source = %q, want discord", metadata.Source)
+	}
+	if metadata.Rendering.DefaultTextFormat != TextFormatPlainText {
+		t.Fatalf("DefaultTextFormat = %q", metadata.Rendering.DefaultTextFormat)
+	}
+	if metadata.Rendering.StructuredSurface != StructuredSurfaceComponents {
+		t.Fatalf("StructuredSurface = %q, want %q", metadata.Rendering.StructuredSurface, StructuredSurfaceComponents)
 	}
 }

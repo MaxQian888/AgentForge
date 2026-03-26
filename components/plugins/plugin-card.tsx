@@ -10,11 +10,15 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
+import { PluginTrustBadge } from "./plugin-trust-badge";
 import type { PluginRecord, PluginLifecycleState } from "@/lib/stores/plugin-store";
 import { usePluginStore } from "@/lib/stores/plugin-store";
 import {
+  ArrowUpCircle,
   Play,
   Pause,
+  Square,
+  Terminal,
   Zap,
   RotateCcw,
   HeartPulse,
@@ -34,6 +38,7 @@ const stateColors: Record<PluginLifecycleState, string> = {
 interface PluginCardProps {
   plugin: PluginRecord;
   onConfigure?: (plugin: PluginRecord) => void;
+  onInvoke?: (plugin: PluginRecord) => void;
   onSelect?: (plugin: PluginRecord) => void;
   selected?: boolean;
 }
@@ -41,12 +46,15 @@ interface PluginCardProps {
 export function PluginCard({
   plugin,
   onConfigure,
+  onInvoke,
   onSelect,
   selected = false,
 }: PluginCardProps) {
   const enablePlugin = usePluginStore((s) => s.enablePlugin);
   const disablePlugin = usePluginStore((s) => s.disablePlugin);
   const activatePlugin = usePluginStore((s) => s.activatePlugin);
+  const deactivatePlugin = usePluginStore((s) => s.deactivatePlugin);
+  const updatePlugin = usePluginStore((s) => s.updatePlugin);
   const uninstallPlugin = usePluginStore((s) => s.uninstallPlugin);
   const checkHealth = usePluginStore((s) => s.checkHealth);
   const restartPlugin = usePluginStore((s) => s.restartPlugin);
@@ -65,6 +73,12 @@ export function PluginCard({
   const canDisable = isEnabled;
   const canActivate = state === "enabled" && isExecutable;
   const canRestart = isExecutable && (state === "active" || state === "degraded");
+  const canDeactivate = state === "active" && isExecutable;
+  const canInvoke = state === "active" && isExecutable;
+  const hasUpdate =
+    Boolean(plugin.source.release?.availableVersion) &&
+    plugin.source.release?.availableVersion !== plugin.metadata.version &&
+    Boolean(plugin.source.path ?? plugin.resolved_source_path);
   const canCheckHealth =
     isExecutable && (state === "active" || state === "degraded");
 
@@ -109,6 +123,8 @@ export function PluginCard({
             {plugin.metadata.description}
           </p>
         ) : null}
+
+        <PluginTrustBadge source={plugin.source} />
 
         <div className="grid gap-1 text-xs text-muted-foreground">
           <p>Runtime: {plugin.spec.runtime}</p>
@@ -173,6 +189,42 @@ export function PluginCard({
             >
               <HeartPulse className="mr-1 size-3.5" />
               Health
+            </Button>
+          ) : null}
+
+          {/* Deactivate */}
+          {canDeactivate ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void deactivatePlugin(id)}
+            >
+              <Square className="mr-1 size-3.5" />
+              Deactivate
+            </Button>
+          ) : null}
+
+          {/* Update */}
+          {hasUpdate ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => void updatePlugin(plugin)}
+            >
+              <ArrowUpCircle className="mr-1 size-3.5" />
+              Update
+            </Button>
+          ) : null}
+
+          {/* Invoke */}
+          {canInvoke ? (
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => onInvoke?.(plugin)}
+            >
+              <Terminal className="mr-1 size-3.5" />
+              Invoke
             </Button>
           ) : null}
 

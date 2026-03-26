@@ -36,8 +36,14 @@ export interface ReviewDTO {
 
 interface ReviewState {
   reviewsByTask: Record<string, ReviewDTO[]>;
+  allReviews: ReviewDTO[];
+  allReviewsLoading: boolean;
   loading: boolean;
   error: string | null;
+  fetchAllReviews: (filters?: {
+    status?: string;
+    riskLevel?: string;
+  }) => Promise<void>;
   fetchReviewsByTask: (taskId: string) => Promise<void>;
   triggerReview: (data: {
     taskId: string;
@@ -54,8 +60,31 @@ interface ReviewState {
 
 export const useReviewStore = create<ReviewState>()((set, get) => ({
   reviewsByTask: {},
+  allReviews: [],
+  allReviewsLoading: false,
   loading: false,
   error: null,
+
+  fetchAllReviews: async (filters) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+
+    set({ allReviewsLoading: true, error: null });
+    try {
+      const api = createApiClient(API_URL);
+      const params = new URLSearchParams();
+      if (filters?.status) params.set("status", filters.status);
+      if (filters?.riskLevel) params.set("riskLevel", filters.riskLevel);
+      const qs = params.toString();
+      const path = `/api/v1/reviews${qs ? `?${qs}` : ""}`;
+      const { data } = await api.get<ReviewDTO[]>(path, { token });
+      set({ allReviews: data ?? [], error: null });
+    } catch {
+      set({ error: "Unable to load reviews" });
+    } finally {
+      set({ allReviewsLoading: false });
+    }
+  },
 
   fetchReviewsByTask: async (taskId) => {
     const token = useAuthStore.getState().accessToken;

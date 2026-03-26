@@ -360,6 +360,38 @@ func (h *PluginHandler) GetWorkflowRun(c echo.Context) error {
 	return c.JSON(http.StatusOK, run)
 }
 
+func (h *PluginHandler) ListRemotePlugins(c echo.Context) error {
+	entries, err := h.service.ListRemotePlugins(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, entries)
+}
+
+func (h *PluginHandler) InstallRemotePlugin(c echo.Context) error {
+	pluginID := c.Param("id")
+	if pluginID == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "plugin id is required"})
+	}
+	var req struct {
+		Version string `json:"version"`
+	}
+	if err := c.Bind(&req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+	if req.Version == "" {
+		req.Version = "latest"
+	}
+	if err := h.service.InstallFromRemote(c.Request().Context(), pluginID, req.Version); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]string{
+		"message":  "plugin installed from remote registry",
+		"pluginId": pluginID,
+		"version":  req.Version,
+	})
+}
+
 func (h *PluginHandler) SyncRuntimeState(c echo.Context) error {
 	var update model.PluginRuntimeStatus
 	if err := c.Bind(&update); err != nil || update.PluginID == "" {

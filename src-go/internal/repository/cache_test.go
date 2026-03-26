@@ -150,3 +150,19 @@ func TestCacheRepository_RefreshToken_Expiry(t *testing.T) {
 		t.Error("expected error for expired token")
 	}
 }
+
+func TestCacheRepository_WidgetDataRoundTrip(t *testing.T) {
+	repo, _ := setupMiniRedis(t)
+	ctx := context.Background()
+
+	if err := repo.SetWidgetData(ctx, "project-1:throughput", `{"points":[]}`, time.Minute); err != nil {
+		t.Fatalf("SetWidgetData() error = %v", err)
+	}
+	value, err := repo.GetWidgetData(ctx, "project-1:throughput")
+	if err != nil {
+		t.Fatalf("GetWidgetData() error = %v", err)
+	}
+	if value != `{"points":[]}` {
+		t.Fatalf("widget payload = %s", value)
+	}
+}

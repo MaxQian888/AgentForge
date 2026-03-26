@@ -13,7 +13,7 @@ import {
   TabsTrigger,
 } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { useTeamStore, type TeamStatus } from "@/lib/stores/team-store";
+import { getTeamStrategyLabel, useTeamStore, type TeamStatus } from "@/lib/stores/team-store";
 import { useAgentStore, type Agent } from "@/lib/stores/agent-store";
 import { TeamPipeline } from "./team-pipeline";
 import { OutputStream } from "@/components/agent/output-stream";
@@ -37,6 +37,8 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
   const fetchTeam = useTeamStore((s) => s.fetchTeam);
   const cancelTeam = useTeamStore((s) => s.cancelTeam);
   const retryTeam = useTeamStore((s) => s.retryTeam);
+  const loading = useTeamStore((s) => Boolean(s.loadingById[teamId]));
+  const error = useTeamStore((s) => s.errorById[teamId] ?? null);
 
   const agents = useAgentStore((s) => s.agents);
   const agentOutputs = useAgentStore((s) => s.agentOutputs);
@@ -71,6 +73,22 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
     const interval = setInterval(update, 60_000);
     return () => clearInterval(interval);
   }, [team?.createdAt]);
+
+  if (!team && loading) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <p className="text-muted-foreground">Loading team detail...</p>
+      </div>
+    );
+  }
+
+  if (!team && error) {
+    return (
+      <div className="flex items-center justify-center py-20">
+        <p className="text-muted-foreground">{error}</p>
+      </div>
+    );
+  }
 
   if (!team) {
     return (
@@ -142,16 +160,28 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
 
       <TeamPipeline team={team} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle className="text-sm font-medium">
-            Resolved Runtime
-          </CardTitle>
-        </CardHeader>
-        <CardContent className="text-sm text-muted-foreground">
-          {team.runtime || "-"} / {team.provider || "-"} / {team.model || "-"}
-        </CardContent>
-      </Card>
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">
+              Strategy
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            {getTeamStrategyLabel(team.strategy)}
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">
+              Resolved Runtime
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="text-sm text-muted-foreground">
+            {team.runtime || "-"} / {team.provider || "-"} / {team.model || "-"}
+          </CardContent>
+        </Card>
+      </div>
 
       <div className="grid gap-4 sm:grid-cols-4">
         <Card>

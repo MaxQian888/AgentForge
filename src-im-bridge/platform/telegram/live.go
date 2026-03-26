@@ -90,10 +90,10 @@ type updateRunner interface {
 }
 
 type sender interface {
-	SendText(ctx context.Context, chatID int64, topicID int64, replyToMessageID int, text string) error
-	EditText(ctx context.Context, chatID int64, messageID int, text string) error
+	SendText(ctx context.Context, chatID int64, topicID int64, replyToMessageID int, message telegramTextMessage) error
+	EditText(ctx context.Context, chatID int64, messageID int, message telegramTextMessage) error
 	AnswerCallbackQuery(ctx context.Context, callbackQueryID string, text string) error
-	SendStructured(ctx context.Context, chatID int64, topicID int64, text string, markup *inlineKeyboardMarkup) error
+	SendStructured(ctx context.Context, chatID int64, topicID int64, message telegramTextMessage, markup *inlineKeyboardMarkup) error
 }
 
 type LiveOption func(*Live) error
@@ -160,7 +160,9 @@ func WithSender(sender sender) LiveOption {
 
 func (l *Live) Name() string { return "telegram-live" }
 
-func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
+func (l *Live) Metadata() core.PlatformMetadata {
+	return core.NormalizeMetadata(liveMetadata, liveMetadata.Source)
+}
 
 func (l *Live) SetActionHandler(handler notify.ActionHandler) {
 	l.actionHandler = handler
@@ -226,7 +228,7 @@ func (l *Live) Reply(ctx context.Context, rawReplyCtx any, content string) error
 	if reply.ChatID == 0 {
 		return errors.New("telegram reply requires chat id")
 	}
-	return l.sender.SendText(ctx, reply.ChatID, reply.TopicID, reply.MessageID, content)
+	return l.sender.SendText(ctx, reply.ChatID, reply.TopicID, reply.MessageID, telegramTextMessage{Text: content})
 }
 
 func (l *Live) Send(ctx context.Context, chatID string, content string) error {
@@ -234,7 +236,7 @@ func (l *Live) Send(ctx context.Context, chatID string, content string) error {
 	if err != nil {
 		return err
 	}
-	return l.sender.SendText(ctx, target, 0, 0, content)
+	return l.sender.SendText(ctx, target, 0, 0, telegramTextMessage{Text: content})
 }
 
 func (l *Live) UpdateMessage(ctx context.Context, rawReplyCtx any, content string) error {
@@ -242,7 +244,7 @@ func (l *Live) UpdateMessage(ctx context.Context, rawReplyCtx any, content strin
 	if reply.ChatID == 0 || reply.MessageID == 0 {
 		return errors.New("telegram update requires chat id and message id")
 	}
-	return l.sender.EditText(ctx, reply.ChatID, reply.MessageID, content)
+	return l.sender.EditText(ctx, reply.ChatID, reply.MessageID, telegramTextMessage{Text: content})
 }
 
 func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
@@ -250,7 +252,38 @@ func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.
 	if err != nil {
 		return err
 	}
-	return l.sender.SendStructured(ctx, target, 0, structuredFallbackText(message), buildInlineKeyboardMarkup(message))
+	return l.sender.SendStructured(ctx, target, 0, telegramTextMessage{Text: structuredFallbackText(message)}, buildInlineKeyboardMarkup(message))
+}
+
+func (l *Live) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
+	target, err := parseChatID(chatID)
+	if err != nil {
+		return err
+	}
+	return l.sendFormattedSegments(ctx, target, 0, 0, renderTelegramText(message))
+}
+
+func (l *Live) ReplyFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	reply := toReplyContext(rawReplyCtx)
+	if reply.ChatID == 0 {
+		return errors.New("telegram reply requires chat id")
+	}
+	return l.sendFormattedSegments(ctx, reply.ChatID, reply.TopicID, reply.MessageID, renderTelegramText(message))
+}
+
+func (l *Live) UpdateFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	reply := toReplyContext(rawReplyCtx)
+	if reply.ChatID == 0 || reply.MessageID == 0 {
+		return errors.New("telegram update requires chat id and message id")
+	}
+	segments := renderTelegramText(message)
+	if len(segments) == 0 {
+		return errors.New("telegram formatted update requires content")
+	}
+	if len(segments) == 1 {
+		return l.sender.EditText(ctx, reply.ChatID, reply.MessageID, segments[0])
+	}
+	return l.sendFormattedSegments(ctx, reply.ChatID, reply.TopicID, reply.MessageID, segments)
 }
 
 func (l *Live) Stop() error {
@@ -396,10 +429,11 @@ func newBotAPISender(botToken string) *botAPISender {
 	return &botAPISender{client: newBotAPIClient(botToken)}
 }
 
-func (s *botAPISender) SendText(ctx context.Context, chatID int64, topicID int64, replyToMessageID int, text string) error {
+func (s *botAPISender) SendText(ctx context.Context, chatID int64, topicID int64, replyToMessageID int, message telegramTextMessage) error {
 	request := sendMessageRequest{
-		ChatID: chatID,
-		Text:   text,
+		ChatID:    chatID,
+		Text:      message.Text,
+		ParseMode: message.ParseMode,
 	}
 	if topicID > 0 {
 		request.MessageThreadID = topicID
@@ -412,11 +446,12 @@ func (s *botAPISender) SendText(ctx context.Context, chatID int64, topicID int64
 	return s.client.sendMessage(ctx, request)
 }
 
-func (s *botAPISender) EditText(ctx context.Context, chatID int64, messageID int, text string) error {
+func (s *botAPISender) EditText(ctx context.Context, chatID int64, messageID int, message telegramTextMessage) error {
 	return s.client.editMessageText(ctx, editMessageTextRequest{
 		ChatID:    chatID,
 		MessageID: messageID,
-		Text:      text,
+		Text:      message.Text,
+		ParseMode: message.ParseMode,
 	})
 }
 
@@ -427,10 +462,11 @@ func (s *botAPISender) AnswerCallbackQuery(ctx context.Context, callbackQueryID 
 	})
 }
 
-func (s *botAPISender) SendStructured(ctx context.Context, chatID int64, topicID int64, text string, markup *inlineKeyboardMarkup) error {
+func (s *botAPISender) SendStructured(ctx context.Context, chatID int64, topicID int64, message telegramTextMessage, markup *inlineKeyboardMarkup) error {
 	request := sendMessageRequest{
 		ChatID:      chatID,
-		Text:        text,
+		Text:        message.Text,
+		ParseMode:   message.ParseMode,
 		ReplyMarkup: markup,
 	}
 	if topicID > 0 {
@@ -469,10 +505,16 @@ type deleteWebhookRequest struct {
 	DropPendingUpdates bool `json:"drop_pending_updates"`
 }
 
+type telegramTextMessage struct {
+	Text      string
+	ParseMode string
+}
+
 type sendMessageRequest struct {
 	ChatID          int64                 `json:"chat_id"`
 	MessageThreadID int64                 `json:"message_thread_id,omitempty"`
 	Text            string                `json:"text"`
+	ParseMode       string                `json:"parse_mode,omitempty"`
 	ReplyParameters *replyParameters      `json:"reply_parameters,omitempty"`
 	ReplyMarkup     *inlineKeyboardMarkup `json:"reply_markup,omitempty"`
 }
@@ -481,6 +523,7 @@ type editMessageTextRequest struct {
 	ChatID    int64  `json:"chat_id"`
 	MessageID int    `json:"message_id"`
 	Text      string `json:"text"`
+	ParseMode string `json:"parse_mode,omitempty"`
 }
 
 type answerCallbackQueryRequest struct {
@@ -858,4 +901,17 @@ func compactMetadata(values map[string]string) map[string]string {
 		return nil
 	}
 	return metadata
+}
+
+func (l *Live) sendFormattedSegments(ctx context.Context, chatID int64, topicID int64, replyToMessageID int, messages []telegramTextMessage) error {
+	for index, message := range messages {
+		currentReplyTo := 0
+		if index == 0 {
+			currentReplyTo = replyToMessageID
+		}
+		if err := l.sender.SendText(ctx, chatID, topicID, currentReplyTo, message); err != nil {
+			return err
+		}
+	}
+	return nil
 }

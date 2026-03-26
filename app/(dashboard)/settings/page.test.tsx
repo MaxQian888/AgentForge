@@ -138,11 +138,11 @@ describe("SettingsPage", () => {
     expect(updateProject).toHaveBeenCalledWith(
       "project-1",
       expect.objectContaining({
-        settings: {
+        settings: expect.objectContaining({
           codingAgent: expect.objectContaining({
             runtime: "opencode",
           }),
-        },
+        }),
       })
     );
   });

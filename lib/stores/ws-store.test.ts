@@ -29,6 +29,7 @@ jest.mock("@/lib/ws-client", () => {
 
 import { useAgentStore } from "./agent-store";
 import { useDashboardStore } from "./dashboard-store";
+import { useDocsStore } from "./docs-store";
 import { useNotificationStore } from "./notification-store";
 import { useSchedulerStore } from "./scheduler-store";
 import { useTaskStore } from "./task-store";
@@ -45,6 +46,32 @@ describe("useWSStore", () => {
       loading: false,
     });
     useNotificationStore.setState({ notifications: [], unreadCount: 0 });
+    useDocsStore.setState({
+      projectId: "project-1",
+      tree: [],
+      currentPage: {
+        id: "page-1",
+        spaceId: "space-1",
+        title: "Runbook",
+        content: "[]",
+        contentText: "",
+        path: "/page-1",
+        sortOrder: 0,
+        isTemplate: false,
+        isSystem: false,
+        isPinned: false,
+        createdAt: "2026-03-26T10:00:00.000Z",
+        updatedAt: "2026-03-26T10:00:00.000Z",
+      },
+      comments: [],
+      versions: [],
+      templates: [],
+      favorites: [],
+      recentAccess: [],
+      loading: false,
+      saving: false,
+      error: null,
+    });
     useDashboardStore.setState({
       summary: null,
       projects: [{ id: "project-1", name: "AgentForge", slug: "agentforge", description: "", repoUrl: "", defaultBranch: "main", createdAt: "2026-03-24T09:00:00.000Z" }],
@@ -165,6 +192,40 @@ describe("useWSStore", () => {
         id: "notification-1",
         message: "Task Implement detector is stalled.",
       })
+    );
+  });
+
+  it("does not duplicate websocket replay notifications with the same identifier", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+    expect(client).toBeDefined();
+
+    const payload = {
+      type: "notification",
+      payload: {
+        id: "notification-dup",
+        type: "task_progress_stalled",
+        title: "Task stalled: Implement detector",
+        body: "Task Implement detector is stalled.",
+        createdAt: "2026-03-26T12:05:00.000Z",
+        isRead: false,
+        targetId: "member-1",
+      },
+    };
+
+    client?.emit("notification", payload);
+    client?.emit("notification", payload);
+
+    expect(useNotificationStore.getState().notifications).toHaveLength(1);
+    expect(useNotificationStore.getState().notifications[0]).toEqual(
+      expect.objectContaining({
+        id: "notification-dup",
+        message: "Task Implement detector is stalled.",
+      }),
     );
   });
 
@@ -371,6 +432,47 @@ describe("useWSStore", () => {
         status: "failed",
       }),
     ]);
+  });
+
+  it("refreshes docs workspace slices on wiki websocket events", () => {
+    const refreshTree = jest
+      .spyOn(useDocsStore.getState(), "refreshActiveProjectTree")
+      .mockResolvedValue(undefined);
+    const refreshComments = jest
+      .spyOn(useDocsStore.getState(), "refreshActivePageComments")
+      .mockResolvedValue(undefined);
+    const fetchPage = jest
+      .spyOn(useDocsStore.getState(), "fetchPage")
+      .mockResolvedValue(undefined);
+    const fetchVersions = jest
+      .spyOn(useDocsStore.getState(), "fetchVersions")
+      .mockResolvedValue(undefined);
+
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+    expect(client).toBeDefined();
+
+    client?.emit("wiki.page.updated", {
+      type: "wiki.page.updated",
+      payload: { id: "page-1" },
+    });
+    client?.emit("wiki.comment.created", {
+      type: "wiki.comment.created",
+      payload: { pageId: "page-1" },
+    });
+    client?.emit("wiki.version.published", {
+      type: "wiki.version.published",
+      payload: { pageId: "page-1" },
+    });
+
+    expect(refreshTree).toHaveBeenCalled();
+    expect(fetchPage).toHaveBeenCalledWith("project-1", "page-1");
+    expect(refreshComments).toHaveBeenCalled();
+    expect(fetchVersions).toHaveBeenCalledWith("project-1", "page-1");
   });
 
   it("hydrates explicit agent pool summary updates from websocket envelopes", () => {

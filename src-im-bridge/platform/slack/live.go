@@ -87,8 +87,8 @@ type Live struct {
 	botToken string
 	appToken string
 
-	runner   socketRunner
-	messages messageClient
+	runner    socketRunner
+	messages  messageClient
 	responses responseClient
 
 	actionHandler notify.ActionHandler
@@ -165,7 +165,9 @@ func WithResponseClient(client responseClient) LiveOption {
 
 func (l *Live) Name() string { return "slack-live" }
 
-func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
+func (l *Live) Metadata() core.PlatformMetadata {
+	return core.NormalizeMetadata(liveMetadata, liveMetadata.Source)
+}
 
 func (l *Live) SetActionHandler(handler notify.ActionHandler) {
 	l.actionHandler = handler

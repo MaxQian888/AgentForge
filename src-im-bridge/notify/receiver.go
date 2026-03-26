@@ -27,6 +27,7 @@ type Notification struct {
 	Card           *core.Card              `json:"card"`     // optional rich card
 	Structured     *core.StructuredMessage `json:"structured,omitempty"`
 	Native         *core.NativeMessage     `json:"native,omitempty"`
+	Metadata       map[string]string       `json:"metadata,omitempty"`
 	ReplyTarget    *core.ReplyTarget       `json:"replyTarget,omitempty"`
 }
 
@@ -139,47 +140,24 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	if chatID == "" {
 		chatID = n.TargetIMUserID // fallback to DM
 	}
-	if n.Native != nil {
-		if strings.TrimSpace(n.Native.Platform) == "" {
-			n.Native.Platform = activePlatform
-		}
-		if _, ok := r.platform.(core.NativeMessageSender); ok {
-			plan, err := core.DeliverNative(ctx, r.platform, r.metadata, n.ReplyTarget, chatID, n.Native)
-			if err != nil {
-				log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send native payload")
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			if strings.TrimSpace(plan.FallbackReason) != "" {
-				log.WithFields(log.Fields{"component": "notify", "chat_id": chatID, "fallback_reason": plan.FallbackReason}).Warn("Native payload fallback")
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]any{
-				"status":          "sent",
-				"type":            "native",
-				"delivery_method": plan.Method,
-				"fallback_reason": strings.TrimSpace(plan.FallbackReason),
-			})
-			return
-		}
+	if n.Native != nil && strings.TrimSpace(n.Native.Platform) == "" {
+		n.Native.Platform = activePlatform
 	}
-	if n.Structured != nil {
-		if sender, ok := r.platform.(core.StructuredSender); ok {
-			if err := sender.SendStructured(ctx, chatID, n.Structured); err != nil {
-				log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send structured payload")
-				http.Error(w, err.Error(), http.StatusInternalServerError)
-				return
-			}
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]string{"status": "sent", "type": "structured"})
+	if n.Native != nil || n.Structured != nil {
+		receipt, err := core.DeliverEnvelope(ctx, r.platform, r.metadata, chatID, &core.DeliveryEnvelope{
+			Content:     n.Content,
+			Structured:  n.Structured,
+			Native:      n.Native,
+			ReplyTarget: n.ReplyTarget,
+			Metadata:    n.Metadata,
+		})
+		if err != nil {
+			log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send typed payload")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
 			return
 		}
-		if n.Card == nil {
-			n.Card = n.Structured.LegacyCard()
-		}
-		if strings.TrimSpace(n.Content) == "" {
-			n.Content = n.Structured.FallbackText()
-		}
+		writeDeliveryReceipt(w, receipt)
+		return
 	}
 
 	// Try card first if available.
@@ -209,11 +187,14 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 
 // SendRequest is the payload for the /im/send endpoint.
 type SendRequest struct {
-	Platform    string            `json:"platform"`
-	ChatID      string            `json:"chat_id"`
-	Content     string            `json:"content"`
-	ThreadID    string            `json:"thread_id,omitempty"`
-	ReplyTarget *core.ReplyTarget `json:"replyTarget,omitempty"`
+	Platform    string                  `json:"platform"`
+	ChatID      string                  `json:"chat_id"`
+	Content     string                  `json:"content"`
+	Structured  *core.StructuredMessage `json:"structured,omitempty"`
+	Native      *core.NativeMessage     `json:"native,omitempty"`
+	Metadata    map[string]string       `json:"metadata,omitempty"`
+	ThreadID    string                  `json:"thread_id,omitempty"`
+	ReplyTarget *core.ReplyTarget       `json:"replyTarget,omitempty"`
 }
 
 func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
@@ -241,14 +222,20 @@ func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
 	}
 
 	ctx := context.Background()
-	if _, err := core.DeliverText(ctx, r.platform, r.metadata, s.ReplyTarget, chatID, s.Content); err != nil {
+	receipt, err := core.DeliverEnvelope(ctx, r.platform, r.metadata, chatID, &core.DeliveryEnvelope{
+		Content:     s.Content,
+		Structured:  s.Structured,
+		Native:      s.Native,
+		ReplyTarget: s.ReplyTarget,
+		Metadata:    s.Metadata,
+	})
+	if err != nil {
 		log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send message")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
 		return
 	}
 
-	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(map[string]string{"status": "sent"})
+	writeDeliveryReceipt(w, receipt)
 }
 
 func (r *Receiver) verifyAndRememberDelivery(w http.ResponseWriter, req *http.Request, path string) ([]byte, bool) {
@@ -349,30 +336,29 @@ func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
 	}
 
 	// Send the result back to the chat if chatID is provided.
-	if a.ChatID != "" && (strings.TrimSpace(result.Result) != "" || result.Native != nil) {
+	if a.ChatID != "" && (strings.TrimSpace(result.Result) != "" || result.Native != nil || result.Structured != nil) {
 		target := a.ReplyTarget
 		if result.ReplyTarget != nil {
 			target = result.ReplyTarget
 		}
 		actionMetadata := cloneMetadata(result.Metadata)
 		nativeMessage, fallbackReason := r.resolveActionNativeMessage(result, target)
-		delivered := false
-		if nativeMessage != nil {
-			if _, err := core.DeliverNative(ctx, r.platform, r.metadata, target, a.ChatID, nativeMessage); err != nil {
-				fallbackReason = classifyNativeFallbackReason(err, target)
-				actionMetadata["fallback_reason"] = fallbackReason
-				log.WithFields(log.Fields{"component": "notify", "fallback_reason": fallbackReason}).WithError(err).Warn("Native action response fallback")
-			} else {
-				delivered = true
-			}
-		} else if fallbackReason != "" {
+		if fallbackReason != "" {
 			actionMetadata["fallback_reason"] = fallbackReason
 		}
 
-		if !delivered {
-			if _, err := core.DeliverText(ctx, r.platform, r.metadata, target, a.ChatID, result.Result); err != nil {
-				log.WithField("component", "notify").WithField("entity_id", a.EntityID).WithError(err).Error("Action response delivery failed")
-			}
+		receipt, err := core.DeliverEnvelope(ctx, r.platform, r.metadata, a.ChatID, &core.DeliveryEnvelope{
+			Content:     result.Result,
+			Structured:  result.Structured,
+			Native:      nativeMessage,
+			ReplyTarget: target,
+			Metadata:    actionMetadata,
+		})
+		if receipt.FallbackReason != "" {
+			actionMetadata["fallback_reason"] = receipt.FallbackReason
+		}
+		if err != nil {
+			log.WithField("component", "notify").WithField("entity_id", a.EntityID).WithError(err).Error("Action response delivery failed")
 		}
 		result.Metadata = actionMetadata
 	}
@@ -409,36 +395,19 @@ func (r *Receiver) resolveActionNativeMessage(result *ActionResponse, target *co
 		return nil, ""
 	}
 
-	cardJSON, err := json.Marshal(map[string]any{
-		"config": map[string]any{
-			"wide_screen_mode": true,
-		},
-		"header": map[string]any{
-			"title": map[string]any{
-				"tag":     "plain_text",
-				"content": "AgentForge Update",
-			},
-		},
-		"elements": []map[string]any{
-			{
-				"tag": "div",
-				"text": map[string]any{
-					"tag":     "lark_md",
-					"content": strings.TrimSpace(result.Result),
-				},
-			},
-		},
-	})
+	builder, ok := r.platform.(core.NativeTextMessageBuilder)
+	if ok {
+		message, err := builder.BuildNativeTextMessage("AgentForge Update", strings.TrimSpace(result.Result))
+		if err != nil {
+			return nil, "native_payload_encode_failed"
+		}
+		return message, ""
+	}
+	message, err := core.NewFeishuMarkdownCardMessage("AgentForge Update", strings.TrimSpace(result.Result))
 	if err != nil {
 		return nil, "native_payload_encode_failed"
 	}
-	return &core.NativeMessage{
-		Platform: "feishu",
-		FeishuCard: &core.FeishuCardPayload{
-			Mode: core.FeishuCardModeJSON,
-			JSON: cardJSON,
-		},
-	}, ""
+	return message, ""
 }
 
 func classifyNativeFallbackReason(err error, target *core.ReplyTarget) string {
@@ -467,4 +436,14 @@ func cloneMetadata(metadata map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func writeDeliveryReceipt(w http.ResponseWriter, receipt core.DeliveryReceipt) {
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"status":          "sent",
+		"type":            receipt.Type,
+		"delivery_method": receipt.Method,
+		"fallback_reason": strings.TrimSpace(receipt.FallbackReason),
+	})
 }

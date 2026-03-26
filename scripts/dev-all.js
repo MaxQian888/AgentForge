@@ -12,6 +12,7 @@ const {
   createEmptyRuntimeState,
   createStopPlan,
   ensureDirectory,
+  getDockerComposeAvailability,
   getWorkflowPaths,
   isCommandAvailable,
   isPortListening,
@@ -20,6 +21,7 @@ const {
   readRuntimeState,
   reconcileRuntimeState,
   runCommandSync,
+  startDockerDesktop,
   writeRuntimeState,
 } = require("./dev-workflow.js");
 
@@ -281,11 +283,13 @@ async function ensureInfrastructure(repoRoot, services, runtimeState) {
     return { ok: true, results };
   }
 
-  if (!canUseDockerCompose()) {
+  const dockerComposeReady = await ensureDockerComposeReady();
+  if (!dockerComposeReady.ok) {
     return {
       ok: false,
-      reason: "missing_prerequisite",
-      detail: "docker compose is unavailable or Docker Desktop is not ready",
+      reason: dockerComposeReady.reason ?? "missing_prerequisite",
+      detail:
+        dockerComposeReady.detail ?? "docker compose is unavailable or Docker Desktop is not ready",
       service: missingInfra[0],
       results,
     };
@@ -337,6 +341,60 @@ async function ensureInfrastructure(repoRoot, services, runtimeState) {
   }
 
   return { ok: true, results };
+}
+
+async function ensureDockerComposeReady(timeoutMs = 180000) {
+  const availability = getDockerComposeAvailability();
+  if (availability.ready) {
+    return {
+      ok: true,
+      availability,
+    };
+  }
+
+  if (!availability.canAutoStart) {
+    return {
+      ok: false,
+      reason: "missing_prerequisite",
+      detail: availability.detail ?? "docker compose is unavailable or Docker Desktop is not ready",
+      availability,
+    };
+  }
+
+  const startResult = startDockerDesktop(availability);
+  if (!startResult.ok) {
+    return {
+      ok: false,
+      reason: startResult.reason ?? "missing_prerequisite",
+      detail: startResult.detail ?? availability.detail,
+      availability,
+    };
+  }
+
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    const nextAvailability = getDockerComposeAvailability();
+    if (nextAvailability.ready) {
+      return {
+        ok: true,
+        availability: nextAvailability,
+        startResult,
+      };
+    }
+
+    await delay(2000);
+  }
+
+  const finalAvailability = getDockerComposeAvailability();
+  return {
+    ok: false,
+    reason: "missing_prerequisite",
+    detail:
+      finalAvailability.detail ??
+      "Docker Desktop did not become ready before the startup timeout elapsed",
+    availability: finalAvailability,
+    startResult,
+  };
 }
 
 function buildRuntimeStateFromResults(previousState, results) {

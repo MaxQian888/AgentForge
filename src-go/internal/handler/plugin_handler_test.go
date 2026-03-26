@@ -773,6 +773,7 @@ spec:
 		t.Fatalf("expected 201, got %d", rec.Code)
 	}
 
+	// Hierarchical workflows are now supported — activation should succeed.
 	activateReq := httptest.NewRequest(http.MethodPost, "/plugins/hierarchical-release-train/activate", nil)
 	activateRec := httptest.NewRecorder()
 	activateCtx := e.NewContext(activateReq, activateRec)
@@ -781,11 +782,8 @@ spec:
 	if err := h.Activate(activateCtx); err != nil {
 		t.Fatalf("activate workflow: %v", err)
 	}
-	if activateRec.Code != http.StatusBadRequest {
-		t.Fatalf("expected 400, got %d", activateRec.Code)
-	}
-	if !bytes.Contains(activateRec.Body.Bytes(), []byte("unsupported workflow process")) {
-		t.Fatalf("expected unsupported workflow error, got %s", activateRec.Body.String())
+	if activateRec.Code != http.StatusOK {
+		t.Fatalf("expected 200 (hierarchical now supported), got %d: %s", activateRec.Code, activateRec.Body.String())
 	}
 }
 

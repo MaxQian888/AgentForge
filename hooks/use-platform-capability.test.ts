@@ -4,6 +4,7 @@ const runtimeMock = {
   isDesktop: true,
   selectFiles: jest.fn(),
   sendNotification: jest.fn(),
+  syncNotificationTraySummary: jest.fn(),
   updateTray: jest.fn(),
   registerShortcut: jest.fn(),
   checkForUpdate: jest.fn(),
@@ -24,6 +25,9 @@ jest.mock("@/lib/platform-runtime", () => ({
     },
     get sendNotification() {
       return runtimeMock.sendNotification;
+    },
+    get syncNotificationTraySummary() {
+      return runtimeMock.syncNotificationTraySummary;
     },
     get updateTray() {
       return runtimeMock.updateTray;
@@ -67,6 +71,7 @@ describe("usePlatformCapability", () => {
       isDesktop: true,
       selectFiles: runtimeMock.selectFiles,
       sendNotification: runtimeMock.sendNotification,
+      syncNotificationTraySummary: runtimeMock.syncNotificationTraySummary,
       updateTray: runtimeMock.updateTray,
       registerShortcut: runtimeMock.registerShortcut,
       checkForUpdate: runtimeMock.checkForUpdate,

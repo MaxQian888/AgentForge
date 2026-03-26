@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"fmt"
+	"log"
+	"sort"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -118,94 +121,281 @@ func (s *WorkflowExecutionService) Start(ctx context.Context, pluginID string, r
 		return nil, err
 	}
 
-	stepOutputs := make(map[string]map[string]any, len(run.Steps))
 	maxRetries := 0
 	if record.Spec.Workflow.Limits != nil && record.Spec.Workflow.Limits.MaxRetries > 0 {
 		maxRetries = record.Spec.Workflow.Limits.MaxRetries
 	}
 
+	switch run.Process {
+	case model.WorkflowProcessSequential:
+		return s.executeSequential(ctx, run, record, maxRetries)
+	case model.WorkflowProcessHierarchical:
+		return s.executeHierarchical(ctx, run, record, maxRetries)
+	case model.WorkflowProcessEventDriven:
+		return s.executeEventDriven(ctx, run, record, maxRetries)
+	case model.WorkflowProcessWave:
+		return s.executeWave(ctx, run, record, maxRetries)
+	default:
+		return s.failRun(ctx, run, nil, fmt.Errorf("unsupported workflow process mode: %s", run.Process))
+	}
+}
+
+// executeSequential processes steps one at a time in order (the original behaviour).
+func (s *WorkflowExecutionService) executeSequential(ctx context.Context, run *model.WorkflowPluginRun, record *model.PluginRecord, maxRetries int) (*model.WorkflowPluginRun, error) {
+	stepOutputs := make(map[string]map[string]any, len(run.Steps))
+
 	for index := range run.Steps {
+		result, err := s.executeStep(ctx, run, record, index, maxRetries, stepOutputs)
+		if err != nil {
+			return result, err
+		}
+		// If the step produced an awaiting_approval status, pause the run.
+		if run.Steps[index].Output != nil {
+			if status, _ := run.Steps[index].Output["status"].(string); status == "awaiting_approval" {
+				return s.pauseRun(ctx, run)
+			}
+		}
+	}
+
+	return s.completeRun(ctx, run)
+}
+
+// executeHierarchical processes steps sequentially. When a step's action is
+// "workflow", the executor will recursively start a child workflow via the
+// WorkflowChildSpawner wired into the step router.
+func (s *WorkflowExecutionService) executeHierarchical(ctx context.Context, run *model.WorkflowPluginRun, record *model.PluginRecord, maxRetries int) (*model.WorkflowPluginRun, error) {
+	stepOutputs := make(map[string]map[string]any, len(run.Steps))
+
+	for index := range run.Steps {
+		result, err := s.executeStep(ctx, run, record, index, maxRetries, stepOutputs)
+		if err != nil {
+			return result, err
+		}
+		if run.Steps[index].Output != nil {
+			if status, _ := run.Steps[index].Output["status"].(string); status == "awaiting_approval" {
+				return s.pauseRun(ctx, run)
+			}
+		}
+	}
+
+	return s.completeRun(ctx, run)
+}
+
+// executeEventDriven is a simplified event-driven mode. It iterates all steps
+// and only executes those whose step ID appears in the trigger's "events" list.
+// Steps that do not match are skipped. Full pub/sub event-driven execution is
+// not yet implemented.
+func (s *WorkflowExecutionService) executeEventDriven(ctx context.Context, run *model.WorkflowPluginRun, record *model.PluginRecord, maxRetries int) (*model.WorkflowPluginRun, error) {
+	log.Printf("[workflow] event-driven mode for run %s: simplified trigger-match implementation; full event-driven execution is pending", run.ID)
+
+	stepOutputs := make(map[string]map[string]any, len(run.Steps))
+
+	// Determine which step IDs should fire based on the trigger payload.
+	triggerEvents := extractTriggerEvents(run.Trigger)
+
+	for index := range run.Steps {
+		step := &run.Steps[index]
+
+		if len(triggerEvents) > 0 && !triggerEvents[step.StepID] {
+			skippedAt := s.now()
+			step.Status = model.WorkflowStepRunStatusSkipped
+			step.CompletedAt = &skippedAt
+			continue
+		}
+
+		result, err := s.executeStep(ctx, run, record, index, maxRetries, stepOutputs)
+		if err != nil {
+			return result, err
+		}
+		if run.Steps[index].Output != nil {
+			if status, _ := run.Steps[index].Output["status"].(string); status == "awaiting_approval" {
+				return s.pauseRun(ctx, run)
+			}
+		}
+	}
+
+	return s.completeRun(ctx, run)
+}
+
+// executeWave groups steps by a "wave_number" value from the step definition's
+// Config or Metadata. Steps within the same wave execute in parallel using
+// goroutines. Waves are processed in ascending order; the next wave starts only
+// after all steps in the current wave complete. Steps without a wave_number
+// default to wave 0.
+func (s *WorkflowExecutionService) executeWave(ctx context.Context, run *model.WorkflowPluginRun, record *model.PluginRecord, maxRetries int) (*model.WorkflowPluginRun, error) {
+	stepOutputs := make(map[string]map[string]any, len(run.Steps))
+
+	// Build wave groups from the original step definitions.
+	waves := groupStepsByWave(record.Spec.Workflow.Steps, run.Steps)
+	waveNumbers := sortedWaveNumbers(waves)
+
+	for _, waveNum := range waveNumbers {
 		if err := ctx.Err(); err != nil {
 			return s.cancelRun(ctx, run, err)
 		}
 
-		step := &run.Steps[index]
-		run.CurrentStepID = step.StepID
-		step.Status = model.WorkflowStepRunStatusRunning
-		startedAt := s.now()
-		step.StartedAt = &startedAt
-		if err := s.runs.Update(ctx, run); err != nil {
-			return nil, err
-		}
-
-		roleManifest, err := s.roles.Get(step.RoleID)
-		if err != nil {
-			return s.failRun(ctx, run, step, fmt.Errorf("resolve workflow role %s: %w", step.RoleID, err))
-		}
-		roleProfile := rolepkg.BuildExecutionProfile(roleManifest)
-
-		var lastErr error
-		for attempt := 1; attempt <= maxRetries+1; attempt++ {
-			stepInput := buildWorkflowStepInput(run, *step, roleProfile, attempt, stepOutputs)
-			step.Input = cloneWorkflowPayload(stepInput)
-			step.RetryCount = attempt - 1
-
-			attemptStartedAt := s.now()
-			result, execErr := s.executor.Execute(ctx, WorkflowStepExecutionRequest{
-				RunID:       run.ID,
-				PluginID:    run.PluginID,
-				Process:     run.Process,
-				Step:        model.WorkflowStepDefinition{ID: step.StepID, Role: step.RoleID, Action: step.Action},
-				RoleProfile: roleProfile,
-				Attempt:     attempt,
-				Input:       cloneWorkflowPayload(stepInput),
-				StartedAt:   attemptStartedAt,
-			})
-			attemptCompletedAt := s.now()
-
-			attemptRecord := model.WorkflowStepAttempt{
-				Attempt:     attempt,
-				Status:      model.WorkflowStepRunStatusFailed,
-				Error:       "",
-				StartedAt:   attemptStartedAt,
-				CompletedAt: &attemptCompletedAt,
+		indices := waves[waveNum]
+		if len(indices) == 1 {
+			// Single step in the wave; run inline (no goroutine overhead).
+			result, err := s.executeStep(ctx, run, record, indices[0], maxRetries, stepOutputs)
+			if err != nil {
+				return result, err
 			}
-			if execErr == nil {
-				output := map[string]any{}
-				if result != nil && result.Output != nil {
-					output = cloneWorkflowPayload(result.Output)
+			if run.Steps[indices[0]].Output != nil {
+				if status, _ := run.Steps[indices[0]].Output["status"].(string); status == "awaiting_approval" {
+					return s.pauseRun(ctx, run)
 				}
-				attemptRecord.Status = model.WorkflowStepRunStatusCompleted
-				attemptRecord.Output = cloneWorkflowPayload(output)
-				step.Status = model.WorkflowStepRunStatusCompleted
-				step.Output = cloneWorkflowPayload(output)
-				step.Error = ""
-				step.CompletedAt = &attemptCompletedAt
-				step.Attempts = append(step.Attempts, attemptRecord)
-				stepOutputs[step.StepID] = cloneWorkflowPayload(output)
-				if err := s.runs.Update(ctx, run); err != nil {
-					return nil, err
-				}
-				lastErr = nil
-				break
 			}
-
-			attemptRecord.Error = execErr.Error()
-			step.Attempts = append(step.Attempts, attemptRecord)
-			lastErr = execErr
-			if attempt > maxRetries {
-				return s.failRun(ctx, run, step, execErr)
-			}
-			if err := s.runs.Update(ctx, run); err != nil {
-				return nil, err
-			}
+			continue
 		}
 
-		if lastErr != nil {
-			return nil, lastErr
+		// Multiple steps: execute in parallel.
+		type stepResult struct {
+			index  int
+			run    *model.WorkflowPluginRun
+			err    error
+		}
+
+		var mu sync.Mutex
+		var wg sync.WaitGroup
+		results := make([]stepResult, len(indices))
+
+		for i, idx := range indices {
+			wg.Add(1)
+			go func(slot, stepIndex int) {
+				defer wg.Done()
+				r, err := s.executeStep(ctx, run, record, stepIndex, maxRetries, stepOutputs)
+				mu.Lock()
+				results[slot] = stepResult{index: stepIndex, run: r, err: err}
+				mu.Unlock()
+			}(i, idx)
+		}
+		wg.Wait()
+
+		// Check for failures in the wave.
+		for _, res := range results {
+			if res.err != nil {
+				return res.run, res.err
+			}
+		}
+		// Check for approval pauses.
+		for _, idx := range indices {
+			if run.Steps[idx].Output != nil {
+				if status, _ := run.Steps[idx].Output["status"].(string); status == "awaiting_approval" {
+					return s.pauseRun(ctx, run)
+				}
+			}
 		}
 	}
 
+	return s.completeRun(ctx, run)
+}
+
+// executeStep runs a single step with retries. It is the shared core used by
+// all execution modes. The caller must hold no locks; the method updates the
+// run record in the store after each attempt.
+func (s *WorkflowExecutionService) executeStep(
+	ctx context.Context,
+	run *model.WorkflowPluginRun,
+	record *model.PluginRecord,
+	index int,
+	maxRetries int,
+	stepOutputs map[string]map[string]any,
+) (*model.WorkflowPluginRun, error) {
+	if err := ctx.Err(); err != nil {
+		return s.cancelRun(ctx, run, err)
+	}
+
+	step := &run.Steps[index]
+	run.CurrentStepID = step.StepID
+	step.Status = model.WorkflowStepRunStatusRunning
+	startedAt := s.now()
+	step.StartedAt = &startedAt
+	if err := s.runs.Update(ctx, run); err != nil {
+		return nil, err
+	}
+
+	roleManifest, err := s.roles.Get(step.RoleID)
+	if err != nil {
+		return s.failRun(ctx, run, step, fmt.Errorf("resolve workflow role %s: %w", step.RoleID, err))
+	}
+	roleProfile := rolepkg.BuildExecutionProfile(roleManifest)
+
+	// Resolve step definition to pass Config through.
+	stepDef := model.WorkflowStepDefinition{ID: step.StepID, Role: step.RoleID, Action: step.Action}
+	if record.Spec.Workflow != nil {
+		for _, def := range record.Spec.Workflow.Steps {
+			if def.ID == step.StepID {
+				stepDef = def
+				break
+			}
+		}
+	}
+
+	var lastErr error
+	for attempt := 1; attempt <= maxRetries+1; attempt++ {
+		stepInput := buildWorkflowStepInput(run, *step, roleProfile, attempt, stepOutputs)
+		step.Input = cloneWorkflowPayload(stepInput)
+		step.RetryCount = attempt - 1
+
+		attemptStartedAt := s.now()
+		result, execErr := s.executor.Execute(ctx, WorkflowStepExecutionRequest{
+			RunID:       run.ID,
+			PluginID:    run.PluginID,
+			Process:     run.Process,
+			Step:        stepDef,
+			RoleProfile: roleProfile,
+			Attempt:     attempt,
+			Input:       cloneWorkflowPayload(stepInput),
+			StartedAt:   attemptStartedAt,
+		})
+		attemptCompletedAt := s.now()
+
+		attemptRecord := model.WorkflowStepAttempt{
+			Attempt:     attempt,
+			Status:      model.WorkflowStepRunStatusFailed,
+			Error:       "",
+			StartedAt:   attemptStartedAt,
+			CompletedAt: &attemptCompletedAt,
+		}
+		if execErr == nil {
+			output := map[string]any{}
+			if result != nil && result.Output != nil {
+				output = cloneWorkflowPayload(result.Output)
+			}
+			attemptRecord.Status = model.WorkflowStepRunStatusCompleted
+			attemptRecord.Output = cloneWorkflowPayload(output)
+			step.Status = model.WorkflowStepRunStatusCompleted
+			step.Output = cloneWorkflowPayload(output)
+			step.Error = ""
+			step.CompletedAt = &attemptCompletedAt
+			step.Attempts = append(step.Attempts, attemptRecord)
+			stepOutputs[step.StepID] = cloneWorkflowPayload(output)
+			if err := s.runs.Update(ctx, run); err != nil {
+				return nil, err
+			}
+			lastErr = nil
+			break
+		}
+
+		attemptRecord.Error = execErr.Error()
+		step.Attempts = append(step.Attempts, attemptRecord)
+		lastErr = execErr
+		if attempt > maxRetries {
+			return s.failRun(ctx, run, step, execErr)
+		}
+		if err := s.runs.Update(ctx, run); err != nil {
+			return nil, err
+		}
+	}
+
+	if lastErr != nil {
+		return nil, lastErr
+	}
+	return nil, nil
+}
+
+func (s *WorkflowExecutionService) completeRun(ctx context.Context, run *model.WorkflowPluginRun) (*model.WorkflowPluginRun, error) {
 	completedAt := s.now()
 	run.Status = model.WorkflowRunStatusCompleted
 	run.CurrentStepID = ""
@@ -214,6 +404,98 @@ func (s *WorkflowExecutionService) Start(ctx context.Context, pluginID string, r
 		return nil, err
 	}
 	return s.runs.GetByID(ctx, run.ID)
+}
+
+func (s *WorkflowExecutionService) pauseRun(ctx context.Context, run *model.WorkflowPluginRun) (*model.WorkflowPluginRun, error) {
+	run.Status = model.WorkflowRunStatusPaused
+	if err := s.runs.Update(ctx, run); err != nil {
+		return nil, err
+	}
+	return s.runs.GetByID(ctx, run.ID)
+}
+
+// extractTriggerEvents reads a "events" key from the trigger payload and
+// returns a set of step IDs that should be executed.
+func extractTriggerEvents(trigger map[string]any) map[string]bool {
+	if trigger == nil {
+		return nil
+	}
+	raw, ok := trigger["events"]
+	if !ok {
+		return nil
+	}
+	result := make(map[string]bool)
+	switch typed := raw.(type) {
+	case []string:
+		for _, s := range typed {
+			result[s] = true
+		}
+	case []any:
+		for _, item := range typed {
+			if s, ok := item.(string); ok {
+				result[s] = true
+			}
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
+}
+
+// groupStepsByWave maps wave numbers to step indices. The wave_number is read
+// from the step definition's Config["wave_number"] or Metadata["wave_number"].
+// Steps without a wave_number default to wave 0.
+func groupStepsByWave(defs []model.WorkflowStepDefinition, steps []model.WorkflowStepRun) map[int][]int {
+	waves := make(map[int][]int)
+	for i, step := range steps {
+		waveNum := 0
+		// Try to find the matching definition for Config/Metadata.
+		for _, def := range defs {
+			if def.ID == step.StepID {
+				waveNum = readWaveNumber(def)
+				break
+			}
+		}
+		waves[waveNum] = append(waves[waveNum], i)
+	}
+	return waves
+}
+
+func readWaveNumber(def model.WorkflowStepDefinition) int {
+	if n := extractIntFromMap(def.Config, "wave_number"); n > 0 {
+		return n
+	}
+	if n := extractIntFromMap(def.Metadata, "wave_number"); n > 0 {
+		return n
+	}
+	return 0
+}
+
+func extractIntFromMap(m map[string]any, key string) int {
+	if m == nil {
+		return 0
+	}
+	switch v := m[key].(type) {
+	case int:
+		return v
+	case int64:
+		return int(v)
+	case float64:
+		return int(v)
+	case float32:
+		return int(v)
+	}
+	return 0
+}
+
+func sortedWaveNumbers(waves map[int][]int) []int {
+	nums := make([]int, 0, len(waves))
+	for n := range waves {
+		nums = append(nums, n)
+	}
+	sort.Ints(nums)
+	return nums
 }
 
 func (s *WorkflowExecutionService) GetRun(ctx context.Context, id uuid.UUID) (*model.WorkflowPluginRun, error) {

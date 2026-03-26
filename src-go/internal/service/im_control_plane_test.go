@@ -268,3 +268,151 @@ func TestIMControlPlane_BindActionAndThrottleProgressHeartbeats(t *testing.T) {
 		t.Fatalf("delivery kind = %q, want %q", listener.deliveries[1].Kind, IMDeliveryKindTerminal)
 	}
 }
+
+func TestIMControlPlane_QueueDeliveryPreservesTypedPayloadAndFallbackMetadata(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+
+	if _, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
+		BridgeID:   "bridge-slack-typed",
+		Platform:   "slack",
+		Transport:  "live",
+		ProjectIDs: []string{"project-typed"},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+
+	listener := &fakeBridgeDeliveryListener{}
+	if _, err := control.AttachBridgeListener(context.Background(), "bridge-slack-typed", 0, listener); err != nil {
+		t.Fatalf("AttachBridgeListener error: %v", err)
+	}
+
+	delivery, err := control.QueueDelivery(context.Background(), IMQueueDeliveryRequest{
+		TargetBridgeID: "bridge-slack-typed",
+		Platform:       "slack",
+		ProjectID:      "project-typed",
+		Kind:           IMDeliveryKindNotify,
+		Content:        "fallback text",
+		Structured: &model.IMStructuredMessage{
+			Title: "Task Update",
+			Body:  "Agent is still running",
+			Fields: []model.IMStructuredField{
+				{Label: "Status", Value: "running"},
+			},
+		},
+		Metadata: map[string]string{
+			"fallback_reason": "thread_reply_unavailable",
+			"delivery_method": "thread_reply",
+		},
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C123",
+			ThreadID:  "1700000000.1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("QueueDelivery error: %v", err)
+	}
+
+	if delivery.Structured == nil || delivery.Structured.Title != "Task Update" {
+		t.Fatalf("Structured = %+v", delivery.Structured)
+	}
+	if delivery.Metadata["fallback_reason"] != "thread_reply_unavailable" {
+		t.Fatalf("Metadata = %+v", delivery.Metadata)
+	}
+	if len(listener.deliveries) != 1 {
+		t.Fatalf("listener deliveries = %d, want 1", len(listener.deliveries))
+	}
+	if listener.deliveries[0].Structured == nil || listener.deliveries[0].Structured.Body != "Agent is still running" {
+		t.Fatalf("listener structured = %+v", listener.deliveries[0].Structured)
+	}
+}
+
+func TestIMControlPlane_BoundProgressPreservesStructuredPayload(t *testing.T) {
+	now := time.Now().UTC()
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+	control.now = func() time.Time { return now }
+
+	if _, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
+		BridgeID:   "bridge-structured",
+		Platform:   "slack",
+		Transport:  "live",
+		ProjectIDs: []string{"project-1"},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+
+	listener := &fakeBridgeDeliveryListener{}
+	if _, err := control.AttachBridgeListener(context.Background(), "bridge-structured", 0, listener); err != nil {
+		t.Fatalf("AttachBridgeListener error: %v", err)
+	}
+
+	if err := control.BindAction(context.Background(), &model.IMActionBinding{
+		BridgeID: "bridge-structured",
+		Platform: "slack",
+		TaskID:   "task-1",
+		RunID:    "run-1",
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:          "slack",
+			ChannelID:         "C123",
+			ThreadID:          "1700000000.1",
+			PreferredRenderer: "blocks",
+		},
+	}); err != nil {
+		t.Fatalf("BindAction error: %v", err)
+	}
+
+	structured := &model.IMStructuredMessage{
+		Title: "Agent Run Complete",
+		Body:  "Run run-1 finished successfully.",
+		Fields: []model.IMStructuredField{
+			{Label: "Task", Value: "task-1"},
+			{Label: "Run", Value: "run-1"},
+			{Label: "Status", Value: "completed"},
+		},
+	}
+	sent, err := control.QueueBoundProgress(context.Background(), IMBoundProgressRequest{
+		RunID:      "run-1",
+		TaskID:     "task-1",
+		Kind:       IMDeliveryKindTerminal,
+		Content:    "Agent completed.",
+		Structured: structured,
+		IsTerminal: true,
+	})
+	if err != nil {
+		t.Fatalf("QueueBoundProgress error: %v", err)
+	}
+	if !sent {
+		t.Fatal("expected terminal structured delivery to be sent")
+	}
+
+	if len(listener.deliveries) != 1 {
+		t.Fatalf("listener deliveries = %d, want 1", len(listener.deliveries))
+	}
+	d := listener.deliveries[0]
+	if d.Structured == nil {
+		t.Fatal("expected delivery to preserve Structured payload")
+	}
+	if d.Structured.Title != "Agent Run Complete" {
+		t.Fatalf("Structured.Title = %q", d.Structured.Title)
+	}
+	if len(d.Structured.Fields) != 3 {
+		t.Fatalf("Structured.Fields = %d, want 3", len(d.Structured.Fields))
+	}
+	if d.Content != "Agent completed." {
+		t.Fatalf("Content = %q, want explicit content preserved", d.Content)
+	}
+	if d.ReplyTarget == nil || d.ReplyTarget.PreferredRenderer != "blocks" {
+		t.Fatalf("ReplyTarget = %+v", d.ReplyTarget)
+	}
+	if d.Kind != IMDeliveryKindTerminal {
+		t.Fatalf("Kind = %q, want %q", d.Kind, IMDeliveryKindTerminal)
+	}
+}

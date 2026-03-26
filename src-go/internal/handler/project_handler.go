@@ -15,6 +15,7 @@ import (
 type ProjectHandler struct {
 	repo          ProjectRepository
 	runtimeClient ProjectRuntimeCatalogClient
+	wikiBootstrap wikiProjectBootstrapper
 }
 
 type ProjectRepository interface {
@@ -29,8 +30,22 @@ type ProjectRuntimeCatalogClient interface {
 	GetRuntimeCatalog(ctx context.Context) (*bridge.RuntimeCatalogResponse, error)
 }
 
-func NewProjectHandler(repo ProjectRepository, runtimeClient ProjectRuntimeCatalogClient) *ProjectHandler {
-	return &ProjectHandler{repo: repo, runtimeClient: runtimeClient}
+type wikiProjectBootstrapper interface {
+	CreateSpace(ctx context.Context, projectID uuid.UUID) (*model.WikiSpace, error)
+	SeedBuiltInTemplates(ctx context.Context, projectID uuid.UUID, spaceID uuid.UUID) ([]*model.WikiPage, error)
+	DeleteProjectSpace(ctx context.Context, projectID uuid.UUID) error
+}
+
+func NewProjectHandler(
+	repo ProjectRepository,
+	runtimeClient ProjectRuntimeCatalogClient,
+	wikiBootstrap ...wikiProjectBootstrapper,
+) *ProjectHandler {
+	handler := &ProjectHandler{repo: repo, runtimeClient: runtimeClient}
+	if len(wikiBootstrap) > 0 {
+		handler.wikiBootstrap = wikiBootstrap[0]
+	}
+	return handler
 }
 
 func (h *ProjectHandler) Create(c echo.Context) error {
@@ -53,6 +68,17 @@ func (h *ProjectHandler) Create(c echo.Context) error {
 	}
 	if err := h.repo.Create(c.Request().Context(), project); err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create project"})
+	}
+	if h.wikiBootstrap != nil {
+		space, err := h.wikiBootstrap.CreateSpace(c.Request().Context(), project.ID)
+		if err != nil {
+			_ = h.repo.Delete(c.Request().Context(), project.ID)
+			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to initialize project wiki"})
+		}
+		if _, err := h.wikiBootstrap.SeedBuiltInTemplates(c.Request().Context(), project.ID, space.ID); err != nil {
+			_ = h.repo.Delete(c.Request().Context(), project.ID)
+			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to initialize project wiki templates"})
+		}
 	}
 	return c.JSON(http.StatusCreated, h.toProjectDTO(c.Request().Context(), project))
 }
@@ -104,6 +130,9 @@ func (h *ProjectHandler) Delete(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid project ID"})
+	}
+	if h.wikiBootstrap != nil {
+		_ = h.wikiBootstrap.DeleteProjectSpace(c.Request().Context(), id)
 	}
 	if err := h.repo.Delete(c.Request().Context(), id); err != nil {
 		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "project not found"})

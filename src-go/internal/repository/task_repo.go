@@ -20,6 +20,17 @@ func NewTaskRepository(db *gorm.DB) *TaskRepository {
 	return &TaskRepository{db: db}
 }
 
+func (r *TaskRepository) DB() *gorm.DB {
+	if r == nil {
+		return nil
+	}
+	return r.db
+}
+
+func (r *TaskRepository) WithDB(db *gorm.DB) *TaskRepository {
+	return &TaskRepository{db: db}
+}
+
 // attachProgress batch-loads progress snapshots for the given tasks and attaches them.
 func (r *TaskRepository) attachProgress(ctx context.Context, tasks []*model.Task) error {
 	if len(tasks) == 0 {
@@ -94,32 +105,38 @@ func (r *TaskRepository) List(ctx context.Context, projectID uuid.UUID, q model.
 		return nil, 0, ErrDatabaseUnavailable
 	}
 
-	query := r.db.WithContext(ctx).Where("project_id = ?", projectID)
+	query := r.db.WithContext(ctx).Model(&taskRecord{}).Where("tasks.project_id = ?", projectID)
 	if q.Status != "" {
-		query = query.Where("status = ?", q.Status)
+		query = query.Where("tasks.status = ?", q.Status)
 	}
 	if q.AssigneeID != "" {
-		query = query.Where("assignee_id = ?", q.AssigneeID)
+		query = query.Where("tasks.assignee_id = ?", q.AssigneeID)
 	}
 	if q.SprintID != "" {
-		query = query.Where("sprint_id = ?", q.SprintID)
+		query = query.Where("tasks.sprint_id = ?", q.SprintID)
 	}
 	if q.Priority != "" {
-		query = query.Where("priority = ?", q.Priority)
+		query = query.Where("tasks.priority = ?", q.Priority)
 	}
 	if q.Search != "" {
 		search := "%" + q.Search + "%"
-		query = query.Where("(title ILIKE ? OR description ILIKE ?)", search, search)
+		query = query.Where("(tasks.title ILIKE ? OR tasks.description ILIKE ?)", search, search)
+	}
+
+	sort := "tasks.created_at DESC"
+	if q.Sort != "" {
+		sort = q.Sort
+	}
+
+	var err error
+	query, sort, err = applyTaskCustomFieldQuery(query, q, sort)
+	if err != nil {
+		return nil, 0, fmt.Errorf("apply custom field query: %w", err)
 	}
 
 	var total int64
-	if err := query.Model(&taskRecord{}).Count(&total).Error; err != nil {
+	if err := query.Count(&total).Error; err != nil {
 		return nil, 0, fmt.Errorf("count tasks: %w", err)
-	}
-
-	sort := "created_at DESC"
-	if q.Sort != "" {
-		sort = q.Sort
 	}
 
 	limit := q.Limit
@@ -145,6 +162,53 @@ func (r *TaskRepository) List(ctx context.Context, projectID uuid.UUID, q model.
 		return nil, 0, fmt.Errorf("attach progress: %w", err)
 	}
 	return tasks, int(total), nil
+}
+
+func applyTaskCustomFieldQuery(query *gorm.DB, q model.TaskListQuery, sort string) (*gorm.DB, string, error) {
+	for index, filter := range q.CustomFieldFilters {
+		if strings.TrimSpace(filter.FieldDefID) == "" {
+			return nil, "", fmt.Errorf("custom field filter %d missing fieldDefId", index)
+		}
+		alias := fmt.Sprintf("cf_filter_%d", index)
+		query = query.Joins(
+			fmt.Sprintf("LEFT JOIN custom_field_values %s ON %s.task_id = tasks.id AND %s.field_def_id = ?", alias, alias, alias),
+			filter.FieldDefID,
+		)
+		normalizedExpr := fmt.Sprintf("REPLACE(CAST(%s.value AS TEXT), '\"', '')", alias)
+		switch strings.ToLower(strings.TrimSpace(filter.Op)) {
+		case "", "eq":
+			query = query.Where(fmt.Sprintf("%s = ?", normalizedExpr), filter.Value)
+		case "ne":
+			query = query.Where(fmt.Sprintf("%s <> ?", normalizedExpr), filter.Value)
+		case "gt":
+			query = query.Where(fmt.Sprintf("%s > ?", normalizedExpr), filter.Value)
+		case "gte":
+			query = query.Where(fmt.Sprintf("%s >= ?", normalizedExpr), filter.Value)
+		case "lt":
+			query = query.Where(fmt.Sprintf("%s < ?", normalizedExpr), filter.Value)
+		case "lte":
+			query = query.Where(fmt.Sprintf("%s <= ?", normalizedExpr), filter.Value)
+		case "contains":
+			query = query.Where(fmt.Sprintf("LOWER(%s) LIKE ?", normalizedExpr), "%"+strings.ToLower(filter.Value)+"%")
+		default:
+			return nil, "", fmt.Errorf("unsupported custom field filter op %q", filter.Op)
+		}
+	}
+
+	if q.CustomFieldSort != nil && strings.TrimSpace(q.CustomFieldSort.FieldDefID) != "" {
+		alias := "cf_sort"
+		query = query.Joins(
+			fmt.Sprintf("LEFT JOIN custom_field_values %s ON %s.task_id = tasks.id AND %s.field_def_id = ?", alias, alias, alias),
+			q.CustomFieldSort.FieldDefID,
+		)
+		direction := strings.ToUpper(strings.TrimSpace(q.CustomFieldSort.Direction))
+		if direction != "ASC" && direction != "DESC" {
+			direction = "ASC"
+		}
+		sort = fmt.Sprintf("REPLACE(CAST(%s.value AS TEXT), '\"', '') %s, tasks.created_at DESC", alias, direction)
+	}
+
+	return query, sort, nil
 }
 
 func (r *TaskRepository) ListBySprint(ctx context.Context, projectID uuid.UUID, sprintID uuid.UUID) ([]*model.Task, error) {
@@ -199,6 +263,18 @@ func (r *TaskRepository) Update(ctx context.Context, id uuid.UUID, req *model.Up
 				return fmt.Errorf("update task: invalid sprint_id %q: %w", val, err)
 			}
 			updates["sprint_id"] = parsed
+		}
+	}
+	if req.MilestoneID != nil {
+		val := strings.TrimSpace(*req.MilestoneID)
+		if val == "" {
+			updates["milestone_id"] = nil
+		} else {
+			parsed, err := uuid.Parse(val)
+			if err != nil {
+				return fmt.Errorf("update task: invalid milestone_id %q: %w", val, err)
+			}
+			updates["milestone_id"] = parsed
 		}
 	}
 	if req.PlannedStartAt != nil {
@@ -370,6 +446,26 @@ func (r *TaskRepository) HasChildren(ctx context.Context, parentID uuid.UUID) (b
 		return false, fmt.Errorf("count child tasks: %w", err)
 	}
 	return count > 0, nil
+}
+
+func (r *TaskRepository) ListChildren(ctx context.Context, parentID uuid.UUID) ([]*model.Task, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	var records []taskRecord
+	if err := r.db.WithContext(ctx).
+		Where("parent_id = ?", parentID).
+		Order("created_at ASC").
+		Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list children: %w", err)
+	}
+
+	tasks := make([]*model.Task, 0, len(records))
+	for i := range records {
+		tasks = append(tasks, records[i].toModel())
+	}
+	return tasks, nil
 }
 
 func (r *TaskRepository) ListDependents(ctx context.Context, blockerID uuid.UUID) ([]*model.Task, error) {

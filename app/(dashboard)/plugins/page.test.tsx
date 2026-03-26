@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import PluginsPage from "./page";
 
@@ -7,6 +7,7 @@ const installUpdate = jest.fn();
 const fetchPlugins = jest.fn();
 const discoverBuiltins = jest.fn();
 const fetchMarketplace = jest.fn();
+const installFromCatalog = jest.fn();
 const getDesktopRuntimeStatus = jest.fn();
 const getPluginRuntimeSummary = jest.fn();
 const installLocal = jest.fn();
@@ -47,7 +48,35 @@ const storeState = {
       last_health_at: "2026-03-24T12:00:00.000Z",
     },
   ],
-  builtins: [],
+  builtins: [
+    {
+      apiVersion: "plugin.agentforge.dev/v1",
+      kind: "IntegrationPlugin",
+      metadata: {
+        id: "feishu-adapter",
+        name: "Feishu Adapter",
+        version: "1.0.0",
+        description: "Built-in Feishu adapter",
+      },
+      spec: {
+        runtime: "wasm",
+        module: "./dist/feishu.wasm",
+        abiVersion: "v1",
+      },
+      permissions: {},
+      source: {
+        type: "builtin",
+        path: "/plugins/feishu-adapter/manifest.yaml",
+      },
+      lifecycle_state: "installed",
+      runtime_host: "go-orchestrator",
+      restart_count: 0,
+      resolved_source_path: "./dist/feishu.wasm",
+      runtime_metadata: { compatible: true, abi_version: "v1" },
+      last_error: "",
+      last_health_at: "",
+    },
+  ],
   marketplace: [
     {
       id: "role-coder",
@@ -57,6 +86,17 @@ const storeState = {
       author: "AgentForge",
       kind: "role",
       installUrl: "",
+      sourceType: "marketplace",
+    },
+    {
+      id: "release-train",
+      name: "Release Train",
+      description: "Workflow automation",
+      version: "1.1.0",
+      author: "AgentForge",
+      kind: "workflow",
+      installUrl: "catalog://release-train",
+      sourceType: "catalog",
     },
   ],
   filters: {
@@ -73,6 +113,7 @@ const storeState = {
   discoverBuiltins,
   fetchMarketplace,
   installLocal,
+  installFromCatalog,
   setFilters,
   resetFilters: jest.fn(),
   selectPlugin,
@@ -112,6 +153,7 @@ describe("PluginsPage", () => {
     fetchPlugins.mockReset();
     discoverBuiltins.mockReset();
     fetchMarketplace.mockReset();
+    installFromCatalog.mockReset();
     getDesktopRuntimeStatus.mockReset();
     getDesktopRuntimeStatus.mockResolvedValue({
       overall: "stopped",
@@ -170,7 +212,8 @@ describe("PluginsPage", () => {
     expect(screen.getByText("Marketplace")).toBeInTheDocument();
     expect(screen.getByText("Plugin details")).toBeInTheDocument();
     expect(screen.getByText("Runtime host")).toBeInTheDocument();
-    expect(screen.getByText("Browse only")).toBeInTheDocument();
+    expect(screen.getByText("Coding role")).toBeInTheDocument();
+    expect(screen.getByText("Feishu Adapter")).toBeInTheDocument();
   });
 
   it("updates the query filter from the search input", async () => {
@@ -242,5 +285,56 @@ describe("PluginsPage", () => {
     expect(
       await screen.findByRole("button", { name: "Restart to update" }),
     ).toBeInTheDocument();
+  });
+
+  it("sends a structured desktop notification payload from the runtime panel", async () => {
+    const user = userEvent.setup();
+    sendNotification.mockResolvedValue({
+      mode: "web",
+      notificationId: "plugins-desktop-runtime-stopped",
+      ok: true,
+      status: "delivered",
+    });
+
+    render(<PluginsPage />);
+    await user.click(screen.getByRole("button", { name: "Notify" }));
+
+    expect(sendNotification).toHaveBeenCalledWith(
+      expect.objectContaining({
+        notificationId: "plugins-desktop-runtime-stopped",
+        type: "desktop.runtime.status",
+        title: "AgentForge Desktop",
+        body: "Desktop runtime is currently stopped.",
+        deliveryPolicy: "always",
+      }),
+    );
+    expect(sendNotification.mock.calls[0]?.[0]).toEqual(
+      expect.objectContaining({
+        createdAt: expect.any(String),
+      }),
+    );
+  });
+
+  it("installs built-in availability entries through the explicit catalog flow", async () => {
+    const user = userEvent.setup();
+    render(<PluginsPage />);
+
+    const builtinHeading = screen.getByText("Feishu Adapter");
+    const builtinCard = builtinHeading.closest(".rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl")?.parentElement ?? builtinHeading.parentElement?.parentElement;
+    expect(builtinCard).not.toBeNull();
+
+    await user.click(
+      within(builtinCard as HTMLElement).getByRole("button", { name: "Install" }),
+    );
+
+    expect(installFromCatalog).toHaveBeenCalledWith("feishu-adapter");
+    expect(installLocal).not.toHaveBeenCalled();
+  });
+
+  it("keeps unsupported marketplace entries in browse-only mode", () => {
+    render(<PluginsPage />);
+
+    expect(screen.getByText("Browse only")).toBeInTheDocument();
+    expect(screen.getByText(/Remote marketplace installation is not wired/i)).toBeInTheDocument();
   });
 });

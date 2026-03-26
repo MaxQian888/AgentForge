@@ -61,7 +61,7 @@ func NewStub(port string) *Stub {
 func (s *Stub) Name() string { return "feishu-stub" }
 
 func (s *Stub) Metadata() core.PlatformMetadata {
-	return core.PlatformMetadata{
+	return core.NormalizeMetadata(core.PlatformMetadata{
 		Source: "feishu",
 		Capabilities: core.PlatformCapabilities{
 			CommandSurface:     core.CommandSurfaceMixed,
@@ -77,7 +77,7 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 			SupportsSlashCommands: true,
 			SupportsMentions:      true,
 		},
-	}
+	}, "feishu")
 }
 
 func (s *Stub) ReplyContextFromTarget(target *core.ReplyTarget) any {
@@ -89,6 +89,10 @@ func (s *Stub) ReplyContextFromTarget(target *core.ReplyTarget) any {
 		chatID = target.ChannelID
 	}
 	return &core.Message{ChatID: chatID, ReplyTarget: target}
+}
+
+func (s *Stub) BuildNativeTextMessage(title, content string) (*core.NativeMessage, error) {
+	return core.NewFeishuMarkdownCardMessage(title, content)
 }
 
 func (s *Stub) Start(handler core.MessageHandler) error {

@@ -69,3 +69,24 @@ func (r *CacheRepository) IsBlacklisted(ctx context.Context, jti string) (bool, 
 	}
 	return exists > 0, nil
 }
+
+func (r *CacheRepository) SetWidgetData(ctx context.Context, key, payload string, ttl time.Duration) error {
+	if r.client == nil {
+		return ErrCacheUnavailable
+	}
+	return r.client.Set(ctx, fmt.Sprintf("widget:%s", key), payload, ttl).Err()
+}
+
+func (r *CacheRepository) GetWidgetData(ctx context.Context, key string) (string, error) {
+	if r.client == nil {
+		return "", ErrCacheUnavailable
+	}
+	value, err := r.client.Get(ctx, fmt.Sprintf("widget:%s", key)).Result()
+	if err != nil {
+		if err == redis.Nil {
+			return "", ErrNotFound
+		}
+		return "", fmt.Errorf("get widget data: %w", err)
+	}
+	return value, nil
+}

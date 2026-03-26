@@ -43,7 +43,7 @@ func NewStub(port string) *Stub {
 func (s *Stub) Name() string { return "discord-stub" }
 
 func (s *Stub) Metadata() core.PlatformMetadata {
-	return core.PlatformMetadata{
+	return core.NormalizeMetadata(core.PlatformMetadata{
 		Source: "discord",
 		Capabilities: core.PlatformCapabilities{
 			CommandSurface:     core.CommandSurfaceInteraction,
@@ -58,7 +58,7 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 			SupportsDeferredReply: true,
 			SupportsSlashCommands: true,
 		},
-	}
+	}, "discord")
 }
 
 func (s *Stub) ReplyContextFromTarget(target *core.ReplyTarget) any {

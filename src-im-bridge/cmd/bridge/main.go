@@ -58,10 +58,19 @@ func (r *backendActionRelay) HandleAction(ctx context.Context, req *notify.Actio
 	if resp == nil {
 		return &notify.ActionResponse{}, nil
 	}
+	metadata := resp.Metadata
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	if strings.TrimSpace(resp.Status) != "" {
+		metadata["action_status"] = strings.TrimSpace(resp.Status)
+	}
 	return &notify.ActionResponse{
 		Result:      resp.Result,
 		ReplyTarget: resp.ReplyTarget,
-		Metadata:    resp.Metadata,
+		Metadata:    metadata,
+		Structured:  resp.Structured,
+		Native:      resp.Native,
 	}, nil
 }
 

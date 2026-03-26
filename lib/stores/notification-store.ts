@@ -33,6 +33,7 @@ interface NotificationState {
   unreadCount: number;
   fetchNotifications: () => Promise<void>;
   markRead: (id: string) => void;
+  markAllRead: () => void;
   addNotification: (n: NotificationApiShape | Notification) => void;
 }
 
@@ -78,6 +79,37 @@ function normalizeNotification(
   };
 }
 
+function dedupeNotifications(notifications: Notification[]): Notification[] {
+  const deduped: Notification[] = [];
+  const seen = new Set<string>();
+
+  for (const notification of notifications) {
+    if (seen.has(notification.id)) {
+      continue;
+    }
+
+    seen.add(notification.id);
+    deduped.push(notification);
+  }
+
+  return deduped;
+}
+
+function upsertNotification(
+  notifications: Notification[],
+  incoming: Notification
+): Notification[] {
+  const existingIndex = notifications.findIndex((entry) => entry.id === incoming.id);
+
+  if (existingIndex === -1) {
+    return [incoming, ...notifications];
+  }
+
+  const next = [...notifications];
+  next[existingIndex] = incoming;
+  return next;
+}
+
 export const useNotificationStore = create<NotificationState>()((set) => ({
   notifications: [],
   unreadCount: 0,
@@ -92,7 +124,7 @@ export const useNotificationStore = create<NotificationState>()((set) => ({
         token,
       }
     );
-    const notifications = data.map(normalizeNotification);
+    const notifications = dedupeNotifications(data.map(normalizeNotification));
     set({
       notifications,
       unreadCount: notifications.filter((n) => !n.read).length,
@@ -115,11 +147,25 @@ export const useNotificationStore = create<NotificationState>()((set) => ({
     api.put(`/api/v1/notifications/${id}/read`, {}, { token });
   },
 
+  markAllRead: () => {
+    set((s) => ({
+      notifications: s.notifications.map((n) => ({ ...n, read: true })),
+      unreadCount: 0,
+    }));
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    const api = createApiClient(API_URL);
+    api.put("/api/v1/notifications/read-all", {}, { token });
+  },
+
   addNotification: (n) => {
     const normalized = normalizeNotification(n);
-    set((s) => ({
-      notifications: [normalized, ...s.notifications],
-      unreadCount: s.unreadCount + (normalized.read ? 0 : 1),
-    }));
+    set((s) => {
+      const notifications = upsertNotification(s.notifications, normalized);
+      return {
+        notifications,
+        unreadCount: notifications.filter((entry) => !entry.read).length,
+      };
+    });
   },
 }));

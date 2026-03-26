@@ -4,7 +4,7 @@ import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import type { AgentTeam, TeamStatus } from "@/lib/stores/team-store";
+import { getTeamStrategyLabel, type AgentTeam, type TeamStatus } from "@/lib/stores/team-store";
 
 const statusColors: Record<TeamStatus, string> = {
   pending: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400",
@@ -69,7 +69,7 @@ export function TeamCard({ team }: TeamCardProps) {
 
           <div className="flex items-center gap-2">
             <Badge variant="outline" className="text-xs">
-              Planner &rarr; Coder &rarr; Reviewer
+              {getTeamStrategyLabel(team.strategy)}
             </Badge>
           </div>
 

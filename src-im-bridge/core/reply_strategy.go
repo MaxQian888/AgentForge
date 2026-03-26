@@ -126,18 +126,9 @@ func DeliverNative(ctx context.Context, platform Platform, metadata PlatformMeta
 	if !ok {
 		return ReplyPlan{}, errors.New("platform does not support native delivery")
 	}
-	if err := message.Validate(); err != nil {
+	plan, err := DeliverNativePlan(metadata, target, fallbackChatID, message)
+	if err != nil {
 		return ReplyPlan{}, err
-	}
-
-	plan := ResolveReplyPlan(metadata, target, fallbackChatID)
-	_, hasUpdater := platform.(NativeMessageUpdater)
-	if target != nil &&
-		strings.TrimSpace(target.ProgressMode) == string(AsyncUpdateDeferredCardUpdate) &&
-		metadata.Capabilities.HasAsyncUpdateMode(AsyncUpdateDeferredCardUpdate) &&
-		plan.Method != DeliveryMethodDeferredCardUpdate &&
-		plan.FallbackReason == "" {
-		plan.FallbackReason = nativeFallbackReason(DeliveryMethodDeferredCardUpdate, target, nil, hasUpdater)
 	}
 	if plan.Method == DeliveryMethodSend {
 		if plan.TargetChatID == "" {
@@ -217,4 +208,22 @@ func nativeFallbackReason(method DeliveryMethod, target *ReplyTarget, replyCtx a
 	default:
 		return ""
 	}
+}
+
+func DeliverNativePlan(metadata PlatformMetadata, target *ReplyTarget, fallbackChatID string, message *NativeMessage) (ReplyPlan, error) {
+	if err := message.Validate(); err != nil {
+		return ReplyPlan{}, err
+	}
+
+	plan := ResolveReplyPlan(metadata, target, fallbackChatID)
+	if target != nil &&
+		strings.TrimSpace(target.ProgressMode) == string(AsyncUpdateDeferredCardUpdate) &&
+		metadata.Capabilities.HasAsyncUpdateMode(AsyncUpdateDeferredCardUpdate) &&
+		plan.Method != DeliveryMethodDeferredCardUpdate &&
+		plan.FallbackReason == "" {
+		if strings.TrimSpace(target.CallbackToken) == "" {
+			plan.FallbackReason = nativeFallbackReason(DeliveryMethodDeferredCardUpdate, target, nil, false)
+		}
+	}
+	return plan, nil
 }

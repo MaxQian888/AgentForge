@@ -178,7 +178,9 @@ func WithDirectMessenger(messenger directMessenger) LiveOption {
 
 func (l *Live) Name() string { return "dingtalk-live" }
 
-func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
+func (l *Live) Metadata() core.PlatformMetadata {
+	return core.NormalizeMetadata(liveMetadata, liveMetadata.Source)
+}
 
 func (l *Live) SetActionHandler(handler notify.ActionHandler) {
 	l.actionHandler = handler

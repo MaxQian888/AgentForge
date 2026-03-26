@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -133,5 +134,85 @@ func TestTaskRecordHandlesNullAssigneeType(t *testing.T) {
 	task := record.toModel()
 	if task.AssigneeType != "" {
 		t.Fatalf("assigneeType = %q, want empty string", task.AssigneeType)
+	}
+}
+
+func TestTaskRepositoryListFiltersAndSortsByCustomField(t *testing.T) {
+	db := openFoundationRepoTestDB(t, &taskRecord{}, &customFieldValueRecord{}, &taskProgressSnapshotRecord{})
+	repo := NewTaskRepository(db)
+	projectID := uuid.New()
+	fieldID := uuid.New()
+	now := time.Date(2026, 3, 26, 12, 0, 0, 0, time.UTC)
+
+	taskA := &taskRecord{
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		Title:     "Task A",
+		Status:    model.TaskStatusTriaged,
+		Priority:  "high",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	taskB := &taskRecord{
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		Title:     "Task B",
+		Status:    model.TaskStatusTriaged,
+		Priority:  "high",
+		CreatedAt: now.Add(time.Minute),
+		UpdatedAt: now.Add(time.Minute),
+	}
+	if err := db.Create(taskA).Error; err != nil {
+		t.Fatalf("create taskA: %v", err)
+	}
+	if err := db.Create(taskB).Error; err != nil {
+		t.Fatalf("create taskB: %v", err)
+	}
+	if err := db.Create(&customFieldValueRecord{
+		ID:         uuid.New(),
+		TaskID:     taskA.ID,
+		FieldDefID: fieldID,
+		Value:      newJSONText(`"P1"`, "null"),
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}).Error; err != nil {
+		t.Fatalf("create value for taskA: %v", err)
+	}
+	if err := db.Create(&customFieldValueRecord{
+		ID:         uuid.New(),
+		TaskID:     taskB.ID,
+		FieldDefID: fieldID,
+		Value:      newJSONText(`"P0"`, "null"),
+		CreatedAt:  now,
+		UpdatedAt:  now,
+	}).Error; err != nil {
+		t.Fatalf("create value for taskB: %v", err)
+	}
+
+	filtered, total, err := repo.List(context.Background(), projectID, model.TaskListQuery{
+		CustomFieldFilters: []model.TaskCustomFieldFilter{{
+			FieldDefID: fieldID.String(),
+			Op:         "eq",
+			Value:      "P0",
+		}},
+	})
+	if err != nil {
+		t.Fatalf("List() with filter error = %v", err)
+	}
+	if total != 1 || len(filtered) != 1 || filtered[0].ID != taskB.ID {
+		t.Fatalf("filtered result total=%d len=%d task=%v", total, len(filtered), filtered)
+	}
+
+	sorted, _, err := repo.List(context.Background(), projectID, model.TaskListQuery{
+		CustomFieldSort: &model.TaskCustomFieldSort{
+			FieldDefID: fieldID.String(),
+			Direction:  "asc",
+		},
+	})
+	if err != nil {
+		t.Fatalf("List() with custom sort error = %v", err)
+	}
+	if len(sorted) != 2 || sorted[0].ID != taskB.ID || sorted[1].ID != taskA.ID {
+		t.Fatalf("sorted order = [%v %v], want [%s %s]", sorted[0].ID, sorted[1].ID, taskB.ID, taskA.ID)
 	}
 }

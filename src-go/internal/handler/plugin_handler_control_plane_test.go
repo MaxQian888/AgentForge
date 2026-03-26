@@ -569,6 +569,60 @@ source:
 	}
 }
 
+func TestPluginHandlerControlPlane_DiscoverBuiltInsDoesNotMutateInstalledList(t *testing.T) {
+	pluginsDir := t.TempDir()
+	writeControlPlaneManifest(t, pluginsDir, "integrations/feishu/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: feishu
+  name: Feishu
+  version: 1.0.0
+  description: Built-in Feishu adapter
+spec:
+  runtime: wasm
+  module: ./dist/feishu.wasm
+  abiVersion: v1
+`)
+
+	h := newControlPlanePluginHandler(pluginsDir, nil)
+	e := echo.New()
+
+	discoverReq := httptest.NewRequest(http.MethodGet, "/plugins/discover", nil)
+	discoverRec := httptest.NewRecorder()
+	if err := h.DiscoverBuiltIns(e.NewContext(discoverReq, discoverRec)); err != nil {
+		t.Fatalf("discover built-ins: %v", err)
+	}
+	if discoverRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", discoverRec.Code)
+	}
+
+	var discovered []model.PluginRecord
+	if err := json.Unmarshal(discoverRec.Body.Bytes(), &discovered); err != nil {
+		t.Fatalf("decode discover response: %v", err)
+	}
+	if len(discovered) != 1 || discovered[0].Metadata.ID != "feishu" {
+		t.Fatalf("unexpected discover payload: %+v", discovered)
+	}
+
+	listReq := httptest.NewRequest(http.MethodGet, "/plugins", nil)
+	listRec := httptest.NewRecorder()
+	if err := h.List(e.NewContext(listReq, listRec)); err != nil {
+		t.Fatalf("list installed plugins: %v", err)
+	}
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("expected 200, got %d", listRec.Code)
+	}
+
+	var installed []model.PluginRecord
+	if err := json.Unmarshal(listRec.Body.Bytes(), &installed); err != nil {
+		t.Fatalf("decode list response: %v", err)
+	}
+	if len(installed) != 0 {
+		t.Fatalf("expected discover to leave installed list empty, got %+v", installed)
+	}
+}
+
 func TestPluginHandlerControlPlane_DeactivateAndUpdateRoutes(t *testing.T) {
 	pluginsDir := t.TempDir()
 	manifestPath := writeControlPlaneManifest(t, pluginsDir, "local/release-train-v1.yaml", `

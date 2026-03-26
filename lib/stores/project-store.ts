@@ -31,8 +31,33 @@ export interface CodingAgentCatalog {
   runtimes: CodingAgentRuntimeOption[];
 }
 
+export interface BudgetGovernance {
+  maxTaskBudgetUsd: number;
+  maxDailySpendUsd: number;
+  alertThresholdPercent: number;
+  autoStopOnExceed: boolean;
+}
+
+export interface ReviewPolicy {
+  autoTriggerOnPR: boolean;
+  requiredLayers: number;
+  minRiskLevelForBlock: string;
+  requireManualApproval: boolean;
+  enabledPluginDimensions: string[];
+}
+
+export interface WebhookConfig {
+  url: string;
+  secret: string;
+  events: string[];
+  active: boolean;
+}
+
 export interface ProjectSettings {
   codingAgent: CodingAgentSelection;
+  budgetGovernance?: BudgetGovernance;
+  reviewPolicy?: ReviewPolicy;
+  webhook?: WebhookConfig;
 }
 
 export interface Project {
@@ -142,6 +167,55 @@ function normalizeCatalog(raw: unknown): CodingAgentCatalog | undefined {
   };
 }
 
+function normalizeBudgetGovernance(raw: unknown): BudgetGovernance | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const bg = raw as Record<string, unknown>;
+  return {
+    maxTaskBudgetUsd: typeof bg.maxTaskBudgetUsd === "number" ? bg.maxTaskBudgetUsd : 0,
+    maxDailySpendUsd: typeof bg.maxDailySpendUsd === "number" ? bg.maxDailySpendUsd : 0,
+    alertThresholdPercent: typeof bg.alertThresholdPercent === "number" ? bg.alertThresholdPercent : 80,
+    autoStopOnExceed: Boolean(bg.autoStopOnExceed),
+  };
+}
+
+function normalizeReviewPolicy(raw: unknown): ReviewPolicy | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const rp = raw as Record<string, unknown>;
+  return {
+    autoTriggerOnPR: Boolean(rp.autoTriggerOnPR),
+    requiredLayers: typeof rp.requiredLayers === "number" ? rp.requiredLayers : 1,
+    minRiskLevelForBlock: typeof rp.minRiskLevelForBlock === "string" ? rp.minRiskLevelForBlock : "critical",
+    requireManualApproval: Boolean(rp.requireManualApproval),
+    enabledPluginDimensions: Array.isArray(rp.enabledPluginDimensions)
+      ? rp.enabledPluginDimensions.map((item: unknown) => String(item))
+      : [],
+  };
+}
+
+function normalizeWebhookConfig(raw: unknown): WebhookConfig | undefined {
+  if (!raw || typeof raw !== "object") return undefined;
+  const wh = raw as Record<string, unknown>;
+  return {
+    url: typeof wh.url === "string" ? wh.url : "",
+    secret: typeof wh.secret === "string" ? wh.secret : "",
+    events: Array.isArray(wh.events) ? wh.events.map((item: unknown) => String(item)) : [],
+    active: Boolean(wh.active),
+  };
+}
+
+function normalizeSettings(raw: unknown): ProjectSettings {
+  if (!raw || typeof raw !== "object") {
+    return { codingAgent: { runtime: "", provider: "", model: "" } };
+  }
+  const s = raw as Record<string, unknown>;
+  return {
+    codingAgent: normalizeSelection(s.codingAgent),
+    budgetGovernance: normalizeBudgetGovernance(s.budgetGovernance),
+    reviewPolicy: normalizeReviewPolicy(s.reviewPolicy),
+    webhook: normalizeWebhookConfig(s.webhook),
+  };
+}
+
 function normalizeProject(raw: Record<string, unknown>): Project {
   return {
     id: String(raw.id ?? ""),
@@ -155,16 +229,7 @@ function normalizeProject(raw: Record<string, unknown>): Project {
     repoUrl: typeof raw.repoUrl === "string" ? raw.repoUrl : "",
     defaultBranch: typeof raw.defaultBranch === "string" ? raw.defaultBranch : "main",
     slug: typeof raw.slug === "string" ? raw.slug : "",
-    settings:
-      raw.settings && typeof raw.settings === "object"
-        ? {
-            codingAgent: normalizeSelection(
-              (raw.settings as { codingAgent?: unknown }).codingAgent
-            ),
-          }
-        : {
-            codingAgent: { runtime: "", provider: "", model: "" },
-          },
+    settings: normalizeSettings(raw.settings),
     codingAgentCatalog: normalizeCatalog(raw.codingAgentCatalog),
   };
 }

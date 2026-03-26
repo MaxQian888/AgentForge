@@ -23,6 +23,8 @@ export interface DesktopRuntimeStatus {
 
 export interface DesktopRuntimeEvent {
   type: string;
+  source?: string;
+  timestamp?: string;
   runtime?: DesktopRuntimeStatus;
   shortcut?: string;
   payload?: unknown;
@@ -71,6 +73,37 @@ export type PlatformResult =
       reason: CapabilityFailureReason;
       error: string;
     };
+
+export type NotificationDeliveryPolicy = "always" | "suppress_if_focused";
+
+export interface BusinessNotificationPayload {
+  notificationId: string;
+  type: string;
+  title: string;
+  body: string;
+  createdAt: string;
+  href?: string | null;
+  deliveryPolicy?: NotificationDeliveryPolicy;
+}
+
+export type PlatformNotificationResult =
+  | {
+      ok: true;
+      mode: "desktop" | "web";
+      notificationId: string;
+      status: "delivered" | "suppressed";
+    }
+  | {
+      ok: false;
+      reason: CapabilityFailureReason;
+      error: string;
+    };
+
+export interface NotificationTraySummary {
+  unreadCount: number;
+  latestTitle?: string | null;
+  visible?: boolean;
+}
 
 export interface RegisterShortcutRequest {
   accelerator: string;
@@ -219,6 +252,14 @@ function normalizeDesktopEvent(payload: unknown): DesktopRuntimeEvent | null {
 
   return {
     type: typedPayload.type,
+    source:
+      typeof typedPayload.source === "string"
+        ? typedPayload.source
+        : undefined,
+    timestamp:
+      typeof typedPayload.timestamp === "string"
+        ? typedPayload.timestamp
+        : undefined,
     runtime: typedPayload.runtime as DesktopRuntimeStatus | undefined,
     shortcut:
       typeof typedPayload.shortcut === "string"
@@ -241,6 +282,33 @@ function normalizeDesktopUpdateInfo(
 
 function normalizeUpdateError(error: unknown, fallback: string): string {
   return error instanceof Error ? error.message : fallback;
+}
+
+function normalizeNotificationStatus(
+  status: unknown,
+): "delivered" | "suppressed" {
+  return status === "suppressed" ? "suppressed" : "delivered";
+}
+
+function buildNotificationTrayState(summary: NotificationTraySummary): {
+  title: string;
+  tooltip: string;
+  visible: boolean;
+} {
+  const unreadCount = Math.max(0, summary.unreadCount);
+  const title =
+    unreadCount > 0 ? `AgentForge · ${unreadCount} unread` : "AgentForge";
+  const tooltip =
+    summary.latestTitle?.trim() ||
+    (unreadCount > 0
+      ? `${unreadCount} unread notifications`
+      : "No unread notifications");
+
+  return {
+    title,
+    tooltip,
+    visible: summary.visible ?? unreadCount > 0,
+  };
 }
 
 function pickFilesFromBrowser(
@@ -441,17 +509,21 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
 
       return pickFilesFromBrowser(options, inputFactory);
     },
-    async sendNotification(payload: {
-      body: string;
-      title: string;
-    }): Promise<PlatformResult> {
+    async sendNotification(
+      payload: BusinessNotificationPayload,
+    ): Promise<PlatformNotificationResult> {
       if (getIsDesktopEnv()) {
         try {
-          await getInvoke(
+          const response = (await getInvoke(
             "send_notification",
-            payload as Record<string, unknown>,
-          );
-          return { ok: true, mode: "desktop" };
+            payload as unknown as Record<string, unknown>,
+          )) as { notificationId?: string; status?: string } | undefined;
+          return {
+            ok: true,
+            mode: "desktop",
+            notificationId: response?.notificationId ?? payload.notificationId,
+            status: normalizeNotificationStatus(response?.status),
+          };
         } catch (error) {
           return {
             ok: false,
@@ -486,6 +558,38 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
       }
 
       notifyWeb(payload.title, { body: payload.body });
+      return {
+        ok: true,
+        mode: "web",
+        notificationId: payload.notificationId,
+        status: "delivered",
+      };
+    },
+    async syncNotificationTraySummary(
+      summary: NotificationTraySummary,
+    ): Promise<PlatformResult> {
+      const trayState = buildNotificationTrayState(summary);
+
+      if (getIsDesktopEnv()) {
+        try {
+          await getInvoke(
+            "update_tray",
+            trayState as Record<string, unknown>,
+          );
+          return { ok: true, mode: "desktop" };
+        } catch (error) {
+          return {
+            ok: false,
+            reason: "failed",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Tray update failed.",
+          };
+        }
+      }
+
+      setDocumentTitle(trayState.title);
       return { ok: true, mode: "web" };
     },
     async updateTray(payload: {

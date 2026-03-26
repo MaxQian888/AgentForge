@@ -1,5 +1,7 @@
 "use client";
 
+import { useState } from "react";
+import { useRouter } from "next/navigation";
 import { Bell, LogOut, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,8 +23,10 @@ import { useNotificationStore } from "@/lib/stores/notification-store";
 import { MobileSidebar } from "./sidebar";
 
 export function Header() {
+  const router = useRouter();
+  const [notifOpen, setNotifOpen] = useState(false);
   const { user, logout } = useAuthStore();
-  const { notifications, unreadCount, markRead } = useNotificationStore();
+  const { notifications, unreadCount, markRead, markAllRead } = useNotificationStore();
 
   const initials = user?.name
     ? user.name
@@ -38,7 +42,7 @@ export function Header() {
       <MobileSidebar />
       <div className="flex-1" />
 
-      <Popover>
+      <Popover open={notifOpen} onOpenChange={setNotifOpen}>
         <PopoverTrigger asChild>
           <Button variant="ghost" size="icon-sm" className="relative">
             <Bell className="size-4" />
@@ -50,7 +54,19 @@ export function Header() {
           </Button>
         </PopoverTrigger>
         <PopoverContent className="w-80 p-0" align="end">
-          <div className="border-b p-3 font-medium">Notifications</div>
+          <div className="flex items-center justify-between border-b p-3">
+            <span className="font-medium">Notifications</span>
+            {unreadCount > 0 && (
+              <Button
+                variant="ghost"
+                size="sm"
+                className="h-auto px-2 py-1 text-xs"
+                onClick={() => markAllRead()}
+              >
+                Mark all read
+              </Button>
+            )}
+          </div>
           <ScrollArea className="h-64">
             {notifications.length === 0 ? (
               <p className="p-4 text-center text-sm text-muted-foreground">
@@ -60,10 +76,21 @@ export function Header() {
               notifications.map((n) => (
                 <button
                   key={n.id}
-                  onClick={() => markRead(n.id)}
+                  onClick={() => {
+                    markRead(n.id);
+                    if (n.href) {
+                      setNotifOpen(false);
+                      router.push(n.href);
+                    }
+                  }}
                   className="flex w-full flex-col gap-1 border-b p-3 text-left hover:bg-accent"
                 >
-                  <span className="text-sm font-medium">{n.title}</span>
+                  <div className="flex items-center gap-2">
+                    {!n.read && (
+                      <span className="size-2 shrink-0 rounded-full bg-primary" />
+                    )}
+                    <span className="text-sm font-medium">{n.title}</span>
+                  </div>
                   <span className="text-xs text-muted-foreground">
                     {n.message}
                   </span>

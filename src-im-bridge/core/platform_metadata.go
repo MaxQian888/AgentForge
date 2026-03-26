@@ -140,12 +140,27 @@ func (c PlatformCapabilities) HasMessageScope(target MessageScope) bool {
 type PlatformMetadata struct {
 	Source       string
 	Capabilities PlatformCapabilities
+	Rendering    RenderingProfile
 }
 
 // MetadataProvider is an optional interface for platforms that can declare
 // metadata explicitly.
 type MetadataProvider interface {
 	Metadata() PlatformMetadata
+}
+
+// NormalizeMetadata normalizes platform metadata using the provided source as a
+// fallback when the metadata itself does not declare one.
+func NormalizeMetadata(metadata PlatformMetadata, fallbackSource string) PlatformMetadata {
+	source := NormalizePlatformName(metadata.Source)
+	if source == "" {
+		source = NormalizePlatformName(fallbackSource)
+	}
+	metadata.Source = source
+	defaultCapabilities := defaultCapabilitiesForSource(source, nil)
+	metadata.Capabilities = normalizeCapabilities(metadata.Capabilities, defaultCapabilities)
+	metadata.Rendering = normalizeRenderingProfile(metadata.Rendering, defaultRenderingProfileForSource(source, metadata.Capabilities))
+	return metadata
 }
 
 // MetadataForPlatform returns normalized metadata for a platform. Platforms can
@@ -161,25 +176,26 @@ func MetadataForPlatform(platform Platform) PlatformMetadata {
 			defaults.Capabilities.StructuredSurface = StructuredSurfaceCards
 		}
 	}
+	defaults = NormalizeMetadata(defaults, defaults.Source)
 
 	provider, ok := platform.(MetadataProvider)
 	if !ok {
-		defaults.Capabilities = normalizeCapabilities(defaults.Capabilities, defaults.Capabilities)
 		return defaults
 	}
 
 	metadata := provider.Metadata()
-	if normalized := NormalizePlatformName(metadata.Source); normalized != "" {
-		metadata.Source = normalized
-	} else {
-		metadata.Source = defaults.Source
-	}
-	metadata.Capabilities = normalizeCapabilities(metadata.Capabilities, defaults.Capabilities)
-	return metadata
+	normalized := NormalizeMetadata(metadata, defaults.Source)
+	normalized.Capabilities = normalizeCapabilities(normalized.Capabilities, defaults.Capabilities)
+	normalized.Rendering = normalizeRenderingProfile(normalized.Rendering, defaultRenderingProfileForSource(normalized.Source, normalized.Capabilities))
+	return normalized
 }
 
 func defaultCapabilitiesForPlatform(platform Platform) PlatformCapabilities {
 	source := NormalizePlatformName(platform.Name())
+	return defaultCapabilitiesForSource(source, platform)
+}
+
+func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapabilities {
 	switch source {
 	case "slack":
 		return PlatformCapabilities{

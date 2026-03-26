@@ -5,6 +5,7 @@ import (
 	"crypto/hmac"
 	"crypto/sha256"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -184,7 +185,13 @@ func (c *bridgeRuntimeControl) applyDelivery(ctx context.Context, delivery *clie
 		return nil
 	}
 	targetChatID := strings.TrimSpace(delivery.TargetChatID)
-	if _, err := core.DeliverText(ctx, c.provider.Platform, c.provider.Metadata(), delivery.ReplyTarget, targetChatID, delivery.Content); err != nil {
+	if _, err := core.DeliverEnvelope(ctx, c.provider.Platform, c.provider.Metadata(), targetChatID, &core.DeliveryEnvelope{
+		Content:     delivery.Content,
+		Structured:  delivery.Structured,
+		Native:      delivery.Native,
+		ReplyTarget: delivery.ReplyTarget,
+		Metadata:    delivery.Metadata,
+	}); err != nil {
 		return err
 	}
 	return nil
@@ -194,15 +201,40 @@ func (c *bridgeRuntimeControl) verifyDelivery(delivery *client.ControlDelivery) 
 	if c == nil || c.cfg == nil || strings.TrimSpace(c.cfg.ControlSharedSecret) == "" {
 		return true
 	}
+	payload, err := json.Marshal(struct {
+		TargetBridgeID string                  `json:"targetBridgeId"`
+		Cursor         int64                   `json:"cursor"`
+		DeliveryID     string                  `json:"deliveryId"`
+		Platform       string                  `json:"platform"`
+		ProjectID      string                  `json:"projectId,omitempty"`
+		Kind           string                  `json:"kind"`
+		Content        string                  `json:"content,omitempty"`
+		Structured     *core.StructuredMessage `json:"structured,omitempty"`
+		Native         *core.NativeMessage     `json:"native,omitempty"`
+		Metadata       map[string]string       `json:"metadata,omitempty"`
+		TargetChatID   string                  `json:"targetChatId,omitempty"`
+		ReplyTarget    *core.ReplyTarget       `json:"replyTarget,omitempty"`
+		Timestamp      string                  `json:"timestamp"`
+	}{
+		TargetBridgeID: strings.TrimSpace(delivery.TargetBridgeID),
+		Cursor:         delivery.Cursor,
+		DeliveryID:     strings.TrimSpace(delivery.DeliveryID),
+		Platform:       core.NormalizePlatformName(delivery.Platform),
+		ProjectID:      strings.TrimSpace(delivery.ProjectID),
+		Kind:           strings.ToLower(strings.TrimSpace(delivery.Kind)),
+		Content:        strings.TrimSpace(delivery.Content),
+		Structured:     delivery.Structured,
+		Native:         delivery.Native,
+		Metadata:       delivery.Metadata,
+		TargetChatID:   strings.TrimSpace(delivery.TargetChatID),
+		ReplyTarget:    delivery.ReplyTarget,
+		Timestamp:      strings.TrimSpace(delivery.Timestamp),
+	})
+	if err != nil {
+		return false
+	}
 	mac := hmac.New(sha256.New, []byte(strings.TrimSpace(c.cfg.ControlSharedSecret)))
-	_, _ = mac.Write([]byte(strings.Join([]string{
-		strings.TrimSpace(delivery.TargetBridgeID),
-		fmt.Sprintf("%d", delivery.Cursor),
-		strings.TrimSpace(delivery.DeliveryID),
-		strings.TrimSpace(delivery.Kind),
-		strings.TrimSpace(delivery.Content),
-		strings.TrimSpace(delivery.Timestamp),
-	}, "|")))
+	_, _ = mac.Write(payload)
 	expected := hex.EncodeToString(mac.Sum(nil))
 	return hmac.Equal([]byte(expected), []byte(strings.TrimSpace(delivery.Signature)))
 }

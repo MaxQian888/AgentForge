@@ -3,6 +3,7 @@ package service_test
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -192,15 +193,18 @@ func TestWorkflowExecutionService_FailsDisabledOrUnsupportedWorkflow(t *testing.
 		}
 	})
 
-	t.Run("unsupported hierarchical workflow", func(t *testing.T) {
+	t.Run("hierarchical workflow now supported", func(t *testing.T) {
 		pluginRepo := repository.NewPluginRegistryRepository()
 		runRepo := repository.NewWorkflowPluginRunRepository()
 		executor := &workflowStepExecutorMock{}
 		record := saveWorkflowPluginRecord(t, pluginRepo, model.PluginStateEnabled, model.WorkflowProcessHierarchical, 0)
 		svc := service.NewWorkflowExecutionService(pluginRepo, runRepo, roleStore, executor)
 
-		if _, err := svc.Start(context.Background(), record.Metadata.ID, service.WorkflowExecutionRequest{}); err == nil {
-			t.Fatal("expected hierarchical workflow start to fail")
+		// Hierarchical workflows are now supported - should not fail on process mode
+		_, err := svc.Start(context.Background(), record.Metadata.ID, service.WorkflowExecutionRequest{})
+		// May fail for other reasons (no steps, etc.) but NOT because of unsupported process
+		if err != nil && strings.Contains(err.Error(), "unsupported workflow process") {
+			t.Fatal("hierarchical workflow should no longer be rejected as unsupported")
 		}
 	})
 }

@@ -66,13 +66,16 @@ type Review struct {
 }
 
 const (
+	ReviewLayerCI    = 1
 	ReviewLayerQuick = 1
 	ReviewLayerDeep  = 2
+	ReviewLayerHuman = 3
 
-	ReviewStatusPending    = "pending"
-	ReviewStatusInProgress = "in_progress"
-	ReviewStatusCompleted  = "completed"
-	ReviewStatusFailed     = "failed"
+	ReviewStatusPending      = "pending"
+	ReviewStatusInProgress   = "in_progress"
+	ReviewStatusCompleted    = "completed"
+	ReviewStatusFailed       = "failed"
+	ReviewStatusPendingHuman = "pending_human"
 
 	ReviewRiskLevelCritical = "critical"
 	ReviewRiskLevelHigh     = "high"
@@ -114,6 +117,19 @@ type TriggerReviewRequest struct {
 	Dimensions   []string `json:"dimensions"`
 	ChangedFiles []string `json:"changedFiles"`
 	Diff         string   `json:"diff"`
+}
+
+type CIReviewRequest struct {
+	TaskID   string          `json:"taskId" validate:"required"`
+	PRURL    string          `json:"prUrl" validate:"required"`
+	CISystem string          `json:"ciSystem"`
+	Status   string          `json:"status"`
+	Findings []ReviewFinding `json:"findings"`
+}
+
+type MarkFalsePositiveRequest struct {
+	FindingIndex int    `json:"findingIndex"`
+	Reason       string `json:"reason" validate:"required"`
 }
 
 type ReviewExecutionPlugin struct {

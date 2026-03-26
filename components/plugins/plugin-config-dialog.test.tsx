@@ -42,7 +42,8 @@ describe("PluginConfigDialog", () => {
       <PluginConfigDialog plugin={plugin} open={true} onOpenChange={onOpenChange} />,
     );
 
-    const textarea = screen.getByLabelText("Configuration");
+    // The form should render in JSON fallback mode (no configSchema)
+    const textarea = screen.getByLabelText("Configuration (JSON)");
     expect(textarea).toHaveValue('{\n  "enabled": true\n}');
 
     await user.clear(textarea);
@@ -65,6 +66,6 @@ describe("PluginConfigDialog", () => {
     render(<PluginConfigDialog plugin={null} open={true} onOpenChange={jest.fn()} />);
 
     expect(screen.getByText("Configure Plugin")).toBeInTheDocument();
-    expect(screen.queryByLabelText("Configuration")).not.toBeInTheDocument();
+    expect(screen.queryByLabelText("Configuration (JSON)")).not.toBeInTheDocument();
   });
 });

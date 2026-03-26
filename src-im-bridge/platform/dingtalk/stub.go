@@ -44,7 +44,7 @@ func NewStub(port string) *Stub {
 func (s *Stub) Name() string { return "dingtalk-stub" }
 
 func (s *Stub) Metadata() core.PlatformMetadata {
-	return core.PlatformMetadata{
+	return core.NormalizeMetadata(core.PlatformMetadata{
 		Source: "dingtalk",
 		Capabilities: core.PlatformCapabilities{
 			CommandSurface:        core.CommandSurfaceMixed,
@@ -55,7 +55,7 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 			SupportsSlashCommands: true,
 			SupportsMentions:      true,
 		},
-	}
+	}, "dingtalk")
 }
 
 func (s *Stub) ReplyContextFromTarget(target *core.ReplyTarget) any {

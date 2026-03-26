@@ -12,6 +12,7 @@ type Task struct {
 	ProjectID      uuid.UUID  `db:"project_id"`
 	ParentID       *uuid.UUID `db:"parent_id"`
 	SprintID       *uuid.UUID `db:"sprint_id"`
+	MilestoneID    *uuid.UUID `db:"milestone_id"`
 	Title          string     `db:"title"`
 	Description    string     `db:"description"`
 	Status         string     `db:"status"`
@@ -86,6 +87,7 @@ type TaskDTO struct {
 	ProjectID      string                   `json:"projectId"`
 	ParentID       *string                  `json:"parentId,omitempty"`
 	SprintID       *string                  `json:"sprintId,omitempty"`
+	MilestoneID    *string                  `json:"milestoneId,omitempty"`
 	ExecutionMode  string                   `json:"executionMode,omitempty"`
 	Title          string                   `json:"title"`
 	Description    string                   `json:"description"`
@@ -128,6 +130,7 @@ type UpdateTaskRequest struct {
 	Description    *string   `json:"description"`
 	Priority       *string   `json:"priority"`
 	SprintID       *string   `json:"sprintId"`
+	MilestoneID    *string   `json:"milestoneId"`
 	Labels         []string  `json:"labels"`
 	BlockedBy      *[]string `json:"blockedBy"`
 	BudgetUsd      *float64  `json:"budgetUsd"`
@@ -135,15 +138,28 @@ type UpdateTaskRequest struct {
 	PlannedEndAt   *string   `json:"plannedEndAt"`
 }
 
+type TaskCustomFieldFilter struct {
+	FieldDefID string `json:"fieldDefId"`
+	Op         string `json:"op"`
+	Value      string `json:"value"`
+}
+
+type TaskCustomFieldSort struct {
+	FieldDefID string `json:"fieldDefId"`
+	Direction  string `json:"direction"`
+}
+
 type TaskListQuery struct {
-	Status     string `json:"status"`
-	AssigneeID string `json:"assigneeId"`
-	SprintID   string `json:"sprintId"`
-	Priority   string `json:"priority"`
-	Search     string `json:"search"`
-	Page       int    `json:"page"`
-	Limit      int    `json:"limit"`
-	Sort       string `json:"sort"`
+	Status             string                  `json:"status"`
+	AssigneeID         string                  `json:"assigneeId"`
+	SprintID           string                  `json:"sprintId"`
+	Priority           string                  `json:"priority"`
+	Search             string                  `json:"search"`
+	Page               int                     `json:"page"`
+	Limit              int                     `json:"limit"`
+	Sort               string                  `json:"sort"`
+	CustomFieldFilters []TaskCustomFieldFilter `json:"customFieldFilters,omitempty"`
+	CustomFieldSort    *TaskCustomFieldSort    `json:"customFieldSort,omitempty"`
 }
 
 type TransitionRequest struct {
@@ -203,6 +219,10 @@ func (t *Task) ToDTO() TaskDTO {
 	if t.SprintID != nil {
 		s := t.SprintID.String()
 		dto.SprintID = &s
+	}
+	if t.MilestoneID != nil {
+		s := t.MilestoneID.String()
+		dto.MilestoneID = &s
 	}
 	if t.AssigneeID != nil {
 		s := t.AssigneeID.String()

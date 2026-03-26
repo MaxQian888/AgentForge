@@ -21,10 +21,17 @@ type WorkflowTaskDispatcher interface {
 	Spawn(ctx context.Context, input DispatchSpawnInput) (*model.TaskDispatchResponse, error)
 }
 
+// WorkflowChildSpawner starts a child workflow execution. Typically backed by
+// WorkflowExecutionService.Start so that hierarchical workflows can recurse.
+type WorkflowChildSpawner interface {
+	Start(ctx context.Context, pluginID string, req WorkflowExecutionRequest) (*model.WorkflowPluginRun, error)
+}
+
 type WorkflowStepRouterExecutor struct {
-	agents  WorkflowAgentSpawner
-	reviews WorkflowReviewRunner
-	tasks   WorkflowTaskDispatcher
+	agents    WorkflowAgentSpawner
+	reviews   WorkflowReviewRunner
+	tasks     WorkflowTaskDispatcher
+	workflows WorkflowChildSpawner
 }
 
 func NewWorkflowStepRouterExecutor(
@@ -37,6 +44,13 @@ func NewWorkflowStepRouterExecutor(
 		reviews: reviews,
 		tasks:   tasks,
 	}
+}
+
+// WithWorkflowSpawner attaches a child-workflow spawner used by the "workflow"
+// action type in hierarchical process mode.
+func (e *WorkflowStepRouterExecutor) WithWorkflowSpawner(spawner WorkflowChildSpawner) *WorkflowStepRouterExecutor {
+	e.workflows = spawner
+	return e
 }
 
 func (e *WorkflowStepRouterExecutor) Execute(ctx context.Context, req WorkflowStepExecutionRequest) (*WorkflowStepExecutionResult, error) {
@@ -52,6 +66,10 @@ func (e *WorkflowStepRouterExecutor) Execute(ctx context.Context, req WorkflowSt
 		return e.executeReview(ctx, req, trigger)
 	case model.WorkflowActionTask:
 		return e.executeTask(ctx, req, trigger)
+	case model.WorkflowActionWorkflow:
+		return e.executeWorkflow(ctx, req, trigger)
+	case model.WorkflowActionApproval:
+		return e.executeApproval(ctx, req)
 	default:
 		return nil, fmt.Errorf("unsupported workflow action: %s", req.Step.Action)
 	}
@@ -158,6 +176,44 @@ func (e *WorkflowStepRouterExecutor) executeTask(ctx context.Context, req Workfl
 	}
 	if result.Dispatch.Run != nil {
 		output["runId"] = result.Dispatch.Run.ID
+	}
+	return &WorkflowStepExecutionResult{Output: output}, nil
+}
+
+func (e *WorkflowStepRouterExecutor) executeWorkflow(ctx context.Context, req WorkflowStepExecutionRequest, trigger map[string]any) (*WorkflowStepExecutionResult, error) {
+	if e.workflows == nil {
+		return nil, fmt.Errorf("workflow child spawner is not configured")
+	}
+	childPluginID := workflowString(trigger, "pluginId")
+	if childPluginID == "" {
+		// Fall back to step config if present.
+		if req.Step.Config != nil {
+			childPluginID = workflowString(req.Step.Config, "plugin_id")
+		}
+	}
+	if childPluginID == "" {
+		return nil, fmt.Errorf("workflow step requires trigger.pluginId or step config plugin_id for child workflow")
+	}
+	childRun, err := e.workflows.Start(ctx, childPluginID, WorkflowExecutionRequest{
+		Trigger: cloneWorkflowPayload(trigger),
+	})
+	if err != nil {
+		return nil, fmt.Errorf("child workflow %s failed: %w", childPluginID, err)
+	}
+	output := map[string]any{
+		"child_run_id": childRun.ID.String(),
+		"child_plugin": childRun.PluginID,
+		"status":       string(childRun.Status),
+	}
+	return &WorkflowStepExecutionResult{Output: output}, nil
+}
+
+func (e *WorkflowStepRouterExecutor) executeApproval(_ context.Context, req WorkflowStepExecutionRequest) (*WorkflowStepExecutionResult, error) {
+	output := map[string]any{
+		"status":  "awaiting_approval",
+		"step_id": req.Step.ID,
+		"run_id":  req.RunID.String(),
+		"message": "workflow paused pending human approval",
 	}
 	return &WorkflowStepExecutionResult{Output: output}, nil
 }

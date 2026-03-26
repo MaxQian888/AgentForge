@@ -15,6 +15,9 @@ describe("useTeamStore", () => {
     useTeamStore.setState({
       teams: [],
       loading: false,
+      error: null,
+      loadingById: {},
+      errorById: {},
     });
   });
 
@@ -90,6 +93,45 @@ describe("useTeamStore", () => {
           provider: "opencode",
           model: "opencode-default",
         }),
+      })
+    );
+  });
+
+  it("normalizes the legacy planner_coder_reviewer strategy alias", () => {
+    const team = normalizeTeam({
+      id: "team-legacy",
+      projectId: "project-1",
+      taskId: "task-1",
+      taskTitle: "Legacy team",
+      name: "Legacy team",
+      status: "planning",
+      strategy: "planner_coder_reviewer",
+      runtime: "codex",
+      provider: "openai",
+      model: "gpt-5-codex",
+      coderRuns: [],
+      totalBudgetUsd: 10,
+      totalSpentUsd: 0,
+      createdAt: "2026-03-25T10:00:00.000Z",
+      updatedAt: "2026-03-25T10:05:00.000Z",
+    });
+
+    expect(team.strategy).toBe("plan-code-review");
+  });
+
+  it("passes the explicit project scope when listing team runs", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => [],
+    } as Response);
+
+    await useTeamStore.getState().fetchTeams("project-1");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:7777/api/v1/teams?projectId=project-1",
+      expect.objectContaining({
+        method: "GET",
       })
     );
   });

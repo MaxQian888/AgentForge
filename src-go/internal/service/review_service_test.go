@@ -61,6 +61,24 @@ func (m *mockReviewRepo) UpdateStatus(_ context.Context, id uuid.UUID, status st
 	return nil
 }
 
+func (m *mockReviewRepo) ListAll(_ context.Context, status, riskLevel string, limit int) ([]*model.Review, error) {
+	var reviews []*model.Review
+	for _, review := range m.byID {
+		if status != "" && review.Status != status {
+			continue
+		}
+		if riskLevel != "" && review.RiskLevel != riskLevel {
+			continue
+		}
+		cloned := *review
+		reviews = append(reviews, &cloned)
+		if limit > 0 && len(reviews) >= limit {
+			break
+		}
+	}
+	return reviews, nil
+}
+
 func (m *mockReviewRepo) UpdateResult(_ context.Context, review *model.Review) error {
 	cloned := *review
 	m.updated = append(m.updated, &cloned)

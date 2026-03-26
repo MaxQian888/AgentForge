@@ -173,7 +173,9 @@ func WithLegacyCardCallbackHandler(verificationToken, eventEncryptKey string, ha
 
 func (l *Live) Name() string { return "feishu-live" }
 
-func (l *Live) Metadata() core.PlatformMetadata { return liveMetadata }
+func (l *Live) Metadata() core.PlatformMetadata {
+	return core.NormalizeMetadata(liveMetadata, liveMetadata.Source)
+}
 
 func (l *Live) SetActionHandler(handler notify.ActionHandler) {
 	l.actionHandler = handler
@@ -191,6 +193,10 @@ func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
 }
 
 func (l *Live) HTTPCallbackHandler() http.Handler { return l.callbackHTTP }
+
+func (l *Live) BuildNativeTextMessage(title, content string) (*core.NativeMessage, error) {
+	return core.NewFeishuMarkdownCardMessage(title, content)
+}
 
 func (l *Live) Start(handler core.MessageHandler) error {
 	if handler == nil {

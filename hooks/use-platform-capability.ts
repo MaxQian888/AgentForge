@@ -7,6 +7,7 @@ export function usePlatformCapability() {
     isDesktop: platformRuntime.isDesktop,
     selectFiles: platformRuntime.selectFiles,
     sendNotification: platformRuntime.sendNotification,
+    syncNotificationTraySummary: platformRuntime.syncNotificationTraySummary,
     updateTray: platformRuntime.updateTray,
     registerShortcut: platformRuntime.registerShortcut,
     checkForUpdate: platformRuntime.checkForUpdate,

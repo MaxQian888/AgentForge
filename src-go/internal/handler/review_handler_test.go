@@ -41,12 +41,28 @@ func (m *reviewServiceMock) GetByTask(_ context.Context, _ uuid.UUID) ([]*model.
 	return m.reviews, nil
 }
 
+func (m *reviewServiceMock) ListAll(_ context.Context, _, _ string, _ int) ([]*model.Review, error) {
+	return m.reviews, nil
+}
+
 func (m *reviewServiceMock) Approve(_ context.Context, _ uuid.UUID, _ string) (*model.Review, error) {
 	return m.review, nil
 }
 
 func (m *reviewServiceMock) Reject(_ context.Context, _ uuid.UUID, _, _ string) (*model.Review, error) {
 	return m.review, nil
+}
+
+func (m *reviewServiceMock) IngestCIResult(_ context.Context, _ *model.CIReviewRequest) (*model.Review, error) {
+	return m.review, nil
+}
+
+func (m *reviewServiceMock) RequestHumanApproval(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+func (m *reviewServiceMock) RouteFixRequest(_ context.Context, _ uuid.UUID) error {
+	return nil
 }
 
 type reviewValidator struct {

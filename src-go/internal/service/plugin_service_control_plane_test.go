@@ -377,6 +377,58 @@ spec:
 	}
 }
 
+func TestPluginServiceControlPlane_DiscoverBuiltInsLeavesRegistryUnchanged(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	builtinPath := writeControlPlaneServiceManifest(t, pluginsDir, "integrations/feishu/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: feishu
+  name: Feishu
+  version: 1.0.0
+  description: Built-in Feishu adapter
+spec:
+  runtime: wasm
+  module: ./dist/feishu.wasm
+  abiVersion: v1
+`)
+
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &controlPlanePluginRuntimeClient{}, &controlPlaneGoRuntime{}, pluginsDir)
+
+	records, err := svc.DiscoverBuiltIns(ctx)
+	if err != nil {
+		t.Fatalf("discover built-ins: %v", err)
+	}
+	if len(records) != 1 || records[0].Metadata.ID != "feishu" {
+		t.Fatalf("unexpected discover results: %+v", records)
+	}
+
+	installed, err := svc.List(ctx, service.PluginListFilter{})
+	if err != nil {
+		t.Fatalf("list installed plugins: %v", err)
+	}
+	if len(installed) != 0 {
+		t.Fatalf("expected discover to leave installed registry empty, got %+v", installed)
+	}
+
+	record, err := svc.RegisterLocalPath(ctx, builtinPath)
+	if err != nil {
+		t.Fatalf("register builtin manifest path: %v", err)
+	}
+	if record.Metadata.ID != "feishu" {
+		t.Fatalf("unexpected explicit install id: %s", record.Metadata.ID)
+	}
+
+	installed, err = svc.List(ctx, service.PluginListFilter{})
+	if err != nil {
+		t.Fatalf("list installed plugins after explicit install: %v", err)
+	}
+	if len(installed) != 1 || installed[0].Metadata.ID != "feishu" {
+		t.Fatalf("expected explicit install to populate registry, got %+v", installed)
+	}
+}
+
 func TestPluginServiceControlPlane_RefreshMCPPersistsSummaryAndAuditEvent(t *testing.T) {
 	ctx := context.Background()
 	pluginsDir := t.TempDir()

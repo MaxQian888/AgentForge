@@ -2,17 +2,29 @@
 
 import { useEffect } from "react";
 import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useTeamStore } from "@/lib/stores/team-store";
 import { TeamCard } from "@/components/team/team-card";
 
 export default function TeamsPage() {
-  const { teams, loading, fetchTeams } = useTeamStore();
+  const pathname = usePathname();
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requestedProjectId = searchParams.get("project");
+  const projects = useDashboardStore((state) => state.projects);
+  const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
+  const activeProjectId = requestedProjectId ?? selectedProjectId;
+  const { teams, loading, error, fetchTeams } = useTeamStore();
 
   useEffect(() => {
-    fetchTeams();
-  }, [fetchTeams]);
+    if (!activeProjectId) return;
+    void fetchTeams(activeProjectId);
+  }, [activeProjectId, fetchTeams]);
 
   const activeTeams = teams.filter(
     (t) =>
@@ -35,6 +47,25 @@ export default function TeamsPage() {
         </Link>
       </div>
 
+      {projects.length > 0 ? (
+        <div className="flex max-w-sm flex-col gap-2">
+          <Label htmlFor="teams-project-selector">Project</Label>
+          <select
+            id="teams-project-selector"
+            aria-label="Project"
+            className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+            value={activeProjectId ?? ""}
+            onChange={(event) => router.replace(`${pathname}?project=${event.target.value}`)}
+          >
+            {projects.map((project) => (
+              <option key={project.id} value={project.id}>
+                {project.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 sm:grid-cols-3">
         <Card>
           <CardContent className="py-4">
@@ -56,8 +87,25 @@ export default function TeamsPage() {
         </Card>
       </div>
 
-      {loading ? (
+      {!activeProjectId ? (
+        <Card>
+          <CardContent className="py-12 text-center">
+            <Users className="mx-auto mb-4 size-12 text-muted-foreground" />
+            <p className="text-muted-foreground">Select a project to inspect team runs.</p>
+          </CardContent>
+        </Card>
+      ) : loading ? (
         <p className="text-muted-foreground">Loading teams...</p>
+      ) : error ? (
+        <Card>
+          <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
+            <Users className="size-10 text-muted-foreground" />
+            <p className="text-muted-foreground">{error}</p>
+            <Button type="button" onClick={() => void fetchTeams(activeProjectId)}>
+              Retry
+            </Button>
+          </CardContent>
+        </Card>
       ) : teams.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">

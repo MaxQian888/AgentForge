@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"os"
@@ -70,6 +71,20 @@ type BridgeResumeResponse = bridgeclient.ResumeResponse
 
 type QueueAgentAdmissionInput = repository.QueueAgentAdmissionRecord
 
+// AgentEventRepository defines persistence for agent lifecycle events.
+type AgentEventRepository interface {
+	Create(ctx context.Context, event *model.AgentEvent) error
+	ListByRunID(ctx context.Context, runID uuid.UUID, limit int) ([]*model.AgentEvent, error)
+	ListByTaskID(ctx context.Context, taskID uuid.UUID, limit int) ([]*model.AgentEvent, error)
+	ListByProjectID(ctx context.Context, projectID uuid.UUID, limit int) ([]*model.AgentEvent, error)
+}
+
+// SprintCostUpdater rolls up task costs to sprint level.
+type SprintCostUpdater interface {
+	SumTaskSpent(ctx context.Context, sprintID uuid.UUID) (float64, error)
+	UpdateSpent(ctx context.Context, sprintID uuid.UUID, spent float64) error
+}
+
 type AgentQueueStore interface {
 	QueueAgentAdmission(ctx context.Context, input QueueAgentAdmissionInput) (*model.AgentPoolQueueEntry, error)
 	CountQueuedByProject(ctx context.Context, projectID uuid.UUID) (int, error)
@@ -102,19 +117,21 @@ var (
 )
 
 type AgentService struct {
-	runRepo    AgentRunRepository
-	taskRepo   AgentTaskRepository
-	projects   AgentProjectRepository
-	hub        *ws.Hub
-	bridge     BridgeClient
-	worktrees  WorktreeManager
-	roleStore  AgentRoleStore
-	progress   *TaskProgressService
-	imProgress IMBoundProgressNotifier
-	pool       *pool.Pool
-	queueStore AgentQueueStore
-	teamSvc    *TeamService
-	memorySvc  *MemoryService
+	runRepo      AgentRunRepository
+	taskRepo     AgentTaskRepository
+	projects     AgentProjectRepository
+	hub          *ws.Hub
+	bridge       BridgeClient
+	worktrees    WorktreeManager
+	roleStore    AgentRoleStore
+	progress     *TaskProgressService
+	imProgress   IMBoundProgressNotifier
+	pool         *pool.Pool
+	queueStore   AgentQueueStore
+	teamSvc      *TeamService
+	memorySvc    *MemoryService
+	eventRepo    AgentEventRepository
+	sprintCostUp SprintCostUpdater
 }
 
 func agentRunLogFields(run *model.AgentRun) log.Fields {
@@ -189,6 +206,14 @@ func (s *AgentService) SetTeamService(ts *TeamService) {
 
 func (s *AgentService) SetMemoryService(ms *MemoryService) {
 	s.memorySvc = ms
+}
+
+func (s *AgentService) SetEventRepository(repo AgentEventRepository) {
+	s.eventRepo = repo
+}
+
+func (s *AgentService) SetSprintCostUpdater(up SprintCostUpdater) {
+	s.sprintCostUp = up
 }
 
 type bridgeExecutionContext struct {
@@ -297,8 +322,11 @@ func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uu
 	spawnFields["branchName"] = allocation.Branch
 	spawnFields["worktreeReused"] = allocation.Reused
 
+	// Inject project memory context into the agent's system prompt.
+	memoryContext := s.injectMemoryContext(ctx, task.ProjectID, resolvedRoleID)
+
 	sessionID := uuid.New().String()
-	resp, err := s.bridge.Execute(ctx, buildBridgeExecuteRequest(
+	bridgeReq := buildBridgeExecuteRequest(
 		task,
 		memberID,
 		sessionID,
@@ -311,7 +339,11 @@ func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uu
 		resolveSpawnBudget(task.BudgetUsd, budgetUsd, roleConfig),
 		run.TeamID,
 		run.TeamRole,
-	))
+	)
+	if memoryContext != "" {
+		bridgeReq.SystemPrompt = strings.TrimSpace(bridgeReq.SystemPrompt + "\n" + memoryContext)
+	}
+	resp, err := s.bridge.Execute(ctx, bridgeReq)
 	if err != nil {
 		log.WithFields(spawnFields).WithError(err).Warn("agent spawn bridge execute failed")
 		_ = s.failSpawn(ctx, run, task, project.Slug, allocation)
@@ -336,6 +368,11 @@ func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uu
 	run.Status = model.AgentRunStatusRunning
 	log.WithFields(spawnFields).Info("agent spawn started bridge runtime")
 	s.broadcastEvent(ws.EventAgentStarted, task.ProjectID.String(), run.ToDTO())
+	s.emitEvent(ctx, run, task.ProjectID, model.AgentEventSpawn, map[string]any{
+		"runtime": selection.Runtime, "provider": selection.Provider, "model": selection.Model,
+		"budgetUsd": budgetUsd, "roleId": resolvedRoleID,
+	})
+	s.emitEvent(ctx, run, task.ProjectID, model.AgentEventRunning, nil)
 	s.recordProgress(ctx, taskID, TaskActivityInput{
 		Source:       model.TaskProgressSourceAgentStarted,
 		OccurredAt:   run.StartedAt,
@@ -370,6 +407,25 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 	}
 	run.Status = status
 	log.WithFields(fields).Info("agent status updated")
+
+	// Emit persistent audit event for status change.
+	if projectID := s.lookupProjectID(ctx, run.TaskID); projectID != "" {
+		pid, _ := uuid.Parse(projectID)
+		agentEventType := status // map run status to event type
+		switch status {
+		case model.AgentRunStatusCompleted:
+			agentEventType = model.AgentEventCompleted
+		case model.AgentRunStatusFailed:
+			agentEventType = model.AgentEventFailed
+		case model.AgentRunStatusCancelled:
+			agentEventType = model.AgentEventCancelled
+		case model.AgentRunStatusBudgetExceeded:
+			agentEventType = model.AgentEventBudgetExceeded
+		case model.AgentRunStatusRunning:
+			agentEventType = model.AgentEventRunning
+		}
+		s.emitEvent(ctx, run, pid, agentEventType, map[string]any{"previousStatus": fields["nextStatus"]})
+	}
 
 	eventType := ws.EventAgentProgress
 	switch status {
@@ -451,6 +507,20 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 	costFields["updatedTaskSpentUsd"] = updatedTask.SpentUsd
 	log.WithFields(costFields).Info("agent cost updated")
 
+	// Emit cost_update audit event.
+	s.emitEvent(ctx, run, updatedTask.ProjectID, model.AgentEventCostUpdate, map[string]any{
+		"inputTokens": inputTokens, "outputTokens": outputTokens, "costUsd": costUsd, "turnCount": turnCount,
+		"taskSpentUsd": totalSpent, "taskBudgetUsd": task.BudgetUsd,
+	})
+
+	// Roll up task costs to sprint.
+	if s.sprintCostUp != nil && updatedTask.SprintID != nil {
+		sprintTotal, err := s.sprintCostUp.SumTaskSpent(ctx, *updatedTask.SprintID)
+		if err == nil {
+			_ = s.sprintCostUp.UpdateSpent(ctx, *updatedTask.SprintID, sprintTotal)
+		}
+	}
+
 	s.broadcastEvent(ws.EventAgentCostUpdate, updatedTask.ProjectID.String(), run.ToDTO())
 	s.broadcastEvent(ws.EventTaskUpdated, updatedTask.ProjectID.String(), updatedTask.ToDTO())
 
@@ -529,22 +599,47 @@ func (s *AgentService) GetByID(ctx context.Context, id uuid.UUID) (*model.AgentR
 	return s.runRepo.GetByID(ctx, id)
 }
 
-// GetLogs returns log entries for an agent run.
+// GetLogs returns log entries for an agent run sourced from persistent agent events.
+// Falls back to synthetic reconstruction from run record when event repo is unavailable.
 func (s *AgentService) GetLogs(ctx context.Context, id uuid.UUID) ([]model.AgentLogEntry, error) {
 	run, err := s.runRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, ErrAgentNotFound
 	}
 
-	// Return basic log entries from the run record
-	var logs []model.AgentLogEntry
+	// Use persistent events if available.
+	if s.eventRepo != nil {
+		events, err := s.eventRepo.ListByRunID(ctx, id, 200)
+		if err == nil && len(events) > 0 {
+			logs := make([]model.AgentLogEntry, 0, len(events))
+			for _, e := range events {
+				logType := "status"
+				if e.EventType == model.AgentEventFailed || e.EventType == model.AgentEventBudgetExceeded {
+					logType = "error"
+				} else if e.EventType == model.AgentEventCostUpdate {
+					logType = "cost"
+				}
+				content := fmt.Sprintf("Event: %s", e.EventType)
+				if e.Payload != "" && e.Payload != "{}" {
+					content = fmt.Sprintf("Event: %s | %s", e.EventType, e.Payload)
+				}
+				logs = append(logs, model.AgentLogEntry{
+					Timestamp: e.OccurredAt.Format(time.RFC3339),
+					Content:   content,
+					Type:      logType,
+				})
+			}
+			return logs, nil
+		}
+	}
 
+	// Fallback: synthetic reconstruction from run record.
+	var logs []model.AgentLogEntry
 	logs = append(logs, model.AgentLogEntry{
 		Timestamp: run.StartedAt.Format(time.RFC3339),
 		Content:   "Agent run started",
 		Type:      "status",
 	})
-
 	if run.ErrorMessage != "" {
 		logs = append(logs, model.AgentLogEntry{
 			Timestamp: run.UpdatedAt.Format(time.RFC3339),
@@ -552,7 +647,6 @@ func (s *AgentService) GetLogs(ctx context.Context, id uuid.UUID) ([]model.Agent
 			Type:      "error",
 		})
 	}
-
 	if run.CompletedAt != nil {
 		logs = append(logs, model.AgentLogEntry{
 			Timestamp: run.CompletedAt.Format(time.RFC3339),
@@ -560,7 +654,6 @@ func (s *AgentService) GetLogs(ctx context.Context, id uuid.UUID) ([]model.Agent
 			Type:      "status",
 		})
 	}
-
 	return logs, nil
 }
 
@@ -889,6 +982,7 @@ func (s *AgentService) pauseRun(ctx context.Context, run *model.AgentRun) error 
 	log.WithFields(agentRunLogFields(run)).WithField("sessionId", sessionID).Info("agent runtime paused")
 	s.releasePoolSlot(run.ID.String())
 	s.broadcastEvent(ws.EventAgentProgress, s.lookupProjectID(ctx, run.TaskID), run.ToDTO())
+	s.emitEvent(ctx, run, task.ProjectID, model.AgentEventPaused, nil)
 	return nil
 }
 
@@ -915,6 +1009,9 @@ func (s *AgentService) resumeRun(ctx context.Context, run *model.AgentRun) error
 	if err != nil {
 		return err
 	}
+	// Inject project memory context on resume.
+	memoryContext := s.injectMemoryContext(ctx, task.ProjectID, strings.TrimSpace(run.RoleID))
+
 	req := buildBridgeExecuteRequest(
 		task,
 		run.MemberID,
@@ -929,6 +1026,9 @@ func (s *AgentService) resumeRun(ctx context.Context, run *model.AgentRun) error
 		run.TeamID,
 		run.TeamRole,
 	)
+	if memoryContext != "" {
+		req.SystemPrompt = strings.TrimSpace(req.SystemPrompt + "\n" + memoryContext)
+	}
 	resp, err := s.bridge.Resume(ctx, req)
 	if err != nil {
 		return fmt.Errorf("resume bridge runtime: %w", err)
@@ -946,6 +1046,7 @@ func (s *AgentService) resumeRun(ctx context.Context, run *model.AgentRun) error
 	run.Status = model.AgentRunStatusRunning
 	log.WithFields(agentRunLogFields(run)).WithField("sessionId", sessionID).Info("agent runtime resumed")
 	s.broadcastEvent(ws.EventAgentProgress, s.lookupProjectID(ctx, run.TaskID), run.ToDTO())
+	s.emitEvent(ctx, run, task.ProjectID, model.AgentEventResumed, nil)
 	return nil
 }
 
@@ -1173,6 +1274,51 @@ func (s *AgentService) releasePoolSlot(runID string) {
 		return
 	}
 	_ = s.pool.Release(runID)
+}
+
+// emitEvent persists an agent lifecycle event for audit purposes.
+func (s *AgentService) emitEvent(ctx context.Context, run *model.AgentRun, projectID uuid.UUID, eventType string, payload map[string]any) {
+	if s.eventRepo == nil || run == nil {
+		return
+	}
+	payloadJSON := "{}"
+	if payload != nil {
+		if b, err := json.Marshal(payload); err == nil {
+			payloadJSON = string(b)
+		}
+	}
+	event := &model.AgentEvent{
+		ID:         uuid.New(),
+		RunID:      run.ID,
+		TaskID:     run.TaskID,
+		ProjectID:  projectID,
+		EventType:  eventType,
+		Payload:    payloadJSON,
+		OccurredAt: time.Now().UTC(),
+		CreatedAt:  time.Now().UTC(),
+	}
+	if err := s.eventRepo.Create(ctx, event); err != nil {
+		log.WithFields(log.Fields{
+			"runId":     run.ID.String(),
+			"eventType": eventType,
+		}).WithError(err).Warn("failed to persist agent event")
+	}
+}
+
+// injectMemoryContext retrieves project memory and returns it as system prompt context.
+func (s *AgentService) injectMemoryContext(ctx context.Context, projectID uuid.UUID, roleID string) string {
+	if s.memorySvc == nil {
+		return ""
+	}
+	memCtx, err := s.memorySvc.InjectContext(ctx, projectID, roleID)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"projectId": projectID.String(),
+			"roleId":    roleID,
+		}).WithError(err).Warn("agent spawn memory injection failed")
+		return ""
+	}
+	return memCtx
 }
 
 func (s *AgentService) broadcastPoolStats(ctx context.Context, projectID string) {
@@ -1418,6 +1564,25 @@ func bridgeEventTime(timestampMS int64) time.Time {
 	return time.UnixMilli(timestampMS).UTC()
 }
 
+func buildAgentRunStructuredMessage(run *model.AgentRun, content string, terminal bool) *model.IMStructuredMessage {
+	if run == nil {
+		return nil
+	}
+	title := "Agent Progress"
+	if terminal {
+		title = "Agent Run Complete"
+	}
+	return &model.IMStructuredMessage{
+		Title: title,
+		Body:  content,
+		Fields: []model.IMStructuredField{
+			{Label: "Task", Value: run.TaskID.String()},
+			{Label: "Run", Value: run.ID.String()},
+			{Label: "Status", Value: run.Status},
+		},
+	}
+}
+
 func (s *AgentService) notifyIMRunUpdate(ctx context.Context, run *model.AgentRun, content string, terminal bool) {
 	if s.imProgress == nil || run == nil || strings.TrimSpace(content) == "" {
 		return
@@ -1427,6 +1592,7 @@ func (s *AgentService) notifyIMRunUpdate(ctx context.Context, run *model.AgentRu
 		RunID:      run.ID.String(),
 		Kind:       IMDeliveryKindProgress,
 		Content:    content,
+		Structured: buildAgentRunStructuredMessage(run, content, terminal),
 		IsTerminal: terminal,
 	})
 	fields := agentRunLogFields(run)

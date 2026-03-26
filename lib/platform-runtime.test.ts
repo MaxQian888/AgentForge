@@ -79,17 +79,107 @@ describe("platform-runtime", () => {
 
     await expect(
       runtime.sendNotification({
+        createdAt: "2026-03-26T08:00:00.000Z",
+        notificationId: "notif-1",
+        type: "task.completed",
         title: "AgentForge",
         body: "Desktop fallback works",
+        href: "/project?id=project-1#task-task-1",
+        deliveryPolicy: "always",
       }),
     ).resolves.toEqual({
       mode: "web",
+      notificationId: "notif-1",
       ok: true,
+      status: "delivered",
     });
     expect(requestPermission).toHaveBeenCalled();
     expect(notifyWeb).toHaveBeenCalledWith("AgentForge", {
       body: "Desktop fallback works",
     });
+  });
+
+  it("normalizes structured desktop notification delivery results", async () => {
+    const invoke = jest
+      .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
+      .mockResolvedValue({
+        notificationId: "notif-2",
+        status: "delivered",
+      });
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke,
+    });
+
+    await expect(
+      runtime.sendNotification({
+        createdAt: "2026-03-26T08:05:00.000Z",
+        notificationId: "notif-2",
+        type: "review.completed",
+        title: "Review finished",
+        body: "All comments were resolved.",
+        href: "/reviews?id=review-1",
+        deliveryPolicy: "always",
+      }),
+    ).resolves.toEqual({
+      mode: "desktop",
+      notificationId: "notif-2",
+      ok: true,
+      status: "delivered",
+    });
+    expect(invoke).toHaveBeenCalledWith("send_notification", {
+      createdAt: "2026-03-26T08:05:00.000Z",
+      notificationId: "notif-2",
+      type: "review.completed",
+      title: "Review finished",
+      body: "All comments were resolved.",
+      href: "/reviews?id=review-1",
+      deliveryPolicy: "always",
+    });
+  });
+
+  it("syncs notification tray summaries through the tray facade", async () => {
+    const invoke = jest
+      .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
+      .mockResolvedValue(undefined);
+    const setDocumentTitle = jest.fn<void, [string]>();
+    const desktopRuntime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke,
+    });
+    const webRuntime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => false,
+      setDocumentTitle,
+    });
+
+    await expect(
+      desktopRuntime.syncNotificationTraySummary({
+        latestTitle: "Build failed",
+        unreadCount: 3,
+      }),
+    ).resolves.toEqual({
+      mode: "desktop",
+      ok: true,
+    });
+    expect(invoke).toHaveBeenCalledWith("update_tray", {
+      title: "AgentForge · 3 unread",
+      tooltip: "Build failed",
+      visible: true,
+    });
+
+    await expect(
+      webRuntime.syncNotificationTraySummary({
+        latestTitle: "Build failed",
+        unreadCount: 3,
+      }),
+    ).resolves.toEqual({
+      mode: "web",
+      ok: true,
+    });
+    expect(setDocumentTitle).toHaveBeenCalledWith("AgentForge · 3 unread");
   });
 
   it("returns unsupported for global shortcuts on web", async () => {
@@ -319,6 +409,61 @@ describe("platform-runtime", () => {
         },
       },
     ]);
+    cleanup();
+    expect(unlisten).toHaveBeenCalled();
+  });
+
+  it("preserves source and timestamp for notification outcome desktop events", async () => {
+    const unlisten = jest.fn();
+    const listen = jest
+      .fn<
+        Promise<() => void>,
+        [string, (event: { payload: unknown }) => void]
+      >()
+      .mockImplementation(async (_event, handler) => {
+        handler({
+          payload: {
+            type: "notification.failed",
+            source: "notification",
+            timestamp: "2026-03-26T10:30:00.000Z",
+            payload: {
+              notificationId: "notification-1",
+              notificationType: "task_progress_stalled",
+              title: "Task stalled: Implement detector",
+              status: "failed",
+              error: "notification backend unavailable",
+            },
+          },
+        });
+
+        return unlisten;
+      });
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      listen,
+    });
+
+    const received: unknown[] = [];
+    const cleanup = await runtime.subscribeDesktopEvents((event) => {
+      received.push(event);
+    });
+
+    expect(received).toEqual([
+      {
+        type: "notification.failed",
+        source: "notification",
+        timestamp: "2026-03-26T10:30:00.000Z",
+        payload: {
+          notificationId: "notification-1",
+          notificationType: "task_progress_stalled",
+          title: "Task stalled: Implement detector",
+          status: "failed",
+          error: "notification backend unavailable",
+        },
+      },
+    ]);
+
     cleanup();
     expect(unlisten).toHaveBeenCalled();
   });

@@ -27,10 +27,15 @@ const (
 	NotificationTypeAgentCompleted        = "agent_completed"
 	NotificationTypeAgentFailed           = "agent_failed"
 	NotificationTypeReviewCompleted       = "review_completed"
+	NotificationTypeAutomationAction      = "automation_action"
 	NotificationTypeBudgetWarning         = "budget_warning"
 	NotificationTypeTaskProgressWarning   = "task_progress_warning"
 	NotificationTypeTaskProgressStalled   = "task_progress_stalled"
 	NotificationTypeTaskProgressRecovered = "task_progress_recovered"
+	NotificationTypeTaskCommentMention    = "task.comment.mention"
+	NotificationTypeWikiCommentMention    = "wiki.comment.mention"
+	NotificationTypeWikiPageUpdated       = "wiki.page.updated"
+	NotificationTypeWikiVersionPublished  = "wiki.version.published"
 )
 
 const (

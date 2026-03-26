@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Separator } from "@/components/ui/separator";
@@ -30,6 +31,18 @@ export default function SettingsPage() {
   const [runtime, setRuntime] = useState("");
   const [provider, setProvider] = useState("");
   const [model, setModel] = useState("");
+  const [maxTaskBudget, setMaxTaskBudget] = useState(0);
+  const [maxDailySpend, setMaxDailySpend] = useState(0);
+  const [alertThreshold, setAlertThreshold] = useState(80);
+  const [autoStopOnExceed, setAutoStopOnExceed] = useState(false);
+  const [autoTriggerOnPR, setAutoTriggerOnPR] = useState(false);
+  const [requiredLayers, setRequiredLayers] = useState("1");
+  const [minRiskLevelForBlock, setMinRiskLevelForBlock] = useState("critical");
+  const [requireManualApproval, setRequireManualApproval] = useState(false);
+  const [webhookUrl, setWebhookUrl] = useState("");
+  const [webhookSecret, setWebhookSecret] = useState("");
+  const [webhookEvents, setWebhookEvents] = useState<string[]>([]);
+  const [webhookActive, setWebhookActive] = useState(false);
   const [saved, setSaved] = useState(false);
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
@@ -58,6 +71,27 @@ export default function SettingsPage() {
           project.codingAgentCatalog?.defaultSelection.model ||
           ""
       );
+      const bg = project.settings?.budgetGovernance;
+      if (bg) {
+        setMaxTaskBudget(bg.maxTaskBudgetUsd);
+        setMaxDailySpend(bg.maxDailySpendUsd);
+        setAlertThreshold(bg.alertThresholdPercent);
+        setAutoStopOnExceed(bg.autoStopOnExceed);
+      }
+      const rp = project.settings?.reviewPolicy;
+      if (rp) {
+        setAutoTriggerOnPR(rp.autoTriggerOnPR);
+        setRequiredLayers(String(rp.requiredLayers));
+        setMinRiskLevelForBlock(rp.minRiskLevelForBlock);
+        setRequireManualApproval(rp.requireManualApproval);
+      }
+      const wh = project.settings?.webhook;
+      if (wh) {
+        setWebhookUrl(wh.url);
+        setWebhookSecret(wh.secret);
+        setWebhookEvents(wh.events);
+        setWebhookActive(wh.active);
+      }
     }
   }, [project]);
 
@@ -97,10 +131,25 @@ export default function SettingsPage() {
       repoUrl,
       defaultBranch,
       settings: {
-        codingAgent: {
-          runtime,
-          provider,
-          model,
+        codingAgent: { runtime, provider, model },
+        budgetGovernance: {
+          maxTaskBudgetUsd: maxTaskBudget,
+          maxDailySpendUsd: maxDailySpend,
+          alertThresholdPercent: alertThreshold,
+          autoStopOnExceed,
+        },
+        reviewPolicy: {
+          autoTriggerOnPR,
+          requiredLayers: Number(requiredLayers),
+          minRiskLevelForBlock,
+          requireManualApproval,
+          enabledPluginDimensions: [],
+        },
+        webhook: {
+          url: webhookUrl,
+          secret: webhookSecret,
+          events: webhookEvents,
+          active: webhookActive,
         },
       },
     });
@@ -260,6 +309,247 @@ export default function SettingsPage() {
                 )}
               </div>
             ))}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Budget &amp; Alert Governance</CardTitle>
+          <CardDescription>
+            Configure spending limits and alert thresholds for agent runs.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <Label>Max Task Budget (USD)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={0.01}
+                value={maxTaskBudget}
+                onChange={(e) => setMaxTaskBudget(Number(e.target.value))}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Max Daily Spend (USD)</Label>
+              <Input
+                type="number"
+                min={0}
+                step={0.01}
+                value={maxDailySpend}
+                onChange={(e) => setMaxDailySpend(Number(e.target.value))}
+              />
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <Label>Alert Threshold (%)</Label>
+              <Input
+                type="number"
+                min={0}
+                max={100}
+                value={alertThreshold}
+                onChange={(e) => setAlertThreshold(Number(e.target.value))}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Auto-stop on Exceed</Label>
+              <Select
+                value={autoStopOnExceed ? "yes" : "no"}
+                onValueChange={(v) => setAutoStopOnExceed(v === "yes")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="yes">Enabled</SelectItem>
+                  <SelectItem value="no">Disabled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Review Policy</CardTitle>
+          <CardDescription>
+            Control how code reviews are triggered and what approval gates apply.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <Label>Auto-trigger on PR</Label>
+              <Select
+                value={autoTriggerOnPR ? "yes" : "no"}
+                onValueChange={(v) => setAutoTriggerOnPR(v === "yes")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="yes">Enabled</SelectItem>
+                  <SelectItem value="no">Disabled</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Required Review Layers</Label>
+              <Select value={requiredLayers} onValueChange={setRequiredLayers}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="1">Quick (Layer 1)</SelectItem>
+                  <SelectItem value="2">Deep (Layer 2)</SelectItem>
+                  <SelectItem value="3">Human (Layer 3)</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <Label>Min Risk Level to Block Merge</Label>
+              <Select
+                value={minRiskLevelForBlock}
+                onValueChange={setMinRiskLevelForBlock}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="critical">Critical</SelectItem>
+                  <SelectItem value="high">High</SelectItem>
+                  <SelectItem value="medium">Medium</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Require Manual Approval</Label>
+              <Select
+                value={requireManualApproval ? "yes" : "no"}
+                onValueChange={(v) => setRequireManualApproval(v === "yes")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="yes">Required</SelectItem>
+                  <SelectItem value="no">Not Required</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Webhook Configuration</CardTitle>
+          <CardDescription>
+            Configure webhook delivery for repository and review events.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <Label>Webhook URL</Label>
+              <Input
+                value={webhookUrl}
+                placeholder="https://example.com/webhook"
+                onChange={(e) => setWebhookUrl(e.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Webhook Secret</Label>
+              <Input
+                type="password"
+                value={webhookSecret}
+                placeholder="Secret token"
+                onChange={(e) => setWebhookSecret(e.target.value)}
+              />
+            </div>
+          </div>
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="flex flex-col gap-2">
+              <Label>Events</Label>
+              <div className="flex flex-wrap gap-2">
+                {["push", "pr_opened", "pr_merged", "review_completed"].map(
+                  (event) => (
+                    <Button
+                      key={event}
+                      type="button"
+                      size="sm"
+                      variant={
+                        webhookEvents.includes(event) ? "default" : "outline"
+                      }
+                      onClick={() =>
+                        setWebhookEvents((prev) =>
+                          prev.includes(event)
+                            ? prev.filter((e) => e !== event)
+                            : [...prev, event]
+                        )
+                      }
+                    >
+                      {event}
+                    </Button>
+                  )
+                )}
+              </div>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>Active</Label>
+              <Select
+                value={webhookActive ? "yes" : "no"}
+                onValueChange={(v) => setWebhookActive(v === "yes")}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="yes">Active</SelectItem>
+                  <SelectItem value="no">Inactive</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>Operator Diagnostics</CardTitle>
+          <CardDescription>
+            Runtime availability and operational health overview.
+          </CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-3 md:grid-cols-2">
+            {runtimeOptions.map((option) => (
+              <div key={option.runtime} className="flex items-center justify-between rounded-md border p-3">
+                <span className="text-sm font-medium">{option.label}</span>
+                <Badge variant={option.available ? "default" : "secondary"}>
+                  {option.available ? "Ready" : "Unavailable"}
+                </Badge>
+              </div>
+            ))}
+            {runtimeOptions.length === 0 && (
+              <p className="text-sm text-muted-foreground">
+                No runtime information available.
+              </p>
+            )}
+          </div>
+          <div className="flex gap-3">
+            <Button asChild size="sm" variant="outline">
+              <Link href="/agents">View Agent Pool</Link>
+            </Button>
+            <Button asChild size="sm" variant="outline">
+              <Link href="/reviews">View Review Backlog</Link>
+            </Button>
           </div>
         </CardContent>
       </Card>

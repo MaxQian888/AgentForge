@@ -7,7 +7,10 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/ws"
+	"github.com/react-go-quick-starter/server/pkg/database"
+	"gorm.io/gorm"
 )
 
 // TaskRepository defines persistence for tasks.
@@ -22,25 +25,42 @@ type TaskRepository interface {
 }
 
 type TaskService struct {
-	repo TaskRepository
-	hub  *ws.Hub
+	repo       TaskRepository
+	hub        *ws.Hub
+	linkSyncer mentionLinkSyncer
+}
+
+type taskRepositoryTxBinder interface {
+	TaskRepository
+	DB() *gorm.DB
+}
+
+type mentionLinkSyncerTxBinder interface {
+	mentionLinkSyncer
+	DB() *gorm.DB
+	WithDB(db *gorm.DB) mentionLinkSyncer
 }
 
 func NewTaskService(repo TaskRepository, hub *ws.Hub) *TaskService {
 	return &TaskService{repo: repo, hub: hub}
 }
 
+func (s *TaskService) WithEntityLinkSyncer(linkSyncer mentionLinkSyncer) *TaskService {
+	s.linkSyncer = linkSyncer
+	return s
+}
+
 func (s *TaskService) Create(ctx context.Context, projectID uuid.UUID, req *model.CreateTaskRequest, reporterID *uuid.UUID) (*model.Task, error) {
 	task := &model.Task{
-		ID:        uuid.New(),
-		ProjectID: projectID,
-		Title:     req.Title,
+		ID:          uuid.New(),
+		ProjectID:   projectID,
+		Title:       req.Title,
 		Description: req.Description,
-		Status:    model.TaskStatusInbox,
-		Priority:  req.Priority,
-		ReporterID: reporterID,
-		Labels:    req.Labels,
-		BudgetUsd: req.BudgetUsd,
+		Status:      model.TaskStatusInbox,
+		Priority:    req.Priority,
+		ReporterID:  reporterID,
+		Labels:      req.Labels,
+		BudgetUsd:   req.BudgetUsd,
 	}
 	if req.ParentID != nil {
 		id, err := uuid.Parse(*req.ParentID)
@@ -79,12 +99,52 @@ func (s *TaskService) List(ctx context.Context, projectID uuid.UUID, q model.Tas
 }
 
 func (s *TaskService) Update(ctx context.Context, id uuid.UUID, req *model.UpdateTaskRequest) (*model.Task, error) {
+	if req.Description != nil && s.linkSyncer != nil {
+		if binder, ok := s.repo.(taskRepositoryTxBinder); ok && binder.DB() != nil {
+			if linkBinder, ok := s.linkSyncer.(mentionLinkSyncerTxBinder); ok {
+				var task *model.Task
+				err := database.WithTx(ctx, binder.DB(), func(tx *gorm.DB) error {
+					txRepo := repository.NewTaskRepository(tx)
+					txSyncer := linkBinder.WithDB(tx)
+					if err := txRepo.Update(ctx, id, req); err != nil {
+						return err
+					}
+					updated, err := txRepo.GetByID(ctx, id)
+					if err != nil {
+						return err
+					}
+					if updated.ReporterID != nil {
+						if err := txSyncer.SyncMentionLinksForSource(ctx, updated.ProjectID, model.EntityTypeTask, updated.ID, *updated.ReporterID, updated.Description); err != nil {
+							return err
+						}
+					}
+					task = updated
+					return nil
+				})
+				if err != nil {
+					return nil, fmt.Errorf("update task: %w", err)
+				}
+				s.hub.BroadcastEvent(&ws.Event{
+					Type:      ws.EventTaskUpdated,
+					ProjectID: task.ProjectID.String(),
+					Payload:   task.ToDTO(),
+				})
+				return task, nil
+			}
+		}
+	}
+
 	if err := s.repo.Update(ctx, id, req); err != nil {
 		return nil, fmt.Errorf("update task: %w", err)
 	}
 	task, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, err
+	}
+	if s.linkSyncer != nil && req.Description != nil && task.ReporterID != nil {
+		if err := s.linkSyncer.SyncMentionLinksForSource(ctx, task.ProjectID, model.EntityTypeTask, task.ID, *task.ReporterID, task.Description); err != nil {
+			return nil, fmt.Errorf("sync task mention links: %w", err)
+		}
 	}
 
 	s.hub.BroadcastEvent(&ws.Event{

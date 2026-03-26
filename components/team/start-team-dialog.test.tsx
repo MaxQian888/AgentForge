@@ -157,6 +157,7 @@ describe("StartTeamDialog", () => {
       "task-1",
       "member-1",
       expect.objectContaining({
+        strategy: "plan-code-review",
         runtime: "codex",
         provider: "openai",
         model: "gpt-5-codex",

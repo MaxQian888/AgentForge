@@ -23,6 +23,7 @@ type ReviewRepository interface {
 	Create(ctx context.Context, review *model.Review) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Review, error)
 	GetByTask(ctx context.Context, taskID uuid.UUID) ([]*model.Review, error)
+	ListAll(ctx context.Context, status, riskLevel string, limit int) ([]*model.Review, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	UpdateResult(ctx context.Context, review *model.Review) error
 }
@@ -50,6 +51,7 @@ type ReviewService struct {
 	planner       *ReviewExecutionPlanner
 	progress      *TaskProgressService
 	imProgress    IMBoundProgressNotifier
+	aggregation   *ReviewAggregationService
 }
 
 func reviewLogFields(review *model.Review, task *model.Task) log.Fields {
@@ -97,6 +99,11 @@ func (s *ReviewService) SetIMProgressNotifier(notifier IMBoundProgressNotifier) 
 
 func (s *ReviewService) WithExecutionPlanner(planner *ReviewExecutionPlanner) *ReviewService {
 	s.planner = planner
+	return s
+}
+
+func (s *ReviewService) WithAggregationService(agg *ReviewAggregationService) *ReviewService {
+	s.aggregation = agg
 	return s
 }
 
@@ -265,10 +272,19 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 	})
 	if s.imProgress != nil {
 		queued, err := s.imProgress.QueueBoundProgress(ctx, IMBoundProgressRequest{
-			TaskID:     task.ID.String(),
-			ReviewID:   review.ID.String(),
-			Kind:       IMDeliveryKindTerminal,
-			Content:    fmt.Sprintf("代码审查已完成。\nReview: %s\n状态: %s\n建议: %s", review.ID.String(), review.Status, review.Recommendation),
+			TaskID:   task.ID.String(),
+			ReviewID: review.ID.String(),
+			Kind:     IMDeliveryKindTerminal,
+			Content:  fmt.Sprintf("代码审查已完成。\nReview: %s\n状态: %s\n建议: %s", review.ID.String(), review.Status, review.Recommendation),
+			Structured: &model.IMStructuredMessage{
+				Title: "Code Review Completed",
+				Body:  fmt.Sprintf("Review %s finished.", review.ID.String()),
+				Fields: []model.IMStructuredField{
+					{Label: "Review", Value: review.ID.String()},
+					{Label: "Status", Value: review.Status},
+					{Label: "Recommendation", Value: review.Recommendation},
+				},
+			},
 			IsTerminal: true,
 		})
 		fields["imQueued"] = queued
@@ -276,8 +292,149 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 			log.WithFields(fields).WithError(err).Warn("review IM progress queue failed")
 		}
 	}
+	// Trigger aggregation if service is available.
+	if s.aggregation != nil {
+		if agg, aggErr := s.aggregation.Aggregate(ctx, review.TaskID); aggErr != nil {
+			log.WithFields(fields).WithError(aggErr).Warn("post-complete aggregation failed")
+		} else {
+			log.WithFields(fields).WithField("aggregationId", agg.ID.String()).Info("post-complete aggregation succeeded")
+		}
+	}
+
 	log.WithFields(fields).Info("review completed")
 	return review, nil
+}
+
+// IngestCIResult creates a review with Layer "ci" (Layer 1) from CI pipeline findings.
+func (s *ReviewService) IngestCIResult(ctx context.Context, req *model.CIReviewRequest) (*model.Review, error) {
+	taskID, err := uuid.Parse(req.TaskID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid task id: %w", err)
+	}
+
+	task, err := s.tasks.GetByID(ctx, taskID)
+	if err != nil || task == nil {
+		return nil, ErrReviewTaskNotFound
+	}
+
+	// Determine risk level from CI status.
+	riskLevel := model.ReviewRiskLevelLow
+	recommendation := model.ReviewRecommendationApprove
+	if req.Status == "failure" || req.Status == "error" {
+		riskLevel = model.ReviewRiskLevelHigh
+		recommendation = model.ReviewRecommendationRequestChanges
+	}
+	if len(req.Findings) > 0 {
+		riskLevel = model.ReviewRiskLevelMedium
+		recommendation = model.ReviewRecommendationRequestChanges
+	}
+
+	summary := fmt.Sprintf("CI result from %s: status=%s, findings=%d", req.CISystem, req.Status, len(req.Findings))
+
+	review := &model.Review{
+		ID:             uuid.New(),
+		TaskID:         task.ID,
+		PRURL:          req.PRURL,
+		Layer:          model.ReviewLayerCI,
+		Status:         model.ReviewStatusCompleted,
+		RiskLevel:      riskLevel,
+		Findings:       req.Findings,
+		Summary:        summary,
+		Recommendation: recommendation,
+		CreatedAt:      time.Now().UTC(),
+		UpdatedAt:      time.Now().UTC(),
+	}
+
+	if err := s.reviews.Create(ctx, review); err != nil {
+		return nil, fmt.Errorf("create CI review: %w", err)
+	}
+
+	fields := reviewLogFields(review, task)
+	fields["ciSystem"] = req.CISystem
+	fields["findingCount"] = len(req.Findings)
+	log.WithFields(fields).Info("CI review ingested")
+
+	s.broadcast(ws.EventReviewCreated, task.ProjectID.String(), review.ToDTO())
+
+	// Trigger aggregation if available.
+	if s.aggregation != nil {
+		if agg, aggErr := s.aggregation.Aggregate(ctx, task.ID); aggErr != nil {
+			log.WithFields(fields).WithError(aggErr).Warn("post-CI aggregation failed")
+		} else {
+			log.WithFields(fields).WithField("aggregationId", agg.ID.String()).Info("post-CI aggregation succeeded")
+		}
+	}
+
+	return review, nil
+}
+
+// RequestHumanApproval sets a review to pending_human status and broadcasts
+// an event so IM/UI can notify the appropriate reviewer.
+func (s *ReviewService) RequestHumanApproval(ctx context.Context, reviewID uuid.UUID) error {
+	review, err := s.reviews.GetByID(ctx, reviewID)
+	if err != nil {
+		return ErrReviewNotFound
+	}
+
+	task, err := s.tasks.GetByID(ctx, review.TaskID)
+	if err != nil {
+		return ErrReviewTaskNotFound
+	}
+
+	if err := s.reviews.UpdateStatus(ctx, reviewID, model.ReviewStatusPendingHuman); err != nil {
+		return fmt.Errorf("update review to pending_human: %w", err)
+	}
+
+	review.Status = model.ReviewStatusPendingHuman
+	fields := reviewLogFields(review, task)
+	log.WithFields(fields).Info("review set to pending_human")
+
+	s.broadcast(ws.EventReviewPendingHuman, task.ProjectID.String(), review.ToDTO())
+
+	if task.AssigneeID != nil && s.notifications != nil {
+		payload, _ := json.Marshal(review.ToDTO())
+		if _, err := s.notifications.Create(
+			ctx,
+			*task.AssigneeID,
+			model.NotificationTypeReviewCompleted,
+			"Human review requested",
+			fmt.Sprintf("Review %s for task %s requires human approval", review.ID.String(), task.Title),
+			string(payload),
+		); err != nil {
+			log.WithFields(fields).WithError(err).Warn("human approval notification failed")
+		}
+	}
+
+	return nil
+}
+
+// RouteFixRequest broadcasts an event with review findings formatted as fix
+// instructions for an active agent to pick up.
+func (s *ReviewService) RouteFixRequest(ctx context.Context, reviewID uuid.UUID) error {
+	review, err := s.reviews.GetByID(ctx, reviewID)
+	if err != nil {
+		return ErrReviewNotFound
+	}
+
+	task, err := s.tasks.GetByID(ctx, review.TaskID)
+	if err != nil {
+		return ErrReviewTaskNotFound
+	}
+
+	fixPayload := map[string]any{
+		"reviewId":       review.ID.String(),
+		"taskId":         task.ID.String(),
+		"recommendation": review.Recommendation,
+		"findings":       review.Findings,
+		"summary":        review.Summary,
+	}
+
+	fields := reviewLogFields(review, task)
+	log.WithFields(fields).Info("routing fix request to agent")
+
+	s.broadcast(ws.EventReviewFixRequested, task.ProjectID.String(), fixPayload)
+
+	return nil
 }
 
 var _ interface {
@@ -287,6 +444,10 @@ var _ interface {
 	Reject(context.Context, uuid.UUID, string, string) (*model.Review, error)
 	GetByID(context.Context, uuid.UUID) (*model.Review, error)
 	GetByTask(context.Context, uuid.UUID) ([]*model.Review, error)
+	ListAll(context.Context, string, string, int) ([]*model.Review, error)
+	IngestCIResult(context.Context, *model.CIReviewRequest) (*model.Review, error)
+	RequestHumanApproval(context.Context, uuid.UUID) error
+	RouteFixRequest(context.Context, uuid.UUID) error
 } = (*ReviewService)(nil)
 
 func (s *ReviewService) Approve(ctx context.Context, id uuid.UUID, comment string) (*model.Review, error) {
@@ -319,6 +480,10 @@ func (s *ReviewService) GetByID(ctx context.Context, id uuid.UUID) (*model.Revie
 
 func (s *ReviewService) GetByTask(ctx context.Context, taskID uuid.UUID) ([]*model.Review, error) {
 	return s.reviews.GetByTask(ctx, taskID)
+}
+
+func (s *ReviewService) ListAll(ctx context.Context, status, riskLevel string, limit int) ([]*model.Review, error) {
+	return s.reviews.ListAll(ctx, status, riskLevel, limit)
 }
 
 func (s *ReviewService) transitionTaskForReview(ctx context.Context, task *model.Task, targetStatus string) error {

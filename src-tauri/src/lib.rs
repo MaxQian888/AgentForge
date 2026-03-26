@@ -687,6 +687,74 @@ struct ShortcutRequest {
     event: String,
 }
 
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopNotificationRequest {
+    notification_id: String,
+    notification_type: String,
+    title: String,
+    body: String,
+    href: Option<String>,
+    created_at: String,
+    delivery_policy: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopNotificationResult {
+    notification_id: String,
+    status: String,
+}
+
+fn notification_outcome_event_type(status: &str) -> &'static str {
+    match status {
+        "suppressed" => "notification.suppressed",
+        "failed" => "notification.failed",
+        _ => "notification.delivered",
+    }
+}
+
+fn notification_outcome_payload(
+    request: &DesktopNotificationRequest,
+    status: &str,
+    error: Option<String>,
+) -> Value {
+    let mut payload = serde_json::Map::new();
+    payload.insert(
+        "notificationId".to_string(),
+        Value::String(request.notification_id.clone()),
+    );
+    payload.insert(
+        "notificationType".to_string(),
+        Value::String(request.notification_type.clone()),
+    );
+    payload.insert("title".to_string(), Value::String(request.title.clone()));
+    payload.insert("body".to_string(), Value::String(request.body.clone()));
+    payload.insert(
+        "href".to_string(),
+        request.href.clone().map(Value::String).unwrap_or(Value::Null),
+    );
+    payload.insert(
+        "createdAt".to_string(),
+        Value::String(request.created_at.clone()),
+    );
+    payload.insert(
+        "deliveryPolicy".to_string(),
+        request
+            .delivery_policy
+            .clone()
+            .map(Value::String)
+            .unwrap_or(Value::Null),
+    );
+    payload.insert("status".to_string(), Value::String(status.to_string()));
+
+    if let Some(error) = error {
+        payload.insert("error".to_string(), Value::String(error));
+    }
+
+    Value::Object(payload)
+}
+
 fn now_string() -> String {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -787,24 +855,65 @@ fn select_files<R: Runtime>(
 fn send_notification<R: Runtime>(
     app: AppHandle<R>,
     state: State<'_, DesktopRuntimeManager>,
-    title: String,
-    body: String,
-) -> Result<(), String> {
-    app.notification()
-        .builder()
-        .title(title.clone())
-        .body(body.clone())
-        .show()
-        .map_err(|error| error.to_string())?;
+    request: DesktopNotificationRequest,
+) -> Result<DesktopNotificationResult, String> {
+    let should_suppress = matches!(
+        request.delivery_policy.as_deref(),
+        Some("suppress_if_focused")
+    ) && app
+        .get_webview_window("main")
+        .and_then(|window| window.is_focused().ok())
+        .unwrap_or(false);
 
+    if should_suppress {
+        let status = "suppressed";
+        state.emit_system_event(
+            &app,
+            notification_outcome_event_type(status),
+            "notification",
+            None,
+            Some(notification_outcome_payload(&request, status, None)),
+        );
+        return Ok(DesktopNotificationResult {
+            notification_id: request.notification_id,
+            status: status.to_string(),
+        });
+    }
+
+    if let Err(error) = app
+        .notification()
+        .builder()
+        .title(request.title.clone())
+        .body(request.body.clone())
+        .show()
+    {
+        let message = error.to_string();
+        state.emit_system_event(
+            &app,
+            notification_outcome_event_type("failed"),
+            "notification",
+            None,
+            Some(notification_outcome_payload(
+                &request,
+                "failed",
+                Some(message.clone()),
+            )),
+        );
+        return Err(message);
+    }
+
+    let status = "delivered";
     state.emit_system_event(
         &app,
-        "notification.sent",
+        notification_outcome_event_type(status),
         "notification",
         None,
-        Some(json!({ "title": title, "body": body })),
+        Some(notification_outcome_payload(&request, status, None)),
     );
-    Ok(())
+    Ok(DesktopNotificationResult {
+        notification_id: request.notification_id,
+        status: status.to_string(),
+    })
 }
 
 #[tauri::command]
@@ -954,4 +1063,52 @@ pub fn run() {
         ])
         .run(tauri::generate_context!())
         .expect("error while running tauri application");
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn notification_outcome_payload_preserves_business_metadata() {
+        let request = DesktopNotificationRequest {
+            notification_id: "notification-1".to_string(),
+            notification_type: "task_progress_stalled".to_string(),
+            title: "Task stalled: Implement detector".to_string(),
+            body: "Task Implement detector is stalled.".to_string(),
+            href: Some("/project?id=project-1#task-task-1".to_string()),
+            created_at: "2026-03-26T10:00:00.000Z".to_string(),
+            delivery_policy: Some("always".to_string()),
+        };
+
+        assert_eq!(
+            notification_outcome_payload(&request, "delivered", None),
+            json!({
+                "notificationId": "notification-1",
+                "notificationType": "task_progress_stalled",
+                "title": "Task stalled: Implement detector",
+                "body": "Task Implement detector is stalled.",
+                "href": "/project?id=project-1#task-task-1",
+                "createdAt": "2026-03-26T10:00:00.000Z",
+                "deliveryPolicy": "always",
+                "status": "delivered",
+            })
+        );
+    }
+
+    #[test]
+    fn notification_outcome_event_type_maps_statuses() {
+        assert_eq!(
+            notification_outcome_event_type("delivered"),
+            "notification.delivered"
+        );
+        assert_eq!(
+            notification_outcome_event_type("suppressed"),
+            "notification.suppressed"
+        );
+        assert_eq!(
+            notification_outcome_event_type("failed"),
+            "notification.failed"
+        );
+    }
 }

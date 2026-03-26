@@ -13,7 +13,9 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
+import { Bot, Network } from "lucide-react";
 import { TaskReviewSection } from "@/components/review/task-review-section";
+import { StartTeamDialog } from "@/components/team/start-team-dialog";
 import { recommendTaskAssignees } from "@/lib/tasks/task-assignment";
 import { getTaskDependencyState } from "@/lib/tasks/task-dependencies";
 import { normalizePlanningInput } from "@/lib/tasks/task-planning";
@@ -71,6 +73,10 @@ export interface TaskDetailContentProps {
   onTaskDecompose?: (
     taskId: string
   ) => Promise<TaskDecompositionResult | null> | TaskDecompositionResult | null | void;
+  onSpawnAgent?: (
+    taskId: string,
+    memberId: string
+  ) => Promise<void> | void;
 }
 
 function formatProgressHealth(task: Task): string | null {
@@ -134,6 +140,7 @@ export function TaskDetailContent({
   onTaskAssign,
   onTaskStatusChange,
   onTaskDecompose,
+  onSpawnAgent,
 }: TaskDetailContentProps) {
   const initialDraft = getTaskDraft(task);
   const [title, setTitle] = useState(initialDraft.title);
@@ -148,6 +155,8 @@ export function TaskDetailContent({
   const [decompositionError, setDecompositionError] = useState<string | null>(null);
   const [generatedSubtasks, setGeneratedSubtasks] = useState<Task[]>([]);
   const [isDecomposing, setIsDecomposing] = useState(false);
+  const [teamDialogOpen, setTeamDialogOpen] = useState(false);
+  const [isSpawningAgent, setIsSpawningAgent] = useState(false);
   const recommendations = useMemo(
     () => recommendTaskAssignees(task, members, tasks, agents),
     [agents, members, task, tasks]
@@ -715,6 +724,44 @@ export function TaskDetailContent({
       <Separator />
 
       <TaskReviewSection taskId={task.id} />
+
+      {task.assigneeId &&
+        (task.status === "assigned" || task.status === "in_progress") ? (
+        <div className="flex flex-wrap gap-2">
+          <Button
+            type="button"
+            variant="outline"
+            disabled={!onSpawnAgent || isSpawningAgent}
+            onClick={async () => {
+              if (!onSpawnAgent || !task.assigneeId) return;
+              setIsSpawningAgent(true);
+              try {
+                await onSpawnAgent(task.id, task.assigneeId);
+              } finally {
+                setIsSpawningAgent(false);
+              }
+            }}
+          >
+            <Bot className="mr-2 size-4" />
+            {isSpawningAgent ? "Spawning..." : "Start Agent"}
+          </Button>
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => setTeamDialogOpen(true)}
+          >
+            <Network className="mr-2 size-4" />
+            Start Team
+          </Button>
+          <StartTeamDialog
+            taskId={task.id}
+            taskTitle={task.title}
+            memberId={task.assigneeId}
+            open={teamDialogOpen}
+            onOpenChange={setTeamDialogOpen}
+          />
+        </div>
+      ) : null}
 
       <Button
         type="button"

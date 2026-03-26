@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo } from "react";
 import Link from "next/link";
+import { useSearchParams } from "next/navigation";
 import { Bot, Network } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -13,6 +14,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { useAgentStore, type AgentStatus } from "@/lib/stores/agent-store";
 
@@ -26,13 +28,108 @@ const statusColors: Record<AgentStatus, string> = {
   budget_exceeded: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
 };
 
+function PoolDiagnostics({
+  pool,
+  agents,
+}: {
+  pool: import("@/lib/stores/agent-store").AgentPoolSummary;
+  agents: import("@/lib/stores/agent-store").Agent[];
+}) {
+  const reasonCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const entry of pool.queue ?? []) {
+      const reason = entry.reason || "unspecified";
+      counts[reason] = (counts[reason] ?? 0) + 1;
+    }
+    return counts;
+  }, [pool.queue]);
+
+  const statusCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    for (const agent of agents) {
+      counts[agent.status] = (counts[agent.status] ?? 0) + 1;
+    }
+    return counts;
+  }, [agents]);
+
+  const warmRatio =
+    pool.active > 0 ? Math.round(((pool.warm ?? 0) / pool.active) * 100) : 0;
+
+  return (
+    <Card>
+      <CardHeader className="pb-3">
+        <CardTitle className="text-base">Pool Diagnostics</CardTitle>
+        <CardDescription>
+          Runtime health, warm reuse, and queue analysis.
+        </CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="grid gap-4 sm:grid-cols-3">
+          <div className="rounded-md border p-3">
+            <p className="text-xs text-muted-foreground">Warm Reuse Ratio</p>
+            <p className="text-lg font-semibold">{warmRatio}%</p>
+            <p className="text-xs text-muted-foreground">
+              {pool.warm ?? 0} warm / {pool.active} active
+            </p>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-xs text-muted-foreground">Pool Health</p>
+            <p className="text-lg font-semibold">
+              {pool.degraded ? (
+                <span className="text-amber-600">Degraded</span>
+              ) : (
+                <span className="text-emerald-600">Healthy</span>
+              )}
+            </p>
+            <p className="text-xs text-muted-foreground">
+              {pool.available} slots available
+            </p>
+          </div>
+          <div className="rounded-md border p-3">
+            <p className="text-xs text-muted-foreground">Agent Distribution</p>
+            <div className="flex flex-wrap gap-1 mt-1">
+              {Object.entries(statusCounts).map(([status, count]) => (
+                <Badge key={status} variant="secondary" className="text-xs">
+                  {status}: {count}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        </div>
+        {Object.keys(reasonCounts).length > 0 && (
+          <div>
+            <p className="text-sm font-medium mb-2">Blocked / Queued Reasons</p>
+            <div className="flex flex-wrap gap-2">
+              {Object.entries(reasonCounts).map(([reason, count]) => (
+                <Badge key={reason} variant="outline">
+                  {reason}: {count}
+                </Badge>
+              ))}
+            </div>
+          </div>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function AgentsPage() {
+  const searchParams = useSearchParams();
   const { agents, fetchAgents, fetchPool, pool, loading } = useAgentStore();
+  const requestedMemberId = searchParams.get("member");
 
   useEffect(() => {
     fetchAgents();
     fetchPool();
   }, [fetchAgents, fetchPool]);
+
+  const visibleAgents = useMemo(
+    () =>
+      requestedMemberId
+        ? agents.filter((agent) => agent.memberId === requestedMemberId)
+        : agents,
+    [agents, requestedMemberId]
+  );
 
   return (
     <div className="flex flex-col gap-6">
@@ -84,6 +181,10 @@ export default function AgentsPage() {
         </div>
       ) : null}
 
+      {pool ? (
+        <PoolDiagnostics pool={pool} agents={agents} />
+      ) : null}
+
       {pool?.queue?.length ? (
         <div className="rounded-md border">
           <Table>
@@ -118,12 +219,14 @@ export default function AgentsPage() {
 
       {loading ? (
         <p className="text-muted-foreground">Loading agents...</p>
-      ) : agents.length === 0 ? (
+      ) : visibleAgents.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
             <Bot className="mx-auto mb-4 size-12 text-muted-foreground" />
             <p className="text-muted-foreground">
-              No agents running. Spawn an agent from a task to get started.
+              {requestedMemberId
+                ? "No agents match the selected team member."
+                : "No agents running. Spawn an agent from a task to get started."}
             </p>
           </CardContent>
         </Card>
@@ -142,7 +245,7 @@ export default function AgentsPage() {
               </TableRow>
             </TableHeader>
             <TableBody>
-              {agents.map((agent) => {
+              {visibleAgents.map((agent) => {
                 const costPct =
                   agent.budget > 0
                     ? (agent.cost / agent.budget) * 100

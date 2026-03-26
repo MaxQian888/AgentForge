@@ -9,6 +9,7 @@ Startup now resolves `IM_PLATFORM` through a bridge-local provider contract rath
 - provider id
 - supported transport modes
 - capability metadata consumed by health/control-plane/notify paths
+- rendering profile metadata consumed by delivery-plan resolution
 - optional provider-native extension declarations for richer message surfaces
 
 This keeps the current single-active-provider-per-process model intact while making future externalized IM providers or richer provider-specific capabilities easier to add without rewriting `main.go`.
@@ -104,12 +105,46 @@ Notifications received on `POST /im/notify` must include a `platform` field matc
 - matching platform without native structured support: fall back to plain text
 - mismatched platform: reject the notification request
 
+The canonical outbound delivery contract now accepts the same typed fields on direct compatibility HTTP and replayed control-plane deliveries:
+
+- `content`: plain-text fallback text
+- `structured`: shared structured payload
+- `native`: provider-native payload such as Feishu JSON/template cards
+- `replyTarget`: preserved asynchronous reply/update context
+- `metadata`: operator-visible delivery metadata such as `fallback_reason`, `delivery_method`, or `action_status`
+
+`POST /im/send`, `POST /im/notify`, and `/ws/im-bridge` replay now resolve those fields through the same delivery helper, so queued/replayed traffic no longer drops structured/native payloads or fallback metadata just because it crossed the control plane.
+
+Outbound delivery now resolves through a provider-aware rendering plan before transport execution. In practice this means:
+
+- provider descriptors declare rendering defaults such as supported text modes, structured rendering preference, and text length limits
+- shared delivery code chooses a rendering plan first, then executes provider transport APIs
+- Telegram can opt into MarkdownV2 through delivery metadata such as `text_format=markdown_v2`, while still falling back to plain text when formatted delivery is not requested or not supported
+- Feishu delayed-update and action-completion paths now build richer provider-native card messages through typed helpers instead of hand-assembling raw card JSON inside shared delivery code
+
+Interactive callbacks normalized into `/api/v1/im/action` now expect truthful backend outcomes instead of placeholder acknowledgements. The backend returns canonical action states such as:
+
+- `started`: the action launched a task/agent workflow
+- `completed`: the action finished synchronously, such as decomposition or review completion
+- `blocked`: the entity exists but is stale, already completed, or otherwise cannot transition
+- `failed`: the entity is missing, invalid, or the downstream workflow could not run
+
+The bridge preserves that status in `metadata.action_status` while still returning the user-facing `result` text through the original reply target.
+
 For Feishu specifically, the native payload surface now supports:
 
 - raw JSON interactive cards
 - template cards with `template_id`, optional `template_version_name`, and `template_variable`
+- provider-owned richer text/card builders for action completion and delayed-update content
 - delayed card updates through preserved callback token context when the originating reply target supports it
 - explicit `fallback_reason` reporting when delayed update cannot be used and the bridge has to fall back to a reply/send path
+
+For Telegram specifically, the rendering profile now supports:
+
+- plain-text delivery by default
+- optional MarkdownV2 delivery when the caller requests `text_format=markdown_v2`
+- provider-side escaping before `sendMessage` / `editMessageText`
+- segmented follow-up sends when a formatted update is too large to safely stay as a single in-place edit
 
 Compatibility `POST /im/send` and `POST /im/notify` deliveries are now protected with:
 
@@ -126,7 +161,7 @@ When `IM_CONTROL_SHARED_SECRET` is configured, unsigned or invalidly signed comp
 | Feishu | long connection | interactive cards + template cards | card action callback | immediate toast/reply, delayed card update, native fallback reason reporting | falls back to reply/send when native card send or delayed update cannot be used |
 | Slack | Socket Mode | Block Kit | interactive payloads via Socket Mode | thread reply, `response_url`, follow-up | falls back to plain text only if blocks cannot be rendered |
 | DingTalk | Stream mode | ActionCard planned, text fallback active | Stream card callback | session webhook, then direct send | structured notifications explicitly degrade to text today |
-| Telegram | long polling | inline keyboard | callback query | reply or in-place edit | card-like content maps to text plus inline keyboard |
+| Telegram | long polling | inline keyboard | callback query | reply or in-place edit | card-like content maps to text plus inline keyboard, and formatted text falls back to plain text when MarkdownV2 is not selected or safe |
 | Discord | outgoing webhook interactions | message components | `/interactions` message component payloads | deferred ack, follow-up, original-response edit | unsupported component cases return explicit ephemeral ack |
 
 ## Native Interaction Matrix
@@ -136,7 +171,7 @@ When `IM_CONTROL_SHARED_SECRET` is configured, unsigned or invalidly signed comp
 | Feishu | slash + mention | chat, message, callback token | `card.action.trigger` normalized into `/im/action` with delayed-update context | reply, native card send, or delayed card update |
 | Slack | slash + mention + interaction | channel, thread, `response_url` | block action and view submission normalized into `/im/action` | thread reply, `response_url`, follow-up |
 | DingTalk | mention + chatbot text | session webhook, conversation id, conversation type | card callback normalized when action reference is present | session webhook reply, conversation fallback |
-| Telegram | slash + mention | chat, message, topic | inline keyboard callback query normalized into `/im/action` | `sendMessage`, `editMessageText` |
+| Telegram | slash + mention | chat, message, topic | inline keyboard callback query normalized into `/im/action` | `sendMessage`, `editMessageText`, segmented follow-up sends for oversized formatted updates |
 | Discord | slash + component | channel, interaction token, original response | message component `custom_id` normalized into `/im/action` | deferred ack, follow-up webhook, original response patch |
 
 ## Rollout And Rollback
@@ -158,7 +193,7 @@ Recommended scoped validation after adapter changes:
 cd src-im-bridge
 go test ./platform/slack ./platform/feishu ./platform/telegram ./platform/discord ./platform/dingtalk -count=1
 go test ./core -run 'Test(ResolveReplyPlan_|DeliverText_|DeliverNative_|MetadataForPlatform_|StructuredMessageFallbackText|ReplyTarget_JSONRoundTrip|NativeMessage_)' -count=1
-go test ./client -run 'Test(HandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget|WithSource_NormalizesHeaderValue|WithPlatform_UsesTelegramMetadataSource)' -count=1
+go test ./client -run 'Test(HandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget|HandleIMAction_ParsesCanonicalActionOutcome|WithSource_NormalizesHeaderValue|WithPlatform_UsesTelegramMetadataSource)' -count=1
 go test ./notify -run 'TestReceiver_(ActionResponseUsesReplyTargetDelivery|HealthReportsNormalizedTelegramSourceAndCapabilities|FallsBackToStructuredTextWhenNativeStructuredSenderUnavailable|PrefersNativePayloadWhenPlatformSupportsIt|UsesDeferredNativeUpdateWhenFeishuReplyTargetSupportsIt|ReportsFallbackReasonWhenDeferredUpdateContextMissing|SuppressesDuplicateSignedCompatibilityDelivery|RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured)' -count=1
 go test ./cmd/bridge -run 'Test(SelectProvider_|SelectPlatform_|LookupPlatformDescriptor_|BridgeRuntimeControl_)' -count=1
 ```

@@ -1,0 +1,358 @@
+package service
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"strings"
+
+	"github.com/google/uuid"
+	"github.com/react-go-quick-starter/server/internal/model"
+)
+
+type IMActionExecutor interface {
+	Execute(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error)
+}
+
+type IMActionExecutorFunc func(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error)
+
+func (fn IMActionExecutorFunc) Execute(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error) {
+	return fn(ctx, req)
+}
+
+type IMActionTaskDispatcher interface {
+	Assign(ctx context.Context, taskID uuid.UUID, req *model.AssignRequest) (*model.TaskDispatchResponse, error)
+	Spawn(ctx context.Context, input DispatchSpawnInput) (*model.TaskDispatchResponse, error)
+}
+
+type IMActionTaskDecomposer interface {
+	Decompose(ctx context.Context, taskID uuid.UUID) (*model.TaskDecompositionResponse, error)
+}
+
+type IMActionReviewer interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*model.Review, error)
+	Approve(ctx context.Context, id uuid.UUID, comment string) (*model.Review, error)
+	Complete(ctx context.Context, id uuid.UUID, req *model.CompleteReviewRequest) (*model.Review, error)
+	RouteFixRequest(ctx context.Context, id uuid.UUID) error
+}
+
+type BackendIMActionExecutor struct {
+	dispatcher IMActionTaskDispatcher
+	decomposer IMActionTaskDecomposer
+	reviewer   IMActionReviewer
+}
+
+func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IMActionTaskDecomposer, reviewer IMActionReviewer) *BackendIMActionExecutor {
+	return &BackendIMActionExecutor{
+		dispatcher: dispatcher,
+		decomposer: decomposer,
+		reviewer:   reviewer,
+	}
+}
+
+func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error) {
+	if req == nil {
+		return nil, nil
+	}
+
+	switch strings.TrimSpace(req.Action) {
+	case "assign-agent":
+		return e.executeAssignAgent(ctx, req), nil
+	case "decompose":
+		return e.executeDecompose(ctx, req), nil
+	case "approve":
+		return e.executeReviewAction(ctx, req, model.ReviewRecommendationApprove), nil
+	case "request-changes":
+		return e.executeReviewAction(ctx, req, model.ReviewRecommendationRequestChanges), nil
+	default:
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unknown action: %s", req.Action), false), nil
+	}
+}
+
+func (e *BackendIMActionExecutor) executeAssignAgent(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	taskID, err := parseIMEntityUUID(req.EntityID)
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Invalid task identifier.", false)
+	}
+	if e.dispatcher == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Task dispatch workflow is unavailable.", false)
+	}
+
+	metadata := cloneStringMap(req.Metadata)
+	var result *model.TaskDispatchResponse
+	assigneeID := firstMetadataValue(metadata, "assigneeId", "assignee_id", "memberId", "member_id")
+	if assigneeID != "" {
+		assignReq := &model.AssignRequest{
+			AssigneeID:   assigneeID,
+			AssigneeType: firstNonEmptyMetadata(metadata, model.MemberTypeAgent, "assigneeType", "assignee_type"),
+		}
+		result, err = e.dispatcher.Assign(ctx, taskID, assignReq)
+	} else {
+		result, err = e.dispatcher.Spawn(ctx, DispatchSpawnInput{TaskID: taskID})
+	}
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Agent dispatch failed: %s", err.Error()), false)
+	}
+	if result == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Agent dispatch returned no result.", false)
+	}
+
+	resp := newIMActionResponse(req, mapDispatchStatusToIMActionStatus(result.Dispatch.Status), describeDispatchOutcome(result), dispatchOutcomeSuccessful(result.Dispatch.Status))
+	resp.Dispatch = cloneDispatchOutcomePtr(&result.Dispatch)
+	if result.Task.ID != "" {
+		task := result.Task
+		resp.Task = &task
+	}
+	return resp
+}
+
+func (e *BackendIMActionExecutor) executeDecompose(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	taskID, err := parseIMEntityUUID(req.EntityID)
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Invalid task identifier.", false)
+	}
+	if e.decomposer == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Task decomposition workflow is unavailable.", false)
+	}
+
+	result, err := e.decomposer.Decompose(ctx, taskID)
+	if err != nil {
+		switch {
+		case errors.Is(err, ErrTaskAlreadyDecomposed):
+			return newIMActionResponse(req, model.IMActionStatusBlocked, "Task already has child tasks and cannot be decomposed again.", false)
+		case errors.Is(err, ErrTaskNotFound):
+			return newIMActionResponse(req, model.IMActionStatusFailed, "Task not found.", false)
+		default:
+			return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Task decomposition failed: %s", err.Error()), false)
+		}
+	}
+	if result == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Task decomposition returned no result.", false)
+	}
+
+	resp := newIMActionResponse(req, model.IMActionStatusCompleted, fmt.Sprintf("Task %s was decomposed into %d subtasks.", result.ParentTask.ID, len(result.Subtasks)), true)
+	resp.Task = cloneTaskDTOPtr(&result.ParentTask)
+	resp.Decomposition = cloneTaskDecompositionResponse(result)
+	return resp
+}
+
+func (e *BackendIMActionExecutor) executeReviewAction(ctx context.Context, req *model.IMActionRequest, recommendation string) *model.IMActionResponse {
+	reviewID, err := parseIMEntityUUID(req.EntityID)
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Invalid review identifier.", false)
+	}
+	if e.reviewer == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Review workflow is unavailable.", false)
+	}
+
+	review, err := e.reviewer.GetByID(ctx, reviewID)
+	if err != nil || review == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Review not found.", false)
+	}
+	if reason := reviewActionBlockReason(review, recommendation); reason != "" {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, reason, false)
+	}
+
+	var updated *model.Review
+	switch recommendation {
+	case model.ReviewRecommendationApprove:
+		updated, err = e.reviewer.Approve(ctx, reviewID, firstMetadataValue(req.Metadata, "comment", "notes"))
+	case model.ReviewRecommendationRequestChanges:
+		updated, err = e.reviewer.Complete(ctx, reviewID, &model.CompleteReviewRequest{
+			RiskLevel:      model.ReviewRiskLevelMedium,
+			Recommendation: model.ReviewRecommendationRequestChanges,
+			Summary:        firstMetadataValue(req.Metadata, "comment", "notes"),
+		})
+		if err == nil {
+			if routeErr := e.reviewer.RouteFixRequest(ctx, reviewID); routeErr != nil {
+				metadata := cloneStringMap(req.Metadata)
+				metadata["route_fix_error"] = routeErr.Error()
+				resp := newIMActionResponse(req, model.IMActionStatusCompleted, fmt.Sprintf("Review %s marked as request_changes, but fix routing failed: %s", reviewID.String(), routeErr.Error()), true)
+				resp.Metadata = metadata
+				if updated != nil {
+					dto := updated.ToDTO()
+					resp.Review = &dto
+				}
+				return resp
+			}
+		}
+	default:
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unsupported review action: %s", recommendation), false)
+	}
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Review action failed: %s", err.Error()), false)
+	}
+	if updated == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Review action returned no result.", false)
+	}
+
+	resp := newIMActionResponse(req, model.IMActionStatusCompleted, describeReviewOutcome(updated), true)
+	dto := updated.ToDTO()
+	resp.Review = &dto
+	return resp
+}
+
+func newIMActionResponse(req *model.IMActionRequest, status string, message string, success bool) *model.IMActionResponse {
+	metadata := cloneStringMap(nil)
+	if req != nil {
+		metadata = cloneStringMap(req.Metadata)
+	}
+	if metadata == nil {
+		metadata = map[string]string{}
+	}
+	if strings.TrimSpace(status) != "" {
+		metadata["action_status"] = strings.TrimSpace(status)
+	}
+	return &model.IMActionResponse{
+		Result:      strings.TrimSpace(message),
+		Success:     success,
+		Status:      strings.TrimSpace(status),
+		ReplyTarget: cloneReplyTarget(req.ReplyTarget),
+		Metadata:    metadata,
+	}
+}
+
+func describeDispatchOutcome(result *model.TaskDispatchResponse) string {
+	if result == nil {
+		return "Agent dispatch did not return a result."
+	}
+	taskID := strings.TrimSpace(result.Task.ID)
+	switch result.Dispatch.Status {
+	case model.DispatchStatusStarted:
+		if result.Dispatch.Run != nil {
+			return fmt.Sprintf("Task %s was dispatched and agent run %s started.", taskID, result.Dispatch.Run.ID)
+		}
+		return fmt.Sprintf("Task %s was dispatched to an agent.", taskID)
+	case model.DispatchStatusQueued:
+		if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
+			return fmt.Sprintf("Task %s entered the agent queue: %s", taskID, reason)
+		}
+		return fmt.Sprintf("Task %s entered the agent queue.", taskID)
+	case model.DispatchStatusBlocked:
+		if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
+			return fmt.Sprintf("Task %s could not start an agent: %s", taskID, reason)
+		}
+		return fmt.Sprintf("Task %s could not start an agent.", taskID)
+	case model.DispatchStatusSkipped:
+		if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
+			return fmt.Sprintf("Task %s dispatch was skipped: %s", taskID, reason)
+		}
+		return fmt.Sprintf("Task %s dispatch was skipped.", taskID)
+	default:
+		return fmt.Sprintf("Task %s dispatch returned status %s.", taskID, result.Dispatch.Status)
+	}
+}
+
+func describeReviewOutcome(review *model.Review) string {
+	if review == nil {
+		return "Review action completed."
+	}
+	switch review.Recommendation {
+	case model.ReviewRecommendationApprove:
+		return fmt.Sprintf("Review %s was approved.", review.ID.String())
+	case model.ReviewRecommendationRequestChanges:
+		return fmt.Sprintf("Review %s now requires changes.", review.ID.String())
+	default:
+		return fmt.Sprintf("Review %s updated to %s.", review.ID.String(), review.Recommendation)
+	}
+}
+
+func reviewActionBlockReason(review *model.Review, recommendation string) string {
+	if review == nil {
+		return "Review not found."
+	}
+	if review.Status == model.ReviewStatusCompleted {
+		if review.Recommendation == recommendation {
+			return fmt.Sprintf("Review %s is already completed as %s.", review.ID.String(), review.Recommendation)
+		}
+		return fmt.Sprintf("Review %s is already completed as %s and cannot transition to %s.", review.ID.String(), review.Recommendation, recommendation)
+	}
+	if review.Status == model.ReviewStatusFailed {
+		return fmt.Sprintf("Review %s is in failed state and cannot accept interactive updates.", review.ID.String())
+	}
+	return ""
+}
+
+func parseIMEntityUUID(raw string) (uuid.UUID, error) {
+	return uuid.Parse(strings.TrimSpace(raw))
+}
+
+func mapDispatchStatusToIMActionStatus(status string) string {
+	switch strings.TrimSpace(status) {
+	case model.DispatchStatusStarted, model.DispatchStatusQueued:
+		return model.IMActionStatusStarted
+	case model.DispatchStatusBlocked:
+		return model.IMActionStatusBlocked
+	case model.DispatchStatusSkipped:
+		return model.IMActionStatusCompleted
+	default:
+		return model.IMActionStatusFailed
+	}
+}
+
+func dispatchOutcomeSuccessful(status string) bool {
+	switch strings.TrimSpace(status) {
+	case model.DispatchStatusStarted, model.DispatchStatusQueued, model.DispatchStatusSkipped:
+		return true
+	default:
+		return false
+	}
+}
+
+func firstMetadataValue(metadata map[string]string, keys ...string) string {
+	for _, key := range keys {
+		if metadata == nil {
+			continue
+		}
+		if value := strings.TrimSpace(metadata[key]); value != "" {
+			return value
+		}
+	}
+	return ""
+}
+
+func firstNonEmptyMetadata(metadata map[string]string, fallback string, keys ...string) string {
+	if value := firstMetadataValue(metadata, keys...); value != "" {
+		return value
+	}
+	return strings.TrimSpace(fallback)
+}
+
+func cloneTaskDTOPtr(task *model.TaskDTO) *model.TaskDTO {
+	if task == nil {
+		return nil
+	}
+	clone := *task
+	clone.Labels = append([]string(nil), task.Labels...)
+	clone.BlockedBy = append([]string(nil), task.BlockedBy...)
+	return &clone
+}
+
+func cloneDispatchOutcomePtr(outcome *model.DispatchOutcome) *model.DispatchOutcome {
+	if outcome == nil {
+		return nil
+	}
+	clone := *outcome
+	if outcome.Run != nil {
+		runClone := *outcome.Run
+		clone.Run = &runClone
+	}
+	if outcome.Queue != nil {
+		queueClone := *outcome.Queue
+		clone.Queue = &queueClone
+	}
+	return &clone
+}
+
+func cloneTaskDecompositionResponse(result *model.TaskDecompositionResponse) *model.TaskDecompositionResponse {
+	if result == nil {
+		return nil
+	}
+	clone := *result
+	parentClone := result.ParentTask
+	clone.ParentTask = parentClone
+	if result.Subtasks != nil {
+		clone.Subtasks = append([]model.TaskDTO(nil), result.Subtasks...)
+	}
+	return &clone
+}

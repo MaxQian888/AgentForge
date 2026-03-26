@@ -39,13 +39,7 @@ type activeProvider struct {
 }
 
 func (d providerDescriptor) normalizedMetadata() core.PlatformMetadata {
-	metadata := d.Metadata
-	if normalized := core.NormalizePlatformName(metadata.Source); normalized != "" {
-		metadata.Source = normalized
-	} else {
-		metadata.Source = core.NormalizePlatformName(d.ID)
-	}
-	return metadata
+	return core.NormalizeMetadata(d.Metadata, d.ID)
 }
 
 func (d providerDescriptor) supportsTransport(mode string) bool {

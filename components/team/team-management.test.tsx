@@ -135,8 +135,10 @@ describe("TeamManagement", () => {
     expect(screen.getByText("Review Bot")).toBeInTheDocument();
     expect(screen.getByText("Human")).toBeInTheDocument();
     expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getAllByText("Active").length).toBeGreaterThan(0);
     expect(screen.getByText("frontend-developer")).toBeInTheDocument();
     expect(screen.getByText("Ready")).toBeInTheDocument();
+    expect(screen.getByText("Last activity 2026-03-24 09:00 UTC")).toBeInTheDocument();
 
     await user.selectOptions(screen.getByLabelText("Project"), "project-2");
     expect(onProjectChange).toHaveBeenCalledWith("project-2");

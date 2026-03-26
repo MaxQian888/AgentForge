@@ -43,7 +43,7 @@ func NewStub(port string) *Stub {
 func (s *Stub) Name() string { return "telegram-stub" }
 
 func (s *Stub) Metadata() core.PlatformMetadata {
-	return core.PlatformMetadata{
+	return core.NormalizeMetadata(core.PlatformMetadata{
 		Source: "telegram",
 		Capabilities: core.PlatformCapabilities{
 			CommandSurface:     core.CommandSurfaceMixed,
@@ -58,7 +58,7 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 			SupportsSlashCommands: true,
 			SupportsMentions:      true,
 		},
-	}
+	}, "telegram")
 }
 
 func (s *Stub) ReplyContextFromTarget(target *core.ReplyTarget) any {

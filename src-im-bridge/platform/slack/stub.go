@@ -44,7 +44,7 @@ func NewStub(port string) *Stub {
 func (s *Stub) Name() string { return "slack-stub" }
 
 func (s *Stub) Metadata() core.PlatformMetadata {
-	return core.PlatformMetadata{
+	return core.NormalizeMetadata(core.PlatformMetadata{
 		Source: "slack",
 		Capabilities: core.PlatformCapabilities{
 			CommandSurface:        core.CommandSurfaceMixed,
@@ -55,7 +55,7 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 			SupportsSlashCommands: true,
 			SupportsMentions:      true,
 		},
-	}
+	}, "slack")
 }
 
 func (s *Stub) ReplyContextFromTarget(target *core.ReplyTarget) any {

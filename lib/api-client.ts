@@ -96,6 +96,22 @@ export function createApiClient(baseUrl: string) {
       });
     },
 
+    patch<T>(
+      path: string,
+      body: unknown,
+      opts?: RequestOptions & { token?: string }
+    ) {
+      const { token, ...rest } = opts ?? {};
+      return request<T>(baseUrl, path, {
+        ...rest,
+        method: "PATCH",
+        body: JSON.stringify(body),
+        headers: token
+          ? { Authorization: `Bearer ${token}` }
+          : undefined,
+      });
+    },
+
     delete<T>(path: string, opts?: RequestOptions & { token?: string }) {
       const { token, ...rest } = opts ?? {};
       return request<T>(baseUrl, path, {

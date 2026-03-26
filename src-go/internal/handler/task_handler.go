@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"strconv"
@@ -16,12 +17,22 @@ import (
 	"github.com/react-go-quick-starter/server/internal/ws"
 )
 
+type taskWorkflowEvaluator interface {
+	EvaluateTransition(ctx context.Context, task *model.Task, fromStatus, toStatus string) []service.TriggerResult
+}
+
+type taskRecommender interface {
+	Recommend(ctx context.Context, taskID uuid.UUID) ([]service.AssignmentCandidate, error)
+}
+
 type TaskHandler struct {
-	repo       taskRepository
-	decomposer taskDecomposer
-	progress   taskProgressRecorder
-	dispatcher taskDispatcher
-	hub        *ws.Hub
+	repo        taskRepository
+	decomposer  taskDecomposer
+	progress    taskProgressRecorder
+	dispatcher  taskDispatcher
+	recommender taskRecommender
+	hub         *ws.Hub
+	workflowSvc taskWorkflowEvaluator
 }
 
 type taskDecomposer interface {
@@ -68,6 +79,34 @@ func (h *TaskHandler) WithDispatcher(dispatcher taskDispatcher) *TaskHandler {
 func (h *TaskHandler) WithHub(hub *ws.Hub) *TaskHandler {
 	h.hub = hub
 	return h
+}
+
+func (h *TaskHandler) WithWorkflowService(svc taskWorkflowEvaluator) *TaskHandler {
+	h.workflowSvc = svc
+	return h
+}
+
+func (h *TaskHandler) WithRecommender(rec taskRecommender) *TaskHandler {
+	h.recommender = rec
+	return h
+}
+
+func (h *TaskHandler) RecommendAssignee(c echo.Context) error {
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+	}
+	if h.recommender == nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "recommender unavailable"})
+	}
+	candidates, err := h.recommender.Recommend(c.Request().Context(), id)
+	if err != nil {
+		if strings.Contains(err.Error(), "fetch task") {
+			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "task not found"})
+		}
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to generate recommendations"})
+	}
+	return c.JSON(http.StatusOK, candidates)
 }
 
 func (h *TaskHandler) Create(c echo.Context) error {
@@ -160,6 +199,18 @@ func (h *TaskHandler) List(c echo.Context) error {
 		Page:       page,
 		Limit:      limit,
 		Sort:       c.QueryParam("sort"),
+	}
+	if rawFilters := strings.TrimSpace(c.QueryParam("customFieldFilters")); rawFilters != "" {
+		if err := json.Unmarshal([]byte(rawFilters), &q.CustomFieldFilters); err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid customFieldFilters query"})
+		}
+	}
+	if rawSort := strings.TrimSpace(c.QueryParam("customFieldSort")); rawSort != "" {
+		var customSort model.TaskCustomFieldSort
+		if err := json.Unmarshal([]byte(rawSort), &customSort); err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid customFieldSort query"})
+		}
+		q.CustomFieldSort = &customSort
 	}
 
 	tasks, total, err := h.repo.List(c.Request().Context(), projectID, q)
@@ -258,6 +309,13 @@ func (h *TaskHandler) Transition(c echo.Context) error {
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
+
+	// Capture previous status before transition for workflow evaluation.
+	var previousStatus string
+	if preTask, fetchErr := h.repo.GetByID(c.Request().Context(), id); fetchErr == nil {
+		previousStatus = preTask.Status
+	}
+
 	if err := h.repo.TransitionStatus(c.Request().Context(), id, req.Status); err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
 	}
@@ -285,6 +343,12 @@ func (h *TaskHandler) Transition(c echo.Context) error {
 		h.broadcastTaskUpdated(dependent)
 		h.broadcastDependencyResolved(dependent, task)
 	}
+
+	// Evaluate workflow triggers after successful transition.
+	if h.workflowSvc != nil && previousStatus != "" {
+		go h.workflowSvc.EvaluateTransition(context.Background(), task, previousStatus, req.Status)
+	}
+
 	return c.JSON(http.StatusOK, task.ToDTO())
 }
 

@@ -342,6 +342,21 @@ func TestLive_SendReplyAndUpdateNativePayloads(t *testing.T) {
 	}
 }
 
+func TestLive_BuildNativeTextMessageReturnsMarkdownCard(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	message, err := live.BuildNativeTextMessage("AgentForge Update", "hello **world**")
+	if err != nil {
+		t.Fatalf("BuildNativeTextMessage error: %v", err)
+	}
+	if message == nil || message.FeishuCard == nil || message.FeishuCard.Mode != core.FeishuCardModeJSON {
+		t.Fatalf("message = %+v", message)
+	}
+}
+
 type fakeEventRunner struct {
 	started           bool
 	stopped           bool

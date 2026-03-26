@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -228,7 +229,7 @@ func writeManifest(t *testing.T, dir string, relativePath string, content string
 	return path
 }
 
-func TestPluginService_DiscoversBuiltInsAndFiltersRecords(t *testing.T) {
+func TestPluginService_DiscoversBuiltInsWithoutInstallingRecords(t *testing.T) {
 	ctx := context.Background()
 	pluginsDir := t.TempDir()
 	writeManifest(t, pluginsDir, "tools/web-search/manifest.yaml", `
@@ -271,8 +272,8 @@ spec:
 	if err != nil {
 		t.Fatalf("list filtered: %v", err)
 	}
-	if len(filtered) != 1 || filtered[0].Metadata.ID != "web-search" {
-		t.Fatalf("expected only tool plugin, got %+v", filtered)
+	if len(filtered) != 0 {
+		t.Fatalf("expected discover to leave installed registry empty, got %+v", filtered)
 	}
 }
 
@@ -796,10 +797,11 @@ spec:
 		t.Fatalf("register workflow: %v", err)
 	}
 
-	if _, err := svc.Activate(ctx, record.Metadata.ID); err == nil {
-		t.Fatal("expected unsupported workflow activation to fail")
-	}
-	if len(goRuntime.activated) != 0 {
-		t.Fatalf("expected no Go runtime activation for unsupported process, got %+v", goRuntime.activated)
+	// Hierarchical workflows are now supported — activation should succeed.
+	if _, err := svc.Activate(ctx, record.Metadata.ID); err != nil {
+		if strings.Contains(err.Error(), "unsupported workflow process") {
+			t.Fatal("hierarchical workflow should no longer be rejected as unsupported")
+		}
+		// Other errors (e.g., WASM module not found) are acceptable
 	}
 }

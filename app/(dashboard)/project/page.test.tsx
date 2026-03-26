@@ -1,6 +1,10 @@
 import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import ProjectPage from "./page";
+import {
+  createDefaultTaskWorkspaceFilters,
+  useTaskWorkspaceStore,
+} from "@/lib/stores/task-workspace-store";
 
 const replace = jest.fn();
 const fetchTasks = jest.fn();
@@ -10,6 +14,10 @@ const assignTask = jest.fn();
 const fetchAgents = jest.fn();
 const fetchMembers = jest.fn();
 const capturedMembersRefs: unknown[][] = [];
+const searchParamsState = {
+  id: "project-1",
+  member: null as string | null,
+};
 
 const taskState = {
   loading: false,
@@ -57,7 +65,7 @@ const projectState = {
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ replace }),
   useSearchParams: () => ({
-    get: (key: string) => (key === "id" ? "project-1" : null),
+    get: (key: string) => (key === "id" ? searchParamsState.id : key === "member" ? searchParamsState.member : null),
   }),
 }));
 
@@ -103,6 +111,18 @@ describe("ProjectPage", () => {
     fetchAgents.mockReset();
     fetchMembers.mockReset();
     capturedMembersRefs.length = 0;
+    searchParamsState.id = "project-1";
+    searchParamsState.member = null;
+    useTaskWorkspaceStore.setState({
+      viewMode: "board",
+      filters: createDefaultTaskWorkspaceFilters(),
+      selectedTaskId: null,
+      contextRailDisplay: "expanded",
+      displayOptions: {
+        density: "comfortable",
+        showDescriptions: true,
+      },
+    });
   });
 
   it("keeps project-scoped members referentially stable while member data is still empty", async () => {
@@ -125,5 +145,15 @@ describe("ProjectPage", () => {
     expect(
       screen.getByText("Capture the task goal and initial priority before the workspace fills in the rest.")
     ).toBeInTheDocument();
+  });
+
+  it("consumes the member query parameter into the shared task workspace assignee filter", async () => {
+    searchParamsState.member = "member-1";
+
+    render(<ProjectPage />);
+
+    await act(async () => undefined);
+
+    expect(useTaskWorkspaceStore.getState().filters.assigneeId).toBe("member-1");
   });
 });

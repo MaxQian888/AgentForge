@@ -36,7 +36,7 @@ func SelectStructuredRenderer(metadata PlatformMetadata, message *StructuredMess
 		return StructuredSurfaceNone
 	}
 	switch metadata.Capabilities.StructuredSurface {
-	case StructuredSurfaceBlocks, StructuredSurfaceCards, StructuredSurfaceInlineKeyboard:
+	case StructuredSurfaceBlocks, StructuredSurfaceCards, StructuredSurfaceInlineKeyboard, StructuredSurfaceActionCard, StructuredSurfaceComponents:
 		return metadata.Capabilities.StructuredSurface
 	default:
 		if metadata.Capabilities.SupportsRichMessages {

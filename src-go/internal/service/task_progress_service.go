@@ -683,6 +683,15 @@ func (n *ControlPlaneTaskProgressIMNotifier) NotifyTaskProgress(ctx context.Cont
 		TaskID:  task.ID.String(),
 		Kind:    IMDeliveryKindProgress,
 		Content: fmt.Sprintf("%s\n%s\nTask: %s\nStatus: %s\nHealth: %s", title, body, task.Title, task.Status, snapshot.HealthStatus),
+		Structured: &model.IMStructuredMessage{
+			Title: title,
+			Body:  body,
+			Fields: []model.IMStructuredField{
+				{Label: "Task", Value: task.Title},
+				{Label: "Status", Value: task.Status},
+				{Label: "Health", Value: snapshot.HealthStatus},
+			},
+		},
 	})
 	fields := taskProgressLogFields(task, snapshot)
 	fields["queued"] = queued

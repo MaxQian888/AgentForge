@@ -22,6 +22,21 @@ type BridgeIntentClassifier interface {
 	ClassifyIntent(ctx context.Context, req ClassifyIntentRequest) (*ClassifyIntentResponse, error)
 }
 
+// IMTaskCreator creates tasks from IM command input.
+type IMTaskCreator interface {
+	Create(ctx context.Context, task *model.Task) error
+}
+
+// IMAgentSpawner spawns agent runs from IM command input.
+type IMAgentSpawner interface {
+	Spawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error)
+}
+
+// IMReviewTrigger triggers code reviews from IM command input.
+type IMReviewTrigger interface {
+	Trigger(ctx context.Context, req *model.TriggerReviewRequest) (*model.Review, error)
+}
+
 // ClassifyIntentRequest is sent to the TS Bridge for NLU.
 type ClassifyIntentRequest struct {
 	Text      string `json:"text"`
@@ -48,6 +63,10 @@ type IMService struct {
 	logger         *logrus.Logger
 	controlPlane   *IMControlPlane
 	deliverySecret string
+	taskCreator    IMTaskCreator
+	agentSpawner   IMAgentSpawner
+	reviewTrigger  IMReviewTrigger
+	actionExecutor IMActionExecutor
 }
 
 // NewIMService creates an IM service with the given notify URL and platform.
@@ -73,6 +92,27 @@ func (s *IMService) SetClassifier(c BridgeIntentClassifier) {
 
 func (s *IMService) SetDeliverySecret(secret string) {
 	s.deliverySecret = strings.TrimSpace(secret)
+}
+
+// SetTaskCreator sets the optional task creation dependency for IM commands.
+func (s *IMService) SetTaskCreator(tc IMTaskCreator) {
+	s.taskCreator = tc
+}
+
+// SetAgentSpawner sets the optional agent spawner dependency for IM commands.
+func (s *IMService) SetAgentSpawner(sp IMAgentSpawner) {
+	s.agentSpawner = sp
+}
+
+// SetReviewTrigger sets the optional review trigger dependency for IM commands.
+func (s *IMService) SetReviewTrigger(rt IMReviewTrigger) {
+	s.reviewTrigger = rt
+}
+
+// SetActionExecutor sets the optional backend action execution seam for
+// interactive IM callbacks.
+func (s *IMService) SetActionExecutor(executor IMActionExecutor) {
+	s.actionExecutor = executor
 }
 
 // HandleIncoming processes a natural language IM message.
@@ -132,7 +172,7 @@ func (s *IMService) HandleIncoming(ctx context.Context, req *model.IMMessageRequ
 }
 
 // HandleCommand dispatches a structured slash command to the appropriate handler.
-func (s *IMService) HandleCommand(_ context.Context, req *model.IMCommandRequest) (*model.IMCommandResponse, error) {
+func (s *IMService) HandleCommand(ctx context.Context, req *model.IMCommandRequest) (*model.IMCommandResponse, error) {
 	entry := s.logger.WithFields(logrus.Fields{
 		"platform":  req.Platform,
 		"channelId": req.ChannelID,
@@ -145,14 +185,11 @@ func (s *IMService) HandleCommand(_ context.Context, req *model.IMCommandRequest
 	// webhook-based IM platforms that POST commands here directly.
 	switch req.Command {
 	case "task":
-		entry.Info("IM command acknowledged")
-		return &model.IMCommandResponse{Result: "Task command received. Use the IM Bridge for full execution.", Success: true}, nil
+		return s.handleTaskCommand(ctx, entry, req)
 	case "agent":
-		entry.Info("IM command acknowledged")
-		return &model.IMCommandResponse{Result: "Agent command received. Use the IM Bridge for full execution.", Success: true}, nil
+		return s.handleAgentCommand(ctx, entry, req)
 	case "review":
-		entry.Info("IM command acknowledged")
-		return &model.IMCommandResponse{Result: "Review command received. Use the IM Bridge for full execution.", Success: true}, nil
+		return s.handleReviewCommand(ctx, entry, req)
 	case "sprint":
 		entry.Info("IM command acknowledged")
 		return &model.IMCommandResponse{Result: "Sprint command received. Use the IM Bridge for full execution.", Success: true}, nil
@@ -209,7 +246,7 @@ func (s *IMService) HandleIntent(ctx context.Context, req *model.IMIntentRequest
 }
 
 // HandleAction processes a button click action from an IM card.
-func (s *IMService) HandleAction(_ context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error) {
+func (s *IMService) HandleAction(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error) {
 	entry := s.logger.WithFields(logrus.Fields{
 		"platform":  req.Platform,
 		"channelId": req.ChannelID,
@@ -219,51 +256,27 @@ func (s *IMService) HandleAction(_ context.Context, req *model.IMActionRequest) 
 		"entityId":  req.EntityID,
 	})
 
-	// Actions follow the format "assign-agent", "decompose", "approve", etc.
-	// The IM Bridge handles the actual API calls; this endpoint provides a
-	// backend-side hook for direct webhook callbacks from IM platforms.
-	switch req.Action {
-	case "assign-agent":
-		entry.Info("IM action acknowledged")
-		return &model.IMActionResponse{
-			Result:      fmt.Sprintf("Agent assignment requested for entity %s", req.EntityID),
-			Success:     true,
-			ReplyTarget: req.ReplyTarget,
-			Metadata:    cloneStringMap(req.Metadata),
-		}, nil
-	case "decompose":
-		entry.Info("IM action acknowledged")
-		return &model.IMActionResponse{
-			Result:      fmt.Sprintf("Task decomposition requested for %s", req.EntityID),
-			Success:     true,
-			ReplyTarget: req.ReplyTarget,
-			Metadata:    cloneStringMap(req.Metadata),
-		}, nil
-	case "approve":
-		entry.Info("IM action acknowledged")
-		return &model.IMActionResponse{
-			Result:      fmt.Sprintf("Approval recorded for %s", req.EntityID),
-			Success:     true,
-			ReplyTarget: req.ReplyTarget,
-			Metadata:    cloneStringMap(req.Metadata),
-		}, nil
-	case "request-changes":
-		entry.Info("IM action acknowledged")
-		return &model.IMActionResponse{
-			Result:      fmt.Sprintf("Change request recorded for %s", req.EntityID),
-			Success:     true,
-			ReplyTarget: req.ReplyTarget,
-			Metadata:    cloneStringMap(req.Metadata),
-		}, nil
-	default:
-		entry.Warn("IM action rejected: unknown action")
-		return &model.IMActionResponse{
-			Result:      fmt.Sprintf("Unknown action: %s", req.Action),
-			Success:     false,
-			ReplyTarget: req.ReplyTarget,
-			Metadata:    cloneStringMap(req.Metadata),
-		}, nil
+	if s.actionExecutor != nil {
+		resp, err := s.actionExecutor.Execute(ctx, req)
+		if err != nil {
+			entry.WithError(err).Error("IM action execution failed")
+			return nil, err
+		}
+		if resp != nil {
+			entry.WithField("status", resp.Status).Info("IM action executed")
+			return resp, nil
+		}
 	}
+
+	// Executor was wired but returned nil — action not recognized.
+	entry.Warn("IM action not handled by executor")
+	return &model.IMActionResponse{
+		Result:      fmt.Sprintf("Action %q not handled by executor.", req.Action),
+		Success:     false,
+		Status:      model.IMActionStatusFailed,
+		ReplyTarget: req.ReplyTarget,
+		Metadata:    cloneStringMap(req.Metadata),
+	}, nil
 }
 
 // Send delivers a message to an IM channel via the IM Bridge notification receiver.
@@ -285,10 +298,19 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 			ProjectID:      req.ProjectID,
 			Kind:           IMDeliveryKindSend,
 			Content:        req.Text,
+			Structured:     req.Structured,
+			Native:         req.Native,
+			Metadata:       req.Metadata,
 			TargetChatID:   req.ChannelID,
 			ReplyTarget:    req.ReplyTarget,
 		})
 		if err == nil {
+			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
+				ChannelID: req.ChannelID,
+				Platform:  req.Platform,
+				EventType: "message.send",
+				Status:    model.IMDeliveryStatusDelivered,
+			})
 			entry.Info("IM send queued via control plane")
 			return nil
 		}
@@ -296,6 +318,15 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 	}
 
 	if s.notifyURL == "" {
+		if s.controlPlane != nil {
+			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
+				ChannelID:     req.ChannelID,
+				Platform:      req.Platform,
+				EventType:     "message.send",
+				Status:        model.IMDeliveryStatusFailed,
+				FailureReason: "notify URL not configured",
+			})
+		}
 		entry.Warn("IM send skipped: no notify URL configured")
 		return nil
 	}
@@ -304,6 +335,9 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 		"platform":    req.Platform,
 		"chat_id":     req.ChannelID,
 		"content":     req.Text,
+		"structured":  req.Structured,
+		"native":      req.Native,
+		"metadata":    req.Metadata,
 		"thread_id":   req.ThreadID,
 		"replyTarget": req.ReplyTarget,
 	}
@@ -321,14 +355,40 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
+		if s.controlPlane != nil {
+			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
+				ChannelID:     req.ChannelID,
+				Platform:      req.Platform,
+				EventType:     "message.send",
+				Status:        model.IMDeliveryStatusFailed,
+				FailureReason: err.Error(),
+			})
+		}
 		entry.WithError(err).Error("IM send compatibility HTTP failed")
 		return fmt.Errorf("IM send failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		if s.controlPlane != nil {
+			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
+				ChannelID:     req.ChannelID,
+				Platform:      req.Platform,
+				EventType:     "message.send",
+				Status:        model.IMDeliveryStatusFailed,
+				FailureReason: fmt.Sprintf("HTTP %d", resp.StatusCode),
+			})
+		}
 		entry.WithField("status", resp.StatusCode).Warn("IM send compatibility HTTP returned non-OK status")
 		return fmt.Errorf("IM send returned %d", resp.StatusCode)
+	}
+	if s.controlPlane != nil {
+		s.controlPlane.RecordDeliveryResult(model.IMDelivery{
+			ChannelID: req.ChannelID,
+			Platform:  req.Platform,
+			EventType: "message.send",
+			Status:    model.IMDeliveryStatusDelivered,
+		})
 	}
 	entry.WithField("status", resp.StatusCode).Info("IM send delivered via compatibility HTTP")
 	return nil
@@ -347,17 +407,26 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 	})
 
 	if s.controlPlane != nil {
-		content := strings.TrimSpace(strings.TrimSpace(req.Title) + "\n" + strings.TrimSpace(req.Body))
+		content := buildNotifyContent(req)
 		_, err := s.controlPlane.QueueDelivery(ctx, IMQueueDeliveryRequest{
 			TargetBridgeID: strings.TrimSpace(req.BridgeID),
 			Platform:       req.Platform,
 			ProjectID:      req.ProjectID,
 			Kind:           IMDeliveryKindNotify,
-			Content:        strings.TrimSpace(content),
+			Content:        content,
+			Structured:     req.Structured,
+			Native:         req.Native,
+			Metadata:       req.Metadata,
 			TargetChatID:   req.ChannelID,
 			ReplyTarget:    req.ReplyTarget,
 		})
 		if err == nil {
+			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
+				ChannelID: req.ChannelID,
+				Platform:  req.Platform,
+				EventType: req.Event,
+				Status:    model.IMDeliveryStatusDelivered,
+			})
 			entry.Info("IM notify queued via control plane")
 			return nil
 		}
@@ -365,6 +434,15 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 	}
 
 	if s.notifyURL == "" {
+		if s.controlPlane != nil {
+			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
+				ChannelID:     req.ChannelID,
+				Platform:      req.Platform,
+				EventType:     req.Event,
+				Status:        model.IMDeliveryStatusFailed,
+				FailureReason: "notify URL not configured",
+			})
+		}
 		entry.Warn("IM notify skipped: no notify URL configured")
 		return nil
 	}
@@ -373,7 +451,10 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 		"type":           req.Event,
 		"platform":       req.Platform,
 		"target_chat_id": req.ChannelID,
-		"content":        fmt.Sprintf("%s\n%s", req.Title, req.Body),
+		"content":        buildNotifyContent(req),
+		"structured":     req.Structured,
+		"native":         req.Native,
+		"metadata":       req.Metadata,
 		"replyTarget":    req.ReplyTarget,
 	}
 	body, err := json.Marshal(payload)
@@ -390,17 +471,149 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
+		if s.controlPlane != nil {
+			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
+				ChannelID:     req.ChannelID,
+				Platform:      req.Platform,
+				EventType:     req.Event,
+				Status:        model.IMDeliveryStatusFailed,
+				FailureReason: err.Error(),
+			})
+		}
 		entry.WithError(err).Error("IM notify compatibility HTTP failed")
 		return fmt.Errorf("IM notify failed: %w", err)
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
+		if s.controlPlane != nil {
+			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
+				ChannelID:     req.ChannelID,
+				Platform:      req.Platform,
+				EventType:     req.Event,
+				Status:        model.IMDeliveryStatusFailed,
+				FailureReason: fmt.Sprintf("HTTP %d", resp.StatusCode),
+			})
+		}
 		entry.WithField("status", resp.StatusCode).Warn("IM notify compatibility HTTP returned non-OK status")
 		return fmt.Errorf("IM notify returned %d", resp.StatusCode)
 	}
+	if s.controlPlane != nil {
+		s.controlPlane.RecordDeliveryResult(model.IMDelivery{
+			ChannelID: req.ChannelID,
+			Platform:  req.Platform,
+			EventType: req.Event,
+			Status:    model.IMDeliveryStatusDelivered,
+		})
+	}
 	entry.WithField("status", resp.StatusCode).Info("IM notify delivered via compatibility HTTP")
 	return nil
+}
+
+func (s *IMService) handleTaskCommand(ctx context.Context, entry *logrus.Entry, req *model.IMCommandRequest) (*model.IMCommandResponse, error) {
+	if s.taskCreator == nil {
+		entry.Info("IM command acknowledged (task creator unavailable)")
+		return &model.IMCommandResponse{Result: "Task command received. Use the IM Bridge for full execution.", Success: true}, nil
+	}
+
+	title, _ := req.Args["title"].(string)
+	if title == "" {
+		title = "Task from IM"
+	}
+	description, _ := req.Args["description"].(string)
+
+	task := &model.Task{
+		ID:          uuid.New(),
+		Title:       title,
+		Description: description,
+		Status:      "inbox",
+	}
+
+	if projectIDStr, ok := req.Args["projectId"].(string); ok {
+		if pid, err := uuid.Parse(projectIDStr); err == nil {
+			task.ProjectID = pid
+		}
+	}
+
+	if err := s.taskCreator.Create(ctx, task); err != nil {
+		entry.WithError(err).Error("IM task creation failed")
+		return &model.IMCommandResponse{Result: fmt.Sprintf("Task creation failed: %s", err.Error()), Success: false}, nil
+	}
+
+	entry.WithField("taskId", task.ID).Info("IM task created")
+	return &model.IMCommandResponse{
+		Result:  fmt.Sprintf("Task created: %s (ID: %s)", task.Title, task.ID),
+		Success: true,
+	}, nil
+}
+
+func (s *IMService) handleAgentCommand(ctx context.Context, entry *logrus.Entry, req *model.IMCommandRequest) (*model.IMCommandResponse, error) {
+	if s.agentSpawner == nil {
+		entry.Info("IM command acknowledged (agent spawner unavailable)")
+		return &model.IMCommandResponse{Result: "Agent command received. Use the IM Bridge for full execution.", Success: true}, nil
+	}
+
+	taskIDStr, _ := req.Args["taskId"].(string)
+	taskID, err := uuid.Parse(taskIDStr)
+	if err != nil {
+		return &model.IMCommandResponse{Result: "Invalid or missing taskId argument.", Success: false}, nil
+	}
+
+	memberIDStr, _ := req.Args["memberId"].(string)
+	memberID, err := uuid.Parse(memberIDStr)
+	if err != nil {
+		return &model.IMCommandResponse{Result: "Invalid or missing memberId argument.", Success: false}, nil
+	}
+
+	runtime, _ := req.Args["runtime"].(string)
+	provider, _ := req.Args["provider"].(string)
+	modelName, _ := req.Args["model"].(string)
+	roleID, _ := req.Args["roleId"].(string)
+	budgetUsd := 0.0
+	if b, ok := req.Args["budgetUsd"].(float64); ok {
+		budgetUsd = b
+	}
+
+	run, err := s.agentSpawner.Spawn(ctx, taskID, memberID, runtime, provider, modelName, budgetUsd, roleID)
+	if err != nil {
+		entry.WithError(err).Error("IM agent spawn failed")
+		return &model.IMCommandResponse{Result: fmt.Sprintf("Agent spawn failed: %s", err.Error()), Success: false}, nil
+	}
+
+	entry.WithField("runId", run.ID).Info("IM agent spawned")
+	return &model.IMCommandResponse{
+		Result:  fmt.Sprintf("Agent spawned: run %s (status: %s)", run.ID, run.Status),
+		Success: true,
+	}, nil
+}
+
+func (s *IMService) handleReviewCommand(ctx context.Context, entry *logrus.Entry, req *model.IMCommandRequest) (*model.IMCommandResponse, error) {
+	if s.reviewTrigger == nil {
+		entry.Info("IM command acknowledged (review trigger unavailable)")
+		return &model.IMCommandResponse{Result: "Review command received. Use the IM Bridge for full execution.", Success: true}, nil
+	}
+
+	triggerReq := &model.TriggerReviewRequest{
+		Trigger: "manual",
+	}
+	if taskIDStr, ok := req.Args["taskId"].(string); ok {
+		triggerReq.TaskID = taskIDStr
+	}
+	if prURL, ok := req.Args["prUrl"].(string); ok {
+		triggerReq.PRURL = prURL
+	}
+
+	review, err := s.reviewTrigger.Trigger(ctx, triggerReq)
+	if err != nil {
+		entry.WithError(err).Error("IM review trigger failed")
+		return &model.IMCommandResponse{Result: fmt.Sprintf("Review trigger failed: %s", err.Error()), Success: false}, nil
+	}
+
+	entry.WithField("reviewId", review.ID).Info("IM review triggered")
+	return &model.IMCommandResponse{
+		Result:  fmt.Sprintf("Review triggered: %s (recommendation: %s)", review.ID, review.Recommendation),
+		Success: true,
+	}, nil
 }
 
 func applyCompatibilityDeliveryHeaders(req *http.Request, path string, body []byte, secret string) {
@@ -423,4 +636,16 @@ func applyCompatibilityDeliveryHeaders(req *http.Request, path string, body []by
 		string(body),
 	}, "|")))
 	req.Header.Set("X-AgentForge-Signature", hex.EncodeToString(mac.Sum(nil)))
+}
+
+func buildNotifyContent(req *model.IMNotifyRequest) string {
+	if req == nil {
+		return ""
+	}
+	if req.Structured != nil {
+		if fallback := strings.TrimSpace(req.Structured.FallbackText()); fallback != "" {
+			return fallback
+		}
+	}
+	return strings.TrimSpace(strings.TrimSpace(req.Title) + "\n" + strings.TrimSpace(req.Body))
 }
