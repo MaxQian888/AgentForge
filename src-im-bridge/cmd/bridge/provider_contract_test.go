@@ -141,6 +141,32 @@ func TestSelectProvider_ConstructsWeComStubPlatform(t *testing.T) {
 	}
 }
 
+func TestSelectProvider_ConstructsQQStubPlatform(t *testing.T) {
+	provider, err := selectProvider(&config{Platform: "qq", TransportMode: transportModeStub, TestPort: "0"})
+	if err != nil {
+		t.Fatalf("selectProvider error: %v", err)
+	}
+	if provider == nil || provider.Platform == nil {
+		t.Fatalf("provider = %+v", provider)
+	}
+	if provider.Source() != "qq" {
+		t.Fatalf("source = %q, want qq", provider.Source())
+	}
+}
+
+func TestSelectProvider_ConstructsQQBotStubPlatform(t *testing.T) {
+	provider, err := selectProvider(&config{Platform: "qqbot", TransportMode: transportModeStub, TestPort: "0"})
+	if err != nil {
+		t.Fatalf("selectProvider error: %v", err)
+	}
+	if provider == nil || provider.Platform == nil {
+		t.Fatalf("provider = %+v", provider)
+	}
+	if provider.Source() != "qqbot" {
+		t.Fatalf("source = %q, want qqbot", provider.Source())
+	}
+}
+
 func TestSelectProvider_ConstructsStubPlatform(t *testing.T) {
 	provider, err := selectProvider(&config{
 		Platform:      "slack",

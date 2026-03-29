@@ -1,6 +1,9 @@
 "use client";
 
+import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import type { TaskComment } from "@/lib/stores/task-comment-store";
 import { TaskCommentInput } from "./task-comment-input";
 
@@ -10,20 +13,24 @@ export function TaskComments({
   onCreateComment,
   onResolveComment,
   onReopenComment,
+  onDeleteComment,
 }: {
   comments: TaskComment[];
   mentionSuggestions?: string[];
   onCreateComment: (body: string) => void | Promise<void>;
   onResolveComment?: (commentId: string) => void;
   onReopenComment?: (commentId: string) => void;
+  onDeleteComment?: (commentId: string) => void;
 }) {
+  const t = useTranslations("tasks");
+  const [deleteTarget, setDeleteTarget] = useState<string | null>(null);
   const roots = comments.filter((comment) => !comment.parentCommentId);
 
   return (
     <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
-      <div className="font-medium">Task Comments</div>
+      <div className="font-medium">{t("comments.title")}</div>
       <div className="mt-1 text-muted-foreground">
-        Discuss blockers, handoff details, and review follow-ups inline.
+        {t("comments.description")}
       </div>
 
       <div className="mt-3">
@@ -45,27 +52,40 @@ export function TaskComments({
                     {new Date(comment.createdAt).toLocaleString()}
                   </div>
                 </div>
-                {comment.resolvedAt ? (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    aria-label={`Reopen ${comment.id}`}
-                    onClick={() => onReopenComment?.(comment.id)}
-                  >
-                    Reopen
-                  </Button>
-                ) : (
-                  <Button
-                    type="button"
-                    size="sm"
-                    variant="ghost"
-                    aria-label={`Resolve ${comment.id}`}
-                    onClick={() => onResolveComment?.(comment.id)}
-                  >
-                    Resolve
-                  </Button>
-                )}
+                <div className="flex items-center gap-1">
+                  {comment.resolvedAt ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`Reopen ${comment.id}`}
+                      onClick={() => onReopenComment?.(comment.id)}
+                    >
+                      {t("comments.reopen")}
+                    </Button>
+                  ) : (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      aria-label={`Resolve ${comment.id}`}
+                      onClick={() => onResolveComment?.(comment.id)}
+                    >
+                      {t("comments.resolve")}
+                    </Button>
+                  )}
+                  {onDeleteComment ? (
+                    <Button
+                      type="button"
+                      size="sm"
+                      variant="ghost"
+                      className="text-destructive hover:text-destructive"
+                      onClick={() => setDeleteTarget(comment.id)}
+                    >
+                      {t("comments.delete")}
+                    </Button>
+                  ) : null}
+                </div>
               </div>
 
               {replies.length > 0 ? (
@@ -82,10 +102,25 @@ export function TaskComments({
         })}
         {roots.length === 0 ? (
           <div className="rounded-md border border-dashed border-border/60 px-3 py-4 text-muted-foreground">
-            No task comments yet.
+            {t("comments.empty")}
           </div>
         ) : null}
       </div>
+
+      <ConfirmDialog
+        open={deleteTarget !== null}
+        title={t("comments.deleteConfirmTitle")}
+        description={t("comments.deleteConfirmDescription")}
+        confirmLabel={t("comments.deleteConfirmLabel")}
+        variant="destructive"
+        onConfirm={() => {
+          if (deleteTarget) {
+            onDeleteComment?.(deleteTarget);
+          }
+          setDeleteTarget(null);
+        }}
+        onCancel={() => setDeleteTarget(null)}
+      />
     </div>
   );
 }

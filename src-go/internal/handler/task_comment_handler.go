@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
@@ -31,11 +32,11 @@ func NewTaskCommentHandler(service taskCommentHandlerService) *TaskCommentHandle
 func (h *TaskCommentHandler) List(c echo.Context) error {
 	taskID, err := uuid.Parse(c.Param("tid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	comments, err := h.service.ListComments(c.Request().Context(), taskID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list task comments"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListTaskComments)
 	}
 	payload := make([]model.TaskCommentDTO, 0, len(comments))
 	for _, comment := range comments {
@@ -47,18 +48,18 @@ func (h *TaskCommentHandler) List(c echo.Context) error {
 func (h *TaskCommentHandler) Create(c echo.Context) error {
 	taskID, err := uuid.Parse(c.Param("tid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	req := new(model.CreateTaskCommentRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 	createdBy := currentUserID(c)
 	if createdBy == nil {
-		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "missing user context"})
+		return localizedError(c, http.StatusUnauthorized, i18n.MsgMissingUserContext)
 	}
 	input := &service.CreateTaskCommentInput{
 		ProjectID: appMiddleware.GetProjectID(c),
@@ -70,16 +71,16 @@ func (h *TaskCommentHandler) Create(c echo.Context) error {
 	if req.ParentCommentID != nil {
 		parentCommentID, err := uuid.Parse(*req.ParentCommentID)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid parent comment ID"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidParentCommentID)
 		}
 		comment, err = h.service.ReplyToComment(c.Request().Context(), parentCommentID, input)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create task comment"})
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateTaskComment)
 		}
 	} else {
 		comment, err = h.service.CreateComment(c.Request().Context(), input)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create task comment"})
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateTaskComment)
 		}
 	}
 	return c.JSON(http.StatusCreated, comment.ToDTO())
@@ -88,14 +89,14 @@ func (h *TaskCommentHandler) Create(c echo.Context) error {
 func (h *TaskCommentHandler) Update(c echo.Context) error {
 	commentID, err := uuid.Parse(c.Param("cid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid comment ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidCommentID)
 	}
 	req := new(model.UpdateTaskCommentRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if req.Resolved == nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "resolved flag is required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgResolvedFlagRequired)
 	}
 	var comment *model.TaskComment
 	if *req.Resolved {
@@ -104,7 +105,7 @@ func (h *TaskCommentHandler) Update(c echo.Context) error {
 		comment, err = h.service.ReopenComment(c.Request().Context(), commentID)
 	}
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update task comment"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateTaskComment)
 	}
 	return c.JSON(http.StatusOK, comment.ToDTO())
 }
@@ -112,10 +113,10 @@ func (h *TaskCommentHandler) Update(c echo.Context) error {
 func (h *TaskCommentHandler) Delete(c echo.Context) error {
 	commentID, err := uuid.Parse(c.Param("cid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid comment ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidCommentID)
 	}
 	if err := h.service.DeleteComment(c.Request().Context(), commentID); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete task comment"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteTaskComment)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

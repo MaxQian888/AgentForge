@@ -214,4 +214,27 @@ type RoleExecutionProfile struct {
 	MaxBudgetUsd     float64  `json:"max_budget_usd"`
 	MaxTurns         int      `json:"max_turns"`
 	PermissionMode   string   `json:"permission_mode"`
+	LoadedSkills     []RoleExecutionSkill           `json:"loaded_skills,omitempty"`
+	AvailableSkills  []RoleExecutionSkill           `json:"available_skills,omitempty"`
+	SkillDiagnostics []RoleExecutionSkillDiagnostic `json:"skill_diagnostics,omitempty"`
+}
+
+type RoleExecutionSkill struct {
+	Path         string   `json:"path"`
+	Label        string   `json:"label"`
+	Description  string   `json:"description,omitempty"`
+	Instructions string   `json:"instructions,omitempty"`
+	Source       string   `json:"source,omitempty"`
+	SourceRoot   string   `json:"source_root,omitempty"`
+	Origin       string   `json:"origin,omitempty"`
+	Requires     []string `json:"requires,omitempty"`
+	Tools        []string `json:"tools,omitempty"`
+}
+
+type RoleExecutionSkillDiagnostic struct {
+	Code     string `json:"code"`
+	Path     string `json:"path,omitempty"`
+	Message  string `json:"message"`
+	Blocking bool   `json:"blocking"`
+	AutoLoad bool   `json:"auto_load,omitempty"`
 }

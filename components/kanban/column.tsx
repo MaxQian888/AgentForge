@@ -5,7 +5,7 @@ import { cn } from "@/lib/utils";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { TaskCard } from "./task-card";
 import type { TaskWorkspaceDisplayOptions } from "@/lib/stores/task-workspace-store";
-import type { Task, TaskStatus } from "@/lib/stores/task-store";
+import type { Task, TaskPriority, TaskStatus } from "@/lib/stores/task-store";
 import type { LinkedDocItem } from "@/components/tasks/linked-docs-panel";
 
 const columnLabels: Record<TaskStatus, string> = {
@@ -25,18 +25,28 @@ interface ColumnProps {
   status: TaskStatus;
   tasks: Task[];
   selectedTaskId: string | null;
+  selectedTaskIds?: string[];
   displayOptions: TaskWorkspaceDisplayOptions;
   linkedDocsByTask: Record<string, LinkedDocItem[]>;
+  subtaskStatsMap?: Record<string, { total: number; done: number }>;
   onTaskClick: (task: Task) => void;
+  onToggleTaskSelection?: (taskId: string) => void;
+  onQuickStatusChange?: (taskId: string, status: TaskStatus) => void;
+  onQuickPriorityChange?: (taskId: string, priority: TaskPriority) => void;
 }
 
 export function Column({
   status,
   tasks,
   selectedTaskId,
+  selectedTaskIds = [],
   displayOptions,
   linkedDocsByTask,
+  subtaskStatsMap = {},
   onTaskClick,
+  onToggleTaskSelection,
+  onQuickStatusChange,
+  onQuickPriorityChange,
 }: ColumnProps) {
   return (
     <div className="flex w-72 shrink-0 flex-col rounded-lg border bg-muted/50">
@@ -63,10 +73,15 @@ export function Column({
                   task={task}
                   index={i}
                   isSelected={task.id === selectedTaskId}
+                  isMultiSelected={selectedTaskIds.includes(task.id)}
                   density={displayOptions.density}
                   showDescription={displayOptions.showDescriptions}
                   linkedDocs={linkedDocsByTask[task.id] ?? []}
+                  subtaskStats={subtaskStatsMap[task.id]}
                   onClick={() => onTaskClick(task)}
+                  onToggleSelect={onToggleTaskSelection}
+                  onQuickStatusChange={onQuickStatusChange}
+                  onQuickPriorityChange={onQuickPriorityChange}
                 />
               ))}
               {provided.placeholder}

@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -8,6 +9,7 @@ import type { FormDefinition } from "@/lib/stores/form-store";
 import { useFormStore } from "@/lib/stores/form-store";
 
 export function FormRenderer({ form }: { form: FormDefinition }) {
+  const t = useTranslations("forms");
   const submitForm = useFormStore((state) => state.submitForm);
   const fields = useMemo(() => (Array.isArray(form.fields) ? form.fields : []), [form.fields]);
   const [values, setValues] = useState<Record<string, string>>({});
@@ -35,9 +37,9 @@ export function FormRenderer({ form }: { form: FormDefinition }) {
           setSubmittedTaskId(task.id);
         }}
       >
-        Submit form
+        {t("submitForm")}
       </Button>
-      {submittedTaskId ? <div className="text-sm text-muted-foreground">Created task: {submittedTaskId}</div> : null}
+      {submittedTaskId ? <div className="text-sm text-muted-foreground">{t("createdTask", { id: submittedTaskId })}</div> : null}
     </div>
   );
 }

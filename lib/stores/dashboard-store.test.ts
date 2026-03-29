@@ -22,6 +22,7 @@ describe("useDashboardStore", () => {
       summary: null,
       projects: [],
       selectedProjectId: null,
+      activeDashboardIdByProject: {},
       loading: false,
       error: null,
       sectionErrors: {},
@@ -215,6 +216,109 @@ describe("useDashboardStore", () => {
       expect.objectContaining({
         widgetType: "throughput_chart",
       })
+    );
+  });
+
+  it("tracks the active dashboard per project when dashboards load, create, and delete", async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockJsonResponse([
+        {
+          id: "dashboard-1",
+          projectId: "project-1",
+          name: "Sprint Overview",
+          layout: [],
+          createdBy: "user-1",
+          createdAt: "2026-03-20T10:00:00.000Z",
+          updatedAt: "2026-03-20T10:00:00.000Z",
+          widgets: [],
+        },
+        {
+          id: "dashboard-2",
+          projectId: "project-1",
+          name: "Review Watch",
+          layout: [],
+          createdBy: "user-1",
+          createdAt: "2026-03-20T10:00:00.000Z",
+          updatedAt: "2026-03-20T10:00:00.000Z",
+          widgets: [],
+        },
+      ])
+    );
+
+    await useDashboardStore.getState().fetchDashboards("project-1");
+
+    let workspaceState = useDashboardStore.getState() as unknown as {
+      activeDashboardIdByProject?: Record<string, string | null>;
+    };
+    expect(workspaceState.activeDashboardIdByProject?.["project-1"]).toBe("dashboard-1");
+
+    fetchMock.mockResolvedValueOnce(
+      mockJsonResponse({
+        id: "dashboard-3",
+        projectId: "project-1",
+        name: "Budget Watch",
+        layout: [],
+        createdBy: "user-1",
+        createdAt: "2026-03-20T10:00:00.000Z",
+        updatedAt: "2026-03-20T10:00:00.000Z",
+        widgets: [],
+      })
+    );
+
+    await useDashboardStore
+      .getState()
+      .createDashboard("project-1", { name: "Budget Watch", layout: [] });
+
+    workspaceState = useDashboardStore.getState() as unknown as {
+      activeDashboardIdByProject?: Record<string, string | null>;
+    };
+    expect(workspaceState.activeDashboardIdByProject?.["project-1"]).toBe("dashboard-3");
+
+    fetchMock.mockResolvedValueOnce(mockJsonResponse({}));
+    await useDashboardStore.getState().deleteDashboard("project-1", "dashboard-3");
+
+    workspaceState = useDashboardStore.getState() as unknown as {
+      activeDashboardIdByProject?: Record<string, string | null>;
+    };
+    expect(workspaceState.activeDashboardIdByProject?.["project-1"]).toBe("dashboard-1");
+  });
+
+  it("records widget request failures without throwing away the widget key", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("widget endpoint unavailable"));
+
+    const result = await useDashboardStore
+      .getState()
+      .fetchWidgetData("project-1", "throughput_chart", {});
+
+    const state = useDashboardStore.getState() as unknown as {
+      widgetRequestStateByKey?: Record<
+        string,
+        { status: string; error: string | null }
+      >;
+    };
+
+    expect(result).toBeNull();
+    expect(
+      state.widgetRequestStateByKey?.["project-1:throughput_chart:{}"]
+    ).toEqual({
+      status: "error",
+      error: "widget endpoint unavailable",
+    });
+  });
+
+  it("records dashboard loading errors per project", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("dashboard list unavailable"));
+
+    await useDashboardStore.getState().fetchDashboards("project-1");
+
+    const state = useDashboardStore.getState() as unknown as {
+      dashboardsLoadingByProject?: Record<string, boolean>;
+      dashboardsErrorByProject?: Record<string, string | null>;
+    };
+
+    expect(state.dashboardsLoadingByProject?.["project-1"]).toBe(false);
+    expect(state.dashboardsErrorByProject?.["project-1"]).toBe(
+      "dashboard list unavailable"
     );
   });
 });

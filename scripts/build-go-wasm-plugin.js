@@ -32,18 +32,14 @@ function parseArgs(argv = process.argv.slice(2)) {
   return parsed;
 }
 
-function main(argv = process.argv.slice(2)) {
+function runBuild(options = {}) {
   const repoRoot = getRepoRoot();
   const target = resolveBuildTarget({
-    ...parseArgs(argv),
+    ...options,
     repoRoot,
   });
 
   mkdirSync(dirname(target.modulePath), { recursive: true });
-
-  console.log(
-    `-> Building ${target.pluginId} -> ${target.modulePath}`,
-  );
 
   const result = spawnSync(
     "go",
@@ -60,11 +56,35 @@ function main(argv = process.argv.slice(2)) {
     },
   );
 
-  if (result.status !== 0) {
-    process.exit(result.status ?? 1);
+  return {
+    pluginId: target.pluginId,
+    modulePath: target.modulePath,
+    status: result.status ?? 1,
+    stdout: result.stdout || "",
+    stderr: result.stderr || "",
+  };
+}
+
+function main(argv = process.argv.slice(2)) {
+  const parsed = parseArgs(argv);
+  const result = runBuild(parsed);
+
+  console.log(
+    `-> Building ${result.pluginId} -> ${result.modulePath}`,
+  );
+
+  if (result.stdout) {
+    process.stdout.write(result.stdout);
+  }
+  if (result.stderr) {
+    process.stderr.write(result.stderr);
   }
 
-  console.log(`   ok ${target.modulePath}`);
+  if (result.status !== 0) {
+    process.exit(result.status);
+  }
+
+  console.log(`   ok ${result.modulePath}`);
 }
 
 if (require.main === module) {
@@ -75,4 +95,5 @@ module.exports = {
   main,
   parseArgs,
   resolveBuildTarget,
+  runBuild,
 };

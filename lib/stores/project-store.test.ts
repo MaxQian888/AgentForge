@@ -167,7 +167,7 @@ describe("useProjectStore", () => {
       }),
     } as Response);
 
-    await useProjectStore.getState().updateProject("project-1", {
+    const updatedProject = await useProjectStore.getState().updateProject("project-1", {
       settings: {
         codingAgent: {
           runtime: "opencode",
@@ -186,6 +186,48 @@ describe("useProjectStore", () => {
           model: "opencode-default",
         },
       },
+    });
+    expect(updatedProject).toEqual(
+      expect.objectContaining({
+        settings: expect.objectContaining({
+          codingAgent: expect.objectContaining({
+            runtime: "opencode",
+          }),
+        }),
+      })
+    );
+  });
+
+  it("rethrows API errors from project updates so pages can render request feedback", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: false,
+      status: 422,
+      json: async () => ({
+        message: "Project settings validation failed",
+        errors: {
+          alertThresholdPercent: "must be between 0 and 100",
+        },
+      }),
+    } as Response);
+
+    await expect(
+      useProjectStore.getState().updateProject("project-1", {
+        settings: {
+          codingAgent: {
+            runtime: "codex",
+            provider: "openai",
+            model: "gpt-5-codex",
+          },
+        },
+      })
+    ).rejects.toMatchObject({
+      message: "Project settings validation failed",
+      status: 422,
+      body: expect.objectContaining({
+        errors: expect.objectContaining({
+          alertThresholdPercent: "must be between 0 and 100",
+        }),
+      }),
     });
   });
 });

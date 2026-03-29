@@ -10,6 +10,8 @@ import (
 
 	"github.com/agentforge/im-bridge/core"
 	"github.com/agentforge/im-bridge/platform/discord"
+	"github.com/agentforge/im-bridge/platform/qq"
+	"github.com/agentforge/im-bridge/platform/qqbot"
 	"github.com/agentforge/im-bridge/platform/telegram"
 	"github.com/agentforge/im-bridge/platform/wecom"
 )
@@ -594,6 +596,14 @@ func TestWithPlatform_UsesDiscordMetadataSource(t *testing.T) {
 
 func TestWithPlatform_UsesWeComMetadataSource(t *testing.T) {
 	assertPlatformHeader(t, wecom.NewStub("0"), "wecom")
+}
+
+func TestWithPlatform_UsesQQMetadataSource(t *testing.T) {
+	assertPlatformHeader(t, qq.NewStub("0"), "qq")
+}
+
+func TestWithPlatform_UsesQQBotMetadataSource(t *testing.T) {
+	assertPlatformHeader(t, qqbot.NewStub("0"), "qqbot")
 }
 
 func TestDoRequest_RejectsUnmarshalableBody(t *testing.T) {

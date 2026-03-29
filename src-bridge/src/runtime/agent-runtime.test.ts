@@ -52,6 +52,40 @@ describe("AgentRuntime", () => {
     });
   });
 
+  test("exposes Claude resume readiness without changing existing identity fields", () => {
+    const runtime = new AgentRuntime("task-789", "session-789");
+    runtime.bindRequest({
+      task_id: "task-789",
+      session_id: "session-789",
+      runtime: "claude_code",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      prompt: "Resume the Claude runtime",
+      worktree_path: "D:/Project/AgentForge",
+      branch_name: "agent/task-789",
+      system_prompt: "Base prompt",
+      max_turns: 12,
+      budget_usd: 5,
+      allowed_tools: ["Read"],
+      permission_mode: "default",
+    });
+    runtime.continuity = {
+      runtime: "claude_code",
+      resume_ready: false,
+      captured_at: 321,
+      blocking_reason: "missing_continuity_state",
+    };
+
+    expect(runtime.toStatus()).toMatchObject({
+      task_id: "task-789",
+      runtime: "claude_code",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      resume_ready: false,
+      resume_blocked_reason: "missing_continuity_state",
+    });
+  });
+
   test("marks the runtime as cancelled when cancelled", () => {
     const runtime = new AgentRuntime("task-456", "session-456");
 

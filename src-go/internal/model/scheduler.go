@@ -67,6 +67,7 @@ type ScheduledJobRun struct {
 	Status        ScheduledJobRunStatus     `db:"status" json:"status"`
 	StartedAt     time.Time                 `db:"started_at" json:"startedAt"`
 	FinishedAt    *time.Time                `db:"finished_at" json:"finishedAt,omitempty"`
+	DurationMs    *int64                    `db:"-" json:"durationMs,omitempty"`
 	Summary       string                    `db:"summary" json:"summary"`
 	ErrorMessage  string                    `db:"error_message" json:"errorMessage"`
 	Metrics       string                    `db:"metrics" json:"metrics"`
@@ -74,9 +75,27 @@ type ScheduledJobRun struct {
 	UpdatedAt     time.Time                 `db:"updated_at" json:"updatedAt"`
 }
 
+func (r *ScheduledJobRun) ComputeDuration() {
+	if r == nil || r.FinishedAt == nil {
+		return
+	}
+	ms := r.FinishedAt.Sub(r.StartedAt).Milliseconds()
+	r.DurationMs = &ms
+}
+
 type UpdateScheduledJobRequest struct {
 	Enabled  *bool   `json:"enabled,omitempty"`
 	Schedule *string `json:"schedule,omitempty"`
+}
+
+type SchedulerStats struct {
+	TotalJobs     int `json:"totalJobs"`
+	EnabledJobs   int `json:"enabledJobs"`
+	DisabledJobs  int `json:"disabledJobs"`
+	FailedJobs    int `json:"failedJobs"`
+	ActiveRuns    int `json:"activeRuns"`
+	TotalRuns24h  int `json:"totalRuns24h"`
+	FailedRuns24h int `json:"failedRuns24h"`
 }
 
 func (status ScheduledJobRunStatus) IsTerminal() bool {

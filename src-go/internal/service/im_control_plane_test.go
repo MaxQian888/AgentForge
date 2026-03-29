@@ -150,7 +150,7 @@ func TestIMControlPlane_ReplayAndAckSuppressDuplicateDelivery(t *testing.T) {
 		t.Fatalf("delivery id = %q, want %q", listener.deliveries[0].DeliveryID, delivery.DeliveryID)
 	}
 
-	if err := control.AckDelivery(context.Background(), "bridge-feishu-1", delivery.Cursor, delivery.DeliveryID); err != nil {
+	if err := control.AckDelivery(context.Background(), "bridge-feishu-1", delivery.Cursor, delivery.DeliveryID, ""); err != nil {
 		t.Fatalf("AckDelivery error: %v", err)
 	}
 
@@ -164,6 +164,136 @@ func TestIMControlPlane_ReplayAndAckSuppressDuplicateDelivery(t *testing.T) {
 	}
 	if len(replayListener.deliveries) != 0 {
 		t.Fatalf("listener replay deliveries = %d, want 0", len(replayListener.deliveries))
+	}
+}
+
+func TestIMControlPlane_AckDeliveryPersistsDowngradeReason(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+
+	if _, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
+		BridgeID:   "bridge-dingtalk-1",
+		Platform:   "dingtalk",
+		Transport:  "live",
+		ProjectIDs: []string{"project-1"},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+
+	delivery, err := control.QueueDelivery(context.Background(), IMQueueDeliveryRequest{
+		TargetBridgeID: "bridge-dingtalk-1",
+		Platform:       "dingtalk",
+		ProjectID:      "project-1",
+		Kind:           IMDeliveryKindNotify,
+		Content:        "fallback text",
+		TargetChatID:   "chat-1",
+	})
+	if err != nil {
+		t.Fatalf("QueueDelivery error: %v", err)
+	}
+
+	control.RecordDeliveryResult(model.IMDelivery{
+		ID:           delivery.DeliveryID,
+		BridgeID:     "bridge-dingtalk-1",
+		ProjectID:    "project-1",
+		ChannelID:    "chat-1",
+		TargetChatID: "chat-1",
+		Platform:     "dingtalk",
+		EventType:    "review.requested",
+		Status:       model.IMDeliveryStatusDelivered,
+		Content:      "fallback text",
+	})
+
+	if err := control.AckDelivery(context.Background(), "bridge-dingtalk-1", delivery.Cursor, delivery.DeliveryID, "actioncard_send_failed"); err != nil {
+		t.Fatalf("AckDelivery error: %v", err)
+	}
+
+	history, err := control.ListDeliveryHistory(context.Background())
+	if err != nil {
+		t.Fatalf("ListDeliveryHistory error: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	if history[0].DowngradeReason != "actioncard_send_failed" {
+		t.Fatalf("DowngradeReason = %q, want actioncard_send_failed", history[0].DowngradeReason)
+	}
+}
+
+func TestIMControlPlane_ListEventTypesReturnsCanonicalSet(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{})
+
+	eventTypes, err := control.ListEventTypes(context.Background())
+	if err != nil {
+		t.Fatalf("ListEventTypes error: %v", err)
+	}
+	if len(eventTypes) < 10 {
+		t.Fatalf("event types len = %d, want at least 10", len(eventTypes))
+	}
+	if eventTypes[0] != "task.created" {
+		t.Fatalf("first event type = %q, want task.created", eventTypes[0])
+	}
+	if eventTypes[len(eventTypes)-1] != "workflow.failed" {
+		t.Fatalf("last event type = %q, want workflow.failed", eventTypes[len(eventTypes)-1])
+	}
+}
+
+func TestIMControlPlane_RetryDeliveryRequeuesFailedDelivery(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+
+	if _, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
+		BridgeID:   "bridge-feishu-1",
+		Platform:   "feishu",
+		Transport:  "live",
+		ProjectIDs: []string{"project-1"},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+
+	control.RecordDeliveryResult(model.IMDelivery{
+		ID:           "delivery-1",
+		BridgeID:     "bridge-feishu-1",
+		ProjectID:    "project-1",
+		ChannelID:    "chat-1",
+		TargetChatID: "chat-1",
+		Platform:     "feishu",
+		EventType:    "review.requested",
+		Kind:         IMDeliveryKindNotify,
+		Status:       model.IMDeliveryStatusFailed,
+		Content:      "retry me",
+		Metadata: map[string]string{
+			"fallback_reason": "thread_reply_unavailable",
+		},
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:  "feishu",
+			ChatID:    "chat-1",
+			MessageID: "om_1",
+		},
+	})
+
+	if _, err := control.RetryDelivery(context.Background(), "delivery-1"); err != nil {
+		t.Fatalf("RetryDelivery error: %v", err)
+	}
+
+	history, err := control.ListDeliveryHistory(context.Background())
+	if err != nil {
+		t.Fatalf("ListDeliveryHistory error: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	if history[0].Status != model.IMDeliveryStatusPending {
+		t.Fatalf("history[0].Status = %q, want pending", history[0].Status)
+	}
+	if history[0].FailureReason != "" {
+		t.Fatalf("history[0].FailureReason = %q, want cleared failure", history[0].FailureReason)
 	}
 }
 

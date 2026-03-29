@@ -127,6 +127,7 @@ const config: Config = {
 
     // Handle image imports
     "^.+\\.(png|jpg|jpeg|gif|webp|avif|ico|bmp|svg)$/i": "<rootDir>/__mocks__/fileMock.js",
+    "^bun:test$": "<rootDir>/__mocks__/bun-test.ts",
   },
 
   // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader
@@ -219,6 +220,8 @@ const config: Config = {
     "/.next/",
     "/out/",
     "/app/page.test.tsx",
+    "/scripts/build-go-wasm-plugin.test.mjs",
+    "/plugins/reviews/",
     "/src-bridge/",
     "/src-tauri/",
   ],

@@ -11,7 +11,10 @@ export type IMPlatform =
   | "dingtalk"
   | "slack"
   | "telegram"
-  | "discord";
+  | "discord"
+  | "wecom"
+  | "qq"
+  | "qqbot";
 
 export interface IMChannel {
   id: string;
@@ -19,18 +22,33 @@ export interface IMChannel {
   name: string;
   channelId: string;
   webhookUrl: string;
+  platformConfig: Record<string, string>;
   events: string[];
   active: boolean;
+}
+
+export interface IMBridgeProviderDetail {
+  platform: string;
+  capabilityMatrix?: Record<string, unknown>;
+  callbackPaths?: string[];
+  status?: string;
+  transport?: string;
 }
 
 export interface IMBridgeStatus {
   registered: boolean;
   lastHeartbeat: string | null;
   providers: string[];
+  providerDetails: IMBridgeProviderDetail[];
   health: "healthy" | "degraded" | "disconnected";
 }
 
-export type IMDeliveryStatus = "delivered" | "suppressed" | "failed";
+export type IMDeliveryStatus =
+  | "pending"
+  | "delivered"
+  | "suppressed"
+  | "failed"
+  | "timeout";
 
 export interface IMDelivery {
   id: string;
@@ -39,6 +57,9 @@ export interface IMDelivery {
   eventType: string;
   status: IMDeliveryStatus;
   failureReason?: string;
+  downgradeReason?: string;
+  content?: string;
+  metadata?: Record<string, string>;
   createdAt: string;
 }
 
@@ -48,14 +69,17 @@ interface IMState {
   channels: IMChannel[];
   bridgeStatus: IMBridgeStatus;
   deliveries: IMDelivery[];
+  eventTypes: string[];
   loading: boolean;
   error: string | null;
 
   fetchChannels: () => Promise<void>;
   fetchBridgeStatus: () => Promise<void>;
   fetchDeliveryHistory: () => Promise<void>;
+  fetchEventTypes: () => Promise<void>;
   saveChannel: (channel: Omit<IMChannel, "id"> & { id?: string }) => Promise<void>;
   deleteChannel: (id: string) => Promise<void>;
+  retryDelivery: (id: string) => Promise<void>;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -72,6 +96,7 @@ const DEFAULT_BRIDGE_STATUS: IMBridgeStatus = {
   registered: false,
   lastHeartbeat: null,
   providers: [],
+  providerDetails: [],
   health: "disconnected",
 };
 
@@ -79,6 +104,7 @@ export const useIMStore = create<IMState>()((set, get) => ({
   channels: [],
   bridgeStatus: DEFAULT_BRIDGE_STATUS,
   deliveries: [],
+  eventTypes: [],
   loading: false,
   error: null,
 
@@ -135,6 +161,21 @@ export const useIMStore = create<IMState>()((set, get) => ({
     }
   },
 
+  fetchEventTypes: async () => {
+    const token = getToken();
+    if (!token) return;
+
+    try {
+      const api = getApi();
+      const { data } = await api.get<string[]>("/api/v1/im/event-types", {
+        token,
+      });
+      set({ eventTypes: data ?? [], error: null });
+    } catch {
+      set({ eventTypes: [], error: "Unable to load IM event types" });
+    }
+  },
+
   saveChannel: async (channel) => {
     const token = getToken();
     if (!token) return;
@@ -166,6 +207,22 @@ export const useIMStore = create<IMState>()((set, get) => ({
       await get().fetchChannels();
     } catch {
       set({ error: "Failed to delete channel" });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  retryDelivery: async (id) => {
+    const token = getToken();
+    if (!token) return;
+
+    set({ loading: true, error: null });
+    try {
+      const api = getApi();
+      await api.post(`/api/v1/im/deliveries/${id}/retry`, {}, { token });
+      await get().fetchDeliveryHistory();
+    } catch {
+      set({ error: "Failed to retry delivery" });
     } finally {
       set({ loading: false });
     }

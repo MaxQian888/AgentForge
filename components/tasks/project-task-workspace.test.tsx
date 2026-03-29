@@ -12,6 +12,9 @@ import {
   useTaskWorkspaceStore,
 } from "@/lib/stores/task-workspace-store";
 
+const fetchDispatchPreflight = jest.fn();
+const fetchDispatchHistory = jest.fn();
+
 jest.mock("@hello-pangea/dnd", () => {
   let lastOnDragEnd: ((result: unknown) => void | Promise<void>) | null = null;
 
@@ -168,6 +171,23 @@ jest.mock("@/lib/stores/milestone-store", () => ({
     }),
 }));
 
+jest.mock("@/lib/stores/agent-store", () => ({
+  useAgentStore: (
+    selector: (state: {
+      agents: Agent[];
+      dispatchHistoryByTask: Record<string, unknown[]>;
+      fetchDispatchPreflight: typeof fetchDispatchPreflight;
+      fetchDispatchHistory: typeof fetchDispatchHistory;
+    }) => unknown
+  ) =>
+    selector({
+      agents,
+      dispatchHistoryByTask: {},
+      fetchDispatchPreflight,
+      fetchDispatchHistory,
+    }),
+}));
+
 type DndMock = {
   __getLastOnDragEnd: () => ((result: unknown) => void | Promise<void>) | null;
 };
@@ -190,6 +210,7 @@ const tasks: Task[] = [
     agentBranch: "",
     agentWorktree: "",
     agentSessionId: "",
+    labels: [],
     blockedBy: [],
     plannedStartAt: "2026-03-25T09:00:00.000Z",
     plannedEndAt: "2026-03-27T18:00:00.000Z",
@@ -224,6 +245,7 @@ const tasks: Task[] = [
     agentBranch: "",
     agentWorktree: "",
     agentSessionId: "",
+    labels: [],
     blockedBy: ["task-1"],
     plannedStartAt: null,
     plannedEndAt: null,
@@ -344,6 +366,10 @@ const sprintMetrics: SprintMetrics = {
 describe("ProjectTaskWorkspace", () => {
   beforeEach(() => {
     window.history.replaceState({}, "", "/project?id=project-1");
+    fetchDispatchPreflight.mockReset();
+    fetchDispatchPreflight.mockResolvedValue(null);
+    fetchDispatchHistory.mockReset();
+    fetchDispatchHistory.mockResolvedValue(undefined);
     useTaskWorkspaceStore.setState({
       viewMode: "board",
       filters: createDefaultTaskWorkspaceFilters(),
@@ -615,6 +641,9 @@ describe("ProjectTaskWorkspace", () => {
     expect(screen.getByText("Calendar Bot")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Assign Calendar Bot" }));
+    await user.click(
+      await screen.findByRole("button", { name: "Assign and dispatch" }),
+    );
 
     await waitFor(() => {
       expect(onTaskAssign).toHaveBeenCalledWith("task-2", "member-2", "agent");

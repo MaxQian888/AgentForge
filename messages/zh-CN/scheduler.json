@@ -1,0 +1,59 @@
+{
+  "title": "调度器控制面板",
+  "subtitle": "管理后台任务、查看运行历史并触发重试。",
+  "refresh": "刷新",
+  "registeredJobs": "已注册任务",
+  "registeredJobsDesc": "内置后台任务及其执行周期、健康状态和下次执行时间。",
+  "jobDetails": "任务详情",
+  "jobDetailsDesc": "查看、配置和管理所选任务。",
+  "stats": {
+    "totalJobs": "总任务数",
+    "enabled": "已启用",
+    "disabled": "已禁用",
+    "activeRuns": "活跃运行",
+    "failed24h": "失败 (24h)",
+    "successRate24h": "成功率 (24h)"
+  },
+  "jobTable": {
+    "colJob": "任务",
+    "colSchedule": "调度",
+    "colStatus": "状态",
+    "colNextRun": "下次运行",
+    "noJobs": "暂无已注册的调度任务。",
+    "disabled": "已禁用",
+    "na": "N/A",
+    "notScheduled": "未安排"
+  },
+  "jobDetail": {
+    "runNow": "立即运行",
+    "disable": "禁用",
+    "enable": "启用",
+    "tabOverview": "概览",
+    "tabHistory": "运行历史",
+    "tabConfig": "配置",
+    "lastRun": "上次运行",
+    "nextRun": "下次运行",
+    "notScheduled": "未安排",
+    "scope": "作用域",
+    "overlapPolicy": "重叠策略",
+    "lastSummary": "最近摘要",
+    "lastError": "最近错误",
+    "scheduleExpression": "调度表达式",
+    "save": "保存",
+    "disableJobTitle": "禁用任务",
+    "enableJobTitle": "启用任务",
+    "disableJobDesc": "这将停止 \"{name}\" 的自动执行。你仍可以手动触发。",
+    "enableJobDesc": "这将按调度恢复 \"{name}\" 的自动执行：{schedule}。",
+    "cancel": "取消",
+    "selectJob": "选择一个调度任务以查看详情和历史。"
+  },
+  "runHistory": {
+    "colStatus": "状态",
+    "colTrigger": "触发方式",
+    "colStarted": "开始时间",
+    "colDuration": "持续时间",
+    "colSummary": "摘要",
+    "colMetrics": "指标",
+    "noRuns": "此任务暂无运行历史记录。"
+  }
+}

@@ -60,3 +60,7 @@ src-go/.env
 .codex/runtime-logs/
 
 bridge-x86_64-pc-windows-msvc.exe
+
+.cache
+tmp-runtime
+.codex

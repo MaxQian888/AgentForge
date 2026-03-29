@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import type { DocsPageTreeNode } from "@/lib/stores/docs-store";
 import { PageTreeItem } from "./page-tree-item";
 
@@ -18,6 +19,8 @@ export function PageTree({
   onTogglePinned?: (pageId: string, pinned: boolean) => void;
   onDeletePage?: (pageId: string) => void;
 }) {
+  const t = useTranslations("docs");
+
   return (
     <div className="flex flex-col gap-1">
       {nodes.map((node) => (
@@ -33,7 +36,7 @@ export function PageTree({
       ))}
       {nodes.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border/60 p-3 text-sm text-muted-foreground">
-          No pages yet. Create the first project doc to start the tree.
+          {t("pageTree.empty")}
         </div>
       ) : null}
     </div>

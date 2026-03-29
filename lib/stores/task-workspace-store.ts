@@ -23,6 +23,7 @@ interface TaskWorkspaceState {
   viewMode: TaskViewMode;
   filters: TaskWorkspaceFilters;
   selectedTaskId: string | null;
+  selectedTaskIds: string[];
   contextRailDisplay: ContextRailDisplay;
   displayOptions: TaskWorkspaceDisplayOptions;
   setViewMode: (viewMode: TaskViewMode) => void;
@@ -31,6 +32,7 @@ interface TaskWorkspaceState {
   setPriority: (priority: "all" | TaskPriority) => void;
   setAssigneeId: (assigneeId: string | "all") => void;
   setSprintId: (sprintId: string | "all") => void;
+  setLabels: (labels: string[]) => void;
   setPlanning: (planning: TaskPlanningFilter) => void;
   setDependency: (dependency: TaskDependencyFilter) => void;
   setContextRailDisplay: (display: ContextRailDisplay) => void;
@@ -40,6 +42,9 @@ interface TaskWorkspaceState {
   applySavedViewConfig: (config: unknown) => void;
   resetFilters: () => void;
   selectTask: (taskId: string | null) => void;
+  toggleTaskSelection: (taskId: string) => void;
+  selectAllVisible: (taskIds: string[]) => void;
+  clearSelection: () => void;
 }
 
 export { createDefaultTaskWorkspaceFilters } from "@/lib/tasks/task-workspace";
@@ -48,6 +53,7 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceState>()((set) => ({
   viewMode: "board",
   filters: createDefaultTaskWorkspaceFilters(),
   selectedTaskId: null,
+  selectedTaskIds: [],
   contextRailDisplay: "expanded",
   displayOptions: {
     density: "comfortable",
@@ -68,6 +74,8 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceState>()((set) => ({
     set((state) => ({ filters: { ...state.filters, sprintId } })),
   setPlanning: (planning) =>
     set((state) => ({ filters: { ...state.filters, planning } })),
+  setLabels: (labels) =>
+    set((state) => ({ filters: { ...state.filters, labels } })),
   setDependency: (dependency) =>
     set((state) => ({ filters: { ...state.filters, dependency } })),
   setContextRailDisplay: (contextRailDisplay) => set({ contextRailDisplay }),
@@ -123,4 +131,14 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceState>()((set) => ({
     }),
   resetFilters: () => set({ filters: createDefaultTaskWorkspaceFilters() }),
   selectTask: (selectedTaskId) => set({ selectedTaskId }),
+  toggleTaskSelection: (taskId) =>
+    set((state) => {
+      const idx = state.selectedTaskIds.indexOf(taskId);
+      if (idx === -1) {
+        return { selectedTaskIds: [...state.selectedTaskIds, taskId] };
+      }
+      return { selectedTaskIds: state.selectedTaskIds.filter((id) => id !== taskId) };
+    }),
+  selectAllVisible: (taskIds) => set({ selectedTaskIds: taskIds }),
+  clearSelection: () => set({ selectedTaskIds: [] }),
 }));

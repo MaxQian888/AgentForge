@@ -11,6 +11,7 @@ import (
 	"os/exec"
 	"runtime"
 	"strconv"
+	"strings"
 	"testing"
 	"time"
 
@@ -19,6 +20,8 @@ import (
 	"github.com/agentforge/im-bridge/platform/dingtalk"
 	"github.com/agentforge/im-bridge/platform/discord"
 	"github.com/agentforge/im-bridge/platform/feishu"
+	"github.com/agentforge/im-bridge/platform/qq"
+	"github.com/agentforge/im-bridge/platform/qqbot"
 	"github.com/agentforge/im-bridge/platform/slack"
 	"github.com/agentforge/im-bridge/platform/telegram"
 	"github.com/agentforge/im-bridge/platform/wecom"
@@ -68,6 +71,48 @@ func TestLoadConfig_ReadsWeComSettings(t *testing.T) {
 	}
 	if cfg.WeComCorpID != "corp-id" || cfg.WeComAgentID != "1000002" || cfg.WeComCallbackPath != "/wecom/callback" {
 		t.Fatalf("cfg = %+v", cfg)
+	}
+}
+
+func TestLoadConfig_ReadsQQAndQQBotSettings(t *testing.T) {
+	t.Setenv("IM_PLATFORM", "qq")
+	t.Setenv("IM_TRANSPORT_MODE", "live")
+	t.Setenv("QQ_ONEBOT_WS_URL", "ws://127.0.0.1:3001/onebot/v11/ws")
+	t.Setenv("QQ_ACCESS_TOKEN", "qq-token")
+	t.Setenv("QQBOT_APP_ID", "1024")
+	t.Setenv("QQBOT_APP_SECRET", "secret")
+	t.Setenv("QQBOT_CALLBACK_PORT", "9082")
+	t.Setenv("QQBOT_CALLBACK_PATH", "/qqbot/callback")
+	t.Setenv("QQBOT_API_BASE", "https://api.sgroup.qq.com")
+	t.Setenv("QQBOT_TOKEN_BASE", "https://bots.qq.com")
+
+	cfg := loadConfig()
+
+	if cfg.Platform != "qq" {
+		t.Fatalf("Platform = %q, want qq", cfg.Platform)
+	}
+	if cfg.QQOneBotWSURL != "ws://127.0.0.1:3001/onebot/v11/ws" || cfg.QQAccessToken != "qq-token" {
+		t.Fatalf("qq cfg = %+v", cfg)
+	}
+	if cfg.QQBotAppID != "1024" || cfg.QQBotCallbackPath != "/qqbot/callback" || cfg.QQBotAPIBase != "https://api.sgroup.qq.com" {
+		t.Fatalf("qqbot cfg = %+v", cfg)
+	}
+}
+
+func TestLoadConfig_ReadsDingTalkCardTemplateSettings(t *testing.T) {
+	t.Setenv("IM_PLATFORM", "dingtalk")
+	t.Setenv("IM_TRANSPORT_MODE", "live")
+	t.Setenv("DINGTALK_APP_KEY", "ding-key")
+	t.Setenv("DINGTALK_APP_SECRET", "ding-secret")
+	t.Setenv("DINGTALK_CARD_TEMPLATE_ID", "template-1.schema")
+
+	cfg := loadConfig()
+
+	if cfg.Platform != "dingtalk" {
+		t.Fatalf("Platform = %q, want dingtalk", cfg.Platform)
+	}
+	if cfg.DingTalkCardTemplateID != "template-1.schema" {
+		t.Fatalf("DingTalkCardTemplateID = %q, want template-1.schema", cfg.DingTalkCardTemplateID)
 	}
 }
 
@@ -326,6 +371,114 @@ func TestSelectPlatform_RejectsWeComLiveWithoutCallbackConfig(t *testing.T) {
 	}
 }
 
+func TestSelectPlatform_ReturnsStubForQQWithoutLiveSettings(t *testing.T) {
+	cfg := &config{
+		Platform:      "qq",
+		TransportMode: "stub",
+		TestPort:      "9010",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "qq-stub" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+}
+
+func TestSelectPlatform_ReturnsLiveQQAdapterWhenConfigured(t *testing.T) {
+	cfg := &config{
+		Platform:      "qq",
+		TransportMode: "live",
+		QQOneBotWSURL: "ws://127.0.0.1:3001/onebot/v11/ws",
+		QQAccessToken: "qq-token",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "qq-live" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+	if _, ok := platform.(*qq.Live); !ok {
+		t.Fatalf("platform type = %T, want *qq.Live", platform)
+	}
+}
+
+func TestSelectPlatform_RejectsQQLiveWithoutWSURL(t *testing.T) {
+	cfg := &config{
+		Platform:      "qq",
+		TransportMode: "live",
+	}
+
+	_, err := selectPlatform(cfg)
+	if err == nil {
+		t.Fatal("expected qq live selection to fail")
+	}
+	if !strings.Contains(err.Error(), "QQ_ONEBOT_WS_URL") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestSelectPlatform_ReturnsStubForQQBotWithoutLiveSettings(t *testing.T) {
+	cfg := &config{
+		Platform:      "qqbot",
+		TransportMode: "stub",
+		TestPort:      "9010",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "qqbot-stub" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+}
+
+func TestSelectPlatform_ReturnsLiveQQBotAdapterWhenConfigured(t *testing.T) {
+	cfg := &config{
+		Platform:          "qqbot",
+		TransportMode:     "live",
+		QQBotAppID:        "1024",
+		QQBotAppSecret:    "secret",
+		QQBotCallbackPort: "9013",
+		QQBotCallbackPath: "/qqbot/callback",
+		QQBotAPIBase:      "https://api.sgroup.qq.com",
+		QQBotTokenBase:    "https://bots.qq.com",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	if platform.Name() != "qqbot-live" {
+		t.Fatalf("platform name = %q", platform.Name())
+	}
+	if _, ok := platform.(*qqbot.Live); !ok {
+		t.Fatalf("platform type = %T, want *qqbot.Live", platform)
+	}
+}
+
+func TestSelectPlatform_RejectsQQBotLiveWithoutCallbackConfig(t *testing.T) {
+	cfg := &config{
+		Platform:       "qqbot",
+		TransportMode:  "live",
+		QQBotAppID:     "1024",
+		QQBotAppSecret: "secret",
+	}
+
+	_, err := selectPlatform(cfg)
+	if err == nil {
+		t.Fatal("expected qqbot live selection to fail")
+	}
+	if !strings.Contains(err.Error(), "QQBOT_CALLBACK_PORT") {
+		t.Fatalf("err = %v", err)
+	}
+}
+
 func TestSelectPlatform_AllowsStubModeWithoutProviderCredentials(t *testing.T) {
 	cfg := &config{
 		Platform:      "slack",
@@ -433,6 +586,38 @@ func TestLookupPlatformDescriptor_ReportsWeComCapabilities(t *testing.T) {
 	}
 	if !descriptor.Metadata.Capabilities.RequiresPublicCallback {
 		t.Fatal("expected wecom live transport to require a public callback")
+	}
+}
+
+func TestLookupPlatformDescriptor_ReportsQQCapabilities(t *testing.T) {
+	descriptor, err := lookupPlatformDescriptor("qq")
+	if err != nil {
+		t.Fatalf("lookupPlatformDescriptor error: %v", err)
+	}
+	if descriptor.Metadata.Source != "qq" {
+		t.Fatalf("source = %q, want qq", descriptor.Metadata.Source)
+	}
+	if descriptor.NewStub == nil || descriptor.NewLive == nil {
+		t.Fatalf("expected qq to be runnable, got NewStub=%v NewLive=%v", descriptor.NewStub, descriptor.NewLive)
+	}
+	if !descriptor.Metadata.Capabilities.SupportsSlashCommands {
+		t.Fatal("expected qq live transport to support slash-style commands")
+	}
+}
+
+func TestLookupPlatformDescriptor_ReportsQQBotCapabilities(t *testing.T) {
+	descriptor, err := lookupPlatformDescriptor("qqbot")
+	if err != nil {
+		t.Fatalf("lookupPlatformDescriptor error: %v", err)
+	}
+	if descriptor.Metadata.Source != "qqbot" {
+		t.Fatalf("source = %q, want qqbot", descriptor.Metadata.Source)
+	}
+	if descriptor.NewStub == nil || descriptor.NewLive == nil {
+		t.Fatalf("expected qqbot to be runnable, got NewStub=%v NewLive=%v", descriptor.NewStub, descriptor.NewLive)
+	}
+	if !descriptor.Metadata.Capabilities.RequiresPublicCallback {
+		t.Fatal("expected qqbot live transport to require callback exposure")
 	}
 }
 

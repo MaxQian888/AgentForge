@@ -1,7 +1,9 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Activity, Wifi, WifiOff } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
+import { PlatformBadge } from "@/components/shared/platform-badge";
 import {
   Card,
   CardContent,
@@ -10,7 +12,7 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
-import { useIMStore } from "@/lib/stores/im-store";
+import { useIMStore, type IMBridgeProviderDetail } from "@/lib/stores/im-store";
 
 const healthColors: Record<string, string> = {
   healthy: "bg-green-500/15 text-green-700 dark:text-green-400",
@@ -25,16 +27,21 @@ const healthDotColors: Record<string, string> = {
 };
 
 export function IMBridgeHealth() {
+  const t = useTranslations("im");
   const bridgeStatus = useIMStore((s) => s.bridgeStatus);
+  const providerSummaries: IMBridgeProviderDetail[] =
+    bridgeStatus.providerDetails.length > 0
+      ? bridgeStatus.providerDetails
+      : bridgeStatus.providers.map((platform) => ({ platform }));
 
   return (
     <div className="flex flex-col gap-6">
-      <h2 className="text-lg font-semibold">Bridge Health</h2>
+      <h2 className="text-lg font-semibold">{t("health.title")}</h2>
 
       <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-4">
         <Card>
           <CardContent className="py-4">
-            <p className="text-sm text-muted-foreground">Registration</p>
+            <p className="text-sm text-muted-foreground">{t("health.registration")}</p>
             <div className="mt-1 flex items-center gap-2">
               {bridgeStatus.registered ? (
                 <Wifi className="size-4 text-green-600 dark:text-green-400" />
@@ -42,7 +49,7 @@ export function IMBridgeHealth() {
                 <WifiOff className="size-4 text-red-600 dark:text-red-400" />
               )}
               <p className="text-lg font-bold">
-                {bridgeStatus.registered ? "Connected" : "Disconnected"}
+                {bridgeStatus.registered ? t("health.connected") : t("health.disconnected")}
               </p>
             </div>
           </CardContent>
@@ -50,7 +57,7 @@ export function IMBridgeHealth() {
 
         <Card>
           <CardContent className="py-4">
-            <p className="text-sm text-muted-foreground">Health Status</p>
+            <p className="text-sm text-muted-foreground">{t("health.healthStatus")}</p>
             <div className="mt-1 flex items-center gap-2">
               <span
                 className={cn(
@@ -73,18 +80,18 @@ export function IMBridgeHealth() {
 
         <Card>
           <CardContent className="py-4">
-            <p className="text-sm text-muted-foreground">Last Heartbeat</p>
+            <p className="text-sm text-muted-foreground">{t("health.lastHeartbeat")}</p>
             <p className="mt-1 text-lg font-bold">
               {bridgeStatus.lastHeartbeat
                 ? new Date(bridgeStatus.lastHeartbeat).toLocaleString()
-                : "No heartbeat"}
+                : t("health.noHeartbeat")}
             </p>
           </CardContent>
         </Card>
 
         <Card>
           <CardContent className="py-4">
-            <p className="text-sm text-muted-foreground">Providers</p>
+            <p className="text-sm text-muted-foreground">{t("health.providers")}</p>
             <p className="mt-1 text-lg font-bold">
               {bridgeStatus.providers.length}
             </p>
@@ -96,29 +103,53 @@ export function IMBridgeHealth() {
         <CardHeader>
           <CardTitle className="flex items-center gap-2">
             <Activity className="size-4" />
-            Registered Providers
+            {t("health.registeredProviders")}
           </CardTitle>
           <CardDescription>
-            IM platform providers currently registered with the bridge.
+            {t("health.registeredProvidersDesc")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {bridgeStatus.providers.length === 0 ? (
             <div className="flex h-[80px] items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
-              No providers registered. Ensure the IM bridge is running and
-              configured.
+              {t("health.noProviders")}
             </div>
           ) : (
-            <div className="flex flex-wrap gap-2">
-              {bridgeStatus.providers.map((provider) => (
-                <Badge
-                  key={provider}
-                  variant="outline"
-                  className="capitalize"
-                >
-                  {provider}
-                </Badge>
-              ))}
+            <div className="grid gap-3">
+              {providerSummaries.map((provider) => {
+                const capabilityMatrix = provider.capabilityMatrix ?? {};
+                const asyncUpdateModes = Array.isArray(
+                  capabilityMatrix.asyncUpdateModes
+                )
+                  ? (capabilityMatrix.asyncUpdateModes as string[])
+                  : [];
+
+                return (
+                  <div
+                    key={provider.platform}
+                    className="rounded-md border p-3"
+                  >
+                    <div className="flex flex-wrap items-center gap-2">
+                      <PlatformBadge platform={provider.platform} />
+                      {typeof capabilityMatrix.structuredSurface === "string" ? (
+                        <Badge variant="secondary" className="text-xs">
+                          {capabilityMatrix.structuredSurface}
+                        </Badge>
+                      ) : null}
+                      {typeof capabilityMatrix.actionCallbackMode === "string" ? (
+                        <Badge variant="secondary" className="text-xs">
+                          {capabilityMatrix.actionCallbackMode}
+                        </Badge>
+                      ) : null}
+                      {asyncUpdateModes.map((mode) => (
+                        <Badge key={mode} variant="secondary" className="text-xs">
+                          {mode}
+                        </Badge>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })}
             </div>
           )}
         </CardContent>

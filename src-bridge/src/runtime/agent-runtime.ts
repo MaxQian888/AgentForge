@@ -1,5 +1,4 @@
-import type { AgentStatus } from "../types.js";
-import type { ExecuteRequest } from "../types.js";
+import type { AgentStatus, ExecuteRequest, RuntimeContinuityState } from "../types.js";
 
 export type RuntimeStatus =
   | "starting"
@@ -21,6 +20,7 @@ export class AgentRuntime {
   lastActivity: number;
   lastTool: string;
   request: ExecuteRequest | null;
+  continuity: RuntimeContinuityState | null;
   budgetWarningEmitted: boolean;
 
   constructor(taskId: string, sessionId: string) {
@@ -34,6 +34,7 @@ export class AgentRuntime {
     this.lastActivity = Date.now();
     this.lastTool = "";
     this.request = null;
+    this.continuity = null;
     this.budgetWarningEmitted = false;
   }
 
@@ -59,6 +60,11 @@ export class AgentRuntime {
     const roleId = this.request?.role_config?.role_id;
     const teamId = this.request?.team_id;
     const teamRole = this.request?.team_role;
+    const continuityMatchesRuntime = this.continuity?.runtime === runtime;
+    const resumeReady = continuityMatchesRuntime ? this.continuity?.resume_ready : undefined;
+    const resumeBlockedReason = continuityMatchesRuntime
+      ? this.continuity?.blocking_reason
+      : undefined;
     return {
       task_id: this.taskId,
       state: this.status,
@@ -72,6 +78,8 @@ export class AgentRuntime {
       role_id: roleId,
       team_id: teamId,
       team_role: teamRole,
+      resume_ready: resumeReady,
+      resume_blocked_reason: resumeBlockedReason,
     };
   }
 }

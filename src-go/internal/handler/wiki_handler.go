@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
@@ -142,11 +143,11 @@ func (h *WikiHandler) ListPages(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	space, err := h.service.GetSpaceByProjectID(c, projectID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "wiki space not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgWikiSpaceNotFound)
 	}
 	pages, err := h.service.GetPageTree(c, space.ID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list wiki pages"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListWikiPages)
 	}
 	return c.JSON(http.StatusOK, buildWikiTree(pages))
 }
@@ -154,7 +155,7 @@ func (h *WikiHandler) ListPages(c echo.Context) error {
 func (h *WikiHandler) CreatePage(c echo.Context) error {
 	req := new(model.CreateWikiPageRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -162,16 +163,16 @@ func (h *WikiHandler) CreatePage(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	space, err := h.service.GetSpaceByProjectID(c, projectID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "wiki space not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgWikiSpaceNotFound)
 	}
 	parentID, err := parseOptionalUUID(req.ParentID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid parent ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidParentID)
 	}
 	userID := currentUserID(c)
 	page, err := h.service.CreatePage(c, projectID, space.ID, req.Title, parentID, req.Content, userID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create wiki page"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateWikiPage)
 	}
 	return c.JSON(http.StatusCreated, page.ToDTO())
 }
@@ -179,11 +180,11 @@ func (h *WikiHandler) CreatePage(c echo.Context) error {
 func (h *WikiHandler) GetPage(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	page, err := h.service.GetPage(c, pageID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "wiki page not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgWikiPageNotFound)
 	}
 	userID := currentUserID(c)
 	if userID != nil {
@@ -195,11 +196,11 @@ func (h *WikiHandler) GetPage(c echo.Context) error {
 func (h *WikiHandler) GetPageContext(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	space, page, err := h.service.GetPageContext(c, pageID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "wiki page not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgWikiPageNotFound)
 	}
 	userID := currentUserID(c)
 	if userID != nil {
@@ -214,28 +215,28 @@ func (h *WikiHandler) GetPageContext(c echo.Context) error {
 func (h *WikiHandler) UpdatePage(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	req := new(model.UpdateWikiPageRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 	expectedUpdatedAt, err := parseOptionalTime(req.ExpectedUpdatedAt)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid expectedUpdatedAt"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidExpectedUpdatedAt)
 	}
 	page, err := h.service.UpdatePage(c, appMiddleware.GetProjectID(c), pageID, req.Title, req.Content, req.ContentText, currentUserID(c), expectedUpdatedAt)
 	if err != nil {
 		if errors.Is(err, service.ErrWikiPageConflict) {
-			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: "wiki page has newer changes"})
+			return localizedError(c, http.StatusConflict, i18n.MsgWikiPageHasNewerChanges)
 		}
 		if errors.Is(err, service.ErrWikiPageNotFound) {
-			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "wiki page not found"})
+			return localizedError(c, http.StatusNotFound, i18n.MsgWikiPageNotFound)
 		}
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update wiki page"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateWikiPage)
 	}
 	return c.JSON(http.StatusOK, page.ToDTO())
 }
@@ -243,13 +244,13 @@ func (h *WikiHandler) UpdatePage(c echo.Context) error {
 func (h *WikiHandler) DeletePage(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	if err := h.service.DeletePage(c, appMiddleware.GetProjectID(c), pageID); err != nil {
 		if errors.Is(err, service.ErrWikiPageNotFound) {
-			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "wiki page not found"})
+			return localizedError(c, http.StatusNotFound, i18n.MsgWikiPageNotFound)
 		}
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete wiki page"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteWikiPage)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "wiki page deleted"})
 }
@@ -257,25 +258,25 @@ func (h *WikiHandler) DeletePage(c echo.Context) error {
 func (h *WikiHandler) MovePage(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	req := new(model.MoveWikiPageRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	parentID, err := parseOptionalUUID(req.ParentID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid parent ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidParentID)
 	}
 	page, err := h.service.MovePage(c, appMiddleware.GetProjectID(c), pageID, parentID, req.SortOrder)
 	if err != nil {
 		if errors.Is(err, service.ErrWikiCircularMove) {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "cannot move page into its own descendant"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgCannotMoveIntoDescendant)
 		}
 		if errors.Is(err, service.ErrWikiPageNotFound) {
-			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "wiki page not found"})
+			return localizedError(c, http.StatusNotFound, i18n.MsgWikiPageNotFound)
 		}
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to move wiki page"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToMoveWikiPage)
 	}
 	return c.JSON(http.StatusOK, page.ToDTO())
 }
@@ -283,11 +284,11 @@ func (h *WikiHandler) MovePage(c echo.Context) error {
 func (h *WikiHandler) ListVersions(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	versions, err := h.service.ListVersions(c, pageID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list page versions"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListPageVersions)
 	}
 	payload := make([]model.PageVersionDTO, 0, len(versions))
 	for _, version := range versions {
@@ -299,18 +300,18 @@ func (h *WikiHandler) ListVersions(c echo.Context) error {
 func (h *WikiHandler) CreateVersion(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	req := new(model.CreatePageVersionRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 	version, err := h.service.CreateVersion(c, appMiddleware.GetProjectID(c), pageID, req.Name, currentUserID(c))
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create page version"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreatePageVersion)
 	}
 	return c.JSON(http.StatusCreated, version.ToDTO())
 }
@@ -318,11 +319,11 @@ func (h *WikiHandler) CreateVersion(c echo.Context) error {
 func (h *WikiHandler) GetVersion(c echo.Context) error {
 	versionID, err := uuid.Parse(c.Param("vid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid version ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidVersionID)
 	}
 	version, err := h.service.GetVersion(c, versionID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "page version not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgPageVersionNotFound)
 	}
 	return c.JSON(http.StatusOK, version.ToDTO())
 }
@@ -330,18 +331,18 @@ func (h *WikiHandler) GetVersion(c echo.Context) error {
 func (h *WikiHandler) RestoreVersion(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	versionID, err := uuid.Parse(c.Param("vid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid version ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidVersionID)
 	}
 	page, version, err := h.service.RestoreVersion(c, appMiddleware.GetProjectID(c), pageID, versionID, currentUserID(c))
 	if err != nil {
 		if errors.Is(err, service.ErrPageVersionNotFound) {
-			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "page version not found"})
+			return localizedError(c, http.StatusNotFound, i18n.MsgPageVersionNotFound)
 		}
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to restore page version"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToRestorePageVersion)
 	}
 	return c.JSON(http.StatusOK, map[string]any{
 		"page":    page.ToDTO(),
@@ -352,11 +353,11 @@ func (h *WikiHandler) RestoreVersion(c echo.Context) error {
 func (h *WikiHandler) ListComments(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	comments, err := h.service.ListComments(c, pageID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list page comments"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListPageComments)
 	}
 	payload := make([]model.PageCommentDTO, 0, len(comments))
 	for _, comment := range comments {
@@ -368,22 +369,22 @@ func (h *WikiHandler) ListComments(c echo.Context) error {
 func (h *WikiHandler) CreateComment(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	req := new(model.CreatePageCommentRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 	parentCommentID, err := parseOptionalUUID(req.ParentCommentID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid parent comment ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidParentCommentID)
 	}
 	comment, err := h.service.CreateComment(c, appMiddleware.GetProjectID(c), pageID, req.Body, req.AnchorBlockID, parentCommentID, currentUserID(c), req.Mentions)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create page comment"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreatePageComment)
 	}
 	return c.JSON(http.StatusCreated, comment.ToDTO())
 }
@@ -391,18 +392,18 @@ func (h *WikiHandler) CreateComment(c echo.Context) error {
 func (h *WikiHandler) UpdateComment(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	commentID, err := uuid.Parse(c.Param("cid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid comment ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidCommentID)
 	}
 	req := new(model.UpdatePageCommentRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if req.Resolved == nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "resolved flag is required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgResolvedFlagRequired)
 	}
 	var comment *model.PageComment
 	if *req.Resolved {
@@ -412,9 +413,9 @@ func (h *WikiHandler) UpdateComment(c echo.Context) error {
 	}
 	if err != nil {
 		if errors.Is(err, service.ErrPageCommentNotFound) {
-			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "page comment not found"})
+			return localizedError(c, http.StatusNotFound, i18n.MsgPageCommentNotFound)
 		}
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update page comment"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdatePageComment)
 	}
 	return c.JSON(http.StatusOK, comment.ToDTO())
 }
@@ -422,17 +423,17 @@ func (h *WikiHandler) UpdateComment(c echo.Context) error {
 func (h *WikiHandler) DeleteComment(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	commentID, err := uuid.Parse(c.Param("cid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid comment ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidCommentID)
 	}
 	if err := h.service.DeleteComment(c, appMiddleware.GetProjectID(c), pageID, commentID); err != nil {
 		if errors.Is(err, service.ErrPageCommentNotFound) {
-			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "page comment not found"})
+			return localizedError(c, http.StatusNotFound, i18n.MsgPageCommentNotFound)
 		}
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete page comment"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeletePageComment)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "page comment deleted"})
 }
@@ -441,11 +442,11 @@ func (h *WikiHandler) ListTemplates(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	space, err := h.service.GetSpaceByProjectID(c, projectID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "wiki space not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgWikiSpaceNotFound)
 	}
 	templates, err := h.service.ListTemplates(c, space.ID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list wiki templates"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListWikiTemplates)
 	}
 	payload := make([]model.WikiPageDTO, 0, len(templates))
 	for _, template := range templates {
@@ -457,18 +458,18 @@ func (h *WikiHandler) ListTemplates(c echo.Context) error {
 func (h *WikiHandler) CreateTemplateFromPage(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	req := new(model.CreateTemplateFromPageRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 	template, err := h.service.CreateTemplateFromPage(c, appMiddleware.GetProjectID(c), pageID, req.Name, req.Category, currentUserID(c))
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create template"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateTemplate)
 	}
 	return c.JSON(http.StatusCreated, template.ToDTO())
 }
@@ -476,7 +477,7 @@ func (h *WikiHandler) CreateTemplateFromPage(c echo.Context) error {
 func (h *WikiHandler) CreatePageFromTemplate(c echo.Context) error {
 	req := new(model.CreatePageFromTemplateRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -484,19 +485,19 @@ func (h *WikiHandler) CreatePageFromTemplate(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	space, err := h.service.GetSpaceByProjectID(c, projectID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "wiki space not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgWikiSpaceNotFound)
 	}
 	templateID, err := uuid.Parse(req.TemplateID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid template ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTemplateID)
 	}
 	parentID, err := parseOptionalUUID(req.ParentID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid parent ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidParentID)
 	}
 	page, err := h.service.CreatePageFromTemplate(c, projectID, space.ID, templateID, parentID, req.Title, currentUserID(c))
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create page from template"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreatePageFromTemplate)
 	}
 	return c.JSON(http.StatusCreated, page.ToDTO())
 }
@@ -504,11 +505,11 @@ func (h *WikiHandler) CreatePageFromTemplate(c echo.Context) error {
 func (h *WikiHandler) ListFavorites(c echo.Context) error {
 	userID := currentUserID(c)
 	if userID == nil {
-		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "missing user context"})
+		return localizedError(c, http.StatusUnauthorized, i18n.MsgMissingUserContext)
 	}
 	favorites, err := h.service.ListFavorites(c, *userID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list page favorites"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListPageFavorites)
 	}
 	payload := make([]model.PageFavoriteDTO, 0, len(favorites))
 	for _, favorite := range favorites {
@@ -520,15 +521,15 @@ func (h *WikiHandler) ListFavorites(c echo.Context) error {
 func (h *WikiHandler) ToggleFavorite(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	req := new(model.ToggleFavoriteRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	userID := currentUserID(c)
 	if userID == nil {
-		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "missing user context"})
+		return localizedError(c, http.StatusUnauthorized, i18n.MsgMissingUserContext)
 	}
 	if req.Favorite {
 		err = h.service.AddFavorite(c, pageID, *userID)
@@ -536,7 +537,7 @@ func (h *WikiHandler) ToggleFavorite(c echo.Context) error {
 		err = h.service.RemoveFavorite(c, pageID, *userID)
 	}
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update favorite state"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateFavoriteState)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"favorite": req.Favorite})
 }
@@ -544,11 +545,11 @@ func (h *WikiHandler) ToggleFavorite(c echo.Context) error {
 func (h *WikiHandler) ListRecentAccess(c echo.Context) error {
 	userID := currentUserID(c)
 	if userID == nil {
-		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "missing user context"})
+		return localizedError(c, http.StatusUnauthorized, i18n.MsgMissingUserContext)
 	}
 	accesses, err := h.service.ListRecentAccess(c, *userID, 20)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list recent pages"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListRecentPages)
 	}
 	payload := make([]model.PageRecentAccessDTO, 0, len(accesses))
 	for _, access := range accesses {
@@ -560,14 +561,14 @@ func (h *WikiHandler) ListRecentAccess(c echo.Context) error {
 func (h *WikiHandler) TogglePinned(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	req := new(model.TogglePinnedRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := h.service.SetPinned(c, appMiddleware.GetProjectID(c), pageID, req.Pinned, currentUserID(c)); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update pinned state"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdatePinnedState)
 	}
 	return c.JSON(http.StatusOK, map[string]bool{"pinned": req.Pinned})
 }

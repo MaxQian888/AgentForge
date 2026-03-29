@@ -5,6 +5,7 @@ import (
 	"net/http"
 
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
 
@@ -28,7 +29,7 @@ func NewIMHandler(svc imService) *IMHandler {
 func (h *IMHandler) HandleMessage(c echo.Context) error {
 	req := new(model.IMMessageRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -44,7 +45,7 @@ func (h *IMHandler) HandleMessage(c echo.Context) error {
 func (h *IMHandler) HandleCommand(c echo.Context) error {
 	req := new(model.IMCommandRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -60,7 +61,7 @@ func (h *IMHandler) HandleCommand(c echo.Context) error {
 func (h *IMHandler) Send(c echo.Context) error {
 	req := new(model.IMSendRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -75,7 +76,7 @@ func (h *IMHandler) Send(c echo.Context) error {
 func (h *IMHandler) Notify(c echo.Context) error {
 	req := new(model.IMNotifyRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -90,7 +91,7 @@ func (h *IMHandler) Notify(c echo.Context) error {
 func (h *IMHandler) HandleAction(c echo.Context) error {
 	req := new(model.IMActionRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -106,7 +107,7 @@ func (h *IMHandler) HandleAction(c echo.Context) error {
 func (h *IMHandler) HandleIntent(c echo.Context) error {
 	req := new(model.IMIntentRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})

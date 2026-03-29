@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"sort"
+	"strings"
 	"sync"
 	"time"
 
@@ -53,6 +54,10 @@ type WorkflowExecutionService struct {
 	roles    PluginRoleStore
 	executor WorkflowStepExecutor
 	now      func() time.Time
+}
+
+type workflowRoleSkillRootProvider interface {
+	SkillsDir() string
 }
 
 func NewWorkflowExecutionService(
@@ -319,7 +324,10 @@ func (s *WorkflowExecutionService) executeStep(
 	if err != nil {
 		return s.failRun(ctx, run, step, fmt.Errorf("resolve workflow role %s: %w", step.RoleID, err))
 	}
-	roleProfile := rolepkg.BuildExecutionProfile(roleManifest)
+	roleProfile := rolepkg.BuildExecutionProfile(roleManifest, rolepkg.WithSkillRoot(resolveWorkflowRoleSkillsDir(s.roles)))
+	if rolepkg.HasBlockingSkillDiagnostics(roleProfile) {
+		return s.failRun(ctx, run, step, fmt.Errorf("resolve workflow role %s runtime skills: %s", step.RoleID, joinWorkflowBlockingSkillMessages(roleProfile.SkillDiagnostics)))
+	}
 
 	// Resolve step definition to pass Config through.
 	stepDef := model.WorkflowStepDefinition{ID: step.StepID, Role: step.RoleID, Action: step.Action}
@@ -393,6 +401,24 @@ func (s *WorkflowExecutionService) executeStep(
 		return nil, lastErr
 	}
 	return nil, nil
+}
+
+func resolveWorkflowRoleSkillsDir(store PluginRoleStore) string {
+	provider, ok := store.(workflowRoleSkillRootProvider)
+	if !ok {
+		return ""
+	}
+	return provider.SkillsDir()
+}
+
+func joinWorkflowBlockingSkillMessages(diagnostics []model.RoleExecutionSkillDiagnostic) string {
+	messages := make([]string, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Blocking {
+			messages = append(messages, diagnostic.Message)
+		}
+	}
+	return strings.Join(messages, "; ")
 }
 
 func (s *WorkflowExecutionService) completeRun(ctx context.Context, run *model.WorkflowPluginRun) (*model.WorkflowPluginRun, error) {

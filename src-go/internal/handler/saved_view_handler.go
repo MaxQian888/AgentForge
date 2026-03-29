@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
@@ -36,7 +37,7 @@ func (h *SavedViewHandler) List(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	userID, err := claimsUserID(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "authentication required"})
+		return localizedError(c, http.StatusUnauthorized, i18n.MsgAuthRequired)
 	}
 	roles := []string{}
 	if h.memberLookup != nil {
@@ -46,7 +47,7 @@ func (h *SavedViewHandler) List(c echo.Context) error {
 	}
 	views, err := h.service.ListAccessibleViews(c.Request().Context(), projectID, *userID, roles)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list saved views"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListSavedViews)
 	}
 	dtos := make([]model.SavedViewDTO, 0, len(views))
 	for _, view := range views {
@@ -59,18 +60,18 @@ func (h *SavedViewHandler) Create(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	userID, err := claimsUserID(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "authentication required"})
+		return localizedError(c, http.StatusUnauthorized, i18n.MsgAuthRequired)
 	}
 	req := new(model.CreateSavedViewRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 	ownerID, err := parseOptionalUUIDString(req.OwnerID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid owner ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidOwnerID)
 	}
 	if ownerID == nil && len(req.SharedWith) == 0 {
 		ownerID = userID
@@ -84,7 +85,7 @@ func (h *SavedViewHandler) Create(c echo.Context) error {
 		Config:     string(req.Config),
 	}
 	if err := h.service.CreateView(c.Request().Context(), view); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create saved view"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateSavedView)
 	}
 	if req.IsDefault {
 		_ = h.service.SetDefaultView(c.Request().Context(), projectID, view.ID)
@@ -96,15 +97,15 @@ func (h *SavedViewHandler) Update(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	viewID, err := uuid.Parse(c.Param("vid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid view ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidViewID)
 	}
 	view, err := h.service.GetView(c.Request().Context(), viewID)
 	if err != nil || view == nil || view.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "saved view not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgSavedViewNotFound)
 	}
 	req := new(model.UpdateSavedViewRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if req.Name != nil {
 		view.Name = *req.Name
@@ -112,7 +113,7 @@ func (h *SavedViewHandler) Update(c echo.Context) error {
 	if req.OwnerID != nil {
 		ownerID, parseErr := parseOptionalUUIDString(req.OwnerID)
 		if parseErr != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid owner ID"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidOwnerID)
 		}
 		view.OwnerID = ownerID
 	}
@@ -126,7 +127,7 @@ func (h *SavedViewHandler) Update(c echo.Context) error {
 		view.Config = string(req.Config)
 	}
 	if err := h.service.UpdateView(c.Request().Context(), view); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update saved view"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateSavedView)
 	}
 	if view.IsDefault {
 		_ = h.service.SetDefaultView(c.Request().Context(), projectID, view.ID)
@@ -138,14 +139,14 @@ func (h *SavedViewHandler) Delete(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	viewID, err := uuid.Parse(c.Param("vid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid view ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidViewID)
 	}
 	view, err := h.service.GetView(c.Request().Context(), viewID)
 	if err != nil || view == nil || view.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "saved view not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgSavedViewNotFound)
 	}
 	if err := h.service.DeleteView(c.Request().Context(), viewID); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete saved view"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteSavedView)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "saved view deleted"})
 }
@@ -154,10 +155,10 @@ func (h *SavedViewHandler) SetDefault(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	viewID, err := uuid.Parse(c.Param("vid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid view ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidViewID)
 	}
 	if err := h.service.SetDefaultView(c.Request().Context(), projectID, viewID); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to set default view"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToSetDefaultView)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "default view updated"})
 }

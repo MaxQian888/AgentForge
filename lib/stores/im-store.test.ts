@@ -28,6 +28,7 @@ const DEFAULT_BRIDGE_STATUS: IMBridgeStatus = {
   registered: false,
   lastHeartbeat: null,
   providers: [],
+  providerDetails: [],
   health: "disconnected",
 };
 
@@ -47,6 +48,7 @@ function makeChannel(overrides: Partial<IMChannel> = {}): IMChannel {
     name: "Alerts",
     channelId: "chat-1",
     webhookUrl: "https://example.com/webhook",
+    platformConfig: {},
     events: ["workflow.completed"],
     active: true,
     ...overrides,
@@ -141,6 +143,7 @@ describe("useIMStore", () => {
       registered: true,
       lastHeartbeat: "2026-03-26T08:30:00.000Z",
       providers: ["feishu", "telegram"],
+      providerDetails: [],
       health: "healthy",
     };
     api.get.mockResolvedValueOnce({ data: bridgeStatus });
@@ -166,6 +169,7 @@ describe("useIMStore", () => {
         registered: true,
         lastHeartbeat: "2026-03-26T08:30:00.000Z",
         providers: ["feishu"],
+        providerDetails: [],
         health: "healthy",
       },
       error: "stale",
@@ -219,6 +223,49 @@ describe("useIMStore", () => {
     });
   });
 
+  it("fetches dynamic IM event types", async () => {
+    const api = makeApiClient();
+    api.get.mockResolvedValueOnce({
+      data: ["task.created", "review.requested", "workflow.failed"],
+    });
+    mockCreateApiClient.mockReturnValue(api);
+
+    await useIMStore.getState().fetchEventTypes();
+
+    expect(api.get).toHaveBeenCalledWith("/api/v1/im/event-types", {
+      token: "test-token",
+    });
+    expect(useIMStore.getState()).toMatchObject({
+      eventTypes: ["task.created", "review.requested", "workflow.failed"],
+      error: null,
+    });
+  });
+
+  it("retries a failed delivery and refreshes history", async () => {
+    const api = makeApiClient();
+    api.post.mockResolvedValueOnce({ data: { id: "delivery-1" } });
+    api.get.mockResolvedValueOnce({
+      data: [makeDelivery({ id: "delivery-1", status: "pending" })],
+    });
+    mockCreateApiClient.mockReturnValue(api);
+
+    await useIMStore.getState().retryDelivery("delivery-1");
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/api/v1/im/deliveries/delivery-1/retry",
+      {},
+      { token: "test-token" },
+    );
+    expect(api.get).toHaveBeenCalledWith("/api/v1/im/deliveries", {
+      token: "test-token",
+    });
+    expect(useIMStore.getState()).toMatchObject({
+      deliveries: [makeDelivery({ id: "delivery-1", status: "pending" })],
+      loading: false,
+      error: null,
+    });
+  });
+
   it("returns early when saving a channel without a token", async () => {
     mockGetAuthState.mockReturnValueOnce({ accessToken: null });
 
@@ -227,6 +274,7 @@ describe("useIMStore", () => {
       name: "Alerts",
       channelId: "chat-1",
       webhookUrl: "https://example.com/webhook",
+      platformConfig: {},
       events: ["workflow.completed"],
       active: true,
     });
@@ -246,6 +294,7 @@ describe("useIMStore", () => {
       name: "Alerts",
       channelId: "chat-1",
       webhookUrl: "https://example.com/webhook",
+      platformConfig: {},
       events: ["workflow.completed"],
       active: true,
     });
@@ -257,6 +306,7 @@ describe("useIMStore", () => {
         name: "Alerts",
         channelId: "chat-1",
         webhookUrl: "https://example.com/webhook",
+        platformConfig: {},
         events: ["workflow.completed"],
         active: true,
       },
@@ -303,6 +353,7 @@ describe("useIMStore", () => {
       name: "Alerts",
       channelId: "chat-1",
       webhookUrl: "https://example.com/webhook",
+      platformConfig: {},
       events: ["workflow.completed"],
       active: true,
     });

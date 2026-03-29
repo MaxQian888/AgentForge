@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
@@ -48,7 +49,7 @@ func (h *PluginHandler) InstallLocal(c echo.Context) error {
 		Source  *model.PluginSource `json:"source"`
 	}
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid install request"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidInstallRequest)
 	}
 
 	var (
@@ -59,7 +60,7 @@ func (h *PluginHandler) InstallLocal(c echo.Context) error {
 	case req.EntryID != "":
 		record, err = h.service.InstallCatalogEntry(c.Request().Context(), req.EntryID)
 	case req.Path == "":
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "path or entry_id is required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgPathOrEntryIDRequired)
 	case req.Source == nil || req.Source.Type == "" || req.Source.Type == model.PluginSourceLocal:
 		record, err = h.service.RegisterLocalPath(c.Request().Context(), req.Path)
 	default:
@@ -149,7 +150,7 @@ func (h *PluginHandler) Invoke(c echo.Context) error {
 		Payload   map[string]any `json:"payload"`
 	}
 	if err := c.Bind(&req); err != nil || req.Operation == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "operation is required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgOperationRequired)
 	}
 	if req.Payload == nil {
 		req.Payload = map[string]any{}
@@ -180,7 +181,7 @@ func (h *PluginHandler) CallMCPTool(c echo.Context) error {
 		Arguments map[string]any `json:"arguments"`
 	}
 	if err := c.Bind(&req); err != nil || req.ToolName == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "tool_name is required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgToolNameRequired)
 	}
 	if req.Arguments == nil {
 		req.Arguments = map[string]any{}
@@ -198,7 +199,7 @@ func (h *PluginHandler) ReadMCPResource(c echo.Context) error {
 		URI string `json:"uri"`
 	}
 	if err := c.Bind(&req); err != nil || req.URI == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "uri is required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgURIRequired)
 	}
 
 	result, err := h.service.ReadMCPResource(c.Request().Context(), c.Param("id"), req.URI)
@@ -214,7 +215,7 @@ func (h *PluginHandler) GetMCPPrompt(c echo.Context) error {
 		Arguments map[string]string `json:"arguments"`
 	}
 	if err := c.Bind(&req); err != nil || req.Name == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "name is required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgNameRequired)
 	}
 
 	result, err := h.service.GetMCPPrompt(c.Request().Context(), c.Param("id"), req.Name, req.Arguments)
@@ -227,7 +228,7 @@ func (h *PluginHandler) GetMCPPrompt(c echo.Context) error {
 func (h *PluginHandler) Uninstall(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "plugin id required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgPluginIDRequired)
 	}
 	if err := h.service.Uninstall(c.Request().Context(), id); err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
@@ -241,7 +242,7 @@ func (h *PluginHandler) Update(c echo.Context) error {
 		Source *model.PluginSource `json:"source"`
 	}
 	if err := c.Bind(&req); err != nil || req.Path == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "path is required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgPathRequired)
 	}
 	record, err := h.service.Update(c.Request().Context(), c.Param("id"), service.PluginInstallRequest{
 		Path:   req.Path,
@@ -258,7 +259,7 @@ func (h *PluginHandler) InstallCatalogEntry(c echo.Context) error {
 		EntryID string `json:"entry_id"`
 	}
 	if err := c.Bind(&req); err != nil || req.EntryID == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "entry_id is required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgEntryIDRequired)
 	}
 	record, err := h.service.InstallCatalogEntry(c.Request().Context(), req.EntryID)
 	if err != nil {
@@ -270,11 +271,11 @@ func (h *PluginHandler) InstallCatalogEntry(c echo.Context) error {
 func (h *PluginHandler) UpdateConfig(c echo.Context) error {
 	id := c.Param("id")
 	if id == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "plugin id required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgPluginIDRequired)
 	}
 	req := new(model.UpdatePluginConfigRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	rec, err := h.service.UpdateConfig(c.Request().Context(), id, req.Config)
 	if err != nil {
@@ -286,7 +287,7 @@ func (h *PluginHandler) UpdateConfig(c echo.Context) error {
 func (h *PluginHandler) Marketplace(c echo.Context) error {
 	plugins, err := h.service.ListMarketplace(c.Request().Context())
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list marketplace"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListMarketplace)
 	}
 	return c.JSON(http.StatusOK, plugins)
 }
@@ -296,7 +297,7 @@ func (h *PluginHandler) ListEvents(c echo.Context) error {
 	if raw := c.QueryParam("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed <= 0 {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "limit must be a positive integer"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgLimitMustBePositive)
 		}
 		limit = parsed
 	}
@@ -310,11 +311,11 @@ func (h *PluginHandler) ListEvents(c echo.Context) error {
 
 func (h *PluginHandler) StartWorkflowRun(c echo.Context) error {
 	if h.workflow == nil {
-		return c.JSON(http.StatusNotImplemented, model.ErrorResponse{Message: "workflow execution is not configured"})
+		return localizedError(c, http.StatusNotImplemented, i18n.MsgWorkflowExecutionNotConfigured)
 	}
 	var req service.WorkflowExecutionRequest
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid workflow execution request"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidWorkflowExecutionReq)
 	}
 	run, err := h.workflow.Start(c.Request().Context(), c.Param("id"), req)
 	if err != nil {
@@ -325,13 +326,13 @@ func (h *PluginHandler) StartWorkflowRun(c echo.Context) error {
 
 func (h *PluginHandler) ListWorkflowRuns(c echo.Context) error {
 	if h.workflow == nil {
-		return c.JSON(http.StatusNotImplemented, model.ErrorResponse{Message: "workflow execution is not configured"})
+		return localizedError(c, http.StatusNotImplemented, i18n.MsgWorkflowExecutionNotConfigured)
 	}
 	limit := 20
 	if raw := c.QueryParam("limit"); raw != "" {
 		parsed, err := strconv.Atoi(raw)
 		if err != nil || parsed <= 0 {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "limit must be a positive integer"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgLimitMustBePositive)
 		}
 		limit = parsed
 	}
@@ -344,11 +345,11 @@ func (h *PluginHandler) ListWorkflowRuns(c echo.Context) error {
 
 func (h *PluginHandler) GetWorkflowRun(c echo.Context) error {
 	if h.workflow == nil {
-		return c.JSON(http.StatusNotImplemented, model.ErrorResponse{Message: "workflow execution is not configured"})
+		return localizedError(c, http.StatusNotImplemented, i18n.MsgWorkflowExecutionNotConfigured)
 	}
 	runID, err := uuid.Parse(c.Param("runId"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "runId must be a valid UUID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgRunIDMustBeValidUUID)
 	}
 	run, err := h.workflow.GetRun(c.Request().Context(), runID)
 	if err != nil {
@@ -371,31 +372,42 @@ func (h *PluginHandler) ListRemotePlugins(c echo.Context) error {
 func (h *PluginHandler) InstallRemotePlugin(c echo.Context) error {
 	pluginID := c.Param("id")
 	if pluginID == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "plugin id is required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgPluginIDIsRequired)
 	}
 	var req struct {
 		Version string `json:"version"`
 	}
 	if err := c.Bind(&req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if req.Version == "" {
 		req.Version = "latest"
 	}
 	if err := h.service.InstallFromRemote(c.Request().Context(), pluginID, req.Version); err != nil {
+		if failure, ok := service.RemoteRegistryFailureFromError(err); ok {
+			return c.JSON(failure.StatusCode, model.RemotePluginInstallResponse{
+				OK:        false,
+				PluginID:  pluginID,
+				Version:   req.Version,
+				ErrorCode: failure.Code,
+				Message:   failure.Message,
+			})
+		}
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
 	}
-	return c.JSON(http.StatusOK, map[string]string{
-		"message":  "plugin installed from remote registry",
-		"pluginId": pluginID,
-		"version":  req.Version,
+	return c.JSON(http.StatusOK, model.RemotePluginInstallResponse{
+		OK:       true,
+		PluginID: pluginID,
+		Version:  req.Version,
+		Registry: h.service.RegistryURL(),
+		Message:  "plugin installed from remote registry",
 	})
 }
 
 func (h *PluginHandler) SyncRuntimeState(c echo.Context) error {
 	var update model.PluginRuntimeStatus
 	if err := c.Bind(&update); err != nil || update.PluginID == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "plugin_id is required"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgPluginIDIsRequired)
 	}
 
 	record, err := h.service.ReportRuntimeState(c.Request().Context(), update.PluginID, update)

@@ -159,7 +159,7 @@ func TestControlPlaneConn_AckWritesBridgeCursorPayload(t *testing.T) {
 	}
 	defer conn.Close()
 
-	if err := conn.Ack(9, "delivery-9"); err != nil {
+	if err := conn.Ack(9, "delivery-9", "actioncard_send_failed"); err != nil {
 		t.Fatalf("Ack error: %v", err)
 	}
 
@@ -167,6 +167,9 @@ func TestControlPlaneConn_AckWritesBridgeCursorPayload(t *testing.T) {
 	case ack := <-ackCh:
 		if ack.BridgeID != "bridge-1" || ack.Cursor != 9 || ack.DeliveryID != "delivery-9" {
 			t.Fatalf("ack = %+v", ack)
+		}
+		if ack.DowngradeReason != "actioncard_send_failed" {
+			t.Fatalf("DowngradeReason = %q", ack.DowngradeReason)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for ack payload")

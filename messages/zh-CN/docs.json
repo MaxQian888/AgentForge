@@ -1,0 +1,103 @@
+{
+  "title": "文档工作区",
+  "selectProject": "请从仪表盘选择一个项目来打开其 Wiki 空间。",
+  "subtitle": "在工作旁记录 PRD、ADR、操作手册、入职笔记和执行摘要。",
+  "useTemplate": "使用模板",
+  "newPage": "新建页面",
+  "pinned": "已置顶",
+  "noPinned": "暂无置顶页面。",
+  "favorites": "收藏",
+  "noFavorites": "将页面标记为收藏以显示在此处。",
+  "recent": "最近",
+  "noRecent": "最近打开的页面会显示在这里。",
+  "allPages": "所有页面",
+  "untitledDoc": "无标题文档",
+  "newFromTemplate": "从模板新建文档",
+  "sidebar": {
+    "searchDocs": "搜索文档",
+    "searchPlaceholder": "查找页面、模板或操作手册",
+    "pageTree": "页面树",
+    "favorites": "收藏",
+    "noFavorites": "暂无收藏。",
+    "recent": "最近",
+    "noRecent": "暂无最近文档。"
+  },
+  "pageTree": {
+    "empty": "暂无页面。创建第一个项目文档以开始构建页面树。"
+  },
+  "pageDetail": {
+    "loading": "正在加载文档…",
+    "notFound": "未找到文档",
+    "backToDocs": "返回文档",
+    "lastUpdated": "最后更新",
+    "newFromTemplate": "从模板新建",
+    "createTasks": "创建任务",
+    "copyLink": "复制链接",
+    "blockTaskCounts": "区块任务统计",
+    "tasks": "{count} 个任务"
+  },
+  "comments": {
+    "title": "评论",
+    "desc": "页面级和行内讨论跟随草稿展示。",
+    "readonlyHint": "共享快照为只读。打开实时文档以添加或解决评论。",
+    "comment": "评论",
+    "writeComment": "写下评论…",
+    "anchor": "锚点：{id}",
+    "pageLevel": "页面级",
+    "detachedTitle": "已脱离评论",
+    "detachedDesc": "这些评论引用的区块在当前草稿中已不存在。"
+  },
+  "editor": {
+    "saveVersion": "保存版本",
+    "saveAsTemplate": "另存为模板",
+    "shareVersion": "分享版本"
+  },
+  "versionHistory": {
+    "title": "版本历史",
+    "restore": "恢复",
+    "share": "分享",
+    "confirmRestore": "恢复 {name} (v{version})？",
+    "noVersions": "暂无保存的版本。"
+  },
+  "versionViewer": {
+    "selectVersion": "选择一个版本进行预览。"
+  },
+  "templatePicker": {
+    "title": "选择模板",
+    "desc": "从预置文档或团队保存的模板开始。",
+    "uncategorized": "未分类",
+    "system": "系统",
+    "custom": "自定义",
+    "noTemplates": "暂无可用模板。",
+    "close": "关闭"
+  },
+  "templateCenter": {
+    "title": "模板中心",
+    "desc": "复用预置的 PRD、ADR、操作手册及团队自定义模板。",
+    "useTemplate": "使用模板",
+    "noTemplates": "模板加载后会显示在这里。"
+  },
+  "relatedTasks": {
+    "title": "关联任务",
+    "desc": "与本文档关联的工作项。",
+    "linkTask": "关联任务",
+    "remove": "移除",
+    "empty": "暂无关联到本文档的任务。"
+  },
+  "taskLinkPicker": {
+    "title": "选择任务",
+    "desc": "将现有任务关联到本文档。",
+    "noTasks": "暂无可关联的任务。",
+    "close": "关闭"
+  },
+  "decompose": {
+    "title": "从选择创建任务",
+    "desc": "选择一个或多个区块，并可选择挂载到现有父任务下。",
+    "selectAll": "全选区块",
+    "noBlocks": "暂无可分解的区块。",
+    "parentTask": "父任务",
+    "createRootTasks": "创建根级待办任务",
+    "cancel": "取消",
+    "createTasks": "创建任务"
+  }
+}

@@ -54,7 +54,7 @@ describe("TeamsPage", () => {
     const user = userEvent.setup();
     render(<TeamsPage />);
 
-    await waitFor(() => expect(fetchTeams).toHaveBeenCalledWith("project-1"));
+    await waitFor(() => expect(fetchTeams).toHaveBeenCalledWith("project-1", undefined));
     expect(screen.getByText("failed to list teams")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: /retry/i }));

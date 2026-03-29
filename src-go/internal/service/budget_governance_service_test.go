@@ -161,3 +161,49 @@ func TestBudgetGovernanceService_CheckProjectBudgetAllowsWithoutLimitAndWrapsErr
 		t.Fatalf("CheckProjectBudget() error = %v, want wrapped list error", err)
 	}
 }
+
+func TestBudgetGovernanceService_CheckBudgetDelegatesSprintThenProject(t *testing.T) {
+	projectID := uuid.New()
+	sprintID := uuid.New()
+	reader := &mockBudgetSprintReader{
+		sprintsByID: map[uuid.UUID]*model.Sprint{
+			sprintID: {
+				ID:             sprintID,
+				ProjectID:      projectID,
+				TotalBudgetUsd: 10,
+				SpentUsd:       7.5,
+			},
+		},
+		sprintsByProject: map[uuid.UUID][]*model.Sprint{
+			projectID: {
+				{ID: sprintID, ProjectID: projectID, SpentUsd: 7.5},
+			},
+		},
+	}
+	svc := service.NewBudgetGovernanceService(reader)
+	svc.SetProjectBudgetLimit(20)
+
+	result, err := svc.CheckBudget(context.Background(), projectID, &sprintID, 0.5)
+	if err != nil {
+		t.Fatalf("CheckBudget() error = %v", err)
+	}
+	if !result.Allowed || !result.Warning {
+		t.Fatalf("CheckBudget() = %+v, want sprint warning", result)
+	}
+
+	result, err = svc.CheckBudget(context.Background(), projectID, &sprintID, 3)
+	if err != nil {
+		t.Fatalf("CheckBudget() error = %v", err)
+	}
+	if result.Allowed || !strings.Contains(result.Reason, "sprint budget exceeded") {
+		t.Fatalf("CheckBudget() = %+v, want sprint block", result)
+	}
+
+	result, err = svc.CheckBudget(context.Background(), projectID, nil, 13)
+	if err != nil {
+		t.Fatalf("CheckBudget() project-only error = %v", err)
+	}
+	if result.Allowed || !strings.Contains(result.Reason, "project budget exceeded") {
+		t.Fatalf("CheckBudget() project-only = %+v, want project block", result)
+	}
+}

@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
 )
@@ -17,15 +18,15 @@ func ProjectMiddleware(projectRepo *repository.ProjectRepository) echo.Middlewar
 		return func(c echo.Context) error {
 			pid := c.Param("pid")
 			if pid == "" {
-				return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "project ID required"})
+				return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: appI18n.Localize(GetLocalizer(c), appI18n.MsgProjectIDRequired)})
 			}
 			id, err := uuid.Parse(pid)
 			if err != nil {
-				return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid project ID"})
+				return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: appI18n.Localize(GetLocalizer(c), appI18n.MsgInvalidProjectID)})
 			}
 			project, err := projectRepo.GetByID(c.Request().Context(), id)
 			if err != nil {
-				return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "project not found"})
+				return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: appI18n.Localize(GetLocalizer(c), appI18n.MsgProjectNotFound)})
 			}
 			c.Set(ProjectContextKey, project)
 			c.Set(ProjectIDContextKey, project.ID)

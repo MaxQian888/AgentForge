@@ -1,6 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import {
   buildClaudeQueryOptions,
+  extractClaudeContinuity,
   persistRuntimeSnapshot,
   streamClaudeRuntime,
 } from "./claude-runtime.js";
@@ -56,6 +57,38 @@ describe("claude runtime", () => {
     expect(defaultOptions.allowDangerouslySkipPermissions).toBeUndefined();
     expect(bypassOptions.allowedTools).toBeUndefined();
     expect(bypassOptions.allowDangerouslySkipPermissions).toBe(true);
+  });
+
+  test("builds a Claude launch tuple with resolved model, budget, and continuity resume inputs", () => {
+    const runtime = new AgentRuntime("task-launch", "session-launch");
+    const options = buildClaudeQueryOptions(
+      createRequest({
+        task_id: "task-launch",
+        session_id: "session-launch",
+        runtime: "claude_code",
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        budget_usd: 7,
+      }),
+      "System prompt",
+      runtime,
+      undefined,
+      {
+        runtime: "claude_code",
+        resume_ready: true,
+        captured_at: 100,
+        session_handle: "claude-session-launch",
+        checkpoint_id: "assistant-uuid-1",
+      },
+    );
+
+    expect(options).toMatchObject({
+      model: "claude-sonnet-4-5",
+      maxBudgetUsd: 7,
+      resume: "claude-session-launch",
+      resumeSessionAt: "assistant-uuid-1",
+      permissionMode: "default",
+    });
   });
 
   test("streams assistant output, tool events, and usage updates", async () => {
@@ -279,5 +312,81 @@ describe("claude runtime", () => {
         },
       },
     });
+  });
+
+  test("persists Claude continuity metadata and resume readiness in saved snapshots", () => {
+    const runtime = new AgentRuntime("task-6", "session-6");
+    const sessionManager = new SessionManager();
+
+    runtime.continuity = {
+      runtime: "claude_code",
+      resume_ready: true,
+      captured_at: 1_111,
+      session_handle: "claude-session-6",
+      checkpoint_id: "checkpoint-6",
+      resume_token: "resume-token-6",
+    };
+
+    persistRuntimeSnapshot(
+      runtime,
+      createRequest({
+        task_id: "task-6",
+        session_id: "session-6",
+        runtime: "claude_code",
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+      }),
+      { send() {} },
+      sessionManager,
+      () => 1_234,
+    );
+
+    expect(sessionManager.restore("task-6")).toMatchObject({
+      continuity: {
+        runtime: "claude_code",
+        resume_ready: true,
+        captured_at: 1_111,
+        session_handle: "claude-session-6",
+        checkpoint_id: "checkpoint-6",
+        resume_token: "resume-token-6",
+      },
+    });
+  });
+
+  test("extracts resumable Claude continuity metadata from runtime events", () => {
+    expect(
+      extractClaudeContinuity(
+        {
+          type: "assistant",
+          session_id: "claude-session-7",
+          uuid: "assistant-uuid-7",
+        },
+        777,
+      ),
+    ).toEqual({
+      runtime: "claude_code",
+      resume_ready: true,
+      captured_at: 777,
+      session_handle: "claude-session-7",
+      checkpoint_id: "assistant-uuid-7",
+      resume_token: "claude-session-7",
+    });
+  });
+
+  test("does not leak non-Claude continuity through Claude fallback branches", () => {
+    expect(
+      extractClaudeContinuity(
+        {
+          type: "assistant",
+        },
+        888,
+        {
+          runtime: "codex",
+          resume_ready: true,
+          captured_at: 777,
+          thread_id: "thread-1",
+        },
+      ),
+    ).toBeNull();
   });
 });

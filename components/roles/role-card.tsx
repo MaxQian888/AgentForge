@@ -1,22 +1,29 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Shield, Pencil, Trash2 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import type { RoleManifest } from "@/lib/stores/role-store";
+import type { RoleManifest, RoleSkillCatalogEntry } from "@/lib/stores/role-store";
 
 interface RoleCardProps {
   role: RoleManifest;
+  skillCatalog?: RoleSkillCatalogEntry[];
   onEdit: () => void;
   onDelete: () => void;
 }
 
-export function RoleCard({ role, onEdit, onDelete }: RoleCardProps) {
+export function RoleCard({ role, skillCatalog = [], onEdit, onDelete }: RoleCardProps) {
+  const t = useTranslations("roles");
   const allowedTools = role.capabilities.allowedTools ?? role.capabilities.tools ?? [];
   const skills = role.capabilities.skills ?? [];
   const autoLoadCount = skills.filter((skill) => skill.autoLoad).length;
   const onDemandCount = skills.length - autoLoadCount;
+  const resolvedCount = skills.filter((skill) =>
+    skillCatalog.some((entry) => entry.path === skill.path),
+  ).length;
+  const unresolvedCount = skills.length - resolvedCount;
   const hasPathRestrictions =
     role.security.allowedPaths.length > 0 || role.security.deniedPaths.length > 0;
 
@@ -46,36 +53,35 @@ export function RoleCard({ role, onEdit, onDelete }: RoleCardProps) {
           ))}
           {role.extends ? (
             <Badge variant="outline" className="text-xs">
-              Extends {role.extends}
+              {t("card.extends", { name: role.extends })}
             </Badge>
           ) : null}
         </div>
         <div className="mb-4 grid gap-2 text-xs text-muted-foreground">
           {allowedTools.length > 0 ? (
-            <p>Tools: {allowedTools.join(", ")}</p>
+            <p>{t("card.tools")}: {allowedTools.join(", ")}</p>
           ) : (
-            <p>Tools: inherits default platform capabilities</p>
+            <p>{t("card.tools")}: {t("card.toolsDefault")}</p>
           )}
           {role.capabilities.maxBudgetUsd != null ? (
-            <p>Max budget: ${role.capabilities.maxBudgetUsd.toFixed(2)}</p>
+            <p>{t("card.maxBudget")}: ${role.capabilities.maxBudgetUsd.toFixed(2)}</p>
           ) : null}
           {role.capabilities.maxTurns != null ? (
-            <p>Max turns: {role.capabilities.maxTurns}</p>
+            <p>{t("card.maxTurns")}: {role.capabilities.maxTurns}</p>
           ) : null}
           {skills.length > 0 ? (
             <>
-              <p>Skills: {autoLoadCount} auto / {onDemandCount} on-demand</p>
-              <p>Key skills: {skills.slice(0, 3).map((skill) => skill.path).join(", ")}</p>
+              <p>{t("card.skills")}: {t("card.skillsAutoOnDemand", { auto: autoLoadCount, onDemand: onDemandCount })}</p>
+              <p>{t("card.keySkills")}: {skills.slice(0, 3).map((skill) => skill.path).join(", ")}</p>
+              <p>{t("card.skillCatalog")}: {t("card.skillCatalogResolved", { resolved: resolvedCount, unresolved: unresolvedCount })}</p>
             </>
           ) : null}
           {role.security.requireReview ? (
-            <p>Review gate: required before execution</p>
+            <p>{t("card.reviewGate")}</p>
           ) : null}
           {hasPathRestrictions ? (
             <p>
-              Path policy: {role.security.allowedPaths.length} allow /
-              {" "}
-              {role.security.deniedPaths.length} deny
+              {t("card.pathPolicy", { allow: role.security.allowedPaths.length, deny: role.security.deniedPaths.length })}
             </p>
           ) : null}
         </div>
@@ -87,7 +93,7 @@ export function RoleCard({ role, onEdit, onDelete }: RoleCardProps) {
             aria-label={`Edit ${role.metadata.name}`}
           >
             <Pencil className="mr-1 size-3.5" />
-            Edit
+            {t("card.edit")}
           </Button>
           <Button
             variant="outline"
@@ -96,7 +102,7 @@ export function RoleCard({ role, onEdit, onDelete }: RoleCardProps) {
             aria-label={`Delete ${role.metadata.name}`}
           >
             <Trash2 className="mr-1 size-3.5" />
-            Delete
+            {t("card.delete")}
           </Button>
         </div>
       </CardContent>

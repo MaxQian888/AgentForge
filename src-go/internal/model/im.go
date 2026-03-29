@@ -7,7 +7,7 @@ import (
 
 // IMMessageRequest represents an incoming IM message webhook.
 type IMMessageRequest struct {
-	Platform  string `json:"platform" validate:"required,oneof=feishu dingtalk slack telegram discord wecom"`
+	Platform  string `json:"platform" validate:"required,oneof=feishu dingtalk slack telegram discord wecom qq qqbot"`
 	ChannelID string `json:"channelId" validate:"required"`
 	UserID    string `json:"userId"`
 	UserName  string `json:"userName"`
@@ -210,38 +210,60 @@ type IMFeishuCardPayload struct {
 }
 
 type IMChannel struct {
-	ID         string   `json:"id"`
-	Platform   string   `json:"platform"`
-	Name       string   `json:"name"`
-	ChannelID  string   `json:"channelId"`
-	WebhookURL string   `json:"webhookUrl"`
-	Events     []string `json:"events"`
-	Active     bool     `json:"active"`
+	ID             string            `json:"id"`
+	Platform       string            `json:"platform"`
+	Name           string            `json:"name"`
+	ChannelID      string            `json:"channelId"`
+	WebhookURL     string            `json:"webhookUrl"`
+	PlatformConfig map[string]string `json:"platformConfig,omitempty"`
+	Events         []string          `json:"events"`
+	Active         bool              `json:"active"`
+}
+
+type IMBridgeProviderDetail struct {
+	Platform         string         `json:"platform"`
+	Status           string         `json:"status,omitempty"`
+	Transport        string         `json:"transport,omitempty"`
+	CallbackPaths    []string       `json:"callbackPaths,omitempty"`
+	CapabilityMatrix map[string]any `json:"capabilityMatrix,omitempty"`
 }
 
 type IMBridgeStatus struct {
-	Registered    bool     `json:"registered"`
-	LastHeartbeat *string  `json:"lastHeartbeat"`
-	Providers     []string `json:"providers"`
-	Health        string   `json:"health"`
+	Registered      bool                     `json:"registered"`
+	LastHeartbeat   *string                  `json:"lastHeartbeat"`
+	Providers       []string                 `json:"providers"`
+	ProviderDetails []IMBridgeProviderDetail `json:"providerDetails,omitempty"`
+	Health          string                   `json:"health"`
 }
 
 type IMDeliveryStatus string
 
 const (
+	IMDeliveryStatusPending    IMDeliveryStatus = "pending"
 	IMDeliveryStatusDelivered  IMDeliveryStatus = "delivered"
 	IMDeliveryStatusSuppressed IMDeliveryStatus = "suppressed"
 	IMDeliveryStatusFailed     IMDeliveryStatus = "failed"
+	IMDeliveryStatusTimeout    IMDeliveryStatus = "timeout"
 )
 
 type IMDelivery struct {
-	ID            string           `json:"id"`
-	ChannelID     string           `json:"channelId"`
-	Platform      string           `json:"platform"`
-	EventType     string           `json:"eventType"`
-	Status        IMDeliveryStatus `json:"status"`
-	FailureReason string           `json:"failureReason,omitempty"`
-	CreatedAt     string           `json:"createdAt"`
+	ID              string               `json:"id"`
+	BridgeID        string               `json:"bridgeId,omitempty"`
+	ProjectID       string               `json:"projectId,omitempty"`
+	ChannelID       string               `json:"channelId"`
+	TargetChatID    string               `json:"targetChatId,omitempty"`
+	Platform        string               `json:"platform"`
+	EventType       string               `json:"eventType"`
+	Kind            string               `json:"kind,omitempty"`
+	Status          IMDeliveryStatus     `json:"status"`
+	FailureReason   string               `json:"failureReason,omitempty"`
+	DowngradeReason string               `json:"downgradeReason,omitempty"`
+	Content         string               `json:"content,omitempty"`
+	Structured      *IMStructuredMessage `json:"structured,omitempty"`
+	Native          *IMNativeMessage     `json:"native,omitempty"`
+	Metadata        map[string]string    `json:"metadata,omitempty"`
+	ReplyTarget     *IMReplyTarget       `json:"replyTarget,omitempty"`
+	CreatedAt       string               `json:"createdAt"`
 }
 
 // IMBridgeRegisterRequest registers a Bridge runtime instance.
@@ -299,10 +321,11 @@ type IMControlDelivery struct {
 
 // IMDeliveryAck acknowledges the last successfully processed delivery cursor.
 type IMDeliveryAck struct {
-	BridgeID    string `json:"bridgeId"`
-	Cursor      int64  `json:"cursor"`
-	DeliveryID  string `json:"deliveryId,omitempty"`
-	ProcessedAt string `json:"processedAt,omitempty"`
+	BridgeID        string `json:"bridgeId"`
+	Cursor          int64  `json:"cursor"`
+	DeliveryID      string `json:"deliveryId,omitempty"`
+	DowngradeReason string `json:"downgradeReason,omitempty"`
+	ProcessedAt     string `json:"processedAt,omitempty"`
 }
 
 // IMActionBinding persists the link between a backend entity and the

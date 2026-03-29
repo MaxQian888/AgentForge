@@ -12,6 +12,7 @@ export interface TaskWorkspaceFilters {
   priority: TaskFilterOption<TaskPriority>;
   assigneeId: string | "all";
   sprintId: string | "all";
+  labels: string[];
   planning: TaskPlanningFilter;
   dependency: TaskDependencyFilter;
 }
@@ -23,6 +24,7 @@ export function createDefaultTaskWorkspaceFilters(): TaskWorkspaceFilters {
     priority: "all",
     assigneeId: "all",
     sprintId: "all",
+    labels: [],
     planning: "all",
     dependency: "all",
   };
@@ -55,6 +57,12 @@ export function filterTasksForWorkspace(
     }
     if (filters.sprintId !== "all" && task.sprintId !== filters.sprintId) {
       return false;
+    }
+    if (filters.labels.length > 0) {
+      const taskLabels = task.labels ?? [];
+      if (!filters.labels.some((label) => taskLabels.includes(label))) {
+        return false;
+      }
     }
     if (filters.planning !== "all" && taskPlanningState(task) !== filters.planning) {
       return false;

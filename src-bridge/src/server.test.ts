@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { createApp } from "./server.js";
+import { BRIDGE_HTTP_ROUTE_GROUPS, createApp } from "./server.js";
 import { RuntimePoolManager } from "./runtime/pool-manager.js";
 import { SessionManager } from "./session/manager.js";
 
@@ -9,6 +9,104 @@ const validRequest = {
   description: "Implement an AI-powered task decomposition endpoint across bridge, Go API, and IM bridge.",
   priority: "high",
 };
+
+describe("bridge HTTP contract", () => {
+  test("declares canonical /bridge routes and compatibility-only aliases", () => {
+    expect(BRIDGE_HTTP_ROUTE_GROUPS.execute).toEqual({
+      method: "post",
+      canonicalPath: "/bridge/execute",
+      compatibilityAliases: ["/execute"],
+    });
+    expect(BRIDGE_HTTP_ROUTE_GROUPS.decompose).toEqual({
+      method: "post",
+      canonicalPath: "/bridge/decompose",
+      compatibilityAliases: ["/ai/decompose"],
+    });
+    expect(BRIDGE_HTTP_ROUTE_GROUPS.classifyIntent).toEqual({
+      method: "post",
+      canonicalPath: "/bridge/classify-intent",
+      compatibilityAliases: ["/ai/classify"],
+    });
+    expect(BRIDGE_HTTP_ROUTE_GROUPS.generate).toEqual({
+      method: "post",
+      canonicalPath: "/bridge/generate",
+      compatibilityAliases: ["/ai/generate"],
+    });
+    expect(BRIDGE_HTTP_ROUTE_GROUPS.cancel).toEqual({
+      method: "post",
+      canonicalPath: "/bridge/cancel",
+      compatibilityAliases: ["/abort"],
+    });
+    expect(BRIDGE_HTTP_ROUTE_GROUPS.resume).toEqual({
+      method: "post",
+      canonicalPath: "/bridge/resume",
+      compatibilityAliases: ["/resume"],
+    });
+    expect(BRIDGE_HTTP_ROUTE_GROUPS.health).toEqual({
+      method: "get",
+      canonicalPath: "/bridge/health",
+      compatibilityAliases: ["/health"],
+    });
+  });
+
+  test("compatibility aliases share canonical validation and response semantics", async () => {
+    const app = createApp({
+      decomposeTask: async () => ({
+        summary: "Alias route uses the same handler.",
+        subtasks: [],
+      }),
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+    });
+
+    const invalidDecomposeCanonical = await app.request("/bridge/decompose", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task_id: "", title: "" }),
+    });
+    const invalidDecomposeAlias = await app.request("/ai/decompose", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task_id: "", title: "" }),
+    });
+    expect(invalidDecomposeAlias.status).toBe(invalidDecomposeCanonical.status);
+    expect(await invalidDecomposeAlias.json()).toEqual(await invalidDecomposeCanonical.json());
+
+    const invalidCancelCanonical = await app.request("/bridge/cancel", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task_id: "" }),
+    });
+    const invalidCancelAlias = await app.request("/abort", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ task_id: "" }),
+    });
+    expect(invalidCancelAlias.status).toBe(invalidCancelCanonical.status);
+    expect(await invalidCancelAlias.json()).toEqual(await invalidCancelCanonical.json());
+
+    const runtimesCanonical = await app.request("/bridge/runtimes");
+    const runtimesAlias = await app.request("/runtimes");
+    expect(runtimesAlias.status).toBe(runtimesCanonical.status);
+    expect(await runtimesAlias.json()).toEqual(await runtimesCanonical.json());
+
+    const healthCanonical = await app.request("/bridge/health");
+    const healthAlias = await app.request("/health");
+    expect(healthAlias.status).toBe(healthCanonical.status);
+    const canonicalHealth = await healthCanonical.json();
+    const aliasHealth = await healthAlias.json();
+    expect(aliasHealth).toMatchObject({
+      status: canonicalHealth.status,
+      active_agents: canonicalHealth.active_agents,
+      max_agents: canonicalHealth.max_agents,
+    });
+    expect(typeof aliasHealth.uptime_ms).toBe("number");
+    expect(typeof canonicalHealth.uptime_ms).toBe("number");
+  });
+});
 
 describe("bridge decompose route", () => {
   test("rejects invalid payloads", async () => {
@@ -155,10 +253,100 @@ describe("bridge decompose route", () => {
 });
 
 describe("bridge execute route", () => {
+  test("reports active runtimes when agents are running", async () => {
+    const pool = new RuntimePoolManager(3);
+    const runtimeA = pool.acquire("task-active-1", "session-active-1", "codex");
+    runtimeA.status = "running";
+    runtimeA.spentUsd = 0.25;
+    runtimeA.bindRequest({
+      task_id: "task-active-1",
+      session_id: "session-active-1",
+      runtime: "codex",
+      provider: "openai",
+      model: "gpt-5-codex",
+      prompt: "run",
+      worktree_path: "D:/Project/AgentForge",
+      branch_name: "agent/task-active-1",
+      system_prompt: "",
+      max_turns: 8,
+      budget_usd: 2,
+      allowed_tools: ["Read"],
+      permission_mode: "default",
+    });
+    const runtimeB = pool.acquire("task-active-2", "session-active-2", "claude_code");
+    runtimeB.status = "running";
+    runtimeB.spentUsd = 0.5;
+    runtimeB.bindRequest({
+      task_id: "task-active-2",
+      session_id: "session-active-2",
+      runtime: "claude_code",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      prompt: "run",
+      worktree_path: "D:/Project/AgentForge",
+      branch_name: "agent/task-active-2",
+      system_prompt: "",
+      max_turns: 8,
+      budget_usd: 2,
+      allowed_tools: ["Read"],
+      permission_mode: "default",
+    });
+    const app = createApp({ pool });
+
+    const response = await app.request("/bridge/active");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([
+      expect.objectContaining({
+        task_id: "task-active-1",
+        runtime: "codex",
+        state: "running",
+        spent_usd: 0.25,
+      }),
+      expect.objectContaining({
+        task_id: "task-active-2",
+        runtime: "claude_code",
+        state: "running",
+        spent_usd: 0.5,
+      }),
+    ]);
+  });
+
+  test("returns an empty active runtime list when no agents are running", async () => {
+    const app = createApp({ pool: new RuntimePoolManager(3) });
+
+    const response = await app.request("/bridge/active");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toEqual([]);
+  });
+
+  test("returns an empty pool summary before any runtime is acquired", async () => {
+    const app = createApp({ pool: new RuntimePoolManager(3) });
+
+    const response = await app.request("/bridge/pool");
+
+    expect(response.status).toBe(200);
+    expect(await response.json()).toMatchObject({
+      active: 0,
+      max: 3,
+      warm_total: 0,
+      warm_available: 0,
+      warm_reuse_hits: 0,
+      cold_starts: 0,
+    });
+  });
+
   test("exposes runtime catalog metadata and readiness diagnostics", async () => {
     const app = createApp({
       executableLookup(command) {
         return command === "codex" ? "C:/mock/codex.exe" : null;
+      },
+      codexAuthStatusProvider() {
+        return {
+          authenticated: true,
+          message: "Logged in using an API key",
+        };
       },
       envLookup(name) {
         switch (name) {
@@ -439,6 +627,12 @@ describe("bridge execute route", () => {
       executableLookup(command) {
         return `C:/mock/${command}.exe`;
       },
+      codexAuthStatusProvider() {
+        return {
+          authenticated: true,
+          message: "Logged in using an API key",
+        };
+      },
       envLookup() {
         return "test-token";
       },
@@ -556,7 +750,7 @@ describe("bridge execute route", () => {
     }
   });
 
-  test("pauses a runtime into a resumable snapshot and resumes it with the persisted request", async () => {
+  test("pauses a runtime into a resumable snapshot and resumes it with persisted continuity", async () => {
     const pool = new RuntimePoolManager(1);
     const sessionManager = new SessionManager();
     const executedPrompts: string[] = [];
@@ -674,6 +868,406 @@ describe("bridge execute route", () => {
       active: 1,
       warm_available: 0,
       warm_reuse_hits: 1,
+    });
+  });
+
+  test("rejects Claude resume when only a legacy request snapshot is available", async () => {
+    const sessionManager = new SessionManager();
+    sessionManager.save("task-legacy-claude", {
+      task_id: "task-legacy-claude",
+      session_id: "session-legacy-claude",
+      status: "paused",
+      turn_number: 2,
+      spent_usd: 0.11,
+      created_at: 100,
+      updated_at: 200,
+      request: {
+        task_id: "task-legacy-claude",
+        session_id: "session-legacy-claude",
+        runtime: "claude_code",
+        provider: "anthropic",
+        model: "claude-sonnet-4-5",
+        prompt: "Resume a legacy Claude snapshot",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-legacy-claude",
+        system_prompt: "",
+        max_turns: 8,
+        budget_usd: 2,
+        allowed_tools: ["Read"],
+        permission_mode: "default",
+      },
+      continuity: {
+        runtime: "claude_code",
+        resume_ready: false,
+        captured_at: 200,
+        blocking_reason: "missing_continuity_state",
+      },
+    });
+
+    const app = createApp({
+      sessionManager,
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+    });
+
+    const response = await app.request("/bridge/resume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-legacy-claude",
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "Claude continuity state is not resumable for task task-legacy-claude",
+      code: "missing_continuity_state",
+    });
+  });
+
+  test("rejects Codex resume when continuity metadata is missing or not resumable", async () => {
+    const sessionManager = new SessionManager();
+    sessionManager.save("task-legacy-codex", {
+      task_id: "task-legacy-codex",
+      session_id: "session-legacy-codex",
+      status: "paused",
+      turn_number: 2,
+      spent_usd: 0.11,
+      created_at: 100,
+      updated_at: 200,
+      request: {
+        task_id: "task-legacy-codex",
+        session_id: "session-legacy-codex",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        prompt: "Resume a legacy Codex snapshot",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-legacy-codex",
+        system_prompt: "",
+        max_turns: 8,
+        budget_usd: 2,
+        allowed_tools: ["Read"],
+        permission_mode: "default",
+      },
+    });
+
+    const app = createApp({
+      sessionManager,
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+    });
+
+    const response = await app.request("/bridge/resume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-legacy-codex",
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "Codex continuity state is not resumable for task task-legacy-codex",
+      code: "missing_continuity_state",
+    });
+  });
+
+  test("rejects OpenCode resume when continuity metadata is missing", async () => {
+    const sessionManager = new SessionManager();
+    sessionManager.save("task-legacy-opencode", {
+      task_id: "task-legacy-opencode",
+      session_id: "session-legacy-opencode",
+      status: "paused",
+      turn_number: 2,
+      spent_usd: 0.11,
+      created_at: 100,
+      updated_at: 200,
+      request: {
+        task_id: "task-legacy-opencode",
+        session_id: "session-legacy-opencode",
+        runtime: "opencode",
+        provider: "opencode",
+        model: "opencode-default",
+        prompt: "Resume a legacy OpenCode snapshot",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-legacy-opencode",
+        system_prompt: "",
+        max_turns: 8,
+        budget_usd: 2,
+        allowed_tools: ["Read"],
+        permission_mode: "default",
+      },
+    });
+
+    const app = createApp({
+      sessionManager,
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+    });
+
+    const response = await app.request("/bridge/resume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-legacy-opencode",
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "OpenCode continuity state is not resumable for task task-legacy-opencode",
+      code: "missing_continuity_state",
+    });
+  });
+
+  test("pauses and resumes OpenCode through the same upstream session", async () => {
+    const pool = new RuntimePoolManager(1);
+    const sessionManager = new SessionManager();
+    const calls: Array<{ kind: string; payload: unknown }> = [];
+
+    const app = createApp({
+      pool,
+      sessionManager,
+      opencodeTransport: {
+        async createSession(input: { title?: string }) {
+          calls.push({ kind: "createSession", payload: input });
+          return { id: "opencode-session-123" };
+        },
+        async sendPromptAsync(input: { sessionId: string; prompt: string; provider: string; model?: string }) {
+          calls.push({ kind: "sendPromptAsync", payload: input });
+        },
+        async abortSession(sessionId: string) {
+          calls.push({ kind: "abortSession", payload: { sessionId } });
+          return true;
+        },
+        checkReadiness() {
+          return Promise.resolve({ ok: true, diagnostics: [] });
+        },
+      } as never,
+      opencodeEventRunner: async function* (params) {
+        calls.push({
+          kind: "eventRunner",
+          payload: { mode: params.mode, sessionId: params.sessionId, prompt: params.prompt },
+        });
+        yield {
+          event: "message.part.delta",
+          data: {
+            sessionID: params.sessionId,
+            part: { type: "text", text: "OpenCode is working." },
+          },
+        };
+
+        if (params.mode === "start") {
+          while (!params.abortSignal.aborted) {
+            await Bun.sleep(5);
+          }
+          return;
+        }
+
+        yield {
+          event: "session.idle",
+          data: {
+            sessionID: params.sessionId,
+          },
+        };
+      },
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+    });
+
+    const executeResponse = await app.request("/bridge/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-opencode-pause",
+        session_id: "session-opencode-pause",
+        runtime: "opencode",
+        provider: "opencode",
+        model: "opencode-default",
+        prompt: "Pause and resume OpenCode",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-opencode-pause",
+        system_prompt: "",
+        max_turns: 8,
+        budget_usd: 2,
+        allowed_tools: ["Read"],
+        permission_mode: "default",
+      }),
+    });
+
+    expect(executeResponse.status).toBe(200);
+
+    const pauseResponse = await app.request("/bridge/pause", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-opencode-pause",
+        reason: "pause openCode",
+      }),
+    });
+
+    expect(pauseResponse.status).toBe(200);
+    await waitFor(
+      () => sessionManager.restore("task-opencode-pause")?.status === "paused",
+      1000,
+    );
+    expect(sessionManager.restore("task-opencode-pause")).toMatchObject({
+      continuity: {
+        runtime: "opencode",
+        resume_ready: true,
+        upstream_session_id: "opencode-session-123",
+      },
+    });
+
+    const resumeResponse = await app.request("/bridge/resume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-opencode-pause",
+      }),
+    });
+
+    expect(resumeResponse.status).toBe(200);
+    expect(await resumeResponse.json()).toEqual({
+      session_id: "session-opencode-pause",
+      resumed: true,
+    });
+
+    expect(calls).toMatchObject([
+      { kind: "createSession", payload: { title: "task-opencode-pause" } },
+      {
+        kind: "sendPromptAsync",
+        payload: {
+          sessionId: "opencode-session-123",
+          prompt: "Pause and resume OpenCode",
+          provider: "opencode",
+          model: "opencode-default",
+        },
+      },
+      {
+        kind: "eventRunner",
+        payload: {
+          mode: "start",
+          sessionId: "opencode-session-123",
+          prompt: "Pause and resume OpenCode",
+        },
+      },
+      { kind: "abortSession", payload: { sessionId: "opencode-session-123" } },
+      {
+        kind: "sendPromptAsync",
+        payload: {
+          sessionId: "opencode-session-123",
+          provider: "opencode",
+          model: "opencode-default",
+        },
+      },
+      {
+        kind: "eventRunner",
+        payload: {
+          mode: "resume",
+          sessionId: "opencode-session-123",
+        },
+      },
+    ]);
+    expect(String((calls[4] as { payload: { prompt: string } }).payload.prompt)).toContain(
+      "Continue",
+    );
+  });
+
+  test("cancel drops resumable OpenCode continuity after aborting the upstream session", async () => {
+    const pool = new RuntimePoolManager(1);
+    const sessionManager = new SessionManager();
+    const calls: Array<{ kind: string; payload: unknown }> = [];
+
+    const app = createApp({
+      pool,
+      sessionManager,
+      opencodeTransport: {
+        async createSession() {
+          return { id: "opencode-session-cancel" };
+        },
+        async sendPromptAsync() {},
+        async abortSession(sessionId: string) {
+          calls.push({ kind: "abortSession", payload: { sessionId } });
+          return true;
+        },
+        checkReadiness() {
+          return Promise.resolve({ ok: true, diagnostics: [] });
+        },
+      } as never,
+      opencodeEventRunner: async function* (params) {
+        yield {
+          event: "message.part.delta",
+          data: {
+            sessionID: params.sessionId,
+            part: { type: "text", text: "OpenCode is running." },
+          },
+        };
+        while (!params.abortSignal.aborted) {
+          await Bun.sleep(5);
+        }
+      },
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+    });
+
+    await app.request("/bridge/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-opencode-cancel",
+        session_id: "session-opencode-cancel",
+        runtime: "opencode",
+        provider: "opencode",
+        model: "opencode-default",
+        prompt: "Cancel OpenCode",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-opencode-cancel",
+        system_prompt: "",
+        max_turns: 8,
+        budget_usd: 2,
+        allowed_tools: ["Read"],
+        permission_mode: "default",
+      }),
+    });
+
+    const cancelResponse = await app.request("/bridge/cancel", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-opencode-cancel",
+        reason: "cancel openCode",
+      }),
+    });
+
+    expect(cancelResponse.status).toBe(200);
+    await waitFor(
+      () => sessionManager.restore("task-opencode-cancel")?.status === "cancelled",
+      1000,
+    );
+    expect(calls).toEqual([{ kind: "abortSession", payload: { sessionId: "opencode-session-cancel" } }]);
+    expect(sessionManager.restore("task-opencode-cancel")).toMatchObject({
+      continuity: {
+        runtime: "opencode",
+        resume_ready: false,
+        blocking_reason: "continuity_not_supported",
+      },
     });
   });
 });

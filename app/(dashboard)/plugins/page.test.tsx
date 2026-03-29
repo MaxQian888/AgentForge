@@ -1,5 +1,28 @@
 import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
+import pluginMessages from "../../../messages/en/plugins.json";
+
+function translatePluginKey(key: string, values?: Record<string, string>) {
+  const resolved = key
+    .split(".")
+    .reduce<unknown>((current, segment) => {
+      if (!current || typeof current !== "object") return undefined;
+      return (current as Record<string, unknown>)[segment];
+    }, pluginMessages);
+  if (typeof resolved !== "string") {
+    return key;
+  }
+  return Object.entries(values ?? {}).reduce(
+    (message, [token, value]) => message.replace(`{${token}}`, value),
+    resolved,
+  );
+}
+
+jest.mock("next-intl", () => ({
+  useTranslations: () =>
+    (key: string, values?: Record<string, string>) =>
+      translatePluginKey(key, values),
+}));
 import PluginsPage from "./page";
 
 const checkForUpdate = jest.fn();
@@ -7,10 +30,13 @@ const installUpdate = jest.fn();
 const fetchPlugins = jest.fn();
 const discoverBuiltins = jest.fn();
 const fetchMarketplace = jest.fn();
+const fetchRemoteMarketplace = jest.fn();
 const installFromCatalog = jest.fn();
+const installFromRemote = jest.fn();
 const getDesktopRuntimeStatus = jest.fn();
 const getPluginRuntimeSummary = jest.fn();
 const installLocal = jest.fn();
+let isDesktop = false;
 const setFilters = jest.fn();
 const sendNotification = jest.fn();
 const selectPlugin = jest.fn();
@@ -75,6 +101,22 @@ const storeState = {
       runtime_metadata: { compatible: true, abi_version: "v1" },
       last_error: "",
       last_health_at: "",
+      builtIn: {
+        official: true,
+        docsRef: "docs/GO_WASM_PLUGIN_RUNTIME.md",
+        verificationProfile: "go-wasm",
+        availabilityStatus: "requires_configuration",
+        availabilityMessage:
+          "Requires Feishu application credentials before live activation.",
+        readinessStatus: "requires_configuration",
+        readinessMessage:
+          "Requires Feishu application credentials before live activation.",
+        nextStep: "Set FEISHU_APP_ID and FEISHU_APP_SECRET on the bridge host.",
+        blockingReasons: ["missing_configuration"],
+        missingConfiguration: ["FEISHU_APP_ID", "FEISHU_APP_SECRET"],
+        installable: true,
+        installBlockedReason: "",
+      },
     },
   ],
   marketplace: [
@@ -99,6 +141,25 @@ const storeState = {
       sourceType: "catalog",
     },
   ],
+  remoteMarketplace: {
+    available: true,
+    registry: "https://registry.agentforge.dev",
+    error: undefined as string | undefined,
+    errorCode: undefined as string | undefined,
+    entries: [
+      {
+        id: "remote-release-train",
+        name: "Remote Release Train",
+        description: "Hosted workflow automation",
+        version: "2.0.0",
+        author: "AgentForge Registry",
+        kind: "remote",
+        registry: "https://registry.agentforge.dev",
+        installable: true,
+        sourceType: "registry",
+      },
+    ],
+  },
   filters: {
     query: "",
     kind: "all",
@@ -112,8 +173,10 @@ const storeState = {
   fetchPlugins,
   discoverBuiltins,
   fetchMarketplace,
+  fetchRemoteMarketplace,
   installLocal,
   installFromCatalog,
+  installFromRemote,
   setFilters,
   resetFilters: jest.fn(),
   selectPlugin,
@@ -138,7 +201,7 @@ jest.mock("@/hooks/use-platform-capability", () => ({
     installUpdate,
     getDesktopRuntimeStatus,
     getPluginRuntimeSummary,
-    isDesktop: false,
+    isDesktop,
     relaunchToUpdate,
     sendNotification,
     subscribeDesktopEvents,
@@ -150,10 +213,77 @@ describe("PluginsPage", () => {
   beforeEach(() => {
     checkForUpdate.mockReset();
     installUpdate.mockReset();
+    isDesktop = false;
     fetchPlugins.mockReset();
     discoverBuiltins.mockReset();
     fetchMarketplace.mockReset();
+    fetchRemoteMarketplace.mockReset();
     installFromCatalog.mockReset();
+    installFromRemote.mockReset();
+    storeState.builtins = [
+      {
+        apiVersion: "plugin.agentforge.dev/v1",
+        kind: "IntegrationPlugin",
+        metadata: {
+          id: "feishu-adapter",
+          name: "Feishu Adapter",
+          version: "1.0.0",
+          description: "Built-in Feishu adapter",
+        },
+        spec: {
+          runtime: "wasm",
+          module: "./dist/feishu.wasm",
+          abiVersion: "v1",
+        },
+        permissions: {},
+        source: {
+          type: "builtin",
+          path: "/plugins/feishu-adapter/manifest.yaml",
+        },
+        lifecycle_state: "installed",
+        runtime_host: "go-orchestrator",
+        restart_count: 0,
+        resolved_source_path: "./dist/feishu.wasm",
+        runtime_metadata: { compatible: true, abi_version: "v1" },
+        last_error: "",
+        last_health_at: "",
+        builtIn: {
+          official: true,
+          docsRef: "docs/GO_WASM_PLUGIN_RUNTIME.md",
+          verificationProfile: "go-wasm",
+          availabilityStatus: "requires_configuration",
+          availabilityMessage:
+            "Requires Feishu application credentials before live activation.",
+          readinessStatus: "requires_configuration",
+          readinessMessage:
+            "Requires Feishu application credentials before live activation.",
+          nextStep: "Set FEISHU_APP_ID and FEISHU_APP_SECRET on the bridge host.",
+          blockingReasons: ["missing_configuration"],
+          missingConfiguration: ["FEISHU_APP_ID", "FEISHU_APP_SECRET"],
+          installable: true,
+          installBlockedReason: "",
+        },
+      },
+    ];
+    storeState.remoteMarketplace = {
+      available: true,
+      registry: "https://registry.agentforge.dev",
+      error: undefined,
+      errorCode: undefined,
+      entries: [
+        {
+          id: "remote-release-train",
+          name: "Remote Release Train",
+          description: "Hosted workflow automation",
+          version: "2.0.0",
+          author: "AgentForge Registry",
+          kind: "remote",
+          registry: "https://registry.agentforge.dev",
+          installable: true,
+          sourceType: "registry",
+        },
+      ],
+    };
     getDesktopRuntimeStatus.mockReset();
     getDesktopRuntimeStatus.mockResolvedValue({
       overall: "stopped",
@@ -202,6 +332,7 @@ describe("PluginsPage", () => {
     expect(fetchPlugins).toHaveBeenCalled();
     expect(discoverBuiltins).toHaveBeenCalled();
     expect(fetchMarketplace).toHaveBeenCalled();
+    expect(fetchRemoteMarketplace).toHaveBeenCalled();
   });
 
   it("renders filter controls, marketplace, and selected plugin details", () => {
@@ -210,10 +341,12 @@ describe("PluginsPage", () => {
     expect(screen.getByText("Desktop runtime")).toBeInTheDocument();
     expect(screen.getByLabelText("Search plugins")).toBeInTheDocument();
     expect(screen.getByText("Marketplace")).toBeInTheDocument();
+    expect(screen.getByText("Remote registry")).toBeInTheDocument();
     expect(screen.getByText("Plugin details")).toBeInTheDocument();
     expect(screen.getByText("Runtime host")).toBeInTheDocument();
     expect(screen.getByText("Coding role")).toBeInTheDocument();
     expect(screen.getByText("Feishu Adapter")).toBeInTheDocument();
+    expect(screen.getByText("Remote Release Train")).toBeInTheDocument();
   });
 
   it("updates the query filter from the search input", async () => {
@@ -315,6 +448,37 @@ describe("PluginsPage", () => {
     );
   });
 
+  it("refreshes plugin surfaces when a projected plugin lifecycle desktop event arrives", async () => {
+    isDesktop = true;
+    subscribeDesktopEvents.mockImplementationOnce(
+      async (
+        handler: (event: {
+          type: string;
+          source?: string;
+          timestamp?: string;
+          payload?: unknown;
+        }) => void,
+      ) => {
+        handler({
+          type: "plugin.lifecycle",
+          source: "plugin",
+          timestamp: "2026-03-28T10:05:00.000Z",
+          payload: {
+            plugin_id: "github-tool",
+            event_type: "activated",
+          },
+        });
+        return jest.fn();
+      },
+    );
+
+    render(<PluginsPage />);
+
+    expect(await screen.findByText("Last desktop event: plugin.lifecycle")).toBeInTheDocument();
+    expect(await screen.findByText("Event bridge: available")).toBeInTheDocument();
+    expect(fetchPlugins).toHaveBeenCalledTimes(2);
+  });
+
   it("installs built-in availability entries through the explicit catalog flow", async () => {
     const user = userEvent.setup();
     render(<PluginsPage />);
@@ -331,10 +495,81 @@ describe("PluginsPage", () => {
     expect(installLocal).not.toHaveBeenCalled();
   });
 
+  it("shows built-in availability guidance from the official bundle metadata", () => {
+    render(<PluginsPage />);
+
+    expect(
+      screen.getByText("Requires Feishu application credentials before live activation."),
+    ).toBeInTheDocument();
+    expect(screen.getByText("docs/GO_WASM_PLUGIN_RUNTIME.md")).toBeInTheDocument();
+    expect(
+      screen.getByText("Set FEISHU_APP_ID and FEISHU_APP_SECRET on the bridge host."),
+    ).toBeInTheDocument();
+  });
+
+  it("renders unsupported-host built-ins as blocked instead of installable", () => {
+    storeState.builtins = [
+      {
+        ...storeState.builtins[0],
+        metadata: {
+          ...storeState.builtins[0].metadata,
+          id: "desktop-only-tool",
+          name: "Desktop Only Tool",
+        },
+        builtIn: {
+          ...storeState.builtins[0].builtIn,
+          availabilityStatus: "unsupported_host",
+          availabilityMessage: "This built-in is not supported on the current host.",
+          readinessStatus: "unsupported_host",
+          readinessMessage: "This built-in is not supported on the current host.",
+          nextStep: "Use a supported host family for this built-in.",
+          blockingReasons: ["unsupported_host"],
+          missingConfiguration: [],
+          installable: false,
+          installBlockedReason: "This built-in is not supported on the current host.",
+        },
+      },
+    ];
+
+    render(<PluginsPage />);
+
+    expect(screen.getByText("This built-in is not supported on the current host.")).toBeInTheDocument();
+    expect(screen.getByText("Use a supported host family for this built-in.")).toBeInTheDocument();
+    const builtinHeading = screen.getByText("Desktop Only Tool");
+    const builtinCard = builtinHeading.closest(".rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl")?.parentElement ?? builtinHeading.parentElement?.parentElement;
+    expect(within(builtinCard as HTMLElement).getByRole("button", { name: "Install" })).toBeDisabled();
+  });
+
   it("keeps unsupported marketplace entries in browse-only mode", () => {
     render(<PluginsPage />);
 
     expect(screen.getByText("Browse only")).toBeInTheDocument();
     expect(screen.getByText(/Remote marketplace installation is not wired/i)).toBeInTheDocument();
+  });
+
+  it("installs remote registry entries through the explicit remote control-plane flow", async () => {
+    const user = userEvent.setup();
+
+    render(<PluginsPage />);
+
+    await user.click(screen.getByRole("button", { name: "Install remote" }));
+
+    expect(installFromRemote).toHaveBeenCalledWith("remote-release-train", "2.0.0");
+  });
+
+  it("shows remote registry availability failures without breaking the rest of the page", () => {
+    storeState.remoteMarketplace = {
+      available: false,
+      registry: "https://registry.agentforge.dev",
+      error: "Registry unavailable",
+      errorCode: "remote_registry_unavailable",
+      entries: [],
+    };
+
+    render(<PluginsPage />);
+
+    expect(screen.getByText("Remote registry")).toBeInTheDocument();
+    expect(screen.getByText("Registry unavailable")).toBeInTheDocument();
+    expect(screen.getByText("Installed plugins")).toBeInTheDocument();
   });
 });

@@ -5,6 +5,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -33,26 +35,36 @@ type DispatchQueueWriter interface {
 	QueueAgentAdmission(ctx context.Context, input QueueAgentAdmissionInput) (*model.AgentPoolQueueEntry, error)
 }
 
+type DispatchBudgetChecker interface {
+	CheckBudget(ctx context.Context, projectID uuid.UUID, sprintID *uuid.UUID, requestedUsd float64) (*BudgetCheckResult, error)
+}
+
 type dispatchPoolStatsProvider interface {
 	PoolStats(ctx context.Context) model.AgentPoolStatsDTO
 }
 
 type runtimeAdmissionSpawner interface {
-	RequestSpawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.TaskDispatchResponse, error)
+	RequestSpawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string, priority int) (*model.TaskDispatchResponse, error)
 }
 
 type DispatchNotificationService interface {
 	Create(ctx context.Context, targetID uuid.UUID, ntype, title, body, data string) (*model.Notification, error)
 }
 
+type DispatchAttemptRecorder interface {
+	Create(ctx context.Context, attempt *model.DispatchAttempt) error
+}
+
 type DispatchSpawnInput struct {
-	TaskID    uuid.UUID
-	MemberID  *uuid.UUID
-	Runtime   string
-	Provider  string
-	Model     string
-	BudgetUSD float64
-	RoleID    string
+	TaskID        uuid.UUID
+	MemberID      *uuid.UUID
+	Runtime       string
+	Provider      string
+	Model         string
+	Priority      int
+	BudgetUSD     float64
+	RoleID        string
+	TriggerSource string
 }
 
 type TaskDispatchService struct {
@@ -63,6 +75,8 @@ type TaskDispatchService struct {
 	notifications DispatchNotificationService
 	progress      *TaskProgressService
 	queueWriter   DispatchQueueWriter
+	budgetChecker DispatchBudgetChecker
+	attempts      DispatchAttemptRecorder
 }
 
 func NewTaskDispatchService(
@@ -88,6 +102,16 @@ func (s *TaskDispatchService) WithQueueWriter(queueWriter DispatchQueueWriter) *
 	return s
 }
 
+func (s *TaskDispatchService) WithBudgetChecker(checker DispatchBudgetChecker) *TaskDispatchService {
+	s.budgetChecker = checker
+	return s
+}
+
+func (s *TaskDispatchService) WithAttemptRecorder(attempts DispatchAttemptRecorder) *TaskDispatchService {
+	s.attempts = attempts
+	return s
+}
+
 func (s *TaskDispatchService) Assign(ctx context.Context, taskID uuid.UUID, req *model.AssignRequest) (*model.TaskDispatchResponse, error) {
 	task, err := s.tasks.GetByID(ctx, taskID)
 	if err != nil {
@@ -100,16 +124,24 @@ func (s *TaskDispatchService) Assign(ctx context.Context, taskID uuid.UUID, req 
 	}
 	member, err := s.members.GetByID(ctx, memberID)
 	if err != nil {
-		return s.blockedResult(ctx, task, "dispatch target is unavailable"), nil
+		result := s.blockedResult(ctx, task, "dispatch target is unavailable")
+		s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, resolveDispatchTriggerSource(req.TriggerSource, "assignment"))
+		return result, nil
 	}
 	if member.ProjectID != task.ProjectID {
-		return s.blockedResult(ctx, task, "dispatch target is outside the task project"), nil
+		result := s.blockedResult(ctx, task, "dispatch target is outside the task project")
+		s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, resolveDispatchTriggerSource(req.TriggerSource, "assignment"))
+		return result, nil
 	}
 	if req.AssigneeType == model.MemberTypeAgent && (member.Type != model.MemberTypeAgent || !member.IsActive) {
-		return s.blockedResult(ctx, task, "dispatch target is not an active agent member"), nil
+		result := s.blockedResult(ctx, task, "dispatch target is not an active agent member")
+		s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, resolveDispatchTriggerSource(req.TriggerSource, "assignment"))
+		return result, nil
 	}
 	if req.AssigneeType == model.MemberTypeHuman && member.Type != model.MemberTypeHuman {
-		return s.blockedResult(ctx, task, "dispatch target does not match the requested assignee type"), nil
+		result := s.blockedResult(ctx, task, "dispatch target does not match the requested assignee type")
+		s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, resolveDispatchTriggerSource(req.TriggerSource, "assignment"))
+		return result, nil
 	}
 
 	if err := s.tasks.UpdateAssignee(ctx, taskID, memberID, member.Type); err != nil {
@@ -132,16 +164,18 @@ func (s *TaskDispatchService) Assign(ctx context.Context, taskID uuid.UUID, req 
 	})
 
 	if member.Type != model.MemberTypeAgent {
-		return &model.TaskDispatchResponse{
+		result := &model.TaskDispatchResponse{
 			Task: updatedTask.ToDTO(),
 			Dispatch: model.DispatchOutcome{
 				Status: model.DispatchStatusSkipped,
 				Reason: "task assigned to a human member",
 			},
-		}, nil
+		}
+		s.recordDispatchAttempt(ctx, updatedTask, &memberID, result.Dispatch, resolveDispatchTriggerSource(req.TriggerSource, "assignment"))
+		return result, nil
 	}
 
-	return s.spawnForTask(ctx, updatedTask, memberID, DispatchSpawnInput{})
+	return s.spawnForTask(ctx, updatedTask, memberID, DispatchSpawnInput{TriggerSource: resolveDispatchTriggerSource(req.TriggerSource, "assignment")})
 }
 
 func (s *TaskDispatchService) Spawn(ctx context.Context, input DispatchSpawnInput) (*model.TaskDispatchResponse, error) {
@@ -155,35 +189,62 @@ func (s *TaskDispatchService) Spawn(ctx context.Context, input DispatchSpawnInpu
 		memberID = *input.MemberID
 	} else {
 		if task.AssigneeID == nil || task.AssigneeType != model.MemberTypeAgent {
-			return s.blockedResult(ctx, task, "task has no valid assigned agent member"), nil
+			result := s.blockedResult(ctx, task, "task has no valid assigned agent member")
+			s.recordDispatchAttempt(ctx, task, nil, result.Dispatch, resolveDispatchTriggerSource(input.TriggerSource, "manual"))
+			return result, nil
 		}
 		memberID = *task.AssigneeID
 	}
 
 	member, err := s.members.GetByID(ctx, memberID)
 	if err != nil {
-		return s.blockedResult(ctx, task, "dispatch target is unavailable"), nil
+		result := s.blockedResult(ctx, task, "dispatch target is unavailable")
+		s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, resolveDispatchTriggerSource(input.TriggerSource, "manual"))
+		return result, nil
 	}
 	if member.ProjectID != task.ProjectID || member.Type != model.MemberTypeAgent || !member.IsActive {
-		return s.blockedResult(ctx, task, "task has no valid assigned agent member"), nil
+		result := s.blockedResult(ctx, task, "task has no valid assigned agent member")
+		s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, resolveDispatchTriggerSource(input.TriggerSource, "manual"))
+		return result, nil
 	}
 
+	input.TriggerSource = resolveDispatchTriggerSource(input.TriggerSource, "manual")
 	return s.spawnForTask(ctx, task, memberID, input)
 }
 
 func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task, memberID uuid.UUID, input DispatchSpawnInput) (*model.TaskDispatchResponse, error) {
+	warning, blocked := s.checkBudget(ctx, task, input.BudgetUSD)
+	if blocked != nil {
+		s.recordDispatchAttempt(ctx, task, &memberID, blocked.Dispatch, input.TriggerSource)
+		return blocked, nil
+	}
 	if admissionSpawner, ok := s.runtime.(runtimeAdmissionSpawner); ok {
-		return admissionSpawner.RequestSpawn(ctx, task.ID, memberID, input.Runtime, input.Provider, input.Model, input.BudgetUSD, input.RoleID)
+		result, err := admissionSpawner.RequestSpawn(ctx, task.ID, memberID, input.Runtime, input.Provider, input.Model, input.BudgetUSD, input.RoleID, input.Priority)
+		if err != nil {
+			return nil, err
+		}
+		if warning != nil && result != nil {
+			result.Dispatch.BudgetWarning = warning
+			s.broadcastBudgetWarning(task, warning)
+		}
+		if result != nil {
+			s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
+		}
+		return result, nil
 	}
 
 	run, err := s.runtime.Spawn(ctx, task.ID, memberID, input.Runtime, input.Provider, input.Model, input.BudgetUSD, input.RoleID)
 	if err != nil {
 		switch {
 		case errors.Is(err, ErrAgentAlreadyRunning):
-			return s.blockedResult(ctx, task, "task already has an active agent run"), nil
+			result := s.blockedResult(ctx, task, "task already has an active agent run")
+			s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
+			return result, nil
 		case errors.Is(err, ErrAgentPoolFull):
 			if s.queueWriter == nil {
-				return s.blockedResult(ctx, task, "agent pool is at capacity"), nil
+				result := s.blockedResult(ctx, task, "agent pool is at capacity")
+				s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
+				return result, nil
 			}
 			entry, queueErr := s.queueWriter.QueueAgentAdmission(ctx, QueueAgentAdmissionInput{
 				ProjectID: task.ProjectID,
@@ -193,17 +254,30 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 				Provider:  input.Provider,
 				Model:     input.Model,
 				RoleID:    input.RoleID,
+				Priority:  input.Priority,
 				BudgetUSD: input.BudgetUSD,
 				Reason:    "agent pool is at capacity",
 			})
 			if queueErr != nil {
-				return s.blockedResult(ctx, task, "agent pool is at capacity"), nil
+				result := s.blockedResult(ctx, task, "agent pool is at capacity")
+				s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
+				return result, nil
 			}
-			return s.queuedResult(task, entry, "agent pool is at capacity"), nil
+			result := s.queuedResult(task, entry, "agent pool is at capacity")
+			if warning != nil {
+				result.Dispatch.BudgetWarning = warning
+				s.broadcastBudgetWarning(task, warning)
+			}
+			s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
+			return result, nil
 		case errors.Is(err, ErrAgentWorktreeUnavailable):
-			return s.blockedResult(ctx, task, "agent dispatch is blocked by worktree availability"), nil
+			result := s.blockedResult(ctx, task, "agent dispatch is blocked by worktree availability")
+			s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
+			return result, nil
 		default:
-			return s.blockedResult(ctx, task, err.Error()), nil
+			result := s.blockedResult(ctx, task, err.Error())
+			s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
+			return result, nil
 		}
 	}
 
@@ -212,18 +286,55 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 		updatedTask = task
 	}
 
-	return &model.TaskDispatchResponse{
+	if warning != nil {
+		s.broadcastBudgetWarning(task, warning)
+	}
+
+	result := &model.TaskDispatchResponse{
 		Task: updatedTask.ToDTO(),
 		Dispatch: model.DispatchOutcome{
-			Status: model.DispatchStatusStarted,
-			Run:    dtoPtr(run.ToDTO()),
+			Status:        model.DispatchStatusStarted,
+			BudgetWarning: warning,
+			Run:           dtoPtr(run.ToDTO()),
 		},
-	}, nil
+	}
+	s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
+	return result, nil
+}
+
+func (s *TaskDispatchService) recordDispatchAttempt(ctx context.Context, task *model.Task, memberID *uuid.UUID, dispatch model.DispatchOutcome, triggerSource string) {
+	if s.attempts == nil || task == nil {
+		return
+	}
+	_ = s.attempts.Create(ctx, &model.DispatchAttempt{
+		ID:             uuid.New(),
+		ProjectID:      task.ProjectID,
+		TaskID:         task.ID,
+		MemberID:       memberID,
+		Outcome:        dispatch.Status,
+		TriggerSource:  resolveDispatchTriggerSource(triggerSource, "manual"),
+		Reason:         dispatch.Reason,
+		GuardrailType:  dispatch.GuardrailType,
+		GuardrailScope: dispatch.GuardrailScope,
+		CreatedAt:      time.Now().UTC(),
+	})
+}
+
+func resolveDispatchTriggerSource(value string, fallback string) string {
+	if strings.TrimSpace(value) != "" {
+		return strings.TrimSpace(value)
+	}
+	return fallback
 }
 
 func (s *TaskDispatchService) blockedResult(ctx context.Context, task *model.Task, reason string) *model.TaskDispatchResponse {
+	guardrailType, guardrailScope := inferDispatchGuardrail(reason)
+	return s.blockedResultWithGuardrail(ctx, task, reason, guardrailType, guardrailScope)
+}
+
+func (s *TaskDispatchService) blockedResultWithGuardrail(ctx context.Context, task *model.Task, reason string, guardrailType string, guardrailScope string) *model.TaskDispatchResponse {
 	if task != nil {
-		s.broadcastDispatchBlocked(task, reason)
+		s.broadcastDispatchBlocked(task, reason, guardrailType, guardrailScope)
 		s.createBlockedNotification(ctx, task, reason)
 	}
 	taskDTO := model.TaskDTO{}
@@ -233,8 +344,10 @@ func (s *TaskDispatchService) blockedResult(ctx context.Context, task *model.Tas
 	return &model.TaskDispatchResponse{
 		Task: taskDTO,
 		Dispatch: model.DispatchOutcome{
-			Status: model.DispatchStatusBlocked,
-			Reason: reason,
+			Status:         model.DispatchStatusBlocked,
+			Reason:         reason,
+			GuardrailType:  guardrailType,
+			GuardrailScope: guardrailScope,
 		},
 	}
 }
@@ -268,7 +381,7 @@ func (s *TaskDispatchService) broadcastTaskAssigned(task *model.Task) {
 	})
 }
 
-func (s *TaskDispatchService) broadcastDispatchBlocked(task *model.Task, reason string) {
+func (s *TaskDispatchService) broadcastDispatchBlocked(task *model.Task, reason string, guardrailType string, guardrailScope string) {
 	if s.hub == nil || task == nil {
 		return
 	}
@@ -278,8 +391,10 @@ func (s *TaskDispatchService) broadcastDispatchBlocked(task *model.Task, reason 
 		Payload: map[string]any{
 			"task": task.ToDTO(),
 			"dispatch": model.DispatchOutcome{
-				Status: model.DispatchStatusBlocked,
-				Reason: reason,
+				Status:         model.DispatchStatusBlocked,
+				Reason:         reason,
+				GuardrailType:  guardrailType,
+				GuardrailScope: guardrailScope,
 			},
 		},
 	})
@@ -326,6 +441,113 @@ func (s *TaskDispatchService) createBlockedNotification(ctx context.Context, tas
 		reason,
 		string(data),
 	)
+}
+
+func (s *TaskDispatchService) checkBudget(ctx context.Context, task *model.Task, requestedUSD float64) (*model.DispatchBudgetWarning, *model.TaskDispatchResponse) {
+	if task == nil {
+		return nil, nil
+	}
+
+	var warning *model.DispatchBudgetWarning
+	if taskWarning, taskBlocked := checkTaskBudget(task, requestedUSD); taskBlocked != nil {
+		return nil, s.blockedResultWithGuardrail(ctx, task, taskBlocked.Reason, model.DispatchGuardrailTypeBudget, "task")
+	} else if taskWarning != nil {
+		warning = taskWarning
+	}
+
+	if s.budgetChecker == nil {
+		return warning, nil
+	}
+	result, err := s.budgetChecker.CheckBudget(ctx, task.ProjectID, task.SprintID, requestedUSD)
+	if err != nil || result == nil {
+		return warning, nil
+	}
+	scope := strings.TrimSpace(result.Scope)
+	if !result.Allowed {
+		if scope == "" {
+			scope = inferBudgetScope(result.Reason)
+		}
+		return nil, s.blockedResultWithGuardrail(ctx, task, result.Reason, model.DispatchGuardrailTypeBudget, scope)
+	}
+	if result.Warning {
+		if scope == "" {
+			scope = inferBudgetScope(result.WarningMessage)
+		}
+		return &model.DispatchBudgetWarning{
+			Scope:   scope,
+			Message: result.WarningMessage,
+		}, nil
+	}
+	return warning, nil
+}
+
+func checkTaskBudget(task *model.Task, requestedUSD float64) (*model.DispatchBudgetWarning, *model.DispatchOutcome) {
+	if task == nil || task.BudgetUsd <= 0 {
+		return nil, nil
+	}
+
+	projected := task.SpentUsd + requestedUSD
+	if projected > task.BudgetUsd {
+		return nil, &model.DispatchOutcome{
+			Status:         model.DispatchStatusBlocked,
+			Reason:         fmt.Sprintf("task budget exceeded: spent $%.2f + requested $%.2f = $%.2f > limit $%.2f", task.SpentUsd, requestedUSD, projected, task.BudgetUsd),
+			GuardrailType:  model.DispatchGuardrailTypeBudget,
+			GuardrailScope: "task",
+		}
+	}
+	if projected >= task.BudgetUsd*0.80 {
+		return &model.DispatchBudgetWarning{
+			Scope:   "task",
+			Message: fmt.Sprintf("task budget warning: projected $%.2f / $%.2f (%.0f%% utilized)", projected, task.BudgetUsd, (projected/task.BudgetUsd)*100),
+		}, nil
+	}
+	return nil, nil
+}
+
+func (s *TaskDispatchService) broadcastBudgetWarning(task *model.Task, warning *model.DispatchBudgetWarning) {
+	if s.hub == nil || task == nil || warning == nil {
+		return
+	}
+	s.hub.BroadcastEvent(&ws.Event{
+		Type:      ws.EventBudgetWarning,
+		ProjectID: task.ProjectID.String(),
+		Payload: map[string]any{
+			"taskId":    task.ID.String(),
+			"projectId": task.ProjectID.String(),
+			"scope":     warning.Scope,
+			"message":   warning.Message,
+		},
+	})
+}
+
+func inferDispatchGuardrail(reason string) (string, string) {
+	switch {
+	case strings.Contains(reason, "budget"):
+		return model.DispatchGuardrailTypeBudget, inferBudgetScope(reason)
+	case strings.Contains(reason, "pool"):
+		return model.DispatchGuardrailTypePool, "project"
+	case strings.Contains(reason, "worktree"):
+		return model.DispatchGuardrailTypeSystem, "worktree"
+	case strings.Contains(reason, "dispatch target"), strings.Contains(reason, "assigned agent member"), strings.Contains(reason, "assignee"):
+		return model.DispatchGuardrailTypeTarget, "member"
+	case strings.Contains(reason, "active agent run"):
+		return model.DispatchGuardrailTypeTask, "task"
+	default:
+		return "", ""
+	}
+}
+
+func inferBudgetScope(text string) string {
+	switch {
+	case strings.Contains(text, "task budget"):
+		return "task"
+	case strings.Contains(text, "sprint budget"):
+		return "sprint"
+	case strings.Contains(text, "project budget"):
+		return "project"
+	default:
+		return ""
+	}
 }
 
 func (s *TaskDispatchService) recordProgress(ctx context.Context, taskID uuid.UUID, input TaskActivityInput) {

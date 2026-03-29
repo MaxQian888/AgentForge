@@ -1,3 +1,37 @@
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, values?: Record<string, string | number>) => {
+    const messages: Record<string, string> = {
+      layerReview: "Layer {layer} Review",
+      summary: "Summary",
+      noSummary: "No summary available.",
+      detailPrLabel: "PR: {value}",
+      detailCostLabel: "Cost: ${value}",
+      detailStatusLabel: "Status: {value}",
+      detailUpdatedLabel: "Updated: {value}",
+      executionDetails: "Execution Details",
+      executionTrigger: "Trigger",
+      executionChangedFiles: "Changed Files",
+      executionResults: "Plugin / Dimension Results",
+      findingsCount: "Findings ({count})",
+      decisions: "Decisions",
+      recommendationApprove: "Approve",
+      recommendationRequestChanges: "Request Changes",
+      recommendationReject: "Reject",
+      approveCommentLabel: "Comment (optional)",
+      requestChangesCommentLabel: "Comment (optional)",
+      approveCommentPlaceholder: "Optional approval comment...",
+      requestChangesCommentPlaceholder: "Describe what needs to change...",
+      confirmApprove: "Confirm Approve",
+      confirmRequestChanges: "Confirm Request Changes",
+      cancelTrigger: "Cancel",
+      statusPendingHuman: "Pending Human",
+      riskHigh: "High",
+    };
+    const template = messages[key] ?? key;
+    return template.replace(/\{(\w+)\}/g, (_, token) => String(values?.[token] ?? ""));
+  },
+}));
+
 jest.mock("./review-findings-table", () => ({
   ReviewFindingsTable: ({
     findings,

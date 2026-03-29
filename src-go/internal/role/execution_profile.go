@@ -2,7 +2,7 @@ package role
 
 import "strings"
 
-func BuildExecutionProfile(manifest *Manifest) *ExecutionProfile {
+func BuildExecutionProfile(manifest *Manifest, opts ...ExecutionProfileOption) *ExecutionProfile {
 	if manifest == nil {
 		return nil
 	}
@@ -11,6 +11,15 @@ func BuildExecutionProfile(manifest *Manifest) *ExecutionProfile {
 	if err := finalizeRoleManifest(normalized); err != nil {
 		return nil
 	}
+
+	options := executionProfileOptions{}
+	for _, opt := range opts {
+		if opt != nil {
+			opt(&options)
+		}
+	}
+
+	loadedSkills, availableSkills, skillDiagnostics := resolveRuntimeSkills(normalized, options.skillRoot)
 
 	return &ExecutionProfile{
 		RoleID:           normalized.Metadata.ID,
@@ -26,6 +35,9 @@ func BuildExecutionProfile(manifest *Manifest) *ExecutionProfile {
 		MaxBudgetUsd:     normalized.Security.MaxBudgetUsd,
 		MaxTurns:         normalized.Capabilities.MaxTurns,
 		PermissionMode:   normalized.Security.PermissionMode,
+		LoadedSkills:     loadedSkills,
+		AvailableSkills:  availableSkills,
+		SkillDiagnostics: skillDiagnostics,
 	}
 }
 

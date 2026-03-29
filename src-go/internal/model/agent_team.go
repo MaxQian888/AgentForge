@@ -70,6 +70,11 @@ type AgentTeamSummaryDTO struct {
 	CoderCompleted int           `json:"coderCompleted"`
 }
 
+type UpdateTeamRequest struct {
+	Name           *string  `json:"name"`
+	TotalBudgetUsd *float64 `json:"totalBudgetUsd"`
+}
+
 func (t *AgentTeam) ToDTO() AgentTeamDTO {
 	dto := AgentTeamDTO{
 		ID:             t.ID.String(),

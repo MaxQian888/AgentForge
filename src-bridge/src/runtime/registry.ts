@@ -4,9 +4,22 @@ import {
   type ClaudeRuntimeDeps,
 } from "../handlers/claude-runtime.js";
 import {
-  streamCommandRuntime,
   type CommandRuntimeRunner,
 } from "../handlers/command-runtime.js";
+import {
+  getDefaultCodexAuthStatus,
+  streamCodexRuntime,
+  type CodexAuthStatusProvider,
+  type CodexRuntimeRunner,
+} from "../handlers/codex-runtime.js";
+import {
+  streamOpenCodeRuntime,
+  type OpenCodeEventRunner,
+} from "../handlers/opencode-runtime.js";
+import {
+  createOpenCodeTransport,
+  type OpenCodeTransport,
+} from "../opencode/transport.js";
 import type { AgentRuntime } from "./agent-runtime.js";
 import type {
   ExecuteRequest,
@@ -14,6 +27,7 @@ import type {
   RuntimeCatalog,
   RuntimeCatalogEntry,
   RuntimeDiagnostic,
+  RuntimeContinuityState,
 } from "../types.js";
 import type { EventStreamer } from "../ws/event-stream.js";
 
@@ -29,8 +43,8 @@ interface RuntimeAdapter {
   defaultProvider: string;
   compatibleProviders: string[];
   defaultModel?: string;
-  getDiagnostics(): RuntimeDiagnostic[];
-  ensureAvailable(): void;
+  getDiagnostics(): Promise<RuntimeDiagnostic[]>;
+  ensureAvailable(): Promise<void>;
   execute(
     runtime: AgentRuntime,
     streamer: EventSink,
@@ -41,9 +55,14 @@ interface RuntimeAdapter {
 
 export interface AgentRuntimeRegistryOptions extends ClaudeRuntimeDeps {
   commandRuntimeRunner?: CommandRuntimeRunner;
+  codexRuntimeRunner?: CodexRuntimeRunner;
   defaultRuntime?: AgentRuntimeKey;
   executableLookup?: (command: string) => string | null;
   envLookup?: (name: string) => string | undefined;
+  opencodeTransport?: OpenCodeTransport;
+  codexAuthStatusProvider?: CodexAuthStatusProvider;
+  continuity?: RuntimeContinuityState;
+  opencodeEventRunner?: OpenCodeEventRunner;
 }
 
 export class AgentRuntimeRegistry {
@@ -52,7 +71,9 @@ export class AgentRuntimeRegistry {
     private readonly defaultRuntime: AgentRuntimeKey,
   ) {}
 
-  resolveExecute(req: ExecuteRequest): { adapter: RuntimeAdapter; request: ExecuteRequest } {
+  async resolveExecute(
+    req: ExecuteRequest,
+  ): Promise<{ adapter: RuntimeAdapter; request: ExecuteRequest }> {
     const runtimeKey = resolveRuntimeKey(req, this.defaultRuntime);
     const adapter = this.adapters[runtimeKey];
     if (!adapter) {
@@ -61,7 +82,7 @@ export class AgentRuntimeRegistry {
 
     const provider = normalizeProvider(req.provider) || adapter.defaultProvider;
     validateRuntimeProvider(runtimeKey, provider, adapter.compatibleProviders);
-    adapter.ensureAvailable();
+    await adapter.ensureAvailable();
 
     return {
       adapter,
@@ -74,11 +95,10 @@ export class AgentRuntimeRegistry {
     };
   }
 
-  getCatalog(): RuntimeCatalog {
-    return {
-      defaultRuntime: this.defaultRuntime,
-      runtimes: Object.values(this.adapters).map((adapter) => {
-        const diagnostics = adapter.getDiagnostics();
+  async getCatalog(): Promise<RuntimeCatalog> {
+    const runtimes = await Promise.all(
+      Object.values(this.adapters).map(async (adapter) => {
+        const diagnostics = await adapter.getDiagnostics();
         return {
           key: adapter.key,
           label: adapter.label,
@@ -89,6 +109,11 @@ export class AgentRuntimeRegistry {
           diagnostics,
         } satisfies RuntimeCatalogEntry;
       }),
+    );
+
+    return {
+      defaultRuntime: this.defaultRuntime,
+      runtimes,
     };
   }
 }
@@ -98,6 +123,14 @@ export function createRuntimeRegistry(
 ): AgentRuntimeRegistry {
   const executableLookup = options.executableLookup ?? defaultExecutableLookup;
   const envLookup = options.envLookup ?? ((name: string) => process.env[name]);
+  const codexCommand = readEnvConfig(envLookup, "CODEX_RUNTIME_COMMAND") || "codex";
+  const opencodeTransport =
+    options.opencodeTransport ??
+    createOpenCodeTransport({
+      envLookup,
+    });
+  const codexAuthStatusProvider =
+    options.codexAuthStatusProvider ?? (() => getDefaultCodexAuthStatus(codexCommand));
 
   const adapters: Record<AgentRuntimeKey, RuntimeAdapter> = {
     claude_code: {
@@ -106,7 +139,7 @@ export function createRuntimeRegistry(
       defaultProvider: "anthropic",
       compatibleProviders: ["anthropic"],
       defaultModel: readEnvConfig(envLookup, "CLAUDE_CODE_RUNTIME_MODEL"),
-      getDiagnostics() {
+      async getDiagnostics() {
         if (options.queryRunner) {
           return [];
         }
@@ -122,27 +155,28 @@ export function createRuntimeRegistry(
         }
         return diagnostics;
       },
-      ensureAvailable() {
-        assertDiagnosticsAvailable("claude_code", this.getDiagnostics());
+      async ensureAvailable() {
+        assertDiagnosticsAvailable("claude_code", await this.getDiagnostics());
       },
       async execute(runtime, streamer, req, systemPrompt) {
         await streamClaudeRuntime(runtime, streamer, req, systemPrompt, {
+          continuity: options.continuity,
           queryRunner: options.queryRunner,
           now: options.now,
         });
       },
     },
-    codex: createCommandAdapter("codex", {
-      commandRuntimeRunner: options.commandRuntimeRunner,
+    codex: createCodexAdapter({
       executableLookup,
-      defaultCommand: readEnvConfig(envLookup, "CODEX_RUNTIME_COMMAND") || "codex",
+      authStatusProvider: codexAuthStatusProvider,
+      codexRuntimeRunner: options.codexRuntimeRunner,
+      defaultCommand: codexCommand,
       defaultModel: readEnvConfig(envLookup, "CODEX_RUNTIME_MODEL"),
       now: options.now,
     }),
-    opencode: createCommandAdapter("opencode", {
-      commandRuntimeRunner: options.commandRuntimeRunner,
-      executableLookup,
-      defaultCommand: readEnvConfig(envLookup, "OPENCODE_RUNTIME_COMMAND") || "opencode",
+    opencode: createOpenCodeReadinessAdapter({
+      transport: opencodeTransport,
+      eventRunner: options.opencodeEventRunner,
       defaultModel: readEnvConfig(envLookup, "OPENCODE_RUNTIME_MODEL"),
       now: options.now,
     }),
@@ -151,42 +185,82 @@ export function createRuntimeRegistry(
   return new AgentRuntimeRegistry(adapters, options.defaultRuntime ?? "claude_code");
 }
 
-function createCommandAdapter(
-  key: "codex" | "opencode",
-  options: {
-    commandRuntimeRunner?: CommandRuntimeRunner;
-    executableLookup: (command: string) => string | null;
-    defaultCommand: string;
-    defaultModel?: string;
-    now?: () => number;
-  },
-): RuntimeAdapter {
+function createCodexAdapter(options: {
+  executableLookup: (command: string) => string | null;
+  authStatusProvider: CodexAuthStatusProvider;
+  codexRuntimeRunner?: CodexRuntimeRunner;
+  defaultCommand: string;
+  defaultModel?: string;
+  now?: () => number;
+}): RuntimeAdapter {
   return {
-    key,
-    label: key === "codex" ? "Codex" : "OpenCode",
-    defaultProvider: key === "codex" ? "openai" : "opencode",
-    compatibleProviders: key === "codex" ? ["openai", "codex"] : ["opencode"],
+    key: "codex",
+    label: "Codex",
+    defaultProvider: "openai",
+    compatibleProviders: ["openai", "codex"],
     defaultModel: options.defaultModel,
-    getDiagnostics() {
+    async getDiagnostics() {
+      const diagnostics: RuntimeDiagnostic[] = [];
       const resolved = options.executableLookup(options.defaultCommand);
-      if (resolved) {
-        return [];
-      }
-      return [
-        {
+      if (!resolved) {
+        diagnostics.push({
           code: "missing_executable",
-          message: `Executable not found for runtime ${key}`,
+          message: "Executable not found for runtime codex",
           blocking: true,
-        },
-      ];
+        });
+        return diagnostics;
+      }
+
+      const authStatus = options.authStatusProvider();
+      if (!authStatus.authenticated) {
+        diagnostics.push({
+          code: "missing_credentials",
+          message: authStatus.message || "Codex CLI authentication is unavailable",
+          blocking: true,
+        });
+      }
+
+      return diagnostics;
     },
-    ensureAvailable() {
-      assertDiagnosticsAvailable(key, this.getDiagnostics());
+    async ensureAvailable() {
+      assertDiagnosticsAvailable("codex", await this.getDiagnostics());
     },
     async execute(runtime, streamer, req, systemPrompt) {
-      await streamCommandRuntime(runtime, streamer, req, systemPrompt, {
+      await streamCodexRuntime(runtime, streamer, req, systemPrompt, {
         command: options.defaultCommand,
-        commandRuntimeRunner: options.commandRuntimeRunner,
+        codexRuntimeRunner: options.codexRuntimeRunner,
+        now: options.now,
+      });
+    },
+  };
+}
+
+function createOpenCodeReadinessAdapter(options: {
+  transport: OpenCodeTransport;
+  eventRunner?: OpenCodeEventRunner;
+  defaultModel?: string;
+  now?: () => number;
+}): RuntimeAdapter {
+  return {
+    key: "opencode",
+    label: "OpenCode",
+    defaultProvider: "opencode",
+    compatibleProviders: ["opencode"],
+    defaultModel: options.defaultModel,
+    async getDiagnostics() {
+      const readiness = await options.transport.checkReadiness({
+        provider: "opencode",
+        model: options.defaultModel,
+      });
+      return readiness.diagnostics;
+    },
+    async ensureAvailable() {
+      assertDiagnosticsAvailable("opencode", await this.getDiagnostics());
+    },
+    async execute(runtime, streamer, req, systemPrompt) {
+      await streamOpenCodeRuntime(runtime, streamer, req, systemPrompt, {
+        transport: options.transport,
+        eventRunner: options.eventRunner,
         now: options.now,
       });
     },

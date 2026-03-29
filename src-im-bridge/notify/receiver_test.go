@@ -580,6 +580,125 @@ func TestReceiver_HealthReportsNormalizedWeComSourceAndCapabilities(t *testing.T
 	}
 }
 
+func TestReceiver_HealthReportsNormalizedQQSourceAndCapabilities(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+
+	r := NewReceiver(&capabilityAwareTextPlatform{
+		textOnlyPlatform: textOnlyPlatform{name: "qq-live"},
+		metadata: core.PlatformMetadata{
+			Source: "qq",
+			Capabilities: core.PlatformCapabilities{
+				CommandSurface:        core.CommandSurfaceMixed,
+				MessageScopes:         []core.MessageScope{core.MessageScopeChat},
+				SupportsMentions:      true,
+				SupportsSlashCommands: true,
+			},
+		},
+	}, strconv.Itoa(port))
+	done := make(chan error, 1)
+	go func() {
+		done <- r.Start()
+	}()
+
+	var resp *http.Response
+	for i := 0; i < 20; i++ {
+		resp, err = http.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/im/health")
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("health request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if payload["platform"] != "qq-live" {
+		t.Fatalf("platform = %v", payload["platform"])
+	}
+	if payload["source"] != "qq" {
+		t.Fatalf("source = %v", payload["source"])
+	}
+
+	if err := r.Stop(); err != nil {
+		t.Fatalf("Stop error: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Start returned error after stop: %v", err)
+	}
+}
+
+func TestReceiver_HealthReportsNormalizedQQBotSourceAndCapabilities(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+
+	r := NewReceiver(&capabilityAwareTextPlatform{
+		textOnlyPlatform: textOnlyPlatform{name: "qqbot-live"},
+		metadata: core.PlatformMetadata{
+			Source: "qqbot",
+			Capabilities: core.PlatformCapabilities{
+				CommandSurface:         core.CommandSurfaceMixed,
+				ActionCallbackMode:     core.ActionCallbackWebhook,
+				MessageScopes:          []core.MessageScope{core.MessageScopeChat},
+				RequiresPublicCallback: true,
+				SupportsMentions:       true,
+				SupportsSlashCommands:  true,
+			},
+		},
+	}, strconv.Itoa(port))
+	done := make(chan error, 1)
+	go func() {
+		done <- r.Start()
+	}()
+
+	var resp *http.Response
+	for i := 0; i < 20; i++ {
+		resp, err = http.Get("http://127.0.0.1:" + strconv.Itoa(port) + "/im/health")
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("health request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	var payload map[string]any
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		t.Fatalf("decode body: %v", err)
+	}
+	if payload["platform"] != "qqbot-live" {
+		t.Fatalf("platform = %v", payload["platform"])
+	}
+	if payload["source"] != "qqbot" {
+		t.Fatalf("source = %v", payload["source"])
+	}
+	if payload["supports_rich_messages"] != false {
+		t.Fatalf("supports_rich_messages = %v", payload["supports_rich_messages"])
+	}
+
+	if err := r.Stop(); err != nil {
+		t.Fatalf("Stop error: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Start returned error after stop: %v", err)
+	}
+}
+
 func TestReceiver_RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured(t *testing.T) {
 	r := NewReceiver(&textOnlyPlatform{name: "slack-stub"}, "0")
 	r.SetSharedSecret("shared-secret")
@@ -718,6 +837,34 @@ func TestReceiver_HandleSend_WritesStructuredReceipt(t *testing.T) {
 	}
 	if payload["type"] != "structured" || payload["delivery_method"] != string(core.DeliveryMethodSend) {
 		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestReceiver_HandleSend_WritesFallbackReasonHeader(t *testing.T) {
+	p := &textOnlyPlatform{name: "telegram-stub"}
+	r := NewReceiver(p, "0")
+
+	body, err := json.Marshal(SendRequest{
+		Platform: "telegram",
+		ChatID:   "chat-1",
+		Structured: &core.StructuredMessage{
+			Title: "Task Update",
+			Body:  "Agent is still working.",
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal send request: %v", err)
+	}
+
+	req := httptest.NewRequest(http.MethodPost, "/im/send", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	r.handleSend(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if rec.Header().Get("X-IM-Downgrade-Reason") != "structured_delivery_unavailable" {
+		t.Fatalf("header downgrade reason = %q", rec.Header().Get("X-IM-Downgrade-Reason"))
 	}
 }
 

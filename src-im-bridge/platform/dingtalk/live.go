@@ -14,6 +14,8 @@ import (
 
 	openapi "github.com/alibabacloud-go/darabonba-openapi/v2/client"
 	dingtalkai "github.com/alibabacloud-go/dingtalk/ai_interaction_1_0"
+	dingtalkcardapi "github.com/alibabacloud-go/dingtalk/card_1_0"
+	dingtalkim "github.com/alibabacloud-go/dingtalk/im_1_0"
 	dingtalkoauth "github.com/alibabacloud-go/dingtalk/oauth2_1_0"
 	teautil "github.com/alibabacloud-go/tea-utils/v2/service"
 	dingtalkcard "github.com/open-dingtalk/dingtalk-stream-sdk-go/card"
@@ -32,6 +34,7 @@ var liveMetadata = core.PlatformMetadata{
 		AsyncUpdateModes:      []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateSessionWebhook},
 		ActionCallbackMode:    core.ActionCallbackWebhook,
 		MessageScopes:         []core.MessageScope{core.MessageScopeChat},
+		SupportsRichMessages:  true,
 		SupportsSlashCommands: true,
 		SupportsMentions:      true,
 	},
@@ -76,6 +79,7 @@ type cardActionStreamRunner interface {
 
 type webhookReplier interface {
 	ReplyText(ctx context.Context, sessionWebhook string, content string) error
+	ReplyMessage(ctx context.Context, sessionWebhook string, requestBody map[string]any) error
 }
 
 type directMessenger interface {
@@ -86,6 +90,18 @@ type accessTokenProvider interface {
 	AccessToken(ctx context.Context) (string, error)
 }
 
+type robotCardSender interface {
+	SendCard(ctx context.Context, target directSendTarget, card *core.Card) error
+}
+
+type advancedCardClient interface {
+	CreateAndDeliverWithOptions(
+		request *dingtalkcardapi.CreateAndDeliverRequest,
+		headers *dingtalkcardapi.CreateAndDeliverHeaders,
+		runtime *teautil.RuntimeOptions,
+	) (*dingtalkcardapi.CreateAndDeliverResponse, error)
+}
+
 type LiveOption func(*Live) error
 
 // Live is the DingTalk production adapter backed by Stream mode for inbound
@@ -94,9 +110,10 @@ type Live struct {
 	appKey    string
 	appSecret string
 
-	runner    streamRunner
-	webhook   webhookReplier
-	messenger directMessenger
+	runner     streamRunner
+	webhook    webhookReplier
+	messenger  directMessenger
+	cardSender robotCardSender
 
 	actionHandler notify.ActionHandler
 
@@ -126,6 +143,13 @@ func NewLive(appKey, appSecret string, opts ...LiveOption) (*Live, error) {
 		runner:    newSDKStreamRunner(appKey, appSecret),
 		webhook:   &sdkWebhookReplier{replier: dingtalkchatbot.NewChatbotReplier()},
 		messenger: messenger,
+		cardSender: &sdkRobotCardSender{
+			robotCode:      strings.TrimSpace(appKey),
+			tokenProvider:  tokenProvider,
+			templateID:     "StandardCard",
+			advancedClient: mustNewCardClient(),
+			client:         mustNewIMClient(),
+		},
 	}
 
 	for _, opt := range opts {
@@ -141,6 +165,9 @@ func NewLive(appKey, appSecret string, opts ...LiveOption) (*Live, error) {
 	}
 	if live.messenger == nil {
 		return nil, errors.New("dingtalk live transport requires a direct messenger")
+	}
+	if live.cardSender == nil {
+		return nil, errors.New("dingtalk live transport requires a robot card sender")
 	}
 
 	return live, nil
@@ -172,6 +199,16 @@ func WithDirectMessenger(messenger directMessenger) LiveOption {
 			return errors.New("direct messenger cannot be nil")
 		}
 		live.messenger = messenger
+		return nil
+	}
+}
+
+func WithRobotCardSender(sender robotCardSender) LiveOption {
+	return func(live *Live) error {
+		if sender == nil {
+			return errors.New("robot card sender cannot be nil")
+		}
+		live.cardSender = sender
 		return nil
 	}
 }
@@ -280,6 +317,45 @@ func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.
 	return l.Send(ctx, chatID, renderStructuredFallback(message))
 }
 
+func (l *Live) SendCard(ctx context.Context, chatID string, card *core.Card) error {
+	if isWebhookTarget(chatID) {
+		if err := l.sendActionCardViaWebhook(ctx, chatID, card); err != nil {
+			if fallbackErr := l.deliverCardFallback(ctx, chatID, nil, card); fallbackErr != nil {
+				return fallbackErr
+			}
+			return err
+		}
+		return nil
+	}
+	target, err := resolveDirectSendTarget(chatID)
+	if err == nil && l.cardSender != nil {
+		if err := l.cardSender.SendCard(ctx, target, card); err == nil {
+			return nil
+		}
+	}
+	return l.deliverCardFallback(ctx, chatID, nil, card)
+}
+
+func (l *Live) ReplyCard(ctx context.Context, rawReplyCtx any, card *core.Card) error {
+	reply := toReplyContext(rawReplyCtx)
+	if reply.SessionWebhook != "" {
+		if err := l.sendActionCardViaWebhook(ctx, reply.SessionWebhook, card); err != nil {
+			if fallbackErr := l.deliverCardFallback(ctx, reply.ConversationID, rawReplyCtx, card); fallbackErr != nil {
+				return fallbackErr
+			}
+			return err
+		}
+		return nil
+	}
+	target, err := resolveDirectSendTarget(reply.ConversationID)
+	if err == nil && l.cardSender != nil {
+		if err := l.cardSender.SendCard(ctx, target, card); err == nil {
+			return nil
+		}
+	}
+	return l.deliverCardFallback(ctx, reply.ConversationID, rawReplyCtx, card)
+}
+
 func (l *Live) Stop() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -348,6 +424,13 @@ func (r *sdkWebhookReplier) ReplyText(ctx context.Context, sessionWebhook string
 	return r.replier.SimpleReplyText(ctx, sessionWebhook, []byte(content))
 }
 
+func (r *sdkWebhookReplier) ReplyMessage(ctx context.Context, sessionWebhook string, requestBody map[string]any) error {
+	if strings.TrimSpace(sessionWebhook) == "" {
+		return errors.New("session webhook is required")
+	}
+	return r.replier.ReplyMessage(ctx, sessionWebhook, requestBody)
+}
+
 type sdkDirectMessenger struct {
 	client        *dingtalkai.Client
 	tokenProvider accessTokenProvider
@@ -390,6 +473,139 @@ func (m *sdkDirectMessenger) SendText(ctx context.Context, target directSendTarg
 	}
 	if resp == nil || resp.Body == nil || resp.Body.Success == nil || !*resp.Body.Success {
 		return errors.New("dingtalk direct send failed")
+	}
+	return nil
+}
+
+type sdkRobotCardSender struct {
+	client             *dingtalkim.Client
+	advancedClient     advancedCardClient
+	tokenProvider      accessTokenProvider
+	robotCode          string
+	templateID         string
+	advancedTemplateID string
+}
+
+func mustNewIMClient() *dingtalkim.Client {
+	client, err := dingtalkim.NewClient(&openapi.Config{})
+	if err != nil {
+		panic(fmt.Errorf("create dingtalk im client: %w", err))
+	}
+	return client
+}
+
+func mustNewCardClient() *dingtalkcardapi.Client {
+	client, err := dingtalkcardapi.NewClient(&openapi.Config{})
+	if err != nil {
+		panic(fmt.Errorf("create dingtalk card client: %w", err))
+	}
+	return client
+}
+
+func WithAdvancedCardTemplate(templateID string) LiveOption {
+	return func(live *Live) error {
+		sender, ok := live.cardSender.(*sdkRobotCardSender)
+		if !ok {
+			return errors.New("advanced card template requires sdk robot card sender")
+		}
+		sender.advancedTemplateID = strings.TrimSpace(templateID)
+		return nil
+	}
+}
+
+func (s *sdkRobotCardSender) SendCard(ctx context.Context, target directSendTarget, card *core.Card) error {
+	if strings.TrimSpace(s.advancedTemplateID) != "" {
+		if err := s.sendAdvancedCard(ctx, target, card); err == nil {
+			return nil
+		}
+	}
+	token, err := s.tokenProvider.AccessToken(ctx)
+	if err != nil {
+		return err
+	}
+	cardData, err := buildStandardCardData(card)
+	if err != nil {
+		return err
+	}
+	request := (&dingtalkim.SendRobotInteractiveCardRequest{}).
+		SetCardTemplateId(s.templateID).
+		SetCardBizId(cardBizID(card)).
+		SetCardData(cardData).
+		SetRobotCode(strings.TrimSpace(s.robotCode)).
+		SetPullStrategy(false)
+	switch {
+	case strings.TrimSpace(target.OpenConversationID) != "":
+		request.SetOpenConversationId(strings.TrimSpace(target.OpenConversationID))
+	case strings.TrimSpace(target.UnionID) != "":
+		receiver, marshalErr := json.Marshal(map[string]string{"unionId": strings.TrimSpace(target.UnionID)})
+		if marshalErr != nil {
+			return marshalErr
+		}
+		request.SetSingleChatReceiver(string(receiver))
+	default:
+		return errors.New("dingtalk robot card send requires conversation id or union id")
+	}
+
+	headers := (&dingtalkim.SendRobotInteractiveCardHeaders{}).
+		SetXAcsDingtalkAccessToken(token)
+	resp, err := s.client.SendRobotInteractiveCardWithOptions(request, headers, &teautil.RuntimeOptions{})
+	if err != nil {
+		return err
+	}
+	if resp == nil || resp.StatusCode == nil || *resp.StatusCode >= httpStatusBadRequest {
+		return errors.New("dingtalk interactive card send failed")
+	}
+	return nil
+}
+
+func (s *sdkRobotCardSender) sendAdvancedCard(ctx context.Context, target directSendTarget, card *core.Card) error {
+	if s.advancedClient == nil {
+		return errors.New("dingtalk advanced card client is unavailable")
+	}
+	token, err := s.tokenProvider.AccessToken(ctx)
+	if err != nil {
+		return err
+	}
+	cardData := &dingtalkcardapi.CreateAndDeliverRequestCardData{
+		CardParamMap: make(map[string]*string),
+	}
+	for key, value := range buildAdvancedCardParams(card) {
+		cloned := value
+		cardData.CardParamMap[key] = &cloned
+	}
+
+	request := (&dingtalkcardapi.CreateAndDeliverRequest{}).
+		SetCardTemplateId(strings.TrimSpace(s.advancedTemplateID)).
+		SetOutTrackId(cardBizID(card)).
+		SetCallbackType("STREAM").
+		SetCardData(cardData)
+
+	switch {
+	case strings.TrimSpace(target.OpenConversationID) != "":
+		request.SetOpenSpaceId("dtv1.card//IM_GROUP." + strings.TrimSpace(target.OpenConversationID))
+		request.SetImGroupOpenSpaceModel((&dingtalkcardapi.CreateAndDeliverRequestImGroupOpenSpaceModel{}).SetSupportForward(true))
+		request.SetImGroupOpenDeliverModel((&dingtalkcardapi.CreateAndDeliverRequestImGroupOpenDeliverModel{}).
+			SetExtension(map[string]*string{}).
+			SetRobotCode(strings.TrimSpace(s.robotCode)))
+	case strings.TrimSpace(target.UnionID) != "":
+		request.SetOpenSpaceId("dtv1.card//IM_SINGLE." + strings.TrimSpace(target.UnionID))
+		request.SetUserId(strings.TrimSpace(target.UnionID))
+		request.SetUserIdType(2)
+		request.SetImSingleOpenSpaceModel((&dingtalkcardapi.CreateAndDeliverRequestImSingleOpenSpaceModel{}).SetSupportForward(false))
+		request.SetImSingleOpenDeliverModel((&dingtalkcardapi.CreateAndDeliverRequestImSingleOpenDeliverModel{}).
+			SetExtension(map[string]*string{}))
+	default:
+		return errors.New("dingtalk advanced card send requires conversation id or union id")
+	}
+
+	headers := (&dingtalkcardapi.CreateAndDeliverHeaders{}).
+		SetXAcsDingtalkAccessToken(token)
+	resp, err := s.advancedClient.CreateAndDeliverWithOptions(request, headers, &teautil.RuntimeOptions{})
+	if err != nil {
+		return err
+	}
+	if resp == nil || resp.StatusCode == nil || *resp.StatusCode >= httpStatusBadRequest {
+		return errors.New("dingtalk advanced interactive card send failed")
 	}
 	return nil
 }
@@ -697,6 +913,250 @@ func renderStructuredFallback(message *core.StructuredMessage) string {
 		content += "\n\nDingTalk ActionCard 暂未启用，已降级为文本。"
 	}
 	return content
+}
+
+type deliveredFallbackError struct {
+	reason string
+}
+
+func (e deliveredFallbackError) Error() string {
+	return e.reason
+}
+
+func (e deliveredFallbackError) FallbackReason() string {
+	return e.reason
+}
+
+func (e deliveredFallbackError) FallbackDelivered() bool {
+	return true
+}
+
+func (l *Live) sendActionCardViaWebhook(ctx context.Context, sessionWebhook string, card *core.Card) error {
+	payload, err := buildActionCardPayload(card)
+	if err != nil {
+		return err
+	}
+	return l.webhook.ReplyMessage(ctx, sessionWebhook, payload)
+}
+
+func (l *Live) deliverCardFallback(ctx context.Context, chatID string, rawReplyCtx any, card *core.Card) error {
+	fallbackText := cardFallbackText(card)
+	if strings.TrimSpace(fallbackText) == "" {
+		fallbackText = "DingTalk ActionCard send failed."
+	}
+	if rawReplyCtx != nil {
+		if err := l.Reply(ctx, rawReplyCtx, fallbackText); err != nil {
+			return err
+		}
+		return deliveredFallbackError{reason: "actioncard_send_failed"}
+	}
+	if err := l.Send(ctx, chatID, fallbackText); err != nil {
+		return err
+	}
+	return deliveredFallbackError{reason: "actioncard_send_failed"}
+}
+
+func buildActionCardPayload(card *core.Card) (map[string]any, error) {
+	if card == nil {
+		return nil, errors.New("card is required")
+	}
+	if len(card.Buttons) == 0 {
+		return nil, errors.New("action card requires at least one button")
+	}
+
+	markdownText := strings.TrimSpace(cardMarkdown(card))
+	if markdownText == "" {
+		return nil, errors.New("action card requires non-empty content")
+	}
+
+	actionCard := map[string]any{
+		"title":          strings.TrimSpace(card.Title),
+		"text":           markdownText,
+		"btnOrientation": "0",
+	}
+	if len(card.Buttons) == 1 {
+		url, ok := resolveCardButtonURL(card.Buttons[0])
+		if !ok {
+			return nil, errors.New("action card button requires a URL")
+		}
+		actionCard["singleTitle"] = strings.TrimSpace(card.Buttons[0].Text)
+		actionCard["singleURL"] = url
+	} else {
+		buttons := make([]map[string]string, 0, len(card.Buttons))
+		for _, button := range card.Buttons {
+			url, ok := resolveCardButtonURL(button)
+			if !ok {
+				return nil, errors.New("action card buttons require URLs")
+			}
+			buttons = append(buttons, map[string]string{
+				"title":     strings.TrimSpace(button.Text),
+				"actionURL": url,
+			})
+		}
+		actionCard["btns"] = buttons
+	}
+
+	return map[string]any{
+		"msgtype":    "actionCard",
+		"actionCard": actionCard,
+	}, nil
+}
+
+const httpStatusBadRequest int32 = 400
+
+func buildStandardCardData(card *core.Card) (string, error) {
+	if card == nil {
+		return "", errors.New("card is required")
+	}
+	payload := map[string]any{
+		"config": map[string]any{
+			"autoLayout":    true,
+			"enableForward": true,
+		},
+		"header": map[string]any{
+			"title": map[string]string{
+				"type": "text",
+				"text": strings.TrimSpace(card.Title),
+			},
+		},
+		"contents": []map[string]any{
+			{
+				"type": "markdown",
+				"text": cardStandardContent(card),
+			},
+		},
+	}
+	encoded, err := json.Marshal(payload)
+	if err != nil {
+		return "", err
+	}
+	return string(encoded), nil
+}
+
+func buildAdvancedCardParams(card *core.Card) map[string]string {
+	params := map[string]string{
+		"title": strings.TrimSpace(card.Title),
+		"body":  cardStandardContent(card),
+	}
+	for index, button := range card.Buttons {
+		if index >= 3 {
+			break
+		}
+		slot := index + 1
+		params[fmt.Sprintf("action_%d_label", slot)] = strings.TrimSpace(button.Text)
+		params[fmt.Sprintf("action_%d_ref", slot)] = strings.TrimSpace(button.Action)
+		if url, ok := resolveCardButtonURL(button); ok {
+			params[fmt.Sprintf("action_%d_url", slot)] = url
+		}
+	}
+	return params
+}
+
+func cardStandardContent(card *core.Card) string {
+	lines := make([]string, 0, len(card.Fields)+len(card.Buttons)+1)
+	for _, field := range card.Fields {
+		label := strings.TrimSpace(field.Label)
+		value := strings.TrimSpace(field.Value)
+		switch {
+		case label == "" && value == "":
+			continue
+		case label == "":
+			lines = append(lines, value)
+		default:
+			lines = append(lines, fmt.Sprintf("**%s**: %s", label, value))
+		}
+	}
+	for _, button := range card.Buttons {
+		label := strings.TrimSpace(button.Text)
+		if label == "" {
+			continue
+		}
+		if url, ok := resolveCardButtonURL(button); ok {
+			lines = append(lines, fmt.Sprintf("- [%s](%s)", label, url))
+			continue
+		}
+		lines = append(lines, "- "+label)
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n\n"))
+}
+
+func cardBizID(card *core.Card) string {
+	title := strings.TrimSpace(card.Title)
+	if title == "" {
+		title = "agentforge"
+	}
+	sanitized := strings.NewReplacer(" ", "-", "/", "-", "\\", "-").Replace(strings.ToLower(title))
+	return fmt.Sprintf("af-%s-%d", sanitized, time.Now().UnixNano())
+}
+
+func resolveCardButtonURL(button core.CardButton) (string, bool) {
+	action := strings.TrimSpace(button.Action)
+	switch {
+	case strings.HasPrefix(action, "link:"):
+		url := strings.TrimSpace(strings.TrimPrefix(action, "link:"))
+		return url, url != ""
+	case strings.HasPrefix(action, "http://"), strings.HasPrefix(action, "https://"):
+		return action, true
+	default:
+		return "", false
+	}
+}
+
+func cardMarkdown(card *core.Card) string {
+	if card == nil {
+		return ""
+	}
+	lines := make([]string, 0, 1+len(card.Fields))
+	if title := strings.TrimSpace(card.Title); title != "" {
+		lines = append(lines, "### "+title)
+	}
+	for _, field := range card.Fields {
+		label := strings.TrimSpace(field.Label)
+		value := strings.TrimSpace(field.Value)
+		switch {
+		case label == "" && value == "":
+			continue
+		case label == "":
+			lines = append(lines, value)
+		default:
+			lines = append(lines, fmt.Sprintf("**%s**: %s", label, value))
+		}
+	}
+	return strings.TrimSpace(strings.Join(lines, "\n\n"))
+}
+
+func cardFallbackText(card *core.Card) string {
+	if card == nil {
+		return ""
+	}
+	lines := make([]string, 0, 1+len(card.Fields)+len(card.Buttons))
+	if title := strings.TrimSpace(card.Title); title != "" {
+		lines = append(lines, title)
+	}
+	for _, field := range card.Fields {
+		label := strings.TrimSpace(field.Label)
+		value := strings.TrimSpace(field.Value)
+		switch {
+		case label == "" && value == "":
+			continue
+		case label == "":
+			lines = append(lines, value)
+		default:
+			lines = append(lines, label+": "+value)
+		}
+	}
+	for _, button := range card.Buttons {
+		label := strings.TrimSpace(button.Text)
+		action := strings.TrimSpace(button.Action)
+		switch {
+		case label != "" && strings.HasPrefix(action, "link:"):
+			lines = append(lines, label+": "+strings.TrimSpace(strings.TrimPrefix(action, "link:")))
+		case label != "":
+			lines = append(lines, label)
+		}
+	}
+	lines = append(lines, "DingTalk ActionCard 暂未完全支持，已降级为文本。")
+	return strings.TrimSpace(strings.Join(lines, "\n"))
 }
 
 func firstActionID(values []string) string {

@@ -20,6 +20,8 @@ type UserRepository interface {
 	Create(ctx context.Context, user *model.User) error
 	GetByEmail(ctx context.Context, email string) (*model.User, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.User, error)
+	UpdateName(ctx context.Context, id uuid.UUID, name string) error
+	UpdatePassword(ctx context.Context, id uuid.UUID, hashedPassword string) error
 }
 
 // CacheRepository defines the interface for token caching operations.
@@ -223,9 +225,52 @@ func (s *AuthService) issueTokens(ctx context.Context, user *model.User) (*model
 	}, nil
 }
 
+// UpdateProfile updates the user's display name and returns the updated profile.
+func (s *AuthService) UpdateProfile(ctx context.Context, userID string, req *model.UpdateUserRequest) (model.UserDTO, error) {
+	parsedID, err := uuid.Parse(userID)
+	if err != nil {
+		return model.UserDTO{}, ErrInvalidToken
+	}
+	if err := s.userRepo.UpdateName(ctx, parsedID, req.Name); err != nil {
+		return model.UserDTO{}, fmt.Errorf("update profile: %w", err)
+	}
+	user, err := s.userRepo.GetByID(ctx, parsedID)
+	if err != nil {
+		return model.UserDTO{}, fmt.Errorf("reload user: %w", err)
+	}
+	return user.ToDTO(), nil
+}
+
+// ChangePassword verifies the current password and sets a new one.
+func (s *AuthService) ChangePassword(ctx context.Context, userID string, currentPassword, newPassword string) error {
+	parsedID, err := uuid.Parse(userID)
+	if err != nil {
+		return ErrInvalidToken
+	}
+	user, err := s.userRepo.GetByID(ctx, parsedID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return ErrInvalidToken
+		}
+		return fmt.Errorf("get user: %w", err)
+	}
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(currentPassword)); err != nil {
+		return ErrCurrentPasswordIncorrect
+	}
+	hash, err := bcrypt.GenerateFromPassword([]byte(newPassword), bcrypt.DefaultCost)
+	if err != nil {
+		return fmt.Errorf("hash password: %w", err)
+	}
+	if err := s.userRepo.UpdatePassword(ctx, parsedID, string(hash)); err != nil {
+		return fmt.Errorf("update password: %w", err)
+	}
+	return nil
+}
+
 // Sentinel errors
 var (
-	ErrEmailAlreadyExists = errors.New("email already exists")
-	ErrInvalidCredentials = errors.New("invalid email or password")
-	ErrInvalidToken       = errors.New("invalid or expired token")
+	ErrEmailAlreadyExists        = errors.New("email already exists")
+	ErrInvalidCredentials        = errors.New("invalid email or password")
+	ErrInvalidToken              = errors.New("invalid or expired token")
+	ErrCurrentPasswordIncorrect  = errors.New("current password is incorrect")
 )

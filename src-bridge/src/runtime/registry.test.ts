@@ -19,15 +19,23 @@ function createRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteRequest 
 }
 
 describe("agent runtime registry", () => {
-  test("publishes runtime catalog metadata and readiness diagnostics", () => {
+  test("publishes runtime catalog metadata and readiness diagnostics", async () => {
     const registry = createRuntimeRegistry({
       executableLookup(command) {
         return command === "codex" ? "C:/mock/codex.exe" : null;
+      },
+      codexAuthStatusProvider() {
+        return {
+          authenticated: false,
+          message: "Codex CLI is not logged in",
+        };
       },
       envLookup(name) {
         switch (name) {
           case "ANTHROPIC_API_KEY":
             return "";
+          case "OPENCODE_SERVER_URL":
+            return "http://127.0.0.1:4096";
           case "CLAUDE_CODE_RUNTIME_MODEL":
             return "claude-sonnet-4-5";
           case "CODEX_RUNTIME_MODEL":
@@ -38,9 +46,23 @@ describe("agent runtime registry", () => {
             return undefined;
         }
       },
+      opencodeTransport: {
+        checkReadiness() {
+          return Promise.resolve({
+            ok: false,
+            diagnostics: [
+              {
+                code: "server_unreachable",
+                message: "OpenCode server http://127.0.0.1:4096 is unreachable",
+                blocking: true,
+              },
+            ],
+          });
+        },
+      } as never,
     });
 
-    const catalog = registry.getCatalog();
+    const catalog = await registry.getCatalog();
     expect(catalog.defaultRuntime).toBe("claude_code");
     expect(catalog.runtimes).toEqual(
       expect.arrayContaining([
@@ -59,8 +81,10 @@ describe("agent runtime registry", () => {
           defaultProvider: "openai",
           compatibleProviders: ["openai", "codex"],
           defaultModel: "gpt-5-codex",
-          available: true,
-          diagnostics: [],
+          available: false,
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({ code: "missing_credentials" }),
+          ]),
         }),
         expect.objectContaining({
           key: "opencode",
@@ -69,14 +93,14 @@ describe("agent runtime registry", () => {
           defaultModel: "opencode-default",
           available: false,
           diagnostics: expect.arrayContaining([
-            expect.objectContaining({ code: "missing_executable" }),
+            expect.objectContaining({ code: "server_unreachable" }),
           ]),
         }),
       ]),
     );
   });
 
-  test("uses injected env lookup for runtime defaults and command discovery", () => {
+  test("uses injected env lookup for runtime defaults and command discovery", async () => {
     const lookedUpCommands: string[] = [];
     const previousCodexCommand = process.env.CODEX_RUNTIME_COMMAND;
     const previousCodexModel = process.env.CODEX_RUNTIME_MODEL;
@@ -89,6 +113,12 @@ describe("agent runtime registry", () => {
         executableLookup(command) {
           lookedUpCommands.push(command);
           return command === "custom-codex" ? "C:/mock/custom-codex.exe" : null;
+        },
+        codexAuthStatusProvider() {
+          return {
+            authenticated: true,
+            message: "Logged in using an API key",
+          };
         },
         envLookup(name) {
           switch (name) {
@@ -104,7 +134,7 @@ describe("agent runtime registry", () => {
         },
       });
 
-      const resolved = registry.resolveExecute(createRequest({ runtime: "codex" }));
+      const resolved = await registry.resolveExecute(createRequest({ runtime: "codex" }));
 
       expect(resolved.request.model).toBe("gpt-5-codex-custom");
       expect(lookedUpCommands).toEqual(["custom-codex"]);
@@ -123,50 +153,121 @@ describe("agent runtime registry", () => {
     }
   });
 
-  test("defaults omitted runtime to claude_code and maps legacy provider hints", () => {
+  test("defaults omitted runtime to claude_code and maps legacy provider hints", async () => {
     const registry = createRuntimeRegistry({
       executableLookup(command) {
         return `C:/mock/${command}.exe`;
       },
+      codexAuthStatusProvider() {
+        return {
+          authenticated: true,
+          message: "Logged in using an API key",
+        };
+      },
       envLookup() {
         return "test-token";
       },
+      opencodeTransport: {
+        checkReadiness() {
+          return Promise.resolve({
+            ok: true,
+            diagnostics: [],
+          });
+        },
+      } as never,
     });
 
-    expect(registry.resolveExecute(createRequest()).request.runtime).toBe("claude_code");
+    expect((await registry.resolveExecute(createRequest())).request.runtime).toBe("claude_code");
     expect(
-      registry.resolveExecute(createRequest({ provider: "anthropic" })).request.runtime,
+      (await registry.resolveExecute(createRequest({ provider: "anthropic" }))).request.runtime,
     ).toBe("claude_code");
-    expect(registry.resolveExecute(createRequest({ provider: "codex" })).request.runtime).toBe(
+    expect((await registry.resolveExecute(createRequest({ provider: "codex" }))).request.runtime).toBe(
       "codex",
     );
     expect(
-      registry.resolveExecute(createRequest({ provider: "opencode" })).request.runtime,
+      (await registry.resolveExecute(createRequest({ provider: "opencode" }))).request.runtime,
     ).toBe("opencode");
     expect(
-      registry.resolveExecute(createRequest({ runtime: "codex", provider: "openai" })).request
+      (await registry.resolveExecute(createRequest({ runtime: "codex", provider: "openai" }))).request
         .runtime,
     ).toBe("codex");
   });
 
-  test("rejects explicit runtime/provider combinations that are incompatible", () => {
+  test("reports provider/model readiness failures for opencode from the transport layer", async () => {
     const registry = createRuntimeRegistry({
       executableLookup(command) {
         return `C:/mock/${command}.exe`;
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          case "OPENCODE_SERVER_URL":
+            return "http://127.0.0.1:4096";
+          case "OPENCODE_RUNTIME_MODEL":
+            return "missing-model";
+          default:
+            return undefined;
+        }
+      },
+      opencodeTransport: {
+        checkReadiness() {
+          return Promise.resolve({
+            ok: false,
+            diagnostics: [
+              {
+                code: "model_unavailable",
+                message: "OpenCode model missing-model is not available for provider opencode",
+                blocking: true,
+              },
+            ],
+          });
+        },
+      } as never,
+    });
+
+    const catalog = await registry.getCatalog();
+    expect(catalog.runtimes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "opencode",
+          available: false,
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({ code: "model_unavailable" }),
+          ]),
+        }),
+      ]),
+    );
+
+    await expect(
+      registry.resolveExecute(createRequest({ runtime: "opencode", provider: "opencode" })),
+    ).rejects.toThrow("OpenCode model missing-model is not available for provider opencode");
+  });
+
+  test("rejects explicit runtime/provider combinations that are incompatible", async () => {
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        return `C:/mock/${command}.exe`;
+      },
+      codexAuthStatusProvider() {
+        return {
+          authenticated: true,
+          message: "Logged in using an API key",
+        };
       },
       envLookup() {
         return "test-token";
       },
     });
 
-    expect(() =>
+    await expect(
       registry.resolveExecute(
         createRequest({ runtime: "codex", provider: "anthropic", model: "gpt-5-codex" }),
       ),
-    ).toThrow("Runtime codex is incompatible with provider anthropic");
+    ).rejects.toThrow("Runtime codex is incompatible with provider anthropic");
   });
 
-  test("rejects unknown runtime hints and missing runtime executables", () => {
+  test("rejects unknown runtime hints and missing runtime executables", async () => {
     const registry = createRuntimeRegistry({
       executableLookup() {
         return null;
@@ -176,15 +277,15 @@ describe("agent runtime registry", () => {
       },
     });
 
-    expect(() =>
+    await expect(
       registry.resolveExecute(createRequest({ runtime: "made_up_runtime" as never })),
-    ).toThrow("Unknown runtime: made_up_runtime");
-    expect(() => registry.resolveExecute(createRequest({ runtime: "codex" }))).toThrow(
+    ).rejects.toThrow("Unknown runtime: made_up_runtime");
+    await expect(registry.resolveExecute(createRequest({ runtime: "codex" }))).rejects.toThrow(
       "Executable not found for runtime codex",
     );
   });
 
-  test("rejects claude_code when the required credential is missing", () => {
+  test("rejects claude_code when the required credential is missing", async () => {
     const registry = createRuntimeRegistry({
       executableLookup(command) {
         return `C:/mock/${command}.exe`;
@@ -194,7 +295,7 @@ describe("agent runtime registry", () => {
       },
     });
 
-    expect(() => registry.resolveExecute(createRequest({ runtime: "claude_code" }))).toThrow(
+    await expect(registry.resolveExecute(createRequest({ runtime: "claude_code" }))).rejects.toThrow(
       "Missing required environment variable for runtime claude_code: ANTHROPIC_API_KEY",
     );
   });

@@ -1,0 +1,103 @@
+{
+  "title": "Docs Workspace",
+  "selectProject": "Select a project from the dashboard to open its wiki space.",
+  "subtitle": "Capture PRDs, ADRs, runbooks, onboarding notes, and execution briefs next to the work.",
+  "useTemplate": "Use Template",
+  "newPage": "New Page",
+  "pinned": "Pinned",
+  "noPinned": "No pinned pages yet.",
+  "favorites": "Favorites",
+  "noFavorites": "Mark a page as favorite to keep it here.",
+  "recent": "Recent",
+  "noRecent": "Recently opened pages show up here.",
+  "allPages": "All Pages",
+  "untitledDoc": "Untitled doc",
+  "newFromTemplate": "New document from template",
+  "sidebar": {
+    "searchDocs": "Search docs",
+    "searchPlaceholder": "Find a page, template, or runbook",
+    "pageTree": "Page Tree",
+    "favorites": "Favorites",
+    "noFavorites": "No favorites yet.",
+    "recent": "Recent",
+    "noRecent": "No recent docs yet."
+  },
+  "pageTree": {
+    "empty": "No pages yet. Create the first project doc to start the tree."
+  },
+  "pageDetail": {
+    "loading": "Loading document…",
+    "notFound": "Document not found",
+    "backToDocs": "Back to Docs",
+    "lastUpdated": "last updated",
+    "newFromTemplate": "New from Template",
+    "createTasks": "Create Tasks",
+    "copyLink": "Copy Link",
+    "blockTaskCounts": "Block Task Counts",
+    "tasks": "{count} tasks"
+  },
+  "comments": {
+    "title": "Comments",
+    "desc": "Page-level and inline discussions stay next to the draft.",
+    "readonlyHint": "Shared snapshots are read-only. Open the live document to add or resolve comments.",
+    "comment": "Comment",
+    "writeComment": "Write a comment…",
+    "anchor": "Anchor: {id}",
+    "pageLevel": "Page level",
+    "detachedTitle": "Detached Comments",
+    "detachedDesc": "These comments reference blocks that no longer exist in the current draft."
+  },
+  "editor": {
+    "saveVersion": "Save Version",
+    "saveAsTemplate": "Save as Template",
+    "shareVersion": "Share Version"
+  },
+  "versionHistory": {
+    "title": "Version History",
+    "restore": "Restore",
+    "share": "Share",
+    "confirmRestore": "Restore {name} (v{version})?",
+    "noVersions": "No saved versions yet."
+  },
+  "versionViewer": {
+    "selectVersion": "Select a version to preview it."
+  },
+  "templatePicker": {
+    "title": "Select a template",
+    "desc": "Start from a seeded document or one of your saved team templates.",
+    "uncategorized": "uncategorized",
+    "system": "System",
+    "custom": "Custom",
+    "noTemplates": "No templates available yet.",
+    "close": "Close"
+  },
+  "templateCenter": {
+    "title": "Template Center",
+    "desc": "Reuse seeded PRDs, ADRs, runbooks, and your own team templates.",
+    "useTemplate": "Use Template",
+    "noTemplates": "Templates will appear here after they load."
+  },
+  "relatedTasks": {
+    "title": "Related Tasks",
+    "desc": "Work items linked back to this document.",
+    "linkTask": "Link Task",
+    "remove": "Remove",
+    "empty": "No tasks linked to this document yet."
+  },
+  "taskLinkPicker": {
+    "title": "Select a task",
+    "desc": "Link an existing task back to this document.",
+    "noTasks": "No tasks available to link.",
+    "close": "Close"
+  },
+  "decompose": {
+    "title": "Create Tasks from Selection",
+    "desc": "Choose one or more blocks and optionally attach them under an existing parent task.",
+    "selectAll": "Select all blocks",
+    "noBlocks": "No blocks available to decompose.",
+    "parentTask": "Parent task",
+    "createRootTasks": "Create root backlog tasks",
+    "cancel": "Cancel",
+    "createTasks": "Create Tasks"
+  }
+}

@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -22,6 +23,7 @@ export function PluginConfigDialog({
   open,
   onOpenChange,
 }: PluginConfigDialogProps) {
+  const t = useTranslations("plugins");
   const updateConfig = usePluginStore((s) => s.updateConfig);
 
   return (
@@ -29,10 +31,10 @@ export function PluginConfigDialog({
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            Configure {plugin?.metadata.name ?? "Plugin"}
+            {t("configDialog.title", { name: plugin?.metadata.name ?? "Plugin" })}
           </DialogTitle>
           <DialogDescription>
-            Edit the plugin configuration. Changes take effect after saving.
+            {t("configDialog.desc")}
           </DialogDescription>
         </DialogHeader>
         {plugin ? (

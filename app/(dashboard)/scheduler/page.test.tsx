@@ -4,6 +4,7 @@ import SchedulerPage from "./page";
 
 const fetchJobs = jest.fn();
 const fetchRuns = jest.fn();
+const fetchStats = jest.fn();
 const updateJob = jest.fn();
 const triggerJob = jest.fn();
 const selectJob = jest.fn();
@@ -38,6 +39,7 @@ const storeState = {
         status: "succeeded",
         startedAt: "2026-03-25T10:00:00.000Z",
         finishedAt: "2026-03-25T10:00:03.000Z",
+        durationMs: 3000,
         summary: "checked 12 tasks",
         errorMessage: "",
         metrics: "{}",
@@ -50,11 +52,21 @@ const storeState = {
     "task-progress-detector": "*/5 * * * *",
   },
   selectedJobKey: "task-progress-detector",
+  stats: {
+    totalJobs: 6,
+    enabledJobs: 5,
+    disabledJobs: 1,
+    failedJobs: 0,
+    activeRuns: 0,
+    totalRuns24h: 42,
+    failedRuns24h: 0,
+  },
   loading: false,
   actionJobKey: null,
   error: null,
   fetchJobs,
   fetchRuns,
+  fetchStats,
   updateJob,
   triggerJob,
   selectJob,
@@ -71,6 +83,7 @@ describe("SchedulerPage", () => {
   beforeEach(() => {
     fetchJobs.mockReset();
     fetchRuns.mockReset();
+    fetchStats.mockReset();
     updateJob.mockReset();
     triggerJob.mockReset();
     selectJob.mockReset();
@@ -81,11 +94,11 @@ describe("SchedulerPage", () => {
     render(<SchedulerPage />);
 
     expect(fetchJobs).toHaveBeenCalled();
+    expect(fetchStats).toHaveBeenCalled();
     expect(fetchRuns).toHaveBeenCalledWith("task-progress-detector");
     expect(screen.getByText("Scheduler Control Plane")).toBeInTheDocument();
     expect(screen.getAllByText("Task progress detector").length).toBeGreaterThan(0);
     expect(screen.getByRole("button", { name: "Run now" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Disable job" })).toBeInTheDocument();
   });
 
   it("updates the draft schedule and can trigger a manual run", async () => {

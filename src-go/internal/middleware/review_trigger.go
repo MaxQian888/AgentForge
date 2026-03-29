@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
 
@@ -17,7 +18,7 @@ func ReviewTriggerAuthMiddleware(secret string, blacklist TokenBlacklist, servic
 		return func(c echo.Context) error {
 			authHeader := c.Request().Header.Get("Authorization")
 			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "missing or invalid authorization header"})
+				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: appI18n.Localize(GetLocalizer(c), appI18n.MsgMissingAuthHeader)})
 			}
 
 			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")

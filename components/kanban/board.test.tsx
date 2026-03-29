@@ -58,6 +58,7 @@ function makeTask(
     agentBranch: "",
     agentWorktree: "",
     agentSessionId: "",
+    labels: [],
     blockedBy: [],
     plannedStartAt: null,
     plannedEndAt: null,
@@ -79,6 +80,7 @@ describe("Board", () => {
     render(
       <Board
         tasks={tasks}
+        allTasks={tasks}
         selectedTaskId={null}
         displayOptions={{ density: "comfortable", showDescriptions: true, showLinkedDocs: false }}
         linkedDocsByTask={{}}
@@ -97,9 +99,11 @@ describe("Board", () => {
 
   it("triggers status updates for cross-column drops and surfaces errors", async () => {
     const successChange = jest.fn().mockResolvedValue(undefined);
+    const successTasks = [makeTask({ id: "task-1", title: "Build dashboard", status: "inbox" })];
     render(
       <Board
-        tasks={[makeTask({ id: "task-1", title: "Build dashboard", status: "inbox" })]}
+        tasks={successTasks}
+        allTasks={successTasks}
         selectedTaskId={null}
         displayOptions={{ density: "comfortable", showDescriptions: true, showLinkedDocs: false }}
         linkedDocsByTask={{}}
@@ -119,9 +123,11 @@ describe("Board", () => {
     expect(successChange).toHaveBeenCalledWith("task-1", "done");
 
     const failingChange = jest.fn().mockRejectedValue(new Error("Status update failed"));
+    const failingTasks = [makeTask({ id: "task-2", title: "Review queues", status: "inbox" })];
     render(
       <Board
-        tasks={[makeTask({ id: "task-2", title: "Review queues", status: "inbox" })]}
+        tasks={failingTasks}
+        allTasks={failingTasks}
         selectedTaskId={null}
         displayOptions={{ density: "comfortable", showDescriptions: true, showLinkedDocs: false }}
         linkedDocsByTask={{}}

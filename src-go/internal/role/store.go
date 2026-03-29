@@ -17,6 +17,10 @@ func NewFileStore(dir string) *FileStore {
 	return &FileStore{dir: dir}
 }
 
+func (s *FileStore) SkillsDir() string {
+	return filepath.Join(filepath.Dir(s.dir), "skills")
+}
+
 func (s *FileStore) List() ([]*Manifest, error) {
 	registry := NewRegistry()
 	if err := s.loadRegistry(registry); err != nil {

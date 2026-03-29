@@ -1,4 +1,5 @@
 import type { TeamMember, TeamMemberWorkload } from "@/lib/dashboard/summary";
+import { isMemberAvailable } from "@/lib/team/member-status";
 import type { Agent } from "@/lib/stores/agent-store";
 import type { Task } from "@/lib/stores/task-store";
 
@@ -331,7 +332,7 @@ export function recommendTaskAssignees(
   const workloads = buildMemberWorkloads(members, tasks, agents);
 
   return members
-    .filter((member) => member.isActive)
+    .filter((member) => isMemberAvailable(member.status, member.isActive))
     .map((member) => {
       const workload =
         workloads.get(member.id) ?? {

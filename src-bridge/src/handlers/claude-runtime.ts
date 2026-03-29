@@ -1,12 +1,17 @@
-import { query, type Options } from "@anthropic-ai/claude-agent-sdk";
 import { calculateCost, type UsageInfo } from "../cost/calculator.js";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
 import type { SessionManager } from "../session/manager.js";
-import type { ExecuteRequest } from "../types.js";
+import type {
+  ClaudeContinuityState,
+  ExecuteRequest,
+  RuntimeContinuityState,
+  SessionSnapshot,
+} from "../types.js";
 import type { EventStreamer } from "../ws/event-stream.js";
 import type { MCPClientHub } from "../mcp/client-hub.js";
 import type { PluginRecord } from "../plugins/types.js";
 import { buildFilterPipeline, applyFilters, type OutputFilter } from "../filters/pipeline.js";
+import type { Options } from "@anthropic-ai/claude-agent-sdk";
 
 type UnknownRecord = Record<string, unknown>;
 type EventSink = Pick<EventStreamer, "send">;
@@ -22,6 +27,7 @@ export interface ClaudeRuntimeDeps {
   now?: () => number;
   mcpHub?: MCPClientHub;
   activePlugins?: PluginRecord[];
+  continuity?: RuntimeContinuityState;
 }
 
 /**
@@ -54,12 +60,15 @@ export function buildClaudeQueryOptions(
   systemPrompt: string,
   runtime: AgentRuntime,
   activePlugins?: PluginRecord[],
+  continuity?: RuntimeContinuityState,
 ): Options & Record<string, unknown> {
   const options: Options & Record<string, unknown> = {
     abortController: runtime.abortController,
     allowedTools: req.allowed_tools.length > 0 ? req.allowed_tools : undefined,
     cwd: req.worktree_path,
+    maxBudgetUsd: req.budget_usd,
     maxTurns: req.max_turns,
+    model: req.model,
     permissionMode: req.permission_mode as Options["permissionMode"],
     systemPrompt,
   };
@@ -76,6 +85,13 @@ export function buildClaudeQueryOptions(
     }
   }
 
+  if (continuity?.runtime === "claude_code" && continuity.resume_ready && continuity.session_handle) {
+    options.resume = continuity.resume_token ?? continuity.session_handle;
+    if (continuity.checkpoint_id) {
+      options.resumeSessionAt = continuity.checkpoint_id;
+    }
+  }
+
   return options;
 }
 
@@ -86,9 +102,15 @@ export async function streamClaudeRuntime(
   systemPrompt: string,
   deps: ClaudeRuntimeDeps = {},
 ): Promise<void> {
-  const queryRunner = deps.queryRunner ?? ((query as unknown) as QueryRunner);
+  const queryRunner = deps.queryRunner ?? (await loadDefaultQueryRunner());
   const now = deps.now ?? Date.now;
-  const options = buildClaudeQueryOptions(req, systemPrompt, runtime, deps.activePlugins);
+  const options = buildClaudeQueryOptions(
+    req,
+    systemPrompt,
+    runtime,
+    deps.activePlugins,
+    deps.continuity,
+  );
 
   // Build output filters from role config
   const outputFilters = buildFilterPipeline(req.role_config?.output_filters ?? []);
@@ -121,6 +143,7 @@ export async function streamClaudeRuntime(
       options,
     })) {
       runtime.lastActivity = now();
+      runtime.continuity = extractClaudeContinuity(message, runtime.lastActivity, runtime.continuity);
 
       emitAssistantBlocks(runtime, streamer, message, req, now, outputFilters);
       emitToolResult(streamer, message, req, now);
@@ -162,6 +185,78 @@ export async function streamClaudeRuntime(
   }
 }
 
+export function extractClaudeContinuity(
+  message: UnknownRecord,
+  capturedAt: number,
+  previous: RuntimeContinuityState | null = null,
+): ClaudeContinuityState | null {
+  const previousClaude = previous?.runtime === "claude_code" ? previous : null;
+  const sessionHandle =
+    typeof message.session_id === "string" && message.session_id.length > 0
+      ? message.session_id
+      : previousClaude?.session_handle;
+
+  if (!sessionHandle) {
+    return previousClaude;
+  }
+
+  const checkpointId =
+    typeof message.uuid === "string" && message.uuid.length > 0
+      ? message.uuid
+      : previousClaude?.checkpoint_id;
+
+  return {
+    runtime: "claude_code",
+    resume_ready: true,
+    captured_at: capturedAt,
+    session_handle: sessionHandle,
+    checkpoint_id: checkpointId,
+    resume_token: sessionHandle,
+  };
+}
+
+export function buildRuntimeSnapshot(
+  runtime: AgentRuntime,
+  req: ExecuteRequest,
+  now: () => number,
+): SessionSnapshot {
+  const updatedAt = now();
+  return {
+    task_id: req.task_id,
+    session_id: req.session_id,
+    status: runtime.status,
+    turn_number: runtime.turnNumber,
+    spent_usd: runtime.spentUsd,
+    created_at: runtime.createdAt,
+    updated_at: updatedAt,
+    request: { ...req },
+    continuity: runtime.continuity
+      ? { ...runtime.continuity }
+      : req.runtime === "claude_code" || req.provider === "anthropic"
+        ? {
+            runtime: "claude_code",
+            resume_ready: false,
+            captured_at: updatedAt,
+            blocking_reason: "missing_continuity_state",
+          }
+        : req.runtime === "codex" || req.provider === "codex" || req.provider === "openai"
+          ? {
+              runtime: "codex",
+              resume_ready: false,
+              captured_at: updatedAt,
+              blocking_reason: "missing_continuity_state",
+            }
+          : req.runtime === "opencode" || req.provider === "opencode"
+            ? {
+                runtime: "opencode",
+                resume_ready: false,
+                captured_at: updatedAt,
+                blocking_reason: "missing_continuity_state",
+              }
+        : undefined,
+  };
+}
+
 export function persistRuntimeSnapshot(
   runtime: AgentRuntime,
   req: ExecuteRequest,
@@ -169,16 +264,7 @@ export function persistRuntimeSnapshot(
   sessionManager: SessionManager | undefined,
   now: () => number,
 ): void {
-  const snapshot = {
-    task_id: req.task_id,
-    session_id: req.session_id,
-    status: runtime.status,
-    turn_number: runtime.turnNumber,
-    spent_usd: runtime.spentUsd,
-    created_at: runtime.createdAt,
-    updated_at: now(),
-    request: { ...req },
-  };
+  const snapshot = buildRuntimeSnapshot(runtime, req, now);
 
   sessionManager?.save(req.task_id, snapshot);
 
@@ -189,6 +275,11 @@ export function persistRuntimeSnapshot(
     type: "snapshot",
     data: snapshot,
   });
+}
+
+async function loadDefaultQueryRunner(): Promise<QueryRunner> {
+  const sdk = await import("@anthropic-ai/claude-agent-sdk");
+  return sdk.query as unknown as QueryRunner;
 }
 
 function emitAssistantBlocks(

@@ -1,0 +1,301 @@
+package i18n
+
+const (
+	// Common
+	MsgInvalidRequestBody = "InvalidRequestBody"
+	MsgInternalError      = "InternalError"
+	MsgUnauthorized       = "Unauthorized"
+	MsgNotFound           = "NotFound"
+	MsgAuthRequired       = "AuthenticationRequired"
+	MsgMissingUserContext = "MissingUserContext"
+
+	// Auth
+	MsgEmailAlreadyExists       = "EmailAlreadyExists"
+	MsgAuthServiceUnavailable   = "AuthServiceUnavailable"
+	MsgRegistrationFailed       = "RegistrationFailed"
+	MsgInvalidCredentials       = "InvalidCredentials"
+	MsgLoginFailed              = "LoginFailed"
+	MsgInvalidRefreshToken      = "InvalidRefreshToken"
+	MsgTokenRefreshFailed       = "TokenRefreshFailed"
+	MsgLogoutFailed             = "LogoutFailed"
+	MsgFailedToLoadUserProfile    = "FailedToLoadUserProfile"
+	MsgFailedToUpdateProfile      = "FailedToUpdateProfile"
+	MsgFailedToChangePassword     = "FailedToChangePassword"
+	MsgCurrentPasswordIncorrect   = "CurrentPasswordIncorrect"
+	MsgMissingAuthHeader        = "MissingAuthHeader"
+	MsgInvalidOrExpiredToken    = "InvalidOrExpiredToken"
+	MsgTokenRevoked             = "TokenRevoked"
+
+	// IDs / Params
+	MsgInvalidTaskID        = "InvalidTaskID"
+	MsgInvalidMemberID      = "InvalidMemberID"
+	MsgInvalidProjectID     = "InvalidProjectID"
+	MsgInvalidSprintID      = "InvalidSprintID"
+	MsgInvalidAgentRunID    = "InvalidAgentRunID"
+	MsgInvalidRuleID        = "InvalidRuleID"
+	MsgInvalidFieldID       = "InvalidFieldID"
+	MsgInvalidDashboardID   = "InvalidDashboardID"
+	MsgInvalidWidgetID      = "InvalidWidgetID"
+	MsgInvalidPageID        = "InvalidPageID"
+	MsgInvalidFormID        = "InvalidFormID"
+	MsgInvalidLinkID        = "InvalidLinkID"
+	MsgInvalidMilestoneID   = "InvalidMilestoneID"
+	MsgInvalidNotificationID = "InvalidNotificationID"
+	MsgInvalidCommentID     = "InvalidCommentID"
+	MsgInvalidReviewID      = "InvalidReviewID"
+	MsgInvalidViewID        = "InvalidViewID"
+	MsgInvalidOwnerID       = "InvalidOwnerID"
+	MsgInvalidParentID      = "InvalidParentID"
+	MsgInvalidSourceID      = "InvalidSourceID"
+	MsgInvalidTargetID      = "InvalidTargetID"
+	MsgInvalidTeamID        = "InvalidTeamID"
+	MsgInvalidVersionID     = "InvalidVersionID"
+	MsgInvalidTemplateID    = "InvalidTemplateID"
+	MsgInvalidMemoryID      = "InvalidMemoryID"
+	MsgInvalidUserID        = "InvalidUserID"
+	MsgInvalidAssigneeID    = "InvalidAssigneeID"
+	MsgInvalidParentTaskID  = "InvalidParentTaskID"
+	MsgInvalidParentCommentID = "InvalidParentCommentID"
+	MsgInvalidLimit         = "InvalidLimit"
+
+	// Agent
+	MsgFailedToStartAgentRun        = "FailedToStartAgentRun"
+	MsgFailedToListAgentRuns        = "FailedToListAgentRuns"
+	MsgAgentRunNotFound             = "AgentRunNotFound"
+	MsgFailedToCancelAgentRun       = "FailedToCancelAgentRun"
+	MsgFailedToFetchAgentRun        = "FailedToFetchAgentRun"
+	MsgFailedToGetAgentLogs         = "FailedToGetAgentLogs"
+	MsgFailedToUpdateAgentRunStatus = "FailedToUpdateAgentRunStatus"
+
+	// Automation
+	MsgFailedToListAutomationRules  = "FailedToListAutomationRules"
+	MsgFailedToCreateAutomationRule = "FailedToCreateAutomationRule"
+	MsgAutomationRuleNotFound       = "AutomationRuleNotFound"
+	MsgFailedToUpdateAutomationRule = "FailedToUpdateAutomationRule"
+	MsgFailedToDeleteAutomationRule = "FailedToDeleteAutomationRule"
+	MsgFailedToListAutomationLogs   = "FailedToListAutomationLogs"
+
+	// Cost
+	MsgInvalidProjectIDParam = "InvalidProjectIDParam"
+	MsgInvalidSprintIDParam  = "InvalidSprintIDParam"
+	MsgFailedToGetCostStats  = "FailedToGetCostStats"
+
+	// Custom Field
+	MsgFailedToListCustomFields      = "FailedToListCustomFields"
+	MsgFailedToCreateCustomField     = "FailedToCreateCustomField"
+	MsgCustomFieldNotFound           = "CustomFieldNotFound"
+	MsgFailedToUpdateCustomField     = "FailedToUpdateCustomField"
+	MsgFailedToDeleteCustomField     = "FailedToDeleteCustomField"
+	MsgInvalidFieldIDInReorder       = "InvalidFieldIDInReorder"
+	MsgFailedToReorderCustomFields   = "FailedToReorderCustomFields"
+	MsgFailedToListCustomFieldValues = "FailedToListCustomFieldValues"
+	MsgFailedToSetCustomFieldValue   = "FailedToSetCustomFieldValue"
+	MsgFailedToClearCustomFieldValue = "FailedToClearCustomFieldValue"
+
+	// Dashboard
+	MsgFailedToListDashboards  = "FailedToListDashboards"
+	MsgFailedToListWidgets     = "FailedToListWidgets"
+	MsgFailedToCreateDashboard = "FailedToCreateDashboard"
+	MsgDashboardNotFound       = "DashboardNotFound"
+	MsgFailedToUpdateDashboard = "FailedToUpdateDashboard"
+	MsgFailedToDeleteDashboard = "FailedToDeleteDashboard"
+	MsgFailedToSaveWidget      = "FailedToSaveWidget"
+	MsgFailedToDeleteWidget    = "FailedToDeleteWidget"
+
+	// Doc Decomposition
+	MsgWikiPageNotFound             = "WikiPageNotFound"
+	MsgFailedToDecomposePageIntoTasks = "FailedToDecomposePageIntoTasks"
+
+	// Entity Link
+	MsgFailedToCreateEntityLink     = "FailedToCreateEntityLink"
+	MsgSourceTypeAndIDRequired      = "SourceTypeAndIDRequired"
+	MsgFailedToListEntityLinks      = "FailedToListEntityLinks"
+	MsgFailedToDeleteEntityLink     = "FailedToDeleteEntityLink"
+
+	// Form
+	MsgFormNotFound          = "FormNotFound"
+	MsgFailedToListForms     = "FailedToListForms"
+	MsgInvalidTargetAssignee = "InvalidTargetAssignee"
+	MsgFailedToCreateForm    = "FailedToCreateForm"
+	MsgFailedToUpdateForm    = "FailedToUpdateForm"
+	MsgFailedToDeleteForm    = "FailedToDeleteForm"
+	MsgTooManySubmissions    = "TooManySubmissions"
+	MsgFailedToSubmitForm    = "FailedToSubmitForm"
+
+	// Member
+	MsgFailedToCreateMember       = "FailedToCreateMember"
+	MsgFailedToListMembers        = "FailedToListMembers"
+	MsgFailedToUpdateMember       = "FailedToUpdateMember"
+	MsgFailedToFetchUpdatedMember = "FailedToFetchUpdatedMember"
+	MsgFailedToDeleteMember       = "FailedToDeleteMember"
+
+	// Memory
+	MsgMemoryServiceUnavailable = "MemoryServiceUnavailable"
+	MsgFailedToStoreMemory      = "FailedToStoreMemory"
+	MsgFailedToSearchMemories   = "FailedToSearchMemories"
+	MsgFailedToDeleteMemory     = "FailedToDeleteMemory"
+
+	// Milestone
+	MsgFailedToListMilestones      = "FailedToListMilestones"
+	MsgFailedToLoadMilestoneMetrics = "FailedToLoadMilestoneMetrics"
+	MsgInvalidTargetDate           = "InvalidTargetDate"
+	MsgFailedToCreateMilestone     = "FailedToCreateMilestone"
+	MsgMilestoneNotFound           = "MilestoneNotFound"
+	MsgFailedToUpdateMilestone     = "FailedToUpdateMilestone"
+	MsgFailedToDeleteMilestone     = "FailedToDeleteMilestone"
+
+	// Notification
+	MsgFailedToListNotifications    = "FailedToListNotifications"
+	MsgFailedToMarkNotificationRead = "FailedToMarkNotificationRead"
+	MsgFailedToMarkAllRead          = "FailedToMarkAllRead"
+
+	// Plugin
+	MsgInvalidInstallRequest          = "InvalidInstallRequest"
+	MsgPathOrEntryIDRequired          = "PathOrEntryIDRequired"
+	MsgOperationRequired              = "OperationRequired"
+	MsgToolNameRequired               = "ToolNameRequired"
+	MsgURIRequired                    = "URIRequired"
+	MsgNameRequired                   = "NameRequired"
+	MsgPluginIDRequired               = "PluginIDRequired"
+	MsgPathRequired                   = "PathRequired"
+	MsgEntryIDRequired                = "EntryIDRequired"
+	MsgFailedToListMarketplace        = "FailedToListMarketplace"
+	MsgLimitMustBePositive            = "LimitMustBePositive"
+	MsgWorkflowExecutionNotConfigured = "WorkflowExecutionNotConfigured"
+	MsgInvalidWorkflowExecutionReq    = "InvalidWorkflowExecutionRequest"
+	MsgRunIDMustBeValidUUID           = "RunIDMustBeValidUUID"
+	MsgPluginIDIsRequired             = "PluginIDIsRequired"
+
+	// Project
+	MsgFailedToCreateProject             = "FailedToCreateProject"
+	MsgFailedToInitProjectWiki           = "FailedToInitProjectWiki"
+	MsgFailedToInitProjectWikiTemplates  = "FailedToInitProjectWikiTemplates"
+	MsgFailedToListProjects              = "FailedToListProjects"
+	MsgProjectNotFound                   = "ProjectNotFound"
+	MsgFailedToUpdateProject             = "FailedToUpdateProject"
+	MsgFailedToFetchUpdatedProject       = "FailedToFetchUpdatedProject"
+
+	// Review
+	MsgReviewNotFound = "ReviewNotFound"
+	MsgTaskNotFound   = "TaskNotFound"
+
+	// Role
+	MsgFailedToLoadRoles          = "FailedToLoadRoles"
+	MsgRoleNotFound               = "RoleNotFound"
+	MsgFailedToLoadRole           = "FailedToLoadRole"
+	MsgRoleIDOrNameRequired       = "RoleIDOrNameRequired"
+	MsgFailedToSaveRole           = "FailedToSaveRole"
+	MsgFailedToReloadRole         = "FailedToReloadRole"
+	MsgRoleIDRequired             = "RoleIDRequired"
+	MsgFailedToDeleteRole         = "FailedToDeleteRole"
+	MsgRoleIDOrDraftRequired      = "RoleIDOrDraftRequired"
+	MsgSandboxInputRequired       = "SandboxInputRequired"
+	MsgRoleSandboxUnavailable     = "RoleSandboxUnavailable"
+	MsgFailedToLoadRuntimeCatalog = "FailedToLoadRuntimeCatalog"
+	MsgFailedToRunSandboxProbe    = "FailedToRunSandboxProbe"
+
+	// Saved View
+	MsgFailedToListSavedViews  = "FailedToListSavedViews"
+	MsgFailedToCreateSavedView = "FailedToCreateSavedView"
+	MsgSavedViewNotFound       = "SavedViewNotFound"
+	MsgFailedToUpdateSavedView = "FailedToUpdateSavedView"
+	MsgFailedToDeleteSavedView = "FailedToDeleteSavedView"
+	MsgFailedToSetDefaultView  = "FailedToSetDefaultView"
+
+	// Scheduler
+	MsgFailedToGetSchedulerStats = "FailedToGetSchedulerStats"
+	MsgFailedToListScheduledJobs = "FailedToListScheduledJobs"
+	MsgScheduledJobNotFound      = "ScheduledJobNotFound"
+
+	// Sprint
+	MsgInvalidStartDateFormat    = "InvalidStartDateFormat"
+	MsgInvalidEndDateFormat      = "InvalidEndDateFormat"
+	MsgFailedToCreateSprint      = "FailedToCreateSprint"
+	MsgFailedToListSprints       = "FailedToListSprints"
+	MsgSprintMetricsUnavailable  = "SprintMetricsUnavailable"
+	MsgSprintNotFound            = "SprintNotFound"
+	MsgFailedToLoadSprintMetrics = "FailedToLoadSprintMetrics"
+	MsgSprintBurndownUnavailable = "SprintBurndownUnavailable"
+	MsgFailedToLoadBurndownData  = "FailedToLoadBurndownData"
+	MsgFailedToUpdateSprint      = "FailedToUpdateSprint"
+
+	// Stats
+	MsgFailedToGetVelocityStats    = "FailedToGetVelocityStats"
+	MsgFailedToGetAgentPerfStats   = "FailedToGetAgentPerfStats"
+
+	// Task
+	MsgRecommenderUnavailable          = "RecommenderUnavailable"
+	MsgFailedToGenerateRecommendations = "FailedToGenerateRecommendations"
+	MsgInvalidPlannedStartDate         = "InvalidPlannedStartDate"
+	MsgInvalidPlannedEndDate           = "InvalidPlannedEndDate"
+	MsgPlannedEndBeforeStart           = "PlannedEndBeforeStart"
+	MsgFailedToCreateTask              = "FailedToCreateTask"
+	MsgFailedToFetchCreatedTask        = "FailedToFetchCreatedTask"
+	MsgInvalidCustomFieldFilters       = "InvalidCustomFieldFilters"
+	MsgInvalidCustomFieldSort          = "InvalidCustomFieldSort"
+	MsgFailedToListTasks               = "FailedToListTasks"
+	MsgFailedToUpdateTask              = "FailedToUpdateTask"
+	MsgFailedToFetchUpdatedTask        = "FailedToFetchUpdatedTask"
+	MsgFailedToReconcileDeps           = "FailedToReconcileDeps"
+	MsgFailedToDeleteTask              = "FailedToDeleteTask"
+	MsgFailedToFetchTask               = "FailedToFetchTask"
+	MsgFailedToUpdateDependentTasks    = "FailedToUpdateDependentTasks"
+	MsgFailedToAssignTask              = "FailedToAssignTask"
+	MsgTaskDecomposerUnavailable       = "TaskDecomposerUnavailable"
+	MsgTaskAlreadyHasChildren          = "TaskAlreadyHasChildren"
+	MsgInvalidTaskDecomposition         = "InvalidTaskDecomposition"
+	MsgFailedToDecomposeTask           = "FailedToDecomposeTask"
+
+	// Task Comment
+	MsgFailedToListTaskComments  = "FailedToListTaskComments"
+	MsgFailedToCreateTaskComment = "FailedToCreateTaskComment"
+	MsgResolvedFlagRequired      = "ResolvedFlagRequired"
+	MsgFailedToUpdateTaskComment = "FailedToUpdateTaskComment"
+	MsgFailedToDeleteTaskComment = "FailedToDeleteTaskComment"
+
+	// Team
+	MsgTeamServiceUnavailable    = "TeamServiceUnavailable"
+	MsgFailedToStartTeam         = "FailedToStartTeam"
+	MsgTeamNotFound              = "TeamNotFound"
+	MsgFailedToListTeams         = "FailedToListTeams"
+	MsgInvalidOrMissingProjectID = "InvalidOrMissingProjectID"
+	MsgFailedToCancelTeam        = "FailedToCancelTeam"
+	MsgFailedToRetryTeam         = "FailedToRetryTeam"
+	MsgTeamStillActive           = "TeamStillActive"
+	MsgFailedToDeleteTeam        = "FailedToDeleteTeam"
+
+	// Wiki
+	MsgWikiSpaceNotFound            = "WikiSpaceNotFound"
+	MsgFailedToListWikiPages        = "FailedToListWikiPages"
+	MsgFailedToCreateWikiPage       = "FailedToCreateWikiPage"
+	MsgFailedToUpdateWikiPage       = "FailedToUpdateWikiPage"
+	MsgWikiPageHasNewerChanges      = "WikiPageHasNewerChanges"
+	MsgInvalidExpectedUpdatedAt     = "InvalidExpectedUpdatedAt"
+	MsgFailedToDeleteWikiPage       = "FailedToDeleteWikiPage"
+	MsgCannotMoveIntoDescendant     = "CannotMoveIntoDescendant"
+	MsgFailedToMoveWikiPage         = "FailedToMoveWikiPage"
+	MsgFailedToListPageVersions     = "FailedToListPageVersions"
+	MsgFailedToCreatePageVersion    = "FailedToCreatePageVersion"
+	MsgPageVersionNotFound          = "PageVersionNotFound"
+	MsgFailedToRestorePageVersion   = "FailedToRestorePageVersion"
+	MsgFailedToListPageComments     = "FailedToListPageComments"
+	MsgFailedToCreatePageComment    = "FailedToCreatePageComment"
+	MsgPageCommentNotFound          = "PageCommentNotFound"
+	MsgFailedToUpdatePageComment    = "FailedToUpdatePageComment"
+	MsgFailedToDeletePageComment    = "FailedToDeletePageComment"
+	MsgFailedToListWikiTemplates    = "FailedToListWikiTemplates"
+	MsgFailedToCreateTemplate       = "FailedToCreateTemplate"
+	MsgFailedToCreatePageFromTemplate = "FailedToCreatePageFromTemplate"
+	MsgFailedToListPageFavorites    = "FailedToListPageFavorites"
+	MsgFailedToUpdateFavoriteState  = "FailedToUpdateFavoriteState"
+	MsgFailedToListRecentPages      = "FailedToListRecentPages"
+	MsgFailedToUpdatePinnedState    = "FailedToUpdatePinnedState"
+
+	// Workflow
+	MsgInvalidTransitions          = "InvalidTransitions"
+	MsgInvalidTriggers             = "InvalidTriggers"
+	MsgFailedToSaveWorkflowConfig  = "FailedToSaveWorkflowConfig"
+
+	// Middleware - Project
+	MsgProjectIDRequired = "ProjectIDRequired"
+)

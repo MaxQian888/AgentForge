@@ -1,0 +1,170 @@
+{
+  "plugins": [
+    {
+      "id": "web-search",
+      "kind": "ToolPlugin",
+      "manifest": "tools/web-search/manifest.yaml",
+      "docsRef": "docs/part/PLUGIN_SYSTEM_DESIGN.md#七工具插件系统tool-plugin",
+      "verificationProfile": "mcp-tool",
+      "readiness": {
+        "readyMessage": "Bundled and ready for install.",
+        "blockedMessage": "Web Search requires local setup before activation.",
+        "nextStep": "Install the built-in and confirm the bridge runtime is available.",
+        "installable": true
+      },
+      "availability": {
+        "status": "ready",
+        "message": "Bundled and ready for install."
+      }
+    },
+    {
+      "id": "github-tool",
+      "kind": "ToolPlugin",
+      "manifest": "tools/github-tool/manifest.yaml",
+      "docsRef": "docs/PRD.md#46-工具插件系统tool-plugin",
+      "verificationProfile": "mcp-tool",
+      "readiness": {
+        "readyMessage": "GitHub Tool is ready for install.",
+        "blockedMessage": "Requires GitHub credentials on the bridge host for authenticated API usage.",
+        "nextStep": "Set AGENTFORGE_GITHUB_TOKEN on the bridge host before activation.",
+        "installable": true,
+        "configuration": [
+          {
+            "kind": "env",
+            "value": "AGENTFORGE_GITHUB_TOKEN",
+            "label": "GitHub token"
+          }
+        ]
+      },
+      "availability": {
+        "status": "requires_configuration",
+        "message": "Requires GitHub credentials on the bridge host for authenticated API usage."
+      }
+    },
+    {
+      "id": "db-query",
+      "kind": "ToolPlugin",
+      "manifest": "tools/db-query/manifest.yaml",
+      "docsRef": "docs/part/PLUGIN_SYSTEM_DESIGN.md#七工具插件系统tool-plugin",
+      "verificationProfile": "mcp-tool",
+      "readiness": {
+        "readyMessage": "DB Query is ready for install.",
+        "blockedMessage": "Requires uvx plus a local SQLite database path before runtime activation can succeed.",
+        "nextStep": "Install uvx and set AGENTFORGE_DB_QUERY_SQLITE_PATH before activation.",
+        "installable": true,
+        "prerequisites": [
+          {
+            "kind": "executable",
+            "value": "uvx",
+            "label": "uvx"
+          }
+        ],
+        "configuration": [
+          {
+            "kind": "env",
+            "value": "AGENTFORGE_DB_QUERY_SQLITE_PATH",
+            "label": "SQLite database path"
+          }
+        ]
+      },
+      "availability": {
+        "status": "requires_prerequisite",
+        "message": "Requires uvx plus a local SQLite database path before runtime activation can succeed."
+      }
+    },
+    {
+      "id": "feishu-adapter",
+      "kind": "IntegrationPlugin",
+      "manifest": "integrations/feishu-adapter/manifest.yaml",
+      "docsRef": "docs/GO_WASM_PLUGIN_RUNTIME.md",
+      "verificationProfile": "go-wasm",
+      "readiness": {
+        "readyMessage": "Feishu Adapter is ready for install.",
+        "blockedMessage": "Requires Feishu application credentials before live activation.",
+        "nextStep": "Set FEISHU_APP_ID and FEISHU_APP_SECRET before activation.",
+        "installable": true,
+        "configuration": [
+          {
+            "kind": "env",
+            "value": "FEISHU_APP_ID",
+            "label": "FEISHU_APP_ID"
+          },
+          {
+            "kind": "env",
+            "value": "FEISHU_APP_SECRET",
+            "label": "FEISHU_APP_SECRET"
+          }
+        ]
+      },
+      "availability": {
+        "status": "requires_configuration",
+        "message": "Requires Feishu application credentials before live activation."
+      }
+    },
+    {
+      "id": "architecture-check",
+      "kind": "ReviewPlugin",
+      "manifest": "reviews/architecture-check/manifest.yaml",
+      "docsRef": "docs/part/PLUGIN_SYSTEM_DESIGN.md#十审查插件系统review-plugin",
+      "verificationProfile": "mcp-review",
+      "readiness": {
+        "readyMessage": "Architecture Check is ready for install.",
+        "blockedMessage": "Requires Bun on the bridge host to execute the bundled review plugin.",
+        "nextStep": "Install Bun on the bridge host before activation.",
+        "installable": true,
+        "prerequisites": [
+          {
+            "kind": "executable",
+            "value": "bun",
+            "label": "Bun"
+          }
+        ]
+      },
+      "availability": {
+        "status": "requires_prerequisite",
+        "message": "Requires Bun on the bridge host to execute the bundled review plugin."
+      }
+    },
+    {
+      "id": "performance-check",
+      "kind": "ReviewPlugin",
+      "manifest": "reviews/performance-check/manifest.yaml",
+      "docsRef": "docs/PRD.md#49-审查插件系统",
+      "verificationProfile": "mcp-review",
+      "readiness": {
+        "readyMessage": "Performance Check is ready for install.",
+        "blockedMessage": "Requires Bun on the bridge host to execute the bundled review plugin.",
+        "nextStep": "Install Bun on the bridge host before activation.",
+        "installable": true,
+        "prerequisites": [
+          {
+            "kind": "executable",
+            "value": "bun",
+            "label": "Bun"
+          }
+        ]
+      },
+      "availability": {
+        "status": "requires_prerequisite",
+        "message": "Requires Bun on the bridge host to execute the bundled review plugin."
+      }
+    },
+    {
+      "id": "standard-dev-flow",
+      "kind": "WorkflowPlugin",
+      "manifest": "workflows/standard-dev-flow/manifest.yaml",
+      "docsRef": "docs/part/PLUGIN_SYSTEM_DESIGN.md#八工作流插件系统workflow-plugin",
+      "verificationProfile": "workflow-wasm",
+      "readiness": {
+        "readyMessage": "Maintained sequential starter workflow for coding and review handoff.",
+        "blockedMessage": "Workflow starter requires local setup before activation.",
+        "nextStep": "Install the built-in and activate it through the standard workflow runtime.",
+        "installable": true
+      },
+      "availability": {
+        "status": "ready",
+        "message": "Maintained sequential starter workflow for coding and review handoff."
+      }
+    }
+  ]
+}

@@ -91,6 +91,25 @@ func (r *ScheduledJobRepository) GetByKey(ctx context.Context, jobKey string) (*
 	return row.toModel(), nil
 }
 
+func (r *ScheduledJobRepository) Stats(ctx context.Context) (*model.SchedulerStats, error) {
+	jobs, err := r.List(ctx)
+	if err != nil {
+		return nil, fmt.Errorf("stats: %w", err)
+	}
+	stats := &model.SchedulerStats{TotalJobs: len(jobs)}
+	for _, job := range jobs {
+		if job.Enabled {
+			stats.EnabledJobs++
+		} else {
+			stats.DisabledJobs++
+		}
+		if job.LastRunStatus == model.ScheduledJobRunStatusFailed {
+			stats.FailedJobs++
+		}
+	}
+	return stats, nil
+}
+
 func (r *ScheduledJobRepository) List(ctx context.Context) ([]*model.ScheduledJob, error) {
 	if r.db == nil {
 		r.mu.RLock()
@@ -264,6 +283,91 @@ func (r *ScheduledJobRunRepository) ListByJobKey(ctx context.Context, jobKey str
 	return runs, nil
 }
 
+func (r *ScheduledJobRunRepository) CountByStatus(ctx context.Context, since time.Time) (total int, failed int, active int, err error) {
+	if r.db == nil {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		for _, run := range r.runs {
+			if !run.Status.IsTerminal() {
+				active++
+			}
+			if run.StartedAt.Before(since) {
+				continue
+			}
+			total++
+			if run.Status == model.ScheduledJobRunStatusFailed {
+				failed++
+			}
+		}
+		return total, failed, active, nil
+	}
+
+	type result struct {
+		Status string
+		Count  int
+	}
+
+	var results []result
+	if dbErr := r.db.WithContext(ctx).
+		Model(&scheduledJobRunRecord{}).
+		Select("status, COUNT(*) as count").
+		Where("started_at >= ?", since).
+		Group("status").
+		Scan(&results).Error; dbErr != nil {
+		return 0, 0, 0, fmt.Errorf("count runs by status: %w", dbErr)
+	}
+	for _, row := range results {
+		total += row.Count
+		if model.ScheduledJobRunStatus(row.Status) == model.ScheduledJobRunStatusFailed {
+			failed += row.Count
+		}
+	}
+
+	var activeCount int64
+	if dbErr := r.db.WithContext(ctx).
+		Model(&scheduledJobRunRecord{}).
+		Where("status IN ?", []model.ScheduledJobRunStatus{
+			model.ScheduledJobRunStatusPending,
+			model.ScheduledJobRunStatusRunning,
+		}).
+		Count(&activeCount).Error; dbErr != nil {
+		return 0, 0, 0, fmt.Errorf("count active runs: %w", dbErr)
+	}
+	active = int(activeCount)
+
+	return total, failed, active, nil
+}
+
+func (r *ScheduledJobRunRepository) DeleteOlderThan(ctx context.Context, before time.Time) (int64, error) {
+	if r.db == nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		kept := make([]*model.ScheduledJobRun, 0, len(r.runs))
+		deleted := int64(0)
+		for _, run := range r.runs {
+			if run.StartedAt.Before(before) && run.Status.IsTerminal() {
+				deleted++
+				continue
+			}
+			kept = append(kept, run)
+		}
+		r.runs = kept
+		return deleted, nil
+	}
+
+	result := r.db.WithContext(ctx).
+		Where("started_at < ? AND status IN ?", before, []model.ScheduledJobRunStatus{
+			model.ScheduledJobRunStatusSucceeded,
+			model.ScheduledJobRunStatusFailed,
+			model.ScheduledJobRunStatusSkipped,
+		}).
+		Delete(&scheduledJobRunRecord{})
+	if result.Error != nil {
+		return 0, fmt.Errorf("delete old scheduled job runs: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
 func (r *ScheduledJobRunRepository) HasActiveRun(ctx context.Context, jobKey string) (bool, error) {
 	if r.db == nil {
 		r.mu.RLock()
@@ -305,6 +409,7 @@ func cloneScheduledJobRun(run *model.ScheduledJobRun) *model.ScheduledJobRun {
 	}
 	cloned := *run
 	cloned.FinishedAt = cloneTimePointer(run.FinishedAt)
+	cloned.ComputeDuration()
 	return &cloned
 }
 

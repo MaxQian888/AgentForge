@@ -5,6 +5,7 @@ jest.mock("@/lib/stores/auth-store", () => ({
 }));
 
 import { useMemberStore } from "./member-store";
+import type { CreateMemberInput, UpdateMemberInput } from "./member-store";
 
 describe("useMemberStore", () => {
   const fetchMock = jest.fn();
@@ -34,6 +35,7 @@ describe("useMemberStore", () => {
           name: "Alice",
           type: "human",
           role: "frontend-developer",
+          status: "active",
           email: "alice@example.com",
           avatarUrl: "",
           skills: ["react", "testing"],
@@ -46,7 +48,10 @@ describe("useMemberStore", () => {
           name: "Review Bot",
           type: "agent",
           role: "code-reviewer",
+          status: "suspended",
           email: "",
+          imPlatform: "feishu",
+          imUserId: "ou_review_bot",
           avatarUrl: "",
           agentConfig: JSON.stringify({
             roleId: "frontend-developer",
@@ -55,7 +60,7 @@ describe("useMemberStore", () => {
             model: "gpt-5-codex",
           }),
           skills: ["review"],
-          isActive: false,
+          isActive: true,
           createdAt: "2026-03-20T10:00:00.000Z",
         },
       ])
@@ -72,8 +77,11 @@ describe("useMemberStore", () => {
     });
     expect(members[1]).toMatchObject({
       id: "member-2",
-      status: "inactive",
+      status: "suspended",
+      isActive: false,
       typeLabel: "Agent",
+      imPlatform: "feishu",
+      imUserId: "ou_review_bot",
       roleBindingLabel: "frontend-developer",
       readinessState: "ready",
       agentProfile: expect.objectContaining({
@@ -92,7 +100,10 @@ describe("useMemberStore", () => {
           name: "Review Bot",
           type: "agent",
           role: "code-reviewer",
+          status: "inactive",
           email: "",
+          imPlatform: "feishu",
+          imUserId: "ou_review_bot",
           avatarUrl: "",
           agentConfig: JSON.stringify({
             roleId: "frontend-developer",
@@ -113,7 +124,10 @@ describe("useMemberStore", () => {
           name: "Review Bot",
           type: "agent",
           role: "code-reviewer",
+          status: "suspended",
           email: "",
+          imPlatform: "slack",
+          imUserId: "U12345",
           avatarUrl: "",
           agentConfig: JSON.stringify({
             roleId: "frontend-developer",
@@ -129,10 +143,13 @@ describe("useMemberStore", () => {
         }),
       );
 
-    await useMemberStore.getState().createMember("project-1", {
+    const createInput: CreateMemberInput = {
       name: "Review Bot",
       type: "agent",
       role: "code-reviewer",
+      status: "inactive",
+      imPlatform: "feishu",
+      imUserId: "ou_review_bot",
       skills: ["review", "typescript"],
       agentProfile: {
         roleId: "frontend-developer",
@@ -142,9 +159,12 @@ describe("useMemberStore", () => {
         maxBudgetUsd: "6.5",
         notes: "",
       },
-    });
+    };
 
-    await useMemberStore.getState().updateMember("member-2", "project-1", {
+    const updateInput: UpdateMemberInput = {
+      status: "suspended",
+      imPlatform: "slack",
+      imUserId: "U12345",
       skills: ["review", "typescript", "security"],
       agentProfile: {
         roleId: "frontend-developer",
@@ -154,11 +174,18 @@ describe("useMemberStore", () => {
         maxBudgetUsd: "7",
         notes: "keep reviews concise",
       },
-    });
+    };
+
+    await useMemberStore.getState().createMember("project-1", createInput);
+
+    await useMemberStore.getState().updateMember("member-2", "project-1", updateInput);
 
     const createBody = JSON.parse((fetchMock.mock.calls[0]?.[1] as RequestInit)?.body as string);
     expect(createBody).toMatchObject({
       type: "agent",
+      status: "inactive",
+      imPlatform: "feishu",
+      imUserId: "ou_review_bot",
       skills: ["review", "typescript"],
       agentConfig: JSON.stringify({
         roleId: "frontend-developer",
@@ -171,6 +198,9 @@ describe("useMemberStore", () => {
 
     const updateBody = JSON.parse((fetchMock.mock.calls[1]?.[1] as RequestInit)?.body as string);
     expect(updateBody).toMatchObject({
+      status: "suspended",
+      imPlatform: "slack",
+      imUserId: "U12345",
       skills: ["review", "typescript", "security"],
       agentConfig: JSON.stringify({
         roleId: "frontend-developer",

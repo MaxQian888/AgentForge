@@ -1,5 +1,6 @@
 "use client";
 import { create } from "zustand";
+import { toast } from "sonner";
 import { WSClient } from "@/lib/ws-client";
 import { useTaskStore } from "./task-store";
 import { useAgentStore } from "./agent-store";
@@ -13,6 +14,8 @@ import { useSchedulerStore } from "./scheduler-store";
 import { useTaskCommentStore } from "./task-comment-store";
 import { useTeamStore, normalizeTeam } from "./team-store";
 import { useWorkflowStore } from "./workflow-store";
+import { emitProjectedDesktopEvent } from "@/lib/platform-runtime";
+import { getPreferredLocale } from "./locale-store";
 import type { Task } from "./task-store";
 import type { AgentPoolSummary, AgentStatus, MemoryStatus } from "./agent-store";
 
@@ -287,7 +290,7 @@ export const useWSStore = create<WSState>()((set) => ({
     });
 
     client.on("budget.warning", (data) => {
-      const payload = extractPayload<{ taskId?: string; spent?: number; budget?: number }>(data);
+      const payload = extractPayload<{ taskId?: string; spent?: number; budget?: number; scope?: string; message?: string }>(data);
       if (!payload?.taskId) {
         return;
       }
@@ -296,6 +299,19 @@ export const useWSStore = create<WSState>()((set) => ({
         spentUsd: typeof payload.spent === "number" ? payload.spent : undefined,
         budgetUsd: typeof payload.budget === "number" ? payload.budget : undefined,
       });
+      const locale = getPreferredLocale();
+      const scopeLabel = formatBudgetScopeLabel(payload.scope, locale);
+      toast.warning(
+        locale === "zh-CN" ? `预算预警${scopeLabel ? `：${scopeLabel}` : ""}` : `Budget warning${scopeLabel ? `: ${scopeLabel}` : ""}`,
+        {
+          description:
+            typeof payload.message === "string" && payload.message.trim() !== ""
+              ? payload.message
+              : locale === "zh-CN"
+                ? `任务 ${payload.taskId} 的预算接近阈值。`
+                : `Task ${payload.taskId} is approaching its budget threshold.`,
+        },
+      );
     });
 
     client.on("budget.exceeded", (data) => {
@@ -320,6 +336,25 @@ export const useWSStore = create<WSState>()((set) => ({
       useDashboardStore.getState().applyActivityNotification(
         payload as import("./notification-store").Notification
       );
+    });
+
+    client.on("plugin.lifecycle", (data) => {
+      const payload = extractPayload<Record<string, unknown>>(data);
+      if (!payload) {
+        return;
+      }
+
+      emitProjectedDesktopEvent({
+        type: "plugin.lifecycle",
+        source: "plugin",
+        timestamp:
+          typeof payload.created_at === "string"
+            ? payload.created_at
+            : typeof payload.createdAt === "string"
+              ? payload.createdAt
+              : undefined,
+        payload,
+      });
     });
 
     client.on("workflow.trigger_fired", (data) => {
@@ -520,3 +555,16 @@ export const useWSStore = create<WSState>()((set) => ({
     client?.unsubscribe(channel);
   },
 }));
+
+function formatBudgetScopeLabel(scope: string | undefined, locale: "zh-CN" | "en"): string {
+  switch (scope) {
+    case "task":
+      return locale === "zh-CN" ? "任务" : "task";
+    case "sprint":
+      return locale === "zh-CN" ? "Sprint" : "sprint";
+    case "project":
+      return locale === "zh-CN" ? "项目" : "project";
+    default:
+      return "";
+  }
+}

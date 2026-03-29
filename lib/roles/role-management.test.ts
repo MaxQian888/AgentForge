@@ -2,6 +2,7 @@ import type { RoleManifest } from "@/lib/stores/role-store";
 import {
   buildRoleDraft,
   buildRoleExecutionSummary,
+  resolveRoleSkillReferences,
   renderRoleManifestYaml,
   serializeRoleDraft,
 } from "./role-management";
@@ -41,6 +42,9 @@ const role: RoleManifest = {
       external: ["figma"],
       mcpServers: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
     },
+    customSettings: {
+      approval_mode: "guided",
+    },
     languages: ["TypeScript"],
     frameworks: ["Next.js"],
     skills: [
@@ -54,7 +58,21 @@ const role: RoleManifest = {
     repositories: ["app", "components"],
     documents: ["docs/PRD.md"],
     patterns: ["responsive-layouts"],
-    shared: [{ id: "design-guidelines", type: "vector", access: "read" }],
+    shared: [
+      {
+        id: "design-guidelines",
+        type: "vector",
+        access: "read",
+        description: "Shared UI guidance",
+        sources: ["docs/PRD.md"],
+      },
+    ],
+    memory: {
+      shortTerm: { maxTokens: 64000 },
+      episodic: { enabled: true, retentionDays: 45 },
+      semantic: { enabled: true, autoExtract: true },
+      procedural: { enabled: false, learnFromFeedback: false },
+    },
   },
   security: {
     profile: "standard",
@@ -76,6 +94,9 @@ const role: RoleManifest = {
   },
   triggers: [{ event: "pr_created", action: "auto_review", condition: "labels.includes('ui')" }],
   extends: "coding-agent",
+  overrides: {
+    "identity.role": "Principal Frontend Developer",
+  },
 };
 
 describe("role management helpers", () => {
@@ -103,6 +124,8 @@ describe("role management helpers", () => {
       packages: "",
       allowedTools: "",
       externalTools: "",
+      mcpServerRows: [],
+      customSettingRows: [],
       skillRows: [],
       languages: "",
       frameworks: "",
@@ -112,6 +135,14 @@ describe("role management helpers", () => {
       documents: "",
       patterns: "",
       sharedKnowledgeRows: [],
+      privateKnowledgeRows: [],
+      memoryShortTermMaxTokens: "",
+      memoryEpisodicEnabled: false,
+      memoryEpisodicRetentionDays: "",
+      memorySemanticEnabled: false,
+      memorySemanticAutoExtract: false,
+      memoryProceduralEnabled: false,
+      memoryProceduralLearnFromFeedback: false,
       securityProfile: "",
       permissionMode: "default",
       allowedPaths: "",
@@ -123,6 +154,7 @@ describe("role management helpers", () => {
       communicationPreferredChannel: "",
       communicationReportFormat: "",
       communicationEscalationPolicy: "",
+      overridesInput: "",
       triggerRows: [],
     });
   });
@@ -136,7 +168,17 @@ describe("role management helpers", () => {
       allowedTools: "Read, Edit",
       packages: "design-system",
       externalTools: "figma",
-      sharedKnowledgeRows: [{ id: "design-guidelines", type: "vector", access: "read", description: "", sourcesInput: "" }],
+      mcpServerRows: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
+      customSettingRows: [{ key: "approval_mode", value: "guided" }],
+      sharedKnowledgeRows: [{ id: "design-guidelines", type: "vector", access: "read", description: "Shared UI guidance", sourcesInput: "docs/PRD.md" }],
+      privateKnowledgeRows: [],
+      memoryShortTermMaxTokens: "64000",
+      memoryEpisodicEnabled: true,
+      memoryEpisodicRetentionDays: "45",
+      memorySemanticEnabled: true,
+      memorySemanticAutoExtract: true,
+      memoryProceduralEnabled: false,
+      memoryProceduralLearnFromFeedback: false,
       skillRows: [
         { path: "skills/react", autoLoad: true },
         { path: "skills/testing", autoLoad: false },
@@ -146,13 +188,14 @@ describe("role management helpers", () => {
       outputFilters: "no_pii",
       collaborationCanDelegateTo: "frontend-developer",
       communicationPreferredChannel: "structured",
+      overridesInput: '{\n  "identity.role": "Principal Frontend Developer"\n}',
       triggerRows: [{ event: "pr_created", action: "auto_review", condition: "labels.includes('ui')" }],
       extendsValue: "coding-agent",
     });
   });
 
   it("serializes a fresh draft without a base role using repo-safe defaults", () => {
-    const payload = serializeRoleDraft({
+    const payload = serializeRoleDraft(({
       ...buildRoleDraft(),
       roleId: "design-manager",
       name: "Design Manager",
@@ -162,6 +205,8 @@ describe("role management helpers", () => {
       systemPrompt: "Coordinate polished UI delivery.",
       allowedTools: " Read, Edit ",
       externalTools: " figma, slack ",
+      mcpServerRows: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
+      customSettingRows: [{ key: "approval_mode", value: "guided" }],
       skillRows: [{ path: " skills/design ", autoLoad: true }],
       languages: " TypeScript ",
       frameworks: " Next.js ",
@@ -178,13 +223,32 @@ describe("role management helpers", () => {
           sourcesInput: " docs/PRD.md, docs/part/PLUGIN_SYSTEM_DESIGN.md ",
         },
       ],
+      privateKnowledgeRows: [
+        {
+          id: "operator-notes",
+          type: "doc",
+          access: "read",
+          description: "Internal notes",
+          sourcesInput: " docs/notes.md ",
+        },
+      ],
+      memoryShortTermMaxTokens: "48000",
+      memoryEpisodicEnabled: true,
+      memoryEpisodicRetentionDays: "30",
+      memorySemanticEnabled: true,
+      memorySemanticAutoExtract: false,
+      memoryProceduralEnabled: true,
+      memoryProceduralLearnFromFeedback: true,
+      overridesInput: '{\n  "identity.role": "Design Manager"\n}',
       triggerRows: [
         { event: "", action: "", condition: "" },
         { event: "pr_created", action: "notify", condition: "labels.includes('design')" },
       ],
-    });
+    }) as Parameters<typeof serializeRoleDraft>[0]);
 
     expect(payload).toEqual({
+      apiVersion: "agentforge/v1",
+      kind: "Role",
       metadata: {
         id: "design-manager",
         name: "Design Manager",
@@ -216,7 +280,7 @@ describe("role management helpers", () => {
         toolConfig: {
           builtIn: ["Read", "Edit"],
           external: ["figma", "slack"],
-          mcpServers: [],
+          mcpServers: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
         },
         skills: [{ path: "skills/design", autoLoad: true }],
         languages: ["TypeScript"],
@@ -224,7 +288,7 @@ describe("role management helpers", () => {
         maxTurns: undefined,
         maxBudgetUsd: undefined,
         maxConcurrency: undefined,
-        customSettings: undefined,
+        customSettings: { approval_mode: "guided" },
       },
       knowledge: {
         repositories: ["app", "components"],
@@ -239,8 +303,21 @@ describe("role management helpers", () => {
             sources: ["docs/PRD.md", "docs/part/PLUGIN_SYSTEM_DESIGN.md"],
           },
         ],
-        private: [],
-        memory: undefined,
+        private: [
+          {
+            id: "operator-notes",
+            type: "doc",
+            access: "read",
+            description: "Internal notes",
+            sources: ["docs/notes.md"],
+          },
+        ],
+        memory: {
+          shortTerm: { maxTokens: 48000 },
+          episodic: { enabled: true, retentionDays: 30 },
+          semantic: { enabled: true, autoExtract: false },
+          procedural: { enabled: true, learnFromFeedback: true },
+        },
       },
       security: {
         profile: undefined,
@@ -269,7 +346,7 @@ describe("role management helpers", () => {
           condition: "labels.includes('design')",
         },
       ],
-      overrides: undefined,
+      overrides: { "identity.role": "Design Manager" },
       extends: undefined,
       validationErrors: [
         "Shared knowledge rows must include at least an id, type, or access value.",
@@ -280,23 +357,45 @@ describe("role management helpers", () => {
 
   it("serializes a draft back into a normalized role payload", () => {
     const payload = serializeRoleDraft(
-      {
+      ({
         ...buildRoleDraft(role),
         roleId: "frontend-developer-custom",
         name: "Frontend Developer Custom",
         packages: "design-system, review",
         externalTools: "figma, playwright",
+        mcpServerRows: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
+        customSettingRows: [
+          { key: "approval_mode", value: "guided" },
+          { key: "review_depth", value: "strict" },
+        ],
         maxBudgetUsd: "7.5",
         requireReview: false,
         sharedKnowledgeRows: [
           { id: "design-guidelines", type: "vector", access: "read", description: "Shared", sourcesInput: "" },
         ],
+        privateKnowledgeRows: [
+          {
+            id: "design-secrets",
+            type: "doc",
+            access: "read",
+            description: "Private notes",
+            sourcesInput: "docs/private.md",
+          },
+        ],
+        memoryShortTermMaxTokens: "32000",
+        memoryEpisodicEnabled: true,
+        memoryEpisodicRetentionDays: "14",
+        memorySemanticEnabled: true,
+        memorySemanticAutoExtract: false,
+        memoryProceduralEnabled: true,
+        memoryProceduralLearnFromFeedback: true,
         outputFilters: "no_pii, no_credentials",
+        overridesInput: '{\n  "identity.role": "Frontend Architect"\n}',
         skillRows: [
           { path: "skills/react", autoLoad: false },
           { path: "skills/accessibility", autoLoad: true },
         ],
-      },
+      }) as Parameters<typeof serializeRoleDraft>[0],
       role,
     );
 
@@ -310,7 +409,12 @@ describe("role management helpers", () => {
         allowedTools: ["Read", "Edit"],
         toolConfig: expect.objectContaining({
           external: ["figma", "playwright"],
+          mcpServers: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
         }),
+        customSettings: {
+          approval_mode: "guided",
+          review_depth: "strict",
+        },
         skills: [
           { path: "skills/react", autoLoad: false },
           { path: "skills/accessibility", autoLoad: true },
@@ -323,33 +427,98 @@ describe("role management helpers", () => {
       }),
       knowledge: expect.objectContaining({
         shared: [{ id: "design-guidelines", type: "vector", access: "read", description: "Shared", sources: [] }],
+        private: [
+          {
+            id: "design-secrets",
+            type: "doc",
+            access: "read",
+            description: "Private notes",
+            sources: ["docs/private.md"],
+          },
+        ],
+        memory: {
+          shortTerm: { maxTokens: 32000 },
+          episodic: { enabled: true, retentionDays: 14 },
+          semantic: { enabled: true, autoExtract: false },
+          procedural: { enabled: true, learnFromFeedback: true },
+        },
       }),
+      overrides: { "identity.role": "Frontend Architect" },
     });
   });
 
   it("reports validation issues for invalid shared knowledge and trigger rows", () => {
     const payload = serializeRoleDraft(
-      {
+      ({
         ...buildRoleDraft(role),
         sharedKnowledgeRows: [
           { id: " ", type: " ", access: " ", description: "Needs context", sourcesInput: "" },
         ],
+        customSettingRows: [
+          { key: "approval_mode", value: "guided" },
+          { key: "approval_mode", value: "strict" },
+          { key: "", value: "missing-key" },
+        ],
+        mcpServerRows: [{ name: "design-mcp", url: "" }],
+        overridesInput: "{ invalid json }",
         triggerRows: [
           { event: "", action: "notify", condition: "" },
           { event: "pr_created", action: "notify", condition: "labels.includes('ui')" },
           { event: "pr_created", action: "notify", condition: "labels.includes('ui')" },
         ],
-      },
+      }) as Parameters<typeof serializeRoleDraft>[0],
       role,
     );
 
     expect(payload.validationErrors).toEqual(
       expect.arrayContaining([
         "Shared knowledge rows must include at least an id, type, or access value.",
+        "Custom setting keys must be unique.",
+        "Custom setting key cannot be blank.",
+        "MCP server rows must include both name and url.",
+        "Overrides input must be valid JSON.",
         "Trigger rows must include both event and action.",
         "Trigger rows must be unique.",
       ]),
     );
+  });
+
+  it("preserves advanced fields for template-derived drafts without requiring a base role", () => {
+    const payload = serializeRoleDraft(({
+      ...buildRoleDraft(role),
+      roleId: "frontend-developer-copy",
+      name: "Frontend Developer Copy",
+    }) as Parameters<typeof serializeRoleDraft>[0]);
+
+    expect(payload).toMatchObject({
+      metadata: expect.objectContaining({
+        id: "frontend-developer-copy",
+        name: "Frontend Developer Copy",
+      }),
+      capabilities: expect.objectContaining({
+        toolConfig: expect.objectContaining({
+          mcpServers: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
+        }),
+        customSettings: { approval_mode: "guided" },
+      }),
+      knowledge: expect.objectContaining({
+        shared: [
+          {
+            id: "design-guidelines",
+            type: "vector",
+            access: "read",
+            description: "Shared UI guidance",
+            sources: ["docs/PRD.md"],
+          },
+        ],
+        memory: expect.objectContaining({
+          shortTerm: { maxTokens: 64000 },
+          episodic: { enabled: true, retentionDays: 45 },
+          semantic: { enabled: true, autoExtract: true },
+        }),
+      }),
+      overrides: { "identity.role": "Principal Frontend Developer" },
+    });
   });
 
   it("builds an execution summary for role drafts", () => {
@@ -414,6 +583,66 @@ describe("role management helpers", () => {
         expect.stringContaining("blank"),
       ]),
     );
+  });
+
+  it("resolves role skill references against the catalog and reports provenance", () => {
+    expect(
+      resolveRoleSkillReferences({
+        skills: [
+          { path: "skills/react", autoLoad: true },
+          { path: "skills/testing", autoLoad: false },
+          { path: "skills/custom-flow", autoLoad: false },
+        ],
+        catalog: [
+          {
+            path: "skills/react",
+            label: "React",
+            description: "Build React interfaces.",
+            source: "repo-local",
+            sourceRoot: "skills",
+          },
+          {
+            path: "skills/testing",
+            label: "Testing",
+            source: "repo-local",
+            sourceRoot: "skills",
+          },
+        ],
+        templateSkills: [{ path: "skills/react", autoLoad: true }],
+        parentSkills: [{ path: "skills/testing", autoLoad: false }],
+      }),
+    ).toEqual([
+      {
+        path: "skills/react",
+        autoLoad: true,
+        label: "React",
+        description: "Build React interfaces.",
+        source: "repo-local",
+        sourceRoot: "skills",
+        status: "resolved",
+        provenance: "template-derived",
+      },
+      {
+        path: "skills/testing",
+        autoLoad: false,
+        label: "Testing",
+        description: "",
+        source: "repo-local",
+        sourceRoot: "skills",
+        status: "resolved",
+        provenance: "inherited",
+      },
+      {
+        path: "skills/custom-flow",
+        autoLoad: false,
+        label: "skills/custom-flow",
+        description: "",
+        source: "manual",
+        sourceRoot: "",
+        status: "unresolved",
+        provenance: "explicit",
+      },
+    ]);
   });
 
   it("renders yaml for nested objects, arrays, and empty containers", () => {

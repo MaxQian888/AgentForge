@@ -45,7 +45,7 @@ type CostReconcileTaskRepository interface {
 }
 
 type CostReconcileTeamRepository interface {
-	ListByProject(ctx context.Context, projectID uuid.UUID) ([]*model.AgentTeam, error)
+	ListByProject(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeam, error)
 	UpdateSpent(ctx context.Context, id uuid.UUID, spent float64) error
 }
 
@@ -228,7 +228,7 @@ func NewCostReconcileHandler(
 				reconciledTasks++
 			}
 
-			projectTeams, err := teams.ListByProject(ctx, project.ID)
+			projectTeams, err := teams.ListByProject(ctx, project.ID, "")
 			if err != nil {
 				return nil, err
 			}
@@ -252,6 +252,42 @@ func NewCostReconcileHandler(
 		return &RunResult{
 			Summary: fmt.Sprintf("reconciled %d tasks and %d teams across %d projects", reconciledTasks, reconciledTeams, len(projectList)),
 			Metrics: string(payload),
+		}, nil
+	}
+}
+
+type HistoryRetentionService interface {
+	DeleteOldRuns(ctx context.Context, retentionDays int) (int64, error)
+}
+
+func NewHistoryRetentionHandler(svc HistoryRetentionService) Handler {
+	return func(ctx context.Context, job *model.ScheduledJob, _ *model.ScheduledJobRun) (*RunResult, error) {
+		if svc == nil {
+			return nil, fmt.Errorf("history retention service is required")
+		}
+
+		retentionDays := 30
+		if job != nil && job.Config != "" && job.Config != "{}" {
+			var cfg struct {
+				RetentionDays int `json:"retentionDays"`
+			}
+			if err := json.Unmarshal([]byte(job.Config), &cfg); err == nil && cfg.RetentionDays > 0 {
+				retentionDays = cfg.RetentionDays
+			}
+		}
+
+		deleted, err := svc.DeleteOldRuns(ctx, retentionDays)
+		if err != nil {
+			return nil, err
+		}
+
+		metrics, _ := json.Marshal(map[string]any{
+			"retentionDays": retentionDays,
+			"deletedRuns":   deleted,
+		})
+		return &RunResult{
+			Summary: fmt.Sprintf("deleted %d runs older than %d days", deleted, retentionDays),
+			Metrics: string(metrics),
 		}, nil
 	}
 }

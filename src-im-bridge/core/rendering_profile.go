@@ -114,6 +114,16 @@ func defaultRenderingProfileForSource(source string, capabilities PlatformCapabi
 		profile.SupportedFormats = []TextFormatMode{TextFormatPlainText}
 		profile.MaxTextLength = 20000
 		profile.StructuredSurface = StructuredSurfaceActionCard
+	case "qq":
+		profile.DefaultTextFormat = TextFormatPlainText
+		profile.SupportedFormats = []TextFormatMode{TextFormatPlainText}
+		profile.MaxTextLength = 4096
+		profile.StructuredSurface = StructuredSurfaceNone
+	case "qqbot":
+		profile.DefaultTextFormat = TextFormatPlainText
+		profile.SupportedFormats = []TextFormatMode{TextFormatPlainText}
+		profile.MaxTextLength = 2000
+		profile.StructuredSurface = StructuredSurfaceNone
 	default:
 		if profile.StructuredSurface == "" {
 			profile.StructuredSurface = StructuredSurfaceNone

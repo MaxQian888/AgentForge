@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
 )
@@ -25,11 +26,11 @@ func (h *CostHandler) GetStats(c echo.Context) error {
 	if projectIDStr != "" {
 		projectID, err := uuid.Parse(projectIDStr)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid projectId"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidProjectIDParam)
 		}
 		summary, err := h.repo.AggregateByProject(c.Request().Context(), projectID)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to get cost stats"})
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToGetCostStats)
 		}
 		return c.JSON(http.StatusOK, summary)
 	}
@@ -37,11 +38,11 @@ func (h *CostHandler) GetStats(c echo.Context) error {
 	if sprintIDStr != "" {
 		sprintID, err := uuid.Parse(sprintIDStr)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid sprintId"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidSprintIDParam)
 		}
 		runs, err := h.repo.ListBySprint(c.Request().Context(), sprintID)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to get cost stats"})
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToGetCostStats)
 		}
 		return c.JSON(http.StatusOK, aggregateRuns(runs))
 	}
@@ -49,7 +50,7 @@ func (h *CostHandler) GetStats(c echo.Context) error {
 	// Default: aggregate across all active runs
 	runs, err := h.repo.ListActive(c.Request().Context())
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to get cost stats"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToGetCostStats)
 	}
 
 	return c.JSON(http.StatusOK, aggregateRuns(runs))

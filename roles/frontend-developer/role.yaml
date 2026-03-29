@@ -41,6 +41,12 @@ capabilities:
     built_in: [Read, Edit, Write, Bash, Glob, Grep]
     external:
       - figma
+    mcp_servers:
+      - name: design-mcp
+        url: http://localhost:3010/mcp
+  custom_settings:
+    approval_mode: guided
+    review_depth: ui-critical
   skills:
     - path: skills/react
       auto_load: true
@@ -64,6 +70,25 @@ knowledge:
       type: vector
       access: read
       description: Shared UI design guidance for AgentForge product surfaces
+      sources:
+        - docs/PRD.md
+        - docs/part/PLUGIN_SYSTEM_DESIGN.md
+  private:
+    - id: frontend-playbook
+      type: doc
+      access: read
+      description: Private implementation notes for frontend delivery.
+      sources:
+        - docs/role-authoring-guide.md
+  memory:
+    short_term:
+      max_tokens: 64000
+    episodic:
+      enabled: true
+      retention_days: 30
+    semantic:
+      enabled: true
+      auto_extract: true
 security:
   profile: standard
   permission_mode: bypassPermissions
@@ -83,3 +108,5 @@ triggers:
   - event: pr_created
     action: auto_review
     condition: "labels.includes('frontend')"
+overrides:
+  identity.role: Principal Frontend Developer

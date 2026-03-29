@@ -1,0 +1,64 @@
+{
+  "appName": "AgentForge",
+  "nav": {
+    "dashboard": "Dashboard",
+    "projects": "Projects",
+    "projectDashboard": "Project Dashboard",
+    "team": "Team",
+    "agents": "Agents",
+    "teams": "Teams",
+    "sprints": "Sprints",
+    "reviews": "Reviews",
+    "scheduler": "Scheduler",
+    "cost": "Cost",
+    "memory": "Memory",
+    "docs": "Docs",
+    "imBridge": "IM Bridge",
+    "roles": "Roles",
+    "plugins": "Plugins",
+    "settings": "Settings"
+  },
+  "header": {
+    "notifications": "Notifications",
+    "markAllRead": "Mark all read",
+    "noNotifications": "No notifications",
+    "logout": "Logout",
+    "user": "User"
+  },
+  "mobileSidebar": {
+    "title": "Mobile navigation",
+    "description": "Browse the main AgentForge dashboard sections."
+  },
+  "action": {
+    "save": "Save",
+    "cancel": "Cancel",
+    "delete": "Delete",
+    "edit": "Edit",
+    "create": "Create",
+    "loading": "Loading...",
+    "search": "Search",
+    "confirm": "Confirm",
+    "back": "Back",
+    "close": "Close",
+    "submit": "Submit",
+    "refresh": "Refresh",
+    "reset": "Reset",
+    "more": "More",
+    "yes": "Yes",
+    "no": "No",
+    "ok": "OK"
+  },
+  "status": {
+    "active": "Active",
+    "inactive": "Inactive",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "pending": "Pending",
+    "running": "Running",
+    "completed": "Completed",
+    "failed": "Failed",
+    "error": "Error",
+    "success": "Success",
+    "warning": "Warning"
+  }
+}

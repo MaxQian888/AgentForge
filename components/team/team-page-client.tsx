@@ -8,6 +8,8 @@ import { useMemberStore, type CreateMemberInput, type UpdateMemberInput } from "
 import { useRoleStore } from "@/lib/stores/role-store";
 import { TeamManagement } from "./team-management";
 
+const EMPTY_PROJECT_MEMBERS: ReturnType<typeof useMemberStore.getState>["membersByProject"][string] = [];
+
 export function TeamPageClient() {
   const pathname = usePathname();
   const router = useRouter();
@@ -27,6 +29,7 @@ export function TeamPageClient() {
   const fetchMembers = useMemberStore((state) => state.fetchMembers);
   const createMember = useMemberStore((state) => state.createMember);
   const updateMember = useMemberStore((state) => state.updateMember);
+  const deleteMember = useMemberStore((state) => state.deleteMember);
   const roles = useRoleStore((state) => state.roles);
   const fetchRoles = useRoleStore((state) => state.fetchRoles);
 
@@ -53,7 +56,13 @@ export function TeamPageClient() {
     void fetchRoles();
   }, [fetchRoles]);
 
-  const projectMembers = activeProjectId ? membersByProject[activeProjectId] ?? [] : [];
+  const projectMembers = useMemo(
+    () =>
+      activeProjectId
+        ? membersByProject[activeProjectId] ?? EMPTY_PROJECT_MEMBERS
+        : EMPTY_PROJECT_MEMBERS,
+    [activeProjectId, membersByProject]
+  );
   const loading = activeProjectId
     ? Boolean(loadingByProject[activeProjectId]) || (dashboardLoading && projectMembers.length === 0)
     : dashboardLoading;
@@ -87,6 +96,12 @@ export function TeamPageClient() {
     await fetchSummary({ projectId: activeProjectId });
   };
 
+  const handleDeleteMember = async (memberId: string) => {
+    if (!activeProjectId) return;
+    await deleteMember(memberId, activeProjectId);
+    await fetchSummary({ projectId: activeProjectId });
+  };
+
   return (
     <TeamManagement
       projects={projects}
@@ -104,6 +119,7 @@ export function TeamPageClient() {
       onProjectChange={handleProjectChange}
       onCreateMember={handleCreateMember}
       onUpdateMember={handleUpdateMember}
+      onDeleteMember={handleDeleteMember}
     />
   );
 }

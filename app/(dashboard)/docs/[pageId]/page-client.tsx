@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Copy } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { createApiClient } from "@/lib/api-client";
@@ -24,6 +25,7 @@ import { useEntityLinkStore } from "@/lib/stores/entity-link-store";
 import { useTaskStore } from "@/lib/stores/task-store";
 
 export function DocsPageDetailClient({ pageId }: { pageId: string }) {
+  const t = useTranslations("docs");
   const router = useRouter();
   const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
   const {
@@ -199,15 +201,15 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
   }, [entityLinks]);
 
   if (loading && !currentPage) {
-    return <p className="text-sm text-muted-foreground">Loading document…</p>;
+    return <p className="text-sm text-muted-foreground">{t("pageDetail.loading")}</p>;
   }
 
   if (!currentPage) {
     return (
       <div className="flex flex-col gap-3">
-        <h1 className="text-2xl font-bold">Document not found</h1>
+        <h1 className="text-2xl font-bold">{t("pageDetail.notFound")}</h1>
         <Button variant="outline" onClick={() => router.push("/docs")}>
-          Back to Docs
+          {t("pageDetail.backToDocs")}
         </Button>
       </div>
     );
@@ -251,7 +253,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           <div>
             <h1 className="text-3xl font-semibold">{currentPage.title}</h1>
             <p className="text-sm text-muted-foreground">
-              {currentPage.path} · last updated{" "}
+              {currentPage.path} · {t("pageDetail.lastUpdated")}{" "}
               {new Date(
                 readonly && selectedVersion ? selectedVersion.createdAt : currentPage.updatedAt
               ).toLocaleString()}
@@ -260,12 +262,12 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           <div className="flex gap-2">
             {!readonly ? (
               <Button variant="outline" onClick={() => setPickerOpen(true)}>
-                New from Template
+                {t("pageDetail.newFromTemplate")}
               </Button>
             ) : null}
             {!readonly ? (
               <Button variant="outline" onClick={() => setDecomposeOpen(true)}>
-                Create Tasks
+                {t("pageDetail.createTasks")}
               </Button>
             ) : null}
             <Button
@@ -275,7 +277,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
               }
             >
               <Copy className="mr-1 size-4" />
-              Copy Link
+              {t("pageDetail.copyLink")}
             </Button>
           </div>
         </div>
@@ -332,7 +334,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
 
         {availableBlocks.length > 0 ? (
           <div className="rounded-xl border border-border/60 bg-card/70 p-4">
-            <h2 className="text-base font-semibold">Block Task Counts</h2>
+            <h2 className="text-base font-semibold">{t("pageDetail.blockTaskCounts")}</h2>
             <div className="mt-3 space-y-2">
               {availableBlocks.map((block) => (
                 <div
@@ -344,7 +346,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
                     <div className="text-xs text-muted-foreground">{block.text}</div>
                   </div>
                   <Button type="button" size="sm" variant="outline">
-                    {blockTaskCounts.get(block.id) ?? 0} tasks
+                    {t("pageDetail.tasks", { count: blockTaskCounts.get(block.id) ?? 0 })}
                   </Button>
                 </div>
               ))}
@@ -425,7 +427,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           void createPageFromTemplate({
             projectId: projectId ?? selectedProjectId ?? "",
             templateId,
-            title: "New document from template",
+            title: t("newFromTemplate"),
           });
           setPickerOpen(false);
         }}

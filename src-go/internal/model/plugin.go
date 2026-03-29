@@ -356,6 +356,22 @@ type PluginReleaseMetadata struct {
 	AvailableVersion string     `yaml:"availableVersion,omitempty" json:"availableVersion,omitempty"`
 }
 
+type PluginBuiltInMetadata struct {
+	Official             bool     `json:"official,omitempty"`
+	DocsRef              string   `json:"docsRef,omitempty"`
+	VerificationProfile  string   `json:"verificationProfile,omitempty"`
+	AvailabilityStatus   string   `json:"availabilityStatus,omitempty"`
+	AvailabilityMessage  string   `json:"availabilityMessage,omitempty"`
+	ReadinessStatus      string   `json:"readinessStatus,omitempty"`
+	ReadinessMessage     string   `json:"readinessMessage,omitempty"`
+	NextStep             string   `json:"nextStep,omitempty"`
+	BlockingReasons      []string `json:"blockingReasons,omitempty"`
+	MissingPrerequisites []string `json:"missingPrerequisites,omitempty"`
+	MissingConfiguration []string `json:"missingConfiguration,omitempty"`
+	Installable          bool     `json:"installable"`
+	InstallBlockedReason string   `json:"installBlockedReason,omitempty"`
+}
+
 type PluginRecord struct {
 	PluginManifest
 	LifecycleState     PluginLifecycleState    `json:"lifecycle_state"`
@@ -366,6 +382,7 @@ type PluginRecord struct {
 	ResolvedSourcePath string                  `json:"resolved_source_path,omitempty"`
 	RuntimeMetadata    *PluginRuntimeMetadata  `json:"runtime_metadata,omitempty"`
 	CurrentInstance    *PluginInstanceSnapshot `json:"current_instance,omitempty"`
+	BuiltIn            *PluginBuiltInMetadata  `json:"builtIn,omitempty"`
 }
 
 type PluginFilter struct {
@@ -456,8 +473,39 @@ type MarketplacePluginDTO struct {
 	InstallURL    string                 `json:"installUrl"`
 	Installed     bool                   `json:"installed"`
 	SourceType    string                 `json:"sourceType,omitempty"`
+	Registry      string                 `json:"registry,omitempty"`
 	Runtime       string                 `json:"runtime,omitempty"`
+	Installable   bool                   `json:"installable,omitempty"`
+	BlockedReason string                 `json:"blockedReason,omitempty"`
 	TrustStatus   PluginTrustState       `json:"trustStatus,omitempty"`
 	ApprovalState PluginApprovalState    `json:"approvalState,omitempty"`
 	Release       *PluginReleaseMetadata `json:"release,omitempty"`
+	BuiltIn       *PluginBuiltInMetadata `json:"builtIn,omitempty"`
+}
+
+type RemoteRegistryErrorCode string
+
+const (
+	RemoteRegistryUnconfigured       RemoteRegistryErrorCode = "remote_registry_unconfigured"
+	RemoteRegistryUnavailable        RemoteRegistryErrorCode = "remote_registry_unavailable"
+	RemoteRegistryDownloadFailed     RemoteRegistryErrorCode = "remote_registry_download_failed"
+	RemoteRegistryInvalidArtifact    RemoteRegistryErrorCode = "remote_registry_invalid_artifact"
+	RemoteRegistryVerificationFailed RemoteRegistryErrorCode = "remote_registry_verification_failed"
+)
+
+type RemoteMarketplaceResponse struct {
+	Available bool                    `json:"available"`
+	Registry  string                  `json:"registry,omitempty"`
+	ErrorCode RemoteRegistryErrorCode `json:"errorCode,omitempty"`
+	Error     string                  `json:"error,omitempty"`
+	Entries   []MarketplacePluginDTO  `json:"entries"`
+}
+
+type RemotePluginInstallResponse struct {
+	OK        bool                    `json:"ok"`
+	PluginID  string                  `json:"pluginId"`
+	Version   string                  `json:"version,omitempty"`
+	Registry  string                  `json:"registry,omitempty"`
+	ErrorCode RemoteRegistryErrorCode `json:"errorCode,omitempty"`
+	Message   string                  `json:"message,omitempty"`
 }

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
@@ -43,21 +44,21 @@ func (h *WorkflowHandler) Put(c echo.Context) error {
 
 	req := new(model.UpdateWorkflowRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 
 	transitionsJSON, err := json.Marshal(req.Transitions)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid transitions"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTransitions)
 	}
 	triggersJSON, err := json.Marshal(req.Triggers)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid triggers"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTriggers)
 	}
 
 	wf, err := h.repo.Upsert(c.Request().Context(), projectID, transitionsJSON, triggersJSON)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to save workflow config"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToSaveWorkflowConfig)
 	}
 
 	return c.JSON(http.StatusOK, wf.ToDTO())

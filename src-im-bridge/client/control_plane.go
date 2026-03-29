@@ -31,9 +31,10 @@ type ControlDelivery struct {
 }
 
 type ControlDeliveryAck struct {
-	BridgeID   string `json:"bridgeId"`
-	Cursor     int64  `json:"cursor"`
-	DeliveryID string `json:"deliveryId,omitempty"`
+	BridgeID        string `json:"bridgeId"`
+	Cursor          int64  `json:"cursor"`
+	DeliveryID      string `json:"deliveryId,omitempty"`
+	DowngradeReason string `json:"downgradeReason,omitempty"`
 }
 
 type ControlPlaneConn struct {
@@ -100,16 +101,17 @@ func (c *ControlPlaneConn) ReadDelivery(ctx context.Context) (*ControlDelivery, 
 	}
 }
 
-func (c *ControlPlaneConn) Ack(cursor int64, deliveryID string) error {
+func (c *ControlPlaneConn) Ack(cursor int64, deliveryID string, downgradeReason string) error {
 	if c == nil || c.conn == nil {
 		return fmt.Errorf("control plane websocket not connected")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
 	return c.conn.WriteJSON(ControlDeliveryAck{
-		BridgeID:   c.bridgeID,
-		Cursor:     cursor,
-		DeliveryID: deliveryID,
+		BridgeID:        c.bridgeID,
+		Cursor:          cursor,
+		DeliveryID:      deliveryID,
+		DowngradeReason: strings.TrimSpace(downgradeReason),
 	})
 }
 

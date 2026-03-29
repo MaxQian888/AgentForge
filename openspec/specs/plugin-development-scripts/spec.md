@@ -46,3 +46,39 @@ The repository SHALL provide a verification workflow that exercises the maintain
 #### Scenario: Verification pinpoints broken maintained workflow
 - **WHEN** any maintained plugin script workflow drifts from the expected manifest, artifact, or command contract
 - **THEN** the verification command exits non-zero and identifies the failing plugin target and workflow stage
+
+### Requirement: Repository verifies maintained built-in plugins by host family
+The repository SHALL provide supported verification workflows for the official built-in plugin bundle grouped by host family instead of relying on one monolithic live smoke run. Maintained Go-hosted wasm plugins, MCP tool plugins, MCP review plugins, and workflow starters MUST each have a documented verification path that identifies the target plugin and the workflow stage being validated.
+
+#### Scenario: MCP built-in plugin verification validates maintained entrypoints
+- **WHEN** a developer or CI workflow verifies an official built-in ToolPlugin or ReviewPlugin
+- **THEN** the repository validation checks the maintained manifest, declared entrypoint or command contract, and family-specific prerequisites without requiring edits to script internals
+
+#### Scenario: Workflow starter verification pinpoints starter-specific failures
+- **WHEN** a maintained built-in workflow starter drifts from its declared manifest, role references, or execution contract
+- **THEN** the verification workflow exits non-zero and identifies the failing workflow starter and validation stage instead of reporting a generic plugin failure
+
+### Requirement: Live smoke remains explicit for prerequisite-heavy built-ins
+The repository SHALL distinguish deterministic default verification from optional live smoke for official built-ins that require network access, secrets, or third-party local services. Default verification MUST remain bounded and reproducible, while live smoke MUST be opt-in and clearly identify the missing prerequisite when it cannot run.
+
+#### Scenario: Default verification skips secret-dependent live execution
+- **WHEN** an official built-in plugin requires secrets or external network access for live runtime execution
+- **THEN** the default verification path validates the maintained contract without silently attempting a flaky live run
+
+#### Scenario: Opt-in live smoke reports missing prerequisite
+- **WHEN** a developer explicitly triggers live smoke for a prerequisite-heavy built-in without satisfying its dependencies
+- **THEN** the live smoke command fails with a message that identifies the missing prerequisite instead of hanging or reporting an unrelated runtime error
+
+### Requirement: Repository verifies official built-in readiness contracts
+The repository SHALL provide a bounded verification workflow that validates official built-in readiness metadata and deterministic readiness preflight behavior without requiring secret-dependent or network-dependent live execution. Verification MUST identify which built-in entry and which readiness stage failed.
+
+#### Scenario: Readiness verification catches bundle metadata drift
+- **WHEN** an official built-in bundle entry declares malformed or incomplete readiness metadata
+- **THEN** the readiness verification workflow exits non-zero
+- **THEN** the failure identifies the affected built-in entry and readiness field
+
+#### Scenario: Readiness verification reports missing deterministic prerequisite
+- **WHEN** a readiness preflight evaluates a built-in plugin that depends on a missing local tool or host capability
+- **THEN** the verification output reports that deterministic prerequisite failure for the affected built-in
+- **THEN** the workflow does not replace that result with an unrelated generic plugin failure
+

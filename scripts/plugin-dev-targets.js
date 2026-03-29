@@ -14,6 +14,9 @@ const MAINTAINED_GO_WASM_TARGETS = {
   "feishu-adapter": {
     sourcePath: "./cmd/sample-wasm-plugin",
   },
+  "standard-dev-flow": {
+    sourcePath: "./cmd/standard-dev-flow",
+  },
 };
 
 function getRepoRoot() {

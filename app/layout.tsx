@@ -1,6 +1,9 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { DesktopWindowFrame } from "@/components/layout/desktop-window-frame";
 import { TooltipProvider } from "@/components/ui/tooltip";
+import { I18nProvider } from "@/lib/i18n/provider";
+import { DEFAULT_LOCALE } from "@/lib/stores/locale-store";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -24,11 +27,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={DEFAULT_LOCALE} suppressHydrationWarning>
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <TooltipProvider>{children}</TooltipProvider>
+        <I18nProvider initialLocale={DEFAULT_LOCALE}>
+          <TooltipProvider>
+            <DesktopWindowFrame>{children}</DesktopWindowFrame>
+          </TooltipProvider>
+        </I18nProvider>
       </body>
     </html>
   );

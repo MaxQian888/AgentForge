@@ -25,9 +25,13 @@ export interface DesktopRuntimeEvent {
   type: string;
   source?: string;
   timestamp?: string;
+  actionId?: string;
+  href?: string;
   runtime?: DesktopRuntimeStatus;
+  status?: "completed" | "failed" | "triggered" | "unsupported";
   shortcut?: string;
   payload?: unknown;
+  windowState?: DesktopWindowChromeState;
 }
 
 export interface PluginRuntimeSummary {
@@ -110,6 +114,35 @@ export interface RegisterShortcutRequest {
   event: string;
 }
 
+export interface DesktopShellActionRequest {
+  actionId: string;
+  href?: string | null;
+  payload?: Record<string, unknown>;
+  source: string;
+}
+
+export interface DesktopWindowChromeState {
+  focused: boolean;
+  maximized: boolean;
+  minimized: boolean;
+  visible: boolean;
+}
+
+export type DesktopShellActionResult =
+  | {
+      ok: true;
+      mode: "desktop" | "web";
+      actionId: string;
+      status: "completed" | "triggered";
+    }
+  | {
+      ok: false;
+      actionId: string;
+      reason: CapabilityFailureReason;
+      error: string;
+      status: "failed" | "unsupported";
+    };
+
 export interface DesktopUpdateInfo {
   currentVersion: string | null;
   notes: string | null;
@@ -152,8 +185,24 @@ interface DesktopUpdateHandle {
   version: string;
 }
 
+interface DesktopWindowHandle {
+  isFocused(): Promise<boolean>;
+  isMaximized(): Promise<boolean>;
+  isMinimized(): Promise<boolean>;
+  isVisible(): Promise<boolean>;
+  onFocusChanged?(
+    handler: (event: { payload: boolean }) => void,
+  ): Promise<() => void>;
+  onMoved?(handler: (event: { payload: unknown }) => void): Promise<() => void>;
+  onResized?(handler: (event: { payload: unknown }) => void): Promise<() => void>;
+  onScaleChanged?(
+    handler: (event: { payload: unknown }) => void,
+  ): Promise<() => void>;
+}
+
 interface PlatformRuntimeDeps {
   checkForDesktopUpdate?: () => Promise<DesktopUpdateHandle | null>;
+  currentWindow?: () => Promise<DesktopWindowHandle> | DesktopWindowHandle;
   defaultBackendUrl?: string;
   inputFactory?: () => HTMLInputElement;
   invoke?: (
@@ -165,7 +214,10 @@ interface PlatformRuntimeDeps {
     event: string,
     handler: (event: { payload: unknown }) => void,
   ) => Promise<() => void>;
-  notifyWeb?: (title: string, options?: NotificationOptions) => void;
+  notifyWeb?: (
+    title: string,
+    options?: NotificationOptions,
+  ) => Notification | { onclick: ((ev: Event) => unknown) | null } | void;
   relaunchDesktopApp?: () => Promise<void>;
   requestNotificationPermission?: () => Promise<NotificationPermission>;
   setDocumentTitle?: (title: string) => void;
@@ -240,6 +292,67 @@ async function importRelaunch() {
   return relaunch;
 }
 
+async function importCurrentWindow(): Promise<DesktopWindowHandle> {
+  const { getCurrentWindow } = await import("@tauri-apps/api/window");
+  return getCurrentWindow() as unknown as DesktopWindowHandle;
+}
+
+function defaultDesktopWindowChromeState(): DesktopWindowChromeState {
+  return {
+    focused: true,
+    maximized: false,
+    minimized: false,
+    visible: true,
+  };
+}
+
+function normalizeDesktopWindowChromeState(
+  payload: unknown,
+): DesktopWindowChromeState | null {
+  if (!payload || typeof payload !== "object") {
+    return null;
+  }
+
+  const typedPayload = payload as Record<string, unknown>;
+  if (
+    typeof typedPayload.focused !== "boolean" ||
+    typeof typedPayload.maximized !== "boolean" ||
+    typeof typedPayload.minimized !== "boolean" ||
+    typeof typedPayload.visible !== "boolean"
+  ) {
+    return null;
+  }
+
+  return {
+    focused: typedPayload.focused,
+    maximized: typedPayload.maximized,
+    minimized: typedPayload.minimized,
+    visible: typedPayload.visible,
+  };
+}
+
+async function readDesktopWindowChromeState(
+  window: DesktopWindowHandle,
+): Promise<DesktopWindowChromeState> {
+  try {
+    const [focused, maximized, minimized, visible] = await Promise.all([
+      window.isFocused(),
+      window.isMaximized(),
+      window.isMinimized(),
+      window.isVisible(),
+    ]);
+
+    return {
+      focused,
+      maximized,
+      minimized,
+      visible,
+    };
+  } catch {
+    return defaultDesktopWindowChromeState();
+  }
+}
+
 function normalizeDesktopEvent(payload: unknown): DesktopRuntimeEvent | null {
   if (!payload || typeof payload !== "object") {
     return null;
@@ -249,24 +362,49 @@ function normalizeDesktopEvent(payload: unknown): DesktopRuntimeEvent | null {
   if (typeof typedPayload.type !== "string") {
     return null;
   }
-
-  return {
+  const normalized: DesktopRuntimeEvent = {
     type: typedPayload.type,
-    source:
-      typeof typedPayload.source === "string"
-        ? typedPayload.source
-        : undefined,
-    timestamp:
-      typeof typedPayload.timestamp === "string"
-        ? typedPayload.timestamp
-        : undefined,
-    runtime: typedPayload.runtime as DesktopRuntimeStatus | undefined,
-    shortcut:
-      typeof typedPayload.shortcut === "string"
-        ? typedPayload.shortcut
-        : undefined,
-    payload: typedPayload.payload,
   };
+
+  if (typeof typedPayload.source === "string") {
+    normalized.source = typedPayload.source;
+  }
+  if (typeof typedPayload.timestamp === "string") {
+    normalized.timestamp = typedPayload.timestamp;
+  }
+  if (typeof typedPayload.actionId === "string") {
+    normalized.actionId = typedPayload.actionId;
+  }
+  if (typeof typedPayload.href === "string") {
+    normalized.href = typedPayload.href;
+  }
+  if (
+    typedPayload.status === "completed" ||
+    typedPayload.status === "failed" ||
+    typedPayload.status === "triggered" ||
+    typedPayload.status === "unsupported"
+  ) {
+    normalized.status = typedPayload.status;
+  }
+  if (typedPayload.runtime && typeof typedPayload.runtime === "object") {
+    normalized.runtime = typedPayload.runtime as DesktopRuntimeStatus;
+  }
+  if (typeof typedPayload.shortcut === "string") {
+    normalized.shortcut = typedPayload.shortcut;
+  }
+  if (typeof typedPayload.payload !== "undefined") {
+    normalized.payload = typedPayload.payload;
+  }
+  const windowState =
+    normalizeDesktopWindowChromeState(typedPayload.windowState) ??
+    (typedPayload.type === "window.state"
+      ? normalizeDesktopWindowChromeState(typedPayload.payload)
+      : null);
+  if (windowState) {
+    normalized.windowState = windowState;
+  }
+
+  return normalized;
 }
 
 function normalizeDesktopUpdateInfo(
@@ -290,6 +428,21 @@ function normalizeNotificationStatus(
   return status === "suppressed" ? "suppressed" : "delivered";
 }
 
+function normalizeShellActionStatus(
+  status: unknown,
+): "completed" | "failed" | "triggered" | "unsupported" {
+  if (
+    status === "completed" ||
+    status === "failed" ||
+    status === "triggered" ||
+    status === "unsupported"
+  ) {
+    return status;
+  }
+
+  return "completed";
+}
+
 function buildNotificationTrayState(summary: NotificationTraySummary): {
   title: string;
   tooltip: string;
@@ -309,6 +462,27 @@ function buildNotificationTrayState(summary: NotificationTraySummary): {
     tooltip,
     visible: summary.visible ?? unreadCount > 0,
   };
+}
+
+function getProjectedDesktopEventTarget(): EventTarget | null {
+  if (typeof window !== "undefined") {
+    return window;
+  }
+
+  return null;
+}
+
+export function emitProjectedDesktopEvent(event: DesktopRuntimeEvent): void {
+  const target = getProjectedDesktopEventTarget();
+  if (!target || typeof CustomEvent === "undefined") {
+    return;
+  }
+
+  target.dispatchEvent(
+    new CustomEvent(DESKTOP_EVENT_NAME, {
+      detail: event,
+    }),
+  );
 }
 
 function pickFilesFromBrowser(
@@ -387,7 +561,7 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
   const notifyWeb =
     deps.notifyWeb ??
     ((title: string, options?: NotificationOptions) => {
-      new Notification(title, options);
+      return new Notification(title, options);
     });
   const setDocumentTitle =
     deps.setDocumentTitle ??
@@ -397,6 +571,11 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
       }
     });
   const inputFactory = deps.inputFactory ?? createBrowserInput;
+  const resolveCurrentWindow =
+    deps.currentWindow ??
+    (async () => {
+      return importCurrentWindow();
+    });
   const checkForDesktopUpdate =
     deps.checkForDesktopUpdate ??
     (async () => {
@@ -411,6 +590,27 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
     });
   let pendingDesktopUpdate: DesktopUpdateHandle | null = null;
   let installedDesktopUpdate: DesktopUpdateHandle | null = null;
+  let cachedDesktopWindow: Promise<DesktopWindowHandle> | null = null;
+
+  const getDesktopWindow = async () => {
+    cachedDesktopWindow ??= Promise.resolve(resolveCurrentWindow());
+    return cachedDesktopWindow;
+  };
+
+  const publishWindowChromeState = async () => {
+    if (!getIsDesktopEnv()) {
+      return;
+    }
+
+    const window = await getDesktopWindow();
+    const nextState = await readDesktopWindowChromeState(window);
+    emitProjectedDesktopEvent({
+      type: "window.state",
+      source: "window",
+      payload: nextState,
+      windowState: nextState,
+    });
+  };
 
   return {
     defaultBackendUrl,
@@ -460,8 +660,35 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
     async subscribeDesktopEvents(
       handler: (event: DesktopRuntimeEvent) => void,
     ): Promise<() => void> {
+      const projectedTarget = getProjectedDesktopEventTarget();
+      const projectedListener =
+        projectedTarget && typeof projectedTarget.addEventListener === "function"
+          ? ((event: Event) => {
+              const detail =
+                event instanceof CustomEvent ? event.detail : undefined;
+              const normalized = normalizeDesktopEvent(detail);
+              if (normalized) {
+                handler(normalized);
+              }
+            })
+          : null;
+
+      if (projectedTarget && projectedListener) {
+        projectedTarget.addEventListener(
+          DESKTOP_EVENT_NAME,
+          projectedListener as EventListener,
+        );
+      }
+
       if (!getIsDesktopEnv()) {
-        return () => {};
+        return () => {
+          if (projectedTarget && projectedListener) {
+            projectedTarget.removeEventListener(
+              DESKTOP_EVENT_NAME,
+              projectedListener as EventListener,
+            );
+          }
+        };
       }
 
       const unlisten = await getListen(DESKTOP_EVENT_NAME, (event) => {
@@ -473,6 +700,12 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
 
       return () => {
         unlisten();
+        if (projectedTarget && projectedListener) {
+          projectedTarget.removeEventListener(
+            DESKTOP_EVENT_NAME,
+            projectedListener as EventListener,
+          );
+        }
       };
     },
     async selectFiles(options: SelectFilesOptions): Promise<SelectFilesResult> {
@@ -512,11 +745,60 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
     async sendNotification(
       payload: BusinessNotificationPayload,
     ): Promise<PlatformNotificationResult> {
+      const shouldPreferBrowserDesktopNotification =
+        getIsDesktopEnv() &&
+        isBrowserNotificationAvailable() &&
+        payload.deliveryPolicy !== "suppress_if_focused";
+
+      if (shouldPreferBrowserDesktopNotification) {
+        const permission =
+          Notification.permission === "default"
+            ? await requestNotificationPermission()
+            : Notification.permission;
+
+        if (permission === "granted") {
+          const notification = notifyWeb(payload.title, {
+            body: payload.body,
+            data: {
+              createdAt: payload.createdAt,
+              href: payload.href,
+              notificationId: payload.notificationId,
+              type: payload.type,
+            },
+          });
+
+          if (
+            notification &&
+            typeof notification === "object" &&
+            "onclick" in notification
+          ) {
+            notification.onclick = () => {
+              void this.performShellAction({
+                actionId: "open_notification_target",
+                href: payload.href ?? undefined,
+                payload: {
+                  notificationId: payload.notificationId,
+                  notificationType: payload.type,
+                },
+                source: "notification",
+              });
+            };
+          }
+
+          return {
+            ok: true,
+            mode: "desktop",
+            notificationId: payload.notificationId,
+            status: "delivered",
+          };
+        }
+      }
+
       if (getIsDesktopEnv()) {
         try {
           const response = (await getInvoke(
             "send_notification",
-            payload as unknown as Record<string, unknown>,
+            { request: payload } as Record<string, unknown>,
           )) as { notificationId?: string; status?: string } | undefined;
           return {
             ok: true,
@@ -628,7 +910,7 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
       try {
         await getInvoke(
           "register_shortcut",
-          request as unknown as Record<string, unknown>,
+          { request } as Record<string, unknown>,
         );
         return { ok: true, mode: "desktop" };
       } catch (error) {
@@ -641,6 +923,153 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
               : "Global shortcut registration failed.",
         };
       }
+    },
+    async performShellAction(
+      request: DesktopShellActionRequest,
+    ): Promise<DesktopShellActionResult> {
+      if (!getIsDesktopEnv()) {
+        return {
+          ok: false,
+          actionId: request.actionId,
+          reason: "unsupported",
+          error: "Shell actions require the desktop shell.",
+          status: "unsupported",
+        };
+      }
+
+      try {
+        const response = (await getInvoke(
+          "perform_shell_action",
+          { request } as Record<string, unknown>,
+        )) as { actionId?: string; status?: string } | undefined;
+        const status = normalizeShellActionStatus(response?.status);
+
+        return {
+          ok: true,
+          mode: "desktop",
+          actionId: response?.actionId ?? request.actionId,
+          status: status === "failed" || status === "unsupported" ? "completed" : status,
+        };
+      } catch (error) {
+        return {
+          ok: false,
+          actionId: request.actionId,
+          reason: "failed",
+          error:
+            error instanceof Error ? error.message : "Shell action failed.",
+          status: "failed",
+        };
+      }
+    },
+    async closeMainWindow(): Promise<DesktopShellActionResult> {
+      return this.performShellAction({
+        actionId: "close_main_window",
+        source: "window",
+      });
+    },
+    async focusMainWindow(): Promise<DesktopShellActionResult> {
+      return this.performShellAction({
+        actionId: "focus_main_window",
+        source: "window",
+      });
+    },
+    async getWindowChromeState(): Promise<DesktopWindowChromeState> {
+      if (!getIsDesktopEnv()) {
+        return defaultDesktopWindowChromeState();
+      }
+
+      try {
+        const snapshot = await getInvoke("get_window_chrome_state");
+        return (
+          normalizeDesktopWindowChromeState(snapshot) ??
+          readDesktopWindowChromeState(await getDesktopWindow())
+        );
+      } catch {
+        try {
+          return await readDesktopWindowChromeState(await getDesktopWindow());
+        } catch {
+          return defaultDesktopWindowChromeState();
+        }
+      }
+    },
+    async minimizeMainWindow(): Promise<DesktopShellActionResult> {
+      return this.performShellAction({
+        actionId: "minimize_main_window",
+        source: "window",
+      });
+    },
+    async restoreMainWindow(): Promise<DesktopShellActionResult> {
+      return this.performShellAction({
+        actionId: "restore_main_window",
+        source: "window",
+      });
+    },
+    async showMainWindow(): Promise<DesktopShellActionResult> {
+      return this.performShellAction({
+        actionId: "show_main_window",
+        source: "window",
+      });
+    },
+    async subscribeWindowChromeState(
+      handler: (state: DesktopWindowChromeState) => void,
+    ): Promise<() => void> {
+      const cleanupDesktopEvents = await this.subscribeDesktopEvents((event) => {
+        if (event.windowState) {
+          handler(event.windowState);
+          return;
+        }
+
+        if (event.type === "window.state") {
+          const nextState = normalizeDesktopWindowChromeState(event.payload);
+          if (nextState) {
+            handler(nextState);
+          }
+          return;
+        }
+
+        if (event.type === "shell.action" && event.source === "window") {
+          void publishWindowChromeState();
+        }
+      });
+
+      if (!getIsDesktopEnv()) {
+        return cleanupDesktopEvents;
+      }
+
+      try {
+        const window = await getDesktopWindow();
+        const cleanupFns = (
+          await Promise.all(
+            [
+              window.onFocusChanged?.(() => {
+                void publishWindowChromeState();
+              }),
+              window.onMoved?.(() => {
+                void publishWindowChromeState();
+              }),
+              window.onResized?.(() => {
+                void publishWindowChromeState();
+              }),
+              window.onScaleChanged?.(() => {
+                void publishWindowChromeState();
+              }),
+            ].filter(Boolean),
+          )
+        ) as Array<() => void>;
+
+        return () => {
+          cleanupDesktopEvents();
+          cleanupFns.forEach((cleanup) => cleanup());
+        };
+      } catch {
+        return cleanupDesktopEvents;
+      }
+    },
+    async toggleMaximizeMainWindow(): Promise<DesktopShellActionResult> {
+      return this.performShellAction({
+        actionId: "toggle_maximize_main_window",
+        source: "window",
+      });
     },
     async checkForUpdate(): Promise<PlatformUpdateResult> {
       if (!getIsDesktopEnv()) {

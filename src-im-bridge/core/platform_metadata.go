@@ -249,6 +249,27 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 			ActionCallbackMode: ActionCallbackWebhook,
 			MessageScopes:      []MessageScope{MessageScopeChat},
 		}
+	case "qq":
+		return PlatformCapabilities{
+			CommandSurface:        CommandSurfaceMixed,
+			StructuredSurface:     StructuredSurfaceNone,
+			AsyncUpdateModes:      []AsyncUpdateMode{AsyncUpdateReply},
+			ActionCallbackMode:    ActionCallbackNone,
+			MessageScopes:         []MessageScope{MessageScopeChat},
+			SupportsMentions:      true,
+			SupportsSlashCommands: true,
+		}
+	case "qqbot":
+		return PlatformCapabilities{
+			CommandSurface:         CommandSurfaceMixed,
+			StructuredSurface:      StructuredSurfaceNone,
+			AsyncUpdateModes:       []AsyncUpdateMode{AsyncUpdateReply},
+			ActionCallbackMode:     ActionCallbackWebhook,
+			MessageScopes:          []MessageScope{MessageScopeChat},
+			RequiresPublicCallback: true,
+			SupportsMentions:       true,
+			SupportsSlashCommands:  true,
+		}
 	default:
 		capabilities := PlatformCapabilities{
 			CommandSurface: CommandSurfaceNone,

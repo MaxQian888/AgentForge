@@ -1,5 +1,11 @@
 export type AgentRuntimeKey = "claude_code" | "codex" | "opencode";
 export type DecomposeExecutionMode = "human" | "agent";
+export type ResumeBlockingReason =
+  | "missing_continuity_state"
+  | "expired_continuity_state"
+  | "runtime_mismatch"
+  | "provider_rejected"
+  | "continuity_not_supported";
 
 /** Request from Go Orchestrator to execute an agent task. */
 export interface ExecuteRequest {
@@ -66,8 +72,34 @@ export interface RoleConfig {
   tools?: string[];
   /** Knowledge content to inject into the system prompt. */
   knowledge_context?: string;
+  /** Auto-loaded skill bundles resolved by Go for prompt injection. */
+  loaded_skills?: RoleExecutionSkill[];
+  /** Non-auto-load skills kept as available runtime inventory. */
+  available_skills?: RoleExecutionSkill[];
+  /** Skill projection diagnostics computed by Go. */
+  skill_diagnostics?: RoleExecutionSkillDiagnostic[];
   /** Output filters to apply (e.g., "no_credentials", "no_pii"). */
   output_filters?: string[];
+}
+
+export interface RoleExecutionSkill {
+  path: string;
+  label: string;
+  description?: string;
+  instructions?: string;
+  source?: string;
+  source_root?: string;
+  origin?: string;
+  requires?: string[];
+  tools?: string[];
+}
+
+export interface RoleExecutionSkillDiagnostic {
+  code: string;
+  path?: string;
+  message: string;
+  blocking: boolean;
+  auto_load?: boolean;
 }
 
 /** Event envelope sent to Go Orchestrator via WebSocket. */
@@ -122,10 +154,20 @@ export interface AgentStatus {
   role_id?: string;
   team_id?: string;
   team_role?: "planner" | "coder" | "reviewer";
+  resume_ready?: boolean;
+  resume_blocked_reason?: ResumeBlockingReason;
 }
 
 export interface RuntimeDiagnostic {
-  code: "missing_credentials" | "missing_executable" | "incompatible_provider";
+  code:
+    | "missing_credentials"
+    | "missing_executable"
+    | "incompatible_provider"
+    | "missing_server_url"
+    | "server_unreachable"
+    | "authentication_failed"
+    | "provider_unavailable"
+    | "model_unavailable";
   message: string;
   blocking: boolean;
 }
@@ -180,6 +222,39 @@ export interface CancelRequest {
   reason?: string;
 }
 
+export interface ClaudeContinuityState {
+  runtime: "claude_code";
+  resume_ready: boolean;
+  captured_at: number;
+  blocking_reason?: ResumeBlockingReason;
+  session_handle?: string;
+  checkpoint_id?: string;
+  resume_token?: string;
+}
+
+export interface CodexContinuityState {
+  runtime: "codex";
+  resume_ready: boolean;
+  captured_at: number;
+  blocking_reason?: ResumeBlockingReason;
+  thread_id?: string;
+}
+
+export interface OpenCodeContinuityState {
+  runtime: "opencode";
+  resume_ready: boolean;
+  captured_at: number;
+  blocking_reason?: ResumeBlockingReason;
+  upstream_session_id?: string;
+  latest_message_id?: string;
+  server_url?: string;
+}
+
+export type RuntimeContinuityState =
+  | ClaudeContinuityState
+  | CodexContinuityState
+  | OpenCodeContinuityState;
+
 /** Session snapshot for persistence. */
 export interface SessionSnapshot {
   task_id: string;
@@ -190,4 +265,5 @@ export interface SessionSnapshot {
   created_at: number;
   updated_at: number;
   request?: ExecuteRequest;
+  continuity?: RuntimeContinuityState;
 }

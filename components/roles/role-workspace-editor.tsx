@@ -1,14 +1,22 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
-import type { RoleManifest } from "@/lib/stores/role-store";
+import type {
+  RoleManifest,
+  RoleSkillCatalogEntry,
+} from "@/lib/stores/role-store";
 import type {
   RoleDraft,
+  RoleDraftValidationBySection,
+  RoleKeyValueDraft,
   RoleKnowledgeSourceDraft,
+  RoleMCPServerDraft,
   RoleSkillDraft,
+  RoleSkillResolution,
   RoleTriggerDraft,
 } from "@/lib/roles/role-management";
 import {
@@ -26,9 +34,11 @@ interface RoleWorkspaceEditorProps {
   draft: RoleDraft;
   templateId: string;
   selectedRole: RoleManifest | undefined;
+  skillCatalog: RoleSkillCatalogEntry[];
+  skillCatalogLoading: boolean;
+  draftSkillResolution: RoleSkillResolution[];
   selectedTemplateName: string | null;
   selectedParentName: string | null;
-  validationErrors: string[];
   saving: boolean;
   activeSection: RoleWorkspaceSectionId;
   onSelectSection: (section: RoleWorkspaceSectionId) => void;
@@ -40,7 +50,22 @@ interface RoleWorkspaceEditorProps {
     field: keyof RoleSkillDraft,
     value: RoleSkillDraft[keyof RoleSkillDraft],
   ) => void;
+  updateMCPServerRow: (
+    index: number,
+    field: keyof RoleMCPServerDraft,
+    value: RoleMCPServerDraft[keyof RoleMCPServerDraft],
+  ) => void;
+  updateCustomSettingRow: (
+    index: number,
+    field: keyof RoleKeyValueDraft,
+    value: RoleKeyValueDraft[keyof RoleKeyValueDraft],
+  ) => void;
   updateKnowledgeRow: (
+    index: number,
+    field: keyof RoleKnowledgeSourceDraft,
+    value: RoleKnowledgeSourceDraft[keyof RoleKnowledgeSourceDraft],
+  ) => void;
+  updatePrivateKnowledgeRow: (
     index: number,
     field: keyof RoleKnowledgeSourceDraft,
     value: RoleKnowledgeSourceDraft[keyof RoleKnowledgeSourceDraft],
@@ -51,10 +76,14 @@ interface RoleWorkspaceEditorProps {
     value: RoleTriggerDraft[keyof RoleTriggerDraft],
   ) => void;
   onAddSkillRow: () => void;
+  onAddMCPServerRow: () => void;
+  onAddCustomSettingRow: () => void;
   onAddKnowledgeRow: () => void;
+  onAddPrivateKnowledgeRow: () => void;
   onAddTriggerRow: () => void;
   availableRoles: RoleManifest[];
   onTemplateChange: (value: string) => void;
+  validationBySection: RoleDraftValidationBySection;
 }
 
 function TextAreaField({
@@ -80,6 +109,22 @@ function TextAreaField({
         rows={rows}
         onChange={(event) => onChange(event.target.value)}
       />
+    </div>
+  );
+}
+
+function SectionErrors({ errors }: { errors: string[] }) {
+  if (errors.length === 0) {
+    return null;
+  }
+
+  return (
+    <div className="grid gap-1">
+      {errors.map((errorMessage) => (
+        <p key={errorMessage} className="text-sm text-destructive">
+          {errorMessage}
+        </p>
+      ))}
     </div>
   );
 }
@@ -124,9 +169,11 @@ export function RoleWorkspaceEditor({
   draft,
   templateId,
   selectedRole,
+  skillCatalog,
+  skillCatalogLoading,
+  draftSkillResolution,
   selectedTemplateName,
   selectedParentName,
-  validationErrors,
   saving,
   activeSection,
   onSelectSection,
@@ -134,47 +181,55 @@ export function RoleWorkspaceEditor({
   onSwitchToCreate,
   updateDraft,
   updateSkillRow,
+  updateMCPServerRow,
+  updateCustomSettingRow,
   updateKnowledgeRow,
+  updatePrivateKnowledgeRow,
   updateTriggerRow,
   onAddSkillRow,
+  onAddMCPServerRow,
+  onAddCustomSettingRow,
   onAddKnowledgeRow,
+  onAddPrivateKnowledgeRow,
   onAddTriggerRow,
   availableRoles,
   onTemplateChange,
+  validationBySection,
 }: RoleWorkspaceEditorProps) {
+  const t = useTranslations("roles");
   return (
     <Card>
       <CardHeader>
-        <CardTitle>{mode === "edit" ? "Role Workspace" : "Create Role"}</CardTitle>
+        <CardTitle>{mode === "edit" ? t("workspace.roleWorkspace") : t("workspace.createRole")}</CardTitle>
         <CardDescription>
-          Work through setup, identity, capabilities, knowledge, governance, and review in one structured authoring flow.
+          {t("workspace.workspaceDesc")}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <form className="flex flex-col gap-4" onSubmit={onSubmit}>
           <div className="rounded-lg border bg-muted/20 p-4">
             <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              Current flow
+              {t("workspace.currentFlow")}
             </p>
             <div className="mt-2 grid gap-2">
               <p className="text-sm font-medium">
-                {mode === "edit" ? "Editing existing role" : "Creating new role"}
+                {mode === "edit" ? t("workspace.editingExisting") : t("workspace.creatingNew")}
               </p>
               <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
                 {selectedTemplateName ? (
                   <span className="rounded-full border px-2 py-1">
-                    Template source: {selectedTemplateName}
+                    {t("workspace.templateSource", { name: selectedTemplateName })}
                   </span>
                 ) : null}
                 {selectedParentName ? (
                   <span className="rounded-full border px-2 py-1">
-                    Inherited from {selectedParentName}
+                    {t("workspace.inheritedFrom", { name: selectedParentName })}
                   </span>
                 ) : (
-                  <span className="rounded-full border px-2 py-1">No inherited parent</span>
+                  <span className="rounded-full border px-2 py-1">{t("workspace.noParent")}</span>
                 )}
                 <span className="rounded-full border px-2 py-1">
-                  {selectedRole ? `Editing ${selectedRole.metadata.id}` : "Unsaved draft"}
+                  {selectedRole ? t("workspace.editing", { id: selectedRole.metadata.id }) : t("workspace.unsavedDraft")}
                 </span>
               </div>
             </div>
@@ -206,7 +261,7 @@ export function RoleWorkspaceEditor({
           >
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-template">Start from template</Label>
+                <Label htmlFor="role-template">{t("formDialog.startFromTemplate")}</Label>
                 <select
                   id="role-template"
                   aria-label="Start from template"
@@ -215,7 +270,7 @@ export function RoleWorkspaceEditor({
                   onChange={(event) => onTemplateChange(event.target.value)}
                   disabled={mode === "edit"}
                 >
-                  <option value="">Blank role</option>
+                  <option value="">{t("formDialog.blankRole")}</option>
                   {availableRoles.map((role) => (
                     <option key={role.metadata.id} value={role.metadata.id}>
                       {role.metadata.name}
@@ -224,7 +279,7 @@ export function RoleWorkspaceEditor({
                 </select>
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-extends">Inherits from</Label>
+                <Label htmlFor="role-extends">{t("formDialog.inheritsFrom")}</Label>
                 <select
                   id="role-extends"
                   aria-label="Inherits from"
@@ -232,7 +287,7 @@ export function RoleWorkspaceEditor({
                   value={draft.extendsValue}
                   onChange={(event) => updateDraft("extendsValue", event.target.value)}
                 >
-                  <option value="">No parent</option>
+                  <option value="">{t("formDialog.noParent")}</option>
                   {availableRoles.map((role) => (
                     <option key={role.metadata.id} value={role.metadata.id}>
                       {role.metadata.name}
@@ -244,7 +299,7 @@ export function RoleWorkspaceEditor({
 
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-id">Role ID</Label>
+                <Label htmlFor="role-id">{t("formDialog.roleId")}</Label>
                 <Input
                   id="role-id"
                   aria-label="Role ID"
@@ -255,7 +310,7 @@ export function RoleWorkspaceEditor({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-name">Name</Label>
+                <Label htmlFor="role-name">{t("formDialog.name")}</Label>
                 <Input
                   id="role-name"
                   value={draft.name}
@@ -264,7 +319,7 @@ export function RoleWorkspaceEditor({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-version">Version</Label>
+                <Label htmlFor="role-version">{t("workspace.version")}</Label>
                 <Input
                   id="role-version"
                   value={draft.version}
@@ -272,7 +327,7 @@ export function RoleWorkspaceEditor({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-tags">Tags</Label>
+                <Label htmlFor="role-tags">{t("formDialog.tags")}</Label>
                 <Input
                   id="role-tags"
                   value={draft.tagsInput}
@@ -282,7 +337,7 @@ export function RoleWorkspaceEditor({
             </div>
             <TextAreaField
               id="role-description"
-              label="Description"
+              label={t("formDialog.description")}
               value={draft.description}
               onChange={(value) => updateDraft("description", value)}
             />
@@ -297,7 +352,7 @@ export function RoleWorkspaceEditor({
           >
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="identity-role">Role Title</Label>
+                <Label htmlFor="identity-role">{t("formDialog.role")}</Label>
                 <Input
                   id="identity-role"
                   value={draft.identityRole}
@@ -305,7 +360,7 @@ export function RoleWorkspaceEditor({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="identity-goal">Goal</Label>
+                <Label htmlFor="identity-goal">{t("formDialog.goal")}</Label>
                 <Input
                   id="identity-goal"
                   value={draft.goal}
@@ -315,23 +370,23 @@ export function RoleWorkspaceEditor({
             </div>
             <TextAreaField
               id="identity-backstory"
-              label="Backstory"
+              label={t("formDialog.backstory")}
               value={draft.backstory}
               onChange={(value) => updateDraft("backstory", value)}
             />
             <TextAreaField
               id="identity-prompt"
-              label="System Prompt"
+              label={t("formDialog.systemPrompt")}
               value={draft.systemPrompt}
               onChange={(value) => updateDraft("systemPrompt", value)}
               rows={5}
             />
 
             <div className="grid gap-4 rounded-lg border p-4">
-              <h3 className="text-sm font-semibold">Advanced Identity</h3>
+              <h3 className="text-sm font-semibold">{t("workspace.advancedIdentity")}</h3>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="identity-persona">Persona</Label>
+                  <Label htmlFor="identity-persona">{t("workspace.persona")}</Label>
                   <Input
                     id="identity-persona"
                     value={draft.persona}
@@ -339,7 +394,7 @@ export function RoleWorkspaceEditor({
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="identity-personality">Personality</Label>
+                  <Label htmlFor="identity-personality">{t("workspace.personality")}</Label>
                   <Input
                     id="identity-personality"
                     value={draft.personality}
@@ -347,7 +402,7 @@ export function RoleWorkspaceEditor({
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="identity-language">Language</Label>
+                  <Label htmlFor="identity-language">{t("workspace.language")}</Label>
                   <Input
                     id="identity-language"
                     value={draft.language}
@@ -355,7 +410,7 @@ export function RoleWorkspaceEditor({
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="identity-tone">Response Tone</Label>
+                  <Label htmlFor="identity-tone">{t("workspace.responseTone")}</Label>
                   <Input
                     id="identity-tone"
                     value={draft.responseTone}
@@ -363,7 +418,7 @@ export function RoleWorkspaceEditor({
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="identity-verbosity">Response Verbosity</Label>
+                  <Label htmlFor="identity-verbosity">{t("workspace.responseVerbosity")}</Label>
                   <Input
                     id="identity-verbosity"
                     value={draft.responseVerbosity}
@@ -371,7 +426,7 @@ export function RoleWorkspaceEditor({
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="identity-format-preference">Format Preference</Label>
+                  <Label htmlFor="identity-format-preference">{t("workspace.formatPreference")}</Label>
                   <Input
                     id="identity-format-preference"
                     value={draft.responseFormatPreference}
@@ -393,7 +448,7 @@ export function RoleWorkspaceEditor({
           >
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="cap-packages">Packages</Label>
+                <Label htmlFor="cap-packages">{t("workspace.packages")}</Label>
                 <Input
                   id="cap-packages"
                   value={draft.packages}
@@ -401,7 +456,7 @@ export function RoleWorkspaceEditor({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="cap-tools">Allowed Tools</Label>
+                <Label htmlFor="cap-tools">{t("formDialog.allowedTools")}</Label>
                 <Input
                   id="cap-tools"
                   aria-label="Allowed Tools"
@@ -410,7 +465,7 @@ export function RoleWorkspaceEditor({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="cap-external-tools">External Tools</Label>
+                <Label htmlFor="cap-external-tools">{t("workspace.externalTools")}</Label>
                 <Input
                   id="cap-external-tools"
                   value={draft.externalTools}
@@ -418,7 +473,7 @@ export function RoleWorkspaceEditor({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="cap-languages">Languages</Label>
+                <Label htmlFor="cap-languages">{t("formDialog.languages")}</Label>
                 <Input
                   id="cap-languages"
                   value={draft.languages}
@@ -426,7 +481,7 @@ export function RoleWorkspaceEditor({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="cap-frameworks">Frameworks</Label>
+                <Label htmlFor="cap-frameworks">{t("formDialog.frameworks")}</Label>
                 <Input
                   id="cap-frameworks"
                   value={draft.frameworks}
@@ -438,64 +493,190 @@ export function RoleWorkspaceEditor({
             <div className="grid gap-4 rounded-lg border p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-semibold">Skills</h3>
+                  <h3 className="text-sm font-semibold">{t("workspace.advancedCapabilitySettings")}</h3>
                   <p className="text-sm text-muted-foreground">
-                    Declare reusable skill references and whether they should auto-load for this role.
+                    {t("workspace.advancedCapabilitySettingsDesc")}
+                  </p>
+                </div>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onAddCustomSettingRow}
+                >
+                  {t("workspace.addCustomSetting")}
+                </Button>
+              </div>
+              {draft.customSettingRows.length > 0 ? (
+                draft.customSettingRows.map((setting, index) => (
+                  <div
+                    key={`custom-setting-${index}`}
+                    className="grid gap-3 rounded-md border p-3 md:grid-cols-2"
+                  >
+                    <Input
+                      aria-label="Custom Setting Key"
+                      value={setting.key}
+                      placeholder="approval_mode"
+                      onChange={(event) =>
+                        updateCustomSettingRow(index, "key", event.target.value)
+                      }
+                    />
+                    <Input
+                      aria-label="Custom Setting Value"
+                      value={setting.value}
+                      placeholder="guided"
+                      onChange={(event) =>
+                        updateCustomSettingRow(index, "value", event.target.value)
+                      }
+                    />
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {t("workspace.noCustomSettingsYet")}
+                </p>
+              )}
+            </div>
+
+            <div className="grid gap-4 rounded-lg border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold">{t("workspace.mcpServers")}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {t("workspace.mcpServersDesc")}
+                  </p>
+                </div>
+                <Button type="button" variant="outline" size="sm" onClick={onAddMCPServerRow}>
+                  {t("workspace.addMcpServer")}
+                </Button>
+              </div>
+              {draft.mcpServerRows.length > 0 ? (
+                draft.mcpServerRows.map((server, index) => (
+                  <div
+                    key={`mcp-server-${index}`}
+                    className="grid gap-3 rounded-md border p-3 md:grid-cols-2"
+                  >
+                    <Input
+                      aria-label="MCP Server Name"
+                      value={server.name}
+                      placeholder="design-mcp"
+                      onChange={(event) =>
+                        updateMCPServerRow(index, "name", event.target.value)
+                      }
+                    />
+                    <Input
+                      aria-label="MCP Server URL"
+                      value={server.url}
+                      placeholder="http://localhost:3010/mcp"
+                      onChange={(event) =>
+                        updateMCPServerRow(index, "url", event.target.value)
+                      }
+                    />
+                  </div>
+                ))
+              ) : (
+                <p className="text-sm text-muted-foreground">{t("workspace.noMcpServersYet")}</p>
+              )}
+            </div>
+
+            <div className="grid gap-4 rounded-lg border p-4">
+              <div className="flex items-center justify-between">
+                <div>
+                  <h3 className="text-sm font-semibold">{t("formDialog.skillsTitle")}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {t("workspace.availableSkillsDesc")}
                   </p>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={onAddSkillRow}>
-                  Add Skill
+                  {t("formDialog.addSkill")}
                 </Button>
+              </div>
+              <div className="grid gap-1 rounded-md border border-dashed p-3 text-sm text-muted-foreground">
+                <p className="font-medium text-foreground">{t("workspace.availableSkillsTitle")}</p>
+                {skillCatalogLoading ? (
+                  <p>Loading...</p>
+                ) : skillCatalog.length > 0 ? (
+                  <p>{skillCatalog.map((skill) => skill.label).join(", ")}</p>
+                ) : (
+                  <p>{t("workspace.availableSkillsEmpty")}</p>
+                )}
               </div>
               <div className="grid gap-4">
                 {draft.skillRows.length > 0 ? (
-                  draft.skillRows.map((skill, index) => (
-                    <div
-                      key={`skill-row-${index}`}
-                      className="grid gap-3 rounded-md border p-3 md:grid-cols-[minmax(0,1fr)_auto]"
-                    >
-                      <div className="flex flex-col gap-1.5">
-                        <Label htmlFor={`skill-path-${index}`}>Skill Path</Label>
-                        <Input
-                          id={`skill-path-${index}`}
-                          aria-label="Skill Path"
-                          value={skill.path}
-                          onChange={(event) =>
-                            updateSkillRow(index, "path", event.target.value)
-                          }
-                          placeholder="skills/react"
-                        />
+                  draft.skillRows.map((skill, index) => {
+                    const resolution = draftSkillResolution.find(
+                      (entry) => entry.path === skill.path.trim(),
+                    );
+
+                    return (
+                      <div
+                        key={`skill-row-${index}`}
+                        className="grid gap-3 rounded-md border p-3 md:grid-cols-[minmax(0,1fr)_auto]"
+                      >
+                        <div className="flex flex-col gap-1.5">
+                          <Label htmlFor={`skill-path-${index}`}>{t("formDialog.skillPath")}</Label>
+                          <Input
+                            id={`skill-path-${index}`}
+                            aria-label="Skill Path"
+                            list={`skill-catalog-${index}`}
+                            value={skill.path}
+                            onChange={(event) =>
+                              updateSkillRow(index, "path", event.target.value)
+                            }
+                            placeholder="skills/react"
+                          />
+                          <datalist id={`skill-catalog-${index}`}>
+                            {skillCatalog.map((catalogEntry) => (
+                              <option key={catalogEntry.path} value={catalogEntry.path}>
+                                {catalogEntry.label}
+                              </option>
+                            ))}
+                          </datalist>
+                          {resolution ? (
+                            <p className="text-xs text-muted-foreground">
+                              {resolution.status === "resolved"
+                                ? `${t("workspace.skillResolvedDetail", {
+                                    label: resolution.label,
+                                    root: resolution.sourceRoot,
+                                  })} · ${
+                                      resolution.provenance === "template-derived"
+                                        ? t("workspace.skillProvenanceTemplate")
+                                        : resolution.provenance === "inherited"
+                                          ? t("workspace.skillProvenanceInherited")
+                                          : t("workspace.skillProvenanceExplicit")
+                                    }`
+                                : `${t("workspace.skillUnresolved")} · ${
+                                    resolution.provenance === "template-derived"
+                                      ? t("workspace.skillProvenanceTemplate")
+                                      : resolution.provenance === "inherited"
+                                        ? t("workspace.skillProvenanceInherited")
+                                        : t("workspace.skillProvenanceExplicit")
+                                  }`}
+                            </p>
+                          ) : null}
+                        </div>
+                        <div className="flex items-center gap-2 pt-7">
+                          <input
+                            id={`skill-auto-load-${index}`}
+                            type="checkbox"
+                            checked={skill.autoLoad}
+                            onChange={(event) =>
+                              updateSkillRow(index, "autoLoad", event.target.checked)
+                            }
+                          />
+                          <Label htmlFor={`skill-auto-load-${index}`}>{t("formDialog.autoLoadSkill")}</Label>
+                        </div>
                       </div>
-                      <div className="flex items-center gap-2 pt-7">
-                        <input
-                          id={`skill-auto-load-${index}`}
-                          type="checkbox"
-                          checked={skill.autoLoad}
-                          onChange={(event) =>
-                            updateSkillRow(index, "autoLoad", event.target.checked)
-                          }
-                        />
-                        <Label htmlFor={`skill-auto-load-${index}`}>Auto-load skill</Label>
-                      </div>
-                    </div>
-                  ))
+                    );
+                  })
                 ) : (
                   <p className="text-sm text-muted-foreground">
-                    No skills configured for this role yet.
+                    {t("workspace.noSkillsYet")}
                   </p>
                 )}
               </div>
             </div>
-
-            {validationErrors.length > 0 ? (
-              <div className="grid gap-1">
-                {validationErrors.map((errorMessage) => (
-                  <p key={errorMessage} className="text-sm text-destructive">
-                    {errorMessage}
-                  </p>
-                ))}
-              </div>
-            ) : null}
+            <SectionErrors errors={validationBySection.capabilities} />
           </AuthoringSection>
 
           <AuthoringSection
@@ -508,19 +689,19 @@ export function RoleWorkspaceEditor({
             <div className="grid gap-4 md:grid-cols-3">
               <TextAreaField
                 id="knowledge-repositories"
-                label="Repositories"
+                label={t("formDialog.repositories")}
                 value={draft.repositories}
                 onChange={(value) => updateDraft("repositories", value)}
               />
               <TextAreaField
                 id="knowledge-documents"
-                label="Documents"
+                label={t("formDialog.documents")}
                 value={draft.documents}
                 onChange={(value) => updateDraft("documents", value)}
               />
               <TextAreaField
                 id="knowledge-patterns"
-                label="Patterns"
+                label={t("formDialog.patterns")}
                 value={draft.patterns}
                 onChange={(value) => updateDraft("patterns", value)}
               />
@@ -528,7 +709,7 @@ export function RoleWorkspaceEditor({
             <div className="grid gap-4 rounded-lg border p-4">
               <div className="flex items-center justify-between">
                 <p className="text-sm text-muted-foreground">
-                  Shared knowledge sources that the role can cite or reuse.
+                  {t("workspace.addSharedKnowledge")}
                 </p>
                 <Button
                   type="button"
@@ -536,7 +717,7 @@ export function RoleWorkspaceEditor({
                   size="sm"
                   onClick={onAddKnowledgeRow}
                 >
-                  Add Shared Knowledge
+                  {t("workspace.addSharedKnowledge")}
                 </Button>
               </div>
               {draft.sharedKnowledgeRows.map((source, index) => (
@@ -560,9 +741,185 @@ export function RoleWorkspaceEditor({
                       updateKnowledgeRow(index, "type", event.target.value)
                     }
                   />
+                  <Input
+                    aria-label="Shared Knowledge Access"
+                    value={source.access}
+                    placeholder="read"
+                    onChange={(event) =>
+                      updateKnowledgeRow(index, "access", event.target.value)
+                    }
+                  />
+                  <Input
+                    aria-label="Shared Knowledge Description"
+                    value={source.description}
+                    placeholder="Shared UI guidance"
+                    onChange={(event) =>
+                      updateKnowledgeRow(index, "description", event.target.value)
+                    }
+                  />
+                  <Input
+                    aria-label="Shared Knowledge Sources"
+                    value={source.sourcesInput}
+                    placeholder="docs/PRD.md, docs/part/PLUGIN_SYSTEM_DESIGN.md"
+                    onChange={(event) =>
+                      updateKnowledgeRow(index, "sourcesInput", event.target.value)
+                    }
+                  />
                 </div>
               ))}
             </div>
+
+            <div className="grid gap-4 rounded-lg border p-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm text-muted-foreground">
+                  {t("workspace.addPrivateKnowledge")}
+                </p>
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  onClick={onAddPrivateKnowledgeRow}
+                >
+                  {t("workspace.addPrivateKnowledge")}
+                </Button>
+              </div>
+              {draft.privateKnowledgeRows.map((source, index) => (
+                <div
+                  key={`private-knowledge-${index}`}
+                  className="grid gap-3 rounded-md border p-3 md:grid-cols-2"
+                >
+                  <Input
+                    aria-label="Private Knowledge ID"
+                    value={source.id}
+                    placeholder="operator-notes"
+                    onChange={(event) =>
+                      updatePrivateKnowledgeRow(index, "id", event.target.value)
+                    }
+                  />
+                  <Input
+                    aria-label="Private Knowledge Type"
+                    value={source.type}
+                    placeholder="doc"
+                    onChange={(event) =>
+                      updatePrivateKnowledgeRow(index, "type", event.target.value)
+                    }
+                  />
+                  <Input
+                    aria-label="Private Knowledge Access"
+                    value={source.access}
+                    placeholder="read"
+                    onChange={(event) =>
+                      updatePrivateKnowledgeRow(index, "access", event.target.value)
+                    }
+                  />
+                  <Input
+                    aria-label="Private Knowledge Description"
+                    value={source.description}
+                    placeholder="Internal notes"
+                    onChange={(event) =>
+                      updatePrivateKnowledgeRow(index, "description", event.target.value)
+                    }
+                  />
+                  <Input
+                    aria-label="Private Knowledge Sources"
+                    value={source.sourcesInput}
+                    placeholder="docs/notes.md"
+                    onChange={(event) =>
+                      updatePrivateKnowledgeRow(index, "sourcesInput", event.target.value)
+                    }
+                  />
+                </div>
+              ))}
+            </div>
+
+            <div className="grid gap-4 rounded-lg border p-4">
+              <div>
+                <h3 className="text-sm font-semibold">{t("workspace.memorySettings")}</h3>
+                <p className="text-sm text-muted-foreground">
+                  {t("workspace.memorySettingsDesc")}
+                </p>
+              </div>
+              <div className="grid gap-4 md:grid-cols-2">
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="memory-short-term">{t("workspace.memoryShortTermMaxTokens")}</Label>
+                  <Input
+                    id="memory-short-term"
+                    aria-label="Short-term Memory Max Tokens"
+                    value={draft.memoryShortTermMaxTokens}
+                    onChange={(event) =>
+                      updateDraft("memoryShortTermMaxTokens", event.target.value)
+                    }
+                  />
+                </div>
+                <div className="flex flex-col gap-1.5">
+                  <Label htmlFor="memory-episodic-retention">{t("workspace.memoryEpisodicRetentionDays")}</Label>
+                  <Input
+                    id="memory-episodic-retention"
+                    aria-label="Episodic Memory Retention Days"
+                    value={draft.memoryEpisodicRetentionDays}
+                    onChange={(event) =>
+                      updateDraft("memoryEpisodicRetentionDays", event.target.value)
+                    }
+                  />
+                </div>
+              </div>
+              <div className="grid gap-3 md:grid-cols-2">
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={draft.memoryEpisodicEnabled}
+                    onChange={(event) =>
+                      updateDraft("memoryEpisodicEnabled", event.target.checked)
+                    }
+                  />
+                  {t("workspace.memoryEpisodicEnabled")}
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={draft.memorySemanticEnabled}
+                    onChange={(event) =>
+                      updateDraft("memorySemanticEnabled", event.target.checked)
+                    }
+                  />
+                  {t("workspace.memorySemanticEnabled")}
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={draft.memorySemanticAutoExtract}
+                    onChange={(event) =>
+                      updateDraft("memorySemanticAutoExtract", event.target.checked)
+                    }
+                  />
+                  {t("workspace.memorySemanticAutoExtract")}
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={draft.memoryProceduralEnabled}
+                    onChange={(event) =>
+                      updateDraft("memoryProceduralEnabled", event.target.checked)
+                    }
+                  />
+                  {t("workspace.memoryProceduralEnabled")}
+                </label>
+                <label className="flex items-center gap-2 text-sm">
+                  <input
+                    type="checkbox"
+                    checked={draft.memoryProceduralLearnFromFeedback}
+                    onChange={(event) =>
+                      updateDraft(
+                        "memoryProceduralLearnFromFeedback",
+                        event.target.checked,
+                      )
+                    }
+                  />
+                  {t("workspace.memoryProceduralLearnFromFeedback")}
+                </label>
+              </div>
+            </div>
+            <SectionErrors errors={validationBySection.knowledge} />
           </AuthoringSection>
 
           <AuthoringSection
@@ -573,10 +930,10 @@ export function RoleWorkspaceEditor({
             onSelectSection={onSelectSection}
           >
             <div className="grid gap-4 rounded-lg border p-4">
-              <h3 className="text-sm font-semibold">Security</h3>
+              <h3 className="text-sm font-semibold">{t("formDialog.security")}</h3>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="security-profile">Security Profile</Label>
+                  <Label htmlFor="security-profile">{t("workspace.securityProfile")}</Label>
                   <Input
                     id="security-profile"
                     value={draft.securityProfile}
@@ -584,7 +941,7 @@ export function RoleWorkspaceEditor({
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="security-permission">Permission Mode</Label>
+                  <Label htmlFor="security-permission">{t("formDialog.permissionMode")}</Label>
                   <Input
                     id="security-permission"
                     aria-label="Permission Mode"
@@ -595,20 +952,20 @@ export function RoleWorkspaceEditor({
               </div>
               <TextAreaField
                 id="security-output-filters"
-                label="Output Filters"
+                label={t("workspace.outputFilters")}
                 value={draft.outputFilters}
                 onChange={(value) => updateDraft("outputFilters", value)}
               />
               <div className="grid gap-4 md:grid-cols-2">
                 <TextAreaField
                   id="security-allowed"
-                  label="Allowed Paths"
+                  label={t("formDialog.allowedPaths")}
                   value={draft.allowedPaths}
                   onChange={(value) => updateDraft("allowedPaths", value)}
                 />
                 <TextAreaField
                   id="security-denied"
-                  label="Denied Paths"
+                  label={t("formDialog.deniedPaths")}
                   value={draft.deniedPaths}
                   onChange={(value) => updateDraft("deniedPaths", value)}
                 />
@@ -620,15 +977,15 @@ export function RoleWorkspaceEditor({
                   checked={draft.requireReview}
                   onChange={(event) => updateDraft("requireReview", event.target.checked)}
                 />
-                <Label htmlFor="security-review">Require review before execution</Label>
+                <Label htmlFor="security-review">{t("formDialog.requireReview")}</Label>
               </div>
             </div>
 
             <div className="grid gap-4 rounded-lg border p-4">
-              <h3 className="text-sm font-semibold">Collaboration</h3>
+              <h3 className="text-sm font-semibold">{t("workspace.collaboration")}</h3>
               <div className="grid gap-4 md:grid-cols-2">
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="collaboration-delegate">Can Delegate To</Label>
+                  <Label htmlFor="collaboration-delegate">{t("workspace.canDelegateTo")}</Label>
                   <Input
                     id="collaboration-delegate"
                     value={draft.collaborationCanDelegateTo}
@@ -638,7 +995,7 @@ export function RoleWorkspaceEditor({
                   />
                 </div>
                 <div className="flex flex-col gap-1.5">
-                  <Label htmlFor="collaboration-accepts">Accepts Delegation From</Label>
+                  <Label htmlFor="collaboration-accepts">{t("workspace.acceptsDelegation")}</Label>
                   <Input
                     id="collaboration-accepts"
                     value={draft.collaborationAcceptsDelegationFrom}
@@ -656,13 +1013,13 @@ export function RoleWorkspaceEditor({
             <div className="grid gap-4 rounded-lg border p-4">
               <div className="flex items-center justify-between">
                 <div>
-                  <h3 className="text-sm font-semibold">Triggers</h3>
+                  <h3 className="text-sm font-semibold">{t("workspace.triggers")}</h3>
                   <p className="text-sm text-muted-foreground">
-                    Define lightweight activation cues for this role.
+                    {t("workspace.triggersDesc")}
                   </p>
                 </div>
                 <Button type="button" variant="outline" size="sm" onClick={onAddTriggerRow}>
-                  Add Trigger
+                  {t("workspace.addTrigger")}
                 </Button>
               </div>
               {draft.triggerRows.map((trigger, index) => (
@@ -697,6 +1054,7 @@ export function RoleWorkspaceEditor({
                 </div>
               ))}
             </div>
+            <SectionErrors errors={validationBySection.governance} />
           </AuthoringSection>
 
           <AuthoringSection
@@ -707,17 +1065,32 @@ export function RoleWorkspaceEditor({
             onSelectSection={onSelectSection}
           >
             <p className="text-sm text-muted-foreground">
-              Review the right-hand context surfaces before saving. They stay available in desktop rails and can be reopened from compact review panels on smaller viewports.
+              {t("workspace.reviewDesc")}
             </p>
+            <div className="grid gap-4 rounded-lg border p-4">
+              <div>
+                <h3 className="text-sm font-semibold">{t("workspace.overrideEditor")}</h3>
+                <p className="text-sm text-muted-foreground">
+                  {t("workspace.overrideEditorDesc")}
+                </p>
+              </div>
+              <textarea
+                aria-label="Role Overrides"
+                className="min-h-32 rounded-md border bg-background px-3 py-2 text-sm font-mono"
+                value={draft.overridesInput}
+                onChange={(event) => updateDraft("overridesInput", event.target.value)}
+              />
+            </div>
+            <SectionErrors errors={validationBySection.review} />
           </AuthoringSection>
 
           <div className="flex flex-wrap items-center gap-3 border-t pt-4">
             <Button type="submit" disabled={saving || !draft.roleId || !draft.name}>
-              {saving ? "Saving..." : "Save Role"}
+              {saving ? t("formDialog.saving") : t("workspace.saveRole")}
             </Button>
             {mode === "edit" && selectedRole ? (
               <Button type="button" variant="outline" onClick={onSwitchToCreate}>
-                Switch to Create
+                {t("workspace.switchToCreate")}
               </Button>
             ) : null}
           </div>

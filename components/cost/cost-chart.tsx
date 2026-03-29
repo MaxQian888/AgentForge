@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import {
   LineChart,
   Line,
@@ -20,6 +21,7 @@ interface CostChartProps {
 }
 
 export function CostChart({ data }: CostChartProps) {
+  const t = useTranslations("cost");
   return (
     <ResponsiveContainer width="100%" height={300}>
       <LineChart data={data}>
@@ -35,7 +37,7 @@ export function CostChart({ data }: CostChartProps) {
           tickFormatter={(v: number) => `$${v}`}
         />
         <Tooltip
-          formatter={(value) => [`$${Number(value).toFixed(2)}`, "Cost"]}
+          formatter={(value) => [`$${Number(value).toFixed(2)}`, t("tooltipCost")]}
           contentStyle={{
             backgroundColor: "var(--popover)",
             border: "1px solid var(--border)",

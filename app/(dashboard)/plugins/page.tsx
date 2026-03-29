@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useEffectEvent, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   BellRing,
   Download,
@@ -85,9 +86,11 @@ function renderRuntimeTone(status: DesktopRuntimeStatus["overall"]): "default" |
 }
 
 export default function PluginsPage() {
+  const t = useTranslations("plugins");
   const plugins = usePluginStore((s) => s.plugins);
   const builtins = usePluginStore((s) => s.builtins);
   const marketplace = usePluginStore((s) => s.marketplace);
+  const remoteMarketplace = usePluginStore((s) => s.remoteMarketplace);
   const filters = usePluginStore((s) => s.filters);
   const selectedPluginId = usePluginStore((s) => s.selectedPluginId);
   const loading = usePluginStore((s) => s.loading);
@@ -95,7 +98,9 @@ export default function PluginsPage() {
   const fetchPlugins = usePluginStore((s) => s.fetchPlugins);
   const discoverBuiltins = usePluginStore((s) => s.discoverBuiltins);
   const fetchMarketplace = usePluginStore((s) => s.fetchMarketplace);
+  const fetchRemoteMarketplace = usePluginStore((s) => s.fetchRemoteMarketplace);
   const installFromCatalog = usePluginStore((s) => s.installFromCatalog);
+  const installFromRemote = usePluginStore((s) => s.installFromRemote);
   const setFilters = usePluginStore((s) => s.setFilters);
   const resetFilters = usePluginStore((s) => s.resetFilters);
   const selectPlugin = usePluginStore((s) => s.selectPlugin);
@@ -132,7 +137,8 @@ export default function PluginsPage() {
     void fetchPlugins();
     void discoverBuiltins();
     void fetchMarketplace();
-  }, [fetchPlugins, discoverBuiltins, fetchMarketplace]);
+    void fetchRemoteMarketplace();
+  }, [fetchPlugins, discoverBuiltins, fetchMarketplace, fetchRemoteMarketplace]);
 
   const handleConfigure = useCallback((plugin: PluginRecord) => {
     setConfigPlugin(plugin);
@@ -179,6 +185,25 @@ export default function PluginsPage() {
 
       if (event.type === "runtime.updated" || event.type === "runtime.terminated") {
         void loadDesktopState();
+        return;
+      }
+
+      if (event.type === "plugin.lifecycle") {
+        setPluginRuntimeSummary((current) => ({
+          ...current,
+          eventBridgeAvailable: true,
+          lastUpdatedAt: event.timestamp ?? current.lastUpdatedAt,
+        }));
+        void fetchPlugins();
+        return;
+      }
+
+      if (event.type === "shell.action") {
+        setPluginRuntimeSummary((current) => ({
+          ...current,
+          eventBridgeAvailable: true,
+          lastUpdatedAt: event.timestamp ?? current.lastUpdatedAt,
+        }));
       }
     }).then((cleanup) => {
       if (disposed) {
@@ -194,7 +219,7 @@ export default function PluginsPage() {
       disposed = true;
       cleanupRef();
     };
-  }, [isDesktop, subscribeDesktopEvents]);
+  }, [fetchPlugins, isDesktop, subscribeDesktopEvents]);
 
   const handleDesktopNotification = useCallback(async () => {
     const result = await sendNotification({
@@ -303,6 +328,11 @@ export default function PluginsPage() {
     [marketplace, filters],
   );
 
+  const filteredRemoteMarketplace = useMemo(
+    () => filterMarketplaceEntries(remoteMarketplace.entries, filters),
+    [remoteMarketplace.entries, filters],
+  );
+
   const selectedPlugin = useMemo(
     () =>
       filteredInstalled.find((plugin) => plugin.metadata.id === selectedPluginId) ??
@@ -329,7 +359,7 @@ export default function PluginsPage() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Plugins</h1>
+        <h1 className="text-2xl font-bold">{t("title")}</h1>
         <div className="flex items-center gap-2">
           <Button
             variant="outline"
@@ -338,15 +368,16 @@ export default function PluginsPage() {
               void fetchPlugins();
               void discoverBuiltins();
               void fetchMarketplace();
+              void fetchRemoteMarketplace();
             }}
             disabled={loading}
           >
             <RefreshCw className="mr-1 size-3.5" />
-            Refresh
+            {t("refresh")}
           </Button>
           <Button size="sm" onClick={() => setInstallOpen(true)}>
             <FolderOpen className="mr-1 size-3.5" />
-            Install Local
+            {t("installLocal")}
           </Button>
         </div>
       </div>
@@ -363,15 +394,14 @@ export default function PluginsPage() {
             <div>
               <CardTitle className="flex items-center gap-2">
                 <MonitorCog className="size-4" />
-                Desktop runtime
+                {t("desktopRuntime")}
               </CardTitle>
               <CardDescription>
-                Desktop telemetry is additive only. Plugin data below still comes from
-                the backend API as the authoritative source.
+                {t("desktopRuntimeDesc")}
               </CardDescription>
             </div>
             <Badge variant={renderRuntimeTone(desktopRuntime.overall)}>
-              {isDesktop ? desktopRuntime.overall : "web-fallback"}
+              {isDesktop ? desktopRuntime.overall : t("webFallback")}
             </Badge>
           </div>
         </CardHeader>
@@ -389,13 +419,13 @@ export default function PluginsPage() {
                   </Badge>
                 </div>
                 <div className="mt-3 grid gap-2 text-muted-foreground">
-                  <p>URL: {runtimeUnit.url ?? "Unavailable"}</p>
-                  <p>PID: {runtimeUnit.pid ?? "Not running"}</p>
-                  <p>Restart count: {runtimeUnit.restartCount}</p>
+                  <p>{t("url")}: {runtimeUnit.url ?? t("urlUnavailable")}</p>
+                  <p>{t("pid")}: {runtimeUnit.pid ?? t("pidNotRunning")}</p>
+                  <p>{t("restartCount")}: {runtimeUnit.restartCount}</p>
                   <p>
-                    Last start: {runtimeUnit.lastStartedAt ?? "Not started in this session"}
+                    {t("lastStart")}: {runtimeUnit.lastStartedAt ?? t("lastStartNone")}
                   </p>
-                  <p>Last error: {runtimeUnit.lastError ?? "No recent runtime errors"}</p>
+                  <p>{t("lastError")}: {runtimeUnit.lastError ?? t("lastErrorNone")}</p>
                 </div>
               </div>
             ))}
@@ -403,18 +433,18 @@ export default function PluginsPage() {
 
           <div className="flex flex-col gap-3 rounded-lg border border-border/60 p-4 text-sm">
             <div className="grid gap-2">
-              <p className="font-medium">Read-only desktop helper summary</p>
+              <p className="font-medium">{t("helperSummary")}</p>
               <p className="text-muted-foreground">
-                Bridge plugins: {pluginRuntimeSummary.bridgePluginCount}
+                {t("bridgePlugins")}: {pluginRuntimeSummary.bridgePluginCount}
               </p>
               <p className="text-muted-foreground">
-                Active bridge runtimes: {pluginRuntimeSummary.activeRuntimeCount}
+                {t("activeBridgeRuntimes")}: {pluginRuntimeSummary.activeRuntimeCount}
               </p>
               <p className="text-muted-foreground">
-                Event bridge: {pluginRuntimeSummary.eventBridgeAvailable ? "available" : "unavailable"}
+                {t("eventBridge")}: {pluginRuntimeSummary.eventBridgeAvailable ? t("eventBridgeAvailable") : t("eventBridgeUnavailable")}
               </p>
               <p className="text-muted-foreground">
-                Last desktop event: {lastDesktopEvent ?? "No desktop events yet"}
+                {t("lastDesktopEvent")}: {lastDesktopEvent ?? t("lastDesktopEventNone")}
               </p>
             </div>
 
@@ -430,14 +460,14 @@ export default function PluginsPage() {
                 size="sm"
                 onClick={() => void handleTraySync()}
               >
-                Sync tray
+                {t("syncTray")}
               </Button>
               <Button
                 variant="outline"
                 size="sm"
                 onClick={() => void handleUpdateCheck()}
               >
-                Check update
+                {t("checkUpdate")}
               </Button>
               {desktopUpdate?.ok && desktopUpdate.status === "available" ? (
                 <Button
@@ -445,7 +475,7 @@ export default function PluginsPage() {
                   size="sm"
                   onClick={() => void handleInstallUpdate()}
                 >
-                  Install update
+                  {t("installUpdate")}
                 </Button>
               ) : null}
               {desktopUpdate?.ok &&
@@ -455,7 +485,7 @@ export default function PluginsPage() {
                   size="sm"
                   onClick={() => void handleRelaunchToUpdate()}
                 >
-                  Restart to update
+                  {t("restartToUpdate")}
                 </Button>
               ) : null}
               <Button
@@ -464,7 +494,7 @@ export default function PluginsPage() {
                 onClick={() => void handleDesktopNotification()}
               >
                 <BellRing className="mr-1 size-3.5" />
-                Notify
+                {t("notify")}
               </Button>
             </div>
 
@@ -478,15 +508,15 @@ export default function PluginsPage() {
               <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-3 text-xs text-muted-foreground">
                 <p className="font-medium text-foreground">
                   {desktopUpdate?.ok && desktopUpdate.status === "ready_to_relaunch"
-                    ? `Update ${activeDesktopUpdate.version} installed and waiting for restart.`
-                    : `Update ${activeDesktopUpdate.version} is ready to install.`}
+                    ? t("updateInstalled", { version: activeDesktopUpdate.version })
+                    : t("updateReady", { version: activeDesktopUpdate.version })}
                 </p>
                 <p className="mt-1">
-                  Current version: {activeDesktopUpdate.currentVersion ?? "Unknown"}
+                  {t("currentVersion", { version: activeDesktopUpdate.currentVersion ?? "Unknown" })}
                 </p>
                 {activeDesktopUpdate.publishedAt ? (
                   <p className="mt-1">
-                    Published at: {activeDesktopUpdate.publishedAt}
+                    {t("publishedAt", { date: activeDesktopUpdate.publishedAt })}
                   </p>
                 ) : null}
                 {activeDesktopUpdate.notes ? (
@@ -495,8 +525,8 @@ export default function PluginsPage() {
                 {desktopUpdateProgress ? (
                   <p className="mt-1">
                     {desktopUpdateProgress.phase === "downloading"
-                      ? `Downloading ${desktopUpdateProgress.downloadedBytes} / ${desktopUpdateProgress.totalBytes ?? "unknown"} bytes`
-                      : "Installing downloaded update"}
+                      ? t("downloading", { downloaded: desktopUpdateProgress.downloadedBytes, total: desktopUpdateProgress.totalBytes ?? "unknown" })
+                      : t("installing")}
                   </p>
                 ) : null}
               </div>
@@ -507,32 +537,31 @@ export default function PluginsPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Filter plugins</CardTitle>
+          <CardTitle>{t("filterPlugins")}</CardTitle>
           <CardDescription>
-            Search across installed, built-in, and marketplace entries without
-            leaving the panel.
+            {t("filterPluginsDesc")}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 md:grid-cols-2 xl:grid-cols-6">
           <div className="flex flex-col gap-1.5 xl:col-span-2">
             <label htmlFor="plugin-search" className="text-sm font-medium">
-              Search plugins
+              {t("searchPlugins")}
             </label>
             <input
               id="plugin-search"
-              aria-label="Search plugins"
+              aria-label={t("searchPlugins")}
               className="h-10 rounded-md border bg-background px-3 text-sm"
               value={searchQuery}
               onChange={(event) => {
                 setSearchQuery(event.target.value);
                 setFilters({ query: event.target.value });
               }}
-              placeholder="Search by name, tag, runtime, or source"
+              placeholder={t("searchPlaceholder")}
             />
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="plugin-kind" className="text-sm font-medium">
-              Kind
+              {t("kind")}
             </label>
             <select
               id="plugin-kind"
@@ -544,7 +573,7 @@ export default function PluginsPage() {
                 })
               }
             >
-              <option value="all">All kinds</option>
+              <option value="all">{t("allKinds")}</option>
               <option value="ToolPlugin">Tool Plugin</option>
               <option value="RolePlugin">Role Plugin</option>
               <option value="WorkflowPlugin">Workflow Plugin</option>
@@ -554,7 +583,7 @@ export default function PluginsPage() {
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="plugin-lifecycle" className="text-sm font-medium">
-              Lifecycle
+              {t("lifecycle")}
             </label>
             <select
               id="plugin-lifecycle"
@@ -567,7 +596,7 @@ export default function PluginsPage() {
                 })
               }
             >
-              <option value="all">All states</option>
+              <option value="all">{t("allStates")}</option>
               <option value="installed">installed</option>
               <option value="enabled">enabled</option>
               <option value="activating">activating</option>
@@ -578,7 +607,7 @@ export default function PluginsPage() {
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="plugin-host" className="text-sm font-medium">
-              Host filter
+              {t("hostFilter")}
             </label>
             <select
               id="plugin-host"
@@ -591,14 +620,14 @@ export default function PluginsPage() {
                 })
               }
             >
-              <option value="all">All hosts</option>
+              <option value="all">{t("allHosts")}</option>
               <option value="go-orchestrator">go-orchestrator</option>
               <option value="ts-bridge">ts-bridge</option>
             </select>
           </div>
           <div className="flex flex-col gap-1.5">
             <label htmlFor="plugin-source" className="text-sm font-medium">
-              Source
+              {t("source")}
             </label>
             <select
               id="plugin-source"
@@ -611,7 +640,7 @@ export default function PluginsPage() {
                 })
               }
             >
-              <option value="all">All sources</option>
+              <option value="all">{t("allSources")}</option>
               <option value="builtin">builtin</option>
               <option value="local">local</option>
               <option value="marketplace">marketplace</option>
@@ -626,7 +655,7 @@ export default function PluginsPage() {
                 resetFilters();
               }}
             >
-              Clear filters
+              {t("clearFilters")}
             </Button>
           </div>
         </CardContent>
@@ -636,14 +665,14 @@ export default function PluginsPage() {
         <div className="flex flex-col gap-6">
           <section>
             <div className="mb-3 flex items-center gap-2">
-              <h2 className="text-lg font-semibold">Installed plugins</h2>
+              <h2 className="text-lg font-semibold">{t("installedPlugins")}</h2>
               <Badge variant="secondary">{filteredInstalled.length}</Badge>
             </div>
             {filteredInstalled.length === 0 ? (
               <div className="flex h-[120px] items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
                 {loading
-                  ? "Loading plugins..."
-                  : "No installed plugins match the current filters."}
+                  ? t("loadingPlugins")
+                  : t("noInstalledMatch")}
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
@@ -667,15 +696,15 @@ export default function PluginsPage() {
             <div className="mb-3 flex items-center gap-2">
               <h2 className="text-lg font-semibold">
                 <Puzzle className="mr-1.5 inline-block size-4" />
-                Built-in plugins
+                {t("builtInPlugins")}
               </h2>
               <Badge variant="secondary">{filteredBuiltins.length}</Badge>
             </div>
             {filteredBuiltins.length === 0 ? (
               <div className="flex h-[120px] items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
                 {loading
-                  ? "Discovering built-in plugins..."
-                  : "No built-in plugins match the current filters."}
+                  ? t("discoveringBuiltins")
+                  : t("noBuiltinMatch")}
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
@@ -686,9 +715,16 @@ export default function PluginsPage() {
                         <CardTitle className="text-base">
                           {builtin.metadata.name}
                         </CardTitle>
-                        <Badge variant="outline" className="text-xs">
-                          {builtin.kind}
-                        </Badge>
+                        <div className="flex items-center gap-2">
+                          {builtin.builtIn?.readinessStatus ?? builtin.builtIn?.availabilityStatus ? (
+                            <Badge variant="secondary" className="text-xs">
+                              {builtin.builtIn?.readinessStatus ?? builtin.builtIn?.availabilityStatus}
+                            </Badge>
+                          ) : null}
+                          <Badge variant="outline" className="text-xs">
+                            {builtin.kind}
+                          </Badge>
+                        </div>
                       </div>
                       <CardDescription className="text-xs">
                         v{builtin.metadata.version}
@@ -700,18 +736,43 @@ export default function PluginsPage() {
                           {builtin.metadata.description}
                         </p>
                       ) : null}
+                      {builtin.builtIn?.readinessMessage ?? builtin.builtIn?.availabilityMessage ? (
+                        <p className="text-xs text-muted-foreground">
+                          {builtin.builtIn?.readinessMessage ?? builtin.builtIn?.availabilityMessage}
+                        </p>
+                      ) : null}
+                      {builtin.builtIn?.nextStep ? (
+                        <p className="text-xs text-muted-foreground">
+                          {builtin.builtIn.nextStep}
+                        </p>
+                      ) : null}
+                      {builtin.builtIn?.missingPrerequisites?.length ? (
+                        <p className="text-xs text-muted-foreground">
+                          Missing prerequisites: {builtin.builtIn.missingPrerequisites.join(", ")}
+                        </p>
+                      ) : null}
+                      {builtin.builtIn?.missingConfiguration?.length ? (
+                        <p className="text-xs text-muted-foreground">
+                          Missing configuration: {builtin.builtIn.missingConfiguration.join(", ")}
+                        </p>
+                      ) : null}
+                      {builtin.builtIn?.docsRef ? (
+                        <p className="text-xs text-muted-foreground">
+                          {builtin.builtIn.docsRef}
+                        </p>
+                      ) : null}
                       <p className="text-xs text-muted-foreground">
-                        Installable from the built-in discovery registry.
+                        {t("installableFromBuiltin")}
                       </p>
                       <Button
                         variant="outline"
                         size="sm"
                         className="w-fit"
                         onClick={() => void installFromCatalog(builtin.metadata.id)}
-                        disabled={loading}
+                        disabled={loading || builtin.builtIn?.installable === false}
                       >
                         <Download className="mr-1 size-3.5" />
-                        Install
+                        {t("install")}
                       </Button>
                     </CardContent>
                   </Card>
@@ -724,14 +785,14 @@ export default function PluginsPage() {
 
           <section>
             <div className="mb-3 flex items-center gap-2">
-              <h2 className="text-lg font-semibold">Marketplace</h2>
+              <h2 className="text-lg font-semibold">{t("marketplace")}</h2>
               <Badge variant="secondary">{filteredMarketplace.length}</Badge>
             </div>
             {filteredMarketplace.length === 0 ? (
               <div className="flex h-[120px] items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
                 {loading
-                  ? "Loading marketplace..."
-                  : "No marketplace plugins match the current filters."}
+                  ? t("loadingMarketplace")
+                  : t("noMarketplaceMatch")}
               </div>
             ) : (
               <div className="grid gap-4 sm:grid-cols-2">
@@ -755,10 +816,10 @@ export default function PluginsPage() {
                       <div className="flex flex-wrap items-center gap-2">
                         {entry.installed ? (
                           <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
-                            Installed
+                            {t("installed")}
                           </Badge>
                         ) : entry.sourceType === "builtin" ? (
-                          <Badge variant="secondary">Built-in</Badge>
+                          <Badge variant="secondary">{t("builtIn")}</Badge>
                         ) : entry.sourceType === "catalog" ? (
                           <Button
                             variant="outline"
@@ -767,16 +828,87 @@ export default function PluginsPage() {
                             disabled={loading}
                           >
                             <Download className="mr-1 size-3.5" />
-                            Install
+                            {t("install")}
                           </Button>
                         ) : (
                           <>
-                            <Badge variant="secondary">Browse only</Badge>
+                            <Badge variant="secondary">{t("browseOnly")}</Badge>
                             <span className="text-xs text-muted-foreground">
-                              Remote marketplace installation is not wired into the
-                              current platform contract yet.
+                              {t("remoteInstallNotReady")}
                             </span>
                           </>
+                        )}
+                      </div>
+                    </CardContent>
+                  </Card>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <Separator />
+
+          <section>
+            <div className="mb-3 flex items-center gap-2">
+              <h2 className="text-lg font-semibold">{t("remoteRegistry")}</h2>
+              <Badge variant="secondary">{filteredRemoteMarketplace.length}</Badge>
+            </div>
+            {remoteMarketplace.registry ? (
+              <p className="mb-3 text-xs text-muted-foreground">
+                {t("remoteRegistrySource")}: {remoteMarketplace.registry}
+              </p>
+            ) : null}
+            {!remoteMarketplace.available && remoteMarketplace.error ? (
+              <div className="rounded-md border border-border/60 bg-muted/30 px-3 py-2 text-sm text-muted-foreground">
+                {remoteMarketplace.error}
+              </div>
+            ) : filteredRemoteMarketplace.length === 0 ? (
+              <div className="flex h-[120px] items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
+                {loading ? t("loadingRemoteRegistry") : t("noRemoteRegistryMatch")}
+              </div>
+            ) : (
+              <div className="grid gap-4 sm:grid-cols-2">
+                {filteredRemoteMarketplace.map((entry) => (
+                  <Card key={entry.id}>
+                    <CardHeader className="pb-3">
+                      <div className="flex items-center justify-between gap-2">
+                        <CardTitle className="text-base">{entry.name}</CardTitle>
+                        <Badge variant="outline" className="text-xs">
+                          {entry.kind}
+                        </Badge>
+                      </div>
+                      <CardDescription className="text-xs">
+                        v{entry.version} · {entry.author}
+                      </CardDescription>
+                    </CardHeader>
+                    <CardContent className="flex flex-col gap-3">
+                      <p className="text-sm text-muted-foreground">
+                        {entry.description}
+                      </p>
+                      <div className="flex flex-wrap items-center gap-2">
+                        {entry.installed ? (
+                          <Badge className="bg-emerald-500/15 text-emerald-700 dark:text-emerald-400">
+                            {t("installed")}
+                          </Badge>
+                        ) : entry.installable === false ? (
+                          <>
+                            <Badge variant="secondary">{t("browseOnly")}</Badge>
+                            {entry.blockedReason ? (
+                              <span className="text-xs text-muted-foreground">
+                                {entry.blockedReason}
+                              </span>
+                            ) : null}
+                          </>
+                        ) : (
+                          <Button
+                            variant="outline"
+                            size="sm"
+                            onClick={() => void installFromRemote(entry.id, entry.version)}
+                            disabled={loading}
+                          >
+                            <Download className="mr-1 size-3.5" />
+                            {t("installRemote")}
+                          </Button>
                         )}
                       </div>
                     </CardContent>

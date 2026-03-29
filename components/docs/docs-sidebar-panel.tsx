@@ -2,6 +2,7 @@
 
 import { useMemo } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Clock3, Search, Star, Pin } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
@@ -36,6 +37,7 @@ export function DocsSidebarPanel({
   onTogglePinned?: (pageId: string, pinned: boolean) => void;
   onDeletePage?: (pageId: string) => void;
 }) {
+  const t = useTranslations("docs");
   const flattened = useMemo(() => flattenDocsTree(tree), [tree]);
   const favoritePages = flattened.filter((page) =>
     favorites.some((favorite) => favorite.pageId === page.id)
@@ -54,17 +56,17 @@ export function DocsSidebarPanel({
       <div className="space-y-2">
         <div className="flex items-center gap-2 text-sm font-medium">
           <Search className="size-4 text-muted-foreground" />
-          Search docs
+          {t("sidebar.searchDocs")}
         </div>
         <Input
           value={query}
           onChange={(event) => onQueryChange(event.target.value)}
-          placeholder="Find a page, template, or runbook"
+          placeholder={t("sidebar.searchPlaceholder")}
         />
       </div>
 
       <section className="space-y-2">
-        <h2 className="text-sm font-semibold">Page Tree</h2>
+        <h2 className="text-sm font-semibold">{t("sidebar.pageTree")}</h2>
         <PageTree
           nodes={filteredTree as DocsPageTreeNode[]}
           currentPageId={currentPageId}
@@ -78,7 +80,7 @@ export function DocsSidebarPanel({
       <section className="space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Pin className="size-4 text-muted-foreground" />
-          Favorites
+          {t("sidebar.favorites")}
         </div>
         {favoritePages.map((page) => (
           <Link key={page.id} href={buildDocsHref(page.id)} className="flex items-center gap-2 text-sm hover:text-primary">
@@ -87,14 +89,14 @@ export function DocsSidebarPanel({
           </Link>
         ))}
         {favoritePages.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No favorites yet.</p>
+          <p className="text-xs text-muted-foreground">{t("sidebar.noFavorites")}</p>
         ) : null}
       </section>
 
       <section className="space-y-2">
         <div className="flex items-center gap-2 text-sm font-semibold">
           <Clock3 className="size-4 text-muted-foreground" />
-          Recent
+          {t("sidebar.recent")}
         </div>
         {recentPages.map((page) => (
           <Link key={page.id} href={buildDocsHref(page.id)} className="truncate text-sm hover:text-primary">
@@ -102,7 +104,7 @@ export function DocsSidebarPanel({
           </Link>
         ))}
         {recentPages.length === 0 ? (
-          <p className="text-xs text-muted-foreground">No recent docs yet.</p>
+          <p className="text-xs text-muted-foreground">{t("sidebar.noRecent")}</p>
         ) : null}
       </section>
     </aside>

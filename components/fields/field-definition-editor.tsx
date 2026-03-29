@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -20,6 +21,7 @@ function moveField(ids: string[], from: number, to: number) {
 }
 
 export function FieldDefinitionEditor({ projectId }: { projectId: string }) {
+  const t = useTranslations("settings");
   const definitionsByProject = useCustomFieldStore((state) => state.definitionsByProject);
   const fetchDefinitions = useCustomFieldStore((state) => state.fetchDefinitions);
   const createDefinition = useCustomFieldStore((state) => state.createDefinition);
@@ -65,11 +67,11 @@ export function FieldDefinitionEditor({ projectId }: { projectId: string }) {
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-4">
         <div className="space-y-2 md:col-span-2">
-          <Label>Field Name</Label>
-          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Priority" />
+          <Label>{t("fields.fieldName")}</Label>
+          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("fields.fieldNamePlaceholder")} />
         </div>
         <div className="space-y-2">
-          <Label>Type</Label>
+          <Label>{t("fields.type")}</Label>
           <select
             className="h-10 w-full rounded-md border bg-background px-3 text-sm"
             value={fieldType}
@@ -83,23 +85,23 @@ export function FieldDefinitionEditor({ projectId }: { projectId: string }) {
           </select>
         </div>
         <div className="space-y-2">
-          <Label>Required</Label>
+          <Label>{t("fields.required")}</Label>
           <label className="flex h-10 items-center gap-2 rounded-md border px-3 text-sm">
             <input type="checkbox" checked={required} onChange={(event) => setRequired(event.target.checked)} />
-            Required
+            {t("fields.required")}
           </label>
         </div>
       </div>
 
       {(fieldType === "select" || fieldType === "multi_select") && (
         <div className="space-y-2">
-          <Label>Options</Label>
-          <Input value={options} onChange={(event) => setOptions(event.target.value)} placeholder="P0, P1, P2" />
+          <Label>{t("fields.options")}</Label>
+          <Input value={options} onChange={(event) => setOptions(event.target.value)} placeholder={t("fields.optionsPlaceholder")} />
         </div>
       )}
 
       <Button type="button" onClick={() => void handleCreate()} disabled={!name.trim()}>
-        Add field
+        {t("fields.addField")}
       </Button>
 
       <div className="space-y-2">
@@ -109,7 +111,7 @@ export function FieldDefinitionEditor({ projectId }: { projectId: string }) {
               <div className="font-medium">{field.name}</div>
               <div className="text-muted-foreground">
                 {field.fieldType}
-                {field.required ? " · required" : ""}
+                {field.required ? t("fields.requiredSuffix") : ""}
               </div>
             </div>
             <div className="flex items-center gap-2">
@@ -120,7 +122,7 @@ export function FieldDefinitionEditor({ projectId }: { projectId: string }) {
                 disabled={index === 0}
                 onClick={() => void reorderDefinitions(projectId, moveField(sorted.map((item) => item.id), index, index - 1))}
               >
-                Up
+                {t("fields.up")}
               </Button>
               <Button
                 type="button"
@@ -129,10 +131,10 @@ export function FieldDefinitionEditor({ projectId }: { projectId: string }) {
                 disabled={index === sorted.length - 1}
                 onClick={() => void reorderDefinitions(projectId, moveField(sorted.map((item) => item.id), index, index + 1))}
               >
-                Down
+                {t("fields.down")}
               </Button>
               <Button type="button" size="sm" variant="destructive" onClick={() => void deleteDefinition(projectId, field.id)}>
-                Delete
+                {t("fields.delete")}
               </Button>
             </div>
           </div>

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -17,15 +18,16 @@ type BuilderField = {
   target: string;
 };
 
-const BUILT_IN_TARGETS = [
-  { value: "title", label: "Task title" },
-  { value: "description", label: "Task description" },
-  { value: "priority", label: "Task priority" },
-];
+const BUILT_IN_TARGET_KEYS = [
+  { value: "title", labelKey: "taskTitle" },
+  { value: "description", labelKey: "taskDescription" },
+  { value: "priority", labelKey: "taskPriority" },
+] as const;
 const EMPTY_FORMS: FormDefinition[] = [];
 const EMPTY_CUSTOM_FIELDS: CustomFieldDefinition[] = [];
 
 export function FormBuilder({ projectId }: { projectId: string }) {
+  const t = useTranslations("forms");
   const formsByProject = useFormStore((state) => state.formsByProject);
   const fetchForms = useFormStore((state) => state.fetchForms);
   const createForm = useFormStore((state) => state.createForm);
@@ -57,31 +59,34 @@ export function FormBuilder({ projectId }: { projectId: string }) {
 
   const targetOptions = useMemo(
     () => [
-      ...BUILT_IN_TARGETS,
+      ...BUILT_IN_TARGET_KEYS.map((item) => ({
+        value: item.value,
+        label: t(item.labelKey),
+      })),
       ...customFields.map((field) => ({
         value: `cf:${field.id}`,
-        label: `Custom field: ${field.name}`,
+        label: t("customField", { name: field.name }),
       })),
     ],
-    [customFields]
+    [customFields, t]
   );
 
   return (
     <div className="space-y-4">
       <div className="grid gap-3 md:grid-cols-2">
         <div className="space-y-2">
-          <Label>Form name</Label>
-          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Bug Report" />
+          <Label>{t("formName")}</Label>
+          <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("formNamePlaceholder")} />
         </div>
         <div className="space-y-2">
-          <Label>Slug</Label>
-          <Input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder="bug-report" />
+          <Label>{t("slug")}</Label>
+          <Input value={slug} onChange={(event) => setSlug(event.target.value)} placeholder={t("slugPlaceholder")} />
         </div>
       </div>
 
       <div className="grid gap-3 md:grid-cols-2">
         <div className="space-y-2">
-          <Label>Target status</Label>
+          <Label>{t("targetStatus")}</Label>
           <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={targetStatus} onChange={(event) => setTargetStatus(event.target.value)}>
             {["inbox", "triaged", "assigned", "in_progress", "in_review"].map((status) => (
               <option key={status} value={status}>
@@ -92,12 +97,12 @@ export function FormBuilder({ projectId }: { projectId: string }) {
         </div>
         <label className="flex items-center gap-2 text-sm md:self-end">
           <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
-          Public form
+          {t("publicForm")}
         </label>
       </div>
 
       <div className="space-y-3">
-        <div className="font-medium text-sm">Field mappings</div>
+        <div className="font-medium text-sm">{t("fieldMappings")}</div>
         {fields.map((field, index) => (
           <div key={`${field.key}-${index}`} className="grid gap-3 rounded-md border p-3 md:grid-cols-3">
             <Input
@@ -105,14 +110,14 @@ export function FormBuilder({ projectId }: { projectId: string }) {
               onChange={(event) =>
                 setFields((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, key: event.target.value } : item)))
               }
-              placeholder="field key"
+              placeholder={t("fieldKeyPlaceholder")}
             />
             <Input
               value={field.label}
               onChange={(event) =>
                 setFields((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, label: event.target.value } : item)))
               }
-              placeholder="field label"
+              placeholder={t("fieldLabelPlaceholder")}
             />
             <select
               className="h-10 rounded-md border bg-background px-3 text-sm"
@@ -134,7 +139,7 @@ export function FormBuilder({ projectId }: { projectId: string }) {
           variant="outline"
           onClick={() => setFields((current) => [...current, { key: `field_${current.length + 1}`, label: "New Field", target: "description" }])}
         >
-          Add field mapping
+          {t("addFieldMapping")}
         </Button>
       </div>
 
@@ -156,7 +161,7 @@ export function FormBuilder({ projectId }: { projectId: string }) {
           setFields([{ key: "title", label: "Title", target: "title" }]);
         }}
       >
-        Create form
+        {t("createForm")}
       </Button>
 
       <div className="space-y-2">

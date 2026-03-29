@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,6 +40,7 @@ function WorkflowGraph({
 }: {
   transitions: Record<string, string[]>;
 }) {
+  const t = useTranslations("workflow");
   const activeStatuses = ALL_TASK_STATUSES.filter(
     (status) =>
       (transitions[status] ?? []).length > 0 ||
@@ -48,8 +50,7 @@ function WorkflowGraph({
   if (activeStatuses.length === 0) {
     return (
       <div className="rounded-md border border-dashed px-4 py-6 text-sm text-muted-foreground">
-        No transitions defined yet. Add a few status rules to visualize this
-        workflow.
+        {t("noTransitions")}
       </div>
     );
   }
@@ -66,7 +67,7 @@ function WorkflowGraph({
             <div className="mb-3 flex items-center justify-between gap-2">
               <span className="text-sm font-semibold">{statusLabel(status)}</span>
               <Badge variant="outline" className="text-[11px]">
-                {targets.length} next
+                {t("next", { count: targets.length })}
               </Badge>
             </div>
             {targets.length > 0 ? (
@@ -79,7 +80,7 @@ function WorkflowGraph({
               </div>
             ) : (
               <p className="text-xs text-muted-foreground">
-                No outbound transitions.
+                {t("noOutbound")}
               </p>
             )}
           </div>
@@ -96,6 +97,7 @@ function TransitionEditor({
   transitions: Record<string, string[]>;
   onChange: (transitions: Record<string, string[]>) => void;
 }) {
+  const t = useTranslations("workflow");
   const toggleTransition = (from: TaskStatus, to: TaskStatus) => {
     const current = transitions[from] ?? [];
     const next = current.includes(to)
@@ -110,7 +112,7 @@ function TransitionEditor({
         <thead>
           <tr>
             <th className="px-2 py-1 text-left font-medium text-muted-foreground">
-              From / To
+              {t("fromTo")}
             </th>
             {ALL_TASK_STATUSES.map((status) => (
               <th
@@ -159,6 +161,7 @@ function TriggerEditor({
   triggers: WorkflowTrigger[];
   onChange: (triggers: WorkflowTrigger[]) => void;
 }) {
+  const t = useTranslations("workflow");
   const addTrigger = () => {
     onChange([
       ...triggers,
@@ -184,7 +187,7 @@ function TriggerEditor({
           key={index}
           className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/20 p-3 text-sm"
         >
-          <span className="text-muted-foreground">When</span>
+          <span className="text-muted-foreground">{t("when")}</span>
           <select
             className="h-8 rounded-md border bg-background px-2 text-sm"
             value={trigger.fromStatus}
@@ -197,7 +200,7 @@ function TriggerEditor({
               </option>
             ))}
           </select>
-          <span className="text-muted-foreground">transitions to</span>
+          <span className="text-muted-foreground">{t("transitionsTo")}</span>
           <select
             className="h-8 rounded-md border bg-background px-2 text-sm"
             value={trigger.toStatus}
@@ -210,7 +213,7 @@ function TriggerEditor({
               </option>
             ))}
           </select>
-          <span className="text-muted-foreground">then</span>
+          <span className="text-muted-foreground">{t("then")}</span>
           <select
             className="h-8 rounded-md border bg-background px-2 text-sm"
             value={trigger.action}
@@ -230,12 +233,12 @@ function TriggerEditor({
             onClick={() => removeTrigger(index)}
             aria-label={`Remove trigger ${index + 1}`}
           >
-            Remove
+            {t("remove")}
           </Button>
         </div>
       ))}
       <Button type="button" size="sm" variant="outline" onClick={addTrigger}>
-        Add trigger rule
+        {t("addTriggerRule")}
       </Button>
     </div>
   );
@@ -305,6 +308,7 @@ function WorkflowDraftEditor({
   initialTriggers,
   onSave,
 }: WorkflowDraftEditorProps) {
+  const t = useTranslations("workflow");
   const [transitions, setTransitions] =
     useState<Record<string, string[]>>(initialTransitions);
   const [triggers, setTriggers] = useState<WorkflowTrigger[]>(initialTriggers);
@@ -345,18 +349,17 @@ function WorkflowDraftEditor({
         <CardHeader>
           <div className="flex flex-col gap-3 lg:flex-row lg:items-start lg:justify-between">
             <div>
-              <CardTitle>Workflow graph</CardTitle>
+              <CardTitle>{t("workflowGraph")}</CardTitle>
               <CardDescription>
-                Read the persisted or draft workflow as a status graph and
-                review its automation rules in the same place.
+                {t("workflowGraphDesc")}
               </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant={connected ? "secondary" : "outline"}>
-                {connected ? "Realtime live" : "Realtime degraded"}
+                {connected ? t("realtimeLive") : t("realtimeDegraded")}
               </Badge>
               <Badge variant={dirty ? "outline" : "secondary"}>
-                {dirty ? "Draft changes" : "Persisted config"}
+                {dirty ? t("draftChanges") : t("persistedConfig")}
               </Badge>
             </div>
           </div>
@@ -365,9 +368,9 @@ function WorkflowDraftEditor({
           <WorkflowGraph transitions={transitions} />
           <div className="rounded-lg border border-border/60 bg-muted/20 p-4">
             <div className="mb-3 flex items-center justify-between gap-2">
-              <h3 className="text-sm font-semibold">Trigger summary</h3>
+              <h3 className="text-sm font-semibold">{t("triggerSummary")}</h3>
               <Badge variant="secondary">
-                {triggers.length} trigger{triggers.length === 1 ? "" : "s"}
+                {triggers.length === 1 ? t("triggerCount", { count: triggers.length }) : t("triggerCountPlural", { count: triggers.length })}
               </Badge>
             </div>
             {triggers.length > 0 ? (
@@ -393,7 +396,7 @@ function WorkflowDraftEditor({
               </div>
             ) : (
               <p className="text-sm text-muted-foreground">
-                No automation triggers configured for this project.
+                {t("noTriggers")}
               </p>
             )}
           </div>
@@ -404,19 +407,19 @@ function WorkflowDraftEditor({
         <CardHeader>
           <div className="flex items-center justify-between gap-3">
             <div>
-              <CardTitle>Status Transitions</CardTitle>
+              <CardTitle>{t("statusTransitions")}</CardTitle>
               <CardDescription>
-                Define which status changes are allowed for tasks in this project.
+                {t("statusTransitionsDesc")}
               </CardDescription>
             </div>
             <Badge variant="secondary">
-              {activeTransitionCount} rule{activeTransitionCount === 1 ? "" : "s"}
+              {activeTransitionCount === 1 ? t("ruleCount", { count: activeTransitionCount }) : t("ruleCountPlural", { count: activeTransitionCount })}
             </Badge>
           </div>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="text-sm text-muted-foreground">Loading workflow config...</div>
+            <div className="text-sm text-muted-foreground">{t("loadingWorkflow")}</div>
           ) : (
             <TransitionEditor
               transitions={transitions}
@@ -428,14 +431,14 @@ function WorkflowDraftEditor({
 
       <Card>
         <CardHeader>
-          <CardTitle>Automation Triggers</CardTitle>
+          <CardTitle>{t("automationTriggers")}</CardTitle>
           <CardDescription>
-            When a task transitions between statuses, run an automated action.
+            {t("automationTriggersDesc")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           {loading ? (
-            <div className="text-sm text-muted-foreground">Loading...</div>
+            <div className="text-sm text-muted-foreground">{t("loading")}</div>
           ) : (
             <TriggerEditor triggers={triggers} onChange={handleTriggerChange} />
           )}
@@ -444,10 +447,9 @@ function WorkflowDraftEditor({
 
       <Card>
         <CardHeader>
-          <CardTitle>Recent activity</CardTitle>
+          <CardTitle>{t("recentActivity")}</CardTitle>
           <CardDescription>
-            Latest trigger executions received from the realtime workflow event
-            stream.
+            {t("recentActivityDesc")}
           </CardDescription>
         </CardHeader>
         <CardContent>
@@ -461,21 +463,21 @@ function WorkflowDraftEditor({
                   <div className="flex flex-wrap items-center gap-2 text-sm">
                     <Badge variant="outline">{entry.taskId || "unknown task"}</Badge>
                     <span className="font-medium">{statusLabel(entry.from)}</span>
-                    <span className="text-muted-foreground">to</span>
+                    <span className="text-muted-foreground">{t("to")}</span>
                     <span className="font-medium">{statusLabel(entry.to)}</span>
                   </div>
                   <p className="mt-2 text-sm text-muted-foreground">
                     {triggerLabel(entry.action)}
                     {connected
-                      ? " recorded in the live workflow feed."
-                      : " captured from the last known workflow event feed."}
+                      ? t("recordedLive")
+                      : t("recordedLast")}
                   </p>
                 </div>
               ))}
             </div>
           ) : (
             <div className="rounded-md border border-dashed px-4 py-6 text-sm text-muted-foreground">
-              No workflow activity received yet for this project.
+              {t("noActivity")}
             </div>
           )}
         </CardContent>
@@ -487,10 +489,10 @@ function WorkflowDraftEditor({
           disabled={!dirty || saving}
           onClick={() => void handleSave()}
         >
-          {saving ? "Saving..." : "Save Workflow Config"}
+          {saving ? t("saving") : t("saveWorkflowConfig")}
         </Button>
         {dirty ? (
-          <span className="text-sm text-muted-foreground">Unsaved changes</span>
+          <span className="text-sm text-muted-foreground">{t("unsavedChanges")}</span>
         ) : null}
       </div>
     </div>

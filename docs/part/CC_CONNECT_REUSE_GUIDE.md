@@ -6,6 +6,17 @@
 
 ---
 
+## 当前实现快照（2026-03-29）
+
+这份指南的核心判断仍然成立：AgentForge 复用了 cc-connect 的 `platform/` 连接器价值，而不是复用它的本地 CLI agent 执行模型。但当前仓库真相已经比最初草案更进一步：
+
+- 当前 IM Bridge 仓库已经有真实 platform registry 与 control-plane wiring，而不只是 Feishu-first 草图。
+- 当前受支持的 operator-facing 平台集合已经覆盖 `feishu`、`dingtalk`、`slack`、`telegram`、`discord`、`wecom`、`qq`、`qqbot`。
+- 与 AgentForge 后端的主通信模型已经收敛为 HTTP control-plane + WebSocket 事件流，而不是待选的 `HTTP+SSE vs gRPC vs WebSocket`。
+- Feishu 的 delayed update / native card 能力、以及 QQ / QQ Bot / WeCom 的平台覆盖都已经进入当前仓库资产，而不是停留在后续列表里。
+
+---
+
 ## 目录
 
 1. [cc-connect 架构分析](#一cc-connect-架构分析)
@@ -354,7 +365,7 @@ app_secret = "xxxxxxxxxxxxxxxxxx"
 
 **原有逻辑：** cc-connect 的 agent/ 层通过 `exec.Command` 在本地启动 AI CLI 子进程（如 `claude`），通过 stdin/stdout 管道与子进程通信。
 
-**替换为：** 不再本地启动 Agent，而是通过 HTTP/gRPC 调用 AgentForge 后端 API。IM Bridge 变为一个纯粹的 **消息翻译层**，不运行任何 Agent 逻辑。
+**替换为：** 不再本地启动 Agent，而是通过 AgentForge 后端的 HTTP control-plane 与 WebSocket 事件流完成消息投递、命令执行和状态回传。IM Bridge 变为一个纯粹的 **消息翻译层**，不运行任何 Agent 逻辑。
 
 **新建 `agent/agentforge/agentforge.go`：**
 
@@ -956,7 +967,7 @@ func (e *Engine) handleNaturalLanguage(p core.Platform, msg *core.Message) {
 
 ## 六、平台特殊考虑
 
-### 6.1 飞书 (Feishu) — P0 首选
+### 6.1 飞书 (Feishu) — 当前最完整平台
 
 飞书是 AgentForge MVP 的首选 IM 平台，原因：
 
@@ -1036,14 +1047,14 @@ cc-connect 提供一键配置命令：
 cc-connect feishu setup --project my-team
 ```
 
-### 6.2 钉钉 (DingTalk) — P1
+### 6.2 钉钉 (DingTalk) — 当前已纳入平台覆盖
 
 - Stream 模式（类似飞书 WebSocket），无需公网 IP
 - 支持 ActionCard 卡片消息（可嵌入按钮）
 - 企业内部应用需要管理员开通
 - 消息长度限制 20,000 字符
 
-### 6.3 Slack — P1
+### 6.3 Slack — 当前已纳入平台覆盖
 
 - Socket Mode，无需公网 IP
 - 支持 Block Kit（丰富的消息布局组件）
@@ -1051,7 +1062,7 @@ cc-connect feishu setup --project my-team
 - 消息长度限制 40,000 字符
 - Markdown 使用 mrkdwn 方言（cc-connect 已通过 `FormattingInstructionProvider` 处理）
 
-### 6.4 Telegram — P1
+### 6.4 Telegram — 当前已纳入平台覆盖
 
 - Long Polling，无需公网 IP
 - 支持 Inline Keyboard（按钮）
@@ -1059,20 +1070,26 @@ cc-connect feishu setup --project my-team
 - 消息长度限制 4,096 字符（较短，需要分段发送）
 - Bot Token 通过 @BotFather 获取
 
-### 6.5 企业微信 (WeCom) — P1
+### 6.5 企业微信 (WeCom) — 当前已纳入平台覆盖
 
 - WebSocket 模式无需公网 IP
 - 支持 Markdown 消息和 Template Card
 - 国内企业使用率高，与钉钉互补
 
-### 6.6 Discord — P2
+### 6.6 Discord — 当前已纳入平台覆盖
 
 - Gateway 连接，无需公网 IP
 - 支持 Embed（嵌入式富文本）和 Components（按钮、下拉菜单）
 - 消息长度限制 2,000 字符
 - 适合开发者社区
 
-### 6.7 各平台消息格式差异汇总
+### 6.7 QQ / QQ Bot — 当前已纳入平台覆盖
+
+- QQ (NapCat / OneBot) 已进入当前 platform registry，并区分 stub / live transport。
+- QQ Bot 官方路径也已进入当前 platform registry，与其他平台一样由统一 control plane 管理。
+- 这意味着平台覆盖范围已经不再是“飞书 MVP，其他待后续”，而是“前端和 control plane 已对齐多平台，只是不同平台的富消息能力深度不同”。
+
+### 6.8 各平台消息格式差异汇总
 
 | 平台 | 最大长度 | 富消息 | 按钮 | 消息编辑 | Markdown |
 |------|:---:|------|:---:|:---:|------|
@@ -1435,11 +1452,10 @@ func (c *Client) ProcessNaturalLanguage(sessionKey, content string, opts Process
 
 ---
 
-> **文档状态：** 初稿完成，待团队评审
+> **文档状态：** 已根据当前仓库实现做过一轮 live contract 同步，但仍包含部分长期架构与迁移草案。
 >
-> **关键决策待确认：**
+> **当前仍值得单独评审的点：**
 >
-> 1. IM Bridge 与后端通信协议选择：HTTP+SSE vs gRPC vs WebSocket
-> 2. 是否保留 cc-connect 的 Management API 作为 Bridge 的管理接口
-> 3. 是否保留 cc-connect 的 Webhook 端点用于外部系统集成
-> 4. 多 Bridge 实例部署方案
+> 1. 多 Bridge 实例部署时，control-plane 和通知补发应继续沿现有后端注册/心跳模型演进，还是引入额外协调层
+> 2. 是否保留 cc-connect 的部分管理/Webhook 能力作为辅助运维入口，而不是主业务入口
+> 3. 各平台富消息能力矩阵是否要进一步文档化为统一 rendering profile / downgrade contract

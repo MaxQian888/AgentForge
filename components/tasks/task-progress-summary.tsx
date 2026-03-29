@@ -1,3 +1,6 @@
+"use client";
+
+import { useTranslations } from "next-intl";
 import type { TaskDependencySummary } from "@/lib/tasks/task-dependencies";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -19,38 +22,35 @@ export function TaskProgressSummary({
   costSummary,
   realtimeState,
 }: TaskProgressSummaryProps) {
+  const t = useTranslations("tasks");
   return (
     <Card>
       <CardHeader className="pb-3">
         <div className="flex items-center justify-between gap-3">
-          <CardTitle className="text-base">Progress health</CardTitle>
+          <CardTitle className="text-base">{t("progress.title")}</CardTitle>
           <Badge variant={realtimeState === "live" ? "secondary" : "outline"}>
-            {realtimeState === "live" ? "Realtime live" : "Realtime degraded"}
+            {realtimeState === "live" ? t("progress.realtimeLive") : t("progress.realtimeDegraded")}
           </Badge>
         </div>
       </CardHeader>
       <CardContent className="flex flex-col gap-2 text-sm">
-        <div>Healthy {counts.healthy}</div>
-        <div>Warning {counts.warning}</div>
-        <div>Stalled {counts.stalled}</div>
-        <div>Unscheduled {counts.unscheduled}</div>
-        <div>Blocked {dependencySummary.blocked}</div>
-        <div>Ready to unblock {dependencySummary.readyToUnblock}</div>
+        <div>{t("progress.healthy", { count: counts.healthy })}</div>
+        <div>{t("progress.warning", { count: counts.warning })}</div>
+        <div>{t("progress.stalled", { count: counts.stalled })}</div>
+        <div>{t("progress.unscheduled", { count: counts.unscheduled })}</div>
+        <div>{t("progress.blocked", { count: dependencySummary.blocked })}</div>
+        <div>{t("progress.readyToUnblock", { count: dependencySummary.readyToUnblock })}</div>
         <div>
-          Task spend ${costSummary.totalSpentUsd.toFixed(2)} / $
-          {costSummary.totalBudgetUsd.toFixed(2)}
+          {t("progress.taskSpend", { spent: costSummary.totalSpentUsd.toFixed(2), budget: costSummary.totalBudgetUsd.toFixed(2) })}
         </div>
         <div>
-          Active runs {costSummary.activeRunCount} using $
-          {costSummary.activeRunCostUsd.toFixed(2)} / $
-          {costSummary.activeRunBudgetUsd.toFixed(2)}
+          {t("progress.activeRuns", { count: costSummary.activeRunCount, cost: costSummary.activeRunCostUsd.toFixed(2), budget: costSummary.activeRunBudgetUsd.toFixed(2) })}
         </div>
         <div>
-          Budgeted tasks {costSummary.budgetedTaskCount}, over budget{" "}
-          {costSummary.overBudgetTaskCount}
+          {t("progress.budgetedTasks", { budgeted: costSummary.budgetedTaskCount, over: costSummary.overBudgetTaskCount })}
         </div>
         {realtimeState === "degraded" ? (
-          <div className="text-muted-foreground">Realtime updates unavailable.</div>
+          <div className="text-muted-foreground">{t("progress.realtimeUnavailable")}</div>
         ) : null}
       </CardContent>
     </Card>

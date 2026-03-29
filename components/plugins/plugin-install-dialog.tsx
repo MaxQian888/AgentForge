@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, useCallback } from "react";
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -37,6 +38,7 @@ export function PluginInstallDialog({
   open,
   onOpenChange,
 }: PluginInstallDialogProps) {
+  const t = useTranslations("plugins");
   const installLocal = usePluginStore((s) => s.installLocal);
   const installFromCatalog = usePluginStore((s) => s.installFromCatalog);
   const fetchPlugins = usePluginStore((s) => s.fetchPlugins);
@@ -133,7 +135,7 @@ export function PluginInstallDialog({
       handleOpenChange(false);
     } catch (err) {
       setInstallError(
-        err instanceof Error ? err.message : "Installation failed"
+        err instanceof Error ? err.message : t("installDialog.installationFailed")
       );
     }
   };
@@ -141,22 +143,22 @@ export function PluginInstallDialog({
   const dialogTitle = (): string => {
     switch (step) {
       case "source":
-        return "Install Plugin";
+        return t("installDialog.titleInstall");
       case "confirm":
-        return "Confirm Installation";
+        return t("installDialog.titleConfirm");
       case "installing":
-        return "Installing Plugin";
+        return t("installDialog.titleInstalling");
     }
   };
 
   const dialogDescription = (): string => {
     switch (step) {
       case "source":
-        return "Choose a source to install a plugin from.";
+        return t("installDialog.descSource");
       case "confirm":
-        return "Review the details before installing.";
+        return t("installDialog.descConfirm");
       case "installing":
-        return "Please wait while the plugin is being installed.";
+        return t("installDialog.descInstalling");
     }
   };
 
@@ -176,13 +178,13 @@ export function PluginInstallDialog({
               onValueChange={(v) => setActiveTab(v as SourceTab)}
             >
               <TabsList className="w-full">
-                <TabsTrigger value="local">Local</TabsTrigger>
-                <TabsTrigger value="catalog">Catalog</TabsTrigger>
+                <TabsTrigger value="local">{t("installDialog.tabLocal")}</TabsTrigger>
+                <TabsTrigger value="catalog">{t("installDialog.tabCatalog")}</TabsTrigger>
               </TabsList>
 
               <TabsContent value="local" className="mt-4">
                 <div className="grid gap-2">
-                  <Label htmlFor="plugin-path">Plugin Path</Label>
+                  <Label htmlFor="plugin-path">{t("installDialog.pluginPath")}</Label>
                   <div className="flex gap-2">
                     <Input
                       id="plugin-path"
@@ -195,13 +197,12 @@ export function PluginInstallDialog({
                       variant="outline"
                       onClick={() => void handleBrowse()}
                     >
-                      Browse
+                      {t("installDialog.browse")}
                     </Button>
                   </div>
                   {!isDesktop && (
                     <p className="text-xs text-muted-foreground">
-                      Native path browsing is only available in the desktop
-                      shell.
+                      {t("installDialog.nativePathHint")}
                     </p>
                   )}
                 </div>
@@ -218,14 +219,14 @@ export function PluginInstallDialog({
                 variant="outline"
                 onClick={() => handleOpenChange(false)}
               >
-                Cancel
+                {t("installDialog.cancel")}
               </Button>
               <Button
                 type="button"
                 disabled={!isNextValid()}
                 onClick={handleNext}
               >
-                Next
+                {t("installDialog.next")}
               </Button>
             </div>
           </div>
@@ -260,13 +261,13 @@ export function PluginInstallDialog({
                     variant="outline"
                     onClick={() => setStep("confirm")}
                   >
-                    Back
+                    {t("installDialog.back")}
                   </Button>
                   <Button
                     type="button"
                     onClick={() => void handleInstall()}
                   >
-                    Retry
+                    {t("installDialog.retry")}
                   </Button>
                 </div>
               </>
@@ -274,7 +275,7 @@ export function PluginInstallDialog({
               <>
                 <Loader2 className="size-8 animate-spin text-muted-foreground" />
                 <p className="text-sm text-muted-foreground">
-                  Installing plugin...
+                  {t("installDialog.installingPlugin")}
                 </p>
               </>
             )}

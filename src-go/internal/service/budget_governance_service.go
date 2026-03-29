@@ -18,6 +18,7 @@ type BudgetSprintReader interface {
 type BudgetCheckResult struct {
 	Allowed        bool   `json:"allowed"`
 	Warning        bool   `json:"warning"`
+	Scope          string `json:"scope,omitempty"`
 	WarningMessage string `json:"warningMessage,omitempty"`
 	Reason         string `json:"reason,omitempty"`
 }
@@ -63,6 +64,7 @@ func (s *BudgetGovernanceService) CheckSprintBudget(ctx context.Context, sprintI
 	if projectedTotal > sprint.TotalBudgetUsd {
 		return &BudgetCheckResult{
 			Allowed: false,
+			Scope:   "sprint",
 			Reason: fmt.Sprintf(
 				"sprint budget exceeded: spent $%.2f + requested $%.2f = $%.2f > limit $%.2f",
 				sprint.SpentUsd, requestedUsd, projectedTotal, sprint.TotalBudgetUsd,
@@ -87,6 +89,7 @@ func (s *BudgetGovernanceService) CheckSprintBudget(ctx context.Context, sprintI
 		return &BudgetCheckResult{
 			Allowed: true,
 			Warning: true,
+			Scope:   "sprint",
 			WarningMessage: fmt.Sprintf(
 				"sprint budget warning: projected $%.2f / $%.2f (%.0f%% utilized)",
 				projectedTotal, sprint.TotalBudgetUsd, (projectedTotal/sprint.TotalBudgetUsd)*100,
@@ -120,6 +123,7 @@ func (s *BudgetGovernanceService) CheckProjectBudget(ctx context.Context, projec
 	if projectedTotal > s.projectBudgetLimit {
 		return &BudgetCheckResult{
 			Allowed: false,
+			Scope:   "project",
 			Reason: fmt.Sprintf(
 				"project budget exceeded: spent $%.2f + requested $%.2f = $%.2f > limit $%.2f",
 				totalSpent, requestedUsd, projectedTotal, s.projectBudgetLimit,
@@ -144,6 +148,7 @@ func (s *BudgetGovernanceService) CheckProjectBudget(ctx context.Context, projec
 		return &BudgetCheckResult{
 			Allowed: true,
 			Warning: true,
+			Scope:   "project",
 			WarningMessage: fmt.Sprintf(
 				"project budget warning: projected $%.2f / $%.2f (%.0f%% utilized)",
 				projectedTotal, s.projectBudgetLimit, (projectedTotal/s.projectBudgetLimit)*100,
@@ -152,4 +157,31 @@ func (s *BudgetGovernanceService) CheckProjectBudget(ctx context.Context, projec
 	}
 
 	return &BudgetCheckResult{Allowed: true}, nil
+}
+
+func (s *BudgetGovernanceService) CheckBudget(ctx context.Context, projectID uuid.UUID, sprintID *uuid.UUID, requestedUsd float64) (*BudgetCheckResult, error) {
+	var warning *BudgetCheckResult
+	if sprintID != nil {
+		result, err := s.CheckSprintBudget(ctx, *sprintID, requestedUsd)
+		if err != nil {
+			return nil, err
+		}
+		if result != nil && !result.Allowed {
+			return result, nil
+		}
+		if result != nil && result.Warning {
+			warning = result
+		}
+	}
+	result, err := s.CheckProjectBudget(ctx, projectID, requestedUsd)
+	if err != nil {
+		return nil, err
+	}
+	if result != nil && (!result.Allowed || result.Warning) {
+		return result, nil
+	}
+	if warning != nil {
+		return warning, nil
+	}
+	return result, nil
 }

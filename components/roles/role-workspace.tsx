@@ -1,18 +1,25 @@
 "use client";
 
 import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import type {
   RoleManifest,
   RolePreviewResponse,
   RoleSandboxResponse,
+  RoleSkillCatalogEntry,
 } from "@/lib/stores/role-store";
 import {
   buildRoleDraft,
   buildRoleExecutionSummary,
+  groupRoleDraftValidationErrors,
+  resolveRoleSkillReferences,
   renderRoleManifestYaml,
   serializeRoleDraft,
   type RoleDraft,
+  type RoleSkillResolution,
+  type RoleKeyValueDraft,
   type RoleKnowledgeSourceDraft,
+  type RoleMCPServerDraft,
   type RoleSkillDraft,
   type RoleTriggerDraft,
 } from "@/lib/roles/role-management";
@@ -24,6 +31,8 @@ import type { RoleWorkspaceSectionId } from "./role-workspace-sections";
 
 interface RoleWorkspaceProps {
   roles: RoleManifest[];
+  skillCatalog?: RoleSkillCatalogEntry[];
+  skillCatalogLoading?: boolean;
   loading: boolean;
   error: string | null;
   onCreateRole: (data: Partial<RoleManifest>) => Promise<unknown>;
@@ -58,6 +67,8 @@ function getLayout(): RoleWorkspaceLayout {
 
 export function RoleWorkspace({
   roles,
+  skillCatalog = [],
+  skillCatalogLoading = false,
   loading,
   error,
   onCreateRole,
@@ -66,6 +77,7 @@ export function RoleWorkspace({
   onPreviewRole,
   onSandboxRole,
 }: RoleWorkspaceProps) {
+  const t = useTranslations("roles");
   const [mode, setMode] = useState<"create" | "edit">("create");
   const [selectedRoleId, setSelectedRoleId] = useState("");
   const [templateId, setTemplateId] = useState("");
@@ -85,6 +97,10 @@ export function RoleWorkspace({
   const selectedRole = useMemo(
     () => roles.find((role) => role.metadata.id === selectedRoleId),
     [roles, selectedRoleId],
+  );
+  const selectedTemplateRole = useMemo(
+    () => roles.find((role) => role.metadata.id === templateId),
+    [roles, templateId],
   );
 
   useEffect(() => {
@@ -116,7 +132,14 @@ export function RoleWorkspace({
     () => serializeRoleDraft(draft, selectedRole),
     [draft, selectedRole],
   );
-  const draftValidationErrors = serializedDraft.validationErrors ?? [];
+  const draftValidationErrors = useMemo(
+    () => serializedDraft.validationErrors ?? [],
+    [serializedDraft],
+  );
+  const validationBySection = useMemo(
+    () => groupRoleDraftValidationErrors(draftValidationErrors),
+    [draftValidationErrors],
+  );
   const executionSummary = useMemo(
     () => buildRoleExecutionSummary(draft),
     [draft],
@@ -192,6 +215,45 @@ export function RoleWorkspace({
     }));
   };
 
+  const updatePrivateKnowledgeRow = (
+    index: number,
+    field: keyof RoleKnowledgeSourceDraft,
+    value: RoleKnowledgeSourceDraft[keyof RoleKnowledgeSourceDraft],
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      privateKnowledgeRows: current.privateKnowledgeRows.map((source, sourceIndex) =>
+        sourceIndex === index ? { ...source, [field]: value } : source,
+      ),
+    }));
+  };
+
+  const updateMCPServerRow = (
+    index: number,
+    field: keyof RoleMCPServerDraft,
+    value: RoleMCPServerDraft[keyof RoleMCPServerDraft],
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      mcpServerRows: current.mcpServerRows.map((server, serverIndex) =>
+        serverIndex === index ? { ...server, [field]: value } : server,
+      ),
+    }));
+  };
+
+  const updateCustomSettingRow = (
+    index: number,
+    field: keyof RoleKeyValueDraft,
+    value: RoleKeyValueDraft[keyof RoleKeyValueDraft],
+  ) => {
+    setDraft((current) => ({
+      ...current,
+      customSettingRows: current.customSettingRows.map((setting, settingIndex) =>
+        settingIndex === index ? { ...setting, [field]: value } : setting,
+      ),
+    }));
+  };
+
   const updateTriggerRow = (
     index: number,
     field: keyof RoleTriggerDraft,
@@ -226,7 +288,12 @@ export function RoleWorkspace({
   const handlePreview = async () => {
     setPreviewLoading(true);
     try {
-      setPreviewResult((await onPreviewRole({ draft: getRequestPayload() })) ?? null);
+      setPreviewResult(
+        (await onPreviewRole({
+          roleId: mode === "edit" ? selectedRole?.metadata.id : undefined,
+          draft: getRequestPayload(),
+        })) ?? null,
+      );
       if (layout !== "desktop") {
         setCompactPanel("review");
       }
@@ -240,6 +307,7 @@ export function RoleWorkspace({
     try {
       setSandboxResult(
         (await onSandboxRole({
+          roleId: mode === "edit" ? selectedRole?.metadata.id : undefined,
           draft: getRequestPayload(),
           input: sandboxInputRef.current,
         })) ?? null,
@@ -253,10 +321,32 @@ export function RoleWorkspace({
   };
 
   const selectedTemplateName =
-    roles.find((role) => role.metadata.id === templateId)?.metadata.name ?? null;
-  const selectedParentName =
-    roles.find((role) => role.metadata.id === draft.extendsValue)?.metadata.name ??
-    (draft.extendsValue || null);
+    selectedTemplateRole?.metadata.name ?? null;
+  const selectedParentRole = roles.find((role) => role.metadata.id === draft.extendsValue);
+  const selectedParentName = selectedParentRole?.metadata.name ?? (draft.extendsValue || null);
+  const draftSkillResolution = useMemo(
+    () =>
+      resolveRoleSkillReferences({
+        skills: draft.skillRows,
+        catalog: skillCatalog,
+        templateSkills: selectedTemplateRole?.capabilities.skills ?? [],
+        parentSkills: selectedParentRole?.capabilities.skills ?? [],
+      }),
+    [draft.skillRows, selectedParentRole, selectedTemplateRole, skillCatalog],
+  );
+  const effectiveSkillResolution = useMemo<RoleSkillResolution[]>(
+    () =>
+      resolveRoleSkillReferences({
+        skills:
+          sandboxResult?.effectiveManifest?.capabilities.skills ??
+          previewResult?.effectiveManifest?.capabilities.skills ??
+          draft.skillRows,
+        catalog: skillCatalog,
+        templateSkills: selectedTemplateRole?.capabilities.skills ?? [],
+        parentSkills: selectedParentRole?.capabilities.skills ?? [],
+      }),
+    [draft.skillRows, previewResult, sandboxResult, selectedParentRole, selectedTemplateRole, skillCatalog],
+  );
 
   const editor = (
     <RoleWorkspaceEditor
@@ -264,9 +354,12 @@ export function RoleWorkspace({
       draft={draft}
       templateId={templateId}
       selectedRole={selectedRole}
+      skillCatalog={skillCatalog}
+      skillCatalogLoading={skillCatalogLoading}
+      draftSkillResolution={draftSkillResolution}
       selectedTemplateName={selectedTemplateName}
       selectedParentName={selectedParentName}
-      validationErrors={draftValidationErrors}
+      validationBySection={validationBySection}
       saving={saving}
       activeSection={activeSection}
       onSelectSection={setActiveSection}
@@ -274,7 +367,10 @@ export function RoleWorkspace({
       onSwitchToCreate={handleNewRole}
       updateDraft={updateDraft}
       updateSkillRow={updateSkillRow}
+      updateMCPServerRow={updateMCPServerRow}
+      updateCustomSettingRow={updateCustomSettingRow}
       updateKnowledgeRow={updateKnowledgeRow}
+      updatePrivateKnowledgeRow={updatePrivateKnowledgeRow}
       updateTriggerRow={updateTriggerRow}
       onAddSkillRow={() =>
         setDraft((current) => ({
@@ -282,11 +378,32 @@ export function RoleWorkspace({
           skillRows: [...current.skillRows, { path: "", autoLoad: false }],
         }))
       }
+      onAddMCPServerRow={() =>
+        setDraft((current) => ({
+          ...current,
+          mcpServerRows: [...current.mcpServerRows, { name: "", url: "" }],
+        }))
+      }
+      onAddCustomSettingRow={() =>
+        setDraft((current) => ({
+          ...current,
+          customSettingRows: [...current.customSettingRows, { key: "", value: "" }],
+        }))
+      }
       onAddKnowledgeRow={() =>
         setDraft((current) => ({
           ...current,
           sharedKnowledgeRows: [
             ...current.sharedKnowledgeRows,
+            { id: "", type: "", access: "", description: "", sourcesInput: "" },
+          ],
+        }))
+      }
+      onAddPrivateKnowledgeRow={() =>
+        setDraft((current) => ({
+          ...current,
+          privateKnowledgeRows: [
+            ...current.privateKnowledgeRows,
             { id: "", type: "", access: "", description: "", sourcesInput: "" },
           ],
         }))
@@ -308,6 +425,7 @@ export function RoleWorkspace({
   const catalog = (
     <RoleWorkspaceCatalog
       roles={roles}
+      skillCatalog={skillCatalog}
       loading={loading}
       error={error}
       onCreateNew={handleNewRole}
@@ -321,6 +439,7 @@ export function RoleWorkspace({
       activeSection={activeSection}
       executionSummary={executionSummary}
       yamlPreview={yamlPreview}
+      effectiveSkillResolution={effectiveSkillResolution}
       previewLoading={previewLoading}
       sandboxLoading={sandboxLoading}
       sandboxInput={sandboxInput}
@@ -355,7 +474,7 @@ export function RoleWorkspace({
             setCompactPanel((current) => (current === "catalog" ? "none" : "catalog"))
           }
         >
-          Show Role Library
+          {t("showRoleLibrary")}
         </Button>
         <Button
           type="button"
@@ -364,7 +483,7 @@ export function RoleWorkspace({
             setCompactPanel((current) => (current === "review" ? "none" : "review"))
           }
         >
-          Show Review Panel
+          {t("showReviewPanel")}
         </Button>
       </div>
 

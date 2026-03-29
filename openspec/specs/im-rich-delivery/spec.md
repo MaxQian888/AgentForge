@@ -2,7 +2,6 @@
 
 ## Purpose
 Define the canonical typed outbound IM delivery contract so text, structured, and provider-native payloads survive compatibility HTTP, control-plane queueing, replay, and explicit fallback reporting consistently.
-
 ## Requirements
 ### Requirement: Outbound IM deliveries SHALL use a canonical typed envelope
 The system SHALL represent outbound IM delivery through a canonical typed envelope instead of a text-only payload. That envelope MUST be able to carry plain text, structured content, provider-native content, reply-target information, delivery kind, and operator-visible fallback metadata so the same outbound message semantics survive direct notify, compatibility HTTP, queueing, and replay.
@@ -43,25 +42,44 @@ The canonical typed outbound IM envelope SHALL be resolved through the active pr
 - **THEN** the rendering step resolves the delivery into a WeCom-supported text, news-style, or template-card-compatible representation according to the active WeCom provider profile
 - **AND** transport execution does not require shared layers to special-case WeCom outside the provider contract
 
+#### Scenario: QQ typed delivery becomes provider-supported QQ content
+- **WHEN** a typed delivery containing structured or richer intent targets QQ
+- **THEN** the rendering step resolves the delivery into a QQ-supported text, link, or provider-supported structured representation according to the active QQ provider profile
+- **AND** transport execution does not require shared layers to special-case QQ outside the provider contract
+
+#### Scenario: QQ Bot typed delivery becomes provider-supported QQ Bot content
+- **WHEN** a typed delivery containing structured or richer intent targets QQ Bot
+- **THEN** the rendering step resolves the delivery into a QQ Bot-supported text, link, or provider-supported structured representation according to the active QQ Bot provider profile
+- **AND** transport execution does not require shared layers to special-case QQ Bot outside the provider contract
+
 #### Scenario: Feishu typed delivery becomes builder-owned native content
 - **WHEN** a typed delivery containing richer card intent targets Feishu
 - **THEN** the rendering step resolves the delivery through Feishu's provider-owned builders into JSON-card, template-card, or `lark_md`-backed output as appropriate
 - **AND** transport execution does not require shared layers to assemble raw Feishu payload fragments directly
 
 ### Requirement: Delivery fallback metadata SHALL reflect rendering-profile decisions
-If the active provider profile changes the final delivery method by downgrading formatted text, splitting oversized text, avoiding an unsafe edit, or abandoning a native update path, the delivery result SHALL preserve provider-aware fallback metadata that explains the rendering decision.
 
-#### Scenario: Unsafe Telegram markdown falls back to plain text
-- **WHEN** a Telegram-targeted delivery requests formatted text but the provider renderer cannot produce safe Markdown-aware output
-- **THEN** the Bridge falls back to Telegram plain text before sending the message
-- **AND** the delivery result records that the formatted path was skipped because the renderer selected a safe fallback
+When the rendering profile changes the delivery method (e.g., card → text), the delivery record SHALL preserve provider-aware fallback metadata. The metadata SHALL include: original intended format, actual delivered format, reason for fallback, and provider name.
 
-#### Scenario: Unsupported WeCom richer update falls back to text with explicit reason
-- **WHEN** a WeCom-targeted delivery requests a richer card update or mutable path that the active WeCom reply target cannot honor
-- **THEN** the Bridge falls back to a WeCom-supported text or follow-up delivery before sending the message
-- **AND** the fallback metadata explains that the richer WeCom update plan was not usable
+The delivery record persisted by the backend SHALL include a `downgrade_reason` field populated from the bridge ack. The `ListDeliveries` API response SHALL expose this field. The bridge control-plane ack message SHALL accept an optional `downgrade_reason` string.
 
-#### Scenario: Incompatible mutable update becomes provider-aware follow-up
-- **WHEN** a reply target requests an in-place update that the active provider profile considers invalid for the current content or target
-- **THEN** the Bridge chooses a supported provider-aware follow-up delivery path instead of forcing the invalid update
-- **AND** the fallback metadata explains that the original mutable update plan was not usable
+#### Scenario: Unsafe markdown falls back to plain text with reason
+- **WHEN** rendering profile determines markdown is unsafe for the target provider
+- **THEN** delivery executes as plain text and fallback metadata records `"markdown_unsafe → plain_text"`
+
+#### Scenario: Unsupported card delivery falls back with explicit reason
+- **WHEN** a card-typed delivery targets a provider with `card: false`
+- **THEN** delivery executes as structured text and fallback metadata records `"card_unsupported → structured_text"`
+
+#### Scenario: Bridge ack carries downgrade reason to backend
+- **WHEN** bridge sends delivery ack with `downgradeReason: "actioncard_send_failed"`
+- **THEN** backend persists `downgrade_reason` on the delivery record and returns it in subsequent `ListDeliveries` responses
+
+### Requirement: Backend SHALL expose event types endpoint
+
+`GET /im/event-types` SHALL return the canonical list of subscribable event types. This endpoint SHALL be used by the frontend to dynamically render event subscription checkboxes instead of hardcoding.
+
+#### Scenario: Fetching event types
+- **WHEN** frontend calls `GET /api/v1/im/event-types`
+- **THEN** the response includes `["task.created", "task.completed", "review.completed", "agent.started", "agent.completed", "budget.warning", "sprint.started", "sprint.completed", "review.requested", "workflow.failed"]`
+

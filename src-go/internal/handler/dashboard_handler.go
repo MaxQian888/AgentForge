@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
@@ -38,13 +39,13 @@ func (h *DashboardHandler) List(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	configs, err := h.crud.ListDashboards(c.Request().Context(), projectID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list dashboards"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListDashboards)
 	}
 	dtos := make([]model.DashboardConfigDTO, 0, len(configs))
 	for _, config := range configs {
 		widgets, widgetsErr := h.crud.ListWidgets(c.Request().Context(), config.ID)
 		if widgetsErr != nil {
-			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list dashboard widgets"})
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListWidgets)
 		}
 		widgetDTOs := make([]model.DashboardWidgetDTO, 0, len(widgets))
 		for _, widget := range widgets {
@@ -59,11 +60,11 @@ func (h *DashboardHandler) Create(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	userID, err := claimsUserID(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "authentication required"})
+		return localizedError(c, http.StatusUnauthorized, i18n.MsgAuthRequired)
 	}
 	req := new(model.CreateDashboardRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -75,7 +76,7 @@ func (h *DashboardHandler) Create(c echo.Context) error {
 		CreatedBy: *userID,
 	}
 	if err := h.crud.CreateDashboard(c.Request().Context(), config); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create dashboard"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateDashboard)
 	}
 	return c.JSON(http.StatusCreated, config.ToDTO(nil))
 }
@@ -84,15 +85,15 @@ func (h *DashboardHandler) Update(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	dashboardID, err := uuid.Parse(c.Param("did"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid dashboard ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidDashboardID)
 	}
 	config, err := h.crud.GetDashboard(c.Request().Context(), dashboardID)
 	if err != nil || config == nil || config.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "dashboard not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgDashboardNotFound)
 	}
 	req := new(model.UpdateDashboardRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if req.Name != nil {
 		config.Name = *req.Name
@@ -101,7 +102,7 @@ func (h *DashboardHandler) Update(c echo.Context) error {
 		config.Layout = string(req.Layout)
 	}
 	if err := h.crud.UpdateDashboard(c.Request().Context(), config); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update dashboard"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateDashboard)
 	}
 	return c.JSON(http.StatusOK, config.ToDTO(nil))
 }
@@ -110,14 +111,14 @@ func (h *DashboardHandler) Delete(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	dashboardID, err := uuid.Parse(c.Param("did"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid dashboard ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidDashboardID)
 	}
 	config, err := h.crud.GetDashboard(c.Request().Context(), dashboardID)
 	if err != nil || config == nil || config.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "dashboard not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgDashboardNotFound)
 	}
 	if err := h.crud.DeleteDashboard(c.Request().Context(), dashboardID); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete dashboard"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteDashboard)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "dashboard deleted"})
 }
@@ -125,11 +126,11 @@ func (h *DashboardHandler) Delete(c echo.Context) error {
 func (h *DashboardHandler) SaveWidget(c echo.Context) error {
 	dashboardID, err := uuid.Parse(c.Param("did"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid dashboard ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidDashboardID)
 	}
 	req := new(model.SaveDashboardWidgetRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -146,7 +147,7 @@ func (h *DashboardHandler) SaveWidget(c echo.Context) error {
 		}
 	}
 	if err := h.crud.SaveWidget(c.Request().Context(), widget); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to save widget"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToSaveWidget)
 	}
 	return c.JSON(http.StatusOK, widget.ToDTO())
 }
@@ -154,11 +155,11 @@ func (h *DashboardHandler) SaveWidget(c echo.Context) error {
 func (h *DashboardHandler) ListWidgets(c echo.Context) error {
 	dashboardID, err := uuid.Parse(c.Param("did"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid dashboard ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidDashboardID)
 	}
 	widgets, err := h.crud.ListWidgets(c.Request().Context(), dashboardID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list widgets"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListWidgets)
 	}
 	dtos := make([]model.DashboardWidgetDTO, 0, len(widgets))
 	for _, widget := range widgets {
@@ -170,10 +171,10 @@ func (h *DashboardHandler) ListWidgets(c echo.Context) error {
 func (h *DashboardHandler) DeleteWidget(c echo.Context) error {
 	widgetID, err := uuid.Parse(c.Param("wid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid widget ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidWidgetID)
 	}
 	if err := h.crud.DeleteWidget(c.Request().Context(), widgetID); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete widget"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteWidget)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "widget deleted"})
 }

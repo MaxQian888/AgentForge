@@ -57,6 +57,26 @@ func (m *mockUserRepo) GetByID(_ context.Context, id uuid.UUID) (*model.User, er
 	return nil, repository.ErrNotFound
 }
 
+func (m *mockUserRepo) UpdateName(_ context.Context, id uuid.UUID, name string) error {
+	for _, u := range m.users {
+		if u.ID == id {
+			u.Name = name
+			return nil
+		}
+	}
+	return repository.ErrNotFound
+}
+
+func (m *mockUserRepo) UpdatePassword(_ context.Context, id uuid.UUID, hashedPassword string) error {
+	for _, u := range m.users {
+		if u.ID == id {
+			u.Password = hashedPassword
+			return nil
+		}
+	}
+	return repository.ErrNotFound
+}
+
 type mockCacheRepo struct {
 	refreshTokens map[string]string
 	blacklist     map[string]bool

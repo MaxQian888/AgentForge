@@ -221,7 +221,7 @@ type costTeamRepositoryStub struct {
 	updatedTeam map[uuid.UUID]float64
 }
 
-func (s *costTeamRepositoryStub) ListByProject(_ context.Context, projectID uuid.UUID) ([]*model.AgentTeam, error) {
+func (s *costTeamRepositoryStub) ListByProject(_ context.Context, projectID uuid.UUID, _ string) ([]*model.AgentTeam, error) {
 	return s.teams[projectID], nil
 }
 

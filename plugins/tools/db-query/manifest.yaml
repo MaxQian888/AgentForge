@@ -1,0 +1,27 @@
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: db-query
+  name: DB Query
+  version: 0.1.0
+  description: Built-in MCP wrapper for local SQLite query workflows and data inspection.
+  tags:
+    - builtin
+    - tool
+    - database
+spec:
+  runtime: mcp
+  transport: stdio
+  command: uvx
+  args:
+    - mcp-server-sqlite
+    - --db
+    - ./data/agentforge.db
+permissions:
+  filesystem:
+    required: true
+    allowed_paths:
+      - ./data
+source:
+  type: builtin
+  path: ./plugins/tools/db-query/manifest.yaml

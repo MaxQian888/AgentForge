@@ -1,8 +1,11 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import type { DocsVersion } from "@/lib/stores/docs-store";
 
 export function VersionViewer({ version }: { version: DocsVersion | null }) {
+  const t = useTranslations("docs");
+
   return (
     <div className="min-h-[220px] rounded-xl border border-border/60 bg-card/70 p-4">
       {version ? (
@@ -18,7 +21,7 @@ export function VersionViewer({ version }: { version: DocsVersion | null }) {
           </pre>
         </div>
       ) : (
-        <p className="text-sm text-muted-foreground">Select a version to preview it.</p>
+        <p className="text-sm text-muted-foreground">{t("versionViewer.selectVersion")}</p>
       )}
     </div>
   );

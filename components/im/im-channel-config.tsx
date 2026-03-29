@@ -1,9 +1,17 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  EventBadgeList,
+} from "@/components/shared/event-badge-list";
+import {
+  PLATFORM_DEFINITIONS,
+  PlatformBadge,
+} from "@/components/shared/platform-badge";
 import {
   Card,
   CardContent,
@@ -27,45 +35,51 @@ import {
   type IMPlatform,
 } from "@/lib/stores/im-store";
 
-const PLATFORMS: { value: IMPlatform; label: string }[] = [
-  { value: "feishu", label: "Feishu" },
-  { value: "dingtalk", label: "DingTalk" },
-  { value: "slack", label: "Slack" },
-  { value: "telegram", label: "Telegram" },
-  { value: "discord", label: "Discord" },
-];
-
-const EVENT_OPTIONS = [
-  "task.created",
-  "task.completed",
-  "review.completed",
-  "agent.started",
-  "agent.completed",
-  "budget.warning",
-];
-
 const EMPTY_FORM: Omit<IMChannel, "id"> & { id?: string } = {
   platform: "feishu",
   name: "",
   channelId: "",
   webhookUrl: "",
+  platformConfig: {},
   events: [],
   active: true,
 };
 
 export function IMChannelConfig() {
+  const t = useTranslations("im");
   const channels = useIMStore((s) => s.channels);
   const loading = useIMStore((s) => s.loading);
+  const eventTypes = useIMStore((s) => s.eventTypes);
   const saveChannel = useIMStore((s) => s.saveChannel);
   const deleteChannel = useIMStore((s) => s.deleteChannel);
+  const fetchEventTypes = useIMStore((s) => s.fetchEventTypes);
 
   const [form, setForm] = useState<Omit<IMChannel, "id"> & { id?: string }>(
     EMPTY_FORM
   );
   const [editing, setEditing] = useState(false);
 
+  useEffect(() => {
+    void fetchEventTypes();
+  }, [fetchEventTypes]);
+
+  const platformOptions = useMemo(
+    () =>
+      Object.entries(PLATFORM_DEFINITIONS).map(([value, definition]) => ({
+        value: value as IMPlatform,
+        label: definition.label,
+      })),
+    []
+  );
+
+  const configFields = PLATFORM_DEFINITIONS[form.platform]?.configFields ?? [];
+  const availableEventTypes = eventTypes.length > 0 ? eventTypes : [];
+
   const handleEdit = useCallback((channel: IMChannel) => {
-    setForm(channel);
+    setForm({
+      ...channel,
+      platformConfig: channel.platformConfig ?? {},
+    });
     setEditing(true);
   }, []);
 
@@ -108,10 +122,10 @@ export function IMChannelConfig() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h2 className="text-lg font-semibold">IM Channels</h2>
+        <h2 className="text-lg font-semibold">{t("channels.title")}</h2>
         <Button size="sm" onClick={handleNew}>
           <Plus className="mr-1 size-3.5" />
-          New Channel
+          {t("channels.newChannel")}
         </Button>
       </div>
 
@@ -119,30 +133,32 @@ export function IMChannelConfig() {
         <Card>
           <CardHeader>
             <CardTitle className="text-base">
-              {form.id ? "Edit Channel" : "New Channel"}
+              {form.id ? t("channels.editChannel") : t("channels.newChannelTitle")}
             </CardTitle>
             <CardDescription>
-              Configure the IM channel connection and event subscriptions.
+              {t("channels.channelDesc")}
             </CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="im-platform">Platform</Label>
+                <Label htmlFor="im-platform">{t("channels.platform")}</Label>
                 <Select
                   value={form.platform}
                   onValueChange={(value: string) =>
                     setForm((prev) => ({
                       ...prev,
                       platform: value as IMPlatform,
+                      platformConfig:
+                        prev.platform === value ? prev.platformConfig : {},
                     }))
                   }
                 >
                   <SelectTrigger id="im-platform" className="w-full">
-                    <SelectValue placeholder="Select platform" />
+                    <SelectValue placeholder={t("channels.platformPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {PLATFORMS.map((p) => (
+                    {platformOptions.map((p) => (
                       <SelectItem key={p.value} value={p.value}>
                         {p.label}
                       </SelectItem>
@@ -152,31 +168,31 @@ export function IMChannelConfig() {
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="im-name">Channel Name</Label>
+                <Label htmlFor="im-name">{t("channels.channelName")}</Label>
                 <Input
                   id="im-name"
                   value={form.name}
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, name: e.target.value }))
                   }
-                  placeholder="e.g. #dev-notifications"
+                  placeholder={t("channels.channelNamePlaceholder")}
                 />
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="im-channel-id">Channel ID</Label>
+                <Label htmlFor="im-channel-id">{t("channels.channelId")}</Label>
                 <Input
                   id="im-channel-id"
                   value={form.channelId}
                   onChange={(e) =>
                     setForm((prev) => ({ ...prev, channelId: e.target.value }))
                   }
-                  placeholder="Platform-specific channel ID"
+                  placeholder={t("channels.channelIdPlaceholder")}
                 />
               </div>
 
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="im-webhook">Webhook URL</Label>
+                <Label htmlFor="im-webhook">{t("channels.webhookUrl")}</Label>
                 <Input
                   id="im-webhook"
                   value={form.webhookUrl}
@@ -186,15 +202,40 @@ export function IMChannelConfig() {
                       webhookUrl: e.target.value,
                     }))
                   }
-                  placeholder="https://..."
+                  placeholder={t("channels.webhookUrlPlaceholder")}
                 />
               </div>
             </div>
 
+            {configFields.length > 0 ? (
+              <div className="grid gap-4 md:grid-cols-2">
+                {configFields.map((field) => (
+                  <div key={field.key} className="flex flex-col gap-1.5">
+                    <Label htmlFor={`im-platform-${field.key}`}>{field.label}</Label>
+                    <Input
+                      id={`im-platform-${field.key}`}
+                      type={field.type ?? "text"}
+                      value={form.platformConfig[field.key] ?? ""}
+                      onChange={(e) =>
+                        setForm((prev) => ({
+                          ...prev,
+                          platformConfig: {
+                            ...prev.platformConfig,
+                            [field.key]: e.target.value,
+                          },
+                        }))
+                      }
+                      placeholder={field.placeholder}
+                    />
+                  </div>
+                ))}
+              </div>
+            ) : null}
+
             <div className="flex flex-col gap-2">
-              <Label>Event Subscriptions</Label>
+              <Label>{t("channels.eventSubscriptions")}</Label>
               <div className="flex flex-wrap gap-3">
-                {EVENT_OPTIONS.map((event) => (
+                {availableEventTypes.map((event) => (
                   <label
                     key={event}
                     className="flex items-center gap-2 text-sm"
@@ -207,12 +248,12 @@ export function IMChannelConfig() {
                     />
                     {event}
                   </label>
-                ))}
+                  ))}
               </div>
             </div>
 
             <div className="flex items-center gap-2">
-              <Label htmlFor="im-active">Active</Label>
+              <Label htmlFor="im-active">{t("channels.active")}</Label>
               <button
                 id="im-active"
                 type="button"
@@ -234,17 +275,17 @@ export function IMChannelConfig() {
                 />
               </button>
               <span className="text-sm text-muted-foreground">
-                {form.active ? "Enabled" : "Disabled"}
+                {form.active ? t("channels.enabled") : t("channels.disabled")}
               </span>
             </div>
 
             <div className="flex items-center gap-2">
               <Button size="sm" onClick={() => void handleSave()} disabled={loading}>
                 <Save className="mr-1 size-3.5" />
-                Save
+                {t("channels.save")}
               </Button>
               <Button variant="outline" size="sm" onClick={handleCancel}>
-                Cancel
+                {t("channels.cancel")}
               </Button>
             </div>
           </CardContent>
@@ -254,8 +295,8 @@ export function IMChannelConfig() {
       {channels.length === 0 ? (
         <div className="flex h-[120px] items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
           {loading
-            ? "Loading channels..."
-            : "No IM channels configured. Click New Channel to get started."}
+            ? t("channels.loadingChannels")
+            : t("channels.noChannels")}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
@@ -272,9 +313,7 @@ export function IMChannelConfig() {
                 <div className="flex items-center justify-between gap-2">
                   <CardTitle className="text-base">{channel.name}</CardTitle>
                   <div className="flex items-center gap-2">
-                    <Badge variant="outline" className="text-xs capitalize">
-                      {channel.platform}
-                    </Badge>
+                    <PlatformBadge platform={channel.platform} />
                     <Badge
                       variant="secondary"
                       className={cn(
@@ -293,13 +332,7 @@ export function IMChannelConfig() {
                 </CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
-                <div className="flex flex-wrap gap-1">
-                  {channel.events.map((event) => (
-                    <Badge key={event} variant="secondary" className="text-xs">
-                      {event}
-                    </Badge>
-                  ))}
-                </div>
+                <EventBadgeList events={channel.events} />
                 <div className="flex items-center gap-2">
                   <Button
                     variant="outline"
@@ -309,7 +342,7 @@ export function IMChannelConfig() {
                       handleEdit(channel);
                     }}
                   >
-                    Edit
+                    {t("channels.edit")}
                   </Button>
                   <Button
                     variant="outline"
@@ -321,7 +354,7 @@ export function IMChannelConfig() {
                     disabled={loading}
                   >
                     <Trash2 className="mr-1 size-3.5" />
-                    Delete
+                    {t("channels.delete")}
                   </Button>
                 </div>
               </CardContent>

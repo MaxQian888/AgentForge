@@ -16,6 +16,19 @@ Examples in this repository include:
 - `roles/frontend-developer/role.yaml`
 - `roles/code-reviewer/role.yaml`
 
+Role skills are now expected to resolve first against repo-local skill fixtures under:
+
+```text
+skills/<skill-id>/SKILL.md
+```
+
+Examples in this repository now include:
+
+- `skills/react/SKILL.md`
+- `skills/typescript/SKILL.md`
+- `skills/css-animation/SKILL.md`
+- `skills/testing/SKILL.md`
+
 ## Legacy Compatibility
 
 The loader still reads legacy flat files such as `roles/frontend-developer.yaml` during migration.
@@ -28,13 +41,28 @@ The current product flow supports more than the original minimal role manifest. 
 - `metadata`: `id`, `name`, `version`, `description`, `author`, `tags`, `icon`
 - `identity`: `role`, `goal`, `backstory`, `persona`, `goals`, `constraints`, `personality`, `language`, `response_style`
 - `capabilities`: `packages`, `allowed_tools`, structured `tools`, `skills`, `max_turns`, `max_budget_usd`
+- `capabilities` advanced authoring: `tools.mcp_servers` and `custom_settings`
 - `knowledge`: legacy `repositories/documents/patterns` plus `shared`, `private`, and `memory`
 - `security`: `profile`, `permission_mode`, path rules, `output_filters`, and structured permissions or resource-limit blocks
 - `collaboration`: delegation rules and communication preferences
 - `triggers`: bounded event/action/condition rows
 - `extends` and `overrides`
 
-The authoring UI does not have to expose every nested field with a dedicated control at all times, but the Go role store and APIs now preserve these sections instead of dropping them during round-trip save or preview.
+The dashboard authoring workspace now has dedicated controls for:
+
+- `capabilities.custom_settings` as structured key-value rows
+- `capabilities.tools.mcp_servers` as named server rows
+- detailed `knowledge.shared` and `knowledge.private` rows, including `description` and `sources`
+- `knowledge.memory` toggles and numeric limits
+- `overrides` through a controlled JSON editor
+
+The dashboard role workspace also supports a repo-local skill catalog:
+
+- it discovers canonical repo-owned skills from `skills/**/SKILL.md`
+- it offers catalog-backed role skill selection while preserving manual path entry
+- it marks unresolved manual skill paths in review context instead of silently treating them as resolved catalog entries
+
+The UI still does not attempt to turn every future role field into a bespoke visual builder. When a field is not yet fully modeled by dedicated controls, the authoring flow must preserve it rather than silently dropping it during create, update, preview, or sandbox round-trips.
 
 ## Normalized Execution Profile
 
@@ -50,13 +78,19 @@ The normalized execution profile currently contains:
 - `allowed_tools`
 - `tools`
 - `knowledge_context`
+- `loaded_skills`
+- `available_skills`
+- `skill_diagnostics`
 - `output_filters`
 - `max_budget_usd`
 - `max_turns`
 - `permission_mode`
 
 Bridge code does not read YAML files directly and should only consume this normalized profile.
+`loaded_skills` contains the fully resolved repo-local auto-load skill bundles that Go has already prepared for prompt injection, while `available_skills` keeps non-auto-load skills visible as runtime inventory without preloading their full instructions.
+`skill_diagnostics` explains blocking versus warning-only skill projection issues. A missing or invalid auto-load skill blocks execution-facing projection; an unresolved non-auto-load skill remains warning-level inventory context unless another runtime contract requires it.
 Fields such as `collaboration`, `memory`, and `triggers` still remain in the normalized Go role model, but they are not forwarded into the Bridge execution contract until there is a runtime consumer for them.
+The same stored-only rule currently applies to `overrides`: it stays part of the canonical role definition and preview context, but it is not emitted into today's Bridge execution profile.
 
 ## Preview And Sandbox
 
@@ -68,8 +102,15 @@ The role authoring workflow now has two non-persistent backend surfaces:
 - `POST /api/v1/roles/sandbox`
   - accepts either `roleId` or an unsaved `draft`, plus a bounded `input`
   - returns the same preview payload, runtime readiness diagnostics, selected runtime tuple, and an optional lightweight probe result
+- `GET /api/v1/roles/skills`
+  - returns repo-local skill catalog entries for role authoring, including canonical path and basic display metadata when available
 
 These flows do **not** create `agent_runs`, worktrees, or update `roles/<role-id>/role.yaml`. They exist to help operators validate advanced role definitions before saving or launch.
+When the authoring flow edits an existing role, it should include the current `roleId` alongside the draft so preview and sandbox can preserve advanced stored sections even if only part of the role was edited in the current UI step.
+Unresolved manual skill paths remain a valid authoring state as long as the role manifest itself is valid, but runtime behavior now depends on load policy:
+
+- unresolved `auto_load` skills become blocking readiness diagnostics for preview, sandbox, and spawn
+- unresolved non-auto-load skills remain warning-level inventory gaps
 
 ## Agent Spawn Binding
 
@@ -92,6 +133,9 @@ The Bridge-bound `role_config` is now expected to carry the runtime-facing advan
 
 - `tools`: Bridge-consumable plugin or MCP tool identifiers
 - `knowledge_context`: extra injected role knowledge context for prompt assembly
+- `loaded_skills`: resolved auto-load skill bundles with prompt-ready instructions
+- `available_skills`: non-auto-load skill inventory kept available for diagnostics or future runtime controls
+- `skill_diagnostics`: normalized skill projection diagnostics computed by Go
 - `output_filters`: output filter identifiers such as `no_credentials` or `no_pii`
 
 This remains the production execution seam for real agent runs. Preview and sandbox authoring flows are separate non-persistent helpers and do not replace the normal spawn contract.
@@ -137,6 +181,15 @@ Runtime readiness is exposed through the coding-agent catalog returned by the ba
 - incompatible runtime/provider pairs
 
 This aligns with the PRD and plugin-system direction that runtime capability discovery belongs to the execution infrastructure, not to hard-coded frontend option lists.
+
+## Advanced Authoring Boundaries
+
+Current authoring surfaces should make the following distinction explicit:
+
+- runtime-facing fields such as `allowed_tools`, Bridge tool identifiers, `knowledge_context`, `output_filters`, budget, turns, and permission mode influence the execution profile directly
+- stored-only advanced fields such as `knowledge.memory`, `collaboration`, `triggers`, and `overrides` remain in the canonical YAML manifest and preview context only
+
+This boundary prevents operators from assuming that every advanced role field is already consumed by the runtime while still keeping those fields stable and editable in the source of truth.
 
 ## Inheritance
 

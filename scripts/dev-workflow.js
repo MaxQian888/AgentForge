@@ -16,12 +16,40 @@ function getWorkflowPaths({
   repoRoot = getRepoRoot(),
   stateFileName = "dev-all-state.json",
 } = {}) {
+  const runtimeBaseDir = resolveWritableRuntimeBaseDir(repoRoot);
   return {
     repoRoot,
-    codexDir: path.join(repoRoot, ".codex"),
-    runtimeLogsDir: path.join(repoRoot, ".codex", "runtime-logs"),
-    statePath: path.join(repoRoot, ".codex", stateFileName),
+    codexDir: runtimeBaseDir,
+    runtimeLogsDir: path.join(runtimeBaseDir, "runtime-logs"),
+    statePath: path.join(runtimeBaseDir, stateFileName),
   };
+}
+
+function resolveWritableRuntimeBaseDir(repoRoot) {
+  const candidates = [
+    path.join(repoRoot, ".codex"),
+    path.join(repoRoot, "tmp-runtime"),
+  ];
+
+  for (const candidate of candidates) {
+    if (canWriteDirectory(candidate)) {
+      return candidate;
+    }
+  }
+
+  return candidates[candidates.length - 1];
+}
+
+function canWriteDirectory(dirPath) {
+  try {
+    ensureDirectory(dirPath);
+    const probePath = path.join(dirPath, `.write-probe-${process.pid}-${Date.now()}.tmp`);
+    fs.writeFileSync(probePath, "ok", "utf8");
+    fs.unlinkSync(probePath);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 function ensureDirectory(dirPath) {

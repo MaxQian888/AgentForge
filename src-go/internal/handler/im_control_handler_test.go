@@ -16,8 +16,11 @@ type imControlPlaneStub struct {
 	channels     []*model.IMChannel
 	status       *model.IMBridgeStatus
 	deliveries   []*model.IMDelivery
+	eventTypes   []string
 	savedChannel *model.IMChannel
 	deletedID    string
+	retriedID    string
+	ackInput     *model.IMDeliveryAck
 }
 
 func (s *imControlPlaneStub) RegisterBridge(context.Context, *model.IMBridgeRegisterRequest) (*model.IMBridgeInstance, error) {
@@ -32,7 +35,13 @@ func (s *imControlPlaneStub) UnregisterBridge(context.Context, string) error { r
 func (s *imControlPlaneStub) BindAction(context.Context, *model.IMActionBinding) error {
 	return nil
 }
-func (s *imControlPlaneStub) AckDelivery(context.Context, string, int64, string) error {
+func (s *imControlPlaneStub) AckDelivery(_ context.Context, bridgeID string, cursor int64, deliveryID string, downgradeReason string) error {
+	s.ackInput = &model.IMDeliveryAck{
+		BridgeID:        bridgeID,
+		Cursor:          cursor,
+		DeliveryID:      deliveryID,
+		DowngradeReason: downgradeReason,
+	}
 	return nil
 }
 func (s *imControlPlaneStub) ListChannels(context.Context) ([]*model.IMChannel, error) {
@@ -54,6 +63,13 @@ func (s *imControlPlaneStub) GetBridgeStatus(context.Context) (*model.IMBridgeSt
 }
 func (s *imControlPlaneStub) ListDeliveryHistory(context.Context) ([]*model.IMDelivery, error) {
 	return s.deliveries, nil
+}
+func (s *imControlPlaneStub) ListEventTypes(context.Context) ([]string, error) {
+	return s.eventTypes, nil
+}
+func (s *imControlPlaneStub) RetryDelivery(_ context.Context, deliveryID string) (*model.IMDelivery, error) {
+	s.retriedID = deliveryID
+	return &model.IMDelivery{ID: deliveryID, Status: model.IMDeliveryStatusPending}, nil
 }
 
 func newIMControlTestContext(method, target, body string) (*echo.Echo, echo.Context, *httptest.ResponseRecorder) {
@@ -92,6 +108,7 @@ func TestIMControlHandlerOperatorEndpoints(t *testing.T) {
 				CreatedAt: "2026-03-26T08:00:00Z",
 			},
 		},
+		eventTypes: []string{"task.created", "workflow.failed"},
 	}
 	h := NewIMControlHandler(stub)
 
@@ -143,6 +160,27 @@ func TestIMControlHandlerOperatorEndpoints(t *testing.T) {
 		t.Fatalf("ListDeliveries() status = %d", deliveriesRec.Code)
 	}
 
+	_, eventTypesCtx, eventTypesRec := newIMControlTestContext(http.MethodGet, "/api/v1/im/event-types", "")
+	if err := h.ListEventTypes(eventTypesCtx); err != nil {
+		t.Fatalf("ListEventTypes() error = %v", err)
+	}
+	if eventTypesRec.Code != http.StatusOK {
+		t.Fatalf("ListEventTypes() status = %d", eventTypesRec.Code)
+	}
+
+	_, retryCtx, retryRec := newIMControlTestContext(http.MethodPost, "/api/v1/im/deliveries/delivery-1/retry", "")
+	retryCtx.SetParamNames("id")
+	retryCtx.SetParamValues("delivery-1")
+	if err := h.RetryDelivery(retryCtx); err != nil {
+		t.Fatalf("RetryDelivery() error = %v", err)
+	}
+	if retryRec.Code != http.StatusOK {
+		t.Fatalf("RetryDelivery() status = %d", retryRec.Code)
+	}
+	if stub.retriedID != "delivery-1" {
+		t.Fatalf("retried id = %q, want delivery-1", stub.retriedID)
+	}
+
 	_, deleteCtx, deleteRec := newIMControlTestContext(http.MethodDelete, "/api/v1/im/channels/channel-1", "")
 	deleteCtx.SetParamNames("id")
 	deleteCtx.SetParamValues("channel-1")
@@ -154,6 +192,22 @@ func TestIMControlHandlerOperatorEndpoints(t *testing.T) {
 	}
 	if stub.deletedID != "channel-1" {
 		t.Fatalf("deleted id = %q, want channel-1", stub.deletedID)
+	}
+}
+
+func TestIMControlHandlerAckDeliveryCapturesDowngradeReason(t *testing.T) {
+	stub := &imControlPlaneStub{}
+	h := NewIMControlHandler(stub)
+
+	_, ctx, rec := newIMControlTestContext(http.MethodPost, "/api/v1/im/bridge/ack", `{"bridgeId":"bridge-1","cursor":7,"deliveryId":"delivery-1","downgradeReason":"actioncard_send_failed"}`)
+	if err := h.AckDelivery(ctx); err != nil {
+		t.Fatalf("AckDelivery() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("AckDelivery() status = %d", rec.Code)
+	}
+	if stub.ackInput == nil || stub.ackInput.DowngradeReason != "actioncard_send_failed" {
+		t.Fatalf("ack input = %+v", stub.ackInput)
 	}
 }
 

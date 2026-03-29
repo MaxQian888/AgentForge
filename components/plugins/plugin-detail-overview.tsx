@@ -73,6 +73,22 @@ export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
             "No resolved source path"}
         </PluginDetailSection>
 
+        {plugin.source.registry || plugin.source.entry || plugin.source.version ? (
+          <PluginDetailSection title="Remote source provenance">
+            <div className="grid gap-1">
+              {plugin.source.registry ? (
+                <p>Registry: {plugin.source.registry}</p>
+              ) : null}
+              {plugin.source.entry ? (
+                <p>Entry: {plugin.source.entry}</p>
+              ) : null}
+              {plugin.source.version ? (
+                <p>Requested version: {plugin.source.version}</p>
+              ) : null}
+            </div>
+          </PluginDetailSection>
+        ) : null}
+
         <PluginDetailSection title="Runtime metadata">
           ABI {plugin.runtime_metadata?.abi_version ?? "n/a"} · Compatible{" "}
           {plugin.runtime_metadata?.compatible ? "yes" : "no"}
@@ -89,6 +105,34 @@ export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
         <PluginDetailSection title="Last error">
           {plugin.last_error || "No recent runtime errors"}
         </PluginDetailSection>
+
+        {plugin.builtIn ? (
+          <PluginDetailSection title="Built-in readiness">
+            <div className="grid gap-1">
+              <p>{plugin.builtIn.readinessStatus ?? plugin.builtIn.availabilityStatus ?? "unknown"}</p>
+              {plugin.builtIn.readinessMessage ?? plugin.builtIn.availabilityMessage ? (
+                <p>{plugin.builtIn.readinessMessage ?? plugin.builtIn.availabilityMessage}</p>
+              ) : null}
+              {plugin.builtIn.nextStep ? (
+                <p>Next step: {plugin.builtIn.nextStep}</p>
+              ) : null}
+              {plugin.builtIn.missingPrerequisites?.length ? (
+                <p>
+                  Missing prerequisites: {plugin.builtIn.missingPrerequisites.join(", ")}
+                </p>
+              ) : null}
+              {plugin.builtIn.missingConfiguration?.length ? (
+                <p>
+                  Missing configuration: {plugin.builtIn.missingConfiguration.join(", ")}
+                </p>
+              ) : null}
+              {plugin.builtIn.installable === false && plugin.builtIn.installBlockedReason ? (
+                <p>Install blocked: {plugin.builtIn.installBlockedReason}</p>
+              ) : null}
+              {plugin.builtIn.docsRef ? <p>Docs: {plugin.builtIn.docsRef}</p> : null}
+            </div>
+          </PluginDetailSection>
+        ) : null}
 
         {plugin.source.release ? (
           <PluginDetailSection title="Release info">

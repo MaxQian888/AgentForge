@@ -101,14 +101,14 @@ func (e *WorkflowStepRouterExecutor) executeAgent(ctx context.Context, req Workf
 		return nil, err
 	}
 	output := map[string]any{
-		"runId":   run.ID.String(),
-		"taskId":  run.TaskID.String(),
+		"runId":    run.ID.String(),
+		"taskId":   run.TaskID.String(),
 		"memberId": run.MemberID.String(),
-		"roleId":  run.RoleID,
-		"status":  run.Status,
-		"runtime": run.Runtime,
+		"roleId":   run.RoleID,
+		"status":   run.Status,
+		"runtime":  run.Runtime,
 		"provider": run.Provider,
-		"model":   run.Model,
+		"model":    run.Model,
 	}
 	return &WorkflowStepExecutionResult{Output: output}, nil
 }
@@ -151,12 +151,14 @@ func (e *WorkflowStepRouterExecutor) executeTask(ctx context.Context, req Workfl
 		return nil, err
 	}
 	dispatchInput := DispatchSpawnInput{
-		TaskID:    taskID,
-		Runtime:   workflowString(trigger, "runtime"),
-		Provider:  workflowString(trigger, "provider"),
-		Model:     workflowString(trigger, "model"),
-		BudgetUSD: workflowFloat(trigger, "budgetUsd"),
-		RoleID:    req.Step.Role,
+		TaskID:        taskID,
+		Runtime:       workflowString(trigger, "runtime"),
+		Provider:      workflowString(trigger, "provider"),
+		Model:         workflowString(trigger, "model"),
+		Priority:      workflowInt(trigger, "priority"),
+		BudgetUSD:     workflowFloat(trigger, "budgetUsd"),
+		RoleID:        req.Step.Role,
+		TriggerSource: "workflow",
 	}
 	if rawMemberID := workflowString(trigger, "memberId"); rawMemberID != "" {
 		memberID, err := uuid.Parse(rawMemberID)

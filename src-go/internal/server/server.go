@@ -10,6 +10,7 @@ import (
 	echolog "github.com/labstack/gommon/log"
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/handler"
+	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	log "github.com/sirupsen/logrus"
 )
@@ -67,7 +68,7 @@ func New(cfg *config.Config, cache *repository.CacheRepository) *echo.Echo {
 	e.Use(echomiddleware.CORSWithConfig(echomiddleware.CORSConfig{
 		AllowOrigins:     cfg.AllowOrigins,
 		AllowMethods:     []string{echo.GET, echo.POST, echo.PUT, echo.DELETE, echo.OPTIONS, echo.PATCH},
-		AllowHeaders:     []string{"Content-Type", "Authorization", "X-Request-ID", "Accept"},
+		AllowHeaders:     []string{"Content-Type", "Authorization", "X-Request-ID", "Accept", "Accept-Language"},
 		ExposeHeaders:    []string{"X-Request-ID"},
 		AllowCredentials: true,
 		MaxAge:           3600,
@@ -77,6 +78,7 @@ func New(cfg *config.Config, cache *repository.CacheRepository) *echo.Echo {
 		ContentTypeNosniff: "nosniff",
 		XFrameOptions:      "DENY",
 	}))
+	e.Use(appMiddleware.Locale())
 	e.Use(echomiddleware.GzipWithConfig(echomiddleware.GzipConfig{Level: 5}))
 	e.Use(echomiddleware.ContextTimeoutWithConfig(echomiddleware.ContextTimeoutConfig{
 		Timeout: 30 * time.Second,

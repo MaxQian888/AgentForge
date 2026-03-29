@@ -47,6 +47,7 @@ function makeTask(
     agentBranch: "",
     agentWorktree: "",
     agentSessionId: "",
+    labels: [],
     blockedBy: [],
     plannedStartAt: null,
     plannedEndAt: null,

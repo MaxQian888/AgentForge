@@ -1,3 +1,19 @@
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const messages: Record<string, string> = {
+      sectionTitle: "Reviews",
+      triggerReview: "Trigger Review",
+      submitTrigger: "Submit",
+      cancelTrigger: "Cancel",
+      prUrlLabel: "PR URL",
+      invalidPrUrl: "Enter a valid GitHub pull request URL.",
+      backToList: "Back to list",
+      loading: "Loading reviews...",
+    };
+    return messages[key] ?? key;
+  },
+}));
+
 const fetchReviewsByTask = jest.fn().mockResolvedValue(undefined);
 const triggerReview = jest.fn().mockResolvedValue(undefined);
 const approveReview = jest.fn().mockResolvedValue(undefined);

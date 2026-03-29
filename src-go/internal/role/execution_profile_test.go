@@ -1,6 +1,8 @@
 package role_test
 
 import (
+	"os"
+	"path/filepath"
 	"reflect"
 	"strings"
 	"testing"
@@ -51,6 +53,100 @@ func TestBuildExecutionProfileProjectsRuntimeFacingAdvancedRoleFields(t *testing
 	}
 }
 
+func TestBuildExecutionProfileProjectsLoadedAndAvailableSkills(t *testing.T) {
+	skillsDir := t.TempDir()
+	mustWriteSkillFixture(t, filepath.Join(skillsDir, "react", "SKILL.md"), `---
+name: React
+description: React UI implementation guidance
+requires:
+  - skills/typescript
+---
+
+# React
+
+Prefer server-safe React and repository-aligned component structure.
+`)
+	mustWriteSkillFixture(t, filepath.Join(skillsDir, "typescript", "SKILL.md"), `---
+name: TypeScript
+description: Type-safe contracts and refactors
+---
+
+# TypeScript
+
+Prefer explicit contracts and narrow public surfaces.
+`)
+	mustWriteSkillFixture(t, filepath.Join(skillsDir, "testing", "SKILL.md"), `---
+name: Testing
+description: Regression-oriented test guidance
+---
+
+# Testing
+
+Write targeted regression coverage before broad refactors.
+`)
+
+	manifest, err := role.Parse([]byte(canonicalRoleManifest))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	profile := role.BuildExecutionProfile(manifest, role.WithSkillRoot(skillsDir))
+	loadedSkills := assertExecutionProfileStructSlice(t, profile, "LoadedSkills")
+	if len(loadedSkills) != 2 {
+		t.Fatalf("LoadedSkills len = %d, want 2", len(loadedSkills))
+	}
+	if loadedSkills[0].FieldByName("Path").String() != "skills/react" {
+		t.Fatalf("LoadedSkills[0].Path = %q, want skills/react", loadedSkills[0].FieldByName("Path").String())
+	}
+	if loadedSkills[1].FieldByName("Path").String() != "skills/typescript" {
+		t.Fatalf("LoadedSkills[1].Path = %q, want skills/typescript", loadedSkills[1].FieldByName("Path").String())
+	}
+	if loadedSkills[0].FieldByName("Instructions").String() == "" {
+		t.Fatal("LoadedSkills[0].Instructions = empty, want injected skill instructions")
+	}
+	availableSkills := assertExecutionProfileStructSlice(t, profile, "AvailableSkills")
+	if len(availableSkills) != 1 {
+		t.Fatalf("AvailableSkills len = %d, want 1", len(availableSkills))
+	}
+	if availableSkills[0].FieldByName("Path").String() != "skills/testing" {
+		t.Fatalf("AvailableSkills[0].Path = %q, want skills/testing", availableSkills[0].FieldByName("Path").String())
+	}
+	if availableSkills[0].FieldByName("Instructions").String() != "" {
+		t.Fatalf("AvailableSkills[0].Instructions = %q, want empty on-demand inventory", availableSkills[0].FieldByName("Instructions").String())
+	}
+	if diagnostics := assertExecutionProfileStructSlice(t, profile, "SkillDiagnostics"); len(diagnostics) != 0 {
+		t.Fatalf("SkillDiagnostics len = %d, want 0", len(diagnostics))
+	}
+}
+
+func TestBuildExecutionProfileReportsBlockingDiagnosticsForMissingAutoLoadSkills(t *testing.T) {
+	skillsDir := t.TempDir()
+	mustWriteSkillFixture(t, filepath.Join(skillsDir, "testing", "SKILL.md"), `---
+name: Testing
+description: Regression-oriented test guidance
+---
+
+# Testing
+`)
+
+	manifest, err := role.Parse([]byte(canonicalRoleManifest))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	profile := role.BuildExecutionProfile(manifest, role.WithSkillRoot(skillsDir))
+	diagnostics := assertExecutionProfileStructSlice(t, profile, "SkillDiagnostics")
+	if len(diagnostics) != 1 {
+		t.Fatalf("SkillDiagnostics len = %d, want 1", len(diagnostics))
+	}
+	if diagnostics[0].FieldByName("Blocking").Bool() != true {
+		t.Fatalf("SkillDiagnostics[0].Blocking = %v, want true", diagnostics[0].FieldByName("Blocking").Bool())
+	}
+	if diagnostics[0].FieldByName("Path").String() != "skills/react" {
+		t.Fatalf("SkillDiagnostics[0].Path = %q, want skills/react", diagnostics[0].FieldByName("Path").String())
+	}
+}
+
 func assertExecutionProfileStringSlice(t *testing.T, profile any, fieldName string, want []string) {
 	t.Helper()
 	rv := reflect.ValueOf(profile)
@@ -81,4 +177,31 @@ func assertExecutionProfileStringField(t *testing.T, profile any, fieldName stri
 		t.Fatalf("expected field %s on execution profile", fieldName)
 	}
 	return field.String()
+}
+
+func assertExecutionProfileStructSlice(t *testing.T, profile any, fieldName string) []reflect.Value {
+	t.Helper()
+	rv := reflect.ValueOf(profile)
+	if rv.Kind() == reflect.Pointer {
+		rv = rv.Elem()
+	}
+	field := rv.FieldByName(fieldName)
+	if !field.IsValid() {
+		t.Fatalf("expected field %s on execution profile", fieldName)
+	}
+	values := make([]reflect.Value, 0, field.Len())
+	for i := 0; i < field.Len(); i++ {
+		values = append(values, field.Index(i))
+	}
+	return values
+}
+
+func mustWriteSkillFixture(t *testing.T, path string, content string) {
+	t.Helper()
+	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {
+		t.Fatalf("MkdirAll(%s) error = %v", filepath.Dir(path), err)
+	}
+	if err := os.WriteFile(path, []byte(content), 0o600); err != nil {
+		t.Fatalf("WriteFile(%s) error = %v", path, err)
+	}
 }

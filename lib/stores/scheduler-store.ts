@@ -36,11 +36,22 @@ export interface SchedulerJobRun {
   status: SchedulerJobRunStatus;
   startedAt: string;
   finishedAt?: string;
+  durationMs?: number | null;
   summary: string;
   errorMessage: string;
   metrics: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface SchedulerStats {
+  totalJobs: number;
+  enabledJobs: number;
+  disabledJobs: number;
+  failedJobs: number;
+  activeRuns: number;
+  totalRuns24h: number;
+  failedRuns24h: number;
 }
 
 export interface UpdateSchedulerJobInput {
@@ -53,11 +64,13 @@ interface SchedulerState {
   runsByJobKey: Record<string, SchedulerJobRun[]>;
   draftSchedules: Record<string, string>;
   selectedJobKey: string | null;
+  stats: SchedulerStats | null;
   loading: boolean;
   actionJobKey: string | null;
   error: string | null;
   fetchJobs: () => Promise<void>;
   fetchRuns: (jobKey: string) => Promise<void>;
+  fetchStats: () => Promise<void>;
   updateJob: (jobKey: string, input: UpdateSchedulerJobInput) => Promise<void>;
   triggerJob: (jobKey: string) => Promise<void>;
   selectJob: (jobKey: string) => void;
@@ -72,11 +85,31 @@ function sortJobs(jobs: SchedulerJob[]): SchedulerJob[] {
   return [...jobs].sort((a, b) => a.jobKey.localeCompare(b.jobKey));
 }
 
+function deriveStats(jobs: SchedulerJob[], prev: SchedulerStats | null): SchedulerStats {
+  const base: SchedulerStats = prev ?? {
+    totalJobs: 0,
+    enabledJobs: 0,
+    disabledJobs: 0,
+    failedJobs: 0,
+    activeRuns: 0,
+    totalRuns24h: 0,
+    failedRuns24h: 0,
+  };
+  return {
+    ...base,
+    totalJobs: jobs.length,
+    enabledJobs: jobs.filter((j) => j.enabled).length,
+    disabledJobs: jobs.filter((j) => !j.enabled).length,
+    failedJobs: jobs.filter((j) => j.lastRunStatus === "failed").length,
+  };
+}
+
 export const useSchedulerStore = create<SchedulerState>()((set, get) => ({
   jobs: [],
   runsByJobKey: {},
   draftSchedules: {},
   selectedJobKey: null,
+  stats: null,
   loading: false,
   actionJobKey: null,
   error: null,
@@ -103,6 +136,7 @@ export const useSchedulerStore = create<SchedulerState>()((set, get) => ({
           jobs,
           draftSchedules: nextDrafts,
           selectedJobKey: state.selectedJobKey ?? jobs[0]?.jobKey ?? null,
+          stats: deriveStats(jobs, state.stats),
           error: null,
         };
       });
@@ -133,6 +167,24 @@ export const useSchedulerStore = create<SchedulerState>()((set, get) => ({
       }));
     } catch {
       set({ error: "Unable to load scheduler run history" });
+    }
+  },
+
+  fetchStats: async () => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) {
+      return;
+    }
+
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.get<SchedulerStats>(
+        "/api/v1/scheduler/stats",
+        { token }
+      );
+      set({ stats: data });
+    } catch {
+      // Stats are non-critical; silently ignore
     }
   },
 
@@ -197,20 +249,34 @@ export const useSchedulerStore = create<SchedulerState>()((set, get) => ({
           ? state.jobs.map((item) => (item.jobKey === job.jobKey ? job : item))
           : [...state.jobs, job]
       );
+      // Sync draft schedule if the job's schedule changed externally
+      const existingDraft = state.draftSchedules[job.jobKey];
+      const existingJob = state.jobs.find((item) => item.jobKey === job.jobKey);
+      const draftMatchedOldSchedule = existingDraft === existingJob?.schedule;
       return {
         jobs,
+        stats: deriveStats(jobs, state.stats),
         draftSchedules: {
           ...state.draftSchedules,
-          [job.jobKey]: state.draftSchedules[job.jobKey] ?? job.schedule,
+          [job.jobKey]: draftMatchedOldSchedule ? job.schedule : (existingDraft ?? job.schedule),
         },
       };
     }),
 
   recordRun: (run) =>
-    set((state) => ({
-      runsByJobKey: {
-        ...state.runsByJobKey,
-        [run.jobKey]: [run, ...(state.runsByJobKey[run.jobKey] ?? [])],
-      },
-    })),
+    set((state) => {
+      const existing = state.runsByJobKey[run.jobKey] ?? [];
+      // Update in place if run already exists (status transition), otherwise prepend
+      const existingIndex = existing.findIndex((r) => r.runId === run.runId);
+      const updated =
+        existingIndex >= 0
+          ? existing.map((r, i) => (i === existingIndex ? run : r))
+          : [run, ...existing];
+      return {
+        runsByJobKey: {
+          ...state.runsByJobKey,
+          [run.jobKey]: updated,
+        },
+      };
+    }),
 }));

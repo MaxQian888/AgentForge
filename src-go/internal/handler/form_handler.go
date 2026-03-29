@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
@@ -29,11 +30,11 @@ func (h *FormHandler) GetBySlug(c echo.Context) error {
 	slug := c.Param("slug")
 	form, err := h.service.GetFormBySlug(c.Request().Context(), slug)
 	if err != nil || form == nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "form not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgFormNotFound)
 	}
 	if !form.IsPublic {
 		if _, claimsErr := claimsUserID(c); claimsErr != nil {
-			return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "authentication required"})
+			return localizedError(c, http.StatusUnauthorized, i18n.MsgAuthRequired)
 		}
 	}
 	return c.JSON(http.StatusOK, form.ToDTO())
@@ -43,7 +44,7 @@ func (h *FormHandler) List(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	forms, err := h.service.ListForms(c.Request().Context(), projectID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list forms"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListForms)
 	}
 	dtos := make([]model.FormDefinitionDTO, 0, len(forms))
 	for _, form := range forms {
@@ -56,14 +57,14 @@ func (h *FormHandler) Create(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	req := new(model.CreateFormRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 	targetAssignee, err := parseOptionalUUIDString(req.TargetAssignee)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid target assignee"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTargetAssignee)
 	}
 	form := &model.FormDefinition{
 		ProjectID:      projectID,
@@ -75,7 +76,7 @@ func (h *FormHandler) Create(c echo.Context) error {
 		IsPublic:       req.IsPublic,
 	}
 	if err := h.service.CreateForm(c.Request().Context(), form); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create form"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateForm)
 	}
 	return c.JSON(http.StatusCreated, form.ToDTO())
 }
@@ -84,15 +85,15 @@ func (h *FormHandler) Update(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	formID, err := uuid.Parse(c.Param("formId"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid form ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidFormID)
 	}
 	form, err := h.service.GetForm(c.Request().Context(), formID)
 	if err != nil || form == nil || form.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "form not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgFormNotFound)
 	}
 	req := new(model.UpdateFormRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if req.Name != nil {
 		form.Name = *req.Name
@@ -109,7 +110,7 @@ func (h *FormHandler) Update(c echo.Context) error {
 	if req.TargetAssignee != nil {
 		targetAssignee, parseErr := parseOptionalUUIDString(req.TargetAssignee)
 		if parseErr != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid target assignee"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTargetAssignee)
 		}
 		form.TargetAssignee = targetAssignee
 	}
@@ -117,7 +118,7 @@ func (h *FormHandler) Update(c echo.Context) error {
 		form.IsPublic = *req.IsPublic
 	}
 	if err := h.service.UpdateForm(c.Request().Context(), form); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update form"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateForm)
 	}
 	return c.JSON(http.StatusOK, form.ToDTO())
 }
@@ -126,14 +127,14 @@ func (h *FormHandler) Delete(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	formID, err := uuid.Parse(c.Param("formId"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid form ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidFormID)
 	}
 	form, err := h.service.GetForm(c.Request().Context(), formID)
 	if err != nil || form == nil || form.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "form not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgFormNotFound)
 	}
 	if err := h.service.DeleteForm(c.Request().Context(), formID); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete form"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteForm)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "form deleted"})
 }
@@ -142,16 +143,16 @@ func (h *FormHandler) Submit(c echo.Context) error {
 	slug := c.Param("slug")
 	form, err := h.service.GetFormBySlug(c.Request().Context(), slug)
 	if err != nil || form == nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "form not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgFormNotFound)
 	}
 	if !form.IsPublic {
 		if _, claimsErr := claimsUserID(c); claimsErr != nil {
-			return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "authentication required"})
+			return localizedError(c, http.StatusUnauthorized, i18n.MsgAuthRequired)
 		}
 	}
 	req := new(model.SubmitFormRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -168,9 +169,9 @@ func (h *FormHandler) Submit(c echo.Context) error {
 	if err != nil {
 		switch {
 		case err == service.ErrFormRateLimited:
-			return c.JSON(http.StatusTooManyRequests, model.ErrorResponse{Message: "too many submissions"})
+			return localizedError(c, http.StatusTooManyRequests, i18n.MsgTooManySubmissions)
 		default:
-			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to submit form"})
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToSubmitForm)
 		}
 	}
 	return c.JSON(http.StatusCreated, task.ToDTO())

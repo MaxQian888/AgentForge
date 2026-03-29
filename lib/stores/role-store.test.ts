@@ -10,7 +10,11 @@ jest.mock("./auth-store", () => ({
 
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
-import { useRoleStore, type RoleManifest } from "./role-store";
+import {
+  useRoleStore,
+  type RoleManifest,
+  type RoleSkillCatalogEntry,
+} from "./role-store";
 
 type MockRoleApiClient = {
   get: jest.Mock;
@@ -257,6 +261,37 @@ describe("useRoleStore", () => {
       },
       { token: "test-token" },
     );
+  });
+
+  it("fetches the role skill catalog and stores repo-local entries", async () => {
+    const api = makeApiClient();
+    const catalog: RoleSkillCatalogEntry[] = [
+      {
+        path: "skills/react",
+        label: "React",
+        description: "Build React interfaces.",
+        source: "repo-local",
+        sourceRoot: "skills",
+      },
+      {
+        path: "skills/testing",
+        label: "Testing",
+        source: "repo-local",
+        sourceRoot: "skills",
+      },
+    ];
+    api.get.mockResolvedValueOnce({ data: catalog });
+    mockCreateApiClient.mockReturnValue(api);
+
+    await useRoleStore.getState().fetchSkillCatalog();
+
+    expect(api.get).toHaveBeenCalledWith("/api/v1/roles/skills", {
+      token: "test-token",
+    });
+    expect(useRoleStore.getState()).toMatchObject({
+      skillCatalog: catalog,
+      skillCatalogLoading: false,
+    });
   });
 
   it("throws when mutating role data without authentication", async () => {

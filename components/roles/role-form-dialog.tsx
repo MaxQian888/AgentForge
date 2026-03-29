@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -75,6 +76,7 @@ export function RoleFormDialog({
   availableRoles = [],
   onSubmit,
 }: RoleFormDialogProps) {
+  const t = useTranslations("roles");
   const [templateId, setTemplateId] = useState("");
   const [roleId, setRoleId] = useState("");
   const [name, setName] = useState("");
@@ -253,16 +255,15 @@ export function RoleFormDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="max-w-3xl">
         <DialogHeader>
-          <DialogTitle>{isEdit ? "Edit Role" : "Create Role"}</DialogTitle>
+          <DialogTitle>{isEdit ? t("formDialog.editTitle") : t("formDialog.createTitle")}</DialogTitle>
           <DialogDescription>
-            Configure identity, execution limits, inherited behavior, knowledge,
-            and safety controls for this role.
+            {t("formDialog.desc")}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex max-h-[75vh] flex-col gap-5 overflow-y-auto pr-1">
           <section className="grid gap-4 md:grid-cols-2">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="role-template">Start from template</Label>
+              <Label htmlFor="role-template">{t("formDialog.startFromTemplate")}</Label>
               <select
                 id="role-template"
                 aria-label="Start from template"
@@ -271,7 +272,7 @@ export function RoleFormDialog({
                 onChange={(event) => applyTemplate(event.target.value)}
                 disabled={isEdit}
               >
-                <option value="">Blank role</option>
+                <option value="">{t("formDialog.blankRole")}</option>
                 {templateOptions.map((item) => (
                   <option key={item.metadata.id} value={item.metadata.id}>
                     {item.metadata.name}
@@ -280,7 +281,7 @@ export function RoleFormDialog({
               </select>
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="role-extends">Inherits from</Label>
+              <Label htmlFor="role-extends">{t("formDialog.inheritsFrom")}</Label>
               <select
                 id="role-extends"
                 aria-label="Inherits from"
@@ -288,7 +289,7 @@ export function RoleFormDialog({
                 value={extendsValue}
                 onChange={(event) => setExtendsValue(event.target.value)}
               >
-                <option value="">No parent</option>
+                <option value="">{t("formDialog.noParent")}</option>
                 {templateOptions.map((item) => (
                   <option key={item.metadata.id} value={item.metadata.id}>
                     {item.metadata.name}
@@ -299,10 +300,10 @@ export function RoleFormDialog({
           </section>
 
           <section className="grid gap-4 rounded-lg border p-4">
-            <h3 className="text-sm font-semibold">Identity</h3>
+            <h3 className="text-sm font-semibold">{t("formDialog.identity")}</h3>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-id">Role ID</Label>
+                <Label htmlFor="role-id">{t("formDialog.roleId")}</Label>
                 <Input
                   id="role-id"
                   aria-label="Role ID"
@@ -314,7 +315,7 @@ export function RoleFormDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-name">Name</Label>
+                <Label htmlFor="role-name">{t("formDialog.name")}</Label>
                 <Input
                   id="role-name"
                   value={name}
@@ -325,7 +326,7 @@ export function RoleFormDialog({
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="role-description">Description</Label>
+              <Label htmlFor="role-description">{t("formDialog.description")}</Label>
               <Input
                 id="role-description"
                 value={description}
@@ -335,7 +336,7 @@ export function RoleFormDialog({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="role-tags">Tags (comma-separated)</Label>
+              <Label htmlFor="role-tags">{t("formDialog.tags")}</Label>
               <Input
                 id="role-tags"
                 value={tagsInput}
@@ -354,7 +355,7 @@ export function RoleFormDialog({
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="identity-role">Role</Label>
+                <Label htmlFor="identity-role">{t("formDialog.role")}</Label>
                 <Input
                   id="identity-role"
                   value={identityRole}
@@ -363,7 +364,7 @@ export function RoleFormDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="identity-goal">Goal</Label>
+                <Label htmlFor="identity-goal">{t("formDialog.goal")}</Label>
                 <Input
                   id="identity-goal"
                   value={goal}
@@ -373,7 +374,7 @@ export function RoleFormDialog({
               </div>
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="identity-backstory">Backstory</Label>
+              <Label htmlFor="identity-backstory">{t("formDialog.backstory")}</Label>
               <textarea
                 id="identity-backstory"
                 className="min-h-[84px] rounded-md border bg-background px-3 py-2 text-sm"
@@ -383,7 +384,7 @@ export function RoleFormDialog({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="role-system-prompt">System Prompt</Label>
+              <Label htmlFor="role-system-prompt">{t("formDialog.systemPrompt")}</Label>
               <textarea
                 id="role-system-prompt"
                 className="min-h-[120px] rounded-md border bg-background px-3 py-2 text-sm"
@@ -395,10 +396,10 @@ export function RoleFormDialog({
           </section>
 
           <section className="grid gap-4 rounded-lg border p-4">
-            <h3 className="text-sm font-semibold">Capabilities</h3>
+            <h3 className="text-sm font-semibold">{t("formDialog.capabilities")}</h3>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-allowed-tools">Allowed Tools</Label>
+                <Label htmlFor="role-allowed-tools">{t("formDialog.allowedTools")}</Label>
                 <Input
                   id="role-allowed-tools"
                   aria-label="Allowed Tools"
@@ -408,7 +409,7 @@ export function RoleFormDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-languages">Languages</Label>
+                <Label htmlFor="role-languages">{t("formDialog.languages")}</Label>
                 <Input
                   id="role-languages"
                   value={languages}
@@ -419,7 +420,7 @@ export function RoleFormDialog({
             </div>
             <div className="grid gap-4 md:grid-cols-3">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-frameworks">Frameworks</Label>
+                <Label htmlFor="role-frameworks">{t("formDialog.frameworks")}</Label>
                 <Input
                   id="role-frameworks"
                   value={frameworks}
@@ -428,7 +429,7 @@ export function RoleFormDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-max-turns">Max Turns</Label>
+                <Label htmlFor="role-max-turns">{t("formDialog.maxTurns")}</Label>
                 <Input
                   id="role-max-turns"
                   type="number"
@@ -438,7 +439,7 @@ export function RoleFormDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-max-budget">Max Budget (USD)</Label>
+                <Label htmlFor="role-max-budget">{t("formDialog.maxBudget")}</Label>
                 <Input
                   id="role-max-budget"
                   type="number"
@@ -453,14 +454,14 @@ export function RoleFormDialog({
 
           <section className="grid gap-4 rounded-lg border p-4">
             <div className="flex items-center justify-between">
-              <h3 className="text-sm font-semibold">Skills</h3>
+              <h3 className="text-sm font-semibold">{t("formDialog.skillsTitle")}</h3>
               <Button
                 type="button"
                 variant="outline"
                 size="sm"
                 onClick={() => setSkills((current) => [...current, { path: "", autoLoad: false }])}
               >
-                Add Skill
+                {t("formDialog.addSkill")}
               </Button>
             </div>
             {skills.length > 0 ? (
@@ -471,7 +472,7 @@ export function RoleFormDialog({
                     className="grid gap-3 rounded-md border p-3 md:grid-cols-[minmax(0,1fr)_auto_auto]"
                   >
                     <div className="flex flex-col gap-1.5">
-                      <Label htmlFor={`dialog-skill-path-${index}`}>Skill Path</Label>
+                      <Label htmlFor={`dialog-skill-path-${index}`}>{t("formDialog.skillPath")}</Label>
                       <Input
                         id={`dialog-skill-path-${index}`}
                         aria-label="Skill Path"
@@ -502,7 +503,7 @@ export function RoleFormDialog({
                         }
                         className="size-4 rounded border-input"
                       />
-                      <Label htmlFor={`dialog-skill-auto-${index}`}>Auto-load skill</Label>
+                      <Label htmlFor={`dialog-skill-auto-${index}`}>{t("formDialog.autoLoadSkill")}</Label>
                     </div>
                     <div className="flex items-end justify-end">
                       <Button
@@ -513,21 +514,21 @@ export function RoleFormDialog({
                           setSkills((current) => current.filter((_, itemIndex) => itemIndex !== index))
                         }
                       >
-                        Remove
+                        {t("formDialog.remove")}
                       </Button>
                     </div>
                   </div>
                 ))}
               </div>
             ) : (
-              <p className="text-sm text-muted-foreground">No skills configured for this role.</p>
+              <p className="text-sm text-muted-foreground">{t("formDialog.noSkills")}</p>
             )}
           </section>
 
           <section className="grid gap-4 rounded-lg border p-4">
-            <h3 className="text-sm font-semibold">Knowledge</h3>
+            <h3 className="text-sm font-semibold">{t("formDialog.knowledge")}</h3>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="role-repositories">Repositories</Label>
+              <Label htmlFor="role-repositories">{t("formDialog.repositories")}</Label>
               <Input
                 id="role-repositories"
                 value={repositories}
@@ -536,7 +537,7 @@ export function RoleFormDialog({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="role-documents">Documents</Label>
+              <Label htmlFor="role-documents">{t("formDialog.documents")}</Label>
               <Input
                 id="role-documents"
                 value={documents}
@@ -545,7 +546,7 @@ export function RoleFormDialog({
               />
             </div>
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="role-patterns">Patterns</Label>
+              <Label htmlFor="role-patterns">{t("formDialog.patterns")}</Label>
               <Input
                 id="role-patterns"
                 value={patterns}
@@ -556,10 +557,10 @@ export function RoleFormDialog({
           </section>
 
           <section className="grid gap-4 rounded-lg border p-4">
-            <h3 className="text-sm font-semibold">Security</h3>
+            <h3 className="text-sm font-semibold">{t("formDialog.security")}</h3>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-permission-mode">Permission Mode</Label>
+                <Label htmlFor="role-permission-mode">{t("formDialog.permissionMode")}</Label>
                 <select
                   id="role-permission-mode"
                   aria-label="Permission Mode"
@@ -580,12 +581,12 @@ export function RoleFormDialog({
                   onChange={(event) => setRequireReview(event.target.checked)}
                   className="size-4 rounded border-input"
                 />
-                <Label htmlFor="role-require-review">Require review before execution</Label>
+                <Label htmlFor="role-require-review">{t("formDialog.requireReview")}</Label>
               </div>
             </div>
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-allowed-paths">Allowed Paths</Label>
+                <Label htmlFor="role-allowed-paths">{t("formDialog.allowedPaths")}</Label>
                 <Input
                   id="role-allowed-paths"
                   value={allowedPaths}
@@ -594,7 +595,7 @@ export function RoleFormDialog({
                 />
               </div>
               <div className="flex flex-col gap-1.5">
-                <Label htmlFor="role-denied-paths">Denied Paths</Label>
+                <Label htmlFor="role-denied-paths">{t("formDialog.deniedPaths")}</Label>
                 <Input
                   id="role-denied-paths"
                   value={deniedPaths}
@@ -611,10 +612,10 @@ export function RoleFormDialog({
               variant="outline"
               onClick={() => onOpenChange(false)}
             >
-              Cancel
+              {t("formDialog.cancel")}
             </Button>
             <Button type="submit" disabled={submitting || !name || !roleId}>
-              {submitting ? "Saving..." : isEdit ? "Update" : "Create"}
+              {submitting ? t("formDialog.saving") : isEdit ? t("formDialog.update") : t("formDialog.create")}
             </Button>
           </DialogFooter>
         </form>

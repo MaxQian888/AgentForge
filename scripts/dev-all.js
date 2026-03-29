@@ -67,6 +67,8 @@ function createDevAllServiceDefinitions({ repoRoot = getRepoRoot() } = {}) {
         env: {
           ENV: "development",
           PORT: "7777",
+          GOCACHE: path.join(repoRoot, "src-go", ".gocache"),
+          GOFLAGS: "-p=1",
           POSTGRES_URL: "postgres://dev:dev@127.0.0.1:5432/appdb?sslmode=disable",
           REDIS_URL: "redis://127.0.0.1:6379",
           BRIDGE_URL: "http://127.0.0.1:7778",

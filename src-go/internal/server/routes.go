@@ -94,8 +94,8 @@ func (a imControlPlaneWSAdapter) AttachBridgeListener(ctx context.Context, bridg
 	return a.control.AttachBridgeListener(ctx, bridgeID, afterCursor, listener)
 }
 
-func (a imControlPlaneWSAdapter) AckDelivery(ctx context.Context, bridgeID string, cursor int64, deliveryID string) error {
-	return a.control.AckDelivery(ctx, bridgeID, cursor, deliveryID)
+func (a imControlPlaneWSAdapter) AckDelivery(ctx context.Context, bridgeID string, cursor int64, deliveryID string, downgradeReason string) error {
+	return a.control.AckDelivery(ctx, bridgeID, cursor, deliveryID, downgradeReason)
 }
 
 func (a imControlPlaneWSAdapter) DetachBridgeListener(bridgeID string) {
@@ -122,6 +122,8 @@ func RegisterRoutes(
 	milestoneRepo *repository.MilestoneRepository,
 	taskProgressRepo *repository.TaskProgressRepository,
 	agentRunRepo *repository.AgentRunRepository,
+	agentPoolQueueRepo *repository.AgentPoolQueueRepository,
+	dispatchAttemptRepo *repository.DispatchAttemptRepository,
 	notifRepo *repository.NotificationRepository,
 	reviewRepo *repository.ReviewRepository,
 	reviewAggRepo *repository.ReviewAggregationRepository,
@@ -137,6 +139,7 @@ func RegisterRoutes(
 	pageRecentAccessRepo *repository.PageRecentAccessRepository,
 	hub *ws.Hub,
 	bridgeClient *bridge.Client,
+	bridgeHealthSvc *service.BridgeHealthService,
 	pluginSvc *service.PluginService,
 	agentSvc *service.AgentService,
 	schedulerSvc handler.SchedulerService,
@@ -222,6 +225,8 @@ func RegisterRoutes(
 	// User routes (protected)
 	users := v1.Group("/users", jwtMw)
 	users.GET("/me", authH.GetMe)
+	users.PUT("/me", authH.UpdateMe)
+	users.PUT("/me/password", authH.ChangePassword)
 
 	// WebSocket
 	wsH := ws.NewHandler(hub, cfg.JWTSecret)
@@ -245,6 +250,9 @@ func RegisterRoutes(
 		agentRuntime = agentSvc
 	}
 	agentH := handler.NewAgentHandler(agentRuntime)
+	bridgeHealthH := handler.NewBridgeHealthHandler(bridgeHealthSvc)
+	bridgeRuntimeCatalogH := handler.NewBridgeRuntimeCatalogHandler(bridgeClient)
+	bridgeAIH := handler.NewBridgeAIHandler(bridgeClient)
 	notifH := handler.NewNotificationHandler(notifRepo)
 	workflowH := handler.NewWorkflowHandler(workflowRepo)
 	costH := handler.NewCostHandler(agentRunRepo)
@@ -295,9 +303,21 @@ func RegisterRoutes(
 	recommendSvc := service.NewAssignmentRecommender(taskRepo, memberRepo, agentRunRepo)
 	taskH = taskH.WithRecommender(recommendSvc)
 	var dispatchSvc *service.TaskDispatchService
+	var budgetSvc *service.BudgetGovernanceService
+	var dispatchPreflightH *handler.DispatchPreflightHandler
+	var dispatchStatsH *handler.DispatchStatsHandler
+	var dispatchHistoryH *handler.DispatchHistoryHandler
 	if agentSvc != nil {
+		budgetSvc = service.NewBudgetGovernanceService(sprintRepo)
+		budgetSvc.SetAutomationEvaluator(automationEngine)
+		agentSvc.SetDispatchBudgetChecker(budgetSvc)
 		dispatchSvc = service.NewTaskDispatchService(taskRepo, memberRepo, agentSvc, hub, notificationSvc, taskProgressSvc)
 		dispatchSvc = dispatchSvc.WithQueueWriter(agentSvc)
+		dispatchSvc = dispatchSvc.WithBudgetChecker(budgetSvc)
+		dispatchSvc = dispatchSvc.WithAttemptRecorder(dispatchAttemptRepo)
+		dispatchPreflightH = handler.NewDispatchPreflightHandler(taskRepo, memberRepo, budgetSvc, agentSvc)
+		dispatchStatsH = handler.NewDispatchStatsHandler(dispatchAttemptRepo, agentPoolQueueRepo)
+		dispatchHistoryH = handler.NewDispatchHistoryHandler(dispatchAttemptRepo)
 		taskH = taskH.WithDispatcher(dispatchSvc)
 		agentH = agentH.WithDispatcher(dispatchSvc)
 	}
@@ -379,6 +399,12 @@ func RegisterRoutes(
 	projectGroup.POST("/memory", memoryH.Store)
 	projectGroup.GET("/memory", memoryH.Search)
 	projectGroup.DELETE("/memory/:mid", memoryH.Delete)
+	if dispatchPreflightH != nil {
+		projectGroup.GET("/dispatch/preflight", dispatchPreflightH.Get)
+	}
+	if dispatchStatsH != nil {
+		projectGroup.GET("/dispatch/stats", dispatchStatsH.Get)
+	}
 	projectGroup.GET("/wiki/pages", wikiH.ListPages)
 	projectGroup.POST("/wiki/pages", wikiH.CreatePage)
 	projectGroup.GET("/wiki/pages/:id", wikiH.GetPage)
@@ -411,16 +437,24 @@ func RegisterRoutes(
 	protected.POST("/tasks/:id/assign", taskH.Assign)
 	protected.GET("/tasks/:id/recommend-assignee", taskH.RecommendAssignee)
 	protected.POST("/tasks/:id/decompose", taskH.Decompose)
+	if dispatchHistoryH != nil {
+		protected.GET("/tasks/:tid/dispatch/history", dispatchHistoryH.Get)
+	}
 	v1.GET("/forms/:slug", formH.GetBySlug)
 	v1.POST("/forms/:slug/submit", formH.Submit)
 
-	// Member update
+	// Members (global)
 	protected.PUT("/members/:id", memberH.Update)
+	protected.DELETE("/members/:id", memberH.Delete)
 
 	// Agents
 	protected.POST("/agents/spawn", agentH.Spawn)
 	protected.GET("/agents", agentH.List)
 	protected.GET("/agents/pool", agentH.Pool)
+	protected.GET("/bridge/health", bridgeHealthH.Get)
+	protected.GET("/bridge/runtimes", bridgeRuntimeCatalogH.Get)
+	protected.POST("/ai/generate", bridgeAIH.Generate)
+	protected.POST("/ai/classify-intent", bridgeAIH.ClassifyIntent)
 	protected.GET("/agents/:id", agentH.Get)
 	protected.POST("/agents/:id/pause", agentH.Pause)
 	protected.POST("/agents/:id/resume", agentH.Resume)
@@ -431,6 +465,8 @@ func RegisterRoutes(
 	protected.POST("/teams/start", teamH.Start)
 	protected.GET("/teams", teamH.List)
 	protected.GET("/teams/:id", teamH.Get)
+	protected.PUT("/teams/:id", teamH.Update)
+	protected.DELETE("/teams/:id", teamH.Delete)
 	protected.POST("/teams/:id/cancel", teamH.Cancel)
 	protected.POST("/teams/:id/retry", teamH.Retry)
 
@@ -440,7 +476,9 @@ func RegisterRoutes(
 	protected.PUT("/notifications/read-all", notifH.MarkAllRead)
 
 	// Scheduler control plane
+	protected.GET("/scheduler/stats", schedulerH.GetStats)
 	protected.GET("/scheduler/jobs", schedulerH.ListJobs)
+	protected.GET("/scheduler/jobs/:jobKey", schedulerH.GetJob)
 	protected.GET("/scheduler/jobs/:jobKey/runs", schedulerH.ListRuns)
 	protected.PUT("/scheduler/jobs/:jobKey", schedulerH.UpdateJob)
 	protected.POST("/scheduler/jobs/:jobKey/trigger", schedulerH.TriggerManual)
@@ -467,6 +505,7 @@ func RegisterRoutes(
 
 	// Roles
 	protected.GET("/roles", roleH.List)
+	protected.GET("/roles/skills", roleH.ListSkills)
 	protected.GET("/roles/:id", roleH.Get)
 	protected.POST("/roles", roleH.Create)
 	protected.PUT("/roles/:id", roleH.Update)
@@ -531,6 +570,8 @@ func RegisterRoutes(
 	protected.DELETE("/im/channels/:id", imControlH.DeleteChannel)
 	protected.GET("/im/bridge/status", imControlH.GetStatus)
 	protected.GET("/im/deliveries", imControlH.ListDeliveries)
+	protected.POST("/im/deliveries/:id/retry", imControlH.RetryDelivery)
+	protected.GET("/im/event-types", imControlH.ListEventTypes)
 	protected.POST("/im/send", imH.Send)
 	protected.POST("/im/notify", imH.Notify)
 

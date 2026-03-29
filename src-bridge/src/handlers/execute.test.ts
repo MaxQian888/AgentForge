@@ -188,7 +188,7 @@ describe("handleExecute", () => {
     expect(pool.get("task-123")).toBeUndefined();
   });
 
-  test("routes codex requests through the command runtime adapter", async () => {
+  test("routes codex requests through the dedicated codex runtime adapter", async () => {
     const pool = new RuntimePoolManager(2);
     const sessionManager = new SessionManager();
     const events: Array<{ type: string; data: unknown }> = [];
@@ -201,44 +201,63 @@ describe("handleExecute", () => {
     });
     let invocation:
       | {
-          runtime: "codex" | "opencode";
+          mode: "start" | "resume";
+          threadId?: string;
           systemPrompt: string;
           req: ExecuteRequest;
         }
       | undefined;
 
-    async function* commandRuntimeRunner(params: {
-      runtime: "codex" | "opencode";
+    async function* codexRuntimeRunner(params: {
+      mode: "start" | "resume";
+      threadId?: string;
       systemPrompt: string;
       req: ExecuteRequest;
     }): AsyncGenerator<Record<string, unknown>, void> {
       invocation = params;
 
+      yield { type: "thread.started", thread_id: "thread-codex-1" };
       yield {
-        type: "assistant_text",
-        content: "Planning Codex work.",
+        type: "item.completed",
+        item: {
+          id: "item-codex-0",
+          type: "agent_message",
+          text: "Planning Codex work.",
+        },
       };
 
       yield {
-        type: "tool_call",
-        tool_name: "Read",
-        tool_input: { file_path: "README.md" },
-        call_id: "codex-call-1",
+        type: "item.started",
+        item: {
+          id: "codex-call-1",
+          type: "command_execution",
+          command: "Get-Content README.md",
+          aggregated_output: "",
+          exit_code: null,
+          status: "in_progress",
+        },
       };
 
       yield {
-        type: "tool_result",
-        call_id: "codex-call-1",
-        output: "# README",
-        is_error: false,
+        type: "item.completed",
+        item: {
+          id: "codex-call-1",
+          type: "command_execution",
+          command: "Get-Content README.md",
+          aggregated_output: "# README",
+          exit_code: 0,
+          status: "completed",
+        },
       };
 
       yield {
-        type: "usage",
-        input_tokens: 120,
-        output_tokens: 45,
-        cache_read_tokens: 0,
-        cost_usd: 0.03,
+        type: "turn.completed",
+        usage: {
+          input_tokens: 120,
+          cached_input_tokens: 0,
+          output_tokens: 45,
+        },
+        total_cost_usd: 0.03,
       };
     }
 
@@ -249,17 +268,23 @@ describe("handleExecute", () => {
     };
 
     const response = await handleExecute(pool, streamer as never, request, {
-      commandRuntimeRunner,
+      codexRuntimeRunner,
       awaitCompletion: true,
       executableLookup(command) {
         return `C:/mock/${command}.exe`;
+      },
+      codexAuthStatusProvider() {
+        return {
+          authenticated: true,
+          message: "Logged in using an API key",
+        };
       },
       sessionManager,
     });
 
     expect(response).toEqual({ session_id: request.session_id });
     expect(invocation).toMatchObject({
-      runtime: "codex",
+      mode: "start",
       req: {
         task_id: request.task_id,
         runtime: "codex",
@@ -281,10 +306,15 @@ describe("handleExecute", () => {
       task_id: request.task_id,
       session_id: request.session_id,
       status: "completed",
+      continuity: expect.objectContaining({
+        runtime: "codex",
+        resume_ready: true,
+        thread_id: "thread-codex-1",
+      }),
     });
   });
 
-  test("routes opencode requests through the command runtime adapter with the same canonical events", async () => {
+  test("routes opencode requests through the dedicated opencode runtime adapter with the same canonical events", async () => {
     const pool = new RuntimePoolManager(2);
     const sessionManager = new SessionManager();
     const events: Array<{ type: string; data: unknown }> = [];
@@ -295,48 +325,7 @@ describe("handleExecute", () => {
       provider: "opencode",
       model: "opencode-default",
     });
-    let invocation:
-      | {
-          runtime: "codex" | "opencode";
-          systemPrompt: string;
-          req: ExecuteRequest;
-        }
-      | undefined;
-
-    async function* commandRuntimeRunner(params: {
-      runtime: "codex" | "opencode";
-      systemPrompt: string;
-      req: ExecuteRequest;
-    }): AsyncGenerator<Record<string, unknown>, void> {
-      invocation = params;
-
-      yield {
-        type: "assistant_text",
-        content: "Planning OpenCode work.",
-      };
-
-      yield {
-        type: "tool_call",
-        tool_name: "Edit",
-        tool_input: { file_path: "README.md" },
-        call_id: "opencode-call-1",
-      };
-
-      yield {
-        type: "tool_result",
-        call_id: "opencode-call-1",
-        output: "patched",
-        is_error: false,
-      };
-
-      yield {
-        type: "usage",
-        input_tokens: 140,
-        output_tokens: 65,
-        cache_read_tokens: 5,
-        cost_usd: 0.04,
-      };
-    }
+    const calls: Array<{ kind: string; payload: unknown }> = [];
 
     const streamer = {
       send(event: { type: string; data: unknown }) {
@@ -345,24 +334,98 @@ describe("handleExecute", () => {
     };
 
     const response = await handleExecute(pool, streamer as never, request, {
-      commandRuntimeRunner,
       awaitCompletion: true,
-      executableLookup(command) {
-        return `C:/mock/${command}.exe`;
+      opencodeTransport: {
+        async createSession(input: { title?: string }) {
+          calls.push({ kind: "createSession", payload: input });
+          return { id: "opencode-session-123" };
+        },
+        async sendPromptAsync(input: { sessionId: string; prompt: string; provider: string; model?: string }) {
+          calls.push({ kind: "sendPromptAsync", payload: input });
+        },
+        async abortSession() {
+          return true;
+        },
+        checkReadiness() {
+          return Promise.resolve({ ok: true, diagnostics: [] });
+        },
+      } as never,
+      opencodeEventRunner: async function* (params) {
+        calls.push({
+          kind: "eventRunner",
+          payload: { mode: params.mode, sessionId: params.sessionId, prompt: params.prompt },
+        });
+        yield {
+          event: "message.part.delta",
+          data: {
+            sessionID: params.sessionId,
+            part: {
+              type: "text",
+              text: "Planning OpenCode work.",
+            },
+          },
+        };
+        yield {
+          event: "message.part.updated",
+          data: {
+            sessionID: params.sessionId,
+            part: {
+              type: "tool",
+              id: "tool-1",
+              toolName: "Edit",
+              state: "running",
+              input: { file_path: "README.md" },
+            },
+          },
+        };
+        yield {
+          event: "message.part.updated",
+          data: {
+            sessionID: params.sessionId,
+            part: {
+              type: "tool",
+              id: "tool-1",
+              toolName: "Edit",
+              state: "completed",
+              output: "patched",
+              isError: false,
+            },
+          },
+        };
+        yield {
+          event: "session.updated",
+          data: {
+            sessionID: params.sessionId,
+            usage: {
+              input_tokens: 140,
+              cached_input_tokens: 5,
+              output_tokens: 65,
+            },
+            total_cost_usd: 0.04,
+          },
+        };
+        yield {
+          event: "session.idle",
+          data: {
+            sessionID: params.sessionId,
+          },
+        };
       },
       sessionManager,
     });
 
     expect(response).toEqual({ session_id: request.session_id });
-    expect(invocation).toMatchObject({
-      runtime: "opencode",
-      req: {
-        task_id: request.task_id,
-        runtime: "opencode",
-        provider: "opencode",
-        model: "opencode-default",
+    expect(calls).toMatchObject([
+      { kind: "createSession" },
+      {
+        kind: "sendPromptAsync",
+        payload: { sessionId: "opencode-session-123", prompt: request.prompt },
       },
-    });
+      {
+        kind: "eventRunner",
+        payload: { mode: "start", sessionId: "opencode-session-123" },
+      },
+    ]);
     expect(events.map((event) => event.type)).toEqual([
       "status_change",
       "status_change",
@@ -377,6 +440,11 @@ describe("handleExecute", () => {
       task_id: request.task_id,
       session_id: request.session_id,
       status: "completed",
+      continuity: expect.objectContaining({
+        runtime: "opencode",
+        resume_ready: true,
+        upstream_session_id: "opencode-session-123",
+      }),
     });
   });
 });

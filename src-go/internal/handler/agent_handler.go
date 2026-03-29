@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
@@ -22,6 +23,7 @@ type AgentRuntimeService interface {
 	Cancel(ctx context.Context, id uuid.UUID, reason string) error
 	PoolStats(ctx context.Context) model.AgentPoolStatsDTO
 	GetLogs(ctx context.Context, id uuid.UUID) ([]model.AgentLogEntry, error)
+	BridgeStatus() string
 }
 
 type AgentHandler struct {
@@ -55,22 +57,25 @@ type SpawnAgentRequest struct {
 func (h *AgentHandler) Spawn(c echo.Context) error {
 	req := new(SpawnAgentRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
+	if h.service != nil && h.service.BridgeStatus() == service.BridgeStatusDegraded {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "bridge_unavailable"})
+	}
 
 	taskID, err := uuid.Parse(req.TaskID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	if h.dispatcher != nil {
 		var memberID *uuid.UUID
 		if strings.TrimSpace(req.MemberID) != "" {
 			parsedMemberID, err := uuid.Parse(req.MemberID)
 			if err != nil {
-				return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid member ID"})
+				return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidMemberID)
 			}
 			memberID = &parsedMemberID
 		}
@@ -89,7 +94,7 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 			case errors.Is(err, service.ErrAgentTaskNotFound), errors.Is(err, service.ErrAgentProjectNotFound):
 				return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: err.Error()})
 			default:
-				return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "failed to start agent run"})
+				return localizedError(c, http.StatusBadGateway, i18n.MsgFailedToStartAgentRun)
 			}
 		}
 
@@ -104,7 +109,7 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 
 	memberID, err := uuid.Parse(req.MemberID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid member ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidMemberID)
 	}
 
 	run, err := h.service.Spawn(c.Request().Context(), taskID, memberID, req.Runtime, req.Provider, req.Model, req.MaxBudgetUsd, req.RoleID)
@@ -121,7 +126,7 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 		case errors.Is(err, service.ErrAgentTaskNotFound), errors.Is(err, service.ErrAgentProjectNotFound):
 			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: err.Error()})
 		default:
-			return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "failed to start agent run"})
+			return localizedError(c, http.StatusBadGateway, i18n.MsgFailedToStartAgentRun)
 		}
 	}
 
@@ -135,7 +140,7 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 func (h *AgentHandler) List(c echo.Context) error {
 	runs, err := h.service.ListSummaries(c.Request().Context())
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list agent runs"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListAgentRuns)
 	}
 	return c.JSON(http.StatusOK, runs)
 }
@@ -143,11 +148,11 @@ func (h *AgentHandler) List(c echo.Context) error {
 func (h *AgentHandler) Get(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid agent run ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidAgentRunID)
 	}
 	run, err := h.service.GetSummary(c.Request().Context(), id)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "agent run not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgAgentRunNotFound)
 	}
 	return c.JSON(http.StatusOK, run)
 }
@@ -167,7 +172,7 @@ func (h *AgentHandler) Resume(c echo.Context) error {
 func (h *AgentHandler) Kill(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid agent run ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidAgentRunID)
 	}
 
 	if err := h.service.Cancel(c.Request().Context(), id, "killed_by_user"); err != nil {
@@ -177,13 +182,13 @@ func (h *AgentHandler) Kill(c echo.Context) error {
 		case errors.Is(err, service.ErrAgentNotRunning):
 			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
 		default:
-			return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "failed to cancel agent run"})
+			return localizedError(c, http.StatusBadGateway, i18n.MsgFailedToCancelAgentRun)
 		}
 	}
 
 	run, err := h.service.GetByID(c.Request().Context(), id)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch agent run"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToFetchAgentRun)
 	}
 	summary, summaryErr := h.service.GetSummary(c.Request().Context(), run.ID)
 	if summaryErr == nil && summary != nil {
@@ -195,14 +200,14 @@ func (h *AgentHandler) Kill(c echo.Context) error {
 func (h *AgentHandler) Logs(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid agent run ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidAgentRunID)
 	}
 	logs, err := h.service.GetLogs(c.Request().Context(), id)
 	if err != nil {
 		if errors.Is(err, service.ErrAgentNotFound) {
-			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "agent run not found"})
+			return localizedError(c, http.StatusNotFound, i18n.MsgAgentRunNotFound)
 		}
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to get agent logs"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToGetAgentLogs)
 	}
 	return c.JSON(http.StatusOK, logs)
 }
@@ -210,7 +215,10 @@ func (h *AgentHandler) Logs(c echo.Context) error {
 func (h *AgentHandler) updateStatus(c echo.Context, status string) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid agent run ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidAgentRunID)
+	}
+	if h.service != nil && h.service.BridgeStatus() == service.BridgeStatusDegraded {
+		return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "bridge_unavailable"})
 	}
 	if err := h.service.UpdateStatus(c.Request().Context(), id, status); err != nil {
 		switch {
@@ -219,12 +227,12 @@ func (h *AgentHandler) updateStatus(c echo.Context, status string) error {
 		case errors.Is(err, service.ErrAgentNotRunning):
 			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
 		default:
-			return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "failed to update agent run status"})
+			return localizedError(c, http.StatusBadGateway, i18n.MsgFailedToUpdateAgentRunStatus)
 		}
 	}
 	run, err := h.service.GetByID(c.Request().Context(), id)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch agent run"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToFetchAgentRun)
 	}
 	summary, summaryErr := h.service.GetSummary(c.Request().Context(), run.ID)
 	if summaryErr == nil && summary != nil {

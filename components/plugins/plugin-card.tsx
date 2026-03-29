@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import {
@@ -50,6 +51,7 @@ export function PluginCard({
   onSelect,
   selected = false,
 }: PluginCardProps) {
+  const t = useTranslations("plugins");
   const enablePlugin = usePluginStore((s) => s.enablePlugin);
   const disablePlugin = usePluginStore((s) => s.disablePlugin);
   const activatePlugin = usePluginStore((s) => s.activatePlugin);
@@ -82,16 +84,15 @@ export function PluginCard({
   const canCheckHealth =
     isExecutable && (state === "active" || state === "degraded");
 
-  let runtimeHint = "This plugin is ready to be managed from the installed registry.";
+  let runtimeHint = t("pluginCard.hintReady");
   if (!isExecutable) {
-    runtimeHint =
-      "Runtime actions unavailable: this plugin does not use an executable runtime host in the current platform phase.";
+    runtimeHint = t("pluginCard.hintNoRuntime");
   } else if (state === "disabled") {
-    runtimeHint = "Enable this plugin before activation or health checks are available.";
+    runtimeHint = t("pluginCard.hintDisabled");
   } else if (state === "installed") {
-    runtimeHint = "Installed but not enabled yet.";
+    runtimeHint = t("pluginCard.hintInstalled");
   } else if (state === "activating") {
-    runtimeHint = "Plugin is activating. Runtime checks will become available once activation finishes.";
+    runtimeHint = t("pluginCard.hintActivating");
   }
 
   return (
@@ -127,9 +128,9 @@ export function PluginCard({
         <PluginTrustBadge source={plugin.source} />
 
         <div className="grid gap-1 text-xs text-muted-foreground">
-          <p>Runtime: {plugin.spec.runtime}</p>
-          <p>Host: {plugin.runtime_host ?? "Not executable"}</p>
-          <p>Source: {plugin.source.type}</p>
+          <p>{t("pluginCard.runtime")}: {plugin.spec.runtime}</p>
+          <p>{t("pluginCard.host")}: {plugin.runtime_host ?? t("pluginCard.hostNotExecutable")}</p>
+          <p>{t("pluginCard.source")}: {plugin.source.type}</p>
         </div>
 
         <p className="text-xs text-muted-foreground">{runtimeHint}</p>
@@ -143,7 +144,7 @@ export function PluginCard({
               onClick={() => void disablePlugin(id)}
             >
               <Pause className="mr-1 size-3.5" />
-              Disable
+              {t("pluginCard.disable")}
             </Button>
           ) : canEnable ? (
             <Button
@@ -152,7 +153,7 @@ export function PluginCard({
               onClick={() => void enablePlugin(id)}
             >
               <Play className="mr-1 size-3.5" />
-              Enable
+              {t("pluginCard.enable")}
             </Button>
           ) : null}
 
@@ -164,7 +165,7 @@ export function PluginCard({
               onClick={() => void activatePlugin(id)}
             >
               <Zap className="mr-1 size-3.5" />
-              Activate
+              {t("pluginCard.activate")}
             </Button>
           ) : null}
 
@@ -176,7 +177,7 @@ export function PluginCard({
               onClick={() => void restartPlugin(id)}
             >
               <RotateCcw className="mr-1 size-3.5" />
-              Restart
+              {t("pluginCard.restart")}
             </Button>
           ) : null}
 
@@ -188,7 +189,7 @@ export function PluginCard({
               onClick={() => void checkHealth(id)}
             >
               <HeartPulse className="mr-1 size-3.5" />
-              Health
+              {t("pluginCard.health")}
             </Button>
           ) : null}
 
@@ -200,7 +201,7 @@ export function PluginCard({
               onClick={() => void deactivatePlugin(id)}
             >
               <Square className="mr-1 size-3.5" />
-              Deactivate
+              {t("pluginCard.deactivate")}
             </Button>
           ) : null}
 
@@ -212,7 +213,7 @@ export function PluginCard({
               onClick={() => void updatePlugin(plugin)}
             >
               <ArrowUpCircle className="mr-1 size-3.5" />
-              Update
+              {t("pluginCard.update")}
             </Button>
           ) : null}
 
@@ -224,7 +225,7 @@ export function PluginCard({
               onClick={() => onInvoke?.(plugin)}
             >
               <Terminal className="mr-1 size-3.5" />
-              Invoke
+              {t("pluginCard.invoke")}
             </Button>
           ) : null}
 
@@ -235,7 +236,7 @@ export function PluginCard({
             onClick={() => onConfigure?.(plugin)}
           >
             <Settings className="mr-1 size-3.5" />
-            Configure
+            {t("pluginCard.configure")}
           </Button>
 
           <Button
@@ -243,7 +244,7 @@ export function PluginCard({
             size="sm"
             onClick={() => onSelect?.(plugin)}
           >
-            Details
+            {t("pluginCard.details")}
           </Button>
 
           {/* Uninstall */}
@@ -253,7 +254,7 @@ export function PluginCard({
             onClick={() => void uninstallPlugin(id)}
           >
             <Trash2 className="mr-1 size-3.5" />
-            Uninstall
+            {t("pluginCard.uninstall")}
           </Button>
         </div>
       </CardContent>

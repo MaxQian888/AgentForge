@@ -7,6 +7,19 @@ const updateTask = jest.fn();
 const assignTask = jest.fn();
 const transitionTask = jest.fn();
 const decomposeTask = jest.fn();
+const fetchDispatchPreflight = jest.fn();
+const fetchDispatchHistory = jest.fn();
+const fetchDocsTree = jest.fn();
+const fetchEntityLinks = jest.fn();
+const createEntityLink = jest.fn();
+const deleteEntityLink = jest.fn();
+const fetchTaskComments = jest.fn();
+const createTaskComment = jest.fn();
+const setTaskCommentResolved = jest.fn();
+const deleteTaskComment = jest.fn();
+const fetchCustomFieldDefinitions = jest.fn();
+const fetchCustomFieldValues = jest.fn();
+const fetchMilestones = jest.fn();
 
 jest.mock("@/lib/stores/task-store", () => ({
   useTaskStore: (selector: (state: {
@@ -34,6 +47,7 @@ jest.mock("@/lib/stores/task-store", () => ({
           agentBranch: "",
           agentWorktree: "",
           agentSessionId: "",
+          labels: [],
           blockedBy: [],
           plannedStartAt: "2026-03-30T09:00:00.000Z",
           plannedEndAt: "2026-03-31T18:00:00.000Z",
@@ -57,6 +71,7 @@ jest.mock("@/lib/stores/task-store", () => ({
           agentBranch: "",
           agentWorktree: "",
           agentSessionId: "",
+          labels: [],
           blockedBy: [],
           plannedStartAt: null,
           plannedEndAt: null,
@@ -83,10 +98,88 @@ jest.mock("@/lib/stores/member-store", () => ({
     }),
 }));
 
+jest.mock("@/lib/stores/docs-store", () => ({
+  useDocsStore: (selector: (state: {
+    tree: unknown[];
+    fetchTree: typeof fetchDocsTree;
+  }) => unknown) =>
+    selector({
+      tree: [],
+      fetchTree: fetchDocsTree,
+    }),
+  flattenDocsTree: () => [],
+}));
+
+jest.mock("@/lib/stores/entity-link-store", () => ({
+  useEntityLinkStore: (selector: (state: {
+    linksByEntity: Record<string, unknown[]>;
+    fetchLinks: typeof fetchEntityLinks;
+    createLink: typeof createEntityLink;
+    deleteLink: typeof deleteEntityLink;
+  }) => unknown) =>
+    selector({
+      linksByEntity: {},
+      fetchLinks: fetchEntityLinks,
+      createLink: createEntityLink,
+      deleteLink: deleteEntityLink,
+    }),
+}));
+
+jest.mock("@/lib/stores/task-comment-store", () => ({
+  useTaskCommentStore: (selector: (state: {
+    commentsByTask: Record<string, unknown[]>;
+    fetchComments: typeof fetchTaskComments;
+    createComment: typeof createTaskComment;
+    setResolved: typeof setTaskCommentResolved;
+    deleteComment: typeof deleteTaskComment;
+  }) => unknown) =>
+    selector({
+      commentsByTask: {},
+      fetchComments: fetchTaskComments,
+      createComment: createTaskComment,
+      setResolved: setTaskCommentResolved,
+      deleteComment: deleteTaskComment,
+    }),
+}));
+
+jest.mock("@/lib/stores/custom-field-store", () => ({
+  useCustomFieldStore: (selector: (state: {
+    definitionsByProject: Record<string, unknown[]>;
+    valuesByTask: Record<string, unknown[]>;
+    fetchDefinitions: typeof fetchCustomFieldDefinitions;
+    fetchTaskValues: typeof fetchCustomFieldValues;
+  }) => unknown) =>
+    selector({
+      definitionsByProject: {},
+      valuesByTask: {},
+      fetchDefinitions: fetchCustomFieldDefinitions,
+      fetchTaskValues: fetchCustomFieldValues,
+    }),
+}));
+
+jest.mock("@/lib/stores/milestone-store", () => ({
+  useMilestoneStore: (selector: (state: {
+    milestonesByProject: Record<string, unknown[]>;
+    fetchMilestones: typeof fetchMilestones;
+  }) => unknown) =>
+    selector({
+      milestonesByProject: {},
+      fetchMilestones,
+    }),
+}));
+
 jest.mock("@/lib/stores/agent-store", () => ({
-  useAgentStore: (selector: (state: { agents: unknown[] }) => unknown) =>
+  useAgentStore: (selector: (state: {
+    agents: unknown[];
+    dispatchHistoryByTask: Record<string, unknown[]>;
+    fetchDispatchPreflight: typeof fetchDispatchPreflight;
+    fetchDispatchHistory: typeof fetchDispatchHistory;
+  }) => unknown) =>
     selector({
       agents: [],
+      dispatchHistoryByTask: {},
+      fetchDispatchPreflight,
+      fetchDispatchHistory,
     }),
 }));
 
@@ -106,6 +199,7 @@ const task: Task = {
   agentBranch: "",
   agentWorktree: "",
   agentSessionId: "",
+  labels: [],
   blockedBy: [],
   plannedStartAt: "2026-03-30T09:00:00.000Z",
   plannedEndAt: "2026-03-31T18:00:00.000Z",
@@ -123,6 +217,21 @@ describe("TaskDetailPanel", () => {
     transitionTask.mockReset();
     transitionTask.mockResolvedValue(undefined);
     decomposeTask.mockReset();
+    fetchDispatchPreflight.mockReset();
+    fetchDispatchPreflight.mockResolvedValue(null);
+    fetchDispatchHistory.mockReset();
+    fetchDispatchHistory.mockResolvedValue(undefined);
+    fetchDocsTree.mockReset();
+    fetchEntityLinks.mockReset();
+    createEntityLink.mockReset();
+    deleteEntityLink.mockReset();
+    fetchTaskComments.mockReset();
+    createTaskComment.mockReset();
+    setTaskCommentResolved.mockReset();
+    deleteTaskComment.mockReset();
+    fetchCustomFieldDefinitions.mockReset();
+    fetchCustomFieldValues.mockReset();
+    fetchMilestones.mockReset();
     decomposeTask.mockResolvedValue({
       summary: "Split the task into API and UI follow-ups.",
       subtasks: [
@@ -144,6 +253,7 @@ describe("TaskDetailPanel", () => {
           agentBranch: "",
           agentWorktree: "",
           agentSessionId: "",
+          labels: [],
           blockedBy: [],
           plannedStartAt: null,
           plannedEndAt: null,

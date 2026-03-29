@@ -305,6 +305,52 @@ func TestDeliverEnvelope_FallsBackToTextForStructuredPayload(t *testing.T) {
 	}
 }
 
+func TestDeliverEnvelope_ReportsFallbackReasonsAcrossPlatforms(t *testing.T) {
+	tests := []struct {
+		name   string
+		source string
+		target *ReplyTarget
+	}{
+		{name: "slack send", source: "slack"},
+		{name: "discord send", source: "discord"},
+		{name: "telegram send", source: "telegram"},
+		{name: "feishu send", source: "feishu"},
+		{name: "wecom send", source: "wecom"},
+		{name: "qq send", source: "qq"},
+		{name: "qqbot send", source: "qqbot"},
+		{
+			name:   "dingtalk reply",
+			source: "dingtalk",
+			target: &ReplyTarget{
+				Platform:       "dingtalk",
+				ChatID:         "chat-1",
+				SessionWebhook: "https://session.example/reply",
+				UseReply:       true,
+			},
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			platform := &deliveryTestPlatform{}
+			metadata := NormalizeMetadata(PlatformMetadata{Source: tc.source}, tc.source)
+			receipt, err := DeliverEnvelope(context.Background(), platform, metadata, "chat-1", &DeliveryEnvelope{
+				Structured: &StructuredMessage{
+					Title: "Task Update",
+					Body:  "Still running.",
+				},
+				ReplyTarget: tc.target,
+			})
+			if err != nil {
+				t.Fatalf("DeliverEnvelope error: %v", err)
+			}
+			if strings.TrimSpace(receipt.FallbackReason) == "" {
+				t.Fatalf("receipt = %+v, want fallback reason", receipt)
+			}
+		})
+	}
+}
+
 func TestSynthesizeNativeDelivery_RequiresDeferredFeishuContextAndContent(t *testing.T) {
 	if synthesized := synthesizeNativeDelivery(PlatformMetadata{Source: "slack"}, &DeliveryEnvelope{
 		Content: "hello",

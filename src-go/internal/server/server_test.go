@@ -47,6 +47,8 @@ func registerTestRoutes(e *echo.Echo, cfg *config.Config, authSvc *service.AuthS
 		repository.NewMilestoneRepository(nil),
 		repository.NewTaskProgressRepository(nil),
 		repository.NewAgentRunRepository(nil),
+		repository.NewAgentPoolQueueRepository(nil),
+		repository.NewDispatchAttemptRepository(nil),
 		repository.NewNotificationRepository(nil),
 		repository.NewReviewRepository(nil),
 		repository.NewReviewAggregationRepository(nil),
@@ -62,6 +64,7 @@ func registerTestRoutes(e *echo.Echo, cfg *config.Config, authSvc *service.AuthS
 		repository.NewPageRecentAccessRepository(nil),
 		ws.NewHub(),
 		bridge.NewClient("http://localhost:7778"),
+		nil,
 		nil,
 		nil,
 		nil,
@@ -400,12 +403,14 @@ func TestRegisterRoutes_IMOperatorRoutesPresent(t *testing.T) {
 	registerTestRoutes(e, cfg, authSvc, cache)
 
 	expected := map[string]struct{}{
-		http.MethodGet + " /api/v1/im/channels":        {},
-		http.MethodPost + " /api/v1/im/channels":       {},
-		http.MethodPut + " /api/v1/im/channels/:id":    {},
-		http.MethodDelete + " /api/v1/im/channels/:id": {},
-		http.MethodGet + " /api/v1/im/bridge/status":   {},
-		http.MethodGet + " /api/v1/im/deliveries":      {},
+		http.MethodGet + " /api/v1/im/channels":              {},
+		http.MethodPost + " /api/v1/im/channels":             {},
+		http.MethodPut + " /api/v1/im/channels/:id":          {},
+		http.MethodDelete + " /api/v1/im/channels/:id":       {},
+		http.MethodGet + " /api/v1/im/bridge/status":         {},
+		http.MethodGet + " /api/v1/im/deliveries":            {},
+		http.MethodPost + " /api/v1/im/deliveries/:id/retry": {},
+		http.MethodGet + " /api/v1/im/event-types":           {},
 	}
 
 	for _, route := range e.Routes() {

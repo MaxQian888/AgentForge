@@ -3,6 +3,7 @@
 import { useEffect, useMemo } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Bot, Network } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Card, CardContent } from "@/components/ui/card";
@@ -15,8 +16,10 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { EventBadgeList } from "@/components/shared/event-badge-list";
 import { cn } from "@/lib/utils";
 import { useAgentStore, type AgentStatus } from "@/lib/stores/agent-store";
+import { useDashboardStore } from "@/lib/stores/dashboard-store";
 
 const statusColors: Record<AgentStatus, string> = {
   starting: "bg-blue-500/15 text-blue-700 dark:text-blue-400",
@@ -35,6 +38,7 @@ function PoolDiagnostics({
   pool: import("@/lib/stores/agent-store").AgentPoolSummary;
   agents: import("@/lib/stores/agent-store").Agent[];
 }) {
+  const t = useTranslations("agents");
   const reasonCounts = useMemo(() => {
     const counts: Record<string, number> = {};
     for (const entry of pool.queue ?? []) {
@@ -58,35 +62,35 @@ function PoolDiagnostics({
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-base">Pool Diagnostics</CardTitle>
+        <CardTitle className="text-base">{t("diagnostics.title")}</CardTitle>
         <CardDescription>
-          Runtime health, warm reuse, and queue analysis.
+          {t("diagnostics.description")}
         </CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
         <div className="grid gap-4 sm:grid-cols-3">
           <div className="rounded-md border p-3">
-            <p className="text-xs text-muted-foreground">Warm Reuse Ratio</p>
+            <p className="text-xs text-muted-foreground">{t("diagnostics.warmReuseRatio")}</p>
             <p className="text-lg font-semibold">{warmRatio}%</p>
             <p className="text-xs text-muted-foreground">
-              {pool.warm ?? 0} warm / {pool.active} active
+              {t("diagnostics.warmActive", { warm: pool.warm ?? 0, active: pool.active })}
             </p>
           </div>
           <div className="rounded-md border p-3">
-            <p className="text-xs text-muted-foreground">Pool Health</p>
+            <p className="text-xs text-muted-foreground">{t("diagnostics.poolHealth")}</p>
             <p className="text-lg font-semibold">
               {pool.degraded ? (
-                <span className="text-amber-600">Degraded</span>
+                <span className="text-amber-600">{t("diagnostics.degraded")}</span>
               ) : (
-                <span className="text-emerald-600">Healthy</span>
+                <span className="text-emerald-600">{t("diagnostics.healthy")}</span>
               )}
             </p>
             <p className="text-xs text-muted-foreground">
-              {pool.available} slots available
+              {t("diagnostics.slotsAvailable", { count: pool.available })}
             </p>
           </div>
           <div className="rounded-md border p-3">
-            <p className="text-xs text-muted-foreground">Agent Distribution</p>
+            <p className="text-xs text-muted-foreground">{t("diagnostics.agentDistribution")}</p>
             <div className="flex flex-wrap gap-1 mt-1">
               {Object.entries(statusCounts).map(([status, count]) => (
                 <Badge key={status} variant="secondary" className="text-xs">
@@ -98,7 +102,7 @@ function PoolDiagnostics({
         </div>
         {Object.keys(reasonCounts).length > 0 && (
           <div>
-            <p className="text-sm font-medium mb-2">Blocked / Queued Reasons</p>
+            <p className="text-sm font-medium mb-2">{t("diagnostics.blockedQueuedReasons")}</p>
             <div className="flex flex-wrap gap-2">
               {Object.entries(reasonCounts).map(([reason, count]) => (
                 <Badge key={reason} variant="outline">
@@ -114,14 +118,34 @@ function PoolDiagnostics({
 }
 
 export default function AgentsPage() {
+  const t = useTranslations("agents");
   const searchParams = useSearchParams();
-  const { agents, fetchAgents, fetchPool, pool, loading } = useAgentStore();
+  const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
+  const {
+    agents,
+    fetchAgents,
+    fetchPool,
+    fetchRuntimeCatalog,
+    fetchBridgeHealth,
+    fetchDispatchStats,
+    resumeAgent,
+    runtimeCatalog,
+    bridgeHealth,
+    dispatchStats,
+    pool,
+    loading,
+  } = useAgentStore();
   const requestedMemberId = searchParams.get("member");
 
   useEffect(() => {
     fetchAgents();
     fetchPool();
-  }, [fetchAgents, fetchPool]);
+    void fetchRuntimeCatalog();
+    void fetchBridgeHealth();
+    if (selectedProjectId) {
+      void fetchDispatchStats(selectedProjectId);
+    }
+  }, [fetchAgents, fetchBridgeHealth, fetchDispatchStats, fetchPool, fetchRuntimeCatalog, selectedProjectId]);
 
   const visibleAgents = useMemo(
     () =>
@@ -130,25 +154,49 @@ export default function AgentsPage() {
         : agents,
     [agents, requestedMemberId]
   );
+  const pausedAgents = useMemo(
+    () => visibleAgents.filter((agent) => agent.status === "paused"),
+    [visibleAgents],
+  );
+  const bridgeDegraded = bridgeHealth?.status === "degraded";
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Agent Monitor</h1>
+        <h1 className="text-2xl font-bold">{t("monitor.title")}</h1>
         <Link
           href="/teams"
           className="inline-flex items-center gap-1.5 text-sm text-muted-foreground hover:text-foreground"
         >
           <Network className="size-4" />
-          Agent Teams
+          {t("monitor.teamsLink")}
         </Link>
       </div>
+
+      {bridgeHealth ? (
+        <Card className={bridgeDegraded ? "border-amber-500/40" : "border-emerald-500/30"}>
+          <CardContent className="flex flex-col gap-2 py-4 sm:flex-row sm:items-center sm:justify-between">
+            <div>
+              <div className="text-sm font-medium">Bridge Health</div>
+              <div className="text-sm text-muted-foreground">
+                Status: {bridgeHealth.status}
+                {bridgeHealth.lastCheck ? `, last check ${new Date(bridgeHealth.lastCheck).toLocaleString()}` : ""}
+              </div>
+            </div>
+            <div className="flex gap-3 text-xs text-muted-foreground">
+              <span>Active {bridgeHealth.pool.active}</span>
+              <span>Available {bridgeHealth.pool.available}</span>
+              <span>Warm {bridgeHealth.pool.warm}</span>
+            </div>
+          </CardContent>
+        </Card>
+      ) : null}
 
       {pool ? (
         <div className="grid gap-4 sm:grid-cols-2 xl:grid-cols-5">
           <Card>
             <CardContent className="py-4">
-              <p className="text-sm text-muted-foreground">Active Slots</p>
+              <p className="text-sm text-muted-foreground">{t("pool.activeSlots")}</p>
               <p className="text-2xl font-bold">
                 {pool.active} / {pool.max}
               </p>
@@ -156,25 +204,25 @@ export default function AgentsPage() {
           </Card>
           <Card>
             <CardContent className="py-4">
-              <p className="text-sm text-muted-foreground">Available Slots</p>
+              <p className="text-sm text-muted-foreground">{t("pool.availableSlots")}</p>
               <p className="text-2xl font-bold">{pool.available}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="py-4">
-              <p className="text-sm text-muted-foreground">Paused Sessions</p>
+              <p className="text-sm text-muted-foreground">{t("pool.pausedSessions")}</p>
               <p className="text-2xl font-bold">{pool.pausedResumable}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="py-4">
-              <p className="text-sm text-muted-foreground">Warm Slots</p>
+              <p className="text-sm text-muted-foreground">{t("pool.warmSlots")}</p>
               <p className="text-2xl font-bold">{pool.warm ?? 0}</p>
             </CardContent>
           </Card>
           <Card>
             <CardContent className="py-4">
-              <p className="text-sm text-muted-foreground">Queued Admissions</p>
+              <p className="text-sm text-muted-foreground">{t("pool.queuedAdmissions")}</p>
               <p className="text-2xl font-bold">{pool.queued ?? 0}</p>
             </CardContent>
           </Card>
@@ -185,15 +233,90 @@ export default function AgentsPage() {
         <PoolDiagnostics pool={pool} agents={agents} />
       ) : null}
 
+      {dispatchStats ? (
+        <div className="grid gap-4 md:grid-cols-3">
+          <Card>
+            <CardContent className="py-4">
+              <p className="text-sm text-muted-foreground">{t("stats.outcomes")}</p>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {Object.entries(dispatchStats.outcomes).map(([status, count]) => (
+                  <Badge key={status} variant="secondary" className="text-xs">
+                    {t(`dispatchStatus.${status}`)}: {count}
+                  </Badge>
+                ))}
+              </div>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <p className="text-sm text-muted-foreground">{t("stats.queueDepth")}</p>
+              <p className="text-2xl font-bold">{dispatchStats.queueDepth}</p>
+              <p className="text-xs text-muted-foreground">
+                {dispatchStats.medianWaitSeconds != null
+                  ? t("stats.medianWait", { seconds: dispatchStats.medianWaitSeconds.toFixed(0) })
+                  : t("stats.medianWaitEmpty")}
+              </p>
+            </CardContent>
+          </Card>
+          <Card>
+            <CardContent className="py-4">
+              <p className="text-sm text-muted-foreground">{t("stats.blockedReasons")}</p>
+              <div className="mt-2 flex flex-wrap gap-1">
+                {Object.entries(dispatchStats.blockedReasons).length > 0 ? (
+                  Object.entries(dispatchStats.blockedReasons).map(([reason, count]) => (
+                    <Badge key={reason} variant="outline" className="text-xs">
+                      {t(`guardrail.${reason}`)}: {count}
+                    </Badge>
+                  ))
+                ) : (
+                  <span className="text-xs text-muted-foreground">{t("stats.none")}</span>
+                )}
+              </div>
+            </CardContent>
+          </Card>
+        </div>
+      ) : null}
+
+      {runtimeCatalog?.runtimes?.length ? (
+        <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+          {runtimeCatalog.runtimes.map((runtime) => (
+            <Card key={runtime.runtime}>
+              <CardHeader className="pb-3">
+                <CardTitle className="text-base">{runtime.label}</CardTitle>
+                <CardDescription>
+                  {runtime.defaultProvider} / {runtime.defaultModel}
+                </CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-2 text-sm">
+                <Badge variant={runtime.available && !bridgeDegraded ? "secondary" : "outline"}>
+                  {runtime.available && !bridgeDegraded ? "Available" : "Unavailable"}
+                </Badge>
+                <div className="text-muted-foreground">
+                  Providers: {runtime.compatibleProviders.join(", ") || "-"}
+                </div>
+                {runtime.diagnostics.length > 0 ? (
+                  <div className="rounded-md border bg-muted/30 p-2 text-xs text-muted-foreground">
+                    {runtime.diagnostics.map((diagnostic) => (
+                      <p key={`${runtime.runtime}-${diagnostic.code}`}>{diagnostic.message}</p>
+                    ))}
+                  </div>
+                ) : null}
+              </CardContent>
+            </Card>
+          ))}
+        </div>
+      ) : null}
+
       {pool?.queue?.length ? (
         <div className="rounded-md border">
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Queued Task</TableHead>
-                <TableHead>Runtime</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead>Reason</TableHead>
+                <TableHead>{t("queue.task")}</TableHead>
+                <TableHead>{t("queue.runtime")}</TableHead>
+                <TableHead>{t("queue.priority")}</TableHead>
+                <TableHead>{t("queue.status")}</TableHead>
+                <TableHead>{t("queue.reason")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -203,6 +326,9 @@ export default function AgentsPage() {
                   <TableCell className="text-xs text-muted-foreground">
                     {entry.runtime || "-"}
                     <div>{entry.provider || "-"}</div>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {t(`priority.${priorityLabel(entry.priority)}`)}
                   </TableCell>
                   <TableCell>
                     <Badge variant="secondary">{entry.status}</Badge>
@@ -217,16 +343,55 @@ export default function AgentsPage() {
         </div>
       ) : null}
 
+      {pausedAgents.length > 0 ? (
+        <div className="rounded-md border">
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Paused Task</TableHead>
+                <TableHead>Runtime</TableHead>
+                <TableHead>Last Activity</TableHead>
+                <TableHead className="text-right">Action</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {pausedAgents.map((agent) => (
+                <TableRow key={`paused-${agent.id}`}>
+                  <TableCell className="font-medium">{agent.taskTitle}</TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {agent.runtime || "-"}
+                    <div>{agent.provider || "-"}</div>
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {agent.lastActivity ? new Date(agent.lastActivity).toLocaleString() : "-"}
+                  </TableCell>
+                  <TableCell className="text-right">
+                    <button
+                      type="button"
+                      className="text-sm text-primary hover:underline disabled:text-muted-foreground"
+                      disabled={bridgeDegraded}
+                      onClick={() => void resumeAgent(agent.id)}
+                    >
+                      Resume
+                    </button>
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        </div>
+      ) : null}
+
       {loading ? (
-        <p className="text-muted-foreground">Loading agents...</p>
+        <p className="text-muted-foreground">{t("monitor.loading")}</p>
       ) : visibleAgents.length === 0 ? (
         <Card>
           <CardContent className="py-12 text-center">
             <Bot className="mx-auto mb-4 size-12 text-muted-foreground" />
             <p className="text-muted-foreground">
               {requestedMemberId
-                ? "No agents match the selected team member."
-                : "No agents running. Spawn an agent from a task to get started."}
+                ? t("empty.noMatch")
+                : t("empty.noAgents")}
             </p>
           </CardContent>
         </Card>
@@ -235,13 +400,14 @@ export default function AgentsPage() {
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>Task</TableHead>
-                <TableHead>Role</TableHead>
-                <TableHead>Runtime</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Turns</TableHead>
-                <TableHead>Cost / Budget</TableHead>
-                <TableHead>Last Activity</TableHead>
+                <TableHead>{t("table.task")}</TableHead>
+                <TableHead>{t("table.role")}</TableHead>
+                <TableHead>{t("table.runtime")}</TableHead>
+                <TableHead>{t("table.dispatch")}</TableHead>
+                <TableHead>{t("table.status")}</TableHead>
+                <TableHead className="text-right">{t("table.turns")}</TableHead>
+                <TableHead>{t("table.costBudget")}</TableHead>
+                <TableHead>{t("table.lastActivity")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -265,12 +431,18 @@ export default function AgentsPage() {
                       {agent.runtime || "-"}
                       <div>{agent.provider || "-"}</div>
                     </TableCell>
+                    <TableCell title={agent.guardrailType ? t(`guardrail.${agent.guardrailType}`) : undefined}>
+                      <EventBadgeList
+                        events={[t(`dispatchStatus.${agent.dispatchStatus ?? "started"}`)]}
+                        emptyLabel={t("stats.none")}
+                      />
+                    </TableCell>
                     <TableCell>
                       <Badge
                         variant="secondary"
                         className={cn(statusColors[agent.status])}
                       >
-                        {agent.status}
+                        {t(`status.${agent.status}`)}
                       </Badge>
                     </TableCell>
                     <TableCell className="text-right">{agent.turns}</TableCell>
@@ -306,4 +478,17 @@ export default function AgentsPage() {
       )}
     </div>
   );
+}
+
+function priorityLabel(priority?: number): "low" | "normal" | "high" | "critical" {
+  switch (priority) {
+    case 30:
+      return "critical";
+    case 20:
+      return "high";
+    case 10:
+      return "normal";
+    default:
+      return "low";
+  }
 }

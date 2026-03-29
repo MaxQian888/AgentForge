@@ -8,6 +8,7 @@ import (
 	"os"
 	"slices"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/google/uuid"
@@ -51,6 +52,10 @@ type WorktreeManager interface {
 
 type AgentRoleStore interface {
 	Get(id string) (*rolepkg.Manifest, error)
+}
+
+type agentRoleSkillRootProvider interface {
+	SkillsDir() string
 }
 
 // BridgeClient defines the interface for calling the TypeScript bridge.
@@ -117,22 +122,27 @@ var (
 )
 
 type AgentService struct {
-	runRepo      AgentRunRepository
-	taskRepo     AgentTaskRepository
-	projects     AgentProjectRepository
-	hub          *ws.Hub
-	bridge       BridgeClient
-	worktrees    WorktreeManager
-	roleStore    AgentRoleStore
-	progress     *TaskProgressService
-	imProgress   IMBoundProgressNotifier
-	pool         *pool.Pool
-	queueStore   AgentQueueStore
-	teamSvc      *TeamService
-	memorySvc    *MemoryService
-	eventRepo    AgentEventRepository
-	sprintCostUp SprintCostUpdater
-	automation   AutomationEventEvaluator
+	runRepo               AgentRunRepository
+	taskRepo              AgentTaskRepository
+	projects              AgentProjectRepository
+	hub                   *ws.Hub
+	bridge                BridgeClient
+	bridgeHealth          *BridgeHealthService
+	worktrees             WorktreeManager
+	roleStore             AgentRoleStore
+	progress              *TaskProgressService
+	imProgress            IMBoundProgressNotifier
+	pool                  *pool.Pool
+	queueStore            AgentQueueStore
+	teamSvc               *TeamService
+	memorySvc             *MemoryService
+	bridgeActivityMu      sync.Mutex
+	bridgeLastActivity    map[uuid.UUID]time.Time
+	bridgeActivityWaiters map[uuid.UUID][]chan struct{}
+	eventRepo             AgentEventRepository
+	sprintCostUp          SprintCostUpdater
+	automation            AutomationEventEvaluator
+	budgetCheck           DispatchBudgetChecker
 }
 
 func agentRunLogFields(run *model.AgentRun) log.Fields {
@@ -175,13 +185,15 @@ func NewAgentService(
 		roles = roleStore[0]
 	}
 	return &AgentService{
-		runRepo:   runRepo,
-		taskRepo:  taskRepo,
-		projects:  projects,
-		hub:       hub,
-		bridge:    bridge,
-		worktrees: worktrees,
-		roleStore: roles,
+		runRepo:               runRepo,
+		taskRepo:              taskRepo,
+		projects:              projects,
+		hub:                   hub,
+		bridge:                bridge,
+		worktrees:             worktrees,
+		roleStore:             roles,
+		bridgeLastActivity:    make(map[uuid.UUID]time.Time),
+		bridgeActivityWaiters: make(map[uuid.UUID][]chan struct{}),
 	}
 }
 
@@ -195,6 +207,17 @@ func (s *AgentService) SetIMProgressNotifier(notifier IMBoundProgressNotifier) {
 
 func (s *AgentService) SetPool(agentPool *pool.Pool) {
 	s.pool = agentPool
+}
+
+func (s *AgentService) SetBridgeHealth(health *BridgeHealthService) {
+	s.bridgeHealth = health
+}
+
+func (s *AgentService) BridgeStatus() string {
+	if s.bridgeHealth == nil {
+		return BridgeStatusReady
+	}
+	return s.bridgeHealth.Status()
 }
 
 func (s *AgentService) SetQueueStore(store AgentQueueStore) {
@@ -219,6 +242,10 @@ func (s *AgentService) SetSprintCostUpdater(up SprintCostUpdater) {
 
 func (s *AgentService) SetAutomationEvaluator(evaluator AutomationEventEvaluator) {
 	s.automation = evaluator
+}
+
+func (s *AgentService) SetDispatchBudgetChecker(checker DispatchBudgetChecker) {
+	s.budgetCheck = checker
 }
 
 type bridgeExecutionContext struct {
@@ -383,6 +410,7 @@ func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uu
 		OccurredAt:   run.StartedAt,
 		UpdateHealth: true,
 	})
+	go s.verifySpawnStarted(task.ID, run.ID, time.Now().UTC())
 	return run, nil
 }
 
@@ -818,7 +846,7 @@ func (s *AgentService) QueueAgentAdmission(ctx context.Context, input QueueAgent
 	return s.queueStore.QueueAgentAdmission(ctx, input)
 }
 
-func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.TaskDispatchResponse, error) {
+func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string, priority int) (*model.TaskDispatchResponse, error) {
 	runs, err := s.runRepo.GetByTask(ctx, taskID)
 	if err != nil {
 		return nil, fmt.Errorf("check existing runs: %w", err)
@@ -856,6 +884,7 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 		Provider:  selection.Provider,
 		Model:     selection.Model,
 		RoleID:    resolvedRoleID,
+		Priority:  priority,
 		BudgetUSD: budgetUsd,
 		Reason:    "agent pool is at capacity",
 	})
@@ -893,6 +922,7 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 				Provider:  selection.Provider,
 				Model:     selection.Model,
 				RoleID:    resolvedRoleID,
+				Priority:  priority,
 				BudgetUSD: budgetUsd,
 				Reason:    "agent pool is at capacity",
 			})
@@ -1389,6 +1419,32 @@ func (s *AgentService) promoteQueuedAdmission(ctx context.Context, completedRun 
 		return
 	}
 
+	if s.budgetCheck != nil {
+		task, taskErr := s.taskRepo.GetByID(ctx, taskID)
+		if taskErr != nil || task == nil {
+			_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusFailed, "queued task is unavailable", nil)
+			return
+		}
+		check, checkErr := s.budgetCheck.CheckBudget(ctx, task.ProjectID, task.SprintID, entry.BudgetUSD)
+		if checkErr == nil && check != nil && !check.Allowed {
+			scope := strings.TrimSpace(check.Scope)
+			if scope == "" {
+				scope = inferBudgetScope(check.Reason)
+			}
+			_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusQueued, check.Reason, nil)
+			s.broadcastEvent(ws.EventTaskDispatchBlocked, task.ProjectID.String(), map[string]any{
+				"queue": entry,
+				"dispatch": model.DispatchOutcome{
+					Status:         model.DispatchStatusBlocked,
+					Reason:         check.Reason,
+					GuardrailType:  model.DispatchGuardrailTypeBudget,
+					GuardrailScope: scope,
+				},
+			})
+			return
+		}
+	}
+
 	run, err := s.Spawn(ctx, taskID, memberID, entry.Runtime, entry.Provider, entry.Model, entry.BudgetUSD, entry.RoleID)
 	if err != nil {
 		log.WithFields(log.Fields{
@@ -1439,9 +1495,12 @@ func (s *AgentService) resolveRoleConfig(roleID string) (*bridgeclient.RoleConfi
 		return nil, fmt.Errorf("load agent role %s: %w", roleID, err)
 	}
 
-	profile := rolepkg.BuildExecutionProfile(manifest)
+	profile := rolepkg.BuildExecutionProfile(manifest, rolepkg.WithSkillRoot(resolveAgentRoleSkillsDir(s.roleStore)))
 	if profile == nil {
 		return nil, fmt.Errorf("%w: %s", ErrAgentRoleNotFound, roleID)
+	}
+	if rolepkg.HasBlockingSkillDiagnostics(profile) {
+		return nil, fmt.Errorf("load agent role %s: blocking skill projection errors: %s", roleID, joinBlockingSkillMessages(profile.SkillDiagnostics))
 	}
 
 	return &bridgeclient.RoleConfig{
@@ -1458,6 +1517,9 @@ func (s *AgentService) resolveRoleConfig(roleID string) (*bridgeclient.RoleConfi
 		MaxBudgetUsd:     profile.MaxBudgetUsd,
 		MaxTurns:         profile.MaxTurns,
 		PermissionMode:   profile.PermissionMode,
+		LoadedSkills:     append([]model.RoleExecutionSkill(nil), profile.LoadedSkills...),
+		AvailableSkills:  append([]model.RoleExecutionSkill(nil), profile.AvailableSkills...),
+		SkillDiagnostics: append([]model.RoleExecutionSkillDiagnostic(nil), profile.SkillDiagnostics...),
 	}, nil
 }
 
@@ -1473,6 +1535,9 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 	if event == nil || strings.TrimSpace(event.TaskID) == "" {
 		return nil
 	}
+	if shouldIgnoreBridgeTaskID(event.TaskID) {
+		return nil
+	}
 
 	run, err := s.resolveRunForBridgeEvent(ctx, event.TaskID)
 	if err != nil {
@@ -1481,6 +1546,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		}
 		return err
 	}
+	s.noteBridgeActivity(run.TaskID, bridgeEventTime(event.TimestampMS))
 	eventFields := agentRunLogFields(run)
 	eventFields["bridgeTaskId"] = event.TaskID
 	eventFields["sessionId"] = event.SessionID
@@ -1547,6 +1613,24 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 	return nil
 }
 
+func resolveAgentRoleSkillsDir(store AgentRoleStore) string {
+	provider, ok := store.(agentRoleSkillRootProvider)
+	if !ok {
+		return ""
+	}
+	return strings.TrimSpace(provider.SkillsDir())
+}
+
+func joinBlockingSkillMessages(diagnostics []model.RoleExecutionSkillDiagnostic) string {
+	messages := make([]string, 0, len(diagnostics))
+	for _, diagnostic := range diagnostics {
+		if diagnostic.Blocking {
+			messages = append(messages, diagnostic.Message)
+		}
+	}
+	return strings.Join(messages, "; ")
+}
+
 func (s *AgentService) resolveRunForBridgeEvent(ctx context.Context, taskID string) (*model.AgentRun, error) {
 	parsedTaskID, err := uuid.Parse(taskID)
 	if err != nil {
@@ -1597,6 +1681,79 @@ func bridgeEventTime(timestampMS int64) time.Time {
 		return time.Now().UTC()
 	}
 	return time.UnixMilli(timestampMS).UTC()
+}
+
+func (s *AgentService) verifySpawnStarted(taskID, runID uuid.UUID, startedAt time.Time) {
+	if s == nil || s.bridge == nil {
+		return
+	}
+	if s.waitForBridgeActivity(taskID, startedAt, 5*time.Second) {
+		return
+	}
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	status, err := s.bridge.GetStatus(ctx, taskID.String())
+	if err != nil || status == nil {
+		if err != nil {
+			log.WithError(err).WithField("taskId", taskID.String()).Warn("agent spawn status verification failed")
+		}
+		return
+	}
+	if nextStatus, ok := mapBridgeRuntimeStatus(status.State); ok && nextStatus != "" && nextStatus != model.AgentRunStatusRunning {
+		_ = s.UpdateStatus(ctx, runID, nextStatus)
+	}
+}
+
+func (s *AgentService) noteBridgeActivity(taskID uuid.UUID, occurredAt time.Time) {
+	s.bridgeActivityMu.Lock()
+	if last, ok := s.bridgeLastActivity[taskID]; !ok || occurredAt.After(last) {
+		s.bridgeLastActivity[taskID] = occurredAt
+	}
+	waiters := append([]chan struct{}(nil), s.bridgeActivityWaiters[taskID]...)
+	delete(s.bridgeActivityWaiters, taskID)
+	s.bridgeActivityMu.Unlock()
+
+	for _, waiter := range waiters {
+		close(waiter)
+	}
+}
+
+func (s *AgentService) waitForBridgeActivity(taskID uuid.UUID, since time.Time, timeout time.Duration) bool {
+	ch := make(chan struct{})
+
+	s.bridgeActivityMu.Lock()
+	if last, ok := s.bridgeLastActivity[taskID]; ok && !last.Before(since) {
+		s.bridgeActivityMu.Unlock()
+		return true
+	}
+	s.bridgeActivityWaiters[taskID] = append(s.bridgeActivityWaiters[taskID], ch)
+	s.bridgeActivityMu.Unlock()
+
+	timer := time.NewTimer(timeout)
+	defer timer.Stop()
+
+	select {
+	case <-ch:
+		return true
+	case <-timer.C:
+		s.bridgeActivityMu.Lock()
+		waiters := s.bridgeActivityWaiters[taskID]
+		next := waiters[:0]
+		for _, waiter := range waiters {
+			if waiter != ch {
+				next = append(next, waiter)
+			}
+		}
+		if len(next) == 0 {
+			delete(s.bridgeActivityWaiters, taskID)
+		} else {
+			s.bridgeActivityWaiters[taskID] = next
+		}
+		s.bridgeActivityMu.Unlock()
+		return false
+	}
 }
 
 func buildAgentRunStructuredMessage(run *model.AgentRun, content string, terminal bool) *model.IMStructuredMessage {

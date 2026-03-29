@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
@@ -45,7 +46,7 @@ func (h *ReviewHandler) WithAggregationService(_ any) *ReviewHandler {
 func (h *ReviewHandler) Trigger(c echo.Context) error {
 	req := new(model.TriggerReviewRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -61,12 +62,12 @@ func (h *ReviewHandler) Trigger(c echo.Context) error {
 func (h *ReviewHandler) Complete(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid review ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidReviewID)
 	}
 
 	req := new(model.CompleteReviewRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -82,7 +83,7 @@ func (h *ReviewHandler) Complete(c echo.Context) error {
 func (h *ReviewHandler) Get(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid review ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidReviewID)
 	}
 
 	review, err := h.service.GetByID(c.Request().Context(), id)
@@ -95,7 +96,7 @@ func (h *ReviewHandler) Get(c echo.Context) error {
 func (h *ReviewHandler) ListByTask(c echo.Context) error {
 	taskID, err := uuid.Parse(c.Param("taskId"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 
 	reviews, err := h.service.GetByTask(c.Request().Context(), taskID)
@@ -135,12 +136,12 @@ func (h *ReviewHandler) ListAll(c echo.Context) error {
 func (h *ReviewHandler) Approve(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid review ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidReviewID)
 	}
 
 	req := new(model.ApproveReviewRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 
 	review, err := h.service.ApproveReview(c.Request().Context(), id, resolveReviewActor(c), req.Comment)
@@ -153,12 +154,12 @@ func (h *ReviewHandler) Approve(c echo.Context) error {
 func (h *ReviewHandler) Reject(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid review ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidReviewID)
 	}
 
 	req := new(model.RejectReviewRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -174,7 +175,7 @@ func (h *ReviewHandler) Reject(c echo.Context) error {
 func (h *ReviewHandler) IngestCIResult(c echo.Context) error {
 	req := new(model.CIReviewRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -190,12 +191,12 @@ func (h *ReviewHandler) IngestCIResult(c echo.Context) error {
 func (h *ReviewHandler) RequestChanges(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid review ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidReviewID)
 	}
 
 	req := new(model.RequestChangesReviewRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 
 	review, err := h.service.RequestChangesReview(c.Request().Context(), id, resolveReviewActor(c), req.Comment)
@@ -213,12 +214,12 @@ func (h *ReviewHandler) RequestChanges(c echo.Context) error {
 func (h *ReviewHandler) MarkFalsePositive(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid review ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidReviewID)
 	}
 
 	req := new(model.MarkFalsePositiveRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -235,9 +236,9 @@ func (h *ReviewHandler) MarkFalsePositive(c echo.Context) error {
 func (h *ReviewHandler) handleServiceError(c echo.Context, err error) error {
 	switch {
 	case errors.Is(err, service.ErrReviewNotFound):
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "review not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgReviewNotFound)
 	case errors.Is(err, service.ErrReviewTaskNotFound):
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "task not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgTaskNotFound)
 	case errors.Is(err, service.ErrReviewInvalidTransition):
 		return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
 	default:

@@ -1,0 +1,27 @@
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: github-tool
+  name: GitHub Tool
+  version: 0.1.0
+  description: Built-in MCP wrapper for repository, issue, and pull-request operations against GitHub.
+  tags:
+    - builtin
+    - tool
+    - github
+spec:
+  runtime: mcp
+  transport: stdio
+  command: npx
+  args:
+    - -y
+    - "@anthropic/mcp-github"
+permissions:
+  network:
+    required: true
+    domains:
+      - api.github.com
+      - github.com
+source:
+  type: builtin
+  path: ./plugins/tools/github-tool/manifest.yaml

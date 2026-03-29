@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -35,6 +36,7 @@ export function DecomposeTasksDialog({
   initialBlockIds?: string[];
   onConfirm: (input: { blockIds: string[]; parentTaskId?: string | null }) => void;
 }) {
+  const t = useTranslations("docs");
   const [selectedBlockIds, setSelectedBlockIds] = useState<string[]>(initialBlockIds);
   const [parentTaskId, setParentTaskId] = useState("");
 
@@ -47,9 +49,9 @@ export function DecomposeTasksDialog({
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent key={initialBlockIds.join("|")}>
         <DialogHeader>
-          <DialogTitle>Create Tasks from Selection</DialogTitle>
+          <DialogTitle>{t("decompose.title")}</DialogTitle>
           <DialogDescription>
-            Choose one or more blocks and optionally attach them under an existing parent task.
+            {t("decompose.desc")}
           </DialogDescription>
         </DialogHeader>
 
@@ -62,7 +64,7 @@ export function DecomposeTasksDialog({
                 setSelectedBlockIds(event.target.checked ? blocks.map((block) => block.id) : [])
               }
             />
-            Select all blocks
+            {t("decompose.selectAll")}
           </label>
 
           <div className="max-h-64 space-y-2 overflow-auto">
@@ -90,19 +92,19 @@ export function DecomposeTasksDialog({
             ))}
             {blocks.length === 0 ? (
               <div className="rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
-                No blocks available to decompose.
+                {t("decompose.noBlocks")}
               </div>
             ) : null}
           </div>
 
           <div className="flex flex-col gap-2">
-            <label className="text-sm font-medium">Parent task</label>
+            <label className="text-sm font-medium">{t("decompose.parentTask")}</label>
             <select
               className="h-10 rounded-md border bg-background px-3 text-sm"
               value={parentTaskId}
               onChange={(event) => setParentTaskId(event.target.value)}
             >
-              <option value="">Create root backlog tasks</option>
+              <option value="">{t("decompose.createRootTasks")}</option>
               {tasks.map((task) => (
                 <option key={task.id} value={task.id}>
                   {task.title}
@@ -114,13 +116,13 @@ export function DecomposeTasksDialog({
 
         <div className="flex justify-end gap-2">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Cancel
+            {t("decompose.cancel")}
           </Button>
           <Button
             onClick={() => onConfirm({ blockIds: selectedBlockIds, parentTaskId: parentTaskId || null })}
             disabled={selectedBlockIds.length === 0}
           >
-            Create Tasks
+            {t("decompose.createTasks")}
           </Button>
         </div>
       </DialogContent>

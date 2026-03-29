@@ -1,7 +1,7 @@
 "use client";
 
 import { create } from "zustand";
-import { createApiClient } from "@/lib/api-client";
+import { ApiError, createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
 
 /* ── Types matching Go model/plugin.go ── */
@@ -15,7 +15,13 @@ export type PluginKind =
 
 export type PluginRuntime = "declarative" | "mcp" | "go-plugin" | "wasm";
 
-export type PluginSourceType = "builtin" | "local" | "git" | "npm" | "catalog";
+export type PluginSourceType =
+  | "builtin"
+  | "local"
+  | "git"
+  | "npm"
+  | "catalog"
+  | "registry";
 export type PluginTrustState = "unknown" | "verified" | "untrusted";
 export type PluginApprovalState = "not-required" | "pending" | "approved" | "rejected";
 
@@ -117,6 +123,22 @@ export interface PluginSource {
     publishedAt?: string;
     availableVersion?: string;
   };
+}
+
+export interface PluginBuiltInMetadata {
+  official?: boolean;
+  docsRef?: string;
+  verificationProfile?: string;
+  availabilityStatus?: string;
+  availabilityMessage?: string;
+  readinessStatus?: string;
+  readinessMessage?: string;
+  nextStep?: string;
+  blockingReasons?: string[];
+  missingPrerequisites?: string[];
+  missingConfiguration?: string[];
+  installable?: boolean;
+  installBlockedReason?: string;
 }
 
 /* ── MCP types ── */
@@ -308,6 +330,7 @@ export interface PluginRecord {
   restart_count: number;
   resolved_source_path?: string;
   runtime_metadata?: PluginRuntimeMetadata;
+  builtIn?: PluginBuiltInMetadata;
 }
 
 export interface MarketplacePluginEntry {
@@ -319,11 +342,23 @@ export interface MarketplacePluginEntry {
   kind: string;
   installUrl?: string;
   installed?: boolean;
-  sourceType?: PluginSourceType;
+  sourceType?: PluginSourceType | "marketplace";
+  registry?: string;
   runtime?: PluginRuntime;
+  installable?: boolean;
+  blockedReason?: string;
   trustStatus?: PluginTrustState;
   approvalState?: PluginApprovalState;
   release?: PluginSource["release"];
+  builtIn?: PluginBuiltInMetadata;
+}
+
+export interface RemoteMarketplaceState {
+  available: boolean;
+  registry: string;
+  error?: string;
+  errorCode?: string;
+  entries: MarketplacePluginEntry[];
 }
 
 export const DEFAULT_PLUGIN_PANEL_FILTERS: PluginPanelFilters = {
@@ -401,8 +436,14 @@ export function filterMarketplaceEntries(
     if (normalizedKind !== "all" && entry.kind.toLowerCase() !== normalizedKind) {
       return false;
     }
-    if (filters.sourceType !== "all" && filters.sourceType !== "marketplace") {
-      return false;
+    if (filters.sourceType !== "all") {
+      if (filters.sourceType === "marketplace") {
+        if (entry.sourceType !== "marketplace" && entry.sourceType !== "registry") {
+          return false;
+        }
+      } else if (entry.sourceType !== filters.sourceType) {
+        return false;
+      }
     }
     if (!query) {
       return true;
@@ -429,6 +470,7 @@ interface PluginState {
   plugins: PluginRecord[];
   builtins: PluginRecord[];
   marketplace: MarketplacePluginEntry[];
+  remoteMarketplace: RemoteMarketplaceState;
   catalogResults: MarketplacePluginEntry[];
   catalogQuery: string;
   events: Record<string, PluginEventRecord[]>;
@@ -443,6 +485,7 @@ interface PluginState {
   fetchPlugins: () => Promise<void>;
   discoverBuiltins: () => Promise<void>;
   fetchMarketplace: () => Promise<void>;
+  fetchRemoteMarketplace: () => Promise<void>;
   installLocal: (path: string) => Promise<void>;
   enablePlugin: (id: string) => Promise<void>;
   disablePlugin: (id: string) => Promise<void>;
@@ -460,6 +503,7 @@ interface PluginState {
   ) => Promise<Record<string, unknown> | null>;
   searchCatalog: (query: string) => Promise<void>;
   installFromCatalog: (entryId: string) => Promise<void>;
+  installFromRemote: (entryId: string, version?: string) => Promise<void>;
   refreshMCP: (id: string) => Promise<PluginMCPRefreshResult | null>;
   callMCPTool: (
     id: string,
@@ -499,10 +543,26 @@ function getToken() {
   return useAuthStore.getState().accessToken;
 }
 
+function getErrorMessage(error: unknown, fallback: string): string {
+  if (error instanceof ApiError) {
+    const body = error.body as { message?: string } | null;
+    return body?.message ?? error.message;
+  }
+  if (error instanceof Error && error.message) {
+    return error.message;
+  }
+  return fallback;
+}
+
 export const usePluginStore = create<PluginState>()((set, get) => ({
   plugins: [],
   builtins: [],
   marketplace: [],
+  remoteMarketplace: {
+    available: false,
+    registry: "",
+    entries: [],
+  },
   catalogResults: [],
   catalogQuery: "",
   events: {},
@@ -565,6 +625,42 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       set({ marketplace: data ?? [], error: null });
     } catch {
       set({ error: "Unable to load plugin marketplace" });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  fetchRemoteMarketplace: async () => {
+    const token = getToken();
+    if (!token) return;
+
+    set({ loading: true, error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.get<RemoteMarketplaceState>(
+        "/api/v1/plugins/marketplace/remote",
+        { token },
+      );
+      set({
+        remoteMarketplace: {
+          available: data?.available ?? false,
+          registry: data?.registry ?? "",
+          error: data?.error,
+          errorCode: data?.errorCode,
+          entries: data?.entries ?? [],
+        },
+        error: null,
+      });
+    } catch (error) {
+      set({
+        remoteMarketplace: {
+          available: false,
+          registry: "",
+          error: getErrorMessage(error, "Unable to load remote plugin registry"),
+          entries: [],
+        },
+        error: "Unable to load remote plugin registry",
+      });
     } finally {
       set({ loading: false });
     }
@@ -773,6 +869,27 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       await get().fetchPlugins();
     } catch {
       set({ error: "Failed to install from catalog" });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  installFromRemote: async (entryId, version = "latest") => {
+    const token = getToken();
+    if (!token) return;
+
+    set({ loading: true, error: null });
+    try {
+      const api = getApi();
+      await api.post(
+        `/api/v1/plugins/marketplace/${entryId}/install-remote`,
+        { version },
+        { token },
+      );
+      await get().fetchPlugins();
+      await get().fetchRemoteMarketplace();
+    } catch (error) {
+      set({ error: getErrorMessage(error, "Failed to install from remote registry") });
     } finally {
       set({ loading: false });
     }

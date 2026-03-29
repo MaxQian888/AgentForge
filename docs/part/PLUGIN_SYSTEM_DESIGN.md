@@ -5,6 +5,8 @@
 > v1.1 更新：引入 Tauri 桌面层，补充插件间通信架构
 > v1.2 更新：Go↔TS 通信改为 HTTP+WS，砍掉 gRPC/Redis，补充生命周期跨进程同步、Token 双重计费、角色配置传递原则
 > v1.3 更新：确定 TS Bridge 打包方案为 Bun compile
+>
+> live contract note: 当前 Go↔TS Bridge 的实现入口以 canonical `/bridge/*` HTTP routes 加 WebSocket 事件流为准。本文中如果仍出现 `gRPC → TS Bridge`、旧裸路径或历史 proto 表述，应视为历史参考而不是当前实现接口。
 
 ---
 
@@ -70,7 +72,7 @@
 
 ### 1.4 当前 OpenSpec MVP 实现边界
 
-这份架构文档覆盖的是插件系统的长期蓝图，但当前仓库真相已经不再停留在最早的 `establish-plugin-runtime-and-registry` MVP。到 2026-03-25 为止，仓库已经把统一契约、双宿主运行时映射、Go 权威注册中心、ReviewPlugin 深审扩展、WorkflowPlugin 顺序执行、SDK 与脚手架、catalog/trust 控制面推进到同一条实现线上，但它仍然不等同于“公开 marketplace 已完成”。
+这份架构文档覆盖的是插件系统的长期蓝图，但当前仓库真相已经不再停留在最早的 `establish-plugin-runtime-and-registry` MVP。到 `2026-03-29` 为止，仓库已经把统一契约、双宿主运行时映射、Go 权威注册中心、ReviewPlugin 深审扩展、WorkflowPlugin 顺序执行、SDK 与脚手架、catalog/trust 控制面、内置插件 bundle/readiness 校验，以及 repo-local 作者命令推进到同一条实现线上，但它仍然不等同于“公开 marketplace 已完成”。
 
 本次 MVP 的可执行插件映射固定为：
 
@@ -83,6 +85,14 @@
 | `ReviewPlugin` | `mcp` | TS Bridge | 已实现 manifest 选择、Layer 2 深审执行接入、结果 provenance 持久化、TS SDK / scaffold |
 
 当前实现同时明确拒绝不受支持的 `kind/runtime` 组合，例如 `ToolPlugin + go-plugin`、`IntegrationPlugin + mcp`。禁用态插件不会被激活；TS Bridge 和 Go Orchestrator 都只使用统一的生命周期语义：`installed`、`enabled`、`activating`、`active`、`degraded`、`disabled`。
+
+当前已经有明确 operator / author surfaces 的实现包括：
+
+- `GET /api/v1/plugins/catalog` 与 `POST /api/v1/plugins/catalog/install`，用于区分 catalog 条目与安装记录
+- `pnpm create-plugin`，用于生成受维护的 `tool` / `review` / `workflow` / `integration` starter
+- `pnpm plugin:verify`，用于受维护 Go WASM 样例的 `build -> debug health` smoke 验证
+- `pnpm plugin:verify:builtins`，用于校验内置插件 bundle 与注册元数据
+- 插件前端控制面中的 built-in readiness / runtime telemetry 增强显示，但业务真相仍以后端控制面为准
 
 本次 OpenSpec 明确延后的事项包括：
 
@@ -315,12 +325,14 @@ Frontend (独立部署):
 ```
 命令通道 (Go 主动调 TS):
   Go (:7777) ──HTTP POST──► TS (:7778)
-  • POST /execute     — 执行 Agent 任务（附带完整角色配置）
+  • POST /bridge/execute     — 执行 Agent 任务（附带完整角色配置）
   • POST /tools/install  — 安装/启动 MCP Server
   • POST /tools/uninstall — 卸载/停止 MCP Server
-  • POST /abort       — 终止正在执行的 Agent
-  • GET  /health      — 健康检查
+  • POST /bridge/cancel       — 终止正在执行的 Agent
+  • GET  /bridge/health      — 健康检查
   • GET  /tools       — 列出所有已加载工具
+
+兼容说明：裸路径 alias 仍可作为迁移兼容入口存在，但当前 live contract 以 `/bridge/*` 为准。
 
 事件通道 (TS 主动推给 Go):
   TS ═══WebSocket═══► Go (:7777/internal/ws)
@@ -421,7 +433,7 @@ Frontend                Go Orchestrator (:7777)    TS Bridge (:7778)      MCP Se
    │  POST /api/v1/agent/    │                        │                      │
    │  execute-tool           │                        │                      │
    │ ───────────────────►    │                        │                      │
-   │                         │  POST /execute         │                      │
+   │                         │  POST /bridge/execute  │                      │
    │                         │ ───────────────────►   │                      │
    │                         │                        │  MCP tools/call      │
    │                         │                        │ ──────────────────►  │
@@ -443,7 +455,7 @@ Frontend              Go Orchestrator (:7777)    TS Bridge (:7778)      Agent/LL
    │                         │                        │                      │
    │  WebSocket /ws          │                        │                      │
    │ ═══════════════════►    │                        │                      │
-   │                         │  POST /execute         │                      │
+   │                         │  POST /bridge/execute  │                      │
    │                         │ ───────────────────►   │  (HTTP 返回 taskId)  │
    │                         │                        │  Claude API Stream   │
    │                         │                        │ ═══════════════════► │
@@ -1018,6 +1030,8 @@ spec:
     max_concurrent: 5
 ```
 
+> 当前仓库实现说明：官方内置工具插件清单现在由 `plugins/builtin-bundle.yaml` 管理，当前随仓库交付的 ToolPlugin 包括 `web-search`、`github-tool` 和 `db-query`。它们都会通过 built-in discovery 与 catalog 暴露真实来源和可用性说明，而不是只保留文档示例。
+
 ### 5.4 MCP Server 集成流程
 
 ```
@@ -1062,81 +1076,37 @@ spec:
 ### 6.2 工作流定义
 
 ```yaml
-# plugins/workflows/standard-dev-flow/workflow.yaml
+# plugins/workflows/standard-dev-flow/manifest.yaml
 apiVersion: agentforge/v1
 kind: WorkflowPlugin
 metadata:
   id: "standard-dev-flow"
   name: "标准开发流程"
   version: "1.0.0"
-  description: "需求分析 → 编码 → 审查 → 测试的标准流程"
+  description: "编码 → 审查的内置顺序工作流 starter"
 
 spec:
-  process: "sequential"
-
-  # 参与角色
-  roles:
-    - ref: "project-assistant"
-      alias: "pm"
-    - ref: "coding-agent"
-      alias: "dev"
-    - ref: "code-reviewer"
-      alias: "reviewer"
-    - ref: "test-engineer"
-      alias: "tester"
-
-  # 工作流步骤
-  steps:
-    - id: "analyze"
-      role: "pm"
-      action: "analyze_requirement"
-      input:
-        requirement: "${trigger.input}"
-      output:
-        tasks: "subtask_list"
-
-    - id: "implement"
-      role: "dev"
-      action: "implement_code"
-      input:
-        task: "${steps.analyze.output.tasks}"
-      output:
-        pr: "pull_request"
-      retry:
-        max_attempts: 2
-        on_failure: "escalate_to_human"
-
-    - id: "review"
-      role: "reviewer"
-      action: "review_code"
-      input:
-        pr: "${steps.implement.output.pr}"
-      output:
-        result: "review_result"
-      conditions:
-        on_approved: "next"
-        on_rejected: "implement"   # 返回编码步骤
-
-    - id: "test"
-      role: "tester"
-      action: "write_and_run_tests"
-      input:
-        pr: "${steps.implement.output.pr}"
-      conditions:
-        on_pass: "complete"
-        on_fail: "implement"
-
-  # 触发条件
-  triggers:
-    - event: "issue_created"
-      condition: "issue.labels.includes('feature')"
-    - event: "manual"
-
-  # 超时和预算
-  limits:
-    total_timeout: "4h"
-    total_budget: "$20"
+  runtime: "wasm"
+  module: "./dist/standard-dev-flow.wasm"
+  abiVersion: "v1"
+  workflow:
+    process: "sequential"
+    roles:
+      - id: "coding-agent"
+      - id: "code-reviewer"
+    steps:
+      - id: "implement"
+        role: "coding-agent"
+        action: "agent"
+        next: ["review"]
+      - id: "review"
+        role: "code-reviewer"
+        action: "review"
+    triggers:
+      - event: "manual"
 ```
+
+> 当前仓库实现说明：repo 内置 starter 位于 `plugins/workflows/standard-dev-flow/manifest.yaml`，并使用现有 `coding-agent` / `code-reviewer` role id，因此它可以直接走当前 Go workflow runtime 的顺序执行路径。
 
 ### 6.3 层级编排模式
 
@@ -1311,35 +1281,23 @@ metadata:
 spec:
   runtime: "mcp"                   # 通过 MCP 提供审查工具
   transport: "stdio"
-  command: "node"
-  args: ["./dist/index.js"]
-
-  # 审查规则
-  rules:
-    - id: "no-direct-db-in-handler"
-      severity: "error"
-      description: "Handler 层不应直接访问数据库"
-      pattern: "src/handlers/**/*.ts"
-
-    - id: "max-file-length"
-      severity: "warning"
-      description: "文件不超过 300 行"
-      threshold: 300
+  command: "bun"
+  args: ["run", "src/index.ts"]
 
   # 触发条件
-  triggers:
-    - event: "pr_created"
-    - event: "pr_updated"
-    file_patterns:
+  review:
+    entrypoint: "review:run"
+    triggers:
+      events:
+        - "pull_request.updated"
+      filePatterns:
       - "src/**/*.ts"
       - "src/**/*.go"
-
-  # 输出格式
-  output:
-    format: "github-review-comments"
-    inline_comments: true
-    summary: true
+    output:
+      format: "findings/v1"
 ```
+
+> 当前仓库实现说明：官方内置审查插件清单同样由 `plugins/builtin-bundle.yaml` 管理，当前随仓库交付的 built-in ReviewPlugin 包括 `architecture-check` 和 `performance-check`，它们通过与自定义 ReviewPlugin 相同的 provenance 字段参与 Layer 2 聚合。
 
 ---
 
@@ -1563,7 +1521,7 @@ Token 消耗发生在 TS Bridge（Claude API 调用），但预算管理在 Go O
 
 ```
 Go 下发任务:
-  POST /execute {
+  POST /bridge/execute {
     task_id: "task_xxx",
     role_config: { ... },
     budget: {
@@ -1584,7 +1542,7 @@ TS Bridge 执行时:
 Go Orchestrator 收到上报后:
   1. 更新任务级消耗记录
   2. 累加到 Sprint 级 / 项目级预算
-  3. 如果项目级预算超限 → HTTP POST /abort 终止 TS 所有任务
+  3. 如果项目级预算超限 → HTTP POST /bridge/cancel 终止 TS 所有任务
   4. 通过 WS 推送消耗数据到前端仪表盘
 ```
 
@@ -1597,7 +1555,7 @@ Go Orchestrator 收到上报后:
 **TS Bridge 是无状态执行器。** 每次 Go 调 TS 都传完整角色配置。
 
 ```
-Go → TS POST /execute:
+Go → TS POST /bridge/execute:
 {
   "task_id": "task_xxx",
   "role": {                        # 完整角色配置，不传 role_id 让 TS 自己查
@@ -1821,7 +1779,7 @@ func main() { sdk.Autorun(runtime) }
 | **审查流水线** | 中 | Layer 2 开放为 Review Plugin 扩展点 |
 | **IM 适配层** | 高 | 从 cc-connect fork 改为 Integration Plugin 架构 |
 | **数据模型** | 中 | 新增插件相关表（见下节） |
-| **gRPC Bridge** | 低 | 新增 Plugin 管理相关 RPC |
+| **Bridge HTTP/WS Surface** | 低 | 新增插件管理、catalog、MCP 交互与 runtime-state sync surface |
 | **Tauri 桌面层** | 中 | 新增 sidecar 进程树管理、系统通知转发、原生能力 API |
 
 ### 16.1.1 Tauri 层新增职责
@@ -1879,8 +1837,8 @@ fn handle_sidecar_output(line: &str, app_handle: &AppHandle) {
 // 新增到 Go Orchestrator
 type PluginManager struct {
     roleRegistry       *RoleRegistry        // YAML 角色解析和管理
-    goPluginManager    *GoPluginManager     // go-plugin 生命周期
-    eventBus           *EventBus            // Redis Pub/Sub 事件分发
+    wasmRuntimeManager *WASMRuntimeManager  // Go-hosted WASM 插件生命周期
+    eventBus           *EventBus            // 当前实现的事件聚合与分发
     workflowEngine     *WorkflowEngine      // 工作流编排执行
 }
 
@@ -1892,7 +1850,7 @@ type RoleRegistry interface {
     ValidateRole(role *Role) error
 }
 
-type GoPluginManager interface {
+type WASMRuntimeManager interface {
     Install(manifest *Manifest) error
     Enable(pluginID string) error
     Disable(pluginID string) error
@@ -1916,21 +1874,25 @@ class MCPClientHub {
 }
 ```
 
-### 16.4 gRPC Bridge 新增接口
+### 16.4 Bridge HTTP/WS 新增接口
 
-```protobuf
-// 新增到 Go ↔ TS Bridge 的 gRPC 定义
-service PluginBridge {
-  // Go 告知 TS 安装/卸载 MCP 工具插件
-  rpc InstallToolPlugin(ToolPluginManifest) returns (InstallResult);
-  rpc UninstallToolPlugin(PluginId) returns (UninstallResult);
+```text
+Go-facing control plane:
 
-  // Go 请求 TS 通过 MCP 调用工具
-  rpc CallTool(ToolCallRequest) returns (ToolCallResponse);
+POST /api/v1/plugins/:id/mcp/refresh
+POST /api/v1/plugins/:id/mcp/tools/call
+POST /api/v1/plugins/:id/mcp/resources/read
+POST /api/v1/plugins/:id/mcp/prompts/get
+GET  /api/v1/plugins/catalog
+POST /api/v1/plugins/catalog/install
 
-  // TS 向 Go 报告工具发现结果
-  rpc ReportToolDiscovery(ToolDiscoveryReport) returns (Empty);
-}
+TS Bridge internal surface:
+
+POST /bridge/plugins/:id/mcp/refresh
+POST /bridge/plugins/:id/mcp/tools/call
+POST /bridge/plugins/:id/mcp/resources/read
+POST /bridge/plugins/:id/mcp/prompts/get
+POST /internal/plugins/runtime-state
 ```
 
 ### 16.5 当前仓库已落地的 MCP 交互控制面（2026-03-25）

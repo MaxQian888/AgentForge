@@ -7,6 +7,8 @@ import (
 	"net/http/httptest"
 	"reflect"
 	"testing"
+
+	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 func TestClientExecuteUsesCanonicalBridgeContract(t *testing.T) {
@@ -59,6 +61,28 @@ func TestClientExecuteUsesCanonicalBridgeContract(t *testing.T) {
 			MaxBudgetUsd:   5,
 			MaxTurns:       20,
 			PermissionMode: "default",
+			LoadedSkills: []model.RoleExecutionSkill{
+				{
+					Path:         "skills/react",
+					Label:        "React",
+					Description:  "React UI implementation guidance",
+					Instructions: "Prefer server-safe React composition.",
+					Source:       "repo-local",
+					SourceRoot:   "skills",
+					Origin:       "direct",
+				},
+			},
+			AvailableSkills: []model.RoleExecutionSkill{
+				{
+					Path:        "skills/testing",
+					Label:       "Testing",
+					Description: "Regression-oriented test guidance",
+					Source:      "repo-local",
+					SourceRoot:  "skills",
+					Origin:      "direct",
+				},
+			},
+			SkillDiagnostics: []model.RoleExecutionSkillDiagnostic{},
 		},
 	}
 	setStringField(t, &req, "TeamID", "team-123")
@@ -114,6 +138,14 @@ func TestClientExecuteUsesCanonicalBridgeContract(t *testing.T) {
 	}
 	if !reflect.DeepEqual(roleConfig["output_filters"], []any{"no_credentials", "no_pii"}) {
 		t.Fatalf("expected output_filters in role_config, got %#v", roleConfig["output_filters"])
+	}
+	loadedSkills, ok := roleConfig["loaded_skills"].([]any)
+	if !ok || len(loadedSkills) != 1 {
+		t.Fatalf("expected loaded_skills in role_config, got %#v", roleConfig["loaded_skills"])
+	}
+	availableSkills, ok := roleConfig["available_skills"].([]any)
+	if !ok || len(availableSkills) != 1 {
+		t.Fatalf("expected available_skills in role_config, got %#v", roleConfig["available_skills"])
 	}
 }
 
@@ -480,6 +512,53 @@ func TestClientGenerateUsesCanonicalBridgeContract(t *testing.T) {
 	}
 	if result.Text != "Sample response" || result.Usage.InputTokens != 12 || result.Usage.OutputTokens != 8 {
 		t.Fatalf("unexpected generate result: %+v", result)
+	}
+}
+
+func TestClientClassifyIntentUsesCanonicalBridgeContract(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotPath string
+		gotBody map[string]any
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"intent":     "task_assign",
+			"command":    "/task assign",
+			"args":       "task-123 Alice",
+			"confidence": 0.92,
+			"reply":      "准备分配任务",
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	result, err := client.ClassifyIntent(context.Background(), ClassifyIntentRequest{
+		Text:      "把 task-123 分配给 Alice",
+		UserID:    "user-123",
+		ProjectID: "project-123",
+	})
+	if err != nil {
+		t.Fatalf("ClassifyIntent() error: %v", err)
+	}
+
+	if gotPath != "/bridge/classify-intent" {
+		t.Fatalf("expected /bridge/classify-intent, got %s", gotPath)
+	}
+	if gotBody["text"] != "把 task-123 分配给 Alice" || gotBody["user_id"] != "user-123" || gotBody["project_id"] != "project-123" {
+		t.Fatalf("unexpected classify intent payload: %#v", gotBody)
+	}
+	if result.Intent != "task_assign" || result.Command != "/task assign" || result.Confidence != 0.92 {
+		t.Fatalf("unexpected classify intent result: %+v", result)
 	}
 }
 

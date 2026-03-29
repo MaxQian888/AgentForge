@@ -6,6 +6,8 @@ import (
 
 	"github.com/go-playground/validator/v10"
 	"github.com/labstack/echo/v4"
+	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
+	"github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
 
@@ -16,8 +18,9 @@ func CustomHTTPErrorHandler(err error, c echo.Context) {
 		return
 	}
 
+	localizer := middleware.GetLocalizer(c)
 	code := http.StatusInternalServerError
-	message := "internal server error"
+	message := appI18n.Localize(localizer, appI18n.MsgInternalError)
 
 	// Validation errors from go-playground/validator
 	var ve validator.ValidationErrors

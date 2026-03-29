@@ -1,3 +1,6 @@
+"use client";
+
+import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -64,6 +67,7 @@ export interface TaskContextRailProps {
     taskId: string,
     memberId: string
   ) => Promise<void> | void;
+  onTaskDelete?: (taskId: string) => Promise<void> | void;
   onResetFilters?: () => void;
 }
 
@@ -84,12 +88,14 @@ export function TaskContextRail({
   onTaskStatusChange,
   onTaskDecompose,
   onSpawnAgent,
+  onTaskDelete,
   onResetFilters,
 }: TaskContextRailProps) {
+  const t = useTranslations("tasks");
   const stalledTasks = tasks.filter(
-    (t) =>
-      t.progress?.healthStatus === "stalled" ||
-      t.progress?.healthStatus === "warning"
+    (task) =>
+      task.progress?.healthStatus === "stalled" ||
+      task.progress?.healthStatus === "warning"
   );
 
   return (
@@ -104,30 +110,30 @@ export function TaskContextRail({
       {stalledTasks.length > 0 ? (
         <Card>
           <CardHeader className="pb-3">
-            <CardTitle className="text-base">Attention needed</CardTitle>
+            <CardTitle className="text-base">{t("attention.title")}</CardTitle>
           </CardHeader>
           <CardContent className="flex flex-col gap-3">
-            {stalledTasks.slice(0, 5).map((t) => (
+            {stalledTasks.slice(0, 5).map((st) => (
               <div
-                key={t.id}
+                key={st.id}
                 className="flex flex-col gap-2 rounded-md border border-border/60 bg-muted/20 p-3 text-sm"
               >
                 <div className="flex items-center justify-between gap-2">
-                  <span className="truncate font-medium">{t.title}</span>
+                  <span className="truncate font-medium">{st.title}</span>
                   <Badge
                     variant="secondary"
                     className={
-                      t.progress?.healthStatus === "stalled"
+                      st.progress?.healthStatus === "stalled"
                         ? "bg-red-500/15 text-red-700 dark:text-red-300"
                         : "bg-amber-500/15 text-amber-700 dark:text-amber-300"
                     }
                   >
-                    {t.progress?.healthStatus === "stalled" ? "Stalled" : "At risk"}
+                    {st.progress?.healthStatus === "stalled" ? t("health.stalled") : t("health.atRisk")}
                   </Badge>
                 </div>
-                {t.progress?.lastActivityAt ? (
+                {st.progress?.lastActivityAt ? (
                   <div className="text-xs text-muted-foreground">
-                    Last activity: {formatRelativeTime(t.progress.lastActivityAt)}
+                    {t("attention.lastActivity", { time: formatRelativeTime(st.progress.lastActivityAt) })}
                   </div>
                 ) : null}
                 <div className="flex flex-wrap gap-1.5">
@@ -137,13 +143,13 @@ export function TaskContextRail({
                       size="sm"
                       variant="outline"
                       onClick={() => {
-                        const firstActive = members.find((m) => m.isActive && m.id !== t.assigneeId);
+                        const firstActive = members.find((m) => m.isActive && m.id !== st.assigneeId);
                         if (firstActive) {
-                          void onTaskAssign(t.id, firstActive.id, firstActive.type);
+                          void onTaskAssign(st.id, firstActive.id, firstActive.type);
                         }
                       }}
                     >
-                      Reassign
+                      {t("attention.reassign")}
                     </Button>
                   ) : null}
                   {onTaskStatusChange ? (
@@ -151,9 +157,9 @@ export function TaskContextRail({
                       type="button"
                       size="sm"
                       variant="outline"
-                      onClick={() => void onTaskStatusChange(t.id, "cancelled")}
+                      onClick={() => void onTaskStatusChange(st.id, "cancelled")}
                     >
-                      Cancel task
+                      {t("attention.cancelTask")}
                     </Button>
                   ) : null}
                 </div>
@@ -165,19 +171,19 @@ export function TaskContextRail({
 
       <Card>
         <CardHeader className="pb-3">
-          <CardTitle className="text-base">Task details</CardTitle>
+          <CardTitle className="text-base">{t("detail.title")}</CardTitle>
         </CardHeader>
         <CardContent>
           {selectionState === "summary" || !selectedTask ? (
             <div className="text-sm text-muted-foreground">
-              Select a task to inspect its details.
+              {t("detail.selectPrompt")}
             </div>
           ) : (
             <div className="flex flex-col gap-4">
               {selectionState === "hidden_by_filter" ? (
                 <div className="flex flex-wrap items-center gap-2 text-sm text-muted-foreground">
                   <span>
-                    This task is outside the current filters, but it remains selected.
+                    {t("detail.hiddenByFilter")}
                   </span>
                   {onResetFilters ? (
                     <Button
@@ -186,7 +192,7 @@ export function TaskContextRail({
                       size="sm"
                       onClick={onResetFilters}
                     >
-                      Reset filters
+                      {t("detail.resetFilters")}
                     </Button>
                   ) : null}
                 </div>
@@ -203,6 +209,7 @@ export function TaskContextRail({
                 onTaskStatusChange={onTaskStatusChange}
                 onTaskDecompose={onTaskDecompose}
                 onSpawnAgent={onSpawnAgent}
+                onTaskDelete={onTaskDelete}
               />
             </div>
           )}

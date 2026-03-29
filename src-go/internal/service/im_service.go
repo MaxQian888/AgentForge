@@ -305,12 +305,7 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 			ReplyTarget:    req.ReplyTarget,
 		})
 		if err == nil {
-			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
-				ChannelID: req.ChannelID,
-				Platform:  req.Platform,
-				EventType: "message.send",
-				Status:    model.IMDeliveryStatusDelivered,
-			})
+			s.controlPlane.RecordDeliveryResult(buildSendDeliveryRecord(req, model.IMDeliveryStatusDelivered, ""))
 			entry.Info("IM send queued via control plane")
 			return nil
 		}
@@ -319,13 +314,7 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 
 	if s.notifyURL == "" {
 		if s.controlPlane != nil {
-			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
-				ChannelID:     req.ChannelID,
-				Platform:      req.Platform,
-				EventType:     "message.send",
-				Status:        model.IMDeliveryStatusFailed,
-				FailureReason: "notify URL not configured",
-			})
+			s.controlPlane.RecordDeliveryResult(buildSendDeliveryRecord(req, model.IMDeliveryStatusFailed, "notify URL not configured"))
 		}
 		entry.Warn("IM send skipped: no notify URL configured")
 		return nil
@@ -356,13 +345,7 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
 		if s.controlPlane != nil {
-			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
-				ChannelID:     req.ChannelID,
-				Platform:      req.Platform,
-				EventType:     "message.send",
-				Status:        model.IMDeliveryStatusFailed,
-				FailureReason: err.Error(),
-			})
+			s.controlPlane.RecordDeliveryResult(buildSendDeliveryRecord(req, model.IMDeliveryStatusFailed, err.Error()))
 		}
 		entry.WithError(err).Error("IM send compatibility HTTP failed")
 		return fmt.Errorf("IM send failed: %w", err)
@@ -371,24 +354,13 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 
 	if resp.StatusCode != http.StatusOK {
 		if s.controlPlane != nil {
-			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
-				ChannelID:     req.ChannelID,
-				Platform:      req.Platform,
-				EventType:     "message.send",
-				Status:        model.IMDeliveryStatusFailed,
-				FailureReason: fmt.Sprintf("HTTP %d", resp.StatusCode),
-			})
+			s.controlPlane.RecordDeliveryResult(buildSendDeliveryRecord(req, model.IMDeliveryStatusFailed, fmt.Sprintf("HTTP %d", resp.StatusCode)))
 		}
 		entry.WithField("status", resp.StatusCode).Warn("IM send compatibility HTTP returned non-OK status")
 		return fmt.Errorf("IM send returned %d", resp.StatusCode)
 	}
 	if s.controlPlane != nil {
-		s.controlPlane.RecordDeliveryResult(model.IMDelivery{
-			ChannelID: req.ChannelID,
-			Platform:  req.Platform,
-			EventType: "message.send",
-			Status:    model.IMDeliveryStatusDelivered,
-		})
+		s.controlPlane.RecordDeliveryResult(buildSendDeliveryRecord(req, model.IMDeliveryStatusDelivered, ""))
 	}
 	entry.WithField("status", resp.StatusCode).Info("IM send delivered via compatibility HTTP")
 	return nil
@@ -421,12 +393,7 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 			ReplyTarget:    req.ReplyTarget,
 		})
 		if err == nil {
-			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
-				ChannelID: req.ChannelID,
-				Platform:  req.Platform,
-				EventType: req.Event,
-				Status:    model.IMDeliveryStatusDelivered,
-			})
+			s.controlPlane.RecordDeliveryResult(buildNotifyDeliveryRecord(req, model.IMDeliveryStatusDelivered, ""))
 			entry.Info("IM notify queued via control plane")
 			return nil
 		}
@@ -435,13 +402,7 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 
 	if s.notifyURL == "" {
 		if s.controlPlane != nil {
-			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
-				ChannelID:     req.ChannelID,
-				Platform:      req.Platform,
-				EventType:     req.Event,
-				Status:        model.IMDeliveryStatusFailed,
-				FailureReason: "notify URL not configured",
-			})
+			s.controlPlane.RecordDeliveryResult(buildNotifyDeliveryRecord(req, model.IMDeliveryStatusFailed, "notify URL not configured"))
 		}
 		entry.Warn("IM notify skipped: no notify URL configured")
 		return nil
@@ -472,13 +433,7 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 	resp, err := s.httpClient.Do(httpReq)
 	if err != nil {
 		if s.controlPlane != nil {
-			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
-				ChannelID:     req.ChannelID,
-				Platform:      req.Platform,
-				EventType:     req.Event,
-				Status:        model.IMDeliveryStatusFailed,
-				FailureReason: err.Error(),
-			})
+			s.controlPlane.RecordDeliveryResult(buildNotifyDeliveryRecord(req, model.IMDeliveryStatusFailed, err.Error()))
 		}
 		entry.WithError(err).Error("IM notify compatibility HTTP failed")
 		return fmt.Errorf("IM notify failed: %w", err)
@@ -487,24 +442,13 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 
 	if resp.StatusCode != http.StatusOK {
 		if s.controlPlane != nil {
-			s.controlPlane.RecordDeliveryResult(model.IMDelivery{
-				ChannelID:     req.ChannelID,
-				Platform:      req.Platform,
-				EventType:     req.Event,
-				Status:        model.IMDeliveryStatusFailed,
-				FailureReason: fmt.Sprintf("HTTP %d", resp.StatusCode),
-			})
+			s.controlPlane.RecordDeliveryResult(buildNotifyDeliveryRecord(req, model.IMDeliveryStatusFailed, fmt.Sprintf("HTTP %d", resp.StatusCode)))
 		}
 		entry.WithField("status", resp.StatusCode).Warn("IM notify compatibility HTTP returned non-OK status")
 		return fmt.Errorf("IM notify returned %d", resp.StatusCode)
 	}
 	if s.controlPlane != nil {
-		s.controlPlane.RecordDeliveryResult(model.IMDelivery{
-			ChannelID: req.ChannelID,
-			Platform:  req.Platform,
-			EventType: req.Event,
-			Status:    model.IMDeliveryStatusDelivered,
-		})
+		s.controlPlane.RecordDeliveryResult(buildNotifyDeliveryRecord(req, model.IMDeliveryStatusDelivered, ""))
 	}
 	entry.WithField("status", resp.StatusCode).Info("IM notify delivered via compatibility HTTP")
 	return nil
@@ -648,4 +592,50 @@ func buildNotifyContent(req *model.IMNotifyRequest) string {
 		}
 	}
 	return strings.TrimSpace(strings.TrimSpace(req.Title) + "\n" + strings.TrimSpace(req.Body))
+}
+
+func buildSendDeliveryRecord(req *model.IMSendRequest, status model.IMDeliveryStatus, failureReason string) model.IMDelivery {
+	if req == nil {
+		return model.IMDelivery{}
+	}
+	return model.IMDelivery{
+		ID:            strings.TrimSpace(req.DeliveryID),
+		BridgeID:      strings.TrimSpace(req.BridgeID),
+		ProjectID:     strings.TrimSpace(req.ProjectID),
+		ChannelID:     strings.TrimSpace(req.ChannelID),
+		TargetChatID:  strings.TrimSpace(req.ChannelID),
+		Platform:      req.Platform,
+		EventType:     "message.send",
+		Kind:          IMDeliveryKindSend,
+		Status:        status,
+		FailureReason: strings.TrimSpace(failureReason),
+		Content:       strings.TrimSpace(req.Text),
+		Structured:    req.Structured,
+		Native:        req.Native,
+		Metadata:      cloneStringMap(req.Metadata),
+		ReplyTarget:   req.ReplyTarget,
+	}
+}
+
+func buildNotifyDeliveryRecord(req *model.IMNotifyRequest, status model.IMDeliveryStatus, failureReason string) model.IMDelivery {
+	if req == nil {
+		return model.IMDelivery{}
+	}
+	return model.IMDelivery{
+		ID:            strings.TrimSpace(req.DeliveryID),
+		BridgeID:      strings.TrimSpace(req.BridgeID),
+		ProjectID:     strings.TrimSpace(req.ProjectID),
+		ChannelID:     strings.TrimSpace(req.ChannelID),
+		TargetChatID:  strings.TrimSpace(req.ChannelID),
+		Platform:      req.Platform,
+		EventType:     strings.TrimSpace(req.Event),
+		Kind:          IMDeliveryKindNotify,
+		Status:        status,
+		FailureReason: strings.TrimSpace(failureReason),
+		Content:       buildNotifyContent(req),
+		Structured:    req.Structured,
+		Native:        req.Native,
+		Metadata:      cloneStringMap(req.Metadata),
+		ReplyTarget:   req.ReplyTarget,
+	}
 }

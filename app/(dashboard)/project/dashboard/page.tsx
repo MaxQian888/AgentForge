@@ -1,21 +1,53 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { Suspense, useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import { Button } from "@/components/ui/button";
+import { Input } from "@/components/ui/input";
 import { useDashboardStore, type DashboardConfig } from "@/lib/stores/dashboard-store";
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid";
 
 const EMPTY_DASHBOARDS: DashboardConfig[] = [];
 
-export default function ProjectDashboardPage() {
+function ProjectDashboardView() {
+  const t = useTranslations("dashboard");
+  const router = useRouter();
+  const pathname = usePathname();
+  const searchParams = useSearchParams();
   const projectId = useDashboardStore((state) => state.selectedProjectId);
+  const activeDashboardIdByProject = useDashboardStore(
+    (state) => state.activeDashboardIdByProject
+  );
+  const dashboardsLoadingByProject = useDashboardStore(
+    (state) => state.dashboardsLoadingByProject
+  );
+  const dashboardsErrorByProject = useDashboardStore(
+    (state) => state.dashboardsErrorByProject
+  );
   const dashboardsByProject = useDashboardStore((state) => state.dashboardsByProject);
   const fetchDashboards = useDashboardStore((state) => state.fetchDashboards);
+  const setActiveDashboard = useDashboardStore((state) => state.setActiveDashboard);
   const createDashboard = useDashboardStore((state) => state.createDashboard);
+  const updateDashboard = useDashboardStore((state) => state.updateDashboard);
+  const deleteDashboard = useDashboardStore((state) => state.deleteDashboard);
+  const [isEditingName, setIsEditingName] = useState(false);
+  const [draftName, setDraftName] = useState("");
 
   const dashboards = useMemo(
     () => (projectId ? dashboardsByProject[projectId] ?? EMPTY_DASHBOARDS : EMPTY_DASHBOARDS),
     [dashboardsByProject, projectId]
   );
+  const routeDashboardId = searchParams.get("dashboard");
+  const activeDashboardId = projectId
+    ? activeDashboardIdByProject[projectId] ?? null
+    : null;
+  const dashboardsLoading = projectId
+    ? dashboardsLoadingByProject[projectId] ?? false
+    : false;
+  const dashboardsError = projectId
+    ? dashboardsErrorByProject[projectId] ?? null
+    : null;
 
   useEffect(() => {
     if (projectId) {
@@ -23,10 +55,80 @@ export default function ProjectDashboardPage() {
     }
   }, [fetchDashboards, projectId]);
 
-  const selectedDashboard = useMemo(() => dashboards[0] ?? null, [dashboards]);
+  const selectedDashboard = useMemo(() => {
+    if (routeDashboardId) {
+      const matched = dashboards.find((dashboard) => dashboard.id === routeDashboardId);
+      if (matched) {
+        return matched;
+      }
+    }
+
+    if (activeDashboardId) {
+      const matched = dashboards.find((dashboard) => dashboard.id === activeDashboardId);
+      if (matched) {
+        return matched;
+      }
+    }
+
+    return dashboards[0] ?? null;
+  }, [activeDashboardId, dashboards, routeDashboardId]);
+
+  useEffect(() => {
+    if (!projectId || !selectedDashboard) {
+      return;
+    }
+
+    if (activeDashboardId !== selectedDashboard.id) {
+      setActiveDashboard(projectId, selectedDashboard.id);
+    }
+
+    if (routeDashboardId === selectedDashboard.id) {
+      return;
+    }
+
+    const nextParams = new URLSearchParams(searchParams.toString());
+    nextParams.set("dashboard", selectedDashboard.id);
+    router.replace(`${pathname}?${nextParams.toString()}`);
+  }, [
+    activeDashboardId,
+    pathname,
+    projectId,
+    routeDashboardId,
+    router,
+    searchParams,
+    selectedDashboard,
+    setActiveDashboard,
+  ]);
 
   if (!projectId) {
-    return <div className="text-sm text-muted-foreground">Select a project first.</div>;
+    return <div className="text-sm text-muted-foreground">{t("projectDashboard.selectProject")}</div>;
+  }
+
+  if (dashboardsLoading && dashboards.length === 0) {
+    return (
+      <div className="text-sm text-muted-foreground">
+        {t("projectDashboard.loading")}
+      </div>
+    );
+  }
+
+  if (dashboardsError && dashboards.length === 0) {
+    return (
+      <div className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
+        <div className="text-sm font-medium text-destructive">
+          {t("projectDashboard.error")}
+        </div>
+        <div className="text-sm text-muted-foreground">{dashboardsError}</div>
+        <Button
+          type="button"
+          size="sm"
+          variant="outline"
+          onClick={() => void fetchDashboards(projectId)}
+        >
+          {t("projectDashboard.retry")}
+        </Button>
+      </div>
+    );
   }
 
   return (
@@ -35,13 +137,119 @@ export default function ProjectDashboardPage() {
         <button
           type="button"
           className="rounded-md border px-3 py-2 text-sm"
-          onClick={() => void createDashboard(projectId, { name: "Sprint Overview", layout: [] })}
+          onClick={() => void createDashboard(projectId, { name: t("projectDashboard.sprintOverview"), layout: [] })}
         >
-          Create Dashboard
+          {t("projectDashboard.createDashboard")}
         </button>
       ) : (
-        <DashboardGrid projectId={projectId} dashboard={selectedDashboard} />
+        <>
+          <div className="flex flex-col gap-3 rounded-lg border bg-card p-4 shadow-sm md:flex-row md:items-end md:justify-between">
+            <div className="flex flex-col gap-3 md:flex-row md:items-end">
+              <div className="flex min-w-[220px] flex-col gap-1.5">
+                <label
+                  htmlFor="project-dashboard-selector"
+                  className="text-sm font-medium"
+                >
+                  {t("projectDashboard.selectorLabel")}
+                </label>
+                <select
+                  id="project-dashboard-selector"
+                  className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                  value={selectedDashboard.id}
+                  onChange={(event) =>
+                    setActiveDashboard(projectId, event.target.value)
+                  }
+                >
+                  {dashboards.map((dashboard) => (
+                    <option key={dashboard.id} value={dashboard.id}>
+                      {dashboard.name}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {isEditingName ? (
+                <div className="flex flex-col gap-1.5">
+                  <label
+                    htmlFor="project-dashboard-name"
+                    className="text-sm font-medium"
+                  >
+                    {t("projectDashboard.nameLabel")}
+                  </label>
+                  <Input
+                    id="project-dashboard-name"
+                    value={draftName}
+                    onChange={(event) => setDraftName(event.target.value)}
+                  />
+                </div>
+              ) : null}
+            </div>
+            <div className="flex flex-wrap gap-2">
+              {isEditingName ? (
+                <>
+                  <Button
+                    type="button"
+                    size="sm"
+                    onClick={async () => {
+                      const trimmedName = draftName.trim();
+                      if (!trimmedName) {
+                        return;
+                      }
+                      await updateDashboard(projectId, selectedDashboard.id, {
+                        name: trimmedName,
+                      });
+                      setIsEditingName(false);
+                    }}
+                  >
+                    {t("projectDashboard.saveName")}
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    onClick={() => {
+                      setDraftName(selectedDashboard.name);
+                      setIsEditingName(false);
+                    }}
+                  >
+                    {t("projectDashboard.cancelEdit")}
+                  </Button>
+                </>
+              ) : (
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() => {
+                    setDraftName(selectedDashboard.name);
+                    setIsEditingName(true);
+                  }}
+                >
+                  {t("projectDashboard.rename")}
+                </Button>
+              )}
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={async () => {
+                  await deleteDashboard(projectId, selectedDashboard.id);
+                }}
+              >
+                {t("projectDashboard.delete")}
+              </Button>
+            </div>
+          </div>
+          <DashboardGrid projectId={projectId} dashboard={selectedDashboard} />
+        </>
       )}
     </div>
+  );
+}
+
+export default function ProjectDashboardPage() {
+  return (
+    <Suspense fallback={null}>
+      <ProjectDashboardView />
+    </Suspense>
   );
 }

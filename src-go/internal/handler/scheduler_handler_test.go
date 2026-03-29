@@ -36,6 +36,25 @@ func (m *schedulerServiceMock) ListJobs(_ context.Context) ([]*model.ScheduledJo
 	return m.jobs, nil
 }
 
+func (m *schedulerServiceMock) GetStats(_ context.Context) (*model.SchedulerStats, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	return &model.SchedulerStats{}, nil
+}
+
+func (m *schedulerServiceMock) GetJob(_ context.Context, jobKey string) (*model.ScheduledJob, error) {
+	if m.err != nil {
+		return nil, m.err
+	}
+	for _, job := range m.jobs {
+		if job.JobKey == jobKey {
+			return job, nil
+		}
+	}
+	return nil, repository.ErrNotFound
+}
+
 func (m *schedulerServiceMock) ListRuns(_ context.Context, jobKey string, limit int) ([]*model.ScheduledJobRun, error) {
 	if m.err != nil {
 		return nil, m.err

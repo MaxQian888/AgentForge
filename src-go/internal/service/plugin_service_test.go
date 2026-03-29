@@ -229,6 +229,15 @@ func writeManifest(t *testing.T, dir string, relativePath string, content string
 	return path
 }
 
+func writeBuiltInBundle(t *testing.T, dir string, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, "builtin-bundle.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write built-in bundle: %v", err)
+	}
+	return path
+}
+
 func TestPluginService_DiscoversBuiltInsWithoutInstallingRecords(t *testing.T) {
 	ctx := context.Background()
 	pluginsDir := t.TempDir()
@@ -257,6 +266,25 @@ spec:
   module: ./dist/feishu.wasm
   abiVersion: v1
 `)
+	writeBuiltInBundle(t, pluginsDir, `
+plugins:
+  - id: web-search
+    kind: ToolPlugin
+    manifest: tools/web-search/manifest.yaml
+    docsRef: docs/part/PLUGIN_SYSTEM_DESIGN.md#七工具插件系统tool-plugin
+    verificationProfile: mcp-tool
+    availability:
+      status: ready
+      message: Bundled and ready for install.
+  - id: feishu
+    kind: IntegrationPlugin
+    manifest: integrations/feishu/manifest.yaml
+    docsRef: docs/GO_WASM_PLUGIN_RUNTIME.md
+    verificationProfile: go-wasm
+    availability:
+      status: requires_configuration
+      message: Requires Feishu application credentials before live activation.
+`)
 
 	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, nil, pluginsDir)
 
@@ -274,6 +302,358 @@ spec:
 	}
 	if len(filtered) != 0 {
 		t.Fatalf("expected discover to leave installed registry empty, got %+v", filtered)
+	}
+}
+
+func TestPluginService_DiscoverBuiltInsUsesOfficialBundleMetadata(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	writeManifest(t, pluginsDir, "tools/web-search/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: web-search
+  name: Web Search
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["tool.js"]
+`)
+	writeManifest(t, pluginsDir, "reviews/architecture-check/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ReviewPlugin
+metadata:
+  id: architecture-check
+  name: Architecture Check
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["review.js"]
+  review:
+    entrypoint: review:run
+    triggers:
+      events: ["pull_request.updated"]
+      filePatterns: ["src/**/*.ts"]
+    output:
+      format: findings/v1
+`)
+	writeManifest(t, pluginsDir, "tools/experimental-helper/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: experimental-helper
+  name: Experimental Helper
+  version: 0.0.1
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["experimental.js"]
+`)
+	writeBuiltInBundle(t, pluginsDir, `
+plugins:
+  - id: web-search
+    kind: ToolPlugin
+    manifest: tools/web-search/manifest.yaml
+    docsRef: docs/part/PLUGIN_SYSTEM_DESIGN.md#七工具插件系统tool-plugin
+    verificationProfile: mcp-tool
+    availability:
+      status: ready
+      message: Bundled and ready for install.
+  - id: architecture-check
+    kind: ReviewPlugin
+    manifest: reviews/architecture-check/manifest.yaml
+    docsRef: docs/part/PLUGIN_SYSTEM_DESIGN.md#十审查插件系统review-plugin
+    verificationProfile: mcp-review
+    availability:
+      status: ready
+      message: Runs through the built-in deep review flow.
+`)
+
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, nil, pluginsDir)
+
+	records, err := svc.DiscoverBuiltIns(ctx)
+	if err != nil {
+		t.Fatalf("discover built-ins: %v", err)
+	}
+	if len(records) != 2 {
+		t.Fatalf("expected 2 official built-ins, got %d", len(records))
+	}
+
+	ids := []string{records[0].Metadata.ID, records[1].Metadata.ID}
+	if strings.Contains(strings.Join(ids, ","), "experimental-helper") {
+		t.Fatalf("expected unlisted built-in manifest to be skipped, got %+v", ids)
+	}
+
+	var architecture *model.PluginRecord
+	for _, record := range records {
+		if record.Metadata.ID == "architecture-check" {
+			architecture = record
+			break
+		}
+	}
+	if architecture == nil {
+		t.Fatalf("expected architecture-check record, got %+v", ids)
+	}
+	if architecture.BuiltIn == nil {
+		t.Fatalf("expected built-in bundle metadata, got %+v", architecture)
+	}
+	if architecture.BuiltIn.VerificationProfile != "mcp-review" {
+		t.Fatalf("verification profile = %q, want mcp-review", architecture.BuiltIn.VerificationProfile)
+	}
+	if architecture.BuiltIn.AvailabilityStatus != "ready" {
+		t.Fatalf("availability status = %q, want ready", architecture.BuiltIn.AvailabilityStatus)
+	}
+	if architecture.BuiltIn.ReadinessStatus != "ready" {
+		t.Fatalf("readiness status = %q, want ready", architecture.BuiltIn.ReadinessStatus)
+	}
+}
+
+func TestPluginService_DiscoverBuiltInsEvaluatesStructuredReadiness(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	writeManifest(t, pluginsDir, "tools/github-tool/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: github-tool
+  name: GitHub Tool
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["tool.js"]
+`)
+	writeBuiltInBundle(t, pluginsDir, `
+plugins:
+  - id: github-tool
+    kind: ToolPlugin
+    manifest: tools/github-tool/manifest.yaml
+    docsRef: docs/PRD.md#46-工具插件系统tool-plugin
+    verificationProfile: mcp-tool
+    readiness:
+      readyMessage: GitHub tool is ready for install.
+      blockedMessage: GitHub tool still needs local setup before activation.
+      nextStep: Configure bridge credentials and install the required helper runtime.
+      installable: true
+      prerequisites:
+        - kind: executable
+          value: definitely-missing-agentforge-cli
+          label: AgentForge CLI helper
+      configuration:
+        - kind: env
+          value: AGENTFORGE_GITHUB_TOKEN
+          label: GitHub token
+`)
+
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, nil, pluginsDir)
+
+	records, err := svc.DiscoverBuiltIns(ctx)
+	if err != nil {
+		t.Fatalf("discover built-ins: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 built-in, got %d", len(records))
+	}
+
+	record := records[0]
+	if record.BuiltIn == nil {
+		t.Fatalf("expected built-in metadata, got %+v", record)
+	}
+	if record.BuiltIn.ReadinessStatus != "requires_prerequisite" {
+		t.Fatalf("readiness status = %q, want requires_prerequisite", record.BuiltIn.ReadinessStatus)
+	}
+	if record.BuiltIn.NextStep != "Configure bridge credentials and install the required helper runtime." {
+		t.Fatalf("next step = %q", record.BuiltIn.NextStep)
+	}
+	if !record.BuiltIn.Installable {
+		t.Fatal("expected built-in to remain installable when only activation readiness is blocked")
+	}
+	if len(record.BuiltIn.MissingPrerequisites) != 1 || record.BuiltIn.MissingPrerequisites[0] != "AgentForge CLI helper" {
+		t.Fatalf("missing prerequisites = %+v", record.BuiltIn.MissingPrerequisites)
+	}
+	if len(record.BuiltIn.MissingConfiguration) != 0 {
+		t.Fatalf("expected prerequisite failure to take precedence, got %+v", record.BuiltIn.MissingConfiguration)
+	}
+	if len(record.BuiltIn.BlockingReasons) == 0 {
+		t.Fatalf("expected blocking reasons, got %+v", record.BuiltIn.BlockingReasons)
+	}
+}
+
+func TestPluginService_SearchCatalogSeparatesInstallabilityFromReadiness(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	writeManifest(t, pluginsDir, "tools/github-tool/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: github-tool
+  name: GitHub Tool
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["tool.js"]
+`)
+	writeBuiltInBundle(t, pluginsDir, `
+plugins:
+  - id: github-tool
+    kind: ToolPlugin
+    manifest: tools/github-tool/manifest.yaml
+    docsRef: docs/PRD.md#46-工具插件系统tool-plugin
+    verificationProfile: mcp-tool
+    readiness:
+      readyMessage: GitHub tool is ready for install.
+      blockedMessage: GitHub tool still needs bridge credentials before activation.
+      nextStep: Set AGENTFORGE_GITHUB_TOKEN on the bridge host.
+      installable: true
+      configuration:
+        - kind: env
+          value: AGENTFORGE_GITHUB_TOKEN
+          label: GitHub token
+`)
+
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, nil, pluginsDir)
+
+	catalog, err := svc.SearchCatalog(ctx, "github")
+	if err != nil {
+		t.Fatalf("search catalog: %v", err)
+	}
+	if len(catalog) != 1 {
+		t.Fatalf("expected 1 catalog entry, got %d", len(catalog))
+	}
+	entry := catalog[0]
+	if !entry.Installable {
+		t.Fatal("expected built-in entry to remain installable")
+	}
+	if entry.BuiltIn == nil {
+		t.Fatalf("expected built-in metadata, got %+v", entry)
+	}
+	if entry.BuiltIn.ReadinessStatus != "requires_configuration" {
+		t.Fatalf("readiness status = %q, want requires_configuration", entry.BuiltIn.ReadinessStatus)
+	}
+	if len(entry.BuiltIn.MissingConfiguration) != 1 || entry.BuiltIn.MissingConfiguration[0] != "GitHub token" {
+		t.Fatalf("missing configuration = %+v", entry.BuiltIn.MissingConfiguration)
+	}
+}
+
+func TestPluginService_InstalledBuiltInRetainsReadinessMetadata(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	writeManifest(t, pluginsDir, "tools/github-tool/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: github-tool
+  name: GitHub Tool
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["tool.js"]
+`)
+	writeBuiltInBundle(t, pluginsDir, `
+plugins:
+  - id: github-tool
+    kind: ToolPlugin
+    manifest: tools/github-tool/manifest.yaml
+    docsRef: docs/PRD.md#46-工具插件系统tool-plugin
+    verificationProfile: mcp-tool
+    readiness:
+      readyMessage: GitHub tool is ready for install.
+      blockedMessage: GitHub tool still needs bridge credentials before activation.
+      nextStep: Set AGENTFORGE_GITHUB_TOKEN on the bridge host.
+      installable: true
+      configuration:
+        - kind: env
+          value: AGENTFORGE_GITHUB_TOKEN
+          label: GitHub token
+`)
+
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, nil, pluginsDir)
+
+	record, err := svc.InstallCatalogEntry(ctx, "github-tool")
+	if err != nil {
+		t.Fatalf("install catalog entry: %v", err)
+	}
+	if record.BuiltIn == nil {
+		t.Fatalf("expected built-in metadata after install, got %+v", record)
+	}
+	if record.BuiltIn.ReadinessStatus != "requires_configuration" {
+		t.Fatalf("readiness status after install = %q, want requires_configuration", record.BuiltIn.ReadinessStatus)
+	}
+
+	hydrated, err := svc.GetByID(ctx, "github-tool")
+	if err != nil {
+		t.Fatalf("get installed built-in: %v", err)
+	}
+	if hydrated.BuiltIn == nil {
+		t.Fatalf("expected hydrated built-in metadata, got %+v", hydrated)
+	}
+	if hydrated.BuiltIn.NextStep != "Set AGENTFORGE_GITHUB_TOKEN on the bridge host." {
+		t.Fatalf("next step = %q", hydrated.BuiltIn.NextStep)
+	}
+}
+
+func TestPluginService_DiscoverBuiltInsMarksUnsupportedHostAsBlocked(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	writeManifest(t, pluginsDir, "tools/host-specific-tool/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: host-specific-tool
+  name: Host Specific Tool
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["tool.js"]
+`)
+	writeBuiltInBundle(t, pluginsDir, `
+plugins:
+  - id: host-specific-tool
+    kind: ToolPlugin
+    manifest: tools/host-specific-tool/manifest.yaml
+    docsRef: docs/PRD.md#46-工具插件系统tool-plugin
+    verificationProfile: mcp-tool
+    readiness:
+      readyMessage: Host-specific tool is ready for install.
+      blockedMessage: Host-specific tool is not supported on this host.
+      nextStep: Use a supported host family for this built-in.
+      installable: false
+      supportedHosts: ["definitely-unsupported-host"]
+`)
+
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, nil, pluginsDir)
+
+	records, err := svc.DiscoverBuiltIns(ctx)
+	if err != nil {
+		t.Fatalf("discover built-ins: %v", err)
+	}
+	if len(records) != 1 {
+		t.Fatalf("expected 1 built-in, got %d", len(records))
+	}
+	record := records[0]
+	if record.BuiltIn == nil {
+		t.Fatalf("expected built-in metadata, got %+v", record)
+	}
+	if record.BuiltIn.ReadinessStatus != "unsupported_host" {
+		t.Fatalf("readiness status = %q, want unsupported_host", record.BuiltIn.ReadinessStatus)
+	}
+	if record.BuiltIn.Installable {
+		t.Fatal("expected unsupported host built-in to be non-installable")
+	}
+	if record.BuiltIn.InstallBlockedReason == "" {
+		t.Fatal("expected install blocked reason for unsupported host")
 	}
 }
 

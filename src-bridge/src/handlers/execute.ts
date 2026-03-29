@@ -40,14 +40,20 @@ export async function handleExecute(
     createRuntimeRegistry({
       queryRunner: deps.queryRunner,
       commandRuntimeRunner: deps.commandRuntimeRunner,
+      codexRuntimeRunner: deps.codexRuntimeRunner,
+      continuity: deps.continuity,
       executableLookup: deps.executableLookup,
       envLookup: deps.envLookup,
       defaultRuntime: deps.defaultRuntime,
       now: deps.now,
+      codexAuthStatusProvider: deps.codexAuthStatusProvider,
+      opencodeTransport: deps.opencodeTransport,
+      opencodeEventRunner: deps.opencodeEventRunner,
     });
-  const { adapter, request } = runtimeRegistry.resolveExecute(req);
+  const { adapter, request } = await runtimeRegistry.resolveExecute(req);
   const runtime = pool.acquire(request.task_id, request.session_id, request.runtime ?? "claude_code");
   runtime.bindRequest(request);
+  runtime.continuity = deps.continuity ? { ...deps.continuity } : runtime.continuity;
 
   const systemPrompt = buildSystemPrompt(
     request.system_prompt || defaultSystemPrompt(request.task_id),

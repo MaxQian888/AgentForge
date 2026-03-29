@@ -14,6 +14,8 @@ That descriptor now also carries provider rendering-profile metadata. Delivery p
 | Slack | Socket Mode | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | Requires app-level token and Socket Mode enablement. |
 | DingTalk | Stream mode | `DINGTALK_APP_KEY`, `DINGTALK_APP_SECRET` | Stream mode is the default live intake; structured notifications currently downgrade to text explicitly. |
 | WeCom | callback-driven app messaging | `WECOM_CORP_ID`, `WECOM_AGENT_ID`, `WECOM_AGENT_SECRET`, `WECOM_CALLBACK_TOKEN`, `WECOM_CALLBACK_PORT` | `WECOM_CALLBACK_PATH` defaults to `/wecom/callback`; inbound callbacks can reply through `response_url` and later direct sends use app-message APIs. |
+| QQ | OneBot WebSocket | `QQ_ONEBOT_WS_URL` | Optional `QQ_ACCESS_TOKEN` secures the websocket handshake when the OneBot server requires it. |
+| QQ Bot | webhook callback + OpenAPI send | `QQBOT_APP_ID`, `QQBOT_APP_SECRET`, `QQBOT_CALLBACK_PORT` | `QQBOT_CALLBACK_PATH` defaults to `/qqbot/callback`; optional `QQBOT_API_BASE` and `QQBOT_TOKEN_BASE` override the official QQ Bot endpoints for tests or alternate deployments. |
 | Telegram | long polling | `TELEGRAM_BOT_TOKEN` | Current live implementation supports `TELEGRAM_UPDATE_MODE=longpoll` only and rejects webhook config. |
 | Discord | outgoing webhook interactions | `DISCORD_APP_ID`, `DISCORD_BOT_TOKEN`, `DISCORD_PUBLIC_KEY`, `DISCORD_INTERACTIONS_PORT` | Optional `DISCORD_COMMAND_GUILD_ID` scopes command sync to a guild for faster rollout. |
 
@@ -27,6 +29,8 @@ All platforms support `IM_TRANSPORT_MODE=stub` for local verification and `IM_TR
 | Slack | Block Kit | Socket Mode interactive payload | channel, thread, `response_url` | thread reply or `response_url` follow-up | plain text only if block rendering is unavailable |
 | DingTalk | ActionCard planned, text fallback active | Stream card callback | session webhook, conversation id, conversation type | session webhook first, direct send fallback | structured payloads are sent as explicit downgraded text today |
 | WeCom | card-compatible structured profile with text fallback | webhook callback payload | chat id, user id, `response_url` | `response_url` reply first, direct app send fallback | richer or mutable updates fall back to text when the current WeCom path cannot honor them |
+| QQ | text-first shared rendering | OneBot message event payload | group id, user id, message id | reply in the same chat using reply-segment compatible sends | structured payloads are sent as explicit downgraded text today |
+| QQ Bot | text-first shared rendering | webhook callback payload | group openid or user openid, `msg_id` | reply when `msg_id` exists, direct follow-up otherwise | structured payloads are sent as explicit downgraded text today |
 | Telegram | inline keyboard | callback query | chat id, message id, `message_thread_id` topic | reply or `editMessageText` depending on target | card-like payloads collapse to text plus inline keyboard; optional MarkdownV2 delivery escapes content first and oversized formatted updates fall back to segmented replies |
 | Discord | message components | `/interactions` component payload | channel id, interaction token, original response id | deferred ack, follow-up, original response patch | unsupported interaction types return explicit ephemeral failure |
 
@@ -61,10 +65,12 @@ Canonical delivery expectations:
 3. For Discord, expose `http://<host>:<DISCORD_INTERACTIONS_PORT>/interactions` and configure it as the interactions endpoint.
 4. For Telegram, make sure no webhook configuration remains in the environment when long polling is enabled.
 5. For WeCom, expose the configured callback endpoint and verify the callback token/path match the live deployment.
-5. Start the bridge and confirm `/im/health` reports the expected `platform`, normalized `source`, and capability matrix fields.
-6. Run a command path, a native action path, a control-plane replay path, and a notification path before promoting the deployment.
-7. For Feishu, verify both JSON-card and template-card notifications if the deployment depends on richer card payloads.
-8. For Telegram, verify one `text_format=markdown_v2` delivery and one oversized formatted completion so the segmented fallback path is exercised explicitly.
+6. For QQ, verify the OneBot websocket connects cleanly and the bridge can receive one inbound command plus one outbound send action before promotion.
+7. For QQ Bot, expose the configured callback endpoint and verify the OpenAPI text-send path can deliver one group or user follow-up before promotion.
+8. Start the bridge and confirm `/im/health` reports the expected `platform`, normalized `source`, and capability matrix fields.
+9. Run a command path, a native action path, a control-plane replay path, and a notification path before promoting the deployment.
+10. For Feishu, verify both JSON-card and template-card notifications if the deployment depends on richer card payloads.
+11. For Telegram, verify one `text_format=markdown_v2` delivery and one oversized formatted completion so the segmented fallback path is exercised explicitly.
 
 ## Rollback Guidance
 
@@ -73,6 +79,8 @@ Canonical delivery expectations:
 - If Discord command registration is causing rollout delays, set `DISCORD_COMMAND_GUILD_ID` to a development guild first, validate there, then remove it for global sync.
 - If Telegram long polling needs to be disabled, stop the bridge before reconfiguring webhook-based infrastructure; the current implementation intentionally rejects mixed polling/webhook state.
 - If WeCom callback delivery fails, verify the exposed callback URL, callback token, and direct-send credentials before falling back to stub mode for diagnosis.
+- If QQ websocket delivery fails, verify the OneBot websocket URL, access token, and upstream adapter availability before falling back to stub mode for diagnosis.
+- If QQ Bot callback delivery fails, verify the exposed callback URL, app credentials, and OpenAPI reachability before falling back to stub mode for diagnosis.
 - If DingTalk users need structured controls before ActionCard send is promoted, do not fake parity; keep the current explicit text downgrade and document the missing card-send step in rollout notes.
 - If the new control-plane WebSocket path is unstable, keep the bridge registered but temporarily fall back to signed compatibility `POST /im/send` and `POST /im/notify` while investigating.
 - If duplicate notifications appear, verify the bridge still uses a stable `IM_BRIDGE_ID_FILE` and confirm `delivery_id` headers are preserved by any reverse proxy.
@@ -85,6 +93,8 @@ Canonical delivery expectations:
 | Slack | Bridge logs `slack-live`, registers, and Socket Mode connects cleanly | Trigger `/task list` or an app mention | Click a Block Kit button or submit a modal and confirm `/im/action` receives channel, thread, and `response_url` context | Confirm a threaded or `response_url` reply arrives after the Socket Mode ack | Matching Slack notification reaches the target channel, mismatched platform is rejected, replay stays in the original thread | `scripts/smoke/fixtures/slack.json` |
 | DingTalk | Bridge logs `dingtalk-live`, registers, and Stream intake starts | Send a bot message in a chat using Stream mode | Trigger a card callback payload and confirm it normalizes into `/im/action` with session webhook or conversation context | Confirm callback results use session webhook first, then conversation-scoped fallback when webhook is absent | Structured notifications fall back to explicit text when rich send is unavailable and duplicate `delivery_id` values are suppressed | `scripts/smoke/fixtures/dingtalk.json` |
 | WeCom | Bridge starts with `wecom-live`, registers, and exposes the configured callback path | Post a callback payload or send a message through the configured WeCom bot/application path | Confirm the callback normalizes into shared commands with `wecom` source, chat id, user id, and `response_url` preserved | Confirm reply flows prefer `response_url`, while replayed or later notifications can fall back to direct app send when no callback reply is available | Matching WeCom notifications use provider-owned structured/text resolution and report explicit fallback when a richer update path is unavailable | `scripts/smoke/fixtures/wecom.json` |
+| QQ | Bridge starts with `qq-live`, registers, and connects to the configured OneBot websocket | Send `/task list` or `/help` through the OneBot-compatible QQ transport | Confirm the inbound message normalizes into shared commands with `qq` source, chat id, user id, and message id preserved | Confirm replies stay in the originating group or private chat and include reply-target-aware follow-up behavior when message context is available | Matching QQ notifications use text delivery and explicit fallback when a richer payload cannot be honored | `scripts/smoke/fixtures/qq.json` |
+| QQ Bot | Bridge starts with `qqbot-live`, registers, and exposes the configured callback path | Post a QQ Bot webhook payload for a group or direct message command | Confirm the callback normalizes into shared commands with `qqbot` source, group or user openid, and `msg_id` preserved | Confirm replies use preserved `msg_id` when present and later notifications can fall back to direct group or user sends through OpenAPI | Matching QQ Bot notifications use text delivery and explicit fallback when a richer payload cannot be honored | `scripts/smoke/fixtures/qqbot.json` |
 | Telegram | Bridge starts with `telegram-live`, registers, and no webhook env configured | Send `/task list` or `/help` to the bot while polling is running | Tap an inline keyboard button and confirm callback query metadata reaches `/im/action` | Confirm `answerCallbackQuery` clears the spinner and later completion edits or replies to the original message/topic; verify oversized formatted completion degrades to segmented replies | Matching Telegram notification sends plain text or inline keyboard to the configured chat id, and `text_format=markdown_v2` deliveries send escaped MarkdownV2 with `parse_mode` | `scripts/smoke/fixtures/telegram.json` |
 | Discord | Bridge starts with `discord-live`, registers, syncs commands, and listens on `/interactions` | Trigger `/agent` or `/help` from a guild or DM | Click a message component and confirm `/im/action` receives `custom_id`, interaction token, and original response context | Confirm the deferred ack is immediate and later progress edits the original response or posts a follow-up as expected | Matching Discord notification sends a channel message using the bot token and replay does not duplicate the first ack | `scripts/smoke/fixtures/discord.json` |
 
@@ -106,16 +116,16 @@ cd src-im-bridge
 .\scripts\smoke\Invoke-StubSmoke.ps1 -Platform telegram -Port 7780
 ```
 
-The same script works for `feishu`, `slack`, `dingtalk`, `discord`, and `wecom` by switching the `-Platform` value.
+The same script works for `feishu`, `slack`, `dingtalk`, `discord`, `wecom`, `qq`, and `qqbot` by switching the `-Platform` value.
 
 Recommended focused verification after native interaction changes:
 
 ```powershell
 cd src-im-bridge
-go test ./platform/slack ./platform/feishu ./platform/telegram ./platform/discord ./platform/dingtalk ./platform/wecom -count=1
+go test ./platform/slack ./platform/feishu ./platform/telegram ./platform/discord ./platform/dingtalk ./platform/wecom ./platform/qq ./platform/qqbot -count=1
 go test ./core -run 'Test(ResolveReplyPlan_|DeliverText_|DeliverNative_|MetadataForPlatform_|StructuredMessageFallbackText|ReplyTarget_JSONRoundTrip|NativeMessage_)' -count=1
-go test ./client -run 'Test(HandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget|HandleIMAction_ParsesCanonicalActionOutcome|WithSource_NormalizesHeaderValue|WithPlatform_UsesTelegramMetadataSource|WithPlatform_UsesWeComMetadataSource)' -count=1
-go test ./notify -run 'TestReceiver_(ActionResponseUsesReplyTargetDelivery|HealthReportsNormalizedTelegramSourceAndCapabilities|HealthReportsNormalizedWeComSourceAndCapabilities|FallsBackToStructuredTextWhenNativeStructuredSenderUnavailable|PrefersNativePayloadWhenPlatformSupportsIt|UsesDeferredNativeUpdateWhenFeishuReplyTargetSupportsIt|ReportsFallbackReasonWhenDeferredUpdateContextMissing|SuppressesDuplicateSignedCompatibilityDelivery|RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured)' -count=1
+go test ./client -run 'Test(HandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget|HandleIMAction_ParsesCanonicalActionOutcome|WithSource_NormalizesHeaderValue|WithPlatform_UsesTelegramMetadataSource|WithPlatform_UsesWeComMetadataSource|WithPlatform_UsesQQMetadataSource|WithPlatform_UsesQQBotMetadataSource)' -count=1
+go test ./notify -run 'TestReceiver_(ActionResponseUsesReplyTargetDelivery|HealthReportsNormalizedTelegramSourceAndCapabilities|HealthReportsNormalizedWeComSourceAndCapabilities|HealthReportsNormalizedQQSourceAndCapabilities|HealthReportsNormalizedQQBotSourceAndCapabilities|FallsBackToStructuredTextWhenNativeStructuredSenderUnavailable|PrefersNativePayloadWhenPlatformSupportsIt|UsesDeferredNativeUpdateWhenFeishuReplyTargetSupportsIt|ReportsFallbackReasonWhenDeferredUpdateContextMissing|SuppressesDuplicateSignedCompatibilityDelivery|RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured)' -count=1
 go test ./cmd/bridge -run 'Test(ConfigurePlatformActionCallbacks_|SelectProvider_|SelectPlatform_|LookupPlatformDescriptor_|BridgeRuntimeControl_)' -count=1
 ```
 

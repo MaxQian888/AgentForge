@@ -90,7 +90,8 @@ interface ProjectState {
   fetchProjects: () => Promise<void>;
   setCurrentProject: (id: string) => void;
   createProject: (data: { name: string; description: string }) => Promise<void>;
-  updateProject: (id: string, data: ProjectUpdateInput) => Promise<void>;
+  updateProject: (id: string, data: ProjectUpdateInput) => Promise<Project | undefined>;
+  deleteProject: (id: string) => Promise<void>;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -297,6 +298,18 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
     set((s) => ({
       projects: s.projects.map((p) => (p.id === id ? updated : p)),
       currentProject: s.currentProject?.id === id ? updated : s.currentProject,
+    }));
+    return updated;
+  },
+
+  deleteProject: async (id) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    const api = createApiClient(API_URL);
+    await api.delete(`/api/v1/projects/${id}`, { token });
+    set((s) => ({
+      projects: s.projects.filter((p) => p.id !== id),
+      currentProject: s.currentProject?.id === id ? null : s.currentProject,
     }));
   },
 }));

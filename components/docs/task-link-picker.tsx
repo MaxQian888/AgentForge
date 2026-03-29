@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,13 +27,15 @@ export function TaskLinkPicker({
   tasks: TaskLinkPickerItem[];
   onPick: (taskId: string) => void;
 }) {
+  const t = useTranslations("docs");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Select a task</DialogTitle>
+          <DialogTitle>{t("taskLinkPicker.title")}</DialogTitle>
           <DialogDescription>
-            Link an existing task back to this document.
+            {t("taskLinkPicker.desc")}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -49,13 +52,13 @@ export function TaskLinkPicker({
           ))}
           {tasks.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
-              No tasks available to link.
+              {t("taskLinkPicker.noTasks")}
             </div>
           ) : null}
         </div>
         <div className="flex justify-end">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Close
+            {t("taskLinkPicker.close")}
           </Button>
         </div>
       </DialogContent>

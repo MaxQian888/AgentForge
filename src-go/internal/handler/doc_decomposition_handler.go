@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
@@ -27,11 +28,11 @@ func NewDocDecompositionHandler(service docDecompositionHandlerService) *DocDeco
 func (h *DocDecompositionHandler) Decompose(c echo.Context) error {
 	pageID, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid page ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	req := new(model.DecomposeTasksFromPageRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -40,16 +41,16 @@ func (h *DocDecompositionHandler) Decompose(c echo.Context) error {
 	if req.ParentTaskID != nil && *req.ParentTaskID != "" {
 		parsed, err := uuid.Parse(*req.ParentTaskID)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid parent task ID"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidParentTaskID)
 		}
 		parentTaskID = &parsed
 	}
 	resp, err := h.service.DecomposeTasksFromBlocks(c.Request().Context(), appMiddleware.GetProjectID(c), pageID, req.BlockIDs, parentTaskID, currentUserID(c))
 	if err != nil {
 		if errors.Is(err, service.ErrWikiPageNotFound) {
-			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "wiki page not found"})
+			return localizedError(c, http.StatusNotFound, i18n.MsgWikiPageNotFound)
 		}
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to decompose page into tasks"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDecomposePageIntoTasks)
 	}
 	return c.JSON(http.StatusCreated, resp)
 }

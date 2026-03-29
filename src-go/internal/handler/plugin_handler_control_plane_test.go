@@ -108,6 +108,15 @@ func writeControlPlaneManifest(t *testing.T, dir string, relative string, conten
 	return path
 }
 
+func writeControlPlaneBundle(t *testing.T, dir string, content string) string {
+	t.Helper()
+	path := filepath.Join(dir, "builtin-bundle.yaml")
+	if err := os.WriteFile(path, []byte(content), 0o644); err != nil {
+		t.Fatalf("write built-in bundle: %v", err)
+	}
+	return path
+}
+
 func newControlPlanePluginHandler(pluginsDir string, goRuntime service.GoPluginRuntime) *handler.PluginHandler {
 	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), controlPlaneRuntimeClient{}, goRuntime, pluginsDir)
 	return handler.NewPluginHandler(svc)
@@ -584,6 +593,30 @@ spec:
   module: ./dist/feishu.wasm
   abiVersion: v1
 `)
+	writeControlPlaneManifest(t, pluginsDir, "tools/experimental-helper/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: experimental-helper
+  name: Experimental Helper
+  version: 0.1.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["experimental.js"]
+`)
+	writeControlPlaneBundle(t, pluginsDir, `
+plugins:
+  - id: feishu
+    kind: IntegrationPlugin
+    manifest: integrations/feishu/manifest.yaml
+    docsRef: docs/GO_WASM_PLUGIN_RUNTIME.md
+    verificationProfile: go-wasm
+    availability:
+      status: requires_configuration
+      message: Requires Feishu application credentials before live activation.
+`)
 
 	h := newControlPlanePluginHandler(pluginsDir, nil)
 	e := echo.New()
@@ -603,6 +636,12 @@ spec:
 	}
 	if len(discovered) != 1 || discovered[0].Metadata.ID != "feishu" {
 		t.Fatalf("unexpected discover payload: %+v", discovered)
+	}
+	if discovered[0].BuiltIn == nil {
+		t.Fatalf("expected built-in bundle metadata in discover payload, got %+v", discovered[0])
+	}
+	if discovered[0].BuiltIn.AvailabilityStatus != "requires_configuration" {
+		t.Fatalf("availability status = %q, want requires_configuration", discovered[0].BuiltIn.AvailabilityStatus)
 	}
 
 	listReq := httptest.NewRequest(http.MethodGet, "/plugins", nil)

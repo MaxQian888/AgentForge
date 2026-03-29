@@ -4,7 +4,7 @@ import { useMemo, useState } from "react";
 import { DragDropContext, type DropResult } from "@hello-pangea/dnd";
 import { Column } from "./column";
 import type { TaskWorkspaceDisplayOptions } from "@/lib/stores/task-workspace-store";
-import type { Task, TaskStatus } from "@/lib/stores/task-store";
+import type { Task, TaskPriority, TaskStatus } from "@/lib/stores/task-store";
 import type { LinkedDocItem } from "@/components/tasks/linked-docs-panel";
 
 const columns: TaskStatus[] = [
@@ -22,7 +22,9 @@ const columns: TaskStatus[] = [
 
 interface BoardProps {
   tasks: Task[];
+  allTasks: Task[];
   selectedTaskId: string | null;
+  selectedTaskIds?: string[];
   displayOptions: TaskWorkspaceDisplayOptions;
   linkedDocsByTask?: Record<string, LinkedDocItem[]>;
   onTaskClick: (task: Task) => void;
@@ -30,15 +32,23 @@ interface BoardProps {
     taskId: string,
     nextStatus: TaskStatus
   ) => Promise<void> | void;
+  onToggleTaskSelection?: (taskId: string) => void;
+  onQuickStatusChange?: (taskId: string, status: TaskStatus) => void;
+  onQuickPriorityChange?: (taskId: string, priority: TaskPriority) => void;
 }
 
 export function Board({
   tasks,
+  allTasks,
   selectedTaskId,
+  selectedTaskIds = [],
   displayOptions,
   linkedDocsByTask = {},
   onTaskClick,
   onTaskStatusChange,
+  onToggleTaskSelection,
+  onQuickStatusChange,
+  onQuickPriorityChange,
 }: BoardProps) {
   const [error, setError] = useState<string | null>(null);
 
@@ -62,6 +72,22 @@ export function Board({
 
     return map;
   }, [tasks]);
+
+  const subtaskStatsMap = useMemo(() => {
+    const map: Record<string, { total: number; done: number }> = {};
+    for (const task of allTasks) {
+      if (task.parentId) {
+        if (!map[task.parentId]) {
+          map[task.parentId] = { total: 0, done: 0 };
+        }
+        map[task.parentId].total++;
+        if (task.status === "done") {
+          map[task.parentId].done++;
+        }
+      }
+    }
+    return map;
+  }, [allTasks]);
 
   const onDragEnd = async (result: DropResult) => {
     if (!result.destination) return;
@@ -97,9 +123,14 @@ export function Board({
               status={status}
               tasks={grouped[status]}
               selectedTaskId={selectedTaskId}
+              selectedTaskIds={selectedTaskIds}
               displayOptions={displayOptions}
               linkedDocsByTask={linkedDocsByTask}
+              subtaskStatsMap={subtaskStatsMap}
               onTaskClick={onTaskClick}
+              onToggleTaskSelection={onToggleTaskSelection}
+              onQuickStatusChange={onQuickStatusChange}
+              onQuickPriorityChange={onQuickPriorityChange}
             />
           ))}
         </div>

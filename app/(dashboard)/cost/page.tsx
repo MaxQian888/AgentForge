@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTranslations } from "next-intl";
 import {
   Activity,
   Cpu,
@@ -38,6 +39,7 @@ function formatTokens(count: number): string {
 }
 
 export default function CostPage() {
+  const t = useTranslations("cost");
   const agents = useAgentStore((s) => s.agents);
   const projectCost = useCostStore((s) => s.projectCost);
   const costLoading = useCostStore((s) => s.loading);
@@ -69,7 +71,7 @@ export default function CostPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold">Cost Overview</h1>
+      <h1 className="text-2xl font-bold">{t("title")}</h1>
 
       {costError ? (
         <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
@@ -81,7 +83,7 @@ export default function CostPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Spend
+              {t("totalSpend")}
             </CardTitle>
             <DollarSign className="size-4 text-muted-foreground" />
           </CardHeader>
@@ -92,7 +94,7 @@ export default function CostPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Input Tokens
+              {t("inputTokens")}
             </CardTitle>
             <TrendingUp className="size-4 text-muted-foreground" />
           </CardHeader>
@@ -103,7 +105,7 @@ export default function CostPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Output Tokens
+              {t("outputTokens")}
             </CardTitle>
             <TrendingUp className="size-4 text-muted-foreground" />
           </CardHeader>
@@ -114,7 +116,7 @@ export default function CostPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Cache Tokens
+              {t("cacheTokens")}
             </CardTitle>
             <Hash className="size-4 text-muted-foreground" />
           </CardHeader>
@@ -125,7 +127,7 @@ export default function CostPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Total Turns
+              {t("totalTurns")}
             </CardTitle>
             <Activity className="size-4 text-muted-foreground" />
           </CardHeader>
@@ -136,7 +138,7 @@ export default function CostPage() {
         <Card>
           <CardHeader className="flex flex-row items-center justify-between pb-2">
             <CardTitle className="text-sm font-medium text-muted-foreground">
-              Active Agents
+              {t("activeAgents")}
             </CardTitle>
             <Cpu className="size-4 text-muted-foreground" />
           </CardHeader>
@@ -148,15 +150,15 @@ export default function CostPage() {
 
       <Card>
         <CardHeader>
-          <CardTitle>Cost Over Time</CardTitle>
-          <CardDescription>Daily spend across all agent runs</CardDescription>
+          <CardTitle>{t("costOverTime")}</CardTitle>
+          <CardDescription>{t("costOverTimeDesc")}</CardDescription>
         </CardHeader>
         <CardContent>
           {chartData.length > 0 ? (
             <CostChart data={chartData} />
           ) : (
             <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
-              {costLoading ? "Loading chart data..." : "No daily cost data available yet."}
+              {costLoading ? t("loadingChart") : t("noChartData")}
             </div>
           )}
         </CardContent>
@@ -165,18 +167,18 @@ export default function CostPage() {
       {sprintCosts.length > 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>Sprint Cost Comparison</CardTitle>
-            <CardDescription>Budget vs. actual spend per sprint</CardDescription>
+            <CardTitle>{t("sprintCostComparison")}</CardTitle>
+            <CardDescription>{t("sprintCostDesc")}</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Sprint</TableHead>
-                  <TableHead className="text-right">Budget</TableHead>
-                  <TableHead className="text-right">Spent</TableHead>
-                  <TableHead className="text-right">Remaining</TableHead>
-                  <TableHead className="text-right">Tokens (In/Out)</TableHead>
+                  <TableHead>{t("colSprint")}</TableHead>
+                  <TableHead className="text-right">{t("colBudget")}</TableHead>
+                  <TableHead className="text-right">{t("colSpent")}</TableHead>
+                  <TableHead className="text-right">{t("colRemaining")}</TableHead>
+                  <TableHead className="text-right">{t("colTokensInOut")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>
@@ -211,8 +213,8 @@ export default function CostPage() {
       {velocity.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Team Velocity</CardTitle>
-            <CardDescription>Tasks completed per period</CardDescription>
+            <CardTitle>{t("teamVelocity")}</CardTitle>
+            <CardDescription>{t("teamVelocityDesc")}</CardDescription>
           </CardHeader>
           <CardContent>
             <VelocityChart data={velocity} />
@@ -223,8 +225,8 @@ export default function CostPage() {
       {agentPerformance.length > 0 && (
         <Card>
           <CardHeader>
-            <CardTitle>Agent Performance</CardTitle>
-            <CardDescription>Success rate, cost, and efficiency by agent</CardDescription>
+            <CardTitle>{t("agentPerformance")}</CardTitle>
+            <CardDescription>{t("agentPerformanceDesc")}</CardDescription>
           </CardHeader>
           <CardContent>
             <AgentPerformanceTable data={agentPerformance} />
@@ -235,17 +237,17 @@ export default function CostPage() {
       {taskCosts.length > 0 ? (
         <Card>
           <CardHeader>
-            <CardTitle>Per-Task Cost Breakdown</CardTitle>
-            <CardDescription>Cost and token usage by individual task</CardDescription>
+            <CardTitle>{t("perTaskCost")}</CardTitle>
+            <CardDescription>{t("perTaskCostDesc")}</CardDescription>
           </CardHeader>
           <CardContent>
             <Table>
               <TableHeader>
                 <TableRow>
-                  <TableHead>Task</TableHead>
-                  <TableHead className="text-right">Agent Runs</TableHead>
-                  <TableHead className="text-right">Cost</TableHead>
-                  <TableHead className="text-right">Tokens (In/Out/Cache)</TableHead>
+                  <TableHead>{t("colTask")}</TableHead>
+                  <TableHead className="text-right">{t("colAgentRuns")}</TableHead>
+                  <TableHead className="text-right">{t("colCost")}</TableHead>
+                  <TableHead className="text-right">{t("colTokensInOutCache")}</TableHead>
                 </TableRow>
               </TableHeader>
               <TableBody>

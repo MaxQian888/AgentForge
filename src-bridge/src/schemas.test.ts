@@ -88,6 +88,29 @@ describe("bridge request schemas", () => {
         permission_mode: "default",
         tools: ["github-tool"],
         knowledge_context: "docs/PRD.md",
+        loaded_skills: [
+          {
+            path: "skills/react",
+            label: "React",
+            description: "React UI implementation guidance",
+            instructions: "Prefer server-safe React composition.",
+            source: "repo-local",
+            source_root: "skills",
+            origin: "direct",
+            requires: ["skills/typescript"],
+          },
+        ],
+        available_skills: [
+          {
+            path: "skills/testing",
+            label: "Testing",
+            description: "Regression-oriented test guidance",
+            source: "repo-local",
+            source_root: "skills",
+            origin: "direct",
+          },
+        ],
+        skill_diagnostics: [],
         output_filters: ["no_pii"],
       },
       team_id: "team-123",
@@ -97,6 +120,8 @@ describe("bridge request schemas", () => {
     expect(parsed.role_config?.role_id).toBe("frontend-developer");
     expect(parsed.role_config?.tools).toEqual(["github-tool"]);
     expect(parsed.role_config?.knowledge_context).toBe("docs/PRD.md");
+    expect(parsed.role_config?.loaded_skills?.[0]?.path).toBe("skills/react");
+    expect(parsed.role_config?.available_skills?.[0]?.path).toBe("skills/testing");
     expect(parsed.role_config?.output_filters).toEqual(["no_pii"]);
     expect(parsed.team_id).toBe("team-123");
     expect(parsed.team_role).toBe("planner");
@@ -157,6 +182,9 @@ describe("bridge request schemas", () => {
         permission_mode: "default",
         tools: ["github-tool"],
         knowledge_context: "docs/PRD.md",
+        loaded_skills: [],
+        available_skills: [],
+        skill_diagnostics: [],
         output_filters: ["no_pii"],
       },
     });

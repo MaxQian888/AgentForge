@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 
 export interface AgentPerformanceRecord {
@@ -17,10 +18,11 @@ interface AgentPerformanceTableProps {
 }
 
 export function AgentPerformanceTable({ data }: AgentPerformanceTableProps) {
+  const t = useTranslations("cost");
   if (data.length === 0) {
     return (
       <p className="text-sm text-muted-foreground">
-        No agent performance data available yet.
+        {t("noAgentPerformance")}
       </p>
     );
   }
@@ -30,12 +32,12 @@ export function AgentPerformanceTable({ data }: AgentPerformanceTableProps) {
       <table className="w-full text-sm">
         <thead>
           <tr className="border-b text-left text-muted-foreground">
-            <th className="pb-2 pr-4 font-medium">Agent</th>
-            <th className="pb-2 pr-4 font-medium">Tasks</th>
-            <th className="pb-2 pr-4 font-medium">Success</th>
-            <th className="pb-2 pr-4 font-medium">Avg Cost</th>
-            <th className="pb-2 pr-4 font-medium">Avg Duration</th>
-            <th className="pb-2 font-medium">Total Cost</th>
+            <th className="pb-2 pr-4 font-medium">{t("colAgent")}</th>
+            <th className="pb-2 pr-4 font-medium">{t("colTasks")}</th>
+            <th className="pb-2 pr-4 font-medium">{t("colSuccess")}</th>
+            <th className="pb-2 pr-4 font-medium">{t("colAvgCost")}</th>
+            <th className="pb-2 pr-4 font-medium">{t("colAvgDuration")}</th>
+            <th className="pb-2 font-medium">{t("colTotalCost")}</th>
           </tr>
         </thead>
         <tbody>

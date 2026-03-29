@@ -14,6 +14,23 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
+const (
+	bridgeExecutePath             = "/bridge/execute"
+	bridgeStatusPathTemplate      = "/bridge/status/:id"
+	bridgeCancelPath              = "/bridge/cancel"
+	bridgePausePath               = "/bridge/pause"
+	bridgeResumePath              = "/bridge/resume"
+	bridgeHealthPath              = "/bridge/health"
+	bridgePoolPath                = "/bridge/pool"
+	bridgeRuntimeCatalogPath      = "/bridge/runtimes"
+	bridgeDecomposePath           = "/bridge/decompose"
+	bridgeGeneratePath            = "/bridge/generate"
+	bridgeClassifyIntentPath      = "/bridge/classify-intent"
+	bridgeReviewPath              = "/bridge/review"
+	bridgePluginRegisterPath      = "/bridge/plugins/register"
+	bridgePluginRefreshMCPPattern = "/bridge/plugins/%s/mcp/refresh"
+)
+
 // ExecuteRequest is sent to the bridge to start an agent session.
 type ExecuteRequest struct {
 	TaskID         string      `json:"task_id"`
@@ -49,6 +66,9 @@ type RoleConfig struct {
 	MaxBudgetUsd     float64  `json:"max_budget_usd"`
 	MaxTurns         int      `json:"max_turns"`
 	PermissionMode   string   `json:"permission_mode"`
+	LoadedSkills     []model.RoleExecutionSkill           `json:"loaded_skills,omitempty"`
+	AvailableSkills  []model.RoleExecutionSkill           `json:"available_skills,omitempty"`
+	SkillDiagnostics []model.RoleExecutionSkillDiagnostic `json:"skill_diagnostics,omitempty"`
 }
 
 // ExecuteResponse is returned after an agent is started.
@@ -240,7 +260,7 @@ func NewClient(baseURL string) *Client {
 // Execute starts an agent session via the bridge.
 func (c *Client) Execute(ctx context.Context, req ExecuteRequest) (*ExecuteResponse, error) {
 	start := time.Now()
-	fields := c.requestLogFields(http.MethodPost, "/bridge/execute")
+	fields := c.requestLogFields(http.MethodPost, bridgeExecutePath)
 	fields["taskId"] = req.TaskID
 	fields["sessionId"] = req.SessionID
 	fields["runtime"] = req.Runtime
@@ -253,7 +273,7 @@ func (c *Client) Execute(ctx context.Context, req ExecuteRequest) (*ExecuteRespo
 		return nil, fmt.Errorf("marshal execute request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/execute", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+bridgeExecutePath, bytes.NewReader(body))
 	if err != nil {
 		logBridgeRequestResult(fields, start, 0, err, "", "bridge execute request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
@@ -285,7 +305,7 @@ func (c *Client) Execute(ctx context.Context, req ExecuteRequest) (*ExecuteRespo
 // GetStatus queries the bridge for agent run status.
 func (c *Client) GetStatus(ctx context.Context, taskID string) (*StatusResponse, error) {
 	start := time.Now()
-	fields := c.requestLogFields(http.MethodGet, "/bridge/status/:taskId")
+	fields := c.requestLogFields(http.MethodGet, bridgeStatusPathTemplate)
 	fields["taskId"] = taskID
 
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/bridge/status/"+taskID, nil)
@@ -319,7 +339,7 @@ func (c *Client) GetStatus(ctx context.Context, taskID string) (*StatusResponse,
 }
 
 func (c *Client) GetPoolSummary(ctx context.Context) (*PoolSummaryResponse, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/bridge/pool", nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+bridgePoolPath, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -343,7 +363,7 @@ func (c *Client) GetPoolSummary(ctx context.Context) (*PoolSummaryResponse, erro
 }
 
 func (c *Client) GetRuntimeCatalog(ctx context.Context) (*RuntimeCatalogResponse, error) {
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/bridge/runtimes", nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+bridgeRuntimeCatalogPath, nil)
 	if err != nil {
 		return nil, fmt.Errorf("create request: %w", err)
 	}
@@ -369,11 +389,11 @@ func (c *Client) GetRuntimeCatalog(ctx context.Context) (*RuntimeCatalogResponse
 // Cancel sends a cancel request to the bridge.
 func (c *Client) Cancel(ctx context.Context, taskID, reason string) error {
 	start := time.Now()
-	fields := c.requestLogFields(http.MethodPost, "/bridge/cancel")
+	fields := c.requestLogFields(http.MethodPost, bridgeCancelPath)
 	fields["taskId"] = taskID
 
 	payload, _ := json.Marshal(map[string]string{"task_id": taskID, "reason": reason})
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/cancel", bytes.NewReader(payload))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+bridgeCancelPath, bytes.NewReader(payload))
 	if err != nil {
 		logBridgeRequestResult(fields, start, 0, err, "", "bridge cancel request creation failed")
 		return fmt.Errorf("create request: %w", err)
@@ -399,11 +419,11 @@ func (c *Client) Cancel(ctx context.Context, taskID, reason string) error {
 // Pause requests the bridge to pause an active runtime while preserving resumable state.
 func (c *Client) Pause(ctx context.Context, taskID, reason string) (*PauseResponse, error) {
 	start := time.Now()
-	fields := c.requestLogFields(http.MethodPost, "/bridge/pause")
+	fields := c.requestLogFields(http.MethodPost, bridgePausePath)
 	fields["taskId"] = taskID
 
 	payload, _ := json.Marshal(map[string]string{"task_id": taskID, "reason": reason})
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/pause", bytes.NewReader(payload))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+bridgePausePath, bytes.NewReader(payload))
 	if err != nil {
 		logBridgeRequestResult(fields, start, 0, err, "", "bridge pause request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
@@ -437,7 +457,7 @@ func (c *Client) Pause(ctx context.Context, taskID, reason string) (*PauseRespon
 // Resume requests the bridge to resume a runtime from a persisted snapshot.
 func (c *Client) Resume(ctx context.Context, req ExecuteRequest) (*ResumeResponse, error) {
 	start := time.Now()
-	fields := c.requestLogFields(http.MethodPost, "/bridge/resume")
+	fields := c.requestLogFields(http.MethodPost, bridgeResumePath)
 	fields["taskId"] = req.TaskID
 	fields["sessionId"] = req.SessionID
 	fields["runtime"] = req.Runtime
@@ -450,7 +470,7 @@ func (c *Client) Resume(ctx context.Context, req ExecuteRequest) (*ResumeRespons
 		return nil, fmt.Errorf("marshal resume request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/resume", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+bridgeResumePath, bytes.NewReader(body))
 	if err != nil {
 		logBridgeRequestResult(fields, start, 0, err, "", "bridge resume request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
@@ -483,9 +503,9 @@ func (c *Client) Resume(ctx context.Context, req ExecuteRequest) (*ResumeRespons
 // Health checks if the bridge is reachable.
 func (c *Client) Health(ctx context.Context) error {
 	start := time.Now()
-	fields := c.requestLogFields(http.MethodGet, "/bridge/health")
+	fields := c.requestLogFields(http.MethodGet, bridgeHealthPath)
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+"/bridge/health", nil)
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+bridgeHealthPath, nil)
 	if err != nil {
 		logBridgeRequestResult(fields, start, 0, err, "", "bridge health request creation failed")
 		return fmt.Errorf("create request: %w", err)
@@ -509,7 +529,7 @@ func (c *Client) Health(ctx context.Context) error {
 // DecomposeTask requests a lightweight task decomposition from the bridge.
 func (c *Client) DecomposeTask(ctx context.Context, req DecomposeRequest) (*DecomposeResponse, error) {
 	start := time.Now()
-	fields := c.requestLogFields(http.MethodPost, "/bridge/decompose")
+	fields := c.requestLogFields(http.MethodPost, bridgeDecomposePath)
 	fields["taskId"] = req.TaskID
 	fields["provider"] = req.Provider
 	fields["model"] = req.Model
@@ -520,7 +540,7 @@ func (c *Client) DecomposeTask(ctx context.Context, req DecomposeRequest) (*Deco
 		return nil, fmt.Errorf("marshal decompose request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/decompose", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+bridgeDecomposePath, bytes.NewReader(body))
 	if err != nil {
 		logBridgeRequestResult(fields, start, 0, err, "", "bridge decompose request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
@@ -552,7 +572,7 @@ func (c *Client) DecomposeTask(ctx context.Context, req DecomposeRequest) (*Deco
 
 func (c *Client) Generate(ctx context.Context, req GenerateRequest) (*GenerateResponse, error) {
 	start := time.Now()
-	fields := c.requestLogFields(http.MethodPost, "/bridge/generate")
+	fields := c.requestLogFields(http.MethodPost, bridgeGeneratePath)
 	fields["provider"] = req.Provider
 	fields["model"] = req.Model
 
@@ -562,7 +582,7 @@ func (c *Client) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 		return nil, fmt.Errorf("marshal generate request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/generate", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+bridgeGeneratePath, bytes.NewReader(body))
 	if err != nil {
 		logBridgeRequestResult(fields, start, 0, err, "", "bridge generate request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
@@ -612,7 +632,7 @@ type ClassifyIntentResponse struct {
 // ClassifyIntent sends a natural language text to the bridge for intent classification.
 func (c *Client) ClassifyIntent(ctx context.Context, req ClassifyIntentRequest) (*ClassifyIntentResponse, error) {
 	start := time.Now()
-	fields := c.requestLogFields(http.MethodPost, "/bridge/classify-intent")
+	fields := c.requestLogFields(http.MethodPost, bridgeClassifyIntentPath)
 	fields["userId"] = req.UserID
 	fields["projectId"] = req.ProjectID
 
@@ -622,7 +642,7 @@ func (c *Client) ClassifyIntent(ctx context.Context, req ClassifyIntentRequest) 
 		return nil, fmt.Errorf("marshal classify intent request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/classify-intent", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+bridgeClassifyIntentPath, bytes.NewReader(body))
 	if err != nil {
 		logBridgeRequestResult(fields, start, 0, err, "", "bridge classify intent request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
@@ -657,7 +677,7 @@ func (c *Client) ClassifyIntent(ctx context.Context, req ClassifyIntentRequest) 
 // Review executes a Layer 2 deep review via the bridge.
 func (c *Client) Review(ctx context.Context, req ReviewRequest) (*ReviewResponse, error) {
 	start := time.Now()
-	fields := c.requestLogFields(http.MethodPost, "/bridge/review")
+	fields := c.requestLogFields(http.MethodPost, bridgeReviewPath)
 	fields["reviewId"] = req.ReviewID
 	fields["taskId"] = req.TaskID
 	fields["dimensionCount"] = len(req.Dimensions)
@@ -669,7 +689,7 @@ func (c *Client) Review(ctx context.Context, req ReviewRequest) (*ReviewResponse
 		return nil, fmt.Errorf("marshal review request: %w", err)
 	}
 
-	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+"/bridge/review", bytes.NewReader(body))
+	httpReq, err := http.NewRequestWithContext(ctx, http.MethodPost, c.baseURL+bridgeReviewPath, bytes.NewReader(body))
 	if err != nil {
 		logBridgeRequestResult(fields, start, 0, err, "", "bridge review request creation failed")
 		return nil, fmt.Errorf("create request: %w", err)
@@ -706,7 +726,7 @@ func (c *Client) RegisterToolPlugin(ctx context.Context, manifest model.PluginMa
 		return nil, fmt.Errorf("marshal tool plugin manifest: %w", err)
 	}
 
-	record, err := c.doPluginRequest(ctx, http.MethodPost, "/bridge/plugins/register", payload)
+	record, err := c.doPluginRequest(ctx, http.MethodPost, bridgePluginRegisterPath, payload)
 	if err != nil {
 		return nil, err
 	}
@@ -738,7 +758,7 @@ func (c *Client) RestartToolPlugin(ctx context.Context, pluginID string) (*model
 }
 
 func (c *Client) RefreshToolPluginMCPSurface(ctx context.Context, pluginID string) (*model.PluginMCPRefreshResult, error) {
-	record, err := c.doPluginRequest(ctx, http.MethodPost, "/bridge/plugins/"+pluginID+"/mcp/refresh", nil)
+	record, err := c.doPluginRequest(ctx, http.MethodPost, fmt.Sprintf(bridgePluginRefreshMCPPattern, pluginID), nil)
 	if err != nil {
 		return nil, err
 	}

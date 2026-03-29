@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Search, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -29,6 +30,7 @@ interface MemoryPanelProps {
 }
 
 export function MemoryPanel({ projectId }: MemoryPanelProps) {
+  const t = useTranslations("memory");
   const [query, setQuery] = useState("");
   const [category, setCategory] = useState("all");
 
@@ -49,7 +51,7 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
       <div className="relative">
         <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
         <Input
-          placeholder="Search memory entries..."
+          placeholder={t("searchPlaceholder")}
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           className="pl-9"
@@ -58,20 +60,20 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
 
       <Tabs value={category} onValueChange={setCategory}>
         <TabsList>
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="episodic">Episodic</TabsTrigger>
-          <TabsTrigger value="semantic">Semantic</TabsTrigger>
-          <TabsTrigger value="procedural">Procedural</TabsTrigger>
+          <TabsTrigger value="all">{t("tabAll")}</TabsTrigger>
+          <TabsTrigger value="episodic">{t("tabEpisodic")}</TabsTrigger>
+          <TabsTrigger value="semantic">{t("tabSemantic")}</TabsTrigger>
+          <TabsTrigger value="procedural">{t("tabProcedural")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value={category} className="mt-4">
           {loading ? (
-            <p className="text-muted-foreground">Loading memories...</p>
+            <p className="text-muted-foreground">{t("loading")}</p>
           ) : filteredEntries.length === 0 ? (
             <Card>
               <CardContent className="py-12 text-center">
                 <p className="text-muted-foreground">
-                  No memory entries found.
+                  {t("noEntries")}
                 </p>
               </CardContent>
             </Card>
@@ -99,6 +101,7 @@ function MemoryEntryCard({
   entry: AgentMemoryEntry;
   onDelete: () => void;
 }) {
+  const t = useTranslations("memory");
   return (
     <Card>
       <CardContent className="flex flex-col gap-2 py-3">
@@ -128,7 +131,7 @@ function MemoryEntryCard({
           {entry.content}
         </p>
         <div className="flex items-center gap-4 text-xs text-muted-foreground">
-          <span>Accessed: {entry.accessCount}x</span>
+          <span>{t("accessed", { count: entry.accessCount })}</span>
           <span>{new Date(entry.createdAt).toLocaleString()}</span>
         </div>
       </CardContent>

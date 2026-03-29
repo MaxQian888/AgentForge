@@ -1,0 +1,19 @@
+{
+  "formName": "表单名称",
+  "formNamePlaceholder": "缺陷报告",
+  "slug": "Slug",
+  "slugPlaceholder": "bug-report",
+  "targetStatus": "目标状态",
+  "publicForm": "公开表单",
+  "fieldMappings": "字段映射",
+  "fieldKeyPlaceholder": "字段键",
+  "fieldLabelPlaceholder": "字段标签",
+  "addFieldMapping": "添加字段映射",
+  "createForm": "创建表单",
+  "submitForm": "提交表单",
+  "createdTask": "已创建任务：{id}",
+  "taskTitle": "任务标题",
+  "taskDescription": "任务描述",
+  "taskPriority": "任务优先级",
+  "customField": "自定义字段：{name}"
+}

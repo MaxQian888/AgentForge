@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { PluginDetailOverview } from "@/components/plugins/plugin-detail-overview";
@@ -43,19 +44,20 @@ function hasKindSpecificData(plugin: PluginRecord): boolean {
 }
 
 export function PluginDetailSidebar({ plugin }: PluginDetailSidebarProps) {
+  const t = useTranslations("plugins");
+
   if (!plugin) {
     return (
       <Card className="h-fit">
         <CardHeader>
-          <CardTitle>Plugin details</CardTitle>
+          <CardTitle>{t("detailSidebar.title")}</CardTitle>
           <CardDescription>
-            Inspect runtime, permissions, health, and source metadata for the
-            selected installed plugin.
+            {t("detailSidebar.desc")}
           </CardDescription>
         </CardHeader>
         <CardContent>
           <div className="rounded-md border border-dashed px-4 py-8 text-sm text-muted-foreground">
-            Select an installed plugin to inspect operational details.
+            {t("detailSidebar.selectPrompt")}
           </div>
         </CardContent>
       </Card>
@@ -67,25 +69,24 @@ export function PluginDetailSidebar({ plugin }: PluginDetailSidebarProps) {
   return (
     <Card className="h-fit">
       <CardHeader>
-        <CardTitle>Plugin details</CardTitle>
+        <CardTitle>{t("detailSidebar.title")}</CardTitle>
         <CardDescription>
-          Inspect runtime, permissions, health, and source metadata for the
-          selected installed plugin.
+          {t("detailSidebar.desc")}
         </CardDescription>
       </CardHeader>
       <CardContent>
         <Tabs defaultValue="overview">
           <TabsList className="w-full flex-wrap">
-            <TabsTrigger value="overview">Overview</TabsTrigger>
-            <TabsTrigger value="events">Events</TabsTrigger>
+            <TabsTrigger value="overview">{t("detailSidebar.tabOverview")}</TabsTrigger>
+            <TabsTrigger value="events">{t("detailSidebar.tabEvents")}</TabsTrigger>
             {showKindTab ? (
-              <TabsTrigger value="kind">Kind</TabsTrigger>
+              <TabsTrigger value="kind">{t("detailSidebar.tabKind")}</TabsTrigger>
             ) : null}
             {plugin.kind === "ToolPlugin" && plugin.spec.runtime === "mcp" ? (
-              <TabsTrigger value="mcp">MCP</TabsTrigger>
+              <TabsTrigger value="mcp">{t("detailSidebar.tabMcp")}</TabsTrigger>
             ) : null}
             {plugin.kind === "WorkflowPlugin" ? (
-              <TabsTrigger value="workflow">Workflow</TabsTrigger>
+              <TabsTrigger value="workflow">{t("detailSidebar.tabWorkflow")}</TabsTrigger>
             ) : null}
           </TabsList>
 

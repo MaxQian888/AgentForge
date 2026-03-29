@@ -1,6 +1,6 @@
 # Backend Technology Analysis: Go vs Rust
 
-## For: Discovery Agent Platform (AI-Driven Development Management)
+## For: AgentForge (AI-Driven Development Management)
 
 ---
 
@@ -8,7 +8,31 @@
 
 **Recommendation: Go**
 
-Go is the recommended backend language for the Discovery Agent Platform. It offers the best balance of development speed, AI agent orchestration capabilities, ecosystem maturity, and hiring accessibility for a startup/internal tool building an AI-driven development management platform.
+Go is the recommended backend language for AgentForge. It offers the best
+balance of development speed, orchestration fit, ecosystem maturity, and hiring
+accessibility for the current platform shape.
+
+## Current Repo Truth
+
+This document began as a technology selection memo. The current repository has
+already made several of these choices concrete, so readers should not treat the
+comparison sections below as an undecided architecture:
+
+- The live backend is Go, not a pending language choice.
+- The current HTTP stack is Echo-based in `src-go/internal/server`, not a fresh
+  Fiber greenfield.
+- LLM execution is intentionally pushed out of the Go process into the TS
+  Bridge. Go does not use LangChainGo as its production execution path.
+- The live cross-process contract is HTTP `/bridge/*` plus WebSocket event flow.
+- The coding-agent runtime catalog already supports `claude_code`, `codex`, and
+  `opencode`, with Go responsible for propagating the `runtime/provider/model`
+  tuple into Bridge requests.
+- The desktop shell is additive Tauri infrastructure around the same Go + TS
+  backend chain, not a separate backend architecture.
+
+Use this document as rationale for why Go was selected and why Rust remains a
+possible future hot-path language, not as the source of truth for current route,
+framework, or runtime contracts.
 
 ---
 
@@ -82,11 +106,14 @@ Go's goroutine model is nearly ideal for AI agent orchestration:
 ## 4. LLM API Integration (HIGH Priority)
 
 ### Go: Excellent
-- **LangChainGo**: Native Claude/Anthropic, OpenAI, Gemini, Bedrock, Cohere, Mistral, Ollama, HuggingFace integrations.
-- **Jetify AI SDK**: Model-agnostic with automatic retries, rate limiting, provider failover.
-- **Google ADK/Genkit**: First-class streaming support, structured outputs, tool calling, RAG.
-- HTTP streaming (SSE/chunked) is straightforward with Go's `net/http` and `io.Reader`.
-- Claude API streaming works naturally with goroutines reading chunked responses.
+- The Go ecosystem still offers strong direct LLM integration options when
+  needed.
+- In AgentForge's current implementation, however, Go deliberately avoids being
+  the production LLM caller. Claude/Codex/OpenCode execution is delegated to
+  the TS Bridge so runtime-specific continuity, auth, and stream normalization
+  live behind one execution surface.
+- This means Go benefits from ecosystem optionality without forcing the backend
+  service itself to become a model-client multiplexer.
 
 ### Rust: Adequate but More Work
 - `reqwest` + `tokio` for HTTP streaming works but requires more boilerplate.
@@ -221,7 +248,7 @@ For our use case (task management platform, likely <1000 concurrent users), both
 └──────────────────┬──────────────────────────────┘
                    │ HTTP/WebSocket
 ┌──────────────────▼──────────────────────────────┐
-│              Go Backend (Fiber/Echo)              │
+│              Go Backend (Echo)                    │
 │                                                  │
 │  ┌─────────────┐  ┌──────────────────────────┐  │
 │  │ REST API     │  │ WebSocket Hub            │  │
@@ -229,14 +256,25 @@ For our use case (task management platform, likely <1000 concurrent users), both
 │  └─────────────┘  └──────────────────────────┘  │
 │                                                  │
 │  ┌─────────────┐  ┌──────────────────────────┐  │
-│  │ Agent        │  │ LLM Integration          │  │
-│  │ Orchestrator │  │ (LangChainGo/Jetify SDK) │  │
-│  │ (goroutines) │  │ (Claude API streaming)   │  │
+│  │ Agent        │  │ Bridge API + runtime      │  │
+│  │ Orchestrator │  │ catalog propagation       │  │
+│  │ (goroutines) │  │ (`/bridge/*` + WS)        │  │
 │  └─────────────┘  └──────────────────────────┘  │
 │                                                  │
 │  ┌─────────────┐  ┌──────────────────────────┐  │
 │  │ Git Ops      │  │ Task Scheduler           │  │
 │  │ (go-git)     │  │ (gocron)                 │  │
+│  └─────────────┘  └──────────────────────────┘  │
+└──────────────────┬──────────────────────────────┘
+                   │ HTTP `/bridge/*` + WS events
+┌──────────────────▼──────────────────────────────┐
+│          TS Agent Bridge (Bun / TypeScript)     │
+│                                                  │
+│  ┌─────────────┐  ┌──────────────────────────┐  │
+│  │ Runtime      │  │ Continuity + session     │  │
+│  │ adapters      │  │ management               │  │
+│  │ Claude/Codex/ │  │ Codex thread ids,        │  │
+│  │ OpenCode      │  │ OpenCode session ids     │  │
 │  └─────────────┘  └──────────────────────────┘  │
 └──────────────────┬──────────────────────────────┘
                    │
@@ -247,16 +285,26 @@ For our use case (task management platform, likely <1000 concurrent users), both
 ```
 
 ### Recommended Go Stack
-- **Web Framework**: Fiber (fastest, Express-like DX) or Echo (more structured, enterprise-ready)
-- **Agent Orchestration**: Google ADK for Go + LangChainGo
-- **LLM Integration**: LangChainGo (Claude, OpenAI, Gemini) or Jetify AI SDK
-- **WebSocket**: Built-in (Fiber/Echo) or Gorilla WebSocket
+- **Web Framework**: Echo is the current repo-truth choice; Fiber remains a comparison point, not the active stack.
+- **Agent Orchestration**: Go orchestrates task lifecycle, worktrees, review routing, and runtime policy propagation.
+- **LLM Integration**: In current AgentForge, production model execution is delegated to the TS Bridge instead of direct LangChainGo usage inside Go.
+- **WebSocket**: Go hub plus Bridge event relay form the live realtime chain.
 - **Git Operations**: go-git v5
 - **Database**: PostgreSQL with GORM or sqlx
 - **Cache/Pub-Sub**: Redis
 - **Task Scheduling**: gocron
-- **Authentication**: JWT middleware (built into Fiber/Echo)
-- **Protocol Support**: MCP + A2A via Google ADK
+- **Authentication**: JWT middleware in the Go API layer
+- **Protocol Support**: MCP through Bridge/plugin surfaces; runtime contracts propagated from Go control-plane decisions
+
+### Current Implementation Note
+
+This recommended architecture is no longer hypothetical. It roughly matches the
+current repository shape:
+
+- Go backend: `src-go/internal/server`, `src-go/internal/service`
+- TS Bridge: `src-bridge/src/server.ts`
+- Runtime catalog: `src-go/internal/service/coding_agent.go`
+- Desktop shell: `src-tauri/src/lib.rs`, `src-tauri/tauri.conf.json`
 
 ---
 

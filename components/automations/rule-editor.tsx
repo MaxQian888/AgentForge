@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -16,6 +17,7 @@ const EVENT_TYPES = [
 ];
 
 export function RuleEditor({ projectId }: { projectId: string }) {
+  const t = useTranslations("settings");
   const createRule = useAutomationStore((state) => state.createRule);
   const [name, setName] = useState("");
   const [eventType, setEventType] = useState(EVENT_TYPES[0]);
@@ -26,12 +28,12 @@ export function RuleEditor({ projectId }: { projectId: string }) {
   return (
     <div className="space-y-4">
       <div className="space-y-2">
-        <Label>Rule name</Label>
-        <Input value={name} onChange={(event) => setName(event.target.value)} placeholder="Notify when done" />
+        <Label>{t("automations.ruleName")}</Label>
+        <Input value={name} onChange={(event) => setName(event.target.value)} placeholder={t("automations.ruleNamePlaceholder")} />
       </div>
       <div className="grid gap-3 md:grid-cols-3">
         <div className="space-y-2">
-          <Label>Event</Label>
+          <Label>{t("automations.event")}</Label>
           <select className="h-10 rounded-md border bg-background px-3 text-sm" value={eventType} onChange={(event) => setEventType(event.target.value)}>
             {EVENT_TYPES.map((eventTypeOption) => (
               <option key={eventTypeOption} value={eventTypeOption}>
@@ -41,16 +43,16 @@ export function RuleEditor({ projectId }: { projectId: string }) {
           </select>
         </div>
         <div className="space-y-2">
-          <Label>Condition field</Label>
+          <Label>{t("automations.conditionField")}</Label>
           <Input value={conditionField} onChange={(event) => setConditionField(event.target.value)} />
         </div>
         <div className="space-y-2">
-          <Label>Condition value</Label>
+          <Label>{t("automations.conditionValue")}</Label>
           <Input value={conditionValue} onChange={(event) => setConditionValue(event.target.value)} />
         </div>
       </div>
       <div className="space-y-2">
-        <Label>Action</Label>
+        <Label>{t("automations.action")}</Label>
         <select className="h-10 rounded-md border bg-background px-3 text-sm" value={actionType} onChange={(event) => setActionType(event.target.value)}>
           {["send_notification", "send_im_message", "update_field", "assign_user", "move_to_column", "create_subtask", "invoke_plugin"].map((type) => (
             <option key={type} value={type}>
@@ -72,7 +74,7 @@ export function RuleEditor({ projectId }: { projectId: string }) {
           })
         }
       >
-        Create rule
+        {t("automations.createRule")}
       </Button>
     </div>
   );

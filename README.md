@@ -50,6 +50,20 @@ This codebase is in an active migration from an earlier starter foundation into 
 
 One important example: the PRD v2 notes that Go-to-TS communication has moved toward `HTTP + WebSocket`, while some older design parts still describe `gRPC`-based variants. The PRD should win when they conflict.
 
+## Implementation Snapshot
+
+As of `2026-03-29`, the repository has already moved beyond a thin starter shell in these concrete areas:
+
+- `Project task workspace`: `app/(dashboard)/project/page.tsx` now hosts one shared Board / List / Timeline / Calendar workspace with a persistent context rail, realtime health state, bulk actions, sprint-aware filtering, task detail editing, and doc/comment linkage surfaces.
+- `Project dashboard workspace`: `app/(dashboard)/project/dashboard/page.tsx` now supports dashboard selection plus create / rename / delete flows, widget catalog insertion, and widget-level refresh / delete / empty-state handling instead of a fixed first-dashboard view.
+- `Settings workspace`: `app/(dashboard)/settings/page.tsx` now has draft lifecycle semantics (`dirty`, save, discard/reset), validation feedback, coding-agent runtime catalog integration, and operator diagnostics grounded in current saved values and fallback state.
+- `Role workspace`: `app/(dashboard)/roles/page.tsx` now exposes a responsive three-surface authoring flow with role library, structured editor, preview/sandbox context rail, inheritance-aware preview, and repo-local skill catalog selection.
+- `Review workspace`: `app/(dashboard)/reviews/page.tsx` now routes backlog, detail, decision actions, and manual deep-review triggers through shared review workspace components instead of isolated page-specific UI.
+- `Docs/wiki workspace`: `app/(dashboard)/docs/page.tsx` and `app/(dashboard)/docs/[pageId]/page-client.tsx` now provide a project-scoped wiki tree, BlockNote editor, comments, version history, templates, recent/favorite docs, and related-task linkage.
+- `Plugin operator surfaces`: the plugin control plane now distinguishes catalog entries from installed plugins, includes built-in bundle/readiness verification, and exposes maintained authoring commands such as `pnpm create-plugin`, `pnpm plugin:verify`, and `pnpm plugin:verify:builtins`.
+- `IM operator UI`: the current frontend contract covers `feishu`, `dingtalk`, `slack`, `telegram`, `discord`, `wecom`, `qq`, and `qqbot`, with backend-driven event types, richer delivery diagnostics, payload preview, and platform-specific config fields.
+- `Desktop shell`: the Tauri app now includes shared desktop window chrome with frameless titlebar controls, bounded sidecar supervision, runtime status queries, shell actions, and window-state synchronization through `lib/platform-runtime.ts`.
+
 ## Repository Map
 
 ```text
@@ -83,6 +97,8 @@ Start here if you want the latest project narrative:
 - [`docs/part/PLUGIN_SYSTEM_DESIGN.md`](./docs/part/PLUGIN_SYSTEM_DESIGN.md): target plugin system design
 - [`docs/part/PLUGIN_RESEARCH_TECH.md`](./docs/part/PLUGIN_RESEARCH_TECH.md): runtime and sandbox technology research for plugins
 - [`docs/GO_WASM_PLUGIN_RUNTIME.md`](./docs/GO_WASM_PLUGIN_RUNTIME.md): current Go-side WASM plugin runtime, SDK, and local verification flow
+- [`docs/role-authoring-guide.md`](./docs/role-authoring-guide.md): current dashboard role workspace flow, preview/sandbox loop, and operator guidance
+- [`docs/role-yaml.md`](./docs/role-yaml.md): canonical role YAML layout, runtime projection rules, and skill-catalog behavior
 - [`docs/part/PLUGIN_RESEARCH_PLATFORMS.md`](./docs/part/PLUGIN_RESEARCH_PLATFORMS.md): platform comparison for extension ecosystems
 - [`docs/part/TECHNICAL_CHALLENGES.md`](./docs/part/TECHNICAL_CHALLENGES.md): key engineering risks and mitigation paths
 - [`docs/part/DATA_AND_REALTIME_DESIGN.md`](./docs/part/DATA_AND_REALTIME_DESIGN.md): data model and realtime/event design
@@ -125,7 +141,7 @@ Current `dev:all` scope:
 
 - Starts or reuses local PostgreSQL + Redis through `docker compose` when they are not already reachable on `5432` / `6379`
 - Starts or reuses the Go Orchestrator on `http://127.0.0.1:7777/health`
-- Starts or reuses the TS Bridge on `http://127.0.0.1:7778/health`
+- Starts or reuses the TS Bridge on `http://127.0.0.1:7778/bridge/health`
 - Starts or reuses the Next.js frontend on `http://127.0.0.1:3000`
 - Persists repo-local runtime metadata in `.codex/dev-all-state.json`
 - Writes managed service logs under `.codex/runtime-logs/`
@@ -226,8 +242,11 @@ Runtime notes:
 - `/bridge/execute` now accepts an optional `runtime` field with `claude_code`, `codex`, or `opencode`.
 - If `runtime` is omitted, the bridge defaults to `claude_code` and still maps legacy provider hints such as `anthropic`, `codex`, and `opencode`.
 - `claude_code` uses the built-in Claude-backed adapter and expects `ANTHROPIC_API_KEY`.
-- `codex` and `opencode` use command-based adapters. Set `CODEX_RUNTIME_COMMAND` or `OPENCODE_RUNTIME_COMMAND` to an executable on `PATH` (or an absolute path). Each command must read one JSON request from `stdin` and emit newline-delimited JSON events on `stdout`.
-- Command adapters normalize these event types into the canonical bridge stream: `assistant_text`, `tool_call`, `tool_result`, `usage`, and `error`.
+- `codex` now uses a bridge-owned Codex connector built on the official Codex CLI surface. `CODEX_RUNTIME_COMMAND` must point to a working `codex` executable, and that CLI must already be authenticated (`codex login status` should report a valid login).
+- The Codex connector launches `codex exec --json` for fresh runs, captures `thread.started.thread_id` as continuity metadata, and uses `codex exec resume <thread-id>` for truthful resume flows instead of replaying the original prompt as a fresh session.
+- `opencode` now uses a bridge-owned OpenCode connector built on the official `opencode serve` HTTP APIs. Configure `OPENCODE_SERVER_URL` to a reachable OpenCode server, and set `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` when that server is protected with basic auth.
+- The OpenCode connector creates or resumes upstream sessions through `/session`, sends work with `/session/:id/prompt_async`, aborts active work with `/session/:id/abort`, and normalizes OpenCode session events into the canonical bridge stream.
+- OpenCode pause and resume now preserve upstream `session_id` continuity instead of replaying the original prompt as a fresh command process.
 
 ### Coding Agent Runtime Catalog
 
@@ -244,10 +263,15 @@ Current runtime compatibility rules:
 | Runtime | Default Provider | Compatible Providers | Default Model | Required Runtime Dependency |
 | --- | --- | --- | --- | --- |
 | `claude_code` | `anthropic` | `anthropic` | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
-| `codex` | `openai` | `openai`, `codex` | `gpt-5-codex` | `CODEX_RUNTIME_COMMAND` |
-| `opencode` | `opencode` | `opencode` | `opencode-default` | `OPENCODE_RUNTIME_COMMAND` |
+| `codex` | `openai` | `openai`, `codex` | `gpt-5-codex` | `CODEX_RUNTIME_COMMAND` plus a valid Codex CLI login |
+| `opencode` | `opencode` | `opencode` | `opencode-default` | `OPENCODE_SERVER_URL` and optional basic-auth credentials |
 
 Bridge readiness diagnostics now surface missing credentials, missing executables, and incompatible runtime/provider combinations before launch. The project settings page and Team start dialog both consume that catalog instead of hard-coded Claude-only defaults.
+
+Focused bridge-runtime verification commands:
+
+- `bun test src/opencode/transport.test.ts src/handlers/opencode-runtime.test.ts src/runtime/registry.test.ts src/session/manager.test.ts src/server.test.ts`
+- `bun run typecheck`
 
 ### Runtime Environment Variables
 
@@ -264,7 +288,15 @@ CODEX_RUNTIME_COMMAND=codex
 OPENCODE_RUNTIME_COMMAND=opencode
 ```
 
-If you use a custom wrapper script or binary, point `CODEX_RUNTIME_COMMAND` or `OPENCODE_RUNTIME_COMMAND` at the full executable path. Project-level runtime selection does not replace these process-level requirements; it only determines which runtime tuple Go forwards to the Bridge.
+For Codex, `CODEX_RUNTIME_COMMAND` should point at the official `codex` CLI (or a repo-owned wrapper that still preserves the same `exec --json` / `exec resume` contract). Project-level runtime selection does not replace these process-level requirements; it only determines which runtime tuple Go forwards to the Bridge.
+
+Before using `runtime=codex`, verify the CLI is authenticated:
+
+```bash
+codex login status
+```
+
+If Codex pause or resume reports a blocked continuity state, the bridge is missing the saved `thread_id` needed to continue the same Codex session and will refuse to silently start a fresh run.
 
 Focused verification for the bridge runtime layer:
 
@@ -307,7 +339,7 @@ Notes:
 - `plugin:build` resolves the maintained sample artifact path from the manifest and still supports `--source` / `--output` overrides when you are iterating on a different Go-hosted plugin target.
 - `plugin:debug` replays the real `AGENTFORGE_AUTORUN`, `AGENTFORGE_OPERATION`, `AGENTFORGE_CONFIG`, `AGENTFORGE_CAPABILITIES`, and `AGENTFORGE_PAYLOAD` contract through the Go WASM runtime instead of inventing a separate dev-only protocol.
 - `plugin:verify` currently runs the maintained sample smoke path only: `build -> debug health`. It is intentionally scoped and does not replace broader Go or bridge test suites.
-- `plugin:dev` is the minimal local plugin stack command. It only concerns the Go orchestrator and TS bridge, reuses them when already healthy, and reports readiness through `http://127.0.0.1:7777/health` and `http://127.0.0.1:7778/health`.
+- `plugin:dev` is the minimal local plugin stack command. It only concerns the Go orchestrator and TS bridge, reuses them when already healthy, and reports readiness through `http://127.0.0.1:7777/health` and `http://127.0.0.1:7778/bridge/health`.
 - The Go control plane now separates installable catalog entries from installed plugin records via `GET /api/v1/plugins/catalog` and `POST /api/v1/plugins/catalog/install`, while external `git`, `npm`, and `catalog` sources stay blocked from enablement until digest plus signature or explicit approval metadata mark them trusted.
 
 ### 4. IM Bridge Workspace
@@ -321,6 +353,12 @@ Useful IM bridge commands:
 
 - `go test ./...`
 - `go build ./cmd/bridge`
+
+Current operator-facing IM scope in this repo:
+
+- The frontend management surfaces cover `feishu`, `dingtalk`, `slack`, `telegram`, `discord`, `wecom`, `qq`, and `qqbot`.
+- Channel configuration now uses backend-fetched event types instead of a hard-coded event checklist.
+- Delivery and health views include richer platform badges, downgrade diagnostics, and payload/detail inspection for operator workflows.
 
 ### 5. Desktop Mode
 
@@ -341,6 +379,7 @@ Desktop capability contract in the current Tauri shell:
 - Tauri now supervises both required sidecars: the Go orchestrator on `http://127.0.0.1:7777` and the TS bridge on `http://127.0.0.1:7778`.
 - The desktop runtime is only reported as `ready` after both sidecars pass health checks. Unexpected exits trigger bounded restart attempts before the runtime is marked `degraded`.
 - Frontend desktop access is centralized through `lib/platform-runtime.ts` and `hooks/use-platform-capability.ts`. Supported desktop commands include backend URL resolution, runtime status, native file picking, system notifications, tray updates, global shortcut registration, update checks, and read-only runtime summary queries.
+- The main window now uses shared frameless chrome via `components/layout/desktop-window-frame.tsx`, including drag region handling plus minimize / maximize / restore / close actions wired through the platform capability facade.
 - Web mode keeps explicit fallback semantics: file picking falls back to browser input, notifications fall back to the Web Notification API, tray updates fall back to document title updates, global shortcuts return `unsupported`, and update checks return `not_applicable`.
 - The plugin dashboard consumes desktop runtime telemetry as an additive status surface only. Plugin inventory and lifecycle actions remain on the existing backend control plane.
 
@@ -371,6 +410,7 @@ Current limitations:
 | `pnpm plugin:debug` | Run a local Go WASM plugin debug invocation through the real runtime envelope |
 | `pnpm plugin:dev` | Start or reuse the minimal plugin authoring stack: Go orchestrator + TS bridge |
 | `pnpm plugin:verify` | Run the maintained sample plugin smoke workflow: build -> debug health |
+| `pnpm plugin:verify:builtins` | Verify the built-in plugin bundle contract and generated registry metadata |
 | `pnpm tauri:dev` | Build backend sidecar and start Tauri dev mode |
 | `pnpm tauri:build` | Build the desktop app |
 | `pnpm build:bridge` | Install and build the TS/Bun bridge |

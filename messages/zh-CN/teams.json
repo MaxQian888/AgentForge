@@ -1,0 +1,21 @@
+{
+  "title": "Agent 团队",
+  "viewAgents": "查看 Agent",
+  "projectLabel": "项目",
+  "statusLabel": "状态",
+  "selectProject": "选择项目",
+  "stats.activeTeams": "活跃团队",
+  "stats.completed": "已完成",
+  "stats.totalSpent": "总花费",
+  "empty.selectProject": "选择一个项目来查看团队运行情况。",
+  "loading": "加载团队中...",
+  "error.retry": "重试",
+  "empty.noTeams": "暂无 Agent 团队。从任务详情页启动团队。",
+  "empty.noFilteredTeams": "没有找到{status}状态的团队。",
+  "teamPage.loading": "加载团队工作区...",
+  "filter.allStatuses": "所有状态",
+  "filter.active": "活跃",
+  "filter.completed": "已完成",
+  "filter.failed": "失败",
+  "filter.cancelled": "已取消"
+}

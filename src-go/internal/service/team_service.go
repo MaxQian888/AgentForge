@@ -24,13 +24,15 @@ type TeamRunRepository interface {
 	Create(ctx context.Context, team *model.AgentTeam) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.AgentTeam, error)
 	GetByTask(ctx context.Context, taskID uuid.UUID) (*model.AgentTeam, error)
-	ListByProject(ctx context.Context, projectID uuid.UUID) ([]*model.AgentTeam, error)
+	ListByProject(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeam, error)
 	ListActive(ctx context.Context) ([]*model.AgentTeam, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	UpdateStatusWithError(ctx context.Context, id uuid.UUID, status, errorMessage string) error
 	UpdateSpent(ctx context.Context, id uuid.UUID, spent float64) error
 	SetPlannerRun(ctx context.Context, id uuid.UUID, plannerRunID uuid.UUID) error
 	SetReviewerRun(ctx context.Context, id uuid.UUID, reviewerRunID uuid.UUID) error
+	Delete(ctx context.Context, id uuid.UUID) error
+	Update(ctx context.Context, id uuid.UUID, req *model.UpdateTeamRequest) error
 }
 
 // TeamAgentRunRepository defines run persistence needed by the team service.
@@ -500,9 +502,45 @@ func (s *TeamService) GetSummary(ctx context.Context, teamID uuid.UUID) (*model.
 	return summary, nil
 }
 
-// ListByProject returns all teams for a project.
-func (s *TeamService) ListByProject(ctx context.Context, projectID uuid.UUID) ([]*model.AgentTeam, error) {
-	return s.teamRepo.ListByProject(ctx, projectID)
+// ListByProject returns all teams for a project, optionally filtered by status.
+func (s *TeamService) ListByProject(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeam, error) {
+	return s.teamRepo.ListByProject(ctx, projectID, status)
+}
+
+// DeleteTeam removes a team that is in terminal status.
+func (s *TeamService) DeleteTeam(ctx context.Context, teamID uuid.UUID) error {
+	team, err := s.teamRepo.GetByID(ctx, teamID)
+	if err != nil {
+		return ErrTeamNotFound
+	}
+	if !model.IsTerminalTeamStatus(team.Status) {
+		return ErrTeamNotActive
+	}
+	if err := s.teamRepo.Delete(ctx, teamID); err != nil {
+		return fmt.Errorf("delete team: %w", err)
+	}
+	log.WithFields(teamLogFields(team)).Info("team deleted")
+	return nil
+}
+
+// UpdateTeam updates mutable fields on a team.
+func (s *TeamService) UpdateTeam(ctx context.Context, teamID uuid.UUID, req *model.UpdateTeamRequest) (*model.AgentTeam, error) {
+	team, err := s.teamRepo.GetByID(ctx, teamID)
+	if err != nil {
+		return nil, ErrTeamNotFound
+	}
+	if req.TotalBudgetUsd != nil && *req.TotalBudgetUsd < team.TotalSpentUsd {
+		return nil, fmt.Errorf("budget cannot be less than already spent amount ($%.2f)", team.TotalSpentUsd)
+	}
+	if err := s.teamRepo.Update(ctx, teamID, req); err != nil {
+		return nil, fmt.Errorf("update team: %w", err)
+	}
+	updated, err := s.teamRepo.GetByID(ctx, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("fetch updated team: %w", err)
+	}
+	log.WithFields(teamLogFields(updated)).Info("team updated")
+	return updated, nil
 }
 
 func (s *TeamService) broadcastEvent(eventType, projectID string, payload any) {

@@ -1,23 +1,44 @@
 /** @jest-environment node */
 
-import * as path from "node:path";
+const spawnSyncMock = jest.fn();
+
+jest.mock("node:child_process", () => ({
+  spawnSync: (...args: unknown[]) => spawnSyncMock(...args),
+}));
+
+jest.mock("./plugin-dev-targets.js", () => ({
+  getRepoRoot: () => process.cwd(),
+  resolveBuildTarget: ({ manifestPath }: { manifestPath: string }) => ({
+    manifestPath,
+    pluginId: "feishu-adapter",
+    modulePath: `${process.cwd()}\\plugins\\integrations\\feishu-adapter\\dist\\feishu.wasm`,
+    sourcePath: "./cmd/sample-wasm-plugin",
+  }),
+}));
 
 describe("debug-go-wasm-plugin runtime envelope", () => {
-  const manifestPath = path.join(
-    process.cwd(),
-    "plugins",
-    "integrations",
-    "feishu-adapter",
-    "manifest.yaml",
-  );
+  const manifestPath =
+    "D:\\Project\\AgentForge\\plugins\\integrations\\feishu-adapter\\manifest.yaml";
 
-  beforeAll(() => {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const { main } = require("./build-go-wasm-plugin.js");
-    main(["--manifest", manifestPath]);
+  beforeEach(() => {
+    jest.resetModules();
+    spawnSyncMock.mockReset();
   });
 
   test("replays health through the Go WASM runtime contract", () => {
+    spawnSyncMock.mockReturnValue({
+      status: 0,
+      stdout: JSON.stringify({
+        ok: true,
+        operation: "health",
+        data: {
+          status: "ok",
+          mode: "webhook",
+        },
+      }),
+      stderr: "",
+    });
+
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { runDebugCommand } = require("./debug-go-wasm-plugin.js");
 
@@ -26,19 +47,46 @@ describe("debug-go-wasm-plugin runtime envelope", () => {
       operation: "health",
     });
 
-    expect(result.status).toBe(0);
-    expect(result.output).toMatchObject({
-      ok: true,
-      operation: "health",
-      data: {
-        status: "ok",
-        mode: "webhook",
+    expect(spawnSyncMock).toHaveBeenCalledWith(
+      "go",
+      [
+        "run",
+        "./cmd/plugin-debugger",
+        "--manifest",
+        manifestPath,
+        "--operation",
+        "health",
+      ],
+      expect.objectContaining({
+        cwd: expect.stringContaining("src-go"),
+        encoding: "utf8",
+      }),
+    );
+    expect(result).toMatchObject({
+      status: 0,
+      output: {
+        ok: true,
+        operation: "health",
+        data: {
+          status: "ok",
+          mode: "webhook",
+        },
       },
+      stderr: "",
     });
-    expect(result.stderr).toContain("");
   });
 
   test("reports undeclared capability failures with structured output", () => {
+    spawnSyncMock.mockReturnValue({
+      status: 1,
+      stdout: JSON.stringify({
+        ok: false,
+        operation: "delete_message",
+        error: "operation delete_message is not declared in spec.capabilities",
+      }),
+      stderr: "plugin error",
+    });
+
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { runDebugCommand } = require("./debug-go-wasm-plugin.js");
 
@@ -47,7 +95,7 @@ describe("debug-go-wasm-plugin runtime envelope", () => {
       operation: "delete_message",
     });
 
-    expect(result.status).not.toBe(0);
+    expect(result.status).toBe(1);
     expect(result.output).toMatchObject({
       ok: false,
       operation: "delete_message",

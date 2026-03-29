@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   Dialog,
   DialogContent,
@@ -21,6 +22,7 @@ interface InvokeFormProps {
 }
 
 function InvokeForm({ plugin, onClose }: InvokeFormProps) {
+  const t = useTranslations("plugins");
   const [operation, setOperation] = useState("");
   const [payloadText, setPayloadText] = useState("{}");
   const [parseError, setParseError] = useState<string | null>(null);
@@ -38,12 +40,12 @@ function InvokeForm({ plugin, onClose }: InvokeFormProps) {
     try {
       parsed = JSON.parse(payloadText) as Record<string, unknown>;
     } catch {
-      setParseError("Invalid JSON payload");
+      setParseError(t("invokeDialog.invalidJson"));
       return;
     }
 
     if (!operation.trim()) {
-      setInvokeError("Operation name is required");
+      setInvokeError(t("invokeDialog.operationRequired"));
       return;
     }
 
@@ -57,7 +59,7 @@ function InvokeForm({ plugin, onClose }: InvokeFormProps) {
       setResult(res);
     } catch (err) {
       setInvokeError(
-        err instanceof Error ? err.message : "Invocation failed",
+        err instanceof Error ? err.message : t("invokeDialog.invocationFailed"),
       );
     } finally {
       setSubmitting(false);
@@ -68,16 +70,16 @@ function InvokeForm({ plugin, onClose }: InvokeFormProps) {
     <>
       <div className="grid gap-3 py-4">
         <div className="grid gap-1.5">
-          <Label htmlFor="invoke-operation">Operation</Label>
+          <Label htmlFor="invoke-operation">{t("invokeDialog.operation")}</Label>
           <Input
             id="invoke-operation"
-            placeholder="e.g. run, execute, ping"
+            placeholder={t("invokeDialog.operationPlaceholder")}
             value={operation}
             onChange={(e) => setOperation(e.target.value)}
           />
         </div>
         <div className="grid gap-1.5">
-          <Label htmlFor="invoke-payload">Payload (JSON)</Label>
+          <Label htmlFor="invoke-payload">{t("invokeDialog.payload")}</Label>
           <textarea
             id="invoke-payload"
             className="flex min-h-[140px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
@@ -98,7 +100,7 @@ function InvokeForm({ plugin, onClose }: InvokeFormProps) {
         ) : null}
         {result !== null ? (
           <div className="grid gap-1.5">
-            <Label>Result</Label>
+            <Label>{t("invokeDialog.result")}</Label>
             <pre className="max-h-[200px] overflow-auto rounded-md border border-border/60 bg-muted/30 p-3 text-xs font-mono">
               {JSON.stringify(result, null, 2)}
             </pre>
@@ -107,10 +109,10 @@ function InvokeForm({ plugin, onClose }: InvokeFormProps) {
       </div>
       <DialogFooter>
         <Button variant="outline" onClick={onClose}>
-          Close
+          {t("invokeDialog.close")}
         </Button>
         <Button onClick={() => void handleSubmit()} disabled={submitting}>
-          {submitting ? "Invoking..." : "Submit"}
+          {submitting ? t("invokeDialog.invoking") : t("invokeDialog.submit")}
         </Button>
       </DialogFooter>
     </>
@@ -128,16 +130,17 @@ export function PluginInvokeDialog({
   open,
   onOpenChange,
 }: PluginInvokeDialogProps) {
+  const t = useTranslations("plugins");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="sm:max-w-lg">
         <DialogHeader>
           <DialogTitle>
-            Invoke {plugin?.metadata.name ?? "Plugin"}
+            {t("invokeDialog.title", { name: plugin?.metadata.name ?? "Plugin" })}
           </DialogTitle>
           <DialogDescription>
-            Send an operation request to the plugin runtime. Provide an
-            operation name and an optional JSON payload.
+            {t("invokeDialog.desc")}
           </DialogDescription>
         </DialogHeader>
         {plugin ? (

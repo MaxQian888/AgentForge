@@ -20,6 +20,7 @@ const blockerTask: Task = {
   agentBranch: "",
   agentWorktree: "",
   agentSessionId: "",
+  labels: [],
   blockedBy: [],
   plannedStartAt: "2026-03-24T09:00:00.000Z",
   plannedEndAt: "2026-03-25T18:00:00.000Z",

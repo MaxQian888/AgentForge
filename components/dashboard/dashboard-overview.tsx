@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Activity, AlertTriangle, Bot, ClipboardCheck, DollarSign, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -39,21 +40,23 @@ export function DashboardOverview({
   sectionErrors,
   onRetry,
 }: DashboardOverviewProps) {
+  const t = useTranslations("dashboard");
+
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading dashboard insights...</p>;
+    return <p className="text-sm text-muted-foreground">{t("loadingInsights")}</p>;
   }
 
   if (error) {
     return (
       <Card>
         <CardHeader>
-          <CardTitle>Dashboard insights unavailable</CardTitle>
+          <CardTitle>{t("error.title")}</CardTitle>
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">{error}</p>
           <div>
             <Button type="button" onClick={() => onRetry()}>
-              Retry Dashboard
+              {t("error.retry")}
             </Button>
           </div>
         </CardContent>
@@ -73,11 +76,11 @@ export function DashboardOverview({
         </CardHeader>
         <CardContent className="flex flex-col gap-4">
           <p className="text-sm text-muted-foreground">
-            No delivery signals yet for this scope.
+            {t("empty.noSignals")}
           </p>
           <div>
             <Button asChild>
-              <Link href={summary.links.projects}>Create or open a project</Link>
+              <Link href={summary.links.projects}>{t("empty.createProject")}</Link>
             </Button>
           </div>
         </CardContent>
@@ -88,44 +91,44 @@ export function DashboardOverview({
   const insightCards = [
     {
       key: "progress",
-      title: "Task Progress",
+      title: t("cards.taskProgress"),
       icon: Activity,
       value: `${summary.progress.inProgress}/${summary.progress.total}`,
-      detail: `${summary.progress.inReview} in review`,
+      detail: t("cards.inReview", { count: summary.progress.inReview }),
       href: summary.scope.projectId
         ? `/project?id=${summary.scope.projectId}`
         : summary.links.projects,
     },
     {
       key: "agents",
-      title: "Active Agents",
+      title: t("cards.activeAgents"),
       icon: Bot,
       value: String(summary.headline.activeAgents),
-      detail: `${summary.team.activeAgentRuns} active runs`,
+      detail: t("cards.activeRuns", { count: summary.team.activeAgentRuns }),
       href: summary.links.agents,
     },
     {
       key: "reviews",
-      title: "Pending Reviews",
+      title: t("cards.pendingReviews"),
       icon: ClipboardCheck,
       value: String(summary.headline.pendingReviews),
-      detail: `${summary.progress.assigned} assigned`,
+      detail: t("cards.assigned", { count: summary.progress.assigned }),
       href: summary.links.reviews,
     },
     {
       key: "cost",
-      title: "Weekly Cost",
+      title: t("cards.weeklyCost"),
       icon: DollarSign,
       value: formatCurrency(summary.headline.weeklyCost),
-      detail: `${summary.scope.projectsCount} tracked projects`,
+      detail: t("cards.trackedProjects", { count: summary.scope.projectsCount }),
       href: "/cost",
     },
     {
       key: "team",
-      title: "Team Capacity",
+      title: t("cards.teamCapacity"),
       icon: Users,
-      value: `${summary.team.totalMembers} members`,
-      detail: `${summary.team.overloadedMembers} overloaded`,
+      value: t("cards.members", { count: summary.team.totalMembers }),
+      detail: t("cards.overloaded", { count: summary.team.overloadedMembers }),
       href: summary.links.team,
     },
   ];
@@ -136,11 +139,11 @@ export function DashboardOverview({
         <div className="space-y-1">
           <h1 className="text-2xl font-bold">{summary.scope.projectName}</h1>
           <p className="text-sm text-muted-foreground">
-            Cross-project visibility for delivery flow, reviews, spend, and team coverage.
+            {t("header.description")}
           </p>
         </div>
         <Button asChild variant="outline">
-          <Link href={summary.links.team}>Open Team</Link>
+          <Link href={summary.links.team}>{t("header.openTeam")}</Link>
         </Button>
       </div>
 
@@ -161,7 +164,7 @@ export function DashboardOverview({
                 <div className="text-2xl font-semibold">{card.value}</div>
                 <p className="text-xs text-muted-foreground">{card.detail}</p>
                 <Button asChild size="sm" variant="ghost" className="px-0">
-                  <Link href={card.href}>Drill Down</Link>
+                  <Link href={card.href}>{t("cards.drillDown")}</Link>
                 </Button>
               </CardContent>
             </Card>
@@ -172,17 +175,17 @@ export function DashboardOverview({
       <div className="flex flex-wrap gap-3">
         <Button asChild>
           <Link href={summary.scope.projectId ? `/project?id=${summary.scope.projectId}` : summary.links.projects}>
-            Create Task
+            {t("actions.createTask")}
           </Link>
         </Button>
         <Button asChild variant="outline">
-          <Link href={summary.links.agents}>Spawn Agent</Link>
+          <Link href={summary.links.agents}>{t("actions.spawnAgent")}</Link>
         </Button>
         <Button asChild variant="outline">
-          <Link href="/sprints">Manage Sprints</Link>
+          <Link href="/sprints">{t("actions.manageSprints")}</Link>
         </Button>
         <Button asChild variant="outline">
-          <Link href="/roles">Configure Roles</Link>
+          <Link href="/roles">{t("actions.configureRoles")}</Link>
         </Button>
       </div>
 
@@ -190,7 +193,7 @@ export function DashboardOverview({
         <Card>
           <CardHeader className="flex flex-row items-center justify-between gap-2">
             <div>
-              <CardTitle>Recent Activity</CardTitle>
+              <CardTitle>{t("activity.title")}</CardTitle>
             </div>
             {sectionErrors.activity ? (
               <div className="flex items-center gap-2">
@@ -201,7 +204,7 @@ export function DashboardOverview({
                   variant="outline"
                   onClick={() => onRetry("activity")}
                 >
-                  Retry Section
+                  {t("activity.retrySection")}
                 </Button>
               </div>
             ) : null}
@@ -209,7 +212,7 @@ export function DashboardOverview({
           <CardContent className="space-y-3">
             {summary.activity.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No recent activity for the selected scope.
+                {t("activity.empty")}
               </p>
             ) : (
               summary.activity.map((item) => (
@@ -223,7 +226,7 @@ export function DashboardOverview({
                       <p className="text-sm text-muted-foreground">{item.message}</p>
                     </div>
                     <Button asChild size="sm" variant="ghost">
-                      <Link href={item.href}>Open</Link>
+                      <Link href={item.href}>{t("activity.open")}</Link>
                     </Button>
                   </div>
                 </div>
@@ -236,13 +239,13 @@ export function DashboardOverview({
           <CardHeader>
             <CardTitle className="flex items-center gap-2">
               <AlertTriangle className="size-4 text-amber-600" />
-              Risk Signals
+              {t("risks.title")}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-3">
             {summary.risks.length === 0 ? (
               <p className="text-sm text-muted-foreground">
-                No immediate operational risks detected.
+                {t("risks.empty")}
               </p>
             ) : (
               summary.risks.map((risk) => (
@@ -255,7 +258,7 @@ export function DashboardOverview({
                     {risk.description}
                   </p>
                   <Button asChild size="sm" variant="ghost" className="mt-2 px-0">
-                    <Link href={risk.href}>Investigate</Link>
+                    <Link href={risk.href}>{t("risks.investigate")}</Link>
                   </Button>
                 </div>
               ))

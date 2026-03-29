@@ -1,3 +1,13 @@
+import { DEFAULT_LOCALE, getPreferredLocale } from "@/lib/stores/locale-store";
+
+function getLocale(): string {
+  try {
+    return getPreferredLocale();
+  } catch {
+    return DEFAULT_LOCALE;
+  }
+}
+
 type RequestOptions = Omit<RequestInit, "method" | "body">;
 
 type ApiResponse<T> = {
@@ -15,6 +25,7 @@ async function request<T>(
     ...init,
     headers: {
       "Content-Type": "application/json",
+      "Accept-Language": getLocale(),
       ...init.headers,
     },
   });

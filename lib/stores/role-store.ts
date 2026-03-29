@@ -48,6 +48,14 @@ export interface RoleSkillReference {
   autoLoad: boolean;
 }
 
+export interface RoleSkillCatalogEntry {
+  path: string;
+  label: string;
+  description?: string;
+  source: string;
+  sourceRoot: string;
+}
+
 export interface RoleSecurity {
   profile?: string;
   permissionMode?: string;
@@ -163,6 +171,29 @@ export interface RoleExecutionProfile {
   max_budget_usd: number;
   max_turns: number;
   permission_mode: string;
+  loaded_skills?: RoleExecutionSkill[];
+  available_skills?: RoleExecutionSkill[];
+  skill_diagnostics?: RoleExecutionSkillDiagnostic[];
+}
+
+export interface RoleExecutionSkill {
+  path: string;
+  label: string;
+  description?: string;
+  instructions?: string;
+  source?: string;
+  source_root?: string;
+  origin?: string;
+  requires?: string[];
+  tools?: string[];
+}
+
+export interface RoleExecutionSkillDiagnostic {
+  code: string;
+  path?: string;
+  message: string;
+  blocking: boolean;
+  auto_load?: boolean;
 }
 
 export interface RolePreviewResponse {
@@ -171,6 +202,11 @@ export interface RolePreviewResponse {
   executionProfile?: RoleExecutionProfile;
   validationIssues?: Array<{ field: string; message: string }>;
   inheritance?: { parentRoleId?: string };
+  readinessDiagnostics?: Array<{
+    code: string;
+    message: string;
+    blocking: boolean;
+  }>;
 }
 
 export interface RoleSandboxResponse extends RolePreviewResponse {
@@ -195,9 +231,12 @@ export interface RoleSandboxResponse extends RolePreviewResponse {
 
 interface RoleState {
   roles: RoleManifest[];
+  skillCatalog: RoleSkillCatalogEntry[];
   loading: boolean;
+  skillCatalogLoading: boolean;
   error: string | null;
   fetchRoles: () => Promise<void>;
+  fetchSkillCatalog: () => Promise<void>;
   createRole: (data: Partial<RoleManifest>) => Promise<RoleManifest>;
   updateRole: (id: string, data: Partial<RoleManifest>) => Promise<RoleManifest>;
   deleteRole: (id: string) => Promise<void>;
@@ -222,7 +261,9 @@ function getToken() {
 
 export const useRoleStore = create<RoleState>()((set) => ({
   roles: [],
+  skillCatalog: [],
   loading: false,
+  skillCatalogLoading: false,
   error: null,
 
   fetchRoles: async () => {
@@ -244,6 +285,28 @@ export const useRoleStore = create<RoleState>()((set) => ({
       set({ error: message });
     } finally {
       set({ loading: false });
+    }
+  },
+
+  fetchSkillCatalog: async () => {
+    const token = getToken();
+    if (!token) return;
+
+    set({ skillCatalogLoading: true, error: null });
+
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.get<RoleSkillCatalogEntry[]>("/api/v1/roles/skills", {
+        token,
+      });
+
+      set({ skillCatalog: data });
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to load role skill catalog";
+      set({ error: message });
+    } finally {
+      set({ skillCatalogLoading: false });
     }
   },
 

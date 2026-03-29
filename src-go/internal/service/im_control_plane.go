@@ -48,6 +48,7 @@ type IMControlDelivery = model.IMControlDelivery
 type IMActionBinding = model.IMActionBinding
 
 type IMQueueDeliveryRequest struct {
+	DeliveryID     string
 	TargetBridgeID string
 	Platform       string
 	ProjectID      string
@@ -245,13 +246,14 @@ func (s *IMControlPlane) UpsertChannel(_ context.Context, channel *model.IMChann
 		id = "im-channel-" + uuid.NewString()
 	}
 	record := &model.IMChannel{
-		ID:         id,
-		Platform:   normalizePlatform(channel.Platform),
-		Name:       strings.TrimSpace(channel.Name),
-		ChannelID:  strings.TrimSpace(channel.ChannelID),
-		WebhookURL: strings.TrimSpace(channel.WebhookURL),
-		Events:     dedupeStrings(channel.Events),
-		Active:     channel.Active,
+		ID:             id,
+		Platform:       normalizePlatform(channel.Platform),
+		Name:           strings.TrimSpace(channel.Name),
+		ChannelID:      strings.TrimSpace(channel.ChannelID),
+		WebhookURL:     strings.TrimSpace(channel.WebhookURL),
+		PlatformConfig: cloneStringMap(channel.PlatformConfig),
+		Events:         dedupeStrings(channel.Events),
+		Active:         channel.Active,
 	}
 	s.channels[id] = record
 	return cloneChannel(record), nil
@@ -275,6 +277,7 @@ func (s *IMControlPlane) GetBridgeStatus(_ context.Context) (*model.IMBridgeStat
 	lastHeartbeat := ""
 	providers := make([]string, 0, len(s.instances))
 	seenProviders := make(map[string]struct{}, len(s.instances))
+	providerDetails := make([]model.IMBridgeProviderDetail, 0, len(s.instances))
 
 	for _, instance := range s.instances {
 		if instance == nil || instance.record == nil {
@@ -288,6 +291,13 @@ func (s *IMControlPlane) GetBridgeStatus(_ context.Context) (*model.IMBridgeStat
 			if _, ok := seenProviders[provider]; !ok {
 				seenProviders[provider] = struct{}{}
 				providers = append(providers, provider)
+				providerDetails = append(providerDetails, model.IMBridgeProviderDetail{
+					Platform:         provider,
+					Status:           strings.TrimSpace(record.Status),
+					Transport:        strings.TrimSpace(record.Transport),
+					CallbackPaths:    append([]string(nil), record.CallbackPaths...),
+					CapabilityMatrix: cloneAnyMap(record.CapabilityMatrix),
+				})
 			}
 		}
 		if record.LastSeenAt > lastHeartbeat {
@@ -308,10 +318,11 @@ func (s *IMControlPlane) GetBridgeStatus(_ context.Context) (*model.IMBridgeStat
 		heartbeat = &lastHeartbeat
 	}
 	return &model.IMBridgeStatus{
-		Registered:    registered,
-		LastHeartbeat: heartbeat,
-		Providers:     providers,
-		Health:        health,
+		Registered:      registered,
+		LastHeartbeat:   heartbeat,
+		Providers:       providers,
+		ProviderDetails: providerDetails,
+		Health:          health,
 	}, nil
 }
 
@@ -320,13 +331,23 @@ func (s *IMControlPlane) RecordDeliveryResult(result model.IMDelivery) {
 	defer s.mu.Unlock()
 
 	record := &model.IMDelivery{
-		ID:            strings.TrimSpace(result.ID),
-		ChannelID:     strings.TrimSpace(result.ChannelID),
-		Platform:      normalizePlatform(result.Platform),
-		EventType:     strings.TrimSpace(result.EventType),
-		Status:        result.Status,
-		FailureReason: strings.TrimSpace(result.FailureReason),
-		CreatedAt:     strings.TrimSpace(result.CreatedAt),
+		ID:              strings.TrimSpace(result.ID),
+		BridgeID:        strings.TrimSpace(result.BridgeID),
+		ProjectID:       strings.TrimSpace(result.ProjectID),
+		ChannelID:       strings.TrimSpace(result.ChannelID),
+		TargetChatID:    strings.TrimSpace(result.TargetChatID),
+		Platform:        normalizePlatform(result.Platform),
+		EventType:       strings.TrimSpace(result.EventType),
+		Kind:            normalizeDeliveryKind(result.Kind),
+		Status:          result.Status,
+		FailureReason:   strings.TrimSpace(result.FailureReason),
+		DowngradeReason: strings.TrimSpace(result.DowngradeReason),
+		Content:         strings.TrimSpace(result.Content),
+		Structured:      cloneStructuredMessage(result.Structured),
+		Native:          cloneNativeMessage(result.Native),
+		Metadata:        cloneStringMap(result.Metadata),
+		ReplyTarget:     cloneReplyTarget(result.ReplyTarget),
+		CreatedAt:       strings.TrimSpace(result.CreatedAt),
 	}
 	if record.ID == "" {
 		record.ID = uuid.NewString()
@@ -349,6 +370,21 @@ func (s *IMControlPlane) ListDeliveryHistory(_ context.Context) ([]*model.IMDeli
 		history = append(history, cloneDeliveryRecord(delivery))
 	}
 	return history, nil
+}
+
+func (s *IMControlPlane) ListEventTypes(_ context.Context) ([]string, error) {
+	return []string{
+		"task.created",
+		"task.completed",
+		"review.completed",
+		"agent.started",
+		"agent.completed",
+		"budget.warning",
+		"sprint.started",
+		"sprint.completed",
+		"review.requested",
+		"workflow.failed",
+	}, nil
 }
 
 func (s *IMControlPlane) ResolveBridgeTarget(platform string, projectID string, targetBridgeID string) (*model.IMBridgeInstance, error) {
@@ -419,7 +455,7 @@ func (s *IMControlPlane) QueueDelivery(ctx context.Context, req IMQueueDeliveryR
 	now := s.now().UTC()
 	delivery := &model.IMControlDelivery{
 		Cursor:         s.nextCursor,
-		DeliveryID:     uuid.NewString(),
+		DeliveryID:     firstNonEmpty(strings.TrimSpace(req.DeliveryID), uuid.NewString()),
 		TargetBridgeID: instance.record.BridgeID,
 		Platform:       instance.record.Platform,
 		ProjectID:      strings.TrimSpace(req.ProjectID),
@@ -449,7 +485,7 @@ func (s *IMControlPlane) QueueDelivery(ctx context.Context, req IMQueueDeliveryR
 	return cloned, nil
 }
 
-func (s *IMControlPlane) AckDelivery(_ context.Context, bridgeID string, cursor int64, deliveryID string) error {
+func (s *IMControlPlane) AckDelivery(_ context.Context, bridgeID string, cursor int64, deliveryID string, downgradeReason string) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -471,13 +507,58 @@ func (s *IMControlPlane) AckDelivery(_ context.Context, bridgeID string, cursor 
 		filtered = append(filtered, delivery)
 	}
 	s.pending[bridgeID] = filtered
+	s.applyDeliveryAckLocked(strings.TrimSpace(deliveryID), strings.TrimSpace(downgradeReason))
 	log.WithFields(log.Fields{
-		"bridgeId":     bridgeID,
-		"cursor":       cursor,
-		"deliveryId":   strings.TrimSpace(deliveryID),
-		"pendingCount": len(filtered),
+		"bridgeId":        bridgeID,
+		"cursor":          cursor,
+		"deliveryId":      strings.TrimSpace(deliveryID),
+		"downgradeReason": strings.TrimSpace(downgradeReason),
+		"pendingCount":    len(filtered),
 	}).Debug("IM control plane delivery acknowledged")
 	return nil
+}
+
+func (s *IMControlPlane) RetryDelivery(ctx context.Context, deliveryID string) (*model.IMDelivery, error) {
+	s.mu.Lock()
+	record := s.findDeliveryLocked(strings.TrimSpace(deliveryID))
+	if record == nil {
+		s.mu.Unlock()
+		return nil, ErrIMDeliveryRejected
+	}
+	if record.Status != model.IMDeliveryStatusFailed && record.Status != model.IMDeliveryStatusTimeout {
+		s.mu.Unlock()
+		return nil, ErrIMDeliveryRejected
+	}
+	retryRecord := cloneDeliveryRecord(record)
+	s.mu.Unlock()
+
+	if _, err := s.QueueDelivery(ctx, IMQueueDeliveryRequest{
+		DeliveryID:     retryRecord.ID,
+		TargetBridgeID: retryRecord.BridgeID,
+		Platform:       retryRecord.Platform,
+		ProjectID:      retryRecord.ProjectID,
+		Kind:           retryRecord.Kind,
+		Content:        retryRecord.Content,
+		Structured:     retryRecord.Structured,
+		Native:         retryRecord.Native,
+		Metadata:       retryRecord.Metadata,
+		TargetChatID:   firstNonEmpty(retryRecord.TargetChatID, retryRecord.ChannelID),
+		ReplyTarget:    retryRecord.ReplyTarget,
+	}); err != nil {
+		return nil, err
+	}
+
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	record = s.findDeliveryLocked(strings.TrimSpace(deliveryID))
+	if record == nil {
+		return nil, ErrIMDeliveryRejected
+	}
+	record.Status = model.IMDeliveryStatusPending
+	record.FailureReason = ""
+	record.DowngradeReason = ""
+	record.CreatedAt = s.now().UTC().Format(time.RFC3339)
+	return cloneDeliveryRecord(record), nil
 }
 
 func (s *IMControlPlane) BindAction(_ context.Context, binding *IMActionBinding) error {
@@ -778,6 +859,10 @@ func cloneDeliveryRecord(delivery *model.IMDelivery) *model.IMDelivery {
 		return nil
 	}
 	clone := *delivery
+	clone.Structured = cloneStructuredMessage(delivery.Structured)
+	clone.Native = cloneNativeMessage(delivery.Native)
+	clone.Metadata = cloneStringMap(delivery.Metadata)
+	clone.ReplyTarget = cloneReplyTarget(delivery.ReplyTarget)
 	return &clone
 }
 
@@ -789,6 +874,7 @@ func cloneChannel(channel *model.IMChannel) *model.IMChannel {
 	if channel.Events != nil {
 		clone.Events = append([]string(nil), channel.Events...)
 	}
+	clone.PlatformConfig = cloneStringMap(channel.PlatformConfig)
 	return &clone
 }
 
@@ -941,6 +1027,40 @@ func normalizeDeliveryContent(content string, structured *model.IMStructuredMess
 	}
 	if structured != nil {
 		return strings.TrimSpace(structured.FallbackText())
+	}
+	return ""
+}
+
+func (s *IMControlPlane) findDeliveryLocked(deliveryID string) *model.IMDelivery {
+	if deliveryID == "" {
+		return nil
+	}
+	for _, delivery := range s.history {
+		if delivery != nil && strings.TrimSpace(delivery.ID) == deliveryID {
+			return delivery
+		}
+	}
+	return nil
+}
+
+func (s *IMControlPlane) applyDeliveryAckLocked(deliveryID string, downgradeReason string) {
+	if deliveryID == "" {
+		return
+	}
+	delivery := s.findDeliveryLocked(deliveryID)
+	if delivery == nil {
+		return
+	}
+	if downgradeReason != "" {
+		delivery.DowngradeReason = downgradeReason
+	}
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
 	}
 	return ""
 }

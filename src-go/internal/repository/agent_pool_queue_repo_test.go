@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
@@ -116,6 +117,142 @@ func TestAgentPoolQueueRepository_PersistsThroughDatabase(t *testing.T) {
 	}
 }
 
+func TestAgentPoolQueueRepository_ReserveNextQueuedByProjectPrefersHigherPriority(t *testing.T) {
+	ctx := context.Background()
+	repo := NewAgentPoolQueueRepository()
+	projectID := uuid.New()
+
+	lowEntry, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
+		ProjectID: projectID,
+		TaskID:    uuid.New(),
+		MemberID:  uuid.New(),
+		Runtime:   "codex",
+		Provider:  "openai",
+		Model:     "gpt-5-codex",
+		Priority:  model.PriorityLow,
+		Reason:    "agent pool is at capacity",
+	})
+	if err != nil {
+		t.Fatalf("QueueAgentAdmission() low error = %v", err)
+	}
+
+	highEntry, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
+		ProjectID: projectID,
+		TaskID:    uuid.New(),
+		MemberID:  uuid.New(),
+		Runtime:   "codex",
+		Provider:  "openai",
+		Model:     "gpt-5-codex",
+		Priority:  model.PriorityHigh,
+		Reason:    "agent pool is at capacity",
+	})
+	if err != nil {
+		t.Fatalf("QueueAgentAdmission() high error = %v", err)
+	}
+
+	reserved, err := repo.ReserveNextQueuedByProject(ctx, projectID)
+	if err != nil {
+		t.Fatalf("ReserveNextQueuedByProject() error = %v", err)
+	}
+	if reserved == nil || reserved.EntryID != highEntry.EntryID {
+		t.Fatalf("reserved = %+v, want high priority entry %s", reserved, highEntry.EntryID)
+	}
+
+	remaining, err := repo.ListQueuedByProject(ctx, projectID, 10)
+	if err != nil {
+		t.Fatalf("ListQueuedByProject() error = %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].EntryID != lowEntry.EntryID {
+		t.Fatalf("remaining queue = %+v, want low priority entry %s", remaining, lowEntry.EntryID)
+	}
+}
+
+func TestAgentPoolQueueRepository_ListQueuedByProjectUsesPriorityThenFIFO(t *testing.T) {
+	ctx := context.Background()
+	repo := NewAgentPoolQueueRepository()
+	projectID := uuid.New()
+	base := time.Now().UTC().Add(-time.Minute)
+
+	critical, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
+		ProjectID: projectID,
+		TaskID:    uuid.New(),
+		MemberID:  uuid.New(),
+		Runtime:   "codex",
+		Provider:  "openai",
+		Model:     "gpt-5-codex",
+		Priority:  model.PriorityCritical,
+		Reason:    "agent pool is at capacity",
+	})
+	if err != nil {
+		t.Fatalf("QueueAgentAdmission() critical error = %v", err)
+	}
+	normalFirst, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
+		ProjectID: projectID,
+		TaskID:    uuid.New(),
+		MemberID:  uuid.New(),
+		Runtime:   "codex",
+		Provider:  "openai",
+		Model:     "gpt-5-codex",
+		Priority:  model.PriorityNormal,
+		Reason:    "agent pool is at capacity",
+	})
+	if err != nil {
+		t.Fatalf("QueueAgentAdmission() normalFirst error = %v", err)
+	}
+	normalSecond, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
+		ProjectID: projectID,
+		TaskID:    uuid.New(),
+		MemberID:  uuid.New(),
+		Runtime:   "codex",
+		Provider:  "openai",
+		Model:     "gpt-5-codex",
+		Priority:  model.PriorityNormal,
+		Reason:    "agent pool is at capacity",
+	})
+	if err != nil {
+		t.Fatalf("QueueAgentAdmission() normalSecond error = %v", err)
+	}
+
+	repo.entries[critical.EntryID].CreatedAt = base.Add(3 * time.Second)
+	repo.entries[normalFirst.EntryID].CreatedAt = base.Add(1 * time.Second)
+	repo.entries[normalSecond.EntryID].CreatedAt = base.Add(2 * time.Second)
+
+	list, err := repo.ListQueuedByProject(ctx, projectID, 10)
+	if err != nil {
+		t.Fatalf("ListQueuedByProject() error = %v", err)
+	}
+	if len(list) != 3 {
+		t.Fatalf("len(list) = %d, want 3", len(list))
+	}
+	if list[0].EntryID != critical.EntryID {
+		t.Fatalf("list[0] = %s, want critical %s", list[0].EntryID, critical.EntryID)
+	}
+	if list[1].EntryID != normalFirst.EntryID || list[2].EntryID != normalSecond.EntryID {
+		t.Fatalf("normal priority FIFO order = [%s %s], want [%s %s]", list[1].EntryID, list[2].EntryID, normalFirst.EntryID, normalSecond.EntryID)
+	}
+}
+
+func TestAgentPoolQueueRepository_DefaultPriorityIsLow(t *testing.T) {
+	ctx := context.Background()
+	repo := NewAgentPoolQueueRepository()
+
+	entry, err := repo.QueueAgentAdmission(ctx, QueueAgentAdmissionRecord{
+		ProjectID: uuid.New(),
+		TaskID:    uuid.New(),
+		MemberID:  uuid.New(),
+		Runtime:   "codex",
+		Provider:  "openai",
+		Model:     "gpt-5-codex",
+		Reason:    "agent pool is at capacity",
+	})
+	if err != nil {
+		t.Fatalf("QueueAgentAdmission() error = %v", err)
+	}
+	if entry.Priority != model.PriorityLow {
+		t.Fatalf("entry.Priority = %d, want %d", entry.Priority, model.PriorityLow)
+	}
+}
+
 func openAgentPoolQueueRepoTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -136,6 +273,7 @@ func openAgentPoolQueueRepoTestDB(t *testing.T) *gorm.DB {
 			provider TEXT NOT NULL,
 			model TEXT NOT NULL,
 			role_id TEXT,
+			priority INTEGER NOT NULL DEFAULT 0,
 			budget_usd REAL NOT NULL DEFAULT 0,
 			agent_run_id TEXT,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,

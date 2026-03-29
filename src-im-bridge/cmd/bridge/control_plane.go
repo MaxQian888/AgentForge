@@ -173,7 +173,7 @@ func (c *bridgeRuntimeControl) consumeDeliveries(ctx context.Context, conn *clie
 			continue
 		}
 		if delivery.Cursor <= c.cursor() {
-			if err := conn.Ack(delivery.Cursor, delivery.DeliveryID); err != nil {
+			if err := conn.Ack(delivery.Cursor, delivery.DeliveryID, ""); err != nil {
 				log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).WithError(err).Error("Duplicate ack failed")
 			}
 			continue
@@ -182,32 +182,34 @@ func (c *bridgeRuntimeControl) consumeDeliveries(ctx context.Context, conn *clie
 			log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).Warn("Rejected delivery due to invalid signature")
 			continue
 		}
-		if err := c.applyDelivery(ctx, delivery); err != nil {
+		downgradeReason, err := c.applyDelivery(ctx, delivery)
+		if err != nil {
 			log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).WithError(err).Error("Failed to apply delivery")
 			continue
 		}
 		c.setCursor(delivery.Cursor)
-		if err := conn.Ack(delivery.Cursor, delivery.DeliveryID); err != nil {
+		if err := conn.Ack(delivery.Cursor, delivery.DeliveryID, downgradeReason); err != nil {
 			log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).WithError(err).Error("Ack failed")
 		}
 	}
 }
 
-func (c *bridgeRuntimeControl) applyDelivery(ctx context.Context, delivery *client.ControlDelivery) error {
+func (c *bridgeRuntimeControl) applyDelivery(ctx context.Context, delivery *client.ControlDelivery) (string, error) {
 	if delivery == nil {
-		return nil
+		return "", nil
 	}
 	targetChatID := strings.TrimSpace(delivery.TargetChatID)
-	if _, err := core.DeliverEnvelope(ctx, c.provider.Platform, c.provider.Metadata(), targetChatID, &core.DeliveryEnvelope{
+	receipt, err := core.DeliverEnvelope(ctx, c.provider.Platform, c.provider.Metadata(), targetChatID, &core.DeliveryEnvelope{
 		Content:     delivery.Content,
 		Structured:  delivery.Structured,
 		Native:      delivery.Native,
 		ReplyTarget: delivery.ReplyTarget,
 		Metadata:    delivery.Metadata,
-	}); err != nil {
-		return err
+	})
+	if err != nil {
+		return "", err
 	}
-	return nil
+	return strings.TrimSpace(receipt.FallbackReason), nil
 }
 
 func (c *bridgeRuntimeControl) verifyDelivery(delivery *client.ControlDelivery) bool {

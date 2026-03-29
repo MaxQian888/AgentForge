@@ -2,12 +2,20 @@
 
 import { useMemo, useState } from "react";
 import Link from "next/link";
-import { Plus, Users } from "lucide-react";
+import { Plus, Users, Trash2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import { Skeleton } from "@/components/ui/skeleton";
 import {
   Table,
   TableBody,
@@ -16,6 +24,7 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import type { TeamMember } from "@/lib/dashboard/summary";
 import type {
   CreateMemberInput,
@@ -23,6 +32,7 @@ import type {
 } from "@/lib/stores/member-store";
 import type { RoleManifest } from "@/lib/stores/role-store";
 import type { AgentProfileDraft } from "@/lib/team/agent-profile";
+import { getMemberStatusLabel, type MemberStatus } from "@/lib/team/member-status";
 
 interface TeamProjectOption {
   id: string;
@@ -40,15 +50,18 @@ interface TeamManagementProps {
   onProjectChange: (projectId: string) => void;
   onCreateMember: (input: CreateMemberInput) => Promise<void>;
   onUpdateMember: (memberId: string, input: UpdateMemberInput) => Promise<void>;
+  onDeleteMember?: (memberId: string) => Promise<void>;
 }
 
 interface MemberFormState {
   name: string;
   type: "human" | "agent";
   role: string;
+  status: MemberStatus;
   email: string;
+  imPlatform: string;
+  imUserId: string;
   skillsInput: string;
-  isActive: boolean;
   agentProfile: AgentProfileDraft;
 }
 
@@ -82,9 +95,11 @@ function buildInitialCreateForm(): MemberFormState {
     name: "",
     type: "human",
     role: "",
+    status: "active",
     email: "",
+    imPlatform: "",
+    imUserId: "",
     skillsInput: "",
-    isActive: true,
     agentProfile: EMPTY_AGENT_PROFILE,
   };
 }
@@ -94,9 +109,11 @@ function buildEditForm(member: TeamMember): MemberFormState {
     name: member.name,
     type: member.type,
     role: member.role,
+    status: member.status,
     email: member.email,
+    imPlatform: member.imPlatform ?? "",
+    imUserId: member.imUserId ?? "",
     skillsInput: member.skills.join(", "),
-    isActive: member.isActive,
     agentProfile: {
       roleId: member.agentProfile?.roleId ?? "",
       runtime: member.agentProfile?.runtime ?? "",
@@ -109,6 +126,34 @@ function buildEditForm(member: TeamMember): MemberFormState {
       notes: member.agentProfile?.notes ?? "",
     },
   };
+}
+
+function StatusSelect({
+  id,
+  label,
+  value,
+  onChange,
+}: {
+  id: string;
+  label: string;
+  value: MemberStatus;
+  onChange: (value: MemberStatus) => void;
+}) {
+  return (
+    <div className="flex flex-col gap-2">
+      <Label htmlFor={id}>{label}</Label>
+      <Select value={value} onValueChange={(nextValue) => onChange(nextValue as MemberStatus)}>
+        <SelectTrigger id={id}>
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="active">Active</SelectItem>
+          <SelectItem value="inactive">Inactive</SelectItem>
+          <SelectItem value="suspended">Suspended</SelectItem>
+        </SelectContent>
+      </Select>
+    </div>
+  );
 }
 
 function RoleBindingSelect({
@@ -127,20 +172,19 @@ function RoleBindingSelect({
   return (
     <div className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
-      <select
-        id={id}
-        aria-label={label}
-        className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
-      >
-        <option value="">Unbound role</option>
-        {availableRoles.map((role) => (
-          <option key={role.metadata.id} value={role.metadata.id}>
-            {role.metadata.name}
-          </option>
-        ))}
-      </select>
+      <Select value={value} onValueChange={onChange}>
+        <SelectTrigger id={id}>
+          <SelectValue placeholder="Unbound role" />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__unbound__">Unbound role</SelectItem>
+          {availableRoles.map((role) => (
+            <SelectItem key={role.metadata.id} value={role.metadata.id}>
+              {role.metadata.name}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     </div>
   );
 }
@@ -163,9 +207,11 @@ function AgentProfileFields({
       <RoleBindingSelect
         id={mode === "edit" ? "edit-bound-role" : "bound-role"}
         label={`${prefix}Bound Role`}
-        value={value.roleId}
+        value={value.roleId || "__unbound__"}
         availableRoles={availableRoles}
-        onChange={(roleId) => onChange({ ...value, roleId })}
+        onChange={(roleId) =>
+          onChange({ ...value, roleId: roleId === "__unbound__" ? "" : roleId })
+        }
       />
       <div className="flex flex-col gap-2">
         <Label htmlFor={mode === "edit" ? "edit-agent-budget" : "agent-budget"}>
@@ -173,7 +219,6 @@ function AgentProfileFields({
         </Label>
         <Input
           id={mode === "edit" ? "edit-agent-budget" : "agent-budget"}
-          aria-label={`${prefix}Agent Budget USD`}
           value={value.maxBudgetUsd}
           onChange={(event) =>
             onChange({ ...value, maxBudgetUsd: event.target.value })
@@ -186,7 +231,6 @@ function AgentProfileFields({
         </Label>
         <Input
           id={mode === "edit" ? "edit-runtime" : "runtime"}
-          aria-label={`${prefix}Runtime`}
           value={value.runtime}
           onChange={(event) => onChange({ ...value, runtime: event.target.value })}
         />
@@ -197,7 +241,6 @@ function AgentProfileFields({
         </Label>
         <Input
           id={mode === "edit" ? "edit-provider" : "provider"}
-          aria-label={`${prefix}Provider`}
           value={value.provider}
           onChange={(event) => onChange({ ...value, provider: event.target.value })}
         />
@@ -208,7 +251,6 @@ function AgentProfileFields({
         </Label>
         <Input
           id={mode === "edit" ? "edit-model" : "model"}
-          aria-label={`${prefix}Model`}
           value={value.model}
           onChange={(event) => onChange({ ...value, model: event.target.value })}
         />
@@ -219,7 +261,6 @@ function AgentProfileFields({
         </Label>
         <textarea
           id={mode === "edit" ? "edit-agent-notes" : "agent-notes"}
-          aria-label={`${prefix}Agent Notes`}
           className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm"
           rows={4}
           value={value.notes}
@@ -241,6 +282,7 @@ export function TeamManagement({
   onProjectChange,
   onCreateMember,
   onUpdateMember,
+  onDeleteMember,
 }: TeamManagementProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] = useState<MemberFormState>(() =>
@@ -248,6 +290,12 @@ export function TeamManagement({
   );
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<MemberFormState | null>(null);
+  const [deletingMemberId, setDeletingMemberId] = useState<string | null>(null);
+
+  // Filter state
+  const [searchQuery, setSearchQuery] = useState("");
+  const [typeFilter, setTypeFilter] = useState("all");
+  const [statusFilter, setStatusFilter] = useState("all");
 
   const selectedProjectName = useMemo(
     () =>
@@ -260,6 +308,27 @@ export function TeamManagement({
     [editingMemberId, members],
   );
 
+  const deletingMember = useMemo(
+    () => members.find((member) => member.id === deletingMemberId) ?? null,
+    [deletingMemberId, members],
+  );
+
+  const filteredMembers = useMemo(() => {
+    return members.filter((member) => {
+      if (searchQuery) {
+        const q = searchQuery.toLowerCase();
+        const matchesSearch =
+          member.name.toLowerCase().includes(q) ||
+          member.email.toLowerCase().includes(q) ||
+          member.role.toLowerCase().includes(q);
+        if (!matchesSearch) return false;
+      }
+      if (typeFilter !== "all" && member.type !== typeFilter) return false;
+      if (statusFilter !== "all" && member.status !== statusFilter) return false;
+      return true;
+    });
+  }, [members, searchQuery, typeFilter, statusFilter]);
+
   const handleCreateMember = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
 
@@ -267,7 +336,10 @@ export function TeamManagement({
       name: createForm.name.trim(),
       type: createForm.type,
       role: createForm.role.trim(),
+      status: createForm.status,
       email: createForm.email.trim(),
+      imPlatform: createForm.imPlatform.trim(),
+      imUserId: createForm.imUserId.trim(),
       skills: parseCommaList(createForm.skillsInput),
     };
 
@@ -287,9 +359,11 @@ export function TeamManagement({
     const payload: UpdateMemberInput = {
       name: editForm.name.trim(),
       role: editForm.role.trim(),
+      status: editForm.status,
       email: editForm.email.trim(),
+      imPlatform: editForm.imPlatform.trim(),
+      imUserId: editForm.imUserId.trim(),
       skills: parseCommaList(editForm.skillsInput),
-      isActive: editForm.isActive,
     };
 
     if (editForm.type === "agent") {
@@ -301,8 +375,38 @@ export function TeamManagement({
     setEditForm(null);
   };
 
+  const handleConfirmDelete = async () => {
+    if (!deletingMemberId || !onDeleteMember) return;
+    await onDeleteMember(deletingMemberId);
+    setDeletingMemberId(null);
+  };
+
   if (loading) {
-    return <p className="text-sm text-muted-foreground">Loading team roster...</p>;
+    return (
+      <div className="flex flex-col gap-6">
+        <div className="space-y-1">
+          <span className="sr-only">Loading team roster...</span>
+          <Skeleton className="h-8 w-48" />
+          <Skeleton className="h-4 w-72" />
+        </div>
+        <Card>
+          <CardHeader>
+            <Skeleton className="h-5 w-32" />
+          </CardHeader>
+          <CardContent className="space-y-3">
+            {Array.from({ length: 4 }).map((_, i) => (
+              <div key={i} className="flex items-center gap-4">
+                <Skeleton className="h-4 w-28" />
+                <Skeleton className="h-4 w-16" />
+                <Skeleton className="h-4 w-20" />
+                <Skeleton className="h-4 w-24" />
+                <Skeleton className="h-4 w-16" />
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   if (error) {
@@ -335,20 +439,22 @@ export function TeamManagement({
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex flex-col gap-2">
-            <Label htmlFor="project-selector">Project</Label>
-            <select
-              id="project-selector"
-              aria-label="Project"
-              className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+            <Label htmlFor="team-project">Project</Label>
+            <Select
               value={selectedProjectId ?? ""}
-              onChange={(event) => onProjectChange(event.target.value)}
+              onValueChange={onProjectChange}
             >
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger id="team-project" className="w-[200px]">
+                <SelectValue placeholder="Select project" />
+              </SelectTrigger>
+              <SelectContent>
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
           <Button type="button" onClick={() => setShowCreateForm((value) => !value)}>
             <Plus className="mr-1 size-4" />
@@ -368,7 +474,6 @@ export function TeamManagement({
                 <Label htmlFor="member-name">Member Name</Label>
                 <Input
                   id="member-name"
-                  aria-label="Member Name"
                   value={createForm.name}
                   onChange={(event) =>
                     setCreateForm((state) => ({ ...state, name: event.target.value }))
@@ -378,27 +483,36 @@ export function TeamManagement({
               </div>
               <div className="flex flex-col gap-2">
                 <Label htmlFor="member-type">Member Type</Label>
-                <select
-                  id="member-type"
-                  aria-label="Member Type"
-                  className="h-9 rounded-md border border-input bg-transparent px-3 text-sm"
+                <Select
                   value={createForm.type}
-                  onChange={(event) =>
+                  onValueChange={(value) =>
                     setCreateForm((state) => ({
                       ...state,
-                      type: event.target.value as MemberFormState["type"],
+                      type: value as MemberFormState["type"],
                     }))
                   }
                 >
-                  <option value="human">Human</option>
-                  <option value="agent">Agent</option>
-                </select>
+                  <SelectTrigger id="member-type">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="human">Human</SelectItem>
+                    <SelectItem value="agent">Agent</SelectItem>
+                  </SelectContent>
+                </Select>
               </div>
+              <StatusSelect
+                id="member-status"
+                label="Status"
+                value={createForm.status}
+                onChange={(status) =>
+                  setCreateForm((state) => ({ ...state, status }))
+                }
+              />
               <div className="flex flex-col gap-2">
                 <Label htmlFor="member-role">Role</Label>
                 <Input
                   id="member-role"
-                  aria-label="Role"
                   value={createForm.role}
                   onChange={(event) =>
                     setCreateForm((state) => ({ ...state, role: event.target.value }))
@@ -409,11 +523,30 @@ export function TeamManagement({
                 <Label htmlFor="member-email">Email</Label>
                 <Input
                   id="member-email"
-                  aria-label="Email"
                   type="email"
                   value={createForm.email}
                   onChange={(event) =>
                     setCreateForm((state) => ({ ...state, email: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="member-im-platform">IM Platform</Label>
+                <Input
+                  id="member-im-platform"
+                  value={createForm.imPlatform}
+                  onChange={(event) =>
+                    setCreateForm((state) => ({ ...state, imPlatform: event.target.value }))
+                  }
+                />
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="member-im-user-id">IM User ID</Label>
+                <Input
+                  id="member-im-user-id"
+                  value={createForm.imUserId}
+                  onChange={(event) =>
+                    setCreateForm((state) => ({ ...state, imUserId: event.target.value }))
                   }
                 />
               </div>
@@ -423,7 +556,6 @@ export function TeamManagement({
                     <Label htmlFor="member-skills">Skills</Label>
                     <Input
                       id="member-skills"
-                      aria-label="Skills"
                       value={createForm.skillsInput}
                       onChange={(event) =>
                         setCreateForm((state) => ({
@@ -433,7 +565,7 @@ export function TeamManagement({
                       }
                     />
                   </div>
-                  <div className="md:col-span-2 rounded-lg border p-4">
+                  <div className="rounded-lg border p-4 md:col-span-2">
                     <h3 className="mb-4 text-sm font-semibold">Agent Profile</h3>
                     <AgentProfileFields
                       mode="create"
@@ -473,8 +605,40 @@ export function TeamManagement({
         </Card>
       ) : (
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <CardTitle>Unified Roster</CardTitle>
+            <div className="flex flex-wrap items-center gap-2">
+              <div className="relative">
+                <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
+                <Input
+                  placeholder="Search members..."
+                  className="w-[180px] pl-8"
+                  value={searchQuery}
+                  onChange={(e) => setSearchQuery(e.target.value)}
+                />
+              </div>
+              <Select value={typeFilter} onValueChange={setTypeFilter}>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Types</SelectItem>
+                  <SelectItem value="human">Human</SelectItem>
+                  <SelectItem value="agent">Agent</SelectItem>
+                </SelectContent>
+              </Select>
+              <Select value={statusFilter} onValueChange={setStatusFilter}>
+                <SelectTrigger className="w-[120px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">All Status</SelectItem>
+                  <SelectItem value="active">Active</SelectItem>
+                  <SelectItem value="inactive">Inactive</SelectItem>
+                  <SelectItem value="suspended">Suspended</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </CardHeader>
           <CardContent>
             <Table>
@@ -491,7 +655,7 @@ export function TeamManagement({
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {members.map((member) => (
+                {filteredMembers.map((member) => (
                   <TableRow key={member.id}>
                     <TableCell>
                       <div className="flex flex-col gap-1">
@@ -499,6 +663,11 @@ export function TeamManagement({
                         <span className="text-xs text-muted-foreground">
                           {member.email || "No direct email"}
                         </span>
+                        {member.imPlatform && member.imUserId ? (
+                          <span className="text-xs text-muted-foreground">
+                            {member.imPlatform} • {member.imUserId}
+                          </span>
+                        ) : null}
                         <span className="text-xs text-muted-foreground">
                           {formatActivityTimestamp(member.lastActivityAt)}
                         </span>
@@ -509,8 +678,11 @@ export function TeamManagement({
                         <Badge variant="secondary" className="w-fit">
                           {member.typeLabel}
                         </Badge>
-                        <Badge variant={member.isActive ? "secondary" : "outline"} className="w-fit">
-                          {member.isActive ? "Active" : "Inactive"}
+                        <Badge
+                          variant={member.status === "active" ? "secondary" : "outline"}
+                          className="w-fit"
+                        >
+                          {member.statusLabel || getMemberStatusLabel(member.status)}
                         </Badge>
                       </div>
                     </TableCell>
@@ -569,20 +741,41 @@ export function TeamManagement({
                       </div>
                     </TableCell>
                     <TableCell className="text-right">
-                      <Button
-                        type="button"
-                        size="sm"
-                        variant="outline"
-                        onClick={() => {
-                          setEditingMemberId(member.id);
-                          setEditForm(buildEditForm(member));
-                        }}
-                      >
-                        Edit {member.name}
-                      </Button>
+                      <div className="flex items-center justify-end gap-1">
+                        <Button
+                          type="button"
+                          size="sm"
+                          variant="outline"
+                          aria-label={`Edit ${member.name}`}
+                          onClick={() => {
+                            setEditingMemberId(member.id);
+                            setEditForm(buildEditForm(member));
+                          }}
+                        >
+                          Edit
+                        </Button>
+                        {onDeleteMember && (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            className="text-muted-foreground hover:text-destructive"
+                            onClick={() => setDeletingMemberId(member.id)}
+                          >
+                            <Trash2 className="size-4" />
+                          </Button>
+                        )}
+                      </div>
                     </TableCell>
                   </TableRow>
                 ))}
+                {filteredMembers.length === 0 && members.length > 0 && (
+                  <TableRow>
+                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                      No members match the current filters.
+                    </TableCell>
+                  </TableRow>
+                )}
               </TableBody>
             </Table>
           </CardContent>
@@ -600,7 +793,6 @@ export function TeamManagement({
                 <Label htmlFor="edit-name">Edit Name</Label>
                 <Input
                   id="edit-name"
-                  aria-label="Edit Name"
                   value={editForm.name}
                   onChange={(event) =>
                     setEditForm((state) =>
@@ -613,7 +805,6 @@ export function TeamManagement({
                 <Label htmlFor="edit-role">Edit Role</Label>
                 <Input
                   id="edit-role"
-                  aria-label="Edit Role"
                   value={editForm.role}
                   onChange={(event) =>
                     setEditForm((state) =>
@@ -626,7 +817,6 @@ export function TeamManagement({
                 <Label htmlFor="edit-email">Edit Email</Label>
                 <Input
                   id="edit-email"
-                  aria-label="Edit Email"
                   type="email"
                   value={editForm.email}
                   onChange={(event) =>
@@ -636,19 +826,39 @@ export function TeamManagement({
                   }
                 />
               </div>
-              <div className="flex items-center gap-2 pt-7">
-                <input
-                  id="edit-active"
-                  aria-label="Edit Active"
-                  type="checkbox"
-                  checked={editForm.isActive}
+              <StatusSelect
+                id="edit-status"
+                label="Edit Status"
+                value={editForm.status}
+                onChange={(status) =>
+                  setEditForm((state) =>
+                    state ? { ...state, status } : state,
+                  )
+                }
+              />
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="edit-im-platform">Edit IM Platform</Label>
+                <Input
+                  id="edit-im-platform"
+                  value={editForm.imPlatform}
                   onChange={(event) =>
                     setEditForm((state) =>
-                      state ? { ...state, isActive: event.target.checked } : state,
+                      state ? { ...state, imPlatform: event.target.value } : state,
                     )
                   }
                 />
-                <Label htmlFor="edit-active">Active member</Label>
+              </div>
+              <div className="flex flex-col gap-2">
+                <Label htmlFor="edit-im-user-id">Edit IM User ID</Label>
+                <Input
+                  id="edit-im-user-id"
+                  value={editForm.imUserId}
+                  onChange={(event) =>
+                    setEditForm((state) =>
+                      state ? { ...state, imUserId: event.target.value } : state,
+                    )
+                  }
+                />
               </div>
               {editForm.type === "agent" ? (
                 <>
@@ -656,7 +866,6 @@ export function TeamManagement({
                     <Label htmlFor="edit-skills">Edit Skills</Label>
                     <Input
                       id="edit-skills"
-                      aria-label="Edit Skills"
                       value={editForm.skillsInput}
                       onChange={(event) =>
                         setEditForm((state) =>
@@ -667,7 +876,7 @@ export function TeamManagement({
                       }
                     />
                   </div>
-                  <div className="md:col-span-2 rounded-lg border p-4">
+                  <div className="rounded-lg border p-4 md:col-span-2">
                     <h3 className="mb-4 text-sm font-semibold">
                       Agent Profile Settings
                     </h3>
@@ -688,7 +897,6 @@ export function TeamManagement({
                   <Label htmlFor="edit-skills">Edit Skills</Label>
                   <Input
                     id="edit-skills"
-                    aria-label="Edit Skills"
                     value={editForm.skillsInput}
                     onChange={(event) =>
                       setEditForm((state) =>
@@ -715,6 +923,16 @@ export function TeamManagement({
           </CardContent>
         </Card>
       ) : null}
+
+      <ConfirmDialog
+        open={deletingMemberId !== null}
+        title="Delete Member"
+        description={`Permanently remove "${deletingMember?.name ?? "this member"}" from the project? This cannot be undone.`}
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={() => void handleConfirmDelete()}
+        onCancel={() => setDeletingMemberId(null)}
+      />
     </div>
   );
 }

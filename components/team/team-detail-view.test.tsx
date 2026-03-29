@@ -184,6 +184,7 @@ describe("TeamDetailView", () => {
     expect(screen.getByTestId("output-stream")).toHaveTextContent("planner ready");
 
     await user.click(screen.getByRole("button", { name: /Cancel/i }));
+    await user.click(screen.getByRole("button", { name: "Cancel Team" }));
     expect(cancelTeam).toHaveBeenCalledWith("team-1");
   });
 
@@ -209,8 +210,8 @@ describe("TeamDetailView", () => {
         selector(loadingTeamState),
     );
 
-    render(<TeamDetailView teamId="team-1" />);
-    expect(screen.getByText("Loading team detail...")).toBeInTheDocument();
+    const { container } = render(<TeamDetailView teamId="team-1" />);
+    expect(container.querySelectorAll('[data-slot="skeleton"]').length).toBeGreaterThan(0);
     expect(screen.queryByText("Team not found")).not.toBeInTheDocument();
   });
 });

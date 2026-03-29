@@ -29,6 +29,7 @@ type mockAgentRuntimeService struct {
 	spawnErr    error
 	cancelErr   error
 	updateErr   error
+	bridgeStatus string
 	lastTaskID  uuid.UUID
 	lastRuntime string
 	lastRoleID  string
@@ -102,6 +103,10 @@ func (m *mockAgentRuntimeService) GetLogs(_ context.Context, _ uuid.UUID) ([]mod
 	return nil, nil
 }
 
+func (m *mockAgentRuntimeService) BridgeStatus() string {
+	return m.bridgeStatus
+}
+
 func (m *mockAgentTaskDispatcher) Spawn(_ context.Context, input service.DispatchSpawnInput) (*model.TaskDispatchResponse, error) {
 	m.lastTaskID = input.TaskID
 	m.lastMemberID = input.MemberID
@@ -155,6 +160,21 @@ func TestAgentHandler_Spawn_MapsWorktreeUnavailableToConflict(t *testing.T) {
 	_ = h.Spawn(c)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+}
+
+func TestAgentHandler_Spawn_ReturnsServiceUnavailableWhenBridgeIsDegraded(t *testing.T) {
+	e := newAgentTestEcho()
+	h := handler.NewAgentHandler(&mockAgentRuntimeService{bridgeStatus: service.BridgeStatusDegraded})
+
+	req := httptest.NewRequest(http.MethodPost, "/agents/spawn", strings.NewReader(`{"taskId":"`+uuid.New().String()+`","memberId":"`+uuid.New().String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	_ = h.Spawn(c)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
 	}
 }
 
@@ -249,5 +269,37 @@ func TestAgentHandler_Kill_MapsInvalidStateToConflict(t *testing.T) {
 	_ = h.Kill(c)
 	if rec.Code != http.StatusConflict {
 		t.Fatalf("expected 409, got %d", rec.Code)
+	}
+}
+
+func TestAgentHandler_Pause_ReturnsServiceUnavailableWhenBridgeIsDegraded(t *testing.T) {
+	e := newAgentTestEcho()
+	h := handler.NewAgentHandler(&mockAgentRuntimeService{bridgeStatus: service.BridgeStatusDegraded})
+
+	req := httptest.NewRequest(http.MethodPost, "/agents/123/pause", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(uuid.New().String())
+
+	_ = h.Pause(c)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+}
+
+func TestAgentHandler_Resume_ReturnsServiceUnavailableWhenBridgeIsDegraded(t *testing.T) {
+	e := newAgentTestEcho()
+	h := handler.NewAgentHandler(&mockAgentRuntimeService{bridgeStatus: service.BridgeStatusDegraded})
+
+	req := httptest.NewRequest(http.MethodPost, "/agents/123/resume", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(uuid.New().String())
+
+	_ = h.Resume(c)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
 	}
 }

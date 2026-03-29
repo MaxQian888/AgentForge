@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Plus } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -46,6 +47,7 @@ function SprintCard({
   onSelect: () => void;
   onEdit: () => void;
 }) {
+  const t = useTranslations("sprints");
   const budgetRatio =
     sprint.totalBudgetUsd > 0
       ? Math.round((sprint.spentUsd / sprint.totalBudgetUsd) * 100)
@@ -55,7 +57,7 @@ function SprintCard({
     <Card className="cursor-pointer hover:ring-1 hover:ring-ring" onClick={onSelect}>
       <CardHeader className="flex flex-row items-center justify-between pb-2">
         <CardTitle className="text-base">{sprint.name}</CardTitle>
-        <Badge variant={statusVariant(sprint.status)}>{sprint.status}</Badge>
+        <Badge variant={statusVariant(sprint.status)}>{t(`status.${sprint.status}`)}</Badge>
       </CardHeader>
       <CardContent className="space-y-2">
         <div className="text-sm text-muted-foreground">
@@ -64,7 +66,7 @@ function SprintCard({
         {sprint.totalBudgetUsd > 0 && (
           <div className="space-y-1">
             <div className="flex justify-between text-sm">
-              <span>Budget</span>
+              <span>{t("card.budget")}</span>
               <span>
                 ${sprint.spentUsd.toFixed(2)} / ${sprint.totalBudgetUsd.toFixed(2)}
               </span>
@@ -86,7 +88,7 @@ function SprintCard({
             onEdit();
           }}
         >
-          Edit
+          {t("card.edit")}
         </Button>
       </CardContent>
     </Card>
@@ -94,6 +96,7 @@ function SprintCard({
 }
 
 export default function SprintsPage() {
+  const t = useTranslations("sprints");
   const { selectedProjectId } = useDashboardStore();
   const {
     sprintsByProject,
@@ -191,9 +194,9 @@ export default function SprintsPage() {
   if (!projectId) {
     return (
       <div className="flex flex-col gap-6">
-        <h1 className="text-2xl font-bold">Sprint Management</h1>
+        <h1 className="text-2xl font-bold">{t("title")}</h1>
         <p className="text-sm text-muted-foreground">
-          Select a project from the Dashboard to manage sprints.
+          {t("selectProjectPrompt")}
         </p>
       </div>
     );
@@ -202,20 +205,20 @@ export default function SprintsPage() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">Sprint Management</h1>
+        <h1 className="text-2xl font-bold">{t("title")}</h1>
         <div className="flex items-center gap-2">
           <Button type="button" variant="outline" onClick={() => setMilestoneOpen(true)}>
-            New Milestone
+            {t("newMilestone")}
           </Button>
           <Button type="button" onClick={openCreate}>
             <Plus className="mr-2 size-4" />
-            New Sprint
+            {t("newSprint")}
           </Button>
         </div>
       </div>
 
       {loading && (
-        <p className="text-sm text-muted-foreground">Loading sprints...</p>
+        <p className="text-sm text-muted-foreground">{t("loading")}</p>
       )}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
@@ -229,7 +232,7 @@ export default function SprintsPage() {
         ))}
         {sprints.length === 0 && !loading && (
           <p className="col-span-full text-sm text-muted-foreground">
-            No sprints yet. Create one to get started.
+            {t("empty.noSprints")}
           </p>
         )}
       </div>
@@ -238,22 +241,22 @@ export default function SprintsPage() {
         <Card>
           <CardHeader>
             <CardTitle>
-              Burndown &mdash; {selectedMetrics.sprint.name}
+              {t("burndown.title")} &mdash; {selectedMetrics.sprint.name}
             </CardTitle>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-4 text-sm">
               <Badge variant="secondary">
-                Completed: {selectedMetrics.completedTasks}/{selectedMetrics.plannedTasks}
+                {t("burndown.completed", { completed: selectedMetrics.completedTasks, planned: selectedMetrics.plannedTasks })}
               </Badge>
               <Badge variant="outline">
-                Completion: {Math.round(selectedMetrics.completionRate * 100)}%
+                {t("burndown.completion", { rate: Math.round(selectedMetrics.completionRate * 100) })}
               </Badge>
               <Badge variant="outline">
-                Velocity: {selectedMetrics.velocityPerWeek.toFixed(1)}/week
+                {t("burndown.velocity", { velocity: selectedMetrics.velocityPerWeek.toFixed(1) })}
               </Badge>
               <Badge variant="secondary">
-                Cost: ${selectedMetrics.taskSpentUsd.toFixed(2)} / ${selectedMetrics.taskBudgetUsd.toFixed(2)}
+                {t("burndown.cost", { spent: selectedMetrics.taskSpentUsd.toFixed(2), budget: selectedMetrics.taskBudgetUsd.toFixed(2) })}
               </Badge>
             </div>
             <BurndownChart
@@ -268,35 +271,35 @@ export default function SprintsPage() {
       <Dialog open={createOpen} onOpenChange={setCreateOpen}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Create Sprint</DialogTitle>
+            <DialogTitle>{t("dialog.createTitle")}</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label>Name</Label>
+              <Label>{t("dialog.name")}</Label>
               <Input value={formName} onChange={(e) => setFormName(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-2">
-                <Label>Start Date</Label>
+                <Label>{t("dialog.startDate")}</Label>
                 <Input type="date" value={formStart} onChange={(e) => setFormStart(e.target.value)} />
               </div>
               <div className="flex flex-col gap-2">
-                <Label>End Date</Label>
+                <Label>{t("dialog.endDate")}</Label>
                 <Input type="date" value={formEnd} onChange={(e) => setFormEnd(e.target.value)} />
               </div>
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Budget (USD)</Label>
+              <Label>{t("dialog.budgetUsd")}</Label>
               <Input type="number" step="0.01" value={formBudget} onChange={(e) => setFormBudget(e.target.value)} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Milestone</Label>
+              <Label>{t("dialog.milestone")}</Label>
               <select
                 className="h-10 rounded-md border bg-background px-3 text-sm"
                 value={formMilestoneId}
                 onChange={(e) => setFormMilestoneId(e.target.value)}
               >
-                <option value="">No milestone</option>
+                <option value="">{t("dialog.noMilestone")}</option>
                 {milestones.map((milestone) => (
                   <option key={milestone.id} value={milestone.id}>
                     {milestone.name}
@@ -307,10 +310,10 @@ export default function SprintsPage() {
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
-              Cancel
+              {t("dialog.cancel")}
             </Button>
             <Button type="button" onClick={() => void handleCreate()}>
-              Create
+              {t("dialog.create")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -320,35 +323,35 @@ export default function SprintsPage() {
       <Dialog open={!!editSprint} onOpenChange={(open) => !open && setEditSprint(null)}>
         <DialogContent>
           <DialogHeader>
-            <DialogTitle>Edit Sprint</DialogTitle>
+            <DialogTitle>{t("dialog.editTitle")}</DialogTitle>
           </DialogHeader>
           <div className="flex flex-col gap-4">
             <div className="flex flex-col gap-2">
-              <Label>Name</Label>
+              <Label>{t("dialog.name")}</Label>
               <Input value={formName} onChange={(e) => setFormName(e.target.value)} />
             </div>
             <div className="grid grid-cols-2 gap-4">
               <div className="flex flex-col gap-2">
-                <Label>Start Date</Label>
+                <Label>{t("dialog.startDate")}</Label>
                 <Input type="date" value={formStart} onChange={(e) => setFormStart(e.target.value)} />
               </div>
               <div className="flex flex-col gap-2">
-                <Label>End Date</Label>
+                <Label>{t("dialog.endDate")}</Label>
                 <Input type="date" value={formEnd} onChange={(e) => setFormEnd(e.target.value)} />
               </div>
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Budget (USD)</Label>
+              <Label>{t("dialog.budgetUsd")}</Label>
               <Input type="number" step="0.01" value={formBudget} onChange={(e) => setFormBudget(e.target.value)} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Milestone</Label>
+              <Label>{t("dialog.milestone")}</Label>
               <select
                 className="h-10 rounded-md border bg-background px-3 text-sm"
                 value={formMilestoneId}
                 onChange={(e) => setFormMilestoneId(e.target.value)}
               >
-                <option value="">No milestone</option>
+                <option value="">{t("dialog.noMilestone")}</option>
                 {milestones.map((milestone) => (
                   <option key={milestone.id} value={milestone.id}>
                     {milestone.name}
@@ -357,24 +360,24 @@ export default function SprintsPage() {
               </select>
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Status</Label>
+              <Label>{t("dialog.status")}</Label>
               <select
                 className="h-10 rounded-md border bg-background px-3 text-sm"
                 value={formStatus}
                 onChange={(e) => setFormStatus(e.target.value as SprintStatus)}
               >
-                <option value="planning">Planning</option>
-                <option value="active">Active</option>
-                <option value="closed">Closed</option>
+                <option value="planning">{t("status.planning")}</option>
+                <option value="active">{t("status.active")}</option>
+                <option value="closed">{t("status.closed")}</option>
               </select>
             </div>
           </div>
           <DialogFooter>
             <Button type="button" variant="outline" onClick={() => setEditSprint(null)}>
-              Cancel
+              {t("dialog.cancel")}
             </Button>
             <Button type="button" onClick={() => void handleUpdate()}>
-              Save
+              {t("dialog.save")}
             </Button>
           </DialogFooter>
         </DialogContent>

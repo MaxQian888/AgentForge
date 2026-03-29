@@ -109,6 +109,13 @@ func (s *Service) trigger(ctx context.Context, jobKey string, trigger model.Sche
 	return run, err
 }
 
+func (s *Service) GetJob(ctx context.Context, jobKey string) (*model.ScheduledJob, error) {
+	if s.jobRepo == nil {
+		return nil, fmt.Errorf("scheduled job repository is required")
+	}
+	return s.jobRepo.GetByKey(ctx, jobKey)
+}
+
 func (s *Service) ListJobs(ctx context.Context) ([]*model.ScheduledJob, error) {
 	if s.jobRepo == nil {
 		return nil, fmt.Errorf("scheduled job repository is required")
@@ -121,6 +128,36 @@ func (s *Service) ListRuns(ctx context.Context, jobKey string, limit int) ([]*mo
 		return nil, fmt.Errorf("scheduled job run repository is required")
 	}
 	return s.runRepo.ListByJobKey(ctx, jobKey, limit)
+}
+
+func (s *Service) GetStats(ctx context.Context) (*model.SchedulerStats, error) {
+	if s.jobRepo == nil || s.runRepo == nil {
+		return nil, fmt.Errorf("scheduler repositories are required")
+	}
+	stats, err := s.jobRepo.Stats(ctx)
+	if err != nil {
+		return nil, err
+	}
+	since := s.now().UTC().Add(-24 * time.Hour)
+	totalRuns, failedRuns, activeRuns, err := s.runRepo.CountByStatus(ctx, since)
+	if err != nil {
+		return nil, err
+	}
+	stats.ActiveRuns = activeRuns
+	stats.TotalRuns24h = totalRuns
+	stats.FailedRuns24h = failedRuns
+	return stats, nil
+}
+
+func (s *Service) DeleteOldRuns(ctx context.Context, retentionDays int) (int64, error) {
+	if s.runRepo == nil {
+		return 0, fmt.Errorf("scheduled job run repository is required")
+	}
+	if retentionDays <= 0 {
+		retentionDays = 30
+	}
+	before := s.now().UTC().Add(-time.Duration(retentionDays) * 24 * time.Hour)
+	return s.runRepo.DeleteOlderThan(ctx, before)
 }
 
 func (s *Service) UpdateJob(ctx context.Context, jobKey string, input UpdateJobInput) (*model.ScheduledJob, error) {

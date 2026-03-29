@@ -4,6 +4,7 @@ use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
 use tauri_plugin_dialog::{DialogExt, FilePath};
@@ -58,10 +59,22 @@ struct DesktopEventPayload {
     #[serde(rename = "type")]
     event_type: String,
     source: String,
+    action_id: Option<String>,
+    href: Option<String>,
+    status: Option<String>,
     runtime: Option<DesktopRuntimeSnapshot>,
     shortcut: Option<String>,
     payload: Option<Value>,
     timestamp: String,
+}
+
+#[derive(Clone, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopWindowChromeState {
+    focused: bool,
+    maximized: bool,
+    minimized: bool,
+    visible: bool,
 }
 
 #[derive(Clone, Debug, Default, Serialize)]
@@ -210,6 +223,9 @@ impl DesktopRuntimeManager {
         let event = DesktopEventPayload {
             event_type: event_type.into(),
             source: source.into(),
+            action_id: None,
+            href: None,
+            status: None,
             runtime,
             shortcut,
             payload,
@@ -247,6 +263,32 @@ impl DesktopRuntimeManager {
         payload: Option<Value>,
     ) {
         self.emit_event(app, event_type, source, shortcut, payload, None);
+    }
+
+    fn emit_shell_action_event<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        source: impl Into<String>,
+        action_id: impl Into<String>,
+        href: Option<String>,
+        payload: Option<Value>,
+        status: impl Into<String>,
+    ) {
+        let event = DesktopEventPayload {
+            event_type: "shell.action".to_string(),
+            source: source.into(),
+            action_id: Some(action_id.into()),
+            href,
+            status: Some(status.into()),
+            runtime: None,
+            shortcut: None,
+            payload,
+            timestamp: now_string(),
+        };
+
+        if let Err(error) = app.emit(DESKTOP_EVENT_NAME, event) {
+            log::warn!("failed to emit desktop shell action event: {error}");
+        }
     }
 
     fn mark_starting<R: Runtime>(&self, app: &AppHandle<R>, label: &str, pid: u32) {
@@ -347,8 +389,17 @@ impl DesktopRuntimeManager {
             {
                 if let Some(window) = tray.app_handle().get_webview_window("main") {
                     let _ = window.show();
+                    let _ = window.unminimize();
                     let _ = window.set_focus();
                 }
+                manager.emit_shell_action_event(
+                    tray.app_handle(),
+                    "tray",
+                    "focus_main_window",
+                    None,
+                    Some(json!({ "trayId": TRAY_ID })),
+                    "completed",
+                );
                 manager.emit_system_event(
                     tray.app_handle(),
                     "tray.clicked",
@@ -689,6 +740,22 @@ struct ShortcutRequest {
 
 #[derive(Debug, Deserialize)]
 #[serde(rename_all = "camelCase")]
+struct DesktopShellActionRequest {
+    action_id: String,
+    href: Option<String>,
+    payload: Option<Value>,
+    source: String,
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+struct DesktopShellActionResult {
+    action_id: String,
+    status: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(rename_all = "camelCase")]
 struct DesktopNotificationRequest {
     notification_id: String,
     notification_type: String,
@@ -753,6 +820,39 @@ fn notification_outcome_payload(
     }
 
     Value::Object(payload)
+}
+
+fn shell_action_event_payload(
+    action_id: &str,
+    href: Option<String>,
+    payload: Option<Value>,
+    status: &str,
+) -> Value {
+    let mut event_payload = serde_json::Map::new();
+    event_payload.insert(
+        "actionId".to_string(),
+        Value::String(action_id.to_string()),
+    );
+    event_payload.insert("status".to_string(), Value::String(status.to_string()));
+
+    if let Some(href) = href {
+        event_payload.insert("href".to_string(), Value::String(href));
+    }
+
+    if let Some(payload) = payload {
+        event_payload.insert("payload".to_string(), payload);
+    }
+
+    Value::Object(event_payload)
+}
+
+fn window_state_payload(state: &DesktopWindowChromeState) -> Value {
+    json!({
+        "focused": state.focused,
+        "maximized": state.maximized,
+        "minimized": state.minimized,
+        "visible": state.visible,
+    })
 }
 
 fn now_string() -> String {
@@ -880,13 +980,21 @@ fn send_notification<R: Runtime>(
         });
     }
 
-    if let Err(error) = app
+    let mut notification_builder = app
         .notification()
         .builder()
         .title(request.title.clone())
         .body(request.body.clone())
-        .show()
-    {
+        .auto_cancel()
+        .extra("notificationId", request.notification_id.clone())
+        .extra("notificationType", request.notification_type.clone())
+        .extra("createdAt", request.created_at.clone());
+
+    if let Some(href) = request.href.clone() {
+        notification_builder = notification_builder.extra("href", href);
+    }
+
+    if let Err(error) = notification_builder.show() {
         let message = error.to_string();
         state.emit_system_event(
             &app,
@@ -1024,6 +1132,117 @@ fn unregister_shortcut<R: Runtime>(
     Ok(())
 }
 
+fn with_main_window<R: Runtime>(app: &AppHandle<R>) -> Result<tauri::WebviewWindow<R>, String> {
+    app.get_webview_window("main")
+        .ok_or_else(|| "AgentForge main window is not available.".to_string())
+}
+
+fn read_main_window_chrome_state<R: Runtime>(
+    app: &AppHandle<R>,
+) -> Result<DesktopWindowChromeState, String> {
+    let window = with_main_window(app)?;
+
+    Ok(DesktopWindowChromeState {
+        focused: window.is_focused().map_err(|error| error.to_string())?,
+        maximized: window.is_maximized().map_err(|error| error.to_string())?,
+        minimized: window.is_minimized().map_err(|error| error.to_string())?,
+        visible: window.is_visible().map_err(|error| error.to_string())?,
+    })
+}
+
+fn emit_window_state_event<R: Runtime>(
+    app: &AppHandle<R>,
+    state: &DesktopRuntimeManager,
+) -> Result<(), String> {
+    let window_state = read_main_window_chrome_state(app)?;
+    state.emit_system_event(
+        app,
+        "window.state",
+        "window",
+        None,
+        Some(window_state_payload(&window_state)),
+    );
+    Ok(())
+}
+
+#[tauri::command]
+fn get_window_chrome_state<R: Runtime>(
+    app: AppHandle<R>,
+) -> Result<DesktopWindowChromeState, String> {
+    read_main_window_chrome_state(&app)
+}
+
+#[tauri::command]
+fn perform_shell_action<R: Runtime>(
+    app: AppHandle<R>,
+    state: State<'_, DesktopRuntimeManager>,
+    request: DesktopShellActionRequest,
+) -> Result<DesktopShellActionResult, String> {
+    let window = with_main_window(&app)?;
+
+    match request.action_id.as_str() {
+        "focus_main_window" | "show_main_window" | "restore_main_window" => {
+            let _ = window.show();
+            let _ = window.unminimize();
+            window.set_focus().map_err(|error| error.to_string())?;
+        }
+        "toggle_maximize_main_window" => {
+            let _ = window.show();
+            let _ = window.unminimize();
+            if window.is_maximized().map_err(|error| error.to_string())? {
+                window.unmaximize().map_err(|error| error.to_string())?;
+            } else {
+                window.maximize().map_err(|error| error.to_string())?;
+            }
+            let _ = window.set_focus();
+        }
+        "minimize_main_window" => {
+            window.minimize().map_err(|error| error.to_string())?;
+        }
+        "close_main_window" => {
+            state.emit_shell_action_event(
+                &app,
+                request.source.clone(),
+                request.action_id.clone(),
+                request.href.clone(),
+                request.payload.clone(),
+                "completed",
+            );
+            window.close().map_err(|error| error.to_string())?;
+            return Ok(DesktopShellActionResult {
+                action_id: request.action_id,
+                status: "completed".to_string(),
+            });
+        }
+        "open_plugins" | "open_reviews" | "open_notification_target" | "refresh_plugin_runtime" => {
+            let _ = window.show();
+            let _ = window.unminimize();
+            let _ = window.set_focus();
+        }
+        _ => {
+            return Err(format!(
+                "Unsupported AgentForge desktop shell action: {}",
+                request.action_id
+            ));
+        }
+    }
+
+    state.emit_shell_action_event(
+        &app,
+        request.source,
+        request.action_id.clone(),
+        request.href.clone(),
+        request.payload.clone(),
+        "completed",
+    );
+    let _ = emit_window_state_event(&app, state.inner());
+
+    Ok(DesktopShellActionResult {
+        action_id: request.action_id,
+        status: "completed".to_string(),
+    })
+}
+
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
 pub fn run() {
     let runtime_manager = DesktopRuntimeManager::new();
@@ -1039,6 +1258,17 @@ pub fn run() {
         .plugin(updater_plugin_builder().build())
         .manage(runtime_manager)
         .setup(move |app| {
+            let plugins_item =
+                MenuItem::with_id(app, "open_plugins", "Open Plugins", true, None::<&str>)
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+            let reviews_item =
+                MenuItem::with_id(app, "open_reviews", "Open Reviews", true, None::<&str>)
+                    .map_err(|error| std::io::Error::other(error.to_string()))?;
+            let menu = Menu::with_items(app, &[&plugins_item, &reviews_item])
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+            app.set_menu(menu)
+                .map_err(|error| std::io::Error::other(error.to_string()))?;
+
             if let Err(error) = setup_manager.ensure_tray(app.handle()) {
                 return Err(std::io::Error::other(error).into());
             }
@@ -1051,10 +1281,37 @@ pub fn run() {
 
             Ok(())
         })
+        .on_menu_event(|app, event| {
+            let action_id = event.id().0.to_string();
+            let href = match action_id.as_str() {
+                "open_plugins" => Some("/plugins".to_string()),
+                "open_reviews" => Some("/reviews".to_string()),
+                _ => None,
+            };
+
+            if let Some(window) = app.get_webview_window("main") {
+                let _ = window.show();
+                let _ = window.unminimize();
+                let _ = window.set_focus();
+            }
+
+            if let Some(manager) = app.try_state::<DesktopRuntimeManager>() {
+                manager.emit_shell_action_event(
+                    app,
+                    "menu",
+                    action_id,
+                    href,
+                    None,
+                    "completed",
+                );
+            }
+        })
         .invoke_handler(tauri::generate_handler![
             get_backend_url,
             get_desktop_runtime_status,
+            get_window_chrome_state,
             get_plugin_runtime_summary,
+            perform_shell_action,
             register_shortcut,
             select_files,
             send_notification,
@@ -1109,6 +1366,44 @@ mod tests {
         assert_eq!(
             notification_outcome_event_type("failed"),
             "notification.failed"
+        );
+    }
+
+    #[test]
+    fn shell_action_event_payload_preserves_route_and_context() {
+        assert_eq!(
+            shell_action_event_payload(
+                "open_notification_target",
+                Some("/reviews?id=review-1".to_string()),
+                Some(json!({ "notificationId": "notification-1" })),
+                "completed",
+            ),
+            json!({
+                "actionId": "open_notification_target",
+                "href": "/reviews?id=review-1",
+                "payload": {
+                    "notificationId": "notification-1"
+                },
+                "status": "completed",
+            })
+        );
+    }
+
+    #[test]
+    fn window_state_payload_preserves_window_flags() {
+        assert_eq!(
+            window_state_payload(&DesktopWindowChromeState {
+                focused: true,
+                maximized: true,
+                minimized: false,
+                visible: true,
+            }),
+            json!({
+                "focused": true,
+                "maximized": true,
+                "minimized": false,
+                "visible": true,
+            })
         );
     }
 }

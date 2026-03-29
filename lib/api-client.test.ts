@@ -1,4 +1,5 @@
 import { createApiClient, ApiError } from "./api-client";
+import { LOCALE_STORAGE_KEY, useLocaleStore } from "@/lib/stores/locale-store";
 
 const BASE = "http://localhost:7777";
 
@@ -12,6 +13,8 @@ function mockFetch(status: number, body: unknown): typeof fetch {
 
 beforeEach(() => {
   jest.restoreAllMocks();
+  localStorage.clear();
+  useLocaleStore.setState({ locale: "zh-CN" });
 });
 
 describe("createApiClient", () => {
@@ -28,6 +31,26 @@ describe("createApiClient", () => {
         expect.objectContaining({ method: "GET" })
       );
       expect(res).toEqual({ data: { id: 1 }, status: 200 });
+    });
+
+    it("uses the persisted locale before hydration completes", async () => {
+      global.fetch = mockFetch(200, { id: 1 });
+      localStorage.setItem(
+        LOCALE_STORAGE_KEY,
+        JSON.stringify({ state: { locale: "en" }, version: 0 })
+      );
+      jest.spyOn(useLocaleStore.persist, "hasHydrated").mockReturnValue(false);
+
+      await api.get("/users");
+
+      expect(fetch).toHaveBeenCalledWith(
+        `${BASE}/users`,
+        expect.objectContaining({
+          headers: expect.objectContaining({
+            "Accept-Language": "en",
+          }),
+        })
+      );
     });
 
     it("sends Authorization header when token provided", async () => {

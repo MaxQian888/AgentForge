@@ -1,0 +1,21 @@
+{
+  "title": "Agent Teams",
+  "viewAgents": "View Agents",
+  "projectLabel": "Project",
+  "statusLabel": "Status",
+  "selectProject": "Select project",
+  "stats.activeTeams": "Active Teams",
+  "stats.completed": "Completed",
+  "stats.totalSpent": "Total Spent",
+  "empty.selectProject": "Select a project to inspect team runs.",
+  "loading": "Loading teams...",
+  "error.retry": "Retry",
+  "empty.noTeams": "No agent teams yet. Start a team from a task detail page.",
+  "empty.noFilteredTeams": "No {status} teams found.",
+  "teamPage.loading": "Loading team workspace...",
+  "filter.allStatuses": "All Statuses",
+  "filter.active": "Active",
+  "filter.completed": "Completed",
+  "filter.failed": "Failed",
+  "filter.cancelled": "Cancelled"
+}

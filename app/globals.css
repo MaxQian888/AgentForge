@@ -119,4 +119,12 @@
   body {
     @apply bg-background text-foreground;
   }
+
+  [data-tauri-drag-region] {
+    app-region: drag;
+  }
+
+  [data-desktop-no-drag="true"] {
+    app-region: no-drag;
+  }
 }

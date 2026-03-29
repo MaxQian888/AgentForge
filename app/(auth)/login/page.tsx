@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -21,6 +22,7 @@ function normalizeEmail(value: string): string {
 
 export default function LoginPage() {
   const router = useRouter();
+  const t = useTranslations("auth");
   const login = useAuthStore((s) => s.login);
   const bootstrapSession = useAuthStore((s) => s.bootstrapSession);
   const status = useAuthStore((s) => s.status);
@@ -77,7 +79,7 @@ export default function LoginPage() {
       setError(
         err instanceof Error && err.message
           ? err.message
-          : "Unable to sign in right now. Please try again."
+          : t("login.defaultError")
       );
     } finally {
       setLoading(false);
@@ -86,11 +88,11 @@ export default function LoginPage() {
 
   if (sessionPending) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-background p-4">
+      <div className="flex h-full min-h-full items-center justify-center bg-background p-4">
         <Card className="w-full max-w-sm">
           <CardHeader>
-            <CardTitle className="text-2xl">AgentForge</CardTitle>
-            <CardDescription>Checking your session...</CardDescription>
+            <CardTitle className="text-2xl">{t("login.title")}</CardTitle>
+            <CardDescription>{t("login.checkingSession")}</CardDescription>
           </CardHeader>
         </Card>
       </div>
@@ -98,11 +100,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex min-h-screen items-center justify-center bg-background p-4">
+    <div className="flex h-full min-h-full items-center justify-center bg-background p-4">
       <Card className="w-full max-w-sm">
         <CardHeader>
-          <CardTitle className="text-2xl">AgentForge</CardTitle>
-          <CardDescription>Sign in to your account</CardDescription>
+          <CardTitle className="text-2xl">{t("login.title")}</CardTitle>
+          <CardDescription>{t("login.description")}</CardDescription>
         </CardHeader>
         <CardContent>
           <form onSubmit={handleSubmit} className="flex flex-col gap-4">
@@ -112,7 +114,7 @@ export default function LoginPage() {
               </p>
             )}
             <div className="flex flex-col gap-2">
-              <Label htmlFor="email">Email</Label>
+              <Label htmlFor="email">{t("login.email")}</Label>
               <Input
                 id="email"
                 type="email"
@@ -124,7 +126,7 @@ export default function LoginPage() {
               />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="password">Password</Label>
+              <Label htmlFor="password">{t("login.password")}</Label>
               <Input
                 id="password"
                 type="password"
@@ -136,12 +138,12 @@ export default function LoginPage() {
               />
             </div>
             <Button type="submit" disabled={loading} className="w-full">
-              {loading ? "Signing in..." : "Sign in"}
+              {loading ? t("login.submitting") : t("login.submit")}
             </Button>
             <p className="text-center text-sm text-muted-foreground">
-              No account?{" "}
+              {t("login.noAccount")}{" "}
               <Link href="/register" className="text-primary underline">
-                Register
+                {t("login.register")}
               </Link>
             </p>
           </form>

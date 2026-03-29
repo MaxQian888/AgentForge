@@ -107,12 +107,13 @@ func (e *BackendIMActionExecutor) executeAssignAgent(ctx context.Context, req *m
 	assigneeID := firstMetadataValue(metadata, "assigneeId", "assignee_id", "memberId", "member_id")
 	if assigneeID != "" {
 		assignReq := &model.AssignRequest{
-			AssigneeID:   assigneeID,
-			AssigneeType: firstNonEmptyMetadata(metadata, model.MemberTypeAgent, "assigneeType", "assignee_type"),
+			AssigneeID:    assigneeID,
+			AssigneeType:  firstNonEmptyMetadata(metadata, model.MemberTypeAgent, "assigneeType", "assignee_type"),
+			TriggerSource: "im",
 		}
 		result, err = e.dispatcher.Assign(ctx, taskID, assignReq)
 	} else {
-		result, err = e.dispatcher.Spawn(ctx, DispatchSpawnInput{TaskID: taskID})
+		result, err = e.dispatcher.Spawn(ctx, DispatchSpawnInput{TaskID: taskID, TriggerSource: "im"})
 	}
 	if err != nil {
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Agent dispatch failed: %s", err.Error()), false)
@@ -294,11 +295,19 @@ func describeDispatchOutcome(result *model.TaskDispatchResponse) string {
 		}
 		return fmt.Sprintf("Task %s was dispatched to an agent.", taskID)
 	case model.DispatchStatusQueued:
+		if result.Dispatch.Queue != nil && result.Dispatch.Queue.Priority > 0 {
+			return fmt.Sprintf("Task %s entered the agent queue at priority %d: %s", taskID, result.Dispatch.Queue.Priority, defaultDispatchReason(result.Dispatch.Reason, "agent pool is at capacity"))
+		}
 		if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
 			return fmt.Sprintf("Task %s entered the agent queue: %s", taskID, reason)
 		}
 		return fmt.Sprintf("Task %s entered the agent queue.", taskID)
 	case model.DispatchStatusBlocked:
+		if result.Dispatch.GuardrailType == model.DispatchGuardrailTypeBudget {
+			if scope := strings.TrimSpace(result.Dispatch.GuardrailScope); scope != "" {
+				return fmt.Sprintf("Task %s could not start an agent because the %s budget blocked dispatch: %s", taskID, scope, defaultDispatchReason(result.Dispatch.Reason, "budget guardrail"))
+			}
+		}
 		if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
 			return fmt.Sprintf("Task %s could not start an agent: %s", taskID, reason)
 		}
@@ -416,7 +425,18 @@ func cloneDispatchOutcomePtr(outcome *model.DispatchOutcome) *model.DispatchOutc
 		queueClone := *outcome.Queue
 		clone.Queue = &queueClone
 	}
+	if outcome.BudgetWarning != nil {
+		warningClone := *outcome.BudgetWarning
+		clone.BudgetWarning = &warningClone
+	}
 	return &clone
+}
+
+func defaultDispatchReason(reason string, fallback string) string {
+	if trimmed := strings.TrimSpace(reason); trimmed != "" {
+		return trimmed
+	}
+	return fallback
 }
 
 func cloneTaskDecompositionResponse(result *model.TaskDecompositionResponse) *model.TaskDecompositionResponse {

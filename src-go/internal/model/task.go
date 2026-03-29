@@ -168,8 +168,9 @@ type TransitionRequest struct {
 }
 
 type AssignRequest struct {
-	AssigneeID   string `json:"assigneeId" validate:"required"`
-	AssigneeType string `json:"assigneeType" validate:"required,oneof=human agent"`
+	AssigneeID    string `json:"assigneeId" validate:"required"`
+	AssigneeType  string `json:"assigneeType" validate:"required,oneof=human agent"`
+	TriggerSource string `json:"-"`
 }
 
 type TaskDecompositionResponse struct {

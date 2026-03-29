@@ -27,6 +27,21 @@ jest.mock("@/lib/ws-client", () => {
   return { WSClient: MockWSClient };
 });
 
+const emitProjectedDesktopEventMock = jest.fn();
+
+jest.mock("@/lib/platform-runtime", () => ({
+  emitProjectedDesktopEvent: (...args: unknown[]) =>
+    emitProjectedDesktopEventMock(...args),
+}));
+
+const toastWarningMock = jest.fn();
+
+jest.mock("sonner", () => ({
+  toast: {
+    warning: (...args: unknown[]) => toastWarningMock(...args),
+  },
+}));
+
 import { useAgentStore } from "./agent-store";
 import { useDashboardStore } from "./dashboard-store";
 import { useDocsStore } from "./docs-store";
@@ -38,10 +53,14 @@ import { useTaskCommentStore } from "./task-comment-store";
 import { useTaskStore } from "./task-store";
 import { useWorkflowStore } from "./workflow-store";
 import { useWSStore } from "./ws-store";
+import { useLocaleStore } from "./locale-store";
 
 describe("useWSStore", () => {
   beforeEach(() => {
+    emitProjectedDesktopEventMock.mockReset();
+    toastWarningMock.mockReset();
     useTaskStore.setState({ tasks: [], loading: false, error: null });
+    useLocaleStore.setState({ locale: "en" });
     useReviewStore.setState({
       reviewsByTask: {},
       allReviews: [],
@@ -241,6 +260,40 @@ describe("useWSStore", () => {
     );
   });
 
+  it("projects plugin lifecycle websocket events into the desktop event stream", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+    expect(client).toBeDefined();
+
+    client?.emit("plugin.lifecycle", {
+      type: "plugin.lifecycle",
+      payload: {
+        id: "evt-1",
+        plugin_id: "github-tool",
+        event_type: "activated",
+        lifecycle_state: "active",
+        summary: "GitHub Tool activated",
+        created_at: "2026-03-28T10:00:00.000Z",
+      },
+    });
+
+    expect(emitProjectedDesktopEventMock).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: "plugin.lifecycle",
+        source: "plugin",
+        timestamp: "2026-03-28T10:00:00.000Z",
+        payload: expect.objectContaining({
+          plugin_id: "github-tool",
+          event_type: "activated",
+        }),
+      }),
+    );
+  });
+
   it("hydrates agent output envelopes and keeps pool stats in sync with live agent events", () => {
     useWSStore.getState().connect("ws://localhost:7777/ws", "token");
 
@@ -346,6 +399,32 @@ describe("useWSStore", () => {
     expect(useDashboardStore.getState().tasks[0]).toEqual(
       expect.objectContaining({
         id: "task-2",
+      }),
+    );
+  });
+
+  it("shows a budget warning toast from websocket envelopes", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+
+    const MockWSClient = jest.requireMock("@/lib/ws-client").WSClient as {
+      instances: Array<{ emit: (event: string, payload: unknown) => void }>;
+    };
+    const client = MockWSClient.instances.at(-1);
+    expect(client).toBeDefined();
+
+    client?.emit("budget.warning", {
+      type: "budget.warning",
+      payload: {
+        taskId: "task-budget",
+        scope: "project",
+        message: "project budget warning",
+      },
+    });
+
+    expect(toastWarningMock).toHaveBeenCalledWith(
+      expect.stringContaining("Budget warning"),
+      expect.objectContaining({
+        description: "project budget warning",
       }),
     );
   });

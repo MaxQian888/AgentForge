@@ -1,0 +1,12 @@
+{
+  "title": "智能体记忆",
+  "selectProject": "请从仪表盘选择一个项目来浏览智能体记忆条目。",
+  "searchPlaceholder": "搜索记忆条目...",
+  "tabAll": "全部",
+  "tabEpisodic": "情景记忆",
+  "tabSemantic": "语义记忆",
+  "tabProcedural": "程序记忆",
+  "loading": "正在加载记忆...",
+  "noEntries": "未找到记忆条目。",
+  "accessed": "访问次数：{count}x"
+}

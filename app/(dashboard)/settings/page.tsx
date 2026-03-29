@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { useTranslations } from "next-intl";
 import Link from "next/link";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -15,185 +16,247 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import {
-  useProjectStore,
-  type Project,
-  type ProjectUpdateInput,
-} from "@/lib/stores/project-store";
-import { useDashboardStore } from "@/lib/stores/dashboard-store";
+import { ApiError } from "@/lib/api-client";
 import { FieldDefinitionEditor } from "@/components/fields/field-definition-editor";
 import { FormBuilder } from "@/components/forms/form-builder";
 import { RuleEditor } from "@/components/automations/rule-editor";
 import { RuleList } from "@/components/automations/rule-list";
 import { AutomationLogViewer } from "@/components/automations/automation-log-viewer";
+import { useDashboardStore } from "@/lib/stores/dashboard-store";
+import { useProjectStore, type Project, type ProjectSettings, type ProjectUpdateInput } from "@/lib/stores/project-store";
+import {
+  DEFAULT_WEBHOOK,
+  areSettingsDraftsEqual,
+  createSettingsWorkspaceDraft,
+  getPrimaryReviewLayerLabel,
+  getMinRiskLevelForBlockValue,
+  getSettingsFallbackState,
+  validateSettingsWorkspaceDraft,
+  type SettingsValidationErrors,
+  type SettingsWorkspaceDraft,
+} from "@/lib/settings/project-settings-workspace";
 
-type UpdateProject = (id: string, data: ProjectUpdateInput) => Promise<void>;
+type UpdateProject = (id: string, data: ProjectUpdateInput) => Promise<Project | undefined>;
+type SaveState = "idle" | "saving" | "saved" | "error";
 
-function SettingsContent({
-  project,
-  updateProject,
-}: {
-  project: Project;
-  updateProject: UpdateProject;
-}) {
-  const initialRuntime =
-    project.settings?.codingAgent.runtime ||
-    project.codingAgentCatalog?.defaultSelection.runtime ||
-    "";
-  const initialProvider =
-    project.settings?.codingAgent.provider ||
-    project.codingAgentCatalog?.defaultSelection.provider ||
-    "";
-  const initialModel =
-    project.settings?.codingAgent.model ||
-    project.codingAgentCatalog?.defaultSelection.model ||
-    "";
+function FieldError({ message }: { message?: string }) {
+  if (!message) return null;
+  return (
+    <p className="text-sm text-destructive" role="alert">
+      {message}
+    </p>
+  );
+}
 
-  const [name, setName] = useState(project.name);
-  const [description, setDescription] = useState(project.description ?? "");
-  const [repoUrl, setRepoUrl] = useState(project.repoUrl ?? "");
-  const [defaultBranch, setDefaultBranch] = useState(project.defaultBranch ?? "main");
-  const [runtime, setRuntime] = useState(initialRuntime);
-  const [provider, setProvider] = useState(initialProvider);
-  const [model, setModel] = useState(initialModel);
-  const [maxTaskBudget, setMaxTaskBudget] = useState(
-    project.settings?.budgetGovernance?.maxTaskBudgetUsd ?? 0
-  );
-  const [maxDailySpend, setMaxDailySpend] = useState(
-    project.settings?.budgetGovernance?.maxDailySpendUsd ?? 0
-  );
-  const [alertThreshold, setAlertThreshold] = useState(
-    project.settings?.budgetGovernance?.alertThresholdPercent ?? 80
-  );
-  const [autoStopOnExceed, setAutoStopOnExceed] = useState(
-    project.settings?.budgetGovernance?.autoStopOnExceed ?? false
-  );
-  const [autoTriggerOnPR, setAutoTriggerOnPR] = useState(
-    project.settings?.reviewPolicy?.autoTriggerOnPR ?? false
-  );
-  const [requiredLayers, setRequiredLayers] = useState(
-    project.settings?.reviewPolicy?.requiredLayers[0] ?? "layer1"
-  );
-  const [minRiskLevelForBlock, setMinRiskLevelForBlock] = useState(
-    project.settings?.reviewPolicy?.minRiskLevelForBlock ?? "critical"
-  );
-  const [requireManualApproval, setRequireManualApproval] = useState(
-    project.settings?.reviewPolicy?.requireManualApproval ?? false
-  );
-  const [webhookUrl, setWebhookUrl] = useState(project.settings?.webhook?.url ?? "");
-  const [webhookSecret, setWebhookSecret] = useState(
-    project.settings?.webhook?.secret ?? ""
-  );
-  const [webhookEvents, setWebhookEvents] = useState(
-    project.settings?.webhook?.events ?? []
-  );
-  const [webhookActive, setWebhookActive] = useState(
-    project.settings?.webhook?.active ?? false
-  );
-  const [saved, setSaved] = useState(false);
+function toProjectUpdateInput(draft: SettingsWorkspaceDraft): ProjectUpdateInput {
+  return {
+    name: draft.name.trim(),
+    description: draft.description,
+    repoUrl: draft.repoUrl,
+    defaultBranch: draft.defaultBranch.trim(),
+    settings: {
+      codingAgent: draft.settings.codingAgent,
+      budgetGovernance: draft.settings.budgetGovernance,
+      reviewPolicy: {
+        ...draft.settings.reviewPolicy,
+        requiredLayers: [...draft.settings.reviewPolicy.requiredLayers],
+      },
+      webhook: draft.settings.webhook,
+    } satisfies ProjectSettings,
+  };
+}
+
+function extractServerError(error: unknown) {
+  if (error instanceof ApiError) {
+    const body = error.body as { message?: string; errors?: Record<string, unknown> } | null;
+    const rawErrors = body?.errors ?? {};
+    const fieldErrors: SettingsValidationErrors = {};
+    const mapping: Record<string, keyof SettingsValidationErrors> = {
+      name: "name",
+      defaultBranch: "defaultBranch",
+      maxTaskBudgetUsd: "maxTaskBudgetUsd",
+      maxDailySpendUsd: "maxDailySpendUsd",
+      alertThresholdPercent: "alertThresholdPercent",
+      runtime: "runtime",
+      provider: "provider",
+      webhookUrl: "webhookUrl",
+      webhookEvents: "webhookEvents",
+    };
+    Object.entries(mapping).forEach(([rawKey, fieldKey]) => {
+      const nextValue = rawErrors[rawKey];
+      if (typeof nextValue === "string") fieldErrors[fieldKey] = nextValue;
+    });
+    return { fieldErrors, message: body?.message ?? error.message };
+  }
+  if (error instanceof Error) return { fieldErrors: {}, message: error.message };
+  return { fieldErrors: {}, message: "Failed to save settings." };
+}
+
+function preserveRedactedWebhookSecret(project: Project, submittedSecret: string): Project {
+  if (!submittedSecret) {
+    return project;
+  }
+
+  if (project.settings.webhook?.secret) {
+    return project;
+  }
+
+  return {
+    ...project,
+    settings: {
+      ...project.settings,
+      webhook: {
+        ...DEFAULT_WEBHOOK,
+        ...project.settings.webhook,
+        secret: submittedSecret,
+      },
+    },
+  };
+}
+
+function SettingsContent({ project, updateProject }: { project: Project; updateProject: UpdateProject }) {
+  const t = useTranslations("settings");
+  const [persistedSnapshot, setPersistedSnapshot] = useState(() => createSettingsWorkspaceDraft(project));
+  const [draft, setDraft] = useState(() => createSettingsWorkspaceDraft(project));
+  const [fallbackState, setFallbackState] = useState(() => getSettingsFallbackState(project));
+  const [validationErrors, setValidationErrors] = useState<SettingsValidationErrors>({});
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveState, setSaveState] = useState<SaveState>("idle");
   const savedTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   useEffect(() => {
     return () => {
-      if (savedTimeoutRef.current) {
-        clearTimeout(savedTimeoutRef.current);
-      }
+      if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
     };
   }, []);
 
   const runtimeOptions = project.codingAgentCatalog?.runtimes ?? [];
   const selectedRuntime =
-    runtimeOptions.find((option) => option.runtime === runtime) ?? runtimeOptions[0];
+    runtimeOptions.find((option) => option.runtime === draft.settings.codingAgent.runtime) ??
+    runtimeOptions[0];
   const compatibleProviders = selectedRuntime?.compatibleProviders ?? [];
   const selectedDiagnostics = selectedRuntime?.diagnostics ?? [];
+  const dirty = useMemo(() => !areSettingsDraftsEqual(draft, persistedSnapshot), [draft, persistedSnapshot]);
+  const hasFallbackDefaults =
+    fallbackState.budgetGovernance || fallbackState.reviewPolicy || fallbackState.webhook;
+
+  const webhookSummary = useMemo(() => {
+    if (!draft.settings.webhook.active) return t("webhookInactiveSummary");
+    if (!draft.settings.webhook.url.trim()) return t("webhookMissingUrlSummary");
+    if (draft.settings.webhook.events.length === 0) return t("webhookMissingEventsSummary");
+    return t("webhookReadySummary");
+  }, [draft.settings.webhook.active, draft.settings.webhook.events.length, draft.settings.webhook.url, t]);
+
+  const clearValidationError = (field: keyof SettingsValidationErrors) => {
+    setValidationErrors((current) => (current[field] ? { ...current, [field]: undefined } : current));
+  };
+
+  const patchDraft = (updater: (current: SettingsWorkspaceDraft) => SettingsWorkspaceDraft) => {
+    setDraft((current) => updater(current));
+    setSaveError(null);
+    if (saveState === "error") setSaveState("idle");
+  };
 
   const handleRuntimeChange = (nextRuntime: string) => {
-    setRuntime(nextRuntime);
-    const nextOption = runtimeOptions.find((option) => option.runtime === nextRuntime);
-    if (!nextOption) {
-      return;
-    }
-    setProvider(nextOption.defaultProvider);
-    setModel(nextOption.defaultModel);
+    patchDraft((current) => {
+      const nextOption = runtimeOptions.find((option) => option.runtime === nextRuntime);
+      if (!nextOption) return current;
+      return {
+        ...current,
+        settings: {
+          ...current.settings,
+          codingAgent: {
+            runtime: nextRuntime,
+            provider: nextOption.defaultProvider,
+            model: nextOption.defaultModel,
+          },
+        },
+      };
+    });
+    clearValidationError("runtime");
+    clearValidationError("provider");
+  };
+
+  const handleDiscard = () => {
+    setDraft(persistedSnapshot);
+    setValidationErrors({});
+    setSaveError(null);
+    setSaveState("idle");
   };
 
   const handleSave = async () => {
-    await updateProject(project.id, {
-      name,
-      description,
-      repoUrl,
-      defaultBranch,
-      settings: {
-        codingAgent: { runtime, provider, model },
-        budgetGovernance: {
-          maxTaskBudgetUsd: maxTaskBudget,
-          maxDailySpendUsd: maxDailySpend,
-          alertThresholdPercent: alertThreshold,
-          autoStopOnExceed,
-        },
-        reviewPolicy: {
-          autoTriggerOnPR,
-          requiredLayers: requiredLayers ? [requiredLayers] : [],
-          minRiskLevelForBlock,
-          requireManualApproval,
-          enabledPluginDimensions: [],
-        },
-        webhook: {
-          url: webhookUrl,
-          secret: webhookSecret,
-          events: webhookEvents,
-          active: webhookActive,
-        },
-      },
-    });
-    setSaved(true);
-    if (savedTimeoutRef.current) {
-      clearTimeout(savedTimeoutRef.current);
+    const nextValidationErrors = validateSettingsWorkspaceDraft(draft, project.codingAgentCatalog);
+    if (Object.values(nextValidationErrors).some(Boolean)) {
+      setValidationErrors(nextValidationErrors);
+      setSaveState("error");
+      setSaveError(t("validationSummary"));
+      return;
     }
-    savedTimeoutRef.current = setTimeout(() => {
-      setSaved(false);
-      savedTimeoutRef.current = null;
-    }, 2000);
+
+    setValidationErrors({});
+    setSaveError(null);
+    setSaveState("saving");
+    try {
+      const input = toProjectUpdateInput(draft);
+      const updatedProjectResponse =
+        (await updateProject(project.id, input)) ??
+        ({ ...project, ...input, settings: input.settings ?? project.settings } as Project);
+      const updatedProject = preserveRedactedWebhookSecret(
+        updatedProjectResponse,
+        draft.settings.webhook.secret
+      );
+      const nextPersistedSnapshot = createSettingsWorkspaceDraft(updatedProject);
+      setPersistedSnapshot(nextPersistedSnapshot);
+      setDraft(nextPersistedSnapshot);
+      setFallbackState(getSettingsFallbackState(updatedProject));
+      setSaveState("saved");
+      if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
+      savedTimeoutRef.current = setTimeout(() => {
+        setSaveState("idle");
+        savedTimeoutRef.current = null;
+      }, 2000);
+    } catch (error) {
+      const serverError = extractServerError(error);
+      setValidationErrors((current) => ({ ...current, ...serverError.fieldErrors }));
+      setSaveError(serverError.message);
+      setSaveState("error");
+    }
   };
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold">Project Settings</h1>
+      <div className="flex flex-col gap-2">
+        <h1 className="text-2xl font-bold">{t("title")}</h1>
+        <div className="flex flex-wrap items-center gap-2 text-sm">
+          {dirty ? <Badge variant="secondary">{t("unsavedChanges")}</Badge> : <Badge variant="outline">{t("allChangesSaved")}</Badge>}
+          {saveState === "saved" && <span className="text-emerald-600 dark:text-emerald-400">{t("settingsSaved")}</span>}
+        </div>
+      </div>
 
       <Card>
         <CardHeader>
-          <CardTitle>General</CardTitle>
+          <CardTitle>{t("general")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="flex flex-col gap-2">
-            <Label>Project Name</Label>
-            <Input value={name} onChange={(e) => setName(e.target.value)} />
-          </div>
-          <div className="flex flex-col gap-2">
-            <Label>Description</Label>
-            <Input value={description} onChange={(e) => setDescription(e.target.value)} />
-          </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>Repository</CardTitle>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="flex flex-col gap-2">
-            <Label>Repository URL</Label>
+            <Label htmlFor="settings-project-name">{t("projectName")}</Label>
             <Input
-              value={repoUrl}
-              placeholder="https://github.com/org/repo"
-              onChange={(e) => setRepoUrl(e.target.value)}
+              id="settings-project-name"
+              value={draft.name}
+              aria-invalid={Boolean(validationErrors.name)}
+              onChange={(event) => {
+                patchDraft((current) => ({ ...current, name: event.target.value }));
+                clearValidationError("name");
+              }}
             />
+            <FieldError message={validationErrors.name} />
           </div>
           <div className="flex flex-col gap-2">
-            <Label>Default Branch</Label>
+            <Label htmlFor="settings-description">{t("description")}</Label>
             <Input
-              value={defaultBranch}
-              onChange={(e) => setDefaultBranch(e.target.value)}
+              id="settings-description"
+              value={draft.description}
+              onChange={(event) => patchDraft((current) => ({ ...current, description: event.target.value }))}
             />
           </div>
         </CardContent>
@@ -201,13 +264,43 @@ function SettingsContent({
 
       <Card>
         <CardHeader>
-          <CardTitle>Coding Agent Defaults</CardTitle>
+          <CardTitle>{t("repository")}</CardTitle>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="settings-repo-url">{t("repoUrl")}</Label>
+            <Input
+              id="settings-repo-url"
+              value={draft.repoUrl}
+              placeholder={t("repoUrlPlaceholder")}
+              onChange={(event) => patchDraft((current) => ({ ...current, repoUrl: event.target.value }))}
+            />
+          </div>
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="settings-default-branch">{t("defaultBranch")}</Label>
+            <Input
+              id="settings-default-branch"
+              value={draft.defaultBranch}
+              aria-invalid={Boolean(validationErrors.defaultBranch)}
+              onChange={(event) => {
+                patchDraft((current) => ({ ...current, defaultBranch: event.target.value }));
+                clearValidationError("defaultBranch");
+              }}
+            />
+            <FieldError message={validationErrors.defaultBranch} />
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("codingAgentDefaults")}</CardTitle>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-3">
             <div className="flex flex-col gap-2">
-              <Label>Runtime</Label>
-              <Select value={runtime} onValueChange={handleRuntimeChange}>
+              <Label>{t("runtime")}</Label>
+              <Select value={draft.settings.codingAgent.runtime} onValueChange={handleRuntimeChange}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -219,10 +312,23 @@ function SettingsContent({
                   ))}
                 </SelectContent>
               </Select>
+              <FieldError message={validationErrors.runtime} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Provider</Label>
-              <Select value={provider} onValueChange={setProvider}>
+              <Label>{t("provider")}</Label>
+              <Select
+                value={draft.settings.codingAgent.provider}
+                onValueChange={(value) => {
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      codingAgent: { ...current.settings.codingAgent, provider: value },
+                    },
+                  }));
+                  clearValidationError("provider");
+                }}
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -234,13 +340,25 @@ function SettingsContent({
                   ))}
                 </SelectContent>
               </Select>
+              <FieldError message={validationErrors.provider} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Model</Label>
-              <Input value={model} onChange={(e) => setModel(e.target.value)} />
+              <Label htmlFor="settings-model">{t("model")}</Label>
+              <Input
+                id="settings-model"
+                value={draft.settings.codingAgent.model}
+                onChange={(event) =>
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      codingAgent: { ...current.settings.codingAgent, model: event.target.value },
+                    },
+                  }))
+                }
+              />
             </div>
           </div>
-
           {selectedDiagnostics.length > 0 && (
             <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
               {selectedDiagnostics.map((diagnostic) => (
@@ -248,7 +366,6 @@ function SettingsContent({
               ))}
             </div>
           )}
-
           <div className="grid gap-3 md:grid-cols-2">
             {runtimeOptions.map((option) => (
               <div key={option.runtime} className="rounded-md border p-4 text-sm">
@@ -260,16 +377,9 @@ function SettingsContent({
                     </p>
                   </div>
                   <Badge variant={option.available ? "default" : "secondary"}>
-                    {option.available ? "Ready" : "Unavailable"}
+                    {option.available ? t("runtimeReady") : t("runtimeUnavailable")}
                   </Badge>
                 </div>
-                {option.diagnostics.length > 0 && (
-                  <div className="mt-3 space-y-1 text-xs text-muted-foreground">
-                    {option.diagnostics.map((diagnostic) => (
-                      <p key={`${option.runtime}-${diagnostic.code}`}>{diagnostic.message}</p>
-                    ))}
-                  </div>
-                )}
               </div>
             ))}
           </div>
@@ -278,57 +388,111 @@ function SettingsContent({
 
       <Card>
         <CardHeader>
-          <CardTitle>Budget &amp; Alert Governance</CardTitle>
-          <CardDescription>
-            Configure spending limits and alert thresholds for agent runs.
-          </CardDescription>
+          <CardTitle>{t("budgetGovernance")}</CardTitle>
+          <CardDescription>{t("budgetGovernanceDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
             <div className="flex flex-col gap-2">
-              <Label>Max Task Budget (USD)</Label>
+              <Label htmlFor="settings-max-task-budget">{t("maxTaskBudget")}</Label>
               <Input
+                id="settings-max-task-budget"
                 type="number"
                 min={0}
                 step={0.01}
-                value={maxTaskBudget}
-                onChange={(e) => setMaxTaskBudget(Number(e.target.value))}
+                aria-invalid={Boolean(validationErrors.maxTaskBudgetUsd)}
+                value={draft.settings.budgetGovernance.maxTaskBudgetUsd}
+                onChange={(event) => {
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      budgetGovernance: {
+                        ...current.settings.budgetGovernance,
+                        maxTaskBudgetUsd: Number(event.target.value),
+                      },
+                    },
+                  }));
+                  clearValidationError("maxTaskBudgetUsd");
+                }}
               />
+              <FieldError message={validationErrors.maxTaskBudgetUsd} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Max Daily Spend (USD)</Label>
+              <Label htmlFor="settings-max-daily-spend">{t("maxDailySpend")}</Label>
               <Input
+                id="settings-max-daily-spend"
                 type="number"
                 min={0}
                 step={0.01}
-                value={maxDailySpend}
-                onChange={(e) => setMaxDailySpend(Number(e.target.value))}
+                aria-invalid={Boolean(validationErrors.maxDailySpendUsd)}
+                value={draft.settings.budgetGovernance.maxDailySpendUsd}
+                onChange={(event) => {
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      budgetGovernance: {
+                        ...current.settings.budgetGovernance,
+                        maxDailySpendUsd: Number(event.target.value),
+                      },
+                    },
+                  }));
+                  clearValidationError("maxDailySpendUsd");
+                }}
               />
+              <FieldError message={validationErrors.maxDailySpendUsd} />
             </div>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="flex flex-col gap-2">
-              <Label>Alert Threshold (%)</Label>
+              <Label htmlFor="settings-alert-threshold">{t("alertThreshold")}</Label>
               <Input
+                id="settings-alert-threshold"
                 type="number"
                 min={0}
                 max={100}
-                value={alertThreshold}
-                onChange={(e) => setAlertThreshold(Number(e.target.value))}
+                aria-invalid={Boolean(validationErrors.alertThresholdPercent)}
+                value={draft.settings.budgetGovernance.alertThresholdPercent}
+                onChange={(event) => {
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      budgetGovernance: {
+                        ...current.settings.budgetGovernance,
+                        alertThresholdPercent: Number(event.target.value),
+                      },
+                    },
+                  }));
+                  clearValidationError("alertThresholdPercent");
+                }}
               />
+              <FieldError message={validationErrors.alertThresholdPercent} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Auto-stop on Exceed</Label>
+              <Label>{t("autoStopOnExceed")}</Label>
               <Select
-                value={autoStopOnExceed ? "yes" : "no"}
-                onValueChange={(value) => setAutoStopOnExceed(value === "yes")}
+                value={draft.settings.budgetGovernance.autoStopOnExceed ? "yes" : "no"}
+                onValueChange={(value) =>
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      budgetGovernance: {
+                        ...current.settings.budgetGovernance,
+                        autoStopOnExceed: value === "yes",
+                      },
+                    },
+                  }))
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="yes">Enabled</SelectItem>
-                  <SelectItem value="no">Disabled</SelectItem>
+                  <SelectItem value="yes">{t("enabled")}</SelectItem>
+                  <SelectItem value="no">{t("disabled")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -338,68 +502,120 @@ function SettingsContent({
 
       <Card>
         <CardHeader>
-          <CardTitle>Review Policy</CardTitle>
-          <CardDescription>
-            Control how code reviews are triggered and what approval gates apply.
-          </CardDescription>
+          <CardTitle>{t("reviewPolicy")}</CardTitle>
+          <CardDescription>{t("reviewPolicyDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
             <div className="flex flex-col gap-2">
-              <Label>Auto-trigger on PR</Label>
+              <Label>{t("autoTriggerOnPR")}</Label>
               <Select
-                value={autoTriggerOnPR ? "yes" : "no"}
-                onValueChange={(value) => setAutoTriggerOnPR(value === "yes")}
+                value={draft.settings.reviewPolicy.autoTriggerOnPR ? "yes" : "no"}
+                onValueChange={(value) =>
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      reviewPolicy: {
+                        ...current.settings.reviewPolicy,
+                        autoTriggerOnPR: value === "yes",
+                      },
+                    },
+                  }))
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="yes">Enabled</SelectItem>
-                  <SelectItem value="no">Disabled</SelectItem>
+                  <SelectItem value="yes">{t("enabled")}</SelectItem>
+                  <SelectItem value="no">{t("disabled")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Required Review Layers</Label>
-              <Select value={requiredLayers} onValueChange={setRequiredLayers}>
+              <Label>{t("requiredReviewLayers")}</Label>
+              <Select
+                value={getPrimaryReviewLayerLabel(draft.settings.reviewPolicy.requiredLayers)}
+                onValueChange={(value) =>
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      reviewPolicy: {
+                        ...current.settings.reviewPolicy,
+                        requiredLayers: value === "none" ? [] : [value],
+                      },
+                    },
+                  }))
+                }
+              >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="layer1">Quick (Layer 1)</SelectItem>
-                  <SelectItem value="layer2">Deep (Layer 2)</SelectItem>
-                  <SelectItem value="layer3">Human (Layer 3)</SelectItem>
+                  <SelectItem value="none">{t("disabled")}</SelectItem>
+                  <SelectItem value="layer1">{t("layerQuick")}</SelectItem>
+                  <SelectItem value="layer2">{t("layerDeep")}</SelectItem>
+                  <SelectItem value="layer3">{t("layerHuman")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="flex flex-col gap-2">
-              <Label>Min Risk Level to Block Merge</Label>
-              <Select value={minRiskLevelForBlock} onValueChange={setMinRiskLevelForBlock}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="critical">Critical</SelectItem>
-                  <SelectItem value="high">High</SelectItem>
-                  <SelectItem value="medium">Medium</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="flex flex-col gap-2">
-              <Label>Require Manual Approval</Label>
+              <Label>{t("minRiskLevelForBlock")}</Label>
               <Select
-                value={requireManualApproval ? "yes" : "no"}
-                onValueChange={(value) => setRequireManualApproval(value === "yes")}
+                value={getMinRiskLevelForBlockValue(
+                  draft.settings.reviewPolicy.minRiskLevelForBlock
+                )}
+                onValueChange={(value) =>
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      reviewPolicy: {
+                        ...current.settings.reviewPolicy,
+                        minRiskLevelForBlock: value === "none" ? "" : value,
+                      },
+                    },
+                  }))
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="yes">Required</SelectItem>
-                  <SelectItem value="no">Not Required</SelectItem>
+                  <SelectItem value="none">{t("disabled")}</SelectItem>
+                  <SelectItem value="critical">{t("riskCritical")}</SelectItem>
+                  <SelectItem value="high">{t("riskHigh")}</SelectItem>
+                  <SelectItem value="medium">{t("riskMedium")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>{t("requireManualApproval")}</Label>
+              <Select
+                value={draft.settings.reviewPolicy.requireManualApproval ? "yes" : "no"}
+                onValueChange={(value) =>
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      reviewPolicy: {
+                        ...current.settings.reviewPolicy,
+                        requireManualApproval: value === "yes",
+                      },
+                    },
+                  }))
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="yes">{t("required")}</SelectItem>
+                  <SelectItem value="no">{t("notRequired")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -409,66 +625,102 @@ function SettingsContent({
 
       <Card>
         <CardHeader>
-          <CardTitle>Webhook Configuration</CardTitle>
-          <CardDescription>
-            Configure webhook delivery for repository and review events.
-          </CardDescription>
+          <CardTitle>{t("webhookConfig")}</CardTitle>
+          <CardDescription>{t("webhookConfigDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
           <div className="grid gap-4 md:grid-cols-2">
             <div className="flex flex-col gap-2">
-              <Label>Webhook URL</Label>
+              <Label htmlFor="settings-webhook-url">{t("webhookUrl")}</Label>
               <Input
-                value={webhookUrl}
-                placeholder="https://example.com/webhook"
-                onChange={(e) => setWebhookUrl(e.target.value)}
+                id="settings-webhook-url"
+                value={draft.settings.webhook.url}
+                aria-invalid={Boolean(validationErrors.webhookUrl)}
+                placeholder={t("webhookUrlPlaceholder")}
+                onChange={(event) => {
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      webhook: { ...current.settings.webhook, url: event.target.value },
+                    },
+                  }));
+                  clearValidationError("webhookUrl");
+                }}
               />
+              <FieldError message={validationErrors.webhookUrl} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Webhook Secret</Label>
+              <Label htmlFor="settings-webhook-secret">{t("webhookSecret")}</Label>
               <Input
+                id="settings-webhook-secret"
                 type="password"
-                value={webhookSecret}
-                placeholder="Secret token"
-                onChange={(e) => setWebhookSecret(e.target.value)}
+                value={draft.settings.webhook.secret}
+                placeholder={t("webhookSecretPlaceholder")}
+                onChange={(event) =>
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      webhook: { ...current.settings.webhook, secret: event.target.value },
+                    },
+                  }))
+                }
               />
             </div>
           </div>
           <div className="grid gap-4 md:grid-cols-2">
             <div className="flex flex-col gap-2">
-              <Label>Events</Label>
+              <Label>{t("webhookEvents")}</Label>
               <div className="flex flex-wrap gap-2">
                 {["push", "pr_opened", "pr_merged", "review_completed"].map((event) => (
                   <Button
                     key={event}
                     type="button"
                     size="sm"
-                    variant={webhookEvents.includes(event) ? "default" : "outline"}
-                    onClick={() =>
-                      setWebhookEvents((current) =>
-                        current.includes(event)
-                          ? current.filter((item) => item !== event)
-                          : [...current, event]
-                      )
-                    }
+                    variant={draft.settings.webhook.events.includes(event) ? "default" : "outline"}
+                    onClick={() => {
+                      patchDraft((current) => ({
+                        ...current,
+                        settings: {
+                          ...current.settings,
+                          webhook: {
+                            ...current.settings.webhook,
+                            events: current.settings.webhook.events.includes(event)
+                              ? current.settings.webhook.events.filter((item) => item !== event)
+                              : [...current.settings.webhook.events, event],
+                          },
+                        },
+                      }));
+                      clearValidationError("webhookEvents");
+                    }}
                   >
                     {event}
                   </Button>
                 ))}
               </div>
+              <FieldError message={validationErrors.webhookEvents} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label>Active</Label>
+              <Label>{t("webhookActive")}</Label>
               <Select
-                value={webhookActive ? "yes" : "no"}
-                onValueChange={(value) => setWebhookActive(value === "yes")}
+                value={draft.settings.webhook.active ? "yes" : "no"}
+                onValueChange={(value) =>
+                  patchDraft((current) => ({
+                    ...current,
+                    settings: {
+                      ...current.settings,
+                      webhook: { ...current.settings.webhook, active: value === "yes" },
+                    },
+                  }))
+                }
               >
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
                 <SelectContent>
-                  <SelectItem value="yes">Active</SelectItem>
-                  <SelectItem value="no">Inactive</SelectItem>
+                  <SelectItem value="yes">{t("active")}</SelectItem>
+                  <SelectItem value="no">{t("inactive")}</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -478,34 +730,70 @@ function SettingsContent({
 
       <Card>
         <CardHeader>
-          <CardTitle>Operator Diagnostics</CardTitle>
-          <CardDescription>
-            Runtime availability and operational health overview.
-          </CardDescription>
+          <CardTitle>{t("operatorDiagnostics")}</CardTitle>
+          <CardDescription>{t("operatorDiagnosticsDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-4">
+          {dirty && (
+            <div className="rounded-md border border-primary/30 bg-primary/5 p-3 text-sm">
+              {t("draftRuntimeChanged")}
+            </div>
+          )}
+          {hasFallbackDefaults && (
+            <div className="rounded-md border border-amber-500/40 bg-amber-500/10 p-3 text-sm">
+              {t("fallbackGovernanceDefaults")}
+            </div>
+          )}
+          <div className="grid gap-3 md:grid-cols-3">
+            <div className="rounded-md border p-3 text-sm">
+              <p className="font-medium">{t("runtimeSummaryTitle")}</p>
+              <p className="mt-1 text-muted-foreground">
+                {(selectedRuntime?.label ?? draft.settings.codingAgent.runtime) || t("noRuntimeInfo")}
+              </p>
+              <p className="mt-2">
+                {selectedRuntime?.available ? t("runtimeReadySummary") : t("runtimeBlockedSummary")}
+              </p>
+            </div>
+            <div className="rounded-md border p-3 text-sm">
+              <p className="font-medium">{t("reviewSummaryTitle")}</p>
+              <p className="mt-1 text-muted-foreground">
+                {draft.settings.reviewPolicy.requireManualApproval
+                  ? t("reviewManualApprovalEnabled")
+                  : t("reviewManualApprovalDisabled")}
+              </p>
+              <p className="mt-2">
+                {t("reviewRiskSummary", {
+                  risk: draft.settings.reviewPolicy.minRiskLevelForBlock || t("disabled"),
+                })}
+              </p>
+            </div>
+            <div className="rounded-md border p-3 text-sm">
+              <p className="font-medium">{t("webhookSummaryTitle")}</p>
+              <p className="mt-1 text-muted-foreground">{webhookSummary}</p>
+              <p className="mt-2">
+                {t("webhookEventCountSummary", { count: draft.settings.webhook.events.length })}
+              </p>
+            </div>
+          </div>
           <div className="grid gap-3 md:grid-cols-2">
             {runtimeOptions.map((option) => (
-              <div
-                key={option.runtime}
-                className="flex items-center justify-between rounded-md border p-3"
-              >
+              <div key={option.runtime} className="flex items-center justify-between rounded-md border p-3">
                 <span className="text-sm font-medium">{option.label}</span>
                 <Badge variant={option.available ? "default" : "secondary"}>
-                  {option.available ? "Ready" : "Unavailable"}
+                  {option.available ? t("runtimeReady") : t("runtimeUnavailable")}
                 </Badge>
               </div>
             ))}
             {runtimeOptions.length === 0 && (
-              <p className="text-sm text-muted-foreground">No runtime information available.</p>
+              <p className="text-sm text-muted-foreground">{t("noRuntimeInfo")}</p>
             )}
           </div>
           <div className="flex gap-3">
             <Button asChild size="sm" variant="outline">
-              <Link href="/agents">View Agent Pool</Link>
+              <Link href="/agents">{t("viewAgentPool")}</Link>
             </Button>
             <Button asChild size="sm" variant="outline">
-              <Link href="/reviews">View Review Backlog</Link>
+              <Link href="/reviews">{t("viewReviewBacklog")}</Link>
             </Button>
           </div>
         </CardContent>
@@ -513,10 +801,8 @@ function SettingsContent({
 
       <Card>
         <CardHeader>
-          <CardTitle>Custom Fields</CardTitle>
-          <CardDescription>
-            Define project-specific properties for task detail and workspace views.
-          </CardDescription>
+          <CardTitle>{t("customFields")}</CardTitle>
+          <CardDescription>{t("customFieldsDesc")}</CardDescription>
         </CardHeader>
         <CardContent>
           <FieldDefinitionEditor projectId={project.id} />
@@ -525,10 +811,8 @@ function SettingsContent({
 
       <Card>
         <CardHeader>
-          <CardTitle>Forms</CardTitle>
-          <CardDescription>
-            Create intake forms that map to task properties and custom fields.
-          </CardDescription>
+          <CardTitle>{t("forms")}</CardTitle>
+          <CardDescription>{t("formsDesc")}</CardDescription>
         </CardHeader>
         <CardContent>
           <FormBuilder projectId={project.id} />
@@ -537,10 +821,8 @@ function SettingsContent({
 
       <Card>
         <CardHeader>
-          <CardTitle>Automations</CardTitle>
-          <CardDescription>
-            Configure event-driven rules and inspect recent automation activity.
-          </CardDescription>
+          <CardTitle>{t("automations")}</CardTitle>
+          <CardDescription>{t("automationsDesc")}</CardDescription>
         </CardHeader>
         <CardContent className="space-y-6">
           <RuleEditor projectId={project.id} />
@@ -551,24 +833,31 @@ function SettingsContent({
 
       <Separator />
 
-      <div className="flex items-center gap-3">
-        <Button type="button" onClick={() => void handleSave()}>
-          Save Settings
-        </Button>
-        {saved && (
-          <span className="text-sm text-emerald-600 dark:text-emerald-400">
-            Settings saved
-          </span>
+      <div className="flex flex-col gap-3">
+        {saveError && (
+          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
+            {saveError}
+          </div>
         )}
+        <div className="flex items-center gap-3">
+          <Button type="button" disabled={saveState === "saving"} onClick={() => void handleSave()}>
+            {saveState === "saving" ? t("savingSettings") : t("saveSettings")}
+          </Button>
+          {dirty && (
+            <Button type="button" variant="outline" onClick={handleDiscard}>
+              {t("discardChanges")}
+            </Button>
+          )}
+        </div>
       </div>
     </div>
   );
 }
 
 export default function SettingsPage() {
+  const t = useTranslations("settings");
   const { selectedProjectId } = useDashboardStore();
   const { projects, fetchProjects, updateProject } = useProjectStore();
-
   const project = projects.find((item) => item.id === selectedProjectId);
 
   useEffect(() => {
@@ -578,10 +867,8 @@ export default function SettingsPage() {
   if (!selectedProjectId) {
     return (
       <div className="flex flex-col gap-6">
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-sm text-muted-foreground">
-          Select a project from the Dashboard to configure settings.
-        </p>
+        <h1 className="text-2xl font-bold">{t("titleNoProject")}</h1>
+        <p className="text-sm text-muted-foreground">{t("selectProject")}</p>
       </div>
     );
   }
@@ -589,8 +876,8 @@ export default function SettingsPage() {
   if (!project) {
     return (
       <div className="flex flex-col gap-6">
-        <h1 className="text-2xl font-bold">Settings</h1>
-        <p className="text-sm text-muted-foreground">Loading project...</p>
+        <h1 className="text-2xl font-bold">{t("titleNoProject")}</h1>
+        <p className="text-sm text-muted-foreground">{t("loadingProject")}</p>
       </div>
     );
   }

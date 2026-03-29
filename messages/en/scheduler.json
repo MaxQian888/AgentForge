@@ -1,0 +1,59 @@
+{
+  "title": "Scheduler Control Plane",
+  "subtitle": "Manage background jobs, inspect run history, and trigger reruns.",
+  "refresh": "Refresh",
+  "registeredJobs": "Registered Jobs",
+  "registeredJobsDesc": "Built-in background jobs with their cadence, health, and next due time.",
+  "jobDetails": "Job Details",
+  "jobDetailsDesc": "Inspect, configure, and manage the selected job.",
+  "stats": {
+    "totalJobs": "Total Jobs",
+    "enabled": "Enabled",
+    "disabled": "Disabled",
+    "activeRuns": "Active Runs",
+    "failed24h": "Failed (24h)",
+    "successRate24h": "Success Rate (24h)"
+  },
+  "jobTable": {
+    "colJob": "Job",
+    "colSchedule": "Schedule",
+    "colStatus": "Status",
+    "colNextRun": "Next Run",
+    "noJobs": "No scheduler jobs registered yet.",
+    "disabled": "Disabled",
+    "na": "N/A",
+    "notScheduled": "Not scheduled"
+  },
+  "jobDetail": {
+    "runNow": "Run now",
+    "disable": "Disable",
+    "enable": "Enable",
+    "tabOverview": "Overview",
+    "tabHistory": "Run History",
+    "tabConfig": "Configuration",
+    "lastRun": "Last run",
+    "nextRun": "Next run",
+    "notScheduled": "Not scheduled",
+    "scope": "Scope",
+    "overlapPolicy": "Overlap Policy",
+    "lastSummary": "Last Summary",
+    "lastError": "Last Error",
+    "scheduleExpression": "Schedule expression",
+    "save": "Save",
+    "disableJobTitle": "Disable job",
+    "enableJobTitle": "Enable job",
+    "disableJobDesc": "This will stop automatic execution of \"{name}\". You can still trigger it manually.",
+    "enableJobDesc": "This will resume automatic execution of \"{name}\" on schedule: {schedule}.",
+    "cancel": "Cancel",
+    "selectJob": "Select a scheduler job to inspect details and history."
+  },
+  "runHistory": {
+    "colStatus": "Status",
+    "colTrigger": "Trigger",
+    "colStarted": "Started",
+    "colDuration": "Duration",
+    "colSummary": "Summary",
+    "colMetrics": "Metrics",
+    "noRuns": "No run history recorded for this job yet."
+  }
+}

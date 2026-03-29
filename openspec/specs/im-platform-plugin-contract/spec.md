@@ -18,7 +18,7 @@ The IM Bridge SHALL represent each platform provider through a normalized descri
 - **AND** operators receive an actionable provider contract error instead of a silent fallback
 
 ### Requirement: Active platform startup SHALL resolve through the provider contract
-The IM Bridge SHALL resolve the configured `IM_PLATFORM` through the provider contract and create exactly one active provider instance per process. Built-in providers such as `feishu`, `slack`, `dingtalk`, `telegram`, `discord`, and `wecom` MUST use the same resolution path as any future plugin-backed provider descriptor. Startup MUST fail if the requested provider id is unknown, unsupported for the requested transport mode, or invalid for the current configuration.
+The IM Bridge SHALL resolve the configured `IM_PLATFORM` through the provider contract and create exactly one active provider instance per process. Built-in providers such as `feishu`, `slack`, `dingtalk`, `telegram`, `discord`, `wecom`, `qq`, and `qqbot` MUST use the same resolution path as any future plugin-backed provider descriptor. Startup MUST fail if the requested provider id is unknown, unsupported for the requested transport mode, or invalid for the current configuration.
 
 #### Scenario: Built-in provider starts through shared resolution
 - **WHEN** the Bridge starts with `IM_PLATFORM=telegram`
@@ -29,6 +29,16 @@ The IM Bridge SHALL resolve the configured `IM_PLATFORM` through the provider co
 - **WHEN** the Bridge starts with `IM_PLATFORM=wecom` and valid live or stub configuration
 - **THEN** the runtime resolves the WeCom provider through the shared provider registry
 - **AND** it instantiates the WeCom platform through the same descriptor-driven loader used by the other built-in providers
+
+#### Scenario: QQ provider starts through shared resolution
+- **WHEN** the Bridge starts with `IM_PLATFORM=qq` and valid live or stub configuration
+- **THEN** the runtime resolves the QQ provider through the shared provider registry
+- **AND** it instantiates the QQ platform through the same descriptor-driven loader used by the other built-in providers
+
+#### Scenario: QQ Bot provider starts through shared resolution
+- **WHEN** the Bridge starts with `IM_PLATFORM=qqbot` and valid live or stub configuration
+- **THEN** the runtime resolves the QQ Bot provider through the shared provider registry
+- **AND** it instantiates the QQ Bot platform through the same descriptor-driven loader used by the other built-in providers
 
 #### Scenario: Unknown provider id is rejected
 - **WHEN** the Bridge starts with `IM_PLATFORM=line`
@@ -47,6 +57,16 @@ The provider contract SHALL allow a provider to opt into native structured rende
 - **WHEN** the WeCom provider is loaded through the provider contract
 - **THEN** its descriptor exposes only the structured rendering, callback, and mutable-update features that the current WeCom implementation actually supports
 - **AND** shared delivery code falls back explicitly instead of claiming richer parity for unsupported WeCom paths
+
+#### Scenario: QQ provider advertises only the richer surfaces it can honor
+- **WHEN** the QQ provider is loaded through the provider contract
+- **THEN** its descriptor exposes only the structured rendering, callback, and mutable-update features that the current QQ implementation actually supports
+- **AND** shared delivery code falls back explicitly instead of claiming richer parity for unsupported QQ paths
+
+#### Scenario: QQ Bot provider advertises only the richer surfaces it can honor
+- **WHEN** the QQ Bot provider is loaded through the provider contract
+- **THEN** its descriptor exposes only the structured rendering, callback, and mutable-update features that the current QQ Bot implementation actually supports
+- **AND** shared delivery code falls back explicitly instead of claiming richer parity for unsupported QQ Bot paths
 
 #### Scenario: Feishu provider opts into native richer surfaces
 - **WHEN** the Feishu provider advertises native card lifecycle and delayed update extensions
@@ -70,3 +90,8 @@ In addition to transport and callback capabilities, each IM Bridge platform prov
 - **WHEN** the Telegram provider is loaded through the provider contract
 - **THEN** its descriptor declares the formatted-text and mutable-update constraints required for safe Markdown-aware delivery
 - **AND** shared delivery code can choose between Markdown-capable rendering and plain-text fallback through the provider contract alone
+
+#### Scenario: QQ-family providers declare truthful baseline rendering profiles
+- **WHEN** the QQ or QQ Bot provider is loaded through the provider contract
+- **THEN** its descriptor declares the text, structured, and mutable-update constraints required for the current provider implementation
+- **AND** shared delivery code can choose between provider-supported rendering and explicit fallback through the provider contract alone

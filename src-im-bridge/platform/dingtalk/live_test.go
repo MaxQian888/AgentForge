@@ -7,6 +7,8 @@ import (
 	"testing"
 	"time"
 
+	dingtalkcardapi "github.com/alibabacloud-go/dingtalk/card_1_0"
+	teautil "github.com/alibabacloud-go/tea-utils/v2/service"
 	dingtalkcard "github.com/open-dingtalk/dingtalk-stream-sdk-go/card"
 
 	"github.com/agentforge/im-bridge/core"
@@ -250,7 +252,197 @@ func TestLive_SendStructuredFallsBackToTextWithExplicitDowngrade(t *testing.T) {
 	}
 }
 
-func TestLive_MetadataDeclaresTextFallbackCapabilities(t *testing.T) {
+func TestLive_ReplyCardUsesSessionWebhookActionCardForLinkButtons(t *testing.T) {
+	replier := &fakeWebhookReplier{}
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{}),
+		WithWebhookReplier(replier),
+		WithDirectMessenger(&fakeDirectMessenger{}),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	plan, err := core.DeliverCard(context.Background(), live, live.Metadata(), &core.ReplyTarget{
+		Platform:       "dingtalk",
+		SessionWebhook: "https://session.example/reply",
+		ConversationID: "cid-group-1",
+		UseReply:       true,
+	}, "", core.NewCard().
+		SetTitle("Review Ready").
+		AddField("Status", "pending_human").
+		AddButton("Open", "link:https://example.test/reviews/1"))
+	if err != nil {
+		t.Fatalf("DeliverCard error: %v", err)
+	}
+
+	if plan.FallbackReason != "" {
+		t.Fatalf("FallbackReason = %q, want empty", plan.FallbackReason)
+	}
+	if len(replier.messageCalls) != 1 {
+		t.Fatalf("messageCalls = %+v", replier.messageCalls)
+	}
+	if replier.messageCalls[0].Webhook != "https://session.example/reply" {
+		t.Fatalf("webhook = %q", replier.messageCalls[0].Webhook)
+	}
+	if replier.messageCalls[0].Body["msgtype"] != "actionCard" {
+		t.Fatalf("payload = %+v", replier.messageCalls[0].Body)
+	}
+}
+
+func TestLive_ReplyCardFallsBackToTextForInteractiveButtons(t *testing.T) {
+	replier := &fakeWebhookReplier{}
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{}),
+		WithWebhookReplier(replier),
+		WithDirectMessenger(&fakeDirectMessenger{}),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	plan, err := core.DeliverCard(context.Background(), live, live.Metadata(), &core.ReplyTarget{
+		Platform:       "dingtalk",
+		SessionWebhook: "https://session.example/reply",
+		ConversationID: "cid-group-1",
+		UseReply:       true,
+	}, "", core.NewCard().
+		SetTitle("Review Ready").
+		AddPrimaryButton("Approve", "act:approve:review-1"))
+	if err != nil {
+		t.Fatalf("DeliverCard error: %v", err)
+	}
+
+	if plan.FallbackReason != "actioncard_send_failed" {
+		t.Fatalf("FallbackReason = %q, want actioncard_send_failed", plan.FallbackReason)
+	}
+	if len(replier.calls) != 1 {
+		t.Fatalf("text fallback calls = %+v", replier.calls)
+	}
+	if !strings.Contains(replier.calls[0].Content, "已降级为文本") {
+		t.Fatalf("fallback content = %q", replier.calls[0].Content)
+	}
+}
+
+func TestLive_SendCardUsesRobotCardSenderForDirectConversation(t *testing.T) {
+	cardSender := &fakeRobotCardSender{}
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{}),
+		WithWebhookReplier(&fakeWebhookReplier{}),
+		WithDirectMessenger(&fakeDirectMessenger{}),
+		WithRobotCardSender(cardSender),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	plan, err := core.DeliverCard(context.Background(), live, live.Metadata(), nil, "cid-group-2", core.NewCard().
+		SetTitle("Review Ready").
+		AddField("Status", "pending_human").
+		AddPrimaryButton("Approve", "act:approve:review-1"))
+	if err != nil {
+		t.Fatalf("DeliverCard error: %v", err)
+	}
+
+	if plan.Method != core.DeliveryMethodSend {
+		t.Fatalf("Method = %q, want send", plan.Method)
+	}
+	if plan.FallbackReason != "" {
+		t.Fatalf("FallbackReason = %q, want empty", plan.FallbackReason)
+	}
+	if len(cardSender.calls) != 1 {
+		t.Fatalf("calls = %+v", cardSender.calls)
+	}
+	if cardSender.calls[0].Target.OpenConversationID != "cid-group-2" {
+		t.Fatalf("target = %+v", cardSender.calls[0].Target)
+	}
+}
+
+func TestLive_SendCardUsesAdvancedTemplateWhenConfigured(t *testing.T) {
+	advancedClient := &fakeAdvancedCardClient{
+		response: &dingtalkcardapi.CreateAndDeliverResponse{
+			StatusCode: int32Ptr(200),
+		},
+	}
+	sender := &sdkRobotCardSender{
+		client:             mustNewIMClient(),
+		advancedClient:     advancedClient,
+		tokenProvider:      staticTokenProvider("token"),
+		robotCode:          "app-key",
+		templateID:         "StandardCard",
+		advancedTemplateID: "template-1.schema",
+	}
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{}),
+		WithWebhookReplier(&fakeWebhookReplier{}),
+		WithDirectMessenger(&fakeDirectMessenger{}),
+		WithRobotCardSender(sender),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	_, err = core.DeliverCard(context.Background(), live, live.Metadata(), nil, "cid-group-2", core.NewCard().
+		SetTitle("Review Ready").
+		AddPrimaryButton("Approve", "act:approve:review-1").
+		AddDangerButton("Reject", "act:reject:review-1"))
+	if err != nil {
+		t.Fatalf("DeliverCard error: %v", err)
+	}
+
+	if advancedClient.request == nil {
+		t.Fatal("expected CreateAndDeliver request")
+	}
+	if advancedClient.request.CallbackType == nil || *advancedClient.request.CallbackType != "STREAM" {
+		t.Fatalf("request = %+v", advancedClient.request)
+	}
+	if advancedClient.request.OpenSpaceId == nil || !strings.Contains(*advancedClient.request.OpenSpaceId, "IM_GROUP.cid-group-2") {
+		t.Fatalf("openSpaceId = %+v", advancedClient.request.OpenSpaceId)
+	}
+	if advancedClient.request.CardData == nil || advancedClient.request.CardData.CardParamMap["action_1_ref"] == nil || *advancedClient.request.CardData.CardParamMap["action_1_ref"] != "act:approve:review-1" {
+		t.Fatalf("cardData = %+v", advancedClient.request.CardData)
+	}
+}
+
+func TestLive_SendCardFallsBackWhenRobotCardSenderFails(t *testing.T) {
+	cardSender := &fakeRobotCardSender{err: errors.New("send card failed")}
+	messenger := &fakeDirectMessenger{}
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{}),
+		WithWebhookReplier(&fakeWebhookReplier{}),
+		WithDirectMessenger(messenger),
+		WithRobotCardSender(cardSender),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	plan, err := core.DeliverCard(context.Background(), live, live.Metadata(), nil, "cid-group-2", core.NewCard().
+		SetTitle("Review Ready").
+		AddPrimaryButton("Approve", "act:approve:review-1"))
+	if err != nil {
+		t.Fatalf("DeliverCard error: %v", err)
+	}
+
+	if plan.FallbackReason != "actioncard_send_failed" {
+		t.Fatalf("FallbackReason = %q, want actioncard_send_failed", plan.FallbackReason)
+	}
+	if len(messenger.calls) != 1 {
+		t.Fatalf("fallback messenger calls = %+v", messenger.calls)
+	}
+}
+
+func TestLive_MetadataDeclaresActionCardCapabilities(t *testing.T) {
 	live, err := NewLive(
 		"app-key",
 		"app-secret",
@@ -266,8 +458,8 @@ func TestLive_MetadataDeclaresTextFallbackCapabilities(t *testing.T) {
 	if metadata.Source != "dingtalk" {
 		t.Fatalf("source = %q", metadata.Source)
 	}
-	if metadata.Capabilities.SupportsRichMessages {
-		t.Fatal("expected DingTalk live transport to rely on text fallback for notifications")
+	if !metadata.Capabilities.SupportsRichMessages {
+		t.Fatal("expected DingTalk live transport to advertise action card support")
 	}
 	if !metadata.Capabilities.SupportsSlashCommands {
 		t.Fatal("expected slash-like commands support")
@@ -275,8 +467,8 @@ func TestLive_MetadataDeclaresTextFallbackCapabilities(t *testing.T) {
 	if !metadata.Capabilities.SupportsMentions {
 		t.Fatal("expected mention support")
 	}
-	if _, ok := any(live).(core.CardSender); ok {
-		t.Fatal("did not expect DingTalk live transport to implement CardSender")
+	if _, ok := any(live).(core.CardSender); !ok {
+		t.Fatal("expected DingTalk live transport to implement CardSender")
 	}
 }
 
@@ -351,13 +543,19 @@ func (f *fakeStreamRunner) Stop(context.Context) error {
 }
 
 type fakeWebhookReplier struct {
-	calls []webhookReplyCall
-	err   error
+	calls        []webhookReplyCall
+	messageCalls []webhookMessageCall
+	err          error
 }
 
 type webhookReplyCall struct {
 	Webhook string
 	Content string
+}
+
+type webhookMessageCall struct {
+	Webhook string
+	Body    map[string]any
 }
 
 func (f *fakeWebhookReplier) ReplyText(ctx context.Context, sessionWebhook string, content string) error {
@@ -367,6 +565,17 @@ func (f *fakeWebhookReplier) ReplyText(ctx context.Context, sessionWebhook strin
 	f.calls = append(f.calls, webhookReplyCall{
 		Webhook: sessionWebhook,
 		Content: content,
+	})
+	return nil
+}
+
+func (f *fakeWebhookReplier) ReplyMessage(ctx context.Context, sessionWebhook string, requestBody map[string]any) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.messageCalls = append(f.messageCalls, webhookMessageCall{
+		Webhook: sessionWebhook,
+		Body:    requestBody,
 	})
 	return nil
 }
@@ -392,6 +601,61 @@ func (f *fakeDirectMessenger) SendText(ctx context.Context, target directSendTar
 		Content:            content,
 	})
 	return nil
+}
+
+type fakeRobotCardSender struct {
+	calls []robotCardCall
+	err   error
+}
+
+type robotCardCall struct {
+	Target directSendTarget
+	Card   *core.Card
+}
+
+func (f *fakeRobotCardSender) SendCard(ctx context.Context, target directSendTarget, card *core.Card) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.calls = append(f.calls, robotCardCall{
+		Target: target,
+		Card:   card,
+	})
+	return nil
+}
+
+type fakeAdvancedCardClient struct {
+	request  *dingtalkcardapi.CreateAndDeliverRequest
+	headers  *dingtalkcardapi.CreateAndDeliverHeaders
+	response *dingtalkcardapi.CreateAndDeliverResponse
+	err      error
+}
+
+func (f *fakeAdvancedCardClient) CreateAndDeliverWithOptions(
+	request *dingtalkcardapi.CreateAndDeliverRequest,
+	headers *dingtalkcardapi.CreateAndDeliverHeaders,
+	runtime *teautil.RuntimeOptions,
+) (*dingtalkcardapi.CreateAndDeliverResponse, error) {
+	f.request = request
+	f.headers = headers
+	_ = runtime
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.response, nil
+}
+
+func int32Ptr(value int32) *int32 {
+	return &value
+}
+
+type staticTokenProvider string
+
+func (s staticTokenProvider) AccessToken(ctx context.Context) (string, error) {
+	if strings.TrimSpace(string(s)) == "" {
+		return "", errors.New("missing token")
+	}
+	return string(s), nil
 }
 
 type fakeDingTalkActionHandler struct {

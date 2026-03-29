@@ -62,6 +62,11 @@ type UpdateUserRequest struct {
 	Name string `json:"name" validate:"required"`
 }
 
+type ChangePasswordRequest struct {
+	CurrentPassword string `json:"currentPassword" validate:"required"`
+	NewPassword     string `json:"newPassword" validate:"required,min=8"`
+}
+
 type ErrorResponse struct {
 	Message string `json:"message"`
 	Code    int    `json:"code,omitempty"`

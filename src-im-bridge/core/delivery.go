@@ -101,9 +101,12 @@ func executeRenderingPlan(ctx context.Context, platform Platform, metadata Platf
 				}
 			}
 		}
-		if sender, ok := platform.(CardSender); ok && sender != nil && SelectStructuredRenderer(metadata, plan.Structured) == StructuredSurfaceCards {
-			replyPlan, err := DeliverCard(ctx, platform, metadata, target, fallbackChatID, plan.Structured.LegacyCard())
-			return DeliveryReceipt{Type: "structured", Method: replyPlan.Method, FallbackReason: firstNonEmpty(strings.TrimSpace(replyPlan.FallbackReason), strings.TrimSpace(plan.FallbackReason))}, err
+		if sender, ok := platform.(CardSender); ok && sender != nil {
+			renderer := SelectStructuredRenderer(metadata, plan.Structured)
+			if renderer == StructuredSurfaceCards || renderer == StructuredSurfaceActionCard {
+				replyPlan, err := DeliverCard(ctx, platform, metadata, target, fallbackChatID, plan.Structured.LegacyCard())
+				return DeliveryReceipt{Type: "structured", Method: replyPlan.Method, FallbackReason: firstNonEmpty(strings.TrimSpace(replyPlan.FallbackReason), strings.TrimSpace(plan.FallbackReason))}, err
+			}
 		}
 		text := ""
 		if len(plan.Text) > 0 {
@@ -111,8 +114,12 @@ func executeRenderingPlan(ctx context.Context, platform Platform, metadata Platf
 		} else if plan.Structured != nil {
 			text = plan.Structured.FallbackText()
 		}
+		fallbackReason := strings.TrimSpace(plan.FallbackReason)
+		if fallbackReason == "" {
+			fallbackReason = inferStructuredFallbackReason(target)
+		}
 		replyPlan, err := DeliverText(ctx, platform, metadata, target, fallbackChatID, text)
-		return DeliveryReceipt{Type: "text", Method: replyPlan.Method, FallbackReason: firstNonEmpty(strings.TrimSpace(replyPlan.FallbackReason), strings.TrimSpace(plan.FallbackReason))}, err
+		return DeliveryReceipt{Type: "text", Method: replyPlan.Method, FallbackReason: firstNonEmpty(strings.TrimSpace(replyPlan.FallbackReason), fallbackReason)}, err
 	case "text":
 		if len(plan.Text) > 0 {
 			if nativeMessage, ok := synthesizeProviderNativeTextMessage(platform, metadata, target, plan.Text[0].Content); ok {

@@ -440,6 +440,9 @@ func cloneMetadata(metadata map[string]string) map[string]string {
 
 func writeDeliveryReceipt(w http.ResponseWriter, receipt core.DeliveryReceipt) {
 	w.Header().Set("Content-Type", "application/json")
+	if fallbackReason := strings.TrimSpace(receipt.FallbackReason); fallbackReason != "" {
+		w.Header().Set("X-IM-Downgrade-Reason", fallbackReason)
+	}
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":          "sent",
 		"type":            receipt.Type,

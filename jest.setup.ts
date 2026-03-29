@@ -5,6 +5,7 @@
 
 import '@testing-library/jest-dom';
 import React from 'react';
+import enMessages from "@/messages/en";
 
 type MockNextImageProps = React.ComponentPropsWithoutRef<'img'> & {
   priority?: boolean;
@@ -41,6 +42,50 @@ jest.mock('next/navigation', () => ({
   useSearchParams() {
     return new URLSearchParams();
   },
+}));
+
+function resolveTranslationValue(source: unknown, path: string) {
+  const segments = path.split(".");
+  let current: unknown = source;
+
+  for (const segment of segments) {
+    if (!current || typeof current !== "object" || Array.isArray(current)) {
+      return undefined;
+    }
+    current = (current as Record<string, unknown>)[segment];
+  }
+
+  return typeof current === "string" ? current : undefined;
+}
+
+function interpolateTranslation(
+  message: string,
+  values?: Record<string, string | number>,
+) {
+  if (!values) {
+    return message;
+  }
+
+  return Object.entries(values).reduce((output, [name, value]) => {
+    return output.replace(new RegExp(`\\{${name}\\}`, "g"), String(value));
+  }, message);
+}
+
+jest.mock("next-intl", () => ({
+  NextIntlClientProvider: ({
+    children,
+  }: {
+    children: React.ReactNode;
+    locale?: string;
+    messages?: Record<string, unknown>;
+  }) => React.createElement(React.Fragment, null, children),
+  useTranslations:
+    (namespace?: string) =>
+    (key: string, values?: Record<string, string | number>) => {
+      const resolvedPath = namespace ? `${namespace}.${key}` : key;
+      const message = resolveTranslationValue(enMessages, resolvedPath) ?? resolvedPath;
+      return interpolateTranslation(message, values);
+    },
 }));
 
 class MockResizeObserver {

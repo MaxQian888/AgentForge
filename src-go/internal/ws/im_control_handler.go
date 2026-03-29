@@ -15,7 +15,7 @@ import (
 
 type IMControlPlane interface {
 	AttachBridgeListener(ctx context.Context, bridgeID string, afterCursor int64, listener IMBridgeListener) ([]*model.IMControlDelivery, error)
-	AckDelivery(ctx context.Context, bridgeID string, cursor int64, deliveryID string) error
+	AckDelivery(ctx context.Context, bridgeID string, cursor int64, deliveryID string, downgradeReason string) error
 	DetachBridgeListener(bridgeID string)
 }
 
@@ -146,7 +146,7 @@ func (h *IMControlHandler) HandleWS(c echo.Context) error {
 		if ack.BridgeID == "" {
 			ack.BridgeID = bridgeID
 		}
-		if err := h.control.AckDelivery(c.Request().Context(), ack.BridgeID, ack.Cursor, ack.DeliveryID); err != nil {
+		if err := h.control.AckDelivery(c.Request().Context(), ack.BridgeID, ack.Cursor, ack.DeliveryID, ack.DowngradeReason); err != nil {
 			log.WithFields(log.Fields{
 				"remoteAddr": remoteAddr,
 				"bridgeId":   ack.BridgeID,

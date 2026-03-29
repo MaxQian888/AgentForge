@@ -49,12 +49,16 @@ func (r *AgentTeamRepository) GetByTask(ctx context.Context, taskID uuid.UUID) (
 	return record.toModel(), nil
 }
 
-func (r *AgentTeamRepository) ListByProject(ctx context.Context, projectID uuid.UUID) ([]*model.AgentTeam, error) {
+func (r *AgentTeamRepository) ListByProject(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeam, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
+	query := r.db.WithContext(ctx).Where("project_id = ?", projectID)
+	if status != "" {
+		query = query.Where("status = ?", status)
+	}
 	var records []agentTeamRecord
-	if err := r.db.WithContext(ctx).Where("project_id = ?", projectID).Order("created_at DESC").Find(&records).Error; err != nil {
+	if err := query.Order("created_at DESC").Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list agent teams by project: %w", err)
 	}
 	teams := make([]*model.AgentTeam, len(records))
@@ -115,6 +119,41 @@ func (r *AgentTeamRepository) UpdateSpent(ctx context.Context, id uuid.UUID, spe
 		"updated_at":      gorm.Expr("NOW()"),
 	}).Error; err != nil {
 		return fmt.Errorf("update agent team spent: %w", err)
+	}
+	return nil
+}
+
+func (r *AgentTeamRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	result := r.db.WithContext(ctx).Delete(&agentTeamRecord{}, "id = ? AND status IN ?", id, []string{"completed", "failed", "cancelled"})
+	if result.Error != nil {
+		return fmt.Errorf("delete agent team: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
+func (r *AgentTeamRepository) Update(ctx context.Context, id uuid.UUID, req *model.UpdateTeamRequest) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	updates := map[string]any{}
+	if req.Name != nil {
+		updates["name"] = *req.Name
+	}
+	if req.TotalBudgetUsd != nil {
+		updates["total_budget_usd"] = *req.TotalBudgetUsd
+	}
+	if len(updates) == 0 {
+		return nil
+	}
+	updates["updated_at"] = gorm.Expr("NOW()")
+	if err := r.db.WithContext(ctx).Model(&agentTeamRecord{}).Where("id = ?", id).Updates(updates).Error; err != nil {
+		return fmt.Errorf("update agent team: %w", err)
 	}
 	return nil
 }

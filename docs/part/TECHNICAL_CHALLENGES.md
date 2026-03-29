@@ -2,6 +2,19 @@
 
 > 版本：v1.0 | 日期：2026-03-22
 > 基于 PRD v1.0 及技术选型分析（Go 后端 + TypeScript Agent SDK Bridge）
+>
+> v1.2 live contract update: 当前 Go↔TS Bridge 实现以 HTTP 命令 + WebSocket 事件流为准，canonical route family 为 `/bridge/*`。本文中保留的 gRPC / proto 讨论仅作历史方案参考，不能视为当前实现入口。
+
+---
+
+## 当前实现快照（2026-03-29）
+
+这份文档分析的是技术难点全景，但当前仓库里已经有几条明确的落地答案，不应再把它们写成悬而未决：
+
+- Go↔TS Bridge 的 live contract 已经稳定为 HTTP `/bridge/*` 命令面 + WebSocket 事件流，兼容 alias 只是历史迁移层。
+- TS Bridge 已有多 runtime catalog 与 continuity 语义，不再只是 Claude 单一路径；当前真实运行时包括 `claude_code`、`codex`、`opencode`。
+- 实时事件广播当前由 Go 侧 WebSocket hub 承担 project-scoped fan-out，任务、审查、插件、调度和文档相关事件都走这条主链。
+- 审查工作区、`pending_human` 状态、项目设置 runtime catalog、docs/wiki、以及桌面 window chrome 都已经有真实实现，因此后续章节中把这些面写成纯规划时，应优先服从当前代码真相。
 
 ---
 
@@ -32,32 +45,35 @@ AgentForge 的核心矛盾：**Go 是最佳后端语言（goroutine 并发模型
 - **错误语义的跨语言映射**：TypeScript 的异常体系（Error/TypeError/RangeError）与 Go 的 `error` 接口截然不同。Agent SDK 的错误可能包含 rate limit 信息、token 用量、会话状态等结构化数据，需要完整传递到 Go 侧进行业务决策。
 - **会话状态的跨进程共享**：Agent SDK 的 session resume 功能依赖内存中的会话状态。当 TS Bridge 进程重启时，这些状态必须能够恢复。
 - **部署耦合**：Go 二进制和 Node.js 运行时的部署、健康检查、版本升级必须协调。任一侧宕机都会影响整个 Agent 执行流水线。
-- **序列化开销**：Agent 输出包含代码片段、diff、日志等大文本，gRPC 的 protobuf 序列化/反序列化在高频流式场景下可能成为瓶颈。
+- **序列化开销**：Agent 输出包含代码片段、diff、日志等大文本。即使当前 live contract 已改为 HTTP + WebSocket，跨进程 JSON 传输与事件分发仍然需要关注峰值大小、分片和缓冲策略。
 
 ### 1.2 技术方案
 
-#### 通信协议选择：gRPC 双向流 + HTTP 回退
+#### 通信协议选择：HTTP 命令 + WebSocket 事件流（当前 live contract）
 
 ```
 Go Backend (Fiber/Echo)
     │
-    ├── gRPC Client ──────────── gRPC Server (TS Bridge)
-    │   ├── AgentService.Execute()     ← 双向流（主路径）
-    │   ├── AgentService.GetStatus()   ← 一元调用
-    │   └── AgentService.Cancel()      ← 一元调用
+    ├── HTTP Client ──────────── HTTP Server (TS Bridge)
+    │   ├── POST /bridge/execute
+    │   ├── GET  /bridge/status/:id
+    │   ├── POST /bridge/cancel
+    │   ├── POST /bridge/pause
+    │   ├── POST /bridge/resume
+    │   └── GET  /bridge/health
     │
-    └── HTTP Client (回退) ──── HTTP Server (TS Bridge)
-        └── POST /agent/execute        ← SSE 流式响应
+    └── WebSocket Event Relay ── WS Bridge Stream
+        └── TS Bridge 将执行事件主动推回 Go
 ```
 
-**为什么选 gRPC 双向流而非纯 HTTP：**
+**为什么当前 live contract 选择 HTTP + WebSocket：**
 
-1. gRPC 双向流天然支持 Go → TS（发送指令）和 TS → Go（流式输出）的并发通信
-2. protobuf 的二进制序列化比 JSON 节省 30-50% 带宽，对大量代码文本传输有意义
-3. gRPC 内建的 deadline/cancellation 语义与 Go `context` 包完美映射
-4. HTTP/SSE 作为回退方案，用于调试和降级场景
+1. `/bridge/*` JSON 接口更接近当前仓库的真实实现和调试方式，Go 与 TS 两侧都已围绕它稳定落地。
+2. WebSocket 足以承载 TS→Go 的事件流与心跳，不需要把命令面和事件面强行塞进同一协议。
+3. 对本仓库的桌面模式与单 Pod 部署而言，可观测性和调试便利性优先于 protobuf 带来的微小序列化收益。
+4. 如需保留 proto / gRPC 讨论，它们应当被视为历史方案参考，而不是当前 live contract。
 
-#### 核心 Proto 定义
+#### 历史 Proto 参考（非 live contract）
 
 ```protobuf
 syntax = "proto3";
@@ -152,7 +168,7 @@ Go 侧（接收并处理）:
 #### 流式输出中继架构
 
 ```
-Claude API ──token──→ Agent SDK ──AgentEvent──→ gRPC Stream ──→ Go Backend
+Claude API ──token──→ Agent SDK ──AgentEvent──→ WS 事件流 ──→ Go Backend
                        (TS Bridge)                                  │
                                                                     ├──→ Redis Pub/Sub
                                                                     │       │
@@ -162,7 +178,7 @@ Claude API ──token──→ Agent SDK ──AgentEvent──→ gRPC Stream 
                                                                     └──→ PostgreSQL (持久化日志)
 ```
 
-关键实现：Go 侧使用 goroutine 从 gRPC stream 读取，通过 channel 扇出到多个消费者（WebSocket、IM、DB），避免任一消费者阻塞影响流式接收。
+关键实现：Go 侧使用 goroutine 从 TS Bridge 的事件流读取，通过 channel 扇出到多个消费者（WebSocket、IM、DB），避免任一消费者阻塞影响流式接收。
 
 ```go
 func (s *AgentService) relayStream(stream pb.AgentBridge_ExecuteClient, taskID string) {
@@ -173,7 +189,7 @@ func (s *AgentService) relayStream(stream pb.AgentBridge_ExecuteClient, taskID s
     go s.imBridge.ForwardEvents(taskID, eventCh)      // IM
     go s.agentRunRepo.PersistEvents(taskID, eventCh)  // DB
 
-    // 生产者：从 gRPC stream 读取
+    // 生产者：从 TS Bridge 事件流读取
     for {
         event, err := stream.Recv()
         if err == io.EOF {
@@ -234,17 +250,17 @@ services:
 
 ### 1.3 关键实现细节
 
-- **Proto 文件版本管理**：放在独立的 `proto/` 目录，Go 和 TS 各自生成代码。CI 中检查 proto 变更是否同步生成了两侧代码。
-- **大消息分片**：Agent 输出中的代码文件可能很大（>1MB），gRPC 默认消息上限 4MB。对超大输出，在 TS 侧分片发送，Go 侧重组。
-- **连接池**：Go 侧维护到 TS Bridge 的 gRPC 连接池（而非每次调用新建连接），减少 TCP 握手开销。
+- **Proto 文件版本管理**：如果保留 proto 作为历史架构描述，应明确它不是 live contract；当前测试和运维都以 `/bridge/*` 路由与 JSON schema 为准。
+- **大消息分片**：Agent 输出中的代码片段和日志仍可能很大（>1MB）。当前风险点不再是 gRPC 默认 4MB 限制，而是 HTTP/WS JSON 事件的缓冲、摘要化和客户端渲染成本。
+- **连接复用**：当前重点是复用 HTTP client 与 TS→Go WebSocket 长连接，而不是设计新的 gRPC 连接池。
 - **优雅停机**：TS Bridge 收到 SIGTERM 后，等待所有进行中的 Agent `query()` 调用发送 SessionSnapshot，然后才退出。Go 侧在 Bridge 重启后用 snapshot 恢复会话。
-- **超时配置**：Agent 执行可能持续数分钟，gRPC stream 的 keepalive 设置需要适配长时间连接（`keepalive_time: 30s, keepalive_timeout: 10s`）。
+- **超时配置**：Agent 执行可能持续数分钟，WebSocket 连接的 keepalive 设置需要适配长时间连接（`ping interval: 30s, pong timeout: 10s`）。
 
 ### 1.4 风险与缓解
 
 | 风险 | 可能性 | 影响 | 缓解 |
 |------|--------|------|------|
-| gRPC stream 在长时间执行中断开 | 中 | 高 | keepalive + 自动重连 + session resume |
+| WS 事件流在长时间执行中断开 | 中 | 高 | keepalive + 自动重连 + session resume |
 | TS Bridge OOM（多 Agent 同时执行） | 中 | 高 | 限制单 Bridge 实例并发数 + 多实例水平扩展 |
 | proto 版本不一致导致序列化失败 | 低 | 高 | CI 强制检查 + proto lint |
 | Go/TS 时区差异导致时间戳不一致 | 低 | 低 | 统一使用 UTC 毫秒时间戳 |
@@ -514,6 +530,8 @@ PRD 要求支持 **1000+ 并发 WebSocket 连接**，且 **Agent 输出延迟 < 
 
 #### 分层消息架构
 
+> live contract note: 下方以 Redis Streams 为中心的设计更适合作为多实例扩展方案参考。当前仓库主路径已经先落在 Go 内部 WebSocket hub + project-scoped broadcast，而不是把 Redis Streams 作为实时主总线。
+
 ```
 Agent 事件源                    分发层                     消费层
 ┌──────────┐              ┌──────────────┐           ┌──────────────┐
@@ -666,6 +684,12 @@ func (h *WSHub) handleReconnect(conn *WSConn, lastMsgID string) error {
 ```
 
 每个 API 节点独立运行一个 Redis Streams 消费者，读取所有相关 topic 的消息，然后只推送给本节点上有对应订阅的 WebSocket 连接。
+
+当前仓库真相补充：
+
+- Go 侧当前已经有 `internal/ws/hub.go` 作为统一广播中心，并支持按 `project_id` 过滤。
+- TS Bridge 通过自己的 `EventStreamer` 反向连接 Go WebSocket，而不是等待 Go 侧订阅一个 gRPC stream。
+- 如果后续真的进入多节点大规模部署，再把 Redis Streams/NATS 这类持久化消息总线提升为实时主链会更合理；当前不应把它写成“已经采用”的默认结论。
 
 ### 3.3 关键实现细节
 

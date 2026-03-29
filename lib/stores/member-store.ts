@@ -12,6 +12,7 @@ import {
   serializeAgentProfileDraft,
   type AgentProfileDraft,
 } from "@/lib/team/agent-profile";
+import type { MemberStatus } from "@/lib/team/member-status";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
@@ -19,7 +20,10 @@ export interface CreateMemberInput {
   name: string;
   type: "human" | "agent";
   role?: string;
+  status?: MemberStatus;
   email?: string;
+  imPlatform?: string;
+  imUserId?: string;
   skills?: string[];
   agentProfile?: AgentProfileDraft;
   agentConfig?: string;
@@ -28,7 +32,10 @@ export interface CreateMemberInput {
 export interface UpdateMemberInput {
   name?: string;
   role?: string;
+  status?: MemberStatus;
   email?: string;
+  imPlatform?: string;
+  imUserId?: string;
   skills?: string[];
   agentProfile?: AgentProfileDraft;
   agentConfig?: string;
@@ -42,6 +49,7 @@ interface MemberState {
   fetchMembers: (projectId: string) => Promise<void>;
   createMember: (projectId: string, input: CreateMemberInput) => Promise<TeamMember>;
   updateMember: (memberId: string, projectId: string, input: UpdateMemberInput) => Promise<TeamMember>;
+  deleteMember: (memberId: string, projectId: string) => Promise<void>;
 }
 
 function getToken() {
@@ -119,7 +127,10 @@ export const useMemberStore = create<MemberState>()((set) => ({
         name: input.name,
         type: input.type,
         role: input.role ?? "",
+        status: input.status ?? "active",
         email: input.email ?? "",
+        imPlatform: input.imPlatform ?? "",
+        imUserId: input.imUserId ?? "",
         skills: input.skills ?? [],
         agentConfig: resolveAgentConfig(input),
       },
@@ -136,6 +147,25 @@ export const useMemberStore = create<MemberState>()((set) => ({
     return member;
   },
 
+  deleteMember: async (memberId, projectId) => {
+    const token = getToken();
+    if (!token) {
+      throw new Error("Missing auth token");
+    }
+
+    const api = createApiClient(API_URL);
+    await api.delete(`/api/v1/members/${memberId}`, { token });
+
+    set((state) => ({
+      membersByProject: {
+        ...state.membersByProject,
+        [projectId]: (state.membersByProject[projectId] ?? []).filter(
+          (item) => item.id !== memberId
+        ),
+      },
+    }));
+  },
+
   updateMember: async (memberId, projectId, input) => {
     const token = getToken();
     if (!token) {
@@ -148,7 +178,10 @@ export const useMemberStore = create<MemberState>()((set) => ({
       {
         name: input.name,
         role: input.role,
+        status: input.status,
         email: input.email,
+        imPlatform: input.imPlatform,
+        imUserId: input.imUserId,
         skills: input.skills,
         agentConfig: resolveAgentConfig(input),
         isActive: input.isActive,

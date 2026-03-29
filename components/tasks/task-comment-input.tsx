@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
@@ -11,6 +12,7 @@ export function TaskCommentInput({
   onSubmit: (body: string) => void | Promise<void>;
   suggestions?: string[];
 }) {
+  const t = useTranslations("tasks");
   const [value, setValue] = useState("");
   const suggestionItems = useMemo(() => {
     const match = value.match(/@([\w-]*)$/);
@@ -23,7 +25,7 @@ export function TaskCommentInput({
   return (
     <div className="flex flex-col gap-2">
       <Input
-        placeholder="Add a task comment…"
+        placeholder={t("comments.placeholder")}
         value={value}
         onChange={(event) => setValue(event.target.value)}
       />
@@ -52,7 +54,7 @@ export function TaskCommentInput({
           setValue("");
         }}
       >
-        Comment
+        {t("comments.submit")}
       </Button>
     </div>
   );

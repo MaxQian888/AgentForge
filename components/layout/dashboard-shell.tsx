@@ -6,7 +6,10 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
 import { resolveBackendUrl } from "@/lib/backend-url";
 import { usePlatformCapability } from "@/hooks/use-platform-capability";
-import type { NotificationDeliveryPolicy } from "@/lib/platform-runtime";
+import type {
+  DesktopRuntimeEvent,
+  NotificationDeliveryPolicy,
+} from "@/lib/platform-runtime";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import {
   useNotificationStore,
@@ -42,11 +45,37 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const unreadCount = useNotificationStore((s) => s.unreadCount);
   const connectWS = useWSStore((s) => s.connect);
   const disconnectWS = useWSStore((s) => s.disconnect);
-  const { isDesktop, sendNotification, syncNotificationTraySummary } =
-    usePlatformCapability();
+  const {
+    isDesktop,
+    sendNotification,
+    subscribeDesktopEvents,
+    syncNotificationTraySummary,
+  } = usePlatformCapability();
   const deliveryLedgerRef = useRef<
     Map<string, "delivered" | "failed" | "suppressed">
   >(new Map());
+
+  const handleDesktopShellAction = useEffectEvent(
+    (event: DesktopRuntimeEvent) => {
+      if (event.type !== "shell.action") {
+        return;
+      }
+
+      const targetHref =
+        event.href ??
+        (event.actionId === "open_plugins"
+          ? "/plugins"
+          : event.actionId === "open_reviews"
+            ? "/reviews"
+            : event.actionId === "open_notification_target"
+              ? "/"
+              : null);
+
+      if (targetHref) {
+        router.push(targetHref);
+      }
+    },
+  );
 
   useEffect(() => {
     if (!hasHydrated) {
@@ -97,6 +126,41 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
 
     void Promise.resolve(fetchNotifications()).catch(() => undefined);
   }, [accessToken, fetchNotifications, hasHydrated, status]);
+
+  useEffect(() => {
+    if (!hasHydrated || status !== "authenticated" || !accessToken || !isDesktop) {
+      return;
+    }
+
+    let disposed = false;
+    let cleanupRef = () => {};
+
+    void subscribeDesktopEvents((event) => {
+      if (disposed) {
+        return;
+      }
+
+      handleDesktopShellAction(event);
+    }).then((cleanup) => {
+      if (disposed) {
+        cleanup();
+        return;
+      }
+
+      cleanupRef = cleanup;
+    });
+
+    return () => {
+      disposed = true;
+      cleanupRef();
+    };
+  }, [
+    accessToken,
+    hasHydrated,
+    isDesktop,
+    status,
+    subscribeDesktopEvents,
+  ]);
 
   const bridgeDesktopNotifications = useEffectEvent(async () => {
     if (!hasHydrated || status !== "authenticated" || !accessToken || !isDesktop) {
@@ -164,7 +228,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden">
+    <div className="flex h-full min-h-full overflow-hidden">
       <Sidebar />
       <div className="flex flex-1 flex-col overflow-hidden">
         <Header />

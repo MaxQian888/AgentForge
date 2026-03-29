@@ -2,7 +2,8 @@
 
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import { Plus } from "lucide-react";
+import { useTranslations } from "next-intl";
+import { Plus, Settings2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -22,6 +23,7 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ProjectTaskWorkspace } from "@/components/tasks/project-task-workspace";
+import { SprintManagement } from "@/components/sprint/sprint-management";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { useMemberStore } from "@/lib/stores/member-store";
 import { useProjectStore } from "@/lib/stores/project-store";
@@ -39,49 +41,81 @@ const EMPTY_PROJECT_MEMBERS: ReturnType<typeof useMemberStore.getState>["members
 function CreateTaskDialog({
   projectId,
   sprints,
+  tasks,
 }: {
   projectId: string;
   sprints: ReturnType<typeof useSprintStore.getState>["sprintsByProject"][string];
+  tasks: import("@/lib/stores/task-store").Task[];
 }) {
+  const t = useTranslations("projects");
   const createTask = useTaskStore((state) => state.createTask);
   const [open, setOpen] = useState(false);
   const [title, setTitle] = useState("");
+  const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
   const [sprintId, setSprintId] = useState("");
+  const [labelsInput, setLabelsInput] = useState("");
+  const [budgetUsd, setBudgetUsd] = useState("");
+  const [plannedStart, setPlannedStart] = useState("");
+  const [plannedEnd, setPlannedEnd] = useState("");
+  const [parentId, setParentId] = useState("");
+
+  const resetForm = () => {
+    setTitle("");
+    setDescription("");
+    setPriority("medium");
+    setSprintId("");
+    setLabelsInput("");
+    setBudgetUsd("");
+    setPlannedStart("");
+    setPlannedEnd("");
+    setParentId("");
+  };
 
   const handleSubmit = async (event: React.FormEvent) => {
     event.preventDefault();
+    const labels = labelsInput
+      .split(",")
+      .map((l) => l.trim())
+      .filter(Boolean);
     await createTask({
       projectId,
       title,
+      description,
       priority,
-      description: "",
       sprintId: sprintId || null,
+      parentId: parentId || null,
+      labels,
+      budgetUsd: budgetUsd ? parseFloat(budgetUsd) : 0,
+      plannedStartAt: plannedStart ? `${plannedStart}T09:00:00.000Z` : null,
+      plannedEndAt: plannedEnd ? `${plannedEnd}T18:00:00.000Z` : null,
     });
-    setTitle("");
-    setPriority("medium");
-    setSprintId("");
+    resetForm();
     setOpen(false);
   };
+
+  const topLevelTasks = tasks.filter(
+    (task) => task.projectId === projectId && !task.parentId
+  );
 
   return (
     <Dialog open={open} onOpenChange={setOpen}>
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus className="mr-1 size-4" />
-          New Task
+          {t("createTask.button")}
         </Button>
       </DialogTrigger>
-      <DialogContent>
+      <DialogContent className="max-h-[85vh] overflow-y-auto">
         <DialogHeader>
-          <DialogTitle>Create Task</DialogTitle>
+          <DialogTitle>{t("createTask.title")}</DialogTitle>
           <DialogDescription>
-            Capture the task goal and initial priority before the workspace fills in the rest.
+            {t("createTask.description")}
           </DialogDescription>
         </DialogHeader>
         <form onSubmit={handleSubmit} className="flex flex-col gap-4">
           <div className="flex flex-col gap-2">
-            <Label>Title</Label>
+            <Label>{t("createTask.titleLabel")}</Label>
             <Input
               value={title}
               onChange={(event) => setTitle(event.target.value)}
@@ -89,39 +123,105 @@ function CreateTaskDialog({
             />
           </div>
           <div className="flex flex-col gap-2">
-            <Label>Priority</Label>
-            <Select
-              value={priority}
-              onValueChange={(value) => setPriority(value as TaskPriority)}
-            >
-              <SelectTrigger>
-                <SelectValue />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="urgent">Urgent</SelectItem>
-                <SelectItem value="high">High</SelectItem>
-                <SelectItem value="medium">Medium</SelectItem>
-                <SelectItem value="low">Low</SelectItem>
-              </SelectContent>
-            </Select>
+            <Label>{t("createTask.descriptionLabel")}</Label>
+            <textarea
+              className="min-h-[80px] rounded-md border bg-background px-3 py-2 text-sm"
+              value={description}
+              placeholder={t("createTask.descriptionPlaceholder")}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
+              <Label>{t("createTask.priorityLabel")}</Label>
+              <Select
+                value={priority}
+                onValueChange={(value) => setPriority(value as TaskPriority)}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="urgent">{t("createTask.priority.urgent")}</SelectItem>
+                  <SelectItem value="high">{t("createTask.priority.high")}</SelectItem>
+                  <SelectItem value="medium">{t("createTask.priority.medium")}</SelectItem>
+                  <SelectItem value="low">{t("createTask.priority.low")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="create-task-sprint">{t("createTask.sprintLabel")}</Label>
+              <select
+                id="create-task-sprint"
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                value={sprintId}
+                onChange={(event) => setSprintId(event.target.value)}
+              >
+                <option value="">{t("createTask.backlog")}</option>
+                {sprints.map((sprint) => (
+                  <option key={sprint.id} value={sprint.id}>
+                    {sprint.name}
+                  </option>
+                ))}
+              </select>
+            </div>
           </div>
           <div className="flex flex-col gap-2">
-            <Label htmlFor="create-task-sprint">Sprint</Label>
-            <select
-              id="create-task-sprint"
-              className="h-10 rounded-md border bg-background px-3 text-sm"
-              value={sprintId}
-              onChange={(event) => setSprintId(event.target.value)}
-            >
-              <option value="">Backlog / no sprint</option>
-              {sprints.map((sprint) => (
-                <option key={sprint.id} value={sprint.id}>
-                  {sprint.name}
-                </option>
-              ))}
-            </select>
+            <Label>{t("createTask.labelsLabel")}</Label>
+            <Input
+              value={labelsInput}
+              placeholder={t("createTask.labelsPlaceholder")}
+              onChange={(event) => setLabelsInput(event.target.value)}
+            />
           </div>
-          <Button type="submit">Create</Button>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
+              <Label>{t("createTask.budgetLabel")}</Label>
+              <Input
+                type="number"
+                min="0"
+                step="0.01"
+                value={budgetUsd}
+                placeholder={t("createTask.budgetPlaceholder")}
+                onChange={(event) => setBudgetUsd(event.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label htmlFor="create-task-parent">{t("createTask.parentTaskLabel")}</Label>
+              <select
+                id="create-task-parent"
+                className="h-10 rounded-md border bg-background px-3 text-sm"
+                value={parentId}
+                onChange={(event) => setParentId(event.target.value)}
+              >
+                <option value="">{t("createTask.noParent")}</option>
+                {topLevelTasks.map((task) => (
+                  <option key={task.id} value={task.id}>
+                    {task.title}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="flex flex-col gap-2">
+              <Label>{t("createTask.plannedStartLabel")}</Label>
+              <Input
+                type="date"
+                value={plannedStart}
+                onChange={(event) => setPlannedStart(event.target.value)}
+              />
+            </div>
+            <div className="flex flex-col gap-2">
+              <Label>{t("createTask.plannedEndLabel")}</Label>
+              <Input
+                type="date"
+                value={plannedEnd}
+                onChange={(event) => setPlannedEnd(event.target.value)}
+              />
+            </div>
+          </div>
+          <Button type="submit">{t("createTask.submit")}</Button>
         </form>
       </DialogContent>
     </Dialog>
@@ -129,6 +229,7 @@ function CreateTaskDialog({
 }
 
 function ProjectView() {
+  const t = useTranslations("projects");
   const searchParams = useSearchParams();
   const router = useRouter();
   const projectId = searchParams.get("id");
@@ -141,6 +242,9 @@ function ProjectView() {
   const transitionTask = useTaskStore((state) => state.transitionTask);
   const assignTask = useTaskStore((state) => state.assignTask);
   const decomposeTask = useTaskStore((state) => state.decomposeTask);
+  const deleteTask = useTaskStore((state) => state.deleteTask);
+  const bulkTransition = useTaskStore((state) => state.bulkTransition);
+  const bulkDelete = useTaskStore((state) => state.bulkDelete);
   const agents = useAgentStore((state) => state.agents);
   const spawnAgent = useAgentStore((state) => state.spawnAgent);
   const fetchAgents = useAgentStore((state) => state.fetchAgents);
@@ -228,9 +332,26 @@ function ProjectView() {
     <div className="flex flex-col gap-4">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">
-          {project?.name ?? "Project"} — Task Workspace
+          {t("taskWorkspace.title", { projectName: project?.name ?? t("taskWorkspace.defaultName") })}
         </h1>
-        <CreateTaskDialog projectId={projectId} sprints={sprints} />
+        <div className="flex items-center gap-2">
+          <Dialog>
+            <DialogTrigger asChild>
+              <Button size="sm" variant="outline">
+                <Settings2 className="mr-1 size-4" />
+                {t("manageSprints")}
+              </Button>
+            </DialogTrigger>
+            <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
+              <DialogHeader>
+                <DialogTitle>{t("manageSprints")}</DialogTitle>
+                <DialogDescription />
+              </DialogHeader>
+              <SprintManagement projectId={projectId} sprints={sprints} />
+            </DialogContent>
+          </Dialog>
+          <CreateTaskDialog projectId={projectId} sprints={sprints} tasks={projectTasks} />
+        </div>
       </div>
 
       <ProjectTaskWorkspace
@@ -251,7 +372,18 @@ function ProjectView() {
         onTaskScheduleChange={(taskId, changes) => updateTask(taskId, changes)}
         onTaskSave={updateTask}
         onTaskAssign={handleTaskAssign}
+        onBulkStatusChange={(ids, status) => void bulkTransition(ids, status)}
+        onBulkAssign={(ids, assigneeId, assigneeType) => {
+          for (const id of ids) {
+            void assignTask(id, assigneeId, assigneeType);
+          }
+        }}
+        onBulkDelete={(ids) => void bulkDelete(ids)}
         onTaskDecompose={decomposeTask}
+        onTaskDelete={async (taskId) => {
+          await deleteTask(taskId);
+          useTaskWorkspaceStore.getState().selectTask(null);
+        }}
         onSpawnAgent={spawnAgent}
         onSprintFilterChange={(nextSprintId) => {
           if (nextSprintId === "all") {

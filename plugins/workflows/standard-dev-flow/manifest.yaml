@@ -1,0 +1,36 @@
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: standard-dev-flow
+  name: Standard Dev Flow
+  version: 0.1.0
+  description: Built-in sequential workflow starter that hands off from coding to review using maintained role ids.
+  tags:
+    - builtin
+    - workflow
+    - starter
+spec:
+  runtime: wasm
+  module: ./dist/standard-dev-flow.wasm
+  abiVersion: v1
+  capabilities:
+    - run_workflow
+  workflow:
+    process: sequential
+    roles:
+      - id: coding-agent
+      - id: code-reviewer
+    steps:
+      - id: implement
+        role: coding-agent
+        action: agent
+        next: [review]
+      - id: review
+        role: code-reviewer
+        action: review
+    triggers:
+      - event: manual
+permissions: {}
+source:
+  type: builtin
+  path: ./plugins/workflows/standard-dev-flow/manifest.yaml

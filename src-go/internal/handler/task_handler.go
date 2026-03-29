@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
@@ -100,17 +101,17 @@ func (h *TaskHandler) WithAutomation(evaluator service.AutomationEventEvaluator)
 func (h *TaskHandler) RecommendAssignee(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	if h.recommender == nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "recommender unavailable"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgRecommenderUnavailable)
 	}
 	candidates, err := h.recommender.Recommend(c.Request().Context(), id)
 	if err != nil {
 		if strings.Contains(err.Error(), "fetch task") {
-			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "task not found"})
+			return localizedError(c, http.StatusNotFound, i18n.MsgTaskNotFound)
 		}
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to generate recommendations"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToGenerateRecommendations)
 	}
 	return c.JSON(http.StatusOK, candidates)
 }
@@ -118,7 +119,7 @@ func (h *TaskHandler) RecommendAssignee(c echo.Context) error {
 func (h *TaskHandler) Create(c echo.Context) error {
 	req := new(model.CreateTaskRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -140,41 +141,41 @@ func (h *TaskHandler) Create(c echo.Context) error {
 	if req.ParentID != nil {
 		pid, err := uuid.Parse(*req.ParentID)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid parent ID"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidParentID)
 		}
 		task.ParentID = &pid
 	}
 	if req.SprintID != nil {
 		sid, err := uuid.Parse(*req.SprintID)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid sprint ID"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidSprintID)
 		}
 		task.SprintID = &sid
 	}
 	if req.PlannedStartAt != nil && *req.PlannedStartAt != "" {
 		plannedStartAt, err := time.Parse(time.RFC3339, *req.PlannedStartAt)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid planned start date"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPlannedStartDate)
 		}
 		task.PlannedStartAt = &plannedStartAt
 	}
 	if req.PlannedEndAt != nil && *req.PlannedEndAt != "" {
 		plannedEndAt, err := time.Parse(time.RFC3339, *req.PlannedEndAt)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid planned end date"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPlannedEndDate)
 		}
 		task.PlannedEndAt = &plannedEndAt
 	}
 	if task.PlannedStartAt != nil && task.PlannedEndAt != nil && task.PlannedEndAt.Before(*task.PlannedStartAt) {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "planned end date must be after planned start date"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgPlannedEndBeforeStart)
 	}
 
 	if err := h.repo.Create(c.Request().Context(), task); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create task"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateTask)
 	}
 	task, err := h.repo.GetByID(c.Request().Context(), task.ID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch created task"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToFetchCreatedTask)
 	}
 	if h.progress != nil {
 		snapshot, progressErr := h.progress.RecordActivity(c.Request().Context(), task.ID, service.TaskActivityInput{
@@ -208,20 +209,20 @@ func (h *TaskHandler) List(c echo.Context) error {
 	}
 	if rawFilters := strings.TrimSpace(c.QueryParam("customFieldFilters")); rawFilters != "" {
 		if err := json.Unmarshal([]byte(rawFilters), &q.CustomFieldFilters); err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid customFieldFilters query"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidCustomFieldFilters)
 		}
 	}
 	if rawSort := strings.TrimSpace(c.QueryParam("customFieldSort")); rawSort != "" {
 		var customSort model.TaskCustomFieldSort
 		if err := json.Unmarshal([]byte(rawSort), &customSort); err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid customFieldSort query"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidCustomFieldSort)
 		}
 		q.CustomFieldSort = &customSort
 	}
 
 	tasks, total, err := h.repo.List(c.Request().Context(), projectID, q)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list tasks"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListTasks)
 	}
 
 	dtos := make([]model.TaskDTO, 0, len(tasks))
@@ -240,11 +241,11 @@ func (h *TaskHandler) List(c echo.Context) error {
 func (h *TaskHandler) Get(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	task, err := h.repo.GetByID(c.Request().Context(), id)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "task not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgTaskNotFound)
 	}
 	return c.JSON(http.StatusOK, task.ToDTO())
 }
@@ -252,11 +253,11 @@ func (h *TaskHandler) Get(c echo.Context) error {
 func (h *TaskHandler) Update(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	req := new(model.UpdateTaskRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if req.BlockedBy != nil {
 		sanitized, err := sanitizeBlockedByIDs(id, *req.BlockedBy)
@@ -266,16 +267,16 @@ func (h *TaskHandler) Update(c echo.Context) error {
 		req.BlockedBy = &sanitized
 	}
 	if err := h.repo.Update(c.Request().Context(), id, req); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update task"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateTask)
 	}
 	task, err := h.repo.GetByID(c.Request().Context(), id)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch updated task"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToFetchUpdatedTask)
 	}
 	if req.BlockedBy != nil {
 		task, err = h.resolveReadyTaskState(c.Request().Context(), task)
 		if err != nil {
-			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to reconcile task dependencies"})
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToReconcileDeps)
 		}
 	}
 	if h.progress != nil {
@@ -307,10 +308,10 @@ func (h *TaskHandler) Update(c echo.Context) error {
 func (h *TaskHandler) Delete(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	if err := h.repo.Delete(c.Request().Context(), id); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete task"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteTask)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "task deleted"})
 }
@@ -318,11 +319,11 @@ func (h *TaskHandler) Delete(c echo.Context) error {
 func (h *TaskHandler) Transition(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	req := new(model.TransitionRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -339,7 +340,7 @@ func (h *TaskHandler) Transition(c echo.Context) error {
 	}
 	task, err := h.repo.GetByID(c.Request().Context(), id)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch task"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToFetchTask)
 	}
 	if h.progress != nil {
 		snapshot, progressErr := h.progress.RecordActivity(c.Request().Context(), task.ID, service.TaskActivityInput{
@@ -354,7 +355,7 @@ func (h *TaskHandler) Transition(c echo.Context) error {
 	}
 	updatedDependents, err := h.autoUnblockDependents(c.Request().Context(), task)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update dependent tasks"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateDependentTasks)
 	}
 	h.broadcastTaskTransitioned(task, req.Reason)
 	for _, dependent := range updatedDependents {
@@ -387,11 +388,11 @@ func (h *TaskHandler) Transition(c echo.Context) error {
 func (h *TaskHandler) Assign(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	req := new(model.AssignRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -401,23 +402,23 @@ func (h *TaskHandler) Assign(c echo.Context) error {
 		if err != nil {
 			switch {
 			case errors.Is(err, service.ErrAgentTaskNotFound):
-				return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "task not found"})
+				return localizedError(c, http.StatusNotFound, i18n.MsgTaskNotFound)
 			default:
-				return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to assign task"})
+				return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToAssignTask)
 			}
 		}
 		return c.JSON(http.StatusOK, result)
 	}
 	assigneeID, err := uuid.Parse(req.AssigneeID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid assignee ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidAssigneeID)
 	}
 	if err := h.repo.UpdateAssignee(c.Request().Context(), id, assigneeID, req.AssigneeType); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to assign task"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToAssignTask)
 	}
 	task, err := h.repo.GetByID(c.Request().Context(), id)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch task"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToFetchTask)
 	}
 	if h.progress != nil {
 		snapshot, progressErr := h.progress.RecordActivity(c.Request().Context(), task.ID, service.TaskActivityInput{
@@ -448,23 +449,23 @@ func (h *TaskHandler) Assign(c echo.Context) error {
 func (h *TaskHandler) Decompose(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	if h.decomposer == nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "task decomposer unavailable"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgTaskDecomposerUnavailable)
 	}
 
 	result, err := h.decomposer.Decompose(c.Request().Context(), id)
 	if err != nil {
 		switch {
 		case errors.Is(err, service.ErrTaskNotFound):
-			return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "task not found"})
+			return localizedError(c, http.StatusNotFound, i18n.MsgTaskNotFound)
 		case errors.Is(err, service.ErrTaskAlreadyDecomposed):
-			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: "task already has child tasks"})
+			return localizedError(c, http.StatusConflict, i18n.MsgTaskAlreadyHasChildren)
 		case errors.Is(err, service.ErrInvalidTaskDecomposition):
-			return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "invalid task decomposition"})
+			return localizedError(c, http.StatusBadGateway, i18n.MsgInvalidTaskDecomposition)
 		default:
-			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to decompose task"})
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDecomposeTask)
 		}
 	}
 	return c.JSON(http.StatusOK, result)

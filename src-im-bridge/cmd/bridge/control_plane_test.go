@@ -248,7 +248,7 @@ func TestBridgeRuntimeControl_ApplyDeliveryPrefersTypedStructuredPayload(t *test
 		},
 	}
 
-	err := control.applyDelivery(context.Background(), &client.ControlDelivery{
+	downgradeReason, err := control.applyDelivery(context.Background(), &client.ControlDelivery{
 		Platform:     "discord",
 		TargetChatID: "channel-1",
 		Content:      "plain fallback",
@@ -268,6 +268,9 @@ func TestBridgeRuntimeControl_ApplyDeliveryPrefersTypedStructuredPayload(t *test
 	})
 	if err != nil {
 		t.Fatalf("applyDelivery error: %v", err)
+	}
+	if downgradeReason != "structured_reply_unavailable" {
+		t.Fatalf("downgradeReason = %q, want structured_reply_unavailable", downgradeReason)
 	}
 
 	if len(platform.structured) != 0 {
@@ -292,7 +295,7 @@ func TestBridgeRuntimeControl_ApplyDeliveryUsesDeferredNativeUpdateForFeishuProg
 		},
 	}
 
-	err := control.applyDelivery(context.Background(), &client.ControlDelivery{
+	downgradeReason, err := control.applyDelivery(context.Background(), &client.ControlDelivery{
 		Platform:     "feishu",
 		TargetChatID: "oc_123",
 		Content:      "Agent 已完成最新阶段",
@@ -307,6 +310,9 @@ func TestBridgeRuntimeControl_ApplyDeliveryUsesDeferredNativeUpdateForFeishuProg
 	})
 	if err != nil {
 		t.Fatalf("applyDelivery error: %v", err)
+	}
+	if downgradeReason != "" {
+		t.Fatalf("downgradeReason = %q, want empty", downgradeReason)
 	}
 
 	if len(platform.nativeUpdates) != 1 {
@@ -432,7 +438,7 @@ func TestBridgeRuntimeControl_ApplyDeliveryUsesWeComResponseURLReplyTarget(t *te
 		},
 	}
 
-	err := control.applyDelivery(context.Background(), &client.ControlDelivery{
+	downgradeReason, err := control.applyDelivery(context.Background(), &client.ControlDelivery{
 		Platform:     "wecom",
 		TargetChatID: "chat-1",
 		Content:      "queued update",
@@ -447,11 +453,222 @@ func TestBridgeRuntimeControl_ApplyDeliveryUsesWeComResponseURLReplyTarget(t *te
 	if err != nil {
 		t.Fatalf("applyDelivery error: %v", err)
 	}
+	if downgradeReason != "" {
+		t.Fatalf("downgradeReason = %q, want empty", downgradeReason)
+	}
 	if len(platform.replies) != 1 || platform.replies[0] != "queued update" {
 		t.Fatalf("replies = %+v", platform.replies)
 	}
 	if len(platform.replyTargets) != 1 || platform.replyTargets[0] == nil || platform.replyTargets[0].SessionWebhook != "https://work.weixin.qq.com/response" {
 		t.Fatalf("reply targets = %+v", platform.replyTargets)
+	}
+}
+
+func TestBridgeRuntimeControl_StartIncludesQQBotCallbackPathInRegistration(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	type counts struct {
+		mu         sync.Mutex
+		lastReg    client.BridgeRegistration
+		registered bool
+	}
+	var seen counts
+	ackCh := make(chan client.ControlDeliveryAck, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/im/bridge/register":
+			var req client.BridgeRegistration
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode register: %v", err)
+			}
+			seen.mu.Lock()
+			seen.lastReg = req
+			seen.registered = true
+			seen.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(client.BridgeInstance{BridgeID: req.BridgeID, Status: "online"})
+		case "/api/v1/im/bridge/heartbeat":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(client.BridgeHeartbeat{BridgeID: "bridge-qqbot-1", Status: "online"})
+		case "/api/v1/im/bridge/unregister":
+			w.WriteHeader(http.StatusOK)
+		case "/ws/im-bridge":
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Fatalf("Upgrade error: %v", err)
+			}
+			defer conn.Close()
+			delivery := client.ControlDelivery{
+				Cursor:         1,
+				DeliveryID:     "delivery-1",
+				TargetBridgeID: "bridge-qqbot-1",
+				Platform:       "qqbot",
+				Kind:           "task.progress",
+				Content:        "hello",
+				TargetChatID:   "group-openid",
+				Timestamp:      "2026-03-28T00:00:00Z",
+			}
+			if err := conn.WriteJSON(delivery); err != nil {
+				t.Fatalf("WriteJSON error: %v", err)
+			}
+			var ack client.ControlDeliveryAck
+			if err := conn.ReadJSON(&ack); err == nil {
+				ackCh <- ack
+			}
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	platform := &qqbotRuntimeTestPlatform{}
+	apiClient := client.NewAgentForgeClient(server.URL, "proj-1", "secret").WithPlatform(platform)
+	provider := &activeProvider{
+		Descriptor: providerDescriptor{
+			ID:       "qqbot",
+			Metadata: platform.Metadata(),
+		},
+		Platform:      platform,
+		TransportMode: "live",
+	}
+	control := newBridgeRuntimeControl(&config{
+		APIBase:               server.URL,
+		ProjectID:             "proj-1",
+		TransportMode:         "live",
+		HeartbeatInterval:     10 * time.Millisecond,
+		ControlReconnectDelay: 10 * time.Millisecond,
+	}, "bridge-qqbot-1", provider, apiClient)
+
+	if err := control.Start(context.Background()); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	select {
+	case <-ackCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ack")
+	}
+	if err := control.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop error: %v", err)
+	}
+
+	seen.mu.Lock()
+	defer seen.mu.Unlock()
+	if !seen.registered {
+		t.Fatal("expected registration to occur")
+	}
+	if len(seen.lastReg.CallbackPaths) != 3 || seen.lastReg.CallbackPaths[2] != "/qqbot/callback" {
+		t.Fatalf("callback paths = %+v", seen.lastReg.CallbackPaths)
+	}
+	if seen.lastReg.Capabilities["requires_public_callback"] != true {
+		t.Fatalf("capabilities = %+v", seen.lastReg.Capabilities)
+	}
+	if seen.lastReg.CapabilityMatrix["commandSurface"] != "mixed" {
+		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
+	}
+}
+
+func TestBridgeRuntimeControl_StartIncludesQQCapabilityMatrixInRegistration(t *testing.T) {
+	upgrader := websocket.Upgrader{}
+	type counts struct {
+		mu         sync.Mutex
+		lastReg    client.BridgeRegistration
+		registered bool
+	}
+	var seen counts
+	ackCh := make(chan client.ControlDeliveryAck, 1)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/im/bridge/register":
+			var req client.BridgeRegistration
+			if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+				t.Fatalf("decode register: %v", err)
+			}
+			seen.mu.Lock()
+			seen.lastReg = req
+			seen.registered = true
+			seen.mu.Unlock()
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusCreated)
+			_ = json.NewEncoder(w).Encode(client.BridgeInstance{BridgeID: req.BridgeID, Status: "online"})
+		case "/api/v1/im/bridge/heartbeat":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(client.BridgeHeartbeat{BridgeID: "bridge-qq-1", Status: "online"})
+		case "/api/v1/im/bridge/unregister":
+			w.WriteHeader(http.StatusOK)
+		case "/ws/im-bridge":
+			conn, err := upgrader.Upgrade(w, r, nil)
+			if err != nil {
+				t.Fatalf("Upgrade error: %v", err)
+			}
+			defer conn.Close()
+			delivery := client.ControlDelivery{
+				Cursor:         1,
+				DeliveryID:     "delivery-1",
+				TargetBridgeID: "bridge-qq-1",
+				Platform:       "qq",
+				Kind:           "task.progress",
+				Content:        "hello",
+				TargetChatID:   "chat-1",
+				Timestamp:      "2026-03-28T00:00:00Z",
+			}
+			if err := conn.WriteJSON(delivery); err != nil {
+				t.Fatalf("WriteJSON error: %v", err)
+			}
+			var ack client.ControlDeliveryAck
+			if err := conn.ReadJSON(&ack); err == nil {
+				ackCh <- ack
+			}
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	platform := &runtimeTestPlatform{}
+	apiClient := client.NewAgentForgeClient(server.URL, "proj-1", "secret").WithSource("qq")
+	provider := &activeProvider{
+		Descriptor: providerDescriptor{
+			ID:       "qq",
+			Metadata: core.NormalizeMetadata(core.PlatformMetadata{Source: "qq"}, "qq"),
+		},
+		Platform:      platform,
+		TransportMode: "live",
+	}
+	control := newBridgeRuntimeControl(&config{
+		APIBase:               server.URL,
+		ProjectID:             "proj-1",
+		TransportMode:         "live",
+		HeartbeatInterval:     10 * time.Millisecond,
+		ControlReconnectDelay: 10 * time.Millisecond,
+	}, "bridge-qq-1", provider, apiClient)
+
+	if err := control.Start(context.Background()); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	select {
+	case <-ackCh:
+	case <-time.After(2 * time.Second):
+		t.Fatal("timed out waiting for ack")
+	}
+	if err := control.Stop(context.Background()); err != nil {
+		t.Fatalf("Stop error: %v", err)
+	}
+
+	seen.mu.Lock()
+	defer seen.mu.Unlock()
+	if !seen.registered {
+		t.Fatal("expected registration to occur")
+	}
+	if seen.lastReg.CapabilityMatrix["commandSurface"] != "mixed" {
+		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
+	}
+	if seen.lastReg.CapabilityMatrix["actionCallbackMode"] != "none" {
+		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
+	}
+	if scopes, ok := seen.lastReg.CapabilityMatrix["messageScopes"].([]interface{}); !ok || len(scopes) == 0 || scopes[0] != "chat" {
+		t.Fatalf("capability matrix scopes = %+v", seen.lastReg.CapabilityMatrix["messageScopes"])
 	}
 }
 
@@ -620,4 +837,28 @@ func (p *wecomRuntimeTestPlatform) Metadata() core.PlatformMetadata {
 
 func (p *wecomRuntimeTestPlatform) CallbackPaths() []string {
 	return []string{"/wecom/callback"}
+}
+
+type qqbotRuntimeTestPlatform struct {
+	runtimeTestPlatform
+}
+
+func (p *qqbotRuntimeTestPlatform) Name() string { return "qqbot-live" }
+
+func (p *qqbotRuntimeTestPlatform) Metadata() core.PlatformMetadata {
+	return core.PlatformMetadata{
+		Source: "qqbot",
+		Capabilities: core.PlatformCapabilities{
+			ActionCallbackMode:     core.ActionCallbackWebhook,
+			AsyncUpdateModes:       []core.AsyncUpdateMode{core.AsyncUpdateReply},
+			MessageScopes:          []core.MessageScope{core.MessageScopeChat},
+			RequiresPublicCallback: true,
+			SupportsMentions:       true,
+			SupportsSlashCommands:  true,
+		},
+	}
+}
+
+func (p *qqbotRuntimeTestPlatform) CallbackPaths() []string {
+	return []string{"/qqbot/callback"}
 }

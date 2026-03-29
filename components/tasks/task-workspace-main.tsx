@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import {
   DragDropContext,
   Draggable,
@@ -8,6 +9,7 @@ import {
   type DropResult,
 } from "@hello-pangea/dnd";
 import { Board } from "@/components/kanban/board";
+import { BulkActionToolbar } from "@/components/tasks/bulk-action-toolbar";
 import { TaskDependencyGraph } from "@/components/tasks/task-dependency-graph";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -43,6 +45,7 @@ import { useCustomFieldStore } from "@/lib/stores/custom-field-store";
 import { useDocsStore, flattenDocsTree } from "@/lib/stores/docs-store";
 import { useEntityLinkStore } from "@/lib/stores/entity-link-store";
 import { FieldValueCell } from "@/components/fields/field-value-cell";
+import { Skeleton } from "@/components/ui/skeleton";
 import { ViewSwitcher } from "@/components/views/view-switcher";
 import { RoadmapView } from "@/components/milestones/roadmap-view";
 import type { Task, TaskPriority, TaskStatus } from "@/lib/stores/task-store";
@@ -57,6 +60,7 @@ interface ProjectTaskWorkspaceProps {
   loading: boolean;
   error: string | null;
   realtimeConnected: boolean;
+  members?: import("@/lib/dashboard/summary").TeamMember[];
   onRetry: () => void;
   onTaskOpen: (taskId: string) => void;
   onTaskStatusChange: (
@@ -67,7 +71,11 @@ interface ProjectTaskWorkspaceProps {
     taskId: string,
     changes: { plannedStartAt: string; plannedEndAt: string }
   ) => Promise<void> | void;
+  onTaskSave?: (taskId: string, data: Partial<Task>) => Promise<void> | void;
   onSprintFilterChange?: (sprintId: string | "all") => void;
+  onBulkStatusChange?: (ids: string[], status: TaskStatus) => void;
+  onBulkAssign?: (ids: string[], assigneeId: string, assigneeType: "human" | "agent") => void;
+  onBulkDelete?: (ids: string[]) => void;
 }
 
 function formatDateKey(value: string | Date): string {
@@ -89,32 +97,32 @@ function addDays(date: Date, days: number): Date {
   return next;
 }
 
-function formatPlanningState(task: Task): string {
+function formatPlanningState(task: Task, unscheduledLabel: string): string {
   if (task.plannedStartAt && task.plannedEndAt) {
     return `${formatDateKey(task.plannedStartAt)} → ${formatDateKey(task.plannedEndAt)}`;
   }
-  return "Unscheduled";
+  return unscheduledLabel;
 }
 
-function formatProgressHealth(task: Task): string | null {
+function formatProgressHealthKey(task: Task): string | null {
   switch (task.progress?.healthStatus) {
     case "stalled":
-      return "Stalled";
+      return "health.stalled";
     case "warning":
-      return "At risk";
+      return "health.atRisk";
     default:
       return null;
   }
 }
 
-function formatProgressReason(task: Task): string | null {
+function formatProgressReasonKey(task: Task): string | null {
   switch (task.progress?.riskReason) {
     case "no_recent_update":
-      return "No recent update";
+      return "risk.noRecentUpdate";
     case "no_assignee":
-      return "No assignee";
+      return "risk.noAssignee";
     case "awaiting_review":
-      return "Awaiting review";
+      return "risk.awaitingReview";
     default:
       return null;
   }
@@ -141,11 +149,11 @@ function priorityOptions(): Array<"all" | TaskPriority> {
   return ["all", "urgent", "high", "medium", "low"];
 }
 
-function dependencyOptions(): Array<{ value: TaskDependencyFilter; label: string }> {
+function dependencyOptions(): Array<{ value: TaskDependencyFilter; labelKey: string }> {
   return [
-    { value: "all", label: "all" },
-    { value: "blocked", label: "blocked" },
-    { value: "ready_to_unblock", label: "ready to unblock" },
+    { value: "all", labelKey: "filter.all" },
+    { value: "blocked", labelKey: "filter.blocked" },
+    { value: "ready_to_unblock", labelKey: "filter.readyToUnblock" },
   ];
 }
 
@@ -166,14 +174,14 @@ function sprintOptions(sprints: Sprint[]): Array<{ value: string; label: string 
   }));
 }
 
-function formatSprintStatus(status: Sprint["status"]): string {
+function formatSprintStatusKey(status: Sprint["status"]): string {
   switch (status) {
     case "active":
-      return "Active";
+      return "sprint.statusActive";
     case "planning":
-      return "Planning";
+      return "sprint.statusPlanning";
     case "closed":
-      return "Closed";
+      return "sprint.statusClosed";
     default:
       return status;
   }
@@ -325,6 +333,8 @@ function SprintOverview({
   sprintMetrics: SprintMetrics | null;
   sprintMetricsLoading: boolean;
 }) {
+  const t = useTranslations("tasks");
+
   if (sprints.length === 0) {
     return null;
   }
@@ -336,39 +346,39 @@ function SprintOverview({
     <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_320px]">
       <Card className="gap-3">
         <CardHeader className="px-4">
-          <CardTitle className="text-base">Sprint overview</CardTitle>
+          <CardTitle className="text-base">{t("sprint.overview")}</CardTitle>
           <CardDescription>
-            Track current cycle scope, burndown progress, and delivery velocity in one place.
+            {t("sprint.overviewDescription")}
           </CardDescription>
         </CardHeader>
         <CardContent className="grid gap-3 px-4">
           <div className="flex flex-wrap items-center gap-2">
             <span className="text-sm font-medium">{activeSprint.name}</span>
-            <Badge variant="secondary">{formatSprintStatus(activeSprint.status)}</Badge>
+            <Badge variant="secondary">{t(formatSprintStatusKey(activeSprint.status))}</Badge>
             <Badge variant="outline">{formatSprintRange(activeSprint)}</Badge>
           </div>
           {sprintMetricsLoading ? (
-            <div className="text-sm text-muted-foreground">Loading sprint metrics...</div>
+            <div className="text-sm text-muted-foreground">{t("sprint.loadingMetrics")}</div>
           ) : sprintMetrics ? (
             <div className="grid gap-3 sm:grid-cols-2 xl:grid-cols-4">
               <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
-                <div className="text-xs text-muted-foreground">Completion</div>
+                <div className="text-xs text-muted-foreground">{t("sprint.completion")}</div>
                 <div className="text-lg font-semibold">
                   {sprintMetrics.completionRate.toFixed(2)}%
                 </div>
               </div>
               <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
-                <div className="text-xs text-muted-foreground">Remaining</div>
+                <div className="text-xs text-muted-foreground">{t("sprint.remaining")}</div>
                 <div className="text-lg font-semibold">{sprintMetrics.remainingTasks}</div>
               </div>
               <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
-                <div className="text-xs text-muted-foreground">Velocity</div>
+                <div className="text-xs text-muted-foreground">{t("sprint.velocity")}</div>
                 <div className="text-lg font-semibold">
                   {sprintMetrics.velocityPerWeek.toFixed(2)}/wk
                 </div>
               </div>
               <div className="rounded-md border border-border/60 bg-muted/20 px-3 py-2">
-                <div className="text-xs text-muted-foreground">Task spend</div>
+                <div className="text-xs text-muted-foreground">{t("sprint.taskSpend")}</div>
                 <div className="text-lg font-semibold">
                   ${sprintMetrics.taskSpentUsd.toFixed(2)}
                 </div>
@@ -376,7 +386,7 @@ function SprintOverview({
             </div>
           ) : (
             <div className="text-sm text-muted-foreground">
-              Select a sprint to load burndown and velocity metrics.
+              {t("sprint.selectSprint")}
             </div>
           )}
         </CardContent>
@@ -384,9 +394,9 @@ function SprintOverview({
 
       <Card className="gap-3">
         <CardHeader className="px-4">
-          <CardTitle className="text-base">Burndown</CardTitle>
+          <CardTitle className="text-base">{t("sprint.burndown")}</CardTitle>
           <CardDescription>
-            Velocity {sprintMetrics ? `${sprintMetrics.velocityPerWeek.toFixed(2)}/wk` : "--"}
+            {t("sprint.velocity")} {sprintMetrics ? `${sprintMetrics.velocityPerWeek.toFixed(2)}/wk` : "--"}
           </CardDescription>
         </CardHeader>
         <CardContent className="px-4">
@@ -442,36 +452,120 @@ function ListView({
   linkedDocsByTask: Record<string, LinkedDocItem[]>;
   onTaskOpen: (taskId: string) => void;
 }) {
+  const t = useTranslations("tasks");
+  const [collapsedParents, setCollapsedParents] = useState<Set<string>>(new Set());
+  const selectedTaskIds = useTaskWorkspaceStore((state) => state.selectedTaskIds);
+  const toggleTaskSelection = useTaskWorkspaceStore((state) => state.toggleTaskSelection);
+
+  // Build hierarchical task list: parents first, children indented underneath
+  const hierarchicalTasks = useMemo(() => {
+    const parentTasks = tasks.filter((t) => !t.parentId);
+    const childrenByParent = new Map<string, Task[]>();
+    for (const task of tasks) {
+      if (task.parentId) {
+        const existing = childrenByParent.get(task.parentId) ?? [];
+        existing.push(task);
+        childrenByParent.set(task.parentId, existing);
+      }
+    }
+    const result: Array<{ task: Task; depth: number; hasChildren: boolean }> = [];
+    for (const parent of parentTasks) {
+      const children = childrenByParent.get(parent.id) ?? [];
+      result.push({ task: parent, depth: 0, hasChildren: children.length > 0 });
+      if (!collapsedParents.has(parent.id)) {
+        for (const child of children) {
+          result.push({ task: child, depth: 1, hasChildren: false });
+        }
+      }
+    }
+    // Also include orphan children (whose parent is not in filtered list)
+    const includedIds = new Set(result.map((r) => r.task.id));
+    for (const task of tasks) {
+      if (!includedIds.has(task.id)) {
+        result.push({ task, depth: 0, hasChildren: false });
+      }
+    }
+    return result;
+  }, [tasks, collapsedParents]);
+
+  const toggleCollapse = (parentId: string) => {
+    setCollapsedParents((prev) => {
+      const next = new Set(prev);
+      if (next.has(parentId)) {
+        next.delete(parentId);
+      } else {
+        next.add(parentId);
+      }
+      return next;
+    });
+  };
+
   return (
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Task</TableHead>
-          <TableHead>Status</TableHead>
-          <TableHead>Progress</TableHead>
-          <TableHead>Priority</TableHead>
-          <TableHead>Assignee</TableHead>
-          <TableHead>Planning</TableHead>
-          {showLinkedDocs ? <TableHead>Linked Docs</TableHead> : null}
+          <TableHead className="w-8">
+            <input
+              type="checkbox"
+              className="size-4 rounded border-border"
+              checked={selectedTaskIds.length > 0 && selectedTaskIds.length === tasks.length}
+              onChange={() => {
+                if (selectedTaskIds.length === tasks.length) {
+                  useTaskWorkspaceStore.getState().clearSelection();
+                } else {
+                  useTaskWorkspaceStore.getState().selectAllVisible(tasks.map((t) => t.id));
+                }
+              }}
+            />
+          </TableHead>
+          <TableHead>{t("list.task")}</TableHead>
+          <TableHead>{t("list.status")}</TableHead>
+          <TableHead>{t("list.progress")}</TableHead>
+          <TableHead>{t("list.priority")}</TableHead>
+          <TableHead>{t("list.assignee")}</TableHead>
+          <TableHead>{t("list.planning")}</TableHead>
+          {showLinkedDocs ? <TableHead>{t("list.linkedDocs")}</TableHead> : null}
           {customFields.map((field) => (
             <TableHead key={field.id}>{field.name}</TableHead>
           ))}
-          <TableHead className="text-right">Action</TableHead>
+          <TableHead className="text-right">{t("list.action")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {tasks.map((task) => (
+        {hierarchicalTasks.map(({ task, depth, hasChildren }) => (
           <TableRow
             key={task.id}
             data-task-id={task.id}
             data-selected={task.id === selectedTaskId ? "true" : "false"}
             className={cn(
-              task.id === selectedTaskId && "bg-accent/40 hover:bg-accent/50"
+              task.id === selectedTaskId && "bg-accent/40 hover:bg-accent/50",
+              selectedTaskIds.includes(task.id) && "bg-blue-500/5"
             )}
           >
             <TableCell>
-              <div className={cn("flex flex-col", density === "compact" ? "gap-0.5" : "gap-1")}>
-                <div className="font-medium">{task.title}</div>
+              <input
+                type="checkbox"
+                className="size-4 rounded border-border"
+                checked={selectedTaskIds.includes(task.id)}
+                onChange={() => toggleTaskSelection(task.id)}
+              />
+            </TableCell>
+            <TableCell>
+              <div className={cn("flex flex-col", density === "compact" ? "gap-0.5" : "gap-1")} style={{ paddingLeft: depth * 24 }}>
+                <div className="flex items-center gap-1.5">
+                  {hasChildren ? (
+                    <button
+                      type="button"
+                      className="text-xs text-muted-foreground hover:text-foreground"
+                      onClick={(e) => { e.stopPropagation(); toggleCollapse(task.id); }}
+                    >
+                      {collapsedParents.has(task.id) ? "▸" : "▾"}
+                    </button>
+                  ) : depth > 0 ? (
+                    <span className="w-3 text-xs text-muted-foreground">└</span>
+                  ) : null}
+                  <span className="font-medium">{task.title}</span>
+                </div>
                 {showDescriptions ? (
                   <div className="text-xs text-muted-foreground">{task.description}</div>
                 ) : null}
@@ -481,21 +575,21 @@ function ListView({
                   if (dependencyState.state === "blocked") {
                     return (
                       <span className="text-xs text-amber-700 dark:text-amber-300">
-                        Blocked by dependency
+                        {t("list.blockedByDependency")}
                       </span>
                     );
                   }
                   if (dependencyState.state === "ready_to_unblock") {
                     return (
                       <span className="text-xs text-emerald-700 dark:text-emerald-300">
-                        Ready to unblock
+                        {t("list.readyToUnblock")}
                       </span>
                     );
                   }
                   if (dependencyState.blockedTasks.length > 0) {
                     return (
                       <span className="text-xs text-muted-foreground">
-                        Blocks {dependencyState.blockedTasks.length} downstream
+                        {t("list.blocksDownstream", { count: dependencyState.blockedTasks.length })}
                       </span>
                     );
                   }
@@ -505,29 +599,29 @@ function ListView({
             </TableCell>
             <TableCell>{task.status}</TableCell>
             <TableCell>
-              {formatProgressHealth(task) ? (
+              {formatProgressHealthKey(task) ? (
                 <div className="flex flex-col gap-1">
                   <Badge
                     variant="secondary"
                     className={getProgressBadgeClass(task)}
                   >
-                    {formatProgressHealth(task)}
+                    {t(formatProgressHealthKey(task)!)}
                   </Badge>
-                  {formatProgressReason(task) ? (
+                  {formatProgressReasonKey(task) ? (
                     <span className="text-xs text-muted-foreground">
-                      {formatProgressReason(task)}
+                      {t(formatProgressReasonKey(task)!)}
                     </span>
                   ) : null}
                 </div>
               ) : (
-                <span className="text-xs text-muted-foreground">Healthy</span>
+                <span className="text-xs text-muted-foreground">{t("list.healthy")}</span>
               )}
             </TableCell>
             <TableCell>
               <Badge variant="secondary">{task.priority}</Badge>
             </TableCell>
-            <TableCell>{task.assigneeName ?? "Unassigned"}</TableCell>
-            <TableCell>{formatPlanningState(task)}</TableCell>
+            <TableCell>{task.assigneeName ?? t("list.unassigned")}</TableCell>
+            <TableCell>{formatPlanningState(task, t("planning.unscheduled"))}</TableCell>
             {showLinkedDocs ? (
               <TableCell>
                 <div className="flex flex-wrap gap-1">
@@ -537,7 +631,7 @@ function ListView({
                     </Badge>
                   ))}
                   {(linkedDocsByTask[task.id] ?? []).length === 0 ? (
-                    <span className="text-xs text-muted-foreground">None</span>
+                    <span className="text-xs text-muted-foreground">{t("list.none")}</span>
                   ) : null}
                 </div>
               </TableCell>
@@ -558,7 +652,7 @@ function ListView({
                 variant="outline"
                 onClick={() => onTaskOpen(task.id)}
               >
-                Open {task.title}
+                {t("list.openTask", { title: task.title })}
               </Button>
             </TableCell>
           </TableRow>
@@ -581,6 +675,7 @@ function PlanningTaskChip({
   density: "comfortable" | "compact";
   onTaskOpen: (taskId: string) => void;
 }) {
+  const t = useTranslations("tasks");
   return (
     <Draggable draggableId={task.id} index={index}>
       {(provided, snapshot) => (
@@ -601,7 +696,7 @@ function PlanningTaskChip({
         >
           <div className="font-medium">{task.title}</div>
           <div className="text-xs text-muted-foreground">
-            {task.assigneeName ?? "Unassigned"}
+            {task.assigneeName ?? t("list.unassigned")}
           </div>
         </button>
       )}
@@ -629,6 +724,7 @@ function PlanningBoard({
     changes: { plannedStartAt: string; plannedEndAt: string }
   ) => Promise<void> | void;
 }) {
+  const t = useTranslations("tasks");
   const [error, setError] = useState<string | null>(null);
 
   const scheduledByDay = useMemo(() => {
@@ -672,7 +768,7 @@ function PlanningBoard({
       setError(
         scheduleError instanceof Error
           ? scheduleError.message
-          : "Failed to update planning window."
+          : t("planning.failedUpdate")
       );
     }
   };
@@ -723,9 +819,9 @@ function PlanningBoard({
 
         <Card>
           <CardHeader>
-            <CardTitle>Unscheduled</CardTitle>
+            <CardTitle>{t("planning.unscheduled")}</CardTitle>
             <CardDescription>
-              Tasks without a planning window stay visible here until scheduled.
+              {t("planning.unscheduledDescription")}
             </CardDescription>
           </CardHeader>
           <CardContent>
@@ -750,7 +846,7 @@ function PlanningBoard({
                   ))}
                   {unscheduledTasks.length === 0 ? (
                     <p className="text-sm text-muted-foreground">
-                      All visible tasks are scheduled.
+                      {t("planning.allScheduled")}
                     </p>
                   ) : null}
                   {provided.placeholder}
@@ -832,8 +928,14 @@ export function TaskWorkspaceMain({
   onTaskOpen,
   onTaskStatusChange,
   onTaskScheduleChange,
+  onTaskSave,
   onSprintFilterChange,
+  members = [],
+  onBulkStatusChange,
+  onBulkAssign,
+  onBulkDelete,
 }: ProjectTaskWorkspaceProps) {
+  const t = useTranslations("tasks");
   const viewMode = useTaskWorkspaceStore((state) => state.viewMode);
   const filters = useTaskWorkspaceStore((state) => state.filters);
   const selectedTaskId = useTaskWorkspaceStore((state) => state.selectedTaskId);
@@ -851,6 +953,9 @@ export function TaskWorkspaceMain({
   const setShowLinkedDocs = useTaskWorkspaceStore((state) => state.setShowLinkedDocs);
   const resetFilters = useTaskWorkspaceStore((state) => state.resetFilters);
   const selectTask = useTaskWorkspaceStore((state) => state.selectTask);
+  const selectedTaskIds = useTaskWorkspaceStore((state) => state.selectedTaskIds);
+  const toggleTaskSelection = useTaskWorkspaceStore((state) => state.toggleTaskSelection);
+  const clearSelection = useTaskWorkspaceStore((state) => state.clearSelection);
   const definitionsByProject = useCustomFieldStore((state) => state.definitionsByProject);
   const valuesByTask = useCustomFieldStore((state) => state.valuesByTask);
   const docsTree = useDocsStore((state) => state.tree);
@@ -903,18 +1008,39 @@ export function TaskWorkspaceMain({
 
   const renderView = (mode: TaskViewMode) => {
     if (loading) {
-      return <EmptyState title="Loading tasks" description="Fetching the project task workspace." />;
+      return (
+        <div className="flex flex-col gap-3">
+          {mode === "board" ? (
+            <div className="flex gap-4">
+              {[1, 2, 3, 4].map((col) => (
+                <div key={col} className="flex w-72 shrink-0 flex-col gap-2 rounded-lg border bg-muted/50 p-3">
+                  <Skeleton className="h-5 w-20" />
+                  <Skeleton className="h-24 w-full rounded-md" />
+                  <Skeleton className="h-24 w-full rounded-md" />
+                  <Skeleton className="h-24 w-full rounded-md" />
+                </div>
+              ))}
+            </div>
+          ) : (
+            <div className="flex flex-col gap-2">
+              {Array.from({ length: 8 }).map((_, i) => (
+                <Skeleton key={i} className="h-12 w-full rounded-md" />
+              ))}
+            </div>
+          )}
+        </div>
+      );
     }
 
     if (error) {
       return (
         <Card>
           <CardHeader>
-            <CardTitle>Unable to load tasks</CardTitle>
+            <CardTitle>{t("empty.unableToLoad")}</CardTitle>
             <CardDescription>{error}</CardDescription>
           </CardHeader>
           <CardContent>
-            <Button onClick={onRetry}>Retry</Button>
+            <Button onClick={onRetry}>{t("empty.retry")}</Button>
           </CardContent>
         </Card>
       );
@@ -923,8 +1049,8 @@ export function TaskWorkspaceMain({
     if (tasks.length === 0) {
       return (
         <EmptyState
-          title="No tasks yet"
-          description="Create the first task to start using Board, List, Timeline, and Calendar views."
+          title={t("empty.noTasks")}
+          description={t("empty.noTasksDescription")}
         />
       );
     }
@@ -932,8 +1058,8 @@ export function TaskWorkspaceMain({
     if (filteredTasks.length === 0) {
       return (
         <EmptyState
-          title="No tasks match the current filters"
-          description="Adjust search or filters to bring tasks back into view."
+          title={t("empty.noMatch")}
+          description={t("empty.noMatchDescription")}
         />
       );
     }
@@ -995,11 +1121,16 @@ export function TaskWorkspaceMain({
         return (
           <Board
             tasks={filteredTasks}
+            allTasks={tasks}
             selectedTaskId={selectedTaskId}
+            selectedTaskIds={selectedTaskIds}
             displayOptions={displayOptions}
             linkedDocsByTask={linkedDocsByTask}
             onTaskClick={(task) => handleTaskOpen(task.id)}
             onTaskStatusChange={onTaskStatusChange}
+            onToggleTaskSelection={toggleTaskSelection}
+            onQuickStatusChange={(taskId, status) => void onTaskStatusChange(taskId, status)}
+            onQuickPriorityChange={(taskId, priority) => void onTaskSave?.(taskId, { priority })}
           />
         );
     }
@@ -1010,24 +1141,24 @@ export function TaskWorkspaceMain({
       <CardHeader className="gap-4 px-6">
         <div className="flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between">
           <div>
-            <CardTitle>Task Workspace</CardTitle>
+            <CardTitle>{t("workspace.title")}</CardTitle>
             <CardDescription>
-              One project-scoped workspace for Board, List, Timeline, and Calendar views.
+              {t("workspace.description")}
             </CardDescription>
           </div>
           <div className="flex flex-wrap items-center gap-3">
             <ViewSwitcher projectId={projectId} />
             <Badge variant={realtimeConnected ? "secondary" : "outline"}>
-              {realtimeConnected ? "Realtime live" : "Live alerts paused"}
+              {realtimeConnected ? t("workspace.realtimeLive") : t("workspace.liveAlertsPaused")}
             </Badge>
             <Tabs value={viewMode} onValueChange={(value) => setViewMode(value as TaskViewMode)}>
               <TabsList>
-                <TabsTrigger value="board">Board</TabsTrigger>
-                <TabsTrigger value="list">List</TabsTrigger>
-                <TabsTrigger value="timeline">Timeline</TabsTrigger>
-                <TabsTrigger value="calendar">Calendar</TabsTrigger>
-                <TabsTrigger value="dependencies">Dependencies</TabsTrigger>
-                <TabsTrigger value="roadmap">Roadmap</TabsTrigger>
+                <TabsTrigger value="board">{t("viewMode.board")}</TabsTrigger>
+                <TabsTrigger value="list">{t("viewMode.list")}</TabsTrigger>
+                <TabsTrigger value="timeline">{t("viewMode.timeline")}</TabsTrigger>
+                <TabsTrigger value="calendar">{t("viewMode.calendar")}</TabsTrigger>
+                <TabsTrigger value="dependencies">{t("viewMode.dependencies")}</TabsTrigger>
+                <TabsTrigger value="roadmap">{t("viewMode.roadmap")}</TabsTrigger>
               </TabsList>
             </Tabs>
           </div>
@@ -1041,17 +1172,17 @@ export function TaskWorkspaceMain({
 
         <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-7">
           <label className="flex flex-col gap-2 text-sm font-medium">
-            Search tasks
+            {t("filter.searchTasks")}
             <Input
-              aria-label="Search tasks"
+              aria-label={t("filter.searchTasks")}
               value={filters.search}
               onChange={(event) => setSearch(event.target.value)}
-              placeholder="Search title, description, or assignee"
+              placeholder={t("filter.searchPlaceholder")}
             />
           </label>
 
           <label className="flex flex-col gap-2 text-sm font-medium">
-            Status
+            {t("filter.status")}
             <select
               className="h-10 rounded-md border bg-background px-3 text-sm"
               value={filters.status}
@@ -1066,7 +1197,7 @@ export function TaskWorkspaceMain({
           </label>
 
           <label className="flex flex-col gap-2 text-sm font-medium">
-            Priority
+            {t("filter.priority")}
             <select
               className="h-10 rounded-md border bg-background px-3 text-sm"
               value={filters.priority}
@@ -1081,13 +1212,13 @@ export function TaskWorkspaceMain({
           </label>
 
           <label className="flex flex-col gap-2 text-sm font-medium">
-            Assignee
+            {t("filter.assignee")}
             <select
               className="h-10 rounded-md border bg-background px-3 text-sm"
               value={filters.assigneeId}
               onChange={(event) => setAssigneeId(event.target.value)}
             >
-              <option value="all">all</option>
+              <option value="all">{t("filter.all")}</option>
               {assigneeOptions(tasks).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -1097,9 +1228,9 @@ export function TaskWorkspaceMain({
           </label>
 
           <label className="flex flex-col gap-2 text-sm font-medium">
-            Sprint
+            {t("filter.sprint")}
             <select
-              aria-label="Sprint"
+              aria-label={t("filter.sprint")}
               className="h-10 rounded-md border bg-background px-3 text-sm"
               value={filters.sprintId}
               onChange={(event) => {
@@ -1108,7 +1239,7 @@ export function TaskWorkspaceMain({
                 onSprintFilterChange?.(nextValue);
               }}
             >
-              <option value="all">all</option>
+              <option value="all">{t("filter.all")}</option>
               {sprintOptions(sprints).map((option) => (
                 <option key={option.value} value={option.value}>
                   {option.label}
@@ -1118,7 +1249,7 @@ export function TaskWorkspaceMain({
           </label>
 
           <label className="flex flex-col gap-2 text-sm font-medium">
-            Planning
+            {t("filter.planning")}
             <select
               className="h-10 rounded-md border bg-background px-3 text-sm"
               value={filters.planning}
@@ -1131,16 +1262,16 @@ export function TaskWorkspaceMain({
                 )
               }
             >
-              <option value="all">all</option>
-              <option value="scheduled">scheduled</option>
-              <option value="unscheduled">unscheduled</option>
+              <option value="all">{t("filter.all")}</option>
+              <option value="scheduled">{t("filter.scheduled")}</option>
+              <option value="unscheduled">{t("filter.unscheduled")}</option>
             </select>
           </label>
 
           <label className="flex flex-col gap-2 text-sm font-medium">
-            Dependencies
+            {t("filter.dependencies")}
             <select
-              aria-label="Dependencies"
+              aria-label={t("filter.dependencies")}
               className="h-10 rounded-md border bg-background px-3 text-sm"
               value={filters.dependency}
               onChange={(event) =>
@@ -1149,7 +1280,7 @@ export function TaskWorkspaceMain({
             >
               {dependencyOptions().map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label}
+                  {t(option.labelKey)}
                 </option>
               ))}
             </select>
@@ -1157,20 +1288,20 @@ export function TaskWorkspaceMain({
         </div>
 
         <div className="flex items-center gap-2 text-sm text-muted-foreground">
-          <span>{filteredTasks.length} visible tasks</span>
+          <span>{t("workspace.visibleTasks", { count: filteredTasks.length })}</span>
           <Button
             type="button"
             variant="ghost"
             size="sm"
             onClick={resetFilters}
           >
-            Reset filters
+            {t("workspace.resetFilters")}
           </Button>
         </div>
 
         {activeFilterChips.length > 0 ? (
           <div className="flex flex-wrap items-center gap-2 text-sm">
-            <span className="text-muted-foreground">Active filters</span>
+            <span className="text-muted-foreground">{t("workspace.activeFilters")}</span>
             {activeFilterChips.map((chip) => (
               <Button
                 key={chip.key}
@@ -1197,14 +1328,14 @@ export function TaskWorkspaceMain({
         ) : null}
 
         <div className="flex flex-wrap items-center gap-2 text-sm">
-          <span className="text-muted-foreground">Display</span>
+          <span className="text-muted-foreground">{t("workspace.display")}</span>
           <Button
             type="button"
             size="sm"
             variant={displayOptions.density === "comfortable" ? "secondary" : "outline"}
             onClick={() => setDensity("comfortable")}
           >
-            Comfortable
+            {t("workspace.comfortable")}
           </Button>
           <Button
             type="button"
@@ -1212,7 +1343,7 @@ export function TaskWorkspaceMain({
             variant={displayOptions.density === "compact" ? "secondary" : "outline"}
             onClick={() => setDensity("compact")}
           >
-            Compact
+            {t("workspace.compact")}
           </Button>
           <Button
             type="button"
@@ -1220,7 +1351,7 @@ export function TaskWorkspaceMain({
             variant="outline"
             onClick={() => setShowDescriptions(!displayOptions.showDescriptions)}
           >
-            {displayOptions.showDescriptions ? "Hide descriptions" : "Show descriptions"}
+            {displayOptions.showDescriptions ? t("workspace.hideDescriptions") : t("workspace.showDescriptions")}
           </Button>
           <Button
             type="button"
@@ -1228,10 +1359,28 @@ export function TaskWorkspaceMain({
             variant="outline"
             onClick={() => setShowLinkedDocs(!displayOptions.showLinkedDocs)}
           >
-            {displayOptions.showLinkedDocs ? "Hide linked docs" : "Show linked docs"}
+            {displayOptions.showLinkedDocs ? t("workspace.hideLinkedDocs") : t("workspace.showLinkedDocs")}
           </Button>
         </div>
       </CardHeader>
+
+      {selectedTaskIds.length > 0 ? (
+        <div className="px-6">
+          <BulkActionToolbar
+            selectedCount={selectedTaskIds.length}
+            members={members}
+            onBulkStatusChange={(status) => onBulkStatusChange?.(selectedTaskIds, status)}
+            onBulkAssign={(assigneeId, assigneeType) =>
+              onBulkAssign?.(selectedTaskIds, assigneeId, assigneeType)
+            }
+            onBulkDelete={() => {
+              onBulkDelete?.(selectedTaskIds);
+              clearSelection();
+            }}
+            onClearSelection={clearSelection}
+          />
+        </div>
+      ) : null}
 
       <CardContent className="px-6">
         <Tabs value={viewMode}>

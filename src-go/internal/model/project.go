@@ -16,33 +16,57 @@ type CodingAgentSelection struct {
 	Model    string `json:"model,omitempty"`
 }
 
+type BudgetGovernance struct {
+	MaxTaskBudgetUsd      float64 `json:"maxTaskBudgetUsd"`
+	MaxDailySpendUsd      float64 `json:"maxDailySpendUsd"`
+	AlertThresholdPercent float64 `json:"alertThresholdPercent"`
+	AutoStopOnExceed      bool    `json:"autoStopOnExceed"`
+}
+
+type WebhookConfig struct {
+	URL    string   `json:"url,omitempty"`
+	Secret string   `json:"secret,omitempty"`
+	Events []string `json:"events"`
+	Active bool     `json:"active"`
+}
+
 type ReviewPolicy struct {
-	RequiredLayers        []string `json:"requiredLayers"`
-	RequireManualApproval bool     `json:"requireManualApproval"`
-	MinRiskLevelForBlock string   `json:"minRiskLevelForBlock,omitempty" validate:"omitempty,oneof=critical high medium low"`
+	RequiredLayers          []string `json:"requiredLayers"`
+	RequireManualApproval   bool     `json:"requireManualApproval"`
+	MinRiskLevelForBlock    string   `json:"minRiskLevelForBlock,omitempty" validate:"omitempty,oneof=critical high medium low"`
+	AutoTriggerOnPR         bool     `json:"autoTriggerOnPR"`
+	EnabledPluginDimensions []string `json:"enabledPluginDimensions"`
 }
 
 func DefaultReviewPolicy() ReviewPolicy {
 	return ReviewPolicy{
-		RequiredLayers:        []string{},
-		RequireManualApproval: false,
-		MinRiskLevelForBlock: "",
+		RequiredLayers:          []string{},
+		RequireManualApproval:   false,
+		MinRiskLevelForBlock:    "",
+		AutoTriggerOnPR:         false,
+		EnabledPluginDimensions: []string{},
 	}
 }
 
 type ProjectStoredSettings struct {
-	CodingAgent  CodingAgentSelection `json:"coding_agent,omitempty"`
-	ReviewPolicy ReviewPolicy         `json:"review_policy,omitempty"`
+	CodingAgent      CodingAgentSelection `json:"coding_agent,omitempty"`
+	ReviewPolicy     ReviewPolicy         `json:"review_policy,omitempty"`
+	BudgetGovernance BudgetGovernance     `json:"budget_governance,omitempty"`
+	Webhook          WebhookConfig        `json:"webhook,omitempty"`
 }
 
 type ProjectSettingsDTO struct {
-	CodingAgent  CodingAgentSelection `json:"codingAgent"`
-	ReviewPolicy ReviewPolicy         `json:"reviewPolicy"`
+	CodingAgent      CodingAgentSelection `json:"codingAgent"`
+	ReviewPolicy     ReviewPolicy         `json:"reviewPolicy"`
+	BudgetGovernance BudgetGovernance     `json:"budgetGovernance"`
+	Webhook          WebhookConfig        `json:"webhook"`
 }
 
 type ProjectSettingsPatch struct {
-	CodingAgent  *CodingAgentSelection `json:"codingAgent,omitempty"`
-	ReviewPolicy *ReviewPolicy         `json:"reviewPolicy,omitempty"`
+	CodingAgent      *CodingAgentSelection `json:"codingAgent,omitempty"`
+	ReviewPolicy     *ReviewPolicy         `json:"reviewPolicy,omitempty"`
+	BudgetGovernance *BudgetGovernance     `json:"budgetGovernance,omitempty"`
+	Webhook          *WebhookConfig        `json:"webhook,omitempty"`
 }
 
 type CodingAgentDiagnosticDTO struct {
@@ -99,10 +123,10 @@ type CreateProjectRequest struct {
 }
 
 type UpdateProjectRequest struct {
-	Name          *string             `json:"name"`
-	Description   *string             `json:"description"`
-	RepoURL       *string             `json:"repoUrl"`
-	DefaultBranch *string             `json:"defaultBranch"`
+	Name          *string               `json:"name"`
+	Description   *string               `json:"description"`
+	RepoURL       *string               `json:"repoUrl"`
+	DefaultBranch *string               `json:"defaultBranch"`
 	Settings      *ProjectSettingsPatch `json:"settings"`
 }
 
@@ -127,9 +151,13 @@ func (p *Project) ToDTOWithCatalog(catalog *CodingAgentCatalogDTO) ProjectDTO {
 
 func (p *Project) SettingsDTO() ProjectSettingsDTO {
 	settings := p.StoredSettings()
+	webhook := settings.Webhook
+	webhook.Secret = ""
 	return ProjectSettingsDTO{
-		CodingAgent:  settings.CodingAgent,
-		ReviewPolicy: settings.ReviewPolicy,
+		CodingAgent:      settings.CodingAgent,
+		ReviewPolicy:     settings.ReviewPolicy,
+		BudgetGovernance: settings.BudgetGovernance,
+		Webhook:          webhook,
 	}
 }
 
@@ -140,8 +168,10 @@ func (p *Project) StoredSettings() ProjectStoredSettings {
 func ParseProjectStoredSettings(raw string) ProjectStoredSettings {
 	settingsMap := parseSettingsMap(raw)
 	return ProjectStoredSettings{
-		CodingAgent:  parseCodingAgentSelection(firstSettingsValue(settingsMap, "coding_agent", "codingAgent")),
-		ReviewPolicy: parseReviewPolicy(firstSettingsValue(settingsMap, "review_policy", "reviewPolicy")),
+		CodingAgent:      parseCodingAgentSelection(firstSettingsValue(settingsMap, "coding_agent", "codingAgent")),
+		ReviewPolicy:     parseReviewPolicy(firstSettingsValue(settingsMap, "review_policy", "reviewPolicy")),
+		BudgetGovernance: parseBudgetGovernance(firstSettingsValue(settingsMap, "budget_governance", "budgetGovernance")),
+		Webhook:          parseWebhookConfig(firstSettingsValue(settingsMap, "webhook")),
 	}
 }
 
@@ -159,9 +189,28 @@ func MergeProjectSettings(raw string, next *ProjectSettingsPatch) (string, error
 		if next.ReviewPolicy != nil {
 			delete(current, "reviewPolicy")
 			current["review_policy"] = map[string]any{
-				"requiredLayers":        normalizeStringSliceFromStrings(next.ReviewPolicy.RequiredLayers),
-				"requireManualApproval": next.ReviewPolicy.RequireManualApproval,
-				"minRiskLevelForBlock":  strings.TrimSpace(next.ReviewPolicy.MinRiskLevelForBlock),
+				"requiredLayers":          normalizeStringSliceFromStrings(next.ReviewPolicy.RequiredLayers),
+				"requireManualApproval":   next.ReviewPolicy.RequireManualApproval,
+				"minRiskLevelForBlock":    strings.TrimSpace(next.ReviewPolicy.MinRiskLevelForBlock),
+				"autoTriggerOnPR":         next.ReviewPolicy.AutoTriggerOnPR,
+				"enabledPluginDimensions": normalizeStringSliceFromStrings(next.ReviewPolicy.EnabledPluginDimensions),
+			}
+		}
+		if next.BudgetGovernance != nil {
+			delete(current, "budgetGovernance")
+			current["budget_governance"] = map[string]any{
+				"maxTaskBudgetUsd":      next.BudgetGovernance.MaxTaskBudgetUsd,
+				"maxDailySpendUsd":      next.BudgetGovernance.MaxDailySpendUsd,
+				"alertThresholdPercent": next.BudgetGovernance.AlertThresholdPercent,
+				"autoStopOnExceed":      next.BudgetGovernance.AutoStopOnExceed,
+			}
+		}
+		if next.Webhook != nil {
+			current["webhook"] = map[string]any{
+				"url":    strings.TrimSpace(next.Webhook.URL),
+				"secret": next.Webhook.Secret,
+				"events": normalizeStringSliceFromStrings(next.Webhook.Events),
+				"active": next.Webhook.Active,
 			}
 		}
 	}
@@ -229,7 +278,55 @@ func parseReviewPolicy(raw any) ReviewPolicy {
 	if threshold, ok := record["minRiskLevelForBlock"].(string); ok {
 		policy.MinRiskLevelForBlock = strings.TrimSpace(threshold)
 	}
+	policy.AutoTriggerOnPR = parseBool(record["autoTriggerOnPR"])
+	policy.EnabledPluginDimensions = normalizeStringSlice(anySlice(record["enabledPluginDimensions"]))
 	return policy
+}
+
+func parseBudgetGovernance(raw any) BudgetGovernance {
+	record, ok := raw.(map[string]any)
+	if !ok {
+		return BudgetGovernance{}
+	}
+	return BudgetGovernance{
+		MaxTaskBudgetUsd:      parseFloat64(record["maxTaskBudgetUsd"]),
+		MaxDailySpendUsd:      parseFloat64(record["maxDailySpendUsd"]),
+		AlertThresholdPercent: parseFloat64(record["alertThresholdPercent"]),
+		AutoStopOnExceed:      parseBool(record["autoStopOnExceed"]),
+	}
+}
+
+func parseWebhookConfig(raw any) WebhookConfig {
+	record, ok := raw.(map[string]any)
+	if !ok {
+		return WebhookConfig{Events: []string{}}
+	}
+	cfg := WebhookConfig{
+		Active: parseBool(record["active"]),
+		Events: normalizeStringSlice(anySlice(record["events"])),
+	}
+	if url, ok := record["url"].(string); ok {
+		cfg.URL = strings.TrimSpace(url)
+	}
+	if secret, ok := record["secret"].(string); ok {
+		cfg.Secret = secret
+	}
+	return cfg
+}
+
+func parseFloat64(raw any) float64 {
+	switch v := raw.(type) {
+	case float64:
+		return v
+	case float32:
+		return float64(v)
+	case int:
+		return float64(v)
+	case int64:
+		return float64(v)
+	default:
+		return 0
+	}
 }
 
 func parseBool(raw any) bool {

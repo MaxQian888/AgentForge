@@ -40,6 +40,39 @@ describe("role injector", () => {
     expect(prompt).toContain("## Knowledge Context\nThis project uses TypeScript strict mode.");
   });
 
+  test("injects loaded skills and summarizes available on-demand skills", () => {
+    const prompt = buildSystemPrompt("Base prompt", {
+      ...roleConfig,
+      loaded_skills: [
+        {
+          path: "skills/react",
+          label: "React",
+          description: "React UI implementation guidance",
+          instructions: "Prefer server-safe React composition.",
+          source: "repo-local",
+          source_root: "skills",
+          origin: "direct",
+        },
+      ],
+      available_skills: [
+        {
+          path: "skills/testing",
+          label: "Testing",
+          description: "Regression-oriented test guidance",
+          source: "repo-local",
+          source_root: "skills",
+          origin: "direct",
+        },
+      ],
+    });
+
+    expect(prompt).toContain("## Loaded Skills");
+    expect(prompt).toContain("### React (skills/react)");
+    expect(prompt).toContain("Prefer server-safe React composition.");
+    expect(prompt).toContain("## Available On-Demand Skills");
+    expect(prompt).toContain("Testing (skills/testing)");
+  });
+
   test("omits knowledge_context section when not set", () => {
     const prompt = buildSystemPrompt("Base prompt", roleConfig);
     expect(prompt).not.toContain("Knowledge Context");

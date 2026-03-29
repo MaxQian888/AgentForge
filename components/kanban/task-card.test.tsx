@@ -53,6 +53,7 @@ describe("TaskCard", () => {
           agentBranch: "",
           agentWorktree: "",
           agentSessionId: "",
+          labels: [],
           blockedBy: [],
           plannedStartAt: null,
           plannedEndAt: null,

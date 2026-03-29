@@ -76,7 +76,38 @@ type RemotePluginEntry struct {
 	Version     string   `json:"version"`
 	Description string   `json:"description"`
 	Author      string   `json:"author"`
+	Kind        string   `json:"kind,omitempty"`
+	Runtime     string   `json:"runtime,omitempty"`
 	Tags        []string `json:"tags"`
+}
+
+type RemoteRegistryFailure struct {
+	Code       model.RemoteRegistryErrorCode
+	Message    string
+	StatusCode int
+	cause      error
+}
+
+func (f *RemoteRegistryFailure) Error() string {
+	if f == nil {
+		return ""
+	}
+	return f.Message
+}
+
+func (f *RemoteRegistryFailure) Unwrap() error {
+	if f == nil {
+		return nil
+	}
+	return f.cause
+}
+
+func RemoteRegistryFailureFromError(err error) (*RemoteRegistryFailure, bool) {
+	var failure *RemoteRegistryFailure
+	if !errors.As(err, &failure) || failure == nil {
+		return nil, false
+	}
+	return failure, true
 }
 
 type PluginPolicy struct {
@@ -111,17 +142,17 @@ type pluginTransactionalStores struct {
 }
 
 type PluginService struct {
-	repo            PluginRegistry
-	instanceStore   PluginInstanceStore
-	eventStore      PluginEventAuditStore
-	broadcaster     PluginEventBroadcaster
-	runtimeClient   ToolPluginRuntimeClient
-	goRuntime       GoPluginRuntime
-	roleStore       PluginRoleStore
-	builtInsDir     string
-	policy          PluginPolicy
-	remoteRegistry  RemoteRegistryClient
-	registryURL     string
+	repo           PluginRegistry
+	instanceStore  PluginInstanceStore
+	eventStore     PluginEventAuditStore
+	broadcaster    PluginEventBroadcaster
+	runtimeClient  ToolPluginRuntimeClient
+	goRuntime      GoPluginRuntime
+	roleStore      PluginRoleStore
+	builtInsDir    string
+	policy         PluginPolicy
+	remoteRegistry RemoteRegistryClient
+	registryURL    string
 }
 
 func NewPluginService(repo PluginRegistry, runtimeClient ToolPluginRuntimeClient, goRuntime GoPluginRuntime, builtInsDir string) *PluginService {
@@ -331,7 +362,11 @@ func (s *PluginService) broadcastOnly(record *model.PluginRecord, eventType mode
 
 func (s *PluginService) DiscoverBuiltIns(ctx context.Context) ([]*model.PluginRecord, error) {
 	records := make([]*model.PluginRecord, 0)
-	err := filepath.WalkDir(s.builtInsDir, func(path string, d fs.DirEntry, err error) error {
+	bundle, err := loadBuiltInBundle(s.builtInsDir)
+	if err != nil {
+		return nil, err
+	}
+	err = filepath.WalkDir(s.builtInsDir, func(path string, d fs.DirEntry, err error) error {
 		if err != nil {
 			return err
 		}
@@ -342,6 +377,13 @@ func (s *PluginService) DiscoverBuiltIns(ctx context.Context) ([]*model.PluginRe
 		manifest, parseErr := pluginparser.ParseFile(path)
 		if parseErr != nil {
 			return parseErr
+		}
+		builtInMeta, include, bundleErr := s.resolveBuiltInMetadata(path, manifest, bundle)
+		if bundleErr != nil {
+			return bundleErr
+		}
+		if !include {
+			return nil
 		}
 		manifest.Source = normalizePluginSource(
 			manifest.Metadata.ID,
@@ -356,7 +398,9 @@ func (s *PluginService) DiscoverBuiltIns(ctx context.Context) ([]*model.PluginRe
 			return err
 		}
 
-		records = append(records, s.hydrateRecord(ctx, buildPluginRecordFromManifest(*manifest)))
+		record := buildPluginRecordFromManifest(*manifest)
+		record.BuiltIn = builtInMeta
+		records = append(records, s.hydrateRecord(ctx, record))
 		return nil
 	})
 	if err != nil {
@@ -454,6 +498,10 @@ func (s *PluginService) SearchCatalog(ctx context.Context, query string) ([]mode
 
 	catalogEntries := make([]model.MarketplacePluginDTO, 0)
 	needle := strings.ToLower(strings.TrimSpace(query))
+	bundle, err := loadBuiltInBundle(s.builtInsDir)
+	if err != nil {
+		return nil, err
+	}
 	err = filepath.WalkDir(s.builtInsDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -466,11 +514,18 @@ func (s *PluginService) SearchCatalog(ctx context.Context, query string) ([]mode
 		if parseErr != nil {
 			return nil
 		}
+		builtInMeta, include, bundleErr := s.resolveBuiltInMetadata(path, manifest, bundle)
+		if bundleErr != nil {
+			return bundleErr
+		}
+		if !include {
+			return nil
+		}
 		manifest.Source = normalizePluginSource(manifest.Metadata.ID, manifest.Source, nil, path)
 		if needle != "" && !catalogMatchesQuery(*manifest, needle) {
 			return nil
 		}
-		catalogEntries = append(catalogEntries, marketplaceFromManifest(*manifest, installedByID[manifest.Metadata.ID]))
+		catalogEntries = append(catalogEntries, marketplaceFromManifest(*manifest, installedByID[manifest.Metadata.ID], builtInMeta))
 		return nil
 	})
 	if err != nil {
@@ -940,6 +995,10 @@ func (s *PluginService) ListMarketplace(ctx context.Context) ([]model.Marketplac
 	}
 
 	catalog := make(map[string]model.MarketplacePluginDTO)
+	bundle, err := loadBuiltInBundle(s.builtInsDir)
+	if err != nil {
+		return nil, err
+	}
 	err = filepath.WalkDir(s.builtInsDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
@@ -951,11 +1010,18 @@ func (s *PluginService) ListMarketplace(ctx context.Context) ([]model.Marketplac
 		if parseErr != nil {
 			return nil
 		}
+		builtInMeta, include, bundleErr := s.resolveBuiltInMetadata(path, manifest, bundle)
+		if bundleErr != nil {
+			return bundleErr
+		}
+		if !include {
+			return nil
+		}
 		manifest.Source = model.PluginSource{
 			Type: model.PluginSourceBuiltin,
 			Path: path,
 		}
-		catalog[manifest.Metadata.ID] = marketplaceFromManifest(*manifest, installedByID[manifest.Metadata.ID])
+		catalog[manifest.Metadata.ID] = marketplaceFromManifest(*manifest, installedByID[manifest.Metadata.ID], builtInMeta)
 		return nil
 	})
 	if err != nil {
@@ -966,7 +1032,7 @@ func (s *PluginService) ListMarketplace(ctx context.Context) ([]model.Marketplac
 		if _, ok := catalog[record.Metadata.ID]; ok {
 			continue
 		}
-		catalog[record.Metadata.ID] = marketplaceFromManifest(record.PluginManifest, record)
+		catalog[record.Metadata.ID] = marketplaceFromManifest(record.PluginManifest, record, s.hydrateRecord(ctx, record).BuiltIn)
 	}
 
 	items := make([]model.MarketplacePluginDTO, 0, len(catalog))
@@ -984,68 +1050,153 @@ func (s *PluginService) SetRemoteRegistry(client RemoteRegistryClient, registryU
 	}
 }
 
+func (s *PluginService) RegistryURL() string {
+	return s.registryURL
+}
+
 // ListRemotePlugins fetches the catalog from the configured remote registry.
-func (s *PluginService) ListRemotePlugins(ctx context.Context) ([]RemotePluginEntry, error) {
-	if s.remoteRegistry == nil {
-		return nil, fmt.Errorf("remote registry client is not configured")
+func (s *PluginService) ListRemotePlugins(ctx context.Context) (*model.RemoteMarketplaceResponse, error) {
+	response := &model.RemoteMarketplaceResponse{
+		Registry: s.registryURL,
+		Entries:  []model.MarketplacePluginDTO{},
 	}
+	if s.remoteRegistry == nil || strings.TrimSpace(s.registryURL) == "" {
+		response.ErrorCode = model.RemoteRegistryUnconfigured
+		response.Error = "Remote plugin registry is not configured."
+		return response, nil
+	}
+
+	installed, err := s.repo.List(ctx, model.PluginFilter{})
+	if err != nil {
+		return nil, err
+	}
+	installedByID := make(map[string]*model.PluginRecord, len(installed))
+	for _, record := range installed {
+		installedByID[record.Metadata.ID] = record
+	}
+
 	entries, err := s.remoteRegistry.FetchCatalog(ctx, s.registryURL)
 	if err != nil {
-		return nil, fmt.Errorf("fetch remote catalog: %w", err)
+		response.ErrorCode = model.RemoteRegistryUnavailable
+		response.Error = "Remote plugin registry is unavailable."
+		return response, nil
 	}
-	return entries, nil
+
+	response.Available = true
+	response.Entries = make([]model.MarketplacePluginDTO, 0, len(entries))
+	for _, entry := range entries {
+		response.Entries = append(response.Entries, marketplaceFromRemoteEntry(entry, s.registryURL, installedByID[entry.PluginID]))
+	}
+	return response, nil
 }
 
 // InstallFromRemote downloads a plugin from the remote registry and installs it locally.
 func (s *PluginService) InstallFromRemote(ctx context.Context, pluginID, version string) error {
-	if s.remoteRegistry == nil {
-		return fmt.Errorf("remote registry client is not configured")
+	if s.remoteRegistry == nil || strings.TrimSpace(s.registryURL) == "" {
+		return &RemoteRegistryFailure{
+			Code:       model.RemoteRegistryUnconfigured,
+			Message:    "Remote plugin registry is not configured.",
+			StatusCode: 503,
+		}
 	}
 
 	reader, err := s.remoteRegistry.Download(ctx, pluginID, version, s.registryURL)
 	if err != nil {
-		return fmt.Errorf("download remote plugin %s@%s: %w", pluginID, version, err)
+		return &RemoteRegistryFailure{
+			Code:       model.RemoteRegistryDownloadFailed,
+			Message:    fmt.Sprintf("Failed to download remote plugin %s@%s.", pluginID, version),
+			StatusCode: 502,
+			cause:      err,
+		}
 	}
 	defer reader.Close()
 
 	// Write to a temporary directory and install from there.
 	tmpDir, err := os.MkdirTemp("", "agentforge-remote-plugin-*")
 	if err != nil {
-		return fmt.Errorf("create temp dir for remote plugin: %w", err)
+		return &RemoteRegistryFailure{
+			Code:       model.RemoteRegistryInvalidArtifact,
+			Message:    "Failed to prepare the downloaded remote plugin artifact.",
+			StatusCode: 400,
+			cause:      err,
+		}
 	}
 	defer os.RemoveAll(tmpDir)
 
 	manifestPath := filepath.Join(tmpDir, "manifest.yaml")
 	outFile, err := os.Create(manifestPath)
 	if err != nil {
-		return fmt.Errorf("create temp manifest file: %w", err)
+		return &RemoteRegistryFailure{
+			Code:       model.RemoteRegistryInvalidArtifact,
+			Message:    "Failed to prepare the downloaded remote plugin artifact.",
+			StatusCode: 400,
+			cause:      err,
+		}
 	}
 
 	if _, err := io.Copy(outFile, reader); err != nil {
 		outFile.Close()
-		return fmt.Errorf("write remote plugin manifest: %w", err)
+		return &RemoteRegistryFailure{
+			Code:       model.RemoteRegistryInvalidArtifact,
+			Message:    "Failed to materialize the downloaded remote plugin manifest.",
+			StatusCode: 400,
+			cause:      err,
+		}
 	}
 	outFile.Close()
 
+	manifest, err := pluginparser.ParseFile(manifestPath)
+	if err != nil {
+		return &RemoteRegistryFailure{
+			Code:       model.RemoteRegistryInvalidArtifact,
+			Message:    "Downloaded remote plugin artifact is not a valid manifest.",
+			StatusCode: 400,
+			cause:      err,
+		}
+	}
+	source := normalizePluginSource(manifest.Metadata.ID, manifest.Source, &model.PluginSource{
+		Type:     model.PluginSourceCatalog,
+		Registry: s.registryURL,
+		Entry:    pluginID,
+		Version:  version,
+	}, manifestPath)
+	record := buildPluginRecordFromManifest(*manifest)
+	record.Source = source
+	if err := validateExternalTrust(record); err != nil {
+		return &RemoteRegistryFailure{
+			Code:       model.RemoteRegistryVerificationFailed,
+			Message:    "Remote plugin artifact failed trust verification or approval checks.",
+			StatusCode: 409,
+			cause:      err,
+		}
+	}
+
 	_, err = s.Install(ctx, PluginInstallRequest{
-		Path: manifestPath,
-		Source: &model.PluginSource{
-			Type:     model.PluginSourceCatalog,
-			Registry: s.registryURL,
-			Entry:    pluginID,
-			Version:  version,
-		},
+		Path:   manifestPath,
+		Source: &source,
 	})
-	return err
+	if err != nil {
+		return &RemoteRegistryFailure{
+			Code:       model.RemoteRegistryInvalidArtifact,
+			Message:    "Downloaded remote plugin artifact failed installation validation.",
+			StatusCode: 400,
+			cause:      err,
+		}
+	}
+	return nil
 }
 
 func (s *PluginService) findCatalogManifest(entryID string) (string, *model.PluginManifest, error) {
+	bundle, err := loadBuiltInBundle(s.builtInsDir)
+	if err != nil {
+		return "", nil, err
+	}
 	var (
 		foundPath     string
 		foundManifest *model.PluginManifest
 	)
 
-	err := filepath.WalkDir(s.builtInsDir, func(path string, d fs.DirEntry, walkErr error) error {
+	err = filepath.WalkDir(s.builtInsDir, func(path string, d fs.DirEntry, walkErr error) error {
 		if walkErr != nil {
 			return walkErr
 		}
@@ -1055,6 +1206,13 @@ func (s *PluginService) findCatalogManifest(entryID string) (string, *model.Plug
 
 		manifest, parseErr := pluginparser.ParseFile(path)
 		if parseErr != nil {
+			return nil
+		}
+		_, include, bundleErr := s.resolveBuiltInMetadata(path, manifest, bundle)
+		if bundleErr != nil {
+			return bundleErr
+		}
+		if !include {
 			return nil
 		}
 		if manifest.Metadata.ID != entryID {
@@ -1107,6 +1265,11 @@ func (s *PluginService) hydrateRecord(ctx context.Context, record *model.PluginR
 	if s.instanceStore != nil {
 		if snapshot, err := s.instanceStore.GetCurrentByPluginID(ctx, record.Metadata.ID); err == nil {
 			cloned.CurrentInstance = snapshot
+		}
+	}
+	if bundle, err := loadBuiltInBundle(s.builtInsDir); err == nil {
+		if metadata, include, metaErr := s.resolveBuiltInMetadata(cloned.Source.Path, &cloned.PluginManifest, bundle); metaErr == nil && include && metadata != nil {
+			cloned.BuiltIn = metadata
 		}
 	}
 	return &cloned
@@ -1742,7 +1905,31 @@ func catalogMatchesQuery(manifest model.PluginManifest, needle string) bool {
 	return false
 }
 
-func marketplaceFromManifest(manifest model.PluginManifest, record *model.PluginRecord) model.MarketplacePluginDTO {
+func (s *PluginService) resolveBuiltInMetadata(manifestPath string, manifest *model.PluginManifest, bundle *builtInBundleIndex) (*model.PluginBuiltInMetadata, bool, error) {
+	relativePath := relativeBundleManifestPath(s.builtInsDir, manifestPath)
+	if !isBuiltInBundleFamily(relativePath) {
+		return nil, true, nil
+	}
+	if bundle == nil {
+		return &model.PluginBuiltInMetadata{Official: true}, true, nil
+	}
+
+	entry, ok := bundle.byManifest[relativePath]
+	if !ok {
+		return nil, false, nil
+	}
+	if manifest != nil {
+		if entry.ID != "" && entry.ID != manifest.Metadata.ID {
+			return nil, false, fmt.Errorf("built-in bundle entry %s points to manifest %s with mismatched id %s", relativePath, entry.ID, manifest.Metadata.ID)
+		}
+		if entry.Kind != "" && entry.Kind != manifest.Kind {
+			return nil, false, fmt.Errorf("built-in bundle entry %s points to manifest %s with mismatched kind %s", relativePath, entry.Kind, manifest.Kind)
+		}
+	}
+	return builtInMetadataFromEntry(entry), true, nil
+}
+
+func marketplaceFromManifest(manifest model.PluginManifest, record *model.PluginRecord, builtIn *model.PluginBuiltInMetadata) model.MarketplacePluginDTO {
 	item := model.MarketplacePluginDTO{
 		ID:          manifest.Metadata.ID,
 		Name:        manifest.Metadata.Name,
@@ -1753,13 +1940,47 @@ func marketplaceFromManifest(manifest model.PluginManifest, record *model.Plugin
 		SourceType:  string(manifest.Source.Type),
 		Runtime:     string(manifest.Spec.Runtime),
 		Release:     manifest.Source.Release,
+		BuiltIn:     builtIn,
 	}
 	if manifest.Source.Trust != nil {
 		item.TrustStatus = manifest.Source.Trust.Status
 		item.ApprovalState = manifest.Source.Trust.ApprovalState
 	}
+	if manifest.Source.Type == model.PluginSourceBuiltin || manifest.Source.Type == model.PluginSourceCatalog || manifest.Source.Type == model.PluginSourceLocal {
+		item.Installable = true
+	}
+	if builtIn != nil {
+		item.Installable = builtIn.Installable
+		if !builtIn.Installable {
+			item.BlockedReason = firstNonEmpty(builtIn.InstallBlockedReason, builtIn.ReadinessMessage, builtIn.AvailabilityMessage)
+		}
+	}
 	if record != nil {
 		item.Installed = true
+	}
+	return item
+}
+
+func marketplaceFromRemoteEntry(entry RemotePluginEntry, registryURL string, record *model.PluginRecord) model.MarketplacePluginDTO {
+	item := model.MarketplacePluginDTO{
+		ID:          entry.PluginID,
+		Name:        entry.Name,
+		Description: entry.Description,
+		Version:     entry.Version,
+		Author:      entry.Author,
+		Kind:        entry.Kind,
+		SourceType:  "registry",
+		Registry:    registryURL,
+		Installable: true,
+		Runtime:     entry.Runtime,
+	}
+	if item.Kind == "" {
+		item.Kind = "remote"
+	}
+	if record != nil {
+		item.Installed = true
+		item.Installable = false
+		item.BlockedReason = "Already installed"
 	}
 	return item
 }

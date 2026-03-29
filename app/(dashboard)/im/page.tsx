@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect } from "react";
+import { useTranslations } from "next-intl";
 import { RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -11,9 +12,11 @@ import { IMMessageHistory } from "@/components/im/im-message-history";
 import { useIMStore } from "@/lib/stores/im-store";
 
 export default function IMBridgePage() {
+  const t = useTranslations("im");
   const fetchChannels = useIMStore((s) => s.fetchChannels);
   const fetchBridgeStatus = useIMStore((s) => s.fetchBridgeStatus);
   const fetchDeliveryHistory = useIMStore((s) => s.fetchDeliveryHistory);
+  const fetchEventTypes = useIMStore((s) => s.fetchEventTypes);
   const loading = useIMStore((s) => s.loading);
   const error = useIMStore((s) => s.error);
   const bridgeStatus = useIMStore((s) => s.bridgeStatus);
@@ -22,19 +25,21 @@ export default function IMBridgePage() {
     void fetchChannels();
     void fetchBridgeStatus();
     void fetchDeliveryHistory();
-  }, [fetchChannels, fetchBridgeStatus, fetchDeliveryHistory]);
+    void fetchEventTypes();
+  }, [fetchChannels, fetchBridgeStatus, fetchDeliveryHistory, fetchEventTypes]);
 
   const handleRefresh = () => {
     void fetchChannels();
     void fetchBridgeStatus();
     void fetchDeliveryHistory();
+    void fetchEventTypes();
   };
 
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">IM Bridge</h1>
+          <h1 className="text-2xl font-bold">{t("title")}</h1>
           <Badge
             variant="secondary"
             className={
@@ -55,7 +60,7 @@ export default function IMBridgePage() {
           disabled={loading}
         >
           <RefreshCw className="mr-1 size-3.5" />
-          Refresh
+          {t("refresh")}
         </Button>
       </div>
 
@@ -67,9 +72,9 @@ export default function IMBridgePage() {
 
       <Tabs defaultValue="channels">
         <TabsList>
-          <TabsTrigger value="channels">Channels</TabsTrigger>
-          <TabsTrigger value="health">Bridge Health</TabsTrigger>
-          <TabsTrigger value="history">Message History</TabsTrigger>
+          <TabsTrigger value="channels">{t("tabChannels")}</TabsTrigger>
+          <TabsTrigger value="health">{t("tabHealth")}</TabsTrigger>
+          <TabsTrigger value="history">{t("tabHistory")}</TabsTrigger>
         </TabsList>
 
         <TabsContent value="channels">

@@ -2,6 +2,7 @@
 
 import { create } from "zustand";
 import { createApiClient } from "@/lib/api-client";
+import type { CodingAgentCatalog } from "./project-store";
 import { useAuthStore } from "./auth-store";
 
 export type AgentStatus =
@@ -14,6 +15,7 @@ export type AgentStatus =
   | "budget_exceeded";
 
 export type MemoryStatus = "none" | "available" | "warming";
+export type DispatchStatus = "started" | "queued" | "blocked" | "skipped";
 
 interface AgentApiShape {
   id: string;
@@ -43,9 +45,11 @@ interface AgentApiShape {
   memoryStatus?: MemoryStatus;
   teamId?: string;
   teamRole?: string;
+  dispatchStatus?: DispatchStatus;
+  guardrailType?: string;
 }
 
-interface AgentPoolQueueEntry {
+export interface AgentPoolQueueEntry {
   entryId: string;
   projectId: string;
   taskId: string;
@@ -56,10 +60,46 @@ interface AgentPoolQueueEntry {
   provider?: string;
   model?: string;
   roleId?: string;
+  priority?: number;
   budgetUsd?: number;
   agentRunId?: string;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface DispatchBudgetState {
+  scope: string;
+  message: string;
+}
+
+export interface DispatchPreflightSummary {
+  admissionLikely: boolean;
+  budgetWarning?: DispatchBudgetState;
+  budgetBlocked?: DispatchBudgetState;
+  poolActive?: number;
+  poolAvailable?: number;
+  poolQueued?: number;
+  dispatchOutcomeHint: DispatchStatus;
+}
+
+export interface DispatchAttemptRecord {
+  id: string;
+  projectId: string;
+  taskId: string;
+  memberId?: string | null;
+  outcome: DispatchStatus;
+  triggerSource: string;
+  reason?: string;
+  guardrailType?: string;
+  guardrailScope?: string;
+  createdAt: string;
+}
+
+export interface DispatchStatsSummary {
+  outcomes: Record<string, number>;
+  blockedReasons: Record<string, number>;
+  queueDepth: number;
+  medianWaitSeconds?: number;
 }
 
 interface AgentDispatchResponse {
@@ -97,6 +137,8 @@ export interface Agent {
   memoryStatus: MemoryStatus;
   teamId?: string;
   teamRole?: string;
+  dispatchStatus?: DispatchStatus;
+  guardrailType?: string;
 }
 
 export interface AgentPoolSummary {
@@ -118,14 +160,66 @@ export interface SpawnAgentOptions {
   maxBudgetUsd?: number;
 }
 
+interface RuntimeCatalogApiShape {
+  default_runtime?: string;
+  runtimes?: Array<{
+    key?: string;
+    label?: string;
+    display_name?: string;
+    default_provider?: string;
+    compatible_providers?: string[];
+    default_model?: string;
+    available?: boolean;
+    diagnostics?: Array<{
+      code?: string;
+      message?: string;
+      blocking?: boolean;
+    }>;
+  }>;
+}
+
+interface BridgeHealthApiShape {
+  status?: string;
+  last_check?: string;
+  pool?: {
+    active?: number;
+    available?: number;
+    warm?: number;
+  };
+}
+
+export interface BridgeHealthSummary {
+  status: string;
+  lastCheck: string;
+  pool: {
+    active: number;
+    available: number;
+    warm: number;
+  };
+}
+
 interface AgentState {
   agents: Agent[];
   agentOutputs: Map<string, string[]>;
   pool: AgentPoolSummary | null;
+  runtimeCatalog: CodingAgentCatalog | null;
+  runtimeCatalogFetchedAt: number;
+  bridgeHealth: BridgeHealthSummary | null;
+  dispatchStats: DispatchStatsSummary | null;
+  dispatchHistoryByTask: Record<string, DispatchAttemptRecord[]>;
   loading: boolean;
   fetchAgents: () => Promise<void>;
   fetchAgent: (id: string) => Promise<Agent | null>;
   fetchPool: () => Promise<void>;
+  fetchRuntimeCatalog: (force?: boolean) => Promise<CodingAgentCatalog | null>;
+  fetchBridgeHealth: () => Promise<BridgeHealthSummary | null>;
+  fetchDispatchPreflight: (
+    projectId: string,
+    taskId: string,
+    memberId: string,
+  ) => Promise<DispatchPreflightSummary | null>;
+  fetchDispatchHistory: (taskId: string) => Promise<DispatchAttemptRecord[]>;
+  fetchDispatchStats: (projectId: string) => Promise<DispatchStatsSummary | null>;
   spawnAgent: (taskId: string, memberId: string, options?: SpawnAgentOptions) => Promise<void>;
   pauseAgent: (id: string) => Promise<void>;
   resumeAgent: (id: string) => Promise<void>;
@@ -166,6 +260,8 @@ function normalizeAgent(agent: AgentApiShape | Agent): Agent {
     memoryStatus: agent.memoryStatus ?? (agent.sessionId ? "available" : "none"),
     teamId: agent.teamId,
     teamRole: agent.teamRole,
+    dispatchStatus: agent.dispatchStatus ?? "started",
+    guardrailType: agent.guardrailType ?? "",
   };
 }
 
@@ -213,10 +309,80 @@ function syncPoolWithAgents(
   };
 }
 
-export const useAgentStore = create<AgentState>()((set) => ({
+function normalizeRuntimeCatalog(raw: RuntimeCatalogApiShape | null | undefined): CodingAgentCatalog | null {
+  if (!raw) {
+    return null;
+  }
+
+  const runtimes = Array.isArray(raw.runtimes)
+    ? raw.runtimes.map((runtime) => ({
+        runtime: typeof runtime?.key === "string" ? runtime.key : "",
+        label:
+          typeof runtime?.label === "string"
+            ? runtime.label
+            : typeof runtime?.display_name === "string"
+              ? runtime.display_name
+              : typeof runtime?.key === "string"
+                ? runtime.key
+                : "",
+        defaultProvider:
+          typeof runtime?.default_provider === "string" ? runtime.default_provider : "",
+        compatibleProviders: Array.isArray(runtime?.compatible_providers)
+          ? runtime.compatible_providers.map((item) => String(item))
+          : [],
+        defaultModel: typeof runtime?.default_model === "string" ? runtime.default_model : "",
+        available: Boolean(runtime?.available),
+        diagnostics: Array.isArray(runtime?.diagnostics)
+          ? runtime.diagnostics.map((diagnostic) => ({
+              code: typeof diagnostic?.code === "string" ? diagnostic.code : "",
+              message: typeof diagnostic?.message === "string" ? diagnostic.message : "",
+              blocking: Boolean(diagnostic?.blocking),
+            }))
+          : [],
+      }))
+    : [];
+
+  const defaultRuntime =
+    typeof raw.default_runtime === "string" ? raw.default_runtime : runtimes[0]?.runtime ?? "";
+  const defaultSelectionRuntime =
+    runtimes.find((runtime) => runtime.runtime === defaultRuntime) ?? runtimes[0];
+
+  return {
+    defaultRuntime,
+    defaultSelection: {
+      runtime: defaultSelectionRuntime?.runtime ?? "",
+      provider: defaultSelectionRuntime?.defaultProvider ?? "",
+      model: defaultSelectionRuntime?.defaultModel ?? "",
+    },
+    runtimes,
+  };
+}
+
+function normalizeBridgeHealth(raw: BridgeHealthApiShape | null | undefined): BridgeHealthSummary | null {
+  if (!raw) {
+    return null;
+  }
+
+  return {
+    status: typeof raw.status === "string" ? raw.status : "degraded",
+    lastCheck: typeof raw.last_check === "string" ? raw.last_check : "",
+    pool: {
+      active: typeof raw.pool?.active === "number" ? raw.pool.active : 0,
+      available: typeof raw.pool?.available === "number" ? raw.pool.available : 0,
+      warm: typeof raw.pool?.warm === "number" ? raw.pool.warm : 0,
+    },
+  };
+}
+
+export const useAgentStore = create<AgentState>()((set, get) => ({
   agents: [],
   agentOutputs: new Map(),
   pool: null,
+  runtimeCatalog: null,
+  runtimeCatalogFetchedAt: 0,
+  bridgeHealth: null,
+  dispatchStats: null,
+  dispatchHistoryByTask: {},
   loading: false,
 
   fetchAgents: async () => {
@@ -254,6 +420,73 @@ export const useAgentStore = create<AgentState>()((set) => ({
     const api = createApiClient(API_URL);
     const { data } = await api.get<AgentPoolSummary>("/api/v1/agents/pool", { token });
     set({ pool: data });
+  },
+
+  fetchRuntimeCatalog: async (force = false) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+    const { runtimeCatalog, runtimeCatalogFetchedAt } = get();
+    if (!force && runtimeCatalog && Date.now() - runtimeCatalogFetchedAt < 60_000) {
+      return runtimeCatalog;
+    }
+    const api = createApiClient(API_URL);
+    const { data } = await api.get<RuntimeCatalogApiShape>("/api/v1/bridge/runtimes", { token });
+    const runtimeCatalogNext = normalizeRuntimeCatalog(data);
+    set({
+      runtimeCatalog: runtimeCatalogNext,
+      runtimeCatalogFetchedAt: Date.now(),
+    });
+    return runtimeCatalogNext;
+  },
+
+  fetchBridgeHealth: async () => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+    const api = createApiClient(API_URL);
+    const { data } = await api.get<BridgeHealthApiShape>("/api/v1/bridge/health", { token });
+    const bridgeHealth = normalizeBridgeHealth(data);
+    set({ bridgeHealth });
+    return bridgeHealth;
+  },
+
+  fetchDispatchPreflight: async (projectId, taskId, memberId) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token || !projectId || !taskId || !memberId) return null;
+    const api = createApiClient(API_URL);
+    const { data } = await api.get<DispatchPreflightSummary>(
+      `/api/v1/projects/${projectId}/dispatch/preflight?taskId=${encodeURIComponent(taskId)}&memberId=${encodeURIComponent(memberId)}`,
+      { token },
+    );
+    return data;
+  },
+
+  fetchDispatchHistory: async (taskId) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token || !taskId) return [];
+    const api = createApiClient(API_URL);
+    const { data } = await api.get<DispatchAttemptRecord[]>(
+      `/api/v1/tasks/${taskId}/dispatch/history`,
+      { token },
+    );
+    set((state) => ({
+      dispatchHistoryByTask: {
+        ...state.dispatchHistoryByTask,
+        [taskId]: data,
+      },
+    }));
+    return data;
+  },
+
+  fetchDispatchStats: async (projectId) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token || !projectId) return null;
+    const api = createApiClient(API_URL);
+    const { data } = await api.get<DispatchStatsSummary>(
+      `/api/v1/projects/${projectId}/dispatch/stats`,
+      { token },
+    );
+    set({ dispatchStats: data });
+    return data;
   },
 
   spawnAgent: async (taskId, memberId, options = {}) => {

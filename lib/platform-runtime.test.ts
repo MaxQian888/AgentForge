@@ -100,6 +100,11 @@ describe("platform-runtime", () => {
   });
 
   it("normalizes structured desktop notification delivery results", async () => {
+    Object.defineProperty(globalThis, "Notification", {
+      configurable: true,
+      value: undefined,
+    });
+
     const invoke = jest
       .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
       .mockResolvedValue({
@@ -129,14 +134,155 @@ describe("platform-runtime", () => {
       status: "delivered",
     });
     expect(invoke).toHaveBeenCalledWith("send_notification", {
-      createdAt: "2026-03-26T08:05:00.000Z",
-      notificationId: "notif-2",
-      type: "review.completed",
-      title: "Review finished",
-      body: "All comments were resolved.",
-      href: "/reviews?id=review-1",
-      deliveryPolicy: "always",
+      request: {
+        createdAt: "2026-03-26T08:05:00.000Z",
+        notificationId: "notif-2",
+        type: "review.completed",
+        title: "Review finished",
+        body: "All comments were resolved.",
+        href: "/reviews?id=review-1",
+        deliveryPolicy: "always",
+      },
     });
+  });
+
+  it("bridges desktop notification clicks into the shell action contract when Notification is available", async () => {
+    class MockNotification {
+      static permission: NotificationPermission = "granted";
+      static lastInstance: MockNotification | null = null;
+      onclick: ((this: Notification, ev: Event) => unknown) | null = null;
+
+      constructor(
+        public readonly title: string,
+        public readonly options?: NotificationOptions,
+      ) {
+        MockNotification.lastInstance = this;
+      }
+    }
+
+    Object.defineProperty(globalThis, "Notification", {
+      configurable: true,
+      value: MockNotification,
+    });
+
+    const invoke = jest
+      .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
+      .mockResolvedValue({
+        actionId: "open_notification_target",
+        status: "completed",
+      });
+    const notifyWeb = jest.fn((title: string, options?: NotificationOptions) => {
+      return new MockNotification(title, options);
+    });
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke,
+      notifyWeb,
+    });
+
+    await expect(
+      runtime.sendNotification({
+        createdAt: "2026-03-28T10:00:00.000Z",
+        notificationId: "notif-click-1",
+        type: "review.completed",
+        title: "Review finished",
+        body: "Open the review backlog.",
+        href: "/reviews?id=review-1",
+        deliveryPolicy: "always",
+      }),
+    ).resolves.toEqual({
+      mode: "desktop",
+      notificationId: "notif-click-1",
+      ok: true,
+      status: "delivered",
+    });
+
+    expect(notifyWeb).toHaveBeenCalledWith("Review finished", {
+      body: "Open the review backlog.",
+      data: {
+        createdAt: "2026-03-28T10:00:00.000Z",
+        href: "/reviews?id=review-1",
+        notificationId: "notif-click-1",
+        type: "review.completed",
+      },
+    });
+    expect(invoke).not.toHaveBeenCalledWith(
+      "send_notification",
+      expect.anything(),
+    );
+
+    MockNotification.lastInstance?.onclick?.call(
+      MockNotification.lastInstance as unknown as Notification,
+      new Event("click"),
+    );
+
+    await expect(Promise.resolve()).resolves.toBeUndefined();
+    expect(invoke).toHaveBeenCalledWith("perform_shell_action", {
+      request: {
+        actionId: "open_notification_target",
+        href: "/reviews?id=review-1",
+        payload: {
+          notificationId: "notif-click-1",
+          notificationType: "review.completed",
+        },
+        source: "notification",
+      },
+    });
+  });
+
+  it("uses the native desktop notification path for focused-window suppression even when Notification exists", async () => {
+    class MockNotification {
+      static permission: NotificationPermission = "granted";
+    }
+
+    Object.defineProperty(globalThis, "Notification", {
+      configurable: true,
+      value: MockNotification,
+    });
+
+    const invoke = jest
+      .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
+      .mockResolvedValue({
+        notificationId: "notif-suppressed-1",
+        status: "suppressed",
+      });
+    const notifyWeb = jest.fn();
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke,
+      notifyWeb,
+    });
+
+    await expect(
+      runtime.sendNotification({
+        createdAt: "2026-03-29T08:00:00.000Z",
+        notificationId: "notif-suppressed-1",
+        type: "review.completed",
+        title: "Review finished",
+        body: "Focused windows should suppress the popup.",
+        href: "/reviews?id=review-1",
+        deliveryPolicy: "suppress_if_focused",
+      }),
+    ).resolves.toEqual({
+      mode: "desktop",
+      notificationId: "notif-suppressed-1",
+      ok: true,
+      status: "suppressed",
+    });
+    expect(invoke).toHaveBeenCalledWith("send_notification", {
+      request: {
+        createdAt: "2026-03-29T08:00:00.000Z",
+        notificationId: "notif-suppressed-1",
+        type: "review.completed",
+        title: "Review finished",
+        body: "Focused windows should suppress the popup.",
+        href: "/reviews?id=review-1",
+        deliveryPolicy: "suppress_if_focused",
+      },
+    });
+    expect(notifyWeb).not.toHaveBeenCalled();
   });
 
   it("syncs notification tray summaries through the tray facade", async () => {
@@ -197,6 +343,241 @@ describe("platform-runtime", () => {
       error: "Global shortcuts require the desktop shell.",
       ok: false,
       reason: "unsupported",
+    });
+  });
+
+  it("wraps desktop shortcut requests under the Tauri command request envelope", async () => {
+    const invoke = jest
+      .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
+      .mockResolvedValue(undefined);
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke,
+    });
+
+    await expect(
+      runtime.registerShortcut({
+        accelerator: "Ctrl+Shift+K",
+        event: "open-command-palette",
+      }),
+    ).resolves.toEqual({
+      mode: "desktop",
+      ok: true,
+    });
+    expect(invoke).toHaveBeenCalledWith("register_shortcut", {
+      request: {
+        accelerator: "Ctrl+Shift+K",
+        event: "open-command-palette",
+      },
+    });
+  });
+
+  it("routes desktop shell actions through the shared desktop command", async () => {
+    const invoke = jest
+      .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
+      .mockResolvedValue({
+        actionId: "focus_main_window",
+        ok: true,
+        status: "completed",
+      });
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke,
+    });
+
+    await expect(
+      (runtime as unknown as {
+        performShellAction: (input: {
+          actionId: string;
+          source: string;
+        }) => Promise<unknown>;
+      }).performShellAction({
+        actionId: "focus_main_window",
+        source: "window",
+      }),
+    ).resolves.toEqual({
+      actionId: "focus_main_window",
+      mode: "desktop",
+      ok: true,
+      status: "completed",
+    });
+    expect(invoke).toHaveBeenCalledWith("perform_shell_action", {
+      request: {
+        actionId: "focus_main_window",
+        source: "window",
+      },
+    });
+  });
+
+  it("normalizes maximize-toggle and close actions through the desktop shell facade", async () => {
+    const invoke = jest
+      .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
+      .mockResolvedValueOnce({
+        actionId: "toggle_maximize_main_window",
+        ok: true,
+        status: "completed",
+      })
+      .mockResolvedValueOnce({
+        actionId: "close_main_window",
+        ok: true,
+        status: "completed",
+      });
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke,
+    });
+
+    await expect(runtime.toggleMaximizeMainWindow()).resolves.toEqual({
+      actionId: "toggle_maximize_main_window",
+      mode: "desktop",
+      ok: true,
+      status: "completed",
+    });
+    await expect(runtime.closeMainWindow()).resolves.toEqual({
+      actionId: "close_main_window",
+      mode: "desktop",
+      ok: true,
+      status: "completed",
+    });
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "perform_shell_action", {
+      request: {
+        actionId: "toggle_maximize_main_window",
+        source: "window",
+      },
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "perform_shell_action", {
+      request: {
+        actionId: "close_main_window",
+        source: "window",
+      },
+    });
+  });
+
+  it("returns a default window chrome snapshot outside desktop mode", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => false,
+    });
+
+    await expect(runtime.getWindowChromeState()).resolves.toEqual({
+      focused: true,
+      maximized: false,
+      minimized: false,
+      visible: true,
+    });
+  });
+
+  it("projects window chrome state updates from desktop events", async () => {
+    let desktopHandler: ((event: { payload: unknown }) => void) | undefined;
+    const listen = jest.fn(async (_event: string, handler: (event: { payload: unknown }) => void) => {
+      desktopHandler = handler;
+      return jest.fn();
+    });
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke: jest.fn().mockResolvedValue({
+        focused: false,
+        maximized: false,
+        minimized: false,
+        visible: true,
+      }),
+      listen,
+    });
+
+    const received: Array<{
+      focused: boolean;
+      maximized: boolean;
+      minimized: boolean;
+      visible: boolean;
+    }> = [];
+    const cleanup = await runtime.subscribeWindowChromeState((state) => {
+      received.push(state);
+    });
+
+    const currentDesktopHandler = desktopHandler;
+    if (currentDesktopHandler) {
+      currentDesktopHandler({
+        payload: {
+          type: "window.state",
+          payload: {
+            focused: true,
+            maximized: true,
+            minimized: false,
+            visible: true,
+          },
+        },
+      });
+    }
+
+    expect(received).toEqual([
+      {
+        focused: true,
+        maximized: true,
+        minimized: false,
+        visible: true,
+      },
+    ]);
+
+    cleanup();
+  });
+
+  it("returns unsupported for shell actions on web", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => false,
+    });
+
+    await expect(
+      (runtime as unknown as {
+        performShellAction: (input: {
+          actionId: string;
+          source: string;
+        }) => Promise<unknown>;
+      }).performShellAction({
+        actionId: "open_plugins",
+        source: "menu",
+      }),
+    ).resolves.toEqual({
+      actionId: "open_plugins",
+      error: "Shell actions require the desktop shell.",
+      ok: false,
+      reason: "unsupported",
+      status: "unsupported",
+    });
+  });
+
+  it("provides convenience helpers for focusing the main window", async () => {
+    const invoke = jest
+      .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
+      .mockResolvedValue({
+        actionId: "focus_main_window",
+        ok: true,
+        status: "completed",
+      });
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke,
+    });
+
+    await expect(
+      (runtime as unknown as { focusMainWindow: () => Promise<unknown> }).focusMainWindow(),
+    ).resolves.toEqual({
+      actionId: "focus_main_window",
+      mode: "desktop",
+      ok: true,
+      status: "completed",
+    });
+    expect(invoke).toHaveBeenCalledWith("perform_shell_action", {
+      request: {
+        actionId: "focus_main_window",
+        source: "window",
+      },
     });
   });
 
@@ -460,6 +841,59 @@ describe("platform-runtime", () => {
           title: "Task stalled: Implement detector",
           status: "failed",
           error: "notification backend unavailable",
+        },
+      },
+    ]);
+
+    cleanup();
+    expect(unlisten).toHaveBeenCalled();
+  });
+
+  it("normalizes shell action desktop events with route context", async () => {
+    const unlisten = jest.fn();
+    const listen = jest
+      .fn<
+        Promise<() => void>,
+        [string, (event: { payload: unknown }) => void]
+      >()
+      .mockImplementation(async (_event, handler) => {
+        handler({
+          payload: {
+            type: "shell.action",
+            source: "notification",
+            actionId: "open_notification_target",
+            status: "triggered",
+            href: "/reviews?id=review-1",
+            timestamp: "2026-03-28T09:10:00.000Z",
+            payload: {
+              notificationId: "notification-7",
+            },
+          },
+        });
+
+        return unlisten;
+      });
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      listen,
+    });
+
+    const received: unknown[] = [];
+    const cleanup = await runtime.subscribeDesktopEvents((event) => {
+      received.push(event);
+    });
+
+    expect(received).toEqual([
+      {
+        type: "shell.action",
+        source: "notification",
+        actionId: "open_notification_target",
+        status: "triggered",
+        href: "/reviews?id=review-1",
+        timestamp: "2026-03-28T09:10:00.000Z",
+        payload: {
+          notificationId: "notification-7",
         },
       },
     ]);

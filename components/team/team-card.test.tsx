@@ -67,4 +67,12 @@ describe("TeamCard", () => {
 
     expect(screen.getByText("Untitled Team")).toBeInTheDocument();
   });
+
+  it("marks every pipeline dot as failed for terminal failure states", () => {
+    render(<TeamCard team={makeTeam({ status: "failed" })} />);
+
+    expect(screen.getByTitle("plan: failed")).toBeInTheDocument();
+    expect(screen.getByTitle("execute: failed")).toBeInTheDocument();
+    expect(screen.getByTitle("review: failed")).toBeInTheDocument();
+  });
 });

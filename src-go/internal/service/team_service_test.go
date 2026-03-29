@@ -37,7 +37,7 @@ func (m *mockTeamRunRepo) GetByTask(_ context.Context, taskID uuid.UUID) (*model
 	return &cloned, nil
 }
 
-func (m *mockTeamRunRepo) ListByProject(_ context.Context, projectID uuid.UUID) ([]*model.AgentTeam, error) {
+func (m *mockTeamRunRepo) ListByProject(_ context.Context, projectID uuid.UUID, _ string) ([]*model.AgentTeam, error) {
 	if m.team == nil || m.team.ProjectID != projectID {
 		return nil, nil
 	}
@@ -91,6 +91,27 @@ func (m *mockTeamRunRepo) SetReviewerRun(_ context.Context, id uuid.UUID, review
 		return service.ErrTeamNotFound
 	}
 	m.team.ReviewerRunID = &reviewerRunID
+	return nil
+}
+
+func (m *mockTeamRunRepo) Delete(_ context.Context, id uuid.UUID) error {
+	if m.team == nil || m.team.ID != id {
+		return service.ErrTeamNotFound
+	}
+	m.team = nil
+	return nil
+}
+
+func (m *mockTeamRunRepo) Update(_ context.Context, id uuid.UUID, req *model.UpdateTeamRequest) error {
+	if m.team == nil || m.team.ID != id {
+		return service.ErrTeamNotFound
+	}
+	if req.Name != nil {
+		m.team.Name = *req.Name
+	}
+	if req.TotalBudgetUsd != nil {
+		m.team.TotalBudgetUsd = *req.TotalBudgetUsd
+	}
 	return nil
 }
 

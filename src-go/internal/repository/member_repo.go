@@ -71,8 +71,19 @@ func (r *MemberRepository) Update(ctx context.Context, id uuid.UUID, req *model.
 	if req.Role != nil {
 		updates["role"] = *req.Role
 	}
+	if req.Status != nil {
+		status := model.NormalizeMemberStatus(*req.Status, req.IsActive != nil && *req.IsActive)
+		updates["status"] = status
+		updates["is_active"] = model.IsMemberStatusActive(status)
+	}
 	if req.Email != nil {
 		updates["email"] = *req.Email
+	}
+	if req.IMPlatform != nil {
+		updates["im_platform"] = *req.IMPlatform
+	}
+	if req.IMUserID != nil {
+		updates["im_user_id"] = *req.IMUserID
 	}
 	if req.AgentConfig != nil {
 		updates["agent_config"] = newJSONText(*req.AgentConfig, "{}")
@@ -80,8 +91,9 @@ func (r *MemberRepository) Update(ctx context.Context, id uuid.UUID, req *model.
 	if req.Skills != nil {
 		updates["skills"] = newStringList(*req.Skills)
 	}
-	if req.IsActive != nil {
+	if req.IsActive != nil && req.Status == nil {
 		updates["is_active"] = *req.IsActive
+		updates["status"] = model.NormalizeMemberStatus("", *req.IsActive)
 	}
 	if len(updates) == 0 {
 		return nil
@@ -93,6 +105,16 @@ func (r *MemberRepository) Update(ctx context.Context, id uuid.UUID, req *model.
 		Updates(updates).
 		Error; err != nil {
 		return fmt.Errorf("update member: %w", err)
+	}
+	return nil
+}
+
+func (r *MemberRepository) Delete(ctx context.Context, id uuid.UUID) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if err := r.db.WithContext(ctx).Delete(&memberRecord{}, "id = ?", id).Error; err != nil {
+		return fmt.Errorf("delete member: %w", err)
 	}
 	return nil
 }

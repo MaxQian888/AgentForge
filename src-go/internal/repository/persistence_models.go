@@ -103,7 +103,10 @@ type memberRecord struct {
 	Name        string     `gorm:"column:name"`
 	Type        string     `gorm:"column:type"`
 	Role        string     `gorm:"column:role"`
+	Status      string     `gorm:"column:status"`
 	Email       string     `gorm:"column:email"`
+	IMPlatform  string     `gorm:"column:im_platform"`
+	IMUserID    string     `gorm:"column:im_user_id"`
 	AvatarURL   string     `gorm:"column:avatar_url"`
 	AgentConfig jsonText   `gorm:"column:agent_config;type:jsonb"`
 	Skills      stringList `gorm:"column:skills;type:text[]"`
@@ -118,6 +121,7 @@ func newMemberRecord(member *model.Member) *memberRecord {
 	if member == nil {
 		return nil
 	}
+	status := model.NormalizeMemberStatus(member.Status, member.IsActive)
 	return &memberRecord{
 		ID:          member.ID,
 		ProjectID:   member.ProjectID,
@@ -125,11 +129,14 @@ func newMemberRecord(member *model.Member) *memberRecord {
 		Name:        member.Name,
 		Type:        member.Type,
 		Role:        member.Role,
+		Status:      status,
 		Email:       member.Email,
+		IMPlatform:  member.IMPlatform,
+		IMUserID:    member.IMUserID,
 		AvatarURL:   member.AvatarURL,
 		AgentConfig: newJSONText(member.AgentConfig, "{}"),
 		Skills:      newStringList(member.Skills),
-		IsActive:    member.IsActive,
+		IsActive:    model.IsMemberStatusActive(status),
 		CreatedAt:   member.CreatedAt,
 		UpdatedAt:   member.UpdatedAt,
 	}
@@ -139,6 +146,7 @@ func (r *memberRecord) toModel() *model.Member {
 	if r == nil {
 		return nil
 	}
+	status := model.NormalizeMemberStatus(r.Status, r.IsActive)
 	return &model.Member{
 		ID:          r.ID,
 		ProjectID:   r.ProjectID,
@@ -146,11 +154,14 @@ func (r *memberRecord) toModel() *model.Member {
 		Name:        r.Name,
 		Type:        r.Type,
 		Role:        r.Role,
+		Status:      status,
 		Email:       r.Email,
+		IMPlatform:  r.IMPlatform,
+		IMUserID:    r.IMUserID,
 		AvatarURL:   r.AvatarURL,
 		AgentConfig: r.AgentConfig.String("{}"),
 		Skills:      r.Skills.Slice(),
-		IsActive:    r.IsActive,
+		IsActive:    model.IsMemberStatusActive(status),
 		CreatedAt:   r.CreatedAt,
 		UpdatedAt:   r.UpdatedAt,
 	}
@@ -576,7 +587,7 @@ func (r *scheduledJobRunRecord) toModel() *model.ScheduledJobRun {
 	if r == nil {
 		return nil
 	}
-	return &model.ScheduledJobRun{
+	run := &model.ScheduledJobRun{
 		RunID:         r.RunID,
 		JobKey:        r.JobKey,
 		TriggerSource: model.ScheduledJobTriggerSource(r.TriggerSource),
@@ -589,6 +600,8 @@ func (r *scheduledJobRunRecord) toModel() *model.ScheduledJobRun {
 		CreatedAt:     r.CreatedAt,
 		UpdatedAt:     r.UpdatedAt,
 	}
+	run.ComputeDuration()
+	return run
 }
 
 type taskRecord struct {
@@ -1069,6 +1082,7 @@ type agentPoolQueueEntryRecord struct {
 	Provider   string    `gorm:"column:provider"`
 	Model      string    `gorm:"column:model"`
 	RoleID     *string   `gorm:"column:role_id"`
+	Priority   int       `gorm:"column:priority"`
 	BudgetUSD  float64   `gorm:"column:budget_usd"`
 	AgentRunID *string   `gorm:"column:agent_run_id"`
 	CreatedAt  time.Time `gorm:"column:created_at"`
@@ -1092,6 +1106,7 @@ func newAgentPoolQueueEntryRecord(entry *model.AgentPoolQueueEntry) *agentPoolQu
 		Provider:   entry.Provider,
 		Model:      entry.Model,
 		RoleID:     cloneStringPointer(optionalStringPointer(entry.RoleID)),
+		Priority:   entry.Priority,
 		BudgetUSD:  entry.BudgetUSD,
 		AgentRunID: cloneStringPointer(entry.AgentRunID),
 		CreatedAt:  entry.CreatedAt,
@@ -1114,6 +1129,7 @@ func (r *agentPoolQueueEntryRecord) toModel() *model.AgentPoolQueueEntry {
 		Provider:   r.Provider,
 		Model:      r.Model,
 		RoleID:     valueOrEmpty(r.RoleID),
+		Priority:   r.Priority,
 		BudgetUSD:  r.BudgetUSD,
 		AgentRunID: cloneStringPointer(r.AgentRunID),
 		CreatedAt:  r.CreatedAt,

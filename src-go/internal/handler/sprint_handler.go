@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
@@ -44,7 +45,7 @@ func NewSprintHandler(repo sprintRepository, taskRepo ...sprintTaskRepository) *
 func (h *SprintHandler) Create(c echo.Context) error {
 	req := new(model.CreateSprintRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -52,11 +53,11 @@ func (h *SprintHandler) Create(c echo.Context) error {
 
 	startDate, err := time.Parse(time.RFC3339, req.StartDate)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid start date format"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidStartDateFormat)
 	}
 	endDate, err := time.Parse(time.RFC3339, req.EndDate)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid end date format"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidEndDateFormat)
 	}
 
 	projectID := appMiddleware.GetProjectID(c)
@@ -70,7 +71,7 @@ func (h *SprintHandler) Create(c echo.Context) error {
 		TotalBudgetUsd: req.TotalBudgetUsd,
 	}
 	if err := h.repo.Create(c.Request().Context(), sprint); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create sprint"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateSprint)
 	}
 	return c.JSON(http.StatusCreated, sprint.ToDTO())
 }
@@ -79,7 +80,7 @@ func (h *SprintHandler) List(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	sprints, err := h.repo.ListByProject(c.Request().Context(), projectID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list sprints"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListSprints)
 	}
 	dtos := make([]model.SprintDTO, 0, len(sprints))
 	for _, s := range sprints {
@@ -91,21 +92,21 @@ func (h *SprintHandler) List(c echo.Context) error {
 func (h *SprintHandler) Metrics(c echo.Context) error {
 	sprintID, err := uuid.Parse(c.Param("sid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid sprint ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidSprintID)
 	}
 	if h.taskRepo == nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "sprint metrics unavailable"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgSprintMetricsUnavailable)
 	}
 
 	projectID := appMiddleware.GetProjectID(c)
 	sprint, err := h.repo.GetByID(c.Request().Context(), sprintID)
 	if err != nil || sprint.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "sprint not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgSprintNotFound)
 	}
 
 	tasks, err := h.taskRepo.ListBySprint(c.Request().Context(), projectID, sprintID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to load sprint metrics"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToLoadSprintMetrics)
 	}
 
 	return c.JSON(http.StatusOK, model.BuildSprintMetricsDTO(sprint, tasks, h.now()))
@@ -114,21 +115,21 @@ func (h *SprintHandler) Metrics(c echo.Context) error {
 func (h *SprintHandler) Burndown(c echo.Context) error {
 	sprintID, err := uuid.Parse(c.Param("sid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid sprint ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidSprintID)
 	}
 
 	sprint, err := h.repo.GetByID(c.Request().Context(), sprintID)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "sprint not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgSprintNotFound)
 	}
 
 	if h.taskRepo == nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "sprint burndown unavailable"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgSprintBurndownUnavailable)
 	}
 
 	tasks, err := h.taskRepo.ListBySprint(c.Request().Context(), sprint.ProjectID, sprintID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to load burndown data"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToLoadBurndownData)
 	}
 
 	metrics := model.BuildSprintMetricsDTO(sprint, tasks, h.now())
@@ -143,18 +144,18 @@ func (h *SprintHandler) WithHub(hub *ws.Hub) *SprintHandler {
 func (h *SprintHandler) Update(c echo.Context) error {
 	sprintID, err := uuid.Parse(c.Param("sid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid sprint ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidSprintID)
 	}
 
 	projectID := appMiddleware.GetProjectID(c)
 	sprint, err := h.repo.GetByID(c.Request().Context(), sprintID)
 	if err != nil || sprint.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "sprint not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgSprintNotFound)
 	}
 
 	req := new(model.UpdateSprintRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 
 	oldStatus := sprint.Status
@@ -173,14 +174,14 @@ func (h *SprintHandler) Update(c echo.Context) error {
 	if req.StartDate != nil {
 		parsed, err := time.Parse(time.RFC3339, *req.StartDate)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid start date format"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidStartDateFormat)
 		}
 		sprint.StartDate = parsed
 	}
 	if req.EndDate != nil {
 		parsed, err := time.Parse(time.RFC3339, *req.EndDate)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid end date format"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidEndDateFormat)
 		}
 		sprint.EndDate = parsed
 	}
@@ -189,7 +190,7 @@ func (h *SprintHandler) Update(c echo.Context) error {
 	}
 
 	if err := h.repo.Update(c.Request().Context(), sprint); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update sprint"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateSprint)
 	}
 
 	dto := sprint.ToDTO()

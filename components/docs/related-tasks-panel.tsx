@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 
@@ -22,17 +23,19 @@ export function RelatedTasksPanel({
   onAddTask?: () => void;
   onRemoveTask?: (linkId: string) => void;
 }) {
+  const t = useTranslations("docs");
+
   return (
     <div className="rounded-xl border border-border/60 bg-card/70 p-4">
       <div className="flex items-center justify-between gap-2">
         <div>
-          <h2 className="text-base font-semibold">Related Tasks</h2>
+          <h2 className="text-base font-semibold">{t("relatedTasks.title")}</h2>
           <p className="text-sm text-muted-foreground">
-            Work items linked back to this document.
+            {t("relatedTasks.desc")}
           </p>
         </div>
         <Button type="button" size="sm" variant="outline" onClick={onAddTask}>
-          Link Task
+          {t("relatedTasks.linkTask")}
         </Button>
       </div>
 
@@ -60,14 +63,14 @@ export function RelatedTasksPanel({
                 aria-label={`Remove ${task.title}`}
                 onClick={() => onRemoveTask?.(task.linkId)}
               >
-                Remove
+                {t("relatedTasks.remove")}
               </Button>
             </div>
           </div>
         ))}
         {tasks.length === 0 ? (
           <div className="rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
-            No tasks linked to this document yet.
+            {t("relatedTasks.empty")}
           </div>
         ) : null}
       </div>

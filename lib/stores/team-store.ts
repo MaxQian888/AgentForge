@@ -42,17 +42,24 @@ export interface StartTeamOptions {
   model?: string;
 }
 
+export interface UpdateTeamInput {
+  name?: string;
+  totalBudgetUsd?: number;
+}
+
 interface TeamState {
   teams: AgentTeam[];
   loading: boolean;
   error: string | null;
   loadingById: Record<string, boolean>;
   errorById: Record<string, string | null>;
-  fetchTeams: (projectId?: string) => Promise<void>;
+  fetchTeams: (projectId?: string, status?: string) => Promise<void>;
   fetchTeam: (id: string) => Promise<AgentTeam | null>;
   startTeam: (taskId: string, memberId: string, options?: StartTeamOptions) => Promise<void>;
   cancelTeam: (id: string) => Promise<void>;
   retryTeam: (id: string) => Promise<void>;
+  deleteTeam: (id: string) => Promise<void>;
+  updateTeam: (id: string, input: UpdateTeamInput) => Promise<AgentTeam | null>;
   upsertTeam: (team: AgentTeam) => void;
 }
 
@@ -140,13 +147,16 @@ export const useTeamStore = create<TeamState>()((set) => ({
   loadingById: {},
   errorById: {},
 
-  fetchTeams: async (projectId) => {
+  fetchTeams: async (projectId, status) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
     set({ loading: true, error: null });
     try {
       const api = createApiClient(API_URL);
-      const query = projectId ? `?projectId=${projectId}` : "";
+      const params = new URLSearchParams();
+      if (projectId) params.set("projectId", projectId);
+      if (status) params.set("status", status);
+      const query = params.toString() ? `?${params.toString()}` : "";
       const { data } = await api.get<Record<string, unknown>[]>(`/api/v1/teams${query}`, { token });
       const teams = data.map(normalizeTeam);
       set({ teams, error: null });
@@ -228,6 +238,24 @@ export const useTeamStore = create<TeamState>()((set) => ({
     const { data } = await api.post<Record<string, unknown>>(`/api/v1/teams/${id}/retry`, {}, { token });
     const team = normalizeTeam(data);
     set((state) => ({ teams: upsertTeams(state.teams, team) }));
+  },
+
+  deleteTeam: async (id) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    const api = createApiClient(API_URL);
+    await api.delete(`/api/v1/teams/${id}`, { token });
+    set((state) => ({ teams: state.teams.filter((t) => t.id !== id) }));
+  },
+
+  updateTeam: async (id, input) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+    const api = createApiClient(API_URL);
+    const { data } = await api.put<Record<string, unknown>>(`/api/v1/teams/${id}`, input, { token });
+    const team = normalizeTeam(data);
+    set((state) => ({ teams: upsertTeams(state.teams, team) }));
+    return team;
   },
 
   upsertTeam: (team) => {

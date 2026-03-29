@@ -1,8 +1,12 @@
+"use client";
+
 import { Suspense } from "react";
+import { useTranslations } from "next-intl";
 import { DashboardPageClient } from "@/components/dashboard/dashboard-page-client";
 
 function DashboardPageFallback() {
-  return <p className="text-sm text-muted-foreground">Loading dashboard...</p>;
+  const t = useTranslations("dashboard");
+  return <p className="text-sm text-muted-foreground">{t("loading")}</p>;
 }
 
 export default function DashboardPage() {

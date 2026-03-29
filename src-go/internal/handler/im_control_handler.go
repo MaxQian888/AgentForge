@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	log "github.com/sirupsen/logrus"
 )
@@ -15,12 +16,14 @@ type imControlPlane interface {
 	RecordHeartbeat(ctx context.Context, bridgeID string) (*model.IMBridgeHeartbeatResponse, error)
 	UnregisterBridge(ctx context.Context, bridgeID string) error
 	BindAction(ctx context.Context, binding *model.IMActionBinding) error
-	AckDelivery(ctx context.Context, bridgeID string, cursor int64, deliveryID string) error
+	AckDelivery(ctx context.Context, bridgeID string, cursor int64, deliveryID string, downgradeReason string) error
 	ListChannels(ctx context.Context) ([]*model.IMChannel, error)
 	UpsertChannel(ctx context.Context, channel *model.IMChannel) (*model.IMChannel, error)
 	DeleteChannel(ctx context.Context, channelID string) error
 	GetBridgeStatus(ctx context.Context) (*model.IMBridgeStatus, error)
 	ListDeliveryHistory(ctx context.Context) ([]*model.IMDelivery, error)
+	ListEventTypes(ctx context.Context) ([]string, error)
+	RetryDelivery(ctx context.Context, deliveryID string) (*model.IMDelivery, error)
 }
 
 type IMControlHandler struct {
@@ -35,7 +38,7 @@ func (h *IMControlHandler) Register(c echo.Context) error {
 	req := new(model.IMBridgeRegisterRequest)
 	if err := c.Bind(req); err != nil {
 		log.WithField("remoteAddr", c.RealIP()).WithError(err).Warn("IM control register rejected: invalid request body")
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	instance, err := h.control.RegisterBridge(c.Request().Context(), req)
 	if err != nil {
@@ -63,7 +66,7 @@ func (h *IMControlHandler) Heartbeat(c echo.Context) error {
 	}{}
 	if err := c.Bind(&req); err != nil {
 		log.WithField("remoteAddr", c.RealIP()).WithError(err).Warn("IM control heartbeat rejected: invalid request body")
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	resp, err := h.control.RecordHeartbeat(c.Request().Context(), req.BridgeID)
 	if err != nil {
@@ -88,7 +91,7 @@ func (h *IMControlHandler) Unregister(c echo.Context) error {
 	}{}
 	if err := c.Bind(&req); err != nil {
 		log.WithField("remoteAddr", c.RealIP()).WithError(err).Warn("IM control unregister rejected: invalid request body")
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := h.control.UnregisterBridge(c.Request().Context(), req.BridgeID); err != nil {
 		log.WithFields(log.Fields{
@@ -108,7 +111,7 @@ func (h *IMControlHandler) BindAction(c echo.Context) error {
 	req := new(model.IMActionBinding)
 	if err := c.Bind(req); err != nil {
 		log.WithField("remoteAddr", c.RealIP()).WithError(err).Warn("IM control bind action rejected: invalid request body")
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := h.control.BindAction(c.Request().Context(), req); err != nil {
 		log.WithFields(log.Fields{
@@ -138,9 +141,9 @@ func (h *IMControlHandler) AckDelivery(c echo.Context) error {
 	req := new(model.IMDeliveryAck)
 	if err := c.Bind(req); err != nil {
 		log.WithField("remoteAddr", c.RealIP()).WithError(err).Warn("IM control delivery ack rejected: invalid request body")
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
-	if err := h.control.AckDelivery(c.Request().Context(), req.BridgeID, req.Cursor, req.DeliveryID); err != nil {
+	if err := h.control.AckDelivery(c.Request().Context(), req.BridgeID, req.Cursor, req.DeliveryID, req.DowngradeReason); err != nil {
 		log.WithFields(log.Fields{
 			"remoteAddr": c.RealIP(),
 			"bridgeId":   req.BridgeID,
@@ -150,10 +153,11 @@ func (h *IMControlHandler) AckDelivery(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
 	}
 	log.WithFields(log.Fields{
-		"remoteAddr": c.RealIP(),
-		"bridgeId":   req.BridgeID,
-		"cursor":     req.Cursor,
-		"deliveryId": req.DeliveryID,
+		"remoteAddr":      c.RealIP(),
+		"bridgeId":        req.BridgeID,
+		"cursor":          req.Cursor,
+		"deliveryId":      req.DeliveryID,
+		"downgradeReason": req.DowngradeReason,
 	}).Debug("IM control delivery acknowledged")
 	return c.JSON(http.StatusOK, map[string]string{"message": "delivery acknowledged"})
 }
@@ -169,7 +173,7 @@ func (h *IMControlHandler) ListChannels(c echo.Context) error {
 func (h *IMControlHandler) SaveChannel(c echo.Context) error {
 	req := new(model.IMChannel)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if id := strings.TrimSpace(c.Param("id")); id != "" {
 		req.ID = id
@@ -206,4 +210,20 @@ func (h *IMControlHandler) ListDeliveries(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
 	}
 	return c.JSON(http.StatusOK, history)
+}
+
+func (h *IMControlHandler) ListEventTypes(c echo.Context) error {
+	eventTypes, err := h.control.ListEventTypes(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, eventTypes)
+}
+
+func (h *IMControlHandler) RetryDelivery(c echo.Context) error {
+	delivery, err := h.control.RetryDelivery(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, delivery)
 }

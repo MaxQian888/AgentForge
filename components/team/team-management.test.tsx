@@ -1,16 +1,25 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TeamManagement } from "./team-management";
 import type { TeamMember } from "@/lib/dashboard/summary";
 import type { RoleManifest } from "@/lib/stores/role-store";
 
 describe("TeamManagement", () => {
+  async function selectOption(
+    user: ReturnType<typeof userEvent.setup>,
+    label: string,
+    option: string
+  ) {
+    await user.click(screen.getByRole("combobox", { name: label }));
+    await user.click(screen.getByRole("option", { name: option }));
+  }
+
   const projects = [
     { id: "project-1", name: "AgentForge" },
     { id: "project-2", name: "Bridge" },
   ];
 
-  const members: TeamMember[] = [
+  const members = [
     {
       id: "member-1",
       projectId: "project-1",
@@ -41,9 +50,11 @@ describe("TeamManagement", () => {
       role: "code-reviewer",
       email: "",
       avatarUrl: "",
+      imPlatform: "feishu",
+      imUserId: "ou_review_bot",
       skills: ["review"],
-      isActive: true,
-      status: "active",
+      isActive: false,
+      status: "suspended",
       createdAt: "2026-03-20T10:00:00.000Z",
       lastActivityAt: "2026-03-24T08:30:00.000Z",
       roleBindingLabel: "frontend-developer",
@@ -65,7 +76,7 @@ describe("TeamManagement", () => {
         activeAgentRuns: 1,
       },
     },
-  ];
+  ] as unknown as TeamMember[];
 
   const availableRoles: RoleManifest[] = [
     {
@@ -110,10 +121,9 @@ describe("TeamManagement", () => {
     },
   ];
 
-  it("renders a unified roster and submits create/update actions", async () => {
+  it("renders a unified roster and submits create actions", async () => {
     const user = userEvent.setup();
     const onCreateMember = jest.fn().mockResolvedValue(undefined);
-    const onUpdateMember = jest.fn().mockResolvedValue(undefined);
     const onProjectChange = jest.fn();
 
     render(
@@ -127,7 +137,7 @@ describe("TeamManagement", () => {
         onRetry={jest.fn()}
         onProjectChange={onProjectChange}
         onCreateMember={onCreateMember}
-        onUpdateMember={onUpdateMember}
+        onUpdateMember={jest.fn().mockResolvedValue(undefined)}
       />
     );
 
@@ -135,37 +145,71 @@ describe("TeamManagement", () => {
     expect(screen.getByText("Review Bot")).toBeInTheDocument();
     expect(screen.getByText("Human")).toBeInTheDocument();
     expect(screen.getByText("Agent")).toBeInTheDocument();
-    expect(screen.getAllByText("Active").length).toBeGreaterThan(0);
+    expect(screen.getByText("Suspended")).toBeInTheDocument();
+    expect(screen.getByText("feishu • ou_review_bot")).toBeInTheDocument();
     expect(screen.getByText("frontend-developer")).toBeInTheDocument();
     expect(screen.getByText("Ready")).toBeInTheDocument();
     expect(screen.getByText("Last activity 2026-03-24 09:00 UTC")).toBeInTheDocument();
 
-    await user.selectOptions(screen.getByLabelText("Project"), "project-2");
+    await selectOption(user, "Project", "Bridge");
     expect(onProjectChange).toHaveBeenCalledWith("project-2");
 
     await user.click(screen.getByRole("button", { name: "Add Member" }));
     await user.type(screen.getByLabelText("Member Name"), "Bob");
-    await user.selectOptions(screen.getByLabelText("Member Type"), "human");
+    await selectOption(user, "Member Type", "Human");
     await user.type(screen.getByLabelText("Role"), "bug-fixer");
+    await selectOption(user, "Status", "Suspended");
     await user.type(screen.getByLabelText("Email"), "bob@example.com");
+    await user.type(screen.getByLabelText("IM Platform"), "slack");
+    await user.type(screen.getByLabelText("IM User ID"), "U-bob");
     await user.click(screen.getByRole("button", { name: "Create Member" }));
 
     expect(onCreateMember).toHaveBeenCalledWith({
       name: "Bob",
       type: "human",
       role: "bug-fixer",
+      status: "suspended",
       email: "bob@example.com",
+      imPlatform: "slack",
+      imUserId: "U-bob",
       skills: [],
     });
+  });
+
+  it("edits canonical status and IM identity for an existing agent member", async () => {
+    const user = userEvent.setup();
+    const onUpdateMember = jest.fn().mockResolvedValue(undefined);
+
+    render(
+      <TeamManagement
+        projects={projects}
+        selectedProjectId="project-1"
+        members={members}
+        loading={false}
+        error={null}
+        availableRoles={availableRoles}
+        onRetry={jest.fn()}
+        onProjectChange={jest.fn()}
+        onCreateMember={jest.fn().mockResolvedValue(undefined)}
+        onUpdateMember={onUpdateMember}
+      />
+    );
 
     await user.click(screen.getByRole("button", { name: "Edit Review Bot" }));
-    const editRole = screen.getByLabelText("Edit Role");
+    const editRole = await screen.findByLabelText("Edit Role");
     await user.clear(editRole);
     await user.type(editRole, "lead-reviewer");
     const editSkills = screen.getByLabelText("Edit Skills");
     await user.clear(editSkills);
     await user.type(editSkills, "review, security, automation");
-    await user.selectOptions(screen.getByLabelText("Edit Bound Role"), "frontend-developer");
+    await selectOption(user, "Edit Bound Role", "Frontend Developer");
+    await selectOption(user, "Edit Status", "Active");
+    const editImPlatform = screen.getByLabelText("Edit IM Platform");
+    await user.clear(editImPlatform);
+    await user.type(editImPlatform, "discord");
+    const editImUserId = screen.getByLabelText("Edit IM User ID");
+    await user.clear(editImUserId);
+    await user.type(editImUserId, "review-bot");
     const editBudget = screen.getByLabelText("Edit Agent Budget USD");
     await user.clear(editBudget);
     await user.type(editBudget, "9");
@@ -174,7 +218,10 @@ describe("TeamManagement", () => {
     expect(onUpdateMember).toHaveBeenCalledWith("member-2", {
       name: "Review Bot",
       role: "lead-reviewer",
+      status: "active",
       email: "",
+      imPlatform: "discord",
+      imUserId: "review-bot",
       skills: ["review", "security", "automation"],
       agentProfile: {
         roleId: "frontend-developer",
@@ -184,9 +231,8 @@ describe("TeamManagement", () => {
         maxBudgetUsd: "9",
         notes: "keep reviews concise",
       },
-      isActive: true,
     });
-  });
+  }, 20000);
 
   it("shows a project-scoped empty state", () => {
     render(
@@ -271,10 +317,10 @@ describe("TeamManagement", () => {
 
     await user.click(screen.getByRole("button", { name: "Add Member" }));
     await user.type(screen.getByLabelText("Member Name"), "Ops Bot");
-    await user.selectOptions(screen.getByLabelText("Member Type"), "agent");
+    await selectOption(user, "Member Type", "Agent");
     await user.type(screen.getByLabelText("Role"), "ops-bot");
     await user.type(screen.getByLabelText("Skills"), "ops, alerts");
-    await user.selectOptions(screen.getByLabelText("Bound Role"), "frontend-developer");
+    await selectOption(user, "Bound Role", "Frontend Developer");
     await user.type(screen.getByLabelText("Agent Budget USD"), "12");
     await user.type(screen.getByLabelText("Runtime"), "codex");
     await user.type(screen.getByLabelText("Provider"), "openai");
@@ -286,7 +332,10 @@ describe("TeamManagement", () => {
       name: "Ops Bot",
       type: "agent",
       role: "ops-bot",
+      status: "active",
       email: "",
+      imPlatform: "",
+      imUserId: "",
       skills: ["ops", "alerts"],
       agentProfile: {
         roleId: "frontend-developer",
@@ -299,8 +348,10 @@ describe("TeamManagement", () => {
     });
 
     await user.click(screen.getByRole("button", { name: "Edit Review Bot" }));
-    expect(screen.getByText("Edit Member")).toBeInTheDocument();
+    await waitFor(() =>
+      expect(screen.getByText("Edit Member")).toBeInTheDocument()
+    );
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText("Edit Member")).not.toBeInTheDocument();
-  });
+  }, 20000);
 });

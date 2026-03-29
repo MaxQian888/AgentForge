@@ -57,6 +57,7 @@ function makeTask(overrides: Partial<Task> & { id: string; title: string }): Tas
     agentBranch: "",
     agentWorktree: "",
     agentSessionId: "",
+    labels: [],
     blockedBy: [],
     plannedStartAt: null,
     plannedEndAt: null,

@@ -67,6 +67,28 @@ const members: TeamMember[] = [
       activeAgentRuns: 0,
     },
   },
+  {
+    id: "member-suspended-specialist",
+    projectId: "project-1",
+    name: "Suspended Sam",
+    type: "human",
+    typeLabel: "Human",
+    role: "Frontend engineer",
+    email: "",
+    avatarUrl: "",
+    skills: ["frontend", "testing", "calendar"],
+    isActive: true,
+    status: "suspended",
+    statusLabel: "Suspended",
+    createdAt: "2026-03-24T09:00:00.000Z",
+    lastActivityAt: null,
+    workload: {
+      assignedTasks: 0,
+      inProgressTasks: 0,
+      inReviewTasks: 0,
+      activeAgentRuns: 0,
+    },
+  },
 ];
 
 const tasks: Task[] = [
@@ -86,6 +108,7 @@ const tasks: Task[] = [
     agentBranch: "",
     agentWorktree: "",
     agentSessionId: "",
+    labels: [],
     blockedBy: [],
     plannedStartAt: null,
     plannedEndAt: null,
@@ -109,6 +132,7 @@ const tasks: Task[] = [
     agentBranch: "",
     agentWorktree: "",
     agentSessionId: "",
+    labels: [],
     blockedBy: [],
     plannedStartAt: null,
     plannedEndAt: null,
@@ -256,6 +280,7 @@ describe("recommendTaskAssignees", () => {
         agentBranch: "",
         agentWorktree: "",
         agentSessionId: "",
+        labels: [],
         blockedBy: [],
         plannedStartAt: null,
         plannedEndAt: null,
@@ -279,6 +304,7 @@ describe("recommendTaskAssignees", () => {
         agentBranch: "",
         agentWorktree: "",
         agentSessionId: "",
+        labels: [],
         blockedBy: [],
         plannedStartAt: null,
         plannedEndAt: null,
@@ -302,6 +328,7 @@ describe("recommendTaskAssignees", () => {
         agentBranch: "",
         agentWorktree: "",
         agentSessionId: "",
+        labels: [],
         blockedBy: [],
         plannedStartAt: null,
         plannedEndAt: null,
@@ -328,6 +355,7 @@ describe("recommendTaskAssignees", () => {
       agentBranch: "",
       agentWorktree: "",
       agentSessionId: "",
+      labels: [],
       blockedBy: [],
       plannedStartAt: null,
       plannedEndAt: null,
@@ -346,5 +374,13 @@ describe("recommendTaskAssignees", () => {
     const bob = recommendations.find((r) => r.member.id === "member-human-backend");
     expect(bob).toBeDefined();
     expect(bob?.reasons.join(" ")).toContain("project familiarity");
+  });
+
+  it("excludes suspended members even when stale compatibility flags still mark them active", () => {
+    const recommendations = recommendTaskAssignees(tasks[0], members, tasks, agents);
+
+    expect(
+      recommendations.find((recommendation) => recommendation.member.id === "member-suspended-specialist")
+    ).toBeUndefined();
   });
 });

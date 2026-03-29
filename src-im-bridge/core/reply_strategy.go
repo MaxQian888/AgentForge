@@ -27,6 +27,14 @@ type ReplyPlan struct {
 	FallbackReason  string
 }
 
+// FallbackDeliveryError reports that a platform-specific richer delivery path
+// already downgraded and delivered a fallback payload.
+type FallbackDeliveryError interface {
+	error
+	FallbackReason() string
+	FallbackDelivered() bool
+}
+
 // ResolveReplyPlan determines the preferred delivery path for a payload based
 // on the platform capability matrix and the preserved reply target.
 func ResolveReplyPlan(metadata PlatformMetadata, target *ReplyTarget, fallbackChatID string) ReplyPlan {
@@ -104,18 +112,39 @@ func DeliverCard(ctx context.Context, platform Platform, metadata PlatformMetada
 		if plan.TargetChatID == "" {
 			return plan, errors.New("delivery missing target chat id")
 		}
-		return plan, sender.SendCard(ctx, plan.TargetChatID, card)
+		if err := sender.SendCard(ctx, plan.TargetChatID, card); err != nil {
+			if fallbackErr, ok := err.(FallbackDeliveryError); ok && fallbackErr.FallbackDelivered() {
+				plan.FallbackReason = fallbackErr.FallbackReason()
+				return plan, nil
+			}
+			return plan, err
+		}
+		return plan, nil
 	}
 
 	replyCtx := restoreReplyContext(platform, target)
 	if replyCtx != nil {
-		return plan, sender.ReplyCard(ctx, replyCtx, card)
+		if err := sender.ReplyCard(ctx, replyCtx, card); err != nil {
+			if fallbackErr, ok := err.(FallbackDeliveryError); ok && fallbackErr.FallbackDelivered() {
+				plan.FallbackReason = fallbackErr.FallbackReason()
+				return plan, nil
+			}
+			return plan, err
+		}
+		return plan, nil
 	}
 	if plan.TargetChatID == "" {
 		return plan, errors.New("delivery missing target chat id")
 	}
 	plan.Method = DeliveryMethodSend
-	return plan, sender.SendCard(ctx, plan.TargetChatID, card)
+	if err := sender.SendCard(ctx, plan.TargetChatID, card); err != nil {
+		if fallbackErr, ok := err.(FallbackDeliveryError); ok && fallbackErr.FallbackDelivered() {
+			plan.FallbackReason = fallbackErr.FallbackReason()
+			return plan, nil
+		}
+		return plan, err
+	}
+	return plan, nil
 }
 
 // DeliverNative routes a provider-native payload through the shared reply

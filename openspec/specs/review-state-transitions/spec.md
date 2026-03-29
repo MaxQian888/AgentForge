@@ -1,7 +1,8 @@
 # review-state-transitions Specification
 
 ## Purpose
-TBD - created by archiving change close-review-pipeline-loop. Update Purpose after archive.
+Define how automated review evidence and later human decisions coexist so pending-human review flows remain auditable and every review surface can react to updated review state without polling.
+
 ## Requirements
 ### Requirement: Human approval transition appends a decision record without modifying review evidence
 The system SHALL provide a dedicated `ApproveReview` operation that records a human approval decision as an appended `ReviewDecision` entry in the review's `executionMetadata.decisions` array. This operation MUST update `status` and `recommendation` to reflect approval, but SHALL NOT overwrite `findings`, `summary`, `costUSD`, or any per-plugin provenance data that was written by the automated bridge result.
@@ -46,13 +47,19 @@ The system SHALL provide a `MarkFalsePositive` operation that appends a `ReviewD
 - **THEN** only the per-finding `dismissed` flag and the decisions array are updated
 
 ### Requirement: All human transition operations emit review events
-The system SHALL emit a typed WebSocket event after each successful human transition (approve, request-changes, false-positive) so that connected frontends and IM bridge instances can update their review state without polling.
+The system SHALL emit a typed WebSocket event after each successful human transition (approve, request-changes, false-positive) so that connected frontends and IM bridge instances can update their review state without polling. The emitted payload MUST contain the updated review DTO needed for the shared review workspace to reconcile backlog and task-level views through one store update path.
 
 #### Scenario: Approve transition emits review.completed event
 - **WHEN** an `ApproveReview` transition succeeds
 - **THEN** the backend emits a `review.completed` WebSocket event containing the updated review identifier and final state
+- **THEN** the payload includes the updated review data required for shared dashboard surfaces to reflect the approval without an immediate refetch
 
 #### Scenario: Request-changes transition emits review.updated event
 - **WHEN** a `RequestChangesReview` transition succeeds
 - **THEN** the backend emits a `review.updated` WebSocket event with the review identifier and new state
+- **THEN** the payload includes the updated decision history and unchanged automated evidence so shared dashboard surfaces can update in place
 
+#### Scenario: False-positive transition updates reusable review surfaces without polling
+- **WHEN** one or more findings are marked as false positives successfully
+- **THEN** the backend emits the corresponding updated review payload
+- **THEN** backlog and task-level review surfaces consuming the shared workspace contract can reflect dismissed findings through the same store update path

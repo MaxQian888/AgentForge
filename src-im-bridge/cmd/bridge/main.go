@@ -90,12 +90,21 @@ type config struct {
 	SlackAppToken           string
 	DingTalkAppKey          string
 	DingTalkAppSecret       string
+	DingTalkCardTemplateID  string
 	WeComCorpID             string
 	WeComAgentID            string
 	WeComAgentSecret        string
 	WeComCallbackToken      string
 	WeComCallbackPort       string
 	WeComCallbackPath       string
+	QQOneBotWSURL           string
+	QQAccessToken           string
+	QQBotAppID              string
+	QQBotAppSecret          string
+	QQBotCallbackPort       string
+	QQBotCallbackPath       string
+	QQBotAPIBase            string
+	QQBotTokenBase          string
 	TelegramBotToken        string
 	TelegramUpdateMode      string
 	TelegramWebhookURL      string
@@ -125,12 +134,21 @@ func loadConfig() *config {
 		SlackAppToken:           os.Getenv("SLACK_APP_TOKEN"),
 		DingTalkAppKey:          os.Getenv("DINGTALK_APP_KEY"),
 		DingTalkAppSecret:       os.Getenv("DINGTALK_APP_SECRET"),
+		DingTalkCardTemplateID:  os.Getenv("DINGTALK_CARD_TEMPLATE_ID"),
 		WeComCorpID:             os.Getenv("WECOM_CORP_ID"),
 		WeComAgentID:            os.Getenv("WECOM_AGENT_ID"),
 		WeComAgentSecret:        os.Getenv("WECOM_AGENT_SECRET"),
 		WeComCallbackToken:      os.Getenv("WECOM_CALLBACK_TOKEN"),
 		WeComCallbackPort:       os.Getenv("WECOM_CALLBACK_PORT"),
 		WeComCallbackPath:       envOrDefault("WECOM_CALLBACK_PATH", "/wecom/callback"),
+		QQOneBotWSURL:           os.Getenv("QQ_ONEBOT_WS_URL"),
+		QQAccessToken:           os.Getenv("QQ_ACCESS_TOKEN"),
+		QQBotAppID:              os.Getenv("QQBOT_APP_ID"),
+		QQBotAppSecret:          os.Getenv("QQBOT_APP_SECRET"),
+		QQBotCallbackPort:       os.Getenv("QQBOT_CALLBACK_PORT"),
+		QQBotCallbackPath:       envOrDefault("QQBOT_CALLBACK_PATH", "/qqbot/callback"),
+		QQBotAPIBase:            envOrDefault("QQBOT_API_BASE", "https://api.sgroup.qq.com"),
+		QQBotTokenBase:          envOrDefault("QQBOT_TOKEN_BASE", "https://bots.qq.com"),
 		TelegramBotToken:        os.Getenv("TELEGRAM_BOT_TOKEN"),
 		TelegramUpdateMode:      envOrDefault("TELEGRAM_UPDATE_MODE", "longpoll"),
 		TelegramWebhookURL:      os.Getenv("TELEGRAM_WEBHOOK_URL"),

@@ -18,17 +18,22 @@
   - `runtime_metadata.abi_version`
   - `runtime_metadata.compatible`
 - 激活、调用、健康检查、降级和重启结果来自真实运行时，而不是乐观状态推断
+- 当前 built-in bundle 也把 Go-hosted WASM built-ins 作为真实资产管理，而不是仅靠文档示例
 
 ## 目录位置
 
 - SDK：`src-go/plugin-sdk-go`
 - 样例插件：`src-go/cmd/sample-wasm-plugin`
+- 工作流样例：`src-go/cmd/standard-dev-flow`
 - 脚手架入口：`scripts/create-plugin.js`
+- built-in bundle：`plugins/builtin-bundle.yaml`
 - 内置示例 manifest：`plugins/integrations/feishu-adapter/manifest.yaml`
+- 内置工作流 manifest：`plugins/workflows/standard-dev-flow/manifest.yaml`
 - 构建脚本：`scripts/build-go-wasm-plugin.js`
 - 调试脚本：`scripts/debug-go-wasm-plugin.js`
 - 最小运行栈脚本：`scripts/run-plugin-dev-stack.js`
 - smoke 验证脚本：`scripts/verify-plugin-dev-workflow.js`
+- built-in bundle 校验脚本：`scripts/verify-built-in-plugin-bundle.js`
 - 校验 fixture：`scripts/__fixtures__/invalid-go-wasm-plugin-manifest.yaml`
 
 ## SDK 契约
@@ -129,6 +134,12 @@ func main() { pluginsdk.Autorun(runtime) }
 - `git` / `npm` / `catalog` source 会在 install 时记录 digest、signature、approval、release metadata
 - 这些外部 source 只有在 digest + signature 或 operator approval 使 trust 状态变为 `verified` 后，才能继续 enable / activate
 
+当前 built-in bundle 语义：
+
+- `plugins/builtin-bundle.yaml` 是官方 built-ins 的权威清单
+- 当前 bundle 至少覆盖 `feishu-adapter` 和 `standard-dev-flow` 两个 Go-hosted WASM 目标
+- bundle 还会同时声明 ToolPlugin / ReviewPlugin / WorkflowPlugin 的最小验证要求，避免“文档里有、仓库里没有”的漂移
+
 ## 本地构建
 
 在仓库根目录执行：
@@ -192,7 +203,7 @@ pnpm plugin:dev
 这个命令只负责最小宿主组合：
 
 - Go Orchestrator：`http://127.0.0.1:7777/health`
-- TS Bridge：`http://127.0.0.1:7778/health`
+- TS Bridge：`http://127.0.0.1:7778/bridge/health`
 
 语义说明：
 
@@ -207,6 +218,7 @@ pnpm plugin:dev
 ```bash
 pnpm test scripts/build-go-wasm-plugin.test.ts scripts/debug-go-wasm-plugin.test.ts scripts/run-plugin-dev-stack.test.ts scripts/verify-plugin-dev-workflow.test.ts --runInBand
 pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
+pnpm plugin:verify:builtins
 cd src-go
 go test ./plugin-sdk-go -count=1
 go test ./internal/plugin -count=1
@@ -220,6 +232,7 @@ go test plugin_service.go plugin_service_test.go
 
 - `scripts/*.test.ts`：manifest 驱动构建、debug envelope、最小开发栈合同、verify stage 计划
 - `plugin:verify`：受维护样例的 `build -> debug health` smoke 路径
+- `plugin:verify:builtins`：校验内置 bundle 清单、manifest 存在性、以及 built-in readiness/verify 元数据
 - `plugin-sdk-go`：typed descriptor/context/result/error helper 和 export helper
 - `internal/plugin`：manifest 校验、WASM runtime 激活/健康检查/调用/重启、ABI mismatch、debug execution path
 - `internal/bridge`：插件运行时状态字段桥接解析
@@ -241,3 +254,4 @@ go test plugin_service.go plugin_service_test.go
 - `WorkflowPlugin` 当前只支持 `process: sequential` 的执行路径；`hierarchical` 和 `event-driven` 仍会返回显式 unsupported error
 - SDK 仍然建立在 JSON envelope + WASI env transport 上；如果后续调用面继续扩大，可以再演进为更正式的 ABI/内存桥接
 - 仓库 `service` 目录还有其他并行工作线尚未收敛，因此更广的 `go test ./...` 仍可能被非本变更问题阻塞
+- `src-go/cmd/sample-wasm-plugin` 仍是受维护的 integration sample；`src-go/cmd/standard-dev-flow` 则是受维护的 workflow sample。两者都已被 built-in bundle 和脚本 target map 纳入当前作者工作流。

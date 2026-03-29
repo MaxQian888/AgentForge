@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -14,9 +15,13 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { Separator } from "@/components/ui/separator";
-import { Bot, Network } from "lucide-react";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { Bot, Network, Trash2 } from "lucide-react";
 import { TaskReviewSection } from "@/components/review/task-review-section";
 import { StartTeamDialog } from "@/components/team/start-team-dialog";
+import { SpawnAgentDialog } from "./spawn-agent-dialog";
+import { DispatchPreflightDialog } from "./dispatch-preflight-dialog";
+import { DispatchHistoryPanel } from "./dispatch-history-panel";
 import { FieldValueCell } from "@/components/fields/field-value-cell";
 import { DocLinkPicker } from "./doc-link-picker";
 import { LinkedDocsPanel, type LinkedDocItem } from "./linked-docs-panel";
@@ -34,8 +39,14 @@ import { useAuthStore } from "@/lib/stores/auth-store";
 import { useCustomFieldStore } from "@/lib/stores/custom-field-store";
 import { useMilestoneStore } from "@/lib/stores/milestone-store";
 import { buildDocsHref } from "@/lib/route-hrefs";
+import { isMemberAvailable } from "@/lib/team/member-status";
 import type { Sprint } from "@/lib/stores/sprint-store";
 import { useTaskCommentStore } from "@/lib/stores/task-comment-store";
+import {
+  useAgentStore,
+  type DispatchPreflightSummary,
+  type DispatchAttemptRecord,
+} from "@/lib/stores/agent-store";
 import type {
   Task,
   TaskDecompositionResult,
@@ -48,6 +59,7 @@ const EMPTY_TASK_COMMENTS: import("@/lib/stores/task-comment-store").TaskComment
 const EMPTY_CUSTOM_FIELDS: import("@/lib/stores/custom-field-store").CustomFieldDefinition[] = [];
 const EMPTY_CUSTOM_FIELD_VALUES: import("@/lib/stores/custom-field-store").CustomFieldValue[] = [];
 const EMPTY_MILESTONES: import("@/lib/stores/milestone-store").Milestone[] = [];
+const EMPTY_DISPATCH_HISTORY: DispatchAttemptRecord[] = [];
 
 const statuses: TaskStatus[] = [
   "inbox",
@@ -72,6 +84,7 @@ interface TaskDraft {
   plannedStartDate: string;
   plannedEndDate: string;
   blockedBy: string[];
+  labels: string;
 }
 
 export interface TaskDetailContentProps {
@@ -95,40 +108,47 @@ export interface TaskDetailContentProps {
   ) => Promise<TaskDecompositionResult | null> | TaskDecompositionResult | null | void;
   onSpawnAgent?: (
     taskId: string,
-    memberId: string
+    memberId: string,
+    options?: {
+      runtime?: string;
+      provider?: string;
+      model?: string;
+      maxBudgetUsd?: number;
+    },
   ) => Promise<void> | void;
+  onTaskDelete?: (taskId: string) => Promise<void> | void;
 }
 
-function formatProgressHealth(task: Task): string | null {
+function formatProgressHealthKey(task: Task): string | null {
   switch (task.progress?.healthStatus) {
     case "stalled":
-      return "Stalled";
+      return "health.stalled";
     case "warning":
-      return "At risk";
+      return "health.atRisk";
     default:
       return null;
   }
 }
 
-function formatProgressReason(task: Task): string | null {
+function formatProgressReasonKey(task: Task): string | null {
   switch (task.progress?.riskReason) {
     case "no_recent_update":
-      return "No recent update";
+      return "risk.noRecentUpdate";
     case "no_assignee":
-      return "No assignee";
+      return "risk.noAssignee";
     case "awaiting_review":
-      return "Awaiting review";
+      return "risk.awaitingReview";
     default:
       return null;
   }
 }
 
-function formatExecutionMode(mode: Task["executionMode"]): string | null {
+function formatExecutionModeKey(mode: Task["executionMode"]): string | null {
   switch (mode) {
     case "agent":
-      return "Agent-ready";
+      return "execution.agentReady";
     case "human":
-      return "Human-led";
+      return "execution.humanLed";
     default:
       return null;
   }
@@ -147,6 +167,7 @@ function getTaskDraft(task: Task): TaskDraft {
     plannedStartDate: toDateInputValue(task.plannedStartAt),
     plannedEndDate: toDateInputValue(task.plannedEndAt),
     blockedBy: [...task.blockedBy],
+    labels: (task.labels ?? []).join(", "),
   };
 }
 
@@ -161,7 +182,9 @@ export function TaskDetailContent({
   onTaskStatusChange,
   onTaskDecompose,
   onSpawnAgent,
+  onTaskDelete,
 }: TaskDetailContentProps) {
+  const t = useTranslations("tasks");
   const docsTree = useDocsStore((state) => state.tree);
   const fetchDocsTree = useDocsStore((state) => state.fetchTree);
   const entityLinks = useEntityLinkStore(
@@ -176,6 +199,12 @@ export function TaskDetailContent({
   const fetchTaskComments = useTaskCommentStore((state) => state.fetchComments);
   const createTaskComment = useTaskCommentStore((state) => state.createComment);
   const setTaskCommentResolved = useTaskCommentStore((state) => state.setResolved);
+  const deleteTaskComment = useTaskCommentStore((state) => state.deleteComment);
+  const fetchDispatchPreflight = useAgentStore((state) => state.fetchDispatchPreflight);
+  const fetchDispatchHistory = useAgentStore((state) => state.fetchDispatchHistory);
+  const dispatchHistory = useAgentStore(
+    (state) => state.dispatchHistoryByTask[task.id] ?? EMPTY_DISPATCH_HISTORY,
+  );
   const initialDraft = getTaskDraft(task);
   const [title, setTitle] = useState(initialDraft.title);
   const [description, setDescription] = useState(initialDraft.description);
@@ -184,13 +213,22 @@ export function TaskDetailContent({
   const [plannedStartDate, setPlannedStartDate] = useState(initialDraft.plannedStartDate);
   const [plannedEndDate, setPlannedEndDate] = useState(initialDraft.plannedEndDate);
   const [blockedBy, setBlockedBy] = useState<string[]>(initialDraft.blockedBy);
+  const [labelsInput, setLabelsInput] = useState(initialDraft.labels);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
   const [planningError, setPlanningError] = useState<string | null>(null);
   const [decompositionSummary, setDecompositionSummary] = useState<string | null>(null);
   const [decompositionError, setDecompositionError] = useState<string | null>(null);
   const [generatedSubtasks, setGeneratedSubtasks] = useState<Task[]>([]);
   const [isDecomposing, setIsDecomposing] = useState(false);
   const [teamDialogOpen, setTeamDialogOpen] = useState(false);
-  const [isSpawningAgent, setIsSpawningAgent] = useState(false);
+  const [spawnDialogOpen, setSpawnDialogOpen] = useState(false);
+  const [preflightDialogOpen, setPreflightDialogOpen] = useState(false);
+  const [preflightSummary, setPreflightSummary] = useState<DispatchPreflightSummary | null>(null);
+  const [pendingAgentAssignment, setPendingAgentAssignment] = useState<{
+    memberId: string;
+    memberName: string;
+    assigneeType: "agent";
+  } | null>(null);
   const [docPickerOpen, setDocPickerOpen] = useState(false);
   const [linkedDocs, setLinkedDocs] = useState<LinkedDocItem[]>([]);
   const recommendations = useMemo(
@@ -202,7 +240,7 @@ export function TaskDetailContent({
     [task, tasks]
   );
   const activeMembers = useMemo(
-    () => members.filter((member) => member.isActive),
+    () => members.filter((member) => isMemberAvailable(member.status, member.isActive)),
     [members]
   );
   const dependencyOptions = useMemo(
@@ -295,6 +333,10 @@ export function TaskDetailContent({
   }, [fetchDocsTree, fetchEntityLinks, fetchTaskComments, task.id, task.projectId]);
 
   useEffect(() => {
+    void fetchDispatchHistory(task.id);
+  }, [fetchDispatchHistory, task.id]);
+
+  useEffect(() => {
     let cancelled = false;
 
     const hydrateLinkedDocs = async () => {
@@ -370,15 +412,21 @@ export function TaskDetailContent({
     });
 
     if (planning.kind === "invalid") {
-      setPlanningError("End date cannot be earlier than start date.");
+      setPlanningError(t("detail.endBeforeStart"));
       return;
     }
 
     setPlanningError(null);
+    const parsedLabels = labelsInput
+      .split(",")
+      .map((l) => l.trim())
+      .filter(Boolean);
+
     await onTaskSave?.(task.id, {
       title,
       description,
       priority,
+      labels: parsedLabels,
       sprintId: sprintId || null,
       milestoneId: milestoneId || null,
       blockedBy,
@@ -400,10 +448,49 @@ export function TaskDetailContent({
       return;
     }
 
+    if (member.type === "agent") {
+      setAssigningMemberId(member.id);
+      try {
+        const summary =
+          (await fetchDispatchPreflight(task.projectId, task.id, member.id)) ?? null;
+        setPreflightSummary(summary);
+        setPendingAgentAssignment({
+          memberId: member.id,
+          memberName: member.name,
+          assigneeType: "agent",
+        });
+        setPreflightDialogOpen(true);
+      } finally {
+        setAssigningMemberId(null);
+      }
+      return;
+    }
+
     setAssigningMemberId(member.id);
     try {
       await onTaskAssign(task.id, member.id, member.type);
       setManualAssigneeId(member.id);
+    } finally {
+      setAssigningMemberId(null);
+    }
+  };
+
+  const handleConfirmPreflight = async () => {
+    if (!pendingAgentAssignment || !onTaskAssign) {
+      return;
+    }
+
+    setAssigningMemberId(pendingAgentAssignment.memberId);
+    try {
+      await onTaskAssign(
+        task.id,
+        pendingAgentAssignment.memberId,
+        pendingAgentAssignment.assigneeType,
+      );
+      setManualAssigneeId(pendingAgentAssignment.memberId);
+      setPreflightDialogOpen(false);
+      setPendingAgentAssignment(null);
+      setPreflightSummary(null);
     } finally {
       setAssigningMemberId(null);
     }
@@ -418,11 +505,11 @@ export function TaskDetailContent({
     setDecompositionError(null);
     try {
       const result = await onTaskDecompose(task.id);
-      setDecompositionSummary(result?.summary ?? "AI decomposition completed.");
+      setDecompositionSummary(result?.summary ?? t("detail.aiDecomposition"));
       setGeneratedSubtasks(result?.subtasks ?? []);
     } catch (error) {
       setDecompositionError(
-        error instanceof Error ? error.message : "Unable to decompose this task."
+        error instanceof Error ? error.message : t("detail.aiDecomposition")
       );
     } finally {
       setIsDecomposing(false);
@@ -438,7 +525,7 @@ export function TaskDetailContent({
   return (
     <div className="flex flex-col gap-4 py-4">
       <div className="flex flex-col gap-2">
-        <Label htmlFor={titleId}>Title</Label>
+        <Label htmlFor={titleId}>{t("detail.titleLabel")}</Label>
         <Input
           id={titleId}
           value={title}
@@ -447,7 +534,7 @@ export function TaskDetailContent({
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor={descriptionId}>Description</Label>
+        <Label htmlFor={descriptionId}>{t("detail.descriptionLabel")}</Label>
         <Input
           id={descriptionId}
           value={description}
@@ -457,14 +544,14 @@ export function TaskDetailContent({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="flex flex-col gap-2">
-          <Label>Status</Label>
+          <Label>{t("detail.statusLabel")}</Label>
           <Select
             value={task.status}
             onValueChange={(value) =>
               void onTaskStatusChange?.(task.id, value as TaskStatus)
             }
           >
-            <SelectTrigger aria-label="Status">
+            <SelectTrigger aria-label={t("detail.statusLabel")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -478,12 +565,12 @@ export function TaskDetailContent({
         </div>
 
         <div className="flex flex-col gap-2">
-          <Label>Priority</Label>
+          <Label>{t("detail.priorityLabel")}</Label>
           <Select
             value={priority}
             onValueChange={(value) => setPriority(value as TaskPriority)}
           >
-            <SelectTrigger aria-label="Priority">
+            <SelectTrigger aria-label={t("detail.priorityLabel")}>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
@@ -498,14 +585,14 @@ export function TaskDetailContent({
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor={`task-detail-sprint-${task.id}`}>Sprint</Label>
+        <Label htmlFor={`task-detail-sprint-${task.id}`}>{t("detail.sprintLabel")}</Label>
         <select
           id={`task-detail-sprint-${task.id}`}
           className="h-10 rounded-md border bg-background px-3 text-sm"
           value={sprintId}
           onChange={(event) => setSprintId(event.target.value)}
         >
-          <option value="">Backlog / no sprint</option>
+          <option value="">{t("detail.backlogNoSprint")}</option>
           {sprints.map((sprint) => (
             <option key={sprint.id} value={sprint.id}>
               {sprint.name}
@@ -515,14 +602,14 @@ export function TaskDetailContent({
       </div>
 
       <div className="flex flex-col gap-2">
-        <Label htmlFor={`task-detail-milestone-${task.id}`}>Milestone</Label>
+        <Label htmlFor={`task-detail-milestone-${task.id}`}>{t("detail.milestoneLabel")}</Label>
         <select
           id={`task-detail-milestone-${task.id}`}
           className="h-10 rounded-md border bg-background px-3 text-sm"
           value={milestoneId}
           onChange={(event) => setMilestoneId(event.target.value)}
         >
-          <option value="">No milestone</option>
+          <option value="">{t("detail.noMilestone")}</option>
           {milestones.map((milestone) => (
             <option key={milestone.id} value={milestone.id}>
               {milestone.name}
@@ -533,7 +620,7 @@ export function TaskDetailContent({
 
       <div className="grid grid-cols-2 gap-4">
         <div className="flex flex-col gap-2">
-          <Label htmlFor={startDateId}>Planned Start</Label>
+          <Label htmlFor={startDateId}>{t("detail.plannedStart")}</Label>
           <Input
             id={startDateId}
             type="date"
@@ -547,7 +634,7 @@ export function TaskDetailContent({
         </div>
 
         <div className="flex flex-col gap-2">
-          <Label htmlFor={endDateId}>Planned End</Label>
+          <Label htmlFor={endDateId}>{t("detail.plannedEnd")}</Label>
           <Input
             id={endDateId}
             type="date"
@@ -565,11 +652,29 @@ export function TaskDetailContent({
         <div className="text-sm text-destructive">{planningError}</div>
       ) : null}
 
+      <div className="flex flex-col gap-2">
+        <Label>{t("detail.labelsLabel")}</Label>
+        <Input
+          value={labelsInput}
+          placeholder={t("detail.labelsPlaceholder")}
+          onChange={(event) => setLabelsInput(event.target.value)}
+        />
+        {labelsInput.trim() ? (
+          <div className="flex flex-wrap gap-1">
+            {labelsInput.split(",").map((l) => l.trim()).filter(Boolean).map((label) => (
+              <Badge key={label} variant="secondary" className="text-xs">
+                {label}
+              </Badge>
+            ))}
+          </div>
+        ) : null}
+      </div>
+
       <div className="flex flex-col gap-3 rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
         <div>
-          <div className="font-medium">Dependencies</div>
+          <div className="font-medium">{t("detail.dependencies")}</div>
           <div className="text-muted-foreground">
-            Select tasks that must finish before this task can move forward.
+            {t("detail.dependenciesDescription")}
           </div>
         </div>
         {dependencyOptions.length > 0 ? (
@@ -600,7 +705,7 @@ export function TaskDetailContent({
                     <span className="truncate">{candidate.title}</span>
                   </div>
                   <Badge variant={candidate.status === "done" ? "secondary" : "outline"}>
-                    {candidate.status === "done" ? "Done" : candidate.status}
+                    {candidate.status === "done" ? t("detail.done") : candidate.status}
                   </Badge>
                 </label>
               );
@@ -608,7 +713,7 @@ export function TaskDetailContent({
           </div>
         ) : (
           <div className="text-muted-foreground">
-            No other project tasks are available to use as blockers yet.
+            {t("detail.noDependencies")}
           </div>
         )}
       </div>
@@ -617,9 +722,9 @@ export function TaskDetailContent({
 
       <div className="flex flex-col gap-3">
         <div>
-          <div className="font-medium">Smart assignment</div>
+          <div className="font-medium">{t("detail.smartAssignment")}</div>
           <div className="text-sm text-muted-foreground">
-            Recommend assignees from member skills and current workload.
+            {t("detail.smartAssignmentDescription")}
           </div>
         </div>
 
@@ -638,7 +743,7 @@ export function TaskDetailContent({
                     <div className="space-y-2">
                       <div className="flex flex-wrap items-center gap-2">
                         <span className="font-medium">{recommendation.member.name}</span>
-                        {index === 0 ? <Badge>Best match</Badge> : null}
+                        {index === 0 ? <Badge>{t("detail.bestMatch")}</Badge> : null}
                         <Badge variant="outline">{recommendation.member.typeLabel}</Badge>
                         <Badge variant="secondary">{recommendation.member.role}</Badge>
                       </div>
@@ -658,10 +763,10 @@ export function TaskDetailContent({
                       onClick={() => void handleAssign(recommendation.member.id)}
                     >
                       {isCurrentAssignee
-                        ? "Assigned"
+                        ? t("detail.assigned")
                         : isAssigning
-                          ? "Assigning..."
-                          : `Assign ${recommendation.member.name}`}
+                          ? t("detail.assigning")
+                          : t("detail.assignMember", { name: recommendation.member.name })}
                     </Button>
                   </div>
                 </div>
@@ -670,14 +775,14 @@ export function TaskDetailContent({
           </div>
         ) : (
           <div className="rounded-lg border border-dashed border-border/60 px-3 py-4 text-sm text-muted-foreground">
-            No active members are available for smart assignment yet.
+            {t("detail.noSmartAssignment")}
           </div>
         )}
 
         {activeMembers.length > 0 ? (
           <div className="grid gap-2 sm:grid-cols-[minmax(0,1fr)_auto] sm:items-end">
             <div className="flex flex-col gap-2">
-              <Label htmlFor={manualAssignId}>Assign manually</Label>
+              <Label htmlFor={manualAssignId}>{t("detail.assignManually")}</Label>
               <select
                 id={manualAssignId}
                 className="h-10 rounded-md border bg-background px-3 text-sm"
@@ -702,7 +807,7 @@ export function TaskDetailContent({
               }
               onClick={() => void handleAssign(manualAssigneeId)}
             >
-              Assign member
+              {t("detail.assignMemberButton")}
             </Button>
           </div>
         ) : null}
@@ -712,54 +817,54 @@ export function TaskDetailContent({
 
       <div className="flex flex-wrap gap-2">
         <Badge variant="outline">
-          Assignee: {task.assigneeName ?? "Unassigned"}
+          {t("detail.assigneeLabel", { name: task.assigneeName ?? t("detail.unassigned") })}
         </Badge>
-        <Badge variant="secondary">Spent: ${task.spentUsd.toFixed(2)}</Badge>
+        <Badge variant="secondary">{t("detail.spentLabel", { amount: task.spentUsd.toFixed(2) })}</Badge>
         {task.budgetUsd > 0 ? (
-          <Badge variant="outline">Budget: ${task.budgetUsd.toFixed(2)}</Badge>
+          <Badge variant="outline">{t("detail.budgetLabel", { amount: task.budgetUsd.toFixed(2) })}</Badge>
         ) : null}
         {task.sprintId ? (
           <Badge variant="outline">
-            Sprint: {sprints.find((sprint) => sprint.id === task.sprintId)?.name ?? task.sprintId}
+            {t("detail.sprintBadge", { name: sprints.find((sprint) => sprint.id === task.sprintId)?.name ?? task.sprintId })}
           </Badge>
         ) : (
-          <Badge variant="outline">Backlog</Badge>
+          <Badge variant="outline">{t("detail.backlog")}</Badge>
         )}
         {task.milestoneId ? (
           <Badge variant="outline">
-            Milestone: {milestones.find((milestone) => milestone.id === task.milestoneId)?.name ?? task.milestoneId}
+            {t("detail.milestoneBadge", { name: milestones.find((milestone) => milestone.id === task.milestoneId)?.name ?? task.milestoneId })}
           </Badge>
         ) : null}
         {budgetRatio != null ? (
           <Badge variant={budgetRatio >= 100 ? "destructive" : "secondary"}>
-            Usage: {budgetRatio}%
+            {t("detail.usageLabel", { percent: budgetRatio })}
           </Badge>
         ) : null}
         <Badge variant="secondary">
           {task.plannedStartAt && task.plannedEndAt
             ? `${task.plannedStartAt.slice(0, 10)} → ${task.plannedEndAt.slice(0, 10)}`
-            : "Unscheduled"}
+            : t("detail.unscheduled")}
         </Badge>
-        {formatProgressHealth(task) ? (
-          <Badge variant="secondary">{formatProgressHealth(task)}</Badge>
+        {formatProgressHealthKey(task) ? (
+          <Badge variant="secondary">{t(formatProgressHealthKey(task)!)}</Badge>
         ) : null}
-        {formatProgressReason(task) ? (
-          <Badge variant="outline">{formatProgressReason(task)}</Badge>
+        {formatProgressReasonKey(task) ? (
+          <Badge variant="outline">{t(formatProgressReasonKey(task)!)}</Badge>
         ) : null}
       </div>
 
       {task.progress ? (
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
-          <div className="font-medium">Progress Signal</div>
+          <div className="font-medium">{t("detail.progressSignal")}</div>
           <div className="mt-2 text-muted-foreground">
-            Last activity: {task.progress.lastActivityAt.slice(0, 16).replace("T", " ")}
+            {t("detail.lastActivity", { time: task.progress.lastActivityAt.slice(0, 16).replace("T", " ") })}
           </div>
           <div className="text-muted-foreground">
-            Source: {task.progress.lastActivitySource}
+            {t("detail.source", { source: task.progress.lastActivitySource })}
           </div>
-          {formatProgressReason(task) ? (
+          {formatProgressReasonKey(task) ? (
             <div className="text-muted-foreground">
-              Reason: {formatProgressReason(task)}
+              {t("detail.reason", { reason: t(formatProgressReasonKey(task)!) })}
             </div>
           ) : null}
         </div>
@@ -779,14 +884,14 @@ export function TaskDetailContent({
 
       {dependencyState.blockers.length > 0 || dependencyState.blockedTasks.length > 0 ? (
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
-          <div className="font-medium">Design blocker</div>
+          <div className="font-medium">{t("detail.designBlocker")}</div>
           {dependencyState.state === "ready_to_unblock" ? (
             <div className="mt-2 text-emerald-700 dark:text-emerald-300">
-              All blockers are done. This task can move forward.
+              {t("detail.allBlockersDone")}
             </div>
           ) : dependencyState.state === "blocked" ? (
             <div className="mt-2 text-muted-foreground">
-              Waiting on unresolved blockers before work can continue.
+              {t("detail.waitingOnBlockers")}
             </div>
           ) : null}
           {dependencyState.blockers.length > 0 ? (
@@ -798,7 +903,7 @@ export function TaskDetailContent({
                 >
                   <span>{blocker.title}</span>
                   <Badge variant={blocker.isComplete ? "secondary" : "outline"}>
-                    {blocker.isComplete ? "Done" : blocker.status}
+                    {blocker.isComplete ? t("detail.done") : blocker.status}
                   </Badge>
                 </div>
               ))}
@@ -807,8 +912,9 @@ export function TaskDetailContent({
           {dependencyState.blockedTasks.length > 0 ? (
             <div className="mt-3 space-y-2">
               <div className="font-medium text-foreground">
-                Blocks {dependencyState.blockedTasks.length} downstream task
-                {dependencyState.blockedTasks.length === 1 ? "" : "s"}
+                {dependencyState.blockedTasks.length === 1
+                  ? t("detail.blocksDownstream", { count: dependencyState.blockedTasks.length })
+                  : t("detail.blocksDownstreamPlural", { count: dependencyState.blockedTasks.length })}
               </div>
               {dependencyState.blockedTasks.map((blockedTask) => (
                 <div
@@ -826,22 +932,22 @@ export function TaskDetailContent({
 
       {task.agentBranch || task.agentWorktree || task.agentSessionId ? (
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
-          <div className="font-medium">Runtime Context</div>
+          <div className="font-medium">{t("detail.runtimeContext")}</div>
           {task.agentBranch ? (
-            <div className="mt-2 text-muted-foreground">Branch: {task.agentBranch}</div>
+            <div className="mt-2 text-muted-foreground">{t("detail.branch", { branch: task.agentBranch })}</div>
           ) : null}
           {task.agentWorktree ? (
-            <div className="text-muted-foreground">Worktree: {task.agentWorktree}</div>
+            <div className="text-muted-foreground">{t("detail.worktree", { worktree: task.agentWorktree })}</div>
           ) : null}
           {task.agentSessionId ? (
-            <div className="text-muted-foreground">Session: {task.agentSessionId}</div>
+            <div className="text-muted-foreground">{t("detail.session", { session: task.agentSessionId })}</div>
           ) : null}
         </div>
       ) : null}
 
       {customFields.length > 0 ? (
         <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
-          <div className="font-medium">Custom Properties</div>
+          <div className="font-medium">{t("detail.customProperties")}</div>
           <div className="mt-3 grid gap-3">
             {customFields.map((field) => (
               <div key={field.id} className="grid grid-cols-[140px_minmax(0,1fr)] items-center gap-3">
@@ -866,9 +972,9 @@ export function TaskDetailContent({
             className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm"
           >
             <div className="flex items-center justify-between gap-2">
-              <div className="font-medium">Doc Preview: {doc.title}</div>
+              <div className="font-medium">{t("detail.docPreview", { title: doc.title })}</div>
               <Button asChild type="button" size="sm" variant="ghost">
-                <Link href={buildDocsHref(doc.pageId)}>View full page</Link>
+                <Link href={buildDocsHref(doc.pageId)}>{t("detail.viewFullPage")}</Link>
               </Button>
             </div>
             {doc.preview ? (
@@ -882,9 +988,9 @@ export function TaskDetailContent({
       <div className="rounded-lg border border-border/60 bg-muted/20 p-3 text-sm">
         <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
           <div>
-            <div className="font-medium">AI task decomposition</div>
+            <div className="font-medium">{t("detail.aiDecomposition")}</div>
             <div className="text-muted-foreground">
-              Break this task into child tasks through the Bridge decomposition flow.
+              {t("detail.aiDecompositionDescription")}
             </div>
           </div>
           <Button
@@ -894,10 +1000,10 @@ export function TaskDetailContent({
             onClick={() => void handleDecompose()}
           >
             {visibleChildTasks.length > 0
-              ? "Already decomposed"
+              ? t("detail.alreadyDecomposed")
               : isDecomposing
-                ? "Decomposing..."
-                : "AI Decompose Task"}
+                ? t("detail.decomposing")
+                : t("detail.aiDecomposeTask")}
           </Button>
         </div>
         {decompositionError ? (
@@ -908,7 +1014,7 @@ export function TaskDetailContent({
         ) : null}
         {visibleChildTasks.length > 0 ? (
           <div className="mt-3 space-y-2">
-            <div className="font-medium text-foreground">Generated subtasks</div>
+            <div className="font-medium text-foreground">{t("detail.generatedSubtasks")}</div>
             {visibleChildTasks.map((childTask) => (
               <div
                 key={childTask.id}
@@ -923,9 +1029,9 @@ export function TaskDetailContent({
                   ) : null}
                 </div>
                 <div className="flex flex-wrap items-center gap-2">
-                  {formatExecutionMode(childTask.executionMode) ? (
+                  {formatExecutionModeKey(childTask.executionMode) ? (
                     <Badge variant="secondary">
-                      {formatExecutionMode(childTask.executionMode)}
+                      {t(formatExecutionModeKey(childTask.executionMode)!)}
                     </Badge>
                   ) : null}
                   <Badge variant="outline">{childTask.status}</Badge>
@@ -966,6 +1072,9 @@ export function TaskDetailContent({
             resolved: false,
           })
         }
+        onDeleteComment={(commentId) =>
+          void deleteTaskComment(task.projectId, task.id, commentId)
+        }
       />
 
       {task.assigneeId &&
@@ -974,19 +1083,11 @@ export function TaskDetailContent({
           <Button
             type="button"
             variant="outline"
-            disabled={!onSpawnAgent || isSpawningAgent}
-            onClick={async () => {
-              if (!onSpawnAgent || !task.assigneeId) return;
-              setIsSpawningAgent(true);
-              try {
-                await onSpawnAgent(task.id, task.assigneeId);
-              } finally {
-                setIsSpawningAgent(false);
-              }
-            }}
+            disabled={!onSpawnAgent}
+            onClick={() => setSpawnDialogOpen(true)}
           >
             <Bot className="mr-2 size-4" />
-            {isSpawningAgent ? "Spawning..." : "Start Agent"}
+            {t("detail.startAgent")}
           </Button>
           <Button
             type="button"
@@ -994,7 +1095,7 @@ export function TaskDetailContent({
             onClick={() => setTeamDialogOpen(true)}
           >
             <Network className="mr-2 size-4" />
-            Start Team
+            {t("detail.startTeam")}
           </Button>
           <StartTeamDialog
             taskId={task.id}
@@ -1003,16 +1104,67 @@ export function TaskDetailContent({
             open={teamDialogOpen}
             onOpenChange={setTeamDialogOpen}
           />
+          <SpawnAgentDialog
+            taskId={task.id}
+            taskTitle={task.title}
+            memberId={task.assigneeId}
+            open={spawnDialogOpen}
+            onOpenChange={setSpawnDialogOpen}
+            onSpawnAgent={onSpawnAgent}
+          />
         </div>
       ) : null}
 
-      <Button
-        type="button"
-        disabled={!onTaskSave}
-        onClick={() => void handleSave()}
-      >
-        Save Changes
-      </Button>
+      <DispatchHistoryPanel attempts={dispatchHistory} />
+
+      <div className="flex items-center gap-2">
+        <Button
+          type="button"
+          disabled={!onTaskSave}
+          onClick={() => void handleSave()}
+          className="flex-1"
+        >
+          {t("detail.saveChanges")}
+        </Button>
+        {onTaskDelete ? (
+          <Button
+            type="button"
+            variant="destructive"
+            size="icon"
+            onClick={() => setDeleteConfirmOpen(true)}
+          >
+            <Trash2 className="size-4" />
+          </Button>
+        ) : null}
+      </div>
+
+      <ConfirmDialog
+        open={deleteConfirmOpen}
+        title={t("detail.deleteConfirmTitle")}
+        description={t("detail.deleteConfirmDescription")}
+        confirmLabel={t("detail.deleteConfirmLabel")}
+        variant="destructive"
+        onConfirm={() => {
+          setDeleteConfirmOpen(false);
+          void onTaskDelete?.(task.id);
+        }}
+        onCancel={() => setDeleteConfirmOpen(false)}
+      />
+
+      <DispatchPreflightDialog
+        open={preflightDialogOpen}
+        taskTitle={task.title}
+        memberName={pendingAgentAssignment?.memberName ?? ""}
+        summary={preflightSummary}
+        onConfirm={() => {
+          void handleConfirmPreflight();
+        }}
+        onCancel={() => {
+          setPreflightDialogOpen(false);
+          setPendingAgentAssignment(null);
+          setPreflightSummary(null);
+        }}
+      />
 
       <DocLinkPicker
         open={docPickerOpen}

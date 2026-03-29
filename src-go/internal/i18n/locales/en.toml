@@ -1,0 +1,739 @@
+# Common
+[InvalidRequestBody]
+other = "invalid request body"
+
+[InternalError]
+other = "internal server error"
+
+[Unauthorized]
+other = "unauthorized"
+
+[NotFound]
+other = "not found"
+
+[AuthenticationRequired]
+other = "authentication required"
+
+[MissingUserContext]
+other = "missing user context"
+
+# Auth
+[EmailAlreadyExists]
+other = "email already exists"
+
+[AuthServiceUnavailable]
+other = "authentication service unavailable"
+
+[RegistrationFailed]
+other = "registration failed"
+
+[InvalidCredentials]
+other = "invalid email or password"
+
+[LoginFailed]
+other = "login failed"
+
+[InvalidRefreshToken]
+other = "invalid or expired refresh token"
+
+[TokenRefreshFailed]
+other = "token refresh failed"
+
+[LogoutFailed]
+other = "logout failed"
+
+[FailedToLoadUserProfile]
+other = "failed to load user profile"
+
+[MissingAuthHeader]
+other = "missing or invalid authorization header"
+
+[InvalidOrExpiredToken]
+other = "invalid or expired token"
+
+[TokenRevoked]
+other = "token has been revoked"
+
+# IDs / Params
+[InvalidTaskID]
+other = "invalid task ID"
+
+[InvalidMemberID]
+other = "invalid member ID"
+
+[InvalidProjectID]
+other = "invalid project ID"
+
+[InvalidSprintID]
+other = "invalid sprint ID"
+
+[InvalidAgentRunID]
+other = "invalid agent run ID"
+
+[InvalidRuleID]
+other = "invalid rule ID"
+
+[InvalidFieldID]
+other = "invalid field ID"
+
+[InvalidDashboardID]
+other = "invalid dashboard ID"
+
+[InvalidWidgetID]
+other = "invalid widget ID"
+
+[InvalidPageID]
+other = "invalid page ID"
+
+[InvalidFormID]
+other = "invalid form ID"
+
+[InvalidLinkID]
+other = "invalid link ID"
+
+[InvalidMilestoneID]
+other = "invalid milestone ID"
+
+[InvalidNotificationID]
+other = "invalid notification ID"
+
+[InvalidCommentID]
+other = "invalid comment ID"
+
+[InvalidReviewID]
+other = "invalid review ID"
+
+[InvalidViewID]
+other = "invalid view ID"
+
+[InvalidOwnerID]
+other = "invalid owner ID"
+
+[InvalidParentID]
+other = "invalid parent ID"
+
+[InvalidSourceID]
+other = "invalid source ID"
+
+[InvalidTargetID]
+other = "invalid target ID"
+
+[InvalidTeamID]
+other = "invalid team ID"
+
+[InvalidVersionID]
+other = "invalid version ID"
+
+[InvalidTemplateID]
+other = "invalid template ID"
+
+[InvalidMemoryID]
+other = "invalid memory ID"
+
+[InvalidUserID]
+other = "invalid user ID"
+
+[InvalidAssigneeID]
+other = "invalid assignee ID"
+
+[InvalidParentTaskID]
+other = "invalid parent task ID"
+
+[InvalidParentCommentID]
+other = "invalid parent comment ID"
+
+[InvalidLimit]
+other = "invalid limit"
+
+# Agent
+[FailedToStartAgentRun]
+other = "failed to start agent run"
+
+[FailedToListAgentRuns]
+other = "failed to list agent runs"
+
+[AgentRunNotFound]
+other = "agent run not found"
+
+[FailedToCancelAgentRun]
+other = "failed to cancel agent run"
+
+[FailedToFetchAgentRun]
+other = "failed to fetch agent run"
+
+[FailedToGetAgentLogs]
+other = "failed to get agent logs"
+
+[FailedToUpdateAgentRunStatus]
+other = "failed to update agent run status"
+
+# Automation
+[FailedToListAutomationRules]
+other = "failed to list automation rules"
+
+[FailedToCreateAutomationRule]
+other = "failed to create automation rule"
+
+[AutomationRuleNotFound]
+other = "automation rule not found"
+
+[FailedToUpdateAutomationRule]
+other = "failed to update automation rule"
+
+[FailedToDeleteAutomationRule]
+other = "failed to delete automation rule"
+
+[FailedToListAutomationLogs]
+other = "failed to list automation logs"
+
+# Cost
+[InvalidProjectIDParam]
+other = "invalid projectId"
+
+[InvalidSprintIDParam]
+other = "invalid sprintId"
+
+[FailedToGetCostStats]
+other = "failed to get cost stats"
+
+# Custom Field
+[FailedToListCustomFields]
+other = "failed to list custom fields"
+
+[FailedToCreateCustomField]
+other = "failed to create custom field"
+
+[CustomFieldNotFound]
+other = "custom field not found"
+
+[FailedToUpdateCustomField]
+other = "failed to update custom field"
+
+[FailedToDeleteCustomField]
+other = "failed to delete custom field"
+
+[InvalidFieldIDInReorder]
+other = "invalid field ID in reorder payload"
+
+[FailedToReorderCustomFields]
+other = "failed to reorder custom fields"
+
+[FailedToListCustomFieldValues]
+other = "failed to list custom field values"
+
+[FailedToSetCustomFieldValue]
+other = "failed to set custom field value"
+
+[FailedToClearCustomFieldValue]
+other = "failed to clear custom field value"
+
+# Dashboard
+[FailedToListDashboards]
+other = "failed to list dashboards"
+
+[FailedToListWidgets]
+other = "failed to list dashboard widgets"
+
+[FailedToCreateDashboard]
+other = "failed to create dashboard"
+
+[DashboardNotFound]
+other = "dashboard not found"
+
+[FailedToUpdateDashboard]
+other = "failed to update dashboard"
+
+[FailedToDeleteDashboard]
+other = "failed to delete dashboard"
+
+[FailedToSaveWidget]
+other = "failed to save widget"
+
+[FailedToDeleteWidget]
+other = "failed to delete widget"
+
+# Doc Decomposition
+[WikiPageNotFound]
+other = "wiki page not found"
+
+[FailedToDecomposePageIntoTasks]
+other = "failed to decompose page into tasks"
+
+# Entity Link
+[FailedToCreateEntityLink]
+other = "failed to create entity link"
+
+[SourceTypeAndIDRequired]
+other = "source_type and source_id are required"
+
+[FailedToListEntityLinks]
+other = "failed to list entity links"
+
+[FailedToDeleteEntityLink]
+other = "failed to delete entity link"
+
+# Form
+[FormNotFound]
+other = "form not found"
+
+[FailedToListForms]
+other = "failed to list forms"
+
+[InvalidTargetAssignee]
+other = "invalid target assignee"
+
+[FailedToCreateForm]
+other = "failed to create form"
+
+[FailedToUpdateForm]
+other = "failed to update form"
+
+[FailedToDeleteForm]
+other = "failed to delete form"
+
+[TooManySubmissions]
+other = "too many submissions"
+
+[FailedToSubmitForm]
+other = "failed to submit form"
+
+# Member
+[FailedToCreateMember]
+other = "failed to create member"
+
+[FailedToListMembers]
+other = "failed to list members"
+
+[FailedToUpdateMember]
+other = "failed to update member"
+
+[FailedToFetchUpdatedMember]
+other = "failed to fetch updated member"
+
+[FailedToDeleteMember]
+other = "failed to delete member"
+
+# Memory
+[MemoryServiceUnavailable]
+other = "memory service unavailable"
+
+[FailedToStoreMemory]
+other = "failed to store memory"
+
+[FailedToSearchMemories]
+other = "failed to search memories"
+
+[FailedToDeleteMemory]
+other = "failed to delete memory"
+
+# Milestone
+[FailedToListMilestones]
+other = "failed to list milestones"
+
+[FailedToLoadMilestoneMetrics]
+other = "failed to load milestone metrics"
+
+[InvalidTargetDate]
+other = "invalid target date"
+
+[FailedToCreateMilestone]
+other = "failed to create milestone"
+
+[MilestoneNotFound]
+other = "milestone not found"
+
+[FailedToUpdateMilestone]
+other = "failed to update milestone"
+
+[FailedToDeleteMilestone]
+other = "failed to delete milestone"
+
+# Notification
+[FailedToListNotifications]
+other = "failed to list notifications"
+
+[FailedToMarkNotificationRead]
+other = "failed to mark notification as read"
+
+[FailedToMarkAllRead]
+other = "failed to mark notifications as read"
+
+# Plugin
+[InvalidInstallRequest]
+other = "invalid install request"
+
+[PathOrEntryIDRequired]
+other = "path or entry_id is required"
+
+[OperationRequired]
+other = "operation is required"
+
+[ToolNameRequired]
+other = "tool_name is required"
+
+[URIRequired]
+other = "uri is required"
+
+[NameRequired]
+other = "name is required"
+
+[PluginIDRequired]
+other = "plugin id required"
+
+[PathRequired]
+other = "path is required"
+
+[EntryIDRequired]
+other = "entry_id is required"
+
+[FailedToListMarketplace]
+other = "failed to list marketplace"
+
+[LimitMustBePositive]
+other = "limit must be a positive integer"
+
+[WorkflowExecutionNotConfigured]
+other = "workflow execution is not configured"
+
+[InvalidWorkflowExecutionRequest]
+other = "invalid workflow execution request"
+
+[RunIDMustBeValidUUID]
+other = "runId must be a valid UUID"
+
+[PluginIDIsRequired]
+other = "plugin id is required"
+
+# Project
+[FailedToCreateProject]
+other = "failed to create project"
+
+[FailedToInitProjectWiki]
+other = "failed to initialize project wiki"
+
+[FailedToInitProjectWikiTemplates]
+other = "failed to initialize project wiki templates"
+
+[FailedToListProjects]
+other = "failed to list projects"
+
+[ProjectNotFound]
+other = "project not found"
+
+[FailedToUpdateProject]
+other = "failed to update project"
+
+[FailedToFetchUpdatedProject]
+other = "failed to fetch updated project"
+
+# Review
+[ReviewNotFound]
+other = "review not found"
+
+[TaskNotFound]
+other = "task not found"
+
+# Role
+[FailedToLoadRoles]
+other = "failed to load roles"
+
+[RoleNotFound]
+other = "role not found"
+
+[FailedToLoadRole]
+other = "failed to load role"
+
+[RoleIDOrNameRequired]
+other = "role id or name is required"
+
+[FailedToSaveRole]
+other = "failed to save role"
+
+[FailedToReloadRole]
+other = "failed to reload role"
+
+[RoleIDRequired]
+other = "role id required"
+
+[FailedToDeleteRole]
+other = "failed to delete role"
+
+[RoleIDOrDraftRequired]
+other = "role id or draft is required"
+
+[SandboxInputRequired]
+other = "sandbox input is required"
+
+[RoleSandboxUnavailable]
+other = "role sandbox bridge is unavailable"
+
+[FailedToLoadRuntimeCatalog]
+other = "failed to load runtime catalog"
+
+[FailedToRunSandboxProbe]
+other = "failed to run role sandbox probe"
+
+# Saved View
+[FailedToListSavedViews]
+other = "failed to list saved views"
+
+[FailedToCreateSavedView]
+other = "failed to create saved view"
+
+[SavedViewNotFound]
+other = "saved view not found"
+
+[FailedToUpdateSavedView]
+other = "failed to update saved view"
+
+[FailedToDeleteSavedView]
+other = "failed to delete saved view"
+
+[FailedToSetDefaultView]
+other = "failed to set default view"
+
+# Scheduler
+[FailedToGetSchedulerStats]
+other = "failed to get scheduler stats"
+
+[FailedToListScheduledJobs]
+other = "failed to list scheduled jobs"
+
+[ScheduledJobNotFound]
+other = "scheduled job not found"
+
+# Sprint
+[InvalidStartDateFormat]
+other = "invalid start date format"
+
+[InvalidEndDateFormat]
+other = "invalid end date format"
+
+[FailedToCreateSprint]
+other = "failed to create sprint"
+
+[FailedToListSprints]
+other = "failed to list sprints"
+
+[SprintMetricsUnavailable]
+other = "sprint metrics unavailable"
+
+[SprintNotFound]
+other = "sprint not found"
+
+[FailedToLoadSprintMetrics]
+other = "failed to load sprint metrics"
+
+[SprintBurndownUnavailable]
+other = "sprint burndown unavailable"
+
+[FailedToLoadBurndownData]
+other = "failed to load burndown data"
+
+[FailedToUpdateSprint]
+other = "failed to update sprint"
+
+# Stats
+[FailedToGetVelocityStats]
+other = "failed to get velocity stats"
+
+[FailedToGetAgentPerfStats]
+other = "failed to get agent performance stats"
+
+# Task
+[RecommenderUnavailable]
+other = "recommender unavailable"
+
+[FailedToGenerateRecommendations]
+other = "failed to generate recommendations"
+
+[InvalidPlannedStartDate]
+other = "invalid planned start date"
+
+[InvalidPlannedEndDate]
+other = "invalid planned end date"
+
+[PlannedEndBeforeStart]
+other = "planned end date must be after planned start date"
+
+[FailedToCreateTask]
+other = "failed to create task"
+
+[FailedToFetchCreatedTask]
+other = "failed to fetch created task"
+
+[InvalidCustomFieldFilters]
+other = "invalid customFieldFilters query"
+
+[InvalidCustomFieldSort]
+other = "invalid customFieldSort query"
+
+[FailedToListTasks]
+other = "failed to list tasks"
+
+[FailedToUpdateTask]
+other = "failed to update task"
+
+[FailedToFetchUpdatedTask]
+other = "failed to fetch updated task"
+
+[FailedToReconcileDeps]
+other = "failed to reconcile task dependencies"
+
+[FailedToDeleteTask]
+other = "failed to delete task"
+
+[FailedToFetchTask]
+other = "failed to fetch task"
+
+[FailedToUpdateDependentTasks]
+other = "failed to update dependent tasks"
+
+[FailedToAssignTask]
+other = "failed to assign task"
+
+[TaskDecomposerUnavailable]
+other = "task decomposer unavailable"
+
+[TaskAlreadyHasChildren]
+other = "task already has child tasks"
+
+[InvalidTaskDecomposition]
+other = "invalid task decomposition"
+
+[FailedToDecomposeTask]
+other = "failed to decompose task"
+
+# Task Comment
+[FailedToListTaskComments]
+other = "failed to list task comments"
+
+[FailedToCreateTaskComment]
+other = "failed to create task comment"
+
+[ResolvedFlagRequired]
+other = "resolved flag is required"
+
+[FailedToUpdateTaskComment]
+other = "failed to update task comment"
+
+[FailedToDeleteTaskComment]
+other = "failed to delete task comment"
+
+# Team
+[TeamServiceUnavailable]
+other = "team service unavailable"
+
+[FailedToStartTeam]
+other = "failed to start team"
+
+[TeamNotFound]
+other = "team not found"
+
+[FailedToListTeams]
+other = "failed to list teams"
+
+[InvalidOrMissingProjectID]
+other = "invalid or missing projectId query parameter"
+
+[FailedToCancelTeam]
+other = "failed to cancel team"
+
+[FailedToRetryTeam]
+other = "failed to retry team"
+
+[TeamStillActive]
+other = "team is still active and cannot be deleted"
+
+[FailedToDeleteTeam]
+other = "failed to delete team"
+
+# Wiki
+[WikiSpaceNotFound]
+other = "wiki space not found"
+
+[FailedToListWikiPages]
+other = "failed to list wiki pages"
+
+[FailedToCreateWikiPage]
+other = "failed to create wiki page"
+
+[FailedToUpdateWikiPage]
+other = "failed to update wiki page"
+
+[WikiPageHasNewerChanges]
+other = "wiki page has newer changes"
+
+[InvalidExpectedUpdatedAt]
+other = "invalid expectedUpdatedAt"
+
+[FailedToDeleteWikiPage]
+other = "failed to delete wiki page"
+
+[CannotMoveIntoDescendant]
+other = "cannot move page into its own descendant"
+
+[FailedToMoveWikiPage]
+other = "failed to move wiki page"
+
+[FailedToListPageVersions]
+other = "failed to list page versions"
+
+[FailedToCreatePageVersion]
+other = "failed to create page version"
+
+[PageVersionNotFound]
+other = "page version not found"
+
+[FailedToRestorePageVersion]
+other = "failed to restore page version"
+
+[FailedToListPageComments]
+other = "failed to list page comments"
+
+[FailedToCreatePageComment]
+other = "failed to create page comment"
+
+[PageCommentNotFound]
+other = "page comment not found"
+
+[FailedToUpdatePageComment]
+other = "failed to update page comment"
+
+[FailedToDeletePageComment]
+other = "failed to delete page comment"
+
+[FailedToListWikiTemplates]
+other = "failed to list wiki templates"
+
+[FailedToCreateTemplate]
+other = "failed to create template"
+
+[FailedToCreatePageFromTemplate]
+other = "failed to create page from template"
+
+[FailedToListPageFavorites]
+other = "failed to list page favorites"
+
+[FailedToUpdateFavoriteState]
+other = "failed to update favorite state"
+
+[FailedToListRecentPages]
+other = "failed to list recent pages"
+
+[FailedToUpdatePinnedState]
+other = "failed to update pinned state"
+
+# Workflow
+[InvalidTransitions]
+other = "invalid transitions"
+
+[InvalidTriggers]
+other = "invalid triggers"
+
+[FailedToSaveWorkflowConfig]
+other = "failed to save workflow config"
+
+# Middleware - Project
+[ProjectIDRequired]
+other = "project ID required"

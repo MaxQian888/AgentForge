@@ -48,7 +48,7 @@ describe("Header", () => {
     await user.click(await screen.findByRole("button", { name: "Task stalled Review queue blocked." }));
     expect(markRead).toHaveBeenCalledWith("n-1");
 
-    await user.click(buttons[1]);
+    await user.click(buttons[2]);
     await user.click(await screen.findByRole("menuitem", { name: /Logout/i }));
     expect(logout).toHaveBeenCalled();
   });

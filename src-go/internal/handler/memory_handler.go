@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
@@ -37,17 +38,17 @@ type StoreMemoryRequest struct {
 
 func (h *MemoryHandler) Store(c echo.Context) error {
 	if h.service == nil {
-		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "memory service unavailable"})
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgMemoryServiceUnavailable)
 	}
 
 	projectID, err := uuid.Parse(c.Param("pid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid project ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidProjectID)
 	}
 
 	req := new(StoreMemoryRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -64,19 +65,19 @@ func (h *MemoryHandler) Store(c echo.Context) error {
 		RelevanceScore: req.RelevanceScore,
 	})
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to store memory"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToStoreMemory)
 	}
 	return c.JSON(http.StatusCreated, mem.ToDTO())
 }
 
 func (h *MemoryHandler) Search(c echo.Context) error {
 	if h.service == nil {
-		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "memory service unavailable"})
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgMemoryServiceUnavailable)
 	}
 
 	projectID, err := uuid.Parse(c.Param("pid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid project ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidProjectID)
 	}
 
 	query := c.QueryParam("q")
@@ -89,23 +90,23 @@ func (h *MemoryHandler) Search(c echo.Context) error {
 
 	results, err := h.service.Search(c.Request().Context(), projectID, query, limit)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to search memories"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToSearchMemories)
 	}
 	return c.JSON(http.StatusOK, results)
 }
 
 func (h *MemoryHandler) Delete(c echo.Context) error {
 	if h.service == nil {
-		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "memory service unavailable"})
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgMemoryServiceUnavailable)
 	}
 
 	id, err := uuid.Parse(c.Param("mid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid memory ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidMemoryID)
 	}
 
 	if err := h.service.Delete(c.Request().Context(), id); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete memory"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteMemory)
 	}
 	return c.NoContent(http.StatusNoContent)
 }

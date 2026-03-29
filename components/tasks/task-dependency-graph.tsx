@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslations } from "next-intl";
 import type { Task } from "@/lib/stores/task-store";
 
 interface TaskDependencyGraphProps {
@@ -207,6 +208,7 @@ function bezierPath(
 }
 
 export function TaskDependencyGraph({ tasks, onTaskClick }: TaskDependencyGraphProps) {
+  const t = useTranslations("tasks");
   const { nodes, edges } = useMemo(() => buildGraph(tasks), [tasks]);
 
   const nodeMap = useMemo(
@@ -217,7 +219,7 @@ export function TaskDependencyGraph({ tasks, onTaskClick }: TaskDependencyGraphP
   if (tasks.length === 0) {
     return (
       <div className="flex h-48 items-center justify-center text-sm text-muted-foreground">
-        No tasks to visualize.
+        {t("empty.noTasksToVisualize")}
       </div>
     );
   }

@@ -21,6 +21,7 @@ type QueueAgentAdmissionRecord struct {
 	Provider  string
 	Model     string
 	RoleID    string
+	Priority  int
 	BudgetUSD float64
 	Reason    string
 }
@@ -54,6 +55,7 @@ func (r *AgentPoolQueueRepository) QueueAgentAdmission(ctx context.Context, inpu
 		Provider:  input.Provider,
 		Model:     input.Model,
 		RoleID:    input.RoleID,
+		Priority:  input.Priority,
 		BudgetUSD: input.BudgetUSD,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
@@ -109,16 +111,7 @@ func (r *AgentPoolQueueRepository) ListAllQueued(ctx context.Context, limit int)
 			}
 			entries = append(entries, cloneAgentPoolQueueEntry(entry))
 		}
-		slices.SortFunc(entries, func(a, b *model.AgentPoolQueueEntry) int {
-			switch {
-			case a.CreatedAt.Before(b.CreatedAt):
-				return -1
-			case a.CreatedAt.After(b.CreatedAt):
-				return 1
-			default:
-				return 0
-			}
-		})
+		slices.SortFunc(entries, compareQueueEntries)
 		if len(entries) > limit {
 			entries = entries[:limit]
 		}
@@ -128,6 +121,7 @@ func (r *AgentPoolQueueRepository) ListAllQueued(ctx context.Context, limit int)
 	var rows []agentPoolQueueEntryRecord
 	if err := r.db.WithContext(ctx).
 		Where("status = ?", model.AgentPoolQueueStatusQueued).
+		Order("priority DESC").
 		Order("created_at ASC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -149,16 +143,7 @@ func (r *AgentPoolQueueRepository) ListQueuedByProject(ctx context.Context, proj
 				entries = append(entries, cloneAgentPoolQueueEntry(entry))
 			}
 		}
-		slices.SortFunc(entries, func(a, b *model.AgentPoolQueueEntry) int {
-			switch {
-			case a.CreatedAt.Before(b.CreatedAt):
-				return -1
-			case a.CreatedAt.After(b.CreatedAt):
-				return 1
-			default:
-				return 0
-			}
-		})
+		slices.SortFunc(entries, compareQueueEntries)
 		if len(entries) > limit {
 			entries = entries[:limit]
 		}
@@ -168,6 +153,7 @@ func (r *AgentPoolQueueRepository) ListQueuedByProject(ctx context.Context, proj
 	var rows []agentPoolQueueEntryRecord
 	if err := r.db.WithContext(ctx).
 		Where("project_id = ? AND status = ?", projectID.String(), model.AgentPoolQueueStatusQueued).
+		Order("priority DESC").
 		Order("created_at ASC").
 		Limit(limit).
 		Find(&rows).Error; err != nil {
@@ -186,16 +172,7 @@ func (r *AgentPoolQueueRepository) ReserveNextQueuedByProject(ctx context.Contex
 				entries = append(entries, entry)
 			}
 		}
-		slices.SortFunc(entries, func(a, b *model.AgentPoolQueueEntry) int {
-			switch {
-			case a.CreatedAt.Before(b.CreatedAt):
-				return -1
-			case a.CreatedAt.After(b.CreatedAt):
-				return 1
-			default:
-				return 0
-			}
-		})
+		slices.SortFunc(entries, compareQueueEntries)
 		if len(entries) == 0 {
 			return nil, nil
 		}
@@ -207,6 +184,7 @@ func (r *AgentPoolQueueRepository) ReserveNextQueuedByProject(ctx context.Contex
 	var row agentPoolQueueEntryRecord
 	if err := r.db.WithContext(ctx).
 		Where("project_id = ? AND status = ?", projectID.String(), model.AgentPoolQueueStatusQueued).
+		Order("priority DESC").
 		Order("created_at ASC").
 		Take(&row).Error; err != nil {
 		if errors.Is(normalizeRepositoryError(err), ErrNotFound) {
@@ -271,6 +249,46 @@ func (r *AgentPoolQueueRepository) CompleteQueuedEntry(ctx context.Context, entr
 	return nil
 }
 
+func (r *AgentPoolQueueRepository) ListRecentByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*model.AgentPoolQueueEntry, error) {
+	if limit <= 0 {
+		limit = 100
+	}
+	if r.db == nil {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		entries := make([]*model.AgentPoolQueueEntry, 0)
+		for _, entry := range r.entries {
+			if entry.ProjectID == projectID.String() {
+				entries = append(entries, cloneAgentPoolQueueEntry(entry))
+			}
+		}
+		slices.SortFunc(entries, func(a, b *model.AgentPoolQueueEntry) int {
+			switch {
+			case a.UpdatedAt.After(b.UpdatedAt):
+				return -1
+			case a.UpdatedAt.Before(b.UpdatedAt):
+				return 1
+			default:
+				return compareQueueEntries(a, b)
+			}
+		})
+		if len(entries) > limit {
+			entries = entries[:limit]
+		}
+		return entries, nil
+	}
+
+	var rows []agentPoolQueueEntryRecord
+	if err := r.db.WithContext(ctx).
+		Where("project_id = ?", projectID.String()).
+		Order("updated_at DESC").
+		Limit(limit).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list recent queue entries by project: %w", err)
+	}
+	return toAgentPoolQueueEntries(rows), nil
+}
+
 func toAgentPoolQueueEntries(rows []agentPoolQueueEntryRecord) []*model.AgentPoolQueueEntry {
 	entries := make([]*model.AgentPoolQueueEntry, 0, len(rows))
 	for _, row := range rows {
@@ -289,4 +307,19 @@ func cloneAgentPoolQueueEntry(entry *model.AgentPoolQueueEntry) *model.AgentPool
 		cloned.AgentRunID = &value
 	}
 	return &cloned
+}
+
+func compareQueueEntries(a, b *model.AgentPoolQueueEntry) int {
+	switch {
+	case a.Priority > b.Priority:
+		return -1
+	case a.Priority < b.Priority:
+		return 1
+	case a.CreatedAt.Before(b.CreatedAt):
+		return -1
+	case a.CreatedAt.After(b.CreatedAt):
+		return 1
+	default:
+		return 0
+	}
 }

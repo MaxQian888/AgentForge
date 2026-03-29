@@ -2,20 +2,24 @@
 
 ## Purpose
 Define the provider-owned rendering profile contract for AgentForge IM Bridge so each active IM provider can declare how typed outbound delivery should be formatted, segmented, downgraded, and turned into final provider payloads.
-
 ## Requirements
 ### Requirement: Active IM provider SHALL publish a rendering profile
-The IM Bridge SHALL define a provider-owned rendering profile for each runnable IM provider. That profile MUST declare the provider's supported text formatting modes, structured rendering preferences, message length limits, mutable-update constraints, and any optional provider-owned builders used to turn typed outbound delivery into final provider payloads.
 
-#### Scenario: Telegram publishes a text-first rendering profile
-- **WHEN** the active provider is Telegram
-- **THEN** the Bridge exposes a rendering profile that identifies plain text and Markdown-capable delivery modes, inline-keyboard rendering preferences, text length constraints, and editable-message limits
-- **AND** upper layers do not infer those rules from the string `"telegram"` alone
+Each runnable IM provider SHALL define supported text formatting modes, structured rendering preferences, message length limits, mutable-update constraints, and card capability declarations. Optional provider-owned builders SHALL turn typed delivery into final provider payloads.
 
-#### Scenario: Feishu publishes richer builder surfaces
-- **WHEN** the active provider is Feishu
-- **THEN** the Bridge exposes a rendering profile that identifies text, `lark_md`, JSON-card, and template-card construction surfaces plus delayed-update constraints
-- **AND** upper layers can request provider-native rendering without assembling raw Feishu payloads themselves
+The DingTalk provider SHALL declare `card: true` and `cardUpdate: false` in its rendering profile, indicating support for sending ActionCard messages but no support for in-place card updates. The profile SHALL include an ActionCard builder that maps typed envelope actions to DingTalk ActionCard button payloads.
+
+#### Scenario: DingTalk provider publishes rendering profile with card support
+- **WHEN** DingTalk provider initializes
+- **THEN** its rendering profile declares `{text: true, markdown: false, card: true, cardUpdate: false, callback: "stream"}` and includes an ActionCard payload builder
+
+#### Scenario: Feishu provider declares full card lifecycle
+- **WHEN** Feishu provider initializes
+- **THEN** its rendering profile declares `{text: true, markdown: true, card: true, cardUpdate: true, callback: "longConnection"}` with delayed-update constraints
+
+#### Scenario: QQ provider declares text-only profile
+- **WHEN** QQ provider initializes
+- **THEN** its rendering profile declares `{text: true, markdown: false, card: false, cardUpdate: false, callback: "websocket"}` with reply-segment awareness
 
 ### Requirement: Typed outbound delivery SHALL resolve through a provider rendering plan
 Before a typed outbound IM delivery is executed, the Bridge SHALL resolve the delivery through the active provider's rendering profile and produce a provider-aware rendering plan. The rendering plan MUST decide whether the delivery uses native payloads, structured output, formatted text, segmented text, editable updates, or explicit downgrade to plain text.
@@ -37,3 +41,4 @@ If a provider supports formatted text modes such as Markdown, HTML, or provider-
 - **WHEN** the Bridge receives a formatted-text intent that cannot be rendered safely under the active provider's escaping or update rules
 - **THEN** the provider rendering profile degrades the delivery to a supported plain-text representation
 - **AND** the transport executor does not send malformed formatted text
+

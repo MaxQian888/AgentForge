@@ -6,6 +6,108 @@ import type { Agent } from "@/lib/stores/agent-store";
 import type { Notification } from "@/lib/stores/notification-store";
 import type { Task } from "@/lib/stores/task-store";
 
+const fetchDocsTree = jest.fn();
+const fetchEntityLinks = jest.fn();
+const createEntityLink = jest.fn();
+const deleteEntityLink = jest.fn();
+const fetchTaskComments = jest.fn();
+const createTaskComment = jest.fn();
+const setTaskCommentResolved = jest.fn();
+const deleteTaskComment = jest.fn();
+const fetchCustomFieldDefinitions = jest.fn();
+const fetchCustomFieldValues = jest.fn();
+const fetchMilestones = jest.fn();
+const fetchDispatchPreflight = jest.fn();
+const fetchDispatchHistory = jest.fn();
+
+jest.mock("@/lib/stores/auth-store", () => ({
+  useAuthStore: {
+    getState: () => ({ accessToken: "test-token" }),
+  },
+}));
+
+jest.mock("@/lib/stores/docs-store", () => ({
+  useDocsStore: (selector: (state: { tree: unknown[]; fetchTree: typeof fetchDocsTree }) => unknown) =>
+    selector({
+      tree: [],
+      fetchTree: fetchDocsTree,
+    }),
+  flattenDocsTree: () => [],
+}));
+
+jest.mock("@/lib/stores/entity-link-store", () => ({
+  useEntityLinkStore: (selector: (state: {
+    linksByEntity: Record<string, unknown[]>;
+    fetchLinks: typeof fetchEntityLinks;
+    createLink: typeof createEntityLink;
+    deleteLink: typeof deleteEntityLink;
+  }) => unknown) =>
+    selector({
+      linksByEntity: {},
+      fetchLinks: fetchEntityLinks,
+      createLink: createEntityLink,
+      deleteLink: deleteEntityLink,
+    }),
+}));
+
+jest.mock("@/lib/stores/task-comment-store", () => ({
+  useTaskCommentStore: (selector: (state: {
+    commentsByTask: Record<string, unknown[]>;
+    fetchComments: typeof fetchTaskComments;
+    createComment: typeof createTaskComment;
+    setResolved: typeof setTaskCommentResolved;
+    deleteComment: typeof deleteTaskComment;
+  }) => unknown) =>
+    selector({
+      commentsByTask: {},
+      fetchComments: fetchTaskComments,
+      createComment: createTaskComment,
+      setResolved: setTaskCommentResolved,
+      deleteComment: deleteTaskComment,
+    }),
+}));
+
+jest.mock("@/lib/stores/custom-field-store", () => ({
+  useCustomFieldStore: (selector: (state: {
+    definitionsByProject: Record<string, unknown[]>;
+    valuesByTask: Record<string, unknown[]>;
+    fetchDefinitions: typeof fetchCustomFieldDefinitions;
+    fetchTaskValues: typeof fetchCustomFieldValues;
+  }) => unknown) =>
+    selector({
+      definitionsByProject: {},
+      valuesByTask: {},
+      fetchDefinitions: fetchCustomFieldDefinitions,
+      fetchTaskValues: fetchCustomFieldValues,
+    }),
+}));
+
+jest.mock("@/lib/stores/milestone-store", () => ({
+  useMilestoneStore: (selector: (state: {
+    milestonesByProject: Record<string, unknown[]>;
+    fetchMilestones: typeof fetchMilestones;
+  }) => unknown) =>
+    selector({
+      milestonesByProject: {},
+      fetchMilestones,
+    }),
+}));
+
+jest.mock("@/lib/stores/agent-store", () => ({
+  useAgentStore: (selector: (state: {
+    agents: Agent[];
+    dispatchHistoryByTask: Record<string, unknown[]>;
+    fetchDispatchPreflight: typeof fetchDispatchPreflight;
+    fetchDispatchHistory: typeof fetchDispatchHistory;
+  }) => unknown) =>
+    selector({
+      agents: [],
+      dispatchHistoryByTask: {},
+      fetchDispatchPreflight,
+      fetchDispatchHistory,
+    }),
+}));
+
 const task: Task = {
   id: "task-1",
   projectId: "project-1",
@@ -22,6 +124,7 @@ const task: Task = {
   agentBranch: "",
   agentWorktree: "",
   agentSessionId: "",
+  labels: [],
   blockedBy: [],
   plannedStartAt: "2026-03-25T09:00:00.000Z",
   plannedEndAt: "2026-03-27T18:00:00.000Z",
@@ -103,6 +206,24 @@ const members: TeamMember[] = [
 const agents: Agent[] = [];
 
 describe("TaskContextRail", () => {
+  beforeEach(() => {
+    fetchDocsTree.mockReset();
+    fetchEntityLinks.mockReset();
+    createEntityLink.mockReset();
+    deleteEntityLink.mockReset();
+    fetchTaskComments.mockReset();
+    createTaskComment.mockReset();
+    setTaskCommentResolved.mockReset();
+    deleteTaskComment.mockReset();
+    fetchCustomFieldDefinitions.mockReset();
+    fetchCustomFieldValues.mockReset();
+    fetchMilestones.mockReset();
+    fetchDispatchPreflight.mockReset();
+    fetchDispatchPreflight.mockResolvedValue(null);
+    fetchDispatchHistory.mockReset();
+    fetchDispatchHistory.mockResolvedValue(undefined);
+  });
+
   it("renders summary mode when no task is selected", () => {
     render(
       <TaskContextRail

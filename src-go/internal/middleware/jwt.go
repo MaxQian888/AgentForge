@@ -10,6 +10,7 @@ import (
 
 	"github.com/golang-jwt/jwt/v5"
 	"github.com/labstack/echo/v4"
+	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
@@ -29,7 +30,7 @@ func JWTMiddleware(secret string, blacklist TokenBlacklist) echo.MiddlewareFunc 
 		return func(c echo.Context) error {
 			authHeader := c.Request().Header.Get("Authorization")
 			if authHeader == "" || !strings.HasPrefix(authHeader, "Bearer ") {
-				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "missing or invalid authorization header"})
+				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: appI18n.Localize(GetLocalizer(c), appI18n.MsgMissingAuthHeader)})
 			}
 
 			tokenStr := strings.TrimPrefix(authHeader, "Bearer ")
@@ -43,19 +44,19 @@ func JWTMiddleware(secret string, blacklist TokenBlacklist) echo.MiddlewareFunc 
 			})
 
 			if err != nil || !token.Valid {
-				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "invalid or expired token"})
+				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: appI18n.Localize(GetLocalizer(c), appI18n.MsgInvalidOrExpiredToken)})
 			}
 
 			// Check blacklist
 			blacklisted, err := blacklist.IsBlacklisted(c.Request().Context(), claims.JTI)
 			if err != nil {
 				if errors.Is(err, repository.ErrCacheUnavailable) {
-					return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "authentication service unavailable"})
+					return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: appI18n.Localize(GetLocalizer(c), appI18n.MsgAuthServiceUnavailable)})
 				}
-				return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "internal server error"})
+				return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: appI18n.Localize(GetLocalizer(c), appI18n.MsgInternalError)})
 			}
 			if blacklisted {
-				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "token has been revoked"})
+				return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: appI18n.Localize(GetLocalizer(c), appI18n.MsgTokenRevoked)})
 			}
 
 			c.Set(JWTContextKey, claims)

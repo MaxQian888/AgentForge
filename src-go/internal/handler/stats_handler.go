@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
 
@@ -31,7 +32,7 @@ func (h *StatsHandler) Velocity(c echo.Context) error {
 
 	stats, err := h.service.Velocity(c.Request().Context(), from, to, projectID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to get velocity stats"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToGetVelocityStats)
 	}
 	return c.JSON(http.StatusOK, stats)
 }
@@ -44,7 +45,7 @@ func (h *StatsHandler) AgentPerformance(c echo.Context) error {
 
 	stats, err := h.service.AgentPerformance(c.Request().Context(), from, to, projectID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to get agent performance stats"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToGetAgentPerfStats)
 	}
 	return c.JSON(http.StatusOK, stats)
 }

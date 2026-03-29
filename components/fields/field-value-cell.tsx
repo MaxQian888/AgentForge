@@ -1,6 +1,7 @@
 "use client";
 
 import { useState } from "react";
+import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { useCustomFieldStore, type CustomFieldDefinition, type CustomFieldValue } from "@/lib/stores/custom-field-store";
 
@@ -15,6 +16,7 @@ export function FieldValueCell({
   field: CustomFieldDefinition;
   value?: CustomFieldValue | null;
 }) {
+  const t = useTranslations("settings");
   const setTaskValue = useCustomFieldStore((state) => state.setTaskValue);
   const clearTaskValue = useCustomFieldStore((state) => state.clearTaskValue);
   const [draft, setDraft] = useState(value?.value == null ? "" : String(value.value));
@@ -52,7 +54,7 @@ export function FieldValueCell({
           void commit(event.target.value);
         }}
       >
-        <option value="">Unset</option>
+        <option value="">{t("fields.unset")}</option>
         {options.map((option) => (
           <option key={String(option)} value={String(option)}>
             {String(option)}

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
@@ -51,7 +52,7 @@ func NewProjectHandler(
 func (h *ProjectHandler) Create(c echo.Context) error {
 	req := new(model.CreateProjectRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -67,17 +68,17 @@ func (h *ProjectHandler) Create(c echo.Context) error {
 		Settings:      "{}",
 	}
 	if err := h.repo.Create(c.Request().Context(), project); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create project"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateProject)
 	}
 	if h.wikiBootstrap != nil {
 		space, err := h.wikiBootstrap.CreateSpace(c.Request().Context(), project.ID)
 		if err != nil {
 			_ = h.repo.Delete(c.Request().Context(), project.ID)
-			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to initialize project wiki"})
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToInitProjectWiki)
 		}
 		if _, err := h.wikiBootstrap.SeedBuiltInTemplates(c.Request().Context(), project.ID, space.ID); err != nil {
 			_ = h.repo.Delete(c.Request().Context(), project.ID)
-			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to initialize project wiki templates"})
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToInitProjectWikiTemplates)
 		}
 	}
 	return c.JSON(http.StatusCreated, h.toProjectDTO(c.Request().Context(), project))
@@ -86,7 +87,7 @@ func (h *ProjectHandler) Create(c echo.Context) error {
 func (h *ProjectHandler) List(c echo.Context) error {
 	projects, err := h.repo.List(c.Request().Context())
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list projects"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListProjects)
 	}
 	dtos := make([]model.ProjectDTO, 0, len(projects))
 	for _, p := range projects {
@@ -98,11 +99,11 @@ func (h *ProjectHandler) List(c echo.Context) error {
 func (h *ProjectHandler) Get(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid project ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidProjectID)
 	}
 	project, err := h.repo.GetByID(c.Request().Context(), id)
 	if err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "project not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgProjectNotFound)
 	}
 	return c.JSON(http.StatusOK, h.toProjectDTO(c.Request().Context(), project))
 }
@@ -110,21 +111,21 @@ func (h *ProjectHandler) Get(c echo.Context) error {
 func (h *ProjectHandler) Update(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid project ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidProjectID)
 	}
 	req := new(model.UpdateProjectRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
 	if err := h.repo.Update(c.Request().Context(), id, req); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update project"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateProject)
 	}
 	project, err := h.repo.GetByID(c.Request().Context(), id)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to fetch updated project"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToFetchUpdatedProject)
 	}
 	return c.JSON(http.StatusOK, h.toProjectDTO(c.Request().Context(), project))
 }
@@ -132,13 +133,13 @@ func (h *ProjectHandler) Update(c echo.Context) error {
 func (h *ProjectHandler) Delete(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid project ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidProjectID)
 	}
 	if h.wikiBootstrap != nil {
 		_ = h.wikiBootstrap.DeleteProjectSpace(c.Request().Context(), id)
 	}
 	if err := h.repo.Delete(c.Request().Context(), id); err != nil {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "project not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgProjectNotFound)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "project deleted"})
 }

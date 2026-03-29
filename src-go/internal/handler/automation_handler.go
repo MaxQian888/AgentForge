@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
@@ -46,7 +47,7 @@ func (h *AutomationHandler) ListRules(c echo.Context) error {
 		rules, err = h.rules.ListByProject(c.Request().Context(), projectID)
 	}
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list automation rules"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListAutomationRules)
 	}
 	dtos := make([]model.AutomationRuleDTO, 0, len(rules))
 	for _, rule := range rules {
@@ -59,11 +60,11 @@ func (h *AutomationHandler) CreateRule(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	userID, err := claimsUserID(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "authentication required"})
+		return localizedError(c, http.StatusUnauthorized, i18n.MsgAuthRequired)
 	}
 	req := new(model.CreateAutomationRuleRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -82,7 +83,7 @@ func (h *AutomationHandler) CreateRule(c echo.Context) error {
 		rule.Enabled = *req.Enabled
 	}
 	if err := h.rules.Create(c.Request().Context(), rule); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create automation rule"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateAutomationRule)
 	}
 	return c.JSON(http.StatusCreated, rule.ToDTO())
 }
@@ -91,15 +92,15 @@ func (h *AutomationHandler) UpdateRule(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	ruleID, err := uuid.Parse(c.Param("rid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid rule ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRuleID)
 	}
 	rule, err := h.rules.GetByID(c.Request().Context(), ruleID)
 	if err != nil || rule == nil || rule.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "automation rule not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgAutomationRuleNotFound)
 	}
 	req := new(model.UpdateAutomationRuleRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if req.Name != nil {
 		rule.Name = *req.Name
@@ -117,7 +118,7 @@ func (h *AutomationHandler) UpdateRule(c echo.Context) error {
 		rule.Actions = string(req.Actions)
 	}
 	if err := h.rules.Update(c.Request().Context(), rule); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update automation rule"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateAutomationRule)
 	}
 	return c.JSON(http.StatusOK, rule.ToDTO())
 }
@@ -126,14 +127,14 @@ func (h *AutomationHandler) DeleteRule(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	ruleID, err := uuid.Parse(c.Param("rid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid rule ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRuleID)
 	}
 	rule, err := h.rules.GetByID(c.Request().Context(), ruleID)
 	if err != nil || rule == nil || rule.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "automation rule not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgAutomationRuleNotFound)
 	}
 	if err := h.rules.Delete(c.Request().Context(), ruleID); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete automation rule"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteAutomationRule)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "automation rule deleted"})
 }
@@ -150,7 +151,7 @@ func (h *AutomationHandler) ListLogs(c echo.Context) error {
 	}
 	logs, total, err := h.logs.ListByProject(c.Request().Context(), projectID, query)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list automation logs"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListAutomationLogs)
 	}
 	dtos := make([]model.AutomationLogDTO, 0, len(logs))
 	for _, entry := range logs {

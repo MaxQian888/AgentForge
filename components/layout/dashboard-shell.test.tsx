@@ -5,11 +5,13 @@ import { DashboardShell } from "./dashboard-shell";
 import { useAuthStore } from "@/lib/stores/auth-store";
 
 const replaceMock = jest.fn();
+const pushMock = jest.fn();
 const connectMock = jest.fn();
 const disconnectMock = jest.fn();
 const fetchNotificationsMock = jest.fn();
 const sendNotificationMock = jest.fn();
 const syncNotificationTraySummaryMock = jest.fn();
+const subscribeDesktopEventsMock = jest.fn();
 const notificationStoreState = {
   fetchNotifications: fetchNotificationsMock,
   notifications: [] as Array<{
@@ -29,7 +31,7 @@ jest.mock("next/navigation", () => ({
   useRouter() {
     return {
       replace: replaceMock,
-      push: jest.fn(),
+      push: pushMock,
       prefetch: jest.fn(),
       back: jest.fn(),
     };
@@ -71,6 +73,7 @@ jest.mock("@/hooks/use-platform-capability", () => ({
   usePlatformCapability: () => ({
     isDesktop: true,
     sendNotification: sendNotificationMock,
+    subscribeDesktopEvents: subscribeDesktopEventsMock,
     syncNotificationTraySummary: syncNotificationTraySummaryMock,
   }),
 }));
@@ -78,11 +81,14 @@ jest.mock("@/hooks/use-platform-capability", () => ({
 describe("DashboardShell", () => {
   beforeEach(() => {
     replaceMock.mockReset();
+    pushMock.mockReset();
     connectMock.mockReset();
     disconnectMock.mockReset();
     fetchNotificationsMock.mockReset();
     sendNotificationMock.mockReset();
     syncNotificationTraySummaryMock.mockReset();
+    subscribeDesktopEventsMock.mockReset();
+    subscribeDesktopEventsMock.mockResolvedValue(jest.fn());
     notificationStoreState.notifications = [];
     notificationStoreState.unreadCount = 0;
     localStorage.clear();
@@ -441,6 +447,46 @@ describe("DashboardShell", () => {
           href: "/docs/page-1",
         }),
       );
+    });
+  });
+
+  it("routes normalized shell action events through the router handoff", async () => {
+    subscribeDesktopEventsMock.mockImplementation(
+      async (
+        handler: (event: {
+          type: string;
+          actionId?: string;
+          href?: string;
+        }) => void,
+      ) => {
+        handler({
+          type: "shell.action",
+          actionId: "open_notification_target",
+          href: "/reviews?id=review-1",
+        });
+        return jest.fn();
+      },
+    );
+    useAuthStore.setState({
+      accessToken: "access-1",
+      refreshToken: "refresh-1",
+      user: {
+        id: "user-1",
+        email: "test@example.com",
+        name: "Test User",
+      },
+      status: "authenticated",
+      hasHydrated: true,
+    } as never);
+
+    render(
+      <DashboardShell>
+        <div>secret dashboard</div>
+      </DashboardShell>,
+    );
+
+    await waitFor(() => {
+      expect(pushMock).toHaveBeenCalledWith("/reviews?id=review-1");
     });
   });
 });

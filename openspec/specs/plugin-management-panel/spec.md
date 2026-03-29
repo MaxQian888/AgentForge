@@ -16,7 +16,7 @@ The system SHALL provide a plugin management panel that lists installed plugins 
 - **THEN** the panel shows the plugin's runtime declaration, runtime host, permissions, resolved source path, runtime metadata, restart count, last health timestamp, and last error state when present
 
 ### Requirement: The panel distinguishes built-in, local, and marketplace plugin sources
-The system SHALL present available plugins by source channel instead of flattening every source into one list. The plugin management panel SHALL separately surface built-in plugin discoveries, installed plugins, and marketplace directory entries, and SHALL indicate whether each available entry is currently installable with the platform's real capabilities.
+The system SHALL present available plugins by source channel instead of flattening every source into one list. The plugin management panel SHALL separately surface built-in plugin discoveries, installed plugins, local catalog entries, and remote registry marketplace entries, and SHALL indicate whether each available entry is currently installable with the platform's real capabilities. Remote registry entries MUST expose registry availability or source-health state so operators can distinguish a reachable remote marketplace from a disabled or failing one.
 
 #### Scenario: Built-in plugin already installed
 - **WHEN** a built-in plugin is already present in the installed plugin registry
@@ -27,6 +27,11 @@ The system SHALL present available plugins by source channel instead of flatteni
 - **WHEN** a marketplace plugin entry lacks a real install source supported by the current platform contract
 - **THEN** the marketplace section SHALL show the entry as browse-only or coming soon
 - **THEN** the panel SHALL not present an enabled install action that implies unsupported remote installation
+
+#### Scenario: Remote registry source is unavailable
+- **WHEN** the configured remote registry is disabled, unreachable, or returns an invalid response
+- **THEN** the remote marketplace section SHALL show the registry source as unavailable with a stable reason
+- **THEN** the rest of the plugin management panel continues to function for installed and local plugin sources
 
 ### Requirement: Lifecycle actions are gated by executable capability and current state
 The system SHALL render lifecycle actions in the plugin panel according to the selected plugin's kind, runtime, and current lifecycle state. The panel SHALL expose only actions that are valid for the current record and SHALL explain unavailable actions for disabled, non-executable, or unsupported runtime combinations.
@@ -42,7 +47,7 @@ The system SHALL render lifecycle actions in the plugin panel according to the s
 - **THEN** the panel SHALL explain that the plugin does not currently run through an executable plugin runtime
 
 ### Requirement: Operators can install plugins through truthful source-aware flows
-The system SHALL let operators initiate plugin installation only through source flows the current platform contract supports. The plugin management panel SHALL provide explicit local-path install and catalog-entry install actions, and MUST keep browse-only entries non-installable when no supported install source is available.
+The system SHALL let operators initiate plugin installation only through source flows the current platform contract supports. The plugin management panel SHALL provide explicit local-path install, catalog-entry install, and supported remote-registry install actions, and MUST keep browse-only or unavailable entries non-installable when no supported install source is available.
 
 #### Scenario: Operator installs a plugin from a local path
 - **WHEN** the operator provides a filesystem path to a plugin directory or manifest file
@@ -58,6 +63,24 @@ The system SHALL let operators initiate plugin installation only through source 
 - **WHEN** an availability entry lacks a real install source supported by the current platform contract
 - **THEN** the panel shows the entry as browse-only or coming soon
 - **THEN** the panel MUST NOT render an install action that implies unsupported remote installation
+
+#### Scenario: Operator installs a plugin from the remote registry marketplace
+- **WHEN** the operator chooses an installable remote marketplace entry from the remote registry section
+- **THEN** the panel triggers the supported remote install action through the Go control plane instead of direct browser download
+- **THEN** the entry only moves into the installed registry section after the remote install and verification flow succeeds
+
+### Requirement: Remote registry install and availability states stay operator-visible in the panel
+The plugin management panel SHALL surface remote registry availability, in-progress install state, install failure categories, and resulting source provenance for remote marketplace entries. Remote-source failures MUST remain scoped to the remote marketplace section and MUST NOT collapse installed-plugin diagnostics or local install actions.
+
+#### Scenario: Remote install failure stays visible on the selected marketplace entry
+- **WHEN** a remote marketplace install fails because of registry reachability, download, or trust verification
+- **THEN** the panel shows the corresponding failure reason on the affected remote entry or detail surface
+- **THEN** the operator can retry or inspect the failure without losing the rest of the plugin console state
+
+#### Scenario: Successful remote install updates source provenance in details
+- **WHEN** a remote marketplace entry installs successfully and becomes an installed plugin record
+- **THEN** the plugin detail view shows the remote registry source provenance and selected version alongside trust and runtime metadata
+- **THEN** the remote marketplace section reflects that the entry is already installed
 
 ### Requirement: Operators can inspect trust, release, and runtime diagnostics for installed plugins
 The plugin management panel SHALL surface operator-facing diagnostics for the selected installed plugin, including trust state, approval state, release metadata, runtime metadata, and recent operational history when available. For ToolPlugin records with MCP runtime metadata, the panel SHALL expose transport details, capability counts, latest interaction summary, and on-demand MCP refresh and inspection actions. For WorkflowPlugin records, the panel SHALL expose recent workflow run history through the existing control-plane contracts.
@@ -94,3 +117,22 @@ The plugin management panel SHALL expose every lifecycle action already supporte
 - **WHEN** the operator selects a plugin that lacks a real update source or available release metadata
 - **THEN** the panel does not present update as a ready action
 - **THEN** the panel explains that no supported update source is currently available for that plugin
+
+### Requirement: The panel surfaces built-in readiness and setup guidance
+The plugin management panel SHALL display evaluated readiness state, blocking reasons, maintained docs references, and next-step setup guidance for official built-in plugins in both the built-in availability section and installed-plugin diagnostics when applicable. The panel MUST distinguish "installable" from "ready to activate" so operators can understand whether a built-in can be added now, used now, or first requires setup work.
+
+#### Scenario: Built-in availability card shows setup guidance
+- **WHEN** the built-in availability section includes an official built-in plugin whose readiness is not `ready`
+- **THEN** the card shows a readiness indicator, the blocking reason, and the next setup step for that built-in
+- **THEN** the card does not imply that the plugin is immediately runnable if activation would still fail
+
+#### Scenario: Installed built-in keeps readiness guidance in details
+- **WHEN** an operator selects an installed official built-in plugin that is still blocked by missing prerequisite or configuration
+- **THEN** the plugin detail surface continues to show the readiness state and setup guidance for that installed plugin
+- **THEN** lifecycle controls explain the blocking condition instead of failing without context
+
+#### Scenario: Host-unsupported built-in is rendered as blocked
+- **WHEN** an official built-in plugin is unsupported on the current host
+- **THEN** the panel renders that built-in as blocked or browse-only with an explicit reason
+- **THEN** the panel does not present a misleading ready-to-run state for that entry
+

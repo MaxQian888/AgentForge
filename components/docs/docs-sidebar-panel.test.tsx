@@ -100,11 +100,11 @@ describe("DocsSidebarPanel", () => {
 
     expect(screen.getByRole("link", { name: "Architecture ADR" })).toHaveAttribute(
       "href",
-      "/docs/adr",
+      "/docs?pageId=adr",
     );
     expect(screen.getByRole("link", { name: "Ops Runbook" })).toHaveAttribute(
       "href",
-      "/docs/runbook",
+      "/docs?pageId=runbook",
     );
     expect(mockPageTree).toHaveBeenCalledWith(
       expect.objectContaining({

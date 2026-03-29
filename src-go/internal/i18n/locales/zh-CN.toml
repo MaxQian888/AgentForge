@@ -1,0 +1,739 @@
+# 通用
+[InvalidRequestBody]
+other = "无效的请求体"
+
+[InternalError]
+other = "服务器内部错误"
+
+[Unauthorized]
+other = "未授权"
+
+[NotFound]
+other = "未找到"
+
+[AuthenticationRequired]
+other = "需要身份验证"
+
+[MissingUserContext]
+other = "缺少用户上下文"
+
+# 认证
+[EmailAlreadyExists]
+other = "该邮箱已被注册"
+
+[AuthServiceUnavailable]
+other = "认证服务不可用"
+
+[RegistrationFailed]
+other = "注册失败"
+
+[InvalidCredentials]
+other = "邮箱或密码错误"
+
+[LoginFailed]
+other = "登录失败"
+
+[InvalidRefreshToken]
+other = "刷新令牌无效或已过期"
+
+[TokenRefreshFailed]
+other = "令牌刷新失败"
+
+[LogoutFailed]
+other = "退出登录失败"
+
+[FailedToLoadUserProfile]
+other = "加载用户信息失败"
+
+[MissingAuthHeader]
+other = "缺少或无效的授权头"
+
+[InvalidOrExpiredToken]
+other = "令牌无效或已过期"
+
+[TokenRevoked]
+other = "令牌已被吊销"
+
+# ID / 参数
+[InvalidTaskID]
+other = "无效的任务 ID"
+
+[InvalidMemberID]
+other = "无效的成员 ID"
+
+[InvalidProjectID]
+other = "无效的项目 ID"
+
+[InvalidSprintID]
+other = "无效的迭代 ID"
+
+[InvalidAgentRunID]
+other = "无效的智能体运行 ID"
+
+[InvalidRuleID]
+other = "无效的规则 ID"
+
+[InvalidFieldID]
+other = "无效的字段 ID"
+
+[InvalidDashboardID]
+other = "无效的仪表盘 ID"
+
+[InvalidWidgetID]
+other = "无效的组件 ID"
+
+[InvalidPageID]
+other = "无效的页面 ID"
+
+[InvalidFormID]
+other = "无效的表单 ID"
+
+[InvalidLinkID]
+other = "无效的链接 ID"
+
+[InvalidMilestoneID]
+other = "无效的里程碑 ID"
+
+[InvalidNotificationID]
+other = "无效的通知 ID"
+
+[InvalidCommentID]
+other = "无效的评论 ID"
+
+[InvalidReviewID]
+other = "无效的评审 ID"
+
+[InvalidViewID]
+other = "无效的视图 ID"
+
+[InvalidOwnerID]
+other = "无效的所有者 ID"
+
+[InvalidParentID]
+other = "无效的父级 ID"
+
+[InvalidSourceID]
+other = "无效的源 ID"
+
+[InvalidTargetID]
+other = "无效的目标 ID"
+
+[InvalidTeamID]
+other = "无效的团队 ID"
+
+[InvalidVersionID]
+other = "无效的版本 ID"
+
+[InvalidTemplateID]
+other = "无效的模板 ID"
+
+[InvalidMemoryID]
+other = "无效的记忆 ID"
+
+[InvalidUserID]
+other = "无效的用户 ID"
+
+[InvalidAssigneeID]
+other = "无效的指派人 ID"
+
+[InvalidParentTaskID]
+other = "无效的父任务 ID"
+
+[InvalidParentCommentID]
+other = "无效的父评论 ID"
+
+[InvalidLimit]
+other = "无效的限制参数"
+
+# 智能体
+[FailedToStartAgentRun]
+other = "启动智能体运行失败"
+
+[FailedToListAgentRuns]
+other = "获取智能体运行列表失败"
+
+[AgentRunNotFound]
+other = "智能体运行记录未找到"
+
+[FailedToCancelAgentRun]
+other = "取消智能体运行失败"
+
+[FailedToFetchAgentRun]
+other = "获取智能体运行信息失败"
+
+[FailedToGetAgentLogs]
+other = "获取智能体日志失败"
+
+[FailedToUpdateAgentRunStatus]
+other = "更新智能体运行状态失败"
+
+# 自动化
+[FailedToListAutomationRules]
+other = "获取自动化规则列表失败"
+
+[FailedToCreateAutomationRule]
+other = "创建自动化规则失败"
+
+[AutomationRuleNotFound]
+other = "自动化规则未找到"
+
+[FailedToUpdateAutomationRule]
+other = "更新自动化规则失败"
+
+[FailedToDeleteAutomationRule]
+other = "删除自动化规则失败"
+
+[FailedToListAutomationLogs]
+other = "获取自动化日志列表失败"
+
+# 成本
+[InvalidProjectIDParam]
+other = "无效的项目 ID 参数"
+
+[InvalidSprintIDParam]
+other = "无效的迭代 ID 参数"
+
+[FailedToGetCostStats]
+other = "获取成本统计失败"
+
+# 自定义字段
+[FailedToListCustomFields]
+other = "获取自定义字段列表失败"
+
+[FailedToCreateCustomField]
+other = "创建自定义字段失败"
+
+[CustomFieldNotFound]
+other = "自定义字段未找到"
+
+[FailedToUpdateCustomField]
+other = "更新自定义字段失败"
+
+[FailedToDeleteCustomField]
+other = "删除自定义字段失败"
+
+[InvalidFieldIDInReorder]
+other = "排序参数中包含无效的字段 ID"
+
+[FailedToReorderCustomFields]
+other = "重排自定义字段失败"
+
+[FailedToListCustomFieldValues]
+other = "获取自定义字段值列表失败"
+
+[FailedToSetCustomFieldValue]
+other = "设置自定义字段值失败"
+
+[FailedToClearCustomFieldValue]
+other = "清除自定义字段值失败"
+
+# 仪表盘
+[FailedToListDashboards]
+other = "获取仪表盘列表失败"
+
+[FailedToListWidgets]
+other = "获取仪表盘组件列表失败"
+
+[FailedToCreateDashboard]
+other = "创建仪表盘失败"
+
+[DashboardNotFound]
+other = "仪表盘未找到"
+
+[FailedToUpdateDashboard]
+other = "更新仪表盘失败"
+
+[FailedToDeleteDashboard]
+other = "删除仪表盘失败"
+
+[FailedToSaveWidget]
+other = "保存组件失败"
+
+[FailedToDeleteWidget]
+other = "删除组件失败"
+
+# 文档分解
+[WikiPageNotFound]
+other = "知识库页面未找到"
+
+[FailedToDecomposePageIntoTasks]
+other = "将页面分解为任务失败"
+
+# 实体关联
+[FailedToCreateEntityLink]
+other = "创建实体关联失败"
+
+[SourceTypeAndIDRequired]
+other = "源类型和源 ID 为必填项"
+
+[FailedToListEntityLinks]
+other = "获取实体关联列表失败"
+
+[FailedToDeleteEntityLink]
+other = "删除实体关联失败"
+
+# 表单
+[FormNotFound]
+other = "表单未找到"
+
+[FailedToListForms]
+other = "获取表单列表失败"
+
+[InvalidTargetAssignee]
+other = "无效的目标指派人"
+
+[FailedToCreateForm]
+other = "创建表单失败"
+
+[FailedToUpdateForm]
+other = "更新表单失败"
+
+[FailedToDeleteForm]
+other = "删除表单失败"
+
+[TooManySubmissions]
+other = "提交次数过多"
+
+[FailedToSubmitForm]
+other = "提交表单失败"
+
+# 成员
+[FailedToCreateMember]
+other = "创建成员失败"
+
+[FailedToListMembers]
+other = "获取成员列表失败"
+
+[FailedToUpdateMember]
+other = "更新成员失败"
+
+[FailedToFetchUpdatedMember]
+other = "获取更新后的成员信息失败"
+
+[FailedToDeleteMember]
+other = "删除成员失败"
+
+# 记忆
+[MemoryServiceUnavailable]
+other = "记忆服务不可用"
+
+[FailedToStoreMemory]
+other = "存储记忆失败"
+
+[FailedToSearchMemories]
+other = "搜索记忆失败"
+
+[FailedToDeleteMemory]
+other = "删除记忆失败"
+
+# 里程碑
+[FailedToListMilestones]
+other = "获取里程碑列表失败"
+
+[FailedToLoadMilestoneMetrics]
+other = "加载里程碑指标失败"
+
+[InvalidTargetDate]
+other = "无效的目标日期"
+
+[FailedToCreateMilestone]
+other = "创建里程碑失败"
+
+[MilestoneNotFound]
+other = "里程碑未找到"
+
+[FailedToUpdateMilestone]
+other = "更新里程碑失败"
+
+[FailedToDeleteMilestone]
+other = "删除里程碑失败"
+
+# 通知
+[FailedToListNotifications]
+other = "获取通知列表失败"
+
+[FailedToMarkNotificationRead]
+other = "标记通知已读失败"
+
+[FailedToMarkAllRead]
+other = "标记全部已读失败"
+
+# 插件
+[InvalidInstallRequest]
+other = "无效的安装请求"
+
+[PathOrEntryIDRequired]
+other = "路径或入口 ID 为必填项"
+
+[OperationRequired]
+other = "操作类型为必填项"
+
+[ToolNameRequired]
+other = "工具名称为必填项"
+
+[URIRequired]
+other = "URI 为必填项"
+
+[NameRequired]
+other = "名称为必填项"
+
+[PluginIDRequired]
+other = "插件 ID 为必填项"
+
+[PathRequired]
+other = "路径为必填项"
+
+[EntryIDRequired]
+other = "入口 ID 为必填项"
+
+[FailedToListMarketplace]
+other = "获取市场列表失败"
+
+[LimitMustBePositive]
+other = "限制参数必须为正整数"
+
+[WorkflowExecutionNotConfigured]
+other = "工作流执行未配置"
+
+[InvalidWorkflowExecutionRequest]
+other = "无效的工作流执行请求"
+
+[RunIDMustBeValidUUID]
+other = "运行 ID 必须为有效的 UUID"
+
+[PluginIDIsRequired]
+other = "插件 ID 为必填项"
+
+# 项目
+[FailedToCreateProject]
+other = "创建项目失败"
+
+[FailedToInitProjectWiki]
+other = "初始化项目知识库失败"
+
+[FailedToInitProjectWikiTemplates]
+other = "初始化项目知识库模板失败"
+
+[FailedToListProjects]
+other = "获取项目列表失败"
+
+[ProjectNotFound]
+other = "项目未找到"
+
+[FailedToUpdateProject]
+other = "更新项目失败"
+
+[FailedToFetchUpdatedProject]
+other = "获取更新后的项目信息失败"
+
+# 评审
+[ReviewNotFound]
+other = "评审未找到"
+
+[TaskNotFound]
+other = "任务未找到"
+
+# 角色
+[FailedToLoadRoles]
+other = "加载角色列表失败"
+
+[RoleNotFound]
+other = "角色未找到"
+
+[FailedToLoadRole]
+other = "加载角色失败"
+
+[RoleIDOrNameRequired]
+other = "角色 ID 或名称为必填项"
+
+[FailedToSaveRole]
+other = "保存角色失败"
+
+[FailedToReloadRole]
+other = "重新加载角色失败"
+
+[RoleIDRequired]
+other = "角色 ID 为必填项"
+
+[FailedToDeleteRole]
+other = "删除角色失败"
+
+[RoleIDOrDraftRequired]
+other = "角色 ID 或草稿为必填项"
+
+[SandboxInputRequired]
+other = "沙盒输入为必填项"
+
+[RoleSandboxUnavailable]
+other = "角色沙盒桥接不可用"
+
+[FailedToLoadRuntimeCatalog]
+other = "加载运行时目录失败"
+
+[FailedToRunSandboxProbe]
+other = "运行角色沙盒探测失败"
+
+# 保存视图
+[FailedToListSavedViews]
+other = "获取保存视图列表失败"
+
+[FailedToCreateSavedView]
+other = "创建保存视图失败"
+
+[SavedViewNotFound]
+other = "保存视图未找到"
+
+[FailedToUpdateSavedView]
+other = "更新保存视图失败"
+
+[FailedToDeleteSavedView]
+other = "删除保存视图失败"
+
+[FailedToSetDefaultView]
+other = "设置默认视图失败"
+
+# 调度器
+[FailedToGetSchedulerStats]
+other = "获取调度器统计失败"
+
+[FailedToListScheduledJobs]
+other = "获取定时任务列表失败"
+
+[ScheduledJobNotFound]
+other = "定时任务未找到"
+
+# 迭代
+[InvalidStartDateFormat]
+other = "无效的开始日期格式"
+
+[InvalidEndDateFormat]
+other = "无效的结束日期格式"
+
+[FailedToCreateSprint]
+other = "创建迭代失败"
+
+[FailedToListSprints]
+other = "获取迭代列表失败"
+
+[SprintMetricsUnavailable]
+other = "迭代指标不可用"
+
+[SprintNotFound]
+other = "迭代未找到"
+
+[FailedToLoadSprintMetrics]
+other = "加载迭代指标失败"
+
+[SprintBurndownUnavailable]
+other = "迭代燃尽图不可用"
+
+[FailedToLoadBurndownData]
+other = "加载燃尽图数据失败"
+
+[FailedToUpdateSprint]
+other = "更新迭代失败"
+
+# 统计
+[FailedToGetVelocityStats]
+other = "获取速度统计失败"
+
+[FailedToGetAgentPerfStats]
+other = "获取智能体性能统计失败"
+
+# 任务
+[RecommenderUnavailable]
+other = "推荐服务不可用"
+
+[FailedToGenerateRecommendations]
+other = "生成推荐失败"
+
+[InvalidPlannedStartDate]
+other = "无效的计划开始日期"
+
+[InvalidPlannedEndDate]
+other = "无效的计划结束日期"
+
+[PlannedEndBeforeStart]
+other = "计划结束日期必须晚于计划开始日期"
+
+[FailedToCreateTask]
+other = "创建任务失败"
+
+[FailedToFetchCreatedTask]
+other = "获取已创建的任务失败"
+
+[InvalidCustomFieldFilters]
+other = "无效的自定义字段过滤条件"
+
+[InvalidCustomFieldSort]
+other = "无效的自定义字段排序条件"
+
+[FailedToListTasks]
+other = "获取任务列表失败"
+
+[FailedToUpdateTask]
+other = "更新任务失败"
+
+[FailedToFetchUpdatedTask]
+other = "获取更新后的任务失败"
+
+[FailedToReconcileDeps]
+other = "协调任务依赖关系失败"
+
+[FailedToDeleteTask]
+other = "删除任务失败"
+
+[FailedToFetchTask]
+other = "获取任务失败"
+
+[FailedToUpdateDependentTasks]
+other = "更新依赖任务失败"
+
+[FailedToAssignTask]
+other = "分配任务失败"
+
+[TaskDecomposerUnavailable]
+other = "任务分解服务不可用"
+
+[TaskAlreadyHasChildren]
+other = "任务已有子任务"
+
+[InvalidTaskDecomposition]
+other = "无效的任务分解结果"
+
+[FailedToDecomposeTask]
+other = "分解任务失败"
+
+# 任务评论
+[FailedToListTaskComments]
+other = "获取任务评论列表失败"
+
+[FailedToCreateTaskComment]
+other = "创建任务评论失败"
+
+[ResolvedFlagRequired]
+other = "已解决标记为必填项"
+
+[FailedToUpdateTaskComment]
+other = "更新任务评论失败"
+
+[FailedToDeleteTaskComment]
+other = "删除任务评论失败"
+
+# 团队
+[TeamServiceUnavailable]
+other = "团队服务不可用"
+
+[FailedToStartTeam]
+other = "启动团队失败"
+
+[TeamNotFound]
+other = "团队未找到"
+
+[FailedToListTeams]
+other = "获取团队列表失败"
+
+[InvalidOrMissingProjectID]
+other = "项目 ID 参数无效或缺失"
+
+[FailedToCancelTeam]
+other = "取消团队失败"
+
+[FailedToRetryTeam]
+other = "重试团队失败"
+
+[TeamStillActive]
+other = "团队仍处于活动状态，无法删除"
+
+[FailedToDeleteTeam]
+other = "删除团队失败"
+
+# 知识库
+[WikiSpaceNotFound]
+other = "知识库空间未找到"
+
+[FailedToListWikiPages]
+other = "获取知识库页面列表失败"
+
+[FailedToCreateWikiPage]
+other = "创建知识库页面失败"
+
+[FailedToUpdateWikiPage]
+other = "更新知识库页面失败"
+
+[WikiPageHasNewerChanges]
+other = "知识库页面有更新的变更"
+
+[InvalidExpectedUpdatedAt]
+other = "无效的预期更新时间"
+
+[FailedToDeleteWikiPage]
+other = "删除知识库页面失败"
+
+[CannotMoveIntoDescendant]
+other = "不能将页面移动到其子级下"
+
+[FailedToMoveWikiPage]
+other = "移动知识库页面失败"
+
+[FailedToListPageVersions]
+other = "获取页面版本列表失败"
+
+[FailedToCreatePageVersion]
+other = "创建页面版本失败"
+
+[PageVersionNotFound]
+other = "页面版本未找到"
+
+[FailedToRestorePageVersion]
+other = "恢复页面版本失败"
+
+[FailedToListPageComments]
+other = "获取页面评论列表失败"
+
+[FailedToCreatePageComment]
+other = "创建页面评论失败"
+
+[PageCommentNotFound]
+other = "页面评论未找到"
+
+[FailedToUpdatePageComment]
+other = "更新页面评论失败"
+
+[FailedToDeletePageComment]
+other = "删除页面评论失败"
+
+[FailedToListWikiTemplates]
+other = "获取知识库模板列表失败"
+
+[FailedToCreateTemplate]
+other = "创建模板失败"
+
+[FailedToCreatePageFromTemplate]
+other = "从模板创建页面失败"
+
+[FailedToListPageFavorites]
+other = "获取收藏页面列表失败"
+
+[FailedToUpdateFavoriteState]
+other = "更新收藏状态失败"
+
+[FailedToListRecentPages]
+other = "获取最近访问页面列表失败"
+
+[FailedToUpdatePinnedState]
+other = "更新置顶状态失败"
+
+# 工作流
+[InvalidTransitions]
+other = "无效的状态转换"
+
+[InvalidTriggers]
+other = "无效的触发器"
+
+[FailedToSaveWorkflowConfig]
+other = "保存工作流配置失败"
+
+# 中间件 - 项目
+[ProjectIDRequired]
+other = "项目 ID 为必填项"

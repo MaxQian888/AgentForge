@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { MessageSquareQuote, RotateCcw, CheckCircle2, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DocsComment } from "@/lib/stores/docs-store";
@@ -17,6 +18,8 @@ export function CommentThread({
   onReopen?: (commentId: string) => void;
   onCopyLink?: (commentId: string) => void;
 }) {
+  const t = useTranslations("docs");
+
   return (
     <div className="rounded-xl border border-border/60 bg-card/80 p-3">
       <div className="flex items-start justify-between gap-3">
@@ -25,7 +28,7 @@ export function CommentThread({
           <div className="space-y-1">
             <p className="text-sm font-medium">{comment.body}</p>
             <p className="text-xs text-muted-foreground">
-              {comment.anchorBlockId ? `Anchor: ${comment.anchorBlockId}` : "Page level"} ·{" "}
+              {comment.anchorBlockId ? t("comments.anchor", { id: comment.anchorBlockId }) : t("comments.pageLevel")} ·{" "}
               {new Date(comment.createdAt).toLocaleString()}
             </p>
           </div>

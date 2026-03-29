@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Bell, LogOut, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -21,9 +22,11 @@ import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { useNotificationStore } from "@/lib/stores/notification-store";
 import { MobileSidebar } from "./sidebar";
+import { LanguageSwitcher } from "./language-switcher";
 
 export function Header() {
   const router = useRouter();
+  const t = useTranslations("common");
   const [notifOpen, setNotifOpen] = useState(false);
   const { user, logout } = useAuthStore();
   const { notifications, unreadCount, markRead, markAllRead } = useNotificationStore();
@@ -55,7 +58,7 @@ export function Header() {
         </PopoverTrigger>
         <PopoverContent className="w-80 p-0" align="end">
           <div className="flex items-center justify-between border-b p-3">
-            <span className="font-medium">Notifications</span>
+            <span className="font-medium">{t("header.notifications")}</span>
             {unreadCount > 0 && (
               <Button
                 variant="ghost"
@@ -63,14 +66,14 @@ export function Header() {
                 className="h-auto px-2 py-1 text-xs"
                 onClick={() => markAllRead()}
               >
-                Mark all read
+                {t("header.markAllRead")}
               </Button>
             )}
           </div>
           <ScrollArea className="h-64">
             {notifications.length === 0 ? (
               <p className="p-4 text-center text-sm text-muted-foreground">
-                No notifications
+                {t("header.noNotifications")}
               </p>
             ) : (
               notifications.map((n) => (
@@ -101,6 +104,8 @@ export function Header() {
         </PopoverContent>
       </Popover>
 
+      <LanguageSwitcher />
+
       <DropdownMenu>
         <DropdownMenuTrigger asChild>
           <Button variant="ghost" size="icon-sm">
@@ -112,7 +117,7 @@ export function Header() {
         <DropdownMenuContent align="end">
           <DropdownMenuItem disabled>
             <User className="mr-2 size-4" />
-            {user?.name ?? "User"}
+            {user?.name ?? t("header.user")}
           </DropdownMenuItem>
           <DropdownMenuItem
             onClick={() => {
@@ -120,7 +125,7 @@ export function Header() {
             }}
           >
             <LogOut className="mr-2 size-4" />
-            Logout
+            {t("header.logout")}
           </DropdownMenuItem>
         </DropdownMenuContent>
       </DropdownMenu>

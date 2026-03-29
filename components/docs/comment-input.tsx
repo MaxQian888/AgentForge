@@ -1,18 +1,20 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
 export function CommentInput({
   onSubmit,
   suggestions = [],
-  placeholder = "Write a comment…",
+  placeholder,
 }: {
   onSubmit: (body: string) => void | Promise<void>;
   suggestions?: string[];
   placeholder?: string;
 }) {
+  const t = useTranslations("docs");
   const [value, setValue] = useState("");
   const suggestionItems = useMemo(() => {
     const match = value.match(/@([\w-]*)$/);
@@ -26,7 +28,7 @@ export function CommentInput({
     <div className="flex flex-col gap-2">
       <Input
         value={value}
-        placeholder={placeholder}
+        placeholder={placeholder ?? t("comments.writeComment")}
         onChange={(event) => setValue(event.target.value)}
       />
       {suggestionItems.length > 0 ? (
@@ -53,7 +55,7 @@ export function CommentInput({
           setValue("");
         }}
       >
-        Comment
+        {t("comments.comment")}
       </Button>
     </div>
   );

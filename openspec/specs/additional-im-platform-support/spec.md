@@ -1,11 +1,11 @@
 # additional-im-platform-support Specification
 
 ## Purpose
-Define the live-transport and platform-capability contract for the AgentForge IM Bridge so Feishu, Slack, DingTalk, Telegram, Discord, and WeCom can run the shared command and notification flows with explicit platform selection, accurate backend source metadata, provider-aware acknowledgement rules, and safe rich-message fallback behavior.
+Define the live-transport and platform-capability contract for the AgentForge IM Bridge so Feishu, Slack, DingTalk, Telegram, Discord, WeCom, QQ, and QQ Bot can run the shared command and notification flows with explicit platform selection, accurate backend source metadata, provider-aware acknowledgement rules, and safe rich-message fallback behavior.
 
 ## Requirements
 ### Requirement: Bridge runtime can start with a supported live platform as the active platform
-The IM Bridge SHALL allow a deployment to select exactly one active IM platform provider per process. The runtime SHALL resolve the requested `IM_PLATFORM` through the provider contract so built-in providers such as `feishu`, `slack`, `dingtalk`, `telegram`, `discord`, and `wecom`, plus future plugin-backed providers, share the same startup path. The runtime SHALL validate the required credentials and transport-specific configuration for the selected provider before starting message handling or notification delivery, and SHALL fail with an actionable configuration error instead of silently falling back to another provider or a local stub when the runtime is configured for live transport.
+The IM Bridge SHALL allow a deployment to select exactly one active IM platform provider per process. The runtime SHALL resolve the requested `IM_PLATFORM` through the provider contract so built-in providers such as `feishu`, `slack`, `dingtalk`, `telegram`, `discord`, `wecom`, `qq`, and `qqbot`, plus future plugin-backed providers, share the same startup path. The runtime SHALL validate the required credentials and transport-specific configuration for the selected provider before starting message handling or notification delivery, and SHALL fail with an actionable configuration error instead of silently falling back to another provider or a local stub when the runtime is configured for live transport.
 
 #### Scenario: Feishu bridge starts with valid live configuration
 - **WHEN** the bridge is configured with `IM_PLATFORM=feishu` and the required live transport credentials are present
@@ -22,8 +22,18 @@ The IM Bridge SHALL allow a deployment to select exactly one active IM platform 
 - **THEN** the bridge resolves and starts a WeCom live platform provider through the same shared provider contract
 - **AND** health and registration surfaces report WeCom as a supported active platform instead of a planned-only placeholder
 
+#### Scenario: QQ bridge starts with valid live configuration
+- **WHEN** the bridge is configured with `IM_PLATFORM=qq` and the required NapCat or OneBot live transport settings are present
+- **THEN** the bridge resolves and starts a QQ live platform provider through the shared provider contract
+- **AND** health and registration surfaces report QQ as a supported active platform instead of a documentation-only target
+
+#### Scenario: QQ Bot bridge starts with valid live configuration
+- **WHEN** the bridge is configured with `IM_PLATFORM=qqbot` and the required QQ Bot official credentials plus live transport settings are present
+- **THEN** the bridge resolves and starts a QQ Bot live platform provider through the shared provider contract
+- **AND** the runtime does not require a separate startup path outside the provider registry
+
 #### Scenario: Selected platform configuration is incomplete
-- **WHEN** the bridge is configured for `slack`, `dingtalk`, `telegram`, `discord`, or `wecom` but a required credential or transport parameter is missing
+- **WHEN** the bridge is configured for `slack`, `dingtalk`, `telegram`, `discord`, `wecom`, `qq`, or `qqbot` but a required credential or transport parameter is missing
 - **THEN** startup fails with an actionable configuration error
 - **AND** the bridge does not silently fall back to another platform implementation
 
@@ -33,7 +43,7 @@ The IM Bridge SHALL allow a deployment to select exactly one active IM platform 
 - **AND** operators can distinguish that explicit gap from a transient configuration failure
 
 ### Requirement: Core command handling remains platform-consistent across supported platforms
-The system SHALL translate Feishu, Slack, DingTalk, Telegram, Discord, and WeCom inbound events or interactions into `core.Message` values that preserve platform identity, user identity, chat identity, reply context, and message content so that the existing `/task`, `/agent`, `/cost`, `/help`, and `@AgentForge` fallback flows execute with consistent command semantics across all supported platforms.
+The system SHALL translate Feishu, Slack, DingTalk, Telegram, Discord, WeCom, QQ, and QQ Bot inbound events or interactions into `core.Message` values that preserve platform identity, user identity, chat identity, reply context, and message content so that the existing `/task`, `/agent`, `/cost`, `/help`, and `@AgentForge` fallback flows execute with consistent command semantics across all supported platforms.
 
 #### Scenario: Telegram slash-style command routes to an existing handler
 - **WHEN** a Telegram inbound update is normalized into `core.Message` content containing `/task list`
@@ -50,13 +60,23 @@ The system SHALL translate Feishu, Slack, DingTalk, Telegram, Discord, and WeCom
 - **THEN** the engine invokes the registered `/help` command handler through the same shared command path
 - **AND** the resulting response is sent back to the originating WeCom conversation context
 
+#### Scenario: QQ group command routes to the shared command engine
+- **WHEN** a QQ inbound group or direct message is normalized into `core.Message` content containing `/task list`
+- **THEN** the engine invokes the registered `/task` command handler through the shared command path
+- **AND** the resulting response is sent back to the originating QQ conversation context
+
+#### Scenario: QQ Bot command routes to the shared command engine
+- **WHEN** a QQ Bot official inbound message or interaction is normalized into `core.Message` content containing `/help`
+- **THEN** the engine invokes the registered `/help` command handler through the same shared command path
+- **AND** the resulting response is sent back to the originating QQ Bot conversation context
+
 #### Scenario: Feishu mention uses the existing fallback path
 - **WHEN** a Feishu inbound message mentions `@AgentForge` without matching a registered slash command
 - **THEN** the engine invokes the configured fallback handler
 - **AND** the platform returns the fallback response to the originating Feishu conversation
 
 ### Requirement: Platform source metadata is propagated to backend API calls
-IM Bridge requests to the AgentForge backend SHALL identify the actual source platform instead of hardcoding Feishu so that backend audit, routing, notification policy, and downstream analytics can distinguish Feishu, Slack, DingTalk, Telegram, Discord, and WeCom traffic.
+IM Bridge requests to the AgentForge backend SHALL identify the actual source platform instead of hardcoding Feishu so that backend audit, routing, notification policy, and downstream analytics can distinguish Feishu, Slack, DingTalk, Telegram, Discord, WeCom, QQ, and QQ Bot traffic.
 
 #### Scenario: Telegram command call includes Telegram as source
 - **WHEN** a user triggers a backend-backed command from Telegram
@@ -65,6 +85,14 @@ IM Bridge requests to the AgentForge backend SHALL identify the actual source pl
 #### Scenario: Discord command call includes Discord as source
 - **WHEN** a user triggers a backend-backed command from Discord
 - **THEN** the bridge sends the backend request with source metadata identifying `discord`
+
+#### Scenario: QQ command call includes QQ as source
+- **WHEN** a user triggers a backend-backed command from QQ
+- **THEN** the bridge sends the backend request with source metadata identifying `qq`
+
+#### Scenario: QQ Bot command call includes QQ Bot as source
+- **WHEN** a user triggers a backend-backed command from QQ Bot
+- **THEN** the bridge sends the backend request with source metadata identifying `qqbot`
 
 #### Scenario: Active platform source remains stable outside inbound message context
 - **WHEN** the bridge issues a backend-backed request from logic that is scoped to the active platform instance but not a specific inbound message
@@ -90,6 +118,18 @@ The notification receiver SHALL only deliver a notification through the active p
 - **AND** the notification contains structured or card-oriented content with a preserved WeCom reply target
 - **THEN** the Bridge resolves the delivery through the WeCom rendering profile into a supported app message or template-card path
 - **AND** it falls back to WeCom-supported plain text with explicit fallback metadata when the richer path cannot be honored
+
+#### Scenario: Matching QQ delivery uses declared QQ rendering profile
+- **WHEN** the notification receiver receives a notification whose platform matches the active QQ bridge
+- **AND** the notification contains structured or richer content with a preserved QQ reply target
+- **THEN** the Bridge resolves the delivery through the QQ rendering profile into a QQ-supported send or reply path
+- **AND** it falls back to QQ-supported text or link output with explicit fallback metadata when the richer path cannot be honored
+
+#### Scenario: Matching QQ Bot delivery uses declared QQ Bot rendering profile
+- **WHEN** the notification receiver receives a notification whose platform matches the active QQ Bot bridge
+- **AND** the notification contains structured or richer content with a preserved QQ Bot reply target
+- **THEN** the Bridge resolves the delivery through the QQ Bot rendering profile into a QQ Bot-supported send or reply path
+- **AND** it falls back to QQ Bot-supported text or link output with explicit fallback metadata when the richer path cannot be honored
 
 #### Scenario: Matching platform without the required native capability falls back cleanly
 - **WHEN** the notification receiver receives a notification whose platform matches the active bridge platform
@@ -130,6 +170,16 @@ The bridge SHALL implement the live transport of each supported platform accordi
 - **THEN** the bridge uses the documented WeCom callback/event intake and application-message delivery model rather than a synthetic polling loop
 - **AND** the deployment documentation reflects the required callback exposure, token exchange, and supported update semantics for that path
 
+#### Scenario: QQ live transport uses OneBot-compatible event and send semantics
+- **WHEN** a QQ deployment is configured for live transport
+- **THEN** the bridge uses the documented NapCat or OneBot-compatible event intake and message-send model rather than a synthetic polling loop
+- **AND** the deployment documentation reflects the required socket or callback exposure, credential handling, and supported update semantics for that path
+
+#### Scenario: QQ Bot live transport uses official event and reply semantics
+- **WHEN** a QQ Bot official application is configured for live transport
+- **THEN** the bridge uses the documented QQ Bot event intake and reply model rather than a synthetic polling loop
+- **AND** the deployment documentation reflects the required app credentials, callback or websocket contract, and supported follow-up semantics for that path
+
 #### Scenario: Feishu live transport prefers long connection where supported
 - **WHEN** a Feishu enterprise self-built application is configured for live transport
 - **THEN** the bridge uses Feishu long connection as the preferred event intake mode for supported event or callback types
@@ -148,6 +198,16 @@ The system SHALL preserve enough platform-specific reply target data when normal
 - **THEN** the Bridge captures the interaction follow-up context required after the initial acknowledgement
 - **AND** that context remains available for later completion messages
 
+#### Scenario: QQ command preserves conversation target
+- **WHEN** a QQ message starts a long-running action
+- **THEN** the Bridge captures the QQ conversation-specific reply target needed for later updates
+- **AND** later updates use the preserved target instead of inferring a destination only from task metadata
+
+#### Scenario: QQ Bot command preserves conversation target
+- **WHEN** a QQ Bot message starts a long-running action
+- **THEN** the Bridge captures the QQ Bot conversation-specific reply target needed for later updates
+- **AND** later updates use the preserved target instead of inferring a destination only from task metadata
+
 #### Scenario: Feishu or Telegram command preserves conversation target
 - **WHEN** a Feishu or Telegram message starts a long-running action
 - **THEN** the Bridge captures the conversation-specific reply target for that action
@@ -165,3 +225,8 @@ The active IM platform runtime SHALL expose the delivery characteristics needed 
 - **WHEN** a platform supports deferred replies or editable progress updates
 - **THEN** the Bridge health or registration payload reports those capabilities
 - **AND** the backend can choose a compatible progress delivery strategy for that platform
+
+#### Scenario: Health and registration reflect QQ-family runtime characteristics
+- **WHEN** the active platform is QQ or QQ Bot
+- **THEN** the Bridge health or registration payload reports the QQ-family callback exposure, mutable-update, and richer-message characteristics that the active provider actually supports
+- **AND** operators can distinguish runnable QQ-family providers from documentation-only placeholders

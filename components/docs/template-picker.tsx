@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -21,13 +22,15 @@ export function TemplatePicker({
   templates: DocsPage[];
   onPick: (templateId: string) => void;
 }) {
+  const t = useTranslations("docs");
+
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Select a template</DialogTitle>
+          <DialogTitle>{t("templatePicker.title")}</DialogTitle>
           <DialogDescription>
-            Start from a seeded document or one of your saved team templates.
+            {t("templatePicker.desc")}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -40,20 +43,20 @@ export function TemplatePicker({
             >
               <div className="font-medium">{template.title}</div>
               <div className="text-xs text-muted-foreground">
-                {template.templateCategory || "uncategorized"} ·{" "}
-                {template.isSystem ? "System" : "Custom"}
+                {template.templateCategory || t("templatePicker.uncategorized")} ·{" "}
+                {template.isSystem ? t("templatePicker.system") : t("templatePicker.custom")}
               </div>
             </button>
           ))}
           {templates.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
-              No templates available yet.
+              {t("templatePicker.noTemplates")}
             </div>
           ) : null}
         </div>
         <div className="flex justify-end">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Close
+            {t("templatePicker.close")}
           </Button>
         </div>
       </DialogContent>

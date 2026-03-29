@@ -53,6 +53,7 @@ export interface Task {
   agentBranch: string;
   agentWorktree: string;
   agentSessionId: string;
+  labels: string[];
   blockedBy: string[];
   plannedStartAt: string | null;
   plannedEndAt: string | null;
@@ -81,6 +82,7 @@ interface TaskApiShape {
   agentBranch?: string | null;
   agentWorktree?: string | null;
   agentSessionId?: string | null;
+  labels?: string[] | null;
   blockedBy?: string[] | null;
   plannedStartAt?: string | null;
   plannedEndAt?: string | null;
@@ -123,6 +125,7 @@ interface TaskState {
   fetchTasks: (projectId: string) => Promise<void>;
   createTask: (data: Partial<Task>) => Promise<void>;
   updateTask: (id: string, data: Partial<Task>) => Promise<void>;
+  deleteTask: (id: string) => Promise<void>;
   transitionTask: (id: string, newStatus: TaskStatus) => Promise<void>;
   upsertTask: (task: TaskApiShape) => void;
   removeTask: (id: string) => void;
@@ -133,6 +136,8 @@ interface TaskState {
     assigneeName?: string
   ) => Promise<void>;
   decomposeTask: (id: string) => Promise<TaskDecompositionResult | null>;
+  bulkTransition: (ids: string[], newStatus: TaskStatus) => Promise<void>;
+  bulkDelete: (ids: string[]) => Promise<void>;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -179,6 +184,7 @@ function normalizeTask(task: TaskApiShape): Task {
     agentBranch: task.agentBranch ?? "",
     agentWorktree: task.agentWorktree ?? "",
     agentSessionId: task.agentSessionId ?? "",
+    labels: task.labels ?? [],
     blockedBy: task.blockedBy ?? [],
     plannedStartAt: task.plannedStartAt ?? null,
     plannedEndAt: task.plannedEndAt ?? null,
@@ -273,6 +279,24 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
           ),
         }));
       }
+      throw error;
+    }
+  },
+
+  deleteTask: async (id) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+
+    const previousTasks = get().tasks;
+    set((state) => ({
+      tasks: state.tasks.filter((task) => task.id !== id),
+    }));
+
+    try {
+      const api = createApiClient(API_URL);
+      await api.delete(`/api/v1/tasks/${id}`, { token });
+    } catch (error) {
+      set({ tasks: previousTasks });
       throw error;
     }
   },
@@ -374,6 +398,55 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
   removeTask: (id) => {
     set((state) => ({
       tasks: state.tasks.filter((task) => task.id !== id),
+    }));
+  },
+
+  bulkTransition: async (ids, newStatus) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+
+    const api = createApiClient(API_URL);
+    const results = await Promise.allSettled(
+      ids.map((id) =>
+        api.post<TaskApiShape>(
+          `/api/v1/tasks/${id}/transition`,
+          { status: newStatus },
+          { token }
+        )
+      )
+    );
+
+    set((state) => {
+      let tasks = [...state.tasks];
+      for (let i = 0; i < results.length; i++) {
+        const result = results[i];
+        if (result.status === "fulfilled") {
+          const normalized = normalizeTask(result.value.data);
+          tasks = tasks.map((t) => (t.id === normalized.id ? normalized : t));
+        }
+      }
+      return { tasks };
+    });
+  },
+
+  bulkDelete: async (ids) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+
+    const api = createApiClient(API_URL);
+    const results = await Promise.allSettled(
+      ids.map((id) => api.delete(`/api/v1/tasks/${id}`, { token }))
+    );
+
+    const deletedIds = new Set<string>();
+    for (let i = 0; i < results.length; i++) {
+      if (results[i].status === "fulfilled") {
+        deletedIds.add(ids[i]);
+      }
+    }
+
+    set((state) => ({
+      tasks: state.tasks.filter((t) => !deletedIds.has(t.id)),
     }));
   },
 }));

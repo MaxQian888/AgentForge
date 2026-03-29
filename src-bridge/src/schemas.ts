@@ -1,5 +1,25 @@
 import { z } from "zod";
 
+const RoleExecutionSkillSchema = z.object({
+  path: z.string().min(1),
+  label: z.string().min(1),
+  description: z.string().optional(),
+  instructions: z.string().optional(),
+  source: z.string().optional(),
+  source_root: z.string().optional(),
+  origin: z.string().optional(),
+  requires: z.array(z.string()).optional(),
+  tools: z.array(z.string()).optional(),
+}).strict();
+
+const RoleExecutionSkillDiagnosticSchema = z.object({
+  code: z.string().min(1),
+  path: z.string().optional(),
+  message: z.string().min(1),
+  blocking: z.boolean(),
+  auto_load: z.boolean().optional(),
+}).strict();
+
 export const RoleConfigSchema = z.object({
   role_id: z.string().min(1),
   name: z.string().min(1),
@@ -13,6 +33,9 @@ export const RoleConfigSchema = z.object({
   permission_mode: z.string(),
   tools: z.array(z.string()).optional(),
   knowledge_context: z.string().optional(),
+  loaded_skills: z.array(RoleExecutionSkillSchema).optional(),
+  available_skills: z.array(RoleExecutionSkillSchema).optional(),
+  skill_diagnostics: z.array(RoleExecutionSkillDiagnosticSchema).optional(),
   output_filters: z.array(z.string()).optional(),
 }).strict();
 

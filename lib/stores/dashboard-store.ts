@@ -45,6 +45,11 @@ export interface DashboardWidget {
   updatedAt: string;
 }
 
+export interface DashboardWidgetRequestState {
+  status: "idle" | "loading" | "success" | "error";
+  error: string | null;
+}
+
 interface TaskListResponse {
   items: DashboardTaskSource[];
   total: number;
@@ -56,9 +61,13 @@ interface DashboardState {
   summary: DashboardSummary | null;
   projects: DashboardProject[];
   selectedProjectId: string | null;
+  activeDashboardIdByProject: Record<string, string | null>;
+  dashboardsLoadingByProject: Record<string, boolean>;
+  dashboardsErrorByProject: Record<string, string | null>;
   dashboardsByProject: Record<string, DashboardConfig[]>;
   widgetsByDashboard: Record<string, DashboardWidget[]>;
   widgetData: Record<string, unknown>;
+  widgetRequestStateByKey: Record<string, DashboardWidgetRequestState>;
   tasks: DashboardTaskSource[];
   members: DashboardMemberSource[];
   agents: DashboardAgentSource[];
@@ -68,6 +77,7 @@ interface DashboardState {
   sectionErrors: Record<string, string>;
   fetchSummary: (options?: { projectId?: string | null; now?: string }) => Promise<void>;
   fetchDashboards: (projectId: string) => Promise<void>;
+  setActiveDashboard: (projectId: string, dashboardId: string | null) => void;
   createDashboard: (projectId: string, input: { name: string; layout?: unknown }) => Promise<void>;
   updateDashboard: (projectId: string, dashboardId: string, input: { name?: string; layout?: unknown }) => Promise<void>;
   deleteDashboard: (projectId: string, dashboardId: string) => Promise<void>;
@@ -140,9 +150,13 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
   summary: null,
   projects: [],
   selectedProjectId: null,
+  activeDashboardIdByProject: {},
+  dashboardsLoadingByProject: {},
+  dashboardsErrorByProject: {},
   dashboardsByProject: {},
   widgetsByDashboard: {},
   widgetData: {},
+  widgetRequestStateByKey: {},
   tasks: [],
   members: [],
   agents: [],
@@ -278,15 +292,66 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
     const token = getToken();
     if (!token) return;
     const api = createApiClient(API_URL);
-    const { data } = await api.get<DashboardConfig[]>(`/api/v1/projects/${projectId}/dashboards`, { token });
     set((state) => ({
-      dashboardsByProject: { ...state.dashboardsByProject, [projectId]: data ?? [] },
-      widgetsByDashboard: {
-        ...state.widgetsByDashboard,
-        ...(data ?? []).reduce<Record<string, DashboardWidget[]>>((acc, item) => {
-          acc[item.id] = item.widgets ?? [];
-          return acc;
-        }, {}),
+      dashboardsLoadingByProject: {
+        ...state.dashboardsLoadingByProject,
+        [projectId]: true,
+      },
+      dashboardsErrorByProject: {
+        ...state.dashboardsErrorByProject,
+        [projectId]: null,
+      },
+    }));
+    try {
+      const { data } = await api.get<DashboardConfig[]>(`/api/v1/projects/${projectId}/dashboards`, { token });
+      set((state) => ({
+        activeDashboardIdByProject: {
+          ...state.activeDashboardIdByProject,
+          [projectId]:
+            (state.activeDashboardIdByProject[projectId] &&
+            (data ?? []).some((item) => item.id === state.activeDashboardIdByProject[projectId]))
+              ? state.activeDashboardIdByProject[projectId]
+              : data?.[0]?.id ?? null,
+        },
+        dashboardsLoadingByProject: {
+          ...state.dashboardsLoadingByProject,
+          [projectId]: false,
+        },
+        dashboardsErrorByProject: {
+          ...state.dashboardsErrorByProject,
+          [projectId]: null,
+        },
+        dashboardsByProject: { ...state.dashboardsByProject, [projectId]: data ?? [] },
+        widgetsByDashboard: {
+          ...state.widgetsByDashboard,
+          ...(data ?? []).reduce<Record<string, DashboardWidget[]>>((acc, item) => {
+            acc[item.id] = item.widgets ?? [];
+            return acc;
+          }, {}),
+        },
+      }));
+    } catch (error) {
+      set((state) => ({
+        dashboardsLoadingByProject: {
+          ...state.dashboardsLoadingByProject,
+          [projectId]: false,
+        },
+        dashboardsErrorByProject: {
+          ...state.dashboardsErrorByProject,
+          [projectId]:
+            error instanceof Error
+              ? error.message
+              : "Failed to load dashboards",
+        },
+      }));
+    }
+  },
+
+  setActiveDashboard: (projectId, dashboardId) => {
+    set((state) => ({
+      activeDashboardIdByProject: {
+        ...state.activeDashboardIdByProject,
+        [projectId]: dashboardId,
       },
     }));
   },
@@ -297,6 +362,10 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
     const api = createApiClient(API_URL);
     const { data } = await api.post<DashboardConfig>(`/api/v1/projects/${projectId}/dashboards`, input, { token });
     set((state) => ({
+      activeDashboardIdByProject: {
+        ...state.activeDashboardIdByProject,
+        [projectId]: data.id,
+      },
       dashboardsByProject: {
         ...state.dashboardsByProject,
         [projectId]: [...(state.dashboardsByProject[projectId] ?? []), data],
@@ -326,10 +395,20 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
     set((state) => {
       const nextWidgets = { ...state.widgetsByDashboard };
       delete nextWidgets[dashboardId];
+      const remainingDashboards = (state.dashboardsByProject[projectId] ?? []).filter(
+        (item) => item.id !== dashboardId
+      );
       return {
+        activeDashboardIdByProject: {
+          ...state.activeDashboardIdByProject,
+          [projectId]:
+            state.activeDashboardIdByProject[projectId] === dashboardId
+              ? remainingDashboards[0]?.id ?? null
+              : state.activeDashboardIdByProject[projectId] ?? null,
+        },
         dashboardsByProject: {
           ...state.dashboardsByProject,
-          [projectId]: (state.dashboardsByProject[projectId] ?? []).filter((item) => item.id !== dashboardId),
+          [projectId]: remainingDashboards,
         },
         widgetsByDashboard: nextWidgets,
       };
@@ -341,12 +420,38 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
     if (!token) return null;
     const api = createApiClient(API_URL);
     const query = config == null ? "" : `?config=${encodeURIComponent(JSON.stringify(config))}`;
-    const { data } = await api.get<unknown>(`/api/v1/projects/${projectId}/dashboard/widgets/${widgetType}${query}`, { token });
     const key = `${projectId}:${widgetType}:${JSON.stringify(config ?? {})}`;
     set((state) => ({
-      widgetData: { ...state.widgetData, [key]: data },
+      widgetRequestStateByKey: {
+        ...state.widgetRequestStateByKey,
+        [key]: { status: "loading", error: null },
+      },
     }));
-    return data;
+    try {
+      const { data } = await api.get<unknown>(`/api/v1/projects/${projectId}/dashboard/widgets/${widgetType}${query}`, { token });
+      set((state) => ({
+        widgetData: { ...state.widgetData, [key]: data },
+        widgetRequestStateByKey: {
+          ...state.widgetRequestStateByKey,
+          [key]: { status: "success", error: null },
+        },
+      }));
+      return data;
+    } catch (error) {
+      set((state) => ({
+        widgetRequestStateByKey: {
+          ...state.widgetRequestStateByKey,
+          [key]: {
+            status: "error",
+            error:
+              error instanceof Error
+                ? error.message
+                : "Failed to load widget data",
+          },
+        },
+      }));
+      return null;
+    }
   },
 
   saveWidget: async (projectId, dashboardId, input) => {

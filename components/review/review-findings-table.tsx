@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { cn } from "@/lib/utils";
 import { Badge } from "@/components/ui/badge";
 import {
@@ -11,6 +12,7 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import type { ReviewFinding } from "@/lib/stores/review-store";
+import { getReviewRiskLabel } from "./review-copy";
 
 const severityColors: Record<string, string> = {
   critical: "bg-red-500/15 text-red-700 dark:text-red-400",
@@ -25,10 +27,12 @@ interface ReviewFindingsTableProps {
 }
 
 export function ReviewFindingsTable({ findings }: ReviewFindingsTableProps) {
+  const t = useTranslations("reviews");
+
   if (findings.length === 0) {
     return (
       <p className="py-4 text-center text-sm text-muted-foreground">
-        No findings reported.
+        {t("noFindingsReported")}
       </p>
     );
   }
@@ -37,42 +41,42 @@ export function ReviewFindingsTable({ findings }: ReviewFindingsTableProps) {
     <Table>
       <TableHeader>
         <TableRow>
-          <TableHead>Severity</TableHead>
-          <TableHead>Category</TableHead>
-          <TableHead>Source</TableHead>
-          <TableHead>File:Line</TableHead>
-          <TableHead>Message</TableHead>
-          <TableHead>Suggestion</TableHead>
+          <TableHead>{t("findingSeverity")}</TableHead>
+          <TableHead>{t("findingCategory")}</TableHead>
+          <TableHead>{t("findingSource")}</TableHead>
+          <TableHead>{t("findingFileLine")}</TableHead>
+          <TableHead>{t("findingMessage")}</TableHead>
+          <TableHead>{t("findingSuggestion")}</TableHead>
         </TableRow>
       </TableHeader>
       <TableBody>
-        {findings.map((f, i) => (
-          <TableRow key={i}>
+        {findings.map((finding, index) => (
+          <TableRow key={index}>
             <TableCell>
               <Badge
                 variant="secondary"
-                className={cn("text-xs", severityColors[f.severity] ?? "")}
+                className={cn("text-xs", severityColors[finding.severity] ?? "")}
               >
-                {f.severity}
+                {getReviewRiskLabel(t, finding.severity)}
               </Badge>
             </TableCell>
             <TableCell className="text-xs">
-              {f.category}
-              {f.subcategory ? ` / ${f.subcategory}` : ""}
+              {finding.category}
+              {finding.subcategory ? ` / ${finding.subcategory}` : ""}
             </TableCell>
             <TableCell className="text-xs text-muted-foreground">
-              {f.sources && f.sources.length > 1
-                ? `${f.sources[0]} +${f.sources.length - 1}`
-                : f.sources?.[0] ?? "-"}
+              {finding.sources && finding.sources.length > 1
+                ? `${finding.sources[0]} +${finding.sources.length - 1}`
+                : finding.sources?.[0] ?? "-"}
             </TableCell>
             <TableCell className="font-mono text-xs">
-              {f.file ? `${f.file}${f.line ? `:${f.line}` : ""}` : "-"}
+              {finding.file ? `${finding.file}${finding.line ? `:${finding.line}` : ""}` : "-"}
             </TableCell>
             <TableCell className="max-w-xs whitespace-normal text-xs">
-              {f.message}
+              {finding.message}
             </TableCell>
             <TableCell className="max-w-xs whitespace-normal text-xs text-muted-foreground">
-              {f.suggestion ?? "-"}
+              {finding.suggestion ?? "-"}
             </TableCell>
           </TableRow>
         ))}

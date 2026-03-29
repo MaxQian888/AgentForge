@@ -1,0 +1,32 @@
+apiVersion: agentforge/v1
+kind: ReviewPlugin
+metadata:
+  id: performance-check
+  name: Performance Check
+  version: 0.1.0
+  description: Built-in review plugin that highlights performance-sensitive hotspots and expensive code paths.
+  tags:
+    - builtin
+    - review
+    - performance
+spec:
+  runtime: mcp
+  transport: stdio
+  command: bun
+  args:
+    - run
+    - src/index.ts
+  review:
+    entrypoint: review:run
+    triggers:
+      events:
+        - pull_request.updated
+      filePatterns:
+        - src/**/*.ts
+        - src-go/**/*.go
+    output:
+      format: findings/v1
+permissions: {}
+source:
+  type: builtin
+  path: ./plugins/reviews/performance-check/manifest.yaml

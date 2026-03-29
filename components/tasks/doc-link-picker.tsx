@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -26,13 +27,14 @@ export function DocLinkPicker({
   docs: DocLinkPickerItem[];
   onPick: (pageId: string) => void;
 }) {
+  const t = useTranslations("tasks");
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent>
         <DialogHeader>
-          <DialogTitle>Link a document</DialogTitle>
+          <DialogTitle>{t("docPicker.title")}</DialogTitle>
           <DialogDescription>
-            Select a requirement or design page to attach to this task.
+            {t("docPicker.description")}
           </DialogDescription>
         </DialogHeader>
         <div className="grid gap-3">
@@ -51,13 +53,13 @@ export function DocLinkPicker({
           ))}
           {docs.length === 0 ? (
             <div className="rounded-lg border border-dashed border-border/70 p-4 text-sm text-muted-foreground">
-              No docs available to link yet.
+              {t("docPicker.empty")}
             </div>
           ) : null}
         </div>
         <div className="flex justify-end">
           <Button variant="ghost" onClick={() => onOpenChange(false)}>
-            Close
+            {t("docPicker.close")}
           </Button>
         </div>
       </DialogContent>

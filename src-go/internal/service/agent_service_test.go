@@ -240,7 +240,8 @@ func (m *mockAgentProjectRepo) GetByID(_ context.Context, id uuid.UUID) (*model.
 }
 
 type mockAgentRoleStore struct {
-	roles map[string]*rolepkg.Manifest
+	roles     map[string]*rolepkg.Manifest
+	skillsDir string
 }
 
 func (m *mockAgentRoleStore) Get(id string) (*rolepkg.Manifest, error) {
@@ -249,6 +250,10 @@ func (m *mockAgentRoleStore) Get(id string) (*rolepkg.Manifest, error) {
 		return &cloned, nil
 	}
 	return nil, os.ErrNotExist
+}
+
+func (m *mockAgentRoleStore) SkillsDir() string {
+	return m.skillsDir
 }
 
 type mockAgentQueueStore struct {
@@ -706,6 +711,59 @@ func TestAgentService_SpawnRejectsUnknownRole(t *testing.T) {
 	}
 	if len(repo.runsByTask[taskID]) != 0 {
 		t.Fatalf("expected no stored runs when role lookup fails, got %d", len(repo.runsByTask[taskID]))
+	}
+}
+
+func TestAgentService_SpawnRejectsBlockingAutoLoadSkillProjection(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	repo := newMockAgentRunRepo()
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Spawn agent",
+		Description: "Resolve runtime skills before execution",
+		BudgetUsd:   5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	bridge := &mockAgentBridge{}
+	worktrees := &mockWorktreeManager{}
+	skillsDir := t.TempDir()
+	roleStore := &mockAgentRoleStore{
+		skillsDir: skillsDir,
+		roles: map[string]*rolepkg.Manifest{
+			"frontend-developer": {
+				Metadata: model.RoleMetadata{ID: "frontend-developer", Name: "Frontend Developer"},
+				Identity: model.RoleIdentity{
+					Role:      "Senior Frontend Developer",
+					Goal:      "Deliver polished frontend work",
+					Backstory: "You specialize in React and UX detail.",
+				},
+				SystemPrompt: "Always preserve the established UI language.",
+				Capabilities: model.RoleCapabilities{
+					AllowedTools: []string{"Read", "Edit", "Write"},
+					MaxTurns:     18,
+					Skills: []model.RoleSkillReference{
+						{Path: "skills/react", AutoLoad: true},
+					},
+				},
+				Security: model.RoleSecurity{
+					MaxBudgetUsd:   3.5,
+					PermissionMode: "bypassPermissions",
+				},
+			},
+		},
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, roleStore)
+
+	_, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 0, "frontend-developer")
+	if err == nil || !strings.Contains(err.Error(), "skills/react") {
+		t.Fatalf("Spawn() error = %v, want blocking skill projection failure mentioning skills/react", err)
+	}
+	if bridge.lastExecute.TaskID != "" {
+		t.Fatalf("bridge Execute() should not be called when auto-load skill projection blocks, got %+v", bridge.lastExecute)
 	}
 }
 
@@ -1213,7 +1271,7 @@ func TestAgentService_RequestSpawnQueuesWhenAdmissionHasNoImmediateSlot(t *testi
 	svc.SetPool(agentPool)
 	svc.SetQueueStore(queueStore)
 
-	result, err := svc.RequestSpawn(context.Background(), taskID, memberID, "codex", "openai", "gpt-5-codex", 5, "")
+	result, err := svc.RequestSpawn(context.Background(), taskID, memberID, "codex", "openai", "gpt-5-codex", 5, "", model.PriorityNormal)
 	if err != nil {
 		t.Fatalf("RequestSpawn() error = %v", err)
 	}
@@ -1333,6 +1391,85 @@ func TestAgentService_UpdateStatusPromotesQueuedAdmissionAfterTerminalRelease(t 
 	}
 	if len(queueStore.completed) == 0 {
 		t.Fatal("expected queued entry completion after promotion")
+	}
+}
+
+func TestAgentService_UpdateStatusRequeuesPromotionWhenBudgetCheckBlocks(t *testing.T) {
+	projectID := uuid.New()
+	runID := uuid.New()
+	completedTaskID := uuid.New()
+	queuedTaskID := uuid.New()
+	memberID := uuid.New()
+	sprintID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{
+		ID:       runID,
+		TaskID:   completedTaskID,
+		MemberID: memberID,
+		Status:   model.AgentRunStatusRunning,
+	}
+	taskRepo := &mockAgentTaskRepo{
+		tasks: map[uuid.UUID]*model.Task{
+			completedTaskID: {
+				ID:             completedTaskID,
+				ProjectID:      projectID,
+				Title:          "Completed task",
+				BudgetUsd:      5,
+				AgentBranch:    "agent/" + completedTaskID.String(),
+				AgentWorktree:  "/tmp/worktree/" + completedTaskID.String(),
+				AgentSessionID: "session-complete",
+			},
+			queuedTaskID: {
+				ID:          queuedTaskID,
+				ProjectID:   projectID,
+				SprintID:    &sprintID,
+				Title:       "Queued task",
+				Description: "Should stay queued when budget blocks promotion",
+				BudgetUsd:   4,
+			},
+		},
+	}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	bridge := &mockAgentBridge{}
+	worktrees := &mockWorktreeManager{}
+	queueStore := &mockAgentQueueStore{
+		next: &model.AgentPoolQueueEntry{
+			EntryID:   uuid.NewString(),
+			ProjectID: projectID.String(),
+			TaskID:    queuedTaskID.String(),
+			MemberID:  memberID.String(),
+			Status:    model.AgentPoolQueueStatusQueued,
+			Runtime:   "codex",
+			Provider:  "openai",
+			Model:     "gpt-5-codex",
+			BudgetUSD: 4,
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc.SetPool(pool.NewPool(2))
+	svc.SetQueueStore(queueStore)
+	svc.SetDispatchBudgetChecker(&mockDispatchBudgetChecker{
+		result: &service.BudgetCheckResult{
+			Allowed: false,
+			Reason:  "project budget exceeded",
+		},
+	})
+
+	if err := svc.UpdateStatus(context.Background(), runID, model.AgentRunStatusCompleted); err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+
+	if bridge.lastExecute.TaskID != "" {
+		t.Fatalf("bridge execute should not run, got %+v", bridge.lastExecute)
+	}
+	if len(queueStore.completed) != 1 {
+		t.Fatalf("queue completions = %+v, want one requeue", queueStore.completed)
+	}
+	if got := queueStore.completed[0]; !strings.Contains(got, string(model.AgentPoolQueueStatusQueued)) || !strings.Contains(got, "project budget exceeded") {
+		t.Fatalf("queue completion = %q, want queued budget-blocked update", got)
 	}
 }
 

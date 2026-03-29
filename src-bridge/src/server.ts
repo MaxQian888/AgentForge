@@ -3,8 +3,10 @@ import type { Context } from "hono";
 import { RuntimePoolManager } from "./runtime/pool-manager.js";
 import { EventStreamer } from "./ws/event-stream.js";
 import { handleExecute } from "./handlers/execute.js";
-import { persistRuntimeSnapshot } from "./handlers/claude-runtime.js";
+import { buildRuntimeSnapshot, persistRuntimeSnapshot } from "./handlers/claude-runtime.js";
 import type { CommandRuntimeRunner } from "./handlers/command-runtime.js";
+import type { CodexAuthStatusProvider, CodexRuntimeRunner } from "./handlers/codex-runtime.js";
+import type { OpenCodeEventRunner } from "./handlers/opencode-runtime.js";
 import type { QueryRunner } from "./handlers/claude-runtime.js";
 import {
   createRuntimeRegistry,
@@ -34,6 +36,7 @@ import {
   UnknownProviderError,
 } from "./providers/registry.js";
 import { MCPClientHub } from "./mcp/client-hub.js";
+import type { OpenCodeTransport } from "./opencode/transport.js";
 import { BunSchedulerAdapter } from "./scheduler/bun-cron-adapter.js";
 
 interface AppDeps {
@@ -44,14 +47,114 @@ interface AppDeps {
   awaitExecution?: boolean;
   queryRunner?: QueryRunner;
   commandRuntimeRunner?: CommandRuntimeRunner;
+  codexRuntimeRunner?: CodexRuntimeRunner;
   sessionManager?: SessionManager;
   now?: () => number;
   executableLookup?: (command: string) => string | null;
   envLookup?: (name: string) => string | undefined;
+  codexAuthStatusProvider?: CodexAuthStatusProvider;
+  opencodeTransport?: OpenCodeTransport;
+  opencodeEventRunner?: OpenCodeEventRunner;
   decomposeTask?: DecomposeTaskExecutor;
   pluginManager?: ToolPluginManager;
   schedulerAdapter?: Pick<BunSchedulerAdapter, "start" | "stop">;
 }
+
+type BridgeRouteMethod = "get" | "post";
+
+interface BridgeHttpRouteGroup {
+  method: BridgeRouteMethod;
+  canonicalPath: string;
+  compatibilityAliases: readonly string[];
+}
+
+export const BRIDGE_HTTP_ROUTE_GROUPS = {
+  execute: {
+    method: "post",
+    canonicalPath: "/bridge/execute",
+    compatibilityAliases: ["/execute"],
+  },
+  decompose: {
+    method: "post",
+    canonicalPath: "/bridge/decompose",
+    compatibilityAliases: ["/ai/decompose"],
+  },
+  classifyIntent: {
+    method: "post",
+    canonicalPath: "/bridge/classify-intent",
+    compatibilityAliases: ["/ai/classify"],
+  },
+  generate: {
+    method: "post",
+    canonicalPath: "/bridge/generate",
+    compatibilityAliases: ["/ai/generate"],
+  },
+  review: {
+    method: "post",
+    canonicalPath: "/bridge/review",
+    compatibilityAliases: [],
+  },
+  status: {
+    method: "get",
+    canonicalPath: "/bridge/status/:id",
+    compatibilityAliases: ["/status/:id"],
+  },
+  runtimes: {
+    method: "get",
+    canonicalPath: "/bridge/runtimes",
+    compatibilityAliases: ["/runtimes"],
+  },
+  cancel: {
+    method: "post",
+    canonicalPath: "/bridge/cancel",
+    compatibilityAliases: ["/abort"],
+  },
+  pause: {
+    method: "post",
+    canonicalPath: "/bridge/pause",
+    compatibilityAliases: ["/pause"],
+  },
+  resume: {
+    method: "post",
+    canonicalPath: "/bridge/resume",
+    compatibilityAliases: ["/resume"],
+  },
+  health: {
+    method: "get",
+    canonicalPath: "/bridge/health",
+    compatibilityAliases: ["/health"],
+  },
+  active: {
+    method: "get",
+    canonicalPath: "/bridge/active",
+    compatibilityAliases: ["/active"],
+  },
+  pool: {
+    method: "get",
+    canonicalPath: "/bridge/pool",
+    compatibilityAliases: ["/pool"],
+  },
+  toolsList: {
+    method: "get",
+    canonicalPath: "/bridge/tools",
+    compatibilityAliases: ["/tools"],
+  },
+  toolsInstall: {
+    method: "post",
+    canonicalPath: "/bridge/tools/install",
+    compatibilityAliases: ["/tools/install"],
+  },
+  toolsUninstall: {
+    method: "post",
+    canonicalPath: "/bridge/tools/uninstall",
+    compatibilityAliases: ["/tools/uninstall"],
+  },
+  toolsRestart: {
+    method: "post",
+    canonicalPath: "/bridge/tools/:id/restart",
+    compatibilityAliases: ["/tools/restart"],
+  },
+} as const satisfies Record<string, BridgeHttpRouteGroup>;
 
 function createDefaultPool(): RuntimePoolManager {
   return new RuntimePoolManager(parseInt(process.env.MAX_CONCURRENT_AGENTS ?? "10"));
@@ -75,6 +178,18 @@ function createDefaultSchedulerAdapter(): BunSchedulerAdapter {
   return new BunSchedulerAdapter({
     goApiUrl: process.env.GO_API_URL ?? "http://localhost:7777",
   });
+}
+
+function registerBridgeRouteGroup(
+  app: Hono,
+  group: BridgeHttpRouteGroup,
+  handler: (c: Context) => Response | Promise<Response>,
+) {
+  const register = group.method === "get" ? app.get.bind(app) : app.post.bind(app);
+  register(group.canonicalPath, handler);
+  for (const alias of group.compatibilityAliases) {
+    register(alias, handler);
+  }
 }
 
 export function createApp(deps: AppDeps = {}): Hono {
@@ -113,8 +228,12 @@ export function createApp(deps: AppDeps = {}): Hono {
     return createRuntimeRegistry({
       queryRunner: deps.queryRunner,
       commandRuntimeRunner: deps.commandRuntimeRunner,
+      codexRuntimeRunner: deps.codexRuntimeRunner,
       executableLookup: deps.executableLookup,
       envLookup: deps.envLookup,
+      codexAuthStatusProvider: deps.codexAuthStatusProvider,
+      opencodeTransport: deps.opencodeTransport,
+      opencodeEventRunner: deps.opencodeEventRunner,
       now,
     });
   }
@@ -135,10 +254,14 @@ export function createApp(deps: AppDeps = {}): Hono {
         awaitCompletion: deps.awaitExecution,
         queryRunner: deps.queryRunner,
         commandRuntimeRunner: deps.commandRuntimeRunner,
+        codexRuntimeRunner: deps.codexRuntimeRunner,
         sessionManager,
         executableLookup: deps.executableLookup,
         envLookup: deps.envLookup,
         now,
+        codexAuthStatusProvider: deps.codexAuthStatusProvider,
+        opencodeTransport: deps.opencodeTransport,
+        opencodeEventRunner: deps.opencodeEventRunner,
         pluginManager,
       });
       return c.json(result, 200);
@@ -242,8 +365,8 @@ export function createApp(deps: AppDeps = {}): Hono {
     return c.json(runtime.toStatus());
   }
 
-  function handleRuntimeCatalogRoute() {
-    const catalog = createRegistry().getCatalog();
+  async function handleRuntimeCatalogRoute() {
+    const catalog = await createRegistry().getCatalog();
     return Response.json({
       default_runtime: catalog.defaultRuntime,
       runtimes: catalog.runtimes.map((runtime) => ({
@@ -272,6 +395,20 @@ export function createApp(deps: AppDeps = {}): Hono {
       if (!runtime) {
         return c.json({ success: false, error: "Not found" }, 404);
       }
+      if (
+        runtime.request?.runtime === "opencode" &&
+        runtime.continuity?.runtime === "opencode" &&
+        runtime.continuity.upstream_session_id &&
+        deps.opencodeTransport
+      ) {
+        await deps.opencodeTransport.abortSession(runtime.continuity.upstream_session_id);
+        runtime.continuity = {
+          ...runtime.continuity,
+          resume_ready: false,
+          captured_at: now(),
+          blocking_reason: "continuity_not_supported",
+        };
+      }
       runtime.cancel("cancelled");
       runtime.lastActivity = now();
       return c.json({ success: true });
@@ -298,17 +435,21 @@ export function createApp(deps: AppDeps = {}): Hono {
       }
 
       runtime.lastActivity = now();
+      if (
+        runtime.request.runtime === "opencode" &&
+        runtime.continuity?.runtime === "opencode" &&
+        runtime.continuity.upstream_session_id &&
+        deps.opencodeTransport
+      ) {
+        await deps.opencodeTransport.abortSession(runtime.continuity.upstream_session_id);
+        runtime.continuity = {
+          ...runtime.continuity,
+          resume_ready: true,
+          captured_at: now(),
+        };
+      }
       runtime.cancel("paused");
-      sessionManager.save(parsed.data.task_id, {
-        task_id: runtime.taskId,
-        session_id: runtime.sessionId,
-        status: "paused",
-        turn_number: runtime.turnNumber,
-        spent_usd: runtime.spentUsd,
-        created_at: runtime.createdAt,
-        updated_at: now(),
-        request: { ...runtime.request },
-      });
+      sessionManager.save(parsed.data.task_id, buildRuntimeSnapshot(runtime, runtime.request, now));
       pool.release(parsed.data.task_id);
 
       return c.json({
@@ -340,15 +481,30 @@ export function createApp(deps: AppDeps = {}): Hono {
       if (pool.get(parsed.data.task_id)) {
         return c.json({ error: "Runtime already active" }, 409);
       }
+      const resumeBlock = getResumeBlock(snapshot);
+      if (resumeBlock) {
+        return c.json(
+          {
+            error: `${resumeBlock.runtimeLabel} continuity state is not resumable for task ${parsed.data.task_id}`,
+            code: resumeBlock.code,
+          },
+          409,
+        );
+      }
 
       const result = await handleExecute(pool, streamer, snapshot.request, {
         awaitCompletion: deps.awaitExecution,
+        continuity: snapshot.continuity,
         queryRunner: deps.queryRunner,
         commandRuntimeRunner: deps.commandRuntimeRunner,
+        codexRuntimeRunner: deps.codexRuntimeRunner,
         sessionManager,
         executableLookup: deps.executableLookup,
         envLookup: deps.envLookup,
         now,
+        codexAuthStatusProvider: deps.codexAuthStatusProvider,
+        opencodeTransport: deps.opencodeTransport,
+        opencodeEventRunner: deps.opencodeEventRunner,
         pluginManager,
       });
 
@@ -547,46 +703,22 @@ export function createApp(deps: AppDeps = {}): Hono {
     return c.json({ error: message }, 500);
   }
 
-  // ---- Register routes: both /bridge/* (legacy) and /* (PRD) ----
-
-  // Execute
-  app.post("/bridge/execute", handleExecuteRoute);
-  app.post("/execute", handleExecuteRoute);
-
-  // AI endpoints
-  app.post("/bridge/decompose", handleDecomposeRoute);
-  app.post("/ai/decompose", handleDecomposeRoute);
-  app.post("/bridge/classify-intent", handleClassifyRoute);
-  app.post("/ai/classify", handleClassifyRoute);
-  app.post("/bridge/generate", handleGenerateRoute);
-  app.post("/ai/generate", handleGenerateRoute);
-
-  // Review
-  app.post("/bridge/review", handleReviewRoute);
-
-  // Status
-  app.get("/bridge/status/:id", handleStatusRoute);
-  app.get("/status/:id", handleStatusRoute);
-  app.get("/bridge/runtimes", handleRuntimeCatalogRoute);
-  app.get("/runtimes", handleRuntimeCatalogRoute);
-
-  // Cancel / Abort
-  app.post("/bridge/cancel", handleCancelRoute);
-  app.post("/abort", handleCancelRoute);
-
-  // Pause / Resume
-  app.post("/bridge/pause", handlePauseRoute);
-  app.post("/pause", handlePauseRoute);
-  app.post("/bridge/resume", handleResumeRoute);
-  app.post("/resume", handleResumeRoute);
-
-  // Health / Active
-  app.get("/bridge/health", handleHealthRoute);
-  app.get("/health", handleHealthRoute);
-  app.get("/bridge/active", handleActiveRoute);
-  app.get("/active", handleActiveRoute);
-  app.get("/bridge/pool", handlePoolRoute);
-  app.get("/pool", handlePoolRoute);
+  // ---- Register live TS Bridge contract ----
+  // New callers, tests, and docs MUST use the canonical /bridge/* paths below.
+  // Compatibility aliases are kept only to avoid breaking legacy callers.
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.execute, handleExecuteRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.decompose, handleDecomposeRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.classifyIntent, handleClassifyRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.generate, handleGenerateRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.review, handleReviewRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.status, handleStatusRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.runtimes, handleRuntimeCatalogRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.cancel, handleCancelRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.pause, handlePauseRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.resume, handleResumeRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.health, handleHealthRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.active, handleActiveRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.pool, handlePoolRoute);
 
   // Plugin management (internal — no PRD alias needed)
   app.post("/bridge/plugins/register", async (c) => {
@@ -666,17 +798,65 @@ export function createApp(deps: AppDeps = {}): Hono {
   app.post("/bridge/plugins/:id/mcp/resources/read", handlePluginMcpResourceReadRoute);
   app.post("/bridge/plugins/:id/mcp/prompts/get", handlePluginMcpPromptGetRoute);
 
-  // Tool management
-  app.get("/bridge/tools", handleToolsListRoute);
-  app.get("/tools", handleToolsListRoute);
-  app.post("/bridge/tools/install", handleToolsInstallRoute);
-  app.post("/tools/install", handleToolsInstallRoute);
-  app.post("/bridge/tools/uninstall", handleToolsUninstallRoute);
-  app.post("/tools/uninstall", handleToolsUninstallRoute);
-  app.post("/bridge/tools/:id/restart", handleToolsRestartRoute);
-  app.post("/tools/restart", handleToolsRestartRoute);
+  // Tool management keeps the same canonical/compatibility split as the rest of the contract.
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.toolsList, handleToolsListRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.toolsInstall, handleToolsInstallRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.toolsUninstall, handleToolsUninstallRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.toolsRestart, handleToolsRestartRoute);
 
   return app;
+}
+
+function getResumeBlock(snapshot: {
+  request?: { runtime?: string; provider?: string };
+  continuity?: {
+    runtime: "claude_code" | "codex" | "opencode";
+    resume_ready: boolean;
+    blocking_reason?: string;
+    thread_id?: string;
+  };
+}): { runtimeLabel: string; code: string } | null {
+  if (snapshot.continuity) {
+    if (
+      snapshot.continuity.resume_ready &&
+      (snapshot.continuity.runtime !== "codex" || Boolean(snapshot.continuity.thread_id))
+    ) {
+      return null;
+    }
+    return {
+      runtimeLabel:
+        snapshot.continuity.runtime === "claude_code"
+          ? "Claude"
+          : snapshot.continuity.runtime === "codex"
+            ? "Codex"
+            : "OpenCode",
+      code: snapshot.continuity.blocking_reason ?? "missing_continuity_state",
+    };
+  }
+
+  const runtime = snapshot.request?.runtime ?? inferRuntimeFromProvider(snapshot.request?.provider);
+  if (!runtime) {
+    return null;
+  }
+
+  return {
+    runtimeLabel: runtime === "claude_code" ? "Claude" : runtime === "codex" ? "Codex" : "OpenCode",
+    code: "missing_continuity_state",
+  };
+}
+
+function inferRuntimeFromProvider(provider: string | undefined): "claude_code" | "codex" | "opencode" | null {
+  switch (provider) {
+    case "anthropic":
+      return "claude_code";
+    case "openai":
+    case "codex":
+      return "codex";
+    case "opencode":
+      return "opencode";
+    default:
+      return null;
+  }
 }
 
 // ---- Default runtime bootstrap ----

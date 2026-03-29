@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
+import { useTranslations } from "next-intl";
 import { FileText, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
@@ -14,6 +15,7 @@ import { TemplatePicker } from "@/components/docs/template-picker";
 import { DocsPageDetailClient } from "./[pageId]/page-client";
 
 export default function DocsLandingPage() {
+  const t = useTranslations("docs");
   const searchParams = useSearchParams();
   const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
   const {
@@ -54,9 +56,9 @@ export default function DocsLandingPage() {
   if (!selectedProjectId) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-2xl font-bold">Docs Workspace</h1>
+        <h1 className="text-2xl font-bold">{t("title")}</h1>
         <p className="text-sm text-muted-foreground">
-          Select a project from the dashboard to open its wiki space.
+          {t("selectProject")}
         </p>
       </div>
     );
@@ -84,32 +86,32 @@ export default function DocsLandingPage() {
       <div className="flex flex-col gap-6">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-semibold">Docs Workspace</h1>
+            <h1 className="text-3xl font-semibold">{t("title")}</h1>
             <p className="text-sm text-muted-foreground">
-              Capture PRDs, ADRs, runbooks, onboarding notes, and execution briefs next to the work.
+              {t("subtitle")}
             </p>
           </div>
           <div className="flex gap-2">
             <Button variant="outline" onClick={() => setPickerOpen(true)}>
-              Use Template
+              {t("useTemplate")}
             </Button>
             <Button
               onClick={() =>
                 void createPage({
                   projectId: selectedProjectId,
-                  title: "Untitled doc",
+                  title: t("untitledDoc"),
                 })
               }
             >
               <Plus className="mr-1 size-4" />
-              New Page
+              {t("newPage")}
             </Button>
           </div>
         </div>
 
         <div className="grid gap-4 lg:grid-cols-3">
           <section className="rounded-2xl border border-border/60 bg-card/70 p-4">
-            <h2 className="text-base font-semibold">Pinned</h2>
+            <h2 className="text-base font-semibold">{t("pinned")}</h2>
             <div className="mt-3 flex flex-col gap-2">
               {pinnedPages.map((page) => (
                 <Link key={page.id} href={buildDocsHref(page.id)} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
@@ -117,13 +119,13 @@ export default function DocsLandingPage() {
                 </Link>
               ))}
               {pinnedPages.length === 0 ? (
-                <p className="text-sm text-muted-foreground">No pinned pages yet.</p>
+                <p className="text-sm text-muted-foreground">{t("noPinned")}</p>
               ) : null}
             </div>
           </section>
 
           <section className="rounded-2xl border border-border/60 bg-card/70 p-4">
-            <h2 className="text-base font-semibold">Favorites</h2>
+            <h2 className="text-base font-semibold">{t("favorites")}</h2>
             <div className="mt-3 flex flex-col gap-2">
               {favorites.map((favorite) => {
                 const page = allPages.find((item) => item.id === favorite.pageId);
@@ -135,13 +137,13 @@ export default function DocsLandingPage() {
                 );
               })}
               {favorites.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Mark a page as favorite to keep it here.</p>
+                <p className="text-sm text-muted-foreground">{t("noFavorites")}</p>
               ) : null}
             </div>
           </section>
 
           <section className="rounded-2xl border border-border/60 bg-card/70 p-4">
-            <h2 className="text-base font-semibold">Recent</h2>
+            <h2 className="text-base font-semibold">{t("recent")}</h2>
             <div className="mt-3 flex flex-col gap-2">
               {recentAccess.map((access) => {
                 const page = allPages.find((item) => item.id === access.pageId);
@@ -153,7 +155,7 @@ export default function DocsLandingPage() {
                 );
               })}
               {recentAccess.length === 0 ? (
-                <p className="text-sm text-muted-foreground">Recently opened pages show up here.</p>
+                <p className="text-sm text-muted-foreground">{t("noRecent")}</p>
               ) : null}
             </div>
           </section>
@@ -165,7 +167,7 @@ export default function DocsLandingPage() {
             void createPageFromTemplate({
               projectId: selectedProjectId,
               templateId,
-              title: "New document from template",
+              title: t("newFromTemplate"),
             })
           }
         />
@@ -173,7 +175,7 @@ export default function DocsLandingPage() {
         <section className="rounded-2xl border border-border/60 bg-card/70 p-4">
           <div className="flex items-center gap-2">
             <FileText className="size-4 text-muted-foreground" />
-            <h2 className="text-base font-semibold">All Pages</h2>
+            <h2 className="text-base font-semibold">{t("allPages")}</h2>
           </div>
           <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
             {allPages.map((page) => (
@@ -198,7 +200,7 @@ export default function DocsLandingPage() {
           void createPageFromTemplate({
             projectId: selectedProjectId,
             templateId,
-            title: "New document from template",
+            title: t("newFromTemplate"),
           });
           setPickerOpen(false);
         }}

@@ -1,0 +1,12 @@
+{
+  "title": "Agent Memory",
+  "selectProject": "Select a project from the Dashboard to browse agent memory entries.",
+  "searchPlaceholder": "Search memory entries...",
+  "tabAll": "All",
+  "tabEpisodic": "Episodic",
+  "tabSemantic": "Semantic",
+  "tabProcedural": "Procedural",
+  "loading": "Loading memories...",
+  "noEntries": "No memory entries found.",
+  "accessed": "Accessed: {count}x"
+}

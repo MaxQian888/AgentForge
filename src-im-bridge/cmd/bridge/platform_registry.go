@@ -8,6 +8,8 @@ import (
 	"github.com/agentforge/im-bridge/platform/dingtalk"
 	"github.com/agentforge/im-bridge/platform/discord"
 	"github.com/agentforge/im-bridge/platform/feishu"
+	"github.com/agentforge/im-bridge/platform/qq"
+	"github.com/agentforge/im-bridge/platform/qqbot"
 	"github.com/agentforge/im-bridge/platform/slack"
 	"github.com/agentforge/im-bridge/platform/telegram"
 	"github.com/agentforge/im-bridge/platform/wecom"
@@ -67,6 +69,59 @@ func providerDescriptors() map[string]providerDescriptor {
 				)
 			},
 		},
+		"qq": {
+			ID:                      "qq",
+			Metadata:                qq.NewStub("0").Metadata(),
+			SupportedTransportModes: []string{transportModeStub, transportModeLive},
+			ValidateConfig: func(cfg *config, mode string) error {
+				if mode != transportModeLive {
+					return nil
+				}
+				if strings.TrimSpace(cfg.QQOneBotWSURL) == "" {
+					return fmt.Errorf("selected platform qq requires QQ_ONEBOT_WS_URL for live transport")
+				}
+				return nil
+			},
+			NewStub: func(cfg *config) (core.Platform, error) {
+				return qq.NewStub(cfg.TestPort), nil
+			},
+			NewLive: func(cfg *config) (core.Platform, error) {
+				return qq.NewLive(cfg.QQOneBotWSURL, cfg.QQAccessToken)
+			},
+		},
+		"qqbot": {
+			ID:                      "qqbot",
+			Metadata:                qqbot.NewStub("0").Metadata(),
+			SupportedTransportModes: []string{transportModeStub, transportModeLive},
+			ValidateConfig: func(cfg *config, mode string) error {
+				if mode != transportModeLive {
+					return nil
+				}
+				switch {
+				case strings.TrimSpace(cfg.QQBotAppID) == "":
+					return fmt.Errorf("selected platform qqbot requires QQBOT_APP_ID for live transport")
+				case strings.TrimSpace(cfg.QQBotAppSecret) == "":
+					return fmt.Errorf("selected platform qqbot requires QQBOT_APP_SECRET for live transport")
+				case strings.TrimSpace(cfg.QQBotCallbackPort) == "":
+					return fmt.Errorf("selected platform qqbot requires QQBOT_CALLBACK_PORT for live transport")
+				default:
+					return nil
+				}
+			},
+			NewStub: func(cfg *config) (core.Platform, error) {
+				return qqbot.NewStub(cfg.TestPort), nil
+			},
+			NewLive: func(cfg *config) (core.Platform, error) {
+				return qqbot.NewLive(
+					cfg.QQBotAppID,
+					cfg.QQBotAppSecret,
+					cfg.QQBotCallbackPort,
+					cfg.QQBotCallbackPath,
+					qqbot.WithAPIBase(cfg.QQBotAPIBase),
+					qqbot.WithTokenBase(cfg.QQBotTokenBase),
+				)
+			},
+		},
 		"feishu": {
 			ID:                      "feishu",
 			Metadata:                feishu.NewStub("0").Metadata(),
@@ -122,7 +177,11 @@ func providerDescriptors() map[string]providerDescriptor {
 				return dingtalk.NewStub(cfg.TestPort), nil
 			},
 			NewLive: func(cfg *config) (core.Platform, error) {
-				return dingtalk.NewLive(cfg.DingTalkAppKey, cfg.DingTalkAppSecret)
+				opts := make([]dingtalk.LiveOption, 0, 1)
+				if strings.TrimSpace(cfg.DingTalkCardTemplateID) != "" {
+					opts = append(opts, dingtalk.WithAdvancedCardTemplate(cfg.DingTalkCardTemplateID))
+				}
+				return dingtalk.NewLive(cfg.DingTalkAppKey, cfg.DingTalkAppSecret, opts...)
 			},
 		},
 		"telegram": {

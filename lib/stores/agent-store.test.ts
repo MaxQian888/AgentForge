@@ -15,6 +15,8 @@ describe("useAgentStore", () => {
     useAgentStore.setState({
       agents: [],
       agentOutputs: new Map(),
+      dispatchStats: null,
+      dispatchHistoryByTask: {},
       loading: false,
     });
   });
@@ -227,6 +229,146 @@ describe("useAgentStore", () => {
             status: "queued",
           }),
         ],
+      }),
+    );
+  });
+
+  it("fetches runtime catalog from the bridge API and caches the normalized result", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        default_runtime: "claude_code",
+        runtimes: [
+          {
+            key: "claude_code",
+            display_name: "Claude Code",
+            default_provider: "anthropic",
+            compatible_providers: ["anthropic"],
+            default_model: "claude-sonnet-4-5",
+            available: true,
+            diagnostics: [],
+          },
+        ],
+      }),
+    } as Response);
+
+    const first = await useAgentStore.getState().fetchRuntimeCatalog();
+    const second = await useAgentStore.getState().fetchRuntimeCatalog();
+
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(first).toEqual(
+      expect.objectContaining({
+        defaultRuntime: "claude_code",
+        defaultSelection: expect.objectContaining({
+          runtime: "claude_code",
+          provider: "anthropic",
+          model: "claude-sonnet-4-5",
+        }),
+      }),
+    );
+    expect(second).toEqual(first);
+  });
+
+  it("fetches bridge health summary and normalizes pool metrics", async () => {
+    fetchMock.mockResolvedValueOnce({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        status: "ready",
+        last_check: "2026-03-28T10:00:00Z",
+        pool: {
+          active: 2,
+          available: 1,
+          warm: 1,
+        },
+      }),
+    } as Response);
+
+    const health = await useAgentStore.getState().fetchBridgeHealth();
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:7777/api/v1/bridge/health",
+      expect.objectContaining({
+        method: "GET",
+      }),
+    );
+    expect(health).toEqual({
+      status: "ready",
+      lastCheck: "2026-03-28T10:00:00Z",
+      pool: {
+        active: 2,
+        available: 1,
+        warm: 1,
+      },
+    });
+  });
+
+  it("fetches dispatch preflight, history, and stats endpoints", async () => {
+    fetchMock
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          admissionLikely: true,
+          dispatchOutcomeHint: "started",
+          poolActive: 1,
+          poolAvailable: 1,
+          poolQueued: 0,
+        }),
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => [
+          {
+            id: "attempt-1",
+            projectId: "project-1",
+            taskId: "task-1",
+            memberId: "member-1",
+            outcome: "queued",
+            triggerSource: "manual",
+            createdAt: "2026-03-28T10:00:00Z",
+          },
+        ],
+      } as Response)
+      .mockResolvedValueOnce({
+        ok: true,
+        status: 200,
+        json: async () => ({
+          outcomes: { started: 2, queued: 1 },
+          blockedReasons: { budget: 1 },
+          queueDepth: 3,
+          medianWaitSeconds: 12,
+        }),
+      } as Response);
+
+    const preflight = await useAgentStore.getState().fetchDispatchPreflight("project-1", "task-1", "member-1");
+    const history = await useAgentStore.getState().fetchDispatchHistory("task-1");
+    const stats = await useAgentStore.getState().fetchDispatchStats("project-1");
+
+    expect(preflight).toEqual(
+      expect.objectContaining({
+        admissionLikely: true,
+        dispatchOutcomeHint: "started",
+      }),
+    );
+    expect(history).toEqual([
+      expect.objectContaining({
+        id: "attempt-1",
+        outcome: "queued",
+      }),
+    ]);
+    expect(stats).toEqual(
+      expect.objectContaining({
+        queueDepth: 3,
+        medianWaitSeconds: 12,
+      }),
+    );
+    expect(useAgentStore.getState().dispatchHistoryByTask["task-1"]).toHaveLength(1);
+    expect(useAgentStore.getState().dispatchStats).toEqual(
+      expect.objectContaining({
+        queueDepth: 3,
       }),
     );
   });

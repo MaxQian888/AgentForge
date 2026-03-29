@@ -21,6 +21,7 @@ jest.mock("./auth-store", () => ({
 }));
 
 import {
+  type RemoteMarketplaceState,
   DEFAULT_PLUGIN_PANEL_FILTERS,
   usePluginStore,
   type PluginRecord,
@@ -37,6 +38,11 @@ describe("plugin store control-plane actions", () => {
       plugins: [],
       builtins: [],
       marketplace: [],
+      remoteMarketplace: {
+        available: false,
+        registry: "",
+        entries: [],
+      } satisfies RemoteMarketplaceState,
       catalogResults: [],
       catalogQuery: "",
       events: {},
@@ -117,6 +123,69 @@ describe("plugin store control-plane actions", () => {
         path: "/plugins/repo-search/manifest.yaml",
         source: plugin.source,
       },
+      { token: "test-token" },
+    );
+  });
+
+  it("loads the remote marketplace envelope into store state", async () => {
+    get.mockResolvedValue({
+      data: {
+        available: true,
+        registry: "https://registry.agentforge.dev",
+        entries: [
+          {
+            id: "release-train",
+            name: "Release Train",
+            description: "Workflow release automation",
+            version: "1.2.0",
+            author: "AgentForge",
+            kind: "remote",
+            registry: "https://registry.agentforge.dev",
+            installable: true,
+            sourceType: "registry",
+          },
+        ],
+      },
+      status: 200,
+    });
+
+    await usePluginStore.getState().fetchRemoteMarketplace();
+
+    expect(get).toHaveBeenCalledWith("/api/v1/plugins/marketplace/remote", {
+      token: "test-token",
+    });
+    expect(usePluginStore.getState().remoteMarketplace).toEqual({
+      available: true,
+      registry: "https://registry.agentforge.dev",
+      entries: [
+        expect.objectContaining({
+          id: "release-train",
+          installable: true,
+          registry: "https://registry.agentforge.dev",
+        }),
+      ],
+    });
+  });
+
+  it("posts explicit remote install requests with the selected version", async () => {
+    post.mockResolvedValue({
+      data: {
+        ok: true,
+        pluginId: "release-train",
+        version: "1.2.0",
+      },
+      status: 200,
+    });
+    get.mockResolvedValue({
+      data: [],
+      status: 200,
+    });
+
+    await usePluginStore.getState().installFromRemote("release-train", "1.2.0");
+
+    expect(post).toHaveBeenCalledWith(
+      "/api/v1/plugins/marketplace/release-train/install-remote",
+      { version: "1.2.0" },
       { token: "test-token" },
     );
   });

@@ -64,3 +64,17 @@ func (r *UserRepository) UpdateName(ctx context.Context, id uuid.UUID, name stri
 	}
 	return nil
 }
+
+func (r *UserRepository) UpdatePassword(ctx context.Context, id uuid.UUID, hashedPassword string) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&userRecord{}).
+		Where("id = ?", id).
+		Updates(map[string]any{"password": hashedPassword}).
+		Error; err != nil {
+		return fmt.Errorf("update user password: %w", err)
+	}
+	return nil
+}

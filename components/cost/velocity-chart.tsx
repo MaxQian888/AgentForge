@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
 
 export interface VelocityPoint {
@@ -13,10 +14,11 @@ interface VelocityChartProps {
 }
 
 export function VelocityChart({ data }: VelocityChartProps) {
+  const t = useTranslations("cost");
   if (data.length === 0) {
     return (
       <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
-        No velocity data available yet.
+        {t("noVelocityData")}
       </div>
     );
   }
@@ -54,10 +56,10 @@ export function VelocityChart({ data }: VelocityChartProps) {
       </div>
       <div className="flex flex-wrap gap-2">
         <Badge variant="outline">
-          Avg: {(data.reduce((s, d) => s + d.tasksCompleted, 0) / data.length).toFixed(1)} tasks/period
+          {t("avgTasksPerPeriod", { avg: (data.reduce((s, d) => s + d.tasksCompleted, 0) / data.length).toFixed(1) })}
         </Badge>
         <Badge variant="secondary">
-          Total: ${data.reduce((s, d) => s + d.costUsd, 0).toFixed(2)}
+          {t("total")}: ${data.reduce((s, d) => s + d.costUsd, 0).toFixed(2)}
         </Badge>
       </div>
     </div>

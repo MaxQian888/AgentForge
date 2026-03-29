@@ -1,0 +1,8 @@
+{
+  "name": "@agentforge/workflow-standard-dev-flow",
+  "private": true,
+  "scripts": {
+    "plugin:build": "node ../../../scripts/build-go-wasm-plugin.js --manifest plugins/workflows/standard-dev-flow/manifest.yaml --source ./cmd/standard-dev-flow",
+    "plugin:verify": "node ../../../scripts/verify-plugin-dev-workflow.js --manifest plugins/workflows/standard-dev-flow/manifest.yaml"
+  }
+}

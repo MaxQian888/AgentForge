@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
+import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { TaskContextRail } from "./task-context-rail";
@@ -59,6 +60,10 @@ interface ProjectTaskWorkspaceProps {
     taskId: string,
     memberId: string
   ) => Promise<void> | void;
+  onTaskDelete?: (taskId: string) => Promise<void> | void;
+  onBulkStatusChange?: (ids: string[], status: TaskStatus) => void;
+  onBulkAssign?: (ids: string[], assigneeId: string, assigneeType: "human" | "agent") => void;
+  onBulkDelete?: (ids: string[]) => void;
   onSprintFilterChange?: (sprintId: string | "all") => void;
 }
 
@@ -82,8 +87,13 @@ export function ProjectTaskWorkspace({
   onTaskAssign,
   onTaskDecompose,
   onSpawnAgent,
+  onTaskDelete,
+  onBulkStatusChange,
+  onBulkAssign,
+  onBulkDelete,
   onSprintFilterChange,
 }: ProjectTaskWorkspaceProps) {
+  const t = useTranslations("tasks");
   const filters = useTaskWorkspaceStore((state) => state.filters);
   const selectedTaskId = useTaskWorkspaceStore((state) => state.selectedTaskId);
   const selectTask = useTaskWorkspaceStore((state) => state.selectTask);
@@ -152,6 +162,11 @@ export function ProjectTaskWorkspace({
         onTaskOpen={onTaskOpen}
         onTaskStatusChange={onTaskStatusChange}
         onTaskScheduleChange={onTaskScheduleChange}
+        onTaskSave={onTaskSave}
+        members={members}
+        onBulkStatusChange={onBulkStatusChange}
+        onBulkAssign={onBulkAssign}
+        onBulkDelete={onBulkDelete}
         onSprintFilterChange={onSprintFilterChange}
       />
       {contextRailDisplay === "expanded" ? (
@@ -163,7 +178,7 @@ export function ProjectTaskWorkspace({
               variant="outline"
               onClick={() => setContextRailDisplay("collapsed")}
             >
-              Collapse context rail
+              {t("workspace.collapseRail")}
             </Button>
           </div>
           <TaskContextRail
@@ -183,6 +198,7 @@ export function ProjectTaskWorkspace({
             onTaskStatusChange={onTaskStatusChange}
             onTaskDecompose={onTaskDecompose}
             onSpawnAgent={onSpawnAgent}
+            onTaskDelete={onTaskDelete}
             onResetFilters={resetFilters}
           />
         </div>
@@ -195,19 +211,19 @@ export function ProjectTaskWorkspace({
               variant="outline"
               onClick={() => setContextRailDisplay("expanded")}
             >
-              Expand context rail
+              {t("workspace.expandRail")}
             </Button>
             <div className="text-xs text-muted-foreground">
-              {rail.selectedTask ? `Selected: ${rail.selectedTask.title}` : "No task selected"}
+              {rail.selectedTask ? t("workspace.selectedTask", { title: rail.selectedTask.title }) : t("workspace.noTaskSelected")}
             </div>
             <div className="text-xs text-muted-foreground">
-              {realtimeConnected ? "Realtime live" : "Realtime degraded"}
+              {realtimeConnected ? t("workspace.realtimeLive") : t("workspace.realtimeDegraded")}
             </div>
             <div className="text-xs text-muted-foreground">
-              Stalled {rail.counts.stalled}
+              {t("workspace.stalledCount", { count: rail.counts.stalled })}
             </div>
             <div className="text-xs text-muted-foreground">
-              {rail.alerts.length} recent alerts
+              {t("workspace.recentAlerts", { count: rail.alerts.length })}
             </div>
           </CardContent>
         </Card>

@@ -1,0 +1,19 @@
+{
+  "formName": "Form name",
+  "formNamePlaceholder": "Bug Report",
+  "slug": "Slug",
+  "slugPlaceholder": "bug-report",
+  "targetStatus": "Target status",
+  "publicForm": "Public form",
+  "fieldMappings": "Field mappings",
+  "fieldKeyPlaceholder": "field key",
+  "fieldLabelPlaceholder": "field label",
+  "addFieldMapping": "Add field mapping",
+  "createForm": "Create form",
+  "submitForm": "Submit form",
+  "createdTask": "Created task: {id}",
+  "taskTitle": "Task title",
+  "taskDescription": "Task description",
+  "taskPriority": "Task priority",
+  "customField": "Custom field: {name}"
+}

@@ -1,7 +1,8 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { XCircle, RotateCw, Clock, DollarSign, Hash, Users } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { XCircle, RotateCw, Clock, DollarSign, Hash, Users, Pencil, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -17,6 +18,9 @@ import { getTeamStrategyLabel, useTeamStore, type TeamStatus } from "@/lib/store
 import { useAgentStore, type Agent } from "@/lib/stores/agent-store";
 import { TeamPipeline } from "./team-pipeline";
 import { OutputStream } from "@/components/agent/output-stream";
+import { Skeleton } from "@/components/ui/skeleton";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { EditTeamDialog } from "./edit-team-dialog";
 
 const statusColors: Record<TeamStatus, string> = {
   pending: "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400",
@@ -33,10 +37,13 @@ interface TeamDetailViewProps {
 }
 
 export function TeamDetailView({ teamId }: TeamDetailViewProps) {
+  const router = useRouter();
   const team = useTeamStore((s) => s.teams.find((t) => t.id === teamId));
   const fetchTeam = useTeamStore((s) => s.fetchTeam);
   const cancelTeam = useTeamStore((s) => s.cancelTeam);
   const retryTeam = useTeamStore((s) => s.retryTeam);
+  const deleteTeam = useTeamStore((s) => s.deleteTeam);
+  const updateTeam = useTeamStore((s) => s.updateTeam);
   const loading = useTeamStore((s) => Boolean(s.loadingById[teamId]));
   const error = useTeamStore((s) => s.errorById[teamId] ?? null);
 
@@ -45,6 +52,10 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
   const fetchAgent = useAgentStore((s) => s.fetchAgent);
 
   const [duration, setDuration] = useState(0);
+  const [confirmCancel, setConfirmCancel] = useState(false);
+  const [confirmRetry, setConfirmRetry] = useState(false);
+  const [confirmDelete, setConfirmDelete] = useState(false);
+  const [showEditDialog, setShowEditDialog] = useState(false);
 
   useEffect(() => {
     void fetchTeam(teamId);
@@ -76,8 +87,25 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
 
   if (!team && loading) {
     return (
-      <div className="flex items-center justify-center py-20">
-        <p className="text-muted-foreground">Loading team detail...</p>
+      <div className="flex flex-col gap-6">
+        <div className="flex items-center justify-between">
+          <div>
+            <Skeleton className="h-8 w-48" />
+            <Skeleton className="mt-2 h-4 w-64" />
+          </div>
+          <Skeleton className="h-8 w-20" />
+        </div>
+        <Skeleton className="h-16 w-full rounded-lg" />
+        <div className="grid gap-4 sm:grid-cols-4">
+          {Array.from({ length: 4 }).map((_, i) => (
+            <Card key={i}>
+              <CardContent className="py-4">
+                <Skeleton className="mb-2 h-4 w-20" />
+                <Skeleton className="h-8 w-16" />
+              </CardContent>
+            </Card>
+          ))}
+        </div>
       </div>
     );
   }
@@ -118,6 +146,11 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
     team.status === "executing" ||
     team.status === "reviewing";
 
+  const isTerminal =
+    team.status === "completed" ||
+    team.status === "failed" ||
+    team.status === "cancelled";
+
   const plannerOutputs = team.plannerRunId
     ? agentOutputs.get(team.plannerRunId) ?? []
     : [];
@@ -128,18 +161,28 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
-        <div>
-          <h1 className="text-2xl font-bold">
-            {team.name || team.taskTitle || "Agent Team"}
-          </h1>
-          <p className="text-muted-foreground">{team.taskTitle}</p>
+        <div className="flex items-center gap-2">
+          <div>
+            <h1 className="text-2xl font-bold">
+              {team.name || team.taskTitle || "Agent Team"}
+            </h1>
+            <p className="text-muted-foreground">{team.taskTitle}</p>
+          </div>
+          <Button
+            variant="ghost"
+            size="icon"
+            className="size-8"
+            onClick={() => setShowEditDialog(true)}
+          >
+            <Pencil className="size-4" />
+          </Button>
         </div>
         <div className="flex gap-2">
           {isActive && (
             <Button
               variant="destructive"
               size="sm"
-              onClick={() => cancelTeam(team.id)}
+              onClick={() => setConfirmCancel(true)}
             >
               <XCircle className="mr-1 size-4" />
               Cancel
@@ -149,14 +192,68 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
             <Button
               variant="outline"
               size="sm"
-              onClick={() => retryTeam(team.id)}
+              onClick={() => setConfirmRetry(true)}
             >
               <RotateCw className="mr-1 size-4" />
               Retry
             </Button>
           )}
+          {isTerminal && (
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={() => setConfirmDelete(true)}
+            >
+              <Trash2 className="mr-1 size-4" />
+              Delete
+            </Button>
+          )}
         </div>
       </div>
+
+      <ConfirmDialog
+        open={confirmCancel}
+        title="Cancel Team"
+        description="This will stop all active agents in the team. This action cannot be undone."
+        confirmLabel="Cancel Team"
+        variant="destructive"
+        onConfirm={() => {
+          setConfirmCancel(false);
+          void cancelTeam(team.id);
+        }}
+        onCancel={() => setConfirmCancel(false)}
+      />
+      <ConfirmDialog
+        open={confirmRetry}
+        title="Retry Team"
+        description="This will restart the team from its last failed phase."
+        confirmLabel="Retry"
+        onConfirm={() => {
+          setConfirmRetry(false);
+          void retryTeam(team.id);
+        }}
+        onCancel={() => setConfirmRetry(false)}
+      />
+      <ConfirmDialog
+        open={confirmDelete}
+        title="Delete Team"
+        description="This will permanently remove this team record. This action cannot be undone."
+        confirmLabel="Delete"
+        variant="destructive"
+        onConfirm={() => {
+          setConfirmDelete(false);
+          void deleteTeam(team.id).then(() => router.push("/teams"));
+        }}
+        onCancel={() => setConfirmDelete(false)}
+      />
+      {showEditDialog && (
+        <EditTeamDialog
+          open={showEditDialog}
+          team={team}
+          onSave={(input) => updateTeam(team.id, input).then(() => void fetchTeam(team.id))}
+          onClose={() => setShowEditDialog(false)}
+        />
+      )}
 
       <TeamPipeline team={team} />
 

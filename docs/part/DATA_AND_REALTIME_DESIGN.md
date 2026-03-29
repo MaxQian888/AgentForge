@@ -5,6 +5,18 @@
 
 ---
 
+## 当前实现快照（2026-03-29）
+
+这份文档覆盖的是数据与实时系统的长线设计，但当前仓库已经有一些比早期设计更具体的实现边界：
+
+- WebSocket 广播当前由 Go 侧 `internal/ws` hub 统一承接，并按 `project_id` 做过滤广播；这是任务、审查、调度、插件、文档关联等前端实时更新的 live hub。
+- 任务、实体链接、任务评论、调度、插件事件都已经直接走 Go hub 广播，而不是依赖文档里更早期的 Redis Pub/Sub 主链路。
+- 文档/Wiki 相关数据面已经包含 `wiki_space`、`wiki_page`、`page_version`、`page_comment`、`doc_template` 及其页面树、模板、评论、版本能力。
+- 项目设置真实前端工作区已经围绕 `codingAgentCatalog`、预算治理、review policy、webhook 配置和 fallback diagnostics 落地，不再只是早期 `agent_defaults/review/notifications/git` 的概念草图。
+- 审查实时状态已经引入 `pending_human` 等明确状态，并通过 `review.pending_human` 等事件驱动前端工作区。
+
+---
+
 ## 目录
 
 1. [PostgreSQL Schema 深度设计](#1-postgresql-schema-深度设计)
@@ -1897,24 +1909,23 @@ func Replay(ctx context.Context, db *sqlx.DB, filter ReplayFilter, handler Handl
 │                                                                     │
 │  Agent SDK (TS)          Bridge (TS)         Go Backend             │
 │  ┌────────────┐         ┌────────────┐      ┌──────────────────┐   │
-│  │ query()    │ stdout  │ 解析输出   │ gRPC │ Agent Service    │   │
+│  │ query()    │ stdout  │ 解析输出   │  WS  │ Agent Service    │   │
 │  │ claude     ├────────→│ 打 tag     ├─────→│ 聚合 + 持久化    │   │
 │  │ subagent   │ stderr  │ 缓冲/批量  │ /HTTP│ 成本计算         │   │
 │  │ tool calls │────────→│ 背压控制   │      │ 预算检查         │   │
 │  └────────────┘         └────────────┘      └────────┬─────────┘   │
 │                                                      │              │
-│                         Redis Pub/Sub                │              │
+│                         Go WS Hub                    │              │
 │                         ┌────────────┐               │              │
-│                         │ af:ws:     │←──────────────┘              │
-│                         │ agent:xxx  │                              │
+│                         │ project-   │←──────────────┘              │
+│                         │ scoped     │                              │
+│                         │ broadcast  │                              │
 │                         └─────┬──────┘                              │
 │                               │                                     │
 │                    ┌──────────┼──────────┐                          │
 │                    ↓          ↓          ↓                          │
-│               WS 实例 1  WS 实例 2  WS 实例 3                       │
-│                    ↓          ↓          ↓                          │
-│               Dashboard   Dashboard   Mobile                       │
-│               (Browser)   (Browser)   (App)                        │
+│               Dashboard   IM Bridge   Other clients                │
+│               (Browser)   / sidecars  / future surfaces            │
 └─────────────────────────────────────────────────────────────────────┘
 ```
 
@@ -2013,14 +2024,14 @@ class OutputCapture {
    - 积压 > 100 条: 丢弃低优先级 text 输出，保留 tool_call/error/status
 
 2. Go 后端处理层
-   - gRPC 流接收，内存队列 1000 条
-   - 满则: 通知 Bridge 降速（gRPC 流控自动生效）
-   - 持久化到 agent_runs 使用批量 INSERT
+   - WebSocket 事件接收 + 内存队列
+   - 满则: 走 Bridge 本地缓冲与丢弃低优先级文本策略，而不是依赖 gRPC 流控
+   - 持久化到 agent_runs 使用批量写入或聚合更新
 
-3. Redis Pub/Sub 层
-   - Redis Pub/Sub 无背压机制（fire and forget）
-   - 解决方案: 对高频 agent.output 事件进行采样
-   - 全量输出存 agent_runs 表，Pub/Sub 只推送摘要
+3. Go WS Hub 广播层
+   - 当前 live path 由 Go hub 直接向前端/消费者广播
+   - 解决方案: 继续按 `project_id` 做过滤，对高频输出保持摘要化广播
+   - 全量输出仍以持久化记录和按需拉取为准，实时广播不承诺无限缓存
 
 4. WebSocket 推送层
    - 每连接发送缓冲: 256 条消息

@@ -7,6 +7,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
@@ -42,7 +43,7 @@ func (h *CustomFieldHandler) ListDefinitions(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	definitions, err := h.service.ListFields(c.Request().Context(), projectID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list custom fields"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListCustomFields)
 	}
 	dtos := make([]model.CustomFieldDefinitionDTO, 0, len(definitions))
 	for _, definition := range definitions {
@@ -55,7 +56,7 @@ func (h *CustomFieldHandler) CreateDefinition(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	req := new(model.CreateCustomFieldRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -68,7 +69,7 @@ func (h *CustomFieldHandler) CreateDefinition(c echo.Context) error {
 		Required:  req.Required,
 	}
 	if err := h.service.CreateField(c.Request().Context(), definition); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create custom field"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateCustomField)
 	}
 	return c.JSON(http.StatusCreated, definition.ToDTO())
 }
@@ -77,15 +78,15 @@ func (h *CustomFieldHandler) UpdateDefinition(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	fieldID, err := uuid.Parse(c.Param("fid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid field ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidFieldID)
 	}
 	definition, err := h.service.GetField(c.Request().Context(), fieldID)
 	if err != nil || definition == nil || definition.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "custom field not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgCustomFieldNotFound)
 	}
 	req := new(model.UpdateCustomFieldRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if req.Name != nil {
 		definition.Name = *req.Name
@@ -103,7 +104,7 @@ func (h *CustomFieldHandler) UpdateDefinition(c echo.Context) error {
 		definition.SortOrder = *req.SortOrder
 	}
 	if err := h.service.UpdateField(c.Request().Context(), definition); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to update custom field"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateCustomField)
 	}
 	return c.JSON(http.StatusOK, definition.ToDTO())
 }
@@ -112,14 +113,14 @@ func (h *CustomFieldHandler) DeleteDefinition(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	fieldID, err := uuid.Parse(c.Param("fid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid field ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidFieldID)
 	}
 	definition, err := h.service.GetField(c.Request().Context(), fieldID)
 	if err != nil || definition == nil || definition.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "custom field not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgCustomFieldNotFound)
 	}
 	if err := h.service.DeleteField(c.Request().Context(), fieldID); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to delete custom field"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteCustomField)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "custom field deleted"})
 }
@@ -128,7 +129,7 @@ func (h *CustomFieldHandler) ReorderDefinitions(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	req := new(model.ReorderCustomFieldsRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
@@ -137,12 +138,12 @@ func (h *CustomFieldHandler) ReorderDefinitions(c echo.Context) error {
 	for _, rawID := range req.FieldIDs {
 		parsed, err := uuid.Parse(rawID)
 		if err != nil {
-			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid field ID in reorder payload"})
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidFieldIDInReorder)
 		}
 		orderedIDs = append(orderedIDs, parsed)
 	}
 	if err := h.service.ReorderFields(c.Request().Context(), projectID, orderedIDs); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to reorder custom fields"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToReorderCustomFields)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "custom fields reordered"})
 }
@@ -150,11 +151,11 @@ func (h *CustomFieldHandler) ReorderDefinitions(c echo.Context) error {
 func (h *CustomFieldHandler) ListTaskValues(c echo.Context) error {
 	taskID, err := uuid.Parse(c.Param("tid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	values, err := h.service.GetValuesForTask(c.Request().Context(), taskID)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list custom field values"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListCustomFieldValues)
 	}
 	dtos := make([]model.CustomFieldValueDTO, 0, len(values))
 	for _, value := range values {
@@ -167,19 +168,19 @@ func (h *CustomFieldHandler) SetTaskValue(c echo.Context) error {
 	projectID := appMiddleware.GetProjectID(c)
 	taskID, err := uuid.Parse(c.Param("tid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	fieldID, err := uuid.Parse(c.Param("fid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid field ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidFieldID)
 	}
 	definition, err := h.service.GetField(c.Request().Context(), fieldID)
 	if err != nil || definition == nil || definition.ProjectID != projectID {
-		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "custom field not found"})
+		return localizedError(c, http.StatusNotFound, i18n.MsgCustomFieldNotFound)
 	}
 	req := new(model.SetCustomFieldValueRequest)
 	if err := c.Bind(req); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 	value := &model.CustomFieldValue{
 		TaskID:     taskID,
@@ -187,7 +188,7 @@ func (h *CustomFieldHandler) SetTaskValue(c echo.Context) error {
 		Value:      string(req.Value),
 	}
 	if err := h.service.SetValue(c.Request().Context(), value); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to set custom field value"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToSetCustomFieldValue)
 	}
 	if h.automation != nil {
 		decodedValue := decodeAutomationJSONValue(req.Value)
@@ -209,14 +210,14 @@ func (h *CustomFieldHandler) SetTaskValue(c echo.Context) error {
 func (h *CustomFieldHandler) ClearTaskValue(c echo.Context) error {
 	taskID, err := uuid.Parse(c.Param("tid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid task ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
 	}
 	fieldID, err := uuid.Parse(c.Param("fid"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid field ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidFieldID)
 	}
 	if err := h.service.ClearValue(c.Request().Context(), taskID, fieldID); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to clear custom field value"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToClearCustomFieldValue)
 	}
 	if h.automation != nil {
 		projectID := appMiddleware.GetProjectID(c)

@@ -23,6 +23,7 @@ type QueueAdmissionInput struct {
 	Provider  string
 	Model     string
 	RoleID    string
+	Priority  int
 	BudgetUSD float64
 	Reason    string
 }

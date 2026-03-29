@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo } from "react";
+import { useTranslations } from "next-intl";
 import type { DocsComment } from "@/lib/stores/docs-store";
 import { CommentInput } from "./comment-input";
 import { CommentThread } from "./comment-thread";
@@ -22,6 +23,7 @@ export function CommentsPanel({
   mentionSuggestions?: string[];
   readonly?: boolean;
 }) {
+  const t = useTranslations("docs");
   const { roots, detached } = useMemo(() => {
     const rootComments = comments.filter((comment) => !comment.parentCommentId);
     const detachedComments = comments.filter(
@@ -33,15 +35,15 @@ export function CommentsPanel({
   return (
     <div className="flex flex-col gap-4 rounded-xl border border-border/60 bg-card/70 p-4">
       <div>
-        <h2 className="text-base font-semibold">Comments</h2>
+        <h2 className="text-base font-semibold">{t("comments.title")}</h2>
         <p className="text-sm text-muted-foreground">
-          Page-level and inline discussions stay next to the draft.
+          {t("comments.desc")}
         </p>
       </div>
 
       {readonly ? (
         <p className="rounded-lg border border-dashed border-border/70 px-3 py-2 text-sm text-muted-foreground">
-          Shared snapshots are read-only. Open the live document to add or resolve comments.
+          {t("comments.readonlyHint")}
         </p>
       ) : (
         <CommentInput onSubmit={onCreateComment} suggestions={mentionSuggestions} />
@@ -62,9 +64,9 @@ export function CommentsPanel({
 
       {detached.length > 0 ? (
         <div className="rounded-lg border border-dashed border-border/70 p-3">
-          <h3 className="text-sm font-medium">Detached Comments</h3>
+          <h3 className="text-sm font-medium">{t("comments.detachedTitle")}</h3>
           <p className="mb-2 text-xs text-muted-foreground">
-            These comments reference blocks that no longer exist in the current draft.
+            {t("comments.detachedDesc")}
           </p>
           <div className="flex flex-col gap-2">
             {detached.map((comment) => (

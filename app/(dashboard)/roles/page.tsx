@@ -7,9 +7,12 @@ import { useRoleStore, type RoleManifest } from "@/lib/stores/role-store";
 export default function RolesPage() {
   const {
     roles,
+    skillCatalog,
     loading,
+    skillCatalogLoading,
     error,
     fetchRoles,
+    fetchSkillCatalog,
     createRole,
     updateRole,
     deleteRole,
@@ -20,7 +23,8 @@ export default function RolesPage() {
 
   useEffect(() => {
     fetchRoles();
-  }, [fetchRoles]);
+    fetchSkillCatalog();
+  }, [fetchRoles, fetchSkillCatalog]);
 
   async function handleSubmit(data: Partial<RoleManifest>) {
     await createRole(data);
@@ -29,6 +33,8 @@ export default function RolesPage() {
   return (
     <RoleWorkspace
       roles={roles}
+      skillCatalog={skillCatalog}
+      skillCatalogLoading={skillCatalogLoading}
       loading={loading}
       error={error}
       onCreateRole={handleSubmit}

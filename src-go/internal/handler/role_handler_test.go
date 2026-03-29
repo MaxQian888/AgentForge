@@ -270,6 +270,66 @@ func TestRoleHandlerCreateReturnsAdvancedStructuredFields(t *testing.T) {
 	}
 }
 
+func TestRoleHandlerListSkillsReturnsRepoLocalCatalogEntries(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "roles"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "skills", "react"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "skills", "testing"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "skills", "react", "SKILL.md"), []byte(`---
+name: React UI
+description: Build React product interfaces.
+---
+`), 0o600); err != nil {
+		t.Fatalf("seed react skill error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "skills", "testing", "SKILL.md"), []byte(`# Testing`), 0o600); err != nil {
+		t.Fatalf("seed testing skill error = %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/roles/skills", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	h := handler.NewRoleHandler(filepath.Join(dir, "roles"))
+	if err := h.ListSkills(ctx); err != nil {
+		t.Fatalf("ListSkills() error = %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var skills []map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &skills); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(skills) != 2 {
+		t.Fatalf("len(skills) = %d, want 2", len(skills))
+	}
+	if skills[0]["path"] != "skills/react" {
+		t.Fatalf("skills[0].path = %#v, want skills/react", skills[0]["path"])
+	}
+	if skills[0]["label"] != "React UI" {
+		t.Fatalf("skills[0].label = %#v, want React UI", skills[0]["label"])
+	}
+	if skills[0]["source"] != "repo-local" {
+		t.Fatalf("skills[0].source = %#v, want repo-local", skills[0]["source"])
+	}
+	if skills[1]["path"] != "skills/testing" {
+		t.Fatalf("skills[1].path = %#v, want skills/testing", skills[1]["path"])
+	}
+	if skills[1]["label"] != "Testing" {
+		t.Fatalf("skills[1].label = %#v, want Testing fallback", skills[1]["label"])
+	}
+}
+
 func TestRoleHandlerGetReturnsAdvancedStructuredFields(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "design-lead"), 0o755); err != nil {
@@ -419,6 +479,429 @@ security:
 	}
 }
 
+func TestRoleHandlerPreviewProjectsRuntimeSkillContext(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "skills", "react"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "skills", "testing"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "skills", "react", "SKILL.md"), []byte(`---
+name: React
+description: React UI implementation guidance
+---
+
+# React
+
+Prefer server-safe React composition.
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "skills", "testing", "SKILL.md"), []byte(`---
+name: Testing
+description: Regression-oriented test guidance
+---
+
+# Testing
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "roles", "base-role"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "roles", "base-role", "role.yaml"), []byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: base-role
+  name: Base Role
+identity:
+  role: Base Role
+  goal: Build UI
+  backstory: Parent backstory
+capabilities:
+  skills:
+    - path: skills/react
+      auto_load: true
+    - path: skills/testing
+      auto_load: false
+security:
+  permission_mode: default
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/roles/preview", strings.NewReader(`{"roleId":"base-role"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	h := handler.NewRoleHandler(filepath.Join(dir, "roles"))
+	if err := h.Preview(ctx); err != nil {
+		t.Fatalf("Preview() error = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	executionProfile := payload["executionProfile"].(map[string]any)
+	loadedSkills := executionProfile["loaded_skills"].([]any)
+	if len(loadedSkills) != 1 {
+		t.Fatalf("loaded_skills = %#v, want 1 loaded skill", loadedSkills)
+	}
+	availableSkills := executionProfile["available_skills"].([]any)
+	if len(availableSkills) != 1 {
+		t.Fatalf("available_skills = %#v, want 1 on-demand skill", availableSkills)
+	}
+}
+
+func TestRoleHandlerUpdatePreservesExistingAdvancedSectionsWhenPayloadOmitsThem(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "design-lead"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "design-lead", "role.yaml"), []byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: design-lead
+  name: Design Lead
+  version: "2.0.0"
+identity:
+  role: Design Lead
+  goal: Keep UX coherent
+capabilities:
+  tools:
+    built_in: [Read]
+    mcp_servers:
+      - name: design-mcp
+        url: http://localhost:3010/mcp
+  custom_settings:
+    approval_mode: guided
+knowledge:
+  shared:
+    - id: design-guidelines
+      type: vector
+      access: read
+      description: Shared UI guidance
+      sources: [docs/PRD.md]
+  memory:
+    short_term:
+      max_tokens: 64000
+overrides:
+  identity.role: Principal Design Lead
+security:
+  allowed_paths: [app/]
+`), 0o600); err != nil {
+		t.Fatalf("seed canonical role error = %v", err)
+	}
+
+	e := echo.New()
+	body := `{
+	  "apiVersion": "agentforge/v1",
+	  "kind": "Role",
+	  "metadata": {
+	    "name": "Design Lead Updated",
+	    "version": "2.0.0"
+	  },
+	  "identity": {
+	    "role": "Design Lead",
+	    "goal": "Keep UX coherent"
+	  },
+	  "security": {
+	    "allowedPaths": ["app/"]
+	  }
+	}`
+	req := httptest.NewRequest(http.MethodPut, "/roles/design-lead", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("design-lead")
+
+	h := handler.NewRoleHandler(dir)
+	if err := h.Update(ctx); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	reloaded, err := os.ReadFile(filepath.Join(dir, "design-lead", "role.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	content := string(reloaded)
+	if !strings.Contains(content, "custom_settings:") {
+		t.Fatalf("saved role lost custom_settings:\n%s", content)
+	}
+	if !strings.Contains(content, "mcp_servers:") {
+		t.Fatalf("saved role lost mcp_servers:\n%s", content)
+	}
+	if !strings.Contains(content, "memory:") {
+		t.Fatalf("saved role lost memory:\n%s", content)
+	}
+	if !strings.Contains(content, "overrides:") {
+		t.Fatalf("saved role lost overrides:\n%s", content)
+	}
+}
+
+func TestRoleHandlerPreviewPreservesExistingAdvancedSectionsForDraftRequests(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "design-lead"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "design-lead", "role.yaml"), []byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: design-lead
+  name: Design Lead
+identity:
+  role: Design Lead
+capabilities:
+  tools:
+    built_in: [Read]
+    mcp_servers:
+      - name: design-mcp
+        url: http://localhost:3010/mcp
+  custom_settings:
+    approval_mode: guided
+knowledge:
+  shared:
+    - id: design-guidelines
+      type: vector
+      access: read
+      description: Shared UI guidance
+      sources: [docs/PRD.md]
+  memory:
+    short_term:
+      max_tokens: 64000
+overrides:
+  identity.role: Principal Design Lead
+security:
+  allowed_paths: [app/]
+`), 0o600); err != nil {
+		t.Fatalf("seed canonical role error = %v", err)
+	}
+
+	e := echo.New()
+	body := `{
+	  "roleId": "design-lead",
+	  "draft": {
+	    "apiVersion": "agentforge/v1",
+	    "kind": "Role",
+	    "metadata": {
+	      "id": "design-lead",
+	      "name": "Design Lead"
+	    },
+	    "identity": {
+	      "role": "Design Lead",
+	      "goal": "Keep UX coherent"
+	    },
+	    "security": {
+	      "allowedPaths": ["app/"]
+	    }
+	  }
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/roles/preview", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	h := handler.NewRoleHandler(dir)
+	if err := h.Preview(ctx); err != nil {
+		t.Fatalf("Preview() error = %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	normalized := payload["normalizedManifest"].(map[string]any)
+	capabilities := normalized["capabilities"].(map[string]any)
+	if _, ok := capabilities["customSettings"]; !ok {
+		t.Fatalf("normalized capabilities.customSettings missing: %#v", capabilities)
+	}
+	toolConfig := capabilities["toolConfig"].(map[string]any)
+	if _, ok := toolConfig["mcpServers"]; !ok {
+		t.Fatalf("normalized toolConfig.mcpServers missing: %#v", toolConfig)
+	}
+	knowledge := normalized["knowledge"].(map[string]any)
+	if _, ok := knowledge["memory"]; !ok {
+		t.Fatalf("normalized knowledge.memory missing: %#v", knowledge)
+	}
+	if _, ok := normalized["overrides"]; !ok {
+		t.Fatalf("normalized overrides missing: %#v", normalized)
+	}
+}
+
+func TestRoleHandlerUpdateAllowsClearingAdvancedSectionsWhenExplicitlyEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "design-lead"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "design-lead", "role.yaml"), []byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: design-lead
+  name: Design Lead
+identity:
+  role: Design Lead
+  goal: Keep UX coherent
+capabilities:
+  custom_settings:
+    approval_mode: guided
+knowledge:
+  private:
+    - id: ux-notes
+      type: vector
+      sources: [knowledge/ux-notes.md]
+security:
+  allowed_paths: [app/]
+  require_review: true
+`), 0o600); err != nil {
+		t.Fatalf("seed canonical role error = %v", err)
+	}
+
+	e := echo.New()
+	body := `{
+	  "apiVersion": "agentforge/v1",
+	  "kind": "Role",
+	  "metadata": {
+	    "name": "Design Lead"
+	  },
+	  "identity": {
+	    "role": "Design Lead",
+	    "goal": "Keep UX coherent"
+	  },
+	  "capabilities": {
+	    "customSettings": {}
+	  },
+	  "knowledge": {
+	    "private": []
+	  },
+	  "security": {
+	    "allowedPaths": ["app/"],
+	    "requireReview": false
+	  }
+	}`
+	req := httptest.NewRequest(http.MethodPut, "/roles/design-lead", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("design-lead")
+
+	h := handler.NewRoleHandler(dir)
+	if err := h.Update(ctx); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	reloaded, err := os.ReadFile(filepath.Join(dir, "design-lead", "role.yaml"))
+	if err != nil {
+		t.Fatalf("ReadFile() error = %v", err)
+	}
+	content := string(reloaded)
+	if strings.Contains(content, "approval_mode: guided") {
+		t.Fatalf("saved role unexpectedly kept custom_settings value:\n%s", content)
+	}
+	if strings.Contains(content, "ux-notes") {
+		t.Fatalf("saved role unexpectedly kept private knowledge source:\n%s", content)
+	}
+	if strings.Contains(content, "require_review: true") {
+		t.Fatalf("saved role unexpectedly kept require_review enabled:\n%s", content)
+	}
+}
+
+func TestRoleHandlerPreviewAllowsClearingAdvancedSectionsWhenExplicitlyEmpty(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "design-lead"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "design-lead", "role.yaml"), []byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: design-lead
+  name: Design Lead
+identity:
+  role: Design Lead
+  goal: Keep UX coherent
+capabilities:
+  custom_settings:
+    approval_mode: guided
+knowledge:
+  private:
+    - id: ux-notes
+      type: vector
+      sources: [knowledge/ux-notes.md]
+security:
+  allowed_paths: [app/]
+  require_review: true
+`), 0o600); err != nil {
+		t.Fatalf("seed canonical role error = %v", err)
+	}
+
+	e := echo.New()
+	body := `{
+	  "roleId": "design-lead",
+	  "draft": {
+	    "apiVersion": "agentforge/v1",
+	    "kind": "Role",
+	    "metadata": {
+	      "id": "design-lead",
+	      "name": "Design Lead"
+	    },
+	    "identity": {
+	      "role": "Design Lead",
+	      "goal": "Keep UX coherent"
+	    },
+	    "capabilities": {
+	      "customSettings": {}
+	    },
+	    "knowledge": {
+	      "private": []
+	    },
+	    "security": {
+	      "allowedPaths": ["app/"],
+	      "requireReview": false
+	    }
+	  }
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/roles/preview", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	h := handler.NewRoleHandler(dir)
+	if err := h.Preview(ctx); err != nil {
+		t.Fatalf("Preview() error = %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	if strings.Contains(rec.Body.String(), "approval_mode") {
+		t.Fatalf("preview unexpectedly kept custom_settings value: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "ux-notes") {
+		t.Fatalf("preview unexpectedly kept private knowledge source: %s", rec.Body.String())
+	}
+	if strings.Contains(rec.Body.String(), "\"requireReview\":true") {
+		t.Fatalf("preview unexpectedly kept requireReview enabled: %s", rec.Body.String())
+	}
+}
+
 func TestRoleHandlerSandboxReturnsReadinessDiagnosticsWithoutRunningProbe(t *testing.T) {
 	dir := t.TempDir()
 	e := echo.New()
@@ -476,6 +959,70 @@ func TestRoleHandlerSandboxReturnsReadinessDiagnosticsWithoutRunningProbe(t *tes
 	}
 	if _, ok := payload["probe"]; ok {
 		t.Fatalf("probe should be omitted when readiness is blocking: %#v", payload["probe"])
+	}
+}
+
+func TestRoleHandlerSandboxAddsBlockingSkillDiagnosticsBeforeProbe(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "roles", "sandbox-role"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "roles", "sandbox-role", "role.yaml"), []byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: sandbox-role
+  name: Sandbox Role
+identity:
+  role: Sandbox Role
+  goal: Check diagnostics
+capabilities:
+  skills:
+    - path: skills/react
+      auto_load: true
+security:
+  permission_mode: default
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	e := echo.New()
+	body := `{
+	  "roleId": "sandbox-role",
+	  "input": "hello",
+	  "runtime": "claude_code"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/roles/sandbox", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	bridgeClient := &fakeRoleBridgeClient{
+		catalog: &bridge.RuntimeCatalogResponse{
+			DefaultRuntime: "claude_code",
+			Runtimes: []bridge.RuntimeCatalogEntryDTO{{
+				Key:             "claude_code",
+				Label:           "Claude Code",
+				DefaultProvider: "anthropic",
+				DefaultModel:    "claude-sonnet-4-5",
+				Available:       true,
+			}},
+		},
+	}
+	h := handler.NewRoleHandler(filepath.Join(dir, "roles")).WithBridgeClient(bridgeClient)
+	if err := h.Sandbox(ctx); err != nil {
+		t.Fatalf("Sandbox() error = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	diagnostics := payload["readinessDiagnostics"].([]any)
+	if len(diagnostics) == 0 {
+		t.Fatalf("readinessDiagnostics = %#v, want blocking skill diagnostic", diagnostics)
+	}
+	if bridgeClient.lastGenerate != nil {
+		t.Fatalf("Generate() was called despite blocking skill diagnostics: %#v", bridgeClient.lastGenerate)
 	}
 }
 

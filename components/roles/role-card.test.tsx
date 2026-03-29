@@ -1,6 +1,29 @@
+import rolesMessages from "../../messages/en/roles.json";
+
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string, values?: Record<string, string | number>) => {
+    const resolved = key
+      .split(".")
+      .reduce<unknown>((current, part) => {
+        if (current && typeof current === "object" && part in current) {
+          return (current as Record<string, unknown>)[part];
+        }
+        return undefined;
+      }, rolesMessages as unknown as Record<string, unknown>);
+
+    if (typeof resolved !== "string") {
+      return key;
+    }
+    return Object.entries(values ?? {}).reduce(
+      (message, [name, value]) => message.replace(`{${name}}`, String(value)),
+      resolved,
+    );
+  },
+}));
+
 import { render, screen } from "@testing-library/react";
 import { RoleCard } from "./role-card";
-import type { RoleManifest } from "@/lib/stores/role-store";
+import type { RoleManifest, RoleSkillCatalogEntry } from "@/lib/stores/role-store";
 
 const reviewRole: RoleManifest = {
   apiVersion: "agentforge/v1",
@@ -48,10 +71,19 @@ const reviewRole: RoleManifest = {
   extends: "base-reviewer",
 };
 
+const skillCatalog: RoleSkillCatalogEntry[] = [
+  {
+    path: "skills/review",
+    label: "Review",
+    source: "repo-local",
+    sourceRoot: "skills",
+  },
+];
+
 describe("RoleCard", () => {
   it("surfaces execution-relevant summaries and safety cues", () => {
     render(
-      <RoleCard role={reviewRole} onEdit={jest.fn()} onDelete={jest.fn()} />,
+      <RoleCard role={reviewRole} skillCatalog={skillCatalog} onEdit={jest.fn()} onDelete={jest.fn()} />,
     );
 
     expect(screen.getByText("Extends base-reviewer")).toBeInTheDocument();
@@ -59,6 +91,7 @@ describe("RoleCard", () => {
     expect(screen.getByText("Max budget: $3.00")).toBeInTheDocument();
     expect(screen.getByText("Skills: 1 auto / 1 on-demand")).toBeInTheDocument();
     expect(screen.getByText("Key skills: skills/review, skills/security")).toBeInTheDocument();
+    expect(screen.getByText("Catalog: 1 resolved / 1 unresolved")).toBeInTheDocument();
     expect(screen.getByText("Review gate: required before execution")).toBeInTheDocument();
     expect(screen.getByText("Path policy: 1 allow / 1 deny")).toBeInTheDocument();
   });

@@ -16,12 +16,13 @@ describe("dev-all workflow contract", () => {
     const paths = getDevAllPaths({ repoRoot });
     const services = createDevAllServiceDefinitions({ repoRoot });
 
-    expect(paths).toMatchObject({
-      repoRoot,
-      codexDir: path.join(repoRoot, ".codex"),
-      runtimeLogsDir: path.join(repoRoot, ".codex", "runtime-logs"),
-      statePath: path.join(repoRoot, ".codex", "dev-all-state.json"),
-    });
+    expect(paths.repoRoot).toBe(repoRoot);
+    expect([
+      path.join(repoRoot, ".codex"),
+      path.join(repoRoot, "tmp-runtime"),
+    ]).toContain(paths.codexDir);
+    expect(paths.runtimeLogsDir).toBe(path.join(paths.codexDir, "runtime-logs"));
+    expect(paths.statePath).toBe(path.join(paths.codexDir, "dev-all-state.json"));
 
     expect(
       services.map((service: {
@@ -261,7 +262,7 @@ describe("dev-all workflow contract", () => {
 
     const result = await runDevAllStart({ repoRoot });
 
-    expect(result.ok).toBe(true);
+    expect(result).toEqual(expect.objectContaining({ ok: true }));
     expect(result.services).toEqual(
       expect.arrayContaining([
         expect.objectContaining({ name: "postgres", action: "reused", source: "reused" }),
@@ -311,6 +312,7 @@ describe("dev-all workflow contract", () => {
         getDockerComposeAvailability,
         startDockerDesktop,
         isCommandAvailable: jest.fn(() => true),
+        isPortListening: jest.fn(async () => false),
         runCommandSync,
         probeServiceHealth: jest.fn(async (service) => {
           const count = probeCounts.get(service.name) ?? 0;

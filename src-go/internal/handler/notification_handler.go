@@ -6,6 +6,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
@@ -22,12 +23,12 @@ func NewNotificationHandler(repo *repository.NotificationRepository) *Notificati
 func (h *NotificationHandler) List(c echo.Context) error {
 	claims, err := middleware.GetClaims(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "unauthorized"})
+		return localizedError(c, http.StatusUnauthorized, i18n.MsgUnauthorized)
 	}
 
 	userID, err := uuid.Parse(claims.UserID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid user ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidUserID)
 	}
 
 	unreadOnly := c.QueryParam("unread_only") == "true"
@@ -35,7 +36,7 @@ func (h *NotificationHandler) List(c echo.Context) error {
 
 	notifications, err := h.repo.ListByTarget(c.Request().Context(), userID, unreadOnly, limit)
 	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list notifications"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListNotifications)
 	}
 
 	dtos := make([]model.NotificationDTO, 0, len(notifications))
@@ -48,10 +49,10 @@ func (h *NotificationHandler) List(c echo.Context) error {
 func (h *NotificationHandler) MarkRead(c echo.Context) error {
 	id, err := uuid.Parse(c.Param("id"))
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid notification ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidNotificationID)
 	}
 	if err := h.repo.MarkRead(c.Request().Context(), id); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to mark notification as read"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToMarkNotificationRead)
 	}
 	return c.JSON(http.StatusOK, map[string]string{"message": "notification marked as read"})
 }
@@ -59,16 +60,16 @@ func (h *NotificationHandler) MarkRead(c echo.Context) error {
 func (h *NotificationHandler) MarkAllRead(c echo.Context) error {
 	claims, err := middleware.GetClaims(c)
 	if err != nil {
-		return c.JSON(http.StatusUnauthorized, model.ErrorResponse{Message: "unauthorized"})
+		return localizedError(c, http.StatusUnauthorized, i18n.MsgUnauthorized)
 	}
 
 	userID, err := uuid.Parse(claims.UserID)
 	if err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid user ID"})
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidUserID)
 	}
 
 	if err := h.repo.MarkAllRead(c.Request().Context(), userID); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to mark notifications as read"})
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToMarkAllRead)
 	}
 
 	return c.JSON(http.StatusOK, map[string]string{"message": "notifications marked as read"})

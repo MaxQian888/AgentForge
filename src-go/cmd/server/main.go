@@ -15,6 +15,7 @@ import (
 
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
+	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
 	"github.com/react-go-quick-starter/server/internal/pool"
@@ -134,10 +135,14 @@ func main() {
 	hub := ws.NewHub()
 	go hub.Run()
 	bridgeClient := bridge.NewClient(cfg.BridgeURL)
+	bridgeHealthCtx, bridgeHealthCancel := context.WithCancel(context.Background())
+	bridgeHealthSvc := service.NewBridgeHealthService(bridgeClient)
+	bridgeHealthSvc.Start(bridgeHealthCtx)
 	worktreeMgr := worktree.NewManager(cfg.WorktreeBasePath, cfg.RepoBasePath, cfg.MaxActiveAgents)
 	runStartupWorktreeSweep(cfg, worktreeMgr)
 	roleStore := role.NewFileStore(cfg.RolesDir)
 	agentSvc := service.NewAgentService(agentRunRepo, taskRepo, projectRepo, hub, bridgeClient, worktreeMgr, roleStore)
+	agentSvc.SetBridgeHealth(bridgeHealthSvc)
 	agentSvc.SetPool(pool.NewPool(cfg.MaxActiveAgents))
 	agentSvc.SetQueueStore(agentPoolQueueRepo)
 	pluginSvc := service.NewPluginService(
@@ -149,6 +154,9 @@ func main() {
 		WithInstanceStore(repository.NewPluginInstanceRepository(db)).
 		WithEventStore(repository.NewPluginEventRepository(db)).
 		WithBroadcaster(ws.NewPluginEventBroadcaster(hub))
+	if cfg.PluginRegistryURL != "" {
+		pluginSvc.SetRemoteRegistry(service.NewHTTPRemoteRegistryClient(http.DefaultClient), cfg.PluginRegistryURL)
+	}
 	schedulerRegistry := scheduler.NewRegistry(scheduledJobRepo, scheduler.BuiltInCatalog(scheduler.CatalogConfig{
 		TaskProgressDetectorInterval: cfg.TaskProgressDetectorInterval,
 		ExecutionMode:                schedulerExecutionMode(cfg.SchedulerExecutionMode),
@@ -170,10 +178,13 @@ func main() {
 		log.WithField("executionMode", cfg.SchedulerExecutionMode).Info("scheduler registry reconciled")
 	}
 
+	// Initialize i18n
+	appI18n.Init()
+
 	// Create Echo instance and register routes
 	e := server.New(cfg, cacheRepo)
 	taskProgressSvc := server.RegisterRoutes(e, cfg, authSvc, cacheRepo,
-		projectRepo, memberRepo, sprintRepo, taskRepo, entityLinkRepo, taskCommentRepo, customFieldRepo, savedViewRepo, formRepo, automationRuleRepo, automationLogRepo, dashboardRepo, milestoneRepo, taskProgressRepo, agentRunRepo, notifRepo, reviewRepo, reviewAggRepo, falsePosRepo, workflowRepo, teamRepo, memoryRepo, wikiSpaceRepo, wikiPageRepo, pageVersionRepo, pageCommentRepo, pageFavoriteRepo, pageRecentAccessRepo, hub, bridgeClient, pluginSvc, agentSvc, schedulerSvc,
+		projectRepo, memberRepo, sprintRepo, taskRepo, entityLinkRepo, taskCommentRepo, customFieldRepo, savedViewRepo, formRepo, automationRuleRepo, automationLogRepo, dashboardRepo, milestoneRepo, taskProgressRepo, agentRunRepo, agentPoolQueueRepo, repository.NewDispatchAttemptRepository(db), notifRepo, reviewRepo, reviewAggRepo, falsePosRepo, workflowRepo, teamRepo, memoryRepo, wikiSpaceRepo, wikiPageRepo, pageVersionRepo, pageCommentRepo, pageFavoriteRepo, pageRecentAccessRepo, hub, bridgeClient, bridgeHealthSvc, pluginSvc, agentSvc, schedulerSvc,
 	)
 	if taskProgressSvc != nil {
 		schedulerSvc.RegisterHandler("task-progress-detector", scheduler.NewTaskProgressDetectorHandler(taskProgressSvc))
@@ -191,10 +202,12 @@ func main() {
 		"cost-reconcile",
 		scheduler.NewCostReconcileHandler(projectRepo, taskRepo, teamRepo, agentRunRepo),
 	)
+	schedulerSvc.RegisterHandler("scheduler-history-retention", scheduler.NewHistoryRetentionHandler(schedulerSvc))
 	log.WithFields(log.Fields{
 		"bridgeUrl":         cfg.BridgeURL,
 		"rolesDir":          cfg.RolesDir,
 		"pluginsDir":        cfg.PluginsDir,
+		"pluginRegistryUrl": cfg.PluginRegistryURL,
 		"schedulerInterval": "15s",
 	}).Info("backend dependencies wired")
 	schedulerCtx, schedulerCancel := context.WithCancel(context.Background())
@@ -208,6 +221,7 @@ func main() {
 	go func() {
 		<-quit
 		log.Info("shutting down server...")
+		bridgeHealthCancel()
 		schedulerCancel()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 		defer cancel()

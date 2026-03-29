@@ -4,6 +4,12 @@ import {
   parseAgentProfile,
   type AgentProfile,
 } from "@/lib/team/agent-profile";
+import {
+  getMemberStatusLabel,
+  isMemberAvailable,
+  normalizeMemberStatus,
+  type MemberStatus,
+} from "@/lib/team/member-status";
 
 export type DashboardTaskStatus =
   | "inbox"
@@ -56,7 +62,10 @@ export interface DashboardMemberSource {
   name: string;
   type: DashboardMemberType;
   role: string;
+  status?: MemberStatus;
   email: string;
+  imPlatform?: string;
+  imUserId?: string;
   avatarUrl?: string;
   agentConfig?: string;
   skills: string[];
@@ -87,11 +96,14 @@ export interface TeamMember {
   type: DashboardMemberType;
   typeLabel: "Human" | "Agent";
   role: string;
+  statusLabel?: string;
   email: string;
+  imPlatform?: string;
+  imUserId?: string;
   avatarUrl: string;
   skills: string[];
   isActive: boolean;
-  status: "active" | "inactive";
+  status: MemberStatus;
   createdAt: string;
   lastActivityAt: string | null;
   workload: TeamMemberWorkload;
@@ -195,6 +207,7 @@ export function normalizeTeamMember(member: DashboardMemberSource): TeamMember {
     member.type === "agent" ? parseAgentProfile(member.agentConfig) : null;
   const readiness =
     member.type === "agent" ? getAgentProfileReadiness(agentProfile) : null;
+  const status = normalizeMemberStatus(member.status, member.isActive);
 
   return {
     id: member.id,
@@ -203,11 +216,14 @@ export function normalizeTeamMember(member: DashboardMemberSource): TeamMember {
     type: member.type,
     typeLabel: member.type === "human" ? "Human" : "Agent",
     role: member.role || (member.type === "human" ? "Contributor" : "Agent"),
+    statusLabel: getMemberStatusLabel(status),
     email: member.email,
+    imPlatform: member.imPlatform ?? "",
+    imUserId: member.imUserId ?? "",
     avatarUrl: member.avatarUrl ?? "",
     skills: member.skills ?? [],
-    isActive: member.isActive,
-    status: member.isActive ? "active" : "inactive",
+    isActive: isMemberAvailable(status, member.isActive),
+    status,
     createdAt: member.createdAt,
     lastActivityAt: null,
     workload: {

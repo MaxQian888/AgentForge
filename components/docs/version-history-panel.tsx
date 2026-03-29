@@ -1,5 +1,6 @@
 "use client";
 
+import { useTranslations } from "next-intl";
 import { Copy, History, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import type { DocsVersion } from "@/lib/stores/docs-store";
@@ -19,11 +20,13 @@ export function VersionHistoryPanel({
   onShare?: (versionId: string) => void;
   readonly?: boolean;
 }) {
+  const t = useTranslations("docs");
+
   return (
     <div className="flex flex-col gap-3 rounded-xl border border-border/60 bg-card/70 p-4">
       <div className="flex items-center gap-2">
         <History className="size-4 text-muted-foreground" />
-        <h2 className="text-base font-semibold">Version History</h2>
+        <h2 className="text-base font-semibold">{t("versionHistory.title")}</h2>
       </div>
       {versions.map((version) => (
         <div
@@ -52,7 +55,7 @@ export function VersionHistoryPanel({
               onClick={() => {
                 if (typeof window !== "undefined") {
                   const confirmed = window.confirm(
-                    `Restore ${version.name} (v${version.versionNumber})?`
+                    t("versionHistory.confirmRestore", { name: version.name, version: version.versionNumber })
                   );
                   if (!confirmed) {
                     return;
@@ -62,17 +65,17 @@ export function VersionHistoryPanel({
               }}
             >
               <RotateCcw className="mr-1 size-3.5" />
-              Restore
+              {t("versionHistory.restore")}
             </Button>
             <Button size="sm" variant="ghost" onClick={() => onShare?.(version.id)}>
               <Copy className="mr-1 size-3.5" />
-              Share
+              {t("versionHistory.share")}
             </Button>
           </div>
         </div>
       ))}
       {versions.length === 0 ? (
-        <p className="text-sm text-muted-foreground">No saved versions yet.</p>
+        <p className="text-sm text-muted-foreground">{t("versionHistory.noVersions")}</p>
       ) : null}
     </div>
   );

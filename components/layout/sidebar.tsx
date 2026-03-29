@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useTranslations } from "next-intl";
 import {
   LayoutDashboard,
   FolderKanban,
@@ -34,28 +35,36 @@ import {
 } from "@/components/ui/sheet";
 import { Separator } from "@/components/ui/separator";
 import { useCallback, useState } from "react";
+import type { LucideIcon } from "lucide-react";
 
-const navItems = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
-  { href: "/projects", label: "Projects", icon: FolderKanban },
-  { href: "/project/dashboard", label: "Project Dashboard", icon: LayoutDashboard },
-  { href: "/team", label: "Team", icon: Users },
-  { href: "/agents", label: "Agents", icon: Bot },
-  { href: "/teams", label: "Teams", icon: Network },
-  { href: "/sprints", label: "Sprints", icon: Timer },
-  { href: "/reviews", label: "Reviews", icon: ClipboardCheck },
-  { href: "/scheduler", label: "Scheduler", icon: RefreshCw },
-  { href: "/cost", label: "Cost", icon: DollarSign },
-  { href: "/memory", label: "Memory", icon: Brain },
-  { href: "/docs", label: "Docs", icon: BookOpenText },
-  { href: "/im", label: "IM Bridge", icon: MessageCircle },
-  { href: "/roles", label: "Roles", icon: Shield },
-  { href: "/plugins", label: "Plugins", icon: Puzzle },
-  { href: "/settings", label: "Settings", icon: Settings },
+interface NavItem {
+  href: string;
+  labelKey: string;
+  icon: LucideIcon;
+}
+
+const navItems: NavItem[] = [
+  { href: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
+  { href: "/projects", labelKey: "nav.projects", icon: FolderKanban },
+  { href: "/project/dashboard", labelKey: "nav.projectDashboard", icon: LayoutDashboard },
+  { href: "/team", labelKey: "nav.team", icon: Users },
+  { href: "/agents", labelKey: "nav.agents", icon: Bot },
+  { href: "/teams", labelKey: "nav.teams", icon: Network },
+  { href: "/sprints", labelKey: "nav.sprints", icon: Timer },
+  { href: "/reviews", labelKey: "nav.reviews", icon: ClipboardCheck },
+  { href: "/scheduler", labelKey: "nav.scheduler", icon: RefreshCw },
+  { href: "/cost", labelKey: "nav.cost", icon: DollarSign },
+  { href: "/memory", labelKey: "nav.memory", icon: Brain },
+  { href: "/docs", labelKey: "nav.docs", icon: BookOpenText },
+  { href: "/im", labelKey: "nav.imBridge", icon: MessageCircle },
+  { href: "/roles", labelKey: "nav.roles", icon: Shield },
+  { href: "/plugins", labelKey: "nav.plugins", icon: Puzzle },
+  { href: "/settings", labelKey: "nav.settings", icon: Settings },
 ];
 
 function NavLinks({ onClick }: { onClick?: () => void }) {
   const pathname = usePathname();
+  const t = useTranslations("common");
 
   return (
     <nav className="flex flex-col gap-1 px-3">
@@ -78,7 +87,7 @@ function NavLinks({ onClick }: { onClick?: () => void }) {
             )}
           >
             <Icon className="size-4" />
-            {item.label}
+            {t(item.labelKey)}
           </Link>
         );
       })}
@@ -106,10 +115,12 @@ function ThemeToggle() {
 }
 
 export function Sidebar() {
+  const t = useTranslations("common");
+
   return (
     <aside className="hidden w-56 shrink-0 border-r bg-sidebar md:flex md:flex-col">
       <div className="flex h-14 items-center px-4 font-semibold">
-        AgentForge
+        {t("appName")}
       </div>
       <Separator />
       <div className="flex-1 py-4">
@@ -123,6 +134,7 @@ export function Sidebar() {
 }
 
 export function MobileSidebar() {
+  const t = useTranslations("common");
   const [open, setOpen] = useState(false);
 
   return (
@@ -134,13 +146,13 @@ export function MobileSidebar() {
       </SheetTrigger>
       <SheetContent side="left" className="w-56 p-0">
         <SheetHeader className="sr-only">
-          <SheetTitle>Mobile navigation</SheetTitle>
+          <SheetTitle>{t("mobileSidebar.title")}</SheetTitle>
           <SheetDescription>
-            Browse the main AgentForge dashboard sections.
+            {t("mobileSidebar.description")}
           </SheetDescription>
         </SheetHeader>
         <div className="flex h-14 items-center px-4 font-semibold">
-          AgentForge
+          {t("appName")}
         </div>
         <Separator />
         <div className="py-4">

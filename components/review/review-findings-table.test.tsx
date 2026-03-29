@@ -1,3 +1,18 @@
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const messages: Record<string, string> = {
+      noFindingsReported: "No findings reported.",
+      findingSeverity: "Severity",
+      findingCategory: "Category",
+      findingSource: "Source",
+      findingFileLine: "File:Line",
+      findingMessage: "Message",
+      findingSuggestion: "Suggestion",
+    };
+    return messages[key] ?? key;
+  },
+}));
+
 import { render, screen } from "@testing-library/react";
 import { ReviewFindingsTable } from "./review-findings-table";
 
