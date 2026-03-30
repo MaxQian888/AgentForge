@@ -21,6 +21,54 @@ function createRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteRequest 
 }
 
 describe("agent runtime registry", () => {
+  test("keeps catalog loading when the default Codex auth probe cannot be spawned", async () => {
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        return command === "codex" ? "C:/mock/codex.exe" : null;
+      },
+      codexAuthStatusProvider() {
+        return {
+          authenticated: false,
+          message: "codex login status blocked",
+        };
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          case "OPENCODE_SERVER_URL":
+            return "http://127.0.0.1:4096";
+          default:
+            return undefined;
+        }
+      },
+      opencodeTransport: {
+        checkReadiness() {
+          return Promise.resolve({
+            ok: true,
+            diagnostics: [],
+          });
+        },
+      } as never,
+    });
+
+    const catalog = await registry.getCatalog();
+    expect(catalog.runtimes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "codex",
+          available: false,
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({
+              code: "missing_credentials",
+              message: expect.stringContaining("codex login status blocked"),
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
   test("publishes runtime catalog metadata and readiness diagnostics", async () => {
     const registry = createRuntimeRegistry({
       executableLookup(command) {

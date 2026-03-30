@@ -10,6 +10,8 @@ const fetchDispatchStats = jest.fn();
 const resumeAgent = jest.fn();
 const searchParamsState = {
   member: "member-2",
+  action: null as string | null,
+  project: "project-1",
 };
 
 const agentState = {
@@ -166,8 +168,29 @@ jest.mock("next/navigation", () => ({
     prefetch: jest.fn(),
     back: jest.fn(),
   }),
+  usePathname: () => "/agents",
   useSearchParams: () => ({
-    get: (key: string) => (key === "member" ? searchParamsState.member : null),
+    get: (key: string) =>
+      key === "member"
+        ? searchParamsState.member
+        : key === "action"
+          ? searchParamsState.action
+          : key === "project"
+            ? searchParamsState.project
+            : null,
+    toString: () => {
+      const params = new URLSearchParams();
+      if (searchParamsState.member) {
+        params.set("member", searchParamsState.member);
+      }
+      if (searchParamsState.action) {
+        params.set("action", searchParamsState.action);
+      }
+      if (searchParamsState.project) {
+        params.set("project", searchParamsState.project);
+      }
+      return params.toString();
+    },
   }),
 }));
 
@@ -190,6 +213,16 @@ describe("AgentsPage", () => {
     fetchDispatchStats.mockReset();
     resumeAgent.mockReset();
     searchParamsState.member = "member-2";
+    searchParamsState.action = null;
+    searchParamsState.project = "project-1";
+  });
+
+  it("keeps rendering the workspace when a legacy spawn action is present", () => {
+    searchParamsState.action = "spawn";
+
+    render(<AgentsPage />);
+
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
   });
 
   it("filters the visible agent list when a member query parameter is present", async () => {

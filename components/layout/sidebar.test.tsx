@@ -77,6 +77,18 @@ describe("AppSidebar", () => {
     expect(projectsLink.closest("[data-active='true']")).not.toBeNull();
   });
 
+  it("matches sidebar items by route segment so /teams does not activate /team", () => {
+    usePathnameMock.mockReturnValue("/teams/detail");
+
+    renderWithProvider();
+
+    const teamLink = screen.getByRole("link", { name: /^Team$/i });
+    const teamsLink = screen.getByRole("link", { name: /^Teams$/i });
+
+    expect(teamLink.closest("[data-active='true']")).toBeNull();
+    expect(teamsLink.closest("[data-active='true']")).not.toBeNull();
+  });
+
   it("renders the app name in header", () => {
     renderWithProvider();
     expect(screen.getByText("AgentForge")).toBeInTheDocument();

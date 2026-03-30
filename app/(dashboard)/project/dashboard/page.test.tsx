@@ -30,6 +30,7 @@ jest.mock("@/components/dashboard/dashboard-grid", () => ({
 
 const searchParamsState = {
   dashboard: null as string | null,
+  action: null as string | null,
 };
 
 const replace = jest.fn();
@@ -38,11 +39,22 @@ jest.mock("next/navigation", () => ({
   useRouter: () => ({ replace }),
   usePathname: () => "/project/dashboard",
   useSearchParams: () => ({
-    get: (key: string) => (key === "dashboard" ? searchParamsState.dashboard : null),
-    toString: () =>
-      searchParamsState.dashboard
-        ? `dashboard=${encodeURIComponent(searchParamsState.dashboard)}`
-        : "",
+    get: (key: string) =>
+      key === "dashboard"
+        ? searchParamsState.dashboard
+        : key === "action"
+          ? searchParamsState.action
+          : null,
+    toString: () => {
+      const params = new URLSearchParams();
+      if (searchParamsState.dashboard) {
+        params.set("dashboard", searchParamsState.dashboard);
+      }
+      if (searchParamsState.action) {
+        params.set("action", searchParamsState.action);
+      }
+      return params.toString();
+    },
   }),
 }));
 
@@ -54,6 +66,7 @@ const deleteDashboard = jest.fn().mockResolvedValue(undefined);
 describe("ProjectDashboardPage", () => {
   beforeEach(() => {
     searchParamsState.dashboard = null;
+    searchParamsState.action = null;
     replace.mockClear();
     fetchDashboards.mockClear();
     createDashboard.mockClear();
@@ -70,6 +83,15 @@ describe("ProjectDashboardPage", () => {
       updateDashboard,
       deleteDashboard,
     });
+  });
+
+  it("ignores unrelated action query params while the dashboard workspace boots", () => {
+    searchParamsState.action = "create-task";
+
+    render(<ProjectDashboardPage />);
+
+    expect(replace).not.toHaveBeenCalled();
+    expect(screen.getByRole("button", { name: "Create Dashboard" })).toBeInTheDocument();
   });
 
   it("renders the create dashboard action when the selected project has no dashboards yet", () => {
