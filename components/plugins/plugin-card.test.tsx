@@ -117,78 +117,95 @@ describe("PluginCard", () => {
     restartPlugin.mockReset();
   });
 
-  it("explains why runtime actions are unavailable for non-executable plugins", () => {
+  it("shows enable button for non-executable disabled plugins", () => {
     render(<PluginCard plugin={rolePlugin} />);
 
-    expect(
-      screen.getByText(/does not use an executable runtime host/i),
-    ).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Activate" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Restart" })).not.toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Health" })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Enable" })).toBeInTheDocument();
+    expect(screen.queryByText("ts-bridge")).not.toBeInTheDocument();
+    expect(screen.getByText("Not executable")).toBeInTheDocument();
   });
 
-  it("exposes runtime actions for active executable plugins", async () => {
+  it("exposes runtime actions for active executable plugins via dropdown menu", async () => {
     const user = userEvent.setup();
 
     render(<PluginCard plugin={activeToolPlugin} />);
 
-    await user.click(screen.getByRole("button", { name: "Restart" }));
-    await user.click(screen.getByRole("button", { name: "Health" }));
+    // Open dropdown menu
+    await user.click(screen.getByRole("button", { name: "More actions" }));
 
-    expect(checkHealth).toHaveBeenCalledWith("github-tool");
+    await user.click(screen.getByRole("menuitem", { name: /Restart/i }));
     expect(restartPlugin).toHaveBeenCalledWith("github-tool");
-    expect(screen.getByText("Host: ts-bridge")).toBeInTheDocument();
+
+    // Reopen dropdown for next action
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(screen.getByRole("menuitem", { name: /Health/i }));
+    expect(checkHealth).toHaveBeenCalledWith("github-tool");
+
+    expect(screen.getByText("ts-bridge")).toBeInTheDocument();
   });
 
-  it("supports activation, configuration, selection, disable, and uninstall flows", async () => {
+  it("supports activation and disable as primary actions for enabled plugins", async () => {
+    const user = userEvent.setup();
+
+    render(<PluginCard plugin={enabledToolPlugin} selected />);
+
+    // Activate is a primary button (visible outside dropdown)
+    await user.click(screen.getByRole("button", { name: "Activate" }));
+    expect(activatePlugin).toHaveBeenCalledWith("github-tool");
+  });
+
+  it("supports configure, uninstall via dropdown menu", async () => {
     const user = userEvent.setup();
     const onConfigure = jest.fn();
+
+    render(<PluginCard plugin={enabledToolPlugin} onConfigure={onConfigure} />);
+
+    // Open dropdown to configure
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(screen.getByRole("menuitem", { name: /Configure/i }));
+    expect(onConfigure).toHaveBeenCalledWith(enabledToolPlugin);
+
+    // Uninstall via dropdown
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(screen.getByRole("menuitem", { name: /Uninstall/i }));
+    expect(uninstallPlugin).toHaveBeenCalledWith("github-tool");
+  });
+
+  it("selects the plugin when the card is clicked", async () => {
+    const user = userEvent.setup();
     const onSelect = jest.fn();
 
-    render(
-      <PluginCard
-        plugin={enabledToolPlugin}
-        onConfigure={onConfigure}
-        onSelect={onSelect}
-        selected
-      />,
-    );
+    render(<PluginCard plugin={enabledToolPlugin} onSelect={onSelect} />);
 
-    await user.click(screen.getByRole("button", { name: "Activate" }));
-    await user.click(screen.getByRole("button", { name: "Disable" }));
-    await user.click(screen.getByRole("button", { name: "Configure" }));
-    await user.click(screen.getByRole("button", { name: "Details" }));
-    await user.click(screen.getByRole("button", { name: "Uninstall" }));
-
-    expect(activatePlugin).toHaveBeenCalledWith("github-tool");
-    expect(disablePlugin).toHaveBeenCalledWith("github-tool");
-    expect(uninstallPlugin).toHaveBeenCalledWith("github-tool");
-    expect(onConfigure).toHaveBeenCalledWith(enabledToolPlugin);
+    // Click the card itself (the outer button)
+    await user.click(screen.getByText("GitHub Tool"));
     expect(onSelect).toHaveBeenCalledWith(enabledToolPlugin);
   });
 
-  it("explains installed executable plugins before they are enabled", () => {
+  it("shows enable button for installed executable plugins", () => {
     render(<PluginCard plugin={installedToolPlugin} />);
 
-    expect(screen.getByText("Installed but not enabled yet.")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Enable" })).toBeInTheDocument();
-    expect(screen.queryByRole("button", { name: "Activate" })).not.toBeInTheDocument();
   });
 
-  it("supports deactivate, update, and invoke flows for active plugins with supported sources", async () => {
+  it("supports deactivate, update, and invoke flows for active plugins via dropdown", async () => {
     const user = userEvent.setup();
     const onInvoke = jest.fn();
 
     render(<PluginCard plugin={updatableActiveToolPlugin} onInvoke={onInvoke} />);
 
-    await user.click(screen.getByRole("button", { name: "Deactivate" }));
+    // Update is a visible button (not in dropdown)
     await user.click(screen.getByRole("button", { name: "Update" }));
-    await user.click(screen.getByRole("button", { name: "Invoke" }));
-
-    expect(deactivatePlugin).toHaveBeenCalledWith("github-tool");
     expect(updatePlugin).toHaveBeenCalledWith(updatableActiveToolPlugin);
+
+    // Deactivate via dropdown
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(screen.getByRole("menuitem", { name: /Deactivate/i }));
+    expect(deactivatePlugin).toHaveBeenCalledWith("github-tool");
+
+    // Invoke via dropdown
+    await user.click(screen.getByRole("button", { name: "More actions" }));
+    await user.click(screen.getByRole("menuitem", { name: /Invoke/i }));
     expect(onInvoke).toHaveBeenCalledWith(updatableActiveToolPlugin);
   });
 });

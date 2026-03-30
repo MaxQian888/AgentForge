@@ -95,6 +95,7 @@ type AgentQueueStore interface {
 	CountQueuedByProject(ctx context.Context, projectID uuid.UUID) (int, error)
 	ListAllQueued(ctx context.Context, limit int) ([]*model.AgentPoolQueueEntry, error)
 	ListQueuedByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*model.AgentPoolQueueEntry, error)
+	ListRecentByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*model.AgentPoolQueueEntry, error)
 	ReserveNextQueuedByProject(ctx context.Context, projectID uuid.UUID) (*model.AgentPoolQueueEntry, error)
 	CompleteQueuedEntry(ctx context.Context, entryID string, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID) error
 }
@@ -119,7 +120,20 @@ var (
 	ErrAgentProjectNotFound     = errors.New("agent project not found")
 	ErrAgentRoleNotFound        = errors.New("agent role not found")
 	ErrAgentWorktreeUnavailable = errors.New("agent worktree unavailable")
+	ErrQueueEntryNotFound       = errors.New("queue entry not found")
 )
+
+type QueueEntryStatusConflictError struct {
+	EntryID string
+	Status  model.AgentPoolQueueStatus
+}
+
+func (e *QueueEntryStatusConflictError) Error() string {
+	if e == nil {
+		return "queue entry cannot be cancelled"
+	}
+	return fmt.Sprintf("queue entry %s is %s and can no longer be cancelled", e.EntryID, e.Status)
+}
 
 type AgentService struct {
 	runRepo               AgentRunRepository
@@ -846,6 +860,75 @@ func (s *AgentService) QueueAgentAdmission(ctx context.Context, input QueueAgent
 	return s.queueStore.QueueAgentAdmission(ctx, input)
 }
 
+func (s *AgentService) ListQueueEntries(ctx context.Context, projectID uuid.UUID, statusFilter string) ([]*model.AgentPoolQueueEntry, error) {
+	if s.queueStore == nil {
+		return nil, ErrQueueEntryNotFound
+	}
+
+	filter := model.AgentPoolQueueStatus(strings.TrimSpace(statusFilter))
+	entries := make([]*model.AgentPoolQueueEntry, 0)
+	if filter == "" || filter == model.AgentPoolQueueStatusQueued {
+		items, err := s.queueStore.ListQueuedByProject(ctx, projectID, 200)
+		if err != nil {
+			return nil, err
+		}
+		entries = append(entries, items...)
+	} else {
+		items, err := s.queueStore.ListRecentByProject(ctx, projectID, 500)
+		if err != nil {
+			return nil, err
+		}
+		for _, entry := range items {
+			if entry == nil || entry.Status != filter {
+				continue
+			}
+			entries = append(entries, cloneQueueEntry(entry))
+		}
+	}
+
+	slices.SortFunc(entries, compareAgentQueueEntries)
+	return entries, nil
+}
+
+func (s *AgentService) CancelQueueEntry(ctx context.Context, projectID uuid.UUID, entryID string, reason string) (*model.AgentPoolQueueEntry, error) {
+	if s.queueStore == nil {
+		return nil, ErrQueueEntryNotFound
+	}
+
+	entry, err := s.findQueueEntry(ctx, projectID, entryID)
+	if err != nil {
+		return nil, err
+	}
+	if entry.Status != model.AgentPoolQueueStatusQueued {
+		return nil, &QueueEntryStatusConflictError{EntryID: entry.EntryID, Status: entry.Status}
+	}
+
+	cancelReason := strings.TrimSpace(reason)
+	if cancelReason == "" {
+		cancelReason = "cancelled_by_operator"
+	}
+	if err := s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusCancelled, cancelReason, nil); err != nil {
+		return nil, err
+	}
+
+	entry.Status = model.AgentPoolQueueStatusCancelled
+	entry.Reason = cancelReason
+	entry.AgentRunID = nil
+	entry.UpdatedAt = time.Now().UTC()
+
+	s.broadcastEvent(ws.EventAgentQueueCancelled, entry.ProjectID, map[string]any{
+		"entryId":   entry.EntryID,
+		"taskId":    entry.TaskID,
+		"memberId":  entry.MemberID,
+		"projectId": entry.ProjectID,
+		"reason":    cancelReason,
+		"status":    entry.Status,
+		"queue":     entry,
+	})
+	s.broadcastPoolStats(ctx, entry.ProjectID)
+	return cloneQueueEntry(entry), nil
+}
+
 func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string, priority int) (*model.TaskDispatchResponse, error) {
 	runs, err := s.runRepo.GetByTask(ctx, taskID)
 	if err != nil {
@@ -1393,6 +1476,31 @@ func (s *AgentService) broadcastPoolStats(ctx context.Context, projectID string)
 	s.broadcastEvent(ws.EventAgentPoolUpdated, projectID, s.PoolStats(ctx))
 }
 
+func (s *AgentService) findQueueEntry(ctx context.Context, projectID uuid.UUID, entryID string) (*model.AgentPoolQueueEntry, error) {
+	entries, err := s.queueStore.ListRecentByProject(ctx, projectID, 500)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range entries {
+		if entry == nil || entry.EntryID != entryID {
+			continue
+		}
+		return cloneQueueEntry(entry), nil
+	}
+
+	queued, err := s.queueStore.ListQueuedByProject(ctx, projectID, 500)
+	if err != nil {
+		return nil, err
+	}
+	for _, entry := range queued {
+		if entry == nil || entry.EntryID != entryID {
+			continue
+		}
+		return cloneQueueEntry(entry), nil
+	}
+	return nil, ErrQueueEntryNotFound
+}
+
 func (s *AgentService) promoteQueuedAdmission(ctx context.Context, completedRun *model.AgentRun) {
 	if s.queueStore == nil || completedRun == nil || s.taskRepo == nil {
 		return
@@ -1674,6 +1782,39 @@ func mapBridgeRuntimeStatus(status string) (string, bool) {
 	default:
 		return "", false
 	}
+}
+
+func compareAgentQueueEntries(a, b *model.AgentPoolQueueEntry) int {
+	switch {
+	case a == nil && b == nil:
+		return 0
+	case a == nil:
+		return 1
+	case b == nil:
+		return -1
+	case a.Priority > b.Priority:
+		return -1
+	case a.Priority < b.Priority:
+		return 1
+	case a.CreatedAt.Before(b.CreatedAt):
+		return -1
+	case a.CreatedAt.After(b.CreatedAt):
+		return 1
+	default:
+		return 0
+	}
+}
+
+func cloneQueueEntry(entry *model.AgentPoolQueueEntry) *model.AgentPoolQueueEntry {
+	if entry == nil {
+		return nil
+	}
+	cloned := *entry
+	if entry.AgentRunID != nil {
+		value := *entry.AgentRunID
+		cloned.AgentRunID = &value
+	}
+	return &cloned
 }
 
 func bridgeEventTime(timestampMS int64) time.Time {

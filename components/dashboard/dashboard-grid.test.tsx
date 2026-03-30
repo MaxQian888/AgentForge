@@ -6,6 +6,35 @@ import type {
   DashboardWidgetRequestState,
 } from "@/lib/stores/dashboard-store";
 
+jest.mock(
+  "react-grid-layout/legacy",
+  () => ({
+    Responsive: ({
+      children,
+      onLayoutChange,
+    }: {
+      children: React.ReactNode;
+      onLayoutChange?: (
+        layout: Array<{ i: string; x: number; y: number; w: number; h: number }>
+      ) => void;
+    }) => (
+      <div data-testid="dashboard-grid-layout">
+        <button
+          type="button"
+          onClick={() =>
+            onLayoutChange?.([{ i: "widget-1", x: 1, y: 0, w: 2, h: 1 }])
+          }
+        >
+          Trigger Layout Change
+        </button>
+        {children}
+      </div>
+    ),
+    WidthProvider: (Component: unknown) => Component,
+  }),
+  { virtual: true }
+);
+
 const fetchWidgetData = jest.fn().mockResolvedValue(undefined);
 const saveWidget = jest.fn().mockResolvedValue(undefined);
 const updateDashboard = jest.fn().mockResolvedValue(undefined);
@@ -139,6 +168,24 @@ describe("DashboardGrid", () => {
     await waitFor(() =>
       expect(screen.getByText("Layout saved")).toBeInTheDocument()
     );
+  });
+
+  it("persists layout changes coming from the grid layout callback", async () => {
+    const user = userEvent.setup();
+
+    render(<DashboardGrid projectId="project-1" dashboard={dashboard} />);
+
+    await user.click(screen.getByRole("button", { name: "Trigger Layout Change" }));
+
+    expect(saveWidget).toHaveBeenCalledWith("project-1", "dashboard-1", {
+      id: "widget-1",
+      widgetType: "throughput_chart",
+      config: {},
+      position: { x: 1, y: 0, w: 2, h: 1 },
+    });
+    expect(updateDashboard).toHaveBeenCalledWith("project-1", "dashboard-1", {
+      layout: [{ id: "widget-1", x: 1, y: 0, w: 2, h: 1 }],
+    });
   });
 
   it("shows a retryable widget error state without removing the card", async () => {

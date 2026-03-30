@@ -85,6 +85,38 @@ describe("task workspace helpers", () => {
     ]);
   });
 
+  it("can filter the workspace by custom field values", () => {
+    const filters = createDefaultTaskWorkspaceFilters();
+    filters.customFieldFilters = { "field-risk": "High" };
+
+    expect(
+      filterTasksForWorkspace(tasks, filters, {
+        valuesByTask: {
+          "task-1": [
+            {
+              id: "value-1",
+              taskId: "task-1",
+              fieldDefId: "field-risk",
+              value: "High",
+              createdAt: "2026-03-24T09:00:00.000Z",
+              updatedAt: "2026-03-24T09:00:00.000Z",
+            },
+          ],
+          "task-2": [
+            {
+              id: "value-2",
+              taskId: "task-2",
+              fieldDefId: "field-risk",
+              value: "Low",
+              createdAt: "2026-03-24T09:00:00.000Z",
+              updatedAt: "2026-03-24T09:00:00.000Z",
+            },
+          ],
+        },
+      })
+    ).toEqual([expect.objectContaining({ id: "task-1" })]);
+  });
+
   it("preserves task duration when rescheduling onto a new day", () => {
     expect(
       getRescheduledPlanningWindow(

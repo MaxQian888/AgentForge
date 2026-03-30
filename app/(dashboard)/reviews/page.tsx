@@ -3,22 +3,19 @@
 import { use, useEffect, useState } from "react";
 import { useTranslations } from "next-intl";
 import { FileSearch } from "lucide-react";
-import { Card, CardContent } from "@/components/ui/card";
-import {
-  Select,
-  SelectContent,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
+import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { FilterBar } from "@/components/shared/filter-bar";
 import { ReviewWorkspace } from "@/components/review/review-workspace";
 import { useReviewStore } from "@/lib/stores/review-store";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 interface ReviewsPageProps {
   searchParams: Promise<{ id?: string | string[] | undefined }>;
 }
 
 export default function ReviewsPage({ searchParams }: ReviewsPageProps) {
+  useBreadcrumbs([{ label: "Project", href: "/" }, { label: "Reviews" }]);
   const t = useTranslations("reviews");
   const {
     allReviews,
@@ -45,53 +42,49 @@ export default function ReviewsPage({ searchParams }: ReviewsPageProps) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{t("title")}</h1>
-      </div>
+      <PageHeader title={t("title")} />
 
-      <div className="flex items-center gap-4">
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">{t("filterStatus")}</span>
-          <Select value={statusFilter} onValueChange={setStatusFilter}>
-            <SelectTrigger className="w-[160px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("all")}</SelectItem>
-              <SelectItem value="pending">{t("statusPending")}</SelectItem>
-              <SelectItem value="in_progress">{t("statusInProgress")}</SelectItem>
-              <SelectItem value="completed">{t("statusCompleted")}</SelectItem>
-              <SelectItem value="failed">{t("statusFailed")}</SelectItem>
-              <SelectItem value="pending_human">{t("statusPendingHuman")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-        <div className="flex items-center gap-2">
-          <span className="text-sm text-muted-foreground">{t("filterRiskLevel")}</span>
-          <Select value={riskFilter} onValueChange={setRiskFilter}>
-            <SelectTrigger className="w-[140px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">{t("all")}</SelectItem>
-              <SelectItem value="critical">{t("riskCritical")}</SelectItem>
-              <SelectItem value="high">{t("riskHigh")}</SelectItem>
-              <SelectItem value="medium">{t("riskMedium")}</SelectItem>
-              <SelectItem value="low">{t("riskLow")}</SelectItem>
-            </SelectContent>
-          </Select>
-        </div>
-      </div>
+      <FilterBar
+        filters={[
+          {
+            key: "status",
+            label: t("filterStatus"),
+            value: statusFilter,
+            onChange: setStatusFilter,
+            options: [
+              { value: "pending", label: t("statusPending") },
+              { value: "in_progress", label: t("statusInProgress") },
+              { value: "completed", label: t("statusCompleted") },
+              { value: "failed", label: t("statusFailed") },
+              { value: "pending_human", label: t("statusPendingHuman") },
+            ],
+          },
+          {
+            key: "riskLevel",
+            label: t("filterRiskLevel"),
+            value: riskFilter,
+            onChange: setRiskFilter,
+            options: [
+              { value: "critical", label: t("riskCritical") },
+              { value: "high", label: t("riskHigh") },
+              { value: "medium", label: t("riskMedium") },
+              { value: "low", label: t("riskLow") },
+            ],
+          },
+        ]}
+        onReset={() => {
+          setStatusFilter("all");
+          setRiskFilter("all");
+        }}
+      />
 
       {allReviewsLoading && allReviews.length === 0 ? (
         <p className="text-muted-foreground">{t("loading")}</p>
       ) : allReviews.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <FileSearch className="mx-auto mb-4 size-12 text-muted-foreground" />
-            <p className="text-muted-foreground">{t("emptyState")}</p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={FileSearch}
+          title={t("emptyState")}
+        />
       ) : (
         <ReviewWorkspace
           reviews={allReviews}

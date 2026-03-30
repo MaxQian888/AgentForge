@@ -2,16 +2,23 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
 // BudgetSprintReader reads sprint data for budget governance checks.
 type BudgetSprintReader interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Sprint, error)
 	ListByProject(ctx context.Context, projectID uuid.UUID) ([]*model.Sprint, error)
+}
+
+type BudgetTaskReader interface {
+	List(ctx context.Context, projectID uuid.UUID, q model.TaskListQuery) ([]*model.Task, int, error)
+	ListBySprint(ctx context.Context, projectID uuid.UUID, sprintID uuid.UUID) ([]*model.Task, error)
 }
 
 // BudgetCheckResult represents the outcome of a budget governance check.
@@ -26,15 +33,18 @@ type BudgetCheckResult struct {
 // BudgetGovernanceService enforces budget limits at the sprint and project level.
 type BudgetGovernanceService struct {
 	sprintReader       BudgetSprintReader
+	taskReader         BudgetTaskReader
 	projectBudgetLimit float64 // optional project-level cap; 0 means no cap
 	automation         AutomationEventEvaluator
 }
 
 // NewBudgetGovernanceService creates a new BudgetGovernanceService.
-func NewBudgetGovernanceService(sprintReader BudgetSprintReader) *BudgetGovernanceService {
-	return &BudgetGovernanceService{
-		sprintReader: sprintReader,
+func NewBudgetGovernanceService(sprintReader BudgetSprintReader, taskReaders ...BudgetTaskReader) *BudgetGovernanceService {
+	var taskReader BudgetTaskReader
+	if len(taskReaders) > 0 {
+		taskReader = taskReaders[0]
 	}
+	return &BudgetGovernanceService{sprintReader: sprintReader, taskReader: taskReader}
 }
 
 // SetProjectBudgetLimit sets an optional project-level budget cap in USD.
@@ -184,4 +194,228 @@ func (s *BudgetGovernanceService) CheckBudget(ctx context.Context, projectID uui
 		return warning, nil
 	}
 	return result, nil
+}
+
+var ErrBudgetSprintNotFound = errors.New("budget sprint not found")
+
+func (s *BudgetGovernanceService) GetProjectBudgetSummary(ctx context.Context, projectID uuid.UUID) (*model.ProjectBudgetSummary, error) {
+	sprints, err := s.sprintReader.ListByProject(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("project budget summary: list sprints: %w", err)
+	}
+
+	tasks, err := s.listProjectTasks(ctx, projectID)
+	if err != nil {
+		return nil, fmt.Errorf("project budget summary: list tasks: %w", err)
+	}
+
+	projectSpent := 0.0
+	activeSprintAllocated := 0.0
+	activeSprintSpent := 0.0
+	activeSprintCount := 0
+	for _, sprint := range sprints {
+		if sprint == nil {
+			continue
+		}
+		projectSpent += sprint.SpentUsd
+		if sprint.Status == model.SprintStatusActive {
+			activeSprintAllocated += sprint.TotalBudgetUsd
+			activeSprintSpent += sprint.SpentUsd
+			activeSprintCount++
+		}
+	}
+
+	taskAllocated := 0.0
+	taskSpent := 0.0
+	tasksWithBudgetCount := 0
+	tasksAtRiskCount := 0
+	tasksExceededCount := 0
+	for _, task := range tasks {
+		if task == nil || task.BudgetUsd <= 0 {
+			continue
+		}
+		tasksWithBudgetCount++
+		taskAllocated += task.BudgetUsd
+		taskSpent += task.SpentUsd
+		switch budgetThresholdStatus(task.BudgetUsd, task.SpentUsd) {
+		case model.BudgetThresholdExceeded:
+			tasksExceededCount++
+			tasksAtRiskCount++
+		case model.BudgetThresholdWarning:
+			tasksAtRiskCount++
+		}
+	}
+
+	scopes := make([]model.BudgetScopeSummary, 0, 3)
+	if projectScope := buildBudgetScope("project", s.projectBudgetLimit, projectSpent, 0); projectScope != nil {
+		scopes = append(scopes, *projectScope)
+	}
+	if activeSprintScope := buildBudgetScope("active_sprints", activeSprintAllocated, activeSprintSpent, activeSprintCount); activeSprintScope != nil {
+		scopes = append(scopes, *activeSprintScope)
+	}
+	if taskScope := buildBudgetScope("tasks", taskAllocated, taskSpent, tasksWithBudgetCount); taskScope != nil {
+		scopes = append(scopes, *taskScope)
+	}
+
+	allocated, spent, remaining, threshold := projectBudgetHeadline(scopes)
+
+	return &model.ProjectBudgetSummary{
+		ProjectID:               projectID.String(),
+		Allocated:               allocated,
+		Spent:                   spent,
+		Remaining:               remaining,
+		ThresholdStatus:         threshold,
+		WarningThresholdPercent: 80,
+		ActiveSprintCount:       activeSprintCount,
+		TasksWithBudgetCount:    tasksWithBudgetCount,
+		TasksAtRiskCount:        tasksAtRiskCount,
+		TasksExceededCount:      tasksExceededCount,
+		Scopes:                  scopes,
+	}, nil
+}
+
+func (s *BudgetGovernanceService) GetSprintBudgetDetail(ctx context.Context, sprintID uuid.UUID) (*model.SprintBudgetDetail, error) {
+	sprint, err := s.sprintReader.GetByID(ctx, sprintID)
+	if err != nil {
+		if errors.Is(err, repository.ErrNotFound) {
+			return nil, ErrBudgetSprintNotFound
+		}
+		return nil, fmt.Errorf("sprint budget detail: fetch sprint: %w", err)
+	}
+
+	tasks, err := s.listSprintTasks(ctx, sprint.ProjectID, sprintID)
+	if err != nil {
+		return nil, fmt.Errorf("sprint budget detail: list tasks: %w", err)
+	}
+
+	entries := make([]model.SprintBudgetTaskEntry, 0, len(tasks))
+	tasksWithBudgetCount := 0
+	for _, task := range tasks {
+		if task == nil {
+			continue
+		}
+		if task.BudgetUsd > 0 {
+			tasksWithBudgetCount++
+		}
+		entries = append(entries, model.SprintBudgetTaskEntry{
+			TaskID:          task.ID.String(),
+			Title:           task.Title,
+			Allocated:       roundBudgetValue(task.BudgetUsd),
+			Spent:           roundBudgetValue(task.SpentUsd),
+			Remaining:       roundBudgetValue(task.BudgetUsd - task.SpentUsd),
+			ThresholdStatus: budgetThresholdStatus(task.BudgetUsd, task.SpentUsd),
+		})
+	}
+
+	allocated := roundBudgetValue(sprint.TotalBudgetUsd)
+	spent := roundBudgetValue(sprint.SpentUsd)
+	remaining := 0.0
+	threshold := model.BudgetThresholdInactive
+	if allocated > 0 {
+		remaining = roundBudgetValue(allocated - spent)
+		threshold = budgetThresholdStatus(allocated, spent)
+	}
+
+	return &model.SprintBudgetDetail{
+		SprintID:                sprint.ID.String(),
+		ProjectID:               sprint.ProjectID.String(),
+		SprintName:              sprint.Name,
+		Allocated:               allocated,
+		Spent:                   spent,
+		Remaining:               remaining,
+		ThresholdStatus:         threshold,
+		WarningThresholdPercent: 80,
+		TasksWithBudgetCount:    tasksWithBudgetCount,
+		Tasks:                   entries,
+	}, nil
+}
+
+func (s *BudgetGovernanceService) listProjectTasks(ctx context.Context, projectID uuid.UUID) ([]*model.Task, error) {
+	if s.taskReader == nil {
+		return nil, nil
+	}
+
+	const pageSize = 200
+	page := 1
+	tasks := make([]*model.Task, 0)
+	for {
+		items, total, err := s.taskReader.List(ctx, projectID, model.TaskListQuery{Page: page, Limit: pageSize})
+		if err != nil {
+			return nil, err
+		}
+		tasks = append(tasks, items...)
+		if len(tasks) >= total || len(items) == 0 {
+			return tasks, nil
+		}
+		page++
+	}
+}
+
+func (s *BudgetGovernanceService) listSprintTasks(ctx context.Context, projectID uuid.UUID, sprintID uuid.UUID) ([]*model.Task, error) {
+	if s.taskReader == nil {
+		return nil, nil
+	}
+	return s.taskReader.ListBySprint(ctx, projectID, sprintID)
+}
+
+func buildBudgetScope(scope string, allocated float64, spent float64, itemCount int) *model.BudgetScopeSummary {
+	if allocated <= 0 {
+		return nil
+	}
+	return &model.BudgetScopeSummary{
+		Scope:                   scope,
+		Allocated:               roundBudgetValue(allocated),
+		Spent:                   roundBudgetValue(spent),
+		Remaining:               roundBudgetValue(allocated - spent),
+		ThresholdStatus:         budgetThresholdStatus(allocated, spent),
+		WarningThresholdPercent: 80,
+		ItemCount:               itemCount,
+	}
+}
+
+func projectBudgetHeadline(scopes []model.BudgetScopeSummary) (float64, float64, float64, model.BudgetThresholdStatus) {
+	if len(scopes) == 0 {
+		return 0, 0, 0, model.BudgetThresholdInactive
+	}
+
+	selected := scopes[0]
+	for _, candidate := range scopes {
+		if candidate.Scope == "project" {
+			selected = candidate
+			break
+		}
+		if selected.Scope != "project" && candidate.Scope == "active_sprints" {
+			selected = candidate
+		}
+	}
+
+	threshold := model.BudgetThresholdHealthy
+	for _, scope := range scopes {
+		if scope.ThresholdStatus == model.BudgetThresholdExceeded {
+			threshold = model.BudgetThresholdExceeded
+			break
+		}
+		if scope.ThresholdStatus == model.BudgetThresholdWarning {
+			threshold = model.BudgetThresholdWarning
+		}
+	}
+
+	return selected.Allocated, selected.Spent, selected.Remaining, threshold
+}
+
+func budgetThresholdStatus(allocated float64, spent float64) model.BudgetThresholdStatus {
+	if allocated <= 0 {
+		return model.BudgetThresholdInactive
+	}
+	if spent > allocated {
+		return model.BudgetThresholdExceeded
+	}
+	if (spent / allocated) >= 0.80-1e-9 {
+		return model.BudgetThresholdWarning
+	}
+	return model.BudgetThresholdHealthy
+}
+
+func roundBudgetValue(value float64) float64 {
+	return float64(int(value*100+0.5)) / 100
 }

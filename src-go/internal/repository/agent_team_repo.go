@@ -13,6 +13,11 @@ type AgentTeamRepository struct {
 	db *gorm.DB
 }
 
+type teamSummaryEnvelope struct {
+	team    *model.AgentTeam
+	summary *model.AgentTeamSummaryDTO
+}
+
 func NewAgentTeamRepository(db *gorm.DB) *AgentTeamRepository {
 	return &AgentTeamRepository{db: db}
 }
@@ -49,6 +54,23 @@ func (r *AgentTeamRepository) GetByTask(ctx context.Context, taskID uuid.UUID) (
 	return record.toModel(), nil
 }
 
+func (r *AgentTeamRepository) GetTeamSummary(ctx context.Context, id uuid.UUID) (*model.AgentTeamSummaryDTO, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	team, err := r.GetByID(ctx, id)
+	if err != nil {
+		return nil, fmt.Errorf("get agent team summary: %w", err)
+	}
+
+	summaries, err := r.buildTeamSummaries(ctx, []*model.AgentTeam{team})
+	if len(summaries) == 0 {
+		return nil, ErrNotFound
+	}
+	return summaries[0], nil
+}
+
 func (r *AgentTeamRepository) ListByProject(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeam, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
@@ -66,6 +88,19 @@ func (r *AgentTeamRepository) ListByProject(ctx context.Context, projectID uuid.
 		teams[i] = records[i].toModel()
 	}
 	return teams, nil
+}
+
+func (r *AgentTeamRepository) ListTeamSummaries(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeamSummaryDTO, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	teams, err := r.ListByProject(ctx, projectID, status)
+	if err != nil {
+		return nil, fmt.Errorf("list agent team summaries by project: %w", err)
+	}
+
+	return r.buildTeamSummaries(ctx, teams)
 }
 
 func (r *AgentTeamRepository) ListActive(ctx context.Context) ([]*model.AgentTeam, error) {
@@ -182,4 +217,98 @@ func (r *AgentTeamRepository) SetReviewerRun(ctx context.Context, id uuid.UUID, 
 		return fmt.Errorf("set agent team reviewer run: %w", err)
 	}
 	return nil
+}
+
+func (r *AgentTeamRepository) buildTeamSummaries(ctx context.Context, teams []*model.AgentTeam) ([]*model.AgentTeamSummaryDTO, error) {
+	summaries := make([]*model.AgentTeamSummaryDTO, 0, len(teams))
+	if len(teams) == 0 {
+		return summaries, nil
+	}
+
+	taskTitles, err := r.loadTaskTitles(ctx, teams)
+	if err != nil {
+		return nil, err
+	}
+
+	teamIDs := make([]uuid.UUID, 0, len(teams))
+	envelopes := make(map[uuid.UUID]*teamSummaryEnvelope, len(teams))
+	for _, team := range teams {
+		summary := &model.AgentTeamSummaryDTO{
+			AgentTeamDTO: team.ToDTO(),
+			TaskTitle:    taskTitles[team.TaskID],
+			CoderRuns:    make([]model.AgentRunDTO, 0),
+		}
+		teamIDs = append(teamIDs, team.ID)
+		envelopes[team.ID] = &teamSummaryEnvelope{
+			team:    team,
+			summary: summary,
+		}
+		summaries = append(summaries, summary)
+	}
+
+	var runRecords []agentRunRecord
+	if err := r.db.WithContext(ctx).
+		Where("team_id IN ?", teamIDs).
+		Order("created_at ASC").
+		Find(&runRecords).Error; err != nil {
+		return nil, fmt.Errorf("list team runs for summaries: %w", err)
+	}
+
+	for _, runRecord := range runRecords {
+		if runRecord.TeamID == nil {
+			continue
+		}
+		envelope := envelopes[*runRecord.TeamID]
+		if envelope == nil {
+			continue
+		}
+
+		switch runRecord.TeamRole {
+		case model.TeamRolePlanner:
+			if (envelope.team.PlannerRunID != nil && runRecord.ID == *envelope.team.PlannerRunID) ||
+				envelope.summary.PlannerStatus == "" {
+				envelope.summary.PlannerStatus = runRecord.Status
+			}
+		case model.TeamRoleCoder:
+			envelope.summary.CoderRuns = append(envelope.summary.CoderRuns, runRecord.toModel().ToDTO())
+			envelope.summary.CoderTotal++
+			if runRecord.Status == model.AgentRunStatusCompleted {
+				envelope.summary.CoderCompleted++
+			}
+		case model.TeamRoleReviewer:
+			if (envelope.team.ReviewerRunID != nil && runRecord.ID == *envelope.team.ReviewerRunID) ||
+				envelope.summary.ReviewerStatus == "" {
+				envelope.summary.ReviewerStatus = runRecord.Status
+			}
+		}
+	}
+
+	return summaries, nil
+}
+
+func (r *AgentTeamRepository) loadTaskTitles(ctx context.Context, teams []*model.AgentTeam) (map[uuid.UUID]string, error) {
+	taskIDs := make([]uuid.UUID, 0, len(teams))
+	for _, team := range teams {
+		taskIDs = append(taskIDs, team.TaskID)
+	}
+
+	type taskTitleRow struct {
+		ID    uuid.UUID `gorm:"column:id"`
+		Title string    `gorm:"column:title"`
+	}
+
+	var rows []taskTitleRow
+	if err := r.db.WithContext(ctx).
+		Model(&taskRecord{}).
+		Select("id, title").
+		Where("id IN ?", taskIDs).
+		Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list task titles for team summaries: %w", err)
+	}
+
+	titles := make(map[uuid.UUID]string, len(rows))
+	for _, row := range rows {
+		titles[row.ID] = row.Title
+	}
+	return titles, nil
 }

@@ -230,3 +230,38 @@ func TestIMControlHandlerListChannelsResponseShape(t *testing.T) {
 		t.Fatalf("payload = %+v", payload)
 	}
 }
+
+func TestIMControlHandlerGetStatusIncludesEmptyProviderDetails(t *testing.T) {
+	stub := &imControlPlaneStub{
+		status: &model.IMBridgeStatus{
+			Registered:      false,
+			LastHeartbeat:   nil,
+			Providers:       []string{},
+			ProviderDetails: []model.IMBridgeProviderDetail{},
+			Health:          "disconnected",
+		},
+	}
+	h := NewIMControlHandler(stub)
+
+	_, ctx, rec := newIMControlTestContext(http.MethodGet, "/api/v1/im/bridge/status", "")
+	if err := h.GetStatus(ctx); err != nil {
+		t.Fatalf("GetStatus() error = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal status: %v", err)
+	}
+
+	rawProviderDetails, ok := payload["providerDetails"]
+	if !ok {
+		t.Fatalf("providerDetails missing from payload: %s", rec.Body.String())
+	}
+	providerDetails, ok := rawProviderDetails.([]any)
+	if !ok {
+		t.Fatalf("providerDetails = %#v, want array", rawProviderDetails)
+	}
+	if len(providerDetails) != 0 {
+		t.Fatalf("providerDetails = %#v, want empty array", providerDetails)
+	}
+}

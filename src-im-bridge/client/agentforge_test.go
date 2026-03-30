@@ -377,12 +377,22 @@ func TestGetCostStats_ParsesResponse(t *testing.T) {
 		gotPath = r.URL.Path
 		gotQuery = r.URL.RawQuery
 		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(CostStats{
-			TotalUsd:   11.1,
-			BudgetUsd:  20.2,
-			DailyUsd:   1.1,
-			WeeklyUsd:  4.4,
-			MonthlyUsd: 11.1,
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"totalCostUsd": 11.1,
+			"budgetSummary": map[string]any{
+				"allocated": 20.2,
+			},
+			"periodRollups": map[string]any{
+				"today": map[string]any{
+					"costUsd": 1.1,
+				},
+				"last7Days": map[string]any{
+					"costUsd": 4.4,
+				},
+				"last30Days": map[string]any{
+					"costUsd": 11.1,
+				},
+			},
 		})
 	}))
 	defer server.Close()
@@ -400,6 +410,9 @@ func TestGetCostStats_ParsesResponse(t *testing.T) {
 		t.Fatalf("query = %q", gotQuery)
 	}
 	if stats.TotalUsd != 11.1 || stats.BudgetUsd != 20.2 {
+		t.Fatalf("stats = %+v", stats)
+	}
+	if stats.DailyUsd != 1.1 || stats.WeeklyUsd != 4.4 || stats.MonthlyUsd != 11.1 {
 		t.Fatalf("stats = %+v", stats)
 	}
 }

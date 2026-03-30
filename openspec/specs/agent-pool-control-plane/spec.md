@@ -46,17 +46,21 @@ The system SHALL promote queued AgentPool entries through the same canonical spa
 - **THEN** the failure is visible to operators without losing the admission history for that queued request
 
 ### Requirement: AgentPool lifecycle is visible to operator-facing APIs and realtime consumers
-The system SHALL expose AgentPool lifecycle changes through first-class APIs and realtime events so Web dashboards and other operator surfaces can render queue, warm-pool, and admission transitions truthfully.
 
-#### Scenario: Queue admission change emits a realtime event
-- **WHEN** a request is queued, promoted from the queue, or fails during promotion
-- **THEN** the system emits an explicit AgentPool lifecycle event for the relevant project scope
-- **THEN** realtime consumers can distinguish queued, promoted, started, and failed-promotion states without inferring from missing `agent.started` events
+The agents dashboard SHALL integrate the dispatch history panel to surface dispatch attempt history for operators. The dispatch preflight dialog SHALL be accessible from the agents page so operators can run preflight checks without entering the spawn flow. These components SHALL be presented in a "Dispatch" tab alongside the existing pool metrics and agents table views.
 
-#### Scenario: Operator lists queued work
-- **WHEN** an authenticated operator requests the current queue roster for a project
-- **THEN** the system returns each queued entry with task identity, member identity, runtime tuple, enqueue time, queue reason, and current queue state
-- **THEN** the returned roster matches the same queue facts used by the admission control plane
+#### Scenario: Operator views dispatch history on agents page
+- **WHEN** operator navigates to the agents dashboard and selects the Dispatch tab
+- **THEN** the dispatch history panel displays recent dispatch attempts with task identity, member, runtime, outcome, and timestamp
+
+#### Scenario: Operator runs preflight check from agents page
+- **WHEN** operator clicks a preflight check action on the Dispatch tab
+- **THEN** the dispatch preflight dialog opens showing admission likelihood, budget status, and pool snapshot
+- **AND** the dialog uses the same preflight data as the spawn flow
+
+#### Scenario: Dispatch tab shows event count badge
+- **WHEN** the agents page loads and there are recent dispatch events
+- **THEN** the Dispatch tab label displays a badge with the count of recent events
 
 ### Requirement: Queue lifecycle preserves latest guardrail verdict and admission context
 The system SHALL retain the runtime tuple, budget context, and latest dispatch guardrail verdict for each queue entry across queued, promoted, and failed states. Operator-facing queue and pool views MUST be able to tell whether an entry is still waiting because of recoverable guardrails or has failed promotion terminally.
@@ -111,4 +115,26 @@ The system SHALL accept an optional priority parameter when creating a queue ent
 - **WHEN** a dispatch queues an entry without specifying a priority
 - **THEN** the entry is created with priority 0
 - **THEN** the entry follows standard FIFO ordering among other priority-0 entries
+
+### Requirement: Operators can cancel queued entries through the pool control plane
+The system SHALL allow operators to cancel individual queued entries via the pool control plane API. Cancellation MUST transition the queue entry to `cancelled` status, emit a realtime pool lifecycle event, and update the pool summary's queued count. This requirement extends the existing operator visibility requirement to include write operations on queued entries.
+
+#### Scenario: Cancel queued entry updates pool lifecycle events
+- **WHEN** an operator cancels a queued entry through the pool control plane
+- **THEN** the system emits an `agent.queue.cancelled` realtime event scoped to the project
+- **THEN** the subsequent pool summary reflects one fewer queued entry
+- **THEN** the cancellation is visible in the queue roster with the `cancelled` status and operator-provided or system-generated reason
+
+#### Scenario: Cancelled entry does not participate in future promotions
+- **WHEN** a queue entry has been cancelled
+- **THEN** the `ReserveNextQueuedByProject` promotion logic skips cancelled entries
+- **THEN** the next eligible non-cancelled entry is promoted instead
+
+### Requirement: Queue roster endpoint exposes individual entries
+The system SHALL expose a dedicated queue roster endpoint that returns individual queue entries for a project, complementing the count-based pool summary. The roster MUST include all fields needed for operator decision-making: task identity, member identity, runtime tuple, priority, budget context, and current guardrail verdict.
+
+#### Scenario: Queue roster returns entries in admission order
+- **WHEN** an authenticated operator requests the queue roster for a project
+- **THEN** entries are returned in admission order: priority descending, then creation time ascending
+- **THEN** each entry includes task ID, member ID, runtime, provider, model, role ID, priority, budget USD, reason, guardrail verdict, and timestamps
 

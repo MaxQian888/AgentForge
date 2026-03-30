@@ -1,19 +1,18 @@
 "use client";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
+import {
+  DEFAULT_LOCALE,
+  isLocale,
+  type Locale,
+} from "@/lib/i18n/config";
 
-export type Locale = "zh-CN" | "en";
-export const SUPPORTED_LOCALES: Locale[] = ["zh-CN", "en"];
-export const DEFAULT_LOCALE: Locale = "en";
+export { DEFAULT_LOCALE, SUPPORTED_LOCALES, type Locale } from "@/lib/i18n/config";
 export const LOCALE_STORAGE_KEY = "locale-storage";
 
 interface LocaleState {
   locale: Locale;
   setLocale: (locale: Locale) => void;
-}
-
-function isLocale(value: unknown): value is Locale {
-  return SUPPORTED_LOCALES.includes(value as Locale);
 }
 
 function readPersistedLocale(): Locale | null {

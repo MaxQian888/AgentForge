@@ -2,10 +2,12 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Plus } from "lucide-react";
+import { Plus, CalendarRange } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
 import {
   Dialog,
   DialogContent,
@@ -24,6 +26,7 @@ import {
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useMilestoneStore } from "@/lib/stores/milestone-store";
 import { MilestoneEditor } from "@/components/milestones/milestone-editor";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 const EMPTY_SPRINTS: Sprint[] = [];
 
@@ -96,6 +99,7 @@ function SprintCard({
 }
 
 export default function SprintsPage() {
+  useBreadcrumbs([{ label: "Project", href: "/" }, { label: "Sprints" }]);
   const t = useTranslations("sprints");
   const { selectedProjectId } = useDashboardStore();
   const {
@@ -194,7 +198,7 @@ export default function SprintsPage() {
   if (!projectId) {
     return (
       <div className="flex flex-col gap-6">
-        <h1 className="text-2xl font-bold">{t("title")}</h1>
+        <PageHeader title={t("title")} />
         <p className="text-sm text-muted-foreground">
           {t("selectProjectPrompt")}
         </p>
@@ -204,18 +208,20 @@ export default function SprintsPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <div className="flex items-center gap-2">
-          <Button type="button" variant="outline" onClick={() => setMilestoneOpen(true)}>
-            {t("newMilestone")}
-          </Button>
-          <Button type="button" onClick={openCreate}>
-            <Plus className="mr-2 size-4" />
-            {t("newSprint")}
-          </Button>
-        </div>
-      </div>
+      <PageHeader
+        title={t("title")}
+        actions={
+          <>
+            <Button type="button" variant="outline" onClick={() => setMilestoneOpen(true)}>
+              {t("newMilestone")}
+            </Button>
+            <Button type="button" onClick={openCreate}>
+              <Plus className="mr-2 size-4" />
+              {t("newSprint")}
+            </Button>
+          </>
+        }
+      />
 
       {loading && (
         <p className="text-sm text-muted-foreground">{t("loading")}</p>
@@ -231,9 +237,12 @@ export default function SprintsPage() {
           />
         ))}
         {sprints.length === 0 && !loading && (
-          <p className="col-span-full text-sm text-muted-foreground">
-            {t("empty.noSprints")}
-          </p>
+          <div className="col-span-full">
+            <EmptyState
+              icon={CalendarRange}
+              title={t("empty.noSprints")}
+            />
+          </div>
         )}
       </div>
 

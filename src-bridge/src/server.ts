@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import type { Context } from "hono";
 import { RuntimePoolManager } from "./runtime/pool-manager.js";
@@ -9,15 +10,24 @@ import type { CodexAuthStatusProvider, CodexRuntimeRunner } from "./handlers/cod
 import type { OpenCodeEventRunner } from "./handlers/opencode-runtime.js";
 import type { QueryRunner } from "./handlers/claude-runtime.js";
 import {
+  type AgentRuntimeRegistry,
   createRuntimeRegistry,
   RuntimeConfigurationError,
   UnknownRuntimeError,
   UnsupportedRuntimeProviderError,
 } from "./runtime/registry.js";
 import {
+  CommandRequestSchema,
   ExecuteRequestSchema,
   CancelRequestSchema,
+  ForkRequestSchema,
+  InterruptRequestSchema,
+  ModelSwitchRequestSchema,
+  PermissionResponseSchema,
+  RevertRequestSchema,
+  RollbackRequestSchema,
   ResumeRequestSchema,
+  UnrevertRequestSchema,
   DecomposeTaskRequestSchema,
   DeepReviewRequestSchema,
 } from "./schemas.js";
@@ -38,6 +48,8 @@ import {
 import { MCPClientHub } from "./mcp/client-hub.js";
 import type { OpenCodeTransport } from "./opencode/transport.js";
 import { BunSchedulerAdapter } from "./scheduler/bun-cron-adapter.js";
+import { HookCallbackManager } from "./runtime/hook-callback-manager.js";
+import { UnsupportedOperationError } from "./runtime/errors.js";
 
 interface AppDeps {
   pool?: RuntimePoolManager;
@@ -58,6 +70,8 @@ interface AppDeps {
   decomposeTask?: DecomposeTaskExecutor;
   pluginManager?: ToolPluginManager;
   schedulerAdapter?: Pick<BunSchedulerAdapter, "start" | "stop">;
+  runtimeRegistry?: AgentRuntimeRegistry;
+  hookCallbackManager?: HookCallbackManager;
 }
 
 type BridgeRouteMethod = "get" | "post";
@@ -103,6 +117,56 @@ export const BRIDGE_HTTP_ROUTE_GROUPS = {
     method: "get",
     canonicalPath: "/bridge/runtimes",
     compatibilityAliases: ["/runtimes"],
+  },
+  fork: {
+    method: "post",
+    canonicalPath: "/bridge/fork",
+    compatibilityAliases: [],
+  },
+  rollback: {
+    method: "post",
+    canonicalPath: "/bridge/rollback",
+    compatibilityAliases: [],
+  },
+  revert: {
+    method: "post",
+    canonicalPath: "/bridge/revert",
+    compatibilityAliases: [],
+  },
+  unrevert: {
+    method: "post",
+    canonicalPath: "/bridge/unrevert",
+    compatibilityAliases: [],
+  },
+  diff: {
+    method: "get",
+    canonicalPath: "/bridge/diff/:task_id",
+    compatibilityAliases: [],
+  },
+  messages: {
+    method: "get",
+    canonicalPath: "/bridge/messages/:task_id",
+    compatibilityAliases: [],
+  },
+  command: {
+    method: "post",
+    canonicalPath: "/bridge/command",
+    compatibilityAliases: [],
+  },
+  interrupt: {
+    method: "post",
+    canonicalPath: "/bridge/interrupt",
+    compatibilityAliases: [],
+  },
+  model: {
+    method: "post",
+    canonicalPath: "/bridge/model",
+    compatibilityAliases: [],
+  },
+  permissionResponse: {
+    method: "post",
+    canonicalPath: "/bridge/permission-response/:request_id",
+    compatibilityAliases: [],
   },
   cancel: {
     method: "post",
@@ -211,6 +275,7 @@ export function createApp(deps: AppDeps = {}): Hono {
   });
   const pluginManager = deps.pluginManager ?? createDefaultPluginManager(mcpHub, streamer);
   const sessionManager = deps.sessionManager ?? createDefaultSessionManager();
+  const hookCallbackManager = deps.hookCallbackManager ?? new HookCallbackManager();
 
   // Wire heartbeat status provider if streamer supports it
   if ("setStatusProvider" in streamer && typeof streamer.setStatusProvider === "function") {
@@ -225,6 +290,9 @@ export function createApp(deps: AppDeps = {}): Hono {
   }
 
   function createRegistry() {
+    if (deps.runtimeRegistry) {
+      return deps.runtimeRegistry;
+    }
     return createRuntimeRegistry({
       queryRunner: deps.queryRunner,
       commandRuntimeRunner: deps.commandRuntimeRunner,
@@ -262,6 +330,8 @@ export function createApp(deps: AppDeps = {}): Hono {
         codexAuthStatusProvider: deps.codexAuthStatusProvider,
         opencodeTransport: deps.opencodeTransport,
         opencodeEventRunner: deps.opencodeEventRunner,
+        runtimeRegistry: deps.runtimeRegistry,
+        hookCallbackManager,
         pluginManager,
       });
       return c.json(result, 200);
@@ -377,8 +447,274 @@ export function createApp(deps: AppDeps = {}): Hono {
         default_model: runtime.defaultModel,
         available: runtime.available,
         diagnostics: runtime.diagnostics,
+        supported_features: runtime.supportedFeatures,
+        agents: runtime.agents,
+        skills: runtime.skills,
       })),
     });
+  }
+
+  async function handleForkRoute(c: Context) {
+    try {
+      const body = await c.req.json();
+      const parsed = ForkRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { error: "Validation failed", details: parsed.error.flatten() },
+          400,
+        );
+      }
+
+      const runtime = pool.get(parsed.data.task_id);
+      if (!runtime?.request) {
+        return c.json({ error: "task not found" }, 404);
+      }
+
+      const forked = await createRegistry().fork(runtime, {
+        message_id: parsed.data.message_id,
+      });
+      const newTaskId = randomUUID();
+      const newSessionId = randomUUID();
+      sessionManager.save(newTaskId, {
+        task_id: newTaskId,
+        session_id: newSessionId,
+        status: "paused",
+        turn_number: runtime.turnNumber,
+        spent_usd: runtime.spentUsd,
+        created_at: now(),
+        updated_at: now(),
+        request: {
+          ...runtime.request,
+          task_id: newTaskId,
+          session_id: newSessionId,
+        },
+        continuity: forked.continuity,
+      });
+
+      return c.json(
+        {
+          new_task_id: newTaskId,
+          continuity: forked.continuity,
+        },
+        200,
+      );
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
+  async function handleRollbackRoute(c: Context) {
+    try {
+      const body = await c.req.json();
+      const parsed = RollbackRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { error: "Validation failed", details: parsed.error.flatten() },
+          400,
+        );
+      }
+
+      const runtime = pool.get(parsed.data.task_id);
+      if (!runtime) {
+        return c.json({ error: "task not found" }, 404);
+      }
+
+      await createRegistry().rollback(runtime, {
+        checkpoint_id: parsed.data.checkpoint_id,
+        turns: parsed.data.turns,
+      });
+      runtime.lastActivity = now();
+      return c.json({ success: true }, 200);
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
+  async function handleRevertRoute(c: Context) {
+    try {
+      const body = await c.req.json();
+      const parsed = RevertRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { error: "Validation failed", details: parsed.error.flatten() },
+          400,
+        );
+      }
+
+      const runtime = pool.get(parsed.data.task_id);
+      if (!runtime) {
+        return c.json({ error: "task not found" }, 404);
+      }
+
+      await createRegistry().revert(runtime, {
+        action: "revert",
+        message_id: parsed.data.message_id,
+      });
+      runtime.lastActivity = now();
+      return c.json({ success: true }, 200);
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
+  async function handleUnrevertRoute(c: Context) {
+    try {
+      const body = await c.req.json();
+      const parsed = UnrevertRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { error: "Validation failed", details: parsed.error.flatten() },
+          400,
+        );
+      }
+
+      const runtime = pool.get(parsed.data.task_id);
+      if (!runtime) {
+        return c.json({ error: "task not found" }, 404);
+      }
+
+      await createRegistry().revert(runtime, {
+        action: "unrevert",
+      });
+      runtime.lastActivity = now();
+      return c.json({ success: true }, 200);
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
+  async function handleDiffRoute(c: Context) {
+    try {
+      const taskId = c.req.param("task_id") ?? "";
+      const runtime = pool.get(taskId);
+      if (!runtime) {
+        return c.json({ error: "task not found" }, 404);
+      }
+
+      const diff = await createRegistry().getDiff(runtime);
+      return c.json(diff, 200);
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
+  async function handleMessagesRoute(c: Context) {
+    try {
+      const taskId = c.req.param("task_id") ?? "";
+      const runtime = pool.get(taskId);
+      if (!runtime) {
+        return c.json({ error: "task not found" }, 404);
+      }
+
+      const messages = await createRegistry().getMessages(runtime);
+      return c.json(messages, 200);
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
+  async function handleCommandRoute(c: Context) {
+    try {
+      const body = await c.req.json();
+      const parsed = CommandRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { error: "Validation failed", details: parsed.error.flatten() },
+          400,
+        );
+      }
+
+      const runtime = pool.get(parsed.data.task_id);
+      if (!runtime) {
+        return c.json({ error: "task not found" }, 404);
+      }
+
+      const result = await createRegistry().executeCommand(runtime, {
+        command: parsed.data.command,
+        arguments: parsed.data.arguments,
+      });
+      runtime.lastActivity = now();
+      return c.json(result ?? { success: true }, 200);
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
+  async function handleInterruptRoute(c: Context) {
+    try {
+      const body = await c.req.json();
+      const parsed = InterruptRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { error: "Validation failed", details: parsed.error.flatten() },
+          400,
+        );
+      }
+
+      const runtime = pool.get(parsed.data.task_id);
+      if (!runtime) {
+        return c.json({ error: "task not found" }, 404);
+      }
+
+      await createRegistry().interrupt(runtime);
+      runtime.lastActivity = now();
+      return c.json({ success: true }, 200);
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
+  async function handleModelRoute(c: Context) {
+    try {
+      const body = await c.req.json();
+      const parsed = ModelSwitchRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { error: "Validation failed", details: parsed.error.flatten() },
+          400,
+        );
+      }
+
+      const runtime = pool.get(parsed.data.task_id);
+      if (!runtime?.request) {
+        return c.json({ error: "task not found" }, 404);
+      }
+
+      await createRegistry().setModel(runtime, {
+        model: parsed.data.model,
+      });
+      runtime.request = {
+        ...runtime.request,
+        model: parsed.data.model,
+      };
+      runtime.lastActivity = now();
+      return c.json({ success: true }, 200);
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
+  async function handlePermissionResponseRoute(c: Context) {
+    try {
+      const body = await c.req.json();
+      const parsed = PermissionResponseSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { error: "Validation failed", details: parsed.error.flatten() },
+          400,
+        );
+      }
+
+      const requestId = c.req.param("request_id") ?? "";
+      const resolved = hookCallbackManager.resolve(requestId, parsed.data);
+      if (!resolved) {
+        return c.json({ error: "pending permission request not found" }, 404);
+      }
+      return c.json({ success: true }, 200);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
   }
 
   async function handleCancelRoute(c: Context) {
@@ -505,6 +841,7 @@ export function createApp(deps: AppDeps = {}): Hono {
         codexAuthStatusProvider: deps.codexAuthStatusProvider,
         opencodeTransport: deps.opencodeTransport,
         opencodeEventRunner: deps.opencodeEventRunner,
+        hookCallbackManager,
         pluginManager,
       });
 
@@ -713,6 +1050,20 @@ export function createApp(deps: AppDeps = {}): Hono {
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.review, handleReviewRoute);
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.status, handleStatusRoute);
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.runtimes, handleRuntimeCatalogRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.fork, handleForkRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.rollback, handleRollbackRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.revert, handleRevertRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.unrevert, handleUnrevertRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.diff, handleDiffRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.messages, handleMessagesRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.command, handleCommandRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.interrupt, handleInterruptRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.model, handleModelRoute);
+  registerBridgeRouteGroup(
+    app,
+    BRIDGE_HTTP_ROUTE_GROUPS.permissionResponse,
+    handlePermissionResponseRoute,
+  );
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.cancel, handleCancelRoute);
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.pause, handlePauseRoute);
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.resume, handleResumeRoute);
@@ -805,6 +1156,21 @@ export function createApp(deps: AppDeps = {}): Hono {
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.toolsRestart, handleToolsRestartRoute);
 
   return app;
+}
+
+function handleOperationError(c: Context, err: unknown) {
+  const message = err instanceof Error ? err.message : String(err);
+  if (err instanceof UnsupportedOperationError) {
+    return c.json(
+      {
+        error: message,
+        operation: err.operation,
+        runtime: err.runtime,
+      },
+      501,
+    );
+  }
+  return c.json({ error: message }, 500);
 }
 
 function getResumeBlock(snapshot: {

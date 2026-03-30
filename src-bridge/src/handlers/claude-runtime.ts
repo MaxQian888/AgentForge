@@ -12,14 +12,33 @@ import type { MCPClientHub } from "../mcp/client-hub.js";
 import type { PluginRecord } from "../plugins/types.js";
 import { buildFilterPipeline, applyFilters, type OutputFilter } from "../filters/pipeline.js";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
+import { HookCallbackManager } from "../runtime/hook-callback-manager.js";
 
 type UnknownRecord = Record<string, unknown>;
 type EventSink = Pick<EventStreamer, "send">;
+type QueryRunnerResult = AsyncIterable<UnknownRecord> & {
+  interrupt?: () => Promise<void>;
+  setModel?: (model?: string) => Promise<void>;
+  setMaxThinkingTokens?: (maxThinkingTokens: number | null) => Promise<void>;
+  rewindFiles?: (
+    userMessageId: string,
+    options?: { dryRun?: boolean },
+  ) => Promise<{ canRewind: boolean; error?: string }>;
+  mcpServerStatus?: () => Promise<unknown>;
+};
+type ForkSessionRunner = (
+  sessionId: string,
+  options?: {
+    dir?: string;
+    upToMessageId?: string;
+    title?: string;
+  },
+) => Promise<{ sessionId: string }>;
 
 export type QueryRunner = (params: {
   prompt: string;
   options?: Record<string, unknown>;
-}) => AsyncIterable<UnknownRecord>;
+}) => QueryRunnerResult;
 
 export interface ClaudeRuntimeDeps {
   queryRunner?: QueryRunner;
@@ -28,6 +47,8 @@ export interface ClaudeRuntimeDeps {
   mcpHub?: MCPClientHub;
   activePlugins?: PluginRecord[];
   continuity?: RuntimeContinuityState;
+  hookCallbackManager?: HookCallbackManager;
+  forkSessionRunner?: ForkSessionRunner;
 }
 
 /**
@@ -73,6 +94,37 @@ export function buildClaudeQueryOptions(
     systemPrompt,
   };
 
+  if (req.agents) {
+    options.agents = req.agents;
+  }
+  if (req.thinking_config?.enabled && req.thinking_config.budget_tokens) {
+    options.maxThinkingTokens = req.thinking_config.budget_tokens;
+  }
+  if (req.file_checkpointing) {
+    options.enableFileCheckpointing = true;
+  }
+  if (req.output_schema) {
+    options.outputFormat = req.output_schema;
+  }
+  if (req.include_partial_messages) {
+    options.includePartialMessages = true;
+  }
+  if (req.disallowed_tools?.length) {
+    options.disallowedTools = req.disallowed_tools;
+  }
+  if (req.fallback_model) {
+    options.fallbackModel = req.fallback_model;
+  }
+  if (req.additional_directories?.length) {
+    options.additionalDirectories = req.additional_directories;
+  }
+  if (req.env) {
+    options.env = {
+      ...process.env,
+      ...req.env,
+    };
+  }
+
   if (req.permission_mode === "bypassPermissions") {
     options.allowDangerouslySkipPermissions = true;
   }
@@ -111,6 +163,7 @@ export async function streamClaudeRuntime(
     deps.activePlugins,
     deps.continuity,
   );
+  attachClaudeCallbacks(options, streamer, req, deps);
 
   // Build output filters from role config
   const outputFilters = buildFilterPipeline(req.role_config?.output_filters ?? []);
@@ -138,15 +191,26 @@ export async function streamClaudeRuntime(
   }, 5000);
 
   try {
-    for await (const message of queryRunner({
+    const query = queryRunner({
       prompt: req.prompt,
       options,
-    })) {
+    });
+    runtime.claudeQuery = hasClaudeQueryControls(query) ? query : null;
+
+    for await (const message of query) {
       runtime.lastActivity = now();
-      runtime.continuity = extractClaudeContinuity(message, runtime.lastActivity, runtime.continuity);
+      runtime.continuity = enrichClaudeContinuity(
+        extractClaudeContinuity(message, runtime.lastActivity, runtime.continuity),
+        runtime,
+      );
 
       emitAssistantBlocks(runtime, streamer, message, req, now, outputFilters);
       emitToolResult(streamer, message, req, now);
+      emitPartialAssistantMessage(streamer, message, req, now);
+      emitRateLimit(streamer, message, req, now);
+      emitToolProgress(streamer, message, req, now);
+      emitCompactBoundary(streamer, message, req, now);
+      captureStructuredOutput(runtime, message);
       emitUsage(runtime, streamer, message, req, now);
 
       // 80% budget warning threshold
@@ -181,6 +245,9 @@ export async function streamClaudeRuntime(
       }
     }
   } finally {
+    if (runtime.claudeQuery && runtime.status !== "running") {
+      runtime.claudeQuery = null;
+    }
     clearInterval(costReportInterval);
   }
 }
@@ -201,7 +268,9 @@ export function extractClaudeContinuity(
   }
 
   const checkpointId =
-    typeof message.uuid === "string" && message.uuid.length > 0
+    message.type === "assistant" &&
+      typeof message.uuid === "string" &&
+      message.uuid.length > 0
       ? message.uuid
       : previousClaude?.checkpoint_id;
 
@@ -282,6 +351,209 @@ async function loadDefaultQueryRunner(): Promise<QueryRunner> {
   return sdk.query as unknown as QueryRunner;
 }
 
+function attachClaudeCallbacks(
+  options: Options & Record<string, unknown>,
+  streamer: EventSink,
+  req: ExecuteRequest,
+  deps: ClaudeRuntimeDeps,
+): void {
+  if (req.hooks_config?.hooks.length && deps.hookCallbackManager) {
+    const hooks = req.hooks_config.hooks.reduce<Record<string, Array<Record<string, unknown>>>>(
+      (acc, hookDefinition) => {
+        const eventName = hookDefinition.hook;
+        const matcher = {
+          matcher:
+            typeof hookDefinition.matcher === "string"
+              ? hookDefinition.matcher
+              : hookDefinition.matcher
+                ? JSON.stringify(hookDefinition.matcher)
+                : undefined,
+          timeout: toHookTimeoutSeconds(req),
+          hooks: [
+            async (input: Record<string, unknown>) => {
+              return requestHookCallback(
+                deps.hookCallbackManager!,
+                req,
+                {
+                  hook: eventName,
+                  task_id: req.task_id,
+                  session_id: req.session_id,
+                  ...normalizeHookInput(input),
+                },
+              );
+            },
+          ],
+        };
+        if (!acc[eventName]) {
+          acc[eventName] = [];
+        }
+        acc[eventName]?.push(matcher);
+        return acc;
+      },
+      {},
+    );
+    options.hooks = hooks;
+  }
+
+  if (req.tool_permission_callback && resolveHookCallbackUrl(req) && deps.hookCallbackManager) {
+    options.canUseTool = async (
+      toolName: string,
+      input: Record<string, unknown>,
+      callbackOptions: Record<string, unknown>,
+    ) => {
+      const result = await requestPermissionCallback(
+        deps.hookCallbackManager!,
+        req,
+        streamer,
+        {
+          callback_type: "tool_permission",
+          tool_name: toolName,
+          tool_input: input,
+          context: callbackOptions,
+        },
+      );
+      return result?.decision === "deny"
+        ? {
+            behavior: "deny",
+            message: result.reason ?? "Tool usage denied",
+          }
+        : {
+            behavior: "allow",
+          };
+    };
+  }
+
+  if (resolveHookCallbackUrl(req) && deps.hookCallbackManager) {
+    options.onElicitation = async (
+      requestPayload: Record<string, unknown>,
+      callbackOptions: Record<string, unknown>,
+    ) => {
+      const result = await requestPermissionCallback(
+        deps.hookCallbackManager!,
+        req,
+        streamer,
+        {
+          callback_type: "elicitation",
+          mcp_server_id: requestPayload.serverName,
+          elicitation_type: requestPayload.mode,
+          message: requestPayload.message,
+          url: requestPayload.url,
+          fields: requestPayload.requestedSchema
+            ? [requestPayload.requestedSchema]
+            : undefined,
+          context: callbackOptions,
+        },
+      );
+      return result?.decision === "deny"
+        ? { action: "decline" }
+        : { action: "accept" };
+    };
+  }
+}
+
+async function requestPermissionCallback(
+  manager: HookCallbackManager,
+  req: ExecuteRequest,
+  streamer: EventSink,
+  payload: Record<string, unknown>,
+): Promise<{ decision?: string; reason?: string } | null> {
+  try {
+    const pending = await manager.register({
+      callbackUrl: resolveHookCallbackUrl(req),
+      payload,
+      timeoutMs: req.hook_timeout_ms ?? req.hooks_config?.timeout_ms ?? 5000,
+    });
+
+    streamer.send({
+      task_id: req.task_id,
+      session_id: req.session_id,
+      timestamp_ms: Date.now(),
+      type: "permission_request",
+      data: {
+        request_id: pending.requestId,
+        tool_name: payload.tool_name,
+        elicitation_type: payload.elicitation_type,
+        fields: payload.fields,
+        mcp_server_id: payload.mcp_server_id,
+        context: payload.context,
+      },
+    });
+
+    return (await pending.response) as { decision?: string; reason?: string };
+  } catch {
+    return {
+      decision: "allow",
+    };
+  }
+}
+
+async function requestHookCallback(
+  manager: HookCallbackManager,
+  req: ExecuteRequest,
+  payload: Record<string, unknown>,
+): Promise<Record<string, unknown>> {
+  try {
+    const pending = await manager.register({
+      callbackUrl: resolveHookCallbackUrl(req),
+      payload,
+      timeoutMs: req.hook_timeout_ms ?? req.hooks_config?.timeout_ms ?? 5000,
+    });
+    return (await pending.response) as Record<string, unknown>;
+  } catch {
+    return {
+      continue: true,
+    };
+  }
+}
+
+function normalizeHookInput(input: Record<string, unknown>): Record<string, unknown> {
+  return {
+    tool_name: input.tool_name,
+    tool_input: input.tool_input,
+    tool_use_id: input.tool_use_id,
+    mcp_server_id: input.mcp_server_name,
+    elicitation_type: input.mode,
+    fields: input.requested_schema ? [input.requested_schema] : undefined,
+    url: input.url,
+    message: input.message,
+  };
+}
+
+function toHookTimeoutSeconds(req: ExecuteRequest): number | undefined {
+  const timeoutMs = req.hook_timeout_ms ?? req.hooks_config?.timeout_ms;
+  if (!timeoutMs || timeoutMs <= 0) {
+    return undefined;
+  }
+  return Math.ceil(timeoutMs / 1000);
+}
+
+function resolveHookCallbackUrl(req: ExecuteRequest): string {
+  return req.hook_callback_url ?? req.hooks_config?.callback_url ?? "";
+}
+
+function hasClaudeQueryControls(query: QueryRunnerResult): boolean {
+  return (
+    typeof query.interrupt === "function" ||
+    typeof query.setModel === "function" ||
+    typeof query.rewindFiles === "function"
+  );
+}
+
+function enrichClaudeContinuity(
+  continuity: ClaudeContinuityState | null,
+  runtime: AgentRuntime,
+): ClaudeContinuityState | null {
+  if (!continuity) {
+    return null;
+  }
+
+  return {
+    ...continuity,
+    query_ref: runtime.taskId,
+    fork_available: true,
+  };
+}
+
 function emitAssistantBlocks(
   runtime: AgentRuntime,
   streamer: EventSink,
@@ -359,6 +631,137 @@ function emitToolResult(
       is_error: Boolean(result.is_error),
     },
   });
+}
+
+function emitPartialAssistantMessage(
+  streamer: EventSink,
+  message: UnknownRecord,
+  req: ExecuteRequest,
+  now: () => number,
+): void {
+  if (message.type !== "stream_event" || !isRecord(message.event)) {
+    return;
+  }
+
+  const content =
+    typeof message.event.text === "string"
+      ? message.event.text
+      : isRecord(message.event.delta) && typeof message.event.delta.text === "string"
+        ? message.event.delta.text
+        : isRecord(message.event.content_block) &&
+            typeof message.event.content_block.text === "string"
+          ? message.event.content_block.text
+          : null;
+  if (!content) {
+    return;
+  }
+
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: now(),
+    type: "partial_message",
+    data: {
+      content,
+      is_complete: false,
+    },
+  });
+}
+
+function emitRateLimit(
+  streamer: EventSink,
+  message: UnknownRecord,
+  req: ExecuteRequest,
+  now: () => number,
+): void {
+  if (message.type !== "rate_limit_event" || !isRecord(message.rate_limit_info)) {
+    return;
+  }
+
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: now(),
+    type: "rate_limit",
+    data: {
+      utilization:
+        typeof message.rate_limit_info.utilization === "number"
+          ? message.rate_limit_info.utilization
+          : undefined,
+      reset_at:
+        typeof message.rate_limit_info.resetsAt === "number"
+          ? message.rate_limit_info.resetsAt
+          : undefined,
+      status:
+        typeof message.rate_limit_info.status === "string"
+          ? message.rate_limit_info.status
+          : undefined,
+    },
+  });
+}
+
+function emitToolProgress(
+  streamer: EventSink,
+  message: UnknownRecord,
+  req: ExecuteRequest,
+  now: () => number,
+): void {
+  if (message.type !== "tool_progress") {
+    return;
+  }
+
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: now(),
+    type: "progress",
+    data: {
+      tool_name: typeof message.tool_name === "string" ? message.tool_name : undefined,
+      progress_text:
+        typeof message.tool_name === "string" &&
+          typeof message.elapsed_time_seconds === "number"
+          ? `${message.tool_name} running (${message.elapsed_time_seconds}s)`
+          : undefined,
+      elapsed_time_seconds:
+        typeof message.elapsed_time_seconds === "number"
+          ? message.elapsed_time_seconds
+          : undefined,
+      tool_use_id: typeof message.tool_use_id === "string" ? message.tool_use_id : undefined,
+      task_id: typeof message.task_id === "string" ? message.task_id : undefined,
+    },
+  });
+}
+
+function emitCompactBoundary(
+  streamer: EventSink,
+  message: UnknownRecord,
+  req: ExecuteRequest,
+  now: () => number,
+): void {
+  if (message.type !== "system" || message.subtype !== "compact_boundary") {
+    return;
+  }
+
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: now(),
+    type: "status_change",
+    data: {
+      old_status: "running",
+      new_status: "running",
+      reason: "compact_boundary",
+      compact_metadata: message.compact_metadata,
+    },
+  });
+}
+
+function captureStructuredOutput(runtime: AgentRuntime, message: UnknownRecord): void {
+  if (message.type !== "result" || !isRecord(message.structured_output)) {
+    return;
+  }
+
+  runtime.structuredOutput = message.structured_output;
 }
 
 function emitUsage(

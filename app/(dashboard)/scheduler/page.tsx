@@ -18,8 +18,12 @@ import {
   SchedulerJobDetail,
   SchedulerJobDetailEmpty,
 } from "@/components/scheduler/scheduler-job-detail";
+import { PageHeader } from "@/components/shared/page-header";
+import { ErrorBanner } from "@/components/shared/error-banner";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 export default function SchedulerPage() {
+  useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Scheduler" }]);
   const t = useTranslations("scheduler");
   const jobs = useSchedulerStore((s) => s.jobs);
   const runsByJobKey = useSchedulerStore((s) => s.runsByJobKey);
@@ -57,31 +61,33 @@ export default function SchedulerPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-start justify-between gap-4">
-        <div>
-          <h1 className="text-2xl font-bold">{t("title")}</h1>
-          <p className="text-sm text-muted-foreground">
-            {t("subtitle")}
-          </p>
-        </div>
-        <Button
-          variant="outline"
-          className="gap-2"
-          onClick={() => {
+      <PageHeader
+        title={t("title")}
+        description={t("subtitle")}
+        actions={
+          <Button
+            variant="outline"
+            className="gap-2"
+            onClick={() => {
+              void fetchJobs();
+              void fetchStats();
+            }}
+            disabled={loading}
+          >
+            <RefreshCw className="size-4" />
+            {t("refresh")}
+          </Button>
+        }
+      />
+
+      {error && (
+        <ErrorBanner
+          message={error}
+          onRetry={() => {
             void fetchJobs();
             void fetchStats();
           }}
-          disabled={loading}
-        >
-          <RefreshCw className="size-4" />
-          {t("refresh")}
-        </Button>
-      </div>
-
-      {error && (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
+        />
       )}
 
       <SchedulerStatsCards stats={stats} loading={loading && !stats} />

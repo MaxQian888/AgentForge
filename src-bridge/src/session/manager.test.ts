@@ -120,6 +120,8 @@ describe("SessionManager", () => {
           session_handle: "claude-session-789",
           checkpoint_id: "checkpoint-1",
           resume_token: "resume-token-1",
+          query_ref: "query-ref-1",
+          fork_available: true,
         },
       };
 
@@ -193,6 +195,40 @@ describe("SessionManager", () => {
           upstream_session_id: "opencode-session-123",
           latest_message_id: "message-9",
           server_url: "http://127.0.0.1:4096",
+          fork_available: true,
+          revert_message_ids: ["message-9"],
+        },
+      });
+      manager.save("task-codex-bound", {
+        task_id: "task-codex-bound",
+        session_id: "session-codex-bound",
+        status: "paused",
+        turn_number: 4,
+        spent_usd: 0.6,
+        created_at: 100,
+        updated_at: 500,
+        request: {
+          task_id: "task-codex-bound",
+          session_id: "session-codex-bound",
+          prompt: "Resume the Codex runtime",
+          worktree_path: "D:/Project/AgentForge",
+          branch_name: "agent/task-codex-bound",
+          system_prompt: "",
+          max_turns: 12,
+          budget_usd: 5,
+          allowed_tools: ["Read"],
+          permission_mode: "default",
+          runtime: "codex" as const,
+          provider: "openai",
+          model: "gpt-5-codex",
+        },
+        continuity: {
+          runtime: "codex" as const,
+          resume_ready: true,
+          captured_at: 450,
+          thread_id: "thread-123",
+          fork_available: true,
+          rollback_turns: 3,
         },
       });
 
@@ -212,6 +248,17 @@ describe("SessionManager", () => {
           upstream_session_id: "opencode-session-123",
           latest_message_id: "message-9",
           server_url: "http://127.0.0.1:4096",
+          fork_available: true,
+          revert_message_ids: ["message-9"],
+        },
+      });
+      expect(reloaded.restore("task-codex-bound")).toMatchObject({
+        continuity: {
+          runtime: "codex",
+          resume_ready: true,
+          thread_id: "thread-123",
+          fork_available: true,
+          rollback_turns: 3,
         },
       });
     } finally {

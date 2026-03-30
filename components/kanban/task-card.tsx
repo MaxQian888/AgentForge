@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import { Draggable } from "@hello-pangea/dnd";
 import Link from "next/link";
 import { MoreHorizontal } from "lucide-react";
@@ -68,6 +69,7 @@ interface TaskCardProps {
   index: number;
   isSelected: boolean;
   isMultiSelected?: boolean;
+  isPending?: boolean;
   density: "comfortable" | "compact";
   showDescription: boolean;
   linkedDocs?: LinkedDocItem[];
@@ -83,6 +85,7 @@ export function TaskCard({
   index,
   isSelected,
   isMultiSelected = false,
+  isPending = false,
   density,
   showDescription,
   linkedDocs = [],
@@ -93,22 +96,33 @@ export function TaskCard({
   onQuickPriorityChange,
 }: TaskCardProps) {
   const previewDoc = linkedDocs[0];
+  const [docPreviewOpen, setDocPreviewOpen] = useState(false);
 
   return (
-    <Draggable draggableId={task.id} index={index}>
+    <Draggable draggableId={task.id} index={index} isDragDisabled={isPending}>
       {(provided, snapshot) => (
         <div
           ref={provided.innerRef}
           {...provided.draggableProps}
           {...provided.dragHandleProps}
-          onClick={onClick}
+          onClick={(event) => {
+            if ((event.metaKey || event.ctrlKey) && onToggleSelect) {
+              event.preventDefault();
+              event.stopPropagation();
+              onToggleSelect(task.id);
+              return;
+            }
+            onClick();
+          }}
           data-task-id={task.id}
           data-selected={isSelected ? "true" : "false"}
+          aria-busy={isPending}
           className={cn(
             "cursor-pointer rounded-md border bg-card shadow-sm transition-shadow hover:shadow-md",
             density === "compact" ? "p-2.5" : "p-3",
             isSelected && "ring-2 ring-primary/25 border-primary/40",
             isMultiSelected && "ring-2 ring-blue-500/30 border-blue-500/40 bg-blue-500/5",
+            isPending && "cursor-wait opacity-80",
             snapshot.isDragging && "shadow-lg ring-2 ring-primary/20"
           )}
         >
@@ -215,14 +229,23 @@ export function TaskCard({
               {task.priority}
             </Badge>
             <div className="flex items-center gap-2">
+              {isPending ? (
+                <span className="text-[11px] font-medium text-muted-foreground">
+                  Saving...
+                </span>
+              ) : null}
               {previewDoc ? (
-                <Popover>
+                <Popover open={docPreviewOpen} onOpenChange={setDocPreviewOpen}>
                   <PopoverTrigger asChild>
                     <button
                       type="button"
                       aria-label={`Show linked docs for ${task.title}`}
                       className="rounded-full border border-border/60 px-2 py-0.5 text-[11px] text-muted-foreground hover:bg-accent/40"
                       onClick={(event) => event.stopPropagation()}
+                      onMouseEnter={() => setDocPreviewOpen(true)}
+                      onMouseLeave={() => setDocPreviewOpen(false)}
+                      onFocus={() => setDocPreviewOpen(true)}
+                      onBlur={() => setDocPreviewOpen(false)}
                     >
                       Docs {linkedDocs.length}
                     </button>
@@ -230,6 +253,8 @@ export function TaskCard({
                   <PopoverContent
                     onClick={(event) => event.stopPropagation()}
                     onMouseDown={(event) => event.stopPropagation()}
+                    onMouseEnter={() => setDocPreviewOpen(true)}
+                    onMouseLeave={() => setDocPreviewOpen(false)}
                   >
                     <PopoverHeader>
                       <PopoverTitle>{previewDoc.title}</PopoverTitle>

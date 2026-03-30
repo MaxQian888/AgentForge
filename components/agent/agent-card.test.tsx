@@ -31,7 +31,7 @@ function makeAgent(overrides: Partial<Agent> = {}): Agent {
 
 describe("AgentCard", () => {
   it("shows runtime, spend, and high-budget usage state", () => {
-    const { container } = render(<AgentCard agent={makeAgent()} />);
+    render(<AgentCard agent={makeAgent()} />);
 
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
     expect(screen.getByText("Implement review queue")).toBeInTheDocument();
@@ -40,13 +40,14 @@ describe("AgentCard", () => {
     ).toBeInTheDocument();
     expect(screen.getByText("Turns: 8")).toBeInTheDocument();
     expect(screen.getByText("Cost: $4.25 / $5.00")).toBeInTheDocument();
-
-    const progress = container.querySelector('[style="width: 85%;"]');
-    expect(progress).toHaveClass("bg-destructive");
+    expect(screen.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "85",
+    );
   });
 
   it("falls back to placeholder runtime values and zero-width budget bar", () => {
-    const { container } = render(
+    render(
       <AgentCard
         agent={makeAgent({
           runtime: "",
@@ -61,8 +62,9 @@ describe("AgentCard", () => {
 
     expect(screen.getByText("Runtime: - / - / -")).toBeInTheDocument();
     expect(screen.getByText("budget_exceeded")).toBeInTheDocument();
-
-    const progress = container.querySelector('[style="width: 0%;"]');
-    expect(progress).toHaveClass("bg-primary");
+    expect(screen.getByRole("progressbar")).toHaveAttribute(
+      "aria-valuenow",
+      "0",
+    );
   });
 });

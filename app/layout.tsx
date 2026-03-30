@@ -1,9 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
+import { NextIntlClientProvider } from "next-intl";
+import { ThemeProvider } from "next-themes";
 import { DesktopWindowFrame } from "@/components/layout/desktop-window-frame";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/lib/i18n/provider";
-import { DEFAULT_LOCALE } from "@/lib/stores/locale-store";
+import { DEFAULT_LOCALE } from "@/lib/i18n/config";
 import "./globals.css";
 
 const geistSans = Geist({
@@ -31,11 +33,20 @@ export default function RootLayout({
       <body
         className={`${geistSans.variable} ${geistMono.variable} antialiased`}
       >
-        <I18nProvider initialLocale={DEFAULT_LOCALE}>
-          <TooltipProvider>
-            <DesktopWindowFrame>{children}</DesktopWindowFrame>
-          </TooltipProvider>
-        </I18nProvider>
+        <ThemeProvider
+          attribute="class"
+          defaultTheme="system"
+          enableSystem
+          disableTransitionOnChange
+        >
+          <NextIntlClientProvider>
+            <I18nProvider initialLocale={DEFAULT_LOCALE}>
+              <TooltipProvider>
+                <DesktopWindowFrame>{children}</DesktopWindowFrame>
+              </TooltipProvider>
+            </I18nProvider>
+          </NextIntlClientProvider>
+        </ThemeProvider>
       </body>
     </html>
   );

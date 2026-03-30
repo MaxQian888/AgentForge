@@ -160,6 +160,12 @@ jest.mock("next-intl", () => ({
 }));
 
 jest.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: jest.fn(),
+    replace: jest.fn(),
+    prefetch: jest.fn(),
+    back: jest.fn(),
+  }),
   useSearchParams: () => ({
     get: (key: string) => (key === "member" ? searchParamsState.member : null),
   }),
@@ -202,11 +208,22 @@ describe("AgentsPage", () => {
     const user = userEvent.setup();
     render(<AgentsPage />);
 
-    expect(screen.getByText("Bridge Health")).toBeInTheDocument();
-    expect(screen.getByText(/Status: degraded/)).toBeInTheDocument();
+    expect(screen.getByRole("tablist")).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "monitor.title", selected: true }),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("tab", { name: "stats.dispatch", selected: false }),
+    ).toBeInTheDocument();
+
+    const degradedAlert = screen.getByRole("alert");
+    expect(degradedAlert).toHaveTextContent("Bridge Health");
+    expect(degradedAlert).toHaveTextContent("Status: degraded");
     expect(screen.getAllByText("Paused verification").length).toBeGreaterThan(0);
 
-    const resumeButton = screen.getByRole("button", { name: "Resume" });
+    const resumeButton = screen.getByRole("button", {
+      name: "workspace.quickResume",
+    });
     expect(resumeButton).toBeDisabled();
 
     await user.click(resumeButton);

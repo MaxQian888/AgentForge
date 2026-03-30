@@ -26,6 +26,7 @@ var liveMetadata = core.NormalizeMetadata(core.PlatformMetadata{
 		AsyncUpdateModes:       []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateSessionWebhook},
 		ActionCallbackMode:     core.ActionCallbackWebhook,
 		MessageScopes:          []core.MessageScope{core.MessageScopeChat},
+		NativeSurfaces:         []string{core.NativeSurfaceWeComCard},
 		RequiresPublicCallback: true,
 		SupportsRichMessages:   true,
 		SupportsSlashCommands:  true,
@@ -34,6 +35,7 @@ var liveMetadata = core.NormalizeMetadata(core.PlatformMetadata{
 	Rendering: core.RenderingProfile{
 		DefaultTextFormat:         core.TextFormatPlainText,
 		SupportedFormats:          []core.TextFormatMode{core.TextFormatPlainText},
+		NativeSurfaces:            []string{core.NativeSurfaceWeComCard},
 		MaxTextLength:             4096,
 		SupportsSegments:          true,
 		StructuredSurface:         core.StructuredSurfaceCards,
@@ -77,10 +79,12 @@ type accessTokenProvider interface {
 
 type responseReplier interface {
 	ReplyText(ctx context.Context, responseURL string, content string) error
+	ReplyMessage(ctx context.Context, responseURL string, payload map[string]any) error
 }
 
 type directSender interface {
 	SendText(ctx context.Context, target directSendTarget, content string) error
+	SendMessage(ctx context.Context, target directSendTarget, payload map[string]any) error
 }
 
 type LiveOption func(*Live) error
@@ -285,7 +289,56 @@ func (l *Live) Send(ctx context.Context, chatID string, content string) error {
 }
 
 func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	if message != nil && len(message.Sections) > 0 {
+		native := &core.NativeMessage{Platform: "wecom", WeComCard: renderStructuredSections(message.Sections)}
+		if err := native.Validate(); err == nil {
+			return l.SendNative(ctx, chatID, native)
+		}
+	}
 	return l.Send(ctx, chatID, renderStructuredFallback(message))
+}
+
+func (l *Live) ReplyStructured(ctx context.Context, rawReplyCtx any, message *core.StructuredMessage) error {
+	if message != nil && len(message.Sections) > 0 {
+		native := &core.NativeMessage{Platform: "wecom", WeComCard: renderStructuredSections(message.Sections)}
+		if err := native.Validate(); err == nil {
+			return l.ReplyNative(ctx, rawReplyCtx, native)
+		}
+	}
+	return l.Reply(ctx, rawReplyCtx, renderStructuredFallback(message))
+}
+
+func (l *Live) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	if message.NormalizedPlatform() != "wecom" || message.WeComCard == nil {
+		return errors.New("native message is not a wecom card payload")
+	}
+	target := parseDirectSendTarget(chatID)
+	if target.ChatID == "" && target.UserID == "" {
+		return errors.New("wecom send requires chat id or user target")
+	}
+	return l.sender.SendMessage(ctx, target, renderWeComNativePayload(message.WeComCard))
+}
+
+func (l *Live) ReplyNative(ctx context.Context, rawReplyCtx any, message *core.NativeMessage) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	if message.NormalizedPlatform() != "wecom" || message.WeComCard == nil {
+		return errors.New("native message is not a wecom card payload")
+	}
+	reply := toReplyContext(rawReplyCtx)
+	payload := renderWeComNativePayload(message.WeComCard)
+	if reply.ResponseURL != "" {
+		return l.responseReplier.ReplyMessage(ctx, reply.ResponseURL, payload)
+	}
+	target := directSendTarget{ChatID: reply.ChatID, UserID: reply.UserID}
+	if target.ChatID == "" && target.UserID == "" {
+		return errors.New("wecom reply requires response url, chat id, or user id")
+	}
+	return l.sender.SendMessage(ctx, target, payload)
 }
 
 func (l *Live) Stop() error {
@@ -493,12 +546,16 @@ type httpResponseReplier struct {
 }
 
 func (r *httpResponseReplier) ReplyText(ctx context.Context, responseURL string, content string) error {
-	body, err := json.Marshal(map[string]any{
+	return r.ReplyMessage(ctx, responseURL, map[string]any{
 		"msgtype": "text",
 		"text": map[string]string{
 			"content": content,
 		},
 	})
+}
+
+func (r *httpResponseReplier) ReplyMessage(ctx context.Context, responseURL string, payload map[string]any) error {
+	body, err := json.Marshal(payload)
 	if err != nil {
 		return err
 	}
@@ -526,27 +583,37 @@ type apiDirectSender struct {
 }
 
 func (s *apiDirectSender) SendText(ctx context.Context, target directSendTarget, content string) error {
-	token, err := s.tokenProvider.AccessToken(ctx)
-	if err != nil {
-		return err
-	}
-	payload := map[string]any{
-		"agentid": s.agentID,
+	return s.SendMessage(ctx, target, map[string]any{
 		"msgtype": "text",
 		"text": map[string]string{
 			"content": content,
 		},
-		"safe": 0,
+	})
+}
+
+func (s *apiDirectSender) SendMessage(ctx context.Context, target directSendTarget, payload map[string]any) error {
+	token, err := s.tokenProvider.AccessToken(ctx)
+	if err != nil {
+		return err
 	}
+	if payload == nil {
+		return errors.New("wecom direct send payload is required")
+	}
+	bodyPayload := make(map[string]any, len(payload)+2)
+	for key, value := range payload {
+		bodyPayload[key] = value
+	}
+	bodyPayload["agentid"] = s.agentID
+	bodyPayload["safe"] = 0
 	switch {
 	case strings.TrimSpace(target.ChatID) != "":
-		payload["chatid"] = strings.TrimSpace(target.ChatID)
+		bodyPayload["chatid"] = strings.TrimSpace(target.ChatID)
 	case strings.TrimSpace(target.UserID) != "":
-		payload["touser"] = strings.TrimSpace(target.UserID)
+		bodyPayload["touser"] = strings.TrimSpace(target.UserID)
 	default:
 		return errors.New("wecom direct send requires chat id or user id")
 	}
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(bodyPayload)
 	if err != nil {
 		return err
 	}
@@ -575,4 +642,51 @@ func (s *apiDirectSender) SendText(ctx context.Context, target directSendTarget,
 		return fmt.Errorf("wecom direct send failed: %s", strings.TrimSpace(result.ErrMsg))
 	}
 	return nil
+}
+
+func renderWeComNativePayload(payload *core.WeComCardPayload) map[string]any {
+	switch payload.CardType {
+	case core.WeComCardTypeNews:
+		articles := make([]map[string]string, 0, len(payload.Articles))
+		for _, article := range payload.Articles {
+			articles = append(articles, map[string]string{
+				"title":       strings.TrimSpace(article.Title),
+				"description": strings.TrimSpace(article.Description),
+				"url":         strings.TrimSpace(article.URL),
+				"picurl":      strings.TrimSpace(article.PicURL),
+			})
+		}
+		return map[string]any{
+			"msgtype": "news",
+			"news": map[string]any{
+				"articles": articles,
+			},
+		}
+	default:
+		cardItems := make([]map[string]string, 0, len(payload.TemplateFields))
+		for _, field := range payload.TemplateFields {
+			cardItems = append(cardItems, map[string]string{
+				"key":   strings.TrimSpace(field.Key),
+				"value": strings.TrimSpace(field.Value),
+			})
+		}
+		return map[string]any{
+			"msgtype": "template_card",
+			"template_card": map[string]any{
+				"card_type": "text_notice",
+				"source": map[string]string{
+					"desc": strings.TrimSpace(payload.Title),
+				},
+				"main_title": map[string]string{
+					"title": strings.TrimSpace(payload.Title),
+					"desc":  strings.TrimSpace(payload.Description),
+				},
+				"card_action": map[string]any{
+					"type": 1,
+					"url":  strings.TrimSpace(payload.URL),
+				},
+				"horizontal_content_list": cardItems,
+			},
+		}
+	}
 }

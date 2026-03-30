@@ -234,11 +234,30 @@ func (c *AgentForgeClient) GetCostStats(ctx context.Context) (*CostStats, error)
 	if resp.StatusCode != http.StatusOK {
 		return nil, c.readError(resp)
 	}
-	var stats CostStats
-	if err := json.NewDecoder(resp.Body).Decode(&stats); err != nil {
+	var summary costSummaryResponse
+	if err := json.NewDecoder(resp.Body).Decode(&summary); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
-	return &stats, nil
+	totalUsd := firstNonNilFloat(summary.TotalCostUsd, summary.LegacyTotalUsd)
+	budgetUsd := summary.LegacyBudgetUsd
+	if summary.BudgetSummary != nil {
+		budgetUsd = summary.BudgetSummary.Allocated
+	}
+	dailyUsd := summary.LegacyDailyUsd
+	weeklyUsd := summary.LegacyWeeklyUsd
+	monthlyUsd := summary.LegacyMonthlyUsd
+	if summary.PeriodRollups != nil {
+		dailyUsd = summary.TodayCostUsd(dailyUsd)
+		weeklyUsd = summary.Last7DaysCostUsd(weeklyUsd)
+		monthlyUsd = summary.Last30DaysCostUsd(monthlyUsd)
+	}
+	return &CostStats{
+		TotalUsd:   totalUsd,
+		BudgetUsd:  budgetUsd,
+		DailyUsd:   dailyUsd,
+		WeeklyUsd:  weeklyUsd,
+		MonthlyUsd: monthlyUsd,
+	}, nil
 }
 
 // --- Review operations ---
@@ -627,6 +646,57 @@ type CostStats struct {
 	DailyUsd   float64 `json:"daily_usd"`
 	WeeklyUsd  float64 `json:"weekly_usd"`
 	MonthlyUsd float64 `json:"monthly_usd"`
+}
+
+type costSummaryResponse struct {
+	TotalCostUsd   *float64 `json:"totalCostUsd"`
+	LegacyTotalUsd float64  `json:"total_usd"`
+	BudgetSummary  *struct {
+		Allocated float64 `json:"allocated"`
+	} `json:"budgetSummary"`
+	LegacyBudgetUsd float64 `json:"budget_usd"`
+	PeriodRollups   *struct {
+		Today struct {
+			CostUsd float64 `json:"costUsd"`
+		} `json:"today"`
+		Last7Days struct {
+			CostUsd float64 `json:"costUsd"`
+		} `json:"last7Days"`
+		Last30Days struct {
+			CostUsd float64 `json:"costUsd"`
+		} `json:"last30Days"`
+	} `json:"periodRollups"`
+	LegacyDailyUsd   float64 `json:"daily_usd"`
+	LegacyWeeklyUsd  float64 `json:"weekly_usd"`
+	LegacyMonthlyUsd float64 `json:"monthly_usd"`
+}
+
+func (c *costSummaryResponse) TodayCostUsd(fallback float64) float64 {
+	if c == nil || c.PeriodRollups == nil {
+		return fallback
+	}
+	return c.PeriodRollups.Today.CostUsd
+}
+
+func (c *costSummaryResponse) Last7DaysCostUsd(fallback float64) float64 {
+	if c == nil || c.PeriodRollups == nil {
+		return fallback
+	}
+	return c.PeriodRollups.Last7Days.CostUsd
+}
+
+func (c *costSummaryResponse) Last30DaysCostUsd(fallback float64) float64 {
+	if c == nil || c.PeriodRollups == nil {
+		return fallback
+	}
+	return c.PeriodRollups.Last30Days.CostUsd
+}
+
+func firstNonNilFloat(value *float64, fallback float64) float64 {
+	if value != nil {
+		return *value
+	}
+	return fallback
 }
 
 // Review represents an AgentForge code review.

@@ -34,9 +34,18 @@ var liveMetadata = core.PlatformMetadata{
 		AsyncUpdateModes:      []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateSessionWebhook},
 		ActionCallbackMode:    core.ActionCallbackWebhook,
 		MessageScopes:         []core.MessageScope{core.MessageScopeChat},
+		NativeSurfaces:        []string{core.NativeSurfaceDingTalkCard},
 		SupportsRichMessages:  true,
 		SupportsSlashCommands: true,
 		SupportsMentions:      true,
+	},
+	Rendering: core.RenderingProfile{
+		DefaultTextFormat: core.TextFormatPlainText,
+		SupportedFormats:  []core.TextFormatMode{core.TextFormatPlainText, core.TextFormatDingTalkMD},
+		NativeSurfaces:    []string{core.NativeSurfaceDingTalkCard},
+		MaxTextLength:     20000,
+		SupportsSegments:  true,
+		StructuredSurface: core.StructuredSurfaceActionCard,
 	},
 }
 
@@ -314,7 +323,31 @@ func (l *Live) Send(ctx context.Context, chatID string, content string) error {
 }
 
 func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	if message != nil && len(message.Sections) > 0 {
+		payload := renderStructuredSections(message.Sections)
+		if title := strings.TrimSpace(message.Title); title != "" {
+			payload.Title = title
+		}
+		native, err := core.NewDingTalkCardMessage(payload.CardType, payload.Title, payload.Markdown, payload.Buttons)
+		if err == nil {
+			return l.SendNative(ctx, chatID, native)
+		}
+	}
 	return l.Send(ctx, chatID, renderStructuredFallback(message))
+}
+
+func (l *Live) ReplyStructured(ctx context.Context, rawReplyCtx any, message *core.StructuredMessage) error {
+	if message != nil && len(message.Sections) > 0 {
+		payload := renderStructuredSections(message.Sections)
+		if title := strings.TrimSpace(message.Title); title != "" {
+			payload.Title = title
+		}
+		native := &core.NativeMessage{Platform: "dingtalk", DingTalkCard: payload}
+		if err := native.Validate(); err == nil {
+			return l.ReplyNative(ctx, rawReplyCtx, native)
+		}
+	}
+	return l.Reply(ctx, rawReplyCtx, renderStructuredFallback(message))
 }
 
 func (l *Live) SendCard(ctx context.Context, chatID string, card *core.Card) error {
@@ -354,6 +387,72 @@ func (l *Live) ReplyCard(ctx context.Context, rawReplyCtx any, card *core.Card) 
 		}
 	}
 	return l.deliverCardFallback(ctx, reply.ConversationID, rawReplyCtx, card)
+}
+
+func (l *Live) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	if message.NormalizedPlatform() != "dingtalk" || message.DingTalkCard == nil {
+		return errors.New("native message is not a dingtalk card payload")
+	}
+	if isWebhookTarget(chatID) {
+		return l.webhook.ReplyMessage(ctx, chatID, buildNativeActionCardPayload(message.DingTalkCard))
+	}
+	target, err := resolveDirectSendTarget(chatID)
+	if err != nil {
+		return err
+	}
+	if l.cardSender != nil {
+		if err := l.cardSender.SendCard(ctx, target, dingTalkNativeToCard(message.DingTalkCard)); err == nil {
+			return nil
+		}
+	}
+	return l.Send(ctx, chatID, message.FallbackText())
+}
+
+func (l *Live) ReplyNative(ctx context.Context, rawReplyCtx any, message *core.NativeMessage) error {
+	reply := toReplyContext(rawReplyCtx)
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	if message.NormalizedPlatform() != "dingtalk" || message.DingTalkCard == nil {
+		return errors.New("native message is not a dingtalk card payload")
+	}
+	if reply.SessionWebhook != "" {
+		return l.webhook.ReplyMessage(ctx, reply.SessionWebhook, buildNativeActionCardPayload(message.DingTalkCard))
+	}
+	if reply.ConversationID != "" {
+		return l.SendNative(ctx, reply.ConversationID, message)
+	}
+	return errors.New("dingtalk reply requires session webhook or conversation target")
+}
+
+func (l *Live) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
+	outgoing, err := renderFormattedTextPayload(message)
+	if err != nil {
+		return err
+	}
+	if isWebhookTarget(chatID) && outgoing != nil {
+		return l.webhook.ReplyMessage(ctx, chatID, outgoing)
+	}
+	return l.Send(ctx, chatID, strings.TrimSpace(message.Content))
+}
+
+func (l *Live) ReplyFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	reply := toReplyContext(rawReplyCtx)
+	outgoing, err := renderFormattedTextPayload(message)
+	if err != nil {
+		return err
+	}
+	if reply.SessionWebhook != "" && outgoing != nil {
+		return l.webhook.ReplyMessage(ctx, reply.SessionWebhook, outgoing)
+	}
+	return l.Reply(ctx, rawReplyCtx, strings.TrimSpace(message.Content))
+}
+
+func (l *Live) UpdateFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	return l.ReplyFormattedText(ctx, rawReplyCtx, message)
 }
 
 func (l *Live) Stop() error {
@@ -913,6 +1012,64 @@ func renderStructuredFallback(message *core.StructuredMessage) string {
 		content += "\n\nDingTalk ActionCard 暂未启用，已降级为文本。"
 	}
 	return content
+}
+
+func buildNativeActionCardPayload(payload *core.DingTalkCardPayload) map[string]any {
+	actionCard := map[string]any{
+		"title":          strings.TrimSpace(payload.Title),
+		"text":           strings.TrimSpace(payload.Markdown),
+		"btnOrientation": "0",
+	}
+	if len(payload.Buttons) == 1 {
+		actionCard["singleTitle"] = strings.TrimSpace(payload.Buttons[0].Title)
+		actionCard["singleURL"] = strings.TrimSpace(payload.Buttons[0].ActionURL)
+	} else if len(payload.Buttons) > 1 {
+		buttons := make([]map[string]string, 0, len(payload.Buttons))
+		for _, button := range payload.Buttons {
+			buttons = append(buttons, map[string]string{
+				"title":     strings.TrimSpace(button.Title),
+				"actionURL": strings.TrimSpace(button.ActionURL),
+			})
+		}
+		actionCard["btns"] = buttons
+	}
+	return map[string]any{
+		"msgtype":    "actionCard",
+		"actionCard": actionCard,
+	}
+}
+
+func dingTalkNativeToCard(payload *core.DingTalkCardPayload) *core.Card {
+	card := core.NewCard().SetTitle(strings.TrimSpace(payload.Title))
+	if body := strings.TrimSpace(payload.Markdown); body != "" {
+		card.AddField("Body", body)
+	}
+	for _, button := range payload.Buttons {
+		card.AddButton(strings.TrimSpace(button.Title), "link:"+strings.TrimSpace(button.ActionURL))
+	}
+	return card
+}
+
+func renderFormattedTextPayload(message *core.FormattedText) (map[string]any, error) {
+	if message == nil {
+		return nil, errors.New("formatted text is required")
+	}
+	content := strings.TrimSpace(message.Content)
+	if content == "" {
+		return nil, errors.New("formatted text content is required")
+	}
+	switch message.Format {
+	case core.TextFormatDingTalkMD:
+		return map[string]any{
+			"msgtype": "markdown",
+			"markdown": map[string]any{
+				"title": "AgentForge Update",
+				"text":  content,
+			},
+		}, nil
+	default:
+		return nil, nil
+	}
 }
 
 type deliveredFallbackError struct {

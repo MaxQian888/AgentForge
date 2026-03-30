@@ -2,6 +2,7 @@ package wecom
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"strings"
 	"testing"
@@ -166,6 +167,104 @@ func TestLive_MetadataDeclaresWeComCallbackAndRenderingCapabilities(t *testing.T
 	if metadata.Rendering.StructuredSurface == core.StructuredSurfaceNone {
 		t.Fatalf("rendering = %+v", metadata.Rendering)
 	}
+	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != core.NativeSurfaceWeComCard {
+		t.Fatalf("NativeSurfaces = %+v", metadata.Rendering.NativeSurfaces)
+	}
+}
+
+func TestLive_SendNativeUsesWeComCardPayload(t *testing.T) {
+	replier := &fakeResponseReplier{}
+	sender := &fakeDirectSender{}
+	live, err := NewLive(
+		"corp-id",
+		"1000002",
+		"agent-secret",
+		"callback-token",
+		"9080",
+		"/callback",
+		WithResponseReplier(replier),
+		WithDirectSender(sender),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	message, err := core.NewWeComCardMessage(
+		core.WeComCardTypeNews,
+		"Review Ready",
+		"Choose the next step.",
+		"https://example.test/reviews/1",
+		[]core.WeComArticle{{
+			Title:       "Review Ready",
+			Description: "Choose the next step.",
+			URL:         "https://example.test/reviews/1",
+		}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewWeComCardMessage error: %v", err)
+	}
+
+	if err := live.SendNative(context.Background(), "chat-2", message); err != nil {
+		t.Fatalf("SendNative error: %v", err)
+	}
+	if len(sender.messageCalls) != 1 {
+		t.Fatalf("messageCalls = %+v", sender.messageCalls)
+	}
+	if sender.messageCalls[0].Payload["msgtype"] != "news" {
+		t.Fatalf("payload = %+v", sender.messageCalls[0].Payload)
+	}
+
+	if err := live.ReplyNative(context.Background(), replyContext{ResponseURL: "https://work.weixin.qq.com/response"}, message); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+	if len(replier.messageCalls) != 1 || replier.messageCalls[0].Payload["msgtype"] != "news" {
+		t.Fatalf("reply payload = %+v", replier.messageCalls)
+	}
+}
+
+func TestRenderStructuredSectionsBuildsWeComNewsPayload(t *testing.T) {
+	payload := renderStructuredSections([]core.StructuredSection{
+		{
+			Type: core.StructuredSectionTypeText,
+			TextSection: &core.TextSection{
+				Body: "Review Ready",
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeImage,
+			ImageSection: &core.ImageSection{
+				URL: "https://example.test/review.png",
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeFields,
+			FieldsSection: &core.FieldsSection{
+				Fields: []core.StructuredField{{Label: "Status", Value: "pending"}},
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeActions,
+			ActionsSection: &core.ActionsSection{
+				Actions: []core.StructuredAction{{Label: "Open", URL: "https://example.test/reviews/1"}},
+			},
+		},
+	})
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal payload: %v", err)
+	}
+	if string(raw) == "" {
+		t.Fatal("expected serializable payload")
+	}
+	if payload.CardType != core.WeComCardTypeNews || len(payload.Articles) != 1 {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if payload.Articles[0].URL != "https://example.test/reviews/1" || payload.Articles[0].PicURL != "https://example.test/review.png" {
+		t.Fatalf("article = %+v", payload.Articles[0])
+	}
 }
 
 func TestLive_CallbackPathsIncludeConfiguredEndpoint(t *testing.T) {
@@ -187,13 +286,19 @@ func TestLive_CallbackPathsIncludeConfiguredEndpoint(t *testing.T) {
 }
 
 type fakeResponseReplier struct {
-	calls []responseReplyCall
-	err   error
+	calls        []responseReplyCall
+	messageCalls []responseMessageCall
+	err          error
 }
 
 type responseReplyCall struct {
 	ResponseURL string
 	Content     string
+}
+
+type responseMessageCall struct {
+	ResponseURL string
+	Payload     map[string]any
 }
 
 func (f *fakeResponseReplier) ReplyText(ctx context.Context, responseURL string, content string) error {
@@ -204,9 +309,18 @@ func (f *fakeResponseReplier) ReplyText(ctx context.Context, responseURL string,
 	return nil
 }
 
+func (f *fakeResponseReplier) ReplyMessage(ctx context.Context, responseURL string, payload map[string]any) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.messageCalls = append(f.messageCalls, responseMessageCall{ResponseURL: responseURL, Payload: payload})
+	return nil
+}
+
 type fakeDirectSender struct {
-	calls []directSendCall
-	err   error
+	calls        []directSendCall
+	messageCalls []directSendMessageCall
+	err          error
 }
 
 type directSendCall struct {
@@ -214,11 +328,24 @@ type directSendCall struct {
 	Content string
 }
 
+type directSendMessageCall struct {
+	Target  directSendTarget
+	Payload map[string]any
+}
+
 func (f *fakeDirectSender) SendText(ctx context.Context, target directSendTarget, content string) error {
 	if f.err != nil {
 		return f.err
 	}
 	f.calls = append(f.calls, directSendCall{Target: target, Content: content})
+	return nil
+}
+
+func (f *fakeDirectSender) SendMessage(ctx context.Context, target directSendTarget, payload map[string]any) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.messageCalls = append(f.messageCalls, directSendMessageCall{Target: target, Payload: payload})
 	return nil
 }
 

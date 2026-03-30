@@ -19,6 +19,11 @@ interface OpenCodeSessionResponse {
   id?: string;
 }
 
+interface OpenCodeNamedEntry {
+  id?: string;
+  name?: string;
+}
+
 export interface OpenCodeProviderCatalog {
   connectedProviders: string[];
   availableProviders: string[];
@@ -274,6 +279,88 @@ export class OpenCodeTransport {
     return body;
   }
 
+  async forkSession(sessionId: string, messageId?: string): Promise<OpenCodeSession> {
+    const response = await this.request(`/session/${sessionId}/fork`, {
+      method: "POST",
+      body: JSON.stringify(messageId ? { messageID: messageId } : {}),
+    });
+    return this.readSessionResponse(response, "OpenCode session fork failed");
+  }
+
+  async revertMessage(sessionId: string, messageId: string): Promise<unknown> {
+    const response = await this.request(`/session/${sessionId}/revert`, {
+      method: "POST",
+      body: JSON.stringify({ messageID: messageId }),
+    });
+    return this.readJsonResponse(response, "OpenCode session revert failed");
+  }
+
+  async unrevertMessages(sessionId: string): Promise<unknown> {
+    const response = await this.request(`/session/${sessionId}/unrevert`, {
+      method: "POST",
+    });
+    return this.readJsonResponse(response, "OpenCode session unrevert failed");
+  }
+
+  async getDiff(sessionId: string): Promise<unknown> {
+    const response = await this.request(`/session/${sessionId}/diff`);
+    return this.readJsonResponse(response, "OpenCode session diff lookup failed");
+  }
+
+  async getTodos(sessionId: string): Promise<unknown> {
+    const response = await this.request(`/session/${sessionId}/todo`);
+    return this.readJsonResponse(response, "OpenCode session todo lookup failed");
+  }
+
+  async getMessages(sessionId: string): Promise<unknown> {
+    const response = await this.request(`/session/${sessionId}/message`);
+    return this.readJsonResponse(response, "OpenCode session message lookup failed");
+  }
+
+  async executeCommand(sessionId: string, command: string, args?: string): Promise<unknown> {
+    const normalized = command.startsWith("/") ? command.slice(1) : command;
+    const response = await this.request(`/session/${sessionId}/command`, {
+      method: "POST",
+      body: JSON.stringify({
+        name: normalized,
+        args: args ? [args] : undefined,
+      }),
+    });
+    return this.readJsonResponse(response, "OpenCode session command failed");
+  }
+
+  async respondToPermission(
+    sessionId: string,
+    permissionId: string,
+    allow: boolean,
+  ): Promise<unknown> {
+    const response = await this.request(`/session/${sessionId}/permissions/${permissionId}`, {
+      method: "POST",
+      body: JSON.stringify({ allow }),
+    });
+    return this.readJsonResponse(response, "OpenCode permission response failed");
+  }
+
+  async getAgents(): Promise<string[]> {
+    const response = await this.request("/agent");
+    const body = await this.readJsonResponse(response, "OpenCode agent discovery failed");
+    return extractNamedEntries(body);
+  }
+
+  async getSkills(): Promise<string[]> {
+    const response = await this.request("/skill");
+    const body = await this.readJsonResponse(response, "OpenCode skill discovery failed");
+    return extractNamedEntries(body);
+  }
+
+  async updateConfig(config: Record<string, unknown>): Promise<unknown> {
+    const response = await this.request("/config", {
+      method: "PATCH",
+      body: JSON.stringify(config),
+    });
+    return this.readJsonResponse(response, "OpenCode config update failed");
+  }
+
   async *streamEvents(abortSignal?: AbortSignal): AsyncGenerator<OpenCodeServerEvent, void> {
     const response = await this.request("/event", {
       signal: abortSignal,
@@ -337,6 +424,36 @@ export class OpenCodeTransport {
       ...init,
       headers,
     });
+  }
+
+  private async readSessionResponse(response: Response, message: string): Promise<OpenCodeSession> {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("OpenCode server authentication failed");
+    }
+    if (!response.ok) {
+      throw new Error(`${message} with status ${response.status}`);
+    }
+
+    const body = (await response.json()) as OpenCodeSessionResponse;
+    if (!body.id) {
+      throw new Error(`${message}: response returned no session id`);
+    }
+    return { id: body.id };
+  }
+
+  private async readJsonResponse(response: Response, message: string): Promise<unknown> {
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("OpenCode server authentication failed");
+    }
+    if (!response.ok) {
+      throw new Error(`${message} with status ${response.status}`);
+    }
+
+    const contentType = response.headers.get("content-type") ?? "";
+    if (!contentType.includes("application/json")) {
+      return true;
+    }
+    return response.json();
   }
 }
 
@@ -453,6 +570,29 @@ function extractProviderModels(input: unknown[] | undefined): Record<string, str
   }
 
   return models;
+}
+
+function extractNamedEntries(input: unknown): string[] {
+  if (!Array.isArray(input)) {
+    return [];
+  }
+
+  return input
+    .map((entry) => {
+      if (typeof entry === "string") {
+        return entry;
+      }
+      if (!entry || typeof entry !== "object") {
+        return undefined;
+      }
+      const namedEntry = entry as OpenCodeNamedEntry;
+      return typeof namedEntry.id === "string"
+        ? namedEntry.id
+        : typeof namedEntry.name === "string"
+          ? namedEntry.name
+          : undefined;
+    })
+    .filter((value): value is string => Boolean(value));
 }
 
 function isStringRecord(value: unknown): value is Record<string, string> {

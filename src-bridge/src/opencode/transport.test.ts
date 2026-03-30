@@ -177,4 +177,82 @@ describe("OpenCode transport", () => {
       parts: [{ type: "text", text: "Continue the existing task" }],
     });
   });
+
+  test("supports advanced session control, discovery, and config endpoints", async () => {
+    process.env.OPENCODE_SERVER_URL = "http://127.0.0.1:4096";
+
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ input, init });
+      const url = String(input);
+      if (url.endsWith("/session/session-123/fork") && init?.method === "POST") {
+        return Response.json({ id: "session-forked" });
+      }
+      if (url.endsWith("/session/session-123/revert") && init?.method === "POST") {
+        return Response.json({ success: true });
+      }
+      if (url.endsWith("/session/session-123/unrevert") && init?.method === "POST") {
+        return Response.json({ success: true });
+      }
+      if (url.endsWith("/session/session-123/diff") && (!init?.method || init.method === "GET")) {
+        return Response.json([{ path: "README.md", diff: "@@ -1 +1 @@" }]);
+      }
+      if (url.endsWith("/session/session-123/todo") && (!init?.method || init.method === "GET")) {
+        return Response.json([{ id: "todo-1", content: "Ship OpenCode transport" }]);
+      }
+      if (url.endsWith("/session/session-123/message") && (!init?.method || init.method === "GET")) {
+        return Response.json([{ id: "msg-1", role: "assistant", content: "hello" }]);
+      }
+      if (url.endsWith("/session/session-123/command") && init?.method === "POST") {
+        return Response.json({ ok: true });
+      }
+      if (url.endsWith("/session/session-123/permissions/perm-1") && init?.method === "POST") {
+        return Response.json({ ok: true });
+      }
+      if (url.endsWith("/agent")) {
+        return Response.json([{ id: "planner" }, { id: "reviewer" }]);
+      }
+      if (url.endsWith("/skill")) {
+        return Response.json([{ id: "opsx-apply" }, { id: "opsx-archive" }]);
+      }
+      if (url.endsWith("/config") && init?.method === "PATCH") {
+        return Response.json({ ok: true });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    }) as typeof fetch;
+
+    const mod = await import("./transport.js");
+    const transport = mod.createOpenCodeTransport();
+
+    expect(await transport.forkSession("session-123", "msg-42")).toEqual({ id: "session-forked" });
+    expect(await transport.revertMessage("session-123", "msg-42")).toEqual({ success: true });
+    expect(await transport.unrevertMessages("session-123")).toEqual({ success: true });
+    expect(await transport.getDiff("session-123")).toEqual([{ path: "README.md", diff: "@@ -1 +1 @@" }]);
+    expect(await transport.getTodos("session-123")).toEqual([{ id: "todo-1", content: "Ship OpenCode transport" }]);
+    expect(await transport.getMessages("session-123")).toEqual([{ id: "msg-1", role: "assistant", content: "hello" }]);
+    expect(await transport.executeCommand("session-123", "/compact", "--full")).toEqual({ ok: true });
+    expect(await transport.respondToPermission("session-123", "perm-1", true)).toEqual({ ok: true });
+    expect(await transport.getAgents()).toEqual(["planner", "reviewer"]);
+    expect(await transport.getSkills()).toEqual(["opsx-apply", "opsx-archive"]);
+    expect(await transport.updateConfig({ provider: "opencode", model: "opencode-fast" })).toEqual({ ok: true });
+
+    expect(calls.map((call) => ({ input: String(call.input), method: call.init?.method ?? "GET" }))).toEqual([
+      { input: "http://127.0.0.1:4096/session/session-123/fork", method: "POST" },
+      { input: "http://127.0.0.1:4096/session/session-123/revert", method: "POST" },
+      { input: "http://127.0.0.1:4096/session/session-123/unrevert", method: "POST" },
+      { input: "http://127.0.0.1:4096/session/session-123/diff", method: "GET" },
+      { input: "http://127.0.0.1:4096/session/session-123/todo", method: "GET" },
+      { input: "http://127.0.0.1:4096/session/session-123/message", method: "GET" },
+      { input: "http://127.0.0.1:4096/session/session-123/command", method: "POST" },
+      { input: "http://127.0.0.1:4096/session/session-123/permissions/perm-1", method: "POST" },
+      { input: "http://127.0.0.1:4096/agent", method: "GET" },
+      { input: "http://127.0.0.1:4096/skill", method: "GET" },
+      { input: "http://127.0.0.1:4096/config", method: "PATCH" },
+    ]);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ messageID: "msg-42" });
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ messageID: "msg-42" });
+    expect(JSON.parse(String(calls[6]?.init?.body))).toEqual({ name: "compact", args: ["--full"] });
+    expect(JSON.parse(String(calls[7]?.init?.body))).toEqual({ allow: true });
+    expect(JSON.parse(String(calls[10]?.init?.body))).toEqual({ provider: "opencode", model: "opencode-fast" });
+  });
 });

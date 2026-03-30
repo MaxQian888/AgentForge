@@ -47,6 +47,8 @@ export async function streamOpenCodeRuntime(
     upstream_session_id: sessionId,
     latest_message_id: continuity?.latest_message_id,
     server_url: deps.transport.serverUrl,
+    fork_available: true,
+    revert_message_ids: continuity?.revert_message_ids ?? [],
   };
 
   const prompt = mode === "resume" ? buildResumePrompt(req.prompt) : req.prompt;
@@ -115,8 +117,67 @@ function emitOpenCodeEvent(
     updateOpenCodeContinuity(runtime, sessionId, now, getLatestMessageID(data));
     return true;
   }
+  if (eventName === "session.status") {
+    streamer.send({
+      task_id: req.task_id,
+      session_id: req.session_id,
+      timestamp_ms: now(),
+      type: "status_change",
+      data: {
+        state: mapOpenCodeSessionStatus(
+          typeof data.status === "string" ? data.status : undefined,
+        ),
+      },
+    });
+    return false;
+  }
   if (eventName === "session.error") {
     throw new Error(getErrorMessage(data) || `OpenCode session ${sessionId} failed`);
+  }
+  if (eventName === "todo.updated") {
+    updateOpenCodeContinuity(runtime, sessionId, now, getLatestMessageID(data));
+    streamer.send({
+      task_id: req.task_id,
+      session_id: req.session_id,
+      timestamp_ms: now(),
+      type: "todo_update",
+      data: {
+        todos: Array.isArray(data.todos) ? data.todos : [],
+      },
+    });
+    return false;
+  }
+  if (eventName === "message.updated") {
+    updateOpenCodeContinuity(runtime, sessionId, now, getLatestMessageID(data));
+    emitOpenCodeMessageUpdate(streamer, req, now, data);
+    return false;
+  }
+  if (eventName === "command.executed") {
+    streamer.send({
+      task_id: req.task_id,
+      session_id: req.session_id,
+      timestamp_ms: now(),
+      type: "output",
+      data: {
+        content: `Command /${typeof data.name === "string" ? data.name : "unknown"} executed`,
+        content_type: "text",
+        turn_number: runtime.turnNumber,
+      },
+    });
+    return false;
+  }
+  if (eventName === "vcs.branch.updated") {
+    streamer.send({
+      task_id: req.task_id,
+      session_id: req.session_id,
+      timestamp_ms: now(),
+      type: "status_change",
+      data: {
+        reason: "branch_updated",
+        branch: typeof data.branch === "string" ? data.branch : undefined,
+      },
+    });
+    return false;
   }
 
   if (eventName === "message.part.delta" || eventName === "message.part.updated") {
@@ -126,7 +187,9 @@ function emitOpenCodeEvent(
     }
     updateOpenCodeContinuity(runtime, sessionId, now, getLatestMessageID(data));
 
-    if (part.type === "text" && typeof part.text === "string" && part.text.length > 0) {
+    const partType = normalizeOpenCodePartType(part);
+
+    if (partType === "text" && typeof part.text === "string" && part.text.length > 0) {
       streamer.send({
         task_id: req.task_id,
         session_id: req.session_id,
@@ -141,7 +204,7 @@ function emitOpenCodeEvent(
       return false;
     }
 
-    if (part.type === "tool") {
+    if (partType === "tool") {
       const toolId = typeof part.id === "string" ? part.id : "";
       const toolName = typeof part.toolName === "string" ? part.toolName : "tool";
       const toolState = typeof part.state === "string" ? part.state : "";
@@ -173,6 +236,88 @@ function emitOpenCodeEvent(
           },
         });
       }
+      return false;
+    }
+
+    if (partType === "reasoning" && typeof part.reasoning === "string") {
+      streamer.send({
+        task_id: req.task_id,
+        session_id: req.session_id,
+        timestamp_ms: now(),
+        type: "reasoning",
+        data: {
+          content: part.reasoning,
+        },
+      });
+      return false;
+    }
+
+    if (partType === "file") {
+      streamer.send({
+        task_id: req.task_id,
+        session_id: req.session_id,
+        timestamp_ms: now(),
+        type: "file_change",
+        data: {
+          files: Array.isArray(part.files) ? part.files : [],
+        },
+      });
+      return false;
+    }
+
+    if (partType === "agent") {
+      const content =
+        typeof part.output === "string"
+          ? part.output
+          : typeof part.content === "string"
+            ? part.content
+            : undefined;
+      if (content) {
+        streamer.send({
+          task_id: req.task_id,
+          session_id: req.session_id,
+          timestamp_ms: now(),
+          type: "output",
+          data: {
+            content,
+            content_type: "text",
+            turn_number: runtime.turnNumber,
+            agent_name:
+              typeof part.agentName === "string" ? part.agentName : undefined,
+          },
+        });
+      }
+      return false;
+    }
+
+    if (partType === "compaction") {
+      streamer.send({
+        task_id: req.task_id,
+        session_id: req.session_id,
+        timestamp_ms: now(),
+        type: "status_change",
+        data: {
+          reason: "compaction",
+          summary: typeof part.summary === "string" ? part.summary : undefined,
+        },
+      });
+      return false;
+    }
+
+    if (partType === "subtask") {
+      const title = typeof part.title === "string" ? part.title : "subtask";
+      const content = typeof part.content === "string" ? part.content : "";
+      streamer.send({
+        task_id: req.task_id,
+        session_id: req.session_id,
+        timestamp_ms: now(),
+        type: "output",
+        data: {
+          content: `Subtask ${title}: ${content}`.trim(),
+          content_type: "text",
+          turn_number: runtime.turnNumber,
+        },
+      });
       return false;
     }
   }
@@ -237,6 +382,10 @@ function updateOpenCodeContinuity(
 ): void {
   const previous =
     runtime.continuity?.runtime === "opencode" ? runtime.continuity : undefined;
+  const revertIds = new Set(previous?.revert_message_ids ?? []);
+  if (latestMessageId) {
+    revertIds.add(latestMessageId);
+  }
   runtime.continuity = {
     runtime: "opencode",
     resume_ready: true,
@@ -244,7 +393,65 @@ function updateOpenCodeContinuity(
     upstream_session_id: sessionId,
     latest_message_id: latestMessageId ?? previous?.latest_message_id,
     server_url: previous?.server_url,
+    fork_available: true,
+    revert_message_ids: Array.from(revertIds),
   };
+}
+
+function emitOpenCodeMessageUpdate(
+  streamer: EventSink,
+  req: ExecuteRequest,
+  now: () => number,
+  data: UnknownRecord,
+): void {
+  const message = isRecord(data.message) ? data.message : null;
+  const content =
+    typeof message?.content === "string"
+      ? message.content
+      : Array.isArray(message?.content)
+        ? message.content
+            .map((part) =>
+              isRecord(part) && typeof part.text === "string" ? part.text : "",
+            )
+            .filter(Boolean)
+            .join("\n")
+        : null;
+  if (!content) {
+    return;
+  }
+
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: now(),
+    type: "output",
+    data: {
+      content,
+      content_type: "text",
+    },
+  });
+}
+
+function normalizeOpenCodePartType(part: UnknownRecord): string {
+  const rawType =
+    typeof part.type === "string"
+      ? part.type
+      : typeof part.kind === "string"
+        ? part.kind
+        : "";
+  return rawType.replace(/Part$/, "").toLowerCase();
+}
+
+function mapOpenCodeSessionStatus(status: string | undefined): string {
+  switch (status) {
+    case "busy":
+    case "running":
+      return "running";
+    case "idle":
+      return "completed";
+    default:
+      return status ?? "unknown";
+  }
 }
 
 function matchesSession(data: UnknownRecord, sessionId: string): boolean {

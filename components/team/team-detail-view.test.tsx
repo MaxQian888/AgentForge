@@ -175,6 +175,7 @@ describe("TeamDetailView", () => {
     expect(fetchAgent).toHaveBeenCalledWith("coder-1");
     expect(fetchAgent).toHaveBeenCalledWith("reviewer-1");
 
+    expect(screen.getByText("Review queue")).toBeInTheDocument();
     expect(screen.getByTestId("team-pipeline")).toHaveTextContent("team-1");
     expect(screen.getByText("Resolved Runtime")).toBeInTheDocument();
     expect(screen.getByText("codex / openai / gpt-5.4")).toBeInTheDocument();

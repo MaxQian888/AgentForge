@@ -26,6 +26,12 @@ type StructuredSender interface {
 	SendStructured(ctx context.Context, chatID string, message *StructuredMessage) error
 }
 
+// ReplyStructuredSender is an optional interface for platforms that can render
+// structured payloads back into an existing reply/update context.
+type ReplyStructuredSender interface {
+	ReplyStructured(ctx context.Context, replyCtx any, message *StructuredMessage) error
+}
+
 // FormattedText captures a text payload with an explicit provider text mode.
 type FormattedText struct {
 	Content string

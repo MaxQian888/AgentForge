@@ -1,14 +1,9 @@
 "use client";
 import { NextIntlClientProvider } from "next-intl";
-import enMessages from "@/messages/en";
-import zhCNMessages from "@/messages/zh-CN";
-import { DEFAULT_LOCALE, type Locale, useLocaleStore } from "@/lib/stores/locale-store";
+import { DEFAULT_LOCALE, type Locale } from "@/lib/i18n/config";
+import { messageBundles } from "@/lib/i18n/messages";
+import { useLocaleStore } from "@/lib/stores/locale-store";
 import { useEffect, useSyncExternalStore, type ReactNode } from "react";
-
-const messageBundles: Record<Locale, Record<string, unknown>> = {
-  "zh-CN": zhCNMessages,
-  en: enMessages,
-};
 
 function subscribeToLocaleHydration(onStoreChange: () => void) {
   return useLocaleStore.persist.onFinishHydration(() => {

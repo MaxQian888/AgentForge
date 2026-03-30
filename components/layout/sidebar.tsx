@@ -1,5 +1,6 @@
 "use client";
 
+import { useState, useCallback } from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useTranslations } from "next-intl";
@@ -11,9 +12,6 @@ import {
   Shield,
   Users,
   Network,
-  Moon,
-  Sun,
-  Menu,
   Timer,
   RefreshCw,
   Puzzle,
@@ -22,20 +20,30 @@ import {
   Brain,
   MessageCircle,
   BookOpenText,
+  ChevronRight,
+  Search,
 } from "lucide-react";
-import { cn } from "@/lib/utils";
-import { Button } from "@/components/ui/button";
-import {
-  Sheet,
-  SheetContent,
-  SheetDescription,
-  SheetHeader,
-  SheetTitle,
-  SheetTrigger,
-} from "@/components/ui/sheet";
-import { Separator } from "@/components/ui/separator";
-import { useCallback, useState } from "react";
 import type { LucideIcon } from "lucide-react";
+import {
+  Sidebar,
+  SidebarContent,
+  SidebarFooter,
+  SidebarGroup,
+  SidebarGroupContent,
+  SidebarGroupLabel,
+  SidebarHeader,
+  SidebarMenu,
+  SidebarMenuButton,
+  SidebarMenuItem,
+  SidebarRail,
+} from "@/components/ui/sidebar";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
+import { useLayoutStore } from "@/lib/stores/layout-store";
 
 interface NavItem {
   href: string;
@@ -43,125 +51,173 @@ interface NavItem {
   icon: LucideIcon;
 }
 
-const navItems: NavItem[] = [
-  { href: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
-  { href: "/projects", labelKey: "nav.projects", icon: FolderKanban },
-  { href: "/project/dashboard", labelKey: "nav.projectDashboard", icon: LayoutDashboard },
-  { href: "/team", labelKey: "nav.team", icon: Users },
-  { href: "/agents", labelKey: "nav.agents", icon: Bot },
-  { href: "/teams", labelKey: "nav.teams", icon: Network },
-  { href: "/sprints", labelKey: "nav.sprints", icon: Timer },
-  { href: "/reviews", labelKey: "nav.reviews", icon: ClipboardCheck },
-  { href: "/scheduler", labelKey: "nav.scheduler", icon: RefreshCw },
-  { href: "/cost", labelKey: "nav.cost", icon: DollarSign },
-  { href: "/memory", labelKey: "nav.memory", icon: Brain },
-  { href: "/docs", labelKey: "nav.docs", icon: BookOpenText },
-  { href: "/im", labelKey: "nav.imBridge", icon: MessageCircle },
-  { href: "/roles", labelKey: "nav.roles", icon: Shield },
-  { href: "/plugins", labelKey: "nav.plugins", icon: Puzzle },
-  { href: "/settings", labelKey: "nav.settings", icon: Settings },
+interface NavGroup {
+  id: string;
+  labelKey: string;
+  items: NavItem[];
+  defaultOpen: boolean;
+}
+
+const navGroups: NavGroup[] = [
+  {
+    id: "workspace",
+    labelKey: "nav.group.workspace",
+    defaultOpen: true,
+    items: [
+      { href: "/", labelKey: "nav.dashboard", icon: LayoutDashboard },
+      { href: "/projects", labelKey: "nav.projects", icon: FolderKanban },
+    ],
+  },
+  {
+    id: "project",
+    labelKey: "nav.group.project",
+    defaultOpen: true,
+    items: [
+      { href: "/project/dashboard", labelKey: "nav.projectDashboard", icon: LayoutDashboard },
+      { href: "/team", labelKey: "nav.team", icon: Users },
+      { href: "/agents", labelKey: "nav.agents", icon: Bot },
+      { href: "/teams", labelKey: "nav.teams", icon: Network },
+      { href: "/sprints", labelKey: "nav.sprints", icon: Timer },
+      { href: "/reviews", labelKey: "nav.reviews", icon: ClipboardCheck },
+    ],
+  },
+  {
+    id: "operations",
+    labelKey: "nav.group.operations",
+    defaultOpen: true,
+    items: [
+      { href: "/cost", labelKey: "nav.cost", icon: DollarSign },
+      { href: "/scheduler", labelKey: "nav.scheduler", icon: RefreshCw },
+      { href: "/memory", labelKey: "nav.memory", icon: Brain },
+    ],
+  },
+  {
+    id: "configuration",
+    labelKey: "nav.group.configuration",
+    defaultOpen: false,
+    items: [
+      { href: "/roles", labelKey: "nav.roles", icon: Shield },
+      { href: "/plugins", labelKey: "nav.plugins", icon: Puzzle },
+      { href: "/settings", labelKey: "nav.settings", icon: Settings },
+      { href: "/im", labelKey: "nav.imBridge", icon: MessageCircle },
+      { href: "/docs", labelKey: "nav.docs", icon: BookOpenText },
+    ],
+  },
 ];
 
-function NavLinks({ onClick }: { onClick?: () => void }) {
+function getStoredGroupState(groupId: string, defaultOpen: boolean): boolean {
+  if (typeof window === "undefined") return defaultOpen;
+  const stored = localStorage.getItem(`sidebar-group-${groupId}`);
+  return stored !== null ? stored === "true" : defaultOpen;
+}
+
+function NavGroupSection({ group }: { group: NavGroup }) {
   const pathname = usePathname();
   const t = useTranslations("common");
+  const [open, setOpen] = useState(() =>
+    getStoredGroupState(group.id, group.defaultOpen)
+  );
+
+  const handleToggle = useCallback(
+    (value: boolean) => {
+      setOpen(value);
+      localStorage.setItem(`sidebar-group-${group.id}`, String(value));
+    },
+    [group.id]
+  );
 
   return (
-    <nav className="flex flex-col gap-1 px-3">
-      {navItems.map((item) => {
-        const Icon = item.icon;
-        const active =
-          item.href === "/"
-            ? pathname === "/"
-            : pathname.startsWith(item.href);
-        return (
-          <Link
-            key={item.href}
-            href={item.href}
-            onClick={onClick}
-            className={cn(
-              "flex items-center gap-3 rounded-md px-3 py-2 text-sm font-medium transition-colors",
-              active
-                ? "bg-accent text-accent-foreground"
-                : "text-muted-foreground hover:bg-accent hover:text-accent-foreground"
-            )}
-          >
-            <Icon className="size-4" />
-            {t(item.labelKey)}
-          </Link>
-        );
-      })}
-    </nav>
+    <Collapsible open={open} onOpenChange={handleToggle}>
+      <SidebarGroup>
+        <SidebarGroupLabel asChild>
+          <CollapsibleTrigger className="flex w-full items-center gap-1 [&[data-state=open]>svg]:rotate-90">
+            <ChevronRight className="size-3 shrink-0 text-muted-foreground transition-transform duration-200" />
+            <span>{t(group.labelKey)}</span>
+          </CollapsibleTrigger>
+        </SidebarGroupLabel>
+        <CollapsibleContent>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {group.items.map((item) => {
+                const Icon = item.icon;
+                const active =
+                  item.href === "/"
+                    ? pathname === "/"
+                    : pathname.startsWith(item.href);
+                return (
+                  <SidebarMenuItem key={item.href}>
+                    <SidebarMenuButton
+                      asChild
+                      isActive={active}
+                      tooltip={t(item.labelKey)}
+                    >
+                      <Link href={item.href}>
+                        <Icon />
+                        <span>{t(item.labelKey)}</span>
+                      </Link>
+                    </SidebarMenuButton>
+                  </SidebarMenuItem>
+                );
+              })}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </CollapsibleContent>
+      </SidebarGroup>
+    </Collapsible>
   );
 }
 
-function ThemeToggle() {
-  const [dark, setDark] = useState(
-    () =>
-      typeof document !== "undefined" &&
-      document.documentElement.classList.contains("dark")
-  );
-
-  const toggle = useCallback(() => {
-    document.documentElement.classList.toggle("dark");
-    setDark((d) => !d);
-  }, []);
-
-  return (
-    <Button variant="ghost" size="icon-sm" onClick={toggle}>
-      {dark ? <Sun className="size-4" /> : <Moon className="size-4" />}
-    </Button>
-  );
-}
-
-export function Sidebar() {
+export function AppSidebar() {
   const t = useTranslations("common");
+  const openCommandPalette = useLayoutStore((s) => s.openCommandPalette);
 
   return (
-    <aside className="hidden w-56 shrink-0 border-r bg-sidebar md:flex md:flex-col">
-      <div className="flex h-14 items-center px-4 font-semibold">
-        {t("appName")}
-      </div>
-      <Separator />
-      <div className="flex-1 py-4">
-        <NavLinks />
-      </div>
-      <div className="border-t p-3">
-        <ThemeToggle />
-      </div>
-    </aside>
-  );
-}
+    <Sidebar collapsible="icon">
+      <SidebarHeader>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <SidebarMenuButton size="lg" asChild tooltip={t("appName")}>
+              <Link href="/">
+                <div className="flex aspect-square size-8 items-center justify-center rounded-lg bg-sidebar-primary text-sidebar-primary-foreground">
+                  <Bot className="size-4" />
+                </div>
+                <span className="font-semibold">{t("appName")}</span>
+              </Link>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+          <SidebarMenuItem>
+            <SidebarMenuButton
+              tooltip={t("quickSearch")}
+              onClick={openCommandPalette}
+              className="text-muted-foreground"
+            >
+              <Search />
+              <span className="flex-1 text-sm">{t("quickSearch")}</span>
+              <kbd className="pointer-events-none hidden rounded border bg-muted px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground group-data-[collapsible=icon]:hidden sm:inline-block">
+                ⌘K
+              </kbd>
+            </SidebarMenuButton>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarHeader>
 
-export function MobileSidebar() {
-  const t = useTranslations("common");
-  const [open, setOpen] = useState(false);
+      <SidebarContent>
+        {navGroups.map((group) => (
+          <NavGroupSection key={group.id} group={group} />
+        ))}
+      </SidebarContent>
 
-  return (
-    <Sheet open={open} onOpenChange={setOpen}>
-      <SheetTrigger asChild>
-        <Button variant="ghost" size="icon-sm" className="md:hidden">
-          <Menu className="size-5" />
-        </Button>
-      </SheetTrigger>
-      <SheetContent side="left" className="w-56 p-0">
-        <SheetHeader className="sr-only">
-          <SheetTitle>{t("mobileSidebar.title")}</SheetTitle>
-          <SheetDescription>
-            {t("mobileSidebar.description")}
-          </SheetDescription>
-        </SheetHeader>
-        <div className="flex h-14 items-center px-4 font-semibold">
-          {t("appName")}
-        </div>
-        <Separator />
-        <div className="py-4">
-          <NavLinks onClick={() => setOpen(false)} />
-        </div>
-        <div className="border-t p-3">
-          <ThemeToggle />
-        </div>
-      </SheetContent>
-    </Sheet>
+      <SidebarFooter>
+        <SidebarMenu>
+          <SidebarMenuItem>
+            <div className="group-data-[collapsible=icon]:hidden px-2 py-1">
+              <ThemeToggle />
+            </div>
+          </SidebarMenuItem>
+        </SidebarMenu>
+      </SidebarFooter>
+
+      <SidebarRail />
+    </Sidebar>
   );
 }

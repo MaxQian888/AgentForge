@@ -160,6 +160,32 @@ describe("useIMStore", () => {
     });
   });
 
+  it("normalizes missing provider details from bridge status responses", async () => {
+    const api = makeApiClient();
+    api.get.mockResolvedValueOnce({
+      data: {
+        registered: true,
+        lastHeartbeat: "2026-03-26T08:30:00.000Z",
+        providers: ["feishu"],
+        health: "healthy",
+      },
+    });
+    mockCreateApiClient.mockReturnValue(api);
+
+    await useIMStore.getState().fetchBridgeStatus();
+
+    expect(useIMStore.getState()).toMatchObject({
+      bridgeStatus: {
+        registered: true,
+        lastHeartbeat: "2026-03-26T08:30:00.000Z",
+        providers: ["feishu"],
+        providerDetails: [],
+        health: "healthy",
+      },
+      error: null,
+    });
+  });
+
   it("falls back to the disconnected bridge state when bridge status fails", async () => {
     const api = makeApiClient();
     api.get.mockRejectedValueOnce(new Error("bridge offline"));

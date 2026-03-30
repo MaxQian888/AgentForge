@@ -87,12 +87,8 @@ describe("RoleCard", () => {
     );
 
     expect(screen.getByText("Extends base-reviewer")).toBeInTheDocument();
-    expect(screen.getByText("Tools: Read, Grep")).toBeInTheDocument();
-    expect(screen.getByText("Max budget: $3.00")).toBeInTheDocument();
-    expect(screen.getByText("Skills: 1 auto / 1 on-demand")).toBeInTheDocument();
-    expect(screen.getByText("Key skills: skills/review, skills/security")).toBeInTheDocument();
-    expect(screen.getByText("Catalog: 1 resolved / 1 unresolved")).toBeInTheDocument();
+    expect(screen.getByText("1 auto / 1 on-demand")).toBeInTheDocument();
     expect(screen.getByText("Review gate: required before execution")).toBeInTheDocument();
-    expect(screen.getByText("Path policy: 1 allow / 1 deny")).toBeInTheDocument();
+    expect(screen.getByText("1 unresolved")).toBeInTheDocument();
   });
 });

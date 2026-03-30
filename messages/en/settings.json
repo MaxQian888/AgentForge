@@ -1,4 +1,11 @@
 {
+  "appearance": "Appearance",
+  "appearanceDesc": "Customize the look and feel of the application.",
+  "themeMode": "Theme",
+  "themeLight": "Light",
+  "themeDark": "Dark",
+  "themeSystem": "System",
+  "language": "Language",
   "title": "Project Settings",
   "titleNoProject": "Settings",
   "selectProject": "Select a project from the Dashboard to configure settings.",

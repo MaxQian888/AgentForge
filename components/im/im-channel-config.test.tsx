@@ -1,4 +1,4 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import mockImMessages from "@/messages/en/im.json";
 import { IMChannelConfig } from "./im-channel-config";
@@ -49,6 +49,12 @@ jest.mock("@/lib/stores/im-store", () => ({
 }));
 
 describe("IMChannelConfig", () => {
+  function setFieldValue(label: string, value: string) {
+    fireEvent.change(screen.getByLabelText(label), {
+      target: { value },
+    });
+  }
+
   beforeEach(() => {
     storeState.channels = [];
     storeState.loading = false;
@@ -84,11 +90,11 @@ describe("IMChannelConfig", () => {
     expect(screen.getByLabelText("App Secret")).toBeInTheDocument();
     expect(screen.queryByLabelText("Corp ID")).not.toBeInTheDocument();
 
-    await user.type(screen.getByLabelText("Channel Name"), "Ops Alerts");
-    await user.type(screen.getByLabelText("Channel ID"), "channel-1");
-    await user.type(screen.getByLabelText("Webhook URL"), "https://example.com/hook");
-    await user.type(screen.getByLabelText("App ID"), "qqbot-app-id");
-    await user.type(screen.getByLabelText("App Secret"), "qqbot-secret");
+    setFieldValue("Channel Name", "Ops Alerts");
+    setFieldValue("Channel ID", "channel-1");
+    setFieldValue("Webhook URL", "https://example.com/hook");
+    setFieldValue("App ID", "qqbot-app-id");
+    setFieldValue("App Secret", "qqbot-secret");
     await user.click(screen.getByLabelText("sprint.completed"));
     await user.click(screen.getByRole("button", { name: "Save" }));
 

@@ -2,12 +2,16 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import { Plus, FolderKanban, Search } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Plus, FolderKanban, Search, ListChecks } from "lucide-react";
+import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
+import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { MetricCard } from "@/components/shared/metric-card";
+import { FilterBar } from "@/components/shared/filter-bar";
 import {
   Dialog,
   DialogContent,
@@ -23,6 +27,7 @@ import {
   type Project,
   type ProjectUpdateInput,
 } from "@/lib/stores/project-store";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 function CreateProjectDialog() {
   const t = useTranslations("projects");
@@ -101,6 +106,7 @@ function ProjectCardSkeleton() {
 }
 
 export default function ProjectsPage() {
+  useBreadcrumbs([{ label: "Workspace", href: "/" }, { label: "Projects" }]);
   const t = useTranslations("projects");
   const { projects, fetchProjects, updateProject, deleteProject, loading } =
     useProjectStore();
@@ -136,55 +142,36 @@ export default function ProjectsPage() {
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <CreateProjectDialog />
-      </div>
+      <PageHeader
+        title={t("title")}
+        actions={<CreateProjectDialog />}
+      />
 
       {/* Search */}
-      <div className="relative max-w-sm">
-        <Search className="absolute left-3 top-1/2 size-4 -translate-y-1/2 text-muted-foreground" />
-        <Input
-          className="pl-9"
-          placeholder={t("search.placeholder")}
-          value={searchQuery}
-          onChange={(e) => setSearchQuery(e.target.value)}
-        />
-      </div>
+      <FilterBar
+        searchValue={searchQuery}
+        searchPlaceholder={t("search.placeholder")}
+        onSearch={setSearchQuery}
+        onReset={() => setSearchQuery("")}
+      />
 
       {/* Stats */}
       {!loading && projects.length > 0 && (
         <div className="grid gap-4 sm:grid-cols-3">
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {t("stats.total")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{projects.length}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {t("stats.active")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{activeCount}</p>
-            </CardContent>
-          </Card>
-          <Card>
-            <CardHeader className="pb-2">
-              <CardTitle className="text-sm font-medium text-muted-foreground">
-                {t("stats.totalTasks")}
-              </CardTitle>
-            </CardHeader>
-            <CardContent>
-              <p className="text-2xl font-bold">{totalTasks}</p>
-            </CardContent>
-          </Card>
+          <MetricCard
+            label={t("stats.total")}
+            value={projects.length}
+            icon={FolderKanban}
+          />
+          <MetricCard
+            label={t("stats.active")}
+            value={activeCount}
+          />
+          <MetricCard
+            label={t("stats.totalTasks")}
+            value={totalTasks}
+            icon={ListChecks}
+          />
         </div>
       )}
 
@@ -196,21 +183,15 @@ export default function ProjectsPage() {
           ))}
         </div>
       ) : projects.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <FolderKanban className="mx-auto mb-4 size-12 text-muted-foreground" />
-            <p className="text-muted-foreground">{t("empty.icon")}</p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={FolderKanban}
+          title={t("empty.icon")}
+        />
       ) : filteredProjects.length === 0 ? (
-        <Card>
-          <CardContent className="py-12 text-center">
-            <Search className="mx-auto mb-4 size-12 text-muted-foreground" />
-            <p className="text-muted-foreground">
-              {t("empty.noSearchResults")}
-            </p>
-          </CardContent>
-        </Card>
+        <EmptyState
+          icon={Search}
+          title={t("empty.noSearchResults")}
+        />
       ) : (
         <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
           {filteredProjects.map((p) => (

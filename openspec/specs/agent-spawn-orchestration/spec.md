@@ -4,22 +4,23 @@
 Define the backend requirements for service-backed agent spawn orchestration, runtime state persistence, startup failure compensation, and authenticated WebSocket lifecycle delivery.
 ## Requirements
 ### Requirement: Agent spawn starts a real execution runtime
-The system SHALL turn an authenticated spawn request into an AgentPool admission flow that either starts a real runtime immediately or records a truthful queued admission outcome when capacity is temporarily unavailable. When the request is admitted immediately, the spawn flow MUST create a new agent run in `starting` state, resolve the canonical execution context for that run, provision an isolated worktree, call the configured Bridge execute endpoint with the task, member, runtime and provider tuple, expanded role execution profile, and any applicable team execution context, persist the resulting branch, worktree, and session identifiers on the task, and mark the run as `running` only after the Bridge accepts the execution request.
 
-#### Scenario: Successful spawn provisions runtime state immediately
-- **WHEN** an authenticated client submits a valid spawn request for a task that has no active agent run and AgentPool admission has an available slot
-- **THEN** the system creates a new agent run in `starting` state
-- **THEN** the system resolves the execution context for that run, including role-derived runtime fields and any team-aware context that applies to the spawn
-- **THEN** the system provisions a worktree and deterministic agent branch for that task
-- **THEN** the system invokes the configured Bridge execute API with the canonical execution context and managed workspace information
-- **THEN** the system stores `agent_branch`, `agent_worktree`, and `agent_session_id` on the task
-- **THEN** the system updates the agent run status to `running`
+The spawn dialog SHALL include a role selector allowing operators to choose a role from the role library when spawning an agent. The selected role's ID SHALL be included as `roleId` in the spawn request. If no role is selected, the spawn request SHALL proceed without a `roleId` (preserving current behavior). The role selector SHALL populate from the role store and fetch roles on dialog open if not already loaded.
 
-#### Scenario: Spawn request is queued by AgentPool admission
-- **WHEN** an authenticated client submits a valid spawn request for a task that has no active agent run but AgentPool admission has no immediate slot available
-- **THEN** the system records a queue entry for that spawn request that preserves the canonical runtime selection and role context needed for later admission
-- **THEN** the synchronous result reports that the request is `queued`
-- **THEN** the system MUST NOT create a real agent run until the queued request is later admitted
+#### Scenario: Operator selects a role when spawning agent
+- **WHEN** operator opens the spawn dialog and selects a role from the role dropdown
+- **THEN** the spawn request includes the selected role's ID as `roleId`
+- **AND** the runtime selector remains independently configurable
+
+#### Scenario: Operator spawns without selecting a role
+- **WHEN** operator opens the spawn dialog and leaves the role selector empty
+- **THEN** the spawn request proceeds without a `roleId` field
+- **AND** the spawn succeeds using default agent configuration
+
+#### Scenario: Role list loads on dialog open
+- **WHEN** the spawn dialog opens and the role store has no loaded roles
+- **THEN** the dialog fetches the role list from the API
+- **AND** displays available roles in the selector once loaded
 
 ### Requirement: Spawn failure leaves no ambiguous runtime state
 The system SHALL compensate for partial startup failures so that a failed spawn does not leave stale runtime metadata behind. If worktree creation or bridge startup fails after the run record is created, the system MUST mark the run as failed and remove any worktree created for that attempt. The system MUST NOT leave the task pointing at a branch, worktree, or session that never became active.

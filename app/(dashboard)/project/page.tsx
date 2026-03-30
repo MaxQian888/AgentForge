@@ -3,7 +3,7 @@
 import { Suspense, useEffect, useMemo, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Plus, Settings2 } from "lucide-react";
+import { Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
@@ -23,7 +23,6 @@ import {
   DialogTrigger,
 } from "@/components/ui/dialog";
 import { ProjectTaskWorkspace } from "@/components/tasks/project-task-workspace";
-import { SprintManagement } from "@/components/sprint/sprint-management";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { useMemberStore } from "@/lib/stores/member-store";
 import { useProjectStore } from "@/lib/stores/project-store";
@@ -35,6 +34,7 @@ import {
 } from "@/lib/stores/task-store";
 import { useTaskWorkspaceStore } from "@/lib/stores/task-workspace-store";
 import { useWSStore } from "@/lib/stores/ws-store";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 const EMPTY_PROJECT_MEMBERS: ReturnType<typeof useMemberStore.getState>["membersByProject"][string] = [];
 
@@ -42,14 +42,18 @@ function CreateTaskDialog({
   projectId,
   sprints,
   tasks,
+  open,
+  onOpenChange,
 }: {
   projectId: string;
   sprints: ReturnType<typeof useSprintStore.getState>["sprintsByProject"][string];
   tasks: import("@/lib/stores/task-store").Task[];
+  open?: boolean;
+  onOpenChange?: (open: boolean) => void;
 }) {
   const t = useTranslations("projects");
   const createTask = useTaskStore((state) => state.createTask);
-  const [open, setOpen] = useState(false);
+  const [internalOpen, setInternalOpen] = useState(false);
   const [title, setTitle] = useState("");
   const [description, setDescription] = useState("");
   const [priority, setPriority] = useState<TaskPriority>("medium");
@@ -59,6 +63,8 @@ function CreateTaskDialog({
   const [plannedStart, setPlannedStart] = useState("");
   const [plannedEnd, setPlannedEnd] = useState("");
   const [parentId, setParentId] = useState("");
+  const dialogOpen = open ?? internalOpen;
+  const setDialogOpen = onOpenChange ?? setInternalOpen;
 
   const resetForm = () => {
     setTitle("");
@@ -91,7 +97,7 @@ function CreateTaskDialog({
       plannedEndAt: plannedEnd ? `${plannedEnd}T18:00:00.000Z` : null,
     });
     resetForm();
-    setOpen(false);
+    setDialogOpen(false);
   };
 
   const topLevelTasks = tasks.filter(
@@ -99,7 +105,7 @@ function CreateTaskDialog({
   );
 
   return (
-    <Dialog open={open} onOpenChange={setOpen}>
+    <Dialog open={dialogOpen} onOpenChange={setDialogOpen}>
       <DialogTrigger asChild>
         <Button size="sm">
           <Plus className="mr-1 size-4" />
@@ -229,6 +235,7 @@ function CreateTaskDialog({
 }
 
 function ProjectView() {
+  useBreadcrumbs([{ label: "Projects", href: "/projects" }, { label: "Tasks" }]);
   const t = useTranslations("projects");
   const searchParams = useSearchParams();
   const router = useRouter();
@@ -243,8 +250,6 @@ function ProjectView() {
   const assignTask = useTaskStore((state) => state.assignTask);
   const decomposeTask = useTaskStore((state) => state.decomposeTask);
   const deleteTask = useTaskStore((state) => state.deleteTask);
-  const bulkTransition = useTaskStore((state) => state.bulkTransition);
-  const bulkDelete = useTaskStore((state) => state.bulkDelete);
   const agents = useAgentStore((state) => state.agents);
   const spawnAgent = useAgentStore((state) => state.spawnAgent);
   const fetchAgents = useAgentStore((state) => state.fetchAgents);
@@ -261,6 +266,7 @@ function ProjectView() {
   );
   const fetchSprints = useSprintStore((state) => state.fetchSprints);
   const fetchSprintMetrics = useSprintStore((state) => state.fetchSprintMetrics);
+  const [createTaskDialogOpen, setCreateTaskDialogOpen] = useState(false);
   const project = useProjectStore((state) =>
     state.projects.find((item) => item.id === projectId)
   );
@@ -329,33 +335,17 @@ function ProjectView() {
   if (!projectId) return null;
 
   return (
-    <div className="flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold">
-          {t("taskWorkspace.title", { projectName: project?.name ?? t("taskWorkspace.defaultName") })}
-        </h1>
-        <div className="flex items-center gap-2">
-          <Dialog>
-            <DialogTrigger asChild>
-              <Button size="sm" variant="outline">
-                <Settings2 className="mr-1 size-4" />
-                {t("manageSprints")}
-              </Button>
-            </DialogTrigger>
-            <DialogContent className="max-w-2xl max-h-[85vh] overflow-y-auto">
-              <DialogHeader>
-                <DialogTitle>{t("manageSprints")}</DialogTitle>
-                <DialogDescription />
-              </DialogHeader>
-              <SprintManagement projectId={projectId} sprints={sprints} />
-            </DialogContent>
-          </Dialog>
-          <CreateTaskDialog projectId={projectId} sprints={sprints} tasks={projectTasks} />
-        </div>
-      </div>
-
+    <div className="-m-6 h-[calc(100vh-3.5rem)]">
+      <CreateTaskDialog
+        projectId={projectId}
+        sprints={sprints}
+        tasks={projectTasks}
+        open={createTaskDialogOpen}
+        onOpenChange={setCreateTaskDialogOpen}
+      />
       <ProjectTaskWorkspace
         projectId={projectId}
+        projectName={project?.name ?? t("taskWorkspace.defaultName")}
         tasks={projectTasks}
         sprints={sprints}
         sprintMetrics={sprintMetrics}
@@ -371,14 +361,74 @@ function ProjectView() {
         onTaskStatusChange={transitionTask}
         onTaskScheduleChange={(taskId, changes) => updateTask(taskId, changes)}
         onTaskSave={updateTask}
+        onCreateTask={() => setCreateTaskDialogOpen(true)}
         onTaskAssign={handleTaskAssign}
-        onBulkStatusChange={(ids, status) => void bulkTransition(ids, status)}
-        onBulkAssign={(ids, assigneeId, assigneeType) => {
-          for (const id of ids) {
-            void assignTask(id, assigneeId, assigneeType);
-          }
+        onBulkStatusChange={async (ids, status) => {
+          const failed = (
+            await Promise.all(
+              ids.map(async (id) => {
+                try {
+                  await transitionTask(id, status);
+                  return null;
+                } catch (error) {
+                  return {
+                    taskId: id,
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : "Failed to change task status.",
+                  };
+                }
+              })
+            )
+          ).filter((item): item is { taskId: string; message: string } => item !== null);
+
+          return { failed };
         }}
-        onBulkDelete={(ids) => void bulkDelete(ids)}
+        onBulkAssign={async (ids, assigneeId, assigneeType) => {
+          const failed = (
+            await Promise.all(
+              ids.map(async (id) => {
+                try {
+                  await assignTask(id, assigneeId, assigneeType);
+                  return null;
+                } catch (error) {
+                  return {
+                    taskId: id,
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : "Failed to assign task.",
+                  };
+                }
+              })
+            )
+          ).filter((item): item is { taskId: string; message: string } => item !== null);
+
+          return { failed };
+        }}
+        onBulkDelete={async (ids) => {
+          const failed = (
+            await Promise.all(
+              ids.map(async (id) => {
+                try {
+                  await deleteTask(id);
+                  return null;
+                } catch (error) {
+                  return {
+                    taskId: id,
+                    message:
+                      error instanceof Error
+                        ? error.message
+                        : "Failed to delete task.",
+                  };
+                }
+              })
+            )
+          ).filter((item): item is { taskId: string; message: string } => item !== null);
+
+          return { failed };
+        }}
         onTaskDecompose={decomposeTask}
         onTaskDelete={async (taskId) => {
           await deleteTask(taskId);

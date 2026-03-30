@@ -24,6 +24,7 @@ jest.mock("@hello-pangea/dnd", () => ({
 }));
 
 import { fireEvent, render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { TaskCard } from "./task-card";
 
 describe("TaskCard", () => {
@@ -79,5 +80,110 @@ describe("TaskCard", () => {
 
     fireEvent.click(screen.getByText("Implement detector"));
     expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("shows a linked-doc preview when the docs indicator is hovered", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <TaskCard
+        index={0}
+        isSelected={false}
+        density="comfortable"
+        showDescription={true}
+        onClick={jest.fn()}
+        linkedDocs={[
+          {
+            id: "link-1",
+            pageId: "page-1",
+            title: "Architecture brief",
+            linkType: "design",
+            updatedAt: "2026-03-24T12:00:00.000Z",
+            preview: "Line 1\nLine 2\nLine 3\nLine 4",
+          },
+        ]}
+        task={{
+          id: "task-2",
+          projectId: "project-1",
+          title: "Review docs hover",
+          description: "",
+          status: "in_progress",
+          priority: "medium",
+          assigneeId: null,
+          assigneeType: null,
+          assigneeName: null,
+          cost: null,
+          budgetUsd: 0,
+          spentUsd: 0,
+          agentBranch: "",
+          agentWorktree: "",
+          agentSessionId: "",
+          labels: [],
+          blockedBy: [],
+          plannedStartAt: null,
+          plannedEndAt: null,
+          progress: null,
+          createdAt: "2026-03-24T09:00:00.000Z",
+          updatedAt: "2026-03-24T12:00:00.000Z",
+        }}
+      />
+    );
+
+    await user.hover(
+      screen.getByRole("button", { name: "Show linked docs for Review docs hover" })
+    );
+
+    expect(await screen.findByText("Architecture brief")).toBeInTheDocument();
+    expect(screen.getByText(/Line 1\s+Line 2\s+Line 3/)).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "View" })).toHaveAttribute(
+      "href",
+      "/docs?pageId=page-1"
+    );
+  });
+
+  it("uses ctrl/cmd click to toggle multi-select without opening task details", () => {
+    const onClick = jest.fn();
+    const onToggleSelect = jest.fn();
+
+    render(
+      <TaskCard
+        index={0}
+        isSelected={false}
+        isMultiSelected={false}
+        density="comfortable"
+        showDescription={true}
+        onClick={onClick}
+        onToggleSelect={onToggleSelect}
+        task={{
+          id: "task-3",
+          projectId: "project-1",
+          title: "Bulk select candidate",
+          description: "",
+          status: "triaged",
+          priority: "medium",
+          assigneeId: null,
+          assigneeType: null,
+          assigneeName: null,
+          cost: null,
+          budgetUsd: 0,
+          spentUsd: 0,
+          agentBranch: "",
+          agentWorktree: "",
+          agentSessionId: "",
+          labels: [],
+          blockedBy: [],
+          plannedStartAt: null,
+          plannedEndAt: null,
+          progress: null,
+          createdAt: "2026-03-24T09:00:00.000Z",
+          updatedAt: "2026-03-24T12:00:00.000Z",
+        }}
+      />
+    );
+
+    fireEvent.click(screen.getByText("Bulk select candidate"), { ctrlKey: true });
+
+    expect(onToggleSelect).toHaveBeenCalledWith("task-3");
+    expect(onClick).not.toHaveBeenCalled();
   });
 });

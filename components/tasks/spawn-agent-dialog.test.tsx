@@ -41,8 +41,44 @@ const storeState = {
   spawnAgent,
 };
 
+const fetchRoles = jest.fn();
+
+const roleStoreState = {
+  roles: [
+    {
+      apiVersion: "agentforge/v1",
+      kind: "Role",
+      metadata: {
+        id: "frontend-developer",
+        name: "Frontend Developer",
+        version: "1.0.0",
+        description: "Builds UI",
+        author: "AgentForge",
+        tags: [],
+      },
+    },
+    {
+      apiVersion: "agentforge/v1",
+      kind: "Role",
+      metadata: {
+        id: "backend-developer",
+        name: "Backend Developer",
+        version: "1.0.0",
+        description: "Builds APIs",
+        author: "AgentForge",
+        tags: [],
+      },
+    },
+  ],
+  fetchRoles,
+};
+
 jest.mock("@/lib/stores/agent-store", () => ({
   useAgentStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
+}));
+
+jest.mock("@/lib/stores/role-store", () => ({
+  useRoleStore: (selector: (state: typeof roleStoreState) => unknown) => selector(roleStoreState),
 }));
 
 jest.mock("@/components/ui/dialog", () => ({
@@ -118,6 +154,7 @@ describe("SpawnAgentDialog", () => {
     fetchRuntimeCatalog.mockReset().mockResolvedValue(storeState.runtimeCatalog);
     fetchBridgeHealth.mockReset().mockResolvedValue(storeState.bridgeHealth);
     spawnAgent.mockReset().mockResolvedValue(undefined);
+    fetchRoles.mockReset().mockResolvedValue(undefined);
     storeState.bridgeHealth.status = "ready";
   });
 
@@ -161,5 +198,75 @@ describe("SpawnAgentDialog", () => {
 
     expect(screen.getByText(/Bridge is degraded/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start Agent" })).toBeDisabled();
+  });
+
+  it("renders a role selector dropdown with available roles", () => {
+    render(
+      <SpawnAgentDialog
+        taskId="task-3"
+        taskTitle="Role selector test"
+        memberId="member-3"
+        open
+        onOpenChange={jest.fn()}
+      />,
+    );
+
+    const roleSelect = screen.getByLabelText("Role");
+    expect(roleSelect).toBeInTheDocument();
+    expect(roleSelect).toBeInstanceOf(HTMLSelectElement);
+
+    const options = Array.from((roleSelect as HTMLSelectElement).options);
+    expect(options).toHaveLength(3);
+    expect(options[0]!.value).toBe("");
+    expect(options[0]!.textContent).toBe("No role (default)");
+    expect(options[1]!.value).toBe("frontend-developer");
+    expect(options[1]!.textContent).toBe("Frontend Developer");
+    expect(options[2]!.value).toBe("backend-developer");
+    expect(options[2]!.textContent).toBe("Backend Developer");
+  });
+
+  it("passes roleId in spawn options when a role is selected", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <SpawnAgentDialog
+        taskId="task-4"
+        taskTitle="Role spawn test"
+        memberId="member-4"
+        open
+        onOpenChange={jest.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(fetchRuntimeCatalog).toHaveBeenCalled());
+
+    const roleSelect = screen.getByLabelText("Role");
+    await user.selectOptions(roleSelect, "frontend-developer");
+    await user.click(screen.getByRole("button", { name: "Start Agent" }));
+
+    expect(spawnAgent).toHaveBeenCalledWith("task-4", "member-4", expect.objectContaining({
+      roleId: "frontend-developer",
+    }));
+  });
+
+  it("passes undefined roleId when no role is selected", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <SpawnAgentDialog
+        taskId="task-5"
+        taskTitle="No role spawn test"
+        memberId="member-5"
+        open
+        onOpenChange={jest.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(fetchRuntimeCatalog).toHaveBeenCalled());
+    await user.click(screen.getByRole("button", { name: "Start Agent" }));
+
+    expect(spawnAgent).toHaveBeenCalledWith("task-5", "member-5", expect.objectContaining({
+      roleId: undefined,
+    }));
   });
 });

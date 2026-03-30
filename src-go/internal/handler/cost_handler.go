@@ -1,21 +1,27 @@
 package handler
 
 import (
+	"context"
 	"net/http"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/repository"
 )
 
-type CostHandler struct {
-	repo *repository.AgentRunRepository
+type costStatsService interface {
+	ProjectSummary(ctx context.Context, projectID uuid.UUID) (*model.ProjectCostSummaryDTO, error)
+	SprintSummary(ctx context.Context, sprintID uuid.UUID) (*model.CostSummaryDTO, error)
+	ActiveSummary(ctx context.Context) (*model.CostSummaryDTO, error)
 }
 
-func NewCostHandler(repo *repository.AgentRunRepository) *CostHandler {
-	return &CostHandler{repo: repo}
+type CostHandler struct {
+	service costStatsService
+}
+
+func NewCostHandler(service costStatsService) *CostHandler {
+	return &CostHandler{service: service}
 }
 
 func (h *CostHandler) GetStats(c echo.Context) error {
@@ -28,7 +34,7 @@ func (h *CostHandler) GetStats(c echo.Context) error {
 		if err != nil {
 			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidProjectIDParam)
 		}
-		summary, err := h.repo.AggregateByProject(c.Request().Context(), projectID)
+		summary, err := h.service.ProjectSummary(c.Request().Context(), projectID)
 		if err != nil {
 			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToGetCostStats)
 		}
@@ -40,30 +46,18 @@ func (h *CostHandler) GetStats(c echo.Context) error {
 		if err != nil {
 			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidSprintIDParam)
 		}
-		runs, err := h.repo.ListBySprint(c.Request().Context(), sprintID)
+		summary, err := h.service.SprintSummary(c.Request().Context(), sprintID)
 		if err != nil {
 			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToGetCostStats)
 		}
-		return c.JSON(http.StatusOK, aggregateRuns(runs))
+		return c.JSON(http.StatusOK, summary)
 	}
 
 	// Default: aggregate across all active runs
-	runs, err := h.repo.ListActive(c.Request().Context())
+	summary, err := h.service.ActiveSummary(c.Request().Context())
 	if err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToGetCostStats)
 	}
 
-	return c.JSON(http.StatusOK, aggregateRuns(runs))
-}
-
-func aggregateRuns(runs []*model.AgentRun) model.CostSummaryDTO {
-	s := model.CostSummaryDTO{RunCount: len(runs)}
-	for _, r := range runs {
-		s.TotalCostUsd += r.CostUsd
-		s.TotalInputTokens += r.InputTokens
-		s.TotalOutputTokens += r.OutputTokens
-		s.TotalCacheReadTokens += r.CacheReadTokens
-		s.TotalTurns += r.TurnCount
-	}
-	return s
+	return c.JSON(http.StatusOK, summary)
 }

@@ -235,4 +235,148 @@ describe("streamOpenCodeRuntime", () => {
       ),
     ).rejects.toThrow("OpenCode event stream ended before session became idle");
   });
+
+  test("handles advanced OpenCode events, parts, and continuity metadata", async () => {
+    const req = createRequest();
+    const runtime = new AgentRuntime(req.task_id, req.session_id);
+    runtime.bindRequest(req);
+    const events: Array<{ type: string; data: unknown }> = [];
+
+    await streamOpenCodeRuntime(
+      runtime,
+      {
+        send(event) {
+          events.push(event);
+        },
+      },
+      req,
+      "System prompt",
+      {
+        transport: {
+          async createSession() {
+            return { id: "opencode-session-advanced" };
+          },
+          async sendPromptAsync() {},
+          async abortSession() {
+            return true;
+          },
+        } as never,
+        async *eventRunner(params) {
+          yield {
+            event: "session.status",
+            data: {
+              sessionID: params.sessionId,
+              status: "busy",
+            },
+          };
+          yield {
+            event: "todo.updated",
+            data: {
+              sessionID: params.sessionId,
+              todos: [{ id: "todo-1", content: "Ship OpenCode" }],
+            },
+          };
+          yield {
+            event: "message.updated",
+            data: {
+              sessionID: params.sessionId,
+              message: { id: "msg-2", content: "updated content" },
+            },
+          };
+          yield {
+            event: "command.executed",
+            data: {
+              sessionID: params.sessionId,
+              name: "compact",
+            },
+          };
+          yield {
+            event: "vcs.branch.updated",
+            data: {
+              sessionID: params.sessionId,
+              branch: "agent/task-opencode",
+            },
+          };
+          yield {
+            event: "message.part.delta",
+            data: {
+              sessionID: params.sessionId,
+              messageID: "msg-3",
+              part: { type: "reasoning", reasoning: "thinking" },
+            },
+          };
+          yield {
+            event: "message.part.updated",
+            data: {
+              sessionID: params.sessionId,
+              messageID: "msg-4",
+              part: { type: "file", files: [{ path: "README.md", change_type: "modified" }] },
+            },
+          };
+          yield {
+            event: "message.part.updated",
+            data: {
+              sessionID: params.sessionId,
+              messageID: "msg-5",
+              part: { type: "agent", agentName: "reviewer", output: "reviewed" },
+            },
+          };
+          yield {
+            event: "message.part.updated",
+            data: {
+              sessionID: params.sessionId,
+              messageID: "msg-6",
+              part: { type: "compaction", summary: "compacted" },
+            },
+          };
+          yield {
+            event: "message.part.updated",
+            data: {
+              sessionID: params.sessionId,
+              messageID: "msg-7",
+              part: { type: "subtask", title: "task A", content: "finish A" },
+            },
+          };
+          yield {
+            event: "session.idle",
+            data: {
+              sessionID: params.sessionId,
+              messageID: "msg-7",
+            },
+          };
+        },
+        now: () => 1_700_000_000_111,
+      },
+    );
+
+    expect(events.map((event) => event.type)).toEqual([
+      "status_change",
+      "todo_update",
+      "output",
+      "output",
+      "status_change",
+      "reasoning",
+      "file_change",
+      "output",
+      "status_change",
+      "output",
+    ]);
+    expect(events[0]).toMatchObject({ data: { state: "running" } });
+    expect(events[1]).toMatchObject({ data: { todos: [{ id: "todo-1", content: "Ship OpenCode" }] } });
+    expect(events[2]).toMatchObject({ data: { content: "updated content" } });
+    expect(events[3]).toMatchObject({ data: { content: "Command /compact executed" } });
+    expect(events[4]).toMatchObject({ data: { reason: "branch_updated", branch: "agent/task-opencode" } });
+    expect(events[5]).toMatchObject({ data: { content: "thinking" } });
+    expect(events[6]).toMatchObject({ data: { files: [{ path: "README.md", change_type: "modified" }] } });
+    expect(events[7]).toMatchObject({ data: { content: "reviewed", agent_name: "reviewer" } });
+    expect(events[8]).toMatchObject({ data: { reason: "compaction", summary: "compacted" } });
+    expect(events[9]).toMatchObject({ data: { content: "Subtask task A: finish A" } });
+    expect(runtime.continuity).toMatchObject({
+      runtime: "opencode",
+      upstream_session_id: "opencode-session-advanced",
+      latest_message_id: "msg-7",
+      revert_message_ids: expect.arrayContaining(["msg-3", "msg-4", "msg-5", "msg-6", "msg-7"]),
+      fork_available: true,
+    });
+  });
 });

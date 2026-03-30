@@ -15,6 +15,10 @@ beforeEach(() => {
     projectCost: null,
     loading: false,
     error: null,
+    velocity: [],
+    velocityLoading: false,
+    agentPerformance: [],
+    performanceLoading: false,
   });
   mockGet.mockReset();
 });
@@ -27,10 +31,17 @@ describe("useCostStore", () => {
       totalOutputTokens: 50000,
       totalCacheReadTokens: 20000,
       totalTurns: 42,
+      runCount: 3,
       activeAgents: 2,
       sprintCosts: [],
       taskCosts: [],
       dailyCosts: [],
+      budgetSummary: null,
+      periodRollups: {
+        today: { costUsd: 1, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, turns: 1, runCount: 1 },
+        last7Days: { costUsd: 4, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, turns: 1, runCount: 1 },
+        last30Days: { costUsd: 12.5, inputTokens: 1, outputTokens: 1, cacheReadTokens: 0, turns: 1, runCount: 3 },
+      },
     };
 
     mockGet.mockResolvedValueOnce({ data: mockData });
@@ -65,9 +76,69 @@ describe("useCostStore", () => {
 
     expect(mockGet).not.toHaveBeenCalled();
 
-    // Restore token for other tests
     jest.requireMock("./auth-store").useAuthStore.getState = () => ({
       accessToken: "test-token",
     });
+  });
+
+  it("normalizes velocity wrapper responses into chart points", async () => {
+    mockGet.mockResolvedValueOnce({
+      data: {
+        points: [
+          { period: "2026-03-28", tasksCompleted: 2, costUsd: 5.25 },
+          { period: "2026-03-29", tasksCompleted: 1, costUsd: 1.5 },
+        ],
+        totalCompleted: 3,
+        totalCostUsd: 6.75,
+        avgPerDay: 1.5,
+      },
+    });
+
+    await useCostStore.getState().fetchVelocity("proj-1");
+
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/v1/stats/velocity?projectId=proj-1",
+      { token: "test-token" }
+    );
+    expect(useCostStore.getState().velocity).toEqual([
+      { period: "2026-03-28", tasksCompleted: 2, costUsd: 5.25 },
+      { period: "2026-03-29", tasksCompleted: 1, costUsd: 1.5 },
+    ]);
+  });
+
+  it("normalizes performance wrapper responses into workspace records", async () => {
+    mockGet.mockResolvedValueOnce({
+      data: {
+        entries: [
+          {
+            bucketId: "planner",
+            label: "Planner",
+            runCount: 4,
+            successRate: 0.75,
+            avgCostUsd: 1.25,
+            avgDurationMinutes: 18,
+            totalCostUsd: 5,
+          },
+        ],
+      },
+    });
+
+    await useCostStore.getState().fetchAgentPerformance("proj-1");
+
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/v1/stats/agent-performance?projectId=proj-1",
+      { token: "test-token" }
+    );
+    expect(useCostStore.getState().agentPerformance).toEqual([
+      {
+        bucketId: "planner",
+        label: "Planner",
+        runCount: 4,
+        successRate: 0.75,
+        avgCostUsd: 1.25,
+        avgDurationMinutes: 18,
+        totalCostUsd: 5,
+      },
+    ]);
   });
 });

@@ -26,6 +26,7 @@ interface ColumnProps {
   tasks: Task[];
   selectedTaskId: string | null;
   selectedTaskIds?: string[];
+  pendingTaskIds?: string[];
   displayOptions: TaskWorkspaceDisplayOptions;
   linkedDocsByTask: Record<string, LinkedDocItem[]>;
   subtaskStatsMap?: Record<string, { total: number; done: number }>;
@@ -40,6 +41,7 @@ export function Column({
   tasks,
   selectedTaskId,
   selectedTaskIds = [],
+  pendingTaskIds = [],
   displayOptions,
   linkedDocsByTask,
   subtaskStatsMap = {},
@@ -74,6 +76,7 @@ export function Column({
                   index={i}
                   isSelected={task.id === selectedTaskId}
                   isMultiSelected={selectedTaskIds.includes(task.id)}
+                  isPending={pendingTaskIds.includes(task.id)}
                   density={displayOptions.density}
                   showDescription={displayOptions.showDescriptions}
                   linkedDocs={linkedDocsByTask[task.id] ?? []}

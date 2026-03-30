@@ -98,6 +98,93 @@ func TestStub_ReplyAndSendStoreReplies(t *testing.T) {
 	}
 }
 
+func TestStub_LogsNativeAndFormattedReplies(t *testing.T) {
+	stub := NewStub("0")
+
+	message, err := core.NewDiscordEmbedMessage(
+		"Build Ready",
+		"Agent finished the run.",
+		nil,
+		0,
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewDiscordEmbedMessage error: %v", err)
+	}
+
+	if err := stub.SendNative(context.Background(), "channel-1", message); err != nil {
+		t.Fatalf("SendNative error: %v", err)
+	}
+	if err := stub.SendFormattedText(context.Background(), "channel-1", &core.FormattedText{
+		Content: "**bold**",
+		Format:  core.TextFormatDiscordMD,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+
+	if len(stub.replies) != 2 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].NativeSurface != core.NativeSurfaceDiscordEmbed {
+		t.Fatalf("native reply = %+v", stub.replies[0])
+	}
+	if stub.replies[1].Format != string(core.TextFormatDiscordMD) {
+		t.Fatalf("formatted reply = %+v", stub.replies[1])
+	}
+}
+
+func TestStub_DeliverEnvelopeSupportsNativeStructuredAndFormatted(t *testing.T) {
+	stub := NewStub("0")
+
+	native, err := core.NewDiscordEmbedMessage("Build Ready", "Agent finished the run.", nil, 0, nil)
+	if err != nil {
+		t.Fatalf("NewDiscordEmbedMessage error: %v", err)
+	}
+	receipt, err := core.DeliverEnvelope(context.Background(), stub, stub.Metadata(), "channel-1", &core.DeliveryEnvelope{Native: native})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope native error: %v", err)
+	}
+	if receipt.Type != "native" {
+		t.Fatalf("native receipt = %+v", receipt)
+	}
+
+	receipt, err = core.DeliverEnvelope(context.Background(), stub, stub.Metadata(), "channel-1", &core.DeliveryEnvelope{
+		Structured: &core.StructuredMessage{
+			Sections: []core.StructuredSection{{
+				Type: core.StructuredSectionTypeText,
+				TextSection: &core.TextSection{
+					Body: "Build ready",
+				},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope structured error: %v", err)
+	}
+	if receipt.Type != "structured" {
+		t.Fatalf("structured receipt = %+v", receipt)
+	}
+
+	receipt, err = core.DeliverEnvelope(context.Background(), stub, stub.Metadata(), "channel-1", &core.DeliveryEnvelope{
+		Content: "**bold**",
+		Metadata: map[string]string{
+			"text_format": string(core.TextFormatDiscordMD),
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope formatted error: %v", err)
+	}
+	if receipt.Type != "text" {
+		t.Fatalf("formatted receipt = %+v", receipt)
+	}
+	if len(stub.replies) != 3 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].NativeSurface != core.NativeSurfaceDiscordEmbed || stub.replies[2].Format != string(core.TextFormatDiscordMD) {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+}
+
 func TestStub_HTTPHandlersExposeAndClearReplies(t *testing.T) {
 	stub := NewStub("0")
 	stub.replies = append(stub.replies, stubReply{ChatID: "channel-1", Content: "hello"})

@@ -1,8 +1,8 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import type {
@@ -10,6 +10,7 @@ import type {
   RoleSkillCatalogEntry,
 } from "@/lib/stores/role-store";
 import type {
+  FieldProvenanceMap,
   RoleDraft,
   RoleDraftValidationBySection,
   RoleKeyValueDraft,
@@ -19,6 +20,7 @@ import type {
   RoleSkillResolution,
   RoleTriggerDraft,
 } from "@/lib/roles/role-management";
+import { ProvenanceBadge } from "./provenance-badge";
 import {
   ROLE_WORKSPACE_SECTIONS,
   type RoleWorkspaceSectionId,
@@ -84,6 +86,7 @@ interface RoleWorkspaceEditorProps {
   availableRoles: RoleManifest[];
   onTemplateChange: (value: string) => void;
   validationBySection: RoleDraftValidationBySection;
+  provenanceMap?: FieldProvenanceMap;
 }
 
 function TextAreaField({
@@ -131,8 +134,6 @@ function SectionErrors({ errors }: { errors: string[] }) {
 
 function AuthoringSection({
   sectionId,
-  title,
-  description,
   activeSection,
   onSelectSection,
   children,
@@ -144,21 +145,12 @@ function AuthoringSection({
   onSelectSection: (section: RoleWorkspaceSectionId) => void;
   children: React.ReactNode;
 }) {
-  const isActive = activeSection === sectionId;
-
+  if (sectionId !== activeSection) return null;
   return (
     <section
-      className={`grid gap-4 rounded-lg border p-4 transition-colors ${
-        isActive ? "border-primary/60 bg-primary/5" : "bg-background"
-      }`}
+      className="grid gap-4 px-4 py-4"
       onFocusCapture={() => onSelectSection(sectionId)}
     >
-      <div className="space-y-1">
-        <h3 className="text-sm font-semibold">{title}</h3>
-        {description ? (
-          <p className="text-sm text-muted-foreground">{description}</p>
-        ) : null}
-      </div>
       {children}
     </section>
   );
@@ -195,62 +187,64 @@ export function RoleWorkspaceEditor({
   availableRoles,
   onTemplateChange,
   validationBySection,
+  provenanceMap,
 }: RoleWorkspaceEditorProps) {
   const t = useTranslations("roles");
   return (
-    <Card>
-      <CardHeader>
-        <CardTitle>{mode === "edit" ? t("workspace.roleWorkspace") : t("workspace.createRole")}</CardTitle>
-        <CardDescription>
-          {t("workspace.workspaceDesc")}
-        </CardDescription>
-      </CardHeader>
-      <CardContent>
-        <form className="flex flex-col gap-4" onSubmit={onSubmit}>
-          <div className="rounded-lg border bg-muted/20 p-4">
-            <p className="text-xs font-semibold uppercase tracking-wide text-muted-foreground">
-              {t("workspace.currentFlow")}
-            </p>
-            <div className="mt-2 grid gap-2">
-              <p className="text-sm font-medium">
-                {mode === "edit" ? t("workspace.editingExisting") : t("workspace.creatingNew")}
-              </p>
-              <div className="flex flex-wrap gap-2 text-xs text-muted-foreground">
-                {selectedTemplateName ? (
-                  <span className="rounded-full border px-2 py-1">
-                    {t("workspace.templateSource", { name: selectedTemplateName })}
-                  </span>
-                ) : null}
-                {selectedParentName ? (
-                  <span className="rounded-full border px-2 py-1">
-                    {t("workspace.inheritedFrom", { name: selectedParentName })}
-                  </span>
-                ) : (
-                  <span className="rounded-full border px-2 py-1">{t("workspace.noParent")}</span>
-                )}
-                <span className="rounded-full border px-2 py-1">
-                  {selectedRole ? t("workspace.editing", { id: selectedRole.metadata.id }) : t("workspace.unsavedDraft")}
-                </span>
-              </div>
-            </div>
-          </div>
+    <div className="flex flex-col">
+      {/* Column header */}
+      <div className="sticky top-0 z-10 border-b bg-card px-4 py-3">
+        <p className="text-sm font-semibold">
+          {mode === "edit" ? t("workspace.roleWorkspace") : t("workspace.createRole")}
+        </p>
+        <div className="mt-1 flex flex-wrap items-center gap-1.5">
+          <span className="text-xs text-muted-foreground">
+            {mode === "edit" ? t("workspace.editingExisting") : t("workspace.creatingNew")}
+          </span>
+          {selectedTemplateName ? (
+            <Badge variant="outline" className="text-xs">
+              {t("workspace.templateSource", { name: selectedTemplateName })}
+            </Badge>
+          ) : null}
+          {selectedParentName ? (
+            <Badge variant="outline" className="text-xs">
+              {t("workspace.inheritedFrom", { name: selectedParentName })}
+            </Badge>
+          ) : (
+            <Badge variant="outline" className="text-xs">{t("workspace.noParent")}</Badge>
+          )}
+          <Badge variant="outline" className="text-xs">
+            {selectedRole ? t("workspace.editing", { id: selectedRole.metadata.id }) : t("workspace.unsavedDraft")}
+          </Badge>
+        </div>
+      </div>
 
-          <div className="grid gap-2 sm:grid-cols-2 xl:grid-cols-6">
-            {ROLE_WORKSPACE_SECTIONS.map((section) => {
-              const isActive = section.id === activeSection;
-              return (
-                <Button
-                  key={section.id}
-                  type="button"
-                  variant={isActive ? "default" : "outline"}
-                  className="justify-start"
-                  onClick={() => onSelectSection(section.id)}
-                >
-                  {section.label}
-                </Button>
-              );
-            })}
-          </div>
+      {/* Section tab navigation */}
+      <div className="flex overflow-x-auto border-b">
+        {ROLE_WORKSPACE_SECTIONS.map((section) => {
+          const isActive = section.id === activeSection;
+          const hasErrors = (validationBySection[section.id as keyof typeof validationBySection] ?? []).length > 0;
+          return (
+            <button
+              key={section.id}
+              type="button"
+              onClick={() => onSelectSection(section.id)}
+              className={`shrink-0 border-b-2 px-4 py-2.5 text-xs font-medium transition-colors ${
+                isActive
+                  ? "border-primary text-foreground"
+                  : "border-transparent text-muted-foreground hover:text-foreground"
+              }`}
+            >
+              {section.label}
+              {hasErrors ? (
+                <span className="ml-1.5 inline-block size-1.5 rounded-full bg-destructive align-middle" />
+              ) : null}
+            </button>
+          );
+        })}
+      </div>
+
+      <form className="flex flex-col" onSubmit={onSubmit}>
 
           <AuthoringSection
             sectionId="setup"
@@ -508,29 +502,35 @@ export function RoleWorkspaceEditor({
                 </Button>
               </div>
               {draft.customSettingRows.length > 0 ? (
-                draft.customSettingRows.map((setting, index) => (
-                  <div
-                    key={`custom-setting-${index}`}
-                    className="grid gap-3 rounded-md border p-3 md:grid-cols-2"
-                  >
-                    <Input
-                      aria-label="Custom Setting Key"
-                      value={setting.key}
-                      placeholder="approval_mode"
-                      onChange={(event) =>
-                        updateCustomSettingRow(index, "key", event.target.value)
-                      }
-                    />
-                    <Input
-                      aria-label="Custom Setting Value"
-                      value={setting.value}
-                      placeholder="guided"
-                      onChange={(event) =>
-                        updateCustomSettingRow(index, "value", event.target.value)
-                      }
-                    />
-                  </div>
-                ))
+                draft.customSettingRows.map((setting, index) => {
+                  const prov = provenanceMap?.customSettings.find((e) => e.key === setting.key.trim());
+                  return (
+                    <div
+                      key={`custom-setting-${index}`}
+                      className="grid gap-3 rounded-md border p-3 md:grid-cols-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Input
+                          aria-label="Custom Setting Key"
+                          value={setting.key}
+                          placeholder="approval_mode"
+                          onChange={(event) =>
+                            updateCustomSettingRow(index, "key", event.target.value)
+                          }
+                        />
+                        {prov ? <ProvenanceBadge provenance={prov.provenance} /> : null}
+                      </div>
+                      <Input
+                        aria-label="Custom Setting Value"
+                        value={setting.value}
+                        placeholder="guided"
+                        onChange={(event) =>
+                          updateCustomSettingRow(index, "value", event.target.value)
+                        }
+                      />
+                    </div>
+                  );
+                })
               ) : (
                 <p className="text-sm text-muted-foreground">
                   {t("workspace.noCustomSettingsYet")}
@@ -551,29 +551,35 @@ export function RoleWorkspaceEditor({
                 </Button>
               </div>
               {draft.mcpServerRows.length > 0 ? (
-                draft.mcpServerRows.map((server, index) => (
-                  <div
-                    key={`mcp-server-${index}`}
-                    className="grid gap-3 rounded-md border p-3 md:grid-cols-2"
-                  >
-                    <Input
-                      aria-label="MCP Server Name"
-                      value={server.name}
-                      placeholder="design-mcp"
-                      onChange={(event) =>
-                        updateMCPServerRow(index, "name", event.target.value)
-                      }
-                    />
-                    <Input
-                      aria-label="MCP Server URL"
-                      value={server.url}
-                      placeholder="http://localhost:3010/mcp"
-                      onChange={(event) =>
-                        updateMCPServerRow(index, "url", event.target.value)
-                      }
-                    />
-                  </div>
-                ))
+                draft.mcpServerRows.map((server, index) => {
+                  const prov = provenanceMap?.mcpServers.find((e) => e.key === server.name.trim());
+                  return (
+                    <div
+                      key={`mcp-server-${index}`}
+                      className="grid gap-3 rounded-md border p-3 md:grid-cols-2"
+                    >
+                      <div className="flex items-center gap-2">
+                        <Input
+                          aria-label="MCP Server Name"
+                          value={server.name}
+                          placeholder="design-mcp"
+                          onChange={(event) =>
+                            updateMCPServerRow(index, "name", event.target.value)
+                          }
+                        />
+                        {prov ? <ProvenanceBadge provenance={prov.provenance} /> : null}
+                      </div>
+                      <Input
+                        aria-label="MCP Server URL"
+                        value={server.url}
+                        placeholder="http://localhost:3010/mcp"
+                        onChange={(event) =>
+                          updateMCPServerRow(index, "url", event.target.value)
+                        }
+                      />
+                    </div>
+                  );
+                })
               ) : (
                 <p className="text-sm text-muted-foreground">{t("workspace.noMcpServersYet")}</p>
               )}
@@ -720,19 +726,24 @@ export function RoleWorkspaceEditor({
                   {t("workspace.addSharedKnowledge")}
                 </Button>
               </div>
-              {draft.sharedKnowledgeRows.map((source, index) => (
+              {draft.sharedKnowledgeRows.map((source, index) => {
+                const prov = provenanceMap?.sharedKnowledge.find((e) => e.key === source.id.trim());
+                return (
                 <div
                   key={`knowledge-${index}`}
                   className="grid gap-3 rounded-md border p-3 md:grid-cols-2"
                 >
-                  <Input
-                    aria-label="Shared Knowledge ID"
-                    value={source.id}
-                    placeholder="design-guidelines"
-                    onChange={(event) =>
-                      updateKnowledgeRow(index, "id", event.target.value)
-                    }
-                  />
+                  <div className="flex items-center gap-2">
+                    <Input
+                      aria-label="Shared Knowledge ID"
+                      value={source.id}
+                      placeholder="design-guidelines"
+                      onChange={(event) =>
+                        updateKnowledgeRow(index, "id", event.target.value)
+                      }
+                    />
+                    {prov ? <ProvenanceBadge provenance={prov.provenance} /> : null}
+                  </div>
                   <Input
                     aria-label="Shared Knowledge Type"
                     value={source.type}
@@ -766,7 +777,8 @@ export function RoleWorkspaceEditor({
                     }
                   />
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="grid gap-4 rounded-lg border p-4">
@@ -783,19 +795,24 @@ export function RoleWorkspaceEditor({
                   {t("workspace.addPrivateKnowledge")}
                 </Button>
               </div>
-              {draft.privateKnowledgeRows.map((source, index) => (
+              {draft.privateKnowledgeRows.map((source, index) => {
+                const prov = provenanceMap?.privateKnowledge.find((e) => e.key === source.id.trim());
+                return (
                 <div
                   key={`private-knowledge-${index}`}
                   className="grid gap-3 rounded-md border p-3 md:grid-cols-2"
                 >
-                  <Input
-                    aria-label="Private Knowledge ID"
-                    value={source.id}
-                    placeholder="operator-notes"
-                    onChange={(event) =>
-                      updatePrivateKnowledgeRow(index, "id", event.target.value)
-                    }
-                  />
+                  <div className="flex items-center gap-2">
+                    <Input
+                      aria-label="Private Knowledge ID"
+                      value={source.id}
+                      placeholder="operator-notes"
+                      onChange={(event) =>
+                        updatePrivateKnowledgeRow(index, "id", event.target.value)
+                      }
+                    />
+                    {prov ? <ProvenanceBadge provenance={prov.provenance} /> : null}
+                  </div>
                   <Input
                     aria-label="Private Knowledge Type"
                     value={source.type}
@@ -829,7 +846,8 @@ export function RoleWorkspaceEditor({
                     }
                   />
                 </div>
-              ))}
+                );
+              })}
             </div>
 
             <div className="grid gap-4 rounded-lg border p-4">
@@ -981,6 +999,110 @@ export function RoleWorkspaceEditor({
               </div>
             </div>
 
+            <details className="rounded-lg border p-4">
+              <summary className="cursor-pointer text-sm font-semibold">
+                {t("workspace.permissions")}
+              </summary>
+              <div className="mt-4 grid gap-4">
+                <div className="grid gap-4 md:grid-cols-2">
+                  <TextAreaField
+                    id="perm-file-allowed"
+                    label={t("workspace.permFileAllowedPaths")}
+                    value={draft.permFileAllowedPaths}
+                    onChange={(value) => updateDraft("permFileAllowedPaths", value)}
+                  />
+                  <TextAreaField
+                    id="perm-file-denied"
+                    label={t("workspace.permFileDeniedPaths")}
+                    value={draft.permFileDeniedPaths}
+                    onChange={(value) => updateDraft("permFileDeniedPaths", value)}
+                  />
+                </div>
+                <TextAreaField
+                  id="perm-network-domains"
+                  label={t("workspace.permNetworkAllowedDomains")}
+                  value={draft.permNetworkAllowedDomains}
+                  onChange={(value) => updateDraft("permNetworkAllowedDomains", value)}
+                />
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="flex items-center gap-2">
+                    <input
+                      id="perm-code-sandbox"
+                      type="checkbox"
+                      checked={draft.permCodeSandbox}
+                      onChange={(event) => updateDraft("permCodeSandbox", event.target.checked)}
+                    />
+                    <Label htmlFor="perm-code-sandbox">{t("workspace.permCodeSandbox")}</Label>
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="perm-code-languages">{t("workspace.permCodeAllowedLanguages")}</Label>
+                    <Input
+                      id="perm-code-languages"
+                      value={draft.permCodeAllowedLanguages}
+                      onChange={(event) => updateDraft("permCodeAllowedLanguages", event.target.value)}
+                      placeholder="python, javascript"
+                    />
+                  </div>
+                </div>
+              </div>
+            </details>
+
+            <details className="rounded-lg border p-4">
+              <summary className="cursor-pointer text-sm font-semibold">
+                {t("workspace.resourceLimits")}
+              </summary>
+              <div className="mt-4 grid gap-4">
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="res-token-task">{t("workspace.resTokenPerTask")}</Label>
+                    <Input id="res-token-task" type="number" value={draft.resourceTokenBudgetPerTask} onChange={(e) => updateDraft("resourceTokenBudgetPerTask", e.target.value)} />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="res-token-day">{t("workspace.resTokenPerDay")}</Label>
+                    <Input id="res-token-day" type="number" value={draft.resourceTokenBudgetPerDay} onChange={(e) => updateDraft("resourceTokenBudgetPerDay", e.target.value)} />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="res-token-month">{t("workspace.resTokenPerMonth")}</Label>
+                    <Input id="res-token-month" type="number" value={draft.resourceTokenBudgetPerMonth} onChange={(e) => updateDraft("resourceTokenBudgetPerMonth", e.target.value)} />
+                  </div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="res-api-minute">{t("workspace.resApiPerMinute")}</Label>
+                    <Input id="res-api-minute" type="number" value={draft.resourceApiCallsPerMinute} onChange={(e) => updateDraft("resourceApiCallsPerMinute", e.target.value)} />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="res-api-hour">{t("workspace.resApiPerHour")}</Label>
+                    <Input id="res-api-hour" type="number" value={draft.resourceApiCallsPerHour} onChange={(e) => updateDraft("resourceApiCallsPerHour", e.target.value)} />
+                  </div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-2">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="res-exec-task">{t("workspace.resExecPerTask")}</Label>
+                    <Input id="res-exec-task" value={draft.resourceExecTimePerTask} onChange={(e) => updateDraft("resourceExecTimePerTask", e.target.value)} placeholder="30m" />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="res-exec-day">{t("workspace.resExecPerDay")}</Label>
+                    <Input id="res-exec-day" value={draft.resourceExecTimePerDay} onChange={(e) => updateDraft("resourceExecTimePerDay", e.target.value)} placeholder="4h" />
+                  </div>
+                </div>
+                <div className="grid gap-4 md:grid-cols-3">
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="res-cost-task">{t("workspace.resCostPerTask")}</Label>
+                    <Input id="res-cost-task" value={draft.resourceCostPerTask} onChange={(e) => updateDraft("resourceCostPerTask", e.target.value)} placeholder="$5.00" />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="res-cost-day">{t("workspace.resCostPerDay")}</Label>
+                    <Input id="res-cost-day" value={draft.resourceCostPerDay} onChange={(e) => updateDraft("resourceCostPerDay", e.target.value)} placeholder="$50.00" />
+                  </div>
+                  <div className="flex flex-col gap-1.5">
+                    <Label htmlFor="res-cost-alert">{t("workspace.resCostAlertThreshold")}</Label>
+                    <Input id="res-cost-alert" type="number" step="0.01" value={draft.resourceCostAlertThreshold} onChange={(e) => updateDraft("resourceCostAlertThreshold", e.target.value)} placeholder="0.80" />
+                  </div>
+                </div>
+              </div>
+            </details>
+
             <div className="grid gap-4 rounded-lg border p-4">
               <h3 className="text-sm font-semibold">{t("workspace.collaboration")}</h3>
               <div className="grid gap-4 md:grid-cols-2">
@@ -1022,37 +1144,44 @@ export function RoleWorkspaceEditor({
                   {t("workspace.addTrigger")}
                 </Button>
               </div>
-              {draft.triggerRows.map((trigger, index) => (
-                <div
-                  key={`trigger-${index}`}
-                  className="grid gap-3 rounded-md border p-3 md:grid-cols-3"
-                >
-                  <Input
-                    aria-label="Trigger Event"
-                    value={trigger.event}
-                    placeholder="pr_created"
-                    onChange={(event) =>
-                      updateTriggerRow(index, "event", event.target.value)
-                    }
-                  />
-                  <Input
-                    aria-label="Trigger Action"
-                    value={trigger.action}
-                    placeholder="auto_review"
-                    onChange={(event) =>
-                      updateTriggerRow(index, "action", event.target.value)
-                    }
-                  />
-                  <Input
-                    aria-label="Trigger Condition"
-                    value={trigger.condition}
-                    placeholder="labels.includes('ui')"
-                    onChange={(event) =>
-                      updateTriggerRow(index, "condition", event.target.value)
-                    }
-                  />
-                </div>
-              ))}
+              {draft.triggerRows.map((trigger, index) => {
+                const trigKey = `${trigger.event.trim()}:${trigger.action.trim()}`;
+                const prov = provenanceMap?.triggers.find((e) => e.key === trigKey);
+                return (
+                  <div
+                    key={`trigger-${index}`}
+                    className="grid gap-3 rounded-md border p-3 md:grid-cols-3"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Input
+                        aria-label="Trigger Event"
+                        value={trigger.event}
+                        placeholder="pr_created"
+                        onChange={(event) =>
+                          updateTriggerRow(index, "event", event.target.value)
+                        }
+                      />
+                      {prov ? <ProvenanceBadge provenance={prov.provenance} /> : null}
+                    </div>
+                    <Input
+                      aria-label="Trigger Action"
+                      value={trigger.action}
+                      placeholder="auto_review"
+                      onChange={(event) =>
+                        updateTriggerRow(index, "action", event.target.value)
+                      }
+                    />
+                    <Input
+                      aria-label="Trigger Condition"
+                      value={trigger.condition}
+                      placeholder="labels.includes('ui')"
+                      onChange={(event) =>
+                        updateTriggerRow(index, "condition", event.target.value)
+                      }
+                    />
+                  </div>
+                );
+              })}
             </div>
             <SectionErrors errors={validationBySection.governance} />
           </AuthoringSection>
@@ -1084,18 +1213,17 @@ export function RoleWorkspaceEditor({
             <SectionErrors errors={validationBySection.review} />
           </AuthoringSection>
 
-          <div className="flex flex-wrap items-center gap-3 border-t pt-4">
-            <Button type="submit" disabled={saving || !draft.roleId || !draft.name}>
-              {saving ? t("formDialog.saving") : t("workspace.saveRole")}
+        <div className="sticky bottom-0 flex flex-wrap items-center gap-3 border-t bg-card px-4 py-3">
+          <Button type="submit" disabled={saving || !draft.roleId || !draft.name}>
+            {saving ? t("formDialog.saving") : t("workspace.saveRole")}
+          </Button>
+          {mode === "edit" && selectedRole ? (
+            <Button type="button" variant="outline" onClick={onSwitchToCreate}>
+              {t("workspace.switchToCreate")}
             </Button>
-            {mode === "edit" && selectedRole ? (
-              <Button type="button" variant="outline" onClick={onSwitchToCreate}>
-                {t("workspace.switchToCreate")}
-              </Button>
-            ) : null}
-          </div>
-        </form>
-      </CardContent>
-    </Card>
+          ) : null}
+        </div>
+      </form>
+    </div>
   );
 }

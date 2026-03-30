@@ -4,6 +4,8 @@ import type {
   RoleKnowledgeSource,
   RoleManifest,
   RoleMCPServer,
+  RolePermissions,
+  RoleResourceLimits,
   RoleSkillCatalogEntry,
   RoleSkillReference,
   RoleTrigger,
@@ -95,6 +97,21 @@ export interface RoleDraft {
   communicationPreferredChannel: string;
   communicationReportFormat: string;
   communicationEscalationPolicy: string;
+  permFileAllowedPaths: string;
+  permFileDeniedPaths: string;
+  permNetworkAllowedDomains: string;
+  permCodeSandbox: boolean;
+  permCodeAllowedLanguages: string;
+  resourceTokenBudgetPerTask: string;
+  resourceTokenBudgetPerDay: string;
+  resourceTokenBudgetPerMonth: string;
+  resourceApiCallsPerMinute: string;
+  resourceApiCallsPerHour: string;
+  resourceExecTimePerTask: string;
+  resourceExecTimePerDay: string;
+  resourceCostPerTask: string;
+  resourceCostPerDay: string;
+  resourceCostAlertThreshold: string;
   overridesInput: string;
   triggerRows: RoleTriggerDraft[];
   sourceManifest?: Partial<RoleManifest>;
@@ -368,6 +385,21 @@ export function buildRoleDraft(role?: RoleManifest): RoleDraft {
     deniedPaths: stringifyList(role?.security.deniedPaths),
     outputFilters: stringifyList(role?.security.outputFilters),
     requireReview: role?.security.requireReview ?? false,
+    permFileAllowedPaths: stringifyList(role?.security.permissions?.fileAccess?.allowedPaths),
+    permFileDeniedPaths: stringifyList(role?.security.permissions?.fileAccess?.deniedPaths),
+    permNetworkAllowedDomains: stringifyList(role?.security.permissions?.network?.allowedDomains),
+    permCodeSandbox: role?.security.permissions?.codeExecution?.sandbox ?? false,
+    permCodeAllowedLanguages: stringifyList(role?.security.permissions?.codeExecution?.allowedLanguages),
+    resourceTokenBudgetPerTask: role?.security.resourceLimits?.tokenBudget?.perTask != null ? String(role.security.resourceLimits.tokenBudget.perTask) : "",
+    resourceTokenBudgetPerDay: role?.security.resourceLimits?.tokenBudget?.perDay != null ? String(role.security.resourceLimits.tokenBudget.perDay) : "",
+    resourceTokenBudgetPerMonth: role?.security.resourceLimits?.tokenBudget?.perMonth != null ? String(role.security.resourceLimits.tokenBudget.perMonth) : "",
+    resourceApiCallsPerMinute: role?.security.resourceLimits?.apiCalls?.perMinute != null ? String(role.security.resourceLimits.apiCalls.perMinute) : "",
+    resourceApiCallsPerHour: role?.security.resourceLimits?.apiCalls?.perHour != null ? String(role.security.resourceLimits.apiCalls.perHour) : "",
+    resourceExecTimePerTask: role?.security.resourceLimits?.executionTime?.perTask ?? "",
+    resourceExecTimePerDay: role?.security.resourceLimits?.executionTime?.perDay ?? "",
+    resourceCostPerTask: role?.security.resourceLimits?.costLimit?.perTask ?? "",
+    resourceCostPerDay: role?.security.resourceLimits?.costLimit?.perDay ?? "",
+    resourceCostAlertThreshold: role?.security.resourceLimits?.costLimit?.alertThreshold != null ? String(role.security.resourceLimits.costLimit.alertThreshold) : "",
     collaborationCanDelegateTo: stringifyList(role?.collaboration?.canDelegateTo),
     collaborationAcceptsDelegationFrom: stringifyList(
       role?.collaboration?.acceptsDelegationFrom,
@@ -381,6 +413,71 @@ export function buildRoleDraft(role?: RoleManifest): RoleDraft {
     overridesInput: role?.overrides ? JSON.stringify(role.overrides, null, 2) : "",
     triggerRows: (role?.triggers ?? []).map((trigger) => buildTriggerDraft(trigger)),
     sourceManifest: cloneRoleManifest(role),
+  };
+}
+
+function serializePermissionsDraft(
+  draft: RoleDraft,
+  sourceManifest?: Partial<RoleManifest> | null,
+): RolePermissions | undefined {
+  const fileAllowed = parseList(draft.permFileAllowedPaths);
+  const fileDenied = parseList(draft.permFileDeniedPaths);
+  const networkDomains = parseList(draft.permNetworkAllowedDomains);
+  const codeLanguages = parseList(draft.permCodeAllowedLanguages);
+  const hasSandbox = draft.permCodeSandbox;
+
+  const hasFile = fileAllowed.length > 0 || fileDenied.length > 0;
+  const hasNetwork = networkDomains.length > 0;
+  const hasCode = hasSandbox || codeLanguages.length > 0;
+
+  if (!hasFile && !hasNetwork && !hasCode) {
+    return sourceManifest?.security?.permissions;
+  }
+
+  return {
+    ...(sourceManifest?.security?.permissions ?? {}),
+    fileAccess: hasFile
+      ? { allowedPaths: fileAllowed, deniedPaths: fileDenied }
+      : sourceManifest?.security?.permissions?.fileAccess,
+    network: hasNetwork
+      ? { allowedDomains: networkDomains }
+      : sourceManifest?.security?.permissions?.network,
+    codeExecution: hasCode
+      ? { sandbox: hasSandbox, allowedLanguages: codeLanguages }
+      : sourceManifest?.security?.permissions?.codeExecution,
+  };
+}
+
+function serializeResourceLimitsDraft(
+  draft: RoleDraft,
+  sourceManifest?: Partial<RoleManifest> | null,
+): RoleResourceLimits | undefined {
+  const tokenPerTask = draft.resourceTokenBudgetPerTask ? Number(draft.resourceTokenBudgetPerTask) : undefined;
+  const tokenPerDay = draft.resourceTokenBudgetPerDay ? Number(draft.resourceTokenBudgetPerDay) : undefined;
+  const tokenPerMonth = draft.resourceTokenBudgetPerMonth ? Number(draft.resourceTokenBudgetPerMonth) : undefined;
+  const apiPerMin = draft.resourceApiCallsPerMinute ? Number(draft.resourceApiCallsPerMinute) : undefined;
+  const apiPerHour = draft.resourceApiCallsPerHour ? Number(draft.resourceApiCallsPerHour) : undefined;
+  const execPerTask = draft.resourceExecTimePerTask.trim() || undefined;
+  const execPerDay = draft.resourceExecTimePerDay.trim() || undefined;
+  const costPerTask = draft.resourceCostPerTask.trim() || undefined;
+  const costPerDay = draft.resourceCostPerDay.trim() || undefined;
+  const costAlert = draft.resourceCostAlertThreshold ? Number(draft.resourceCostAlertThreshold) : undefined;
+
+  const hasToken = tokenPerTask != null || tokenPerDay != null || tokenPerMonth != null;
+  const hasApi = apiPerMin != null || apiPerHour != null;
+  const hasExec = execPerTask != null || execPerDay != null;
+  const hasCost = costPerTask != null || costPerDay != null || costAlert != null;
+
+  if (!hasToken && !hasApi && !hasExec && !hasCost) {
+    return sourceManifest?.security?.resourceLimits;
+  }
+
+  return {
+    ...(sourceManifest?.security?.resourceLimits ?? {}),
+    tokenBudget: hasToken ? { perTask: tokenPerTask, perDay: tokenPerDay, perMonth: tokenPerMonth } : sourceManifest?.security?.resourceLimits?.tokenBudget,
+    apiCalls: hasApi ? { perMinute: apiPerMin, perHour: apiPerHour } : sourceManifest?.security?.resourceLimits?.apiCalls,
+    executionTime: hasExec ? { perTask: execPerTask, perDay: execPerDay } : sourceManifest?.security?.resourceLimits?.executionTime,
+    costLimit: hasCost ? { perTask: costPerTask, perDay: costPerDay, alertThreshold: costAlert } : sourceManifest?.security?.resourceLimits?.costLimit,
   };
 }
 
@@ -514,9 +611,9 @@ export function serializeRoleDraft(
       deniedPaths: parseList(draft.deniedPaths),
       maxBudgetUsd: draft.maxBudgetUsd ? Number(draft.maxBudgetUsd) : 0,
       requireReview: draft.requireReview,
-      permissions: sourceManifest?.security.permissions,
+      permissions: serializePermissionsDraft(draft, sourceManifest),
       outputFilters: parseList(draft.outputFilters),
-      resourceLimits: sourceManifest?.security.resourceLimits,
+      resourceLimits: serializeResourceLimitsDraft(draft, sourceManifest),
     },
     collaboration,
     triggers,
@@ -843,4 +940,153 @@ function renderYamlValue(value: unknown, indent = 0): string[] {
 
 export function renderRoleManifestYaml(role: Partial<RoleManifest>): string {
   return renderYamlValue(role).join("\n");
+}
+
+export type FieldProvenance = "inherited" | "template" | "explicit";
+
+export interface FieldProvenanceEntry {
+  key: string;
+  provenance: FieldProvenance;
+}
+
+export interface FieldProvenanceMap {
+  customSettings: FieldProvenanceEntry[];
+  mcpServers: FieldProvenanceEntry[];
+  sharedKnowledge: FieldProvenanceEntry[];
+  privateKnowledge: FieldProvenanceEntry[];
+  triggers: FieldProvenanceEntry[];
+  collaboration: FieldProvenanceEntry[];
+}
+
+function computeKeyProvenance(
+  key: string,
+  parentKeys: Set<string>,
+  templateKeys: Set<string>,
+): FieldProvenance {
+  if (parentKeys.has(key)) return "inherited";
+  if (templateKeys.has(key)) return "template";
+  return "explicit";
+}
+
+export function computeFieldProvenance(
+  draft: RoleDraft,
+  parentManifest?: Partial<RoleManifest> | null,
+  templateManifest?: Partial<RoleManifest> | null,
+): FieldProvenanceMap {
+  const parentCustomKeys = new Set(
+    Object.keys(parentManifest?.capabilities?.customSettings ?? {}),
+  );
+  const templateCustomKeys = new Set(
+    Object.keys(templateManifest?.capabilities?.customSettings ?? {}),
+  );
+  const customSettings: FieldProvenanceEntry[] = draft.customSettingRows
+    .filter((row) => row.key.trim())
+    .map((row) => ({
+      key: row.key.trim(),
+      provenance: computeKeyProvenance(row.key.trim(), parentCustomKeys, templateCustomKeys),
+    }));
+
+  const parentMCPNames = new Set(
+    (parentManifest?.capabilities?.toolConfig?.mcpServers ?? [])
+      .map((s) => s.name?.trim())
+      .filter(Boolean) as string[],
+  );
+  const templateMCPNames = new Set(
+    (templateManifest?.capabilities?.toolConfig?.mcpServers ?? [])
+      .map((s) => s.name?.trim())
+      .filter(Boolean) as string[],
+  );
+  const mcpServers: FieldProvenanceEntry[] = draft.mcpServerRows
+    .filter((row) => row.name.trim())
+    .map((row) => ({
+      key: row.name.trim(),
+      provenance: computeKeyProvenance(row.name.trim(), parentMCPNames, templateMCPNames),
+    }));
+
+  const parentSharedIds = new Set(
+    (parentManifest?.knowledge?.shared ?? [])
+      .map((s) => s.id?.trim())
+      .filter(Boolean) as string[],
+  );
+  const templateSharedIds = new Set(
+    (templateManifest?.knowledge?.shared ?? [])
+      .map((s) => s.id?.trim())
+      .filter(Boolean) as string[],
+  );
+  const sharedKnowledge: FieldProvenanceEntry[] = draft.sharedKnowledgeRows
+    .filter((row) => row.id.trim())
+    .map((row) => ({
+      key: row.id.trim(),
+      provenance: computeKeyProvenance(row.id.trim(), parentSharedIds, templateSharedIds),
+    }));
+
+  const parentPrivateIds = new Set(
+    (parentManifest?.knowledge?.private ?? [])
+      .map((s) => s.id?.trim())
+      .filter(Boolean) as string[],
+  );
+  const templatePrivateIds = new Set(
+    (templateManifest?.knowledge?.private ?? [])
+      .map((s) => s.id?.trim())
+      .filter(Boolean) as string[],
+  );
+  const privateKnowledge: FieldProvenanceEntry[] = draft.privateKnowledgeRows
+    .filter((row) => row.id.trim())
+    .map((row) => ({
+      key: row.id.trim(),
+      provenance: computeKeyProvenance(row.id.trim(), parentPrivateIds, templatePrivateIds),
+    }));
+
+  const parentTriggerKeys = new Set(
+    (parentManifest?.triggers ?? [])
+      .map((t) => `${t.event?.trim()}:${t.action?.trim()}`)
+      .filter((k) => k !== ":"),
+  );
+  const templateTriggerKeys = new Set(
+    (templateManifest?.triggers ?? [])
+      .map((t) => `${t.event?.trim()}:${t.action?.trim()}`)
+      .filter((k) => k !== ":"),
+  );
+  const triggers: FieldProvenanceEntry[] = draft.triggerRows
+    .filter((row) => row.event.trim() || row.action.trim())
+    .map((row) => {
+      const key = `${row.event.trim()}:${row.action.trim()}`;
+      return {
+        key,
+        provenance: computeKeyProvenance(key, parentTriggerKeys, templateTriggerKeys),
+      };
+    });
+
+  const collaborationEntries: FieldProvenanceEntry[] = [];
+  const parentCollab = parentManifest?.collaboration;
+  const templateCollab = templateManifest?.collaboration;
+  if (draft.collaborationCanDelegateTo.trim()) {
+    collaborationEntries.push({
+      key: "canDelegateTo",
+      provenance: parentCollab?.canDelegateTo?.length
+        ? "inherited"
+        : templateCollab?.canDelegateTo?.length
+          ? "template"
+          : "explicit",
+    });
+  }
+  if (draft.collaborationAcceptsDelegationFrom.trim()) {
+    collaborationEntries.push({
+      key: "acceptsDelegationFrom",
+      provenance: parentCollab?.acceptsDelegationFrom?.length
+        ? "inherited"
+        : templateCollab?.acceptsDelegationFrom?.length
+          ? "template"
+          : "explicit",
+    });
+  }
+
+  return {
+    customSettings,
+    mcpServers,
+    sharedKnowledge,
+    privateKnowledge,
+    triggers,
+    collaboration: collaborationEntries,
+  };
 }

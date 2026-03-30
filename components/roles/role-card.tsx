@@ -1,8 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import { Shield, Pencil, Trash2 } from "lucide-react";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Shield, Pencil, Trash2, Wrench, BookOpen, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import type { RoleManifest, RoleSkillCatalogEntry } from "@/lib/stores/role-store";
@@ -24,32 +23,38 @@ export function RoleCard({ role, skillCatalog = [], onEdit, onDelete }: RoleCard
     skillCatalog.some((entry) => entry.path === skill.path),
   ).length;
   const unresolvedCount = skills.length - resolvedCount;
-  const hasPathRestrictions =
-    role.security.allowedPaths.length > 0 || role.security.deniedPaths.length > 0;
 
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center gap-3 pb-2">
-        <Shield className="size-5 text-primary" />
-        <div className="space-y-1">
-          <CardTitle className="text-base">{role.metadata.name}</CardTitle>
-          <p className="text-xs text-muted-foreground">
+    <div className="relative overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm transition-colors hover:bg-accent/30">
+      {/* Left accent stripe */}
+      <div className="absolute inset-y-0 left-0 w-0.5 bg-primary/40" />
+
+      {/* Header */}
+      <div className="flex items-start gap-2.5 pl-5 pr-3 pt-3 pb-2">
+        <Shield className="mt-0.5 size-3.5 shrink-0 text-primary/70" />
+        <div className="min-w-0 flex-1">
+          <p className="truncate text-xs font-semibold leading-tight">{role.metadata.name}</p>
+          <p className="truncate text-xs text-muted-foreground">
             {role.identity.role || role.metadata.id}
           </p>
         </div>
-      </CardHeader>
-      <CardContent>
-        <p className="mb-3 text-sm text-muted-foreground">
+        <Badge variant="outline" className="shrink-0 text-xs">
+          v{role.metadata.version || "1.0.0"}
+        </Badge>
+      </div>
+
+      {/* Description */}
+      {role.metadata.description ? (
+        <p className="line-clamp-2 pl-5 pr-3 pb-1.5 text-xs text-muted-foreground">
           {role.metadata.description}
         </p>
-        <div className="mb-2 flex flex-wrap gap-1.5">
-          <Badge variant="outline" className="text-xs">
-            v{role.metadata.version || "1.0.0"}
-          </Badge>
+      ) : null}
+
+      {/* Tags */}
+      {((role.metadata.tags ?? []).length > 0 || role.extends) ? (
+        <div className="flex flex-wrap gap-1 pl-5 pr-3 pb-1.5">
           {(role.metadata.tags ?? []).map((tag) => (
-            <Badge key={tag} variant="secondary" className="text-xs">
-              {tag}
-            </Badge>
+            <Badge key={tag} variant="secondary" className="text-xs">{tag}</Badge>
           ))}
           {role.extends ? (
             <Badge variant="outline" className="text-xs">
@@ -57,55 +62,59 @@ export function RoleCard({ role, skillCatalog = [], onEdit, onDelete }: RoleCard
             </Badge>
           ) : null}
         </div>
-        <div className="mb-4 grid gap-2 text-xs text-muted-foreground">
-          {allowedTools.length > 0 ? (
-            <p>{t("card.tools")}: {allowedTools.join(", ")}</p>
-          ) : (
-            <p>{t("card.tools")}: {t("card.toolsDefault")}</p>
-          )}
-          {role.capabilities.maxBudgetUsd != null ? (
-            <p>{t("card.maxBudget")}: ${role.capabilities.maxBudgetUsd.toFixed(2)}</p>
-          ) : null}
-          {role.capabilities.maxTurns != null ? (
-            <p>{t("card.maxTurns")}: {role.capabilities.maxTurns}</p>
-          ) : null}
-          {skills.length > 0 ? (
-            <>
-              <p>{t("card.skills")}: {t("card.skillsAutoOnDemand", { auto: autoLoadCount, onDemand: onDemandCount })}</p>
-              <p>{t("card.keySkills")}: {skills.slice(0, 3).map((skill) => skill.path).join(", ")}</p>
-              <p>{t("card.skillCatalog")}: {t("card.skillCatalogResolved", { resolved: resolvedCount, unresolved: unresolvedCount })}</p>
-            </>
-          ) : null}
-          {role.security.requireReview ? (
-            <p>{t("card.reviewGate")}</p>
-          ) : null}
-          {hasPathRestrictions ? (
-            <p>
-              {t("card.pathPolicy", { allow: role.security.allowedPaths.length, deny: role.security.deniedPaths.length })}
-            </p>
-          ) : null}
-        </div>
-        <div className="flex items-center gap-2">
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onEdit}
-            aria-label={`Edit ${role.metadata.name}`}
-          >
-            <Pencil className="mr-1 size-3.5" />
-            {t("card.edit")}
-          </Button>
-          <Button
-            variant="outline"
-            size="sm"
-            onClick={onDelete}
-            aria-label={`Delete ${role.metadata.name}`}
-          >
-            <Trash2 className="mr-1 size-3.5" />
-            {t("card.delete")}
-          </Button>
-        </div>
-      </CardContent>
-    </Card>
+      ) : null}
+
+      {/* Icon-group metadata */}
+      <div className="flex flex-wrap items-center gap-x-3 gap-y-0.5 pl-5 pr-3 pb-2 text-xs text-muted-foreground">
+        {allowedTools.length > 0 ? (
+          <span className="flex items-center gap-1">
+            <Wrench className="size-3" />
+            {allowedTools.length}
+          </span>
+        ) : null}
+        {skills.length > 0 ? (
+          <span className="flex items-center gap-1">
+            <BookOpen className="size-3" />
+            {t("card.skillsAutoOnDemand", { auto: autoLoadCount, onDemand: onDemandCount })}
+          </span>
+        ) : null}
+        {role.security.requireReview ? (
+          <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+            <AlertCircle className="size-3" />
+            {t("card.reviewGate")}
+          </span>
+        ) : null}
+        {unresolvedCount > 0 ? (
+          <span className="flex items-center gap-1 text-destructive">
+            <AlertCircle className="size-3" />
+            {unresolvedCount} unresolved
+          </span>
+        ) : null}
+      </div>
+
+      {/* Actions */}
+      <div className="flex items-center gap-1 border-t pl-4 py-1.5 pr-2">
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs"
+          onClick={onEdit}
+          aria-label={`Edit ${role.metadata.name}`}
+        >
+          <Pencil className="mr-1 size-3" />
+          {t("card.edit")}
+        </Button>
+        <Button
+          variant="ghost"
+          size="sm"
+          className="h-7 px-2 text-xs text-muted-foreground"
+          onClick={onDelete}
+          aria-label={`Delete ${role.metadata.name}`}
+        >
+          <Trash2 className="mr-1 size-3" />
+          {t("card.delete")}
+        </Button>
+      </div>
+    </div>
   );
 }

@@ -3,8 +3,10 @@
 import { useEffect } from "react";
 import { RoleWorkspace } from "@/components/roles/role-workspace";
 import { useRoleStore, type RoleManifest } from "@/lib/stores/role-store";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 export default function RolesPage() {
+  useBreadcrumbs([{ label: "Configuration", href: "/" }, { label: "Roles" }]);
   const {
     roles,
     skillCatalog,

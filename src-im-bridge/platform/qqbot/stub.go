@@ -24,9 +24,10 @@ type Stub struct {
 }
 
 type stubReply struct {
-	ChatID    string    `json:"chat_id,omitempty"`
-	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp"`
+	ChatID        string    `json:"chat_id,omitempty"`
+	Content       string    `json:"content"`
+	NativeSurface string    `json:"native_surface,omitempty"`
+	Timestamp     time.Time `json:"timestamp"`
 }
 
 type stubMessageRequest struct {
@@ -120,6 +121,31 @@ func (s *Stub) Send(ctx context.Context, chatID string, content string) error {
 	s.mu.Unlock()
 	log.WithFields(log.Fields{"component": "qqbot-stub", "chat_id": chatID}).Info("Send: " + content)
 	return nil
+}
+
+func (s *Stub) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	s.mu.Lock()
+	s.replies = append(s.replies, stubReply{
+		ChatID:        chatID,
+		Content:       message.FallbackText(),
+		NativeSurface: message.SurfaceType(),
+		Timestamp:     time.Now(),
+	})
+	s.mu.Unlock()
+	log.WithFields(log.Fields{"component": "qqbot-stub", "chat_id": chatID}).Info("Send native: " + message.FallbackText())
+	return nil
+}
+
+func (s *Stub) ReplyNative(ctx context.Context, rawReplyCtx any, message *core.NativeMessage) error {
+	reply := toReplyContext(rawReplyCtx)
+	target := firstNonEmpty(reply.ChatID, reply.UserID)
+	if !reply.IsGroup && reply.UserID != "" {
+		target = "user:" + reply.UserID
+	}
+	return s.SendNative(ctx, target, message)
 }
 
 func (s *Stub) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {

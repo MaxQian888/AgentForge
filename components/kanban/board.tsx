@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { DragDropContext, type DropResult } from "@hello-pangea/dnd";
 import { Column } from "./column";
 import type { TaskWorkspaceDisplayOptions } from "@/lib/stores/task-workspace-store";
@@ -51,6 +51,46 @@ export function Board({
   onQuickPriorityChange,
 }: BoardProps) {
   const [error, setError] = useState<string | null>(null);
+  const [optimisticStatuses, setOptimisticStatuses] = useState<Record<string, TaskStatus>>({});
+  const [pendingTaskIds, setPendingTaskIds] = useState<string[]>([]);
+
+  useEffect(() => {
+    const tasksById = new Map(tasks.map((task) => [task.id, task]));
+
+    setPendingTaskIds((current) =>
+      current.filter((taskId) => tasksById.has(taskId)),
+    );
+    setOptimisticStatuses((current) => {
+      let changed = false;
+      const next = { ...current };
+
+      for (const [taskId, status] of Object.entries(current)) {
+        const task = tasksById.get(taskId);
+        if (!task || task.status === status) {
+          delete next[taskId];
+          changed = true;
+        }
+      }
+
+      return changed ? next : current;
+    });
+  }, [tasks]);
+
+  const visibleTasks = useMemo(
+    () =>
+      tasks.map((task) => {
+        const optimisticStatus = optimisticStatuses[task.id];
+        if (!optimisticStatus || optimisticStatus === task.status) {
+          return task;
+        }
+
+        return {
+          ...task,
+          status: optimisticStatus,
+        };
+      }),
+    [optimisticStatuses, tasks],
+  );
 
   const grouped = useMemo(() => {
     const map: Record<TaskStatus, Task[]> = {
@@ -66,12 +106,12 @@ export function Board({
       budget_exceeded: [],
     };
 
-    for (const task of tasks) {
+    for (const task of visibleTasks) {
       map[task.status]?.push(task);
     }
 
     return map;
-  }, [tasks]);
+  }, [visibleTasks]);
 
   const subtaskStatsMap = useMemo(() => {
     const map: Record<string, { total: number; done: number }> = {};
@@ -92,18 +132,35 @@ export function Board({
   const onDragEnd = async (result: DropResult) => {
     if (!result.destination) return;
 
+    const taskId = result.draggableId;
     const newStatus = result.destination.droppableId as TaskStatus;
     if (newStatus === result.source.droppableId) return;
+    if (pendingTaskIds.includes(taskId)) return;
 
     setError(null);
+    setOptimisticStatuses((current) => ({
+      ...current,
+      [taskId]: newStatus,
+    }));
+    setPendingTaskIds((current) =>
+      current.includes(taskId) ? current : [...current, taskId],
+    );
+
     try {
-      await onTaskStatusChange(result.draggableId, newStatus);
+      await onTaskStatusChange(taskId, newStatus);
     } catch (dragError) {
+      setOptimisticStatuses((current) => {
+        const next = { ...current };
+        delete next[taskId];
+        return next;
+      });
       setError(
         dragError instanceof Error
           ? dragError.message
           : "Failed to update task status."
       );
+    } finally {
+      setPendingTaskIds((current) => current.filter((id) => id !== taskId));
     }
   };
 
@@ -124,6 +181,7 @@ export function Board({
               tasks={grouped[status]}
               selectedTaskId={selectedTaskId}
               selectedTaskIds={selectedTaskIds}
+              pendingTaskIds={pendingTaskIds}
               displayOptions={displayOptions}
               linkedDocsByTask={linkedDocsByTask}
               subtaskStatsMap={subtaskStatsMap}

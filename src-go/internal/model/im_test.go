@@ -89,3 +89,71 @@ func TestIMActionRequest_JSONRoundTripPreservesReplyTargetAndMetadata(t *testing
 		t.Fatalf("Metadata = %+v", decoded.Metadata)
 	}
 }
+
+func TestIMSendRequest_JSONRoundTripPreservesTypedNativePayloads(t *testing.T) {
+	req := &IMSendRequest{
+		Platform:  "slack",
+		ChannelID: "C123",
+		Text:      "fallback text",
+		Native: &IMNativeMessage{
+			Platform: "slack",
+			SlackBlockKit: &IMSlackBlockKitPayload{
+				Blocks: json.RawMessage(`[{"type":"section","text":{"type":"mrkdwn","text":"*Build* ready"}}]`),
+			},
+		},
+	}
+
+	raw, err := json.Marshal(req)
+	if err != nil {
+		t.Fatalf("marshal send request: %v", err)
+	}
+
+	var decoded IMSendRequest
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal send request: %v", err)
+	}
+
+	if decoded.Native == nil || decoded.Native.SlackBlockKit == nil {
+		t.Fatalf("Native = %+v", decoded.Native)
+	}
+	if string(decoded.Native.SlackBlockKit.Blocks) == "" {
+		t.Fatalf("SlackBlockKit = %+v", decoded.Native.SlackBlockKit)
+	}
+}
+
+func TestIMNativeMessage_JSONRoundTripPreservesAdditionalPlatformPayloads(t *testing.T) {
+	payload := &IMNativeMessage{
+		Platform: "discord",
+		DiscordEmbed: &IMDiscordEmbedPayload{
+			Title:       "Build Ready",
+			Description: "Agent finished the run.",
+			Fields: []IMDiscordEmbedField{{
+				Name:  "Status",
+				Value: "success",
+			}},
+			Components: []IMDiscordActionRow{{
+				Buttons: []IMDiscordButton{{
+					Label: "Open",
+					URL:   "https://example.test/builds/1",
+				}},
+			}},
+		},
+	}
+
+	raw, err := json.Marshal(payload)
+	if err != nil {
+		t.Fatalf("marshal native payload: %v", err)
+	}
+
+	var decoded IMNativeMessage
+	if err := json.Unmarshal(raw, &decoded); err != nil {
+		t.Fatalf("unmarshal native payload: %v", err)
+	}
+
+	if decoded.DiscordEmbed == nil || decoded.DiscordEmbed.Title != "Build Ready" {
+		t.Fatalf("DiscordEmbed = %+v", decoded.DiscordEmbed)
+	}
+	if len(decoded.DiscordEmbed.Components) != 1 || len(decoded.DiscordEmbed.Components[0].Buttons) != 1 {
+		t.Fatalf("Components = %+v", decoded.DiscordEmbed.Components)
+	}
+}

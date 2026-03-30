@@ -24,7 +24,9 @@ type TeamRunRepository interface {
 	Create(ctx context.Context, team *model.AgentTeam) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.AgentTeam, error)
 	GetByTask(ctx context.Context, taskID uuid.UUID) (*model.AgentTeam, error)
+	GetTeamSummary(ctx context.Context, id uuid.UUID) (*model.AgentTeamSummaryDTO, error)
 	ListByProject(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeam, error)
+	ListTeamSummaries(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeamSummaryDTO, error)
 	ListActive(ctx context.Context) ([]*model.AgentTeam, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	UpdateStatusWithError(ctx context.Context, id uuid.UUID, status, errorMessage string) error
@@ -287,7 +289,6 @@ func (s *TeamService) spawnCodersForTask(ctx context.Context, team *model.AgentT
 	}
 }
 
-
 func (s *TeamService) updateTeamCost(ctx context.Context, team *model.AgentTeam) {
 	runs, err := s.runRepo.ListByTeam(ctx, team.ID)
 	if err != nil {
@@ -463,6 +464,10 @@ func (s *TeamService) RetryTeam(ctx context.Context, teamID uuid.UUID) error {
 
 // GetSummary builds a full team summary DTO.
 func (s *TeamService) GetSummary(ctx context.Context, teamID uuid.UUID) (*model.AgentTeamSummaryDTO, error) {
+	if summary, err := s.teamRepo.GetTeamSummary(ctx, teamID); err == nil && summary != nil {
+		return summary, nil
+	}
+
 	team, err := s.teamRepo.GetByID(ctx, teamID)
 	if err != nil {
 		return nil, ErrTeamNotFound
@@ -505,6 +510,33 @@ func (s *TeamService) GetSummary(ctx context.Context, teamID uuid.UUID) (*model.
 // ListByProject returns all teams for a project, optionally filtered by status.
 func (s *TeamService) ListByProject(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeam, error) {
 	return s.teamRepo.ListByProject(ctx, projectID, status)
+}
+
+// ListSummaries returns enriched team summaries for a project, optionally filtered by status.
+func (s *TeamService) ListSummaries(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeamSummaryDTO, error) {
+	summaries, err := s.teamRepo.ListTeamSummaries(ctx, projectID, status)
+	if err == nil {
+		return summaries, nil
+	}
+
+	teams, listErr := s.teamRepo.ListByProject(ctx, projectID, status)
+	if listErr != nil {
+		return nil, listErr
+	}
+
+	fallback := make([]*model.AgentTeamSummaryDTO, 0, len(teams))
+	for _, team := range teams {
+		summary, summaryErr := s.GetSummary(ctx, team.ID)
+		if summaryErr == nil && summary != nil {
+			fallback = append(fallback, summary)
+			continue
+		}
+		fallback = append(fallback, &model.AgentTeamSummaryDTO{
+			AgentTeamDTO: team.ToDTO(),
+			CoderRuns:    make([]model.AgentRunDTO, 0),
+		})
+	}
+	return fallback, nil
 }
 
 // DeleteTeam removes a team that is in terminal status.

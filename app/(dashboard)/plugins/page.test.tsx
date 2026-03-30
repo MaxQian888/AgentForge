@@ -1,4 +1,4 @@
-import { render, screen, within } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import pluginMessages from "../../../messages/en/plugins.json";
 
@@ -335,18 +335,16 @@ describe("PluginsPage", () => {
     expect(fetchRemoteMarketplace).toHaveBeenCalled();
   });
 
-  it("renders filter controls, marketplace, and selected plugin details", () => {
+  it("renders tabs, search, and desktop runtime header", () => {
     render(<PluginsPage />);
 
     expect(screen.getByText("Desktop runtime")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Installed/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Built-in/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Marketplace/i })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Remote/i })).toBeInTheDocument();
     expect(screen.getByLabelText("Search plugins")).toBeInTheDocument();
-    expect(screen.getByText("Marketplace")).toBeInTheDocument();
-    expect(screen.getByText("Remote registry")).toBeInTheDocument();
     expect(screen.getByText("Plugin details")).toBeInTheDocument();
-    expect(screen.getByText("Runtime host")).toBeInTheDocument();
-    expect(screen.getByText("Coding role")).toBeInTheDocument();
-    expect(screen.getByText("Feishu Adapter")).toBeInTheDocument();
-    expect(screen.getByText("Remote Release Train")).toBeInTheDocument();
   });
 
   it("updates the query filter from the search input", async () => {
@@ -358,7 +356,7 @@ describe("PluginsPage", () => {
     expect(setFilters).toHaveBeenCalledWith({ query: "git" });
   });
 
-  it("shows available desktop update metadata after a successful check", async () => {
+  it("expands runtime panel and shows desktop update after check", async () => {
     const user = userEvent.setup();
     checkForUpdate.mockResolvedValue({
       mode: "desktop",
@@ -373,6 +371,11 @@ describe("PluginsPage", () => {
     });
 
     render(<PluginsPage />);
+
+    // Expand the runtime panel
+    await user.click(screen.getByText("Desktop runtime"));
+
+    // Now the check update button is visible
     await user.click(screen.getByRole("button", { name: "Check update" }));
 
     expect(
@@ -411,6 +414,7 @@ describe("PluginsPage", () => {
     });
 
     render(<PluginsPage />);
+    await user.click(screen.getByText("Desktop runtime"));
     await user.click(screen.getByRole("button", { name: "Check update" }));
     await user.click(await screen.findByRole("button", { name: "Install update" }));
 
@@ -430,6 +434,7 @@ describe("PluginsPage", () => {
     });
 
     render(<PluginsPage />);
+    await user.click(screen.getByText("Desktop runtime"));
     await user.click(screen.getByRole("button", { name: "Notify" }));
 
     expect(sendNotification).toHaveBeenCalledWith(
@@ -474,30 +479,21 @@ describe("PluginsPage", () => {
 
     render(<PluginsPage />);
 
-    expect(await screen.findByText("Last desktop event: plugin.lifecycle")).toBeInTheDocument();
-    expect(await screen.findByText("Event bridge: available")).toBeInTheDocument();
+    // Expand runtime to see desktop event info
+    await userEvent.click(screen.getByText("Desktop runtime"));
+
+    expect(await screen.findByText(/Last desktop event.*plugin\.lifecycle/)).toBeInTheDocument();
+    expect(await screen.findByText(/Event bridge.*available/)).toBeInTheDocument();
     expect(fetchPlugins).toHaveBeenCalledTimes(2);
   });
 
-  it("installs built-in availability entries through the explicit catalog flow", async () => {
+  it("shows built-in plugins in the built-in tab", async () => {
     const user = userEvent.setup();
     render(<PluginsPage />);
 
-    const builtinHeading = screen.getByText("Feishu Adapter");
-    const builtinCard = builtinHeading.closest(".rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl")?.parentElement ?? builtinHeading.parentElement?.parentElement;
-    expect(builtinCard).not.toBeNull();
+    await user.click(screen.getByRole("tab", { name: /Built-in/i }));
 
-    await user.click(
-      within(builtinCard as HTMLElement).getByRole("button", { name: "Install" }),
-    );
-
-    expect(installFromCatalog).toHaveBeenCalledWith("feishu-adapter");
-    expect(installLocal).not.toHaveBeenCalled();
-  });
-
-  it("shows built-in availability guidance from the official bundle metadata", () => {
-    render(<PluginsPage />);
-
+    expect(screen.getByText("Feishu Adapter")).toBeInTheDocument();
     expect(
       screen.getByText("Requires Feishu application credentials before live activation."),
     ).toBeInTheDocument();
@@ -507,7 +503,18 @@ describe("PluginsPage", () => {
     ).toBeInTheDocument();
   });
 
-  it("renders unsupported-host built-ins as blocked instead of installable", () => {
+  it("installs built-in availability entries through the explicit catalog flow", async () => {
+    const user = userEvent.setup();
+    render(<PluginsPage />);
+
+    await user.click(screen.getByRole("tab", { name: /Built-in/i }));
+    await user.click(screen.getByRole("button", { name: "Install" }));
+
+    expect(installFromCatalog).toHaveBeenCalledWith("feishu-adapter");
+    expect(installLocal).not.toHaveBeenCalled();
+  });
+
+  it("renders unsupported-host built-ins as blocked instead of installable", async () => {
     storeState.builtins = [
       {
         ...storeState.builtins[0],
@@ -531,33 +538,41 @@ describe("PluginsPage", () => {
       },
     ];
 
+    const user = userEvent.setup();
     render(<PluginsPage />);
+
+    await user.click(screen.getByRole("tab", { name: /Built-in/i }));
 
     expect(screen.getByText("This built-in is not supported on the current host.")).toBeInTheDocument();
     expect(screen.getByText("Use a supported host family for this built-in.")).toBeInTheDocument();
-    const builtinHeading = screen.getByText("Desktop Only Tool");
-    const builtinCard = builtinHeading.closest(".rounded-md, .rounded-lg, .rounded-xl, .rounded-2xl")?.parentElement ?? builtinHeading.parentElement?.parentElement;
-    expect(within(builtinCard as HTMLElement).getByRole("button", { name: "Install" })).toBeDisabled();
+    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
   });
 
-  it("keeps unsupported marketplace entries in browse-only mode", () => {
+  it("shows marketplace entries in the marketplace tab", async () => {
+    const user = userEvent.setup();
     render(<PluginsPage />);
 
+    await user.click(screen.getByRole("tab", { name: /Marketplace/i }));
+
+    expect(screen.getByText("Coder Role")).toBeInTheDocument();
     expect(screen.getByText("Browse only")).toBeInTheDocument();
     expect(screen.getByText(/Remote marketplace installation is not wired/i)).toBeInTheDocument();
   });
 
-  it("installs remote registry entries through the explicit remote control-plane flow", async () => {
+  it("shows remote entries in the remote tab and supports install", async () => {
     const user = userEvent.setup();
-
     render(<PluginsPage />);
+
+    await user.click(screen.getByRole("tab", { name: /Remote/i }));
+
+    expect(screen.getByText("Remote Release Train")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Install remote" }));
 
     expect(installFromRemote).toHaveBeenCalledWith("remote-release-train", "2.0.0");
   });
 
-  it("shows remote registry availability failures without breaking the rest of the page", () => {
+  it("shows remote registry availability failures without breaking the rest of the page", async () => {
     storeState.remoteMarketplace = {
       available: false,
       registry: "https://registry.agentforge.dev",
@@ -566,10 +581,12 @@ describe("PluginsPage", () => {
       entries: [],
     };
 
+    const user = userEvent.setup();
     render(<PluginsPage />);
 
-    expect(screen.getByText("Remote registry")).toBeInTheDocument();
+    await user.click(screen.getByRole("tab", { name: /Remote/i }));
+
     expect(screen.getByText("Registry unavailable")).toBeInTheDocument();
-    expect(screen.getByText("Installed plugins")).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: /Installed/i })).toBeInTheDocument();
   });
 });

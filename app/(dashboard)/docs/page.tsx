@@ -4,8 +4,10 @@ import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
-import { FileText, Plus } from "lucide-react";
+import { FileText, FolderOpen, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { flattenDocsTree, useDocsStore } from "@/lib/stores/docs-store";
 import { buildDocsHref } from "@/lib/route-hrefs";
@@ -13,8 +15,10 @@ import { DocsSidebarPanel } from "@/components/docs/docs-sidebar-panel";
 import { TemplateCenter } from "@/components/docs/template-center";
 import { TemplatePicker } from "@/components/docs/template-picker";
 import { DocsPageDetailClient } from "./[pageId]/page-client";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 export default function DocsLandingPage() {
+  useBreadcrumbs([{ label: "Configuration", href: "/" }, { label: "Docs" }]);
   const t = useTranslations("docs");
   const searchParams = useSearchParams();
   const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
@@ -56,10 +60,11 @@ export default function DocsLandingPage() {
   if (!selectedProjectId) {
     return (
       <div className="flex flex-col gap-4">
-        <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <p className="text-sm text-muted-foreground">
-          {t("selectProject")}
-        </p>
+        <PageHeader title={t("title")} />
+        <EmptyState
+          icon={FolderOpen}
+          title={t("selectProject")}
+        />
       </div>
     );
   }
@@ -84,30 +89,28 @@ export default function DocsLandingPage() {
       />
 
       <div className="flex flex-col gap-6">
-        <div className="flex flex-wrap items-center justify-between gap-3">
-          <div>
-            <h1 className="text-3xl font-semibold">{t("title")}</h1>
-            <p className="text-sm text-muted-foreground">
-              {t("subtitle")}
-            </p>
-          </div>
-          <div className="flex gap-2">
-            <Button variant="outline" onClick={() => setPickerOpen(true)}>
-              {t("useTemplate")}
-            </Button>
-            <Button
-              onClick={() =>
-                void createPage({
-                  projectId: selectedProjectId,
-                  title: t("untitledDoc"),
-                })
-              }
-            >
-              <Plus className="mr-1 size-4" />
-              {t("newPage")}
-            </Button>
-          </div>
-        </div>
+        <PageHeader
+          title={t("title")}
+          description={t("subtitle")}
+          actions={
+            <>
+              <Button variant="outline" onClick={() => setPickerOpen(true)}>
+                {t("useTemplate")}
+              </Button>
+              <Button
+                onClick={() =>
+                  void createPage({
+                    projectId: selectedProjectId,
+                    title: t("untitledDoc"),
+                  })
+                }
+              >
+                <Plus className="mr-1 size-4" />
+                {t("newPage")}
+              </Button>
+            </>
+          }
+        />
 
         <div className="grid gap-4 lg:grid-cols-3">
           <section className="rounded-2xl border border-border/60 bg-card/70 p-4">
@@ -119,7 +122,7 @@ export default function DocsLandingPage() {
                 </Link>
               ))}
               {pinnedPages.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t("noPinned")}</p>
+                <EmptyState icon={FileText} title={t("noPinned")} className="py-6" />
               ) : null}
             </div>
           </section>
@@ -137,7 +140,7 @@ export default function DocsLandingPage() {
                 );
               })}
               {favorites.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t("noFavorites")}</p>
+                <EmptyState icon={FileText} title={t("noFavorites")} className="py-6" />
               ) : null}
             </div>
           </section>
@@ -155,7 +158,7 @@ export default function DocsLandingPage() {
                 );
               })}
               {recentAccess.length === 0 ? (
-                <p className="text-sm text-muted-foreground">{t("noRecent")}</p>
+                <EmptyState icon={FileText} title={t("noRecent")} className="py-6" />
               ) : null}
             </div>
           </section>

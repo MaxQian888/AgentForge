@@ -1,11 +1,12 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
+import { PanelLeftClose, PanelRightClose } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { ProjectWorkspaceSidebar } from "./project-workspace-sidebar";
 import { TaskContextRail } from "./task-context-rail";
-import { TaskWorkspaceMain } from "./task-workspace-main";
+import { TaskWorkspaceMain, type BulkActionResult } from "./task-workspace-main";
 import {
   buildContextRailState,
   type TaskContextRailSelectionState,
@@ -25,8 +26,19 @@ import { useTaskWorkspaceStore } from "@/lib/stores/task-workspace-store";
 import { useCustomFieldStore } from "@/lib/stores/custom-field-store";
 import { useSavedViewStore } from "@/lib/stores/saved-view-store";
 
+type WorkspaceLayout = "desktop" | "medium" | "narrow";
+type CompactPanel = "none" | "sidebar" | "details";
+
+function getLayout(): WorkspaceLayout {
+  if (typeof window === "undefined") return "desktop";
+  if (window.innerWidth >= 1280) return "desktop";
+  if (window.innerWidth >= 768) return "medium";
+  return "narrow";
+}
+
 interface ProjectTaskWorkspaceProps {
   projectId: string;
+  projectName: string;
   tasks: Task[];
   loading: boolean;
   error: string | null;
@@ -48,6 +60,7 @@ interface ProjectTaskWorkspaceProps {
     changes: { plannedStartAt: string; plannedEndAt: string }
   ) => Promise<void> | void;
   onTaskSave: (taskId: string, data: Partial<Task>) => Promise<void> | void;
+  onCreateTask?: () => void;
   onTaskAssign: (
     taskId: string,
     assigneeId: string,
@@ -61,14 +74,15 @@ interface ProjectTaskWorkspaceProps {
     memberId: string
   ) => Promise<void> | void;
   onTaskDelete?: (taskId: string) => Promise<void> | void;
-  onBulkStatusChange?: (ids: string[], status: TaskStatus) => void;
-  onBulkAssign?: (ids: string[], assigneeId: string, assigneeType: "human" | "agent") => void;
-  onBulkDelete?: (ids: string[]) => void;
+  onBulkStatusChange?: (ids: string[], status: TaskStatus) => Promise<BulkActionResult | void> | BulkActionResult | void;
+  onBulkAssign?: (ids: string[], assigneeId: string, assigneeType: "human" | "agent") => Promise<BulkActionResult | void> | BulkActionResult | void;
+  onBulkDelete?: (ids: string[]) => Promise<BulkActionResult | void> | BulkActionResult | void;
   onSprintFilterChange?: (sprintId: string | "all") => void;
 }
 
 export function ProjectTaskWorkspace({
   projectId,
+  projectName,
   tasks,
   loading,
   error,
@@ -84,6 +98,7 @@ export function ProjectTaskWorkspace({
   onTaskStatusChange,
   onTaskScheduleChange,
   onTaskSave,
+  onCreateTask,
   onTaskAssign,
   onTaskDecompose,
   onSpawnAgent,
@@ -106,11 +121,28 @@ export function ProjectTaskWorkspace({
   );
   const fetchDefinitions = useCustomFieldStore((state) => state.fetchDefinitions);
   const fetchTaskValues = useCustomFieldStore((state) => state.fetchTaskValues);
+  const valuesByTask = useCustomFieldStore((state) => state.valuesByTask);
   const fetchViews = useSavedViewStore((state) => state.fetchViews);
 
+  const [layout, setLayout] = useState<WorkspaceLayout>(() => getLayout());
+  const [compactPanel, setCompactPanel] = useState<CompactPanel>("none");
+
+  useEffect(() => {
+    const handleResize = () => {
+      const nextLayout = getLayout();
+      setLayout(nextLayout);
+      if (nextLayout === "desktop") {
+        setCompactPanel("none");
+      }
+    };
+    handleResize();
+    window.addEventListener("resize", handleResize);
+    return () => window.removeEventListener("resize", handleResize);
+  }, []);
+
   const filteredTasks = useMemo(
-    () => filterTasksForWorkspace(tasks, filters),
-    [tasks, filters]
+    () => filterTasksForWorkspace(tasks, filters, { valuesByTask }),
+    [tasks, filters, valuesByTask]
   );
 
   useEffect(() => {
@@ -140,15 +172,34 @@ export function ProjectTaskWorkspace({
     [agents, filteredTasks, notifications, projectId, selectedTaskId, tasks]
   );
 
-  return (
-    <div
-      className={cn(
-        "grid gap-4",
-        contextRailDisplay === "expanded"
-          ? "xl:grid-cols-[minmax(0,1fr)_360px]"
-          : "xl:grid-cols-[minmax(0,1fr)_120px]"
-      )}
-    >
+  const showRail = contextRailDisplay === "expanded";
+
+  const sidebar = (
+    <ProjectWorkspaceSidebar
+      projectId={projectId}
+      projectName={projectName}
+      tasks={tasks}
+      sprints={sprints}
+      filteredCount={filteredTasks.length}
+      realtimeConnected={realtimeConnected}
+      onCreateTask={onCreateTask}
+      onSprintFilterChange={onSprintFilterChange}
+    />
+  );
+
+  const mainContent = (
+    <div className="relative flex h-full flex-col">
+      {/* Toggle buttons for context rail on desktop */}
+      {layout === "desktop" && !showRail ? (
+        <button
+          type="button"
+          className="absolute right-0 top-3 z-10 rounded-l-md border border-r-0 bg-background px-1.5 py-1.5 text-muted-foreground shadow-sm transition-colors hover:bg-accent hover:text-foreground"
+          onClick={() => setContextRailDisplay("expanded")}
+          title={t("sidebar.showDetails")}
+        >
+          <PanelRightClose className="size-4" />
+        </button>
+      ) : null}
       <TaskWorkspaceMain
         projectId={projectId}
         tasks={tasks}
@@ -163,71 +214,118 @@ export function ProjectTaskWorkspace({
         onTaskStatusChange={onTaskStatusChange}
         onTaskScheduleChange={onTaskScheduleChange}
         onTaskSave={onTaskSave}
+        onCreateTask={onCreateTask}
         members={members}
         onBulkStatusChange={onBulkStatusChange}
         onBulkAssign={onBulkAssign}
         onBulkDelete={onBulkDelete}
         onSprintFilterChange={onSprintFilterChange}
       />
-      {contextRailDisplay === "expanded" ? (
-        <div className="flex flex-col gap-3">
-          <div className="flex justify-end">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setContextRailDisplay("collapsed")}
-            >
-              {t("workspace.collapseRail")}
-            </Button>
-          </div>
-          <TaskContextRail
-            selectionState={rail.selectionState as TaskContextRailSelectionState}
-            selectedTask={rail.selectedTask}
-            counts={rail.counts}
-            dependencySummary={rail.dependencySummary}
-            costSummary={rail.costSummary}
-            alerts={rail.alerts}
-            realtimeState={realtimeConnected ? "live" : "degraded"}
-            tasks={tasks}
-            members={members}
-            agents={agents}
-            sprints={sprints}
-            onTaskSave={onTaskSave}
-            onTaskAssign={onTaskAssign}
-            onTaskStatusChange={onTaskStatusChange}
-            onTaskDecompose={onTaskDecompose}
-            onSpawnAgent={onSpawnAgent}
-            onTaskDelete={onTaskDelete}
-            onResetFilters={resetFilters}
-          />
+    </div>
+  );
+
+  const contextRail = (
+    <div className="flex h-full flex-col">
+      <div className="flex items-center justify-between border-b px-3 py-2">
+        <span className="text-xs font-medium text-muted-foreground">
+          {rail.selectedTask
+            ? t("workspace.selectedTask", { title: rail.selectedTask.title })
+            : t("workspace.noTaskSelected")}
+        </span>
+        <button
+          type="button"
+          className="rounded-md p-1 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          onClick={() => setContextRailDisplay("collapsed")}
+          title={t("sidebar.collapseDetails")}
+        >
+          <PanelLeftClose className="size-4" />
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto">
+        <TaskContextRail
+          selectionState={rail.selectionState as TaskContextRailSelectionState}
+          selectedTask={rail.selectedTask}
+          counts={rail.counts}
+          dependencySummary={rail.dependencySummary}
+          costSummary={rail.costSummary}
+          alerts={rail.alerts}
+          realtimeState={realtimeConnected ? "live" : "degraded"}
+          tasks={tasks}
+          members={members}
+          agents={agents}
+          sprints={sprints}
+          onTaskSave={onTaskSave}
+          onTaskAssign={onTaskAssign}
+          onTaskStatusChange={onTaskStatusChange}
+          onTaskDecompose={onTaskDecompose}
+          onSpawnAgent={onSpawnAgent}
+          onTaskDelete={onTaskDelete}
+          onResetFilters={resetFilters}
+        />
+      </div>
+    </div>
+  );
+
+  // Desktop: 3-column grid
+  if (layout === "desktop") {
+    return (
+      <div className="flex h-full overflow-hidden border-t bg-card">
+        <div
+          className={cn(
+            "grid h-full w-full divide-x divide-border",
+            showRail
+              ? "grid-cols-[260px_minmax(0,1fr)_320px]"
+              : "grid-cols-[260px_minmax(0,1fr)]"
+          )}
+        >
+          <div className="overflow-y-auto">{sidebar}</div>
+          <div className="overflow-y-auto">{mainContent}</div>
+          {showRail ? <div className="overflow-hidden">{contextRail}</div> : null}
         </div>
-      ) : (
-        <Card className="h-fit">
-          <CardContent className="flex flex-col gap-3 px-4 py-4">
-            <Button
-              type="button"
-              size="sm"
-              variant="outline"
-              onClick={() => setContextRailDisplay("expanded")}
-            >
-              {t("workspace.expandRail")}
-            </Button>
-            <div className="text-xs text-muted-foreground">
-              {rail.selectedTask ? t("workspace.selectedTask", { title: rail.selectedTask.title }) : t("workspace.noTaskSelected")}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {realtimeConnected ? t("workspace.realtimeLive") : t("workspace.realtimeDegraded")}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {t("workspace.stalledCount", { count: rail.counts.stalled })}
-            </div>
-            <div className="text-xs text-muted-foreground">
-              {t("workspace.recentAlerts", { count: rail.alerts.length })}
-            </div>
-          </CardContent>
-        </Card>
-      )}
+      </div>
+    );
+  }
+
+  // Medium / Narrow: stacked with toggle buttons
+  return (
+    <div className="flex h-full flex-col overflow-hidden">
+      <div className="flex items-center gap-2 border-b bg-card px-3 py-2">
+        <Button
+          type="button"
+          size="sm"
+          variant={compactPanel === "sidebar" ? "secondary" : "outline"}
+          className="h-7 text-xs"
+          onClick={() =>
+            setCompactPanel((c) => (c === "sidebar" ? "none" : "sidebar"))
+          }
+        >
+          {t("sidebar.showSidebar")}
+        </Button>
+        <Button
+          type="button"
+          size="sm"
+          variant={compactPanel === "details" ? "secondary" : "outline"}
+          className="h-7 text-xs"
+          onClick={() =>
+            setCompactPanel((c) => (c === "details" ? "none" : "details"))
+          }
+        >
+          {t("sidebar.showDetails")}
+        </Button>
+      </div>
+
+      {compactPanel === "sidebar" ? (
+        <div className="border-b bg-card">{sidebar}</div>
+      ) : null}
+      {compactPanel === "details" ? (
+        <div className="max-h-[50vh] overflow-y-auto border-b bg-card">
+          {contextRail}
+        </div>
+      ) : null}
+
+      <div className="min-h-0 flex-1 overflow-auto bg-card">
+        {mainContent}
+      </div>
     </div>
   );
 }

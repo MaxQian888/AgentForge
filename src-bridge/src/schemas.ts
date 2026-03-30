@@ -1,5 +1,14 @@
 import { z } from "zod";
 
+const UnknownRecordSchema = z.record(z.string(), z.unknown());
+const HookNameSchema = z.enum([
+  "PreToolUse",
+  "PostToolUse",
+  "SubagentStart",
+  "SubagentStop",
+  "PermissionRequest",
+]);
+
 const RoleExecutionSkillSchema = z.object({
   path: z.string().min(1),
   label: z.string().min(1),
@@ -39,6 +48,40 @@ export const RoleConfigSchema = z.object({
   output_filters: z.array(z.string()).optional(),
 }).strict();
 
+export const ThinkingConfigSchema = z.object({
+  enabled: z.boolean(),
+  budget_tokens: z.number().int().positive().optional(),
+});
+
+export const StructuredOutputSchemaSchema = z.object({
+  type: z.literal("json_schema"),
+  schema: UnknownRecordSchema,
+});
+
+export const HookDefinitionSchema = z.object({
+  hook: HookNameSchema,
+  matcher: UnknownRecordSchema.optional(),
+});
+
+export const HooksConfigSchema = z.object({
+  hooks: z.array(HookDefinitionSchema).min(1),
+  callback_url: z.string().url().optional(),
+  timeout_ms: z.number().int().positive().default(5000).optional(),
+});
+
+export const AttachmentSchema = z.object({
+  type: z.enum(["image", "file"]),
+  path: z.string().min(1),
+  mime_type: z.string().min(1).optional(),
+});
+
+export const AgentDefinitionSchema = z.object({
+  description: z.string().min(1),
+  prompt: z.string().min(1),
+  tools: z.array(z.string()).optional(),
+  model: z.string().min(1).optional(),
+});
+
 export const ExecuteRequestSchema = z.object({
   task_id: z.string().min(1),
   session_id: z.string().min(1),
@@ -57,6 +100,21 @@ export const ExecuteRequestSchema = z.object({
   role_config: RoleConfigSchema.optional(),
   team_id: z.string().optional(),
   team_role: z.enum(["planner", "coder", "reviewer"]).optional(),
+  thinking_config: ThinkingConfigSchema.optional(),
+  output_schema: StructuredOutputSchemaSchema.optional(),
+  hooks_config: HooksConfigSchema.optional(),
+  hook_callback_url: z.string().url().optional(),
+  hook_timeout_ms: z.number().int().positive().default(5000).optional(),
+  attachments: z.array(AttachmentSchema).optional(),
+  file_checkpointing: z.boolean().optional(),
+  agents: z.record(z.string(), AgentDefinitionSchema).optional(),
+  disallowed_tools: z.array(z.string()).optional(),
+  fallback_model: z.string().min(1).optional(),
+  additional_directories: z.array(z.string().min(1)).optional(),
+  include_partial_messages: z.boolean().optional(),
+  tool_permission_callback: z.boolean().optional(),
+  web_search: z.boolean().optional(),
+  env: z.record(z.string(), z.string()).optional(),
 });
 
 export const DecomposeTaskRequestSchema = z.object({
@@ -85,8 +143,97 @@ export const CancelRequestSchema = z.object({
   reason: z.string().optional(),
 });
 
+export const ForkRequestSchema = z.object({
+  task_id: z.string().min(1),
+  message_id: z.string().min(1).optional(),
+});
+
+export const RollbackRequestSchema = z.object({
+  task_id: z.string().min(1),
+  checkpoint_id: z.string().min(1).optional(),
+  turns: z.number().int().positive().optional(),
+});
+
+export const RevertRequestSchema = z.object({
+  task_id: z.string().min(1),
+  message_id: z.string().min(1),
+});
+
+export const UnrevertRequestSchema = z.object({
+  task_id: z.string().min(1),
+});
+
+export const CommandRequestSchema = z.object({
+  task_id: z.string().min(1),
+  command: z.string().min(1),
+  arguments: z.string().min(1).optional(),
+});
+
+export const InterruptRequestSchema = z.object({
+  task_id: z.string().min(1),
+});
+
+export const ModelSwitchRequestSchema = z.object({
+  task_id: z.string().min(1),
+  model: z.string().min(1),
+});
+
+export const PermissionResponseSchema = z.object({
+  decision: z.enum(["allow", "deny"]),
+  reason: z.string().optional(),
+});
+
 export const ResumeRequestSchema = ExecuteRequestSchema.partial().extend({
   task_id: z.string().min(1),
+});
+
+export const ReasoningEventDataSchema = z.object({
+  content: z.string().min(1),
+});
+
+export const FileChangeEventDataSchema = z.object({
+  files: z.array(
+    z.object({
+      path: z.string().min(1),
+      change_type: z.string().min(1).optional(),
+    }).catchall(z.unknown()),
+  ).min(1),
+});
+
+export const TodoUpdateEventDataSchema = z.object({
+  todos: z.array(
+    z.object({
+      id: z.string().min(1).optional(),
+      content: z.string().min(1).optional(),
+      status: z.string().min(1).optional(),
+    }).catchall(z.unknown()),
+  ),
+});
+
+export const ProgressEventDataSchema = z.object({
+  tool_name: z.string().min(1).optional(),
+  progress_text: z.string().min(1).optional(),
+  item_type: z.string().min(1).optional(),
+  partial_output: z.unknown().optional(),
+});
+
+export const RateLimitEventDataSchema = z.object({
+  utilization: z.number().min(0).max(1).optional(),
+  reset_at: z.union([z.string().min(1), z.number()]).optional(),
+});
+
+export const PartialMessageEventDataSchema = z.object({
+  content: z.string(),
+  is_complete: z.boolean(),
+});
+
+export const PermissionRequestEventDataSchema = z.object({
+  request_id: z.string().min(1),
+  tool_name: z.string().min(1).optional(),
+  context: z.unknown().optional(),
+  elicitation_type: z.string().min(1).optional(),
+  fields: z.array(z.unknown()).optional(),
+  mcp_server_id: z.string().min(1).optional(),
 });
 
 export const ReviewDimensionSchema = z.enum([

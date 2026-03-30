@@ -86,6 +86,56 @@ describe("AgentRuntime", () => {
     });
   });
 
+  test("projects advanced request features into runtime status snapshots", () => {
+    const runtime = new AgentRuntime("task-advanced", "session-advanced");
+    runtime.bindRequest({
+      task_id: "task-advanced",
+      session_id: "session-advanced",
+      runtime: "claude_code",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      prompt: "Run with advanced runtime settings",
+      worktree_path: "D:/Project/AgentForge",
+      branch_name: "agent/task-advanced",
+      system_prompt: "Base prompt",
+      max_turns: 12,
+      budget_usd: 5,
+      allowed_tools: ["Read"],
+      permission_mode: "default",
+      thinking_config: {
+        enabled: true,
+        budget_tokens: 8_000,
+      },
+      file_checkpointing: true,
+      hooks_config: {
+        hooks: [
+          { hook: "PreToolUse" },
+          { hook: "SubagentStart" },
+        ],
+      },
+      agents: {
+        reviewer: {
+          description: "Review the patch",
+          prompt: "Review carefully.",
+        },
+      },
+    });
+    runtime.structuredOutput = {
+      summary: "Done",
+    };
+
+    expect(runtime.toStatus()).toMatchObject({
+      task_id: "task-advanced",
+      thinking_enabled: true,
+      file_checkpointing: true,
+      active_hooks: ["PreToolUse", "SubagentStart"],
+      subagent_count: 1,
+      structured_output: {
+        summary: "Done",
+      },
+    });
+  });
+
   test("marks the runtime as cancelled when cancelled", () => {
     const runtime = new AgentRuntime("task-456", "session-456");
 

@@ -2,6 +2,9 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
+import { PanelLeftIcon, PanelRightIcon } from "lucide-react";
+import { useIsMobile } from "@/hooks/use-mobile";
+import { cn } from "@/lib/utils";
 import type {
   RoleManifest,
   RolePreviewResponse,
@@ -11,6 +14,7 @@ import type {
 import {
   buildRoleDraft,
   buildRoleExecutionSummary,
+  computeFieldProvenance,
   groupRoleDraftValidationErrors,
   resolveRoleSkillReferences,
   renderRoleManifestYaml,
@@ -24,6 +28,18 @@ import {
   type RoleTriggerDraft,
 } from "@/lib/roles/role-management";
 import { Button } from "@/components/ui/button";
+import {
+  Sheet,
+  SheetContent,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { RoleWorkspaceCatalog } from "./role-workspace-catalog";
 import { RoleWorkspaceContextRail } from "./role-workspace-context-rail";
 import { RoleWorkspaceEditor } from "./role-workspace-editor";
@@ -49,22 +65,6 @@ interface RoleWorkspaceProps {
   }) => Promise<RoleSandboxResponse | void>;
 }
 
-type RoleWorkspaceLayout = "desktop" | "medium" | "narrow";
-type CompactPanel = "none" | "catalog" | "review";
-
-function getLayout(): RoleWorkspaceLayout {
-  if (typeof window === "undefined") {
-    return "desktop";
-  }
-  if (window.innerWidth >= 1280) {
-    return "desktop";
-  }
-  if (window.innerWidth >= 768) {
-    return "medium";
-  }
-  return "narrow";
-}
-
 export function RoleWorkspace({
   roles,
   skillCatalog = [],
@@ -78,6 +78,7 @@ export function RoleWorkspace({
   onSandboxRole,
 }: RoleWorkspaceProps) {
   const t = useTranslations("roles");
+  const isMobile = useIsMobile();
   const [mode, setMode] = useState<"create" | "edit">("create");
   const [selectedRoleId, setSelectedRoleId] = useState("");
   const [templateId, setTemplateId] = useState("");
@@ -90,9 +91,13 @@ export function RoleWorkspace({
   const [sandboxResult, setSandboxResult] = useState<RoleSandboxResponse | null>(null);
   const [activeSection, setActiveSection] =
     useState<RoleWorkspaceSectionId>("setup");
-  const [layout, setLayout] = useState<RoleWorkspaceLayout>(() => getLayout());
-  const [compactPanel, setCompactPanel] = useState<CompactPanel>("none");
   const sandboxInputRef = useRef("");
+
+  // Panel visibility
+  const [catalogOpen, setCatalogOpen] = useState(true);
+  const [contextOpen, setContextOpen] = useState(true);
+  const [catalogSheetOpen, setCatalogSheetOpen] = useState(false);
+  const [contextSheetOpen, setContextSheetOpen] = useState(false);
 
   const selectedRole = useMemo(
     () => roles.find((role) => role.metadata.id === selectedRoleId),
@@ -103,18 +108,16 @@ export function RoleWorkspace({
     [roles, templateId],
   );
 
+  // Auto-collapse panels based on viewport width
   useEffect(() => {
-    const handleResize = () => {
-      const nextLayout = getLayout();
-      setLayout(nextLayout);
-      if (nextLayout === "desktop") {
-        setCompactPanel("none");
-      }
+    const mq = window.matchMedia("(min-width: 1280px)");
+    const handler = () => {
+      setCatalogOpen(mq.matches);
+      setContextOpen(mq.matches);
     };
-
-    handleResize();
-    window.addEventListener("resize", handleResize);
-    return () => window.removeEventListener("resize", handleResize);
+    handler();
+    mq.addEventListener("change", handler);
+    return () => mq.removeEventListener("change", handler);
   }, []);
 
   useEffect(() => {
@@ -176,6 +179,7 @@ export function RoleWorkspace({
     setPreviewResult(null);
     setSandboxResult(null);
     setActiveSection("setup");
+    if (isMobile) setCatalogSheetOpen(false);
   };
 
   const handleTemplateChange = (value: string) => {
@@ -294,9 +298,7 @@ export function RoleWorkspace({
           draft: getRequestPayload(),
         })) ?? null,
       );
-      if (layout !== "desktop") {
-        setCompactPanel("review");
-      }
+      if (isMobile) setContextSheetOpen(true);
     } finally {
       setPreviewLoading(false);
     }
@@ -312,9 +314,7 @@ export function RoleWorkspace({
           input: sandboxInputRef.current,
         })) ?? null,
       );
-      if (layout !== "desktop") {
-        setCompactPanel("review");
-      }
+      if (isMobile) setContextSheetOpen(true);
     } finally {
       setSandboxLoading(false);
     }
@@ -346,6 +346,11 @@ export function RoleWorkspace({
         parentSkills: selectedParentRole?.capabilities.skills ?? [],
       }),
     [draft.skillRows, previewResult, sandboxResult, selectedParentRole, selectedTemplateRole, skillCatalog],
+  );
+
+  const provenanceMap = useMemo(
+    () => computeFieldProvenance(draft, selectedParentRole ?? null, selectedTemplateRole ?? null),
+    [draft, selectedParentRole, selectedTemplateRole],
   );
 
   const editor = (
@@ -419,6 +424,7 @@ export function RoleWorkspace({
       }
       availableRoles={roles}
       onTemplateChange={handleTemplateChange}
+      provenanceMap={provenanceMap}
     />
   );
 
@@ -451,46 +457,108 @@ export function RoleWorkspace({
       onSandbox={() => void handleSandbox()}
       previewResult={previewResult}
       sandboxResult={sandboxResult}
+      provenanceMap={provenanceMap}
     />
   );
 
-  if (layout === "desktop") {
-    return (
-      <div className="grid gap-6 xl:grid-cols-[minmax(260px,0.95fr)_minmax(0,1.35fr)_minmax(320px,0.9fr)]">
-        {catalog}
-        {editor}
-        {contextRail}
-      </div>
-    );
-  }
+  const toggleCatalog = () => {
+    if (isMobile) {
+      setCatalogSheetOpen((v) => !v);
+    } else {
+      setCatalogOpen((v) => !v);
+    }
+  };
+
+  const toggleContext = () => {
+    if (isMobile) {
+      setContextSheetOpen((v) => !v);
+    } else {
+      setContextOpen((v) => !v);
+    }
+  };
 
   return (
-    <div className="grid gap-4">
-      <div className="flex flex-wrap gap-2">
-        <Button
-          type="button"
-          variant={compactPanel === "catalog" ? "default" : "outline"}
-          onClick={() =>
-            setCompactPanel((current) => (current === "catalog" ? "none" : "catalog"))
-          }
+    <TooltipProvider>
+    <div className="flex h-[calc(100vh-3.5rem)]">
+      {/* Catalog panel: collapsible secondary sidebar */}
+      {isMobile ? (
+        <Sheet open={catalogSheetOpen} onOpenChange={setCatalogSheetOpen}>
+          <SheetContent side="left" className="w-72 p-0" showCloseButton={false}>
+            <SheetHeader className="sr-only">
+              <SheetTitle>{t("roleLibrary")}</SheetTitle>
+            </SheetHeader>
+            {catalog}
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <div
+          className={cn(
+            "shrink-0 overflow-hidden border-r bg-sidebar transition-[width] duration-200 ease-linear",
+            catalogOpen ? "w-[260px]" : "w-0",
+          )}
         >
-          {t("showRoleLibrary")}
-        </Button>
-        <Button
-          type="button"
-          variant={compactPanel === "review" ? "default" : "outline"}
-          onClick={() =>
-            setCompactPanel((current) => (current === "review" ? "none" : "review"))
-          }
-        >
-          {t("showReviewPanel")}
-        </Button>
+          <div className="h-full w-[260px] overflow-y-auto">{catalog}</div>
+        </div>
+      )}
+
+      {/* Editor: fills remaining space */}
+      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+        {/* Toolbar with panel toggle buttons */}
+        <div className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2">
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                onClick={toggleCatalog}
+                aria-label={t("toggleCatalog")}
+              >
+                <PanelLeftIcon className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("toggleCatalog")}</TooltipContent>
+          </Tooltip>
+          <div className="flex-1" />
+          <Tooltip>
+            <TooltipTrigger asChild>
+              <Button
+                variant="ghost"
+                size="icon"
+                className="size-7"
+                onClick={toggleContext}
+                aria-label={t("toggleContextRail")}
+              >
+                <PanelRightIcon className="size-4" />
+              </Button>
+            </TooltipTrigger>
+            <TooltipContent side="bottom">{t("toggleContextRail")}</TooltipContent>
+          </Tooltip>
+        </div>
+        <div className="flex-1 overflow-y-auto">{editor}</div>
       </div>
 
-      {editor}
-
-      {compactPanel === "catalog" ? catalog : null}
-      {compactPanel === "review" ? contextRail : null}
+      {/* Context rail: collapsible right panel */}
+      {isMobile ? (
+        <Sheet open={contextSheetOpen} onOpenChange={setContextSheetOpen}>
+          <SheetContent side="right" className="w-80 p-0" showCloseButton={false}>
+            <SheetHeader className="sr-only">
+              <SheetTitle>{t("contextRail.authoringGuide")}</SheetTitle>
+            </SheetHeader>
+            {contextRail}
+          </SheetContent>
+        </Sheet>
+      ) : (
+        <div
+          className={cn(
+            "shrink-0 overflow-hidden border-l transition-[width] duration-200 ease-linear",
+            contextOpen ? "w-80" : "w-0",
+          )}
+        >
+          <div className="h-full w-80 overflow-y-auto">{contextRail}</div>
+        </div>
+      )}
     </div>
+    </TooltipProvider>
   );
 }

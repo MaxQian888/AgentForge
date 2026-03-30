@@ -29,4 +29,22 @@ describe("roles locale messages", () => {
       })
     );
   });
+
+  it("keeps context rail skill resolution copy available in both locales", () => {
+    expect(enRoles.contextRail).toEqual(
+      expect.objectContaining({
+        skillResolution: expect.any(String),
+        skillResolutionDesc: expect.any(String),
+        skillResolutionNone: expect.any(String),
+      })
+    );
+
+    expect(zhCNRoles.contextRail).toEqual(
+      expect.objectContaining({
+        skillResolution: expect.any(String),
+        skillResolutionDesc: expect.any(String),
+        skillResolutionNone: expect.any(String),
+      })
+    );
+  });
 });

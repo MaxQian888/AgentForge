@@ -2,7 +2,6 @@
 
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Card, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { RoleCard } from "./role-card";
 import type { RoleManifest, RoleSkillCatalogEntry } from "@/lib/stores/role-store";
 
@@ -27,36 +26,25 @@ export function RoleWorkspaceCatalog({
 }: RoleWorkspaceCatalogProps) {
   const t = useTranslations("roles");
   return (
-    <section className="flex flex-col gap-4">
-      <Card>
-        <CardHeader className="gap-3">
-          <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-            <div className="space-y-1">
-              <CardTitle>{t("roleLibrary")}</CardTitle>
-              <CardDescription>
-                {t("roleLibraryDesc")}
-              </CardDescription>
-            </div>
-            <Button onClick={onCreateNew}>{t("newRole")}</Button>
+    <div className="flex flex-col">
+      <div className="sticky top-0 z-10 border-b bg-sidebar px-4 py-3">
+        <div className="flex items-center justify-between gap-2">
+          <div>
+            <p className="text-sm font-semibold">{t("roleLibrary")}</p>
+            <p className="text-xs text-muted-foreground">{t("roleLibraryDesc")}</p>
           </div>
-          {error ? <p className="text-sm text-destructive">{error}</p> : null}
-        </CardHeader>
-      </Card>
+          <Button size="sm" onClick={onCreateNew}>{t("newRole")}</Button>
+        </div>
+        {error ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
+      </div>
 
-      {loading && roles.length === 0 ? (
-        <p className="text-sm text-muted-foreground">{t("loadingRoles")}</p>
-      ) : roles.length === 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("roleLibrary")}</CardTitle>
-            <CardDescription>
-              {t("emptyLibrary")}
-            </CardDescription>
-          </CardHeader>
-        </Card>
-      ) : (
-        <div className="grid gap-4">
-          {roles.map((role) => (
+      <div className="flex flex-col gap-2 p-3">
+        {loading && roles.length === 0 ? (
+          <p className="py-6 text-center text-xs text-muted-foreground">{t("loadingRoles")}</p>
+        ) : roles.length === 0 ? (
+          <p className="py-6 text-center text-xs text-muted-foreground">{t("emptyLibrary")}</p>
+        ) : (
+          roles.map((role) => (
             <RoleCard
               key={role.metadata.id}
               role={role}
@@ -64,9 +52,9 @@ export function RoleWorkspaceCatalog({
               onEdit={() => onEditRole(role)}
               onDelete={() => onDeleteRole(role)}
             />
-          ))}
-        </div>
-      )}
-    </section>
+          ))
+        )}
+      </div>
+    </div>
   );
 }

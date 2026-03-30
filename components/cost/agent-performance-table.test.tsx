@@ -6,7 +6,7 @@ describe("AgentPerformanceTable", () => {
     render(<AgentPerformanceTable data={[]} />);
 
     expect(
-      screen.getByText("No agent performance data available yet."),
+      screen.getByText("No execution-bucket performance data available yet."),
     ).toBeInTheDocument();
   });
 
@@ -15,18 +15,18 @@ describe("AgentPerformanceTable", () => {
       <AgentPerformanceTable
         data={[
           {
-            agentId: "agent-1",
-            agentName: "Planner",
-            taskCount: 4,
+            bucketId: "planner",
+            label: "Planner",
+            runCount: 4,
             successRate: 0.82,
             avgCostUsd: 1.25,
             avgDurationMinutes: 18,
             totalCostUsd: 5,
           },
           {
-            agentId: "agent-2",
-            agentName: "Reviewer",
-            taskCount: 2,
+            bucketId: "reviewer",
+            label: "Reviewer",
+            runCount: 2,
             successRate: 0.4,
             avgCostUsd: 2.5,
             avgDurationMinutes: 30,
@@ -36,7 +36,9 @@ describe("AgentPerformanceTable", () => {
       />,
     );
 
-    expect(screen.getByRole("columnheader", { name: "Agent" })).toBeInTheDocument();
+    expect(
+      screen.getByRole("columnheader", { name: "Execution Bucket" }),
+    ).toBeInTheDocument();
     expect(screen.getByText("Planner")).toBeInTheDocument();
     expect(screen.getByText("Reviewer")).toBeInTheDocument();
     expect(screen.getByText("82%")).toBeInTheDocument();

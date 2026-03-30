@@ -5,6 +5,7 @@ import (
 	"crypto/ed25519"
 	"crypto/rand"
 	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -356,6 +357,156 @@ func TestLive_MetadataDeclaresDeferredDiscordCapabilities(t *testing.T) {
 	if metadata.Capabilities.SupportsRichMessages {
 		t.Fatal("expected discord live transport to rely on text fallback for notifications")
 	}
+	if !coreHasTextFormat(metadata.Rendering.SupportedFormats, core.TextFormatDiscordMD) {
+		t.Fatalf("SupportedFormats = %+v, want discord_md", metadata.Rendering.SupportedFormats)
+	}
+	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != core.NativeSurfaceDiscordEmbed {
+		t.Fatalf("NativeSurfaces = %+v", metadata.Rendering.NativeSurfaces)
+	}
+}
+
+func TestLive_SendNativeAndReplyNativeUseDiscordEmbeds(t *testing.T) {
+	runner := &fakeInteractionRunner{}
+	followups := &fakeFollowupClient{}
+	channels := &fakeChannelClient{}
+
+	live, err := NewLive(
+		"app-123",
+		"bot-token",
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"9000",
+		WithInteractionRunner(runner),
+		WithFollowupClient(followups),
+		WithChannelClient(channels),
+		WithOriginalResponseClient(&fakeOriginalResponseClient{}),
+		WithCommandRegistrar(&fakeCommandRegistrar{}),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	message, err := core.NewDiscordEmbedMessage(
+		"Build Ready",
+		"Agent finished the run.",
+		[]core.DiscordEmbedField{{Name: "Status", Value: "success"}},
+		0x00FF00,
+		[]core.DiscordActionRow{{
+			Buttons: []core.DiscordButton{{Label: "Open", URL: "https://example.test/builds/1", Style: "link"}},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewDiscordEmbedMessage error: %v", err)
+	}
+
+	if err := live.SendNative(context.Background(), "channel-1", message); err != nil {
+		t.Fatalf("SendNative error: %v", err)
+	}
+	if len(channels.calls) != 1 {
+		t.Fatalf("channel calls = %+v", channels.calls)
+	}
+	if len(channels.calls[0].Message.Embeds) != 1 || len(channels.calls[0].Message.Components) != 1 {
+		t.Fatalf("channel message = %+v", channels.calls[0].Message)
+	}
+
+	if err := live.ReplyNative(context.Background(), replyContext{
+		InteractionToken: "reply-token",
+		ChannelID:        "channel-1",
+	}, message); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+	if len(followups.calls) != 1 || len(followups.calls[0].Message.Embeds) != 1 {
+		t.Fatalf("followup calls = %+v", followups.calls)
+	}
+}
+
+func TestLive_SendFormattedTextSupportsDiscordMarkdown(t *testing.T) {
+	runner := &fakeInteractionRunner{}
+	channels := &fakeChannelClient{}
+
+	live, err := NewLive(
+		"app-123",
+		"bot-token",
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"9000",
+		WithInteractionRunner(runner),
+		WithFollowupClient(&fakeFollowupClient{}),
+		WithChannelClient(channels),
+		WithOriginalResponseClient(&fakeOriginalResponseClient{}),
+		WithCommandRegistrar(&fakeCommandRegistrar{}),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.SendFormattedText(context.Background(), "channel-1", &core.FormattedText{
+		Content: "**literal**",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("SendFormattedText plain error: %v", err)
+	}
+	if err := live.SendFormattedText(context.Background(), "channel-1", &core.FormattedText{
+		Content: "**bold** and ~~strike~~",
+		Format:  core.TextFormatDiscordMD,
+	}); err != nil {
+		t.Fatalf("SendFormattedText markdown error: %v", err)
+	}
+
+	if len(channels.calls) != 2 {
+		t.Fatalf("channel calls = %+v", channels.calls)
+	}
+	if channels.calls[0].Message.Content == "**literal**" {
+		t.Fatalf("expected plain-text send to escape markdown, got %+v", channels.calls[0].Message)
+	}
+	if channels.calls[1].Message.Content != "**bold** and ~~strike~~" {
+		t.Fatalf("markdown message = %+v", channels.calls[1].Message)
+	}
+}
+
+func TestRenderStructuredSectionsBuildsDiscordEmbedsAndComponents(t *testing.T) {
+	embed, components := renderStructuredSections([]core.StructuredSection{
+		{
+			Type: core.StructuredSectionTypeText,
+			TextSection: &core.TextSection{
+				Body: "Build ready",
+			},
+		},
+		{
+			Type:           core.StructuredSectionTypeDivider,
+			DividerSection: &core.DividerSection{},
+		},
+		{
+			Type: core.StructuredSectionTypeFields,
+			FieldsSection: &core.FieldsSection{
+				Fields: []core.StructuredField{{Label: "Status", Value: "success"}},
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeImage,
+			ImageSection: &core.ImageSection{
+				URL: "https://example.test/build.png",
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeActions,
+			ActionsSection: &core.ActionsSection{
+				Actions: []core.StructuredAction{{Label: "Open", URL: "https://example.test/builds/1"}},
+			},
+		},
+	})
+
+	raw, err := json.Marshal(embed)
+	if err != nil {
+		t.Fatalf("marshal embed: %v", err)
+	}
+	if string(raw) == "" {
+		t.Fatal("expected serializable embed")
+	}
+	if embed.Description == "" || len(embed.Fields) != 1 || embed.Image.URL == "" {
+		t.Fatalf("embed = %+v", embed)
+	}
+	if len(components) != 1 || len(components[0].Components) != 1 {
+		t.Fatalf("components = %+v", components)
+	}
 }
 
 func TestValidateRequestSignature_AcceptsSignedPayload(t *testing.T) {
@@ -529,4 +680,13 @@ type fakeDiscordActionHandler struct {
 func (h *fakeDiscordActionHandler) HandleAction(ctx context.Context, req *notify.ActionRequest) (*notify.ActionResponse, error) {
 	h.requests = append(h.requests, req)
 	return &notify.ActionResponse{Result: "Approved"}, nil
+}
+
+func coreHasTextFormat(formats []core.TextFormatMode, target core.TextFormatMode) bool {
+	for _, format := range formats {
+		if format == target {
+			return true
+		}
+	}
+	return false
 }

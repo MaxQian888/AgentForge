@@ -1,5 +1,5 @@
-jest.mock("./sidebar", () => ({
-  MobileSidebar: () => <div data-testid="mobile-sidebar">mobile</div>,
+jest.mock("@/components/ui/sidebar", () => ({
+  SidebarTrigger: () => <button data-testid="sidebar-trigger" aria-label="Toggle Sidebar" />,
 }));
 
 jest.mock("@/lib/stores/auth-store", () => ({
@@ -21,6 +21,7 @@ describe("Header", () => {
     const user = userEvent.setup();
     const logout = jest.fn().mockResolvedValue(undefined);
     const markRead = jest.fn();
+    const markAllRead = jest.fn();
     const mockUseAuthStore = useAuthStore as unknown as jest.MockedFunction<typeof useAuthStore>;
     const mockUseNotificationStore =
       useNotificationStore as unknown as jest.MockedFunction<typeof useNotificationStore>;
@@ -35,20 +36,26 @@ describe("Header", () => {
       ],
       unreadCount: 1,
       markRead,
+      markAllRead,
     });
 
-    const { container } = render(<Header />);
-    const buttons = container.querySelectorAll("button");
+    render(<Header />);
 
-    expect(screen.getByTestId("mobile-sidebar")).toBeInTheDocument();
+    expect(screen.getByTestId("sidebar-trigger")).toBeInTheDocument();
     expect(screen.getByText("AJ")).toBeInTheDocument();
     expect(screen.getByText("1")).toBeInTheDocument();
 
-    await user.click(buttons[0]);
-    await user.click(await screen.findByRole("button", { name: "Task stalled Review queue blocked." }));
+    const notificationTrigger = screen.getByText("1").closest("button");
+    expect(notificationTrigger).not.toBeNull();
+
+    await user.click(notificationTrigger!);
+    await user.click(await screen.findByRole("button", { name: /Task stalled/i }));
     expect(markRead).toHaveBeenCalledWith("n-1");
 
-    await user.click(buttons[2]);
+    const accountTrigger = screen.getByText("AJ").closest("button");
+    expect(accountTrigger).not.toBeNull();
+
+    await user.click(accountTrigger!);
     await user.click(await screen.findByRole("menuitem", { name: /Logout/i }));
     expect(logout).toHaveBeenCalled();
   });

@@ -1,12 +1,22 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Bell, LogOut, User } from "lucide-react";
+import { Bell, LogOut, Search, User } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Avatar, AvatarFallback } from "@/components/ui/avatar";
+import { Separator } from "@/components/ui/separator";
+import {
+  Breadcrumb,
+  BreadcrumbItem,
+  BreadcrumbLink,
+  BreadcrumbList,
+  BreadcrumbPage,
+  BreadcrumbSeparator,
+} from "@/components/ui/breadcrumb";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -21,7 +31,8 @@ import {
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { useNotificationStore } from "@/lib/stores/notification-store";
-import { MobileSidebar } from "./sidebar";
+import { useLayoutStore } from "@/lib/stores/layout-store";
+import { SidebarTrigger } from "@/components/ui/sidebar";
 import { LanguageSwitcher } from "./language-switcher";
 
 export function Header() {
@@ -29,7 +40,10 @@ export function Header() {
   const t = useTranslations("common");
   const [notifOpen, setNotifOpen] = useState(false);
   const { user, logout } = useAuthStore();
-  const { notifications, unreadCount, markRead, markAllRead } = useNotificationStore();
+  const { notifications, unreadCount, markRead, markAllRead } =
+    useNotificationStore();
+  const breadcrumbs = useLayoutStore((s) => s.breadcrumbs);
+  const openCommandPalette = useLayoutStore((s) => s.openCommandPalette);
 
   const initials = user?.name
     ? user.name
@@ -41,9 +55,50 @@ export function Header() {
     : "U";
 
   return (
-    <header className="flex h-14 items-center gap-4 border-b bg-background px-4">
-      <MobileSidebar />
+    <header className="flex h-12 items-center gap-2 border-b bg-background px-4">
+      <SidebarTrigger className="-ml-1" />
+
+      {breadcrumbs.length > 0 && (
+        <>
+          <Separator orientation="vertical" className="mx-1 h-4" />
+          <Breadcrumb className="hidden md:flex">
+            <BreadcrumbList className="text-[13px]">
+              {breadcrumbs.map((crumb, i) => {
+                const isLast = i === breadcrumbs.length - 1;
+                return (
+                  <span key={i} className="contents">
+                    {i > 0 && <BreadcrumbSeparator />}
+                    <BreadcrumbItem>
+                      {isLast || !crumb.href ? (
+                        <BreadcrumbPage>{crumb.label}</BreadcrumbPage>
+                      ) : (
+                        <BreadcrumbLink asChild>
+                          <Link href={crumb.href}>{crumb.label}</Link>
+                        </BreadcrumbLink>
+                      )}
+                    </BreadcrumbItem>
+                  </span>
+                );
+              })}
+            </BreadcrumbList>
+          </Breadcrumb>
+        </>
+      )}
+
       <div className="flex-1" />
+
+      <Button
+        variant="outline"
+        size="sm"
+        className="hidden h-7 gap-2 rounded-md border-input bg-background px-2 text-xs text-muted-foreground shadow-none sm:flex"
+        onClick={openCommandPalette}
+      >
+        <Search className="size-3.5" />
+        <span>{t("quickSearch")}</span>
+        <kbd className="pointer-events-none rounded border bg-muted px-1 py-0.5 text-[10px] font-medium">
+          ⌘K
+        </kbd>
+      </Button>
 
       <Popover open={notifOpen} onOpenChange={setNotifOpen}>
         <PopoverTrigger asChild>

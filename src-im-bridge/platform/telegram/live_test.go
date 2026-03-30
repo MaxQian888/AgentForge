@@ -316,6 +316,89 @@ func TestLive_MetadataDeclaresTelegramCapabilities(t *testing.T) {
 	if !foundMarkdown {
 		t.Fatalf("SupportedFormats = %+v, want markdown_v2", metadata.Rendering.SupportedFormats)
 	}
+	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != core.NativeSurfaceTelegramRich {
+		t.Fatalf("NativeSurfaces = %+v", metadata.Rendering.NativeSurfaces)
+	}
+}
+
+func TestLive_SendNativeUsesTelegramRichPayload(t *testing.T) {
+	runner := &fakeUpdateRunner{}
+	sender := &fakeSender{}
+
+	live, err := NewLive("bot-token", WithUpdateRunner(runner), WithSender(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	message, err := core.NewTelegramRichMessage(
+		"*Build* ready",
+		"MarkdownV2",
+		[][]core.TelegramInlineButton{{
+			{Text: "Open", URL: "https://example.test/builds/1"},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewTelegramRichMessage error: %v", err)
+	}
+
+	if err := live.SendNative(context.Background(), "-2001", message); err != nil {
+		t.Fatalf("SendNative error: %v", err)
+	}
+
+	if len(sender.structuredCalls) != 1 {
+		t.Fatalf("structuredCalls = %+v", sender.structuredCalls)
+	}
+	call := sender.structuredCalls[0]
+	if call.ChatID != -2001 || call.ParseMode != "MarkdownV2" {
+		t.Fatalf("call = %+v", call)
+	}
+	if call.Markup == nil || len(call.Markup.InlineKeyboard) != 1 || call.Markup.InlineKeyboard[0][0].URL != "https://example.test/builds/1" {
+		t.Fatalf("markup = %+v", call.Markup)
+	}
+}
+
+func TestRenderStructuredSectionsBuildsTelegramTextAndKeyboard(t *testing.T) {
+	message, markup := renderStructuredSections([]core.StructuredSection{
+		{
+			Type: core.StructuredSectionTypeText,
+			TextSection: &core.TextSection{
+				Body: "Build ready",
+			},
+		},
+		{
+			Type:           core.StructuredSectionTypeDivider,
+			DividerSection: &core.DividerSection{},
+		},
+		{
+			Type: core.StructuredSectionTypeFields,
+			FieldsSection: &core.FieldsSection{
+				Fields: []core.StructuredField{{Label: "Status", Value: "success"}},
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeActions,
+			ActionsSection: &core.ActionsSection{
+				Actions: []core.StructuredAction{
+					{ID: "act:approve:review-1", Label: "Approve"},
+					{URL: "https://example.test/builds/1", Label: "Open"},
+				},
+				ButtonsPerRow: 2,
+			},
+		},
+	})
+
+	if message.Text == "" {
+		t.Fatalf("message = %+v", message)
+	}
+	if markup == nil || len(markup.InlineKeyboard) != 1 || len(markup.InlineKeyboard[0]) != 2 {
+		t.Fatalf("markup = %+v", markup)
+	}
+	if markup.InlineKeyboard[0][0].CallbackData != "act:approve:review-1" {
+		t.Fatalf("first button = %+v", markup.InlineKeyboard[0][0])
+	}
+	if markup.InlineKeyboard[0][1].URL != "https://example.test/builds/1" {
+		t.Fatalf("second button = %+v", markup.InlineKeyboard[0][1])
+	}
 }
 
 func TestLive_DeliverEnvelopeUsesFormattedTextWhenRequested(t *testing.T) {

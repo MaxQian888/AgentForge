@@ -10,8 +10,12 @@ import { IMChannelConfig } from "@/components/im/im-channel-config";
 import { IMBridgeHealth } from "@/components/im/im-bridge-health";
 import { IMMessageHistory } from "@/components/im/im-message-history";
 import { useIMStore } from "@/lib/stores/im-store";
+import { PageHeader } from "@/components/shared/page-header";
+import { ErrorBanner } from "@/components/shared/error-banner";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 export default function IMBridgePage() {
+  useBreadcrumbs([{ label: "Configuration", href: "/" }, { label: "IM Bridge" }]);
   const t = useTranslations("im");
   const fetchChannels = useIMStore((s) => s.fetchChannels);
   const fetchBridgeStatus = useIMStore((s) => s.fetchBridgeStatus);
@@ -37,38 +41,38 @@ export default function IMBridgePage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-3">
-          <h1 className="text-2xl font-bold">{t("title")}</h1>
-          <Badge
-            variant="secondary"
-            className={
-              bridgeStatus.health === "healthy"
-                ? "bg-green-500/15 text-green-700 dark:text-green-400"
-                : bridgeStatus.health === "degraded"
-                  ? "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400"
-                  : "bg-red-500/15 text-red-700 dark:text-red-400"
-            }
-          >
-            {bridgeStatus.health}
-          </Badge>
-        </div>
-        <Button
-          variant="outline"
-          size="sm"
-          onClick={handleRefresh}
-          disabled={loading}
-        >
-          <RefreshCw className="mr-1 size-3.5" />
-          {t("refresh")}
-        </Button>
-      </div>
+      <PageHeader
+        title={t("title")}
+        actions={
+          <>
+            <Badge
+              variant="secondary"
+              className={
+                bridgeStatus.health === "healthy"
+                  ? "bg-green-500/15 text-green-700 dark:text-green-400"
+                  : bridgeStatus.health === "degraded"
+                    ? "bg-yellow-500/15 text-yellow-700 dark:text-yellow-400"
+                    : "bg-red-500/15 text-red-700 dark:text-red-400"
+              }
+            >
+              {bridgeStatus.health}
+            </Badge>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={handleRefresh}
+              disabled={loading}
+            >
+              <RefreshCw className="mr-1 size-3.5" />
+              {t("refresh")}
+            </Button>
+          </>
+        }
+      />
 
-      {error ? (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {error}
-        </div>
-      ) : null}
+      {error && (
+        <ErrorBanner message={error} onRetry={handleRefresh} />
+      )}
 
       <Tabs defaultValue="channels">
         <TabsList>

@@ -44,7 +44,16 @@
 }
 
 :root {
-  --radius: 0.625rem;
+  --radius: 0.5rem;
+  --transition-fast: 150ms;
+  --transition-base: 200ms;
+  --transition-slow: 300ms;
+  --header-height: 3rem;
+  --status-active: oklch(0.62 0.19 145);
+  --status-idle: oklch(0.55 0.15 250);
+  --status-error: oklch(0.58 0.24 27);
+  --status-warning: oklch(0.75 0.18 75);
+  --status-success: oklch(0.62 0.19 145);
   --background: oklch(1 0 0);
   --foreground: oklch(0.145 0 0);
   --card: oklch(1 0 0);
@@ -79,6 +88,11 @@
 }
 
 .dark {
+  --status-active: oklch(0.72 0.17 145);
+  --status-idle: oklch(0.65 0.13 250);
+  --status-error: oklch(0.70 0.19 22);
+  --status-warning: oklch(0.80 0.16 75);
+  --status-success: oklch(0.72 0.17 145);
   --background: oklch(0.145 0 0);
   --foreground: oklch(0.985 0 0);
   --card: oklch(0.205 0 0);
@@ -110,6 +124,24 @@
   --sidebar-accent-foreground: oklch(0.985 0 0);
   --sidebar-border: oklch(1 0 0 / 10%);
   --sidebar-ring: oklch(0.556 0 0);
+}
+
+@keyframes fade-in {
+  from { opacity: 0; transform: translateY(-2px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+@keyframes pulse-dot {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.4; }
+}
+
+.animate-fade-in {
+  animation: fade-in var(--transition-base) ease-out;
+}
+
+.animate-pulse-dot {
+  animation: pulse-dot 2s ease-in-out infinite;
 }
 
 @layer base {

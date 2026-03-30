@@ -75,6 +75,7 @@ type PlatformCapabilities struct {
 	AsyncUpdateModes   []AsyncUpdateMode   `json:"asyncUpdateModes,omitempty"`
 	ActionCallbackMode ActionCallbackMode  `json:"actionCallbackMode,omitempty"`
 	MessageScopes      []MessageScope      `json:"messageScopes,omitempty"`
+	NativeSurfaces     []string            `json:"nativeSurfaces,omitempty"`
 	Mutability         MutabilitySemantics `json:"mutability,omitempty"`
 
 	SupportsRichMessages   bool `json:"supportsRichMessages,omitempty"`
@@ -110,6 +111,9 @@ func (c PlatformCapabilities) Matrix() map[string]any {
 		}
 		matrix["messageScopes"] = scopes
 	}
+	if len(c.NativeSurfaces) > 0 {
+		matrix["nativeSurfaces"] = append([]string(nil), c.NativeSurfaces...)
+	}
 	return matrix
 }
 
@@ -133,6 +137,12 @@ func (c PlatformCapabilities) HasMessageScope(target MessageScope) bool {
 		}
 	}
 	return false
+}
+
+// HasNativeSurface reports whether the capability matrix declares the given
+// native payload surface.
+func (c PlatformCapabilities) HasNativeSurface(target string) bool {
+	return hasStringFold(c.NativeSurfaces, target)
 }
 
 // PlatformMetadata captures the stable source identity and declared
@@ -204,6 +214,7 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateThreadReply, AsyncUpdateFollowUp},
 			ActionCallbackMode: ActionCallbackSocketPayload,
 			MessageScopes:      []MessageScope{MessageScopeChat, MessageScopeThread},
+			NativeSurfaces:     []string{NativeSurfaceSlackBlockKit},
 		}
 	case "discord":
 		return PlatformCapabilities{
@@ -212,6 +223,7 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateFollowUp, AsyncUpdateEdit},
 			ActionCallbackMode: ActionCallbackInteractionToken,
 			MessageScopes:      []MessageScope{MessageScopeInteractionScoped, MessageScopeChat},
+			NativeSurfaces:     []string{NativeSurfaceDiscordEmbed},
 			Mutability: MutabilitySemantics{
 				CanEdit:        true,
 				PrefersInPlace: true,
@@ -224,6 +236,7 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateEdit},
 			ActionCallbackMode: ActionCallbackQuery,
 			MessageScopes:      []MessageScope{MessageScopeChat, MessageScopeTopic},
+			NativeSurfaces:     []string{NativeSurfaceTelegramRich},
 			Mutability: MutabilitySemantics{
 				CanEdit:        true,
 				PrefersInPlace: true,
@@ -236,6 +249,7 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateDeferredCardUpdate},
 			ActionCallbackMode: ActionCallbackWebhook,
 			MessageScopes:      []MessageScope{MessageScopeChat, MessageScopeThread},
+			NativeSurfaces:     []string{NativeSurfaceFeishuCard},
 			Mutability: MutabilitySemantics{
 				CanEdit:        true,
 				PrefersInPlace: true,
@@ -248,6 +262,7 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateSessionWebhook},
 			ActionCallbackMode: ActionCallbackWebhook,
 			MessageScopes:      []MessageScope{MessageScopeChat},
+			NativeSurfaces:     []string{NativeSurfaceDingTalkCard},
 		}
 	case "qq":
 		return PlatformCapabilities{
@@ -266,9 +281,19 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 			AsyncUpdateModes:       []AsyncUpdateMode{AsyncUpdateReply},
 			ActionCallbackMode:     ActionCallbackWebhook,
 			MessageScopes:          []MessageScope{MessageScopeChat},
+			NativeSurfaces:         []string{NativeSurfaceQQBotMarkdown},
 			RequiresPublicCallback: true,
 			SupportsMentions:       true,
 			SupportsSlashCommands:  true,
+		}
+	case "wecom":
+		return PlatformCapabilities{
+			CommandSurface:     CommandSurfaceInteraction,
+			StructuredSurface:  StructuredSurfaceNone,
+			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply},
+			ActionCallbackMode: ActionCallbackWebhook,
+			MessageScopes:      []MessageScope{MessageScopeChat},
+			NativeSurfaces:     []string{NativeSurfaceWeComCard},
 		}
 	default:
 		capabilities := PlatformCapabilities{
@@ -341,6 +366,9 @@ func normalizeCapabilities(capabilities PlatformCapabilities, defaults PlatformC
 		} else {
 			capabilities.MessageScopes = []MessageScope{MessageScopeChat}
 		}
+	}
+	if len(capabilities.NativeSurfaces) == 0 && len(defaults.NativeSurfaces) > 0 {
+		capabilities.NativeSurfaces = append([]string(nil), defaults.NativeSurfaces...)
 	}
 
 	if capabilities.Mutability == (MutabilitySemantics{}) {

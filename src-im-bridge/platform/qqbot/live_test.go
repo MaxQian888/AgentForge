@@ -129,10 +129,49 @@ func TestLive_MetadataDeclaresQQBotCallbackCapabilities(t *testing.T) {
 	if !metadata.Capabilities.SupportsSlashCommands {
 		t.Fatal("expected slash command capability")
 	}
+	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != core.NativeSurfaceQQBotMarkdown {
+		t.Fatalf("NativeSurfaces = %+v", metadata.Rendering.NativeSurfaces)
+	}
+}
+
+func TestLive_SendNativeUsesQQBotMarkdownPayload(t *testing.T) {
+	sender := &fakeSender{}
+	live, err := NewLive(
+		"1024",
+		"secret",
+		"9080",
+		"/callback",
+		WithSender(sender),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	message, err := core.NewQQBotMarkdownMessage(
+		"## Review Ready",
+		[][]core.QQBotKeyboardButton{{
+			{Label: "Open", URL: "https://example.test/reviews/1"},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewQQBotMarkdownMessage error: %v", err)
+	}
+
+	if err := live.SendNative(context.Background(), "group:group-openid", message); err != nil {
+		t.Fatalf("SendNative error: %v", err)
+	}
+	if len(sender.messageCalls) != 1 {
+		t.Fatalf("messageCalls = %+v", sender.messageCalls)
+	}
+	if sender.messageCalls[0].Payload["msg_type"] != 2 {
+		t.Fatalf("payload = %+v", sender.messageCalls[0].Payload)
+	}
 }
 
 type fakeSender struct {
-	calls []sendCall
+	calls        []sendCall
+	messageCalls []sendMessageCall
 }
 
 type sendCall struct {
@@ -140,8 +179,18 @@ type sendCall struct {
 	Content string
 }
 
+type sendMessageCall struct {
+	Target  messageTarget
+	Payload map[string]any
+}
+
 func (f *fakeSender) SendText(ctx context.Context, target messageTarget, content string) error {
 	f.calls = append(f.calls, sendCall{Target: target, Content: content})
+	return nil
+}
+
+func (f *fakeSender) SendMessage(ctx context.Context, target messageTarget, payload map[string]any) error {
+	f.messageCalls = append(f.messageCalls, sendMessageCall{Target: target, Payload: payload})
 	return nil
 }
 

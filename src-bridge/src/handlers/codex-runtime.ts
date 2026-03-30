@@ -1,5 +1,9 @@
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { calculateCost } from "../cost/calculator.js";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
+import type { PluginRecord } from "../plugins/types.js";
 import type { ExecuteRequest } from "../types.js";
 import type { EventStreamer } from "../ws/event-stream.js";
 
@@ -21,12 +25,20 @@ export type CodexRuntimeRunner = (params: {
   prompt: string;
   threadId?: string;
   abortSignal: AbortSignal;
+  activePlugins?: PluginRecord[];
 }) => AsyncIterable<UnknownRecord>;
 
 export interface CodexRuntimeDeps {
   command: string;
   codexRuntimeRunner?: CodexRuntimeRunner;
   now?: () => number;
+  activePlugins?: PluginRecord[];
+}
+
+export interface CodexLaunch {
+  cmd: string[];
+  env: Record<string, string>;
+  cleanup: () => void;
 }
 
 export async function streamCodexRuntime(
@@ -54,6 +66,7 @@ export async function streamCodexRuntime(
     prompt,
     threadId: continuity?.thread_id,
     abortSignal: runtime.abortController.signal,
+    activePlugins: deps.activePlugins,
   })) {
     runtime.lastActivity = now();
     emitCodexRuntimeEvent(runtime, streamer, event, req, now);
@@ -63,6 +76,84 @@ export async function streamCodexRuntime(
       throw new Error(`budget exceeded for task ${req.task_id}`);
     }
   }
+}
+
+export function prepareCodexLaunch(params: {
+  mode: "start" | "resume";
+  command: string;
+  req: ExecuteRequest;
+  prompt: string;
+  threadId?: string;
+  activePlugins?: PluginRecord[];
+}): CodexLaunch {
+  const tempRoot = mkdtempSync(join(tmpdir(), "agentforge-codex-"));
+  const cleanup = () => {
+    rmSync(tempRoot, { force: true, recursive: true });
+  };
+
+  const cmd = [params.command, "-C", params.req.worktree_path, "exec"];
+
+  if (params.mode === "resume") {
+    cmd.push("resume");
+  }
+
+  cmd.push("--json");
+
+  if (params.req.model) {
+    cmd.push("--model", params.req.model);
+  }
+
+  if (params.req.permission_mode === "bypassPermissions") {
+    cmd.push("--dangerously-bypass-approvals-and-sandbox");
+  } else {
+    cmd.push("--full-auto");
+  }
+
+  if (params.req.output_schema?.schema) {
+    const schemaPath = join(tempRoot, "output-schema.json");
+    writeFileSync(schemaPath, JSON.stringify(params.req.output_schema.schema, null, 2), "utf8");
+    cmd.push("--output-schema", schemaPath);
+  }
+
+  for (const attachment of params.req.attachments ?? []) {
+    if (attachment.type === "image") {
+      cmd.push("--image", attachment.path);
+    }
+  }
+
+  for (const dir of params.req.additional_directories ?? []) {
+    cmd.push("--add-dir", dir);
+  }
+
+  if (params.req.web_search) {
+    cmd.push("--search");
+  }
+
+  for (const configValue of buildCodexConfigOverrides(params.activePlugins ?? [])) {
+    cmd.push("-c", configValue);
+  }
+
+  if (params.mode === "resume" && params.threadId) {
+    cmd.push(params.threadId);
+  }
+
+  cmd.push(params.prompt);
+
+  return {
+    cmd,
+    env: {
+      ...Object.fromEntries(
+        Object.entries(process.env).map(([key, value]) => [key, value ?? ""]),
+      ),
+      ...Object.fromEntries(
+        Object.entries(params.req.env ?? {}).map(([key, value]) => [key, value ?? ""]),
+      ),
+      AGENTFORGE_RUNTIME: "codex",
+      AGENTFORGE_MODEL: params.req.model ?? "",
+      AGENTFORGE_PERMISSION_MODE: params.req.permission_mode,
+    },
+    cleanup,
+  };
 }
 
 export function getDefaultCodexAuthStatus(command = "codex"): CodexAuthStatus {
@@ -108,11 +199,21 @@ function emitCodexRuntimeEvent(
           resume_ready: true,
           captured_at: now(),
           thread_id: event.thread_id,
+          fork_available: true,
+          rollback_turns: runtime.continuity?.runtime === "codex"
+            ? runtime.continuity.rollback_turns ?? 0
+            : 0,
         };
       }
       return;
+    case "turn.started":
+      emitCodexTurnStarted(runtime, streamer, req, now);
+      return;
     case "item.started":
       emitCodexItemStarted(runtime, streamer, event, req, now);
+      return;
+    case "item.updated":
+      emitCodexItemUpdated(streamer, event, req, now);
       return;
     case "item.completed":
       emitCodexItemCompleted(runtime, streamer, event, req, now);
@@ -120,14 +221,43 @@ function emitCodexRuntimeEvent(
     case "turn.completed":
       emitCodexTurnCompleted(runtime, streamer, event, req, now);
       return;
+    case "turn.failed":
+      emitCodexTurnFailed(runtime, streamer, event, req, now);
+      return;
     case "error":
-      if (typeof event.message === "string") {
-        throw new Error(event.message);
-      }
+      emitCodexTopLevelError(runtime, streamer, event, req, now);
       return;
     default:
       return;
   }
+}
+
+function emitCodexTurnStarted(
+  runtime: AgentRuntime,
+  streamer: EventSink,
+  req: ExecuteRequest,
+  now: () => number,
+): void {
+  if (runtime.continuity?.runtime === "codex") {
+    runtime.continuity = {
+      ...runtime.continuity,
+      captured_at: now(),
+      rollback_turns: (runtime.continuity.rollback_turns ?? 0) + 1,
+      fork_available: true,
+    };
+  }
+
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: now(),
+    type: "status_change",
+    data: {
+      old_status: "running",
+      new_status: "running",
+      reason: "turn_started",
+    },
+  });
 }
 
 function emitCodexItemStarted(
@@ -158,6 +288,40 @@ function emitCodexItemStarted(
   });
 }
 
+function emitCodexItemUpdated(
+  streamer: EventSink,
+  event: UnknownRecord,
+  req: ExecuteRequest,
+  now: () => number,
+): void {
+  if (!isRecord(event.item)) {
+    return;
+  }
+
+  const itemType = normalizeCodexItemType(event.item);
+  if (itemType !== "command_execution") {
+    return;
+  }
+
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: now(),
+    type: "progress",
+    data: {
+      item_type: itemType,
+      partial_output:
+        typeof event.item.aggregated_output === "string"
+          ? event.item.aggregated_output
+          : "",
+      status:
+        typeof event.item.status === "string"
+          ? event.item.status
+          : undefined,
+    },
+  });
+}
+
 function emitCodexItemCompleted(
   runtime: AgentRuntime,
   streamer: EventSink,
@@ -169,7 +333,9 @@ function emitCodexItemCompleted(
     return;
   }
 
-  if (event.item.type === "agent_message" && typeof event.item.text === "string") {
+  const itemType = normalizeCodexItemType(event.item);
+
+  if (itemType === "agent_message" && typeof event.item.text === "string") {
     streamer.send({
       task_id: req.task_id,
       session_id: req.session_id,
@@ -184,26 +350,27 @@ function emitCodexItemCompleted(
     return;
   }
 
-  if (event.item.type !== "command_execution") {
+  if (itemType === "command_execution") {
+    const exitCode =
+      typeof event.item.exit_code === "number" && Number.isFinite(event.item.exit_code)
+        ? event.item.exit_code
+        : 0;
+    streamer.send({
+      task_id: req.task_id,
+      session_id: req.session_id,
+      timestamp_ms: now(),
+      type: "tool_result",
+      data: {
+        call_id: typeof event.item.id === "string" ? event.item.id : "",
+        output:
+          typeof event.item.aggregated_output === "string" ? event.item.aggregated_output : "",
+        is_error: exitCode !== 0,
+      },
+    });
     return;
   }
 
-  const exitCode =
-    typeof event.item.exit_code === "number" && Number.isFinite(event.item.exit_code)
-      ? event.item.exit_code
-      : 0;
-  streamer.send({
-    task_id: req.task_id,
-    session_id: req.session_id,
-    timestamp_ms: now(),
-    type: "tool_result",
-    data: {
-      call_id: typeof event.item.id === "string" ? event.item.id : "",
-      output:
-        typeof event.item.aggregated_output === "string" ? event.item.aggregated_output : "",
-      is_error: exitCode !== 0,
-    },
-  });
+  emitCodexItemDetail(runtime, streamer, event.item, req, now);
 }
 
 function emitCodexTurnCompleted(
@@ -241,6 +408,7 @@ function emitCodexTurnCompleted(
     runtime.continuity = {
       ...runtime.continuity,
       captured_at: now(),
+      fork_available: true,
     };
   }
 
@@ -260,6 +428,50 @@ function emitCodexTurnCompleted(
   });
 }
 
+function emitCodexTurnFailed(
+  runtime: AgentRuntime,
+  streamer: EventSink,
+  event: UnknownRecord,
+  req: ExecuteRequest,
+  now: () => number,
+): never {
+  runtime.status = "failed";
+  const message = extractCodexErrorMessage(event) ?? "codex turn failed";
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: now(),
+    type: "error",
+    data: {
+      message,
+      source: "codex",
+    },
+  });
+  throw new Error(message);
+}
+
+function emitCodexTopLevelError(
+  runtime: AgentRuntime,
+  streamer: EventSink,
+  event: UnknownRecord,
+  req: ExecuteRequest,
+  now: () => number,
+): never {
+  runtime.status = "failed";
+  const message = extractCodexErrorMessage(event) ?? "codex runtime failed";
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: now(),
+    type: "error",
+    data: {
+      message,
+      source: "codex",
+    },
+  });
+  throw new Error(message);
+}
+
 async function* spawnCodexRuntime(params: {
   mode: "start" | "resume";
   command: string;
@@ -268,16 +480,20 @@ async function* spawnCodexRuntime(params: {
   prompt: string;
   threadId?: string;
   abortSignal: AbortSignal;
+  activePlugins?: PluginRecord[];
 }): AsyncGenerator<UnknownRecord, void> {
+  const launch = prepareCodexLaunch({
+    mode: params.mode,
+    command: params.command,
+    req: params.req,
+    prompt: params.prompt,
+    threadId: params.threadId,
+    activePlugins: params.activePlugins,
+  });
   const proc = Bun.spawn({
-    cmd: buildCodexCommand(params),
+    cmd: launch.cmd,
     cwd: params.req.worktree_path,
-    env: {
-      ...process.env,
-      AGENTFORGE_RUNTIME: "codex",
-      AGENTFORGE_MODEL: params.req.model ?? "",
-      AGENTFORGE_PERMISSION_MODE: params.req.permission_mode,
-    },
+    env: launch.env,
     stdout: "pipe",
     stderr: "pipe",
   });
@@ -324,40 +540,8 @@ async function* spawnCodexRuntime(params: {
     }
   } finally {
     params.abortSignal.removeEventListener("abort", onAbort);
+    launch.cleanup();
   }
-}
-
-function buildCodexCommand(params: {
-  mode: "start" | "resume";
-  command: string;
-  req: ExecuteRequest;
-  prompt: string;
-  threadId?: string;
-}): string[] {
-  const cmd = [params.command, "-C", params.req.worktree_path, "exec"];
-
-  if (params.mode === "resume") {
-    cmd.push("resume");
-  }
-
-  cmd.push("--json");
-
-  if (params.req.model) {
-    cmd.push("--model", params.req.model);
-  }
-
-  if (params.req.permission_mode === "bypassPermissions") {
-    cmd.push("--dangerously-bypass-approvals-and-sandbox");
-  } else {
-    cmd.push("--full-auto");
-  }
-
-  if (params.mode === "resume" && params.threadId) {
-    cmd.push(params.threadId);
-  }
-
-  cmd.push(params.prompt);
-  return cmd;
 }
 
 function buildCodexPrompt(prompt: string, systemPrompt: string): string {
@@ -370,6 +554,209 @@ function buildCodexPrompt(prompt: string, systemPrompt: string): string {
 
 function buildCodexResumePrompt(prompt: string): string {
   return `Continue the existing task from the saved Codex thread state. Preserve prior context and continue the unfinished work.\n\nOriginal task:\n${prompt}`;
+}
+
+function buildCodexConfigOverrides(activePlugins: PluginRecord[]): string[] {
+  const overrides: string[] = [];
+
+  for (const plugin of activePlugins) {
+    const id = plugin.metadata.id;
+    if (plugin.spec.transport === "http" && plugin.spec.url) {
+      overrides.push(`mcp_servers.${id}.url=${tomlString(plugin.spec.url)}`);
+      continue;
+    }
+
+    if (plugin.spec.command) {
+      overrides.push(`mcp_servers.${id}.command=${tomlString(plugin.spec.command)}`);
+      if (plugin.spec.args?.length) {
+        overrides.push(`mcp_servers.${id}.args=${tomlArray(plugin.spec.args)}`);
+      }
+      if (plugin.spec.env && Object.keys(plugin.spec.env).length > 0) {
+        overrides.push(`mcp_servers.${id}.env=${tomlInlineTable(plugin.spec.env)}`);
+      }
+    }
+  }
+
+  return overrides;
+}
+
+function emitCodexItemDetail(
+  runtime: AgentRuntime,
+  streamer: EventSink,
+  item: UnknownRecord,
+  req: ExecuteRequest,
+  now: () => number,
+): void {
+  const detail = isRecord(item.details) ? item.details : null;
+  if (!detail || typeof detail.type !== "string") {
+    return;
+  }
+
+  switch (detail.type) {
+    case "Reasoning":
+      if (typeof detail.summary === "string") {
+        streamer.send({
+          task_id: req.task_id,
+          session_id: req.session_id,
+          timestamp_ms: now(),
+          type: "reasoning",
+          data: {
+            content: detail.summary,
+          },
+        });
+      }
+      return;
+    case "FileChange":
+      streamer.send({
+        task_id: req.task_id,
+        session_id: req.session_id,
+        timestamp_ms: now(),
+        type: "file_change",
+        data: {
+          files: Array.isArray(detail.files) ? detail.files : [],
+        },
+      });
+      return;
+    case "McpToolCall":
+      emitCodexToolCallResult(
+        streamer,
+        req,
+        now,
+        typeof detail.toolName === "string" ? detail.toolName : "mcp_tool",
+        detail.input,
+        detail.output,
+        typeof item.id === "string" ? item.id : "",
+      );
+      return;
+    case "WebSearch":
+      emitCodexToolCallResult(
+        streamer,
+        req,
+        now,
+        "web_search",
+        detail.query,
+        detail.results,
+        typeof item.id === "string" ? item.id : "",
+      );
+      return;
+    case "TodoList":
+      streamer.send({
+        task_id: req.task_id,
+        session_id: req.session_id,
+        timestamp_ms: now(),
+        type: "todo_update",
+        data: {
+          todos: Array.isArray(detail.todos) ? detail.todos : [],
+        },
+      });
+      return;
+    case "CollabToolCall":
+      if (typeof detail.output === "string") {
+        streamer.send({
+          task_id: req.task_id,
+          session_id: req.session_id,
+          timestamp_ms: now(),
+          type: "output",
+          data: {
+            content: detail.output,
+            content_type: "text",
+            turn_number: runtime.turnNumber,
+            agent_name: detail.agentName,
+          },
+        });
+      }
+      return;
+    case "Error":
+      streamer.send({
+        task_id: req.task_id,
+        session_id: req.session_id,
+        timestamp_ms: now(),
+        type: "error",
+        data: {
+          message: typeof detail.message === "string" ? detail.message : "codex item error",
+          source: "codex",
+        },
+      });
+      return;
+    default:
+      return;
+  }
+}
+
+function emitCodexToolCallResult(
+  streamer: EventSink,
+  req: ExecuteRequest,
+  now: () => number,
+  toolName: string,
+  input: unknown,
+  output: unknown,
+  callId: string,
+): void {
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: now(),
+    type: "tool_call",
+    data: {
+      tool_name: toolName,
+      tool_input: input,
+      call_id: callId,
+    },
+  });
+  streamer.send({
+    task_id: req.task_id,
+    session_id: req.session_id,
+    timestamp_ms: now(),
+    type: "tool_result",
+    data: {
+      call_id: callId,
+      output,
+      is_error: false,
+    },
+  });
+}
+
+function normalizeCodexItemType(item: UnknownRecord): string {
+  if (typeof item.type === "string") {
+    return item.type;
+  }
+
+  if (isRecord(item.details) && typeof item.details.type === "string") {
+    switch (item.details.type) {
+      case "AgentMessage":
+        return "agent_message";
+      case "CommandExecution":
+        return "command_execution";
+      default:
+        return item.details.type;
+    }
+  }
+
+  return "";
+}
+
+function extractCodexErrorMessage(event: UnknownRecord): string | null {
+  if (typeof event.message === "string") {
+    return event.message;
+  }
+  if (isRecord(event.error) && typeof event.error.message === "string") {
+    return event.error.message;
+  }
+  return null;
+}
+
+function tomlString(value: string): string {
+  return JSON.stringify(value);
+}
+
+function tomlArray(values: string[]): string {
+  return `[${values.map(tomlString).join(",")}]`;
+}
+
+function tomlInlineTable(values: Record<string, string>): string {
+  return `{${Object.entries(values)
+    .map(([key, value]) => `${key}=${tomlString(value)}`)
+    .join(",")}}`;
 }
 
 async function* readLines(

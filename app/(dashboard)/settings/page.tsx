@@ -22,8 +22,10 @@ import { FormBuilder } from "@/components/forms/form-builder";
 import { RuleEditor } from "@/components/automations/rule-editor";
 import { RuleList } from "@/components/automations/rule-list";
 import { AutomationLogViewer } from "@/components/automations/automation-log-viewer";
+import { ThemeToggle } from "@/components/ui/theme-toggle";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useProjectStore, type Project, type ProjectSettings, type ProjectUpdateInput } from "@/lib/stores/project-store";
+import { useLocaleStore, SUPPORTED_LOCALES, type Locale } from "@/lib/stores/locale-store";
 import {
   DEFAULT_WEBHOOK,
   areSettingsDraftsEqual,
@@ -35,6 +37,11 @@ import {
   type SettingsValidationErrors,
   type SettingsWorkspaceDraft,
 } from "@/lib/settings/project-settings-workspace";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
+import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { ErrorBanner } from "@/components/shared/error-banner";
+import { FolderOpen } from "lucide-react";
 
 type UpdateProject = (id: string, data: ProjectUpdateInput) => Promise<Project | undefined>;
 type SaveState = "idle" | "saving" | "saved" | "error";
@@ -225,13 +232,15 @@ function SettingsContent({ project, updateProject }: { project: Project; updateP
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <div className="flex flex-wrap items-center gap-2 text-sm">
-          {dirty ? <Badge variant="secondary">{t("unsavedChanges")}</Badge> : <Badge variant="outline">{t("allChangesSaved")}</Badge>}
-          {saveState === "saved" && <span className="text-emerald-600 dark:text-emerald-400">{t("settingsSaved")}</span>}
-        </div>
-      </div>
+      <PageHeader
+        title={t("title")}
+        actions={
+          <div className="flex flex-wrap items-center gap-2 text-sm">
+            {dirty ? <Badge variant="secondary">{t("unsavedChanges")}</Badge> : <Badge variant="outline">{t("allChangesSaved")}</Badge>}
+            {saveState === "saved" && <span className="text-emerald-600 dark:text-emerald-400">{t("settingsSaved")}</span>}
+          </div>
+        }
+      />
 
       <Card>
         <CardHeader>
@@ -835,9 +844,7 @@ function SettingsContent({ project, updateProject }: { project: Project; updateP
 
       <div className="flex flex-col gap-3">
         {saveError && (
-          <div className="rounded-md border border-destructive/40 bg-destructive/10 p-3 text-sm text-destructive">
-            {saveError}
-          </div>
+          <ErrorBanner message={saveError} />
         )}
         <div className="flex items-center gap-3">
           <Button type="button" disabled={saveState === "saving"} onClick={() => void handleSave()}>
@@ -854,7 +861,49 @@ function SettingsContent({ project, updateProject }: { project: Project; updateP
   );
 }
 
+const LOCALE_LABELS: Record<Locale, string> = {
+  en: "English",
+  "zh-CN": "中文（简体）",
+};
+
+function AppearanceCard() {
+  const t = useTranslations("settings");
+  const locale = useLocaleStore((s) => s.locale);
+  const setLocale = useLocaleStore((s) => s.setLocale);
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>{t("appearance")}</CardTitle>
+        <CardDescription>{t("appearanceDesc")}</CardDescription>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="flex flex-col gap-2">
+          <Label>{t("themeMode")}</Label>
+          <ThemeToggle />
+        </div>
+        <div className="flex flex-col gap-2">
+          <Label htmlFor="appearance-language">{t("language")}</Label>
+          <select
+            id="appearance-language"
+            value={locale}
+            onChange={(e) => setLocale(e.target.value as Locale)}
+            className="flex h-9 w-full max-w-xs rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
+          >
+            {SUPPORTED_LOCALES.map((loc) => (
+              <option key={loc} value={loc}>
+                {LOCALE_LABELS[loc]}
+              </option>
+            ))}
+          </select>
+        </div>
+      </CardContent>
+    </Card>
+  );
+}
+
 export default function SettingsPage() {
+  useBreadcrumbs([{ label: "Configuration", href: "/" }, { label: "Settings" }]);
   const t = useTranslations("settings");
   const { selectedProjectId } = useDashboardStore();
   const { projects, fetchProjects, updateProject } = useProjectStore();
@@ -864,23 +913,26 @@ export default function SettingsPage() {
     void fetchProjects();
   }, [fetchProjects]);
 
-  if (!selectedProjectId) {
-    return (
-      <div className="flex flex-col gap-6">
-        <h1 className="text-2xl font-bold">{t("titleNoProject")}</h1>
-        <p className="text-sm text-muted-foreground">{t("selectProject")}</p>
-      </div>
-    );
-  }
-
-  if (!project) {
-    return (
-      <div className="flex flex-col gap-6">
-        <h1 className="text-2xl font-bold">{t("titleNoProject")}</h1>
-        <p className="text-sm text-muted-foreground">{t("loadingProject")}</p>
-      </div>
-    );
-  }
-
-  return <SettingsContent key={project.id} project={project} updateProject={updateProject} />;
+  return (
+    <div className="mx-auto w-full max-w-4xl flex flex-col gap-6">
+      <AppearanceCard />
+      {!selectedProjectId && (
+        <EmptyState
+          icon={FolderOpen}
+          title={t("titleNoProject")}
+          description={t("selectProject")}
+        />
+      )}
+      {selectedProjectId && !project && (
+        <EmptyState
+          icon={FolderOpen}
+          title={t("titleNoProject")}
+          description={t("loadingProject")}
+        />
+      )}
+      {project && (
+        <SettingsContent key={project.id} project={project} updateProject={updateProject} />
+      )}
+    </div>
+  );
 }

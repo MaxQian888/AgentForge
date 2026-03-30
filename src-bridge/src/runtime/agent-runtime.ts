@@ -1,5 +1,16 @@
 import type { AgentStatus, ExecuteRequest, RuntimeContinuityState } from "../types.js";
 
+export interface ClaudeQueryControl {
+  interrupt?: () => Promise<void>;
+  setModel?: (model?: string) => Promise<void>;
+  setMaxThinkingTokens?: (maxThinkingTokens: number | null) => Promise<void>;
+  rewindFiles?: (
+    userMessageId: string,
+    options?: { dryRun?: boolean },
+  ) => Promise<{ canRewind: boolean; error?: string }>;
+  mcpServerStatus?: () => Promise<unknown>;
+}
+
 export type RuntimeStatus =
   | "starting"
   | "running"
@@ -21,6 +32,8 @@ export class AgentRuntime {
   lastTool: string;
   request: ExecuteRequest | null;
   continuity: RuntimeContinuityState | null;
+  structuredOutput: Record<string, unknown> | null;
+  claudeQuery: ClaudeQueryControl | null;
   budgetWarningEmitted: boolean;
 
   constructor(taskId: string, sessionId: string) {
@@ -35,6 +48,8 @@ export class AgentRuntime {
     this.lastTool = "";
     this.request = null;
     this.continuity = null;
+    this.structuredOutput = null;
+    this.claudeQuery = null;
     this.budgetWarningEmitted = false;
   }
 
@@ -65,6 +80,10 @@ export class AgentRuntime {
     const resumeBlockedReason = continuityMatchesRuntime
       ? this.continuity?.blocking_reason
       : undefined;
+    const activeHooks = this.request?.hooks_config?.hooks.map((hook) => hook.hook);
+    const subagentCount = this.request?.agents
+      ? Object.keys(this.request.agents).length
+      : undefined;
     return {
       task_id: this.taskId,
       state: this.status,
@@ -80,6 +99,11 @@ export class AgentRuntime {
       team_role: teamRole,
       resume_ready: resumeReady,
       resume_blocked_reason: resumeBlockedReason,
+      structured_output: this.structuredOutput ?? undefined,
+      thinking_enabled: this.request?.thinking_config?.enabled,
+      file_checkpointing: this.request?.file_checkpointing,
+      active_hooks: activeHooks && activeHooks.length > 0 ? activeHooks : undefined,
+      subagent_count: subagentCount,
     };
   }
 }

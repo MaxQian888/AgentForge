@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Users } from "lucide-react";
+import { Plus, Users } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Label } from "@/components/ui/label";
@@ -19,6 +19,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useTeamStore } from "@/lib/stores/team-store";
 import { TeamCard } from "@/components/team/team-card";
+import { TeamCreationWizard } from "@/components/team/team-creation-wizard";
 
 const STATUS_OPTION_KEYS = ["all", "active", "completed", "failed", "cancelled"] as const;
 
@@ -48,6 +49,7 @@ export default function TeamsPage() {
   const { teams, loading, error, fetchTeams, deleteTeam } = useTeamStore();
 
   const [statusFilter, setStatusFilter] = useState("all");
+  const [wizardOpen, setWizardOpen] = useState(false);
 
   useEffect(() => {
     if (!activeProjectId) return;
@@ -82,13 +84,21 @@ export default function TeamsPage() {
     <div className="flex flex-col gap-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">{t("title")}</h1>
-        <Link
-          href="/agents"
-          className="text-sm text-muted-foreground hover:underline"
-        >
-          {t("viewAgents")}
-        </Link>
+        <div className="flex items-center gap-3">
+          <Link
+            href="/agents"
+            className="text-sm text-muted-foreground hover:underline"
+          >
+            {t("viewAgents")}
+          </Link>
+          <Button onClick={() => setWizardOpen(true)}>
+            <Plus className="mr-1.5 size-4" />
+            {t("wizard.createTeam")}
+          </Button>
+        </div>
       </div>
+
+      <TeamCreationWizard open={wizardOpen} onOpenChange={setWizardOpen} />
 
       {projects.length > 0 && (
         <div className="flex flex-wrap items-end gap-4">

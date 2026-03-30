@@ -24,9 +24,20 @@ func ResolveRenderingPlan(metadata PlatformMetadata, fallbackChatID string, deli
 	if delivery == nil {
 		return RenderingPlan{}, errors.New("delivery is required")
 	}
+	metadata = NormalizeMetadata(metadata, metadata.Source)
 	plan := RenderingPlan{}
 
 	if delivery.Native != nil {
+		replyPlan := ResolveReplyPlan(metadata, delivery.ReplyTarget, fallbackChatID)
+		if err := delivery.Native.Validate(); err != nil {
+			return RenderingPlan{}, err
+		}
+		if nativePlatform := delivery.Native.NormalizedPlatform(); nativePlatform != "" && NormalizePlatformName(metadata.Source) != "" && nativePlatform != NormalizePlatformName(metadata.Source) {
+			return nativeFallbackRenderingPlan(replyPlan, metadata, delivery.Metadata, delivery.Native, "native_platform_mismatch"), nil
+		}
+		if surface := delivery.Native.SurfaceType(); surface != "" && !hasStringFold(metadata.Rendering.NativeSurfaces, surface) {
+			return nativeFallbackRenderingPlan(replyPlan, metadata, delivery.Metadata, delivery.Native, "native_surface_unsupported"), nil
+		}
 		replyPlan, err := DeliverNativePlan(metadata, delivery.ReplyTarget, fallbackChatID, delivery.Native)
 		if err != nil {
 			return RenderingPlan{}, err
@@ -87,12 +98,25 @@ func DeliverEnvelope(ctx context.Context, platform Platform, metadata PlatformMe
 func executeRenderingPlan(ctx context.Context, platform Platform, metadata PlatformMetadata, fallbackChatID string, target *ReplyTarget, plan RenderingPlan) (DeliveryReceipt, error) {
 	switch plan.Type {
 	case "native":
+		if _, ok := platform.(NativeMessageSender); !ok {
+			replyPlan, err := DeliverText(ctx, platform, metadata, target, fallbackChatID, plan.Native.FallbackText())
+			return DeliveryReceipt{Type: "text", Method: replyPlan.Method, FallbackReason: firstNonEmpty("native_sender_unavailable", strings.TrimSpace(plan.FallbackReason))}, err
+		}
 		replyPlan, err := DeliverNative(ctx, platform, metadata, target, fallbackChatID, plan.Native)
 		return DeliveryReceipt{Type: "native", Method: replyPlan.Method, FallbackReason: firstNonEmpty(strings.TrimSpace(replyPlan.FallbackReason), strings.TrimSpace(plan.FallbackReason))}, err
 	case "structured":
 		if nativeMessage, ok := synthesizeProviderNativeTextMessage(platform, metadata, target, plan.Structured.FallbackText()); ok {
 			replyPlan, err := DeliverNative(ctx, platform, metadata, target, fallbackChatID, nativeMessage)
 			return DeliveryReceipt{Type: "native", Method: replyPlan.Method, FallbackReason: firstNonEmpty(strings.TrimSpace(replyPlan.FallbackReason), strings.TrimSpace(plan.FallbackReason))}, err
+		}
+		if sender, ok := platform.(ReplyStructuredSender); ok && target != nil {
+			replyCtx := restoreReplyContext(platform, target)
+			if replyCtx != nil {
+				replyPlan := ResolveReplyPlan(metadata, target, fallbackChatID)
+				if err := sender.ReplyStructured(ctx, replyCtx, plan.Structured); err == nil {
+					return DeliveryReceipt{Type: "structured", Method: replyPlan.Method, FallbackReason: strings.TrimSpace(plan.FallbackReason)}, nil
+				}
+			}
 		}
 		if sender, ok := platform.(StructuredSender); ok && target == nil {
 			if chatID := strings.TrimSpace(fallbackChatID); chatID != "" {
@@ -258,4 +282,16 @@ func resolveTextFormat(metadata PlatformMetadata, deliveryMetadata map[string]st
 		return requested
 	}
 	return metadata.Rendering.DefaultTextFormat
+}
+
+func nativeFallbackRenderingPlan(replyPlan ReplyPlan, metadata PlatformMetadata, deliveryMetadata map[string]string, message *NativeMessage, fallbackReason string) RenderingPlan {
+	return RenderingPlan{
+		Type:   "text",
+		Method: replyPlan.Method,
+		Text: []RenderedText{{
+			Content: strings.TrimSpace(message.FallbackText()),
+			Format:  resolveTextFormat(metadata, deliveryMetadata),
+		}},
+		FallbackReason: firstNonEmpty(fallbackReason, metadataValue(deliveryMetadata, "fallback_reason")),
+	}
 }

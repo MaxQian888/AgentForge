@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 	"sync"
@@ -23,9 +24,11 @@ type Stub struct {
 }
 
 type stubReply struct {
-	ChatID    string    `json:"chat_id,omitempty"`
-	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp"`
+	ChatID        string    `json:"chat_id,omitempty"`
+	Content       string    `json:"content"`
+	NativeSurface string    `json:"native_surface,omitempty"`
+	Format        string    `json:"format,omitempty"`
+	Timestamp     time.Time `json:"timestamp"`
 }
 
 type stubMessageRequest struct {
@@ -95,19 +98,53 @@ func (s *Stub) Start(handler core.MessageHandler) error {
 }
 
 func (s *Stub) Reply(ctx context.Context, replyCtx any, content string) error {
-	chatID := ""
-	if msg, ok := replyCtx.(*core.Message); ok {
-		chatID = msg.ChatID
-	}
-	return s.Send(ctx, chatID, content)
+	return s.recordReply(chatIDFromReplyContext(replyCtx), content, "", "")
 }
 
 func (s *Stub) Send(ctx context.Context, chatID string, content string) error {
+	return s.recordReply(chatID, content, "", "")
+}
+
+func (s *Stub) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	return s.recordReply(chatID, message.FallbackText(), message.SurfaceType(), "")
+}
+
+func (s *Stub) ReplyNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	return s.recordReply(chatIDFromReplyContext(replyCtx), message.FallbackText(), message.SurfaceType(), "")
+}
+
+func (s *Stub) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
+	if message == nil {
+		return fmt.Errorf("formatted text is required")
+	}
+	return s.recordReply(chatID, message.Content, "", string(message.Format))
+}
+
+func (s *Stub) ReplyFormattedText(ctx context.Context, replyCtx any, message *core.FormattedText) error {
+	if message == nil {
+		return fmt.Errorf("formatted text is required")
+	}
+	return s.recordReply(chatIDFromReplyContext(replyCtx), message.Content, "", string(message.Format))
+}
+
+func (s *Stub) UpdateFormattedText(ctx context.Context, replyCtx any, message *core.FormattedText) error {
+	return s.ReplyFormattedText(ctx, replyCtx, message)
+}
+
+func (s *Stub) recordReply(chatID, content, nativeSurface, format string) error {
 	s.mu.Lock()
 	s.replies = append(s.replies, stubReply{
-		ChatID:    chatID,
-		Content:   content,
-		Timestamp: time.Now(),
+		ChatID:        strings.TrimSpace(chatID),
+		Content:       content,
+		NativeSurface: strings.TrimSpace(nativeSurface),
+		Format:        strings.TrimSpace(format),
+		Timestamp:     time.Now(),
 	})
 	s.mu.Unlock()
 	log.WithFields(log.Fields{"component": "discord-stub", "chat_id": chatID}).Info("Send: " + content)
@@ -119,6 +156,11 @@ func (s *Stub) Stop() error {
 		return s.server.Shutdown(context.Background())
 	}
 	return nil
+}
+
+func (s *Stub) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	outgoing := renderDiscordStructuredMessage(message)
+	return s.recordReply(chatID, outgoing.Content, "", "")
 }
 
 func (s *Stub) handleTestMessage(w http.ResponseWriter, r *http.Request) {
@@ -182,4 +224,21 @@ func (s *Stub) handleClearReplies(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+}
+
+func chatIDFromReplyContext(replyCtx any) string {
+	switch value := replyCtx.(type) {
+	case *core.Message:
+		if value != nil {
+			return value.ChatID
+		}
+	case *core.ReplyTarget:
+		if value != nil {
+			if trimmed := strings.TrimSpace(value.ChatID); trimmed != "" {
+				return trimmed
+			}
+			return strings.TrimSpace(value.ChannelID)
+		}
+	}
+	return ""
 }

@@ -77,4 +77,21 @@ describe("agent profile helpers", () => {
       }),
     ).toEqual(["codex", "openai", "gpt-5-codex"]);
   });
+
+  it("requires execution settings before an agent profile is marked ready", () => {
+    const readiness = getAgentProfileReadiness({
+      roleId: "frontend-developer",
+      runtime: "",
+      provider: "openai",
+      model: "",
+      maxBudgetUsd: "",
+      notes: "",
+    });
+
+    expect(readiness).toEqual({
+      state: "incomplete",
+      label: "Setup Required",
+      missing: ["runtime", "model"],
+    });
+  });
 });

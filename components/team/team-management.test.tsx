@@ -1,10 +1,16 @@
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TeamManagement } from "./team-management";
 import type { TeamMember } from "@/lib/dashboard/summary";
 import type { RoleManifest } from "@/lib/stores/role-store";
 
 describe("TeamManagement", () => {
+  function setFieldValue(label: string, value: string) {
+    fireEvent.change(screen.getByLabelText(label), {
+      target: { value },
+    });
+  }
+
   async function selectOption(
     user: ReturnType<typeof userEvent.setup>,
     label: string,
@@ -76,6 +82,40 @@ describe("TeamManagement", () => {
         activeAgentRuns: 1,
       },
     },
+    {
+      id: "member-3",
+      projectId: "project-1",
+      name: "Builder Bot",
+      type: "agent",
+      typeLabel: "Agent",
+      role: "implementer",
+      email: "",
+      avatarUrl: "",
+      skills: ["delivery"],
+      isActive: true,
+      status: "active",
+      createdAt: "2026-03-20T10:00:00.000Z",
+      lastActivityAt: "2026-03-24T07:45:00.000Z",
+      roleBindingLabel: "frontend-developer",
+      readinessState: "incomplete",
+      readinessLabel: "Setup Required",
+      readinessMissing: ["runtime", "provider", "model"],
+      agentSummary: [],
+      agentProfile: {
+        roleId: "frontend-developer",
+        runtime: "",
+        provider: "",
+        model: "",
+        maxBudgetUsd: null,
+        notes: "",
+      },
+      workload: {
+        assignedTasks: 0,
+        inProgressTasks: 0,
+        inReviewTasks: 0,
+        activeAgentRuns: 0,
+      },
+    },
   ] as unknown as TeamMember[];
 
   const availableRoles: RoleManifest[] = [
@@ -144,7 +184,7 @@ describe("TeamManagement", () => {
     expect(screen.getByText("Alice")).toBeInTheDocument();
     expect(screen.getByText("Review Bot")).toBeInTheDocument();
     expect(screen.getByText("Human")).toBeInTheDocument();
-    expect(screen.getByText("Agent")).toBeInTheDocument();
+    expect(screen.getAllByText("Agent").length).toBeGreaterThan(0);
     expect(screen.getByText("Suspended")).toBeInTheDocument();
     expect(screen.getByText("feishu • ou_review_bot")).toBeInTheDocument();
     expect(screen.getByText("frontend-developer")).toBeInTheDocument();
@@ -155,13 +195,13 @@ describe("TeamManagement", () => {
     expect(onProjectChange).toHaveBeenCalledWith("project-2");
 
     await user.click(screen.getByRole("button", { name: "Add Member" }));
-    await user.type(screen.getByLabelText("Member Name"), "Bob");
+    setFieldValue("Member Name", "Bob");
     await selectOption(user, "Member Type", "Human");
-    await user.type(screen.getByLabelText("Role"), "bug-fixer");
+    setFieldValue("Role", "bug-fixer");
     await selectOption(user, "Status", "Suspended");
-    await user.type(screen.getByLabelText("Email"), "bob@example.com");
-    await user.type(screen.getByLabelText("IM Platform"), "slack");
-    await user.type(screen.getByLabelText("IM User ID"), "U-bob");
+    setFieldValue("Email", "bob@example.com");
+    setFieldValue("IM Platform", "slack");
+    setFieldValue("IM User ID", "U-bob");
     await user.click(screen.getByRole("button", { name: "Create Member" }));
 
     expect(onCreateMember).toHaveBeenCalledWith({
@@ -197,22 +237,19 @@ describe("TeamManagement", () => {
 
     await user.click(screen.getByRole("button", { name: "Edit Review Bot" }));
     const editRole = await screen.findByLabelText("Edit Role");
-    await user.clear(editRole);
-    await user.type(editRole, "lead-reviewer");
+    fireEvent.change(editRole, { target: { value: "lead-reviewer" } });
     const editSkills = screen.getByLabelText("Edit Skills");
-    await user.clear(editSkills);
-    await user.type(editSkills, "review, security, automation");
+    fireEvent.change(editSkills, {
+      target: { value: "review, security, automation" },
+    });
     await selectOption(user, "Edit Bound Role", "Frontend Developer");
     await selectOption(user, "Edit Status", "Active");
     const editImPlatform = screen.getByLabelText("Edit IM Platform");
-    await user.clear(editImPlatform);
-    await user.type(editImPlatform, "discord");
+    fireEvent.change(editImPlatform, { target: { value: "discord" } });
     const editImUserId = screen.getByLabelText("Edit IM User ID");
-    await user.clear(editImUserId);
-    await user.type(editImUserId, "review-bot");
+    fireEvent.change(editImUserId, { target: { value: "review-bot" } });
     const editBudget = screen.getByLabelText("Edit Agent Budget USD");
-    await user.clear(editBudget);
-    await user.type(editBudget, "9");
+    fireEvent.change(editBudget, { target: { value: "9" } });
     await user.click(screen.getByRole("button", { name: "Save Member" }));
 
     expect(onUpdateMember).toHaveBeenCalledWith("member-2", {
@@ -316,16 +353,16 @@ describe("TeamManagement", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Add Member" }));
-    await user.type(screen.getByLabelText("Member Name"), "Ops Bot");
+    setFieldValue("Member Name", "Ops Bot");
     await selectOption(user, "Member Type", "Agent");
-    await user.type(screen.getByLabelText("Role"), "ops-bot");
-    await user.type(screen.getByLabelText("Skills"), "ops, alerts");
+    setFieldValue("Role", "ops-bot");
+    setFieldValue("Skills", "ops, alerts");
     await selectOption(user, "Bound Role", "Frontend Developer");
-    await user.type(screen.getByLabelText("Agent Budget USD"), "12");
-    await user.type(screen.getByLabelText("Runtime"), "codex");
-    await user.type(screen.getByLabelText("Provider"), "openai");
-    await user.type(screen.getByLabelText("Model"), "gpt-5-codex");
-    await user.type(screen.getByLabelText("Agent Notes"), "Handle incidents");
+    setFieldValue("Agent Budget USD", "12");
+    setFieldValue("Runtime", "codex");
+    setFieldValue("Provider", "openai");
+    setFieldValue("Model", "gpt-5-codex");
+    setFieldValue("Agent Notes", "Handle incidents");
     await user.click(screen.getByRole("button", { name: "Create Member" }));
 
     expect(onCreateMember).toHaveBeenCalledWith({
@@ -354,4 +391,42 @@ describe("TeamManagement", () => {
     await user.click(screen.getByRole("button", { name: "Cancel" }));
     expect(screen.queryByText("Edit Member")).not.toBeInTheDocument();
   }, 20000);
+
+  it("links roster drill-downs and opens setup-required agents with highlighted missing fields", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <TeamManagement
+        projects={projects}
+        selectedProjectId="project-1"
+        members={members}
+        loading={false}
+        error={null}
+        availableRoles={availableRoles}
+        onRetry={jest.fn()}
+        onProjectChange={jest.fn()}
+        onCreateMember={jest.fn().mockResolvedValue(undefined)}
+        onUpdateMember={jest.fn().mockResolvedValue(undefined)}
+      />
+    );
+
+    expect(screen.getByRole("link", { name: "Alice" })).toHaveAttribute(
+      "href",
+      "/project?id=project-1&member=member-1"
+    );
+    expect(screen.getByRole("link", { name: "View Alice tasks" })).toHaveAttribute(
+      "href",
+      "/project?id=project-1&member=member-1"
+    );
+    expect(
+      screen.getByRole("link", { name: "View Review Bot agent activity" })
+    ).toHaveAttribute("href", "/agents?member=member-2");
+
+    await user.click(screen.getByRole("button", { name: "Setup Required" }));
+
+    expect(await screen.findByText("Edit Member")).toBeInTheDocument();
+    expect(screen.getByLabelText("Edit Runtime")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Edit Provider")).toHaveAttribute("aria-invalid", "true");
+    expect(screen.getByLabelText("Edit Model")).toHaveAttribute("aria-invalid", "true");
+  });
 });

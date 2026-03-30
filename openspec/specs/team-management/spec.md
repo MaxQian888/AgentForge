@@ -60,10 +60,15 @@ The system SHALL surface enough member-level workload context to help users deci
 - **AND** the row surfaces the most recent collaboration cue available for that member when such activity exists
 
 #### Scenario: User investigates a member from team management
-- **WHEN** a user selects a member entry or workload indicator from the team management view
-- **THEN** the system navigates to a related filtered view such as project tasks, agent details, or recent activity for that member
-- **AND** the destination consumes the provided member and project context instead of ignoring it
-- **AND** the user can continue managing that member's work without manually rebuilding the same filter state
+- **WHEN** a user clicks a member's workload indicator or selects a member entry from the team management view
+- **THEN** the system navigates to the project task workspace filtered by that member as assignee
+- **AND** the destination consumes the provided member and project context
+- **AND** the task workspace pre-selects the appropriate view mode and shows tasks assigned to that member
+
+#### Scenario: User investigates an agent member's active runs
+- **WHEN** a user clicks an agent member's active agent run count
+- **THEN** the system navigates to the team runs list filtered to show runs involving that agent member
+- **AND** the user can continue managing that agent's work from the destination
 
 ### Requirement: Team roster surfaces agent role linkage and configuration readiness
 The system SHALL expose enough agent-specific summary information in the team roster to help users manage silicon employees as first-class collaborators. Agent entries MUST show their bound role state and a concise readiness summary of supported execution or governance settings so operators can identify which agent members are ready to use or still need configuration.
@@ -74,9 +79,10 @@ The system SHALL expose enough agent-specific summary information in the team ro
 - **THEN** the operator can distinguish that agent from a generic member row without opening the editor first
 
 #### Scenario: Agent profile is incomplete
-- **WHEN** an agent member is missing required or expected profile information for the current product contract
-- **THEN** the team management view surfaces an incomplete or attention-needed cue for that member
-- **THEN** the view provides a direct edit path so the operator can complete the missing configuration
+- **WHEN** an agent member is missing required profile information (runtime, provider, or model)
+- **THEN** the team management view surfaces a prominent "Setup Required" badge on that member row
+- **AND** the badge is clickable and opens the agent profile editor directly
+- **AND** the editor highlights the missing fields
 
 ### Requirement: Team startup supports explicit coding-agent runtime selection
 The system SHALL allow a team run to start through a supported team strategy plus an explicit coding-agent `runtime`, `provider`, and `model` selection, and it MUST also support falling back to the project's resolved defaults when the caller omits that selection. The resulting team summary MUST expose the resolved strategy and coding-agent identity used by downstream team surfaces.
@@ -115,13 +121,18 @@ The system SHALL provide project-scoped agent team collection and detail surface
 
 #### Scenario: Team list request fails
 - **WHEN** the project-scoped team run request fails
-- **THEN** the system shows an actionable error state instead of an empty successful list
-- **AND** the operator can retry the same project-scoped request without leaving the page
+- **THEN** the system shows an actionable error state with retry button instead of an empty successful list
+- **AND** the error message explains what went wrong
 
 #### Scenario: Team detail is loading
 - **WHEN** a user opens a team detail route and the team summary request is still in flight
-- **THEN** the system shows a loading state for that detail view
+- **THEN** the system shows a loading skeleton for that detail view
 - **AND** the system SHALL NOT present the team as missing until the request has completed with a not-found outcome
+
+#### Scenario: Team detail shows fully populated summary
+- **WHEN** a user opens a team detail view
+- **THEN** the system displays the team's task title (not just task ID), pipeline visualization with planner/coder/reviewer statuses, coder run count and completion state, cost tracking, and error messages
+- **AND** all `AgentTeamSummaryDTO` fields are populated by the backend
 
 ### Requirement: Team strategy identifiers remain canonical and backward-compatible
 The system SHALL use canonical backend strategy identifiers for new team startup and team run display, while remaining able to interpret supported legacy identifiers already persisted in existing team records.
@@ -148,4 +159,18 @@ The system SHALL use the canonical team member availability state when exposing 
 - **WHEN** a supported assignment or dispatch entry point resolves a target member whose canonical status is `inactive` or `suspended`
 - **THEN** the system returns actionable unavailable feedback instead of treating that member as a ready runnable agent collaborator
 - **AND** the same member remains visible in team management so operators can reactivate or edit it without recreating the record
+
+### Requirement: Backend populates AgentTeamSummaryDTO with task and agent run data
+The system SHALL populate all fields of `AgentTeamSummaryDTO` when returning team detail or team list responses. The handler MUST JOIN with the tasks table for `taskTitle` and query agent runs for `coderRuns`, `coderTotal`, `coderCompleted`, `plannerStatus`, and `reviewerStatus`.
+
+#### Scenario: Team detail returns fully populated summary
+- **WHEN** the backend receives `GET /api/v1/teams/:id`
+- **THEN** the response includes `taskTitle` from the associated task record
+- **AND** the response includes `coderRuns` array with status and cost for each coder agent run
+- **AND** the response includes `plannerStatus` and `reviewerStatus` from their respective agent run records
+
+#### Scenario: Team list returns summaries with task titles
+- **WHEN** the backend receives `GET /api/v1/teams?projectId=X`
+- **THEN** each team in the response includes its `taskTitle`
+- **AND** the query uses batch lookups (IN clause) to avoid N+1 queries
 

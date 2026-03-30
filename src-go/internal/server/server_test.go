@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
@@ -31,6 +32,10 @@ func testConfig() *config.Config {
 }
 
 func registerTestRoutes(e *echo.Echo, cfg *config.Config, authSvc *service.AuthService, cache *repository.CacheRepository) {
+	registerTestRoutesWithAgentService(e, cfg, authSvc, cache, nil)
+}
+
+func registerTestRoutesWithAgentService(e *echo.Echo, cfg *config.Config, authSvc *service.AuthService, cache *repository.CacheRepository, agentSvc *service.AgentService) {
 	server.RegisterRoutes(e, cfg, authSvc, cache,
 		repository.NewProjectRepository(nil),
 		repository.NewMemberRepository(nil),
@@ -66,7 +71,18 @@ func registerTestRoutes(e *echo.Echo, cfg *config.Config, authSvc *service.AuthS
 		bridge.NewClient("http://localhost:7778"),
 		nil,
 		nil,
+		agentSvc,
 		nil,
+	)
+}
+
+func testAgentService() *service.AgentService {
+	return service.NewAgentService(
+		repository.NewAgentRunRepository(nil),
+		repository.NewTaskRepository(nil),
+		repository.NewProjectRepository(nil),
+		ws.NewHub(),
+		bridge.NewClient("http://localhost:7778"),
 		nil,
 	)
 }
@@ -419,6 +435,59 @@ func TestRegisterRoutes_IMOperatorRoutesPresent(t *testing.T) {
 
 	if len(expected) != 0 {
 		t.Fatalf("expected IM operator routes to be registered, missing: %+v", expected)
+	}
+}
+
+func TestRegisterRoutes_DispatcherInfraGapRoutesPresent(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutesWithAgentService(e, cfg, authSvc, cache, testAgentService())
+
+	expected := map[string]struct{}{
+		http.MethodGet + " /api/v1/projects/:pid/queue":             {},
+		http.MethodDelete + " /api/v1/projects/:pid/queue/:entryId": {},
+		http.MethodGet + " /api/v1/projects/:pid/budget/summary":    {},
+		http.MethodGet + " /api/v1/sprints/:sid/budget":             {},
+	}
+
+	for _, route := range e.Routes() {
+		delete(expected, route.Method+" "+route.Path)
+	}
+
+	if len(expected) != 0 {
+		t.Fatalf("expected dispatcher infra gap routes to be registered, missing: %+v", expected)
+	}
+}
+
+func TestRegisterRoutes_DispatcherInfraGapRoutesRequireAuth(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutesWithAgentService(e, cfg, authSvc, cache, testAgentService())
+
+	for _, tc := range []struct {
+		name   string
+		method string
+		path   string
+	}{
+		{name: "queue list", method: http.MethodGet, path: "/api/v1/projects/" + uuid.NewString() + "/queue"},
+		{name: "queue cancel", method: http.MethodDelete, path: "/api/v1/projects/" + uuid.NewString() + "/queue/" + uuid.NewString()},
+		{name: "project budget summary", method: http.MethodGet, path: "/api/v1/projects/" + uuid.NewString() + "/budget/summary"},
+		{name: "sprint budget detail", method: http.MethodGet, path: "/api/v1/sprints/" + uuid.NewString() + "/budget"},
+	} {
+		req := httptest.NewRequest(tc.method, tc.path, nil)
+		rec := httptest.NewRecorder()
+		e.ServeHTTP(rec, req)
+		if rec.Code != http.StatusUnauthorized {
+			t.Fatalf("%s status = %d, want 401", tc.name, rec.Code)
+		}
 	}
 }
 

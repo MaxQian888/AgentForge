@@ -92,13 +92,13 @@ type AgentRunSummaryDTO struct {
 }
 
 type AgentPoolStatsDTO struct {
-	Active          int `json:"active"`
-	Max             int `json:"max"`
-	Available       int `json:"available"`
-	PausedResumable int `json:"pausedResumable"`
-	Queued          int `json:"queued"`
-	Warm            int `json:"warm"`
-	Degraded        bool `json:"degraded"`
+	Active          int                   `json:"active"`
+	Max             int                   `json:"max"`
+	Available       int                   `json:"available"`
+	PausedResumable int                   `json:"pausedResumable"`
+	Queued          int                   `json:"queued"`
+	Warm            int                   `json:"warm"`
+	Degraded        bool                  `json:"degraded"`
 	Queue           []AgentPoolQueueEntry `json:"queue,omitempty"`
 }
 
@@ -130,6 +130,7 @@ type CostGroupDTO struct {
 type VelocityPointDTO struct {
 	Period         string  `json:"period"`
 	TasksCompleted int     `json:"tasksCompleted"`
+	CostUsd        float64 `json:"costUsd"`
 	AvgCycleTimeH  float64 `json:"avgCycleTimeHours"`
 }
 
@@ -137,17 +138,19 @@ type VelocityPointDTO struct {
 type VelocityStatsDTO struct {
 	Points         []VelocityPointDTO `json:"points"`
 	TotalCompleted int                `json:"totalCompleted"`
+	TotalCostUsd   float64            `json:"totalCostUsd"`
 	AvgPerDay      float64            `json:"avgPerDay"`
 }
 
 // AgentPerformanceEntryDTO represents performance data for a single agent role.
 type AgentPerformanceEntryDTO struct {
-	RoleID       string  `json:"roleId"`
-	RunCount     int     `json:"runCount"`
-	SuccessRate  float64 `json:"successRate"`
-	AvgCostUsd   float64 `json:"avgCostUsd"`
-	AvgDurationS float64 `json:"avgDurationSeconds"`
-	TotalCostUsd float64 `json:"totalCostUsd"`
+	BucketID           string  `json:"bucketId"`
+	Label              string  `json:"label"`
+	RunCount           int     `json:"runCount"`
+	SuccessRate        float64 `json:"successRate"`
+	AvgCostUsd         float64 `json:"avgCostUsd"`
+	AvgDurationMinutes float64 `json:"avgDurationMinutes"`
+	TotalCostUsd       float64 `json:"totalCostUsd"`
 }
 
 // AgentPerformanceDTO contains agent performance statistics.

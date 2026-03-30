@@ -6,6 +6,7 @@ import { Plus, Users, Trash2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/shared/page-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import {
@@ -33,6 +34,7 @@ import type {
 import type { RoleManifest } from "@/lib/stores/role-store";
 import type { AgentProfileDraft } from "@/lib/team/agent-profile";
 import { getMemberStatusLabel, type MemberStatus } from "@/lib/team/member-status";
+import { cn } from "@/lib/utils";
 
 interface TeamProjectOption {
   id: string;
@@ -162,18 +164,26 @@ function RoleBindingSelect({
   value,
   availableRoles,
   onChange,
+  className,
+  ariaInvalid,
 }: {
   id: string;
   label: string;
   value: string;
   availableRoles: RoleManifest[];
   onChange: (value: string) => void;
+  className?: string;
+  ariaInvalid?: boolean;
 }) {
   return (
     <div className="flex flex-col gap-2">
       <Label htmlFor={id}>{label}</Label>
       <Select value={value} onValueChange={onChange}>
-        <SelectTrigger id={id}>
+        <SelectTrigger
+          id={id}
+          className={className}
+          aria-invalid={ariaInvalid}
+        >
           <SelectValue placeholder="Unbound role" />
         </SelectTrigger>
         <SelectContent>
@@ -194,13 +204,20 @@ function AgentProfileFields({
   availableRoles,
   value,
   onChange,
+  highlightedFields = [],
 }: {
   mode: "create" | "edit";
   availableRoles: RoleManifest[];
   value: AgentProfileDraft;
   onChange: (nextValue: AgentProfileDraft) => void;
+  highlightedFields?: string[];
 }) {
   const prefix = mode === "edit" ? "Edit " : "";
+  const highlightedSet = new Set(highlightedFields);
+  const highlightClass = (field: string) =>
+    highlightedSet.has(field)
+      ? "border-destructive ring-1 ring-destructive/40"
+      : undefined;
 
   return (
     <div className="grid gap-4 md:grid-cols-2">
@@ -209,6 +226,8 @@ function AgentProfileFields({
         label={`${prefix}Bound Role`}
         value={value.roleId || "__unbound__"}
         availableRoles={availableRoles}
+        className={highlightClass("roleId")}
+        ariaInvalid={highlightedSet.has("roleId")}
         onChange={(roleId) =>
           onChange({ ...value, roleId: roleId === "__unbound__" ? "" : roleId })
         }
@@ -220,6 +239,8 @@ function AgentProfileFields({
         <Input
           id={mode === "edit" ? "edit-agent-budget" : "agent-budget"}
           value={value.maxBudgetUsd}
+          className={highlightClass("maxBudgetUsd")}
+          aria-invalid={highlightedSet.has("maxBudgetUsd")}
           onChange={(event) =>
             onChange({ ...value, maxBudgetUsd: event.target.value })
           }
@@ -232,6 +253,8 @@ function AgentProfileFields({
         <Input
           id={mode === "edit" ? "edit-runtime" : "runtime"}
           value={value.runtime}
+          className={highlightClass("runtime")}
+          aria-invalid={highlightedSet.has("runtime")}
           onChange={(event) => onChange({ ...value, runtime: event.target.value })}
         />
       </div>
@@ -242,6 +265,8 @@ function AgentProfileFields({
         <Input
           id={mode === "edit" ? "edit-provider" : "provider"}
           value={value.provider}
+          className={highlightClass("provider")}
+          aria-invalid={highlightedSet.has("provider")}
           onChange={(event) => onChange({ ...value, provider: event.target.value })}
         />
       </div>
@@ -252,6 +277,8 @@ function AgentProfileFields({
         <Input
           id={mode === "edit" ? "edit-model" : "model"}
           value={value.model}
+          className={highlightClass("model")}
+          aria-invalid={highlightedSet.has("model")}
           onChange={(event) => onChange({ ...value, model: event.target.value })}
         />
       </div>
@@ -290,6 +317,7 @@ export function TeamManagement({
   );
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<MemberFormState | null>(null);
+  const [highlightedAgentFields, setHighlightedAgentFields] = useState<string[]>([]);
   const [deletingMemberId, setDeletingMemberId] = useState<string | null>(null);
 
   // Filter state
@@ -328,6 +356,32 @@ export function TeamManagement({
       return true;
     });
   }, [members, searchQuery, typeFilter, statusFilter]);
+
+  const openMemberEditor = (
+    member: TeamMember,
+    options?: { highlightedFields?: string[] }
+  ) => {
+    setEditingMemberId(member.id);
+    setEditForm(buildEditForm(member));
+    setHighlightedAgentFields(options?.highlightedFields ?? []);
+  };
+
+  const clearEditState = () => {
+    setEditingMemberId(null);
+    setEditForm(null);
+    setHighlightedAgentFields([]);
+  };
+
+  const setupRequiredFields = (member: TeamMember) =>
+    (member.readinessMissing ?? []).filter((field) =>
+      ["runtime", "provider", "model", "roleId"].includes(field)
+    );
+
+  const hasSetupRequired = (member: TeamMember) =>
+    member.type === "agent" &&
+    setupRequiredFields(member).some((field) =>
+      ["runtime", "provider", "model"].includes(field)
+    );
 
   const handleCreateMember = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -371,8 +425,7 @@ export function TeamManagement({
     }
 
     await onUpdateMember(editingMemberId, payload);
-    setEditingMemberId(null);
-    setEditForm(null);
+    clearEditState();
   };
 
   const handleConfirmDelete = async () => {
@@ -430,12 +483,10 @@ export function TeamManagement({
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4 lg:flex-row lg:items-end lg:justify-between">
-        <div className="space-y-1">
-          <h1 className="text-2xl font-bold">Team Management</h1>
-          <p className="text-sm text-muted-foreground">
-            Keep human and agent collaborators aligned for {selectedProjectName}.
-          </p>
-        </div>
+        <PageHeader
+          title="Team Management"
+          description={`Keep human and agent collaborators aligned for ${selectedProjectName}.`}
+        />
 
         <div className="flex flex-col gap-2 sm:flex-row sm:items-end">
           <div className="flex flex-col gap-2">
@@ -659,7 +710,12 @@ export function TeamManagement({
                   <TableRow key={member.id}>
                     <TableCell>
                       <div className="flex flex-col gap-1">
-                        <span className="font-medium">{member.name}</span>
+                        <Link
+                          href={`/project?id=${member.projectId}&member=${member.id}`}
+                          className="font-medium hover:underline"
+                        >
+                          {member.name}
+                        </Link>
                         <span className="text-xs text-muted-foreground">
                           {member.email || "No direct email"}
                         </span>
@@ -690,16 +746,32 @@ export function TeamManagement({
                     <TableCell>
                       {member.type === "agent" ? (
                         <div className="flex flex-col gap-1 text-xs">
-                          <Badge
-                            variant={
-                              member.readinessState === "ready"
-                                ? "secondary"
-                                : "outline"
-                            }
-                            className="w-fit"
-                          >
-                            {member.readinessLabel ?? "Needs attention"}
-                          </Badge>
+                          {hasSetupRequired(member) ? (
+                            <Button
+                              type="button"
+                              size="sm"
+                              variant="outline"
+                              className="h-6 w-fit border-destructive/50 px-2 text-destructive"
+                              onClick={() =>
+                                openMemberEditor(member, {
+                                  highlightedFields: setupRequiredFields(member),
+                                })
+                              }
+                            >
+                              Setup Required
+                            </Button>
+                          ) : (
+                            <Badge
+                              variant={
+                                member.readinessState === "ready"
+                                  ? "secondary"
+                                  : "outline"
+                              }
+                              className="w-fit"
+                            >
+                              {member.readinessLabel ?? "Needs attention"}
+                            </Badge>
+                          )}
                           <span className="text-muted-foreground">
                             Bound role: {member.roleBindingLabel ?? "Unbound role"}
                           </span>
@@ -717,11 +789,39 @@ export function TeamManagement({
                     </TableCell>
                     <TableCell>{member.skills.join(", ") || "No skills tagged"}</TableCell>
                     <TableCell>
-                      <div className="text-xs text-muted-foreground">
-                        <div>Assigned: {member.workload.assignedTasks}</div>
-                        <div>In progress: {member.workload.inProgressTasks}</div>
-                        <div>In review: {member.workload.inReviewTasks}</div>
-                        <div>Agent runs: {member.workload.activeAgentRuns}</div>
+                      <div className="flex flex-col gap-1 text-xs text-muted-foreground">
+                        <Link
+                          href={`/project?id=${member.projectId}&member=${member.id}`}
+                          aria-label={`View ${member.name} tasks`}
+                          className="hover:text-foreground hover:underline"
+                        >
+                          Assigned: {member.workload.assignedTasks}
+                        </Link>
+                        <Link
+                          href={`/project?id=${member.projectId}&member=${member.id}`}
+                          aria-label={`View ${member.name} in-progress tasks`}
+                          className="hover:text-foreground hover:underline"
+                        >
+                          In progress: {member.workload.inProgressTasks}
+                        </Link>
+                        <Link
+                          href={`/project?id=${member.projectId}&member=${member.id}`}
+                          aria-label={`View ${member.name} review tasks`}
+                          className="hover:text-foreground hover:underline"
+                        >
+                          In review: {member.workload.inReviewTasks}
+                        </Link>
+                        <Link
+                          href={`/agents?member=${member.id}`}
+                          aria-label={`View ${member.name} agent activity`}
+                          className={cn(
+                            "hover:text-foreground hover:underline",
+                            member.type !== "agent" &&
+                              "pointer-events-none text-muted-foreground/60 no-underline"
+                          )}
+                        >
+                          Agent runs: {member.workload.activeAgentRuns}
+                        </Link>
                       </div>
                     </TableCell>
                     <TableCell>
@@ -748,8 +848,7 @@ export function TeamManagement({
                           variant="outline"
                           aria-label={`Edit ${member.name}`}
                           onClick={() => {
-                            setEditingMemberId(member.id);
-                            setEditForm(buildEditForm(member));
+                            openMemberEditor(member);
                           }}
                         >
                           Edit
@@ -884,6 +983,7 @@ export function TeamManagement({
                       mode="edit"
                       availableRoles={availableRoles}
                       value={editForm.agentProfile}
+                      highlightedFields={highlightedAgentFields}
                       onChange={(agentProfile) =>
                         setEditForm((state) =>
                           state ? { ...state, agentProfile } : state,
@@ -911,10 +1011,7 @@ export function TeamManagement({
                 <Button
                   type="button"
                   variant="ghost"
-                  onClick={() => {
-                    setEditingMemberId(null);
-                    setEditForm(null);
-                  }}
+                  onClick={clearEditState}
                 >
                   Cancel
                 </Button>

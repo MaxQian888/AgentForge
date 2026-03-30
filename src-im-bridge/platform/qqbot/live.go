@@ -25,9 +25,18 @@ var liveMetadata = core.NormalizeMetadata(core.PlatformMetadata{
 		AsyncUpdateModes:       []core.AsyncUpdateMode{core.AsyncUpdateReply},
 		ActionCallbackMode:     core.ActionCallbackWebhook,
 		MessageScopes:          []core.MessageScope{core.MessageScopeChat},
+		NativeSurfaces:         []string{core.NativeSurfaceQQBotMarkdown},
 		RequiresPublicCallback: true,
 		SupportsMentions:       true,
 		SupportsSlashCommands:  true,
+	},
+	Rendering: core.RenderingProfile{
+		DefaultTextFormat: core.TextFormatPlainText,
+		SupportedFormats:  []core.TextFormatMode{core.TextFormatPlainText},
+		NativeSurfaces:    []string{core.NativeSurfaceQQBotMarkdown},
+		MaxTextLength:     2000,
+		SupportsSegments:  true,
+		StructuredSurface: core.StructuredSurfaceNone,
 	},
 }, "qqbot")
 
@@ -65,6 +74,7 @@ type accessTokenProvider interface {
 
 type sender interface {
 	SendText(ctx context.Context, target messageTarget, content string) error
+	SendMessage(ctx context.Context, target messageTarget, payload map[string]any) error
 }
 
 type LiveOption func(*Live) error
@@ -257,6 +267,35 @@ func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.
 	return l.Send(ctx, chatID, strings.TrimSpace(message.FallbackText()))
 }
 
+func (l *Live) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	if message.NormalizedPlatform() != "qqbot" || message.QQBotMarkdown == nil {
+		return errors.New("native message is not a qqbot markdown payload")
+	}
+	target := parseTarget(chatID)
+	if target.GroupOpenID == "" && target.UserOpenID == "" {
+		return errors.New("qqbot send requires group or user target")
+	}
+	return l.sender.SendMessage(ctx, target, renderQQBotNativePayload(message.QQBotMarkdown))
+}
+
+func (l *Live) ReplyNative(ctx context.Context, rawReplyCtx any, message *core.NativeMessage) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	if message.NormalizedPlatform() != "qqbot" || message.QQBotMarkdown == nil {
+		return errors.New("native message is not a qqbot markdown payload")
+	}
+	reply := toReplyContext(rawReplyCtx)
+	target := targetFromReply(reply)
+	if target.GroupOpenID == "" && target.UserOpenID == "" {
+		return errors.New("qqbot reply requires group or user target")
+	}
+	return l.sender.SendMessage(ctx, target, renderQQBotNativePayload(message.QQBotMarkdown))
+}
+
 func (l *Live) Stop() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -431,6 +470,13 @@ type apiSender struct {
 }
 
 func (s *apiSender) SendText(ctx context.Context, target messageTarget, content string) error {
+	return s.SendMessage(ctx, target, map[string]any{
+		"content":  strings.TrimSpace(content),
+		"msg_type": 0,
+	})
+}
+
+func (s *apiSender) SendMessage(ctx context.Context, target messageTarget, payload map[string]any) error {
 	token, err := s.tokenProvider.AccessToken(ctx)
 	if err != nil {
 		return err
@@ -446,14 +492,17 @@ func (s *apiSender) SendText(ctx context.Context, target messageTarget, content 
 		return errors.New("qqbot send requires group_openid or user_openid")
 	}
 
-	payload := map[string]any{
-		"content":  strings.TrimSpace(content),
-		"msg_type": 0,
+	if payload == nil {
+		return errors.New("qqbot send payload is required")
+	}
+	bodyPayload := make(map[string]any, len(payload)+1)
+	for key, value := range payload {
+		bodyPayload[key] = value
 	}
 	if strings.TrimSpace(target.MessageID) != "" {
-		payload["msg_id"] = strings.TrimSpace(target.MessageID)
+		bodyPayload["msg_id"] = strings.TrimSpace(target.MessageID)
 	}
-	body, err := json.Marshal(payload)
+	body, err := json.Marshal(bodyPayload)
 	if err != nil {
 		return err
 	}
@@ -474,4 +523,33 @@ func (s *apiSender) SendText(ctx context.Context, target messageTarget, content 
 		return fmt.Errorf("qqbot send failed: %s", strings.TrimSpace(string(body)))
 	}
 	return nil
+}
+
+func renderQQBotNativePayload(payload *core.QQBotMarkdownPayload) map[string]any {
+	body := map[string]any{
+		"msg_type": 2,
+		"markdown": map[string]any{
+			"content": strings.TrimSpace(payload.Markdown),
+		},
+	}
+	if len(payload.Keyboard) > 0 {
+		rows := make([][]map[string]string, 0, len(payload.Keyboard))
+		for _, row := range payload.Keyboard {
+			renderedRow := make([]map[string]string, 0, len(row))
+			for _, button := range row {
+				renderedRow = append(renderedRow, map[string]string{
+					"label":  strings.TrimSpace(button.Label),
+					"url":    strings.TrimSpace(button.URL),
+					"action": strings.TrimSpace(button.Action),
+				})
+			}
+			if len(renderedRow) > 0 {
+				rows = append(rows, renderedRow)
+			}
+		}
+		if len(rows) > 0 {
+			body["keyboard"] = map[string]any{"rows": rows}
+		}
+	}
+	return body
 }

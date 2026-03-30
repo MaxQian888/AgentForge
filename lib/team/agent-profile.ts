@@ -97,9 +97,31 @@ export function getAgentProfileReadiness(
 ): AgentProfileReadiness {
   const normalized = { ...EMPTY_DRAFT, ...(draft ?? {}) };
   const missing: string[] = [];
+  const missingSetupFields: string[] = [];
 
   if (!normalized.roleId.trim()) {
     missing.push("roleId");
+  }
+
+  if (!normalized.runtime.trim()) {
+    missing.push("runtime");
+    missingSetupFields.push("runtime");
+  }
+  if (!normalized.provider.trim()) {
+    missing.push("provider");
+    missingSetupFields.push("provider");
+  }
+  if (!normalized.model.trim()) {
+    missing.push("model");
+    missingSetupFields.push("model");
+  }
+
+  if (missingSetupFields.length > 0) {
+    return {
+      state: "incomplete",
+      label: "Setup Required",
+      missing,
+    };
   }
 
   if (missing.length > 0) {

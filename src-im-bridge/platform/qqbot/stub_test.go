@@ -83,6 +83,61 @@ func TestStub_ReplyAndSendStoreReplies(t *testing.T) {
 	}
 }
 
+func TestStub_LogsNativeReplies(t *testing.T) {
+	stub := NewStub("0")
+
+	message, err := core.NewQQBotMarkdownMessage(
+		"## Review Ready",
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewQQBotMarkdownMessage error: %v", err)
+	}
+
+	if err := stub.SendNative(context.Background(), "group:group-openid", message); err != nil {
+		t.Fatalf("SendNative error: %v", err)
+	}
+	if len(stub.replies) != 1 || stub.replies[0].NativeSurface != core.NativeSurfaceQQBotMarkdown {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+}
+
+func TestStub_DeliverEnvelopeSupportsNativeAndStructured(t *testing.T) {
+	stub := NewStub("0")
+
+	native, err := core.NewQQBotMarkdownMessage("## Review Ready", nil)
+	if err != nil {
+		t.Fatalf("NewQQBotMarkdownMessage error: %v", err)
+	}
+	receipt, err := core.DeliverEnvelope(context.Background(), stub, stub.Metadata(), "group:group-openid", &core.DeliveryEnvelope{Native: native})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope native error: %v", err)
+	}
+	if receipt.Type != "native" {
+		t.Fatalf("native receipt = %+v", receipt)
+	}
+
+	receipt, err = core.DeliverEnvelope(context.Background(), stub, stub.Metadata(), "group:group-openid", &core.DeliveryEnvelope{
+		Structured: &core.StructuredMessage{
+			Sections: []core.StructuredSection{{
+				Type: core.StructuredSectionTypeText,
+				TextSection: &core.TextSection{
+					Body: "Review Ready",
+				},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope structured error: %v", err)
+	}
+	if receipt.Type != "text" {
+		t.Fatalf("structured receipt = %+v", receipt)
+	}
+	if len(stub.replies) != 2 || stub.replies[0].NativeSurface != core.NativeSurfaceQQBotMarkdown {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+}
+
 type testRecorder struct {
 	header http.Header
 	code   int

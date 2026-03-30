@@ -257,9 +257,11 @@ func (m *mockAgentRoleStore) SkillsDir() string {
 }
 
 type mockAgentQueueStore struct {
-	queued    []*model.AgentPoolQueueEntry
-	completed []string
-	next      *model.AgentPoolQueueEntry
+	queued        []*model.AgentPoolQueueEntry
+	completed     []string
+	next          *model.AgentPoolQueueEntry
+	listRecentErr error
+	completeErr   error
 }
 
 func (m *mockAgentQueueStore) QueueAgentAdmission(_ context.Context, input service.QueueAgentAdmissionInput) (*model.AgentPoolQueueEntry, error) {
@@ -325,6 +327,27 @@ func (m *mockAgentQueueStore) ListQueuedByProject(_ context.Context, projectID u
 	return results, nil
 }
 
+func (m *mockAgentQueueStore) ListRecentByProject(_ context.Context, projectID uuid.UUID, limit int) ([]*model.AgentPoolQueueEntry, error) {
+	if m.listRecentErr != nil {
+		return nil, m.listRecentErr
+	}
+	if limit <= 0 {
+		limit = len(m.queued)
+	}
+	results := make([]*model.AgentPoolQueueEntry, 0, len(m.queued))
+	for _, entry := range m.queued {
+		if entry.ProjectID != projectID.String() {
+			continue
+		}
+		cloned := *entry
+		results = append(results, &cloned)
+		if len(results) == limit {
+			break
+		}
+	}
+	return results, nil
+}
+
 func (m *mockAgentQueueStore) ReserveNextQueuedByProject(_ context.Context, projectID uuid.UUID) (*model.AgentPoolQueueEntry, error) {
 	if m.next != nil && m.next.ProjectID == projectID.String() {
 		cloned := *m.next
@@ -341,6 +364,9 @@ func (m *mockAgentQueueStore) ReserveNextQueuedByProject(_ context.Context, proj
 }
 
 func (m *mockAgentQueueStore) CompleteQueuedEntry(_ context.Context, entryID string, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID) error {
+	if m.completeErr != nil {
+		return m.completeErr
+	}
 	m.completed = append(m.completed, entryID+":"+string(status)+":"+reason)
 	for _, entry := range m.queued {
 		if entry.EntryID != entryID {
@@ -1470,6 +1496,190 @@ func TestAgentService_UpdateStatusRequeuesPromotionWhenBudgetCheckBlocks(t *test
 	}
 	if got := queueStore.completed[0]; !strings.Contains(got, string(model.AgentPoolQueueStatusQueued)) || !strings.Contains(got, "project budget exceeded") {
 		t.Fatalf("queue completion = %q, want queued budget-blocked update", got)
+	}
+}
+
+func TestAgentService_CancelQueueEntryCancelsQueuedEntryAndBroadcastsEvents(t *testing.T) {
+	projectID := uuid.New()
+	taskID := uuid.New()
+	memberID := uuid.New()
+	base := time.Now().UTC().Add(-time.Minute)
+	queueEntry := &model.AgentPoolQueueEntry{
+		EntryID:   uuid.NewString(),
+		ProjectID: projectID.String(),
+		TaskID:    taskID.String(),
+		MemberID:  memberID.String(),
+		Status:    model.AgentPoolQueueStatusQueued,
+		Reason:    "agent pool is at capacity",
+		Runtime:   "codex",
+		Provider:  "openai",
+		Model:     "gpt-5-codex",
+		RoleID:    "dispatcher",
+		Priority:  model.PriorityHigh,
+		BudgetUSD: 12.5,
+		CreatedAt: base,
+		UpdatedAt: base,
+	}
+	queueStore := &mockAgentQueueStore{queued: []*model.AgentPoolQueueEntry{queueEntry}}
+	repo := newMockAgentRunRepo()
+	taskRepo := &mockAgentTaskRepo{
+		tasks: map[uuid.UUID]*model.Task{
+			taskID: {
+				ID:        taskID,
+				ProjectID: projectID,
+				CreatedAt: base,
+				UpdatedAt: base,
+			},
+		},
+	}
+	hub := ws.NewHub()
+	stop, events := subscribeProjectEvents(t, hub, projectID.String())
+	defer stop()
+	waitForHubClient(t, hub)
+
+	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{}, hub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetPool(pool.NewPool(2))
+	svc.SetQueueStore(queueStore)
+
+	entry, err := svc.CancelQueueEntry(context.Background(), projectID, queueEntry.EntryID, "cancelled_by_operator")
+	if err != nil {
+		t.Fatalf("CancelQueueEntry() error = %v", err)
+	}
+	if entry.Status != model.AgentPoolQueueStatusCancelled {
+		t.Fatalf("entry.Status = %q, want %q", entry.Status, model.AgentPoolQueueStatusCancelled)
+	}
+	if entry.Reason != "cancelled_by_operator" {
+		t.Fatalf("entry.Reason = %q, want cancelled_by_operator", entry.Reason)
+	}
+	if len(queueStore.completed) != 1 || !strings.Contains(queueStore.completed[0], string(model.AgentPoolQueueStatusCancelled)) {
+		t.Fatalf("queue completions = %+v, want cancelled completion", queueStore.completed)
+	}
+
+	cancelled := waitForEventType(t, events, ws.EventAgentQueueCancelled)
+	var cancelledPayload map[string]any
+	if err := json.Unmarshal(cancelled.Payload, &cancelledPayload); err != nil {
+		t.Fatalf("decode cancelled payload: %v", err)
+	}
+	if cancelledPayload["entryId"] != queueEntry.EntryID {
+		t.Fatalf("cancelled payload entryId = %#v, want %q", cancelledPayload["entryId"], queueEntry.EntryID)
+	}
+	if cancelledPayload["taskId"] != queueEntry.TaskID {
+		t.Fatalf("cancelled payload taskId = %#v, want %q", cancelledPayload["taskId"], queueEntry.TaskID)
+	}
+	if cancelledPayload["memberId"] != queueEntry.MemberID {
+		t.Fatalf("cancelled payload memberId = %#v, want %q", cancelledPayload["memberId"], queueEntry.MemberID)
+	}
+	if cancelledPayload["projectId"] != queueEntry.ProjectID {
+		t.Fatalf("cancelled payload projectId = %#v, want %q", cancelledPayload["projectId"], queueEntry.ProjectID)
+	}
+	if cancelledPayload["reason"] != "cancelled_by_operator" {
+		t.Fatalf("cancelled payload reason = %#v, want cancelled_by_operator", cancelledPayload["reason"])
+	}
+
+	poolUpdated := waitForEventType(t, events, ws.EventAgentPoolUpdated)
+	var stats model.AgentPoolStatsDTO
+	if err := json.Unmarshal(poolUpdated.Payload, &stats); err != nil {
+		t.Fatalf("decode pool payload: %v", err)
+	}
+	if stats.Queued != 0 {
+		t.Fatalf("pool queued = %d, want 0 after cancel", stats.Queued)
+	}
+}
+
+func TestAgentService_CancelQueueEntryReturnsConflictForPromotedEntry(t *testing.T) {
+	projectID := uuid.New()
+	queueStore := &mockAgentQueueStore{
+		queued: []*model.AgentPoolQueueEntry{
+			{
+				EntryID:   uuid.NewString(),
+				ProjectID: projectID.String(),
+				Status:    model.AgentPoolQueueStatusPromoted,
+			},
+		},
+	}
+	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetQueueStore(queueStore)
+
+	_, err := svc.CancelQueueEntry(context.Background(), projectID, queueStore.queued[0].EntryID, "cancelled_by_operator")
+	if err == nil {
+		t.Fatal("CancelQueueEntry() error = nil, want conflict")
+	}
+	var conflictErr *service.QueueEntryStatusConflictError
+	if !errors.As(err, &conflictErr) {
+		t.Fatalf("CancelQueueEntry() error = %v, want QueueEntryStatusConflictError", err)
+	}
+	if conflictErr.Status != model.AgentPoolQueueStatusPromoted {
+		t.Fatalf("conflict status = %q, want promoted", conflictErr.Status)
+	}
+	if len(queueStore.completed) != 0 {
+		t.Fatalf("queue completions = %+v, want none", queueStore.completed)
+	}
+}
+
+func TestAgentService_CancelQueueEntryReturnsNotFoundForUnknownEntry(t *testing.T) {
+	projectID := uuid.New()
+	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetQueueStore(&mockAgentQueueStore{})
+
+	_, err := svc.CancelQueueEntry(context.Background(), projectID, uuid.NewString(), "cancelled_by_operator")
+	if !errors.Is(err, service.ErrQueueEntryNotFound) {
+		t.Fatalf("CancelQueueEntry() error = %v, want ErrQueueEntryNotFound", err)
+	}
+}
+
+func TestAgentService_ListQueueEntriesSortsAndFiltersStatuses(t *testing.T) {
+	projectID := uuid.New()
+	base := time.Now().UTC().Add(-time.Minute)
+	normalOlder := &model.AgentPoolQueueEntry{
+		EntryID:   "normal-older",
+		ProjectID: projectID.String(),
+		Status:    model.AgentPoolQueueStatusQueued,
+		Priority:  model.PriorityNormal,
+		CreatedAt: base.Add(10 * time.Second),
+		UpdatedAt: base.Add(10 * time.Second),
+	}
+	highPriority := &model.AgentPoolQueueEntry{
+		EntryID:   "critical",
+		ProjectID: projectID.String(),
+		Status:    model.AgentPoolQueueStatusQueued,
+		Priority:  model.PriorityCritical,
+		CreatedAt: base.Add(30 * time.Second),
+		UpdatedAt: base.Add(30 * time.Second),
+	}
+	cancelled := &model.AgentPoolQueueEntry{
+		EntryID:   "cancelled",
+		ProjectID: projectID.String(),
+		Status:    model.AgentPoolQueueStatusCancelled,
+		Priority:  model.PriorityHigh,
+		CreatedAt: base.Add(20 * time.Second),
+		UpdatedAt: base.Add(20 * time.Second),
+	}
+	normalNewer := &model.AgentPoolQueueEntry{
+		EntryID:   "normal-newer",
+		ProjectID: projectID.String(),
+		Status:    model.AgentPoolQueueStatusQueued,
+		Priority:  model.PriorityNormal,
+		CreatedAt: base.Add(40 * time.Second),
+		UpdatedAt: base.Add(40 * time.Second),
+	}
+	queueStore := &mockAgentQueueStore{queued: []*model.AgentPoolQueueEntry{normalNewer, highPriority, cancelled, normalOlder}}
+	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetQueueStore(queueStore)
+
+	entries, err := svc.ListQueueEntries(context.Background(), projectID, "")
+	if err != nil {
+		t.Fatalf("ListQueueEntries() error = %v", err)
+	}
+	if got := []string{entries[0].EntryID, entries[1].EntryID, entries[2].EntryID}; !reflect.DeepEqual(got, []string{"critical", "normal-older", "normal-newer"}) {
+		t.Fatalf("queued order = %+v, want [critical normal-older normal-newer]", got)
+	}
+
+	cancelledEntries, err := svc.ListQueueEntries(context.Background(), projectID, string(model.AgentPoolQueueStatusCancelled))
+	if err != nil {
+		t.Fatalf("ListQueueEntries(cancelled) error = %v", err)
+	}
+	if len(cancelledEntries) != 1 || cancelledEntries[0].EntryID != "cancelled" {
+		t.Fatalf("cancelled entries = %+v, want [cancelled]", cancelledEntries)
 	}
 }
 

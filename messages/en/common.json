@@ -16,7 +16,13 @@
     "imBridge": "IM Bridge",
     "roles": "Roles",
     "plugins": "Plugins",
-    "settings": "Settings"
+    "settings": "Settings",
+    "group": {
+      "workspace": "Workspace",
+      "project": "Project",
+      "operations": "Operations",
+      "configuration": "Configuration"
+    }
   },
   "header": {
     "notifications": "Notifications",
@@ -48,6 +54,34 @@
     "no": "No",
     "ok": "OK"
   },
+  "commandPalette": {
+    "placeholder": "Type a command or search...",
+    "navigation": "Navigation",
+    "actions": "Actions",
+    "createProject": "Create Project",
+    "createTask": "Create Task",
+    "spawnAgent": "Spawn Agent",
+    "createTeam": "Create Team",
+    "noResults": "No results found."
+  },
+  "breadcrumbs": {
+    "home": "Home",
+    "workspace": "Workspace",
+    "project": "Project",
+    "operations": "Operations",
+    "configuration": "Configuration"
+  },
+  "emptyState": {
+    "default": "Nothing here yet",
+    "noResults": "No results found",
+    "noData": "No data available"
+  },
+  "filterBar": {
+    "search": "Search...",
+    "reset": "Reset",
+    "allItems": "All"
+  },
+  "quickSearch": "Quick Search",
   "status": {
     "active": "Active",
     "inactive": "Inactive",

@@ -28,6 +28,7 @@ describe("useTaskWorkspaceStore", () => {
     store.setAssigneeId("member-1");
     store.setPlanning("scheduled");
     store.setDependency("blocked");
+    store.setCustomFieldFilter("field-risk", "High");
     store.selectTask("task-1");
     store.setContextRailDisplay("collapsed");
 
@@ -41,6 +42,7 @@ describe("useTaskWorkspaceStore", () => {
       assigneeId: "member-1",
       planning: "scheduled",
       dependency: "blocked",
+      customFieldFilters: { "field-risk": "High" },
     });
     expect(state.selectedTaskId).toBe("task-1");
     expect(state.contextRailDisplay).toBe("collapsed");
@@ -69,5 +71,14 @@ describe("useTaskWorkspaceStore", () => {
       showDescriptions: false,
       showLinkedDocs: true,
     });
+  });
+
+  it("can clear a custom field filter without resetting the rest of the workspace state", () => {
+    const store = useTaskWorkspaceStore.getState();
+
+    store.setCustomFieldFilter("field-risk", "High");
+    store.setCustomFieldFilter("field-risk", "all");
+
+    expect(useTaskWorkspaceStore.getState().filters.customFieldFilters).toEqual({});
   });
 });

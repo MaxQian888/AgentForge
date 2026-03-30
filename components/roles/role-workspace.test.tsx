@@ -21,6 +21,34 @@ jest.mock("next-intl", () => ({
   },
 }));
 
+let mockIsMobile = false;
+jest.mock("@/hooks/use-mobile", () => ({
+  useIsMobile: () => mockIsMobile,
+}));
+
+// matchMedia mock for auto-collapse logic
+function mockMatchMedia(matches: boolean) {
+  const listeners: Array<(e: { matches: boolean }) => void> = [];
+  Object.defineProperty(window, "matchMedia", {
+    configurable: true,
+    writable: true,
+    value: jest.fn().mockImplementation((query: string) => ({
+      matches,
+      media: query,
+      addEventListener: (_: string, cb: (e: { matches: boolean }) => void) => listeners.push(cb),
+      removeEventListener: (_: string, cb: (e: { matches: boolean }) => void) => {
+        const idx = listeners.indexOf(cb);
+        if (idx >= 0) listeners.splice(idx, 1);
+      },
+      addListener: jest.fn(),
+      removeListener: jest.fn(),
+      onchange: null,
+      dispatchEvent: jest.fn(),
+    })),
+  });
+  return listeners;
+}
+
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { RoleWorkspace } from "./role-workspace";
@@ -143,7 +171,15 @@ function setViewport(width: number) {
 }
 
 describe("RoleWorkspace", () => {
+  function setFieldValue(label: string, value: string) {
+    fireEvent.change(screen.getByLabelText(label), {
+      target: { value },
+    });
+  }
+
   beforeEach(() => {
+    mockIsMobile = false;
+    mockMatchMedia(true); // >= 1280px by default
     setViewport(1440);
   });
 
@@ -167,8 +203,7 @@ describe("RoleWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "New Role" }));
     await user.selectOptions(screen.getByLabelText("Start from template"), "frontend-developer");
-    await user.clear(screen.getByLabelText("Role ID"));
-    await user.type(screen.getByLabelText("Role ID"), "frontend-developer-copy");
+    setFieldValue("Role ID", "frontend-developer-copy");
     await user.click(screen.getByRole("button", { name: "Save Role" }));
 
     expect(onCreateRole).toHaveBeenCalledWith(
@@ -235,11 +270,12 @@ describe("RoleWorkspace", () => {
     expect(screen.getByRole("button", { name: "Knowledge" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Governance" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Review" })).toBeInTheDocument();
-    expect(screen.getByText("Current flow")).toBeInTheDocument();
     expect(screen.getByText("Editing existing role")).toBeInTheDocument();
     expect(screen.getByText("Inherited from coding-agent")).toBeInTheDocument();
     expect(screen.getByLabelText("Role ID")).toHaveValue("frontend-developer");
     expect(screen.getByDisplayValue("1.2.0")).toBeInTheDocument();
+    // Navigate to Capabilities to check skill fields
+    await user.click(screen.getByRole("button", { name: "Capabilities" }));
     expect(screen.getAllByText("Skills").length).toBeGreaterThan(0);
     expect(screen.getByDisplayValue("skills/react")).toBeInTheDocument();
     expect(screen.getByDisplayValue("skills/testing")).toBeInTheDocument();
@@ -265,9 +301,9 @@ describe("RoleWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "New Role" }));
     await user.selectOptions(screen.getByLabelText("Start from template"), "frontend-developer");
+    await user.click(screen.getByRole("button", { name: "Capabilities" }));
     const skillInputs = screen.getAllByLabelText("Skill Path");
-    await user.clear(skillInputs[1]!);
-    await user.type(skillInputs[1]!, "skills/react");
+    fireEvent.change(skillInputs[1]!, { target: { value: "skills/react" } });
     await user.click(screen.getByRole("button", { name: "Save Role" }));
 
     expect(onCreateRole).not.toHaveBeenCalled();
@@ -371,7 +407,7 @@ describe("RoleWorkspace", () => {
       }),
     );
 
-    await user.type(screen.getByLabelText("Sandbox Input"), "Summarize this role.");
+    setFieldValue("Sandbox Input", "Summarize this role.");
     await user.click(screen.getByRole("button", { name: "Run Sandbox Probe" }));
     expect(onSandboxRole).toHaveBeenCalledWith(
       expect.objectContaining({
@@ -406,37 +442,46 @@ describe("RoleWorkspace", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Edit Frontend Developer" }));
-    await user.clear(screen.getByLabelText("Name"));
-    await user.type(screen.getByLabelText("Name"), "Frontend Captain");
+    setFieldValue("Name", "Frontend Captain");
     await user.click(screen.getByRole("button", { name: "Capabilities" }));
-    await user.type(screen.getByLabelText("Packages"), ", ui-kit");
-    await user.type(screen.getByLabelText("External Tools"), ", linear");
+    setFieldValue("Packages", "design-system, ui-kit");
+    setFieldValue("External Tools", "figma, linear");
     await user.click(screen.getByRole("button", { name: "Add Custom Setting" }));
     const customSettingKeys = screen.getAllByLabelText("Custom Setting Key");
     const customSettingValues = screen.getAllByLabelText("Custom Setting Value");
-    await user.type(customSettingKeys[1]!, "review_depth");
-    await user.type(customSettingValues[1]!, "strict");
+    fireEvent.change(customSettingKeys[1]!, {
+      target: { value: "review_depth" },
+    });
+    fireEvent.change(customSettingValues[1]!, {
+      target: { value: "strict" },
+    });
     await user.click(screen.getByRole("button", { name: "Add MCP Server" }));
     const mcpServerNames = screen.getAllByLabelText("MCP Server Name");
     const mcpServerUrls = screen.getAllByLabelText("MCP Server URL");
-    await user.type(mcpServerNames[1]!, "figma-sync");
-    await user.type(mcpServerUrls[1]!, "https://mcp.example.com");
+    fireEvent.change(mcpServerNames[1]!, {
+      target: { value: "figma-sync" },
+    });
+    fireEvent.change(mcpServerUrls[1]!, {
+      target: { value: "https://mcp.example.com" },
+    });
     await user.click(screen.getByRole("button", { name: "Identity" }));
-    await user.clear(screen.getByLabelText("Persona"));
-    await user.type(screen.getByLabelText("Persona"), "precise");
+    setFieldValue("Persona", "precise");
     await user.click(screen.getByRole("button", { name: "Knowledge" }));
     await user.click(screen.getByRole("button", { name: "Add Shared Knowledge" }));
     const knowledgeIds = screen.getAllByLabelText("Shared Knowledge ID");
     const knowledgeTypes = screen.getAllByLabelText("Shared Knowledge Type");
-    await user.type(knowledgeIds[1]!, "team-playbook");
-    await user.type(knowledgeTypes[1]!, "doc");
+    fireEvent.change(knowledgeIds[1]!, {
+      target: { value: "team-playbook" },
+    });
+    fireEvent.change(knowledgeTypes[1]!, { target: { value: "doc" } });
     await user.click(screen.getByRole("button", { name: "Add Private Knowledge" }));
     const privateKnowledgeIds = screen.getAllByLabelText("Private Knowledge ID");
     const privateKnowledgeTypes = screen.getAllByLabelText("Private Knowledge Type");
-    await user.type(privateKnowledgeIds[0]!, "operator-notes");
-    await user.type(privateKnowledgeTypes[0]!, "doc");
-    await user.clear(screen.getByLabelText("Short-term Memory Max Tokens"));
-    await user.type(screen.getByLabelText("Short-term Memory Max Tokens"), "48000");
+    fireEvent.change(privateKnowledgeIds[0]!, {
+      target: { value: "operator-notes" },
+    });
+    fireEvent.change(privateKnowledgeTypes[0]!, { target: { value: "doc" } });
+    setFieldValue("Short-term Memory Max Tokens", "48000");
     await user.click(screen.getByLabelText(/Enable procedural memory/i));
     await user.click(screen.getByLabelText(/Learn procedural memory from feedback/i));
     await user.click(screen.getByRole("button", { name: "Governance" }));
@@ -444,9 +489,13 @@ describe("RoleWorkspace", () => {
     const triggerEvents = screen.getAllByLabelText("Trigger Event");
     const triggerActions = screen.getAllByLabelText("Trigger Action");
     const triggerConditions = screen.getAllByLabelText("Trigger Condition");
-    await user.type(triggerEvents[1]!, "task_blocked");
-    await user.type(triggerActions[1]!, "escalate");
-    await user.type(triggerConditions[1]!, "severity === 'high'");
+    fireEvent.change(triggerEvents[1]!, {
+      target: { value: "task_blocked" },
+    });
+    fireEvent.change(triggerActions[1]!, { target: { value: "escalate" } });
+    fireEvent.change(triggerConditions[1]!, {
+      target: { value: "severity === 'high'" },
+    });
     await user.click(screen.getByRole("button", { name: "Review" }));
     fireEvent.change(screen.getByLabelText("Role Overrides"), {
       target: { value: '{\n  "identity.role": "Frontend Captain"\n}' },
@@ -569,7 +618,7 @@ describe("RoleWorkspace", () => {
     );
 
     await user.click(screen.getByRole("button", { name: "Preview Role Draft" }));
-    await user.type(screen.getByLabelText("Sandbox Input"), "Check advanced role context.");
+    setFieldValue("Sandbox Input", "Check advanced role context.");
     await user.click(screen.getByRole("button", { name: "Run Sandbox Probe" }));
 
     expect(await screen.findByText("Advanced Authoring")).toBeInTheDocument();
@@ -581,6 +630,7 @@ describe("RoleWorkspace", () => {
   });
 
   it("keeps role library and review surfaces reachable on medium viewports", async () => {
+    mockMatchMedia(false); // < 1280px — panels auto-collapsed
     setViewport(960);
     const user = userEvent.setup();
 
@@ -598,15 +648,17 @@ describe("RoleWorkspace", () => {
       />,
     );
 
-    expect(screen.getByRole("button", { name: "Show Role Library" })).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Show Review Panel" })).toBeInTheDocument();
-    expect(screen.queryByText("Role Library")).not.toBeInTheDocument();
+    // Panel toggle buttons are always present in the toolbar
+    expect(screen.getByRole("button", { name: "Toggle role catalog" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Toggle context rail" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Show Role Library" }));
+    // Expand catalog via toggle
+    await user.click(screen.getByRole("button", { name: "Toggle role catalog" }));
     expect(screen.getByText("Role Library")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Edit Frontend Developer" })).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Show Review Panel" }));
+    // Expand context rail via toggle
+    await user.click(screen.getByRole("button", { name: "Toggle context rail" }));
     expect(screen.getByText("Execution Summary")).toBeInTheDocument();
     expect(screen.getByText("YAML Preview")).toBeInTheDocument();
     expect(screen.getByText("Preview And Sandbox")).toBeInTheDocument();
@@ -631,6 +683,7 @@ describe("RoleWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "New Role" }));
     await user.selectOptions(screen.getByLabelText("Start from template"), "frontend-developer");
+    await user.click(screen.getByRole("button", { name: "Capabilities" }));
 
     expect(screen.getByText("Available repo-local skills")).toBeInTheDocument();
     expect(screen.getAllByText("React").length).toBeGreaterThan(0);
@@ -638,9 +691,57 @@ describe("RoleWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Add Skill" }));
     const skillInputs = screen.getAllByLabelText("Skill Path");
-    await user.type(skillInputs[2]!, "skills/custom-flow");
+    fireEvent.change(skillInputs[2]!, {
+      target: { value: "skills/custom-flow" },
+    });
 
     expect(screen.getByText(/Unresolved manual reference/)).toBeInTheDocument();
     expect(screen.getAllByText(/Template-derived/).length).toBeGreaterThan(0);
+  });
+
+  it("renders the Permissions section inside the Governance tab", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <RoleWorkspace
+        roles={[frontendRole]}
+        skillCatalog={skillCatalog}
+        loading={false}
+        error={null}
+        onCreateRole={jest.fn().mockResolvedValue(undefined)}
+        onUpdateRole={jest.fn().mockResolvedValue(undefined)}
+        onDeleteRole={jest.fn().mockResolvedValue(undefined)}
+        onPreviewRole={jest.fn().mockResolvedValue(undefined)}
+        onSandboxRole={jest.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Edit Frontend Developer" }));
+    await user.click(screen.getByRole("button", { name: "Governance" }));
+
+    expect(screen.getByText("Permissions")).toBeInTheDocument();
+  });
+
+  it("renders the Resource Limits section inside the Governance tab", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <RoleWorkspace
+        roles={[frontendRole]}
+        skillCatalog={skillCatalog}
+        loading={false}
+        error={null}
+        onCreateRole={jest.fn().mockResolvedValue(undefined)}
+        onUpdateRole={jest.fn().mockResolvedValue(undefined)}
+        onDeleteRole={jest.fn().mockResolvedValue(undefined)}
+        onPreviewRole={jest.fn().mockResolvedValue(undefined)}
+        onSandboxRole={jest.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Edit Frontend Developer" }));
+    await user.click(screen.getByRole("button", { name: "Governance" }));
+
+    expect(screen.getByText("Resource Limits")).toBeInTheDocument();
   });
 });

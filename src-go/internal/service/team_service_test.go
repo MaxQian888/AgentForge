@@ -37,12 +37,26 @@ func (m *mockTeamRunRepo) GetByTask(_ context.Context, taskID uuid.UUID) (*model
 	return &cloned, nil
 }
 
+func (m *mockTeamRunRepo) GetTeamSummary(_ context.Context, id uuid.UUID) (*model.AgentTeamSummaryDTO, error) {
+	if m.team == nil || m.team.ID != id {
+		return nil, service.ErrTeamNotFound
+	}
+	return nil, service.ErrTeamNotFound
+}
+
 func (m *mockTeamRunRepo) ListByProject(_ context.Context, projectID uuid.UUID, _ string) ([]*model.AgentTeam, error) {
 	if m.team == nil || m.team.ProjectID != projectID {
 		return nil, nil
 	}
 	cloned := *m.team
 	return []*model.AgentTeam{&cloned}, nil
+}
+
+func (m *mockTeamRunRepo) ListTeamSummaries(_ context.Context, projectID uuid.UUID, _ string) ([]*model.AgentTeamSummaryDTO, error) {
+	if m.team == nil || m.team.ProjectID != projectID {
+		return nil, nil
+	}
+	return nil, service.ErrTeamNotFound
 }
 
 func (m *mockTeamRunRepo) ListActive(_ context.Context) ([]*model.AgentTeam, error) {

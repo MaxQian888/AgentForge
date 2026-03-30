@@ -8,6 +8,10 @@ export interface HeartbeatStatusProvider {
   getMCPServerStatuses(): MCPServerStatus[];
 }
 
+export function serializeBridgeEvent(event: AgentEvent): string {
+  return JSON.stringify(event);
+}
+
 export class EventStreamer {
   private ws: WebSocket | null = null;
   private readonly url: string;
@@ -69,7 +73,7 @@ export class EventStreamer {
   send(event: AgentEvent): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.flushBuffer();
-      this.ws.send(JSON.stringify(event));
+      this.ws.send(serializeBridgeEvent(event));
     } else {
       if (this.buffer.length >= this.maxBuffer) {
         this.buffer.shift();
@@ -81,7 +85,7 @@ export class EventStreamer {
   private flushBuffer(): void {
     while (this.buffer.length > 0 && this.ws?.readyState === WebSocket.OPEN) {
       const event = this.buffer.shift()!;
-      this.ws.send(JSON.stringify(event));
+      this.ws.send(serializeBridgeEvent(event));
     }
   }
 
@@ -117,7 +121,7 @@ export class EventStreamer {
         },
       };
 
-      this.ws.send(JSON.stringify(heartbeat));
+      this.ws.send(serializeBridgeEvent(heartbeat));
     }, 10000);
   }
 

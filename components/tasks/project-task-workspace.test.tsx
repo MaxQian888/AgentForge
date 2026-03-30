@@ -1,4 +1,4 @@
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { ProjectTaskWorkspace } from "./project-task-workspace";
 import type { TeamMember } from "@/lib/dashboard/summary";
@@ -365,6 +365,7 @@ const sprintMetrics: SprintMetrics = {
 
 describe("ProjectTaskWorkspace", () => {
   beforeEach(() => {
+    Object.defineProperty(window, "innerWidth", { writable: true, configurable: true, value: 1400 });
     window.history.replaceState({}, "", "/project?id=project-1");
     fetchDispatchPreflight.mockReset();
     fetchDispatchPreflight.mockResolvedValue(null);
@@ -389,6 +390,7 @@ describe("ProjectTaskWorkspace", () => {
     return render(
       <ProjectTaskWorkspace
         projectId="project-1"
+        projectName="Test Project"
         tasks={tasks}
         loading={false}
         error={null}
@@ -421,15 +423,15 @@ describe("ProjectTaskWorkspace", () => {
 
     renderWorkspace({ onTaskOpen });
 
-    await user.type(screen.getByLabelText("Search tasks"), "calendar");
-    await user.click(screen.getByRole("tab", { name: "List" }));
+    await user.type(screen.getAllByLabelText("Search tasks")[0], "calendar");
+    await user.click(screen.getByRole("button", { name: "List" }));
 
     expect(screen.getAllByText("Calendar polish").length).toBeGreaterThan(0);
 
     await user.click(screen.getByRole("button", { name: "Open Calendar polish" }));
     expect(onTaskOpen).toHaveBeenCalledWith("task-2");
 
-    await user.click(screen.getByRole("tab", { name: "Calendar" }));
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
     expect(screen.getAllByText("Calendar polish").length).toBeGreaterThan(0);
     expect(
       screen.queryByRole("button", { name: "Open Implement timeline view" })
@@ -465,13 +467,33 @@ describe("ProjectTaskWorkspace", () => {
     expect(onTaskStatusChange).toHaveBeenCalledWith("task-1", "done");
   });
 
+  it("supports ctrl/cmd multi-select in board view and reveals the bulk action toolbar", async () => {
+    const { container } = renderWorkspace();
+
+    const taskCard = container.querySelector('[data-task-id="task-1"]');
+    if (!(taskCard instanceof HTMLElement)) {
+      throw new Error("Expected task card for task-1");
+    }
+
+    fireEvent.click(taskCard, { ctrlKey: true });
+
+    await waitFor(() => {
+      expect(useTaskWorkspaceStore.getState().selectedTaskIds).toEqual(["task-1"]);
+    });
+    expect(screen.getByText("1 selected")).toBeInTheDocument();
+
+    const user = userEvent.setup();
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+    expect(screen.queryByText("1 selected")).not.toBeInTheDocument();
+  });
+
   it("keeps unscheduled tasks visible in timeline and reschedules them through the shared callback", async () => {
     const user = userEvent.setup();
     const onTaskScheduleChange = jest.fn().mockResolvedValue(undefined);
 
     renderWorkspace({ onTaskScheduleChange });
 
-    await user.click(screen.getByRole("tab", { name: "Timeline" }));
+    await user.click(screen.getByRole("button", { name: "Timeline" }));
 
     expect(screen.getByText("Unscheduled")).toBeInTheDocument();
     expect(screen.getAllByText("Calendar polish").length).toBeGreaterThan(0);
@@ -492,12 +514,226 @@ describe("ProjectTaskWorkspace", () => {
     });
   });
 
+  it("reschedules scheduled timeline tasks while preserving their duration", async () => {
+    const user = userEvent.setup();
+    const onTaskScheduleChange = jest.fn().mockResolvedValue(undefined);
+
+    renderWorkspace({ onTaskScheduleChange });
+
+    await user.click(screen.getByRole("button", { name: "Timeline" }));
+
+    const onDragEnd = getLastOnDragEnd();
+
+    await act(async () => {
+      await onDragEnd?.({
+        draggableId: "task-1",
+        source: { droppableId: "timeline:2026-03-25", index: 0 },
+        destination: { droppableId: "timeline:2026-03-30", index: 0 },
+      });
+    });
+
+    expect(onTaskScheduleChange).toHaveBeenCalledWith("task-1", {
+      plannedStartAt: "2026-03-30T09:00:00.000Z",
+      plannedEndAt: "2026-04-01T18:00:00.000Z",
+    });
+  });
+
+  it("shows inline feedback when a timeline scheduling update fails", async () => {
+    const user = userEvent.setup();
+    const onTaskScheduleChange = jest
+      .fn()
+      .mockRejectedValue(new Error("Timeline update failed"));
+
+    renderWorkspace({ onTaskScheduleChange });
+
+    await user.click(screen.getByRole("button", { name: "Timeline" }));
+
+    const onDragEnd = getLastOnDragEnd();
+
+    await act(async () => {
+      await onDragEnd?.({
+        draggableId: "task-1",
+        source: { droppableId: "timeline:2026-03-25", index: 0 },
+        destination: { droppableId: "timeline:2026-03-30", index: 0 },
+      });
+    });
+
+    expect(await screen.findByText("Timeline update failed")).toBeInTheDocument();
+    expect(screen.getAllByText("Implement timeline view").length).toBeGreaterThan(0);
+  });
+
+  it("supports timeline day, week, and month granularity while keeping scheduled spans visible", async () => {
+    const user = userEvent.setup();
+
+    renderWorkspace();
+
+    await user.click(screen.getByRole("button", { name: "Timeline" }));
+
+    const timelineView = screen.getByTestId("timeline-view");
+    const dayButton = within(timelineView).getByRole("button", { name: "Day" });
+    const weekButton = within(timelineView).getByRole("button", { name: "Week" });
+    const monthButton = within(timelineView).getByRole("button", { name: "Month" });
+
+    expect(dayButton).toHaveAttribute("aria-pressed", "true");
+    expect(within(timelineView).getByTestId("timeline-bar-task-1")).toHaveAttribute(
+      "data-granularity",
+      "day"
+    );
+    expect(within(timelineView).getByTestId("timeline-bar-task-1")).toHaveAttribute(
+      "data-span",
+      "3"
+    );
+
+    await user.click(weekButton);
+    expect(weekButton).toHaveAttribute("aria-pressed", "true");
+    expect(within(timelineView).getByTestId("timeline-bar-task-1")).toHaveAttribute(
+      "data-granularity",
+      "week"
+    );
+
+    await user.click(monthButton);
+    expect(monthButton).toHaveAttribute("aria-pressed", "true");
+    expect(within(timelineView).getByTestId("timeline-bar-task-1")).toHaveAttribute(
+      "data-granularity",
+      "month"
+    );
+  });
+
+  it("keeps unscheduled tasks visible in calendar view and schedules them through drag", async () => {
+    const user = userEvent.setup();
+    const onTaskScheduleChange = jest.fn().mockResolvedValue(undefined);
+
+    renderWorkspace({ onTaskScheduleChange });
+
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+
+    expect(screen.getByText("Unscheduled")).toBeInTheDocument();
+    expect(screen.getAllByText("Calendar polish").length).toBeGreaterThan(0);
+
+    const onDragEnd = getLastOnDragEnd();
+
+    await act(async () => {
+      await onDragEnd?.({
+        draggableId: "task-2",
+        source: { droppableId: "calendar:unscheduled", index: 0 },
+        destination: { droppableId: "calendar:2026-03-30", index: 0 },
+      });
+    });
+
+    expect(onTaskScheduleChange).toHaveBeenCalledWith("task-2", {
+      plannedStartAt: "2026-03-30T09:00:00.000Z",
+      plannedEndAt: "2026-03-30T18:00:00.000Z",
+    });
+  });
+
+  it("shows inline feedback when a calendar scheduling update fails", async () => {
+    const user = userEvent.setup();
+    const onTaskScheduleChange = jest
+      .fn()
+      .mockRejectedValue(new Error("Calendar update failed"));
+
+    renderWorkspace({ onTaskScheduleChange });
+
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+
+    const onDragEnd = getLastOnDragEnd();
+
+    await act(async () => {
+      await onDragEnd?.({
+        draggableId: "task-1",
+        source: { droppableId: "calendar:2026-03-25", index: 0 },
+        destination: { droppableId: "calendar:2026-03-30", index: 0 },
+      });
+    });
+
+    expect(await screen.findByText("Calendar update failed")).toBeInTheDocument();
+    expect(screen.getAllByText("Implement timeline view").length).toBeGreaterThan(0);
+  });
+
+  it("supports month and week calendar layouts and renders multi-day task spans", async () => {
+    const user = userEvent.setup();
+
+    renderWorkspace();
+
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+
+    const calendarView = screen.getByTestId("calendar-view");
+    const monthButton = within(calendarView).getByRole("button", { name: "Month" });
+    const weekButton = within(calendarView).getByRole("button", { name: "Week" });
+
+    expect(monthButton).toHaveAttribute("aria-pressed", "true");
+    expect(within(calendarView).getByTestId("calendar-bar-task-1")).toHaveAttribute(
+      "data-mode",
+      "month"
+    );
+    expect(within(calendarView).getByTestId("calendar-bar-task-1")).toHaveAttribute(
+      "data-span",
+      "3"
+    );
+
+    await user.click(weekButton);
+    expect(weekButton).toHaveAttribute("aria-pressed", "true");
+    expect(within(calendarView).getByTestId("calendar-bar-task-1")).toHaveAttribute(
+      "data-mode",
+      "week"
+    );
+  });
+
+  it("shows the shared empty state when timeline or calendar have no tasks to render", async () => {
+    const user = userEvent.setup();
+    useTaskWorkspaceStore.setState({
+      viewMode: "timeline",
+      filters: createDefaultTaskWorkspaceFilters(),
+      selectedTaskId: null,
+      contextRailDisplay: "expanded",
+      displayOptions: {
+        density: "comfortable",
+        showDescriptions: true,
+        showLinkedDocs: false,
+      },
+    });
+
+    const { rerender } = renderWorkspace({ tasks: [] });
+
+    expect(screen.getByText("No tasks yet")).toBeInTheDocument();
+
+    await act(async () => {
+      useTaskWorkspaceStore.setState((state) => ({ ...state, viewMode: "calendar" }));
+    });
+    rerender(
+      <ProjectTaskWorkspace
+        projectId="project-1"
+        projectName="Test Project"
+        tasks={[]}
+        loading={false}
+        error={null}
+        realtimeConnected
+        notifications={notifications}
+        members={members}
+        agents={agents}
+        sprints={sprints}
+        sprintMetrics={sprintMetrics}
+        sprintMetricsLoading={false}
+        onRetry={jest.fn()}
+        onTaskOpen={jest.fn()}
+        onTaskStatusChange={jest.fn()}
+        onTaskScheduleChange={jest.fn()}
+        onTaskSave={jest.fn()}
+        onTaskAssign={jest.fn()}
+        onSprintFilterChange={jest.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+    expect(screen.getByText("No tasks yet")).toBeInTheDocument();
+  });
+
   it("renders progress health signals in the list workspace view", async () => {
     const user = userEvent.setup();
 
     renderWorkspace();
 
-    await user.click(screen.getByRole("tab", { name: "List" }));
+    await user.click(screen.getByRole("button", { name: "List" }));
 
     expect(screen.getAllByText("Stalled").length).toBeGreaterThan(0);
     expect(screen.getAllByText("No recent update").length).toBeGreaterThan(0);
@@ -511,7 +747,7 @@ describe("ProjectTaskWorkspace", () => {
       error: "Unable to load tasks",
     });
 
-    expect(screen.getByText("Task Workspace")).toBeInTheDocument();
+    expect(screen.getByText("Test Project")).toBeInTheDocument();
     expect(screen.getAllByText("Unable to load tasks")).not.toHaveLength(0);
     expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument();
   });
@@ -527,7 +763,7 @@ describe("ProjectTaskWorkspace", () => {
 
     renderWorkspace();
 
-    await user.type(screen.getByLabelText("Search tasks"), "calendar");
+    await user.type(screen.getAllByLabelText("Search tasks")[0], "calendar");
 
     expect(screen.getByText(/outside the current filters/i)).toBeInTheDocument();
     expect(screen.getByDisplayValue("Implement timeline view")).toBeInTheDocument();
@@ -538,7 +774,7 @@ describe("ProjectTaskWorkspace", () => {
 
     renderWorkspace();
 
-    await user.click(screen.getByRole("tab", { name: "List" }));
+    await user.click(screen.getByRole("button", { name: "List" }));
     expect(screen.getByText("Build the horizontal planning lane.")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Hide descriptions" }));
@@ -546,32 +782,25 @@ describe("ProjectTaskWorkspace", () => {
       screen.queryByText("Build the horizontal planning lane.")
     ).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "Board" }));
-    await user.click(screen.getByRole("tab", { name: "List" }));
+    await user.click(screen.getByRole("button", { name: "Board" }));
+    await user.click(screen.getByRole("button", { name: "List" }));
 
     expect(
       screen.queryByText("Build the horizontal planning lane.")
     ).not.toBeInTheDocument();
   });
 
-  it("shows active filter chips and lets the user clear one filter without resetting the others", async () => {
+  it("lets the user type a search filter and clear it to restore all tasks", async () => {
     const user = userEvent.setup();
 
     renderWorkspace();
 
-    await user.type(screen.getByLabelText("Search tasks"), "calendar");
+    await user.type(screen.getAllByLabelText("Search tasks")[0], "calendar");
 
-    expect(
-      screen.getByRole("button", { name: 'Clear filter search "calendar"' })
-    ).toBeInTheDocument();
+    expect(screen.getAllByText("Calendar polish").length).toBeGreaterThan(0);
 
-    await user.click(
-      screen.getByRole("button", { name: 'Clear filter search "calendar"' })
-    );
+    await user.click(screen.getByRole("button", { name: "Reset filters" }));
 
-    expect(
-      screen.queryByRole("button", { name: 'Clear filter search "calendar"' })
-    ).not.toBeInTheDocument();
     expect(screen.getAllByText("Implement timeline view").length).toBeGreaterThan(0);
     expect(screen.getAllByText("Calendar polish").length).toBeGreaterThan(0);
   });
@@ -596,12 +825,12 @@ describe("ProjectTaskWorkspace", () => {
       container.querySelector('[data-task-id="task-1"][data-selected="true"]')
     ).not.toBeNull();
 
-    await user.click(screen.getByRole("tab", { name: "List" }));
+    await user.click(screen.getByRole("button", { name: "List" }));
     expect(
       container.querySelector('tr[data-task-id="task-1"][data-selected="true"]')
     ).not.toBeNull();
 
-    await user.click(screen.getByRole("tab", { name: "Timeline" }));
+    await user.click(screen.getByRole("button", { name: "Timeline" }));
     expect(
       container.querySelector('button[data-task-id="task-1"][data-selected="true"]')
     ).not.toBeNull();
@@ -613,10 +842,10 @@ describe("ProjectTaskWorkspace", () => {
     expect(screen.getByText(/realtime updates unavailable/i)).toBeInTheDocument();
   });
 
-  it("surfaces a degraded realtime indicator in the workspace header", () => {
+  it("surfaces a degraded realtime indicator in the workspace sidebar", () => {
     renderWorkspace({ realtimeConnected: false });
 
-    expect(screen.getByText("Live alerts paused")).toBeInTheDocument();
+    expect(screen.getAllByText("Realtime degraded").length).toBeGreaterThan(0);
   });
 
   it("shows smart assignment recommendations for the selected task and forwards one-click assignment", async () => {
@@ -655,8 +884,8 @@ describe("ProjectTaskWorkspace", () => {
 
     renderWorkspace();
 
-    await user.click(screen.getByRole("tab", { name: "List" }));
-    await user.selectOptions(screen.getByLabelText("Dependencies"), "blocked");
+    await user.click(screen.getByRole("button", { name: "List" }));
+    await user.selectOptions(screen.getAllByLabelText("Dependencies")[0], "blocked");
 
     expect(screen.getAllByText("Calendar polish").length).toBeGreaterThan(0);
   });
@@ -666,19 +895,14 @@ describe("ProjectTaskWorkspace", () => {
 
     renderWorkspace();
 
-    await user.click(screen.getByRole("button", { name: "Collapse context rail" }));
+    await user.click(screen.getByTitle("Hide Details"));
 
     expect(
       useTaskWorkspaceStore.getState().contextRailDisplay
     ).toBe("collapsed");
-    expect(
-      screen.getByRole("button", { name: "Expand context rail" })
-    ).toBeInTheDocument();
-    expect(screen.getAllByText("Realtime live").length).toBeGreaterThan(0);
-    expect(screen.getByText("Stalled 1")).toBeInTheDocument();
     expect(screen.queryByText("Task details")).not.toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Expand context rail" }));
+    await user.click(screen.getByTitle("Show Details"));
 
     expect(
       useTaskWorkspaceStore.getState().contextRailDisplay
@@ -715,8 +939,8 @@ describe("ProjectTaskWorkspace", () => {
     expect(screen.getAllByText("Sprint Alpha").length).toBeGreaterThan(0);
     expect(screen.getByText("Velocity 2.00/wk")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("tab", { name: "List" }));
-    await user.selectOptions(screen.getByLabelText("Sprint"), "sprint-2");
+    await user.click(screen.getByRole("button", { name: "List" }));
+    await user.selectOptions(screen.getAllByLabelText("Sprint")[0], "sprint-2");
 
     expect(screen.getAllByText("Calendar polish").length).toBeGreaterThan(0);
   });

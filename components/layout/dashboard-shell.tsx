@@ -1,10 +1,15 @@
 "use client";
 
 import { useEffect, useEffectEvent, useRef } from "react";
-import { useRouter } from "next/navigation";
-import { Sidebar } from "@/components/layout/sidebar";
+import { usePathname, useRouter } from "next/navigation";
+import { AppSidebar } from "@/components/layout/sidebar";
 import { Header } from "@/components/layout/header";
+import { CommandPalette } from "@/components/shared/command-palette";
+import { SidebarInset, SidebarProvider } from "@/components/ui/sidebar";
+import { cn } from "@/lib/utils";
 import { resolveBackendUrl } from "@/lib/backend-url";
+import { useLayoutStore } from "@/lib/stores/layout-store";
+import { useKeyboardNavigation } from "@/hooks/use-keyboard-navigation";
 import { usePlatformCapability } from "@/hooks/use-platform-capability";
 import type {
   DesktopRuntimeEvent,
@@ -34,8 +39,11 @@ function resolveNotificationDeliveryPolicy(
   }
 }
 
+const FLUSH_ROUTES = ["/roles", "/agents"];
+
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();
+  const pathname = usePathname();
   const accessToken = useAuthStore((s) => s.accessToken);
   const status = useAuthStore((s) => s.status);
   const hasHydrated = useAuthStore((s) => s.hasHydrated);
@@ -43,6 +51,9 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const fetchNotifications = useNotificationStore((s) => s.fetchNotifications);
   const notifications = useNotificationStore((s) => s.notifications);
   const unreadCount = useNotificationStore((s) => s.unreadCount);
+  const commandPaletteOpen = useLayoutStore((s) => s.commandPaletteOpen);
+  const closeCommandPalette = useLayoutStore((s) => s.closeCommandPalette);
+  useKeyboardNavigation();
   const connectWS = useWSStore((s) => s.connect);
   const disconnectWS = useWSStore((s) => s.disconnect);
   const {
@@ -228,12 +239,27 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <div className="flex h-full min-h-full overflow-hidden">
-      <Sidebar />
-      <div className="flex flex-1 flex-col overflow-hidden">
+    <SidebarProvider>
+      <AppSidebar />
+      <SidebarInset className="overflow-hidden">
         <Header />
-        <main className="flex-1 overflow-auto p-6">{children}</main>
-      </div>
-    </div>
+        <div
+          className={cn(
+            "flex-1 overflow-auto",
+            !FLUSH_ROUTES.some(
+              (r) => pathname === r || pathname.startsWith(r + "/"),
+            ) && "p-6",
+          )}
+        >
+          {children}
+        </div>
+      </SidebarInset>
+      <CommandPalette
+        open={commandPaletteOpen}
+        onOpenChange={(open) => {
+          if (!open) closeCommandPalette();
+        }}
+      />
+    </SidebarProvider>
   );
 }

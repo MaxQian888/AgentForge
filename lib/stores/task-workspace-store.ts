@@ -35,6 +35,7 @@ interface TaskWorkspaceState {
   setLabels: (labels: string[]) => void;
   setPlanning: (planning: TaskPlanningFilter) => void;
   setDependency: (dependency: TaskDependencyFilter) => void;
+  setCustomFieldFilter: (fieldId: string, value: string | "all") => void;
   setContextRailDisplay: (display: ContextRailDisplay) => void;
   setDensity: (density: TaskWorkspaceDensity) => void;
   setShowDescriptions: (showDescriptions: boolean) => void;
@@ -78,6 +79,21 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceState>()((set) => ({
     set((state) => ({ filters: { ...state.filters, labels } })),
   setDependency: (dependency) =>
     set((state) => ({ filters: { ...state.filters, dependency } })),
+  setCustomFieldFilter: (fieldId, value) =>
+    set((state) => {
+      const nextFilters = { ...state.filters.customFieldFilters };
+      if (!fieldId || value === "all" || value === "") {
+        delete nextFilters[fieldId];
+      } else {
+        nextFilters[fieldId] = value;
+      }
+      return {
+        filters: {
+          ...state.filters,
+          customFieldFilters: nextFilters,
+        },
+      };
+    }),
   setContextRailDisplay: (contextRailDisplay) => set({ contextRailDisplay }),
   setDensity: (density) =>
     set((state) => ({
@@ -121,6 +137,11 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceState>()((set) => ({
             break;
           case "search":
             nextFilters.search = typeof value === "string" ? value : nextFilters.search;
+            break;
+          default:
+            if (field.startsWith("cf:") && typeof value === "string") {
+              nextFilters.customFieldFilters[field.slice(3)] = value;
+            }
             break;
         }
       }

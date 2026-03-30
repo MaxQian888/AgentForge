@@ -51,6 +51,8 @@ func TestEmbeddedMigrationsKeepReleasedFilenamesStable(t *testing.T) {
 		"039_create_wiki_workspace_tables.down.sql",
 		"040_add_review_pending_human_status.up.sql",
 		"040_add_review_pending_human_status.down.sql",
+		"041_align_member_contract_with_documented_status_and_im_identity.up.sql",
+		"041_align_member_contract_with_documented_status_and_im_identity.down.sql",
 	}
 
 	for _, name := range expected {

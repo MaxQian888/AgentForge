@@ -197,8 +197,14 @@ func (m *IMStructuredMessage) FallbackText() string {
 }
 
 type IMNativeMessage struct {
-	Platform   string               `json:"platform,omitempty"`
-	FeishuCard *IMFeishuCardPayload `json:"feishuCard,omitempty"`
+	Platform      string                  `json:"platform,omitempty"`
+	FeishuCard    *IMFeishuCardPayload    `json:"feishuCard,omitempty"`
+	SlackBlockKit *IMSlackBlockKitPayload `json:"slackBlockKit,omitempty"`
+	DiscordEmbed  *IMDiscordEmbedPayload  `json:"discordEmbed,omitempty"`
+	TelegramRich  *IMTelegramRichPayload  `json:"telegramRich,omitempty"`
+	DingTalkCard  *IMDingTalkCardPayload  `json:"dingTalkCard,omitempty"`
+	WeComCard     *IMWeComCardPayload     `json:"weComCard,omitempty"`
+	QQBotMarkdown *IMQQBotMarkdownPayload `json:"qqBotMarkdown,omitempty"`
 }
 
 type IMFeishuCardPayload struct {
@@ -207,6 +213,91 @@ type IMFeishuCardPayload struct {
 	TemplateID          string          `json:"templateId,omitempty"`
 	TemplateVersionName string          `json:"templateVersionName,omitempty"`
 	TemplateVariable    map[string]any  `json:"templateVariable,omitempty"`
+}
+
+type IMSlackBlockKitPayload struct {
+	Blocks json.RawMessage `json:"blocks,omitempty"`
+}
+
+type IMDiscordEmbedField struct {
+	Name   string `json:"name,omitempty"`
+	Value  string `json:"value,omitempty"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+type IMDiscordButton struct {
+	Label    string `json:"label,omitempty"`
+	CustomID string `json:"customId,omitempty"`
+	URL      string `json:"url,omitempty"`
+	Style    string `json:"style,omitempty"`
+}
+
+type IMDiscordActionRow struct {
+	Buttons []IMDiscordButton `json:"buttons,omitempty"`
+}
+
+type IMDiscordEmbedPayload struct {
+	Title       string                `json:"title,omitempty"`
+	Description string                `json:"description,omitempty"`
+	Fields      []IMDiscordEmbedField `json:"fields,omitempty"`
+	Color       int                   `json:"color,omitempty"`
+	Components  []IMDiscordActionRow  `json:"components,omitempty"`
+}
+
+type IMTelegramInlineButton struct {
+	Text         string `json:"text,omitempty"`
+	URL          string `json:"url,omitempty"`
+	CallbackData string `json:"callbackData,omitempty"`
+}
+
+type IMTelegramRichPayload struct {
+	Text           string                     `json:"text,omitempty"`
+	ParseMode      string                     `json:"parseMode,omitempty"`
+	InlineKeyboard [][]IMTelegramInlineButton `json:"inlineKeyboard,omitempty"`
+}
+
+type IMDingTalkCardButton struct {
+	Title     string `json:"title,omitempty"`
+	ActionURL string `json:"actionUrl,omitempty"`
+}
+
+type IMDingTalkCardPayload struct {
+	CardType string                 `json:"cardType,omitempty"`
+	Title    string                 `json:"title,omitempty"`
+	Markdown string                 `json:"markdown,omitempty"`
+	Buttons  []IMDingTalkCardButton `json:"buttons,omitempty"`
+}
+
+type IMWeComArticle struct {
+	Title       string `json:"title,omitempty"`
+	Description string `json:"description,omitempty"`
+	URL         string `json:"url,omitempty"`
+	PicURL      string `json:"picUrl,omitempty"`
+}
+
+type IMWeComTemplateField struct {
+	Key   string `json:"key,omitempty"`
+	Value string `json:"value,omitempty"`
+}
+
+type IMWeComCardPayload struct {
+	CardType       string                 `json:"cardType,omitempty"`
+	Title          string                 `json:"title,omitempty"`
+	Description    string                 `json:"description,omitempty"`
+	URL            string                 `json:"url,omitempty"`
+	Articles       []IMWeComArticle       `json:"articles,omitempty"`
+	TemplateFields []IMWeComTemplateField `json:"templateFields,omitempty"`
+}
+
+type IMQQBotKeyboardButton struct {
+	Label  string `json:"label,omitempty"`
+	URL    string `json:"url,omitempty"`
+	Action string `json:"action,omitempty"`
+}
+
+type IMQQBotMarkdownPayload struct {
+	Markdown string                    `json:"markdown,omitempty"`
+	Keyboard [][]IMQQBotKeyboardButton `json:"keyboard,omitempty"`
 }
 
 type IMChannel struct {
@@ -232,7 +323,7 @@ type IMBridgeStatus struct {
 	Registered      bool                     `json:"registered"`
 	LastHeartbeat   *string                  `json:"lastHeartbeat"`
 	Providers       []string                 `json:"providers"`
-	ProviderDetails []IMBridgeProviderDetail `json:"providerDetails,omitempty"`
+	ProviderDetails []IMBridgeProviderDetail `json:"providerDetails"`
 	Health          string                   `json:"health"`
 }
 

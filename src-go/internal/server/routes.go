@@ -255,7 +255,6 @@ func RegisterRoutes(
 	bridgeAIH := handler.NewBridgeAIHandler(bridgeClient)
 	notifH := handler.NewNotificationHandler(notifRepo)
 	workflowH := handler.NewWorkflowHandler(workflowRepo)
-	costH := handler.NewCostHandler(agentRunRepo)
 	roleH := handler.NewRoleHandler(cfg.RolesDir).WithBridgeClient(bridgeClient)
 	customFieldH := handler.NewCustomFieldHandler(service.NewCustomFieldService(customFieldRepo))
 	savedViewH := handler.NewSavedViewHandler(service.NewSavedViewService(savedViewRepo), memberRepo)
@@ -307,8 +306,10 @@ func RegisterRoutes(
 	var dispatchPreflightH *handler.DispatchPreflightHandler
 	var dispatchStatsH *handler.DispatchStatsHandler
 	var dispatchHistoryH *handler.DispatchHistoryHandler
+	var queueManagementH *handler.QueueManagementHandler
+	var budgetQueryH *handler.BudgetQueryHandler
 	if agentSvc != nil {
-		budgetSvc = service.NewBudgetGovernanceService(sprintRepo)
+		budgetSvc = service.NewBudgetGovernanceService(sprintRepo, taskRepo)
 		budgetSvc.SetAutomationEvaluator(automationEngine)
 		agentSvc.SetDispatchBudgetChecker(budgetSvc)
 		dispatchSvc = service.NewTaskDispatchService(taskRepo, memberRepo, agentSvc, hub, notificationSvc, taskProgressSvc)
@@ -318,9 +319,13 @@ func RegisterRoutes(
 		dispatchPreflightH = handler.NewDispatchPreflightHandler(taskRepo, memberRepo, budgetSvc, agentSvc)
 		dispatchStatsH = handler.NewDispatchStatsHandler(dispatchAttemptRepo, agentPoolQueueRepo)
 		dispatchHistoryH = handler.NewDispatchHistoryHandler(dispatchAttemptRepo)
+		queueManagementH = handler.NewQueueManagementHandler(agentSvc)
+		budgetQueryH = handler.NewBudgetQueryHandler(budgetSvc)
 		taskH = taskH.WithDispatcher(dispatchSvc)
 		agentH = agentH.WithDispatcher(dispatchSvc)
 	}
+	costQuerySvc := service.NewCostQueryService(taskRepo, sprintRepo, agentRunRepo, budgetSvc)
+	costH := handler.NewCostHandler(costQuerySvc)
 	workflowRunRepo := repository.NewWorkflowPluginRunRepository()
 	workflowExec := service.NewWorkflowExecutionService(
 		pluginSvc,
@@ -404,6 +409,13 @@ func RegisterRoutes(
 	}
 	if dispatchStatsH != nil {
 		projectGroup.GET("/dispatch/stats", dispatchStatsH.Get)
+	}
+	if queueManagementH != nil {
+		projectGroup.GET("/queue", queueManagementH.List)
+		projectGroup.DELETE("/queue/:entryId", queueManagementH.Cancel)
+	}
+	if budgetQueryH != nil {
+		projectGroup.GET("/budget/summary", budgetQueryH.ProjectSummary)
 	}
 	projectGroup.GET("/wiki/pages", wikiH.ListPages)
 	projectGroup.POST("/wiki/pages", wikiH.CreatePage)
@@ -502,6 +514,9 @@ func RegisterRoutes(
 	protected.GET("/stats/agent-performance", statsH.AgentPerformance)
 
 	protected.GET("/sprints/:sid/burndown", sprintH.Burndown)
+	if budgetQueryH != nil {
+		protected.GET("/sprints/:sid/budget", budgetQueryH.SprintDetail)
+	}
 
 	// Roles
 	protected.GET("/roles", roleH.List)

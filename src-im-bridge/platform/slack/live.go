@@ -29,10 +29,19 @@ var liveMetadata = core.PlatformMetadata{
 		AsyncUpdateModes:      []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateThreadReply, core.AsyncUpdateFollowUp},
 		ActionCallbackMode:    core.ActionCallbackSocketPayload,
 		MessageScopes:         []core.MessageScope{core.MessageScopeChat, core.MessageScopeThread},
+		NativeSurfaces:        []string{core.NativeSurfaceSlackBlockKit},
 		SupportsRichMessages:  true,
 		SupportsDeferredReply: true,
 		SupportsSlashCommands: true,
 		SupportsMentions:      true,
+	},
+	Rendering: core.RenderingProfile{
+		DefaultTextFormat: core.TextFormatPlainText,
+		SupportedFormats:  []core.TextFormatMode{core.TextFormatPlainText, core.TextFormatSlackMrkdwn},
+		NativeSurfaces:    []string{core.NativeSurfaceSlackBlockKit},
+		MaxTextLength:     4000,
+		SupportsSegments:  true,
+		StructuredSurface: core.StructuredSurfaceBlocks,
 	},
 }
 
@@ -70,6 +79,7 @@ type slackOutgoingMessage struct {
 	ThreadTS  string
 	Text      string
 	Blocks    []goslack.Block
+	Markdown  *bool
 }
 
 type messageClient interface {
@@ -237,18 +247,15 @@ func (l *Live) Reply(ctx context.Context, replyCtx any, content string) error {
 	if target.ChannelID == "" {
 		return errors.New("slack reply requires channel id")
 	}
-	if target.ResponseURL != "" {
-		return l.responses.PostResponse(ctx, target.ResponseURL, slackOutgoingMessage{
-			ChannelID: target.ChannelID,
-			ThreadTS:  target.ThreadTS,
-			Text:      content,
-		})
-	}
-	return l.messages.PostMessage(ctx, slackOutgoingMessage{
+	message := slackOutgoingMessage{
 		ChannelID: target.ChannelID,
 		ThreadTS:  target.ThreadTS,
 		Text:      content,
-	})
+	}
+	if target.ResponseURL != "" {
+		return l.responses.PostResponse(ctx, target.ResponseURL, message)
+	}
+	return l.messages.PostMessage(ctx, message)
 }
 
 func (l *Live) Send(ctx context.Context, chatID string, content string) error {
@@ -276,6 +283,35 @@ func (l *Live) SendCard(ctx context.Context, chatID string, card *core.Card) err
 	})
 }
 
+func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	if strings.TrimSpace(chatID) == "" {
+		return errors.New("slack structured send requires channel id")
+	}
+	outgoing, err := renderSlackStructuredMessage(message)
+	if err != nil {
+		return err
+	}
+	outgoing.ChannelID = chatID
+	return l.messages.PostMessage(ctx, outgoing)
+}
+
+func (l *Live) ReplyStructured(ctx context.Context, replyCtx any, message *core.StructuredMessage) error {
+	target := toReplyContext(replyCtx)
+	if target.ChannelID == "" {
+		return errors.New("slack structured reply requires channel id")
+	}
+	outgoing, err := renderSlackStructuredMessage(message)
+	if err != nil {
+		return err
+	}
+	outgoing.ChannelID = target.ChannelID
+	outgoing.ThreadTS = target.ThreadTS
+	if target.ResponseURL != "" {
+		return l.responses.PostResponse(ctx, target.ResponseURL, outgoing)
+	}
+	return l.messages.PostMessage(ctx, outgoing)
+}
+
 func (l *Live) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) error {
 	target := toReplyContext(replyCtx)
 	if target.ChannelID == "" {
@@ -299,6 +335,68 @@ func (l *Live) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) err
 		Text:      text,
 		Blocks:    blocks,
 	})
+}
+
+func (l *Live) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	if strings.TrimSpace(chatID) == "" {
+		return errors.New("slack native send requires channel id")
+	}
+	outgoing, err := renderSlackNativeMessage(message)
+	if err != nil {
+		return err
+	}
+	outgoing.ChannelID = chatID
+	return l.messages.PostMessage(ctx, outgoing)
+}
+
+func (l *Live) ReplyNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	target := toReplyContext(replyCtx)
+	if target.ChannelID == "" {
+		return errors.New("slack native reply requires channel id")
+	}
+	outgoing, err := renderSlackNativeMessage(message)
+	if err != nil {
+		return err
+	}
+	outgoing.ChannelID = target.ChannelID
+	outgoing.ThreadTS = target.ThreadTS
+	if target.ResponseURL != "" {
+		return l.responses.PostResponse(ctx, target.ResponseURL, outgoing)
+	}
+	return l.messages.PostMessage(ctx, outgoing)
+}
+
+func (l *Live) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
+	if strings.TrimSpace(chatID) == "" {
+		return errors.New("slack formatted send requires channel id")
+	}
+	outgoing, err := renderSlackFormattedTextMessage(message)
+	if err != nil {
+		return err
+	}
+	outgoing.ChannelID = chatID
+	return l.messages.PostMessage(ctx, outgoing)
+}
+
+func (l *Live) ReplyFormattedText(ctx context.Context, replyCtx any, message *core.FormattedText) error {
+	target := toReplyContext(replyCtx)
+	if target.ChannelID == "" {
+		return errors.New("slack formatted reply requires channel id")
+	}
+	outgoing, err := renderSlackFormattedTextMessage(message)
+	if err != nil {
+		return err
+	}
+	outgoing.ChannelID = target.ChannelID
+	outgoing.ThreadTS = target.ThreadTS
+	if target.ResponseURL != "" {
+		return l.responses.PostResponse(ctx, target.ResponseURL, outgoing)
+	}
+	return l.messages.PostMessage(ctx, outgoing)
+}
+
+func (l *Live) UpdateFormattedText(ctx context.Context, replyCtx any, message *core.FormattedText) error {
+	return l.ReplyFormattedText(ctx, replyCtx, message)
 }
 
 func (l *Live) Stop() error {
@@ -433,6 +531,11 @@ func (c *slackAPIMessageClient) PostMessage(ctx context.Context, message slackOu
 	options := []goslack.MsgOption{
 		goslack.MsgOptionText(message.Text, false),
 	}
+	if message.Markdown != nil {
+		params := goslack.NewPostMessageParameters()
+		params.Markdown = *message.Markdown
+		options = append(options, goslack.MsgOptionPostMessageParameters(params))
+	}
 	if len(message.Blocks) > 0 {
 		options = append(options, goslack.MsgOptionBlocks(message.Blocks...))
 	}
@@ -451,6 +554,9 @@ func (c *httpResponseClient) PostResponse(ctx context.Context, responseURL strin
 
 	payload := map[string]any{
 		"text": message.Text,
+	}
+	if message.Markdown != nil {
+		payload["mrkdwn"] = *message.Markdown
 	}
 	if message.ThreadTS != "" {
 		payload["thread_ts"] = message.ThreadTS
@@ -478,6 +584,81 @@ func (c *httpResponseClient) PostResponse(ctx context.Context, responseURL strin
 		return fmt.Errorf("slack response url returned %d", resp.StatusCode)
 	}
 	return nil
+}
+
+func renderSlackNativeMessage(message *core.NativeMessage) (slackOutgoingMessage, error) {
+	if err := message.Validate(); err != nil {
+		return slackOutgoingMessage{}, err
+	}
+	if message.NormalizedPlatform() != "slack" || message.SlackBlockKit == nil {
+		return slackOutgoingMessage{}, errors.New("native message is not a slack block kit payload")
+	}
+
+	var blocks goslack.Blocks
+	if err := json.Unmarshal(message.SlackBlockKit.Blocks, &blocks); err != nil {
+		return slackOutgoingMessage{}, fmt.Errorf("decode slack block kit payload: %w", err)
+	}
+	if len(blocks.BlockSet) == 0 {
+		return slackOutgoingMessage{}, errors.New("slack block kit payload requires at least one block")
+	}
+
+	return slackOutgoingMessage{
+		Text:   strings.TrimSpace(message.FallbackText()),
+		Blocks: blocks.BlockSet,
+	}, nil
+}
+
+func renderSlackStructuredMessage(message *core.StructuredMessage) (slackOutgoingMessage, error) {
+	if message == nil {
+		return slackOutgoingMessage{}, errors.New("structured message is required")
+	}
+	outgoing := slackOutgoingMessage{
+		Text: strings.TrimSpace(message.FallbackText()),
+	}
+	if len(message.Sections) > 0 {
+		outgoing.Blocks = renderStructuredSections(message.Sections)
+		return outgoing, nil
+	}
+
+	card := message.LegacyCard()
+	if card == nil {
+		return outgoing, nil
+	}
+	_, blocks, err := renderCardMessage(card)
+	if err != nil {
+		return slackOutgoingMessage{}, err
+	}
+	outgoing.Blocks = blocks
+	return outgoing, nil
+}
+
+func renderSlackFormattedTextMessage(message *core.FormattedText) (slackOutgoingMessage, error) {
+	if message == nil {
+		return slackOutgoingMessage{}, errors.New("formatted text is required")
+	}
+	content := strings.TrimSpace(message.Content)
+	if content == "" {
+		return slackOutgoingMessage{}, errors.New("formatted text content is required")
+	}
+
+	markdown := false
+	switch message.Format {
+	case "", core.TextFormatPlainText:
+		markdown = false
+	case core.TextFormatSlackMrkdwn:
+		markdown = true
+	default:
+		markdown = false
+	}
+
+	return slackOutgoingMessage{
+		Text:     content,
+		Markdown: boolPtr(markdown),
+	}, nil
+}
+
+func boolPtr(value bool) *bool {
+	return &value
 }
 
 func normalizeEnvelope(envelope socketEnvelope) (*core.Message, error) {

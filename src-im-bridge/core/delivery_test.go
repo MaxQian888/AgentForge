@@ -9,12 +9,18 @@ import (
 
 type structuredDeliveryTestPlatform struct {
 	deliveryTestPlatform
-	structuredSent []*StructuredMessage
+	structuredSent    []*StructuredMessage
+	structuredReplies []*StructuredMessage
 }
 
 func (p *structuredDeliveryTestPlatform) SendStructured(ctx context.Context, chatID string, message *StructuredMessage) error {
 	p.structuredSent = append(p.structuredSent, message)
 	p.sentContent = append(p.sentContent, chatID+":"+message.FallbackText())
+	return nil
+}
+
+func (p *structuredDeliveryTestPlatform) ReplyStructured(ctx context.Context, replyCtx any, message *StructuredMessage) error {
+	p.structuredReplies = append(p.structuredReplies, message)
 	return nil
 }
 
@@ -98,6 +104,62 @@ func TestResolveRenderingPlan_PrefersNativePayloadsBeforeExecution(t *testing.T)
 	}
 	if plan.Method != DeliveryMethodReply {
 		t.Fatalf("delivery method = %q, want %q", plan.Method, DeliveryMethodReply)
+	}
+}
+
+func TestResolveRenderingPlan_FallsBackWhenNativePlatformMismatches(t *testing.T) {
+	plan, err := ResolveRenderingPlan(PlatformMetadata{
+		Source: "telegram",
+		Rendering: RenderingProfile{
+			NativeSurfaces: []string{NativeSurfaceTelegramRich},
+		},
+	}, "chat-1", &DeliveryEnvelope{
+		Native: &NativeMessage{
+			Platform: "slack",
+			SlackBlockKit: &SlackBlockKitPayload{
+				Blocks: json.RawMessage(`[{"type":"section","text":{"type":"mrkdwn","text":"*Build* ready"}}]`),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveRenderingPlan error: %v", err)
+	}
+	if plan.Type != "text" || len(plan.Text) != 1 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if plan.FallbackReason != "native_platform_mismatch" {
+		t.Fatalf("fallback reason = %q", plan.FallbackReason)
+	}
+	if !strings.Contains(plan.Text[0].Content, "Build ready") {
+		t.Fatalf("fallback text = %q", plan.Text[0].Content)
+	}
+}
+
+func TestResolveRenderingPlan_FallsBackWhenNativeSurfaceUnsupported(t *testing.T) {
+	plan, err := ResolveRenderingPlan(PlatformMetadata{
+		Source: "slack",
+		Rendering: RenderingProfile{
+			NativeSurfaces: []string{NativeSurfaceFeishuCard},
+		},
+	}, "chat-1", &DeliveryEnvelope{
+		Native: &NativeMessage{
+			Platform: "slack",
+			SlackBlockKit: &SlackBlockKitPayload{
+				Blocks: json.RawMessage(`[{"type":"section","text":{"type":"mrkdwn","text":"*Build* ready"}}]`),
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ResolveRenderingPlan error: %v", err)
+	}
+	if plan.Type != "text" || len(plan.Text) != 1 {
+		t.Fatalf("plan = %+v", plan)
+	}
+	if plan.FallbackReason != "native_surface_unsupported" {
+		t.Fatalf("fallback reason = %q", plan.FallbackReason)
+	}
+	if !strings.Contains(plan.Text[0].Content, "Build ready") {
+		t.Fatalf("fallback text = %q", plan.Text[0].Content)
 	}
 }
 
@@ -229,6 +291,43 @@ func TestDeliverEnvelope_SendsStructuredPayloadWhenPlatformSupportsStructuredSen
 	}
 	if len(platform.structuredSent) != 1 {
 		t.Fatalf("structuredSent = %d, want 1", len(platform.structuredSent))
+	}
+}
+
+func TestDeliverEnvelope_RepliesWithStructuredSectionsWhenPlatformSupportsReplyStructuredSender(t *testing.T) {
+	platform := &structuredDeliveryTestPlatform{}
+	receipt, err := DeliverEnvelope(context.Background(), platform, PlatformMetadata{
+		Source: "slack",
+		Capabilities: PlatformCapabilities{
+			StructuredSurface: StructuredSurfaceBlocks,
+			AsyncUpdateModes:  []AsyncUpdateMode{AsyncUpdateReply},
+		},
+	}, "", &DeliveryEnvelope{
+		Structured: &StructuredMessage{
+			Sections: []StructuredSection{
+				{
+					Type: StructuredSectionTypeText,
+					TextSection: &TextSection{
+						Body: "Build ready",
+					},
+				},
+			},
+		},
+		ReplyTarget: &ReplyTarget{
+			Platform:  "slack",
+			ChatID:    "chat-1",
+			ChannelID: "chat-1",
+			UseReply:  true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope error: %v", err)
+	}
+	if receipt.Type != "structured" || receipt.Method != DeliveryMethodReply {
+		t.Fatalf("receipt = %+v", receipt)
+	}
+	if len(platform.structuredReplies) != 1 {
+		t.Fatalf("structuredReplies = %d, want 1", len(platform.structuredReplies))
 	}
 }
 

@@ -6,6 +6,7 @@ import {
   streamClaudeRuntime,
 } from "./claude-runtime.js";
 import { AgentRuntime } from "../runtime/agent-runtime.js";
+import { HookCallbackManager } from "../runtime/hook-callback-manager.js";
 import { SessionManager } from "../session/manager.js";
 import type { ExecuteRequest } from "../types.js";
 
@@ -88,6 +89,387 @@ describe("claude runtime", () => {
       resume: "claude-session-launch",
       resumeSessionAt: "assistant-uuid-1",
       permissionMode: "default",
+    });
+  });
+
+  test("wires advanced Claude options, callback handlers, and extended SDK messages", async () => {
+    const runtime = new AgentRuntime("task-advanced", "session-advanced");
+    const events: Array<{ type: string; data: unknown }> = [];
+    const fetchCalls: Array<{ url: string; body: Record<string, unknown> }> = [];
+    let callbackId = 0;
+    let capturedOptions: Record<string, unknown> | undefined;
+    const callbackManager = new HookCallbackManager({
+      idGenerator: () => `req-${++callbackId}`,
+      fetchImpl: async (input, init) => {
+        fetchCalls.push({
+          url: String(input),
+          body: JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>,
+        });
+        return new Response(null, { status: 202 });
+      },
+    });
+    const request = createRequest({
+      task_id: "task-advanced",
+      session_id: "session-advanced",
+      runtime: "claude_code",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      thinking_config: {
+        enabled: true,
+        budget_tokens: 2_048,
+      },
+      output_schema: {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: {
+            summary: {
+              type: "string",
+            },
+          },
+        },
+      },
+      hooks_config: {
+        hooks: [{ hook: "PreToolUse" }],
+        timeout_ms: 5,
+      },
+      hook_callback_url: "http://127.0.0.1:7777/hooks",
+      hook_timeout_ms: 50,
+      file_checkpointing: true,
+      agents: {
+        reviewer: {
+          description: "Review changes",
+          prompt: "Review carefully.",
+          tools: ["Read", "Grep"],
+          model: "claude-haiku-4-5",
+        },
+      },
+      include_partial_messages: true,
+      disallowed_tools: ["Bash"],
+      fallback_model: "claude-haiku-4-5",
+      additional_directories: ["D:/Shared"],
+      tool_permission_callback: true,
+      env: {
+        FEATURE_FLAG: "enabled",
+      },
+    });
+
+    async function* queryMessages(): AsyncGenerator<Record<string, unknown>, void> {
+      yield {
+        type: "assistant",
+        session_id: request.session_id,
+        uuid: "assistant-uuid-1",
+        message: {
+          content: [{ type: "text", text: "Starting advanced execution." }],
+        },
+      };
+      yield {
+        type: "stream_event",
+        session_id: request.session_id,
+        uuid: "stream-1",
+        parent_tool_use_id: null,
+        event: {
+          type: "content_block_delta",
+          delta: {
+            text: "Partial assistant output",
+          },
+        },
+      };
+      yield {
+        type: "rate_limit_event",
+        session_id: request.session_id,
+        uuid: "rate-1",
+        rate_limit_info: {
+          utilization: 0.82,
+          resetsAt: 1_750_000_000,
+          status: "allowed_warning",
+        },
+      };
+      yield {
+        type: "tool_progress",
+        session_id: request.session_id,
+        uuid: "progress-1",
+        tool_use_id: "tool-1",
+        tool_name: "Read",
+        parent_tool_use_id: null,
+        elapsed_time_seconds: 3,
+      };
+      yield {
+        type: "system",
+        subtype: "compact_boundary",
+        session_id: request.session_id,
+        uuid: "compact-1",
+        compact_metadata: {
+          trigger: "auto",
+          pre_tokens: 12_345,
+        },
+      };
+      yield {
+        type: "result",
+        session_id: request.session_id,
+        uuid: "result-1",
+        subtype: "success",
+        result: "Done",
+        structured_output: {
+          summary: "Advanced done",
+        },
+        stop_reason: "end_turn",
+        total_cost_usd: 0.04,
+        usage: {
+          input_tokens: 2_000,
+          output_tokens: 750,
+          cache_read_input_tokens: 0,
+        },
+      };
+    }
+
+    const query = Object.assign(queryMessages(), {
+      interrupt: async () => {},
+      setModel: async () => {},
+      setMaxThinkingTokens: async () => {},
+      rewindFiles: async () => ({ canRewind: true }),
+      mcpServerStatus: async () => [],
+    });
+
+    await streamClaudeRuntime(
+      runtime,
+      {
+        send(event) {
+          events.push(event as { type: string; data: unknown });
+        },
+      },
+      request,
+      "Advanced system prompt",
+      {
+        queryRunner(params) {
+          capturedOptions = params.options as Record<string, unknown>;
+          return query;
+        },
+        hookCallbackManager: callbackManager,
+        now: createNow([301, 302, 303, 304, 305, 306, 307, 308]),
+      },
+    );
+
+    expect(capturedOptions).toMatchObject({
+      agents: {
+        reviewer: {
+          description: "Review changes",
+          prompt: "Review carefully.",
+          tools: ["Read", "Grep"],
+          model: "claude-haiku-4-5",
+        },
+      },
+      maxThinkingTokens: 2_048,
+      enableFileCheckpointing: true,
+      outputFormat: {
+        type: "json_schema",
+      },
+      includePartialMessages: true,
+      disallowedTools: ["Bash"],
+      fallbackModel: "claude-haiku-4-5",
+      additionalDirectories: ["D:/Shared"],
+    });
+    expect((capturedOptions?.env as Record<string, string | undefined>)?.FEATURE_FLAG).toBe("enabled");
+    expect(typeof capturedOptions?.canUseTool).toBe("function");
+    expect(typeof capturedOptions?.onElicitation).toBe("function");
+    expect(((capturedOptions?.hooks as Record<string, unknown[]>)?.PreToolUse ?? [])).toHaveLength(1);
+
+    expect(events.map((event) => event.type)).toEqual([
+      "output",
+      "partial_message",
+      "rate_limit",
+      "progress",
+      "status_change",
+      "cost_update",
+    ]);
+    expect(events[1]?.data).toMatchObject({
+      content: "Partial assistant output",
+      is_complete: false,
+    });
+    expect(events[2]?.data).toMatchObject({
+      utilization: 0.82,
+      reset_at: 1_750_000_000,
+    });
+    expect(events[3]?.data).toMatchObject({
+      tool_name: "Read",
+      elapsed_time_seconds: 3,
+    });
+    expect(events[4]?.data).toMatchObject({
+      reason: "compact_boundary",
+    });
+    expect(runtime.structuredOutput).toEqual({
+      summary: "Advanced done",
+    });
+    expect(runtime.continuity).toMatchObject({
+      runtime: "claude_code",
+      query_ref: "task-advanced",
+      fork_available: true,
+      checkpoint_id: "assistant-uuid-1",
+    });
+
+    const hookPromise = (
+      (capturedOptions?.hooks as Record<string, Array<{ hooks: Array<(...args: unknown[]) => Promise<unknown>> }>>)
+        .PreToolUse[0]?.hooks[0]
+    )(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Read",
+        tool_input: { path: "README.md" },
+        tool_use_id: "tool-1",
+        session_id: request.session_id,
+        transcript_path: "D:/Project/AgentForge/.claude/transcript.jsonl",
+        cwd: request.worktree_path,
+      },
+      "tool-1",
+      { signal: new AbortController().signal },
+    ) as Promise<unknown>;
+    callbackManager.resolve("req-1", {
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+      },
+    });
+    await expect(hookPromise).resolves.toMatchObject({
+      continue: true,
+      hookSpecificOutput: {
+        hookEventName: "PreToolUse",
+        permissionDecision: "allow",
+      },
+    });
+
+    const canUseToolPromise = (capturedOptions?.canUseTool as (
+      toolName: string,
+      input: Record<string, unknown>,
+      options: Record<string, unknown>,
+    ) => Promise<unknown>)("Edit", { file_path: "README.md" }, {
+      signal: new AbortController().signal,
+      toolUseID: "tool-2",
+      title: "Claude wants to edit README.md",
+    });
+    callbackManager.resolve("req-2", {
+      decision: "allow",
+      reason: "approved",
+    });
+    await expect(canUseToolPromise).resolves.toMatchObject({
+      behavior: "allow",
+    });
+
+    const elicitationPromise = (capturedOptions?.onElicitation as (
+      request: Record<string, unknown>,
+      options: Record<string, unknown>,
+    ) => Promise<unknown>)(
+      {
+        serverName: "github",
+        message: "Authorize GitHub",
+        mode: "url",
+        url: "https://example.com/oauth",
+      },
+      { signal: new AbortController().signal },
+    );
+    callbackManager.resolve("req-3", {
+      decision: "allow",
+      reason: "approved",
+    });
+    await expect(elicitationPromise).resolves.toMatchObject({
+      action: "accept",
+    });
+
+    expect(fetchCalls).toMatchObject([
+      {
+        url: "http://127.0.0.1:7777/hooks",
+        body: {
+          request_id: "req-1",
+          hook: "PreToolUse",
+        },
+      },
+      {
+        url: "http://127.0.0.1:7777/hooks",
+        body: {
+          request_id: "req-2",
+          callback_type: "tool_permission",
+          tool_name: "Edit",
+        },
+      },
+      {
+        url: "http://127.0.0.1:7777/hooks",
+        body: {
+          request_id: "req-3",
+          callback_type: "elicitation",
+          mcp_server_id: "github",
+        },
+      },
+    ]);
+    expect(events.filter((event) => event.type === "permission_request")).toHaveLength(2);
+  });
+
+  test("fails open when hook callbacks time out", async () => {
+    const runtime = new AgentRuntime("task-timeout", "session-timeout");
+    let capturedOptions: Record<string, unknown> | undefined;
+
+    const callbackManager = new HookCallbackManager({
+      fetchImpl: async () => new Response(null, { status: 202 }),
+    });
+
+    async function* queryRunner() {
+      yield {
+        type: "result",
+        session_id: "session-timeout",
+        subtype: "success",
+        result: "ok",
+        stop_reason: "end_turn",
+        total_cost_usd: 0,
+        usage: {
+          input_tokens: 0,
+          output_tokens: 0,
+          cache_read_input_tokens: 0,
+        },
+      };
+    }
+
+    await streamClaudeRuntime(
+      runtime,
+      { send() {} },
+      createRequest({
+        task_id: "task-timeout",
+        session_id: "session-timeout",
+        runtime: "claude_code",
+        provider: "anthropic",
+        hooks_config: {
+          hooks: [{ hook: "PreToolUse" }],
+          timeout_ms: 1,
+        },
+        hook_callback_url: "http://127.0.0.1:7777/hooks",
+      }),
+      "System prompt",
+      {
+        queryRunner(params) {
+          capturedOptions = params.options as Record<string, unknown>;
+          return queryRunner();
+        },
+        hookCallbackManager: callbackManager,
+      },
+    );
+
+    const hookPromise = (
+      (capturedOptions?.hooks as Record<string, Array<{ hooks: Array<(...args: unknown[]) => Promise<unknown>> }>>)
+        .PreToolUse[0]?.hooks[0]
+    )(
+      {
+        hook_event_name: "PreToolUse",
+        tool_name: "Read",
+        tool_input: { path: "README.md" },
+        tool_use_id: "tool-timeout",
+        session_id: "session-timeout",
+        transcript_path: "D:/Project/AgentForge/.claude/transcript.jsonl",
+        cwd: "D:/Project/AgentForge",
+      },
+      "tool-timeout",
+      { signal: new AbortController().signal },
+    ) as Promise<unknown>;
+
+    await expect(hookPromise).resolves.toMatchObject({
+      continue: true,
     });
   });
 

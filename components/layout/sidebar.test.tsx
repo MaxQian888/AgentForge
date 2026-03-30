@@ -17,39 +17,68 @@ jest.mock("next/navigation", () => ({
   usePathname: () => usePathnameMock(),
 }));
 
-import userEvent from "@testing-library/user-event";
-import { render, screen } from "@testing-library/react";
-import { MobileSidebar, Sidebar } from "./sidebar";
+jest.mock("next-intl", () => ({
+  useTranslations: () => (key: string) => {
+    const map: Record<string, string> = {
+      appName: "AgentForge",
+      "nav.dashboard": "Dashboard",
+      "nav.projects": "Projects",
+      "nav.projectDashboard": "Project Dashboard",
+      "nav.team": "Team",
+      "nav.agents": "Agents",
+      "nav.teams": "Teams",
+      "nav.sprints": "Sprints",
+      "nav.reviews": "Reviews",
+      "nav.scheduler": "Scheduler",
+      "nav.cost": "Cost",
+      "nav.memory": "Memory",
+      "nav.docs": "Docs",
+      "nav.imBridge": "IM Bridge",
+      "nav.roles": "Roles",
+      "nav.plugins": "Plugins",
+      "nav.settings": "Settings",
+    };
+    return map[key] ?? key;
+  },
+}));
 
-describe("Sidebar", () => {
+// Mock next-themes used by ThemeToggle
+jest.mock("next-themes", () => ({
+  useTheme: () => ({ theme: "light", setTheme: jest.fn() }),
+}));
+
+import { render, screen } from "@testing-library/react";
+import { SidebarProvider } from "@/components/ui/sidebar";
+import { AppSidebar } from "./sidebar";
+
+function renderWithProvider() {
+  return render(
+    <SidebarProvider>
+      <AppSidebar />
+    </SidebarProvider>
+  );
+}
+
+describe("AppSidebar", () => {
   beforeEach(() => {
-    document.documentElement.className = "";
     usePathnameMock.mockReturnValue("/projects");
   });
 
-  it("highlights the active route and toggles dark mode", async () => {
-    const user = userEvent.setup();
-    const { container } = render(<Sidebar />);
-
-    const projectsLink = screen.getByRole("link", { name: /Projects/i });
-    const dashboardLink = screen.getByRole("link", { name: /^Dashboard$/i });
-    expect(projectsLink).toHaveClass("bg-accent");
-    expect(dashboardLink).toHaveClass("text-muted-foreground");
-
-    await user.click(container.querySelector("button")!);
-    expect(document.documentElement.classList.contains("dark")).toBe(true);
+  it("renders nav links", () => {
+    renderWithProvider();
+    expect(screen.getByRole("link", { name: /Projects/i })).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: /^Dashboard$/i })).toBeInTheDocument();
   });
 
-  it("opens the mobile sheet navigation", async () => {
-    const user = userEvent.setup();
-    const { container } = render(<MobileSidebar />);
+  it("marks the active route with data-active", () => {
+    renderWithProvider();
+    const projectsLink = screen.getByRole("link", { name: /^Projects$/i });
+    // The SidebarMenuButton wraps the link, check the parent has data-active
+    expect(projectsLink.closest("[data-active='true']")).not.toBeNull();
+  });
 
-    await user.click(container.querySelector("button")!);
-
-    expect(await screen.findAllByText("AgentForge")).not.toHaveLength(0);
-    expect(screen.getAllByRole("link", { name: /Projects/i })[0]).toHaveAttribute(
-      "href",
-      "/projects",
-    );
+  it("renders the app name in header", () => {
+    renderWithProvider();
+    expect(screen.getByText("AgentForge")).toBeInTheDocument();
   });
 });

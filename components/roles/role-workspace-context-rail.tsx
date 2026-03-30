@@ -2,12 +2,12 @@
 
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import type {
   RolePreviewResponse,
   RoleSandboxResponse,
 } from "@/lib/stores/role-store";
 import type {
+  FieldProvenanceMap,
   RoleExecutionSummary,
   RoleSkillResolution,
 } from "@/lib/roles/role-management";
@@ -30,6 +30,7 @@ interface RoleWorkspaceContextRailProps {
   onSandbox: () => void;
   previewResult: RolePreviewResponse | null;
   sandboxResult: RoleSandboxResponse | null;
+  provenanceMap?: FieldProvenanceMap;
 }
 
 export function RoleWorkspaceContextRail({
@@ -45,6 +46,7 @@ export function RoleWorkspaceContextRail({
   onSandbox,
   previewResult,
   sandboxResult,
+  provenanceMap,
 }: RoleWorkspaceContextRailProps) {
   const t = useTranslations("roles");
   const activeSectionLabel =
@@ -81,120 +83,169 @@ export function RoleWorkspaceContextRail({
       : (previewResult?.validationIssues ?? []);
 
   return (
-    <section className="grid gap-4">
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("contextRail.authoringGuide")}</CardTitle>
-          <CardDescription>
-            {t("contextRail.guidanceFor", { section: activeSectionLabel.toLowerCase() })}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 text-sm text-muted-foreground">
-          <div>
-            <p className="font-medium text-foreground">{guidance.title}</p>
-            <p>{guidance.summary}</p>
-          </div>
-          <ul className="list-disc space-y-1 pl-5">
-            {guidance.bullets.map((bullet) => (
-              <li key={bullet}>{bullet}</li>
-            ))}
-          </ul>
-        </CardContent>
-      </Card>
+    <div className="flex flex-col">
+      {/* Authoring Guide — sticky header */}
+      <div className="sticky top-0 z-10 border-b bg-background px-4 py-3">
+        <p className="text-xs font-semibold">{t("contextRail.authoringGuide")}</p>
+        <p className="text-xs text-muted-foreground">
+          {t("contextRail.guidanceFor", { section: activeSectionLabel.toLowerCase() })}
+        </p>
+      </div>
+      <div className="border-b px-4 py-3 text-xs text-muted-foreground">
+        <p className="mb-1 font-medium text-foreground">{guidance.title}</p>
+        <p className="mb-2">{guidance.summary}</p>
+        <ul className="list-disc space-y-0.5 pl-4">
+          {guidance.bullets.map((bullet) => (
+            <li key={bullet}>{bullet}</li>
+          ))}
+        </ul>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("contextRail.executionSummary")}</CardTitle>
-          <CardDescription>
-            {t("contextRail.executionSummaryDesc")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 text-sm">
+      {/* Preview & Sandbox — promoted to top */}
+      <div className="border-b px-4 py-3">
+        <p className="mb-2 text-xs font-semibold">{t("contextRail.previewAndSandbox")}</p>
+        <div className="flex flex-wrap gap-1.5">
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onPreview}
+            disabled={previewLoading}
+          >
+            {previewLoading ? t("contextRail.previewing") : t("contextRail.previewDraft")}
+          </Button>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            onClick={onSandbox}
+            disabled={sandboxLoading}
+          >
+            {sandboxLoading ? t("contextRail.running") : t("contextRail.runSandbox")}
+          </Button>
+        </div>
+        <div className="mt-2 grid gap-1">
+          <label htmlFor="sandbox-input" className="text-xs font-medium">
+            {t("contextRail.sandboxInput")}
+          </label>
+          <textarea
+            id="sandbox-input"
+            className="min-h-16 rounded-md border bg-background px-2.5 py-1.5 text-xs"
+            rows={3}
+            value={sandboxInput}
+            onChange={(event) => onSandboxInputChange(event.target.value)}
+          />
+        </div>
+        {previewResult?.executionProfile ? (
+          <p className="mt-2 text-xs text-muted-foreground">
+            Effective role: {previewResult.executionProfile.name} ({previewResult.executionProfile.role_id})
+          </p>
+        ) : null}
+        {sandboxResult?.selection ? (
+          <p className="mt-1 text-xs text-muted-foreground">{`${sandboxResult.selection.runtime} / ${sandboxResult.selection.provider} / ${sandboxResult.selection.model}`}</p>
+        ) : null}
+        {sandboxResult?.probe?.text ? (
+          <p className="mt-1 text-xs">{sandboxResult.probe.text}</p>
+        ) : null}
+        <div className="mt-3 grid gap-2 border-t pt-2.5">
           <div>
-            <p className="font-medium">{t("contextRail.promptIntent")}</p>
-            <p className="text-muted-foreground">
-              {executionSummary.promptIntent || t("contextRail.noPromptIntent")}
-            </p>
-          </div>
-          <div>
-            <p className="font-medium">{t("contextRail.allowedTools")}</p>
-            <p className="text-muted-foreground">{executionSummary.toolsLabel}</p>
-          </div>
-          <div>
-            <p className="font-medium">{t("contextRail.skills")}</p>
-            <p className="text-muted-foreground">{executionSummary.skillsLabel}</p>
-            <p className="text-muted-foreground">
-              {executionSummary.keySkillPaths.length > 0
-                ? executionSummary.keySkillPaths.join(", ")
-                : t("contextRail.noKeySkills")}
-            </p>
-          </div>
-          <div>
-            <p className="font-medium">{t("contextRail.budget")}</p>
-            <p className="text-muted-foreground">{executionSummary.budgetLabel}</p>
-          </div>
-          <div>
-            <p className="font-medium">{t("contextRail.turnLimit")}</p>
-            <p className="text-muted-foreground">{executionSummary.turnsLabel}</p>
-          </div>
-          <div>
-            <p className="font-medium">{t("contextRail.permissionMode")}</p>
-            <p className="text-muted-foreground">{executionSummary.permissionMode}</p>
-          </div>
-          <div>
-            <p className="font-medium">{t("contextRail.safetyCues")}</p>
-            <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-              {executionSummary.safetyCues.length > 0 ? (
-                executionSummary.safetyCues.map((cue) => <li key={cue}>{cue}</li>)
-              ) : (
-                <li>{t("contextRail.noSafetyCues")}</li>
-              )}
-            </ul>
-          </div>
-          <div>
-            <p className="font-medium">{t("contextRail.skillResolution")}</p>
-            <p className="text-muted-foreground">{t("contextRail.skillResolutionDesc")}</p>
-            {effectiveSkillResolution.length > 0 ? (
-              <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
-                {effectiveSkillResolution.map((skill, index) => (
-                  <li key={`${skill.path}:${skill.provenance}:${index}`}>
-                    {skill.label} ({skill.path}) - {skill.status} / {skill.provenance}
+            <p className="text-xs font-medium">{t("contextRail.readiness")}</p>
+            {readinessDiagnostics.length > 0 ? (
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                {readinessDiagnostics.map((diagnostic) => (
+                  <li key={`${diagnostic.code}:${diagnostic.message}`}>
+                    {diagnostic.message}
                   </li>
                 ))}
               </ul>
             ) : (
-              <p className="text-muted-foreground">{t("contextRail.skillResolutionNone")}</p>
+              <p className="text-xs text-muted-foreground">{t("contextRail.readinessNone")}</p>
             )}
           </div>
-        </CardContent>
-      </Card>
+          <div>
+            <p className="text-xs font-medium">{t("contextRail.validationIssues")}</p>
+            {validationIssues.length > 0 ? (
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                {validationIssues.map((issue) => (
+                  <li key={`${issue.field}:${issue.message}`}>
+                    {issue.field}: {issue.message}
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              <p className="text-xs text-muted-foreground">{t("contextRail.validationIssuesNone")}</p>
+            )}
+          </div>
+        </div>
+      </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("contextRail.yamlPreview")}</CardTitle>
-          <CardDescription>
-            {t("contextRail.yamlPreviewDesc")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent>
-          <pre className="max-h-72 overflow-auto rounded-md border bg-muted/30 p-3 text-xs">
+      {/* Execution Summary — collapsible, open by default */}
+      <details open className="border-b">
+        <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 text-xs font-semibold hover:bg-muted/40">
+          {t("contextRail.executionSummary")}
+        </summary>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-4 gap-y-1 px-4 pb-3 pt-1 text-xs">
+          <dt className="text-muted-foreground">{t("contextRail.allowedTools")}</dt>
+          <dd>{executionSummary.toolsLabel}</dd>
+          <dt className="text-muted-foreground">{t("contextRail.skills")}</dt>
+          <dd>{executionSummary.skillsLabel}</dd>
+          <dt className="text-muted-foreground">{t("contextRail.budget")}</dt>
+          <dd>{executionSummary.budgetLabel}</dd>
+          <dt className="text-muted-foreground">{t("contextRail.turnLimit")}</dt>
+          <dd>{executionSummary.turnsLabel}</dd>
+          <dt className="text-muted-foreground">{t("contextRail.permissionMode")}</dt>
+          <dd>{executionSummary.permissionMode}</dd>
+        </dl>
+        {executionSummary.promptIntent ? (
+          <p className="border-t px-4 py-2 text-xs text-muted-foreground">
+            <span className="font-medium text-foreground">{t("contextRail.promptIntent")}: </span>
+            {executionSummary.promptIntent}
+          </p>
+        ) : null}
+        {executionSummary.safetyCues.length > 0 ? (
+          <div className="border-t px-4 py-2">
+            <p className="mb-0.5 text-xs font-medium">{t("contextRail.safetyCues")}</p>
+            <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+              {executionSummary.safetyCues.map((cue) => <li key={cue}>{cue}</li>)}
+            </ul>
+          </div>
+        ) : null}
+        {effectiveSkillResolution.length > 0 ? (
+          <div className="border-t px-4 py-2">
+            <p className="mb-0.5 text-xs font-medium">{t("contextRail.skillResolution")}</p>
+            <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+              {effectiveSkillResolution.map((skill, index) => (
+                <li key={`${skill.path}:${skill.provenance}:${index}`}>
+                  {skill.label} ({skill.path}) — {skill.status} / {skill.provenance}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : null}
+      </details>
+
+      {/* YAML Preview — collapsible, closed by default */}
+      <details className="border-b">
+        <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 text-xs font-semibold hover:bg-muted/40">
+          {t("contextRail.yamlPreview")}
+        </summary>
+        <div className="px-3 pb-3">
+          <pre className="max-h-48 overflow-auto rounded-md border bg-muted/30 p-2.5 font-mono text-[11px] leading-relaxed">
             {yamlPreview}
           </pre>
-        </CardContent>
-      </Card>
+        </div>
+      </details>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("contextRail.advancedAuthoring")}</CardTitle>
-          <CardDescription>
-            {t("contextRail.advancedAuthoringDesc")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3 text-sm">
+      {/* Advanced Authoring — collapsible, closed by default */}
+      <details className="border-b">
+        <summary className="flex cursor-pointer select-none items-center justify-between px-4 py-3 text-xs font-semibold hover:bg-muted/40">
+          {t("contextRail.advancedAuthoring")}
+        </summary>
+        <div className="grid gap-3 px-4 pb-3 pt-1 text-xs">
           <div>
             <p className="font-medium">{t("contextRail.advancedSettings")}</p>
             {advancedSettings.length > 0 ? (
-              <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-muted-foreground">
                 {advancedSettings.map((item) => (
                   <li key={item}>{item}</li>
                 ))}
@@ -203,6 +254,28 @@ export function RoleWorkspaceContextRail({
               <p className="text-muted-foreground">{t("contextRail.advancedSettingsNone")}</p>
             )}
           </div>
+          {provenanceMap ? (() => {
+            const all = [
+              ...provenanceMap.customSettings,
+              ...provenanceMap.mcpServers,
+              ...provenanceMap.sharedKnowledge,
+              ...provenanceMap.privateKnowledge,
+              ...provenanceMap.triggers,
+              ...provenanceMap.collaboration,
+            ];
+            const inherited = all.filter((e) => e.provenance === "inherited").length;
+            const template = all.filter((e) => e.provenance === "template").length;
+            const explicit = all.filter((e) => e.provenance === "explicit").length;
+            if (all.length === 0) return null;
+            return (
+              <div>
+                <p className="font-medium">Field provenance</p>
+                <p className="text-muted-foreground">
+                  {t("workspace.provenanceSummary", { inherited: String(inherited), template: String(template), explicit: String(explicit) })}
+                </p>
+              </div>
+            );
+          })() : null}
           {inheritanceParent ? (
             <p className="text-muted-foreground">
               {t("contextRail.inheritsFrom", { name: inheritanceParent })}
@@ -210,11 +283,9 @@ export function RoleWorkspaceContextRail({
           ) : null}
           <div>
             <p className="font-medium">{t("contextRail.storedOnlyFields")}</p>
-            <p className="text-muted-foreground">
-              {t("contextRail.storedOnlyFieldsDesc")}
-            </p>
+            <p className="text-muted-foreground">{t("contextRail.storedOnlyFieldsDesc")}</p>
             {storedOnlyFields.length > 0 ? (
-              <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-muted-foreground">
                 {storedOnlyFields.map((field) => (
                   <li key={field}>{field}</li>
                 ))}
@@ -225,37 +296,31 @@ export function RoleWorkspaceContextRail({
           </div>
           <div>
             <p className="font-medium">{t("contextRail.runtimeProjection")}</p>
-            <p className="text-muted-foreground">
-              {t("contextRail.runtimeProjectionDesc")}
-            </p>
+            <p className="text-muted-foreground">{t("contextRail.runtimeProjectionDesc")}</p>
             {runtimeExecutionProfile?.loaded_skills?.length ? (
-              <div className="mt-2">
+              <div className="mt-1.5">
                 <p className="font-medium text-foreground">Loaded skills</p>
-                <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                   {runtimeExecutionProfile.loaded_skills.map((skill) => (
-                    <li key={`loaded-${skill.path}`}>
-                      {skill.label} ({skill.path})
-                    </li>
+                    <li key={`loaded-${skill.path}`}>{skill.label} ({skill.path})</li>
                   ))}
                 </ul>
               </div>
             ) : null}
             {runtimeExecutionProfile?.available_skills?.length ? (
-              <div className="mt-2">
+              <div className="mt-1.5">
                 <p className="font-medium text-foreground">On-demand skills</p>
-                <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                   {runtimeExecutionProfile.available_skills.map((skill) => (
-                    <li key={`available-${skill.path}`}>
-                      {skill.label} ({skill.path})
-                    </li>
+                    <li key={`available-${skill.path}`}>{skill.label} ({skill.path})</li>
                   ))}
                 </ul>
               </div>
             ) : null}
             {runtimeExecutionProfile?.skill_diagnostics?.length ? (
-              <div className="mt-2">
+              <div className="mt-1.5">
                 <p className="font-medium text-foreground">Skill diagnostics</p>
-                <ul className="list-disc space-y-1 pl-5 text-muted-foreground">
+                <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                   {runtimeExecutionProfile.skill_diagnostics.map((diagnostic, index) => (
                     <li key={`${diagnostic.code}:${diagnostic.path ?? "global"}:${index}`}>
                       {diagnostic.message}
@@ -265,95 +330,8 @@ export function RoleWorkspaceContextRail({
               </div>
             ) : null}
           </div>
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("contextRail.previewAndSandbox")}</CardTitle>
-          <CardDescription>
-            {t("contextRail.previewAndSandboxDesc")}
-          </CardDescription>
-        </CardHeader>
-        <CardContent className="grid gap-3">
-          <div className="flex flex-wrap gap-2">
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onPreview}
-              disabled={previewLoading}
-            >
-              {previewLoading ? t("contextRail.previewing") : t("contextRail.previewDraft")}
-            </Button>
-            <Button
-              type="button"
-              variant="outline"
-              onClick={onSandbox}
-              disabled={sandboxLoading}
-            >
-              {sandboxLoading ? t("contextRail.running") : t("contextRail.runSandbox")}
-            </Button>
-          </div>
-          <div className="grid gap-1.5">
-            <label htmlFor="sandbox-input" className="text-sm font-medium">
-              {t("contextRail.sandboxInput")}
-            </label>
-            <textarea
-              id="sandbox-input"
-              className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm"
-              rows={4}
-              value={sandboxInput}
-              onChange={(event) => onSandboxInputChange(event.target.value)}
-            />
-          </div>
-          {previewResult?.executionProfile ? (
-            <p className="text-sm text-muted-foreground">
-              Effective role: {previewResult.executionProfile.name} (
-              {previewResult.executionProfile.role_id})
-            </p>
-          ) : null}
-          {sandboxResult?.selection ? (
-            <p className="text-sm text-muted-foreground">{`${sandboxResult.selection.runtime} / ${sandboxResult.selection.provider} / ${sandboxResult.selection.model}`}</p>
-          ) : null}
-          {sandboxResult?.probe?.text ? (
-            <p className="text-sm">{sandboxResult.probe.text}</p>
-          ) : null}
-          <div className="grid gap-2 border-t pt-3">
-            <div>
-              <p className="text-sm font-medium">{t("contextRail.readiness")}</p>
-              {readinessDiagnostics.length > 0 ? (
-                <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                  {readinessDiagnostics.map((diagnostic) => (
-                    <li key={`${diagnostic.code}:${diagnostic.message}`}>
-                      {diagnostic.message}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {t("contextRail.readinessNone")}
-                </p>
-              )}
-            </div>
-            <div>
-              <p className="text-sm font-medium">{t("contextRail.validationIssues")}</p>
-              {validationIssues.length > 0 ? (
-                <ul className="list-disc space-y-1 pl-5 text-sm text-muted-foreground">
-                  {validationIssues.map((issue) => (
-                    <li key={`${issue.field}:${issue.message}`}>
-                      {issue.field}: {issue.message}
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-muted-foreground">
-                  {t("contextRail.validationIssuesNone")}
-                </p>
-              )}
-            </div>
-          </div>
-        </CardContent>
-      </Card>
-    </section>
+        </div>
+      </details>
+    </div>
   );
 }

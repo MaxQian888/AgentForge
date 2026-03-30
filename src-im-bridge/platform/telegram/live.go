@@ -31,12 +31,21 @@ var liveMetadata = core.PlatformMetadata{
 		AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateEdit},
 		ActionCallbackMode: core.ActionCallbackQuery,
 		MessageScopes:      []core.MessageScope{core.MessageScopeChat, core.MessageScopeTopic},
+		NativeSurfaces:     []string{core.NativeSurfaceTelegramRich},
 		Mutability: core.MutabilitySemantics{
 			CanEdit:        true,
 			PrefersInPlace: true,
 		},
 		SupportsSlashCommands: true,
 		SupportsMentions:      true,
+	},
+	Rendering: core.RenderingProfile{
+		DefaultTextFormat: core.TextFormatPlainText,
+		SupportedFormats:  []core.TextFormatMode{core.TextFormatPlainText, core.TextFormatMarkdownV2},
+		NativeSurfaces:    []string{core.NativeSurfaceTelegramRich},
+		MaxTextLength:     4096,
+		SupportsSegments:  true,
+		StructuredSurface: core.StructuredSurfaceInlineKeyboard,
 	},
 }
 
@@ -252,7 +261,25 @@ func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.
 	if err != nil {
 		return err
 	}
-	return l.sender.SendStructured(ctx, target, 0, telegramTextMessage{Text: structuredFallbackText(message)}, buildInlineKeyboardMarkup(message))
+	textMessage := telegramTextMessage{Text: structuredFallbackText(message)}
+	markup := buildInlineKeyboardMarkup(message)
+	if message != nil && len(message.Sections) > 0 {
+		textMessage, markup = renderStructuredSections(message.Sections)
+	}
+	return l.sender.SendStructured(ctx, target, 0, textMessage, markup)
+}
+
+func (l *Live) ReplyStructured(ctx context.Context, rawReplyCtx any, message *core.StructuredMessage) error {
+	reply := toReplyContext(rawReplyCtx)
+	if reply.ChatID == 0 {
+		return errors.New("telegram reply requires chat id")
+	}
+	textMessage := telegramTextMessage{Text: structuredFallbackText(message)}
+	markup := buildInlineKeyboardMarkup(message)
+	if message != nil && len(message.Sections) > 0 {
+		textMessage, markup = renderStructuredSections(message.Sections)
+	}
+	return l.sender.SendStructured(ctx, reply.ChatID, reply.TopicID, textMessage, markup)
 }
 
 func (l *Live) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
@@ -284,6 +311,30 @@ func (l *Live) UpdateFormattedText(ctx context.Context, rawReplyCtx any, message
 		return l.sender.EditText(ctx, reply.ChatID, reply.MessageID, segments[0])
 	}
 	return l.sendFormattedSegments(ctx, reply.ChatID, reply.TopicID, reply.MessageID, segments)
+}
+
+func (l *Live) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	target, err := parseChatID(chatID)
+	if err != nil {
+		return err
+	}
+	textMessage, markup, err := renderTelegramNativeMessage(message)
+	if err != nil {
+		return err
+	}
+	return l.sender.SendStructured(ctx, target, 0, textMessage, markup)
+}
+
+func (l *Live) ReplyNative(ctx context.Context, rawReplyCtx any, message *core.NativeMessage) error {
+	reply := toReplyContext(rawReplyCtx)
+	if reply.ChatID == 0 {
+		return errors.New("telegram reply requires chat id")
+	}
+	textMessage, markup, err := renderTelegramNativeMessage(message)
+	if err != nil {
+		return err
+	}
+	return l.sender.SendStructured(ctx, reply.ChatID, reply.TopicID, textMessage, markup)
 }
 
 func (l *Live) Stop() error {
@@ -914,4 +965,45 @@ func (l *Live) sendFormattedSegments(ctx context.Context, chatID int64, topicID 
 		}
 	}
 	return nil
+}
+
+func renderTelegramNativeMessage(message *core.NativeMessage) (telegramTextMessage, *inlineKeyboardMarkup, error) {
+	if err := message.Validate(); err != nil {
+		return telegramTextMessage{}, nil, err
+	}
+	if message.NormalizedPlatform() != "telegram" || message.TelegramRich == nil {
+		return telegramTextMessage{}, nil, errors.New("native message is not a telegram rich payload")
+	}
+	return telegramTextMessage{
+		Text:      strings.TrimSpace(message.TelegramRich.Text),
+		ParseMode: strings.TrimSpace(message.TelegramRich.ParseMode),
+	}, inlineKeyboardFromNative(message.TelegramRich.InlineKeyboard), nil
+}
+
+func inlineKeyboardFromNative(rows [][]core.TelegramInlineButton) *inlineKeyboardMarkup {
+	if len(rows) == 0 {
+		return nil
+	}
+	keyboard := make([][]inlineKeyboardButton, 0, len(rows))
+	for _, row := range rows {
+		renderedRow := make([]inlineKeyboardButton, 0, len(row))
+		for _, button := range row {
+			label := strings.TrimSpace(button.Text)
+			if label == "" {
+				continue
+			}
+			renderedRow = append(renderedRow, inlineKeyboardButton{
+				Text:         label,
+				URL:          strings.TrimSpace(button.URL),
+				CallbackData: strings.TrimSpace(button.CallbackData),
+			})
+		}
+		if len(renderedRow) > 0 {
+			keyboard = append(keyboard, renderedRow)
+		}
+	}
+	if len(keyboard) == 0 {
+		return nil
+	}
+	return &inlineKeyboardMarkup{InlineKeyboard: keyboard}
 }

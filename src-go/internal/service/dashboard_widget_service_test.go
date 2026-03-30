@@ -131,9 +131,23 @@ func TestDashboardWidgetServiceBurndownAndDerivedWidgets(t *testing.T) {
 	if blockers["count"] != 1 {
 		t.Fatalf("blocker count = %#v", blockers["count"])
 	}
+	budget, _ := service.WidgetData(context.Background(), projectID, model.DashboardWidgetBudgetConsumption, "")
+	if budget["allocated"] != 27.0 || budget["spent"] != 16.0 {
+		t.Fatalf("budget payload = %#v", budget)
+	}
+	agentCost, _ := service.WidgetData(context.Background(), projectID, model.DashboardWidgetAgentCost, "")
+	entries, ok := agentCost["entries"].([]map[string]any)
+	if !ok || len(entries) != 1 || entries[0]["roleId"] != "agent.dev" {
+		t.Fatalf("agent cost payload = %#v", agentCost)
+	}
 	reviewBacklog, _ := service.WidgetData(context.Background(), projectID, model.DashboardWidgetReviewBacklog, "")
 	if reviewBacklog["count"] != 1 {
 		t.Fatalf("review backlog = %#v", reviewBacklog["count"])
+	}
+	taskAging, _ := service.WidgetData(context.Background(), projectID, model.DashboardWidgetTaskAging, "")
+	buckets, ok := taskAging["buckets"].([]map[string]any)
+	if !ok || len(buckets) != 4 {
+		t.Fatalf("task aging payload = %#v", taskAging)
 	}
 	sla, _ := service.WidgetData(context.Background(), projectID, model.DashboardWidgetSLACompliance, "")
 	if sla["total"] != 2 {

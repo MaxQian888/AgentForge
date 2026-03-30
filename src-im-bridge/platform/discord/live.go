@@ -53,12 +53,21 @@ var liveMetadata = core.PlatformMetadata{
 		AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateFollowUp, core.AsyncUpdateEdit},
 		ActionCallbackMode: core.ActionCallbackInteractionToken,
 		MessageScopes:      []core.MessageScope{core.MessageScopeInteractionScoped, core.MessageScopeChat},
+		NativeSurfaces:     []string{core.NativeSurfaceDiscordEmbed},
 		Mutability: core.MutabilitySemantics{
 			CanEdit:        true,
 			PrefersInPlace: true,
 		},
 		SupportsDeferredReply: true,
 		SupportsSlashCommands: true,
+	},
+	Rendering: core.RenderingProfile{
+		DefaultTextFormat: core.TextFormatPlainText,
+		SupportedFormats:  []core.TextFormatMode{core.TextFormatPlainText, core.TextFormatDiscordMD},
+		NativeSurfaces:    []string{core.NativeSurfaceDiscordEmbed},
+		MaxTextLength:     2000,
+		SupportsSegments:  true,
+		StructuredSurface: core.StructuredSurfaceComponents,
 	},
 }
 
@@ -143,7 +152,26 @@ type discordComponent struct {
 type discordOutgoingMessage struct {
 	Content    string             `json:"content,omitempty"`
 	Flags      int                `json:"flags,omitempty"`
+	Embeds     []discordEmbed     `json:"embeds,omitempty"`
 	Components []discordComponent `json:"components,omitempty"`
+}
+
+type discordEmbed struct {
+	Title       string              `json:"title,omitempty"`
+	Description string              `json:"description,omitempty"`
+	Color       int                 `json:"color,omitempty"`
+	Fields      []discordEmbedField `json:"fields,omitempty"`
+	Image       discordEmbedImage   `json:"image,omitempty"`
+}
+
+type discordEmbedField struct {
+	Name   string `json:"name,omitempty"`
+	Value  string `json:"value,omitempty"`
+	Inline bool   `json:"inline,omitempty"`
+}
+
+type discordEmbedImage struct {
+	URL string `json:"url,omitempty"`
 }
 
 type interactionRunner interface {
@@ -424,10 +452,90 @@ func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.
 	if channelID == "" {
 		return errors.New("discord send requires channel id")
 	}
+	outgoing := renderDiscordStructuredMessage(message)
 	return l.channels.SendChannelMessage(ctx, channelID, discordOutgoingMessage{
-		Content:    structuredFallbackText(message),
-		Components: buildMessageComponents(message),
+		Content:    outgoing.Content,
+		Embeds:     outgoing.Embeds,
+		Components: outgoing.Components,
 	})
+}
+
+func (l *Live) ReplyStructured(ctx context.Context, rawReplyCtx any, message *core.StructuredMessage) error {
+	reply := toReplyContext(rawReplyCtx)
+	outgoing := renderDiscordStructuredMessage(message)
+	if strings.TrimSpace(reply.InteractionToken) != "" {
+		return l.followups.SendFollowup(ctx, l.appID, reply.InteractionToken, outgoing)
+	}
+	if strings.TrimSpace(reply.ChannelID) != "" {
+		return l.channels.SendChannelMessage(ctx, reply.ChannelID, outgoing)
+	}
+	return errors.New("discord reply requires interaction token or channel id")
+}
+
+func (l *Live) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	channelID := strings.TrimSpace(chatID)
+	if channelID == "" {
+		return errors.New("discord send requires channel id")
+	}
+	outgoing, err := renderDiscordNativeMessage(message)
+	if err != nil {
+		return err
+	}
+	return l.channels.SendChannelMessage(ctx, channelID, outgoing)
+}
+
+func (l *Live) ReplyNative(ctx context.Context, rawReplyCtx any, message *core.NativeMessage) error {
+	reply := toReplyContext(rawReplyCtx)
+	outgoing, err := renderDiscordNativeMessage(message)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(reply.InteractionToken) != "" {
+		return l.followups.SendFollowup(ctx, l.appID, reply.InteractionToken, outgoing)
+	}
+	if strings.TrimSpace(reply.ChannelID) != "" {
+		return l.channels.SendChannelMessage(ctx, reply.ChannelID, outgoing)
+	}
+	return errors.New("discord reply requires interaction token or channel id")
+}
+
+func (l *Live) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
+	channelID := strings.TrimSpace(chatID)
+	if channelID == "" {
+		return errors.New("discord send requires channel id")
+	}
+	outgoing, err := renderDiscordFormattedTextMessage(message)
+	if err != nil {
+		return err
+	}
+	return l.channels.SendChannelMessage(ctx, channelID, outgoing)
+}
+
+func (l *Live) ReplyFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	reply := toReplyContext(rawReplyCtx)
+	outgoing, err := renderDiscordFormattedTextMessage(message)
+	if err != nil {
+		return err
+	}
+	if strings.TrimSpace(reply.InteractionToken) != "" {
+		return l.followups.SendFollowup(ctx, l.appID, reply.InteractionToken, outgoing)
+	}
+	if strings.TrimSpace(reply.ChannelID) != "" {
+		return l.channels.SendChannelMessage(ctx, reply.ChannelID, outgoing)
+	}
+	return errors.New("discord reply requires interaction token or channel id")
+}
+
+func (l *Live) UpdateFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	reply := toReplyContext(rawReplyCtx)
+	if strings.TrimSpace(reply.InteractionToken) == "" {
+		return errors.New("discord update requires interaction token")
+	}
+	outgoing, err := renderDiscordFormattedTextMessage(message)
+	if err != nil {
+		return err
+	}
+	return l.originals.EditOriginalResponse(ctx, l.appID, reply.InteractionToken, outgoing)
 }
 
 func (l *Live) Stop() error {
@@ -925,6 +1033,70 @@ func structuredFallbackText(message *core.StructuredMessage) string {
 	return strings.TrimSpace(message.FallbackText())
 }
 
+func renderDiscordNativeMessage(message *core.NativeMessage) (discordOutgoingMessage, error) {
+	if err := message.Validate(); err != nil {
+		return discordOutgoingMessage{}, err
+	}
+	if message.NormalizedPlatform() != "discord" || message.DiscordEmbed == nil {
+		return discordOutgoingMessage{}, errors.New("native message is not a discord embed payload")
+	}
+
+	embed := discordEmbed{
+		Title:       strings.TrimSpace(message.DiscordEmbed.Title),
+		Description: strings.TrimSpace(message.DiscordEmbed.Description),
+		Color:       message.DiscordEmbed.Color,
+	}
+	for _, field := range message.DiscordEmbed.Fields {
+		embed.Fields = append(embed.Fields, discordEmbedField{
+			Name:   strings.TrimSpace(field.Name),
+			Value:  strings.TrimSpace(field.Value),
+			Inline: field.Inline,
+		})
+	}
+	components := renderDiscordActionRows(message.DiscordEmbed.Components)
+
+	return discordOutgoingMessage{
+		Content:    strings.TrimSpace(message.FallbackText()),
+		Embeds:     []discordEmbed{embed},
+		Components: components,
+	}, nil
+}
+
+func renderDiscordFormattedTextMessage(message *core.FormattedText) (discordOutgoingMessage, error) {
+	if message == nil {
+		return discordOutgoingMessage{}, errors.New("formatted text is required")
+	}
+	content := strings.TrimSpace(message.Content)
+	if content == "" {
+		return discordOutgoingMessage{}, errors.New("formatted text content is required")
+	}
+
+	switch message.Format {
+	case "", core.TextFormatPlainText:
+		content = escapeDiscordMarkdown(content)
+	case core.TextFormatDiscordMD:
+		// keep native markdown untouched
+	default:
+		content = escapeDiscordMarkdown(content)
+	}
+
+	return discordOutgoingMessage{Content: content}, nil
+}
+
+func renderDiscordStructuredMessage(message *core.StructuredMessage) discordOutgoingMessage {
+	outgoing := discordOutgoingMessage{Content: structuredFallbackText(message)}
+	if message != nil && len(message.Sections) > 0 {
+		embed, components := renderStructuredSections(message.Sections)
+		if !embed.isZero() {
+			outgoing.Embeds = []discordEmbed{embed}
+		}
+		outgoing.Components = components
+		return outgoing
+	}
+	outgoing.Components = buildMessageComponents(message)
+	return outgoing
+}
+
 func discordComponentStyle(style core.ActionStyle) int {
 	switch style {
 	case core.ActionStylePrimary:
@@ -968,4 +1140,29 @@ func valueOrEmpty[T any](value *T, getter func(*T) string) string {
 		return ""
 	}
 	return strings.TrimSpace(getter(value))
+}
+
+func escapeDiscordMarkdown(content string) string {
+	replacer := strings.NewReplacer(
+		`\\`, `\\\\`,
+		"*", `\*`,
+		"_", `\_`,
+		"~", `\~`,
+		"`", "\\`",
+		"|", `\|`,
+		">", `\>`,
+		"[", `\[`,
+		"]", `\]`,
+		"(", `\(`,
+		")", `\)`,
+	)
+	return replacer.Replace(content)
+}
+
+func (e discordEmbed) isZero() bool {
+	return strings.TrimSpace(e.Title) == "" &&
+		strings.TrimSpace(e.Description) == "" &&
+		len(e.Fields) == 0 &&
+		strings.TrimSpace(e.Image.URL) == "" &&
+		e.Color == 0
 }

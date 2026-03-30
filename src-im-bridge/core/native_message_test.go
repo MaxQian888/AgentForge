@@ -3,6 +3,7 @@ package core
 import (
 	"context"
 	"encoding/json"
+	"strings"
 	"testing"
 )
 
@@ -96,6 +97,168 @@ func TestNativeMessage_ConstructorsBuildTypedFeishuMessages(t *testing.T) {
 	}
 	if markdownMessage.FeishuCard == nil || markdownMessage.FeishuCard.Mode != FeishuCardModeJSON {
 		t.Fatalf("markdownMessage = %+v", markdownMessage)
+	}
+}
+
+func TestNativeMessage_ConstructorsBuildTypedPlatformMessages(t *testing.T) {
+	slackMessage, err := NewSlackBlockKitMessage([]map[string]any{
+		{
+			"type": "section",
+			"text": map[string]any{
+				"type": "mrkdwn",
+				"text": "*Build* passed",
+			},
+		},
+		{
+			"type": "actions",
+			"elements": []map[string]any{
+				{
+					"type": "button",
+					"text": map[string]any{
+						"type": "plain_text",
+						"text": "Open",
+					},
+					"url": "https://example.test/builds/1",
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSlackBlockKitMessage error: %v", err)
+	}
+	if slackMessage.Platform != "slack" || slackMessage.SlackBlockKit == nil {
+		t.Fatalf("slackMessage = %+v", slackMessage)
+	}
+	if fallback := slackMessage.SlackBlockKit.FallbackText(); !strings.Contains(fallback, "Build passed") || !strings.Contains(fallback, "Open") {
+		t.Fatalf("slack fallback = %q", fallback)
+	}
+
+	discordMessage, err := NewDiscordEmbedMessage(
+		"Build Ready",
+		"Agent finished the run.",
+		[]DiscordEmbedField{{Name: "Status", Value: "success", Inline: true}},
+		0x00FF00,
+		[]DiscordActionRow{{
+			Buttons: []DiscordButton{{
+				Label: "Open",
+				URL:   "https://example.test/builds/1",
+				Style: "link",
+			}},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewDiscordEmbedMessage error: %v", err)
+	}
+	if discordMessage.Platform != "discord" || discordMessage.DiscordEmbed == nil {
+		t.Fatalf("discordMessage = %+v", discordMessage)
+	}
+	if fallback := discordMessage.DiscordEmbed.FallbackText(); !strings.Contains(fallback, "Build Ready") || !strings.Contains(fallback, "Status: success") {
+		t.Fatalf("discord fallback = %q", fallback)
+	}
+
+	telegramMessage, err := NewTelegramRichMessage(
+		"*Build* passed",
+		"MarkdownV2",
+		[][]TelegramInlineButton{{
+			{Text: "Open", URL: "https://example.test/builds/1"},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewTelegramRichMessage error: %v", err)
+	}
+	if telegramMessage.Platform != "telegram" || telegramMessage.TelegramRich == nil {
+		t.Fatalf("telegramMessage = %+v", telegramMessage)
+	}
+	if fallback := telegramMessage.TelegramRich.FallbackText(); !strings.Contains(fallback, "Build passed") || !strings.Contains(fallback, "Open") {
+		t.Fatalf("telegram fallback = %q", fallback)
+	}
+
+	dingTalkMessage, err := NewDingTalkCardMessage(
+		DingTalkCardTypeActionCard,
+		"Build Ready",
+		"### Build passed",
+		[]DingTalkCardButton{{Title: "Open", ActionURL: "https://example.test/builds/1"}},
+	)
+	if err != nil {
+		t.Fatalf("NewDingTalkCardMessage error: %v", err)
+	}
+	if dingTalkMessage.Platform != "dingtalk" || dingTalkMessage.DingTalkCard == nil {
+		t.Fatalf("dingTalkMessage = %+v", dingTalkMessage)
+	}
+	if fallback := dingTalkMessage.DingTalkCard.FallbackText(); !strings.Contains(fallback, "Build Ready") || !strings.Contains(fallback, "Build passed") {
+		t.Fatalf("dingtalk fallback = %q", fallback)
+	}
+
+	weComMessage, err := NewWeComCardMessage(
+		WeComCardTypeNews,
+		"Build Ready",
+		"Agent finished the run.",
+		"https://example.test/builds/1",
+		[]WeComArticle{{
+			Title:       "Build #1",
+			Description: "Agent finished the run.",
+			URL:         "https://example.test/builds/1",
+		}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewWeComCardMessage error: %v", err)
+	}
+	if weComMessage.Platform != "wecom" || weComMessage.WeComCard == nil {
+		t.Fatalf("weComMessage = %+v", weComMessage)
+	}
+	if fallback := weComMessage.WeComCard.FallbackText(); !strings.Contains(fallback, "Build #1") {
+		t.Fatalf("wecom fallback = %q", fallback)
+	}
+
+	qqBotMessage, err := NewQQBotMarkdownMessage(
+		"## Build Ready",
+		[][]QQBotKeyboardButton{{
+			{Label: "Open", URL: "https://example.test/builds/1"},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewQQBotMarkdownMessage error: %v", err)
+	}
+	if qqBotMessage.Platform != "qqbot" || qqBotMessage.QQBotMarkdown == nil {
+		t.Fatalf("qqBotMessage = %+v", qqBotMessage)
+	}
+	if fallback := qqBotMessage.QQBotMarkdown.FallbackText(); !strings.Contains(fallback, "Build Ready") || !strings.Contains(fallback, "Open") {
+		t.Fatalf("qqbot fallback = %q", fallback)
+	}
+}
+
+func TestNativeMessage_ValidateRejectsInvalidPayloadsAndMultipleSurfaces(t *testing.T) {
+	if _, err := NewSlackBlockKitMessage(make([]map[string]any, 51)); err == nil {
+		t.Fatal("expected slack block limit validation to fail")
+	}
+
+	if _, err := NewDiscordEmbedMessage("", "", nil, 0, nil); err == nil {
+		t.Fatal("expected discord embed without title or description to fail")
+	}
+
+	if _, err := NewTelegramRichMessage(strings.Repeat("a", 4097), "MarkdownV2", nil); err == nil {
+		t.Fatal("expected telegram max length validation to fail")
+	}
+
+	if _, err := NewDingTalkCardMessage(DingTalkCardTypeActionCard, "", "body", nil); err == nil {
+		t.Fatal("expected dingtalk title validation to fail")
+	}
+
+	if _, err := NewWeComCardMessage(WeComCardTypeNews, "", "", "", nil, nil); err == nil {
+		t.Fatal("expected wecom validation to fail")
+	}
+
+	if _, err := NewQQBotMarkdownMessage("", nil); err == nil {
+		t.Fatal("expected qqbot markdown validation to fail")
+	}
+
+	message := &NativeMessage{
+		SlackBlockKit: &SlackBlockKitPayload{Blocks: json.RawMessage(`[{"type":"section","text":{"type":"mrkdwn","text":"hello"}}]`)},
+		DiscordEmbed:  &DiscordEmbedPayload{Title: "Build Ready"},
+	}
+	if err := message.Validate(); err == nil {
+		t.Fatal("expected multiple native surfaces to fail validation")
 	}
 }
 

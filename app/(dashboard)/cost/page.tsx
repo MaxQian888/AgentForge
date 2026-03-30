@@ -6,6 +6,7 @@ import {
   Activity,
   Cpu,
   DollarSign,
+  FolderOpen,
   Hash,
   TrendingUp,
 } from "lucide-react";
@@ -17,6 +18,10 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { MetricCard } from "@/components/shared/metric-card";
+import { ErrorBanner } from "@/components/shared/error-banner";
 import {
   Table,
   TableBody,
@@ -28,9 +33,9 @@ import {
 import { CostChart } from "@/components/cost/cost-chart";
 import { VelocityChart } from "@/components/cost/velocity-chart";
 import { AgentPerformanceTable } from "@/components/cost/agent-performance-table";
-import { useAgentStore } from "@/lib/stores/agent-store";
 import { useCostStore } from "@/lib/stores/cost-store";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 function formatTokens(count: number): string {
   if (count >= 1_000_000) return `${(count / 1_000_000).toFixed(1)}M`;
@@ -38,16 +43,29 @@ function formatTokens(count: number): string {
   return String(count);
 }
 
+function renderMetric(
+  hasSummary: boolean,
+  value: number | undefined,
+  formatter: (next: number) => string,
+): string {
+  if (!hasSummary) {
+    return "\u2014";
+  }
+  return formatter(value ?? 0);
+}
+
 export default function CostPage() {
+  useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Cost" }]);
   const t = useTranslations("cost");
-  const agents = useAgentStore((s) => s.agents);
   const projectCost = useCostStore((s) => s.projectCost);
   const costLoading = useCostStore((s) => s.loading);
   const costError = useCostStore((s) => s.error);
   const fetchProjectCost = useCostStore((s) => s.fetchProjectCost);
   const velocity = useCostStore((s) => s.velocity);
+  const velocityLoading = useCostStore((s) => s.velocityLoading);
   const fetchVelocity = useCostStore((s) => s.fetchVelocity);
   const agentPerformance = useCostStore((s) => s.agentPerformance);
+  const performanceLoading = useCostStore((s) => s.performanceLoading);
   const fetchAgentPerformance = useCostStore((s) => s.fetchAgentPerformance);
   const selectedProjectId = useDashboardStore((s) => s.selectedProjectId);
 
@@ -59,93 +77,62 @@ export default function CostPage() {
     }
   }, [selectedProjectId, fetchProjectCost, fetchVelocity, fetchAgentPerformance]);
 
-  const totalCost = projectCost?.totalCostUsd ?? agents.reduce((sum, a) => sum + a.cost, 0);
-  const totalInput = projectCost?.totalInputTokens ?? 0;
-  const totalOutput = projectCost?.totalOutputTokens ?? 0;
-  const totalCache = projectCost?.totalCacheReadTokens ?? 0;
-  const totalTurns = projectCost?.totalTurns ?? 0;
-  const activeAgents = projectCost?.activeAgents ?? agents.filter((a) => a.status === "running" || a.status === "starting").length;
+  if (!selectedProjectId) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title={t("title")} />
+        <EmptyState
+          icon={FolderOpen}
+          title={t("selectProjectPrompt")}
+        />
+      </div>
+    );
+  }
+
+  const hasSummary = projectCost !== null;
   const sprintCosts = projectCost?.sprintCosts ?? [];
   const taskCosts = projectCost?.taskCosts ?? [];
   const chartData = projectCost?.dailyCosts?.map((d) => ({ date: d.date, cost: d.costUsd })) ?? [];
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold">{t("title")}</h1>
+      <PageHeader title={t("title")} />
 
       {costError ? (
-        <div className="rounded-md border border-destructive/40 bg-destructive/10 px-3 py-2 text-sm text-destructive">
-          {costError}
-        </div>
+        <ErrorBanner message={costError} />
       ) : null}
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {t("totalSpend")}
-            </CardTitle>
-            <DollarSign className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">${totalCost.toFixed(2)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {t("inputTokens")}
-            </CardTitle>
-            <TrendingUp className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatTokens(totalInput)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {t("outputTokens")}
-            </CardTitle>
-            <TrendingUp className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatTokens(totalOutput)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {t("cacheTokens")}
-            </CardTitle>
-            <Hash className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{formatTokens(totalCache)}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {t("totalTurns")}
-            </CardTitle>
-            <Activity className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{totalTurns}</div>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between pb-2">
-            <CardTitle className="text-sm font-medium text-muted-foreground">
-              {t("activeAgents")}
-            </CardTitle>
-            <Cpu className="size-4 text-muted-foreground" />
-          </CardHeader>
-          <CardContent>
-            <div className="text-2xl font-bold">{activeAgents}</div>
-          </CardContent>
-        </Card>
+        <MetricCard
+          label={t("totalSpend")}
+          value={renderMetric(hasSummary, projectCost?.totalCostUsd, (value) => `$${value.toFixed(2)}`)}
+          icon={DollarSign}
+        />
+        <MetricCard
+          label={t("inputTokens")}
+          value={renderMetric(hasSummary, projectCost?.totalInputTokens, formatTokens)}
+          icon={TrendingUp}
+        />
+        <MetricCard
+          label={t("outputTokens")}
+          value={renderMetric(hasSummary, projectCost?.totalOutputTokens, formatTokens)}
+          icon={TrendingUp}
+        />
+        <MetricCard
+          label={t("cacheTokens")}
+          value={renderMetric(hasSummary, projectCost?.totalCacheReadTokens, formatTokens)}
+          icon={Hash}
+        />
+        <MetricCard
+          label={t("totalTurns")}
+          value={renderMetric(hasSummary, projectCost?.totalTurns, (value) => String(value))}
+          icon={Activity}
+        />
+        <MetricCard
+          label={t("activeAgents")}
+          value={renderMetric(hasSummary, projectCost?.activeAgents, (value) => String(value))}
+          icon={Cpu}
+        />
       </div>
 
       <Card>
@@ -164,13 +151,13 @@ export default function CostPage() {
         </CardContent>
       </Card>
 
-      {sprintCosts.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("sprintCostComparison")}</CardTitle>
-            <CardDescription>{t("sprintCostDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("sprintCostComparison")}</CardTitle>
+          <CardDescription>{t("sprintCostDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {sprintCosts.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -206,41 +193,51 @@ export default function CostPage() {
                 })}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      ) : null}
+          ) : (
+            <p className="text-sm text-muted-foreground">{t("noSprintCostData")}</p>
+          )}
+        </CardContent>
+      </Card>
 
-      {velocity.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("teamVelocity")}</CardTitle>
-            <CardDescription>{t("teamVelocityDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("teamVelocity")}</CardTitle>
+          <CardDescription>{t("teamVelocityDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {velocityLoading && velocity.length === 0 ? (
+            <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
+              {t("loadingVelocity")}
+            </div>
+          ) : (
             <VelocityChart data={velocity} />
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
-      {agentPerformance.length > 0 && (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("agentPerformance")}</CardTitle>
-            <CardDescription>{t("agentPerformanceDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("agentPerformance")}</CardTitle>
+          <CardDescription>{t("agentPerformanceDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {performanceLoading && agentPerformance.length === 0 ? (
+            <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
+              {t("loadingPerformance")}
+            </div>
+          ) : (
             <AgentPerformanceTable data={agentPerformance} />
-          </CardContent>
-        </Card>
-      )}
+          )}
+        </CardContent>
+      </Card>
 
-      {taskCosts.length > 0 ? (
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("perTaskCost")}</CardTitle>
-            <CardDescription>{t("perTaskCostDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent>
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("perTaskCost")}</CardTitle>
+          <CardDescription>{t("perTaskCostDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {taskCosts.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -269,9 +266,11 @@ export default function CostPage() {
                 ))}
               </TableBody>
             </Table>
-          </CardContent>
-        </Card>
-      ) : null}
+          ) : (
+            <p className="text-sm text-muted-foreground">{t("noTaskCostData")}</p>
+          )}
+        </CardContent>
+      </Card>
     </div>
   );
 }

@@ -1,22 +1,28 @@
 "use client";
 
 import { useTranslations } from "next-intl";
+import { FolderOpen } from "lucide-react";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { WorkflowConfigPanel } from "@/components/workflow/workflow-config-panel";
+import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 export default function WorkflowPage() {
+  useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Workflow" }]);
   const t = useTranslations("workflow");
   const selectedProjectId = useDashboardStore((s) => s.selectedProjectId);
 
   return (
     <div className="flex flex-col gap-6">
-      <h1 className="text-2xl font-bold">{t("title")}</h1>
+      <PageHeader title={t("title")} />
       {selectedProjectId ? (
         <WorkflowConfigPanel projectId={selectedProjectId} />
       ) : (
-        <div className="text-sm text-muted-foreground">
-          {t("selectProject")}
-        </div>
+        <EmptyState
+          icon={FolderOpen}
+          title={t("selectProject")}
+        />
       )}
     </div>
   );

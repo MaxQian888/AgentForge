@@ -15,6 +15,7 @@ type TeamRuntimeService interface {
 	StartTeam(ctx context.Context, input service.StartTeamInput) (*model.AgentTeam, error)
 	GetSummary(ctx context.Context, teamID uuid.UUID) (*model.AgentTeamSummaryDTO, error)
 	ListByProject(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeam, error)
+	ListSummaries(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeamSummaryDTO, error)
 	CancelTeam(ctx context.Context, teamID uuid.UUID) error
 	RetryTeam(ctx context.Context, teamID uuid.UUID) error
 	DeleteTeam(ctx context.Context, teamID uuid.UUID) error
@@ -118,16 +119,12 @@ func (h *TeamHandler) List(c echo.Context) error {
 	}
 
 	status := c.QueryParam("status")
-	teams, err := h.service.ListByProject(c.Request().Context(), projectID, status)
+	summaries, err := h.service.ListSummaries(c.Request().Context(), projectID, status)
 	if err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListTeams)
 	}
 
-	dtos := make([]model.AgentTeamDTO, 0, len(teams))
-	for _, t := range teams {
-		dtos = append(dtos, t.ToDTO())
-	}
-	return c.JSON(http.StatusOK, dtos)
+	return c.JSON(http.StatusOK, summaries)
 }
 
 func (h *TeamHandler) Cancel(c echo.Context) error {

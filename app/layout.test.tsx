@@ -3,6 +3,10 @@ jest.mock("next/font/google", () => ({
   Geist_Mono: () => ({ variable: "--font-geist-mono" }),
 }));
 
+jest.mock("next-themes", () => ({
+  ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
+}));
+
 jest.mock("@/lib/i18n/provider", () => ({
   I18nProvider: ({ children }: { children: React.ReactNode }) => children,
 }));

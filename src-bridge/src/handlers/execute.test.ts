@@ -121,6 +121,64 @@ describe("handleExecute", () => {
     expect(pool.get(request.task_id)).toBeUndefined();
   });
 
+  test("includes structured output on the completed status change event", async () => {
+    const pool = new RuntimePoolManager(1);
+    const events: Array<{ type: string; data: unknown }> = [];
+
+    await handleExecute(
+      pool,
+      {
+        send(event: { type: string; data: unknown }) {
+          events.push(event);
+        },
+      } as never,
+      createRequest({
+        task_id: "task-structured",
+        session_id: "session-structured",
+        output_schema: {
+          type: "json_schema",
+          schema: {
+            type: "object",
+            properties: {
+              summary: { type: "string" },
+            },
+          },
+        },
+      }),
+      {
+        awaitCompletion: true,
+        queryRunner: async function* () {
+          yield {
+            type: "result",
+            session_id: "session-structured",
+            subtype: "success",
+            result: "Done",
+            structured_output: {
+              summary: "Structured done",
+            },
+            stop_reason: "end_turn",
+            total_cost_usd: 0.01,
+            usage: {
+              input_tokens: 100,
+              output_tokens: 50,
+              cache_read_input_tokens: 0,
+            },
+          };
+        },
+      },
+    );
+
+    expect(events.at(-1)).toMatchObject({
+      type: "status_change",
+      data: {
+        new_status: "completed",
+        structured_output: {
+          summary: "Structured done",
+        },
+      },
+    });
+  });
+
   test("aborts execution when the local budget is exceeded and persists continuity state", async () => {
     const pool = new RuntimePoolManager(2);
     const sessionManager = new SessionManager();
@@ -312,6 +370,65 @@ describe("handleExecute", () => {
         thread_id: "thread-codex-1",
       }),
     });
+  });
+
+  test("passes advanced execute request fields through to the Codex runtime adapter", async () => {
+    const pool = new RuntimePoolManager(1);
+    let invocation:
+      | {
+          req: ExecuteRequest;
+        }
+      | undefined;
+
+    const request = createRequest({
+      task_id: "task-codex-advanced",
+      session_id: "session-codex-advanced",
+      runtime: "codex",
+      provider: "codex",
+      model: "gpt-5-codex",
+      output_schema: {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: {
+            summary: { type: "string" },
+          },
+        },
+      },
+      attachments: [{ type: "image", path: "D:/tmp/screenshot.png" }],
+      additional_directories: ["D:/Shared"],
+      web_search: true,
+      env: { FEATURE_FLAG: "enabled" },
+    });
+
+    await handleExecute(
+      pool,
+      { send() {} } as never,
+      request,
+      {
+        awaitCompletion: true,
+        executableLookup(command) {
+          return `C:/mock/${command}.exe`;
+        },
+        codexAuthStatusProvider() {
+          return {
+            authenticated: true,
+            message: "Logged in using an API key",
+          };
+        },
+        codexRuntimeRunner: async function* (params) {
+          invocation = params;
+          yield { type: "thread.started", thread_id: "thread-codex-advanced" };
+          yield { type: "turn.completed", total_cost_usd: 0 };
+        },
+      },
+    );
+
+    expect(invocation?.req.output_schema).toEqual(request.output_schema);
+    expect(invocation?.req.attachments).toEqual(request.attachments);
+    expect(invocation?.req.additional_directories).toEqual(["D:/Shared"]);
+    expect(invocation?.req.web_search).toBe(true);
+    expect(invocation?.req.env).toEqual({ FEATURE_FLAG: "enabled" });
   });
 
   test("routes opencode requests through the dedicated opencode runtime adapter with the same canonical events", async () => {

@@ -100,6 +100,33 @@ const DEFAULT_BRIDGE_STATUS: IMBridgeStatus = {
   health: "disconnected",
 };
 
+function normalizeBridgeStatus(
+  status: Partial<IMBridgeStatus> | null | undefined,
+): IMBridgeStatus {
+  if (!status) {
+    return {
+      ...DEFAULT_BRIDGE_STATUS,
+      providers: [...DEFAULT_BRIDGE_STATUS.providers],
+      providerDetails: [...DEFAULT_BRIDGE_STATUS.providerDetails],
+    };
+  }
+
+  return {
+    registered: status.registered ?? DEFAULT_BRIDGE_STATUS.registered,
+    lastHeartbeat:
+      typeof status.lastHeartbeat === "string" || status.lastHeartbeat === null
+        ? status.lastHeartbeat
+        : DEFAULT_BRIDGE_STATUS.lastHeartbeat,
+    providers: Array.isArray(status.providers)
+      ? [...status.providers]
+      : [...DEFAULT_BRIDGE_STATUS.providers],
+    providerDetails: Array.isArray(status.providerDetails)
+      ? [...status.providerDetails]
+      : [...DEFAULT_BRIDGE_STATUS.providerDetails],
+    health: status.health ?? DEFAULT_BRIDGE_STATUS.health,
+  };
+}
+
 export const useIMStore = create<IMState>()((set, get) => ({
   channels: [],
   bridgeStatus: DEFAULT_BRIDGE_STATUS,
@@ -137,9 +164,9 @@ export const useIMStore = create<IMState>()((set, get) => ({
         "/api/v1/im/bridge/status",
         { token }
       );
-      set({ bridgeStatus: data ?? DEFAULT_BRIDGE_STATUS, error: null });
+      set({ bridgeStatus: normalizeBridgeStatus(data), error: null });
     } catch {
-      set({ bridgeStatus: DEFAULT_BRIDGE_STATUS, error: null });
+      set({ bridgeStatus: normalizeBridgeStatus(null), error: null });
     }
   },
 

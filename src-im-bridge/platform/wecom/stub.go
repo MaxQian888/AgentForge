@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 	"sync"
 	"time"
 
@@ -23,9 +24,10 @@ type Stub struct {
 }
 
 type stubReply struct {
-	ChatID    string    `json:"chat_id,omitempty"`
-	Content   string    `json:"content"`
-	Timestamp time.Time `json:"timestamp"`
+	ChatID        string    `json:"chat_id,omitempty"`
+	Content       string    `json:"content"`
+	NativeSurface string    `json:"native_surface,omitempty"`
+	Timestamp     time.Time `json:"timestamp"`
 }
 
 type stubMessageRequest struct {
@@ -83,15 +85,36 @@ func (s *Stub) Start(handler core.MessageHandler) error {
 func (s *Stub) Reply(ctx context.Context, replyCtx any, content string) error {
 	reply := toReplyContext(replyCtx)
 	target := firstNonEmpty(reply.ChatID, reply.UserID)
-	return s.Send(ctx, target, content)
+	return s.recordReply(target, content, "")
 }
 
 func (s *Stub) Send(ctx context.Context, chatID string, content string) error {
+	return s.recordReply(chatID, content, "")
+}
+
+func (s *Stub) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	return s.recordReply(chatID, message.FallbackText(), message.SurfaceType())
+}
+
+func (s *Stub) ReplyNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
+	if err := message.Validate(); err != nil {
+		return err
+	}
+	reply := toReplyContext(replyCtx)
+	target := firstNonEmpty(reply.ChatID, reply.UserID)
+	return s.recordReply(target, message.FallbackText(), message.SurfaceType())
+}
+
+func (s *Stub) recordReply(chatID, content, nativeSurface string) error {
 	s.mu.Lock()
 	s.replies = append(s.replies, stubReply{
-		ChatID:    chatID,
-		Content:   content,
-		Timestamp: time.Now(),
+		ChatID:        strings.TrimSpace(chatID),
+		Content:       content,
+		NativeSurface: strings.TrimSpace(nativeSurface),
+		Timestamp:     time.Now(),
 	})
 	s.mu.Unlock()
 	log.WithFields(log.Fields{"component": "wecom-stub", "chat_id": chatID}).Info("Send: " + content)

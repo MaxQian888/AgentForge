@@ -1,4 +1,5 @@
 import type { Task, TaskPriority, TaskStatus } from "@/lib/stores/task-store";
+import type { CustomFieldValue } from "@/lib/stores/custom-field-store";
 import { getTaskDependencyState } from "./task-dependencies";
 
 export type TaskViewMode = "board" | "list" | "timeline" | "calendar" | "dependencies" | "roadmap";
@@ -15,6 +16,7 @@ export interface TaskWorkspaceFilters {
   labels: string[];
   planning: TaskPlanningFilter;
   dependency: TaskDependencyFilter;
+  customFieldFilters: Record<string, string>;
 }
 
 export function createDefaultTaskWorkspaceFilters(): TaskWorkspaceFilters {
@@ -27,6 +29,7 @@ export function createDefaultTaskWorkspaceFilters(): TaskWorkspaceFilters {
     labels: [],
     planning: "all",
     dependency: "all",
+    customFieldFilters: {},
   };
 }
 
@@ -46,7 +49,10 @@ function taskPlanningState(task: Task): TaskPlanningFilter {
 
 export function filterTasksForWorkspace(
   tasks: Task[],
-  filters: TaskWorkspaceFilters
+  filters: TaskWorkspaceFilters,
+  options?: {
+    valuesByTask?: Record<string, CustomFieldValue[]>;
+  }
 ): Task[] {
   return tasks.filter((task) => {
     if (!taskMatchesSearch(task, filters.search)) return false;
@@ -72,6 +78,19 @@ export function filterTasksForWorkspace(
       getTaskDependencyState(task, tasks).state !== filters.dependency
     ) {
       return false;
+    }
+    const customFieldFilters = filters.customFieldFilters ?? {};
+    if (Object.keys(customFieldFilters).length > 0) {
+      const values = options?.valuesByTask?.[task.id] ?? [];
+      for (const [fieldId, expectedValue] of Object.entries(customFieldFilters)) {
+        if (!expectedValue || expectedValue === "all") {
+          continue;
+        }
+        const value = values.find((item) => item.fieldDefId === fieldId)?.value;
+        if (String(value ?? "Unset") !== expectedValue) {
+          return false;
+        }
+      }
     }
     return true;
   });

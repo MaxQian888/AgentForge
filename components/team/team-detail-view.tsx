@@ -6,6 +6,7 @@ import { XCircle, RotateCw, Clock, DollarSign, Hash, Users, Pencil, Trash2 } fro
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { PageHeader } from "@/components/shared/page-header";
 import { Separator } from "@/components/ui/separator";
 import {
   Tabs,
@@ -160,56 +161,52 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
 
   return (
     <div className="flex flex-col gap-6">
-      <div className="flex items-center justify-between">
-        <div className="flex items-center gap-2">
-          <div>
-            <h1 className="text-2xl font-bold">
-              {team.name || team.taskTitle || "Agent Team"}
-            </h1>
-            <p className="text-muted-foreground">{team.taskTitle}</p>
-          </div>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="size-8"
-            onClick={() => setShowEditDialog(true)}
-          >
-            <Pencil className="size-4" />
-          </Button>
-        </div>
-        <div className="flex gap-2">
-          {isActive && (
-            <Button
-              variant="destructive"
-              size="sm"
-              onClick={() => setConfirmCancel(true)}
-            >
-              <XCircle className="mr-1 size-4" />
-              Cancel
-            </Button>
-          )}
-          {(team.status === "failed" || team.status === "cancelled") && (
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={() => setConfirmRetry(true)}
-            >
-              <RotateCw className="mr-1 size-4" />
-              Retry
-            </Button>
-          )}
-          {isTerminal && (
+      <PageHeader
+        title={team.name || team.taskTitle || "Agent Team"}
+        description={team.taskTitle}
+        actions={
+          <>
             <Button
               variant="ghost"
-              size="sm"
-              onClick={() => setConfirmDelete(true)}
+              size="icon"
+              className="size-8"
+              onClick={() => setShowEditDialog(true)}
             >
-              <Trash2 className="mr-1 size-4" />
-              Delete
+              <Pencil className="size-4" />
             </Button>
-          )}
-        </div>
-      </div>
+            {isActive && (
+              <Button
+                variant="destructive"
+                size="sm"
+                onClick={() => setConfirmCancel(true)}
+              >
+                <XCircle className="mr-1 size-4" />
+                Cancel
+              </Button>
+            )}
+            {(team.status === "failed" || team.status === "cancelled") && (
+              <Button
+                variant="outline"
+                size="sm"
+                onClick={() => setConfirmRetry(true)}
+              >
+                <RotateCw className="mr-1 size-4" />
+                Retry
+              </Button>
+            )}
+            {isTerminal && (
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={() => setConfirmDelete(true)}
+              >
+                <Trash2 className="mr-1 size-4" />
+                Delete
+              </Button>
+            )}
+          </>
+        }
+      />
 
       <ConfirmDialog
         open={confirmCancel}

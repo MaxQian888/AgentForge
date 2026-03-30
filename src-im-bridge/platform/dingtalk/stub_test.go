@@ -63,6 +63,92 @@ func TestStub_SendStoresReply(t *testing.T) {
 	}
 }
 
+func TestStub_LogsNativeAndFormattedReplies(t *testing.T) {
+	stub := NewStub("0")
+
+	message, err := core.NewDingTalkCardMessage(
+		core.DingTalkCardTypeActionCard,
+		"Review Ready",
+		"### Choose the next step",
+		[]core.DingTalkCardButton{{Title: "Open", ActionURL: "https://example.test/reviews/1"}},
+	)
+	if err != nil {
+		t.Fatalf("NewDingTalkCardMessage error: %v", err)
+	}
+
+	if err := stub.SendNative(context.Background(), "chat-1", message); err != nil {
+		t.Fatalf("SendNative error: %v", err)
+	}
+	if err := stub.SendFormattedText(context.Background(), "chat-1", &core.FormattedText{
+		Content: "### Review Ready",
+		Format:  core.TextFormatDingTalkMD,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+
+	if len(stub.replies) != 2 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].NativeSurface != core.NativeSurfaceDingTalkCard {
+		t.Fatalf("native reply = %+v", stub.replies[0])
+	}
+	if stub.replies[1].Format != string(core.TextFormatDingTalkMD) {
+		t.Fatalf("formatted reply = %+v", stub.replies[1])
+	}
+}
+
+func TestStub_DeliverEnvelopeSupportsNativeStructuredAndFormatted(t *testing.T) {
+	stub := NewStub("0")
+
+	native, err := core.NewDingTalkCardMessage(core.DingTalkCardTypeActionCard, "Review Ready", "### Review Ready", []core.DingTalkCardButton{{Title: "Open", ActionURL: "https://example.test/reviews/1"}})
+	if err != nil {
+		t.Fatalf("NewDingTalkCardMessage error: %v", err)
+	}
+	receipt, err := core.DeliverEnvelope(context.Background(), stub, stub.Metadata(), "chat-1", &core.DeliveryEnvelope{Native: native})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope native error: %v", err)
+	}
+	if receipt.Type != "native" {
+		t.Fatalf("native receipt = %+v", receipt)
+	}
+
+	receipt, err = core.DeliverEnvelope(context.Background(), stub, stub.Metadata(), "chat-1", &core.DeliveryEnvelope{
+		Structured: &core.StructuredMessage{
+			Sections: []core.StructuredSection{{
+				Type: core.StructuredSectionTypeText,
+				TextSection: &core.TextSection{
+					Body: "Review Ready",
+				},
+			}},
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope structured error: %v", err)
+	}
+	if receipt.Type != "structured" {
+		t.Fatalf("structured receipt = %+v", receipt)
+	}
+
+	receipt, err = core.DeliverEnvelope(context.Background(), stub, stub.Metadata(), "chat-1", &core.DeliveryEnvelope{
+		Content: "### Review Ready",
+		Metadata: map[string]string{
+			"text_format": string(core.TextFormatDingTalkMD),
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope formatted error: %v", err)
+	}
+	if receipt.Type != "text" {
+		t.Fatalf("formatted receipt = %+v", receipt)
+	}
+	if len(stub.replies) != 3 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].NativeSurface != core.NativeSurfaceDingTalkCard || stub.replies[2].Format != string(core.TextFormatDingTalkMD) {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+}
+
 func TestStub_ReplyUsesMessageChatID(t *testing.T) {
 	stub := NewStub("0")
 

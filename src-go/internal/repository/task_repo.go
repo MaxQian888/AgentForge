@@ -547,6 +547,12 @@ type TaskDateCount struct {
 	Count int
 }
 
+type TaskDateCost struct {
+	Date    time.Time
+	Count   int
+	CostUsd float64
+}
+
 func (r *TaskRepository) CountCompletedByDateRange(ctx context.Context, from, to time.Time, projectID *uuid.UUID) ([]TaskDateCount, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
@@ -573,6 +579,38 @@ func (r *TaskRepository) CountCompletedByDateRange(ctx context.Context, from, to
 		var tc TaskDateCount
 		if err := rows.Scan(&tc.Date, &tc.Count); err != nil {
 			return nil, fmt.Errorf("scan task date count: %w", err)
+		}
+		results = append(results, tc)
+	}
+	return results, rows.Err()
+}
+
+func (r *TaskRepository) SummarizeCompletedCostByDateRange(ctx context.Context, from, to time.Time, projectID *uuid.UUID) ([]TaskDateCost, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	query := `SELECT COALESCE(completed_at, updated_at)::date AS d, COUNT(*) AS cnt, COALESCE(SUM(spent_usd), 0) AS total_cost
+		FROM tasks
+		WHERE status = 'done'
+		AND COALESCE(completed_at, updated_at) BETWEEN $1 AND $2`
+	args := []interface{}{from, to}
+	if projectID != nil {
+		query += ` AND project_id = $3`
+		args = append(args, *projectID)
+	}
+	query += ` GROUP BY d ORDER BY d`
+
+	rows, err := r.db.WithContext(ctx).Raw(query, args...).Rows()
+	if err != nil {
+		return nil, fmt.Errorf("summarize completed cost by date range: %w", err)
+	}
+	defer rows.Close()
+
+	var results []TaskDateCost
+	for rows.Next() {
+		var tc TaskDateCost
+		if err := rows.Scan(&tc.Date, &tc.Count, &tc.CostUsd); err != nil {
+			return nil, fmt.Errorf("scan task date cost: %w", err)
 		}
 		results = append(results, tc)
 	}

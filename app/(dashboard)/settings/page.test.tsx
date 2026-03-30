@@ -1,9 +1,22 @@
 import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
-import { act, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import SettingsPage from "./page";
 import settingsMessages from "@/messages/en/settings.json";
 import type { Project } from "@/lib/stores/project-store";
+
+const mockSetTheme = jest.fn();
+jest.mock("next-themes", () => ({
+  useTheme: () => ({ theme: "system", setTheme: mockSetTheme }),
+}));
+
+const mockSetLocale = jest.fn();
+jest.mock("@/lib/stores/locale-store", () => ({
+  useLocaleStore: (selector: (s: { locale: string; setLocale: typeof mockSetLocale }) => unknown) =>
+    selector({ locale: "en", setLocale: mockSetLocale }),
+  SUPPORTED_LOCALES: ["en", "zh-CN"],
+  DEFAULT_LOCALE: "en",
+}));
 
 const fetchProjects = jest.fn();
 const updateProject = jest.fn();
@@ -180,7 +193,69 @@ jest.mock("@/components/ui/select", () => {
   };
 });
 
+describe("SettingsPage — Appearance section", () => {
+  beforeEach(() => {
+    mockSetTheme.mockReset();
+    mockSetLocale.mockReset();
+    projectState.projects = [createProjectFixture()];
+    fetchProjects.mockReset().mockResolvedValue(undefined);
+    updateProject.mockReset();
+  });
+
+  it("renders Appearance heading and description even when no project is selected", async () => {
+    dashboardState.selectedProjectId = null as unknown as string;
+
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+
+    expect(screen.getByText(settingsMessages.appearance)).toBeInTheDocument();
+
+    // restore
+    dashboardState.selectedProjectId = "project-1";
+  });
+
+  it("renders Appearance heading when a project is selected", async () => {
+    dashboardState.selectedProjectId = "project-1";
+
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+
+    expect(screen.getByText(settingsMessages.appearance)).toBeInTheDocument();
+  });
+
+  it("renders Light, Dark, System theme buttons", async () => {
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+
+    expect(screen.getByRole("button", { name: settingsMessages.themeLight })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: settingsMessages.themeDark })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: settingsMessages.themeSystem })).toBeInTheDocument();
+  });
+
+  it("calls setLocale when a different language is selected", async () => {
+    const user = userEvent.setup();
+
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+
+    const languageSelect = screen.getByRole("combobox", { name: settingsMessages.language });
+    await user.selectOptions(languageSelect, "zh-CN");
+
+    expect(mockSetLocale).toHaveBeenCalledWith("zh-CN");
+  });
+});
+
 describe("SettingsPage", () => {
+  function setControlValue(element: HTMLElement, value: string) {
+    fireEvent.change(element, {
+      target: { value },
+    });
+  }
+
   beforeEach(() => {
     projectState.projects = [createProjectFixture()];
     fetchProjects.mockReset().mockResolvedValue(undefined);
@@ -206,8 +281,7 @@ describe("SettingsPage", () => {
     expect(screen.getByText("Fallback defaults are currently active for governance settings.")).toBeInTheDocument();
 
     const nameInput = screen.getByRole("textbox", { name: "Project Name" });
-    await user.clear(nameInput);
-    await user.type(nameInput, "AgentForge Next");
+    setControlValue(nameInput, "AgentForge Next");
 
     expect(screen.getByText("Unsaved changes")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Discard Changes" })).toBeInTheDocument();
@@ -228,8 +302,7 @@ describe("SettingsPage", () => {
     const thresholdInput = screen.getByRole("spinbutton", {
       name: "Alert Threshold (%)",
     });
-    await user.clear(thresholdInput);
-    await user.type(thresholdInput, "101");
+    setControlValue(thresholdInput, "101");
     await user.click(screen.getByRole("button", { name: "Save Settings" }));
 
     expect(updateProject).not.toHaveBeenCalled();
@@ -245,8 +318,7 @@ describe("SettingsPage", () => {
     });
 
     const nameInput = screen.getByRole("textbox", { name: "Project Name" });
-    await user.clear(nameInput);
-    await user.type(nameInput, "AgentForge Failing Save");
+    setControlValue(nameInput, "AgentForge Failing Save");
     await user.click(screen.getByRole("button", { name: "Save Settings" }));
 
     await waitFor(() => {
@@ -280,8 +352,7 @@ describe("SettingsPage", () => {
     });
 
     const nameInput = screen.getByRole("textbox", { name: "Project Name" });
-    await user.clear(nameInput);
-    await user.type(nameInput, "AgentForge Policy");
+    setControlValue(nameInput, "AgentForge Policy");
     await user.click(screen.getByRole("button", { name: "Save Settings" }));
 
     await waitFor(() => {
@@ -306,8 +377,7 @@ describe("SettingsPage", () => {
     });
 
     const nameInput = screen.getByRole("textbox", { name: "Project Name" });
-    await user.clear(nameInput);
-    await user.type(nameInput, "AgentForge Legacy Policy");
+    setControlValue(nameInput, "AgentForge Legacy Policy");
     await user.click(screen.getByRole("button", { name: "Save Settings" }));
 
     await waitFor(() => {
@@ -398,8 +468,7 @@ describe("SettingsPage", () => {
 
     expect(secretInput).toHaveValue("signing-secret");
 
-    await user.clear(nameInput);
-    await user.type(nameInput, "AgentForge Retained Secret");
+    setControlValue(nameInput, "AgentForge Retained Secret");
     await user.click(screen.getByRole("button", { name: "Save Settings" }));
 
     await waitFor(() => {
@@ -408,8 +477,7 @@ describe("SettingsPage", () => {
 
     expect(secretInput).toHaveValue("signing-secret");
 
-    await user.clear(nameInput);
-    await user.type(nameInput, "AgentForge Second Save");
+    setControlValue(nameInput, "AgentForge Second Save");
     await user.click(screen.getByRole("button", { name: "Save Settings" }));
 
     await waitFor(() => {

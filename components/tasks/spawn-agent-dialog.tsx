@@ -15,6 +15,7 @@ import { Label } from "@/components/ui/label";
 import { RuntimeSelector } from "@/components/shared/runtime-selector";
 import type { CodingAgentSelection } from "@/lib/stores/project-store";
 import { useAgentStore } from "@/lib/stores/agent-store";
+import { useRoleStore } from "@/lib/stores/role-store";
 
 interface SpawnAgentDialogProps {
   taskId: string;
@@ -30,6 +31,7 @@ interface SpawnAgentDialogProps {
       provider?: string;
       model?: string;
       maxBudgetUsd?: number;
+      roleId?: string;
     },
   ) => Promise<void> | void;
 }
@@ -53,8 +55,11 @@ export function SpawnAgentDialog({
   const fetchRuntimeCatalog = useAgentStore((state) => state.fetchRuntimeCatalog);
   const fetchBridgeHealth = useAgentStore((state) => state.fetchBridgeHealth);
   const spawnAgent = useAgentStore((state) => state.spawnAgent);
+  const roles = useRoleStore((state) => state.roles);
+  const fetchRoles = useRoleStore((state) => state.fetchRoles);
   const [selection, setSelection] = useState<CodingAgentSelection>(EMPTY_SELECTION);
   const [budget, setBudget] = useState("5.00");
+  const [selectedRoleId, setSelectedRoleId] = useState("");
   const [submitting, setSubmitting] = useState(false);
 
   useEffect(() => {
@@ -63,7 +68,8 @@ export function SpawnAgentDialog({
     }
     void fetchRuntimeCatalog();
     void fetchBridgeHealth();
-  }, [fetchBridgeHealth, fetchRuntimeCatalog, open]);
+    void fetchRoles();
+  }, [fetchBridgeHealth, fetchRoles, fetchRuntimeCatalog, open]);
 
   useEffect(() => {
     if (!runtimeCatalog) {
@@ -95,6 +101,7 @@ export function SpawnAgentDialog({
         provider: selection.provider,
         model: selection.model,
         maxBudgetUsd: parseFloat(budget) || 5,
+        roleId: selectedRoleId || undefined,
       });
       onOpenChange(false);
     } finally {
@@ -129,6 +136,24 @@ export function SpawnAgentDialog({
               value={budget}
               onChange={(event) => setBudget(event.target.value)}
             />
+          </div>
+
+          <div className="flex flex-col gap-2">
+            <Label htmlFor="spawn-agent-role">Role</Label>
+            <select
+              id="spawn-agent-role"
+              aria-label="Role"
+              className="h-10 rounded-md border bg-background px-3 text-sm"
+              value={selectedRoleId}
+              onChange={(e) => setSelectedRoleId(e.target.value)}
+            >
+              <option value="">No role (default)</option>
+              {roles.map((role) => (
+                <option key={role.metadata.id} value={role.metadata.id}>
+                  {role.metadata.name}
+                </option>
+              ))}
+            </select>
           </div>
 
           <RuntimeSelector

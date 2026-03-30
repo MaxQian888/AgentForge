@@ -125,6 +125,9 @@ func TestMetadataForPlatform_DefaultsStructuredSurfaceAndMatrixFromLegacyCapabil
 	if !hasTextFormat(metadata.Rendering.SupportedFormats, TextFormatLarkMD) {
 		t.Fatalf("SupportedFormats = %+v, want lark_md", metadata.Rendering.SupportedFormats)
 	}
+	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != NativeSurfaceFeishuCard {
+		t.Fatalf("NativeSurfaces = %+v, want [%q]", metadata.Rendering.NativeSurfaces, NativeSurfaceFeishuCard)
+	}
 }
 
 type metadataCardPlatform struct {
@@ -171,6 +174,7 @@ func TestPlatformCapabilities_MatrixAndLookupHelpers(t *testing.T) {
 		AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateFollowUp},
 		ActionCallbackMode: ActionCallbackSocketPayload,
 		MessageScopes:      []MessageScope{MessageScopeChat, MessageScopeThread},
+		NativeSurfaces:     []string{NativeSurfaceSlackBlockKit},
 		Mutability: MutabilitySemantics{
 			CanEdit:        true,
 			PrefersInPlace: true,
@@ -180,6 +184,9 @@ func TestPlatformCapabilities_MatrixAndLookupHelpers(t *testing.T) {
 	matrix := capabilities.Matrix()
 	if matrix["commandSurface"] != "mixed" || matrix["structuredSurface"] != "blocks" {
 		t.Fatalf("matrix = %+v", matrix)
+	}
+	if nativeSurfaces, ok := matrix["nativeSurfaces"].([]string); !ok || len(nativeSurfaces) != 1 || nativeSurfaces[0] != NativeSurfaceSlackBlockKit {
+		t.Fatalf("nativeSurfaces = %+v", matrix["nativeSurfaces"])
 	}
 	if !capabilities.HasAsyncUpdateMode(AsyncUpdateFollowUp) {
 		t.Fatal("expected async update mode to be found")
@@ -227,6 +234,9 @@ func TestMetadataForPlatform_DefaultsTelegramRenderingProfile(t *testing.T) {
 	if !hasTextFormat(metadata.Rendering.SupportedFormats, TextFormatMarkdownV2) {
 		t.Fatalf("SupportedFormats = %+v, want markdown_v2", metadata.Rendering.SupportedFormats)
 	}
+	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != NativeSurfaceTelegramRich {
+		t.Fatalf("NativeSurfaces = %+v, want [%q]", metadata.Rendering.NativeSurfaces, NativeSurfaceTelegramRich)
+	}
 }
 
 func TestNormalizeMetadata_UsesFallbackSourceForRenderingDefaults(t *testing.T) {
@@ -239,5 +249,11 @@ func TestNormalizeMetadata_UsesFallbackSourceForRenderingDefaults(t *testing.T) 
 	}
 	if metadata.Rendering.StructuredSurface != StructuredSurfaceComponents {
 		t.Fatalf("StructuredSurface = %q, want %q", metadata.Rendering.StructuredSurface, StructuredSurfaceComponents)
+	}
+	if !hasTextFormat(metadata.Rendering.SupportedFormats, TextFormatDiscordMD) {
+		t.Fatalf("SupportedFormats = %+v, want discord_md", metadata.Rendering.SupportedFormats)
+	}
+	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != NativeSurfaceDiscordEmbed {
+		t.Fatalf("NativeSurfaces = %+v, want [%q]", metadata.Rendering.NativeSurfaces, NativeSurfaceDiscordEmbed)
 	}
 }

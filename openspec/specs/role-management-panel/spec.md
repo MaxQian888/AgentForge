@@ -4,17 +4,29 @@
 Define the structured role management experience for creating, editing, templating, and reviewing execution-relevant role manifest settings.
 ## Requirements
 ### Requirement: Operators can edit roles through a structured manifest-aware form
-The system SHALL provide a role management workspace that edits the normalized role manifest through a documentation-aligned authoring layout instead of a single undifferentiated long form. The workspace MUST organize the current role API contract and advanced PRD-backed role sections into clearly labeled authoring groups that match the operator mental model from `docs/role-authoring-guide.md`, including template or inheritance setup, identity, advanced identity, capabilities, knowledge, security, collaboration, triggers, preview, and save actions. The workspace MUST keep navigation between those groups clear while editing and MUST block save when required fields, nested advanced fields, or supported list inputs are invalid.
 
-#### Scenario: Edit an existing advanced role through grouped authoring sections
-- **WHEN** the operator opens an existing role for editing
-- **THEN** the workspace loads the role into clearly separated authoring groups with stable section labels instead of one undifferentiated scroll surface
-- **THEN** the operator can move between those groups without losing track of where template, inheritance, preview, and save actions live
+The role workspace SHALL provide editing for ALL documented role manifest fields without requiring raw file surgery. This includes security permissions (fileAccess with allowedPaths and deniedPaths, network with allowedDomains, codeExecution with sandbox mode and allowedLanguages) and resource limits (tokenBudget, apiCalls, executionTime, costLimit). These fields SHALL appear in the Governance section as collapsible sub-sections.
 
-#### Scenario: Save is blocked by invalid structured data
-- **WHEN** the operator enters invalid required metadata, malformed advanced nested config, or malformed supported list values in the role workspace
-- **THEN** the system shows inline validation feedback in the relevant authoring group before submission
-- **THEN** the workspace SHALL NOT submit a partial or invalid manifest payload to the role API
+#### Scenario: Operator edits file access permissions
+- **WHEN** operator expands the Permissions sub-section in Governance
+- **THEN** the editor displays fileAccess fields with allowed paths and denied paths as editable lists
+- **AND** network fields with allowed domains as an editable list
+- **AND** codeExecution fields with sandbox toggle and allowed languages list
+
+#### Scenario: Operator edits resource limits
+- **WHEN** operator expands the Resource Limits sub-section in Governance
+- **THEN** the editor displays tokenBudget, apiCalls, executionTime, and costLimit as numeric inputs
+- **AND** each field shows its current value or empty for unset
+
+#### Scenario: Saving preserves advanced governance fields
+- **WHEN** operator saves a role after editing permissions and resource limits
+- **THEN** the serialized manifest includes the updated permissions and resourceLimits
+- **AND** untouched fields from the original manifest are preserved
+
+#### Scenario: Governance sub-sections default to collapsed
+- **WHEN** operator opens a role that has no permissions or resource limits set
+- **THEN** the Permissions and Resource Limits sub-sections are collapsed by default
+- **AND** expanding them shows empty/default fields ready for input
 
 ### Requirement: The role panel supports template-based creation and inheritance setup
 The system SHALL support role creation flows that start from a blank role, copy an existing role as a template, or inherit from an existing role. The workspace SHALL present these starting decisions as a visible first-stage setup flow and SHALL keep the selected template source, inheritance parent, live execution-oriented summary, preview action, and sandbox action discoverable throughout authoring so operators can follow the recommended flow from `docs/role-authoring-guide.md` without hunting through the page.
@@ -130,17 +142,27 @@ The system SHALL let operators inspect and edit the current documented advanced 
 - **THEN** the workspace SHALL NOT submit a lossy or malformed role payload to the role API
 
 ### Requirement: Role workspace reveals advanced field provenance and save impact
-The system SHALL show enough provenance and impact information for advanced role fields so operators can understand whether a value is inherited, copied from a template, explicitly overridden in the current draft, or preserved unchanged. This visibility MUST remain available from the same authoring flow as YAML preview, execution summary, preview, and sandbox actions.
 
-#### Scenario: Operator inspects inherited advanced values before saving
-- **WHEN** the operator edits a child role that inherits advanced tool, knowledge, memory, or governance settings from a parent role
-- **THEN** the workspace indicates which advanced values are inherited versus explicitly set in the current draft
-- **THEN** the operator can review the effective impact of those advanced values without leaving the current authoring flow
+The role workspace SHALL display provenance indicators on all advanced fields (custom settings, MCP servers, knowledge sources, memory settings, collaboration, triggers, overrides) showing whether each value is inherited from a parent role, copied from a template, or explicitly set by the operator. The context rail Advanced Authoring panel SHALL distinguish inherited values from explicitly-set values. Provenance SHALL be computed by comparing the current draft against the parent manifest and template manifest.
 
-#### Scenario: Operator reviews save impact for advanced role edits
-- **WHEN** the operator changes advanced fields and opens the review context before saving
-- **THEN** the workspace shows which advanced sections will be written back, preserved as-is, or excluded from the execution profile
-- **THEN** the operator can distinguish canonical YAML persistence from runtime projection behavior before submission
+#### Scenario: Custom setting inherited from parent role
+- **WHEN** operator opens a role that extends a parent, and the parent has custom_settings entries
+- **THEN** each inherited custom setting row displays an "inherited" provenance badge
+- **AND** explicitly added settings display an "explicit" provenance badge
+
+#### Scenario: MCP server copied from template
+- **WHEN** operator creates a role from a template that has MCP server entries
+- **THEN** each template-derived MCP server row displays a "template" provenance badge
+- **AND** newly added servers display an "explicit" provenance badge
+
+#### Scenario: Context rail shows provenance summary
+- **WHEN** operator views the Advanced Authoring panel in the context rail
+- **THEN** each advanced field category shows count of inherited, template-derived, and explicit values
+- **AND** individual values are labeled with their provenance source
+
+#### Scenario: Provenance updates on field edit
+- **WHEN** operator modifies an inherited custom setting value
+- **THEN** the provenance badge changes from "inherited" to "explicit" indicating an override
 
 ### Requirement: Role workspace can discover and select skills from the authoritative catalog
 The system SHALL let operators discover and select skills from the authoritative role-skill catalog inside the existing role workspace while preserving the current structured skill-row editing model. Each skill row MUST continue to support direct editing of `path` and `auto_load`, but the workspace MUST also offer catalog-backed selection so operators do not have to memorize valid skill paths before authoring a role.
@@ -167,3 +189,11 @@ The system SHALL surface role-skill resolution and provenance cues in the role l
 - **WHEN** the operator reviews a draft whose skills came from a template, inheritance, or explicit edits in the current workspace
 - **THEN** the review context identifies which skills are inherited, template-derived, or explicitly added in the current draft
 - **THEN** the operator can understand the effective skill tree before saving without leaving the current authoring flow
+
+### Requirement: Dead code cleanup removes unused role form dialog
+The codebase SHALL NOT contain the legacy `role-form-dialog.tsx` component if it has no active import references. Before removal, a codebase-wide search SHALL confirm the component is unused.
+
+#### Scenario: Legacy role form dialog confirmed unused and removed
+- **WHEN** a codebase search finds zero import references to `role-form-dialog`
+- **THEN** `role-form-dialog.tsx` and `role-form-dialog.test.tsx` are deleted
+- **AND** no runtime or build errors result from the removal

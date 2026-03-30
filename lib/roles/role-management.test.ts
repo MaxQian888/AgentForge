@@ -2,6 +2,7 @@ import type { RoleManifest } from "@/lib/stores/role-store";
 import {
   buildRoleDraft,
   buildRoleExecutionSummary,
+  computeFieldProvenance,
   resolveRoleSkillReferences,
   renderRoleManifestYaml,
   serializeRoleDraft,
@@ -149,6 +150,21 @@ describe("role management helpers", () => {
       deniedPaths: "",
       outputFilters: "",
       requireReview: false,
+      permFileAllowedPaths: "",
+      permFileDeniedPaths: "",
+      permNetworkAllowedDomains: "",
+      permCodeSandbox: false,
+      permCodeAllowedLanguages: "",
+      resourceTokenBudgetPerTask: "",
+      resourceTokenBudgetPerDay: "",
+      resourceTokenBudgetPerMonth: "",
+      resourceApiCallsPerMinute: "",
+      resourceApiCallsPerHour: "",
+      resourceExecTimePerTask: "",
+      resourceExecTimePerDay: "",
+      resourceCostPerTask: "",
+      resourceCostPerDay: "",
+      resourceCostAlertThreshold: "",
       collaborationCanDelegateTo: "",
       collaborationAcceptsDelegationFrom: "",
       communicationPreferredChannel: "",
@@ -643,6 +659,286 @@ describe("role management helpers", () => {
         provenance: "explicit",
       },
     ]);
+  });
+
+  describe("computeFieldProvenance()", () => {
+    it("marks custom settings that exist in parent manifest as inherited", () => {
+      const parentManifest: Partial<RoleManifest> = {
+        capabilities: {
+          packages: [],
+          allowedTools: [],
+          customSettings: { approval_mode: "guided", theme: "dark" },
+        },
+      } as unknown as Partial<RoleManifest>;
+
+      const draft = {
+        ...buildRoleDraft(),
+        customSettingRows: [
+          { key: "approval_mode", value: "guided" },
+          { key: "theme", value: "dark" },
+        ],
+      };
+
+      const provenance = computeFieldProvenance(draft, parentManifest, null);
+
+      expect(provenance.customSettings).toEqual([
+        { key: "approval_mode", provenance: "inherited" },
+        { key: "theme", provenance: "inherited" },
+      ]);
+    });
+
+    it("marks MCP servers that exist in template manifest as template", () => {
+      const templateManifest: Partial<RoleManifest> = {
+        capabilities: {
+          packages: [],
+          allowedTools: [],
+          toolConfig: {
+            builtIn: [],
+            external: [],
+            mcpServers: [
+              { name: "design-mcp", url: "http://localhost:3010/mcp" },
+              { name: "analytics-mcp", url: "http://localhost:3020/mcp" },
+            ],
+          },
+        },
+      } as unknown as Partial<RoleManifest>;
+
+      const draft = {
+        ...buildRoleDraft(),
+        mcpServerRows: [
+          { name: "design-mcp", url: "http://localhost:3010/mcp" },
+          { name: "analytics-mcp", url: "http://localhost:3020/mcp" },
+        ],
+      };
+
+      const provenance = computeFieldProvenance(draft, null, templateManifest);
+
+      expect(provenance.mcpServers).toEqual([
+        { key: "design-mcp", provenance: "template" },
+        { key: "analytics-mcp", provenance: "template" },
+      ]);
+    });
+
+    it("marks new custom settings not in parent or template as explicit", () => {
+      const parentManifest: Partial<RoleManifest> = {
+        capabilities: {
+          packages: [],
+          allowedTools: [],
+          customSettings: { approval_mode: "guided" },
+        },
+      } as unknown as Partial<RoleManifest>;
+
+      const templateManifest: Partial<RoleManifest> = {
+        capabilities: {
+          packages: [],
+          allowedTools: [],
+          customSettings: { theme: "light" },
+        },
+      } as unknown as Partial<RoleManifest>;
+
+      const draft = {
+        ...buildRoleDraft(),
+        customSettingRows: [
+          { key: "approval_mode", value: "guided" },
+          { key: "theme", value: "light" },
+          { key: "brand_new_setting", value: "custom" },
+        ],
+      };
+
+      const provenance = computeFieldProvenance(draft, parentManifest, templateManifest);
+
+      expect(provenance.customSettings).toEqual([
+        { key: "approval_mode", provenance: "inherited" },
+        { key: "theme", provenance: "template" },
+        { key: "brand_new_setting", provenance: "explicit" },
+      ]);
+    });
+
+    it("marks triggers from parent as inherited", () => {
+      const parentManifest: Partial<RoleManifest> = {
+        triggers: [
+          { event: "pr_created", action: "auto_review", condition: "labels.includes('ui')" },
+        ],
+      };
+
+      const draft = {
+        ...buildRoleDraft(),
+        triggerRows: [
+          { event: "pr_created", action: "auto_review", condition: "labels.includes('ui')" },
+        ],
+      };
+
+      const provenance = computeFieldProvenance(draft, parentManifest, null);
+
+      expect(provenance.triggers).toEqual([
+        { key: "pr_created:auto_review", provenance: "inherited" },
+      ]);
+    });
+
+    it("returns all empty arrays for an empty draft", () => {
+      const draft = buildRoleDraft();
+      const provenance = computeFieldProvenance(draft, null, null);
+
+      expect(provenance).toEqual({
+        customSettings: [],
+        mcpServers: [],
+        sharedKnowledge: [],
+        privateKnowledge: [],
+        triggers: [],
+        collaboration: [],
+      });
+    });
+  });
+
+  describe("permissions and resource limits round-trip", () => {
+    it("populates permFileAllowedPaths from manifest security.permissions.fileAccess", () => {
+      const manifest: RoleManifest = {
+        ...role,
+        security: {
+          ...role.security,
+          permissions: {
+            fileAccess: {
+              allowedPaths: ["src/", "lib/"],
+              deniedPaths: ["secrets/"],
+            },
+          },
+        },
+      };
+
+      const draft = buildRoleDraft(manifest);
+
+      expect(draft.permFileAllowedPaths).toBe("src/, lib/");
+      expect(draft.permFileDeniedPaths).toBe("secrets/");
+    });
+
+    it("populates resourceTokenBudgetPerTask from manifest security.resourceLimits", () => {
+      const manifest: RoleManifest = {
+        ...role,
+        security: {
+          ...role.security,
+          resourceLimits: {
+            tokenBudget: { perTask: 50000, perDay: 500000, perMonth: 5000000 },
+          },
+        },
+      };
+
+      const draft = buildRoleDraft(manifest);
+
+      expect(draft.resourceTokenBudgetPerTask).toBe("50000");
+      expect(draft.resourceTokenBudgetPerDay).toBe("500000");
+      expect(draft.resourceTokenBudgetPerMonth).toBe("5000000");
+    });
+
+    it("serializes permissions fields into security.permissions", () => {
+      const draft = {
+        ...buildRoleDraft(),
+        roleId: "perm-test",
+        name: "Perm Test",
+        permFileAllowedPaths: "src/, lib/",
+        permFileDeniedPaths: "secrets/",
+        permNetworkAllowedDomains: "api.example.com, cdn.example.com",
+        permCodeSandbox: true,
+        permCodeAllowedLanguages: "TypeScript, Python",
+      };
+
+      const payload = serializeRoleDraft(draft as Parameters<typeof serializeRoleDraft>[0]);
+
+      expect(payload.security?.permissions).toEqual({
+        fileAccess: {
+          allowedPaths: ["src/", "lib/"],
+          deniedPaths: ["secrets/"],
+        },
+        network: {
+          allowedDomains: ["api.example.com", "cdn.example.com"],
+        },
+        codeExecution: {
+          sandbox: true,
+          allowedLanguages: ["TypeScript", "Python"],
+        },
+      });
+    });
+
+    it("serializes resource limits fields into security.resourceLimits", () => {
+      const draft = {
+        ...buildRoleDraft(),
+        roleId: "limits-test",
+        name: "Limits Test",
+        resourceTokenBudgetPerTask: "50000",
+        resourceTokenBudgetPerDay: "500000",
+        resourceTokenBudgetPerMonth: "5000000",
+        resourceApiCallsPerMinute: "60",
+        resourceApiCallsPerHour: "1000",
+        resourceExecTimePerTask: "30m",
+        resourceExecTimePerDay: "8h",
+        resourceCostPerTask: "$5.00",
+        resourceCostPerDay: "$50.00",
+        resourceCostAlertThreshold: "80",
+      };
+
+      const payload = serializeRoleDraft(draft as Parameters<typeof serializeRoleDraft>[0]);
+
+      expect(payload.security?.resourceLimits).toEqual({
+        tokenBudget: { perTask: 50000, perDay: 500000, perMonth: 5000000 },
+        apiCalls: { perMinute: 60, perHour: 1000 },
+        executionTime: { perTask: "30m", perDay: "8h" },
+        costLimit: { perTask: "$5.00", perDay: "$50.00", alertThreshold: 80 },
+      });
+    });
+
+    it("round-trips permissions through buildRoleDraft then serializeRoleDraft", () => {
+      const manifest: RoleManifest = {
+        ...role,
+        security: {
+          ...role.security,
+          permissions: {
+            fileAccess: {
+              allowedPaths: ["src/", "lib/"],
+              deniedPaths: ["secrets/"],
+            },
+            network: {
+              allowedDomains: ["api.example.com"],
+            },
+            codeExecution: {
+              sandbox: true,
+              allowedLanguages: ["TypeScript"],
+            },
+          },
+          resourceLimits: {
+            tokenBudget: { perTask: 50000, perDay: 500000 },
+            apiCalls: { perMinute: 60 },
+            executionTime: { perTask: "30m" },
+            costLimit: { perTask: "$5.00", alertThreshold: 80 },
+          },
+        },
+      };
+
+      const draft = buildRoleDraft(manifest);
+      const payload = serializeRoleDraft(
+        draft as Parameters<typeof serializeRoleDraft>[0],
+        manifest,
+      );
+
+      expect(payload.security?.permissions).toEqual({
+        fileAccess: {
+          allowedPaths: ["src/", "lib/"],
+          deniedPaths: ["secrets/"],
+        },
+        network: {
+          allowedDomains: ["api.example.com"],
+        },
+        codeExecution: {
+          sandbox: true,
+          allowedLanguages: ["TypeScript"],
+        },
+      });
+
+      expect(payload.security?.resourceLimits).toEqual({
+        tokenBudget: { perTask: 50000, perDay: 500000 },
+        apiCalls: { perMinute: 60 },
+        executionTime: { perTask: "30m" },
+        costLimit: { perTask: "$5.00", alertThreshold: 80 },
+      });
+    });
   });
 
   it("renders yaml for nested objects, arrays, and empty containers", () => {

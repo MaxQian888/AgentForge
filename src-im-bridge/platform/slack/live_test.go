@@ -2,6 +2,7 @@ package slack
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 
@@ -399,6 +400,176 @@ func TestLive_MetadataDeclaresDeferredRichSlackCapabilities(t *testing.T) {
 	if !metadata.Capabilities.SupportsRichMessages {
 		t.Fatal("expected rich-message capability")
 	}
+	if !coreHasTextFormat(metadata.Rendering.SupportedFormats, core.TextFormatSlackMrkdwn) {
+		t.Fatalf("SupportedFormats = %+v, want slack_mrkdwn", metadata.Rendering.SupportedFormats)
+	}
+	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != core.NativeSurfaceSlackBlockKit {
+		t.Fatalf("NativeSurfaces = %+v", metadata.Rendering.NativeSurfaces)
+	}
+}
+
+func TestLive_SendNativeAndReplyNativeUseSlackBlockKit(t *testing.T) {
+	runner := &fakeSocketRunner{}
+	messages := &fakeSlackMessageClient{}
+	responses := &fakeSlackResponseClient{}
+
+	live, err := NewLive(
+		"xoxb-bot",
+		"xapp-app",
+		WithSocketRunner(runner),
+		WithMessageClient(messages),
+		WithResponseClient(responses),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	message, err := core.NewSlackBlockKitMessage([]map[string]any{
+		{
+			"type": "section",
+			"text": map[string]any{
+				"type": "mrkdwn",
+				"text": "*Build* ready",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("NewSlackBlockKitMessage error: %v", err)
+	}
+
+	if err := live.SendNative(context.Background(), "C123", message); err != nil {
+		t.Fatalf("SendNative error: %v", err)
+	}
+	if len(messages.posts) != 1 {
+		t.Fatalf("posts = %+v", messages.posts)
+	}
+	if len(messages.posts[0].Blocks) != 1 || messages.posts[0].Text == "" {
+		t.Fatalf("native post = %+v", messages.posts[0])
+	}
+
+	if err := live.ReplyNative(context.Background(), replyContext{
+		ChannelID:   "C123",
+		ResponseURL: "https://hooks.slack.com/actions/native",
+	}, message); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+	if len(responses.calls) != 1 || responses.calls[0].Blocks != 1 {
+		t.Fatalf("response calls = %+v", responses.calls)
+	}
+}
+
+func TestLive_SendFormattedTextControlsSlackMarkdownParsing(t *testing.T) {
+	runner := &fakeSocketRunner{}
+	messages := &fakeSlackMessageClient{}
+
+	live, err := NewLive("xoxb-bot", "xapp-app", WithSocketRunner(runner), WithMessageClient(messages))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.SendFormattedText(context.Background(), "C123", &core.FormattedText{
+		Content: "*literal*",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("SendFormattedText plain error: %v", err)
+	}
+	if err := live.SendFormattedText(context.Background(), "C123", &core.FormattedText{
+		Content: "*bold* and ~strike~",
+		Format:  core.TextFormatSlackMrkdwn,
+	}); err != nil {
+		t.Fatalf("SendFormattedText mrkdwn error: %v", err)
+	}
+
+	if len(messages.posts) != 2 {
+		t.Fatalf("posts = %+v", messages.posts)
+	}
+	if messages.posts[0].Markdown == nil || *messages.posts[0].Markdown {
+		t.Fatalf("plain formatted post = %+v", messages.posts[0])
+	}
+	if messages.posts[1].Markdown == nil || !*messages.posts[1].Markdown {
+		t.Fatalf("mrkdwn formatted post = %+v", messages.posts[1])
+	}
+}
+
+func TestLive_SendStructuredUsesSlackBlocks(t *testing.T) {
+	runner := &fakeSocketRunner{}
+	messages := &fakeSlackMessageClient{}
+
+	live, err := NewLive("xoxb-bot", "xapp-app", WithSocketRunner(runner), WithMessageClient(messages))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	err = live.SendStructured(context.Background(), "C123", &core.StructuredMessage{
+		Sections: []core.StructuredSection{
+			{
+				Type: core.StructuredSectionTypeText,
+				TextSection: &core.TextSection{
+					Body: "Build ready",
+				},
+			},
+			{
+				Type: core.StructuredSectionTypeActions,
+				ActionsSection: &core.ActionsSection{
+					Actions: []core.StructuredAction{{Label: "Open", URL: "https://example.test/builds/1"}},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendStructured error: %v", err)
+	}
+
+	if len(messages.posts) != 1 {
+		t.Fatalf("posts = %+v", messages.posts)
+	}
+	if len(messages.posts[0].Blocks) != 2 {
+		t.Fatalf("structured post = %+v", messages.posts[0])
+	}
+}
+
+func TestRenderStructuredSectionsBuildsSlackBlocks(t *testing.T) {
+	blocks := renderStructuredSections([]core.StructuredSection{
+		{
+			Type: core.StructuredSectionTypeText,
+			TextSection: &core.TextSection{
+				Body: "Build ready",
+			},
+		},
+		{
+			Type:           core.StructuredSectionTypeDivider,
+			DividerSection: &core.DividerSection{},
+		},
+		{
+			Type: core.StructuredSectionTypeContext,
+			ContextSection: &core.ContextSection{
+				Elements: []string{"alice", "2m ago"},
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeFields,
+			FieldsSection: &core.FieldsSection{
+				Fields: []core.StructuredField{{Label: "Status", Value: "success"}},
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeActions,
+			ActionsSection: &core.ActionsSection{
+				Actions: []core.StructuredAction{{Label: "Open", URL: "https://example.test/builds/1"}},
+			},
+		},
+	})
+
+	if len(blocks) != 5 {
+		t.Fatalf("blocks = %+v", blocks)
+	}
+	raw, err := json.Marshal(blocks)
+	if err != nil {
+		t.Fatalf("marshal blocks: %v", err)
+	}
+	if string(raw) == "" {
+		t.Fatal("expected serializable block payload")
+	}
 }
 
 type fakeSocketRunner struct {
@@ -439,6 +610,8 @@ type fakeSlackResponseCall struct {
 	ResponseURL string
 	Text        string
 	ThreadTS    string
+	Blocks      int
+	Markdown    *bool
 }
 
 func (c *fakeSlackResponseClient) PostResponse(ctx context.Context, responseURL string, message slackOutgoingMessage) error {
@@ -446,6 +619,8 @@ func (c *fakeSlackResponseClient) PostResponse(ctx context.Context, responseURL 
 		ResponseURL: responseURL,
 		Text:        message.Text,
 		ThreadTS:    message.ThreadTS,
+		Blocks:      len(message.Blocks),
+		Markdown:    message.Markdown,
 	})
 	return nil
 }
@@ -461,4 +636,13 @@ func (h *fakeSlackActionHandler) HandleAction(ctx context.Context, req *notify.A
 	}
 	h.requests = append(h.requests, req)
 	return &notify.ActionResponse{}, nil
+}
+
+func coreHasTextFormat(formats []core.TextFormatMode, target core.TextFormatMode) bool {
+	for _, format := range formats {
+		if format == target {
+			return true
+		}
+	}
+	return false
 }

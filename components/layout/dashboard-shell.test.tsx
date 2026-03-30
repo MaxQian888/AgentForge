@@ -36,10 +36,13 @@ jest.mock("next/navigation", () => ({
       back: jest.fn(),
     };
   },
+  usePathname() {
+    return "/dashboard";
+  },
 }));
 
 jest.mock("@/components/layout/sidebar", () => ({
-  Sidebar: () => <div data-testid="sidebar">sidebar</div>,
+  AppSidebar: () => <div data-testid="sidebar">sidebar</div>,
 }));
 
 jest.mock("@/components/layout/header", () => ({

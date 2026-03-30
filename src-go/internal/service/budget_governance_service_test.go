@@ -43,6 +43,64 @@ func (m *mockBudgetSprintReader) ListByProject(_ context.Context, projectID uuid
 	return out, nil
 }
 
+type mockBudgetTaskReader struct {
+	tasksByProject  map[uuid.UUID][]*model.Task
+	tasksBySprint   map[uuid.UUID][]*model.Task
+	listErr         error
+	listBySprintErr error
+}
+
+func (m *mockBudgetTaskReader) List(_ context.Context, projectID uuid.UUID, q model.TaskListQuery) ([]*model.Task, int, error) {
+	if m.listErr != nil {
+		return nil, 0, m.listErr
+	}
+	tasks := m.tasksByProject[projectID]
+	cloned := make([]*model.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if q.SprintID != "" {
+			if task.SprintID == nil || task.SprintID.String() != q.SprintID {
+				continue
+			}
+		}
+		item := *task
+		cloned = append(cloned, &item)
+	}
+	total := len(cloned)
+	limit := q.Limit
+	if limit <= 0 || limit > total {
+		limit = total
+	}
+	page := q.Page
+	if page <= 0 {
+		page = 1
+	}
+	start := (page - 1) * limit
+	if start >= total {
+		return []*model.Task{}, total, nil
+	}
+	end := start + limit
+	if end > total {
+		end = total
+	}
+	return cloned[start:end], total, nil
+}
+
+func (m *mockBudgetTaskReader) ListBySprint(_ context.Context, projectID uuid.UUID, sprintID uuid.UUID) ([]*model.Task, error) {
+	if m.listBySprintErr != nil {
+		return nil, m.listBySprintErr
+	}
+	tasks := m.tasksBySprint[sprintID]
+	cloned := make([]*model.Task, 0, len(tasks))
+	for _, task := range tasks {
+		if task.ProjectID != projectID {
+			continue
+		}
+		item := *task
+		cloned = append(cloned, &item)
+	}
+	return cloned, nil
+}
+
 func TestBudgetGovernanceService_CheckSprintBudget(t *testing.T) {
 	sprintID := uuid.New()
 	reader := &mockBudgetSprintReader{
@@ -205,5 +263,161 @@ func TestBudgetGovernanceService_CheckBudgetDelegatesSprintThenProject(t *testin
 	}
 	if result.Allowed || !strings.Contains(result.Reason, "project budget exceeded") {
 		t.Fatalf("CheckBudget() project-only = %+v, want project block", result)
+	}
+}
+
+func TestBudgetGovernanceService_GetProjectBudgetSummaryAggregatesScopes(t *testing.T) {
+	projectID := uuid.New()
+	activeSprintID := uuid.New()
+	closedSprintID := uuid.New()
+	reader := &mockBudgetSprintReader{
+		sprintsByProject: map[uuid.UUID][]*model.Sprint{
+			projectID: {
+				{
+					ID:             activeSprintID,
+					ProjectID:      projectID,
+					Name:           "Active sprint",
+					Status:         model.SprintStatusActive,
+					TotalBudgetUsd: 10,
+					SpentUsd:       8.5,
+				},
+				{
+					ID:             closedSprintID,
+					ProjectID:      projectID,
+					Name:           "Closed sprint",
+					Status:         model.SprintStatusClosed,
+					TotalBudgetUsd: 4,
+					SpentUsd:       2,
+				},
+			},
+		},
+	}
+	taskReader := &mockBudgetTaskReader{
+		tasksByProject: map[uuid.UUID][]*model.Task{
+			projectID: {
+				{ID: uuid.New(), ProjectID: projectID, SprintID: &activeSprintID, Title: "Budget warning", BudgetUsd: 5, SpentUsd: 4.2},
+				{ID: uuid.New(), ProjectID: projectID, SprintID: &activeSprintID, Title: "Healthy", BudgetUsd: 3, SpentUsd: 1.5},
+				{ID: uuid.New(), ProjectID: projectID, SprintID: &closedSprintID, Title: "Task aggregate", BudgetUsd: 2, SpentUsd: 2.2},
+			},
+		},
+	}
+	svc := service.NewBudgetGovernanceService(reader, taskReader)
+	svc.SetProjectBudgetLimit(12)
+
+	summary, err := svc.GetProjectBudgetSummary(context.Background(), projectID)
+	if err != nil {
+		t.Fatalf("GetProjectBudgetSummary() error = %v", err)
+	}
+	if summary.ProjectID != projectID.String() {
+		t.Fatalf("ProjectID = %q, want %q", summary.ProjectID, projectID.String())
+	}
+	if summary.Allocated != 12 || summary.Spent != 10.5 || summary.Remaining != 1.5 {
+		t.Fatalf("summary budget = %+v, want allocated=12 spent=10.5 remaining=1.5", summary)
+	}
+	if summary.ThresholdStatus != model.BudgetThresholdWarning {
+		t.Fatalf("ThresholdStatus = %q, want warning", summary.ThresholdStatus)
+	}
+	if summary.TasksAtRiskCount != 2 {
+		t.Fatalf("TasksAtRiskCount = %d, want 2", summary.TasksAtRiskCount)
+	}
+	if summary.TasksExceededCount != 1 {
+		t.Fatalf("TasksExceededCount = %d, want 1", summary.TasksExceededCount)
+	}
+	if len(summary.Scopes) != 3 {
+		t.Fatalf("len(Scopes) = %d, want 3", len(summary.Scopes))
+	}
+}
+
+func TestBudgetGovernanceService_GetProjectBudgetSummaryReturnsZeroWhenInactive(t *testing.T) {
+	projectID := uuid.New()
+	svc := service.NewBudgetGovernanceService(
+		&mockBudgetSprintReader{sprintsByProject: map[uuid.UUID][]*model.Sprint{projectID: nil}},
+		&mockBudgetTaskReader{tasksByProject: map[uuid.UUID][]*model.Task{projectID: nil}},
+	)
+
+	summary, err := svc.GetProjectBudgetSummary(context.Background(), projectID)
+	if err != nil {
+		t.Fatalf("GetProjectBudgetSummary() error = %v", err)
+	}
+	if summary.Allocated != 0 || summary.Spent != 0 || summary.Remaining != 0 {
+		t.Fatalf("summary budget = %+v, want zero values", summary)
+	}
+	if summary.ThresholdStatus != model.BudgetThresholdInactive {
+		t.Fatalf("ThresholdStatus = %q, want inactive", summary.ThresholdStatus)
+	}
+	if len(summary.Scopes) != 0 {
+		t.Fatalf("Scopes = %+v, want none", summary.Scopes)
+	}
+}
+
+func TestBudgetGovernanceService_GetSprintBudgetDetailReturnsRealtimeSpend(t *testing.T) {
+	projectID := uuid.New()
+	sprintID := uuid.New()
+	reader := &mockBudgetSprintReader{
+		sprintsByID: map[uuid.UUID]*model.Sprint{
+			sprintID: {
+				ID:             sprintID,
+				ProjectID:      projectID,
+				Name:           "Realtime sprint",
+				Status:         model.SprintStatusActive,
+				TotalBudgetUsd: 12,
+				SpentUsd:       9.6,
+			},
+		},
+	}
+	taskReader := &mockBudgetTaskReader{
+		tasksBySprint: map[uuid.UUID][]*model.Task{
+			sprintID: {
+				{ID: uuid.New(), ProjectID: projectID, SprintID: &sprintID, Title: "Task A", BudgetUsd: 5, SpentUsd: 4.8},
+				{ID: uuid.New(), ProjectID: projectID, SprintID: &sprintID, Title: "Task B", BudgetUsd: 7, SpentUsd: 4.8},
+			},
+		},
+	}
+	svc := service.NewBudgetGovernanceService(reader, taskReader)
+
+	detail, err := svc.GetSprintBudgetDetail(context.Background(), sprintID)
+	if err != nil {
+		t.Fatalf("GetSprintBudgetDetail() error = %v", err)
+	}
+	if detail.SprintID != sprintID.String() || detail.ProjectID != projectID.String() {
+		t.Fatalf("detail ids = %+v", detail)
+	}
+	if detail.Allocated != 12 || detail.Spent != 9.6 || detail.Remaining != 2.4 {
+		t.Fatalf("detail budget = %+v, want allocated=12 spent=9.6 remaining=2.4", detail)
+	}
+	if detail.ThresholdStatus != model.BudgetThresholdWarning {
+		t.Fatalf("ThresholdStatus = %q, want warning", detail.ThresholdStatus)
+	}
+	if len(detail.Tasks) != 2 {
+		t.Fatalf("len(Tasks) = %d, want 2", len(detail.Tasks))
+	}
+}
+
+func TestBudgetGovernanceService_GetSprintBudgetDetailReturnsInactiveWhenNoBudgetConfigured(t *testing.T) {
+	projectID := uuid.New()
+	sprintID := uuid.New()
+	reader := &mockBudgetSprintReader{
+		sprintsByID: map[uuid.UUID]*model.Sprint{
+			sprintID: {
+				ID:             sprintID,
+				ProjectID:      projectID,
+				Name:           "No budget sprint",
+				Status:         model.SprintStatusPlanning,
+				TotalBudgetUsd: 0,
+				SpentUsd:       0,
+			},
+		},
+	}
+	svc := service.NewBudgetGovernanceService(reader, &mockBudgetTaskReader{})
+
+	detail, err := svc.GetSprintBudgetDetail(context.Background(), sprintID)
+	if err != nil {
+		t.Fatalf("GetSprintBudgetDetail() error = %v", err)
+	}
+	if detail.Allocated != 0 || detail.Spent != 0 || detail.Remaining != 0 {
+		t.Fatalf("detail budget = %+v, want zero values", detail)
+	}
+	if detail.ThresholdStatus != model.BudgetThresholdInactive {
+		t.Fatalf("ThresholdStatus = %q, want inactive", detail.ThresholdStatus)
 	}
 }

@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, test } from "bun:test";
-import { EventStreamer } from "./event-stream.js";
+import { EventStreamer, serializeBridgeEvent } from "./event-stream.js";
 
 type TestSocket = {
   readyState: number;
@@ -208,5 +208,70 @@ describe("EventStreamer", () => {
     expect(intervalCleared).toBe(true);
     expect(timeoutCleared).toBe(true);
     expect(closeCount).toBe(1);
+  });
+
+  test("serializes new advanced bridge event types without losing payload shape", () => {
+    expect(
+      serializeBridgeEvent({
+        task_id: "task-advanced",
+        session_id: "session-advanced",
+        timestamp_ms: 123,
+        type: "reasoning",
+        data: { content: "thinking" },
+      }),
+    ).toBe(
+      JSON.stringify({
+        task_id: "task-advanced",
+        session_id: "session-advanced",
+        timestamp_ms: 123,
+        type: "reasoning",
+        data: { content: "thinking" },
+      }),
+    );
+    expect(
+      serializeBridgeEvent({
+        task_id: "task-advanced",
+        session_id: "session-advanced",
+        timestamp_ms: 124,
+        type: "todo_update",
+        data: { todos: [{ id: "todo-1", content: "ship it" }] },
+      }),
+    ).toContain("\"type\":\"todo_update\"");
+    expect(
+      serializeBridgeEvent({
+        task_id: "task-advanced",
+        session_id: "session-advanced",
+        timestamp_ms: 125,
+        type: "progress",
+        data: { item_type: "command_execution", partial_output: "partial" },
+      }),
+    ).toContain("\"type\":\"progress\"");
+    expect(
+      serializeBridgeEvent({
+        task_id: "task-advanced",
+        session_id: "session-advanced",
+        timestamp_ms: 126,
+        type: "rate_limit",
+        data: { utilization: 0.8, reset_at: 123456 },
+      }),
+    ).toContain("\"type\":\"rate_limit\"");
+    expect(
+      serializeBridgeEvent({
+        task_id: "task-advanced",
+        session_id: "session-advanced",
+        timestamp_ms: 127,
+        type: "partial_message",
+        data: { content: "partial", is_complete: false },
+      }),
+    ).toContain("\"type\":\"partial_message\"");
+    expect(
+      serializeBridgeEvent({
+        task_id: "task-advanced",
+        session_id: "session-advanced",
+        timestamp_ms: 128,
+        type: "permission_request",
+        data: { request_id: "req-1", tool_name: "Read" },
+      }),
+    ).toContain("\"type\":\"permission_request\"");
   });
 });

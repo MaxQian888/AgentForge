@@ -36,3 +36,48 @@ type AgentPoolQueueEntry struct {
 	CreatedAt  time.Time            `db:"created_at" json:"createdAt"`
 	UpdatedAt  time.Time            `db:"updated_at" json:"updatedAt"`
 }
+
+type QueueEntryDTO struct {
+	EntryID    string  `json:"entryId"`
+	ProjectID  string  `json:"projectId"`
+	TaskID     string  `json:"taskId"`
+	MemberID   string  `json:"memberId"`
+	Status     string  `json:"status"`
+	Reason     string  `json:"reason"`
+	Runtime    string  `json:"runtime"`
+	Provider   string  `json:"provider"`
+	Model      string  `json:"model"`
+	RoleID     string  `json:"roleId,omitempty"`
+	Priority   int     `json:"priority"`
+	BudgetUSD  float64 `json:"budgetUsd"`
+	AgentRunID *string `json:"agentRunId,omitempty"`
+	CreatedAt  string  `json:"createdAt"`
+	UpdatedAt  string  `json:"updatedAt"`
+}
+
+func (e *AgentPoolQueueEntry) ToDTO() QueueEntryDTO {
+	if e == nil {
+		return QueueEntryDTO{}
+	}
+	dto := QueueEntryDTO{
+		EntryID:   e.EntryID,
+		ProjectID: e.ProjectID,
+		TaskID:    e.TaskID,
+		MemberID:  e.MemberID,
+		Status:    string(e.Status),
+		Reason:    e.Reason,
+		Runtime:   e.Runtime,
+		Provider:  e.Provider,
+		Model:     e.Model,
+		RoleID:    e.RoleID,
+		Priority:  e.Priority,
+		BudgetUSD: e.BudgetUSD,
+		CreatedAt: e.CreatedAt.Format(time.RFC3339),
+		UpdatedAt: e.UpdatedAt.Format(time.RFC3339),
+	}
+	if e.AgentRunID != nil {
+		value := *e.AgentRunID
+		dto.AgentRunID = &value
+	}
+	return dto
+}

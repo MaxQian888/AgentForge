@@ -16,7 +16,13 @@
     "imBridge": "IM 桥接",
     "roles": "角色",
     "plugins": "插件",
-    "settings": "设置"
+    "settings": "设置",
+    "group": {
+      "workspace": "工作区",
+      "project": "项目",
+      "operations": "运维",
+      "configuration": "配置"
+    }
   },
   "header": {
     "notifications": "通知",
@@ -48,6 +54,34 @@
     "no": "否",
     "ok": "确定"
   },
+  "commandPalette": {
+    "placeholder": "输入命令或搜索...",
+    "navigation": "导航",
+    "actions": "操作",
+    "createProject": "创建项目",
+    "createTask": "创建任务",
+    "spawnAgent": "启动智能体",
+    "createTeam": "创建团队",
+    "noResults": "未找到结果。"
+  },
+  "breadcrumbs": {
+    "home": "首页",
+    "workspace": "工作区",
+    "project": "项目",
+    "operations": "运维",
+    "configuration": "配置"
+  },
+  "emptyState": {
+    "default": "暂无内容",
+    "noResults": "未找到结果",
+    "noData": "暂无数据"
+  },
+  "filterBar": {
+    "search": "搜索...",
+    "reset": "重置",
+    "allItems": "全部"
+  },
+  "quickSearch": "快速搜索",
   "status": {
     "active": "活跃",
     "inactive": "未活跃",

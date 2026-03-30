@@ -258,12 +258,11 @@ describe("ProjectDashboardPage", () => {
 
     render(<ProjectDashboardPage />);
 
-    expect(screen.getByText("Dashboard workspace unavailable")).toBeInTheDocument();
-    expect(screen.getByText("dashboard endpoint unavailable")).toBeInTheDocument();
+    expect(
+      screen.getByText("Dashboard workspace unavailable: dashboard endpoint unavailable")
+    ).toBeInTheDocument();
 
-    await user.click(
-      screen.getByRole("button", { name: "Retry Dashboard Workspace" })
-    );
+    await user.click(screen.getByRole("button", { name: "Retry" }));
 
     expect(fetchDashboards).toHaveBeenLastCalledWith("project-1");
   });

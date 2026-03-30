@@ -1,10 +1,24 @@
 import { describe, expect, test } from "bun:test";
 import {
   CancelRequestSchema,
+  CommandRequestSchema,
   DecomposeTaskRequestSchema,
   DeepReviewRequestSchema,
   ExecuteRequestSchema,
+  FileChangeEventDataSchema,
+  ForkRequestSchema,
+  InterruptRequestSchema,
+  ModelSwitchRequestSchema,
+  PartialMessageEventDataSchema,
+  PermissionResponseSchema,
+  ProgressEventDataSchema,
+  RateLimitEventDataSchema,
+  ReasoningEventDataSchema,
+  RevertRequestSchema,
+  RollbackRequestSchema,
   ResumeRequestSchema,
+  TodoUpdateEventDataSchema,
+  UnrevertRequestSchema,
 } from "./schemas.js";
 
 describe("bridge request schemas", () => {
@@ -194,6 +208,229 @@ describe("bridge request schemas", () => {
     expect(parsed.role_config?.role_id).toBe("code-reviewer");
   });
 
+  test("accepts advanced bridge execution options and route payloads", () => {
+    const parsed = ExecuteRequestSchema.parse({
+      task_id: "task-advanced",
+      session_id: "session-advanced",
+      runtime: "claude_code",
+      provider: "anthropic",
+      model: "claude-opus-4-1",
+      prompt: "Run an advanced bridge task",
+      worktree_path: "D:/Project/AgentForge",
+      branch_name: "agent/task-advanced",
+      budget_usd: 2,
+      thinking_config: {
+        enabled: true,
+        budget_tokens: 10_000,
+      },
+      output_schema: {
+        type: "json_schema",
+        schema: {
+          type: "object",
+          properties: {
+            summary: { type: "string" },
+          },
+        },
+      },
+      hooks_config: {
+        hooks: [
+          {
+            hook: "PreToolUse",
+            matcher: {
+              tools: ["Read"],
+            },
+          },
+        ],
+        callback_url: "http://127.0.0.1:7777/hooks",
+        timeout_ms: 4000,
+      },
+      hook_callback_url: "http://127.0.0.1:7777/hooks",
+      hook_timeout_ms: 4000,
+      attachments: [
+        {
+          type: "image",
+          path: "D:/Project/AgentForge/tmp/screenshot.png",
+          mime_type: "image/png",
+        },
+      ],
+      file_checkpointing: true,
+      agents: {
+        reviewer: {
+          description: "Review risky changes",
+          prompt: "Act as a skeptical reviewer.",
+          tools: ["Read", "Grep"],
+          model: "claude-sonnet-4-5",
+        },
+      },
+      disallowed_tools: ["Bash"],
+      fallback_model: "claude-sonnet-4-5",
+      additional_directories: ["D:/Shared"],
+      include_partial_messages: true,
+      tool_permission_callback: true,
+      web_search: true,
+      env: {
+        FEATURE_FLAG: "enabled",
+      },
+    });
+
+    expect(parsed.thinking_config).toEqual({
+      enabled: true,
+      budget_tokens: 10_000,
+    });
+    expect(parsed.output_schema?.type).toBe("json_schema");
+    expect(parsed.hooks_config?.hooks[0]?.hook).toBe("PreToolUse");
+    expect(parsed.attachments?.[0]?.type).toBe("image");
+    expect(parsed.agents?.reviewer?.tools).toEqual(["Read", "Grep"]);
+    expect(parsed.additional_directories).toEqual(["D:/Shared"]);
+    expect(parsed.env).toEqual({ FEATURE_FLAG: "enabled" });
+
+    expect(
+      ForkRequestSchema.parse({
+        task_id: "task-advanced",
+        message_id: "message-1",
+      }),
+    ).toEqual({
+      task_id: "task-advanced",
+      message_id: "message-1",
+    });
+    expect(
+      RollbackRequestSchema.parse({
+        task_id: "task-advanced",
+        checkpoint_id: "checkpoint-1",
+        turns: 2,
+      }),
+    ).toEqual({
+      task_id: "task-advanced",
+      checkpoint_id: "checkpoint-1",
+      turns: 2,
+    });
+    expect(
+      RevertRequestSchema.parse({
+        task_id: "task-advanced",
+        message_id: "message-1",
+      }),
+    ).toEqual({
+      task_id: "task-advanced",
+      message_id: "message-1",
+    });
+    expect(
+      UnrevertRequestSchema.parse({
+        task_id: "task-advanced",
+      }),
+    ).toEqual({
+      task_id: "task-advanced",
+    });
+    expect(
+      CommandRequestSchema.parse({
+        task_id: "task-advanced",
+        command: "/compact",
+        arguments: "--full",
+      }),
+    ).toEqual({
+      task_id: "task-advanced",
+      command: "/compact",
+      arguments: "--full",
+    });
+    expect(
+      InterruptRequestSchema.parse({
+        task_id: "task-advanced",
+      }),
+    ).toEqual({
+      task_id: "task-advanced",
+    });
+    expect(
+      ModelSwitchRequestSchema.parse({
+        task_id: "task-advanced",
+        model: "claude-haiku-4-5",
+      }),
+    ).toEqual({
+      task_id: "task-advanced",
+      model: "claude-haiku-4-5",
+    });
+    expect(
+      PermissionResponseSchema.parse({
+        decision: "allow",
+        reason: "approved",
+      }),
+    ).toEqual({
+      decision: "allow",
+      reason: "approved",
+    });
+  });
+
+  test("validates new advanced event payload schemas", () => {
+    expect(
+      ReasoningEventDataSchema.parse({
+        content: "Considering the next step.",
+      }),
+    ).toEqual({
+      content: "Considering the next step.",
+    });
+    expect(
+      FileChangeEventDataSchema.parse({
+        files: [
+          {
+            path: "src/index.ts",
+            change_type: "modified",
+          },
+        ],
+      }),
+    ).toEqual({
+      files: [
+        {
+          path: "src/index.ts",
+          change_type: "modified",
+        },
+      ],
+    });
+    expect(
+      TodoUpdateEventDataSchema.parse({
+        todos: [
+          {
+            id: "todo-1",
+            content: "Finish the shared runtime routes",
+            status: "in_progress",
+          },
+        ],
+      }),
+    ).toEqual({
+      todos: [
+        {
+          id: "todo-1",
+          content: "Finish the shared runtime routes",
+          status: "in_progress",
+        },
+      ],
+    });
+    expect(
+      ProgressEventDataSchema.parse({
+        tool_name: "Read",
+        progress_text: "Scanning the bridge sources",
+      }),
+    ).toEqual({
+      tool_name: "Read",
+      progress_text: "Scanning the bridge sources",
+    });
+    expect(
+      RateLimitEventDataSchema.parse({
+        utilization: 0.82,
+        reset_at: "2026-03-30T10:00:00.000Z",
+      }),
+    ).toEqual({
+      utilization: 0.82,
+      reset_at: "2026-03-30T10:00:00.000Z",
+    });
+    expect(
+      PartialMessageEventDataSchema.parse({
+        content: "Partial response",
+        is_complete: false,
+      }),
+    ).toEqual({
+      content: "Partial response",
+      is_complete: false,
+    });
+  });
+
   test("rejects invalid cancel and review payloads", () => {
     expect(CancelRequestSchema.safeParse({ task_id: "" }).success).toBe(false);
     expect(
@@ -204,5 +441,37 @@ describe("bridge request schemas", () => {
         pr_number: -1,
       }).success,
     ).toBe(false);
+    expect(
+      ExecuteRequestSchema.safeParse({
+        task_id: "task-123",
+        session_id: "session-123",
+        prompt: "Inspect the repository",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-123",
+        budget_usd: 1,
+        thinking_config: {
+          enabled: true,
+          budget_tokens: 0,
+        },
+      }).success,
+    ).toBe(false);
+    expect(
+      ExecuteRequestSchema.safeParse({
+        task_id: "task-123",
+        session_id: "session-123",
+        prompt: "Inspect the repository",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-123",
+        budget_usd: 1,
+        attachments: [
+          {
+            type: "video",
+            path: "D:/Project/AgentForge/tmp/demo.mp4",
+          },
+        ],
+      }).success,
+    ).toBe(false);
+    expect(PermissionResponseSchema.safeParse({ decision: "maybe" }).success).toBe(false);
+    expect(RevertRequestSchema.safeParse({ task_id: "task-123" }).success).toBe(false);
   });
 });

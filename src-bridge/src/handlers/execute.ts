@@ -35,12 +35,26 @@ export async function handleExecute(
   req: ExecuteRequest,
   deps: ExecuteDeps = {},
 ): Promise<{ session_id: string }> {
+  // Resolve active MCP tool plugins for agent execution before adapter construction.
+  if (deps.pluginManager) {
+    const toolPluginIds = req.role_config?.tools ?? [];
+    const allPlugins = deps.pluginManager.list();
+    deps.activePlugins = allPlugins.filter(
+      (p) =>
+        p.lifecycle_state === "active" &&
+        (toolPluginIds.length === 0 || toolPluginIds.includes(p.metadata.id)),
+    );
+  }
+
   const runtimeRegistry =
     deps.runtimeRegistry ??
     createRuntimeRegistry({
       queryRunner: deps.queryRunner,
       commandRuntimeRunner: deps.commandRuntimeRunner,
       codexRuntimeRunner: deps.codexRuntimeRunner,
+      activePlugins: deps.activePlugins,
+      hookCallbackManager: deps.hookCallbackManager,
+      forkSessionRunner: deps.forkSessionRunner,
       continuity: deps.continuity,
       executableLookup: deps.executableLookup,
       envLookup: deps.envLookup,
@@ -59,16 +73,6 @@ export async function handleExecute(
     request.system_prompt || defaultSystemPrompt(request.task_id),
     request.role_config,
   );
-
-  // Resolve active MCP tool plugins for agent execution
-  if (deps.pluginManager) {
-    const toolPluginIds = request.role_config?.tools ?? [];
-    const allPlugins = deps.pluginManager.list();
-    const activePlugins = allPlugins.filter(
-      (p) => p.lifecycle_state === "active" && (toolPluginIds.length === 0 || toolPluginIds.includes(p.metadata.id)),
-    );
-    deps.activePlugins = activePlugins;
-  }
 
   streamer.send({
     task_id: request.task_id,
@@ -141,7 +145,12 @@ async function executeAgent(
       session_id: req.session_id,
       timestamp_ms: now(),
       type: "status_change",
-      data: { old_status: "running", new_status: "completed", reason: "end_turn" },
+      data: {
+        old_status: "running",
+        new_status: "completed",
+        reason: "end_turn",
+        structured_output: runtime.structuredOutput ?? undefined,
+      },
     });
   } catch (err: unknown) {
     runtime.status = classifyTerminalStatus(runtime, err);

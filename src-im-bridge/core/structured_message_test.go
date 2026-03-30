@@ -92,3 +92,114 @@ func TestStructuredMessage_LegacyCardPreservesActionStyles(t *testing.T) {
 		t.Fatal("expected nil structured message to return nil legacy card")
 	}
 }
+
+func TestStructuredSection_FallbackTextCoversAllSectionTypes(t *testing.T) {
+	tests := []struct {
+		name    string
+		section StructuredSection
+		want    string
+	}{
+		{
+			name: "text",
+			section: StructuredSection{
+				Type: StructuredSectionTypeText,
+				TextSection: &TextSection{
+					Body: "Build *ready*",
+				},
+			},
+			want: "Build ready",
+		},
+		{
+			name: "image",
+			section: StructuredSection{
+				Type: StructuredSectionTypeImage,
+				ImageSection: &ImageSection{
+					URL:     "https://example.test/image.png",
+					AltText: "Build preview",
+				},
+			},
+			want: "Build preview: https://example.test/image.png",
+		},
+		{
+			name: "divider",
+			section: StructuredSection{
+				Type:           StructuredSectionTypeDivider,
+				DividerSection: &DividerSection{},
+			},
+			want: "---",
+		},
+		{
+			name: "context",
+			section: StructuredSection{
+				Type: StructuredSectionTypeContext,
+				ContextSection: &ContextSection{
+					Elements: []string{"alice", "2m ago"},
+				},
+			},
+			want: "alice | 2m ago",
+		},
+		{
+			name: "fields",
+			section: StructuredSection{
+				Type: StructuredSectionTypeFields,
+				FieldsSection: &FieldsSection{
+					Fields: []StructuredField{{Label: "Status", Value: "success"}},
+				},
+			},
+			want: "Status: success",
+		},
+		{
+			name: "actions",
+			section: StructuredSection{
+				Type: StructuredSectionTypeActions,
+				ActionsSection: &ActionsSection{
+					Actions: []StructuredAction{{Label: "Open", URL: "https://example.test/builds/1"}},
+				},
+			},
+			want: "Open: https://example.test/builds/1",
+		},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			if got := tc.section.FallbackText(); got != tc.want {
+				t.Fatalf("FallbackText() = %q, want %q", got, tc.want)
+			}
+		})
+	}
+}
+
+func TestStructuredMessage_FallbackTextPrefersSections(t *testing.T) {
+	message := &StructuredMessage{
+		Title: "Legacy Title",
+		Body:  "Legacy body",
+		Sections: []StructuredSection{
+			{
+				Type: StructuredSectionTypeText,
+				TextSection: &TextSection{
+					Body: "Build ready",
+				},
+			},
+			{
+				Type:           StructuredSectionTypeDivider,
+				DividerSection: &DividerSection{},
+			},
+			{
+				Type: StructuredSectionTypeFields,
+				FieldsSection: &FieldsSection{
+					Fields: []StructuredField{{Label: "Status", Value: "success"}},
+				},
+			},
+			{
+				Type: StructuredSectionTypeActions,
+				ActionsSection: &ActionsSection{
+					Actions: []StructuredAction{{Label: "Open", URL: "https://example.test/builds/1"}},
+				},
+			},
+		},
+	}
+
+	if got, want := message.FallbackText(), "Build ready\n---\nStatus: success\nOpen: https://example.test/builds/1"; got != want {
+		t.Fatalf("FallbackText() = %q, want %q", got, want)
+	}
+}

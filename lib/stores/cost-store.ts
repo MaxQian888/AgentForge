@@ -29,10 +29,28 @@ export interface ProjectCostSummary {
   totalOutputTokens: number;
   totalCacheReadTokens: number;
   totalTurns: number;
+  runCount: number;
   activeAgents: number;
   sprintCosts: SprintCostSummary[];
   taskCosts: TaskCostDetail[];
   dailyCosts: Array<{ date: string; costUsd: number }>;
+  budgetSummary: {
+    allocated: number;
+    spent: number;
+    remaining: number;
+    thresholdStatus: string;
+  } | null;
+  periodRollups: Record<
+    string,
+    {
+      costUsd: number;
+      inputTokens: number;
+      outputTokens: number;
+      cacheReadTokens: number;
+      turns: number;
+      runCount: number;
+    }
+  >;
 }
 
 export interface VelocityPoint {
@@ -42,13 +60,24 @@ export interface VelocityPoint {
 }
 
 export interface AgentPerformanceRecord {
-  agentId: string;
-  agentName: string;
-  taskCount: number;
+  bucketId: string;
+  label: string;
+  runCount: number;
   successRate: number;
   avgCostUsd: number;
   avgDurationMinutes: number;
   totalCostUsd: number;
+}
+
+interface VelocityResponse {
+  points: VelocityPoint[];
+  totalCompleted: number;
+  totalCostUsd: number;
+  avgPerDay: number;
+}
+
+interface AgentPerformanceResponse {
+  entries: AgentPerformanceRecord[];
 }
 
 interface CostState {
@@ -88,7 +117,7 @@ export const useCostStore = create<CostState>()((set) => ({
       );
       set({ projectCost: data, error: null });
     } catch {
-      set({ error: "Unable to load cost data" });
+      set({ projectCost: null, error: "Unable to load cost data" });
     } finally {
       set({ loading: false });
     }
@@ -101,11 +130,11 @@ export const useCostStore = create<CostState>()((set) => ({
     set({ velocityLoading: true });
     try {
       const api = createApiClient(API_URL);
-      const { data } = await api.get<VelocityPoint[]>(
+      const { data } = await api.get<VelocityResponse>(
         `/api/v1/stats/velocity?projectId=${projectId}`,
         { token }
       );
-      set({ velocity: data });
+      set({ velocity: data.points });
     } catch {
       set({ velocity: [] });
     } finally {
@@ -120,11 +149,11 @@ export const useCostStore = create<CostState>()((set) => ({
     set({ performanceLoading: true });
     try {
       const api = createApiClient(API_URL);
-      const { data } = await api.get<AgentPerformanceRecord[]>(
+      const { data } = await api.get<AgentPerformanceResponse>(
         `/api/v1/stats/agent-performance?projectId=${projectId}`,
         { token }
       );
-      set({ agentPerformance: data });
+      set({ agentPerformance: data.entries });
     } catch {
       set({ agentPerformance: [] });
     } finally {

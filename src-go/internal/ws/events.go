@@ -13,6 +13,7 @@ const (
 	EventTaskDeleted            = "task.deleted"
 	EventAgentStarted           = "agent.started"
 	EventAgentQueued            = "agent.queued"
+	EventAgentQueueCancelled    = "agent.queue.cancelled"
 	EventAgentQueuePromoted     = "agent.queue.promoted"
 	EventAgentQueueFailed       = "agent.queue.failed"
 	EventAgentPoolUpdated       = "agent.pool.updated"

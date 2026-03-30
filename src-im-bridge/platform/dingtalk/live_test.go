@@ -470,6 +470,118 @@ func TestLive_MetadataDeclaresActionCardCapabilities(t *testing.T) {
 	if _, ok := any(live).(core.CardSender); !ok {
 		t.Fatal("expected DingTalk live transport to implement CardSender")
 	}
+	foundMarkdown := false
+	for _, format := range metadata.Rendering.SupportedFormats {
+		if format == core.TextFormatDingTalkMD {
+			foundMarkdown = true
+			break
+		}
+	}
+	if !foundMarkdown {
+		t.Fatalf("SupportedFormats = %+v, want dingtalk_md", metadata.Rendering.SupportedFormats)
+	}
+	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != core.NativeSurfaceDingTalkCard {
+		t.Fatalf("NativeSurfaces = %+v", metadata.Rendering.NativeSurfaces)
+	}
+}
+
+func TestLive_SendNativeUsesWebhookActionCard(t *testing.T) {
+	replier := &fakeWebhookReplier{}
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{}),
+		WithWebhookReplier(replier),
+		WithDirectMessenger(&fakeDirectMessenger{}),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	message, err := core.NewDingTalkCardMessage(
+		core.DingTalkCardTypeActionCard,
+		"Review Ready",
+		"### Choose the next step",
+		[]core.DingTalkCardButton{{Title: "Open", ActionURL: "https://example.test/reviews/1"}},
+	)
+	if err != nil {
+		t.Fatalf("NewDingTalkCardMessage error: %v", err)
+	}
+
+	if err := live.SendNative(context.Background(), "https://session.example/reply", message); err != nil {
+		t.Fatalf("SendNative error: %v", err)
+	}
+
+	if len(replier.messageCalls) != 1 {
+		t.Fatalf("messageCalls = %+v", replier.messageCalls)
+	}
+	if replier.messageCalls[0].Body["msgtype"] != "actionCard" {
+		t.Fatalf("payload = %+v", replier.messageCalls[0].Body)
+	}
+}
+
+func TestLive_SendFormattedTextUsesMarkdownWebhookPayload(t *testing.T) {
+	replier := &fakeWebhookReplier{}
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{}),
+		WithWebhookReplier(replier),
+		WithDirectMessenger(&fakeDirectMessenger{}),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.SendFormattedText(context.Background(), "https://session.example/reply", &core.FormattedText{
+		Content: "### Review Ready",
+		Format:  core.TextFormatDingTalkMD,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+
+	if len(replier.messageCalls) != 1 {
+		t.Fatalf("messageCalls = %+v", replier.messageCalls)
+	}
+	if replier.messageCalls[0].Body["msgtype"] != "markdown" {
+		t.Fatalf("payload = %+v", replier.messageCalls[0].Body)
+	}
+}
+
+func TestRenderStructuredSectionsBuildsDingTalkCardPayload(t *testing.T) {
+	payload := renderStructuredSections([]core.StructuredSection{
+		{
+			Type: core.StructuredSectionTypeText,
+			TextSection: &core.TextSection{
+				Body: "Build ready",
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeImage,
+			ImageSection: &core.ImageSection{
+				URL: "https://example.test/build.png",
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeFields,
+			FieldsSection: &core.FieldsSection{
+				Fields: []core.StructuredField{{Label: "Status", Value: "success"}},
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeActions,
+			ActionsSection: &core.ActionsSection{
+				Actions: []core.StructuredAction{{Label: "Open", URL: "https://example.test/reviews/1"}},
+			},
+		},
+	})
+
+	if payload.Title == "" || payload.Markdown == "" || len(payload.Buttons) != 1 {
+		t.Fatalf("payload = %+v", payload)
+	}
+	if !containsAll(payload.Markdown, []string{"Build ready", "Status", "https://example.test/build.png"}) {
+		t.Fatalf("markdown = %q", payload.Markdown)
+	}
 }
 
 func TestLive_StartRequiresHandler(t *testing.T) {

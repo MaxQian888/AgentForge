@@ -1,11 +1,51 @@
 export type AgentRuntimeKey = "claude_code" | "codex" | "opencode";
 export type DecomposeExecutionMode = "human" | "agent";
+export type HookName =
+  | "PreToolUse"
+  | "PostToolUse"
+  | "SubagentStart"
+  | "SubagentStop"
+  | "PermissionRequest";
 export type ResumeBlockingReason =
   | "missing_continuity_state"
   | "expired_continuity_state"
   | "runtime_mismatch"
   | "provider_rejected"
   | "continuity_not_supported";
+
+export interface ThinkingConfig {
+  enabled: boolean;
+  budget_tokens?: number;
+}
+
+export interface StructuredOutputSchema {
+  type: "json_schema";
+  schema: Record<string, unknown>;
+}
+
+export interface HookDefinition {
+  hook: HookName;
+  matcher?: Record<string, unknown>;
+}
+
+export interface HooksConfig {
+  hooks: HookDefinition[];
+  callback_url?: string;
+  timeout_ms?: number;
+}
+
+export interface Attachment {
+  type: "image" | "file";
+  path: string;
+  mime_type?: string;
+}
+
+export interface AgentDefinition {
+  description: string;
+  prompt: string;
+  tools?: string[];
+  model?: string;
+}
 
 /** Request from Go Orchestrator to execute an agent task. */
 export interface ExecuteRequest {
@@ -26,6 +66,21 @@ export interface ExecuteRequest {
   role_config?: RoleConfig;
   team_id?: string;
   team_role?: "planner" | "coder" | "reviewer";
+  thinking_config?: ThinkingConfig;
+  output_schema?: StructuredOutputSchema;
+  hooks_config?: HooksConfig;
+  hook_callback_url?: string;
+  hook_timeout_ms?: number;
+  attachments?: Attachment[];
+  file_checkpointing?: boolean;
+  agents?: Record<string, AgentDefinition>;
+  disallowed_tools?: string[];
+  fallback_model?: string;
+  additional_directories?: string[];
+  include_partial_messages?: boolean;
+  tool_permission_callback?: boolean;
+  web_search?: boolean;
+  env?: Record<string, string>;
 }
 
 export interface ResumeRequest {
@@ -120,6 +175,13 @@ export type AgentEventType =
   | "error"
   | "snapshot"
   | "heartbeat"
+  | "reasoning"
+  | "file_change"
+  | "todo_update"
+  | "progress"
+  | "rate_limit"
+  | "partial_message"
+  | "permission_request"
   // PRD agent-prefixed aliases (Go can match either format)
   | "agent.output"
   | "agent.tool_call"
@@ -156,6 +218,11 @@ export interface AgentStatus {
   team_role?: "planner" | "coder" | "reviewer";
   resume_ready?: boolean;
   resume_blocked_reason?: ResumeBlockingReason;
+  structured_output?: Record<string, unknown>;
+  thinking_enabled?: boolean;
+  file_checkpointing?: boolean;
+  active_hooks?: HookName[];
+  subagent_count?: number;
 }
 
 export interface RuntimeDiagnostic {
@@ -180,6 +247,9 @@ export interface RuntimeCatalogEntry {
   defaultModel?: string;
   available: boolean;
   diagnostics: RuntimeDiagnostic[];
+  supportedFeatures: string[];
+  agents?: string[];
+  skills?: string[];
 }
 
 export interface RuntimeCatalog {
@@ -216,9 +286,96 @@ export interface CostUpdate {
   turn_number: number;
 }
 
+export interface ReasoningEventData {
+  content: string;
+}
+
+export interface FileChangeEventData {
+  files: Array<{
+    path: string;
+    change_type?: string;
+    [key: string]: unknown;
+  }>;
+}
+
+export interface TodoUpdateEventData {
+  todos: Array<{
+    id?: string;
+    content?: string;
+    status?: string;
+    [key: string]: unknown;
+  }>;
+}
+
+export interface ProgressEventData {
+  tool_name?: string;
+  progress_text?: string;
+  item_type?: string;
+  partial_output?: unknown;
+}
+
+export interface RateLimitEventData {
+  utilization?: number;
+  reset_at?: string | number;
+}
+
+export interface PartialMessageEventData {
+  content: string;
+  is_complete: boolean;
+}
+
+export interface PermissionRequestEventData {
+  request_id: string;
+  tool_name?: string;
+  context?: unknown;
+  elicitation_type?: string;
+  fields?: unknown[];
+  mcp_server_id?: string;
+}
+
 /** Cancel request from Go Orchestrator. */
 export interface CancelRequest {
   task_id: string;
+  reason?: string;
+}
+
+export interface ForkRequest {
+  task_id: string;
+  message_id?: string;
+}
+
+export interface RollbackRequest {
+  task_id: string;
+  checkpoint_id?: string;
+  turns?: number;
+}
+
+export interface RevertRequest {
+  task_id: string;
+  message_id: string;
+}
+
+export interface UnrevertRequest {
+  task_id: string;
+}
+
+export interface CommandRequest {
+  task_id: string;
+  command: string;
+  arguments?: string;
+}
+
+export interface InterruptRequest {
+  task_id: string;
+}
+
+export interface ModelSwitchRequest {
+  task_id: string;
+  model: string;
+}
+
+export interface PermissionResponse {
+  decision: "allow" | "deny";
   reason?: string;
 }
 
@@ -230,6 +387,8 @@ export interface ClaudeContinuityState {
   session_handle?: string;
   checkpoint_id?: string;
   resume_token?: string;
+  query_ref?: string;
+  fork_available?: boolean;
 }
 
 export interface CodexContinuityState {
@@ -238,6 +397,8 @@ export interface CodexContinuityState {
   captured_at: number;
   blocking_reason?: ResumeBlockingReason;
   thread_id?: string;
+  fork_available?: boolean;
+  rollback_turns?: number;
 }
 
 export interface OpenCodeContinuityState {
@@ -248,6 +409,8 @@ export interface OpenCodeContinuityState {
   upstream_session_id?: string;
   latest_message_id?: string;
   server_url?: string;
+  fork_available?: boolean;
+  revert_message_ids?: string[];
 }
 
 export type RuntimeContinuityState =

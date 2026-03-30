@@ -1,4 +1,11 @@
 {
+  "appearance": "外观",
+  "appearanceDesc": "自定义应用程序的外观与风格。",
+  "themeMode": "主题",
+  "themeLight": "浅色",
+  "themeDark": "深色",
+  "themeSystem": "跟随系统",
+  "language": "语言",
   "title": "项目设置",
   "titleNoProject": "设置",
   "selectProject": "请从仪表盘选择一个项目来配置设置。",

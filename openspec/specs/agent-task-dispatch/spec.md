@@ -46,25 +46,23 @@ The system MUST validate task dispatch targets before attempting to start agent 
 - **THEN** the outcome includes a machine-readable budget guardrail classification identifying the exhausted scope
 
 ### Requirement: Assignment and dispatch outcomes are visible to synchronous and realtime consumers
-The system SHALL expose assignment and dispatch as a layered result, so API clients, WebSocket consumers, notifications, and IM command handlers can distinguish between assignment success, queued admission, and runtime startup success. Successful dispatch MUST continue to emit runtime lifecycle signals, while queued or blocked dispatch attempts MUST emit explicit results that consumers can render without inferring from missing runtime events.
 
-#### Scenario: Successful agent assignment emits assignment and runtime feedback
-- **WHEN** an assignment request dispatches an agent successfully
-- **THEN** the system emits the task assignment signal for the relevant task/project scope
-- **THEN** the system emits the runtime-started lifecycle signal for the same task/project scope
-- **THEN** synchronous callers receive the same dispatch outcome reflected in the API response
+The agent detail page SHALL display dispatch context including the dispatch outcome (started, queued, blocked, skipped), preflight summary, and budget metadata. This context SHALL be shown as a dedicated section on the agent detail page so operators can understand how the agent was dispatched without navigating away.
 
-#### Scenario: Queued assignment emits an explicit non-started result
-- **WHEN** an assignment request succeeds but AgentPool admission queues the task before runtime startup
-- **THEN** the system keeps the task assignment result distinguishable from runtime startup
-- **THEN** the system emits an explicit queued dispatch signal or notification for the relevant task/project scope
-- **THEN** synchronous callers receive the same queued outcome in the API response
+#### Scenario: Agent detail shows dispatch outcome
+- **WHEN** operator views an agent's detail page
+- **THEN** a Dispatch Context section displays the dispatch outcome (started/queued/blocked/skipped)
+- **AND** shows the preflight summary including budget status and pool state at dispatch time
 
-#### Scenario: Blocked dispatch emits an explicit non-started result
-- **WHEN** an assignment request updates the task assignee but startup is blocked before a runtime begins
-- **THEN** the system keeps the task assignment result distinguishable from runtime startup
-- **THEN** the system emits an explicit blocked dispatch signal or notification for the relevant task/project scope
-- **THEN** consumers MUST NOT need to infer the blocked state solely from the absence of `agent.started`
+#### Scenario: Agent detail shows dispatch history for the task
+- **WHEN** operator views an agent's detail page for a task with multiple dispatch attempts
+- **THEN** the Dispatch Context section shows the dispatch history for that task
+- **AND** each attempt shows outcome, timestamp, and reason if blocked
+
+#### Scenario: Agent without dispatch context shows minimal info
+- **WHEN** operator views an agent that was spawned manually without dispatch
+- **THEN** the Dispatch Context section shows "Manual spawn" with the spawn timestamp
+- **AND** no preflight or guardrail data is displayed
 
 ### Requirement: IM task assignment commands reflect dispatch outcomes truthfully
 The system MUST make IM-triggered task assignment reuse the same task dispatch workflow and outcome semantics as the canonical backend API.

@@ -7,10 +7,16 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { useDashboardStore, type DashboardConfig } from "@/lib/stores/dashboard-store";
 import { DashboardGrid } from "@/components/dashboard/dashboard-grid";
+import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
+import { PageHeader } from "@/components/shared/page-header";
+import { EmptyState } from "@/components/shared/empty-state";
+import { ErrorBanner } from "@/components/shared/error-banner";
+import { FolderOpen, LayoutDashboard } from "lucide-react";
 
 const EMPTY_DASHBOARDS: DashboardConfig[] = [];
 
 function ProjectDashboardView() {
+  useBreadcrumbs([{ label: "Projects", href: "/projects" }, { label: "Dashboard" }]);
   const t = useTranslations("dashboard");
   const router = useRouter();
   const pathname = usePathname();
@@ -101,7 +107,12 @@ function ProjectDashboardView() {
   ]);
 
   if (!projectId) {
-    return <div className="text-sm text-muted-foreground">{t("projectDashboard.selectProject")}</div>;
+    return (
+      <EmptyState
+        icon={FolderOpen}
+        title={t("projectDashboard.selectProject")}
+      />
+    );
   }
 
   if (dashboardsLoading && dashboards.length === 0) {
@@ -114,33 +125,25 @@ function ProjectDashboardView() {
 
   if (dashboardsError && dashboards.length === 0) {
     return (
-      <div className="space-y-3 rounded-lg border border-destructive/30 bg-destructive/5 p-4">
-        <div className="text-sm font-medium text-destructive">
-          {t("projectDashboard.error")}
-        </div>
-        <div className="text-sm text-muted-foreground">{dashboardsError}</div>
-        <Button
-          type="button"
-          size="sm"
-          variant="outline"
-          onClick={() => void fetchDashboards(projectId)}
-        >
-          {t("projectDashboard.retry")}
-        </Button>
-      </div>
+      <ErrorBanner
+        message={`${t("projectDashboard.error")}: ${dashboardsError}`}
+        onRetry={() => void fetchDashboards(projectId)}
+      />
     );
   }
 
   return (
     <div className="space-y-4">
+      <PageHeader title={t("projectDashboard.title")} />
       {!selectedDashboard ? (
-        <button
-          type="button"
-          className="rounded-md border px-3 py-2 text-sm"
-          onClick={() => void createDashboard(projectId, { name: t("projectDashboard.sprintOverview"), layout: [] })}
-        >
-          {t("projectDashboard.createDashboard")}
-        </button>
+        <EmptyState
+          icon={LayoutDashboard}
+          title={t("projectDashboard.createDashboard")}
+          action={{
+            label: t("projectDashboard.createDashboard"),
+            onClick: () => void createDashboard(projectId, { name: t("projectDashboard.sprintOverview"), layout: [] }),
+          }}
+        />
       ) : (
         <>
           <div className="flex flex-col gap-3 rounded-lg border bg-card p-4 shadow-sm md:flex-row md:items-end md:justify-between">

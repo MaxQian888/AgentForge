@@ -3,6 +3,13 @@
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
+  Responsive,
+  WidthProvider,
+  type Layout,
+  type LayoutItem,
+  type ResponsiveLayouts,
+} from "react-grid-layout/legacy";
+import {
   useDashboardStore,
   type DashboardConfig,
   type DashboardWidget,
@@ -17,18 +24,38 @@ import {
   DialogTitle,
 } from "@/components/ui/dialog";
 import { Label } from "@/components/ui/label";
-import { WidgetWrapper } from "./widget-wrapper";
+import { WidgetCard } from "./widget-card";
 import { AddWidgetDialog } from "./add-widget-dialog";
 import { getWidgetMetadata } from "./widget-catalog";
 import { BurndownChartWidget, MetricCard, ThroughputChart } from "./widgets";
 
 type WidgetData = Record<string, unknown>;
+const ResponsiveGridLayout = WidthProvider(Responsive);
 
 interface WidgetPosition {
   x: number;
   y: number;
   w: number;
   h: number;
+}
+
+function toLayoutItem(id: string, position: WidgetPosition): LayoutItem {
+  return {
+    i: id,
+    x: position.x,
+    y: position.y,
+    w: position.w,
+    h: position.h,
+  };
+}
+
+function samePosition(left: WidgetPosition, right: WidgetPosition): boolean {
+  return (
+    left.x === right.x &&
+    left.y === right.y &&
+    left.w === right.w &&
+    left.h === right.h
+  );
 }
 
 function normalizePosition(position: unknown): WidgetPosition {
@@ -208,25 +235,40 @@ export function DashboardGrid({
     [configuringWidgetId, widgets]
   );
 
-  const persistLayout = async (
-    widget: DashboardWidget,
-    nextPosition: WidgetPosition,
-    nextDraft?: Record<string, WidgetPosition>
-  ) => {
-    const draft = nextDraft ?? {
-      ...layoutDraft,
-      [widget.id]: nextPosition,
+  const currentPositions = useMemo(
+    () =>
+      Object.fromEntries(
+        items.map(({ widget, position }) => [widget.id, position])
+      ) as Record<string, WidgetPosition>,
+    [items]
+  );
+  const responsiveLayouts = useMemo<ResponsiveLayouts>(() => {
+    const layout = items.map(({ widget, position }) =>
+      toLayoutItem(widget.id, position)
+    );
+
+    return {
+      lg: layout,
+      md: layout,
+      sm: layout,
     };
+  }, [items]);
+
+  const persistLayoutDraft = async (draft: Record<string, WidgetPosition>) => {
     setLayoutDraft(draft);
     setLayoutStatus("saving");
 
     try {
-      await saveWidget(projectId, dashboard.id, {
-        id: widget.id,
-        widgetType: widget.widgetType,
-        config: widget.config,
-        position: nextPosition,
-      });
+      await Promise.all(
+        widgets.map((widget) =>
+          saveWidget(projectId, dashboard.id, {
+            id: widget.id,
+            widgetType: widget.widgetType,
+            config: widget.config,
+            position: draft[widget.id] ?? normalizePosition(widget.position),
+          })
+        )
+      );
       await updateDashboard(projectId, dashboard.id, {
         layout: widgets.map((item) => ({
           id: item.id,
@@ -237,6 +279,19 @@ export function DashboardGrid({
     } catch {
       setLayoutStatus("error");
     }
+  };
+
+  const persistLayout = async (
+    widget: DashboardWidget,
+    nextPosition: WidgetPosition,
+    nextDraft?: Record<string, WidgetPosition>
+  ) => {
+    const draft = nextDraft ?? {
+      ...currentPositions,
+      [widget.id]: nextPosition,
+    };
+
+    await persistLayoutDraft(draft);
   };
 
   const openWidgetConfig = (widget: DashboardWidget) => {
@@ -277,7 +332,46 @@ export function DashboardGrid({
         </div>
       ) : null}
 
-      <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-3">
+      <ResponsiveGridLayout
+        layouts={responsiveLayouts}
+        breakpoints={{ lg: 1280, md: 768, sm: 0 }}
+        cols={{ lg: 3, md: 2, sm: 1 }}
+        margin={[16, 16]}
+        containerPadding={[0, 0]}
+        rowHeight={220}
+        isDraggable
+        isResizable
+        draggableHandle=".dashboard-widget-handle"
+        onLayoutChange={(layout: Layout) => {
+          if (layout.length === 0) {
+            return;
+          }
+
+          const nextDraft: Record<string, WidgetPosition> = {};
+          for (const item of layout) {
+            nextDraft[item.i] = normalizePosition({
+              x: item.x,
+              y: item.y,
+              w: item.w,
+              h: item.h,
+            });
+          }
+          const changed = layout.some((item) => {
+            const current = currentPositions[item.i];
+            const next = nextDraft[item.i];
+            return !current || !samePosition(current, next);
+          });
+
+          if (!changed) {
+            return;
+          }
+
+          void persistLayoutDraft({
+            ...currentPositions,
+            ...nextDraft,
+          });
+        }}
+      >
         {items.map(({ widget, position, requestState, data }) => {
           const metadata = getWidgetMetadata(widget.widgetType);
           const wrapperState =
@@ -288,11 +382,11 @@ export function DashboardGrid({
                 : "ready";
 
           return (
-            <div
-              key={widget.id}
-              className={position.w > 1 ? "md:col-span-2" : undefined}
-            >
-              <WidgetWrapper
+            <div key={widget.id}>
+              <div className="dashboard-widget-handle mb-2 cursor-move text-xs font-medium text-muted-foreground">
+                {t(metadata.titleKey)}
+              </div>
+              <WidgetCard
                 title={t(metadata.titleKey)}
                 state={wrapperState}
                 message={
@@ -312,7 +406,7 @@ export function DashboardGrid({
                 }
               >
                 {renderWidgetBody(widget.widgetType, data, t)}
-              </WidgetWrapper>
+              </WidgetCard>
               <div className="mt-2 flex gap-2">
                 <Button
                   type="button"
@@ -333,7 +427,7 @@ export function DashboardGrid({
             </div>
           );
         })}
-      </div>
+      </ResponsiveGridLayout>
 
       <AddWidgetDialog
         open={addOpen}

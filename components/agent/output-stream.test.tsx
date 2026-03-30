@@ -14,7 +14,12 @@ describe("OutputStream", () => {
 
     render(<OutputStream lines={[]} />);
 
-    expect(screen.getByText("Waiting for output...")).toBeInTheDocument();
+    expect(screen.getByText("Waiting for output")).toBeInTheDocument();
+    expect(
+      screen.getByText(
+        "Runtime logs will appear here once the agent starts producing output.",
+      ),
+    ).toBeInTheDocument();
     expect(scrollIntoView).toHaveBeenCalled();
   });
 
@@ -23,6 +28,6 @@ describe("OutputStream", () => {
 
     expect(screen.getByText("booting")).toBeInTheDocument();
     expect(screen.getByText("ready")).toBeInTheDocument();
-    expect(screen.queryByText("Waiting for output...")).not.toBeInTheDocument();
+    expect(screen.queryByText("Waiting for output")).not.toBeInTheDocument();
   });
 });
