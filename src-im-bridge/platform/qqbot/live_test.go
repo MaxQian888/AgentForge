@@ -2,10 +2,14 @@ package qqbot
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/agentforge/im-bridge/core"
+	"net/http"
+	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
-
-	"github.com/agentforge/im-bridge/core"
+	"time"
 )
 
 func TestNewLive_RequiresCredentialsAndCallbackSettings(t *testing.T) {
@@ -198,4 +202,258 @@ type staticTokenProvider string
 
 func (s staticTokenProvider) AccessToken(ctx context.Context) (string, error) {
 	return string(s), nil
+}
+
+func TestLive_OptionsIdentityAndReplyContextHelpers(t *testing.T) {
+	live, err := NewLive(
+		"1024",
+		"secret",
+		"9080",
+		"callback",
+		WithAPIBase("https://api.example.test/"),
+		WithTokenBase("https://token.example.test/"),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if live.Name() != "qqbot-live" {
+		t.Fatalf("Name = %q", live.Name())
+	}
+	if live.apiBase != "https://api.example.test" {
+		t.Fatalf("apiBase = %q", live.apiBase)
+	}
+	if live.tokenBase != "https://token.example.test" {
+		t.Fatalf("tokenBase = %q", live.tokenBase)
+	}
+	if !reflect.DeepEqual(live.CallbackPaths(), []string{"/callback"}) {
+		t.Fatalf("CallbackPaths = %+v", live.CallbackPaths())
+	}
+	if live.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+
+	replyAny := live.ReplyContextFromTarget(&core.ReplyTarget{
+		ConversationID: "group-openid",
+		UserID:         "user-openid",
+		MessageID:      "evt-1",
+	})
+	reply, ok := replyAny.(replyContext)
+	if !ok {
+		t.Fatalf("ReplyContextFromTarget type = %T", replyAny)
+	}
+	if reply.ChatID != "group-openid" || reply.UserID != "user-openid" || reply.MessageID != "evt-1" || !reply.IsGroup {
+		t.Fatalf("reply = %+v", reply)
+	}
+}
+
+func TestQQBotLiveHelpers_ParseTargetsAndEventTime(t *testing.T) {
+	if got := parseTarget(""); got.GroupOpenID != "" || got.UserOpenID != "" {
+		t.Fatalf("parseTarget(empty) = %+v", got)
+	}
+	if got := parseTarget("user:user-openid"); got.UserOpenID != "user-openid" || got.GroupOpenID != "" {
+		t.Fatalf("parseTarget(user) = %+v", got)
+	}
+	if got := parseTarget("group:group-openid"); got.GroupOpenID != "group-openid" || got.UserOpenID != "" {
+		t.Fatalf("parseTarget(group) = %+v", got)
+	}
+	if got := parseTarget("group-openid"); got.GroupOpenID != "group-openid" {
+		t.Fatalf("parseTarget(default) = %+v", got)
+	}
+
+	if got := targetFromReply(replyContext{ChatID: "group-openid", MessageID: "evt-1", IsGroup: true}); got.GroupOpenID != "group-openid" || got.MessageID != "evt-1" {
+		t.Fatalf("targetFromReply(group) = %+v", got)
+	}
+	if got := targetFromReply(replyContext{UserID: "user-openid", MessageID: "evt-2"}); got.UserOpenID != "user-openid" || got.MessageID != "evt-2" {
+		t.Fatalf("targetFromReply(user) = %+v", got)
+	}
+	if got := targetFromReply(replyContext{}); got != (messageTarget{}) {
+		t.Fatalf("targetFromReply(empty) = %+v", got)
+	}
+
+	if got := parseEventTime("2026-03-30T10:20:30Z"); !got.Equal(time.Date(2026, 3, 30, 10, 20, 30, 0, time.UTC)) {
+		t.Fatalf("parseEventTime(valid) = %v", got)
+	}
+	before := time.Now()
+	got := parseEventTime("bad-time")
+	after := time.Now()
+	if got.Before(before) || got.After(after.Add(time.Second)) {
+		t.Fatalf("parseEventTime(invalid) = %v, want near now", got)
+	}
+}
+
+func TestLive_ReplyNativeUsesReplyTargetsAndRejectsMissingTargets(t *testing.T) {
+	sender := &fakeSender{}
+	live, err := NewLive(
+		"1024",
+		"secret",
+		"9080",
+		"/callback",
+		WithSender(sender),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	message, err := core.NewQQBotMarkdownMessage("## Review Ready", nil)
+	if err != nil {
+		t.Fatalf("NewQQBotMarkdownMessage error: %v", err)
+	}
+
+	if err := live.ReplyNative(context.Background(), replyContext{ChatID: "group-openid", MessageID: "evt-1", IsGroup: true}, message); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+	if len(sender.messageCalls) != 1 || sender.messageCalls[0].Target.GroupOpenID != "group-openid" || sender.messageCalls[0].Target.MessageID != "evt-1" {
+		t.Fatalf("messageCalls = %+v", sender.messageCalls)
+	}
+
+	if err := live.ReplyNative(context.Background(), replyContext{}, message); err == nil || !strings.Contains(err.Error(), "requires group or user target") {
+		t.Fatalf("missing target error = %v", err)
+	}
+}
+
+func TestCachedAccessTokenProvider_CachesAndValidatesResponses(t *testing.T) {
+	requests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests++
+		if r.URL.Path != "/app/getAppAccessToken" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		var body map[string]string
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["appId"] != "1024" || body["clientSecret"] != "secret" {
+			t.Fatalf("body = %+v", body)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"access_token": "token-123",
+			"expires_in":   3600,
+		})
+	}))
+	defer server.Close()
+
+	provider := &cachedAccessTokenProvider{
+		appID:     "1024",
+		appSecret: "secret",
+		tokenBase: server.URL,
+		client:    server.Client(),
+	}
+
+	token, err := provider.AccessToken(context.Background())
+	if err != nil {
+		t.Fatalf("AccessToken first error: %v", err)
+	}
+	if token != "token-123" {
+		t.Fatalf("token = %q", token)
+	}
+	token, err = provider.AccessToken(context.Background())
+	if err != nil {
+		t.Fatalf("AccessToken second error: %v", err)
+	}
+	if token != "token-123" {
+		t.Fatalf("cached token = %q", token)
+	}
+	if requests != 1 {
+		t.Fatalf("requests = %d, want 1", requests)
+	}
+
+	errorServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "denied", http.StatusBadGateway)
+	}))
+	defer errorServer.Close()
+	provider = &cachedAccessTokenProvider{
+		appID:     "1024",
+		appSecret: "secret",
+		tokenBase: errorServer.URL,
+		client:    errorServer.Client(),
+	}
+	if _, err := provider.AccessToken(context.Background()); err == nil || !strings.Contains(err.Error(), "qqbot access token request failed") {
+		t.Fatalf("error response = %v", err)
+	}
+
+	missingTokenServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_, _ = w.Write([]byte(`{"expires_in":120}`))
+	}))
+	defer missingTokenServer.Close()
+	provider = &cachedAccessTokenProvider{
+		appID:     "1024",
+		appSecret: "secret",
+		tokenBase: missingTokenServer.URL,
+		client:    missingTokenServer.Client(),
+	}
+	if _, err := provider.AccessToken(context.Background()); err == nil || !strings.Contains(err.Error(), "missing access_token") {
+		t.Fatalf("missing token error = %v", err)
+	}
+}
+
+func TestAPISender_SendTextAndMessage(t *testing.T) {
+	requests := make([]map[string]any, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if got := r.Header.Get("Authorization"); got != "QQBot token-123" {
+			t.Fatalf("Authorization = %q", got)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		body["_path"] = r.URL.Path
+		requests = append(requests, body)
+		w.WriteHeader(http.StatusOK)
+	}))
+	defer server.Close()
+
+	sender := &apiSender{
+		apiBase:       server.URL,
+		tokenProvider: staticTokenProvider("token-123"),
+		client:        server.Client(),
+	}
+
+	if err := sender.SendText(context.Background(), messageTarget{GroupOpenID: "group-openid", MessageID: "evt-1"}, " hello "); err != nil {
+		t.Fatalf("SendText error: %v", err)
+	}
+	if err := sender.SendMessage(context.Background(), messageTarget{UserOpenID: "user-openid"}, map[string]any{"msg_type": 2, "markdown": map[string]any{"content": "## Ready"}}); err != nil {
+		t.Fatalf("SendMessage error: %v", err)
+	}
+
+	if len(requests) != 2 {
+		t.Fatalf("requests = %+v", requests)
+	}
+	if requests[0]["_path"] != "/v2/groups/group-openid/messages" || requests[0]["content"] != "hello" || requests[0]["msg_type"] != float64(0) || requests[0]["msg_id"] != "evt-1" {
+		t.Fatalf("first request = %+v", requests[0])
+	}
+	if requests[1]["_path"] != "/v2/users/user-openid/messages" || requests[1]["msg_type"] != float64(2) {
+		t.Fatalf("second request = %+v", requests[1])
+	}
+}
+
+func TestAPISender_RejectsBadInputsAndServerErrors(t *testing.T) {
+	sender := &apiSender{
+		apiBase:       "https://api.example.test",
+		tokenProvider: staticTokenProvider("token-123"),
+		client:        http.DefaultClient,
+	}
+
+	if err := sender.SendMessage(context.Background(), messageTarget{}, map[string]any{"msg_type": 2}); err == nil || !strings.Contains(err.Error(), "requires group_openid or user_openid") {
+		t.Fatalf("empty target error = %v", err)
+	}
+	if err := sender.SendMessage(context.Background(), messageTarget{GroupOpenID: "group-openid"}, nil); err == nil || !strings.Contains(err.Error(), "payload is required") {
+		t.Fatalf("nil payload error = %v", err)
+	}
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "upstream boom", http.StatusBadGateway)
+	}))
+	defer server.Close()
+	sender = &apiSender{
+		apiBase:       server.URL,
+		tokenProvider: staticTokenProvider("token-123"),
+		client:        server.Client(),
+	}
+	if err := sender.SendMessage(context.Background(), messageTarget{GroupOpenID: "group-openid"}, map[string]any{"msg_type": 2}); err == nil || !strings.Contains(err.Error(), "qqbot send failed: upstream boom") {
+		t.Fatalf("server error = %v", err)
+	}
 }

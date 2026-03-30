@@ -4,11 +4,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"github.com/agentforge/im-bridge/core"
+	"io"
+	"net/http"
 	"strings"
 	"testing"
 	"time"
-
-	"github.com/agentforge/im-bridge/core"
 )
 
 func TestNewLive_RequiresCredentialsAndCallbackSettings(t *testing.T) {
@@ -356,4 +357,328 @@ func (s staticTokenProvider) AccessToken(ctx context.Context) (string, error) {
 		return "", errors.New("missing token")
 	}
 	return string(s), nil
+}
+
+type roundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn roundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func TestLive_ReplyContextAndFallbackHelpers(t *testing.T) {
+	live, err := NewLive(
+		"corp-id",
+		"1000002",
+		"agent-secret",
+		"callback-token",
+		"9080",
+		"/callback",
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if live.Name() != "wecom-live" {
+		t.Fatalf("Name = %q", live.Name())
+	}
+	if live.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+
+	replyAny := live.ReplyContextFromTarget(&core.ReplyTarget{
+		SessionWebhook: " https://work.weixin.qq.com/response ",
+		ConversationID: "chat-1",
+		UserID:         "zhangsan",
+	})
+	reply, ok := replyAny.(replyContext)
+	if !ok {
+		t.Fatalf("ReplyContextFromTarget type = %T", replyAny)
+	}
+	if reply.ResponseURL != "https://work.weixin.qq.com/response" || reply.ChatID != "chat-1" || reply.UserID != "zhangsan" {
+		t.Fatalf("reply = %+v", reply)
+	}
+
+	if got := renderStructuredFallback(nil); got != "" {
+		t.Fatalf("renderStructuredFallback(nil) = %q", got)
+	}
+	if got := renderStructuredFallback(&core.StructuredMessage{Title: "Review Ready", Body: "Ship it"}); !strings.Contains(got, "Review Ready") || strings.Contains(got, "WeCom richer card update is unavailable") {
+		t.Fatalf("renderStructuredFallback(no actions) = %q", got)
+	}
+	if got := renderStructuredFallback(&core.StructuredMessage{
+		Title: "Review Ready",
+		Body:  "Ship it",
+		Actions: []core.StructuredAction{
+			{Label: "Open", URL: "https://example.test/reviews/1"},
+		},
+	}); !strings.Contains(got, "WeCom richer card update is unavailable") {
+		t.Fatalf("renderStructuredFallback(actions) = %q", got)
+	}
+
+	sender := &fakeDirectSender{}
+	replier := &fakeResponseReplier{}
+	live, err = NewLive(
+		"corp-id",
+		"1000002",
+		"agent-secret",
+		"callback-token",
+		"9080",
+		"/callback",
+		WithDirectSender(sender),
+		WithResponseReplier(replier),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive second error: %v", err)
+	}
+	if err := live.ReplyStructured(context.Background(), replyContext{
+		ResponseURL: "https://work.weixin.qq.com/response",
+		ChatID:      "chat-1",
+	}, &core.StructuredMessage{
+		Sections: []core.StructuredSection{{
+			Type: core.StructuredSectionTypeText,
+			TextSection: &core.TextSection{
+				Body: "Build ready",
+			},
+		}},
+	}); err != nil {
+		t.Fatalf("ReplyStructured error: %v", err)
+	}
+	if len(replier.messageCalls) != 1 || replier.messageCalls[0].Payload["msgtype"] == nil {
+		t.Fatalf("replier.messageCalls = %+v", replier.messageCalls)
+	}
+}
+
+func TestWeComHelpers_ParseTargetsReplyContextAndTime(t *testing.T) {
+	testCases := []struct {
+		name     string
+		incoming callbackMessage
+		wantErr  string
+	}{
+		{
+			name: "unsupported message type",
+			incoming: callbackMessage{
+				MsgType: "image",
+				Text:    callbackText{Content: "ignored"},
+				ChatID:  "chat-1",
+				From:    callbackSender{UserID: "zhangsan"},
+			},
+			wantErr: "unsupported wecom message type",
+		},
+		{
+			name: "missing content",
+			incoming: callbackMessage{
+				MsgType: "text",
+				ChatID:  "chat-1",
+				From:    callbackSender{UserID: "zhangsan"},
+			},
+			wantErr: "missing text content",
+		},
+		{
+			name: "missing chat",
+			incoming: callbackMessage{
+				MsgType: "text",
+				Text:    callbackText{Content: "hello"},
+				From:    callbackSender{UserID: "zhangsan"},
+			},
+			wantErr: "missing chat id",
+		},
+		{
+			name: "missing sender",
+			incoming: callbackMessage{
+				MsgType: "text",
+				Text:    callbackText{Content: "hello"},
+				ChatID:  "chat-1",
+			},
+			wantErr: "missing sender user id",
+		},
+	}
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			if _, err := normalizeInboundMessage(tc.incoming); err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tc.wantErr)
+			}
+		})
+	}
+
+	raw := replyContext{ResponseURL: "https://work.weixin.qq.com/response", ChatID: "chat-1", UserID: "zhangsan"}
+	if got := toReplyContext(raw); got != raw {
+		t.Fatalf("toReplyContext(raw) = %+v", got)
+	}
+	if got := toReplyContext(&replyContext{ChatID: "chat-2", UserID: "lisi"}); got.ChatID != "chat-2" || got.UserID != "lisi" {
+		t.Fatalf("toReplyContext(pointer) = %+v", got)
+	}
+	msg := &core.Message{ChatID: "chat-3", UserID: "wangwu", ThreadID: "thread-1"}
+	if got := toReplyContext(msg); got.ChatID != "chat-3" || got.UserID != "wangwu" {
+		t.Fatalf("toReplyContext(message) = %+v", got)
+	}
+	target := &core.ReplyTarget{SessionWebhook: "https://work.weixin.qq.com/hook", ConversationID: "chat-4", UserID: "zhaoliu"}
+	if got := toReplyContext(target); got.ResponseURL != "https://work.weixin.qq.com/hook" || got.ChatID != "chat-4" || got.UserID != "zhaoliu" {
+		t.Fatalf("toReplyContext(target) = %+v", got)
+	}
+	if got := toReplyContext("invalid"); got != (replyContext{}) {
+		t.Fatalf("toReplyContext(invalid) = %+v", got)
+	}
+
+	if got := parseDirectSendTarget(""); got != (directSendTarget{}) {
+		t.Fatalf("parseDirectSendTarget(empty) = %+v", got)
+	}
+	if got := parseDirectSendTarget("user:zhangsan"); got.UserID != "zhangsan" || got.ChatID != "" {
+		t.Fatalf("parseDirectSendTarget(user) = %+v", got)
+	}
+	if got := parseDirectSendTarget("chat-1"); got.ChatID != "chat-1" || got.UserID != "" {
+		t.Fatalf("parseDirectSendTarget(chat) = %+v", got)
+	}
+
+	if got := firstNonEmpty(" ", "chat-1", "chat-2"); got != "chat-1" {
+		t.Fatalf("firstNonEmpty = %q", got)
+	}
+
+	if got := parseEventTime(1710000000000); !got.Equal(time.UnixMilli(1710000000000)) {
+		t.Fatalf("parseEventTime(valid) = %v", got)
+	}
+	before := time.Now()
+	got := parseEventTime(0)
+	after := time.Now()
+	if got.Before(before) || got.After(after.Add(time.Second)) {
+		t.Fatalf("parseEventTime(zero) = %v, want near now", got)
+	}
+}
+
+func TestCachedAccessTokenProviderAndHTTPSenders(t *testing.T) {
+	tokenRequests := 0
+	tokenClient := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		tokenRequests++
+		if req.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", req.Method)
+		}
+		if !strings.Contains(req.URL.RawQuery, "corpid=corp-id") || !strings.Contains(req.URL.RawQuery, "corpsecret=agent-secret") {
+			t.Fatalf("query = %s", req.URL.RawQuery)
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`{"errcode":0,"errmsg":"ok","access_token":"token-123","expires_in":120}`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	provider := &cachedAccessTokenProvider{
+		corpID:      "corp-id",
+		agentSecret: "agent-secret",
+		client:      tokenClient,
+	}
+
+	token, err := provider.AccessToken(context.Background())
+	if err != nil {
+		t.Fatalf("AccessToken first error: %v", err)
+	}
+	if token != "token-123" {
+		t.Fatalf("token = %q", token)
+	}
+	if _, err := provider.AccessToken(context.Background()); err != nil {
+		t.Fatalf("AccessToken cached error: %v", err)
+	}
+	if tokenRequests != 1 {
+		t.Fatalf("tokenRequests = %d, want 1", tokenRequests)
+	}
+
+	errorProvider := &cachedAccessTokenProvider{
+		corpID:      "corp-id",
+		agentSecret: "agent-secret",
+		client: &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"errcode":40013,"errmsg":"invalid corpid"}`)),
+				Header:     make(http.Header),
+			}, nil
+		})},
+	}
+	if _, err := errorProvider.AccessToken(context.Background()); err == nil || !strings.Contains(err.Error(), "wecom gettoken failed") {
+		t.Fatalf("errorProvider err = %v", err)
+	}
+
+	responseBodies := make([]map[string]any, 0, 2)
+	responseClient := &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatalf("decode response replier body: %v", err)
+		}
+		responseBodies = append(responseBodies, body)
+		if strings.Contains(req.URL.String(), "bad") {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Body:       io.NopCloser(strings.NewReader("upstream boom")),
+				Header:     make(http.Header),
+			}, nil
+		}
+		return &http.Response{
+			StatusCode: http.StatusOK,
+			Body:       io.NopCloser(strings.NewReader(`ok`)),
+			Header:     make(http.Header),
+		}, nil
+	})}
+	replier := &httpResponseReplier{client: responseClient}
+	if err := replier.ReplyText(context.Background(), "https://work.weixin.qq.com/response", "hello"); err != nil {
+		t.Fatalf("ReplyText error: %v", err)
+	}
+	if err := replier.ReplyMessage(context.Background(), "https://work.weixin.qq.com/bad", map[string]any{"msgtype": "text"}); err == nil || !strings.Contains(err.Error(), "wecom response_url reply failed: upstream boom") {
+		t.Fatalf("ReplyMessage error = %v", err)
+	}
+	if len(responseBodies) == 0 || responseBodies[0]["msgtype"] != "text" {
+		t.Fatalf("responseBodies = %+v", responseBodies)
+	}
+
+	sendBodies := make([]map[string]any, 0, 2)
+	sender := &apiDirectSender{
+		agentID:       "1000002",
+		tokenProvider: staticTokenProvider("token-123"),
+		client: &http.Client{Transport: roundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			if req.Method != http.MethodPost {
+				t.Fatalf("method = %s, want POST", req.Method)
+			}
+			if !strings.Contains(req.URL.RawQuery, "access_token=token-123") {
+				t.Fatalf("query = %s", req.URL.RawQuery)
+			}
+			var body map[string]any
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatalf("decode direct send body: %v", err)
+			}
+			sendBodies = append(sendBodies, body)
+			if body["chatid"] == "bad-chat" {
+				return &http.Response{
+					StatusCode: http.StatusOK,
+					Body:       io.NopCloser(strings.NewReader(`{"errcode":82001,"errmsg":"send denied"}`)),
+					Header:     make(http.Header),
+				}, nil
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"errcode":0,"errmsg":"ok"}`)),
+				Header:     make(http.Header),
+			}, nil
+		})},
+	}
+
+	if err := sender.SendText(context.Background(), directSendTarget{ChatID: "chat-1"}, "hello"); err != nil {
+		t.Fatalf("SendText error: %v", err)
+	}
+	if err := sender.SendMessage(context.Background(), directSendTarget{UserID: "zhangsan"}, map[string]any{"msgtype": "textcard", "textcard": map[string]any{"title": "Review Ready"}}); err != nil {
+		t.Fatalf("SendMessage error: %v", err)
+	}
+	if len(sendBodies) != 2 {
+		t.Fatalf("sendBodies = %+v", sendBodies)
+	}
+	if sendBodies[0]["chatid"] != "chat-1" || sendBodies[0]["agentid"] != "1000002" || sendBodies[0]["safe"] != float64(0) {
+		t.Fatalf("first send body = %+v", sendBodies[0])
+	}
+	if sendBodies[1]["touser"] != "zhangsan" {
+		t.Fatalf("second send body = %+v", sendBodies[1])
+	}
+	if err := sender.SendMessage(context.Background(), directSendTarget{}, map[string]any{"msgtype": "text"}); err == nil || !strings.Contains(err.Error(), "requires chat id or user id") {
+		t.Fatalf("empty target error = %v", err)
+	}
+	if err := sender.SendMessage(context.Background(), directSendTarget{ChatID: "chat-1"}, nil); err == nil || !strings.Contains(err.Error(), "payload is required") {
+		t.Fatalf("nil payload error = %v", err)
+	}
+	if err := sender.SendMessage(context.Background(), directSendTarget{ChatID: "bad-chat"}, map[string]any{"msgtype": "text"}); err == nil || !strings.Contains(err.Error(), "wecom direct send failed: send denied") {
+		t.Fatalf("upstream err = %v", err)
+	}
 }

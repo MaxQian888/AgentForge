@@ -63,7 +63,7 @@ const storeState = {
   },
   loading: false,
   actionJobKey: null,
-  error: null,
+  error: null as string | null,
   fetchJobs,
   fetchRuns,
   fetchStats,
@@ -79,6 +79,61 @@ jest.mock("@/lib/stores/scheduler-store", () => ({
   useSchedulerStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
 }));
 
+jest.mock("@/components/scheduler/scheduler-stats-cards", () => ({
+  SchedulerStatsCards: () => <div data-testid="scheduler-stats" />,
+}));
+
+jest.mock("@/components/scheduler/scheduler-job-table", () => ({
+  SchedulerJobTable: ({
+    onSelectJob,
+  }: {
+    onSelectJob: (jobKey: string) => void;
+  }) => (
+    <button type="button" onClick={() => onSelectJob("task-progress-detector")}>
+      select-job
+    </button>
+  ),
+}));
+
+jest.mock("@/components/scheduler/scheduler-job-detail", () => ({
+  SchedulerJobDetail: ({
+    onUpdateJob,
+    onTriggerJob,
+    onSetDraftSchedule,
+  }: {
+    onUpdateJob: (input: { enabled: boolean }) => void;
+    onTriggerJob: () => void;
+    onSetDraftSchedule: (schedule: string) => void;
+  }) => (
+    <div>
+      <button type="button" onClick={() => onSetDraftSchedule("0 * * * *")}>
+        set-schedule
+      </button>
+      <button type="button" onClick={() => onUpdateJob({ enabled: false })}>
+        update-job
+      </button>
+      <button type="button" onClick={onTriggerJob}>
+        Run now
+      </button>
+    </div>
+  ),
+  SchedulerJobDetailEmpty: () => <div data-testid="scheduler-job-detail-empty" />,
+}));
+
+jest.mock("@/components/shared/error-banner", () => ({
+  ErrorBanner: ({
+    message,
+    onRetry,
+  }: {
+    message: string;
+    onRetry: () => void;
+  }) => (
+    <button type="button" onClick={onRetry}>
+      {message}
+    </button>
+  ),
+}));
+
 describe("SchedulerPage", () => {
   beforeEach(() => {
     fetchJobs.mockReset();
@@ -88,6 +143,8 @@ describe("SchedulerPage", () => {
     triggerJob.mockReset();
     selectJob.mockReset();
     setDraftSchedule.mockReset();
+    storeState.error = null;
+    storeState.selectedJobKey = "task-progress-detector";
   });
 
   it("loads jobs and renders scheduler management controls", () => {
@@ -97,7 +154,7 @@ describe("SchedulerPage", () => {
     expect(fetchStats).toHaveBeenCalled();
     expect(fetchRuns).toHaveBeenCalledWith("task-progress-detector");
     expect(screen.getByText("Scheduler Control Plane")).toBeInTheDocument();
-    expect(screen.getAllByText("Task progress detector").length).toBeGreaterThan(0);
+    expect(screen.getByRole("button", { name: "select-job" })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Run now" })).toBeInTheDocument();
   });
 
@@ -105,11 +162,27 @@ describe("SchedulerPage", () => {
     const user = userEvent.setup();
     render(<SchedulerPage />);
 
-    await user.clear(screen.getByLabelText("Schedule expression"));
-    await user.type(screen.getByLabelText("Schedule expression"), "0 * * * *");
+    await user.click(screen.getByRole("button", { name: "set-schedule" }));
     await user.click(screen.getByRole("button", { name: "Run now" }));
 
-    expect(setDraftSchedule).toHaveBeenCalled();
+    expect(setDraftSchedule).toHaveBeenCalledWith("task-progress-detector", "0 * * * *");
     expect(triggerJob).toHaveBeenCalledWith("task-progress-detector");
+  });
+
+  it("refreshes the page, selects a job, updates it, and retries from the error banner", async () => {
+    const user = userEvent.setup();
+    storeState.error = "scheduler unavailable";
+
+    render(<SchedulerPage />);
+
+    await user.click(screen.getByRole("button", { name: "Refresh" }));
+    await user.click(screen.getByRole("button", { name: "scheduler unavailable" }));
+    await user.click(screen.getByRole("button", { name: "select-job" }));
+    await user.click(screen.getByRole("button", { name: "update-job" }));
+
+    expect(fetchJobs).toHaveBeenCalledTimes(3);
+    expect(fetchStats).toHaveBeenCalledTimes(3);
+    expect(selectJob).toHaveBeenCalledWith("task-progress-detector");
+    expect(updateJob).toHaveBeenCalledWith("task-progress-detector", { enabled: false });
   });
 });

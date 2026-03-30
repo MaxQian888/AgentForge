@@ -2,17 +2,16 @@ package dingtalk
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"strings"
-	"testing"
-	"time"
-
+	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/notify"
 	dingtalkcardapi "github.com/alibabacloud-go/dingtalk/card_1_0"
 	teautil "github.com/alibabacloud-go/tea-utils/v2/service"
 	dingtalkcard "github.com/open-dingtalk/dingtalk-stream-sdk-go/card"
-
-	"github.com/agentforge/im-bridge/core"
-	"github.com/agentforge/im-bridge/notify"
+	"strings"
+	"testing"
+	"time"
 )
 
 func TestNewLive_RequiresCredentials(t *testing.T) {
@@ -786,4 +785,258 @@ func containsAll(content string, parts []string) bool {
 		}
 	}
 	return true
+}
+
+func TestDingTalkLive_NameReplyContextAndLifecycle(t *testing.T) {
+	runner := &fakeStreamRunner{}
+	replier := &fakeWebhookReplier{}
+	messenger := &fakeDirectMessenger{}
+
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(runner),
+		WithWebhookReplier(replier),
+		WithDirectMessenger(messenger),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if live.Name() != "dingtalk-live" {
+		t.Fatalf("Name = %q", live.Name())
+	}
+	if live.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+
+	replyAny := live.ReplyContextFromTarget(&core.ReplyTarget{
+		SessionWebhook: " https://session.example/reply ",
+		ConversationID: "cid-group-1",
+		UserID:         "staff-1",
+		Metadata: map[string]string{
+			"conversation_type": " 2 ",
+		},
+	})
+	reply, ok := replyAny.(replyContext)
+	if !ok {
+		t.Fatalf("ReplyContextFromTarget type = %T", replyAny)
+	}
+	if reply.SessionWebhook != "https://session.example/reply" || reply.ConversationID != "cid-group-1" || reply.ConversationType != "2" || reply.UserID != "staff-1" {
+		t.Fatalf("reply = %+v", reply)
+	}
+
+	if err := live.Stop(); err != nil {
+		t.Fatalf("Stop before Start error: %v", err)
+	}
+
+	stopErr := context.Canceled
+	live, err = NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{stopErr: stopErr}),
+		WithWebhookReplier(&fakeWebhookReplier{}),
+		WithDirectMessenger(&fakeDirectMessenger{}),
+	)
+	if err != nil {
+		t.Fatalf("NewLive second error: %v", err)
+	}
+	if err := live.Start(func(core.Platform, *core.Message) {}); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	if err := live.Stop(); err != stopErr {
+		t.Fatalf("Stop error = %v, want %v", err, stopErr)
+	}
+}
+
+func TestDingTalkLive_ReplyStructuredNativeAndFormattedBranches(t *testing.T) {
+	replier := &fakeWebhookReplier{}
+	messenger := &fakeDirectMessenger{}
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{}),
+		WithWebhookReplier(replier),
+		WithDirectMessenger(messenger),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	err = live.ReplyStructured(context.Background(), replyContext{
+		SessionWebhook: "https://session.example/reply",
+		ConversationID: "cid-group-1",
+	}, &core.StructuredMessage{
+		Sections: []core.StructuredSection{
+			{
+				Type: core.StructuredSectionTypeText,
+				TextSection: &core.TextSection{
+					Body: "Build ready",
+				},
+			},
+			{
+				Type: core.StructuredSectionTypeActions,
+				ActionsSection: &core.ActionsSection{
+					Actions: []core.StructuredAction{
+						{Label: "Open", URL: "https://example.test/builds/1"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReplyStructured error: %v", err)
+	}
+	if len(replier.messageCalls) != 1 || replier.messageCalls[0].Body["msgtype"] != "actionCard" {
+		t.Fatalf("messageCalls = %+v", replier.messageCalls)
+	}
+
+	replier.messageCalls = nil
+	err = live.ReplyFormattedText(context.Background(), replyContext{
+		SessionWebhook: "https://session.example/reply",
+		ConversationID: "cid-group-1",
+	}, &core.FormattedText{
+		Content: "### Review Ready",
+		Format:  core.TextFormatDingTalkMD,
+	})
+	if err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if len(replier.messageCalls) != 1 || replier.messageCalls[0].Body["msgtype"] != "markdown" {
+		t.Fatalf("formatted messageCalls = %+v", replier.messageCalls)
+	}
+
+	replier.calls = nil
+	err = live.UpdateFormattedText(context.Background(), replyContext{
+		SessionWebhook: "https://session.example/reply",
+		ConversationID: "cid-group-1",
+	}, &core.FormattedText{
+		Content: "plain fallback",
+		Format:  core.TextFormatPlainText,
+	})
+	if err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+	if len(replier.calls) != 1 || replier.calls[0].Content != "plain fallback" {
+		t.Fatalf("replier.calls = %+v", replier.calls)
+	}
+
+	native, err := core.NewDingTalkCardMessage(
+		core.DingTalkCardTypeActionCard,
+		"Review Ready",
+		"### Choose the next step",
+		[]core.DingTalkCardButton{{Title: "Open", ActionURL: "https://example.test/reviews/1"}},
+	)
+	if err != nil {
+		t.Fatalf("NewDingTalkCardMessage error: %v", err)
+	}
+	replier.messageCalls = nil
+	if err := live.ReplyNative(context.Background(), replyContext{
+		ConversationID: "cid-group-2",
+	}, native); err != nil {
+		t.Fatalf("ReplyNative via conversation error: %v", err)
+	}
+	if len(messenger.calls) == 0 {
+		t.Fatalf("messenger.calls = %+v", messenger.calls)
+	}
+
+	if err := live.ReplyNative(context.Background(), replyContext{}, native); err == nil || !strings.Contains(err.Error(), "requires session webhook or conversation target") {
+		t.Fatalf("missing target error = %v", err)
+	}
+}
+
+func TestDingTalkLive_HelperFunctionsAndPayloadBuilders(t *testing.T) {
+	rawCtx := replyContext{SessionWebhook: "https://session.example/reply", ConversationID: "cid-1", UserID: "staff-1"}
+	if got := toReplyContext(rawCtx); got != rawCtx {
+		t.Fatalf("toReplyContext(raw) = %+v", got)
+	}
+	if got := toReplyContext(&replyContext{ConversationID: "cid-2", UserID: "staff-2"}); got.ConversationID != "cid-2" || got.UserID != "staff-2" {
+		t.Fatalf("toReplyContext(pointer) = %+v", got)
+	}
+	msg := &core.Message{ChatID: "cid-3", UserID: "staff-3"}
+	if got := toReplyContext(msg); got.ConversationID != "cid-3" || got.UserID != "staff-3" {
+		t.Fatalf("toReplyContext(message) = %+v", got)
+	}
+	if got := toReplyContext("invalid"); got != (replyContext{}) {
+		t.Fatalf("toReplyContext(invalid) = %+v", got)
+	}
+
+	if _, err := resolveDirectSendTarget(""); err == nil || !strings.Contains(err.Error(), "requires target") {
+		t.Fatalf("resolveDirectSendTarget(empty) err = %v", err)
+	}
+	if _, err := resolveDirectSendTarget("open-conversation:"); err == nil || !strings.Contains(err.Error(), "cannot be empty") {
+		t.Fatalf("resolveDirectSendTarget(open empty) err = %v", err)
+	}
+	if _, err := resolveDirectSendTarget("union:"); err == nil || !strings.Contains(err.Error(), "cannot be empty") {
+		t.Fatalf("resolveDirectSendTarget(union empty) err = %v", err)
+	}
+	if got, err := resolveDirectSendTarget("open-conversation:cid-group-1"); err != nil || got.OpenConversationID != "cid-group-1" {
+		t.Fatalf("resolveDirectSendTarget(open) = %+v, %v", got, err)
+	}
+	if got, err := resolveDirectSendTarget("union:user-1"); err != nil || got.UnionID != "user-1" {
+		t.Fatalf("resolveDirectSendTarget(union) = %+v, %v", got, err)
+	}
+	if got, err := resolveDirectSendTarget("cid-group-2"); err != nil || got.OpenConversationID != "cid-group-2" {
+		t.Fatalf("resolveDirectSendTarget(cid) = %+v, %v", got, err)
+	}
+	if got, err := resolveDirectSendTarget("user-2"); err != nil || got.UnionID != "user-2" {
+		t.Fatalf("resolveDirectSendTarget(default) = %+v, %v", got, err)
+	}
+
+	if got := parseUnixMillis(1710000000000); !got.Equal(time.UnixMilli(1710000000000)) {
+		t.Fatalf("parseUnixMillis(valid) = %v", got)
+	}
+	before := time.Now()
+	gotNow := parseUnixMillis(0)
+	after := time.Now()
+	if gotNow.Before(before) || gotNow.After(after.Add(time.Second)) {
+		t.Fatalf("parseUnixMillis(now) = %v", gotNow)
+	}
+
+	payload, err := buildStandardCardData(core.NewCard().
+		SetTitle("Review Ready").
+		AddField("Status", "pending").
+		AddPrimaryButton("Approve", "act:approve:review-1"))
+	if err != nil {
+		t.Fatalf("buildStandardCardData error: %v", err)
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if decoded["header"] == nil || decoded["contents"] == nil {
+		t.Fatalf("decoded = %+v", decoded)
+	}
+	if _, err := buildStandardCardData(nil); err == nil {
+		t.Fatal("expected nil card to fail")
+	}
+
+	nativePayload := &core.DingTalkCardPayload{
+		Title:    "Review Ready",
+		Markdown: "### Choose the next step",
+		Buttons: []core.DingTalkCardButton{
+			{Title: "Open", ActionURL: "https://example.test/reviews/1"},
+			{Title: "Approve", ActionURL: "https://example.test/reviews/1?approve=1"},
+		},
+	}
+	card := dingTalkNativeToCard(nativePayload)
+	if card.Title != "Review Ready" || len(card.Fields) != 1 || len(card.Buttons) != 2 {
+		t.Fatalf("card = %+v", card)
+	}
+	actionPayload := buildNativeActionCardPayload(nativePayload)
+	if actionPayload["msgtype"] != "actionCard" {
+		t.Fatalf("actionPayload = %+v", actionPayload)
+	}
+	if _, err := renderFormattedTextPayload(nil); err == nil {
+		t.Fatal("expected nil formatted text to fail")
+	}
+	if _, err := renderFormattedTextPayload(&core.FormattedText{}); err == nil {
+		t.Fatal("expected empty formatted text to fail")
+	}
+	if payload, err := renderFormattedTextPayload(&core.FormattedText{Content: "### Review Ready", Format: core.TextFormatDingTalkMD}); err != nil || payload["msgtype"] != "markdown" {
+		t.Fatalf("renderFormattedTextPayload(markdown) = %+v, %v", payload, err)
+	}
+	if payload, err := renderFormattedTextPayload(&core.FormattedText{Content: "plain", Format: core.TextFormatPlainText}); err != nil || payload != nil {
+		t.Fatalf("renderFormattedTextPayload(plain) = %+v, %v", payload, err)
+	}
 }

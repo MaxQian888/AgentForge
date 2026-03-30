@@ -5,7 +5,7 @@ distribution source for `latest.json` and signed updater bundles.
 
 ## Current Implementation Snapshot
 
-As of `2026-03-29`, the updater flow in this repository is no longer a
+As of `2026-03-30`, the updater flow in this repository is no longer a
 check-only stub:
 
 - `src-tauri/src/lib.rs` wires the Tauri updater plugin into the desktop shell.
@@ -37,6 +37,10 @@ check-only stub:
 
 - Normal local development and non-release builds continue to use the base
   `src-tauri/tauri.conf.json` and do not require updater signing inputs.
+- Local Rust/Tauri logic verification is available separately through
+  `pnpm test:tauri`, `pnpm test:tauri:coverage`, and the callable
+  `.github/workflows/desktop-tauri-logic.yml` workflow; these validate the
+  desktop lib and runtime-logic seam before release packaging.
 - Tag-triggered releases call `.github/workflows/build-tauri.yml` with
   `updater-enabled: true`, which switches Tauri to the
   `src-tauri/tauri.updater.conf.json` overlay and requires updater signing
@@ -51,6 +55,11 @@ check-only stub:
 - `pnpm tauri:dev`
   - Desktop development with current-platform sidecars.
   - Does not require updater signing secrets.
+- `pnpm test:tauri`
+  - Runs the `src-tauri` Rust library tests used by the desktop logic workflow.
+- `pnpm test:tauri:coverage`
+  - Enforces the runtime-logic coverage gate mirrored by
+    `.github/workflows/desktop-tauri-logic.yml`.
 - `pnpm build:desktop`
   - Runs `build:backend`, `build:bridge`, and `pnpm tauri build`.
   - This is the repo-level full desktop packaging entrypoint.

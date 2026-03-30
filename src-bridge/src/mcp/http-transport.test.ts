@@ -1,14 +1,22 @@
 import { describe, expect, test } from "bun:test";
-import { createHttpTransport } from "./http-transport.js";
+
+let dynamicImportCounter = 0;
+
+async function importHttpTransportModule() {
+  dynamicImportCounter += 1;
+  return import(`./http-transport.ts?actual-${dynamicImportCounter}`);
+}
 
 describe("createHttpTransport", () => {
-  test("throws when url is missing", () => {
+  test("throws when url is missing", async () => {
+    const { createHttpTransport } = await importHttpTransportModule();
     expect(() =>
       createHttpTransport({ pluginId: "test", transport: "http" }),
     ).toThrow("missing spec.url");
   });
 
-  test("creates transport with valid url", () => {
+  test("creates transport with valid url", async () => {
+    const { createHttpTransport } = await importHttpTransportModule();
     const transport = createHttpTransport({
       pluginId: "test",
       transport: "http",

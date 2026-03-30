@@ -1,10 +1,16 @@
 jest.mock("@/lib/stores/auth-store", () => ({
   useAuthStore: {
-    getState: () => ({ token: "test-token" }),
+    getState: jest.fn(() => ({ token: "test-token" })),
   },
 }));
 
 import { useDashboardStore } from "./dashboard-store";
+
+const authStoreModule = jest.requireMock("@/lib/stores/auth-store") as {
+  useAuthStore: {
+    getState: jest.Mock<{ token?: string | null; accessToken?: string | null }, []>;
+  };
+};
 
 describe("useDashboardStore", () => {
   const fetchMock = jest.fn();
@@ -18,11 +24,22 @@ describe("useDashboardStore", () => {
   beforeEach(() => {
     fetchMock.mockReset();
     global.fetch = fetchMock as unknown as typeof fetch;
+    authStoreModule.useAuthStore.getState.mockReturnValue({ token: "test-token" });
     useDashboardStore.setState({
       summary: null,
       projects: [],
       selectedProjectId: null,
       activeDashboardIdByProject: {},
+      dashboardsLoadingByProject: {},
+      dashboardsErrorByProject: {},
+      dashboardsByProject: {},
+      widgetsByDashboard: {},
+      widgetData: {},
+      widgetRequestStateByKey: {},
+      tasks: [],
+      members: [],
+      agents: [],
+      activity: [],
       loading: false,
       error: null,
       sectionErrors: {},
@@ -115,6 +132,54 @@ describe("useDashboardStore", () => {
     expect(state.summary?.team.totalMembers).toBe(1);
     expect(state.sectionErrors.activity).toContain("notifications unavailable");
     expect(state.error).toBeNull();
+  });
+
+  it("builds an all-projects summary when there is no selectable project", async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockJsonResponse([
+        {
+          id: "project-1",
+          name: "AgentForge",
+          slug: "agentforge",
+          description: "Main project",
+          repoUrl: "",
+          defaultBranch: "main",
+          createdAt: "2026-03-20T10:00:00.000Z",
+        },
+      ]),
+    );
+
+    await useDashboardStore.getState().fetchSummary({ projectId: "missing-project" });
+
+    expect(useDashboardStore.getState()).toMatchObject({
+      selectedProjectId: null,
+      tasks: [],
+      members: [],
+      agents: [],
+      activity: [],
+      summary: expect.objectContaining({
+        scope: {
+          projectId: null,
+          projectName: "All Projects",
+          projectsCount: 1,
+        },
+      }),
+    });
+  });
+
+  it("stores a fatal dashboard summary error when the project list fails", async () => {
+    fetchMock.mockRejectedValueOnce(new Error("projects unavailable"));
+
+    await useDashboardStore.getState().fetchSummary();
+
+    expect(useDashboardStore.getState()).toMatchObject({
+      loading: false,
+      error: "projects unavailable",
+      tasks: [],
+      members: [],
+      agents: [],
+      activity: [],
+    });
   });
 
   it("normalizes notification activity payloads for dashboard consumers", async () => {
@@ -281,6 +346,220 @@ describe("useDashboardStore", () => {
       activeDashboardIdByProject?: Record<string, string | null>;
     };
     expect(workspaceState.activeDashboardIdByProject?.["project-1"]).toBe("dashboard-1");
+  });
+
+  it("updates dashboards, widgets, and active dashboard state in place", async () => {
+    useDashboardStore.setState({
+      summary: null,
+      projects: [],
+      selectedProjectId: null,
+      activeDashboardIdByProject: { "project-1": "dashboard-1" },
+      dashboardsLoadingByProject: {},
+      dashboardsErrorByProject: {},
+      dashboardsByProject: {
+        "project-1": [
+          {
+            id: "dashboard-1",
+            projectId: "project-1",
+            name: "Sprint Overview",
+            layout: [],
+            createdBy: "user-1",
+            createdAt: "2026-03-20T10:00:00.000Z",
+            updatedAt: "2026-03-20T10:00:00.000Z",
+            widgets: [],
+          },
+        ],
+      },
+      widgetsByDashboard: { "dashboard-1": [] },
+      widgetData: {},
+      widgetRequestStateByKey: {},
+      tasks: [],
+      members: [],
+      agents: [],
+      activity: [],
+      loading: false,
+      error: null,
+      sectionErrors: {},
+    });
+    fetchMock
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          id: "dashboard-1",
+          projectId: "project-1",
+          name: "Updated Overview",
+          layout: [{ x: 0 }],
+          createdBy: "user-1",
+          createdAt: "2026-03-20T10:00:00.000Z",
+          updatedAt: "2026-03-21T10:00:00.000Z",
+          widgets: [],
+        }),
+      )
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          id: "widget-1",
+          dashboardId: "dashboard-1",
+          widgetType: "throughput_chart",
+          config: { days: 7 },
+          position: { x: 0, y: 0, w: 2, h: 2 },
+          createdAt: "2026-03-20T10:00:00.000Z",
+          updatedAt: "2026-03-20T10:00:00.000Z",
+        }),
+      )
+      .mockResolvedValueOnce(mockJsonResponse({}));
+
+    await useDashboardStore
+      .getState()
+      .updateDashboard("project-1", "dashboard-1", { name: "Updated Overview" });
+    useDashboardStore.getState().setActiveDashboard("project-1", "dashboard-1");
+    await useDashboardStore.getState().saveWidget("project-1", "dashboard-1", {
+      widgetType: "throughput_chart",
+      config: { days: 7 },
+      position: { x: 0, y: 0, w: 2, h: 2 },
+    });
+    await useDashboardStore
+      .getState()
+      .deleteWidget("project-1", "dashboard-1", "widget-1");
+
+    expect(useDashboardStore.getState()).toMatchObject({
+      activeDashboardIdByProject: { "project-1": "dashboard-1" },
+      dashboardsByProject: {
+        "project-1": [expect.objectContaining({ name: "Updated Overview" })],
+      },
+      widgetsByDashboard: {
+        "dashboard-1": [],
+      },
+    });
+  });
+
+  it("applies task, agent, and activity updates while respecting the selected project", () => {
+    useDashboardStore.setState({
+      summary: null,
+      projects: [
+        {
+          id: "project-1",
+          name: "AgentForge",
+          slug: "agentforge",
+          description: "",
+          repoUrl: "",
+          defaultBranch: "main",
+          createdAt: "2026-03-20T10:00:00.000Z",
+        },
+      ],
+      selectedProjectId: "project-1",
+      activeDashboardIdByProject: {},
+      dashboardsLoadingByProject: {},
+      dashboardsErrorByProject: {},
+      dashboardsByProject: {},
+      widgetsByDashboard: {},
+      widgetData: {},
+      widgetRequestStateByKey: {},
+      tasks: [],
+      members: [],
+      agents: [],
+      activity: [],
+      loading: false,
+      error: null,
+      sectionErrors: {},
+    });
+
+    useDashboardStore.getState().applyTaskUpdate({
+      id: "task-1",
+      projectId: "project-2",
+      title: "Ignore me",
+      status: "assigned",
+      priority: "low",
+      assigneeId: null,
+      assigneeType: null,
+      spentUsd: 0,
+      createdAt: "2026-03-24T10:00:00.000Z",
+      updatedAt: "2026-03-24T10:00:00.000Z",
+    });
+    useDashboardStore.getState().applyTaskUpdate({
+      id: "task-2",
+      projectId: "project-1",
+      title: "Keep me",
+      status: "in_progress",
+      priority: "high",
+      assigneeId: "member-1",
+      assigneeType: "human",
+      spentUsd: 2,
+      createdAt: "2026-03-24T10:00:00.000Z",
+      updatedAt: "2026-03-24T10:00:00.000Z",
+    });
+    useDashboardStore.getState().applyAgentUpdate({
+      id: "run-1",
+      taskId: "task-2",
+      memberId: "member-1",
+      status: "running",
+      costUsd: 0.5,
+      turnCount: 1,
+      startedAt: "2026-03-24T10:00:00.000Z",
+      createdAt: "2026-03-24T10:00:00.000Z",
+      updatedAt: "2026-03-24T10:00:00.000Z",
+    });
+    useDashboardStore.getState().applyAgentUpdate({
+      id: "run-1",
+      taskId: "task-2",
+      memberId: "member-1",
+      status: "completed",
+      costUsd: 0.5,
+      turnCount: 1,
+      startedAt: "2026-03-24T10:00:00.000Z",
+      createdAt: "2026-03-24T10:00:00.000Z",
+      updatedAt: "2026-03-24T10:05:00.000Z",
+    });
+    useDashboardStore.getState().applyActivityNotification({
+      id: "notification-1",
+      type: "task_progress_stalled",
+      title: "Task stalled",
+      message: "Task stalled.",
+      createdAt: "2026-03-24T11:00:00.000Z",
+      targetId: "member-1",
+    });
+    useDashboardStore.getState().applyActivityNotification({
+      id: "notification-1",
+      type: "task_progress_stalled",
+      title: "Task stalled",
+      message: "Task stalled again.",
+      createdAt: "2026-03-24T11:05:00.000Z",
+      targetId: "member-1",
+    });
+
+    expect(useDashboardStore.getState()).toMatchObject({
+      tasks: [expect.objectContaining({ id: "task-2" })],
+      agents: [expect.objectContaining({ id: "run-1", status: "completed" })],
+      activity: [expect.objectContaining({ id: "notification-1", message: "Task stalled again." })],
+    });
+  });
+
+  it("returns early without an auth token", async () => {
+    authStoreModule.useAuthStore.getState.mockReturnValue({
+      token: null,
+      accessToken: null,
+    });
+
+    await useDashboardStore.getState().fetchSummary();
+    await useDashboardStore.getState().fetchDashboards("project-1");
+    await expect(
+      useDashboardStore.getState().fetchWidgetData("project-1", "throughput_chart"),
+    ).resolves.toBeNull();
+    await useDashboardStore
+      .getState()
+      .createDashboard("project-1", { name: "Skipped", layout: [] });
+    await useDashboardStore
+      .getState()
+      .updateDashboard("project-1", "dashboard-1", { name: "Skipped" });
+    await useDashboardStore
+      .getState()
+      .deleteDashboard("project-1", "dashboard-1");
+    await useDashboardStore.getState().saveWidget("project-1", "dashboard-1", {
+      widgetType: "throughput_chart",
+    });
+    await useDashboardStore
+      .getState()
+      .deleteWidget("project-1", "dashboard-1", "widget-1");
+
+    expect(fetchMock).not.toHaveBeenCalled();
   });
 
   it("records widget request failures without throwing away the widget key", async () => {

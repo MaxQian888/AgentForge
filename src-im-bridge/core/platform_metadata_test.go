@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"reflect"
 	"testing"
 )
 
@@ -200,6 +201,12 @@ func TestPlatformCapabilities_MatrixAndLookupHelpers(t *testing.T) {
 	if capabilities.HasMessageScope(MessageScopeTopic) {
 		t.Fatal("did not expect absent message scope")
 	}
+	if !capabilities.HasNativeSurface(" slack_block_kit ") {
+		t.Fatal("expected native surface lookup to ignore case and whitespace")
+	}
+	if capabilities.HasNativeSurface(NativeSurfaceDiscordEmbed) {
+		t.Fatal("did not expect absent native surface")
+	}
 }
 
 func TestMetadataForPlatform_DefaultsTelegramRenderingProfile(t *testing.T) {
@@ -255,5 +262,101 @@ func TestNormalizeMetadata_UsesFallbackSourceForRenderingDefaults(t *testing.T) 
 	}
 	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != NativeSurfaceDiscordEmbed {
 		t.Fatalf("NativeSurfaces = %+v, want [%q]", metadata.Rendering.NativeSurfaces, NativeSurfaceDiscordEmbed)
+	}
+}
+
+func TestDefaultCapabilitiesForSource_CoversAdditionalPlatformsAndFallbacks(t *testing.T) {
+	qqbot := defaultCapabilitiesForSource("qqbot", nil)
+	if !qqbot.RequiresPublicCallback {
+		t.Fatal("expected qqbot to require public callback")
+	}
+	if !qqbot.SupportsSlashCommands || !qqbot.SupportsMentions {
+		t.Fatalf("qqbot capabilities = %+v", qqbot)
+	}
+	if !reflect.DeepEqual(qqbot.NativeSurfaces, []string{NativeSurfaceQQBotMarkdown}) {
+		t.Fatalf("qqbot NativeSurfaces = %+v", qqbot.NativeSurfaces)
+	}
+
+	wecom := defaultCapabilitiesForSource("wecom", nil)
+	if wecom.CommandSurface != CommandSurfaceInteraction {
+		t.Fatalf("wecom CommandSurface = %q", wecom.CommandSurface)
+	}
+	if !reflect.DeepEqual(wecom.NativeSurfaces, []string{NativeSurfaceWeComCard}) {
+		t.Fatalf("wecom NativeSurfaces = %+v", wecom.NativeSurfaces)
+	}
+
+	customCard := defaultCapabilitiesForSource("custom", &metadataCardPlatform{name: "custom-card"})
+	if customCard.StructuredSurface != StructuredSurfaceCards || !customCard.SupportsRichMessages {
+		t.Fatalf("customCard capabilities = %+v", customCard)
+	}
+	if !reflect.DeepEqual(customCard.MessageScopes, []MessageScope{MessageScopeChat}) {
+		t.Fatalf("customCard MessageScopes = %+v", customCard.MessageScopes)
+	}
+
+	custom := defaultCapabilitiesForSource("custom", nil)
+	if custom.CommandSurface != CommandSurfaceNone {
+		t.Fatalf("custom CommandSurface = %q", custom.CommandSurface)
+	}
+	if !reflect.DeepEqual(custom.MessageScopes, []MessageScope{MessageScopeChat}) {
+		t.Fatalf("custom MessageScopes = %+v", custom.MessageScopes)
+	}
+}
+
+func TestNormalizeCapabilities_DerivesLegacyFlagsAndDefaults(t *testing.T) {
+	defaults := PlatformCapabilities{
+		StructuredSurface:  StructuredSurfaceBlocks,
+		AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply},
+		ActionCallbackMode: ActionCallbackWebhook,
+		MessageScopes:      []MessageScope{MessageScopeThread},
+		NativeSurfaces:     []string{NativeSurfaceSlackBlockKit},
+		Mutability: MutabilitySemantics{
+			CanEdit: true,
+		},
+	}
+
+	got := normalizeCapabilities(PlatformCapabilities{
+		SupportsSlashCommands:  true,
+		SupportsMentions:       true,
+		SupportsRichMessages:   true,
+		SupportsDeferredReply:  true,
+		RequiresPublicCallback: true,
+	}, defaults)
+
+	if got.CommandSurface != CommandSurfaceMixed {
+		t.Fatalf("CommandSurface = %q, want %q", got.CommandSurface, CommandSurfaceMixed)
+	}
+	if got.StructuredSurface != StructuredSurfaceBlocks {
+		t.Fatalf("StructuredSurface = %q, want %q", got.StructuredSurface, StructuredSurfaceBlocks)
+	}
+	if !reflect.DeepEqual(got.AsyncUpdateModes, []AsyncUpdateMode{AsyncUpdateFollowUp}) {
+		t.Fatalf("AsyncUpdateModes = %+v", got.AsyncUpdateModes)
+	}
+	if got.ActionCallbackMode != ActionCallbackInteractionToken {
+		t.Fatalf("ActionCallbackMode = %q, want %q", got.ActionCallbackMode, ActionCallbackInteractionToken)
+	}
+	if !reflect.DeepEqual(got.MessageScopes, defaults.MessageScopes) {
+		t.Fatalf("MessageScopes = %+v, want %+v", got.MessageScopes, defaults.MessageScopes)
+	}
+	if !reflect.DeepEqual(got.NativeSurfaces, defaults.NativeSurfaces) {
+		t.Fatalf("NativeSurfaces = %+v, want %+v", got.NativeSurfaces, defaults.NativeSurfaces)
+	}
+	if got.Mutability != defaults.Mutability {
+		t.Fatalf("Mutability = %+v, want %+v", got.Mutability, defaults.Mutability)
+	}
+	if !got.SupportsDeferredReply || !got.RequiresPublicCallback || !got.SupportsSlashCommands || !got.SupportsMentions {
+		t.Fatalf("normalized flags = %+v", got)
+	}
+}
+
+func TestNormalizeCapabilities_DefaultsWebhookForStructuredSurface(t *testing.T) {
+	got := normalizeCapabilities(PlatformCapabilities{
+		StructuredSurface: StructuredSurfaceCards,
+	}, PlatformCapabilities{})
+
+	if got.ActionCallbackMode != ActionCallbackWebhook {
+		t.Fatalf("ActionCallbackMode = %q, want %q", got.ActionCallbackMode, ActionCallbackWebhook)
+	}
+	if !reflect.DeepEqual(got.MessageScopes, []MessageScope{MessageScopeChat}) {
+		t.Fatalf("MessageScopes = %+v", got.MessageScopes)
 	}
 }

@@ -2,6 +2,7 @@ package handler_test
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,17 +26,26 @@ func (tv *agentTestValidator) Validate(i interface{}) error {
 }
 
 type mockAgentRuntimeService struct {
-	spawnRun    *model.AgentRun
-	spawnErr    error
-	cancelErr   error
-	updateErr   error
+	spawnRun     *model.AgentRun
+	spawnErr     error
+	cancelErr    error
+	updateErr    error
+	listErr      error
+	summaryErr   error
+	getByIDErr   error
+	logsErr      error
 	bridgeStatus string
-	lastTaskID  uuid.UUID
-	lastRuntime string
-	lastRoleID  string
-	lastRunID   uuid.UUID
-	lastReason  string
-	updateState string
+	lastTaskID   uuid.UUID
+	lastRuntime  string
+	lastRoleID   string
+	lastRunID    uuid.UUID
+	lastReason   string
+	updateState  string
+	summaries    []model.AgentRunSummaryDTO
+	summary      *model.AgentRunSummaryDTO
+	run          *model.AgentRun
+	poolStats    model.AgentPoolStatsDTO
+	logs         []model.AgentLogEntry
 }
 
 type mockAgentTaskDispatcher struct {
@@ -72,14 +82,26 @@ func (m *mockAgentRuntimeService) ListActive(_ context.Context) ([]*model.AgentR
 }
 
 func (m *mockAgentRuntimeService) ListSummaries(_ context.Context) ([]model.AgentRunSummaryDTO, error) {
-	return []model.AgentRunSummaryDTO{}, nil
+	return m.summaries, m.listErr
 }
 
 func (m *mockAgentRuntimeService) GetByID(_ context.Context, id uuid.UUID) (*model.AgentRun, error) {
+	if m.getByIDErr != nil {
+		return nil, m.getByIDErr
+	}
+	if m.run != nil {
+		return m.run, nil
+	}
 	return &model.AgentRun{ID: id, TaskID: uuid.New(), MemberID: uuid.New()}, nil
 }
 
 func (m *mockAgentRuntimeService) GetSummary(_ context.Context, id uuid.UUID) (*model.AgentRunSummaryDTO, error) {
+	if m.summaryErr != nil {
+		return nil, m.summaryErr
+	}
+	if m.summary != nil {
+		return m.summary, nil
+	}
 	return &model.AgentRunSummaryDTO{ID: id.String(), TaskID: uuid.New().String(), MemberID: uuid.New().String()}, nil
 }
 
@@ -96,11 +118,11 @@ func (m *mockAgentRuntimeService) Cancel(_ context.Context, id uuid.UUID, reason
 }
 
 func (m *mockAgentRuntimeService) PoolStats(_ context.Context) model.AgentPoolStatsDTO {
-	return model.AgentPoolStatsDTO{}
+	return m.poolStats
 }
 
 func (m *mockAgentRuntimeService) GetLogs(_ context.Context, _ uuid.UUID) ([]model.AgentLogEntry, error) {
-	return nil, nil
+	return m.logs, m.logsErr
 }
 
 func (m *mockAgentRuntimeService) BridgeStatus() string {
@@ -301,5 +323,178 @@ func TestAgentHandler_Resume_ReturnsServiceUnavailableWhenBridgeIsDegraded(t *te
 	_ = h.Resume(c)
 	if rec.Code != http.StatusServiceUnavailable {
 		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+}
+
+func TestAgentHandler_ListGetPoolLogsAndPauseSuccess(t *testing.T) {
+	e := newAgentTestEcho()
+	runID := uuid.New()
+	summary := model.AgentRunSummaryDTO{ID: runID.String(), TaskID: uuid.New().String(), MemberID: uuid.New().String()}
+	svc := &mockAgentRuntimeService{
+		summaries: []model.AgentRunSummaryDTO{summary},
+		summary:   &summary,
+		run:       &model.AgentRun{ID: runID, TaskID: uuid.New(), MemberID: uuid.New()},
+		poolStats: model.AgentPoolStatsDTO{Active: 2, Available: 1, Queued: 3},
+		logs:      []model.AgentLogEntry{{Type: "status", Content: "running"}},
+	}
+	h := handler.NewAgentHandler(svc)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	listRec := httptest.NewRecorder()
+	if err := h.List(e.NewContext(listReq, listRec)); err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("List() status = %d, want 200", listRec.Code)
+	}
+
+	getReq := httptest.NewRequest(http.MethodGet, "/agents/"+runID.String(), nil)
+	getRec := httptest.NewRecorder()
+	getCtx := e.NewContext(getReq, getRec)
+	getCtx.SetParamNames("id")
+	getCtx.SetParamValues(runID.String())
+	if err := h.Get(getCtx); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if getRec.Code != http.StatusOK {
+		t.Fatalf("Get() status = %d, want 200", getRec.Code)
+	}
+
+	poolReq := httptest.NewRequest(http.MethodGet, "/agents/pool", nil)
+	poolRec := httptest.NewRecorder()
+	if err := h.Pool(e.NewContext(poolReq, poolRec)); err != nil {
+		t.Fatalf("Pool() error = %v", err)
+	}
+	if poolRec.Code != http.StatusOK {
+		t.Fatalf("Pool() status = %d, want 200", poolRec.Code)
+	}
+
+	logsReq := httptest.NewRequest(http.MethodGet, "/agents/"+runID.String()+"/logs", nil)
+	logsRec := httptest.NewRecorder()
+	logsCtx := e.NewContext(logsReq, logsRec)
+	logsCtx.SetParamNames("id")
+	logsCtx.SetParamValues(runID.String())
+	if err := h.Logs(logsCtx); err != nil {
+		t.Fatalf("Logs() error = %v", err)
+	}
+	if logsRec.Code != http.StatusOK {
+		t.Fatalf("Logs() status = %d, want 200", logsRec.Code)
+	}
+
+	pauseReq := httptest.NewRequest(http.MethodPost, "/agents/"+runID.String()+"/pause", nil)
+	pauseRec := httptest.NewRecorder()
+	pauseCtx := e.NewContext(pauseReq, pauseRec)
+	pauseCtx.SetParamNames("id")
+	pauseCtx.SetParamValues(runID.String())
+	if err := h.Pause(pauseCtx); err != nil {
+		t.Fatalf("Pause() error = %v", err)
+	}
+	if pauseRec.Code != http.StatusOK || svc.updateState != model.AgentRunStatusPaused {
+		t.Fatalf("Pause() status/state = %d / %q", pauseRec.Code, svc.updateState)
+	}
+}
+
+func TestAgentHandlerKillAndUpdateStatusFallbacks(t *testing.T) {
+	e := newAgentTestEcho()
+	runID := uuid.New()
+	svc := &mockAgentRuntimeService{
+		run:        &model.AgentRun{ID: runID, TaskID: uuid.New(), MemberID: uuid.New()},
+		summaryErr: service.ErrAgentNotFound,
+	}
+	h := handler.NewAgentHandler(svc)
+
+	killReq := httptest.NewRequest(http.MethodPost, "/agents/"+runID.String()+"/kill", nil)
+	killRec := httptest.NewRecorder()
+	killCtx := e.NewContext(killReq, killRec)
+	killCtx.SetParamNames("id")
+	killCtx.SetParamValues(runID.String())
+	if err := h.Kill(killCtx); err != nil {
+		t.Fatalf("Kill() error = %v", err)
+	}
+	if killRec.Code != http.StatusOK || svc.lastReason != "killed_by_user" {
+		t.Fatalf("Kill() status/reason = %d / %q", killRec.Code, svc.lastReason)
+	}
+
+	svc.updateErr = service.ErrAgentNotFound
+	resumeReq := httptest.NewRequest(http.MethodPost, "/agents/"+runID.String()+"/resume", nil)
+	resumeRec := httptest.NewRecorder()
+	resumeCtx := e.NewContext(resumeReq, resumeRec)
+	resumeCtx.SetParamNames("id")
+	resumeCtx.SetParamValues(runID.String())
+	if err := h.Resume(resumeCtx); err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if resumeRec.Code != http.StatusNotFound {
+		t.Fatalf("Resume() status = %d, want 404", resumeRec.Code)
+	}
+}
+
+func TestAgentHandlerAdditionalErrorBranches(t *testing.T) {
+	e := newAgentTestEcho()
+
+	listHandler := handler.NewAgentHandler(&mockAgentRuntimeService{listErr: errors.New("list failed")})
+	listReq := httptest.NewRequest(http.MethodGet, "/agents", nil)
+	listRec := httptest.NewRecorder()
+	if err := listHandler.List(e.NewContext(listReq, listRec)); err != nil {
+		t.Fatalf("List() error = %v", err)
+	}
+	if listRec.Code != http.StatusInternalServerError {
+		t.Fatalf("List() status = %d, want 500", listRec.Code)
+	}
+
+	getHandler := handler.NewAgentHandler(&mockAgentRuntimeService{})
+	getReq := httptest.NewRequest(http.MethodGet, "/agents/bad", nil)
+	getRec := httptest.NewRecorder()
+	getCtx := e.NewContext(getReq, getRec)
+	getCtx.SetParamNames("id")
+	getCtx.SetParamValues("bad")
+	if err := getHandler.Get(getCtx); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if getRec.Code != http.StatusBadRequest {
+		t.Fatalf("Get() status = %d, want 400", getRec.Code)
+	}
+
+	logsHandler := handler.NewAgentHandler(&mockAgentRuntimeService{logsErr: service.ErrAgentNotFound})
+	logsReq := httptest.NewRequest(http.MethodGet, "/agents/"+uuid.New().String()+"/logs", nil)
+	logsRec := httptest.NewRecorder()
+	logsCtx := e.NewContext(logsReq, logsRec)
+	logsCtx.SetParamNames("id")
+	logsCtx.SetParamValues(uuid.New().String())
+	if err := logsHandler.Logs(logsCtx); err != nil {
+		t.Fatalf("Logs() error = %v", err)
+	}
+	if logsRec.Code != http.StatusNotFound {
+		t.Fatalf("Logs() status = %d, want 404", logsRec.Code)
+	}
+
+	runID := uuid.New()
+	updateHandler := handler.NewAgentHandler(&mockAgentRuntimeService{updateErr: errors.New("bridge write failed")})
+	updateReq := httptest.NewRequest(http.MethodPost, "/agents/"+runID.String()+"/resume", nil)
+	updateRec := httptest.NewRecorder()
+	updateCtx := e.NewContext(updateReq, updateRec)
+	updateCtx.SetParamNames("id")
+	updateCtx.SetParamValues(runID.String())
+	if err := updateHandler.Resume(updateCtx); err != nil {
+		t.Fatalf("Resume() error = %v", err)
+	}
+	if updateRec.Code != http.StatusBadGateway {
+		t.Fatalf("Resume() status = %d, want 502", updateRec.Code)
+	}
+
+	fetchHandler := handler.NewAgentHandler(&mockAgentRuntimeService{
+		run:        nil,
+		getByIDErr: errors.New("load failed"),
+	})
+	fetchReq := httptest.NewRequest(http.MethodPost, "/agents/"+runID.String()+"/pause", nil)
+	fetchRec := httptest.NewRecorder()
+	fetchCtx := e.NewContext(fetchReq, fetchRec)
+	fetchCtx.SetParamNames("id")
+	fetchCtx.SetParamValues(runID.String())
+	if err := fetchHandler.Pause(fetchCtx); err != nil {
+		t.Fatalf("Pause() error = %v", err)
+	}
+	if fetchRec.Code != http.StatusInternalServerError {
+		t.Fatalf("Pause() status = %d, want 500", fetchRec.Code)
 	}
 }

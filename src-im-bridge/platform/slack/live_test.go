@@ -4,12 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"testing"
-
 	"github.com/agentforge/im-bridge/core"
 	"github.com/agentforge/im-bridge/notify"
 	goslack "github.com/slack-go/slack"
 	"github.com/slack-go/slack/slackevents"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
 )
 
 func TestLive_StartAcknowledgesSlashCommandBeforeDispatch(t *testing.T) {
@@ -645,4 +647,209 @@ func coreHasTextFormat(formats []core.TextFormatMode, target core.TextFormatMode
 		}
 	}
 	return false
+}
+
+type slackRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn slackRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func TestSlackLive_NameReplyContextAndReplyBranches(t *testing.T) {
+	messages := &fakeSlackMessageClient{}
+	responses := &fakeSlackResponseClient{}
+	live, err := NewLive(
+		"xoxb-bot",
+		"xapp-app",
+		WithSocketRunner(&fakeSocketRunner{}),
+		WithMessageClient(messages),
+		WithResponseClient(responses),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if live.Name() != "slack-live" {
+		t.Fatalf("Name = %q", live.Name())
+	}
+	if live.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+
+	replyAny := live.ReplyContextFromTarget(&core.ReplyTarget{
+		ChatID:      "C111",
+		ThreadID:    "1700000000.100000",
+		ResponseURL: "https://hooks.slack.com/actions/test",
+	})
+	reply, ok := replyAny.(replyContext)
+	if !ok {
+		t.Fatalf("ReplyContextFromTarget type = %T", replyAny)
+	}
+	if reply.ChannelID != "C111" || reply.ThreadTS != "1700000000.100000" || reply.ResponseURL != "https://hooks.slack.com/actions/test" {
+		t.Fatalf("reply = %+v", reply)
+	}
+
+	if err := live.ReplyStructured(context.Background(), replyContext{
+		ChannelID:   "C111",
+		ThreadTS:    "1700000000.100000",
+		ResponseURL: "https://hooks.slack.com/actions/test",
+	}, &core.StructuredMessage{
+		Sections: []core.StructuredSection{{
+			Type: core.StructuredSectionTypeText,
+			TextSection: &core.TextSection{
+				Body: "Build ready",
+			},
+		}},
+	}); err != nil {
+		t.Fatalf("ReplyStructured error: %v", err)
+	}
+	if len(responses.calls) != 1 || responses.calls[0].ResponseURL != "https://hooks.slack.com/actions/test" {
+		t.Fatalf("responses = %+v", responses.calls)
+	}
+
+	if err := live.ReplyCard(context.Background(), replyContext{
+		ChannelID: "C222",
+		ThreadTS:  "1700000000.200000",
+	}, core.NewCard().
+		SetTitle("Review Ready").
+		AddPrimaryButton("Open", "link:https://example.test/reviews/1")); err != nil {
+		t.Fatalf("ReplyCard error: %v", err)
+	}
+	if len(messages.posts) != 1 || messages.posts[0].ChannelID != "C222" || len(messages.posts[0].Blocks) == 0 {
+		t.Fatalf("messages.posts = %+v", messages.posts)
+	}
+
+	if err := live.ReplyFormattedText(context.Background(), replyContext{
+		ChannelID: "C333",
+		ThreadTS:  "1700000000.300000",
+	}, &core.FormattedText{
+		Content: "*bold*",
+		Format:  core.TextFormatSlackMrkdwn,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if len(messages.posts) != 2 || messages.posts[1].ThreadTS != "1700000000.300000" {
+		t.Fatalf("messages.posts = %+v", messages.posts)
+	}
+
+	if err := live.UpdateFormattedText(context.Background(), replyContext{
+		ChannelID:   "C444",
+		ResponseURL: "https://hooks.slack.com/actions/update",
+	}, &core.FormattedText{
+		Content: "*literal*",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+	if len(responses.calls) != 2 || responses.calls[1].ResponseURL != "https://hooks.slack.com/actions/update" {
+		t.Fatalf("responses = %+v", responses.calls)
+	}
+
+	if err := live.ReplyStructured(context.Background(), replyContext{}, &core.StructuredMessage{Title: "missing target"}); err == nil || !strings.Contains(err.Error(), "channel id") {
+		t.Fatalf("missing target err = %v", err)
+	}
+}
+
+func TestSlackHelpers_NormalizationAndHTTPResponseClient(t *testing.T) {
+	if _, err := normalizeEnvelope(socketEnvelope{Type: socketEnvelopeSlashCommand}); err == nil || !strings.Contains(err.Error(), "missing slash command payload") {
+		t.Fatalf("normalizeEnvelope slash err = %v", err)
+	}
+	if _, err := normalizeEnvelope(socketEnvelope{Type: socketEnvelopeEventsAPI}); err == nil || !strings.Contains(err.Error(), "missing events api payload") {
+		t.Fatalf("normalizeEnvelope events err = %v", err)
+	}
+	if _, err := normalizeEnvelope(socketEnvelope{Type: socketEnvelopeInteractive}); err != errIgnoreEnvelope {
+		t.Fatalf("normalizeEnvelope interactive err = %v", err)
+	}
+
+	msg, err := normalizeEventsAPI(&slackevents.EventsAPIEvent{
+		Type: slackevents.CallbackEvent,
+		InnerEvent: slackevents.EventsAPIInnerEvent{
+			Type: "message",
+			Data: &slackevents.MessageEvent{
+				User:            "U123",
+				Text:            "hello",
+				Channel:         "D456",
+				TimeStamp:       "1700000000.123456",
+				ThreadTimeStamp: "1700000000.100000",
+				ChannelType:     "im",
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("normalizeEventsAPI message error: %v", err)
+	}
+	if msg.ChatID != "D456" || msg.IsGroup {
+		t.Fatalf("message = %+v", msg)
+	}
+	if _, err := normalizeEventsAPI(&slackevents.EventsAPIEvent{
+		Type: "url_verification",
+	}); err != errIgnoreEnvelope {
+		t.Fatalf("normalizeEventsAPI non-callback err = %v", err)
+	}
+
+	rawCtx := replyContext{ChannelID: "C111", ThreadTS: "1700000000.100000"}
+	if got := toReplyContext(rawCtx); got != rawCtx {
+		t.Fatalf("toReplyContext(raw) = %+v", got)
+	}
+	if got := toReplyContext(&replyContext{ChannelID: "C222", ResponseURL: "https://hooks.slack.com"}); got.ChannelID != "C222" || got.ResponseURL == "" {
+		t.Fatalf("toReplyContext(pointer) = %+v", got)
+	}
+	coreMsg := &core.Message{ChatID: "C333"}
+	if got := toReplyContext(coreMsg); got.ChannelID != "C333" {
+		t.Fatalf("toReplyContext(message) = %+v", got)
+	}
+	if got := toReplyContext("invalid"); got != (replyContext{}) {
+		t.Fatalf("toReplyContext(invalid) = %+v", got)
+	}
+
+	if got := normalizeMentionText(" <@U999> hello "); got != "@AgentForge hello" {
+		t.Fatalf("normalizeMentionText = %q", got)
+	}
+	if got := parseSlackTimestamp("1700000000.5"); got.Unix() != 1700000000 {
+		t.Fatalf("parseSlackTimestamp(valid) = %v", got)
+	}
+	if !isDirectSlackChannel("D123") || isDirectSlackChannel("C123") {
+		t.Fatalf("isDirectSlackChannel unexpected result")
+	}
+	if got := compactMetadata(map[string]string{" source ": " slash_command ", "empty": " "}); got["source"] != "slash_command" || len(got) != 1 {
+		t.Fatalf("compactMetadata = %+v", got)
+	}
+	if got := valueOrEmpty(&fakeSlackResponseCall{ResponseURL: "https://hooks.slack.com"}, func(v *fakeSlackResponseCall) string { return v.ResponseURL }); got != "https://hooks.slack.com" {
+		t.Fatalf("valueOrEmpty = %q", got)
+	}
+
+	calls := make([]map[string]any, 0, 2)
+	client := &httpResponseClient{client: &http.Client{Transport: slackRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+		var body map[string]any
+		if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+			t.Fatalf("decode response body: %v", err)
+		}
+		calls = append(calls, body)
+		status := http.StatusOK
+		if strings.Contains(req.URL.String(), "bad") {
+			status = http.StatusBadGateway
+		}
+		return &http.Response{
+			StatusCode: status,
+			Body:       io.NopCloser(strings.NewReader("ok")),
+			Header:     make(http.Header),
+		}, nil
+	})}}
+
+	if err := client.PostResponse(context.Background(), "https://hooks.slack.com/actions/test", slackOutgoingMessage{
+		Text:     "hello",
+		ThreadTS: "1700000000.100000",
+		Markdown: boolPtr(true),
+	}); err != nil {
+		t.Fatalf("PostResponse error: %v", err)
+	}
+	if len(calls) != 1 || calls[0]["text"] != "hello" || calls[0]["mrkdwn"] != true || calls[0]["thread_ts"] != "1700000000.100000" {
+		t.Fatalf("calls = %+v", calls)
+	}
+	if err := client.PostResponse(context.Background(), "", slackOutgoingMessage{}); err == nil || !strings.Contains(err.Error(), "response url is required") {
+		t.Fatalf("missing response url err = %v", err)
+	}
+	if err := client.PostResponse(context.Background(), "https://hooks.slack.com/actions/bad", slackOutgoingMessage{Text: "boom"}); err == nil || !strings.Contains(err.Error(), "returned 502") {
+		t.Fatalf("upstream err = %v", err)
+	}
 }

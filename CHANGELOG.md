@@ -1,44 +1,45 @@
 # Changelog
 
-All notable changes to this project will be documented in this file.
+All notable changes to AgentForge should be documented in this file.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and the repository continues to use semantic versioning as the release intent
+even though the workspace has evolved well beyond its original starter state.
 
 ## [Unreleased]
 
 ### Added
-- Initial project setup with Next.js 16 and React 19
-- Tauri 2.9 integration for cross-platform desktop applications
-- Tailwind CSS v4 with CSS variables and dark mode support
-- shadcn/ui component library with Radix UI primitives
-- Zustand for lightweight state management
-- Geist Font optimized with next/font
-- TypeScript configuration with strict mode
-- ESLint configuration for code quality
-- Jest and React Testing Library for testing
-- GitHub Actions CI/CD pipeline
-  - Quality checks (ESLint, TypeScript, security audit)
-  - Test suite with coverage reporting
-  - Tauri desktop builds for Windows, macOS, and Linux
-  - Release workflow for version tags
+
+- Multi-surface dashboard workspaces for:
+  - overview metrics and quick actions
+  - project dashboard CRUD and widget operations
+  - shared task workspace across board/list/timeline/calendar views
+  - role authoring with preview, sandbox, and repo-local skill catalog support
+  - project docs/wiki editing with comments, versions, templates, and task linkage
+  - team, scheduler, workflow, memory, IM, plugin, and review operator surfaces
+- Coding-agent runtime catalog support across `claude_code`, `codex`, and `opencode`
+- Repo-local plugin authoring flow with `create-plugin`, `plugin:build`,
+  `plugin:debug`, `plugin:dev`, `plugin:verify`, and
+  `plugin:verify:builtins`
+- Desktop window chrome, sidecar supervision, updater-manifest generation, and
+  release-time updater artifact validation
+- Modular CI with root quality/tests, Go CI, bridge typecheck, IM bridge build,
+  desktop build matrix, and layered PR review automation
+
+### Changed
+
+- Repository documentation now consistently treats AgentForge, not
+  `react-quick-starter`, as the product identity
+- Root frontend build guidance now reflects static export output in `out/`
+  rather than treating `pnpm start` as the primary deployment path
+- Contribution, testing, and CI/CD docs now describe the actual multi-workspace
+  verification model used by the repository
 
 ### Documentation
-- Comprehensive README with installation and usage instructions
-- Chinese documentation (README_zh.md)
-- CI/CD setup guide (CI_CD.md)
-- Testing guide (TESTING.md)
-- AI assistant instructions (AGENTS.md, CLAUDE.md, GEMINI.md)
 
-## [0.1.0] - 2024-01-28
-
-### Added
-- Initial release
-- Next.js 16 App Router setup
-- React 19 with new features support
-- Tauri 2.9 desktop wrapper
-- Basic UI components (Button)
-- Project structure and configuration
-
-[Unreleased]: https://github.com/AstroAir/react-quick-starter/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/AstroAir/react-quick-starter/releases/tag/v0.1.0
+- Refreshed `README.md` and `README_zh.md` to match the current implemented workspaces
+- Refreshed `docs/PRD.md` implementation snapshot
+- Rewrote `TESTING.md` around real verification entrypoints by subsystem
+- Rewrote `CI_CD.md` around the current GitHub Actions workflows
+- Replaced stale starter-era contribution guidance in `CONTRIBUTING.md`
+- Updated plugin runtime guidance in `docs/GO_WASM_PLUGIN_RUNTIME.md`

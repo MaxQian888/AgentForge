@@ -4,13 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"net/http"
-	"testing"
-
 	"github.com/agentforge/im-bridge/core"
 	"github.com/agentforge/im-bridge/notify"
 	larkcallback "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
 )
 
 func TestLive_StartNormalizesInboundMessageFromLongConnection(t *testing.T) {
@@ -494,4 +495,130 @@ type fakeFeishuActionHandler struct {
 func (h *fakeFeishuActionHandler) HandleAction(ctx context.Context, req *notify.ActionRequest) (*notify.ActionResponse, error) {
 	h.requests = append(h.requests, req)
 	return &notify.ActionResponse{Result: "Approved"}, nil
+}
+
+func TestFeishuLive_NameReplyContextAndHelperFunctions(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if live.Name() != "feishu-live" {
+		t.Fatalf("Name = %q", live.Name())
+	}
+	if live.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+
+	replyAny := live.ReplyContextFromTarget(&core.ReplyTarget{
+		MessageID:     " msg-1 ",
+		ChannelID:     "chat-1",
+		CallbackToken: " card-token ",
+	})
+	reply, ok := replyAny.(replyContext)
+	if !ok {
+		t.Fatalf("ReplyContextFromTarget type = %T", replyAny)
+	}
+	if reply.MessageID != "msg-1" || reply.ChatID != "chat-1" || reply.CallbackToken != "card-token" {
+		t.Fatalf("reply = %+v", reply)
+	}
+
+	rawCtx := replyContext{MessageID: "msg-2", ChatID: "chat-2", CallbackToken: "cb-token-2"}
+	if got := toReplyContext(rawCtx); got != rawCtx {
+		t.Fatalf("toReplyContext(raw) = %+v", got)
+	}
+	if got := toReplyContext(&replyContext{ChatID: "chat-3"}); got.ChatID != "chat-3" {
+		t.Fatalf("toReplyContext(pointer) = %+v", got)
+	}
+	if got := toReplyContext(&core.Message{ChatID: "chat-4"}); got.ChatID != "chat-4" {
+		t.Fatalf("toReplyContext(message) = %+v", got)
+	}
+	if got := toReplyContext(&core.ReplyTarget{MessageID: "msg-5", ChatID: "chat-5", CallbackToken: "cb-token-5"}); got.MessageID != "msg-5" || got.ChatID != "chat-5" || got.CallbackToken != "cb-token-5" {
+		t.Fatalf("toReplyContext(target) = %+v", got)
+	}
+	if got := toReplyContext("invalid"); got != (replyContext{}) {
+		t.Fatalf("toReplyContext(invalid) = %+v", got)
+	}
+
+	openID := "ou_123"
+	userID := "user_123"
+	unionID := "union_123"
+	if got := senderID(&larkim.EventSender{SenderId: &larkim.UserId{OpenId: &openID}}); got != "ou_123" {
+		t.Fatalf("senderID(open) = %q", got)
+	}
+	if got := senderID(&larkim.EventSender{SenderId: &larkim.UserId{UserId: &userID}}); got != "user_123" {
+		t.Fatalf("senderID(user) = %q", got)
+	}
+	if got := senderID(&larkim.EventSender{SenderId: &larkim.UserId{UnionId: &unionID}}); got != "union_123" {
+		t.Fatalf("senderID(union) = %q", got)
+	}
+	if got := senderID(nil); got != "" {
+		t.Fatalf("senderID(nil) = %q", got)
+	}
+
+	if got := parseUnixMillis("1700000000123"); !got.Equal(time.Unix(0, 0).Add(1700000000123 * time.Millisecond)) {
+		t.Fatalf("parseUnixMillis(valid) = %v", got)
+	}
+	before := time.Now()
+	got := parseUnixMillis("bad")
+	after := time.Now()
+	if got.Before(before) || got.After(after.Add(time.Second)) {
+		t.Fatalf("parseUnixMillis(invalid) = %v", got)
+	}
+
+	if got := normalizeButtonStyle(" primary "); got != "primary" {
+		t.Fatalf("normalizeButtonStyle(primary) = %q", got)
+	}
+	if got := normalizeButtonStyle("other"); got != "default" {
+		t.Fatalf("normalizeButtonStyle(other) = %q", got)
+	}
+	if got := feishuActionReference(map[string]interface{}{"action": " act:approve:review-1 "}); got != "act:approve:review-1" {
+		t.Fatalf("feishuActionReference(action) = %q", got)
+	}
+	if got := feishuActionReference(map[string]interface{}{"action_id": " act:reject:review-1 "}); got != "act:reject:review-1" {
+		t.Fatalf("feishuActionReference(action_id) = %q", got)
+	}
+	if got := feishuActionReference(nil); got != "" {
+		t.Fatalf("feishuActionReference(nil) = %q", got)
+	}
+	operatorUserID := "user_456"
+	if got := feishuOperatorID(&larkcallback.Operator{OpenID: "ou_456"}); got != "ou_456" {
+		t.Fatalf("feishuOperatorID(open) = %q", got)
+	}
+	if got := feishuOperatorID(&larkcallback.Operator{UserID: &operatorUserID}); got != "user_456" {
+		t.Fatalf("feishuOperatorID(user) = %q", got)
+	}
+	if got := feishuOperatorID(nil); got != "" {
+		t.Fatalf("feishuOperatorID(nil) = %q", got)
+	}
+	if got := value(nil); got != "" {
+		t.Fatalf("value(nil) = %q", got)
+	}
+	if got := value(&openID); got != "ou_123" {
+		t.Fatalf("value(ptr) = %q", got)
+	}
+	if got := firstNonEmpty(" ", "chat-6", "chat-7"); got != "chat-6" {
+		t.Fatalf("firstNonEmpty = %q", got)
+	}
+	if got := compactMetadata(map[string]string{" source ": " card.action.trigger ", "empty": " "}); got["source"] != "card.action.trigger" || len(got) != 1 {
+		t.Fatalf("compactMetadata = %+v", got)
+	}
+}
+
+func TestFeishuLive_DecodeTextMessageAndReplyCardErrors(t *testing.T) {
+	if _, err := decodeTextMessage(nil, nil); err == nil || !strings.Contains(err.Error(), "missing feishu text message content") {
+		t.Fatalf("decodeTextMessage(nil) err = %v", err)
+	}
+	invalid := "{"
+	if _, err := decodeTextMessage(&invalid, nil); err == nil || !strings.Contains(err.Error(), "decode feishu text payload") {
+		t.Fatalf("decodeTextMessage(invalid) err = %v", err)
+	}
+
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+	if err := live.ReplyCard(context.Background(), replyContext{}, core.NewCard().SetTitle("missing target")); err == nil || !strings.Contains(err.Error(), "requires message id or chat id") {
+		t.Fatalf("ReplyCard missing target err = %v", err)
+	}
 }

@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net/http"
-	"testing"
-
 	"github.com/agentforge/im-bridge/core"
+	"net/http"
+	"strings"
+	"testing"
 )
 
 func TestStub_MetadataAndReplyContextDeclareQQBotBehavior(t *testing.T) {
@@ -182,5 +182,56 @@ func TestStub_HTTPHandlersExposeAndClearReplies(t *testing.T) {
 
 	if len(stub.replies) != 0 {
 		t.Fatalf("replies = %+v", stub.replies)
+	}
+}
+
+func TestStub_HelperConversionsAndReplyNative(t *testing.T) {
+	stub := NewStub("0")
+
+	message, err := core.NewQQBotMarkdownMessage("## Review Ready", nil)
+	if err != nil {
+		t.Fatalf("NewQQBotMarkdownMessage error: %v", err)
+	}
+	if err := stub.ReplyNative(context.Background(), replyContext{UserID: "user-openid", MessageID: "evt-1"}, message); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+	if err := stub.SendStructured(context.Background(), "group:group-openid", &core.StructuredMessage{
+		Title: "Review Ready",
+		Body:  "Choose the next step.",
+	}); err != nil {
+		t.Fatalf("SendStructured error: %v", err)
+	}
+	if len(stub.replies) != 2 || stub.replies[0].NativeSurface != core.NativeSurfaceQQBotMarkdown || !strings.Contains(stub.replies[1].Content, "Review Ready") {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+
+	raw := replyContext{ChatID: "group-openid", UserID: "user-openid", MessageID: "evt-1", IsGroup: true}
+	if got := toReplyContext(raw); got != raw {
+		t.Fatalf("toReplyContext(raw) = %+v", got)
+	}
+	if got := toReplyContext(&replyContext{ChatID: "group-openid", UserID: "user-openid", MessageID: "evt-2", IsGroup: true}); got.MessageID != "evt-2" {
+		t.Fatalf("toReplyContext(pointer) = %+v", got)
+	}
+	msg := &core.Message{
+		ChatID:      "group-openid",
+		UserID:      "user-openid",
+		IsGroup:     true,
+		ReplyTarget: &core.ReplyTarget{MessageID: "evt-3"},
+	}
+	if got := toReplyContext(msg); got.ChatID != "group-openid" || got.MessageID != "evt-3" || !got.IsGroup {
+		t.Fatalf("toReplyContext(message) = %+v", got)
+	}
+	target := &core.ReplyTarget{ConversationID: "group-openid", UserID: "user-openid", MessageID: "evt-4"}
+	if got := toReplyContext(target); got.ChatID != "group-openid" || got.MessageID != "evt-4" || !got.IsGroup {
+		t.Fatalf("toReplyContext(target) = %+v", got)
+	}
+	if got := toReplyContext("invalid"); got != (replyContext{}) {
+		t.Fatalf("toReplyContext(invalid) = %+v", got)
+	}
+	if got := messageIDFromTarget(nil); got != "" {
+		t.Fatalf("messageIDFromTarget(nil) = %q", got)
+	}
+	if got := messageIDFromTarget(&core.ReplyTarget{MessageID: " evt-5 "}); got != "evt-5" {
+		t.Fatalf("messageIDFromTarget(target) = %q", got)
 	}
 }

@@ -4,10 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/agentforge/im-bridge/core"
 	"net/http"
 	"testing"
-
-	"github.com/agentforge/im-bridge/core"
 )
 
 func TestStub_MapsMentionMessageToCoreMessage(t *testing.T) {
@@ -222,3 +221,66 @@ func (r *testRecorder) Header() http.Header {
 
 func (r *testRecorder) Write(data []byte) (int, error) { return r.buf.Write(data) }
 func (r *testRecorder) WriteHeader(statusCode int)     { r.code = statusCode }
+
+func TestDingTalkStub_ReplyContextAndFormattedBranches(t *testing.T) {
+	stub := NewStub("0")
+
+	if stub.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+	replyAny := stub.ReplyContextFromTarget(&core.ReplyTarget{
+		ConversationID: "cid-group-1",
+	})
+	msg, ok := replyAny.(*core.Message)
+	if !ok {
+		t.Fatalf("ReplyContextFromTarget type = %T", replyAny)
+	}
+	if msg.ChatID != "cid-group-1" {
+		t.Fatalf("reply msg = %+v", msg)
+	}
+
+	native, err := core.NewDingTalkCardMessage(
+		core.DingTalkCardTypeActionCard,
+		"Review Ready",
+		"### Choose the next step",
+		[]core.DingTalkCardButton{{Title: "Open", ActionURL: "https://example.test/reviews/1"}},
+	)
+	if err != nil {
+		t.Fatalf("NewDingTalkCardMessage error: %v", err)
+	}
+
+	if err := stub.ReplyNative(context.Background(), &core.ReplyTarget{ChatID: "cid-group-2"}, native); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+	if err := stub.ReplyFormattedText(context.Background(), &core.ReplyTarget{ChannelID: "cid-group-3"}, &core.FormattedText{
+		Content: "### Review Ready",
+		Format:  core.TextFormatDingTalkMD,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if err := stub.UpdateFormattedText(context.Background(), &core.ReplyTarget{ChannelID: "cid-group-4"}, &core.FormattedText{
+		Content: "updated",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+	if len(stub.replies) != 3 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].NativeSurface != core.NativeSurfaceDingTalkCard {
+		t.Fatalf("native reply = %+v", stub.replies[0])
+	}
+	if stub.replies[1].Format != string(core.TextFormatDingTalkMD) {
+		t.Fatalf("formatted reply = %+v", stub.replies[1])
+	}
+	if stub.replies[2].Format != string(core.TextFormatPlainText) {
+		t.Fatalf("updated reply = %+v", stub.replies[2])
+	}
+
+	if got := chatIDFromReplyContext(&core.ReplyTarget{ChatID: "chat-1"}); got != "chat-1" {
+		t.Fatalf("chatIDFromReplyContext(replyTarget) = %q", got)
+	}
+	if got := chatIDFromReplyContext("invalid"); got != "" {
+		t.Fatalf("chatIDFromReplyContext(invalid) = %q", got)
+	}
+}

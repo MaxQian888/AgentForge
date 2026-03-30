@@ -9,6 +9,7 @@ describe("useTaskWorkspaceStore", () => {
       viewMode: "board",
       filters: createDefaultTaskWorkspaceFilters(),
       selectedTaskId: null,
+      selectedTaskIds: [],
       contextRailDisplay: "expanded",
       displayOptions: {
         density: "comfortable",
@@ -80,5 +81,85 @@ describe("useTaskWorkspaceStore", () => {
     store.setCustomFieldFilter("field-risk", "all");
 
     expect(useTaskWorkspaceStore.getState().filters.customFieldFilters).toEqual({});
+  });
+
+  it("tracks sprint and label filters directly", () => {
+    const store = useTaskWorkspaceStore.getState();
+
+    store.setSprintId("sprint-2");
+    store.setLabels(["frontend", "release"]);
+
+    expect(useTaskWorkspaceStore.getState().filters).toMatchObject({
+      sprintId: "sprint-2",
+      labels: ["frontend", "release"],
+    });
+  });
+
+  it("applies saved-view config aliases and custom field filters", () => {
+    const store = useTaskWorkspaceStore.getState();
+    store.setLabels(["existing-label"]);
+
+    store.applySavedViewConfig({
+      layout: "timeline",
+      filters: [
+        { field: "status", value: "done" },
+        { field: "priority", value: "low" },
+        { field: "assignee_id", value: "member-2" },
+        { field: "sprint_id", value: "sprint-7" },
+        { field: "search", value: "release" },
+        { field: "cf:field-risk", value: "Critical" },
+        { field: "ignored", value: "ignored" },
+        null,
+      ],
+    });
+
+    expect(useTaskWorkspaceStore.getState()).toMatchObject({
+      viewMode: "timeline",
+      filters: {
+        status: "done",
+        priority: "low",
+        assigneeId: "member-2",
+        sprintId: "sprint-7",
+        search: "release",
+        labels: ["existing-label"],
+        customFieldFilters: {
+          "field-risk": "Critical",
+        },
+      },
+    });
+  });
+
+  it("ignores invalid saved-view configs", () => {
+    const store = useTaskWorkspaceStore.getState();
+    store.setSearch("current");
+
+    store.applySavedViewConfig(null);
+    store.applySavedViewConfig("invalid");
+
+    expect(useTaskWorkspaceStore.getState()).toMatchObject({
+      viewMode: "board",
+      filters: expect.objectContaining({
+        search: "current",
+      }),
+    });
+  });
+
+  it("toggles multi-selection and can replace or clear the visible selection", () => {
+    const store = useTaskWorkspaceStore.getState();
+
+    store.toggleTaskSelection("task-1");
+    store.toggleTaskSelection("task-2");
+    store.toggleTaskSelection("task-1");
+
+    expect(useTaskWorkspaceStore.getState().selectedTaskIds).toEqual(["task-2"]);
+
+    store.selectAllVisible(["task-3", "task-4"]);
+    expect(useTaskWorkspaceStore.getState().selectedTaskIds).toEqual([
+      "task-3",
+      "task-4",
+    ]);
+
+    store.clearSelection();
+    expect(useTaskWorkspaceStore.getState().selectedTaskIds).toEqual([]);
   });
 });

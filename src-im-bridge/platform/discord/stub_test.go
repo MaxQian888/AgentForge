@@ -4,10 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/agentforge/im-bridge/core"
 	"net/http"
 	"testing"
-
-	"github.com/agentforge/im-bridge/core"
 )
 
 func TestStub_MetadataAndReplyContextDeclareDiscordBehavior(t *testing.T) {
@@ -247,3 +246,55 @@ func (r *testRecorder) Header() http.Header {
 
 func (r *testRecorder) Write(data []byte) (int, error) { return r.buf.Write(data) }
 func (r *testRecorder) WriteHeader(statusCode int)     { r.code = statusCode }
+
+func TestDiscordStub_HelperBranches(t *testing.T) {
+	stub := NewStub("0")
+
+	if stub.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+	replyAny := stub.ReplyContextFromTarget(&core.ReplyTarget{ChatID: "channel-1"})
+	msg, ok := replyAny.(*core.Message)
+	if !ok || msg.ChatID != "channel-1" {
+		t.Fatalf("ReplyContextFromTarget = %#v", replyAny)
+	}
+
+	native, err := core.NewDiscordEmbedMessage("Build Ready", "Agent finished the run.", nil, 0, nil)
+	if err != nil {
+		t.Fatalf("NewDiscordEmbedMessage error: %v", err)
+	}
+	if err := stub.ReplyNative(context.Background(), &core.ReplyTarget{ChannelID: "channel-2"}, native); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+	if err := stub.ReplyFormattedText(context.Background(), &core.ReplyTarget{ChannelID: "channel-3"}, &core.FormattedText{
+		Content: "formatted",
+		Format:  core.TextFormatDiscordMD,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if err := stub.UpdateFormattedText(context.Background(), &core.ReplyTarget{ChannelID: "channel-4"}, &core.FormattedText{
+		Content: "updated",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+	if len(stub.replies) != 3 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].NativeSurface != core.NativeSurfaceDiscordEmbed {
+		t.Fatalf("native reply = %+v", stub.replies[0])
+	}
+	if stub.replies[1].Format != string(core.TextFormatDiscordMD) {
+		t.Fatalf("formatted reply = %+v", stub.replies[1])
+	}
+	if stub.replies[2].Format != string(core.TextFormatPlainText) {
+		t.Fatalf("updated reply = %+v", stub.replies[2])
+	}
+
+	if got := chatIDFromReplyContext(&core.ReplyTarget{ChannelID: "channel-5"}); got != "channel-5" {
+		t.Fatalf("chatIDFromReplyContext(replyTarget) = %q", got)
+	}
+	if got := chatIDFromReplyContext("invalid"); got != "" {
+		t.Fatalf("chatIDFromReplyContext(invalid) = %q", got)
+	}
+}

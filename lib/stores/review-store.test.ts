@@ -82,6 +82,44 @@ describe("useReviewStore", () => {
     });
   });
 
+  it("fetches all reviews with status and risk filters", async () => {
+    const api = makeApiClient();
+    api.get.mockResolvedValueOnce({
+      data: [
+        {
+          id: "review-all-1",
+          taskId: "task-1",
+          prUrl: "https://example.com/pr/1",
+          prNumber: 1,
+          layer: 2,
+          status: "completed",
+          riskLevel: "high",
+          findings: [],
+          summary: "complete",
+          recommendation: "approve",
+          costUsd: 0.3,
+          createdAt: "2026-03-25T10:00:00.000Z",
+          updatedAt: "2026-03-25T10:05:00.000Z",
+        },
+      ],
+    });
+    mockCreateApiClient.mockReturnValue(api);
+
+    await useReviewStore.getState().fetchAllReviews({
+      status: "completed",
+      riskLevel: "high",
+    });
+
+    expect(api.get).toHaveBeenCalledWith(
+      "/api/v1/reviews?status=completed&riskLevel=high",
+      { token: "test-token" },
+    );
+    expect(useReviewStore.getState()).toMatchObject({
+      allReviewsLoading: false,
+      allReviews: [expect.objectContaining({ id: "review-all-1" })],
+    });
+  });
+
   it("surfaces a fetch error when loading task reviews fails", async () => {
     const api = makeApiClient();
     api.get.mockRejectedValueOnce(new Error("boom"));
@@ -167,6 +205,21 @@ describe("useReviewStore", () => {
       prUrl: "https://example.com/pr/1",
       trigger: "manual",
     });
+
+    expect(mockCreateApiClient).not.toHaveBeenCalled();
+  });
+
+  it("returns early without a token for fetch and mutation actions", async () => {
+    mockGetAuthState.mockReturnValue({ accessToken: null });
+
+    await useReviewStore.getState().fetchAllReviews();
+    await useReviewStore.getState().fetchReviewsByTask("task-1");
+    await useReviewStore.getState().approveReview("review-1");
+    await useReviewStore.getState().rejectReview("review-1", "reason");
+    await useReviewStore.getState().requestChanges("review-1");
+    await useReviewStore
+      .getState()
+      .markFalsePositive("review-1", ["finding-1"], "reason");
 
     expect(mockCreateApiClient).not.toHaveBeenCalled();
   });
@@ -274,6 +327,77 @@ describe("useReviewStore", () => {
     expect(useReviewStore.getState().reviewsByTask["task-1"][0]).toEqual(
       expect.objectContaining({
         id: "review-live",
+      }),
+    );
+  });
+
+  it("updates an existing task slice entry even when the incoming task id is blank", () => {
+    useReviewStore.setState({
+      allReviews: [
+        {
+          id: "review-blank",
+          taskId: "task-1",
+          prUrl: "https://example.com/pr/blank",
+          prNumber: 1,
+          layer: 2,
+          status: "pending_human",
+          riskLevel: "medium",
+          findings: [],
+          summary: "pending",
+          recommendation: "approve",
+          costUsd: 0.2,
+          createdAt: "2026-03-26T08:00:00.000Z",
+          updatedAt: "2026-03-26T08:00:00.000Z",
+        },
+      ],
+      reviewsByTask: {
+        "task-1": [
+          {
+            id: "review-blank",
+            taskId: "task-1",
+            prUrl: "https://example.com/pr/blank",
+            prNumber: 1,
+            layer: 2,
+            status: "pending_human",
+            riskLevel: "medium",
+            findings: [],
+            summary: "pending",
+            recommendation: "approve",
+            costUsd: 0.2,
+            createdAt: "2026-03-26T08:00:00.000Z",
+            updatedAt: "2026-03-26T08:00:00.000Z",
+          },
+        ],
+      },
+      allReviewsLoading: false,
+      loading: false,
+      error: null,
+    });
+
+    useReviewStore.getState().updateReview({
+      id: "review-blank",
+      taskId: "00000000-0000-0000-0000-000000000000",
+      prUrl: "https://example.com/pr/blank",
+      prNumber: 1,
+      layer: 2,
+      status: "completed",
+      riskLevel: "low",
+      findings: [],
+      summary: "completed",
+      recommendation: "approve",
+      costUsd: 0.2,
+      createdAt: "2026-03-26T08:00:00.000Z",
+      updatedAt: "2026-03-26T08:30:00.000Z",
+    });
+
+    expect(useReviewStore.getState().allReviews[0]).toEqual(
+      expect.objectContaining({
+        status: "completed",
+      }),
+    );
+    expect(useReviewStore.getState().reviewsByTask["task-1"][0]).toEqual(
+      expect.objectContaining({
+        status: "completed",
       }),
     );
   });

@@ -1,261 +1,212 @@
 # Testing Guide
 
-This document provides information about the testing setup and how to run tests in this project.
+AgentForge no longer has a single "one command covers everything" test surface.
+The repository is split across a Next.js frontend, a Go orchestrator, a Bun-based
+bridge, an IM bridge workspace, and a Tauri desktop shell. Use the verification
+entrypoint that matches the surface you changed.
 
-## Testing Stack
+## Current Test Surfaces
 
-- **Test Runner**: Jest 30.x
-- **Testing Library**: @testing-library/react 16.x
-- **Test Environment**: jsdom (simulates browser environment)
-- **Coverage Provider**: V8
-- **CI/CD**: GitHub Actions
+### 1. Root Web/UI Surface
 
-## Running Tests
+- Runner: Jest 30 via `next/jest`
+- Environment: `jsdom`
+- Primary scope: `app/`, `components/`, `hooks/`, and `lib/`
+- Coverage output: `coverage/`
 
-### Run all tests
+This is the main test surface for the Next.js dashboard and shared frontend
+logic. It is also the surface used by `.github/workflows/test.yml`.
+
+### 2. Go Orchestrator
+
+- Workspace: `src-go/`
+- Primary entrypoint: `go test ./...`
+- CI integration path: `go test ./... -tags integration -count=1 -v`
+
+Use this for backend handlers, services, repositories, scheduler logic, auth,
+and Go-side plugin/runtime behavior.
+
+### 3. TypeScript Bridge
+
+- Workspace: `src-bridge/`
+- Primary entrypoints:
+  - `bun test <paths>`
+  - `bun run typecheck`
+
+The bridge currently does not expose a dedicated `test` script in
+`src-bridge/package.json`, so focused `bun test` commands are the expected path.
+
+### 4. IM Bridge
+
+- Workspace: `src-im-bridge/`
+- Primary entrypoints:
+  - `go test ./...`
+  - `go build ./...`
+
+Use this for messaging platform adapters, rendering, rate limiting, native
+payload handling, and platform metadata logic.
+
+### 5. Desktop / Tauri Shell
+
+- Workspace: `src-tauri/`
+- Primary verification path today:
+  - `pnpm test:tauri`
+  - `pnpm test:tauri:coverage`
+  - `pnpm tauri:dev`
+  - `pnpm tauri:build`
+  - `.github/workflows/desktop-tauri-logic.yml`
+  - `.github/workflows/build-tauri.yml`
+
+Current repository truth for desktop verification is split into two seams:
+
+- `pnpm test:tauri` proves the Rust desktop library tests still pass.
+- `pnpm test:tauri:coverage` enforces the 80%+ unit-test gate on
+  `src-tauri/src/runtime_logic.rs`, the extracted deterministic logic seam
+  behind the desktop shell.
+- `pnpm tauri:dev` / `pnpm tauri:build` still cover the runtime/build-oriented
+  desktop path.
+
+## Root Jest Commands
+
+From the repository root:
 
 ```bash
 pnpm test
-```
-
-### Run tests in watch mode
-
-```bash
 pnpm test:watch
-```
-
-### Run tests with coverage
-
-```bash
 pnpm test:coverage
+pnpm test:tauri
+pnpm test:tauri:coverage
 ```
 
-### Run specific test file
+Recommended targeted commands, especially on Windows:
 
 ```bash
-pnpm test path/to/test-file.test.tsx
+pnpm exec jest app/(dashboard)/page.test.tsx --runInBand
+pnpm exec jest components/dashboard/widgets.test.tsx --runInBand
+pnpm exec jest --testNamePattern="workflow" --runInBand
 ```
 
-### Run tests matching a pattern
+Using `pnpm exec jest ... --runInBand` is the most reliable path for focused
+debugging when a broader `pnpm test -- ...` invocation becomes noisy.
+
+## Root Jest Configuration Truth
+
+The source of truth is [`jest.config.ts`](./jest.config.ts).
+
+Important current behavior:
+
+- `jest.setup.ts` configures the shared test environment and framework mocks.
+- `collectCoverageFrom` covers:
+  - `app/**/*.{js,jsx,ts,tsx}`
+  - `components/**/*.{js,jsx,ts,tsx}`
+  - `hooks/**/*.{js,jsx,ts,tsx}`
+  - `lib/**/*.{js,jsx,ts,tsx}`
+- Coverage explicitly excludes `components/ui/**`.
+- Test path ignores currently include:
+  - `src-bridge/`
+  - `src-tauri/`
+  - `plugins/reviews/`
+  - `.next/`
+  - `out/`
+  - `app/page.test.tsx`
+  - `scripts/build-go-wasm-plugin.test.mjs`
+
+That means root Jest is intentionally **not** the authoritative test surface for
+the bridge, Rust desktop code, or review-plugin workspaces.
+
+## Coverage and Reports
+
+Running `pnpm test:coverage` generates reports under `coverage/`:
+
+- `coverage/index.html`
+- `coverage/lcov.info`
+- `coverage/cobertura-coverage.xml`
+- `coverage/clover.xml`
+- `coverage/junit.xml`
+
+Current global thresholds in `jest.config.ts`:
+
+- Branches: 60%
+- Functions: 60%
+- Lines: 70%
+- Statements: 70%
+
+## Backend and Bridge Commands
+
+### Go Orchestrator
 
 ```bash
-pnpm test --testNamePattern="Button"
+cd src-go
+go test ./...
 ```
 
-## Test File Structure
-
-Test files should be placed next to the files they test with the `.test.ts` or `.test.tsx` extension:
-
-```
-components/
-  ui/
-    button.tsx
-    button.test.tsx  ← Test file
-app/
-  page.tsx
-  page.test.tsx      ← Test file
-lib/
-  utils.ts
-  utils.test.ts      ← Test file
-```
-
-## Writing Tests
-
-### Component Test Example
-
-```typescript
-import { render, screen } from '@testing-library/react';
-import userEvent from '@testing-library/user-event';
-import { Button } from './button';
-
-describe('Button', () => {
-  it('renders a button with text', () => {
-    render(<Button>Click me</Button>);
-    expect(screen.getByRole('button', { name: /click me/i })).toBeInTheDocument();
-  });
-
-  it('handles click events', async () => {
-    const handleClick = jest.fn();
-    const user = userEvent.setup();
-    
-    render(<Button onClick={handleClick}>Click me</Button>);
-    await user.click(screen.getByRole('button'));
-    
-    expect(handleClick).toHaveBeenCalledTimes(1);
-  });
-});
-```
-
-### Utility Function Test Example
-
-```typescript
-import { cn } from './utils';
-
-describe('cn utility function', () => {
-  it('merges class names correctly', () => {
-    const result = cn('class1', 'class2');
-    expect(result).toBe('class1 class2');
-  });
-});
-```
-
-## Coverage Reports
-
-After running `pnpm test:coverage`, coverage reports are generated in the `coverage/` directory:
-
-- **HTML Report**: `coverage/index.html` - Open in browser for interactive coverage report
-- **LCOV Report**: `coverage/lcov.info` - For CI/CD integration
-- **JUnit XML**: `coverage/junit.xml` - For CI/CD test result reporting
-- **Clover XML**: `coverage/clover.xml` - Alternative coverage format
-
-### Viewing Coverage Report
-
-Open the HTML coverage report in your browser:
+Integration-style verification requires Postgres and Redis plus the expected env
+vars:
 
 ```bash
-# Windows
-start coverage/index.html
-
-# macOS
-open coverage/index.html
-
-# Linux
-xdg-open coverage/index.html
+cd src-go
+$env:TEST_POSTGRES_URL="postgres://dev:dev@localhost:5432/appdb_test?sslmode=disable"
+$env:TEST_REDIS_URL="redis://localhost:6379"
+go test ./... -tags integration -count=1 -v
 ```
 
-## Jest Configuration
+### TypeScript Bridge
 
-The Jest configuration is in `jest.config.ts` and includes:
-
-- **Test Environment**: jsdom for React component testing
-- **Setup File**: `jest.setup.ts` - Configures testing-library/jest-dom and mocks
-- **Module Name Mapper**: Handles path aliases (@/components, @/lib, etc.)
-- **Coverage Collection**: Configured to collect from app/, components/, and lib/ directories
-- **Reporters**: Default console reporter + JUnit XML reporter for CI
-
-## Mocked Modules
-
-The following Next.js modules are automatically mocked in `jest.setup.ts`:
-
-- `next/image` - Mocked to render as standard `<img>` tag
-- `next/navigation` - Mocked router hooks (useRouter, usePathname, useSearchParams)
-
-## CI/CD Integration
-
-Tests run automatically on:
-
-- Push to `master` or `develop` branches via `.github/workflows/ci.yml`
-- Pull requests to `master` or `develop` branches via `.github/workflows/ci.yml`
-- Version tags via `.github/workflows/release.yml`
-
-The `test.yml` reusable workflow itself is invoked by `ci.yml`/`release.yml`, and can also be run manually with `workflow_dispatch` when you want to debug test/build steps in isolation.
-
-The CI pipeline:
-
-1. Installs dependencies
-2. Runs linting (`pnpm lint`)
-3. Runs tests with coverage (`pnpm test:coverage`)
-4. Uploads coverage to Codecov (if configured)
-5. Uploads test results and coverage as artifacts
-6. Builds the Next.js application (`pnpm build`)
-
-### GitHub Actions Workflow
-
-The workflow is defined in `.github/workflows/ci.yml`.
-
-### Setting up Codecov (Optional)
-
-To enable Codecov integration:
-
-1. Sign up at [codecov.io](https://codecov.io)
-2. Add your repository
-3. Add `CODECOV_TOKEN` to your GitHub repository secrets
-4. Coverage will be automatically uploaded on each CI run
-
-## Best Practices
-
-### 1. Test Behavior, Not Implementation
-
-❌ Bad:
-
-```typescript
-expect(component.state.count).toBe(1);
+```bash
+cd src-bridge
+bun test src/runtime/registry.test.ts src/server.test.ts
+bun run typecheck
 ```
 
-✅ Good:
+Use focused file lists that match the bridge slice you changed.
 
-```typescript
-expect(screen.getByText('Count: 1')).toBeInTheDocument();
+### IM Bridge
+
+```bash
+cd src-im-bridge
+go test ./...
+go build ./...
 ```
 
-### 2. Use Accessible Queries
+## Build Verification
 
-Prefer queries that reflect how users interact with your app:
+For the web app, remember that `next.config.ts` currently enables
+`output: "export"`.
 
-1. `getByRole` - Best for most elements
-2. `getByLabelText` - Good for form fields
-3. `getByPlaceholderText` - For inputs without labels
-4. `getByText` - For non-interactive elements
-5. `getByTestId` - Last resort
-
-### 3. Use User Events
-
-Use `@testing-library/user-event` instead of `fireEvent`:
-
-❌ Bad:
-
-```typescript
-fireEvent.click(button);
+```bash
+pnpm build
 ```
 
-✅ Good:
+This produces the deployable static site in `out/`. The CI test workflow uploads
+`out/` as the frontend build artifact after tests pass.
 
-```typescript
-const user = userEvent.setup();
-await user.click(button);
-```
+## CI Usage
 
-### 4. Clean Up After Tests
+The main workflows connected to testing are:
 
-Jest automatically cleans up after each test, but if you create side effects:
+- `.github/workflows/test.yml`
+  - runs `pnpm test:coverage`
+  - uploads `coverage/`
+  - runs `pnpm build`
+  - uploads `out/`
+- `.github/workflows/desktop-tauri-logic.yml`
+  - runs `cargo test --manifest-path src-tauri/Cargo.toml --lib`
+  - runs the `runtime_logic.rs` coverage gate via `cargo llvm-cov`
+- `.github/workflows/go-ci.yml`
+  - runs Go unit, lint, and integration coverage paths
+- `.github/workflows/ci.yml`
+  - orchestrates root quality, root tests, Go CI, bridge typecheck, IM build,
+    and then desktop builds
 
-```typescript
-afterEach(() => {
-  // Clean up
-  jest.clearAllMocks();
-});
-```
+## Practical Guidance
 
-### 5. Test Accessibility
-
-```typescript
-it('has accessible button', () => {
-  render(<Button>Click me</Button>);
-  const button = screen.getByRole('button', { name: /click me/i });
-  expect(button).toBeInTheDocument();
-});
-```
-
-## Troubleshooting
-
-### Tests are slow
-
-- Use `test.only()` to run a single test during development
-- Use `pnpm test:watch` to run only changed tests
-
-### Module not found errors
-
-- Check that path aliases in `jest.config.ts` match `tsconfig.json`
-- Ensure the module is properly mocked if it's a Next.js-specific module
-
-### Coverage not collected
-
-- Verify the file is in the `collectCoverageFrom` patterns in `jest.config.ts`
-- Check that the file isn't in `coveragePathIgnorePatterns`
-
-## Resources
-
-- [Jest Documentation](https://jestjs.io/)
-- [Testing Library Documentation](https://testing-library.com/docs/react-testing-library/intro/)
-- [Testing Library Cheatsheet](https://testing-library.com/docs/react-testing-library/cheatsheet)
-- [Common Testing Mistakes](https://kentcdodds.com/blog/common-mistakes-with-react-testing-library)
+- If you only changed dashboard UI, start with root Jest plus `pnpm build`.
+- If you changed `src-go/`, do not stop at root Jest; run Go tests.
+- If you changed `src-bridge/`, run focused `bun test` plus `bun run typecheck`.
+- If you changed `src-im-bridge/`, run `go test ./...` there.
+- If you changed `src-tauri/`, run `pnpm test:tauri`; if you touched
+  `src-tauri/src/runtime_logic.rs` or related pure desktop helpers, also run
+  `pnpm test:tauri:coverage`, then finish with `pnpm tauri:dev` or
+  `pnpm tauri:build` when the runtime/build path matters.
+- Prefer reporting scoped verification truthfully over claiming repo-wide
+  coverage you did not actually run.

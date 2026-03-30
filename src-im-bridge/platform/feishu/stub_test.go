@@ -4,10 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/agentforge/im-bridge/core"
 	"net/http"
 	"testing"
-
-	"github.com/agentforge/im-bridge/core"
 )
 
 func TestStub_MapsInboundMessageAndAppliesDefaults(t *testing.T) {
@@ -149,3 +148,54 @@ func (r *testRecorder) Header() http.Header {
 
 func (r *testRecorder) Write(data []byte) (int, error) { return r.buf.Write(data) }
 func (r *testRecorder) WriteHeader(statusCode int)     { r.code = statusCode }
+
+func TestFeishuStub_HelperBranches(t *testing.T) {
+	stub := NewStub("0")
+
+	if stub.Name() != "feishu-stub" {
+		t.Fatalf("Name = %q", stub.Name())
+	}
+	metadata := stub.Metadata()
+	if metadata.Source != "feishu" || !metadata.Capabilities.SupportsRichMessages {
+		t.Fatalf("Metadata = %+v", metadata)
+	}
+	if stub.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+	replyAny := stub.ReplyContextFromTarget(&core.ReplyTarget{ChannelID: "chat-1"})
+	msg, ok := replyAny.(*core.Message)
+	if !ok || msg.ChatID != "chat-1" {
+		t.Fatalf("ReplyContextFromTarget = %#v", replyAny)
+	}
+
+	native, err := stub.BuildNativeTextMessage("AgentForge Update", "hello **world**")
+	if err != nil {
+		t.Fatalf("BuildNativeTextMessage error: %v", err)
+	}
+	if native == nil || native.FeishuCard == nil {
+		t.Fatalf("native = %+v", native)
+	}
+
+	if err := stub.Send(context.Background(), "chat-2", "broadcast"); err != nil {
+		t.Fatalf("Send error: %v", err)
+	}
+	if err := stub.SendNative(context.Background(), "chat-3", native); err != nil {
+		t.Fatalf("SendNative error: %v", err)
+	}
+	if err := stub.ReplyNative(context.Background(), &core.ReplyTarget{ChatID: "chat-4"}, native); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+	if err := stub.UpdateNative(context.Background(), &core.ReplyTarget{ChannelID: "chat-5"}, native); err != nil {
+		t.Fatalf("UpdateNative error: %v", err)
+	}
+
+	if len(stub.replies) != 1 || stub.replies[0].ChatID != "chat-2" {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if len(stub.native) != 3 {
+		t.Fatalf("native replies = %+v", stub.native)
+	}
+	if stub.native[0].ChatID != "chat-3" || stub.native[1].ChatID != "chat-4" || stub.native[2].ChatID != "chat-5" || !stub.native[2].Updated {
+		t.Fatalf("native replies = %+v", stub.native)
+	}
+}

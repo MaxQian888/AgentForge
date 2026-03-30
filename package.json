@@ -10,6 +10,8 @@
     "test": "jest",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage",
+    "test:tauri": "cargo test --manifest-path src-tauri/Cargo.toml --lib",
+    "test:tauri:coverage": "cargo llvm-cov --manifest-path src-tauri/Cargo.toml --lib --ignore-filename-regex \"lib[.]rs$\" --fail-under-lines 80 --fail-under-functions 80",
     "build:backend": "node scripts/build-backend.js",
     "build:backend:dev": "node scripts/build-backend.js --current-only",
     "build:plugin:wasm": "node scripts/build-go-wasm-plugin.js",

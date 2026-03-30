@@ -4,10 +4,9 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"github.com/agentforge/im-bridge/core"
 	"net/http"
 	"testing"
-
-	"github.com/agentforge/im-bridge/core"
 )
 
 func TestStub_MetadataAndReplyContextDeclareTelegramBehavior(t *testing.T) {
@@ -238,3 +237,62 @@ func (r *testRecorder) Header() http.Header {
 
 func (r *testRecorder) Write(data []byte) (int, error) { return r.buf.Write(data) }
 func (r *testRecorder) WriteHeader(statusCode int)     { r.code = statusCode }
+
+func TestTelegramStub_HelperBranches(t *testing.T) {
+	stub := NewStub("0")
+
+	if stub.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+	replyAny := stub.ReplyContextFromTarget(&core.ReplyTarget{ChannelID: "2001"})
+	msg, ok := replyAny.(*core.Message)
+	if !ok || msg.ChatID != "2001" {
+		t.Fatalf("ReplyContextFromTarget = %#v", replyAny)
+	}
+
+	message, err := core.NewTelegramRichMessage(
+		"*Build* ready",
+		"MarkdownV2",
+		[][]core.TelegramInlineButton{{{
+			Text: "Open",
+			URL:  "https://example.test/builds/1",
+		}}},
+	)
+	if err != nil {
+		t.Fatalf("NewTelegramRichMessage error: %v", err)
+	}
+	if err := stub.ReplyNative(context.Background(), &core.ReplyTarget{ChannelID: "2002"}, message); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+	if err := stub.ReplyFormattedText(context.Background(), &core.ReplyTarget{ChatID: "2003"}, &core.FormattedText{
+		Content: "formatted",
+		Format:  core.TextFormatMarkdownV2,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if err := stub.UpdateFormattedText(context.Background(), &core.ReplyTarget{ChannelID: "2004"}, &core.FormattedText{
+		Content: "updated",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+	if len(stub.replies) != 3 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].NativeSurface != core.NativeSurfaceTelegramRich {
+		t.Fatalf("native reply = %+v", stub.replies[0])
+	}
+	if stub.replies[1].Format != string(core.TextFormatMarkdownV2) {
+		t.Fatalf("formatted reply = %+v", stub.replies[1])
+	}
+	if stub.replies[2].Format != string(core.TextFormatPlainText) {
+		t.Fatalf("updated reply = %+v", stub.replies[2])
+	}
+
+	if got := chatIDFromReplyContext(&core.ReplyTarget{ChannelID: "2005"}); got != "2005" {
+		t.Fatalf("chatIDFromReplyContext(replyTarget) = %q", got)
+	}
+	if got := chatIDFromReplyContext("invalid"); got != "" {
+		t.Fatalf("chatIDFromReplyContext(invalid) = %q", got)
+	}
+}

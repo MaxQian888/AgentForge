@@ -2,13 +2,12 @@ package commands
 
 import (
 	"encoding/json"
+	"github.com/agentforge/im-bridge/client"
+	"github.com/agentforge/im-bridge/core"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
-
-	"github.com/agentforge/im-bridge/client"
-	"github.com/agentforge/im-bridge/core"
 )
 
 func TestAgentCommand_RequiresSubcommand(t *testing.T) {
@@ -159,5 +158,207 @@ func TestFormatAgentSpawnReply_CoversDispatchBranches(t *testing.T) {
 	}, "task-12345678")
 	if idle != "任务 task-123 当前未启动 Agent" {
 		t.Fatalf("idle = %q", idle)
+	}
+}
+
+func TestAgentCommand_RunRequiresPrompt(t *testing.T) {
+	apiClient := client.NewAgentForgeClient("http://example.test", "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent run",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "/agent run <") {
+		t.Fatalf("usage reply = %q", platform.replies[0])
+	}
+}
+
+func TestAgentCommand_RunCreatesTaskAndStartsAgent(t *testing.T) {
+	requests := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests = append(requests, r.Method+" "+r.URL.Path)
+		switch r.URL.Path {
+		case "/api/v1/projects/proj/tasks":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode create body: %v", err)
+			}
+			if body["title"] != "Bridge smoke" || body["description"] != "Bridge smoke" {
+				t.Fatalf("create body = %+v", body)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(&client.Task{ID: "task-quick-123"})
+		case "/api/v1/agents/spawn":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode spawn body: %v", err)
+			}
+			if body["taskId"] != "task-quick-123" {
+				t.Fatalf("spawn body = %+v", body)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(&client.TaskDispatchResponse{
+				Task: client.Task{ID: "task-quick-123"},
+				Dispatch: client.DispatchOutcome{
+					Status: "started",
+					Run:    &client.AgentRun{ID: "run-quick-123", TaskID: "task-quick-123"},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent run Bridge smoke",
+	})
+
+	if len(requests) != 2 {
+		t.Fatalf("requests = %v", requests)
+	}
+	if len(platform.replies) != 2 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if strings.Contains(platform.replies[0], "run-quic") {
+		t.Fatalf("progress reply should not contain run id: %q", platform.replies[0])
+	}
+	if !strings.Contains(platform.replies[1], "run-quic") {
+		t.Fatalf("final reply = %q", platform.replies[1])
+	}
+}
+
+func TestAgentCommand_RunReportsFailuresAfterProgressReply(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"create failed"}`, http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent run Broken path",
+	})
+
+	if len(platform.replies) != 2 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[1], "create failed") {
+		t.Fatalf("failure reply = %q", platform.replies[1])
+	}
+}
+
+func TestAgentCommand_LogsRequiresRunID(t *testing.T) {
+	apiClient := client.NewAgentForgeClient("http://example.test", "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent logs",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "/agent logs <agent-run-id>") {
+		t.Fatalf("usage reply = %q", platform.replies[0])
+	}
+}
+
+func TestAgentCommand_LogsRepliesWithEntriesAndFailures(t *testing.T) {
+	step := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if step == 0 {
+			step++
+			if r.URL.Path != "/api/v1/agents/run-123/logs" {
+				t.Fatalf("path = %s", r.URL.Path)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode([]client.AgentLogEntry{
+				{Timestamp: "2026-03-25T00:00:00Z", Type: "info", Content: "bridge ready"},
+				{Timestamp: "2026-03-25T00:00:05Z", Type: "info", Content: "delivery sent"},
+			})
+			return
+		}
+		http.Error(w, `{"message":"logs unavailable"}`, http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent logs run-123",
+	})
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent logs run-456",
+	})
+
+	if len(platform.replies) != 2 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "bridge ready") || !strings.Contains(platform.replies[0], "delivery sent") {
+		t.Fatalf("logs reply = %q", platform.replies[0])
+	}
+	if !strings.Contains(platform.replies[1], "logs unavailable") {
+		t.Fatalf("failure reply = %q", platform.replies[1])
+	}
+}
+
+func TestAgentCommand_UnknownSubcommandShowsUsage(t *testing.T) {
+	apiClient := client.NewAgentForgeClient("http://example.test", "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent noop something",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "/agent list|spawn|run|logs") {
+		t.Fatalf("usage reply = %q", platform.replies[0])
+	}
+}
+
+func TestFormatAgentSpawnReply_HandlesBlockedWithoutReason(t *testing.T) {
+	got := formatAgentSpawnReply(&client.TaskDispatchResponse{
+		Dispatch: client.DispatchOutcome{Status: "blocked"},
+	}, "task-12345678")
+
+	if !strings.Contains(got, "Agent") {
+		t.Fatalf("reply = %q", got)
+	}
+	if strings.Contains(got, "budget exceeded") {
+		t.Fatalf("reply should not include stale reason: %q", got)
 	}
 }

@@ -226,6 +226,7 @@ describe("SettingsPage — Appearance section", () => {
   });
 
   it("renders Light, Dark, System theme buttons", async () => {
+    const user = userEvent.setup();
     await act(async () => {
       render(<SettingsPage />);
     });
@@ -233,6 +234,14 @@ describe("SettingsPage — Appearance section", () => {
     expect(screen.getByRole("button", { name: settingsMessages.themeLight })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: settingsMessages.themeDark })).toBeInTheDocument();
     expect(screen.getByRole("button", { name: settingsMessages.themeSystem })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: settingsMessages.themeLight }));
+    await user.click(screen.getByRole("button", { name: settingsMessages.themeDark }));
+    await user.click(screen.getByRole("button", { name: settingsMessages.themeSystem }));
+
+    expect(mockSetTheme).toHaveBeenNthCalledWith(1, "light");
+    expect(mockSetTheme).toHaveBeenNthCalledWith(2, "dark");
+    expect(mockSetTheme).toHaveBeenNthCalledWith(3, "system");
   });
 
   it("calls setLocale when a different language is selected", async () => {
@@ -495,5 +504,65 @@ describe("SettingsPage", () => {
         }),
       })
     );
+  });
+
+  it("saves budget, review, runtime, and webhook control changes together", async () => {
+    const user = userEvent.setup();
+
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+
+    setControlValue(screen.getByRole("textbox", { name: "Repository URL" }), "https://github.com/acme/agentforge-next");
+    setControlValue(screen.getByRole("textbox", { name: "Default Branch" }), "develop");
+    setControlValue(screen.getByRole("textbox", { name: "Model" }), "gpt-5-codex-high");
+    setControlValue(screen.getByRole("spinbutton", { name: "Max Task Budget (USD)" }), "15");
+    setControlValue(screen.getByRole("spinbutton", { name: "Max Daily Spend (USD)" }), "45");
+    setControlValue(screen.getByRole("textbox", { name: "Webhook URL" }), "https://hooks.example.com/next");
+
+    const selects = screen.getAllByLabelText("coding-agent-select");
+    await user.selectOptions(selects[1], "codex");
+    await user.selectOptions(selects[2], "yes");
+    await user.selectOptions(selects[3], "yes");
+    await user.selectOptions(selects[4], "layer3");
+    await user.selectOptions(selects[5], "critical");
+    await user.selectOptions(selects[6], "yes");
+    await user.selectOptions(selects[7], "yes");
+
+    await user.click(screen.getByRole("button", { name: "push" }));
+    await user.click(screen.getByRole("button", { name: "pr_opened" }));
+    await user.click(screen.getByRole("button", { name: "Save Settings" }));
+
+    await waitFor(() => {
+      expect(updateProject).toHaveBeenCalledWith(
+        "project-1",
+        expect.objectContaining({
+          repoUrl: "https://github.com/acme/agentforge-next",
+          defaultBranch: "develop",
+          settings: expect.objectContaining({
+            codingAgent: expect.objectContaining({
+              provider: "codex",
+              model: "gpt-5-codex-high",
+            }),
+            budgetGovernance: expect.objectContaining({
+              maxTaskBudgetUsd: 15,
+              maxDailySpendUsd: 45,
+              autoStopOnExceed: true,
+            }),
+            reviewPolicy: expect.objectContaining({
+              autoTriggerOnPR: true,
+              requiredLayers: ["layer3"],
+              minRiskLevelForBlock: "critical",
+              requireManualApproval: true,
+            }),
+            webhook: expect.objectContaining({
+              url: "https://hooks.example.com/next",
+              active: true,
+              events: expect.arrayContaining(["push", "pr_opened"]),
+            }),
+          }),
+        }),
+      );
+    });
   });
 });

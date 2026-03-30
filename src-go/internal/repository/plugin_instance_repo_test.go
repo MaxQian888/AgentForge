@@ -2,7 +2,9 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
+	"time"
 
 	"github.com/react-go-quick-starter/server/internal/model"
 )
@@ -115,5 +117,66 @@ func TestPluginInstanceRepository_ClonesNestedMCPMetadataInMemory(t *testing.T) 
 	}
 	if loaded.RuntimeMetadata.MCP.LatestInteraction == nil || loaded.RuntimeMetadata.MCP.LatestInteraction.Summary != "tools=2" {
 		t.Fatalf("latest interaction = %+v, want preserved summary", loaded.RuntimeMetadata.MCP.LatestInteraction)
+	}
+}
+
+func TestPluginInstanceRepository_HelperFunctions(t *testing.T) {
+	repo := NewPluginInstanceRepository()
+	rebound := repo.WithDB(nil).(*PluginInstanceRepository)
+	if rebound.snapshots == nil {
+		t.Fatal("WithDB(nil) should keep an in-memory snapshot map")
+	}
+	repo.snapshots["shared"] = &model.PluginInstanceSnapshot{PluginID: "shared"}
+	if _, ok := rebound.snapshots["shared"]; !ok {
+		t.Fatal("WithDB(nil) should share in-memory snapshot contents")
+	}
+
+	if nullablePluginInstanceString("") != nil {
+		t.Fatal("nullablePluginInstanceString(empty) should return nil")
+	}
+	if optionalPluginInstanceString("") != nil {
+		t.Fatal("optionalPluginInstanceString(empty) should return nil")
+	}
+	if got := nullablePluginInstanceString("plugin-1"); got != "plugin-1" {
+		t.Fatalf("nullablePluginInstanceString() = %#v", got)
+	}
+}
+
+func TestPluginInstanceRecordToSnapshot(t *testing.T) {
+	lastHealthAt := time.Now().UTC()
+	metadata, err := json.Marshal(&model.PluginRuntimeMetadata{
+		Compatible: true,
+		MCP: &model.PluginMCPRuntimeMetadata{
+			Transport: "stdio",
+			ToolCount: 2,
+		},
+	})
+	if err != nil {
+		t.Fatalf("marshal metadata: %v", err)
+	}
+
+	record := &pluginInstanceRecordModel{
+		PluginID:           "repo-search",
+		ProjectID:          optionalPluginInstanceString("project-1"),
+		RuntimeHost:        string(model.PluginHostTSBridge),
+		LifecycleState:     string(model.PluginStateActive),
+		ResolvedSourcePath: optionalPluginInstanceString("./dist/tool.js"),
+		RuntimeMetadata:    newRawJSON(metadata, "null"),
+		RestartCount:       1,
+		LastHealthAt:       &lastHealthAt,
+		LastError:          optionalPluginInstanceString(""),
+		CreatedAt:          lastHealthAt,
+		UpdatedAt:          lastHealthAt,
+	}
+
+	snapshot, err := record.toSnapshot()
+	if err != nil {
+		t.Fatalf("toSnapshot() error = %v", err)
+	}
+	if snapshot.PluginID != "repo-search" || snapshot.ProjectID != "project-1" {
+		t.Fatalf("snapshot = %#v", snapshot)
+	}
+	if snapshot.RuntimeMetadata == nil || snapshot.RuntimeMetadata.MCP == nil || snapshot.RuntimeMetadata.MCP.ToolCount != 2 {
+		t.Fatalf("snapshot.RuntimeMetadata = %#v", snapshot.RuntimeMetadata)
 	}
 }

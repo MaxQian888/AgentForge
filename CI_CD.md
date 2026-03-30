@@ -1,372 +1,370 @@
 # CI/CD Pipeline Documentation
 
-This document provides comprehensive information about the CI/CD pipeline configured for this React + Next.js + Tauri project.
+This document describes the GitHub Actions workflows that are actually present
+in this repository today. AgentForge uses a modular pipeline: frontend quality
+and tests live at the repo root, Go and bridge validation run as separate
+workflows, desktop builds are matrix-based, and review automation has its own
+PR-triggered path.
 
-## Overview
+## Workflow Inventory
 
-The CI/CD pipeline is implemented using GitHub Actions and includes the following jobs:
+### Core Delivery Workflows
 
-1. **Code Quality & Security** - Linting, type checking, and security audits
-2. **Test Suite** - Unit tests with coverage reporting
-3. **Deploy Preview** - Automatic preview deployments for pull requests
-4. **Deploy Production** - Production deployments (disabled by default)
-5. **Build Tauri** - Cross-platform desktop application builds
-6. **Create Release** - Automated GitHub releases for tagged versions
+- `.github/workflows/ci.yml`
+  - Main push / pull request orchestrator for `master` and `develop`
+- `.github/workflows/quality.yml`
+  - Reusable/manual frontend quality checks
+- `.github/workflows/test.yml`
+  - Reusable/manual frontend test + build workflow
+- `.github/workflows/go-ci.yml`
+  - Go unit, lint, and integration validation
+- `.github/workflows/desktop-tauri-logic.yml`
+  - Reusable/manual desktop Rust lib tests + runtime-logic coverage gate
+- `.github/workflows/build-tauri.yml`
+  - Reusable/manual desktop build matrix
+- `.github/workflows/release.yml`
+  - Tag-triggered draft release flow with updater artifacts
+- `.github/workflows/deploy.yml`
+  - Callable/manual deploy workflow, disabled by default
 
-## Workflow Triggers
+### Review Automation Workflows
 
-The pipeline runs on:
+- `.github/workflows/agent-review.yml`
+  - Layer 1 PR review for `agent/*` branches
+- `.github/workflows/review-layer2.yml`
+  - Layer 2 deep-review trigger based on Layer 1 metadata
 
-- **Push** to `master` or `develop` branches via `.github/workflows/ci.yml`
-- **Pull requests** to `master` or `develop` branches via `.github/workflows/ci.yml`
-- **Tags** starting with `v` via `.github/workflows/release.yml`
-- **Manual dispatch** for `.github/workflows/quality.yml` and `.github/workflows/test.yml` (for isolated debugging)
+## Main CI Orchestrator
 
-## Jobs Overview
+The main repository pipeline is `.github/workflows/ci.yml`.
 
-### 1. Code Quality & Security
+It runs on:
 
-**Runs on:** Called by `ci.yml` / `release.yml` (or manual dispatch)  
-**Duration:** ~2-3 minutes
+- push to `master`
+- push to `develop`
+- pull requests targeting `master`
+- pull requests targeting `develop`
 
-This job performs:
+The current job graph is:
 
-- ESLint code linting
-- TypeScript type checking (`tsc --noEmit`)
-- Security audit of dependencies (`pnpm audit`)
-- Check for outdated dependencies
+1. `quality`
+2. `test`
+3. `go-ci`
+4. `bridge-typecheck`
+5. `im-bridge-build`
+6. `build-tauri`
 
-**Note:** Some steps continue on error to avoid blocking the pipeline for warnings.
+`build-tauri` only starts after the first five jobs succeed.
 
-### 2. Test Suite
+## What Each Core Job Does
 
-**Runs on:** Called by `ci.yml` / `release.yml` (or manual dispatch)  
-**Duration:** ~3-5 minutes
+### 1. Quality
 
-This job performs:
+Source: `.github/workflows/quality.yml`
 
-- Runs all Jest tests with coverage
-- Generates multiple coverage report formats (HTML, LCOV, Cobertura, JUnit)
-- Uploads coverage to Codecov (if configured)
-- Posts coverage summary as PR comment
-- Publishes test results with annotations
-- Builds the Next.js application
-- Checks bundle size
+Environment:
 
-**Coverage Thresholds:**
+- Ubuntu
+- Node.js 22.x
+- pnpm 10
 
-- Branches: 60%
-- Functions: 60%
-- Lines: 70%
-- Statements: 70%
+Current checks:
 
-### 3. Deploy Preview
+- `pnpm install --frozen-lockfile`
+- `pnpm lint`
+- `pnpm exec tsc --noEmit`
+- `pnpm audit --audit-level=moderate`
+- `pnpm outdated`
 
-**Runs on:** Pull requests only  
-**Duration:** ~2-3 minutes
+Important current behavior:
 
-Automatically deploys preview versions of the application for pull requests.
+- `pnpm lint` is `continue-on-error: true`
+- `pnpm audit` is `continue-on-error: true`
+- `pnpm outdated` is `continue-on-error: true`
+- TypeScript typecheck is still a blocking step
 
-**Required Secrets:**
+### 2. Test
 
-- `VERCEL_TOKEN` - Vercel deployment token
-- `VERCEL_ORG_ID` - Vercel organization ID
-- `VERCEL_PROJECT_ID` - Vercel project ID
+Source: `.github/workflows/test.yml`
 
-**Setup Instructions:**
+Environment:
 
-1. Install Vercel CLI: `npm i -g vercel`
-2. Run `vercel login` and authenticate
-3. Run `vercel link` in your project directory
-4. Get your tokens:
+- Ubuntu
+- Node.js 22.x
+- pnpm 10
 
-   ```bash
-   vercel whoami
-   cat .vercel/project.json
-   ```
+Current checks:
 
-5. Add secrets to GitHub repository settings
+- `pnpm install --frozen-lockfile`
+- `pnpm test:coverage`
+- `pnpm build`
 
-### 4. Deploy Production (DISABLED BY DEFAULT)
+Artifacts:
 
-**Runs on:** Pushes to `master` branch (when enabled)  
-**Duration:** ~2-3 minutes
+- `test-results` from `coverage/junit.xml`
+- `coverage-report` from `coverage/`
+- `nextjs-build` from `out/`
 
-⚠️ **This job is commented out by default for safety.**
+Important current behavior:
 
-**To Enable Production Deployments:**
+- The workflow assumes `pnpm build` emits the deployable static site to `out/`
+  because `next.config.ts` currently enables `output: "export"`.
+- Bundle-size reporting also reads from `out/`.
+- Optional Codecov steps are still commented out by default.
 
-1. **Set up GitHub Environment Protection:**
-   - Go to `Settings > Environments`
-   - Create a new environment named `production`
-   - Add required reviewers (recommended)
-   - Add deployment branch restrictions (optional)
-   - Add environment secrets
+### 3. Go CI
 
-2. **Configure Required Secrets:**
-   - `VERCEL_TOKEN`
-   - `VERCEL_ORG_ID`
-   - `VERCEL_PROJECT_ID`
+Source: `.github/workflows/go-ci.yml`
 
-3. **Uncomment the job** in `.github/workflows/ci.yml`
+Jobs:
 
-4. **Update the environment URL** to match your production domain
+- `go-unit`
+- `go-integration`
 
-**Additional Safety Measures:**
+`go-unit` runs:
 
-- Consider requiring specific labels on commits
-- Only deploy on tagged releases
-- Add time-based deployment windows
-- Require manual approval via GitHub Environments
+- `go vet ./...`
+- `golangci-lint`
+- `go test ./... -count=1 -race -timeout 120s`
 
-### 5. Build Tauri Desktop Application
+`go-integration` runs:
 
-**Runs on:** All pushes and pull requests  
-**Duration:** ~10-20 minutes per platform
+- Postgres 16 and Redis 7 service containers
+- `go test ./... -tags integration -count=1 -v`
 
-Builds cross-platform desktop applications for:
+Important current behavior:
 
-- **Linux** (x86_64): AppImage and .deb packages
-- **Windows** (x64): MSI and NSIS installers
-- **macOS** (x64 and ARM64): DMG and .app bundles
+- When `go-ci.yml` is called from `ci.yml` or `release.yml` via `workflow_call`,
+  the integration job runs.
+- Integration tests use:
+  - `TEST_POSTGRES_URL=postgres://dev:dev@localhost:5432/appdb_test?sslmode=disable`
+  - `TEST_REDIS_URL=redis://localhost:6379`
 
-**Platform-Specific Requirements:**
+### 4. Bridge Typecheck
 
-#### Linux (Ubuntu)
+Defined inline in `.github/workflows/ci.yml`.
 
-No additional setup required. System dependencies are installed automatically:
+Current steps:
 
-- libgtk-3-dev
-- libwebkit2gtk-4.1-dev
-- libappindicator3-dev
-- librsvg2-dev
-- patchelf
-- libssl-dev
+- checkout
+- `bun install --frozen-lockfile` in `src-bridge/`
+- `bun run typecheck`
 
-#### Windows
+This is currently a typecheck gate only. It does not run a separate repo-level
+bridge test workflow.
 
-**Optional Code Signing:**
+### 5. IM Bridge Build
 
-To enable code signing, add these secrets:
+Defined inline in `.github/workflows/ci.yml`.
 
-- `WINDOWS_CERTIFICATE` - Base64-encoded PFX certificate
-- `WINDOWS_CERTIFICATE_PASSWORD` - Certificate password
+Current steps:
 
-**How to prepare certificate:**
+- checkout
+- setup Go using `src-im-bridge/go.mod`
+- `go build ./...` in `src-im-bridge/`
 
-```powershell
-# Convert PFX to base64
-$bytes = [System.IO.File]::ReadAllBytes("certificate.pfx")
-$base64 = [System.Convert]::ToBase64String($bytes)
-$base64 | Out-File certificate.txt
-```
+This is a build-validity gate for the IM bridge workspace.
 
-#### macOS
+### 6. Build Tauri
 
-**Optional Code Signing and Notarization:**
+Source: `.github/workflows/build-tauri.yml`
 
-To enable code signing and notarization, add these secrets:
+Build matrix:
 
-- `APPLE_CERTIFICATE` - Base64-encoded .p12 certificate
-- `APPLE_CERTIFICATE_PASSWORD` - Certificate password
-- `APPLE_SIGNING_IDENTITY` - Developer ID Application identity
-- `APPLE_ID` - Apple ID email
-- `APPLE_PASSWORD` - App-specific password
-- `APPLE_TEAM_ID` - Apple Developer Team ID
+- `ubuntu-latest` / `x86_64-unknown-linux-gnu`
+- `windows-latest` / `x86_64-pc-windows-msvc`
+- `macos-latest` / `x86_64-apple-darwin`
+- `macos-latest` / `aarch64-apple-darwin`
 
-**How to prepare certificate:**
+Current steps per platform:
 
-```bash
-# Export certificate from Keychain as .p12
-# Then convert to base64
-base64 -i certificate.p12 -o certificate.txt
-```
+- checkout
+- setup pnpm 10 and Node 22
+- install Rust stable
+- install dependencies
+- setup Go
+- `node scripts/build-backend.js --current-only`
+- `pnpm tauri build --target <target>`
 
-**How to create app-specific password:**
+Produced artifacts:
 
-1. Go to <https://appleid.apple.com>
-2. Sign in with your Apple ID
-3. Go to Security > App-Specific Passwords
-4. Generate a new password
+- Linux AppImage and `.deb`
+- Windows MSI and NSIS `.exe`
+- macOS `.app`, `.dmg`, and updater tarballs
 
-**Tauri Configuration:**
+Important current behavior:
 
-Update `src-tauri/tauri.conf.json` for code signing:
+- Updater-specific signing is optional and controlled by workflow inputs.
+- The active workflow currently wires Tauri updater signing inputs, not a full
+  per-platform certificate/notarization flow.
 
-```json
-{
-  "bundle": {
-    "macOS": {
-      "signingIdentity": "Developer ID Application: Your Name (TEAM_ID)",
-      "entitlements": "path/to/entitlements.plist"
-    },
-    "windows": {
-      "certificateThumbprint": null,
-      "digestAlgorithm": "sha256",
-      "timestampUrl": "http://timestamp.digicert.com"
-    }
-  }
-}
-```
+### 7. Desktop Tauri Logic
 
-### 6. Create Release
+Source: `.github/workflows/desktop-tauri-logic.yml`
 
-**Runs on:** Tags starting with `v` (e.g., `v1.0.0`)  
-**Duration:** ~1-2 minutes
+Environment:
 
-Automatically creates a GitHub release with all built artifacts when you push a version tag.
+- `windows-latest`
+- Rust stable
+- `cargo-llvm-cov`
 
-**How to Create a Release:**
+Current checks:
 
-```bash
-# Create and push a version tag
-git tag v1.0.0
-git push origin v1.0.0
-```
+- `cargo test --manifest-path src-tauri/Cargo.toml --lib`
+- `cargo llvm-cov --manifest-path src-tauri/Cargo.toml --lib --ignore-filename-regex 'lib[.]rs$' --fail-under-lines 80 --fail-under-functions 80`
 
-The release will be created as a **draft** with:
+Current role in the pipeline:
 
-- Auto-generated release notes
-- All platform-specific installers attached
-- Changelog based on commits since last tag
+- This workflow is callable and manually runnable.
+- It is not currently wired into `.github/workflows/ci.yml`.
+- The repo-level scripts `pnpm test:tauri` and `pnpm test:tauri:coverage`
+  mirror this validation seam for local use.
 
-**Review and publish the draft release manually** after verifying the artifacts.
+## Release Flow
 
-## Caching Strategy
+Source: `.github/workflows/release.yml`
 
-The pipeline uses multiple caching strategies to improve performance:
+Trigger:
 
-1. **pnpm Store Cache** - Caches downloaded packages
-2. **Next.js Build Cache** - Caches Next.js build outputs
-3. **Rust Cache** - Caches Rust dependencies and build artifacts
+- push tags matching `v*`
 
-**Expected Speed Improvements:**
+Current release stages:
 
-- First run: ~15-25 minutes (full build)
-- Cached runs: ~5-10 minutes (incremental build)
+1. `quality`
+2. `test`
+3. `go-ci`
+4. `build-tauri`
+5. `create-release`
 
-## Concurrency Control
+Release-specific behavior:
 
-The pipeline uses concurrency groups to automatically cancel outdated workflow runs when new commits are pushed to the same branch or PR.
+- `build-tauri` is called with:
+  - `updater-enabled: true`
+  - `updater-pubkey: ${{ vars.TAURI_UPDATER_PUBKEY }}`
+- The workflow inherits secrets for updater signing.
+- `create-release` downloads artifacts, builds `artifacts/latest.json`, validates
+  the updater payload set, and creates a **draft** GitHub release.
 
-**Configuration:**
+Release assets currently attached:
 
-```yaml
-concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
-  cancel-in-progress: true
-```
+- `*.AppImage*`
+- `*.deb`
+- `*.msi*`
+- `*.exe*`
+- `*.app.tar.gz*`
+- `*.dmg`
+- `latest.json`
+
+## Deploy Flow
+
+Source: `.github/workflows/deploy.yml`
+
+Triggers:
+
+- `workflow_call`
+- `workflow_dispatch`
+
+Inputs:
+
+- `environment=preview`
+- `environment=production`
+
+Current truth:
+
+- `DEPLOY_ENABLED` is hard-coded to `false`
+- Vercel deployment steps are still commented out
+- The workflow downloads `nextjs-build` from `out/` only if deployments are
+  explicitly enabled
+- This workflow is **not** called from `.github/workflows/ci.yml` by default
+
+Treat deploy as a prepared but inactive path until the workflow file is updated
+and the required secrets are configured.
+
+## Review Automation
+
+### Layer 1 Review
+
+Source: `.github/workflows/agent-review.yml`
+
+Trigger:
+
+- pull requests with types `opened`, `synchronize`, `ready_for_review`
+
+Important current behavior:
+
+- The review job only runs when `github.head_ref` starts with `agent/`
+- It uses `anthropics/claude-code-action@v1`
+- It persists review-decision metadata as a workflow artifact
+- If `AGENTFORGE_API_URL` and `AGENTFORGE_CI_TOKEN` are available, it also
+  reports a normalized CI result back to AgentForge
+
+### Layer 2 Deep Review
+
+Source: `.github/workflows/review-layer2.yml`
+
+Trigger:
+
+- `workflow_run` after `Agent PR Review`
+
+Important current behavior:
+
+- It downloads the Layer 1 artifact from the previous run
+- It only triggers deep review when Layer 1 marked
+  `needs_deep_review=true`
+- It POSTs the diff and review dimensions to
+  `POST /api/v1/reviews/trigger` on the AgentForge API
 
 ## Artifacts
 
-All jobs upload artifacts that are retained for 7-30 days:
+Common artifact names in the current workflows:
 
-| Artifact | Retention | Description |
-|----------|-----------|-------------|
-| `test-results` | 30 days | JUnit XML test results |
-| `coverage-report` | 30 days | HTML coverage reports |
-| `nextjs-build` | 7 days | Built Next.js application |
-| `tauri-*` | 30 days | Platform-specific installers |
+- `test-results`
+- `coverage-report`
+- `nextjs-build`
+- `tauri-linux-*-appimage`
+- `tauri-linux-*-deb`
+- `tauri-windows-*-msi`
+- `tauri-windows-*-nsis`
+- `tauri-macos-*-updater`
+- `tauri-macos-*-dmg`
+- `tauri-macos-*-app`
+- `layer1-review-decision`
 
-## Required GitHub Secrets
+## Secrets and Variables
 
-### For Preview/Production Deployments (Optional)
+### Baseline CI
+
+The core `ci.yml` path works without repository secrets.
+
+### Optional / Conditional Inputs
+
+#### Desktop updater release
+
+- `vars.TAURI_UPDATER_PUBKEY`
+- `secrets.TAURI_SIGNING_PRIVATE_KEY`
+- `secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD` (optional)
+
+#### Deploy workflow
 
 - `VERCEL_TOKEN`
 - `VERCEL_ORG_ID`
 - `VERCEL_PROJECT_ID`
+- `DEPLOY_ENABLED=true` in the workflow file
 
-### For Codecov Integration (Optional)
+#### Review automation
 
-- `CODECOV_TOKEN`
+- `ANTHROPIC_API_KEY`
+- `AGENTFORGE_API_URL`
+- `AGENTFORGE_CI_TOKEN`
+- `AGENTFORGE_TOKEN`
 
-### For Windows Code Signing (Optional)
+## Operational Notes
 
-- `WINDOWS_CERTIFICATE`
-- `WINDOWS_CERTIFICATE_PASSWORD`
-
-### For macOS Code Signing (Optional)
-
-- `APPLE_CERTIFICATE`
-- `APPLE_CERTIFICATE_PASSWORD`
-- `APPLE_SIGNING_IDENTITY`
-- `APPLE_ID`
-- `APPLE_PASSWORD`
-- `APPLE_TEAM_ID`
-
-## Troubleshooting
-
-### Tests Failing in CI but Passing Locally
-
-1. Check Node.js version matches (22.x)
-2. Ensure `pnpm-lock.yaml` is committed
-3. Check for environment-specific issues
-4. Review test logs in GitHub Actions
-
-### Tauri Build Failing
-
-1. **Linux:** Check system dependencies are installed
-2. **Windows:** Verify Rust toolchain is properly set up
-3. **macOS:** Check Xcode Command Line Tools are available
-4. Review Tauri configuration in `src-tauri/tauri.conf.json`
-
-### Code Signing Issues
-
-1. Verify secrets are properly set in GitHub
-2. Check certificate validity and expiration
-3. Ensure signing identity matches certificate
-4. Review Tauri documentation for platform-specific requirements
-
-### Deployment Failures
-
-1. Verify all required secrets are set
-2. Check Vercel project configuration
-3. Review deployment logs in GitHub Actions
-4. Ensure build artifacts are generated correctly
-
-## Best Practices
-
-1. **Always test locally** before pushing
-2. **Use feature branches** for development
-3. **Create pull requests** for code review
-4. **Tag releases** with semantic versioning (v1.0.0)
-5. **Review draft releases** before publishing
-6. **Monitor CI/CD costs** and optimize as needed
-7. **Keep dependencies updated** regularly
-8. **Review security audit** results
-
-## Monitoring and Notifications
-
-### GitHub Actions Dashboard
-
-View workflow runs at: `https://github.com/YOUR_ORG/YOUR_REPO/actions`
-
-### Email Notifications
-
-Configure in: `Settings > Notifications > Actions`
-
-### Slack Integration (Optional)
-
-Add Slack notifications using the `slack-send` action.
-
-## Cost Optimization
-
-### GitHub Actions Minutes
-
-- **Free tier:** 2,000 minutes/month for private repos
-- **Paid plans:** Additional minutes available
-
-### Optimization Tips
-
-1. Use caching effectively (already implemented)
-2. Cancel outdated runs (already implemented)
-3. Run expensive jobs only when needed
-4. Consider self-hosted runners for heavy workloads
-
-## Additional Resources
-
-- [GitHub Actions Documentation](https://docs.github.com/en/actions)
-- [Tauri Documentation](https://tauri.app/v1/guides/)
-- [Next.js Deployment](https://nextjs.org/docs/deployment)
-- [Vercel Documentation](https://vercel.com/docs)
-- [Code Signing Guide](https://tauri.app/v1/guides/distribution/sign-macos)
+- The frontend build artifact is the static-export `out/` directory, not a
+  server-oriented `.next` deployment package.
+- Root frontend CI and Go CI are separate truths; passing one does not imply the
+  other also passed.
+- The release flow currently validates updater artifacts before draft release
+  creation, so `latest.json` is part of the release contract.
+- Deploy remains intentionally disabled; do not assume preview or production
+  hosting is active just because `deploy.yml` exists.

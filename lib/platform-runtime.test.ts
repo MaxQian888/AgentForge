@@ -47,6 +47,48 @@ describe("platform-runtime", () => {
     });
   });
 
+  it("falls back to default desktop runtime snapshots when desktop commands fail", async () => {
+    const invoke = jest
+      .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
+      .mockRejectedValue(new Error("bridge unavailable"));
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke,
+    });
+
+    await expect(runtime.getDesktopRuntimeStatus()).resolves.toEqual({
+      overall: "stopped",
+      backend: {
+        label: "backend",
+        status: "stopped",
+        url: null,
+        pid: null,
+        restartCount: 0,
+        lastError: null,
+        lastStartedAt: null,
+      },
+      bridge: {
+        label: "bridge",
+        status: "stopped",
+        url: null,
+        pid: null,
+        restartCount: 0,
+        lastError: null,
+        lastStartedAt: null,
+      },
+    });
+    await expect(runtime.getPluginRuntimeSummary()).resolves.toEqual({
+      activeRuntimeCount: 0,
+      backendHealthy: false,
+      bridgeHealthy: false,
+      bridgePluginCount: 0,
+      eventBridgeAvailable: false,
+      lastUpdatedAt: null,
+      warnings: ["Desktop plugin runtime summary is unavailable."],
+    });
+  });
+
   it("uses the web notification fallback when desktop APIs are unavailable", async () => {
     class MockNotification {
       static permission: NotificationPermission = "default";
@@ -96,6 +138,37 @@ describe("platform-runtime", () => {
     expect(requestPermission).toHaveBeenCalled();
     expect(notifyWeb).toHaveBeenCalledWith("AgentForge", {
       body: "Desktop fallback works",
+    });
+  });
+
+  it("returns a permission error when browser notifications are denied", async () => {
+    class MockNotification {
+      static permission: NotificationPermission = "default";
+    }
+
+    Object.defineProperty(globalThis, "Notification", {
+      configurable: true,
+      value: MockNotification,
+    });
+
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => false,
+      requestNotificationPermission: jest.fn().mockResolvedValue("denied"),
+    });
+
+    await expect(
+      runtime.sendNotification({
+        createdAt: "2026-03-30T10:00:00.000Z",
+        notificationId: "notif-denied",
+        type: "task.completed",
+        title: "Denied",
+        body: "Permission denied",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "permission_denied",
+      error: "Notification permission was not granted.",
     });
   });
 
@@ -328,6 +401,24 @@ describe("platform-runtime", () => {
     expect(setDocumentTitle).toHaveBeenCalledWith("AgentForge · 3 unread");
   });
 
+  it("surfaces desktop tray update failures", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke: jest.fn().mockRejectedValue(new Error("tray unavailable")),
+    });
+
+    await expect(
+      runtime.updateTray({
+        title: "AgentForge",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "failed",
+      error: "tray unavailable",
+    });
+  });
+
   it("returns unsupported for global shortcuts on web", async () => {
     const runtime = createPlatformRuntime({
       defaultBackendUrl: "http://localhost:7777",
@@ -373,6 +464,25 @@ describe("platform-runtime", () => {
     });
   });
 
+  it("surfaces desktop shortcut registration failures", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke: jest.fn().mockRejectedValue(new Error("shortcut denied")),
+    });
+
+    await expect(
+      runtime.registerShortcut({
+        accelerator: "Ctrl+Shift+K",
+        event: "open-command-palette",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      reason: "failed",
+      error: "shortcut denied",
+    });
+  });
+
   it("routes desktop shell actions through the shared desktop command", async () => {
     const invoke = jest
       .fn<Promise<unknown>, [string, Record<string, unknown>?]>()
@@ -408,6 +518,32 @@ describe("platform-runtime", () => {
         actionId: "focus_main_window",
         source: "window",
       },
+    });
+  });
+
+  it("surfaces shell action invocation failures on desktop", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke: jest.fn().mockRejectedValue(new Error("shell failed")),
+    });
+
+    await expect(
+      (runtime as unknown as {
+        performShellAction: (input: {
+          actionId: string;
+          source: string;
+        }) => Promise<unknown>;
+      }).performShellAction({
+        actionId: "focus_main_window",
+        source: "window",
+      }),
+    ).resolves.toEqual({
+      ok: false,
+      actionId: "focus_main_window",
+      reason: "failed",
+      error: "shell failed",
+      status: "failed",
     });
   });
 
@@ -461,6 +597,50 @@ describe("platform-runtime", () => {
     const runtime = createPlatformRuntime({
       defaultBackendUrl: "http://localhost:7777",
       isDesktopEnv: () => false,
+    });
+
+    await expect(runtime.getWindowChromeState()).resolves.toEqual({
+      focused: true,
+      maximized: false,
+      minimized: false,
+      visible: true,
+    });
+  });
+
+  it("falls back to the current window when the desktop chrome snapshot is invalid", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke: jest.fn().mockResolvedValue({ focused: true }),
+      currentWindow: () => ({
+        isFocused: async () => false,
+        isMaximized: async () => true,
+        isMinimized: async () => false,
+        isVisible: async () => true,
+      }),
+    });
+
+    await expect(runtime.getWindowChromeState()).resolves.toEqual({
+      focused: false,
+      maximized: true,
+      minimized: false,
+      visible: true,
+    });
+  });
+
+  it("returns the default chrome state when reading the desktop window fails", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      invoke: jest.fn().mockRejectedValue(new Error("no state")),
+      currentWindow: () => ({
+        isFocused: async () => {
+          throw new Error("focus failed");
+        },
+        isMaximized: async () => false,
+        isMinimized: async () => false,
+        isVisible: async () => true,
+      }),
     });
 
     await expect(runtime.getWindowChromeState()).resolves.toEqual({
@@ -594,6 +774,36 @@ describe("platform-runtime", () => {
     });
   });
 
+  it("returns up_to_date when no desktop update is available", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      checkForDesktopUpdate: jest.fn().mockResolvedValue(null),
+    });
+
+    await expect(runtime.checkForUpdate()).resolves.toEqual({
+      ok: true,
+      mode: "desktop",
+      status: "up_to_date",
+    });
+  });
+
+  it("surfaces update check failures", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      checkForDesktopUpdate: jest
+        .fn()
+        .mockRejectedValue(new Error("update unavailable")),
+    });
+
+    await expect(runtime.checkForUpdate()).resolves.toEqual({
+      ok: false,
+      reason: "failed",
+      error: "update unavailable",
+    });
+  });
+
   it("returns normalized update metadata when a desktop update is available", async () => {
     const runtime = createPlatformRuntime({
       defaultBackendUrl: "http://localhost:7777",
@@ -687,6 +897,43 @@ describe("platform-runtime", () => {
     ]);
   });
 
+  it("returns a failure when installUpdate is called without a pending desktop update", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+    });
+
+    await expect(runtime.installUpdate()).resolves.toEqual({
+      ok: false,
+      reason: "failed",
+      error: "No desktop update is ready to install.",
+    });
+  });
+
+  it("surfaces desktop update installation failures", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      checkForDesktopUpdate: jest.fn().mockResolvedValue({
+        body: "Important fixes",
+        currentVersion: "0.1.0",
+        date: "2026-03-25T04:00:00.000Z",
+        downloadAndInstall: jest
+          .fn()
+          .mockRejectedValue(new Error("install failed")),
+        version: "0.2.0",
+      }),
+    });
+
+    await runtime.checkForUpdate();
+
+    await expect(runtime.installUpdate()).resolves.toEqual({
+      ok: false,
+      reason: "failed",
+      error: "install failed",
+    });
+  });
+
   it("relaunches the desktop app after an installed update is ready", async () => {
     const relaunchDesktopApp = jest.fn().mockResolvedValue(undefined);
     const runtime = createPlatformRuntime({
@@ -710,6 +957,45 @@ describe("platform-runtime", () => {
       ok: true,
     });
     expect(relaunchDesktopApp).toHaveBeenCalled();
+  });
+
+  it("returns a failure when relaunch is requested without an installed update", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+    });
+
+    await expect(runtime.relaunchToUpdate()).resolves.toEqual({
+      ok: false,
+      reason: "failed",
+      error: "No installed desktop update is waiting to relaunch.",
+    });
+  });
+
+  it("surfaces desktop relaunch failures", async () => {
+    const runtime = createPlatformRuntime({
+      defaultBackendUrl: "http://localhost:7777",
+      isDesktopEnv: () => true,
+      checkForDesktopUpdate: jest.fn().mockResolvedValue({
+        body: "Important fixes",
+        currentVersion: "0.1.0",
+        date: "2026-03-25T04:00:00.000Z",
+        downloadAndInstall: jest.fn().mockResolvedValue(undefined),
+        version: "0.2.0",
+      }),
+      relaunchDesktopApp: jest
+        .fn()
+        .mockRejectedValue(new Error("relaunch failed")),
+    });
+
+    await runtime.checkForUpdate();
+    await runtime.installUpdate();
+
+    await expect(runtime.relaunchToUpdate()).resolves.toEqual({
+      ok: false,
+      reason: "failed",
+      error: "relaunch failed",
+    });
   });
 
   it("normalizes desktop runtime event subscriptions", async () => {

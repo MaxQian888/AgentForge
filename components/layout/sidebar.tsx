@@ -111,6 +111,14 @@ function getStoredGroupState(groupId: string, defaultOpen: boolean): boolean {
   return stored !== null ? stored === "true" : defaultOpen;
 }
 
+function isNavItemActive(pathname: string, href: string): boolean {
+  if (href === "/") {
+    return pathname === "/";
+  }
+
+  return pathname === href || pathname.startsWith(`${href}/`);
+}
+
 function NavGroupSection({ group }: { group: NavGroup }) {
   const pathname = usePathname();
   const t = useTranslations("common");
@@ -140,10 +148,7 @@ function NavGroupSection({ group }: { group: NavGroup }) {
             <SidebarMenu>
               {group.items.map((item) => {
                 const Icon = item.icon;
-                const active =
-                  item.href === "/"
-                    ? pathname === "/"
-                    : pathname.startsWith(item.href);
+                const active = isNavItemActive(pathname, item.href);
                 return (
                   <SidebarMenuItem key={item.href}>
                     <SidebarMenuButton

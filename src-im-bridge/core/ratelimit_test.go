@@ -74,3 +74,17 @@ func TestRateLimiter_Cleanup(t *testing.T) {
 		t.Fatalf("buckets = %d, want 0 after cleanup", count)
 	}
 }
+
+func TestNewRateLimiter_AppliesDefaultRateAndWindow(t *testing.T) {
+	rl := NewRateLimiter(0, 0)
+
+	if rl.rate != 20 {
+		t.Fatalf("rate = %d, want 20", rl.rate)
+	}
+	if rl.window != time.Minute {
+		t.Fatalf("window = %s, want %s", rl.window, time.Minute)
+	}
+	if rl.now == nil {
+		t.Fatal("expected now function to be initialized")
+	}
+}

@@ -1,284 +1,206 @@
-# Contributing to React Quick Starter
+# Contributing to AgentForge
 
-Thank you for your interest in contributing to React Quick Starter! This document provides guidelines and instructions for contributing.
-
-## Table of Contents
-
-- [Code of Conduct](#code-of-conduct)
-- [Getting Started](#getting-started)
-- [Development Setup](#development-setup)
-- [Making Changes](#making-changes)
-- [Commit Guidelines](#commit-guidelines)
-- [Pull Request Process](#pull-request-process)
-- [Coding Standards](#coding-standards)
-- [Testing](#testing)
-- [Documentation](#documentation)
-
-## Code of Conduct
-
-By participating in this project, you agree to maintain a respectful and inclusive environment. Please be considerate of others and focus on constructive collaboration.
+Thank you for contributing to AgentForge. This repository is no longer a thin
+starter template; it is a multi-surface workspace with a Next.js dashboard, Go
+orchestrator, Bun bridge, IM bridge workspace, and Tauri desktop shell. Keep
+changes scoped, repo-truthful, and verified against the surface you touched.
 
 ## Getting Started
 
-1. **Fork the repository** on GitHub
-2. **Clone your fork** locally:
-   ```bash
-   git clone https://github.com/YOUR_USERNAME/react-quick-starter.git
-   cd react-quick-starter
-   ```
-3. **Add the upstream remote**:
-   ```bash
-   git remote add upstream https://github.com/AstroAir/react-quick-starter.git
-   ```
+1. Fork the repository on GitHub.
+2. Clone your fork locally:
+
+```bash
+git clone https://github.com/YOUR_USERNAME/AgentForge.git
+cd AgentForge
+```
+
+3. Add the main repository as `upstream`:
+
+```bash
+git remote add upstream https://github.com/Arxtect/AgentForge.git
+```
+
+## Prerequisites
+
+- Node.js 20+
+- pnpm 10 recommended
+- Go 1.25+ for `src-go/`
+- Bun for `src-bridge/`
+- Rust 1.77.2+ for Tauri work
+- Docker Desktop or another Docker environment when you need local Postgres and Redis
 
 ## Development Setup
 
-### Prerequisites
-
-- **Node.js** 20.x or later
-- **pnpm** 8.x or later
-- **Rust** 1.70+ (for Tauri development)
-
-### Installation
+Install dependencies:
 
 ```bash
-# Install dependencies
 pnpm install
+```
 
-# Start development server
+Preferred local workflows:
+
+```bash
+# Preferred full local web stack
+pnpm dev:all
+
+# Frontend-only development
 pnpm dev
 
-# For Tauri desktop development
-pnpm tauri dev
+# Desktop shell development
+pnpm tauri:dev
 ```
 
-### Verify Setup
+Useful status commands:
 
 ```bash
-# Run linting
+pnpm dev:all:status
+pnpm dev:all:logs
+pnpm dev:all:stop
+```
+
+## Verify Your Setup
+
+Run the checks that match the surface you will modify:
+
+```bash
+# Root frontend checks
 pnpm lint
-
-# Run tests
 pnpm test
+pnpm build
 
-# Check Tauri environment
-pnpm tauri info
+# Rust desktop checks
+pnpm test:tauri
 ```
 
-## Making Changes
+For deeper guidance, use:
 
-### Branch Naming
+- [`TESTING.md`](./TESTING.md) for test surfaces and commands
+- [`CI_CD.md`](./CI_CD.md) for GitHub Actions truth
+- [`README.md`](./README.md) and [`README_zh.md`](./README_zh.md) for current runtime and workspace overview
 
-Create a feature branch from `main`:
+## Branching
 
-```bash
-git checkout main
-git pull upstream main
-git checkout -b <type>/<description>
-```
-
-Branch types:
-- `feat/` - New features
-- `fix/` - Bug fixes
-- `docs/` - Documentation changes
-- `refactor/` - Code refactoring
-- `test/` - Test additions or modifications
-- `chore/` - Maintenance tasks
-
-Examples:
-- `feat/add-dark-mode-toggle`
-- `fix/navigation-scroll-issue`
-- `docs/update-installation-guide`
-
-### Keep Your Fork Updated
+Create feature branches from `master`:
 
 ```bash
 git fetch upstream
-git checkout main
-git merge upstream/main
+git checkout master
+git merge upstream/master
+git checkout -b <type>/<description>
 ```
 
-## Commit Guidelines
+Common branch prefixes:
 
-We follow [Conventional Commits](https://www.conventionalcommits.org/) specification.
+- `feat/`
+- `fix/`
+- `docs/`
+- `refactor/`
+- `test/`
+- `chore/`
+- `ci/`
 
-### Commit Message Format
+Examples:
 
-```
-<type>(<scope>): <description>
+- `feat/project-dashboard-widget-refresh`
+- `fix/bridge-runtime-readiness`
+- `docs/update-testing-guide`
 
-[optional body]
+Notes:
 
-[optional footer(s)]
-```
+- `master` is the current default integration branch in this repository.
+- Branches prefixed with `agent/` are reserved for the automated review flow in
+  `.github/workflows/agent-review.yml`. Do not use that prefix unless you
+  intentionally want that workflow behavior.
 
-### Types
+## Making Changes
 
-| Type | Description |
-|------|-------------|
-| `feat` | New feature |
-| `fix` | Bug fix |
-| `docs` | Documentation only |
-| `style` | Code style (formatting, semicolons, etc.) |
-| `refactor` | Code change that neither fixes a bug nor adds a feature |
-| `perf` | Performance improvement |
-| `test` | Adding or updating tests |
-| `build` | Build system or external dependencies |
-| `ci` | CI/CD configuration |
-| `chore` | Other changes that don't modify src or test files |
-| `revert` | Reverts a previous commit |
+- Keep changes focused on one concern.
+- Do not mix unrelated refactors into feature or bugfix branches.
+- Update docs when behavior, commands, or runtime expectations change.
+- Preserve repo conventions already present in the touched area instead of
+  introducing parallel patterns.
 
-### Examples
+## Local Quality Gates
+
+The current pre-commit gate is defined by `.husky/pre-commit` and runs:
 
 ```bash
-feat(ui): add Button component variants
-fix(auth): resolve token refresh loop
-docs(readme): update installation instructions
-refactor(utils): simplify cn helper function
-test(button): add accessibility tests
+pnpm exec lint-staged --concurrent false --max-arg-length 8000
+pnpm exec tsc --noEmit
 ```
+
+If your change affects staged JavaScript or TypeScript files, make sure it is
+compatible with that hook before opening a PR.
+
+## Testing Expectations
+
+AgentForge does not have one universal test command for every workspace.
+
+- Root Next.js/dashboard work should usually run `pnpm test` and `pnpm build`.
+- Go changes should run `go test ./...` from `src-go/`.
+- Bridge changes should run focused `bun test ...` plus `bun run typecheck` from `src-bridge/`.
+- IM bridge changes should run `go test ./...` from `src-im-bridge/`.
+- Desktop/Tauri changes should run `pnpm test:tauri` and, when relevant,
+  `pnpm tauri:build`.
+
+Document the exact verification you ran in your PR description.
 
 ## Pull Request Process
 
-1. **Update your branch** with the latest upstream changes
-2. **Run all checks locally**:
-   ```bash
-   pnpm lint
-   pnpm test
-   pnpm build
-   ```
-3. **Push your branch** to your fork
-4. **Create a Pull Request** against `main`
-5. **Fill out the PR template** completely
-6. **Request review** from maintainers
-7. **Address feedback** and make requested changes
-8. **Squash commits** if requested
+1. Update your branch from `upstream/master`.
+2. Run the local checks that match the affected surface.
+3. Push your branch to your fork.
+4. Open a pull request against `master`.
+5. Summarize scope, key behavior changes, and validation.
+6. Include screenshots or recordings for UI changes when they materially help review.
+7. Address feedback with follow-up commits unless maintainers request squashing.
 
-### PR Checklist
+Recommended PR checklist:
 
-- [ ] Code follows project style guidelines
-- [ ] Self-reviewed the code
-- [ ] Added/updated tests as needed
-- [ ] Updated documentation as needed
-- [ ] All CI checks pass
-- [ ] Linked related issues
+- [ ] Scope is focused and coherent
+- [ ] Tests or build checks were run for the touched surface
+- [ ] Documentation was updated where behavior or commands changed
+- [ ] No unrelated generated files or experiments were included
+- [ ] CI checks pass
 
-## Coding Standards
+## Commit Guidelines
 
-### TypeScript
+Use Conventional Commits:
 
-- Use TypeScript for all new code
-- Enable strict mode
-- Avoid `any` type; use proper typing
-- Export types from dedicated type files when shared
-
-### React
-
-- Use functional components with hooks
-- Follow React 19 best practices
-- Keep components small and focused
-- Use proper prop typing
-
-### Styling
-
-- Use Tailwind CSS utility classes
-- Follow the existing design system
-- Use CSS variables for theming
-- Avoid inline styles
-
-### File Organization
-
-```
-components/
-├── ui/           # shadcn/ui components
-│   └── button.tsx
-├── feature/      # Feature-specific components
-│   └── header.tsx
-└── index.ts      # Barrel exports
+```text
+<type>(<scope>): <description>
 ```
 
-### Naming Conventions
+Examples:
 
-| Type | Convention | Example |
-|------|------------|---------|
-| Components | PascalCase | `UserProfile.tsx` |
-| Hooks | camelCase with `use` prefix | `useAuth.ts` |
-| Utilities | camelCase | `formatDate.ts` |
-| Types/Interfaces | PascalCase | `UserData` |
-| Constants | SCREAMING_SNAKE_CASE | `MAX_RETRIES` |
-
-## Testing
-
-### Running Tests
-
-```bash
-# Run all tests
-pnpm test
-
-# Run tests in watch mode
-pnpm test:watch
-
-# Run with coverage
-pnpm test:coverage
-```
-
-### Writing Tests
-
-- Place tests next to source files: `Component.test.tsx`
-- Use React Testing Library for component tests
-- Test behavior, not implementation details
-- Aim for meaningful coverage, not 100%
-
-### Test Structure
-
-```typescript
-import { render, screen } from '@testing-library/react'
-import { Button } from './button'
-
-describe('Button', () => {
-  it('renders children correctly', () => {
-    render(<Button>Click me</Button>)
-    expect(screen.getByRole('button')).toHaveTextContent('Click me')
-  })
-
-  it('handles click events', async () => {
-    const handleClick = jest.fn()
-    render(<Button onClick={handleClick}>Click</Button>)
-    await userEvent.click(screen.getByRole('button'))
-    expect(handleClick).toHaveBeenCalledTimes(1)
-  })
-})
-```
+- `feat(project-dashboard): add widget refresh feedback`
+- `fix(auth): fail closed when refresh token validation fails`
+- `docs(testing): clarify bridge and tauri verification paths`
+- `ci(release): validate updater artifacts before draft release`
 
 ## Documentation
 
-### When to Update Docs
+Update docs when you change:
 
-- Adding new features
-- Changing existing behavior
-- Updating dependencies
-- Modifying configuration
+- runtime commands
+- verification commands
+- CI behavior
+- frontend workspaces or operator flows
+- plugin/runtime contracts
+- environment or deployment expectations
 
-### Documentation Files
+High-signal repository docs include:
 
-- `README.md` - Project overview and quick start
-- `README_zh.md` - Chinese documentation
-- `CONTRIBUTING.md` - This file
-- `CI_CD.md` - CI/CD setup guide
-- `TESTING.md` - Testing guide
+- [`README.md`](./README.md)
+- [`README_zh.md`](./README_zh.md)
+- [`TESTING.md`](./TESTING.md)
+- [`CI_CD.md`](./CI_CD.md)
+- [`docs/PRD.md`](./docs/PRD.md)
 
-### Code Comments
+## Questions
 
-- Use JSDoc for public APIs
-- Explain "why", not "what"
-- Keep comments up to date
-
-## Questions?
-
-If you have questions, feel free to:
-
-1. Check existing [Issues](https://github.com/AstroAir/react-quick-starter/issues)
-2. Open a new issue for discussion
-3. Reach out to maintainers
-
-Thank you for contributing! 🎉
+If you are unsure about repository truth, inspect the current code and workflow
+files first. For contribution-related questions, start with the repository
+issues in `Arxtect/AgentForge` and link the exact file or command that seems
+unclear.

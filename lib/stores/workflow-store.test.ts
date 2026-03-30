@@ -8,8 +8,14 @@ jest.mock("@/lib/api-client", () => ({
 }));
 
 jest.mock("./auth-store", () => ({
-  useAuthStore: { getState: () => ({ accessToken: "test-token" }) },
+  useAuthStore: { getState: jest.fn(() => ({ accessToken: "test-token" })) },
 }));
+
+const authStoreModule = jest.requireMock("./auth-store") as {
+  useAuthStore: {
+    getState: jest.Mock<{ accessToken: string | null }, []>;
+  };
+};
 
 beforeEach(() => {
   useWorkflowStore.setState({
@@ -17,9 +23,13 @@ beforeEach(() => {
     loading: false,
     saving: false,
     error: null,
+    recentActivityByProject: {},
   });
   mockGet.mockReset();
   mockPut.mockReset();
+  authStoreModule.useAuthStore.getState.mockReturnValue({
+    accessToken: "test-token",
+  });
 });
 
 describe("useWorkflowStore", () => {
@@ -110,5 +120,45 @@ describe("useWorkflowStore", () => {
         taskId: "task-2",
       }),
     );
+  });
+
+  it("uses a generated timestamp and can clear workflow activity", () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-03-30T12:00:00.000Z"));
+
+    useWorkflowStore.getState().appendActivity("proj-1", {
+      taskId: "task-1",
+      action: "notify",
+      from: "triaged",
+      to: "assigned",
+    });
+    expect(useWorkflowStore.getState().recentActivityByProject["proj-1"][0]).toEqual(
+      expect.objectContaining({
+        timestamp: "2026-03-30T12:00:00.000Z",
+      }),
+    );
+
+    useWorkflowStore.getState().clearActivity("proj-1");
+    expect(useWorkflowStore.getState().recentActivityByProject["proj-1"]).toEqual(
+      [],
+    );
+
+    jest.useRealTimers();
+  });
+
+  it("returns early without an auth token", async () => {
+    authStoreModule.useAuthStore.getState.mockReturnValue({
+      accessToken: null,
+    });
+
+    await useWorkflowStore.getState().fetchWorkflow("proj-1");
+    await expect(
+      useWorkflowStore.getState().updateWorkflow("proj-1", {
+        transitions: {},
+        triggers: [],
+      }),
+    ).resolves.toBe(false);
+
+    expect(mockGet).not.toHaveBeenCalled();
+    expect(mockPut).not.toHaveBeenCalled();
   });
 });

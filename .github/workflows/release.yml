@@ -46,10 +46,15 @@ jobs:
     name: Go CI
     uses: ./.github/workflows/go-ci.yml
 
+  # Run desktop Tauri logic tests and coverage gate
+  desktop-tauri-logic:
+    name: Desktop Tauri Logic
+    uses: ./.github/workflows/desktop-tauri-logic.yml
+
   # Build Tauri apps for all platforms
   build-tauri:
     name: Build Tauri
-    needs: [quality, test, go-ci]
+    needs: [quality, test, go-ci, desktop-tauri-logic]
     uses: ./.github/workflows/build-tauri.yml
     with:
       updater-enabled: true

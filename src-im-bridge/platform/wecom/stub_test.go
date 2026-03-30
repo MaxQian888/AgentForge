@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net/http"
-	"testing"
-
 	"github.com/agentforge/im-bridge/core"
+	"net/http"
+	"strings"
+	"testing"
 )
 
 func TestStub_MetadataAndReplyContextDeclareWeComBehavior(t *testing.T) {
@@ -201,3 +201,56 @@ func (r *testRecorder) Header() http.Header {
 
 func (r *testRecorder) Write(data []byte) (int, error) { return r.buf.Write(data) }
 func (r *testRecorder) WriteHeader(statusCode int)     { r.code = statusCode }
+
+func TestStub_ReplyAndReplyNativeUseReplyTargets(t *testing.T) {
+	stub := NewStub("0")
+
+	if err := stub.Reply(context.Background(), replyContext{ChatID: "chat-1"}, "reply text"); err != nil {
+		t.Fatalf("Reply error: %v", err)
+	}
+
+	message, err := core.NewWeComCardMessage(
+		core.WeComCardTypeNews,
+		"Review Ready",
+		"Choose the next step.",
+		"https://example.test/reviews/1",
+		[]core.WeComArticle{{
+			Title:       "Review Ready",
+			Description: "Choose the next step.",
+			URL:         "https://example.test/reviews/1",
+		}},
+		nil,
+	)
+	if err != nil {
+		t.Fatalf("NewWeComCardMessage error: %v", err)
+	}
+	if err := stub.ReplyNative(context.Background(), replyContext{UserID: "zhangsan"}, message); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+
+	if len(stub.replies) != 2 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].ChatID != "chat-1" {
+		t.Fatalf("first reply = %+v", stub.replies[0])
+	}
+	if stub.replies[1].ChatID != "zhangsan" || stub.replies[1].NativeSurface != core.NativeSurfaceWeComCard {
+		t.Fatalf("second reply = %+v", stub.replies[1])
+	}
+}
+
+func TestStub_SendStructuredUsesFallbackText(t *testing.T) {
+	stub := NewStub("0")
+	if err := stub.SendStructured(context.Background(), "chat-2", &core.StructuredMessage{
+		Title: "Review Ready",
+		Body:  "Choose the next step.",
+		Actions: []core.StructuredAction{
+			{Label: "Open", URL: "https://example.test/reviews/1"},
+		},
+	}); err != nil {
+		t.Fatalf("SendStructured error: %v", err)
+	}
+	if len(stub.replies) != 1 || !strings.Contains(stub.replies[0].Content, "WeCom richer card update is unavailable") {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+}

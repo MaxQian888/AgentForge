@@ -112,6 +112,34 @@ jest.mock("@/lib/stores/review-store", () => ({
     typeof selector === "function" ? selector(storeState) : storeState,
 }));
 
+jest.mock("@/components/shared/filter-bar", () => ({
+  FilterBar: ({
+    onReset,
+    filters,
+  }: {
+    onReset: () => void;
+    filters: Array<{ onChange: (value: string) => void }>;
+  }) => (
+    <div>
+      <button type="button" onClick={() => filters[0]?.onChange("completed")}>
+        filter-status
+      </button>
+      <button type="button" onClick={() => filters[1]?.onChange("high")}>
+        filter-risk
+      </button>
+      <button type="button" onClick={onReset}>
+        reset-filters
+      </button>
+    </div>
+  ),
+}));
+
+jest.mock("@/components/review/review-workspace", () => ({
+  ReviewWorkspace: ({ selectedReviewId }: { selectedReviewId: string | null }) => (
+    <div data-testid="review-workspace">{selectedReviewId ?? "none"}</div>
+  ),
+}));
+
 import userEvent from "@testing-library/user-event";
 import { act, render, screen, waitFor } from "@testing-library/react";
 import ReviewsPage from "./page";
@@ -122,11 +150,43 @@ describe("ReviewsPage", () => {
     triggerReview.mockClear();
     approveReview.mockClear();
     requestChanges.mockClear();
+    storeState.allReviews = [
+      {
+        id: "review-task",
+        taskId: "task-1",
+        prUrl: "https://github.com/org/repo/pull/1",
+        prNumber: 1,
+        layer: 2,
+        status: "pending_human",
+        riskLevel: "high",
+        findings: [],
+        summary: "Task-bound review summary",
+        recommendation: "request_changes",
+        costUsd: 1.25,
+        createdAt: "2026-03-25T08:00:00.000Z",
+        updatedAt: "2026-03-25T08:30:00.000Z",
+      },
+      {
+        id: "review-standalone",
+        taskId: "",
+        prUrl: "https://github.com/org/repo/pull/99",
+        prNumber: 99,
+        layer: 2,
+        status: "completed",
+        riskLevel: "medium",
+        findings: [],
+        summary: "Standalone review summary",
+        recommendation: "approve",
+        costUsd: 0.75,
+        createdAt: "2026-03-26T08:00:00.000Z",
+        updatedAt: "2026-03-26T08:20:00.000Z",
+      },
+    ];
+    storeState.allReviewsLoading = false;
+    storeState.error = null;
   });
 
-  it("loads the backlog, opens the detail for the review id in search params, and supports standalone triggers", async () => {
-    const user = userEvent.setup();
-
+  it("loads the backlog and forwards the selected review id into the workspace", async () => {
     await act(async () => {
       render(<ReviewsPage searchParams={Promise.resolve({ id: "review-standalone" })} />);
     });
@@ -138,43 +198,58 @@ describe("ReviewsPage", () => {
       }),
     );
 
-    expect(
-      screen.getByText("PR: https://github.com/org/repo/pull/99"),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("review-workspace")).toHaveTextContent("review-standalone");
+  });
 
-    await user.click(screen.getByRole("button", { name: "Trigger Review" }));
-    await user.type(
-      screen.getByPlaceholderText("https://github.com/org/repo/pull/123"),
-      "https://git.example.com/org/repo/pull/77",
-    );
-    await user.click(screen.getByRole("button", { name: "Submit" }));
+  it("refetches reviews when filters change and resets them back to all", async () => {
+    const user = userEvent.setup();
 
+    await act(async () => {
+      render(<ReviewsPage searchParams={Promise.resolve({ id: "review-task" })} />);
+    });
+
+    fetchAllReviews.mockClear();
+    await user.click(screen.getByRole("button", { name: "filter-status" }));
     await waitFor(() =>
-      expect(triggerReview).toHaveBeenCalledWith({
-        prUrl: "https://git.example.com/org/repo/pull/77",
-        trigger: "manual",
+      expect(fetchAllReviews).toHaveBeenLastCalledWith({
+        status: "completed",
+        riskLevel: undefined,
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "filter-risk" }));
+    await waitFor(() =>
+      expect(fetchAllReviews).toHaveBeenLastCalledWith({
+        status: "completed",
+        riskLevel: "high",
+      }),
+    );
+
+    await user.click(screen.getByRole("button", { name: "reset-filters" }));
+    await waitFor(() =>
+      expect(fetchAllReviews).toHaveBeenLastCalledWith({
+        status: undefined,
+        riskLevel: undefined,
       }),
     );
   });
 
-  it("resyncs the selected review when the search param id changes", async () => {
+  it("renders the loading and empty states when no reviews are available", async () => {
+    storeState.allReviews = [];
+    storeState.allReviewsLoading = true;
+
     let rerender: ReturnType<typeof render>["rerender"];
     await act(async () => {
-      ({ rerender } = render(
-        <ReviewsPage searchParams={Promise.resolve({ id: "review-task" })} />,
-      ));
+      ({ rerender } = render(<ReviewsPage searchParams={Promise.resolve({})} />));
     });
 
-    expect(
-      await screen.findByText("PR: https://github.com/org/repo/pull/1"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("Loading reviews...")).toBeInTheDocument();
 
+    storeState.allReviewsLoading = false;
     await act(async () => {
-      rerender(<ReviewsPage searchParams={Promise.resolve({ id: "review-standalone" })} />);
+      rerender(<ReviewsPage searchParams={Promise.resolve({})} />);
     });
 
-    expect(
-      await screen.findByText("PR: https://github.com/org/repo/pull/99"),
-    ).toBeInTheDocument();
+    expect(screen.getByText("No reviews found.")).toBeInTheDocument();
   });
 });

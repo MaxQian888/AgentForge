@@ -2,12 +2,15 @@ package telegram
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
-	"testing"
-	"time"
-
 	"github.com/agentforge/im-bridge/core"
 	"github.com/agentforge/im-bridge/notify"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
+	"time"
 )
 
 func TestLive_StartNormalizesSlashCommandUpdate(t *testing.T) {
@@ -565,4 +568,298 @@ type fakeTelegramActionHandler struct {
 func (h *fakeTelegramActionHandler) HandleAction(ctx context.Context, req *notify.ActionRequest) (*notify.ActionResponse, error) {
 	h.requests = append(h.requests, req)
 	return &notify.ActionResponse{Result: "Approved"}, nil
+}
+
+type telegramRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn telegramRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func TestLive_NameReplyStructuredAndReplyFormattedText(t *testing.T) {
+	runner := &fakeUpdateRunner{}
+	sender := &fakeSender{}
+
+	live, err := NewLive("bot-token", WithUpdateRunner(runner), WithSender(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if live.Name() != "telegram-live" {
+		t.Fatalf("Name = %q", live.Name())
+	}
+	if live.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+
+	replyAny := live.ReplyContextFromTarget(&core.ReplyTarget{
+		ChatID:    "-2001",
+		TopicID:   "777",
+		MessageID: "42",
+	})
+	reply, ok := replyAny.(replyContext)
+	if !ok {
+		t.Fatalf("ReplyContextFromTarget type = %T", replyAny)
+	}
+	if reply.ChatID != -2001 || reply.TopicID != 777 || reply.MessageID != 42 {
+		t.Fatalf("reply = %+v", reply)
+	}
+
+	if err := live.ReplyStructured(context.Background(), replyContext{ChatID: -2001, TopicID: 777}, &core.StructuredMessage{
+		Title: "Review Ready",
+		Body:  "Choose the next step.",
+		Actions: []core.StructuredAction{
+			{ID: "act:approve:review-1", Label: "Approve"},
+		},
+	}); err != nil {
+		t.Fatalf("ReplyStructured error: %v", err)
+	}
+	if len(sender.structuredCalls) != 1 || sender.structuredCalls[0].ChatID != -2001 || sender.structuredCalls[0].TopicID != 777 {
+		t.Fatalf("structuredCalls = %+v", sender.structuredCalls)
+	}
+
+	if err := live.ReplyFormattedText(context.Background(), replyContext{ChatID: -2001, TopicID: 777, MessageID: 42}, &core.FormattedText{
+		Content: "*Build* ready",
+		Format:  core.TextFormatMarkdownV2,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if len(sender.calls) != 1 || sender.calls[0].ReplyToMessageID != 42 || sender.calls[0].ParseMode != "MarkdownV2" {
+		t.Fatalf("calls = %+v", sender.calls)
+	}
+
+	if err := live.ReplyStructured(context.Background(), replyContext{}, &core.StructuredMessage{Title: "Missing target"}); err == nil || !strings.Contains(err.Error(), "requires chat id") {
+		t.Fatalf("missing target error = %v", err)
+	}
+}
+
+func TestTelegramHelpers_ParseContextValidationAndNativeRendering(t *testing.T) {
+	raw := replyContext{ChatID: -2001, TopicID: 777, MessageID: 42}
+	if got := toReplyContext(raw); got != raw {
+		t.Fatalf("toReplyContext(raw) = %+v", got)
+	}
+	if got := toReplyContext(&replyContext{ChatID: -3001, TopicID: 888, MessageID: 43}); got.ChatID != -3001 || got.TopicID != 888 || got.MessageID != 43 {
+		t.Fatalf("toReplyContext(pointer) = %+v", got)
+	}
+	msg := &core.Message{
+		ChatID:      "-4001",
+		ThreadID:    "999",
+		ReplyTarget: &core.ReplyTarget{MessageID: "44"},
+	}
+	if got := toReplyContext(msg); got.ChatID != -4001 || got.TopicID != 999 || got.MessageID != 44 {
+		t.Fatalf("toReplyContext(message) = %+v", got)
+	}
+	if got := toReplyContext("invalid"); got != (replyContext{}) {
+		t.Fatalf("toReplyContext(invalid) = %+v", got)
+	}
+
+	if _, err := parseChatID("abc"); err == nil || !strings.Contains(err.Error(), "numeric chat id") {
+		t.Fatalf("parseChatID(non-numeric) err = %v", err)
+	}
+	if _, err := parseChatID("0"); err == nil || !strings.Contains(err.Error(), "requires chat id") {
+		t.Fatalf("parseChatID(zero) err = %v", err)
+	}
+	if got, err := parseChatID("-2001"); err != nil || got != -2001 {
+		t.Fatalf("parseChatID(valid) = %d, %v", got, err)
+	}
+
+	if err := validateUpdateMode("", ""); err != nil {
+		t.Fatalf("validateUpdateMode(default) error: %v", err)
+	}
+	if err := validateUpdateMode("webhook", ""); err == nil || !strings.Contains(err.Error(), "only longpoll update mode") {
+		t.Fatalf("validateUpdateMode(webhook) = %v", err)
+	}
+
+	if got := normalizeCommandText("/task@AgentForge   list "); got != "/task list" {
+		t.Fatalf("normalizeCommandText = %q", got)
+	}
+	if got := descriptionOrFallback("  ", "fallback"); got != "fallback" {
+		t.Fatalf("descriptionOrFallback(blank) = %q", got)
+	}
+	if got := descriptionOrFallback(" detailed error ", "fallback"); got != "detailed error" {
+		t.Fatalf("descriptionOrFallback(desc) = %q", got)
+	}
+	if got := telegramParseMode(core.TextFormatMarkdownV2); got != "MarkdownV2" {
+		t.Fatalf("telegramParseMode(markdown) = %q", got)
+	}
+	if got := telegramParseMode(core.TextFormatPlainText); got != "" {
+		t.Fatalf("telegramParseMode(plain) = %q", got)
+	}
+
+	message, err := core.NewTelegramRichMessage(
+		"*Build* ready",
+		"MarkdownV2",
+		[][]core.TelegramInlineButton{{
+			{Text: "Open", URL: "https://example.test/builds/1"},
+		}},
+	)
+	if err != nil {
+		t.Fatalf("NewTelegramRichMessage error: %v", err)
+	}
+	textMessage, markup, err := renderTelegramNativeMessage(message)
+	if err != nil {
+		t.Fatalf("renderTelegramNativeMessage error: %v", err)
+	}
+	if textMessage.Text != "*Build* ready" || textMessage.ParseMode != "MarkdownV2" {
+		t.Fatalf("textMessage = %+v", textMessage)
+	}
+	if markup == nil || len(markup.InlineKeyboard) != 1 || markup.InlineKeyboard[0][0].URL != "https://example.test/builds/1" {
+		t.Fatalf("markup = %+v", markup)
+	}
+	if _, _, err := renderTelegramNativeMessage(&core.NativeMessage{Platform: "slack"}); err == nil || !strings.Contains(err.Error(), "native message") {
+		t.Fatalf("renderTelegramNativeMessage(non-telegram) err = %v", err)
+	}
+}
+
+func TestLive_ReplyNativeUsesReplyTargetAndRejectsMissingChat(t *testing.T) {
+	runner := &fakeUpdateRunner{}
+	sender := &fakeSender{}
+	live, err := NewLive("bot-token", WithUpdateRunner(runner), WithSender(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	message, err := core.NewTelegramRichMessage(
+		"*Build* ready",
+		"MarkdownV2",
+		[][]core.TelegramInlineButton{{{
+			Text: "Open",
+			URL:  "https://example.test/builds/1",
+		}}},
+	)
+	if err != nil {
+		t.Fatalf("NewTelegramRichMessage error: %v", err)
+	}
+
+	if err := live.ReplyNative(context.Background(), replyContext{ChatID: -2001, TopicID: 777}, message); err != nil {
+		t.Fatalf("ReplyNative error: %v", err)
+	}
+	if len(sender.structuredCalls) != 1 || sender.structuredCalls[0].ChatID != -2001 || sender.structuredCalls[0].TopicID != 777 {
+		t.Fatalf("structuredCalls = %+v", sender.structuredCalls)
+	}
+	if err := live.ReplyNative(context.Background(), replyContext{}, message); err == nil || !strings.Contains(err.Error(), "requires chat id") {
+		t.Fatalf("missing chat error = %v", err)
+	}
+}
+
+func TestBotAPISenderAndClientMethods(t *testing.T) {
+	requests := make([]struct {
+		path string
+		body map[string]any
+	}, 0, 5)
+	client := &botAPIClient{
+		baseURL: "https://api.telegram.example/bot-token",
+		client: &http.Client{Transport: telegramRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			var body map[string]any
+			if err := json.NewDecoder(req.Body).Decode(&body); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			requests = append(requests, struct {
+				path string
+				body map[string]any
+			}{path: req.URL.Path, body: body})
+
+			responseBody := `{"ok":true,"result":{"message_id":1}}`
+			if strings.HasSuffix(req.URL.Path, "/getUpdates") {
+				responseBody = `{"ok":true,"result":[{"update_id":1}]}`
+			} else if strings.HasSuffix(req.URL.Path, "/answerCallbackQuery") || strings.HasSuffix(req.URL.Path, "/deleteWebhook") {
+				responseBody = `{"ok":true,"result":true}`
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(responseBody)),
+				Header:     make(http.Header),
+			}, nil
+		})},
+	}
+	sender := &botAPISender{client: client}
+
+	if err := sender.SendText(context.Background(), -2001, 777, 42, telegramTextMessage{Text: "hello", ParseMode: "MarkdownV2"}); err != nil {
+		t.Fatalf("SendText error: %v", err)
+	}
+	if err := sender.EditText(context.Background(), -2001, 42, telegramTextMessage{Text: "updated", ParseMode: "MarkdownV2"}); err != nil {
+		t.Fatalf("EditText error: %v", err)
+	}
+	if err := sender.AnswerCallbackQuery(context.Background(), "cb-1", "done"); err != nil {
+		t.Fatalf("AnswerCallbackQuery error: %v", err)
+	}
+	if err := sender.SendStructured(context.Background(), -2001, 777, telegramTextMessage{Text: "structured"}, &inlineKeyboardMarkup{
+		InlineKeyboard: [][]inlineKeyboardButton{{{Text: "Open", URL: "https://example.test"}}},
+	}); err != nil {
+		t.Fatalf("SendStructured error: %v", err)
+	}
+	if err := client.deleteWebhook(context.Background()); err != nil {
+		t.Fatalf("deleteWebhook error: %v", err)
+	}
+	updates, err := client.getUpdates(context.Background(), 9)
+	if err != nil {
+		t.Fatalf("getUpdates error: %v", err)
+	}
+	if len(updates) != 1 || updates[0].UpdateID != 1 {
+		t.Fatalf("updates = %+v", updates)
+	}
+
+	if len(requests) != 6 {
+		t.Fatalf("requests = %+v", requests)
+	}
+	if requests[0].path != "/bot-token/sendMessage" || requests[0].body["chat_id"] != float64(-2001) || requests[0].body["message_thread_id"] != float64(777) {
+		t.Fatalf("send text request = %+v", requests[0])
+	}
+	replyParameters, ok := requests[0].body["reply_parameters"].(map[string]any)
+	if !ok || replyParameters["message_id"] != float64(42) {
+		t.Fatalf("reply parameters = %+v", requests[0].body["reply_parameters"])
+	}
+	if requests[1].path != "/bot-token/editMessageText" || requests[1].body["message_id"] != float64(42) {
+		t.Fatalf("edit text request = %+v", requests[1])
+	}
+	if requests[2].path != "/bot-token/answerCallbackQuery" || requests[2].body["callback_query_id"] != "cb-1" {
+		t.Fatalf("answer callback request = %+v", requests[2])
+	}
+	if requests[3].path != "/bot-token/sendMessage" || requests[3].body["reply_markup"] == nil {
+		t.Fatalf("structured request = %+v", requests[3])
+	}
+	if requests[4].path != "/bot-token/deleteWebhook" {
+		t.Fatalf("delete webhook request = %+v", requests[4])
+	}
+	if requests[5].path != "/bot-token/getUpdates" || requests[5].body["offset"] != float64(9) {
+		t.Fatalf("get updates request = %+v", requests[5])
+	}
+
+	if err := client.sendMessage(context.Background(), sendMessageRequest{}); err == nil || !strings.Contains(err.Error(), "requires content") {
+		t.Fatalf("sendMessage empty err = %v", err)
+	}
+	if err := client.editMessageText(context.Background(), editMessageTextRequest{}); err == nil || !strings.Contains(err.Error(), "requires content") {
+		t.Fatalf("editMessageText empty err = %v", err)
+	}
+	if err := client.answerCallbackQuery(context.Background(), answerCallbackQueryRequest{}); err == nil || !strings.Contains(err.Error(), "callback query id") {
+		t.Fatalf("answerCallbackQuery empty err = %v", err)
+	}
+
+	errorClient := &botAPIClient{
+		baseURL: "https://api.telegram.example/bot-token",
+		client: &http.Client{Transport: telegramRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Body:       io.NopCloser(strings.NewReader("upstream boom")),
+				Header:     make(http.Header),
+			}, nil
+		})},
+	}
+	if err := errorClient.deleteWebhook(context.Background()); err == nil || !strings.Contains(err.Error(), "status 502") {
+		t.Fatalf("deleteWebhook upstream err = %v", err)
+	}
+
+	notOKClient := &botAPIClient{
+		baseURL: "https://api.telegram.example/bot-token",
+		client: &http.Client{Transport: telegramRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"ok":false,"description":"denied"}`)),
+				Header:     make(http.Header),
+			}, nil
+		})},
+	}
+	if _, err := notOKClient.getUpdates(context.Background(), 0); err == nil || !strings.Contains(err.Error(), "denied") {
+		t.Fatalf("getUpdates not-ok err = %v", err)
+	}
 }

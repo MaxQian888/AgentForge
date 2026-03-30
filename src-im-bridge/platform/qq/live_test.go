@@ -2,10 +2,11 @@ package qq
 
 import (
 	"context"
+	"encoding/json"
+	"github.com/agentforge/im-bridge/core"
 	"strings"
 	"testing"
-
-	"github.com/agentforge/im-bridge/core"
+	"time"
 )
 
 func TestNewLive_RequiresWSURL(t *testing.T) {
@@ -141,5 +142,118 @@ func TestLive_SendStructuredFallsBackToRenderableText(t *testing.T) {
 	message, _ := transport.calls[0].Params["message"].(string)
 	if !strings.Contains(message, "Review Ready") || !strings.Contains(message, "Approve") {
 		t.Fatalf("message = %q", message)
+	}
+}
+
+type trackingTransport struct {
+	started bool
+	stopped bool
+}
+
+func (t *trackingTransport) Start(ctx context.Context, handler func(context.Context, incomingEvent) error) error {
+	t.started = true
+	return nil
+}
+
+func (t *trackingTransport) Stop(ctx context.Context) error {
+	t.stopped = true
+	return nil
+}
+
+func (t *trackingTransport) SendAction(ctx context.Context, action string, params map[string]any) error {
+	return nil
+}
+
+func TestLive_NameReplyContextAndLifecycle(t *testing.T) {
+	transport := &trackingTransport{}
+	live, err := NewLive(
+		"ws://127.0.0.1:3001/onebot/v11/ws",
+		"qq-token",
+		WithTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if live.Name() != "qq-live" {
+		t.Fatalf("Name = %q", live.Name())
+	}
+	if live.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+
+	replyAny := live.ReplyContextFromTarget(&core.ReplyTarget{
+		ChannelID: "group-1",
+		UserID:    "user-1",
+		MessageID: "msg-1",
+	})
+	reply, ok := replyAny.(replyContext)
+	if !ok {
+		t.Fatalf("ReplyContextFromTarget type = %T", replyAny)
+	}
+	if reply.ChatID != "group-1" || reply.UserID != "user-1" || reply.MessageID != "msg-1" || !reply.IsGroup {
+		t.Fatalf("reply = %+v", reply)
+	}
+
+	if err := live.Start(nil); err == nil {
+		t.Fatal("expected nil handler to fail")
+	}
+	if err := live.Start(func(p core.Platform, msg *core.Message) {}); err != nil {
+		t.Fatalf("Start error: %v", err)
+	}
+	if !transport.started {
+		t.Fatal("expected transport Start to be called")
+	}
+
+	if err := live.Stop(); err != nil {
+		t.Fatalf("Stop error: %v", err)
+	}
+	if !transport.stopped {
+		t.Fatal("expected transport Stop to be called")
+	}
+}
+
+func TestQQLiveHelpers_ParseTargetsPayloadAndTime(t *testing.T) {
+	if got := parseTarget(""); got.action != "" || got.id != "" {
+		t.Fatalf("parseTarget(empty) = %+v", got)
+	}
+	if got := parseTarget("user:3003"); got.action != "send_private_msg" || got.paramName != "user_id" || got.id != "3003" {
+		t.Fatalf("parseTarget(user) = %+v", got)
+	}
+	if got := parseTarget("group:2002"); got.action != "send_group_msg" || got.paramName != "group_id" || got.id != "2002" {
+		t.Fatalf("parseTarget(group) = %+v", got)
+	}
+	if got := parseTarget("2002"); got.action != "send_group_msg" || got.id != "2002" {
+		t.Fatalf("parseTarget(default) = %+v", got)
+	}
+
+	if got := messageTargetFromReply(replyContext{ChatID: "2002", MessageID: "msg-1", IsGroup: true}); got.action != "send_group_msg" || got.id != "2002" {
+		t.Fatalf("messageTargetFromReply(group) = %+v", got)
+	}
+	if got := messageTargetFromReply(replyContext{UserID: "3003", MessageID: "msg-2"}); got.action != "send_private_msg" || got.id != "3003" {
+		t.Fatalf("messageTargetFromReply(user) = %+v", got)
+	}
+	if got := messageTargetFromReply(replyContext{}); got.action != "" || got.id != "" {
+		t.Fatalf("messageTargetFromReply(empty) = %+v", got)
+	}
+
+	if got := renderMessagePayload(json.RawMessage(`"plain text"`)); got != "plain text" {
+		t.Fatalf("renderMessagePayload(string) = %q", got)
+	}
+	if got := renderMessagePayload(json.RawMessage(`[{"type":"text","data":{"text":"hello"}},{"type":"image","data":{"url":"skip"}},{"type":"text","data":{"text":" world"}}]`)); got != "hello world" {
+		t.Fatalf("renderMessagePayload(segments) = %q", got)
+	}
+	if got := renderMessagePayload(json.RawMessage(`{"bad":true}`)); got != "" {
+		t.Fatalf("renderMessagePayload(invalid) = %q", got)
+	}
+
+	if got := parseEventTime(1710000000); !got.Equal(time.Unix(1710000000, 0)) {
+		t.Fatalf("parseEventTime(valid) = %v", got)
+	}
+	before := time.Now()
+	got := parseEventTime(0)
+	after := time.Now()
+	if got.Before(before) || got.After(after.Add(time.Second)) {
+		t.Fatalf("parseEventTime(zero) = %v, want near now", got)
 	}
 }

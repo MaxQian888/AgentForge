@@ -52,14 +52,19 @@ One important example: the PRD v2 notes that Go-to-TS communication has moved to
 
 ## Implementation Snapshot
 
-As of `2026-03-29`, the repository has already moved beyond a thin starter shell in these concrete areas:
+As of `2026-03-30`, the repository has already moved beyond a thin starter shell in these concrete areas:
 
+- `Overview dashboard`: `app/(dashboard)/page.tsx` now renders summary cards, activity feed, fleet/team/budget widgets, and quick actions grounded in the current project context.
 - `Project task workspace`: `app/(dashboard)/project/page.tsx` now hosts one shared Board / List / Timeline / Calendar workspace with a persistent context rail, realtime health state, bulk actions, sprint-aware filtering, task detail editing, and doc/comment linkage surfaces.
 - `Project dashboard workspace`: `app/(dashboard)/project/dashboard/page.tsx` now supports dashboard selection plus create / rename / delete flows, widget catalog insertion, and widget-level refresh / delete / empty-state handling instead of a fixed first-dashboard view.
 - `Settings workspace`: `app/(dashboard)/settings/page.tsx` now has draft lifecycle semantics (`dirty`, save, discard/reset), validation feedback, coding-agent runtime catalog integration, and operator diagnostics grounded in current saved values and fallback state.
 - `Role workspace`: `app/(dashboard)/roles/page.tsx` now exposes a responsive three-surface authoring flow with role library, structured editor, preview/sandbox context rail, inheritance-aware preview, and repo-local skill catalog selection.
 - `Review workspace`: `app/(dashboard)/reviews/page.tsx` now routes backlog, detail, decision actions, and manual deep-review triggers through shared review workspace components instead of isolated page-specific UI.
 - `Docs/wiki workspace`: `app/(dashboard)/docs/page.tsx` and `app/(dashboard)/docs/[pageId]/page-client.tsx` now provide a project-scoped wiki tree, BlockNote editor, comments, version history, templates, recent/favorite docs, and related-task linkage.
+- `Team workspaces`: `app/(dashboard)/team/page.tsx` and `app/(dashboard)/teams/page.tsx` now cover project-scoped member management, role-aware roster editing, team-run stats/filtering, and team creation flows instead of static team placeholders.
+- `Workflow operations workspace`: `app/(dashboard)/workflow/page.tsx` now exposes editable status transitions, trigger rules, realtime activity, and persisted workflow draft/save behavior per project.
+- `Scheduler operations workspace`: `app/(dashboard)/scheduler/page.tsx` now provides scheduler stats, registered job inspection, run history, draft schedule editing, and manual trigger controls.
+- `Memory workspace`: `app/(dashboard)/memory/page.tsx` now supports project-scoped memory search, category filtering, scope/category badges, and entry deletion.
 - `Plugin operator surfaces`: the plugin control plane now distinguishes catalog entries from installed plugins, includes built-in bundle/readiness verification, and exposes maintained authoring commands such as `pnpm create-plugin`, `pnpm plugin:verify`, and `pnpm plugin:verify:builtins`.
 - `IM operator UI`: the current frontend contract covers `feishu`, `dingtalk`, `slack`, `telegram`, `discord`, `wecom`, `qq`, and `qqbot`, with backend-driven event types, richer delivery diagnostics, payload preview, and platform-specific config fields.
 - `Desktop shell`: the Tauri app now includes shared desktop window chrome with frameless titlebar controls, bounded sidecar supervision, runtime status queries, shell actions, and window-state synchronization through `lib/platform-runtime.ts`.
@@ -85,7 +90,7 @@ AgentForge/
 Notable frontend route groups already present:
 
 - `app/(auth)` for login and registration
-- `app/(dashboard)` for dashboard, agents, projects, roles, and cost views
+- `app/(dashboard)` for overview, projects, project dashboard/task workspaces, team/team-run orchestration, agents, sprints, reviews, cost, scheduler, memory, roles, plugins, settings, IM, docs, and workflow operations
 
 ## Documentation Guide
 
@@ -97,6 +102,7 @@ Start here if you want the latest project narrative:
 - [`docs/part/PLUGIN_SYSTEM_DESIGN.md`](./docs/part/PLUGIN_SYSTEM_DESIGN.md): target plugin system design
 - [`docs/part/PLUGIN_RESEARCH_TECH.md`](./docs/part/PLUGIN_RESEARCH_TECH.md): runtime and sandbox technology research for plugins
 - [`docs/GO_WASM_PLUGIN_RUNTIME.md`](./docs/GO_WASM_PLUGIN_RUNTIME.md): current Go-side WASM plugin runtime, SDK, and local verification flow
+- [`docs/desktop-updater-release.md`](./docs/desktop-updater-release.md): desktop updater signing inputs, `latest.json` generation, and release validation flow
 - [`docs/role-authoring-guide.md`](./docs/role-authoring-guide.md): current dashboard role workspace flow, preview/sandbox loop, and operator guidance
 - [`docs/role-yaml.md`](./docs/role-yaml.md): canonical role YAML layout, runtime projection rules, and skill-catalog behavior
 - [`docs/part/PLUGIN_RESEARCH_PLATFORMS.md`](./docs/part/PLUGIN_RESEARCH_PLATFORMS.md): platform comparison for extension ecosystems
@@ -169,11 +175,15 @@ Useful root commands:
 - `pnpm lint`
 - `pnpm test`
 - `pnpm test:coverage`
+- `pnpm test:tauri`
+- `pnpm test:tauri:coverage`
 - `pnpm create-plugin -- --type tool --name echo-tool`
 - `pnpm plugin:build -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
 - `pnpm plugin:debug -- --manifest plugins/integrations/feishu-adapter/manifest.yaml --operation health`
 - `pnpm plugin:dev`
 - `pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml`
+
+Note: `next.config.ts` currently enables `output: "export"`. `pnpm build` generates the deployable static site in `out/`, while `pnpm start` remains a legacy Next server entrypoint rather than the primary production path for this checkout.
 
 ### 2. Go Backend
 
@@ -393,11 +403,13 @@ Current limitations:
 | Command | Purpose |
 | --- | --- |
 | `pnpm dev` | Run the Next.js web app |
-| `pnpm build` | Build the Next.js app |
-| `pnpm start` | Start the built Next.js app |
+| `pnpm build` | Build the static-export web app and emit `out/` |
+| `pnpm start` | Legacy Next server entrypoint; not the primary deploy path while `output: "export"` is enabled |
 | `pnpm lint` | Run ESLint |
 | `pnpm test` | Run Jest |
 | `pnpm test:coverage` | Run Jest with coverage |
+| `pnpm test:tauri` | Run the `src-tauri` Rust library tests |
+| `pnpm test:tauri:coverage` | Enforce the desktop runtime-logic coverage gate for `src-tauri/src/runtime_logic.rs` |
 | `pnpm create-plugin` | Scaffold a repo-local plugin starter for tool, review, workflow, or integration development |
 | `pnpm build:backend` | Cross-compile Go sidecar binaries for Tauri |
 | `pnpm build:backend:dev` | Build the Go sidecar for the current platform |
@@ -415,6 +427,8 @@ Current limitations:
 | `pnpm tauri:build` | Build the desktop app |
 | `pnpm build:bridge` | Install and build the TS/Bun bridge |
 | `pnpm build:desktop` | Build backend + bridge sidecars and package the desktop app |
+| `pnpm build:updater-manifest` | Build `latest.json` from signed updater artifacts for release publishing |
+| `pnpm verify:updater-artifacts` | Validate updater artifacts and `latest.json` before draft release publication |
 
 ## Tech Stack Snapshot
 

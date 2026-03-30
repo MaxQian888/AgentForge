@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -25,24 +26,36 @@ func (v *bridgeAPIValidator) Validate(i interface{}) error {
 type fakeBridgeAPIClient struct {
 	runtimeCatalog *bridge.RuntimeCatalogResponse
 	runtimeCalls   int
+	runtimeErr     error
 	generateReq    *bridge.GenerateRequest
 	generateResp   *bridge.GenerateResponse
+	generateErr    error
 	classifyReq    *bridge.ClassifyIntentRequest
 	classifyResp   *bridge.ClassifyIntentResponse
+	classifyErr    error
 }
 
 func (f *fakeBridgeAPIClient) GetRuntimeCatalog(_ context.Context) (*bridge.RuntimeCatalogResponse, error) {
 	f.runtimeCalls++
+	if f.runtimeErr != nil {
+		return nil, f.runtimeErr
+	}
 	return f.runtimeCatalog, nil
 }
 
 func (f *fakeBridgeAPIClient) Generate(_ context.Context, req bridge.GenerateRequest) (*bridge.GenerateResponse, error) {
 	f.generateReq = &req
+	if f.generateErr != nil {
+		return nil, f.generateErr
+	}
 	return f.generateResp, nil
 }
 
 func (f *fakeBridgeAPIClient) ClassifyIntent(_ context.Context, req bridge.ClassifyIntentRequest) (*bridge.ClassifyIntentResponse, error) {
 	f.classifyReq = &req
+	if f.classifyErr != nil {
+		return nil, f.classifyErr
+	}
 	return f.classifyResp, nil
 }
 
@@ -96,6 +109,43 @@ func TestBridgeRuntimeCatalogHandler_CachesResponsesForTTL(t *testing.T) {
 	}
 	if client.runtimeCalls != 2 {
 		t.Fatalf("runtime calls after ttl = %d, want 2", client.runtimeCalls)
+	}
+}
+
+func TestBridgeRuntimeCatalogHandler_ServiceUnavailableAndBadGateway(t *testing.T) {
+	e := newBridgeAPIHandlerTestEcho()
+
+	req := httptest.NewRequest(http.MethodGet, "/bridge/runtimes", nil)
+	rec := httptest.NewRecorder()
+	if err := newBridgeRuntimeCatalogHandlerWithConfig(nil, time.Second, time.Now).Get(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Get(nil client) error = %v", err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("nil client status = %d, want 503", rec.Code)
+	}
+
+	handler := newBridgeRuntimeCatalogHandlerWithConfig(&fakeBridgeAPIClient{runtimeErr: errors.New("bridge down")}, time.Second, time.Now)
+	req = httptest.NewRequest(http.MethodGet, "/bridge/runtimes", nil)
+	rec = httptest.NewRecorder()
+	if err := handler.Get(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Get(error client) error = %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("error client status = %d, want 502", rec.Code)
+	}
+
+	if NewBridgeRuntimeCatalogHandler((*bridge.Client)(nil)) == nil {
+		t.Fatal("NewBridgeRuntimeCatalogHandler() returned nil")
+	}
+}
+
+func TestBridgeRuntimeCatalogHandler_DefaultConfigFallbacks(t *testing.T) {
+	handler := newBridgeRuntimeCatalogHandlerWithConfig(&fakeBridgeAPIClient{}, 0, nil)
+	if handler.ttl != 60*time.Second {
+		t.Fatalf("handler.ttl = %v, want 60s", handler.ttl)
+	}
+	if handler.now == nil {
+		t.Fatal("handler.now should be initialized")
 	}
 }
 
@@ -162,5 +212,122 @@ func TestBridgeAIHandler_ClassifyIntentProxiesTextPayload(t *testing.T) {
 	}
 	if client.classifyReq.UserID != "" || client.classifyReq.ProjectID != "" {
 		t.Fatalf("expected empty user/project passthrough, got %#v", client.classifyReq)
+	}
+}
+
+func TestBridgeAIHandler_ErrorBranches(t *testing.T) {
+	e := newBridgeAPIHandlerTestEcho()
+
+	nilHandler := NewBridgeAIHandler(nil)
+	req := httptest.NewRequest(http.MethodPost, "/ai/generate", strings.NewReader(`{"prompt":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	if err := nilHandler.Generate(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Generate(nil client) error = %v", err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("nil Generate status = %d, want 503", rec.Code)
+	}
+
+	client := &fakeBridgeAPIClient{generateErr: errors.New("bridge generate failed")}
+	handler := NewBridgeAIHandler(client)
+	req = httptest.NewRequest(http.MethodPost, "/ai/generate", strings.NewReader(`{"prompt":"hi"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	if err := handler.Generate(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Generate(error) error = %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("Generate(error) status = %d, want 502", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/ai/generate", strings.NewReader(`{`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	if err := handler.Generate(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Generate(bad json) error = %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("Generate(bad json) status = %d, want 400", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/ai/classify-intent", strings.NewReader(`{}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	if err := handler.ClassifyIntent(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ClassifyIntent(validation) error = %v", err)
+	}
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("ClassifyIntent(validation) status = %d, want 422", rec.Code)
+	}
+
+	client.classifyErr = errors.New("bridge classify failed")
+	req = httptest.NewRequest(http.MethodPost, "/ai/classify-intent", strings.NewReader(`{"text":"assign this","candidates":["task_assign"]}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	if err := handler.ClassifyIntent(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ClassifyIntent(error) error = %v", err)
+	}
+	if rec.Code != http.StatusBadGateway {
+		t.Fatalf("ClassifyIntent(error) status = %d, want 502", rec.Code)
+	}
+}
+
+func TestBridgeAPIHandlersWithConcreteBridgeClient(t *testing.T) {
+	e := newBridgeAPIHandlerTestEcho()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/bridge/runtimes":
+			_ = json.NewEncoder(w).Encode(bridge.RuntimeCatalogResponse{
+				DefaultRuntime: "codex",
+				Runtimes: []bridge.RuntimeCatalogEntryDTO{{
+					Key:             "codex",
+					Label:           "Codex",
+					DefaultProvider: "openai",
+					DefaultModel:    "gpt-5-codex",
+					Available:       true,
+				}},
+			})
+		case "/bridge/generate":
+			_ = json.NewEncoder(w).Encode(bridge.GenerateResponse{Text: "ok"})
+		case "/bridge/classify-intent":
+			_ = json.NewEncoder(w).Encode(bridge.ClassifyIntentResponse{Intent: "task_assign", Command: "/task assign"})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := bridge.NewClient(server.URL)
+
+	runtimeHandler := NewBridgeRuntimeCatalogHandler(client)
+	req := httptest.NewRequest(http.MethodGet, "/bridge/runtimes", nil)
+	rec := httptest.NewRecorder()
+	if err := runtimeHandler.Get(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("runtime handler Get() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("runtime handler status = %d, want 200", rec.Code)
+	}
+
+	aiHandler := NewBridgeAIHandler(client)
+	req = httptest.NewRequest(http.MethodPost, "/ai/generate", strings.NewReader(`{"prompt":"hello"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	if err := aiHandler.Generate(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("Generate(concrete client) error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("Generate(concrete client) status = %d, want 200", rec.Code)
+	}
+
+	req = httptest.NewRequest(http.MethodPost, "/ai/classify-intent", strings.NewReader(`{"text":"assign this task"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec = httptest.NewRecorder()
+	if err := aiHandler.ClassifyIntent(e.NewContext(req, rec)); err != nil {
+		t.Fatalf("ClassifyIntent(concrete client) error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ClassifyIntent(concrete client) status = %d, want 200", rec.Code)
 	}
 }

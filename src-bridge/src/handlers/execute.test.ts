@@ -1,5 +1,6 @@
 import { describe, expect, test } from "bun:test";
 import { handleExecute } from "./execute.js";
+import type { AgentRuntime } from "../runtime/agent-runtime.js";
 import { RuntimePoolManager } from "../runtime/pool-manager.js";
 import { SessionManager } from "../session/manager.js";
 import type { ExecuteRequest } from "../types.js";
@@ -562,6 +563,288 @@ describe("handleExecute", () => {
         resume_ready: true,
         upstream_session_id: "opencode-session-123",
       }),
+    });
+  });
+
+  test("filters active role-scoped MCP plugins before constructing the runtime adapter", async () => {
+    const pool = new RuntimePoolManager(1);
+    const request = createRequest({
+      task_id: "task-plugin-filter",
+      session_id: "session-plugin-filter",
+      runtime: "codex",
+      provider: "codex",
+      model: "gpt-5-codex",
+      role_config: {
+        role_id: "reviewer",
+        name: "Reviewer",
+        role: "Senior Reviewer",
+        goal: "Review risky changes",
+        backstory: "Finds subtle regressions.",
+        system_prompt: "Review carefully.",
+        allowed_tools: ["Read"],
+        max_budget_usd: 5,
+        max_turns: 8,
+        permission_mode: "default",
+        tools: ["plugin-allowed", "plugin-inactive"],
+      },
+    });
+    let activePluginIds: string[] | undefined;
+
+    await handleExecute(
+      pool,
+      { send() {} } as never,
+      request,
+      {
+        awaitCompletion: true,
+        pluginManager: {
+          list() {
+            return [
+              {
+                metadata: { id: "plugin-allowed" },
+                lifecycle_state: "active",
+              },
+              {
+                metadata: { id: "plugin-inactive" },
+                lifecycle_state: "disabled",
+              },
+              {
+                metadata: { id: "plugin-extra" },
+                lifecycle_state: "active",
+              },
+            ];
+          },
+        } as never,
+        executableLookup(command) {
+          return `C:/mock/${command}.exe`;
+        },
+        codexAuthStatusProvider() {
+          return {
+            authenticated: true,
+            message: "Logged in using an API key",
+          };
+        },
+        codexRuntimeRunner: async function* (params) {
+          activePluginIds = params.activePlugins?.map((plugin) => plugin.metadata.id);
+          yield { type: "thread.started", thread_id: "thread-plugin-filter" };
+          yield { type: "turn.completed", total_cost_usd: 0 };
+        },
+      },
+    );
+
+    expect(activePluginIds).toEqual(["plugin-allowed"]);
+  });
+
+  test("reports background execution failures when awaitCompletion is disabled", async () => {
+    const pool = new RuntimePoolManager(1);
+    const request = createRequest({
+      task_id: "task-background-error",
+      session_id: "session-background-error",
+    });
+    const events: Array<{ type: string; data: unknown }> = [];
+
+    const response = await handleExecute(
+      pool,
+      {
+        send(event: { type: string; data: unknown }) {
+          if (
+            event.type === "status_change" &&
+            (event.data as { new_status?: string }).new_status === "running"
+          ) {
+            throw new Error("streamer failed during running transition");
+          }
+          events.push(event);
+        },
+      } as never,
+      request,
+      {
+        awaitCompletion: false,
+        runtimeRegistry: {
+          async resolveExecute(req: ExecuteRequest) {
+            return {
+              request: req,
+              adapter: {
+                async execute() {},
+              },
+            };
+          },
+        } as never,
+        now: () => 99,
+      },
+    );
+
+    await new Promise((resolve) => setTimeout(resolve, 0));
+
+    expect(response).toEqual({ session_id: request.session_id });
+    expect(events).toEqual([
+      expect.objectContaining({
+        type: "status_change",
+        data: { old_status: "idle", new_status: "starting" },
+      }),
+      expect.objectContaining({
+        type: "error",
+        data: {
+          code: "INTERNAL",
+          message: "Error: streamer failed during running transition",
+          retryable: false,
+        },
+      }),
+    ]);
+    expect(pool.get(request.task_id)).toBeUndefined();
+  });
+
+  test("snapshots only while running and classifies paused executions without emitting an error event", async () => {
+    const pool = new RuntimePoolManager(1);
+    const sessionManager = new SessionManager();
+    const request = createRequest({
+      task_id: "task-paused",
+      session_id: "session-paused",
+    });
+    const events: Array<{ type: string; data: unknown }> = [];
+    const originalSetInterval = globalThis.setInterval;
+    const originalClearInterval = globalThis.clearInterval;
+    let intervalCallback: (() => void) | undefined;
+    const cleared: unknown[] = [];
+
+    globalThis.setInterval = (((callback: TimerHandler) => {
+      intervalCallback = callback as () => void;
+      return "interval-token" as never;
+    }) as unknown as typeof globalThis.setInterval);
+    globalThis.clearInterval = (((token?: unknown) => {
+      cleared.push(token);
+    }) as typeof globalThis.clearInterval);
+
+    try {
+      await handleExecute(
+        pool,
+        {
+          send(event: { type: string; data: unknown }) {
+            events.push(event);
+          },
+        } as never,
+        request,
+        {
+          awaitCompletion: true,
+          sessionManager,
+          now: () => 1234,
+          runtimeRegistry: {
+            async resolveExecute(req: ExecuteRequest) {
+              return {
+                request: req,
+                adapter: {
+                  async execute(runtime: AgentRuntime) {
+                    intervalCallback?.();
+                    runtime.status = "paused";
+                    intervalCallback?.();
+                    throw new Error("pause requested");
+                  },
+                },
+              };
+            },
+          } as never,
+        },
+      );
+    } finally {
+      globalThis.setInterval = originalSetInterval;
+      globalThis.clearInterval = originalClearInterval;
+    }
+
+    expect(events.map((event) => event.type)).toEqual([
+      "status_change",
+      "status_change",
+      "snapshot",
+      "snapshot",
+      "status_change",
+    ]);
+    expect(events.some((event) => event.type === "error")).toBe(false);
+    expect(cleared).toEqual(["interval-token"]);
+    expect(sessionManager.restore(request.task_id)).toMatchObject({
+      task_id: request.task_id,
+      status: "paused",
+    });
+  });
+
+  test("classifies cancelled and failed executions truthfully", async () => {
+    const cancelledPool = new RuntimePoolManager(1);
+    const failedPool = new RuntimePoolManager(1);
+    const cancelledSessionManager = new SessionManager();
+    const failedSessionManager = new SessionManager();
+    const cancelledEvents: Array<{ type: string; data: unknown }> = [];
+    const failedEvents: Array<{ type: string; data: unknown }> = [];
+
+    await handleExecute(
+      cancelledPool,
+      {
+        send(event: { type: string; data: unknown }) {
+          cancelledEvents.push(event);
+        },
+      } as never,
+      createRequest({
+        task_id: "task-cancelled",
+        session_id: "session-cancelled",
+      }),
+      {
+        awaitCompletion: true,
+        sessionManager: cancelledSessionManager,
+        runtimeRegistry: {
+          async resolveExecute(req: ExecuteRequest) {
+            return {
+              request: req,
+              adapter: {
+                async execute(runtime: AgentRuntime) {
+                  runtime.abortController.abort("cancelled_by_user");
+                  throw new Error("cancelled");
+                },
+              },
+            };
+          },
+        } as never,
+      },
+    );
+
+    await handleExecute(
+      failedPool,
+      {
+        send(event: { type: string; data: unknown }) {
+          failedEvents.push(event);
+        },
+      } as never,
+      createRequest({
+        task_id: "task-failed",
+        session_id: "session-failed",
+      }),
+      {
+        awaitCompletion: true,
+        sessionManager: failedSessionManager,
+        runtimeRegistry: {
+          async resolveExecute(req: ExecuteRequest) {
+            return {
+              request: req,
+              adapter: {
+                async execute() {
+                  throw new Error("runtime exploded");
+                },
+              },
+            };
+          },
+        } as never,
+      },
+    );
+
+    expect(cancelledSessionManager.restore("task-cancelled")).toMatchObject({
+      task_id: "task-cancelled",
+      status: "cancelled",
+    });
+    expect(failedSessionManager.restore("task-failed")).toMatchObject({
+      task_id: "task-failed",
+      status: "failed",
+    });
+    expect(cancelledEvents.at(-1)).toMatchObject({
+      type: "status_change",
+      data: { new_status: "cancelled", reason: "cancelled_by_user" },
+    });
+    expect(failedEvents.at(-1)).toMatchObject({
+      type: "status_change",
+      data: { new_status: "failed", reason: "runtime_error" },
     });
   });
 });

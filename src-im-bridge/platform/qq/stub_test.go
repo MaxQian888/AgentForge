@@ -4,10 +4,10 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"net/http"
-	"testing"
-
 	"github.com/agentforge/im-bridge/core"
+	"net/http"
+	"strings"
+	"testing"
 )
 
 func TestStub_MetadataAndReplyContextDeclareQQBehavior(t *testing.T) {
@@ -133,5 +133,56 @@ func TestStub_HTTPHandlersExposeAndClearReplies(t *testing.T) {
 
 	if len(stub.replies) != 0 {
 		t.Fatalf("replies = %+v", stub.replies)
+	}
+}
+
+func TestStub_SendStructuredAndHelperConversions(t *testing.T) {
+	stub := NewStub("0")
+
+	if err := stub.SendStructured(context.Background(), "group:2002", &core.StructuredMessage{
+		Title: "Review Ready",
+		Body:  "Choose the next step.",
+		Actions: []core.StructuredAction{
+			{ID: "act:approve:review-1", Label: "Approve"},
+		},
+	}); err != nil {
+		t.Fatalf("SendStructured error: %v", err)
+	}
+	if len(stub.replies) != 1 || !strings.Contains(stub.replies[0].Content, "Review Ready") {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+
+	raw := replyContext{ChatID: "2002", UserID: "3003", MessageID: "msg-1", IsGroup: true}
+	if got := toReplyContext(raw); got != raw {
+		t.Fatalf("toReplyContext(raw) = %+v", got)
+	}
+	if got := toReplyContext(&replyContext{ChatID: "2002", UserID: "3003", MessageID: "msg-2", IsGroup: true}); got.MessageID != "msg-2" {
+		t.Fatalf("toReplyContext(pointer) = %+v", got)
+	}
+
+	msg := &core.Message{
+		ChatID:      "2002",
+		UserID:      "3003",
+		IsGroup:     true,
+		ReplyTarget: &core.ReplyTarget{MessageID: "msg-3"},
+		ReplyCtx:    nil,
+	}
+	if got := toReplyContext(msg); got.ChatID != "2002" || got.UserID != "3003" || got.MessageID != "msg-3" || !got.IsGroup {
+		t.Fatalf("toReplyContext(message) = %+v", got)
+	}
+
+	target := &core.ReplyTarget{ConversationID: "group-77", UserID: "user-1", MessageID: "msg-4"}
+	if got := toReplyContext(target); got.ChatID != "group-77" || got.MessageID != "msg-4" || !got.IsGroup {
+		t.Fatalf("toReplyContext(target) = %+v", got)
+	}
+
+	if got := toReplyContext("invalid"); got != (replyContext{}) {
+		t.Fatalf("toReplyContext(invalid) = %+v", got)
+	}
+	if got := messageIDFromTarget(nil); got != "" {
+		t.Fatalf("messageIDFromTarget(nil) = %q", got)
+	}
+	if got := messageIDFromTarget(&core.ReplyTarget{MessageID: " 99 "}); got != "99" {
+		t.Fatalf("messageIDFromTarget(target) = %q", got)
 	}
 }

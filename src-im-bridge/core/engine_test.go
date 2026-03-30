@@ -2,8 +2,10 @@ package core
 
 import (
 	"context"
+	"strings"
 	"sync"
 	"testing"
+	"time"
 )
 
 // mockPlatform is a minimal Platform for testing.
@@ -128,5 +130,53 @@ func TestEngine_StopDelegatesToPlatform(t *testing.T) {
 	}
 	if !p.stopped {
 		t.Fatal("expected platform Stop to be called")
+	}
+}
+
+func TestEngine_SetRateLimiterBlocksRepeatedMessagesUsingDerivedKey(t *testing.T) {
+	p := &mockPlatform{}
+	e := NewEngine(p)
+	e.RegisterCommand("/ping", func(plat Platform, msg *Message, args string) {
+		_ = plat.Reply(context.Background(), msg.ReplyCtx, "pong")
+	})
+
+	rl := NewRateLimiter(1, time.Hour)
+	rl.now = func() time.Time { return time.Unix(1, 0) }
+	e.SetRateLimiter(rl)
+
+	msg := &Message{
+		Platform: "slack",
+		ChatID:   "chat-1",
+		UserID:   "user-1",
+		Content:  "/ping",
+	}
+	e.HandleMessage(p, msg)
+	e.HandleMessage(p, msg)
+
+	if len(p.replies) != 2 {
+		t.Fatalf("replies = %v", p.replies)
+	}
+	if p.replies[0] != "pong" {
+		t.Fatalf("first reply = %q", p.replies[0])
+	}
+	if p.replies[1] == "pong" || !strings.Contains(p.replies[1], "频繁") {
+		t.Fatalf("second reply = %q", p.replies[1])
+	}
+	if _, exists := rl.buckets["slack:chat-1:user-1"]; !exists {
+		t.Fatalf("rate limiter buckets = %+v", rl.buckets)
+	}
+}
+
+func TestEngine_UnknownSlashCommandWithoutFallbackRepliesWithHelp(t *testing.T) {
+	p := &mockPlatform{}
+	e := NewEngine(p)
+
+	e.HandleMessage(p, &Message{Content: "/unknown"})
+
+	if len(p.replies) != 1 {
+		t.Fatalf("replies = %v", p.replies)
+	}
+	if !strings.Contains(p.replies[0], "/help") {
+		t.Fatalf("help reply = %q", p.replies[0])
 	}
 }

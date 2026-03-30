@@ -3,7 +3,7 @@ use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
 use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
 use tauri::{AppHandle, Emitter, Manager, Runtime, State};
@@ -15,6 +15,20 @@ use tauri_plugin_shell::{
     ShellExt,
 };
 
+mod runtime_logic;
+
+use crate::runtime_logic::{
+    active_runtime_count, active_runtime_summary_unavailable_warning, bridge_plugin_count,
+    bridge_plugin_summary_unavailable_warning, bridge_url_unavailable_warning,
+    build_plugin_runtime_summary, classify_shell_action, compute_overall_status,
+    compute_termination_outcome, menu_action_href, notification_outcome_event_type,
+    notification_outcome_payload, now_string, resolve_updater_pubkey, select_files_mode,
+    shell_action_event_payload, should_suppress_notification, window_state_payload,
+    DesktopEventPayload, DesktopNotificationRequest, DesktopNotificationResult,
+    DesktopRuntimeSnapshot, DesktopRuntimeUnit, DesktopWindowChromeState, PluginRuntimeSummary,
+    RuntimeStatus, SelectFilesMode, ShellActionKind,
+};
+
 const BACKEND_LABEL: &str = "backend";
 const BACKEND_PORT: u16 = 7777;
 const BRIDGE_LABEL: &str = "bridge";
@@ -22,72 +36,6 @@ const BRIDGE_PORT: u16 = 7778;
 const DESKTOP_EVENT_NAME: &str = "agentforge://desktop-event";
 const MAX_RESTART_ATTEMPTS: u32 = 2;
 const TRAY_ID: &str = "agentforge-main-tray";
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, PartialEq, Eq, Serialize)]
-#[serde(rename_all = "lowercase")]
-enum RuntimeStatus {
-    Degraded,
-    Ready,
-    Starting,
-    #[default]
-    Stopped,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DesktopRuntimeUnit {
-    label: String,
-    status: RuntimeStatus,
-    url: Option<String>,
-    pid: Option<u32>,
-    restart_count: u32,
-    last_error: Option<String>,
-    last_started_at: Option<String>,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DesktopRuntimeSnapshot {
-    overall: RuntimeStatus,
-    backend: DesktopRuntimeUnit,
-    bridge: DesktopRuntimeUnit,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DesktopEventPayload {
-    #[serde(rename = "type")]
-    event_type: String,
-    source: String,
-    action_id: Option<String>,
-    href: Option<String>,
-    status: Option<String>,
-    runtime: Option<DesktopRuntimeSnapshot>,
-    shortcut: Option<String>,
-    payload: Option<Value>,
-    timestamp: String,
-}
-
-#[derive(Clone, Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DesktopWindowChromeState {
-    focused: bool,
-    maximized: bool,
-    minimized: bool,
-    visible: bool,
-}
-
-#[derive(Clone, Debug, Default, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct PluginRuntimeSummary {
-    active_runtime_count: usize,
-    backend_healthy: bool,
-    bridge_healthy: bool,
-    bridge_plugin_count: usize,
-    event_bridge_available: bool,
-    last_updated_at: Option<String>,
-    warnings: Vec<String>,
-}
 
 #[derive(Debug)]
 struct ManagedRuntimeState {
@@ -151,15 +99,7 @@ impl DesktopRuntimeState {
     }
 
     fn recalculate_overall(&mut self) {
-        self.overall = match (self.backend.status, self.bridge.status) {
-            (RuntimeStatus::Ready, RuntimeStatus::Ready) => RuntimeStatus::Ready,
-            (RuntimeStatus::Stopped, RuntimeStatus::Stopped) => RuntimeStatus::Stopped,
-            (RuntimeStatus::Degraded, _)
-            | (_, RuntimeStatus::Degraded)
-            | (RuntimeStatus::Ready, RuntimeStatus::Stopped)
-            | (RuntimeStatus::Stopped, RuntimeStatus::Ready) => RuntimeStatus::Degraded,
-            _ => RuntimeStatus::Starting,
-        };
+        self.overall = compute_overall_status(self.backend.status, self.bridge.status);
     }
 
     fn snapshot(&self) -> DesktopRuntimeSnapshot {
@@ -590,32 +530,25 @@ impl DesktopRuntimeManager {
             let runtime = state.runtime_mut(label);
             runtime.child = None;
             runtime.pid = None;
-
-            if runtime.status == RuntimeStatus::Stopped {
-                state.recalculate_overall();
-                return;
-            }
-
-            let message = format!(
-                "{label} sidecar terminated (code: {:?}, signal: {:?})",
-                payload.code, payload.signal
+            let outcome = compute_termination_outcome(
+                runtime.status,
+                runtime.restart_count,
+                self.max_restart_attempts,
+                label,
+                payload.code,
+                payload.signal,
             );
 
-            if runtime.restart_count < self.max_restart_attempts {
-                runtime.restart_count += 1;
-                runtime.status = RuntimeStatus::Starting;
-                runtime.last_error = Some(format!(
-                    "{message}; restart attempt {}/{}",
-                    runtime.restart_count, self.max_restart_attempts
-                ));
-                state.recalculate_overall();
-                true
-            } else {
-                runtime.status = RuntimeStatus::Degraded;
-                runtime.last_error = Some(format!("{message}; restart limit reached"));
-                state.recalculate_overall();
-                false
-            }
+            runtime.status = outcome.next_status;
+            runtime.restart_count = outcome.next_restart_count;
+            runtime.last_error = outcome.last_error;
+            state.recalculate_overall();
+
+            let Some(should_restart) = outcome.should_restart else {
+                return;
+            };
+
+            should_restart
         };
 
         self.emit_runtime_event(
@@ -667,18 +600,10 @@ impl DesktopRuntimeManager {
 
     async fn plugin_runtime_summary(&self) -> PluginRuntimeSummary {
         let snapshot = self.snapshot();
-        let mut summary = PluginRuntimeSummary {
-            backend_healthy: snapshot.backend.status == RuntimeStatus::Ready,
-            bridge_healthy: snapshot.bridge.status == RuntimeStatus::Ready,
-            event_bridge_available: snapshot.overall != RuntimeStatus::Stopped,
-            last_updated_at: Some(now_string()),
-            ..PluginRuntimeSummary::default()
-        };
+        let mut summary = build_plugin_runtime_summary(&snapshot, now_string());
 
         let Some(bridge_url) = snapshot.bridge.url else {
-            summary
-                .warnings
-                .push("Bridge URL is not available in the current desktop snapshot.".to_string());
+            summary.warnings.push(bridge_url_unavailable_warning());
             return summary;
         };
 
@@ -689,28 +614,22 @@ impl DesktopRuntimeManager {
             .await
         {
             if let Ok(payload) = response.json::<Value>().await {
-                summary.bridge_plugin_count = payload["plugins"]
-                    .as_array()
-                    .map(|entries| entries.len())
-                    .unwrap_or_default();
+                summary.bridge_plugin_count = bridge_plugin_count(&payload);
             }
         } else {
             summary
                 .warnings
-                .push("Bridge plugin summary is temporarily unavailable.".to_string());
+                .push(bridge_plugin_summary_unavailable_warning());
         }
 
         if let Ok(response) = self.client.get(format!("{bridge_url}/active")).send().await {
             if let Ok(payload) = response.json::<Value>().await {
-                summary.active_runtime_count = payload
-                    .as_array()
-                    .map(|entries| entries.len())
-                    .unwrap_or_default();
+                summary.active_runtime_count = active_runtime_count(&payload);
             }
         } else {
             summary
                 .warnings
-                .push("Bridge active-runtime summary is temporarily unavailable.".to_string());
+                .push(active_runtime_summary_unavailable_warning());
         }
 
         summary
@@ -754,114 +673,6 @@ struct DesktopShellActionResult {
     status: String,
 }
 
-#[derive(Debug, Deserialize)]
-#[serde(rename_all = "camelCase")]
-struct DesktopNotificationRequest {
-    notification_id: String,
-    notification_type: String,
-    title: String,
-    body: String,
-    href: Option<String>,
-    created_at: String,
-    delivery_policy: Option<String>,
-}
-
-#[derive(Debug, Serialize)]
-#[serde(rename_all = "camelCase")]
-struct DesktopNotificationResult {
-    notification_id: String,
-    status: String,
-}
-
-fn notification_outcome_event_type(status: &str) -> &'static str {
-    match status {
-        "suppressed" => "notification.suppressed",
-        "failed" => "notification.failed",
-        _ => "notification.delivered",
-    }
-}
-
-fn notification_outcome_payload(
-    request: &DesktopNotificationRequest,
-    status: &str,
-    error: Option<String>,
-) -> Value {
-    let mut payload = serde_json::Map::new();
-    payload.insert(
-        "notificationId".to_string(),
-        Value::String(request.notification_id.clone()),
-    );
-    payload.insert(
-        "notificationType".to_string(),
-        Value::String(request.notification_type.clone()),
-    );
-    payload.insert("title".to_string(), Value::String(request.title.clone()));
-    payload.insert("body".to_string(), Value::String(request.body.clone()));
-    payload.insert(
-        "href".to_string(),
-        request.href.clone().map(Value::String).unwrap_or(Value::Null),
-    );
-    payload.insert(
-        "createdAt".to_string(),
-        Value::String(request.created_at.clone()),
-    );
-    payload.insert(
-        "deliveryPolicy".to_string(),
-        request
-            .delivery_policy
-            .clone()
-            .map(Value::String)
-            .unwrap_or(Value::Null),
-    );
-    payload.insert("status".to_string(), Value::String(status.to_string()));
-
-    if let Some(error) = error {
-        payload.insert("error".to_string(), Value::String(error));
-    }
-
-    Value::Object(payload)
-}
-
-fn shell_action_event_payload(
-    action_id: &str,
-    href: Option<String>,
-    payload: Option<Value>,
-    status: &str,
-) -> Value {
-    let mut event_payload = serde_json::Map::new();
-    event_payload.insert(
-        "actionId".to_string(),
-        Value::String(action_id.to_string()),
-    );
-    event_payload.insert("status".to_string(), Value::String(status.to_string()));
-
-    if let Some(href) = href {
-        event_payload.insert("href".to_string(), Value::String(href));
-    }
-
-    if let Some(payload) = payload {
-        event_payload.insert("payload".to_string(), payload);
-    }
-
-    Value::Object(event_payload)
-}
-
-fn window_state_payload(state: &DesktopWindowChromeState) -> Value {
-    json!({
-        "focused": state.focused,
-        "maximized": state.maximized,
-        "minimized": state.minimized,
-        "visible": state.visible,
-    })
-}
-
-fn now_string() -> String {
-    SystemTime::now()
-        .duration_since(UNIX_EPOCH)
-        .map(|duration| duration.as_secs().to_string())
-        .unwrap_or_else(|_| "0".to_string())
-}
-
 fn file_path_to_string(path: FilePath) -> Option<String> {
     path.into_path()
         .ok()
@@ -871,11 +682,10 @@ fn file_path_to_string(path: FilePath) -> Option<String> {
 #[cfg(not(any(target_os = "android", target_os = "ios")))]
 fn updater_plugin_builder() -> tauri_plugin_updater::Builder {
     let mut builder = tauri_plugin_updater::Builder::new();
-    if let Some(pubkey) = std::env::var("TAURI_UPDATER_PUBKEY")
-        .ok()
-        .or_else(|| std::env::var("AGENTFORGE_TAURI_UPDATER_PUBKEY").ok())
-        .filter(|value| !value.trim().is_empty())
-    {
+    if let Some(pubkey) = resolve_updater_pubkey(
+        std::env::var("TAURI_UPDATER_PUBKEY").ok(),
+        std::env::var("AGENTFORGE_TAURI_UPDATER_PUBKEY").ok(),
+    ) {
         builder = builder.pubkey(pubkey);
     }
 
@@ -917,35 +727,32 @@ fn select_files<R: Runtime>(
         }
     }
 
-    let multiple = options.multiple.unwrap_or(false);
-    let directory = options.directory.unwrap_or(false);
-
-    let paths = if directory && multiple {
-        dialog
+    let paths = match select_files_mode(
+        options.directory.unwrap_or(false),
+        options.multiple.unwrap_or(false),
+    ) {
+        SelectFilesMode::Folders => dialog
             .blocking_pick_folders()
             .unwrap_or_default()
             .into_iter()
             .filter_map(file_path_to_string)
-            .collect::<Vec<_>>()
-    } else if directory {
-        dialog
+            .collect::<Vec<_>>(),
+        SelectFilesMode::Folder => dialog
             .blocking_pick_folder()
             .and_then(file_path_to_string)
             .map(|path| vec![path])
-            .unwrap_or_default()
-    } else if multiple {
-        dialog
+            .unwrap_or_default(),
+        SelectFilesMode::Files => dialog
             .blocking_pick_files()
             .unwrap_or_default()
             .into_iter()
             .filter_map(file_path_to_string)
-            .collect::<Vec<_>>()
-    } else {
-        dialog
+            .collect::<Vec<_>>(),
+        SelectFilesMode::File => dialog
             .blocking_pick_file()
             .and_then(file_path_to_string)
             .map(|path| vec![path])
-            .unwrap_or_default()
+            .unwrap_or_default(),
     };
 
     Ok(paths)
@@ -957,13 +764,12 @@ fn send_notification<R: Runtime>(
     state: State<'_, DesktopRuntimeManager>,
     request: DesktopNotificationRequest,
 ) -> Result<DesktopNotificationResult, String> {
-    let should_suppress = matches!(
+    let should_suppress = should_suppress_notification(
         request.delivery_policy.as_deref(),
-        Some("suppress_if_focused")
-    ) && app
-        .get_webview_window("main")
-        .and_then(|window| window.is_focused().ok())
-        .unwrap_or(false);
+        app.get_webview_window("main")
+            .and_then(|window| window.is_focused().ok())
+            .unwrap_or(false),
+    );
 
     if should_suppress {
         let status = "suppressed";
@@ -1180,13 +986,13 @@ fn perform_shell_action<R: Runtime>(
 ) -> Result<DesktopShellActionResult, String> {
     let window = with_main_window(&app)?;
 
-    match request.action_id.as_str() {
-        "focus_main_window" | "show_main_window" | "restore_main_window" => {
+    match classify_shell_action(request.action_id.as_str()) {
+        ShellActionKind::FocusMainWindow => {
             let _ = window.show();
             let _ = window.unminimize();
             window.set_focus().map_err(|error| error.to_string())?;
         }
-        "toggle_maximize_main_window" => {
+        ShellActionKind::ToggleMaximizeMainWindow => {
             let _ = window.show();
             let _ = window.unminimize();
             if window.is_maximized().map_err(|error| error.to_string())? {
@@ -1196,10 +1002,10 @@ fn perform_shell_action<R: Runtime>(
             }
             let _ = window.set_focus();
         }
-        "minimize_main_window" => {
+        ShellActionKind::MinimizeMainWindow => {
             window.minimize().map_err(|error| error.to_string())?;
         }
-        "close_main_window" => {
+        ShellActionKind::CloseMainWindow => {
             state.emit_shell_action_event(
                 &app,
                 request.source.clone(),
@@ -1214,12 +1020,12 @@ fn perform_shell_action<R: Runtime>(
                 status: "completed".to_string(),
             });
         }
-        "open_plugins" | "open_reviews" | "open_notification_target" | "refresh_plugin_runtime" => {
+        ShellActionKind::FocusRoute => {
             let _ = window.show();
             let _ = window.unminimize();
             let _ = window.set_focus();
         }
-        _ => {
+        ShellActionKind::Unsupported => {
             return Err(format!(
                 "Unsupported AgentForge desktop shell action: {}",
                 request.action_id
@@ -1283,11 +1089,7 @@ pub fn run() {
         })
         .on_menu_event(|app, event| {
             let action_id = event.id().0.to_string();
-            let href = match action_id.as_str() {
-                "open_plugins" => Some("/plugins".to_string()),
-                "open_reviews" => Some("/reviews".to_string()),
-                _ => None,
-            };
+            let href = menu_action_href(action_id.as_str());
 
             if let Some(window) = app.get_webview_window("main") {
                 let _ = window.show();
@@ -1296,14 +1098,7 @@ pub fn run() {
             }
 
             if let Some(manager) = app.try_state::<DesktopRuntimeManager>() {
-                manager.emit_shell_action_event(
-                    app,
-                    "menu",
-                    action_id,
-                    href,
-                    None,
-                    "completed",
-                );
+                manager.emit_shell_action_event(app, "menu", action_id, href, None, "completed");
             }
         })
         .invoke_handler(tauri::generate_handler![
@@ -1370,6 +1165,184 @@ mod tests {
     }
 
     #[test]
+    fn notification_outcome_payload_includes_error_and_null_optionals_when_missing() {
+        let request = DesktopNotificationRequest {
+            notification_id: "notification-2".to_string(),
+            notification_type: "review_ready".to_string(),
+            title: "Review ready".to_string(),
+            body: "A review is ready.".to_string(),
+            href: None,
+            created_at: "2026-03-30T10:00:00.000Z".to_string(),
+            delivery_policy: None,
+        };
+
+        assert_eq!(
+            notification_outcome_payload(
+                &request,
+                "failed",
+                Some("notification backend unavailable".to_string()),
+            ),
+            json!({
+                "notificationId": "notification-2",
+                "notificationType": "review_ready",
+                "title": "Review ready",
+                "body": "A review is ready.",
+                "href": Value::Null,
+                "createdAt": "2026-03-30T10:00:00.000Z",
+                "deliveryPolicy": Value::Null,
+                "status": "failed",
+                "error": "notification backend unavailable",
+            })
+        );
+    }
+
+    #[test]
+    fn runtime_status_serializes_using_lowercase_contract() {
+        assert_eq!(
+            serde_json::to_value(RuntimeStatus::Starting).unwrap(),
+            json!("starting")
+        );
+        assert_eq!(
+            serde_json::to_value(RuntimeStatus::Degraded).unwrap(),
+            json!("degraded")
+        );
+    }
+
+    #[test]
+    fn runtime_state_recalculate_overall_covers_primary_status_combinations() {
+        let cases = [
+            (
+                RuntimeStatus::Ready,
+                RuntimeStatus::Ready,
+                RuntimeStatus::Ready,
+            ),
+            (
+                RuntimeStatus::Stopped,
+                RuntimeStatus::Stopped,
+                RuntimeStatus::Stopped,
+            ),
+            (
+                RuntimeStatus::Degraded,
+                RuntimeStatus::Ready,
+                RuntimeStatus::Degraded,
+            ),
+            (
+                RuntimeStatus::Ready,
+                RuntimeStatus::Stopped,
+                RuntimeStatus::Degraded,
+            ),
+            (
+                RuntimeStatus::Stopped,
+                RuntimeStatus::Ready,
+                RuntimeStatus::Degraded,
+            ),
+            (
+                RuntimeStatus::Starting,
+                RuntimeStatus::Ready,
+                RuntimeStatus::Starting,
+            ),
+        ];
+
+        for (backend_status, bridge_status, expected) in cases {
+            let mut state = DesktopRuntimeState::new();
+            state.backend.status = backend_status;
+            state.bridge.status = bridge_status;
+
+            state.recalculate_overall();
+
+            assert_eq!(
+                state.overall, expected,
+                "expected overall status {expected:?} for backend={backend_status:?}, bridge={bridge_status:?}"
+            );
+        }
+    }
+
+    #[test]
+    fn runtime_mut_routes_bridge_label_and_defaults_unknown_to_backend() {
+        let mut state = DesktopRuntimeState::new();
+
+        state.runtime_mut(BRIDGE_LABEL).status = RuntimeStatus::Ready;
+        state.runtime_mut("unknown-runtime").status = RuntimeStatus::Degraded;
+
+        assert_eq!(state.bridge.status, RuntimeStatus::Ready);
+        assert_eq!(state.backend.status, RuntimeStatus::Degraded);
+    }
+
+    #[test]
+    fn runtime_manager_mutate_updates_snapshot_metadata_and_labels() {
+        let manager = DesktopRuntimeManager::new();
+
+        let snapshot = manager.mutate(|state| {
+            state.backend.status = RuntimeStatus::Ready;
+            state.backend.pid = Some(42);
+            state.backend.restart_count = 1;
+            state.backend.last_error = Some("recovered from bootstrap failure".to_string());
+            state.backend.last_started_at = Some("1234567890".to_string());
+            state.bridge.status = RuntimeStatus::Ready;
+        });
+
+        assert_eq!(snapshot.overall, RuntimeStatus::Ready);
+        assert_eq!(snapshot.backend.label, BACKEND_LABEL);
+        assert_eq!(snapshot.backend.status, RuntimeStatus::Ready);
+        assert_eq!(
+            snapshot.backend.url.as_deref(),
+            Some("http://127.0.0.1:7777")
+        );
+        assert_eq!(snapshot.backend.pid, Some(42));
+        assert_eq!(snapshot.backend.restart_count, 1);
+        assert_eq!(
+            snapshot.backend.last_error.as_deref(),
+            Some("recovered from bootstrap failure")
+        );
+        assert_eq!(
+            snapshot.backend.last_started_at.as_deref(),
+            Some("1234567890")
+        );
+        assert_eq!(snapshot.bridge.label, BRIDGE_LABEL);
+        assert_eq!(
+            snapshot.bridge.url.as_deref(),
+            Some("http://127.0.0.1:7778")
+        );
+    }
+
+    #[test]
+    fn backend_url_falls_back_to_localhost_when_runtime_url_is_missing() {
+        let manager = DesktopRuntimeManager::new();
+
+        manager.mutate(|state| {
+            state.backend.url = None;
+        });
+
+        assert_eq!(
+            manager.backend_url(),
+            format!("http://localhost:{BACKEND_PORT}")
+        );
+    }
+
+    #[test]
+    fn stop_runtime_resets_runtime_state_and_preserves_reason() {
+        let manager = DesktopRuntimeManager::new();
+
+        manager.mutate(|state| {
+            state.backend.status = RuntimeStatus::Ready;
+            state.backend.pid = Some(7777);
+            state.bridge.status = RuntimeStatus::Ready;
+        });
+
+        let stopped = manager.stop_runtime(BACKEND_LABEL, Some("manual shutdown".to_string()));
+        let snapshot = manager.snapshot();
+
+        assert!(stopped.is_none());
+        assert_eq!(snapshot.backend.status, RuntimeStatus::Stopped);
+        assert_eq!(snapshot.backend.pid, None);
+        assert_eq!(
+            snapshot.backend.last_error.as_deref(),
+            Some("manual shutdown")
+        );
+        assert_eq!(snapshot.overall, RuntimeStatus::Degraded);
+    }
+
+    #[test]
     fn shell_action_event_payload_preserves_route_and_context() {
         assert_eq!(
             shell_action_event_payload(
@@ -1390,6 +1363,17 @@ mod tests {
     }
 
     #[test]
+    fn shell_action_event_payload_omits_optional_fields_when_absent() {
+        assert_eq!(
+            shell_action_event_payload("refresh_plugin_runtime", None, None, "completed"),
+            json!({
+                "actionId": "refresh_plugin_runtime",
+                "status": "completed",
+            })
+        );
+    }
+
+    #[test]
     fn window_state_payload_preserves_window_flags() {
         assert_eq!(
             window_state_payload(&DesktopWindowChromeState {
@@ -1404,6 +1388,21 @@ mod tests {
                 "minimized": false,
                 "visible": true,
             })
+        );
+    }
+
+    #[test]
+    fn now_string_returns_numeric_timestamp() {
+        assert!(now_string().parse::<u64>().is_ok());
+    }
+
+    #[test]
+    fn file_path_to_string_returns_lossy_owned_path() {
+        let path = std::env::temp_dir().join("agentforge-desktop-test.txt");
+
+        assert_eq!(
+            file_path_to_string(FilePath::Path(path.clone())),
+            Some(path.to_string_lossy().into_owned())
         );
     }
 }

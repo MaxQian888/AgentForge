@@ -216,7 +216,7 @@ pnpm plugin:dev
 推荐的聚焦验证命令：
 
 ```bash
-pnpm test scripts/build-go-wasm-plugin.test.ts scripts/debug-go-wasm-plugin.test.ts scripts/run-plugin-dev-stack.test.ts scripts/verify-plugin-dev-workflow.test.ts --runInBand
+pnpm exec jest --runInBand scripts/build-go-wasm-plugin.test.ts scripts/debug-go-wasm-plugin.test.ts scripts/run-plugin-dev-stack.test.ts scripts/verify-plugin-dev-workflow.test.ts scripts/verify-built-in-plugin-bundle.test.ts
 pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
 pnpm plugin:verify:builtins
 cd src-go
@@ -224,13 +224,12 @@ go test ./plugin-sdk-go -count=1
 go test ./internal/plugin -count=1
 go test ./internal/bridge
 go test ./internal/handler
-cd internal/service
-go test plugin_service.go plugin_service_test.go
+go test ./internal/service -run PluginService -count=1
 ```
 
 覆盖范围：
 
-- `scripts/*.test.ts`：manifest 驱动构建、debug envelope、最小开发栈合同、verify stage 计划
+- `scripts/*.test.ts`：manifest 驱动构建、debug envelope、最小开发栈合同、verify stage 计划，以及 built-in bundle 合同校验
 - `plugin:verify`：受维护样例的 `build -> debug health` smoke 路径
 - `plugin:verify:builtins`：校验内置 bundle 清单、manifest 存在性、以及 built-in readiness/verify 元数据
 - `plugin-sdk-go`：typed descriptor/context/result/error helper 和 export helper

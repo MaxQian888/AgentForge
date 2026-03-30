@@ -7,10 +7,12 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
-	"testing"
-
 	"github.com/agentforge/im-bridge/core"
 	"github.com/agentforge/im-bridge/notify"
+	"io"
+	"net/http"
+	"strings"
+	"testing"
 )
 
 func TestLive_StartAcknowledgesInteractionBeforeDispatchAndSyncsCommands(t *testing.T) {
@@ -689,4 +691,253 @@ func coreHasTextFormat(formats []core.TextFormatMode, target core.TextFormatMode
 		}
 	}
 	return false
+}
+
+type discordRoundTripperFunc func(*http.Request) (*http.Response, error)
+
+func (fn discordRoundTripperFunc) RoundTrip(req *http.Request) (*http.Response, error) {
+	return fn(req)
+}
+
+func TestDiscordLive_NameOptionsAndReplyContextHelpers(t *testing.T) {
+	live, err := NewLive(
+		"app-123",
+		"bot-token",
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"9000",
+		WithInteractionRunner(&fakeInteractionRunner{}),
+		WithFollowupClient(&fakeFollowupClient{}),
+		WithChannelClient(&fakeChannelClient{}),
+		WithOriginalResponseClient(&fakeOriginalResponseClient{}),
+		WithCommandRegistrar(&fakeCommandRegistrar{}),
+		WithCommandGuildID(" guild-1 "),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if live.Name() != "discord-live" {
+		t.Fatalf("Name = %q", live.Name())
+	}
+	if live.commandGuildID != "guild-1" {
+		t.Fatalf("commandGuildID = %q", live.commandGuildID)
+	}
+	if live.ReplyContextFromTarget(nil) != nil {
+		t.Fatal("expected nil reply target to stay nil")
+	}
+
+	replyAny := live.ReplyContextFromTarget(&core.ReplyTarget{
+		InteractionToken: " reply-token ",
+		ChatID:           "channel-1",
+	})
+	reply, ok := replyAny.(replyContext)
+	if !ok {
+		t.Fatalf("ReplyContextFromTarget type = %T", replyAny)
+	}
+	if reply.InteractionToken != "reply-token" || reply.ChannelID != "channel-1" || reply.OriginalResponseID != "@original" {
+		t.Fatalf("reply = %+v", reply)
+	}
+}
+
+func TestDiscordLive_ReplyStructuredFormattedAndUpdateBranches(t *testing.T) {
+	followups := &fakeFollowupClient{}
+	channels := &fakeChannelClient{}
+	originals := &fakeOriginalResponseClient{}
+	live, err := NewLive(
+		"app-123",
+		"bot-token",
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"9000",
+		WithInteractionRunner(&fakeInteractionRunner{}),
+		WithFollowupClient(followups),
+		WithChannelClient(channels),
+		WithOriginalResponseClient(originals),
+		WithCommandRegistrar(&fakeCommandRegistrar{}),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.ReplyStructured(context.Background(), replyContext{
+		InteractionToken: "reply-token",
+		ChannelID:        "channel-1",
+	}, &core.StructuredMessage{
+		Title: "Review Ready",
+		Body:  "Choose the next step.",
+		Actions: []core.StructuredAction{
+			{ID: "act:approve:review-1", Label: "Approve"},
+		},
+	}); err != nil {
+		t.Fatalf("ReplyStructured via followup error: %v", err)
+	}
+	if len(followups.calls) != 1 || len(followups.calls[0].Message.Components) != 1 {
+		t.Fatalf("followups = %+v", followups.calls)
+	}
+
+	followups.calls = nil
+	if err := live.ReplyFormattedText(context.Background(), replyContext{
+		ChannelID: "channel-2",
+	}, &core.FormattedText{
+		Content: "**bold**",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText channel error: %v", err)
+	}
+	if len(channels.calls) != 1 || channels.calls[0].ChannelID != "channel-2" {
+		t.Fatalf("channels = %+v", channels.calls)
+	}
+
+	if err := live.UpdateFormattedText(context.Background(), replyContext{
+		InteractionToken: "update-token",
+	}, &core.FormattedText{
+		Content: "**bold**",
+		Format:  core.TextFormatDiscordMD,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+	if len(originals.calls) != 1 || originals.calls[0].Token != "update-token" {
+		t.Fatalf("originals = %+v", originals.calls)
+	}
+
+	if err := live.ReplyStructured(context.Background(), replyContext{}, &core.StructuredMessage{Title: "missing target"}); err == nil || !strings.Contains(err.Error(), "requires interaction token or channel id") {
+		t.Fatalf("missing target error = %v", err)
+	}
+	if err := live.UpdateFormattedText(context.Background(), replyContext{}, &core.FormattedText{Content: "missing"}); err == nil || !strings.Contains(err.Error(), "requires interaction token") {
+		t.Fatalf("missing update token error = %v", err)
+	}
+}
+
+func TestDiscordAPIWrappersAndHelpers(t *testing.T) {
+	requests := make([]struct {
+		path   string
+		auth   string
+		method string
+		body   map[string]any
+	}, 0, 5)
+
+	api := &discordAPIClient{
+		baseURL:  "https://discord.example/api",
+		botToken: "bot-token",
+		client: &http.Client{Transport: discordRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			var body map[string]any
+			if req.Body != nil {
+				_ = json.NewDecoder(req.Body).Decode(&body)
+			}
+			requests = append(requests, struct {
+				path   string
+				auth   string
+				method string
+				body   map[string]any
+			}{
+				path:   req.URL.Path,
+				auth:   req.Header.Get("Authorization"),
+				method: req.Method,
+				body:   body,
+			})
+			return &http.Response{
+				StatusCode: http.StatusNoContent,
+				Body:       io.NopCloser(strings.NewReader("")),
+				Header:     make(http.Header),
+			}, nil
+		})},
+	}
+
+	followups := &discordFollowupClient{client: api}
+	channels := &discordChannelClient{client: api}
+	originals := &discordOriginalResponseClient{client: api}
+	registrar := &discordCommandRegistrar{client: api}
+
+	if err := followups.SendFollowup(context.Background(), "app-123", "reply-token", discordOutgoingMessage{Content: "reply text"}); err != nil {
+		t.Fatalf("SendFollowup error: %v", err)
+	}
+	if err := channels.SendChannelMessage(context.Background(), "channel-1", discordOutgoingMessage{Content: "notify text"}); err != nil {
+		t.Fatalf("SendChannelMessage error: %v", err)
+	}
+	if err := originals.EditOriginalResponse(context.Background(), "app-123", "reply-token", discordOutgoingMessage{Content: "updated"}); err != nil {
+		t.Fatalf("EditOriginalResponse error: %v", err)
+	}
+	if err := registrar.SyncCommands(context.Background(), "app-123", "guild-1", defaultApplicationCommands()); err != nil {
+		t.Fatalf("SyncCommands error: %v", err)
+	}
+
+	if len(requests) != 4 {
+		t.Fatalf("requests = %+v", requests)
+	}
+	if requests[0].path != "/api/webhooks/app-123/reply-token" || requests[0].auth != "" {
+		t.Fatalf("followup request = %+v", requests[0])
+	}
+	if requests[1].path != "/api/channels/channel-1/messages" || requests[1].auth != "Bot bot-token" {
+		t.Fatalf("channel request = %+v", requests[1])
+	}
+	if requests[2].path != "/api/webhooks/app-123/reply-token/messages/@original" || requests[2].method != http.MethodPatch {
+		t.Fatalf("original request = %+v", requests[2])
+	}
+	if requests[3].path != "/api/applications/app-123/guilds/guild-1/commands" || requests[3].method != http.MethodPut {
+		t.Fatalf("command request = %+v", requests[3])
+	}
+
+	if err := followups.SendFollowup(context.Background(), "app-123", "", discordOutgoingMessage{}); err == nil || !strings.Contains(err.Error(), "interaction token") {
+		t.Fatalf("followup missing token err = %v", err)
+	}
+	if err := channels.SendChannelMessage(context.Background(), "", discordOutgoingMessage{}); err == nil || !strings.Contains(err.Error(), "channel id") {
+		t.Fatalf("channel missing id err = %v", err)
+	}
+	if err := originals.EditOriginalResponse(context.Background(), "app-123", "", discordOutgoingMessage{}); err == nil || !strings.Contains(err.Error(), "interaction token") {
+		t.Fatalf("original missing token err = %v", err)
+	}
+
+	errorAPI := &discordAPIClient{
+		baseURL:  "https://discord.example/api",
+		botToken: "bot-token",
+		client: &http.Client{Transport: discordRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			return &http.Response{
+				StatusCode: http.StatusBadGateway,
+				Body:       io.NopCloser(strings.NewReader("upstream boom")),
+				Header:     make(http.Header),
+			}, nil
+		})},
+	}
+	if err := errorAPI.doJSON(context.Background(), http.MethodPost, "/bad", map[string]any{"x": 1}, true); err == nil || !strings.Contains(err.Error(), "discord api error 502") {
+		t.Fatalf("doJSON error = %v", err)
+	}
+
+	if got := toReplyContext(replyContext{InteractionToken: "reply-token"}); got.InteractionToken != "reply-token" {
+		t.Fatalf("toReplyContext(raw) = %+v", got)
+	}
+	if got := toReplyContext(&replyContext{ChannelID: "channel-1"}); got.ChannelID != "channel-1" {
+		t.Fatalf("toReplyContext(pointer) = %+v", got)
+	}
+	msg := &core.Message{
+		ChatID:      "channel-2",
+		ReplyTarget: &core.ReplyTarget{InteractionToken: "reply-token", OriginalResponseID: "@original"},
+	}
+	if got := toReplyContext(msg); got.ChannelID != "channel-2" || got.InteractionToken != "reply-token" || got.OriginalResponseID != "@original" {
+		t.Fatalf("toReplyContext(message) = %+v", got)
+	}
+	if got := toReplyContext("invalid"); got != (replyContext{}) {
+		t.Fatalf("toReplyContext(invalid) = %+v", got)
+	}
+
+	components := buildMessageComponents(&core.StructuredMessage{
+		Actions: []core.StructuredAction{
+			{ID: "act:approve:review-1", Label: "Approve", Style: core.ActionStylePrimary},
+			{URL: "https://example.test/reviews/1", Label: "Open"},
+		},
+	})
+	if len(components) != 2 || components[0].Components[0].CustomID != "act:approve:review-1" || components[1].Components[0].URL != "https://example.test/reviews/1" {
+		t.Fatalf("components = %+v", components)
+	}
+
+	if got := compactMetadata(map[string]string{" source ": " interaction ", "empty": " "}); got["source"] != "interaction" || len(got) != 1 {
+		t.Fatalf("compactMetadata = %+v", got)
+	}
+	if got := compactMetadata(map[string]string{" ": " "}); got != nil {
+		t.Fatalf("compactMetadata(empty) = %+v", got)
+	}
+	if got := valueOrEmpty(&followupCall{AppID: "app-123"}, func(v *followupCall) string { return v.AppID }); got != "app-123" {
+		t.Fatalf("valueOrEmpty = %q", got)
+	}
+	if got := valueOrEmpty[*followupCall](nil, func(v **followupCall) string { return "" }); got != "" {
+		t.Fatalf("valueOrEmpty(nil) = %q", got)
+	}
 }

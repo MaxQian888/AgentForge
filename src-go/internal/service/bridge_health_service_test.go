@@ -51,10 +51,10 @@ func TestBridgeHealthService_StartMarksReadyAfterSuccessfulProbe(t *testing.T) {
 			WarmAvailable: 1,
 		},
 	}, bridgeHealthConfig{
-		startupAttempts: 1,
-		startupInterval: time.Millisecond,
+		startupAttempts:   1,
+		startupInterval:   time.Millisecond,
 		heartbeatInterval: time.Hour,
-		failureThreshold: 3,
+		failureThreshold:  3,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -80,10 +80,10 @@ func TestBridgeHealthService_StartMarksDegradedWhenStartupProbeNeverSucceeds(t *
 	svc := newBridgeHealthServiceWithConfig(&fakeBridgeHealthClient{
 		healthResults: []error{errors.New("dial tcp"), errors.New("dial tcp")},
 	}, bridgeHealthConfig{
-		startupAttempts: 2,
-		startupInterval: time.Millisecond,
+		startupAttempts:   2,
+		startupInterval:   time.Millisecond,
 		heartbeatInterval: time.Hour,
-		failureThreshold: 3,
+		failureThreshold:  3,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -107,10 +107,10 @@ func TestBridgeHealthService_TransitionsToDegradedAfterConsecutiveHeartbeatFailu
 			errors.New("heartbeat failed"),
 		},
 	}, bridgeHealthConfig{
-		startupAttempts: 1,
-		startupInterval: time.Millisecond,
+		startupAttempts:   1,
+		startupInterval:   time.Millisecond,
 		heartbeatInterval: 5 * time.Millisecond,
-		failureThreshold: 3,
+		failureThreshold:  3,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -136,10 +136,10 @@ func TestBridgeHealthService_RecoversToReadyAfterHeartbeatSucceeds(t *testing.T)
 			WarmAvailable: 0,
 		},
 	}, bridgeHealthConfig{
-		startupAttempts: 1,
-		startupInterval: time.Millisecond,
+		startupAttempts:   1,
+		startupInterval:   time.Millisecond,
 		heartbeatInterval: 5 * time.Millisecond,
-		failureThreshold: 3,
+		failureThreshold:  3,
 	})
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -151,6 +151,52 @@ func TestBridgeHealthService_RecoversToReadyAfterHeartbeatSucceeds(t *testing.T)
 	}
 
 	waitForBridgeHealthStatus(t, svc, BridgeStatusReady)
+}
+
+func TestNewBridgeHealthServiceDefaultsAndStatusHelpers(t *testing.T) {
+	svc := NewBridgeHealthService(nil)
+	if svc == nil {
+		t.Fatal("NewBridgeHealthService() returned nil")
+	}
+	if svc.config.startupAttempts != 10 || svc.config.failureThreshold != 3 {
+		t.Fatalf("default config = %+v", svc.config)
+	}
+	if got := svc.Status(); got != BridgeStatusDegraded {
+		t.Fatalf("Status() = %q, want degraded", got)
+	}
+
+	var nilSvc *BridgeHealthService
+	if got := nilSvc.Status(); got != BridgeStatusDegraded {
+		t.Fatalf("nil Status() = %q, want degraded", got)
+	}
+	if snapshot := nilSvc.Snapshot(); snapshot.Status != BridgeStatusDegraded {
+		t.Fatalf("nil Snapshot() = %+v, want degraded snapshot", snapshot)
+	}
+}
+
+func TestBridgeHealthService_RunCheckAndSetDegradedWithNilClient(t *testing.T) {
+	svc := newBridgeHealthServiceWithConfig(nil, bridgeHealthConfig{
+		startupAttempts:   1,
+		startupInterval:   time.Millisecond,
+		heartbeatInterval: time.Second,
+		failureThreshold:  2,
+	})
+	if ok := svc.runCheck(context.Background()); ok {
+		t.Fatal("runCheck(nil client) = true, want false")
+	}
+	if got := svc.Status(); got != BridgeStatusDegraded {
+		t.Fatalf("Status() after runCheck = %q, want degraded", got)
+	}
+
+	checkTime := time.Date(2026, 3, 30, 20, 0, 0, 0, time.UTC)
+	svc.setDegraded(checkTime, "manual override")
+	snapshot := svc.Snapshot()
+	if !snapshot.LastCheck.Equal(checkTime) {
+		t.Fatalf("LastCheck = %v, want %v", snapshot.LastCheck, checkTime)
+	}
+	if svc.consecutiveFailures != svc.config.failureThreshold {
+		t.Fatalf("consecutiveFailures = %d, want %d", svc.consecutiveFailures, svc.config.failureThreshold)
+	}
 }
 
 func waitForBridgeHealthStatus(t *testing.T, svc *BridgeHealthService, want string) {

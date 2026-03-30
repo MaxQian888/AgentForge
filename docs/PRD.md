@@ -9,16 +9,19 @@
 
 ---
 
-## 当前实现快照（2026-03-29）
+## 当前实现快照（2026-03-30）
 
 这份 PRD 仍然描述 AgentForge 的目标蓝图，但当前仓库已经有一批能力进入真实实现态。阅读后续章节时，如果某些长篇设计还保留更早的规划口径，请优先以这份实现快照和对应代码路径理解“现在已经做到哪里”：
 
+- `总览 Dashboard`：`app/(dashboard)/page.tsx` 已提供汇总指标卡、活动流、agent/team/budget widget，以及基于当前项目上下文的快捷操作。
 - `任务工作区`：`app/(dashboard)/project/page.tsx` 已落地统一的 Board / List / Timeline / Calendar 任务工作区，含右侧 context rail、实时健康态、批量操作、Sprint 过滤、任务详情编辑，以及文档/评论联动。
 - `项目 Dashboard`：`app/(dashboard)/project/dashboard/page.tsx` 已落地 dashboard 切换与增删改、widget catalog、widget 级操作与空态/失败态处理。
 - `项目设置`：`app/(dashboard)/settings/page.tsx` 已落地 draft/save/discard 生命周期、字段校验反馈、runtime/provider/model catalog 选择，以及更真实的 operator diagnostics。
 - `角色定义体验`：`app/(dashboard)/roles/page.tsx`、`docs/role-authoring-guide.md`、`docs/role-yaml.md` 对应的角色工作区、preview/sandbox、repo-local skill catalog、继承/覆盖与响应式布局已经落地。
 - `审查工作区`：`app/(dashboard)/reviews/page.tsx` 已收敛 backlog、详情、decision actions 与手动 deep-review 入口到共享 review workspace。
 - `文档/知识库`：`app/(dashboard)/docs/page.tsx` 与 `app/(dashboard)/docs/[pageId]/page-client.tsx` 已落地项目级 wiki、BlockNote 编辑器、评论、版本、模板、最近/收藏和任务关联。
+- `团队工作区`：`app/(dashboard)/team/page.tsx` 与 `app/(dashboard)/teams/page.tsx` 已覆盖项目成员管理、角色感知 roster 编辑、Team 运行统计/筛选，以及 Team 创建流程。
+- `工作流 / 调度 / 记忆`：`app/(dashboard)/workflow/page.tsx`、`app/(dashboard)/scheduler/page.tsx`、`app/(dashboard)/memory/page.tsx` 已分别落地 workflow draft/save、调度统计与手动触发、项目级记忆检索与清理等运维工作区。
 - `插件系统现状`：当前仓库已落地 Go-hosted WASM Integration/Workflow plugin、TS-hosted MCP Tool/Review plugin、catalog 与 trust gate、内置插件 bundle/readiness 校验，以及 repo-local 插件脚手架命令。
 - `IM 控制面`：前端已覆盖 `feishu`、`dingtalk`、`slack`、`telegram`、`discord`、`wecom`、`qq`、`qqbot`，并补齐事件类型拉取、payload 预览和降级诊断。
 - `桌面壳`：Tauri 已具备 sidecar 监督、桌面能力 facade、shell action、共享 frameless titlebar/window chrome 与窗口状态同步。

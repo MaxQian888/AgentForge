@@ -5,7 +5,7 @@
 
 ---
 
-## 当前实现快照（2026-03-29）
+## 当前实现快照（2026-03-30）
 
 这份文档仍然描述审查流水线的总体蓝图，但当前仓库已经有一条更具体的实现线：
 
@@ -13,6 +13,7 @@
 - Layer 2 已经支持通过 ReviewPlugin 扩展点加载官方 built-ins；当前仓库内置的受维护 ReviewPlugin 至少包括 `architecture-check` 与 `performance-check`，并由 `plugins/builtin-bundle.yaml` 统一管理。
 - 审查工作区已经从“仅 PR 后台流水线”扩展到 operator-facing review workspace：`app/(dashboard)/reviews/page.tsx`、`components/review/review-workspace.tsx`、`review-detail-panel.tsx`、`review-decision-actions.tsx`、`review-trigger-form.tsx` 共同承载 backlog、详情、manual deep review 和人工决策。
 - 人工审批态当前已有真实状态机与实时事件：`pending_human` 已在 Go model、service、ws-store 和前端列表/详情面板中落地。
+- GitHub PR 自动化已经有真实分层 workflow：`.github/workflows/agent-review.yml` 负责 `agent/*` 分支的 Layer 1 快速审查与 decision artifact，`.github/workflows/review-layer2.yml` 会在需要时把同一条 PR diff 继续升级到 AgentForge Layer 2 深审入口。
 
 ---
 

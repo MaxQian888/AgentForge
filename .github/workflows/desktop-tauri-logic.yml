@@ -1,0 +1,35 @@
+name: Desktop Tauri Logic
+
+on:
+  workflow_call:
+  workflow_dispatch:
+
+jobs:
+  desktop-tauri-logic:
+    name: Desktop Tauri Logic
+    runs-on: windows-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v6
+
+      - name: Install Rust stable
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Add LLVM tools
+        run: rustup component add llvm-tools-preview
+
+      - name: Rust cache
+        uses: swatinem/rust-cache@v2
+        with:
+          workspaces: "./src-tauri -> target"
+          cache-on-failure: true
+
+      - name: Install cargo-llvm-cov
+        run: cargo install cargo-llvm-cov --locked
+
+      - name: Run src-tauri lib tests
+        run: cargo test --manifest-path src-tauri/Cargo.toml --lib
+
+      - name: Enforce runtime logic coverage gate
+        run: cargo llvm-cov --manifest-path src-tauri/Cargo.toml --lib --ignore-filename-regex 'lib[.]rs$' --fail-under-lines 80 --fail-under-functions 80

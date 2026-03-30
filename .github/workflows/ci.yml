@@ -56,7 +56,12 @@ jobs:
     name: Go CI
     uses: ./.github/workflows/go-ci.yml
 
-  # Step 4: TypeScript Bridge typecheck
+  # Step 4: Desktop Tauri logic tests + coverage gate
+  desktop-tauri-logic:
+    name: Desktop Tauri Logic
+    uses: ./.github/workflows/desktop-tauri-logic.yml
+
+  # Step 5: TypeScript Bridge typecheck
   bridge-typecheck:
     name: Bridge Typecheck
     runs-on: ubuntu-latest
@@ -69,7 +74,7 @@ jobs:
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
 
-  # Step 5: IM Bridge build check
+  # Step 6: IM Bridge build check
   im-bridge-build:
     name: IM Bridge Build
     runs-on: ubuntu-latest
@@ -85,8 +90,8 @@ jobs:
           cache-dependency-path: src-im-bridge/go.sum
       - run: go build ./...
 
-  # Step 6: Build Tauri Desktop Apps (after all checks pass)
+  # Step 7: Build Tauri Desktop Apps (after all checks pass)
   build-tauri:
     name: Build Tauri
-    needs: [quality, test, go-ci, bridge-typecheck, im-bridge-build]
+    needs: [quality, test, go-ci, desktop-tauri-logic, bridge-typecheck, im-bridge-build]
     uses: ./.github/workflows/build-tauri.yml

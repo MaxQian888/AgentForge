@@ -297,3 +297,150 @@ func TestDeliverNative_UsesUpdaterWhenDeferredCardUpdateIsPreferred(t *testing.T
 		t.Fatalf("sent=%d replies=%d", len(platform.nativeSent), len(platform.nativeReplies))
 	}
 }
+
+type nativeStringer string
+
+func (s nativeStringer) String() string { return string(s) }
+
+func TestNativeMessageHelpers_NormalizeSurfaceAndFallback(t *testing.T) {
+	if got := (*NativeMessage)(nil).NormalizedPlatform(); got != "" {
+		t.Fatalf("nil NormalizedPlatform = %q", got)
+	}
+	if got := (*NativeMessage)(nil).SurfaceType(); got != "" {
+		t.Fatalf("nil SurfaceType = %q", got)
+	}
+	if got := (*NativeMessage)(nil).FallbackText(); got != "" {
+		t.Fatalf("nil FallbackText = %q", got)
+	}
+
+	slack := &NativeMessage{
+		Platform: " SLACK-STUB ",
+		SlackBlockKit: &SlackBlockKitPayload{
+			Blocks: json.RawMessage(`[{"type":"section","text":{"type":"mrkdwn","text":"*Build* ready"}}]`),
+		},
+	}
+	if got := slack.NormalizedPlatform(); got != "slack" {
+		t.Fatalf("slack NormalizedPlatform = %q", got)
+	}
+	if got := slack.SurfaceType(); got != NativeSurfaceSlackBlockKit {
+		t.Fatalf("slack SurfaceType = %q", got)
+	}
+	if got := slack.FallbackText(); !strings.Contains(got, "Build ready") {
+		t.Fatalf("slack FallbackText = %q", got)
+	}
+
+	feishu := &NativeMessage{
+		FeishuCard: &FeishuCardPayload{
+			Mode:       FeishuCardModeTemplate,
+			TemplateID: "ctp_123",
+		},
+	}
+	if got := feishu.NormalizedPlatform(); got != "feishu" {
+		t.Fatalf("feishu NormalizedPlatform = %q", got)
+	}
+	if got := feishu.SurfaceType(); got != NativeSurfaceFeishuCard {
+		t.Fatalf("feishu SurfaceType = %q", got)
+	}
+	if got := feishu.FallbackText(); !strings.Contains(got, "ctp_123") {
+		t.Fatalf("feishu FallbackText = %q", got)
+	}
+}
+
+func TestNativeMessage_ValidateRejectsNilUnsupportedAndMismatch(t *testing.T) {
+	testCases := []struct {
+		name    string
+		message *NativeMessage
+		wantErr string
+	}{
+		{
+			name:    "nil",
+			message: nil,
+			wantErr: "native message is required",
+		},
+		{
+			name:    "missing platform and payload",
+			message: &NativeMessage{},
+			wantErr: "native message platform is required",
+		},
+		{
+			name: "unsupported platform",
+			message: &NativeMessage{
+				Platform: "custom",
+			},
+			wantErr: `unsupported native message platform "custom"`,
+		},
+		{
+			name: "mismatched platform",
+			message: &NativeMessage{
+				Platform: "discord",
+				SlackBlockKit: &SlackBlockKitPayload{
+					Blocks: json.RawMessage(`[{"type":"section","text":{"type":"mrkdwn","text":"hello"}}]`),
+				},
+			},
+			wantErr: `does not match payload "slack"`,
+		},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.message.Validate()
+			if err == nil || !strings.Contains(err.Error(), tc.wantErr) {
+				t.Fatalf("error = %v, want substring %q", err, tc.wantErr)
+			}
+		})
+	}
+}
+
+func TestNativeMessageHelpers_ParseUtilityValues(t *testing.T) {
+	if _, err := decodeObjectArray(nil, "blocks"); err == nil || !strings.Contains(err.Error(), "blocks is required") {
+		t.Fatalf("decodeObjectArray(nil) error = %v", err)
+	}
+	if _, err := decodeObjectArray(json.RawMessage(`{"type":"section"}`), "blocks"); err == nil || !strings.Contains(err.Error(), "decode blocks") {
+		t.Fatalf("decodeObjectArray(object) error = %v", err)
+	}
+	decoded, err := decodeObjectArray(json.RawMessage(`[{"type":"section"}]`), "blocks")
+	if err != nil {
+		t.Fatalf("decodeObjectArray(array) error: %v", err)
+	}
+	if len(decoded) != 1 || decoded[0]["type"] != "section" {
+		t.Fatalf("decoded = %+v", decoded)
+	}
+
+	lines := []string{"existing"}
+	appendNonEmptyLine(&lines, nativeStringer(" **Hello** "))
+	appendNonEmptyLine(&lines, 123)
+	appendNonEmptyLine(nil, "ignored")
+	if len(lines) != 2 || lines[1] != "Hello" {
+		t.Fatalf("lines = %+v", lines)
+	}
+
+	objects := toObjectSlice([]any{map[string]any{"id": "1"}, "skip"})
+	if len(objects) != 1 || objects[0]["id"] != "1" {
+		t.Fatalf("objects = %+v", objects)
+	}
+	if got := toObjectSlice("skip"); got != nil {
+		t.Fatalf("toObjectSlice(string) = %+v, want nil", got)
+	}
+
+	if got := slackTextValue(map[string]any{"text": " *Build* ready "}); got != "Build ready" {
+		t.Fatalf("slackTextValue(map) = %q", got)
+	}
+	if got := slackTextValue(" _Done_ "); got != "Done" {
+		t.Fatalf("slackTextValue(string) = %q", got)
+	}
+	if got := actionFallbackText("*Open*", " https://example.test ", ""); got != "Open: https://example.test" {
+		t.Fatalf("actionFallbackText(label+url) = %q", got)
+	}
+	if got := actionFallbackText("", "", "act:approve"); got != "act:approve" {
+		t.Fatalf("actionFallbackText(action) = %q", got)
+	}
+	if got := fallbackImageText(" *Preview* ", " https://example.test/image "); got != "Preview: https://example.test/image" {
+		t.Fatalf("fallbackImageText = %q", got)
+	}
+	if got := asString(nativeStringer("build")); got != "build" {
+		t.Fatalf("asString(stringer) = %q", got)
+	}
+	if got := asString(123); got != "" {
+		t.Fatalf("asString(int) = %q", got)
+	}
+}

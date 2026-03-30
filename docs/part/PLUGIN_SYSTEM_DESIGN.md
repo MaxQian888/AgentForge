@@ -72,7 +72,7 @@
 
 ### 1.4 当前 OpenSpec MVP 实现边界
 
-这份架构文档覆盖的是插件系统的长期蓝图，但当前仓库真相已经不再停留在最早的 `establish-plugin-runtime-and-registry` MVP。到 `2026-03-29` 为止，仓库已经把统一契约、双宿主运行时映射、Go 权威注册中心、ReviewPlugin 深审扩展、WorkflowPlugin 顺序执行、SDK 与脚手架、catalog/trust 控制面、内置插件 bundle/readiness 校验，以及 repo-local 作者命令推进到同一条实现线上，但它仍然不等同于“公开 marketplace 已完成”。
+这份架构文档覆盖的是插件系统的长期蓝图，但当前仓库真相已经不再停留在最早的 `establish-plugin-runtime-and-registry` MVP。到 `2026-03-30` 为止，仓库已经把统一契约、双宿主运行时映射、Go 权威注册中心、ReviewPlugin 深审扩展、WorkflowPlugin 顺序执行、SDK 与脚手架、catalog/trust 控制面、内置插件 bundle/readiness 校验，以及 repo-local 作者命令推进到同一条实现线上，但它仍然不等同于“公开 marketplace 已完成”。
 
 本次 MVP 的可执行插件映射固定为：
 
