@@ -68,6 +68,13 @@ describe("dev-all workflow contract", () => {
         healthUrl: "http://127.0.0.1:7778/health",
       },
       {
+        name: "im-bridge",
+        kind: "application",
+        source: "spawn",
+        port: 7779,
+        healthUrl: "http://127.0.0.1:7779/im/health",
+      },
+      {
         name: "frontend",
         kind: "application",
         source: "spawn",
@@ -75,6 +82,23 @@ describe("dev-all workflow contract", () => {
         healthUrl: "http://127.0.0.1:3000",
       },
     ]);
+
+    const imBridge = services.find((service: { name: string }) => service.name === "im-bridge");
+    expect(imBridge).toMatchObject({
+      cwd: path.join(repoRoot, "src-im-bridge"),
+      start: {
+        command: "go",
+        args: ["run", "./cmd/bridge"],
+        env: expect.objectContaining({
+          AGENTFORGE_API_BASE: "http://127.0.0.1:7777",
+          IM_BRIDGE_ID_FILE: path.join(paths.codexDir, "im-bridge-id"),
+          IM_PLATFORM: "feishu",
+          IM_TRANSPORT_MODE: "stub",
+          NOTIFY_PORT: "7779",
+          TEST_PORT: "7780",
+        }),
+      },
+    });
   });
 
   test("reports an untracked but healthy service as external", () => {
@@ -269,6 +293,7 @@ describe("dev-all workflow contract", () => {
         expect.objectContaining({ name: "redis", action: "reused", source: "reused" }),
         expect.objectContaining({ name: "go-orchestrator", action: "reused", source: "reused" }),
         expect.objectContaining({ name: "ts-bridge", action: "reused", source: "reused" }),
+        expect.objectContaining({ name: "im-bridge", action: "reused", source: "reused" }),
         expect.objectContaining({ name: "frontend", action: "reused", source: "reused" }),
       ]),
     );
@@ -384,6 +409,42 @@ describe("dev-all workflow contract", () => {
         }),
       }),
     );
+  });
+
+  test("reports IM bridge listener conflicts through the failing service metadata", async () => {
+    jest.resetModules();
+
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-devall-imbridge-conflict-"));
+
+    jest.doMock("./dev-workflow.js", () => {
+      const actual = jest.requireActual("./dev-workflow.js");
+      return {
+        ...actual,
+        canUseDockerCompose: jest.fn(() => true),
+        isCommandAvailable: jest.fn(() => true),
+        isPortListening: jest.fn(async (port) => port === 7779),
+        probeServiceHealth: jest.fn(async (service) => {
+          if (service.name === "im-bridge") {
+            return false;
+          }
+
+          return service.kind === "infra" || service.name === "go-orchestrator" || service.name === "ts-bridge";
+        }),
+        readRuntimeState: jest.fn(() => ({
+          version: 1,
+          services: {},
+        })),
+        writeRuntimeState: jest.fn(),
+      };
+    });
+
+    const { runDevAllStart } = require("./dev-all.js");
+
+    const result = await runDevAllStart({ repoRoot });
+
+    expect(result.ok).toBe(false);
+    expect(result.reason).toBe("external_unknown_listener");
+    expect(result.service?.name).toBe("im-bridge");
   });
 
   test("persists partial managed state when startup fails after infra is prepared", async () => {

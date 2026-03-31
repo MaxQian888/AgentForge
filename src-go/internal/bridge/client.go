@@ -53,19 +53,19 @@ type ExecuteRequest struct {
 }
 
 type RoleConfig struct {
-	RoleID           string   `json:"role_id"`
-	Name             string   `json:"name"`
-	Role             string   `json:"role"`
-	Goal             string   `json:"goal"`
-	Backstory        string   `json:"backstory"`
-	SystemPrompt     string   `json:"system_prompt"`
-	AllowedTools     []string `json:"allowed_tools"`
-	Tools            []string `json:"tools,omitempty"`
-	KnowledgeContext string   `json:"knowledge_context,omitempty"`
-	OutputFilters    []string `json:"output_filters,omitempty"`
-	MaxBudgetUsd     float64  `json:"max_budget_usd"`
-	MaxTurns         int      `json:"max_turns"`
-	PermissionMode   string   `json:"permission_mode"`
+	RoleID           string                               `json:"role_id"`
+	Name             string                               `json:"name"`
+	Role             string                               `json:"role"`
+	Goal             string                               `json:"goal"`
+	Backstory        string                               `json:"backstory"`
+	SystemPrompt     string                               `json:"system_prompt"`
+	AllowedTools     []string                             `json:"allowed_tools"`
+	Tools            []string                             `json:"tools,omitempty"`
+	KnowledgeContext string                               `json:"knowledge_context,omitempty"`
+	OutputFilters    []string                             `json:"output_filters,omitempty"`
+	MaxBudgetUsd     float64                              `json:"max_budget_usd"`
+	MaxTurns         int                                  `json:"max_turns"`
+	PermissionMode   string                               `json:"permission_mode"`
 	LoadedSkills     []model.RoleExecutionSkill           `json:"loaded_skills,omitempty"`
 	AvailableSkills  []model.RoleExecutionSkill           `json:"available_skills,omitempty"`
 	SkillDiagnostics []model.RoleExecutionSkillDiagnostic `json:"skill_diagnostics,omitempty"`
@@ -113,6 +113,24 @@ type PoolSummaryResponse struct {
 	Degraded        bool  `json:"degraded"`
 }
 
+type HealthResponse struct {
+	Status       string `json:"status"`
+	ActiveAgents int    `json:"active_agents"`
+	MaxAgents    int    `json:"max_agents"`
+	UptimeMS     int64  `json:"uptime_ms"`
+}
+
+type ToolDefinition struct {
+	PluginID    string         `json:"plugin_id"`
+	Name        string         `json:"name"`
+	Description string         `json:"description,omitempty"`
+	InputSchema map[string]any `json:"input_schema,omitempty"`
+}
+
+type ToolsListResponse struct {
+	Tools []ToolDefinition `json:"tools"`
+}
+
 type RuntimeCatalogResponse struct {
 	DefaultRuntime string                   `json:"default_runtime"`
 	Runtimes       []RuntimeCatalogEntryDTO `json:"runtimes"`
@@ -124,8 +142,10 @@ type RuntimeCatalogEntryDTO struct {
 	DefaultProvider     string                 `json:"default_provider"`
 	CompatibleProviders []string               `json:"compatible_providers"`
 	DefaultModel        string                 `json:"default_model"`
+	ModelOptions        []string               `json:"model_options,omitempty"`
 	Available           bool                   `json:"available"`
 	Diagnostics         []RuntimeDiagnosticDTO `json:"diagnostics"`
+	SupportedFeatures   []string               `json:"supported_features,omitempty"`
 }
 
 type RuntimeDiagnosticDTO struct {
@@ -141,6 +161,7 @@ type DecomposeRequest struct {
 	Priority    string `json:"priority"`
 	Provider    string `json:"provider,omitempty"`
 	Model       string `json:"model,omitempty"`
+	Context     any    `json:"context,omitempty"`
 }
 
 type GenerateRequest struct {
@@ -362,6 +383,10 @@ func (c *Client) GetPoolSummary(ctx context.Context) (*PoolSummaryResponse, erro
 	return &result, nil
 }
 
+func (c *Client) GetPool(ctx context.Context) (*PoolSummaryResponse, error) {
+	return c.GetPoolSummary(ctx)
+}
+
 func (c *Client) GetRuntimeCatalog(ctx context.Context) (*RuntimeCatalogResponse, error) {
 	httpReq, err := http.NewRequestWithContext(ctx, http.MethodGet, c.baseURL+bridgeRuntimeCatalogPath, nil)
 	if err != nil {
@@ -524,6 +549,14 @@ func (c *Client) Health(ctx context.Context) error {
 	}
 	logBridgeRequestResult(fields, start, resp.StatusCode, nil, "bridge health check passed", "")
 	return nil
+}
+
+func (c *Client) GetHealth(ctx context.Context) (*HealthResponse, error) {
+	var result HealthResponse
+	if err := c.doJSONRequest(ctx, http.MethodGet, bridgeHealthPath, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 // DecomposeTask requests a lightweight task decomposition from the bridge.
@@ -731,6 +764,38 @@ func (c *Client) RegisterToolPlugin(ctx context.Context, manifest model.PluginMa
 		return nil, err
 	}
 	return pluginRuntimeStatusFromRecord(record), nil
+}
+
+func (c *Client) ListTools(ctx context.Context) (*ToolsListResponse, error) {
+	var result ToolsListResponse
+	if err := c.doJSONRequest(ctx, http.MethodGet, "/bridge/tools", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Client) InstallTool(ctx context.Context, manifest model.PluginManifest) (*model.PluginRecord, error) {
+	var result model.PluginRecord
+	if err := c.doJSONRequest(ctx, http.MethodPost, "/bridge/tools/install", map[string]any{"manifest": manifest}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Client) UninstallTool(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
+	var result model.PluginRecord
+	if err := c.doJSONRequest(ctx, http.MethodPost, "/bridge/tools/uninstall", map[string]any{"plugin_id": pluginID}, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+func (c *Client) RestartTool(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
+	var result model.PluginRecord
+	if err := c.doJSONRequest(ctx, http.MethodPost, "/bridge/tools/"+pluginID+"/restart", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
 }
 
 func (c *Client) ActivateToolPlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {

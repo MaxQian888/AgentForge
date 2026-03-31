@@ -28,6 +28,18 @@ describe("dashboard widgets", () => {
     expect(screen.getByTestId("x-axis-date")).toBeInTheDocument();
   });
 
+  it("renders a line throughput chart when chartType is line", () => {
+    render(
+      <ThroughputChart
+        data={[{ date: "2026-03-30", count: 3 }]}
+        chartType="line"
+      />,
+    );
+
+    expect(screen.getByTestId("line-chart")).toBeInTheDocument();
+    expect(screen.getByTestId("line-count")).toBeInTheDocument();
+  });
+
   it("renders the burndown chart scaffold", () => {
     render(
       <BurndownChartWidget

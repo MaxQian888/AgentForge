@@ -1,8 +1,46 @@
 "use client";
 
-import { Bar, BarChart, CartesianGrid, Line, LineChart, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import {
+  Bar,
+  BarChart,
+  CartesianGrid,
+  Line,
+  LineChart,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts";
 
-export function ThroughputChart({ data }: { data: Array<{ date: string; count: number }> }) {
+export function ThroughputChart({
+  data,
+  chartType = "bar",
+}: {
+  data: Array<{ date: string; count: number }>;
+  chartType?: "bar" | "line";
+}) {
+  if (chartType === "line") {
+    return (
+      <div className="h-56">
+        <ResponsiveContainer width="100%" height="100%">
+          <LineChart data={data}>
+            <CartesianGrid strokeDasharray="3 3" />
+            <XAxis dataKey="date" />
+            <YAxis allowDecimals={false} />
+            <Tooltip />
+            <Line
+              type="monotone"
+              dataKey="count"
+              stroke="currentColor"
+              className="stroke-primary"
+              strokeWidth={2}
+            />
+          </LineChart>
+        </ResponsiveContainer>
+      </div>
+    );
+  }
+
   return (
     <div className="h-56">
       <ResponsiveContainer width="100%" height="100%">

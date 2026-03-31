@@ -167,6 +167,189 @@ describe("useDashboardStore", () => {
     });
   });
 
+  it("treats an explicit null projectId as aggregate scope across all projects", async () => {
+    fetchMock.mockImplementation((input: RequestInfo | URL) => {
+      const url = String(input);
+
+      if (url.endsWith("/api/v1/projects")) {
+        return Promise.resolve(
+          mockJsonResponse([
+            {
+              id: "project-1",
+              name: "AgentForge",
+              slug: "agentforge",
+              description: "Main project",
+              repoUrl: "",
+              defaultBranch: "main",
+              createdAt: "2026-03-20T10:00:00.000Z",
+            },
+            {
+              id: "project-2",
+              name: "Ops",
+              slug: "ops",
+              description: "Ops project",
+              repoUrl: "",
+              defaultBranch: "main",
+              createdAt: "2026-03-20T10:00:00.000Z",
+            },
+          ]),
+        );
+      }
+
+      if (url.endsWith("/api/v1/projects/project-1/tasks")) {
+        return Promise.resolve(
+          mockJsonResponse({
+            items: [
+              {
+                id: "task-1",
+                projectId: "project-1",
+                title: "Review queue",
+                description: "",
+                status: "in_review",
+                priority: "high",
+                assigneeId: "member-1",
+                assigneeType: "human",
+                spentUsd: 3.5,
+                createdAt: "2026-03-23T10:00:00.000Z",
+                updatedAt: "2026-03-24T10:00:00.000Z",
+              },
+            ],
+            total: 1,
+            page: 1,
+            limit: 20,
+          }),
+        );
+      }
+
+      if (url.endsWith("/api/v1/projects/project-2/tasks")) {
+        return Promise.resolve(
+          mockJsonResponse({
+            items: [
+              {
+                id: "task-2",
+                projectId: "project-2",
+                title: "Deploy ops",
+                description: "",
+                status: "assigned",
+                priority: "medium",
+                assigneeId: "member-2",
+                assigneeType: "human",
+                spentUsd: 1.5,
+                createdAt: "2026-03-23T10:00:00.000Z",
+                updatedAt: "2026-03-24T10:00:00.000Z",
+              },
+            ],
+            total: 1,
+            page: 1,
+            limit: 20,
+          }),
+        );
+      }
+
+      if (url.endsWith("/api/v1/projects/project-1/members")) {
+        return Promise.resolve(
+          mockJsonResponse([
+            {
+              id: "member-1",
+              projectId: "project-1",
+              name: "Alice",
+              type: "human",
+              role: "frontend",
+              email: "alice@example.com",
+              avatarUrl: "",
+              skills: ["react"],
+              isActive: true,
+              createdAt: "2026-03-20T10:00:00.000Z",
+            },
+          ]),
+        );
+      }
+
+      if (url.endsWith("/api/v1/projects/project-2/members")) {
+        return Promise.resolve(
+          mockJsonResponse([
+            {
+              id: "member-2",
+              projectId: "project-2",
+              name: "Bob",
+              type: "human",
+              role: "ops",
+              email: "bob@example.com",
+              avatarUrl: "",
+              skills: ["deploy"],
+              isActive: true,
+              createdAt: "2026-03-20T10:00:00.000Z",
+            },
+          ]),
+        );
+      }
+
+      if (url.endsWith("/api/v1/agents")) {
+        return Promise.resolve(
+          mockJsonResponse([
+            {
+              id: "run-1",
+              taskId: "task-1",
+              memberId: "member-1",
+              status: "running",
+              provider: "anthropic",
+              model: "sonnet",
+              inputTokens: 10,
+              outputTokens: 20,
+              cacheReadTokens: 0,
+              costUsd: 5.25,
+              turnCount: 3,
+              errorMessage: "",
+              startedAt: "2026-03-24T09:00:00.000Z",
+              createdAt: "2026-03-24T09:00:00.000Z",
+            },
+          ]),
+        );
+      }
+
+      if (url.endsWith("/api/v1/notifications")) {
+        return Promise.resolve(
+          mockJsonResponse([
+            {
+              id: "notification-1",
+              targetId: "member-1",
+              type: "review_completed",
+              title: "Deep review completed",
+              body: "Task task-1 is waiting for a reviewer.",
+              createdAt: "2026-03-24T10:30:00.000Z",
+            },
+          ]),
+        );
+      }
+
+      throw new Error(`Unexpected fetch: ${url}`);
+    });
+
+    await useDashboardStore.getState().fetchSummary({
+      projectId: null,
+      now: "2026-03-24T12:00:00.000Z",
+    });
+
+    expect(useDashboardStore.getState()).toMatchObject({
+      selectedProjectId: null,
+      tasks: [
+        expect.objectContaining({ id: "task-1" }),
+        expect.objectContaining({ id: "task-2" }),
+      ],
+      members: [
+        expect.objectContaining({ id: "member-1" }),
+        expect.objectContaining({ id: "member-2" }),
+      ],
+      summary: expect.objectContaining({
+        scope: {
+          projectId: null,
+          projectName: "All Projects",
+          projectsCount: 2,
+        },
+      }),
+    });
+  });
+
   it("stores a fatal dashboard summary error when the project list fails", async () => {
     fetchMock.mockRejectedValueOnce(new Error("projects unavailable"));
 

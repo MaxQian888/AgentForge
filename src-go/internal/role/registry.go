@@ -24,7 +24,9 @@ func NewRegistry() *Registry {
 	}
 }
 
-// LoadDir loads all .yaml and .yml files from a directory into the registry.
+// LoadDir loads canonical roles/<id>/role.yaml manifests first, then falls back
+// to legacy flat .yaml/.yml files under the roles root when no canonical
+// manifest exists for the same role identifier.
 func (r *Registry) LoadDir(dir string) error {
 	entries, err := os.ReadDir(dir)
 	if err != nil {

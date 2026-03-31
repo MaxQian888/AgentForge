@@ -17,6 +17,10 @@
         {
           "name": "bridge",
           "sidecar": true
+        },
+        {
+          "name": "im-bridge",
+          "sidecar": true
         }
       ]
     },

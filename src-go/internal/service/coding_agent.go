@@ -1,6 +1,7 @@
 package service
 
 import (
+	_ "embed"
 	"encoding/json"
 	"fmt"
 	"strings"
@@ -14,30 +15,63 @@ type codingAgentRuntimeSpec struct {
 	defaultProvider     string
 	compatibleProviders []string
 	defaultModel        string
+	modelOptions        []string
+	supportedFeatures   []string
+	strictModelOptions  bool
 }
 
-var codingAgentRuntimeSpecs = map[string]codingAgentRuntimeSpec{
-	"claude_code": {
-		runtime:             "claude_code",
-		label:               "Claude Code",
-		defaultProvider:     "anthropic",
-		compatibleProviders: []string{"anthropic"},
-		defaultModel:        "claude-sonnet-4-5",
-	},
-	"codex": {
-		runtime:             "codex",
-		label:               "Codex",
-		defaultProvider:     "openai",
-		compatibleProviders: []string{"openai", "codex"},
-		defaultModel:        "gpt-5-codex",
-	},
-	"opencode": {
-		runtime:             "opencode",
-		label:               "OpenCode",
-		defaultProvider:     "opencode",
-		compatibleProviders: []string{"opencode"},
-		defaultModel:        "opencode-default",
-	},
+type codingAgentRuntimeProfileDocument struct {
+	Key                 string   `json:"key"`
+	Label               string   `json:"label"`
+	DefaultProvider     string   `json:"default_provider"`
+	CompatibleProviders []string `json:"compatible_providers"`
+	DefaultModel        string   `json:"default_model"`
+	ModelOptions        []string `json:"model_options"`
+	StrictModelOptions  bool     `json:"strict_model_options"`
+	SupportedFeatures   []string `json:"supported_features"`
+}
+
+//go:embed coding_agent_backend_profiles.json
+var codingAgentRuntimeProfilesJSON []byte
+
+var (
+	codingAgentRuntimeSpecs  = loadCodingAgentRuntimeSpecs()
+	codingAgentRuntimeOrders = loadCodingAgentRuntimeOrder()
+)
+
+func loadCodingAgentRuntimeDocuments() []codingAgentRuntimeProfileDocument {
+	var docs []codingAgentRuntimeProfileDocument
+	if err := json.Unmarshal(codingAgentRuntimeProfilesJSON, &docs); err != nil {
+		panic(fmt.Sprintf("decode coding agent runtime profiles: %v", err))
+	}
+	return docs
+}
+
+func loadCodingAgentRuntimeSpecs() map[string]codingAgentRuntimeSpec {
+	docs := loadCodingAgentRuntimeDocuments()
+	specs := make(map[string]codingAgentRuntimeSpec, len(docs))
+	for _, doc := range docs {
+		specs[doc.Key] = codingAgentRuntimeSpec{
+			runtime:             doc.Key,
+			label:               doc.Label,
+			defaultProvider:     doc.DefaultProvider,
+			compatibleProviders: append([]string(nil), doc.CompatibleProviders...),
+			defaultModel:        doc.DefaultModel,
+			modelOptions:        append([]string(nil), doc.ModelOptions...),
+			supportedFeatures:   append([]string(nil), doc.SupportedFeatures...),
+			strictModelOptions:  doc.StrictModelOptions,
+		}
+	}
+	return specs
+}
+
+func loadCodingAgentRuntimeOrder() []string {
+	docs := loadCodingAgentRuntimeDocuments()
+	order := make([]string, 0, len(docs))
+	for _, doc := range docs {
+		order = append(order, doc.Key)
+	}
+	return order
 }
 
 func ResolveProjectCodingAgentSelection(
@@ -85,6 +119,9 @@ func ResolveProjectCodingAgentSelection(
 	if resolvedModel == "" {
 		return model.CodingAgentSelection{}, fmt.Errorf("runtime %s does not have a default model", spec.runtime)
 	}
+	if spec.strictModelOptions && len(spec.modelOptions) > 0 && !modelCompatible(spec, resolvedModel) {
+		return model.CodingAgentSelection{}, fmt.Errorf("runtime %s does not support model %s", spec.runtime, resolvedModel)
+	}
 
 	return model.CodingAgentSelection{
 		Runtime:  spec.runtime,
@@ -103,8 +140,7 @@ func MarshalCodingAgentSelection(selection model.CodingAgentSelection) string {
 
 func DefaultCodingAgentCatalog(selection model.CodingAgentSelection) *model.CodingAgentCatalogDTO {
 	runtimes := make([]model.CodingAgentRuntimeOptionDTO, 0, len(codingAgentRuntimeSpecs))
-	order := []string{"claude_code", "codex", "opencode"}
-	for _, key := range order {
+	for _, key := range codingAgentRuntimeOrders {
 		spec := codingAgentRuntimeSpecs[key]
 		runtimes = append(runtimes, model.CodingAgentRuntimeOptionDTO{
 			Runtime:             spec.runtime,
@@ -112,8 +148,10 @@ func DefaultCodingAgentCatalog(selection model.CodingAgentSelection) *model.Codi
 			DefaultProvider:     spec.defaultProvider,
 			CompatibleProviders: append([]string(nil), spec.compatibleProviders...),
 			DefaultModel:        spec.defaultModel,
+			ModelOptions:        append([]string(nil), spec.modelOptions...),
 			Available:           true,
 			Diagnostics:         []model.CodingAgentDiagnosticDTO{},
+			SupportedFeatures:   append([]string(nil), spec.supportedFeatures...),
 		})
 	}
 	return &model.CodingAgentCatalogDTO{
@@ -134,6 +172,15 @@ func normalizeProvider(provider string) string {
 func providerCompatible(spec codingAgentRuntimeSpec, provider string) bool {
 	for _, candidate := range spec.compatibleProviders {
 		if candidate == provider {
+			return true
+		}
+	}
+	return false
+}
+
+func modelCompatible(spec codingAgentRuntimeSpec, modelName string) bool {
+	for _, candidate := range spec.modelOptions {
+		if candidate == modelName {
 			return true
 		}
 	}

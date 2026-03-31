@@ -57,7 +57,7 @@
         ]
       },
       // task for the `beforeDevCommand` if used, must be configured in `.vscode/tasks.json`
-      "preLaunchTask": "ui:dev-if-needed",
+      "preLaunchTask": "desktop:debug:prepare",
       "postDebugTask": "ui:stop"
     },
     {
@@ -68,7 +68,7 @@
         "args": ["build", "--release", "--manifest-path=./src-tauri/Cargo.toml"]
       },
       // task for the `beforeBuildCommand` if used, must be configured in `.vscode/tasks.json`
-      "preLaunchTask": "ui:build"
+      "preLaunchTask": "desktop:build:prepare"
     }
   ]
 }

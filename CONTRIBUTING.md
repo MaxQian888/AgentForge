@@ -5,6 +5,40 @@ starter template; it is a multi-surface workspace with a Next.js dashboard, Go
 orchestrator, Bun bridge, IM bridge workspace, and Tauri desktop shell. Keep
 changes scoped, repo-truthful, and verified against the surface you touched.
 
+## Quick Start In 5 Minutes
+
+If you want the fastest repo-truthful local path:
+
+1. Install the required toolchains:
+   - Node.js 20+
+   - pnpm 10 recommended
+   - Go 1.25+
+   - Bun
+   - Rust 1.77.2+
+   - Docker Desktop or another Docker environment
+2. Install dependencies from the repo root:
+
+```bash
+pnpm install
+```
+
+3. Start the local web stack:
+
+```bash
+pnpm dev:all
+```
+
+4. Confirm the stack is healthy:
+
+```bash
+pnpm dev:all:status
+```
+
+5. Open the app:
+   - frontend: `http://localhost:3000`
+   - Go health: `http://localhost:7777/health`
+   - bridge health: `http://localhost:7778/bridge/health`
+
 ## Getting Started
 
 1. Fork the repository on GitHub.
@@ -58,6 +92,29 @@ pnpm dev:all:status
 pnpm dev:all:logs
 pnpm dev:all:stop
 ```
+
+## Environment Variable Cheat Sheet
+
+The full reference lives in
+[`docs/deployment/environment-variables.md`](./docs/deployment/environment-variables.md).
+The most important local values are:
+
+| Variable | Surface | Typical local value |
+| --- | --- | --- |
+| `NEXT_PUBLIC_API_URL` | frontend | `http://localhost:7777` |
+| `POSTGRES_URL` | Go backend | `postgres://dev:dev@localhost:5432/appdb?sslmode=disable` |
+| `REDIS_URL` | Go backend | `redis://localhost:6379` |
+| `JWT_SECRET` | Go backend | `change-me-in-production-at-least-32-chars` |
+| `BRIDGE_URL` | Go backend | `http://localhost:7778` |
+| `GO_WS_URL` | TS bridge | `ws://localhost:7777/ws/bridge` |
+| `AGENTFORGE_API_BASE` | IM bridge | `http://localhost:7777` |
+| `IM_PLATFORM` | IM bridge | `feishu` or the platform you are testing |
+
+Notes:
+
+- the current checkout does not require `.env.local.example` or `src-go/.env.example` to exist
+- prefer local env files over hard-coding values into scripts
+- never expose secrets through `NEXT_PUBLIC_*`
 
 ## Verify Your Setup
 
@@ -197,6 +254,34 @@ High-signal repository docs include:
 - [`TESTING.md`](./TESTING.md)
 - [`CI_CD.md`](./CI_CD.md)
 - [`docs/PRD.md`](./docs/PRD.md)
+
+## FAQ / Troubleshooting
+
+### Port already in use (`EADDRINUSE`)
+
+- run `pnpm dev:all:status` to see which managed services are already running
+- stop the managed stack with `pnpm dev:all:stop`
+- if the port is occupied by a non-AgentForge process, free that process or change your local override
+
+### Node / pnpm / Bun / Go version mismatch
+
+- confirm Node.js 20+ and pnpm 10+
+- use Bun for `src-bridge/`
+- use Go 1.25+ for `src-go/` and `src-im-bridge/`
+- keep Rust installed for Tauri work even if you are mostly editing the web UI
+
+### Tauri build or dev mode fails
+
+- verify `pnpm desktop:dev:prepare` or `pnpm desktop:build:prepare` completes
+- confirm `src-tauri/binaries/` contains the expected sidecars
+- review [`docs/deployment/desktop-build.md`](./docs/deployment/desktop-build.md)
+
+### Database or Redis connection failures
+
+- start infra with `docker compose up -d`
+- confirm Postgres on `5432` and Redis on `6379`
+- verify `POSTGRES_URL` and `REDIS_URL`
+- remember that auth refresh/revocation paths fail closed when Redis is unavailable
 
 ## Questions
 

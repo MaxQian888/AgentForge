@@ -120,6 +120,8 @@ const skillCatalog: RoleSkillCatalogEntry[] = [
     path: "skills/react",
     label: "React",
     description: "Build React interfaces.",
+    shortDescription: "Guide React work in the current repo.",
+    availableParts: ["agents", "references"],
     source: "repo-local",
     sourceRoot: "skills",
   },
@@ -127,6 +129,7 @@ const skillCatalog: RoleSkillCatalogEntry[] = [
     path: "skills/testing",
     label: "Testing",
     description: "Verify product behavior.",
+    availableParts: ["agents"],
     source: "repo-local",
     sourceRoot: "skills",
   },
@@ -156,6 +159,8 @@ const draftSkillResolution: RoleSkillResolution[] = [
     autoLoad: true,
     label: "React",
     description: "Build React interfaces.",
+    shortDescription: "Guide React work in the current repo.",
+    availableParts: ["agents", "references"],
     source: "repo-local",
     sourceRoot: "skills",
     status: "resolved",
@@ -266,10 +271,15 @@ describe("RoleWorkspaceEditor", () => {
 
     expect(screen.getByText("Advanced Capability Settings")).toBeInTheDocument();
     expect(screen.getByText("Available repo-local skills")).toBeInTheDocument();
-    expect(screen.getByText("React, Testing")).toBeInTheDocument();
+    expect(screen.getAllByText("React").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("Testing").length).toBeGreaterThan(0);
+    expect(screen.getByText("Guide React work in the current repo.")).toBeInTheDocument();
+    expect(screen.getAllByText("Agents").length).toBeGreaterThan(0);
+    expect(screen.getAllByText("References").length).toBeGreaterThan(0);
     expect(screen.getByText("template")).toBeInTheDocument();
     expect(screen.getByText("inherited")).toBeInTheDocument();
     expect(screen.getByText(/React from skills/)).toBeInTheDocument();
+    expect(screen.getByText("Parts:")).toBeInTheDocument();
     expect(screen.getByText(/Unresolved manual reference/)).toBeInTheDocument();
     expect(screen.getByText(/Explicit/)).toBeInTheDocument();
     expect(screen.getByText(/Template-derived/)).toBeInTheDocument();

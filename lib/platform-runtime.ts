@@ -19,6 +19,7 @@ export interface DesktopRuntimeStatus {
   overall: "degraded" | "ready" | "starting" | "stopped";
   backend: DesktopRuntimeUnit;
   bridge: DesktopRuntimeUnit;
+  imBridge: DesktopRuntimeUnit;
 }
 
 export interface DesktopRuntimeEvent {
@@ -242,6 +243,15 @@ function defaultDesktopRuntimeStatus(): DesktopRuntimeStatus {
     },
     bridge: {
       label: "bridge",
+      status: "stopped",
+      url: null,
+      pid: null,
+      restartCount: 0,
+      lastError: null,
+      lastStartedAt: null,
+    },
+    imBridge: {
+      label: "im-bridge",
       status: "stopped",
       url: null,
       pid: null,

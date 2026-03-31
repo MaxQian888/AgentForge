@@ -76,6 +76,15 @@ const EMPTY_RUNTIME_STATUS: DesktopRuntimeStatus = {
     lastError: null,
     lastStartedAt: null,
   },
+  imBridge: {
+    label: "im-bridge",
+    status: "stopped",
+    url: null,
+    pid: null,
+    restartCount: 0,
+    lastError: null,
+    lastStartedAt: null,
+  },
 };
 
 const EMPTY_PLUGIN_RUNTIME_SUMMARY: PluginRuntimeSummary = {
@@ -230,11 +239,17 @@ export default function PluginsPage() {
   const handleTraySync = useCallback(async () => {
     const result = await updateTray({
       title: `AgentForge · ${desktopRuntime.overall}`,
-      tooltip: `Backend ${desktopRuntime.backend.status} / Bridge ${desktopRuntime.bridge.status}`,
+      tooltip: `Backend ${desktopRuntime.backend.status} / Bridge ${desktopRuntime.bridge.status} / IM Bridge ${desktopRuntime.imBridge.status}`,
       visible: true,
     });
     setDesktopMessage(result.ok ? `Tray state synced through ${result.mode} mode.` : result.error);
-  }, [desktopRuntime.backend.status, desktopRuntime.bridge.status, desktopRuntime.overall, updateTray]);
+  }, [
+    desktopRuntime.backend.status,
+    desktopRuntime.bridge.status,
+    desktopRuntime.imBridge.status,
+    desktopRuntime.overall,
+    updateTray,
+  ]);
 
   const handleUpdateCheck = useCallback(async () => {
     const result = await checkForUpdate();
@@ -373,8 +388,8 @@ export default function PluginsPage() {
           <div className="border-t px-4 pb-4 pt-3">
             <p className="mb-3 text-xs text-muted-foreground">{t("desktopRuntimeDesc")}</p>
             <div className="grid gap-3 lg:grid-cols-[minmax(0,2fr)_minmax(280px,1fr)]">
-              <div className="grid gap-3 md:grid-cols-2">
-                {[desktopRuntime.backend, desktopRuntime.bridge].map((unit) => (
+              <div className="grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+                {[desktopRuntime.backend, desktopRuntime.bridge, desktopRuntime.imBridge].map((unit) => (
                   <div key={unit.label} className="rounded-lg border border-border/60 p-3 text-sm">
                     <div className="flex items-center justify-between gap-2">
                       <p className="font-medium capitalize">{unit.label}</p>

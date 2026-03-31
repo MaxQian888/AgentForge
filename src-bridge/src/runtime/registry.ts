@@ -6,6 +6,7 @@ import {
   type ClaudeRuntimeDeps,
 } from "../handlers/claude-runtime.js";
 import {
+  streamCommandRuntime,
   type CommandRuntimeRunner,
 } from "../handlers/command-runtime.js";
 import {
@@ -22,6 +23,11 @@ import {
   createOpenCodeTransport,
   type OpenCodeTransport,
 } from "../opencode/transport.js";
+import {
+  getRuntimeProfile,
+  getRuntimeProfiles,
+  type RuntimeProfile,
+} from "./backend-profiles.js";
 import type { AgentRuntime } from "./agent-runtime.js";
 import type {
   ExecuteRequest,
@@ -118,6 +124,9 @@ interface RuntimeAdapter {
   defaultProvider: string;
   compatibleProviders: string[];
   defaultModel?: string;
+  modelOptions?: string[];
+  strictModelOptions: boolean;
+  supportedFeatures: string[];
   getDiagnostics(): Promise<RuntimeDiagnostic[]>;
   getCatalogDetails?(): Promise<Partial<RuntimeCatalogEntry>>;
   ensureAvailable(): Promise<void>;
@@ -180,6 +189,7 @@ export class AgentRuntimeRegistry {
 
     const provider = normalizeProvider(req.provider) || adapter.defaultProvider;
     validateRuntimeProvider(runtimeKey, provider, adapter.compatibleProviders);
+    validateRuntimeModel(runtimeKey, req.model, adapter.modelOptions, adapter.strictModelOptions);
     await adapter.ensureAvailable();
 
     return {
@@ -203,9 +213,10 @@ export class AgentRuntimeRegistry {
           defaultProvider: adapter.defaultProvider,
           compatibleProviders: [...adapter.compatibleProviders],
           defaultModel: adapter.defaultModel,
+          modelOptions: adapter.modelOptions,
           available: !diagnostics.some((diagnostic) => diagnostic.blocking),
           diagnostics,
-          supportedFeatures: getSupportedFeatures(adapter.key),
+          supportedFeatures: [...adapter.supportedFeatures],
           ...(adapter.getCatalogDetails ? await adapter.getCatalogDetails() : {}),
         } satisfies RuntimeCatalogEntry;
       }),
@@ -271,7 +282,11 @@ export function createRuntimeRegistry(
 ): AgentRuntimeRegistry {
   const executableLookup = options.executableLookup ?? defaultExecutableLookup;
   const envLookup = options.envLookup ?? ((name: string) => process.env[name]);
-  const codexCommand = readEnvConfig(envLookup, "CODEX_RUNTIME_COMMAND") || "codex";
+  const codexProfile = getRuntimeProfile("codex");
+  const codexCommand =
+    readProfileCommand(envLookup, codexProfile.command) ??
+    codexProfile.command?.default_command ??
+    "codex";
   const opencodeTransport =
     options.opencodeTransport ??
     createOpenCodeTransport({
@@ -280,13 +295,20 @@ export function createRuntimeRegistry(
   const codexAuthStatusProvider =
     options.codexAuthStatusProvider ?? (() => getDefaultCodexAuthStatus(codexCommand));
 
+  const claudeProfile = getRuntimeProfile("claude_code");
+  const opencodeProfile = getRuntimeProfile("opencode");
+
   const adapters: Record<AgentRuntimeKey, RuntimeAdapter> = {
     claude_code: {
-      key: "claude_code",
-      label: "Claude Code",
-      defaultProvider: "anthropic",
-      compatibleProviders: ["anthropic"],
-      defaultModel: readEnvConfig(envLookup, "CLAUDE_CODE_RUNTIME_MODEL"),
+      key: claudeProfile.key,
+      label: claudeProfile.label,
+      defaultProvider: claudeProfile.default_provider,
+      compatibleProviders: [...claudeProfile.compatible_providers],
+      defaultModel:
+        readEnvConfig(envLookup, "CLAUDE_CODE_RUNTIME_MODEL") ?? claudeProfile.default_model,
+      modelOptions: claudeProfile.model_options,
+      strictModelOptions: Boolean(claudeProfile.strict_model_options),
+      supportedFeatures: [...claudeProfile.supported_features],
       async getDiagnostics() {
         if (options.queryRunner) {
           return [];
@@ -317,30 +339,55 @@ export function createRuntimeRegistry(
       },
       ...createClaudeAdvancedOperations(options),
     },
-    codex: createCodexAdapter({
+    codex: createCodexAdapter(codexProfile, {
       executableLookup,
       authStatusProvider: codexAuthStatusProvider,
       codexRuntimeRunner: options.codexRuntimeRunner,
       defaultCommand: codexCommand,
-      defaultModel: readEnvConfig(envLookup, "CODEX_RUNTIME_MODEL"),
+      defaultModel: readEnvConfig(envLookup, "CODEX_RUNTIME_MODEL") ?? codexProfile.default_model,
       now: options.now,
       activePlugins: options.activePlugins,
       advancedOperations: options.advancedOperations?.codex,
       codexForkRunner: options.codexForkRunner,
     }),
-    opencode: createOpenCodeReadinessAdapter({
+    opencode: createOpenCodeReadinessAdapter(opencodeProfile, {
       transport: opencodeTransport,
       eventRunner: options.opencodeEventRunner,
-      defaultModel: readEnvConfig(envLookup, "OPENCODE_RUNTIME_MODEL"),
+      defaultModel:
+        readEnvConfig(envLookup, "OPENCODE_RUNTIME_MODEL") ?? opencodeProfile.default_model,
       now: options.now,
       advancedOperations: options.advancedOperations?.opencode,
+    }),
+    cursor: createCliRuntimeAdapter(getRuntimeProfile("cursor"), {
+      executableLookup,
+      envLookup,
+      commandRuntimeRunner: options.commandRuntimeRunner,
+      now: options.now,
+    }),
+    gemini: createCliRuntimeAdapter(getRuntimeProfile("gemini"), {
+      executableLookup,
+      envLookup,
+      commandRuntimeRunner: options.commandRuntimeRunner,
+      now: options.now,
+    }),
+    qoder: createCliRuntimeAdapter(getRuntimeProfile("qoder"), {
+      executableLookup,
+      envLookup,
+      commandRuntimeRunner: options.commandRuntimeRunner,
+      now: options.now,
+    }),
+    iflow: createCliRuntimeAdapter(getRuntimeProfile("iflow"), {
+      executableLookup,
+      envLookup,
+      commandRuntimeRunner: options.commandRuntimeRunner,
+      now: options.now,
     }),
   };
 
   return new AgentRuntimeRegistry(adapters, options.defaultRuntime ?? "claude_code");
 }
 
-function createCodexAdapter(options: {
+function createCodexAdapter(profile: RuntimeProfile, options: {
   executableLookup: (command: string) => string | null;
   authStatusProvider: CodexAuthStatusProvider;
   codexRuntimeRunner?: CodexRuntimeRunner;
@@ -352,11 +399,14 @@ function createCodexAdapter(options: {
   codexForkRunner?: AgentRuntimeRegistryOptions["codexForkRunner"];
 }): RuntimeAdapter {
   return {
-    key: "codex",
-    label: "Codex",
-    defaultProvider: "openai",
-    compatibleProviders: ["openai", "codex"],
+    key: profile.key,
+    label: profile.label,
+    defaultProvider: profile.default_provider,
+    compatibleProviders: [...profile.compatible_providers],
     defaultModel: options.defaultModel,
+    modelOptions: profile.model_options,
+    strictModelOptions: Boolean(profile.strict_model_options),
+    supportedFeatures: [...profile.supported_features],
     async getDiagnostics() {
       const diagnostics: RuntimeDiagnostic[] = [];
       const resolved = options.executableLookup(options.defaultCommand);
@@ -395,7 +445,7 @@ function createCodexAdapter(options: {
   };
 }
 
-function createOpenCodeReadinessAdapter(options: {
+function createOpenCodeReadinessAdapter(profile: RuntimeProfile, options: {
   transport: OpenCodeTransport;
   eventRunner?: OpenCodeEventRunner;
   defaultModel?: string;
@@ -403,14 +453,17 @@ function createOpenCodeReadinessAdapter(options: {
   advancedOperations?: RuntimeAdvancedOperations;
 }): RuntimeAdapter {
   return {
-    key: "opencode",
-    label: "OpenCode",
-    defaultProvider: "opencode",
-    compatibleProviders: ["opencode"],
+    key: profile.key,
+    label: profile.label,
+    defaultProvider: profile.default_provider,
+    compatibleProviders: [...profile.compatible_providers],
     defaultModel: options.defaultModel,
+    modelOptions: profile.model_options,
+    strictModelOptions: Boolean(profile.strict_model_options),
+    supportedFeatures: [...profile.supported_features],
     async getDiagnostics() {
       const readiness = await options.transport.checkReadiness({
-        provider: "opencode",
+        provider: profile.default_provider,
         model: options.defaultModel,
       });
       return readiness.diagnostics;
@@ -436,6 +489,87 @@ function createOpenCodeReadinessAdapter(options: {
       });
     },
     ...createOpenCodeAdvancedOperations(options),
+  };
+}
+
+function createCliRuntimeAdapter(
+  profile: RuntimeProfile,
+  options: {
+    executableLookup: (command: string) => string | null;
+    envLookup: (name: string) => string | undefined;
+    commandRuntimeRunner?: CommandRuntimeRunner;
+    now?: () => number;
+  },
+): RuntimeAdapter {
+  const command =
+    readProfileCommand(options.envLookup, profile.command) ??
+    profile.command?.default_command ??
+    profile.key;
+
+  return {
+    key: profile.key,
+    label: profile.label,
+    defaultProvider: profile.default_provider,
+    compatibleProviders: [...profile.compatible_providers],
+    defaultModel: profile.default_model,
+    modelOptions: profile.model_options,
+    strictModelOptions: Boolean(profile.strict_model_options),
+    supportedFeatures: [...profile.supported_features],
+    async getDiagnostics() {
+      const diagnostics: RuntimeDiagnostic[] = [];
+      const resolved = options.executableLookup(command);
+      if (!resolved) {
+        diagnostics.push({
+          code: "missing_executable",
+          message:
+            profile.command?.install_hint && profile.command.install_hint.length > 0
+              ? profile.command.install_hint
+              : `Executable not found for runtime ${profile.key}`,
+          blocking: true,
+        });
+        return diagnostics;
+      }
+
+      if (profile.auth?.mode === "env_any" && !hasAnyEnvValue(options.envLookup, profile.auth.env_vars)) {
+        diagnostics.push({
+          code: "missing_credentials",
+          message:
+            profile.auth.message && profile.auth.message.length > 0
+              ? profile.auth.message
+              : `Authentication is unavailable for runtime ${profile.key}`,
+          blocking: true,
+        });
+      }
+
+      return diagnostics;
+    },
+    async ensureAvailable() {
+      assertDiagnosticsAvailable(profile.key, await this.getDiagnostics());
+    },
+    async execute(runtime, streamer, req, systemPrompt) {
+      const launch = buildCliRuntimeLaunch(
+        profile.key as Extract<AgentRuntimeKey, "cursor" | "gemini" | "qoder" | "iflow">,
+        command,
+        req,
+        systemPrompt,
+      );
+      await streamCommandRuntime(runtime, streamer, req, systemPrompt, {
+        command,
+        commandArgs: launch.commandArgs,
+        commandEnv: launch.commandEnv,
+        stdinPayload: launch.stdinPayload,
+        commandRuntimeRunner: options.commandRuntimeRunner,
+        now: options.now,
+      });
+    },
+    fork: unsupportedOperation(profile.key, "fork"),
+    rollback: unsupportedOperation(profile.key, "rollback"),
+    revert: unsupportedOperation(profile.key, "revert"),
+    getMessages: unsupportedOperation(profile.key, "getMessages"),
+    getDiff: unsupportedOperation(profile.key, "getDiff"),
+    executeCommand: unsupportedOperation(profile.key, "executeCommand"),
+    interrupt: unsupportedOperation(profile.key, "interrupt"),
+    setModel: unsupportedOperation(profile.key, "setModel"),
   };
 }
 
@@ -672,73 +806,6 @@ function unsupportedOperation(
   };
 }
 
-function getSupportedFeatures(runtime: AgentRuntimeKey): string[] {
-  switch (runtime) {
-    case "claude_code":
-      return [
-        "structured_output",
-        "agents",
-        "hooks",
-        "thinking",
-        "file_checkpointing",
-        "elicitation",
-        "tool_permission_callback",
-        "partial_messages",
-        "disallowed_tools",
-        "fallback_model",
-        "additional_directories",
-        "env",
-        "rate_limit",
-        "progress",
-        "interrupt",
-        "set_model",
-        "fork",
-        "rollback",
-      ];
-    case "codex":
-      return [
-        "turn_started",
-        "turn_failed",
-        "progress",
-        "reasoning",
-        "file_change",
-        "mcp_tool_call",
-        "web_search",
-        "todo_update",
-        "output_schema",
-        "image_attachments",
-        "additional_directories",
-        "env",
-        "mcp_config",
-        "fork",
-      ];
-    case "opencode":
-      return [
-        "fork",
-        "revert",
-        "diff",
-        "todo_update",
-        "messages",
-        "command",
-        "permission_response",
-        "agents",
-        "skills",
-        "session_status",
-        "message_updated",
-        "command_executed",
-        "vcs_branch_updated",
-        "reasoning",
-        "file_change",
-        "agent_part",
-        "compaction",
-        "subtask",
-        "set_model",
-      ];
-    default:
-      return [];
-  }
-}
-
 function resolveRuntimeKey(
   req: ExecuteRequest,
   defaultRuntime: AgentRuntimeKey,
@@ -759,6 +826,15 @@ function resolveRuntimeKey(
       return "codex";
     case "opencode":
       return "opencode";
+    case "cursor":
+      return "cursor";
+    case "google":
+    case "vertex":
+      return "gemini";
+    case "qoder":
+      return "qoder";
+    case "iflow":
+      return "iflow";
     default:
       throw new UnsupportedRuntimeProviderError(
         `Provider ${req.provider} does not support agent_execution`,
@@ -776,6 +852,25 @@ function validateRuntimeProvider(
   }
   throw new UnsupportedRuntimeProviderError(
     `Runtime ${runtime} is incompatible with provider ${provider}`,
+  );
+}
+
+function validateRuntimeModel(
+  runtime: AgentRuntimeKey,
+  model: string | undefined,
+  modelOptions: string[] | undefined,
+  strictModelOptions: boolean,
+): void {
+  if (!strictModelOptions || !model || !modelOptions || modelOptions.length === 0) {
+    return;
+  }
+
+  if (modelOptions.includes(model)) {
+    return;
+  }
+
+  throw new RuntimeConfigurationError(
+    `Runtime ${runtime} does not support model ${model}`,
   );
 }
 
@@ -798,8 +893,135 @@ function normalizeProvider(provider: string | undefined): string {
 }
 
 function validateRuntimeKey(runtime: string): asserts runtime is AgentRuntimeKey {
-  if (runtime !== "claude_code" && runtime !== "codex" && runtime !== "opencode") {
+  if (!getRuntimeProfiles().some((profile) => profile.key === runtime)) {
     throw new UnknownRuntimeError(`Unknown runtime: ${runtime}`);
+  }
+}
+
+function readProfileCommand(
+  envLookup: (name: string) => string | undefined,
+  command: RuntimeProfile["command"],
+): string | undefined {
+  if (!command?.env_var) {
+    return undefined;
+  }
+  return readEnvConfig(envLookup, command.env_var);
+}
+
+function hasAnyEnvValue(
+  envLookup: (name: string) => string | undefined,
+  envVars: string[] | undefined,
+): boolean {
+  return (envVars ?? []).some((name) => Boolean(readEnvConfig(envLookup, name)));
+}
+
+function composeCliPrompt(systemPrompt: string, prompt: string): string {
+  const trimmedSystemPrompt = systemPrompt.trim();
+  if (!trimmedSystemPrompt) {
+    return prompt;
+  }
+  return `${trimmedSystemPrompt}\n\n${prompt}`;
+}
+
+function buildCliRuntimeLaunch(
+  runtime: Extract<AgentRuntimeKey, "cursor" | "gemini" | "qoder" | "iflow">,
+  command: string,
+  req: ExecuteRequest,
+  systemPrompt: string,
+): {
+  commandArgs: string[];
+  commandEnv?: Record<string, string>;
+  stdinPayload?: string;
+} {
+  const prompt = composeCliPrompt(systemPrompt, req.prompt);
+
+  switch (runtime) {
+    case "cursor": {
+      const commandArgs = ["--print", "--output-format", "stream-json"];
+      switch (req.permission_mode) {
+        case "plan":
+          commandArgs.unshift("--mode", "plan");
+          commandArgs.unshift("--trust");
+          break;
+        case "ask":
+          commandArgs.unshift("--mode", "ask");
+          commandArgs.unshift("--trust");
+          break;
+        case "yolo":
+        case "auto":
+        case "bypassPermissions":
+          commandArgs.unshift("--force");
+          commandArgs.unshift("--trust");
+          break;
+        default:
+          commandArgs.unshift("--trust");
+          break;
+      }
+      if (req.model) {
+        commandArgs.push("--model", req.model);
+      }
+      return {
+        commandArgs,
+        stdinPayload: prompt,
+      };
+    }
+    case "gemini": {
+      const commandArgs = ["-p", prompt, "--output-format", "stream-json"];
+      switch (req.permission_mode) {
+        case "plan":
+          commandArgs.push("--approval-mode", "plan");
+          break;
+        case "auto_edit":
+        case "acceptEdits":
+          commandArgs.push("--approval-mode", "auto_edit");
+          break;
+        case "yolo":
+        case "auto":
+        case "bypassPermissions":
+          commandArgs.push("-y");
+          break;
+      }
+      if (req.model) {
+        commandArgs.push("--model", req.model);
+      }
+      return { commandArgs };
+    }
+    case "qoder": {
+      const commandArgs = ["-p", prompt, "-f", "stream-json"];
+      if (req.permission_mode === "yolo" || req.permission_mode === "bypassPermissions") {
+        commandArgs.push("--dangerously-skip-permissions");
+      }
+      if (req.model) {
+        commandArgs.push("-m", req.model);
+      }
+      return { commandArgs };
+    }
+    case "iflow": {
+      const commandArgs = ["-i", prompt, "-o"];
+      switch (req.permission_mode) {
+        case "plan":
+          commandArgs.push("--plan");
+          break;
+        case "auto_edit":
+        case "acceptEdits":
+          commandArgs.push("--autoEdit");
+          break;
+        case "yolo":
+        case "auto":
+        case "bypassPermissions":
+          commandArgs.push("--yolo");
+          break;
+        default:
+          commandArgs.push("--default");
+          break;
+      }
+      if (req.model) {
+        commandArgs.push("--model", req.model);
+      }
+      return { commandArgs };
+    }
+    default:
+      return { commandArgs: [command] };
   }
 }
 

@@ -1,0 +1,4 @@
+interface:
+  display_name: "AgentForge React"
+  short_description: "Build AgentForge React and App Router surfaces safely"
+  default_prompt: "Use $react to implement or repair the current AgentForge React and Next.js App Router surface while preserving existing store, layout, and static-export constraints."

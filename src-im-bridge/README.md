@@ -94,8 +94,13 @@ Stub adapters expose local test endpoints on `TEST_PORT`:
 
 All supported platforms reuse the same command engine:
 
-- `/task`
-- `/agent`
+- `/task` (`create`, `list`, `status`, `assign`, `decompose`, `move`; 兼容 `transition`)
+- `/agent` (`status`, `spawn`, `run`, `logs`, `pause`, `resume`, `kill`; 兼容 `list`)
+- `/queue`
+- `/team`
+- `/memory`
+- `/review`
+- `/sprint`
 - `/cost`
 - `/help`
 - `@AgentForge ...` fallback

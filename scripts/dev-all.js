@@ -33,6 +33,7 @@ function getDevAllPaths({ repoRoot = getRepoRoot() } = {}) {
 }
 
 function createDevAllServiceDefinitions({ repoRoot = getRepoRoot() } = {}) {
+  const workflowPaths = getDevAllPaths({ repoRoot });
   return [
     {
       name: "postgres",
@@ -89,6 +90,27 @@ function createDevAllServiceDefinitions({ repoRoot = getRepoRoot() } = {}) {
           PORT: "7778",
           GO_API_URL: "http://127.0.0.1:7777",
           GO_WS_URL: "ws://127.0.0.1:7777/ws/bridge",
+        },
+      },
+    },
+    {
+      name: "im-bridge",
+      kind: "application",
+      cwd: path.join(repoRoot, "src-im-bridge"),
+      port: 7779,
+      healthUrl: "http://127.0.0.1:7779/im/health",
+      start: {
+        source: "spawn",
+        command: "go",
+        args: ["run", "./cmd/bridge"],
+        env: {
+          AGENTFORGE_API_BASE: "http://127.0.0.1:7777",
+          AGENTFORGE_PROJECT_ID: process.env.AGENTFORGE_PROJECT_ID ?? "",
+          IM_BRIDGE_ID_FILE: path.join(workflowPaths.codexDir, "im-bridge-id"),
+          IM_PLATFORM: "feishu",
+          IM_TRANSPORT_MODE: "stub",
+          NOTIFY_PORT: "7779",
+          TEST_PORT: "7780",
         },
       },
     },

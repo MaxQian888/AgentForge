@@ -30,6 +30,7 @@ pub(crate) struct DesktopRuntimeSnapshot {
     pub(crate) overall: RuntimeStatus,
     pub(crate) backend: DesktopRuntimeUnit,
     pub(crate) bridge: DesktopRuntimeUnit,
+    pub(crate) im_bridge: DesktopRuntimeUnit,
 }
 
 #[derive(Clone, Debug, PartialEq, Serialize)]
@@ -116,14 +117,24 @@ pub(crate) struct TerminationOutcome {
 pub(crate) fn compute_overall_status(
     backend_status: RuntimeStatus,
     bridge_status: RuntimeStatus,
+    im_bridge_status: RuntimeStatus,
 ) -> RuntimeStatus {
-    match (backend_status, bridge_status) {
-        (RuntimeStatus::Ready, RuntimeStatus::Ready) => RuntimeStatus::Ready,
-        (RuntimeStatus::Stopped, RuntimeStatus::Stopped) => RuntimeStatus::Stopped,
-        (RuntimeStatus::Degraded, _)
-        | (_, RuntimeStatus::Degraded)
-        | (RuntimeStatus::Ready, RuntimeStatus::Stopped)
-        | (RuntimeStatus::Stopped, RuntimeStatus::Ready) => RuntimeStatus::Degraded,
+    match (backend_status, bridge_status, im_bridge_status) {
+        (RuntimeStatus::Ready, RuntimeStatus::Ready, RuntimeStatus::Ready) => RuntimeStatus::Ready,
+        (RuntimeStatus::Stopped, RuntimeStatus::Stopped, RuntimeStatus::Stopped) => {
+            RuntimeStatus::Stopped
+        }
+        (RuntimeStatus::Degraded, _, _)
+        | (_, RuntimeStatus::Degraded, _)
+        | (_, _, RuntimeStatus::Degraded)
+        | (RuntimeStatus::Ready, RuntimeStatus::Ready, RuntimeStatus::Stopped)
+        | (RuntimeStatus::Ready, RuntimeStatus::Stopped, RuntimeStatus::Ready)
+        | (RuntimeStatus::Stopped, RuntimeStatus::Ready, RuntimeStatus::Ready)
+        | (RuntimeStatus::Stopped, RuntimeStatus::Stopped, RuntimeStatus::Ready)
+        | (RuntimeStatus::Stopped, RuntimeStatus::Ready, RuntimeStatus::Stopped)
+        | (RuntimeStatus::Ready, RuntimeStatus::Stopped, RuntimeStatus::Stopped) => {
+            RuntimeStatus::Degraded
+        }
         _ => RuntimeStatus::Starting,
     }
 }
@@ -222,10 +233,7 @@ pub(crate) fn build_shell_action_event(
         runtime: None,
         shortcut: None,
         payload: Some(shell_action_event_payload(
-            &action_id,
-            href,
-            payload,
-            &status,
+            &action_id, href, payload, &status,
         )),
         timestamp,
     }
@@ -384,19 +392,35 @@ mod tests {
     #[test]
     fn compute_overall_status_covers_ready_degraded_and_starting_states() {
         assert_eq!(
-            compute_overall_status(RuntimeStatus::Ready, RuntimeStatus::Ready),
+            compute_overall_status(
+                RuntimeStatus::Ready,
+                RuntimeStatus::Ready,
+                RuntimeStatus::Ready
+            ),
             RuntimeStatus::Ready
         );
         assert_eq!(
-            compute_overall_status(RuntimeStatus::Stopped, RuntimeStatus::Stopped),
+            compute_overall_status(
+                RuntimeStatus::Stopped,
+                RuntimeStatus::Stopped,
+                RuntimeStatus::Stopped
+            ),
             RuntimeStatus::Stopped
         );
         assert_eq!(
-            compute_overall_status(RuntimeStatus::Ready, RuntimeStatus::Stopped),
+            compute_overall_status(
+                RuntimeStatus::Ready,
+                RuntimeStatus::Stopped,
+                RuntimeStatus::Ready
+            ),
             RuntimeStatus::Degraded
         );
         assert_eq!(
-            compute_overall_status(RuntimeStatus::Starting, RuntimeStatus::Ready),
+            compute_overall_status(
+                RuntimeStatus::Starting,
+                RuntimeStatus::Ready,
+                RuntimeStatus::Ready
+            ),
             RuntimeStatus::Starting
         );
     }
@@ -562,6 +586,15 @@ mod tests {
                 restart_count: 1,
                 last_error: Some("warming".to_string()),
                 last_started_at: Some("2".to_string()),
+            },
+            im_bridge: DesktopRuntimeUnit {
+                label: "im-bridge".to_string(),
+                status: RuntimeStatus::Ready,
+                url: Some("http://127.0.0.1:7779".to_string()),
+                pid: Some(3),
+                restart_count: 0,
+                last_error: None,
+                last_started_at: Some("3".to_string()),
             },
         };
 

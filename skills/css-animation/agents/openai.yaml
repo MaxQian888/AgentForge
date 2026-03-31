@@ -1,0 +1,4 @@
+interface:
+  display_name: "AgentForge Motion"
+  short_description: "Add restrained motion without breaking shared shells"
+  default_prompt: "Use $css-animation to add or refine purposeful AgentForge UI motion while keeping shared dashboard, desktop, and accessibility constraints intact."

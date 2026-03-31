@@ -135,8 +135,10 @@ describe("useProjectStore", () => {
                 defaultProvider: "openai",
                 compatibleProviders: ["openai", "codex"],
                 defaultModel: "gpt-5-codex",
+                modelOptions: ["gpt-5-codex", "o3"],
                 available: true,
                 diagnostics: [],
+                supportedFeatures: ["reasoning", "fork"],
               },
             ],
           },
@@ -161,6 +163,12 @@ describe("useProjectStore", () => {
             runtime: "codex",
             provider: "openai",
           }),
+          runtimes: [
+            expect.objectContaining({
+              modelOptions: ["gpt-5-codex", "o3"],
+              supportedFeatures: ["reasoning", "fork"],
+            }),
+          ],
         }),
       })
     );
@@ -204,8 +212,10 @@ describe("useProjectStore", () => {
                 defaultProvider: "openai",
                 compatibleProviders: ["openai", 7],
                 defaultModel: "gpt-5-codex",
+                modelOptions: ["gpt-5-codex", 7],
                 available: "yes",
                 diagnostics: [{ code: 7, message: null, blocking: "true" }],
+                supportedFeatures: ["reasoning", 9],
               },
             ],
           },
@@ -244,28 +254,30 @@ describe("useProjectStore", () => {
           active: true,
         },
       },
-      codingAgentCatalog: {
-        defaultRuntime: "",
-        defaultSelection: {
-          runtime: "",
-          provider: "",
-          model: "",
-        },
-        runtimes: [
-          expect.objectContaining({
-            runtime: "codex",
-            compatibleProviders: ["openai", "7"],
-            diagnostics: [
-              {
-                code: "",
-                message: "",
-                blocking: true,
-              },
+          codingAgentCatalog: {
+            defaultRuntime: "",
+            defaultSelection: {
+              runtime: "",
+              provider: "",
+              model: "",
+            },
+            runtimes: [
+              expect.objectContaining({
+                runtime: "codex",
+                compatibleProviders: ["openai", "7"],
+                modelOptions: ["gpt-5-codex", "7"],
+                diagnostics: [
+                  {
+                    code: "",
+                    message: "",
+                    blocking: true,
+                  },
+                ],
+                supportedFeatures: ["reasoning", "9"],
+              }),
             ],
-          }),
-        ],
-      },
-    });
+          },
+        });
   });
 
   it("sends nested settings payloads when updating coding-agent defaults", async () => {

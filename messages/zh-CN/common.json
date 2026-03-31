@@ -59,10 +59,17 @@
     "placeholder": "输入命令或搜索...",
     "navigation": "导航",
     "actions": "操作",
+    "context": "上下文",
     "createProject": "创建项目",
     "createTask": "创建任务",
     "spawnAgent": "启动智能体",
     "createTeam": "创建团队",
+    "toggleTheme": "切换主题",
+    "clearAgentSelection": "返回 Agent 概览",
+    "clearTeamProjectFilter": "清除团队项目过滤",
+    "clearDashboardSelection": "重置仪表板选择",
+    "recent": "最近访问",
+    "history": "最近命令",
     "noResults": "未找到结果。"
   },
   "breadcrumbs": {

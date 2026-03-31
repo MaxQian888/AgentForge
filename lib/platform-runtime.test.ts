@@ -77,6 +77,15 @@ describe("platform-runtime", () => {
         lastError: null,
         lastStartedAt: null,
       },
+      imBridge: {
+        label: "im-bridge",
+        status: "stopped",
+        url: null,
+        pid: null,
+        restartCount: 0,
+        lastError: null,
+        lastStartedAt: null,
+      },
     });
     await expect(runtime.getPluginRuntimeSummary()).resolves.toEqual({
       activeRuntimeCount: 0,
@@ -1029,6 +1038,15 @@ describe("platform-runtime", () => {
                 lastError: null,
                 lastStartedAt: "2026-03-25T03:00:02.000Z",
               },
+              imBridge: {
+                label: "im-bridge",
+                status: "ready",
+                url: "http://127.0.0.1:7779",
+                pid: 1003,
+                restartCount: 0,
+                lastError: null,
+                lastStartedAt: "2026-03-25T03:00:03.000Z",
+              },
             },
           },
         });
@@ -1072,6 +1090,15 @@ describe("platform-runtime", () => {
             restartCount: 0,
             lastError: null,
             lastStartedAt: "2026-03-25T03:00:02.000Z",
+          },
+          imBridge: {
+            label: "im-bridge",
+            status: "ready",
+            url: "http://127.0.0.1:7779",
+            pid: 1003,
+            restartCount: 0,
+            lastError: null,
+            lastStartedAt: "2026-03-25T03:00:03.000Z",
           },
         },
       },

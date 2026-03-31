@@ -418,9 +418,9 @@ describe("RoleWorkspace", () => {
     expect(await screen.findByText("A calm frontend specialist for dashboard polish.")).toBeInTheDocument();
     expect(screen.getByText("claude_code / anthropic / claude-sonnet-4-5")).toBeInTheDocument();
     expect(screen.getByText("Loaded skills")).toBeInTheDocument();
-    expect(screen.getByText("React (skills/react)")).toBeInTheDocument();
+    expect(screen.getAllByText(/React \(skills\/react\)/).length).toBeGreaterThan(0);
     expect(screen.getByText("On-demand skills")).toBeInTheDocument();
-    expect(screen.getByText("Testing (skills/testing)")).toBeInTheDocument();
+    expect(screen.getAllByText(/Testing \(skills\/testing\)/).length).toBeGreaterThan(0);
   });
 
   it("updates an existing role with advanced workspace sections and can switch back to create mode", async () => {

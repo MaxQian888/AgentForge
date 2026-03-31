@@ -246,8 +246,21 @@ describe("useAgentStore", () => {
             default_provider: "anthropic",
             compatible_providers: ["anthropic"],
             default_model: "claude-sonnet-4-5",
+            model_options: ["claude-sonnet-4-5", "claude-opus-4-1"],
             available: true,
             diagnostics: [],
+            supported_features: ["structured_output", "interrupt"],
+          },
+          {
+            key: "cursor",
+            display_name: "Cursor Agent",
+            default_provider: "cursor",
+            compatible_providers: ["cursor"],
+            default_model: "claude-sonnet-4-20250514",
+            model_options: ["claude-sonnet-4-20250514", "gpt-4o"],
+            available: true,
+            diagnostics: [],
+            supported_features: ["progress", "reasoning"],
           },
         ],
       }),
@@ -265,6 +278,13 @@ describe("useAgentStore", () => {
           provider: "anthropic",
           model: "claude-sonnet-4-5",
         }),
+        runtimes: expect.arrayContaining([
+          expect.objectContaining({
+            runtime: "cursor",
+            modelOptions: ["claude-sonnet-4-20250514", "gpt-4o"],
+            supportedFeatures: ["progress", "reasoning"],
+          }),
+        ]),
       }),
     );
     expect(second).toEqual(first);

@@ -67,6 +67,24 @@ describe("bridge request schemas", () => {
     expect(decompose.model).toBe("gpt-5");
   });
 
+  test("preserves optional decomposition context payloads", () => {
+    const decompose = DecomposeTaskRequestSchema.parse({
+      task_id: "task-123",
+      title: "Split feature work",
+      description: "Break this task down into focused subtasks.",
+      priority: "high",
+      context: {
+        relevantFiles: ["src-go/internal/server/routes.go"],
+        waveMode: true,
+      },
+    });
+
+    expect(decompose.context).toEqual({
+      relevantFiles: ["src-go/internal/server/routes.go"],
+      waveMode: true,
+    });
+  });
+
   test("rejects execute payloads with unknown runtime keys", () => {
     expect(
       ExecuteRequestSchema.safeParse({
@@ -79,6 +97,22 @@ describe("bridge request schemas", () => {
         runtime: "made_up_runtime",
       }).success,
     ).toBe(false);
+  });
+
+  test("accepts additional CLI-backed runtime keys", () => {
+    for (const runtime of ["cursor", "gemini", "qoder", "iflow"] as const) {
+      const parsed = ExecuteRequestSchema.parse({
+        task_id: `task-${runtime}`,
+        session_id: `session-${runtime}`,
+        prompt: "Inspect the repository",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: `agent/task-${runtime}`,
+        budget_usd: 1,
+        runtime,
+      });
+
+      expect(parsed.runtime).toBe(runtime);
+    }
   });
 
   test("accepts normalized role execution profiles and rejects raw YAML-shaped role payloads", () => {
@@ -108,6 +142,11 @@ describe("bridge request schemas", () => {
             label: "React",
             description: "React UI implementation guidance",
             instructions: "Prefer server-safe React composition.",
+            display_name: "React Workspace",
+            short_description: "Guide React work in this repository.",
+            default_prompt: "Use $react to implement the current React seam.",
+            available_parts: ["agents", "references"],
+            reference_count: 1,
             source: "repo-local",
             source_root: "skills",
             origin: "direct",
@@ -119,6 +158,7 @@ describe("bridge request schemas", () => {
             path: "skills/testing",
             label: "Testing",
             description: "Regression-oriented test guidance",
+            available_parts: ["agents"],
             source: "repo-local",
             source_root: "skills",
             origin: "direct",
@@ -135,6 +175,8 @@ describe("bridge request schemas", () => {
     expect(parsed.role_config?.tools).toEqual(["github-tool"]);
     expect(parsed.role_config?.knowledge_context).toBe("docs/PRD.md");
     expect(parsed.role_config?.loaded_skills?.[0]?.path).toBe("skills/react");
+    expect(parsed.role_config?.loaded_skills?.[0]?.display_name).toBe("React Workspace");
+    expect(parsed.role_config?.loaded_skills?.[0]?.available_parts).toEqual(["agents", "references"]);
     expect(parsed.role_config?.available_skills?.[0]?.path).toBe("skills/testing");
     expect(parsed.role_config?.output_filters).toEqual(["no_pii"]);
     expect(parsed.team_id).toBe("team-123");

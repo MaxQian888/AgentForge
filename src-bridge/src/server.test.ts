@@ -340,7 +340,16 @@ describe("bridge execute route", () => {
   test("exposes runtime catalog metadata and readiness diagnostics", async () => {
     const app = createApp({
       executableLookup(command) {
-        return command === "codex" ? "C:/mock/codex.exe" : null;
+        switch (command) {
+          case "codex":
+          case "cursor-agent":
+          case "gemini":
+          case "qodercli":
+          case "iflow":
+            return `C:/mock/${command}.exe`;
+          default:
+            return null;
+        }
       },
       codexAuthStatusProvider() {
         return {
@@ -356,6 +365,12 @@ describe("bridge execute route", () => {
             return "claude-sonnet-4-5";
           case "CODEX_RUNTIME_MODEL":
             return "gpt-5-codex";
+          case "CURSOR_API_KEY":
+            return "cursor-token";
+          case "GEMINI_API_KEY":
+            return "gemini-token";
+          case "IFLOW_API_KEY":
+            return "iflow-token";
           default:
             return undefined;
         }
@@ -379,8 +394,15 @@ describe("bridge execute route", () => {
           key: "codex",
           default_provider: "openai",
           compatible_providers: ["openai", "codex"],
+          model_options: expect.arrayContaining(["gpt-5-codex", "o3"]),
           supported_features: expect.arrayContaining(["reasoning", "output_schema"]),
           available: true,
+        }),
+        expect.objectContaining({
+          key: "cursor",
+          default_provider: "cursor",
+          compatible_providers: ["cursor"],
+          model_options: expect.arrayContaining(["claude-sonnet-4-20250514", "gpt-4o"]),
         }),
       ]),
     });
@@ -925,7 +947,7 @@ describe("bridge execute route", () => {
 
     expect(response.status).toBe(409);
     expect(await response.json()).toEqual({
-      error: "Claude continuity state is not resumable for task task-legacy-claude",
+      error: "Claude Code continuity state is not resumable for task task-legacy-claude",
       code: "missing_continuity_state",
     });
   });
@@ -1270,6 +1292,91 @@ describe("bridge execute route", () => {
         resume_ready: false,
         blocking_reason: "continuity_not_supported",
       },
+    });
+  });
+
+  test("rejects resume for paused CLI-backed runtimes that do not support truthful continuity", async () => {
+    const pool = new RuntimePoolManager(1);
+    const sessionManager = new SessionManager();
+
+    const app = createApp({
+      pool,
+      sessionManager,
+      commandRuntimeRunner: async function* () {
+        yield {
+          type: "assistant_text",
+          content: "Cursor is working.",
+        };
+        while (true) {
+          await Bun.sleep(5);
+        }
+      },
+      executableLookup(command) {
+        return command === "cursor-agent" ? "C:/mock/cursor-agent.exe" : null;
+      },
+      envLookup(name) {
+        return name === "CURSOR_API_KEY" ? "cursor-token" : undefined;
+      },
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+    });
+
+    const executeResponse = await app.request("/bridge/execute", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-cursor-pause",
+        session_id: "session-cursor-pause",
+        runtime: "cursor",
+        provider: "cursor",
+        model: "claude-sonnet-4-20250514",
+        prompt: "Pause and resume Cursor",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-cursor-pause",
+        system_prompt: "",
+        max_turns: 8,
+        budget_usd: 2,
+        allowed_tools: ["Read"],
+        permission_mode: "default",
+      }),
+    });
+
+    expect(executeResponse.status).toBe(200);
+
+    const pauseResponse = await app.request("/bridge/pause", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-cursor-pause",
+        reason: "pause cursor",
+      }),
+    });
+    expect(pauseResponse.status).toBe(200);
+
+    await waitFor(() => sessionManager.restore("task-cursor-pause")?.status === "paused");
+    expect(sessionManager.restore("task-cursor-pause")).toMatchObject({
+      continuity: {
+        runtime: "cursor",
+        resume_ready: false,
+        blocking_reason: "continuity_not_supported",
+      },
+    });
+
+    const resumeResponse = await app.request("/bridge/resume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-cursor-pause",
+      }),
+    });
+
+    expect(resumeResponse.status).toBe(409);
+    expect(await resumeResponse.json()).toEqual({
+      error: "Cursor Agent continuity state is not resumable for task task-cursor-pause",
+      code: "continuity_not_supported",
     });
   });
 });

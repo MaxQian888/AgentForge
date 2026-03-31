@@ -5,6 +5,7 @@ import { useTranslations } from "next-intl";
 import { Activity, AlertTriangle, Bot, ClipboardCheck, DollarSign, Users } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { QuickActionShortcuts } from "./quick-action-shortcuts";
 import type { DashboardSummary } from "@/lib/dashboard/summary";
 
 interface DashboardOverviewProps {
@@ -132,6 +133,41 @@ export function DashboardOverview({
       href: summary.links.team,
     },
   ];
+  const quickActions = [
+    {
+      id: "create-task",
+      label: t("actions.createTask"),
+      href: summary.scope.projectId
+        ? `/project?id=${summary.scope.projectId}`
+        : summary.links.projects,
+      icon: Activity,
+      shortcut: "N",
+    },
+    {
+      id: "spawn-agent",
+      label: t("actions.spawnAgent"),
+      href: summary.links.agents,
+      icon: Bot,
+      shortcut: "A",
+      variant: "outline" as const,
+    },
+    {
+      id: "manage-sprints",
+      label: t("actions.manageSprints"),
+      href: "/sprints",
+      icon: ClipboardCheck,
+      shortcut: "S",
+      variant: "outline" as const,
+    },
+    {
+      id: "configure-roles",
+      label: t("actions.configureRoles"),
+      href: "/roles",
+      icon: Users,
+      shortcut: "R",
+      variant: "outline" as const,
+    },
+  ];
 
   return (
     <div className="flex flex-col gap-6">
@@ -172,22 +208,7 @@ export function DashboardOverview({
         })}
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <Button asChild>
-          <Link href={summary.scope.projectId ? `/project?id=${summary.scope.projectId}` : summary.links.projects}>
-            {t("actions.createTask")}
-          </Link>
-        </Button>
-        <Button asChild variant="outline">
-          <Link href={summary.links.agents}>{t("actions.spawnAgent")}</Link>
-        </Button>
-        <Button asChild variant="outline">
-          <Link href="/sprints">{t("actions.manageSprints")}</Link>
-        </Button>
-        <Button asChild variant="outline">
-          <Link href="/roles">{t("actions.configureRoles")}</Link>
-        </Button>
-      </div>
+      <QuickActionShortcuts actions={quickActions} />
 
       <div className="grid gap-4 xl:grid-cols-[1.6fr_1fr]">
         <Card>

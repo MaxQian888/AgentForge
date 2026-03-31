@@ -24,6 +24,7 @@ type Config struct {
 	RolesDir                     string
 	PluginsDir                   string
 	PluginRegistryURL            string
+	BridgeToolManifestAllowlist  []string
 	SchedulerExecutionMode       string
 	MaxActiveAgents              int
 	DefaultTaskBudget            float64
@@ -64,6 +65,7 @@ func Load() *Config {
 	viper.SetDefault("ROLES_DIR", "./roles")
 	viper.SetDefault("PLUGINS_DIR", "./plugins")
 	viper.SetDefault("PLUGIN_REGISTRY_URL", "")
+	viper.SetDefault("BRIDGE_TOOL_MANIFEST_ALLOWLIST", "")
 	viper.SetDefault("SCHEDULER_EXECUTION_MODE", "in_process")
 	viper.SetDefault("MAX_ACTIVE_AGENTS", 20)
 	viper.SetDefault("DEFAULT_TASK_BUDGET", 5.0)
@@ -97,6 +99,10 @@ func Load() *Config {
 	for i, status := range exemptStatuses {
 		exemptStatuses[i] = strings.TrimSpace(status)
 	}
+	bridgeToolManifestAllowlist := strings.Split(viper.GetString("BRIDGE_TOOL_MANIFEST_ALLOWLIST"), ",")
+	for i, host := range bridgeToolManifestAllowlist {
+		bridgeToolManifestAllowlist[i] = strings.TrimSpace(host)
+	}
 
 	return &Config{
 		Port:                         viper.GetString("PORT"),
@@ -114,6 +120,7 @@ func Load() *Config {
 		RolesDir:                     viper.GetString("ROLES_DIR"),
 		PluginsDir:                   viper.GetString("PLUGINS_DIR"),
 		PluginRegistryURL:            viper.GetString("PLUGIN_REGISTRY_URL"),
+		BridgeToolManifestAllowlist:  bridgeToolManifestAllowlist,
 		SchedulerExecutionMode:       viper.GetString("SCHEDULER_EXECUTION_MODE"),
 		MaxActiveAgents:              viper.GetInt("MAX_ACTIVE_AGENTS"),
 		DefaultTaskBudget:            viper.GetFloat64("DEFAULT_TASK_BUDGET"),

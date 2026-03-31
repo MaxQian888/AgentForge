@@ -1,0 +1,200 @@
+[
+  {
+    "key": "claude_code",
+    "label": "Claude Code",
+    "adapter_family": "dedicated",
+    "default_provider": "anthropic",
+    "compatible_providers": ["anthropic"],
+    "default_model": "claude-sonnet-4-5",
+    "model_options": ["claude-sonnet-4-5", "claude-opus-4-1", "claude-haiku-4-5"],
+    "strict_model_options": false,
+    "command": {
+      "default_command": "claude",
+      "env_var": "CLAUDE_CODE_RUNTIME_COMMAND",
+      "install_hint": "Install Claude Code CLI."
+    },
+    "supported_features": [
+      "structured_output",
+      "agents",
+      "hooks",
+      "thinking",
+      "file_checkpointing",
+      "elicitation",
+      "tool_permission_callback",
+      "partial_messages",
+      "disallowed_tools",
+      "fallback_model",
+      "additional_directories",
+      "env",
+      "rate_limit",
+      "progress",
+      "interrupt",
+      "set_model",
+      "fork",
+      "rollback"
+    ]
+  },
+  {
+    "key": "codex",
+    "label": "Codex",
+    "adapter_family": "dedicated",
+    "default_provider": "openai",
+    "compatible_providers": ["openai", "codex"],
+    "default_model": "gpt-5-codex",
+    "model_options": ["gpt-5-codex", "o3", "gpt-4.1"],
+    "strict_model_options": false,
+    "command": {
+      "default_command": "codex",
+      "env_var": "CODEX_RUNTIME_COMMAND",
+      "install_hint": "Install Codex CLI."
+    },
+    "supported_features": [
+      "turn_started",
+      "turn_failed",
+      "progress",
+      "reasoning",
+      "file_change",
+      "mcp_tool_call",
+      "web_search",
+      "todo_update",
+      "output_schema",
+      "image_attachments",
+      "additional_directories",
+      "env",
+      "mcp_config",
+      "fork"
+    ]
+  },
+  {
+    "key": "opencode",
+    "label": "OpenCode",
+    "adapter_family": "dedicated",
+    "default_provider": "opencode",
+    "compatible_providers": ["opencode"],
+    "default_model": "opencode-default",
+    "model_options": ["opencode-default"],
+    "strict_model_options": false,
+    "command": {
+      "default_command": "opencode",
+      "env_var": "OPENCODE_RUNTIME_COMMAND",
+      "install_hint": "Install OpenCode CLI or configure the OpenCode server."
+    },
+    "supported_features": [
+      "fork",
+      "revert",
+      "diff",
+      "todo_update",
+      "messages",
+      "command",
+      "permission_response",
+      "agents",
+      "skills",
+      "session_status",
+      "message_updated",
+      "command_executed",
+      "vcs_branch_updated",
+      "reasoning",
+      "file_change",
+      "agent_part",
+      "compaction",
+      "subtask",
+      "set_model"
+    ]
+  },
+  {
+    "key": "cursor",
+    "label": "Cursor Agent",
+    "adapter_family": "cli",
+    "default_provider": "cursor",
+    "compatible_providers": ["cursor"],
+    "default_model": "claude-sonnet-4-20250514",
+    "model_options": [
+      "claude-sonnet-4-20250514",
+      "claude-opus-4-20250514",
+      "gpt-4o",
+      "gemini-2.5-pro",
+      "cursor-small"
+    ],
+    "strict_model_options": true,
+    "command": {
+      "default_command": "cursor-agent",
+      "env_var": "CURSOR_RUNTIME_COMMAND",
+      "install_hint": "Install Cursor Agent CLI from Cursor or npm."
+    },
+    "auth": {
+      "mode": "env_any",
+      "env_vars": ["CURSOR_API_KEY"],
+      "message": "Cursor Agent authentication is unavailable"
+    },
+    "supported_features": ["progress", "reasoning"]
+  },
+  {
+    "key": "gemini",
+    "label": "Gemini CLI",
+    "adapter_family": "cli",
+    "default_provider": "google",
+    "compatible_providers": ["google", "vertex"],
+    "default_model": "gemini-2.5-pro",
+    "model_options": [
+      "gemini-3.1-pro-preview",
+      "gemini-3-flash-preview",
+      "gemini-2.5-pro",
+      "gemini-2.5-flash",
+      "gemini-2.5-flash-lite"
+    ],
+    "strict_model_options": true,
+    "command": {
+      "default_command": "gemini",
+      "env_var": "GEMINI_RUNTIME_COMMAND",
+      "install_hint": "Install Gemini CLI with npm."
+    },
+    "auth": {
+      "mode": "env_any",
+      "env_vars": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
+      "message": "Gemini CLI authentication is unavailable"
+    },
+    "supported_features": ["reasoning", "plan_mode", "progress"]
+  },
+  {
+    "key": "qoder",
+    "label": "Qoder CLI",
+    "adapter_family": "cli",
+    "default_provider": "qoder",
+    "compatible_providers": ["qoder"],
+    "default_model": "auto",
+    "model_options": ["auto", "ultimate", "performance", "efficient", "lite"],
+    "strict_model_options": true,
+    "command": {
+      "default_command": "qodercli",
+      "env_var": "QODER_RUNTIME_COMMAND",
+      "install_hint": "Install Qoder CLI from qoder.com."
+    },
+    "auth": {
+      "mode": "none",
+      "env_vars": [],
+      "message": ""
+    },
+    "supported_features": ["progress"]
+  },
+  {
+    "key": "iflow",
+    "label": "iFlow CLI",
+    "adapter_family": "cli",
+    "default_provider": "iflow",
+    "compatible_providers": ["iflow"],
+    "default_model": "Qwen3-Coder",
+    "model_options": ["Qwen3-Coder", "Kimi-K2.5", "DeepSeek-v3"],
+    "strict_model_options": true,
+    "command": {
+      "default_command": "iflow",
+      "env_var": "IFLOW_RUNTIME_COMMAND",
+      "install_hint": "Install iFlow CLI with npm."
+    },
+    "auth": {
+      "mode": "env_any",
+      "env_vars": ["IFLOW_API_KEY", "IFLOW_apiKey"],
+      "message": "iFlow CLI authentication is unavailable"
+    },
+    "supported_features": ["plan_mode", "auto_edit", "progress"]
+  }
+]

@@ -18,7 +18,7 @@ export type DecomposeTaskExecutor = (
 ) => Promise<DecomposeTaskResponse>;
 
 export function buildDecompositionPrompt(req: DecomposeTaskRequest): string {
-  return [
+  const promptSections = [
     "You are decomposing an engineering task into implementation-ready subtasks.",
     "Return valid JSON only with this shape: {\"summary\": string, \"subtasks\": [{\"title\": string, \"description\": string, \"priority\": \"critical\"|\"high\"|\"medium\"|\"low\", \"executionMode\": \"human\"|\"agent\"}]}",
     "Return a concise summary and a small ordered list of subtasks.",
@@ -28,7 +28,14 @@ export function buildDecompositionPrompt(req: DecomposeTaskRequest): string {
     `Title: ${req.title}`,
     `Priority: ${req.priority}`,
     `Description:\n${req.description}`,
-  ].join("\n\n");
+  ];
+
+  if (req.context !== undefined) {
+    promptSections.push("Additional Context");
+    promptSections.push(JSON.stringify(req.context));
+  }
+
+  return promptSections.join("\n\n");
 }
 
 export function createTextGenerationDecomposeExecutor(

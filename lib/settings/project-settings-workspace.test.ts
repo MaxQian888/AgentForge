@@ -28,8 +28,10 @@ const codingAgentCatalog: CodingAgentCatalog = {
       defaultProvider: "openai",
       compatibleProviders: ["openai", "codex"],
       defaultModel: "gpt-5-codex",
+      modelOptions: ["gpt-5-codex", "o3"],
       available: true,
       diagnostics: [],
+      supportedFeatures: ["reasoning", "fork"],
     },
     {
       runtime: "claude_code",
@@ -37,8 +39,10 @@ const codingAgentCatalog: CodingAgentCatalog = {
       defaultProvider: "anthropic",
       compatibleProviders: ["anthropic"],
       defaultModel: "claude-sonnet-4-5",
+      modelOptions: ["claude-sonnet-4-5", "claude-opus-4-1"],
       available: true,
       diagnostics: [],
+      supportedFeatures: ["structured_output", "interrupt"],
     },
   ],
 };

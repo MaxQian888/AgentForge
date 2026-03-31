@@ -17,7 +17,10 @@ var (
 	ErrTeamAlreadyActive = errors.New("team already active for this task")
 	ErrTeamNotActive     = errors.New("team is not active")
 	ErrTeamTaskNotFound  = errors.New("team task not found")
+	ErrTeamSizeLimit     = errors.New("team size limit exceeded")
 )
+
+const defaultMaxTeamSize = 8
 
 // TeamRunRepository defines persistence for agent teams.
 type TeamRunRepository interface {
@@ -84,6 +87,7 @@ type TeamService struct {
 	projectRepo TeamProjectRepository
 	memorySvc   *MemoryService
 	hub         *ws.Hub
+	maxTeamSize int
 }
 
 func NewTeamService(
@@ -103,7 +107,15 @@ func NewTeamService(
 		projectRepo: projectRepo,
 		memorySvc:   memorySvc,
 		hub:         hub,
+		maxTeamSize: defaultMaxTeamSize,
 	}
+}
+
+func (s *TeamService) WithMaxTeamSize(limit int) *TeamService {
+	if limit > 0 {
+		s.maxTeamSize = limit
+	}
+	return s
 }
 
 // resolveStrategy returns the TeamStrategy implementation for the given name.
@@ -209,6 +221,10 @@ func (s *TeamService) ProcessRunCompletion(ctx context.Context, run *model.Agent
 }
 
 func (s *TeamService) spawnCodersForTasks(ctx context.Context, team *model.AgentTeam, parentTask *model.Task, children []*model.Task) {
+	if err := s.enforceTeamSize(ctx, team, len(children)); err != nil {
+		return
+	}
+
 	memberID := uuid.Nil
 	if parentTask.AssigneeID != nil {
 		memberID = *parentTask.AssigneeID
@@ -254,6 +270,10 @@ func (s *TeamService) spawnCodersForTasks(ctx context.Context, team *model.Agent
 }
 
 func (s *TeamService) spawnCodersForTask(ctx context.Context, team *model.AgentTeam, task *model.Task) {
+	if err := s.enforceTeamSize(ctx, team, 1); err != nil {
+		return
+	}
+
 	memberID := uuid.Nil
 	if task.AssigneeID != nil {
 		memberID = *task.AssigneeID
@@ -313,6 +333,44 @@ func (s *TeamService) updateTeamCost(ctx context.Context, team *model.AgentTeam)
 		"spent":  totalSpent,
 		"budget": team.TotalBudgetUsd,
 	})
+}
+
+func (s *TeamService) enforceTeamSize(ctx context.Context, team *model.AgentTeam, coderCount int) error {
+	if s == nil || team == nil {
+		return nil
+	}
+	if coderCount < 0 {
+		coderCount = 0
+	}
+
+	plannedSize := coderCount + 2 // planner + reviewer + coders
+	if s.maxTeamSize > 0 && plannedSize > s.maxTeamSize {
+		err := fmt.Errorf("%w: planned size %d exceeds limit %d", ErrTeamSizeLimit, plannedSize, s.maxTeamSize)
+		log.WithFields(log.Fields{
+			"teamId":      team.ID.String(),
+			"projectId":   team.ProjectID.String(),
+			"taskId":      team.TaskID.String(),
+			"plannedSize": plannedSize,
+			"maxTeamSize": s.maxTeamSize,
+		}).WithError(err).Warn("team size limit rejected team expansion")
+		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, err.Error())
+		team.Status = model.TeamStatusFailed
+		team.ErrorMessage = err.Error()
+		s.broadcastEvent(ws.EventTeamFailed, team.ProjectID.String(), team.ToDTO())
+		return err
+	}
+
+	if s.maxTeamSize > 0 && plannedSize >= s.maxTeamSize-1 {
+		log.WithFields(log.Fields{
+			"teamId":      team.ID.String(),
+			"projectId":   team.ProjectID.String(),
+			"taskId":      team.TaskID.String(),
+			"plannedSize": plannedSize,
+			"maxTeamSize": s.maxTeamSize,
+		}).Warn("team size is approaching configured limit")
+	}
+
+	return nil
 }
 
 // CancelTeam cancels all active runs in a team.

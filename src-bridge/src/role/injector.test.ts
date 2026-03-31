@@ -48,6 +48,7 @@ describe("role injector", () => {
           path: "skills/react",
           label: "React",
           description: "React UI implementation guidance",
+          available_parts: ["agents", "references"],
           instructions: "Prefer server-safe React composition.",
           source: "repo-local",
           source_root: "skills",
@@ -59,6 +60,7 @@ describe("role injector", () => {
           path: "skills/testing",
           label: "Testing",
           description: "Regression-oriented test guidance",
+          available_parts: ["agents"],
           source: "repo-local",
           source_root: "skills",
           origin: "direct",
@@ -68,9 +70,10 @@ describe("role injector", () => {
 
     expect(prompt).toContain("## Loaded Skills");
     expect(prompt).toContain("### React (skills/react)");
+    expect(prompt).toContain("Bundled parts: agents, references");
     expect(prompt).toContain("Prefer server-safe React composition.");
     expect(prompt).toContain("## Available On-Demand Skills");
-    expect(prompt).toContain("Testing (skills/testing)");
+    expect(prompt).toContain("Testing (skills/testing): Regression-oriented test guidance [parts: agents]");
   });
 
   test("omits knowledge_context section when not set", () => {

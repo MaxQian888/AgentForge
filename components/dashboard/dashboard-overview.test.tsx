@@ -79,6 +79,10 @@ describe("DashboardOverview", () => {
     expect(screen.getByText("Deep review completed")).toBeInTheDocument();
     expect(screen.getByText("Budget pressure detected")).toBeInTheDocument();
     expect(screen.getByText("Notifications unavailable")).toBeInTheDocument();
+    expect(screen.getByText("N")).toBeInTheDocument();
+    expect(screen.getByText("A")).toBeInTheDocument();
+    expect(screen.getByText("S")).toBeInTheDocument();
+    expect(screen.getByText("R")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Retry Section" }));
     expect(onRetry).toHaveBeenCalledWith("activity");

@@ -1,0 +1,69 @@
+package commands
+
+import (
+	"context"
+	"fmt"
+	"strings"
+
+	"github.com/agentforge/im-bridge/client"
+	"github.com/agentforge/im-bridge/core"
+)
+
+// RegisterQueueCommands registers /queue sub-commands on the engine.
+func RegisterQueueCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+	engine.RegisterCommand("/queue", func(p core.Platform, msg *core.Message, args string) {
+		parts := strings.Fields(strings.TrimSpace(args))
+		if len(parts) == 0 {
+			_ = p.Reply(context.Background(), msg.ReplyCtx, commandUsage("/queue"))
+			return
+		}
+
+		ctx := context.Background()
+		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
+		switch canonicalSubcommand("/queue", parts[0]) {
+		case "list":
+			filter := ""
+			if len(parts) > 1 {
+				filter = parts[1]
+			}
+			entries, err := scopedClient.ListQueueEntries(ctx, filter)
+			if err != nil {
+				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取队列失败: %v", err))
+				return
+			}
+			_ = p.Reply(ctx, msg.ReplyCtx, formatQueueEntries(entries))
+		case "cancel":
+			if len(parts) < 2 {
+				_ = p.Reply(ctx, msg.ReplyCtx, subcommandUsage("/queue", "cancel"))
+				return
+			}
+			entry, err := scopedClient.CancelQueueEntry(ctx, parts[1], "manual_cancel")
+			if err != nil {
+				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("取消队列失败: %v", err))
+				return
+			}
+			_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("队列项 %s 已变更为 %s", entry.EntryID, entry.Status))
+		default:
+			_ = p.Reply(ctx, msg.ReplyCtx, commandUsage("/queue"))
+		}
+	})
+}
+
+func formatQueueEntries(entries []client.QueueEntry) string {
+	if len(entries) == 0 {
+		return "当前没有匹配的队列项"
+	}
+	lines := make([]string, 0, len(entries)+1)
+	lines = append(lines, fmt.Sprintf("队列项 (%d):", len(entries)))
+	for _, entry := range entries {
+		lines = append(lines, fmt.Sprintf("- %s [%s] task=%s member=%s priority=%d reason=%s",
+			entry.EntryID,
+			entry.Status,
+			entry.TaskID,
+			entry.MemberID,
+			entry.Priority,
+			entry.Reason,
+		))
+	}
+	return strings.Join(lines, "\n")
+}

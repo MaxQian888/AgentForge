@@ -13,6 +13,7 @@ export function WidgetWrapper({
   onConfigure,
   onRemove,
   onRetry,
+  autoRefresh,
 }: {
   title: string;
   children?: ReactNode;
@@ -22,14 +23,61 @@ export function WidgetWrapper({
   onConfigure?: () => void;
   onRemove?: () => void;
   onRetry?: () => void;
+  autoRefresh?: {
+    interval: "30s" | "60s" | "300s" | "off";
+    paused: boolean;
+    lastUpdatedLabel?: string;
+    onPauseToggle: () => void;
+    onIntervalChange: (interval: "30s" | "60s" | "300s" | "off") => void;
+  };
 }) {
   const t = useTranslations("dashboard");
 
   return (
     <div className="rounded-lg border bg-card p-4 shadow-sm">
       <div className="mb-3 flex items-start justify-between gap-3">
-        <div className="text-sm font-medium">{title}</div>
+        <div className="space-y-1">
+          <div className="text-sm font-medium">{title}</div>
+          {autoRefresh?.lastUpdatedLabel ? (
+            <div className="text-xs text-muted-foreground">
+              {autoRefresh.lastUpdatedLabel}
+            </div>
+          ) : null}
+        </div>
         <div className="flex flex-wrap justify-end gap-2">
+          {autoRefresh ? (
+            <>
+              <label className="sr-only" htmlFor={`${title}-auto-refresh`}>
+                {t("widget.autoRefresh.label")}
+              </label>
+              <select
+                id={`${title}-auto-refresh`}
+                aria-label={t("widget.autoRefresh.label")}
+                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+                value={autoRefresh.interval}
+                onChange={(event) =>
+                  autoRefresh.onIntervalChange(
+                    event.target.value as "30s" | "60s" | "300s" | "off"
+                  )
+                }
+              >
+                <option value="30s">{t("widget.autoRefresh.interval.30s")}</option>
+                <option value="60s">{t("widget.autoRefresh.interval.60s")}</option>
+                <option value="300s">{t("widget.autoRefresh.interval.300s")}</option>
+                <option value="off">{t("widget.autoRefresh.interval.off")}</option>
+              </select>
+              <Button
+                type="button"
+                size="sm"
+                variant="outline"
+                onClick={autoRefresh.onPauseToggle}
+              >
+                {autoRefresh.paused
+                  ? t("widget.autoRefresh.resume")
+                  : t("widget.autoRefresh.pause")}
+              </Button>
+            </>
+          ) : null}
           {onRefresh ? (
             <Button type="button" size="sm" variant="outline" onClick={onRefresh}>
               {t("widget.refresh")}

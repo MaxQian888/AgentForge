@@ -23,7 +23,7 @@ export const DASHBOARD_WIDGETS: DashboardWidgetMetadata[] = [
     type: "throughput_chart",
     titleKey: "widget.throughput_chart.title",
     descriptionKey: "widget.throughput_chart.description",
-    defaultConfig: { range: "14d", groupBy: "day" },
+    defaultConfig: { range: "14d", groupBy: "day", chartType: "bar" },
   },
   {
     type: "burndown",

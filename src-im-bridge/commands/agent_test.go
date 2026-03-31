@@ -6,6 +6,7 @@ import (
 	"github.com/agentforge/im-bridge/core"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -21,7 +22,7 @@ func TestAgentCommand_RequiresSubcommand(t *testing.T) {
 		Content:  "/agent",
 	})
 
-	if len(platform.replies) != 1 || platform.replies[0] != "用法: /agent list|spawn|run|logs <参数>" {
+	if len(platform.replies) != 1 || platform.replies[0] != "用法: /agent status|runtimes|health|spawn|run|logs|pause|resume|kill <参数>" {
 		t.Fatalf("replies = %v", platform.replies)
 	}
 }
@@ -31,15 +32,24 @@ func TestAgentCommand_ListRepliesWithPoolStatus(t *testing.T) {
 		if r.Method != http.MethodGet {
 			t.Fatalf("method = %s, want GET", r.Method)
 		}
-		if r.URL.Path != "/api/v1/agents/pool" {
+		switch r.URL.Path {
+		case "/api/v1/agents/pool":
+			if got := r.Header.Get("X-IM-Source"); got != "slack" {
+				t.Fatalf("X-IM-Source = %q, want slack", got)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(&client.PoolStatus{ActiveAgents: 2, MaxAgents: 8})
+		case "/api/v1/bridge/pool":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"active":         1,
+				"max":            4,
+				"warm_total":     1,
+				"warm_available": 1,
+			})
+		default:
 			t.Fatalf("path = %s", r.URL.Path)
 		}
-		if got := r.Header.Get("X-IM-Source"); got != "slack" {
-			t.Fatalf("X-IM-Source = %q, want slack", got)
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(&client.PoolStatus{ActiveAgents: 2, MaxAgents: 8})
 	}))
 	defer server.Close()
 
@@ -53,8 +63,174 @@ func TestAgentCommand_ListRepliesWithPoolStatus(t *testing.T) {
 		Content:  "/agent list",
 	})
 
-	if len(platform.replies) != 1 || platform.replies[0] != "Agent 池状态: 2/8 活跃" {
+	if len(platform.replies) != 1 {
 		t.Fatalf("replies = %v", platform.replies)
+	}
+	for _, want := range []string{"2/8", "Bridge", "1/4"} {
+		if !strings.Contains(platform.replies[0], want) {
+			t.Fatalf("reply = %q, want substring %q", platform.replies[0], want)
+		}
+	}
+}
+
+func TestAgentCommand_RuntimesAndHealth(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/bridge/runtimes":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_runtime": "codex",
+				"runtimes": []map[string]any{
+					{"key": "codex", "label": "Codex", "default_provider": "openai", "default_model": "gpt-5-codex", "available": true},
+					{"key": "claude_code", "label": "Claude Code", "default_provider": "anthropic", "default_model": "claude-sonnet-4-5", "available": false},
+				},
+			})
+		case "/api/v1/bridge/health":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "ready",
+				"pool": map[string]any{
+					"active":    2,
+					"available": 4,
+					"warm":      1,
+				},
+			})
+		default:
+			t.Fatalf("unexpected path = %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent runtimes",
+	})
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent health",
+	})
+
+	if len(platform.replies) != 2 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	for _, want := range []string{"codex", "claude_code", "gpt-5-codex"} {
+		if !strings.Contains(platform.replies[0], want) {
+			t.Fatalf("runtimes reply = %q, want substring %q", platform.replies[0], want)
+		}
+	}
+	for _, want := range []string{"ready", "2", "4", "1"} {
+		if !strings.Contains(platform.replies[1], want) {
+			t.Fatalf("health reply = %q, want substring %q", platform.replies[1], want)
+		}
+	}
+}
+
+func TestAgentCommand_RequiresArgsForRuntimesOnlyViaSubcommandUsage(t *testing.T) {
+	apiClient := client.NewAgentForgeClient("http://example.test", "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent runtimes",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "获取 Bridge runtimes 失败") && !strings.Contains(platform.replies[0], "Bridge runtimes") {
+		t.Fatalf("reply = %q", platform.replies[0])
+	}
+}
+
+func TestAgentCommand_StatusRepliesWithPoolStatus(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		switch r.URL.Path {
+		case "/api/v1/agents/pool":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(&client.PoolStatus{Active: 2, Max: 8, Available: 6, PausedResumable: 1, Queued: 3})
+		case "/api/v1/bridge/pool":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"active":         1,
+				"max":            4,
+				"warm_total":     1,
+				"warm_available": 1,
+			})
+		default:
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent status",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	for _, want := range []string{"2/8", "排队", "可恢复"} {
+		if !strings.Contains(platform.replies[0], want) {
+			t.Fatalf("reply = %q, want substring %q", platform.replies[0], want)
+		}
+	}
+}
+
+func TestAgentCommand_StatusWithRunIDRepliesWithRunSummary(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodGet {
+			t.Fatalf("method = %s, want GET", r.Method)
+		}
+		if r.URL.Path != "/api/v1/agents/run-123" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&client.AgentRunSummary{
+			ID:             "run-123",
+			TaskID:         "task-123",
+			TaskTitle:      "Bridge rollout",
+			Status:         "paused",
+			Runtime:        "codex",
+			Provider:       "openai",
+			Model:          "gpt-5-codex",
+			CanResume:      true,
+			LastActivityAt: "2026-03-31T12:00:00Z",
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent status run-123",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	for _, want := range []string{"Bridge rollout", "paused", "codex"} {
+		if !strings.Contains(platform.replies[0], want) {
+			t.Fatalf("reply = %q, want substring %q", platform.replies[0], want)
+		}
 	}
 }
 
@@ -279,7 +455,7 @@ func TestAgentCommand_LogsRequiresRunID(t *testing.T) {
 	if len(platform.replies) != 1 {
 		t.Fatalf("replies = %v", platform.replies)
 	}
-	if !strings.Contains(platform.replies[0], "/agent logs <agent-run-id>") {
+	if !strings.Contains(platform.replies[0], "/agent logs <run-id>") {
 		t.Fatalf("usage reply = %q", platform.replies[0])
 	}
 }
@@ -345,8 +521,45 @@ func TestAgentCommand_UnknownSubcommandShowsUsage(t *testing.T) {
 	if len(platform.replies) != 1 {
 		t.Fatalf("replies = %v", platform.replies)
 	}
-	if !strings.Contains(platform.replies[0], "/agent list|spawn|run|logs") {
+	if !strings.Contains(platform.replies[0], "/agent status|runtimes|health|spawn|run|logs|pause|resume|kill") {
 		t.Fatalf("usage reply = %q", platform.replies[0])
+	}
+}
+
+func TestAgentCommand_LifecycleControlsCallCanonicalEndpoints(t *testing.T) {
+	calls := make([]string, 0, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&client.AgentRunSummary{
+			ID:        "run-123",
+			TaskID:    "task-123",
+			TaskTitle: "Bridge rollout",
+			Status:    "paused",
+			Runtime:   "codex",
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	for _, command := range []string{"/agent pause run-123", "/agent resume run-123", "/agent kill run-123"} {
+		engine.HandleMessage(platform, &core.Message{
+			Platform: "slack-stub",
+			Content:  command,
+		})
+	}
+
+	wantCalls := []string{
+		"POST /api/v1/agents/run-123/pause",
+		"POST /api/v1/agents/run-123/resume",
+		"POST /api/v1/agents/run-123/kill",
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %+v, want %+v", calls, wantCalls)
 	}
 }
 

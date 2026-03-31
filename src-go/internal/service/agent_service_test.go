@@ -566,6 +566,53 @@ func TestAgentService_SpawnPrefersExplicitRuntime(t *testing.T) {
 	}
 }
 
+func TestAgentService_SpawnPrefersExplicitCliBackedRuntime(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	repo := newMockAgentRunRepo()
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Spawn cursor agent",
+		Description: "Use explicit cursor runtime",
+		BudgetUsd:   5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	bridge := &mockAgentBridge{}
+	worktrees := &mockWorktreeManager{
+		allocation: &worktree.Allocation{
+			ProjectSlug: "agentforge",
+			TaskID:      taskID.String(),
+			Branch:      "agent/" + taskID.String(),
+			Path:        "/tmp/worktree/" + taskID.String(),
+		},
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+
+	run, err := svc.Spawn(
+		context.Background(),
+		taskID,
+		memberID,
+		"cursor",
+		"cursor",
+		"claude-sonnet-4-20250514",
+		5,
+		"",
+	)
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+
+	if bridge.lastExecute.Runtime != "cursor" || bridge.lastExecute.Provider != "cursor" || bridge.lastExecute.Model != "claude-sonnet-4-20250514" {
+		t.Fatalf("bridge execute selection = %#v", bridge.lastExecute)
+	}
+	if run.Runtime != "cursor" || run.Provider != "cursor" || run.Model != "claude-sonnet-4-20250514" {
+		t.Fatalf("stored run selection = %#v", run)
+	}
+}
+
 func TestAgentService_SpawnResolvesProjectDefaultsAndPersistsRuntime(t *testing.T) {
 	taskID := uuid.New()
 	memberID := uuid.New()

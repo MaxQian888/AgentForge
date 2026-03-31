@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useMemo } from "react";
-import { useSearchParams } from "next/navigation";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
   Activity,
@@ -20,12 +20,12 @@ import { ActivityFeed } from "@/components/dashboard/activity-feed";
 import { AgentFleetWidget } from "@/components/dashboard/agent-fleet-widget";
 import { TeamHealthWidget } from "@/components/dashboard/team-health-widget";
 import { BudgetWidget } from "@/components/dashboard/budget-widget";
-import { Button } from "@/components/ui/button";
+import { DashboardWidgetsSkeleton } from "@/components/dashboard/dashboard-widget-skeletons";
+import { QuickActionShortcuts } from "@/components/dashboard/quick-action-shortcuts";
 import { Skeleton } from "@/components/ui/skeleton";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { useCostStore } from "@/lib/stores/cost-store";
-import Link from "next/link";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -45,21 +45,18 @@ function MetricsSkeleton() {
 }
 
 function WidgetsSkeleton() {
-  return (
-    <div className="grid gap-4 lg:grid-cols-2">
-      {Array.from({ length: 4 }).map((_, i) => (
-        <Skeleton key={i} className="h-[240px] rounded-lg" />
-      ))}
-    </div>
-  );
+  return <DashboardWidgetsSkeleton />;
 }
 
 export default function DashboardPage() {
   const t = useTranslations("dashboard");
+  const pathname = usePathname();
+  const router = useRouter();
   const searchParams = useSearchParams();
   const projectId = searchParams.get("project");
 
   const summary = useDashboardStore((s) => s.summary);
+  const projects = useDashboardStore((s) => s.projects);
   const loading = useDashboardStore((s) => s.loading);
   const fetchSummary = useDashboardStore((s) => s.fetchSummary);
   const dashboardActivity = useDashboardStore((s) => s.activity);
@@ -133,6 +130,52 @@ export default function DashboardPage() {
   const budgetTotal = projectCost?.budgetSummary?.allocated ?? 0;
   const budgetSpent = projectCost?.budgetSummary?.spent ?? summary?.headline.weeklyCost ?? 0;
   const budgetRemaining = projectCost?.budgetSummary?.remaining ?? Math.max(budgetTotal - budgetSpent, 0);
+  const quickActions = [
+    {
+      id: "create-task",
+      label: t("actions.createTask"),
+      href:
+        summary?.scope.projectId
+          ? `/project?id=${summary.scope.projectId}`
+          : "/projects",
+      icon: Plus,
+      shortcut: "N",
+      variant: "ghost" as const,
+    },
+    {
+      id: "spawn-agent",
+      label: t("actions.spawnAgent"),
+      href: summary?.links.agents ?? "/agents",
+      icon: Rocket,
+      shortcut: "A",
+      variant: "ghost" as const,
+    },
+    {
+      id: "new-sprint",
+      label: t("actions.newSprint"),
+      href: "/sprints",
+      icon: Zap,
+      shortcut: "S",
+      variant: "ghost" as const,
+    },
+    {
+      id: "create-team",
+      label: t("actions.createTeam"),
+      href: "/team",
+      icon: Users,
+      shortcut: "T",
+      variant: "ghost" as const,
+    },
+  ];
+
+  const handleProjectChange = (nextProjectId: string) => {
+    if (!nextProjectId) {
+      router.replace(pathname);
+      return;
+    }
+
+    router.replace(`${pathname}?project=${nextProjectId}`);
+  };
 
   if (loading) {
     return (
@@ -180,6 +223,27 @@ export default function DashboardPage() {
         </>
       }
     >
+      {projects.length > 0 ? (
+        <div className="flex flex-wrap items-end gap-4">
+          <label className="flex min-w-[220px] flex-col gap-2 text-sm font-medium">
+            <span>{t("projectFilterLabel")}</span>
+            <select
+              aria-label={t("projectFilterLabel")}
+              className="h-9 rounded-md border border-input bg-background px-3 text-sm font-normal"
+              value={projectId ?? ""}
+              onChange={(event) => handleProjectChange(event.target.value)}
+            >
+              <option value="">{t("allProjects")}</option>
+              {projects.map((project) => (
+                <option key={project.id} value={project.id}>
+                  {project.name}
+                </option>
+              ))}
+            </select>
+          </label>
+        </div>
+      ) : null}
+
       <div className="grid gap-4 lg:grid-cols-2">
         <ActivityFeed events={activityEvents} />
         <AgentFleetWidget agents={fleetAgents} />
@@ -191,38 +255,7 @@ export default function DashboardPage() {
         />
       </div>
 
-      <div className="flex flex-wrap gap-3">
-        <Button asChild variant="ghost" size="sm">
-          <Link
-            href={
-              summary?.scope.projectId
-                ? `/project?id=${summary.scope.projectId}`
-                : "/projects"
-            }
-          >
-            <Plus className="mr-1.5 size-4" />
-            {t("actions.createTask")}
-          </Link>
-        </Button>
-        <Button asChild variant="ghost" size="sm">
-          <Link href={summary?.links.agents ?? "/agents"}>
-            <Rocket className="mr-1.5 size-4" />
-            {t("actions.spawnAgent")}
-          </Link>
-        </Button>
-        <Button asChild variant="ghost" size="sm">
-          <Link href="/sprints">
-            <Zap className="mr-1.5 size-4" />
-            {t("actions.newSprint")}
-          </Link>
-        </Button>
-        <Button asChild variant="ghost" size="sm">
-          <Link href="/team">
-            <Users className="mr-1.5 size-4" />
-            {t("actions.createTeam")}
-          </Link>
-        </Button>
-      </div>
+      <QuickActionShortcuts actions={quickActions} />
     </OverviewLayout>
   );
 }

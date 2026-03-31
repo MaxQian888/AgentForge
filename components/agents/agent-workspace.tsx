@@ -20,7 +20,7 @@ import {
 } from "@/components/ui/tooltip";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { cn } from "@/lib/utils";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useBreakpoint } from "@/hooks/use-breakpoint";
 import type {
   Agent,
   AgentPoolSummary,
@@ -58,7 +58,7 @@ export function AgentWorkspace({
   onKill,
 }: AgentWorkspaceProps) {
   const t = useTranslations("agents");
-  const isMobile = useIsMobile();
+  const { isDesktop, isMobile } = useBreakpoint();
   const router = useRouter();
   const searchParams = useSearchParams();
 
@@ -79,12 +79,8 @@ export function AgentWorkspace({
   const bridgeDegraded = bridgeHealth?.status === "degraded";
 
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1280px)");
-    const handler = () => setSidebarOpen(mq.matches);
-    handler();
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
+    setSidebarOpen(isDesktop);
+  }, [isDesktop]);
 
   const setSelectedAgentId = (id: string | null) => {
     const params = new URLSearchParams(searchParams.toString());

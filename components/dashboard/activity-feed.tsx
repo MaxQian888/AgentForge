@@ -1,5 +1,6 @@
 "use client";
 
+import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusDot } from "@/components/shared/status-dot";
@@ -16,6 +17,9 @@ interface ActivityFeedProps {
   events: ActivityEvent[];
 }
 
+type ActivityTypeFilter = "all" | "task" | "review" | "agent" | "system";
+type ActivityTimeRange = "all" | "last24h" | "last7d";
+
 function relativeTime(timestamp: string): string {
   const diff = Date.now() - new Date(timestamp).getTime();
   const seconds = Math.floor(diff / 1000);
@@ -28,16 +32,96 @@ function relativeTime(timestamp: string): string {
   return `${days}d ago`;
 }
 
+function categorizeActivityType(type: string): ActivityTypeFilter {
+  if (type.includes("task")) return "task";
+  if (type.includes("review")) return "review";
+  if (type.includes("agent")) return "agent";
+  return "system";
+}
+
+function matchesTimeRange(timestamp: string, range: ActivityTimeRange) {
+  if (range === "all") {
+    return true;
+  }
+
+  const diff = Date.now() - new Date(timestamp).getTime();
+  const dayMs = 24 * 60 * 60 * 1000;
+
+  if (range === "last24h") {
+    return diff <= dayMs;
+  }
+
+  return diff <= 7 * dayMs;
+}
+
 export function ActivityFeed({ events }: ActivityFeedProps) {
   const t = useTranslations("dashboard");
-  const visible = events.slice(0, 8);
+  const [typeFilter, setTypeFilter] = useState<ActivityTypeFilter>("all");
+  const [timeRange, setTimeRange] = useState<ActivityTimeRange>("all");
+  const filtered = useMemo(
+    () =>
+      events.filter((event) => {
+        const matchesType =
+          typeFilter === "all" ||
+          categorizeActivityType(event.type) === typeFilter;
+        const matchesRange = matchesTimeRange(event.timestamp, timeRange);
+        return matchesType && matchesRange;
+      }),
+    [events, timeRange, typeFilter],
+  );
+  const visible = filtered.slice(0, 8);
 
   return (
     <Card>
       <CardHeader className="pb-3">
-        <CardTitle className="text-sm font-medium">
-          {t("activityFeed.title")}
-        </CardTitle>
+        <div className="flex flex-col gap-3 lg:flex-row lg:items-end lg:justify-between">
+          <div className="space-y-1">
+            <CardTitle className="text-sm font-medium">
+              {t("activityFeed.title")}
+            </CardTitle>
+            <p className="text-xs text-muted-foreground">
+              {t("activityFeed.count", { count: filtered.length })}
+            </p>
+          </div>
+          <div className="flex flex-wrap gap-3">
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              <span>{t("activityFeed.typeLabel")}</span>
+              <select
+                aria-label={t("activityFeed.typeLabel")}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                value={typeFilter}
+                onChange={(event) =>
+                  setTypeFilter(event.target.value as ActivityTypeFilter)
+                }
+              >
+                <option value="all">{t("activityFeed.type.all")}</option>
+                <option value="task">{t("activityFeed.type.task")}</option>
+                <option value="review">{t("activityFeed.type.review")}</option>
+                <option value="agent">{t("activityFeed.type.agent")}</option>
+                <option value="system">{t("activityFeed.type.system")}</option>
+              </select>
+            </label>
+            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              <span>{t("activityFeed.timeRangeLabel")}</span>
+              <select
+                aria-label={t("activityFeed.timeRangeLabel")}
+                className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground"
+                value={timeRange}
+                onChange={(event) =>
+                  setTimeRange(event.target.value as ActivityTimeRange)
+                }
+              >
+                <option value="all">{t("activityFeed.timeRange.all")}</option>
+                <option value="last24h">
+                  {t("activityFeed.timeRange.last24h")}
+                </option>
+                <option value="last7d">
+                  {t("activityFeed.timeRange.last7d")}
+                </option>
+              </select>
+            </label>
+          </div>
+        </div>
       </CardHeader>
       <CardContent>
         {visible.length === 0 ? (

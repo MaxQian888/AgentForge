@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -47,6 +48,26 @@ type taskDecompositionBridgeAdapter struct {
 }
 
 func (a taskDecompositionBridgeAdapter) DecomposeTask(ctx context.Context, req service.BridgeDecomposeRequest) (*service.BridgeDecomposeResponse, error) {
+	var contextPayload map[string]any
+	if req.CodeContext != nil {
+		if contextPayload == nil {
+			contextPayload = make(map[string]any)
+		}
+		contextPayload["codeContext"] = req.CodeContext
+	}
+	if len(req.FewShotHistory) > 0 {
+		if contextPayload == nil {
+			contextPayload = make(map[string]any)
+		}
+		contextPayload["fewShotHistory"] = req.FewShotHistory
+	}
+	if req.WaveMode {
+		if contextPayload == nil {
+			contextPayload = make(map[string]any)
+		}
+		contextPayload["waveMode"] = true
+	}
+
 	resp, err := a.client.DecomposeTask(ctx, bridge.DecomposeRequest{
 		TaskID:      req.TaskID,
 		Title:       req.Title,
@@ -54,6 +75,7 @@ func (a taskDecompositionBridgeAdapter) DecomposeTask(ctx context.Context, req s
 		Priority:    req.Priority,
 		Provider:    req.Provider,
 		Model:       req.Model,
+		Context:     contextPayload,
 	})
 	if err != nil {
 		return nil, err
@@ -251,7 +273,13 @@ func RegisterRoutes(
 	}
 	agentH := handler.NewAgentHandler(agentRuntime)
 	bridgeHealthH := handler.NewBridgeHealthHandler(bridgeHealthSvc)
+	bridgePoolH := handler.NewBridgePoolHandler(bridgeClient)
 	bridgeRuntimeCatalogH := handler.NewBridgeRuntimeCatalogHandler(bridgeClient)
+	bridgeToolsAllowlist := append([]string{}, cfg.BridgeToolManifestAllowlist...)
+	if strings.TrimSpace(cfg.PluginRegistryURL) != "" {
+		bridgeToolsAllowlist = append(bridgeToolsAllowlist, cfg.PluginRegistryURL)
+	}
+	bridgeToolsH := handler.NewBridgeToolsHandler(bridgeClient, bridgeToolsAllowlist...)
 	bridgeAIH := handler.NewBridgeAIHandler(bridgeClient)
 	notifH := handler.NewNotificationHandler(notifRepo)
 	workflowH := handler.NewWorkflowHandler(workflowRepo)
@@ -464,7 +492,13 @@ func RegisterRoutes(
 	protected.GET("/agents", agentH.List)
 	protected.GET("/agents/pool", agentH.Pool)
 	protected.GET("/bridge/health", bridgeHealthH.Get)
+	protected.GET("/bridge/pool", bridgePoolH.Get)
 	protected.GET("/bridge/runtimes", bridgeRuntimeCatalogH.Get)
+	protected.GET("/bridge/tools", bridgeToolsH.List)
+	protected.POST("/bridge/tools/install", bridgeToolsH.Install)
+	protected.POST("/bridge/tools/uninstall", bridgeToolsH.Uninstall)
+	protected.POST("/bridge/tools/:id/restart", bridgeToolsH.Restart)
+	protected.POST("/ai/decompose", bridgeAIH.Decompose)
 	protected.POST("/ai/generate", bridgeAIH.Generate)
 	protected.POST("/ai/classify-intent", bridgeAIH.ClassifyIntent)
 	protected.GET("/agents/:id", agentH.Get)

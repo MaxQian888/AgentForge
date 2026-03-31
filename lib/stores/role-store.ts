@@ -52,6 +52,13 @@ export interface RoleSkillCatalogEntry {
   path: string;
   label: string;
   description?: string;
+  displayName?: string;
+  shortDescription?: string;
+  defaultPrompt?: string;
+  availableParts?: string[];
+  referenceCount?: number;
+  scriptCount?: number;
+  assetCount?: number;
   source: string;
   sourceRoot: string;
 }
@@ -181,6 +188,13 @@ export interface RoleExecutionSkill {
   label: string;
   description?: string;
   instructions?: string;
+  display_name?: string;
+  short_description?: string;
+  default_prompt?: string;
+  available_parts?: string[];
+  reference_count?: number;
+  script_count?: number;
+  asset_count?: number;
   source?: string;
   source_root?: string;
   origin?: string;

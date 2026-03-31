@@ -37,7 +37,13 @@ func TestRegisterRoutes_WiresBridgeAPISurface(t *testing.T) {
 	source := string(content)
 	expectedRoutes := []string{
 		`protected.GET("/bridge/health", bridgeHealthH.Get)`,
+		`protected.GET("/bridge/pool", bridgePoolH.Get)`,
 		`protected.GET("/bridge/runtimes", bridgeRuntimeCatalogH.Get)`,
+		`protected.GET("/bridge/tools", bridgeToolsH.List)`,
+		`protected.POST("/bridge/tools/install", bridgeToolsH.Install)`,
+		`protected.POST("/bridge/tools/uninstall", bridgeToolsH.Uninstall)`,
+		`protected.POST("/bridge/tools/:id/restart", bridgeToolsH.Restart)`,
+		`protected.POST("/ai/decompose", bridgeAIH.Decompose)`,
 		`protected.POST("/ai/generate", bridgeAIH.Generate)`,
 		`protected.POST("/ai/classify-intent", bridgeAIH.ClassifyIntent)`,
 	}
@@ -72,6 +78,24 @@ func TestRegisterRoutes_WiresDispatchObservabilityRoutes(t *testing.T) {
 	for _, route := range expected {
 		if !strings.Contains(source, route) {
 			t.Fatalf("expected RegisterRoutes to contain %s", route)
+		}
+	}
+}
+
+func TestRegisterRoutes_DoesNotWireInstructionIntrospectionRoutes(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("routes.go"))
+	if err != nil {
+		t.Fatalf("ReadFile(routes.go) error = %v", err)
+	}
+	source := string(content)
+	unexpected := []string{
+		`projectGroup.GET("/instructions/pending", instructionH.ListPending)`,
+		`projectGroup.GET("/instructions/history", instructionH.ListHistory)`,
+		`projectGroup.GET("/instructions/metrics", instructionH.ListMetrics)`,
+	}
+	for _, route := range unexpected {
+		if strings.Contains(source, route) {
+			t.Fatalf("expected RegisterRoutes not to contain %s", route)
 		}
 	}
 }

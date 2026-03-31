@@ -22,6 +22,9 @@ export function buildSystemPrompt(basePrompt: string, roleConfig?: RoleConfig): 
         if (skill.description) {
           blocks.push(skill.description);
         }
+        if (skill.available_parts?.length) {
+          blocks.push(`Bundled parts: ${skill.available_parts.join(", ")}`);
+        }
         if (skill.instructions) {
           blocks.push(skill.instructions);
         }
@@ -34,9 +37,11 @@ export function buildSystemPrompt(basePrompt: string, roleConfig?: RoleConfig): 
     parts.push([
       "## Available On-Demand Skills",
       ...roleConfig.available_skills.map((skill) =>
-        skill.description
-          ? `- ${skill.label} (${skill.path}): ${skill.description}`
-          : `- ${skill.label} (${skill.path})`,
+        [
+          `- ${skill.label} (${skill.path})`,
+          skill.description ? `: ${skill.description}` : "",
+          skill.available_parts?.length ? ` [parts: ${skill.available_parts.join(", ")}]` : "",
+        ].join(""),
       ),
     ].join("\n"));
   }

@@ -9,7 +9,7 @@ import (
 	"github.com/agentforge/im-bridge/core"
 )
 
-const sprintUsage = "用法: /sprint status 或 /sprint burndown"
+var sprintUsage = commandUsage("/sprint")
 
 // RegisterSprintCommands registers /sprint sub-commands on the engine.
 func RegisterSprintCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {

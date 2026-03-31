@@ -75,6 +75,23 @@
       "args": ["build"]
     },
     {
+      "label": "desktop:dev:prepare",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["desktop:dev:prepare"]
+    },
+    {
+      "label": "desktop:build:prepare",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["desktop:build:prepare"]
+    },
+    {
+      "label": "desktop:debug:prepare",
+      "dependsOrder": "sequence",
+      "dependsOn": ["desktop:dev:prepare", "ui:dev-if-needed"]
+    },
+    {
       "label": "ui:stop",
       "type": "shell",
       "command": "",

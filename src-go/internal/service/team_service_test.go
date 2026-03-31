@@ -339,6 +339,57 @@ func TestTeamService_StartTeamUsesProjectDefaultsAndPersistsRuntimeConfig(t *tes
 	}
 }
 
+func TestTeamService_StartTeamAcceptsExplicitCliBackedRuntime(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	teamRepo := &mockTeamRunRepo{}
+	runRepo := newMockTeamAgentRunRepo()
+	spawner := &mockTeamSpawner{}
+	taskRepo := &mockTeamTaskRepo{task: &model.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Coordinate gemini support",
+		Description: "Start the planning team",
+		BudgetUsd:   12,
+	}}
+	projectRepo := &mockTeamProjectRepo{project: &model.Project{
+		ID:       projectID,
+		Slug:     "agentforge",
+		Settings: "{}",
+	}}
+
+	svc := service.NewTeamService(teamRepo, runRepo, spawner, taskRepo, projectRepo, nil, ws.NewHub())
+
+	team, err := svc.StartTeam(context.Background(), service.StartTeamInput{
+		TaskID:         taskID,
+		MemberID:       memberID,
+		Name:           "Gemini team",
+		Strategy:       "plan-code-review",
+		TotalBudgetUsd: 12,
+		Runtime:        "gemini",
+		Provider:       "google",
+		Model:          "gemini-2.5-pro",
+	})
+	if err != nil {
+		t.Fatalf("StartTeam() error = %v", err)
+	}
+
+	if team == nil {
+		t.Fatal("expected team to be created")
+	}
+	if len(spawner.calls) != 1 {
+		t.Fatalf("planner spawn calls = %d, want 1", len(spawner.calls))
+	}
+	planner := spawner.calls[0]
+	if planner.runtime != "gemini" || planner.provider != "google" || planner.model != "gemini-2.5-pro" {
+		t.Fatalf("planner spawn selection = %#v", planner)
+	}
+	if teamRepo.team == nil || !strings.Contains(teamRepo.team.Config, "\"runtime\":\"gemini\"") {
+		t.Fatalf("team config = %q, want persisted gemini runtime selection", teamRepo.team.Config)
+	}
+}
+
 func TestTeamService_ProcessRunCompletionPropagatesRuntimeConfigToCoders(t *testing.T) {
 	taskID := uuid.New()
 	memberID := uuid.New()
@@ -392,5 +443,57 @@ func TestTeamService_ProcessRunCompletionPropagatesRuntimeConfigToCoders(t *test
 	}
 	if coder.teamID != teamID || coder.teamRole != model.TeamRoleCoder {
 		t.Fatalf("coder team context = %#v, want %s/%s", coder, teamID, model.TeamRoleCoder)
+	}
+}
+
+func TestTeamService_ProcessRunCompletionFailsWhenTeamSizeWouldExceedLimit(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	teamID := uuid.New()
+	teamRepo := &mockTeamRunRepo{team: &model.AgentTeam{
+		ID:             teamID,
+		ProjectID:      projectID,
+		TaskID:         taskID,
+		Name:           "oversized team",
+		Status:         model.TeamStatusPlanning,
+		Strategy:       "swarm",
+		TotalBudgetUsd: 12,
+		Config:         `{"runtime":"codex","provider":"openai","model":"gpt-5-codex"}`,
+	}}
+	runRepo := newMockTeamAgentRunRepo()
+	spawner := &mockTeamSpawner{}
+	taskRepo := &mockTeamTaskRepo{task: &model.Task{
+		ID:         taskID,
+		ProjectID:  projectID,
+		Title:      "Large coordination task",
+		AssigneeID: &memberID,
+	}, hasChildren: true}
+	taskRepo.createdChildTasks = []*model.Task{
+		{ID: uuid.New(), ProjectID: projectID},
+		{ID: uuid.New(), ProjectID: projectID},
+		{ID: uuid.New(), ProjectID: projectID},
+	}
+	projectRepo := &mockTeamProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+
+	svc := service.NewTeamService(teamRepo, runRepo, spawner, taskRepo, projectRepo, nil, ws.NewHub()).WithMaxTeamSize(4)
+
+	svc.ProcessRunCompletion(context.Background(), &model.AgentRun{
+		ID:       uuid.New(),
+		TaskID:   taskID,
+		MemberID: memberID,
+		TeamID:   &teamID,
+		TeamRole: model.TeamRolePlanner,
+		Status:   model.AgentRunStatusCompleted,
+	})
+
+	if len(spawner.calls) != 0 {
+		t.Fatalf("spawn calls = %d, want 0 when team size limit is exceeded", len(spawner.calls))
+	}
+	if teamRepo.team.Status != model.TeamStatusFailed {
+		t.Fatalf("team status = %s, want %s", teamRepo.team.Status, model.TeamStatusFailed)
+	}
+	if !strings.Contains(teamRepo.team.ErrorMessage, "team size") {
+		t.Fatalf("team error message = %q, want team size limit detail", teamRepo.team.ErrorMessage)
 	}
 }

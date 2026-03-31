@@ -81,8 +81,10 @@ type CodingAgentRuntimeOptionDTO struct {
 	DefaultProvider     string                     `json:"defaultProvider"`
 	CompatibleProviders []string                   `json:"compatibleProviders"`
 	DefaultModel        string                     `json:"defaultModel"`
+	ModelOptions        []string                   `json:"modelOptions,omitempty"`
 	Available           bool                       `json:"available"`
 	Diagnostics         []CodingAgentDiagnosticDTO `json:"diagnostics"`
+	SupportedFeatures   []string                   `json:"supportedFeatures,omitempty"`
 }
 
 type CodingAgentCatalogDTO struct {

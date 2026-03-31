@@ -13,7 +13,7 @@ jest.mock("next-intl", () => ({
 
 const replaceMock = jest.fn();
 const useSearchParamsMock = jest.fn();
-const useIsMobileMock = jest.fn();
+const useBreakpointMock = jest.fn();
 
 jest.mock("next/navigation", () => ({
   useRouter: () => ({ replace: replaceMock }),
@@ -33,8 +33,8 @@ jest.mock("next/link", () => ({
   ),
 }));
 
-jest.mock("@/hooks/use-mobile", () => ({
-  useIsMobile: () => useIsMobileMock(),
+jest.mock("@/hooks/use-breakpoint", () => ({
+  useBreakpoint: () => useBreakpointMock(),
 }));
 
 jest.mock("./agent-workspace-sidebar", () => ({
@@ -81,7 +81,12 @@ import { AgentWorkspace } from "./agent-workspace";
 describe("AgentWorkspace", () => {
   beforeEach(() => {
     replaceMock.mockReset();
-    useIsMobileMock.mockReturnValue(false);
+    useBreakpointMock.mockReturnValue({
+      breakpoint: "desktop",
+      isMobile: false,
+      isTablet: false,
+      isDesktop: true,
+    });
     useSearchParamsMock.mockReturnValue(
       new URLSearchParams("agent=agent-1"),
     );

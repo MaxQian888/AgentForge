@@ -11,6 +11,7 @@ import (
 	"github.com/agentforge/im-bridge/platform/wecom"
 	"net/http"
 	"net/http/httptest"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -98,6 +99,60 @@ func TestDecomposeTask_CallsEndpointAndParsesResponse(t *testing.T) {
 	}
 	if result.Subtasks[0].Title != "实现 API client" {
 		t.Fatalf("first subtask title = %q", result.Subtasks[0].Title)
+	}
+}
+
+func TestDecomposeTaskViaBridge_LoadsTaskAndCallsAIEndpoint(t *testing.T) {
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/tasks/task-123":
+			_ = json.NewEncoder(w).Encode(Task{
+				ID:          "task-123",
+				ProjectID:   "proj",
+				Title:       "Bridge rollout",
+				Description: "Break bridge work down",
+				Priority:    "high",
+				Status:      "triaged",
+			})
+		case "/api/v1/ai/decompose":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode bridge body: %v", err)
+			}
+			if body["task_id"] != "task-123" || body["title"] != "Bridge rollout" || body["provider"] != "openai" || body["model"] != "gpt-5" {
+				t.Fatalf("bridge body = %+v", body)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"summary": "Bridge summary",
+				"subtasks": []map[string]any{
+					{"title": "API client", "description": "Expose API", "priority": "high", "executionMode": "agent"},
+					{"title": "IM command", "description": "Reply in chat", "priority": "medium", "executionMode": "human"},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	result, err := client.DecomposeTaskViaBridge(context.Background(), "task-123", "openai", "gpt-5")
+	if err != nil {
+		t.Fatalf("DecomposeTaskViaBridge error: %v", err)
+	}
+
+	if result.ParentTask.ID != "task-123" || result.Summary != "Bridge summary" || len(result.Subtasks) != 2 {
+		t.Fatalf("result = %+v", result)
+	}
+	if !reflect.DeepEqual(calls, []string{
+		"GET /api/v1/tasks/task-123",
+		"POST /api/v1/ai/decompose",
+	}) {
+		t.Fatalf("calls = %+v", calls)
 	}
 }
 
@@ -205,6 +260,100 @@ func TestListTasks_ReturnsDecodeErrorForInvalidJSON(t *testing.T) {
 	}
 	if !strings.Contains(err.Error(), "decode response") {
 		t.Fatalf("err = %v", err)
+	}
+}
+
+func TestBridgeToolsClientMethods_CallExpectedEndpoints(t *testing.T) {
+	calls := make([]string, 0, 4)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/bridge/tools":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tools": []map[string]any{
+					{"plugin_id": "web-search", "name": "search", "description": "Search repos"},
+				},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/bridge/tools/install":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode install body: %v", err)
+			}
+			if body["manifest_url"] != "https://registry.example.com/web-search.yaml" {
+				t.Fatalf("install body = %+v", body)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"metadata":        map[string]any{"id": "web-search", "name": "Web Search", "version": "1.0.0"},
+				"lifecycle_state": "active",
+				"restart_count":   0,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/bridge/tools/uninstall":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode uninstall body: %v", err)
+			}
+			if body["plugin_id"] != "web-search" {
+				t.Fatalf("uninstall body = %+v", body)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"metadata":        map[string]any{"id": "web-search", "name": "Web Search", "version": "1.0.0"},
+				"lifecycle_state": "disabled",
+				"restart_count":   0,
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/bridge/tools/web-search/restart":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"metadata":        map[string]any{"id": "web-search", "name": "Web Search", "version": "1.0.0"},
+				"lifecycle_state": "active",
+				"restart_count":   1,
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	tools, err := client.ListBridgeTools(context.Background())
+	if err != nil {
+		t.Fatalf("ListBridgeTools error: %v", err)
+	}
+	if len(tools) != 1 || tools[0].PluginID != "web-search" || tools[0].Name != "search" {
+		t.Fatalf("tools = %+v", tools)
+	}
+
+	installed, err := client.InstallBridgeTool(context.Background(), "https://registry.example.com/web-search.yaml")
+	if err != nil {
+		t.Fatalf("InstallBridgeTool error: %v", err)
+	}
+	if installed.Metadata.ID != "web-search" || installed.LifecycleState != "active" {
+		t.Fatalf("installed = %+v", installed)
+	}
+
+	uninstalled, err := client.UninstallBridgeTool(context.Background(), "web-search")
+	if err != nil {
+		t.Fatalf("UninstallBridgeTool error: %v", err)
+	}
+	if uninstalled.LifecycleState != "disabled" {
+		t.Fatalf("uninstalled = %+v", uninstalled)
+	}
+
+	restarted, err := client.RestartBridgeTool(context.Background(), "web-search")
+	if err != nil {
+		t.Fatalf("RestartBridgeTool error: %v", err)
+	}
+	if restarted.RestartCount != 1 {
+		t.Fatalf("restarted = %+v", restarted)
+	}
+
+	if !reflect.DeepEqual(calls, []string{
+		"GET /api/v1/bridge/tools",
+		"POST /api/v1/bridge/tools/install",
+		"POST /api/v1/bridge/tools/uninstall",
+		"POST /api/v1/bridge/tools/web-search/restart",
+	}) {
+		t.Fatalf("calls = %+v", calls)
 	}
 }
 
@@ -366,6 +515,145 @@ func TestGetAgentPoolStatus_ParsesResponse(t *testing.T) {
 	}
 	if status.ActiveAgents != 3 || status.MaxAgents != 10 {
 		t.Fatalf("status = %+v", status)
+	}
+}
+
+func TestBridgeRuntimeStatusMethods_ParseResponses(t *testing.T) {
+	calls := make([]string, 0, 3)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/bridge/pool":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"active":         2,
+				"max":            6,
+				"warm_total":     1,
+				"warm_available": 1,
+				"degraded":       false,
+			})
+		case "/api/v1/bridge/health":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"status": "ready",
+				"pool": map[string]any{
+					"active":    2,
+					"available": 4,
+					"warm":      1,
+				},
+			})
+		case "/api/v1/bridge/runtimes":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"default_runtime": "codex",
+				"runtimes": []map[string]any{
+					{"key": "codex", "label": "Codex", "default_provider": "openai", "default_model": "gpt-5-codex", "available": true},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	pool, err := client.GetBridgePoolStatus(context.Background())
+	if err != nil {
+		t.Fatalf("GetBridgePoolStatus error: %v", err)
+	}
+	if pool.Active != 2 || pool.Max != 6 {
+		t.Fatalf("pool = %+v", pool)
+	}
+
+	health, err := client.GetBridgeHealth(context.Background())
+	if err != nil {
+		t.Fatalf("GetBridgeHealth error: %v", err)
+	}
+	if health.Status != "ready" || health.Pool.Active != 2 {
+		t.Fatalf("health = %+v", health)
+	}
+
+	runtimes, err := client.GetBridgeRuntimes(context.Background())
+	if err != nil {
+		t.Fatalf("GetBridgeRuntimes error: %v", err)
+	}
+	if runtimes.DefaultRuntime != "codex" || len(runtimes.Runtimes) != 1 || runtimes.Runtimes[0].Key != "codex" {
+		t.Fatalf("runtimes = %+v", runtimes)
+	}
+
+	if !reflect.DeepEqual(calls, []string{
+		"GET /api/v1/bridge/pool",
+		"GET /api/v1/bridge/health",
+		"GET /api/v1/bridge/runtimes",
+	}) {
+		t.Fatalf("calls = %+v", calls)
+	}
+}
+
+func TestBridgeAITextMethods_CallExpectedEndpoints(t *testing.T) {
+	calls := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/ai/generate":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode generate body: %v", err)
+			}
+			if body["prompt"] != "Write a summary" || body["model"] != "gpt-5" {
+				t.Fatalf("generate body = %+v", body)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"text": "Summary output",
+				"usage": map[string]any{
+					"input_tokens":  12,
+					"output_tokens": 8,
+				},
+			})
+		case "/api/v1/ai/classify-intent":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode classify body: %v", err)
+			}
+			if body["text"] != "show sprint status" {
+				t.Fatalf("classify body = %+v", body)
+			}
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"intent":     "sprint_view",
+				"command":    "/sprint status",
+				"args":       "",
+				"confidence": 0.95,
+				"reply":      "Route to sprint status",
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	generated, err := client.GenerateTaskAI(context.Background(), "Write a summary", "", "gpt-5")
+	if err != nil {
+		t.Fatalf("GenerateTaskAI error: %v", err)
+	}
+	if generated.Text != "Summary output" || generated.Usage.OutputTokens != 8 {
+		t.Fatalf("generated = %+v", generated)
+	}
+
+	classified, err := client.ClassifyTaskAI(context.Background(), "show sprint status", []string{"sprint_view", "task_list"})
+	if err != nil {
+		t.Fatalf("ClassifyTaskAI error: %v", err)
+	}
+	if classified.Intent != "sprint_view" || classified.Confidence != 0.95 {
+		t.Fatalf("classified = %+v", classified)
+	}
+
+	if !reflect.DeepEqual(calls, []string{
+		"POST /api/v1/ai/generate",
+		"POST /api/v1/ai/classify-intent",
+	}) {
+		t.Fatalf("calls = %+v", calls)
 	}
 }
 
@@ -616,6 +904,71 @@ func TestWithPlatform_UsesQQMetadataSource(t *testing.T) {
 
 func TestWithPlatform_UsesQQBotMetadataSource(t *testing.T) {
 	assertPlatformHeader(t, qqbot.NewStub("0"), "qqbot")
+}
+
+func TestProjectScopedOperations_RequireConfiguredProjectScope(t *testing.T) {
+	requestCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requestCount++
+		t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "", "secret")
+	checks := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "members",
+			call: func() error {
+				_, err := client.ListProjectMembers(context.Background())
+				return err
+			},
+		},
+		{
+			name: "queue list",
+			call: func() error {
+				_, err := client.ListQueueEntries(context.Background(), "queued")
+				return err
+			},
+		},
+		{
+			name: "queue cancel",
+			call: func() error {
+				_, err := client.CancelQueueEntry(context.Background(), "entry-1", "manual_cancel")
+				return err
+			},
+		},
+		{
+			name: "memory search",
+			call: func() error {
+				_, err := client.SearchProjectMemory(context.Background(), "release", 5)
+				return err
+			},
+		},
+		{
+			name: "memory note",
+			call: func() error {
+				_, err := client.StoreProjectMemoryNote(context.Background(), "operator-note", "Remember to reuse Codex")
+				return err
+			},
+		},
+	}
+
+	for _, tc := range checks {
+		err := tc.call()
+		if err == nil {
+			t.Fatalf("%s: expected error", tc.name)
+		}
+		if !strings.Contains(err.Error(), "project scope is not configured") {
+			t.Fatalf("%s: err = %v", tc.name, err)
+		}
+	}
+
+	if requestCount != 0 {
+		t.Fatalf("requestCount = %d, want 0", requestCount)
+	}
 }
 
 func TestDoRequest_RejectsUnmarshalableBody(t *testing.T) {
@@ -935,6 +1288,177 @@ func TestGetAgentLogs_ParsesEntries(t *testing.T) {
 	}
 	if len(logs) != 1 || logs[0].Content != "started" {
 		t.Fatalf("logs = %+v", logs)
+	}
+}
+
+func TestGetAgentRunAndLifecycleActions_UseCanonicalEndpoints(t *testing.T) {
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(AgentRunSummary{
+			ID:             "run-123",
+			TaskID:         "task-123",
+			TaskTitle:      "Bridge rollout",
+			Status:         "paused",
+			Runtime:        "codex",
+			Provider:       "openai",
+			Model:          "gpt-5-codex",
+			CanResume:      true,
+			LastActivityAt: "2026-03-31T12:00:00Z",
+		})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj-1", "secret")
+
+	run, err := client.GetAgentRun(context.Background(), "run-123")
+	if err != nil {
+		t.Fatalf("GetAgentRun error: %v", err)
+	}
+	if run.TaskTitle != "Bridge rollout" || run.Status != "paused" {
+		t.Fatalf("run = %+v", run)
+	}
+
+	for _, action := range []struct {
+		name string
+		call func(context.Context, string) (*AgentRunSummary, error)
+	}{
+		{name: "pause", call: client.PauseAgentRun},
+		{name: "resume", call: client.ResumeAgentRun},
+		{name: "kill", call: client.KillAgentRun},
+	} {
+		got, err := action.call(context.Background(), "run-123")
+		if err != nil {
+			t.Fatalf("%s error: %v", action.name, err)
+		}
+		if got.ID != "run-123" {
+			t.Fatalf("%s returned %+v", action.name, got)
+		}
+	}
+
+	wantCalls := []string{
+		"GET /api/v1/agents/run-123",
+		"POST /api/v1/agents/run-123/pause",
+		"POST /api/v1/agents/run-123/resume",
+		"POST /api/v1/agents/run-123/kill",
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %+v, want %+v", calls, wantCalls)
+	}
+}
+
+func TestTransitionTaskStatus_UsesTransitionEndpoint(t *testing.T) {
+	var gotPath string
+	var gotBody map[string]string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(Task{
+			ID:       "task-123",
+			Title:    "Bridge rollout",
+			Status:   "done",
+			Priority: "high",
+		})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj-1", "secret")
+	task, err := client.TransitionTaskStatus(context.Background(), "task-123", "done")
+	if err != nil {
+		t.Fatalf("TransitionTaskStatus error: %v", err)
+	}
+	if gotPath != "/api/v1/tasks/task-123/transition" {
+		t.Fatalf("path = %q", gotPath)
+	}
+	if gotBody["status"] != "done" {
+		t.Fatalf("body = %+v", gotBody)
+	}
+	if task.Status != "done" {
+		t.Fatalf("task = %+v", task)
+	}
+}
+
+func TestQueueAndMemoryEndpoints_ParseCanonicalResponses(t *testing.T) {
+	var calls []string
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path+"?"+r.URL.RawQuery)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/proj-1/queue":
+			_ = json.NewEncoder(w).Encode([]QueueEntry{
+				{EntryID: "entry-1", TaskID: "task-1", MemberID: "member-1", Status: "queued", Priority: 20, Reason: "agent pool is at capacity"},
+			})
+		case r.Method == http.MethodDelete && r.URL.Path == "/api/v1/projects/proj-1/queue/entry-1":
+			_ = json.NewEncoder(w).Encode(QueueEntry{
+				EntryID: "entry-1", TaskID: "task-1", MemberID: "member-1", Status: "cancelled", Priority: 20, Reason: "manual_cancel",
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/proj-1/memory":
+			_ = json.NewEncoder(w).Encode([]MemoryEntry{
+				{ID: "mem-1", Key: "release-plan", Content: "Coordinate deployment in phases", Category: "semantic", Scope: "project"},
+			})
+		case r.Method == http.MethodPost && r.URL.Path == "/api/v1/projects/proj-1/memory":
+			var payload map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if payload["scope"] != "project" || payload["category"] != "operator_note" {
+				t.Fatalf("payload = %+v", payload)
+			}
+			_ = json.NewEncoder(w).Encode(MemoryEntry{
+				ID: "mem-2", Key: "operator-note", Content: "Remember to reuse Codex", Category: "operator_note", Scope: "project",
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
+		}
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj-1", "secret")
+
+	queue, err := client.ListQueueEntries(context.Background(), "queued")
+	if err != nil {
+		t.Fatalf("ListQueueEntries error: %v", err)
+	}
+	if len(queue) != 1 || queue[0].EntryID != "entry-1" {
+		t.Fatalf("queue = %+v", queue)
+	}
+
+	cancelled, err := client.CancelQueueEntry(context.Background(), "entry-1", "manual_cancel")
+	if err != nil {
+		t.Fatalf("CancelQueueEntry error: %v", err)
+	}
+	if cancelled.Status != "cancelled" {
+		t.Fatalf("cancelled = %+v", cancelled)
+	}
+
+	memories, err := client.SearchProjectMemory(context.Background(), "release", 5)
+	if err != nil {
+		t.Fatalf("SearchProjectMemory error: %v", err)
+	}
+	if len(memories) != 1 || memories[0].ID != "mem-1" {
+		t.Fatalf("memories = %+v", memories)
+	}
+
+	created, err := client.StoreProjectMemoryNote(context.Background(), "operator-note", "Remember to reuse Codex")
+	if err != nil {
+		t.Fatalf("StoreProjectMemoryNote error: %v", err)
+	}
+	if created.Category != "operator_note" || created.Scope != "project" {
+		t.Fatalf("created = %+v", created)
+	}
+
+	wantCalls := []string{
+		"GET /api/v1/projects/proj-1/queue?status=queued",
+		"DELETE /api/v1/projects/proj-1/queue/entry-1?reason=manual_cancel",
+		"GET /api/v1/projects/proj-1/memory?limit=5&q=release",
+		"POST /api/v1/projects/proj-1/memory?",
+	}
+	if !reflect.DeepEqual(calls, wantCalls) {
+		t.Fatalf("calls = %+v, want %+v", calls, wantCalls)
 	}
 }
 

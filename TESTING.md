@@ -168,6 +168,53 @@ go test ./...
 go build ./...
 ```
 
+## IM Bridge End-To-End Flow
+
+Use this when you need to verify the IM bridge against the real backend control
+plane instead of only unit tests.
+
+1. Start the shared local stack:
+
+```bash
+pnpm dev:all
+```
+
+2. Configure `src-im-bridge/.env` from the values in
+   `src-im-bridge/.env.example`.
+3. Start the bridge from `src-im-bridge/`:
+
+```bash
+go run ./cmd/bridge
+```
+
+4. Verify control-plane registration and status:
+   - `POST /api/v1/im/bridge/register`
+   - `POST /api/v1/im/bridge/heartbeat`
+   - `GET /api/v1/im/bridge/status`
+   - `GET /api/v1/im/event-types`
+5. Exercise at least one inbound and one outbound path for the platform you are
+   testing.
+
+## Bridge Test Matrix
+
+The TypeScript bridge does not have a single one-size-fits-all command. Use the
+smallest focused matrix that matches your change:
+
+| Change area | Recommended commands |
+| --- | --- |
+| Runtime registry / execution routing | `bun test src/runtime/registry.test.ts src/server.test.ts` |
+| Claude/Codex/OpenCode runtime adapters | focused `bun test` on the touched runtime tests plus `bun run typecheck` |
+| Session / resume continuity | `bun test src/session/manager.test.ts ...` |
+| Transport / OpenCode HTTP adapter | `bun test src/opencode/transport.test.ts ...` |
+| Plugin SDK / MCP glue | focused `bun test` in the relevant plugin or SDK area plus `bun run typecheck` |
+
+On this repo, a truthful bridge verification normally ends with:
+
+```bash
+cd src-bridge
+bun run typecheck
+```
+
 ## Build Verification
 
 For the web app, remember that `next.config.ts` currently enables
@@ -210,3 +257,21 @@ The main workflows connected to testing are:
   `pnpm tauri:build` when the runtime/build path matters.
 - Prefer reporting scoped verification truthfully over claiming repo-wide
   coverage you did not actually run.
+
+## Coverage Improvement Guide
+
+When you need to raise coverage without guessing:
+
+1. Start from the owning surface instead of the repo root:
+   - root UI: `pnpm test:coverage`
+   - Go: `go test ./...`
+   - bridge: focused `bun test`
+   - Tauri: `pnpm test:tauri:coverage`
+2. Prioritize files with behavior, branching, or DTO normalization logic over
+   static wrappers.
+3. Match the test file to the source seam already used in the repo:
+   - `components/foo.tsx` -> `components/foo.test.tsx`
+   - `lib/stores/bar.ts` -> `lib/stores/bar.test.ts`
+   - `src-go/internal/handler/...` -> handler/service/repository tests in Go
+4. Prefer focused reruns while iterating, then finish with the owning broad
+   command for the touched surface.

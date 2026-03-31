@@ -169,12 +169,14 @@ interface RuntimeCatalogApiShape {
     default_provider?: string;
     compatible_providers?: string[];
     default_model?: string;
+    model_options?: string[];
     available?: boolean;
     diagnostics?: Array<{
       code?: string;
       message?: string;
       blocking?: boolean;
     }>;
+    supported_features?: string[];
   }>;
 }
 
@@ -331,6 +333,9 @@ function normalizeRuntimeCatalog(raw: RuntimeCatalogApiShape | null | undefined)
           ? runtime.compatible_providers.map((item) => String(item))
           : [],
         defaultModel: typeof runtime?.default_model === "string" ? runtime.default_model : "",
+        modelOptions: Array.isArray(runtime?.model_options)
+          ? runtime.model_options.map((item) => String(item))
+          : [],
         available: Boolean(runtime?.available),
         diagnostics: Array.isArray(runtime?.diagnostics)
           ? runtime.diagnostics.map((diagnostic) => ({
@@ -338,6 +343,9 @@ function normalizeRuntimeCatalog(raw: RuntimeCatalogApiShape | null | undefined)
               message: typeof diagnostic?.message === "string" ? diagnostic.message : "",
               blocking: Boolean(diagnostic?.blocking),
             }))
+          : [],
+        supportedFeatures: Array.isArray(runtime?.supported_features)
+          ? runtime.supported_features.map((item) => String(item))
           : [],
       }))
     : [];

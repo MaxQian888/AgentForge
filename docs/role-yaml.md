@@ -157,6 +157,10 @@ Current supported coding-agent runtimes are:
 | `claude_code` | only `anthropic` | Claude Code backed execution |
 | `codex` | `openai` or legacy-compatible `codex` | Codex-backed execution |
 | `opencode` | only `opencode` | OpenCode-backed execution |
+| `cursor` | only `cursor` | Cursor Agent backed execution through the CLI-backed runtime profile family |
+| `gemini` | `google` or `vertex` | Gemini CLI backed execution through the CLI-backed runtime profile family |
+| `qoder` | only `qoder` | Qoder CLI backed execution through the CLI-backed runtime profile family |
+| `iflow` | only `iflow` | iFlow CLI backed execution through the CLI-backed runtime profile family |
 
 Go resolves this tuple from project defaults plus explicit launch overrides before it projects the role profile into Bridge `role_config`. That means role selection no longer silently falls back to a provider-only guess.
 
@@ -170,6 +174,7 @@ When a Team run starts, the resolved runtime/provider/model tuple is stored with
 - retry flows
 
 This keeps Claude Code, Codex, and OpenCode support consistent across the full Team lifecycle instead of only applying the selection to the first planner phase.
+The same resolved tuple is now also preserved for the additional CLI-backed runtimes. However, Team or single-agent callers must still respect each runtime's advertised capability matrix instead of assuming full lifecycle parity.
 Team-managed Bridge runs now also carry explicit `team_id` and `team_role` (`planner`, `coder`, or `reviewer`) in their execution request and preserved runtime identity, so status, snapshot, and resume flows do not need to reconstruct Team phase context from separate database lookups.
 
 ## Readiness Diagnostics
@@ -179,6 +184,8 @@ Runtime readiness is exposed through the coding-agent catalog returned by the ba
 - missing API credentials
 - missing runtime executables
 - incompatible runtime/provider pairs
+- unsupported bounded model selections
+- blocked continuity for runtimes that do not support truthful resume
 
 This aligns with the PRD and plugin-system direction that runtime capability discovery belongs to the execution infrastructure, not to hard-coded frontend option lists.
 

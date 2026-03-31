@@ -37,6 +37,7 @@ export type SettingsValidationErrors = Partial<
     | "alertThresholdPercent"
     | "runtime"
     | "provider"
+    | "model"
     | "webhookUrl"
     | "webhookEvents",
     string
@@ -163,6 +164,14 @@ export function validateSettingsWorkspaceDraft(
     !selectedRuntime.compatibleProviders.includes(draft.settings.codingAgent.provider)
   ) {
     errors.provider = "Selected provider is not supported by the current runtime.";
+  }
+
+  if (
+    selectedRuntime &&
+    (selectedRuntime.modelOptions?.length ?? 0) > 0 &&
+    !(selectedRuntime.modelOptions ?? []).includes(draft.settings.codingAgent.model)
+  ) {
+    errors.model = "Selected model is not supported by the current runtime.";
   }
 
   if (draft.settings.webhook.active && !draft.settings.webhook.url.trim()) {

@@ -152,6 +152,73 @@ describe("agent runtime registry", () => {
     );
   });
 
+  test("publishes additional CLI-backed runtime profiles with bounded model options", async () => {
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        switch (command) {
+          case "cursor-agent":
+          case "gemini":
+          case "qodercli":
+          case "iflow":
+            return `C:/mock/${command}.exe`;
+          default:
+            return null;
+        }
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          case "GEMINI_API_KEY":
+            return "gemini-token";
+          case "CURSOR_API_KEY":
+            return "cursor-token";
+          case "IFLOW_API_KEY":
+            return "iflow-token";
+          default:
+            return undefined;
+        }
+      },
+    });
+
+    const catalog = await registry.getCatalog();
+    expect(catalog.runtimes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "cursor",
+          label: "Cursor Agent",
+          defaultProvider: "cursor",
+          compatibleProviders: ["cursor"],
+          modelOptions: expect.arrayContaining(["claude-sonnet-4-20250514", "gpt-4o"]),
+          supportedFeatures: expect.arrayContaining(["progress", "reasoning"]),
+        }),
+        expect.objectContaining({
+          key: "gemini",
+          label: "Gemini CLI",
+          defaultProvider: "google",
+          compatibleProviders: ["google", "vertex"],
+          modelOptions: expect.arrayContaining(["gemini-2.5-pro", "gemini-2.5-flash"]),
+          supportedFeatures: expect.arrayContaining(["reasoning", "plan_mode"]),
+        }),
+        expect.objectContaining({
+          key: "qoder",
+          label: "Qoder CLI",
+          defaultProvider: "qoder",
+          compatibleProviders: ["qoder"],
+          modelOptions: expect.arrayContaining(["auto", "ultimate"]),
+        }),
+        expect.objectContaining({
+          key: "iflow",
+          label: "iFlow CLI",
+          defaultProvider: "iflow",
+          compatibleProviders: ["iflow"],
+          modelOptions: expect.arrayContaining(["Qwen3-Coder", "Kimi-K2.5"]),
+          supportedFeatures: expect.arrayContaining(["plan_mode", "auto_edit"]),
+        }),
+      ]),
+    );
+  });
+
   test("uses injected env lookup for runtime defaults and command discovery", async () => {
     const lookedUpCommands: string[] = [];
     const previousCodexCommand = process.env.CODEX_RUNTIME_COMMAND;

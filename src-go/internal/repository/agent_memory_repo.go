@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -98,9 +99,9 @@ func (r *AgentMemoryRepository) IncrementAccess(ctx context.Context, id uuid.UUI
 		Model(&agentMemoryRecord{}).
 		Where("id = ?", id).
 		Updates(map[string]any{
-			"access_count":    gorm.Expr("access_count + 1"),
+			"access_count":     gorm.Expr("access_count + 1"),
 			"last_accessed_at": gorm.Expr("NOW()"),
-			"updated_at":      gorm.Expr("NOW()"),
+			"updated_at":       gorm.Expr("NOW()"),
 		}).Error; err != nil {
 		return fmt.Errorf("increment agent memory access: %w", err)
 	}
@@ -115,4 +116,58 @@ func (r *AgentMemoryRepository) Delete(ctx context.Context, id uuid.UUID) error 
 		return fmt.Errorf("delete agent memory: %w", err)
 	}
 	return nil
+}
+
+func (r *AgentMemoryRepository) ListByProjectAndTimeRange(ctx context.Context, projectID uuid.UUID, category, scope, roleID string, start, end *time.Time, limit int) ([]*model.AgentMemory, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+
+	query := r.db.WithContext(ctx).Where("project_id = ?", projectID)
+	if strings.TrimSpace(category) != "" {
+		query = query.Where("category = ?", category)
+	}
+	if strings.TrimSpace(scope) != "" {
+		query = query.Where("scope = ?", scope)
+	}
+	if strings.TrimSpace(roleID) != "" {
+		query = query.Where("role_id = ?", roleID)
+	}
+	if start != nil {
+		query = query.Where("created_at >= ?", *start)
+	}
+	if end != nil {
+		query = query.Where("created_at <= ?", *end)
+	}
+
+	var records []agentMemoryRecord
+	if err := query.Order("created_at ASC").Limit(limit).Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list agent memories by project and time range: %w", err)
+	}
+
+	memories := make([]*model.AgentMemory, len(records))
+	for index := range records {
+		memories[index] = records[index].toModel()
+	}
+	return memories, nil
+}
+
+func (r *AgentMemoryRepository) DeleteOlderThan(ctx context.Context, projectID uuid.UUID, category string, before time.Time) (int64, error) {
+	if r.db == nil {
+		return 0, ErrDatabaseUnavailable
+	}
+
+	query := r.db.WithContext(ctx).Where("project_id = ? AND created_at < ?", projectID, before)
+	if strings.TrimSpace(category) != "" {
+		query = query.Where("category = ?", category)
+	}
+
+	result := query.Delete(&agentMemoryRecord{})
+	if result.Error != nil {
+		return 0, fmt.Errorf("delete agent memories older than cutoff: %w", result.Error)
+	}
+	return result.RowsAffected, nil
 }

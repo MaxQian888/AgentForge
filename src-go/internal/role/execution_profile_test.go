@@ -66,10 +66,16 @@ requires:
 
 Prefer server-safe React and repository-aligned component structure.
 `)
+	mustWriteSkillFixture(t, filepath.Join(skillsDir, "react", "agents", "openai.yaml"), `interface:
+  display_name: "React Workspace"
+  short_description: "Guide React work in this repository."
+  default_prompt: "Use $react to implement the current React seam."
+`)
+	mustWriteSkillFixture(t, filepath.Join(skillsDir, "react", "references", "surface-map.md"), `# Surface Map`)
 	mustWriteSkillFixture(t, filepath.Join(skillsDir, "typescript", "SKILL.md"), `---
 name: TypeScript
 description: Type-safe contracts and refactors
----
+--- 
 
 # TypeScript
 
@@ -103,6 +109,19 @@ Write targeted regression coverage before broad refactors.
 	}
 	if loadedSkills[0].FieldByName("Instructions").String() == "" {
 		t.Fatal("LoadedSkills[0].Instructions = empty, want injected skill instructions")
+	}
+	if loadedSkills[0].FieldByName("DisplayName").String() != "React Workspace" {
+		t.Fatalf("LoadedSkills[0].DisplayName = %q, want interface display name", loadedSkills[0].FieldByName("DisplayName").String())
+	}
+	if loadedSkills[0].FieldByName("ShortDescription").String() != "Guide React work in this repository." {
+		t.Fatalf("LoadedSkills[0].ShortDescription = %q, want interface short description", loadedSkills[0].FieldByName("ShortDescription").String())
+	}
+	if loadedSkills[0].FieldByName("DefaultPrompt").String() == "" {
+		t.Fatal("LoadedSkills[0].DefaultPrompt = empty, want interface default prompt")
+	}
+	parts := loadedSkills[0].FieldByName("AvailableParts")
+	if parts.Len() != 2 || parts.Index(0).String() != "agents" || parts.Index(1).String() != "references" {
+		t.Fatalf("LoadedSkills[0].AvailableParts = %v, want agents and references", parts)
 	}
 	availableSkills := assertExecutionProfileStructSlice(t, profile, "AvailableSkills")
 	if len(availableSkills) != 1 {

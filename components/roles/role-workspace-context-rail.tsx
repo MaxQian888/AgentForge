@@ -49,6 +49,20 @@ export function RoleWorkspaceContextRail({
   provenanceMap,
 }: RoleWorkspaceContextRailProps) {
   const t = useTranslations("roles");
+  const skillPartLabel = (part: string) => {
+    switch (part) {
+      case "agents":
+        return t("workspace.skillPartAgents");
+      case "references":
+        return t("workspace.skillPartReferences");
+      case "scripts":
+        return t("workspace.skillPartScripts");
+      case "assets":
+        return t("workspace.skillPartAssets");
+      default:
+        return part;
+    }
+  };
   const activeSectionLabel =
     ROLE_WORKSPACE_SECTIONS.find((section) => section.id === activeSection)?.label ??
     "Review";
@@ -302,7 +316,14 @@ export function RoleWorkspaceContextRail({
                 <p className="font-medium text-foreground">Loaded skills</p>
                 <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                   {runtimeExecutionProfile.loaded_skills.map((skill) => (
-                    <li key={`loaded-${skill.path}`}>{skill.label} ({skill.path})</li>
+                    <li key={`loaded-${skill.path}`}>
+                      {skill.label} ({skill.path})
+                      {skill.available_parts?.length
+                        ? ` · ${t("workspace.skillPartsLabel")}: ${skill.available_parts
+                            .map((part) => skillPartLabel(part))
+                            .join(", ")}`
+                        : ""}
+                    </li>
                   ))}
                 </ul>
               </div>
@@ -312,7 +333,14 @@ export function RoleWorkspaceContextRail({
                 <p className="font-medium text-foreground">On-demand skills</p>
                 <ul className="list-disc space-y-0.5 pl-4 text-muted-foreground">
                   {runtimeExecutionProfile.available_skills.map((skill) => (
-                    <li key={`available-${skill.path}`}>{skill.label} ({skill.path})</li>
+                    <li key={`available-${skill.path}`}>
+                      {skill.label} ({skill.path})
+                      {skill.available_parts?.length
+                        ? ` · ${t("workspace.skillPartsLabel")}: ${skill.available_parts
+                            .map((part) => skillPartLabel(part))
+                            .join(", ")}`
+                        : ""}
+                    </li>
                   ))}
                 </ul>
               </div>

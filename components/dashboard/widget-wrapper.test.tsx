@@ -3,14 +3,24 @@ import userEvent from "@testing-library/user-event";
 import { WidgetWrapper } from "./widget-wrapper";
 
 jest.mock("next-intl", () => ({
-  useTranslations: () => (key: string) => {
+  useTranslations: () => (key: string, values?: Record<string, string | number>) => {
     const translations: Record<string, string> = {
       "widget.refresh": "Refresh",
       "widget.configure": "Configure Widget",
       "widget.remove": "Remove Widget",
       "widget.retry": "Retry Widget",
       "widget.emptyFallback": "No widget data yet.",
+      "widget.autoRefresh.pause": "Pause Auto Refresh",
+      "widget.autoRefresh.resume": "Resume Auto Refresh",
+      "widget.autoRefresh.label": "Auto Refresh",
+      "widget.autoRefresh.interval.30s": "30s",
+      "widget.autoRefresh.interval.60s": "60s",
+      "widget.autoRefresh.interval.300s": "5m",
+      "widget.autoRefresh.interval.off": "Off",
     };
+    if (key === "widget.lastUpdated") {
+      return `Last updated ${String(values?.time ?? "")} ago`;
+    }
 
     return translations[key] ?? key;
   },
@@ -65,5 +75,36 @@ describe("WidgetWrapper", () => {
     );
 
     expect(screen.getByText("No widget data yet.")).toBeInTheDocument();
+  });
+
+  it("renders auto-refresh controls and last-updated metadata when provided", async () => {
+    const user = userEvent.setup();
+    const onPauseToggle = jest.fn();
+    const onIntervalChange = jest.fn();
+
+    render(
+      <WidgetWrapper
+        title="Throughput"
+        onRefresh={jest.fn()}
+        autoRefresh={{
+          interval: "30s",
+          paused: false,
+          lastUpdatedLabel: "Last updated 30s ago",
+          onPauseToggle,
+          onIntervalChange,
+        }}
+      >
+        <div>Chart body</div>
+      </WidgetWrapper>
+    );
+
+    expect(screen.getByText("Last updated 30s ago")).toBeInTheDocument();
+    expect(screen.getByLabelText("Auto Refresh")).toHaveValue("30s");
+
+    await user.selectOptions(screen.getByLabelText("Auto Refresh"), "60s");
+    await user.click(screen.getByRole("button", { name: "Pause Auto Refresh" }));
+
+    expect(onIntervalChange).toHaveBeenCalledWith("60s");
+    expect(onPauseToggle).toHaveBeenCalledTimes(1);
   });
 });

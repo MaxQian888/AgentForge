@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   Responsive,
@@ -32,11 +32,180 @@ import { BurndownChartWidget, MetricCard, ThroughputChart } from "./widgets";
 type WidgetData = Record<string, unknown>;
 const ResponsiveGridLayout = WidthProvider(Responsive);
 
+type DashboardTimeRange = "all" | "7d" | "30d" | "current_sprint";
+type DashboardCategory = "all" | "tasks" | "reviews" | "agents" | "budget";
+
+interface DashboardFilterState {
+  timeRange: DashboardTimeRange;
+  category: DashboardCategory;
+}
+
+interface PersistedLayoutItem {
+  id: string;
+  x: number;
+  y: number;
+  w: number;
+  h: number;
+}
+
+interface PersistedDashboardLayout {
+  items?: PersistedLayoutItem[];
+  filters?: Partial<DashboardFilterState>;
+}
+
+interface DashboardAlertItem {
+  id: string;
+  priority: number;
+  title: string;
+  message: string;
+  href: string;
+  actionLabel: string;
+}
+
+const DEFAULT_FILTERS: DashboardFilterState = {
+  timeRange: "all",
+  category: "all",
+};
+
+type AutoRefreshInterval = "30s" | "60s" | "300s" | "off";
+
+const DEFAULT_AUTO_REFRESH_INTERVAL: AutoRefreshInterval = "30s";
+const AUTO_REFRESH_LABELS: Record<AutoRefreshInterval, string> = {
+  "30s": "30s",
+  "60s": "60s",
+  "300s": "5m",
+  off: "Off",
+};
+
+function toAutoRefreshMs(interval: AutoRefreshInterval) {
+  switch (interval) {
+    case "60s":
+      return 60_000;
+    case "300s":
+      return 300_000;
+    case "off":
+      return null;
+    case "30s":
+    default:
+      return 30_000;
+  }
+}
+
 interface WidgetPosition {
   x: number;
   y: number;
   w: number;
   h: number;
+}
+
+function readPersistedDashboardLayout(
+  layout: unknown,
+): { items: PersistedLayoutItem[]; filters: DashboardFilterState } {
+  if (Array.isArray(layout)) {
+    return {
+      items: layout as PersistedLayoutItem[],
+      filters: DEFAULT_FILTERS,
+    };
+  }
+
+  if (!layout || typeof layout !== "object") {
+    return {
+      items: [],
+      filters: DEFAULT_FILTERS,
+    };
+  }
+
+  const candidate = layout as PersistedDashboardLayout;
+  return {
+    items: Array.isArray(candidate.items)
+      ? (candidate.items as PersistedLayoutItem[])
+      : [],
+    filters: {
+      timeRange:
+        candidate.filters?.timeRange ?? DEFAULT_FILTERS.timeRange,
+      category: candidate.filters?.category ?? DEFAULT_FILTERS.category,
+    },
+  };
+}
+
+function serializeDashboardLayout(
+  items: PersistedLayoutItem[],
+  filters: DashboardFilterState,
+) {
+  if (
+    filters.timeRange === DEFAULT_FILTERS.timeRange &&
+    filters.category === DEFAULT_FILTERS.category
+  ) {
+    return items;
+  }
+
+  return {
+    items,
+    filters,
+  };
+}
+
+function widgetSupportsTimeRange(widgetType: string) {
+  return widgetType === "throughput_chart" || widgetType === "burndown";
+}
+
+function widgetSupportsCategory(widgetType: string) {
+  return widgetType !== "budget_consumption";
+}
+
+function mergeWidgetConfig(
+  widgetType: string,
+  config: unknown,
+  filters: DashboardFilterState,
+) {
+  const baseConfig =
+    typeof config === "object" && config ? { ...(config as Record<string, unknown>) } : {};
+
+  if (widgetSupportsTimeRange(widgetType) && filters.timeRange !== "all") {
+    baseConfig.range = filters.timeRange;
+  }
+
+  if (widgetSupportsCategory(widgetType) && filters.category !== "all") {
+    baseConfig.category = filters.category;
+  }
+
+  return baseConfig;
+}
+
+function buildWidgetRequestConfig(
+  widgetType: string,
+  config: unknown,
+  filters: DashboardFilterState,
+) {
+  const merged = mergeWidgetConfig(widgetType, config, filters);
+  delete merged.autoRefreshInterval;
+  delete merged.autoRefreshPaused;
+  return merged;
+}
+
+function getAutoRefreshInterval(config: unknown): AutoRefreshInterval {
+  if (
+    config &&
+    typeof config === "object" &&
+    typeof (config as Record<string, unknown>).autoRefreshInterval === "string"
+  ) {
+    return (config as Record<string, unknown>)
+      .autoRefreshInterval as AutoRefreshInterval;
+  }
+
+  return DEFAULT_AUTO_REFRESH_INTERVAL;
+}
+
+function getAutoRefreshPaused(config: unknown) {
+  if (
+    config &&
+    typeof config === "object" &&
+    typeof (config as Record<string, unknown>).autoRefreshPaused === "boolean"
+  ) {
+    return Boolean((config as Record<string, unknown>).autoRefreshPaused);
+  }
+
+  return false;
 }
 
 function toLayoutItem(id: string, position: WidgetPosition): LayoutItem {
@@ -88,12 +257,20 @@ function isWidgetEmpty(widgetType: string, data: WidgetData | undefined) {
 function renderWidgetBody(
   widgetType: string,
   data: WidgetData | undefined,
+  config: unknown,
   t: ReturnType<typeof useTranslations>
 ) {
   if (widgetType === "throughput_chart") {
+    const chartType =
+      config &&
+      typeof config === "object" &&
+      (config as Record<string, unknown>).chartType === "line"
+        ? "line"
+        : "bar";
     return (
       <ThroughputChart
         data={(data?.points as Array<{ date: string; count: number }>) ?? []}
+        chartType={chartType}
       />
     );
   }
@@ -166,6 +343,43 @@ function renderWidgetBody(
   );
 }
 
+function validateWidgetConfig(
+  widgetType: string,
+  config: Record<string, unknown>,
+) {
+  const range = typeof config.range === "string" ? config.range : undefined;
+  const groupBy =
+    typeof config.groupBy === "string" ? config.groupBy : undefined;
+  const chartType =
+    typeof config.chartType === "string" ? config.chartType : undefined;
+
+  if (
+    (widgetType === "throughput_chart" || widgetType === "burndown") &&
+    range &&
+    !["7d", "14d", "30d", "current_sprint"].includes(range)
+  ) {
+    return "widget.config.invalid";
+  }
+
+  if (
+    (widgetType === "throughput_chart" || widgetType === "burndown") &&
+    groupBy &&
+    !["day", "week"].includes(groupBy)
+  ) {
+    return "widget.config.invalid";
+  }
+
+  if (
+    widgetType === "throughput_chart" &&
+    chartType &&
+    !["bar", "line"].includes(chartType)
+  ) {
+    return "widget.config.invalid";
+  }
+
+  return null;
+}
+
 export function DashboardGrid({
   projectId,
   dashboard,
@@ -196,12 +410,104 @@ export function DashboardGrid({
     null
   );
   const [configDraft, setConfigDraft] = useState<Record<string, unknown>>({});
+  const persistedLayout = useMemo(
+    () => readPersistedDashboardLayout(dashboard.layout),
+    [dashboard.layout],
+  );
+  const [filterDraft, setFilterDraft] = useState<{
+    dashboardId: string;
+    filters: DashboardFilterState;
+    dirty: boolean;
+  }>(() => ({
+    dashboardId: dashboard.id,
+    filters: persistedLayout.filters,
+    dirty: false,
+  }));
+  const globalFilters =
+    filterDraft.dashboardId === dashboard.id && filterDraft.dirty
+      ? filterDraft.filters
+      : persistedLayout.filters;
+  const [lastUpdatedByWidgetId, setLastUpdatedByWidgetId] = useState<
+    Record<string, number>
+  >({});
+  const [dismissedAlertState, setDismissedAlertState] = useState<{
+    dashboardId: string;
+    ids: string[];
+  }>({
+    dashboardId: dashboard.id,
+    ids: [],
+  });
 
+  const performWidgetFetch = useCallback(
+    async (
+      widget: DashboardWidget,
+      options?: {
+        trackTimestamp?: boolean;
+      },
+    ) => {
+      if (options?.trackTimestamp) {
+        setLastUpdatedByWidgetId((current) => ({
+          ...current,
+          [widget.id]: Date.now(),
+        }));
+      }
+
+      await fetchWidgetData(
+        projectId,
+        widget.widgetType,
+        buildWidgetRequestConfig(widget.widgetType, widget.config, globalFilters),
+      );
+    },
+    [fetchWidgetData, globalFilters, projectId],
+  );
+
+  const refreshWidget = useCallback(async (widget: DashboardWidget) => {
+    await performWidgetFetch(widget, { trackTimestamp: true });
+  }, [performWidgetFetch]);
   useEffect(() => {
     for (const widget of widgets) {
-      void fetchWidgetData(projectId, widget.widgetType, widget.config);
+      void fetchWidgetData(
+        projectId,
+        widget.widgetType,
+        buildWidgetRequestConfig(widget.widgetType, widget.config, globalFilters),
+      );
     }
-  }, [fetchWidgetData, projectId, widgets]);
+  }, [fetchWidgetData, globalFilters, projectId, widgets]);
+
+  useEffect(() => {
+    const cleanups: Array<() => void> = [];
+
+    widgets.forEach((widget, index) => {
+      const interval = getAutoRefreshInterval(widget.config);
+      const paused = getAutoRefreshPaused(widget.config);
+      const intervalMs = toAutoRefreshMs(interval);
+
+      if (paused || intervalMs == null) {
+        return;
+      }
+
+      let repeatingTimer: ReturnType<typeof setInterval> | null = null;
+      const staggerMs = index * 500;
+      const initialDelay = intervalMs + staggerMs;
+      const initialTimer = setTimeout(() => {
+        void refreshWidget(widget);
+        repeatingTimer = setInterval(() => {
+          void refreshWidget(widget);
+        }, intervalMs);
+      }, initialDelay);
+
+      cleanups.push(() => {
+        clearTimeout(initialTimer);
+        if (repeatingTimer) {
+          clearInterval(repeatingTimer);
+        }
+      });
+    });
+
+    return () => {
+      cleanups.forEach((cleanup) => cleanup());
+    };
+  }, [globalFilters, projectId, refreshWidget, widgets]);
 
   const items = useMemo(
     () =>
@@ -234,6 +540,9 @@ export function DashboardGrid({
     () => widgets.find((widget) => widget.id === configuringWidgetId) ?? null,
     [configuringWidgetId, widgets]
   );
+  const configValidationMessage = configuringWidget
+    ? validateWidgetConfig(configuringWidget.widgetType, configDraft)
+    : null;
 
   const currentPositions = useMemo(
     () =>
@@ -269,11 +578,12 @@ export function DashboardGrid({
           })
         )
       );
+      const nextItems = widgets.map((item) => ({
+        id: item.id,
+        ...(draft[item.id] ?? normalizePosition(item.position)),
+      }));
       await updateDashboard(projectId, dashboard.id, {
-        layout: widgets.map((item) => ({
-          id: item.id,
-          ...(draft[item.id] ?? normalizePosition(item.position)),
-        })),
+        layout: serializeDashboardLayout(nextItems, globalFilters),
       });
       setLayoutStatus("saved");
     } catch {
@@ -294,6 +604,78 @@ export function DashboardGrid({
     await persistLayoutDraft(draft);
   };
 
+  const persistFilters = async (nextFilters: DashboardFilterState) => {
+    setFilterDraft({
+      dashboardId: dashboard.id,
+      filters: nextFilters,
+      dirty: true,
+    });
+    setLayoutStatus("saving");
+
+    try {
+      const nextItems = widgets.map((item) => ({
+        id: item.id,
+        ...(currentPositions[item.id] ?? normalizePosition(item.position)),
+      }));
+      await updateDashboard(projectId, dashboard.id, {
+        layout: serializeDashboardLayout(nextItems, nextFilters),
+      });
+      setLayoutStatus("saved");
+    } catch {
+      setLayoutStatus("error");
+    }
+  };
+
+  const activeFilterSummary =
+    globalFilters.category !== "all" || globalFilters.timeRange !== "all"
+      ? t("widget.filter.applied", {
+          category: t(`widget.filter.category.${globalFilters.category}`),
+          timeRange: t(`widget.filter.timeRange.${globalFilters.timeRange}`),
+        })
+      : null;
+  const alerts = useMemo<DashboardAlertItem[]>(() => {
+    const dismissedAlertIds =
+      dismissedAlertState.dashboardId === dashboard.id
+        ? dismissedAlertState.ids
+        : [];
+    const nextAlerts: DashboardAlertItem[] = [];
+
+    items.forEach(({ widget, data }) => {
+      if (widget.widgetType === "budget_consumption") {
+        const spent = Number(data?.spent ?? 0);
+        const allocated = Number(data?.allocated ?? 0);
+        if (allocated > 0 && spent / allocated >= 0.9) {
+          nextAlerts.push({
+            id: `${widget.id}:budget-threshold`,
+            priority: 100,
+            title: t("widget.alert.budget.title"),
+            message: t("widget.alert.budget.message"),
+            href: "/cost",
+            actionLabel: t("widget.alert.budget.action"),
+          });
+        }
+      }
+
+      if (widget.widgetType === "blocker_count") {
+        const count = Number(data?.count ?? 0);
+        if (count > 0) {
+          nextAlerts.push({
+            id: `${widget.id}:blockers`,
+            priority: 50,
+            title: t("widget.alert.blockers.title"),
+            message: t("widget.alert.blockers.message"),
+            href: `/project?id=${projectId}`,
+            actionLabel: t("widget.alert.blockers.action"),
+          });
+        }
+      }
+    });
+
+    return nextAlerts
+      .filter((alert) => !dismissedAlertIds.includes(alert.id))
+      .sort((left, right) => right.priority - left.priority);
+  }, [dashboard.id, dismissedAlertState.dashboardId, dismissedAlertState.ids, items, projectId, t]);
+
   const openWidgetConfig = (widget: DashboardWidget) => {
     setConfigDraft(
       typeof widget.config === "object" && widget.config
@@ -310,6 +692,107 @@ export function DashboardGrid({
         <Button type="button" variant="outline" onClick={() => setAddOpen(true)}>
           {t("widget.addWidget")}
         </Button>
+      </div>
+
+      {alerts.length > 0 ? (
+        <div className="space-y-3">
+          {alerts.map((alert) => (
+            <div
+              key={alert.id}
+              className="rounded-lg border border-amber-300 bg-amber-50 p-4 shadow-sm"
+            >
+              <div className="flex items-start justify-between gap-4">
+                <div className="space-y-1">
+                  <h3 className="text-sm font-semibold text-amber-950">
+                    {alert.title}
+                  </h3>
+                  <p className="text-sm text-amber-900">{alert.message}</p>
+                  <a
+                    href={alert.href}
+                    className="text-sm font-medium text-amber-900 underline underline-offset-4"
+                  >
+                    {alert.actionLabel}
+                  </a>
+                </div>
+                <Button
+                  type="button"
+                  size="sm"
+                  variant="outline"
+                  onClick={() =>
+                    setDismissedAlertState((current) => ({
+                      dashboardId: dashboard.id,
+                      ids:
+                        current.dashboardId === dashboard.id
+                          ? [...current.ids, alert.id]
+                          : [alert.id],
+                    }))
+                  }
+                >
+                  {t("widget.alert.dismiss")}
+                </Button>
+              </div>
+            </div>
+          ))}
+        </div>
+      ) : null}
+
+      <div className="flex flex-wrap items-end gap-3 rounded-lg border bg-card p-4">
+        <label className="flex min-w-[180px] flex-col gap-1.5 text-sm font-medium">
+          <span>{t("widget.filter.timeRange")}</span>
+          <select
+            aria-label={t("widget.filter.timeRange")}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm font-normal"
+            value={globalFilters.timeRange}
+            onChange={(event) =>
+              void persistFilters({
+                ...globalFilters,
+                timeRange: event.target.value as DashboardTimeRange,
+              })
+            }
+          >
+            <option value="all">{t("widget.filter.timeRange.all")}</option>
+            <option value="7d">{t("widget.filter.timeRange.7d")}</option>
+            <option value="30d">{t("widget.filter.timeRange.30d")}</option>
+            <option value="current_sprint">
+              {t("widget.filter.timeRange.current_sprint")}
+            </option>
+          </select>
+        </label>
+
+        <label className="flex min-w-[180px] flex-col gap-1.5 text-sm font-medium">
+          <span>{t("widget.filter.category")}</span>
+          <select
+            aria-label={t("widget.filter.category")}
+            className="h-9 rounded-md border border-input bg-background px-3 text-sm font-normal"
+            value={globalFilters.category}
+            onChange={(event) =>
+              void persistFilters({
+                ...globalFilters,
+                category: event.target.value as DashboardCategory,
+              })
+            }
+          >
+            <option value="all">{t("widget.filter.category.all")}</option>
+            <option value="tasks">{t("widget.filter.category.tasks")}</option>
+            <option value="reviews">{t("widget.filter.category.reviews")}</option>
+            <option value="agents">{t("widget.filter.category.agents")}</option>
+            <option value="budget">{t("widget.filter.category.budget")}</option>
+          </select>
+        </label>
+
+        {(globalFilters.timeRange !== "all" || globalFilters.category !== "all") && (
+          <Button
+            type="button"
+            variant="outline"
+            onClick={() => void persistFilters(DEFAULT_FILTERS)}
+          >
+            {t("widget.filter.clear")}
+          </Button>
+        )}
+
+        {activeFilterSummary ? (
+          <div className="text-sm text-muted-foreground">{activeFilterSummary}</div>
+        ) : null}
       </div>
 
       {layoutStatus === "saving" ? (
@@ -381,6 +864,10 @@ export function DashboardGrid({
                 ? "empty"
                 : "ready";
 
+          const autoRefreshInterval = getAutoRefreshInterval(widget.config);
+          const autoRefreshPaused = getAutoRefreshPaused(widget.config);
+          const lastUpdated = lastUpdatedByWidgetId[widget.id];
+
           return (
             <div key={widget.id}>
               <div className="dashboard-widget-handle mb-2 cursor-move text-xs font-medium text-muted-foreground">
@@ -394,18 +881,61 @@ export function DashboardGrid({
                     ? requestState.error ?? t("widget.errorFallback")
                     : undefined
                 }
+                autoRefresh={{
+                  interval: autoRefreshInterval,
+                  paused: autoRefreshPaused,
+                  lastUpdatedLabel: lastUpdated
+                    ? t("widget.lastUpdated", {
+                        time: AUTO_REFRESH_LABELS[autoRefreshInterval],
+                      })
+                    : undefined,
+                  onPauseToggle: async () => {
+                    await saveWidget(projectId, dashboard.id, {
+                      id: widget.id,
+                      widgetType: widget.widgetType,
+                      config: {
+                        ...(typeof widget.config === "object" && widget.config
+                          ? (widget.config as Record<string, unknown>)
+                          : {}),
+                        autoRefreshInterval,
+                        autoRefreshPaused: !autoRefreshPaused,
+                      },
+                      position,
+                    });
+                  },
+                  onIntervalChange: async (interval) => {
+                    await saveWidget(projectId, dashboard.id, {
+                      id: widget.id,
+                      widgetType: widget.widgetType,
+                      config: {
+                        ...(typeof widget.config === "object" && widget.config
+                          ? (widget.config as Record<string, unknown>)
+                          : {}),
+                        autoRefreshInterval: interval,
+                        autoRefreshPaused: autoRefreshPaused,
+                      },
+                      position,
+                    });
+                  },
+                }}
                 onRefresh={() =>
-                  void fetchWidgetData(projectId, widget.widgetType, widget.config)
+                  void refreshWidget(widget)
                 }
                 onRetry={() =>
-                  void fetchWidgetData(projectId, widget.widgetType, widget.config)
+                  void refreshWidget(widget)
                 }
                 onConfigure={() => openWidgetConfig(widget)}
                 onRemove={() =>
                   void deleteWidget(projectId, dashboard.id, widget.id)
                 }
               >
-                {renderWidgetBody(widget.widgetType, data, t)}
+                {globalFilters.category !== "all" &&
+                !widgetSupportsCategory(widget.widgetType) ? (
+                  <div className="mb-3 text-xs text-muted-foreground">
+                    {t("widget.filter.notApplicable")}
+                  </div>
+                ) : null}
+                {renderWidgetBody(widget.widgetType, data, widget.config, t)}
               </WidgetCard>
               <div className="mt-2 flex gap-2">
                 <Button
@@ -497,12 +1027,39 @@ export function DashboardGrid({
                   <option value="week">week</option>
                 </select>
               </div>
+              {configuringWidget?.widgetType === "throughput_chart" ? (
+                <div className="space-y-2">
+                  <Label htmlFor="widget-config-chart-type">
+                    {t("widget.config.chartType")}
+                  </Label>
+                  <select
+                    id="widget-config-chart-type"
+                    aria-label={t("widget.config.chartType")}
+                    className="h-9 rounded-md border border-input bg-background px-3 text-sm"
+                    value={String(configDraft.chartType ?? "")}
+                    onChange={(event) =>
+                      setConfigDraft((current) => ({
+                        ...current,
+                        chartType: event.target.value,
+                      }))
+                    }
+                  >
+                    <option value="bar">{t("widget.config.chartType.bar")}</option>
+                    <option value="line">{t("widget.config.chartType.line")}</option>
+                  </select>
+                </div>
+              ) : null}
             </div>
           ) : (
             <div className="text-sm text-muted-foreground">
               {t("widget.config.noExtraSettings")}
             </div>
           )}
+          {configValidationMessage ? (
+            <div className="text-sm text-destructive">
+              {t(configValidationMessage)}
+            </div>
+          ) : null}
 
           <DialogFooter>
             <Button
@@ -531,10 +1088,15 @@ export function DashboardGrid({
                 await fetchWidgetData(
                   projectId,
                   configuringWidget.widgetType,
-                  configDraft
+                  buildWidgetRequestConfig(
+                    configuringWidget.widgetType,
+                    configDraft,
+                    globalFilters
+                  )
                 );
                 setConfiguringWidgetId(null);
               }}
+              disabled={Boolean(configValidationMessage)}
             >
               {t("widget.saveConfig")}
             </Button>

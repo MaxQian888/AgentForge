@@ -4,13 +4,20 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/agentforge/im-bridge/core"
+)
+
+var errProjectScopeNotConfigured = errors.New(
+	"project scope is not configured; set AGENTFORGE_PROJECT_ID to a project UUID",
 )
 
 // AgentForgeClient communicates with the AgentForge Go backend API.
@@ -168,6 +175,41 @@ func (c *AgentForgeClient) DecomposeTask(ctx context.Context, taskID string) (*T
 	return &result, nil
 }
 
+func (c *AgentForgeClient) DecomposeTaskViaBridge(ctx context.Context, taskID, provider, model string) (*BridgeTaskDecompositionResponse, error) {
+	task, err := c.GetTask(ctx, taskID)
+	if err != nil {
+		return nil, fmt.Errorf("load task: %w", err)
+	}
+
+	body := map[string]string{
+		"task_id":     task.ID,
+		"title":       task.Title,
+		"description": task.Description,
+		"priority":    normalizeTaskPriority(task.Priority),
+	}
+	if strings.TrimSpace(provider) != "" {
+		body["provider"] = strings.TrimSpace(provider)
+	}
+	if strings.TrimSpace(model) != "" {
+		body["model"] = strings.TrimSpace(model)
+	}
+
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/ai/decompose", body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, c.readError(resp)
+	}
+	var result BridgeTaskDecompositionResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	result.ParentTask = *task
+	return &result, nil
+}
+
 // --- Agent operations ---
 
 // SpawnAgent spawns an AI agent for a task.
@@ -190,7 +232,11 @@ func (c *AgentForgeClient) SpawnAgent(ctx context.Context, taskID string) (*Task
 
 // ListProjectMembers returns project members that can be used for command-side assignee resolution.
 func (c *AgentForgeClient) ListProjectMembers(ctx context.Context) ([]Member, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/members", c.projectID), nil)
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/members", projectID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -219,7 +265,349 @@ func (c *AgentForgeClient) GetAgentPoolStatus(ctx context.Context) (*PoolStatus,
 	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
+	if status.ActiveAgents == 0 && status.Active != 0 {
+		status.ActiveAgents = status.Active
+	}
+	if status.MaxAgents == 0 && status.Max != 0 {
+		status.MaxAgents = status.Max
+	}
 	return &status, nil
+}
+
+func (c *AgentForgeClient) GetBridgePoolStatus(ctx context.Context) (*BridgePoolStatus, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/bridge/pool", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var status BridgePoolStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &status, nil
+}
+
+func (c *AgentForgeClient) GetBridgeHealth(ctx context.Context) (*BridgeHealthStatus, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/bridge/health", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var status BridgeHealthStatus
+	if err := json.NewDecoder(resp.Body).Decode(&status); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &status, nil
+}
+
+func (c *AgentForgeClient) GetBridgeRuntimes(ctx context.Context) (*BridgeRuntimeCatalog, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/bridge/runtimes", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var catalog BridgeRuntimeCatalog
+	if err := json.NewDecoder(resp.Body).Decode(&catalog); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &catalog, nil
+}
+
+func (c *AgentForgeClient) ListBridgeTools(ctx context.Context) ([]BridgeTool, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/bridge/tools", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var payload struct {
+		Tools []BridgeTool `json:"tools"`
+	}
+	if err := json.NewDecoder(resp.Body).Decode(&payload); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return payload.Tools, nil
+}
+
+func (c *AgentForgeClient) InstallBridgeTool(ctx context.Context, manifestURL string) (*BridgePluginRecord, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/bridge/tools/install", map[string]string{
+		"manifest_url": manifestURL,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, c.readError(resp)
+	}
+	var record BridgePluginRecord
+	if err := json.NewDecoder(resp.Body).Decode(&record); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &record, nil
+}
+
+func (c *AgentForgeClient) UninstallBridgeTool(ctx context.Context, pluginID string) (*BridgePluginRecord, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/bridge/tools/uninstall", map[string]string{
+		"plugin_id": pluginID,
+	})
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, c.readError(resp)
+	}
+	var record BridgePluginRecord
+	if err := json.NewDecoder(resp.Body).Decode(&record); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &record, nil
+}
+
+func (c *AgentForgeClient) RestartBridgeTool(ctx context.Context, pluginID string) (*BridgePluginRecord, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/bridge/tools/"+pluginID+"/restart", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, c.readError(resp)
+	}
+	var record BridgePluginRecord
+	if err := json.NewDecoder(resp.Body).Decode(&record); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &record, nil
+}
+
+func (c *AgentForgeClient) GenerateTaskAI(ctx context.Context, prompt, provider, model string) (*TaskAIGenerateResponse, error) {
+	body := map[string]string{"prompt": prompt}
+	if strings.TrimSpace(provider) != "" {
+		body["provider"] = strings.TrimSpace(provider)
+	}
+	if strings.TrimSpace(model) != "" {
+		body["model"] = strings.TrimSpace(model)
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/ai/generate", body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, c.readError(resp)
+	}
+	var result TaskAIGenerateResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &result, nil
+}
+
+func (c *AgentForgeClient) ClassifyTaskAI(ctx context.Context, text string, candidates []string) (*TaskAIClassifyResponse, error) {
+	body := map[string]any{"text": text}
+	if len(candidates) > 0 {
+		body["candidates"] = candidates
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/ai/classify-intent", body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, c.readError(resp)
+	}
+	var result TaskAIClassifyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &result, nil
+}
+
+// GetAgentRun returns a single agent run summary.
+func (c *AgentForgeClient) GetAgentRun(ctx context.Context, runID string) (*AgentRunSummary, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/agents/"+runID, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var run AgentRunSummary
+	if err := json.NewDecoder(resp.Body).Decode(&run); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &run, nil
+}
+
+func (c *AgentForgeClient) PauseAgentRun(ctx context.Context, runID string) (*AgentRunSummary, error) {
+	return c.agentRunLifecycleAction(ctx, runID, "pause")
+}
+
+func (c *AgentForgeClient) ResumeAgentRun(ctx context.Context, runID string) (*AgentRunSummary, error) {
+	return c.agentRunLifecycleAction(ctx, runID, "resume")
+}
+
+func (c *AgentForgeClient) KillAgentRun(ctx context.Context, runID string) (*AgentRunSummary, error) {
+	return c.agentRunLifecycleAction(ctx, runID, "kill")
+}
+
+func (c *AgentForgeClient) agentRunLifecycleAction(ctx context.Context, runID, action string) (*AgentRunSummary, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/agents/%s/%s", runID, action), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var run AgentRunSummary
+	if err := json.NewDecoder(resp.Body).Decode(&run); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &run, nil
+}
+
+// TransitionTaskStatus moves a task to a new workflow status.
+func (c *AgentForgeClient) TransitionTaskStatus(ctx context.Context, taskID, status string) (*Task, error) {
+	body := map[string]string{"status": status}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/tasks/"+taskID+"/transition", body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var task Task
+	if err := json.NewDecoder(resp.Body).Decode(&task); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &task, nil
+}
+
+// ListQueueEntries returns project-scoped queue entries.
+func (c *AgentForgeClient) ListQueueEntries(ctx context.Context, status string) ([]QueueEntry, error) {
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	query := url.Values{}
+	if trimmed := strings.TrimSpace(status); trimmed != "" {
+		query.Set("status", trimmed)
+	}
+	path := fmt.Sprintf("/api/v1/projects/%s/queue", projectID)
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var entries []QueueEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return entries, nil
+}
+
+// CancelQueueEntry cancels a queued admission entry.
+func (c *AgentForgeClient) CancelQueueEntry(ctx context.Context, entryID, reason string) (*QueueEntry, error) {
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	query := url.Values{}
+	if trimmed := strings.TrimSpace(reason); trimmed != "" {
+		query.Set("reason", trimmed)
+	}
+	path := fmt.Sprintf("/api/v1/projects/%s/queue/%s", projectID, entryID)
+	if encoded := query.Encode(); encoded != "" {
+		path += "?" + encoded
+	}
+	resp, err := c.doRequest(ctx, http.MethodDelete, path, nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var entry QueueEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &entry, nil
+}
+
+// SearchProjectMemory searches project-scoped memory entries.
+func (c *AgentForgeClient) SearchProjectMemory(ctx context.Context, queryText string, limit int) ([]MemoryEntry, error) {
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	query := url.Values{}
+	query.Set("q", strings.TrimSpace(queryText))
+	if limit > 0 {
+		query.Set("limit", strconv.Itoa(limit))
+	}
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/memory?%s", projectID, query.Encode()), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var entries []MemoryEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entries); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return entries, nil
+}
+
+// StoreProjectMemoryNote stores a lightweight project-scoped operator note.
+func (c *AgentForgeClient) StoreProjectMemoryNote(ctx context.Context, key, content string) (*MemoryEntry, error) {
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	body := map[string]any{
+		"scope":          "project",
+		"category":       "operator_note",
+		"key":            key,
+		"content":        content,
+		"relevanceScore": 0.5,
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/memory", projectID), body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, c.readError(resp)
+	}
+	var entry MemoryEntry
+	if err := json.NewDecoder(resp.Body).Decode(&entry); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &entry, nil
 }
 
 // --- Cost operations ---
@@ -577,6 +965,23 @@ func (c *AgentForgeClient) readError(resp *http.Response) error {
 	return fmt.Errorf("API error %d: %s", resp.StatusCode, string(body))
 }
 
+func normalizeTaskPriority(priority string) string {
+	switch strings.ToLower(strings.TrimSpace(priority)) {
+	case "critical", "high", "medium", "low":
+		return strings.ToLower(strings.TrimSpace(priority))
+	default:
+		return "medium"
+	}
+}
+
+func (c *AgentForgeClient) requireProjectScope() (string, error) {
+	projectID := strings.TrimSpace(c.projectID)
+	if projectID == "" {
+		return "", errProjectScopeNotConfigured
+	}
+	return projectID, nil
+}
+
 // --- Types ---
 
 // Task represents an AgentForge task.
@@ -606,6 +1011,19 @@ type TaskDecompositionResponse struct {
 	Subtasks   []TaskDecompositionItem `json:"subtasks"`
 }
 
+type BridgeTaskDecompositionItem struct {
+	Title         string `json:"title"`
+	Description   string `json:"description"`
+	Priority      string `json:"priority"`
+	ExecutionMode string `json:"executionMode"`
+}
+
+type BridgeTaskDecompositionResponse struct {
+	ParentTask Task                          `json:"-"`
+	Summary    string                        `json:"summary"`
+	Subtasks   []BridgeTaskDecompositionItem `json:"subtasks"`
+}
+
 // AgentRun represents an AI agent execution.
 type AgentRun struct {
 	ID       string  `json:"id"`
@@ -613,6 +1031,20 @@ type AgentRun struct {
 	MemberID string  `json:"memberId,omitempty"`
 	Status   string  `json:"status"`
 	CostUsd  float64 `json:"costUsd"`
+}
+
+type AgentRunSummary struct {
+	ID             string  `json:"id"`
+	TaskID         string  `json:"taskId"`
+	TaskTitle      string  `json:"taskTitle"`
+	MemberID       string  `json:"memberId,omitempty"`
+	Status         string  `json:"status"`
+	Runtime        string  `json:"runtime"`
+	Provider       string  `json:"provider"`
+	Model          string  `json:"model"`
+	CostUsd        float64 `json:"costUsd"`
+	CanResume      bool    `json:"canResume"`
+	LastActivityAt string  `json:"lastActivityAt"`
 }
 
 type DispatchOutcome struct {
@@ -627,16 +1059,124 @@ type TaskDispatchResponse struct {
 }
 
 type Member struct {
-	ID       string `json:"id"`
-	Name     string `json:"name"`
-	Type     string `json:"type"`
-	IsActive bool   `json:"isActive"`
+	ID         string   `json:"id"`
+	Name       string   `json:"name"`
+	Type       string   `json:"type"`
+	Role       string   `json:"role"`
+	Status     string   `json:"status"`
+	IMPlatform string   `json:"imPlatform,omitempty"`
+	IMUserID   string   `json:"imUserId,omitempty"`
+	Skills     []string `json:"skills,omitempty"`
+	IsActive   bool     `json:"isActive"`
+}
+
+type BridgeTool struct {
+	PluginID    string `json:"plugin_id"`
+	Name        string `json:"name"`
+	Description string `json:"description,omitempty"`
+}
+
+type BridgePluginMetadata struct {
+	ID      string `json:"id"`
+	Name    string `json:"name"`
+	Version string `json:"version"`
+}
+
+type BridgePluginRecord struct {
+	Metadata       BridgePluginMetadata `json:"metadata"`
+	LifecycleState string               `json:"lifecycle_state"`
+	RestartCount   int                  `json:"restart_count"`
+}
+
+type BridgePoolStatus struct {
+	Active        int  `json:"active"`
+	Max           int  `json:"max"`
+	WarmTotal     int  `json:"warm_total"`
+	WarmAvailable int  `json:"warm_available"`
+	Degraded      bool `json:"degraded"`
+}
+
+type BridgeHealthPool struct {
+	Active    int `json:"active"`
+	Available int `json:"available"`
+	Warm      int `json:"warm"`
+}
+
+type BridgeHealthStatus struct {
+	Status string           `json:"status"`
+	Pool   BridgeHealthPool `json:"pool"`
+}
+
+type BridgeRuntimeEntry struct {
+	Key             string `json:"key"`
+	Label           string `json:"label"`
+	DefaultProvider string `json:"default_provider"`
+	DefaultModel    string `json:"default_model"`
+	Available       bool   `json:"available"`
+}
+
+type BridgeRuntimeCatalog struct {
+	DefaultRuntime string               `json:"default_runtime"`
+	Runtimes       []BridgeRuntimeEntry `json:"runtimes"`
+}
+
+type TaskAIUsage struct {
+	InputTokens  int `json:"input_tokens"`
+	OutputTokens int `json:"output_tokens"`
+}
+
+type TaskAIGenerateResponse struct {
+	Text  string      `json:"text"`
+	Usage TaskAIUsage `json:"usage"`
+}
+
+type TaskAIClassifyResponse struct {
+	Intent     string  `json:"intent"`
+	Command    string  `json:"command"`
+	Args       string  `json:"args"`
+	Confidence float64 `json:"confidence"`
+	Reply      string  `json:"reply,omitempty"`
 }
 
 // PoolStatus represents the agent pool status.
 type PoolStatus struct {
-	ActiveAgents int `json:"active_agents"`
-	MaxAgents    int `json:"max_agents"`
+	ActiveAgents    int `json:"active_agents"`
+	MaxAgents       int `json:"max_agents"`
+	Active          int `json:"active"`
+	Max             int `json:"max"`
+	Available       int `json:"available"`
+	PausedResumable int `json:"pausedResumable"`
+	Queued          int `json:"queued"`
+}
+
+type QueueEntry struct {
+	EntryID    string  `json:"entryId"`
+	ProjectID  string  `json:"projectId"`
+	TaskID     string  `json:"taskId"`
+	MemberID   string  `json:"memberId"`
+	Status     string  `json:"status"`
+	Reason     string  `json:"reason"`
+	Runtime    string  `json:"runtime"`
+	Provider   string  `json:"provider"`
+	Model      string  `json:"model"`
+	RoleID     string  `json:"roleId,omitempty"`
+	Priority   int     `json:"priority"`
+	BudgetUSD  float64 `json:"budgetUsd"`
+	AgentRunID *string `json:"agentRunId,omitempty"`
+}
+
+type MemoryEntry struct {
+	ID             string  `json:"id"`
+	ProjectID      string  `json:"projectId"`
+	Scope          string  `json:"scope"`
+	RoleID         string  `json:"roleId"`
+	Category       string  `json:"category"`
+	Key            string  `json:"key"`
+	Content        string  `json:"content"`
+	Metadata       string  `json:"metadata"`
+	RelevanceScore float64 `json:"relevanceScore"`
+	AccessCount    int     `json:"accessCount"`
+	CreatedAt      string  `json:"createdAt"`
 }
 
 // CostStats represents project cost statistics.

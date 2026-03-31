@@ -5,11 +5,14 @@ import type { EventStreamer } from "../ws/event-stream.js";
 
 type UnknownRecord = Record<string, unknown>;
 type EventSink = Pick<EventStreamer, "send">;
-type CommandRuntimeKey = "codex" | "opencode";
+type CommandRuntimeKey = "codex" | "opencode" | "cursor" | "gemini" | "qoder" | "iflow";
 
 export type CommandRuntimeRunner = (params: {
   runtime: CommandRuntimeKey;
   command: string;
+  commandArgs?: string[];
+  commandEnv?: Record<string, string>;
+  stdinPayload?: string;
   req: ExecuteRequest;
   systemPrompt: string;
   abortSignal: AbortSignal;
@@ -17,6 +20,9 @@ export type CommandRuntimeRunner = (params: {
 
 export interface CommandRuntimeDeps {
   command: string;
+  commandArgs?: string[];
+  commandEnv?: Record<string, string>;
+  stdinPayload?: string;
   commandRuntimeRunner?: CommandRuntimeRunner;
   now?: () => number;
 }
@@ -34,6 +40,9 @@ export async function streamCommandRuntime(
   for await (const event of runner({
     runtime: req.runtime as CommandRuntimeKey,
     command: deps.command,
+    commandArgs: deps.commandArgs,
+    commandEnv: deps.commandEnv,
+    stdinPayload: deps.stdinPayload,
     req,
     systemPrompt,
     abortSignal: runtime.abortController.signal,
@@ -141,6 +150,61 @@ function emitCommandRuntimeEvent(
       });
       return;
     }
+    case "reasoning":
+      if (typeof event.content === "string" && event.content.length > 0) {
+        streamer.send({
+          task_id: req.task_id,
+          session_id: req.session_id,
+          timestamp_ms: now(),
+          type: "reasoning",
+          data: {
+            content: event.content,
+          },
+        });
+      }
+      return;
+    case "progress":
+      streamer.send({
+        task_id: req.task_id,
+        session_id: req.session_id,
+        timestamp_ms: now(),
+        type: "progress",
+        data: {
+          tool_name: typeof event.tool_name === "string" ? event.tool_name : undefined,
+          progress_text:
+            typeof event.progress_text === "string" ? event.progress_text : undefined,
+          item_type: typeof event.item_type === "string" ? event.item_type : undefined,
+          partial_output: event.partial_output,
+        },
+      });
+      return;
+    case "todo_update":
+      streamer.send({
+        task_id: req.task_id,
+        session_id: req.session_id,
+        timestamp_ms: now(),
+        type: "todo_update",
+        data: {
+          todos: Array.isArray(event.todos) ? event.todos : [],
+        },
+      });
+      return;
+    case "rate_limit":
+      streamer.send({
+        task_id: req.task_id,
+        session_id: req.session_id,
+        timestamp_ms: now(),
+        type: "rate_limit",
+        data: {
+          utilization:
+            typeof event.utilization === "number" ? event.utilization : undefined,
+          reset_at:
+            typeof event.reset_at === "string" || typeof event.reset_at === "number"
+              ? event.reset_at
+              : undefined,
+        },
+      });
+      return;
     case "error":
       if (typeof event.message === "string") {
         throw new Error(event.message);
@@ -166,15 +230,19 @@ function emitCommandRuntimeEvent(
 async function* spawnCommandRuntime(params: {
   runtime: CommandRuntimeKey;
   command: string;
+  commandArgs?: string[];
+  commandEnv?: Record<string, string>;
+  stdinPayload?: string;
   req: ExecuteRequest;
   systemPrompt: string;
   abortSignal: AbortSignal;
 }): AsyncGenerator<UnknownRecord, void> {
   const proc = Bun.spawn({
-    cmd: [params.command],
+    cmd: [params.command, ...(params.commandArgs ?? [])],
     cwd: params.req.worktree_path,
     env: {
       ...process.env,
+      ...(params.commandEnv ?? {}),
       AGENTFORGE_RUNTIME: params.runtime,
       AGENTFORGE_MODEL: params.req.model ?? "",
       AGENTFORGE_PERMISSION_MODE: params.req.permission_mode,
@@ -194,20 +262,24 @@ async function* spawnCommandRuntime(params: {
   params.abortSignal.addEventListener("abort", onAbort, { once: true });
 
   try {
-    const input = JSON.stringify({
-      task_id: params.req.task_id,
-      session_id: params.req.session_id,
-      prompt: params.req.prompt,
-      system_prompt: params.systemPrompt,
-      worktree_path: params.req.worktree_path,
-      branch_name: params.req.branch_name,
-      model: params.req.model,
-      allowed_tools: params.req.allowed_tools,
-      permission_mode: params.req.permission_mode,
-      budget_usd: params.req.budget_usd,
-      max_turns: params.req.max_turns,
-    });
-    proc.stdin.write(`${input}\n`);
+    if (params.stdinPayload !== "") {
+      const input =
+        params.stdinPayload ??
+        JSON.stringify({
+          task_id: params.req.task_id,
+          session_id: params.req.session_id,
+          prompt: params.req.prompt,
+          system_prompt: params.systemPrompt,
+          worktree_path: params.req.worktree_path,
+          branch_name: params.req.branch_name,
+          model: params.req.model,
+          allowed_tools: params.req.allowed_tools,
+          permission_mode: params.req.permission_mode,
+          budget_usd: params.req.budget_usd,
+          max_turns: params.req.max_turns,
+        });
+      proc.stdin.write(`${input}\n`);
+    }
     proc.stdin.end();
 
     if (proc.stdout) {

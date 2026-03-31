@@ -10,11 +10,18 @@ import (
 )
 
 type SkillCatalogEntry struct {
-	Path        string `json:"path"`
-	Label       string `json:"label"`
-	Description string `json:"description,omitempty"`
-	Source      string `json:"source"`
-	SourceRoot  string `json:"sourceRoot"`
+	Path             string   `json:"path"`
+	Label            string   `json:"label"`
+	Description      string   `json:"description,omitempty"`
+	DisplayName      string   `json:"displayName,omitempty"`
+	ShortDescription string   `json:"shortDescription,omitempty"`
+	DefaultPrompt    string   `json:"defaultPrompt,omitempty"`
+	AvailableParts   []string `json:"availableParts,omitempty"`
+	ReferenceCount   int      `json:"referenceCount,omitempty"`
+	ScriptCount      int      `json:"scriptCount,omitempty"`
+	AssetCount       int      `json:"assetCount,omitempty"`
+	Source           string   `json:"source"`
+	SourceRoot       string   `json:"sourceRoot"`
 }
 
 func DiscoverSkillCatalog(root string) ([]SkillCatalogEntry, error) {
@@ -56,10 +63,6 @@ func DiscoverSkillCatalog(root string) ([]SkillCatalogEntry, error) {
 }
 
 func buildSkillCatalogEntry(root, skillFile string) (SkillCatalogEntry, error) {
-	content, err := os.ReadFile(skillFile)
-	if err != nil {
-		return SkillCatalogEntry{}, err
-	}
 	relDir, err := filepath.Rel(root, filepath.Dir(skillFile))
 	if err != nil {
 		return SkillCatalogEntry{}, err
@@ -70,18 +73,24 @@ func buildSkillCatalogEntry(root, skillFile string) (SkillCatalogEntry, error) {
 		path += "/" + normalizedRelDir
 	}
 
-	document := parseSkillDocument(string(content))
-	label := strings.TrimSpace(document.Frontmatter.Name)
-	if label == "" {
-		label = humanizeSkillLabel(normalizedRelDir)
+	document, err := readSkillPackageDocument(root, path)
+	if err != nil {
+		return SkillCatalogEntry{}, err
 	}
 
 	return SkillCatalogEntry{
-		Path:        path,
-		Label:       label,
-		Description: strings.TrimSpace(document.Frontmatter.Description),
-		Source:      "repo-local",
-		SourceRoot:  "skills",
+		Path:             path,
+		Label:            skillLabel(document),
+		Description:      skillDescription(document),
+		DisplayName:      document.Interface.DisplayName,
+		ShortDescription: document.Interface.ShortDescription,
+		DefaultPrompt:    document.Interface.DefaultPrompt,
+		AvailableParts:   append([]string(nil), document.AvailableParts...),
+		ReferenceCount:   document.ReferenceCount,
+		ScriptCount:      document.ScriptCount,
+		AssetCount:       document.AssetCount,
+		Source:           "repo-local",
+		SourceRoot:       "skills",
 	}, nil
 }
 

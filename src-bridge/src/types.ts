@@ -1,4 +1,11 @@
-export type AgentRuntimeKey = "claude_code" | "codex" | "opencode";
+export type AgentRuntimeKey =
+  | "claude_code"
+  | "codex"
+  | "opencode"
+  | "cursor"
+  | "gemini"
+  | "qoder"
+  | "iflow";
 export type DecomposeExecutionMode = "human" | "agent";
 export type HookName =
   | "PreToolUse"
@@ -95,6 +102,7 @@ export interface DecomposeTaskRequest {
   priority: "critical" | "high" | "medium" | "low";
   provider?: string;
   model?: string;
+  context?: unknown;
 }
 
 /** One child task returned from decomposition. */
@@ -142,6 +150,13 @@ export interface RoleExecutionSkill {
   label: string;
   description?: string;
   instructions?: string;
+  display_name?: string;
+  short_description?: string;
+  default_prompt?: string;
+  available_parts?: string[];
+  reference_count?: number;
+  script_count?: number;
+  asset_count?: number;
   source?: string;
   source_root?: string;
   origin?: string;
@@ -245,6 +260,7 @@ export interface RuntimeCatalogEntry {
   defaultProvider: string;
   compatibleProviders: string[];
   defaultModel?: string;
+  modelOptions?: string[];
   available: boolean;
   diagnostics: RuntimeDiagnostic[];
   supportedFeatures: string[];
@@ -413,10 +429,18 @@ export interface OpenCodeContinuityState {
   revert_message_ids?: string[];
 }
 
+export interface CliRuntimeContinuityState {
+  runtime: "cursor" | "gemini" | "qoder" | "iflow";
+  resume_ready: boolean;
+  captured_at: number;
+  blocking_reason?: ResumeBlockingReason;
+}
+
 export type RuntimeContinuityState =
   | ClaudeContinuityState
   | CodexContinuityState
-  | OpenCodeContinuityState;
+  | OpenCodeContinuityState
+  | CliRuntimeContinuityState;
 
 /** Session snapshot for persistence. */
 export interface SessionSnapshot {

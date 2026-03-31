@@ -92,6 +92,48 @@ func TestDiscoverSkillCatalogSkipsNonSkillFilesAndKeepsFallbackLabel(t *testing.
 	}
 }
 
+func TestDiscoverSkillCatalogReadsStandardSkillParts(t *testing.T) {
+	root := t.TempDir()
+	mustWriteSkill(t, filepath.Join(root, "design", "SKILL.md"), `# Design`)
+	mustWriteSkill(t, filepath.Join(root, "design", "agents", "openai.yaml"), `interface:
+  display_name: "Design Expert"
+  short_description: "Guide design system decisions."
+  default_prompt: "Use $design-expert to review the current design seam."
+`)
+	mustWriteSkill(t, filepath.Join(root, "design", "references", "surface-map.md"), `# Surface map`)
+	mustWriteSkill(t, filepath.Join(root, "design", "scripts", "lint-design.ps1"), `Write-Output "ok"`)
+	mustWriteSkill(t, filepath.Join(root, "design", "assets", "token.json"), `{}`)
+
+	entries, err := DiscoverSkillCatalog(root)
+	if err != nil {
+		t.Fatalf("DiscoverSkillCatalog() error = %v", err)
+	}
+	if len(entries) != 1 {
+		t.Fatalf("len(entries) = %d, want 1", len(entries))
+	}
+	if entries[0].Label != "Design Expert" {
+		t.Fatalf("entries[0].Label = %q, want interface display name fallback", entries[0].Label)
+	}
+	if entries[0].Description != "Guide design system decisions." {
+		t.Fatalf("entries[0].Description = %q, want interface short description fallback", entries[0].Description)
+	}
+	if entries[0].DisplayName != "Design Expert" {
+		t.Fatalf("entries[0].DisplayName = %q, want interface display name", entries[0].DisplayName)
+	}
+	if entries[0].ShortDescription != "Guide design system decisions." {
+		t.Fatalf("entries[0].ShortDescription = %q, want interface short description", entries[0].ShortDescription)
+	}
+	if entries[0].DefaultPrompt == "" {
+		t.Fatal("entries[0].DefaultPrompt = empty, want interface prompt")
+	}
+	if entries[0].ReferenceCount != 1 || entries[0].ScriptCount != 1 || entries[0].AssetCount != 1 {
+		t.Fatalf("resource counts = %#v, want 1 each", entries[0])
+	}
+	if got := entries[0].AvailableParts; len(got) != 4 || got[0] != "agents" || got[1] != "references" || got[2] != "scripts" || got[3] != "assets" {
+		t.Fatalf("AvailableParts = %v, want ordered standard parts", got)
+	}
+}
+
 func mustWriteSkill(t *testing.T, path, content string) {
 	t.Helper()
 	if err := os.MkdirAll(filepath.Dir(path), 0o755); err != nil {

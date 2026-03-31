@@ -27,6 +27,7 @@ const config: Config = {
     "lib/**/*.{js,jsx,ts,tsx}",
     "!**/*.d.ts",
     "!**/node_modules/**",
+    "!**/.worktrees/**",
     "!**/.next/**",
     "!**/coverage/**",
     "!**/out/**",
@@ -38,6 +39,7 @@ const config: Config = {
   // An array of regexp pattern strings used to skip coverage collection
   coveragePathIgnorePatterns: [
     "/node_modules/",
+    "/.worktrees/",
     "/.next/",
     "/out/",
     "/coverage/",
@@ -133,6 +135,7 @@ const config: Config = {
 
   // An array of regexp pattern strings, matched against all module paths before considered 'visible' to the module loader
   modulePathIgnorePatterns: [
+    "<rootDir>/.worktrees/",
     "<rootDir>/out/",
     "<rootDir>/.next/",
   ],
@@ -218,6 +221,7 @@ const config: Config = {
   // An array of regexp pattern strings that are matched against all test paths, matched tests are skipped
   testPathIgnorePatterns: [
     "/node_modules/",
+    "/.worktrees/",
     "/.next/",
     "/out/",
     "/app/page.test.tsx",

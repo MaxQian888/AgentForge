@@ -48,6 +48,15 @@ export function RuntimeSelector({
     [catalog, value.runtime],
   );
   const runtimeDiagnostics = selectedRuntime?.diagnostics ?? [];
+  const modelOptions = useMemo(
+    () =>
+      selectedRuntime?.modelOptions && selectedRuntime.modelOptions.length > 0
+        ? selectedRuntime.modelOptions
+        : selectedRuntime?.defaultModel
+          ? [selectedRuntime.defaultModel]
+          : [],
+    [selectedRuntime],
+  );
   const catalogDiagnostics = useMemo(
     () =>
       runtimeOptions.flatMap((option) =>
@@ -72,7 +81,10 @@ export function RuntimeSelector({
       selectedRuntime?.compatibleProviders.includes(value.provider)
         ? value.provider
         : fallback?.defaultProvider || "";
-    const nextModel = value.model || fallback?.defaultModel || "";
+    const nextModel =
+      modelOptions.includes(value.model)
+        ? value.model
+        : modelOptions[0] || fallback?.defaultModel || "";
 
     if (
       nextRuntime !== value.runtime ||
@@ -85,14 +97,17 @@ export function RuntimeSelector({
         model: nextModel,
       });
     }
-  }, [catalog, onChange, runtimeOptions, selectedRuntime, value.model, value.provider, value.runtime]);
+  }, [catalog, modelOptions, onChange, runtimeOptions, selectedRuntime, value.model, value.provider, value.runtime]);
 
   const handleRuntimeChange = (runtime: string) => {
     const nextRuntime = runtimeOptions.find((option) => option.runtime === runtime);
     onChange({
       runtime,
       provider: nextRuntime?.defaultProvider ?? "",
-      model: nextRuntime?.defaultModel ?? "",
+      model:
+        nextRuntime?.modelOptions && nextRuntime.modelOptions.length > 0
+          ? nextRuntime.modelOptions[0] ?? ""
+          : nextRuntime?.defaultModel ?? "",
     });
   };
 
@@ -145,12 +160,12 @@ export function RuntimeSelector({
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {selectedRuntime?.defaultModel ? (
-              <SelectItem value={selectedRuntime.defaultModel}>
-                {selectedRuntime.defaultModel}
+            {modelOptions.map((option) => (
+              <SelectItem key={option} value={option}>
+                {option}
               </SelectItem>
-            ) : null}
-            {value.model && selectedRuntime?.defaultModel !== value.model ? (
+            ))}
+            {value.model && !modelOptions.includes(value.model) ? (
               <SelectItem value={value.model}>{value.model}</SelectItem>
             ) : null}
           </SelectContent>

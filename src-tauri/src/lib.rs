@@ -23,8 +23,7 @@ use crate::runtime_logic::{
     build_plugin_runtime_summary, build_shell_action_event, classify_shell_action,
     compute_overall_status, compute_termination_outcome, menu_action_href,
     notification_outcome_event_type, notification_outcome_payload, now_string,
-    resolve_updater_pubkey, select_files_mode, should_suppress_notification,
-    window_state_payload,
+    resolve_updater_pubkey, select_files_mode, should_suppress_notification, window_state_payload,
     DesktopEventPayload, DesktopNotificationRequest, DesktopNotificationResult,
     DesktopRuntimeSnapshot, DesktopRuntimeUnit, DesktopWindowChromeState, PluginRuntimeSummary,
     RuntimeStatus, SelectFilesMode, ShellActionKind,
@@ -37,6 +36,9 @@ const BACKEND_LABEL: &str = "backend";
 const BACKEND_PORT: u16 = 7777;
 const BRIDGE_LABEL: &str = "bridge";
 const BRIDGE_PORT: u16 = 7778;
+const IM_BRIDGE_LABEL: &str = "im-bridge";
+const IM_BRIDGE_PORT: u16 = 7779;
+const IM_BRIDGE_TEST_PORT: u16 = 7780;
 const DESKTOP_EVENT_NAME: &str = "agentforge://desktop-event";
 const MAX_RESTART_ATTEMPTS: u32 = 2;
 const TRAY_ID: &str = "agentforge-main-tray";
@@ -82,6 +84,7 @@ impl ManagedRuntimeState {
 struct DesktopRuntimeState {
     backend: ManagedRuntimeState,
     bridge: ManagedRuntimeState,
+    im_bridge: ManagedRuntimeState,
     overall: RuntimeStatus,
 }
 
@@ -90,6 +93,7 @@ impl DesktopRuntimeState {
         Self {
             backend: ManagedRuntimeState::new(format!("http://127.0.0.1:{BACKEND_PORT}")),
             bridge: ManagedRuntimeState::new(format!("http://127.0.0.1:{BRIDGE_PORT}")),
+            im_bridge: ManagedRuntimeState::new(format!("http://127.0.0.1:{IM_BRIDGE_PORT}")),
             overall: RuntimeStatus::Stopped,
         }
     }
@@ -98,12 +102,17 @@ impl DesktopRuntimeState {
         match label {
             BACKEND_LABEL => &mut self.backend,
             BRIDGE_LABEL => &mut self.bridge,
+            IM_BRIDGE_LABEL => &mut self.im_bridge,
             _ => &mut self.backend,
         }
     }
 
     fn recalculate_overall(&mut self) {
-        self.overall = compute_overall_status(self.backend.status, self.bridge.status);
+        self.overall = compute_overall_status(
+            self.backend.status,
+            self.bridge.status,
+            self.im_bridge.status,
+        );
     }
 
     fn snapshot(&self) -> DesktopRuntimeSnapshot {
@@ -111,6 +120,7 @@ impl DesktopRuntimeState {
             overall: self.overall,
             backend: self.backend.snapshot(BACKEND_LABEL),
             bridge: self.bridge.snapshot(BRIDGE_LABEL),
+            im_bridge: self.im_bridge.snapshot(IM_BRIDGE_LABEL),
         }
     }
 }
@@ -218,14 +228,8 @@ impl DesktopRuntimeManager {
         payload: Option<Value>,
         status: impl Into<String>,
     ) {
-        let event = build_shell_action_event(
-            source,
-            action_id,
-            href,
-            payload,
-            status,
-            now_string(),
-        );
+        let event =
+            build_shell_action_event(source, action_id, href, payload, status, now_string());
 
         if let Err(error) = app.emit(DESKTOP_EVENT_NAME, event) {
             log::warn!("failed to emit desktop shell action event: {error}");
@@ -368,6 +372,7 @@ impl DesktopRuntimeManager {
         let backend_ready = self.start_backend(app.clone(), false).await;
         if backend_ready {
             let _ = self.start_bridge(app.clone(), false).await;
+            let _ = self.start_im_bridge(app.clone(), false).await;
         }
     }
 
@@ -489,6 +494,102 @@ impl DesktopRuntimeManager {
         }
     }
 
+    fn im_bridge_id_file<R: Runtime>(&self, app: &AppHandle<R>) -> String {
+        let primary_runtime_dir = app
+            .path()
+            .app_data_dir()
+            .unwrap_or_else(|_| std::env::temp_dir().join("agentforge-desktop"))
+            .join("runtime");
+        let fallback_runtime_dir = std::env::temp_dir().join("agentforge-desktop-runtime");
+
+        for candidate in [primary_runtime_dir, fallback_runtime_dir] {
+            if std::fs::create_dir_all(&candidate).is_ok() {
+                return candidate
+                    .join("im-bridge-id")
+                    .to_string_lossy()
+                    .into_owned();
+            }
+        }
+
+        std::env::temp_dir()
+            .join("agentforge-desktop-runtime")
+            .join("im-bridge-id")
+            .to_string_lossy()
+            .into_owned()
+    }
+
+    async fn start_im_bridge<R: Runtime>(&self, app: AppHandle<R>, is_restart: bool) -> bool {
+        let backend_url = self.backend_url();
+        let notify_port = IM_BRIDGE_PORT.to_string();
+        let test_port = IM_BRIDGE_TEST_PORT.to_string();
+        let im_bridge_id_file = self.im_bridge_id_file(&app);
+        let project_scope = std::env::var("AGENTFORGE_PROJECT_ID")
+            .ok()
+            .map(|value| value.trim().to_string())
+            .filter(|value| !value.is_empty());
+        let command = match app.shell().sidecar(IM_BRIDGE_LABEL) {
+            Ok(command) => {
+                let command = command
+                    .env("AGENTFORGE_API_BASE", &backend_url)
+                    .env("IM_BRIDGE_ID_FILE", &im_bridge_id_file)
+                    .env("IM_PLATFORM", "feishu")
+                    .env("IM_TRANSPORT_MODE", "stub")
+                    .env("NOTIFY_PORT", &notify_port)
+                    .env("TEST_PORT", &test_port);
+                if let Some(project_scope) = project_scope.as_deref() {
+                    command.env("AGENTFORGE_PROJECT_ID", project_scope)
+                } else {
+                    command
+                }
+            }
+            Err(error) => {
+                self.mark_degraded(
+                    &app,
+                    IM_BRIDGE_LABEL,
+                    format!("IM bridge sidecar not configured: {error}"),
+                );
+                return false;
+            }
+        };
+
+        match command.spawn() {
+            Ok((rx, child)) => {
+                let pid = child.pid();
+                self.mutate(|state| {
+                    let runtime = state.runtime_mut(IM_BRIDGE_LABEL);
+                    runtime.child = Some(child);
+                });
+                self.mark_starting(&app, IM_BRIDGE_LABEL, pid);
+                self.watch_sidecar_events(app.clone(), IM_BRIDGE_LABEL, rx);
+
+                let health_urls = [format!("http://127.0.0.1:{IM_BRIDGE_PORT}/im/health")];
+                if self.wait_for_health(&health_urls).await {
+                    self.mark_ready(&app, IM_BRIDGE_LABEL);
+                    true
+                } else {
+                    self.mark_degraded(
+                        &app,
+                        IM_BRIDGE_LABEL,
+                        if is_restart {
+                            "IM bridge health check timed out after restart"
+                        } else {
+                            "IM bridge health check timed out during startup"
+                        },
+                    );
+                    false
+                }
+            }
+            Err(error) => {
+                self.mark_degraded(
+                    &app,
+                    IM_BRIDGE_LABEL,
+                    format!("failed to spawn IM bridge sidecar: {error}"),
+                );
+                false
+            }
+        }
+    }
+
     fn watch_sidecar_events<R: Runtime>(
         &self,
         app: AppHandle<R>,
@@ -574,14 +675,28 @@ impl DesktopRuntimeManager {
             ) {
                 let _ = child.kill();
             }
+            if let Some(child) = self.stop_runtime(
+                IM_BRIDGE_LABEL,
+                Some("IM bridge stopped while backend restarts".to_string()),
+            ) {
+                let _ = child.kill();
+            }
 
             if self.start_backend(app.clone(), true).await {
                 let _ = self.start_bridge(app.clone(), true).await;
+                let _ = self.start_im_bridge(app.clone(), true).await;
             }
             return;
         }
 
-        let _ = self.start_bridge(app, true).await;
+        if label == BRIDGE_LABEL {
+            let _ = self.start_bridge(app, true).await;
+            return;
+        }
+
+        if label == IM_BRIDGE_LABEL {
+            let _ = self.start_im_bridge(app, true).await;
+        }
     }
 
     async fn wait_for_health(&self, urls: &[String]) -> bool {
@@ -1216,8 +1331,10 @@ mod tests {
                 RuntimeStatus::Ready,
                 RuntimeStatus::Ready,
                 RuntimeStatus::Ready,
+                RuntimeStatus::Ready,
             ),
             (
+                RuntimeStatus::Stopped,
                 RuntimeStatus::Stopped,
                 RuntimeStatus::Stopped,
                 RuntimeStatus::Stopped,
@@ -1225,47 +1342,54 @@ mod tests {
             (
                 RuntimeStatus::Degraded,
                 RuntimeStatus::Ready,
+                RuntimeStatus::Ready,
                 RuntimeStatus::Degraded,
             ),
             (
+                RuntimeStatus::Ready,
                 RuntimeStatus::Ready,
                 RuntimeStatus::Stopped,
                 RuntimeStatus::Degraded,
             ),
             (
-                RuntimeStatus::Stopped,
                 RuntimeStatus::Ready,
+                RuntimeStatus::Ready,
+                RuntimeStatus::Stopped,
                 RuntimeStatus::Degraded,
             ),
             (
                 RuntimeStatus::Starting,
+                RuntimeStatus::Ready,
                 RuntimeStatus::Ready,
                 RuntimeStatus::Starting,
             ),
         ];
 
-        for (backend_status, bridge_status, expected) in cases {
+        for (backend_status, bridge_status, im_bridge_status, expected) in cases {
             let mut state = DesktopRuntimeState::new();
             state.backend.status = backend_status;
             state.bridge.status = bridge_status;
+            state.im_bridge.status = im_bridge_status;
 
             state.recalculate_overall();
 
             assert_eq!(
                 state.overall, expected,
-                "expected overall status {expected:?} for backend={backend_status:?}, bridge={bridge_status:?}"
+                "expected overall status {expected:?} for backend={backend_status:?}, bridge={bridge_status:?}, im_bridge={im_bridge_status:?}"
             );
         }
     }
 
     #[test]
-    fn runtime_mut_routes_bridge_label_and_defaults_unknown_to_backend() {
+    fn runtime_mut_routes_bridge_and_im_bridge_labels_and_defaults_unknown_to_backend() {
         let mut state = DesktopRuntimeState::new();
 
         state.runtime_mut(BRIDGE_LABEL).status = RuntimeStatus::Ready;
+        state.runtime_mut(IM_BRIDGE_LABEL).status = RuntimeStatus::Ready;
         state.runtime_mut("unknown-runtime").status = RuntimeStatus::Degraded;
 
         assert_eq!(state.bridge.status, RuntimeStatus::Ready);
+        assert_eq!(state.im_bridge.status, RuntimeStatus::Ready);
         assert_eq!(state.backend.status, RuntimeStatus::Degraded);
     }
 
@@ -1280,6 +1404,7 @@ mod tests {
             state.backend.last_error = Some("recovered from bootstrap failure".to_string());
             state.backend.last_started_at = Some("1234567890".to_string());
             state.bridge.status = RuntimeStatus::Ready;
+            state.im_bridge.status = RuntimeStatus::Ready;
         });
 
         assert_eq!(snapshot.overall, RuntimeStatus::Ready);
@@ -1304,6 +1429,36 @@ mod tests {
             snapshot.bridge.url.as_deref(),
             Some("http://127.0.0.1:7778")
         );
+        assert_eq!(snapshot.im_bridge.label, IM_BRIDGE_LABEL);
+        assert_eq!(
+            snapshot.im_bridge.url.as_deref(),
+            Some("http://127.0.0.1:7779")
+        );
+    }
+
+    #[test]
+    fn default_capability_allows_im_bridge_sidecar() {
+        let capability: Value =
+            serde_json::from_str(include_str!("../capabilities/default.json")).unwrap();
+        let allow_list = capability["permissions"]
+            .as_array()
+            .and_then(|permissions| {
+                permissions.iter().find_map(|permission| {
+                    let object = permission.as_object()?;
+                    let identifier = object.get("identifier")?.as_str()?;
+                    if identifier == "shell:allow-execute" {
+                        object.get("allow")?.as_array().cloned()
+                    } else {
+                        None
+                    }
+                })
+            })
+            .expect("shell:allow-execute allow list should exist");
+
+        assert!(allow_list.iter().any(|entry| {
+            entry["name"] == Value::String(IM_BRIDGE_LABEL.to_string())
+                && entry["sidecar"] == Value::Bool(true)
+        }));
     }
 
     #[test]
@@ -1328,6 +1483,7 @@ mod tests {
             state.backend.status = RuntimeStatus::Ready;
             state.backend.pid = Some(7777);
             state.bridge.status = RuntimeStatus::Ready;
+            state.im_bridge.status = RuntimeStatus::Ready;
         });
 
         let stopped = manager.stop_runtime(BACKEND_LABEL, Some("manual shutdown".to_string()));

@@ -1,0 +1,4 @@
+interface:
+  display_name: "AgentForge TypeScript"
+  short_description: "Keep TypeScript contracts aligned across UI and bridge"
+  default_prompt: "Use $typescript to update the current AgentForge TypeScript contract safely across schemas, runtime handlers, stores, and UI consumers."

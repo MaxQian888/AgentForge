@@ -6,31 +6,7 @@ import (
 	"github.com/agentforge/im-bridge/core"
 )
 
-const helpText = `AgentForge IM 助手
-
-可用命令:
-  /task create <标题>      — 创建新任务
-  /task list [状态]        — 查看任务列表
-  /task status <task-id>   — 查看任务详情
-  /task assign <id> <人员> — 分配任务
-  /task decompose <id>     — AI 分解现有任务
-
-  /agent list              — 查看 Agent 池状态
-  /agent spawn <task-id>   — 为任务启动 Agent
-  /agent run <描述>        — 创建任务并自动启动 Agent
-  /agent logs <run-id>     — 查看 Agent 执行日志
-
-  /review <pr-url>         — 触发代码审查
-  /review status <id>      — 查看审查状态
-
-  /sprint status           — 查看当前 Sprint
-  /sprint burndown         — 查看燃尽图
-
-  /cost                    — 查看费用统计
-
-  /help                    — 显示此帮助
-
-或者直接 @AgentForge <你的需求> 使用自然语言`
+var helpText = buildHelpText()
 
 // RegisterHelpCommand registers the /help command on the engine.
 func RegisterHelpCommand(engine *core.Engine) {

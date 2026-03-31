@@ -146,7 +146,12 @@
     "resCostPerTask": "费用 / 任务",
     "resCostPerDay": "费用 / 天",
     "resCostAlertThreshold": "费用预警阈值",
-    "provenanceSummary": "来源：{inherited} 继承，{template} 模板，{explicit} 显式"
+    "provenanceSummary": "来源：{inherited} 继承，{template} 模板，{explicit} 显式",
+    "skillPartsLabel": "部件",
+    "skillPartAgents": "Agents 元数据",
+    "skillPartReferences": "References",
+    "skillPartScripts": "Scripts",
+    "skillPartAssets": "Assets"
   },
   "contextRail": {
     "authoringGuide": "编辑指南",

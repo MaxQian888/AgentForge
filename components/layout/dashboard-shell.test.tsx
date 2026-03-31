@@ -6,6 +6,7 @@ import { useAuthStore } from "@/lib/stores/auth-store";
 
 const replaceMock = jest.fn();
 const pushMock = jest.fn();
+const searchParamsMock = jest.fn();
 const connectMock = jest.fn();
 const disconnectMock = jest.fn();
 const fetchNotificationsMock = jest.fn();
@@ -38,6 +39,9 @@ jest.mock("next/navigation", () => ({
   },
   usePathname() {
     return "/dashboard";
+  },
+  useSearchParams() {
+    return searchParamsMock();
   },
 }));
 
@@ -92,6 +96,8 @@ describe("DashboardShell", () => {
     syncNotificationTraySummaryMock.mockReset();
     subscribeDesktopEventsMock.mockReset();
     subscribeDesktopEventsMock.mockResolvedValue(jest.fn());
+    searchParamsMock.mockReset();
+    searchParamsMock.mockReturnValue(new URLSearchParams());
     notificationStoreState.notifications = [];
     notificationStoreState.unreadCount = 0;
     localStorage.clear();

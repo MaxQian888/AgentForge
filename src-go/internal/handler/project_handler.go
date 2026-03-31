@@ -196,8 +196,10 @@ func projectCatalogFromBridge(
 			DefaultProvider:     runtime.DefaultProvider,
 			CompatibleProviders: append([]string(nil), runtime.CompatibleProviders...),
 			DefaultModel:        runtime.DefaultModel,
+			ModelOptions:        append([]string(nil), runtime.ModelOptions...),
 			Available:           runtime.Available,
 			Diagnostics:         diagnostics,
+			SupportedFeatures:   append([]string(nil), runtime.SupportedFeatures...),
 		})
 	}
 

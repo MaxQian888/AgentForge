@@ -270,6 +270,8 @@ describe("useRoleStore", () => {
         path: "skills/react",
         label: "React",
         description: "Build React interfaces.",
+        shortDescription: "Guide React work in the current repo.",
+        availableParts: ["agents", "references"],
         source: "repo-local",
         sourceRoot: "skills",
       },

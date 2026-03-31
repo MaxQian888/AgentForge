@@ -50,6 +50,7 @@ import type { OpenCodeTransport } from "./opencode/transport.js";
 import { BunSchedulerAdapter } from "./scheduler/bun-cron-adapter.js";
 import { HookCallbackManager } from "./runtime/hook-callback-manager.js";
 import { UnsupportedOperationError } from "./runtime/errors.js";
+import { getRuntimeProfile } from "./runtime/backend-profiles.js";
 
 interface AppDeps {
   pool?: RuntimePoolManager;
@@ -445,6 +446,7 @@ export function createApp(deps: AppDeps = {}): Hono {
         default_provider: runtime.defaultProvider,
         compatible_providers: runtime.compatibleProviders,
         default_model: runtime.defaultModel,
+        model_options: runtime.modelOptions,
         available: runtime.available,
         diagnostics: runtime.diagnostics,
         supported_features: runtime.supportedFeatures,
@@ -782,6 +784,18 @@ export function createApp(deps: AppDeps = {}): Hono {
           ...runtime.continuity,
           resume_ready: true,
           captured_at: now(),
+        };
+      } else if (
+        runtime.request.runtime === "cursor" ||
+        runtime.request.runtime === "gemini" ||
+        runtime.request.runtime === "qoder" ||
+        runtime.request.runtime === "iflow"
+      ) {
+        runtime.continuity = {
+          runtime: runtime.request.runtime,
+          resume_ready: false,
+          captured_at: now(),
+          blocking_reason: "continuity_not_supported",
         };
       }
       runtime.cancel("paused");
@@ -1176,7 +1190,7 @@ function handleOperationError(c: Context, err: unknown) {
 function getResumeBlock(snapshot: {
   request?: { runtime?: string; provider?: string };
   continuity?: {
-    runtime: "claude_code" | "codex" | "opencode";
+    runtime: "claude_code" | "codex" | "opencode" | "cursor" | "gemini" | "qoder" | "iflow";
     resume_ready: boolean;
     blocking_reason?: string;
     thread_id?: string;
@@ -1190,12 +1204,7 @@ function getResumeBlock(snapshot: {
       return null;
     }
     return {
-      runtimeLabel:
-        snapshot.continuity.runtime === "claude_code"
-          ? "Claude"
-          : snapshot.continuity.runtime === "codex"
-            ? "Codex"
-            : "OpenCode",
+      runtimeLabel: runtimeDisplayLabel(snapshot.continuity.runtime),
       code: snapshot.continuity.blocking_reason ?? "missing_continuity_state",
     };
   }
@@ -1206,12 +1215,14 @@ function getResumeBlock(snapshot: {
   }
 
   return {
-    runtimeLabel: runtime === "claude_code" ? "Claude" : runtime === "codex" ? "Codex" : "OpenCode",
+    runtimeLabel: runtimeDisplayLabel(runtime),
     code: "missing_continuity_state",
   };
 }
 
-function inferRuntimeFromProvider(provider: string | undefined): "claude_code" | "codex" | "opencode" | null {
+function inferRuntimeFromProvider(
+  provider: string | undefined,
+): "claude_code" | "codex" | "opencode" | "cursor" | "gemini" | "qoder" | "iflow" | null {
   switch (provider) {
     case "anthropic":
       return "claude_code";
@@ -1220,8 +1231,27 @@ function inferRuntimeFromProvider(provider: string | undefined): "claude_code" |
       return "codex";
     case "opencode":
       return "opencode";
+    case "cursor":
+      return "cursor";
+    case "google":
+    case "vertex":
+      return "gemini";
+    case "qoder":
+      return "qoder";
+    case "iflow":
+      return "iflow";
     default:
       return null;
+  }
+}
+
+function runtimeDisplayLabel(runtime: string): string {
+  try {
+    return getRuntimeProfile(
+      runtime as "claude_code" | "codex" | "opencode" | "cursor" | "gemini" | "qoder" | "iflow",
+    ).label;
+  } catch {
+    return runtime;
   }
 }
 

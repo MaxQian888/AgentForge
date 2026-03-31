@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import { PanelLeftIcon, PanelRightIcon } from "lucide-react";
-import { useIsMobile } from "@/hooks/use-mobile";
+import { useBreakpoint } from "@/hooks/use-breakpoint";
 import { cn } from "@/lib/utils";
 import type {
   RoleManifest,
@@ -78,7 +78,7 @@ export function RoleWorkspace({
   onSandboxRole,
 }: RoleWorkspaceProps) {
   const t = useTranslations("roles");
-  const isMobile = useIsMobile();
+  const { isDesktop, isMobile } = useBreakpoint();
   const [mode, setMode] = useState<"create" | "edit">("create");
   const [selectedRoleId, setSelectedRoleId] = useState("");
   const [templateId, setTemplateId] = useState("");
@@ -110,15 +110,9 @@ export function RoleWorkspace({
 
   // Auto-collapse panels based on viewport width
   useEffect(() => {
-    const mq = window.matchMedia("(min-width: 1280px)");
-    const handler = () => {
-      setCatalogOpen(mq.matches);
-      setContextOpen(mq.matches);
-    };
-    handler();
-    mq.addEventListener("change", handler);
-    return () => mq.removeEventListener("change", handler);
-  }, []);
+    setCatalogOpen(isDesktop);
+    setContextOpen(isDesktop);
+  }, [isDesktop]);
 
   useEffect(() => {
     if (mode === "edit" && selectedRole) {

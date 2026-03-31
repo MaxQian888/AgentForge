@@ -15,6 +15,7 @@ import (
 	"github.com/agentforge/im-bridge/commands"
 	"github.com/agentforge/im-bridge/core"
 	"github.com/agentforge/im-bridge/notify"
+	"github.com/google/uuid"
 )
 
 type backendActionRelay struct {
@@ -120,7 +121,7 @@ type config struct {
 func loadConfig() *config {
 	return &config{
 		APIBase:                 envOrDefault("AGENTFORGE_API_BASE", "http://localhost:7777"),
-		ProjectID:               envOrDefault("AGENTFORGE_PROJECT_ID", "default-project"),
+		ProjectID:               normalizedProjectScope(os.Getenv("AGENTFORGE_PROJECT_ID")),
 		APIKey:                  envOrDefault("AGENTFORGE_API_KEY", ""),
 		BridgeIDFile:            envOrDefault("IM_BRIDGE_ID_FILE", ".agentforge/im-bridge-id"),
 		ControlSharedSecret:     os.Getenv("IM_CONTROL_SHARED_SECRET"),
@@ -167,6 +168,17 @@ func envOrDefault(key, fallback string) string {
 		return v
 	}
 	return fallback
+}
+
+func normalizedProjectScope(raw string) string {
+	trimmed := strings.TrimSpace(raw)
+	if trimmed == "" {
+		return ""
+	}
+	if _, err := uuid.Parse(trimmed); err != nil {
+		return ""
+	}
+	return trimmed
 }
 
 func durationEnvOrDefault(key string, fallback time.Duration) time.Duration {
@@ -217,23 +229,7 @@ func main() {
 	}
 	engine.SetRateLimiter(core.NewRateLimiter(rateLimitRate, time.Minute))
 
-	commands.RegisterTaskCommands(engine, apiClient)
-	commands.RegisterAgentCommands(engine, apiClient)
-	commands.RegisterCostCommands(engine, apiClient)
-	commands.RegisterReviewCommands(engine, apiClient)
-	commands.RegisterSprintCommands(engine, apiClient)
-	commands.RegisterHelpCommand(engine)
-
-	// Natural language fallback: call NLU intent classification via Go backend.
-	engine.SetFallback(func(p core.Platform, msg *core.Message) {
-		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext(bridgeID, msg.ReplyTarget)
-		reply, err := scopedClient.SendNLU(ctx, msg.Content, msg.UserID)
-		if err != nil || reply == "" {
-			reply = "理解失败，请使用 /help 查看可用命令。"
-		}
-		_ = p.Reply(ctx, msg.ReplyCtx, reply)
-	})
+	registerCommandHandlers(engine, apiClient, bridgeID)
 
 	runtimeControl := newBridgeRuntimeControl(cfg, bridgeID, provider, apiClient)
 	if err := runtimeControl.Start(context.Background()); err != nil {
@@ -277,6 +273,34 @@ func main() {
 	_ = runtimeControl.Stop(context.Background())
 	_ = notifyServer.Stop()
 	log.WithField("component", "main").Info("Goodbye")
+}
+
+func registerCommandHandlers(engine *core.Engine, apiClient *client.AgentForgeClient, bridgeID string) {
+	commands.RegisterTaskCommands(engine, apiClient)
+	commands.RegisterAgentCommands(engine, apiClient)
+	commands.RegisterCostCommands(engine, apiClient)
+	commands.RegisterReviewCommands(engine, apiClient)
+	commands.RegisterSprintCommands(engine, apiClient)
+	commands.RegisterQueueCommands(engine, apiClient)
+	commands.RegisterTeamCommands(engine, apiClient)
+	commands.RegisterMemoryCommands(engine, apiClient)
+	commands.RegisterToolsCommands(engine, apiClient)
+	commands.RegisterHelpCommand(engine)
+
+	engine.SetFallback(func(p core.Platform, msg *core.Message) {
+		ctx := context.Background()
+		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext(bridgeID, msg.ReplyTarget)
+		reply, err := scopedClient.SendNLU(ctx, msg.Content, msg.UserID)
+		if err != nil || strings.TrimSpace(reply) == "" {
+			suggestion := commands.SuggestCommandFromCatalog(msg.Content)
+			if suggestion == "/help" {
+				reply = commands.DefaultCommandGuidance()
+			} else {
+				reply = fmt.Sprintf("我建议先使用 %s", suggestion)
+			}
+		}
+		_ = p.Reply(ctx, msg.ReplyCtx, reply)
+	})
 }
 
 func configurePlatformActionCallbacks(platform core.Platform, handler notify.ActionHandler) {

@@ -6,8 +6,8 @@
   "build": {
     "frontendDist": "../out",
     "devUrl": "http://localhost:3000",
-    "beforeDevCommand": "pnpm dev",
-    "beforeBuildCommand": "pnpm build:backend && pnpm build:bridge && pnpm build"
+    "beforeDevCommand": "pnpm desktop:dev:prepare && pnpm dev",
+    "beforeBuildCommand": "pnpm desktop:build:prepare"
   },
   "app": {
     "windows": [
@@ -50,7 +50,8 @@
     ],
     "externalBin": [
       "binaries/server",
-      "binaries/bridge"
+      "binaries/bridge",
+      "binaries/im-bridge"
     ],
     "windows": {
       "certificateThumbprint": null,

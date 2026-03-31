@@ -14,6 +14,13 @@ const RoleExecutionSkillSchema = z.object({
   label: z.string().min(1),
   description: z.string().optional(),
   instructions: z.string().optional(),
+  display_name: z.string().optional(),
+  short_description: z.string().optional(),
+  default_prompt: z.string().optional(),
+  available_parts: z.array(z.string()).optional(),
+  reference_count: z.number().int().nonnegative().optional(),
+  script_count: z.number().int().nonnegative().optional(),
+  asset_count: z.number().int().nonnegative().optional(),
   source: z.string().optional(),
   source_root: z.string().optional(),
   origin: z.string().optional(),
@@ -85,7 +92,9 @@ export const AgentDefinitionSchema = z.object({
 export const ExecuteRequestSchema = z.object({
   task_id: z.string().min(1),
   session_id: z.string().min(1),
-  runtime: z.enum(["claude_code", "codex", "opencode"]).optional(),
+  runtime: z
+    .enum(["claude_code", "codex", "opencode", "cursor", "gemini", "qoder", "iflow"])
+    .optional(),
   provider: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
   prompt: z.string().min(1),
@@ -124,6 +133,7 @@ export const DecomposeTaskRequestSchema = z.object({
   priority: z.enum(["critical", "high", "medium", "low"]),
   provider: z.string().min(1).optional(),
   model: z.string().min(1).optional(),
+  context: z.unknown().optional(),
 });
 
 export const DecomposeSubtaskSchema = z.object({

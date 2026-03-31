@@ -67,9 +67,14 @@ func TestClientExecuteUsesCanonicalBridgeContract(t *testing.T) {
 					Label:        "React",
 					Description:  "React UI implementation guidance",
 					Instructions: "Prefer server-safe React composition.",
-					Source:       "repo-local",
-					SourceRoot:   "skills",
-					Origin:       "direct",
+					DisplayName:  "React Workspace",
+					AvailableParts: []string{
+						"agents",
+						"references",
+					},
+					Source:     "repo-local",
+					SourceRoot: "skills",
+					Origin:     "direct",
 				},
 			},
 			AvailableSkills: []model.RoleExecutionSkill{
@@ -142,6 +147,13 @@ func TestClientExecuteUsesCanonicalBridgeContract(t *testing.T) {
 	loadedSkills, ok := roleConfig["loaded_skills"].([]any)
 	if !ok || len(loadedSkills) != 1 {
 		t.Fatalf("expected loaded_skills in role_config, got %#v", roleConfig["loaded_skills"])
+	}
+	loadedSkill, ok := loadedSkills[0].(map[string]any)
+	if !ok {
+		t.Fatalf("expected loaded skill object, got %#v", loadedSkills[0])
+	}
+	if loadedSkill["display_name"] != "React Workspace" {
+		t.Fatalf("expected loaded skill display_name, got %#v", loadedSkill)
 	}
 	availableSkills, ok := roleConfig["available_skills"].([]any)
 	if !ok || len(availableSkills) != 1 {
@@ -336,14 +348,17 @@ func TestClientGetRuntimeCatalogUsesBridgeRoute(t *testing.T) {
 					"default_provider":     "anthropic",
 					"compatible_providers": []string{"anthropic"},
 					"default_model":        "claude-sonnet-4-5",
+					"model_options":        []string{"claude-sonnet-4-5", "claude-opus-4-1"},
 					"available":            true,
 					"diagnostics":          []map[string]any{},
+					"supported_features":   []string{"structured_output", "interrupt"},
 				},
 				{
 					"key":                  "codex",
 					"default_provider":     "openai",
 					"compatible_providers": []string{"openai", "codex"},
 					"default_model":        "gpt-5-codex",
+					"model_options":        []string{"gpt-5-codex", "o3"},
 					"available":            false,
 					"diagnostics": []map[string]any{
 						{
@@ -352,6 +367,17 @@ func TestClientGetRuntimeCatalogUsesBridgeRoute(t *testing.T) {
 							"blocking": true,
 						},
 					},
+					"supported_features": []string{"reasoning", "fork"},
+				},
+				{
+					"key":                  "cursor",
+					"default_provider":     "cursor",
+					"compatible_providers": []string{"cursor"},
+					"default_model":        "claude-sonnet-4-20250514",
+					"model_options":        []string{"claude-sonnet-4-20250514", "gpt-4o"},
+					"available":            true,
+					"diagnostics":          []map[string]any{},
+					"supported_features":   []string{"progress", "reasoning"},
 				},
 			},
 		})
@@ -370,11 +396,48 @@ func TestClientGetRuntimeCatalogUsesBridgeRoute(t *testing.T) {
 	if catalog.DefaultRuntime != "claude_code" {
 		t.Fatalf("default runtime = %s, want claude_code", catalog.DefaultRuntime)
 	}
-	if len(catalog.Runtimes) != 2 {
-		t.Fatalf("runtime count = %d, want 2", len(catalog.Runtimes))
+	if len(catalog.Runtimes) != 3 {
+		t.Fatalf("runtime count = %d, want 3", len(catalog.Runtimes))
 	}
 	if catalog.Runtimes[1].DefaultProvider != "openai" {
 		t.Fatalf("codex default provider = %s, want openai", catalog.Runtimes[1].DefaultProvider)
+	}
+	if !reflect.DeepEqual(catalog.Runtimes[1].ModelOptions, []string{"gpt-5-codex", "o3"}) {
+		t.Fatalf("codex model options = %#v, want gpt-5-codex/o3", catalog.Runtimes[1].ModelOptions)
+	}
+	if !reflect.DeepEqual(catalog.Runtimes[2].SupportedFeatures, []string{"progress", "reasoning"}) {
+		t.Fatalf("cursor supported features = %#v, want progress/reasoning", catalog.Runtimes[2].SupportedFeatures)
+	}
+}
+
+func TestClientGetHealthUsesCanonicalBridgeRoute(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"status":        "SERVING",
+			"active_agents": 2,
+			"max_agents":    5,
+			"uptime_ms":     12345,
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	health, err := client.GetHealth(context.Background())
+	if err != nil {
+		t.Fatalf("GetHealth() error: %v", err)
+	}
+
+	if gotPath != "/bridge/health" {
+		t.Fatalf("expected canonical health route, got %s", gotPath)
+	}
+	if health.Status != "SERVING" || health.ActiveAgents != 2 || health.MaxAgents != 5 || health.UptimeMS != 12345 {
+		t.Fatalf("unexpected health response: %#v", health)
 	}
 }
 
@@ -456,6 +519,192 @@ func TestClientDecomposeIncludesProviderAndModelWhenSpecified(t *testing.T) {
 	}
 	if gotBody["model"] != "gpt-5" {
 		t.Fatalf("expected model in decompose payload, got %#v", gotBody)
+	}
+}
+
+func TestClientDecomposeIncludesContextWhenSpecified(t *testing.T) {
+	t.Parallel()
+
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"summary": "Decomposed",
+			"subtasks": []map[string]any{
+				{
+					"title":         "One",
+					"description":   "Two",
+					"priority":      "high",
+					"executionMode": "agent",
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.DecomposeTask(context.Background(), DecomposeRequest{
+		TaskID:      "task-123",
+		Title:       "Bridge",
+		Description: "Break the task down",
+		Priority:    "high",
+		Context: map[string]any{
+			"relevantFiles": []string{"src-go/internal/server/routes.go"},
+			"waveMode":      true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("DecomposeTask() error: %v", err)
+	}
+
+	contextValue, ok := gotBody["context"].(map[string]any)
+	if !ok {
+		t.Fatalf("expected context object in decompose payload, got %#v", gotBody["context"])
+	}
+	if contextValue["waveMode"] != true {
+		t.Fatalf("unexpected context payload: %#v", contextValue)
+	}
+}
+
+func TestClientListToolsUsesCanonicalBridgeRoute(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"tools": []map[string]any{
+				{
+					"plugin_id":   "web-search",
+					"name":        "search",
+					"description": "Search repos",
+					"input_schema": map[string]any{
+						"type": "object",
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	result, err := client.ListTools(context.Background())
+	if err != nil {
+		t.Fatalf("ListTools() error: %v", err)
+	}
+
+	if gotPath != "/bridge/tools" {
+		t.Fatalf("expected canonical tools route, got %s", gotPath)
+	}
+	if len(result.Tools) != 1 || result.Tools[0].PluginID != "web-search" || result.Tools[0].Name != "search" {
+		t.Fatalf("unexpected tools response: %#v", result)
+	}
+}
+
+func TestClientInstallToolUsesCanonicalBridgeRoute(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotPath string
+		gotBody map[string]any
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleToolPluginRecord("web-search", "active", 0))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	record, err := client.InstallTool(context.Background(), sampleToolPluginManifest("web-search"))
+	if err != nil {
+		t.Fatalf("InstallTool() error: %v", err)
+	}
+
+	if gotPath != "/bridge/tools/install" {
+		t.Fatalf("expected canonical install route, got %s", gotPath)
+	}
+	manifest, ok := gotBody["manifest"].(map[string]any)
+	if !ok || manifest["kind"] != string(model.PluginKindTool) {
+		t.Fatalf("expected manifest wrapper payload, got %#v", gotBody)
+	}
+	if record.Metadata.ID != "web-search" || record.LifecycleState != model.PluginStateActive {
+		t.Fatalf("unexpected installed record: %#v", record)
+	}
+}
+
+func TestClientUninstallToolUsesCanonicalBridgeRoute(t *testing.T) {
+	t.Parallel()
+
+	var (
+		gotPath string
+		gotBody map[string]any
+	)
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		defer r.Body.Close()
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode request body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleToolPluginRecord("web-search", "disabled", 0))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	record, err := client.UninstallTool(context.Background(), "web-search")
+	if err != nil {
+		t.Fatalf("UninstallTool() error: %v", err)
+	}
+
+	if gotPath != "/bridge/tools/uninstall" {
+		t.Fatalf("expected canonical uninstall route, got %s", gotPath)
+	}
+	if gotBody["plugin_id"] != "web-search" {
+		t.Fatalf("expected plugin_id uninstall payload, got %#v", gotBody)
+	}
+	if record.Metadata.ID != "web-search" || record.LifecycleState != model.PluginStateDisabled {
+		t.Fatalf("unexpected uninstalled record: %#v", record)
+	}
+}
+
+func TestClientRestartToolUsesCanonicalBridgeRoute(t *testing.T) {
+	t.Parallel()
+
+	var gotPath string
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotPath = r.URL.Path
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(sampleToolPluginRecord("web-search", "active", 1))
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	record, err := client.RestartTool(context.Background(), "web-search")
+	if err != nil {
+		t.Fatalf("RestartTool() error: %v", err)
+	}
+
+	if gotPath != "/bridge/tools/web-search/restart" {
+		t.Fatalf("expected canonical restart route, got %s", gotPath)
+	}
+	if record.Metadata.ID != "web-search" || record.RestartCount != 1 {
+		t.Fatalf("unexpected restarted record: %#v", record)
 	}
 }
 
@@ -913,5 +1162,52 @@ func TestClientGetToolPluginMCPPromptUsesCanonicalBridgeContract(t *testing.T) {
 	}
 	if result.PluginID != "repo-search" || result.Operation != "get_prompt" || result.Result.Description != "Repository summary prompt" {
 		t.Fatalf("unexpected prompt result: %+v", result)
+	}
+}
+
+func sampleToolPluginManifest(id string) model.PluginManifest {
+	return model.PluginManifest{
+		APIVersion: "agentforge/v1",
+		Kind:       model.PluginKindTool,
+		Metadata: model.PluginMetadata{
+			ID:      id,
+			Name:    "Web Search",
+			Version: "1.0.0",
+		},
+		Spec: model.PluginSpec{
+			Runtime:   model.PluginRuntimeMCP,
+			Transport: "stdio",
+			Command:   "node",
+			Args:      []string{"index.js"},
+		},
+		Permissions: model.PluginPermissions{},
+		Source: model.PluginSource{
+			Type: model.PluginSourceLocal,
+		},
+	}
+}
+
+func sampleToolPluginRecord(id string, lifecycle string, restartCount int) map[string]any {
+	return map[string]any{
+		"apiVersion": "agentforge/v1",
+		"kind":       string(model.PluginKindTool),
+		"metadata": map[string]any{
+			"id":      id,
+			"name":    "Web Search",
+			"version": "1.0.0",
+		},
+		"spec": map[string]any{
+			"runtime":   string(model.PluginRuntimeMCP),
+			"transport": "stdio",
+			"command":   "node",
+			"args":      []string{"index.js"},
+		},
+		"permissions": map[string]any{},
+		"source": map[string]any{
+			"type": string(model.PluginSourceLocal),
+		},
+		"lifecycle_state": lifecycle,
+		"runtime_host":    string(model.PluginHostTSBridge),
+		"restart_count":   restartCount,
 	}
 }

@@ -305,6 +305,15 @@ describe("PluginsPage", () => {
         lastError: null,
         lastStartedAt: null,
       },
+      imBridge: {
+        label: "im-bridge",
+        status: "stopped",
+        url: null,
+        pid: null,
+        restartCount: 0,
+        lastError: null,
+        lastStartedAt: null,
+      },
     });
     getPluginRuntimeSummary.mockReset();
     getPluginRuntimeSummary.mockResolvedValue({

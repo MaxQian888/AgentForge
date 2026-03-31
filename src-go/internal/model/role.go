@@ -201,34 +201,41 @@ type RoleTrigger struct {
 }
 
 type RoleExecutionProfile struct {
-	RoleID           string   `json:"role_id"`
-	Name             string   `json:"name"`
-	Role             string   `json:"role"`
-	Goal             string   `json:"goal"`
-	Backstory        string   `json:"backstory"`
-	SystemPrompt     string   `json:"system_prompt"`
-	AllowedTools     []string `json:"allowed_tools"`
-	Tools            []string `json:"tools,omitempty"`
-	KnowledgeContext string   `json:"knowledge_context,omitempty"`
-	OutputFilters    []string `json:"output_filters,omitempty"`
-	MaxBudgetUsd     float64  `json:"max_budget_usd"`
-	MaxTurns         int      `json:"max_turns"`
-	PermissionMode   string   `json:"permission_mode"`
+	RoleID           string                         `json:"role_id"`
+	Name             string                         `json:"name"`
+	Role             string                         `json:"role"`
+	Goal             string                         `json:"goal"`
+	Backstory        string                         `json:"backstory"`
+	SystemPrompt     string                         `json:"system_prompt"`
+	AllowedTools     []string                       `json:"allowed_tools"`
+	Tools            []string                       `json:"tools,omitempty"`
+	KnowledgeContext string                         `json:"knowledge_context,omitempty"`
+	OutputFilters    []string                       `json:"output_filters,omitempty"`
+	MaxBudgetUsd     float64                        `json:"max_budget_usd"`
+	MaxTurns         int                            `json:"max_turns"`
+	PermissionMode   string                         `json:"permission_mode"`
 	LoadedSkills     []RoleExecutionSkill           `json:"loaded_skills,omitempty"`
 	AvailableSkills  []RoleExecutionSkill           `json:"available_skills,omitempty"`
 	SkillDiagnostics []RoleExecutionSkillDiagnostic `json:"skill_diagnostics,omitempty"`
 }
 
 type RoleExecutionSkill struct {
-	Path         string   `json:"path"`
-	Label        string   `json:"label"`
-	Description  string   `json:"description,omitempty"`
-	Instructions string   `json:"instructions,omitempty"`
-	Source       string   `json:"source,omitempty"`
-	SourceRoot   string   `json:"source_root,omitempty"`
-	Origin       string   `json:"origin,omitempty"`
-	Requires     []string `json:"requires,omitempty"`
-	Tools        []string `json:"tools,omitempty"`
+	Path             string   `json:"path"`
+	Label            string   `json:"label"`
+	Description      string   `json:"description,omitempty"`
+	Instructions     string   `json:"instructions,omitempty"`
+	DisplayName      string   `json:"display_name,omitempty"`
+	ShortDescription string   `json:"short_description,omitempty"`
+	DefaultPrompt    string   `json:"default_prompt,omitempty"`
+	AvailableParts   []string `json:"available_parts,omitempty"`
+	ReferenceCount   int      `json:"reference_count,omitempty"`
+	ScriptCount      int      `json:"script_count,omitempty"`
+	AssetCount       int      `json:"asset_count,omitempty"`
+	Source           string   `json:"source,omitempty"`
+	SourceRoot       string   `json:"source_root,omitempty"`
+	Origin           string   `json:"origin,omitempty"`
+	Requires         []string `json:"requires,omitempty"`
+	Tools            []string `json:"tools,omitempty"`
 }
 
 type RoleExecutionSkillDiagnostic struct {

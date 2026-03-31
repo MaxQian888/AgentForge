@@ -2,7 +2,6 @@
 
 ## Purpose
 Define the live-transport and platform-capability contract for the AgentForge IM Bridge so Feishu, Slack, DingTalk, Telegram, Discord, WeCom, QQ, and QQ Bot can run the shared command and notification flows with explicit platform selection, accurate backend source metadata, provider-aware acknowledgement rules, and safe rich-message fallback behavior.
-
 ## Requirements
 ### Requirement: Bridge runtime can start with a supported live platform as the active platform
 The IM Bridge SHALL allow a deployment to select exactly one active IM platform provider per process. The runtime SHALL resolve the requested `IM_PLATFORM` through the provider contract so built-in providers such as `feishu`, `slack`, `dingtalk`, `telegram`, `discord`, `wecom`, `qq`, and `qqbot`, plus future plugin-backed providers, share the same startup path. The runtime SHALL validate the required credentials and transport-specific configuration for the selected provider before starting message handling or notification delivery, and SHALL fail with an actionable configuration error instead of silently falling back to another provider or a local stub when the runtime is configured for live transport.
@@ -43,37 +42,37 @@ The IM Bridge SHALL allow a deployment to select exactly one active IM platform 
 - **AND** operators can distinguish that explicit gap from a transient configuration failure
 
 ### Requirement: Core command handling remains platform-consistent across supported platforms
-The system SHALL translate Feishu, Slack, DingTalk, Telegram, Discord, WeCom, QQ, and QQ Bot inbound events or interactions into `core.Message` values that preserve platform identity, user identity, chat identity, reply context, and message content so that the existing `/task`, `/agent`, `/cost`, `/help`, and `@AgentForge` fallback flows execute with consistent command semantics across all supported platforms.
+The system SHALL translate Feishu, Slack, DingTalk, Telegram, Discord, WeCom, QQ, and QQ Bot inbound events or interactions into core.Message values that preserve platform identity, user identity, chat identity, reply context, and message content so that the canonical operator command surface executes with consistent semantics across all supported platforms. This surface MUST include existing task, agent, review, sprint, cost, help, and @AgentForge flows plus newly approved operator commands such as agent runtime control, task workflow control, queue visibility, team summary, and memory access. Platform adapters MUST NOT special-case command names or silently drop these supported commands because the active platform entered through slash, mention, callback, or interaction normalization.
 
-#### Scenario: Telegram slash-style command routes to an existing handler
-- **WHEN** a Telegram inbound update is normalized into `core.Message` content containing `/task list`
-- **THEN** the engine invokes the registered `/task` command handler
-- **AND** the platform sends the resulting reply back to the originating Telegram chat
+#### Scenario: Telegram slash-style task workflow command routes to a shared handler
+- **WHEN** a Telegram inbound update is normalized into core.Message content containing /task move task-123 done
+- **THEN** the engine invokes the registered /task command handler with the normalized subcommand and args
+- **AND** the resulting response is sent back to the originating Telegram chat
 
-#### Scenario: Discord interaction is normalized to an existing command
-- **WHEN** a Discord application command or interaction maps to the logical command `/agent spawn`
-- **THEN** the engine invokes the registered `/agent` command handler with the normalized arguments
-- **AND** the resulting response is delivered back through the originating Discord interaction context
+#### Scenario: Discord interaction is normalized to an agent control command
+- **WHEN** a Discord application command or interaction maps to the logical command /agent status run-123
+- **THEN** the engine invokes the registered /agent command handler with the normalized args
+- **AND** the response is delivered through the originating Discord interaction context
 
-#### Scenario: WeCom callback event routes to the shared command engine
-- **WHEN** a WeCom inbound callback or application message is normalized into `core.Message` content containing `/help`
-- **THEN** the engine invokes the registered `/help` command handler through the same shared command path
+#### Scenario: WeCom callback event routes to the queue command
+- **WHEN** a WeCom inbound callback or application message is normalized into core.Message content containing /queue list queued
+- **THEN** the engine invokes the registered /queue command handler through the shared command path
 - **AND** the resulting response is sent back to the originating WeCom conversation context
 
-#### Scenario: QQ group command routes to the shared command engine
-- **WHEN** a QQ inbound group or direct message is normalized into `core.Message` content containing `/task list`
-- **THEN** the engine invokes the registered `/task` command handler through the shared command path
+#### Scenario: QQ group command routes to the memory command
+- **WHEN** a QQ inbound group or direct message is normalized into core.Message content containing /memory search release
+- **THEN** the engine invokes the registered /memory command handler through the shared command path
 - **AND** the resulting response is sent back to the originating QQ conversation context
 
-#### Scenario: QQ Bot command routes to the shared command engine
-- **WHEN** a QQ Bot official inbound message or interaction is normalized into `core.Message` content containing `/help`
-- **THEN** the engine invokes the registered `/help` command handler through the same shared command path
+#### Scenario: QQ Bot command routes to the team summary command
+- **WHEN** a QQ Bot official inbound message or interaction is normalized into core.Message content containing /team list
+- **THEN** the engine invokes the registered /team command handler through the shared command path
 - **AND** the resulting response is sent back to the originating QQ Bot conversation context
 
 #### Scenario: Feishu mention uses the existing fallback path
-- **WHEN** a Feishu inbound message mentions `@AgentForge` without matching a registered slash command
+- **WHEN** a Feishu inbound message mentions @AgentForge without matching a registered slash command
 - **THEN** the engine invokes the configured fallback handler
-- **AND** the platform returns the fallback response to the originating Feishu conversation
+- **AND** any command guidance returned to the user references a command from the canonical operator catalog
 
 ### Requirement: Platform source metadata is propagated to backend API calls
 IM Bridge requests to the AgentForge backend SHALL identify the actual source platform instead of hardcoding Feishu so that backend audit, routing, notification policy, and downstream analytics can distinguish Feishu, Slack, DingTalk, Telegram, Discord, WeCom, QQ, and QQ Bot traffic.
@@ -230,3 +229,4 @@ The active IM platform runtime SHALL expose the delivery characteristics needed 
 - **WHEN** the active platform is QQ or QQ Bot
 - **THEN** the Bridge health or registration payload reports the QQ-family callback exposure, mutable-update, and richer-message characteristics that the active provider actually supports
 - **AND** operators can distinguish runnable QQ-family providers from documentation-only placeholders
+

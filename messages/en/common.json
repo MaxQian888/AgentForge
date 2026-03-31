@@ -59,10 +59,17 @@
     "placeholder": "Type a command or search...",
     "navigation": "Navigation",
     "actions": "Actions",
+    "context": "Context",
     "createProject": "Create Project",
     "createTask": "Create Task",
     "spawnAgent": "Spawn Agent",
     "createTeam": "Create Team",
+    "toggleTheme": "Toggle Theme",
+    "clearAgentSelection": "Back To Agent Overview",
+    "clearTeamProjectFilter": "Clear Team Project Filter",
+    "clearDashboardSelection": "Reset Dashboard Selection",
+    "recent": "Recent",
+    "history": "Recent Commands",
     "noResults": "No results found."
   },
   "breadcrumbs": {

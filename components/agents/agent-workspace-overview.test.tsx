@@ -101,8 +101,10 @@ describe("AgentWorkspaceOverview", () => {
               defaultProvider: "openai",
               compatibleProviders: ["openai"],
               defaultModel: "gpt-5.4",
+              modelOptions: ["gpt-5.4", "o3"],
               available: false,
               diagnostics: [{ code: "missing_cli", message: "CLI missing", blocking: true }],
+              supportedFeatures: ["reasoning", "fork"],
             },
           ],
         }}

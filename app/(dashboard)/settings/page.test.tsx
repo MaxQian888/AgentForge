@@ -53,8 +53,10 @@ function createProjectFixture(): Project {
           defaultProvider: "openai",
           compatibleProviders: ["openai", "codex"],
           defaultModel: "gpt-5-codex",
+          modelOptions: ["gpt-5-codex", "gpt-5-codex-high"],
           available: true,
           diagnostics: [],
+          supportedFeatures: ["reasoning", "fork"],
         },
         {
           runtime: "opencode",
@@ -62,6 +64,7 @@ function createProjectFixture(): Project {
           defaultProvider: "opencode",
           compatibleProviders: ["opencode"],
           defaultModel: "opencode-default",
+          modelOptions: ["opencode-default"],
           available: false,
           diagnostics: [
             {
@@ -70,6 +73,7 @@ function createProjectFixture(): Project {
               blocking: true,
             },
           ],
+          supportedFeatures: ["messages"],
         },
       ],
     },
@@ -515,19 +519,19 @@ describe("SettingsPage", () => {
 
     setControlValue(screen.getByRole("textbox", { name: "Repository URL" }), "https://github.com/acme/agentforge-next");
     setControlValue(screen.getByRole("textbox", { name: "Default Branch" }), "develop");
-    setControlValue(screen.getByRole("textbox", { name: "Model" }), "gpt-5-codex-high");
     setControlValue(screen.getByRole("spinbutton", { name: "Max Task Budget (USD)" }), "15");
     setControlValue(screen.getByRole("spinbutton", { name: "Max Daily Spend (USD)" }), "45");
     setControlValue(screen.getByRole("textbox", { name: "Webhook URL" }), "https://hooks.example.com/next");
 
     const selects = screen.getAllByLabelText("coding-agent-select");
     await user.selectOptions(selects[1], "codex");
-    await user.selectOptions(selects[2], "yes");
+    await user.selectOptions(selects[2], "gpt-5-codex-high");
     await user.selectOptions(selects[3], "yes");
-    await user.selectOptions(selects[4], "layer3");
-    await user.selectOptions(selects[5], "critical");
-    await user.selectOptions(selects[6], "yes");
+    await user.selectOptions(selects[4], "yes");
+    await user.selectOptions(selects[5], "layer3");
+    await user.selectOptions(selects[6], "critical");
     await user.selectOptions(selects[7], "yes");
+    await user.selectOptions(selects[8], "yes");
 
     await user.click(screen.getByRole("button", { name: "push" }));
     await user.click(screen.getByRole("button", { name: "pr_opened" }));

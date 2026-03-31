@@ -29,10 +29,11 @@ import (
 )
 
 func TestLoadConfig_ReadsExplicitPlatformSettings(t *testing.T) {
+	projectID := "11111111-1111-1111-1111-111111111111"
 	t.Setenv("IM_PLATFORM", "slack")
 	t.Setenv("IM_TRANSPORT_MODE", "stub")
 	t.Setenv("AGENTFORGE_API_BASE", "http://example.test")
-	t.Setenv("AGENTFORGE_PROJECT_ID", "proj-1")
+	t.Setenv("AGENTFORGE_PROJECT_ID", projectID)
 	t.Setenv("AGENTFORGE_API_KEY", "secret")
 	t.Setenv("SLACK_BOT_TOKEN", "xoxb-test")
 	t.Setenv("SLACK_APP_TOKEN", "xapp-test")
@@ -52,6 +53,19 @@ func TestLoadConfig_ReadsExplicitPlatformSettings(t *testing.T) {
 	}
 	if cfg.SlackAppToken != "xapp-test" {
 		t.Fatalf("SlackAppToken = %q, want xapp-test", cfg.SlackAppToken)
+	}
+	if cfg.ProjectID != projectID {
+		t.Fatalf("ProjectID = %q, want %s", cfg.ProjectID, projectID)
+	}
+}
+
+func TestLoadConfig_DropsInvalidProjectScopeDefault(t *testing.T) {
+	t.Setenv("AGENTFORGE_PROJECT_ID", "default-project")
+
+	cfg := loadConfig()
+
+	if cfg.ProjectID != "" {
+		t.Fatalf("ProjectID = %q, want empty scope for invalid project id", cfg.ProjectID)
 	}
 }
 
@@ -663,6 +677,90 @@ func TestConfigurePlatformActionCallbacks_IgnoresPlainPlatforms(t *testing.T) {
 	configurePlatformActionCallbacks(&plainPlatform{}, &noopActionHandler{})
 }
 
+func TestRegisterCommandHandlers_WiresOperatorCommands(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/proj/queue":
+			_ = json.NewEncoder(w).Encode([]client.QueueEntry{
+				{EntryID: "entry-1", TaskID: "task-1", MemberID: "member-1", Status: "queued", Priority: 20, Reason: "agent pool is at capacity"},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/proj/members":
+			_ = json.NewEncoder(w).Encode([]client.Member{
+				{ID: "member-1", Name: "Alice", Type: "human", Role: "lead", Status: "active", IsActive: true},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/bridge/tools":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tools": []map[string]any{
+					{"plugin_id": "web-search", "name": "search", "description": "Search repos"},
+				},
+			})
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/proj/memory":
+			_ = json.NewEncoder(w).Encode([]client.MemoryEntry{
+				{ID: "mem-1", Key: "release-plan", Content: "Coordinate deployment in phases", Category: "semantic", Scope: "project"},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &replyCapturePlatform{}
+	engine := core.NewEngine(platform)
+	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+
+	for _, content := range []string{"/queue list queued", "/team list", "/memory search release", "/tools list"} {
+		engine.HandleMessage(platform, &core.Message{
+			Platform: "slack-stub",
+			Content:  content,
+		})
+	}
+
+	if len(platform.replies) != 4 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "entry-1") {
+		t.Fatalf("queue reply = %q", platform.replies[0])
+	}
+	if !strings.Contains(platform.replies[1], "Alice") {
+		t.Fatalf("team reply = %q", platform.replies[1])
+	}
+	if !strings.Contains(platform.replies[2], "release-plan") {
+		t.Fatalf("memory reply = %q", platform.replies[2])
+	}
+	if !strings.Contains(platform.replies[3], "web-search") {
+		t.Fatalf("tools reply = %q", platform.replies[3])
+	}
+}
+
+func TestRegisterCommandHandlers_FallbackSuggestsCanonicalCommand(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/intent" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		http.Error(w, "classifier unavailable", http.StatusBadGateway)
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &replyCapturePlatform{}
+	engine := core.NewEngine(platform)
+	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "@AgentForge 暂停 run-123",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "/agent pause run-123") {
+		t.Fatalf("reply = %q", platform.replies[0])
+	}
+}
+
 func TestMain_StartsBridgeAndShutsDownGracefully(t *testing.T) {
 	if runtime.GOOS == "windows" {
 		t.Skip("Windows test subprocess cannot reliably deliver os.Interrupt to the helper process")
@@ -786,6 +884,21 @@ func waitForHTTP(t *testing.T, url string) *http.Response {
 type actionHandlerAwarePlatform struct {
 	handler notify.ActionHandler
 }
+
+type replyCapturePlatform struct {
+	replies []string
+}
+
+func (p *replyCapturePlatform) Name() string                            { return "reply-capture" }
+func (p *replyCapturePlatform) Start(handler core.MessageHandler) error { return nil }
+func (p *replyCapturePlatform) Reply(ctx context.Context, replyCtx any, content string) error {
+	p.replies = append(p.replies, content)
+	return nil
+}
+func (p *replyCapturePlatform) Send(ctx context.Context, chatID string, content string) error {
+	return nil
+}
+func (p *replyCapturePlatform) Stop() error { return nil }
 
 func (p *actionHandlerAwarePlatform) Name() string                            { return "mock-platform" }
 func (p *actionHandlerAwarePlatform) Start(handler core.MessageHandler) error { return nil }

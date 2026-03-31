@@ -1,0 +1,4 @@
+interface:
+  display_name: "AgentForge Testing"
+  short_description: "Choose the right verification surface and regression proof"
+  default_prompt: "Use $testing to reproduce the current AgentForge bug or contract drift with the correct package-level verification path before and after the fix."

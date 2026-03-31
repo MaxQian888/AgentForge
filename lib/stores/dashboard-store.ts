@@ -178,10 +178,109 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
         { token }
       );
 
+      const hasExplicitProjectSelection =
+        options != null &&
+        Object.prototype.hasOwnProperty.call(options, "projectId");
       const selectedProjectId =
-        options?.projectId ?? projects[0]?.id ?? null;
+        hasExplicitProjectSelection
+          ? options?.projectId ?? null
+          : projects[0]?.id ?? null;
       const selectedProject =
         projects.find((project) => project.id === selectedProjectId) ?? null;
+
+      if (selectedProjectId === null) {
+        const taskResults = await Promise.allSettled(
+          projects.map((project) =>
+            api.get<TaskListResponse>(`/api/v1/projects/${project.id}/tasks`, {
+              token,
+            }),
+          ),
+        );
+        const memberResults = await Promise.allSettled(
+          projects.map((project) =>
+            api.get<DashboardMemberSource[]>(
+              `/api/v1/projects/${project.id}/members`,
+              { token },
+            ),
+          ),
+        );
+        const [agentsResult, activityResult] = await Promise.allSettled([
+          api.get<DashboardAgentSource[]>("/api/v1/agents", { token }),
+          api.get<Array<DashboardActivitySource & { body?: string }>>(
+            "/api/v1/notifications",
+            { token },
+          ),
+        ]);
+
+        const sectionErrors: Record<string, string> = {};
+
+        const tasks = taskResults.flatMap((result) => {
+          if (result.status === "fulfilled") {
+            return result.value.data.items;
+          }
+
+          sectionErrors.tasks ??=
+            result.reason instanceof Error
+              ? result.reason.message
+              : "Failed to load tasks";
+          return [];
+        });
+
+        const members = memberResults.flatMap((result) => {
+          if (result.status === "fulfilled") {
+            return result.value.data;
+          }
+
+          sectionErrors.team ??=
+            result.reason instanceof Error
+              ? result.reason.message
+              : "Failed to load team members";
+          return [];
+        });
+
+        const agents =
+          agentsResult.status === "fulfilled"
+            ? agentsResult.value.data.filter((agent) =>
+                tasks.some((task) => task.id === agent.taskId),
+              )
+            : (sectionErrors.agents =
+                agentsResult.reason instanceof Error
+                  ? agentsResult.reason.message
+                  : "Failed to load agents",
+              []);
+
+        const activity =
+          activityResult.status === "fulfilled"
+            ? activityResult.value.data.map(normalizeActivitySource)
+            : (sectionErrors.activity =
+                activityResult.reason instanceof Error
+                  ? activityResult.reason.message
+                  : "Failed to load activity",
+              []);
+
+        const summary = buildDashboardSummary({
+          scopeProjectId: null,
+          scopeProjectName: "All Projects",
+          projectsCount: projects.length,
+          tasks,
+          agents,
+          members,
+          activity,
+          now: options?.now,
+        });
+
+        set({
+          projects,
+          selectedProjectId: null,
+          tasks,
+          members,
+          agents,
+          activity,
+          summary,
+          sectionErrors,
+        });
+        return;
+      }
 
       if (!selectedProjectId || !selectedProject) {
         set({

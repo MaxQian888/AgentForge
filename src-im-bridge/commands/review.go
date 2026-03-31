@@ -9,7 +9,7 @@ import (
 	"github.com/agentforge/im-bridge/core"
 )
 
-const reviewUsage = "用法: /review <pr-url> | /review status <id> | /review deep <pr-url> | /review approve <id> | /review request-changes <id> [comment]"
+var reviewUsage = commandUsage("/review")
 
 // RegisterReviewCommands registers /review sub-commands on the engine.
 func RegisterReviewCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {

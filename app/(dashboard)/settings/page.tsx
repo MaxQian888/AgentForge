@@ -142,6 +142,12 @@ function SettingsContent({ project, updateProject }: { project: Project; updateP
     runtimeOptions.find((option) => option.runtime === draft.settings.codingAgent.runtime) ??
     runtimeOptions[0];
   const compatibleProviders = selectedRuntime?.compatibleProviders ?? [];
+  const modelOptions =
+    selectedRuntime?.modelOptions && selectedRuntime.modelOptions.length > 0
+      ? selectedRuntime.modelOptions
+      : selectedRuntime?.defaultModel
+        ? [selectedRuntime.defaultModel]
+        : [];
   const selectedDiagnostics = selectedRuntime?.diagnostics ?? [];
   const dirty = useMemo(() => !areSettingsDraftsEqual(draft, persistedSnapshot), [draft, persistedSnapshot]);
   const hasFallbackDefaults =
@@ -175,7 +181,8 @@ function SettingsContent({ project, updateProject }: { project: Project; updateP
           codingAgent: {
             runtime: nextRuntime,
             provider: nextOption.defaultProvider,
-            model: nextOption.defaultModel,
+            model:
+              nextOption.modelOptions?.[0] ?? nextOption.defaultModel,
           },
         },
       };
@@ -352,20 +359,32 @@ function SettingsContent({ project, updateProject }: { project: Project; updateP
               <FieldError message={validationErrors.provider} />
             </div>
             <div className="flex flex-col gap-2">
-              <Label htmlFor="settings-model">{t("model")}</Label>
-              <Input
-                id="settings-model"
+              <Label>{t("model")}</Label>
+              <Select
                 value={draft.settings.codingAgent.model}
-                onChange={(event) =>
+                onValueChange={(value) => {
                   patchDraft((current) => ({
                     ...current,
                     settings: {
                       ...current.settings,
-                      codingAgent: { ...current.settings.codingAgent, model: event.target.value },
+                      codingAgent: { ...current.settings.codingAgent, model: value },
                     },
-                  }))
-                }
-              />
+                  }));
+                  clearValidationError("model");
+                }}
+              >
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  {modelOptions.map((option) => (
+                    <SelectItem key={option} value={option}>
+                      {option}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+              <FieldError message={validationErrors.model} />
             </div>
           </div>
           {selectedDiagnostics.length > 0 && (
@@ -384,6 +403,11 @@ function SettingsContent({ project, updateProject }: { project: Project; updateP
                     <p className="text-muted-foreground">
                       {option.defaultProvider} / {option.defaultModel}
                     </p>
+                    {(option.modelOptions?.length ?? 0) > 1 ? (
+                      <p className="mt-1 text-xs text-muted-foreground">
+                        {(option.modelOptions ?? []).join(", ")}
+                      </p>
+                    ) : null}
                   </div>
                   <Badge variant={option.available ? "default" : "secondary"}>
                     {option.available ? t("runtimeReady") : t("runtimeUnavailable")}

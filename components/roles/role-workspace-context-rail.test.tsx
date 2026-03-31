@@ -34,6 +34,11 @@ jest.mock("next-intl", () => ({
       "contextRail.runtimeProjection": "Runtime Projection",
       "contextRail.runtimeProjectionDesc": "Runtime view of the role.",
       "workspace.provenanceSummary": "Inherited {inherited}, Template {template}, Explicit {explicit}",
+      "workspace.skillPartsLabel": "Parts",
+      "workspace.skillPartAgents": "Agents",
+      "workspace.skillPartReferences": "References",
+      "workspace.skillPartScripts": "Scripts",
+      "workspace.skillPartAssets": "Assets",
     };
     let template = map[key] ?? key;
     if (key === "contextRail.guidanceFor") {
@@ -92,8 +97,8 @@ describe("RoleWorkspaceContextRail", () => {
           executionProfile: {
             name: "Frontend Developer",
             role_id: "frontend",
-            loaded_skills: [{ label: "React", path: "skills/react" }],
-            available_skills: [{ label: "Testing", path: "skills/testing" }],
+            loaded_skills: [{ label: "React", path: "skills/react", available_parts: ["agents", "references"] }],
+            available_skills: [{ label: "Testing", path: "skills/testing", available_parts: ["agents"] }],
             skill_diagnostics: [{ code: "missing", message: "Testing unresolved" }],
           },
           effectiveManifest: {
@@ -149,8 +154,8 @@ describe("RoleWorkspaceContextRail", () => {
       screen.getByText("Inherited 1, Template 1, Explicit 2"),
     ).toBeInTheDocument();
     expect(screen.getAllByText("knowledge.memory").length).toBeGreaterThan(0);
-    expect(screen.getByText("React (skills/react)")).toBeInTheDocument();
-    expect(screen.getByText("Testing (skills/testing)")).toBeInTheDocument();
+    expect(screen.getByText(/React \(skills\/react\).*Parts: Agents, References/)).toBeInTheDocument();
+    expect(screen.getByText(/Testing \(skills\/testing\).*Parts: Agents/)).toBeInTheDocument();
     expect(screen.getByText("Testing unresolved")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Preview Role Draft" }));

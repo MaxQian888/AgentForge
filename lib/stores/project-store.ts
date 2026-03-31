@@ -21,8 +21,10 @@ export interface CodingAgentRuntimeOption {
   defaultProvider: string;
   compatibleProviders: string[];
   defaultModel: string;
+  modelOptions: string[];
   available: boolean;
   diagnostics: CodingAgentDiagnostic[];
+  supportedFeatures: string[];
 }
 
 export interface CodingAgentCatalog {
@@ -161,8 +163,14 @@ function normalizeCatalog(raw: unknown): CodingAgentCatalog | undefined {
             : [],
           defaultModel:
             typeof runtime?.defaultModel === "string" ? runtime.defaultModel : "",
+          modelOptions: Array.isArray(runtime?.modelOptions)
+            ? runtime.modelOptions.map((item: unknown) => String(item))
+            : [],
           available: Boolean(runtime?.available),
           diagnostics: normalizeDiagnostics(runtime?.diagnostics),
+          supportedFeatures: Array.isArray(runtime?.supportedFeatures)
+            ? runtime.supportedFeatures.map((item: unknown) => String(item))
+            : [],
         }))
       : [],
   };

@@ -13,6 +13,11 @@ describe("roles locale messages", () => {
         skillProvenanceExplicit: expect.any(String),
         skillProvenanceTemplate: expect.any(String),
         skillProvenanceInherited: expect.any(String),
+        skillPartsLabel: expect.any(String),
+        skillPartAgents: expect.any(String),
+        skillPartReferences: expect.any(String),
+        skillPartScripts: expect.any(String),
+        skillPartAssets: expect.any(String),
       })
     );
 
@@ -26,6 +31,11 @@ describe("roles locale messages", () => {
         skillProvenanceExplicit: expect.any(String),
         skillProvenanceTemplate: expect.any(String),
         skillProvenanceInherited: expect.any(String),
+        skillPartsLabel: expect.any(String),
+        skillPartAgents: expect.any(String),
+        skillPartReferences: expect.any(String),
+        skillPartScripts: expect.any(String),
+        skillPartAssets: expect.any(String),
       })
     );
   });

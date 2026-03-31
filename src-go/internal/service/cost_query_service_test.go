@@ -273,13 +273,19 @@ func TestDefaultCodingAgentCatalog(t *testing.T) {
 	if !reflect.DeepEqual(catalog.DefaultSelection, selection) {
 		t.Fatalf("catalog.DefaultSelection = %#v, want %#v", catalog.DefaultSelection, selection)
 	}
-	if len(catalog.Runtimes) != 3 {
-		t.Fatalf("len(catalog.Runtimes) = %d, want 3", len(catalog.Runtimes))
+	if len(catalog.Runtimes) < 7 {
+		t.Fatalf("len(catalog.Runtimes) = %d, want at least 7", len(catalog.Runtimes))
 	}
-	if catalog.Runtimes[0].Runtime != "claude_code" || catalog.Runtimes[1].Runtime != "codex" || catalog.Runtimes[2].Runtime != "opencode" {
-		t.Fatalf("runtime order = %#v", catalog.Runtimes)
+	runtimeByKey := make(map[string]model.CodingAgentRuntimeOptionDTO, len(catalog.Runtimes))
+	for _, runtime := range catalog.Runtimes {
+		runtimeByKey[runtime.Runtime] = runtime
 	}
-	if !catalog.Runtimes[1].Available || catalog.Runtimes[1].DefaultProvider != "openai" {
-		t.Fatalf("codex runtime entry = %#v", catalog.Runtimes[1])
+	for _, key := range []string{"claude_code", "codex", "opencode", "cursor", "gemini", "qoder", "iflow"} {
+		if _, ok := runtimeByKey[key]; !ok {
+			t.Fatalf("expected runtime %q in default catalog", key)
+		}
+	}
+	if !runtimeByKey["codex"].Available || runtimeByKey["codex"].DefaultProvider != "openai" {
+		t.Fatalf("codex runtime entry = %#v", runtimeByKey["codex"])
 	}
 }

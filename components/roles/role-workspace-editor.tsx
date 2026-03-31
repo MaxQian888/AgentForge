@@ -190,6 +190,20 @@ export function RoleWorkspaceEditor({
   provenanceMap,
 }: RoleWorkspaceEditorProps) {
   const t = useTranslations("roles");
+  const skillPartLabel = (part: string) => {
+    switch (part) {
+      case "agents":
+        return t("workspace.skillPartAgents");
+      case "references":
+        return t("workspace.skillPartReferences");
+      case "scripts":
+        return t("workspace.skillPartScripts");
+      case "assets":
+        return t("workspace.skillPartAssets");
+      default:
+        return part;
+    }
+  };
   return (
     <div className="flex flex-col">
       {/* Column header */}
@@ -659,6 +673,25 @@ export function RoleWorkspaceEditor({
                                         : t("workspace.skillProvenanceExplicit")
                                   }`}
                             </p>
+                          ) : null}
+                          {resolution?.shortDescription || resolution?.description ? (
+                            <p className="text-xs text-muted-foreground">
+                              {resolution?.shortDescription ?? resolution?.description}
+                            </p>
+                          ) : null}
+                          {resolution?.availableParts?.length ? (
+                            <div className="flex flex-wrap items-center gap-1 text-xs text-muted-foreground">
+                              <span>{t("workspace.skillPartsLabel")}:</span>
+                              {resolution.availableParts.map((part) => (
+                                <Badge
+                                  key={`${resolution.path}:${part}`}
+                                  variant="outline"
+                                  className="text-[10px]"
+                                >
+                                  {skillPartLabel(part)}
+                                </Badge>
+                              ))}
+                            </div>
                           ) : null}
                         </div>
                         <div className="flex items-center gap-2 pt-7">

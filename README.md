@@ -39,6 +39,19 @@ The current documentation describes AgentForge around these major layers:
 - `Review Pipeline`: layered review flow covering fast checks, deep review, and human approval
 - `Data Layer`: PostgreSQL, Redis, WebSocket/event flow, and related infra
 
+```mermaid
+flowchart LR
+  IM[IM Bridge] --> GO[Go Orchestrator]
+  Web[Next.js Dashboard] --> GO
+  Desktop[Tauri Desktop Shell] --> Web
+  Desktop --> GO
+  GO --> Bridge[TS Agent Bridge]
+  GO --> PG[(PostgreSQL)]
+  GO --> Redis[(Redis)]
+  GO --> Plugins[Plugin Control Plane]
+  Bridge --> Plugins
+```
+
 ## Current Repository Status
 
 This codebase is in an active migration from an earlier starter foundation into AgentForge. That matters for anyone reading the repo:
@@ -52,7 +65,7 @@ One important example: the PRD v2 notes that Go-to-TS communication has moved to
 
 ## Implementation Snapshot
 
-As of `2026-03-30`, the repository has already moved beyond a thin starter shell in these concrete areas:
+As of `2026-03-31`, the repository has already moved beyond a thin starter shell in these concrete areas:
 
 - `Overview dashboard`: `app/(dashboard)/page.tsx` now renders summary cards, activity feed, fleet/team/budget widgets, and quick actions grounded in the current project context.
 - `Project task workspace`: `app/(dashboard)/project/page.tsx` now hosts one shared Board / List / Timeline / Calendar workspace with a persistent context rail, realtime health state, bulk actions, sprint-aware filtering, task detail editing, and doc/comment linkage surfaces.
@@ -67,7 +80,20 @@ As of `2026-03-30`, the repository has already moved beyond a thin starter shell
 - `Memory workspace`: `app/(dashboard)/memory/page.tsx` now supports project-scoped memory search, category filtering, scope/category badges, and entry deletion.
 - `Plugin operator surfaces`: the plugin control plane now distinguishes catalog entries from installed plugins, includes built-in bundle/readiness verification, and exposes maintained authoring commands such as `pnpm create-plugin`, `pnpm plugin:verify`, and `pnpm plugin:verify:builtins`.
 - `IM operator UI`: the current frontend contract covers `feishu`, `dingtalk`, `slack`, `telegram`, `discord`, `wecom`, `qq`, and `qqbot`, with backend-driven event types, richer delivery diagnostics, payload preview, and platform-specific config fields.
+- `Marketplace`: `app/(dashboard)/marketplace/page.tsx` now provides a unified Skills/Plugin/Role marketplace with search, category filtering, featured items, detail views with version history and reviews, publish workflows, and install confirmation. The backend is a standalone Go microservice in `src-marketplace/` with its own database migrations, handler/service/repository layers, and admin moderation endpoints.
 - `Desktop shell`: the Tauri app now includes shared desktop window chrome with frameless titlebar controls, bounded sidecar supervision, runtime status queries, shell actions, and window-state synchronization through `lib/platform-runtime.ts`.
+
+## Feature Matrix
+
+| Surface | Current truth | Primary commands / entrypoints |
+| --- | --- | --- |
+| Web dashboard | Next.js 16 app-router workspace with auth, project/task/review/team/role/plugin/settings/docs surfaces | `pnpm dev`, `pnpm build` |
+| Go orchestrator | Echo API, persistence, scheduling, realtime hub, review and plugin control plane | `cd src-go && go run ./cmd/server`, `go test ./...` |
+| TS bridge | Bun service for coding runtimes, AI helpers, MCP plugin hosting | `cd src-bridge && bun run dev`, `bun run typecheck` |
+| IM bridge | cc-connect-based platform bridge with backend control-plane integration | `cd src-im-bridge && go run ./cmd/bridge` |
+| Desktop shell | Tauri 2 wrapper with sidecar supervision and updater plumbing | `pnpm tauri:dev`, `pnpm tauri:build` |
+| Marketplace | Standalone Go microservice + Next.js frontend for publishing, discovering, and installing plugins, skills, and roles | `cd src-marketplace && go run ./cmd/server`, browse `app/(dashboard)/marketplace/` |
+| Plugins | Built-in/local/catalog/remote plugin management plus MCP and workflow runs | `pnpm create-plugin`, `pnpm plugin:verify` |
 
 ## Repository Map
 
@@ -77,20 +103,22 @@ AgentForge/
 ├── components/          # Shared UI components
 ├── hooks/               # Frontend hooks
 ├── lib/                 # Frontend utilities and mock/domain helpers
-├── src-go/              # Go backend foundation
+├── src-go/              # Go backend foundation (orchestrator)
+├── src-marketplace/     # Go marketplace microservice
 ├── src-bridge/          # TypeScript/Bun agent bridge service
 ├── src-im-bridge/       # IM bridge fork workspace
 ├── src-tauri/           # Tauri desktop shell
 ├── docs/                # PRD, research, architecture, design docs
 ├── openspec/            # OpenSpec change artifacts
 ├── roles/               # Role definitions and related assets
+├── plugins/             # Built-in plugin bundle, integrations, tools, reviews, workflows
 └── scripts/             # Build helpers such as backend sidecar compilation
 ```
 
 Notable frontend route groups already present:
 
 - `app/(auth)` for login and registration
-- `app/(dashboard)` for overview, projects, project dashboard/task workspaces, team/team-run orchestration, agents, sprints, reviews, cost, scheduler, memory, roles, plugins, settings, IM, docs, and workflow operations
+- `app/(dashboard)` for overview, projects, project dashboard/task workspaces, team/team-run orchestration, agents, sprints, reviews, cost, scheduler, memory, roles, plugins, marketplace, settings, IM, docs, and workflow operations
 
 ## Documentation Guide
 
@@ -102,6 +130,12 @@ Start here if you want the latest project narrative:
 - [`docs/part/PLUGIN_SYSTEM_DESIGN.md`](./docs/part/PLUGIN_SYSTEM_DESIGN.md): target plugin system design
 - [`docs/part/PLUGIN_RESEARCH_TECH.md`](./docs/part/PLUGIN_RESEARCH_TECH.md): runtime and sandbox technology research for plugins
 - [`docs/GO_WASM_PLUGIN_RUNTIME.md`](./docs/GO_WASM_PLUGIN_RUNTIME.md): current Go-side WASM plugin runtime, SDK, and local verification flow
+- [`docs/api/`](./docs/api): current REST API reference by module
+- [`docs/schema/`](./docs/schema): PostgreSQL and Redis schema/reference docs
+- [`docs/deployment/`](./docs/deployment): deployment, env var, desktop build, and TLS guides
+- [`docs/security/`](./docs/security): auth, Tauri capability, and security best-practice docs
+- [`docs/adr/`](./docs/adr): architecture decision records
+- [`docs/guides/`](./docs/guides): plugin, frontend component, and state-management guides
 - [`docs/desktop-updater-release.md`](./docs/desktop-updater-release.md): desktop updater signing inputs, `latest.json` generation, and release validation flow
 - [`docs/role-authoring-guide.md`](./docs/role-authoring-guide.md): current dashboard role workspace flow, preview/sandbox loop, and operator guidance
 - [`docs/role-yaml.md`](./docs/role-yaml.md): canonical role YAML layout, runtime projection rules, and skill-catalog behavior
@@ -148,7 +182,9 @@ Current `dev:all` scope:
 - Starts or reuses local PostgreSQL + Redis through `docker compose` when they are not already reachable on `5432` / `6379`
 - Starts or reuses the Go Orchestrator on `http://127.0.0.1:7777/health`
 - Starts or reuses the TS Bridge on `http://127.0.0.1:7778/bridge/health`
+- Starts or reuses the IM Bridge on `http://127.0.0.1:7779/im/health`
 - Starts or reuses the Next.js frontend on `http://127.0.0.1:3000`
+- Persists the managed IM Bridge identity file at `.codex/im-bridge-id`
 - Persists repo-local runtime metadata in `.codex/dev-all-state.json`
 - Writes managed service logs under `.codex/runtime-logs/`
 
@@ -249,20 +285,22 @@ Useful bridge commands:
 
 Runtime notes:
 
-- `/bridge/execute` now accepts an optional `runtime` field with `claude_code`, `codex`, or `opencode`.
-- If `runtime` is omitted, the bridge defaults to `claude_code` and still maps legacy provider hints such as `anthropic`, `codex`, and `opencode`.
+- `/bridge/execute` now accepts an optional `runtime` field with `claude_code`, `codex`, `opencode`, `cursor`, `gemini`, `qoder`, or `iflow`.
+- If `runtime` is omitted, the bridge defaults to `claude_code` and still maps legacy provider hints such as `anthropic`, `codex`, `opencode`, `cursor`, `google`, `vertex`, `qoder`, and `iflow`.
 - `claude_code` uses the built-in Claude-backed adapter and expects `ANTHROPIC_API_KEY`.
 - `codex` now uses a bridge-owned Codex connector built on the official Codex CLI surface. `CODEX_RUNTIME_COMMAND` must point to a working `codex` executable, and that CLI must already be authenticated (`codex login status` should report a valid login).
 - The Codex connector launches `codex exec --json` for fresh runs, captures `thread.started.thread_id` as continuity metadata, and uses `codex exec resume <thread-id>` for truthful resume flows instead of replaying the original prompt as a fresh session.
 - `opencode` now uses a bridge-owned OpenCode connector built on the official `opencode serve` HTTP APIs. Configure `OPENCODE_SERVER_URL` to a reachable OpenCode server, and set `OPENCODE_SERVER_USERNAME` / `OPENCODE_SERVER_PASSWORD` when that server is protected with basic auth.
 - The OpenCode connector creates or resumes upstream sessions through `/session`, sends work with `/session/:id/prompt_async`, aborts active work with `/session/:id/abort`, and normalizes OpenCode session events into the canonical bridge stream.
 - OpenCode pause and resume now preserve upstream `session_id` continuity instead of replaying the original prompt as a fresh command process.
+- `cursor`, `gemini`, `qoder`, and `iflow` now register as CLI-backed runtime profiles. They use one shared catalog and validation contract, but they do not pretend to support the same pause/resume/fork/rollback semantics as Claude Code, Codex, or OpenCode. When truthful continuity is unavailable, the bridge records a blocked continuity state and rejects resume instead of silently starting a fresh run.
 
 ### Coding Agent Runtime Catalog
 
 In the current product contract, coding-agent execution is no longer "provider only". The runtime tuple is:
 
 - `runtime`: the actual execution backend (`claude_code`, `codex`, `opencode`)
+- `runtime`: the actual execution backend (`claude_code`, `codex`, `opencode`, `cursor`, `gemini`, `qoder`, `iflow`)
 - `provider`: the provider alias allowed for that runtime
 - `model`: the concrete model string forwarded to the runtime
 
@@ -275,8 +313,12 @@ Current runtime compatibility rules:
 | `claude_code` | `anthropic` | `anthropic` | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
 | `codex` | `openai` | `openai`, `codex` | `gpt-5-codex` | `CODEX_RUNTIME_COMMAND` plus a valid Codex CLI login |
 | `opencode` | `opencode` | `opencode` | `opencode-default` | `OPENCODE_SERVER_URL` and optional basic-auth credentials |
+| `cursor` | `cursor` | `cursor` | `claude-sonnet-4-20250514` | `CURSOR_RUNTIME_COMMAND` plus a working Cursor Agent CLI and any required local auth |
+| `gemini` | `google` | `google`, `vertex` | `gemini-2.5-pro` | `GEMINI_RUNTIME_COMMAND` plus Gemini CLI auth (`GEMINI_API_KEY` / `GOOGLE_API_KEY` or equivalent login) |
+| `qoder` | `qoder` | `qoder` | `auto` | `QODER_RUNTIME_COMMAND` plus a working Qoder CLI install |
+| `iflow` | `iflow` | `iflow` | `Qwen3-Coder` | `IFLOW_RUNTIME_COMMAND` plus iFlow CLI auth (`IFLOW_API_KEY` or equivalent login) |
 
-Bridge readiness diagnostics now surface missing credentials, missing executables, and incompatible runtime/provider combinations before launch. The project settings page and Team start dialog both consume that catalog instead of hard-coded Claude-only defaults.
+Bridge readiness diagnostics now surface missing credentials, missing executables, bounded model incompatibilities, and incompatible runtime/provider combinations before launch. The project settings page, single-agent launch, and Team start dialog all consume that catalog instead of hard-coded Claude-only defaults.
 
 Focused bridge-runtime verification commands:
 
@@ -296,9 +338,31 @@ CODEX_RUNTIME_COMMAND=codex
 
 # OpenCode runtime adapter
 OPENCODE_RUNTIME_COMMAND=opencode
+
+# Cursor Agent runtime adapter
+CURSOR_RUNTIME_COMMAND=cursor-agent
+CURSOR_API_KEY=...
+
+# Gemini CLI runtime adapter
+GEMINI_RUNTIME_COMMAND=gemini
+GEMINI_API_KEY=...
+
+# Qoder runtime adapter
+QODER_RUNTIME_COMMAND=qodercli
+
+# iFlow runtime adapter
+IFLOW_RUNTIME_COMMAND=iflow
+IFLOW_API_KEY=...
 ```
 
 For Codex, `CODEX_RUNTIME_COMMAND` should point at the official `codex` CLI (or a repo-owned wrapper that still preserves the same `exec --json` / `exec resume` contract). Project-level runtime selection does not replace these process-level requirements; it only determines which runtime tuple Go forwards to the Bridge.
+
+For the CLI-backed runtimes:
+
+- `cursor` currently exposes a bounded model list through the runtime catalog and requires the local Cursor Agent executable to be discoverable.
+- `gemini` currently supports bounded catalog-driven model selection and provider aliases `google` / `vertex`; if the required auth or provider profile is missing, readiness stays blocked.
+- `qoder` uses bounded model tiers (`auto`, `ultimate`, `performance`, `efficient`, `lite`) and treats provider as fixed `qoder`.
+- `iflow` currently exposes bounded catalog-driven model selection and treats unsupported pause/resume/fork flows as `continuity_not_supported` rather than silently replaying the original request.
 
 Before using `runtime=codex`, verify the CLI is authenticated:
 
@@ -307,6 +371,22 @@ codex login status
 ```
 
 If Codex pause or resume reports a blocked continuity state, the bridge is missing the saved `thread_id` needed to continue the same Codex session and will refuse to silently start a fresh run.
+
+Suggested operator checks for the expanded backend matrix:
+
+```bash
+# Cursor Agent
+cursor-agent --help
+
+# Gemini CLI
+gemini --version
+
+# Qoder CLI
+qodercli --help
+
+# iFlow CLI
+iflow --version
+```
 
 Focused verification for the bridge runtime layer:
 
@@ -370,6 +450,46 @@ Current operator-facing IM scope in this repo:
 - Channel configuration now uses backend-fetched event types instead of a hard-coded event checklist.
 - Delivery and health views include richer platform badges, downgrade diagnostics, and payload/detail inspection for operator workflows.
 
+### 4.5 Marketplace Service
+
+The marketplace is a standalone Go microservice that manages the publishing, discovery, installation, and review of plugins, skills, and roles.
+
+```bash
+cd src-marketplace
+go run ./cmd/server
+```
+
+Useful marketplace commands:
+
+- `go test ./...`
+- `go build ./cmd/server`
+
+The marketplace backend runs on port `7779` by default and provides:
+
+- REST API for item CRUD, version management, reviews, search, and category filtering
+- Admin-only endpoints for featuring and verifying marketplace items
+- Digest-based artifact integrity verification
+- Integration with the Go orchestrator's plugin install endpoint (`POST /api/v1/plugins/catalog/install`)
+
+The frontend marketplace page (`app/(dashboard)/marketplace/page.tsx`) exposes:
+
+- Search bar with type/category filtering and sort options (downloads, rating, newest)
+- Featured items section
+- Item detail view with version history, reviews, and install confirmation
+- Publish dialog for authors to submit new plugins, skills, or roles
+- Installed-items tracking through the marketplace store (`lib/stores/marketplace-store.ts`)
+
+Key marketplace components:
+
+- `components/marketplace/marketplace-search-bar.tsx`
+- `components/marketplace/marketplace-filter-panel.tsx`
+- `components/marketplace/marketplace-item-card.tsx`
+- `components/marketplace/marketplace-item-detail.tsx`
+- `components/marketplace/marketplace-publish-dialog.tsx`
+- `components/marketplace/marketplace-install-confirm.tsx`
+- `components/marketplace/marketplace-review-dialog.tsx`
+- `components/marketplace/marketplace-version-list.tsx`
+
 ### 5. Desktop Mode
 
 If you are working on the desktop shell:
@@ -378,16 +498,17 @@ If you are working on the desktop shell:
 pnpm tauri:dev
 ```
 
-Or build desktop artifacts:
+Or build desktop artifacts through the shared desktop packaging contract:
 
 ```bash
-pnpm tauri:build
+pnpm build:desktop
 ```
 
 Desktop capability contract in the current Tauri shell:
 
-- Tauri now supervises both required sidecars: the Go orchestrator on `http://127.0.0.1:7777` and the TS bridge on `http://127.0.0.1:7778`.
-- The desktop runtime is only reported as `ready` after both sidecars pass health checks. Unexpected exits trigger bounded restart attempts before the runtime is marked `degraded`.
+- Tauri now supervises three required sidecars: the Go orchestrator on `http://127.0.0.1:7777`, the TS bridge on `http://127.0.0.1:7778`, and the IM Bridge on `http://127.0.0.1:7779`.
+- The desktop runtime is only reported as `ready` after all three sidecars pass health checks. Unexpected exits trigger bounded restart attempts before the runtime is marked `degraded`.
+- The shared desktop prepare contract is split into `pnpm desktop:dev:prepare` for current-host development binaries and `pnpm desktop:build:prepare` for packaging binaries plus the frontend production build. `tauri:dev`, `build:desktop`, Tauri pre-commands, and the maintained VS Code desktop debug entry points all reuse that contract.
 - Frontend desktop access is centralized through `lib/platform-runtime.ts` and `hooks/use-platform-capability.ts`. Supported desktop commands include backend URL resolution, runtime status, native file picking, system notifications, tray updates, global shortcut registration, update checks, and read-only runtime summary queries.
 - The main window now uses shared frameless chrome via `components/layout/desktop-window-frame.tsx`, including drag region handling plus minimize / maximize / restore / close actions wired through the platform capability facade.
 - Web mode keeps explicit fallback semantics: file picking falls back to browser input, notifications fall back to the Web Notification API, tray updates fall back to document title updates, global shortcuts return `unsupported`, and update checks return `not_applicable`.
@@ -413,7 +534,11 @@ Current limitations:
 | `pnpm create-plugin` | Scaffold a repo-local plugin starter for tool, review, workflow, or integration development |
 | `pnpm build:backend` | Cross-compile Go sidecar binaries for Tauri |
 | `pnpm build:backend:dev` | Build the Go sidecar for the current platform |
-| `pnpm dev:all` | Start or reuse the full local web development stack: compose infra + Go + TS bridge + frontend |
+| `pnpm build:im-bridge` | Cross-compile IM Bridge sidecar binaries for Tauri |
+| `pnpm build:im-bridge:dev` | Build the IM Bridge sidecar for the current platform |
+| `pnpm desktop:dev:prepare` | Prepare current-host backend + TS bridge + IM Bridge sidecars for desktop development |
+| `pnpm desktop:build:prepare` | Prepare packaging backend + TS bridge + IM Bridge sidecars and build the frontend bundle |
+| `pnpm dev:all` | Start or reuse the full local web development stack: compose infra + Go + TS bridge + IM Bridge + frontend |
 | `pnpm dev:all:status` | Report source, health, ports, and known log paths for the local dev stack |
 | `pnpm dev:all:logs` | Show the repo-local log files tracked for the local dev stack |
 | `pnpm dev:all:stop` | Stop only the services managed by `dev:all` and preserve reused or external listeners |
@@ -423,10 +548,10 @@ Current limitations:
 | `pnpm plugin:dev` | Start or reuse the minimal plugin authoring stack: Go orchestrator + TS bridge |
 | `pnpm plugin:verify` | Run the maintained sample plugin smoke workflow: build -> debug health |
 | `pnpm plugin:verify:builtins` | Verify the built-in plugin bundle contract and generated registry metadata |
-| `pnpm tauri:dev` | Build backend sidecar and start Tauri dev mode |
+| `pnpm tauri:dev` | Start Tauri dev mode with shared desktop prepare hooks for backend + TS bridge + IM Bridge |
 | `pnpm tauri:build` | Build the desktop app |
 | `pnpm build:bridge` | Install and build the TS/Bun bridge |
-| `pnpm build:desktop` | Build backend + bridge sidecars and package the desktop app |
+| `pnpm build:desktop` | Package the desktop app through the shared backend + TS bridge + IM Bridge desktop build contract |
 | `pnpm build:updater-manifest` | Build `latest.json` from signed updater artifacts for release publishing |
 | `pnpm verify:updater-artifacts` | Validate updater artifacts and `latest.json` before draft release publication |
 

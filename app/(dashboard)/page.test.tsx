@@ -1,9 +1,11 @@
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import DashboardPage from "./page";
 
 const searchParamsState = {
   projectId: "project-1",
 };
+const replaceMock = jest.fn();
 
 const dashboardState = {
   summary: {
@@ -26,6 +28,26 @@ const dashboardState = {
       agents: "/agents/live",
     },
   },
+  projects: [
+    {
+      id: "project-1",
+      name: "AgentForge",
+      slug: "agentforge",
+      description: "Main project",
+      repoUrl: "",
+      defaultBranch: "main",
+      createdAt: "2026-03-20T10:00:00.000Z",
+    },
+    {
+      id: "project-2",
+      name: "Ops",
+      slug: "ops",
+      description: "Ops project",
+      repoUrl: "",
+      defaultBranch: "main",
+      createdAt: "2026-03-20T10:00:00.000Z",
+    },
+  ],
   loading: false,
   fetchSummary: jest.fn(),
   activity: [
@@ -87,6 +109,11 @@ jest.mock("next-intl", () => ({
 }));
 
 jest.mock("next/navigation", () => ({
+  useRouter: () => ({
+    push: jest.fn(),
+    replace: replaceMock,
+  }),
+  usePathname: () => "/",
   useSearchParams: () => ({
     get: (key: string) => (key === "project" ? searchParamsState.projectId : null),
   }),
@@ -184,6 +211,7 @@ describe("DashboardPage", () => {
   beforeEach(() => {
     searchParamsState.projectId = "project-1";
     dashboardState.loading = false;
+    replaceMock.mockReset();
     dashboardState.fetchSummary.mockReset();
     agentState.fetchAgents.mockReset();
   });
@@ -195,7 +223,8 @@ describe("DashboardPage", () => {
 
     expect(dashboardState.fetchSummary).toHaveBeenCalledWith({ projectId: "project-1" });
     expect(agentState.fetchAgents).toHaveBeenCalledTimes(1);
-    expect(screen.getAllByTestId("skeleton")).toHaveLength(9);
+    expect(screen.getAllByTestId("skeleton")).toHaveLength(25);
+    expect(screen.getAllByTestId("dashboard-widget-skeleton")).toHaveLength(4);
   });
 
   it("renders metrics, widgets, and quick-action links from the loaded summary", () => {
@@ -208,22 +237,50 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("agent-fleet-widget")).toHaveTextContent("agent-1,agent-2");
     expect(screen.getByTestId("team-health-widget")).toHaveTextContent("Alice:Active:Lead");
     expect(screen.getByTestId("budget-widget")).toHaveTextContent("100/40/60");
-    expect(screen.getByRole("link", { name: "dashboard.actions.createTask" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "dashboard.actions.createTask N" })).toHaveAttribute(
       "href",
       "/project?id=project-1",
     );
-    expect(screen.getByRole("link", { name: "dashboard.actions.spawnAgent" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "dashboard.actions.spawnAgent A" })).toHaveAttribute(
       "href",
       "/agents/live",
     );
-    expect(screen.getByRole("link", { name: "dashboard.actions.newSprint" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "dashboard.actions.newSprint S" })).toHaveAttribute(
       "href",
       "/sprints",
     );
-    expect(screen.getByRole("link", { name: "dashboard.actions.createTeam" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "dashboard.actions.createTeam T" })).toHaveAttribute(
       "href",
       "/team",
     );
+    expect(screen.getByText("N")).toBeInTheDocument();
+    expect(screen.getByText("A")).toBeInTheDocument();
+    expect(screen.getByText("S")).toBeInTheDocument();
+    expect(screen.getByText("T")).toBeInTheDocument();
+  });
+
+  it("shows a project selector and updates the query string when the project changes", async () => {
+    const user = userEvent.setup();
+
+    render(<DashboardPage />);
+
+    expect(screen.getByLabelText("dashboard.projectFilterLabel")).toHaveValue(
+      "project-1",
+    );
+
+    await user.selectOptions(
+      screen.getByLabelText("dashboard.projectFilterLabel"),
+      "project-2",
+    );
+
+    expect(replaceMock).toHaveBeenCalledWith("/?project=project-2");
+
+    await user.selectOptions(
+      screen.getByLabelText("dashboard.projectFilterLabel"),
+      "",
+    );
+
+    expect(replaceMock).toHaveBeenCalledWith("/");
   });
 
   it("maps activity statuses, idle members, and fallback links when budget data is missing", () => {
@@ -278,11 +335,11 @@ describe("DashboardPage", () => {
     );
     expect(screen.getByTestId("team-health-widget")).toHaveTextContent("Bot Worker:Idle:Agent");
     expect(screen.getByTestId("budget-widget")).toHaveTextContent("0/42/0");
-    expect(screen.getByRole("link", { name: "dashboard.actions.createTask" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "dashboard.actions.createTask N" })).toHaveAttribute(
       "href",
       "/projects",
     );
-    expect(screen.getByRole("link", { name: "dashboard.actions.spawnAgent" })).toHaveAttribute(
+    expect(screen.getByRole("link", { name: "dashboard.actions.spawnAgent A" })).toHaveAttribute(
       "href",
       "/agents",
     );

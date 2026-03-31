@@ -17,8 +17,10 @@ const catalog = {
       defaultProvider: "openai",
       compatibleProviders: ["openai", "codex"],
       defaultModel: "gpt-5-codex",
+      modelOptions: ["gpt-5-codex", "o3"],
       available: true,
       diagnostics: [],
+      supportedFeatures: ["reasoning", "fork"],
     },
     {
       runtime: "claude_code",
@@ -26,8 +28,10 @@ const catalog = {
       defaultProvider: "anthropic",
       compatibleProviders: ["anthropic"],
       defaultModel: "claude-sonnet-4-5",
+      modelOptions: ["claude-sonnet-4-5", "claude-opus-4-1"],
       available: true,
       diagnostics: [],
+      supportedFeatures: ["structured_output", "interrupt"],
     },
     {
       runtime: "opencode",
@@ -35,6 +39,7 @@ const catalog = {
       defaultProvider: "opencode",
       compatibleProviders: ["opencode"],
       defaultModel: "opencode-default",
+      modelOptions: ["opencode-default"],
       available: false,
       diagnostics: [
         {
@@ -43,6 +48,18 @@ const catalog = {
           blocking: true,
         },
       ],
+      supportedFeatures: ["messages"],
+    },
+    {
+      runtime: "cursor",
+      label: "Cursor Agent",
+      defaultProvider: "cursor",
+      compatibleProviders: ["cursor"],
+      defaultModel: "claude-sonnet-4-20250514",
+      modelOptions: ["claude-sonnet-4-20250514", "gpt-4o"],
+      available: true,
+      diagnostics: [],
+      supportedFeatures: ["progress", "reasoning"],
     },
   ],
 };
@@ -137,5 +154,24 @@ describe("RuntimeSelector", () => {
 
     expect(screen.getByText("OpenCode CLI is not installed")).toBeInTheDocument();
     expect(screen.getByText("OpenCode is currently unavailable.")).toBeInTheDocument();
+  });
+
+  it("uses bounded model options for additional CLI-backed runtimes", async () => {
+    const user = userEvent.setup();
+    const Wrapper = () => {
+      const [value, setValue] = React.useState(catalog.defaultSelection);
+      return <RuntimeSelector catalog={catalog} value={value} onChange={setValue} idPrefix="test-runtime" />;
+    };
+
+    render(<Wrapper />);
+
+    const selects = screen.getAllByLabelText("runtime-selector-select");
+    await user.selectOptions(selects[0], "cursor");
+
+    expect(Array.from((selects[1] as HTMLSelectElement).options).map((option) => option.value)).toEqual(["cursor"]);
+    expect(Array.from((selects[2] as HTMLSelectElement).options).map((option) => option.value)).toEqual([
+      "claude-sonnet-4-20250514",
+      "gpt-4o",
+    ]);
   });
 });

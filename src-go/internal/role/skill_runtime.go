@@ -2,8 +2,6 @@ package role
 
 import (
 	"fmt"
-	"os"
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -23,14 +21,21 @@ func WithSkillRoot(root string) ExecutionProfileOption {
 }
 
 type runtimeSkillDocument struct {
-	Path        string
-	Label       string
-	Description string
-	Instructions string
-	Requires    []string
-	Tools       []string
-	Source      string
-	SourceRoot  string
+	Path             string
+	Label            string
+	Description      string
+	Instructions     string
+	DisplayName      string
+	ShortDescription string
+	DefaultPrompt    string
+	AvailableParts   []string
+	ReferenceCount   int
+	ScriptCount      int
+	AssetCount       int
+	Requires         []string
+	Tools            []string
+	Source           string
+	SourceRoot       string
 }
 
 func resolveRuntimeSkills(manifest *Manifest, skillRoot string) ([]model.RoleExecutionSkill, []model.RoleExecutionSkill, []model.RoleExecutionSkillDiagnostic) {
@@ -86,15 +91,22 @@ func resolveRuntimeSkills(manifest *Manifest, skillRoot string) ([]model.RoleExe
 
 		loadedSeen[path] = struct{}{}
 		loaded = append(loaded, model.RoleExecutionSkill{
-			Path:         doc.Path,
-			Label:        doc.Label,
-			Description:  doc.Description,
-			Instructions: doc.Instructions,
-			Source:       doc.Source,
-			SourceRoot:   doc.SourceRoot,
-			Origin:       origin,
-			Requires:     append([]string(nil), doc.Requires...),
-			Tools:        append([]string(nil), doc.Tools...),
+			Path:             doc.Path,
+			Label:            doc.Label,
+			Description:      doc.Description,
+			Instructions:     doc.Instructions,
+			DisplayName:      doc.DisplayName,
+			ShortDescription: doc.ShortDescription,
+			DefaultPrompt:    doc.DefaultPrompt,
+			AvailableParts:   append([]string(nil), doc.AvailableParts...),
+			ReferenceCount:   doc.ReferenceCount,
+			ScriptCount:      doc.ScriptCount,
+			AssetCount:       doc.AssetCount,
+			Source:           doc.Source,
+			SourceRoot:       doc.SourceRoot,
+			Origin:           origin,
+			Requires:         append([]string(nil), doc.Requires...),
+			Tools:            append([]string(nil), doc.Tools...),
 		})
 		for _, requirePath := range doc.Requires {
 			appendLoaded(requirePath, blocking, "dependency", path)
@@ -127,14 +139,21 @@ func resolveRuntimeSkills(manifest *Manifest, skillRoot string) ([]model.RoleExe
 		}
 		availableSeen[path] = struct{}{}
 		available = append(available, model.RoleExecutionSkill{
-			Path:        doc.Path,
-			Label:       doc.Label,
-			Description: doc.Description,
-			Source:      doc.Source,
-			SourceRoot:  doc.SourceRoot,
-			Origin:      "direct",
-			Requires:    append([]string(nil), doc.Requires...),
-			Tools:       append([]string(nil), doc.Tools...),
+			Path:             doc.Path,
+			Label:            doc.Label,
+			Description:      doc.Description,
+			DisplayName:      doc.DisplayName,
+			ShortDescription: doc.ShortDescription,
+			DefaultPrompt:    doc.DefaultPrompt,
+			AvailableParts:   append([]string(nil), doc.AvailableParts...),
+			ReferenceCount:   doc.ReferenceCount,
+			ScriptCount:      doc.ScriptCount,
+			AssetCount:       doc.AssetCount,
+			Source:           doc.Source,
+			SourceRoot:       doc.SourceRoot,
+			Origin:           "direct",
+			Requires:         append([]string(nil), doc.Requires...),
+			Tools:            append([]string(nil), doc.Tools...),
 		})
 	}
 
@@ -161,32 +180,27 @@ func HasBlockingSkillDiagnostics(profile *ExecutionProfile) bool {
 }
 
 func readRuntimeSkillDocument(root, canonicalPath string) (*runtimeSkillDocument, error) {
-	canonicalPath = normalizeSkillReferencePath(canonicalPath)
-	if canonicalPath == "" {
-		return nil, fmt.Errorf("skill path is required")
-	}
-	relative := strings.TrimPrefix(canonicalPath, "skills/")
-	skillFile := filepath.Join(root, filepath.FromSlash(relative), "SKILL.md")
-	content, err := os.ReadFile(skillFile)
+	document, err := readSkillPackageDocument(root, canonicalPath)
 	if err != nil {
 		return nil, err
 	}
 
-	document := parseSkillDocument(string(content))
-	label := strings.TrimSpace(document.Frontmatter.Name)
-	if label == "" {
-		label = humanizeSkillLabel(relative)
-	}
-
 	return &runtimeSkillDocument{
-		Path:         canonicalPath,
-		Label:        label,
-		Description:  strings.TrimSpace(document.Frontmatter.Description),
-		Instructions: strings.TrimSpace(document.Body),
-		Requires:     normalizeRequiredSkillPaths(document.Frontmatter.Requires),
-		Tools:        trimNonEmpty(document.Frontmatter.Tools),
-		Source:       "repo-local",
-		SourceRoot:   "skills",
+		Path:             document.Path,
+		Label:            skillLabel(document),
+		Description:      skillDescription(document),
+		Instructions:     strings.TrimSpace(document.Body),
+		DisplayName:      document.Interface.DisplayName,
+		ShortDescription: document.Interface.ShortDescription,
+		DefaultPrompt:    document.Interface.DefaultPrompt,
+		AvailableParts:   append([]string(nil), document.AvailableParts...),
+		ReferenceCount:   document.ReferenceCount,
+		ScriptCount:      document.ScriptCount,
+		AssetCount:       document.AssetCount,
+		Requires:         normalizeRequiredSkillPaths(document.Frontmatter.Requires),
+		Tools:            trimNonEmpty(document.Frontmatter.Tools),
+		Source:           "repo-local",
+		SourceRoot:       "skills",
 	}, nil
 }
 

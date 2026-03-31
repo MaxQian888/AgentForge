@@ -139,6 +139,13 @@ export interface RoleSkillResolution {
   autoLoad: boolean;
   label: string;
   description: string;
+  displayName?: string;
+  shortDescription?: string;
+  defaultPrompt?: string;
+  availableParts?: string[];
+  referenceCount?: number;
+  scriptCount?: number;
+  assetCount?: number;
   source: string;
   sourceRoot: string;
   status: RoleSkillResolutionStatus;
@@ -701,6 +708,13 @@ export function resolveRoleSkillReferences({
           autoLoad: skill.autoLoad,
           label: matchedCatalogEntry.label,
           description: matchedCatalogEntry.description ?? "",
+          displayName: matchedCatalogEntry.displayName,
+          shortDescription: matchedCatalogEntry.shortDescription,
+          defaultPrompt: matchedCatalogEntry.defaultPrompt,
+          availableParts: matchedCatalogEntry.availableParts,
+          referenceCount: matchedCatalogEntry.referenceCount,
+          scriptCount: matchedCatalogEntry.scriptCount,
+          assetCount: matchedCatalogEntry.assetCount,
           source: matchedCatalogEntry.source,
           sourceRoot: matchedCatalogEntry.sourceRoot,
           status: "resolved" as const,

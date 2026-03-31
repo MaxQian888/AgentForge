@@ -158,7 +158,9 @@ func TestProjectHandler_GetIncludesRuntimeCatalogAndResolvedDefaults(t *testing.
 					DefaultProvider:     "openai",
 					CompatibleProviders: []string{"openai", "codex"},
 					DefaultModel:        "gpt-5-codex",
+					ModelOptions:        []string{"gpt-5-codex", "o3"},
 					Available:           true,
+					SupportedFeatures:   []string{"reasoning", "fork"},
 				},
 			},
 		},
@@ -197,6 +199,12 @@ func TestProjectHandler_GetIncludesRuntimeCatalogAndResolvedDefaults(t *testing.
 	}
 	if len(body.CodingAgentCatalog.Runtimes) != 1 || body.CodingAgentCatalog.Runtimes[0].Runtime != "codex" {
 		t.Fatalf("runtime catalog = %+v", body.CodingAgentCatalog.Runtimes)
+	}
+	if len(body.CodingAgentCatalog.Runtimes[0].ModelOptions) != 2 {
+		t.Fatalf("model options = %+v, want two codex options", body.CodingAgentCatalog.Runtimes[0].ModelOptions)
+	}
+	if len(body.CodingAgentCatalog.Runtimes[0].SupportedFeatures) != 2 {
+		t.Fatalf("supported features = %+v, want two codex features", body.CodingAgentCatalog.Runtimes[0].SupportedFeatures)
 	}
 }
 

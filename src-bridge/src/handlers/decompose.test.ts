@@ -25,6 +25,20 @@ describe("decompose handler", () => {
     expect(prompt).toContain("executionMode");
   });
 
+  test("includes optional decomposition context in the generated prompt", () => {
+    const prompt = buildDecompositionPrompt({
+      ...request,
+      context: {
+        relevantFiles: ["src-go/internal/server/routes.go"],
+        waveMode: true,
+      },
+    });
+
+    expect(prompt).toContain("Additional Context");
+    expect(prompt).toContain("\"relevantFiles\":[\"src-go/internal/server/routes.go\"]");
+    expect(prompt).toContain("\"waveMode\":true");
+  });
+
   test("passes the resolved provider context to the executor", async () => {
     const provider = resolveProviderSelection("text_generation", {
       provider: "openai",

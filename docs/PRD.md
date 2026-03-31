@@ -2247,8 +2247,14 @@ graph TD
   /task create <description>     — 创建任务
   /task assign <id> @agent       — 分配给 Agent
   /task status <id>              — 查看状态
+  /task move <id> <status>       — 流转任务状态
   /task list                     — 查看我的任务
+  /agent status [id]             — 查看 Agent 池或运行状态
   /agent run <prompt>            — 直接执行 Agent 指令
+  /agent pause|resume|kill <id>  — 控制 Agent 生命周期
+  /queue list [status]           — 查看 Agent 队列
+  /team list                     — 查看项目成员摘要
+  /memory search|note            — 搜索或记录项目记忆
   /review <pr-url>               — 触发审查
   /sprint status                 — Sprint 概览
   @AgentForge <自然语言>          — AI 理解意图并执行
@@ -2610,10 +2616,22 @@ AgentForge IM 命令协议:
 /task status <id>                    查看任务状态
 /task assign <id> @agent|@user       分配任务
 /task decompose <id>                 AI 分解任务
+/task move <id> <status>             流转任务状态（兼容 transition）
 
 /agent run <prompt>                  直接执行 Agent 指令
 /agent status                        Agent 池状态
 /agent logs <id>                     查看 Agent 日志
+/agent pause <id>                    暂停 Agent 运行
+/agent resume <id>                   恢复 Agent 运行
+/agent kill <id>                     终止 Agent 运行
+
+/queue list [status]                 查看 Agent 队列
+/queue cancel <entry-id>             取消队列项
+
+/team list                           项目成员摘要
+
+/memory search <query>               搜索项目记忆
+/memory note <content>               记录项目记忆
 
 /review <pr-url>                     触发代码审查
 /review status <id>                  审查状态
