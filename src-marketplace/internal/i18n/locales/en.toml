@@ -1,1 +1,45 @@
-[]
+[ItemNotFound]
+description = "Item not found"
+one = "Item not found"
+
+[VersionAlreadyExists]
+one = "Version already exists"
+
+[InvalidSemver]
+one = "Invalid semantic version format"
+
+[ItemSlugTaken]
+one = "A item with this slug and type already exists"
+
+[NotItemOwner]
+one = "You are not the owner of this item"
+
+[ArtifactRequired]
+one = "Artifact file is required"
+
+[RatingOutOfRange]
+one = "Rating must be between 1 and 5"
+
+[VersionYanked]
+one = "This version has been yanked and is unavailable"
+
+[VersionNotFound]
+one = "Version not found"
+
+[AdminRequired]
+one = "Admin privileges required"
+
+[FailedToStoreArtifact]
+one = "Failed to store artifact"
+
+[InvalidRequestBody]
+one = "Invalid request body"
+
+[InvalidID]
+one = "Invalid ID"
+
+[InternalError]
+one = "Internal server error"
+
+[NotFound]
+one = "Not found"
