@@ -103,20 +103,22 @@ AgentForge/
 ├── components/          # 共享 UI 组件
 ├── hooks/               # 前端 hooks
 ├── lib/                 # 前端工具与领域/Mock 辅助代码
-├── src-go/              # Go 后端基础实现
+├── src-go/              # Go 后端基础实现（编排器）
+├── src-marketplace/     # Go Marketplace 微服务
 ├── src-bridge/          # TypeScript/Bun Agent Bridge 服务
 ├── src-im-bridge/       # IM Bridge fork 工作区
 ├── src-tauri/           # Tauri 桌面壳
 ├── docs/                # PRD、调研、架构、设计文档
 ├── openspec/            # OpenSpec 变更产物
 ├── roles/               # 角色定义及相关资产
+├── plugins/             # 内置插件 bundle、integrations、tools、reviews、workflows
 └── scripts/             # 构建辅助脚本，如后端 sidecar 编译
 ```
 
 当前已经存在的主要前端路由组：
 
 - `app/(auth)`：登录、注册
-- `app/(dashboard)`：总览、projects、项目 dashboard/任务工作区、team/teams 编排、agents、sprints、reviews、cost、scheduler、memory、roles、plugins、settings、IM、docs 与 workflow 运维页面
+- `app/(dashboard)`：总览、projects、项目 dashboard/任务工作区、team/teams 编排、agents、sprints、reviews、cost、scheduler、memory、roles、plugins、marketplace、settings、IM、docs 与 workflow 运维页面
 
 ## 文档导航
 
