@@ -559,6 +559,13 @@ func RegisterRoutes(
 	protected.GET("/plugins/:id/workflow-runs", pluginH.ListWorkflowRuns)
 	protected.GET("/plugins/workflow-runs/:runId", pluginH.GetWorkflowRun)
 
+	// Marketplace integration (only registered when a marketplace URL is configured)
+	if cfg.MarketplaceURL != "" {
+		marketplaceH := handler.NewMarketplaceHandler(pluginSvc, cfg.MarketplaceURL, cfg.PluginsDir)
+		protected.POST("/marketplace/install", marketplaceH.Install)
+		protected.GET("/marketplace/installed", marketplaceH.Installed)
+	}
+
 	// IM Bridge
 	imSvc := service.NewIMService(cfg.IMNotifyURL, cfg.IMNotifyPlatform, imControlPlane)
 	imSvc.SetDeliverySecret(cfg.IMControlSharedSecret)

@@ -38,6 +38,7 @@ type Config struct {
 	IMControlSharedSecret        string
 	IMBridgeHeartbeatTTL         time.Duration
 	IMBridgeProgressInterval     time.Duration
+	MarketplaceURL               string
 }
 
 func Load() *Config {
@@ -77,6 +78,7 @@ func Load() *Config {
 	viper.SetDefault("IM_CONTROL_SHARED_SECRET", "")
 	viper.SetDefault("IM_BRIDGE_HEARTBEAT_TTL", "2m")
 	viper.SetDefault("IM_BRIDGE_PROGRESS_INTERVAL", "30s")
+	viper.SetDefault("MARKETPLACE_URL", "")
 
 	accessTTL, _ := time.ParseDuration(viper.GetString("JWT_ACCESS_TTL"))
 	refreshTTL, _ := time.ParseDuration(viper.GetString("JWT_REFRESH_TTL"))
@@ -126,5 +128,6 @@ func Load() *Config {
 		IMControlSharedSecret:        viper.GetString("IM_CONTROL_SHARED_SECRET"),
 		IMBridgeHeartbeatTTL:         imBridgeHeartbeatTTL,
 		IMBridgeProgressInterval:     imBridgeProgressInterval,
+		MarketplaceURL:               viper.GetString("MARKETPLACE_URL"),
 	}
 }
