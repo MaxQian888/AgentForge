@@ -65,7 +65,7 @@ flowchart LR
 
 ## 当前实现快照
 
-截至 `2026-03-30`，仓库已经不只是一个 starter 外壳，以下能力已经有真实落地：
+截至 `2026-03-31`，仓库已经不只是一个 starter 外壳，以下能力已经有真实落地：
 
 - `总览 Dashboard`：`app/(dashboard)/page.tsx` 已提供汇总指标卡、活动流、agent/team/budget widget，以及基于当前项目上下文的快捷操作。
 - `项目任务工作区`：`app/(dashboard)/project/page.tsx` 已经收敛为统一的 Board / List / Timeline / Calendar 工作区，带持久右侧 context rail、实时健康态、批量操作、Sprint 过滤、任务详情编辑以及文档/评论关联入口。
@@ -81,6 +81,7 @@ flowchart LR
 - `插件控制面`：当前插件控制面已经区分 catalog 条目与已安装插件，补齐 built-in bundle/readiness 验证，并提供 `pnpm create-plugin`、`pnpm plugin:verify`、`pnpm plugin:verify:builtins` 等维护中的作者工作流。
 - `IM 运维界面`：当前前端合同已经覆盖 `feishu`、`dingtalk`、`slack`、`telegram`、`discord`、`wecom`、`qq`、`qqbot`，并具备后端驱动事件类型、投递降级诊断、payload 预览和平台特有配置字段。
 - `桌面壳`：Tauri 桌面模式已经具备共享 frameless titlebar、sidecar 有界监督、runtime 状态查询、shell actions，以及通过 `lib/platform-runtime.ts` 暴露的窗口状态同步能力。
+- `Marketplace 市场`：`app/(dashboard)/marketplace/page.tsx` 已提供统一的 Skills/Plugin/Role 市场，支持搜索、分类过滤、精选推荐、详情查看（含版本历史和评价）、发布流程以及安装确认。后端为独立 Go 微服务 `src-marketplace/`，具备独立的数据库迁移、handler/service/repository 分层和管理员审核端点。
 
 ## 功能矩阵
 
@@ -91,6 +92,7 @@ flowchart LR
 | TS Bridge | Bun 服务，负责 coding runtime、AI helper、MCP 插件托管 | `cd src-bridge && bun run dev`、`bun run typecheck` |
 | IM Bridge | 基于 cc-connect 的平台桥接层，接入后端控制面 | `cd src-im-bridge && go run ./cmd/bridge` |
 | Desktop Shell | Tauri 2 桌面壳，含 sidecar supervision 与 updater plumbing | `pnpm tauri:dev`、`pnpm tauri:build` |
+| Marketplace | 独立 Go 微服务 + Next.js 前端，用于发布、发现和安装插件/Skills/角色 | `cd src-marketplace && go run ./cmd/server`，浏览 `app/(dashboard)/marketplace/` |
 | Plugins | built-in/local/catalog/remote 插件管理，加上 MCP 与 workflow run 支持 | `pnpm create-plugin`、`pnpm plugin:verify` |
 
 ## 仓库结构
