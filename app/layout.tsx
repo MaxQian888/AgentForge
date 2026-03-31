@@ -1,11 +1,11 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import { NextIntlClientProvider } from "next-intl";
-import { ThemeProvider } from "next-themes";
 import { DesktopWindowFrame } from "@/components/layout/desktop-window-frame";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { I18nProvider } from "@/lib/i18n/provider";
 import { DEFAULT_LOCALE } from "@/lib/i18n/config";
+import { ThemeProvider } from "@/lib/theme/provider";
 import "./globals.css";
 
 const geistSans = Geist({

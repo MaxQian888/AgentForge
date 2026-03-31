@@ -6,7 +6,7 @@ import settingsMessages from "@/messages/en/settings.json";
 import type { Project } from "@/lib/stores/project-store";
 
 const mockSetTheme = jest.fn();
-jest.mock("next-themes", () => ({
+jest.mock("@/lib/theme/provider", () => ({
   useTheme: () => ({ theme: "system", setTheme: mockSetTheme }),
 }));
 

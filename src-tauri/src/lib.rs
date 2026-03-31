@@ -20,14 +20,18 @@ mod runtime_logic;
 use crate::runtime_logic::{
     active_runtime_count, active_runtime_summary_unavailable_warning, bridge_plugin_count,
     bridge_plugin_summary_unavailable_warning, bridge_url_unavailable_warning,
-    build_plugin_runtime_summary, classify_shell_action, compute_overall_status,
-    compute_termination_outcome, menu_action_href, notification_outcome_event_type,
-    notification_outcome_payload, now_string, resolve_updater_pubkey, select_files_mode,
-    shell_action_event_payload, should_suppress_notification, window_state_payload,
+    build_plugin_runtime_summary, build_shell_action_event, classify_shell_action,
+    compute_overall_status, compute_termination_outcome, menu_action_href,
+    notification_outcome_event_type, notification_outcome_payload, now_string,
+    resolve_updater_pubkey, select_files_mode, should_suppress_notification,
+    window_state_payload,
     DesktopEventPayload, DesktopNotificationRequest, DesktopNotificationResult,
     DesktopRuntimeSnapshot, DesktopRuntimeUnit, DesktopWindowChromeState, PluginRuntimeSummary,
     RuntimeStatus, SelectFilesMode, ShellActionKind,
 };
+
+#[cfg(test)]
+use crate::runtime_logic::shell_action_event_payload;
 
 const BACKEND_LABEL: &str = "backend";
 const BACKEND_PORT: u16 = 7777;
@@ -214,17 +218,14 @@ impl DesktopRuntimeManager {
         payload: Option<Value>,
         status: impl Into<String>,
     ) {
-        let event = DesktopEventPayload {
-            event_type: "shell.action".to_string(),
-            source: source.into(),
-            action_id: Some(action_id.into()),
+        let event = build_shell_action_event(
+            source,
+            action_id,
             href,
-            status: Some(status.into()),
-            runtime: None,
-            shortcut: None,
             payload,
-            timestamp: now_string(),
-        };
+            status,
+            now_string(),
+        );
 
         if let Err(error) = app.emit(DESKTOP_EVENT_NAME, event) {
             log::warn!("failed to emit desktop shell action event: {error}");

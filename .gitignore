@@ -1,5 +1,8 @@
 # See https://help.github.com/articles/ignoring-files/ for more about ignoring files.
 
+# Git worktrees
+.worktrees/
+
 # dependencies
 node_modules
 /.pnp
@@ -50,6 +53,8 @@ next-env.d.ts
 
 # Go backend binaries (compiled artifacts)
 src-tauri/binaries/server*
+src-tauri/binaries/bridge*
+src-tauri/binaries/im-bridge*
 !src-tauri/binaries/.gitkeep
 
 # Go build cache
@@ -65,3 +70,4 @@ bridge-x86_64-pc-windows-msvc.exe
 tmp-runtime
 .codex
 .gocache
+.tmp-go-cache

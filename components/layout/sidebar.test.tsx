@@ -42,8 +42,8 @@ jest.mock("next-intl", () => ({
   },
 }));
 
-// Mock next-themes used by ThemeToggle
-jest.mock("next-themes", () => ({
+// Mock theme provider used by ThemeToggle
+jest.mock("@/lib/theme/provider", () => ({
   useTheme: () => ({ theme: "light", setTheme: jest.fn() }),
 }));
 

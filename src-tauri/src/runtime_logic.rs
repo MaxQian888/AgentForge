@@ -12,7 +12,7 @@ pub(crate) enum RuntimeStatus {
     Stopped,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DesktopRuntimeUnit {
     pub(crate) label: String,
@@ -24,7 +24,7 @@ pub(crate) struct DesktopRuntimeUnit {
     pub(crate) last_started_at: Option<String>,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DesktopRuntimeSnapshot {
     pub(crate) overall: RuntimeStatus,
@@ -32,7 +32,7 @@ pub(crate) struct DesktopRuntimeSnapshot {
     pub(crate) bridge: DesktopRuntimeUnit,
 }
 
-#[derive(Clone, Debug, Serialize)]
+#[derive(Clone, Debug, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub(crate) struct DesktopEventPayload {
     #[serde(rename = "type")]
@@ -200,6 +200,35 @@ pub(crate) fn shell_action_event_payload(
     }
 
     Value::Object(event_payload)
+}
+
+pub(crate) fn build_shell_action_event(
+    source: impl Into<String>,
+    action_id: impl Into<String>,
+    href: Option<String>,
+    payload: Option<Value>,
+    status: impl Into<String>,
+    timestamp: String,
+) -> DesktopEventPayload {
+    let action_id = action_id.into();
+    let status = status.into();
+
+    DesktopEventPayload {
+        event_type: "shell.action".to_string(),
+        source: source.into(),
+        action_id: Some(action_id.clone()),
+        href: href.clone(),
+        status: Some(status.clone()),
+        runtime: None,
+        shortcut: None,
+        payload: Some(shell_action_event_payload(
+            &action_id,
+            href,
+            payload,
+            &status,
+        )),
+        timestamp,
+    }
 }
 
 pub(crate) fn window_state_payload(state: &DesktopWindowChromeState) -> Value {
@@ -429,6 +458,34 @@ mod tests {
                 "actionId": "refresh_plugin_runtime",
                 "status": "completed",
             })
+        );
+        assert_eq!(
+            build_shell_action_event(
+                "notification",
+                "open_notification_target",
+                Some("/reviews?id=review-1".to_string()),
+                Some(json!({ "notificationId": "notification-7" })),
+                "completed",
+                "1711800000".to_string(),
+            ),
+            DesktopEventPayload {
+                event_type: "shell.action".to_string(),
+                source: "notification".to_string(),
+                action_id: Some("open_notification_target".to_string()),
+                href: Some("/reviews?id=review-1".to_string()),
+                status: Some("completed".to_string()),
+                runtime: None,
+                shortcut: None,
+                payload: Some(json!({
+                    "actionId": "open_notification_target",
+                    "href": "/reviews?id=review-1",
+                    "payload": {
+                        "notificationId": "notification-7"
+                    },
+                    "status": "completed",
+                })),
+                timestamp: "1711800000".to_string(),
+            }
         );
     }
 

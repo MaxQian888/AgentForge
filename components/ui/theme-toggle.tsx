@@ -1,7 +1,7 @@
 "use client";
 
-import { useTheme } from "next-themes";
 import { cn } from "@/lib/utils";
+import { useTheme } from "@/lib/theme/provider";
 
 const THEME_OPTIONS = [
   { value: "light", label: "Light" },
