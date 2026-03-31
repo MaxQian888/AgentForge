@@ -1,0 +1,56 @@
+{
+  "title": "Marketplace",
+  "description": "Discover and install plugins, skills, and roles",
+  "search": { "placeholder": "Search marketplace..." },
+  "filter": {
+    "type": "Type",
+    "typeAll": "All Types",
+    "typePlugin": "Plugin",
+    "typeSkill": "Skill",
+    "typeRole": "Role",
+    "category": "Category",
+    "sort": "Sort by",
+    "sortDownloads": "Most Downloaded",
+    "sortRating": "Top Rated",
+    "sortNewest": "Newest"
+  },
+  "item": {
+    "install": "Install",
+    "installed": "Installed",
+    "verified": "Verified",
+    "featured": "Featured",
+    "downloads": "downloads",
+    "version": "Version",
+    "license": "License",
+    "repository": "Repository",
+    "noDescription": "No description provided."
+  },
+  "publish": {
+    "title": "Publish Item",
+    "submitLabel": "Publish",
+    "success": "Item published successfully",
+    "cancel": "Cancel"
+  },
+  "install": {
+    "confirmTitle": "Install {name}",
+    "confirm": "Install",
+    "cancel": "Cancel",
+    "installing": "Installing...",
+    "success": "Installed successfully"
+  },
+  "review": {
+    "title": "Write a Review",
+    "submit": "Submit Review",
+    "delete": "Delete Review",
+    "noReviews": "No reviews yet. Be the first!"
+  },
+  "versions": {
+    "title": "Versions",
+    "yanked": "yanked",
+    "latest": "latest",
+    "download": "Download",
+    "noVersions": "No versions published yet."
+  },
+  "empty": "No items found. Try adjusting your filters.",
+  "featured": "Featured"
+}

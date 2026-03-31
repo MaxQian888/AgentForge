@@ -22,6 +22,7 @@ import {
   BookOpenText,
   ChevronRight,
   Search,
+  Store,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -98,6 +99,7 @@ const navGroups: NavGroup[] = [
     items: [
       { href: "/roles", labelKey: "nav.roles", icon: Shield },
       { href: "/plugins", labelKey: "nav.plugins", icon: Puzzle },
+      { href: "/marketplace", labelKey: "nav.marketplace", icon: Store },
       { href: "/settings", labelKey: "nav.settings", icon: Settings },
       { href: "/im", labelKey: "nav.imBridge", icon: MessageCircle },
       { href: "/docs", labelKey: "nav.docs", icon: BookOpenText },

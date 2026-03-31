@@ -24,11 +24,12 @@ const (
 type PluginSourceType string
 
 const (
-	PluginSourceBuiltin PluginSourceType = "builtin"
-	PluginSourceLocal   PluginSourceType = "local"
-	PluginSourceGit     PluginSourceType = "git"
-	PluginSourceNPM     PluginSourceType = "npm"
-	PluginSourceCatalog PluginSourceType = "catalog"
+	PluginSourceBuiltin      PluginSourceType = "builtin"
+	PluginSourceLocal        PluginSourceType = "local"
+	PluginSourceGit          PluginSourceType = "git"
+	PluginSourceNPM          PluginSourceType = "npm"
+	PluginSourceCatalog      PluginSourceType = "catalog"
+	PluginSourceMarketplace  PluginSourceType = "marketplace"
 )
 
 type PluginTrustState string

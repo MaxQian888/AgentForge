@@ -1,0 +1,45 @@
+[ItemNotFound]
+description = "未找到该项目"
+one = "未找到该项目"
+
+[VersionAlreadyExists]
+one = "版本已存在"
+
+[InvalidSemver]
+one = "无效的语义化版本格式"
+
+[ItemSlugTaken]
+one = "该类型下已存在相同标识的项目"
+
+[NotItemOwner]
+one = "您不是该项目的拥有者"
+
+[ArtifactRequired]
+one = "必须上传构件文件"
+
+[RatingOutOfRange]
+one = "评分必须在 1 到 5 之间"
+
+[VersionYanked]
+one = "该版本已被撤回，暂时无法使用"
+
+[VersionNotFound]
+one = "未找到该版本"
+
+[AdminRequired]
+one = "需要管理员权限"
+
+[FailedToStoreArtifact]
+one = "构件存储失败"
+
+[InvalidRequestBody]
+one = "请求体格式无效"
+
+[InvalidID]
+one = "无效的 ID"
+
+[InternalError]
+one = "服务器内部错误"
+
+[NotFound]
+one = "未找到"

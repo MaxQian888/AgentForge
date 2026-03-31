@@ -2,6 +2,25 @@
 # Usage: docker compose -f docker-compose.yml -f docker-compose.dev.yml up -d
 
 services:
+  marketplace:
+    build:
+      context: ./src-marketplace
+      dockerfile: Dockerfile
+    container_name: agentforge-marketplace
+    ports:
+      - "7779:7779"
+    environment:
+      PORT: "7779"
+      ENV: "development"
+      POSTGRES_URL: "postgres://agentforge:agentforge@host.docker.internal:5432/agentforge_marketplace?sslmode=disable"
+      ALLOW_ORIGINS: "http://localhost:3000,tauri://localhost,http://localhost:1420"
+      ARTIFACTS_DIR: "/data/artifacts"
+    volumes:
+      - marketplace-artifacts:/data/artifacts
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    restart: unless-stopped
+
   bridge:
     build:
       context: ./src-bridge
@@ -16,3 +35,6 @@ services:
     extra_hosts:
       - "host.docker.internal:host-gateway"
     restart: unless-stopped
+
+volumes:
+  marketplace-artifacts:
