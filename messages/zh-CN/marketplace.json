@@ -1,0 +1,56 @@
+{
+  "title": "应用市场",
+  "description": "发现并安装插件、技能和角色",
+  "search": { "placeholder": "搜索应用市场..." },
+  "filter": {
+    "type": "类型",
+    "typeAll": "全部类型",
+    "typePlugin": "插件",
+    "typeSkill": "技能",
+    "typeRole": "角色",
+    "category": "分类",
+    "sort": "排序方式",
+    "sortDownloads": "下载量最多",
+    "sortRating": "评分最高",
+    "sortNewest": "最新发布"
+  },
+  "item": {
+    "install": "安装",
+    "installed": "已安装",
+    "verified": "已认证",
+    "featured": "精选",
+    "downloads": "下载",
+    "version": "版本",
+    "license": "许可证",
+    "repository": "代码仓库",
+    "noDescription": "暂无描述。"
+  },
+  "publish": {
+    "title": "发布项目",
+    "submitLabel": "发布",
+    "success": "项目发布成功",
+    "cancel": "取消"
+  },
+  "install": {
+    "confirmTitle": "安装 {name}",
+    "confirm": "安装",
+    "cancel": "取消",
+    "installing": "安装中...",
+    "success": "安装成功"
+  },
+  "review": {
+    "title": "撰写评价",
+    "submit": "提交评价",
+    "delete": "删除评价",
+    "noReviews": "暂无评价，来写第一条吧！"
+  },
+  "versions": {
+    "title": "版本历史",
+    "yanked": "已撤回",
+    "latest": "最新",
+    "download": "下载",
+    "noVersions": "暂未发布任何版本。"
+  },
+  "empty": "未找到相关项目，请尝试调整筛选条件。",
+  "featured": "精选"
+}
