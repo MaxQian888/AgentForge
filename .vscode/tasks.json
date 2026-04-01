@@ -75,16 +75,205 @@
       "args": ["build"]
     },
     {
+      "label": "ui:lint",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["lint"],
+      "problemMatcher": ["$eslint-stylish"]
+    },
+    {
+      "label": "ui:typecheck",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["exec", "tsc", "--noEmit"],
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "ui:test",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["test"],
+      "group": "test"
+    },
+    {
+      "label": "ui:test:coverage",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["test:coverage"],
+      "group": "test"
+    },
+    {
+      "label": "bridge:dev",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["--dir", "src-bridge", "dev"]
+    },
+    {
+      "label": "bridge:build",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["--dir", "src-bridge", "build"],
+      "group": "build"
+    },
+    {
+      "label": "bridge:typecheck",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["--dir", "src-bridge", "typecheck"],
+      "problemMatcher": ["$tsc"]
+    },
+    {
+      "label": "backend:dev",
+      "type": "shell",
+      "command": "go",
+      "args": ["run", "./cmd/server"],
+      "options": {
+        "cwd": "${workspaceFolder}/src-go"
+      }
+    },
+    {
+      "label": "backend:build",
+      "type": "shell",
+      "command": "go",
+      "args": ["build", "./cmd/server"],
+      "options": {
+        "cwd": "${workspaceFolder}/src-go"
+      },
+      "group": "build"
+    },
+    {
+      "label": "backend:test",
+      "type": "shell",
+      "command": "go",
+      "args": ["test", "./..."],
+      "options": {
+        "cwd": "${workspaceFolder}/src-go"
+      },
+      "group": "test"
+    },
+    {
+      "label": "backend:vet",
+      "type": "shell",
+      "command": "go",
+      "args": ["vet", "./..."],
+      "options": {
+        "cwd": "${workspaceFolder}/src-go"
+      }
+    },
+    {
+      "label": "im-bridge:dev",
+      "type": "shell",
+      "command": "go",
+      "args": ["run", "./cmd/bridge"],
+      "options": {
+        "cwd": "${workspaceFolder}/src-im-bridge"
+      }
+    },
+    {
+      "label": "im-bridge:build",
+      "type": "shell",
+      "command": "go",
+      "args": ["build", "./cmd/bridge"],
+      "options": {
+        "cwd": "${workspaceFolder}/src-im-bridge"
+      },
+      "group": "build"
+    },
+    {
+      "label": "im-bridge:test",
+      "type": "shell",
+      "command": "go",
+      "args": ["test", "./..."],
+      "options": {
+        "cwd": "${workspaceFolder}/src-im-bridge"
+      },
+      "group": "test"
+    },
+    {
+      "label": "im-bridge:vet",
+      "type": "shell",
+      "command": "go",
+      "args": ["vet", "./..."],
+      "options": {
+        "cwd": "${workspaceFolder}/src-im-bridge"
+      }
+    },
+    {
+      "label": "marketplace:dev",
+      "type": "shell",
+      "command": "go",
+      "args": ["run", "./cmd/server"],
+      "options": {
+        "cwd": "${workspaceFolder}/src-marketplace"
+      }
+    },
+    {
+      "label": "marketplace:build",
+      "type": "shell",
+      "command": "go",
+      "args": ["build", "./cmd/server"],
+      "options": {
+        "cwd": "${workspaceFolder}/src-marketplace"
+      },
+      "group": "build"
+    },
+    {
+      "label": "marketplace:test",
+      "type": "shell",
+      "command": "go",
+      "args": ["test", "./..."],
+      "options": {
+        "cwd": "${workspaceFolder}/src-marketplace"
+      },
+      "group": "test"
+    },
+    {
+      "label": "marketplace:vet",
+      "type": "shell",
+      "command": "go",
+      "args": ["vet", "./..."],
+      "options": {
+        "cwd": "${workspaceFolder}/src-marketplace"
+      }
+    },
+    {
       "label": "desktop:dev:prepare",
       "type": "shell",
       "command": "pnpm",
       "args": ["desktop:dev:prepare"]
     },
     {
+      "label": "desktop:dev",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["tauri:dev"]
+    },
+    {
       "label": "desktop:build:prepare",
       "type": "shell",
       "command": "pnpm",
       "args": ["desktop:build:prepare"]
+    },
+    {
+      "label": "desktop:build",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["tauri:build"],
+      "group": "build"
+    },
+    {
+      "label": "desktop:test:tauri",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["test:tauri"],
+      "group": "test"
+    },
+    {
+      "label": "desktop:test:tauri:coverage",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["test:tauri:coverage"],
+      "group": "test"
     },
     {
       "label": "desktop:debug:prepare",
@@ -146,6 +335,32 @@
       "type": "shell",
       "command": "pnpm",
       "args": ["dev:all:stop"]
+    },
+    {
+      "label": "fullstack:logs",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["dev:all:logs"]
+    },
+    {
+      "label": "quality:check",
+      "dependsOrder": "sequence",
+      "dependsOn": [
+        "ui:lint",
+        "ui:typecheck",
+        "ui:test",
+        "bridge:typecheck",
+        "backend:test",
+        "backend:vet",
+        "im-bridge:test",
+        "im-bridge:vet",
+        "marketplace:test",
+        "marketplace:vet"
+      ],
+      "group": {
+        "kind": "test",
+        "isDefault": true
+      }
     }
   ]
 }

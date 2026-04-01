@@ -44,6 +44,8 @@
 }
 
 :root {
+  --font-geist-sans: "Segoe UI", "Noto Sans", Arial, sans-serif;
+  --font-geist-mono: "Cascadia Mono", "Cascadia Code", Consolas, "Liberation Mono", "Courier New", monospace;
   --radius: 0.5rem;
   --transition-fast: 150ms;
   --transition-base: 200ms;

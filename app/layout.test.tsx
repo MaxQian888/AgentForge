@@ -1,8 +1,3 @@
-jest.mock("next/font/google", () => ({
-  Geist: () => ({ variable: "--font-geist-sans" }),
-  Geist_Mono: () => ({ variable: "--font-geist-mono" }),
-}));
-
 jest.mock("@/lib/theme/provider", () => ({
   ThemeProvider: ({ children }: { children: React.ReactNode }) => children,
 }));
@@ -30,7 +25,7 @@ describe("RootLayout", () => {
     });
   });
 
-  it("renders html/body with font variables and children", () => {
+  it("renders html/body and children", () => {
     const markup = renderToStaticMarkup(
       <RootLayout>
         <main>content</main>
@@ -38,8 +33,7 @@ describe("RootLayout", () => {
     );
 
     expect(markup).toContain('<html lang="en"');
-    expect(markup).toContain("--font-geist-sans");
-    expect(markup).toContain("--font-geist-mono");
+    expect(markup).toContain("font-sans");
     expect(markup).toContain("antialiased");
     expect(markup).toContain('data-slot="desktop-window-frame"');
     expect(markup).toContain('data-slot="desktop-window-content"');

@@ -73,3 +73,5 @@ tmp-runtime
 .tmp-go-cache
 .tmp
 bridge.exe
+marketplace.exe
+server.exe

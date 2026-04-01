@@ -151,6 +151,32 @@ function getOutputFilename(target) {
   return `bridge-${target.triple}${target.extension}`;
 }
 
+function isHostTarget(target, hostTriple) {
+  if (target.triple === hostTriple) {
+    return true;
+  }
+
+  if (
+    target.triple === "x86_64-pc-windows-msvc" &&
+    /windows.*amd64|x86_64-pc-windows/u.test(hostTriple)
+  ) {
+    return true;
+  }
+
+  return false;
+}
+
+function isSkippableCrossTargetError(error) {
+  const message = String(error instanceof Error ? error.message : error);
+
+  return (
+    /Failed to download/u.test(message) ||
+    /UNKNOWN_CERTIFICATE_VERIFICATION_ERROR/u.test(message) ||
+    /Failed to extract executable/u.test(message) ||
+    /download may be incomplete/u.test(message)
+  );
+}
+
 function ensureBridgeDependencies(bridgeDir) {
   const result = spawnSync("bun", ["install"], {
     cwd: bridgeDir,
@@ -178,12 +204,28 @@ function buildTarget(target, { bridgeDir, binariesDir }) {
     ],
     {
       cwd: bridgeDir,
-      stdio: "inherit",
+      encoding: "utf8",
     },
   );
 
+  if (result.stdout) {
+    process.stdout.write(result.stdout);
+  }
+
+  if (result.stderr) {
+    process.stderr.write(result.stderr);
+  }
+
   if (result.status !== 0) {
-    throw new Error(`bun build failed for ${target.triple}`);
+    const details = [result.stderr, result.stdout]
+      .filter(Boolean)
+      .join("\n")
+      .trim();
+    throw new Error(
+      details
+        ? `bun build failed for ${target.triple}: ${details}`
+        : `bun build failed for ${target.triple}`,
+    );
   }
 
   console.log(`   ok ${path.basename(outputPath)}`);
@@ -194,6 +236,11 @@ function main(argv = process.argv.slice(2)) {
   const directories = getDirectories();
   const hostTriple = detectHostTriple({ cwd: directories.repoRoot });
   const targets = resolveTargets({ currentOnly, hostTriple });
+  const ciMode =
+    String(process.env.CI || "").toLowerCase() === "true" ||
+    process.env.BRIDGE_BUILD_STRICT === "1";
+  const skippedTargets = [];
+  let hostBuilt = false;
 
   fs.mkdirSync(directories.binariesDir, { recursive: true });
   ensureBridgeDependencies(directories.bridgeDir);
@@ -203,10 +250,36 @@ function main(argv = process.argv.slice(2)) {
   }
 
   for (const target of targets) {
-    buildTarget(target, directories);
+    try {
+      buildTarget(target, directories);
+      if (isHostTarget(target, hostTriple)) {
+        hostBuilt = true;
+      }
+    } catch (error) {
+      const hostTarget = isHostTarget(target, hostTriple);
+
+      if (!ciMode && !hostTarget && isSkippableCrossTargetError(error)) {
+        const message =
+          error instanceof Error ? error.message : "Unknown bridge build error";
+        console.warn(`   skipped ${target.triple}: ${message}`);
+        skippedTargets.push(target.triple);
+        continue;
+      }
+
+      throw error;
+    }
+  }
+
+  if (!hostBuilt) {
+    throw new Error(`Host bridge binary was not built for ${hostTriple}`);
   }
 
   console.log("");
+  if (skippedTargets.length > 0) {
+    console.warn(
+      `Bridge build skipped cross-target binaries (${skippedTargets.join(", ")}) in non-CI mode.`,
+    );
+  }
   console.log(
     `Bridge build complete. Binaries in: ${directories.binariesDir}`,
   );
