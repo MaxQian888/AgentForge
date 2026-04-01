@@ -83,6 +83,10 @@ describe("RoleWorkspaceContextRail", () => {
             label: "React",
             path: "skills/react",
             status: "resolved",
+            compatibilityStatus: "blocking",
+            requires: ["skills/typescript"],
+            tools: ["code_editor", "browser_preview"],
+            missingTools: ["browser_preview"],
             provenance: "explicit",
           },
         ] as never}
@@ -97,8 +101,8 @@ describe("RoleWorkspaceContextRail", () => {
           executionProfile: {
             name: "Frontend Developer",
             role_id: "frontend",
-            loaded_skills: [{ label: "React", path: "skills/react", available_parts: ["agents", "references"] }],
-            available_skills: [{ label: "Testing", path: "skills/testing", available_parts: ["agents"] }],
+            loaded_skills: [{ label: "React", path: "skills/react", origin: "direct", requires: ["skills/typescript"], tools: ["code_editor", "browser_preview"], available_parts: ["agents", "references"] }],
+            available_skills: [{ label: "Testing", path: "skills/testing", tools: ["code_editor", "terminal"], available_parts: ["agents"] }],
             skill_diagnostics: [{ code: "missing", message: "Testing unresolved" }],
           },
           effectiveManifest: {
@@ -110,6 +114,26 @@ describe("RoleWorkspaceContextRail", () => {
             collaboration: { canDelegateTo: ["frontend"] },
             triggers: [{ event: "pr_created" }],
             overrides: { "identity.role": "Frontend Captain" },
+            pluginDependencies: [
+              {
+                pluginId: "design-mcp",
+                status: "missing",
+                blocking: true,
+                referenceType: "mcp_server",
+                message: "Role dependency design-mcp is not currently installed as a usable tool plugin",
+              },
+            ],
+            pluginConsumers: [
+              {
+                pluginId: "workflow.release-train",
+                pluginName: "Release Train",
+                pluginKind: "WorkflowPlugin",
+                lifecycleState: "enabled",
+                status: "enabled",
+                blocking: true,
+                references: ["workflow.roles", "steps.review.role"],
+              },
+            ],
           },
           inheritance: { parentRoleId: "coding-agent" },
           validationIssues: [{ field: "overrides", message: "Use explicit override paths only." }],
@@ -154,8 +178,11 @@ describe("RoleWorkspaceContextRail", () => {
       screen.getByText("Inherited 1, Template 1, Explicit 2"),
     ).toBeInTheDocument();
     expect(screen.getAllByText("knowledge.memory").length).toBeGreaterThan(0);
-    expect(screen.getByText(/React \(skills\/react\).*Parts: Agents, References/)).toBeInTheDocument();
-    expect(screen.getByText(/Testing \(skills\/testing\).*Parts: Agents/)).toBeInTheDocument();
+    expect(screen.getByText("Role dependency design-mcp is not currently installed as a usable tool plugin")).toBeInTheDocument();
+    expect(screen.getByText(/Release Train \(workflow\.release-train\).*enabled/)).toBeInTheDocument();
+    expect(screen.getByText(/React \(skills\/react\).*blocking.*deps: skills\/typescript.*tools: code_editor, browser_preview.*missing: browser_preview/)).toBeInTheDocument();
+    expect(screen.getByText(/React \(skills\/react\).*origin: direct.*deps: skills\/typescript.*tools: code_editor, browser_preview.*Parts: Agents, References/)).toBeInTheDocument();
+    expect(screen.getByText(/Testing \(skills\/testing\).*tools: code_editor, terminal.*Parts: Agents/)).toBeInTheDocument();
     expect(screen.getByText("Testing unresolved")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Preview Role Draft" }));

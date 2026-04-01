@@ -29,7 +29,7 @@ type AgentRunRepository interface {
 	GetByTask(ctx context.Context, taskID uuid.UUID) ([]*model.AgentRun, error)
 	ListActive(ctx context.Context) ([]*model.AgentRun, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
-	UpdateCost(ctx context.Context, id uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int) error
+	UpdateCost(ctx context.Context, id uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int, costAccounting *model.CostAccountingSnapshot) error
 }
 
 type AgentTaskRepository interface {
@@ -62,6 +62,7 @@ type agentRoleSkillRootProvider interface {
 type BridgeClient interface {
 	Execute(ctx context.Context, req BridgeExecuteRequest) (*BridgeExecuteResponse, error)
 	GetStatus(ctx context.Context, taskID string) (*BridgeStatusResponse, error)
+	Health(ctx context.Context) error
 	GetPoolSummary(ctx context.Context) (*bridgeclient.PoolSummaryResponse, error)
 	Cancel(ctx context.Context, taskID, reason string) error
 	Pause(ctx context.Context, taskID, reason string) (*BridgePauseResponse, error)
@@ -113,6 +114,7 @@ func (a agentServiceQueueAdapter) QueueAgentAdmission(ctx context.Context, input
 
 var (
 	ErrAgentAlreadyRunning      = errors.New("agent already running for this task")
+	ErrAgentBridgeUnavailable   = errors.New("bridge is unavailable")
 	ErrAgentNotFound            = errors.New("agent run not found")
 	ErrAgentNotRunning          = errors.New("agent is not running")
 	ErrAgentPoolFull            = errors.New("agent pool is full")
@@ -144,6 +146,7 @@ type AgentService struct {
 	bridgeHealth          *BridgeHealthService
 	worktrees             WorktreeManager
 	roleStore             AgentRoleStore
+	pluginCatalog         pluginCatalogListProvider
 	progress              *TaskProgressService
 	imProgress            IMBoundProgressNotifier
 	pool                  *pool.Pool
@@ -158,6 +161,8 @@ type AgentService struct {
 	automation            AutomationEventEvaluator
 	budgetCheck           DispatchBudgetChecker
 }
+
+const bridgeSpawnHealthCheckAttempts = 3
 
 func agentRunLogFields(run *model.AgentRun) log.Fields {
 	if run == nil {
@@ -225,6 +230,10 @@ func (s *AgentService) SetPool(agentPool *pool.Pool) {
 
 func (s *AgentService) SetBridgeHealth(health *BridgeHealthService) {
 	s.bridgeHealth = health
+}
+
+func (s *AgentService) SetPluginCatalog(catalog pluginCatalogListProvider) {
+	s.pluginCatalog = catalog
 }
 
 func (s *AgentService) BridgeStatus() string {
@@ -311,6 +320,14 @@ func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uu
 		"model":       selection.Model,
 		"budgetUsd":   budgetUsd,
 		"projectSlug": project.Slug,
+	}
+	if err := s.ensureBridgeHealthy(ctx); err != nil {
+		log.WithFields(spawnFields).WithError(err).Warn("agent spawn blocked by bridge health")
+		return nil, err
+	}
+	if bridgePoolAtCapacity(ctx, s.bridge) {
+		log.WithFields(spawnFields).Warn("agent spawn blocked by bridge pool capacity")
+		return nil, ErrAgentPoolFull
 	}
 
 	resolvedRoleID := strings.TrimSpace(roleID)
@@ -504,13 +521,13 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 		Source:       model.TaskProgressSourceAgentStatus,
 		UpdateHealth: true,
 	})
-	s.notifyIMRunUpdate(ctx, run, nextAgentRunSummary(run.Status, run.TaskID.String(), run.ID.String()), isTerminalAgentStatus(status))
+	s.notifyIMRunUpdate(ctx, run, nextAgentRunSummary(run.Status, run.TaskID.String(), run.ID.String()), isTerminalAgentStatus(status), ws.BridgeEventStatusChange)
 	return nil
 }
 
 // UpdateCost records cost data for an agent run.
-func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int) error {
-	if err := s.runRepo.UpdateCost(ctx, id, inputTokens, outputTokens, cacheReadTokens, costUsd, turnCount); err != nil {
+func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int, costAccounting *model.CostAccountingSnapshot) error {
+	if err := s.runRepo.UpdateCost(ctx, id, inputTokens, outputTokens, cacheReadTokens, costUsd, turnCount, costAccounting); err != nil {
 		return fmt.Errorf("update agent cost: %w", err)
 	}
 
@@ -534,6 +551,11 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 	costFields["cacheReadTokens"] = cacheReadTokens
 	costFields["reportedCostUsd"] = costUsd
 	costFields["reportedTurnCount"] = turnCount
+	if costAccounting != nil {
+		costFields["costAccountingMode"] = costAccounting.Mode
+		costFields["costAccountingCoverage"] = costAccounting.Coverage
+		costFields["costAccountingSource"] = costAccounting.Source
+	}
 	costFields["projectId"] = task.ProjectID.String()
 	costFields["taskBudgetUsd"] = task.BudgetUsd
 	costFields["taskSpentUsd"] = totalSpent
@@ -558,6 +580,7 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 	s.emitEvent(ctx, run, updatedTask.ProjectID, model.AgentEventCostUpdate, map[string]any{
 		"inputTokens": inputTokens, "outputTokens": outputTokens, "costUsd": costUsd, "turnCount": turnCount,
 		"taskSpentUsd": totalSpent, "taskBudgetUsd": task.BudgetUsd,
+		"costAccounting": costAccounting,
 	})
 
 	// Roll up task costs to sprint.
@@ -578,6 +601,7 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 		if previousRatio < 0.8 && currentRatio >= 0.8 && currentRatio < 1 {
 			log.WithFields(costFields).WithField("budgetPercent", currentRatio*100).Warn("agent cost crossed budget warning threshold")
 			s.broadcastBudgetEvent(ws.EventBudgetWarning, updatedTask, currentRatio*100)
+			s.notifyIMBudgetAlert(ctx, run, updatedTask, currentRatio*100)
 			if s.automation != nil {
 				taskID := updatedTask.ID
 				_ = s.automation.EvaluateRules(ctx, AutomationEvent{
@@ -957,6 +981,44 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 	if _, err := s.resolveRoleConfig(resolvedRoleID); err != nil {
 		return nil, err
 	}
+	bridgePoolReason := formatBridgePoolCapacityReason(ctx, s.bridge)
+	if bridgePoolReason != "" {
+		if s.queueStore != nil {
+			entry, queueErr := s.queueStore.QueueAgentAdmission(ctx, QueueAgentAdmissionInput{
+				ProjectID: task.ProjectID,
+				TaskID:    taskID,
+				MemberID:  memberID,
+				Runtime:   selection.Runtime,
+				Provider:  selection.Provider,
+				Model:     selection.Model,
+				RoleID:    resolvedRoleID,
+				Priority:  priority,
+				BudgetUSD: budgetUsd,
+				Reason:    bridgePoolReason,
+			})
+			if queueErr == nil {
+				return &model.TaskDispatchResponse{
+					Task: task.ToDTO(),
+					Dispatch: model.DispatchOutcome{
+						Status:         model.DispatchStatusQueued,
+						Reason:         bridgePoolReason,
+						GuardrailType:  model.DispatchGuardrailTypePool,
+						GuardrailScope: "bridge",
+						Queue:          entry,
+					},
+				}, nil
+			}
+		}
+		return &model.TaskDispatchResponse{
+			Task: task.ToDTO(),
+			Dispatch: model.DispatchOutcome{
+				Status:         model.DispatchStatusBlocked,
+				Reason:         bridgePoolReason,
+				GuardrailType:  model.DispatchGuardrailTypePool,
+				GuardrailScope: "bridge",
+			},
+		}, nil
+	}
 
 	controller := pool.NewAdmissionController(s.pool, agentServiceQueueAdapter{store: s.queueStore})
 	decision, err := controller.Decide(ctx, pool.QueueAdmissionInput{
@@ -996,6 +1058,17 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 
 	run, err := s.Spawn(ctx, taskID, memberID, runtime, provider, modelName, budgetUsd, roleID)
 	if err != nil {
+		if errors.Is(err, ErrAgentBridgeUnavailable) {
+			return &model.TaskDispatchResponse{
+				Task: task.ToDTO(),
+				Dispatch: model.DispatchOutcome{
+					Status:         model.DispatchStatusBlocked,
+					Reason:         "Bridge is unavailable. Options: Retry / Cancel.",
+					GuardrailType:  model.DispatchGuardrailTypeSystem,
+					GuardrailScope: "bridge",
+				},
+			}, nil
+		}
 		if errors.Is(err, ErrAgentPoolFull) && s.queueStore != nil {
 			entry, queueErr := s.queueStore.QueueAgentAdmission(ctx, QueueAgentAdmissionInput{
 				ProjectID: task.ProjectID,
@@ -1029,6 +1102,45 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 			Run:    dtoPtr(run.ToDTO()),
 		},
 	}, nil
+}
+
+func (s *AgentService) ensureBridgeHealthy(ctx context.Context) error {
+	if s == nil || s.bridge == nil {
+		return nil
+	}
+	var lastErr error
+	for attempt := 0; attempt < bridgeSpawnHealthCheckAttempts; attempt++ {
+		if err := s.bridge.Health(ctx); err == nil {
+			return nil
+		} else {
+			lastErr = err
+		}
+		if ctx.Err() != nil {
+			break
+		}
+	}
+	if lastErr == nil {
+		return nil
+	}
+	return fmt.Errorf("%w: %v", ErrAgentBridgeUnavailable, lastErr)
+}
+
+func bridgePoolAtCapacity(ctx context.Context, bridge BridgeClient) bool {
+	return formatBridgePoolCapacityReason(ctx, bridge) != ""
+}
+
+func formatBridgePoolCapacityReason(ctx context.Context, bridge BridgeClient) string {
+	if bridge == nil {
+		return ""
+	}
+	summary, err := bridge.GetPoolSummary(ctx)
+	if err != nil || summary == nil || summary.Max <= 0 {
+		return ""
+	}
+	if summary.Active < summary.Max {
+		return ""
+	}
+	return fmt.Sprintf("Bridge pool at capacity (%d/%d active). Options: Wait in queue / Proceed anyway.", summary.Active, summary.Max)
 }
 
 func (s *AgentService) failSpawn(ctx context.Context, run *model.AgentRun, task *model.Task, projectSlug string, allocation *worktreepkg.Allocation) error {
@@ -1610,6 +1722,16 @@ func (s *AgentService) resolveRoleConfig(roleID string) (*bridgeclient.RoleConfi
 	if rolepkg.HasBlockingSkillDiagnostics(profile) {
 		return nil, fmt.Errorf("load agent role %s: blocking skill projection errors: %s", roleID, joinBlockingSkillMessages(profile.SkillDiagnostics))
 	}
+	if s.pluginCatalog != nil {
+		plugins, err := ListDependencyPlugins(context.Background(), s.pluginCatalog)
+		if err != nil {
+			return nil, fmt.Errorf("load agent role %s plugin dependencies: %w", roleID, err)
+		}
+		dependencies := BuildRolePluginDependencies(manifest, plugins)
+		if HasBlockingRolePluginDependencies(dependencies) {
+			return nil, fmt.Errorf("load agent role %s plugin dependencies: %s", roleID, JoinBlockingRolePluginDependencyMessages(dependencies))
+		}
+	}
 
 	return &bridgeclient.RoleConfig{
 		RoleID:           profile.RoleID,
@@ -1620,6 +1742,7 @@ func (s *AgentService) resolveRoleConfig(roleID string) (*bridgeclient.RoleConfi
 		SystemPrompt:     profile.SystemPrompt,
 		AllowedTools:     append([]string(nil), profile.AllowedTools...),
 		Tools:            append([]string(nil), profile.Tools...),
+		PluginBindings:   append([]model.RoleToolPluginBinding(nil), profile.PluginBindings...),
 		KnowledgeContext: profile.KnowledgeContext,
 		OutputFilters:    append([]string(nil), profile.OutputFilters...),
 		MaxBudgetUsd:     profile.MaxBudgetUsd,
@@ -1687,7 +1810,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 			OccurredAt:   bridgeEventTime(event.TimestampMS),
 			UpdateHealth: true,
 		})
-		s.notifyIMRunUpdate(ctx, run, summarizeBridgeOutput(payload.Content, payload.TurnNumber), false)
+		s.notifyIMRunUpdate(ctx, run, summarizeBridgeOutput(payload.Content, payload.TurnNumber), false, ws.BridgeEventOutput)
 		return nil
 
 	case ws.BridgeEventCostUpdate:
@@ -1701,7 +1824,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		eventFields["turnNumber"] = payload.TurnNumber
 		eventFields["reportedCostUsd"] = payload.CostUSD
 		log.WithFields(eventFields).Debug("bridge cost event received")
-		return s.UpdateCost(ctx, run.ID, payload.InputTokens, payload.OutputTokens, payload.CacheReadTokens, payload.CostUSD, payload.TurnNumber)
+		return s.UpdateCost(ctx, run.ID, payload.InputTokens, payload.OutputTokens, payload.CacheReadTokens, payload.CostUSD, payload.TurnNumber, payload.CostAccounting)
 
 	case ws.BridgeEventStatusChange:
 		var payload ws.BridgeStatusChangeData
@@ -1716,6 +1839,170 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		eventFields["newStatus"] = payload.NewStatus
 		log.WithFields(eventFields).Info("bridge terminal status event received")
 		return s.UpdateStatus(ctx, run.ID, nextStatus)
+
+	case ws.BridgeEventError:
+		var payload ws.BridgeEventErrorData
+		if err := event.DecodeData(&payload); err != nil {
+			return fmt.Errorf("decode bridge error payload: %w", err)
+		}
+		eventFields["errorCode"] = payload.Code
+		eventFields["errorMessage"] = payload.Message
+		eventFields["retryable"] = payload.Retryable
+		log.WithFields(eventFields).Warn("bridge error event received")
+		s.broadcastEvent(ws.EventAgentFailed, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+			"agent_id":   run.ID.String(),
+			"task_id":    run.TaskID.String(),
+			"session_id": event.SessionID,
+			"code":       payload.Code,
+			"message":    payload.Message,
+			"retryable":  payload.Retryable,
+			"timestamp":  time.UnixMilli(event.TimestampMS).UTC().Format(time.RFC3339),
+		})
+		if !payload.Retryable && !isTerminalAgentStatus(run.Status) {
+			return s.UpdateStatus(ctx, run.ID, model.AgentRunStatusFailed)
+		}
+		return nil
+
+	case ws.BridgeEventPermissionRequest:
+		var payload ws.BridgeEventPermissionRequestData
+		if err := event.DecodeData(&payload); err != nil {
+			return fmt.Errorf("decode bridge permission request payload: %w", err)
+		}
+		eventFields["requestId"] = payload.RequestID
+		eventFields["toolName"] = payload.ToolName
+		log.WithFields(eventFields).Info("bridge permission request event received")
+		s.broadcastEvent(ws.EventAgentPermissionRequest, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+			"agent_id":         run.ID.String(),
+			"task_id":          run.TaskID.String(),
+			"session_id":       event.SessionID,
+			"request_id":       payload.RequestID,
+			"tool_name":        payload.ToolName,
+			"context":          payload.Context,
+			"elicitation_type": payload.ElicitationType,
+			"fields":           payload.Fields,
+			"mcp_server_id":    payload.MCPServerID,
+			"timestamp":        time.UnixMilli(event.TimestampMS).UTC().Format(time.RFC3339),
+		})
+		s.notifyIMPermissionRequest(ctx, run, payload)
+		return nil
+
+	case ws.BridgeEventToolCall:
+		var payload ws.BridgeEventToolCallData
+		if err := event.DecodeData(&payload); err != nil {
+			return fmt.Errorf("decode bridge tool_call payload: %w", err)
+		}
+		log.WithFields(eventFields).Debug("bridge tool_call event received")
+		s.broadcastEvent(ws.EventAgentToolCall, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+			"agent_id":     run.ID.String(),
+			"task_id":      run.TaskID.String(),
+			"session_id":   event.SessionID,
+			"tool_name":    payload.ToolName,
+			"tool_call_id": payload.ToolCallID,
+			"input":        payload.Input,
+			"turn_number":  payload.TurnNumber,
+			"timestamp":    time.UnixMilli(event.TimestampMS).UTC().Format(time.RFC3339),
+		})
+		return nil
+
+	case ws.BridgeEventToolResult:
+		var payload ws.BridgeEventToolResultData
+		if err := event.DecodeData(&payload); err != nil {
+			return fmt.Errorf("decode bridge tool_result payload: %w", err)
+		}
+		log.WithFields(eventFields).Debug("bridge tool_result event received")
+		s.broadcastEvent(ws.EventAgentToolResult, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+			"agent_id":     run.ID.String(),
+			"task_id":      run.TaskID.String(),
+			"session_id":   event.SessionID,
+			"tool_name":    payload.ToolName,
+			"tool_call_id": payload.ToolCallID,
+			"output":       payload.Output,
+			"is_error":     payload.IsError,
+			"turn_number":  payload.TurnNumber,
+			"timestamp":    time.UnixMilli(event.TimestampMS).UTC().Format(time.RFC3339),
+		})
+		return nil
+
+	case ws.BridgeEventReasoning:
+		log.WithFields(eventFields).Debug("bridge reasoning event received")
+		s.broadcastEvent(ws.EventAgentReasoning, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+			"agent_id":   run.ID.String(),
+			"task_id":    run.TaskID.String(),
+			"session_id": event.SessionID,
+			"data":       event.Data,
+			"timestamp":  time.UnixMilli(event.TimestampMS).UTC().Format(time.RFC3339),
+		})
+		return nil
+
+	case ws.BridgeEventFileChange:
+		log.WithFields(eventFields).Debug("bridge file_change event received")
+		s.broadcastEvent(ws.EventAgentFileChange, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+			"agent_id":   run.ID.String(),
+			"task_id":    run.TaskID.String(),
+			"session_id": event.SessionID,
+			"data":       event.Data,
+			"timestamp":  time.UnixMilli(event.TimestampMS).UTC().Format(time.RFC3339),
+		})
+		return nil
+
+	case ws.BridgeEventTodoUpdate:
+		log.WithFields(eventFields).Debug("bridge todo_update event received")
+		s.broadcastEvent(ws.EventAgentTodoUpdate, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+			"agent_id":   run.ID.String(),
+			"task_id":    run.TaskID.String(),
+			"session_id": event.SessionID,
+			"data":       event.Data,
+			"timestamp":  time.UnixMilli(event.TimestampMS).UTC().Format(time.RFC3339),
+		})
+		return nil
+
+	case ws.BridgeEventProgress:
+		log.WithFields(eventFields).Debug("bridge progress event received")
+		s.broadcastEvent(ws.EventAgentProgress, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+			"agent_id":   run.ID.String(),
+			"task_id":    run.TaskID.String(),
+			"session_id": event.SessionID,
+			"data":       event.Data,
+			"timestamp":  time.UnixMilli(event.TimestampMS).UTC().Format(time.RFC3339),
+		})
+		s.recordProgress(ctx, run.TaskID, TaskActivityInput{
+			Source:       model.TaskProgressSourceAgentHeartbeat,
+			OccurredAt:   bridgeEventTime(event.TimestampMS),
+			UpdateHealth: true,
+		})
+		return nil
+
+	case ws.BridgeEventRateLimit:
+		log.WithFields(eventFields).Warn("bridge rate_limit event received")
+		s.broadcastEvent(ws.EventAgentRateLimit, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+			"agent_id":   run.ID.String(),
+			"task_id":    run.TaskID.String(),
+			"session_id": event.SessionID,
+			"data":       event.Data,
+			"timestamp":  time.UnixMilli(event.TimestampMS).UTC().Format(time.RFC3339),
+		})
+		return nil
+
+	case ws.BridgeEventPartialMessage:
+		s.broadcastEvent(ws.EventAgentPartialMessage, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+			"agent_id":   run.ID.String(),
+			"task_id":    run.TaskID.String(),
+			"session_id": event.SessionID,
+			"data":       event.Data,
+			"timestamp":  time.UnixMilli(event.TimestampMS).UTC().Format(time.RFC3339),
+		})
+		return nil
+
+	case ws.BridgeEventSnapshot:
+		log.WithFields(eventFields).Debug("bridge snapshot event received")
+		s.broadcastEvent(ws.EventAgentSnapshot, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+			"agent_id":   run.ID.String(),
+			"task_id":    run.TaskID.String(),
+			"session_id": event.SessionID,
+			"data":       event.Data,
+			"timestamp":  time.UnixMilli(event.TimestampMS).UTC().Format(time.RFC3339),
+		})
+		return nil
 	}
 
 	return nil
@@ -1916,28 +2203,118 @@ func buildAgentRunStructuredMessage(run *model.AgentRun, content string, termina
 	}
 }
 
-func (s *AgentService) notifyIMRunUpdate(ctx context.Context, run *model.AgentRun, content string, terminal bool) {
+func buildBridgePermissionStructuredMessage(run *model.AgentRun, payload ws.BridgeEventPermissionRequestData) *model.IMStructuredMessage {
+	if run == nil {
+		return nil
+	}
+	body := fmt.Sprintf("Tool: %s\nRequest: %s", strings.TrimSpace(payload.ToolName), strings.TrimSpace(payload.RequestID))
+	return &model.IMStructuredMessage{
+		Title: "Permission Request",
+		Body:  strings.TrimSpace(body),
+		Fields: []model.IMStructuredField{
+			{Label: "Task", Value: run.TaskID.String()},
+			{Label: "Run", Value: run.ID.String()},
+			{Label: "Tool", Value: strings.TrimSpace(payload.ToolName)},
+			{Label: "Request", Value: strings.TrimSpace(payload.RequestID)},
+		},
+	}
+}
+
+func buildBudgetAlertStructuredMessage(run *model.AgentRun, task *model.Task, percent float64) *model.IMStructuredMessage {
+	if run == nil || task == nil {
+		return nil
+	}
+	body := fmt.Sprintf("Task crossed the 80%% budget threshold and has spent $%.2f of $%.2f (%.0f%%).", task.SpentUsd, task.BudgetUsd, percent)
+	return &model.IMStructuredMessage{
+		Title: "Budget Alert",
+		Body:  body,
+		Fields: []model.IMStructuredField{
+			{Label: "Task", Value: task.Title},
+			{Label: "Run", Value: run.ID.String()},
+			{Label: "Spent", Value: fmt.Sprintf("$%.2f", task.SpentUsd)},
+			{Label: "Budget", Value: fmt.Sprintf("$%.2f", task.BudgetUsd)},
+		},
+	}
+}
+
+func (s *AgentService) queueIMProgress(ctx context.Context, req IMBoundProgressRequest, fields log.Fields, logMessage string) {
+	if s.imProgress == nil {
+		return
+	}
+	queued, err := s.imProgress.QueueBoundProgress(ctx, req)
+	if fields == nil {
+		fields = log.Fields{}
+	}
+	fields["queued"] = queued
+	if err != nil {
+		log.WithFields(fields).WithError(err).Warn(logMessage)
+		return
+	}
+	if queued {
+		log.WithFields(fields).Debug(logMessage + " queued")
+	}
+}
+
+func (s *AgentService) notifyIMRunUpdate(ctx context.Context, run *model.AgentRun, content string, terminal bool, eventType string) {
 	if s.imProgress == nil || run == nil || strings.TrimSpace(content) == "" {
 		return
 	}
-	queued, err := s.imProgress.QueueBoundProgress(ctx, IMBoundProgressRequest{
+	fields := agentRunLogFields(run)
+	fields["terminal"] = terminal
+	metadata := map[string]string{}
+	if strings.TrimSpace(eventType) != "" {
+		metadata["bridge_event_type"] = strings.TrimSpace(eventType)
+	}
+	s.queueIMProgress(ctx, IMBoundProgressRequest{
 		TaskID:     run.TaskID.String(),
 		RunID:      run.ID.String(),
 		Kind:       IMDeliveryKindProgress,
 		Content:    content,
 		Structured: buildAgentRunStructuredMessage(run, content, terminal),
+		Metadata:   metadata,
 		IsTerminal: terminal,
-	})
-	fields := agentRunLogFields(run)
-	fields["terminal"] = terminal
-	fields["queued"] = queued
-	if err != nil {
-		log.WithFields(fields).WithError(err).Warn("agent IM progress notification failed")
+	}, fields, "agent IM progress notification")
+}
+
+func (s *AgentService) notifyIMPermissionRequest(ctx context.Context, run *model.AgentRun, payload ws.BridgeEventPermissionRequestData) {
+	if run == nil {
 		return
 	}
-	if queued {
-		log.WithFields(fields).Debug("agent IM progress notification queued")
+	content := fmt.Sprintf("Permission request pending for tool %s (request %s).", strings.TrimSpace(payload.ToolName), strings.TrimSpace(payload.RequestID))
+	fields := agentRunLogFields(run)
+	fields["requestId"] = payload.RequestID
+	fields["toolName"] = payload.ToolName
+	s.queueIMProgress(ctx, IMBoundProgressRequest{
+		TaskID:     run.TaskID.String(),
+		RunID:      run.ID.String(),
+		Kind:       IMDeliveryKindProgress,
+		Content:    content,
+		Structured: buildBridgePermissionStructuredMessage(run, payload),
+		Metadata: map[string]string{
+			"bridge_event_type": string(ws.BridgeEventPermissionRequest),
+			"request_id":        strings.TrimSpace(payload.RequestID),
+		},
+	}, fields, "agent IM permission request notification")
+}
+
+func (s *AgentService) notifyIMBudgetAlert(ctx context.Context, run *model.AgentRun, task *model.Task, percent float64) {
+	if run == nil || task == nil {
+		return
 	}
+	content := fmt.Sprintf("Budget alert: task crossed the 80%% threshold and spent $%.2f of $%.2f budget (%.0f%%).", task.SpentUsd, task.BudgetUsd, percent)
+	fields := agentRunLogFields(run)
+	fields["budgetPercent"] = percent
+	s.queueIMProgress(ctx, IMBoundProgressRequest{
+		TaskID:     run.TaskID.String(),
+		RunID:      run.ID.String(),
+		Kind:       IMDeliveryKindProgress,
+		Content:    content,
+		Structured: buildBudgetAlertStructuredMessage(run, task, percent),
+		Metadata: map[string]string{
+			"bridge_event_type": ws.EventBudgetWarning,
+			"budget_percent":    fmt.Sprintf("%.0f", percent),
+		},
+	}, fields, "agent IM budget alert notification")
 }
 
 func summarizeBridgeOutput(content string, turnNumber int) string {

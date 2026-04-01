@@ -1,6 +1,8 @@
 "use client";
 
+import Link from "next/link";
 import { useTranslations } from "next-intl";
+import { Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { RoleCard } from "./role-card";
 import type { RoleManifest, RoleSkillCatalogEntry } from "@/lib/stores/role-store";
@@ -33,7 +35,15 @@ export function RoleWorkspaceCatalog({
             <p className="text-sm font-semibold">{t("roleLibrary")}</p>
             <p className="text-xs text-muted-foreground">{t("roleLibraryDesc")}</p>
           </div>
-          <Button size="sm" onClick={onCreateNew}>{t("newRole")}</Button>
+          <div className="flex items-center gap-2">
+            <Button asChild size="sm" variant="outline">
+              <Link href="/marketplace?type=role">
+                <Store className="mr-1 size-3" />
+                {t("browseMarketplace")}
+              </Link>
+            </Button>
+            <Button size="sm" onClick={onCreateNew}>{t("newRole")}</Button>
+          </div>
         </div>
         {error ? <p className="mt-1 text-xs text-destructive">{error}</p> : null}
       </div>

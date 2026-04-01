@@ -254,3 +254,100 @@ func TestStub_SendStructuredUsesFallbackText(t *testing.T) {
 		t.Fatalf("replies = %+v", stub.replies)
 	}
 }
+
+func TestStub_FormattedTextSenderRecordsFormatAndContent(t *testing.T) {
+	stub := NewStub("0")
+
+	if err := stub.SendFormattedText(context.Background(), "chat-1", &core.FormattedText{
+		Content: "**bold**",
+		Format:  core.TextFormatWeComMD,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+	if len(stub.replies) != 1 || stub.replies[0].Format != string(core.TextFormatWeComMD) || stub.replies[0].Content != "**bold**" {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+
+	if err := stub.ReplyFormattedText(context.Background(), replyContext{ChatID: "chat-2"}, &core.FormattedText{
+		Content: "reply markdown",
+		Format:  core.TextFormatWeComMD,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if len(stub.replies) != 2 || stub.replies[1].ChatID != "chat-2" || stub.replies[1].Format != string(core.TextFormatWeComMD) {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+
+	if err := stub.UpdateFormattedText(context.Background(), &core.ReplyTarget{ChannelID: "chat-3"}, &core.FormattedText{
+		Content: "updated",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+	if len(stub.replies) != 3 || stub.replies[2].ChatID != "chat-3" {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+
+	// nil message returns error
+	if err := stub.SendFormattedText(context.Background(), "chat-1", nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil SendFormattedText error = %v", err)
+	}
+	if err := stub.ReplyFormattedText(context.Background(), replyContext{ChatID: "chat-1"}, nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil ReplyFormattedText error = %v", err)
+	}
+}
+
+func TestStub_CardSenderRecordsCardFallbackText(t *testing.T) {
+	stub := NewStub("0")
+
+	card := core.NewCard().
+		SetTitle("Review Ready").
+		AddField("Status", "pending").
+		AddPrimaryButton("Open", "link:https://example.test/reviews/1")
+
+	if err := stub.SendCard(context.Background(), "chat-1", card); err != nil {
+		t.Fatalf("SendCard error: %v", err)
+	}
+	if len(stub.replies) != 1 || stub.replies[0].NativeSurface != "wecom_card" {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if !strings.Contains(stub.replies[0].Content, "Review Ready") || !strings.Contains(stub.replies[0].Content, "Status: pending") {
+		t.Fatalf("content = %q", stub.replies[0].Content)
+	}
+
+	if err := stub.ReplyCard(context.Background(), replyContext{ChatID: "chat-2"}, card); err != nil {
+		t.Fatalf("ReplyCard error: %v", err)
+	}
+	if len(stub.replies) != 2 || stub.replies[1].ChatID != "chat-2" || stub.replies[1].NativeSurface != "wecom_card" {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+
+	// nil card returns error
+	if err := stub.SendCard(context.Background(), "chat-1", nil); err == nil || !strings.Contains(err.Error(), "card is required") {
+		t.Fatalf("nil SendCard error = %v", err)
+	}
+	if err := stub.ReplyCard(context.Background(), replyContext{ChatID: "chat-1"}, nil); err == nil || !strings.Contains(err.Error(), "card is required") {
+		t.Fatalf("nil ReplyCard error = %v", err)
+	}
+}
+
+func TestChatIDFromReplyContext_ExtractsTargetFromVariousTypes(t *testing.T) {
+	if got := chatIDFromReplyContext(replyContext{ChatID: "chat-1", UserID: "user-1"}); got != "chat-1" {
+		t.Fatalf("replyContext = %q", got)
+	}
+	if got := chatIDFromReplyContext(&replyContext{UserID: "user-2"}); got != "user-2" {
+		t.Fatalf("*replyContext = %q", got)
+	}
+	if got := chatIDFromReplyContext(&core.Message{ChatID: "chat-3"}); got != "chat-3" {
+		t.Fatalf("*Message = %q", got)
+	}
+	if got := chatIDFromReplyContext(&core.ReplyTarget{ChannelID: "channel-4"}); got != "channel-4" {
+		t.Fatalf("*ReplyTarget = %q", got)
+	}
+	if got := chatIDFromReplyContext("invalid"); got != "" {
+		t.Fatalf("invalid = %q", got)
+	}
+	if got := chatIDFromReplyContext((*replyContext)(nil)); got != "" {
+		t.Fatalf("nil *replyContext = %q", got)
+	}
+}

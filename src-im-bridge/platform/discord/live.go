@@ -60,6 +60,7 @@ var liveMetadata = core.PlatformMetadata{
 		},
 		SupportsDeferredReply: true,
 		SupportsSlashCommands: true,
+		SupportsRichMessages:  true,
 	},
 	Rendering: core.RenderingProfile{
 		DefaultTextFormat: core.TextFormatPlainText,
@@ -195,6 +196,13 @@ type commandRegistrar interface {
 	SyncCommands(ctx context.Context, appID, guildID string, commands []applicationCommand) error
 }
 
+var _ core.CardSender = (*Live)(nil)
+var _ core.TypingIndicator = (*Live)(nil)
+
+type typingClient interface {
+	TriggerTyping(ctx context.Context, channelID string) error
+}
+
 type LiveOption func(*Live) error
 
 type Live struct {
@@ -209,6 +217,7 @@ type Live struct {
 	channels  channelClient
 	originals originalResponseClient
 	registrar commandRegistrar
+	typing    typingClient
 
 	actionHandler notify.ActionHandler
 
@@ -240,6 +249,7 @@ func NewLive(appID, botToken, publicKey, port string, opts ...LiveOption) (*Live
 		channels:  &discordChannelClient{client: apiClient},
 		originals: &discordOriginalResponseClient{client: apiClient},
 		registrar: &discordCommandRegistrar{client: apiClient},
+		typing:    &discordTypingClient{client: apiClient},
 	}
 
 	for _, opt := range opts {
@@ -538,6 +548,40 @@ func (l *Live) UpdateFormattedText(ctx context.Context, rawReplyCtx any, message
 	return l.originals.EditOriginalResponse(ctx, l.appID, reply.InteractionToken, outgoing)
 }
 
+func (l *Live) SendCard(ctx context.Context, chatID string, card *core.Card) error {
+	channelID := strings.TrimSpace(chatID)
+	if channelID == "" {
+		return errors.New("discord send requires channel id")
+	}
+	outgoing := renderCardToDiscordMessage(card)
+	return l.channels.SendChannelMessage(ctx, channelID, outgoing)
+}
+
+func (l *Live) ReplyCard(ctx context.Context, rawReplyCtx any, card *core.Card) error {
+	reply := toReplyContext(rawReplyCtx)
+	outgoing := renderCardToDiscordMessage(card)
+	if strings.TrimSpace(reply.InteractionToken) != "" {
+		return l.followups.SendFollowup(ctx, l.appID, reply.InteractionToken, outgoing)
+	}
+	if strings.TrimSpace(reply.ChannelID) != "" {
+		return l.channels.SendChannelMessage(ctx, reply.ChannelID, outgoing)
+	}
+	return errors.New("discord reply requires interaction token or channel id")
+}
+
+func (l *Live) StartTyping(ctx context.Context, chatID string) error {
+	channelID := strings.TrimSpace(chatID)
+	if channelID == "" {
+		return nil
+	}
+	_ = l.typing.TriggerTyping(ctx, channelID)
+	return nil
+}
+
+func (l *Live) StopTyping(ctx context.Context, chatID string) error {
+	return nil // Discord typing auto-expires after ~10 seconds
+}
+
 func (l *Live) Stop() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -754,6 +798,27 @@ func (c *discordCommandRegistrar) SyncCommands(ctx context.Context, appID, guild
 		path = "/applications/" + strings.TrimSpace(appID) + "/guilds/" + strings.TrimSpace(guildID) + "/commands"
 	}
 	return c.client.doJSON(ctx, http.MethodPut, path, commands, true)
+}
+
+type discordTypingClient struct {
+	client *discordAPIClient
+}
+
+func (c *discordTypingClient) TriggerTyping(ctx context.Context, channelID string) error {
+	if strings.TrimSpace(channelID) == "" {
+		return errors.New("discord typing requires channel id")
+	}
+	return c.client.doJSON(ctx, http.MethodPost, "/channels/"+strings.TrimSpace(channelID)+"/typing", nil, true)
+}
+
+func WithTypingClient(client typingClient) LiveOption {
+	return func(live *Live) error {
+		if client == nil {
+			return errors.New("typing client cannot be nil")
+		}
+		live.typing = client
+		return nil
+	}
 }
 
 func defaultApplicationCommands() []applicationCommand {

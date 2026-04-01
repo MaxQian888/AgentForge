@@ -9,9 +9,9 @@
 
 ---
 
-## 当前实现快照（2026-03-30）
+## 当前实现快照（2026-03-31）
 
-这份 PRD 仍然描述 AgentForge 的目标蓝图，但当前仓库已经有一批能力进入真实实现态。阅读后续章节时，如果某些长篇设计还保留更早的规划口径，请优先以这份实现快照和对应代码路径理解“现在已经做到哪里”：
+这份 PRD 仍然描述 AgentForge 的目标蓝图，但当前仓库已经有一批能力进入真实实现态。阅读后续章节时，如果某些长篇设计还保留更早的规划口径，请优先以这份实现快照和对应代码路径理解”现在已经做到哪里”：
 
 - `总览 Dashboard`：`app/(dashboard)/page.tsx` 已提供汇总指标卡、活动流、agent/team/budget widget，以及基于当前项目上下文的快捷操作。
 - `任务工作区`：`app/(dashboard)/project/page.tsx` 已落地统一的 Board / List / Timeline / Calendar 任务工作区，含右侧 context rail、实时健康态、批量操作、Sprint 过滤、任务详情编辑，以及文档/评论联动。
@@ -25,6 +25,7 @@
 - `插件系统现状`：当前仓库已落地 Go-hosted WASM Integration/Workflow plugin、TS-hosted MCP Tool/Review plugin、catalog 与 trust gate、内置插件 bundle/readiness 校验，以及 repo-local 插件脚手架命令。
 - `IM 控制面`：前端已覆盖 `feishu`、`dingtalk`、`slack`、`telegram`、`discord`、`wecom`、`qq`、`qqbot`，并补齐事件类型拉取、payload 预览和降级诊断。
 - `桌面壳`：Tauri 已具备 sidecar 监督、桌面能力 facade、shell action、共享 frameless titlebar/window chrome 与窗口状态同步。
+- `Marketplace 市场`：`app/(dashboard)/marketplace/page.tsx` 已落地统一的 Skills/Plugin/Role 市场，支持搜索、分类过滤、精选推荐、详情查看（含版本历史与评价）、发布流程与安装确认。后端为独立 Go 微服务 `src-marketplace/`，含数据库迁移、handler/service/repository 分层、管理员审核端点与摘要校验。
 
 ---
 

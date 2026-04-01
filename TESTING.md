@@ -66,6 +66,20 @@ Current repository truth for desktop verification is split into two seams:
 - `pnpm tauri:dev` / `pnpm tauri:build` still cover the runtime/build-oriented
   desktop path.
 
+### 6. Marketplace Service
+
+- Workspace: `src-marketplace/`
+- Primary entrypoint: `go test ./...`
+- CI integration path: `go test ./... -count=1 -v`
+
+Use this for marketplace item CRUD, version management, reviews, search, category filtering, admin moderation, and artifact integrity verification.
+
+### 7. Frontend Marketplace Page
+
+- Workspace: `app/(dashboard)/marketplace/`, `components/marketplace/`, `lib/stores/marketplace-store.ts`
+- Primary entrypoint: root Jest (covered by `pnpm test`)
+- Test file: `components/marketplace/marketplace-item-card.test.tsx`, `lib/stores/marketplace-store.test.ts`
+
 ## Root Jest Commands
 
 From the repository root:

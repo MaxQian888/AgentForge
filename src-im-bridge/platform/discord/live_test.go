@@ -356,8 +356,8 @@ func TestLive_MetadataDeclaresDeferredDiscordCapabilities(t *testing.T) {
 	if !metadata.Capabilities.SupportsSlashCommands {
 		t.Fatal("expected slash command capability")
 	}
-	if metadata.Capabilities.SupportsRichMessages {
-		t.Fatal("expected discord live transport to rely on text fallback for notifications")
+	if !metadata.Capabilities.SupportsRichMessages {
+		t.Fatal("expected discord live transport to advertise rich-message support")
 	}
 	if !coreHasTextFormat(metadata.Rendering.SupportedFormats, core.TextFormatDiscordMD) {
 		t.Fatalf("SupportedFormats = %+v, want discord_md", metadata.Rendering.SupportedFormats)
@@ -576,6 +576,137 @@ func TestLive_StopReturnsRunnerError(t *testing.T) {
 	if err := live.Stop(); !errors.Is(err, stopErr) {
 		t.Fatalf("Stop error = %v, want %v", err, stopErr)
 	}
+}
+
+func TestLive_SendCardUsesChannelClient(t *testing.T) {
+	channels := &fakeChannelClient{}
+	live, err := NewLive(
+		"app-123",
+		"bot-token",
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"9000",
+		WithInteractionRunner(&fakeInteractionRunner{}),
+		WithFollowupClient(&fakeFollowupClient{}),
+		WithChannelClient(channels),
+		WithOriginalResponseClient(&fakeOriginalResponseClient{}),
+		WithCommandRegistrar(&fakeCommandRegistrar{}),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	card := core.NewCard().
+		SetTitle("Build Ready").
+		AddField("Status", "success").
+		AddPrimaryButton("View", "act:view:build-1")
+
+	if err := live.SendCard(context.Background(), "channel-1", card); err != nil {
+		t.Fatalf("SendCard error: %v", err)
+	}
+	if len(channels.calls) != 1 {
+		t.Fatalf("channel calls = %+v", channels.calls)
+	}
+	call := channels.calls[0]
+	if call.ChannelID != "channel-1" {
+		t.Fatalf("ChannelID = %q", call.ChannelID)
+	}
+	if len(call.Message.Embeds) != 1 || call.Message.Embeds[0].Title != "Build Ready" {
+		t.Fatalf("embeds = %+v", call.Message.Embeds)
+	}
+	if len(call.Message.Components) != 1 {
+		t.Fatalf("components = %+v", call.Message.Components)
+	}
+
+	if err := live.SendCard(context.Background(), "", card); err == nil || !strings.Contains(err.Error(), "channel id") {
+		t.Fatalf("expected channel id error, got: %v", err)
+	}
+}
+
+func TestLive_ReplyCardUsesFollowupOrChannel(t *testing.T) {
+	followups := &fakeFollowupClient{}
+	channels := &fakeChannelClient{}
+	live, err := NewLive(
+		"app-123",
+		"bot-token",
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"9000",
+		WithInteractionRunner(&fakeInteractionRunner{}),
+		WithFollowupClient(followups),
+		WithChannelClient(channels),
+		WithOriginalResponseClient(&fakeOriginalResponseClient{}),
+		WithCommandRegistrar(&fakeCommandRegistrar{}),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	card := core.NewCard().SetTitle("Review Ready")
+
+	if err := live.ReplyCard(context.Background(), replyContext{InteractionToken: "reply-token", ChannelID: "channel-1"}, card); err != nil {
+		t.Fatalf("ReplyCard via followup error: %v", err)
+	}
+	if len(followups.calls) != 1 || followups.calls[0].Message.Embeds[0].Title != "Review Ready" {
+		t.Fatalf("followup calls = %+v", followups.calls)
+	}
+
+	if err := live.ReplyCard(context.Background(), replyContext{ChannelID: "channel-2"}, card); err != nil {
+		t.Fatalf("ReplyCard via channel error: %v", err)
+	}
+	if len(channels.calls) != 1 || channels.calls[0].ChannelID != "channel-2" {
+		t.Fatalf("channel calls = %+v", channels.calls)
+	}
+
+	if err := live.ReplyCard(context.Background(), replyContext{}, card); err == nil || !strings.Contains(err.Error(), "requires interaction token or channel id") {
+		t.Fatalf("expected missing target error, got: %v", err)
+	}
+}
+
+func TestLive_StartTypingCallsAPIAndStopTypingIsNoop(t *testing.T) {
+	typing := &fakeTypingClient{}
+	live, err := NewLive(
+		"app-123",
+		"bot-token",
+		"0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+		"9000",
+		WithInteractionRunner(&fakeInteractionRunner{}),
+		WithFollowupClient(&fakeFollowupClient{}),
+		WithChannelClient(&fakeChannelClient{}),
+		WithOriginalResponseClient(&fakeOriginalResponseClient{}),
+		WithCommandRegistrar(&fakeCommandRegistrar{}),
+		WithTypingClient(typing),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.StartTyping(context.Background(), "channel-1"); err != nil {
+		t.Fatalf("StartTyping error: %v", err)
+	}
+	if len(typing.calls) != 1 || typing.calls[0] != "channel-1" {
+		t.Fatalf("typing calls = %+v", typing.calls)
+	}
+
+	// Empty channel should be silently ignored
+	if err := live.StartTyping(context.Background(), ""); err != nil {
+		t.Fatalf("StartTyping empty error: %v", err)
+	}
+	if len(typing.calls) != 1 {
+		t.Fatalf("typing calls after empty = %+v", typing.calls)
+	}
+
+	// StopTyping is always a no-op
+	if err := live.StopTyping(context.Background(), "channel-1"); err != nil {
+		t.Fatalf("StopTyping error: %v", err)
+	}
+}
+
+type fakeTypingClient struct {
+	calls []string
+}
+
+func (f *fakeTypingClient) TriggerTyping(ctx context.Context, channelID string) error {
+	f.calls = append(f.calls, channelID)
+	return nil
 }
 
 type fakeInteractionRunner struct {

@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
 
@@ -167,6 +168,7 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
       const api = createApiClient(API_URL);
       await api.post("/api/v1/reviews/trigger", body, { token });
     } catch {
+      toast.error("Unable to trigger review");
       set({ error: "Unable to trigger review" });
     } finally {
       set({ loading: false });
@@ -189,6 +191,7 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
         get().updateReview(data);
       }
     } catch {
+      toast.error("Unable to approve review");
       set({ error: "Unable to approve review" });
     } finally {
       set({ loading: false });
@@ -211,6 +214,7 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
         get().updateReview(data);
       }
     } catch {
+      toast.error("Unable to reject review");
       set({ error: "Unable to reject review" });
     } finally {
       set({ loading: false });
@@ -233,6 +237,7 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
         get().updateReview(data);
       }
     } catch {
+      toast.error("Unable to request review changes");
       set({ error: "Unable to request review changes" });
     } finally {
       set({ loading: false });
@@ -255,6 +260,7 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
         get().updateReview(data);
       }
     } catch {
+      toast.error("Unable to mark false positive finding");
       set({ error: "Unable to mark false positive finding" });
     } finally {
       set({ loading: false });

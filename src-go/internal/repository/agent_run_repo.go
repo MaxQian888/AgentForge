@@ -149,18 +149,20 @@ func (r *AgentRunRepository) SetTeamFields(ctx context.Context, id uuid.UUID, te
 	return nil
 }
 
-func (r *AgentRunRepository) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int) error {
+func (r *AgentRunRepository) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int, costAccounting *model.CostAccountingSnapshot) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
 	}
-	if err := r.db.WithContext(ctx).Model(&agentRunRecord{}).Where("id = ?", id).Updates(map[string]any{
+	updates := map[string]any{
 		"input_tokens":      inputTokens,
 		"output_tokens":     outputTokens,
 		"cache_read_tokens": cacheReadTokens,
 		"cost_usd":          costUsd,
 		"turn_count":        turnCount,
 		"updated_at":        gorm.Expr("NOW()"),
-	}).Error; err != nil {
+	}
+	updates["cost_accounting"] = mustMarshalAgentRunCostAccounting(costAccounting)
+	if err := r.db.WithContext(ctx).Model(&agentRunRecord{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return fmt.Errorf("update agent run cost: %w", err)
 	}
 	return nil

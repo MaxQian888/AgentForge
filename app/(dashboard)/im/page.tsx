@@ -1,10 +1,13 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IMChannelConfig } from "@/components/im/im-channel-config";
 import { IMBridgeHealth } from "@/components/im/im-bridge-health";
@@ -21,9 +24,19 @@ export default function IMBridgePage() {
   const fetchBridgeStatus = useIMStore((s) => s.fetchBridgeStatus);
   const fetchDeliveryHistory = useIMStore((s) => s.fetchDeliveryHistory);
   const fetchEventTypes = useIMStore((s) => s.fetchEventTypes);
+  const testSend = useIMStore((s) => s.testSend);
+  const channels = useIMStore((s) => s.channels);
   const loading = useIMStore((s) => s.loading);
   const error = useIMStore((s) => s.error);
   const bridgeStatus = useIMStore((s) => s.bridgeStatus);
+  const deliveries = useIMStore((s) => s.deliveries);
+  const lastTestSendResult = useIMStore((s) => s.lastTestSendResult);
+  const [activeTab, setActiveTab] = useState("channels");
+  const [preferredPlatform, setPreferredPlatform] = useState<string | null>(null);
+  const [channelConfigSeed, setChannelConfigSeed] = useState(0);
+  const [testPlatform, setTestPlatform] = useState("slack");
+  const [testChannelId, setTestChannelId] = useState("");
+  const [testMessage, setTestMessage] = useState("ping");
 
   useEffect(() => {
     void fetchChannels();
@@ -37,6 +50,43 @@ export default function IMBridgePage() {
     void fetchBridgeStatus();
     void fetchDeliveryHistory();
     void fetchEventTypes();
+  };
+
+  const handleConfigureProvider = (platform: string) => {
+    setPreferredPlatform(platform);
+    setActiveTab("channels");
+    setChannelConfigSeed((current) => current + 1);
+  };
+
+  const availablePlatforms = useMemo(
+    () => Array.from(new Set(channels.map((channel) => channel.platform).filter(Boolean))).sort(),
+    [channels],
+  );
+  const successRateText = useMemo(() => {
+    const settled = deliveries.filter((delivery) =>
+      ["delivered", "suppressed", "failed", "timeout"].includes(delivery.status),
+    );
+    if (settled.length === 0) {
+      return "-";
+    }
+    const successful = settled.filter((delivery) =>
+      ["delivered", "suppressed"].includes(delivery.status),
+    );
+    return `${Math.round((successful.length / settled.length) * 100)}%`;
+  }, [deliveries]);
+  const effectiveTestPlatform = testPlatform || availablePlatforms[0] || "slack";
+  const platformChannels = useMemo(
+    () => channels.filter((channel) => channel.platform === effectiveTestPlatform),
+    [channels, effectiveTestPlatform],
+  );
+  const effectiveTestChannelId = testChannelId || platformChannels[0]?.channelId || "";
+
+  const handleTestSend = async () => {
+    await testSend({
+      platform: effectiveTestPlatform,
+      channelId: effectiveTestChannelId,
+      text: testMessage,
+    });
   };
 
   return (
@@ -57,12 +107,10 @@ export default function IMBridgePage() {
             >
               {bridgeStatus.health}
             </Badge>
-            <Button
-              variant="outline"
-              size="sm"
-              onClick={handleRefresh}
-              disabled={loading}
-            >
+            <Badge variant="secondary">{`${t("summaryPending")}: ${bridgeStatus.pendingDeliveries}`}</Badge>
+            <Badge variant="secondary">{`${t("summaryFailures")}: ${bridgeStatus.recentFailures}`}</Badge>
+            <Badge variant="secondary">{`${t("summarySuccessRate")}: ${successRateText}`}</Badge>
+            <Button variant="outline" size="sm" onClick={handleRefresh} disabled={loading}>
               <RefreshCw className="mr-1 size-3.5" />
               {t("refresh")}
             </Button>
@@ -70,11 +118,63 @@ export default function IMBridgePage() {
         }
       />
 
-      {error && (
-        <ErrorBanner message={error} onRetry={handleRefresh} />
-      )}
+      {error && <ErrorBanner message={error} onRetry={handleRefresh} />}
 
-      <Tabs defaultValue="channels">
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("testSendTitle")}</CardTitle>
+        </CardHeader>
+        <CardContent className="grid gap-4 md:grid-cols-[160px,1fr,1fr,auto]">
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="im-test-platform">{t("testSendPlatform")}</Label>
+            <select
+              id="im-test-platform"
+              className="rounded-md border bg-background px-3 py-2 text-sm"
+              value={effectiveTestPlatform}
+              onChange={(event) => setTestPlatform(event.target.value)}
+            >
+              {availablePlatforms.map((platform) => (
+                <option key={platform} value={platform}>
+                  {platform}
+                </option>
+              ))}
+            </select>
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="im-test-channel">{t("testSendChannel")}</Label>
+            <Input
+              id="im-test-channel"
+              value={effectiveTestChannelId}
+              onChange={(event) => setTestChannelId(event.target.value)}
+            />
+          </div>
+          <div className="flex flex-col gap-1.5">
+            <Label htmlFor="im-test-message">{t("testSendMessage")}</Label>
+            <Input
+              id="im-test-message"
+              value={testMessage}
+              onChange={(event) => setTestMessage(event.target.value)}
+            />
+          </div>
+          <div className="flex items-end">
+            <Button
+              onClick={() => void handleTestSend()}
+              disabled={loading || !effectiveTestChannelId}
+            >
+              {t("testSendButton")}
+            </Button>
+          </div>
+          {lastTestSendResult ? (
+            <div className="md:col-span-4">
+              <Badge variant="secondary">
+                {`${t("testSendResult")}: ${lastTestSendResult.status}`}
+              </Badge>
+            </div>
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>
           <TabsTrigger value="channels">{t("tabChannels")}</TabsTrigger>
           <TabsTrigger value="health">{t("tabHealth")}</TabsTrigger>
@@ -82,11 +182,14 @@ export default function IMBridgePage() {
         </TabsList>
 
         <TabsContent value="channels">
-          <IMChannelConfig />
+          <IMChannelConfig
+            key={`${preferredPlatform ?? "default"}:${channelConfigSeed}`}
+            preferredPlatform={preferredPlatform}
+          />
         </TabsContent>
 
         <TabsContent value="health">
-          <IMBridgeHealth />
+          <IMBridgeHealth onConfigureProvider={handleConfigureProvider} />
         </TabsContent>
 
         <TabsContent value="history">

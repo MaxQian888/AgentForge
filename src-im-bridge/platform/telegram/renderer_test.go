@@ -86,3 +86,78 @@ func TestLive_UpdateFormattedTextFallsBackToSegmentedRepliesWhenOversized(t *tes
 		t.Fatalf("calls = %+v", sender.calls)
 	}
 }
+
+func TestRenderCardToTelegram_BuildsMarkdownV2WithKeyboard(t *testing.T) {
+	card := core.NewCard().
+		SetTitle("Build #42").
+		AddField("Status", "success").
+		AddField("Branch", "main").
+		AddPrimaryButton("Approve", "act:approve:build-42").
+		AddButton("View", "link:https://example.test/builds/42")
+
+	text, markup := renderCardToTelegram(card)
+
+	if !strings.Contains(text, "*Build \\#42*") {
+		t.Fatalf("title not escaped: %q", text)
+	}
+	if !strings.Contains(text, "*Status:* success") {
+		t.Fatalf("field not formatted: %q", text)
+	}
+	if !strings.Contains(text, "*Branch:* main") {
+		t.Fatalf("second field not formatted: %q", text)
+	}
+	if markup == nil || len(markup.InlineKeyboard) != 2 {
+		t.Fatalf("markup = %+v", markup)
+	}
+	if markup.InlineKeyboard[0][0].Text != "Approve" || markup.InlineKeyboard[0][0].CallbackData != "act:approve:build-42" {
+		t.Fatalf("first button = %+v", markup.InlineKeyboard[0][0])
+	}
+	if markup.InlineKeyboard[1][0].Text != "View" || markup.InlineKeyboard[1][0].URL != "https://example.test/builds/42" {
+		t.Fatalf("second button = %+v", markup.InlineKeyboard[1][0])
+	}
+}
+
+func TestRenderCardToTelegram_NilCardReturnsEmpty(t *testing.T) {
+	text, markup := renderCardToTelegram(nil)
+	if text != "" || markup != nil {
+		t.Fatalf("nil card: text=%q, markup=%+v", text, markup)
+	}
+}
+
+func TestRenderCardToTelegram_SkipsEmptyButtonsAndFields(t *testing.T) {
+	card := core.NewCard().
+		AddField("", "").
+		AddField("", "standalone value").
+		AddButton("", "act:noop").
+		AddButton("OK", "")
+
+	text, markup := renderCardToTelegram(card)
+
+	if !strings.Contains(text, "standalone value") {
+		t.Fatalf("text = %q", text)
+	}
+	if strings.Contains(text, "noop") {
+		t.Fatalf("empty text button should be skipped: %q", text)
+	}
+	if markup != nil {
+		t.Fatalf("expected no keyboard for empty/invalid buttons, got %+v", markup)
+	}
+}
+
+func TestCardFallbackText_RendersPlainTextSummary(t *testing.T) {
+	card := core.NewCard().
+		SetTitle("Deploy").
+		AddField("Env", "prod").
+		AddButton("Rollback", "act:rollback:deploy-1")
+
+	text := cardFallbackText(card)
+	if !strings.Contains(text, "Deploy") || !strings.Contains(text, "Env: prod") || !strings.Contains(text, "[Rollback] act:rollback:deploy-1") {
+		t.Fatalf("fallback text = %q", text)
+	}
+}
+
+func TestCardFallbackText_NilCardReturnsEmpty(t *testing.T) {
+	if got := cardFallbackText(nil); got != "" {
+		t.Fatalf("nil card fallback = %q", got)
+	}
+}

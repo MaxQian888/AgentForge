@@ -449,7 +449,7 @@ describe("PluginsPage", () => {
     expect(sendNotification).toHaveBeenCalledWith(
       expect.objectContaining({
         notificationId: "plugins-desktop-runtime-stopped",
-        type: "desktop.runtime.status",
+        notificationType: "desktop.runtime.status",
         title: "AgentForge Desktop",
         body: "Desktop runtime is currently stopped.",
         deliveryPolicy: "always",

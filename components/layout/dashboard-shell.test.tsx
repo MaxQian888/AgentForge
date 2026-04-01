@@ -265,7 +265,7 @@ describe("DashboardShell", () => {
       expect(sendNotificationMock).toHaveBeenCalledWith(
         expect.objectContaining({
           notificationId: "notification-1",
-          type: "task_progress_stalled",
+          notificationType: "task_progress_stalled",
           title: "Task stalled: Implement detector",
           body: "Task Implement detector is stalled.",
         }),
@@ -396,7 +396,7 @@ describe("DashboardShell", () => {
       expect(sendNotificationMock).toHaveBeenCalledWith(
         expect.objectContaining({
           notificationId: "notification-docs-1",
-          type: "wiki.comment.mention",
+          notificationType: "wiki.comment.mention",
           title: "Mentioned in Runbook",
           body: "Alice mentioned you in the Runbook page.",
           href: "/docs/page-1#comment-comment-1",
@@ -450,7 +450,7 @@ describe("DashboardShell", () => {
       expect(sendNotificationMock).toHaveBeenCalledWith(
         expect.objectContaining({
           notificationId: "notification-docs-2",
-          type: "wiki.page.updated",
+          notificationType: "wiki.page.updated",
           title: "Runbook updated",
           body: "The production runbook received a new version.",
           href: "/docs/page-1",

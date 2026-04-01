@@ -134,6 +134,17 @@ describe("streamOpenCodeRuntime", () => {
       "tool_result",
       "cost_update",
     ]);
+    expect(events[3]).toMatchObject({
+      data: {
+        cost_usd: 0.04,
+        cost_accounting: {
+          total_cost_usd: 0.04,
+          mode: "authoritative_total",
+          coverage: "full",
+          source: "opencode_native_total",
+        },
+      },
+    });
     expect(runtime.continuity).toMatchObject({
       runtime: "opencode",
       resume_ready: true,

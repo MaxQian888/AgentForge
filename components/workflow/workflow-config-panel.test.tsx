@@ -1,6 +1,80 @@
+import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { WorkflowConfigPanel } from "./workflow-config-panel";
+
+jest.mock("@/components/ui/select", () => {
+  function flattenOptions(children: ReactNode): Array<{ value: string; label: string }> {
+    const options: Array<{ value: string; label: string }> = [];
+    function visit(node: ReactNode) {
+      Children.forEach(node, (child) => {
+        if (!isValidElement(child)) return;
+        const el = child as ReactElement<{ children?: ReactNode; value?: string }>;
+        if (el.props.value !== undefined) {
+          options.push({
+            value: el.props.value,
+            label: typeof el.props.children === "string" ? el.props.children : String(el.props.value),
+          });
+          return;
+        }
+        visit(el.props.children);
+      });
+    }
+    visit(children);
+    return options;
+  }
+
+  function extractAriaLabel(children: ReactNode): string | undefined {
+    let label: string | undefined;
+    Children.forEach(children, (child) => {
+      if (!isValidElement(child)) return;
+      const el = child as ReactElement<{ "aria-label"?: string }>;
+      if (el.props["aria-label"]) {
+        label = el.props["aria-label"];
+      }
+    });
+    return label;
+  }
+
+  return {
+    Select: ({
+      value,
+      onValueChange,
+      children,
+    }: {
+      value?: string;
+      onValueChange?: (value: string) => void;
+      children?: ReactNode;
+    }) => {
+      const options = flattenOptions(children);
+      const ariaLabel = extractAriaLabel(children);
+      return (
+        <select
+          aria-label={ariaLabel}
+          value={value}
+          onChange={(e) => onValueChange?.(e.target.value)}
+        >
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      );
+    },
+    SelectTrigger: ({ children }: { children?: ReactNode; "aria-label"?: string }) => <>{children}</>,
+    SelectValue: () => null,
+    SelectContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    SelectItem: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  };
+});
+
+jest.mock("@/components/ui/table", () => ({
+  Table: ({ children, ...props }: { children?: ReactNode } & Record<string, unknown>) => <table {...props}>{children}</table>,
+  TableHeader: ({ children }: { children?: ReactNode }) => <thead>{children}</thead>,
+  TableBody: ({ children }: { children?: ReactNode }) => <tbody>{children}</tbody>,
+  TableRow: ({ children, ...props }: { children?: ReactNode } & Record<string, unknown>) => <tr {...props}>{children}</tr>,
+  TableHead: ({ children, ...props }: { children?: ReactNode } & Record<string, unknown>) => <th {...props}>{children}</th>,
+  TableCell: ({ children, ...props }: { children?: ReactNode } & Record<string, unknown>) => <td {...props}>{children}</td>,
+}));
 
 const mockFetchWorkflow = jest.fn();
 const mockUpdateWorkflow = jest.fn();

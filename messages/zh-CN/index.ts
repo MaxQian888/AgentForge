@@ -17,6 +17,7 @@ import im from "./im.json";
 import roles from "./roles.json";
 import workflow from "./workflow.json";
 import forms from "./forms.json";
+import logs from "./logs.json";
 import { normalizeMessageBundle } from "../normalize";
 
 export default normalizeMessageBundle({
@@ -39,4 +40,5 @@ export default normalizeMessageBundle({
   roles,
   workflow,
   forms,
+  logs,
 });

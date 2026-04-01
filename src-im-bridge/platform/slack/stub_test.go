@@ -236,6 +236,17 @@ func (r *testRecorder) WriteHeader(statusCode int)     { r.code = statusCode }
 
 var _ = time.Now
 
+func TestStub_UpdateMessageStoresReply(t *testing.T) {
+	stub := NewStub("0")
+
+	if err := stub.UpdateMessage(context.Background(), &core.Message{ChatID: "chat-1"}, "edited"); err != nil {
+		t.Fatalf("UpdateMessage error: %v", err)
+	}
+	if len(stub.replies) != 1 || stub.replies[0].Content != "edited" || stub.replies[0].ChatID != "chat-1" {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+}
+
 func TestSlackStub_HelperBranches(t *testing.T) {
 	stub := NewStub("0")
 

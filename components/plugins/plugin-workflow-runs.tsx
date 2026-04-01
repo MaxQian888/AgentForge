@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState } from "react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   usePluginStore,
@@ -79,7 +80,7 @@ export function PluginWorkflowRuns({ plugin }: { plugin: PluginRecord }) {
       {showTriggerForm ? (
         <div className="rounded-lg border border-border/60 p-3">
           <p className="mb-2 text-xs font-medium">Trigger Payload (JSON)</p>
-          <textarea
+          <Textarea
             className="min-h-[80px] w-full rounded-md border bg-background px-2 py-1 font-mono text-xs"
             value={triggerJson}
             onChange={(e) => {

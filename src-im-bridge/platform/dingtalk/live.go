@@ -333,6 +333,19 @@ func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.
 			return l.SendNative(ctx, chatID, native)
 		}
 	}
+	// Try ActionCard via LegacyCard when sections are empty but actions exist.
+	if message != nil && len(message.Sections) == 0 && len(message.Actions) > 0 {
+		if card := message.LegacyCard(); card != nil && len(card.Buttons) > 0 {
+			err := l.SendCard(ctx, chatID, card)
+			if err == nil {
+				return nil
+			}
+			// deliverCardFallback already sent a text fallback; avoid duplicate send.
+			if fe, ok := err.(deliveredFallbackError); ok && fe.FallbackDelivered() {
+				return nil
+			}
+		}
+	}
 	return l.Send(ctx, chatID, renderStructuredFallback(message))
 }
 
@@ -345,6 +358,19 @@ func (l *Live) ReplyStructured(ctx context.Context, rawReplyCtx any, message *co
 		native := &core.NativeMessage{Platform: "dingtalk", DingTalkCard: payload}
 		if err := native.Validate(); err == nil {
 			return l.ReplyNative(ctx, rawReplyCtx, native)
+		}
+	}
+	// Try ActionCard via LegacyCard when sections are empty but actions exist.
+	if message != nil && len(message.Sections) == 0 && len(message.Actions) > 0 {
+		if card := message.LegacyCard(); card != nil && len(card.Buttons) > 0 {
+			err := l.ReplyCard(ctx, rawReplyCtx, card)
+			if err == nil {
+				return nil
+			}
+			// deliverCardFallback already sent a text fallback; avoid duplicate reply.
+			if fe, ok := err.(deliveredFallbackError); ok && fe.FallbackDelivered() {
+				return nil
+			}
 		}
 	}
 	return l.Reply(ctx, rawReplyCtx, renderStructuredFallback(message))

@@ -21,7 +21,8 @@ describe("DecomposeTasksDialog", () => {
     );
 
     await user.click(screen.getByRole("checkbox", { name: /Select all blocks/i }));
-    await user.selectOptions(screen.getByRole("combobox"), "task-1");
+    await user.click(screen.getByRole("combobox"));
+    await user.click(screen.getByRole("option", { name: "Parent task" }));
     await user.click(screen.getByRole("button", { name: "Create Tasks" }));
 
     expect(onConfirm).toHaveBeenCalledWith({

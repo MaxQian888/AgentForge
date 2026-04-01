@@ -908,18 +908,18 @@ function AppearanceCard() {
         </div>
         <div className="flex flex-col gap-2">
           <Label htmlFor="appearance-language">{t("language")}</Label>
-          <select
-            id="appearance-language"
-            value={locale}
-            onChange={(e) => setLocale(e.target.value as Locale)}
-            className="flex h-9 w-full max-w-xs rounded-md border border-input bg-transparent px-3 py-1 text-sm shadow-xs transition-colors focus:outline-none focus:ring-1 focus:ring-ring"
-          >
-            {SUPPORTED_LOCALES.map((loc) => (
-              <option key={loc} value={loc}>
-                {LOCALE_LABELS[loc]}
-              </option>
-            ))}
-          </select>
+          <Select value={locale} onValueChange={(v) => setLocale(v as Locale)}>
+            <SelectTrigger className="w-full max-w-xs">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {SUPPORTED_LOCALES.map((loc) => (
+                <SelectItem key={loc} value={loc}>
+                  {LOCALE_LABELS[loc]}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
       </CardContent>
     </Card>

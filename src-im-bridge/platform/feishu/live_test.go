@@ -401,6 +401,13 @@ func (r *fakeEventRunner) dispatchCardAction(ctx context.Context, event *larkcal
 type fakeMessageClient struct {
 	sendCalls  []fakeSendCall
 	replyCalls []fakeReplyCall
+	patchCalls []fakePatchCall
+	patchErr   error
+}
+
+type fakePatchCall struct {
+	MessageID string
+	Content   string
 }
 
 type fakeCardUpdater struct {
@@ -438,6 +445,14 @@ func (c *fakeMessageClient) Reply(ctx context.Context, messageID, msgType, conte
 		Content:   content,
 	})
 	return nil
+}
+
+func (c *fakeMessageClient) Patch(ctx context.Context, messageID, content string) error {
+	c.patchCalls = append(c.patchCalls, fakePatchCall{
+		MessageID: messageID,
+		Content:   content,
+	})
+	return c.patchErr
 }
 
 func (u *fakeCardUpdater) Update(ctx context.Context, callbackToken string, message *core.NativeMessage) error {
@@ -602,6 +617,177 @@ func TestFeishuLive_NameReplyContextAndHelperFunctions(t *testing.T) {
 	}
 	if got := compactMetadata(map[string]string{" source ": " card.action.trigger ", "empty": " "}); got["source"] != "card.action.trigger" || len(got) != 1 {
 		t.Fatalf("compactMetadata = %+v", got)
+	}
+}
+
+func TestLive_SendFormattedTextLarkMDUsesNativePath(t *testing.T) {
+	sender := &fakeMessageClient{}
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.SendFormattedText(context.Background(), "chat-1", &core.FormattedText{
+		Content: "hello **world**",
+		Format:  core.TextFormatLarkMD,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+
+	if len(sender.sendCalls) != 1 {
+		t.Fatalf("sendCalls = %d, want 1", len(sender.sendCalls))
+	}
+	if sender.sendCalls[0].MsgType != larkim.MsgTypeInteractive {
+		t.Fatalf("MsgType = %q, want interactive", sender.sendCalls[0].MsgType)
+	}
+}
+
+func TestLive_SendFormattedTextPlainFallsBackToSend(t *testing.T) {
+	sender := &fakeMessageClient{}
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.SendFormattedText(context.Background(), "chat-1", &core.FormattedText{
+		Content: "plain text",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+
+	if len(sender.sendCalls) != 1 {
+		t.Fatalf("sendCalls = %d, want 1", len(sender.sendCalls))
+	}
+	if sender.sendCalls[0].MsgType != larkim.MsgTypeText {
+		t.Fatalf("MsgType = %q, want text", sender.sendCalls[0].MsgType)
+	}
+}
+
+func TestLive_SendFormattedTextNilMessageReturnsError(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.SendFormattedText(context.Background(), "chat-1", nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("SendFormattedText(nil) err = %v", err)
+	}
+}
+
+func TestLive_ReplyFormattedTextLarkMDUsesNativePath(t *testing.T) {
+	sender := &fakeMessageClient{}
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	rc := replyContext{MessageID: "msg-1", ChatID: "chat-1"}
+	if err := live.ReplyFormattedText(context.Background(), rc, &core.FormattedText{
+		Content: "hello **world**",
+		Format:  core.TextFormatLarkMD,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+
+	if len(sender.replyCalls) != 1 {
+		t.Fatalf("replyCalls = %d, want 1", len(sender.replyCalls))
+	}
+	if sender.replyCalls[0].MsgType != larkim.MsgTypeInteractive {
+		t.Fatalf("MsgType = %q, want interactive", sender.replyCalls[0].MsgType)
+	}
+}
+
+func TestLive_ReplyFormattedTextNilMessageReturnsError(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.ReplyFormattedText(context.Background(), replyContext{MessageID: "msg-1"}, nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("ReplyFormattedText(nil) err = %v", err)
+	}
+}
+
+func TestLive_UpdateFormattedTextNilMessageReturnsError(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.UpdateFormattedText(context.Background(), replyContext{MessageID: "msg-1"}, nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("UpdateFormattedText(nil) err = %v", err)
+	}
+}
+
+func TestLive_UpdateFormattedTextFallsBackToReplyWhenNoCallbackToken(t *testing.T) {
+	sender := &fakeMessageClient{}
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(sender), WithCardUpdater(&fakeCardUpdater{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	rc := replyContext{MessageID: "msg-1", ChatID: "chat-1"}
+	if err := live.UpdateFormattedText(context.Background(), rc, &core.FormattedText{
+		Content: "updated **content**",
+		Format:  core.TextFormatLarkMD,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+
+	// Without callback token, UpdateNative fails, falls back to ReplyFormattedText -> ReplyNative
+	if len(sender.replyCalls) != 1 {
+		t.Fatalf("replyCalls = %d, want 1", len(sender.replyCalls))
+	}
+	if sender.replyCalls[0].MsgType != larkim.MsgTypeInteractive {
+		t.Fatalf("MsgType = %q, want interactive", sender.replyCalls[0].MsgType)
+	}
+}
+
+func TestLive_UpdateMessagePatchesExistingMessage(t *testing.T) {
+	sender := &fakeMessageClient{}
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	rc := replyContext{MessageID: "msg-1", ChatID: "chat-1"}
+	if err := live.UpdateMessage(context.Background(), rc, "updated text"); err != nil {
+		t.Fatalf("UpdateMessage error: %v", err)
+	}
+
+	if len(sender.patchCalls) != 1 {
+		t.Fatalf("patchCalls = %d, want 1", len(sender.patchCalls))
+	}
+	if sender.patchCalls[0].MessageID != "msg-1" {
+		t.Fatalf("patch MessageID = %q, want msg-1", sender.patchCalls[0].MessageID)
+	}
+	patchPayload := decodeJSONMap(t, sender.patchCalls[0].Content)
+	if patchPayload["text"] != "updated text" {
+		t.Fatalf("patch content = %+v", patchPayload)
+	}
+}
+
+func TestLive_UpdateMessageRequiresMessageID(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.UpdateMessage(context.Background(), replyContext{ChatID: "chat-1"}, "text"); err == nil || !strings.Contains(err.Error(), "requires message id") {
+		t.Fatalf("UpdateMessage(no message id) err = %v", err)
+	}
+}
+
+func TestLive_MetadataDeclaresAsyncUpdateEdit(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	metadata := live.Metadata()
+	if !metadata.Capabilities.HasAsyncUpdateMode(core.AsyncUpdateEdit) {
+		t.Fatal("expected AsyncUpdateEdit in capabilities")
 	}
 }
 

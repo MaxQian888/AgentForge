@@ -5,6 +5,7 @@ import {
 
 describe("useTaskWorkspaceStore", () => {
   beforeEach(() => {
+    localStorage.clear();
     useTaskWorkspaceStore.setState({
       viewMode: "board",
       filters: createDefaultTaskWorkspaceFilters(),
@@ -15,6 +16,19 @@ describe("useTaskWorkspaceStore", () => {
         density: "comfortable",
         showDescriptions: true,
         showLinkedDocs: false,
+        boardColumnOrder: [
+          "inbox",
+          "triaged",
+          "assigned",
+          "in_progress",
+          "blocked",
+          "in_review",
+          "changes_requested",
+          "done",
+          "cancelled",
+          "budget_exceeded",
+        ],
+        hiddenBoardColumns: [],
       },
     });
   });
@@ -27,6 +41,7 @@ describe("useTaskWorkspaceStore", () => {
     store.setStatus("in_progress");
     store.setPriority("high");
     store.setAssigneeId("member-1");
+    store.setDueDateRange({ start: "2026-03-25", end: "2026-03-31" });
     store.setPlanning("scheduled");
     store.setDependency("blocked");
     store.setCustomFieldFilter("field-risk", "High");
@@ -41,6 +56,8 @@ describe("useTaskWorkspaceStore", () => {
       status: "in_progress",
       priority: "high",
       assigneeId: "member-1",
+      dueDateStart: "2026-03-25",
+      dueDateEnd: "2026-03-31",
       planning: "scheduled",
       dependency: "blocked",
       customFieldFilters: { "field-risk": "High" },
@@ -71,6 +88,19 @@ describe("useTaskWorkspaceStore", () => {
       density: "compact",
       showDescriptions: false,
       showLinkedDocs: true,
+      boardColumnOrder: [
+        "inbox",
+        "triaged",
+        "assigned",
+        "in_progress",
+        "blocked",
+        "in_review",
+        "changes_requested",
+        "done",
+        "cancelled",
+        "budget_exceeded",
+      ],
+      hiddenBoardColumns: [],
     });
   });
 
@@ -105,6 +135,8 @@ describe("useTaskWorkspaceStore", () => {
         { field: "status", value: "done" },
         { field: "priority", value: "low" },
         { field: "assignee_id", value: "member-2" },
+        { field: "due_date_start", value: "2026-03-20" },
+        { field: "due_date_end", value: "2026-03-28" },
         { field: "sprint_id", value: "sprint-7" },
         { field: "search", value: "release" },
         { field: "cf:field-risk", value: "Critical" },
@@ -119,6 +151,8 @@ describe("useTaskWorkspaceStore", () => {
         status: "done",
         priority: "low",
         assigneeId: "member-2",
+        dueDateStart: "2026-03-20",
+        dueDateEnd: "2026-03-28",
         sprintId: "sprint-7",
         search: "release",
         labels: ["existing-label"],
@@ -161,5 +195,30 @@ describe("useTaskWorkspaceStore", () => {
 
     store.clearSelection();
     expect(useTaskWorkspaceStore.getState().selectedTaskIds).toEqual([]);
+  });
+
+  it("persists board column order and hidden columns", () => {
+    const store = useTaskWorkspaceStore.getState();
+
+    store.setBoardColumnOrder([
+      "done",
+      "inbox",
+      "triaged",
+      "assigned",
+      "in_progress",
+      "blocked",
+      "in_review",
+      "changes_requested",
+      "cancelled",
+      "budget_exceeded",
+    ]);
+    store.setHiddenBoardColumns(["blocked", "cancelled"]);
+
+    const state = useTaskWorkspaceStore.getState();
+
+    expect(state.displayOptions.boardColumnOrder?.[0]).toBe("done");
+    expect(state.displayOptions.hiddenBoardColumns).toEqual(["blocked", "cancelled"]);
+    expect(localStorage.getItem("task-workspace-board-columns")).toContain("\"done\"");
+    expect(localStorage.getItem("task-workspace-hidden-columns")).toContain("\"blocked\"");
   });
 });

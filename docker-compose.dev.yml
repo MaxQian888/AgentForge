@@ -8,13 +8,19 @@ services:
       dockerfile: Dockerfile
     container_name: agentforge-marketplace
     ports:
-      - "7779:7779"
+      - "7781:7781"
     environment:
-      PORT: "7779"
+      PORT: "7781"
       ENV: "development"
       POSTGRES_URL: "postgres://agentforge:agentforge@host.docker.internal:5432/agentforge_marketplace?sslmode=disable"
       ALLOW_ORIGINS: "http://localhost:3000,tauri://localhost,http://localhost:1420"
       ARTIFACTS_DIR: "/data/artifacts"
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:7781/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     volumes:
       - marketplace-artifacts:/data/artifacts
     extra_hosts:

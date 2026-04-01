@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
 
@@ -123,6 +124,7 @@ interface TaskState {
   loading: boolean;
   error: string | null;
   fetchTasks: (projectId: string) => Promise<void>;
+  fetchTaskById: (taskId: string) => Promise<Task | null>;
   createTask: (data: Partial<Task>) => Promise<void>;
   updateTask: (id: string, data: Partial<Task>) => Promise<void>;
   deleteTask: (id: string) => Promise<void>;
@@ -234,20 +236,51 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
     }
   },
 
+  fetchTaskById: async (taskId) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+
+    const existing = get().tasks.find((task) => task.id === taskId);
+    if (existing) {
+      return existing;
+    }
+
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.get<TaskApiShape>(`/api/v1/tasks/${taskId}`, {
+        token,
+      });
+      const normalized = normalizeTask(data);
+      set((state) => ({
+        tasks: upsertNormalizedTask(state.tasks, normalized),
+      }));
+      return normalized;
+    } catch {
+      return null;
+    }
+  },
+
   createTask: async (data) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
 
-    const api = createApiClient(API_URL);
-    const { data: task } = await api.post<TaskApiShape>(
-      `/api/v1/projects/${data.projectId}/tasks`,
-      data,
-      { token }
-    );
+    try {
+      const api = createApiClient(API_URL);
+      const { data: task } = await api.post<TaskApiShape>(
+        `/api/v1/projects/${data.projectId}/tasks`,
+        data,
+        { token }
+      );
 
-    set((state) => ({
-      tasks: upsertNormalizedTask(state.tasks, normalizeTask(task)),
-    }));
+      set((state) => ({
+        tasks: upsertNormalizedTask(state.tasks, normalizeTask(task)),
+      }));
+    } catch (error) {
+      toast.error("Failed to create task", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
+    }
   },
 
   updateTask: async (id, data) => {
@@ -279,6 +312,9 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
           ),
         }));
       }
+      toast.error("Failed to update task", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
       throw error;
     }
   },
@@ -297,6 +333,9 @@ export const useTaskStore = create<TaskState>()((set, get) => ({
       await api.delete(`/api/v1/tasks/${id}`, { token });
     } catch (error) {
       set({ tasks: previousTasks });
+      toast.error("Failed to delete task", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
       throw error;
     }
   },

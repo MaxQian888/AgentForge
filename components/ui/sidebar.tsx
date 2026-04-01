@@ -32,6 +32,16 @@ const SIDEBAR_WIDTH_MOBILE = "18rem"
 const SIDEBAR_WIDTH_ICON = "3rem"
 const SIDEBAR_KEYBOARD_SHORTCUT = "b"
 const SIDEBAR_MENU_SKELETON_WIDTHS = ["50%", "60%", "70%", "80%", "90%"] as const
+const SIDEBAR_SWIPE_EDGE_WIDTH = 24
+const SIDEBAR_SWIPE_THRESHOLD = 56
+const SIDEBAR_SWIPE_VERTICAL_TOLERANCE = 48
+
+type SwipeGesture = {
+  startX: number
+  startY: number
+  currentX: number
+  currentY: number
+}
 
 function getSidebarMenuSkeletonWidth(seed: string) {
   let hash = 0
@@ -41,6 +51,88 @@ function getSidebarMenuSkeletonWidth(seed: string) {
   }
 
   return SIDEBAR_MENU_SKELETON_WIDTHS[hash]
+}
+
+function getTouchPoint(
+  event: Pick<React.TouchEvent, "touches" | "changedTouches">
+) {
+  const touch = event.touches[0] ?? event.changedTouches[0]
+
+  if (!touch) {
+    return null
+  }
+
+  return {
+    x: touch.clientX,
+    y: touch.clientY,
+  }
+}
+
+function startSwipeGesture(
+  event: Pick<React.TouchEvent, "touches" | "changedTouches">
+): SwipeGesture | null {
+  const point = getTouchPoint(event)
+
+  if (!point) {
+    return null
+  }
+
+  return {
+    startX: point.x,
+    startY: point.y,
+    currentX: point.x,
+    currentY: point.y,
+  }
+}
+
+function updateSwipeGesture(
+  gesture: SwipeGesture | null,
+  event: Pick<React.TouchEvent, "touches" | "changedTouches">
+) {
+  const point = getTouchPoint(event)
+
+  if (!gesture || !point) {
+    return gesture
+  }
+
+  return {
+    ...gesture,
+    currentX: point.x,
+    currentY: point.y,
+  }
+}
+
+function isHorizontalSwipe(gesture: SwipeGesture | null) {
+  if (!gesture) {
+    return false
+  }
+
+  return (
+    Math.abs(gesture.currentY - gesture.startY) <=
+      SIDEBAR_SWIPE_VERTICAL_TOLERANCE &&
+    Math.abs(gesture.currentX - gesture.startX) >= SIDEBAR_SWIPE_THRESHOLD
+  )
+}
+
+function shouldOpenMobileSidebar(gesture: SwipeGesture | null) {
+  if (!gesture || !isHorizontalSwipe(gesture)) {
+    return false
+  }
+
+  return gesture.currentX > gesture.startX
+}
+
+function shouldCloseMobileSidebar(
+  gesture: SwipeGesture | null,
+  side: "left" | "right"
+) {
+  if (!gesture || !isHorizontalSwipe(gesture)) {
+    return false
+  }
+
+  return side === "left"
+    ? gesture.currentX < gesture.startX
+    : gesture.currentX > gesture.startX
 }
 
 type SidebarContextProps = {
@@ -79,6 +171,7 @@ function SidebarProvider({
 }) {
   const isMobile = useIsMobile()
   const [openMobile, setOpenMobile] = React.useState(false)
+  const mobileOpenSwipeRef = React.useRef<SwipeGesture | null>(null)
 
   // This is the internal state of the sidebar.
   // We use openProp and setOpenProp for control from outside the component.
@@ -156,6 +249,36 @@ function SidebarProvider({
           {...props}
         >
           {children}
+          {isMobile && !openMobile ? (
+            <div
+              aria-hidden="true"
+              data-slot="sidebar-swipe-edge"
+              data-testid="sidebar-swipe-edge"
+              className="fixed inset-y-0 left-0 z-40 md:hidden"
+              style={{ width: SIDEBAR_SWIPE_EDGE_WIDTH }}
+              onTouchStart={(event) => {
+                mobileOpenSwipeRef.current = startSwipeGesture(event)
+              }}
+              onTouchMove={(event) => {
+                mobileOpenSwipeRef.current = updateSwipeGesture(
+                  mobileOpenSwipeRef.current,
+                  event
+                )
+              }}
+              onTouchEnd={(event) => {
+                mobileOpenSwipeRef.current = updateSwipeGesture(
+                  mobileOpenSwipeRef.current,
+                  event
+                )
+
+                if (shouldOpenMobileSidebar(mobileOpenSwipeRef.current)) {
+                  setOpenMobile(true)
+                }
+
+                mobileOpenSwipeRef.current = null
+              }}
+            />
+          ) : null}
         </div>
       </TooltipProvider>
     </SidebarContext.Provider>
@@ -175,6 +298,7 @@ function Sidebar({
   collapsible?: "offcanvas" | "icon" | "none"
 }) {
   const { isMobile, state, openMobile, setOpenMobile } = useSidebar()
+  const mobileCloseSwipeRef = React.useRef<SwipeGesture | null>(null)
 
   if (collapsible === "none") {
     return (
@@ -198,6 +322,7 @@ function Sidebar({
           data-sidebar="sidebar"
           data-slot="sidebar"
           data-mobile="true"
+          data-testid="mobile-sidebar-drawer"
           className="w-(--sidebar-width) bg-sidebar p-0 text-sidebar-foreground [&>button]:hidden"
           style={
             {
@@ -205,6 +330,27 @@ function Sidebar({
             } as React.CSSProperties
           }
           side={side}
+          onTouchStart={(event) => {
+            mobileCloseSwipeRef.current = startSwipeGesture(event)
+          }}
+          onTouchMove={(event) => {
+            mobileCloseSwipeRef.current = updateSwipeGesture(
+              mobileCloseSwipeRef.current,
+              event
+            )
+          }}
+          onTouchEnd={(event) => {
+            mobileCloseSwipeRef.current = updateSwipeGesture(
+              mobileCloseSwipeRef.current,
+              event
+            )
+
+            if (shouldCloseMobileSidebar(mobileCloseSwipeRef.current, side)) {
+              setOpenMobile(false)
+            }
+
+            mobileCloseSwipeRef.current = null
+          }}
         >
           <SheetHeader className="sr-only">
             <SheetTitle>Sidebar</SheetTitle>

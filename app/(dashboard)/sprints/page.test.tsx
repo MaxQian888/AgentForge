@@ -79,6 +79,48 @@ jest.mock("@/components/ui/dialog", () => ({
   DialogFooter: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
 }));
 
+jest.mock("@/components/ui/select", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require("react");
+
+  function flattenOptions(children: React.ReactNode): Array<{ value: string; label: string }> {
+    const options: Array<{ value: string; label: string }> = [];
+    function visit(node: React.ReactNode) {
+      React.Children.forEach(node, (child: unknown) => {
+        if (!React.isValidElement(child)) return;
+        const element = child as React.ReactElement<{ children?: React.ReactNode; value?: string }>;
+        if (element.props.value !== undefined) {
+          options.push({
+            value: element.props.value,
+            label: typeof element.props.children === "string" ? element.props.children : String(element.props.value),
+          });
+          return;
+        }
+        visit(element.props.children);
+      });
+    }
+    visit(children);
+    return options;
+  }
+
+  return {
+    Select: ({ value, onValueChange, children }: { value: string; onValueChange: (v: string) => void; children: React.ReactNode }) => {
+      const options = flattenOptions(children);
+      return (
+        <select value={value} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onValueChange(e.target.value)}>
+          {options.map((item: { value: string; label: string }) => (
+            <option key={item.value} value={item.value}>{item.label}</option>
+          ))}
+        </select>
+      );
+    },
+    SelectTrigger: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    SelectValue: () => null,
+    SelectContent: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+    SelectItem: ({ children }: { children: React.ReactNode }) => <>{children}</>,
+  };
+});
+
 jest.mock("@/lib/stores/dashboard-store", () => ({
   useDashboardStore: () => dashboardState,
 }));

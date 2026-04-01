@@ -213,6 +213,88 @@ func TestLive_NameReplyContextAndLifecycle(t *testing.T) {
 	}
 }
 
+func TestLive_SendFormattedTextDelegatesToPlainTextSend(t *testing.T) {
+	transport := &fakeTransport{}
+	live, err := NewLive(
+		"ws://127.0.0.1:3001/onebot/v11/ws",
+		"qq-token",
+		WithTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.SendFormattedText(context.Background(), "group:2002", &core.FormattedText{
+		Content: "hello formatted",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+	if len(transport.calls) != 1 {
+		t.Fatalf("calls = %+v", transport.calls)
+	}
+	message, _ := transport.calls[0].Params["message"].(string)
+	if message != "hello formatted" {
+		t.Fatalf("message = %q", message)
+	}
+
+	if err := live.SendFormattedText(context.Background(), "group:2002", nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil message error = %v", err)
+	}
+}
+
+func TestLive_ReplyFormattedTextDelegatesToPlainTextReply(t *testing.T) {
+	transport := &fakeTransport{}
+	live, err := NewLive(
+		"ws://127.0.0.1:3001/onebot/v11/ws",
+		"qq-token",
+		WithTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.ReplyFormattedText(context.Background(), replyContext{ChatID: "2002", MessageID: "1001", IsGroup: true}, &core.FormattedText{
+		Content: "reply formatted",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if len(transport.calls) != 1 {
+		t.Fatalf("calls = %+v", transport.calls)
+	}
+	message, _ := transport.calls[0].Params["message"].(string)
+	if !strings.Contains(message, "reply formatted") {
+		t.Fatalf("message = %q", message)
+	}
+
+	if err := live.ReplyFormattedText(context.Background(), replyContext{ChatID: "2002"}, nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil message error = %v", err)
+	}
+}
+
+func TestLive_UpdateFormattedTextDelegatesToReply(t *testing.T) {
+	transport := &fakeTransport{}
+	live, err := NewLive(
+		"ws://127.0.0.1:3001/onebot/v11/ws",
+		"qq-token",
+		WithTransport(transport),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.UpdateFormattedText(context.Background(), replyContext{ChatID: "2002", IsGroup: true}, &core.FormattedText{
+		Content: "update formatted",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+	if len(transport.calls) != 1 {
+		t.Fatalf("calls = %+v", transport.calls)
+	}
+}
+
 func TestQQLiveHelpers_ParseTargetsPayloadAndTime(t *testing.T) {
 	if got := parseTarget(""); got.action != "" || got.id != "" {
 		t.Fatalf("parseTarget(empty) = %+v", got)

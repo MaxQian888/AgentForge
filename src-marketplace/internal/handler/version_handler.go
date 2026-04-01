@@ -81,6 +81,10 @@ func (h *VersionHandler) Upload(c echo.Context) error {
 		if errors.Is(err, service.ErrInvalidSemver) {
 			return localizedError(c, http.StatusBadRequest, "Invalid semantic version format")
 		}
+		var artifactErr *service.ArtifactValidationError
+		if errors.As(err, &artifactErr) {
+			return localizedError(c, http.StatusBadRequest, artifactErr.Error())
+		}
 		return localizedError(c, http.StatusInternalServerError, "Failed to store artifact")
 	}
 	return c.JSON(http.StatusCreated, v)

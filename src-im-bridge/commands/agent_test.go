@@ -253,28 +253,38 @@ func TestAgentCommand_SpawnRequiresTaskID(t *testing.T) {
 func TestAgentCommand_SpawnRepliesWithRunAndTask(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
-			t.Fatalf("method = %s, want POST", r.Method)
+			if r.Method != http.MethodGet {
+				t.Fatalf("method = %s, want POST/GET", r.Method)
+			}
 		}
-		if r.URL.Path != "/api/v1/agents/spawn" {
+		switch r.URL.Path {
+		case "/api/v1/agents/spawn":
+			var body map[string]string
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode body: %v", err)
+			}
+			if body["taskId"] != "task-123" {
+				t.Fatalf("taskId = %q", body["taskId"])
+			}
+
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(&client.TaskDispatchResponse{
+				Task: client.Task{ID: "task-123456"},
+				Dispatch: client.DispatchOutcome{
+					Status: "started",
+					Run:    &client.AgentRun{ID: "run-123456", TaskID: "task-123456"},
+				},
+			})
+		case "/api/v1/bridge/tools":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tools": []map[string]any{
+					{"plugin_id": "web-search", "name": "search"},
+				},
+			})
+		default:
 			t.Fatalf("path = %s", r.URL.Path)
 		}
-
-		var body map[string]string
-		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
-			t.Fatalf("decode body: %v", err)
-		}
-		if body["taskId"] != "task-123" {
-			t.Fatalf("taskId = %q", body["taskId"])
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		_ = json.NewEncoder(w).Encode(&client.TaskDispatchResponse{
-			Task: client.Task{ID: "task-123456"},
-			Dispatch: client.DispatchOutcome{
-				Status: "started",
-				Run:    &client.AgentRun{ID: "run-123456", TaskID: "task-123456"},
-			},
-		})
 	}))
 	defer server.Close()
 
@@ -291,8 +301,10 @@ func TestAgentCommand_SpawnRepliesWithRunAndTask(t *testing.T) {
 	if len(platform.replies) != 1 {
 		t.Fatalf("replies = %v", platform.replies)
 	}
-	if !strings.Contains(platform.replies[0], "已启动 Agent #run-1234 执行任务 task-123") {
-		t.Fatalf("reply = %q", platform.replies[0])
+	for _, want := range []string{"已启动 Agent #run-1234 执行任务 task-123", "Bridge tools", "web-search"} {
+		if !strings.Contains(platform.replies[0], want) {
+			t.Fatalf("reply = %q, want substring %q", platform.replies[0], want)
+		}
 	}
 }
 
@@ -335,6 +347,13 @@ func TestFormatAgentSpawnReply_CoversDispatchBranches(t *testing.T) {
 	if idle != "任务 task-123 当前未启动 Agent" {
 		t.Fatalf("idle = %q", idle)
 	}
+
+	queuedWithReason := formatAgentSpawnReply(&client.TaskDispatchResponse{
+		Dispatch: client.DispatchOutcome{Status: "queued", Reason: "Bridge pool at capacity (2/2 active). Options: Wait in queue / Proceed anyway."},
+	}, "task-12345678")
+	if queuedWithReason != "已加入队列：Bridge pool at capacity (2/2 active). Options: Wait in queue / Proceed anyway." {
+		t.Fatalf("queuedWithReason = %q", queuedWithReason)
+	}
 }
 
 func TestAgentCommand_RunRequiresPrompt(t *testing.T) {
@@ -357,7 +376,7 @@ func TestAgentCommand_RunRequiresPrompt(t *testing.T) {
 }
 
 func TestAgentCommand_RunCreatesTaskAndStartsAgent(t *testing.T) {
-	requests := make([]string, 0, 2)
+	requests := make([]string, 0, 3)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		switch r.URL.Path {
@@ -387,6 +406,13 @@ func TestAgentCommand_RunCreatesTaskAndStartsAgent(t *testing.T) {
 					Run:    &client.AgentRun{ID: "run-quick-123", TaskID: "task-quick-123"},
 				},
 			})
+		case "/api/v1/bridge/tools":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"tools": []map[string]any{
+					{"plugin_id": "web-search", "name": "search"},
+				},
+			})
 		default:
 			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
 		}
@@ -403,7 +429,7 @@ func TestAgentCommand_RunCreatesTaskAndStartsAgent(t *testing.T) {
 		Content:  "/agent run Bridge smoke",
 	})
 
-	if len(requests) != 2 {
+	if len(requests) != 3 {
 		t.Fatalf("requests = %v", requests)
 	}
 	if len(platform.replies) != 2 {
@@ -413,6 +439,9 @@ func TestAgentCommand_RunCreatesTaskAndStartsAgent(t *testing.T) {
 		t.Fatalf("progress reply should not contain run id: %q", platform.replies[0])
 	}
 	if !strings.Contains(platform.replies[1], "run-quic") {
+		t.Fatalf("final reply = %q", platform.replies[1])
+	}
+	if !strings.Contains(platform.replies[1], "Bridge tools") || !strings.Contains(platform.replies[1], "web-search") {
 		t.Fatalf("final reply = %q", platform.replies[1])
 	}
 }

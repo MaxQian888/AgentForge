@@ -36,6 +36,11 @@ const RoleExecutionSkillDiagnosticSchema = z.object({
   auto_load: z.boolean().optional(),
 }).strict();
 
+const RolePluginBindingSchema = z.object({
+  plugin_id: z.string().min(1),
+  functions: z.array(z.string()).optional(),
+}).strict();
+
 export const RoleConfigSchema = z.object({
   role_id: z.string().min(1),
   name: z.string().min(1),
@@ -48,6 +53,7 @@ export const RoleConfigSchema = z.object({
   max_turns: z.number().int().positive(),
   permission_mode: z.string(),
   tools: z.array(z.string()).optional(),
+  plugin_bindings: z.array(RolePluginBindingSchema).optional(),
   knowledge_context: z.string().optional(),
   loaded_skills: z.array(RoleExecutionSkillSchema).optional(),
   available_skills: z.array(RoleExecutionSkillSchema).optional(),

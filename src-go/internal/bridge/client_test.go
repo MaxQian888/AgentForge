@@ -792,9 +792,13 @@ func TestClientClassifyIntentUsesCanonicalBridgeContract(t *testing.T) {
 
 	client := NewClient(server.URL)
 	result, err := client.ClassifyIntent(context.Background(), ClassifyIntentRequest{
-		Text:      "把 task-123 分配给 Alice",
-		UserID:    "user-123",
-		ProjectID: "project-123",
+		Text:       "把 task-123 分配给 Alice",
+		UserID:     "user-123",
+		ProjectID:  "project-123",
+		Candidates: []string{"task_assign", "chat"},
+		Context: map[string]any{
+			"history": []string{"上一条消息"},
+		},
 	})
 	if err != nil {
 		t.Fatalf("ClassifyIntent() error: %v", err)
@@ -805,6 +809,12 @@ func TestClientClassifyIntentUsesCanonicalBridgeContract(t *testing.T) {
 	}
 	if gotBody["text"] != "把 task-123 分配给 Alice" || gotBody["user_id"] != "user-123" || gotBody["project_id"] != "project-123" {
 		t.Fatalf("unexpected classify intent payload: %#v", gotBody)
+	}
+	if candidates, ok := gotBody["candidates"].([]any); !ok || len(candidates) != 2 {
+		t.Fatalf("expected candidates in classify intent payload, got %#v", gotBody["candidates"])
+	}
+	if contextValue, ok := gotBody["context"].(map[string]any); !ok || contextValue["history"] == nil {
+		t.Fatalf("expected context in classify intent payload, got %#v", gotBody["context"])
 	}
 	if result.Intent != "task_assign" || result.Command != "/task assign" || result.Confidence != 0.92 {
 		t.Fatalf("unexpected classify intent result: %+v", result)

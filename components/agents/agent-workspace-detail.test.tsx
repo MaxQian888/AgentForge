@@ -10,9 +10,22 @@ jest.mock("next-intl", () => ({
       "table.costBudget": "Cost/Budget",
       "status.running": "Running",
       "status.paused": "Paused",
+      "workspace.reasoning": "Reasoning",
+      "workspace.toolCalls": "Tool Calls",
+      "workspace.fileChanges": "File Changes",
+      "workspace.todos": "Todos",
+      "workspace.partialMessage": "Live Output",
+      "workspace.permissionRequests": "Permission Requests",
+      "workspace.permissionRequests.approve": "Approve",
+      "workspace.permissionRequests.deny": "Deny",
+      "workspace.logs": "Logs",
     };
     return map[key] ?? key;
   },
+}));
+
+jest.mock("@/lib/stores/auth-store", () => ({
+  useAuthStore: { getState: () => ({ accessToken: "test-token" }) },
 }));
 
 jest.mock("@/components/agent/output-stream", () => ({
@@ -33,26 +46,40 @@ import { AgentWorkspaceDetail } from "./agent-workspace-detail";
 
 const fetchAgentMock = jest.fn();
 const fetchDispatchHistoryMock = jest.fn();
+const fetchAgentLogsMock = jest.fn().mockResolvedValue([]);
 const pauseAgentMock = jest.fn();
 const resumeAgentMock = jest.fn();
 const killAgentMock = jest.fn();
+const removePermissionRequestMock = jest.fn();
 const storeState = {
   agents: [] as Array<Record<string, unknown>>,
   agentOutputs: new Map<string, string[]>(),
+  agentToolCalls: new Map<string, unknown[]>(),
+  agentToolResults: new Map<string, unknown[]>(),
+  agentReasoning: new Map<string, string>(),
+  agentFileChanges: new Map<string, unknown[]>(),
+  agentTodos: new Map<string, unknown[]>(),
+  agentPartialMessages: new Map<string, string>(),
+  agentPermissionRequests: new Map<string, unknown[]>(),
+  agentLogs: new Map<string, unknown[]>(),
   pool: null as Record<string, unknown> | null,
   dispatchHistoryByTask: {} as Record<string, Array<{ id: string }>>,
   fetchAgent: fetchAgentMock,
   fetchDispatchHistory: fetchDispatchHistoryMock,
+  fetchAgentLogs: fetchAgentLogsMock,
   pauseAgent: pauseAgentMock,
   resumeAgent: resumeAgentMock,
   killAgent: killAgentMock,
+  removePermissionRequest: removePermissionRequestMock,
 };
 
-jest.mock("@/lib/stores/agent-store", () => ({
-  useAgentStore: (
-    selector: (state: typeof storeState) => unknown,
-  ) => selector(storeState),
-}));
+const agentStoreRef: { current: Record<string, unknown> } = { current: {} };
+
+jest.mock("@/lib/stores/agent-store", () => {
+  const fn = (selector: (state: unknown) => unknown) => selector(agentStoreRef.current);
+  fn.getState = () => agentStoreRef.current;
+  return { useAgentStore: fn };
+});
 
 describe("AgentWorkspaceDetail", () => {
   beforeEach(() => {
@@ -60,9 +87,12 @@ describe("AgentWorkspaceDetail", () => {
     fetchAgentMock.mockResolvedValue(undefined);
     fetchDispatchHistoryMock.mockReset();
     fetchDispatchHistoryMock.mockResolvedValue(undefined);
+    fetchAgentLogsMock.mockReset();
+    fetchAgentLogsMock.mockResolvedValue([]);
     pauseAgentMock.mockReset();
     resumeAgentMock.mockReset();
     killAgentMock.mockReset();
+    removePermissionRequestMock.mockReset();
 
     storeState.agents = [
       {
@@ -87,6 +117,7 @@ describe("AgentWorkspaceDetail", () => {
     storeState.dispatchHistoryByTask = {
       "task-1": [{ id: "attempt-1" }],
     };
+    agentStoreRef.current = storeState;
   });
 
   it("renders a not-found state when the agent does not exist", () => {

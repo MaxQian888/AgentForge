@@ -1,3 +1,5 @@
+import type { CostAccountingData } from "./cost/accounting.js";
+
 export type AgentRuntimeKey =
   | "claude_code"
   | "codex"
@@ -133,6 +135,11 @@ export interface RoleConfig {
   permission_mode: string;
   /** MCP Server plugin IDs this role should use. */
   tools?: string[];
+  /** Selected declared functions per plugin. */
+  plugin_bindings?: Array<{
+    plugin_id: string;
+    functions?: string[];
+  }>;
   /** Knowledge content to inject into the system prompt. */
   knowledge_context?: string;
   /** Auto-loaded skill bundles resolved by Go for prompt injection. */
@@ -187,6 +194,7 @@ export type AgentEventType =
   | "tool_result"
   | "status_change"
   | "cost_update"
+  | "budget_alert"
   | "error"
   | "snapshot"
   | "heartbeat"
@@ -238,6 +246,7 @@ export interface AgentStatus {
   file_checkpointing?: boolean;
   active_hooks?: HookName[];
   subagent_count?: number;
+  cost_accounting?: CostAccountingData;
 }
 
 export interface RuntimeDiagnostic {
@@ -297,9 +306,11 @@ export interface CostUpdate {
   input_tokens: number;
   output_tokens: number;
   cache_read_tokens: number;
+  cache_creation_tokens?: number;
   cost_usd: number;
   budget_remaining_usd: number;
   turn_number: number;
+  cost_accounting?: CostAccountingData;
 }
 
 export interface ReasoningEventData {
@@ -453,4 +464,5 @@ export interface SessionSnapshot {
   updated_at: number;
   request?: ExecuteRequest;
   continuity?: RuntimeContinuityState;
+  cost_accounting?: CostAccountingData;
 }

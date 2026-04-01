@@ -26,7 +26,7 @@ func Load() (*Config, error) {
 	_ = viper.ReadInConfig()
 	viper.AutomaticEnv()
 
-	viper.SetDefault("PORT", "7779")
+	viper.SetDefault("PORT", "7781")
 	viper.SetDefault("ENV", "development")
 	viper.SetDefault("ARTIFACTS_DIR", "./data/artifacts")
 	viper.SetDefault("MAX_UPLOAD_MB", 100)

@@ -5,6 +5,13 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useFormStore, type FormDefinition } from "@/lib/stores/form-store";
 import {
   useCustomFieldStore,
@@ -87,13 +94,18 @@ export function FormBuilder({ projectId }: { projectId: string }) {
       <div className="grid gap-3 md:grid-cols-2">
         <div className="space-y-2">
           <Label>{t("targetStatus")}</Label>
-          <select className="h-10 w-full rounded-md border bg-background px-3 text-sm" value={targetStatus} onChange={(event) => setTargetStatus(event.target.value)}>
-            {["inbox", "triaged", "assigned", "in_progress", "in_review"].map((status) => (
-              <option key={status} value={status}>
-                {status}
-              </option>
-            ))}
-          </select>
+          <Select value={targetStatus} onValueChange={setTargetStatus}>
+            <SelectTrigger className="h-10 w-full text-sm">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {["inbox", "triaged", "assigned", "in_progress", "in_review"].map((status) => (
+                <SelectItem key={status} value={status}>
+                  {status}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <label className="flex items-center gap-2 text-sm md:self-end">
           <input type="checkbox" checked={isPublic} onChange={(event) => setIsPublic(event.target.checked)} />
@@ -119,19 +131,23 @@ export function FormBuilder({ projectId }: { projectId: string }) {
               }
               placeholder={t("fieldLabelPlaceholder")}
             />
-            <select
-              className="h-10 rounded-md border bg-background px-3 text-sm"
+            <Select
               value={field.target}
-              onChange={(event) =>
-                setFields((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, target: event.target.value } : item)))
+              onValueChange={(value) =>
+                setFields((current) => current.map((item, itemIndex) => (itemIndex === index ? { ...item, target: value } : item)))
               }
             >
-              {targetOptions.map((option) => (
-                <option key={option.value} value={option.value}>
-                  {option.label}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="h-10 text-sm">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                {targetOptions.map((option) => (
+                  <SelectItem key={option.value} value={option.value}>
+                    {option.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         ))}
         <Button

@@ -104,13 +104,13 @@ func TestCostQueryService_ProjectSummaryAggregatesDeterministicOutputs(t *testin
 		},
 		&stubCostQueryRunReader{
 			projectRuns: []*model.AgentRun{
-				{TaskID: taskA, Status: model.AgentRunStatusRunning, CostUsd: 2.25, InputTokens: 10, OutputTokens: 20, CacheReadTokens: 3, TurnCount: 2, CreatedAt: now},
-				{TaskID: taskA, Status: model.AgentRunStatusCompleted, CostUsd: 2.25, InputTokens: 5, OutputTokens: 10, CacheReadTokens: 1, TurnCount: 1, CreatedAt: now.AddDate(0, 0, -1)},
-				{TaskID: taskB, Status: model.AgentRunStatusPaused, CostUsd: 1.11119, InputTokens: 7, OutputTokens: 8, CacheReadTokens: 0, TurnCount: 3, CreatedAt: now.AddDate(0, 0, -10)},
+				{TaskID: taskA, Status: model.AgentRunStatusRunning, Runtime: "claude_code", Provider: "anthropic", Model: "claude-sonnet-4-5", CostUsd: 2.25, InputTokens: 10, OutputTokens: 20, CacheReadTokens: 3, TurnCount: 2, CreatedAt: now, CostAccounting: &model.CostAccountingSnapshot{Mode: "authoritative_total", Coverage: "full", Source: "anthropic_result_total"}},
+				{TaskID: taskA, Status: model.AgentRunStatusCompleted, Runtime: "codex", Provider: "openai", Model: "gpt-5-codex", CostUsd: 2.25, InputTokens: 5, OutputTokens: 10, CacheReadTokens: 1, TurnCount: 1, CreatedAt: now.AddDate(0, 0, -1), CostAccounting: &model.CostAccountingSnapshot{Mode: "estimated_api_pricing", Coverage: "full", Source: "openai_api_pricing"}},
+				{TaskID: taskB, Status: model.AgentRunStatusPaused, Runtime: "opencode", Provider: "opencode", Model: "opencode-default", CostUsd: 0, InputTokens: 7, OutputTokens: 8, CacheReadTokens: 0, TurnCount: 3, CreatedAt: now.AddDate(0, 0, -10), CostAccounting: &model.CostAccountingSnapshot{Mode: "unpriced", Coverage: "none", Source: "opencode_usage"}},
 			},
 		},
 		&stubCostQueryBudgetReader{
-			summary: &model.ProjectBudgetSummary{ProjectID: projectID.String(), Allocated: 20, Spent: 5.6112},
+			summary: &model.ProjectBudgetSummary{ProjectID: projectID.String(), Allocated: 20, Spent: 4.5},
 		},
 	)
 	service.now = func() time.Time { return now }
@@ -119,8 +119,8 @@ func TestCostQueryService_ProjectSummaryAggregatesDeterministicOutputs(t *testin
 	if err != nil {
 		t.Fatalf("ProjectSummary() error = %v", err)
 	}
-	if summary.TotalCostUsd != 5.6112 {
-		t.Fatalf("summary.TotalCostUsd = %v, want 5.6112", summary.TotalCostUsd)
+	if summary.TotalCostUsd != 4.5 {
+		t.Fatalf("summary.TotalCostUsd = %v, want 4.5", summary.TotalCostUsd)
 	}
 	if summary.ActiveAgents != 2 {
 		t.Fatalf("summary.ActiveAgents = %d, want 2", summary.ActiveAgents)
@@ -139,6 +139,18 @@ func TestCostQueryService_ProjectSummaryAggregatesDeterministicOutputs(t *testin
 	}
 	if summary.PeriodRollups["today"].RunCount != 1 || summary.PeriodRollups["last7Days"].RunCount != 2 || summary.PeriodRollups["last30Days"].RunCount != 3 {
 		t.Fatalf("summary.PeriodRollups = %#v", summary.PeriodRollups)
+	}
+	if summary.CostCoverage == nil {
+		t.Fatalf("summary.CostCoverage = nil")
+	}
+	if summary.CostCoverage.AuthoritativeRunCount != 1 || summary.CostCoverage.EstimatedRunCount != 1 || summary.CostCoverage.UnpricedRunCount != 1 {
+		t.Fatalf("summary.CostCoverage = %#v", summary.CostCoverage)
+	}
+	if !summary.CostCoverage.HasCoverageGap {
+		t.Fatalf("summary.CostCoverage.HasCoverageGap = false, want true")
+	}
+	if len(summary.RuntimeBreakdown) != 3 {
+		t.Fatalf("summary.RuntimeBreakdown = %#v", summary.RuntimeBreakdown)
 	}
 }
 
@@ -234,11 +246,11 @@ func TestCostQueryService_PropagatesErrorsAndBuildHelpers(t *testing.T) {
 			{TaskID: taskA, CostUsd: 3, InputTokens: 1, OutputTokens: 2, CacheReadTokens: 0},
 		},
 	)
-	if len(taskCosts) != 2 || taskCosts[0].TaskTitle != "Review" || taskCosts[1].CostUsd != 2 {
+	if len(taskCosts) != 2 || taskCosts[0].TaskTitle != "Build" || taskCosts[0].CostUsd != 5 || taskCosts[1].TaskTitle != "Review" || taskCosts[1].CostUsd != 5 {
 		t.Fatalf("buildTaskCostDetails() = %#v", taskCosts)
 	}
-	if taskCosts[1].AgentRuns != 2 || taskCosts[1].InputTokens != 4 {
-		t.Fatalf("buildTaskCostDetails(agent aggregation) = %#v", taskCosts[1])
+	if taskCosts[0].AgentRuns != 2 || taskCosts[0].InputTokens != 4 {
+		t.Fatalf("buildTaskCostDetails(agent aggregation) = %#v", taskCosts[0])
 	}
 
 	sprintCosts := buildSprintCostSummaries(

@@ -148,7 +148,48 @@ func (s *Stub) ReplyNative(ctx context.Context, rawReplyCtx any, message *core.N
 	return s.SendNative(ctx, target, message)
 }
 
+func (s *Stub) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
+	if message == nil {
+		return fmt.Errorf("formatted text is required")
+	}
+	s.mu.Lock()
+	s.replies = append(s.replies, stubReply{
+		ChatID:        chatID,
+		Content:       message.Content,
+		NativeSurface: string(message.Format),
+		Timestamp:     time.Now(),
+	})
+	s.mu.Unlock()
+	log.WithFields(log.Fields{"component": "qqbot-stub", "chat_id": chatID}).Info("SendFormattedText: " + message.Content)
+	return nil
+}
+
+func (s *Stub) ReplyFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	if message == nil {
+		return fmt.Errorf("formatted text is required")
+	}
+	reply := toReplyContext(rawReplyCtx)
+	target := firstNonEmpty(reply.ChatID, reply.UserID)
+	if !reply.IsGroup && reply.UserID != "" {
+		target = "user:" + reply.UserID
+	}
+	return s.SendFormattedText(ctx, target, message)
+}
+
+func (s *Stub) UpdateFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	return s.ReplyFormattedText(ctx, rawReplyCtx, message)
+}
+
+var _ core.FormattedTextSender = (*Stub)(nil)
+
 func (s *Stub) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	rendered := renderStructuredAsMarkdown(message)
+	if rendered != "" {
+		return s.SendFormattedText(ctx, chatID, &core.FormattedText{
+			Content: rendered,
+			Format:  core.TextFormatQQBotMD,
+		})
+	}
 	return s.Send(ctx, chatID, strings.TrimSpace(message.FallbackText()))
 }
 

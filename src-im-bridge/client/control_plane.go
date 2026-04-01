@@ -34,7 +34,10 @@ type ControlDeliveryAck struct {
 	BridgeID        string `json:"bridgeId"`
 	Cursor          int64  `json:"cursor"`
 	DeliveryID      string `json:"deliveryId,omitempty"`
+	Status          string `json:"status,omitempty"`
+	FailureReason   string `json:"failureReason,omitempty"`
 	DowngradeReason string `json:"downgradeReason,omitempty"`
+	ProcessedAt     string `json:"processedAt,omitempty"`
 }
 
 type ControlPlaneConn struct {
@@ -101,18 +104,19 @@ func (c *ControlPlaneConn) ReadDelivery(ctx context.Context) (*ControlDelivery, 
 	}
 }
 
-func (c *ControlPlaneConn) Ack(cursor int64, deliveryID string, downgradeReason string) error {
+func (c *ControlPlaneConn) Ack(ack ControlDeliveryAck) error {
 	if c == nil || c.conn == nil {
 		return fmt.Errorf("control plane websocket not connected")
 	}
 	c.mu.Lock()
 	defer c.mu.Unlock()
-	return c.conn.WriteJSON(ControlDeliveryAck{
-		BridgeID:        c.bridgeID,
-		Cursor:          cursor,
-		DeliveryID:      deliveryID,
-		DowngradeReason: strings.TrimSpace(downgradeReason),
-	})
+	ack.BridgeID = firstNonEmpty(strings.TrimSpace(ack.BridgeID), c.bridgeID)
+	ack.DeliveryID = strings.TrimSpace(ack.DeliveryID)
+	ack.Status = strings.TrimSpace(ack.Status)
+	ack.FailureReason = strings.TrimSpace(ack.FailureReason)
+	ack.DowngradeReason = strings.TrimSpace(ack.DowngradeReason)
+	ack.ProcessedAt = strings.TrimSpace(ack.ProcessedAt)
+	return c.conn.WriteJSON(ack)
 }
 
 func (c *ControlPlaneConn) Close() error {
@@ -131,4 +135,13 @@ func EncodeReplyTargetHeader(target *core.ReplyTarget) string {
 		return ""
 	}
 	return string(encoded)
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, value := range values {
+		if trimmed := strings.TrimSpace(value); trimmed != "" {
+			return trimmed
+		}
+	}
+	return ""
 }

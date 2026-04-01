@@ -41,4 +41,32 @@ type ProjectCostSummaryDTO struct {
 	DailyCosts           []CostTimeSeriesDTO            `json:"dailyCosts"`
 	BudgetSummary        *ProjectBudgetSummary          `json:"budgetSummary,omitempty"`
 	PeriodRollups        map[string]CostPeriodRollupDTO `json:"periodRollups"`
+	CostCoverage         *CostCoverageSummaryDTO        `json:"costCoverage,omitempty"`
+	RuntimeBreakdown     []RuntimeCostBreakdownDTO      `json:"runtimeBreakdown"`
+}
+
+type CostCoverageSummaryDTO struct {
+	TotalRunCount         int     `json:"totalRunCount"`
+	PricedRunCount        int     `json:"pricedRunCount"`
+	AuthoritativeRunCount int     `json:"authoritativeRunCount"`
+	EstimatedRunCount     int     `json:"estimatedRunCount"`
+	PlanIncludedRunCount  int     `json:"planIncludedRunCount"`
+	UnpricedRunCount      int     `json:"unpricedRunCount"`
+	TotalCostUsd          float64 `json:"totalCostUsd"`
+	AuthoritativeCostUsd  float64 `json:"authoritativeCostUsd"`
+	EstimatedCostUsd      float64 `json:"estimatedCostUsd"`
+	HasCoverageGap        bool    `json:"hasCoverageGap"`
+}
+
+type RuntimeCostBreakdownDTO struct {
+	Runtime               string  `json:"runtime"`
+	Provider              string  `json:"provider"`
+	Model                 string  `json:"model"`
+	RunCount              int     `json:"runCount"`
+	PricedRunCount        int     `json:"pricedRunCount"`
+	AuthoritativeRunCount int     `json:"authoritativeRunCount"`
+	EstimatedRunCount     int     `json:"estimatedRunCount"`
+	PlanIncludedRunCount  int     `json:"planIncludedRunCount"`
+	UnpricedRunCount      int     `json:"unpricedRunCount"`
+	TotalCostUsd          float64 `json:"totalCostUsd"`
 }

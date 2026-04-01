@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/agentforge/im-bridge/core"
 	"net/http"
+	"strings"
 	"testing"
+
+	"github.com/agentforge/im-bridge/core"
 )
 
 func TestStub_MapsInboundMessageAndAppliesDefaults(t *testing.T) {
@@ -130,6 +132,63 @@ func TestStub_InvalidJSONReturnsBadRequest(t *testing.T) {
 
 	if rr.code != http.StatusBadRequest {
 		t.Fatalf("status = %d, want %d", rr.code, http.StatusBadRequest)
+	}
+}
+
+func TestStub_FormattedTextAndUpdateMessageMethods(t *testing.T) {
+	stub := NewStub("0")
+	msg := &core.Message{ChatID: "chat-1"}
+
+	if err := stub.SendFormattedText(context.Background(), "chat-2", &core.FormattedText{
+		Content: "formatted send",
+		Format:  core.TextFormatLarkMD,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+
+	if err := stub.ReplyFormattedText(context.Background(), msg, &core.FormattedText{
+		Content: "formatted reply",
+		Format:  core.TextFormatLarkMD,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+
+	if err := stub.UpdateFormattedText(context.Background(), msg, &core.FormattedText{
+		Content: "formatted update",
+		Format:  core.TextFormatLarkMD,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+
+	if err := stub.UpdateMessage(context.Background(), msg, "plain update"); err != nil {
+		t.Fatalf("UpdateMessage error: %v", err)
+	}
+
+	if len(stub.replies) != 4 {
+		t.Fatalf("replies = %d, want 4", len(stub.replies))
+	}
+	if stub.replies[0].ChatID != "chat-2" || stub.replies[0].Content != "formatted send" {
+		t.Fatalf("replies[0] = %+v", stub.replies[0])
+	}
+	if stub.replies[1].ChatID != "chat-1" || stub.replies[1].Content != "formatted reply" {
+		t.Fatalf("replies[1] = %+v", stub.replies[1])
+	}
+	if stub.replies[2].ChatID != "chat-1" || stub.replies[2].Content != "formatted update" {
+		t.Fatalf("replies[2] = %+v", stub.replies[2])
+	}
+	if stub.replies[3].ChatID != "chat-1" || stub.replies[3].Content != "plain update" {
+		t.Fatalf("replies[3] = %+v", stub.replies[3])
+	}
+}
+
+func TestStub_FormattedTextNilMessageReturnsError(t *testing.T) {
+	stub := NewStub("0")
+
+	if err := stub.SendFormattedText(context.Background(), "chat-1", nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("SendFormattedText(nil) err = %v", err)
+	}
+	if err := stub.ReplyFormattedText(context.Background(), &core.Message{ChatID: "chat-1"}, nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("ReplyFormattedText(nil) err = %v", err)
 	}
 }
 

@@ -14,6 +14,8 @@ type RoleManifest struct {
 	Overrides     map[string]any    `yaml:"overrides,omitempty" json:"overrides,omitempty"`
 	Collaboration RoleCollaboration `yaml:"collaboration,omitempty" json:"collaboration,omitempty"`
 	Triggers      []RoleTrigger     `yaml:"triggers,omitempty" json:"triggers,omitempty"`
+	PluginDependencies []RolePluginDependency `yaml:"-" json:"pluginDependencies,omitempty"`
+	PluginConsumers    []RolePluginConsumer   `yaml:"-" json:"pluginConsumers,omitempty"`
 }
 
 type RoleMetadata struct {
@@ -89,7 +91,13 @@ type RoleResponseStyle struct {
 type RoleToolConfig struct {
 	BuiltIn    []string        `yaml:"built_in,omitempty" json:"builtIn,omitempty"`
 	External   []string        `yaml:"external,omitempty" json:"external,omitempty"`
+	PluginBindings []RoleToolPluginBinding `yaml:"plugin_bindings,omitempty" json:"pluginBindings,omitempty"`
 	MCPServers []RoleMCPServer `yaml:"mcp_servers,omitempty" json:"mcpServers,omitempty"`
+}
+
+type RoleToolPluginBinding struct {
+	PluginID  string   `yaml:"plugin_id" json:"pluginId"`
+	Functions []string `yaml:"functions,omitempty" json:"functions,omitempty"`
 }
 
 type RoleMCPServer struct {
@@ -209,6 +217,7 @@ type RoleExecutionProfile struct {
 	SystemPrompt     string                         `json:"system_prompt"`
 	AllowedTools     []string                       `json:"allowed_tools"`
 	Tools            []string                       `json:"tools,omitempty"`
+	PluginBindings   []RoleToolPluginBinding       `json:"plugin_bindings,omitempty"`
 	KnowledgeContext string                         `json:"knowledge_context,omitempty"`
 	OutputFilters    []string                       `json:"output_filters,omitempty"`
 	MaxBudgetUsd     float64                        `json:"max_budget_usd"`
@@ -244,4 +253,26 @@ type RoleExecutionSkillDiagnostic struct {
 	Message  string `json:"message"`
 	Blocking bool   `json:"blocking"`
 	AutoLoad bool   `json:"auto_load,omitempty"`
+}
+
+type RolePluginDependency struct {
+	PluginID       string `yaml:"-" json:"pluginId"`
+	PluginName     string `yaml:"-" json:"pluginName,omitempty"`
+	PluginKind     string `yaml:"-" json:"pluginKind,omitempty"`
+	LifecycleState string `yaml:"-" json:"lifecycleState,omitempty"`
+	ReferenceType  string `yaml:"-" json:"referenceType"`
+	Status         string `yaml:"-" json:"status"`
+	Blocking       bool   `yaml:"-" json:"blocking"`
+	Message        string `yaml:"-" json:"message,omitempty"`
+}
+
+type RolePluginConsumer struct {
+	PluginID       string   `yaml:"-" json:"pluginId"`
+	PluginName     string   `yaml:"-" json:"pluginName,omitempty"`
+	PluginKind     string   `yaml:"-" json:"pluginKind,omitempty"`
+	LifecycleState string   `yaml:"-" json:"lifecycleState,omitempty"`
+	Status         string   `yaml:"-" json:"status"`
+	Blocking       bool     `yaml:"-" json:"blocking"`
+	Message        string   `yaml:"-" json:"message,omitempty"`
+	References     []string `yaml:"-" json:"references,omitempty"`
 }

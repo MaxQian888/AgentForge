@@ -135,6 +135,7 @@ describe("bridge request schemas", () => {
         max_turns: 20,
         permission_mode: "default",
         tools: ["github-tool"],
+        plugin_bindings: [{ plugin_id: "github-tool", functions: ["search", "open_file"] }],
         knowledge_context: "docs/PRD.md",
         loaded_skills: [
           {
@@ -173,6 +174,9 @@ describe("bridge request schemas", () => {
 
     expect(parsed.role_config?.role_id).toBe("frontend-developer");
     expect(parsed.role_config?.tools).toEqual(["github-tool"]);
+    expect(parsed.role_config?.plugin_bindings).toEqual([
+      { plugin_id: "github-tool", functions: ["search", "open_file"] },
+    ]);
     expect(parsed.role_config?.knowledge_context).toBe("docs/PRD.md");
     expect(parsed.role_config?.loaded_skills?.[0]?.path).toBe("skills/react");
     expect(parsed.role_config?.loaded_skills?.[0]?.display_name).toBe("React Workspace");

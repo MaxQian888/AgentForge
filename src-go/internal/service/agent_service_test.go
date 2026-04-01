@@ -19,6 +19,7 @@ import (
 	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/pool"
+	"github.com/react-go-quick-starter/server/internal/repository"
 	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/worktree"
@@ -85,7 +86,7 @@ func (m *mockAgentRunRepo) UpdateStatus(_ context.Context, id uuid.UUID, status 
 	return nil
 }
 
-func (m *mockAgentRunRepo) UpdateCost(_ context.Context, id uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int) error {
+func (m *mockAgentRunRepo) UpdateCost(_ context.Context, id uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int, costAccounting *model.CostAccountingSnapshot) error {
 	run, ok := m.runs[id]
 	if !ok {
 		return service.ErrAgentNotFound
@@ -95,6 +96,7 @@ func (m *mockAgentRunRepo) UpdateCost(_ context.Context, id uuid.UUID, inputToke
 	run.CacheReadTokens = cacheReadTokens
 	run.CostUsd = costUsd
 	run.TurnCount = turnCount
+	run.CostAccounting = costAccounting.Clone()
 	return nil
 }
 
@@ -107,6 +109,9 @@ type mockAgentBridge struct {
 	pauseReason  string
 	resumeReq    service.BridgeExecuteRequest
 	poolSummary  *bridgeclient.PoolSummaryResponse
+	healthErr    error
+	healthSeq    []error
+	healthCalls  int
 }
 
 func (m *mockAgentBridge) Execute(_ context.Context, req service.BridgeExecuteRequest) (*service.BridgeExecuteResponse, error) {
@@ -125,6 +130,16 @@ func (m *mockAgentBridge) GetPoolSummary(_ context.Context) (*bridgeclient.PoolS
 	return m.poolSummary, nil
 }
 
+func (m *mockAgentBridge) Health(_ context.Context) error {
+	m.healthCalls++
+	if len(m.healthSeq) > 0 {
+		err := m.healthSeq[0]
+		m.healthSeq = m.healthSeq[1:]
+		return err
+	}
+	return m.healthErr
+}
+
 func (m *mockAgentBridge) Cancel(_ context.Context, taskID, reason string) error {
 	m.cancelTaskID = taskID
 	m.cancelReason = reason
@@ -141,6 +156,34 @@ func (m *mockAgentBridge) Resume(_ context.Context, req service.BridgeExecuteReq
 	m.resumeReq = req
 	return &service.BridgeResumeResponse{SessionID: req.SessionID, Resumed: true}, nil
 }
+
+type mockAgentIMProgressNotifier struct {
+	requests []service.IMBoundProgressRequest
+	queued   bool
+	err      error
+}
+
+func (m *mockAgentIMProgressNotifier) QueueBoundProgress(_ context.Context, req service.IMBoundProgressRequest) (bool, error) {
+	m.requests = append(m.requests, req)
+	if m.err != nil {
+		return false, m.err
+	}
+	if !m.queued {
+		return true, nil
+	}
+	return m.queued, nil
+}
+
+type bridgeIMDeliveryListener struct {
+	deliveries []*model.IMControlDelivery
+}
+
+func (l *bridgeIMDeliveryListener) Send(_ context.Context, delivery *model.IMControlDelivery) error {
+	l.deliveries = append(l.deliveries, delivery)
+	return nil
+}
+
+func (l *bridgeIMDeliveryListener) Close() error { return nil }
 
 type mockAgentTaskRepo struct {
 	task             *model.Task
@@ -254,6 +297,14 @@ func (m *mockAgentRoleStore) Get(id string) (*rolepkg.Manifest, error) {
 
 func (m *mockAgentRoleStore) SkillsDir() string {
 	return m.skillsDir
+}
+
+type mockAgentPluginCatalog struct {
+	records []*model.PluginRecord
+}
+
+func (m *mockAgentPluginCatalog) List(_ context.Context, _ service.PluginListFilter) ([]*model.PluginRecord, error) {
+	return m.records, nil
 }
 
 type mockAgentQueueStore struct {
@@ -702,6 +753,9 @@ func TestAgentService_SpawnProjectsSelectedRoleIntoBridgeRequest(t *testing.T) {
 					MaxTurns:     18,
 					ToolConfig: model.RoleToolConfig{
 						External: []string{"github-tool", "web-search"},
+						PluginBindings: []model.RoleToolPluginBinding{
+							{PluginID: "github-tool", Functions: []string{"search_prs"}},
+						},
 					},
 				},
 				Knowledge: model.RoleKnowledge{
@@ -751,6 +805,13 @@ func TestAgentService_SpawnProjectsSelectedRoleIntoBridgeRequest(t *testing.T) {
 		t.Fatalf("bridge allowed tools len = %d, want 3", len(bridge.lastExecute.AllowedTools))
 	}
 	assertBridgeRoleConfigStringSlice(t, bridge.lastExecute.RoleConfig, "Tools", []string{"github-tool", "web-search"})
+	bindingsField := reflect.ValueOf(bridge.lastExecute.RoleConfig).Elem().FieldByName("PluginBindings")
+	if !bindingsField.IsValid() {
+		t.Fatal("bridge role config missing PluginBindings field")
+	}
+	if bindingsField.Len() != 1 {
+		t.Fatalf("bridge role config plugin bindings len = %d, want 1", bindingsField.Len())
+	}
 	assertBridgeRoleConfigStringSlice(t, bridge.lastExecute.RoleConfig, "OutputFilters", []string{"no_credentials", "no_pii"})
 	knowledgeContext := assertBridgeRoleConfigStringField(t, bridge.lastExecute.RoleConfig, "KnowledgeContext")
 	if !strings.Contains(knowledgeContext, "docs/PRD.md") {
@@ -838,6 +899,168 @@ func TestAgentService_SpawnRejectsBlockingAutoLoadSkillProjection(t *testing.T) 
 	if bridge.lastExecute.TaskID != "" {
 		t.Fatalf("bridge Execute() should not be called when auto-load skill projection blocks, got %+v", bridge.lastExecute)
 	}
+}
+
+func TestAgentService_SpawnRejectsBlockingPluginDependency(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	repo := newMockAgentRunRepo()
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Spawn agent",
+		Description: "Resolve plugin dependencies before execution",
+		BudgetUsd:   5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	bridge := &mockAgentBridge{}
+	worktrees := &mockWorktreeManager{}
+	roleStore := &mockAgentRoleStore{
+		roles: map[string]*rolepkg.Manifest{
+			"design-lead": {
+				Metadata: model.RoleMetadata{ID: "design-lead", Name: "Design Lead"},
+				Identity: model.RoleIdentity{
+					Role: "Design Lead",
+					Goal: "Review UX",
+				},
+				SystemPrompt: "Review design consistency.",
+				Capabilities: model.RoleCapabilities{
+					AllowedTools: []string{"Read"},
+					ToolConfig: model.RoleToolConfig{
+						External: []string{"design-mcp"},
+					},
+				},
+				Security: model.RoleSecurity{
+					MaxBudgetUsd:   2,
+					PermissionMode: "default",
+				},
+			},
+		},
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, roleStore)
+	svc.SetPluginCatalog(&mockAgentPluginCatalog{})
+
+	_, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 0, "design-lead")
+	if err == nil || !strings.Contains(err.Error(), "design-mcp") {
+		t.Fatalf("Spawn() error = %v, want blocking plugin dependency failure mentioning design-mcp", err)
+	}
+	if bridge.lastExecute.TaskID != "" {
+		t.Fatalf("bridge Execute() should not be called when plugin dependency blocks, got %+v", bridge.lastExecute)
+	}
+}
+
+func TestAgentService_SpawnAllowsBundledToolPluginDependencies(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	repo := newMockAgentRunRepo()
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Spawn agent",
+		Description: "Resolve bundled tool dependencies before execution",
+		BudgetUsd:   5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	bridge := &mockAgentBridge{}
+	worktrees := &mockWorktreeManager{
+		allocation: &worktree.Allocation{
+			ProjectSlug: "agentforge",
+			TaskID:      taskID.String(),
+			Branch:      "agent/" + taskID.String(),
+			Path:        filepath.Join("tmp", "worktree", taskID.String()),
+		},
+	}
+	roleStore := &mockAgentRoleStore{
+		roles: map[string]*rolepkg.Manifest{
+			"frontend-developer": {
+				Metadata: model.RoleMetadata{
+					ID:   "frontend-developer",
+					Name: "Frontend Developer",
+				},
+				Identity: model.RoleIdentity{
+					Role:      "Senior Frontend Developer",
+					Goal:      "Deliver polished frontend work",
+					Backstory: "You specialize in React and UX detail.",
+				},
+				SystemPrompt: "Always preserve the established UI language.",
+				Capabilities: model.RoleCapabilities{
+					AllowedTools: []string{"Read", "Edit", "Write"},
+					MaxTurns:     18,
+					ToolConfig: model.RoleToolConfig{
+						External: []string{"github-tool", "web-search"},
+					},
+				},
+				Security: model.RoleSecurity{
+					MaxBudgetUsd:   3.5,
+					PermissionMode: "bypassPermissions",
+				},
+			},
+		},
+	}
+	pluginsDir := t.TempDir()
+	writeManifest(t, pluginsDir, "tools/github-tool/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: github-tool
+  name: GitHub Tool
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["github.js"]
+`)
+	writeManifest(t, pluginsDir, "tools/web-search/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: web-search
+  name: Web Search
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["search.js"]
+`)
+	writeBuiltInBundle(t, pluginsDir, `
+plugins:
+  - id: github-tool
+    kind: ToolPlugin
+    manifest: tools/github-tool/manifest.yaml
+    docsRef: docs/PRD.md#tool-plugin
+    verificationProfile: mcp-tool
+    availability:
+      status: ready
+      message: GitHub tool ships with AgentForge.
+  - id: web-search
+    kind: ToolPlugin
+    manifest: tools/web-search/manifest.yaml
+    docsRef: docs/PRD.md#tool-plugin
+    verificationProfile: mcp-tool
+    availability:
+      status: ready
+      message: Web search ships with AgentForge.
+`)
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, roleStore)
+	svc.SetPluginCatalog(service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, pluginsDir))
+
+	run, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 0, "frontend-developer")
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+	if run.RoleID != "frontend-developer" {
+		t.Fatalf("run.RoleID = %q, want frontend-developer", run.RoleID)
+	}
+	if bridge.lastExecute.RoleConfig == nil {
+		t.Fatal("expected role config to be forwarded when bundled tool dependencies are available")
+	}
+	assertBridgeRoleConfigStringSlice(t, bridge.lastExecute.RoleConfig, "Tools", []string{"github-tool", "web-search"})
 }
 
 func TestAgentService_CancelReleasesCanonicalManagedWorktree(t *testing.T) {
@@ -1127,6 +1350,59 @@ func TestAgentService_ProcessBridgeEvent_CompletesRunFromTerminalStatusChange(t 
 	}
 }
 
+func TestAgentService_ProcessBridgeEvent_PermissionRequestQueuesIMNotification(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	runID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{
+		ID:       runID,
+		TaskID:   taskID,
+		MemberID: memberID,
+		Status:   model.AgentRunStatusRunning,
+	}
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Permission request",
+		BudgetUsd: 5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	imNotifier := &mockAgentIMProgressNotifier{}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetIMProgressNotifier(imNotifier)
+
+	err := svc.ProcessBridgeEvent(context.Background(), &ws.BridgeAgentEvent{
+		TaskID:      taskID.String(),
+		SessionID:   "session-1",
+		TimestampMS: 789,
+		Type:        ws.BridgeEventPermissionRequest,
+		Data:        []byte(`{"request_id":"req-123","tool_name":"Read","elicitation_type":"tool_permission","context":{"path":"README.md"}}`),
+	})
+	if err != nil {
+		t.Fatalf("ProcessBridgeEvent() error = %v", err)
+	}
+
+	if len(imNotifier.requests) != 1 {
+		t.Fatalf("im notifier requests = %d, want 1", len(imNotifier.requests))
+	}
+	req := imNotifier.requests[0]
+	if req.TaskID != taskID.String() || req.RunID != runID.String() {
+		t.Fatalf("request ids = %+v", req)
+	}
+	if req.Kind != service.IMDeliveryKindProgress {
+		t.Fatalf("Kind = %q, want %q", req.Kind, service.IMDeliveryKindProgress)
+	}
+	if !strings.Contains(req.Content, "Read") || !strings.Contains(req.Content, "req-123") {
+		t.Fatalf("Content = %q", req.Content)
+	}
+	if req.Structured == nil || !strings.Contains(req.Structured.Title, "Permission") {
+		t.Fatalf("Structured = %+v", req.Structured)
+	}
+}
+
 func TestAgentService_UpdateCost_SyncsTaskSpendAndBroadcastsBudgetWarning(t *testing.T) {
 	taskID := uuid.New()
 	memberID := uuid.New()
@@ -1162,7 +1438,7 @@ func TestAgentService_UpdateCost_SyncsTaskSpendAndBroadcastsBudgetWarning(t *tes
 
 	svc := service.NewAgentService(repo, taskRepo, projectRepo, hub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 
-	if err := svc.UpdateCost(context.Background(), runID, 260, 80, 10, 4.2, 3); err != nil {
+	if err := svc.UpdateCost(context.Background(), runID, 260, 80, 10, 4.2, 3, nil); err != nil {
 		t.Fatalf("UpdateCost() error = %v", err)
 	}
 
@@ -1184,6 +1460,217 @@ func TestAgentService_UpdateCost_SyncsTaskSpendAndBroadcastsBudgetWarning(t *tes
 	}
 	if payload["taskId"] != taskID.String() {
 		t.Fatalf("warning taskId = %v, want %s", payload["taskId"], taskID)
+	}
+}
+
+func TestAgentService_ProcessBridgeCostEvent_PersistsAccountingMetadata(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	runID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{
+		ID:       runID,
+		TaskID:   taskID,
+		MemberID: memberID,
+		Status:   model.AgentRunStatusRunning,
+	}
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Persist accounting metadata",
+		Status:    model.TaskStatusInProgress,
+		BudgetUsd: 10,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+
+	err := svc.ProcessBridgeEvent(context.Background(), &ws.BridgeAgentEvent{
+		TaskID:      taskID.String(),
+		SessionID:   "session-cost-accounting",
+		TimestampMS: 1_700_000_000_000,
+		Type:        ws.BridgeEventCostUpdate,
+		Data:        []byte(`{"input_tokens":120,"output_tokens":45,"cache_read_tokens":5,"cache_creation_tokens":12,"cost_usd":0.37,"budget_remaining_usd":9.63,"turn_number":3,"cost_accounting":{"total_cost_usd":0.37,"input_tokens":120,"output_tokens":45,"cache_read_tokens":5,"cache_creation_tokens":12,"mode":"estimated_api_pricing","coverage":"full","source":"openai_api_pricing","components":[]}}`),
+	})
+	if err != nil {
+		t.Fatalf("ProcessBridgeEvent() error = %v", err)
+	}
+
+	if repo.runs[runID].CostAccounting == nil {
+		t.Fatalf("run cost accounting = nil")
+	}
+	if repo.runs[runID].CostAccounting.Mode != "estimated_api_pricing" || repo.runs[runID].CostAccounting.CacheCreationTokens != 12 {
+		t.Fatalf("run cost accounting = %#v", repo.runs[runID].CostAccounting)
+	}
+}
+
+func TestAgentService_UpdateCost_BudgetWarningQueuesIMNotification(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	runID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{
+		ID:              runID,
+		TaskID:          taskID,
+		MemberID:        memberID,
+		Status:          model.AgentRunStatusRunning,
+		InputTokens:     200,
+		OutputTokens:    50,
+		CacheReadTokens: 0,
+		CostUsd:         3.5,
+		TurnCount:       2,
+	}
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Budget warning notify",
+		Status:    model.TaskStatusInProgress,
+		BudgetUsd: 5,
+		SpentUsd:  3.5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	imNotifier := &mockAgentIMProgressNotifier{}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetIMProgressNotifier(imNotifier)
+
+	if err := svc.UpdateCost(context.Background(), runID, 260, 80, 10, 4.2, 3, nil); err != nil {
+		t.Fatalf("UpdateCost() error = %v", err)
+	}
+
+	if len(imNotifier.requests) != 1 {
+		t.Fatalf("im notifier requests = %d, want 1", len(imNotifier.requests))
+	}
+	req := imNotifier.requests[0]
+	if req.TaskID != taskID.String() || req.RunID != runID.String() {
+		t.Fatalf("request ids = %+v", req)
+	}
+	if !strings.Contains(req.Content, "80") || !strings.Contains(req.Content, "4.20") {
+		t.Fatalf("Content = %q", req.Content)
+	}
+	if req.Structured == nil || !strings.Contains(req.Structured.Title, "Budget") {
+		t.Fatalf("Structured = %+v", req.Structured)
+	}
+}
+
+func TestBridgeWS_PreservesEventOrderingIntoIMDeliveries(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	runID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{
+		ID:       runID,
+		TaskID:   taskID,
+		MemberID: memberID,
+		Status:   model.AgentRunStatusRunning,
+	}
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:             taskID,
+		ProjectID:      projectID,
+		Title:          "Bridge event flow",
+		Status:         model.TaskStatusInProgress,
+		BudgetUsd:      5,
+		SpentUsd:       3.5,
+		AgentBranch:    "agent/" + taskID.String(),
+		AgentWorktree:  "/tmp/worktree/" + taskID.String(),
+		AgentSessionID: "session-1",
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+
+	control := service.NewIMControlPlane(service.IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+	if _, err := control.RegisterBridge(context.Background(), &service.IMBridgeRegisterRequest{
+		BridgeID:   "bridge-slack-1",
+		Platform:   "slack",
+		Transport:  "live",
+		ProjectIDs: []string{projectID.String()},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+	listener := &bridgeIMDeliveryListener{}
+	if _, err := control.AttachBridgeListener(context.Background(), "bridge-slack-1", 0, listener); err != nil {
+		t.Fatalf("AttachBridgeListener error: %v", err)
+	}
+	if err := control.BindAction(context.Background(), &service.IMActionBinding{
+		BridgeID:  "bridge-slack-1",
+		Platform:  "slack",
+		ProjectID: projectID.String(),
+		TaskID:    taskID.String(),
+		RunID:     runID.String(),
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C123",
+			ThreadID:  "1700000000.1",
+		},
+	}); err != nil {
+		t.Fatalf("BindAction error: %v", err)
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetIMProgressNotifier(control)
+
+	e := echo.New()
+	e.GET("/ws/bridge", ws.NewBridgeHandler(svc).HandleWS)
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	wsURL := "ws" + strings.TrimPrefix(srv.URL, "http") + "/ws/bridge"
+	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
+	if err != nil {
+		t.Fatalf("dial bridge websocket: %v", err)
+	}
+	defer conn.Close()
+
+	if err := conn.WriteJSON(map[string]any{
+		"task_id":      taskID.String(),
+		"session_id":   "session-1",
+		"timestamp_ms": 100,
+		"type":         "permission_request",
+		"data": map[string]any{
+			"request_id": "req-1",
+			"tool_name":  "Read",
+		},
+	}); err != nil {
+		t.Fatalf("write permission_request event: %v", err)
+	}
+	if err := conn.WriteJSON(map[string]any{
+		"task_id":      taskID.String(),
+		"session_id":   "session-1",
+		"timestamp_ms": 200,
+		"type":         "status_change",
+		"data": map[string]any{
+			"old_status": "running",
+			"new_status": "completed",
+			"reason":     "end_turn",
+		},
+	}); err != nil {
+		t.Fatalf("write status_change event: %v", err)
+	}
+
+	deadline := time.Now().Add(2 * time.Second)
+	for len(listener.deliveries) < 2 && time.Now().Before(deadline) {
+		time.Sleep(10 * time.Millisecond)
+	}
+	if len(listener.deliveries) != 2 {
+		t.Fatalf("listener deliveries = %d, want 2", len(listener.deliveries))
+	}
+	if listener.deliveries[0].Structured == nil || !strings.Contains(listener.deliveries[0].Structured.Title, "Permission") {
+		t.Fatalf("first delivery = %+v", listener.deliveries[0])
+	}
+	if listener.deliveries[1].Kind != service.IMDeliveryKindTerminal {
+		t.Fatalf("second delivery kind = %q, want %q", listener.deliveries[1].Kind, service.IMDeliveryKindTerminal)
+	}
+	if !strings.Contains(listener.deliveries[1].Content, "运行完成") {
+		t.Fatalf("second delivery content = %q", listener.deliveries[1].Content)
+	}
+	if listener.deliveries[0].Cursor >= listener.deliveries[1].Cursor {
+		t.Fatalf("delivery cursors out of order: first=%d second=%d", listener.deliveries[0].Cursor, listener.deliveries[1].Cursor)
 	}
 }
 
@@ -1223,7 +1710,7 @@ func TestAgentService_UpdateCost_BudgetExceededCancelsRunAndKeepsRuntimeForResum
 
 	svc := service.NewAgentService(repo, taskRepo, projectRepo, hub, bridge, worktrees, nil)
 
-	if err := svc.UpdateCost(context.Background(), runID, 320, 140, 10, 5.3, 5); err != nil {
+	if err := svc.UpdateCost(context.Background(), runID, 320, 140, 10, 5.3, 5, nil); err != nil {
 		t.Fatalf("UpdateCost() error = %v", err)
 	}
 
@@ -1279,7 +1766,7 @@ func TestAgentService_UpdateCostEmitsAutomationBudgetEvent(t *testing.T) {
 	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetAutomationEvaluator(automation)
 
-	if err := svc.UpdateCost(context.Background(), runID, 260, 80, 10, 4.2, 3); err != nil {
+	if err := svc.UpdateCost(context.Background(), runID, 260, 80, 10, 4.2, 3, nil); err != nil {
 		t.Fatalf("UpdateCost() error = %v", err)
 	}
 	if len(automation.events) != 1 || automation.events[0].EventType != model.AutomationEventBudgetThresholdReached {
@@ -1357,6 +1844,140 @@ func TestAgentService_RequestSpawnQueuesWhenAdmissionHasNoImmediateSlot(t *testi
 	}
 	if len(repo.runsByTask[taskID]) != 0 {
 		t.Fatalf("expected no real agent run to be created while queued, got %d", len(repo.runsByTask[taskID]))
+	}
+}
+
+func TestAgentService_RequestSpawnQueuesWhenBridgePoolAtCapacity(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	repo := newMockAgentRunRepo()
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Bridge pool full",
+		Description: "Queue because bridge runtime pool is full",
+		BudgetUsd:   5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	queueStore := &mockAgentQueueStore{}
+	bridge := &mockAgentBridge{
+		poolSummary: &bridgeclient.PoolSummaryResponse{
+			Active: 2,
+			Max:    2,
+		},
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, &mockWorktreeManager{}, nil)
+	svc.SetPool(pool.NewPool(4))
+	svc.SetQueueStore(queueStore)
+
+	result, err := svc.RequestSpawn(context.Background(), taskID, memberID, "codex", "openai", "gpt-5-codex", 5, "", model.PriorityNormal)
+	if err != nil {
+		t.Fatalf("RequestSpawn() error = %v", err)
+	}
+
+	if result.Dispatch.Status != model.DispatchStatusQueued {
+		t.Fatalf("dispatch = %+v, want queued", result.Dispatch)
+	}
+	if result.Dispatch.Queue == nil {
+		t.Fatal("expected queue payload")
+	}
+	for _, want := range []string{"Bridge pool at capacity", "Wait in queue", "Proceed anyway"} {
+		if !strings.Contains(result.Dispatch.Reason, want) {
+			t.Fatalf("reason = %q, want substring %q", result.Dispatch.Reason, want)
+		}
+	}
+	if len(repo.runsByTask[taskID]) != 0 {
+		t.Fatalf("expected no run creation, got %d", len(repo.runsByTask[taskID]))
+	}
+}
+
+func TestAgentService_RequestSpawnBlocksWhenBridgeHealthCheckFailsAfterRetries(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	repo := newMockAgentRunRepo()
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Bridge health failed",
+		Description: "Block because bridge is unavailable",
+		BudgetUsd:   5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	bridge := &mockAgentBridge{
+		healthSeq: []error{
+			errors.New("bridge down"),
+			errors.New("bridge still down"),
+			errors.New("bridge unavailable"),
+		},
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, &mockWorktreeManager{}, nil)
+	svc.SetPool(pool.NewPool(4))
+
+	result, err := svc.RequestSpawn(context.Background(), taskID, memberID, "codex", "openai", "gpt-5-codex", 5, "", model.PriorityNormal)
+	if err != nil {
+		t.Fatalf("RequestSpawn() error = %v", err)
+	}
+
+	if result.Dispatch.Status != model.DispatchStatusBlocked {
+		t.Fatalf("dispatch = %+v, want blocked", result.Dispatch)
+	}
+	if result.Dispatch.GuardrailType != model.DispatchGuardrailTypeSystem || result.Dispatch.GuardrailScope != "bridge" {
+		t.Fatalf("guardrail = %+v", result.Dispatch)
+	}
+	for _, want := range []string{"Bridge is unavailable", "Retry", "Cancel"} {
+		if !strings.Contains(result.Dispatch.Reason, want) {
+			t.Fatalf("reason = %q, want substring %q", result.Dispatch.Reason, want)
+		}
+	}
+	if bridge.healthCalls != 3 {
+		t.Fatalf("healthCalls = %d, want 3", bridge.healthCalls)
+	}
+	if len(repo.runsByTask[taskID]) != 0 {
+		t.Fatalf("expected no run creation, got %d", len(repo.runsByTask[taskID]))
+	}
+}
+
+func TestAgentService_SpawnRetriesBridgeHealthCheckBeforeExecution(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	repo := newMockAgentRunRepo()
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:          taskID,
+		ProjectID:   projectID,
+		Title:       "Retry bridge health",
+		Description: "Spawn after transient bridge health failures",
+		BudgetUsd:   5,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	bridge := &mockAgentBridge{
+		healthSeq: []error{
+			errors.New("timeout"),
+			errors.New("timeout"),
+			nil,
+		},
+	}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, &mockWorktreeManager{}, nil)
+	svc.SetPool(pool.NewPool(4))
+
+	run, err := svc.Spawn(context.Background(), taskID, memberID, "codex", "openai", "gpt-5-codex", 5, "")
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+
+	if run == nil || run.Status != model.AgentRunStatusRunning {
+		t.Fatalf("run = %+v", run)
+	}
+	if bridge.healthCalls != 3 {
+		t.Fatalf("healthCalls = %d, want 3", bridge.healthCalls)
+	}
+	if bridge.lastExecute.TaskID != taskID.String() {
+		t.Fatalf("bridge execute task id = %q, want %q", bridge.lastExecute.TaskID, taskID.String())
 	}
 }
 

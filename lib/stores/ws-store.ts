@@ -14,10 +14,20 @@ import { useSchedulerStore } from "./scheduler-store";
 import { useTaskCommentStore } from "./task-comment-store";
 import { useTeamStore, normalizeTeam } from "./team-store";
 import { useWorkflowStore } from "./workflow-store";
+import { useLogStore } from "./log-store";
 import { emitProjectedDesktopEvent } from "@/lib/platform-runtime";
 import { getPreferredLocale } from "./locale-store";
 import type { Task } from "./task-store";
-import type { AgentPoolSummary, AgentStatus, MemoryStatus } from "./agent-store";
+import type {
+  AgentPoolSummary,
+  AgentStatus,
+  MemoryStatus,
+  AgentToolCallEntry,
+  AgentToolResultEntry,
+  AgentFileChangeEntry,
+  AgentTodoEntry,
+  AgentPermissionRequestEntry,
+} from "./agent-store";
 
 interface WSEventEnvelope<T> {
   type: string;
@@ -289,6 +299,135 @@ export const useWSStore = create<WSState>()((set) => ({
       }));
     });
 
+    /* ── Agent queue events ── */
+
+    client.on("agent.queued", applyAgentEvent);
+    client.on("agent.queue.cancelled", applyAgentEvent);
+    client.on("agent.queue.promoted", applyAgentEvent);
+    client.on("agent.queue.failed", applyAgentEvent);
+
+    /* ── Agent streaming events ── */
+
+    client.on("agent.tool_call", (data) => {
+      const payload = extractPayload<AgentToolCallEntry & { agentId?: string; agent_id?: string }>(data);
+      const agentId = payload?.agentId ?? payload?.agent_id;
+      if (!agentId || !payload) return;
+      useAgentStore.getState().appendToolCall(agentId, {
+        toolName: payload.toolName ?? "",
+        toolCallId: payload.toolCallId,
+        input: payload.input,
+        turnNumber: payload.turnNumber,
+      });
+    });
+
+    client.on("agent.tool_result", (data) => {
+      const payload = extractPayload<AgentToolResultEntry & { agentId?: string; agent_id?: string }>(data);
+      const agentId = payload?.agentId ?? payload?.agent_id;
+      if (!agentId || !payload) return;
+      useAgentStore.getState().appendToolResult(agentId, {
+        toolName: payload.toolName ?? "",
+        toolCallId: payload.toolCallId,
+        output: payload.output,
+        isError: payload.isError,
+        turnNumber: payload.turnNumber,
+      });
+    });
+
+    client.on("agent.reasoning", (data) => {
+      const payload = extractPayload<{ agentId?: string; agent_id?: string; content?: string }>(data);
+      const agentId = payload?.agentId ?? payload?.agent_id;
+      if (!agentId || typeof payload?.content !== "string") return;
+      useAgentStore.getState().setReasoning(agentId, payload.content);
+    });
+
+    client.on("agent.file_change", (data) => {
+      const payload = extractPayload<{ agentId?: string; agent_id?: string; files?: AgentFileChangeEntry[] }>(data);
+      const agentId = payload?.agentId ?? payload?.agent_id;
+      if (!agentId || !Array.isArray(payload?.files)) return;
+      useAgentStore.getState().appendFileChanges(agentId, payload.files);
+    });
+
+    client.on("agent.todo_update", (data) => {
+      const payload = extractPayload<{ agentId?: string; agent_id?: string; todos?: AgentTodoEntry[] }>(data);
+      const agentId = payload?.agentId ?? payload?.agent_id;
+      if (!agentId || !Array.isArray(payload?.todos)) return;
+      useAgentStore.getState().setTodos(agentId, payload.todos);
+    });
+
+    client.on("agent.partial_message", (data) => {
+      const payload = extractPayload<{ agentId?: string; agent_id?: string; content?: string }>(data);
+      const agentId = payload?.agentId ?? payload?.agent_id;
+      if (!agentId || typeof payload?.content !== "string") return;
+      useAgentStore.getState().setPartialMessage(agentId, payload.content);
+    });
+
+    client.on("agent.permission_request", (data) => {
+      const payload = extractPayload<AgentPermissionRequestEntry & { agentId?: string; agent_id?: string }>(data);
+      const agentId = payload?.agentId ?? payload?.agent_id;
+      if (!agentId || !payload?.requestId) return;
+      useAgentStore.getState().appendPermissionRequest(agentId, {
+        requestId: payload.requestId,
+        toolName: payload.toolName,
+        context: payload.context,
+        elicitationType: payload.elicitationType,
+        fields: payload.fields,
+        mcpServerId: payload.mcpServerId,
+      });
+    });
+
+    client.on("agent.rate_limit", (data) => {
+      const payload = extractPayload<{ agentId?: string; agent_id?: string; message?: string; retryAfterMs?: number }>(data);
+      const agentId = payload?.agentId ?? payload?.agent_id;
+      if (!agentId) return;
+      const locale = getPreferredLocale();
+      toast.warning(
+        locale === "zh-CN" ? "Agent 速率限制" : "Agent Rate Limited",
+        {
+          description: typeof payload?.message === "string" && payload.message.trim() !== ""
+            ? payload.message
+            : locale === "zh-CN"
+              ? `Agent ${agentId} 遇到速率限制，将自动重试。`
+              : `Agent ${agentId} hit a rate limit and will retry automatically.`,
+        },
+      );
+    });
+
+    client.on("agent.snapshot", (data) => {
+      const payload = extractPayload<Record<string, unknown>>(data);
+      if (!payload || typeof payload.id !== "string") return;
+      applyAgentEvent(data);
+    });
+
+    /* ── Review events ── */
+
+    client.on("review.created", applyReviewEvent);
+    client.on("review.fix_requested", applyReviewEvent);
+
+    /* ── Sprint events ── */
+
+    client.on("sprint.created", (data) => {
+      const payload = extractPayload<{ sprint?: Sprint }>(data);
+      const sprint = payload?.sprint ?? (payload as unknown as Sprint);
+      if (!sprint?.id || !sprint?.projectId) return;
+      useSprintStore.getState().upsertSprint(sprint);
+    });
+
+    client.on("sprint.transitioned", (data) => {
+      const payload = extractPayload<{ sprint?: Sprint }>(data);
+      const sprint = payload?.sprint ?? (payload as unknown as Sprint);
+      if (!sprint?.id || !sprint?.projectId) return;
+      useSprintStore.getState().upsertSprint(sprint);
+    });
+
+    /* ── Task dependency event ── */
+
+    client.on("task.dependency_resolved", (data) => {
+      const payload = extractPayload<{ task?: import("./task-store").Task }>(data);
+      if (!payload?.task) return;
+      useTaskStore.getState().upsertTask(payload.task);
+      useDashboardStore.getState().applyTaskUpdate(payload.task);
+    });
+
     client.on("budget.warning", (data) => {
       const payload = extractPayload<{ taskId?: string; spent?: number; budget?: number; scope?: string; message?: string }>(data);
       if (!payload?.taskId) {
@@ -396,6 +535,18 @@ export const useWSStore = create<WSState>()((set) => ({
         useSchedulerStore.getState().recordRun(payload.run);
       }
     };
+
+    client.on("log.created", (data) => {
+      const payload = extractPayload<import("./log-store").LogEntry>(data);
+      if (!payload?.id) return;
+      const projectId =
+        typeof (data as { projectId?: string })?.projectId === "string"
+          ? (data as { projectId?: string }).projectId!
+          : "";
+      if (projectId) {
+        useLogStore.getState().prependLog(projectId, payload);
+      }
+    });
 
     client.on("scheduler.job.updated", applySchedulerEvent);
     client.on("scheduler.run.started", applySchedulerEvent);

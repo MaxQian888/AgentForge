@@ -8,6 +8,7 @@ import type {
   RoleResourceLimits,
   RoleSkillCatalogEntry,
   RoleSkillReference,
+  RoleToolPluginBinding,
   RoleTrigger,
 } from "@/lib/stores/role-store";
 
@@ -19,6 +20,11 @@ export interface RoleSkillDraft {
 export interface RoleMCPServerDraft {
   name: string;
   url: string;
+}
+
+export interface RolePluginBindingDraft {
+  pluginId: string;
+  functionsInput: string;
 }
 
 export interface RoleKeyValueDraft {
@@ -67,6 +73,7 @@ export interface RoleDraft {
   packages: string;
   allowedTools: string;
   externalTools: string;
+  pluginBindingRows: RolePluginBindingDraft[];
   mcpServerRows: RoleMCPServerDraft[];
   customSettingRows: RoleKeyValueDraft[];
   skillRows: RoleSkillDraft[];
@@ -129,10 +136,24 @@ export interface RoleExecutionSummary {
 }
 
 export type RoleSkillResolutionStatus = "resolved" | "unresolved";
+export type RoleSkillCompatibilityStatus =
+  | "compatible"
+  | "warning"
+  | "blocking"
+  | "unknown";
 export type RoleSkillResolutionProvenance =
   | "explicit"
   | "template-derived"
   | "inherited";
+
+export interface RoleCapabilitySource {
+  allowedTools?: string[];
+  builtInTools?: string[];
+  externalTools?: string[];
+  mcpServerNames?: string[];
+  packages?: string[];
+  frameworks?: string[];
+}
 
 export interface RoleSkillResolution {
   path: string;
@@ -146,9 +167,13 @@ export interface RoleSkillResolution {
   referenceCount?: number;
   scriptCount?: number;
   assetCount?: number;
+  requires?: string[];
+  tools?: string[];
   source: string;
   sourceRoot: string;
   status: RoleSkillResolutionStatus;
+  compatibilityStatus: RoleSkillCompatibilityStatus;
+  missingTools?: string[];
   provenance: RoleSkillResolutionProvenance;
 }
 
@@ -168,6 +193,89 @@ function stringifyList(values?: string[]): string {
   return (values ?? []).join(", ");
 }
 
+function normalizeCapabilityToken(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replaceAll(" ", "_")
+    .replaceAll("-", "_")
+    .replaceAll(".", "_")
+    .replaceAll("/", "_");
+}
+
+function roleCapabilityAliases(token: string): string[] {
+  switch (token) {
+    case "read":
+    case "edit":
+    case "write":
+    case "glob":
+    case "grep":
+    case "multiedit":
+      return ["code_editor"];
+    case "bash":
+    case "terminal":
+    case "terminal_access":
+      return ["terminal"];
+    case "browser_preview":
+      return ["browser_preview"];
+    case "web_development":
+      return ["code_editor", "terminal", "browser_preview"];
+    case "testing":
+      return ["code_editor", "terminal"];
+    case "design_system":
+    case "react":
+    case "next_js":
+    case "nextjs":
+    case "vue":
+    case "vue_js":
+    case "svelte":
+      return ["browser_preview"];
+    default:
+      return [];
+  }
+}
+
+function buildRoleCapabilitySet(source?: RoleCapabilitySource): Set<string> {
+  const capabilities = new Set<string>();
+  if (!source) {
+    return capabilities;
+  }
+
+  const values = [
+    ...(source.allowedTools ?? []),
+    ...(source.builtInTools ?? []),
+    ...(source.externalTools ?? []),
+    ...(source.mcpServerNames ?? []),
+    ...(source.packages ?? []),
+    ...(source.frameworks ?? []),
+  ];
+
+  for (const value of values) {
+    const token = normalizeCapabilityToken(value);
+    if (!token) {
+      continue;
+    }
+    capabilities.add(token);
+    for (const alias of roleCapabilityAliases(token)) {
+      capabilities.add(alias);
+    }
+  }
+
+  return capabilities;
+}
+
+function missingRequiredCapabilities(required: string[], available: Set<string>): string[] {
+  const missing: string[] = [];
+  for (const value of required) {
+    const token = normalizeCapabilityToken(value);
+    if (!token || available.has(token) || missing.includes(token)) {
+      continue;
+    }
+    missing.push(token);
+  }
+  return missing;
+}
+
 function cloneRoleManifest<T>(value: T): T {
   if (value == null) {
     return value;
@@ -182,6 +290,15 @@ function buildMCPServerDraft(server?: RoleMCPServer): RoleMCPServerDraft {
   };
 }
 
+function buildPluginBindingDraft(
+  binding?: RoleToolPluginBinding,
+): RolePluginBindingDraft {
+  return {
+    pluginId: binding?.pluginId ?? "",
+    functionsInput: stringifyList(binding?.functions),
+  };
+}
+
 function serializeMCPServerDraft(draft: RoleMCPServerDraft): RoleMCPServer | null {
   const name = draft.name.trim();
   const url = draft.url.trim();
@@ -193,6 +310,20 @@ function serializeMCPServerDraft(draft: RoleMCPServerDraft): RoleMCPServer | nul
   return {
     name: name || undefined,
     url: url || undefined,
+  };
+}
+
+function serializePluginBindingDraft(
+  draft: RolePluginBindingDraft,
+): RoleToolPluginBinding | null {
+  const pluginId = draft.pluginId.trim();
+  if (!pluginId) {
+    return null;
+  }
+
+  return {
+    pluginId,
+    functions: parseList(draft.functionsInput),
   };
 }
 
@@ -361,6 +492,10 @@ export function buildRoleDraft(role?: RoleManifest): RoleDraft {
     packages: stringifyList(role?.capabilities.packages),
     allowedTools: stringifyList(role?.capabilities.allowedTools),
     externalTools: stringifyList(role?.capabilities.toolConfig?.external),
+    pluginBindingRows:
+      role?.capabilities.toolConfig?.pluginBindings?.map((binding) =>
+        buildPluginBindingDraft(binding),
+      ) ?? [],
     mcpServerRows:
       role?.capabilities.toolConfig?.mcpServers?.map((server) =>
         buildMCPServerDraft(server),
@@ -503,6 +638,9 @@ export function serializeRoleDraft(
   const privateKnowledge = draft.privateKnowledgeRows
     .map((source) => serializeKnowledgeSourceDraft(source))
     .filter((source): source is RoleKnowledgeSource => source != null);
+  const pluginBindings = draft.pluginBindingRows
+    .map((binding) => serializePluginBindingDraft(binding))
+    .filter((binding): binding is RoleToolPluginBinding => binding != null);
   const mcpServers = draft.mcpServerRows
     .map((server) => serializeMCPServerDraft(server))
     .filter((server): server is RoleMCPServer => server != null);
@@ -580,6 +718,7 @@ export function serializeRoleDraft(
           sourceManifest?.capabilities.toolConfig?.builtIn ??
           parseList(draft.allowedTools),
         external: parseList(draft.externalTools),
+        pluginBindings,
         mcpServers,
       },
       skills: draft.skillRows.map((skill) => ({
@@ -630,7 +769,38 @@ export function serializeRoleDraft(
   };
 }
 
-export function buildRoleExecutionSummary(draft: RoleDraft): RoleExecutionSummary {
+export function buildRoleCapabilitySourceFromDraft(draft: RoleDraft): RoleCapabilitySource {
+  return {
+    allowedTools: parseList(draft.allowedTools),
+    builtInTools: parseList(draft.allowedTools),
+    externalTools: parseList(draft.externalTools),
+    mcpServerNames: draft.mcpServerRows.map((server) => server.name.trim()).filter(Boolean),
+    packages: parseList(draft.packages),
+    frameworks: parseList(draft.frameworks),
+  };
+}
+
+export function buildRoleCapabilitySourceFromManifest(
+  role?: Partial<RoleManifest> | null,
+): RoleCapabilitySource {
+  return {
+    allowedTools: role?.capabilities?.allowedTools ?? [],
+    builtInTools:
+      role?.capabilities?.toolConfig?.builtIn ??
+      role?.capabilities?.allowedTools ??
+      [],
+    externalTools: role?.capabilities?.toolConfig?.external ?? [],
+    mcpServerNames:
+      role?.capabilities?.toolConfig?.mcpServers?.map((server) => server.name ?? "").filter(Boolean) ?? [],
+    packages: role?.capabilities?.packages ?? [],
+    frameworks: role?.capabilities?.frameworks ?? [],
+  };
+}
+
+export function buildRoleExecutionSummary(
+  draft: RoleDraft,
+  catalog: RoleSkillCatalogEntry[] = [],
+): RoleExecutionSummary {
   const safetyCues: string[] = [];
   const allowedPaths = parseList(draft.allowedPaths);
   const deniedPaths = parseList(draft.deniedPaths);
@@ -640,6 +810,20 @@ export function buildRoleExecutionSummary(draft: RoleDraft): RoleExecutionSummar
     .filter((skill) => skill.path.length > 0);
   const autoLoadCount = normalizedSkills.filter((skill) => skill.autoLoad).length;
   const onDemandCount = normalizedSkills.length - autoLoadCount;
+  const skillResolution = resolveRoleSkillReferences({
+    skills: draft.skillRows,
+    catalog,
+    roleCapabilities: buildRoleCapabilitySourceFromDraft(draft),
+  });
+  const blockingSkills = skillResolution.filter(
+    (skill) => skill.compatibilityStatus === "blocking",
+  ).length;
+  const warningSkills = skillResolution.filter(
+    (skill) => skill.compatibilityStatus === "warning",
+  ).length;
+  const directDependencies = new Set(
+    skillResolution.flatMap((skill) => skill.requires ?? []),
+  );
 
   if (draft.requireReview) {
     safetyCues.push("Review required");
@@ -652,6 +836,15 @@ export function buildRoleExecutionSummary(draft: RoleDraft): RoleExecutionSummar
   }
   if (outputFilters.length > 0) {
     safetyCues.push(`${outputFilters.length} output filters`);
+  }
+  if (blockingSkills > 0) {
+    safetyCues.push(`${blockingSkills} blocking skill issue${blockingSkills === 1 ? "" : "s"}`);
+  }
+  if (warningSkills > 0) {
+    safetyCues.push(`${warningSkills} warning skill issue${warningSkills === 1 ? "" : "s"}`);
+  }
+  if (directDependencies.size > 0) {
+    safetyCues.push(`${directDependencies.size} skill dependenc${directDependencies.size === 1 ? "y" : "ies"} visible`);
   }
 
   return {
@@ -674,11 +867,13 @@ export function resolveRoleSkillReferences({
   catalog,
   templateSkills = [],
   parentSkills = [],
+  roleCapabilities,
 }: {
   skills: Array<RoleSkillDraft | RoleSkillReference>;
   catalog: RoleSkillCatalogEntry[];
   templateSkills?: Array<RoleSkillDraft | RoleSkillReference>;
   parentSkills?: Array<RoleSkillDraft | RoleSkillReference>;
+  roleCapabilities?: RoleCapabilitySource;
 }): RoleSkillResolution[] {
   const catalogByPath = new Map(
     catalog.map((entry) => [entry.path.trim(), entry] satisfies [string, RoleSkillCatalogEntry]),
@@ -687,6 +882,7 @@ export function resolveRoleSkillReferences({
     templateSkills.map((skill) => skill.path.trim()).filter(Boolean),
   );
   const parentPaths = new Set(parentSkills.map((skill) => skill.path.trim()).filter(Boolean));
+  const capabilitySet = buildRoleCapabilitySet(roleCapabilities);
 
   return skills
     .map((skill) => ({
@@ -703,6 +899,11 @@ export function resolveRoleSkillReferences({
           : "explicit";
 
       if (matchedCatalogEntry) {
+        const requiredTools = matchedCatalogEntry.tools ?? [];
+        const missingTools =
+          capabilitySet.size > 0
+            ? missingRequiredCapabilities(requiredTools, capabilitySet)
+            : [];
         return {
           path: skill.path,
           autoLoad: skill.autoLoad,
@@ -715,9 +916,18 @@ export function resolveRoleSkillReferences({
           referenceCount: matchedCatalogEntry.referenceCount,
           scriptCount: matchedCatalogEntry.scriptCount,
           assetCount: matchedCatalogEntry.assetCount,
+          requires: matchedCatalogEntry.requires,
+          tools: requiredTools,
           source: matchedCatalogEntry.source,
           sourceRoot: matchedCatalogEntry.sourceRoot,
           status: "resolved" as const,
+          compatibilityStatus:
+            missingTools.length > 0
+              ? skill.autoLoad
+                ? "blocking"
+                : "warning"
+              : "compatible",
+          missingTools,
           provenance,
         };
       }
@@ -730,6 +940,7 @@ export function resolveRoleSkillReferences({
         source: "manual",
         sourceRoot: "",
         status: "unresolved" as const,
+        compatibilityStatus: skill.autoLoad ? "blocking" : "warning",
         provenance,
       };
     });
@@ -778,6 +989,7 @@ function validateRoleDraft(draft: RoleDraft): string[] {
   const errors = [
     ...validateSkillRows(draft.skillRows),
     ...validateCustomSettingRows(draft.customSettingRows),
+    ...validatePluginBindingRows(draft.pluginBindingRows),
     ...validateMCPServerRows(draft.mcpServerRows),
     ...validateKnowledgeRows(
       draft.sharedKnowledgeRows,
@@ -805,6 +1017,30 @@ function validateRoleDraft(draft: RoleDraft): string[] {
       continue;
     }
     seenTriggerKeys.add(key);
+  }
+
+  return Array.from(new Set(errors));
+}
+
+function validatePluginBindingRows(bindingRows: RolePluginBindingDraft[]): string[] {
+  const errors: string[] = [];
+  const seen = new Set<string>();
+
+  for (const row of bindingRows) {
+    const pluginId = row.pluginId.trim();
+    const functions = row.functionsInput.trim();
+    if (!pluginId && !functions) {
+      continue;
+    }
+    if (!pluginId) {
+      errors.push("Plugin bindings must include a plugin id.");
+      continue;
+    }
+    if (seen.has(pluginId)) {
+      errors.push("Plugin bindings must be unique.");
+      continue;
+    }
+    seen.add(pluginId);
   }
 
   return Array.from(new Set(errors));

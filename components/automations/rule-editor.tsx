@@ -5,6 +5,13 @@ import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useAutomationStore } from "@/lib/stores/automation-store";
 
 const EVENT_TYPES = [
@@ -34,13 +41,18 @@ export function RuleEditor({ projectId }: { projectId: string }) {
       <div className="grid gap-3 md:grid-cols-3">
         <div className="space-y-2">
           <Label>{t("automations.event")}</Label>
-          <select className="h-10 rounded-md border bg-background px-3 text-sm" value={eventType} onChange={(event) => setEventType(event.target.value)}>
-            {EVENT_TYPES.map((eventTypeOption) => (
-              <option key={eventTypeOption} value={eventTypeOption}>
-                {eventTypeOption}
-              </option>
-            ))}
-          </select>
+          <Select value={eventType} onValueChange={setEventType}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {EVENT_TYPES.map((eventTypeOption) => (
+                <SelectItem key={eventTypeOption} value={eventTypeOption}>
+                  {eventTypeOption}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
         </div>
         <div className="space-y-2">
           <Label>{t("automations.conditionField")}</Label>
@@ -53,13 +65,18 @@ export function RuleEditor({ projectId }: { projectId: string }) {
       </div>
       <div className="space-y-2">
         <Label>{t("automations.action")}</Label>
-        <select className="h-10 rounded-md border bg-background px-3 text-sm" value={actionType} onChange={(event) => setActionType(event.target.value)}>
-          {["send_notification", "send_im_message", "update_field", "assign_user", "move_to_column", "create_subtask", "invoke_plugin"].map((type) => (
-            <option key={type} value={type}>
-              {type}
-            </option>
-          ))}
-        </select>
+        <Select value={actionType} onValueChange={setActionType}>
+          <SelectTrigger>
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            {["send_notification", "send_im_message", "update_field", "assign_user", "move_to_column", "create_subtask", "invoke_plugin"].map((type) => (
+              <SelectItem key={type} value={type}>
+                {type}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       </div>
       <Button
         type="button"

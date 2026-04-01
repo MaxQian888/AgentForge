@@ -7,6 +7,7 @@ import (
 
 	"github.com/agentforge/im-bridge/client"
 	"github.com/agentforge/im-bridge/core"
+	log "github.com/sirupsen/logrus"
 )
 
 // RegisterAgentCommands registers /agent sub-commands on the engine.
@@ -41,6 +42,13 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取 Agent 状态失败: %v", err))
 				return
 			}
+			route := engine.ResolveCommandRoute("/agent", "status")
+			available, bridgeErr := engine.BridgeCapabilityAvailable(ctx, route.Capability)
+			if !available {
+				log.WithFields(log.Fields{"component": "commands.agent"}).WithError(bridgeErr).Warn("Bridge pool capability unavailable during agent status")
+				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("%s\nBridge pool unavailable: %v", formatAgentPoolStatus(status), bridgeErr))
+				return
+			}
 			bridgePool, bridgeErr := scopedClient.GetBridgePoolStatus(ctx)
 			if bridgeErr != nil {
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("%s\nBridge pool unavailable: %v", formatAgentPoolStatus(status), bridgeErr))
@@ -48,6 +56,12 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatAgentPoolStatusWithBridge(status, bridgePool))
 		case "runtimes":
+			route := engine.ResolveCommandRoute("/agent", "runtimes")
+			if available, bridgeErr := engine.BridgeCapabilityAvailable(ctx, route.Capability); !available {
+				log.WithFields(log.Fields{"component": "commands.agent"}).WithError(bridgeErr).Warn("Bridge runtime catalog capability unavailable")
+				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取 Bridge runtimes 失败: %v", bridgeErr))
+				return
+			}
 			runtimes, err := scopedClient.GetBridgeRuntimes(ctx)
 			if err != nil {
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取 Bridge runtimes 失败: %v", err))
@@ -55,6 +69,12 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatBridgeRuntimeCatalog(runtimes))
 		case "health":
+			route := engine.ResolveCommandRoute("/agent", "health")
+			if available, bridgeErr := engine.BridgeCapabilityAvailable(ctx, route.Capability); !available {
+				log.WithFields(log.Fields{"component": "commands.agent"}).WithError(bridgeErr).Warn("Bridge health capability unavailable")
+				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取 Bridge health 失败: %v", bridgeErr))
+				return
+			}
 			health, err := scopedClient.GetBridgeHealth(ctx)
 			if err != nil {
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取 Bridge health 失败: %v", err))
@@ -71,8 +91,13 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("启动 Agent 失败: %v", err))
 				return
 			}
+			log.WithFields(log.Fields{
+				"component": "commands.agent",
+				"taskId":    subArgs,
+				"status":    result.Dispatch.Status,
+			}).Info("Agent spawn command completed")
 			bindAgentDispatch(ctx, scopedClient, result, msg)
-			_ = p.Reply(ctx, msg.ReplyCtx, formatAgentSpawnReply(result, subArgs))
+			_ = p.Reply(ctx, msg.ReplyCtx, formatAgentSpawnReplyWithBridgeTools(ctx, scopedClient, result, subArgs))
 		case "run":
 			if subArgs == "" {
 				_ = p.Reply(ctx, msg.ReplyCtx, "用法: /agent run <任务描述>")
@@ -84,8 +109,13 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("执行失败: %v", err))
 				return
 			}
+			log.WithFields(log.Fields{
+				"component": "commands.agent",
+				"taskId":    result.Task.ID,
+				"status":    result.Dispatch.Status,
+			}).Info("Quick agent run command completed")
 			bindAgentDispatch(ctx, scopedClient, result, msg)
-			_ = p.Reply(ctx, msg.ReplyCtx, formatAgentSpawnReply(result, result.Task.ID))
+			_ = p.Reply(ctx, msg.ReplyCtx, formatAgentSpawnReplyWithBridgeTools(ctx, scopedClient, result, result.Task.ID))
 		case "logs":
 			if subArgs == "" {
 				_ = p.Reply(ctx, msg.ReplyCtx, subcommandUsage("/agent", subCmd))
@@ -187,8 +217,49 @@ func formatAgentSpawnReply(result *client.TaskDispatchResponse, requestedTaskID 
 		}
 		return "未启动 Agent"
 	default:
+		if result.Dispatch.Status == "queued" {
+			if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
+				return fmt.Sprintf("已加入队列：%s", reason)
+			}
+		}
 		return fmt.Sprintf("任务 %s 当前未启动 Agent", shortID(requestedTaskID))
 	}
+}
+
+func formatAgentSpawnReplyWithBridgeTools(ctx context.Context, c *client.AgentForgeClient, result *client.TaskDispatchResponse, requestedTaskID string) string {
+	reply := formatAgentSpawnReply(result, requestedTaskID)
+	if c == nil || result == nil || result.Dispatch.Status != "started" {
+		return reply
+	}
+	tools, err := c.ListBridgeTools(ctx)
+	if err != nil || len(tools) == 0 {
+		return reply
+	}
+	return reply + "\n" + formatSpawnBridgeTools(tools)
+}
+
+func formatSpawnBridgeTools(tools []client.BridgeTool) string {
+	if len(tools) == 0 {
+		return ""
+	}
+	limit := len(tools)
+	if limit > 3 {
+		limit = 3
+	}
+	parts := make([]string, 0, limit)
+	for _, tool := range tools[:limit] {
+		if id := strings.TrimSpace(tool.PluginID); id != "" {
+			parts = append(parts, id)
+			continue
+		}
+		if name := strings.TrimSpace(tool.Name); name != "" {
+			parts = append(parts, name)
+		}
+	}
+	if len(parts) == 0 {
+		return ""
+	}
+	return "Bridge tools: " + strings.Join(parts, ", ")
 }
 
 func formatAgentPoolStatus(status *client.PoolStatus) string {

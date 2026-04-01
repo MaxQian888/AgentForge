@@ -596,11 +596,23 @@ func (r *fakeSocketRunner) dispatch(ctx context.Context, envelope socketEnvelope
 }
 
 type fakeSlackMessageClient struct {
-	posts []slackOutgoingMessage
+	posts   []slackOutgoingMessage
+	updates []fakeUpdateCall
+}
+
+type fakeUpdateCall struct {
+	ChannelID string
+	MessageTS string
+	Text      string
 }
 
 func (c *fakeSlackMessageClient) PostMessage(ctx context.Context, message slackOutgoingMessage) error {
 	c.posts = append(c.posts, message)
+	return nil
+}
+
+func (c *fakeSlackMessageClient) UpdateMessage(ctx context.Context, channelID, messageTS, text string) error {
+	c.updates = append(c.updates, fakeUpdateCall{ChannelID: channelID, MessageTS: messageTS, Text: text})
 	return nil
 }
 
@@ -747,6 +759,82 @@ func TestSlackLive_NameReplyContextAndReplyBranches(t *testing.T) {
 
 	if err := live.ReplyStructured(context.Background(), replyContext{}, &core.StructuredMessage{Title: "missing target"}); err == nil || !strings.Contains(err.Error(), "channel id") {
 		t.Fatalf("missing target err = %v", err)
+	}
+}
+
+func TestLive_UpdateMessageCallsClientUpdate(t *testing.T) {
+	runner := &fakeSocketRunner{}
+	messages := &fakeSlackMessageClient{}
+
+	live, err := NewLive("xoxb-bot", "xapp-app", WithSocketRunner(runner), WithMessageClient(messages))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	rc := &replyContext{ChannelID: "C111", MessageTS: "1700000000.123456"}
+	if err := live.UpdateMessage(context.Background(), rc, "updated text"); err != nil {
+		t.Fatalf("UpdateMessage error: %v", err)
+	}
+
+	if len(messages.updates) != 1 {
+		t.Fatalf("updates = %+v, want 1 update", messages.updates)
+	}
+	if messages.updates[0].ChannelID != "C111" || messages.updates[0].MessageTS != "1700000000.123456" || messages.updates[0].Text != "updated text" {
+		t.Fatalf("update = %+v", messages.updates[0])
+	}
+}
+
+func TestLive_UpdateMessageRejectsNilReplyContext(t *testing.T) {
+	runner := &fakeSocketRunner{}
+	messages := &fakeSlackMessageClient{}
+
+	live, err := NewLive("xoxb-bot", "xapp-app", WithSocketRunner(runner), WithMessageClient(messages))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.UpdateMessage(context.Background(), nil, "text"); err == nil || !strings.Contains(err.Error(), "invalid reply context") {
+		t.Fatalf("UpdateMessage nil context err = %v", err)
+	}
+
+	if err := live.UpdateMessage(context.Background(), "wrong-type", "text"); err == nil || !strings.Contains(err.Error(), "invalid reply context") {
+		t.Fatalf("UpdateMessage wrong type err = %v", err)
+	}
+}
+
+func TestLive_UpdateMessageRejectsMissingMessageTS(t *testing.T) {
+	runner := &fakeSocketRunner{}
+	messages := &fakeSlackMessageClient{}
+
+	live, err := NewLive("xoxb-bot", "xapp-app", WithSocketRunner(runner), WithMessageClient(messages))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	rc := &replyContext{ChannelID: "C111"}
+	if err := live.UpdateMessage(context.Background(), rc, "text"); err == nil || !strings.Contains(err.Error(), "message timestamp required") {
+		t.Fatalf("UpdateMessage missing ts err = %v", err)
+	}
+}
+
+func TestLive_ReplyContextFromTargetIncludesMessageTS(t *testing.T) {
+	runner := &fakeSocketRunner{}
+	live, err := NewLive("xoxb-bot", "xapp-app", WithSocketRunner(runner), WithMessageClient(&fakeSlackMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	replyAny := live.ReplyContextFromTarget(&core.ReplyTarget{
+		ChatID:    "C111",
+		ThreadID:  "1700000000.100000",
+		MessageID: "1700000000.200000",
+	})
+	reply, ok := replyAny.(replyContext)
+	if !ok {
+		t.Fatalf("ReplyContextFromTarget type = %T", replyAny)
+	}
+	if reply.MessageTS != "1700000000.200000" {
+		t.Fatalf("MessageTS = %q, want 1700000000.200000", reply.MessageTS)
 	}
 }
 

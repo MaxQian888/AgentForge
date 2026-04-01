@@ -99,4 +99,27 @@ describe("Column", () => {
 
     expect(container.querySelector(".bg-accent\\/50")).toBeInTheDocument();
   });
+
+  it("supports quick task creation from the column header with the status pre-set", async () => {
+    const user = userEvent.setup();
+    const onQuickCreateTask = jest.fn().mockResolvedValue(undefined);
+
+    render(
+      <Column
+        status="in_progress"
+        tasks={[]}
+        selectedTaskId={null}
+        displayOptions={{ density: "comfortable", showDescriptions: true, showLinkedDocs: false }}
+        linkedDocsByTask={{}}
+        onTaskClick={jest.fn()}
+        onQuickCreateTask={onQuickCreateTask}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Quick create in In Progress" }));
+    await user.type(screen.getByLabelText("Task title"), "Ship alerts");
+    await user.click(screen.getByRole("button", { name: "Add task" }));
+
+    expect(onQuickCreateTask).toHaveBeenCalledWith("in_progress", "Ship alerts");
+  });
 });

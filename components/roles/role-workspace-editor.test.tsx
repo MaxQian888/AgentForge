@@ -21,7 +21,7 @@ jest.mock("next-intl", () => ({
   },
 }));
 
-import { fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import {
   buildRoleDraft,
@@ -31,6 +31,7 @@ import {
 } from "@/lib/roles/role-management";
 import type { RoleManifest, RoleSkillCatalogEntry } from "@/lib/stores/role-store";
 import { RoleWorkspaceEditor } from "./role-workspace-editor";
+import type { PluginRecord } from "@/lib/stores/plugin-store";
 
 const frontendRole: RoleManifest = {
   apiVersion: "agentforge/v1",
@@ -121,6 +122,8 @@ const skillCatalog: RoleSkillCatalogEntry[] = [
     label: "React",
     description: "Build React interfaces.",
     shortDescription: "Guide React work in the current repo.",
+    requires: ["skills/typescript"],
+    tools: ["code_editor", "browser_preview"],
     availableParts: ["agents", "references"],
     source: "repo-local",
     sourceRoot: "skills",
@@ -160,10 +163,14 @@ const draftSkillResolution: RoleSkillResolution[] = [
     label: "React",
     description: "Build React interfaces.",
     shortDescription: "Guide React work in the current repo.",
+    requires: ["skills/typescript"],
+    tools: ["code_editor", "browser_preview"],
     availableParts: ["agents", "references"],
     source: "repo-local",
     sourceRoot: "skills",
     status: "resolved",
+    compatibilityStatus: "blocking",
+    missingTools: ["browser_preview"],
     provenance: "explicit",
   },
   {
@@ -171,10 +178,34 @@ const draftSkillResolution: RoleSkillResolution[] = [
     autoLoad: false,
     label: "skills/testing",
     description: "",
+    tools: ["code_editor", "terminal"],
     source: "manual",
     sourceRoot: "",
     status: "unresolved",
+    compatibilityStatus: "warning",
     provenance: "template-derived",
+  },
+];
+
+const availablePlugins: PluginRecord[] = [
+  {
+    apiVersion: "agentforge/v1",
+    kind: "ToolPlugin",
+    metadata: {
+      id: "repo-search",
+      name: "Repo Search",
+      version: "1.0.0",
+      description: "Search the workspace repository.",
+      tags: ["search"],
+    },
+    spec: {
+      runtime: "mcp",
+      capabilities: ["search_code", "open_file"],
+    },
+    permissions: {},
+    source: { type: "local" },
+    lifecycle_state: "active",
+    restart_count: 0,
   },
 ];
 
@@ -214,6 +245,7 @@ function renderEditor(
     onAddPrivateKnowledgeRow: jest.fn(),
     onAddTriggerRow: jest.fn(),
     availableRoles: [frontendRole],
+    availablePlugins,
     onTemplateChange: jest.fn(),
     validationBySection: emptyValidation,
     provenanceMap,
@@ -241,9 +273,8 @@ describe("RoleWorkspaceEditor", () => {
     fireEvent.change(screen.getByLabelText("Name"), {
       target: { value: "Frontend Captain" },
     });
-    fireEvent.change(screen.getByLabelText("Inherits from"), {
-      target: { value: "frontend-developer" },
-    });
+    await user.click(screen.getByRole("combobox", { name: "Inherits from" }));
+    await user.click(screen.getByRole("option", { name: "Frontend Developer" }));
     fireEvent.change(screen.getByLabelText("Version"), {
       target: { value: "2.0.0" },
     });
@@ -280,14 +311,22 @@ describe("RoleWorkspaceEditor", () => {
     expect(screen.getByText("inherited")).toBeInTheDocument();
     expect(screen.getByText(/React from skills/)).toBeInTheDocument();
     expect(screen.getByText("Parts:")).toBeInTheDocument();
+    expect(screen.getByText("Dependencies: skills/typescript")).toBeInTheDocument();
+    expect(screen.getByText("Declared tools: code_editor, browser_preview")).toBeInTheDocument();
+    expect(screen.getByText("Blocking compatibility issue · Missing: browser_preview")).toBeInTheDocument();
     expect(screen.getByText(/Unresolved manual reference/)).toBeInTheDocument();
+    expect(screen.getByText("Warning-only compatibility issue")).toBeInTheDocument();
     expect(screen.getByText(/Explicit/)).toBeInTheDocument();
     expect(screen.getByText(/Template-derived/)).toBeInTheDocument();
     expect(screen.getByText("Skill paths must be unique.")).toBeInTheDocument();
+    expect(screen.getByText("Available plugins")).toBeInTheDocument();
+    expect(screen.getAllByText("Repo Search").length).toBeGreaterThan(0);
+    expect(screen.getByText("Functions: search_code, open_file")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Add Custom Setting" }));
     await user.click(screen.getByRole("button", { name: "Add MCP Server" }));
     await user.click(screen.getByRole("button", { name: "Add Skill" }));
+    await user.click(screen.getByRole("button", { name: "Use plugin Repo Search" }));
 
     fireEvent.change(screen.getByLabelText("Custom Setting Key"), {
       target: { value: "review_depth" },
@@ -302,9 +341,30 @@ describe("RoleWorkspaceEditor", () => {
     expect(props.onAddCustomSettingRow).toHaveBeenCalled();
     expect(props.onAddMCPServerRow).toHaveBeenCalled();
     expect(props.onAddSkillRow).toHaveBeenCalled();
+    expect(props.updateDraft).toHaveBeenCalledWith("externalTools", "figma, repo-search");
+    expect(props.updateDraft).toHaveBeenCalledWith("pluginBindingRows", [
+      { pluginId: "repo-search", functionsInput: "search_code, open_file" },
+    ]);
     expect(props.updateCustomSettingRow).toHaveBeenCalledWith(0, "key", "review_depth");
     expect(props.updateMCPServerRow).toHaveBeenCalledWith(0, "name", "figma-sync");
     expect(props.updateSkillRow).toHaveBeenCalledWith(0, "path", "skills/testing");
+
+    cleanup();
+
+    const updatedDraft = {
+      ...buildRoleDraft(frontendRole),
+      pluginBindingRows: [{ pluginId: "repo-search", functionsInput: "search_code, open_file" }],
+    };
+    const rerendered = renderEditor({
+      activeSection: "capabilities",
+      draft: updatedDraft,
+    });
+    fireEvent.change(rerendered.getByLabelText("Plugin Functions"), {
+      target: { value: "search_code" },
+    });
+    expect(rerendered.props.updateDraft).toHaveBeenCalledWith("pluginBindingRows", [
+      { pluginId: "repo-search", functionsInput: "search_code" },
+    ]);
   });
 
   it("renders governance and review sections with trigger and override editing", async () => {

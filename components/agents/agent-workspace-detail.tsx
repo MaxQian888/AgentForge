@@ -1,17 +1,31 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useCallback } from "react";
+import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { ArrowLeft, Pause, Play, Skull } from "lucide-react";
+import {
+  ArrowLeft,
+  Pause,
+  Play,
+  Skull,
+  Wrench,
+  FileCode,
+  Brain,
+  CheckSquare,
+  ShieldAlert,
+  ScrollText,
+} from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Progress } from "@/components/ui/progress";
+import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { OutputStream } from "@/components/agent/output-stream";
 import { DispatchHistoryPanel } from "@/components/tasks/dispatch-history-panel";
 import { cn } from "@/lib/utils";
 import { useAgentStore } from "@/lib/stores/agent-store";
+import { useAuthStore } from "@/lib/stores/auth-store";
 import { statusColors } from "./agent-status-colors";
 
 interface AgentWorkspaceDetailProps {
@@ -32,11 +46,47 @@ export function AgentWorkspaceDetail({
   const dispatchHistory = useAgentStore(
     (s) => s.dispatchHistoryByTask[agent?.taskId ?? ""] ?? [],
   );
+  const toolCalls = useAgentStore((s) => s.agentToolCalls.get(agentId) ?? []);
+  const toolResults = useAgentStore((s) => s.agentToolResults.get(agentId) ?? []);
+  const reasoning = useAgentStore((s) => s.agentReasoning.get(agentId));
+  const fileChanges = useAgentStore((s) => s.agentFileChanges.get(agentId) ?? []);
+  const todos = useAgentStore((s) => s.agentTodos.get(agentId) ?? []);
+  const partialMessage = useAgentStore((s) => s.agentPartialMessages.get(agentId));
+  const permissionRequests = useAgentStore(
+    (s) => s.agentPermissionRequests.get(agentId) ?? [],
+  );
+  const agentLogs = useAgentStore((s) => s.agentLogs.get(agentId) ?? []);
   const fetchAgent = useAgentStore((s) => s.fetchAgent);
   const fetchDispatchHistory = useAgentStore((s) => s.fetchDispatchHistory);
+  const fetchAgentLogs = useAgentStore((s) => s.fetchAgentLogs);
   const pauseAgent = useAgentStore((s) => s.pauseAgent);
   const resumeAgent = useAgentStore((s) => s.resumeAgent);
   const killAgent = useAgentStore((s) => s.killAgent);
+
+  const handlePermissionResponse = useCallback(
+    async (requestId: string, approved: boolean) => {
+      const backendUrl =
+        process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
+      const token = useAuthStore.getState().accessToken;
+      try {
+        await fetch(
+          `${backendUrl}/api/v1/bridge/permission-response/${requestId}`,
+          {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              ...(token ? { Authorization: `Bearer ${token}` } : {}),
+            },
+            body: JSON.stringify({ approved }),
+          },
+        );
+        useAgentStore.getState().removePermissionRequest(agentId, requestId);
+      } catch {
+        // Permission response delivery is best-effort
+      }
+    },
+    [agentId],
+  );
 
   useEffect(() => {
     void fetchAgent(agentId);
@@ -47,6 +97,10 @@ export function AgentWorkspaceDetail({
       void fetchDispatchHistory(agent.taskId);
     }
   }, [agent?.taskId, fetchDispatchHistory]);
+
+  useEffect(() => {
+    void fetchAgentLogs(agentId);
+  }, [agentId, fetchAgentLogs]);
 
   if (!agent) {
     return (
@@ -177,6 +231,88 @@ export function AgentWorkspaceDetail({
         </Card>
       </div>
 
+      {/* Permission requests banner */}
+      {permissionRequests.length > 0 && (
+        <Card className="border-amber-500/50 bg-amber-500/5">
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium text-amber-600 dark:text-amber-400">
+              <ShieldAlert className="size-4" />
+              {t("workspace.permissionRequests")} ({permissionRequests.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent className="space-y-2">
+            {permissionRequests.map((req) => (
+              <div
+                key={req.requestId}
+                className="flex items-center justify-between rounded-md border p-3 text-sm"
+              >
+                <div className="min-w-0">
+                  <p className="font-medium">{req.toolName ?? "Unknown tool"}</p>
+                  {req.mcpServerId && (
+                    <p className="text-xs text-muted-foreground">
+                      MCP: {req.mcpServerId}
+                    </p>
+                  )}
+                </div>
+                <div className="flex shrink-0 gap-2">
+                  <Button
+                    size="sm"
+                    variant="outline"
+                    onClick={() =>
+                      handlePermissionResponse(req.requestId, true)
+                    }
+                  >
+                    {t("workspace.permissionRequests.approve")}
+                  </Button>
+                  <Button
+                    size="sm"
+                    variant="ghost"
+                    onClick={() =>
+                      handlePermissionResponse(req.requestId, false)
+                    }
+                  >
+                    {t("workspace.permissionRequests.deny")}
+                  </Button>
+                </div>
+              </div>
+            ))}
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Reasoning */}
+      {reasoning && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Brain className="size-4" />
+              {t("workspace.reasoning")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted/50 p-3 text-xs">
+              {reasoning}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Partial message (live streaming output) */}
+      {partialMessage && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              {t("workspace.partialMessage")}
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <pre className="max-h-48 overflow-auto whitespace-pre-wrap rounded-md bg-muted/50 p-3 text-xs">
+              {partialMessage}
+            </pre>
+          </CardContent>
+        </Card>
+      )}
+
       {/* Pool snapshot */}
       {pool && (
         <Card>
@@ -201,6 +337,119 @@ export function AgentWorkspaceDetail({
             <div>
               <p className="text-muted-foreground">Warm</p>
               <p className="text-xl font-semibold">{pool.warm ?? 0}</p>
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Tool calls */}
+      {toolCalls.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <Wrench className="size-4" />
+              {t("workspace.toolCalls")} ({toolCalls.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="max-h-64 space-y-2 overflow-auto">
+              {toolCalls.map((call, i) => {
+                const result = toolResults.find(
+                  (r) => r.toolCallId === call.toolCallId,
+                );
+                return (
+                  <div
+                    key={call.toolCallId ?? i}
+                    className="rounded-md border p-3 text-xs"
+                  >
+                    <div className="flex items-center justify-between">
+                      <span className="font-mono font-medium">
+                        {call.toolName}
+                      </span>
+                      {result && (
+                        <Badge
+                          variant="secondary"
+                          className={cn(
+                            result.isError
+                              ? "bg-destructive/10 text-destructive"
+                              : "bg-green-500/10 text-green-600",
+                          )}
+                        >
+                          {result.isError ? "error" : "ok"}
+                        </Badge>
+                      )}
+                    </div>
+                    {call.input != null && (
+                      <pre className="mt-1 max-h-20 overflow-auto whitespace-pre-wrap text-muted-foreground">
+                        {typeof call.input === "string"
+                          ? call.input
+                          : JSON.stringify(call.input, null, 2)}
+                      </pre>
+                    )}
+                  </div>
+                );
+              })}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* File changes */}
+      {fileChanges.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <FileCode className="size-4" />
+              {t("workspace.fileChanges")} ({fileChanges.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="max-h-48 space-y-1 overflow-auto text-xs">
+              {fileChanges.map((file, i) => (
+                <div key={i} className="flex items-center gap-2">
+                  <Badge variant="outline" className="shrink-0 text-[10px]">
+                    {file.changeType ?? "modified"}
+                  </Badge>
+                  <span className="truncate font-mono">{file.path}</span>
+                </div>
+              ))}
+            </div>
+          </CardContent>
+        </Card>
+      )}
+
+      {/* Todos */}
+      {todos.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <CheckSquare className="size-4" />
+              {t("workspace.todos")} ({todos.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <div className="max-h-48 space-y-1 overflow-auto text-sm">
+              {todos.map((todo, i) => (
+                <div key={todo.id ?? i} className="flex items-center gap-2">
+                  <span
+                    className={cn(
+                      "size-2 shrink-0 rounded-full",
+                      todo.status === "completed"
+                        ? "bg-green-500"
+                        : todo.status === "in_progress"
+                          ? "bg-blue-500"
+                          : "bg-muted-foreground/40",
+                    )}
+                  />
+                  <span
+                    className={cn(
+                      todo.status === "completed" && "line-through text-muted-foreground",
+                    )}
+                  >
+                    {todo.content ?? todo.id}
+                  </span>
+                </div>
+              ))}
             </div>
           </CardContent>
         </Card>
@@ -243,6 +492,14 @@ export function AgentWorkspaceDetail({
           {dispatchHistory.length > 0 && (
             <DispatchHistoryPanel attempts={dispatchHistory} />
           )}
+          <div className="flex flex-wrap gap-2 pt-2">
+            <Button asChild type="button" size="sm" variant="outline">
+              <Link href={`/project?taskId=${agent.taskId}`}>Current Task</Link>
+            </Button>
+            <Button asChild type="button" size="sm" variant="outline">
+              <Link href={`/reviews?taskId=${agent.taskId}`}>Review History</Link>
+            </Button>
+          </div>
         </CardContent>
       </Card>
 
@@ -253,6 +510,44 @@ export function AgentWorkspaceDetail({
         <h2 className="mb-3 text-lg font-semibold">Output Stream</h2>
         <OutputStream lines={outputs} />
       </div>
+
+      {/* Agent logs */}
+      {agentLogs.length > 0 && (
+        <Card>
+          <CardHeader className="pb-2">
+            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+              <ScrollText className="size-4" />
+              {t("workspace.logs")} ({agentLogs.length})
+            </CardTitle>
+          </CardHeader>
+          <CardContent>
+            <ScrollArea className="h-64">
+              <div className="space-y-1 font-mono text-xs">
+                {agentLogs.map((log, i) => (
+                  <div
+                    key={i}
+                    className={cn(
+                      "flex gap-2 px-2 py-0.5 rounded",
+                      log.type === "error" && "bg-destructive/10 text-destructive",
+                      log.type === "status" && "text-muted-foreground",
+                    )}
+                  >
+                    <span className="shrink-0 text-muted-foreground">
+                      {new Date(log.timestamp).toLocaleTimeString()}
+                    </span>
+                    <Badge variant="outline" className="shrink-0 text-[10px] h-4">
+                      {log.type}
+                    </Badge>
+                    <span className="whitespace-pre-wrap break-all">
+                      {log.content}
+                    </span>
+                  </div>
+                ))}
+              </div>
+            </ScrollArea>
+          </CardContent>
+        </Card>
+      )}
     </div>
   );
 }

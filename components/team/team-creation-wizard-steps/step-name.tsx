@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 
 export interface StepNameData {
   name: string;
@@ -34,7 +35,7 @@ export function StepName({ data, onChange }: StepNameProps) {
 
       <div className="flex flex-col gap-2">
         <Label htmlFor="team-description">{t("wizard.descriptionLabel")}</Label>
-        <textarea
+        <Textarea
           id="team-description"
           value={data.description}
           onChange={(e) => onChange({ ...data, description: e.target.value })}

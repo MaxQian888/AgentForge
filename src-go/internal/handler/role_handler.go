@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"net/http"
 	"os"
@@ -16,11 +17,13 @@ import (
 	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	rolepkg "github.com/react-go-quick-starter/server/internal/role"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type RoleHandler struct {
 	store        *rolepkg.FileStore
 	bridgeClient roleAuthoringBridgeClient
+	pluginCatalog roleDependencyPluginCatalog
 	skillsDir    string
 }
 
@@ -34,6 +37,10 @@ func NewRoleHandler(rolesDir string) *RoleHandler {
 type roleAuthoringBridgeClient interface {
 	GetRuntimeCatalog(ctx context.Context) (*bridge.RuntimeCatalogResponse, error)
 	Generate(ctx context.Context, req bridge.GenerateRequest) (*bridge.GenerateResponse, error)
+}
+
+type roleDependencyPluginCatalog interface {
+	List(ctx context.Context, filter service.PluginListFilter) ([]*model.PluginRecord, error)
 }
 
 type rolePreviewRequest struct {
@@ -98,10 +105,22 @@ func (h *RoleHandler) WithBridgeClient(client roleAuthoringBridgeClient) *RoleHa
 	return h
 }
 
+func (h *RoleHandler) WithPluginCatalog(catalog roleDependencyPluginCatalog) *RoleHandler {
+	h.pluginCatalog = catalog
+	return h
+}
+
 func (h *RoleHandler) List(c echo.Context) error {
 	roles, err := h.store.List()
 	if err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToLoadRoles)
+	}
+	plugins, err := h.listDependencyPlugins(c.Request().Context())
+	if err != nil {
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToLoadRoles)
+	}
+	for index, role := range roles {
+		roles[index] = h.enrichRoleManifest(role, plugins)
 	}
 	return c.JSON(http.StatusOK, roles)
 }
@@ -115,7 +134,11 @@ func (h *RoleHandler) Get(c echo.Context) error {
 		}
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToLoadRole)
 	}
-	return c.JSON(http.StatusOK, loadedRole)
+	plugins, err := h.listDependencyPlugins(c.Request().Context())
+	if err != nil {
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToLoadRole)
+	}
+	return c.JSON(http.StatusOK, h.enrichRoleManifest(loadedRole, plugins))
 }
 
 func (h *RoleHandler) ListSkills(c echo.Context) error {
@@ -141,7 +164,11 @@ func (h *RoleHandler) Create(c echo.Context) error {
 	if err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToReloadRole)
 	}
-	return c.JSON(http.StatusCreated, loadedRole)
+	plugins, err := h.listDependencyPlugins(c.Request().Context())
+	if err != nil {
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToReloadRole)
+	}
+	return c.JSON(http.StatusCreated, h.enrichRoleManifest(loadedRole, plugins))
 }
 
 func (h *RoleHandler) Update(c echo.Context) error {
@@ -167,13 +194,31 @@ func (h *RoleHandler) Update(c echo.Context) error {
 	if err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToReloadRole)
 	}
-	return c.JSON(http.StatusOK, loadedRole)
+	plugins, err := h.listDependencyPlugins(c.Request().Context())
+	if err != nil {
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToReloadRole)
+	}
+	return c.JSON(http.StatusOK, h.enrichRoleManifest(loadedRole, plugins))
 }
 
 func (h *RoleHandler) Delete(c echo.Context) error {
 	roleID := c.Param("id")
 	if roleID == "" {
 		return localizedError(c, http.StatusBadRequest, i18n.MsgRoleIDRequired)
+	}
+	plugins, err := h.listDependencyPlugins(c.Request().Context())
+	if err != nil {
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteRole)
+	}
+	consumers := service.BuildRolePluginConsumers(roleID, plugins)
+	if len(consumers) > 0 {
+		blockers := make([]string, 0, len(consumers))
+		for _, consumer := range consumers {
+			blockers = append(blockers, consumer.PluginID)
+		}
+		return c.JSON(http.StatusConflict, model.ErrorResponse{
+			Message: fmt.Sprintf("role %s is still referenced by installed plugins: %s", roleID, strings.Join(blockers, ", ")),
+		})
 	}
 	if err := h.store.Delete(roleID); err != nil {
 		if errors.Is(err, os.ErrNotExist) {
@@ -215,12 +260,19 @@ func (h *RoleHandler) Preview(c echo.Context) error {
 	}
 
 	executionProfile := rolepkg.BuildExecutionProfile(effective, rolepkg.WithSkillRoot(h.skillsDir))
+	plugins, err := h.listDependencyPlugins(c.Request().Context())
+	if err != nil {
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToLoadRole)
+	}
+	normalized = h.enrichRoleManifest(normalized, plugins)
+	effective = h.enrichRoleManifest(effective, plugins)
 	response := rolePreviewResponse{
 		NormalizedManifest: (*model.RoleManifest)(normalized),
 		EffectiveManifest:  (*model.RoleManifest)(effective),
 		ExecutionProfile:   executionProfile,
 		ReadinessDiagnostics: skillDiagnosticsToRuntimeDiagnostics(executionProfile.SkillDiagnostics),
 	}
+	response.ReadinessDiagnostics = append(response.ReadinessDiagnostics, rolePluginDependenciesToRuntimeDiagnostics(effective.PluginDependencies)...)
 	if normalized.Extends != "" {
 		response.Inheritance = &roleInheritanceSummary{ParentRoleID: normalized.Extends}
 	}
@@ -271,8 +323,21 @@ func (h *RoleHandler) Sandbox(c echo.Context) error {
 	executionProfile := rolepkg.BuildExecutionProfile(effective, rolepkg.WithSkillRoot(h.skillsDir))
 	selection, diagnostics, canProbe := resolveSandboxSelection(catalog, req)
 	diagnostics = append(diagnostics, skillDiagnosticsToRuntimeDiagnostics(executionProfile.SkillDiagnostics)...)
+	plugins, err := h.listDependencyPlugins(c.Request().Context())
+	if err != nil {
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToLoadRole)
+	}
+	normalized = h.enrichRoleManifest(normalized, plugins)
+	effective = h.enrichRoleManifest(effective, plugins)
+	diagnostics = append(diagnostics, rolePluginDependenciesToRuntimeDiagnostics(effective.PluginDependencies)...)
 	for _, diagnostic := range executionProfile.SkillDiagnostics {
 		if diagnostic.Blocking {
+			canProbe = false
+			break
+		}
+	}
+	for _, dependency := range effective.PluginDependencies {
+		if dependency.Blocking {
 			canProbe = false
 			break
 		}
@@ -620,6 +685,41 @@ func cloneStringMap(values map[string]string) map[string]string {
 		cloned[key] = value
 	}
 	return cloned
+}
+
+func (h *RoleHandler) listDependencyPlugins(ctx context.Context) ([]*model.PluginRecord, error) {
+	if h.pluginCatalog == nil {
+		return nil, nil
+	}
+	return h.pluginCatalog.List(ctx, service.PluginListFilter{})
+}
+
+func (h *RoleHandler) enrichRoleManifest(manifest *rolepkg.Manifest, plugins []*model.PluginRecord) *rolepkg.Manifest {
+	if manifest == nil {
+		return nil
+	}
+	cloned := *manifest
+	cloned.PluginDependencies = service.BuildRolePluginDependencies(&cloned, plugins)
+	cloned.PluginConsumers = service.BuildRolePluginConsumers(cloned.Metadata.ID, plugins)
+	return &cloned
+}
+
+func rolePluginDependenciesToRuntimeDiagnostics(dependencies []model.RolePluginDependency) []bridge.RuntimeDiagnosticDTO {
+	if len(dependencies) == 0 {
+		return nil
+	}
+	diagnostics := make([]bridge.RuntimeDiagnosticDTO, 0, len(dependencies))
+	for _, dependency := range dependencies {
+		if !dependency.Blocking {
+			continue
+		}
+		diagnostics = append(diagnostics, bridge.RuntimeDiagnosticDTO{
+			Code:     "role_plugin_dependency_unavailable",
+			Message:  dependency.Message,
+			Blocking: true,
+		})
+	}
+	return diagnostics
 }
 
 func isEmptyRolePermissions(permissions model.RolePermissions) bool {

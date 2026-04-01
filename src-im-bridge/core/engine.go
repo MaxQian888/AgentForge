@@ -4,6 +4,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"time"
 )
 
 // CommandHandler handles a slash command with parsed arguments.
@@ -11,24 +12,83 @@ type CommandHandler func(p Platform, msg *Message, args string)
 
 // Engine routes incoming messages to command handlers or a fallback.
 type Engine struct {
-	mu          sync.RWMutex
-	commands    map[string]CommandHandler
-	platform    Platform
-	fallback    func(p Platform, msg *Message)
-	rateLimiter *RateLimiter
+	mu                    sync.RWMutex
+	commands              map[string]CommandHandler
+	platform              Platform
+	fallback              func(p Platform, msg *Message)
+	rateLimiter           *RateLimiter
+	bridgeCapabilityProbe BridgeCapabilityProbe
+	bridgeCapabilityTTL   time.Duration
+	bridgeCapabilityCache map[BridgeCapability]bridgeCapabilityCacheEntry
 }
 
 // NewEngine creates an engine bound to a specific platform.
 func NewEngine(platform Platform) *Engine {
 	return &Engine{
-		commands: make(map[string]CommandHandler),
-		platform: platform,
+		commands:              make(map[string]CommandHandler),
+		platform:              platform,
+		bridgeCapabilityTTL:   15 * time.Second,
+		bridgeCapabilityCache: make(map[BridgeCapability]bridgeCapabilityCacheEntry),
 	}
 }
 
 // SetRateLimiter sets the rate limiter for the engine.
 func (e *Engine) SetRateLimiter(rl *RateLimiter) {
 	e.rateLimiter = rl
+}
+
+func (e *Engine) SetBridgeCapabilityProbe(probe BridgeCapabilityProbe) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.bridgeCapabilityProbe = probe
+	e.bridgeCapabilityCache = make(map[BridgeCapability]bridgeCapabilityCacheEntry)
+}
+
+func (e *Engine) SetBridgeCapabilityTTL(ttl time.Duration) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if ttl <= 0 {
+		ttl = 15 * time.Second
+	}
+	e.bridgeCapabilityTTL = ttl
+	e.bridgeCapabilityCache = make(map[BridgeCapability]bridgeCapabilityCacheEntry)
+}
+
+func (e *Engine) ResolveCommandRoute(command, subcommand string) CommandRoute {
+	return resolveCommandRoute(command, subcommand)
+}
+
+func (e *Engine) BridgeCapabilityAvailable(ctx context.Context, capability BridgeCapability) (bool, error) {
+	capability = BridgeCapability(strings.TrimSpace(string(capability)))
+	if capability == "" {
+		return false, nil
+	}
+
+	e.mu.RLock()
+	probe := e.bridgeCapabilityProbe
+	ttl := e.bridgeCapabilityTTL
+	cached, ok := e.bridgeCapabilityCache[capability]
+	e.mu.RUnlock()
+
+	if probe == nil {
+		return true, nil
+	}
+
+	now := time.Now()
+	if ok && ttl > 0 && now.Sub(cached.checkedAt) < ttl {
+		return cached.err == nil, cached.err
+	}
+
+	err := probe.Check(ctx, capability)
+
+	e.mu.Lock()
+	e.bridgeCapabilityCache[capability] = bridgeCapabilityCacheEntry{
+		checkedAt: now,
+		err:       err,
+	}
+	e.mu.Unlock()
+
+	return err == nil, err
 }
 
 // RegisterCommand registers a slash command handler (e.g. "/task").

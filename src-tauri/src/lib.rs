@@ -1,8 +1,9 @@
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use serde_json::{json, Value};
+use std::path::PathBuf;
+use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
 use tauri::menu::{Menu, MenuItem};
 use tauri::tray::{MouseButton, MouseButtonState, TrayIconBuilder, TrayIconEvent};
@@ -15,6 +16,7 @@ use tauri_plugin_shell::{
     ShellExt,
 };
 
+mod process_cleanup;
 mod runtime_logic;
 
 use crate::runtime_logic::{
@@ -27,6 +29,9 @@ use crate::runtime_logic::{
     DesktopEventPayload, DesktopNotificationRequest, DesktopNotificationResult,
     DesktopRuntimeSnapshot, DesktopRuntimeUnit, DesktopWindowChromeState, PluginRuntimeSummary,
     RuntimeStatus, SelectFilesMode, ShellActionKind,
+};
+use process_cleanup::{
+    collect_windows_port_conflicts, format_port_conflict_message, windows_process_executable_path,
 };
 
 #[cfg(test)]
@@ -42,6 +47,12 @@ const IM_BRIDGE_TEST_PORT: u16 = 7780;
 const DESKTOP_EVENT_NAME: &str = "agentforge://desktop-event";
 const MAX_RESTART_ATTEMPTS: u32 = 2;
 const TRAY_ID: &str = "agentforge-main-tray";
+const HEALTH_CHECK_INTERVAL_MS: u64 = 500;
+const BACKEND_HEALTH_CHECK_ITERATIONS: u32 = 60; // 30 seconds for cold starts with migrations
+const DEFAULT_HEALTH_CHECK_ITERATIONS: u32 = 20; // 10 seconds for bridge/im-bridge
+const GRACEFUL_SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(5);
+const LIVENESS_CHECK_INTERVAL_SECS: u64 = 30;
+const LIVENESS_FAILURE_THRESHOLD: u32 = 3;
 
 #[derive(Debug)]
 struct ManagedRuntimeState {
@@ -85,6 +96,7 @@ struct DesktopRuntimeState {
     backend: ManagedRuntimeState,
     bridge: ManagedRuntimeState,
     im_bridge: ManagedRuntimeState,
+    im_bridge_id_file_path: Option<PathBuf>,
     overall: RuntimeStatus,
 }
 
@@ -94,6 +106,7 @@ impl DesktopRuntimeState {
             backend: ManagedRuntimeState::new(format!("http://127.0.0.1:{BACKEND_PORT}")),
             bridge: ManagedRuntimeState::new(format!("http://127.0.0.1:{BRIDGE_PORT}")),
             im_bridge: ManagedRuntimeState::new(format!("http://127.0.0.1:{IM_BRIDGE_PORT}")),
+            im_bridge_id_file_path: None,
             overall: RuntimeStatus::Stopped,
         }
     }
@@ -104,6 +117,15 @@ impl DesktopRuntimeState {
             BRIDGE_LABEL => &mut self.bridge,
             IM_BRIDGE_LABEL => &mut self.im_bridge,
             _ => &mut self.backend,
+        }
+    }
+
+    fn runtime_ref(&self, label: &str) -> &ManagedRuntimeState {
+        match label {
+            BACKEND_LABEL => &self.backend,
+            BRIDGE_LABEL => &self.bridge,
+            IM_BRIDGE_LABEL => &self.im_bridge,
+            _ => &self.backend,
         }
     }
 
@@ -132,6 +154,122 @@ struct DesktopRuntimeManager {
     max_restart_attempts: u32,
 }
 
+fn detect_port_conflict(port: u16) -> Option<(u32, Option<String>)> {
+    #[cfg(target_os = "windows")]
+    {
+        let output = match Command::new("netstat").args(["-ano", "-p", "TCP"]).output() {
+            Ok(output) => output,
+            Err(error) => {
+                log::warn!("failed to run netstat for port conflict detection: {error}");
+                return None;
+            }
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let conflict = collect_windows_port_conflicts(&stdout, &[port], std::process::id())
+            .into_iter()
+            .next()?;
+        let executable_path = windows_process_executable_path(conflict.pid);
+        return Some((conflict.pid, executable_path));
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        let output = match Command::new("lsof")
+            .args(["-nP", "-iTCP", &format!(":{port}"), "-sTCP:LISTEN", "-t"])
+            .output()
+        {
+            Ok(output) => output,
+            Err(error) => {
+                log::warn!("failed to run lsof for port conflict detection: {error}");
+                return None;
+            }
+        };
+
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        let current_pid = std::process::id();
+        let pid = stdout
+            .split_whitespace()
+            .find_map(|pid_str| pid_str.parse::<u32>().ok())
+            .filter(|pid| *pid != 0 && *pid != current_pid)?;
+        return Some((pid, None));
+    }
+}
+
+fn runtime_port_conflict_message(label: &str, port: u16) -> Option<String> {
+    detect_port_conflict(port).map(|(pid, executable_path)| {
+        format_port_conflict_message(label, port, pid, executable_path.as_deref())
+    })
+}
+
+fn is_process_alive(pid: u32) -> bool {
+    #[cfg(unix)]
+    {
+        unsafe { libc::kill(pid as i32, 0) == 0 }
+    }
+    #[cfg(windows)]
+    {
+        // /FI filters by exact PID; "INFO: No tasks" in output means process exited
+        Command::new("tasklist")
+            .args(["/FI", &format!("PID eq {pid}"), "/NH", "/FO", "CSV"])
+            .output()
+            .map(|output| {
+                let stdout = String::from_utf8_lossy(&output.stdout);
+                // CSV output has PID in second column as "PID"; check no "INFO:" prefix
+                !stdout.contains("INFO:") && stdout.contains(&format!("\"{pid}\""))
+            })
+            .unwrap_or(false)
+    }
+    #[cfg(not(any(unix, windows)))]
+    {
+        true
+    }
+}
+
+/// Attempt graceful termination of a sidecar process, falling back to force kill.
+fn graceful_kill(pid: u32, label: &str) {
+    // Send graceful termination signal
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc::kill(pid as i32, libc::SIGTERM);
+        }
+    }
+    #[cfg(windows)]
+    {
+        // taskkill without /F sends WM_CLOSE, allowing graceful shutdown
+        let _ = Command::new("taskkill")
+            .args(["/PID", &pid.to_string()])
+            .output();
+    }
+
+    // Poll for process exit with timeout
+    let poll_interval = Duration::from_millis(250);
+    let max_polls = (GRACEFUL_SHUTDOWN_TIMEOUT.as_millis() / poll_interval.as_millis()) as u32;
+    for _ in 0..max_polls {
+        if !is_process_alive(pid) {
+            log::info!("[{label}] sidecar exited gracefully (PID {pid})");
+            return;
+        }
+        std::thread::sleep(poll_interval);
+    }
+
+    // Force kill with process tree on Windows
+    log::warn!("[{label}] graceful shutdown timed out for PID {pid}, force killing");
+    #[cfg(windows)]
+    {
+        let _ = Command::new("taskkill")
+            .args(["/F", "/T", "/PID", &pid.to_string()])
+            .output();
+    }
+    #[cfg(unix)]
+    {
+        unsafe {
+            libc::kill(pid as i32, libc::SIGKILL);
+        }
+    }
+}
+
 impl DesktopRuntimeManager {
     fn new() -> Self {
         Self {
@@ -153,6 +291,20 @@ impl DesktopRuntimeManager {
             .backend
             .url
             .unwrap_or_else(|| format!("http://localhost:{BACKEND_PORT}"))
+    }
+
+    fn ensure_port_available<R: Runtime>(
+        &self,
+        app: &AppHandle<R>,
+        label: &str,
+        port: u16,
+    ) -> bool {
+        if let Some(message) = runtime_port_conflict_message(label, port) {
+            self.mark_degraded(app, label, message);
+            return false;
+        }
+
+        true
     }
 
     fn mutate<F>(&self, mutator: F) -> DesktopRuntimeSnapshot
@@ -264,6 +416,7 @@ impl DesktopRuntimeManager {
             let runtime = state.runtime_mut(label);
             runtime.status = RuntimeStatus::Ready;
             runtime.last_error = None;
+            runtime.restart_count = 0;
         });
 
         self.emit_event(
@@ -300,6 +453,14 @@ impl DesktopRuntimeManager {
         );
     }
 
+    fn take_child(&self, label: &str) -> Option<(CommandChild, u32)> {
+        let mut state = self.inner.lock().unwrap();
+        let runtime = state.runtime_mut(label);
+        let child = runtime.child.take()?;
+        let pid = runtime.pid.unwrap_or(0);
+        Some((child, pid))
+    }
+
     fn stop_runtime(&self, label: &str, reason: Option<String>) -> Option<CommandChild> {
         let mut state = self.inner.lock().unwrap();
         let runtime = state.runtime_mut(label);
@@ -307,8 +468,81 @@ impl DesktopRuntimeManager {
         runtime.pid = None;
         runtime.status = RuntimeStatus::Stopped;
         runtime.last_error = reason;
+        if label == IM_BRIDGE_LABEL {
+            if let Some(path) = state.im_bridge_id_file_path.take() {
+                let _ = std::fs::remove_file(&path);
+            }
+        }
         state.recalculate_overall();
         child
+    }
+
+    fn shutdown_all(&self) {
+        // Collect all children first, then shutdown gracefully
+        let mut children: Vec<(&str, CommandChild, u32)> = Vec::new();
+        for label in [BACKEND_LABEL, BRIDGE_LABEL, IM_BRIDGE_LABEL] {
+            if let Some((child, pid)) = self.take_child(label) {
+                children.push((label, child, pid));
+            }
+        }
+
+        // Phase 1: Send graceful termination signal to all sidecars
+        for (label, _, pid) in &children {
+            if *pid > 0 {
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(*pid as i32, libc::SIGTERM);
+                }
+                #[cfg(windows)]
+                {
+                    let _ = Command::new("taskkill")
+                        .args(["/PID", &pid.to_string()])
+                        .output();
+                }
+                log::info!("[{label}] sent graceful shutdown signal to PID {pid}");
+            }
+        }
+
+        // Phase 2: Wait for all sidecars to exit, polling together
+        let poll_interval = Duration::from_millis(250);
+        let max_polls =
+            (GRACEFUL_SHUTDOWN_TIMEOUT.as_millis() / poll_interval.as_millis()) as u32;
+        for _ in 0..max_polls {
+            if children.iter().all(|(_, _, pid)| *pid == 0 || !is_process_alive(*pid)) {
+                break;
+            }
+            std::thread::sleep(poll_interval);
+        }
+
+        // Phase 3: Force kill any remaining, then update state
+        for (label, child, pid) in children {
+            if pid > 0 && is_process_alive(pid) {
+                log::warn!("[{label}] graceful shutdown timed out for PID {pid}, force killing");
+                #[cfg(windows)]
+                {
+                    let _ = Command::new("taskkill")
+                        .args(["/F", "/T", "/PID", &pid.to_string()])
+                        .output();
+                }
+                #[cfg(unix)]
+                unsafe {
+                    libc::kill(pid as i32, libc::SIGKILL);
+                }
+            }
+            let _ = child.kill();
+            self.mutate(|state| {
+                let runtime = state.runtime_mut(label);
+                runtime.pid = None;
+                runtime.status = RuntimeStatus::Stopped;
+                runtime.last_error = Some("app shutdown".to_string());
+            });
+        }
+
+        // Clean up IM bridge ID file
+        let id_file_path = self.inner.lock().unwrap().im_bridge_id_file_path.take();
+        if let Some(path) = id_file_path {
+            let _ = std::fs::remove_file(&path);
+        }
     }
 
     fn ensure_tray<R: Runtime>(&self, app: &AppHandle<R>) -> Result<(), String> {
@@ -374,9 +608,15 @@ impl DesktopRuntimeManager {
             let _ = self.start_bridge(app.clone(), false).await;
             let _ = self.start_im_bridge(app.clone(), false).await;
         }
+
+        self.start_liveness_monitor(app);
     }
 
     async fn start_backend<R: Runtime>(&self, app: AppHandle<R>, is_restart: bool) -> bool {
+        if !self.ensure_port_available(&app, BACKEND_LABEL, BACKEND_PORT) {
+            return false;
+        }
+
         let port_arg = BACKEND_PORT.to_string();
         let command = match app.shell().sidecar("server") {
             Ok(command) => command
@@ -406,7 +646,7 @@ impl DesktopRuntimeManager {
                     format!("http://127.0.0.1:{BACKEND_PORT}/health"),
                     format!("http://127.0.0.1:{BACKEND_PORT}/api/v1/health"),
                 ];
-                if self.wait_for_health(&health_urls).await {
+                if self.wait_for_health(&health_urls, BACKEND_HEALTH_CHECK_ITERATIONS).await {
                     self.mark_ready(&app, BACKEND_LABEL);
                     true
                 } else {
@@ -434,6 +674,10 @@ impl DesktopRuntimeManager {
     }
 
     async fn start_bridge<R: Runtime>(&self, app: AppHandle<R>, is_restart: bool) -> bool {
+        if !self.ensure_port_available(&app, BRIDGE_LABEL, BRIDGE_PORT) {
+            return false;
+        }
+
         let backend_url = self.backend_url();
         let backend_ws_url = format!("ws://127.0.0.1:{BACKEND_PORT}/ws/bridge");
         let bridge_port = BRIDGE_PORT.to_string();
@@ -467,7 +711,7 @@ impl DesktopRuntimeManager {
                     format!("http://127.0.0.1:{BRIDGE_PORT}/health"),
                     format!("http://127.0.0.1:{BRIDGE_PORT}/bridge/health"),
                 ];
-                if self.wait_for_health(&health_urls).await {
+                if self.wait_for_health(&health_urls, DEFAULT_HEALTH_CHECK_ITERATIONS).await {
                     self.mark_ready(&app, BRIDGE_LABEL);
                     true
                 } else {
@@ -494,7 +738,7 @@ impl DesktopRuntimeManager {
         }
     }
 
-    fn im_bridge_id_file<R: Runtime>(&self, app: &AppHandle<R>) -> String {
+    fn im_bridge_id_file<R: Runtime>(&self, app: &AppHandle<R>) -> PathBuf {
         let primary_runtime_dir = app
             .path()
             .app_data_dir()
@@ -504,25 +748,30 @@ impl DesktopRuntimeManager {
 
         for candidate in [primary_runtime_dir, fallback_runtime_dir] {
             if std::fs::create_dir_all(&candidate).is_ok() {
-                return candidate
-                    .join("im-bridge-id")
-                    .to_string_lossy()
-                    .into_owned();
+                return candidate.join("im-bridge-id");
             }
         }
 
         std::env::temp_dir()
             .join("agentforge-desktop-runtime")
             .join("im-bridge-id")
-            .to_string_lossy()
-            .into_owned()
     }
 
     async fn start_im_bridge<R: Runtime>(&self, app: AppHandle<R>, is_restart: bool) -> bool {
+        if !self.ensure_port_available(&app, IM_BRIDGE_LABEL, IM_BRIDGE_PORT) {
+            return false;
+        }
+
         let backend_url = self.backend_url();
         let notify_port = IM_BRIDGE_PORT.to_string();
         let test_port = IM_BRIDGE_TEST_PORT.to_string();
-        let im_bridge_id_file = self.im_bridge_id_file(&app);
+        let im_bridge_id_path = self.im_bridge_id_file(&app);
+        let im_bridge_id_file = im_bridge_id_path.to_string_lossy().into_owned();
+
+        // Store path for cleanup on shutdown
+        self.mutate(|state| {
+            state.im_bridge_id_file_path = Some(im_bridge_id_path);
+        });
         let project_scope = std::env::var("AGENTFORGE_PROJECT_ID")
             .ok()
             .map(|value| value.trim().to_string())
@@ -563,7 +812,7 @@ impl DesktopRuntimeManager {
                 self.watch_sidecar_events(app.clone(), IM_BRIDGE_LABEL, rx);
 
                 let health_urls = [format!("http://127.0.0.1:{IM_BRIDGE_PORT}/im/health")];
-                if self.wait_for_health(&health_urls).await {
+                if self.wait_for_health(&health_urls, DEFAULT_HEALTH_CHECK_ITERATIONS).await {
                     self.mark_ready(&app, IM_BRIDGE_LABEL);
                     true
                 } else {
@@ -669,17 +918,25 @@ impl DesktopRuntimeManager {
         }
 
         if label == BACKEND_LABEL {
-            if let Some(child) = self.stop_runtime(
-                BRIDGE_LABEL,
-                Some("bridge stopped while backend restarts".to_string()),
-            ) {
+            if let Some((child, pid)) = self.take_child(BRIDGE_LABEL) {
+                if pid > 0 {
+                    graceful_kill(pid, BRIDGE_LABEL);
+                }
                 let _ = child.kill();
+                self.stop_runtime(
+                    BRIDGE_LABEL,
+                    Some("bridge stopped while backend restarts".to_string()),
+                );
             }
-            if let Some(child) = self.stop_runtime(
-                IM_BRIDGE_LABEL,
-                Some("IM bridge stopped while backend restarts".to_string()),
-            ) {
+            if let Some((child, pid)) = self.take_child(IM_BRIDGE_LABEL) {
+                if pid > 0 {
+                    graceful_kill(pid, IM_BRIDGE_LABEL);
+                }
                 let _ = child.kill();
+                self.stop_runtime(
+                    IM_BRIDGE_LABEL,
+                    Some("IM bridge stopped while backend restarts".to_string()),
+                );
             }
 
             if self.start_backend(app.clone(), true).await {
@@ -699,8 +956,8 @@ impl DesktopRuntimeManager {
         }
     }
 
-    async fn wait_for_health(&self, urls: &[String]) -> bool {
-        for _ in 0..20 {
+    async fn wait_for_health(&self, urls: &[String], max_iterations: u32) -> bool {
+        for _ in 0..max_iterations {
             for url in urls {
                 match self.client.get(url).send().await {
                     Ok(response) if response.status().is_success() => return true,
@@ -708,10 +965,67 @@ impl DesktopRuntimeManager {
                 }
             }
 
-            thread::sleep(Duration::from_millis(500));
+            tokio::time::sleep(Duration::from_millis(HEALTH_CHECK_INTERVAL_MS)).await;
         }
 
         false
+    }
+
+    async fn check_health_once(&self, port: u16, paths: &[&str]) -> bool {
+        for path in paths {
+            let url = format!("http://127.0.0.1:{port}/{path}");
+            if let Ok(response) = self.client.get(&url).send().await {
+                if response.status().is_success() {
+                    return true;
+                }
+            }
+        }
+        false
+    }
+
+    fn start_liveness_monitor<R: Runtime>(&self, app: AppHandle<R>) {
+        let manager = self.clone();
+        tauri::async_runtime::spawn(async move {
+            let interval = Duration::from_secs(LIVENESS_CHECK_INTERVAL_SECS);
+            let mut consecutive_failures: [u32; 3] = [0, 0, 0];
+            let checks: [(&str, u16, &[&str]); 3] = [
+                (BACKEND_LABEL, BACKEND_PORT, &["health", "api/v1/health"]),
+                (BRIDGE_LABEL, BRIDGE_PORT, &["health", "bridge/health"]),
+                (IM_BRIDGE_LABEL, IM_BRIDGE_PORT, &["im/health"]),
+            ];
+
+            loop {
+                tokio::time::sleep(interval).await;
+
+                for (idx, (label, port, paths)) in checks.iter().enumerate() {
+                    let current_status = {
+                        let state = manager.inner.lock().unwrap();
+                        state.runtime_ref(label).status
+                    };
+
+                    if current_status != RuntimeStatus::Ready {
+                        consecutive_failures[idx] = 0;
+                        continue;
+                    }
+
+                    if manager.check_health_once(*port, paths).await {
+                        consecutive_failures[idx] = 0;
+                    } else {
+                        consecutive_failures[idx] += 1;
+                        if consecutive_failures[idx] >= LIVENESS_FAILURE_THRESHOLD {
+                            manager.mark_degraded(
+                                &app,
+                                label,
+                                format!(
+                                    "{label} failed {LIVENESS_FAILURE_THRESHOLD} consecutive liveness checks"
+                                ),
+                            );
+                            consecutive_failures[idx] = 0;
+                        }
+                    }
+                }
+            }
+        });
     }
 
     async fn plugin_runtime_summary(&self) -> PluginRuntimeSummary {
@@ -738,7 +1052,7 @@ impl DesktopRuntimeManager {
                 .push(bridge_plugin_summary_unavailable_warning());
         }
 
-        if let Ok(response) = self.client.get(format!("{bridge_url}/active")).send().await {
+        if let Ok(response) = self.client.get(format!("{bridge_url}/bridge/active")).send().await {
             if let Ok(payload) = response.json::<Value>().await {
                 summary.active_runtime_count = active_runtime_count(&payload);
             }
@@ -1170,7 +1484,7 @@ pub fn run() {
     let runtime_manager = DesktopRuntimeManager::new();
     let setup_manager = runtime_manager.clone();
 
-    tauri::Builder::default()
+    let app = tauri::Builder::default()
         .plugin(tauri_plugin_process::init())
         .plugin(tauri_plugin_notification::init())
         .plugin(tauri_plugin_dialog::init())
@@ -1229,8 +1543,15 @@ pub fn run() {
             unregister_shortcut,
             update_tray,
         ])
-        .run(tauri::generate_context!())
-        .expect("error while running tauri application");
+        .build(tauri::generate_context!())
+        .expect("error while building tauri application");
+
+    let exit_manager = app.state::<DesktopRuntimeManager>().inner().clone();
+    app.run(move |_app, event| {
+        if let tauri::RunEvent::Exit = event {
+            exit_manager.shutdown_all();
+        }
+    });
 }
 
 #[cfg(test)]

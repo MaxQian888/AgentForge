@@ -11,26 +11,26 @@ import (
 
 // CostStats aggregates cost information for a task or project.
 type CostStats struct {
-	TotalCostUsd    float64 `json:"totalCostUsd"`
-	TotalInputTokens  int64 `json:"totalInputTokens"`
-	TotalOutputTokens int64 `json:"totalOutputTokens"`
-	TotalTurns        int   `json:"totalTurns"`
-	RunCount          int   `json:"runCount"`
+	TotalCostUsd      float64 `json:"totalCostUsd"`
+	TotalInputTokens  int64   `json:"totalInputTokens"`
+	TotalOutputTokens int64   `json:"totalOutputTokens"`
+	TotalTurns        int     `json:"totalTurns"`
+	RunCount          int     `json:"runCount"`
 }
 
 type CostService struct {
-	agentRunRepo AgentRunRepository
-	taskRepo     TaskRepository
-	hub          *ws.Hub
-	budgetWarnPct  float64 // 0.8 = warn at 80%
-	budgetKillPct  float64 // 1.0 = kill at 100%
+	agentRunRepo  AgentRunRepository
+	taskRepo      TaskRepository
+	hub           *ws.Hub
+	budgetWarnPct float64 // 0.8 = warn at 80%
+	budgetKillPct float64 // 1.0 = kill at 100%
 }
 
 func NewCostService(agentRunRepo AgentRunRepository, taskRepo TaskRepository, hub *ws.Hub) *CostService {
 	return &CostService{
-		agentRunRepo: agentRunRepo,
-		taskRepo:     taskRepo,
-		hub:          hub,
+		agentRunRepo:  agentRunRepo,
+		taskRepo:      taskRepo,
+		hub:           hub,
 		budgetWarnPct: 0.8,
 		budgetKillPct: 1.0,
 	}
@@ -38,7 +38,7 @@ func NewCostService(agentRunRepo AgentRunRepository, taskRepo TaskRepository, hu
 
 // RecordCost updates cost on an agent run and checks budget thresholds.
 func (s *CostService) RecordCost(ctx context.Context, runID uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int) error {
-	if err := s.agentRunRepo.UpdateCost(ctx, runID, inputTokens, outputTokens, cacheReadTokens, costUsd, turnCount); err != nil {
+	if err := s.agentRunRepo.UpdateCost(ctx, runID, inputTokens, outputTokens, cacheReadTokens, costUsd, turnCount, nil); err != nil {
 		return fmt.Errorf("record cost: %w", err)
 	}
 
@@ -66,9 +66,9 @@ func (s *CostService) RecordCost(ctx context.Context, runID uuid.UUID, inputToke
 				Type:      ws.EventBudgetExceeded,
 				ProjectID: task.ProjectID.String(),
 				Payload: map[string]any{
-					"taskId":  task.ID.String(),
-					"budget":  task.BudgetUsd,
-					"spent":   taskCost.TotalCostUsd,
+					"taskId": task.ID.String(),
+					"budget": task.BudgetUsd,
+					"spent":  taskCost.TotalCostUsd,
 				},
 			})
 		} else if ratio >= s.budgetWarnPct {

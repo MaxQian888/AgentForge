@@ -2,6 +2,7 @@ package core
 
 import (
 	"context"
+	"errors"
 	"strings"
 	"sync"
 	"testing"
@@ -178,5 +179,54 @@ func TestEngine_UnknownSlashCommandWithoutFallbackRepliesWithHelp(t *testing.T) 
 	}
 	if !strings.Contains(p.replies[0], "/help") {
 		t.Fatalf("help reply = %q", p.replies[0])
+	}
+}
+
+func TestEngine_ResolveCommandRouteClassifiesBridgeAndGoPaths(t *testing.T) {
+	e := NewEngine(&mockPlatform{})
+
+	bridgeRoute := e.ResolveCommandRoute("/task", "decompose")
+	if bridgeRoute.Target != CommandRouteBridgePreferred || bridgeRoute.Capability != BridgeCapabilityDecompose || !bridgeRoute.AllowFallback {
+		t.Fatalf("bridgeRoute = %+v", bridgeRoute)
+	}
+
+	goRoute := e.ResolveCommandRoute("/task", "create")
+	if goRoute.Target != CommandRouteGoAPI || goRoute.Capability != "" {
+		t.Fatalf("goRoute = %+v", goRoute)
+	}
+}
+
+func TestEngine_BridgeCapabilityAvailableCachesProbeResult(t *testing.T) {
+	e := NewEngine(&mockPlatform{})
+	calls := 0
+	e.SetBridgeCapabilityProbe(BridgeCapabilityProbeFunc(func(ctx context.Context, capability BridgeCapability) error {
+		calls++
+		if capability != BridgeCapabilityRuntimes {
+			t.Fatalf("capability = %q", capability)
+		}
+		return nil
+	}))
+
+	for i := 0; i < 2; i++ {
+		available, err := e.BridgeCapabilityAvailable(context.Background(), BridgeCapabilityRuntimes)
+		if err != nil || !available {
+			t.Fatalf("available=%t err=%v", available, err)
+		}
+	}
+
+	if calls != 1 {
+		t.Fatalf("probe calls = %d, want 1", calls)
+	}
+}
+
+func TestEngine_BridgeCapabilityAvailableReturnsProbeError(t *testing.T) {
+	e := NewEngine(&mockPlatform{})
+	e.SetBridgeCapabilityProbe(BridgeCapabilityProbeFunc(func(ctx context.Context, capability BridgeCapability) error {
+		return errors.New("bridge unavailable")
+	}))
+
+	available, err := e.BridgeCapabilityAvailable(context.Background(), BridgeCapabilityTools)
+	if available || err == nil || !strings.Contains(err.Error(), "bridge unavailable") {
+		t.Fatalf("available=%t err=%v", available, err)
 	}
 }

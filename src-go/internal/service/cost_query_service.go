@@ -80,6 +80,8 @@ func (s *CostQueryService) ProjectSummary(ctx context.Context, projectID uuid.UU
 		DailyCosts:           buildDailyCostSeries(runs),
 		BudgetSummary:        budgetSummary,
 		PeriodRollups:        buildPeriodRollups(runs, s.now()),
+		CostCoverage:         buildCostCoverageSummary(runs),
+		RuntimeBreakdown:     buildRuntimeCostBreakdown(runs),
 	}, nil
 }
 
@@ -134,7 +136,7 @@ func aggregateCostSummary(runs []*model.AgentRun) model.CostSummaryDTO {
 		if run == nil {
 			continue
 		}
-		summary.TotalCostUsd += run.CostUsd
+		summary.TotalCostUsd += pricedCostForRun(run)
 		summary.TotalInputTokens += run.InputTokens
 		summary.TotalOutputTokens += run.OutputTokens
 		summary.TotalCacheReadTokens += run.CacheReadTokens
@@ -174,7 +176,7 @@ func buildDailyCostSeries(runs []*model.AgentRun) []model.CostTimeSeriesDTO {
 			entry = &bucket{}
 			byDay[day] = entry
 		}
-		entry.cost += run.CostUsd
+		entry.cost += pricedCostForRun(run)
 		entry.runs++
 	}
 	days := make([]string, 0, len(byDay))
@@ -197,8 +199,10 @@ func buildDailyCostSeries(runs []*model.AgentRun) []model.CostTimeSeriesDTO {
 
 func buildTaskCostDetails(tasks []*model.Task, runs []*model.AgentRun) []model.TaskCostDetailDTO {
 	type aggregate struct {
-		summary *model.TaskCostDetailDTO
-		order   string
+		summary      *model.TaskCostDetailDTO
+		order        string
+		fallbackCost float64
+		hasRunCost   bool
 	}
 	byTask := map[uuid.UUID]*aggregate{}
 	for _, task := range tasks {
@@ -209,9 +213,9 @@ func buildTaskCostDetails(tasks []*model.Task, runs []*model.AgentRun) []model.T
 			summary: &model.TaskCostDetailDTO{
 				TaskID:    task.ID.String(),
 				TaskTitle: task.Title,
-				CostUsd:   roundCost(task.SpentUsd),
 			},
-			order: task.Title,
+			order:        task.Title,
+			fallbackCost: roundCost(task.SpentUsd),
 		}
 	}
 
@@ -234,13 +238,17 @@ func buildTaskCostDetails(tasks []*model.Task, runs []*model.AgentRun) []model.T
 		entry.summary.InputTokens += run.InputTokens
 		entry.summary.OutputTokens += run.OutputTokens
 		entry.summary.CacheReadTokens += run.CacheReadTokens
-		if entry.summary.CostUsd == 0 {
-			entry.summary.CostUsd = roundCost(entry.summary.CostUsd + run.CostUsd)
-		}
+		entry.summary.CostUsd += pricedCostForRun(run)
+		entry.hasRunCost = true
 	}
 
 	items := make([]model.TaskCostDetailDTO, 0, len(byTask))
 	for _, entry := range byTask {
+		if entry.hasRunCost {
+			entry.summary.CostUsd = roundCost(entry.summary.CostUsd)
+		} else {
+			entry.summary.CostUsd = entry.fallbackCost
+		}
 		if entry.summary.AgentRuns == 0 && entry.summary.CostUsd == 0 {
 			continue
 		}
@@ -272,7 +280,7 @@ func buildSprintCostSummaries(sprints []*model.Sprint, tasks []*model.Task, runs
 		bySprint[sprint.ID] = &model.SprintCostSummaryDTO{
 			SprintID:   sprint.ID.String(),
 			SprintName: sprint.Name,
-			CostUsd:    roundCost(sprint.SpentUsd),
+			CostUsd:    0,
 			BudgetUsd:  roundCost(sprint.TotalBudgetUsd),
 		}
 	}
@@ -289,12 +297,14 @@ func buildSprintCostSummaries(sprints []*model.Sprint, tasks []*model.Task, runs
 		if entry == nil {
 			continue
 		}
+		entry.CostUsd += pricedCostForRun(run)
 		entry.InputTokens += run.InputTokens
 		entry.OutputTokens += run.OutputTokens
 	}
 
 	items := make([]model.SprintCostSummaryDTO, 0, len(bySprint))
 	for _, entry := range bySprint {
+		entry.CostUsd = roundCost(entry.CostUsd)
 		if entry.CostUsd == 0 && entry.BudgetUsd == 0 && entry.InputTokens == 0 && entry.OutputTokens == 0 {
 			continue
 		}
@@ -332,7 +342,7 @@ func buildPeriodRollups(runs []*model.AgentRun, now time.Time) map[string]model.
 				continue
 			}
 			entry := rollups[key]
-			entry.CostUsd += run.CostUsd
+			entry.CostUsd += pricedCostForRun(run)
 			entry.InputTokens += run.InputTokens
 			entry.OutputTokens += run.OutputTokens
 			entry.CacheReadTokens += run.CacheReadTokens
@@ -346,6 +356,147 @@ func buildPeriodRollups(runs []*model.AgentRun, now time.Time) map[string]model.
 		rollups[key] = entry
 	}
 	return rollups
+}
+
+func buildCostCoverageSummary(runs []*model.AgentRun) *model.CostCoverageSummaryDTO {
+	summary := &model.CostCoverageSummaryDTO{}
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		summary.TotalRunCount++
+		accounting := effectiveCostAccounting(run)
+		costUsd := pricedCostForRun(run)
+		switch accounting.Mode {
+		case model.CostAccountingModeAuthoritativeTotal:
+			summary.PricedRunCount++
+			summary.AuthoritativeRunCount++
+			summary.AuthoritativeCostUsd += costUsd
+			summary.TotalCostUsd += costUsd
+		case model.CostAccountingModeEstimatedAPI:
+			summary.PricedRunCount++
+			summary.EstimatedRunCount++
+			summary.EstimatedCostUsd += costUsd
+			summary.TotalCostUsd += costUsd
+		case model.CostAccountingModePlanIncluded:
+			summary.PlanIncludedRunCount++
+			summary.HasCoverageGap = true
+		default:
+			summary.UnpricedRunCount++
+			summary.HasCoverageGap = true
+		}
+		if accounting.Coverage != model.CostAccountingCoverageFull {
+			summary.HasCoverageGap = true
+		}
+	}
+	summary.TotalCostUsd = roundCost(summary.TotalCostUsd)
+	summary.AuthoritativeCostUsd = roundCost(summary.AuthoritativeCostUsd)
+	summary.EstimatedCostUsd = roundCost(summary.EstimatedCostUsd)
+	return summary
+}
+
+func buildRuntimeCostBreakdown(runs []*model.AgentRun) []model.RuntimeCostBreakdownDTO {
+	type key struct {
+		runtime  string
+		provider string
+		model    string
+	}
+	byKey := map[key]*model.RuntimeCostBreakdownDTO{}
+	for _, run := range runs {
+		if run == nil {
+			continue
+		}
+		k := key{runtime: run.Runtime, provider: run.Provider, model: run.Model}
+		entry := byKey[k]
+		if entry == nil {
+			entry = &model.RuntimeCostBreakdownDTO{
+				Runtime:  run.Runtime,
+				Provider: run.Provider,
+				Model:    run.Model,
+			}
+			byKey[k] = entry
+		}
+		entry.RunCount++
+		accounting := effectiveCostAccounting(run)
+		costUsd := pricedCostForRun(run)
+		switch accounting.Mode {
+		case model.CostAccountingModeAuthoritativeTotal:
+			entry.PricedRunCount++
+			entry.AuthoritativeRunCount++
+			entry.TotalCostUsd += costUsd
+		case model.CostAccountingModeEstimatedAPI:
+			entry.PricedRunCount++
+			entry.EstimatedRunCount++
+			entry.TotalCostUsd += costUsd
+		case model.CostAccountingModePlanIncluded:
+			entry.PlanIncludedRunCount++
+		default:
+			entry.UnpricedRunCount++
+		}
+	}
+
+	items := make([]model.RuntimeCostBreakdownDTO, 0, len(byKey))
+	for _, entry := range byKey {
+		entry.TotalCostUsd = roundCost(entry.TotalCostUsd)
+		items = append(items, *entry)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].TotalCostUsd == items[j].TotalCostUsd {
+			if items[i].Runtime == items[j].Runtime {
+				if items[i].Provider == items[j].Provider {
+					return items[i].Model < items[j].Model
+				}
+				return items[i].Provider < items[j].Provider
+			}
+			return items[i].Runtime < items[j].Runtime
+		}
+		return items[i].TotalCostUsd > items[j].TotalCostUsd
+	})
+	return items
+}
+
+func effectiveCostAccounting(run *model.AgentRun) *model.CostAccountingSnapshot {
+	if run == nil {
+		return &model.CostAccountingSnapshot{
+			Mode:     model.CostAccountingModeUnpriced,
+			Coverage: model.CostAccountingCoverageNone,
+			Source:   "missing_run",
+		}
+	}
+	if run.CostAccounting != nil {
+		return run.CostAccounting.Clone()
+	}
+	if run.CostUsd > 0 {
+		if run.Provider == "codex" || (run.Runtime == "codex" && run.Provider != "openai") {
+			return &model.CostAccountingSnapshot{
+				Mode:     model.CostAccountingModePlanIncluded,
+				Coverage: model.CostAccountingCoverageNone,
+				Source:   "legacy_plan_usage",
+			}
+		}
+		return &model.CostAccountingSnapshot{
+			Mode:     model.CostAccountingModeEstimatedAPI,
+			Coverage: model.CostAccountingCoveragePartial,
+			Source:   "legacy_inferred_pricing",
+		}
+	}
+	return &model.CostAccountingSnapshot{
+		Mode:     model.CostAccountingModeUnpriced,
+		Coverage: model.CostAccountingCoverageNone,
+		Source:   "legacy_unpriced",
+	}
+}
+
+func pricedCostForRun(run *model.AgentRun) float64 {
+	if run == nil {
+		return 0
+	}
+	switch effectiveCostAccounting(run).Mode {
+	case model.CostAccountingModePlanIncluded, model.CostAccountingModeUnpriced:
+		return 0
+	default:
+		return run.CostUsd
+	}
 }
 
 func roundCost(value float64) float64 {

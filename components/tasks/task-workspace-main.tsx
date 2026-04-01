@@ -41,6 +41,7 @@ import { cn } from "@/lib/utils";
 import { useCustomFieldStore } from "@/lib/stores/custom-field-store";
 import { useDocsStore, flattenDocsTree } from "@/lib/stores/docs-store";
 import { useEntityLinkStore } from "@/lib/stores/entity-link-store";
+import { useTaskStore } from "@/lib/stores/task-store";
 import { FieldValueCell } from "@/components/fields/field-value-cell";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RoadmapView } from "@/components/milestones/roadmap-view";
@@ -48,6 +49,14 @@ import type { Task, TaskPriority, TaskStatus } from "@/lib/stores/task-store";
 import type { LinkedDocItem } from "./linked-docs-panel";
 import Link from "next/link";
 import { buildDocsHref } from "@/lib/route-hrefs";
+import { HighlightedText } from "@/components/shared/highlighted-text";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export interface BulkActionFailure {
   taskId: string;
@@ -701,88 +710,99 @@ export function TaskListView({
       ) : null}
       {customFields.length > 0 ? (
         <div className="grid gap-3 md:grid-cols-3">
-          <label className="flex flex-col gap-1 text-xs font-medium">
+          <div className="flex flex-col gap-1 text-xs font-medium">
             {t("list.customFieldFilterField")}
-            <select
-              aria-label={t("list.customFieldFilterField")}
-              className="h-8 rounded-md border bg-background px-2 text-xs"
+            <Select
               value={activeCustomFilterFieldId}
-              onChange={(event) => {
-                const nextFieldId = event.target.value;
+              onValueChange={(nextFieldId) => {
                 if (activeCustomFilterFieldId !== "all") {
                   onSetCustomFieldFilter(activeCustomFilterFieldId, "all");
                 }
                 setActiveCustomFilterFieldId(nextFieldId);
               }}
             >
-              <option value="all">{t("list.customFieldNone")}</option>
-              {customFields.map((field) => (
-                <option key={field.id} value={field.id}>
-                  {field.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
+              <SelectTrigger aria-label={t("list.customFieldFilterField")} className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("list.customFieldNone")}</SelectItem>
+                {customFields.map((field) => (
+                  <SelectItem key={field.id} value={field.id}>
+                    {field.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1 text-xs font-medium">
             {t("list.customFieldFilterValue")}
-            <select
-              aria-label={t("list.customFieldFilterValue")}
-              className="h-8 rounded-md border bg-background px-2 text-xs"
+            <Select
               disabled={activeCustomFilterFieldId === "all"}
               value={activeCustomFilterValue}
-              onChange={(event) => {
+              onValueChange={(value) => {
                 if (activeCustomFilterFieldId === "all") {
                   return;
                 }
                 onSetCustomFieldFilter(
                   activeCustomFilterFieldId,
-                  event.target.value as string | "all"
+                  value as string | "all"
                 );
               }}
             >
-              <option value="all">{t("list.customFieldNone")}</option>
-              {(activeCustomFilterFieldId !== "all"
-                ? customFieldOptions[activeCustomFilterFieldId] ?? []
-                : []
-              ).map((option) => (
-                <option key={option} value={option}>
-                  {option}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium">
+              <SelectTrigger aria-label={t("list.customFieldFilterValue")} className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("list.customFieldNone")}</SelectItem>
+                {(activeCustomFilterFieldId !== "all"
+                  ? customFieldOptions[activeCustomFilterFieldId] ?? []
+                  : []
+                ).map((option) => (
+                  <SelectItem key={option} value={option}>
+                    {option}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1 text-xs font-medium">
             {t("list.customFieldSort")}
-            <select
-              aria-label={t("list.customFieldSort")}
-              className="h-8 rounded-md border bg-background px-2 text-xs"
+            <Select
               value={customSortFieldId}
-              onChange={(event) => setCustomSortFieldId(event.target.value)}
+              onValueChange={setCustomSortFieldId}
             >
-              <option value="all">{t("list.customFieldNone")}</option>
-              {customFields.map((field) => (
-                <option key={field.id} value={field.id}>
-                  {field.name}
-                </option>
-              ))}
-            </select>
-          </label>
-          <label className="flex flex-col gap-1 text-xs font-medium md:col-span-3">
+              <SelectTrigger aria-label={t("list.customFieldSort")} className="h-8 text-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("list.customFieldNone")}</SelectItem>
+                {customFields.map((field) => (
+                  <SelectItem key={field.id} value={field.id}>
+                    {field.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="flex flex-col gap-1 text-xs font-medium md:col-span-3">
             {t("list.customFieldGroup")}
-            <select
-              aria-label={t("list.customFieldGroup")}
-              className="h-8 rounded-md border bg-background px-2 text-xs md:max-w-xs"
+            <Select
               value={groupByFieldId}
-              onChange={(event) => setGroupByFieldId(event.target.value)}
+              onValueChange={setGroupByFieldId}
             >
-              <option value="all">{t("list.customFieldNone")}</option>
-              {customFields.map((field) => (
-                <option key={field.id} value={field.id}>
-                  {field.name}
-                </option>
-              ))}
-            </select>
-          </label>
+              <SelectTrigger aria-label={t("list.customFieldGroup")} className="h-8 text-xs md:max-w-xs">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="all">{t("list.customFieldNone")}</SelectItem>
+                {customFields.map((field) => (
+                  <SelectItem key={field.id} value={field.id}>
+                    {field.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       ) : null}
 
@@ -886,10 +906,14 @@ export function TaskListView({
                     ) : depth > 0 ? (
                       <span className="w-3 text-xs text-muted-foreground">└</span>
                     ) : null}
-                    <span className="font-medium">{task.title}</span>
+                    <span className="font-medium">
+                      <HighlightedText text={task.title} query={filters.search} />
+                    </span>
                   </div>
                   {showDescriptions ? (
-                    <div className="text-xs text-muted-foreground">{task.description}</div>
+                    <div className="text-xs text-muted-foreground">
+                      <HighlightedText text={task.description} query={filters.search} />
+                    </div>
                   ) : null}
                   {(() => {
                     const dependencyState = getTaskDependencyState(task, allTasks);
@@ -923,20 +947,23 @@ export function TaskListView({
                 </div>
               </TableCell>
               <TableCell>
-                <select
-                  aria-label={`Status for ${task.title}`}
-                  className="h-8 rounded-md border bg-background px-2 text-xs"
+                <Select
                   value={task.status}
-                  onChange={(event) =>
-                    void handleInlineStatusChange(task, event.target.value as TaskStatus)
+                  onValueChange={(value) =>
+                    void handleInlineStatusChange(task, value as TaskStatus)
                   }
                 >
-                  {inlineStatusOptions.map((status) => (
-                    <option key={status} value={status}>
-                      {status}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger aria-label={`Status for ${task.title}`} className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {inlineStatusOptions.map((status) => (
+                      <SelectItem key={status} value={status}>
+                        {status}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </TableCell>
               <TableCell>
                 {formatProgressHealthKey(task) ? (
@@ -958,20 +985,23 @@ export function TaskListView({
                 )}
               </TableCell>
               <TableCell>
-                <select
-                  aria-label={`Priority for ${task.title}`}
-                  className="h-8 rounded-md border bg-background px-2 text-xs"
+                <Select
                   value={task.priority}
-                  onChange={(event) =>
-                    void handleInlinePriorityChange(task, event.target.value as TaskPriority)
+                  onValueChange={(value) =>
+                    void handleInlinePriorityChange(task, value as TaskPriority)
                   }
                 >
-                  {inlinePriorityOptions.map((priority) => (
-                    <option key={priority} value={priority}>
-                      {priority}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger aria-label={`Priority for ${task.title}`} className="h-8 text-xs">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {inlinePriorityOptions.map((priority) => (
+                      <SelectItem key={priority} value={priority}>
+                        {priority}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </TableCell>
               <TableCell>{task.assigneeName ?? t("list.unassigned")}</TableCell>
               <TableCell>{formatPlanningState(task, t("planning.unscheduled"))}</TableCell>
@@ -1024,12 +1054,28 @@ export function TaskListView({
 type TimelineGranularity = "day" | "week" | "month";
 type CalendarMode = "month" | "week";
 
+interface PlanningTaskPlacement {
+  slotIndex: number;
+  rowIndex: number;
+  span: number;
+}
+
+interface PlanningDependencyConnector {
+  blockerId: string;
+  taskId: string;
+  blocker: PlanningTaskPlacement;
+  task: PlanningTaskPlacement;
+}
+
 function PlanningTaskChip({
   task,
   index,
   isSelected,
+  isHovered,
   density,
   onTaskOpen,
+  onTaskHoverChange,
+  searchQuery,
   span = 1,
   testId,
   granularity,
@@ -1038,8 +1084,11 @@ function PlanningTaskChip({
   task: Task;
   index: number;
   isSelected: boolean;
+  isHovered: boolean;
   density: "comfortable" | "compact";
   onTaskOpen: (taskId: string) => void;
+  onTaskHoverChange: (taskId: string | null) => void;
+  searchQuery?: string;
   span?: number;
   testId?: string;
   granularity?: TimelineGranularity;
@@ -1058,6 +1107,7 @@ function PlanningTaskChip({
           {...provided.dragHandleProps}
           data-task-id={task.id}
           data-selected={isSelected ? "true" : "false"}
+          data-hovered={isHovered ? "true" : "false"}
           data-testid={testId}
           data-span={String(span)}
           data-granularity={granularity}
@@ -1070,9 +1120,15 @@ function PlanningTaskChip({
           )}
           style={spanWidth ? { width: spanWidth } : undefined}
           onClick={() => onTaskOpen(task.id)}
+          onMouseEnter={() => onTaskHoverChange(task.id)}
+          onMouseLeave={() => onTaskHoverChange(null)}
+          onFocus={() => onTaskHoverChange(task.id)}
+          onBlur={() => onTaskHoverChange(null)}
           type="button"
         >
-          <div className="font-medium">{task.title}</div>
+          <div className="font-medium">
+            <HighlightedText text={task.title} query={searchQuery} />
+          </div>
           <div className="text-xs text-muted-foreground">
             {task.assigneeName ?? t("list.unassigned")}
           </div>
@@ -1204,6 +1260,81 @@ function calendarSpan(task: Task): number {
   );
 }
 
+function normalizePlanningAnchor(value: string): Date {
+  return new Date(`${formatDateKey(value)}T00:00:00.000Z`);
+}
+
+function shiftCalendarAnchor(
+  anchor: string,
+  mode: CalendarMode,
+  delta: number
+): string {
+  const base = normalizePlanningAnchor(anchor);
+  const next =
+    mode === "month"
+      ? addMonths(startOfMonth(base), delta)
+      : addWeeks(startOfWeek(base), delta);
+
+  return next.toISOString();
+}
+
+function formatCalendarPeriodLabel(anchor: string, mode: CalendarMode): string {
+  const base = normalizePlanningAnchor(anchor);
+
+  if (mode === "week") {
+    return `Week of ${formatDateKey(startOfWeek(base))}`;
+  }
+
+  return formatDateKey(startOfMonth(base)).slice(0, 7);
+}
+
+function quickFilterAssigneeOptions(
+  tasks: Task[]
+): Array<{ value: string; label: string }> {
+  const seen = new Map<string, string>();
+
+  for (const task of tasks) {
+    if (!task.assigneeId || seen.has(task.assigneeId)) {
+      continue;
+    }
+
+    seen.set(task.assigneeId, task.assigneeName ?? task.assigneeId);
+  }
+
+  return Array.from(seen.entries()).map(([value, label]) => ({ value, label }));
+}
+
+function quickFilterTagOptions(tasks: Task[]): string[] {
+  const seen = new Set<string>();
+
+  for (const task of tasks) {
+    for (const label of task.labels ?? []) {
+      if (label) {
+        seen.add(label);
+      }
+    }
+  }
+
+  return Array.from(seen).sort((left, right) => left.localeCompare(right));
+}
+
+function buildPlanningConnectorPath(
+  startX: number,
+  startY: number,
+  endX: number,
+  endY: number
+): string {
+  const direction = endX >= startX ? 1 : -1;
+  const controlOffset = Math.max(20, Math.abs(endX - startX) * 0.4);
+
+  return [
+    `M ${startX} ${startY}`,
+    `C ${startX + controlOffset * direction} ${startY},`,
+    `${endX - controlOffset * direction} ${endY},`,
+    `${endX} ${endY}`,
+  ].join(" ");
+}
+
 function PlanningBoard({
   tasks,
   selectedTaskId,
@@ -1217,6 +1348,7 @@ function PlanningBoard({
   resolveSlotKey,
   getTaskSpan,
   chipMetadata,
+  searchQuery,
 }: {
   tasks: Task[];
   selectedTaskId: string | null;
@@ -1232,6 +1364,7 @@ function PlanningBoard({
   slotLabelFormatter: (slotKey: string) => string;
   resolveSlotKey: (task: Task) => string | null;
   getTaskSpan: (task: Task) => number;
+  searchQuery?: string;
   chipMetadata?: {
     granularity?: TimelineGranularity;
     mode?: CalendarMode;
@@ -1239,6 +1372,7 @@ function PlanningBoard({
 }) {
   const t = useTranslations("tasks");
   const [error, setError] = useState<string | null>(null);
+  const [hoveredTaskId, setHoveredTaskId] = useState<string | null>(null);
 
   const scheduledBySlot = useMemo(() => {
     const map = new Map<string, Task[]>();
@@ -1256,6 +1390,53 @@ function PlanningBoard({
     }
     return map;
   }, [resolveSlotKey, slotKeys, tasks]);
+
+  const taskPlacements = useMemo(() => {
+    const placements = new Map<string, PlanningTaskPlacement>();
+
+    slotKeys.forEach((slotKey, slotIndex) => {
+      (scheduledBySlot.get(slotKey) ?? []).forEach((task, rowIndex) => {
+        placements.set(task.id, {
+          slotIndex,
+          rowIndex,
+          span: getTaskSpan(task),
+        });
+      });
+    });
+
+    return placements;
+  }, [getTaskSpan, scheduledBySlot, slotKeys]);
+
+  const timelineConnectors = useMemo(() => {
+    if (droppablePrefix !== "timeline") {
+      return [] as PlanningDependencyConnector[];
+    }
+
+    const connectors: PlanningDependencyConnector[] = [];
+
+    for (const task of tasks) {
+      const taskPlacement = taskPlacements.get(task.id);
+      if (!taskPlacement) {
+        continue;
+      }
+
+      for (const blockerId of task.blockedBy) {
+        const blockerPlacement = taskPlacements.get(blockerId);
+        if (!blockerPlacement) {
+          continue;
+        }
+
+        connectors.push({
+          blockerId,
+          taskId: task.id,
+          blocker: blockerPlacement,
+          task: taskPlacement,
+        });
+      }
+    }
+
+    return connectors;
+  }, [droppablePrefix, taskPlacements, tasks]);
 
   const unscheduledTasks = tasks.filter(
     (task) => !task.plannedStartAt || !task.plannedEndAt
@@ -1296,50 +1477,127 @@ function PlanningBoard({
       ) : null}
 
       <DragDropContext onDragEnd={(result) => void onDragEnd(result)}>
-        <div
-          className="grid gap-3"
-          style={{
-            gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
-          }}
-        >
-          {slotKeys.map((slotKey) => (
-            <Card key={slotKey} className="gap-3 py-4">
-              <CardHeader className="px-4">
-                <CardTitle className="text-sm">
-                  {slotLabelFormatter(slotKey)}
-                </CardTitle>
-              </CardHeader>
-              <CardContent className="px-4">
-                <Droppable droppableId={`${droppablePrefix}:${slotKey}`}>
-                  {(provided, snapshot) => (
-                    <div
-                      ref={provided.innerRef}
-                      {...provided.droppableProps}
-                      className={`flex min-h-28 flex-col gap-2 rounded-md border border-dashed p-2 ${
-                        snapshot.isDraggingOver ? "bg-accent/40" : "bg-muted/30"
-                      }`}
-                    >
-                      {(scheduledBySlot.get(slotKey) ?? []).map((task, index) => (
-                        <PlanningTaskChip
-                          key={task.id}
-                          task={task}
-                          index={index}
-                          isSelected={task.id === selectedTaskId}
-                          density={density}
-                          onTaskOpen={onTaskOpen}
-                          span={getTaskSpan(task)}
-                          testId={`${droppablePrefix}-bar-${task.id}`}
-                          granularity={chipMetadata?.granularity}
-                          mode={chipMetadata?.mode}
-                        />
-                      ))}
-                      {provided.placeholder}
-                    </div>
-                  )}
-                </Droppable>
-              </CardContent>
-            </Card>
-          ))}
+        <div className="relative">
+          <div
+            className="grid gap-3"
+            style={{
+              gridTemplateColumns: `repeat(${columnCount}, minmax(0, 1fr))`,
+            }}
+          >
+            {slotKeys.map((slotKey) => (
+              <Card key={slotKey} className="gap-3 py-4">
+                <CardHeader className="px-4">
+                  <CardTitle className="text-sm">
+                    {slotLabelFormatter(slotKey)}
+                  </CardTitle>
+                </CardHeader>
+                <CardContent className="px-4">
+                  <Droppable droppableId={`${droppablePrefix}:${slotKey}`}>
+                    {(provided, snapshot) => (
+                      <div
+                        ref={provided.innerRef}
+                        {...provided.droppableProps}
+                        className={`flex min-h-28 flex-col gap-2 rounded-md border border-dashed p-2 ${
+                          snapshot.isDraggingOver ? "bg-accent/40" : "bg-muted/30"
+                        }`}
+                      >
+                        {(scheduledBySlot.get(slotKey) ?? []).map((task, index) => (
+                          <PlanningTaskChip
+                            key={task.id}
+                            task={task}
+                            index={index}
+                            isSelected={task.id === selectedTaskId}
+                            isHovered={task.id === hoveredTaskId}
+                            density={density}
+                            onTaskOpen={onTaskOpen}
+                            onTaskHoverChange={setHoveredTaskId}
+                            searchQuery={searchQuery}
+                            span={getTaskSpan(task)}
+                            testId={`${droppablePrefix}-bar-${task.id}`}
+                            granularity={chipMetadata?.granularity}
+                            mode={chipMetadata?.mode}
+                          />
+                        ))}
+                        {provided.placeholder}
+                      </div>
+                    )}
+                  </Droppable>
+                </CardContent>
+              </Card>
+            ))}
+          </div>
+
+          {droppablePrefix === "timeline" && timelineConnectors.length > 0 ? (
+            <svg
+              aria-hidden="true"
+              className="pointer-events-none absolute inset-0 z-[1] h-full w-full"
+              preserveAspectRatio="none"
+              viewBox={`0 0 ${
+                columnCount * 100 + Math.max(0, columnCount - 1) * 12
+              } ${
+                Math.max(
+                  152,
+                  48 +
+                    Math.max(
+                      1,
+                      ...Array.from(taskPlacements.values(), (placement) => placement.rowIndex + 1)
+                    ) *
+                      (density === "compact" ? 32 : 36) +
+                    24
+                )
+              }`}
+            >
+              {timelineConnectors.map((connector) => {
+                const isActive =
+                  hoveredTaskId === connector.blockerId ||
+                  hoveredTaskId === connector.taskId;
+                const columnWidth = 100;
+                const columnGap = 12;
+                const rowHeight = density === "compact" ? 32 : 36;
+                const chipCenterOffset = density === "compact" ? 16 : 18;
+                const topOffset = 48;
+                const blockerVisibleSpan = Math.max(
+                  1,
+                  Math.min(
+                    connector.blocker.span,
+                    columnCount - connector.blocker.slotIndex
+                  )
+                );
+                const startX =
+                  connector.blocker.slotIndex * (columnWidth + columnGap) +
+                  blockerVisibleSpan * columnWidth -
+                  10;
+                const endX =
+                  connector.task.slotIndex * (columnWidth + columnGap) + 10;
+                const startY =
+                  topOffset +
+                  connector.blocker.rowIndex * rowHeight +
+                  chipCenterOffset;
+                const endY =
+                  topOffset +
+                  connector.task.rowIndex * rowHeight +
+                  chipCenterOffset;
+
+                return (
+                  <path
+                    key={`${connector.blockerId}-${connector.taskId}`}
+                    d={buildPlanningConnectorPath(startX, startY, endX, endY)}
+                    data-active={isActive ? "true" : "false"}
+                    data-testid={`timeline-dependency-${connector.blockerId}-${connector.taskId}`}
+                    fill="none"
+                    stroke={
+                      isActive
+                        ? "var(--primary, rgb(59 130 246))"
+                        : "var(--muted-foreground, rgb(148 163 184))"
+                    }
+                    strokeLinecap="round"
+                    strokeWidth={isActive ? 2.5 : 1.5}
+                    strokeOpacity={isActive ? 0.9 : 0.45}
+                  />
+                );
+              })}
+            </svg>
+          ) : null}
         </div>
 
         <Card>
@@ -1365,8 +1623,11 @@ function PlanningBoard({
                       task={task}
                       index={index}
                       isSelected={task.id === selectedTaskId}
+                      isHovered={task.id === hoveredTaskId}
                       density={density}
                       onTaskOpen={onTaskOpen}
+                      onTaskHoverChange={setHoveredTaskId}
+                      searchQuery={searchQuery}
                     />
                   ))}
                   {unscheduledTasks.length === 0 ? (
@@ -1389,6 +1650,7 @@ export function TaskTimelineView(props: {
   tasks: Task[];
   selectedTaskId: string | null;
   density: "comfortable" | "compact";
+  searchQuery?: string;
   onTaskOpen: (taskId: string) => void;
   onTaskScheduleChange: (
     taskId: string,
@@ -1431,6 +1693,7 @@ export function TaskTimelineView(props: {
         }
         resolveSlotKey={(task) => timelineSlotKey(task, granularity)}
         getTaskSpan={(task) => timelineSpan(task, granularity)}
+        searchQuery={props.searchQuery}
         chipMetadata={{ granularity }}
       />
     </div>
@@ -1441,6 +1704,7 @@ export function TaskCalendarView(props: {
   tasks: Task[];
   selectedTaskId: string | null;
   density: "comfortable" | "compact";
+  searchQuery?: string;
   onTaskOpen: (taskId: string) => void;
   onTaskScheduleChange: (
     taskId: string,
@@ -1449,29 +1713,71 @@ export function TaskCalendarView(props: {
 }) {
   const t = useTranslations("tasks");
   const [mode, setMode] = useState<CalendarMode>("month");
-  const baseline =
+  const initialAnchor =
     props.tasks.find((task) => task.plannedStartAt)?.plannedStartAt ??
     new Date().toISOString();
+  const [anchor, setAnchor] = useState(initialAnchor);
+
+  useEffect(() => {
+    setAnchor(initialAnchor);
+  }, [initialAnchor]);
+
   const slotKeys = useMemo(
-    () => calendarSlotKeys(baseline, mode),
-    [baseline, mode]
+    () => calendarSlotKeys(anchor, mode),
+    [anchor, mode]
   );
 
   return (
     <div data-testid="calendar-view" className="space-y-3">
-      <div className="flex flex-wrap justify-end gap-2">
-        {(["month", "week"] as const).map((calendarMode) => (
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <div className="flex items-center gap-2">
           <Button
-            key={calendarMode}
             type="button"
             size="sm"
-            variant={mode === calendarMode ? "default" : "outline"}
-            aria-pressed={mode === calendarMode}
-            onClick={() => setMode(calendarMode)}
+            variant="outline"
+            aria-label={
+              mode === "month"
+                ? t("planning.previousMonth")
+                : t("planning.previousWeek")
+            }
+            onClick={() => setAnchor((currentAnchor) => shiftCalendarAnchor(currentAnchor, mode, -1))}
           >
-            {t(`planning.scale.${calendarMode}`)}
+            {"<"}
           </Button>
-        ))}
+          <span
+            data-testid="calendar-period-label"
+            className="min-w-20 text-sm font-medium text-foreground"
+          >
+            {formatCalendarPeriodLabel(anchor, mode)}
+          </span>
+          <Button
+            type="button"
+            size="sm"
+            variant="outline"
+            aria-label={
+              mode === "month"
+                ? t("planning.nextMonth")
+                : t("planning.nextWeek")
+            }
+            onClick={() => setAnchor((currentAnchor) => shiftCalendarAnchor(currentAnchor, mode, 1))}
+          >
+            {">"}
+          </Button>
+        </div>
+        <div className="flex flex-wrap justify-end gap-2">
+          {(["month", "week"] as const).map((calendarMode) => (
+            <Button
+              key={calendarMode}
+              type="button"
+              size="sm"
+              variant={mode === calendarMode ? "default" : "outline"}
+              aria-pressed={mode === calendarMode}
+              onClick={() => setMode(calendarMode)}
+            >
+              {t(`planning.scale.${calendarMode}`)}
+            </Button>
+          ))}
+        </div>
       </div>
       <PlanningBoard
         {...props}
@@ -1483,8 +1789,136 @@ export function TaskCalendarView(props: {
           task.plannedStartAt ? formatDateKey(task.plannedStartAt) : null
         }
         getTaskSpan={calendarSpan}
+        searchQuery={props.searchQuery}
         chipMetadata={{ mode }}
       />
+    </div>
+  );
+}
+
+function TaskQuickFilterBar({ tasks }: { tasks: Task[] }) {
+  const t = useTranslations("tasks");
+  const filters = useTaskWorkspaceStore((state) => state.filters);
+  const setPriority = useTaskWorkspaceStore((state) => state.setPriority);
+  const setAssigneeId = useTaskWorkspaceStore((state) => state.setAssigneeId);
+  const setLabels = useTaskWorkspaceStore((state) => state.setLabels);
+  const setDueDateRange = useTaskWorkspaceStore((state) => state.setDueDateRange);
+  const assignees = useMemo(() => quickFilterAssigneeOptions(tasks), [tasks]);
+  const tags = useMemo(() => quickFilterTagOptions(tasks), [tasks]);
+
+  const toggleTag = (label: string) => {
+    if (filters.labels.includes(label)) {
+      setLabels(filters.labels.filter((currentLabel) => currentLabel !== label));
+      return;
+    }
+
+    setLabels([...filters.labels, label]);
+  };
+
+  return (
+    <div
+      data-testid="task-quick-filter-bar"
+      className="flex flex-wrap items-center gap-3 rounded-lg border bg-card px-3 py-2"
+    >
+      <div className="flex items-center gap-2 text-xs font-medium">
+        <span className="text-muted-foreground">{t("quickFilter.priority")}</span>
+        <Select
+          value={filters.priority}
+          onValueChange={(value) =>
+            setPriority(value as "all" | TaskPriority)
+          }
+        >
+          <SelectTrigger aria-label={t("quickFilter.priority")} className="h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("filter.all")}</SelectItem>
+            {(["urgent", "high", "medium", "low"] as const).map((priority) => (
+              <SelectItem key={priority} value={priority}>
+                {priority}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      <div className="flex items-center gap-2 text-xs font-medium">
+        <span className="text-muted-foreground">{t("quickFilter.assignee")}</span>
+        <Select
+          value={filters.assigneeId}
+          onValueChange={setAssigneeId}
+        >
+          <SelectTrigger aria-label={t("quickFilter.assignee")} className="h-8 text-xs">
+            <SelectValue />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="all">{t("filter.all")}</SelectItem>
+            {assignees.map((assignee) => (
+              <SelectItem key={assignee.value} value={assignee.value}>
+                {assignee.label}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
+      </div>
+
+      {tags.length > 0 ? (
+        <div className="flex flex-wrap items-center gap-2">
+          <span className="text-xs font-medium text-muted-foreground">
+            {t("quickFilter.tags")}
+          </span>
+          <div className="flex flex-wrap gap-1">
+            {tags.map((label) => {
+              const active = filters.labels.includes(label);
+              return (
+                <Button
+                  key={label}
+                  type="button"
+                  size="sm"
+                  variant={active ? "default" : "outline"}
+                  aria-pressed={active}
+                  className="h-7 px-2 text-xs"
+                  onClick={() => toggleTag(label)}
+                >
+                  {label}
+                </Button>
+              );
+            })}
+          </div>
+        </div>
+      ) : null}
+
+      <label className="flex items-center gap-2 text-xs font-medium">
+        <span className="text-muted-foreground">{t("quickFilter.dueFrom")}</span>
+        <input
+          type="date"
+          aria-label={t("quickFilter.dueFrom")}
+          className="h-8 rounded-md border bg-background px-2 text-xs"
+          value={filters.dueDateStart}
+          onChange={(event) =>
+            setDueDateRange({
+              start: event.target.value,
+              end: filters.dueDateEnd,
+            })
+          }
+        />
+      </label>
+
+      <label className="flex items-center gap-2 text-xs font-medium">
+        <span className="text-muted-foreground">{t("quickFilter.dueTo")}</span>
+        <input
+          type="date"
+          aria-label={t("quickFilter.dueTo")}
+          className="h-8 rounded-md border bg-background px-2 text-xs"
+          value={filters.dueDateEnd}
+          onChange={(event) =>
+            setDueDateRange({
+              start: filters.dueDateStart,
+              end: event.target.value,
+            })
+          }
+        />
+      </label>
     </div>
   );
 }
@@ -1519,6 +1953,9 @@ export function TaskWorkspaceMain({
   const selectAllVisible = useTaskWorkspaceStore((state) => state.selectAllVisible);
   const toggleTaskSelection = useTaskWorkspaceStore((state) => state.toggleTaskSelection);
   const clearSelection = useTaskWorkspaceStore((state) => state.clearSelection);
+  const setBoardColumnOrder = useTaskWorkspaceStore((state) => state.setBoardColumnOrder);
+  const setHiddenBoardColumns = useTaskWorkspaceStore((state) => state.setHiddenBoardColumns);
+  const createTask = useTaskStore((state) => state.createTask);
   const definitionsByProject = useCustomFieldStore((state) => state.definitionsByProject);
   const valuesByTask = useCustomFieldStore((state) => state.valuesByTask);
   const [bulkFailures, setBulkFailures] = useState<BulkActionFailure[]>([]);
@@ -1674,6 +2111,7 @@ export function TaskWorkspaceMain({
             tasks={filteredTasks}
             selectedTaskId={selectedTaskId}
             density={displayOptions.density}
+            searchQuery={filters.search}
             onTaskOpen={handleTaskOpen}
             onTaskScheduleChange={onTaskScheduleChange}
           />
@@ -1684,6 +2122,7 @@ export function TaskWorkspaceMain({
             tasks={filteredTasks}
             selectedTaskId={selectedTaskId}
             density={displayOptions.density}
+            searchQuery={filters.search}
             onTaskOpen={handleTaskOpen}
             onTaskScheduleChange={onTaskScheduleChange}
           />
@@ -1713,11 +2152,23 @@ export function TaskWorkspaceMain({
             selectedTaskIds={selectedTaskIds}
             displayOptions={displayOptions}
             linkedDocsByTask={linkedDocsByTask}
+            searchQuery={filters.search}
             onTaskClick={(task) => handleTaskOpen(task.id)}
             onTaskStatusChange={onTaskStatusChange}
             onToggleTaskSelection={toggleTaskSelection}
             onQuickStatusChange={(taskId, status) => void onTaskStatusChange(taskId, status)}
             onQuickPriorityChange={(taskId, priority) => void onTaskSave?.(taskId, { priority })}
+            onQuickCreateTask={(status, title) =>
+              createTask({
+                projectId,
+                title,
+                status,
+              })
+            }
+            onUpdateBoardColumns={(boardColumnOrder, hiddenBoardColumns) => {
+              setBoardColumnOrder(boardColumnOrder);
+              setHiddenBoardColumns(hiddenBoardColumns);
+            }}
           />
         );
     }
@@ -1767,6 +2218,8 @@ export function TaskWorkspaceMain({
           />
         </div>
       ) : null}
+
+      <TaskQuickFilterBar tasks={tasks} />
 
       <div className="min-h-0 flex-1 overflow-auto">
         {renderView(viewMode)}

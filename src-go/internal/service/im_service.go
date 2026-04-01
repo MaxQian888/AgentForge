@@ -9,6 +9,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"regexp"
 	"strings"
 	"time"
 
@@ -212,9 +213,7 @@ func (s *IMService) HandleIntent(ctx context.Context, req *model.IMIntentRequest
 
 	if s.classifier == nil {
 		entry.Warn("IM intent request skipped: classifier unavailable")
-		return &model.IMIntentResponse{
-			Reply: "自然语言理解功能尚未就绪。请使用 /help 查看可用命令。",
-		}, nil
+		return fallbackIMIntentResponse(req.Text), nil
 	}
 
 	intentResp, err := s.classifier.ClassifyIntent(ctx, ClassifyIntentRequest{
@@ -224,9 +223,7 @@ func (s *IMService) HandleIntent(ctx context.Context, req *model.IMIntentRequest
 	})
 	if err != nil {
 		entry.WithError(err).Warn("IM intent classification failed")
-		return &model.IMIntentResponse{
-			Reply: "理解失败，请使用 /help 查看可用命令。",
-		}, nil
+		return fallbackIMIntentResponse(req.Text), nil
 	}
 	entry.WithFields(logrus.Fields{
 		"intent":     intentResp.Intent,
@@ -243,6 +240,39 @@ func (s *IMService) HandleIntent(ctx context.Context, req *model.IMIntentRequest
 		Reply:  reply,
 		Intent: intentResp.Intent,
 	}, nil
+}
+
+func fallbackIMIntentResponse(text string) *model.IMIntentResponse {
+	trimmed := strings.TrimSpace(text)
+	runID := regexp.MustCompile(`run-[A-Za-z0-9_-]+`).FindString(trimmed)
+	lower := strings.ToLower(trimmed)
+
+	switch {
+	case strings.Contains(trimmed, "暂停") || strings.Contains(lower, "pause"):
+		command := "/agent pause"
+		if runID != "" {
+			command += " " + runID
+		}
+		return &model.IMIntentResponse{Reply: fmt.Sprintf("我建议先使用 %s", command), Intent: "agent_pause"}
+	case strings.Contains(trimmed, "恢复") || strings.Contains(lower, "resume"):
+		command := "/agent resume"
+		if runID != "" {
+			command += " " + runID
+		}
+		return &model.IMIntentResponse{Reply: fmt.Sprintf("我建议先使用 %s", command), Intent: "agent_resume"}
+	case strings.Contains(trimmed, "终止") || strings.Contains(trimmed, "停止") || strings.Contains(lower, "kill"):
+		command := "/agent kill"
+		if runID != "" {
+			command += " " + runID
+		}
+		return &model.IMIntentResponse{Reply: fmt.Sprintf("我建议先使用 %s", command), Intent: "agent_kill"}
+	case strings.Contains(trimmed, "队列"):
+		return &model.IMIntentResponse{Reply: "我建议先使用 /queue list", Intent: "queue_list"}
+	case strings.Contains(trimmed, "成员") || strings.Contains(trimmed, "团队"):
+		return &model.IMIntentResponse{Reply: "我建议先使用 /team list", Intent: "team_list"}
+	default:
+		return &model.IMIntentResponse{Reply: "自然语言理解功能尚未就绪。请使用 /help 查看可用命令。"}
+	}
 }
 
 // HandleAction processes a button click action from an IM card.
@@ -292,7 +322,8 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 	})
 
 	if s.controlPlane != nil {
-		_, err := s.controlPlane.QueueDelivery(ctx, IMQueueDeliveryRequest{
+		delivery, err := s.controlPlane.QueueDelivery(ctx, IMQueueDeliveryRequest{
+			DeliveryID:     strings.TrimSpace(req.DeliveryID),
 			TargetBridgeID: strings.TrimSpace(req.BridgeID),
 			Platform:       req.Platform,
 			ProjectID:      req.ProjectID,
@@ -305,7 +336,9 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 			ReplyTarget:    req.ReplyTarget,
 		})
 		if err == nil {
-			s.controlPlane.RecordDeliveryResult(buildSendDeliveryRecord(req, model.IMDeliveryStatusDelivered, ""))
+			record := buildSendDeliveryRecord(req, model.IMDeliveryStatusPending, "")
+			record.ID = strings.TrimSpace(delivery.DeliveryID)
+			s.controlPlane.RecordDeliveryResult(record)
 			entry.Info("IM send queued via control plane")
 			return nil
 		}
@@ -380,7 +413,8 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 
 	if s.controlPlane != nil {
 		content := buildNotifyContent(req)
-		_, err := s.controlPlane.QueueDelivery(ctx, IMQueueDeliveryRequest{
+		delivery, err := s.controlPlane.QueueDelivery(ctx, IMQueueDeliveryRequest{
+			DeliveryID:     strings.TrimSpace(req.DeliveryID),
 			TargetBridgeID: strings.TrimSpace(req.BridgeID),
 			Platform:       req.Platform,
 			ProjectID:      req.ProjectID,
@@ -393,7 +427,9 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 			ReplyTarget:    req.ReplyTarget,
 		})
 		if err == nil {
-			s.controlPlane.RecordDeliveryResult(buildNotifyDeliveryRecord(req, model.IMDeliveryStatusDelivered, ""))
+			record := buildNotifyDeliveryRecord(req, model.IMDeliveryStatusPending, "")
+			record.ID = strings.TrimSpace(delivery.DeliveryID)
+			s.controlPlane.RecordDeliveryResult(record)
 			entry.Info("IM notify queued via control plane")
 			return nil
 		}

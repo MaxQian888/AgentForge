@@ -9,6 +9,13 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
   Dialog,
   DialogContent,
   DialogFooter,
@@ -303,18 +310,19 @@ export default function SprintsPage() {
             </div>
             <div className="flex flex-col gap-2">
               <Label>{t("dialog.milestone")}</Label>
-              <select
-                className="h-10 rounded-md border bg-background px-3 text-sm"
-                value={formMilestoneId}
-                onChange={(e) => setFormMilestoneId(e.target.value)}
-              >
-                <option value="">{t("dialog.noMilestone")}</option>
-                {milestones.map((milestone) => (
-                  <option key={milestone.id} value={milestone.id}>
-                    {milestone.name}
-                  </option>
-                ))}
-              </select>
+              <Select value={formMilestoneId || "__none__"} onValueChange={(v) => setFormMilestoneId(v === "__none__" ? "" : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder={t("dialog.noMilestone")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">{t("dialog.noMilestone")}</SelectItem>
+                  {milestones.map((milestone) => (
+                    <SelectItem key={milestone.id} value={milestone.id}>
+                      {milestone.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>
@@ -355,30 +363,32 @@ export default function SprintsPage() {
             </div>
             <div className="flex flex-col gap-2">
               <Label>{t("dialog.milestone")}</Label>
-              <select
-                className="h-10 rounded-md border bg-background px-3 text-sm"
-                value={formMilestoneId}
-                onChange={(e) => setFormMilestoneId(e.target.value)}
-              >
-                <option value="">{t("dialog.noMilestone")}</option>
-                {milestones.map((milestone) => (
-                  <option key={milestone.id} value={milestone.id}>
-                    {milestone.name}
-                  </option>
-                ))}
-              </select>
+              <Select value={formMilestoneId || "__none__"} onValueChange={(v) => setFormMilestoneId(v === "__none__" ? "" : v)}>
+                <SelectTrigger>
+                  <SelectValue placeholder={t("dialog.noMilestone")} />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="__none__">{t("dialog.noMilestone")}</SelectItem>
+                  {milestones.map((milestone) => (
+                    <SelectItem key={milestone.id} value={milestone.id}>
+                      {milestone.name}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
             <div className="flex flex-col gap-2">
               <Label>{t("dialog.status")}</Label>
-              <select
-                className="h-10 rounded-md border bg-background px-3 text-sm"
-                value={formStatus}
-                onChange={(e) => setFormStatus(e.target.value as SprintStatus)}
-              >
-                <option value="planning">{t("status.planning")}</option>
-                <option value="active">{t("status.active")}</option>
-                <option value="closed">{t("status.closed")}</option>
-              </select>
+              <Select value={formStatus} onValueChange={(v) => setFormStatus(v as SprintStatus)}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="planning">{t("status.planning")}</SelectItem>
+                  <SelectItem value="active">{t("status.active")}</SelectItem>
+                  <SelectItem value="closed">{t("status.closed")}</SelectItem>
+                </SelectContent>
+              </Select>
             </div>
           </div>
           <DialogFooter>

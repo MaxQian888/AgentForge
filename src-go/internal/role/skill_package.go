@@ -25,6 +25,8 @@ type skillPackageDocument struct {
 	Frontmatter    skillFrontmatter
 	Body           string
 	Interface      skillInterfaceMetadata
+	Requires       []string
+	Tools          []string
 	AvailableParts []string
 	ReferenceCount int
 	ScriptCount    int
@@ -70,6 +72,8 @@ func readSkillPackageDocument(root, canonicalPath string) (*skillPackageDocument
 		Frontmatter:    document.Frontmatter,
 		Body:           document.Body,
 		Interface:      interfaceMetadata,
+		Requires:       normalizeRequiredSkillPaths(document.Frontmatter.Requires),
+		Tools:          normalizeCapabilityTokens(document.Frontmatter.Tools),
 		AvailableParts: parts,
 		ReferenceCount: referenceCount,
 		ScriptCount:    scriptCount,

@@ -16,12 +16,17 @@ The system SHALL provide a plugin management panel that lists installed plugins 
 - **THEN** the panel shows the plugin's runtime declaration, runtime host, permissions, resolved source path, runtime metadata, restart count, last health timestamp, and last error state when present
 
 ### Requirement: The panel distinguishes built-in, local, and marketplace plugin sources
-The system SHALL present available plugins by source channel instead of flattening every source into one list. The plugin management panel SHALL separately surface built-in plugin discoveries, installed plugins, local catalog entries, and remote registry marketplace entries, and SHALL indicate whether each available entry is currently installable with the platform's real capabilities. Remote registry entries MUST expose registry availability or source-health state so operators can distinguish a reachable remote marketplace from a disabled or failing one.
+The system SHALL present available plugins by source channel instead of flattening every source into one list. The plugin management panel SHALL separately surface built-in plugin discoveries, installed plugins, local catalog entries, remote registry marketplace entries, and installed plugins that originated from the standalone marketplace workspace, and SHALL indicate whether each available entry is currently installable with the platform's real capabilities. Remote registry entries MUST expose registry availability or source-health state so operators can distinguish a reachable remote marketplace from a disabled or failing one. Installed plugins that originated from the standalone marketplace workspace MUST preserve marketplace item identity, selected version, and a navigation path back to the originating marketplace surface instead of collapsing into anonymous local provenance.
 
 #### Scenario: Built-in plugin already installed
 - **WHEN** a built-in plugin is already present in the installed plugin registry
 - **THEN** the built-in availability section SHALL not present it as a duplicate install candidate
 - **THEN** the installed section SHALL remain the authoritative place to manage that plugin
+
+#### Scenario: Standalone marketplace-sourced plugin remains identifiable after install
+- **WHEN** an installed plugin originated from the standalone marketplace workspace
+- **THEN** the installed section and detail surface SHALL show the marketplace provenance, originating item identity, and selected version
+- **THEN** the operator SHALL be able to navigate from the plugin detail surface back to the originating marketplace item or management workspace
 
 #### Scenario: Marketplace entry is browse-only
 - **WHEN** a marketplace plugin entry lacks a real install source supported by the current platform contract
@@ -135,4 +140,17 @@ The plugin management panel SHALL display evaluated readiness state, blocking re
 - **WHEN** an official built-in plugin is unsupported on the current host
 - **THEN** the panel renders that built-in as blocked or browse-only with an explicit reason
 - **THEN** the panel does not present a misleading ready-to-run state for that entry
+
+### Requirement: Operators can inspect plugin-role dependency health from the plugin panel
+The plugin management panel SHALL surface role dependency health for any selected plugin whose current contract depends on roles or is consumed by role-scoped tool references. WorkflowPlugin records MUST show each referenced role binding, whether it currently resolves from the authoritative role registry, and whether any missing or stale role binding is blocking activation or execution. ToolPlugin or MCP-backed plugin records that are referenced by current roles through role-scoped tool or MCP identifiers MUST show the referencing roles and their current dependency state instead of hiding that relationship behind raw ids.
+
+#### Scenario: Workflow plugin shows a stale role binding
+- **WHEN** the operator opens the detail view for an installed workflow plugin whose manifest references a role id that no longer resolves from the current role registry
+- **THEN** the panel shows that role binding as missing or stale instead of rendering only the raw role id list
+- **THEN** the panel explains that activation or execution is currently blocked by that dependency gap and provides a path back to the roles workspace
+
+#### Scenario: Tool plugin shows referencing roles
+- **WHEN** the operator opens the detail view for a tool or MCP-backed plugin whose plugin id is referenced by one or more current roles through role-scoped tool configuration
+- **THEN** the panel shows the referencing roles and the current dependency status for each reference
+- **THEN** the operator can navigate from that plugin detail context to the affected roles without manually searching raw ids
 

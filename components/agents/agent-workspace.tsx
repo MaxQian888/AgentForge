@@ -4,11 +4,12 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams, useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Network, PanelLeftIcon } from "lucide-react";
+import { Network, PanelLeftIcon, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import {
   Sheet,
   SheetContent,
+  SheetDescription,
   SheetHeader,
   SheetTitle,
 } from "@/components/ui/sheet";
@@ -25,12 +26,29 @@ import type {
   Agent,
   AgentPoolSummary,
   BridgeHealthSummary,
+  DispatchAttemptRecord,
   DispatchStatsSummary,
 } from "@/lib/stores/agent-store";
 import type { CodingAgentCatalog } from "@/lib/stores/project-store";
+import type { TeamMember } from "@/lib/dashboard/summary";
+import type { Task } from "@/lib/stores/task-store";
+import { SpawnAgentDialog } from "@/components/tasks/spawn-agent-dialog";
 import { AgentWorkspaceSidebar } from "./agent-workspace-sidebar";
 import { AgentWorkspaceOverview } from "./agent-workspace-overview";
 import { AgentWorkspaceDetail } from "./agent-workspace-detail";
+import { buildAgentVisualizationModel } from "./agent-visualization-model";
+import { AgentVisualizationCanvas } from "./agent-visualization-canvas";
+import { AgentVisualizationFocusPanel } from "./agent-visualization-focus-panel";
+
+type AgentWorkspaceView = "monitor" | "visualization" | "dispatch";
+
+function parseAgentWorkspaceView(view: string | null): AgentWorkspaceView {
+  if (view === "visualization" || view === "dispatch") {
+    return view;
+  }
+
+  return "monitor";
+}
 
 interface AgentWorkspaceProps {
   agents: Agent[];
@@ -40,6 +58,23 @@ interface AgentWorkspaceProps {
   dispatchStats: DispatchStatsSummary | null;
   loading: boolean;
   requestedMemberId: string | null;
+  dispatchHistoryByTask: Record<string, DispatchAttemptRecord[]>;
+  fetchDispatchHistory: (taskId: string) => Promise<DispatchAttemptRecord[]>;
+  fetchAgent?: (id: string) => Promise<Agent | null>;
+  selectedProjectId?: string | null;
+  tasks?: Task[];
+  members?: TeamMember[];
+  onSpawnAgent?: (
+    taskId: string,
+    memberId: string,
+    options?: {
+      runtime?: string;
+      provider?: string;
+      model?: string;
+      maxBudgetUsd?: number;
+      roleId?: string;
+    },
+  ) => void | Promise<void>;
   onPause: (id: string) => void;
   onResume: (id: string) => void;
   onKill: (id: string) => void;
@@ -53,6 +88,13 @@ export function AgentWorkspace({
   dispatchStats,
   loading,
   requestedMemberId,
+  dispatchHistoryByTask,
+  fetchDispatchHistory,
+  fetchAgent,
+  selectedProjectId,
+  tasks = [],
+  members = [],
+  onSpawnAgent,
   onPause,
   onResume,
   onKill,
@@ -64,11 +106,14 @@ export function AgentWorkspace({
 
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [sidebarSheetOpen, setSidebarSheetOpen] = useState(false);
-  const [activeTab, setActiveTab] = useState<"monitor" | "dispatch">(
-    "monitor",
-  );
+  const [spawnDialogOpen, setSpawnDialogOpen] = useState(false);
+  const [visualizationHistoryTaskId, setVisualizationHistoryTaskId] = useState<
+    string | null
+  >(null);
 
+  const activeView = parseAgentWorkspaceView(searchParams.get("view"));
   const selectedAgentId = searchParams.get("agent");
+  const visualizationFocusId = searchParams.get("vizNode");
   const visibleAgents = useMemo(
     () =>
       requestedMemberId
@@ -77,23 +122,172 @@ export function AgentWorkspace({
     [agents, requestedMemberId],
   );
   const bridgeDegraded = bridgeHealth?.status === "degraded";
+  const spawnTaskOptions = useMemo(
+    () =>
+      tasks
+        .filter(
+          (task) =>
+            task.projectId === selectedProjectId &&
+            task.status !== "done" &&
+            task.status !== "cancelled",
+        )
+        .map((task) => ({
+          id: task.id,
+          title: task.title,
+        })),
+    [selectedProjectId, tasks],
+  );
+  const spawnMemberOptions = useMemo(
+    () =>
+      members.map((member) => ({
+        id: member.id,
+        label: `${member.name} (${member.typeLabel})`,
+      })),
+    [members],
+  );
+  const canOpenSpawnDialog =
+    Boolean(selectedProjectId) &&
+    Boolean(onSpawnAgent) &&
+    spawnTaskOptions.length > 0 &&
+    spawnMemberOptions.length > 0;
+  const visualizationModel = useMemo(
+    () =>
+      buildAgentVisualizationModel({
+        agents,
+        pool,
+        runtimeCatalog,
+        bridgeHealth,
+        requestedMemberId,
+      }),
+    [agents, bridgeHealth, pool, requestedMemberId, runtimeCatalog],
+  );
+  const visualizationFocus = useMemo(() => {
+    if (selectedAgentId || activeView !== "visualization" || !visualizationFocusId) {
+      return null;
+    }
+
+    return visualizationModel.focusByNodeId[visualizationFocusId] ?? null;
+  }, [
+    activeView,
+    selectedAgentId,
+    visualizationFocusId,
+    visualizationModel,
+  ]);
+  const visualizationFocusTaskId =
+    visualizationFocus && "taskId" in visualizationFocus
+      ? visualizationFocus.taskId
+      : null;
+  const visualizationDispatchHistory = visualizationFocusTaskId
+    ? dispatchHistoryByTask[visualizationFocusTaskId] ?? []
+    : [];
 
   useEffect(() => {
     setSidebarOpen(isDesktop);
   }, [isDesktop]);
 
-  const setSelectedAgentId = (id: string | null) => {
-    const params = new URLSearchParams(searchParams.toString());
-    if (id) {
-      params.set("agent", id);
-    } else {
-      params.delete("agent");
+  useEffect(() => {
+    if (!visualizationFocusTaskId) {
+      setVisualizationHistoryTaskId(null);
+      return;
     }
 
-    router.replace(`/agents?${params.toString()}`, { scroll: false });
+    if (dispatchHistoryByTask[visualizationFocusTaskId] !== undefined) {
+      setVisualizationHistoryTaskId(null);
+      return;
+    }
+
+    let cancelled = false;
+    setVisualizationHistoryTaskId(visualizationFocusTaskId);
+    void fetchDispatchHistory(visualizationFocusTaskId).finally(() => {
+      if (!cancelled) {
+        setVisualizationHistoryTaskId((current) =>
+          current === visualizationFocusTaskId ? null : current,
+        );
+      }
+    });
+
+    return () => {
+      cancelled = true;
+    };
+  }, [
+    dispatchHistoryByTask,
+    fetchDispatchHistory,
+    visualizationFocusTaskId,
+  ]);
+
+  useEffect(() => {
+    if (!fetchAgent || activeView !== "monitor") {
+      return;
+    }
+
+    const runningAgentIds = visibleAgents
+      .filter((agent) => agent.status === "running")
+      .map((agent) => agent.id);
+
+    if (runningAgentIds.length === 0) {
+      return;
+    }
+
+    const intervalId = window.setInterval(() => {
+      runningAgentIds.forEach((id) => {
+        void fetchAgent(id);
+      });
+    }, 5000);
+
+    return () => {
+      window.clearInterval(intervalId);
+    };
+  }, [activeView, fetchAgent, visibleAgents]);
+
+  const buildWorkspaceHref = (
+    mutate: (params: URLSearchParams) => void,
+  ) => {
+    const params = new URLSearchParams(searchParams.toString());
+    mutate(params);
+    const query = params.toString();
+
+    return query ? `/agents?${query}` : "/agents?";
+  };
+
+  const setSelectedAgentId = (id: string | null) => {
+    const href = buildWorkspaceHref((params) => {
+      if (id) {
+        params.set("agent", id);
+        params.delete("vizNode");
+      } else {
+        params.delete("agent");
+      }
+    });
+
+    router.replace(href, { scroll: false });
     if (isMobile) {
       setSidebarSheetOpen(false);
     }
+  };
+
+  const setActiveView = (view: AgentWorkspaceView) => {
+    const href = buildWorkspaceHref((params) => {
+      params.set("view", view);
+      if (view !== "visualization") {
+        params.delete("vizNode");
+      }
+    });
+
+    router.replace(href, { scroll: false });
+  };
+
+  const setVisualizationFocusId = (id: string | null) => {
+    const href = buildWorkspaceHref((params) => {
+      params.set("view", "visualization");
+      params.delete("agent");
+      if (id) {
+        params.set("vizNode", id);
+      } else {
+        params.delete("vizNode");
+      }
+    });
+
+    router.replace(href, { scroll: false });
   };
 
   const toggleSidebar = () => {
@@ -130,6 +324,7 @@ export function AgentWorkspace({
             >
               <SheetHeader className="sr-only">
                 <SheetTitle>{t("monitor.title")}</SheetTitle>
+                <SheetDescription>{t("workspace.searchPlaceholder")}</SheetDescription>
               </SheetHeader>
               {sidebarContent}
             </SheetContent>
@@ -148,8 +343,10 @@ export function AgentWorkspace({
         )}
 
         <Tabs
-          value={activeTab}
-          onValueChange={(value) => setActiveTab(value as "monitor" | "dispatch")}
+          value={activeView}
+          onValueChange={(value) =>
+            setActiveView(value as AgentWorkspaceView)
+          }
           className="flex min-w-0 flex-1 flex-col gap-0 overflow-hidden"
         >
           <div className="flex h-10 shrink-0 items-center gap-1 border-b bg-background px-2">
@@ -179,6 +376,13 @@ export function AgentWorkspace({
                 {t("monitor.title")}
               </TabsTrigger>
               <TabsTrigger
+                value="visualization"
+                aria-label={t("visualization.title")}
+                className="h-7 px-3 text-xs"
+              >
+                {t("visualization.title")}
+              </TabsTrigger>
+              <TabsTrigger
                 value="dispatch"
                 aria-label={t("stats.dispatch")}
                 className="h-7 px-3 text-xs"
@@ -197,6 +401,19 @@ export function AgentWorkspace({
 
             <div className="flex-1" />
 
+            {onSpawnAgent ? (
+              <Button
+                type="button"
+                variant="outline"
+                size="sm"
+                disabled={!canOpenSpawnDialog}
+                onClick={() => setSpawnDialogOpen(true)}
+              >
+                <Plus className="mr-1 size-3.5" />
+                Spawn Agent
+              </Button>
+            ) : null}
+
             <Link
               href="/teams"
               className="inline-flex items-center gap-1.5 text-xs text-muted-foreground hover:text-foreground"
@@ -211,11 +428,6 @@ export function AgentWorkspace({
               <div className="flex items-center justify-center py-20">
                 <p className="text-muted-foreground">{t("monitor.loading")}</p>
               </div>
-            ) : selectedAgentId ? (
-              <AgentWorkspaceDetail
-                agentId={selectedAgentId}
-                onBack={() => setSelectedAgentId(null)}
-              />
             ) : (
               <>
                 <TabsContent value="monitor" className="mt-0">
@@ -226,6 +438,11 @@ export function AgentWorkspace({
                     runtimeCatalog={runtimeCatalog}
                     bridgeHealth={bridgeHealth}
                     dispatchStats={dispatchStats}
+                    selectedAgentId={selectedAgentId}
+                    onSelectAgent={setSelectedAgentId}
+                    onPause={onPause}
+                    onResume={onResume}
+                    onKill={onKill}
                   />
                 </TabsContent>
                 <TabsContent value="dispatch" className="mt-0">
@@ -236,12 +453,79 @@ export function AgentWorkspace({
                     runtimeCatalog={runtimeCatalog}
                     bridgeHealth={bridgeHealth}
                     dispatchStats={dispatchStats}
+                    selectedAgentId={selectedAgentId}
+                    onSelectAgent={setSelectedAgentId}
+                    onPause={onPause}
+                    onResume={onResume}
+                    onKill={onKill}
                   />
+                </TabsContent>
+                <TabsContent value="visualization" className="mt-0">
+                  <div className="flex flex-col gap-4 xl:flex-row xl:items-start">
+                    <div className="min-w-0 flex-1">
+                      <AgentVisualizationCanvas
+                        model={visualizationModel}
+                        loading={loading}
+                        requestedMemberId={requestedMemberId}
+                        selectedAgentId={selectedAgentId}
+                        selectedVisualizationNodeId={visualizationFocus?.nodeId ?? null}
+                        onSelectAgent={setSelectedAgentId}
+                        onSelectVisualizationNode={setVisualizationFocusId}
+                      />
+                    </div>
+                    {visualizationFocus ? (
+                      <div className="px-6 pb-6 xl:w-[360px] xl:px-0 xl:pr-6 xl:pt-6">
+                        <AgentVisualizationFocusPanel
+                          focus={visualizationFocus}
+                          dispatchHistory={visualizationDispatchHistory}
+                          dispatchHistoryLoading={
+                            visualizationFocusTaskId != null &&
+                            visualizationHistoryTaskId === visualizationFocusTaskId
+                          }
+                          onClearFocus={() => setVisualizationFocusId(null)}
+                        />
+                      </div>
+                    ) : null}
+                  </div>
                 </TabsContent>
               </>
             )}
           </div>
         </Tabs>
+        <Sheet
+          open={Boolean(selectedAgentId)}
+          onOpenChange={(open) => {
+            if (!open) {
+              setSelectedAgentId(null);
+            }
+          }}
+        >
+          <SheetContent
+            side="right"
+            className="w-full max-w-none overflow-y-auto p-0 sm:max-w-2xl"
+            showCloseButton={false}
+          >
+            <SheetHeader className="sr-only">
+              <SheetTitle>{t("monitor.title")}</SheetTitle>
+            </SheetHeader>
+            {selectedAgentId ? (
+              <AgentWorkspaceDetail
+                agentId={selectedAgentId}
+                onBack={() => setSelectedAgentId(null)}
+              />
+            ) : null}
+          </SheetContent>
+        </Sheet>
+        {onSpawnAgent ? (
+          <SpawnAgentDialog
+            open={spawnDialogOpen}
+            onOpenChange={setSpawnDialogOpen}
+            taskOptions={spawnTaskOptions}
+            memberOptions={spawnMemberOptions}
+            defaultMemberId={requestedMemberId ?? undefined}
+            onSpawnAgent={onSpawnAgent}
+          />
+        ) : null}
       </div>
     </TooltipProvider>
   );

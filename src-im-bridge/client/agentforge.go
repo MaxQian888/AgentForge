@@ -435,6 +435,32 @@ func (c *AgentForgeClient) ClassifyTaskAI(ctx context.Context, text string, cand
 	return &result, nil
 }
 
+func (c *AgentForgeClient) ClassifyMentionIntent(ctx context.Context, req MentionIntentRequest) (*TaskAIClassifyResponse, error) {
+	body := map[string]any{"text": req.Text, "project_id": c.projectID}
+	if strings.TrimSpace(req.UserID) != "" {
+		body["user_id"] = strings.TrimSpace(req.UserID)
+	}
+	if len(req.Candidates) > 0 {
+		body["candidates"] = req.Candidates
+	}
+	if req.Context != nil {
+		body["context"] = req.Context
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/ai/classify-intent", body)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return nil, c.readError(resp)
+	}
+	var result TaskAIClassifyResponse
+	if err := json.NewDecoder(resp.Body).Decode(&result); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &result, nil
+}
+
 // GetAgentRun returns a single agent run summary.
 func (c *AgentForgeClient) GetAgentRun(ctx context.Context, runID string) (*AgentRunSummary, error) {
 	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/agents/"+runID, nil)
@@ -878,10 +904,14 @@ func (c *AgentForgeClient) RegisterBridge(ctx context.Context, req BridgeRegistr
 	return &instance, nil
 }
 
-func (c *AgentForgeClient) HeartbeatBridge(ctx context.Context, bridgeID string) (*BridgeHeartbeat, error) {
-	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/im/bridge/heartbeat", map[string]string{
+func (c *AgentForgeClient) HeartbeatBridge(ctx context.Context, bridgeID string, metadata ...map[string]string) (*BridgeHeartbeat, error) {
+	body := map[string]any{
 		"bridgeId": bridgeID,
-	})
+	}
+	if len(metadata) > 0 && len(metadata[0]) > 0 {
+		body["metadata"] = metadata[0]
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/im/bridge/heartbeat", body)
 	if err != nil {
 		return nil, err
 	}
@@ -1138,6 +1168,13 @@ type TaskAIClassifyResponse struct {
 	Reply      string  `json:"reply,omitempty"`
 }
 
+type MentionIntentRequest struct {
+	Text       string   `json:"text"`
+	UserID     string   `json:"user_id,omitempty"`
+	Candidates []string `json:"candidates,omitempty"`
+	Context    any      `json:"context,omitempty"`
+}
+
 // PoolStatus represents the agent pool status.
 type PoolStatus struct {
 	ActiveAgents    int `json:"active_agents"`
@@ -1240,15 +1277,28 @@ func firstNonNilFloat(value *float64, fallback float64) float64 {
 }
 
 // Review represents an AgentForge code review.
+type ReviewFinding struct {
+	ID         string   `json:"id,omitempty"`
+	Category   string   `json:"category,omitempty"`
+	Severity   string   `json:"severity"`
+	File       string   `json:"file,omitempty"`
+	Line       int      `json:"line,omitempty"`
+	Message    string   `json:"message"`
+	Suggestion string   `json:"suggestion,omitempty"`
+	Sources    []string `json:"sources,omitempty"`
+	Dismissed  bool     `json:"dismissed,omitempty"`
+}
+
 type Review struct {
-	ID             string  `json:"id"`
-	TaskID         string  `json:"taskId"`
-	PRURL          string  `json:"prUrl"`
-	Status         string  `json:"status"`
-	RiskLevel      string  `json:"riskLevel"`
-	Summary        string  `json:"summary"`
-	Recommendation string  `json:"recommendation"`
-	CostUSD        float64 `json:"costUsd"`
+	ID             string          `json:"id"`
+	TaskID         string          `json:"taskId"`
+	PRURL          string          `json:"prUrl"`
+	Status         string          `json:"status"`
+	RiskLevel      string          `json:"riskLevel"`
+	Findings       []ReviewFinding `json:"findings,omitempty"`
+	Summary        string          `json:"summary"`
+	Recommendation string          `json:"recommendation"`
+	CostUSD        float64         `json:"costUsd"`
 }
 
 // Sprint represents an AgentForge sprint.

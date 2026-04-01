@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
 
@@ -59,32 +60,50 @@ export const useAutomationStore = create<AutomationState>()((set) => ({
   createRule: async (projectId, input) => {
     const token = getToken();
     if (!token) return;
-    const { data } = await getApi().post<AutomationRule>(`/api/v1/projects/${projectId}/automations`, input, { token });
-    set((state) => ({ rulesByProject: { ...state.rulesByProject, [projectId]: [...(state.rulesByProject[projectId] ?? []), data] } }));
+    try {
+      const { data } = await getApi().post<AutomationRule>(`/api/v1/projects/${projectId}/automations`, input, { token });
+      set((state) => ({ rulesByProject: { ...state.rulesByProject, [projectId]: [...(state.rulesByProject[projectId] ?? []), data] } }));
+    } catch (error) {
+      toast.error("Failed to create automation rule", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   },
 
   updateRule: async (projectId, ruleId, input) => {
     const token = getToken();
     if (!token) return;
-    const { data } = await getApi().put<AutomationRule>(`/api/v1/projects/${projectId}/automations/${ruleId}`, input, { token });
-    set((state) => ({
-      rulesByProject: {
-        ...state.rulesByProject,
-        [projectId]: (state.rulesByProject[projectId] ?? []).map((item) => (item.id === ruleId ? data : item)),
-      },
-    }));
+    try {
+      const { data } = await getApi().put<AutomationRule>(`/api/v1/projects/${projectId}/automations/${ruleId}`, input, { token });
+      set((state) => ({
+        rulesByProject: {
+          ...state.rulesByProject,
+          [projectId]: (state.rulesByProject[projectId] ?? []).map((item) => (item.id === ruleId ? data : item)),
+        },
+      }));
+    } catch (error) {
+      toast.error("Failed to update automation rule", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   },
 
   deleteRule: async (projectId, ruleId) => {
     const token = getToken();
     if (!token) return;
-    await getApi().delete(`/api/v1/projects/${projectId}/automations/${ruleId}`, { token });
-    set((state) => ({
-      rulesByProject: {
-        ...state.rulesByProject,
-        [projectId]: (state.rulesByProject[projectId] ?? []).filter((item) => item.id !== ruleId),
-      },
-    }));
+    try {
+      await getApi().delete(`/api/v1/projects/${projectId}/automations/${ruleId}`, { token });
+      set((state) => ({
+        rulesByProject: {
+          ...state.rulesByProject,
+          [projectId]: (state.rulesByProject[projectId] ?? []).filter((item) => item.id !== ruleId),
+        },
+      }));
+    } catch (error) {
+      toast.error("Failed to delete automation rule", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   },
 
   fetchLogs: async (projectId) => {

@@ -599,6 +599,47 @@ describe("ProjectTaskWorkspace", () => {
     );
   });
 
+  it("renders timeline dependency connectors and highlights them when a linked task is hovered", async () => {
+    const user = userEvent.setup();
+    const scheduledTasks = tasks.map((task) =>
+      task.id === "task-2"
+        ? {
+            ...task,
+            plannedStartAt: "2026-03-28T09:00:00.000Z",
+            plannedEndAt: "2026-03-29T18:00:00.000Z",
+          }
+        : task
+    );
+
+    renderWorkspace({ tasks: scheduledTasks });
+
+    await user.click(screen.getByRole("button", { name: "Timeline" }));
+
+    const connector = screen.getByTestId("timeline-dependency-task-1-task-2");
+    expect(connector).toHaveAttribute("data-active", "false");
+
+    await user.hover(screen.getByTestId("timeline-bar-task-1"));
+    expect(connector).toHaveAttribute("data-active", "true");
+
+    await user.unhover(screen.getByTestId("timeline-bar-task-1"));
+    expect(connector).toHaveAttribute("data-active", "false");
+  });
+
+  it("does not render timeline dependency connectors when no visible tasks depend on each other", async () => {
+    const user = userEvent.setup();
+
+    renderWorkspace({
+      tasks: tasks.map((task) => ({
+        ...task,
+        blockedBy: [],
+      })),
+    });
+
+    await user.click(screen.getByRole("button", { name: "Timeline" }));
+
+    expect(screen.queryByTestId("timeline-dependency-task-1-task-2")).not.toBeInTheDocument();
+  });
+
   it("keeps unscheduled tasks visible in calendar view and schedules them through drag", async () => {
     const user = userEvent.setup();
     const onTaskScheduleChange = jest.fn().mockResolvedValue(undefined);
@@ -677,6 +718,40 @@ describe("ProjectTaskWorkspace", () => {
       "data-mode",
       "week"
     );
+  });
+
+  it("navigates between calendar months while preserving the visible date grid", async () => {
+    const user = userEvent.setup();
+
+    renderWorkspace();
+
+    await user.click(screen.getByRole("button", { name: "Calendar" }));
+
+    const calendarView = screen.getByTestId("calendar-view");
+    expect(within(calendarView).getByTestId("calendar-period-label")).toHaveTextContent(
+      "2026-03"
+    );
+    expect(within(calendarView).getByTestId("calendar-bar-task-1")).toBeInTheDocument();
+
+    await user.click(
+      within(calendarView).getByRole("button", { name: "Next month" })
+    );
+
+    expect(within(calendarView).getByTestId("calendar-period-label")).toHaveTextContent(
+      "2026-04"
+    );
+    expect(
+      within(calendarView).queryByTestId("calendar-bar-task-1")
+    ).not.toBeInTheDocument();
+
+    await user.click(
+      within(calendarView).getByRole("button", { name: "Previous month" })
+    );
+
+    expect(within(calendarView).getByTestId("calendar-period-label")).toHaveTextContent(
+      "2026-03"
+    );
+    expect(within(calendarView).getByTestId("calendar-bar-task-1")).toBeInTheDocument();
   });
 
   it("shows the shared empty state when timeline or calendar have no tasks to render", async () => {

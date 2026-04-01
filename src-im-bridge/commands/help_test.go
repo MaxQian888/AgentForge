@@ -52,3 +52,13 @@ func TestSuggestCommandFromCatalogForPauseIntent(t *testing.T) {
 		t.Fatalf("suggestion = %q, want /agent pause run-123", got)
 	}
 }
+
+func TestIntentCatalogRanksTopCommandCandidates(t *testing.T) {
+	ranked := RankIntentCandidates("@AgentForge 看一下 sprint 和任务")
+	if len(ranked) < 3 {
+		t.Fatalf("ranked = %+v", ranked)
+	}
+	if ranked[0].Command == "" {
+		t.Fatalf("ranked[0] = %+v", ranked[0])
+	}
+}

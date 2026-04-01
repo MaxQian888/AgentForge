@@ -247,6 +247,43 @@ func (r *testRecorder) Header() http.Header {
 func (r *testRecorder) Write(data []byte) (int, error) { return r.buf.Write(data) }
 func (r *testRecorder) WriteHeader(statusCode int)     { r.code = statusCode }
 
+func TestStub_SendCardAndReplyCardRecordReplies(t *testing.T) {
+	stub := NewStub("0")
+
+	card := core.NewCard().
+		SetTitle("Build Ready").
+		AddField("Status", "success").
+		AddPrimaryButton("View", "act:view:build-1")
+
+	if err := stub.SendCard(context.Background(), "channel-1", card); err != nil {
+		t.Fatalf("SendCard error: %v", err)
+	}
+	if err := stub.ReplyCard(context.Background(), &core.Message{ChatID: "channel-2"}, card); err != nil {
+		t.Fatalf("ReplyCard error: %v", err)
+	}
+
+	if len(stub.replies) != 2 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].ChatID != "channel-1" || stub.replies[0].Content != "Build Ready" || stub.replies[0].NativeSurface != "discord_card" {
+		t.Fatalf("first reply = %+v", stub.replies[0])
+	}
+	if stub.replies[1].ChatID != "channel-2" || stub.replies[1].Content != "Build Ready" || stub.replies[1].NativeSurface != "discord_card" {
+		t.Fatalf("second reply = %+v", stub.replies[1])
+	}
+}
+
+func TestStub_TypingIndicatorIsNoop(t *testing.T) {
+	stub := NewStub("0")
+
+	if err := stub.StartTyping(context.Background(), "channel-1"); err != nil {
+		t.Fatalf("StartTyping error: %v", err)
+	}
+	if err := stub.StopTyping(context.Background(), "channel-1"); err != nil {
+		t.Fatalf("StopTyping error: %v", err)
+	}
+}
+
 func TestDiscordStub_HelperBranches(t *testing.T) {
 	stub := NewStub("0")
 

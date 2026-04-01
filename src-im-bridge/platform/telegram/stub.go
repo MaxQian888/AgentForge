@@ -146,6 +146,20 @@ func (s *Stub) UpdateFormattedText(ctx context.Context, replyCtx any, message *c
 	return s.ReplyFormattedText(ctx, replyCtx, message)
 }
 
+func (s *Stub) SendCard(ctx context.Context, chatID string, card *core.Card) error {
+	return s.recordReply(chatID, cardFallbackText(card), "telegram_card", "")
+}
+
+func (s *Stub) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) error {
+	return s.recordReply(chatIDFromReplyContext(replyCtx), cardFallbackText(card), "telegram_card", "")
+}
+
+func (s *Stub) StartTyping(ctx context.Context, chatID string) error { return nil }
+func (s *Stub) StopTyping(ctx context.Context, chatID string) error  { return nil }
+
+var _ core.CardSender = (*Stub)(nil)
+var _ core.TypingIndicator = (*Stub)(nil)
+
 func (s *Stub) recordReply(chatID, content, nativeSurface, format string) error {
 	s.mu.Lock()
 	s.replies = append(s.replies, stubReply{

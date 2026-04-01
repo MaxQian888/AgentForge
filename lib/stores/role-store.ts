@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
 
@@ -55,6 +56,8 @@ export interface RoleSkillCatalogEntry {
   displayName?: string;
   shortDescription?: string;
   defaultPrompt?: string;
+  requires?: string[];
+  tools?: string[];
   availableParts?: string[];
   referenceCount?: number;
   scriptCount?: number;
@@ -84,7 +87,13 @@ export interface RoleResponseStyle {
 export interface RoleToolConfig {
   builtIn?: string[];
   external?: string[];
+  pluginBindings?: RoleToolPluginBinding[];
   mcpServers?: RoleMCPServer[];
+}
+
+export interface RoleToolPluginBinding {
+  pluginId: string;
+  functions?: string[];
 }
 
 export interface RoleMCPServer {
@@ -146,6 +155,28 @@ export interface RoleTrigger {
   requiresApproval?: boolean;
 }
 
+export interface RolePluginDependency {
+  pluginId: string;
+  pluginName?: string;
+  pluginKind?: string;
+  lifecycleState?: string;
+  referenceType: string;
+  status: string;
+  blocking: boolean;
+  message?: string;
+}
+
+export interface RolePluginConsumer {
+  pluginId: string;
+  pluginName?: string;
+  pluginKind?: string;
+  lifecycleState?: string;
+  status: string;
+  blocking: boolean;
+  message?: string;
+  references?: string[];
+}
+
 export interface RoleManifest {
   apiVersion: string;
   kind: string;
@@ -165,6 +196,8 @@ export interface RoleManifest {
   collaboration?: RoleCollaboration;
   triggers?: RoleTrigger[];
   overrides?: Record<string, unknown>;
+  pluginDependencies?: RolePluginDependency[];
+  pluginConsumers?: RolePluginConsumer[];
 }
 
 export interface RoleExecutionProfile {
@@ -175,6 +208,7 @@ export interface RoleExecutionProfile {
   backstory: string;
   system_prompt: string;
   allowed_tools: string[];
+  plugin_bindings?: RoleToolPluginBinding[];
   max_budget_usd: number;
   max_turns: number;
   permission_mode: string;
@@ -328,48 +362,69 @@ export const useRoleStore = create<RoleState>()((set) => ({
     const token = getToken();
     if (!token) throw new Error("Not authenticated");
 
-    const api = createApiClient(API_URL);
-    const { data: role } = await api.post<RoleManifest>(
-      "/api/v1/roles",
-      data,
-      { token }
-    );
+    try {
+      const api = createApiClient(API_URL);
+      const { data: role } = await api.post<RoleManifest>(
+        "/api/v1/roles",
+        data,
+        { token }
+      );
 
-    set((state) => ({ roles: [...state.roles, role] }));
+      set((state) => ({ roles: [...state.roles, role] }));
 
-    return role;
+      return role;
+    } catch (error) {
+      toast.error("Failed to create role", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
+    }
   },
 
   updateRole: async (id, data) => {
     const token = getToken();
     if (!token) throw new Error("Not authenticated");
 
-    const api = createApiClient(API_URL);
-    const { data: role } = await api.put<RoleManifest>(
-      `/api/v1/roles/${id}`,
-      data,
-      { token }
-    );
+    try {
+      const api = createApiClient(API_URL);
+      const { data: role } = await api.put<RoleManifest>(
+        `/api/v1/roles/${id}`,
+        data,
+        { token }
+      );
 
-    set((state) => ({
-      roles: state.roles.map((r) =>
-        r.metadata.id === id ? role : r
-      ),
-    }));
+      set((state) => ({
+        roles: state.roles.map((r) =>
+          r.metadata.id === id ? role : r
+        ),
+      }));
 
-    return role;
+      return role;
+    } catch (error) {
+      toast.error("Failed to update role", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
+    }
   },
 
   deleteRole: async (id) => {
     const token = getToken();
     if (!token) throw new Error("Not authenticated");
 
-    const api = createApiClient(API_URL);
-    await api.delete(`/api/v1/roles/${id}`, { token });
+    try {
+      const api = createApiClient(API_URL);
+      await api.delete(`/api/v1/roles/${id}`, { token });
 
-    set((state) => ({
-      roles: state.roles.filter((r) => r.metadata.id !== id),
-    }));
+      set((state) => ({
+        roles: state.roles.filter((r) => r.metadata.id !== id),
+      }));
+    } catch (error) {
+      toast.error("Failed to delete role", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
+    }
   },
 
   previewRole: async (payload) => {

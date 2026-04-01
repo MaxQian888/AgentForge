@@ -11,7 +11,10 @@ import type {
   RoleSandboxResponse,
   RoleSkillCatalogEntry,
 } from "@/lib/stores/role-store";
+import type { PluginRecord } from "@/lib/stores/plugin-store";
 import {
+  buildRoleCapabilitySourceFromDraft,
+  buildRoleCapabilitySourceFromManifest,
   buildRoleDraft,
   buildRoleExecutionSummary,
   computeFieldProvenance,
@@ -48,6 +51,7 @@ import type { RoleWorkspaceSectionId } from "./role-workspace-sections";
 interface RoleWorkspaceProps {
   roles: RoleManifest[];
   skillCatalog?: RoleSkillCatalogEntry[];
+  availablePlugins?: PluginRecord[];
   skillCatalogLoading?: boolean;
   loading: boolean;
   error: string | null;
@@ -68,6 +72,7 @@ interface RoleWorkspaceProps {
 export function RoleWorkspace({
   roles,
   skillCatalog = [],
+  availablePlugins = [],
   skillCatalogLoading = false,
   loading,
   error,
@@ -138,8 +143,8 @@ export function RoleWorkspace({
     [draftValidationErrors],
   );
   const executionSummary = useMemo(
-    () => buildRoleExecutionSummary(draft),
-    [draft],
+    () => buildRoleExecutionSummary(draft, skillCatalog),
+    [draft, skillCatalog],
   );
 
   const getRequestPayload = () => {
@@ -325,8 +330,18 @@ export function RoleWorkspace({
         catalog: skillCatalog,
         templateSkills: selectedTemplateRole?.capabilities.skills ?? [],
         parentSkills: selectedParentRole?.capabilities.skills ?? [],
+        roleCapabilities: buildRoleCapabilitySourceFromDraft(draft),
       }),
-    [draft.skillRows, selectedParentRole, selectedTemplateRole, skillCatalog],
+    [draft, selectedParentRole, selectedTemplateRole, skillCatalog],
+  );
+  const effectiveRoleCapabilitySource = useMemo(
+    () =>
+      sandboxResult?.effectiveManifest || previewResult?.effectiveManifest
+        ? buildRoleCapabilitySourceFromManifest(
+            sandboxResult?.effectiveManifest ?? previewResult?.effectiveManifest,
+          )
+        : buildRoleCapabilitySourceFromDraft(draft),
+    [draft, previewResult, sandboxResult],
   );
   const effectiveSkillResolution = useMemo<RoleSkillResolution[]>(
     () =>
@@ -338,8 +353,9 @@ export function RoleWorkspace({
         catalog: skillCatalog,
         templateSkills: selectedTemplateRole?.capabilities.skills ?? [],
         parentSkills: selectedParentRole?.capabilities.skills ?? [],
+        roleCapabilities: effectiveRoleCapabilitySource,
       }),
-    [draft.skillRows, previewResult, sandboxResult, selectedParentRole, selectedTemplateRole, skillCatalog],
+    [draft.skillRows, effectiveRoleCapabilitySource, previewResult, sandboxResult, selectedParentRole, selectedTemplateRole, skillCatalog],
   );
 
   const provenanceMap = useMemo(
@@ -354,6 +370,7 @@ export function RoleWorkspace({
       templateId={templateId}
       selectedRole={selectedRole}
       skillCatalog={skillCatalog}
+      availablePlugins={availablePlugins}
       skillCatalogLoading={skillCatalogLoading}
       draftSkillResolution={draftSkillResolution}
       selectedTemplateName={selectedTemplateName}

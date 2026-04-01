@@ -13,6 +13,7 @@ import {
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { usePluginStore } from "@/lib/stores/plugin-store";
 import type { PluginRecord } from "@/lib/stores/plugin-store";
 
@@ -80,7 +81,7 @@ function InvokeForm({ plugin, onClose }: InvokeFormProps) {
         </div>
         <div className="grid gap-1.5">
           <Label htmlFor="invoke-payload">{t("invokeDialog.payload")}</Label>
-          <textarea
+          <Textarea
             id="invoke-payload"
             className="flex min-h-[140px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background placeholder:text-muted-foreground focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2 disabled:cursor-not-allowed disabled:opacity-50 font-mono"
             value={payloadText}

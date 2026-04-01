@@ -514,11 +514,17 @@ type structuredCall struct {
 	Markup    *inlineKeyboardMarkup
 }
 
+type chatActionCall struct {
+	ChatID int64
+	Action string
+}
+
 type fakeSender struct {
 	calls           []sendCall
 	edits           []editCall
 	callbackAnswers []callbackAnswerCall
 	structuredCalls []structuredCall
+	chatActions     []chatActionCall
 }
 
 func (s *fakeSender) SendText(ctx context.Context, chatID int64, topicID int64, replyToMessageID int, message telegramTextMessage) error {
@@ -557,6 +563,14 @@ func (s *fakeSender) SendStructured(ctx context.Context, chatID int64, topicID i
 		Text:      message.Text,
 		ParseMode: message.ParseMode,
 		Markup:    markup,
+	})
+	return nil
+}
+
+func (s *fakeSender) SendChatAction(ctx context.Context, chatID int64, action string) error {
+	s.chatActions = append(s.chatActions, chatActionCall{
+		ChatID: chatID,
+		Action: action,
 	})
 	return nil
 }
@@ -861,5 +875,176 @@ func TestBotAPISenderAndClientMethods(t *testing.T) {
 	}
 	if _, err := notOKClient.getUpdates(context.Background(), 0); err == nil || !strings.Contains(err.Error(), "denied") {
 		t.Fatalf("getUpdates not-ok err = %v", err)
+	}
+}
+
+func TestLive_SendCardRendersMarkdownV2WithInlineKeyboard(t *testing.T) {
+	runner := &fakeUpdateRunner{}
+	sender := &fakeSender{}
+
+	live, err := NewLive("bot-token", WithUpdateRunner(runner), WithSender(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	card := core.NewCard().
+		SetTitle("Build #42").
+		AddField("Status", "success").
+		AddField("Branch", "main").
+		AddPrimaryButton("Approve", "act:approve:build-42").
+		AddButton("View", "link:https://example.test/builds/42")
+
+	if err := live.SendCard(context.Background(), "-2001", card); err != nil {
+		t.Fatalf("SendCard error: %v", err)
+	}
+
+	if len(sender.structuredCalls) != 1 {
+		t.Fatalf("structuredCalls = %+v", sender.structuredCalls)
+	}
+	call := sender.structuredCalls[0]
+	if call.ChatID != -2001 {
+		t.Fatalf("ChatID = %d", call.ChatID)
+	}
+	if call.ParseMode != "MarkdownV2" {
+		t.Fatalf("ParseMode = %q", call.ParseMode)
+	}
+	if !strings.Contains(call.Text, "Build \\#42") {
+		t.Fatalf("text = %q, expected escaped title", call.Text)
+	}
+	if !strings.Contains(call.Text, "*Status:*") {
+		t.Fatalf("text = %q, expected bold label", call.Text)
+	}
+	if call.Markup == nil || len(call.Markup.InlineKeyboard) != 2 {
+		t.Fatalf("markup = %+v", call.Markup)
+	}
+	if call.Markup.InlineKeyboard[0][0].CallbackData != "act:approve:build-42" {
+		t.Fatalf("first button = %+v", call.Markup.InlineKeyboard[0][0])
+	}
+	if call.Markup.InlineKeyboard[1][0].URL != "https://example.test/builds/42" {
+		t.Fatalf("second button = %+v", call.Markup.InlineKeyboard[1][0])
+	}
+}
+
+func TestLive_ReplyCardUsesReplyContextAndRejectsMissingChat(t *testing.T) {
+	runner := &fakeUpdateRunner{}
+	sender := &fakeSender{}
+
+	live, err := NewLive("bot-token", WithUpdateRunner(runner), WithSender(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	card := core.NewCard().
+		SetTitle("Task Assigned").
+		AddField("Assignee", "alice").
+		AddPrimaryButton("Accept", "act:accept:task-1")
+
+	if err := live.ReplyCard(context.Background(), replyContext{ChatID: -2001, TopicID: 777}, card); err != nil {
+		t.Fatalf("ReplyCard error: %v", err)
+	}
+
+	if len(sender.structuredCalls) != 1 {
+		t.Fatalf("structuredCalls = %+v", sender.structuredCalls)
+	}
+	call := sender.structuredCalls[0]
+	if call.ChatID != -2001 || call.TopicID != 777 {
+		t.Fatalf("call = %+v", call)
+	}
+	if call.ParseMode != "MarkdownV2" {
+		t.Fatalf("ParseMode = %q", call.ParseMode)
+	}
+	if call.Markup == nil || len(call.Markup.InlineKeyboard) != 1 {
+		t.Fatalf("markup = %+v", call.Markup)
+	}
+
+	if err := live.ReplyCard(context.Background(), replyContext{}, card); err == nil || !strings.Contains(err.Error(), "requires chat id") {
+		t.Fatalf("missing chat error = %v", err)
+	}
+}
+
+func TestLive_StartTypingSendsChatActionAndStopTypingIsNoop(t *testing.T) {
+	runner := &fakeUpdateRunner{}
+	sender := &fakeSender{}
+
+	live, err := NewLive("bot-token", WithUpdateRunner(runner), WithSender(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.StartTyping(context.Background(), "-2001"); err != nil {
+		t.Fatalf("StartTyping error: %v", err)
+	}
+
+	if len(sender.chatActions) != 1 {
+		t.Fatalf("chatActions = %+v", sender.chatActions)
+	}
+	if sender.chatActions[0].ChatID != -2001 || sender.chatActions[0].Action != "typing" {
+		t.Fatalf("chatAction = %+v", sender.chatActions[0])
+	}
+
+	// Non-numeric chatID is silently ignored
+	if err := live.StartTyping(context.Background(), "not-a-number"); err != nil {
+		t.Fatalf("StartTyping non-numeric error: %v", err)
+	}
+	if len(sender.chatActions) != 1 {
+		t.Fatalf("expected non-numeric chatID to be ignored, chatActions = %+v", sender.chatActions)
+	}
+
+	// Empty chatID is silently ignored
+	if err := live.StartTyping(context.Background(), ""); err != nil {
+		t.Fatalf("StartTyping empty error: %v", err)
+	}
+
+	// StopTyping is always a no-op
+	if err := live.StopTyping(context.Background(), "-2001"); err != nil {
+		t.Fatalf("StopTyping error: %v", err)
+	}
+}
+
+func TestLive_SendCardWithNilCardSendsEmptyStructured(t *testing.T) {
+	runner := &fakeUpdateRunner{}
+	sender := &fakeSender{}
+
+	live, err := NewLive("bot-token", WithUpdateRunner(runner), WithSender(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.SendCard(context.Background(), "-2001", nil); err != nil {
+		t.Fatalf("SendCard nil error: %v", err)
+	}
+}
+
+func TestBotAPISender_SendChatActionCallsAPI(t *testing.T) {
+	var requestPath string
+	var requestBody map[string]any
+	client := &botAPIClient{
+		baseURL: "https://api.telegram.example/bot-token",
+		client: &http.Client{Transport: telegramRoundTripperFunc(func(req *http.Request) (*http.Response, error) {
+			requestPath = req.URL.Path
+			if err := json.NewDecoder(req.Body).Decode(&requestBody); err != nil {
+				t.Fatalf("decode request body: %v", err)
+			}
+			return &http.Response{
+				StatusCode: http.StatusOK,
+				Body:       io.NopCloser(strings.NewReader(`{"ok":true,"result":true}`)),
+				Header:     make(http.Header),
+			}, nil
+		})},
+	}
+	sender := &botAPISender{client: client}
+
+	if err := sender.SendChatAction(context.Background(), -2001, "typing"); err != nil {
+		t.Fatalf("SendChatAction error: %v", err)
+	}
+	if requestPath != "/bot-token/sendChatAction" {
+		t.Fatalf("path = %q", requestPath)
+	}
+	if requestBody["chat_id"] != float64(-2001) || requestBody["action"] != "typing" {
+		t.Fatalf("body = %+v", requestBody)
+	}
+
+	if err := client.sendChatAction(context.Background(), sendChatActionRequest{}); err == nil || !strings.Contains(err.Error(), "requires action") {
+		t.Fatalf("sendChatAction empty err = %v", err)
 	}
 }

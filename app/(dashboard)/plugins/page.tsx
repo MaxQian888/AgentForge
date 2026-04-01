@@ -226,7 +226,7 @@ export default function PluginsPage() {
   const handleDesktopNotification = useCallback(async () => {
     const result = await sendNotification({
       notificationId: `plugins-desktop-runtime-${desktopRuntime.overall}`,
-      type: "desktop.runtime.status",
+      notificationType: "desktop.runtime.status",
       title: "AgentForge Desktop",
       body: `Desktop runtime is currently ${desktopRuntime.overall}.`,
       href: "/plugins",
@@ -707,6 +707,16 @@ export default function PluginsPage() {
 
           {/* --- Marketplace --- */}
           <TabsContent value="marketplace" className="mt-4">
+            <div className="mb-3 flex items-center justify-between rounded-lg border border-border/60 bg-muted/20 p-3">
+              <p className="text-xs text-muted-foreground">
+                Browse the full marketplace for plugins, skills, and roles.
+              </p>
+              <Button asChild size="sm" variant="outline">
+                <a href="/marketplace?type=plugin">
+                  Open Marketplace
+                </a>
+              </Button>
+            </div>
             {filteredMarketplace.length === 0 ? (
               <EmptyState
                 icon={Puzzle}

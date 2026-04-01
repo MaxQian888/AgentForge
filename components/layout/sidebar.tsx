@@ -23,6 +23,7 @@ import {
   ChevronRight,
   Search,
   Store,
+  ScrollText,
 } from "lucide-react";
 import type { LucideIcon } from "lucide-react";
 import {
@@ -90,6 +91,7 @@ const navGroups: NavGroup[] = [
       { href: "/cost", labelKey: "nav.cost", icon: DollarSign },
       { href: "/scheduler", labelKey: "nav.scheduler", icon: RefreshCw },
       { href: "/memory", labelKey: "nav.memory", icon: Brain },
+      { href: "/logs", labelKey: "nav.logs", icon: ScrollText },
     ],
   },
   {

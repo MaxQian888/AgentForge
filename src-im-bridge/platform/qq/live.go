@@ -148,6 +148,26 @@ func (l *Live) Send(ctx context.Context, chatID string, content string) error {
 	})
 }
 
+func (l *Live) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
+	if message == nil {
+		return errors.New("formatted text is required")
+	}
+	return l.Send(ctx, chatID, message.Content)
+}
+
+func (l *Live) ReplyFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	if message == nil {
+		return errors.New("formatted text is required")
+	}
+	return l.Reply(ctx, rawReplyCtx, message.Content)
+}
+
+func (l *Live) UpdateFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	return l.ReplyFormattedText(ctx, rawReplyCtx, message)
+}
+
+var _ core.FormattedTextSender = (*Live)(nil)
+
 func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
 	return l.Send(ctx, chatID, strings.TrimSpace(message.FallbackText()))
 }

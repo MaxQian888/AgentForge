@@ -26,11 +26,15 @@ var liveMetadata = core.PlatformMetadata{
 	Capabilities: core.PlatformCapabilities{
 		CommandSurface:        core.CommandSurfaceMixed,
 		StructuredSurface:     core.StructuredSurfaceBlocks,
-		AsyncUpdateModes:      []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateThreadReply, core.AsyncUpdateFollowUp},
+		AsyncUpdateModes:      []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateThreadReply, core.AsyncUpdateFollowUp, core.AsyncUpdateEdit},
 		ActionCallbackMode:    core.ActionCallbackSocketPayload,
 		MessageScopes:         []core.MessageScope{core.MessageScopeChat, core.MessageScopeThread},
 		NativeSurfaces:        []string{core.NativeSurfaceSlackBlockKit},
 		SupportsRichMessages:  true,
+		Mutability: core.MutabilitySemantics{
+			CanEdit:        true,
+			PrefersInPlace: true,
+		},
 		SupportsDeferredReply: true,
 		SupportsSlashCommands: true,
 		SupportsMentions:      true,
@@ -45,12 +49,15 @@ var liveMetadata = core.PlatformMetadata{
 	},
 }
 
+var _ core.MessageUpdater = (*Live)(nil)
+
 var errIgnoreEnvelope = errors.New("ignore slack envelope")
 
 type replyContext struct {
 	ChannelID   string
 	ThreadTS    string
 	ResponseURL string
+	MessageTS   string
 }
 
 type socketEnvelopeType string
@@ -84,6 +91,7 @@ type slackOutgoingMessage struct {
 
 type messageClient interface {
 	PostMessage(ctx context.Context, message slackOutgoingMessage) error
+	UpdateMessage(ctx context.Context, channelID, messageTS, text string) error
 }
 
 type responseClient interface {
@@ -191,7 +199,19 @@ func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
 		ChannelID:   firstNonEmpty(target.ChannelID, target.ChatID),
 		ThreadTS:    target.ThreadID,
 		ResponseURL: target.ResponseURL,
+		MessageTS:   target.MessageID,
 	}
+}
+
+func (l *Live) UpdateMessage(ctx context.Context, rawReplyCtx any, content string) error {
+	rc, ok := rawReplyCtx.(*replyContext)
+	if !ok || rc == nil {
+		return errors.New("invalid reply context for Slack UpdateMessage")
+	}
+	if rc.MessageTS == "" {
+		return errors.New("message timestamp required for Slack UpdateMessage")
+	}
+	return l.messages.UpdateMessage(ctx, rc.ChannelID, rc.MessageTS, content)
 }
 
 func (l *Live) Start(handler core.MessageHandler) error {
@@ -521,6 +541,11 @@ type slackAPIMessageClient struct {
 
 type httpResponseClient struct {
 	client *http.Client
+}
+
+func (c *slackAPIMessageClient) UpdateMessage(ctx context.Context, channelID, messageTS, text string) error {
+	_, _, _, err := c.client.UpdateMessageContext(ctx, channelID, messageTS, goslack.MsgOptionText(text, false))
+	return err
 }
 
 func (c *slackAPIMessageClient) PostMessage(ctx context.Context, message slackOutgoingMessage) error {

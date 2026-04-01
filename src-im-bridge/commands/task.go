@@ -7,6 +7,7 @@ import (
 
 	"github.com/agentforge/im-bridge/client"
 	"github.com/agentforge/im-bridge/core"
+	log "github.com/sirupsen/logrus"
 )
 
 var taskUsage = commandUsage("/task")
@@ -37,9 +38,9 @@ func RegisterTaskCommands(engine *core.Engine, apiClient *client.AgentForgeClien
 		case "assign":
 			handleTaskAssign(ctx, p, msg, scopedClient, subArgs)
 		case "decompose":
-			handleTaskDecomposeBridgeFirst(ctx, p, msg, scopedClient, subArgs)
+			handleTaskDecomposeBridgeFirst(ctx, p, msg, engine, scopedClient, subArgs)
 		case "ai":
-			handleTaskAI(ctx, p, msg, scopedClient, subArgs)
+			handleTaskAI(ctx, p, msg, engine, scopedClient, subArgs)
 		case "move":
 			handleTaskMove(ctx, p, msg, scopedClient, subArgs)
 		default:
@@ -140,7 +141,7 @@ func handleTaskAssign(ctx context.Context, p core.Platform, msg *core.Message, c
 	_ = p.Reply(ctx, msg.ReplyCtx, formatTaskDispatchReply(result, member.Name))
 }
 
-func handleTaskDecomposeBridgeFirst(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, args string) {
+func handleTaskDecomposeBridgeFirst(ctx context.Context, p core.Platform, msg *core.Message, engine *core.Engine, c *client.AgentForgeClient, args string) {
 	parts := strings.Fields(strings.TrimSpace(args))
 	if len(parts) == 0 {
 		_ = p.Reply(ctx, msg.ReplyCtx, "鐢ㄦ硶: /task decompose <task-id>")
@@ -158,10 +159,26 @@ func handleTaskDecomposeBridgeFirst(ctx context.Context, p core.Platform, msg *c
 
 	_ = p.Reply(ctx, msg.ReplyCtx, "姝ｅ湪鍒嗚В浠诲姟锛岃绋嶅€?..")
 
-	result, err := c.DecomposeTaskViaBridge(ctx, taskID, provider, model)
-	if err == nil {
-		_ = p.Reply(ctx, msg.ReplyCtx, formatBridgeTaskDecomposition(result))
-		return
+	route := engine.ResolveCommandRoute("/task", "decompose")
+	available, routeErr := engine.BridgeCapabilityAvailable(ctx, route.Capability)
+	if available {
+		result, err := c.DecomposeTaskViaBridge(ctx, taskID, provider, model)
+		if err == nil {
+			log.WithFields(log.Fields{
+				"component": "commands.task",
+				"taskId":    taskID,
+				"provider":  provider,
+				"model":     model,
+			}).Info("Bridge task decomposition succeeded")
+			_ = p.Reply(ctx, msg.ReplyCtx, formatBridgeTaskDecomposition(result))
+			return
+		}
+		log.WithFields(log.Fields{
+			"component": "commands.task",
+			"taskId":    taskID,
+			"provider":  provider,
+			"model":     model,
+		}).WithError(err).Warn("Bridge task decomposition failed; attempting legacy fallback")
 	}
 
 	legacyResult, legacyErr := c.DecomposeTask(ctx, taskID)
@@ -177,7 +194,16 @@ func handleTaskDecomposeBridgeFirst(ctx context.Context, p core.Platform, msg *c
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("任务分解失败: %v\n未创建任何子任务，请稍后重试。", legacyErr))
 		return
 	}
-	_ = p.Reply(ctx, msg.ReplyCtx, formatLegacyTaskDecompositionWithPrefix("Using fallback (Bridge unavailable)\n", legacyResult))
+	prefix := "Using fallback (Bridge unavailable)\n"
+	if routeErr == nil && available {
+		prefix = "Using fallback (Bridge request failed)\n"
+	}
+	log.WithFields(log.Fields{
+		"component": "commands.task",
+		"taskId":    taskID,
+		"fallback":  prefix,
+	}).Info("Task decomposition completed via fallback path")
+	_ = p.Reply(ctx, msg.ReplyCtx, formatLegacyTaskDecompositionWithPrefix(prefix, legacyResult))
 }
 
 func handleTaskDecompose(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, taskID string) {
@@ -226,6 +252,7 @@ func formatBridgeTaskDecomposition(result *client.BridgeTaskDecompositionRespons
 		sb.WriteString(fmt.Sprintf("%d. [%s/%s] %s\n",
 			i+1, subtask.ExecutionMode, subtask.Priority, subtask.Title))
 	}
+	appendBridgeDecomposeHandoff(&sb, result)
 	return strings.TrimRight(sb.String(), "\n")
 }
 
@@ -242,7 +269,51 @@ func formatLegacyTaskDecompositionWithPrefix(prefix string, result *client.TaskD
 		sb.WriteString(fmt.Sprintf("%d. #%s [%s/%s] %s\n",
 			i+1, shortID(subtask.ID), subtask.Status, subtask.Priority, subtask.Title))
 	}
+	appendLegacyDecomposeHandoff(&sb, result)
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func appendBridgeDecomposeHandoff(sb *strings.Builder, result *client.BridgeTaskDecompositionResponse) {
+	if sb == nil || result == nil {
+		return
+	}
+	commands := make([]string, 0, len(result.Subtasks))
+	for _, subtask := range result.Subtasks {
+		if strings.TrimSpace(subtask.ExecutionMode) != "agent" {
+			continue
+		}
+		title := strings.TrimSpace(subtask.Title)
+		if title == "" {
+			continue
+		}
+		commands = append(commands, "/agent run "+title)
+	}
+	appendHandoffCommands(sb, commands)
+}
+
+func appendLegacyDecomposeHandoff(sb *strings.Builder, result *client.TaskDecompositionResponse) {
+	if sb == nil || result == nil {
+		return
+	}
+	commands := make([]string, 0, len(result.Subtasks))
+	for _, subtask := range result.Subtasks {
+		taskID := strings.TrimSpace(subtask.ID)
+		if taskID == "" {
+			continue
+		}
+		commands = append(commands, "/agent spawn "+taskID)
+	}
+	appendHandoffCommands(sb, commands)
+}
+
+func appendHandoffCommands(sb *strings.Builder, commands []string) {
+	if sb == nil || len(commands) == 0 {
+		return
+	}
+	sb.WriteString("可继续执行:\n")
+	for _, command := range commands {
+		sb.WriteString("- " + command + "\n")
+	}
 }
 
 func handleTaskMove(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, args string) {
@@ -261,7 +332,7 @@ func handleTaskMove(ctx context.Context, p core.Platform, msg *core.Message, c *
 	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("任务 #%s 已流转到 %s", shortID(task.ID), task.Status))
 }
 
-func handleTaskAI(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, args string) {
+func handleTaskAI(ctx context.Context, p core.Platform, msg *core.Message, engine *core.Engine, c *client.AgentForgeClient, args string) {
 	parts := strings.Fields(strings.TrimSpace(args))
 	if len(parts) == 0 {
 		_ = p.Reply(ctx, msg.ReplyCtx, "鐢ㄦ硶: /task ai generate|classify <鍙傛暟>")
@@ -270,8 +341,20 @@ func handleTaskAI(ctx context.Context, p core.Platform, msg *core.Message, c *cl
 
 	switch parts[0] {
 	case "generate":
+		route := engine.ResolveCommandRoute("/task ai", "generate")
+		if available, err := engine.BridgeCapabilityAvailable(ctx, route.Capability); !available {
+			log.WithFields(log.Fields{"component": "commands.task"}).WithError(err).Warn("Bridge task AI generate capability unavailable")
+			_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("AI 鐢熸垚澶辫触: %v", err))
+			return
+		}
 		handleTaskAIGenerate(ctx, p, msg, c, strings.TrimSpace(args[len(parts[0]):]))
 	case "classify":
+		route := engine.ResolveCommandRoute("/task ai", "classify")
+		if available, err := engine.BridgeCapabilityAvailable(ctx, route.Capability); !available {
+			log.WithFields(log.Fields{"component": "commands.task"}).WithError(err).Warn("Bridge task AI classify capability unavailable")
+			_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("AI 鎰忓浘鍒嗙被澶辫触: %v", err))
+			return
+		}
 		handleTaskAIClassify(ctx, p, msg, c, strings.TrimSpace(args[len(parts[0]):]))
 	default:
 		_ = p.Reply(ctx, msg.ReplyCtx, "鐢ㄦ硶: /task ai generate|classify <鍙傛暟>")

@@ -89,4 +89,54 @@ describe("PluginDetailOverview", () => {
     expect(screen.getByText("Next step: Set FEISHU_APP_ID and FEISHU_APP_SECRET before activation.")).toBeInTheDocument();
     expect(screen.getByText("Missing configuration: FEISHU_APP_ID, FEISHU_APP_SECRET")).toBeInTheDocument();
   });
+
+  it("renders marketplace provenance and a deep-link back to the marketplace workspace", () => {
+    render(
+      <PluginDetailOverview
+        plugin={{
+          ...plugin,
+          source: {
+            ...plugin.source,
+            type: "marketplace",
+            catalog: "release-train",
+            ref: "1.2.3",
+          },
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Marketplace provenance")).toBeInTheDocument();
+    expect(screen.getByText("Marketplace item: release-train")).toBeInTheDocument();
+    expect(screen.getByText("Selected version: 1.2.3")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open in marketplace" })).toHaveAttribute(
+      "href",
+      "/marketplace?item=release-train",
+    );
+  });
+
+  it("renders role consumers and a deep-link to the roles workspace", () => {
+    render(
+      <PluginDetailOverview
+        plugin={{
+          ...plugin,
+          roleConsumers: [
+            {
+              roleId: "design-lead",
+              roleName: "Design Lead",
+              referenceType: "external",
+              status: "active",
+              blocking: false,
+            },
+          ],
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Role consumers")).toBeInTheDocument();
+    expect(screen.getByText("Design Lead (design-lead)")).toBeInTheDocument();
+    expect(screen.getByRole("link", { name: "Open roles workspace" })).toHaveAttribute(
+      "href",
+      "/roles",
+    );
+  });
 });

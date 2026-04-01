@@ -200,6 +200,21 @@ func TestAgentHandler_Spawn_ReturnsServiceUnavailableWhenBridgeIsDegraded(t *tes
 	}
 }
 
+func TestAgentHandler_Spawn_MapsBridgeUnavailableToServiceUnavailable(t *testing.T) {
+	e := newAgentTestEcho()
+	h := handler.NewAgentHandler(&mockAgentRuntimeService{spawnErr: service.ErrAgentBridgeUnavailable})
+
+	req := httptest.NewRequest(http.MethodPost, "/agents/spawn", strings.NewReader(`{"taskId":"`+uuid.New().String()+`","memberId":"`+uuid.New().String()+`"}`))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+
+	_ = h.Spawn(c)
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("expected 503, got %d", rec.Code)
+	}
+}
+
 func TestAgentHandler_Spawn_ForwardsExplicitRuntime(t *testing.T) {
 	e := newAgentTestEcho()
 	mockSvc := &mockAgentRuntimeService{}

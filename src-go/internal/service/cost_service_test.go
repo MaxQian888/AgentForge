@@ -31,7 +31,7 @@ type costServiceRunRepo struct {
 func (r *costServiceRunRepo) Create(context.Context, *model.AgentRun) error         { return nil }
 func (r *costServiceRunRepo) UpdateStatus(context.Context, uuid.UUID, string) error { return nil }
 
-func (r *costServiceRunRepo) UpdateCost(_ context.Context, id uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int) error {
+func (r *costServiceRunRepo) UpdateCost(_ context.Context, id uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int, _ *model.CostAccountingSnapshot) error {
 	r.updateCostInput.id = id
 	r.updateCostInput.inputTokens = inputTokens
 	r.updateCostInput.outputTokens = outputTokens

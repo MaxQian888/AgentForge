@@ -12,6 +12,21 @@ import {
   CardTitle,
 } from "@/components/ui/card";
 import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
   ALL_TASK_STATUSES,
   TRIGGER_ACTIONS,
   useWorkflowStore,
@@ -108,31 +123,31 @@ function TransitionEditor({
 
   return (
     <div className="overflow-auto">
-      <table className="w-full text-xs">
-        <thead>
-          <tr>
-            <th className="px-2 py-1 text-left font-medium text-muted-foreground">
+      <Table className="w-full text-xs">
+        <TableHeader>
+          <TableRow>
+            <TableHead className="px-2 py-1 text-left font-medium text-muted-foreground">
               {t("fromTo")}
-            </th>
+            </TableHead>
             {ALL_TASK_STATUSES.map((status) => (
-              <th
+              <TableHead
                 key={status}
                 className="px-1 py-1 text-center font-medium text-muted-foreground"
               >
                 {statusLabel(status)}
-              </th>
+              </TableHead>
             ))}
-          </tr>
-        </thead>
-        <tbody>
+          </TableRow>
+        </TableHeader>
+        <TableBody>
           {ALL_TASK_STATUSES.map((from) => (
-            <tr key={from} className="border-t border-border/40">
-              <td className="px-2 py-1 font-medium">{statusLabel(from)}</td>
+            <TableRow key={from} className="border-t border-border/40">
+              <TableCell className="px-2 py-1 font-medium">{statusLabel(from)}</TableCell>
               {ALL_TASK_STATUSES.map((to) => {
                 const checked = (transitions[from] ?? []).includes(to);
                 const isSame = from === to;
                 return (
-                  <td key={to} className="px-1 py-1 text-center">
+                  <TableCell key={to} className="px-1 py-1 text-center">
                     {isSame ? (
                       <span className="text-muted-foreground/40">-</span>
                     ) : (
@@ -143,13 +158,13 @@ function TransitionEditor({
                         aria-label={`Allow ${statusLabel(from)} to ${statusLabel(to)}`}
                       />
                     )}
-                  </td>
+                  </TableCell>
                 );
               })}
-            </tr>
+            </TableRow>
           ))}
-        </tbody>
-      </table>
+        </TableBody>
+      </Table>
     </div>
   );
 }
@@ -188,44 +203,53 @@ function TriggerEditor({
           className="flex flex-wrap items-center gap-2 rounded-md border border-border/60 bg-muted/20 p-3 text-sm"
         >
           <span className="text-muted-foreground">{t("when")}</span>
-          <select
-            className="h-8 rounded-md border bg-background px-2 text-sm"
+          <Select
             value={trigger.fromStatus}
-            onChange={(e) => updateTrigger(index, "fromStatus", e.target.value)}
-            aria-label={`Trigger ${index + 1} from status`}
+            onValueChange={(value) => updateTrigger(index, "fromStatus", value)}
           >
-            {ALL_TASK_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {statusLabel(s)}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="h-8 px-2 text-sm" aria-label={`Trigger ${index + 1} from status`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ALL_TASK_STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {statusLabel(s)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <span className="text-muted-foreground">{t("transitionsTo")}</span>
-          <select
-            className="h-8 rounded-md border bg-background px-2 text-sm"
+          <Select
             value={trigger.toStatus}
-            onChange={(e) => updateTrigger(index, "toStatus", e.target.value)}
-            aria-label={`Trigger ${index + 1} to status`}
+            onValueChange={(value) => updateTrigger(index, "toStatus", value)}
           >
-            {ALL_TASK_STATUSES.map((s) => (
-              <option key={s} value={s}>
-                {statusLabel(s)}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="h-8 px-2 text-sm" aria-label={`Trigger ${index + 1} to status`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {ALL_TASK_STATUSES.map((s) => (
+                <SelectItem key={s} value={s}>
+                  {statusLabel(s)}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <span className="text-muted-foreground">{t("then")}</span>
-          <select
-            className="h-8 rounded-md border bg-background px-2 text-sm"
+          <Select
             value={trigger.action}
-            onChange={(e) => updateTrigger(index, "action", e.target.value)}
-            aria-label={`Trigger ${index + 1} action`}
+            onValueChange={(value) => updateTrigger(index, "action", value)}
           >
-            {TRIGGER_ACTIONS.map((a) => (
-              <option key={a.value} value={a.value}>
-                {a.label}
-              </option>
-            ))}
-          </select>
+            <SelectTrigger className="h-8 px-2 text-sm" aria-label={`Trigger ${index + 1} action`}>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {TRIGGER_ACTIONS.map((a) => (
+                <SelectItem key={a.value} value={a.value}>
+                  {a.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
           <Button
             type="button"
             size="sm"

@@ -27,6 +27,7 @@ type stubReply struct {
 	ChatID        string    `json:"chat_id,omitempty"`
 	Content       string    `json:"content"`
 	NativeSurface string    `json:"native_surface,omitempty"`
+	Format        string    `json:"format,omitempty"`
 	Timestamp     time.Time `json:"timestamp"`
 }
 
@@ -85,18 +86,18 @@ func (s *Stub) Start(handler core.MessageHandler) error {
 func (s *Stub) Reply(ctx context.Context, replyCtx any, content string) error {
 	reply := toReplyContext(replyCtx)
 	target := firstNonEmpty(reply.ChatID, reply.UserID)
-	return s.recordReply(target, content, "")
+	return s.recordReply(target, content, "", "")
 }
 
 func (s *Stub) Send(ctx context.Context, chatID string, content string) error {
-	return s.recordReply(chatID, content, "")
+	return s.recordReply(chatID, content, "", "")
 }
 
 func (s *Stub) SendNative(ctx context.Context, chatID string, message *core.NativeMessage) error {
 	if err := message.Validate(); err != nil {
 		return err
 	}
-	return s.recordReply(chatID, message.FallbackText(), message.SurfaceType())
+	return s.recordReply(chatID, message.FallbackText(), message.SurfaceType(), "")
 }
 
 func (s *Stub) ReplyNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
@@ -105,21 +106,57 @@ func (s *Stub) ReplyNative(ctx context.Context, replyCtx any, message *core.Nati
 	}
 	reply := toReplyContext(replyCtx)
 	target := firstNonEmpty(reply.ChatID, reply.UserID)
-	return s.recordReply(target, message.FallbackText(), message.SurfaceType())
+	return s.recordReply(target, message.FallbackText(), message.SurfaceType(), "")
 }
 
-func (s *Stub) recordReply(chatID, content, nativeSurface string) error {
+func (s *Stub) recordReply(chatID, content, nativeSurface, format string) error {
 	s.mu.Lock()
 	s.replies = append(s.replies, stubReply{
 		ChatID:        strings.TrimSpace(chatID),
 		Content:       content,
 		NativeSurface: strings.TrimSpace(nativeSurface),
+		Format:        strings.TrimSpace(format),
 		Timestamp:     time.Now(),
 	})
 	s.mu.Unlock()
 	log.WithFields(log.Fields{"component": "wecom-stub", "chat_id": chatID}).Info("Send: " + content)
 	return nil
 }
+
+func (s *Stub) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
+	if message == nil {
+		return fmt.Errorf("formatted text is required")
+	}
+	return s.recordReply(chatID, message.Content, "", string(message.Format))
+}
+
+func (s *Stub) ReplyFormattedText(ctx context.Context, replyCtx any, message *core.FormattedText) error {
+	if message == nil {
+		return fmt.Errorf("formatted text is required")
+	}
+	return s.recordReply(chatIDFromReplyContext(replyCtx), message.Content, "", string(message.Format))
+}
+
+func (s *Stub) UpdateFormattedText(ctx context.Context, replyCtx any, message *core.FormattedText) error {
+	return s.ReplyFormattedText(ctx, replyCtx, message)
+}
+
+func (s *Stub) SendCard(ctx context.Context, chatID string, card *core.Card) error {
+	if card == nil {
+		return fmt.Errorf("card is required")
+	}
+	return s.recordReply(chatID, cardFallbackText(card), "wecom_card", "")
+}
+
+func (s *Stub) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) error {
+	if card == nil {
+		return fmt.Errorf("card is required")
+	}
+	return s.recordReply(chatIDFromReplyContext(replyCtx), cardFallbackText(card), "wecom_card", "")
+}
+
+var _ core.FormattedTextSender = (*Stub)(nil)
+var _ core.CardSender = (*Stub)(nil)
 
 func (s *Stub) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
 	return s.Send(ctx, chatID, renderStructuredFallback(message))
@@ -202,4 +239,24 @@ func (s *Stub) handleClearReplies(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+}
+
+func chatIDFromReplyContext(replyCtx any) string {
+	switch value := replyCtx.(type) {
+	case replyContext:
+		return firstNonEmpty(value.ChatID, value.UserID)
+	case *replyContext:
+		if value != nil {
+			return firstNonEmpty(value.ChatID, value.UserID)
+		}
+	case *core.Message:
+		if value != nil {
+			return value.ChatID
+		}
+	case *core.ReplyTarget:
+		if value != nil {
+			return firstNonEmpty(value.ChatID, value.ChannelID, value.ConversationID)
+		}
+	}
+	return ""
 }

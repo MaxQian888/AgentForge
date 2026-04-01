@@ -139,6 +139,20 @@ export class EventStreamer {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+
+    // Notify Go that the bridge is shutting down before closing the connection.
+    if (this.ws?.readyState === WebSocket.OPEN) {
+      this.ws.send(
+        serializeBridgeEvent({
+          task_id: "__bridge__",
+          session_id: "",
+          timestamp_ms: Date.now(),
+          type: "status_change",
+          data: { old_status: "ready", new_status: "shutting_down", reason: "graceful_shutdown" },
+        }),
+      );
+    }
+
     this.ws?.close();
   }
 }

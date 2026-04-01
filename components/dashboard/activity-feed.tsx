@@ -3,6 +3,13 @@
 import { useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { StatusDot } from "@/components/shared/status-dot";
 
 interface ActivityEvent {
@@ -84,42 +91,34 @@ export function ActivityFeed({ events }: ActivityFeedProps) {
             </p>
           </div>
           <div className="flex flex-wrap gap-3">
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
               <span>{t("activityFeed.typeLabel")}</span>
-              <select
-                aria-label={t("activityFeed.typeLabel")}
-                className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                value={typeFilter}
-                onChange={(event) =>
-                  setTypeFilter(event.target.value as ActivityTypeFilter)
-                }
-              >
-                <option value="all">{t("activityFeed.type.all")}</option>
-                <option value="task">{t("activityFeed.type.task")}</option>
-                <option value="review">{t("activityFeed.type.review")}</option>
-                <option value="agent">{t("activityFeed.type.agent")}</option>
-                <option value="system">{t("activityFeed.type.system")}</option>
-              </select>
-            </label>
-            <label className="flex flex-col gap-1 text-xs text-muted-foreground">
+              <Select value={typeFilter} onValueChange={(v) => setTypeFilter(v as ActivityTypeFilter)}>
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("activityFeed.type.all")}</SelectItem>
+                  <SelectItem value="task">{t("activityFeed.type.task")}</SelectItem>
+                  <SelectItem value="review">{t("activityFeed.type.review")}</SelectItem>
+                  <SelectItem value="agent">{t("activityFeed.type.agent")}</SelectItem>
+                  <SelectItem value="system">{t("activityFeed.type.system")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex flex-col gap-1 text-xs text-muted-foreground">
               <span>{t("activityFeed.timeRangeLabel")}</span>
-              <select
-                aria-label={t("activityFeed.timeRangeLabel")}
-                className="h-8 rounded-md border border-input bg-background px-2 text-sm text-foreground"
-                value={timeRange}
-                onChange={(event) =>
-                  setTimeRange(event.target.value as ActivityTimeRange)
-                }
-              >
-                <option value="all">{t("activityFeed.timeRange.all")}</option>
-                <option value="last24h">
-                  {t("activityFeed.timeRange.last24h")}
-                </option>
-                <option value="last7d">
-                  {t("activityFeed.timeRange.last7d")}
-                </option>
-              </select>
-            </label>
+              <Select value={timeRange} onValueChange={(v) => setTimeRange(v as ActivityTimeRange)}>
+                <SelectTrigger className="h-8 text-sm">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="all">{t("activityFeed.timeRange.all")}</SelectItem>
+                  <SelectItem value="last24h">{t("activityFeed.timeRange.last24h")}</SelectItem>
+                  <SelectItem value="last7d">{t("activityFeed.timeRange.last7d")}</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
           </div>
         </div>
       </CardHeader>

@@ -10,6 +10,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"time"
 
 	"github.com/agentforge/marketplace/internal/model"
@@ -30,14 +31,42 @@ var semverRe = regexp.MustCompile(`^v?[0-9]+\.[0-9]+\.[0-9]+`)
 
 // MarketplaceService orchestrates marketplace business logic.
 type MarketplaceService struct {
-	itemRepo     *repository.MarketplaceItemRepository
-	reviewRepo   *repository.MarketplaceReviewRepository
+	itemRepo     marketplaceItemRepository
+	reviewRepo   marketplaceReviewRepository
 	artifactsDir string
 }
 
+type marketplaceItemRepository interface {
+	List(ctx context.Context, q model.ListItemsQuery) ([]*model.MarketplaceItem, int64, error)
+	ListFeatured(ctx context.Context) ([]*model.MarketplaceItem, error)
+	Search(ctx context.Context, query string) ([]*model.MarketplaceItem, error)
+	GetByID(ctx context.Context, id uuid.UUID) (*model.MarketplaceItem, error)
+	GetBySlugAndType(ctx context.Context, slug, itemType string) (*model.MarketplaceItem, error)
+	Create(ctx context.Context, item *model.MarketplaceItem) error
+	Update(ctx context.Context, id uuid.UUID, req model.UpdateItemRequest) error
+	SoftDelete(ctx context.Context, id uuid.UUID) error
+	SetFeatured(ctx context.Context, id uuid.UUID, featured bool) error
+	SetVerified(ctx context.Context, id uuid.UUID, verified bool) error
+	CreateVersion(ctx context.Context, version *model.MarketplaceItemVersion) error
+	YankVersion(ctx context.Context, itemID uuid.UUID, version string) error
+	ListVersions(ctx context.Context, itemID uuid.UUID) ([]*model.MarketplaceItemVersion, error)
+	GetVersion(ctx context.Context, itemID uuid.UUID, version string) (*model.MarketplaceItemVersion, error)
+	SetLatestVersion(ctx context.Context, itemID uuid.UUID, version string) error
+	UpdateLatestVersion(ctx context.Context, id uuid.UUID, version string) error
+	IncrementDownloadCount(ctx context.Context, id uuid.UUID) error
+	UpdateRatingStats(ctx context.Context, id uuid.UUID, avg float64, count int) error
+}
+
+type marketplaceReviewRepository interface {
+	ListByItem(ctx context.Context, itemID uuid.UUID, limit, offset int) ([]*model.MarketplaceReview, error)
+	UpsertReview(ctx context.Context, review *model.MarketplaceReview) error
+	ComputeRatingStats(ctx context.Context, itemID uuid.UUID) (float64, int, error)
+	DeleteByItemAndUser(ctx context.Context, itemID, userID uuid.UUID) error
+}
+
 func NewMarketplaceService(
-	itemRepo *repository.MarketplaceItemRepository,
-	reviewRepo *repository.MarketplaceReviewRepository,
+	itemRepo marketplaceItemRepository,
+	reviewRepo marketplaceReviewRepository,
 	artifactsDir string,
 ) *MarketplaceService {
 	return &MarketplaceService{itemRepo, reviewRepo, artifactsDir}
@@ -92,6 +121,15 @@ func (s *MarketplaceService) GetItem(ctx context.Context, id uuid.UUID) (*model.
 			return nil, repository.ErrNotFound
 		}
 		return nil, err
+	}
+	item.SourceType = "marketplace"
+	if item.Type == model.ItemTypeSkill && item.LatestVersion != nil && strings.TrimSpace(*item.LatestVersion) != "" {
+		preview, previewErr := s.loadSkillPreviewForVersion(ctx, item.ID, *item.LatestVersion)
+		if previewErr != nil {
+			item.PreviewError = previewErr.Error()
+		} else {
+			item.SkillPreview = preview
+		}
 	}
 	return item, nil
 }
@@ -209,6 +247,10 @@ func (s *MarketplaceService) PublishVersion(
 	digest, written, err := streamToFile(destPath, artifactReader)
 	if err != nil {
 		return nil, fmt.Errorf("stream artifact: %w", err)
+	}
+	if err := validateMarketplaceArtifact(item.Type, destPath); err != nil {
+		_ = os.Remove(destPath)
+		return nil, err
 	}
 
 	v := &model.MarketplaceItemVersion{
@@ -352,4 +394,3 @@ func streamToFile(dst string, src io.Reader) (digest string, size int64, err err
 	digest = hex.EncodeToString(hasher.Sum(nil))
 	return digest, size, nil
 }
-

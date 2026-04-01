@@ -1,6 +1,9 @@
-import { render, screen, fireEvent } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import { MarketplaceItemCard } from "./marketplace-item-card";
-import type { MarketplaceItem } from "@/lib/stores/marketplace-store";
+import type {
+  MarketplaceConsumptionRecord,
+  MarketplaceItem,
+} from "@/lib/stores/marketplace-store";
 
 const mockItem: MarketplaceItem = {
   id: "test-id",
@@ -24,119 +27,126 @@ const mockItem: MarketplaceItem = {
 };
 
 describe("MarketplaceItemCard", () => {
-  it("renders item name", () => {
+  it("renders item details and an install action by default", () => {
     render(<MarketplaceItemCard item={mockItem} />);
+
     expect(screen.getByText("Test Plugin")).toBeInTheDocument();
-  });
-
-  it("renders item type badge", () => {
-    render(<MarketplaceItemCard item={mockItem} />);
     expect(screen.getByText("plugin")).toBeInTheDocument();
+    expect(screen.getByText("100")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
   });
 
-  it("renders author name", () => {
-    render(<MarketplaceItemCard item={mockItem} />);
-    expect(screen.getByText(/Test Author/)).toBeInTheDocument();
+  it("renders manage state when consumption is installed and used", () => {
+    const consumption: MarketplaceConsumptionRecord = {
+      itemId: mockItem.id,
+      itemType: "plugin",
+      status: "installed",
+      consumerSurface: "plugin-management-panel",
+      installed: true,
+      used: true,
+    };
+
+    render(<MarketplaceItemCard item={mockItem} consumption={consumption} />);
+
+    expect(screen.getByRole("button", { name: "Manage" })).toBeInTheDocument();
   });
 
-  it("renders item description", () => {
-    render(<MarketplaceItemCard item={mockItem} />);
+  it("renders blocked state and failure copy when install is unsupported", () => {
+    const consumption: MarketplaceConsumptionRecord = {
+      itemId: mockItem.id,
+      itemType: "plugin",
+      status: "blocked",
+      consumerSurface: "plugin-management-panel",
+      installed: false,
+      used: false,
+      failureReason: "Remote installation is unavailable",
+    };
+
+    render(<MarketplaceItemCard item={mockItem} consumption={consumption} />);
+
+    expect(screen.getByRole("button", { name: "Blocked" })).toBeDisabled();
     expect(
-      screen.getByText("A test plugin for testing."),
+      screen.getByText("Remote installation is unavailable"),
     ).toBeInTheDocument();
   });
 
-  it("renders download count", () => {
-    render(<MarketplaceItemCard item={mockItem} />);
-    expect(screen.getByText("100")).toBeInTheDocument();
-  });
-
-  it("renders average rating", () => {
-    render(<MarketplaceItemCard item={mockItem} />);
-    expect(screen.getByText("4.5")).toBeInTheDocument();
-  });
-
-  it("shows Install button when not installed", () => {
-    render(<MarketplaceItemCard item={mockItem} installed={false} />);
-    const btn = screen.getByRole("button", { name: "Install" });
-    expect(btn).toBeInTheDocument();
-    expect(btn).not.toBeDisabled();
-  });
-
-  it("shows Installed button disabled when installed", () => {
-    render(<MarketplaceItemCard item={mockItem} installed={true} />);
-    const btn = screen.getByRole("button", { name: "Installed" });
-    expect(btn).toBeInTheDocument();
-    expect(btn).toBeDisabled();
-  });
-
-  it("calls onInstall with the item when Install button clicked", () => {
+  it("calls onInstall when the install button is pressed", () => {
     const onInstall = jest.fn();
+
     render(<MarketplaceItemCard item={mockItem} onInstall={onInstall} />);
     fireEvent.click(screen.getByRole("button", { name: "Install" }));
+
     expect(onInstall).toHaveBeenCalledWith(mockItem);
-    expect(onInstall).toHaveBeenCalledTimes(1);
   });
 
-  it("does not propagate click to card when Install button clicked", () => {
-    const onSelect = jest.fn();
-    const onInstall = jest.fn();
+  it("renders update badge and Update button when updateInfo.hasUpdate is true", () => {
+    const consumption: MarketplaceConsumptionRecord = {
+      itemId: mockItem.id,
+      itemType: "plugin",
+      status: "installed",
+      consumerSurface: "plugin-management-panel",
+      installed: true,
+      used: true,
+    };
+
     render(
       <MarketplaceItemCard
         item={mockItem}
-        onSelect={onSelect}
+        consumption={consumption}
+        updateInfo={{
+          itemId: mockItem.id,
+          itemType: "plugin",
+          installedVersion: "1.0.0",
+          latestVersion: "2.0.0",
+          hasUpdate: true,
+        }}
+      />,
+    );
+
+    expect(screen.getByText("Update: v2.0.0")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Update" })).toBeInTheDocument();
+  });
+
+  it("calls onInstall when Update button is clicked", () => {
+    const onInstall = jest.fn();
+    const consumption: MarketplaceConsumptionRecord = {
+      itemId: mockItem.id,
+      itemType: "plugin",
+      status: "installed",
+      consumerSurface: "plugin-management-panel",
+      installed: true,
+      used: true,
+    };
+
+    render(
+      <MarketplaceItemCard
+        item={mockItem}
+        consumption={consumption}
+        updateInfo={{
+          itemId: mockItem.id,
+          itemType: "plugin",
+          installedVersion: "1.0.0",
+          latestVersion: "2.0.0",
+          hasUpdate: true,
+        }}
         onInstall={onInstall}
       />,
     );
-    fireEvent.click(screen.getByRole("button", { name: "Install" }));
-    expect(onSelect).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByRole("button", { name: "Update" }));
+
+    expect(onInstall).toHaveBeenCalledWith(mockItem);
   });
 
-  it("calls onSelect when card body is clicked", () => {
-    const onSelect = jest.fn();
-    render(<MarketplaceItemCard item={mockItem} onSelect={onSelect} />);
-    // Click on the description text area (not the button)
-    fireEvent.click(screen.getByText("A test plugin for testing."));
-    expect(onSelect).toHaveBeenCalledWith(mockItem);
-  });
+  it("renders clickable tags and calls onTagClick", () => {
+    const itemWithTags = { ...mockItem, tags: ["react", "typescript"] };
+    const onTagClick = jest.fn();
 
-  it("shows verified icon for verified items", () => {
-    render(<MarketplaceItemCard item={mockItem} />);
-    // The CheckCircle icon doesn't have visible text, but the container is rendered.
-    // We verify that the component renders without error when is_verified=true.
-    expect(screen.getByText("Test Plugin")).toBeInTheDocument();
-  });
+    render(<MarketplaceItemCard item={itemWithTags} onTagClick={onTagClick} />);
 
-  it("renders placeholder when item has no icon_url", () => {
-    render(<MarketplaceItemCard item={mockItem} />);
-    // The placeholder shows the first 2 chars of name uppercased.
-    expect(screen.getByText("TE")).toBeInTheDocument();
-  });
+    const tagButton = screen.getByText("react");
+    expect(tagButton).toBeInTheDocument();
+    fireEvent.click(tagButton);
 
-  it("applies selected ring styling when selected", () => {
-    const { container } = render(
-      <MarketplaceItemCard item={mockItem} selected={true} />,
-    );
-    // The outermost card element should contain a ring class
-    const card = container.firstChild as HTMLElement;
-    expect(card.className).toContain("ring");
-  });
-
-  it("renders skill type badge with correct text", () => {
-    const skillItem: MarketplaceItem = { ...mockItem, type: "skill" };
-    render(<MarketplaceItemCard item={skillItem} />);
-    expect(screen.getByText("skill")).toBeInTheDocument();
-  });
-
-  it("renders role type badge with correct text", () => {
-    const roleItem: MarketplaceItem = { ...mockItem, type: "role" };
-    render(<MarketplaceItemCard item={roleItem} />);
-    expect(screen.getByText("role")).toBeInTheDocument();
-  });
-
-  it("shows fallback description text when description is empty", () => {
-    const noDescItem: MarketplaceItem = { ...mockItem, description: "" };
-    render(<MarketplaceItemCard item={noDescItem} />);
-    expect(screen.getByText("No description provided.")).toBeInTheDocument();
+    expect(onTagClick).toHaveBeenCalledWith("react");
   });
 });

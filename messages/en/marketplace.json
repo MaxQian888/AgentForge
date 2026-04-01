@@ -38,6 +38,33 @@
     "installing": "Installing...",
     "success": "Installed successfully"
   },
+  "uninstall": {
+    "button": "Uninstall",
+    "confirm": "Uninstall {name}?",
+    "confirmDesc": "This will remove the installed files and consumption state. This action cannot be undone.",
+    "removing": "Removing...",
+    "success": "{type} uninstalled successfully"
+  },
+  "sideload": {
+    "title": "Local side-load",
+    "pluginDesc": "Reuse the existing local plugin install seam from within the marketplace workspace.",
+    "pluginButton": "Side-load local plugin",
+    "roleDesc": "Upload a zip package containing a valid role.yaml at its root.",
+    "skillDesc": "Upload a zip package containing a valid SKILL.md at its root.",
+    "button": "Side-load {type}",
+    "installing": "Installing...",
+    "success": "Side-loaded {type} from {filename}"
+  },
+  "update": {
+    "available": "Update available",
+    "banner": "Update available: v{latest} (installed: v{installed})",
+    "button": "Update",
+    "updateTo": "Update to v{version}"
+  },
+  "tags": {
+    "label": "Tags",
+    "filterByTag": "Filter by tag"
+  },
   "review": {
     "title": "Write a Review",
     "submit": "Submit Review",

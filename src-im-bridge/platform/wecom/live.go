@@ -34,7 +34,7 @@ var liveMetadata = core.NormalizeMetadata(core.PlatformMetadata{
 	},
 	Rendering: core.RenderingProfile{
 		DefaultTextFormat:         core.TextFormatPlainText,
-		SupportedFormats:          []core.TextFormatMode{core.TextFormatPlainText},
+		SupportedFormats:          []core.TextFormatMode{core.TextFormatPlainText, core.TextFormatWeComMD},
 		NativeSurfaces:            []string{core.NativeSurfaceWeComCard},
 		MaxTextLength:             4096,
 		SupportsSegments:          true,
@@ -340,6 +340,83 @@ func (l *Live) ReplyNative(ctx context.Context, rawReplyCtx any, message *core.N
 	}
 	return l.sender.SendMessage(ctx, target, payload)
 }
+
+func (l *Live) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
+	if message == nil {
+		return errors.New("formatted text is required")
+	}
+	if message.Format == core.TextFormatWeComMD {
+		target := parseDirectSendTarget(chatID)
+		if target.ChatID == "" && target.UserID == "" {
+			return errors.New("wecom send requires chat id or user target")
+		}
+		return l.sender.SendMessage(ctx, target, map[string]any{
+			"msgtype": "markdown",
+			"markdown": map[string]string{
+				"content": message.Content,
+			},
+		})
+	}
+	return l.Send(ctx, chatID, message.Content)
+}
+
+func (l *Live) ReplyFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	if message == nil {
+		return errors.New("formatted text is required")
+	}
+	if message.Format == core.TextFormatWeComMD {
+		reply := toReplyContext(rawReplyCtx)
+		payload := map[string]any{
+			"msgtype": "markdown",
+			"markdown": map[string]string{
+				"content": message.Content,
+			},
+		}
+		if reply.ResponseURL != "" {
+			return l.responseReplier.ReplyMessage(ctx, reply.ResponseURL, payload)
+		}
+		target := directSendTarget{ChatID: reply.ChatID, UserID: reply.UserID}
+		if target.ChatID == "" && target.UserID == "" {
+			return errors.New("wecom reply requires response url, chat id, or user id")
+		}
+		return l.sender.SendMessage(ctx, target, payload)
+	}
+	return l.Reply(ctx, rawReplyCtx, message.Content)
+}
+
+func (l *Live) UpdateFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	return l.ReplyFormattedText(ctx, rawReplyCtx, message)
+}
+
+func (l *Live) SendCard(ctx context.Context, chatID string, card *core.Card) error {
+	if card == nil {
+		return errors.New("card is required")
+	}
+	target := parseDirectSendTarget(chatID)
+	if target.ChatID == "" && target.UserID == "" {
+		return errors.New("wecom send requires chat id or user target")
+	}
+	return l.sender.SendMessage(ctx, target, renderCardToWeComTextCard(card))
+}
+
+func (l *Live) ReplyCard(ctx context.Context, rawReplyCtx any, card *core.Card) error {
+	if card == nil {
+		return errors.New("card is required")
+	}
+	reply := toReplyContext(rawReplyCtx)
+	payload := renderCardToWeComTextCard(card)
+	if reply.ResponseURL != "" {
+		return l.responseReplier.ReplyMessage(ctx, reply.ResponseURL, payload)
+	}
+	target := directSendTarget{ChatID: reply.ChatID, UserID: reply.UserID}
+	if target.ChatID == "" && target.UserID == "" {
+		return errors.New("wecom reply requires response url, chat id, or user id")
+	}
+	return l.sender.SendMessage(ctx, target, payload)
+}
+
+var _ core.FormattedTextSender = (*Live)(nil)
+var _ core.CardSender = (*Live)(nil)
 
 func (l *Live) Stop() error {
 	l.mu.Lock()

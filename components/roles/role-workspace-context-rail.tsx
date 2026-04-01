@@ -2,6 +2,7 @@
 
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import { Textarea } from "@/components/ui/textarea";
 import type {
   RolePreviewResponse,
   RoleSandboxResponse,
@@ -89,6 +90,8 @@ export function RoleWorkspaceContextRail({
   ].filter((item): item is string => item != null);
   const runtimeExecutionProfile =
     sandboxResult?.executionProfile ?? previewResult?.executionProfile;
+  const pluginDependencies = effectiveManifest?.pluginDependencies ?? [];
+  const pluginConsumers = effectiveManifest?.pluginConsumers ?? [];
   const readinessDiagnostics =
     sandboxResult?.readinessDiagnostics ?? previewResult?.readinessDiagnostics ?? [];
   const validationIssues =
@@ -142,7 +145,7 @@ export function RoleWorkspaceContextRail({
           <label htmlFor="sandbox-input" className="text-xs font-medium">
             {t("contextRail.sandboxInput")}
           </label>
-          <textarea
+          <Textarea
             id="sandbox-input"
             className="min-h-16 rounded-md border bg-background px-2.5 py-1.5 text-xs"
             rows={3}
@@ -190,6 +193,35 @@ export function RoleWorkspaceContextRail({
               <p className="text-xs text-muted-foreground">{t("contextRail.validationIssuesNone")}</p>
             )}
           </div>
+          {pluginDependencies.length > 0 ? (
+            <div>
+              <p className="text-xs font-medium">Plugin dependencies</p>
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                {pluginDependencies.map((dependency) => (
+                  <li key={`${dependency.pluginId}:${dependency.referenceType}`}>
+                    {dependency.message ??
+                      `${dependency.pluginId} (${dependency.referenceType}) — ${dependency.status}`}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
+          {pluginConsumers.length > 0 ? (
+            <div>
+              <p className="text-xs font-medium">Downstream plugin consumers</p>
+              <ul className="mt-0.5 list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
+                {pluginConsumers.map((consumer) => (
+                  <li key={`${consumer.pluginId}:${consumer.status}`}>
+                    {consumer.pluginName
+                      ? `${consumer.pluginName} (${consumer.pluginId})`
+                      : consumer.pluginId}
+                    {` — ${consumer.status}`}
+                    {consumer.references?.length ? ` · refs: ${consumer.references.join(", ")}` : ""}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          ) : null}
         </div>
       </div>
 
@@ -230,7 +262,10 @@ export function RoleWorkspaceContextRail({
             <ul className="list-disc space-y-0.5 pl-4 text-xs text-muted-foreground">
               {effectiveSkillResolution.map((skill, index) => (
                 <li key={`${skill.path}:${skill.provenance}:${index}`}>
-                  {skill.label} ({skill.path}) — {skill.status} / {skill.provenance}
+                  {skill.label} ({skill.path}) — {skill.status} / {skill.provenance} / {skill.compatibilityStatus}
+                  {skill.requires?.length ? ` · deps: ${skill.requires.join(", ")}` : ""}
+                  {skill.tools?.length ? ` · tools: ${skill.tools.join(", ")}` : ""}
+                  {skill.missingTools?.length ? ` · missing: ${skill.missingTools.join(", ")}` : ""}
                 </li>
               ))}
             </ul>
@@ -318,6 +353,9 @@ export function RoleWorkspaceContextRail({
                   {runtimeExecutionProfile.loaded_skills.map((skill) => (
                     <li key={`loaded-${skill.path}`}>
                       {skill.label} ({skill.path})
+                      {skill.origin ? ` · origin: ${skill.origin}` : ""}
+                      {skill.requires?.length ? ` · deps: ${skill.requires.join(", ")}` : ""}
+                      {skill.tools?.length ? ` · tools: ${skill.tools.join(", ")}` : ""}
                       {skill.available_parts?.length
                         ? ` · ${t("workspace.skillPartsLabel")}: ${skill.available_parts
                             .map((part) => skillPartLabel(part))
@@ -335,6 +373,8 @@ export function RoleWorkspaceContextRail({
                   {runtimeExecutionProfile.available_skills.map((skill) => (
                     <li key={`available-${skill.path}`}>
                       {skill.label} ({skill.path})
+                      {skill.requires?.length ? ` · deps: ${skill.requires.join(", ")}` : ""}
+                      {skill.tools?.length ? ` · tools: ${skill.tools.join(", ")}` : ""}
                       {skill.available_parts?.length
                         ? ` · ${t("workspace.skillPartsLabel")}: ${skill.available_parts
                             .map((part) => skillPartLabel(part))

@@ -23,10 +23,27 @@ jest.mock("next-intl", () => ({
       riskMedium: "Medium",
       riskLow: "Low",
       riskCritical: "Critical",
+      unassigned: "Unassigned",
+      noBranch: "No branch",
     };
     const template = messages[key] ?? key;
     return template.replace(/\{(\w+)\}/g, (_, token) => String(values?.[token] ?? ""));
   },
+}));
+
+const fetchTaskById = jest.fn().mockResolvedValue(null);
+const taskStoreState = {
+  tasks: [] as Array<{
+    id: string;
+    assigneeName: string | null;
+    agentBranch: string;
+  }>,
+  fetchTaskById,
+};
+
+jest.mock("@/lib/stores/task-store", () => ({
+  useTaskStore: (selector?: (state: typeof taskStoreState) => unknown) =>
+    typeof selector === "function" ? selector(taskStoreState) : taskStoreState,
 }));
 
 import userEvent from "@testing-library/user-event";
@@ -54,10 +71,54 @@ function makeReview(overrides: Partial<ReviewDTO> = {}): ReviewDTO {
 }
 
 describe("ReviewList", () => {
+  beforeEach(() => {
+    fetchTaskById.mockClear();
+    taskStoreState.tasks = [];
+  });
+
   it("shows an empty-state message when no reviews exist", () => {
     render(<ReviewList reviews={[]} onSelect={jest.fn()} />);
 
     expect(screen.getByText("No reviews yet.")).toBeInTheDocument();
+  });
+
+  it("groups reviews into status columns and shows per-column counts", () => {
+    render(
+      <ReviewList
+        reviews={[
+          makeReview({ id: "review-1", status: "pending_human" }),
+          makeReview({ id: "review-2", status: "completed", recommendation: "approve" }),
+          makeReview({ id: "review-3", status: "failed", recommendation: "reject" }),
+        ]}
+        onSelect={jest.fn()}
+      />
+    );
+
+    expect(screen.getByTestId("review-column-pending_human")).toHaveTextContent(
+      "Pending Human"
+    );
+    expect(screen.getByTestId("review-column-pending_human")).toHaveTextContent("1");
+    expect(screen.getByTestId("review-column-completed")).toHaveTextContent("1");
+    expect(screen.getByTestId("review-column-failed")).toHaveTextContent("1");
+  });
+
+  it("shows assignee, branch, and age metadata when the related task is available", () => {
+    jest.useFakeTimers().setSystemTime(new Date("2026-03-27T08:00:00.000Z"));
+    taskStoreState.tasks = [
+      {
+        id: "task-1",
+        assigneeName: "Alice",
+        agentBranch: "agent/review-1",
+      },
+    ];
+
+    render(<ReviewList reviews={[makeReview()]} onSelect={jest.fn()} />);
+
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(screen.getByText("agent/review-1")).toBeInTheDocument();
+    expect(screen.getByText("2d ago")).toBeInTheDocument();
+
+    jest.useRealTimers();
   });
 
   it("lets users select, approve, and request changes on a pending_human review without using prompt dialogs", async () => {

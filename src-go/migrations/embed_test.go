@@ -53,6 +53,8 @@ func TestEmbeddedMigrationsKeepReleasedFilenamesStable(t *testing.T) {
 		"040_add_review_pending_human_status.down.sql",
 		"041_align_member_contract_with_documented_status_and_im_identity.up.sql",
 		"041_align_member_contract_with_documented_status_and_im_identity.down.sql",
+		"042_add_agent_run_cost_accounting.up.sql",
+		"042_add_agent_run_cost_accounting.down.sql",
 	}
 
 	for _, name := range expected {

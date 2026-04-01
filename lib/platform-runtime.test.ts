@@ -132,7 +132,7 @@ describe("platform-runtime", () => {
       runtime.sendNotification({
         createdAt: "2026-03-26T08:00:00.000Z",
         notificationId: "notif-1",
-        type: "task.completed",
+        notificationType: "task.completed",
         title: "AgentForge",
         body: "Desktop fallback works",
         href: "/project?id=project-1#task-task-1",
@@ -170,7 +170,7 @@ describe("platform-runtime", () => {
       runtime.sendNotification({
         createdAt: "2026-03-30T10:00:00.000Z",
         notificationId: "notif-denied",
-        type: "task.completed",
+        notificationType: "task.completed",
         title: "Denied",
         body: "Permission denied",
       }),
@@ -203,7 +203,7 @@ describe("platform-runtime", () => {
       runtime.sendNotification({
         createdAt: "2026-03-26T08:05:00.000Z",
         notificationId: "notif-2",
-        type: "review.completed",
+        notificationType: "review.completed",
         title: "Review finished",
         body: "All comments were resolved.",
         href: "/reviews?id=review-1",
@@ -219,7 +219,7 @@ describe("platform-runtime", () => {
       request: {
         createdAt: "2026-03-26T08:05:00.000Z",
         notificationId: "notif-2",
-        type: "review.completed",
+        notificationType: "review.completed",
         title: "Review finished",
         body: "All comments were resolved.",
         href: "/reviews?id=review-1",
@@ -267,7 +267,7 @@ describe("platform-runtime", () => {
       runtime.sendNotification({
         createdAt: "2026-03-28T10:00:00.000Z",
         notificationId: "notif-click-1",
-        type: "review.completed",
+        notificationType: "review.completed",
         title: "Review finished",
         body: "Open the review backlog.",
         href: "/reviews?id=review-1",
@@ -341,7 +341,7 @@ describe("platform-runtime", () => {
       runtime.sendNotification({
         createdAt: "2026-03-29T08:00:00.000Z",
         notificationId: "notif-suppressed-1",
-        type: "review.completed",
+        notificationType: "review.completed",
         title: "Review finished",
         body: "Focused windows should suppress the popup.",
         href: "/reviews?id=review-1",
@@ -357,7 +357,7 @@ describe("platform-runtime", () => {
       request: {
         createdAt: "2026-03-29T08:00:00.000Z",
         notificationId: "notif-suppressed-1",
-        type: "review.completed",
+        notificationType: "review.completed",
         title: "Review finished",
         body: "Focused windows should suppress the popup.",
         href: "/reviews?id=review-1",

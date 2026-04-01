@@ -38,6 +38,33 @@
     "installing": "安装中...",
     "success": "安装成功"
   },
+  "uninstall": {
+    "button": "卸载",
+    "confirm": "卸载 {name}？",
+    "confirmDesc": "此操作将移除已安装的文件和使用状态记录，且不可撤销。",
+    "removing": "正在移除...",
+    "success": "{type} 卸载成功"
+  },
+  "sideload": {
+    "title": "本地侧载",
+    "pluginDesc": "在市场工作区中复用现有的本地插件安装通道。",
+    "pluginButton": "侧载本地插件",
+    "roleDesc": "上传一个包含有效 role.yaml 的 zip 包。",
+    "skillDesc": "上传一个包含有效 SKILL.md 的 zip 包。",
+    "button": "侧载{type}",
+    "installing": "安装中...",
+    "success": "已从 {filename} 侧载 {type}"
+  },
+  "update": {
+    "available": "有可用更新",
+    "banner": "有可用更新：v{latest}（已安装：v{installed}）",
+    "button": "更新",
+    "updateTo": "更新到 v{version}"
+  },
+  "tags": {
+    "label": "标签",
+    "filterByTag": "按标签筛选"
+  },
   "review": {
     "title": "撰写评价",
     "submit": "提交评价",

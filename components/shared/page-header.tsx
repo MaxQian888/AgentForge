@@ -36,15 +36,15 @@ export function PageHeader({
   return (
     <div
       className={cn(
-        "flex flex-col gap-1 pb-4",
+        "flex flex-col gap-[var(--space-stack-xs)] pb-[var(--space-section-gap)]",
         sticky &&
-          "sticky top-0 z-10 -mx-6 -mt-6 mb-2 border-b bg-background/80 px-6 py-3 backdrop-blur-sm",
+          "sticky top-0 z-10 -mx-[var(--space-page-inline)] -mt-[var(--space-page-inline)] mb-[var(--space-stack-sm)] border-b bg-background/80 px-[var(--space-page-inline)] py-[var(--space-stack-sm)] backdrop-blur-sm",
         className
       )}
     >
       {breadcrumbs && breadcrumbs.length > 0 && (
         <Breadcrumb className="animate-fade-in">
-          <BreadcrumbList className="text-[13px]">
+          <BreadcrumbList className="text-fluid-caption">
             {breadcrumbs.map((crumb, i) => {
               const isLast = i === breadcrumbs.length - 1;
               return (
@@ -65,17 +65,21 @@ export function PageHeader({
           </BreadcrumbList>
         </Breadcrumb>
       )}
-      <div className="flex items-center justify-between gap-4">
+      <div className="flex items-center justify-between gap-[var(--space-grid-gap)]">
         <div className="min-w-0">
-          <h1 className="text-lg font-semibold tracking-tight truncate">
+          <h1 className="text-fluid-title truncate font-semibold tracking-tight">
             {title}
           </h1>
           {description && (
-            <p className="text-[13px] text-muted-foreground">{description}</p>
+            <p className="mt-[var(--space-stack-xs)] text-fluid-body text-muted-foreground">
+              {description}
+            </p>
           )}
         </div>
         {actions && (
-          <div className="flex shrink-0 items-center gap-2">{actions}</div>
+          <div className="flex shrink-0 items-center gap-[var(--space-stack-sm)]">
+            {actions}
+          </div>
         )}
       </div>
     </div>

@@ -4,7 +4,9 @@ import { streamCommandRuntime } from "./command-runtime.js";
 import { AgentRuntime } from "../runtime/agent-runtime.js";
 import type { ExecuteRequest } from "../types.js";
 
-function createRequest(overrides: Partial<ExecuteRequest> = {}): ExecuteRequest {
+function createRequest(
+  overrides: Partial<ExecuteRequest> = {},
+): ExecuteRequest {
   return {
     task_id: "task-123",
     session_id: "session-123",
@@ -113,6 +115,12 @@ describe("streamCommandRuntime", () => {
         cost_usd: 0.03,
         budget_remaining_usd: 4.97,
         turn_number: 1,
+        cost_accounting: {
+          total_cost_usd: 0.03,
+          mode: "authoritative_total",
+          coverage: "full",
+          source: "native_runtime_usage",
+        },
       },
     });
     expect(runtime.turnNumber).toBe(1);
@@ -121,8 +129,51 @@ describe("streamCommandRuntime", () => {
     expect(runtime.lastActivity).toBe(1_700_000_000_000);
   });
 
-  test("falls back to calculated cost and treats unknown content events as assistant output", async () => {
-    const req = createRequest({ model: "gpt-5" });
+  test("emits budget_alert when spend crosses the configured threshold", async () => {
+    const req = createRequest({ budget_usd: 0.036 });
+    const runtime = new AgentRuntime(req.task_id, req.session_id);
+    runtime.bindRequest(req);
+    const events: Array<{ type: string; data: unknown }> = [];
+
+    await streamCommandRuntime(
+      runtime,
+      {
+        send(event) {
+          events.push(event);
+        },
+      },
+      req,
+      "Follow the repo instructions closely.",
+      {
+        command: "codex",
+        now: () => 1_700_000_000_000,
+        async *commandRuntimeRunner() {
+          yield {
+            type: "usage",
+            input_tokens: 120,
+            output_tokens: 45,
+            cache_read_tokens: 5,
+            cost_usd: 0.03,
+          };
+        },
+      },
+    );
+
+    expect(events.map((event) => event.type)).toEqual([
+      "cost_update",
+      "budget_alert",
+    ]);
+    expect(events[1]).toMatchObject({
+      data: {
+        cost_usd: 0.03,
+        threshold_percent: 80,
+        turn_number: 0,
+      },
+    });
+  });
+
+  test("falls back to official API pricing only when the billing surface is explicitly priceable", async () => {
+    const req = createRequest({ provider: "openai", model: "gpt-5" });
     const runtime = new AgentRuntime(req.task_id, req.session_id);
     runtime.bindRequest(req);
     const events: Array<{ type: string; data: unknown }> = [];
@@ -151,7 +202,10 @@ describe("streamCommandRuntime", () => {
       },
     );
 
-    expect(events.map((event) => event.type)).toEqual(["output", "cost_update"]);
+    expect(events.map((event) => event.type)).toEqual([
+      "output",
+      "cost_update",
+    ]);
     expect(events[0]).toMatchObject({
       data: {
         content: "Raw fallback output.",
@@ -170,6 +224,53 @@ describe("streamCommandRuntime", () => {
           },
           "gpt-5",
         ),
+        cost_accounting: {
+          mode: "estimated_api_pricing",
+          coverage: "full",
+          source: "openai_api_pricing",
+        },
+      },
+    });
+  });
+
+  test("marks plan-backed codex usage as plan_included when no truthful usd total is available", async () => {
+    const req = createRequest();
+    const runtime = new AgentRuntime(req.task_id, req.session_id);
+    runtime.bindRequest(req);
+    const events: Array<{ type: string; data: unknown }> = [];
+
+    await streamCommandRuntime(
+      runtime,
+      {
+        send(event) {
+          events.push(event);
+        },
+      },
+      req,
+      "No-op system prompt.",
+      {
+        command: "codex",
+        now: () => 24,
+        async *commandRuntimeRunner() {
+          yield {
+            type: "usage",
+            input_tokens: 1_000,
+            output_tokens: 500,
+            cache_read_tokens: 10,
+          };
+        },
+      },
+    );
+
+    expect(events[0]).toMatchObject({
+      type: "cost_update",
+      data: {
+        cost_usd: 0,
+        cost_accounting: {
+          mode: "plan_included",
+          coverage: "none",
+          source: "cli_runtime_usage",
+        },
       },
     });
   });
@@ -286,7 +387,9 @@ describe("streamCommandRuntime", () => {
       | undefined;
     const originalSpawn = Bun.spawn;
 
-    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = ((params: unknown) => {
+    (Bun as unknown as { spawn: typeof Bun.spawn }).spawn = ((
+      params: unknown,
+    ) => {
       spawnParams = params as {
         cmd?: string[];
         cwd?: string;
@@ -302,11 +405,11 @@ describe("streamCommandRuntime", () => {
           },
         },
         stdout: createStream([
-          "{\"type\":\"assistant_text\",\"content\":\"Spawned output.\"}\nplain ",
+          '{"type":"assistant_text","content":"Spawned output."}\nplain ',
           "fallback output\n",
-          "{\"type\":\"tool_call\",\"tool_name\":\"Read\",\"tool_input\":{\"file_path\":\"README.md\"},\"call_id\":\"call-spawn\"}\n",
-          "{\"type\":\"tool_result\",\"call_id\":\"call-spawn\",\"output\":\"done\",\"is_error\":false}\n",
-          "{\"type\":\"usage\",\"input_tokens\":20,\"output_tokens\":10,\"cache_read_tokens\":2,\"cost_usd\":0.01}\n",
+          '{"type":"tool_call","tool_name":"Read","tool_input":{"file_path":"README.md"},"call_id":"call-spawn"}\n',
+          '{"type":"tool_result","call_id":"call-spawn","output":"done","is_error":false}\n',
+          '{"type":"usage","input_tokens":20,"output_tokens":10,"cache_read_tokens":2,"cost_usd":0.01}\n',
         ]),
         stderr: createStream([]),
         exited: Promise.resolve(0),
@@ -395,7 +498,7 @@ describe("streamCommandRuntime", () => {
           end() {},
         },
         stdout: createStream([
-          "{\"type\":\"usage\",\"input_tokens\":1,\"output_tokens\":1,\"cache_read_tokens\":0,\"cost_usd\":0.02}\n",
+          '{"type":"usage","input_tokens":1,"output_tokens":1,"cache_read_tokens":0,"cost_usd":0.02}\n',
         ]),
         stderr: createStream([]),
         exited: Promise.resolve(0),

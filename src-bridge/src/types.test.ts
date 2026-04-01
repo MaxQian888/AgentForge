@@ -97,6 +97,17 @@ describe("bridge contract types", () => {
       active_hooks: ["PreToolUse"],
       subagent_count: 1,
       thinking_enabled: true,
+      cost_accounting: {
+        total_cost_usd: 1.25,
+        input_tokens: 2_000,
+        output_tokens: 900,
+        cache_read_tokens: 120,
+        cache_creation_tokens: 80,
+        mode: "estimated_api_pricing",
+        coverage: "full",
+        source: "openai_api_pricing",
+        components: [],
+      },
     };
     const catalog: RuntimeCatalog = {
       defaultRuntime: "codex",
@@ -124,11 +135,13 @@ describe("bridge contract types", () => {
       updated_at: 1_717_000_000_123,
       request,
       continuity,
+      cost_accounting: status.cost_accounting,
     };
 
     expect(snapshot.request?.role_config?.knowledge_context).toBe("docs/review-playbook.md");
     expect(snapshot.continuity?.runtime).toBe("codex");
     expect(status.resume_ready).toBe(true);
+    expect(status.cost_accounting?.mode).toBe("estimated_api_pricing");
     expect(catalog.runtimes[0]?.supportedFeatures).toContain("fork");
   });
 

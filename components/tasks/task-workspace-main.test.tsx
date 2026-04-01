@@ -1,3 +1,81 @@
+jest.mock("@/components/ui/select", () => {
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  const React = require("react");
+
+  function flattenOptions(children: React.ReactNode): Array<{ value: string; label: string }> {
+    const options: Array<{ value: string; label: string }> = [];
+    function visit(node: React.ReactNode) {
+      React.Children.forEach(node, (child: unknown) => {
+        if (!React.isValidElement(child)) return;
+        const element = child as React.ReactElement<{ children?: React.ReactNode; value?: string }>;
+        if (element.props.value !== undefined) {
+          options.push({
+            value: element.props.value,
+            label: typeof element.props.children === "string" ? element.props.children : String(element.props.value),
+          });
+          return;
+        }
+        visit(element.props.children);
+      });
+    }
+    visit(children);
+    return options;
+  }
+
+  return {
+    Select: ({
+      value,
+      onValueChange,
+      disabled,
+      children,
+    }: {
+      value?: string;
+      onValueChange?: (value: string) => void;
+      disabled?: boolean;
+      children?: React.ReactNode;
+    }) => {
+      const options = flattenOptions(children);
+      let ariaLabel: string | undefined;
+      React.Children.forEach(children, (child: unknown) => {
+        if (!React.isValidElement(child)) return;
+        const el = child as React.ReactElement<{ "aria-label"?: string; children?: React.ReactNode }>;
+        if (el.props["aria-label"]) {
+          ariaLabel = el.props["aria-label"];
+        }
+      });
+
+      return (
+        <select
+          aria-label={ariaLabel}
+          disabled={disabled}
+          value={value}
+          onChange={(e: React.ChangeEvent<HTMLSelectElement>) =>
+            onValueChange?.(e.target.value)
+          }
+        >
+          {options.map((opt) => (
+            <option key={opt.value} value={opt.value}>
+              {opt.label}
+            </option>
+          ))}
+        </select>
+      );
+    },
+    SelectTrigger: ({ children, ...props }: { children?: React.ReactNode; "aria-label"?: string; className?: string }) => (
+      <span aria-label={props["aria-label"]}>{children}</span>
+    ),
+    SelectValue: () => null,
+    SelectContent: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+    SelectItem: ({
+      value,
+      children,
+    }: {
+      value: string;
+      children?: React.ReactNode;
+    }) => <span data-value={value}>{children}</span>,
+  };
+});
+
 jest.mock("@/components/kanban/board", () => ({
   Board: ({ tasks }: { tasks: Array<{ id: string }> }) => (
     <div data-testid="board-view">{tasks.length} board tasks</div>
@@ -19,7 +97,7 @@ jest.mock("@/components/sprint/burndown-chart", () => ({
 }));
 
 import userEvent from "@testing-library/user-event";
-import { act, render, screen, within } from "@testing-library/react";
+import { act, fireEvent, render, screen, within } from "@testing-library/react";
 import { TaskWorkspaceMain } from "./task-workspace-main";
 import {
   createDefaultTaskWorkspaceFilters,
@@ -34,12 +112,14 @@ import type { Task } from "@/lib/stores/task-store";
 function makeTask(
   overrides: Partial<Task> & { id: string; title: string; status: Task["status"] },
 ): Task {
+  const { id, title, status, ...rest } = overrides;
+
   return {
-    id: overrides.id,
     projectId: "project-1",
-    title: overrides.title,
-    description: `${overrides.title} description`,
-    status: overrides.status,
+    id,
+    title,
+    description: rest.description ?? `${title} description`,
+    status,
     priority: "medium",
     assigneeId: null,
     assigneeType: null,
@@ -57,6 +137,7 @@ function makeTask(
     progress: null,
     createdAt: "2026-03-25T08:00:00.000Z",
     updatedAt: "2026-03-25T08:00:00.000Z",
+    ...rest,
   };
 }
 
@@ -173,6 +254,81 @@ describe("TaskWorkspaceMain", () => {
     expect(screen.getByTestId("dependency-view")).toHaveTextContent("2 dependency tasks");
   });
 
+  it("renders a quick filter bar and scopes board tasks by assignee, tag, due date, and priority", async () => {
+    const user = userEvent.setup();
+    const tasks = [
+      makeTask({
+        id: "task-1",
+        title: "Alpha task",
+        status: "in_progress",
+        assigneeId: "member-1",
+        assigneeName: "Alice",
+        labels: ["frontend"],
+        priority: "high",
+        plannedStartAt: "2026-03-25T09:00:00.000Z",
+        plannedEndAt: "2026-03-27T18:00:00.000Z",
+      }),
+      makeTask({
+        id: "task-2",
+        title: "Beta task",
+        status: "triaged",
+        assigneeId: "member-2",
+        assigneeName: "Bob",
+        labels: ["backend"],
+        priority: "medium",
+        plannedStartAt: "2026-04-02T09:00:00.000Z",
+        plannedEndAt: "2026-04-02T18:00:00.000Z",
+      }),
+      makeTask({
+        id: "task-3",
+        title: "Gamma task",
+        status: "triaged",
+        assigneeId: "member-2",
+        assigneeName: "Bob",
+        labels: ["frontend"],
+        priority: "low",
+        plannedStartAt: "2026-03-29T09:00:00.000Z",
+        plannedEndAt: "2026-03-30T18:00:00.000Z",
+      }),
+    ];
+
+    render(
+      <TaskWorkspaceMain
+        projectId="project-1"
+        tasks={tasks}
+        sprints={[]}
+        sprintMetrics={null}
+        sprintMetricsLoading={false}
+        loading={false}
+        error={null}
+        realtimeConnected={true}
+        onRetry={jest.fn()}
+        onTaskOpen={jest.fn()}
+        onTaskStatusChange={jest.fn()}
+        onTaskScheduleChange={jest.fn()}
+      />
+    );
+
+    const filterBar = screen.getByTestId("task-quick-filter-bar");
+
+    expect(screen.getByTestId("board-view")).toHaveTextContent("3 board tasks");
+
+    await user.selectOptions(within(filterBar).getByLabelText("Assignee"), "member-1");
+    expect(screen.getByTestId("board-view")).toHaveTextContent("1 board tasks");
+
+    await user.selectOptions(within(filterBar).getByLabelText("Assignee"), "all");
+    await user.click(within(filterBar).getByRole("button", { name: "frontend" }));
+    expect(screen.getByTestId("board-view")).toHaveTextContent("2 board tasks");
+
+    fireEvent.change(within(filterBar).getByLabelText("Due from"), {
+      target: { value: "2026-03-28" },
+    });
+    expect(screen.getByTestId("board-view")).toHaveTextContent("1 board tasks");
+
+    await user.selectOptions(within(filterBar).getByLabelText("Priority"), "high");
+    expect(screen.getByText("No tasks match the current filters")).toBeInTheDocument();
+  });
+
   it("renders the list view and forwards task-open interactions", async () => {
     const user = userEvent.setup();
     const onTaskOpen = jest.fn();
@@ -204,6 +360,51 @@ describe("TaskWorkspaceMain", () => {
 
     await user.click(screen.getByRole("button", { name: "Open Build dashboard" }));
     expect(onTaskOpen).toHaveBeenCalledWith("task-1");
+  });
+
+  it("highlights matching search text in list and timeline task results", async () => {
+    useTaskWorkspaceStore.setState((state) => ({
+      ...state,
+      viewMode: "list",
+      filters: {
+        ...state.filters,
+        search: "timeline",
+      },
+    }));
+
+    render(
+      <TaskWorkspaceMain
+        projectId="project-1"
+        tasks={[
+          makeTask({
+            id: "task-1",
+            title: "Timeline polish",
+            description: "Refine the timeline interactions for scheduling.",
+            status: "in_progress",
+            plannedStartAt: "2026-03-25T09:00:00.000Z",
+            plannedEndAt: "2026-03-27T18:00:00.000Z",
+          }),
+        ]}
+        sprints={[]}
+        sprintMetrics={null}
+        sprintMetricsLoading={false}
+        loading={false}
+        error={null}
+        realtimeConnected={true}
+        onRetry={jest.fn()}
+        onTaskOpen={jest.fn()}
+        onTaskStatusChange={jest.fn()}
+        onTaskScheduleChange={jest.fn()}
+      />
+    );
+
+    expect(screen.getAllByText(/timeline/i, { selector: "mark" }).length).toBeGreaterThanOrEqual(2);
+
+    act(() => {
+      useTaskWorkspaceStore.setState((state) => ({ ...state, viewMode: "timeline" }));
+    });
+
+    expect(screen.getAllByText(/timeline/i, { selector: "mark" }).length).toBeGreaterThanOrEqual(1);
   });
 
   it("sorts list rows when the user clicks a column header", async () => {
@@ -636,8 +837,7 @@ describe("TaskWorkspaceMain", () => {
     const toolbar = screen.getByTestId("bulk-action-toolbar");
     const statusSelect = within(toolbar).getAllByRole("combobox")[0];
 
-    await user.click(statusSelect);
-    await user.click(screen.getByRole("option", { name: "done" }));
+    await user.selectOptions(statusSelect, "done");
 
     expect(
       await screen.findByText("Some bulk actions failed")

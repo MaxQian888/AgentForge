@@ -72,3 +72,4 @@ tmp-runtime
 .gocache
 .tmp-go-cache
 .tmp
+bridge.exe

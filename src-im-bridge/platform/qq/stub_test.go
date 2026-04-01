@@ -136,6 +136,49 @@ func TestStub_HTTPHandlersExposeAndClearReplies(t *testing.T) {
 	}
 }
 
+func TestStub_FormattedTextSendAndReplyStorePlainText(t *testing.T) {
+	stub := NewStub("0")
+
+	if err := stub.SendFormattedText(context.Background(), "group:1002", &core.FormattedText{
+		Content: "formatted send",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+	if err := stub.ReplyFormattedText(context.Background(), replyContext{ChatID: "1001"}, &core.FormattedText{
+		Content: "formatted reply",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if err := stub.UpdateFormattedText(context.Background(), replyContext{ChatID: "1001"}, &core.FormattedText{
+		Content: "formatted update",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+
+	if len(stub.replies) != 3 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].Content != "formatted send" {
+		t.Fatalf("first reply = %+v", stub.replies[0])
+	}
+	if stub.replies[1].Content != "formatted reply" {
+		t.Fatalf("second reply = %+v", stub.replies[1])
+	}
+	if stub.replies[2].Content != "formatted update" {
+		t.Fatalf("third reply = %+v", stub.replies[2])
+	}
+
+	if err := stub.SendFormattedText(context.Background(), "group:1002", nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil message error = %v", err)
+	}
+	if err := stub.ReplyFormattedText(context.Background(), replyContext{ChatID: "1001"}, nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil reply message error = %v", err)
+	}
+}
+
 func TestStub_SendStructuredAndHelperConversions(t *testing.T) {
 	stub := NewStub("0")
 

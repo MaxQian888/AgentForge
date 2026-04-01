@@ -1,7 +1,9 @@
 package commands
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -66,6 +68,11 @@ func TestTaskCommand_DecomposeBridgeFirstWithProviderAndModel(t *testing.T) {
 			t.Fatalf("reply = %q, want substring %q", platform.replies[1], want)
 		}
 	}
+	for _, want := range []string{"可继续执行", "/agent run API client"} {
+		if !strings.Contains(platform.replies[1], want) {
+			t.Fatalf("reply = %q, want substring %q", platform.replies[1], want)
+		}
+	}
 }
 
 func TestTaskCommand_DecomposeFallsBackToLegacyAPIWhenBridgeUnavailable(t *testing.T) {
@@ -116,7 +123,7 @@ func TestTaskCommand_DecomposeFallsBackToLegacyAPIWhenBridgeUnavailable(t *testi
 	if len(platform.replies) != 2 {
 		t.Fatalf("replies = %v", platform.replies)
 	}
-	for _, want := range []string{"fallback", "legacy fallback summary", "legacy subtask"} {
+	for _, want := range []string{"fallback", "legacy fallback summary", "legacy subtask", "/agent spawn child-1"} {
 		if !strings.Contains(platform.replies[1], want) {
 			t.Fatalf("reply = %q, want substring %q", platform.replies[1], want)
 		}
@@ -161,5 +168,58 @@ func TestTaskCommand_DecomposeFailureAfterBridgeAndFallbackExplainsNoSubtasksCre
 	}
 	if !strings.Contains(platform.replies[1], "未创建任何子任务") {
 		t.Fatalf("reply = %q", platform.replies[1])
+	}
+}
+
+func TestTaskCommand_DecomposeSkipsBridgeWhenCapabilityProbeFails(t *testing.T) {
+	calls := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/tasks/task-123/decompose":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"parentTask": map[string]any{
+					"id":        "task-123",
+					"projectId": "proj",
+					"title":     "Bridge decomposition",
+					"status":    "triaged",
+					"priority":  "high",
+				},
+				"summary": "legacy fallback summary",
+				"subtasks": []map[string]any{
+					{"id": "child-1", "title": "legacy subtask", "status": "inbox", "priority": "high"},
+				},
+			})
+		default:
+			t.Fatalf("unexpected path = %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	engine.SetBridgeCapabilityProbe(core.BridgeCapabilityProbeFunc(func(ctx context.Context, capability core.BridgeCapability) error {
+		if capability != core.BridgeCapabilityDecompose {
+			t.Fatalf("capability = %q", capability)
+		}
+		return errors.New("bridge unavailable")
+	}))
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task decompose task-123",
+	})
+
+	if len(platform.replies) != 2 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[1], "fallback") || !strings.Contains(platform.replies[1], "legacy fallback summary") {
+		t.Fatalf("reply = %q", platform.replies[1])
+	}
+	if strings.Contains(strings.Join(calls, ","), "/api/v1/ai/decompose") {
+		t.Fatalf("bridge decompose endpoint should not be called, calls = %v", calls)
 	}
 }

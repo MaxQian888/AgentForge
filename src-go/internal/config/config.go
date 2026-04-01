@@ -80,7 +80,7 @@ func Load() *Config {
 	viper.SetDefault("IM_CONTROL_SHARED_SECRET", "")
 	viper.SetDefault("IM_BRIDGE_HEARTBEAT_TTL", "2m")
 	viper.SetDefault("IM_BRIDGE_PROGRESS_INTERVAL", "30s")
-	viper.SetDefault("MARKETPLACE_URL", "")
+	viper.SetDefault("MARKETPLACE_URL", "http://localhost:7781")
 
 	accessTTL, _ := time.ParseDuration(viper.GetString("JWT_ACCESS_TTL"))
 	refreshTTL, _ := time.ParseDuration(viper.GetString("JWT_REFRESH_TTL"))

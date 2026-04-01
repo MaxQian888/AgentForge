@@ -5,6 +5,14 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { DialogFooter } from "@/components/ui/dialog";
+import { Textarea } from "@/components/ui/textarea";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { cn } from "@/lib/utils";
 import type { PluginRecord } from "@/lib/stores/plugin-store";
 
@@ -104,19 +112,22 @@ function SchemaField({
         </label>
       ) : /* Enum select */
       schema.enum ? (
-        <select
-          id={fieldId}
-          value={String(value ?? "")}
-          onChange={(e) => onChange(e.target.value)}
-          className="flex h-10 w-full rounded-md border border-input bg-background px-3 py-2 text-sm ring-offset-background focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-ring focus-visible:ring-offset-2"
+        <Select
+          value={String(value ?? "") || "__none__"}
+          onValueChange={(val) => onChange(val === "__none__" ? "" : val)}
         >
-          <option value="">— Select —</option>
-          {schema.enum.map((opt) => (
-            <option key={opt} value={opt}>
-              {opt}
-            </option>
-          ))}
-        </select>
+          <SelectTrigger id={fieldId} className="w-full">
+            <SelectValue placeholder="— Select —" />
+          </SelectTrigger>
+          <SelectContent>
+            <SelectItem value="__none__">— Select —</SelectItem>
+            {schema.enum.map((opt) => (
+              <SelectItem key={opt} value={opt}>
+                {opt}
+              </SelectItem>
+            ))}
+          </SelectContent>
+        </Select>
       ) : /* Number / Integer */
       fieldType === "number" || fieldType === "integer" ? (
         <Input
@@ -194,7 +205,7 @@ function JsonFallback({
     <>
       <div className="grid gap-3 py-4">
         <Label htmlFor="config-json">Configuration (JSON)</Label>
-        <textarea
+        <Textarea
           id="config-json"
           className={cn(
             "flex min-h-[200px] w-full rounded-md border border-input bg-background px-3 py-2 text-sm",

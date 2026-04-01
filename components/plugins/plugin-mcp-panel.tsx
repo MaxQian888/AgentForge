@@ -5,6 +5,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import {
   usePluginStore,
@@ -279,7 +280,7 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
                   </option>
                 ))}
               </select>
-              <textarea
+              <Textarea
                 className="min-h-[60px] w-full rounded-md border bg-background px-2 py-1 font-mono text-xs"
                 placeholder='{"key": "value"}'
                 value={toolArgs}
@@ -329,7 +330,7 @@ export function PluginMCPPanel({ plugin }: { plugin: PluginRecord }) {
                   </option>
                 ))}
               </select>
-              <textarea
+              <Textarea
                 className="min-h-[60px] w-full rounded-md border bg-background px-2 py-1 font-mono text-xs"
                 placeholder='{"arg": "value"}'
                 value={promptArgs}

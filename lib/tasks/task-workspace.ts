@@ -14,6 +14,8 @@ export interface TaskWorkspaceFilters {
   assigneeId: string | "all";
   sprintId: string | "all";
   labels: string[];
+  dueDateStart: string;
+  dueDateEnd: string;
   planning: TaskPlanningFilter;
   dependency: TaskDependencyFilter;
   customFieldFilters: Record<string, string>;
@@ -27,6 +29,8 @@ export function createDefaultTaskWorkspaceFilters(): TaskWorkspaceFilters {
     assigneeId: "all",
     sprintId: "all",
     labels: [],
+    dueDateStart: "",
+    dueDateEnd: "",
     planning: "all",
     dependency: "all",
     customFieldFilters: {},
@@ -45,6 +49,30 @@ function taskMatchesSearch(task: Task, search: string): boolean {
 
 function taskPlanningState(task: Task): TaskPlanningFilter {
   return task.plannedStartAt && task.plannedEndAt ? "scheduled" : "unscheduled";
+}
+
+function taskMatchesDueDateRange(
+  task: Task,
+  dueDateStart: string,
+  dueDateEnd: string
+): boolean {
+  if (!dueDateStart && !dueDateEnd) {
+    return true;
+  }
+
+  if (!task.plannedEndAt) {
+    return false;
+  }
+
+  const dueDate = task.plannedEndAt.slice(0, 10);
+  if (dueDateStart && dueDate < dueDateStart) {
+    return false;
+  }
+  if (dueDateEnd && dueDate > dueDateEnd) {
+    return false;
+  }
+
+  return true;
 }
 
 export function filterTasksForWorkspace(
@@ -69,6 +97,9 @@ export function filterTasksForWorkspace(
       if (!filters.labels.some((label) => taskLabels.includes(label))) {
         return false;
       }
+    }
+    if (!taskMatchesDueDateRange(task, filters.dueDateStart, filters.dueDateEnd)) {
+      return false;
     }
     if (filters.planning !== "all" && taskPlanningState(task) !== filters.planning) {
       return false;

@@ -16,6 +16,8 @@ type SkillCatalogEntry struct {
 	DisplayName      string   `json:"displayName,omitempty"`
 	ShortDescription string   `json:"shortDescription,omitempty"`
 	DefaultPrompt    string   `json:"defaultPrompt,omitempty"`
+	Requires         []string `json:"requires,omitempty"`
+	Tools            []string `json:"tools,omitempty"`
 	AvailableParts   []string `json:"availableParts,omitempty"`
 	ReferenceCount   int      `json:"referenceCount,omitempty"`
 	ScriptCount      int      `json:"scriptCount,omitempty"`
@@ -85,6 +87,8 @@ func buildSkillCatalogEntry(root, skillFile string) (SkillCatalogEntry, error) {
 		DisplayName:      document.Interface.DisplayName,
 		ShortDescription: document.Interface.ShortDescription,
 		DefaultPrompt:    document.Interface.DefaultPrompt,
+		Requires:         append([]string(nil), document.Requires...),
+		Tools:            append([]string(nil), document.Tools...),
 		AvailableParts:   append([]string(nil), document.AvailableParts...),
 		ReferenceCount:   document.ReferenceCount,
 		ScriptCount:      document.ScriptCount,

@@ -13,6 +13,8 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/handler"
+	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type fakeRoleBridgeClient struct {
@@ -21,6 +23,18 @@ type fakeRoleBridgeClient struct {
 	generateResult *bridge.GenerateResponse
 	generateErr    error
 	lastGenerate   *bridge.GenerateRequest
+}
+
+type fakeRolePluginCatalog struct {
+	records []*model.PluginRecord
+	err     error
+}
+
+func (f *fakeRolePluginCatalog) List(_ context.Context, _ service.PluginListFilter) ([]*model.PluginRecord, error) {
+	if f == nil {
+		return nil, nil
+	}
+	return f.records, f.err
 }
 
 func (f *fakeRoleBridgeClient) GetRuntimeCatalog(_ context.Context) (*bridge.RuntimeCatalogResponse, error) {
@@ -270,6 +284,128 @@ func TestRoleHandlerCreateReturnsAdvancedStructuredFields(t *testing.T) {
 	}
 }
 
+func TestRoleHandler_DeleteBlocksRoleReferencedByInstalledPlugin(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "roles")
+	if err := os.MkdirAll(filepath.Join(dir, "reviewer"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "reviewer", "role.yaml"), []byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: reviewer
+  name: Reviewer
+identity:
+  role: Reviewer
+  goal: review code
+`), 0o600); err != nil {
+		t.Fatalf("seed role error = %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodDelete, "/roles/reviewer", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("reviewer")
+
+	h := handler.NewRoleHandler(dir).WithPluginCatalog(&fakeRolePluginCatalog{
+		records: []*model.PluginRecord{
+			{
+				PluginManifest: model.PluginManifest{
+					APIVersion: "agentforge/v1",
+					Kind:       model.PluginKindWorkflow,
+					Metadata: model.PluginMetadata{
+						ID:      "workflow.release-train",
+						Name:    "Release Train",
+						Version: "1.0.0",
+					},
+					Spec: model.PluginSpec{
+						Runtime: model.PluginRuntimeWASM,
+						Workflow: &model.WorkflowPluginSpec{
+							Process: model.WorkflowProcessSequential,
+							Roles:   []model.WorkflowRoleBinding{{ID: "reviewer"}},
+							Steps:   []model.WorkflowStepDefinition{{ID: "review", Role: "reviewer", Action: model.WorkflowActionReview}},
+						},
+					},
+				},
+				LifecycleState: model.PluginStateEnabled,
+			},
+		},
+	})
+	if err := h.Delete(ctx); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+	if !strings.Contains(rec.Body.String(), "workflow.release-train") {
+		t.Fatalf("response = %s, want blocking plugin id", rec.Body.String())
+	}
+}
+
+func TestRoleHandler_PreviewIncludesPluginDependencyDiagnostics(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "roles")
+	if err := os.MkdirAll(dir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+
+	e := echo.New()
+	body := `{
+	  "draft": {
+	    "apiVersion": "agentforge/v1",
+	    "kind": "Role",
+	    "metadata": {
+	      "id": "design-lead",
+	      "name": "Design Lead",
+	      "version": "1.0.0"
+	    },
+	    "identity": {
+	      "role": "Design Lead",
+	      "goal": "Review UX consistency"
+	    },
+	    "capabilities": {
+	      "toolConfig": {
+	        "external": ["design-mcp"]
+	      }
+	    }
+	  }
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/roles/preview", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	h := handler.NewRoleHandler(dir).WithPluginCatalog(&fakeRolePluginCatalog{})
+	if err := h.Preview(ctx); err != nil {
+		t.Fatalf("Preview() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	diagnostics, ok := payload["readinessDiagnostics"].([]any)
+	if !ok || len(diagnostics) == 0 {
+		t.Fatalf("readinessDiagnostics = %#v, want blocking plugin dependency diagnostic", payload["readinessDiagnostics"])
+	}
+	firstDiagnostic := diagnostics[0].(map[string]any)
+	if firstDiagnostic["code"] != "role_plugin_dependency_unavailable" {
+		t.Fatalf("diagnostic.code = %#v, want role_plugin_dependency_unavailable", firstDiagnostic["code"])
+	}
+	effectiveManifest := payload["effectiveManifest"].(map[string]any)
+	pluginDependencies, ok := effectiveManifest["pluginDependencies"].([]any)
+	if !ok || len(pluginDependencies) != 1 {
+		t.Fatalf("effectiveManifest.pluginDependencies = %#v, want 1 dependency summary", effectiveManifest["pluginDependencies"])
+	}
+	firstDependency := pluginDependencies[0].(map[string]any)
+	if firstDependency["pluginId"] != "design-mcp" || firstDependency["status"] != "missing" {
+		t.Fatalf("first plugin dependency = %#v, want missing design-mcp", firstDependency)
+	}
+}
+
 func TestRoleHandlerListSkillsReturnsRepoLocalCatalogEntries(t *testing.T) {
 	dir := t.TempDir()
 	if err := os.MkdirAll(filepath.Join(dir, "roles"), 0o755); err != nil {
@@ -284,6 +420,11 @@ func TestRoleHandlerListSkillsReturnsRepoLocalCatalogEntries(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "skills", "react", "SKILL.md"), []byte(`---
 name: React UI
 description: Build React product interfaces.
+requires:
+  - typescript
+tools:
+  - code_editor
+  - browser-preview
 ---
 `), 0o600); err != nil {
 		t.Fatalf("seed react skill error = %v", err)
@@ -321,6 +462,14 @@ description: Build React product interfaces.
 	}
 	if skills[0]["source"] != "repo-local" {
 		t.Fatalf("skills[0].source = %#v, want repo-local", skills[0]["source"])
+	}
+	requires, ok := skills[0]["requires"].([]any)
+	if !ok || len(requires) != 1 || requires[0] != "skills/typescript" {
+		t.Fatalf("skills[0].requires = %#v, want normalized dependency", skills[0]["requires"])
+	}
+	tools, ok := skills[0]["tools"].([]any)
+	if !ok || len(tools) != 2 || tools[0] != "code_editor" || tools[1] != "browser_preview" {
+		t.Fatalf("skills[0].tools = %#v, want normalized declared tools", skills[0]["tools"])
 	}
 	if skills[1]["path"] != "skills/testing" {
 		t.Fatalf("skills[1].path = %#v, want skills/testing", skills[1]["path"])
@@ -1023,6 +1172,89 @@ security:
 	}
 	if bridgeClient.lastGenerate != nil {
 		t.Fatalf("Generate() was called despite blocking skill diagnostics: %#v", bridgeClient.lastGenerate)
+	}
+}
+
+func TestRoleHandlerSandboxBlocksProbeForAutoLoadSkillToolMismatch(t *testing.T) {
+	dir := t.TempDir()
+	if err := os.MkdirAll(filepath.Join(dir, "roles", "sandbox-role"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.MkdirAll(filepath.Join(dir, "skills", "react"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "skills", "react", "SKILL.md"), []byte(`---
+name: React
+tools:
+  - browser_preview
+---
+
+# React
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "roles", "sandbox-role", "role.yaml"), []byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: sandbox-role
+  name: Sandbox Role
+identity:
+  role: Sandbox Role
+  goal: Check diagnostics
+capabilities:
+  tools:
+    built_in: [Read, Edit]
+  skills:
+    - path: skills/react
+      auto_load: true
+security:
+  permission_mode: default
+`), 0o600); err != nil {
+		t.Fatalf("WriteFile() error = %v", err)
+	}
+
+	e := echo.New()
+	body := `{
+	  "roleId": "sandbox-role",
+	  "input": "hello",
+	  "runtime": "claude_code"
+	}`
+	req := httptest.NewRequest(http.MethodPost, "/roles/sandbox", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+
+	bridgeClient := &fakeRoleBridgeClient{
+		catalog: &bridge.RuntimeCatalogResponse{
+			DefaultRuntime: "claude_code",
+			Runtimes: []bridge.RuntimeCatalogEntryDTO{{
+				Key:             "claude_code",
+				Label:           "Claude Code",
+				DefaultProvider: "anthropic",
+				DefaultModel:    "claude-sonnet-4-5",
+				Available:       true,
+			}},
+		},
+	}
+	h := handler.NewRoleHandler(filepath.Join(dir, "roles")).WithBridgeClient(bridgeClient)
+	if err := h.Sandbox(ctx); err != nil {
+		t.Fatalf("Sandbox() error = %v", err)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	diagnostics := payload["readinessDiagnostics"].([]any)
+	if len(diagnostics) == 0 {
+		t.Fatalf("readinessDiagnostics = %#v, want blocking tool mismatch diagnostic", diagnostics)
+	}
+	first := diagnostics[0].(map[string]any)
+	if first["code"] != "role_skill_tools_unavailable" {
+		t.Fatalf("diagnostic code = %#v, want role_skill_tools_unavailable", first["code"])
+	}
+	if bridgeClient.lastGenerate != nil {
+		t.Fatalf("Generate() was called despite blocking tool mismatch: %#v", bridgeClient.lastGenerate)
 	}
 }
 

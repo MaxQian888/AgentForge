@@ -2,6 +2,13 @@
 
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type { CustomFieldDefinition } from "@/lib/stores/custom-field-store";
 
 export function FieldFilterControl({
@@ -18,18 +25,22 @@ export function FieldFilterControl({
   if (field.fieldType === "select" || field.fieldType === "multi_select") {
     const options = Array.isArray(field.options) ? field.options : [];
     return (
-      <select
-        className="h-9 rounded-md border bg-background px-3 text-sm"
-        value={value}
-        onChange={(event) => onChange(event.target.value)}
+      <Select
+        value={value || "__none__"}
+        onValueChange={(val) => onChange(val === "__none__" ? "" : val)}
       >
-        <option value="">{t("fields.filterAll")}</option>
-        {options.map((option) => (
-          <option key={String(option)} value={String(option)}>
-            {String(option)}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger className="h-9 text-sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">{t("fields.filterAll")}</SelectItem>
+          {options.map((option) => (
+            <SelectItem key={String(option)} value={String(option)}>
+              {String(option)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     );
   }
 

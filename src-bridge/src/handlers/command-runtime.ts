@@ -1,11 +1,21 @@
-import { calculateCost } from "../cost/calculator.js";
+import {
+  accumulateCostAccounting,
+  serializeCostAccounting,
+} from "../cost/accounting.js";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
 import type { ExecuteRequest } from "../types.js";
 import type { EventStreamer } from "../ws/event-stream.js";
+import { emitBudgetAlertIfNeeded } from "./budget-events.js";
 
 type UnknownRecord = Record<string, unknown>;
 type EventSink = Pick<EventStreamer, "send">;
-type CommandRuntimeKey = "codex" | "opencode" | "cursor" | "gemini" | "qoder" | "iflow";
+type CommandRuntimeKey =
+  | "codex"
+  | "opencode"
+  | "cursor"
+  | "gemini"
+  | "qoder"
+  | "iflow";
 
 export type CommandRuntimeRunner = (params: {
   runtime: CommandRuntimeKey;
@@ -107,32 +117,53 @@ function emitCommandRuntimeEvent(
         data: {
           call_id: typeof event.call_id === "string" ? event.call_id : "",
           output:
-            typeof event.output === "string" ? event.output : JSON.stringify(event.output ?? {}),
+            typeof event.output === "string"
+              ? event.output
+              : JSON.stringify(event.output ?? {}),
           is_error: Boolean(event.is_error),
         },
       });
       return;
     case "usage": {
       const inputTokens =
-        typeof event.input_tokens === "number" ? Math.max(event.input_tokens, 0) : 0;
+        typeof event.input_tokens === "number"
+          ? Math.max(event.input_tokens, 0)
+          : 0;
       const outputTokens =
-        typeof event.output_tokens === "number" ? Math.max(event.output_tokens, 0) : 0;
+        typeof event.output_tokens === "number"
+          ? Math.max(event.output_tokens, 0)
+          : 0;
       const cacheReadTokens =
-        typeof event.cache_read_tokens === "number" ? Math.max(event.cache_read_tokens, 0) : 0;
-      const nextSpent =
+        typeof event.cache_read_tokens === "number"
+          ? Math.max(event.cache_read_tokens, 0)
+          : 0;
+      const nativeDelta =
         typeof event.cost_usd === "number" && Number.isFinite(event.cost_usd)
-          ? runtime.spentUsd + Math.max(event.cost_usd, 0)
-          : runtime.spentUsd +
-            calculateCost(
-              {
-                input_tokens: inputTokens,
-                output_tokens: outputTokens,
-                cache_read_input_tokens: cacheReadTokens,
-              },
-              req.model,
-            );
-
-      runtime.spentUsd = nextSpent;
+          ? Math.max(event.cost_usd, 0)
+          : undefined;
+      const snapshot = accumulateCostAccounting({
+        previous: runtime.costAccounting,
+        runtime: req.runtime ?? "cursor",
+        provider: req.provider ?? req.runtime ?? "unknown",
+        requestedModel: req.model,
+        usageDelta: {
+          inputTokens,
+          outputTokens,
+          cacheReadTokens,
+        },
+        authoritativeTotalCostUsd:
+          nativeDelta !== undefined
+            ? (runtime.costAccounting?.totalCostUsd ?? runtime.spentUsd) +
+              nativeDelta
+            : undefined,
+        source:
+          nativeDelta !== undefined
+            ? "native_runtime_usage"
+            : (req.provider ?? "") === "openai"
+              ? "openai_api_pricing"
+              : "cli_runtime_usage",
+      });
+      runtime.applyCostAccounting(snapshot);
 
       streamer.send({
         task_id: req.task_id,
@@ -146,8 +177,10 @@ function emitCommandRuntimeEvent(
           cost_usd: runtime.spentUsd,
           budget_remaining_usd: Math.max(req.budget_usd - runtime.spentUsd, 0),
           turn_number: runtime.turnNumber,
+          cost_accounting: serializeCostAccounting(snapshot),
         },
       });
+      emitBudgetAlertIfNeeded(runtime, streamer, req, now);
       return;
     }
     case "reasoning":
@@ -170,10 +203,14 @@ function emitCommandRuntimeEvent(
         timestamp_ms: now(),
         type: "progress",
         data: {
-          tool_name: typeof event.tool_name === "string" ? event.tool_name : undefined,
+          tool_name:
+            typeof event.tool_name === "string" ? event.tool_name : undefined,
           progress_text:
-            typeof event.progress_text === "string" ? event.progress_text : undefined,
-          item_type: typeof event.item_type === "string" ? event.item_type : undefined,
+            typeof event.progress_text === "string"
+              ? event.progress_text
+              : undefined,
+          item_type:
+            typeof event.item_type === "string" ? event.item_type : undefined,
           partial_output: event.partial_output,
         },
       });
@@ -197,9 +234,12 @@ function emitCommandRuntimeEvent(
         type: "rate_limit",
         data: {
           utilization:
-            typeof event.utilization === "number" ? event.utilization : undefined,
+            typeof event.utilization === "number"
+              ? event.utilization
+              : undefined,
           reset_at:
-            typeof event.reset_at === "string" || typeof event.reset_at === "number"
+            typeof event.reset_at === "string" ||
+            typeof event.reset_at === "number"
               ? event.reset_at
               : undefined,
         },
@@ -308,7 +348,10 @@ async function* spawnCommandRuntime(params: {
     const exitCode = await proc.exited;
     const stderr = proc.stderr ? await readToString(proc.stderr) : "";
     if (exitCode !== 0 && !params.abortSignal.aborted) {
-      throw new Error(stderr.trim() || `${params.runtime} runtime exited with code ${exitCode}`);
+      throw new Error(
+        stderr.trim() ||
+          `${params.runtime} runtime exited with code ${exitCode}`,
+      );
     }
   } finally {
     params.abortSignal.removeEventListener("abort", onAbort);
@@ -345,7 +388,9 @@ async function* readLines(
   }
 }
 
-async function readToString(stream: ReadableStream<Uint8Array>): Promise<string> {
+async function readToString(
+  stream: ReadableStream<Uint8Array>,
+): Promise<string> {
   let output = "";
   for await (const line of readLines(stream)) {
     output += line;

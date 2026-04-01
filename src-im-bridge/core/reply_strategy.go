@@ -217,13 +217,13 @@ func nativeFallbackReason(method DeliveryMethod, target *ReplyTarget, replyCtx a
 	case DeliveryMethodDeferredCardUpdate:
 		switch {
 		case target == nil || strings.TrimSpace(target.CallbackToken) == "":
-			return "feishu deferred card update unavailable: missing callback token"
+			return "deferred card update unavailable: missing callback token"
 		case !hasUpdater:
-			return "feishu deferred card update unavailable: native updater not implemented"
+			return "deferred card update unavailable: native updater not implemented"
 		case replyCtx == nil:
-			return "feishu deferred card update unavailable: reply context could not be restored"
+			return "deferred card update unavailable: reply context could not be restored"
 		default:
-			return "feishu deferred card update unavailable"
+			return "deferred card update unavailable"
 		}
 	case DeliveryMethodEdit:
 		switch {

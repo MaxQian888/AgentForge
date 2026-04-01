@@ -31,25 +31,81 @@ const (
 	bridgePluginRefreshMCPPattern = "/bridge/plugins/%s/mcp/refresh"
 )
 
+// ThinkingConfig controls extended thinking for the agent runtime.
+type ThinkingConfig struct {
+	Enabled      bool `json:"enabled"`
+	BudgetTokens int  `json:"budget_tokens,omitempty"`
+}
+
+// StructuredOutputSchema defines a JSON schema for structured agent output.
+type StructuredOutputSchema struct {
+	Type   string         `json:"type"`
+	Schema map[string]any `json:"schema"`
+}
+
+// HookDefinition declares a single hook trigger.
+type HookDefinition struct {
+	Hook    string         `json:"hook"`
+	Matcher map[string]any `json:"matcher,omitempty"`
+}
+
+// HooksConfig groups hook triggers and their callback.
+type HooksConfig struct {
+	Hooks       []HookDefinition `json:"hooks"`
+	CallbackURL string           `json:"callback_url,omitempty"`
+	TimeoutMS   int              `json:"timeout_ms,omitempty"`
+}
+
+// Attachment represents an image or file attachment for an agent run.
+type Attachment struct {
+	Type     string `json:"type"`
+	Path     string `json:"path"`
+	MimeType string `json:"mime_type,omitempty"`
+}
+
+// AgentDefinition defines a sub-agent that can be spawned during execution.
+type AgentDefinition struct {
+	Description string   `json:"description"`
+	Prompt      string   `json:"prompt"`
+	Tools       []string `json:"tools,omitempty"`
+	Model       string   `json:"model,omitempty"`
+}
+
 // ExecuteRequest is sent to the bridge to start an agent session.
 type ExecuteRequest struct {
-	TaskID         string      `json:"task_id"`
-	SessionID      string      `json:"session_id"`
-	MemberID       string      `json:"member_id,omitempty"`
-	TeamID         string      `json:"team_id,omitempty"`
-	TeamRole       string      `json:"team_role,omitempty"`
-	Runtime        string      `json:"runtime,omitempty"`
-	Provider       string      `json:"provider,omitempty"`
-	Model          string      `json:"model,omitempty"`
-	Prompt         string      `json:"prompt"`
-	WorktreePath   string      `json:"worktree_path"`
-	BranchName     string      `json:"branch_name"`
-	SystemPrompt   string      `json:"system_prompt,omitempty"`
-	MaxTurns       int         `json:"max_turns,omitempty"`
-	BudgetUSD      float64     `json:"budget_usd"`
-	AllowedTools   []string    `json:"allowed_tools,omitempty"`
-	PermissionMode string      `json:"permission_mode,omitempty"`
-	RoleConfig     *RoleConfig `json:"role_config,omitempty"`
+	TaskID                 string                     `json:"task_id"`
+	SessionID              string                     `json:"session_id"`
+	MemberID               string                     `json:"member_id,omitempty"`
+	TeamID                 string                     `json:"team_id,omitempty"`
+	TeamRole               string                     `json:"team_role,omitempty"`
+	Runtime                string                     `json:"runtime,omitempty"`
+	Provider               string                     `json:"provider,omitempty"`
+	Model                  string                     `json:"model,omitempty"`
+	Prompt                 string                     `json:"prompt"`
+	WorktreePath           string                     `json:"worktree_path"`
+	BranchName             string                     `json:"branch_name"`
+	SystemPrompt           string                     `json:"system_prompt,omitempty"`
+	MaxTurns               int                        `json:"max_turns,omitempty"`
+	BudgetUSD              float64                    `json:"budget_usd"`
+	WarnThreshold          float64                    `json:"warn_threshold,omitempty"`
+	AllowedTools           []string                   `json:"allowed_tools,omitempty"`
+	DisallowedTools        []string                   `json:"disallowed_tools,omitempty"`
+	PermissionMode         string                     `json:"permission_mode,omitempty"`
+	RoleConfig             *RoleConfig                `json:"role_config,omitempty"`
+	ThinkingConfig         *ThinkingConfig            `json:"thinking_config,omitempty"`
+	OutputSchema           *StructuredOutputSchema    `json:"output_schema,omitempty"`
+	HooksConfig            *HooksConfig               `json:"hooks_config,omitempty"`
+	HookCallbackURL        string                     `json:"hook_callback_url,omitempty"`
+	HookTimeoutMS          int                        `json:"hook_timeout_ms,omitempty"`
+	Attachments            []Attachment               `json:"attachments,omitempty"`
+	FileCheckpointing      *bool                      `json:"file_checkpointing,omitempty"`
+	Agents                 map[string]AgentDefinition `json:"agents,omitempty"`
+	FallbackModel          string                     `json:"fallback_model,omitempty"`
+	AdditionalDirectories  []string                   `json:"additional_directories,omitempty"`
+	IncludePartialMessages *bool                      `json:"include_partial_messages,omitempty"`
+	ToolPermissionCallback *bool                      `json:"tool_permission_callback,omitempty"`
+	WebSearch              *bool                      `json:"web_search,omitempty"`
+	Env                    map[string]string          `json:"env,omitempty"`
 }
 
 type RoleConfig struct {
@@ -61,6 +117,7 @@ type RoleConfig struct {
 	SystemPrompt     string                               `json:"system_prompt"`
 	AllowedTools     []string                             `json:"allowed_tools"`
 	Tools            []string                             `json:"tools,omitempty"`
+	PluginBindings   []model.RoleToolPluginBinding        `json:"plugin_bindings,omitempty"`
 	KnowledgeContext string                               `json:"knowledge_context,omitempty"`
 	OutputFilters    []string                             `json:"output_filters,omitempty"`
 	MaxBudgetUsd     float64                              `json:"max_budget_usd"`
@@ -146,6 +203,8 @@ type RuntimeCatalogEntryDTO struct {
 	Available           bool                   `json:"available"`
 	Diagnostics         []RuntimeDiagnosticDTO `json:"diagnostics"`
 	SupportedFeatures   []string               `json:"supported_features,omitempty"`
+	Agents              []string               `json:"agents,omitempty"`
+	Skills              []string               `json:"skills,omitempty"`
 }
 
 type RuntimeDiagnosticDTO struct {
@@ -646,11 +705,181 @@ func (c *Client) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 	return &result, nil
 }
 
+// --- Conversation management ---
+
+// ForkRequest forks a conversation at a specific message.
+type ForkRequest struct {
+	TaskID    string `json:"task_id"`
+	MessageID string `json:"message_id,omitempty"`
+}
+
+// ForkResponse is returned after a fork operation.
+type ForkResponse struct {
+	NewTaskID  string `json:"new_task_id"`
+	Continuity any    `json:"continuity,omitempty"`
+}
+
+// Fork forks a conversation at a given message checkpoint.
+func (c *Client) Fork(ctx context.Context, req ForkRequest) (*ForkResponse, error) {
+	var result ForkResponse
+	if err := c.doJSONRequest(ctx, http.MethodPost, "/bridge/fork", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// RollbackRequest rolls back an agent runtime.
+type RollbackRequest struct {
+	TaskID       string `json:"task_id"`
+	CheckpointID string `json:"checkpoint_id,omitempty"`
+	Turns        int    `json:"turns,omitempty"`
+}
+
+// Rollback rolls back a runtime to a checkpoint or by N turns.
+func (c *Client) Rollback(ctx context.Context, req RollbackRequest) error {
+	return c.doJSONRequest(ctx, http.MethodPost, "/bridge/rollback", req, nil)
+}
+
+// RevertRequest reverts a specific message.
+type RevertRequest struct {
+	TaskID    string `json:"task_id"`
+	MessageID string `json:"message_id"`
+}
+
+// Revert reverts a specific message in the conversation.
+func (c *Client) Revert(ctx context.Context, req RevertRequest) error {
+	return c.doJSONRequest(ctx, http.MethodPost, "/bridge/revert", req, nil)
+}
+
+// UnrevertRequest undoes a previous revert.
+type UnrevertRequest struct {
+	TaskID string `json:"task_id"`
+}
+
+// Unrevert undoes a previous message revert.
+func (c *Client) Unrevert(ctx context.Context, req UnrevertRequest) error {
+	return c.doJSONRequest(ctx, http.MethodPost, "/bridge/unrevert", req, nil)
+}
+
+// DiffResponse holds the diff output from an agent runtime.
+type DiffResponse struct {
+	Diff string `json:"diff,omitempty"`
+}
+
+// GetDiff retrieves the diff of changes made by an agent runtime.
+func (c *Client) GetDiff(ctx context.Context, taskID string) (*DiffResponse, error) {
+	var result DiffResponse
+	if err := c.doJSONRequest(ctx, http.MethodGet, "/bridge/diff/"+taskID, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// MessagesResponse holds conversation messages from an agent runtime.
+type MessagesResponse struct {
+	Messages []any `json:"messages,omitempty"`
+}
+
+// GetMessages retrieves the conversation history for a task.
+func (c *Client) GetMessages(ctx context.Context, taskID string) (*MessagesResponse, error) {
+	var result MessagesResponse
+	if err := c.doJSONRequest(ctx, http.MethodGet, "/bridge/messages/"+taskID, nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// CommandRequest sends a command to a running agent runtime.
+type CommandRequest struct {
+	TaskID    string `json:"task_id"`
+	Command   string `json:"command"`
+	Arguments string `json:"arguments,omitempty"`
+}
+
+// ExecuteCommand sends a runtime command to a running agent.
+func (c *Client) ExecuteCommand(ctx context.Context, req CommandRequest) error {
+	return c.doJSONRequest(ctx, http.MethodPost, "/bridge/command", req, nil)
+}
+
+// --- Runtime control ---
+
+// Interrupt interrupts a running agent without cancelling.
+func (c *Client) Interrupt(ctx context.Context, taskID string) error {
+	return c.doJSONRequest(ctx, http.MethodPost, "/bridge/interrupt", map[string]string{"task_id": taskID}, nil)
+}
+
+// ModelSwitchRequest switches the model of a running agent.
+type ModelSwitchRequest struct {
+	TaskID string `json:"task_id"`
+	Model  string `json:"model"`
+}
+
+// SwitchModel switches the model for a running agent session.
+func (c *Client) SwitchModel(ctx context.Context, req ModelSwitchRequest) error {
+	return c.doJSONRequest(ctx, http.MethodPost, "/bridge/model", req, nil)
+}
+
+// PermissionResponsePayload is submitted to resolve a pending permission request.
+type PermissionResponsePayload struct {
+	Decision string `json:"decision"`
+	Reason   string `json:"reason,omitempty"`
+}
+
+// PermissionResponse submits a permission decision to the bridge.
+func (c *Client) PermissionResponse(ctx context.Context, requestID string, payload PermissionResponsePayload) error {
+	return c.doJSONRequest(ctx, http.MethodPost, "/bridge/permission-response/"+requestID, payload, nil)
+}
+
+// GetActive returns the list of all active agent runtimes.
+func (c *Client) GetActive(ctx context.Context) ([]StatusResponse, error) {
+	var result []StatusResponse
+	if err := c.doJSONRequest(ctx, http.MethodGet, "/bridge/active", nil, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// --- Plugin lifecycle ---
+
+// PluginListResponse holds the list of plugins.
+type PluginListResponse struct {
+	Plugins []any `json:"plugins"`
+}
+
+// ListPlugins returns all registered plugins.
+func (c *Client) ListPlugins(ctx context.Context) (*PluginListResponse, error) {
+	var result PluginListResponse
+	if err := c.doJSONRequest(ctx, http.MethodGet, "/bridge/plugins", nil, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
+// EnablePlugin enables a registered plugin.
+func (c *Client) EnablePlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
+	record, err := c.doPluginRequest(ctx, http.MethodPost, "/bridge/plugins/"+pluginID+"/enable", nil)
+	if err != nil {
+		return nil, err
+	}
+	return pluginRuntimeStatusFromRecord(record), nil
+}
+
+// DisablePlugin disables a registered plugin.
+func (c *Client) DisablePlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
+	record, err := c.doPluginRequest(ctx, http.MethodPost, "/bridge/plugins/"+pluginID+"/disable", nil)
+	if err != nil {
+		return nil, err
+	}
+	return pluginRuntimeStatusFromRecord(record), nil
+}
+
 // ClassifyIntentRequest is sent to the bridge for NLU intent classification.
 type ClassifyIntentRequest struct {
-	Text      string `json:"text"`
-	UserID    string `json:"user_id"`
-	ProjectID string `json:"project_id"`
+	Text       string   `json:"text"`
+	UserID     string   `json:"user_id"`
+	ProjectID  string   `json:"project_id"`
+	Candidates []string `json:"candidates,omitempty"`
+	Context    any      `json:"context,omitempty"`
 }
 
 // ClassifyIntentResponse is the NLU result from the bridge.

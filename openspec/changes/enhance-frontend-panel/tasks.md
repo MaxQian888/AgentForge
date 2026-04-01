@@ -2,23 +2,23 @@
 
 - [x] 1.1 Add chart library (recharts) and configure for tree-shaking
 - [x] 1.2 Add command palette library (cmdk) dependency
-- [ ] 1.3 Add drag-and-drop library (@dnd-kit/core) for workflow builder
+- [x] 1.3 Add drag-and-drop library (@dnd-kit/core) for workflow builder
 - [x] 1.4 Create responsive breakpoint utilities and hooks
 - [x] 1.5 Implement command palette modal component with ⌘K trigger
 - [x] 1.6 Create virtual scrolling wrapper component for large lists
 
 ## 2. Responsive Layout System
 
-- [ ] 2.1 Define CSS custom properties for responsive spacing scale
+- [x] 2.1 Define CSS custom properties for responsive spacing scale
 - [x] 2.2 Create responsive grid component with breakpoint-aware columns
 - [x] 2.3 Implement sidebar collapse/expand animation with state persistence
-- [ ] 2.4 Create mobile navigation drawer with swipe gesture support
-- [ ] 2.5 Implement responsive table component that transforms to cards on mobile
-- [ ] 2.6 Add responsive typography utilities with viewport-based scaling
+- [x] 2.4 Create mobile navigation drawer with swipe gesture support
+- [x] 2.5 Implement responsive table component that transforms to cards on mobile
+- [x] 2.6 Add responsive typography utilities with viewport-based scaling
 
 ## 3. Dashboard Visualization Enhancement
 
-- [ ] 3.1 Create MetricCard component with sparkline chart support
+- [x] 3.1 Create MetricCard component with sparkline chart support
 - [x] 3.2 Implement trend indicator component (up/down/neutral arrows)
 - [x] 3.3 Create real-time status indicator component with color states
 - [x] 3.4 Build activity feed with filtering (by type and time range)
@@ -28,31 +28,31 @@
 
 ## 4. Agent Workspace Panel
 
-- [ ] 4.1 Create agent grid view with status cards
-- [ ] 4.2 Implement agent spawn form with runtime/provider/model selection
-- [ ] 4.3 Build agent control buttons (pause, resume, terminate) with confirmations
-- [ ] 4.4 Create agent details slide-out panel with logs and metrics
-- [ ] 4.5 Implement bulk selection and bulk operations toolbar
-- [ ] 4.6 Add CPU/memory sparkline charts to agent cards
-- [ ] 4.7 Create agent status filter tabs (all, running, paused, error)
-- [ ] 4.8 Implement agent resource utilization polling
+- [x] 4.1 Create agent grid view with status cards
+- [x] 4.2 Implement agent spawn form with runtime/provider/model selection
+- [x] 4.3 Build agent control buttons (pause, resume, terminate) with confirmations
+- [x] 4.4 Create agent details slide-out panel with logs and metrics
+- [x] 4.5 Implement bulk selection and bulk operations toolbar
+- [x] 4.6 Add CPU/memory sparkline charts to agent cards
+- [x] 4.7 Create agent status filter tabs (all, running, paused, error)
+- [x] 4.8 Implement agent resource utilization polling
 
 ## 5. Task Multi-View Board
 
-- [ ] 5.1 Create view mode toggle component (kanban/timeline/calendar)
-- [ ] 5.2 Implement kanban board with drag-and-drop column support
-- [ ] 5.3 Build customizable column configuration (hide, reorder)
-- [ ] 5.4 Create timeline view with task dependencies visualization
-- [ ] 5.5 Implement calendar view with month navigation
-- [ ] 5.6 Build task card component with priority, assignee, due date, tags
-- [ ] 5.7 Create quick filter bar (assignee, priority, tags, date range)
-- [ ] 5.8 Implement task search with highlighting
-- [ ] 5.9 Create quick task creation form from column header
-- [ ] 5.10 Add keyboard navigation for task board
+- [x] 5.1 Create view mode toggle component (kanban/timeline/calendar)
+- [x] 5.2 Implement kanban board with drag-and-drop column support
+- [x] 5.3 Build customizable column configuration (hide, reorder)
+- [x] 5.4 Create timeline view with task dependencies visualization
+- [x] 5.5 Implement calendar view with month navigation
+- [x] 5.6 Build task card component with priority, assignee, due date, tags
+- [x] 5.7 Create quick filter bar (assignee, priority, tags, date range)
+- [x] 5.8 Implement task search with highlighting
+- [x] 5.9 Create quick task creation form from column header
+- [x] 5.10 Add keyboard navigation for task board
 
 ## 6. Review Pipeline Visualization
 
-- [ ] 6.1 Create review pipeline columns by status
+- [x] 6.1 Create review pipeline columns by status
 - [ ] 6.2 Build review card with risk badge, assignee, target branch, age
 - [ ] 6.3 Implement status transition actions (approve, reject, block)
 - [ ] 6.4 Create bulk selection and bulk operations for reviews
@@ -84,14 +84,14 @@
 
 ## 9. Plugin Marketplace Panel
 
-- [ ] 9.1 Create plugin catalog grid with search and categories
-- [ ] 9.2 Build plugin detail view with description, screenshots, reviews
-- [ ] 9.3 Implement one-click plugin installation with progress
+- [x] 9.1 Create plugin catalog grid with search and categories
+- [x] 9.2 Build plugin detail view with description, screenshots, reviews
+- [x] 9.3 Implement one-click plugin installation with progress
 - [ ] 9.4 Create installed plugins list with enable/disable toggles
-- [ ] 9.5 Implement plugin update notification and one-click update
-- [ ] 9.6 Build plugin configuration panel integration
-- [ ] 9.7 Create plugin review submission form
-- [ ] 9.8 Add developer tools for local plugin creation
+- [x] 9.5 Implement plugin update notification and one-click update
+- [x] 9.6 Build plugin configuration panel integration
+- [x] 9.7 Create plugin review submission form
+- [x] 9.8 Add developer tools for local plugin creation
 
 ## 10. Workflow Visual Builder
 
@@ -155,8 +155,8 @@
 - [x] 15.1 Implement widget auto-refresh with configurable interval
 - [x] 15.2 Create global time range filter for dashboard
 - [x] 15.3 Implement category filter affecting multiple widgets
-- [ ] 15.4 Make widgets draggable with grid layout
-- [ ] 15.5 Implement widget resize functionality
+- [x] 15.4 Make widgets draggable with grid layout
+- [x] 15.5 Implement widget resize functionality
 - [x] 15.6 Create quick action shortcuts component
 - [x] 15.7 Build dashboard alert banner system
 - [x] 15.8 Implement widget configuration panel

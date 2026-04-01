@@ -17,6 +17,11 @@ const roleStoreState = {
   sandboxRole: jest.fn(),
 };
 
+const pluginStoreState = {
+  plugins: [{ metadata: { id: "repo-search" }, kind: "ToolPlugin" }],
+  fetchPlugins: jest.fn(),
+};
+
 jest.mock("@/hooks/use-breadcrumbs", () => ({
   useBreadcrumbs: jest.fn(),
 }));
@@ -25,21 +30,29 @@ jest.mock("@/lib/stores/role-store", () => ({
   useRoleStore: () => roleStoreState,
 }));
 
+jest.mock("@/lib/stores/plugin-store", () => ({
+  usePluginStore: (selector?: (state: typeof pluginStoreState) => unknown) =>
+    selector ? selector(pluginStoreState) : pluginStoreState,
+}));
+
 jest.mock("@/components/roles/role-workspace", () => ({
   RoleWorkspace: ({
     roles,
     skillCatalog,
+    availablePlugins,
     onCreateRole,
     onDeleteRole,
   }: {
     roles: Array<{ metadata: { id: string } }>;
     skillCatalog: Array<{ id: string }>;
+    availablePlugins: Array<{ metadata: { id: string } }>;
     onCreateRole: (input: { name: string }) => Promise<void>;
     onDeleteRole: (role: { metadata: { id: string } }) => Promise<void>;
   }) => (
     <div>
       <div data-testid="roles-count">{roles.length}</div>
       <div data-testid="skill-count">{skillCatalog.length}</div>
+      <div data-testid="plugin-count">{availablePlugins.length}</div>
       <button type="button" onClick={() => void onCreateRole({ name: "Operations" })}>
         create-role
       </button>
@@ -59,6 +72,7 @@ describe("RolesPage", () => {
     roleStoreState.fetchSkillCatalog.mockReset();
     roleStoreState.createRole.mockReset().mockResolvedValue(undefined);
     roleStoreState.deleteRole.mockReset().mockResolvedValue(undefined);
+    pluginStoreState.fetchPlugins.mockReset();
   });
 
   it("loads the roles and skill catalog on mount", () => {
@@ -66,8 +80,10 @@ describe("RolesPage", () => {
 
     expect(roleStoreState.fetchRoles).toHaveBeenCalledTimes(1);
     expect(roleStoreState.fetchSkillCatalog).toHaveBeenCalledTimes(1);
+    expect(pluginStoreState.fetchPlugins).toHaveBeenCalledTimes(1);
     expect(screen.getByTestId("roles-count")).toHaveTextContent("1");
     expect(screen.getByTestId("skill-count")).toHaveTextContent("1");
+    expect(screen.getByTestId("plugin-count")).toHaveTextContent("1");
   });
 
   it("wires create and delete callbacks through the role workspace", async () => {

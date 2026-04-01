@@ -45,12 +45,12 @@ func (h *AgentHandler) WithDispatcher(dispatcher agentTaskDispatcher) *AgentHand
 }
 
 type SpawnAgentRequest struct {
-	TaskID   string `json:"taskId" validate:"required"`
-	MemberID string `json:"memberId"`
-	Runtime  string `json:"runtime"`
-	Provider string `json:"provider"`
-	Model    string `json:"model"`
-	RoleID   string `json:"roleId"`
+	TaskID       string  `json:"taskId" validate:"required"`
+	MemberID     string  `json:"memberId"`
+	Runtime      string  `json:"runtime"`
+	Provider     string  `json:"provider"`
+	Model        string  `json:"model"`
+	RoleID       string  `json:"roleId"`
 	MaxBudgetUsd float64 `json:"maxBudgetUsd"`
 }
 
@@ -117,6 +117,8 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 		switch {
 		case errors.Is(err, service.ErrAgentAlreadyRunning):
 			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
+		case errors.Is(err, service.ErrAgentBridgeUnavailable):
+			return c.JSON(http.StatusServiceUnavailable, map[string]string{"error": "bridge_unavailable"})
 		case errors.Is(err, service.ErrAgentPoolFull):
 			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
 		case errors.Is(err, service.ErrAgentWorktreeUnavailable):

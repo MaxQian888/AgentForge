@@ -12,7 +12,7 @@ describe("calculateCost", () => {
     expect(cost).toBeCloseTo(33.9, 5);
   });
 
-  test("falls back to sonnet pricing for unknown models and missing usage fields", () => {
+  test("uses normalized aliases and current OpenAI pricing where available", () => {
     expect(calculateCost({}, "unknown-model")).toBe(0);
     expect(
       calculateCost(
@@ -22,6 +22,15 @@ describe("calculateCost", () => {
         },
         "claude-haiku-4",
       ),
-    ).toBeCloseTo(2.4, 5);
+    ).toBeCloseTo(3, 5);
+    expect(
+      calculateCost(
+        {
+          input_tokens: 1_000_000,
+          cache_read_input_tokens: 1_000_000,
+        },
+        "gpt-5-codex",
+      ),
+    ).toBeCloseTo(1.375, 5);
   });
 });

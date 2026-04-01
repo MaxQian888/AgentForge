@@ -162,7 +162,8 @@ func TestCostHandler_GetStats_ProjectSummaryIncludesAuthoritativeBreakdowns(t *t
 			created_at DATETIME,
 			updated_at DATETIME,
 			team_id TEXT,
-			team_role TEXT
+			team_role TEXT,
+			cost_accounting JSON
 		)`,
 	} {
 		if err := db.Exec(stmt).Error; err != nil {
@@ -235,7 +236,7 @@ func TestCostHandler_GetStats_ProjectSummaryIncludesAuthoritativeBreakdowns(t *t
 	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
 		t.Fatalf("decode response: %v", err)
 	}
-	for _, key := range []string{"activeAgents", "dailyCosts", "sprintCosts", "taskCosts", "budgetSummary", "periodRollups"} {
+	for _, key := range []string{"activeAgents", "dailyCosts", "sprintCosts", "taskCosts", "budgetSummary", "periodRollups", "costCoverage", "runtimeBreakdown"} {
 		if _, ok := body[key]; !ok {
 			t.Fatalf("response missing %q: %s", key, rec.Body.String())
 		}

@@ -121,6 +121,39 @@ describe("useTaskStore", () => {
     expect(useTaskStore.getState().loading).toBe(false);
   });
 
+  it("fetches a single task by id and upserts it into the task cache", async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockJsonResponse({
+        ...baseTask,
+        id: "task-9",
+        title: "Review metadata source",
+        agentBranch: "agent/review-9",
+      })
+    );
+
+    const task = await useTaskStore.getState().fetchTaskById("task-9");
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:7777/api/v1/tasks/task-9",
+      expect.objectContaining({
+        method: "GET",
+        headers: expect.objectContaining({
+          Authorization: "Bearer test-token",
+        }),
+      })
+    );
+    expect(task).toEqual(
+      expect.objectContaining({
+        id: "task-9",
+        title: "Review metadata source",
+        agentBranch: "agent/review-9",
+      })
+    );
+    expect(useTaskStore.getState().tasks).toEqual([
+      expect.objectContaining({ id: "task-9" }),
+    ]);
+  });
+
   it("posts board status transitions through the task transition endpoint", async () => {
     useTaskStore.setState({
       tasks: [

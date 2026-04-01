@@ -14,6 +14,9 @@ import (
 	"github.com/agentforge/im-bridge/core"
 )
 
+var _ core.CardSender = (*Stub)(nil)
+var _ core.TypingIndicator = (*Stub)(nil)
+
 type Stub struct {
 	port    string
 	handler core.MessageHandler
@@ -136,6 +139,25 @@ func (s *Stub) ReplyFormattedText(ctx context.Context, replyCtx any, message *co
 func (s *Stub) UpdateFormattedText(ctx context.Context, replyCtx any, message *core.FormattedText) error {
 	return s.ReplyFormattedText(ctx, replyCtx, message)
 }
+
+func (s *Stub) SendCard(ctx context.Context, chatID string, card *core.Card) error {
+	fallback := ""
+	if card != nil {
+		fallback = card.Title
+	}
+	return s.recordReply(chatID, fallback, "discord_card", "")
+}
+
+func (s *Stub) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) error {
+	fallback := ""
+	if card != nil {
+		fallback = card.Title
+	}
+	return s.recordReply(chatIDFromReplyContext(replyCtx), fallback, "discord_card", "")
+}
+
+func (s *Stub) StartTyping(ctx context.Context, chatID string) error { return nil }
+func (s *Stub) StopTyping(ctx context.Context, chatID string) error  { return nil }
 
 func (s *Stub) recordReply(chatID, content, nativeSurface, format string) error {
 	s.mu.Lock()

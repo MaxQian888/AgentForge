@@ -96,6 +96,7 @@ All supported platforms reuse the same command engine:
 
 - `/task` (`create`, `list`, `status`, `assign`, `decompose`, `move`; 兼容 `transition`)
 - `/agent` (`status`, `spawn`, `run`, `logs`, `pause`, `resume`, `kill`; 兼容 `list`)
+- `/tools` (`list`, `install`, `uninstall`, `restart`)
 - `/queue`
 - `/team`
 - `/memory`
@@ -104,6 +105,16 @@ All supported platforms reuse the same command engine:
 - `/cost`
 - `/help`
 - `@AgentForge ...` fallback
+
+Common examples:
+
+- `/task decompose task-123 openai gpt-5`
+- `/task decompose task-123` and then use the suggested `/agent run ...` or `/agent spawn ...` handoff commands
+- `/agent spawn task-123` to start a run and immediately see available Bridge tools
+- `/agent health` or `/agent runtimes` for Bridge runtime diagnostics
+- `/tools list`
+- `/tools install https://registry.example.com/web-search.yaml`
+- `@AgentForge review the PR and create follow-up tasks for the fixes`
 
 The bridge propagates the active message platform to the backend through `X-IM-Source`, so Slack, DingTalk, and Feishu traffic can be distinguished downstream.
 This now also applies to Telegram, Discord, WeCom, QQ, and QQ Bot.
@@ -141,6 +152,15 @@ Interactive callbacks normalized into `/api/v1/im/action` now expect truthful ba
 - `failed`: the entity is missing, invalid, or the downstream workflow could not run
 
 The bridge preserves that status in `metadata.action_status` while still returning the user-facing `result` text through the original reply target.
+
+Bridge capability routing and fallback behavior now follows these rules:
+
+- `@AgentForge ...` mentions call `/api/v1/ai/classify-intent` with candidate intents and recent session history
+- low-confidence classifications return a three-item disambiguation menu instead of silently guessing
+- `/task decompose` prefers Bridge decomposition, then falls back to the legacy Go decomposition endpoint when Bridge is unavailable
+- `/task decompose` replies now include follow-up `/agent run ...` or `/agent spawn ...` suggestions for generated subtasks
+- `/agent spawn` can return a queued outcome with a Bridge pool capacity reason before any runtime starts, and successful spawns include a Bridge tools summary
+- completed reviews with findings now include follow-up `/task create ...` suggestions
 
 For Feishu specifically, the native payload surface now supports:
 
@@ -228,3 +248,24 @@ Run the IM bridge test suite from the package root:
 cd src-im-bridge
 go test ./...
 ```
+
+## Operator Console
+
+The dashboard `/im` workspace now relies on a richer operator contract instead of a liveness-only bridge status. The backend operator surface is expected to provide:
+
+- `GET /api/v1/im/bridge/status` for overall health, pending backlog, recent failures, average settled latency, and provider diagnostics metadata
+- `GET /api/v1/im/deliveries` with optional filters such as `deliveryId`, `status`, `platform`, `eventType`, `kind`, and `since`
+- `POST /api/v1/im/deliveries/:id/retry` and `POST /api/v1/im/deliveries/retry-batch` for operator retry workflows
+- `POST /api/v1/im/test-send` for bounded-wait operator test messages that return the delivery id plus `delivered`, `failed`, or `pending`
+
+Provider diagnostics shown in the operator console are last-known metadata snapshots supplied by bridge registration and heartbeat refresh. When a provider cannot report extra diagnostics, the console should show diagnostics as unavailable instead of fabricating a healthy state.
+
+## Delivery Lifecycle
+
+Control-plane delivery history is now settlement-truthful:
+
+1. backend queue acceptance records the delivery as `pending`
+2. the bridge applies the delivery and returns a terminal ack payload
+3. the backend updates history with terminal status, `processedAt`, `latencyMs`, and any `failureReason` or `downgradeReason`
+
+This means operator-visible backlog, success rates, retries, and latency are derived from actual bridge settlement, not just from the fact that the backend enqueued a message.

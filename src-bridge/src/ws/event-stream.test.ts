@@ -200,8 +200,8 @@ describe("EventStreamer", () => {
     streamer.reconnectTimer = 222 as unknown as ReturnType<typeof setTimeout>;
     streamer.close();
 
-    // Heartbeat now sends JSON instead of ping
-    expect(sendCount).toBe(1);
+    // Heartbeat sends JSON + close() sends shutdown notification
+    expect(sendCount).toBe(2);
     expect(reconnectDelay).toBe(1000);
     expect(reconnectInvoked).toBe(true);
     expect(streamer.reconnectDelay).toBe(2000);

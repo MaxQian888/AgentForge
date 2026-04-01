@@ -13,10 +13,99 @@ import type { TaskPriority, TaskStatus } from "./task-store";
 export type ContextRailDisplay = "expanded" | "collapsed";
 export type TaskWorkspaceDensity = "comfortable" | "compact";
 
+export const DEFAULT_BOARD_COLUMN_ORDER: TaskStatus[] = [
+  "inbox",
+  "triaged",
+  "assigned",
+  "in_progress",
+  "blocked",
+  "in_review",
+  "changes_requested",
+  "done",
+  "cancelled",
+  "budget_exceeded",
+];
+
+const BOARD_COLUMN_ORDER_STORAGE_KEY = "task-workspace-board-columns";
+const HIDDEN_BOARD_COLUMNS_STORAGE_KEY = "task-workspace-hidden-columns";
+
 export interface TaskWorkspaceDisplayOptions {
   density: TaskWorkspaceDensity;
   showDescriptions: boolean;
   showLinkedDocs: boolean;
+  boardColumnOrder?: TaskStatus[];
+  hiddenBoardColumns?: TaskStatus[];
+}
+
+function readStoredTaskStatuses(storageKey: string): TaskStatus[] | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+
+  try {
+    const raw = localStorage.getItem(storageKey);
+    if (!raw) {
+      return undefined;
+    }
+
+    const parsed = JSON.parse(raw);
+    if (!Array.isArray(parsed)) {
+      return undefined;
+    }
+
+    return parsed.filter((value): value is TaskStatus =>
+      DEFAULT_BOARD_COLUMN_ORDER.includes(value as TaskStatus),
+    );
+  } catch {
+    return undefined;
+  }
+}
+
+function persistTaskStatuses(storageKey: string, statuses: TaskStatus[]) {
+  if (typeof window === "undefined") {
+    return;
+  }
+
+  try {
+    localStorage.setItem(storageKey, JSON.stringify(statuses));
+  } catch {}
+}
+
+function normalizeBoardColumnOrder(order?: TaskStatus[]): TaskStatus[] {
+  const next = Array.isArray(order) ? [...order] : [];
+  const seen = new Set<TaskStatus>();
+  const normalized: TaskStatus[] = [];
+
+  for (const status of next) {
+    if (!DEFAULT_BOARD_COLUMN_ORDER.includes(status) || seen.has(status)) {
+      continue;
+    }
+    normalized.push(status);
+    seen.add(status);
+  }
+
+  for (const status of DEFAULT_BOARD_COLUMN_ORDER) {
+    if (!seen.has(status)) {
+      normalized.push(status);
+    }
+  }
+
+  return normalized;
+}
+
+function normalizeHiddenBoardColumns(columns?: TaskStatus[]): TaskStatus[] {
+  if (!Array.isArray(columns)) {
+    return [];
+  }
+
+  const seen = new Set<TaskStatus>();
+  return columns.filter((status): status is TaskStatus => {
+    if (!DEFAULT_BOARD_COLUMN_ORDER.includes(status) || seen.has(status)) {
+      return false;
+    }
+    seen.add(status);
+    return true;
+  });
 }
 
 interface TaskWorkspaceState {
@@ -33,6 +122,7 @@ interface TaskWorkspaceState {
   setAssigneeId: (assigneeId: string | "all") => void;
   setSprintId: (sprintId: string | "all") => void;
   setLabels: (labels: string[]) => void;
+  setDueDateRange: (range: { start: string; end: string }) => void;
   setPlanning: (planning: TaskPlanningFilter) => void;
   setDependency: (dependency: TaskDependencyFilter) => void;
   setCustomFieldFilter: (fieldId: string, value: string | "all") => void;
@@ -40,6 +130,8 @@ interface TaskWorkspaceState {
   setDensity: (density: TaskWorkspaceDensity) => void;
   setShowDescriptions: (showDescriptions: boolean) => void;
   setShowLinkedDocs: (showLinkedDocs: boolean) => void;
+  setBoardColumnOrder: (boardColumnOrder: TaskStatus[]) => void;
+  setHiddenBoardColumns: (hiddenBoardColumns: TaskStatus[]) => void;
   applySavedViewConfig: (config: unknown) => void;
   resetFilters: () => void;
   selectTask: (taskId: string | null) => void;
@@ -60,6 +152,12 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceState>()((set) => ({
     density: "comfortable",
     showDescriptions: true,
     showLinkedDocs: false,
+    boardColumnOrder: normalizeBoardColumnOrder(
+      readStoredTaskStatuses(BOARD_COLUMN_ORDER_STORAGE_KEY),
+    ),
+    hiddenBoardColumns: normalizeHiddenBoardColumns(
+      readStoredTaskStatuses(HIDDEN_BOARD_COLUMNS_STORAGE_KEY),
+    ),
   },
 
   setViewMode: (viewMode) => set({ viewMode }),
@@ -73,10 +171,18 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceState>()((set) => ({
     set((state) => ({ filters: { ...state.filters, assigneeId } })),
   setSprintId: (sprintId) =>
     set((state) => ({ filters: { ...state.filters, sprintId } })),
-  setPlanning: (planning) =>
-    set((state) => ({ filters: { ...state.filters, planning } })),
   setLabels: (labels) =>
     set((state) => ({ filters: { ...state.filters, labels } })),
+  setDueDateRange: ({ start, end }) =>
+    set((state) => ({
+      filters: {
+        ...state.filters,
+        dueDateStart: start,
+        dueDateEnd: end,
+      },
+    })),
+  setPlanning: (planning) =>
+    set((state) => ({ filters: { ...state.filters, planning } })),
   setDependency: (dependency) =>
     set((state) => ({ filters: { ...state.filters, dependency } })),
   setCustomFieldFilter: (fieldId, value) =>
@@ -107,6 +213,26 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceState>()((set) => ({
     set((state) => ({
       displayOptions: { ...state.displayOptions, showLinkedDocs },
     })),
+  setBoardColumnOrder: (boardColumnOrder) => {
+    const normalized = normalizeBoardColumnOrder(boardColumnOrder);
+    persistTaskStatuses(BOARD_COLUMN_ORDER_STORAGE_KEY, normalized);
+    set((state) => ({
+      displayOptions: {
+        ...state.displayOptions,
+        boardColumnOrder: normalized,
+      },
+    }));
+  },
+  setHiddenBoardColumns: (hiddenBoardColumns) => {
+    const normalized = normalizeHiddenBoardColumns(hiddenBoardColumns);
+    persistTaskStatuses(HIDDEN_BOARD_COLUMNS_STORAGE_KEY, normalized);
+    set((state) => ({
+      displayOptions: {
+        ...state.displayOptions,
+        hiddenBoardColumns: normalized,
+      },
+    }));
+  },
   applySavedViewConfig: (config) =>
     set((state) => {
       if (!config || typeof config !== "object") {
@@ -130,6 +256,14 @@ export const useTaskWorkspaceStore = create<TaskWorkspaceState>()((set) => ({
           case "assigneeId":
           case "assignee_id":
             nextFilters.assigneeId = typeof value === "string" ? value : nextFilters.assigneeId;
+            break;
+          case "dueDateStart":
+          case "due_date_start":
+            nextFilters.dueDateStart = typeof value === "string" ? value : nextFilters.dueDateStart;
+            break;
+          case "dueDateEnd":
+          case "due_date_end":
+            nextFilters.dueDateEnd = typeof value === "string" ? value : nextFilters.dueDateEnd;
             break;
           case "sprintId":
           case "sprint_id":

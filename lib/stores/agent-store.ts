@@ -1,6 +1,7 @@
 "use client";
 
 import { create } from "zustand";
+import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import type { CodingAgentCatalog } from "./project-store";
 import { useAuthStore } from "./auth-store";
@@ -16,6 +17,14 @@ export type AgentStatus =
 
 export type MemoryStatus = "none" | "available" | "warming";
 export type DispatchStatus = "started" | "queued" | "blocked" | "skipped";
+
+export interface AgentResourceUtilization {
+  cpuPercent: number;
+  memoryPercent: number;
+  cpuHistory: number[];
+  memoryHistory: number[];
+  updatedAt?: string;
+}
 
 interface AgentApiShape {
   id: string;
@@ -43,6 +52,7 @@ interface AgentApiShape {
   completedAt?: string | null;
   canResume?: boolean;
   memoryStatus?: MemoryStatus;
+  resourceUtilization?: AgentResourceUtilization;
   teamId?: string;
   teamRole?: string;
   dispatchStatus?: DispatchStatus;
@@ -135,6 +145,7 @@ export interface Agent {
   completedAt?: string | null;
   canResume: boolean;
   memoryStatus: MemoryStatus;
+  resourceUtilization?: AgentResourceUtilization;
   teamId?: string;
   teamRole?: string;
   dispatchStatus?: DispatchStatus;
@@ -190,6 +201,49 @@ interface BridgeHealthApiShape {
   };
 }
 
+/* ── Agent streaming data types (consumed from WS events) ── */
+
+export interface AgentToolCallEntry {
+  toolName: string;
+  toolCallId?: string;
+  input?: unknown;
+  turnNumber?: number;
+}
+
+export interface AgentToolResultEntry {
+  toolName: string;
+  toolCallId?: string;
+  output?: unknown;
+  isError?: boolean;
+  turnNumber?: number;
+}
+
+export interface AgentFileChangeEntry {
+  path: string;
+  changeType?: string;
+}
+
+export interface AgentTodoEntry {
+  id?: string;
+  content?: string;
+  status?: string;
+}
+
+export interface AgentPermissionRequestEntry {
+  requestId: string;
+  toolName?: string;
+  context?: unknown;
+  elicitationType?: string;
+  fields?: unknown[];
+  mcpServerId?: string;
+}
+
+export interface AgentLogEntry {
+  timestamp: string;
+  content: string;
+  type: string;
+}
+
 export interface BridgeHealthSummary {
   status: string;
   lastCheck: string;
@@ -203,6 +257,14 @@ export interface BridgeHealthSummary {
 interface AgentState {
   agents: Agent[];
   agentOutputs: Map<string, string[]>;
+  agentToolCalls: Map<string, AgentToolCallEntry[]>;
+  agentToolResults: Map<string, AgentToolResultEntry[]>;
+  agentReasoning: Map<string, string>;
+  agentFileChanges: Map<string, AgentFileChangeEntry[]>;
+  agentTodos: Map<string, AgentTodoEntry[]>;
+  agentPartialMessages: Map<string, string>;
+  agentPermissionRequests: Map<string, AgentPermissionRequestEntry[]>;
+  agentLogs: Map<string, AgentLogEntry[]>;
   pool: AgentPoolSummary | null;
   runtimeCatalog: CodingAgentCatalog | null;
   runtimeCatalogFetchedAt: number;
@@ -222,12 +284,22 @@ interface AgentState {
   ) => Promise<DispatchPreflightSummary | null>;
   fetchDispatchHistory: (taskId: string) => Promise<DispatchAttemptRecord[]>;
   fetchDispatchStats: (projectId: string) => Promise<DispatchStatsSummary | null>;
+  fetchAgentLogs: (id: string) => Promise<AgentLogEntry[]>;
   spawnAgent: (taskId: string, memberId: string, options?: SpawnAgentOptions) => Promise<void>;
   pauseAgent: (id: string) => Promise<void>;
   resumeAgent: (id: string) => Promise<void>;
   killAgent: (id: string) => Promise<void>;
   appendOutput: (id: string, line: string) => void;
   upsertAgent: (agent: AgentApiShape | Agent) => void;
+  appendToolCall: (id: string, entry: AgentToolCallEntry) => void;
+  appendToolResult: (id: string, entry: AgentToolResultEntry) => void;
+  setReasoning: (id: string, content: string) => void;
+  appendFileChanges: (id: string, files: AgentFileChangeEntry[]) => void;
+  setTodos: (id: string, todos: AgentTodoEntry[]) => void;
+  setPartialMessage: (id: string, content: string) => void;
+  appendPermissionRequest: (id: string, entry: AgentPermissionRequestEntry) => void;
+  removePermissionRequest: (agentId: string, requestId: string) => void;
+  clearAgentStreamData: (id: string) => void;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -260,6 +332,7 @@ function normalizeAgent(agent: AgentApiShape | Agent): Agent {
     completedAt: agent.completedAt ?? undefined,
     canResume: Boolean(agent.canResume),
     memoryStatus: agent.memoryStatus ?? (agent.sessionId ? "available" : "none"),
+    resourceUtilization: agent.resourceUtilization,
     teamId: agent.teamId,
     teamRole: agent.teamRole,
     dispatchStatus: agent.dispatchStatus ?? "started",
@@ -385,6 +458,14 @@ function normalizeBridgeHealth(raw: BridgeHealthApiShape | null | undefined): Br
 export const useAgentStore = create<AgentState>()((set, get) => ({
   agents: [],
   agentOutputs: new Map(),
+  agentToolCalls: new Map(),
+  agentToolResults: new Map(),
+  agentReasoning: new Map(),
+  agentFileChanges: new Map(),
+  agentTodos: new Map(),
+  agentPartialMessages: new Map(),
+  agentPermissionRequests: new Map(),
+  agentLogs: new Map(),
   pool: null,
   runtimeCatalog: null,
   runtimeCatalogFetchedAt: 0,
@@ -497,94 +578,139 @@ export const useAgentStore = create<AgentState>()((set, get) => ({
     return data;
   },
 
+  fetchAgentLogs: async (id) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token || !id) return [];
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.get<AgentLogEntry[]>(
+        `/api/v1/agents/${id}/logs`,
+        { token },
+      );
+      const logs = Array.isArray(data) ? data : [];
+      set((state) => {
+        const map = new Map(state.agentLogs);
+        map.set(id, logs);
+        return { agentLogs: map };
+      });
+      return logs;
+    } catch {
+      return [];
+    }
+  },
+
   spawnAgent: async (taskId, memberId, options = {}) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
-    const api = createApiClient(API_URL);
-    const { data } = await api.post<AgentApiShape | AgentDispatchResponse>(
-      "/api/v1/agents/spawn",
-      {
-        taskId,
-        memberId,
-        runtime: options.runtime,
-        provider: options.provider,
-        model: options.model,
-        roleId: options.roleId,
-        maxBudgetUsd: options.maxBudgetUsd,
-      },
-      { token }
-    );
-    const queuedDispatch =
-      "dispatch" in data && data.dispatch?.status === "queued"
-        ? data.dispatch.queue
-        : undefined;
-    if (queuedDispatch) {
-      set((state) => {
-        const currentPool = state.pool ?? {
-          active: 0,
-          max: 0,
-          available: 0,
-          pausedResumable: 0,
-          queued: 0,
-          warm: 0,
-          degraded: false,
-          queue: [],
-        };
-        const nextQueue = [...(currentPool.queue ?? []), queuedDispatch];
-        return {
-          pool: {
-            ...currentPool,
-            queued: nextQueue.length,
-            queue: nextQueue,
-          },
-        };
-      });
-      return;
-    }
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<AgentApiShape | AgentDispatchResponse>(
+        "/api/v1/agents/spawn",
+        {
+          taskId,
+          memberId,
+          runtime: options.runtime,
+          provider: options.provider,
+          model: options.model,
+          roleId: options.roleId,
+          maxBudgetUsd: options.maxBudgetUsd,
+        },
+        { token }
+      );
+      const queuedDispatch =
+        "dispatch" in data && data.dispatch?.status === "queued"
+          ? data.dispatch.queue
+          : undefined;
+      if (queuedDispatch) {
+        set((state) => {
+          const currentPool = state.pool ?? {
+            active: 0,
+            max: 0,
+            available: 0,
+            pausedResumable: 0,
+            queued: 0,
+            warm: 0,
+            degraded: false,
+            queue: [],
+          };
+          const nextQueue = [...(currentPool.queue ?? []), queuedDispatch];
+          return {
+            pool: {
+              ...currentPool,
+              queued: nextQueue.length,
+              queue: nextQueue,
+            },
+          };
+        });
+        return;
+      }
 
-    const agentSource =
-      "dispatch" in data && data.dispatch?.run ? data.dispatch.run : (data as AgentApiShape);
-    const agent = normalizeAgent(agentSource);
-    set((state) => {
-      const agents = upsertAgents(state.agents, agent);
-      return { agents, pool: syncPoolWithAgents(state.pool, agents) };
-    });
+      const agentSource =
+        "dispatch" in data && data.dispatch?.run ? data.dispatch.run : (data as AgentApiShape);
+      const agent = normalizeAgent(agentSource);
+      set((state) => {
+        const agents = upsertAgents(state.agents, agent);
+        return { agents, pool: syncPoolWithAgents(state.pool, agents) };
+      });
+    } catch (error) {
+      toast.error("Failed to spawn agent", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   },
 
   pauseAgent: async (id) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
-    const api = createApiClient(API_URL);
-    const { data } = await api.post<AgentApiShape>(`/api/v1/agents/${id}/pause`, {}, { token });
-    const agent = normalizeAgent(data);
-    set((state) => {
-      const agents = upsertAgents(state.agents, agent);
-      return { agents, pool: syncPoolWithAgents(state.pool, agents) };
-    });
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<AgentApiShape>(`/api/v1/agents/${id}/pause`, {}, { token });
+      const agent = normalizeAgent(data);
+      set((state) => {
+        const agents = upsertAgents(state.agents, agent);
+        return { agents, pool: syncPoolWithAgents(state.pool, agents) };
+      });
+    } catch (error) {
+      toast.error("Failed to pause agent", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   },
 
   resumeAgent: async (id) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
-    const api = createApiClient(API_URL);
-    const { data } = await api.post<AgentApiShape>(`/api/v1/agents/${id}/resume`, {}, { token });
-    const agent = normalizeAgent(data);
-    set((state) => {
-      const agents = upsertAgents(state.agents, agent);
-      return { agents, pool: syncPoolWithAgents(state.pool, agents) };
-    });
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<AgentApiShape>(`/api/v1/agents/${id}/resume`, {}, { token });
+      const agent = normalizeAgent(data);
+      set((state) => {
+        const agents = upsertAgents(state.agents, agent);
+        return { agents, pool: syncPoolWithAgents(state.pool, agents) };
+      });
+    } catch (error) {
+      toast.error("Failed to resume agent", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   },
 
   killAgent: async (id) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
-    const api = createApiClient(API_URL);
-    const { data } = await api.post<AgentApiShape>(`/api/v1/agents/${id}/kill`, {}, { token });
-    const agent = normalizeAgent(data);
-    set((state) => {
-      const agents = upsertAgents(state.agents, agent);
-      return { agents, pool: syncPoolWithAgents(state.pool, agents) };
-    });
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<AgentApiShape>(`/api/v1/agents/${id}/kill`, {}, { token });
+      const agent = normalizeAgent(data);
+      set((state) => {
+        const agents = upsertAgents(state.agents, agent);
+        return { agents, pool: syncPoolWithAgents(state.pool, agents) };
+      });
+    } catch (error) {
+      toast.error("Failed to terminate agent", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+    }
   },
 
   appendOutput: (id, line) => {
@@ -601,6 +727,105 @@ export const useAgentStore = create<AgentState>()((set, get) => ({
     set((state) => {
       const agents = upsertAgents(state.agents, normalized);
       return { agents, pool: syncPoolWithAgents(state.pool, agents) };
+    });
+  },
+
+  appendToolCall: (id, entry) => {
+    set((state) => {
+      const map = new Map(state.agentToolCalls);
+      map.set(id, [...(map.get(id) ?? []), entry]);
+      return { agentToolCalls: map };
+    });
+  },
+
+  appendToolResult: (id, entry) => {
+    set((state) => {
+      const map = new Map(state.agentToolResults);
+      map.set(id, [...(map.get(id) ?? []), entry]);
+      return { agentToolResults: map };
+    });
+  },
+
+  setReasoning: (id, content) => {
+    set((state) => {
+      const map = new Map(state.agentReasoning);
+      map.set(id, content);
+      return { agentReasoning: map };
+    });
+  },
+
+  appendFileChanges: (id, files) => {
+    set((state) => {
+      const map = new Map(state.agentFileChanges);
+      map.set(id, [...(map.get(id) ?? []), ...files]);
+      return { agentFileChanges: map };
+    });
+  },
+
+  setTodos: (id, todos) => {
+    set((state) => {
+      const map = new Map(state.agentTodos);
+      map.set(id, todos);
+      return { agentTodos: map };
+    });
+  },
+
+  setPartialMessage: (id, content) => {
+    set((state) => {
+      const map = new Map(state.agentPartialMessages);
+      map.set(id, content);
+      return { agentPartialMessages: map };
+    });
+  },
+
+  appendPermissionRequest: (id, entry) => {
+    set((state) => {
+      const map = new Map(state.agentPermissionRequests);
+      map.set(id, [...(map.get(id) ?? []), entry]);
+      return { agentPermissionRequests: map };
+    });
+  },
+
+  removePermissionRequest: (agentId, requestId) => {
+    set((state) => {
+      const map = new Map(state.agentPermissionRequests);
+      const current = map.get(agentId);
+      if (!current) return state;
+      const filtered = current.filter((entry) => entry.requestId !== requestId);
+      if (filtered.length === 0) {
+        map.delete(agentId);
+      } else {
+        map.set(agentId, filtered);
+      }
+      return { agentPermissionRequests: map };
+    });
+  },
+
+  clearAgentStreamData: (id) => {
+    set((state) => {
+      const toolCalls = new Map(state.agentToolCalls);
+      const toolResults = new Map(state.agentToolResults);
+      const reasoning = new Map(state.agentReasoning);
+      const fileChanges = new Map(state.agentFileChanges);
+      const todos = new Map(state.agentTodos);
+      const partialMessages = new Map(state.agentPartialMessages);
+      const permissionRequests = new Map(state.agentPermissionRequests);
+      toolCalls.delete(id);
+      toolResults.delete(id);
+      reasoning.delete(id);
+      fileChanges.delete(id);
+      todos.delete(id);
+      partialMessages.delete(id);
+      permissionRequests.delete(id);
+      return {
+        agentToolCalls: toolCalls,
+        agentToolResults: toolResults,
+        agentReasoning: reasoning,
+        agentFileChanges: fileChanges,
+        agentTodos: todos,
+        agentPartialMessages: partialMessages,
+        agentPermissionRequests: permissionRequests,
+      };
     });
   },
 }));

@@ -1,18 +1,24 @@
 package handler
 
 import (
+	"archive/zip"
+	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"io"
+	"io/fs"
 	"net/http"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 	"time"
 
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/model"
+	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
@@ -22,15 +28,19 @@ type MarketplaceHandler struct {
 	marketURL  string
 	httpClient *http.Client
 	pluginsDir string
+	rolesDir   string
 }
 
+const marketplaceConsumptionStateFile = "marketplace-consumption.json"
+
 // NewMarketplaceHandler creates a new MarketplaceHandler.
-func NewMarketplaceHandler(pluginSvc *service.PluginService, marketURL string, pluginsDir string) *MarketplaceHandler {
+func NewMarketplaceHandler(pluginSvc *service.PluginService, marketURL string, pluginsDir string, rolesDir string) *MarketplaceHandler {
 	return &MarketplaceHandler{
 		pluginSvc:  pluginSvc,
 		marketURL:  marketURL,
 		httpClient: &http.Client{Timeout: 60 * time.Second},
 		pluginsDir: pluginsDir,
+		rolesDir:   rolesDir,
 	}
 }
 
@@ -54,6 +64,41 @@ func (h *MarketplaceHandler) Install(c echo.Context) error {
 	authHeader := c.Request().Header.Get("Authorization")
 	ctx := c.Request().Context()
 
+	if strings.TrimSpace(h.marketURL) == "" {
+		return c.JSON(http.StatusServiceUnavailable, map[string]any{
+			"errorCode": model.MarketplaceErrorUnconfigured,
+			"message":   "Marketplace service URL is not configured.",
+		})
+	}
+
+	itemMeta, err := h.fetchItemMetadata(ctx, authHeader, req.ItemID)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, map[string]any{
+			"errorCode": model.MarketplaceErrorInvalidResponse,
+			"message":   err.Error(),
+		})
+	}
+
+	installState := model.MarketplaceConsumptionRecord{
+		ItemID:          req.ItemID,
+		ItemType:        marketplaceItemType(itemMeta.Type),
+		Version:         req.Version,
+		Status:          model.MarketplaceConsumptionStatusBlocked,
+		ConsumerSurface: marketplaceConsumerSurface(itemMeta.Type),
+		Installed:       false,
+		Used:            false,
+		UpdatedAt:       time.Now().UTC(),
+		Provenance: &model.MarketplaceConsumptionProvenance{
+			SourceType:        string(model.PluginSourceMarketplace),
+			MarketplaceItemID: req.ItemID,
+			SelectedVersion:   req.Version,
+		},
+	}
+
+	destDir := filepath.Join(h.marketplaceRootDir(), req.ItemID, req.Version)
+	installState.LocalPath = destDir
+	installState.Provenance.LocalPath = destDir
+
 	// 1. Download artifact from marketplace service.
 	downloadURL := fmt.Sprintf("%s/api/v1/items/%s/versions/%s/download",
 		h.marketURL, req.ItemID, req.Version)
@@ -66,18 +111,31 @@ func (h *MarketplaceHandler) Install(c echo.Context) error {
 
 	resp, err := h.httpClient.Do(httpReq)
 	if err != nil {
-		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "failed to reach marketplace service"})
+		installState.FailureReason = "failed to reach marketplace service"
+		_ = h.writeConsumptionState(installState)
+		return c.JSON(http.StatusBadGateway, model.MarketplaceInstallResponse{
+			OK:        false,
+			Item:      installState,
+			ErrorCode: model.MarketplaceErrorUnavailable,
+			Message:   installState.FailureReason,
+		})
 	}
 	defer resp.Body.Close()
 
 	if resp.StatusCode != http.StatusOK {
-		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "marketplace service returned error"})
+		installState.FailureReason = "marketplace service returned error"
+		_ = h.writeConsumptionState(installState)
+		return c.JSON(http.StatusBadGateway, model.MarketplaceInstallResponse{
+			OK:        false,
+			Item:      installState,
+			ErrorCode: model.MarketplaceErrorUnavailable,
+			Message:   installState.FailureReason,
+		})
 	}
 
 	expectedDigest := resp.Header.Get("X-Content-Digest")
 
 	// 2. Save artifact while computing SHA-256.
-	destDir := filepath.Join(h.pluginsDir, "marketplace", req.ItemID, req.Version)
 	if err := os.MkdirAll(destDir, 0755); err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create directory"})
 	}
@@ -94,7 +152,14 @@ func (h *MarketplaceHandler) Install(c echo.Context) error {
 	if _, err := io.Copy(f, tee); err != nil {
 		f.Close()
 		os.Remove(tmpPath)
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to download artifact"})
+		installState.FailureReason = "failed to download artifact"
+		_ = h.writeConsumptionState(installState)
+		return c.JSON(http.StatusInternalServerError, model.MarketplaceInstallResponse{
+			OK:        false,
+			Item:      installState,
+			ErrorCode: model.MarketplaceErrorDownloadFailed,
+			Message:   installState.FailureReason,
+		})
 	}
 	f.Close()
 
@@ -102,69 +167,56 @@ func (h *MarketplaceHandler) Install(c echo.Context) error {
 	actualDigest := hex.EncodeToString(hasher.Sum(nil))
 	if expectedDigest != "" && actualDigest != expectedDigest {
 		os.Remove(tmpPath)
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "artifact digest mismatch"})
+		installState.FailureReason = "artifact digest mismatch"
+		_ = h.writeConsumptionState(installState)
+		return c.JSON(http.StatusBadRequest, model.MarketplaceInstallResponse{
+			OK:        false,
+			Item:      installState,
+			ErrorCode: model.MarketplaceErrorDigestMismatch,
+			Message:   installState.FailureReason,
+		})
 	}
 
 	if err := os.Rename(tmpPath, destPath); err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to save artifact"})
 	}
 
-	// 4. Fetch item metadata from marketplace service.
-	metaURL := fmt.Sprintf("%s/api/v1/items/%s", h.marketURL, req.ItemID)
-	metaReq, err := http.NewRequestWithContext(ctx, http.MethodGet, metaURL, nil)
-	if err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create metadata request"})
-	}
-	metaReq.Header.Set("Authorization", authHeader)
-
-	metaResp, err := h.httpClient.Do(metaReq)
-	if err != nil {
-		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: "failed to fetch item metadata"})
-	}
-	defer metaResp.Body.Close()
-
-	var itemMeta struct {
-		ID   string `json:"id"`
-		Type string `json:"type"`
-		Name string `json:"name"`
-		Slug string `json:"slug"`
-	}
-	if err := json.NewDecoder(metaResp.Body).Decode(&itemMeta); err != nil {
-		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to parse item metadata"})
-	}
-
-	// 5. Register in plugin service based on item type.
-	switch itemMeta.Type {
-	case "plugin":
-		source := &model.PluginSource{
-			Type:    model.PluginSourceMarketplace,
-			Catalog: req.ItemID,
-			Ref:     req.Version,
-			Path:    destDir,
-		}
-		_, err := h.pluginSvc.Install(ctx, service.PluginInstallRequest{
-			Path:   destDir,
-			Source: source,
-		})
-		if err != nil {
-			// Artifact is already saved; return a warning rather than failing.
-			return c.JSON(http.StatusOK, map[string]interface{}{
-				"ok":      true,
-				"item_id": req.ItemID,
-				"version": req.Version,
-				"type":    itemMeta.Type,
-				"warning": err.Error(),
+	if err := h.completeInstall(ctx, itemMeta, req, destDir, &installState); err != nil {
+		if invalidArtifactErr, ok := err.(*marketplaceArtifactError); ok {
+			installState.Status = model.MarketplaceConsumptionStatusBlocked
+			installState.FailureReason = invalidArtifactErr.Error()
+			if persistErr := h.writeConsumptionState(installState); persistErr != nil {
+				return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to persist marketplace state"})
+			}
+			return c.JSON(http.StatusBadRequest, model.MarketplaceInstallResponse{
+				OK:        false,
+				Item:      installState,
+				ErrorCode: model.MarketplaceErrorInvalidArtifact,
+				Message:   invalidArtifactErr.Error(),
 			})
 		}
-	// For skills and roles, the artifact is stored on disk; full extraction
-	// would happen in a future implementation.
+
+		installState.Status = model.MarketplaceConsumptionStatusWarning
+		installState.Warning = err.Error()
+		installState.FailureReason = err.Error()
+		if persistErr := h.writeConsumptionState(installState); persistErr != nil {
+			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to persist marketplace state"})
+		}
+		return c.JSON(http.StatusConflict, model.MarketplaceInstallResponse{
+			OK:        false,
+			Item:      installState,
+			ErrorCode: model.MarketplaceErrorInstallFailed,
+			Message:   installState.Warning,
+		})
 	}
 
-	return c.JSON(http.StatusOK, map[string]interface{}{
-		"ok":      true,
-		"item_id": req.ItemID,
-		"version": req.Version,
-		"type":    itemMeta.Type,
+	if err := h.writeConsumptionState(installState); err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to persist marketplace state"})
+	}
+
+	return c.JSON(http.StatusOK, model.MarketplaceInstallResponse{
+		OK:   true,
+		Item: installState,
 	})
 }
 
@@ -187,4 +239,797 @@ func (h *MarketplaceHandler) Installed(c echo.Context) error {
 	}
 
 	return c.JSON(http.StatusOK, installedIDs)
+}
+
+// Consumption returns the typed marketplace install and consumption state known locally.
+func (h *MarketplaceHandler) Consumption(c echo.Context) error {
+	records, err := h.loadConsumptionStates()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to load marketplace state"})
+	}
+
+	byKey := make(map[string]model.MarketplaceConsumptionRecord, len(records))
+	for _, record := range records {
+		byKey[marketplaceConsumptionKey(record.ItemID, record.Version)] = record
+	}
+
+	plugins, err := h.pluginSvc.List(c.Request().Context(), service.PluginListFilter{
+		SourceType: model.PluginSourceMarketplace,
+	})
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list marketplace plugins"})
+	}
+	for _, plugin := range plugins {
+		itemID := plugin.Source.Catalog
+		if strings.TrimSpace(itemID) == "" {
+			itemID = plugin.Metadata.ID
+		}
+		version := plugin.Source.Ref
+		if strings.TrimSpace(version) == "" {
+			version = plugin.Metadata.Version
+		}
+		record := model.MarketplaceConsumptionRecord{
+			ItemID:          itemID,
+			ItemType:        model.MarketplaceItemTypePlugin,
+			Version:         version,
+			Status:          model.MarketplaceConsumptionStatusInstalled,
+			ConsumerSurface: model.MarketplaceConsumerSurfacePluginManagementPanel,
+			Installed:       true,
+			Used:            true,
+			RecordID:        plugin.Metadata.ID,
+			LocalPath:       plugin.Source.Path,
+			UpdatedAt:       time.Now().UTC(),
+			Provenance: &model.MarketplaceConsumptionProvenance{
+				SourceType:        string(plugin.Source.Type),
+				MarketplaceItemID: itemID,
+				SelectedVersion:   version,
+				RecordID:          plugin.Metadata.ID,
+				LocalPath:         plugin.Source.Path,
+			},
+		}
+		byKey[marketplaceConsumptionKey(itemID, version)] = record
+	}
+
+	builtInSkills, err := h.listBuiltInSkills()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list built-in skills"})
+	}
+	for _, skill := range builtInSkills {
+		record := model.MarketplaceConsumptionRecord{
+			ItemID:          skill.ID,
+			ItemType:        model.MarketplaceItemTypeSkill,
+			Status:          model.MarketplaceConsumptionStatusInstalled,
+			ConsumerSurface: model.MarketplaceConsumerSurfaceRoleSkillCatalog,
+			Installed:       true,
+			Used:            false,
+			RecordID:        skill.SkillPreview.CanonicalPath,
+			LocalPath:       skill.LocalPath,
+			UpdatedAt:       time.Now().UTC(),
+			Provenance: &model.MarketplaceConsumptionProvenance{
+				SourceType:        string(model.PluginSourceBuiltin),
+				MarketplaceItemID: skill.ID,
+				RecordID:          skill.SkillPreview.CanonicalPath,
+				LocalPath:         skill.LocalPath,
+			},
+		}
+		byKey[marketplaceConsumptionKey(skill.ID, "")] = record
+	}
+
+	items := make([]model.MarketplaceConsumptionRecord, 0, len(byKey))
+	for _, item := range byKey {
+		items = append(items, item)
+	}
+	sort.Slice(items, func(i, j int) bool {
+		if items[i].ItemID == items[j].ItemID {
+			return items[i].Version < items[j].Version
+		}
+		return items[i].ItemID < items[j].ItemID
+	})
+
+	return c.JSON(http.StatusOK, model.MarketplaceConsumptionResponse{Items: items})
+}
+
+func (h *MarketplaceHandler) ListBuiltInSkills(c echo.Context) error {
+	items, err := h.listBuiltInSkills()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to list built-in skills"})
+	}
+	return c.JSON(http.StatusOK, items)
+}
+
+func (h *MarketplaceHandler) GetBuiltInSkill(c echo.Context) error {
+	requestedID := strings.TrimSpace(c.Param("id"))
+	if requestedID == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "missing built-in skill id"})
+	}
+
+	items, err := h.listBuiltInSkills()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to load built-in skill"})
+	}
+	for _, item := range items {
+		if item.ID == requestedID || item.Slug == requestedID {
+			return c.JSON(http.StatusOK, item)
+		}
+	}
+	return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "built-in skill not found"})
+}
+
+type marketplaceItemMetadata struct {
+	ID            string `json:"id"`
+	Type          string `json:"type"`
+	Name          string `json:"name"`
+	Slug          string `json:"slug"`
+	LatestVersion string `json:"latest_version"`
+}
+
+type marketplaceArtifactError struct {
+	message string
+}
+
+func (e *marketplaceArtifactError) Error() string {
+	return e.message
+}
+
+func (h *MarketplaceHandler) fetchItemMetadata(ctx context.Context, authHeader string, itemID string) (*marketplaceItemMetadata, error) {
+	metaURL := fmt.Sprintf("%s/api/v1/items/%s", h.marketURL, itemID)
+	metaReq, err := http.NewRequestWithContext(ctx, http.MethodGet, metaURL, nil)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create metadata request: %w", err)
+	}
+	metaReq.Header.Set("Authorization", authHeader)
+
+	metaResp, err := h.httpClient.Do(metaReq)
+	if err != nil {
+		return nil, fmt.Errorf("failed to fetch item metadata: %w", err)
+	}
+	defer metaResp.Body.Close()
+	if metaResp.StatusCode != http.StatusOK {
+		return nil, fmt.Errorf("marketplace metadata returned status %d", metaResp.StatusCode)
+	}
+
+	var itemMeta marketplaceItemMetadata
+	if err := json.NewDecoder(metaResp.Body).Decode(&itemMeta); err != nil {
+		return nil, fmt.Errorf("failed to parse item metadata: %w", err)
+	}
+	return &itemMeta, nil
+}
+
+func (h *MarketplaceHandler) marketplaceRootDir() string {
+	return filepath.Join(h.pluginsDir, "marketplace")
+}
+
+func (h *MarketplaceHandler) skillsRootDir() string {
+	if strings.TrimSpace(h.rolesDir) == "" {
+		return ""
+	}
+	return filepath.Join(filepath.Dir(h.rolesDir), "skills")
+}
+
+func (h *MarketplaceHandler) completeInstall(
+	ctx context.Context,
+	itemMeta *marketplaceItemMetadata,
+	req *MarketplaceInstallRequest,
+	destDir string,
+	installState *model.MarketplaceConsumptionRecord,
+) error {
+	switch installState.ItemType {
+	case model.MarketplaceItemTypeRole:
+		return h.installRoleArtifact(itemMeta, destDir, installState)
+	case model.MarketplaceItemTypeSkill:
+		return h.installSkillArtifact(itemMeta, destDir, installState)
+	default:
+		stagingDir, err := h.extractZipPackage(filepath.Join(destDir, "artifact"), destDir)
+		if err != nil {
+			return err
+		}
+		targetDir := filepath.Join(destDir, "content")
+		if err := replaceDirectory(targetDir, stagingDir); err != nil {
+			return err
+		}
+		source := &model.PluginSource{
+			Type:    model.PluginSourceMarketplace,
+			Catalog: req.ItemID,
+			Ref:     req.Version,
+			Path:    targetDir,
+		}
+		record, err := h.pluginSvc.Install(ctx, service.PluginInstallRequest{
+			Path:   targetDir,
+			Source: source,
+		})
+		if err != nil {
+			return err
+		}
+		installState.Status = model.MarketplaceConsumptionStatusInstalled
+		installState.Installed = true
+		installState.Used = true
+		installState.RecordID = record.Metadata.ID
+		installState.LocalPath = targetDir
+		installState.Provenance.RecordID = record.Metadata.ID
+		installState.Provenance.LocalPath = targetDir
+		return nil
+	}
+}
+
+func (h *MarketplaceHandler) installRoleArtifact(
+	itemMeta *marketplaceItemMetadata,
+	destDir string,
+	installState *model.MarketplaceConsumptionRecord,
+) error {
+	if strings.TrimSpace(h.rolesDir) == "" {
+		return fmt.Errorf("role install root is not configured")
+	}
+	stagingDir, err := h.extractZipPackage(filepath.Join(destDir, "artifact"), h.rolesDir)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stagingDir)
+
+	roleManifestPath := filepath.Join(stagingDir, "role.yaml")
+	manifest, err := rolepkg.ParseFile(roleManifestPath)
+	if err != nil {
+		return &marketplaceArtifactError{message: fmt.Sprintf("invalid role artifact: %v", err)}
+	}
+	if strings.TrimSpace(manifest.Metadata.ID) != "" && manifest.Metadata.ID != itemMeta.Slug {
+		return &marketplaceArtifactError{message: "invalid role artifact: metadata.id must match marketplace item slug"}
+	}
+
+	targetDir := filepath.Join(h.rolesDir, itemMeta.Slug)
+	if err := replaceDirectory(targetDir, stagingDir); err != nil {
+		return err
+	}
+	if _, err := rolepkg.NewFileStore(h.rolesDir).Get(itemMeta.Slug); err != nil {
+		_ = os.RemoveAll(targetDir)
+		return &marketplaceArtifactError{message: fmt.Sprintf("invalid role artifact: failed discovery after install: %v", err)}
+	}
+
+	installState.Status = model.MarketplaceConsumptionStatusInstalled
+	installState.Installed = true
+	installState.Used = true
+	installState.RecordID = itemMeta.Slug
+	installState.LocalPath = targetDir
+	installState.Provenance.RecordID = itemMeta.Slug
+	installState.Provenance.LocalPath = targetDir
+	return nil
+}
+
+func (h *MarketplaceHandler) installSkillArtifact(
+	itemMeta *marketplaceItemMetadata,
+	destDir string,
+	installState *model.MarketplaceConsumptionRecord,
+) error {
+	skillsRoot := h.skillsRootDir()
+	if strings.TrimSpace(skillsRoot) == "" {
+		return fmt.Errorf("skill install root is not configured")
+	}
+	stagingDir, err := h.extractZipPackage(filepath.Join(destDir, "artifact"), skillsRoot)
+	if err != nil {
+		return err
+	}
+	defer os.RemoveAll(stagingDir)
+
+	if _, err := os.Stat(filepath.Join(stagingDir, "SKILL.md")); err != nil {
+		return &marketplaceArtifactError{message: "invalid skill artifact: SKILL.md is required at the package root"}
+	}
+
+	targetDir := filepath.Join(skillsRoot, itemMeta.Slug)
+	if err := replaceDirectory(targetDir, stagingDir); err != nil {
+		return err
+	}
+	entries, err := rolepkg.DiscoverSkillCatalog(skillsRoot)
+	if err != nil {
+		_ = os.RemoveAll(targetDir)
+		return &marketplaceArtifactError{message: fmt.Sprintf("invalid skill artifact: failed discovery after install: %v", err)}
+	}
+	expectedPath := "skills/" + itemMeta.Slug
+	found := false
+	for _, entry := range entries {
+		if entry.Path == expectedPath {
+			found = true
+			break
+		}
+	}
+	if !found {
+		_ = os.RemoveAll(targetDir)
+		return &marketplaceArtifactError{message: "invalid skill artifact: installed package is not discoverable from the role skill catalog"}
+	}
+
+	installState.Status = model.MarketplaceConsumptionStatusInstalled
+	installState.Installed = true
+	installState.Used = true
+	installState.RecordID = itemMeta.Slug
+	installState.LocalPath = targetDir
+	installState.Provenance.RecordID = itemMeta.Slug
+	installState.Provenance.LocalPath = targetDir
+	return nil
+}
+
+func (h *MarketplaceHandler) extractZipPackage(artifactPath string, tempParent string) (string, error) {
+	reader, err := zip.OpenReader(artifactPath)
+	if err != nil {
+		return "", &marketplaceArtifactError{message: fmt.Sprintf("invalid artifact: expected zip archive: %v", err)}
+	}
+	defer reader.Close()
+
+	if err := os.MkdirAll(tempParent, 0o755); err != nil {
+		return "", err
+	}
+	stagingDir, err := os.MkdirTemp(tempParent, ".marketplace-package-*")
+	if err != nil {
+		return "", err
+	}
+
+	for _, file := range reader.File {
+		name := filepath.Clean(file.Name)
+		if strings.HasPrefix(name, "..") || filepath.IsAbs(name) {
+			_ = os.RemoveAll(stagingDir)
+			return "", &marketplaceArtifactError{message: "invalid artifact: archive contains unsafe paths"}
+		}
+		if strings.Contains(name, string(os.PathSeparator)+"..") {
+			_ = os.RemoveAll(stagingDir)
+			return "", &marketplaceArtifactError{message: "invalid artifact: archive contains unsafe paths"}
+		}
+
+		targetPath := filepath.Join(stagingDir, name)
+		if file.FileInfo().IsDir() {
+			if err := os.MkdirAll(targetPath, 0o755); err != nil {
+				_ = os.RemoveAll(stagingDir)
+				return "", err
+			}
+			continue
+		}
+
+		if err := os.MkdirAll(filepath.Dir(targetPath), 0o755); err != nil {
+			_ = os.RemoveAll(stagingDir)
+			return "", err
+		}
+		src, err := file.Open()
+		if err != nil {
+			_ = os.RemoveAll(stagingDir)
+			return "", err
+		}
+		dst, err := os.Create(targetPath)
+		if err != nil {
+			src.Close()
+			_ = os.RemoveAll(stagingDir)
+			return "", err
+		}
+		if _, err := io.Copy(dst, src); err != nil {
+			dst.Close()
+			src.Close()
+			_ = os.RemoveAll(stagingDir)
+			return "", err
+		}
+		dst.Close()
+		src.Close()
+	}
+
+	packageRoot, err := normalizeExtractedPackageRoot(stagingDir)
+	if err != nil {
+		_ = os.RemoveAll(stagingDir)
+		return "", err
+	}
+
+	return packageRoot, nil
+}
+
+func replaceDirectory(targetDir string, sourceDir string) error {
+	if err := os.RemoveAll(targetDir); err != nil {
+		return err
+	}
+	if err := os.MkdirAll(filepath.Dir(targetDir), 0o755); err != nil {
+		return err
+	}
+	return os.Rename(sourceDir, targetDir)
+}
+
+func normalizeExtractedPackageRoot(stagingDir string) (string, error) {
+	entries, err := os.ReadDir(stagingDir)
+	if err != nil {
+		return "", err
+	}
+
+	nonHidden := make([]os.DirEntry, 0, len(entries))
+	for _, entry := range entries {
+		if strings.HasPrefix(entry.Name(), ".") {
+			continue
+		}
+		nonHidden = append(nonHidden, entry)
+	}
+	if len(nonHidden) != 1 || !nonHidden[0].IsDir() {
+		return stagingDir, nil
+	}
+
+	rootDir := filepath.Join(stagingDir, nonHidden[0].Name())
+	relocatedDir := stagingDir + "-root"
+	if err := os.Rename(rootDir, relocatedDir); err != nil {
+		return "", err
+	}
+	if err := os.RemoveAll(stagingDir); err != nil {
+		_ = os.RemoveAll(relocatedDir)
+		return "", err
+	}
+	return relocatedDir, nil
+}
+
+func (h *MarketplaceHandler) writeConsumptionState(record model.MarketplaceConsumptionRecord) error {
+	statePath := filepath.Join(h.marketplaceRootDir(), record.ItemID, record.Version, marketplaceConsumptionStateFile)
+	if err := os.MkdirAll(filepath.Dir(statePath), 0o755); err != nil {
+		return err
+	}
+	data, err := json.MarshalIndent(record, "", "  ")
+	if err != nil {
+		return err
+	}
+	return os.WriteFile(statePath, data, 0o644)
+}
+
+func (h *MarketplaceHandler) loadConsumptionStates() ([]model.MarketplaceConsumptionRecord, error) {
+	root := h.marketplaceRootDir()
+	if _, err := os.Stat(root); err != nil {
+		if os.IsNotExist(err) {
+			return nil, nil
+		}
+		return nil, err
+	}
+
+	records := []model.MarketplaceConsumptionRecord{}
+	err := filepath.WalkDir(root, func(path string, d fs.DirEntry, walkErr error) error {
+		if walkErr != nil {
+			return walkErr
+		}
+		if d.IsDir() || filepath.Base(path) != marketplaceConsumptionStateFile {
+			return nil
+		}
+		data, err := os.ReadFile(path)
+		if err != nil {
+			return err
+		}
+		var record model.MarketplaceConsumptionRecord
+		if err := json.Unmarshal(data, &record); err != nil {
+			return err
+		}
+		records = append(records, record)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return records, nil
+}
+
+func marketplaceItemType(itemType string) model.MarketplaceItemType {
+	switch strings.TrimSpace(itemType) {
+	case string(model.MarketplaceItemTypeSkill):
+		return model.MarketplaceItemTypeSkill
+	case string(model.MarketplaceItemTypeRole):
+		return model.MarketplaceItemTypeRole
+	default:
+		return model.MarketplaceItemTypePlugin
+	}
+}
+
+func marketplaceConsumerSurface(itemType string) model.MarketplaceConsumerSurface {
+	switch marketplaceItemType(itemType) {
+	case model.MarketplaceItemTypeRole:
+		return model.MarketplaceConsumerSurfaceRoleWorkspace
+	case model.MarketplaceItemTypeSkill:
+		return model.MarketplaceConsumerSurfaceRoleSkillCatalog
+	default:
+		return model.MarketplaceConsumerSurfacePluginManagementPanel
+	}
+}
+
+func marketplaceConsumptionKey(itemID string, version string) string {
+	return itemID + "@" + version
+}
+
+// MarketplaceUninstallRequest is the request body for POST /marketplace/uninstall.
+type MarketplaceUninstallRequest struct {
+	ItemID   string `json:"item_id" validate:"required"`
+	ItemType string `json:"item_type" validate:"required"`
+}
+
+// Uninstall removes a marketplace-installed item and cleans up its consumption state.
+func (h *MarketplaceHandler) Uninstall(c echo.Context) error {
+	req := new(MarketplaceUninstallRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request"})
+	}
+	if req.ItemID == "" || req.ItemType == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "item_id and item_type are required"})
+	}
+
+	ctx := c.Request().Context()
+	itemType := marketplaceItemType(req.ItemType)
+
+	// Find existing consumption records for this item.
+	records, err := h.loadConsumptionStates()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to load marketplace state"})
+	}
+
+	var matched *model.MarketplaceConsumptionRecord
+	for i := range records {
+		if records[i].ItemID == req.ItemID {
+			matched = &records[i]
+			break
+		}
+	}
+	if matched == nil {
+		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "no consumption record found for this item"})
+	}
+
+	switch itemType {
+	case model.MarketplaceItemTypePlugin:
+		// Uninstall via plugin service if a record ID exists.
+		if matched.RecordID != "" {
+			if err := h.pluginSvc.Uninstall(ctx, matched.RecordID); err != nil {
+				return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: fmt.Sprintf("failed to uninstall plugin: %v", err)})
+			}
+		}
+	case model.MarketplaceItemTypeRole:
+		if matched.LocalPath != "" {
+			_ = os.RemoveAll(matched.LocalPath)
+		}
+	case model.MarketplaceItemTypeSkill:
+		if matched.LocalPath != "" {
+			_ = os.RemoveAll(matched.LocalPath)
+		}
+	}
+
+	// Remove the marketplace consumption directory for all versions.
+	marketplaceItemDir := filepath.Join(h.marketplaceRootDir(), req.ItemID)
+	_ = os.RemoveAll(marketplaceItemDir)
+
+	return c.JSON(http.StatusOK, map[string]any{
+		"ok":      true,
+		"itemId":  req.ItemID,
+		"message": "item uninstalled",
+	})
+}
+
+// Sideload accepts a local zip artifact upload and installs it as a marketplace-like item.
+func (h *MarketplaceHandler) Sideload(c echo.Context) error {
+	itemType := strings.TrimSpace(c.FormValue("type"))
+	if itemType == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "type is required (plugin, role, or skill)"})
+	}
+
+	file, err := c.FormFile("file")
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "file is required"})
+	}
+
+	src, err := file.Open()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to open uploaded file"})
+	}
+	defer src.Close()
+
+	// Save to temp file.
+	tmpFile, err := os.CreateTemp("", "marketplace-sideload-*.zip")
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to create temp file"})
+	}
+	tmpPath := tmpFile.Name()
+	defer os.Remove(tmpPath)
+
+	if _, err := io.Copy(tmpFile, src); err != nil {
+		tmpFile.Close()
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to save uploaded file"})
+	}
+	tmpFile.Close()
+
+	ctx := c.Request().Context()
+	mItemType := marketplaceItemType(itemType)
+
+	// Derive a slug from the filename (strip extension).
+	slug := strings.TrimSuffix(file.Filename, filepath.Ext(file.Filename))
+	slug = strings.TrimSuffix(slug, ".tar") // handle .tar.gz etc.
+	if slug == "" {
+		slug = "sideload-" + fmt.Sprintf("%d", time.Now().UnixMilli())
+	}
+
+	installState := model.MarketplaceConsumptionRecord{
+		ItemID:          "sideload-" + slug,
+		ItemType:        mItemType,
+		Version:         "local",
+		Status:          model.MarketplaceConsumptionStatusBlocked,
+		ConsumerSurface: marketplaceConsumerSurface(itemType),
+		Installed:       false,
+		Used:            false,
+		UpdatedAt:       time.Now().UTC(),
+		Provenance: &model.MarketplaceConsumptionProvenance{
+			SourceType:        "sideload",
+			MarketplaceItemID: "sideload-" + slug,
+			SelectedVersion:   "local",
+		},
+	}
+
+	switch mItemType {
+	case model.MarketplaceItemTypeRole:
+		if strings.TrimSpace(h.rolesDir) == "" {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "role install root is not configured"})
+		}
+		stagingDir, err := h.extractZipPackage(tmpPath, h.rolesDir)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: fmt.Sprintf("invalid artifact: %v", err)})
+		}
+		defer os.RemoveAll(stagingDir)
+
+		roleManifestPath := filepath.Join(stagingDir, "role.yaml")
+		manifest, err := rolepkg.ParseFile(roleManifestPath)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: fmt.Sprintf("invalid role artifact: %v", err)})
+		}
+		if strings.TrimSpace(manifest.Metadata.ID) != "" {
+			slug = manifest.Metadata.ID
+			installState.ItemID = "sideload-" + slug
+			installState.Provenance.MarketplaceItemID = installState.ItemID
+		}
+
+		targetDir := filepath.Join(h.rolesDir, slug)
+		if err := replaceDirectory(targetDir, stagingDir); err != nil {
+			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to install role"})
+		}
+		if _, err := rolepkg.NewFileStore(h.rolesDir).Get(slug); err != nil {
+			_ = os.RemoveAll(targetDir)
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: fmt.Sprintf("invalid role artifact: %v", err)})
+		}
+		installState.Status = model.MarketplaceConsumptionStatusInstalled
+		installState.Installed = true
+		installState.Used = true
+		installState.RecordID = slug
+		installState.LocalPath = targetDir
+		installState.Provenance.RecordID = slug
+		installState.Provenance.LocalPath = targetDir
+
+	case model.MarketplaceItemTypeSkill:
+		skillsRoot := h.skillsRootDir()
+		if strings.TrimSpace(skillsRoot) == "" {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "skill install root is not configured"})
+		}
+		stagingDir, err := h.extractZipPackage(tmpPath, skillsRoot)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: fmt.Sprintf("invalid artifact: %v", err)})
+		}
+		defer os.RemoveAll(stagingDir)
+
+		if _, err := os.Stat(filepath.Join(stagingDir, "SKILL.md")); err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid skill artifact: SKILL.md is required at the package root"})
+		}
+
+		targetDir := filepath.Join(skillsRoot, slug)
+		if err := replaceDirectory(targetDir, stagingDir); err != nil {
+			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to install skill"})
+		}
+		entries, err := rolepkg.DiscoverSkillCatalog(skillsRoot)
+		if err != nil {
+			_ = os.RemoveAll(targetDir)
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: fmt.Sprintf("invalid skill artifact: %v", err)})
+		}
+		expectedPath := "skills/" + slug
+		found := false
+		for _, entry := range entries {
+			if entry.Path == expectedPath {
+				found = true
+				break
+			}
+		}
+		if !found {
+			_ = os.RemoveAll(targetDir)
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid skill artifact: installed package is not discoverable"})
+		}
+		installState.Status = model.MarketplaceConsumptionStatusInstalled
+		installState.Installed = true
+		installState.Used = true
+		installState.RecordID = slug
+		installState.LocalPath = targetDir
+		installState.Provenance.RecordID = slug
+		installState.Provenance.LocalPath = targetDir
+
+	case model.MarketplaceItemTypePlugin:
+		// Delegate to existing plugin install seam.
+		source := &model.PluginSource{
+			Type: model.PluginSourceLocal,
+			Path: tmpPath,
+		}
+		stagingDir, err := h.extractZipPackage(tmpPath, h.pluginsDir)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: fmt.Sprintf("invalid artifact: %v", err)})
+		}
+		targetDir := filepath.Join(h.pluginsDir, "sideload-"+slug)
+		if err := replaceDirectory(targetDir, stagingDir); err != nil {
+			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to install plugin"})
+		}
+		source.Path = targetDir
+		record, err := h.pluginSvc.Install(ctx, service.PluginInstallRequest{
+			Path:   targetDir,
+			Source: source,
+		})
+		if err != nil {
+			_ = os.RemoveAll(targetDir)
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: fmt.Sprintf("failed to install plugin: %v", err)})
+		}
+		installState.Status = model.MarketplaceConsumptionStatusInstalled
+		installState.Installed = true
+		installState.Used = true
+		installState.RecordID = record.Metadata.ID
+		installState.LocalPath = targetDir
+		installState.Provenance.RecordID = record.Metadata.ID
+		installState.Provenance.LocalPath = targetDir
+
+	default:
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "unsupported item type: " + itemType})
+	}
+
+	if err := h.writeConsumptionState(installState); err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to persist marketplace state"})
+	}
+
+	return c.JSON(http.StatusOK, model.MarketplaceInstallResponse{
+		OK:   true,
+		Item: installState,
+	})
+}
+
+// MarketplaceUpdateInfo represents a single item's update availability.
+type MarketplaceUpdateInfo struct {
+	ItemID           string `json:"itemId"`
+	ItemType         string `json:"itemType"`
+	InstalledVersion string `json:"installedVersion"`
+	LatestVersion    string `json:"latestVersion"`
+	HasUpdate        bool   `json:"hasUpdate"`
+}
+
+// Updates checks all installed marketplace items against the marketplace service for newer versions.
+func (h *MarketplaceHandler) Updates(c echo.Context) error {
+	if strings.TrimSpace(h.marketURL) == "" {
+		return c.JSON(http.StatusOK, map[string]any{"items": []MarketplaceUpdateInfo{}})
+	}
+
+	records, err := h.loadConsumptionStates()
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to load marketplace state"})
+	}
+
+	authHeader := c.Request().Header.Get("Authorization")
+	ctx := c.Request().Context()
+	var updates []MarketplaceUpdateInfo
+
+	for _, record := range records {
+		if record.Status != model.MarketplaceConsumptionStatusInstalled {
+			continue
+		}
+		if record.Provenance == nil || record.Provenance.SourceType == "sideload" || record.Provenance.SourceType == string(model.PluginSourceBuiltin) {
+			continue
+		}
+		if strings.TrimSpace(record.Version) == "" || record.Version == "local" {
+			continue
+		}
+
+		meta, err := h.fetchItemMetadata(ctx, authHeader, record.ItemID)
+		if err != nil {
+			continue
+		}
+
+		latestVersion := meta.LatestVersion
+		if latestVersion == "" {
+			continue
+		}
+
+		updates = append(updates, MarketplaceUpdateInfo{
+			ItemID:           record.ItemID,
+			ItemType:         string(record.ItemType),
+			InstalledVersion: record.Version,
+			LatestVersion:    latestVersion,
+			HasUpdate:        latestVersion != record.Version,
+		})
+	}
+
+	if updates == nil {
+		updates = []MarketplaceUpdateInfo{}
+	}
+	return c.JSON(http.StatusOK, map[string]any{"items": updates})
 }

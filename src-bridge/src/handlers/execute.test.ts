@@ -218,7 +218,7 @@ describe("handleExecute", () => {
       "status_change",
       "output",
       "cost_update",
-      "cost_update",  // budget warning at 80% threshold
+      "budget_alert",
       "error",
       "snapshot",
       "status_change",

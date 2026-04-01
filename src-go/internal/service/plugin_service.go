@@ -564,6 +564,9 @@ func (s *PluginService) Enable(ctx context.Context, pluginID string) (*model.Plu
 	if err := validateExternalTrust(record); err != nil {
 		return nil, err
 	}
+	if err := FirstMissingWorkflowRoleError(record, s.roleStore); err != nil {
+		return nil, err
+	}
 	record.LifecycleState = model.PluginStateEnabled
 	record.LastError = ""
 	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventEnabled, model.PluginEventSourceOperator, "plugin enabled", nil); err != nil {
@@ -606,6 +609,12 @@ func (s *PluginService) Activate(ctx context.Context, pluginID string) (*model.P
 		return nil, fmt.Errorf("plugin %s is disabled", pluginID)
 	}
 	if err := validateExternalTrust(record); err != nil {
+		return nil, err
+	}
+	if err := FirstMissingWorkflowRoleError(record, s.roleStore); err != nil {
+		record.LastError = err.Error()
+		record.LifecycleState = model.PluginStateDegraded
+		_ = s.persistRecordWithEvent(ctx, record, model.PluginEventFailed, model.PluginEventSourceControlPlane, err.Error(), map[string]any{"operation": "activate"})
 		return nil, err
 	}
 	if err := s.validateActivationPermissions(record); err != nil {
@@ -1271,6 +1280,10 @@ func (s *PluginService) hydrateRecord(ctx context.Context, record *model.PluginR
 		if metadata, include, metaErr := s.resolveBuiltInMetadata(cloned.Source.Path, &cloned.PluginManifest, bundle); metaErr == nil && include && metadata != nil {
 			cloned.BuiltIn = metadata
 		}
+	}
+	cloned.RoleDependencies = BuildPluginRoleDependencies(&cloned, s.roleStore)
+	if roles, err := ListDependencyRoles(s.roleStore); err == nil {
+		cloned.RoleConsumers = BuildPluginRoleConsumers(&cloned, roles)
 	}
 	return &cloned
 }

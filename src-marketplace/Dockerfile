@@ -9,5 +9,5 @@ FROM alpine:3.19
 RUN apk add --no-cache ca-certificates
 WORKDIR /app
 COPY --from=builder /app/marketplace .
-EXPOSE 7779
+EXPOSE 7781
 CMD ["./marketplace"]

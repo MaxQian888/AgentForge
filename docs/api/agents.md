@@ -33,6 +33,9 @@ Behavior:
 - optionally validates `memberId`
 - may return a queued dispatch outcome instead of a direct run if the
   dispatcher is enabled
+- performs Bridge health retries before runtime execution when the Go service
+  path owns the spawn
+- may queue early when the Bridge runtime pool is already at capacity
 - refuses to start when the bridge is degraded
 
 ## Endpoint Summary
@@ -48,7 +51,12 @@ Behavior:
 | `GET` | `/api/v1/agents/:id/logs` | Read normalized agent logs |
 | `GET` | `/api/v1/agents/pool` | Return pool capacity and queue summary |
 | `GET` | `/api/v1/bridge/health` | Return TS bridge health |
+| `GET` | `/api/v1/bridge/pool` | Return TS bridge runtime pool summary |
 | `GET` | `/api/v1/bridge/runtimes` | Return runtime catalog and diagnostics |
+| `GET` | `/api/v1/bridge/tools` | List installed Bridge tools/plugins |
+| `POST` | `/api/v1/bridge/tools/install` | Install a Bridge tool/plugin from an allowed manifest |
+| `POST` | `/api/v1/bridge/tools/uninstall` | Uninstall a Bridge tool/plugin |
+| `POST` | `/api/v1/bridge/tools/:id/restart` | Restart a Bridge tool/plugin |
 | `POST` | `/api/v1/ai/generate` | Run bridge-backed generation |
 | `POST` | `/api/v1/ai/classify-intent` | Run bridge-backed intent classification |
 
@@ -80,6 +88,14 @@ Key fields:
 - `degraded`
 - optional `queue[]`
 
+`GET /api/v1/bridge/pool` returns Bridge-side runtime capacity fields such as:
+
+- `active`
+- `max`
+- `warmTotal`
+- `warmAvailable`
+- `degraded`
+
 ## Logs
 
 `GET /api/v1/agents/:id/logs` returns normalized log entries:
@@ -106,6 +122,48 @@ The runtime tuple is:
 - `runtime`
 - `provider`
 - `model`
+
+## Bridge Tool Management
+
+`GET /api/v1/bridge/tools` returns:
+
+```json
+{
+  "tools": [
+    {
+      "plugin_id": "web-search",
+      "name": "search",
+      "description": "Search repositories and docs"
+    }
+  ]
+}
+```
+
+`POST /api/v1/bridge/tools/install` request body:
+
+```json
+{
+  "manifest_url": "https://registry.example.com/web-search.yaml"
+}
+```
+
+`POST /api/v1/bridge/tools/uninstall` request body:
+
+```json
+{
+  "plugin_id": "web-search"
+}
+```
+
+`POST /api/v1/bridge/tools/:id/restart` does not require a body when the plugin
+id is present in the route.
+
+Notes:
+
+- install manifest URLs must pass the backend allowlist
+- install/uninstall/restart proxy directly to the TS Bridge lifecycle surface
+- IM `/tools *` commands and `/agent spawn` tool summaries both read from this
+  same API
 
 ## Typical Failure Modes
 

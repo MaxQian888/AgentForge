@@ -4,7 +4,7 @@
 Define the authoritative project-scoped cost query contracts that power standalone operator cost surfaces and lightweight summary consumers.
 ## Requirements
 ### Requirement: Project cost summary is queryable through an authoritative project-scoped contract
-The system SHALL expose an authenticated project-scoped cost summary contract at `GET /api/v1/stats/cost?projectId=<id>` for standalone operator cost surfaces. The response MUST be derived from persisted run/task/sprint/budget facts and MUST include totals, active run count, budget summary, recorded trend data, sprint breakdown, task breakdown, and compact period rollups without requiring consumers to combine unrelated stores or undocumented secondary routes.
+The system SHALL expose an authenticated project-scoped cost summary contract at `GET /api/v1/stats/cost?projectId=<id>` for standalone operator cost surfaces. The response MUST be derived from persisted run/task/sprint/budget facts and MUST include totals, active run count, budget summary, recorded trend data, sprint breakdown, task breakdown, compact period rollups, and external runtime attribution metadata without requiring consumers to combine unrelated stores or undocumented secondary routes.
 
 #### Scenario: Project cost summary returns authoritative aggregates
 - **WHEN** an authenticated operator requests `GET /api/v1/stats/cost?projectId=<id>` for a project with runs, tasks, and sprints
@@ -12,12 +12,20 @@ The system SHALL expose an authenticated project-scoped cost summary contract at
 - **THEN** the response includes `dailyCosts`, `sprintCosts`, and `taskCosts` arrays derived from persisted repository data for that project
 - **THEN** the response includes a project budget snapshot that is consistent with the existing budget query capability for the same project
 - **THEN** the response includes compact period rollups for today, the most recent 7-day window, and the most recent 30-day window so lightweight consumers can render summary views from the same contract
+- **THEN** the response includes external runtime attribution metadata that distinguishes authoritative, estimated, and unpriced spend coverage for that project
+- **THEN** the response includes runtime/provider/model breakdown entries so operators can see which external runtime families contributed to the recorded spend
 
 #### Scenario: Empty project cost summary stays explicit
 - **WHEN** an authenticated operator requests the project cost summary for a project with no recorded cost activity
 - **THEN** the system returns HTTP 200 with zero-value totals
-- **THEN** `dailyCosts`, `sprintCosts`, and `taskCosts` are empty arrays
+- **THEN** `dailyCosts`, `sprintCosts`, `taskCosts`, and runtime-breakdown arrays are empty
+- **THEN** the response includes a zero-value cost-coverage summary instead of omitting the attribution section
 - **THEN** the response does not substitute totals or active run counts from unrelated global or client-side state
+
+#### Scenario: Mixed coverage project summary reports attribution gaps truthfully
+- **WHEN** a project's recorded runs include both priced external runtimes and runs whose billing mode or pricing alias cannot be truthfully expressed as USD
+- **THEN** the summary SHALL expose both the priced totals and the unpriced coverage counts
+- **THEN** the API SHALL NOT hide the unpriced runs or silently treat them as zero-cost authoritative spend
 
 ### Requirement: Velocity statistics expose cost-aligned period points
 The system SHALL expose authenticated velocity statistics at `GET /api/v1/stats/velocity?projectId=<id>` using a typed response whose `points` entries carry both throughput and cost semantics for the same date window. Each point MUST include `period`, `tasksCompleted`, and `costUsd`, and any summary metadata in the response MUST stay consistent with those points.
@@ -45,3 +53,4 @@ The system SHALL expose authenticated performance statistics at `GET /api/v1/sta
 - **WHEN** the server cannot resolve a richer display label for an aggregated execution bucket
 - **THEN** the response still returns a stable identifier and a non-empty fallback label
 - **THEN** the fallback remains truthful to the underlying persisted grouping dimension
+

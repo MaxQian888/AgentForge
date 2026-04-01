@@ -186,4 +186,286 @@ describe("TaskCard", () => {
     expect(onToggleSelect).toHaveBeenCalledWith("task-3");
     expect(onClick).not.toHaveBeenCalled();
   });
+
+  it("shows priority, due date, and tag chips for scheduled work", () => {
+    render(
+      <TaskCard
+        index={0}
+        isSelected={false}
+        density="comfortable"
+        showDescription={true}
+        onClick={jest.fn()}
+        task={{
+          id: "task-4",
+          projectId: "project-1",
+          title: "Ship timeline polish",
+          description: "",
+          status: "in_progress",
+          priority: "urgent",
+          assigneeId: "member-1",
+          assigneeType: "human",
+          assigneeName: "Alice",
+          cost: null,
+          budgetUsd: 0,
+          spentUsd: 0,
+          agentBranch: "",
+          agentWorktree: "",
+          agentSessionId: "",
+          labels: ["timeline", "ux"],
+          blockedBy: [],
+          plannedStartAt: "2026-03-26T09:00:00.000Z",
+          plannedEndAt: "2026-03-28T18:00:00.000Z",
+          progress: null,
+          createdAt: "2026-03-24T09:00:00.000Z",
+          updatedAt: "2026-03-24T12:00:00.000Z",
+        }}
+      />
+    );
+
+    expect(screen.getByText("urgent")).toBeInTheDocument();
+    expect(screen.getByText("timeline")).toBeInTheDocument();
+    expect(screen.getByText("ux")).toBeInTheDocument();
+    expect(screen.getByText("Due 2026-03-28")).toBeInTheDocument();
+  });
+
+  it("shows an explicit unassigned placeholder when the task has no assignee", () => {
+    render(
+      <TaskCard
+        index={0}
+        isSelected={false}
+        density="comfortable"
+        showDescription={true}
+        onClick={jest.fn()}
+        task={{
+          id: "task-5",
+          projectId: "project-1",
+          title: "Triaging backlog",
+          description: "",
+          status: "triaged",
+          priority: "medium",
+          assigneeId: null,
+          assigneeType: null,
+          assigneeName: null,
+          cost: null,
+          budgetUsd: 0,
+          spentUsd: 0,
+          agentBranch: "",
+          agentWorktree: "",
+          agentSessionId: "",
+          labels: [],
+          blockedBy: [],
+          plannedStartAt: null,
+          plannedEndAt: null,
+          progress: null,
+          createdAt: "2026-03-24T09:00:00.000Z",
+          updatedAt: "2026-03-24T12:00:00.000Z",
+        }}
+      />
+    );
+
+    expect(screen.getByText("Unassigned")).toBeInTheDocument();
+  });
+
+  it("highlights matching search text in the task title and description", () => {
+    render(
+      <TaskCard
+        index={0}
+        isSelected={false}
+        density="comfortable"
+        showDescription={true}
+        onClick={jest.fn()}
+        searchQuery="timeline"
+        task={{
+          id: "task-6",
+          projectId: "project-1",
+          title: "Timeline quality pass",
+          description: "Audit the timeline interactions before release.",
+          status: "in_progress",
+          priority: "medium",
+          assigneeId: null,
+          assigneeType: null,
+          assigneeName: null,
+          cost: null,
+          budgetUsd: 0,
+          spentUsd: 0,
+          agentBranch: "",
+          agentWorktree: "",
+          agentSessionId: "",
+          labels: [],
+          blockedBy: [],
+          plannedStartAt: null,
+          plannedEndAt: null,
+          progress: null,
+          createdAt: "2026-03-24T09:00:00.000Z",
+          updatedAt: "2026-03-24T12:00:00.000Z",
+        }}
+      />
+    );
+
+    expect(screen.getAllByText(/timeline/i, { selector: "mark" })).toHaveLength(2);
+  });
+
+  it("opens task details when Enter is pressed on a focused card", () => {
+    const onClick = jest.fn();
+
+    render(
+      <div data-board-column="in_progress">
+        <TaskCard
+          index={0}
+          isSelected={false}
+          density="comfortable"
+          showDescription={true}
+          onClick={onClick}
+          task={{
+            id: "task-7",
+            projectId: "project-1",
+            title: "Keyboard open",
+            description: "",
+            status: "in_progress",
+            priority: "medium",
+            assigneeId: null,
+            assigneeType: null,
+            assigneeName: null,
+            cost: null,
+            budgetUsd: 0,
+            spentUsd: 0,
+            agentBranch: "",
+            agentWorktree: "",
+            agentSessionId: "",
+            labels: [],
+            blockedBy: [],
+            plannedStartAt: null,
+            plannedEndAt: null,
+            progress: null,
+            createdAt: "2026-03-24T09:00:00.000Z",
+            updatedAt: "2026-03-24T12:00:00.000Z",
+          }}
+        />
+      </div>
+    );
+
+    const card = document.querySelector('[data-task-id="task-7"]') as HTMLElement;
+    card.focus();
+    fireEvent.keyDown(card, { key: "Enter" });
+
+    expect(onClick).toHaveBeenCalledTimes(1);
+  });
+
+  it("moves focus between board task cards with arrow keys", () => {
+    render(
+      <div>
+        <div data-board-column="in_progress">
+          <TaskCard
+            index={0}
+            isSelected={false}
+            density="comfortable"
+            showDescription={true}
+            onClick={jest.fn()}
+            task={{
+              id: "task-8",
+              projectId: "project-1",
+              title: "First card",
+              description: "",
+              status: "in_progress",
+              priority: "medium",
+              assigneeId: null,
+              assigneeType: null,
+              assigneeName: null,
+              cost: null,
+              budgetUsd: 0,
+              spentUsd: 0,
+              agentBranch: "",
+              agentWorktree: "",
+              agentSessionId: "",
+              labels: [],
+              blockedBy: [],
+              plannedStartAt: null,
+              plannedEndAt: null,
+              progress: null,
+              createdAt: "2026-03-24T09:00:00.000Z",
+              updatedAt: "2026-03-24T12:00:00.000Z",
+            }}
+          />
+          <TaskCard
+            index={1}
+            isSelected={false}
+            density="comfortable"
+            showDescription={true}
+            onClick={jest.fn()}
+            task={{
+              id: "task-9",
+              projectId: "project-1",
+              title: "Second card",
+              description: "",
+              status: "in_progress",
+              priority: "medium",
+              assigneeId: null,
+              assigneeType: null,
+              assigneeName: null,
+              cost: null,
+              budgetUsd: 0,
+              spentUsd: 0,
+              agentBranch: "",
+              agentWorktree: "",
+              agentSessionId: "",
+              labels: [],
+              blockedBy: [],
+              plannedStartAt: null,
+              plannedEndAt: null,
+              progress: null,
+              createdAt: "2026-03-24T09:00:00.000Z",
+              updatedAt: "2026-03-24T12:00:00.000Z",
+            }}
+          />
+        </div>
+        <div data-board-column="done">
+          <TaskCard
+            index={0}
+            isSelected={false}
+            density="comfortable"
+            showDescription={true}
+            onClick={jest.fn()}
+            task={{
+              id: "task-10",
+              projectId: "project-1",
+              title: "Third card",
+              description: "",
+              status: "done",
+              priority: "medium",
+              assigneeId: null,
+              assigneeType: null,
+              assigneeName: null,
+              cost: null,
+              budgetUsd: 0,
+              spentUsd: 0,
+              agentBranch: "",
+              agentWorktree: "",
+              agentSessionId: "",
+              labels: [],
+              blockedBy: [],
+              plannedStartAt: null,
+              plannedEndAt: null,
+              progress: null,
+              createdAt: "2026-03-24T09:00:00.000Z",
+              updatedAt: "2026-03-24T12:00:00.000Z",
+            }}
+          />
+        </div>
+      </div>
+    );
+
+    const firstCard = document.querySelector('[data-task-id="task-8"]') as HTMLElement;
+    const secondCard = document.querySelector('[data-task-id="task-9"]') as HTMLElement;
+    const thirdCard = document.querySelector('[data-task-id="task-10"]') as HTMLElement;
+
+    firstCard.focus();
+    fireEvent.keyDown(firstCard, { key: "ArrowDown" });
+    expect(secondCard).toHaveFocus();
+
+    fireEvent.keyDown(secondCard, { key: "ArrowRight" });
+    expect(thirdCard).toHaveFocus();
+
+    fireEvent.keyDown(thirdCard, { key: "ArrowLeft" });
+    expect(secondCard).toHaveFocus();
+  });
 });

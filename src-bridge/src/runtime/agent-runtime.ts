@@ -1,4 +1,12 @@
-import type { AgentStatus, ExecuteRequest, RuntimeContinuityState } from "../types.js";
+import type {
+  AgentStatus,
+  ExecuteRequest,
+  RuntimeContinuityState,
+} from "../types.js";
+import {
+  serializeCostAccounting,
+  type CostAccountingSnapshot,
+} from "../cost/accounting.js";
 
 export interface ClaudeQueryControl {
   interrupt?: () => Promise<void>;
@@ -35,6 +43,7 @@ export class AgentRuntime {
   structuredOutput: Record<string, unknown> | null;
   claudeQuery: ClaudeQueryControl | null;
   budgetWarningEmitted: boolean;
+  costAccounting: CostAccountingSnapshot | null;
 
   constructor(taskId: string, sessionId: string) {
     this.taskId = taskId;
@@ -51,10 +60,16 @@ export class AgentRuntime {
     this.structuredOutput = null;
     this.claudeQuery = null;
     this.budgetWarningEmitted = false;
+    this.costAccounting = null;
   }
 
   bindRequest(request: ExecuteRequest): void {
     this.request = { ...request };
+  }
+
+  applyCostAccounting(snapshot: CostAccountingSnapshot): void {
+    this.costAccounting = snapshot;
+    this.spentUsd = snapshot.totalCostUsd;
   }
 
   cancel(nextStatus: Extract<RuntimeStatus, "paused" | "cancelled" | "budget_exceeded" | "failed"> = "cancelled"): void {
@@ -104,6 +119,7 @@ export class AgentRuntime {
       file_checkpointing: this.request?.file_checkpointing,
       active_hooks: activeHooks && activeHooks.length > 0 ? activeHooks : undefined,
       subagent_count: subagentCount,
+      cost_accounting: serializeCostAccounting(this.costAccounting),
     };
   }
 }

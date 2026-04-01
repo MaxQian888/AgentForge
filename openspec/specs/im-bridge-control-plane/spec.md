@@ -24,6 +24,41 @@ The system SHALL treat each IM Bridge process as a registered runtime instance i
 ### Requirement: Outbound control-plane deliveries are authenticated and instance-targeted
 The system SHALL authenticate every backend-to-Bridge control-plane delivery and SHALL route each delivery to either an explicitly targeted `bridge_id` or a backend-selected live instance that matches the requested platform and project binding. A Bridge MUST reject unsigned or invalidly signed deliveries, and it MUST NOT deliver a message that targets another instance.
 
+**Changes**:
+- **ADDED**: When IM commands are processed, the system now determines whether to route through Bridge or Go API based on capability type
+- **ADDED**: Capability routing logic that checks if Bridge is available and has the requested capability before deciding routing path
+- **ADDED**: Fallback behavior when Bridge is unavailable for Bridge-specific capabilities
+
+#### Scenario: Natural language command routes through Bridge classify-intent
+- **WHEN** user sends `@AgentForge show me the sprint status` and Bridge is available
+- **THEN** IM Bridge checks if Bridge supports `classify-intent` capability
+- **THEN** IM Bridge calls `POST /api/v1/ai/classify-intent` with `{ text: "show me the sprint status", candidates: [...] }`
+- **THEN** Bridge returns `{ intent: "sprint_status", confidence: 0.95 }`
+- **THEN** IM Bridge routes to `/sprint status` command handler
+- **AND** IM Bridge executes command and displays result
+
+#### Scenario: Bridge-specific command routes directly to Bridge
+- **WHEN** user sends `/agent runtimes` command
+- **THEN** IM Bridge identifies this as a Bridge-specific capability
+- **THEN** IM Bridge checks Bridge availability
+- **THEN** IM Bridge calls `GET /api/v1/bridge/runtimes`
+- **THEN** Go backend proxies to `GET http://localhost:7778/bridge/runtimes`
+- **AND** IM Bridge displays runtime list from Bridge response
+
+#### Scenario: Legacy command routes to Go API directly
+- **WHEN** user sends `/task create Fix the bug` command
+- **THEN** IM Bridge identifies this as a Go API capability (task persistence)
+- **THEN** IM Bridge calls `POST /api/v1/tasks` directly (not through Bridge proxy)
+- **AND** IM Bridge displays task creation result
+
+#### Scenario: Bridge capability with fallback
+- **WHEN** user sends `/task decompose task-123` and Bridge is unavailable
+- **THEN** IM Bridge detects Bridge is unavailable
+- **THEN** IM Bridge attempts fallback to Go API decompose endpoint
+- **THEN** IM Bridge displays result with note "Using fallback (Bridge unavailable)"
+ if fallback succeeds
+ - **OR** IM Bridge displays error "Bridge required for this operation" if no fallback available
+
 #### Scenario: Valid signed delivery reaches the targeted instance
 - **WHEN** the backend sends a notification or progress delivery with a valid signature and a target `bridge_id`
 - **THEN** the matching Bridge instance accepts the delivery
@@ -40,13 +75,15 @@ The system SHALL authenticate every backend-to-Bridge control-plane delivery and
 - **AND** no user-visible IM message is sent from the wrong Bridge
 
 ### Requirement: Control-plane delivery resumes safely after reconnect
-The system SHALL preserve pending outbound deliveries across transient Bridge disconnects and SHALL resume from an acknowledged delivery cursor when the Bridge reconnects. Replayed deliveries MUST remain idempotent so the same logical notification or progress update is not sent more than once to the user-visible IM target.
+The system SHALL preserve pending outbound deliveries across transient Bridge disconnects and SHALL resume from the last acknowledged delivery cursor when the Bridge reconnects. Replayed deliveries MUST remain idempotent so the same logical notification or progress update is not sent more than once to the user-visible IM target.
+
+**Changes**: No changes to this requirement (preserved as-is)
 
 #### Scenario: Reconnect resumes from last acknowledged delivery
-- **WHEN** a Bridge loses its persistent control-plane connection after acknowledging delivery cursor `N`
-- **AND** pending deliveries `N+1` and later are queued while it is offline
+- **WHEN** a Bridge loses connection after acknowledging delivery cursor `N`
+- **AND** pending deliveries `N+1` and later were queued while it is offline
 - **THEN** the Bridge reconnects and requests replay beginning after cursor `N`
-- **AND** the backend resends only the pending deliveries that were not yet acknowledged
+- **AND** the backend resends only the pending deliveries that had not yet acknowledged
 
 #### Scenario: Duplicate delivery id is suppressed
 - **WHEN** a Bridge receives the same logical delivery more than once during replay or retry
@@ -54,12 +91,14 @@ The system SHALL preserve pending outbound deliveries across transient Bridge di
 - **AND** it does not send a second copy of that message to the IM conversation
 
 ### Requirement: Control-plane deliveries SHALL preserve typed outbound payloads across queue and replay
-The system SHALL preserve the canonical typed outbound delivery envelope when a message is queued for a Bridge instance, replayed after reconnect, or acknowledged through the control-plane cursor. Control-plane routing and replay MUST retain rich payload shape, reply-target context, and fallback metadata instead of collapsing the delivery to a text-only `content` field.
+The system SHALL preserve the canonical typed outbound delivery envelope when a message is queued for a Bridge instance, replayed after reconnect, and acknowledged through the control-plane cursor. Control-plane routing and replay MUST retain rich payload shape, reply-target context, and fallback metadata instead of collapsing the delivery to a text-only `content` field.
+
+**Changes**: No changes to this requirement (preserved as-is)
 
 #### Scenario: Targeted delivery reaches the Bridge with typed payload intact
 - **WHEN** the backend queues a signed delivery containing structured or provider-native payload for a specific `bridge_id`
 - **THEN** the control plane routes that typed delivery to the targeted Bridge instance without flattening it to text
-- **AND** the Bridge applies the same payload shape during delivery resolution that the backend originally queued
+- **AND** the Bridge applies the same payload shape during delivery resolution as the backend originally queued
 
 #### Scenario: Reconnect replay preserves rich payload fidelity
 - **WHEN** a Bridge reconnects after rich or mutable deliveries were queued while it was offline
@@ -70,6 +109,46 @@ The system SHALL preserve the canonical typed outbound delivery envelope when a 
 - **WHEN** a Bridge acknowledges a typed delivery cursor and later reconnect logic encounters the same delivery again
 - **THEN** the control plane suppresses the duplicate replay using the delivery cursor and identifier
 - **AND** users do not receive a second copy of the same rich or terminal delivery
+
+### Requirement: Bridge status snapshot SHALL expose operator-facing runtime summary
+
+`GET /api/v1/im/bridge/status` SHALL return an operator-oriented IM Bridge snapshot in addition to basic liveness. The snapshot MUST include overall health, per-provider transport and capability data, pending delivery counts, recent delivery summary, rolling aggregate counters, and last-known provider diagnostics metadata when available.
+
+#### Scenario: Status snapshot includes backlog and recent delivery health
+- **WHEN** one Feishu bridge has pending deliveries and recent fallback or failure activity
+- **THEN** `GET /api/v1/im/bridge/status` includes that provider's pending count, last settled delivery timestamp, recent failure or fallback summary, and the aggregate pending/error counters for the operator console
+
+#### Scenario: Status snapshot tolerates missing diagnostics metadata
+- **WHEN** a registered provider has not reported optional diagnostics metadata
+- **THEN** the status endpoint still returns the provider entry successfully
+- **THEN** the diagnostics field is marked unavailable instead of failing the entire snapshot
+
+### Requirement: Control-plane delivery settlement SHALL be operator-truthful
+
+A delivery queued for a live IM Bridge SHALL be recorded as `pending` until the bridge reports a terminal settlement. The bridge settlement payload MUST carry terminal status, processed timestamp, and optional failure or downgrade reason so operator history, queue depth, and latency metrics reflect actual delivery outcomes instead of optimistic queue acceptance.
+
+#### Scenario: Successful settlement updates a pending delivery
+- **WHEN** the backend queues delivery `d1` and the bridge later settles `d1` with status `delivered`
+- **THEN** `d1` is removed from the pending backlog, marked `delivered` in history, and assigned a processed timestamp and latency derived from queue time to settlement time
+
+#### Scenario: Failed settlement remains visible in operator history
+- **WHEN** the bridge settles delivery `d2` with status `failed` and failure reason `rate_limit`
+- **THEN** the history record for `d2` is marked `failed`
+- **THEN** the failure reason is persisted and included in subsequent operator snapshot and history responses
+
+#### Scenario: Unsettled delivery stays pending
+- **WHEN** the backend queues delivery `d3` and no terminal settlement has been reported yet
+- **THEN** `d3` remains `pending` in the operator snapshot and history
+- **THEN** `d3` is not counted as delivered for success-rate or latency metrics
+
+### Requirement: Bridge registration and heartbeat SHALL support optional diagnostics refresh
+
+Bridge registration and heartbeat flows SHALL allow an instance to refresh optional operator diagnostics metadata, including transport warnings, callback health, quota summaries, or last transport error snapshots. The backend MUST store the latest diagnostics per bridge instance and expose them through the operator status snapshot.
+
+#### Scenario: Heartbeat refreshes diagnostics metadata
+- **WHEN** a bridge heartbeat reports webhook health `healthy` and quota summary metadata
+- **THEN** the backend stores the latest diagnostics for that bridge instance
+- **THEN** the next operator status snapshot exposes those diagnostics on the matching provider card
 
 ### Requirement: IM /review command supports deep, approve, and request-changes subcommands
 The system SHALL extend the IM `/review` command handler to accept three additional subcommands: `deep <pr-url>`, `approve <review-id>`, and `request-changes <review-id> [comment]`. Each subcommand SHALL call the corresponding backend API and reply with a structured result card. The existing `/review <pr-url>` and `/review status <id>` commands SHALL remain unchanged.

@@ -197,3 +197,43 @@ The codebase SHALL NOT contain the legacy `role-form-dialog.tsx` component if it
 - **WHEN** a codebase search finds zero import references to `role-form-dialog`
 - **THEN** `role-form-dialog.tsx` and `role-form-dialog.test.tsx` are deleted
 - **AND** no runtime or build errors result from the removal
+
+### Requirement: Role workspace exposes skill compatibility impact before save
+The system SHALL surface role-skill compatibility cues throughout the existing authoring flow so operators can understand not only whether a skill resolves from the repository catalog, but also what dependencies it brings in, what tool capabilities it declares, and whether the current role configuration fully covers those needs. These cues MUST remain visible in the Skills section, draft summary, role library, and review context without requiring raw YAML inspection.
+
+#### Scenario: Skills section shows dependency and tool-demand details for a selected skill
+- **WHEN** the operator selects or types a skill path in the Skills section and that skill resolves from the authoritative catalog
+- **THEN** the workspace shows the skill's direct dependency paths and declared tool requirements alongside its label and provenance cues
+- **THEN** any compatibility warning or blocking state for the current role configuration is visible from the same authoring flow
+
+#### Scenario: Summary and library react to compatibility changes
+- **WHEN** the operator changes skill rows, toggles `auto_load`, or edits the role's tool configuration in a way that changes skill compatibility
+- **THEN** the draft summary and review context update to reflect the current direct-versus-transitive skill impact and blocking versus warning state
+- **THEN** the role library can distinguish a fully compatible skill-backed role from a role that still contains compatibility warnings or blockers
+
+### Requirement: Role surfaces expose plugin dependency health and downstream plugin consumers
+The role library, role workspace, and role context surfaces SHALL expose both sides of the current plugin-role contract. For the currently selected or previewed role, the UI MUST show whether each role-scoped external tool or MCP server dependency currently resolves to a usable plugin in the current checkout, and it MUST also show which installed plugins currently consume that role through declared role bindings so operators can understand impact before preview, save, or delete actions.
+
+#### Scenario: Role workspace shows a missing plugin dependency
+- **WHEN** the operator edits or previews a role whose `toolConfig.external` or `toolConfig.mcpServers` contains a plugin-scoped dependency that is not currently usable
+- **THEN** the workspace and review context show that dependency as an explicit readiness cue instead of forcing the operator to infer it from raw YAML
+- **THEN** the operator can see which plugin or MCP dependency is missing from the same authoring flow
+
+#### Scenario: Role surfaces show downstream workflow consumers before delete
+- **WHEN** the operator selects a role that is currently referenced by one or more installed plugins with declared role bindings
+- **THEN** the role library or workspace shows a downstream consumer summary before the operator confirms deletion
+- **THEN** the delete affordance explains that dependent plugins must be updated or removed first rather than failing later with a generic runtime error
+
+### Requirement: Role workspace can select installed plugins and inspect their declared functions
+The role workspace SHALL let operators specify installed tool plugins for an existing role without relying on manual string entry alone. When installed ToolPlugin records are available, the capabilities authoring surface MUST present them as selectable entries, MUST write the chosen plugin identifiers back into the role's external tool configuration, and MUST expose each plugin's runtime or lifecycle summary plus declared functions or capabilities so operators can understand what they are attaching to the role.
+
+#### Scenario: Operator adds an installed plugin to an existing role
+- **WHEN** the operator edits an existing role and the current checkout contains installed ToolPlugin records
+- **THEN** the capabilities section shows those plugins as selectable entries with explicit add or use actions
+- **THEN** choosing one of those entries updates the role draft's plugin configuration without requiring the operator to manually type the plugin id
+
+#### Scenario: Role workspace shows declared plugin functions before selection
+- **WHEN** the capabilities section lists available installed plugins for role authoring
+- **THEN** each listed plugin shows its runtime or lifecycle summary and declared functions or capabilities
+- **THEN** the operator can compare plugin choices from the same authoring surface before attaching them to the role
+

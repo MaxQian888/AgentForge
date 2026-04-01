@@ -140,6 +140,12 @@ describe("streamCodexRuntime", () => {
         cache_read_tokens: 30,
         output_tokens: 45,
         cost_usd: 0.03,
+        cost_accounting: {
+          total_cost_usd: 0.03,
+          mode: "authoritative_total",
+          coverage: "full",
+          source: "codex_native_total",
+        },
       },
     });
     expect(runtime.continuity).toMatchObject({

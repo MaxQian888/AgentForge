@@ -23,7 +23,7 @@ export function OverviewLayout({
   className,
 }: OverviewLayoutProps) {
   return (
-    <div className={cn("flex flex-col gap-4", className)}>
+    <div className={cn("flex flex-col gap-[var(--space-section-gap)]", className)}>
       <PageHeader
         breadcrumbs={breadcrumbs}
         title={title}
@@ -31,11 +31,13 @@ export function OverviewLayout({
         actions={actions}
       />
       {metrics && (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-5">
+        <div className="grid grid-cols-2 gap-[var(--space-grid-gap)] sm:grid-cols-3 lg:grid-cols-5">
           {metrics}
         </div>
       )}
-      <div className="grid gap-4 lg:grid-cols-2">{children}</div>
+      <div className="grid gap-[var(--space-grid-gap)] lg:grid-cols-2">
+        {children}
+      </div>
     </div>
   );
 }

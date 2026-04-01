@@ -34,6 +34,10 @@ func (b *spawnVerificationBridge) GetPoolSummary(context.Context) (*bridgeclient
 	return nil, nil
 }
 
+func (b *spawnVerificationBridge) Health(context.Context) error {
+	return nil
+}
+
 func (b *spawnVerificationBridge) Cancel(context.Context, string, string) error {
 	return nil
 }

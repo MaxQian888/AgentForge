@@ -4,9 +4,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
-	"github.com/agentforge/im-bridge/core"
 	"net/http"
+	"strings"
 	"testing"
+
+	"github.com/agentforge/im-bridge/core"
 )
 
 func TestStub_MetadataAndReplyContextDeclareTelegramBehavior(t *testing.T) {
@@ -294,5 +296,44 @@ func TestTelegramStub_HelperBranches(t *testing.T) {
 	}
 	if got := chatIDFromReplyContext("invalid"); got != "" {
 		t.Fatalf("chatIDFromReplyContext(invalid) = %q", got)
+	}
+}
+
+func TestStub_SendCardAndReplyCardRecordReplies(t *testing.T) {
+	stub := NewStub("0")
+
+	card := core.NewCard().
+		SetTitle("Build #42").
+		AddField("Status", "success").
+		AddPrimaryButton("Approve", "act:approve:build-42")
+
+	if err := stub.SendCard(context.Background(), "1001", card); err != nil {
+		t.Fatalf("SendCard error: %v", err)
+	}
+	if err := stub.ReplyCard(context.Background(), &core.Message{ChatID: "1002"}, card); err != nil {
+		t.Fatalf("ReplyCard error: %v", err)
+	}
+
+	if len(stub.replies) != 2 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].ChatID != "1001" || stub.replies[0].NativeSurface != "telegram_card" {
+		t.Fatalf("first reply = %+v", stub.replies[0])
+	}
+	if stub.replies[1].ChatID != "1002" || stub.replies[1].NativeSurface != "telegram_card" {
+		t.Fatalf("second reply = %+v", stub.replies[1])
+	}
+	if !strings.Contains(stub.replies[0].Content, "Build #42") || !strings.Contains(stub.replies[0].Content, "Status: success") {
+		t.Fatalf("first reply content = %q", stub.replies[0].Content)
+	}
+}
+
+func TestStub_TypingIndicatorIsNoop(t *testing.T) {
+	stub := NewStub("0")
+	if err := stub.StartTyping(context.Background(), "1001"); err != nil {
+		t.Fatalf("StartTyping error: %v", err)
+	}
+	if err := stub.StopTyping(context.Background(), "1001"); err != nil {
+		t.Fatalf("StopTyping error: %v", err)
 	}
 }

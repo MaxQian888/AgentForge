@@ -1,21 +1,28 @@
 package server_test
 
 import (
+	"context"
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
+	"github.com/alicebob/miniredis/v2"
+	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
+	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/server"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/ws"
+	"github.com/redis/go-redis/v9"
 )
 
 func testConfig() *config.Config {
@@ -32,10 +39,14 @@ func testConfig() *config.Config {
 }
 
 func registerTestRoutes(e *echo.Echo, cfg *config.Config, authSvc *service.AuthService, cache *repository.CacheRepository) {
-	registerTestRoutesWithAgentService(e, cfg, authSvc, cache, nil)
+	registerTestRoutesWithDependencies(e, cfg, authSvc, cache, nil, nil)
 }
 
 func registerTestRoutesWithAgentService(e *echo.Echo, cfg *config.Config, authSvc *service.AuthService, cache *repository.CacheRepository, agentSvc *service.AgentService) {
+	registerTestRoutesWithDependencies(e, cfg, authSvc, cache, nil, agentSvc)
+}
+
+func registerTestRoutesWithDependencies(e *echo.Echo, cfg *config.Config, authSvc *service.AuthService, cache *repository.CacheRepository, pluginSvc *service.PluginService, agentSvc *service.AgentService) {
 	server.RegisterRoutes(e, cfg, authSvc, cache,
 		repository.NewProjectRepository(nil),
 		repository.NewMemberRepository(nil),
@@ -67,13 +78,31 @@ func registerTestRoutesWithAgentService(e *echo.Echo, cfg *config.Config, authSv
 		repository.NewPageCommentRepository(nil),
 		repository.NewPageFavoriteRepository(nil),
 		repository.NewPageRecentAccessRepository(nil),
+		repository.NewLogRepository(nil),
 		ws.NewHub(),
 		bridge.NewClient("http://localhost:7778"),
 		nil,
-		nil,
+		pluginSvc,
 		agentSvc,
 		nil,
 	)
+}
+
+func signedBearerToken(t *testing.T, secret string) string {
+	t.Helper()
+	token, err := jwt.NewWithClaims(jwt.SigningMethodHS256, &service.Claims{
+		UserID: uuid.NewString(),
+		Email:  "role-test@example.com",
+		JTI:    uuid.NewString(),
+		RegisteredClaims: jwt.RegisteredClaims{
+			ExpiresAt: jwt.NewNumericDate(time.Now().Add(time.Hour)),
+			IssuedAt:  jwt.NewNumericDate(time.Now()),
+		},
+	}).SignedString([]byte(secret))
+	if err != nil {
+		t.Fatalf("sign test token: %v", err)
+	}
+	return "Bearer " + token
 }
 
 func testAgentService() *service.AgentService {
@@ -113,7 +142,8 @@ func TestNew_Production(t *testing.T) {
 
 func TestRegisterRoutes_HealthEndpoint(t *testing.T) {
 	cfg := testConfig()
-	cache := repository.NewCacheRepository(nil)
+	redisServer := miniredis.RunT(t)
+	cache := repository.NewCacheRepository(redis.NewClient(&redis.Options{Addr: redisServer.Addr()}))
 	userRepo := repository.NewUserRepository(nil)
 	authSvc := service.NewAuthService(userRepo, cache, cfg)
 
@@ -137,7 +167,8 @@ func TestRegisterRoutes_HealthEndpoint(t *testing.T) {
 
 func TestRegisterRoutes_HealthV1Endpoint(t *testing.T) {
 	cfg := testConfig()
-	cache := repository.NewCacheRepository(nil)
+	redisServer := miniredis.RunT(t)
+	cache := repository.NewCacheRepository(redis.NewClient(&redis.Options{Addr: redisServer.Addr()}))
 	userRepo := repository.NewUserRepository(nil)
 	authSvc := service.NewAuthService(userRepo, cache, cfg)
 
@@ -286,6 +317,82 @@ func TestRegisterRoutes_PluginControlPlaneCompatibilityRoutesPresent(t *testing.
 	}
 }
 
+func TestRegisterRoutes_RoleEndpointsUsePluginCatalogForDependencyDiagnostics(t *testing.T) {
+	cfg := testConfig()
+	cfg.RolesDir = filepath.Join(t.TempDir(), "roles")
+	roleDir := filepath.Join(cfg.RolesDir, "design-lead")
+	if err := os.MkdirAll(roleDir, 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(roleDir, "role.yaml"), []byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: design-lead
+  name: Design Lead
+identity:
+  role: Design Lead
+  goal: Review design consistency
+capabilities:
+  tools:
+    external:
+      - design-mcp
+`), 0o600); err != nil {
+		t.Fatalf("seed role error = %v", err)
+	}
+
+	redisServer := miniredis.RunT(t)
+	cache := repository.NewCacheRepository(redis.NewClient(&redis.Options{Addr: redisServer.Addr()}))
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+	pluginRepo := repository.NewPluginRegistryRepository(nil)
+	if err := pluginRepo.Save(context.Background(), &model.PluginRecord{
+		PluginManifest: model.PluginManifest{
+			APIVersion: "agentforge/v1",
+			Kind:       model.PluginKindTool,
+			Metadata: model.PluginMetadata{
+				ID:      "design-mcp",
+				Name:    "Design MCP",
+				Version: "1.0.0",
+			},
+			Spec: model.PluginSpec{
+				Runtime:   model.PluginRuntimeMCP,
+				Transport: "stdio",
+				Command:   "node",
+				Args:      []string{"tool.js"},
+			},
+		},
+		LifecycleState: model.PluginStateActive,
+	}); err != nil {
+		t.Fatalf("save plugin record: %v", err)
+	}
+	pluginSvc := service.NewPluginService(pluginRepo, nil, nil, t.TempDir())
+
+	e := server.New(cfg, cache)
+	registerTestRoutesWithDependencies(e, cfg, authSvc, cache, pluginSvc, nil)
+
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/roles/design-lead", nil)
+	req.Header.Set("Authorization", signedBearerToken(t, cfg.JWTSecret))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("GET /api/v1/roles/:id status = %d, want 200", rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	dependencies, ok := payload["pluginDependencies"].([]any)
+	if !ok || len(dependencies) != 1 {
+		t.Fatalf("pluginDependencies = %#v, want 1 dependency", payload["pluginDependencies"])
+	}
+	dependency := dependencies[0].(map[string]any)
+	if dependency["pluginId"] != "design-mcp" || dependency["status"] != "active" {
+		t.Fatalf("dependency = %#v, want active design-mcp", dependency)
+	}
+}
+
 func TestRegisterRoutes_InternalSchedulerRoutesPresent(t *testing.T) {
 	cfg := testConfig()
 	cache := repository.NewCacheRepository(nil)
@@ -419,14 +526,16 @@ func TestRegisterRoutes_IMOperatorRoutesPresent(t *testing.T) {
 	registerTestRoutes(e, cfg, authSvc, cache)
 
 	expected := map[string]struct{}{
-		http.MethodGet + " /api/v1/im/channels":              {},
-		http.MethodPost + " /api/v1/im/channels":             {},
-		http.MethodPut + " /api/v1/im/channels/:id":          {},
-		http.MethodDelete + " /api/v1/im/channels/:id":       {},
-		http.MethodGet + " /api/v1/im/bridge/status":         {},
-		http.MethodGet + " /api/v1/im/deliveries":            {},
-		http.MethodPost + " /api/v1/im/deliveries/:id/retry": {},
-		http.MethodGet + " /api/v1/im/event-types":           {},
+		http.MethodGet + " /api/v1/im/channels":                {},
+		http.MethodPost + " /api/v1/im/channels":               {},
+		http.MethodPut + " /api/v1/im/channels/:id":            {},
+		http.MethodDelete + " /api/v1/im/channels/:id":         {},
+		http.MethodGet + " /api/v1/im/bridge/status":           {},
+		http.MethodGet + " /api/v1/im/deliveries":              {},
+		http.MethodPost + " /api/v1/im/deliveries/:id/retry":   {},
+		http.MethodPost + " /api/v1/im/deliveries/retry-batch": {},
+		http.MethodPost + " /api/v1/im/test-send":              {},
+		http.MethodGet + " /api/v1/im/event-types":             {},
 	}
 
 	for _, route := range e.Routes() {

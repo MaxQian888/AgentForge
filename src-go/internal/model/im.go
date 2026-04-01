@@ -312,19 +312,28 @@ type IMChannel struct {
 }
 
 type IMBridgeProviderDetail struct {
-	Platform         string         `json:"platform"`
-	Status           string         `json:"status,omitempty"`
-	Transport        string         `json:"transport,omitempty"`
-	CallbackPaths    []string       `json:"callbackPaths,omitempty"`
-	CapabilityMatrix map[string]any `json:"capabilityMatrix,omitempty"`
+	Platform          string            `json:"platform"`
+	Status            string            `json:"status,omitempty"`
+	Transport         string            `json:"transport,omitempty"`
+	CallbackPaths     []string          `json:"callbackPaths,omitempty"`
+	CapabilityMatrix  map[string]any    `json:"capabilityMatrix,omitempty"`
+	PendingDeliveries int               `json:"pendingDeliveries"`
+	RecentFailures    int               `json:"recentFailures"`
+	RecentDowngrades  int               `json:"recentDowngrades"`
+	LastDeliveryAt    *string           `json:"lastDeliveryAt,omitempty"`
+	Diagnostics       map[string]string `json:"diagnostics,omitempty"`
 }
 
 type IMBridgeStatus struct {
-	Registered      bool                     `json:"registered"`
-	LastHeartbeat   *string                  `json:"lastHeartbeat"`
-	Providers       []string                 `json:"providers"`
-	ProviderDetails []IMBridgeProviderDetail `json:"providerDetails"`
-	Health          string                   `json:"health"`
+	Registered        bool                     `json:"registered"`
+	LastHeartbeat     *string                  `json:"lastHeartbeat"`
+	Providers         []string                 `json:"providers"`
+	ProviderDetails   []IMBridgeProviderDetail `json:"providerDetails"`
+	Health            string                   `json:"health"`
+	PendingDeliveries int                      `json:"pendingDeliveries"`
+	RecentFailures    int                      `json:"recentFailures"`
+	RecentDowngrades  int                      `json:"recentDowngrades"`
+	AverageLatencyMs  int64                    `json:"averageLatencyMs"`
 }
 
 type IMDeliveryStatus string
@@ -355,6 +364,8 @@ type IMDelivery struct {
 	Metadata        map[string]string    `json:"metadata,omitempty"`
 	ReplyTarget     *IMReplyTarget       `json:"replyTarget,omitempty"`
 	CreatedAt       string               `json:"createdAt"`
+	ProcessedAt     string               `json:"processedAt,omitempty"`
+	LatencyMs       int64                `json:"latencyMs,omitempty"`
 }
 
 // IMBridgeRegisterRequest registers a Bridge runtime instance.
@@ -415,8 +426,52 @@ type IMDeliveryAck struct {
 	BridgeID        string `json:"bridgeId"`
 	Cursor          int64  `json:"cursor"`
 	DeliveryID      string `json:"deliveryId,omitempty"`
+	Status          string `json:"status,omitempty"`
+	FailureReason   string `json:"failureReason,omitempty"`
 	DowngradeReason string `json:"downgradeReason,omitempty"`
 	ProcessedAt     string `json:"processedAt,omitempty"`
+}
+
+type IMRetryBatchRequest struct {
+	DeliveryIDs []string `json:"deliveryIds"`
+}
+
+type IMDeliveryHistoryFilters struct {
+	DeliveryID string `json:"deliveryId,omitempty"`
+	Status     string `json:"status,omitempty"`
+	Platform   string `json:"platform,omitempty"`
+	EventType  string `json:"eventType,omitempty"`
+	Kind       string `json:"kind,omitempty"`
+	Since      string `json:"since,omitempty"`
+}
+
+type IMRetryBatchItemResult struct {
+	DeliveryID string           `json:"deliveryId"`
+	Status     IMDeliveryStatus `json:"status"`
+	Message    string           `json:"message,omitempty"`
+}
+
+type IMRetryBatchResponse struct {
+	Results []IMRetryBatchItemResult `json:"results"`
+}
+
+type IMTestSendRequest struct {
+	DeliveryID string            `json:"deliveryId,omitempty"`
+	Platform   string            `json:"platform"`
+	ChannelID  string            `json:"channelId"`
+	ProjectID  string            `json:"projectId,omitempty"`
+	BridgeID   string            `json:"bridgeId,omitempty"`
+	Text       string            `json:"text"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+}
+
+type IMTestSendResponse struct {
+	DeliveryID      string           `json:"deliveryId"`
+	Status          IMDeliveryStatus `json:"status"`
+	FailureReason   string           `json:"failureReason,omitempty"`
+	DowngradeReason string           `json:"downgradeReason,omitempty"`
+	ProcessedAt     string           `json:"processedAt,omitempty"`
+	LatencyMs       int64            `json:"latencyMs,omitempty"`
 }
 
 // IMActionBinding persists the link between a backend entity and the

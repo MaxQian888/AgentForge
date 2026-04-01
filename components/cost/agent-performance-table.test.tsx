@@ -1,6 +1,15 @@
 import { render, screen } from "@testing-library/react";
 import { AgentPerformanceTable } from "./agent-performance-table";
 
+jest.mock("@/hooks/use-breakpoint", () => ({
+  useBreakpoint: () => ({
+    breakpoint: "desktop",
+    isDesktop: true,
+    isTablet: false,
+    isMobile: false,
+  }),
+}));
+
 describe("AgentPerformanceTable", () => {
   it("shows an empty-state message when no records exist", () => {
     render(<AgentPerformanceTable data={[]} />);

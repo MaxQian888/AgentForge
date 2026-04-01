@@ -4,6 +4,10 @@ import { useTranslations } from "next-intl";
 import { Shield, Pencil, Trash2, Wrench, BookOpen, AlertCircle } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  buildRoleCapabilitySourceFromManifest,
+  resolveRoleSkillReferences,
+} from "@/lib/roles/role-management";
 import type { RoleManifest, RoleSkillCatalogEntry } from "@/lib/stores/role-store";
 
 interface RoleCardProps {
@@ -19,10 +23,21 @@ export function RoleCard({ role, skillCatalog = [], onEdit, onDelete }: RoleCard
   const skills = role.capabilities.skills ?? [];
   const autoLoadCount = skills.filter((skill) => skill.autoLoad).length;
   const onDemandCount = skills.length - autoLoadCount;
-  const resolvedCount = skills.filter((skill) =>
-    skillCatalog.some((entry) => entry.path === skill.path),
+  const skillResolution = resolveRoleSkillReferences({
+    skills,
+    catalog: skillCatalog,
+    roleCapabilities: buildRoleCapabilitySourceFromManifest(role),
+  });
+  const resolvedCount = skillResolution.filter((skill) => skill.status === "resolved").length;
+  const unresolvedCount = skillResolution.length - resolvedCount;
+  const blockingCount = skillResolution.filter(
+    (skill) => skill.compatibilityStatus === "blocking",
   ).length;
-  const unresolvedCount = skills.length - resolvedCount;
+  const warningCount = skillResolution.filter(
+    (skill) => skill.compatibilityStatus === "warning",
+  ).length;
+  const pluginConsumerCount = role.pluginConsumers?.length ?? 0;
+  const deleteBlocked = pluginConsumerCount > 0;
 
   return (
     <div className="relative overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm transition-colors hover:bg-accent/30">
@@ -90,6 +105,24 @@ export function RoleCard({ role, skillCatalog = [], onEdit, onDelete }: RoleCard
             {unresolvedCount} unresolved
           </span>
         ) : null}
+        {blockingCount > 0 ? (
+          <span className="flex items-center gap-1 text-destructive">
+            <AlertCircle className="size-3" />
+            {blockingCount} blocking
+          </span>
+        ) : null}
+        {warningCount > 0 ? (
+          <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+            <AlertCircle className="size-3" />
+            {warningCount} warning
+          </span>
+        ) : null}
+        {pluginConsumerCount > 0 ? (
+          <span className="flex items-center gap-1 text-amber-600 dark:text-amber-400">
+            <AlertCircle className="size-3" />
+            {pluginConsumerCount} plugin consumer
+          </span>
+        ) : null}
       </div>
 
       {/* Actions */}
@@ -109,6 +142,12 @@ export function RoleCard({ role, skillCatalog = [], onEdit, onDelete }: RoleCard
           size="sm"
           className="h-7 px-2 text-xs text-muted-foreground"
           onClick={onDelete}
+          disabled={deleteBlocked}
+          title={
+            deleteBlocked
+              ? `Cannot delete while ${pluginConsumerCount} plugin consumer still references this role.`
+              : undefined
+          }
           aria-label={`Delete ${role.metadata.name}`}
         >
           <Trash2 className="mr-1 size-3" />

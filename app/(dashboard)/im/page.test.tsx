@@ -1,17 +1,27 @@
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import IMBridgePage from "./page";
 
 const imState = {
+  channels: [{ id: "channel-1", platform: "slack", channelId: "C123" }],
   loading: false,
   error: null as string | null,
   bridgeStatus: {
     health: "healthy",
+    pendingDeliveries: 2,
+    recentFailures: 1,
   },
+  deliveries: [
+    { id: "delivery-1", status: "delivered" },
+    { id: "delivery-2", status: "failed" },
+    { id: "delivery-3", status: "suppressed" },
+  ],
+  lastTestSendResult: null as null | { status: string },
   fetchChannels: jest.fn(),
   fetchBridgeStatus: jest.fn(),
   fetchDeliveryHistory: jest.fn(),
   fetchEventTypes: jest.fn(),
+  testSend: jest.fn(),
 };
 
 jest.mock("next-intl", () => ({
@@ -77,13 +87,23 @@ jest.mock("@/lib/stores/im-store", () => ({
 
 describe("IMBridgePage", () => {
   beforeEach(() => {
+    imState.channels = [{ id: "channel-1", platform: "slack", channelId: "C123" }];
     imState.loading = false;
     imState.error = null;
     imState.bridgeStatus.health = "healthy";
+    imState.bridgeStatus.pendingDeliveries = 2;
+    imState.bridgeStatus.recentFailures = 1;
+    imState.deliveries = [
+      { id: "delivery-1", status: "delivered" },
+      { id: "delivery-2", status: "failed" },
+      { id: "delivery-3", status: "suppressed" },
+    ];
+    imState.lastTestSendResult = null;
     imState.fetchChannels.mockReset();
     imState.fetchBridgeStatus.mockReset();
     imState.fetchDeliveryHistory.mockReset();
     imState.fetchEventTypes.mockReset();
+    imState.testSend.mockReset();
   });
 
   it("loads all IM bridge datasets on mount", () => {
@@ -94,6 +114,10 @@ describe("IMBridgePage", () => {
     expect(imState.fetchDeliveryHistory).toHaveBeenCalledTimes(1);
     expect(imState.fetchEventTypes).toHaveBeenCalledTimes(1);
     expect(screen.getByText("healthy")).toBeInTheDocument();
+    expect(screen.getByText("im.summaryPending: 2")).toBeInTheDocument();
+    expect(screen.getByText("im.summaryFailures: 1")).toBeInTheDocument();
+    expect(screen.getByText("im.summarySuccessRate: 67%")).toBeInTheDocument();
+    expect(screen.getByText("im.testSendTitle")).toBeInTheDocument();
     expect(screen.getByTestId("im-channel-config")).toBeInTheDocument();
     expect(screen.getByTestId("im-bridge-health")).toBeInTheDocument();
     expect(screen.getByTestId("im-message-history")).toBeInTheDocument();
@@ -112,5 +136,33 @@ describe("IMBridgePage", () => {
     expect(imState.fetchBridgeStatus).toHaveBeenCalledTimes(3);
     expect(imState.fetchDeliveryHistory).toHaveBeenCalledTimes(3);
     expect(imState.fetchEventTypes).toHaveBeenCalledTimes(3);
+  });
+
+  it("uses the fallback channel for the currently selected platform when sending a test message", async () => {
+    const user = userEvent.setup();
+    imState.channels = [
+      {
+        id: "channel-feishu",
+        platform: "feishu",
+        channelId: "oc_feishu",
+      },
+      {
+        id: "channel-slack",
+        platform: "slack",
+        channelId: "C123",
+      },
+    ];
+
+    render(<IMBridgePage />);
+
+    await user.click(screen.getByRole("button", { name: "im.testSendButton" }));
+
+    await waitFor(() => {
+      expect(imState.testSend).toHaveBeenCalledWith({
+        platform: "slack",
+        channelId: "C123",
+        text: "ping",
+      });
+    });
   });
 });

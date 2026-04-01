@@ -72,14 +72,15 @@ The system SHALL reject malformed advanced authoring input through preview or sa
 - **THEN** the operator can correct the issue before any save attempt or sandbox probe
 
 ### Requirement: Preview and sandbox explain role-skill resolution without conflating it with runtime readiness
-The system SHALL include role-skill resolution context in preview and sandbox authoring feedback so operators can see which configured skill references are resolved by the authoritative repository catalog, which are inherited or template-derived, and which remain unresolved manual references. This feedback MUST distinguish authoring-level skill-resolution warnings from runtime readiness blockers because the current execution profile does not auto-load role skills directly.
+The system SHALL include role-skill resolution and compatibility context in preview and sandbox authoring feedback so operators can see which configured skill references are resolved by the authoritative repository catalog, which are inherited or template-derived, which transitive skills will load through dependency closure, and what declared tool requirements apply to the effective role-skill tree. This feedback MUST distinguish authoring-level resolution warnings from runtime readiness blockers such as missing auto-load skills or incompatible auto-load tool requirements.
 
-#### Scenario: Preview shows effective skill-tree resolution for an unsaved child draft
-- **WHEN** the operator previews an unsaved draft whose effective skill tree includes inherited skills, template-copied skills, and newly added manual references
-- **THEN** the preview result shows the effective role skills after inheritance or template application
-- **THEN** the authoring flow can indicate for each effective skill whether it is catalog-resolved, inherited, template-derived, or unresolved
+#### Scenario: Preview shows effective skill-tree resolution and compatibility for an unsaved child draft
+- **WHEN** the operator previews an unsaved draft whose effective skill tree includes inherited skills, template-copied skills, newly added manual references, and auto-load dependencies
+- **THEN** the preview result shows the effective role skills after inheritance or template application together with any transitive loaded skills
+- **THEN** the authoring flow can indicate for each effective skill whether it is catalog-resolved, inherited, template-derived, unresolved, and whether its declared tool requirements are currently compatible with the effective role
 
-#### Scenario: Unresolved skill references surface as authoring warnings instead of runtime blockers
-- **WHEN** the operator runs preview or sandbox for a valid draft that includes one or more unresolved manual skill references
-- **THEN** the result returns authoring feedback that those skill references are unresolved in the current repository catalog
-- **THEN** the flow does not report that condition as a runtime readiness blocker unless some separate runtime prerequisite is actually missing
+#### Scenario: Sandbox separates warning-only inventory gaps from blocking compatibility failures
+- **WHEN** the operator runs sandbox for a valid draft that includes both a non-auto-load unresolved manual skill reference and an auto-load skill whose declared tool requirements are not covered by the effective role tool inventory
+- **THEN** the sandbox result reports the unresolved non-auto-load skill as warning-only authoring or inventory context
+- **THEN** the auto-load compatibility failure is returned as a blocking readiness issue before any probe is executed
+

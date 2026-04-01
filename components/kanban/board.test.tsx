@@ -179,4 +179,57 @@ describe("Board", () => {
     expect(screen.queryByTestId("task-blocked-task-2")).not.toBeInTheDocument();
     expect(await screen.findByText("Cannot transition from inbox to blocked")).toBeInTheDocument();
   });
+
+  it("supports hiding and reordering board columns through the configuration menu", async () => {
+    const user = userEvent.setup();
+    const tasks = [
+      makeTask({ id: "task-1", title: "Build dashboard", status: "inbox" }),
+      makeTask({ id: "task-2", title: "Review queues", status: "done" }),
+    ];
+
+    render(
+      <Board
+        tasks={tasks}
+        allTasks={tasks}
+        selectedTaskId={null}
+        displayOptions={{
+          density: "comfortable",
+          showDescriptions: true,
+          showLinkedDocs: false,
+          boardColumnOrder: [
+            "inbox",
+            "triaged",
+            "assigned",
+            "in_progress",
+            "blocked",
+            "in_review",
+            "changes_requested",
+            "done",
+            "cancelled",
+            "budget_exceeded",
+          ],
+          hiddenBoardColumns: [],
+        }}
+        linkedDocsByTask={{}}
+        onTaskClick={jest.fn()}
+        onTaskStatusChange={jest.fn()}
+        onUpdateBoardColumns={jest.fn()}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Configure Columns" }));
+    await user.click(screen.getByRole("button", { name: "Hide blocked" }));
+
+    expect(screen.queryByTestId("column-blocked")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Move done left" }));
+
+    const columnIds = screen
+      .getAllByTestId(/column-/)
+      .map((column) => column.getAttribute("data-testid"));
+    expect(columnIds).not.toContain("column-blocked");
+    expect(columnIds.indexOf("column-done")).toBeLessThan(
+      columnIds.indexOf("column-changes_requested"),
+    );
+  });
 });

@@ -255,7 +255,8 @@ describe("SettingsPage — Appearance section", () => {
       render(<SettingsPage />);
     });
 
-    const languageSelect = screen.getByRole("combobox", { name: settingsMessages.language });
+    const selects = screen.getAllByLabelText("coding-agent-select");
+    const languageSelect = selects[0];
     await user.selectOptions(languageSelect, "zh-CN");
 
     expect(mockSetLocale).toHaveBeenCalledWith("zh-CN");
@@ -416,7 +417,7 @@ describe("SettingsPage", () => {
     });
 
     const selects = screen.getAllByLabelText("coding-agent-select");
-    await user.selectOptions(selects[0], "opencode");
+    await user.selectOptions(selects[1], "opencode");
 
     expect(screen.getByText("Draft runtime selection differs from the last saved project settings.")).toBeInTheDocument();
     expect(screen.getByText("OpenCode CLI is not installed")).toBeInTheDocument();
@@ -524,14 +525,14 @@ describe("SettingsPage", () => {
     setControlValue(screen.getByRole("textbox", { name: "Webhook URL" }), "https://hooks.example.com/next");
 
     const selects = screen.getAllByLabelText("coding-agent-select");
-    await user.selectOptions(selects[1], "codex");
-    await user.selectOptions(selects[2], "gpt-5-codex-high");
-    await user.selectOptions(selects[3], "yes");
+    await user.selectOptions(selects[2], "codex");
+    await user.selectOptions(selects[3], "gpt-5-codex-high");
     await user.selectOptions(selects[4], "yes");
-    await user.selectOptions(selects[5], "layer3");
-    await user.selectOptions(selects[6], "critical");
-    await user.selectOptions(selects[7], "yes");
+    await user.selectOptions(selects[5], "yes");
+    await user.selectOptions(selects[6], "layer3");
+    await user.selectOptions(selects[7], "critical");
     await user.selectOptions(selects[8], "yes");
+    await user.selectOptions(selects[9], "yes");
 
     await user.click(screen.getByRole("button", { name: "push" }));
     await user.click(screen.getByRole("button", { name: "pr_opened" }));

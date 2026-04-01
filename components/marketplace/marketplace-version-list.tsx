@@ -2,19 +2,21 @@
 
 import { useEffect } from "react";
 import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { Download } from "lucide-react";
 import { useMarketplaceStore } from "@/lib/stores/marketplace-store";
 import { formatDistanceToNow } from "date-fns";
 
 const MARKETPLACE_URL =
-  process.env.NEXT_PUBLIC_MARKETPLACE_URL ?? "http://localhost:7779";
+  process.env.NEXT_PUBLIC_MARKETPLACE_URL ?? "http://localhost:7781";
 
 interface Props {
   itemId: string;
+  canManage?: boolean;
 }
 
-export function MarketplaceVersionList({ itemId }: Props) {
-  const { fetchItemVersions, selectedItemVersions } = useMarketplaceStore();
+export function MarketplaceVersionList({ itemId, canManage = false }: Props) {
+  const { fetchItemVersions, selectedItemVersions, yankVersion } = useMarketplaceStore();
 
   useEffect(() => {
     void fetchItemVersions(itemId);
@@ -52,14 +54,27 @@ export function MarketplaceVersionList({ itemId }: Props) {
             </p>
           </div>
           {!v.is_yanked && (
-            <a
-              href={`${MARKETPLACE_URL}/api/v1/items/${itemId}/versions/${v.version}/download`}
-              className="text-xs text-blue-500 hover:underline flex items-center gap-1"
-              download
-            >
-              <Download className="w-3 h-3" />
-              Download
-            </a>
+            <div className="flex items-center gap-2">
+              <a
+                href={`${MARKETPLACE_URL}/api/v1/items/${itemId}/versions/${v.version}/download`}
+                className="text-xs text-blue-500 hover:underline flex items-center gap-1"
+                download
+              >
+                <Download className="w-3 h-3" />
+                Download
+              </a>
+              {canManage ? (
+                <Button
+                  type="button"
+                  variant="outline"
+                  size="sm"
+                  className="h-7 text-xs"
+                  onClick={() => void yankVersion(itemId, v.version)}
+                >
+                  Yank
+                </Button>
+              ) : null}
+            </div>
           )}
         </div>
       ))}

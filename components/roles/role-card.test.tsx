@@ -69,6 +69,17 @@ const reviewRole: RoleManifest = {
     requireReview: true,
   },
   extends: "base-reviewer",
+  pluginConsumers: [
+    {
+      pluginId: "workflow.release-train",
+      pluginName: "Release Train",
+      pluginKind: "WorkflowPlugin",
+      lifecycleState: "enabled",
+      status: "enabled",
+      blocking: true,
+      references: ["workflow.roles", "steps.review.role"],
+    },
+  ],
 };
 
 const skillCatalog: RoleSkillCatalogEntry[] = [
@@ -90,5 +101,8 @@ describe("RoleCard", () => {
     expect(screen.getByText("1 auto / 1 on-demand")).toBeInTheDocument();
     expect(screen.getByText("Review gate: required before execution")).toBeInTheDocument();
     expect(screen.getByText("1 unresolved")).toBeInTheDocument();
+    expect(screen.getByText("1 warning")).toBeInTheDocument();
+    expect(screen.getByText("1 plugin consumer")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Delete Reviewer" })).toBeDisabled();
   });
 });

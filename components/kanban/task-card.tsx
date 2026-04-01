@@ -26,6 +26,7 @@ import {
 import type { Task, TaskPriority, TaskStatus } from "@/lib/stores/task-store";
 import type { LinkedDocItem } from "@/components/tasks/linked-docs-panel";
 import { buildDocsHref } from "@/lib/route-hrefs";
+import { HighlightedText } from "@/components/shared/highlighted-text";
 
 const priorityColors: Record<TaskPriority, string> = {
   urgent: "bg-red-500/15 text-red-700 dark:text-red-400",
@@ -39,6 +40,80 @@ const progressColors = {
   warning: "bg-amber-500/15 text-amber-700 dark:text-amber-400",
   stalled: "bg-rose-500/15 text-rose-700 dark:text-rose-400",
 } as const;
+
+function focusSiblingBoardCard(
+  current: HTMLElement,
+  key: "ArrowUp" | "ArrowDown" | "ArrowLeft" | "ArrowRight"
+): boolean {
+  const currentColumn = current.closest<HTMLElement>("[data-board-column]");
+  if (!currentColumn) {
+    return false;
+  }
+
+  const cardsInColumn = Array.from(
+    currentColumn.querySelectorAll<HTMLElement>('[data-board-task-card="true"]')
+  );
+  const currentIndex = cardsInColumn.indexOf(current);
+  if (currentIndex === -1) {
+    return false;
+  }
+
+  if (key === "ArrowUp" || key === "ArrowDown") {
+    const nextIndex = key === "ArrowUp" ? currentIndex - 1 : currentIndex + 1;
+    const nextCard =
+      key === "ArrowUp" ? cardsInColumn[currentIndex - 1] : cardsInColumn[currentIndex + 1];
+
+    if (!nextCard) {
+      return false;
+    }
+
+    nextCard.dataset.boardNavIndex = String(nextIndex);
+    nextCard.focus();
+    return true;
+  }
+
+  const boardColumns = Array.from(
+    document.querySelectorAll<HTMLElement>("[data-board-column]")
+  );
+  const currentColumnIndex = boardColumns.indexOf(currentColumn);
+  if (currentColumnIndex === -1) {
+    return false;
+  }
+
+  const adjacentColumn =
+    key === "ArrowLeft"
+      ? boardColumns[currentColumnIndex - 1]
+      : boardColumns[currentColumnIndex + 1];
+  if (!adjacentColumn) {
+    return false;
+  }
+
+  const adjacentCards = Array.from(
+    adjacentColumn.querySelectorAll<HTMLElement>('[data-board-task-card="true"]')
+  );
+  if (adjacentCards.length === 0) {
+    return false;
+  }
+
+  const requestedRow = Number(current.dataset.boardNavIndex ?? currentIndex);
+  const targetIndex = Math.min(requestedRow, adjacentCards.length - 1);
+  const targetCard = adjacentCards[targetIndex];
+  if (!targetCard) {
+    return false;
+  }
+
+  targetCard.dataset.boardNavIndex = String(requestedRow);
+  targetCard.focus();
+  return true;
+}
+
+function formatDueDate(value: string | null): string | null {
+  if (!value) {
+    return null;
+  }
+
+  return new Date(value).toISOString().slice(0, 10);
+}
 
 function formatProgressHealth(label: NonNullable<Task["progress"]>["healthStatus"]) {
   switch (label) {
@@ -74,6 +149,7 @@ interface TaskCardProps {
   showDescription: boolean;
   linkedDocs?: LinkedDocItem[];
   subtaskStats?: { total: number; done: number };
+  searchQuery?: string;
   onClick: () => void;
   onToggleSelect?: (taskId: string) => void;
   onQuickStatusChange?: (taskId: string, status: TaskStatus) => void;
@@ -90,6 +166,7 @@ export function TaskCard({
   showDescription,
   linkedDocs = [],
   subtaskStats,
+  searchQuery,
   onClick,
   onToggleSelect,
   onQuickStatusChange,
@@ -97,6 +174,7 @@ export function TaskCard({
 }: TaskCardProps) {
   const previewDoc = linkedDocs[0];
   const [docPreviewOpen, setDocPreviewOpen] = useState(false);
+  const dueDate = formatDueDate(task.plannedEndAt);
 
   return (
     <Draggable draggableId={task.id} index={index} isDragDisabled={isPending}>
@@ -115,16 +193,43 @@ export function TaskCard({
             onClick();
           }}
           data-task-id={task.id}
+          data-board-task-card="true"
           data-selected={isSelected ? "true" : "false"}
           aria-busy={isPending}
+          role="button"
+          tabIndex={0}
           className={cn(
             "cursor-pointer rounded-md border bg-card shadow-sm transition-shadow hover:shadow-md",
             density === "compact" ? "p-2.5" : "p-3",
             isSelected && "ring-2 ring-primary/25 border-primary/40",
             isMultiSelected && "ring-2 ring-blue-500/30 border-blue-500/40 bg-blue-500/5",
             isPending && "cursor-wait opacity-80",
-            snapshot.isDragging && "shadow-lg ring-2 ring-primary/20"
+            snapshot.isDragging && "shadow-lg ring-2 ring-primary/20",
+            "focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-primary/35 focus-visible:border-primary/50"
           )}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              onClick();
+              return;
+            }
+
+            if (
+              event.key === "ArrowUp" ||
+              event.key === "ArrowDown" ||
+              event.key === "ArrowLeft" ||
+              event.key === "ArrowRight"
+            ) {
+              const moved = focusSiblingBoardCard(
+                event.currentTarget,
+                event.key
+              );
+
+              if (moved) {
+                event.preventDefault();
+              }
+            }
+          }}
         >
           <div className="flex items-start gap-2">
             {onToggleSelect ? (
@@ -137,7 +242,7 @@ export function TaskCard({
               />
             ) : null}
             <p className="mb-2 text-sm font-medium leading-snug flex-1">
-              {task.title}
+              <HighlightedText text={task.title} query={searchQuery} />
             </p>
             {(onQuickStatusChange || onQuickPriorityChange) ? (
               <DropdownMenu>
@@ -187,7 +292,7 @@ export function TaskCard({
           </div>
           {showDescription && task.description ? (
             <p className="mb-2 text-xs text-muted-foreground">
-              {task.description}
+              <HighlightedText text={task.description} query={searchQuery} />
             </p>
           ) : null}
           {task.labels && task.labels.length > 0 && (
@@ -221,6 +326,13 @@ export function TaskCard({
               </span>
             </div>
           )}
+          {dueDate ? (
+            <div className="mb-2">
+              <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                {`Due ${dueDate}`}
+              </Badge>
+            </div>
+          ) : null}
           <div className="flex items-center justify-between">
             <Badge
               variant="secondary"
@@ -300,12 +412,16 @@ export function TaskCard({
                   ${task.cost.toFixed(2)}
                 </span>
               ) : null}
-              {task.assigneeName && (
+              {task.assigneeName ? (
                 <Avatar className="size-5">
                   <AvatarFallback className="text-[10px]">
                     {task.assigneeName[0]?.toUpperCase()}
                   </AvatarFallback>
                 </Avatar>
+              ) : (
+                <Badge variant="outline" className="text-[10px] text-muted-foreground">
+                  Unassigned
+                </Badge>
               )}
             </div>
           </div>

@@ -86,6 +86,13 @@ describe("useWSStore", () => {
     useAgentStore.setState({
       agents: [],
       agentOutputs: new Map(),
+      agentToolCalls: new Map(),
+      agentToolResults: new Map(),
+      agentReasoning: new Map(),
+      agentFileChanges: new Map(),
+      agentTodos: new Map(),
+      agentPartialMessages: new Map(),
+      agentPermissionRequests: new Map(),
       pool: { active: 0, max: 2, available: 2, pausedResumable: 0 },
       loading: false,
     });
@@ -1177,6 +1184,228 @@ describe("useWSStore", () => {
     ).not.toBeNull();
   });
 
+  it("applies agent queue events (queued, cancelled, promoted, failed) via applyAgentEvent", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+    const client = getLatestClient();
+
+    const basePayload = {
+      id: "run-q1",
+      taskId: "task-1",
+      memberId: "member-1",
+      status: "queued",
+      createdAt: "2026-04-01T09:00:00.000Z",
+      startedAt: "2026-04-01T09:00:00.000Z",
+      lastActivityAt: "2026-04-01T09:00:00.000Z",
+    };
+
+    client?.emit("agent.queued", { payload: { ...basePayload, status: "queued" } });
+    expect(useAgentStore.getState().agents[0]).toEqual(
+      expect.objectContaining({ id: "run-q1", status: "queued" }),
+    );
+
+    client?.emit("agent.queue.promoted", { payload: { ...basePayload, status: "running" } });
+    expect(useAgentStore.getState().agents[0]).toEqual(
+      expect.objectContaining({ id: "run-q1", status: "running" }),
+    );
+
+    client?.emit("agent.queue.cancelled", { payload: { ...basePayload, status: "cancelled" } });
+    expect(useAgentStore.getState().agents[0]).toEqual(
+      expect.objectContaining({ id: "run-q1", status: "cancelled" }),
+    );
+
+    client?.emit("agent.queue.failed", { payload: { ...basePayload, status: "failed" } });
+    expect(useAgentStore.getState().agents[0]).toEqual(
+      expect.objectContaining({ id: "run-q1", status: "failed" }),
+    );
+
+    // Pool should stay in sync
+    expect(useAgentStore.getState().pool).toEqual(
+      expect.objectContaining({ active: 0, pausedResumable: 0 }),
+    );
+  });
+
+  it("applies agent streaming events (tool_call, tool_result, reasoning, file_change, todo_update, partial_message, permission_request)", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+    const client = getLatestClient();
+
+    client?.emit("agent.tool_call", {
+      payload: {
+        agentId: "agent-s1",
+        toolName: "Read",
+        toolCallId: "tc-1",
+        input: { path: "/foo" },
+        turnNumber: 1,
+      },
+    });
+    expect(useAgentStore.getState().agentToolCalls.get("agent-s1")).toEqual([
+      expect.objectContaining({ toolName: "Read", toolCallId: "tc-1" }),
+    ]);
+
+    client?.emit("agent.tool_result", {
+      payload: {
+        agentId: "agent-s1",
+        toolName: "Read",
+        toolCallId: "tc-1",
+        output: "file contents",
+        isError: false,
+      },
+    });
+    expect(useAgentStore.getState().agentToolResults.get("agent-s1")).toEqual([
+      expect.objectContaining({ toolName: "Read", output: "file contents", isError: false }),
+    ]);
+
+    client?.emit("agent.reasoning", {
+      payload: { agentId: "agent-s1", content: "Thinking about the problem..." },
+    });
+    expect(useAgentStore.getState().agentReasoning.get("agent-s1")).toBe(
+      "Thinking about the problem...",
+    );
+
+    client?.emit("agent.file_change", {
+      payload: {
+        agentId: "agent-s1",
+        files: [{ path: "src/index.ts", changeType: "modified" }],
+      },
+    });
+    expect(useAgentStore.getState().agentFileChanges.get("agent-s1")).toEqual([
+      expect.objectContaining({ path: "src/index.ts", changeType: "modified" }),
+    ]);
+
+    client?.emit("agent.todo_update", {
+      payload: {
+        agentId: "agent-s1",
+        todos: [{ id: "todo-1", content: "Fix bug", status: "in_progress" }],
+      },
+    });
+    expect(useAgentStore.getState().agentTodos.get("agent-s1")).toEqual([
+      expect.objectContaining({ id: "todo-1", content: "Fix bug" }),
+    ]);
+
+    client?.emit("agent.partial_message", {
+      payload: { agentId: "agent-s1", content: "Partial output so far..." },
+    });
+    expect(useAgentStore.getState().agentPartialMessages.get("agent-s1")).toBe(
+      "Partial output so far...",
+    );
+
+    client?.emit("agent.permission_request", {
+      payload: {
+        agentId: "agent-s1",
+        requestId: "perm-1",
+        toolName: "Bash",
+      },
+    });
+    expect(useAgentStore.getState().agentPermissionRequests.get("agent-s1")).toEqual([
+      expect.objectContaining({ requestId: "perm-1", toolName: "Bash" }),
+    ]);
+  });
+
+  it("applies agent.snapshot via applyAgentEvent", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+    const client = getLatestClient();
+
+    client?.emit("agent.snapshot", {
+      payload: {
+        id: "run-snap",
+        taskId: "task-1",
+        memberId: "member-1",
+        status: "running",
+        turnCount: 5,
+        costUsd: 1.5,
+        createdAt: "2026-04-01T09:00:00.000Z",
+        startedAt: "2026-04-01T09:00:00.000Z",
+        lastActivityAt: "2026-04-01T09:05:00.000Z",
+      },
+    });
+
+    expect(useAgentStore.getState().agents[0]).toEqual(
+      expect.objectContaining({ id: "run-snap", status: "running", turns: 5 }),
+    );
+  });
+
+  it("applies review.created and review.fix_requested via applyReviewEvent", () => {
+    useReviewStore.setState({
+      reviewsByTask: { "task-1": [] },
+      allReviews: [],
+      allReviewsLoading: false,
+      loading: false,
+      error: null,
+    });
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+    const client = getLatestClient();
+
+    client?.emit("review.created", {
+      payload: {
+        id: "review-c1",
+        taskId: "task-1",
+        prUrl: "https://example.com/pr/10",
+        prNumber: 10,
+        layer: 1,
+        status: "in_progress",
+        riskLevel: "low",
+        findings: [],
+        summary: "new review",
+        recommendation: "approve",
+        costUsd: 0.1,
+        createdAt: "2026-04-01T10:00:00.000Z",
+        updatedAt: "2026-04-01T10:00:00.000Z",
+      },
+    });
+
+    expect(useReviewStore.getState().allReviews[0]).toEqual(
+      expect.objectContaining({ id: "review-c1", status: "in_progress" }),
+    );
+
+    client?.emit("review.fix_requested", {
+      payload: {
+        id: "review-c1",
+        taskId: "task-1",
+        prUrl: "https://example.com/pr/10",
+        prNumber: 10,
+        layer: 1,
+        status: "fix_requested",
+        riskLevel: "medium",
+        findings: [],
+        summary: "needs fixes",
+        recommendation: "request_changes",
+        costUsd: 0.2,
+        createdAt: "2026-04-01T10:00:00.000Z",
+        updatedAt: "2026-04-01T10:05:00.000Z",
+      },
+    });
+
+    expect(useReviewStore.getState().allReviews[0]).toEqual(
+      expect.objectContaining({ id: "review-c1", status: "fix_requested" }),
+    );
+  });
+
+  it("applies task.dependency_resolved by upserting the task", () => {
+    useWSStore.getState().connect("ws://localhost:7777/ws", "token");
+    const client = getLatestClient();
+
+    client?.emit("task.dependency_resolved", {
+      payload: {
+        task: {
+          id: "task-dep",
+          projectId: "project-1",
+          title: "Unblocked task",
+          description: "",
+          status: "ready",
+          priority: "medium",
+          createdAt: "2026-04-01T09:00:00.000Z",
+          updatedAt: "2026-04-01T09:10:00.000Z",
+        },
+      },
+    });
+
+    expect(useTaskStore.getState().tasks[0]).toEqual(
+      expect.objectContaining({ id: "task-dep", status: "ready" }),
+    );
+    expect(useDashboardStore.getState().tasks[0]).toEqual(
+      expect.objectContaining({ id: "task-dep" }),
+    );
+  });
+
   it("ignores malformed websocket envelopes without mutating stores", () => {
     useDashboardStore.setState({
       summary: null,
@@ -1211,6 +1440,21 @@ describe("useWSStore", () => {
     client?.emit("link.deleted", { payload: {} });
     client?.emit("task_comment.created", null);
     client?.emit("task_comment.resolved", { payload: {} });
+    client?.emit("agent.queued", { payload: {} });
+    client?.emit("agent.queue.cancelled", null);
+    client?.emit("agent.queue.promoted", { payload: {} });
+    client?.emit("agent.queue.failed", null);
+    client?.emit("agent.tool_call", { payload: {} });
+    client?.emit("agent.tool_result", null);
+    client?.emit("agent.reasoning", { payload: { agentId: "x" } });
+    client?.emit("agent.file_change", { payload: { agentId: "x" } });
+    client?.emit("agent.todo_update", { payload: { agentId: "x" } });
+    client?.emit("agent.partial_message", { payload: {} });
+    client?.emit("agent.permission_request", { payload: { agentId: "x" } });
+    client?.emit("agent.snapshot", null);
+    client?.emit("review.created", { payload: {} });
+    client?.emit("review.fix_requested", null);
+    client?.emit("task.dependency_resolved", { payload: {} });
 
     expect(useTaskStore.getState().tasks).toEqual([]);
     expect(useNotificationStore.getState().notifications).toEqual([]);

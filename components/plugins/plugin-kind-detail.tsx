@@ -11,6 +11,7 @@ interface PluginKindDetailProps {
 function WorkflowDetail({ plugin }: { plugin: PluginRecord }) {
   const workflow = plugin.spec.workflow;
   if (!workflow) return null;
+  const roleDependencies = plugin.roleDependencies ?? [];
 
   return (
     <div className="flex flex-col gap-3">
@@ -60,6 +61,30 @@ function WorkflowDetail({ plugin }: { plugin: PluginRecord }) {
       {workflow.limits?.maxRetries != null ? (
         <PluginDetailSection title="Limits">
           Max retries: {workflow.limits.maxRetries}
+        </PluginDetailSection>
+      ) : null}
+
+      {roleDependencies.length > 0 ? (
+        <PluginDetailSection title="Role dependency health">
+          <div className="flex flex-col gap-2 text-xs">
+            {roleDependencies.map((dependency) => (
+              <div
+                key={`${dependency.roleId}:${dependency.status}`}
+                className="rounded-md bg-muted/40 px-2 py-1.5"
+              >
+                <p className="font-medium text-foreground">
+                  {dependency.roleName
+                    ? `${dependency.roleName} (${dependency.roleId})`
+                    : dependency.roleId}{" "}
+                  · {dependency.status}
+                </p>
+                {dependency.references?.length ? (
+                  <p>References: {dependency.references.join(", ")}</p>
+                ) : null}
+                {dependency.message ? <p>{dependency.message}</p> : null}
+              </div>
+            ))}
+          </div>
         </PluginDetailSection>
       ) : null}
     </div>

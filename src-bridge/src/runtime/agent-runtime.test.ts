@@ -123,6 +123,17 @@ describe("AgentRuntime", () => {
     runtime.structuredOutput = {
       summary: "Done",
     };
+    runtime.costAccounting = {
+      totalCostUsd: 0.42,
+      inputTokens: 900,
+      outputTokens: 300,
+      cacheReadTokens: 45,
+      cacheCreationTokens: 120,
+      mode: "authoritative_total",
+      coverage: "full",
+      source: "anthropic_result_total",
+      components: [],
+    };
 
     expect(runtime.toStatus()).toMatchObject({
       task_id: "task-advanced",
@@ -132,6 +143,13 @@ describe("AgentRuntime", () => {
       subagent_count: 1,
       structured_output: {
         summary: "Done",
+      },
+      cost_accounting: {
+        total_cost_usd: 0.42,
+        cache_creation_tokens: 120,
+        mode: "authoritative_total",
+        coverage: "full",
+        source: "anthropic_result_total",
       },
     });
   });

@@ -121,6 +121,7 @@ type bridgeClassifyIntentRequest struct {
 	Candidates []string `json:"candidates"`
 	UserID     string   `json:"user_id"`
 	ProjectID  string   `json:"project_id"`
+	Context    any      `json:"context,omitempty"`
 }
 
 type bridgeDecomposeRequest struct {
@@ -199,9 +200,11 @@ func (h *BridgeAIHandler) ClassifyIntent(c echo.Context) error {
 	}
 
 	resp, err := h.client.ClassifyIntent(c.Request().Context(), bridge.ClassifyIntentRequest{
-		Text:      req.Text,
-		UserID:    req.UserID,
-		ProjectID: req.ProjectID,
+		Text:       req.Text,
+		Candidates: req.Candidates,
+		UserID:     req.UserID,
+		ProjectID:  req.ProjectID,
+		Context:    req.Context,
 	})
 	if err != nil {
 		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
@@ -398,6 +401,319 @@ func (h *BridgeToolsHandler) isAllowedManifestHost(host string) bool {
 	}
 	_, ok := h.allowedManifestHosts[host]
 	return ok
+}
+
+// --- Bridge proxy handlers for conversation management and runtime control ---
+
+// BridgeConversationClient covers conversation management operations.
+type BridgeConversationClient interface {
+	Fork(ctx context.Context, req bridge.ForkRequest) (*bridge.ForkResponse, error)
+	Rollback(ctx context.Context, req bridge.RollbackRequest) error
+	Revert(ctx context.Context, req bridge.RevertRequest) error
+	Unrevert(ctx context.Context, req bridge.UnrevertRequest) error
+	GetDiff(ctx context.Context, taskID string) (*bridge.DiffResponse, error)
+	GetMessages(ctx context.Context, taskID string) (*bridge.MessagesResponse, error)
+	ExecuteCommand(ctx context.Context, req bridge.CommandRequest) error
+	Interrupt(ctx context.Context, taskID string) error
+	SwitchModel(ctx context.Context, req bridge.ModelSwitchRequest) error
+	PermissionResponse(ctx context.Context, requestID string, payload bridge.PermissionResponsePayload) error
+	GetActive(ctx context.Context) ([]bridge.StatusResponse, error)
+	ListPlugins(ctx context.Context) (*bridge.PluginListResponse, error)
+	EnablePlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error)
+	DisablePlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error)
+}
+
+type BridgeConversationHandler struct {
+	client BridgeConversationClient
+}
+
+func NewBridgeConversationHandler(client BridgeConversationClient) *BridgeConversationHandler {
+	return &BridgeConversationHandler{client: client}
+}
+
+type bridgeForkRequest struct {
+	TaskID    string `json:"task_id" validate:"required"`
+	MessageID string `json:"message_id"`
+}
+
+func (h *BridgeConversationHandler) Fork(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	req := new(bridgeForkRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	resp, err := h.client.Fork(c.Request().Context(), bridge.ForkRequest{
+		TaskID:    req.TaskID,
+		MessageID: req.MessageID,
+	})
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+type bridgeRollbackRequest struct {
+	TaskID       string `json:"task_id" validate:"required"`
+	CheckpointID string `json:"checkpoint_id"`
+	Turns        int    `json:"turns"`
+}
+
+func (h *BridgeConversationHandler) Rollback(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	req := new(bridgeRollbackRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := h.client.Rollback(c.Request().Context(), bridge.RollbackRequest{
+		TaskID:       req.TaskID,
+		CheckpointID: req.CheckpointID,
+		Turns:        req.Turns,
+	}); err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"success": true})
+}
+
+type bridgeRevertRequest struct {
+	TaskID    string `json:"task_id" validate:"required"`
+	MessageID string `json:"message_id" validate:"required"`
+}
+
+func (h *BridgeConversationHandler) Revert(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	req := new(bridgeRevertRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := h.client.Revert(c.Request().Context(), bridge.RevertRequest{
+		TaskID:    req.TaskID,
+		MessageID: req.MessageID,
+	}); err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"success": true})
+}
+
+type bridgeUnrevertRequest struct {
+	TaskID string `json:"task_id" validate:"required"`
+}
+
+func (h *BridgeConversationHandler) Unrevert(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	req := new(bridgeUnrevertRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := h.client.Unrevert(c.Request().Context(), bridge.UnrevertRequest{
+		TaskID: req.TaskID,
+	}); err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"success": true})
+}
+
+func (h *BridgeConversationHandler) GetDiff(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	taskID := strings.TrimSpace(c.Param("task_id"))
+	if taskID == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "task_id is required"})
+	}
+	resp, err := h.client.GetDiff(c.Request().Context(), taskID)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *BridgeConversationHandler) GetMessages(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	taskID := strings.TrimSpace(c.Param("task_id"))
+	if taskID == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "task_id is required"})
+	}
+	resp, err := h.client.GetMessages(c.Request().Context(), taskID)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+type bridgeCommandRequest struct {
+	TaskID    string `json:"task_id" validate:"required"`
+	Command   string `json:"command" validate:"required"`
+	Arguments string `json:"arguments"`
+}
+
+func (h *BridgeConversationHandler) ExecuteCommand(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	req := new(bridgeCommandRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := h.client.ExecuteCommand(c.Request().Context(), bridge.CommandRequest{
+		TaskID:    req.TaskID,
+		Command:   req.Command,
+		Arguments: req.Arguments,
+	}); err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"success": true})
+}
+
+type bridgeInterruptRequest struct {
+	TaskID string `json:"task_id" validate:"required"`
+}
+
+func (h *BridgeConversationHandler) Interrupt(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	req := new(bridgeInterruptRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := h.client.Interrupt(c.Request().Context(), req.TaskID); err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"success": true})
+}
+
+type bridgeModelSwitchRequest struct {
+	TaskID string `json:"task_id" validate:"required"`
+	Model  string `json:"model" validate:"required"`
+}
+
+func (h *BridgeConversationHandler) SwitchModel(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	req := new(bridgeModelSwitchRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := h.client.SwitchModel(c.Request().Context(), bridge.ModelSwitchRequest{
+		TaskID: req.TaskID,
+		Model:  req.Model,
+	}); err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"success": true})
+}
+
+type bridgePermissionResponseRequest struct {
+	Decision string `json:"decision" validate:"required"`
+	Reason   string `json:"reason"`
+}
+
+func (h *BridgeConversationHandler) PermissionResponse(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	requestID := strings.TrimSpace(c.Param("request_id"))
+	if requestID == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "request_id is required"})
+	}
+	req := new(bridgePermissionResponseRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := h.client.PermissionResponse(c.Request().Context(), requestID, bridge.PermissionResponsePayload{
+		Decision: req.Decision,
+		Reason:   req.Reason,
+	}); err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]bool{"success": true})
+}
+
+func (h *BridgeConversationHandler) GetActive(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	resp, err := h.client.GetActive(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *BridgeConversationHandler) ListPlugins(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	resp, err := h.client.ListPlugins(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *BridgeConversationHandler) EnablePlugin(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	pluginID := strings.TrimSpace(c.Param("id"))
+	if pluginID == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "plugin id is required"})
+	}
+	resp, err := h.client.EnablePlugin(c.Request().Context(), pluginID)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
+}
+
+func (h *BridgeConversationHandler) DisablePlugin(c echo.Context) error {
+	if h.client == nil {
+		return c.JSON(http.StatusServiceUnavailable, model.ErrorResponse{Message: "bridge unavailable"})
+	}
+	pluginID := strings.TrimSpace(c.Param("id"))
+	if pluginID == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "plugin id is required"})
+	}
+	resp, err := h.client.DisablePlugin(c.Request().Context(), pluginID)
+	if err != nil {
+		return c.JSON(http.StatusBadGateway, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, resp)
 }
 
 func normalizeManifestHost(raw string) string {

@@ -1,5 +1,6 @@
 "use client";
 import { create } from "zustand";
+import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
 
@@ -280,44 +281,65 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   createProject: async (input) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
-    const api = createApiClient(API_URL);
-    const { data: createdProjectRaw } = await api.post<Record<string, unknown>>(
-      "/api/v1/projects",
-      {
-        ...input,
-        slug: toProjectSlug(input.name),
-      },
-      { token }
-    );
-    const project = normalizeProject(createdProjectRaw);
-    set((s) => ({ projects: [...s.projects, project] }));
+    try {
+      const api = createApiClient(API_URL);
+      const { data: createdProjectRaw } = await api.post<Record<string, unknown>>(
+        "/api/v1/projects",
+        {
+          ...input,
+          slug: toProjectSlug(input.name),
+        },
+        { token }
+      );
+      const project = normalizeProject(createdProjectRaw);
+      set((s) => ({ projects: [...s.projects, project] }));
+    } catch (error) {
+      toast.error("Failed to create project", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
+    }
   },
 
   updateProject: async (id, data) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
-    const api = createApiClient(API_URL);
-    const { data: updatedRaw } = await api.put<Record<string, unknown>>(
-      `/api/v1/projects/${id}`,
-      data,
-      { token }
-    );
-    const updated = normalizeProject(updatedRaw);
-    set((s) => ({
-      projects: s.projects.map((p) => (p.id === id ? updated : p)),
-      currentProject: s.currentProject?.id === id ? updated : s.currentProject,
-    }));
-    return updated;
+    try {
+      const api = createApiClient(API_URL);
+      const { data: updatedRaw } = await api.put<Record<string, unknown>>(
+        `/api/v1/projects/${id}`,
+        data,
+        { token }
+      );
+      const updated = normalizeProject(updatedRaw);
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === id ? updated : p)),
+        currentProject: s.currentProject?.id === id ? updated : s.currentProject,
+      }));
+      return updated;
+    } catch (error) {
+      toast.error("Failed to update project", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
+    }
   },
 
   deleteProject: async (id) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
-    const api = createApiClient(API_URL);
-    await api.delete(`/api/v1/projects/${id}`, { token });
-    set((s) => ({
-      projects: s.projects.filter((p) => p.id !== id),
-      currentProject: s.currentProject?.id === id ? null : s.currentProject,
-    }));
+    try {
+      const api = createApiClient(API_URL);
+      await api.delete(`/api/v1/projects/${id}`, { token });
+      set((s) => ({
+        projects: s.projects.filter((p) => p.id !== id),
+        currentProject: s.currentProject?.id === id ? null : s.currentProject,
+      }));
+    } catch (error) {
+      toast.error("Failed to delete project", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
+    }
   },
 }));

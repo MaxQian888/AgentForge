@@ -20,6 +20,10 @@ const storeState: { bridgeStatus: IMBridgeStatus } = {
     providers: [],
     providerDetails: [],
     health: "disconnected",
+    pendingDeliveries: 0,
+    recentFailures: 0,
+    recentDowngrades: 0,
+    averageLatencyMs: 0,
   },
 };
 
@@ -37,6 +41,10 @@ describe("IMBridgeHealth", () => {
       providers: [],
       providerDetails: [],
       health: "disconnected",
+      pendingDeliveries: 0,
+      recentFailures: 0,
+      recentDowngrades: 0,
+      averageLatencyMs: 0,
     };
   });
 
@@ -49,6 +57,16 @@ describe("IMBridgeHealth", () => {
       providerDetails: [
         {
           platform: "dingtalk",
+          status: "online",
+          transport: "live",
+          pendingDeliveries: 2,
+          recentFailures: 1,
+          recentDowngrades: 1,
+          lastDeliveryAt: "2026-03-26T01:20:00.000Z",
+          diagnostics: {
+            provider_id: "dingtalk",
+            webhook_status: "healthy",
+          },
           capabilityMatrix: {
             commandSurface: "mixed",
             structuredSurface: "action_card",
@@ -64,6 +82,12 @@ describe("IMBridgeHealth", () => {
         },
         {
           platform: "qqbot",
+          status: "online",
+          transport: "live",
+          pendingDeliveries: 0,
+          recentFailures: 0,
+          recentDowngrades: 0,
+          diagnostics: {},
           capabilityMatrix: {
             commandSurface: "mixed",
             structuredSurface: "none",
@@ -79,19 +103,29 @@ describe("IMBridgeHealth", () => {
         },
       ],
       health: "healthy",
+      pendingDeliveries: 2,
+      recentFailures: 1,
+      recentDowngrades: 1,
+      averageLatencyMs: 420,
     };
 
     render(<IMBridgeHealth />);
 
     expect(screen.getByText("Bridge Health")).toBeInTheDocument();
     expect(screen.getByText("Connected")).toBeInTheDocument();
-    expect(screen.getByText("healthy")).toBeInTheDocument();
+    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
     expect(screen.getByText(new Date(heartbeat).toLocaleString())).toBeInTheDocument();
+    expect(screen.getByText("Pending Deliveries")).toBeInTheDocument();
+    expect(screen.getAllByText("2").length).toBeGreaterThan(0);
+    expect(screen.getByText("Recent Failures")).toBeInTheDocument();
+    expect(screen.getByText("420 ms")).toBeInTheDocument();
     expect(screen.getByText("DingTalk")).toBeInTheDocument();
     expect(screen.getByText("QQ Bot")).toBeInTheDocument();
     expect(screen.getByText("action_card")).toBeInTheDocument();
     expect(screen.getAllByText("webhook")).toHaveLength(2);
     expect(screen.getByText("session_webhook")).toBeInTheDocument();
+    expect(screen.getByText("webhook_status")).toBeInTheDocument();
+    expect(screen.getAllByText("healthy").length).toBeGreaterThan(0);
   });
 
   it("shows disconnected fallbacks when no heartbeat or providers exist", () => {
@@ -114,6 +148,10 @@ describe("IMBridgeHealth", () => {
       providers: ["dingtalk", "qqbot"],
       providerDetails: [],
       health: "healthy",
+      pendingDeliveries: 0,
+      recentFailures: 0,
+      recentDowngrades: 0,
+      averageLatencyMs: 0,
     };
 
     render(<IMBridgeHealth />);

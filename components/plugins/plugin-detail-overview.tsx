@@ -36,6 +36,7 @@ function renderPermissions(plugin: PluginRecord): string {
 }
 
 export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
+  const roleConsumers = plugin.roleConsumers ?? [];
   return (
     <div className="flex flex-col gap-4">
       <div className="flex items-start justify-between gap-3">
@@ -84,6 +85,30 @@ export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
               ) : null}
               {plugin.source.version ? (
                 <p>Requested version: {plugin.source.version}</p>
+              ) : null}
+            </div>
+          </PluginDetailSection>
+        ) : null}
+
+        {plugin.source.type === "marketplace" || plugin.source.catalog || plugin.source.ref ? (
+          <PluginDetailSection title="Marketplace provenance">
+            <div className="grid gap-1">
+              {plugin.source.catalog ? (
+                <p>Marketplace item: {plugin.source.catalog}</p>
+              ) : null}
+              {plugin.source.ref ? (
+                <p>Selected version: {plugin.source.ref}</p>
+              ) : null}
+              <p>Source type: {plugin.source.type}</p>
+              {plugin.source.catalog ? (
+                <p>
+                  <a
+                    href={`/marketplace?item=${encodeURIComponent(plugin.source.catalog)}`}
+                    className="underline"
+                  >
+                    Open in marketplace
+                  </a>
+                </p>
               ) : null}
             </div>
           </PluginDetailSection>
@@ -164,6 +189,24 @@ export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
                   Update available: v{plugin.source.release.availableVersion}
                 </p>
               ) : null}
+            </div>
+          </PluginDetailSection>
+        ) : null}
+
+        {roleConsumers.length > 0 ? (
+          <PluginDetailSection title="Role consumers">
+            <div className="grid gap-1">
+              {roleConsumers.map((consumer) => (
+                <div key={`${consumer.roleId}:${consumer.referenceType}`} className="grid gap-0.5">
+                  <p>{consumer.roleName ? `${consumer.roleName} (${consumer.roleId})` : consumer.roleId}</p>
+                  <p>{consumer.referenceType} · {consumer.status}</p>
+                </div>
+              ))}
+              <p>
+                <a href="/roles" className="underline">
+                  Open roles workspace
+                </a>
+              </p>
             </div>
           </PluginDetailSection>
         ) : null}

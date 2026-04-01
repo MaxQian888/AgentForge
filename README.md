@@ -79,6 +79,7 @@ As of `2026-03-31`, the repository has already moved beyond a thin starter shell
 - `Scheduler operations workspace`: `app/(dashboard)/scheduler/page.tsx` now provides scheduler stats, registered job inspection, run history, draft schedule editing, and manual trigger controls.
 - `Memory workspace`: `app/(dashboard)/memory/page.tsx` now supports project-scoped memory search, category filtering, scope/category badges, and entry deletion.
 - `Plugin operator surfaces`: the plugin control plane now distinguishes catalog entries from installed plugins, includes built-in bundle/readiness verification, and exposes maintained authoring commands such as `pnpm create-plugin`, `pnpm plugin:verify`, and `pnpm plugin:verify:builtins`.
+- `Repo-owned skills`: canonical built-in skills now remain explicitly declared through `skills/builtin-bundle.yaml`, with a matching `pnpm skill:verify:builtins` drift check and marketplace-ready preview metadata derived from `SKILL.md` plus `agents/*.yaml`.
 - `IM operator UI`: the current frontend contract covers `feishu`, `dingtalk`, `slack`, `telegram`, `discord`, `wecom`, `qq`, and `qqbot`, with backend-driven event types, richer delivery diagnostics, payload preview, and platform-specific config fields.
 - `Marketplace`: `app/(dashboard)/marketplace/page.tsx` now provides a unified Skills/Plugin/Role marketplace with search, category filtering, featured items, detail views with version history and reviews, publish workflows, and install confirmation. The backend is a standalone Go microservice in `src-marketplace/` with its own database migrations, handler/service/repository layers, and admin moderation endpoints.
 - `Desktop shell`: the Tauri app now includes shared desktop window chrome with frameless titlebar controls, bounded sidecar supervision, runtime status queries, shell actions, and window-state synchronization through `lib/platform-runtime.ts`.
@@ -464,20 +465,22 @@ Useful marketplace commands:
 - `go test ./...`
 - `go build ./cmd/server`
 
-The marketplace backend runs on port `7779` by default and provides:
+The marketplace backend runs on port `7781` by default and provides:
 
 - REST API for item CRUD, version management, reviews, search, and category filtering
 - Admin-only endpoints for featuring and verifying marketplace items
-- Digest-based artifact integrity verification
-- Integration with the Go orchestrator's plugin install endpoint (`POST /api/v1/plugins/catalog/install`)
+- Typed install and consumption bridge metadata through the Go orchestrator (`/api/v1/marketplace/install` and `/api/v1/marketplace/consumption`)
+- Artifact package validation for plugin, role, and skill uploads before version publish succeeds
 
 The frontend marketplace page (`app/(dashboard)/marketplace/page.tsx`) exposes:
 
 - Search bar with type/category filtering and sort options (downloads, rating, newest)
+- Dedicated repo-owned built-in skills section that stays visible even when the standalone marketplace service is unavailable
 - Featured items section
-- Item detail view with version history, reviews, and install confirmation
-- Publish dialog for authors to submit new plugins, skills, or roles
-- Installed-items tracking through the marketplace store (`lib/stores/marketplace-store.ts`)
+- Item detail view with version history, reviews, moderation controls, install confirmation, downstream handoff links, and structured skill Markdown/YAML preview support
+- Publish dialog for authors to submit new plugins, skills, or roles, plus item-owned version upload
+- Typed installed/blocked/used tracking through the marketplace store (`lib/stores/marketplace-store.ts`)
+- Plugin local side-load entrypoint reused from within the marketplace workspace; unsupported role/skill side-load paths remain explicitly blocked
 
 Key marketplace components:
 
@@ -548,6 +551,7 @@ Current limitations:
 | `pnpm plugin:dev` | Start or reuse the minimal plugin authoring stack: Go orchestrator + TS bridge |
 | `pnpm plugin:verify` | Run the maintained sample plugin smoke workflow: build -> debug health |
 | `pnpm plugin:verify:builtins` | Verify the built-in plugin bundle contract and generated registry metadata |
+| `pnpm skill:verify:builtins`  | Verify the built-in skill bundle contract and marketplace preview prerequisites |
 | `pnpm tauri:dev` | Start Tauri dev mode with shared desktop prepare hooks for backend + TS bridge + IM Bridge |
 | `pnpm tauri:build` | Build the desktop app |
 | `pnpm build:bridge` | Install and build the TS/Bun bridge |

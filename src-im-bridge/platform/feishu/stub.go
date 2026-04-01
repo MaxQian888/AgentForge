@@ -13,6 +13,11 @@ import (
 	"github.com/agentforge/im-bridge/core"
 )
 
+var (
+	_ core.FormattedTextSender = (*Stub)(nil)
+	_ core.MessageUpdater      = (*Stub)(nil)
+)
+
 // Stub is a test-only Feishu platform implementation that exposes HTTP
 // endpoints for simulating incoming messages and inspecting replies.
 type Stub struct {
@@ -66,7 +71,7 @@ func (s *Stub) Metadata() core.PlatformMetadata {
 		Capabilities: core.PlatformCapabilities{
 			CommandSurface:     core.CommandSurfaceMixed,
 			StructuredSurface:  core.StructuredSurfaceCards,
-			AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateDeferredCardUpdate},
+			AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateEdit, core.AsyncUpdateDeferredCardUpdate},
 			ActionCallbackMode: core.ActionCallbackWebhook,
 			MessageScopes:      []core.MessageScope{core.MessageScopeChat, core.MessageScopeThread},
 			Mutability: core.MutabilitySemantics{
@@ -211,6 +216,54 @@ func (s *Stub) ReplyNative(ctx context.Context, replyCtx any, message *core.Nati
 	return nil
 }
 
+func (s *Stub) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
+	if message == nil {
+		return fmt.Errorf("formatted text is required")
+	}
+	s.mu.Lock()
+	s.replies = append(s.replies, stubReply{
+		ChatID:    chatID,
+		Content:   message.Content,
+		Timestamp: time.Now(),
+	})
+	s.mu.Unlock()
+	log.WithFields(log.Fields{"component": "feishu-stub", "chat_id": chatID, "format": string(message.Format)}).Info("SendFormattedText: " + message.Content)
+	return nil
+}
+
+func (s *Stub) ReplyFormattedText(ctx context.Context, replyCtx any, message *core.FormattedText) error {
+	if message == nil {
+		return fmt.Errorf("formatted text is required")
+	}
+	chatID := stubChatIDFromReplyContext(replyCtx)
+	s.mu.Lock()
+	s.replies = append(s.replies, stubReply{
+		ChatID:    chatID,
+		Content:   message.Content,
+		Timestamp: time.Now(),
+	})
+	s.mu.Unlock()
+	log.WithFields(log.Fields{"component": "feishu-stub", "chat_id": chatID, "format": string(message.Format)}).Info("ReplyFormattedText: " + message.Content)
+	return nil
+}
+
+func (s *Stub) UpdateFormattedText(ctx context.Context, replyCtx any, message *core.FormattedText) error {
+	return s.ReplyFormattedText(ctx, replyCtx, message)
+}
+
+func (s *Stub) UpdateMessage(ctx context.Context, replyCtx any, content string) error {
+	chatID := stubChatIDFromReplyContext(replyCtx)
+	s.mu.Lock()
+	s.replies = append(s.replies, stubReply{
+		ChatID:    chatID,
+		Content:   content,
+		Timestamp: time.Now(),
+	})
+	s.mu.Unlock()
+	log.WithFields(log.Fields{"component": "feishu-stub", "chat_id": chatID}).Info("UpdateMessage: " + content)
+	return nil
+}
+
 func (s *Stub) UpdateNative(ctx context.Context, replyCtx any, message *core.NativeMessage) error {
 	chatID := ""
 	if target, ok := replyCtx.(*core.ReplyTarget); ok {
@@ -232,6 +285,16 @@ func (s *Stub) Stop() error {
 		return s.server.Shutdown(context.Background())
 	}
 	return nil
+}
+
+func stubChatIDFromReplyContext(replyCtx any) string {
+	if msg, ok := replyCtx.(*core.Message); ok {
+		return msg.ChatID
+	}
+	if target, ok := replyCtx.(*core.ReplyTarget); ok {
+		return firstNonEmpty(target.ChatID, target.ChannelID)
+	}
+	return ""
 }
 
 // --- HTTP handlers for testing ---

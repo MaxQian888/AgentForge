@@ -7,6 +7,86 @@ import (
 	"github.com/agentforge/im-bridge/core"
 )
 
+const defaultCardEmbedColor = 0x5865F2 // Discord blurple
+
+func renderCardToDiscordMessage(card *core.Card) discordOutgoingMessage {
+	if card == nil {
+		return discordOutgoingMessage{}
+	}
+
+	embed := discordEmbed{
+		Title: strings.TrimSpace(card.Title),
+		Color: defaultCardEmbedColor,
+	}
+	for _, field := range card.Fields {
+		name := strings.TrimSpace(field.Label)
+		value := strings.TrimSpace(field.Value)
+		if name == "" && value == "" {
+			continue
+		}
+		if name == "" {
+			name = "Field"
+		}
+		embed.Fields = append(embed.Fields, discordEmbedField{
+			Name:   name,
+			Value:  value,
+			Inline: true,
+		})
+	}
+
+	var components []discordComponent
+	if len(card.Buttons) > 0 {
+		rowButtons := make([]discordComponent, 0, len(card.Buttons))
+		for i, button := range card.Buttons {
+			label := strings.TrimSpace(button.Text)
+			if label == "" {
+				continue
+			}
+			component := discordComponent{
+				Type:  componentTypeButton,
+				Label: label,
+			}
+			action := strings.TrimSpace(button.Action)
+			if strings.HasPrefix(action, "link:") {
+				component.Style = componentStyleLink
+				component.URL = strings.TrimPrefix(action, "link:")
+			} else {
+				component.Style = cardButtonStyle(button.Style)
+				if action != "" {
+					component.CustomID = action
+				} else {
+					component.CustomID = fmt.Sprintf("card-btn-%d", i)
+				}
+			}
+			rowButtons = append(rowButtons, component)
+		}
+		if len(rowButtons) > 0 {
+			components = append(components, discordComponent{
+				Type:       componentTypeActionRow,
+				Components: rowButtons,
+			})
+		}
+	}
+
+	fallback := strings.TrimSpace(card.Title)
+	return discordOutgoingMessage{
+		Content:    fallback,
+		Embeds:     []discordEmbed{embed},
+		Components: components,
+	}
+}
+
+func cardButtonStyle(style string) int {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "primary":
+		return componentStylePrimary
+	case "danger":
+		return componentStyleDanger
+	default:
+		return componentStyleSecondary
+	}
+}
+
 func renderStructuredSections(sections []core.StructuredSection) (discordEmbed, []discordComponent) {
 	embed := discordEmbed{}
 	var descriptionParts []string

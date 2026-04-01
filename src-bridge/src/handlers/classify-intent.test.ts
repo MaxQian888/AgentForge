@@ -31,10 +31,48 @@ describe("handleClassifyIntent", () => {
       },
     );
 
-    expect(receivedPrompt).toContain("User message: 帮我创建一个修复 bridge 覆盖率的任务");
+    expect(receivedPrompt).toContain(
+      "User message: 帮我创建一个修复 bridge 覆盖率的任务",
+    );
     expect(receivedPrompt).toContain("/task create <title>");
     expect(receivedProvider).toBe("openai:gpt-5");
     expect(result.intent).toBe("create_task");
+  });
+
+  test("includes candidates and context history in the classifier prompt when provided", async () => {
+    const provider = resolveProviderSelection("text_generation", {
+      provider: "openai",
+      model: "gpt-5",
+    });
+    let receivedPrompt = "";
+
+    await handleClassifyIntent(
+      {
+        text: "@AgentForge 帮我看看帮助",
+        user_id: "user-123",
+        project_id: "project-456",
+        candidates: ["help", "task_list", "sprint_status"],
+        context: {
+          history: ["上一条消息", "再上一条消息"],
+          thread_id: "thread-1",
+        },
+      } as never,
+      provider,
+      async ({ prompt }) => {
+        receivedPrompt = prompt;
+        return {
+          intent: "help",
+          command: "/help",
+          args: "",
+          confidence: 0.88,
+        };
+      },
+    );
+
+    expect(receivedPrompt).toContain("help");
+    expect(receivedPrompt).toContain("task_list");
+    expect(receivedPrompt).toContain("thread-1");
+    expect(receivedPrompt).toContain("上一条消息");
   });
 
   test("falls back to an unknown response when executor output is invalid", async () => {
@@ -83,7 +121,9 @@ describe("handleClassifyIntent", () => {
           },
           provider,
         ),
-      ).rejects.toThrow("Provider openai is missing credentials: OPENAI_API_KEY");
+      ).rejects.toThrow(
+        "Provider openai is missing credentials: OPENAI_API_KEY",
+      );
     } finally {
       if (previous === undefined) {
         delete process.env.OPENAI_API_KEY;

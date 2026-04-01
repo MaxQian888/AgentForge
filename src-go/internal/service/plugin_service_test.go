@@ -57,6 +57,17 @@ func (f *fakePluginRoleStore) Get(id string) (*rolepkg.Manifest, error) {
 	return role, nil
 }
 
+func (f *fakePluginRoleStore) List() ([]*rolepkg.Manifest, error) {
+	if f == nil || f.roles == nil {
+		return nil, nil
+	}
+	roles := make([]*rolepkg.Manifest, 0, len(f.roles))
+	for _, role := range f.roles {
+		roles = append(roles, role)
+	}
+	return roles, nil
+}
+
 func (f *fakePluginRuntimeClient) RegisterToolPlugin(_ context.Context, manifest model.PluginManifest) (*model.PluginRuntimeStatus, error) {
 	f.registered = append(f.registered, manifest.Metadata.ID)
 	status := f.status
@@ -1183,5 +1194,164 @@ spec:
 			t.Fatal("hierarchical workflow should no longer be rejected as unsupported")
 		}
 		// Other errors (e.g., WASM module not found) are acceptable
+	}
+}
+
+func TestPluginService_GetByIDHydratesWorkflowRoleDependencies(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	repo := repository.NewPluginRegistryRepository()
+	record := &model.PluginRecord{
+		PluginManifest: model.PluginManifest{
+			APIVersion: "agentforge/v1",
+			Kind:       model.PluginKindWorkflow,
+			Metadata: model.PluginMetadata{
+				ID:      "workflow.release-train",
+				Name:    "Release Train",
+				Version: "1.0.0",
+			},
+			Spec: model.PluginSpec{
+				Runtime:    model.PluginRuntimeWASM,
+				Module:     "./dist/release-train.wasm",
+				ABIVersion: "v1",
+				Workflow: &model.WorkflowPluginSpec{
+					Process: model.WorkflowProcessSequential,
+					Roles: []model.WorkflowRoleBinding{
+						{ID: "coder"},
+						{ID: "reviewer"},
+					},
+					Steps: []model.WorkflowStepDefinition{
+						{ID: "implement", Role: "coder", Action: model.WorkflowActionAgent, Next: []string{"review"}},
+						{ID: "review", Role: "reviewer", Action: model.WorkflowActionReview},
+					},
+				},
+			},
+		},
+		LifecycleState: model.PluginStateEnabled,
+		RuntimeHost:    model.PluginHostGoOrchestrator,
+	}
+	if err := repo.Save(ctx, record); err != nil {
+		t.Fatalf("save plugin record: %v", err)
+	}
+
+	svc := service.NewPluginService(repo, &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, pluginsDir).
+		WithRoleStore(&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"coder": {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+			},
+		})
+
+	hydrated, err := svc.GetByID(ctx, "workflow.release-train")
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if len(hydrated.RoleDependencies) != 2 {
+		t.Fatalf("len(RoleDependencies) = %d, want 2", len(hydrated.RoleDependencies))
+	}
+	if hydrated.RoleDependencies[0].RoleID != "coder" || hydrated.RoleDependencies[0].Status != "resolved" {
+		t.Fatalf("first role dependency = %+v, want resolved coder", hydrated.RoleDependencies[0])
+	}
+	if hydrated.RoleDependencies[1].RoleID != "reviewer" || hydrated.RoleDependencies[1].Status != "missing" || !hydrated.RoleDependencies[1].Blocking {
+		t.Fatalf("second role dependency = %+v, want missing blocking reviewer", hydrated.RoleDependencies[1])
+	}
+}
+
+func TestPluginService_GetByIDHydratesToolPluginRoleConsumers(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	repo := repository.NewPluginRegistryRepository()
+	record := &model.PluginRecord{
+		PluginManifest: model.PluginManifest{
+			APIVersion: "agentforge/v1",
+			Kind:       model.PluginKindTool,
+			Metadata: model.PluginMetadata{
+				ID:      "design-mcp",
+				Name:    "Design MCP",
+				Version: "1.0.0",
+			},
+			Spec: model.PluginSpec{
+				Runtime:   model.PluginRuntimeMCP,
+				Transport: "stdio",
+				Command:   "node",
+			},
+		},
+		LifecycleState: model.PluginStateActive,
+		RuntimeHost:    model.PluginHostTSBridge,
+	}
+	if err := repo.Save(ctx, record); err != nil {
+		t.Fatalf("save plugin record: %v", err)
+	}
+
+	svc := service.NewPluginService(repo, &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, pluginsDir).
+		WithRoleStore(&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"design-lead": {
+					Metadata: model.RoleMetadata{ID: "design-lead", Name: "Design Lead"},
+					Capabilities: model.RoleCapabilities{
+						ToolConfig: model.RoleToolConfig{
+							External: []string{"design-mcp"},
+						},
+					},
+				},
+			},
+		})
+
+	hydrated, err := svc.GetByID(ctx, "design-mcp")
+	if err != nil {
+		t.Fatalf("GetByID() error = %v", err)
+	}
+	if len(hydrated.RoleConsumers) != 1 {
+		t.Fatalf("len(RoleConsumers) = %d, want 1", len(hydrated.RoleConsumers))
+	}
+	if hydrated.RoleConsumers[0].RoleID != "design-lead" || hydrated.RoleConsumers[0].Status != "active" {
+		t.Fatalf("role consumer = %+v, want active design-lead consumer", hydrated.RoleConsumers[0])
+	}
+}
+
+func TestPluginService_EnableRejectsWorkflowPluginWithStaleRoleReference(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	localPath := writeManifest(t, pluginsDir, "local/release-train.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: release-train
+  name: Release Train
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/release-train.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: coder
+      - id: reviewer
+    steps:
+      - id: implement
+        role: coder
+        action: agent
+        next: [review]
+      - id: review
+        role: reviewer
+        action: review
+`)
+	roleStore := &fakePluginRoleStore{
+		roles: map[string]*rolepkg.Manifest{
+			"coder":    {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+			"reviewer": {Metadata: model.RoleMetadata{ID: "reviewer", Name: "Reviewer"}},
+		},
+	}
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, pluginsDir).
+		WithRoleStore(roleStore)
+	record, err := svc.Install(ctx, service.PluginInstallRequest{Path: localPath})
+	if err != nil {
+		t.Fatalf("Install() error = %v", err)
+	}
+	delete(roleStore.roles, "reviewer")
+
+	_, err = svc.Enable(ctx, record.Metadata.ID)
+	if err == nil || !strings.Contains(err.Error(), "unknown workflow role reference: reviewer") {
+		t.Fatalf("Enable() error = %v, want stale reviewer role failure", err)
 	}
 }

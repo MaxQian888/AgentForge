@@ -3,6 +3,7 @@ package commands
 import (
 	"fmt"
 	"regexp"
+	"slices"
 	"strings"
 )
 
@@ -20,6 +21,13 @@ type commandCatalogSubcommand struct {
 	Summary string
 	Usage   string
 	Aliases []string
+}
+
+type IntentCandidate struct {
+	Intent   string
+	Command  string
+	Summary  string
+	Keywords []string
 }
 
 var operatorCommandCatalog = []commandCatalogEntry{
@@ -214,6 +222,129 @@ func findCommandCatalogEntry(command string) *commandCatalogEntry {
 
 var runIDPattern = regexp.MustCompile(`run-[A-Za-z0-9_-]+`)
 
+var operatorIntentCatalog = []IntentCandidate{
+	{Intent: "help", Command: "/help", Summary: "查看帮助和可用命令", Keywords: []string{"help", "帮助", "命令"}},
+	{Intent: "create_task", Command: "/task create", Summary: "创建新任务", Keywords: []string{"create task", "创建任务", "新任务"}},
+	{Intent: "decompose_task", Command: "/task decompose", Summary: "分解任务", Keywords: []string{"decompose", "分解", "拆分任务"}},
+	{Intent: "task_list", Command: "/task list", Summary: "查看任务列表", Keywords: []string{"任务", "task", "列表", "list"}},
+	{Intent: "agent_spawn", Command: "/agent spawn", Summary: "为任务启动 Agent", Keywords: []string{"spawn agent", "启动 agent", "派 agent", "执行任务"}},
+	{Intent: "sprint_status", Command: "/sprint status", Summary: "查看当前 sprint", Keywords: []string{"sprint", "迭代", "进度", "状态"}},
+	{Intent: "review", Command: "/review", Summary: "触发代码审查", Keywords: []string{"review", "审查", "pr", "pull request"}},
+	{Intent: "review_followup_tasks", Command: "/review", Summary: "审查并生成后续任务建议", Keywords: []string{"review", "follow-up", "后续任务", "issues", "修复项"}},
+	{Intent: "queue_list", Command: "/queue list", Summary: "查看 Agent 队列", Keywords: []string{"队列", "queue", "排队"}},
+	{Intent: "team_list", Command: "/team list", Summary: "查看团队成员摘要", Keywords: []string{"团队", "成员", "team"}},
+	{Intent: "memory_search", Command: "/memory search <query>", Summary: "搜索项目记忆", Keywords: []string{"记忆", "memory", "知识"}},
+	{Intent: "agent_pause", Command: "/agent pause", Summary: "暂停指定 Agent", Keywords: []string{"暂停", "pause"}},
+	{Intent: "agent_resume", Command: "/agent resume", Summary: "恢复指定 Agent", Keywords: []string{"恢复", "resume"}},
+	{Intent: "agent_kill", Command: "/agent kill", Summary: "终止指定 Agent", Keywords: []string{"终止", "停止", "kill"}},
+}
+
+func IntentCandidates() []string {
+	candidates := make([]string, 0, len(operatorIntentCatalog))
+	for _, item := range operatorIntentCatalog {
+		candidates = append(candidates, item.Intent)
+	}
+	return candidates
+}
+
+func RankIntentCandidates(content string) []IntentCandidate {
+	trimmed := strings.ToLower(strings.TrimSpace(strings.ReplaceAll(content, "@AgentForge", "")))
+	scored := make([]struct {
+		item  IntentCandidate
+		score int
+	}, 0, len(operatorIntentCatalog))
+
+	for _, item := range operatorIntentCatalog {
+		score := 0
+		switch item.Intent {
+		case "task_list":
+			score += 3
+		case "sprint_status":
+			score += 2
+		case "help":
+			score += 1
+		}
+		for _, keyword := range item.Keywords {
+			if keyword != "" && strings.Contains(trimmed, strings.ToLower(keyword)) {
+				score += 10
+			}
+		}
+		scored = append(scored, struct {
+			item  IntentCandidate
+			score int
+		}{item: item, score: score})
+	}
+
+	slices.SortStableFunc(scored, func(a, b struct {
+		item  IntentCandidate
+		score int
+	}) int {
+		switch {
+		case a.score > b.score:
+			return -1
+		case a.score < b.score:
+			return 1
+		default:
+			return strings.Compare(a.item.Intent, b.item.Intent)
+		}
+	})
+
+	ranked := make([]IntentCandidate, 0, len(scored))
+	for _, entry := range scored {
+		ranked = append(ranked, entry.item)
+	}
+	return ranked
+}
+
+func ResolveIntentCommand(intent, command, args string) string {
+	intent = strings.TrimSpace(intent)
+	command = strings.TrimSpace(command)
+	args = strings.TrimSpace(args)
+
+	if intent != "" {
+		for _, item := range operatorIntentCatalog {
+			if item.Intent == intent {
+				command = item.Command
+				break
+			}
+		}
+	}
+	if command == "" || !strings.HasPrefix(command, "/") {
+		return ""
+	}
+	if args == "" {
+		return command
+	}
+	return command + " " + args
+}
+
+func FormatIntentDisambiguation(content string, preferredCommand string) string {
+	lines := []string{"可能的命令:"}
+	seen := map[string]struct{}{}
+	appendCommand := func(command string) {
+		command = strings.TrimSpace(command)
+		if command == "" {
+			return
+		}
+		if _, ok := seen[command]; ok {
+			return
+		}
+		seen[command] = struct{}{}
+		lines = append(lines, fmt.Sprintf("- %s", command))
+	}
+	appendCommand(preferredCommand)
+	for _, item := range RankIntentCandidates(content) {
+		appendCommand(item.Command)
+		if len(lines) >= 4 {
+			break
+		}
+	}
+	if len(lines) == 1 {
+		lines = append(lines, "- /help")
+	}
+	return strings.Join(lines, "\n")
+}
+
 func suggestCommandFromCatalog(content string) string {
 	trimmed := strings.TrimSpace(strings.ReplaceAll(content, "@AgentForge", ""))
 	if trimmed == "" {
@@ -244,6 +375,10 @@ func suggestCommandFromCatalog(content string) string {
 	case strings.Contains(trimmed, "记忆") || strings.Contains(strings.ToLower(trimmed), "memory"):
 		return "/memory search <query>"
 	default:
+		ranked := RankIntentCandidates(content)
+		if len(ranked) > 0 {
+			return ranked[0].Command
+		}
 		return "/help"
 	}
 }

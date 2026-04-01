@@ -759,6 +759,64 @@ func TestSendNLU_SendsIntentPayloadAndParsesReply(t *testing.T) {
 	}
 }
 
+func TestClassifyMentionIntent_SendsCandidatesAndContext(t *testing.T) {
+	var gotMethod string
+	var gotPath string
+	var gotBody map[string]any
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		gotMethod = r.Method
+		gotPath = r.URL.Path
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(TaskAIClassifyResponse{
+			Intent:     "help",
+			Command:    "/help",
+			Args:       "",
+			Confidence: 0.91,
+		})
+	}))
+	defer server.Close()
+
+	client := NewAgentForgeClient(server.URL, "proj", "secret")
+
+	reply, err := client.ClassifyMentionIntent(context.Background(), MentionIntentRequest{
+		Text:       "@AgentForge 帮我看看帮助",
+		UserID:     "user-1",
+		Candidates: []string{"help", "task_list"},
+		Context: map[string]any{
+			"history": []string{"上一条消息"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ClassifyMentionIntent error: %v", err)
+	}
+
+	if gotMethod != http.MethodPost {
+		t.Fatalf("method = %s, want POST", gotMethod)
+	}
+	if gotPath != "/api/v1/ai/classify-intent" {
+		t.Fatalf("path = %s", gotPath)
+	}
+	if gotBody["text"] != "@AgentForge 帮我看看帮助" || gotBody["user_id"] != "user-1" {
+		t.Fatalf("body = %+v", gotBody)
+	}
+	candidates, ok := gotBody["candidates"].([]any)
+	if !ok || len(candidates) != 2 {
+		t.Fatalf("candidates = %#v", gotBody["candidates"])
+	}
+	contextValue, ok := gotBody["context"].(map[string]any)
+	if !ok {
+		t.Fatalf("context = %#v", gotBody["context"])
+	}
+	if reply.Intent != "help" || contextValue["history"] == nil {
+		t.Fatalf("reply=%+v context=%#v", reply, contextValue)
+	}
+}
+
 func TestHandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget(t *testing.T) {
 	var gotMethod string
 	var gotPath string

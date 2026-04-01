@@ -5,10 +5,19 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import type {
   RoleManifest,
   RoleSkillCatalogEntry,
 } from "@/lib/stores/role-store";
+import type { PluginRecord } from "@/lib/stores/plugin-store";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import type {
   FieldProvenanceMap,
   RoleDraft,
@@ -16,6 +25,7 @@ import type {
   RoleKeyValueDraft,
   RoleKnowledgeSourceDraft,
   RoleMCPServerDraft,
+  RolePluginBindingDraft,
   RoleSkillDraft,
   RoleSkillResolution,
   RoleTriggerDraft,
@@ -37,6 +47,7 @@ interface RoleWorkspaceEditorProps {
   templateId: string;
   selectedRole: RoleManifest | undefined;
   skillCatalog: RoleSkillCatalogEntry[];
+  availablePlugins: PluginRecord[];
   skillCatalogLoading: boolean;
   draftSkillResolution: RoleSkillResolution[];
   selectedTemplateName: string | null;
@@ -105,7 +116,7 @@ function TextAreaField({
   return (
     <div className="flex flex-col gap-1.5">
       <Label htmlFor={id}>{label}</Label>
-      <textarea
+      <Textarea
         id={id}
         className="min-h-24 rounded-md border bg-background px-3 py-2 text-sm"
         value={value}
@@ -130,6 +141,28 @@ function SectionErrors({ errors }: { errors: string[] }) {
       ))}
     </div>
   );
+}
+
+function appendCommaSeparatedValue(current: string, next: string): string {
+  const values = current
+    .split(",")
+    .map((value) => value.trim())
+    .filter(Boolean);
+  if (!values.includes(next)) {
+    values.push(next);
+  }
+  return values.join(", ");
+}
+
+function upsertPluginBinding(
+  rows: RolePluginBindingDraft[],
+  next: RolePluginBindingDraft,
+): RolePluginBindingDraft[] {
+  const index = rows.findIndex((row) => row.pluginId === next.pluginId);
+  if (index === -1) {
+    return [...rows, next];
+  }
+  return rows.map((row, rowIndex) => (rowIndex === index ? next : row));
 }
 
 function AuthoringSection({
@@ -162,6 +195,7 @@ export function RoleWorkspaceEditor({
   templateId,
   selectedRole,
   skillCatalog,
+  availablePlugins,
   skillCatalogLoading,
   draftSkillResolution,
   selectedTemplateName,
@@ -202,6 +236,18 @@ export function RoleWorkspaceEditor({
         return t("workspace.skillPartAssets");
       default:
         return part;
+    }
+  };
+  const skillCompatibilityLabel = (resolution: RoleSkillResolution) => {
+    switch (resolution.compatibilityStatus) {
+      case "blocking":
+        return "Blocking compatibility issue";
+      case "warning":
+        return "Warning-only compatibility issue";
+      case "compatible":
+        return "Compatibility OK";
+      default:
+        return "Compatibility unknown";
     }
   };
   return (
@@ -270,38 +316,42 @@ export function RoleWorkspaceEditor({
             <div className="grid gap-4 md:grid-cols-2">
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="role-template">{t("formDialog.startFromTemplate")}</Label>
-                <select
-                  id="role-template"
-                  aria-label="Start from template"
-                  className="h-10 rounded-md border bg-background px-3 text-sm"
-                  value={templateId}
-                  onChange={(event) => onTemplateChange(event.target.value)}
+                <Select
+                  value={templateId || "__none__"}
+                  onValueChange={(value) => onTemplateChange(value === "__none__" ? "" : value)}
                   disabled={mode === "edit"}
                 >
-                  <option value="">{t("formDialog.blankRole")}</option>
-                  {availableRoles.map((role) => (
-                    <option key={role.metadata.id} value={role.metadata.id}>
-                      {role.metadata.name}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="role-template" aria-label="Start from template" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">{t("formDialog.blankRole")}</SelectItem>
+                    {availableRoles.map((role) => (
+                      <SelectItem key={role.metadata.id} value={role.metadata.id}>
+                        {role.metadata.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="role-extends">{t("formDialog.inheritsFrom")}</Label>
-                <select
-                  id="role-extends"
-                  aria-label="Inherits from"
-                  className="h-10 rounded-md border bg-background px-3 text-sm"
-                  value={draft.extendsValue}
-                  onChange={(event) => updateDraft("extendsValue", event.target.value)}
+                <Select
+                  value={draft.extendsValue || "__none__"}
+                  onValueChange={(value) => updateDraft("extendsValue", value === "__none__" ? "" : value)}
                 >
-                  <option value="">{t("formDialog.noParent")}</option>
-                  {availableRoles.map((role) => (
-                    <option key={role.metadata.id} value={role.metadata.id}>
-                      {role.metadata.name}
-                    </option>
-                  ))}
-                </select>
+                  <SelectTrigger id="role-extends" aria-label="Inherits from" className="w-full">
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="__none__">{t("formDialog.noParent")}</SelectItem>
+                    {availableRoles.map((role) => (
+                      <SelectItem key={role.metadata.id} value={role.metadata.id}>
+                        {role.metadata.name}
+                      </SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
               </div>
             </div>
 
@@ -476,9 +526,17 @@ export function RoleWorkspaceEditor({
                 <Label htmlFor="cap-external-tools">{t("workspace.externalTools")}</Label>
                 <Input
                   id="cap-external-tools"
+                  list="plugin-catalog"
                   value={draft.externalTools}
                   onChange={(event) => updateDraft("externalTools", event.target.value)}
                 />
+                <datalist id="plugin-catalog">
+                  {availablePlugins.map((plugin) => (
+                    <option key={plugin.metadata.id} value={plugin.metadata.id}>
+                      {plugin.metadata.name}
+                    </option>
+                  ))}
+                </datalist>
               </div>
               <div className="flex flex-col gap-1.5">
                 <Label htmlFor="cap-languages">{t("formDialog.languages")}</Label>
@@ -497,6 +555,142 @@ export function RoleWorkspaceEditor({
                 />
               </div>
             </div>
+
+            <div className="grid gap-4 rounded-lg border p-4">
+              <div>
+                <h3 className="text-sm font-semibold">{t("workspace.availablePluginsTitle")}</h3>
+                <p className="text-sm text-muted-foreground">
+                  {t("workspace.availablePluginsDesc")}
+                </p>
+              </div>
+              {availablePlugins.length > 0 ? (
+                <div className="grid gap-3">
+                  {availablePlugins.map((plugin) => {
+                    const selectedPluginIds = draft.externalTools
+                      .split(",")
+                      .map((value) => value.trim())
+                      .filter(Boolean);
+                    const selected = selectedPluginIds.includes(plugin.metadata.id);
+                    return (
+                      <div
+                        key={plugin.metadata.id}
+                        className="grid gap-2 rounded-md border p-3"
+                      >
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="min-w-0">
+                            <p className="text-sm font-medium">{plugin.metadata.name}</p>
+                            <p className="text-xs text-muted-foreground">{plugin.metadata.id}</p>
+                            {plugin.metadata.description ? (
+                              <p className="mt-1 text-xs text-muted-foreground">
+                                {plugin.metadata.description}
+                              </p>
+                            ) : null}
+                          </div>
+                          <Button
+                            type="button"
+                            variant="outline"
+                            size="sm"
+                            disabled={selected}
+                            aria-label={`Use plugin ${plugin.metadata.name}`}
+                            onClick={() => {
+                              updateDraft(
+                                "externalTools",
+                                appendCommaSeparatedValue(draft.externalTools, plugin.metadata.id),
+                              );
+                              updateDraft(
+                                "pluginBindingRows",
+                                upsertPluginBinding(draft.pluginBindingRows, {
+                                  pluginId: plugin.metadata.id,
+                                  functionsInput: plugin.spec.capabilities?.join(", ") ?? "",
+                                }),
+                              );
+                            }}
+                          >
+                            {selected ? t("workspace.pluginSelected") : t("workspace.usePlugin")}
+                          </Button>
+                        </div>
+                        <div className="grid gap-1 text-xs text-muted-foreground">
+                          <p>
+                            {t("workspace.pluginRuntimeLabel")}: {plugin.spec.runtime}
+                          </p>
+                          <p>
+                            {t("workspace.pluginLifecycleLabel")}: {plugin.lifecycle_state}
+                          </p>
+                          <p>
+                            {t("workspace.pluginFunctionsLabel")}:{" "}
+                            {plugin.spec.capabilities?.length
+                              ? plugin.spec.capabilities.join(", ")
+                              : t("workspace.pluginFunctionsEmpty")}
+                          </p>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">
+                  {t("workspace.availablePluginsEmpty")}
+                </p>
+              )}
+            </div>
+
+            {draft.pluginBindingRows.length > 0 ? (
+              <div className="grid gap-4 rounded-lg border p-4">
+                <div>
+                  <h3 className="text-sm font-semibold">{t("workspace.pluginBindingsTitle")}</h3>
+                  <p className="text-sm text-muted-foreground">
+                    {t("workspace.pluginBindingsDesc")}
+                  </p>
+                </div>
+                {draft.pluginBindingRows.map((binding, index) => (
+                  <div
+                    key={`plugin-binding-${binding.pluginId || index}`}
+                    className="grid gap-3 rounded-md border p-3 md:grid-cols-2"
+                  >
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor={`plugin-binding-id-${index}`}>
+                        {t("workspace.pluginBindingPlugin")}
+                      </Label>
+                      <Input
+                        id={`plugin-binding-id-${index}`}
+                        aria-label="Plugin Binding Plugin"
+                        value={binding.pluginId}
+                        onChange={(event) =>
+                          updateDraft(
+                            "pluginBindingRows",
+                            draft.pluginBindingRows.map((row, rowIndex) =>
+                              rowIndex === index
+                                ? { ...row, pluginId: event.target.value }
+                                : row,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                    <div className="flex flex-col gap-1.5">
+                      <Label htmlFor={`plugin-binding-functions-${index}`}>
+                        {t("workspace.pluginBindingFunctions")}
+                      </Label>
+                      <Input
+                        id={`plugin-binding-functions-${index}`}
+                        aria-label="Plugin Functions"
+                        value={binding.functionsInput}
+                        onChange={(event) =>
+                          updateDraft(
+                            "pluginBindingRows",
+                            draft.pluginBindingRows.map((row, rowIndex) =>
+                              rowIndex === index
+                                ? { ...row, functionsInput: event.target.value }
+                                : row,
+                            ),
+                          )
+                        }
+                      />
+                    </div>
+                  </div>
+                ))}
+              </div>
+            ) : null}
 
             <div className="grid gap-4 rounded-lg border p-4">
               <div className="flex items-center justify-between">
@@ -677,6 +871,24 @@ export function RoleWorkspaceEditor({
                           {resolution?.shortDescription || resolution?.description ? (
                             <p className="text-xs text-muted-foreground">
                               {resolution?.shortDescription ?? resolution?.description}
+                            </p>
+                          ) : null}
+                          {resolution?.requires?.length ? (
+                            <p className="text-xs text-muted-foreground">
+                              Dependencies: {resolution.requires.join(", ")}
+                            </p>
+                          ) : null}
+                          {resolution?.tools?.length ? (
+                            <p className="text-xs text-muted-foreground">
+                              Declared tools: {resolution.tools.join(", ")}
+                            </p>
+                          ) : null}
+                          {resolution ? (
+                            <p className="text-xs text-muted-foreground">
+                              {skillCompatibilityLabel(resolution)}
+                              {resolution.missingTools?.length
+                                ? ` · Missing: ${resolution.missingTools.join(", ")}`
+                                : ""}
                             </p>
                           ) : null}
                           {resolution?.availableParts?.length ? (
@@ -1236,7 +1448,7 @@ export function RoleWorkspaceEditor({
                   {t("workspace.overrideEditorDesc")}
                 </p>
               </div>
-              <textarea
+              <Textarea
                 aria-label="Role Overrides"
                 className="min-h-32 rounded-md border bg-background px-3 py-2 text-sm font-mono"
                 value={draft.overridesInput}

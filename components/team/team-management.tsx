@@ -9,6 +9,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/shared/page-header";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -286,7 +287,7 @@ function AgentProfileFields({
         <Label htmlFor={mode === "edit" ? "edit-agent-notes" : "agent-notes"}>
           {prefix}Agent Notes
         </Label>
-        <textarea
+        <Textarea
           id={mode === "edit" ? "edit-agent-notes" : "agent-notes"}
           className="min-h-24 rounded-md border border-input bg-background px-3 py-2 text-sm"
           rows={4}

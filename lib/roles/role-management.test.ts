@@ -1,5 +1,6 @@
-import type { RoleManifest } from "@/lib/stores/role-store";
+import type { RoleManifest, RoleSkillCatalogEntry } from "@/lib/stores/role-store";
 import {
+  buildRoleCapabilitySourceFromManifest,
   buildRoleDraft,
   buildRoleExecutionSummary,
   computeFieldProvenance,
@@ -41,6 +42,9 @@ const role: RoleManifest = {
     toolConfig: {
       builtIn: ["Read", "Edit"],
       external: ["figma"],
+      pluginBindings: [
+        { pluginId: "repo-search", functions: ["search_code", "open_file"] },
+      ],
       mcpServers: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
     },
     customSettings: {
@@ -99,6 +103,28 @@ const role: RoleManifest = {
     "identity.role": "Principal Frontend Developer",
   },
 };
+
+const roleSkillCatalog: RoleSkillCatalogEntry[] = [
+  {
+    path: "skills/react",
+    label: "React",
+    description: "Build React interfaces.",
+    shortDescription: "Guide React work in the current repo.",
+    requires: ["skills/typescript"],
+    tools: ["code_editor", "browser_preview"],
+    availableParts: ["agents", "references"],
+    source: "repo-local",
+    sourceRoot: "skills",
+  },
+  {
+    path: "skills/testing",
+    label: "Testing",
+    tools: ["code_editor", "terminal"],
+    availableParts: ["agents"],
+    source: "repo-local",
+    sourceRoot: "skills",
+  },
+];
 
 describe("role management helpers", () => {
   it("builds sensible defaults for a new role draft", () => {
@@ -165,6 +191,7 @@ describe("role management helpers", () => {
       resourceCostPerTask: "",
       resourceCostPerDay: "",
       resourceCostAlertThreshold: "",
+      pluginBindingRows: [],
       collaborationCanDelegateTo: "",
       collaborationAcceptsDelegationFrom: "",
       communicationPreferredChannel: "",
@@ -172,6 +199,7 @@ describe("role management helpers", () => {
       communicationEscalationPolicy: "",
       overridesInput: "",
       triggerRows: [],
+      sourceManifest: undefined,
     });
   });
 
@@ -184,6 +212,7 @@ describe("role management helpers", () => {
       allowedTools: "Read, Edit",
       packages: "design-system",
       externalTools: "figma",
+      pluginBindingRows: [{ pluginId: "repo-search", functionsInput: "search_code, open_file" }],
       mcpServerRows: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
       customSettingRows: [{ key: "approval_mode", value: "guided" }],
       sharedKnowledgeRows: [{ id: "design-guidelines", type: "vector", access: "read", description: "Shared UI guidance", sourcesInput: "docs/PRD.md" }],
@@ -221,6 +250,7 @@ describe("role management helpers", () => {
       systemPrompt: "Coordinate polished UI delivery.",
       allowedTools: " Read, Edit ",
       externalTools: " figma, slack ",
+      pluginBindingRows: [{ pluginId: "repo-search", functionsInput: "search_code, open_file" }],
       mcpServerRows: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
       customSettingRows: [{ key: "approval_mode", value: "guided" }],
       skillRows: [{ path: " skills/design ", autoLoad: true }],
@@ -296,6 +326,9 @@ describe("role management helpers", () => {
         toolConfig: {
           builtIn: ["Read", "Edit"],
           external: ["figma", "slack"],
+          pluginBindings: [
+            { pluginId: "repo-search", functions: ["search_code", "open_file"] },
+          ],
           mcpServers: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
         },
         skills: [{ path: "skills/design", autoLoad: true }],
@@ -379,6 +412,10 @@ describe("role management helpers", () => {
         name: "Frontend Developer Custom",
         packages: "design-system, review",
         externalTools: "figma, playwright",
+        pluginBindingRows: [
+          { pluginId: "repo-search", functionsInput: "search_code" },
+          { pluginId: "figma-sync", functionsInput: "sync_frames, publish_comments" },
+        ],
         mcpServerRows: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
         customSettingRows: [
           { key: "approval_mode", value: "guided" },
@@ -425,6 +462,10 @@ describe("role management helpers", () => {
         allowedTools: ["Read", "Edit"],
         toolConfig: expect.objectContaining({
           external: ["figma", "playwright"],
+          pluginBindings: [
+            { pluginId: "repo-search", functions: ["search_code"] },
+            { pluginId: "figma-sync", functions: ["sync_frames", "publish_comments"] },
+          ],
           mcpServers: [{ name: "design-mcp", url: "http://localhost:3010/mcp" }],
         }),
         customSettings: {
@@ -538,7 +579,7 @@ describe("role management helpers", () => {
   });
 
   it("builds an execution summary for role drafts", () => {
-    const summary = buildRoleExecutionSummary(buildRoleDraft(role));
+    const summary = buildRoleExecutionSummary(buildRoleDraft(role), roleSkillCatalog);
 
     expect(summary).toEqual({
       promptIntent: "Ship a great dashboard UX",
@@ -553,6 +594,8 @@ describe("role management helpers", () => {
         "2 allowed paths",
         "1 denied path",
         "1 output filters",
+        "1 warning skill issue",
+        "1 skill dependency visible",
       ],
     });
   });
@@ -566,7 +609,7 @@ describe("role management helpers", () => {
       permissionMode: "",
       deniedPaths: "secrets/, private/",
       skillRows: [{ path: " ", autoLoad: true }],
-    });
+    }, roleSkillCatalog);
 
     expect(summary).toEqual({
       promptIntent: "Review the role before execution.",
@@ -615,12 +658,15 @@ describe("role management helpers", () => {
             label: "React",
             description: "Build React interfaces.",
             shortDescription: "Guide React work in the current repo.",
+            requires: ["skills/typescript"],
+            tools: ["code_editor", "browser_preview"],
             availableParts: ["agents", "references"],
             source: "repo-local",
             sourceRoot: "skills",
           },
           {
             path: "skills/testing",
+            tools: ["code_editor", "terminal"],
             label: "Testing",
             availableParts: ["agents"],
             source: "repo-local",
@@ -629,6 +675,7 @@ describe("role management helpers", () => {
         ],
         templateSkills: [{ path: "skills/react", autoLoad: true }],
         parentSkills: [{ path: "skills/testing", autoLoad: false }],
+        roleCapabilities: buildRoleCapabilitySourceFromManifest(role),
       }),
     ).toEqual([
       {
@@ -637,10 +684,14 @@ describe("role management helpers", () => {
         label: "React",
         description: "Build React interfaces.",
         shortDescription: "Guide React work in the current repo.",
+        requires: ["skills/typescript"],
+        tools: ["code_editor", "browser_preview"],
         availableParts: ["agents", "references"],
         source: "repo-local",
         sourceRoot: "skills",
         status: "resolved",
+        compatibilityStatus: "compatible",
+        missingTools: [],
         provenance: "template-derived",
       },
       {
@@ -648,10 +699,13 @@ describe("role management helpers", () => {
         autoLoad: false,
         label: "Testing",
         description: "",
+        tools: ["code_editor", "terminal"],
         availableParts: ["agents"],
         source: "repo-local",
         sourceRoot: "skills",
         status: "resolved",
+        compatibilityStatus: "warning",
+        missingTools: ["terminal"],
         provenance: "inherited",
       },
       {
@@ -662,6 +716,7 @@ describe("role management helpers", () => {
         source: "manual",
         sourceRoot: "",
         status: "unresolved",
+        compatibilityStatus: "warning",
         provenance: "explicit",
       },
     ]);

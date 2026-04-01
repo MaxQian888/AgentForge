@@ -83,7 +83,7 @@ export type NotificationDeliveryPolicy = "always" | "suppress_if_focused";
 
 export interface BusinessNotificationPayload {
   notificationId: string;
-  type: string;
+  notificationType: string;
   title: string;
   body: string;
   createdAt: string;
@@ -773,7 +773,7 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
               createdAt: payload.createdAt,
               href: payload.href,
               notificationId: payload.notificationId,
-              type: payload.type,
+              type: payload.notificationType,
             },
           });
 
@@ -788,7 +788,7 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
                 href: payload.href ?? undefined,
                 payload: {
                   notificationId: payload.notificationId,
-                  notificationType: payload.type,
+                  notificationType: payload.notificationType,
                 },
                 source: "notification",
               });
@@ -931,6 +931,32 @@ export function createPlatformRuntime(deps: PlatformRuntimeDeps = {}) {
             error instanceof Error
               ? error.message
               : "Global shortcut registration failed.",
+        };
+      }
+    },
+    async unregisterShortcut(accelerator: string): Promise<PlatformResult> {
+      if (!getIsDesktopEnv()) {
+        return {
+          ok: false,
+          reason: "unsupported",
+          error: "Global shortcuts require the desktop shell.",
+        };
+      }
+
+      try {
+        await getInvoke(
+          "unregister_shortcut",
+          { accelerator } as Record<string, unknown>,
+        );
+        return { ok: true, mode: "desktop" };
+      } catch (error) {
+        return {
+          ok: false,
+          reason: "failed",
+          error:
+            error instanceof Error
+              ? error.message
+              : "Global shortcut unregistration failed.",
         };
       }
     },

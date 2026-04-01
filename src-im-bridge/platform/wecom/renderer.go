@@ -53,3 +53,72 @@ func renderStructuredSections(sections []core.StructuredSection) *core.WeComCard
 		Articles:    []core.WeComArticle{article},
 	}
 }
+
+// renderCardToWeComTextCard converts a core.Card to a WeCom textcard message payload.
+func renderCardToWeComTextCard(card *core.Card) map[string]any {
+	title := strings.TrimSpace(card.Title)
+	if title == "" {
+		title = "AgentForge"
+	}
+
+	var descParts []string
+	for _, field := range card.Fields {
+		label := strings.TrimSpace(field.Label)
+		value := strings.TrimSpace(field.Value)
+		if label != "" && value != "" {
+			descParts = append(descParts, label+": "+value)
+		} else if value != "" {
+			descParts = append(descParts, value)
+		}
+	}
+	description := strings.Join(descParts, "\n")
+
+	var cardURL string
+	for _, button := range card.Buttons {
+		action := strings.TrimSpace(button.Action)
+		if strings.HasPrefix(action, "link:") {
+			cardURL = strings.TrimSpace(strings.TrimPrefix(action, "link:"))
+			break
+		}
+	}
+
+	payload := map[string]any{
+		"msgtype": "textcard",
+		"textcard": map[string]any{
+			"title":       title,
+			"description": description,
+			"url":         cardURL,
+		},
+	}
+	return payload
+}
+
+// cardFallbackText renders a card as plain text for platforms without card support.
+func cardFallbackText(card *core.Card) string {
+	if card == nil {
+		return ""
+	}
+	var parts []string
+	if title := strings.TrimSpace(card.Title); title != "" {
+		parts = append(parts, title)
+	}
+	for _, field := range card.Fields {
+		label := strings.TrimSpace(field.Label)
+		value := strings.TrimSpace(field.Value)
+		if label != "" && value != "" {
+			parts = append(parts, label+": "+value)
+		} else if value != "" {
+			parts = append(parts, value)
+		}
+	}
+	for _, button := range card.Buttons {
+		text := strings.TrimSpace(button.Text)
+		action := strings.TrimSpace(button.Action)
+		if text != "" && action != "" {
+			parts = append(parts, "["+text+"] "+action)
+		} else if text != "" {
+			parts = append(parts, "["+text+"]")
+		}
+	}
+	return strings.Join(parts, "\n")
+}

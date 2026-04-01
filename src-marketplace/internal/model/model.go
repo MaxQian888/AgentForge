@@ -57,6 +57,9 @@ type MarketplaceItem struct {
 	IsDeleted     bool            `json:"is_deleted" gorm:"not null;default:false"`
 	CreatedAt     time.Time       `json:"created_at"`
 	UpdatedAt     time.Time       `json:"updated_at"`
+	SourceType    string          `json:"sourceType,omitempty" gorm:"-"`
+	SkillPreview  *SkillPackagePreview `json:"skillPreview,omitempty" gorm:"-"`
+	PreviewError  string          `json:"previewError,omitempty" gorm:"-"`
 }
 
 func (MarketplaceItem) TableName() string { return "marketplace_items" }
@@ -152,4 +155,29 @@ type ItemListResponse struct {
 
 type ErrorResponse struct {
 	Message string `json:"message"`
+}
+
+type SkillAgentConfigPreview struct {
+	Path             string `json:"path"`
+	Yaml             string `json:"yaml"`
+	DisplayName      string `json:"displayName,omitempty"`
+	ShortDescription string `json:"shortDescription,omitempty"`
+	DefaultPrompt    string `json:"defaultPrompt,omitempty"`
+}
+
+type SkillPackagePreview struct {
+	CanonicalPath   string                   `json:"canonicalPath"`
+	Label           string                   `json:"label"`
+	DisplayName     string                   `json:"displayName,omitempty"`
+	Description     string                   `json:"description,omitempty"`
+	DefaultPrompt   string                   `json:"defaultPrompt,omitempty"`
+	MarkdownBody    string                   `json:"markdownBody"`
+	FrontmatterYAML string                   `json:"frontmatterYaml"`
+	Requires        []string                 `json:"requires,omitempty"`
+	Tools           []string                 `json:"tools,omitempty"`
+	AvailableParts  []string                 `json:"availableParts,omitempty"`
+	ReferenceCount  int                      `json:"referenceCount,omitempty"`
+	ScriptCount     int                      `json:"scriptCount,omitempty"`
+	AssetCount      int                      `json:"assetCount,omitempty"`
+	AgentConfigs    []SkillAgentConfigPreview `json:"agentConfigs,omitempty"`
 }

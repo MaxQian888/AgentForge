@@ -7,26 +7,27 @@ import (
 )
 
 type AgentRun struct {
-	ID              uuid.UUID  `db:"id"`
-	TaskID          uuid.UUID  `db:"task_id"`
-	MemberID        uuid.UUID  `db:"member_id"`
-	RoleID          string     `db:"role_id"`
-	Status          string     `db:"status"`
-	Runtime         string     `db:"runtime"`
-	Provider        string     `db:"provider"`
-	Model           string     `db:"model"`
-	InputTokens     int64      `db:"input_tokens"`
-	OutputTokens    int64      `db:"output_tokens"`
-	CacheReadTokens int64      `db:"cache_read_tokens"`
-	CostUsd         float64    `db:"cost_usd"`
-	TurnCount       int        `db:"turn_count"`
-	ErrorMessage    string     `db:"error_message"`
-	StartedAt       time.Time  `db:"started_at"`
-	CompletedAt     *time.Time `db:"completed_at"`
-	CreatedAt       time.Time  `db:"created_at"`
-	UpdatedAt       time.Time  `db:"updated_at"`
-	TeamID          *uuid.UUID `db:"team_id"`
-	TeamRole        string     `db:"team_role"`
+	ID              uuid.UUID               `db:"id"`
+	TaskID          uuid.UUID               `db:"task_id"`
+	MemberID        uuid.UUID               `db:"member_id"`
+	RoleID          string                  `db:"role_id"`
+	Status          string                  `db:"status"`
+	Runtime         string                  `db:"runtime"`
+	Provider        string                  `db:"provider"`
+	Model           string                  `db:"model"`
+	InputTokens     int64                   `db:"input_tokens"`
+	OutputTokens    int64                   `db:"output_tokens"`
+	CacheReadTokens int64                   `db:"cache_read_tokens"`
+	CostUsd         float64                 `db:"cost_usd"`
+	TurnCount       int                     `db:"turn_count"`
+	ErrorMessage    string                  `db:"error_message"`
+	StartedAt       time.Time               `db:"started_at"`
+	CompletedAt     *time.Time              `db:"completed_at"`
+	CreatedAt       time.Time               `db:"created_at"`
+	UpdatedAt       time.Time               `db:"updated_at"`
+	TeamID          *uuid.UUID              `db:"team_id"`
+	TeamRole        string                  `db:"team_role"`
+	CostAccounting  *CostAccountingSnapshot `db:"cost_accounting"`
 }
 
 const (
@@ -40,55 +41,57 @@ const (
 )
 
 type AgentRunDTO struct {
-	ID              string  `json:"id"`
-	TaskID          string  `json:"taskId"`
-	MemberID        string  `json:"memberId"`
-	RoleID          string  `json:"roleId,omitempty"`
-	Status          string  `json:"status"`
-	Runtime         string  `json:"runtime"`
-	Provider        string  `json:"provider"`
-	Model           string  `json:"model"`
-	InputTokens     int64   `json:"inputTokens"`
-	OutputTokens    int64   `json:"outputTokens"`
-	CacheReadTokens int64   `json:"cacheReadTokens"`
-	CostUsd         float64 `json:"costUsd"`
-	TurnCount       int     `json:"turnCount"`
-	ErrorMessage    string  `json:"errorMessage"`
-	StartedAt       string  `json:"startedAt"`
-	CompletedAt     *string `json:"completedAt,omitempty"`
-	CreatedAt       string  `json:"createdAt"`
-	TeamID          *string `json:"teamId,omitempty"`
-	TeamRole        string  `json:"teamRole,omitempty"`
+	ID              string                  `json:"id"`
+	TaskID          string                  `json:"taskId"`
+	MemberID        string                  `json:"memberId"`
+	RoleID          string                  `json:"roleId,omitempty"`
+	Status          string                  `json:"status"`
+	Runtime         string                  `json:"runtime"`
+	Provider        string                  `json:"provider"`
+	Model           string                  `json:"model"`
+	InputTokens     int64                   `json:"inputTokens"`
+	OutputTokens    int64                   `json:"outputTokens"`
+	CacheReadTokens int64                   `json:"cacheReadTokens"`
+	CostUsd         float64                 `json:"costUsd"`
+	TurnCount       int                     `json:"turnCount"`
+	ErrorMessage    string                  `json:"errorMessage"`
+	StartedAt       string                  `json:"startedAt"`
+	CompletedAt     *string                 `json:"completedAt,omitempty"`
+	CreatedAt       string                  `json:"createdAt"`
+	TeamID          *string                 `json:"teamId,omitempty"`
+	TeamRole        string                  `json:"teamRole,omitempty"`
+	CostAccounting  *CostAccountingSnapshot `json:"costAccounting,omitempty"`
 }
 
 type AgentRunSummaryDTO struct {
-	ID              string  `json:"id"`
-	TaskID          string  `json:"taskId"`
-	TaskTitle       string  `json:"taskTitle"`
-	MemberID        string  `json:"memberId"`
-	RoleID          string  `json:"roleId,omitempty"`
-	RoleName        string  `json:"roleName"`
-	Status          string  `json:"status"`
-	Runtime         string  `json:"runtime"`
-	Provider        string  `json:"provider"`
-	Model           string  `json:"model"`
-	InputTokens     int64   `json:"inputTokens"`
-	OutputTokens    int64   `json:"outputTokens"`
-	CacheReadTokens int64   `json:"cacheReadTokens"`
-	CostUsd         float64 `json:"costUsd"`
-	BudgetUsd       float64 `json:"budgetUsd"`
-	TurnCount       int     `json:"turnCount"`
-	WorktreePath    string  `json:"worktreePath"`
-	BranchName      string  `json:"branchName"`
-	SessionID       string  `json:"sessionId"`
-	LastActivityAt  string  `json:"lastActivityAt"`
-	StartedAt       string  `json:"startedAt"`
-	CreatedAt       string  `json:"createdAt"`
-	CompletedAt     *string `json:"completedAt,omitempty"`
-	CanResume       bool    `json:"canResume"`
-	MemoryStatus    string  `json:"memoryStatus"`
-	TeamID          *string `json:"teamId,omitempty"`
-	TeamRole        string  `json:"teamRole,omitempty"`
+	ID              string                  `json:"id"`
+	TaskID          string                  `json:"taskId"`
+	TaskTitle       string                  `json:"taskTitle"`
+	MemberID        string                  `json:"memberId"`
+	RoleID          string                  `json:"roleId,omitempty"`
+	RoleName        string                  `json:"roleName"`
+	Status          string                  `json:"status"`
+	Runtime         string                  `json:"runtime"`
+	Provider        string                  `json:"provider"`
+	Model           string                  `json:"model"`
+	InputTokens     int64                   `json:"inputTokens"`
+	OutputTokens    int64                   `json:"outputTokens"`
+	CacheReadTokens int64                   `json:"cacheReadTokens"`
+	CostUsd         float64                 `json:"costUsd"`
+	BudgetUsd       float64                 `json:"budgetUsd"`
+	TurnCount       int                     `json:"turnCount"`
+	WorktreePath    string                  `json:"worktreePath"`
+	BranchName      string                  `json:"branchName"`
+	SessionID       string                  `json:"sessionId"`
+	LastActivityAt  string                  `json:"lastActivityAt"`
+	StartedAt       string                  `json:"startedAt"`
+	CreatedAt       string                  `json:"createdAt"`
+	CompletedAt     *string                 `json:"completedAt,omitempty"`
+	CanResume       bool                    `json:"canResume"`
+	MemoryStatus    string                  `json:"memoryStatus"`
+	TeamID          *string                 `json:"teamId,omitempty"`
+	TeamRole        string                  `json:"teamRole,omitempty"`
+	CostAccounting  *CostAccountingSnapshot `json:"costAccounting,omitempty"`
 }
 
 type AgentPoolStatsDTO struct {
@@ -182,6 +185,7 @@ func (a *AgentRun) ToDTO() AgentRunDTO {
 		ErrorMessage:    a.ErrorMessage,
 		StartedAt:       a.StartedAt.Format(time.RFC3339),
 		CreatedAt:       a.CreatedAt.Format(time.RFC3339),
+		CostAccounting:  a.CostAccounting.Clone(),
 	}
 	if a.CompletedAt != nil {
 		s := a.CompletedAt.Format(time.RFC3339)

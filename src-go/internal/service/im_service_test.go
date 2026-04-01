@@ -3,9 +3,12 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/react-go-quick-starter/server/internal/model"
 )
@@ -224,5 +227,136 @@ func TestIMService_HandleActionReturnsFailureWhenExecutorReturnsNil(t *testing.T
 	}
 	if resp.Metadata["source"] != "test" {
 		t.Fatalf("Metadata not preserved: %+v", resp.Metadata)
+	}
+}
+
+func TestIMService_SendQueuesPendingDeliveryForControlPlane(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+	if _, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
+		BridgeID:   "bridge-slack-1",
+		Platform:   "slack",
+		Transport:  "live",
+		ProjectIDs: []string{"project-1"},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+
+	svc := NewIMService("", "slack", control)
+	if err := svc.Send(context.Background(), &model.IMSendRequest{
+		Platform:   "slack",
+		ChannelID:  "C123",
+		Text:       "queued via control plane",
+		ProjectID:  "project-1",
+		BridgeID:   "bridge-slack-1",
+		DeliveryID: "delivery-1",
+	}); err != nil {
+		t.Fatalf("Send error: %v", err)
+	}
+
+	history, err := control.ListDeliveryHistory(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListDeliveryHistory error: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	if history[0].Status != model.IMDeliveryStatusPending {
+		t.Fatalf("history[0].Status = %q, want pending", history[0].Status)
+	}
+	if history[0].ID != "delivery-1" {
+		t.Fatalf("history[0].ID = %q, want delivery-1", history[0].ID)
+	}
+}
+
+func TestIMService_NotifyQueuesPendingDeliveryForControlPlane(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+	if _, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
+		BridgeID:   "bridge-feishu-1",
+		Platform:   "feishu",
+		Transport:  "live",
+		ProjectIDs: []string{"project-1"},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+
+	svc := NewIMService("", "feishu", control)
+	if err := svc.Notify(context.Background(), &model.IMNotifyRequest{
+		Platform:   "feishu",
+		ChannelID:  "chat-1",
+		Event:      "task.created",
+		Title:      "Created",
+		Body:       "Task created",
+		ProjectID:  "project-1",
+		BridgeID:   "bridge-feishu-1",
+		DeliveryID: "delivery-notify-1",
+	}); err != nil {
+		t.Fatalf("Notify error: %v", err)
+	}
+
+	history, err := control.ListDeliveryHistory(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListDeliveryHistory error: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	if history[0].Status != model.IMDeliveryStatusPending {
+		t.Fatalf("history[0].Status = %q, want pending", history[0].Status)
+	}
+	if history[0].ID != "delivery-notify-1" {
+		t.Fatalf("history[0].ID = %q, want delivery-notify-1", history[0].ID)
+	}
+}
+
+type intentClassifierStub struct {
+	resp *ClassifyIntentResponse
+	err  error
+}
+
+func (s intentClassifierStub) ClassifyIntent(_ context.Context, req ClassifyIntentRequest) (*ClassifyIntentResponse, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	return s.resp, nil
+}
+
+func TestIMService_HandleIntentFallsBackToKeywordSuggestionWhenClassifierUnavailable(t *testing.T) {
+	svc := NewIMService("", "slack")
+
+	resp, err := svc.HandleIntent(context.Background(), &model.IMIntentRequest{
+		Text:      "暂停 run-123",
+		UserID:    "user-1",
+		ProjectID: "project-1",
+	})
+	if err != nil {
+		t.Fatalf("HandleIntent error: %v", err)
+	}
+	if !strings.Contains(resp.Reply, "/agent pause run-123") {
+		t.Fatalf("Reply = %q", resp.Reply)
+	}
+}
+
+func TestIMService_HandleIntentFallsBackToKeywordSuggestionWhenClassifierFails(t *testing.T) {
+	svc := NewIMService("", "slack")
+	svc.SetClassifier(intentClassifierStub{err: errors.New("bridge down")})
+
+	resp, err := svc.HandleIntent(context.Background(), &model.IMIntentRequest{
+		Text:      "暂停 run-123",
+		UserID:    "user-1",
+		ProjectID: "project-1",
+	})
+	if err != nil {
+		t.Fatalf("HandleIntent error: %v", err)
+	}
+	if !strings.Contains(resp.Reply, "/agent pause run-123") {
+		t.Fatalf("Reply = %q", resp.Reply)
 	}
 }

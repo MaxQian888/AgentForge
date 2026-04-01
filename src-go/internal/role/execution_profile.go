@@ -1,6 +1,10 @@
 package role
 
-import "strings"
+import (
+	"strings"
+
+	"github.com/react-go-quick-starter/server/internal/model"
+)
 
 func BuildExecutionProfile(manifest *Manifest, opts ...ExecutionProfileOption) *ExecutionProfile {
 	if manifest == nil {
@@ -20,6 +24,7 @@ func BuildExecutionProfile(manifest *Manifest, opts ...ExecutionProfileOption) *
 	}
 
 	loadedSkills, availableSkills, skillDiagnostics := resolveRuntimeSkills(normalized, options.skillRoot)
+	skillDiagnostics = appendSkillCompatibilityDiagnostics(normalized, loadedSkills, availableSkills, skillDiagnostics)
 
 	return &ExecutionProfile{
 		RoleID:           normalized.Metadata.ID,
@@ -30,6 +35,7 @@ func BuildExecutionProfile(manifest *Manifest, opts ...ExecutionProfileOption) *
 		SystemPrompt:     normalized.SystemPrompt,
 		AllowedTools:     append([]string(nil), normalized.Capabilities.AllowedTools...),
 		Tools:            buildExecutionToolIDs(normalized),
+		PluginBindings:   append([]model.RoleToolPluginBinding(nil), normalized.Capabilities.ToolConfig.PluginBindings...),
 		KnowledgeContext: buildKnowledgeContext(normalized),
 		OutputFilters:    append([]string(nil), normalized.Security.OutputFilters...),
 		MaxBudgetUsd:     normalized.Security.MaxBudgetUsd,

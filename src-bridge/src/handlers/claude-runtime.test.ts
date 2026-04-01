@@ -561,6 +561,12 @@ describe("claude runtime", () => {
     expect(events[4]?.data).toMatchObject({
       cost_usd: 0.25,
       budget_remaining_usd: 4.75,
+      cost_accounting: {
+        total_cost_usd: 0.25,
+        mode: "authoritative_total",
+        coverage: "full",
+        source: "anthropic_result_total",
+      },
     });
     expect(runtime.turnNumber).toBe(1);
     expect(runtime.lastTool).toBe("Read");
@@ -613,6 +619,17 @@ describe("claude runtime", () => {
     runtime.status = "completed";
     runtime.turnNumber = 3;
     runtime.spentUsd = 0.42;
+    runtime.costAccounting = {
+      totalCostUsd: 0.42,
+      inputTokens: 1_000,
+      outputTokens: 400,
+      cacheReadTokens: 50,
+      cacheCreationTokens: 20,
+      mode: "authoritative_total",
+      coverage: "full",
+      source: "anthropic_result_total",
+      components: [],
+    };
 
     persistRuntimeSnapshot(
       runtime,
@@ -633,6 +650,9 @@ describe("claude runtime", () => {
       turn_number: 3,
       spent_usd: 0.42,
       updated_at: 999,
+      cost_accounting: {
+        total_cost_usd: 0.42,
+      },
     });
     expect(events).toHaveLength(1);
     expect(events[0]).toMatchObject({

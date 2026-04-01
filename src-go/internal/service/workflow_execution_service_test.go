@@ -299,6 +299,140 @@ func TestWorkflowExecutionService_GetAndListRuns(t *testing.T) {
 	}
 }
 
+func TestWorkflowExecutionService_StartRejectsStaleRoleReferenceBeforeCreatingRun(t *testing.T) {
+	pluginRepo := repository.NewPluginRegistryRepository()
+	runRepo := repository.NewWorkflowPluginRunRepository()
+	executor := &workflowStepExecutorMock{}
+	record := saveWorkflowPluginRecord(t, pluginRepo, model.PluginStateEnabled, model.WorkflowProcessSequential, 0)
+	svc := service.NewWorkflowExecutionService(
+		pluginRepo,
+		runRepo,
+		&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"coder": {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+			},
+		},
+		executor,
+	)
+
+	run, err := svc.Start(context.Background(), record.Metadata.ID, service.WorkflowExecutionRequest{})
+	if err == nil || !strings.Contains(err.Error(), "reviewer") {
+		t.Fatalf("Start() error = %v, want stale reviewer dependency failure", err)
+	}
+	if run != nil {
+		t.Fatalf("run = %+v, want nil when stale role blocks startup", run)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("executor calls = %d, want 0 when startup is blocked before step execution", len(executor.calls))
+	}
+	runs, listErr := runRepo.ListByPluginID(context.Background(), record.Metadata.ID, 10)
+	if listErr != nil {
+		t.Fatalf("ListByPluginID() error = %v", listErr)
+	}
+	if len(runs) != 0 {
+		t.Fatalf("len(runs) = %d, want 0 when stale role blocks startup", len(runs))
+	}
+}
+
+func TestWorkflowExecutionService_StartRejectsBlockingRolePluginDependency(t *testing.T) {
+	pluginRepo := repository.NewPluginRegistryRepository()
+	runRepo := repository.NewWorkflowPluginRunRepository()
+	executor := &workflowStepExecutorMock{}
+	record := saveWorkflowPluginRecord(t, pluginRepo, model.PluginStateEnabled, model.WorkflowProcessSequential, 0)
+	pluginSvc := service.NewPluginService(pluginRepo, &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, t.TempDir())
+	svc := service.NewWorkflowExecutionService(
+		pluginSvc,
+		runRepo,
+		&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"coder": {
+					Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"},
+					Capabilities: model.RoleCapabilities{
+						ToolConfig: model.RoleToolConfig{
+							External: []string{"design-mcp"},
+						},
+					},
+				},
+				"reviewer": {Metadata: model.RoleMetadata{ID: "reviewer", Name: "Reviewer"}},
+			},
+		},
+		executor,
+	)
+
+	run, err := svc.Start(context.Background(), record.Metadata.ID, service.WorkflowExecutionRequest{})
+	if err == nil || !strings.Contains(err.Error(), "design-mcp") {
+		t.Fatalf("Start() error = %v, want missing role plugin dependency failure", err)
+	}
+	if run != nil {
+		t.Fatalf("run = %+v, want nil when role plugin dependency blocks startup", run)
+	}
+	if len(executor.calls) != 0 {
+		t.Fatalf("executor calls = %d, want 0 when role plugin dependency blocks startup", len(executor.calls))
+	}
+}
+
+func TestWorkflowExecutionService_StartAllowsBundledRolePluginDependency(t *testing.T) {
+	pluginRepo := repository.NewPluginRegistryRepository()
+	runRepo := repository.NewWorkflowPluginRunRepository()
+	executor := &workflowStepExecutorMock{}
+	record := saveWorkflowPluginRecord(t, pluginRepo, model.PluginStateEnabled, model.WorkflowProcessSequential, 0)
+	pluginsDir := t.TempDir()
+	writeManifest(t, pluginsDir, "tools/github-tool/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: github-tool
+  name: GitHub Tool
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["github.js"]
+`)
+	writeBuiltInBundle(t, pluginsDir, `
+plugins:
+  - id: github-tool
+    kind: ToolPlugin
+    manifest: tools/github-tool/manifest.yaml
+    docsRef: docs/PRD.md#tool-plugin
+    verificationProfile: mcp-tool
+    availability:
+      status: ready
+      message: GitHub tool ships with AgentForge.
+`)
+	pluginSvc := service.NewPluginService(pluginRepo, &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, pluginsDir)
+	svc := service.NewWorkflowExecutionService(
+		pluginSvc,
+		runRepo,
+		&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"coder": {
+					Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"},
+					Capabilities: model.RoleCapabilities{
+						ToolConfig: model.RoleToolConfig{
+							External: []string{"github-tool"},
+						},
+					},
+				},
+				"reviewer": {Metadata: model.RoleMetadata{ID: "reviewer", Name: "Reviewer"}},
+			},
+		},
+		executor,
+	)
+
+	run, err := svc.Start(context.Background(), record.Metadata.ID, service.WorkflowExecutionRequest{})
+	if err != nil {
+		t.Fatalf("Start() error = %v", err)
+	}
+	if run == nil || run.Status != model.WorkflowRunStatusCompleted {
+		t.Fatalf("run = %+v, want completed workflow run", run)
+	}
+	if len(executor.calls) != 2 {
+		t.Fatalf("executor calls = %d, want 2", len(executor.calls))
+	}
+}
+
 func TestWorkflowExecutionService_GetRunReturnsNotFound(t *testing.T) {
 	svc := service.NewWorkflowExecutionService(
 		repository.NewPluginRegistryRepository(),

@@ -1,5 +1,6 @@
 "use client";
 
+import { Badge } from "@/components/ui/badge";
 import { Label } from "@/components/ui/label";
 import { RadioGroup, RadioGroupItem } from "@/components/ui/radio-group";
 import { Input } from "@/components/ui/input";
@@ -10,6 +11,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { X } from "lucide-react";
 import type {
   MarketplaceFilters,
   MarketplaceItemType,
@@ -81,6 +83,32 @@ export function MarketplaceFilterPanel({ filters, onChange }: Props) {
           </SelectContent>
         </Select>
       </div>
+      {filters.tags.length > 0 ? (
+        <div>
+          <Label className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2 block">
+            Tags
+          </Label>
+          <div className="flex flex-wrap gap-1">
+            {filters.tags.map((tag) => (
+              <Badge key={tag} variant="secondary" className="text-xs gap-1">
+                {tag}
+                <button
+                  type="button"
+                  className="ml-0.5 hover:text-destructive"
+                  onClick={() =>
+                    onChange({
+                      tags: filters.tags.filter((t) => t !== tag),
+                      page: 1,
+                    })
+                  }
+                >
+                  <X className="size-3" />
+                </button>
+              </Badge>
+            ))}
+          </div>
+        </div>
+      ) : null}
     </div>
   );
 }

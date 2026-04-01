@@ -85,15 +85,15 @@ flowchart LR
 
 ## 功能矩阵
 
-| Surface | 当前真相 | 主要命令 / 入口 |
-| --- | --- | --- |
-| Web Dashboard | Next.js 16 app-router 工作区，覆盖 auth、project/task/review/team/role/plugin/settings/docs 等页面 | `pnpm dev`、`pnpm build` |
-| Go Orchestrator | Echo API、持久化、调度、实时 hub、review 与 plugin control plane | `cd src-go && go run ./cmd/server`、`go test ./...` |
-| TS Bridge | Bun 服务，负责 coding runtime、AI helper、MCP 插件托管 | `cd src-bridge && bun run dev`、`bun run typecheck` |
-| IM Bridge | 基于 cc-connect 的平台桥接层，接入后端控制面 | `cd src-im-bridge && go run ./cmd/bridge` |
-| Desktop Shell | Tauri 2 桌面壳，含 sidecar supervision 与 updater plumbing | `pnpm tauri:dev`、`pnpm tauri:build` |
-| Marketplace | 独立 Go 微服务 + Next.js 前端，用于发布、发现和安装插件/Skills/角色 | `cd src-marketplace && go run ./cmd/server`，浏览 `app/(dashboard)/marketplace/` |
-| Plugins | built-in/local/catalog/remote 插件管理，加上 MCP 与 workflow run 支持 | `pnpm create-plugin`、`pnpm plugin:verify` |
+| Surface         | 当前真相                                                                                           | 主要命令 / 入口                                                                      |
+| --------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
+| Web Dashboard   | Next.js 16 app-router 工作区，覆盖 auth、project/task/review/team/role/plugin/settings/docs 等页面 | `pnpm dev`、`pnpm build`                                                         |
+| Go Orchestrator | Echo API、持久化、调度、实时 hub、review 与 plugin control plane                                   | `cd src-go && go run ./cmd/server`、`go test ./...`                              |
+| TS Bridge       | Bun 服务，负责 coding runtime、AI helper、MCP 插件托管                                             | `cd src-bridge && bun run dev`、`bun run typecheck`                              |
+| IM Bridge       | 基于 cc-connect 的平台桥接层，接入后端控制面                                                       | `cd src-im-bridge && go run ./cmd/bridge`                                          |
+| Desktop Shell   | Tauri 2 桌面壳，含 sidecar supervision 与 updater plumbing                                         | `pnpm tauri:dev`、`pnpm tauri:build`                                             |
+| Marketplace     | 独立 Go 微服务 + Next.js 前端，用于发布、发现和安装插件/Skills/角色                                | `cd src-marketplace && go run ./cmd/server`，浏览 `app/(dashboard)/marketplace/` |
+| Plugins         | built-in/local/catalog/remote 插件管理，加上 MCP 与 workflow run 支持                              | `pnpm create-plugin`、`pnpm plugin:verify`                                       |
 
 ## 仓库结构
 
@@ -362,6 +362,47 @@ go run ./cmd/bridge
 - Channel 配置页现在从后端拉取事件类型，不再依赖前端硬编码事件清单。
 - 投递历史和健康视图已经补齐平台 badge、降级诊断以及 payload/详情检查入口。
 
+### 4.5 Marketplace 市场服务
+
+Marketplace 是一个独立的 Go 微服务，负责插件、技能和角色的发布、发现、安装与评价。
+
+```bash
+cd src-marketplace
+go run ./cmd/server
+```
+
+常用 Marketplace 命令：
+
+- `go test ./...`
+- `go build ./cmd/server`
+
+Marketplace 后端默认运行在端口 `7781`，提供以下能力：
+
+- REST API，支持条目 CRUD、版本管理、评价、搜索和分类过滤
+- 管理员专用端点，用于精选推荐和审核验证
+- 通过 Go 编排器暴露 typed install / consumption bridge（`/api/v1/marketplace/install` 与 `/api/v1/marketplace/consumption`）
+- 在发布版本前对 plugin / role / skill 三类产物做包结构校验
+
+前端市场页面（`app/(dashboard)/marketplace/page.tsx`）暴露以下功能：
+
+- 搜索栏，支持类型/分类过滤和排序（下载量、评分、最新）
+- 精选推荐区
+- 条目详情视图，含版本历史、评价、审核操作、安装确认和 downstream handoff
+- 发布对话框，供作者提交新插件、技能或角色，并支持作者上传新版本
+- 通过 marketplace store（`lib/stores/marketplace-store.ts`）跟踪 typed installed / blocked / used 状态
+- 在市场工作区内复用本地 plugin side-load 入口；当前不支持的 role / skill side-load 会显式显示 blocked reason
+
+核心市场组件：
+
+- `components/marketplace/marketplace-search-bar.tsx`
+- `components/marketplace/marketplace-filter-panel.tsx`
+- `components/marketplace/marketplace-item-card.tsx`
+- `components/marketplace/marketplace-item-detail.tsx`
+- `components/marketplace/marketplace-publish-dialog.tsx`
+- `components/marketplace/marketplace-install-confirm.tsx`
+- `components/marketplace/marketplace-review-dialog.tsx`
+- `components/marketplace/marketplace-version-list.tsx`
+
 ### 5. 桌面模式
 
 如果你在做桌面壳相关工作，可以运行：
@@ -392,35 +433,35 @@ pnpm tauri:build
 
 ## 根目录关键脚本
 
-| 命令 | 作用 |
-| --- | --- |
-| `pnpm dev` | 启动 Next.js Web 应用 |
-| `pnpm build` | 构建静态导出 Web 应用并输出到 `out/` |
-| `pnpm start` | 保留的 Next 服务端启动脚本；在当前 `output: "export"` 配置下不是主部署路径 |
-| `pnpm lint` | 运行 ESLint |
-| `pnpm test` | 运行 Jest |
-| `pnpm test:coverage` | 运行带覆盖率的 Jest |
-| `pnpm test:tauri` | 运行 `src-tauri` Rust 库测试 |
-| `pnpm test:tauri:coverage` | 对 `src-tauri/src/runtime_logic.rs` 执行桌面 runtime logic 覆盖率门禁 |
-| `pnpm create-plugin` | 为 tool、review、workflow、integration 生成 repo-local 插件脚手架 |
-| `pnpm build:backend` | 为 Tauri 交叉编译 Go sidecar |
-| `pnpm build:backend:dev` | 仅为当前平台构建 Go sidecar |
-| `pnpm dev:all` | 启动或复用完整本地 Web 开发栈：compose infra + Go + TS Bridge + frontend |
-| `pnpm dev:all:status` | 输出本地开发栈的来源、健康状态、端口与已知日志路径 |
-| `pnpm dev:all:logs` | 查看当前被 `dev:all` 跟踪的 repo-local 日志文件路径 |
-| `pnpm dev:all:stop` | 仅停止 `dev:all` 托管的服务，并保留复用的外部监听器 |
-| `pnpm build:plugin:wasm` | 构建 Go WASM 样例插件产物 |
-| `pnpm plugin:build` | 按 manifest 构建受维护的 Go 宿主插件目标 |
-| `pnpm plugin:debug` | 通过真实 runtime envelope 本地调试 Go WASM 插件 |
-| `pnpm plugin:dev` | 启动或复用最小插件开发栈：Go Orchestrator + TS Bridge |
-| `pnpm plugin:verify` | 运行受维护样例的 smoke 工作流：build -> debug health |
-| `pnpm plugin:verify:builtins` | 校验内置插件 bundle 合同与生成后的注册元数据 |
-| `pnpm tauri:dev` | 构建后端 sidecar 并启动 Tauri 开发模式 |
-| `pnpm tauri:build` | 构建桌面应用 |
-| `pnpm build:bridge` | 安装并构建 TS/Bun Bridge |
-| `pnpm build:desktop` | 构建 backend + bridge sidecar 并打包桌面应用 |
-| `pnpm build:updater-manifest` | 从签名后的 updater 产物生成发布用 `latest.json` |
-| `pnpm verify:updater-artifacts` | 在起草 Release 前校验 updater 产物与 `latest.json` |
+| 命令                              | 作用                                                                         |
+| --------------------------------- | ---------------------------------------------------------------------------- |
+| `pnpm dev`                      | 启动 Next.js Web 应用                                                        |
+| `pnpm build`                    | 构建静态导出 Web 应用并输出到 `out/`                                       |
+| `pnpm start`                    | 保留的 Next 服务端启动脚本；在当前 `output: "export"` 配置下不是主部署路径 |
+| `pnpm lint`                     | 运行 ESLint                                                                  |
+| `pnpm test`                     | 运行 Jest                                                                    |
+| `pnpm test:coverage`            | 运行带覆盖率的 Jest                                                          |
+| `pnpm test:tauri`               | 运行 `src-tauri` Rust 库测试                                               |
+| `pnpm test:tauri:coverage`      | 对 `src-tauri/src/runtime_logic.rs` 执行桌面 runtime logic 覆盖率门禁      |
+| `pnpm create-plugin`            | 为 tool、review、workflow、integration 生成 repo-local 插件脚手架            |
+| `pnpm build:backend`            | 为 Tauri 交叉编译 Go sidecar                                                 |
+| `pnpm build:backend:dev`        | 仅为当前平台构建 Go sidecar                                                  |
+| `pnpm dev:all`                  | 启动或复用完整本地 Web 开发栈：compose infra + Go + TS Bridge + frontend     |
+| `pnpm dev:all:status`           | 输出本地开发栈的来源、健康状态、端口与已知日志路径                           |
+| `pnpm dev:all:logs`             | 查看当前被 `dev:all` 跟踪的 repo-local 日志文件路径                        |
+| `pnpm dev:all:stop`             | 仅停止 `dev:all` 托管的服务，并保留复用的外部监听器                        |
+| `pnpm build:plugin:wasm`        | 构建 Go WASM 样例插件产物                                                    |
+| `pnpm plugin:build`             | 按 manifest 构建受维护的 Go 宿主插件目标                                     |
+| `pnpm plugin:debug`             | 通过真实 runtime envelope 本地调试 Go WASM 插件                              |
+| `pnpm plugin:dev`               | 启动或复用最小插件开发栈：Go Orchestrator + TS Bridge                        |
+| `pnpm plugin:verify`            | 运行受维护样例的 smoke 工作流：build -> debug health                         |
+| `pnpm plugin:verify:builtins`   | 校验内置插件 bundle 合同与生成后的注册元数据                                 |
+| `pnpm tauri:dev`                | 构建后端 sidecar 并启动 Tauri 开发模式                                       |
+| `pnpm tauri:build`              | 构建桌面应用                                                                 |
+| `pnpm build:bridge`             | 安装并构建 TS/Bun Bridge                                                     |
+| `pnpm build:desktop`            | 构建 backend + bridge sidecar 并打包桌面应用                                 |
+| `pnpm build:updater-manifest`   | 从签名后的 updater 产物生成发布用 `latest.json`                            |
+| `pnpm verify:updater-artifacts` | 在起草 Release 前校验 updater 产物与 `latest.json`                         |
 
 ## 技术栈快照
 
@@ -436,25 +477,27 @@ pnpm tauri:build
 - `src-tauri/` 应保持最小权限范围
 - 仓库同时包含真实实现与设计阶段文档，不应默认认为所有文档中的模块都已经完全落地
 - 如果你对项目意图有疑问，应优先看 PRD 和架构文档，而不是仍残留在部分包名/模块名里的旧 starter 表述
+- 
 
 ## Desktop + IM Bridge Workflow
 
-- `pnpm dev:all` 鐜板湪瑕嗙洊鏈湴 Web 寮€鍙戝叏鏍堬細PostgreSQL / Redis + Go Orchestrator + TS Bridge + IM Bridge + frontend銆?
-- `dev:all` 浼氬悓鏃惰褰?IM Bridge 鍋ュ悍绔偣 `http://127.0.0.1:7779/im/health`锛屽苟灏嗙ǔ瀹?bridge identity 钀藉湴鍒?`.codex/im-bridge-id`銆?
-- `pnpm build:im-bridge` 涓?`pnpm build:im-bridge:dev` 鐢ㄤ簬鏋勫缓 Tauri 鎵€闇?IM Bridge sidecar銆?
-- `pnpm desktop:dev:prepare` 鐢ㄤ簬涓烘闈㈠紑鍙戝噯澶囧綋鍓嶄富鏈虹殑 backend + TS Bridge + IM Bridge sidecar銆?
-- `pnpm desktop:build:prepare` 鐢ㄤ簬涓烘闈㈽墦鍖呭噯澶?backend + TS Bridge + IM Bridge sidecar锛屽苟鍚屾鏋勫缓 frontend bundle銆?
-- `pnpm tauri:dev`銆?`pnpm build:desktop`銆乀auri pre-command 鍜?VS Code 妗岄潰璋冭瘯鍏ュ彛鐜板湪閮藉鐢ㄥ悓涓€鏉?desktop prepare contract銆?
-- 妗岄潰 runtime 鐜板湪浠?backend / bridge / im-bridge 涓夋潯 sidecar 浣滀负蹇呴渶鎷撴墤锛屽彧鏈夊叏閮ㄥ仴搴锋椂鎵嶄細鎶ュ憡 `ready`銆?
+- `pnpm dev:all` 现在覆盖本地 Web 开发全栈：PostgreSQL / Redis + Go Orchestrator + TS Bridge + IM Bridge + frontend。
+- `dev:all` 会同时摄取 IM Bridge 健康端点 `http://127.0.0.1:7779/im/health`，并将稳定 bridge identity 落地到 `.codex/im-bridge-id`。
+- 
+- `pnpm build:im-bridge` 与 `pnpm build:im-bridge:dev` 用于构建 Tauri 所需 IM Bridge sidecar。
+- `pnpm desktop:dev:prepare` 用于为桌面开发准备当前主机的 backend + TS Bridge + IM Bridge sidecar。
+- `pnpm desktop:build:prepare` 用于为桌面打包准备 backend + TS Bridge + IM Bridge sidecar，并同步构建 frontend bundle。
+- `pnpm tauri:dev`、`pnpm build:desktop`、Tauri pre-command 和 VS Code 桌面调试入口现在都复用同一条 desktop prepare contract。
+- 桌面 runtime 现在以 backend / bridge / im-bridge 三条 sidecar 作为必需拼图，只有全部健康时才会报告 `ready`。
 
-| 鍛戒护 | 浣滅敤 |
-| --- | --- |
-| `pnpm build:im-bridge` | 涓?Tauri 浜ゅ弶缂栬瘧 IM Bridge sidecar |
-| `pnpm build:im-bridge:dev` | 浠呬负褰撳墠骞冲彴鏋勫缓 IM Bridge sidecar |
-| `pnpm desktop:dev:prepare` | 鍑嗗褰撳墠涓绘満鐨?desktop sidecars锛歜ackend + TS Bridge + IM Bridge |
-| `pnpm desktop:build:prepare` | 鍑嗗 desktop 鎵撳寘鐢ㄧ殑 sidecars 骞舵瀯寤?frontend bundle |
-| `pnpm tauri:dev` | 閫氳繃鍏变韩 prepare hook 鍚姩 Tauri 寮€鍙戞ā寮?|
-| `pnpm build:desktop` | 閫氳繃鍏变韩 packaging contract 鎵撳寘 desktop app |
+| 命令                           | 作用                                                             |
+| ------------------------------ | ---------------------------------------------------------------- |
+| `pnpm build:im-bridge`       | 为 Tauri 交叉编译 IM Bridge sidecar                              |
+| `pnpm build:im-bridge:dev`   | 仅为当前平台构建 IM Bridge sidecar                               |
+| `pnpm desktop:dev:prepare`   | 准备当前主机的 desktop sidecars：backend + TS Bridge + IM Bridge |
+| `pnpm desktop:build:prepare` | 准备 desktop 打包用的 sidecars 并构建 frontend bundle            |
+| `pnpm tauri:dev`             | 通过共享 prepare hook 启动 Tauri 开发模式                        |
+| `pnpm build:desktop`         | 通过共享 packaging contract 打包 desktop app                     |
 
 ## License
 

@@ -11,6 +11,11 @@ func TestDiscoverSkillCatalogReturnsNormalizedRepoLocalSkills(t *testing.T) {
 	mustWriteSkill(t, filepath.Join(root, "react", "SKILL.md"), `---
 name: React UI
 description: Build React interfaces.
+requires:
+  - typescript
+tools:
+  - code_editor
+  - browser-preview
 ---
 
 # React UI
@@ -42,6 +47,12 @@ description: Verify product behavior.
 	if entries[0].Source != "repo-local" || entries[0].SourceRoot != "skills" {
 		t.Fatalf("entries[0] source = %#v, want repo-local skills root", entries[0])
 	}
+	if got := entries[0].Requires; len(got) != 1 || got[0] != "skills/typescript" {
+		t.Fatalf("entries[0].Requires = %v, want normalized dependency path", got)
+	}
+	if got := entries[0].Tools; len(got) != 2 || got[0] != "code_editor" || got[1] != "browser_preview" {
+		t.Fatalf("entries[0].Tools = %v, want normalized declared tools", got)
+	}
 
 	if entries[1].Path != "skills/testing" {
 		t.Fatalf("entries[1].Path = %q, want skills/testing", entries[1].Path)
@@ -51,6 +62,9 @@ description: Verify product behavior.
 	}
 	if entries[1].Description != "Verify product behavior." {
 		t.Fatalf("entries[1].Description = %q, want description fallback", entries[1].Description)
+	}
+	if len(entries[1].Requires) != 0 || len(entries[1].Tools) != 0 {
+		t.Fatalf("entries[1] compatibility metadata = %#v, want empty optional metadata", entries[1])
 	}
 }
 

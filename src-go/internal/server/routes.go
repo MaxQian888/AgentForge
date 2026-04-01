@@ -116,8 +116,8 @@ func (a imControlPlaneWSAdapter) AttachBridgeListener(ctx context.Context, bridg
 	return a.control.AttachBridgeListener(ctx, bridgeID, afterCursor, listener)
 }
 
-func (a imControlPlaneWSAdapter) AckDelivery(ctx context.Context, bridgeID string, cursor int64, deliveryID string, downgradeReason string) error {
-	return a.control.AckDelivery(ctx, bridgeID, cursor, deliveryID, downgradeReason)
+func (a imControlPlaneWSAdapter) AckDelivery(ctx context.Context, ack *model.IMDeliveryAck) error {
+	return a.control.AckDelivery(ctx, ack)
 }
 
 func (a imControlPlaneWSAdapter) DetachBridgeListener(bridgeID string) {
@@ -159,6 +159,7 @@ func RegisterRoutes(
 	pageCommentRepo *repository.PageCommentRepository,
 	pageFavoriteRepo *repository.PageFavoriteRepository,
 	pageRecentAccessRepo *repository.PageRecentAccessRepository,
+	logRepo *repository.LogRepository,
 	hub *ws.Hub,
 	bridgeClient *bridge.Client,
 	bridgeHealthSvc *service.BridgeHealthService,
@@ -281,6 +282,7 @@ func RegisterRoutes(
 	}
 	bridgeToolsH := handler.NewBridgeToolsHandler(bridgeClient, bridgeToolsAllowlist...)
 	bridgeAIH := handler.NewBridgeAIHandler(bridgeClient)
+	bridgeConvH := handler.NewBridgeConversationHandler(bridgeClient)
 	notifH := handler.NewNotificationHandler(notifRepo)
 	workflowH := handler.NewWorkflowHandler(workflowRepo)
 	roleH := handler.NewRoleHandler(cfg.RolesDir).WithBridgeClient(bridgeClient)
@@ -311,6 +313,10 @@ func RegisterRoutes(
 	pluginSvc = pluginSvc.
 		WithRoleStore(workflowRoleStore).
 		WithBroadcaster(ws.NewPluginEventBroadcaster(hub))
+	roleH = roleH.WithPluginCatalog(pluginSvc)
+	if agentSvc != nil {
+		agentSvc.SetPluginCatalog(pluginSvc)
+	}
 	automationEngine := service.NewAutomationEngineService(
 		automationRuleRepo,
 		automationLogRepo,
@@ -352,6 +358,9 @@ func RegisterRoutes(
 		taskH = taskH.WithDispatcher(dispatchSvc)
 		agentH = agentH.WithDispatcher(dispatchSvc)
 	}
+	logSvc := service.NewLogService(logRepo, hub)
+	logH := handler.NewLogHandler(logSvc)
+
 	costQuerySvc := service.NewCostQueryService(taskRepo, sprintRepo, agentRunRepo, budgetSvc)
 	costH := handler.NewCostHandler(costQuerySvc)
 	workflowRunRepo := repository.NewWorkflowPluginRunRepository()
@@ -432,6 +441,8 @@ func RegisterRoutes(
 	projectGroup.POST("/memory", memoryH.Store)
 	projectGroup.GET("/memory", memoryH.Search)
 	projectGroup.DELETE("/memory/:mid", memoryH.Delete)
+	projectGroup.GET("/logs", logH.List)
+	projectGroup.POST("/logs", logH.Create)
 	if dispatchPreflightH != nil {
 		projectGroup.GET("/dispatch/preflight", dispatchPreflightH.Get)
 	}
@@ -501,6 +512,22 @@ func RegisterRoutes(
 	protected.POST("/ai/decompose", bridgeAIH.Decompose)
 	protected.POST("/ai/generate", bridgeAIH.Generate)
 	protected.POST("/ai/classify-intent", bridgeAIH.ClassifyIntent)
+
+	// Bridge conversation management & runtime control
+	protected.POST("/bridge/fork", bridgeConvH.Fork)
+	protected.POST("/bridge/rollback", bridgeConvH.Rollback)
+	protected.POST("/bridge/revert", bridgeConvH.Revert)
+	protected.POST("/bridge/unrevert", bridgeConvH.Unrevert)
+	protected.GET("/bridge/diff/:task_id", bridgeConvH.GetDiff)
+	protected.GET("/bridge/messages/:task_id", bridgeConvH.GetMessages)
+	protected.POST("/bridge/command", bridgeConvH.ExecuteCommand)
+	protected.POST("/bridge/interrupt", bridgeConvH.Interrupt)
+	protected.POST("/bridge/model", bridgeConvH.SwitchModel)
+	protected.POST("/bridge/permission-response/:request_id", bridgeConvH.PermissionResponse)
+	protected.GET("/bridge/active", bridgeConvH.GetActive)
+	protected.GET("/bridge/plugins", bridgeConvH.ListPlugins)
+	protected.POST("/bridge/plugins/:id/enable", bridgeConvH.EnablePlugin)
+	protected.POST("/bridge/plugins/:id/disable", bridgeConvH.DisablePlugin)
 	protected.GET("/agents/:id", agentH.Get)
 	protected.POST("/agents/:id/pause", agentH.Pause)
 	protected.POST("/agents/:id/resume", agentH.Resume)
@@ -593,12 +620,16 @@ func RegisterRoutes(
 	protected.GET("/plugins/:id/workflow-runs", pluginH.ListWorkflowRuns)
 	protected.GET("/plugins/workflow-runs/:runId", pluginH.GetWorkflowRun)
 
-	// Marketplace integration (only registered when a marketplace URL is configured)
-	if cfg.MarketplaceURL != "" {
-		marketplaceH := handler.NewMarketplaceHandler(pluginSvc, cfg.MarketplaceURL, cfg.PluginsDir)
-		protected.POST("/marketplace/install", marketplaceH.Install)
-		protected.GET("/marketplace/installed", marketplaceH.Installed)
-	}
+	// Marketplace integration
+	marketplaceH := handler.NewMarketplaceHandler(pluginSvc, cfg.MarketplaceURL, cfg.PluginsDir, cfg.RolesDir)
+	protected.POST("/marketplace/install", marketplaceH.Install)
+	protected.POST("/marketplace/uninstall", marketplaceH.Uninstall)
+	protected.POST("/marketplace/sideload", marketplaceH.Sideload)
+	protected.GET("/marketplace/updates", marketplaceH.Updates)
+	protected.GET("/marketplace/installed", marketplaceH.Installed)
+	protected.GET("/marketplace/consumption", marketplaceH.Consumption)
+	protected.GET("/marketplace/built-in-skills", marketplaceH.ListBuiltInSkills)
+	protected.GET("/marketplace/built-in-skills/:id", marketplaceH.GetBuiltInSkill)
 
 	// IM Bridge
 	imSvc := service.NewIMService(cfg.IMNotifyURL, cfg.IMNotifyPlatform, imControlPlane)
@@ -627,6 +658,8 @@ func RegisterRoutes(
 	protected.GET("/im/bridge/status", imControlH.GetStatus)
 	protected.GET("/im/deliveries", imControlH.ListDeliveries)
 	protected.POST("/im/deliveries/:id/retry", imControlH.RetryDelivery)
+	protected.POST("/im/deliveries/retry-batch", imControlH.RetryBatchDeliveries)
+	protected.POST("/im/test-send", imControlH.TestSend)
 	protected.GET("/im/event-types", imControlH.ListEventTypes)
 	protected.POST("/im/send", imH.Send)
 	protected.POST("/im/notify", imH.Notify)

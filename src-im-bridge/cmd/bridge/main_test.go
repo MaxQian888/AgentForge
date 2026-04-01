@@ -736,10 +736,14 @@ func TestRegisterCommandHandlers_WiresOperatorCommands(t *testing.T) {
 
 func TestRegisterCommandHandlers_FallbackSuggestsCanonicalCommand(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if r.URL.Path != "/api/v1/intent" {
+		if r.URL.Path != "/api/v1/ai/classify-intent" && r.URL.Path != "/api/v1/intent" {
 			t.Fatalf("unexpected path: %s", r.URL.Path)
 		}
-		http.Error(w, "classifier unavailable", http.StatusBadGateway)
+		if r.URL.Path == "/api/v1/ai/classify-intent" {
+			http.Error(w, "classifier unavailable", http.StatusBadGateway)
+			return
+		}
+		http.Error(w, "intent fallback unavailable", http.StatusBadGateway)
 	}))
 	defer server.Close()
 
@@ -758,6 +762,233 @@ func TestRegisterCommandHandlers_FallbackSuggestsCanonicalCommand(t *testing.T) 
 	}
 	if !strings.Contains(platform.replies[0], "/agent pause run-123") {
 		t.Fatalf("reply = %q", platform.replies[0])
+	}
+}
+
+func TestRegisterCommandHandlers_FallbackRoutesHighConfidenceIntentToCanonicalCommand(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ai/classify-intent" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["text"] != "@AgentForge 帮我看看帮助" {
+			t.Fatalf("body = %+v", body)
+		}
+		candidates, ok := body["candidates"].([]any)
+		if !ok || len(candidates) == 0 {
+			t.Fatalf("candidates = %#v", body["candidates"])
+		}
+		contextValue, ok := body["context"].(map[string]any)
+		if !ok {
+			t.Fatalf("context = %#v", body["context"])
+		}
+		history, ok := contextValue["history"].([]any)
+		if !ok || len(history) == 0 {
+			t.Fatalf("history = %#v", contextValue["history"])
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"intent":     "help",
+			"command":    "/help",
+			"args":       "",
+			"confidence": 0.95,
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &replyCapturePlatform{}
+	engine := core.NewEngine(platform)
+	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform:   "slack-stub",
+		UserID:     "user-1",
+		SessionKey: "slack-stub:chat-1:user-1",
+		Content:    "@AgentForge 帮我看看帮助",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "AgentForge IM 助手") {
+		t.Fatalf("reply = %q", platform.replies[0])
+	}
+}
+
+func TestRegisterCommandHandlers_FallbackShowsDisambiguationForLowConfidenceIntent(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ai/classify-intent" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"intent":     "unknown",
+			"command":    "/task list",
+			"args":       "",
+			"confidence": 0.42,
+			"reply":      "不太确定你的意图。",
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &replyCapturePlatform{}
+	engine := core.NewEngine(platform)
+	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform:   "slack-stub",
+		UserID:     "user-1",
+		SessionKey: "slack-stub:chat-1:user-1",
+		Content:    "@AgentForge 看看现在的情况",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	for _, want := range []string{"可能的命令", "/task list", "/sprint status", "/help"} {
+		if !strings.Contains(platform.replies[0], want) {
+			t.Fatalf("reply = %q, want substring %q", platform.replies[0], want)
+		}
+	}
+}
+
+func TestRegisterCommandHandlers_FallbackSupportsReviewFollowUpWorkflow(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		switch r.URL.Path {
+		case "/api/v1/ai/classify-intent":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode classify body: %v", err)
+			}
+			candidates, ok := body["candidates"].([]any)
+			if !ok || len(candidates) == 0 {
+				t.Fatalf("candidates = %#v", body["candidates"])
+			}
+			foundWorkflow := false
+			for _, candidate := range candidates {
+				if candidate == "review_followup_tasks" {
+					foundWorkflow = true
+					break
+				}
+			}
+			if !foundWorkflow {
+				t.Fatalf("candidates = %#v, want review_followup_tasks", candidates)
+			}
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"intent":     "review_followup_tasks",
+				"command":    "/review",
+				"args":       "https://github.com/org/repo/pull/42",
+				"confidence": 0.93,
+			})
+		case "/api/v1/reviews/trigger":
+			w.Header().Set("Content-Type", "application/json")
+			w.WriteHeader(http.StatusAccepted)
+			_ = json.NewEncoder(w).Encode(&client.Review{
+				ID:             "review-12345678",
+				PRURL:          "https://github.com/org/repo/pull/42",
+				Status:         "completed",
+				RiskLevel:      "high",
+				Summary:        "发现问题",
+				Recommendation: "request_changes",
+				Findings: []client.ReviewFinding{
+					{Severity: "high", Message: "Missing auth guard"},
+				},
+			})
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &replyCapturePlatform{}
+	engine := core.NewEngine(platform)
+	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform:   "slack-stub",
+		UserID:     "user-1",
+		SessionKey: "slack-stub:chat-1:user-1",
+		Content:    "@AgentForge review the PR and create follow-up tasks for the fixes",
+	})
+
+	if len(platform.replies) != 2 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "正在触发代码审查") {
+		t.Fatalf("first reply = %q", platform.replies[0])
+	}
+	for _, want := range []string{"后续任务建议", "/task create 修复审查问题", "Missing auth guard"} {
+		if !strings.Contains(platform.replies[1], want) {
+			t.Fatalf("second reply = %q, want substring %q", platform.replies[1], want)
+		}
+	}
+}
+
+func TestRegisterCommandHandlers_FallbackIncludesRecentSessionHistoryInClassificationContext(t *testing.T) {
+	callCount := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/ai/classify-intent" {
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+		callCount++
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		contextValue, ok := body["context"].(map[string]any)
+		if !ok {
+			t.Fatalf("context = %#v", body["context"])
+		}
+		history, ok := contextValue["history"].([]any)
+		if !ok {
+			t.Fatalf("history = %#v", contextValue["history"])
+		}
+		if callCount == 1 {
+			if len(history) != 1 || history[0] != "@AgentForge 先看一下任务" {
+				t.Fatalf("first history = %#v", history)
+			}
+		}
+		if callCount == 2 {
+			if len(history) < 2 {
+				t.Fatalf("second history = %#v, want at least 2 entries", history)
+			}
+			if history[0] != "@AgentForge 先看一下任务" || history[1] != "@AgentForge 再看看 sprint" {
+				t.Fatalf("second history = %#v", history)
+			}
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]any{
+			"intent":     "unknown",
+			"command":    "",
+			"args":       "",
+			"confidence": 0.2,
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &replyCapturePlatform{}
+	engine := core.NewEngine(platform)
+	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+
+	for _, content := range []string{"@AgentForge 先看一下任务", "@AgentForge 再看看 sprint"} {
+		engine.HandleMessage(platform, &core.Message{
+			Platform:   "slack-stub",
+			UserID:     "user-1",
+			SessionKey: "slack-stub:chat-1:user-1",
+			Content:    content,
+		})
+	}
+
+	if callCount != 2 {
+		t.Fatalf("callCount = %d, want 2", callCount)
 	}
 }
 

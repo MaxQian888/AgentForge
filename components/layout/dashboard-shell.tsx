@@ -203,7 +203,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
       const result = await Promise.resolve(
         sendNotification({
           notificationId: notification.id,
-          type: notification.type,
+          notificationType: notification.type,
           title: notification.title,
           body: notification.message,
           href: notification.href,

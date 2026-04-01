@@ -3,6 +3,13 @@
 import { ReactNode } from "react";
 import { useTranslations } from "next-intl";
 import { Button } from "@/components/ui/button";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export function WidgetWrapper({
   title,
@@ -47,25 +54,24 @@ export function WidgetWrapper({
         <div className="flex flex-wrap justify-end gap-2">
           {autoRefresh ? (
             <>
-              <label className="sr-only" htmlFor={`${title}-auto-refresh`}>
-                {t("widget.autoRefresh.label")}
-              </label>
-              <select
-                id={`${title}-auto-refresh`}
-                aria-label={t("widget.autoRefresh.label")}
-                className="h-8 rounded-md border border-input bg-background px-2 text-xs"
+              <Select
                 value={autoRefresh.interval}
-                onChange={(event) =>
+                onValueChange={(value) =>
                   autoRefresh.onIntervalChange(
-                    event.target.value as "30s" | "60s" | "300s" | "off"
+                    value as "30s" | "60s" | "300s" | "off"
                   )
                 }
               >
-                <option value="30s">{t("widget.autoRefresh.interval.30s")}</option>
-                <option value="60s">{t("widget.autoRefresh.interval.60s")}</option>
-                <option value="300s">{t("widget.autoRefresh.interval.300s")}</option>
-                <option value="off">{t("widget.autoRefresh.interval.off")}</option>
-              </select>
+                <SelectTrigger className="h-8 px-2 text-xs" aria-label={t("widget.autoRefresh.label")}>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="30s">{t("widget.autoRefresh.interval.30s")}</SelectItem>
+                  <SelectItem value="60s">{t("widget.autoRefresh.interval.60s")}</SelectItem>
+                  <SelectItem value="300s">{t("widget.autoRefresh.interval.300s")}</SelectItem>
+                  <SelectItem value="off">{t("widget.autoRefresh.interval.off")}</SelectItem>
+                </SelectContent>
+              </Select>
               <Button
                 type="button"
                 size="sm"

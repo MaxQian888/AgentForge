@@ -155,13 +155,17 @@ func replyReview(ctx context.Context, p core.Platform, msg *core.Message, review
 	if strings.TrimSpace(title) != "" {
 		prefix = title + "\n"
 	}
-	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("%s代码审查 #%s\nPR: %s\n状态: %s\n建议: %s",
+	reply := fmt.Sprintf("%s代码审查 #%s\nPR: %s\n状态: %s\n建议: %s",
 		prefix,
 		shortID(review.ID),
 		review.PRURL,
 		review.Status,
 		review.Recommendation,
-	))
+	)
+	if followups := formatReviewFollowUpTasks(review); followups != "" {
+		reply += "\n后续任务建议:\n" + followups
+	}
+	_ = p.Reply(ctx, msg.ReplyCtx, reply)
 }
 
 func buildReviewCard(review *client.Review) *core.Card {
@@ -175,6 +179,9 @@ func buildReviewCard(review *client.Review) *core.Card {
 	}
 	if review.Recommendation != "" {
 		card.AddField("建议", review.Recommendation)
+	}
+	if followups := formatReviewFollowUpTasks(review); followups != "" {
+		card.AddField("后续任务", followups)
 	}
 	if review.CostUSD > 0 {
 		card.AddField("费用", fmt.Sprintf("$%.2f", review.CostUSD))
@@ -190,6 +197,33 @@ func buildReviewCard(review *client.Review) *core.Card {
 		return card
 	}
 	return card
+}
+
+func formatReviewFollowUpTasks(review *client.Review) string {
+	if review == nil || !isTerminalReviewStatus(review.Status) || len(review.Findings) == 0 {
+		return ""
+	}
+	commands := make([]string, 0, 3)
+	for _, finding := range review.Findings {
+		if finding.Dismissed {
+			continue
+		}
+		title := strings.TrimSpace(finding.Suggestion)
+		if title == "" {
+			title = strings.TrimSpace(finding.Message)
+		}
+		if title == "" {
+			continue
+		}
+		if file := strings.TrimSpace(finding.File); file != "" {
+			title += " [" + file + "]"
+		}
+		commands = append(commands, "/task create 修复审查问题: "+title)
+		if len(commands) == 3 {
+			break
+		}
+	}
+	return strings.Join(commands, "\n")
 }
 
 func isTerminalReviewStatus(status string) bool {

@@ -1,4 +1,8 @@
-import { calculateCost, type UsageInfo } from "../cost/calculator.js";
+import {
+  accumulateCostAccounting,
+  serializeCostAccounting,
+  type CostAccountingComponentInput,
+} from "../cost/accounting.js";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
 import type { SessionManager } from "../session/manager.js";
 import type {
@@ -10,12 +14,23 @@ import type {
 import type { EventStreamer } from "../ws/event-stream.js";
 import type { MCPClientHub } from "../mcp/client-hub.js";
 import type { PluginRecord } from "../plugins/types.js";
-import { buildFilterPipeline, applyFilters, type OutputFilter } from "../filters/pipeline.js";
+import {
+  buildFilterPipeline,
+  applyFilters,
+  type OutputFilter,
+} from "../filters/pipeline.js";
 import type { Options } from "@anthropic-ai/claude-agent-sdk";
 import { HookCallbackManager } from "../runtime/hook-callback-manager.js";
+import { emitBudgetAlertIfNeeded } from "./budget-events.js";
 
 type UnknownRecord = Record<string, unknown>;
 type EventSink = Pick<EventStreamer, "send">;
+interface UsageInfo {
+  input_tokens?: number;
+  output_tokens?: number;
+  cache_read_input_tokens?: number;
+  cache_creation_input_tokens?: number;
+}
 type QueryRunnerResult = AsyncIterable<UnknownRecord> & {
   interrupt?: () => Promise<void>;
   setModel?: (model?: string) => Promise<void>;
@@ -137,7 +152,11 @@ export function buildClaudeQueryOptions(
     }
   }
 
-  if (continuity?.runtime === "claude_code" && continuity.resume_ready && continuity.session_handle) {
+  if (
+    continuity?.runtime === "claude_code" &&
+    continuity.resume_ready &&
+    continuity.session_handle
+  ) {
     options.resume = continuity.resume_token ?? continuity.session_handle;
     if (continuity.checkpoint_id) {
       options.resumeSessionAt = continuity.checkpoint_id;
@@ -166,11 +185,13 @@ export async function streamClaudeRuntime(
   attachClaudeCallbacks(options, streamer, req, deps);
 
   // Build output filters from role config
-  const outputFilters = buildFilterPipeline(req.role_config?.output_filters ?? []);
+  const outputFilters = buildFilterPipeline(
+    req.role_config?.output_filters ?? [],
+  );
 
   // Periodic cost reporting timer (every 5s)
   const costReportInterval = setInterval(() => {
-    if (runtime.spentUsd > 0) {
+    if (runtime.spentUsd > 0 && runtime.costAccounting) {
       streamer.send({
         task_id: req.task_id,
         session_id: req.session_id,
@@ -178,13 +199,15 @@ export async function streamClaudeRuntime(
         type: "cost_update",
         data: {
           session_id: req.session_id,
-          input_tokens: 0,
-          output_tokens: 0,
-          cache_read_tokens: 0,
+          input_tokens: runtime.costAccounting.inputTokens,
+          output_tokens: runtime.costAccounting.outputTokens,
+          cache_read_tokens: runtime.costAccounting.cacheReadTokens,
+          cache_creation_tokens: runtime.costAccounting.cacheCreationTokens,
           cost_usd: runtime.spentUsd,
           budget_remaining_usd: Math.max(req.budget_usd - runtime.spentUsd, 0),
           turn_number: runtime.turnNumber,
           periodic: true,
+          cost_accounting: serializeCostAccounting(runtime.costAccounting),
         },
       });
     }
@@ -200,7 +223,11 @@ export async function streamClaudeRuntime(
     for await (const message of query) {
       runtime.lastActivity = now();
       runtime.continuity = enrichClaudeContinuity(
-        extractClaudeContinuity(message, runtime.lastActivity, runtime.continuity),
+        extractClaudeContinuity(
+          message,
+          runtime.lastActivity,
+          runtime.continuity,
+        ),
         runtime,
       );
 
@@ -212,32 +239,6 @@ export async function streamClaudeRuntime(
       emitCompactBoundary(streamer, message, req, now);
       captureStructuredOutput(runtime, message);
       emitUsage(runtime, streamer, message, req, now);
-
-      // 80% budget warning threshold
-      const warnThreshold = req.warn_threshold ?? 0.8;
-      if (
-        !runtime.budgetWarningEmitted &&
-        req.budget_usd > 0 &&
-        runtime.spentUsd >= req.budget_usd * warnThreshold
-      ) {
-        runtime.budgetWarningEmitted = true;
-        streamer.send({
-          task_id: req.task_id,
-          session_id: req.session_id,
-          timestamp_ms: now(),
-          type: "cost_update",
-          data: {
-            session_id: req.session_id,
-            input_tokens: 0,
-            output_tokens: 0,
-            cache_read_tokens: 0,
-            cost_usd: runtime.spentUsd,
-            budget_remaining_usd: Math.max(req.budget_usd - runtime.spentUsd, 0),
-            turn_number: runtime.turnNumber,
-            warning: "budget_threshold_reached",
-          },
-        });
-      }
 
       if (runtime.spentUsd >= req.budget_usd) {
         runtime.abortController.abort("budget_exceeded");
@@ -269,8 +270,8 @@ export function extractClaudeContinuity(
 
   const checkpointId =
     message.type === "assistant" &&
-      typeof message.uuid === "string" &&
-      message.uuid.length > 0
+    typeof message.uuid === "string" &&
+    message.uuid.length > 0
       ? message.uuid
       : previousClaude?.checkpoint_id;
 
@@ -299,6 +300,7 @@ export function buildRuntimeSnapshot(
     created_at: runtime.createdAt,
     updated_at: updatedAt,
     request: { ...req },
+    cost_accounting: serializeCostAccounting(runtime.costAccounting),
     continuity: runtime.continuity
       ? { ...runtime.continuity }
       : req.runtime === "claude_code" || req.provider === "anthropic"
@@ -308,7 +310,9 @@ export function buildRuntimeSnapshot(
             captured_at: updatedAt,
             blocking_reason: "missing_continuity_state",
           }
-        : req.runtime === "codex" || req.provider === "codex" || req.provider === "openai"
+        : req.runtime === "codex" ||
+            req.provider === "codex" ||
+            req.provider === "openai"
           ? {
               runtime: "codex",
               resume_ready: false,
@@ -322,7 +326,7 @@ export function buildRuntimeSnapshot(
                 captured_at: updatedAt,
                 blocking_reason: "missing_continuity_state",
               }
-        : undefined,
+            : undefined,
   };
 }
 
@@ -358,44 +362,43 @@ function attachClaudeCallbacks(
   deps: ClaudeRuntimeDeps,
 ): void {
   if (req.hooks_config?.hooks.length && deps.hookCallbackManager) {
-    const hooks = req.hooks_config.hooks.reduce<Record<string, Array<Record<string, unknown>>>>(
-      (acc, hookDefinition) => {
-        const eventName = hookDefinition.hook;
-        const matcher = {
-          matcher:
-            typeof hookDefinition.matcher === "string"
-              ? hookDefinition.matcher
-              : hookDefinition.matcher
-                ? JSON.stringify(hookDefinition.matcher)
-                : undefined,
-          timeout: toHookTimeoutSeconds(req),
-          hooks: [
-            async (input: Record<string, unknown>) => {
-              return requestHookCallback(
-                deps.hookCallbackManager!,
-                req,
-                {
-                  hook: eventName,
-                  task_id: req.task_id,
-                  session_id: req.session_id,
-                  ...normalizeHookInput(input),
-                },
-              );
-            },
-          ],
-        };
-        if (!acc[eventName]) {
-          acc[eventName] = [];
-        }
-        acc[eventName]?.push(matcher);
-        return acc;
-      },
-      {},
-    );
+    const hooks = req.hooks_config.hooks.reduce<
+      Record<string, Array<Record<string, unknown>>>
+    >((acc, hookDefinition) => {
+      const eventName = hookDefinition.hook;
+      const matcher = {
+        matcher:
+          typeof hookDefinition.matcher === "string"
+            ? hookDefinition.matcher
+            : hookDefinition.matcher
+              ? JSON.stringify(hookDefinition.matcher)
+              : undefined,
+        timeout: toHookTimeoutSeconds(req),
+        hooks: [
+          async (input: Record<string, unknown>) => {
+            return requestHookCallback(deps.hookCallbackManager!, req, {
+              hook: eventName,
+              task_id: req.task_id,
+              session_id: req.session_id,
+              ...normalizeHookInput(input),
+            });
+          },
+        ],
+      };
+      if (!acc[eventName]) {
+        acc[eventName] = [];
+      }
+      acc[eventName]?.push(matcher);
+      return acc;
+    }, {});
     options.hooks = hooks;
   }
 
-  if (req.tool_permission_callback && resolveHookCallbackUrl(req) && deps.hookCallbackManager) {
+  if (
+    req.tool_permission_callback &&
+    resolveHookCallbackUrl(req) &&
+    deps.hookCallbackManager
+  ) {
     options.canUseTool = async (
       toolName: string,
       input: Record<string, unknown>,
@@ -506,7 +509,9 @@ async function requestHookCallback(
   }
 }
 
-function normalizeHookInput(input: Record<string, unknown>): Record<string, unknown> {
+function normalizeHookInput(
+  input: Record<string, unknown>,
+): Record<string, unknown> {
   return {
     tool_name: input.tool_name,
     tool_input: input.tool_input,
@@ -569,9 +574,10 @@ function emitAssistantBlocks(
 
   for (const block of contentBlocks) {
     if (block.type === "text" && typeof block.text === "string") {
-      const content = outputFilters.length > 0
-        ? applyFilters(block.text, outputFilters)
-        : block.text;
+      const content =
+        outputFilters.length > 0
+          ? applyFilters(block.text, outputFilters)
+          : block.text;
       streamer.send({
         task_id: req.task_id,
         session_id: req.session_id,
@@ -646,7 +652,8 @@ function emitPartialAssistantMessage(
   const content =
     typeof message.event.text === "string"
       ? message.event.text
-      : isRecord(message.event.delta) && typeof message.event.delta.text === "string"
+      : isRecord(message.event.delta) &&
+          typeof message.event.delta.text === "string"
         ? message.event.delta.text
         : isRecord(message.event.content_block) &&
             typeof message.event.content_block.text === "string"
@@ -674,7 +681,10 @@ function emitRateLimit(
   req: ExecuteRequest,
   now: () => number,
 ): void {
-  if (message.type !== "rate_limit_event" || !isRecord(message.rate_limit_info)) {
+  if (
+    message.type !== "rate_limit_event" ||
+    !isRecord(message.rate_limit_info)
+  ) {
     return;
   }
 
@@ -716,18 +726,23 @@ function emitToolProgress(
     timestamp_ms: now(),
     type: "progress",
     data: {
-      tool_name: typeof message.tool_name === "string" ? message.tool_name : undefined,
+      tool_name:
+        typeof message.tool_name === "string" ? message.tool_name : undefined,
       progress_text:
         typeof message.tool_name === "string" &&
-          typeof message.elapsed_time_seconds === "number"
+        typeof message.elapsed_time_seconds === "number"
           ? `${message.tool_name} running (${message.elapsed_time_seconds}s)`
           : undefined,
       elapsed_time_seconds:
         typeof message.elapsed_time_seconds === "number"
           ? message.elapsed_time_seconds
           : undefined,
-      tool_use_id: typeof message.tool_use_id === "string" ? message.tool_use_id : undefined,
-      task_id: typeof message.task_id === "string" ? message.task_id : undefined,
+      tool_use_id:
+        typeof message.tool_use_id === "string"
+          ? message.tool_use_id
+          : undefined,
+      task_id:
+        typeof message.task_id === "string" ? message.task_id : undefined,
     },
   });
 }
@@ -756,7 +771,10 @@ function emitCompactBoundary(
   });
 }
 
-function captureStructuredOutput(runtime: AgentRuntime, message: UnknownRecord): void {
+function captureStructuredOutput(
+  runtime: AgentRuntime,
+  message: UnknownRecord,
+): void {
   if (message.type !== "result" || !isRecord(message.structured_output)) {
     return;
   }
@@ -773,14 +791,33 @@ function emitUsage(
 ): void {
   const usage = extractUsage(message);
   if (!usage) return;
+  const source =
+    typeof message.total_cost_usd === "number" && Number.isFinite(message.total_cost_usd)
+      ? "anthropic_result_total"
+      : "anthropic_api_pricing";
+  const components = extractModelUsageComponents(message);
 
   const reportedTotal =
-    typeof message.total_cost_usd === "number" && Number.isFinite(message.total_cost_usd)
+    typeof message.total_cost_usd === "number" &&
+    Number.isFinite(message.total_cost_usd)
       ? message.total_cost_usd
       : undefined;
-  const nextSpent =
-    reportedTotal !== undefined ? reportedTotal : runtime.spentUsd + calculateCost(usage);
-  runtime.spentUsd = nextSpent;
+  const snapshot = accumulateCostAccounting({
+    previous: runtime.costAccounting,
+    runtime: req.runtime ?? "claude_code",
+    provider: req.provider ?? "anthropic",
+    requestedModel: req.model ?? "claude-sonnet-4-5",
+    usageDelta: {
+      inputTokens: usage.input_tokens ?? 0,
+      outputTokens: usage.output_tokens ?? 0,
+      cacheReadTokens: usage.cache_read_input_tokens ?? 0,
+      cacheCreationTokens: usage.cache_creation_input_tokens ?? 0,
+    },
+    authoritativeTotalCostUsd: reportedTotal,
+    source,
+    components,
+  });
+  runtime.applyCostAccounting(snapshot);
 
   streamer.send({
     task_id: req.task_id,
@@ -792,30 +829,81 @@ function emitUsage(
       input_tokens: usage.input_tokens ?? 0,
       output_tokens: usage.output_tokens ?? 0,
       cache_read_tokens: usage.cache_read_input_tokens ?? 0,
+      cache_creation_tokens: usage.cache_creation_input_tokens ?? 0,
       cost_usd: runtime.spentUsd,
       budget_remaining_usd: Math.max(req.budget_usd - runtime.spentUsd, 0),
       turn_number: runtime.turnNumber,
+      cost_accounting: serializeCostAccounting(snapshot),
     },
   });
+  emitBudgetAlertIfNeeded(runtime, streamer, req, now);
 }
 
 function extractUsage(message: UnknownRecord): UsageInfo | null {
-  if (!isRecord(message.usage)) return null;
+  const sourceUsage = isRecord(message.usage)
+    ? message.usage
+    : isRecord(message.message) && isRecord(message.message.usage)
+      ? message.message.usage
+      : null;
+  if (!sourceUsage) return null;
 
   return {
     input_tokens:
-      typeof message.usage.input_tokens === "number" ? message.usage.input_tokens : undefined,
+      typeof sourceUsage.input_tokens === "number"
+        ? sourceUsage.input_tokens
+        : undefined,
     output_tokens:
-      typeof message.usage.output_tokens === "number" ? message.usage.output_tokens : undefined,
+      typeof sourceUsage.output_tokens === "number"
+        ? sourceUsage.output_tokens
+        : undefined,
     cache_read_input_tokens:
-      typeof message.usage.cache_read_input_tokens === "number"
-        ? message.usage.cache_read_input_tokens
+      typeof sourceUsage.cache_read_input_tokens === "number"
+        ? sourceUsage.cache_read_input_tokens
+        : undefined,
+    cache_creation_input_tokens:
+      typeof sourceUsage.cache_creation_input_tokens === "number"
+        ? sourceUsage.cache_creation_input_tokens
         : undefined,
   };
 }
 
+function extractModelUsageComponents(
+  message: UnknownRecord,
+): CostAccountingComponentInput[] {
+  if (!isRecord(message.modelUsage)) {
+    return [];
+  }
+
+  return Object.entries(message.modelUsage).flatMap(([model, usage]) => {
+    if (!isRecord(usage)) {
+      return [];
+    }
+
+    return [
+      {
+        model,
+        inputTokens:
+          typeof usage.inputTokens === "number" ? usage.inputTokens : undefined,
+        outputTokens:
+          typeof usage.outputTokens === "number" ? usage.outputTokens : undefined,
+        cacheReadTokens:
+          typeof usage.cacheReadInputTokens === "number"
+            ? usage.cacheReadInputTokens
+            : undefined,
+        cacheCreationTokens:
+          typeof usage.cacheCreationInputTokens === "number"
+            ? usage.cacheCreationInputTokens
+            : undefined,
+        costUsd: typeof usage.costUSD === "number" ? usage.costUSD : undefined,
+        source: "anthropic_model_usage",
+      },
+    ];
+  });
+}
+
 function getContentBlocks(message: UnknownRecord): Array<UnknownRecord> | null {
-  if (!isRecord(message.message) || !Array.isArray(message.message.content)) return null;
+  if (!isRecord(message.message) || !Array.isArray(message.message.content))
+    return null;
 
   return message.message.content.filter(isRecord);
 }

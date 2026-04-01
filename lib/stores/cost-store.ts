@@ -23,6 +23,32 @@ export interface TaskCostDetail {
   cacheReadTokens: number;
 }
 
+export interface CostCoverageSummary {
+  totalRunCount: number;
+  pricedRunCount: number;
+  authoritativeRunCount: number;
+  estimatedRunCount: number;
+  planIncludedRunCount: number;
+  unpricedRunCount: number;
+  totalCostUsd: number;
+  authoritativeCostUsd: number;
+  estimatedCostUsd: number;
+  hasCoverageGap: boolean;
+}
+
+export interface RuntimeCostBreakdownRecord {
+  runtime: string;
+  provider: string;
+  model: string;
+  runCount: number;
+  pricedRunCount: number;
+  authoritativeRunCount: number;
+  estimatedRunCount: number;
+  planIncludedRunCount: number;
+  unpricedRunCount: number;
+  totalCostUsd: number;
+}
+
 export interface ProjectCostSummary {
   totalCostUsd: number;
   totalInputTokens: number;
@@ -51,6 +77,8 @@ export interface ProjectCostSummary {
       runCount: number;
     }
   >;
+  costCoverage: CostCoverageSummary | null;
+  runtimeBreakdown: RuntimeCostBreakdownRecord[];
 }
 
 export interface VelocityPoint {

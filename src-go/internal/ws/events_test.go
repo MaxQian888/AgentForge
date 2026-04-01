@@ -38,7 +38,7 @@ func TestEventJSON(t *testing.T) {
 func TestBridgeAgentEventDecodeData(t *testing.T) {
 	event := &BridgeAgentEvent{
 		Type: BridgeEventCostUpdate,
-		Data: []byte(`{"input_tokens":120,"output_tokens":45,"cache_read_tokens":5,"cost_usd":0.37,"budget_remaining_usd":4.63,"turn_number":3}`),
+		Data: []byte(`{"input_tokens":120,"output_tokens":45,"cache_read_tokens":5,"cache_creation_tokens":12,"cost_usd":0.37,"budget_remaining_usd":4.63,"turn_number":3,"cost_accounting":{"total_cost_usd":0.37,"input_tokens":120,"output_tokens":45,"cache_read_tokens":5,"cache_creation_tokens":12,"mode":"estimated_api_pricing","coverage":"full","source":"openai_api_pricing","components":[]}}`),
 	}
 
 	var payload BridgeEventCostUpdateData
@@ -50,6 +50,12 @@ func TestBridgeAgentEventDecodeData(t *testing.T) {
 	}
 	if payload.CostUSD != 0.37 || payload.BudgetRemainingUSD != 4.63 || payload.TurnNumber != 3 {
 		t.Fatalf("unexpected cost payload: %+v", payload)
+	}
+	if payload.CacheCreationTokens != 12 {
+		t.Fatalf("cache creation tokens = %d, want 12", payload.CacheCreationTokens)
+	}
+	if payload.CostAccounting == nil || payload.CostAccounting.Mode != "estimated_api_pricing" {
+		t.Fatalf("cost accounting = %+v", payload.CostAccounting)
 	}
 }
 

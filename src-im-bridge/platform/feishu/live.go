@@ -24,12 +24,17 @@ import (
 	"github.com/agentforge/im-bridge/notify"
 )
 
+var (
+	_ core.FormattedTextSender = (*Live)(nil)
+	_ core.MessageUpdater      = (*Live)(nil)
+)
+
 var liveMetadata = core.PlatformMetadata{
 	Source: "feishu",
 	Capabilities: core.PlatformCapabilities{
 		CommandSurface:     core.CommandSurfaceMixed,
 		StructuredSurface:  core.StructuredSurfaceCards,
-		AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateDeferredCardUpdate},
+		AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateEdit, core.AsyncUpdateDeferredCardUpdate},
 		ActionCallbackMode: core.ActionCallbackWebhook,
 		MessageScopes:      []core.MessageScope{core.MessageScopeChat, core.MessageScopeThread},
 		Mutability: core.MutabilitySemantics{
@@ -64,6 +69,7 @@ type cardActionEventRunner interface {
 type messageClient interface {
 	Send(ctx context.Context, receiveIDType, receiveID, msgType, content string) error
 	Reply(ctx context.Context, messageID, msgType, content string) error
+	Patch(ctx context.Context, messageID, content string) error
 }
 
 type cardUpdater interface {
@@ -329,6 +335,59 @@ func (l *Live) UpdateNative(ctx context.Context, replyCtx any, message *core.Nat
 	return l.cardUpdater.Update(ctx, replyTarget.CallbackToken, message)
 }
 
+func (l *Live) SendFormattedText(ctx context.Context, chatID string, message *core.FormattedText) error {
+	if message == nil {
+		return errors.New("formatted text is required")
+	}
+	if message.Format == core.TextFormatLarkMD {
+		nativeMsg, err := l.BuildNativeTextMessage("", message.Content)
+		if err == nil {
+			return l.SendNative(ctx, chatID, nativeMsg)
+		}
+	}
+	return l.Send(ctx, chatID, message.Content)
+}
+
+func (l *Live) ReplyFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	if message == nil {
+		return errors.New("formatted text is required")
+	}
+	if message.Format == core.TextFormatLarkMD {
+		nativeMsg, err := l.BuildNativeTextMessage("", message.Content)
+		if err == nil {
+			return l.ReplyNative(ctx, rawReplyCtx, nativeMsg)
+		}
+	}
+	return l.Reply(ctx, rawReplyCtx, message.Content)
+}
+
+func (l *Live) UpdateFormattedText(ctx context.Context, rawReplyCtx any, message *core.FormattedText) error {
+	if message == nil {
+		return errors.New("formatted text is required")
+	}
+	if message.Format == core.TextFormatLarkMD {
+		nativeMsg, err := l.BuildNativeTextMessage("", message.Content)
+		if err == nil {
+			if updateErr := l.UpdateNative(ctx, rawReplyCtx, nativeMsg); updateErr == nil {
+				return nil
+			}
+		}
+	}
+	return l.ReplyFormattedText(ctx, rawReplyCtx, message)
+}
+
+func (l *Live) UpdateMessage(ctx context.Context, rawReplyCtx any, content string) error {
+	rc := toReplyContext(rawReplyCtx)
+	if strings.TrimSpace(rc.MessageID) == "" {
+		return errors.New("feishu update message requires message id")
+	}
+	payload, err := renderTextPayload(content)
+	if err != nil {
+		return err
+	}
+	return l.messages.Patch(ctx, rc.MessageID, payload)
+}
+
 func (l *Live) Stop() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -419,6 +478,27 @@ func (c *sdkMessageClient) Reply(ctx context.Context, messageID, msgType, conten
 	}
 	if !resp.Success() {
 		return fmt.Errorf("feishu reply failed: code=%d msg=%s", resp.Code, resp.Msg)
+	}
+	return nil
+}
+
+func (c *sdkMessageClient) Patch(ctx context.Context, messageID, content string) error {
+	resp, err := c.client.Im.Message.Patch(
+		ctx,
+		larkim.NewPatchMessageReqBuilder().
+			MessageId(messageID).
+			Body(
+				larkim.NewPatchMessageReqBodyBuilder().
+					Content(content).
+					Build(),
+			).
+			Build(),
+	)
+	if err != nil {
+		return err
+	}
+	if !resp.Success() {
+		return fmt.Errorf("feishu patch failed: code=%d msg=%s", resp.Code, resp.Msg)
 	}
 	return nil
 }

@@ -7,6 +7,8 @@ const fetchRuntimeCatalog = jest.fn();
 const fetchBridgeHealth = jest.fn();
 const spawnAgent = jest.fn();
 
+const fetchDispatchPreflight = jest.fn().mockResolvedValue(null);
+
 const storeState = {
   runtimeCatalog: {
     defaultRuntime: "codex",
@@ -38,6 +40,7 @@ const storeState = {
   },
   fetchRuntimeCatalog,
   fetchBridgeHealth,
+  fetchDispatchPreflight,
   spawnAgent,
 };
 
@@ -79,6 +82,11 @@ jest.mock("@/lib/stores/agent-store", () => ({
 
 jest.mock("@/lib/stores/role-store", () => ({
   useRoleStore: (selector: (state: typeof roleStoreState) => unknown) => selector(roleStoreState),
+}));
+
+jest.mock("@/lib/stores/project-store", () => ({
+  useProjectStore: (selector: (state: { currentProject: { id: string } | null }) => unknown) =>
+    selector({ currentProject: { id: "project-1" } }),
 }));
 
 jest.mock("@/components/ui/dialog", () => ({
@@ -196,7 +204,7 @@ describe("SpawnAgentDialog", () => {
       />,
     );
 
-    expect(screen.getByText(/Bridge is degraded/)).toBeInTheDocument();
+    expect(screen.getByText(/Bridge Degraded/)).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Start Agent" })).toBeDisabled();
   });
 
@@ -267,6 +275,37 @@ describe("SpawnAgentDialog", () => {
 
     expect(spawnAgent).toHaveBeenCalledWith("task-5", "member-5", expect.objectContaining({
       roleId: undefined,
+    }));
+  });
+
+  it("supports selecting task and member inside the workspace spawn flow", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <SpawnAgentDialog
+        open
+        onOpenChange={jest.fn()}
+        taskOptions={[
+          { id: "task-6", title: "Monitor release" },
+          { id: "task-7", title: "Triage backlog" },
+        ]}
+        memberOptions={[
+          { id: "member-6", label: "Reviewer (Agent)" },
+          { id: "member-7", label: "Planner (Human)" },
+        ]}
+      />,
+    );
+
+    await waitFor(() => expect(fetchRuntimeCatalog).toHaveBeenCalled());
+
+    await user.selectOptions(screen.getByLabelText("Task"), "task-7");
+    await user.selectOptions(screen.getByLabelText("Member"), "member-7");
+    await user.click(screen.getByRole("button", { name: "Start Agent" }));
+
+    expect(spawnAgent).toHaveBeenCalledWith("task-7", "member-7", expect.objectContaining({
+      runtime: "codex",
+      provider: "openai",
+      model: "gpt-5-codex",
     }));
   });
 });

@@ -1,8 +1,12 @@
-import { calculateCost } from "../cost/calculator.js";
+import {
+  accumulateCostAccounting,
+  serializeCostAccounting,
+} from "../cost/accounting.js";
 import type { OpenCodeTransport } from "../opencode/transport.js";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
 import type { ExecuteRequest } from "../types.js";
 import type { EventStreamer } from "../ws/event-stream.js";
+import { emitBudgetAlertIfNeeded } from "./budget-events.js";
 
 type UnknownRecord = Record<string, unknown>;
 type EventSink = Pick<EventStreamer, "send">;
@@ -32,7 +36,8 @@ export async function streamOpenCodeRuntime(
 ): Promise<void> {
   const now = deps.now ?? Date.now;
   const continuity =
-    runtime.continuity?.runtime === "opencode" && runtime.continuity.resume_ready
+    runtime.continuity?.runtime === "opencode" &&
+    runtime.continuity.resume_ready
       ? runtime.continuity
       : null;
   const mode = continuity?.upstream_session_id ? "resume" : "start";
@@ -83,7 +88,9 @@ export async function streamOpenCodeRuntime(
   }
 
   if (runtime.abortController.signal.aborted) {
-    throw new Error(String(runtime.abortController.signal.reason ?? "opencode run aborted"));
+    throw new Error(
+      String(runtime.abortController.signal.reason ?? "opencode run aborted"),
+    );
   }
   if (!sawTerminal) {
     throw new Error("OpenCode event stream ended before session became idle");
@@ -132,7 +139,9 @@ function emitOpenCodeEvent(
     return false;
   }
   if (eventName === "session.error") {
-    throw new Error(getErrorMessage(data) || `OpenCode session ${sessionId} failed`);
+    throw new Error(
+      getErrorMessage(data) || `OpenCode session ${sessionId} failed`,
+    );
   }
   if (eventName === "todo.updated") {
     updateOpenCodeContinuity(runtime, sessionId, now, getLatestMessageID(data));
@@ -180,7 +189,10 @@ function emitOpenCodeEvent(
     return false;
   }
 
-  if (eventName === "message.part.delta" || eventName === "message.part.updated") {
+  if (
+    eventName === "message.part.delta" ||
+    eventName === "message.part.updated"
+  ) {
     const part = isRecord(data.part) ? data.part : null;
     if (!part) {
       return false;
@@ -189,7 +201,11 @@ function emitOpenCodeEvent(
 
     const partType = normalizeOpenCodePartType(part);
 
-    if (partType === "text" && typeof part.text === "string" && part.text.length > 0) {
+    if (
+      partType === "text" &&
+      typeof part.text === "string" &&
+      part.text.length > 0
+    ) {
       streamer.send({
         task_id: req.task_id,
         session_id: req.session_id,
@@ -206,7 +222,8 @@ function emitOpenCodeEvent(
 
     if (partType === "tool") {
       const toolId = typeof part.id === "string" ? part.id : "";
-      const toolName = typeof part.toolName === "string" ? part.toolName : "tool";
+      const toolName =
+        typeof part.toolName === "string" ? part.toolName : "tool";
       const toolState = typeof part.state === "string" ? part.state : "";
       if (toolState === "running" || toolState === "pending") {
         runtime.turnNumber += 1;
@@ -231,7 +248,9 @@ function emitOpenCodeEvent(
           data: {
             call_id: toolId,
             output:
-              typeof part.output === "string" ? part.output : JSON.stringify(part.output ?? {}),
+              typeof part.output === "string"
+                ? part.output
+                : JSON.stringify(part.output ?? {}),
             is_error: toolState === "error" || Boolean(part.isError),
           },
         });
@@ -339,25 +358,37 @@ function emitUsage(
 ): void {
   const usage = isRecord(data.usage) ? data.usage : {};
   const inputTokens =
-    typeof usage.input_tokens === "number" ? Math.max(usage.input_tokens, 0) : 0;
+    typeof usage.input_tokens === "number"
+      ? Math.max(usage.input_tokens, 0)
+      : 0;
   const outputTokens =
-    typeof usage.output_tokens === "number" ? Math.max(usage.output_tokens, 0) : 0;
+    typeof usage.output_tokens === "number"
+      ? Math.max(usage.output_tokens, 0)
+      : 0;
   const cacheReadTokens =
-    typeof usage.cached_input_tokens === "number" ? Math.max(usage.cached_input_tokens, 0) : 0;
+    typeof usage.cached_input_tokens === "number"
+      ? Math.max(usage.cached_input_tokens, 0)
+      : 0;
   const nextSpent =
-    typeof data.total_cost_usd === "number" && Number.isFinite(data.total_cost_usd)
+    typeof data.total_cost_usd === "number" &&
+    Number.isFinite(data.total_cost_usd)
       ? Math.max(data.total_cost_usd, 0)
-      : runtime.spentUsd +
-        calculateCost(
-          {
-            input_tokens: inputTokens,
-            output_tokens: outputTokens,
-            cache_read_input_tokens: cacheReadTokens,
-          },
-          req.model,
-        );
-
-  runtime.spentUsd = nextSpent;
+      : undefined;
+  const snapshot = accumulateCostAccounting({
+    previous: runtime.costAccounting,
+    runtime: req.runtime ?? "opencode",
+    provider: req.provider ?? "opencode",
+    requestedModel: req.model,
+    usageDelta: {
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+    },
+    authoritativeTotalCostUsd: nextSpent,
+    source:
+      nextSpent !== undefined ? "opencode_native_total" : "opencode_usage",
+  });
+  runtime.applyCostAccounting(snapshot);
   streamer.send({
     task_id: req.task_id,
     session_id: req.session_id,
@@ -370,8 +401,10 @@ function emitUsage(
       cost_usd: runtime.spentUsd,
       budget_remaining_usd: Math.max(req.budget_usd - runtime.spentUsd, 0),
       turn_number: runtime.turnNumber,
+      cost_accounting: serializeCostAccounting(snapshot),
     },
   });
+  emitBudgetAlertIfNeeded(runtime, streamer, req, now);
 }
 
 function updateOpenCodeContinuity(
@@ -465,14 +498,18 @@ function matchesSession(data: UnknownRecord, sessionId: string): boolean {
 function getLatestMessageID(data: UnknownRecord): string | undefined {
   if (typeof data.messageID === "string") return data.messageID;
   if (typeof data.messageId === "string") return data.messageId;
-  if (isRecord(data.message) && typeof data.message.id === "string") return data.message.id;
+  if (isRecord(data.message) && typeof data.message.id === "string")
+    return data.message.id;
   return undefined;
 }
 
 function getErrorMessage(data: UnknownRecord): string | undefined {
   if (isRecord(data.error)) {
     if (typeof data.error.message === "string") return data.error.message;
-    if (isRecord(data.error.data) && typeof data.error.data.message === "string") {
+    if (
+      isRecord(data.error.data) &&
+      typeof data.error.data.message === "string"
+    ) {
       return data.error.data.message;
     }
   }

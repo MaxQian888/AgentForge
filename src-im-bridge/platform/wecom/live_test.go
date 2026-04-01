@@ -682,3 +682,218 @@ func TestCachedAccessTokenProviderAndHTTPSenders(t *testing.T) {
 		t.Fatalf("upstream err = %v", err)
 	}
 }
+
+func TestLive_SendFormattedTextUsesMarkdownPayloadForWeComMD(t *testing.T) {
+	sender := &fakeDirectSender{}
+	replier := &fakeResponseReplier{}
+	live, err := NewLive(
+		"corp-id", "1000002", "agent-secret", "callback-token", "9080", "/callback",
+		WithDirectSender(sender),
+		WithResponseReplier(replier),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	// SendFormattedText with WeComMD format should use markdown msgtype
+	if err := live.SendFormattedText(context.Background(), "chat-1", &core.FormattedText{
+		Content: "**bold text**",
+		Format:  core.TextFormatWeComMD,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+	if len(sender.messageCalls) != 1 {
+		t.Fatalf("messageCalls = %+v", sender.messageCalls)
+	}
+	if sender.messageCalls[0].Payload["msgtype"] != "markdown" {
+		t.Fatalf("msgtype = %v", sender.messageCalls[0].Payload["msgtype"])
+	}
+
+	// SendFormattedText with plain text should fall back to Send
+	sender.messageCalls = nil
+	if err := live.SendFormattedText(context.Background(), "chat-2", &core.FormattedText{
+		Content: "plain text",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("SendFormattedText plain error: %v", err)
+	}
+	if len(sender.calls) != 1 || sender.calls[0].Content != "plain text" {
+		t.Fatalf("sender.calls = %+v", sender.calls)
+	}
+
+	// nil message returns error
+	if err := live.SendFormattedText(context.Background(), "chat-1", nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil message error = %v", err)
+	}
+}
+
+func TestLive_ReplyFormattedTextUsesResponseURLOrDirectSend(t *testing.T) {
+	sender := &fakeDirectSender{}
+	replier := &fakeResponseReplier{}
+	live, err := NewLive(
+		"corp-id", "1000002", "agent-secret", "callback-token", "9080", "/callback",
+		WithDirectSender(sender),
+		WithResponseReplier(replier),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	// Reply with response URL
+	if err := live.ReplyFormattedText(context.Background(), replyContext{
+		ResponseURL: "https://work.weixin.qq.com/response",
+		ChatID:      "chat-1",
+	}, &core.FormattedText{
+		Content: "**markdown reply**",
+		Format:  core.TextFormatWeComMD,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if len(replier.messageCalls) != 1 || replier.messageCalls[0].Payload["msgtype"] != "markdown" {
+		t.Fatalf("replier.messageCalls = %+v", replier.messageCalls)
+	}
+
+	// Reply without response URL falls back to direct send
+	if err := live.ReplyFormattedText(context.Background(), replyContext{
+		ChatID: "chat-2",
+	}, &core.FormattedText{
+		Content: "**direct markdown**",
+		Format:  core.TextFormatWeComMD,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText direct error: %v", err)
+	}
+	if len(sender.messageCalls) != 1 || sender.messageCalls[0].Payload["msgtype"] != "markdown" {
+		t.Fatalf("sender.messageCalls = %+v", sender.messageCalls)
+	}
+
+	// nil message returns error
+	if err := live.ReplyFormattedText(context.Background(), replyContext{ChatID: "chat-1"}, nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil message error = %v", err)
+	}
+
+	// Missing target returns error
+	if err := live.ReplyFormattedText(context.Background(), replyContext{}, &core.FormattedText{
+		Content: "no target",
+		Format:  core.TextFormatWeComMD,
+	}); err == nil || !strings.Contains(err.Error(), "requires response url, chat id, or user id") {
+		t.Fatalf("missing target error = %v", err)
+	}
+}
+
+func TestLive_UpdateFormattedTextDelegatesToReply(t *testing.T) {
+	replier := &fakeResponseReplier{}
+	live, err := NewLive(
+		"corp-id", "1000002", "agent-secret", "callback-token", "9080", "/callback",
+		WithResponseReplier(replier),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.UpdateFormattedText(context.Background(), replyContext{
+		ResponseURL: "https://work.weixin.qq.com/response",
+	}, &core.FormattedText{
+		Content: "**updated**",
+		Format:  core.TextFormatWeComMD,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+	if len(replier.messageCalls) != 1 || replier.messageCalls[0].Payload["msgtype"] != "markdown" {
+		t.Fatalf("replier.messageCalls = %+v", replier.messageCalls)
+	}
+}
+
+func TestLive_SendCardAndReplyCardUseTextCardPayload(t *testing.T) {
+	sender := &fakeDirectSender{}
+	replier := &fakeResponseReplier{}
+	live, err := NewLive(
+		"corp-id", "1000002", "agent-secret", "callback-token", "9080", "/callback",
+		WithDirectSender(sender),
+		WithResponseReplier(replier),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	card := core.NewCard().
+		SetTitle("Review Ready").
+		AddField("Status", "pending").
+		AddField("Author", "zhangsan").
+		AddPrimaryButton("Open", "link:https://example.test/reviews/1")
+
+	// SendCard
+	if err := live.SendCard(context.Background(), "chat-1", card); err != nil {
+		t.Fatalf("SendCard error: %v", err)
+	}
+	if len(sender.messageCalls) != 1 {
+		t.Fatalf("sender.messageCalls = %+v", sender.messageCalls)
+	}
+	if sender.messageCalls[0].Payload["msgtype"] != "textcard" {
+		t.Fatalf("msgtype = %v", sender.messageCalls[0].Payload["msgtype"])
+	}
+	textcard, ok := sender.messageCalls[0].Payload["textcard"].(map[string]any)
+	if !ok {
+		t.Fatalf("textcard type = %T", sender.messageCalls[0].Payload["textcard"])
+	}
+	if textcard["title"] != "Review Ready" {
+		t.Fatalf("title = %v", textcard["title"])
+	}
+	if textcard["url"] != "https://example.test/reviews/1" {
+		t.Fatalf("url = %v", textcard["url"])
+	}
+
+	// ReplyCard via response URL
+	if err := live.ReplyCard(context.Background(), replyContext{
+		ResponseURL: "https://work.weixin.qq.com/response",
+		ChatID:      "chat-1",
+	}, card); err != nil {
+		t.Fatalf("ReplyCard error: %v", err)
+	}
+	if len(replier.messageCalls) != 1 || replier.messageCalls[0].Payload["msgtype"] != "textcard" {
+		t.Fatalf("replier.messageCalls = %+v", replier.messageCalls)
+	}
+
+	// ReplyCard via direct send (no response URL)
+	sender.messageCalls = nil
+	if err := live.ReplyCard(context.Background(), replyContext{ChatID: "chat-2"}, card); err != nil {
+		t.Fatalf("ReplyCard direct error: %v", err)
+	}
+	if len(sender.messageCalls) != 1 || sender.messageCalls[0].Payload["msgtype"] != "textcard" {
+		t.Fatalf("sender direct messageCalls = %+v", sender.messageCalls)
+	}
+
+	// nil card returns error
+	if err := live.SendCard(context.Background(), "chat-1", nil); err == nil || !strings.Contains(err.Error(), "card is required") {
+		t.Fatalf("nil card error = %v", err)
+	}
+	if err := live.ReplyCard(context.Background(), replyContext{ChatID: "chat-1"}, nil); err == nil || !strings.Contains(err.Error(), "card is required") {
+		t.Fatalf("nil reply card error = %v", err)
+	}
+
+	// Missing target returns error
+	if err := live.ReplyCard(context.Background(), replyContext{}, card); err == nil || !strings.Contains(err.Error(), "requires response url, chat id, or user id") {
+		t.Fatalf("missing target error = %v", err)
+	}
+}
+
+func TestLive_MetadataIncludesWeComMDInSupportedFormats(t *testing.T) {
+	live, err := NewLive("corp-id", "1000002", "agent-secret", "callback-token", "9080", "/callback")
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+	metadata := live.Metadata()
+	found := false
+	for _, format := range metadata.Rendering.SupportedFormats {
+		if format == core.TextFormatWeComMD {
+			found = true
+			break
+		}
+	}
+	if !found {
+		t.Fatalf("SupportedFormats = %+v, want TextFormatWeComMD", metadata.Rendering.SupportedFormats)
+	}
+}

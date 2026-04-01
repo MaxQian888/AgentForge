@@ -3,10 +3,13 @@ package commands
 import (
 	"context"
 	"fmt"
+	"net/url"
+	"os"
 	"strings"
 
 	"github.com/agentforge/im-bridge/client"
 	"github.com/agentforge/im-bridge/core"
+	log "github.com/sirupsen/logrus"
 )
 
 func RegisterToolsCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
@@ -21,19 +24,36 @@ func RegisterToolsCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		switch canonicalSubcommand("/tools", parts[0]) {
 		case "list":
+			route := engine.ResolveCommandRoute("/tools", "list")
+			if available, err := engine.BridgeCapabilityAvailable(ctx, route.Capability); !available {
+				log.WithFields(log.Fields{"component": "commands.tools"}).WithError(err).Warn("Bridge tools list capability unavailable")
+				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取 Bridge tools 失败: %v", err))
+				return
+			}
 			tools, err := scopedClient.ListBridgeTools(ctx)
 			if err != nil {
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取 Bridge tools 失败: %v", err))
 				return
 			}
+			log.WithFields(log.Fields{"component": "commands.tools", "toolCount": len(tools)}).Info("Bridge tools listed")
 			_ = p.Reply(ctx, msg.ReplyCtx, formatBridgeTools(tools))
 		case "install":
 			if len(parts) < 2 {
 				_ = p.Reply(ctx, msg.ReplyCtx, subcommandUsage("/tools", "install"))
 				return
 			}
+			route := engine.ResolveCommandRoute("/tools", "install")
+			if available, err := engine.BridgeCapabilityAvailable(ctx, route.Capability); !available {
+				log.WithFields(log.Fields{"component": "commands.tools"}).WithError(err).Warn("Bridge tools install capability unavailable")
+				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("安装插件失败: %v", err))
+				return
+			}
 			if err := requireToolsAdmin(ctx, scopedClient, msg, "Admin role required for plugin installation"); err != nil {
 				_ = p.Reply(ctx, msg.ReplyCtx, err.Error())
+				return
+			}
+			if err := validateBridgeToolManifestURL(parts[1]); err != nil {
+				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("安装插件失败: %v", err))
 				return
 			}
 			record, err := scopedClient.InstallBridgeTool(ctx, parts[1])
@@ -41,10 +61,17 @@ func RegisterToolsCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("安装插件失败: %v", err))
 				return
 			}
+			log.WithFields(log.Fields{"component": "commands.tools", "pluginId": record.Metadata.ID}).Info("Bridge tool installed")
 			_ = p.Reply(ctx, msg.ReplyCtx, formatBridgePluginRecord("安装完成", record))
 		case "uninstall":
 			if len(parts) < 2 {
 				_ = p.Reply(ctx, msg.ReplyCtx, subcommandUsage("/tools", "uninstall"))
+				return
+			}
+			route := engine.ResolveCommandRoute("/tools", "uninstall")
+			if available, err := engine.BridgeCapabilityAvailable(ctx, route.Capability); !available {
+				log.WithFields(log.Fields{"component": "commands.tools"}).WithError(err).Warn("Bridge tools uninstall capability unavailable")
+				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("卸载插件失败: %v", err))
 				return
 			}
 			if err := requireToolsAdmin(ctx, scopedClient, msg, "Admin role required for plugin uninstallation"); err != nil {
@@ -56,10 +83,17 @@ func RegisterToolsCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("卸载插件失败: %v", err))
 				return
 			}
+			log.WithFields(log.Fields{"component": "commands.tools", "pluginId": record.Metadata.ID}).Info("Bridge tool uninstalled")
 			_ = p.Reply(ctx, msg.ReplyCtx, formatBridgePluginRecord("卸载完成", record))
 		case "restart":
 			if len(parts) < 2 {
 				_ = p.Reply(ctx, msg.ReplyCtx, subcommandUsage("/tools", "restart"))
+				return
+			}
+			route := engine.ResolveCommandRoute("/tools", "restart")
+			if available, err := engine.BridgeCapabilityAvailable(ctx, route.Capability); !available {
+				log.WithFields(log.Fields{"component": "commands.tools"}).WithError(err).Warn("Bridge tools restart capability unavailable")
+				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("重启插件失败: %v", err))
 				return
 			}
 			record, err := scopedClient.RestartBridgeTool(ctx, parts[1])
@@ -67,6 +101,7 @@ func RegisterToolsCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("重启插件失败: %v", err))
 				return
 			}
+			log.WithFields(log.Fields{"component": "commands.tools", "pluginId": record.Metadata.ID}).Info("Bridge tool restarted")
 			_ = p.Reply(ctx, msg.ReplyCtx, formatBridgePluginRecord("重启完成", record))
 		default:
 			_ = p.Reply(ctx, msg.ReplyCtx, commandUsage("/tools"))
@@ -145,4 +180,36 @@ func formatBridgePluginRecord(prefix string, record *client.BridgePluginRecord) 
 		parts = append(parts, fmt.Sprintf("restart_count=%d", record.RestartCount))
 	}
 	return strings.Join(parts, " | ")
+}
+
+func validateBridgeToolManifestURL(raw string) error {
+	parsedURL, err := url.Parse(strings.TrimSpace(raw))
+	if err != nil || parsedURL == nil || parsedURL.Scheme == "" || parsedURL.Host == "" {
+		return fmt.Errorf("invalid manifest_url")
+	}
+	if parsedURL.Scheme != "http" && parsedURL.Scheme != "https" {
+		return fmt.Errorf("manifest_url must use http or https")
+	}
+
+	allowlist := bridgeToolManifestAllowlist()
+	if len(allowlist) == 0 {
+		return nil
+	}
+	if _, ok := allowlist[strings.ToLower(strings.TrimSpace(parsedURL.Hostname()))]; !ok {
+		return fmt.Errorf("manifest_url host not in allowlist")
+	}
+	return nil
+}
+
+func bridgeToolManifestAllowlist() map[string]struct{} {
+	raw := os.Getenv("BRIDGE_TOOL_MANIFEST_ALLOWLIST")
+	hosts := make(map[string]struct{})
+	for _, entry := range strings.Split(raw, ",") {
+		host := strings.ToLower(strings.TrimSpace(entry))
+		if host == "" {
+			continue
+		}
+		hosts[host] = struct{}{}
+	}
+	return hosts
 }

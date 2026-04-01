@@ -2,7 +2,6 @@ package role
 
 import (
 	"fmt"
-	"slices"
 	"strings"
 
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -157,13 +156,6 @@ func resolveRuntimeSkills(manifest *Manifest, skillRoot string) ([]model.RoleExe
 		})
 	}
 
-	slices.SortFunc(diagnostics, func(a, b model.RoleExecutionSkillDiagnostic) int {
-		if compare := strings.Compare(a.Path, b.Path); compare != 0 {
-			return compare
-		}
-		return strings.Compare(a.Code, b.Code)
-	})
-
 	return loaded, available, diagnostics
 }
 
@@ -197,8 +189,8 @@ func readRuntimeSkillDocument(root, canonicalPath string) (*runtimeSkillDocument
 		ReferenceCount:   document.ReferenceCount,
 		ScriptCount:      document.ScriptCount,
 		AssetCount:       document.AssetCount,
-		Requires:         normalizeRequiredSkillPaths(document.Frontmatter.Requires),
-		Tools:            trimNonEmpty(document.Frontmatter.Tools),
+		Requires:         append([]string(nil), document.Requires...),
+		Tools:            append([]string(nil), document.Tools...),
 		Source:           "repo-local",
 		SourceRoot:       "skills",
 	}, nil
@@ -235,15 +227,4 @@ func normalizeSkillReferencePath(value string) string {
 		return "skills/" + value
 	}
 	return value
-}
-
-func trimNonEmpty(values []string) []string {
-	out := make([]string, 0, len(values))
-	for _, value := range values {
-		value = strings.TrimSpace(value)
-		if value != "" {
-			out = append(out, value)
-		}
-	}
-	return out
 }

@@ -181,7 +181,7 @@ func (s *IMControlPlane) RegisterBridge(_ context.Context, req *IMBridgeRegister
 	return cloneBridgeInstance(record), nil
 }
 
-func (s *IMControlPlane) RecordHeartbeat(_ context.Context, bridgeID string) (*model.IMBridgeHeartbeatResponse, error) {
+func (s *IMControlPlane) RecordHeartbeat(_ context.Context, bridgeID string, metadata map[string]string) (*model.IMBridgeHeartbeatResponse, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -189,6 +189,9 @@ func (s *IMControlPlane) RecordHeartbeat(_ context.Context, bridgeID string) (*m
 	if !ok {
 		log.WithField("bridgeId", strings.TrimSpace(bridgeID)).Warn("IM control plane heartbeat failed: bridge not found")
 		return nil, ErrIMBridgeNotFound
+	}
+	if len(metadata) > 0 {
+		instance.record.Metadata = cloneStringMap(metadata)
 	}
 	s.applyHeartbeat(instance.record)
 	log.WithFields(imBridgeFields(instance.record)).Debug("IM control plane heartbeat recorded")
@@ -276,8 +279,26 @@ func (s *IMControlPlane) GetBridgeStatus(_ context.Context) (*model.IMBridgeStat
 	health := "disconnected"
 	lastHeartbeat := ""
 	providers := make([]string, 0, len(s.instances))
-	seenProviders := make(map[string]struct{}, len(s.instances))
-	providerDetails := make([]model.IMBridgeProviderDetail, 0, len(s.instances))
+	providerDetailsByPlatform := make(map[string]*model.IMBridgeProviderDetail, len(s.instances))
+	var pendingDeliveries int
+	var recentFailures int
+	var recentDowngrades int
+	var settledLatencyTotal int64
+	var settledLatencyCount int64
+
+	ensureProviderDetail := func(platform string) *model.IMBridgeProviderDetail {
+		normalized := normalizePlatform(platform)
+		if normalized == "" {
+			return nil
+		}
+		if detail, ok := providerDetailsByPlatform[normalized]; ok {
+			return detail
+		}
+		providers = append(providers, normalized)
+		detail := &model.IMBridgeProviderDetail{Platform: normalized}
+		providerDetailsByPlatform[normalized] = detail
+		return detail
+	}
 
 	for _, instance := range s.instances {
 		if instance == nil || instance.record == nil {
@@ -287,21 +308,73 @@ func (s *IMControlPlane) GetBridgeStatus(_ context.Context) (*model.IMBridgeStat
 		if s.isBridgeAlive(record, now) {
 			registered = true
 		}
-		if provider := strings.TrimSpace(record.Platform); provider != "" {
-			if _, ok := seenProviders[provider]; !ok {
-				seenProviders[provider] = struct{}{}
-				providers = append(providers, provider)
-				providerDetails = append(providerDetails, model.IMBridgeProviderDetail{
-					Platform:         provider,
-					Status:           strings.TrimSpace(record.Status),
-					Transport:        strings.TrimSpace(record.Transport),
-					CallbackPaths:    append([]string(nil), record.CallbackPaths...),
-					CapabilityMatrix: cloneAnyMap(record.CapabilityMatrix),
-				})
+		if detail := ensureProviderDetail(record.Platform); detail != nil {
+			if detail.Status == "" || s.isBridgeAlive(record, now) {
+				detail.Status = strings.TrimSpace(record.Status)
+			}
+			if detail.Transport == "" {
+				detail.Transport = strings.TrimSpace(record.Transport)
+			}
+			if len(detail.CallbackPaths) == 0 {
+				detail.CallbackPaths = append([]string(nil), record.CallbackPaths...)
+			} else {
+				detail.CallbackPaths = dedupeStrings(append(detail.CallbackPaths, record.CallbackPaths...))
+			}
+			if len(detail.CapabilityMatrix) == 0 {
+				detail.CapabilityMatrix = cloneAnyMap(record.CapabilityMatrix)
+			}
+			if len(detail.Diagnostics) == 0 {
+				detail.Diagnostics = cloneStringMap(record.Metadata)
 			}
 		}
 		if record.LastSeenAt > lastHeartbeat {
 			lastHeartbeat = record.LastSeenAt
+		}
+	}
+
+	for bridgeID, queued := range s.pending {
+		if len(queued) == 0 {
+			continue
+		}
+		instance := s.instances[strings.TrimSpace(bridgeID)]
+		if instance == nil || instance.record == nil {
+			continue
+		}
+		detail := ensureProviderDetail(instance.record.Platform)
+		if detail == nil {
+			continue
+		}
+		detail.PendingDeliveries += len(queued)
+		pendingDeliveries += len(queued)
+	}
+
+	for _, delivery := range s.history {
+		if delivery == nil {
+			continue
+		}
+		detail := ensureProviderDetail(delivery.Platform)
+		if detail == nil {
+			continue
+		}
+		if eventAt := deliveryEventTimestamp(delivery); eventAt != "" {
+			if detail.LastDeliveryAt == nil || eventAt > strings.TrimSpace(*detail.LastDeliveryAt) {
+				detail.LastDeliveryAt = &eventAt
+			}
+		}
+		switch delivery.Status {
+		case model.IMDeliveryStatusFailed, model.IMDeliveryStatusTimeout:
+			detail.RecentFailures++
+			recentFailures++
+		}
+		if strings.TrimSpace(delivery.DowngradeReason) != "" {
+			detail.RecentDowngrades++
+			recentDowngrades++
+		}
+		if delivery.Status == model.IMDeliveryStatusDelivered {
+			if latency := deliveryLatencyMs(delivery); latency > 0 {
+				settledLatencyTotal += latency
+				settledLatencyCount++
+			}
 		}
 	}
 
@@ -313,16 +386,30 @@ func (s *IMControlPlane) GetBridgeStatus(_ context.Context) (*model.IMBridgeStat
 	}
 
 	sort.Strings(providers)
+	providerDetails := make([]model.IMBridgeProviderDetail, 0, len(providers))
+	for _, provider := range providers {
+		if detail := providerDetailsByPlatform[provider]; detail != nil {
+			providerDetails = append(providerDetails, *detail)
+		}
+	}
 	var heartbeat *string
 	if lastHeartbeat != "" {
 		heartbeat = &lastHeartbeat
 	}
+	var averageLatencyMs int64
+	if settledLatencyCount > 0 {
+		averageLatencyMs = settledLatencyTotal / settledLatencyCount
+	}
 	return &model.IMBridgeStatus{
-		Registered:      registered,
-		LastHeartbeat:   heartbeat,
-		Providers:       providers,
-		ProviderDetails: providerDetails,
-		Health:          health,
+		Registered:        registered,
+		LastHeartbeat:     heartbeat,
+		Providers:         providers,
+		ProviderDetails:   providerDetails,
+		Health:            health,
+		PendingDeliveries: pendingDeliveries,
+		RecentFailures:    recentFailures,
+		RecentDowngrades:  recentDowngrades,
+		AverageLatencyMs:  averageLatencyMs,
 	}, nil
 }
 
@@ -348,6 +435,8 @@ func (s *IMControlPlane) RecordDeliveryResult(result model.IMDelivery) {
 		Metadata:        cloneStringMap(result.Metadata),
 		ReplyTarget:     cloneReplyTarget(result.ReplyTarget),
 		CreatedAt:       strings.TrimSpace(result.CreatedAt),
+		ProcessedAt:     strings.TrimSpace(result.ProcessedAt),
+		LatencyMs:       result.LatencyMs,
 	}
 	if record.ID == "" {
 		record.ID = uuid.NewString()
@@ -361,12 +450,15 @@ func (s *IMControlPlane) RecordDeliveryResult(result model.IMDelivery) {
 	}
 }
 
-func (s *IMControlPlane) ListDeliveryHistory(_ context.Context) ([]*model.IMDelivery, error) {
+func (s *IMControlPlane) ListDeliveryHistory(_ context.Context, filters *model.IMDeliveryHistoryFilters) ([]*model.IMDelivery, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
 	history := make([]*model.IMDelivery, 0, len(s.history))
 	for _, delivery := range s.history {
+		if !matchesDeliveryFilters(delivery, filters) {
+			continue
+		}
 		history = append(history, cloneDeliveryRecord(delivery))
 	}
 	return history, nil
@@ -485,11 +577,14 @@ func (s *IMControlPlane) QueueDelivery(ctx context.Context, req IMQueueDeliveryR
 	return cloned, nil
 }
 
-func (s *IMControlPlane) AckDelivery(_ context.Context, bridgeID string, cursor int64, deliveryID string, downgradeReason string) error {
+func (s *IMControlPlane) AckDelivery(_ context.Context, ack *model.IMDeliveryAck) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
-	bridgeID = strings.TrimSpace(bridgeID)
+	if ack == nil {
+		return ErrIMDeliveryRejected
+	}
+	bridgeID := strings.TrimSpace(ack.BridgeID)
 	if _, ok := s.instances[bridgeID]; !ok {
 		log.WithField("bridgeId", bridgeID).Warn("IM control plane delivery ack failed: bridge not found")
 		return ErrIMBridgeNotFound
@@ -498,21 +593,21 @@ func (s *IMControlPlane) AckDelivery(_ context.Context, bridgeID string, cursor 
 	pending := s.pending[bridgeID]
 	filtered := pending[:0]
 	for _, delivery := range pending {
-		if delivery.Cursor < cursor {
+		if delivery.Cursor < ack.Cursor {
 			continue
 		}
-		if delivery.Cursor == cursor && strings.TrimSpace(deliveryID) != "" && delivery.DeliveryID == strings.TrimSpace(deliveryID) {
+		if delivery.Cursor == ack.Cursor && strings.TrimSpace(ack.DeliveryID) != "" && delivery.DeliveryID == strings.TrimSpace(ack.DeliveryID) {
 			continue
 		}
 		filtered = append(filtered, delivery)
 	}
 	s.pending[bridgeID] = filtered
-	s.applyDeliveryAckLocked(strings.TrimSpace(deliveryID), strings.TrimSpace(downgradeReason))
+	s.applyDeliveryAckLocked(ack)
 	log.WithFields(log.Fields{
 		"bridgeId":        bridgeID,
-		"cursor":          cursor,
-		"deliveryId":      strings.TrimSpace(deliveryID),
-		"downgradeReason": strings.TrimSpace(downgradeReason),
+		"cursor":          ack.Cursor,
+		"deliveryId":      strings.TrimSpace(ack.DeliveryID),
+		"downgradeReason": strings.TrimSpace(ack.DowngradeReason),
 		"pendingCount":    len(filtered),
 	}).Debug("IM control plane delivery acknowledged")
 	return nil
@@ -628,6 +723,19 @@ func (s *IMControlPlane) QueueBoundProgress(ctx context.Context, req IMBoundProg
 		}).Debug("IM control plane bound progress skipped: no binding")
 		return false, nil
 	}
+	if !isBoundProgressEventEnabled(state.binding, req.Metadata) {
+		s.mu.Unlock()
+		log.WithFields(log.Fields{
+			"bridgeId":   state.binding.BridgeID,
+			"taskId":     state.binding.TaskID,
+			"runId":      state.binding.RunID,
+			"reviewId":   state.binding.ReviewID,
+			"eventType":  strings.TrimSpace(req.Metadata["bridge_event_type"]),
+			"kind":       normalizeDeliveryKind(req.Kind),
+			"isTerminal": req.IsTerminal,
+		}).Debug("IM control plane bound progress skipped: event type disabled")
+		return false, nil
+	}
 
 	now := s.now().UTC()
 	if !req.IsTerminal && !state.lastHeartbeatAt.IsZero() && now.Sub(state.lastHeartbeatAt) < s.progressHeartbeatInterval {
@@ -689,6 +797,36 @@ func (s *IMControlPlane) QueueBoundProgress(ctx context.Context, req IMBoundProg
 		"isTerminal": req.IsTerminal,
 	}).Debug("IM control plane bound progress queued")
 	return true, nil
+}
+
+func isBoundProgressEventEnabled(binding *IMActionBinding, metadata map[string]string) bool {
+	if binding == nil || binding.ReplyTarget == nil || binding.ReplyTarget.Metadata == nil {
+		return true
+	}
+	eventType := strings.TrimSpace(metadata["bridge_event_type"])
+	if eventType == "" {
+		return true
+	}
+	raw, ok := binding.ReplyTarget.Metadata["bridge_event_enabled."+eventType]
+	if !ok {
+		return true
+	}
+	enabled, parsed := parseMetadataBool(raw)
+	if !parsed {
+		return true
+	}
+	return enabled
+}
+
+func parseMetadataBool(raw string) (bool, bool) {
+	switch strings.ToLower(strings.TrimSpace(raw)) {
+	case "1", "true", "yes", "on", "enabled":
+		return true, true
+	case "0", "false", "no", "off", "disabled":
+		return false, true
+	default:
+		return false, false
+	}
 }
 
 func (s *IMControlPlane) SignDelivery(delivery *model.IMControlDelivery) string {
@@ -1043,7 +1181,11 @@ func (s *IMControlPlane) findDeliveryLocked(deliveryID string) *model.IMDelivery
 	return nil
 }
 
-func (s *IMControlPlane) applyDeliveryAckLocked(deliveryID string, downgradeReason string) {
+func (s *IMControlPlane) applyDeliveryAckLocked(ack *model.IMDeliveryAck) {
+	if ack == nil {
+		return
+	}
+	deliveryID := strings.TrimSpace(ack.DeliveryID)
 	if deliveryID == "" {
 		return
 	}
@@ -1051,9 +1193,87 @@ func (s *IMControlPlane) applyDeliveryAckLocked(deliveryID string, downgradeReas
 	if delivery == nil {
 		return
 	}
-	if downgradeReason != "" {
-		delivery.DowngradeReason = downgradeReason
+	status := model.IMDeliveryStatus(strings.TrimSpace(ack.Status))
+	if status == "" {
+		status = model.IMDeliveryStatusDelivered
 	}
+	if delivery.Status == model.IMDeliveryStatusPending {
+		delivery.Status = status
+	}
+	delivery.FailureReason = strings.TrimSpace(ack.FailureReason)
+	processedAt := strings.TrimSpace(ack.ProcessedAt)
+	if processedAt == "" {
+		processedAt = s.now().UTC().Format(time.RFC3339)
+	}
+	delivery.ProcessedAt = processedAt
+	if queuedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(delivery.CreatedAt)); err == nil {
+		if processed, err := time.Parse(time.RFC3339, processedAt); err == nil && !processed.Before(queuedAt) {
+			delivery.LatencyMs = processed.Sub(queuedAt).Milliseconds()
+		}
+	}
+	if strings.TrimSpace(ack.DowngradeReason) != "" {
+		delivery.DowngradeReason = strings.TrimSpace(ack.DowngradeReason)
+	}
+}
+
+func deliveryEventTimestamp(delivery *model.IMDelivery) string {
+	if delivery == nil {
+		return ""
+	}
+	if processedAt := strings.TrimSpace(delivery.ProcessedAt); processedAt != "" {
+		return processedAt
+	}
+	return strings.TrimSpace(delivery.CreatedAt)
+}
+
+func deliveryLatencyMs(delivery *model.IMDelivery) int64 {
+	if delivery == nil {
+		return 0
+	}
+	if delivery.LatencyMs > 0 {
+		return delivery.LatencyMs
+	}
+	queuedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(delivery.CreatedAt))
+	if err != nil {
+		return 0
+	}
+	processedAt, err := time.Parse(time.RFC3339, strings.TrimSpace(delivery.ProcessedAt))
+	if err != nil || processedAt.Before(queuedAt) {
+		return 0
+	}
+	return processedAt.Sub(queuedAt).Milliseconds()
+}
+
+func matchesDeliveryFilters(delivery *model.IMDelivery, filters *model.IMDeliveryHistoryFilters) bool {
+	if delivery == nil || filters == nil {
+		return delivery != nil
+	}
+	if deliveryID := strings.TrimSpace(filters.DeliveryID); deliveryID != "" && strings.TrimSpace(delivery.ID) != deliveryID {
+		return false
+	}
+	if status := strings.TrimSpace(filters.Status); status != "" && !strings.EqualFold(string(delivery.Status), status) {
+		return false
+	}
+	if platform := normalizePlatform(filters.Platform); platform != "" && normalizePlatform(delivery.Platform) != platform {
+		return false
+	}
+	if eventType := strings.TrimSpace(filters.EventType); eventType != "" && !strings.EqualFold(strings.TrimSpace(delivery.EventType), eventType) {
+		return false
+	}
+	if kind := strings.TrimSpace(filters.Kind); kind != "" && !strings.EqualFold(strings.TrimSpace(delivery.Kind), kind) {
+		return false
+	}
+	if since := strings.TrimSpace(filters.Since); since != "" {
+		sinceTime, err := time.Parse(time.RFC3339, since)
+		if err != nil {
+			return false
+		}
+		eventAt, err := time.Parse(time.RFC3339, deliveryEventTimestamp(delivery))
+		if err != nil || eventAt.Before(sinceTime) {
+			return false
+		}
+	}
+	return true
 }
 
 func firstNonEmpty(values ...string) string {

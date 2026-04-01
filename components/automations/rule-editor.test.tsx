@@ -1,3 +1,44 @@
+import { Children, isValidElement, type ReactNode, type ReactElement } from "react";
+
+jest.mock("@/components/ui/select", () => {
+  function flattenOptions(children: ReactNode): Array<{ value: string; label: string }> {
+    const options: Array<{ value: string; label: string }> = [];
+    function visit(node: ReactNode) {
+      Children.forEach(node, (child) => {
+        if (!isValidElement(child)) return;
+        const element = child as ReactElement<{ children?: ReactNode; value?: string }>;
+        if (element.props.value !== undefined) {
+          options.push({
+            value: element.props.value,
+            label: typeof element.props.children === "string" ? element.props.children : String(element.props.value),
+          });
+          return;
+        }
+        visit(element.props.children);
+      });
+    }
+    visit(children);
+    return options;
+  }
+
+  return {
+    Select: ({ value, onValueChange, children }: { value?: string; onValueChange?: (v: string) => void; children?: ReactNode }) => {
+      const options = flattenOptions(children);
+      return (
+        <select value={value} onChange={(e: React.ChangeEvent<HTMLSelectElement>) => onValueChange?.(e.target.value)}>
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      );
+    },
+    SelectTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    SelectValue: () => null,
+    SelectContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    SelectItem: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  };
+});
+
 jest.mock("next-intl", () => ({
   useTranslations: () => (key: string) => {
     const map: Record<string, string> = {

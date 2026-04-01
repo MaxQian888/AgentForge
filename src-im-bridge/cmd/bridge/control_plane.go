@@ -121,7 +121,7 @@ func (c *bridgeRuntimeControl) heartbeatLoop(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if _, err := c.client.HeartbeatBridge(ctx, c.bridgeID); err != nil {
+			if _, err := c.client.HeartbeatBridge(ctx, c.bridgeID, c.runtimeMetadata()); err != nil {
 				log.WithField("component", "control-plane").WithError(err).Error("Heartbeat failed")
 			}
 		}
@@ -173,7 +173,12 @@ func (c *bridgeRuntimeControl) consumeDeliveries(ctx context.Context, conn *clie
 			continue
 		}
 		if delivery.Cursor <= c.cursor() {
-			if err := conn.Ack(delivery.Cursor, delivery.DeliveryID, ""); err != nil {
+			if err := conn.Ack(client.ControlDeliveryAck{
+				Cursor:      delivery.Cursor,
+				DeliveryID:  delivery.DeliveryID,
+				Status:      "delivered",
+				ProcessedAt: time.Now().UTC().Format(time.RFC3339),
+			}); err != nil {
 				log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).WithError(err).Error("Duplicate ack failed")
 			}
 			continue
@@ -184,11 +189,27 @@ func (c *bridgeRuntimeControl) consumeDeliveries(ctx context.Context, conn *clie
 		}
 		downgradeReason, err := c.applyDelivery(ctx, delivery)
 		if err != nil {
+			c.setCursor(delivery.Cursor)
+			if ackErr := conn.Ack(client.ControlDeliveryAck{
+				Cursor:        delivery.Cursor,
+				DeliveryID:    delivery.DeliveryID,
+				Status:        "failed",
+				FailureReason: err.Error(),
+				ProcessedAt:   time.Now().UTC().Format(time.RFC3339),
+			}); ackErr != nil {
+				log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).WithError(ackErr).Error("Failure ack failed")
+			}
 			log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).WithError(err).Error("Failed to apply delivery")
 			continue
 		}
 		c.setCursor(delivery.Cursor)
-		if err := conn.Ack(delivery.Cursor, delivery.DeliveryID, downgradeReason); err != nil {
+		if err := conn.Ack(client.ControlDeliveryAck{
+			Cursor:          delivery.Cursor,
+			DeliveryID:      delivery.DeliveryID,
+			Status:          "delivered",
+			DowngradeReason: downgradeReason,
+			ProcessedAt:     time.Now().UTC().Format(time.RFC3339),
+		}); err != nil {
 			log.WithField("component", "control-plane").WithField("delivery_id", delivery.DeliveryID).WithError(err).Error("Ack failed")
 		}
 	}
@@ -296,4 +317,22 @@ func firstNonEmpty(values ...string) string {
 		}
 	}
 	return ""
+}
+
+func (c *bridgeRuntimeControl) runtimeMetadata() map[string]string {
+	if c == nil || c.provider == nil {
+		return nil
+	}
+	metadata := map[string]string{
+		"platform_name":  c.provider.Platform.Name(),
+		"provider_id":    c.provider.Descriptor.ID,
+		"transport_mode": c.provider.TransportMode,
+	}
+	if capability := string(c.provider.Metadata().Capabilities.ActionCallbackMode); capability != "" {
+		metadata["action_callback_mode"] = capability
+	}
+	if surface := string(c.provider.Metadata().Capabilities.StructuredSurface); surface != "" {
+		metadata["structured_surface"] = surface
+	}
+	return metadata
 }

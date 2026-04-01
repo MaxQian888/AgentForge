@@ -29,6 +29,14 @@ Examples in this repository now include:
 - `skills/css-animation/SKILL.md`
 - `skills/testing/SKILL.md`
 
+The official repo-owned built-in skill marketplace surface is now declared separately in:
+
+```text
+skills/builtin-bundle.yaml
+```
+
+That bundle does not replace `skills/**/SKILL.md` as the canonical package layout. It only declares which repo-local skills are currently promoted into the built-in marketplace surface, along with the market-facing metadata and verification path used to keep that surface truthful.
+
 ## Legacy Compatibility
 
 The loader still reads legacy flat files such as `roles/frontend-developer.yaml` during migration.
@@ -61,6 +69,8 @@ The dashboard role workspace also supports a repo-local skill catalog:
 - it discovers canonical repo-owned skills from `skills/**/SKILL.md`
 - it offers catalog-backed role skill selection while preserving manual path entry
 - it marks unresolved manual skill paths in review context instead of silently treating them as resolved catalog entries
+- it exposes direct skill dependencies and declared tool requirements from skill metadata so authoring surfaces can explain why a role-skill combination is or is not compatible
+- it shares the same package truth that now powers built-in skill marketplace previews, including Markdown from `SKILL.md` and normalized YAML from supported `agents/*.yaml` files
 
 The UI still does not attempt to turn every future role field into a bespoke visual builder. When a field is not yet fully modeled by dedicated controls, the authoring flow must preserve it rather than silently dropping it during create, update, preview, or sandbox round-trips.
 
@@ -89,6 +99,7 @@ The normalized execution profile currently contains:
 Bridge code does not read YAML files directly and should only consume this normalized profile.
 `loaded_skills` contains the fully resolved repo-local auto-load skill bundles that Go has already prepared for prompt injection, while `available_skills` keeps non-auto-load skills visible as runtime inventory without preloading their full instructions.
 `skill_diagnostics` explains blocking versus warning-only skill projection issues. A missing or invalid auto-load skill blocks execution-facing projection; an unresolved non-auto-load skill remains warning-level inventory context unless another runtime contract requires it.
+`skill_diagnostics` now also covers role-skill compatibility mismatches. Auto-load skills and their dependency closure can block execution when their declared tool requirements are not covered by the effective role capability set; non-auto-load tool mismatches remain warning-only inventory context.
 Fields such as `collaboration`, `memory`, and `triggers` still remain in the normalized Go role model, but they are not forwarded into the Bridge execution contract until there is a runtime consumer for them.
 The same stored-only rule currently applies to `overrides`: it stays part of the canonical role definition and preview context, but it is not emitted into today's Bridge execution profile.
 
@@ -103,7 +114,7 @@ The role authoring workflow now has two non-persistent backend surfaces:
   - accepts either `roleId` or an unsaved `draft`, plus a bounded `input`
   - returns the same preview payload, runtime readiness diagnostics, selected runtime tuple, and an optional lightweight probe result
 - `GET /api/v1/roles/skills`
-  - returns repo-local skill catalog entries for role authoring, including canonical path and basic display metadata when available
+  - returns repo-local skill catalog entries for role authoring, including canonical path, display metadata, direct dependency paths, and declared tool requirements when available
 
 These flows do **not** create `agent_runs`, worktrees, or update `roles/<role-id>/role.yaml`. They exist to help operators validate advanced role definitions before saving or launch.
 When the authoring flow edits an existing role, it should include the current `roleId` alongside the draft so preview and sandbox can preserve advanced stored sections even if only part of the role was edited in the current UI step.
@@ -111,6 +122,19 @@ Unresolved manual skill paths remain a valid authoring state as long as the role
 
 - unresolved `auto_load` skills become blocking readiness diagnostics for preview, sandbox, and spawn
 - unresolved non-auto-load skills remain warning-level inventory gaps
+- resolved skills whose declared tool requirements are not covered by the effective role capability set follow the same severity split: blocking for auto-load closure, warning-only for on-demand inventory
+
+## Role-Skill Compatibility Normalization
+
+Compatibility checks do not compare raw role YAML tool strings to `SKILL.md` tool hints directly.
+Go first normalizes the effective role into a capability set used only for compatibility evaluation:
+
+- legacy CLI-oriented built-ins such as `Read`, `Edit`, `Write`, `Glob`, `Grep`, and `Bash`
+- structured tool host entries such as `tools.external` and `tools.mcp_servers`
+- compatible package and framework hints already present in the role manifest
+
+That normalized set is then compared with skill-declared tool hints such as `code_editor`, `terminal`, and `browser_preview`.
+This keeps sample roles like `roles/coding-agent/role.yaml` and `roles/frontend-developer/role.yaml` compatible with current repo-local skills without rewriting their canonical runtime `allowed_tools` into a new vocabulary just for authoring diagnostics.
 
 ## Agent Spawn Binding
 

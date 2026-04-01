@@ -21,6 +21,7 @@ export type PluginSourceType =
   | "git"
   | "npm"
   | "catalog"
+  | "marketplace"
   | "registry";
 export type PluginTrustState = "unknown" | "verified" | "untrusted";
 export type PluginApprovalState = "not-required" | "pending" | "approved" | "rejected";
@@ -139,6 +140,24 @@ export interface PluginBuiltInMetadata {
   missingConfiguration?: string[];
   installable?: boolean;
   installBlockedReason?: string;
+}
+
+export interface PluginRoleDependency {
+  roleId: string;
+  roleName?: string;
+  status: string;
+  blocking: boolean;
+  message?: string;
+  references?: string[];
+}
+
+export interface PluginRoleConsumer {
+  roleId: string;
+  roleName?: string;
+  referenceType: string;
+  status: string;
+  blocking: boolean;
+  message?: string;
 }
 
 /* ── MCP types ── */
@@ -331,6 +350,8 @@ export interface PluginRecord {
   resolved_source_path?: string;
   runtime_metadata?: PluginRuntimeMetadata;
   builtIn?: PluginBuiltInMetadata;
+  roleDependencies?: PluginRoleDependency[];
+  roleConsumers?: PluginRoleConsumer[];
 }
 
 export interface MarketplacePluginEntry {

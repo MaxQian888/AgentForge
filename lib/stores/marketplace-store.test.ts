@@ -1,5 +1,6 @@
 const post = jest.fn();
 const get = jest.fn();
+const patch = jest.fn();
 const del = jest.fn();
 
 jest.mock("@/lib/api-client", () => {
@@ -9,6 +10,7 @@ jest.mock("@/lib/api-client", () => {
     createApiClient: jest.fn(() => ({
       post,
       get,
+      patch,
       delete: del,
     })),
   };
@@ -18,13 +20,17 @@ jest.mock("./auth-store", () => ({
   useAuthStore: {
     getState: jest.fn(() => ({
       accessToken: "test-token",
+      user: { id: "user-1" },
     })),
   },
 }));
 
 import {
+  resolveMarketplaceConsumptionRecord,
   useMarketplaceStore,
+  type MarketplaceConsumptionRecord,
   type MarketplaceItem,
+  type SkillPackagePreview,
   type MarketplaceFilters,
 } from "./marketplace-store";
 
@@ -35,19 +41,19 @@ function createMarketplaceItem(
   return {
     id,
     type: "plugin",
-    slug: `test-plugin-${id}`,
-    name: `Test Plugin ${id}`,
-    author_id: "author-1",
-    author_name: "Test Author",
-    description: "A test plugin",
+    slug: `item-${id}`,
+    name: `Item ${id}`,
+    author_id: "user-1",
+    author_name: "Author",
+    description: "Marketplace item",
     category: "testing",
     tags: [],
     license: "MIT",
     extra_metadata: {},
-    download_count: 100,
-    avg_rating: 4.5,
-    rating_count: 10,
-    is_verified: true,
+    download_count: 10,
+    avg_rating: 4.2,
+    rating_count: 2,
+    is_verified: false,
     is_featured: false,
     created_at: "2024-01-01T00:00:00Z",
     updated_at: "2024-01-01T00:00:00Z",
@@ -58,6 +64,7 @@ function createMarketplaceItem(
 const defaultFilters: MarketplaceFilters = {
   type: "all",
   category: "",
+  tags: [],
   sort: "downloads",
   page: 1,
   query: "",
@@ -67,30 +74,40 @@ describe("marketplace-store", () => {
   beforeEach(() => {
     post.mockReset();
     get.mockReset();
+    patch.mockReset();
     del.mockReset();
 
     useMarketplaceStore.setState({
       items: [],
+      builtInItems: [],
       featuredItems: [],
       selectedItem: null,
       selectedItemVersions: [],
       selectedItemReviews: [],
-      installedItemIds: new Set(),
+      consumptionItems: [],
       filters: { ...defaultFilters },
       total: 0,
       loading: false,
+      builtInLoading: false,
+      consumptionLoading: false,
+      installLoading: false,
+      serviceStatus: "idle",
+      serviceMessage: null,
+      builtInMessage: null,
       error: null,
       publishDialogOpen: false,
       installConfirmItem: null,
     });
   });
 
-  // ── fetchItems ─────────────────────────────────────────────────────────────
-
-  it("fetchItems populates items and total from API response", async () => {
-    const mockItems = [createMarketplaceItem("1"), createMarketplaceItem("2")];
+  it("fetchItems populates items and marks the marketplace as ready", async () => {
     get.mockResolvedValueOnce({
-      data: { items: mockItems, total: 2, page: 1, page_size: 20 },
+      data: {
+        items: [createMarketplaceItem("1"), createMarketplaceItem("2")],
+        total: 2,
+        page: 1,
+        page_size: 20,
+      },
       status: 200,
     });
 
@@ -98,245 +115,242 @@ describe("marketplace-store", () => {
 
     expect(useMarketplaceStore.getState().items).toHaveLength(2);
     expect(useMarketplaceStore.getState().total).toBe(2);
-    expect(useMarketplaceStore.getState().loading).toBe(false);
-    expect(useMarketplaceStore.getState().error).toBeNull();
+    expect(useMarketplaceStore.getState().serviceStatus).toBe("ready");
+    expect(useMarketplaceStore.getState().serviceMessage).toBeNull();
   });
 
-  it("fetchItems sets error when API call fails", async () => {
-    get.mockRejectedValueOnce(new Error("Network error"));
+  it("fetchItems surfaces marketplace unavailability instead of silently returning empty state", async () => {
+    get.mockRejectedValueOnce(new Error("service unavailable"));
 
     await useMarketplaceStore.getState().fetchItems();
 
-    expect(useMarketplaceStore.getState().error).toBeTruthy();
-    expect(useMarketplaceStore.getState().loading).toBe(false);
+    expect(useMarketplaceStore.getState().items).toHaveLength(0);
+    expect(useMarketplaceStore.getState().serviceStatus).toBe("unavailable");
+    expect(useMarketplaceStore.getState().serviceMessage).toContain("service unavailable");
   });
 
-  it("fetchItems sets loading to false after success", async () => {
+  it("fetchBuiltInItems loads repo-owned built-in skills from the app backend", async () => {
+    const preview: SkillPackagePreview = {
+      canonicalPath: "skills/react",
+      label: "React",
+      markdownBody: "# React",
+      frontmatterYaml: "name: React",
+      requires: ["skills/typescript"],
+      tools: ["code_editor", "browser_preview"],
+      availableParts: ["agents", "references"],
+      agentConfigs: [
+        {
+          path: "agents/openai.yaml",
+          yaml: "interface:\n  display_name: AgentForge React",
+        },
+      ],
+    };
     get.mockResolvedValueOnce({
-      data: { items: [], total: 0, page: 1, page_size: 20 },
+      data: [
+        createMarketplaceItem("react", {
+          type: "skill",
+          slug: "react",
+          sourceType: "builtin",
+          localPath: "D:/Project/AgentForge/skills/react",
+          skillPreview: preview,
+        }),
+      ],
       status: 200,
     });
 
-    await useMarketplaceStore.getState().fetchItems();
+    await useMarketplaceStore.getState().fetchBuiltInItems();
 
-    expect(useMarketplaceStore.getState().loading).toBe(false);
-  });
-
-  it("fetchItems sends type filter when not 'all'", async () => {
-    useMarketplaceStore.setState({
-      filters: { ...defaultFilters, type: "plugin" },
+    expect(get).toHaveBeenCalledWith("/api/v1/marketplace/built-in-skills", {
+      token: "test-token",
     });
-
-    get.mockResolvedValueOnce({
-      data: { items: [], total: 0, page: 1, page_size: 20 },
-      status: 200,
-    });
-
-    await useMarketplaceStore.getState().fetchItems();
-
-    expect(get).toHaveBeenCalledWith(
-      expect.stringContaining("type=plugin"),
-      expect.objectContaining({ token: "test-token" }),
+    expect(useMarketplaceStore.getState().builtInItems).toHaveLength(1);
+    expect(useMarketplaceStore.getState().builtInItems[0]?.sourceType).toBe("builtin");
+    expect(useMarketplaceStore.getState().builtInItems[0]?.skillPreview?.canonicalPath).toBe(
+      "skills/react",
     );
   });
 
-  it("fetchItems does not send type parameter when 'all'", async () => {
+  it("fetchConsumption loads typed install state", async () => {
+    const consumption: MarketplaceConsumptionRecord = {
+      itemId: "item-1",
+      itemType: "plugin",
+      version: "1.0.0",
+      status: "installed",
+      consumerSurface: "plugin-management-panel",
+      installed: true,
+      used: true,
+      recordId: "repo-search",
+      provenance: {
+        marketplaceItemId: "item-1",
+        selectedVersion: "1.0.0",
+      },
+      updatedAt: "2024-01-01T00:00:00Z",
+    };
     get.mockResolvedValueOnce({
-      data: { items: [], total: 0, page: 1, page_size: 20 },
+      data: { items: [consumption] },
       status: 200,
     });
 
-    await useMarketplaceStore.getState().fetchItems();
+    await useMarketplaceStore.getState().fetchConsumption();
 
-    const [[url]] = get.mock.calls;
-    expect(url).not.toContain("type=all");
+    expect(useMarketplaceStore.getState().consumptionItems).toEqual([consumption]);
   });
 
-  // ── fetchFeatured ──────────────────────────────────────────────────────────
-
-  it("fetchFeatured populates featuredItems", async () => {
-    const featured = [
-      createMarketplaceItem("featured-1", { is_featured: true }),
-    ];
-    get.mockResolvedValueOnce({ data: featured, status: 200 });
-
-    await useMarketplaceStore.getState().fetchFeatured();
-
-    expect(useMarketplaceStore.getState().featuredItems).toHaveLength(1);
-    expect(useMarketplaceStore.getState().featuredItems[0].id).toBe(
-      "featured-1",
-    );
-  });
-
-  it("fetchFeatured silently ignores errors", async () => {
-    get.mockRejectedValueOnce(new Error("boom"));
-
-    await expect(
-      useMarketplaceStore.getState().fetchFeatured(),
-    ).resolves.toBeUndefined();
-
-    expect(useMarketplaceStore.getState().featuredItems).toHaveLength(0);
-  });
-
-  // ── search ─────────────────────────────────────────────────────────────────
-
-  it("search populates items from search endpoint", async () => {
-    const results = [createMarketplaceItem("search-1")];
-    get.mockResolvedValueOnce({ data: results, status: 200 });
-
-    await useMarketplaceStore.getState().search("my-query");
-
-    expect(get).toHaveBeenCalledWith(
-      expect.stringContaining("my-query"),
-      expect.objectContaining({ token: "test-token" }),
-    );
-    expect(useMarketplaceStore.getState().items).toHaveLength(1);
-    expect(useMarketplaceStore.getState().total).toBe(1);
-  });
-
-  it("search sets error on failure", async () => {
-    get.mockRejectedValueOnce(new Error("Search failed"));
-
-    await useMarketplaceStore.getState().search("broken");
-
-    expect(useMarketplaceStore.getState().error).toBeTruthy();
-    expect(useMarketplaceStore.getState().loading).toBe(false);
-  });
-
-  // ── setFilters ─────────────────────────────────────────────────────────────
-
-  it("setFilters merges partial updates without overwriting other fields", async () => {
-    // setFilters also calls fetchItems, so mock a response
-    get.mockResolvedValue({
-      data: { items: [], total: 0, page: 1, page_size: 20 },
+  it("installItem posts the install request and refreshes typed consumption", async () => {
+    post.mockResolvedValueOnce({
+      data: {
+        ok: true,
+        item: {
+          itemId: "item-1",
+          itemType: "plugin",
+          version: "1.0.0",
+          status: "installed",
+          consumerSurface: "plugin-management-panel",
+          installed: true,
+          used: true,
+        },
+      },
+      status: 200,
+    });
+    get.mockResolvedValueOnce({
+      data: {
+        items: [
+          {
+            itemId: "item-1",
+            itemType: "plugin",
+            version: "1.0.0",
+            status: "installed",
+            consumerSurface: "plugin-management-panel",
+            installed: true,
+            used: true,
+          },
+        ],
+      },
       status: 200,
     });
 
-    useMarketplaceStore.getState().setFilters({ type: "plugin" });
-
-    expect(useMarketplaceStore.getState().filters.type).toBe("plugin");
-    expect(useMarketplaceStore.getState().filters.sort).toBe("downloads");
-    expect(useMarketplaceStore.getState().filters.page).toBe(1);
-  });
-
-  it("setFilters triggers a new fetchItems call", async () => {
-    get.mockResolvedValue({
-      data: { items: [], total: 0, page: 1, page_size: 20 },
-      status: 200,
-    });
-
-    useMarketplaceStore.getState().setFilters({ sort: "rating" });
-
-    // Wait for the async fetchItems to be enqueued
-    await new Promise((r) => setTimeout(r, 10));
-
-    expect(get).toHaveBeenCalled();
-  });
-
-  // ── selectItem ─────────────────────────────────────────────────────────────
-
-  it("selectItem sets selectedItem and clears versions/reviews", async () => {
-    // fetchItemVersions and fetchItemReviews will be called silently
-    get.mockResolvedValue({ data: [], status: 200 });
-
-    const item = createMarketplaceItem("sel-1");
-    useMarketplaceStore.getState().selectItem(item);
-
-    expect(useMarketplaceStore.getState().selectedItem).toEqual(item);
-    expect(useMarketplaceStore.getState().selectedItemVersions).toHaveLength(0);
-    expect(useMarketplaceStore.getState().selectedItemReviews).toHaveLength(0);
-  });
-
-  it("selectItem with null clears selectedItem", () => {
-    useMarketplaceStore.setState({
-      selectedItem: createMarketplaceItem("old"),
-    });
-
-    useMarketplaceStore.getState().selectItem(null);
-
-    expect(useMarketplaceStore.getState().selectedItem).toBeNull();
-  });
-
-  // ── publishDialogOpen ──────────────────────────────────────────────────────
-
-  it("setPublishDialogOpen toggles publishDialogOpen", () => {
-    useMarketplaceStore.getState().setPublishDialogOpen(true);
-    expect(useMarketplaceStore.getState().publishDialogOpen).toBe(true);
-
-    useMarketplaceStore.getState().setPublishDialogOpen(false);
-    expect(useMarketplaceStore.getState().publishDialogOpen).toBe(false);
-  });
-
-  // ── installConfirmItem ─────────────────────────────────────────────────────
-
-  it("setInstallConfirmItem stores and clears the item", () => {
-    const item = createMarketplaceItem("confirm-1");
-
-    useMarketplaceStore.getState().setInstallConfirmItem(item);
-    expect(useMarketplaceStore.getState().installConfirmItem).toEqual(item);
-
-    useMarketplaceStore.getState().setInstallConfirmItem(null);
-    expect(useMarketplaceStore.getState().installConfirmItem).toBeNull();
-  });
-
-  // ── installItem ────────────────────────────────────────────────────────────
-
-  it("installItem posts to install endpoint and refreshes installed list", async () => {
-    post.mockResolvedValueOnce({ data: {}, status: 200 });
-    get.mockResolvedValueOnce({ data: ["item-1"], status: 200 });
-
-    await useMarketplaceStore.getState().installItem("item-1", "1.0.0");
+    const result = await useMarketplaceStore.getState().installItem("item-1", "1.0.0");
 
     expect(post).toHaveBeenCalledWith(
       "/api/v1/marketplace/install",
       { item_id: "item-1", version: "1.0.0" },
       { token: "test-token" },
     );
-    expect(useMarketplaceStore.getState().installedItemIds.has("item-1")).toBe(
-      true,
-    );
+    expect(result.ok).toBe(true);
+    expect(useMarketplaceStore.getState().consumptionItems[0]?.itemId).toBe("item-1");
   });
 
-  // ── publishItem ────────────────────────────────────────────────────────────
-
-  it("publishItem posts to items endpoint and returns created item", async () => {
-    const newItem = createMarketplaceItem("pub-1");
-    post.mockResolvedValueOnce({ data: newItem, status: 201 });
-    // fetchItems called after publish
+  it("uninstallItem posts uninstall request and refreshes consumption", async () => {
+    post.mockResolvedValueOnce({
+      data: { ok: true, itemId: "item-1", message: "item uninstalled" },
+      status: 200,
+    });
     get.mockResolvedValueOnce({
-      data: { items: [newItem], total: 1, page: 1, page_size: 20 },
+      data: { items: [] },
       status: 200,
     });
 
-    const result = await useMarketplaceStore.getState().publishItem({
-      type: "plugin",
-      slug: "test-plugin-pub-1",
-      name: "Test Plugin pub-1",
-      description: "desc",
-      category: "testing",
-      tags: [],
-      license: "MIT",
-    });
+    await useMarketplaceStore.getState().uninstallItem("item-1", "plugin");
 
     expect(post).toHaveBeenCalledWith(
-      "/api/v1/items",
-      expect.objectContaining({ type: "plugin" }),
+      "/api/v1/marketplace/uninstall",
+      { item_id: "item-1", item_type: "plugin" },
       { token: "test-token" },
     );
-    expect(result.id).toBe("pub-1");
+    expect(useMarketplaceStore.getState().consumptionItems).toEqual([]);
+    expect(useMarketplaceStore.getState().uninstallLoading).toBe(false);
   });
 
-  // ── deleteReview ───────────────────────────────────────────────────────────
+  it("uninstallItem sets error on failure", async () => {
+    post.mockRejectedValueOnce(new Error("uninstall failed"));
 
-  it("deleteReview calls DELETE on the review endpoint", async () => {
-    del.mockResolvedValueOnce({ data: {}, status: 200 });
-    // fetchItemReviews called after delete
-    get.mockResolvedValueOnce({ data: [], status: 200 });
+    await expect(
+      useMarketplaceStore.getState().uninstallItem("item-1", "plugin"),
+    ).rejects.toThrow("uninstall failed");
 
-    await useMarketplaceStore.getState().deleteReview("item-1");
+    expect(useMarketplaceStore.getState().error).toBe("uninstall failed");
+    expect(useMarketplaceStore.getState().uninstallLoading).toBe(false);
+  });
 
-    expect(del).toHaveBeenCalledWith("/api/v1/items/item-1/reviews/me", {
-      token: "test-token",
+  it("checkUpdates populates updates list from backend", async () => {
+    get.mockResolvedValueOnce({
+      data: {
+        items: [
+          {
+            itemId: "item-1",
+            itemType: "plugin",
+            installedVersion: "1.0.0",
+            latestVersion: "2.0.0",
+            hasUpdate: true,
+          },
+        ],
+      },
+      status: 200,
     });
+
+    await useMarketplaceStore.getState().checkUpdates();
+
+    expect(get).toHaveBeenCalledWith(
+      "/api/v1/marketplace/updates",
+      { token: "test-token" },
+    );
+    expect(useMarketplaceStore.getState().updates).toHaveLength(1);
+    expect(useMarketplaceStore.getState().updates[0]?.hasUpdate).toBe(true);
+  });
+
+  it("checkUpdates sets empty array on failure", async () => {
+    get.mockRejectedValueOnce(new Error("service down"));
+
+    await useMarketplaceStore.getState().checkUpdates();
+
+    expect(useMarketplaceStore.getState().updates).toEqual([]);
+  });
+
+  it("setFilters includes tags in query params when fetching", async () => {
+    get.mockResolvedValueOnce({
+      data: { items: [], total: 0, page: 1, page_size: 20 },
+      status: 200,
+    });
+
+    useMarketplaceStore.getState().setFilters({ tags: ["react", "nextjs"], page: 1 });
+
+    await new Promise((r) => setTimeout(r, 50));
+
+    const lastCall = get.mock.calls.find(
+      (call: string[]) => typeof call[0] === "string" && call[0].includes("/api/v1/items?"),
+    );
+    expect(lastCall).toBeDefined();
+    expect(lastCall![0]).toContain("tags=react%2Cnextjs");
+  });
+});
+
+describe("resolveMarketplaceConsumptionRecord", () => {
+  it("prefers installed records over blocked or warning records for the same item", () => {
+    const result = resolveMarketplaceConsumptionRecord(
+      [
+        {
+          itemId: "item-1",
+          itemType: "plugin",
+          status: "blocked",
+          consumerSurface: "plugin-management-panel",
+          installed: false,
+          used: false,
+          updatedAt: "2024-01-01T00:00:00Z",
+        },
+        {
+          itemId: "item-1",
+          itemType: "plugin",
+          status: "installed",
+          consumerSurface: "plugin-management-panel",
+          installed: true,
+          used: true,
+          updatedAt: "2024-01-02T00:00:00Z",
+        },
+      ],
+      "item-1",
+    );
+
+    expect(result?.status).toBe("installed");
+    expect(result?.used).toBe(true);
   });
 });

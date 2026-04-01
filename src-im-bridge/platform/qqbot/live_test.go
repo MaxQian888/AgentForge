@@ -80,7 +80,7 @@ func TestLive_ReplyPrefersReplyContextAndFallsBackToDirectSend(t *testing.T) {
 	}
 }
 
-func TestLive_SendStructuredFallsBackToRenderableText(t *testing.T) {
+func TestLive_SendStructuredRendersAsMarkdownNative(t *testing.T) {
 	sender := &fakeSender{}
 	live, err := NewLive(
 		"1024",
@@ -104,11 +104,17 @@ func TestLive_SendStructuredFallsBackToRenderableText(t *testing.T) {
 	if err != nil {
 		t.Fatalf("SendStructured error: %v", err)
 	}
-	if len(sender.calls) != 1 {
-		t.Fatalf("sender calls = %+v", sender.calls)
+	// Structured messages now render as markdown and go through the native path
+	if len(sender.messageCalls) != 1 {
+		t.Fatalf("messageCalls = %+v", sender.messageCalls)
 	}
-	if !strings.Contains(sender.calls[0].Content, "Review Ready") || !strings.Contains(sender.calls[0].Content, "Approve") {
-		t.Fatalf("content = %q", sender.calls[0].Content)
+	if sender.messageCalls[0].Payload["msg_type"] != 2 {
+		t.Fatalf("payload = %+v", sender.messageCalls[0].Payload)
+	}
+	md, _ := sender.messageCalls[0].Payload["markdown"].(map[string]any)
+	content, _ := md["content"].(string)
+	if !strings.Contains(content, "Review Ready") || !strings.Contains(content, "Approve") {
+		t.Fatalf("markdown content = %q", content)
 	}
 }
 
@@ -202,6 +208,148 @@ type staticTokenProvider string
 
 func (s staticTokenProvider) AccessToken(ctx context.Context) (string, error) {
 	return string(s), nil
+}
+
+func TestLive_SendFormattedTextUsesMarkdownWhenQQBotMD(t *testing.T) {
+	sender := &fakeSender{}
+	live, err := NewLive(
+		"1024",
+		"secret",
+		"9080",
+		"/callback",
+		WithSender(sender),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.SendFormattedText(context.Background(), "group:group-openid", &core.FormattedText{
+		Content: "## Review Ready",
+		Format:  core.TextFormatQQBotMD,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+	if len(sender.messageCalls) != 1 {
+		t.Fatalf("messageCalls = %+v", sender.messageCalls)
+	}
+	if sender.messageCalls[0].Payload["msg_type"] != 2 {
+		t.Fatalf("payload = %+v", sender.messageCalls[0].Payload)
+	}
+
+	// plain text format should fall back to SendText
+	if err := live.SendFormattedText(context.Background(), "group:group-openid", &core.FormattedText{
+		Content: "plain text",
+		Format:  core.TextFormatPlainText,
+	}); err != nil {
+		t.Fatalf("SendFormattedText plain error: %v", err)
+	}
+	if len(sender.calls) != 1 || sender.calls[0].Content != "plain text" {
+		t.Fatalf("calls = %+v", sender.calls)
+	}
+
+	if err := live.SendFormattedText(context.Background(), "group:group-openid", nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil message error = %v", err)
+	}
+}
+
+func TestLive_ReplyFormattedTextUsesMarkdownWhenQQBotMD(t *testing.T) {
+	sender := &fakeSender{}
+	live, err := NewLive(
+		"1024",
+		"secret",
+		"9080",
+		"/callback",
+		WithSender(sender),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.ReplyFormattedText(context.Background(), replyContext{ChatID: "group-openid", MessageID: "evt-1", IsGroup: true}, &core.FormattedText{
+		Content: "## Reply Ready",
+		Format:  core.TextFormatQQBotMD,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if len(sender.messageCalls) != 1 {
+		t.Fatalf("messageCalls = %+v", sender.messageCalls)
+	}
+	if sender.messageCalls[0].Payload["msg_type"] != 2 {
+		t.Fatalf("payload = %+v", sender.messageCalls[0].Payload)
+	}
+
+	if err := live.ReplyFormattedText(context.Background(), replyContext{ChatID: "group-openid"}, nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil message error = %v", err)
+	}
+}
+
+func TestLive_UpdateFormattedTextDelegatesToReply(t *testing.T) {
+	sender := &fakeSender{}
+	live, err := NewLive(
+		"1024",
+		"secret",
+		"9080",
+		"/callback",
+		WithSender(sender),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	if err := live.UpdateFormattedText(context.Background(), replyContext{ChatID: "group-openid", MessageID: "evt-1", IsGroup: true}, &core.FormattedText{
+		Content: "## Update Ready",
+		Format:  core.TextFormatQQBotMD,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+	if len(sender.messageCalls) != 1 {
+		t.Fatalf("messageCalls = %+v", sender.messageCalls)
+	}
+}
+
+func TestLive_SendStructuredRendersAsMarkdown(t *testing.T) {
+	sender := &fakeSender{}
+	live, err := NewLive(
+		"1024",
+		"secret",
+		"9080",
+		"/callback",
+		WithSender(sender),
+		WithAccessTokenProvider(staticTokenProvider("token")),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	err = live.SendStructured(context.Background(), "group:group-openid", &core.StructuredMessage{
+		Sections: []core.StructuredSection{
+			{
+				Type:        core.StructuredSectionTypeText,
+				TextSection: &core.TextSection{Body: "Review Ready"},
+			},
+			{
+				Type: core.StructuredSectionTypeFields,
+				FieldsSection: &core.FieldsSection{
+					Fields: []core.StructuredField{
+						{Label: "Status", Value: "Open"},
+					},
+				},
+			},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendStructured error: %v", err)
+	}
+	// Should send via markdown native path
+	if len(sender.messageCalls) != 1 {
+		t.Fatalf("messageCalls = %+v", sender.messageCalls)
+	}
+	if sender.messageCalls[0].Payload["msg_type"] != 2 {
+		t.Fatalf("payload = %+v", sender.messageCalls[0].Payload)
+	}
 }
 
 func TestLive_OptionsIdentityAndReplyContextHelpers(t *testing.T) {

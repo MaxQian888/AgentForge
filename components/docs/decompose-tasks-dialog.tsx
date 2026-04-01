@@ -10,6 +10,13 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 
 export interface DecomposeDialogBlock {
   id: string;
@@ -99,18 +106,22 @@ export function DecomposeTasksDialog({
 
           <div className="flex flex-col gap-2">
             <label className="text-sm font-medium">{t("decompose.parentTask")}</label>
-            <select
-              className="h-10 rounded-md border bg-background px-3 text-sm"
-              value={parentTaskId}
-              onChange={(event) => setParentTaskId(event.target.value)}
+            <Select
+              value={parentTaskId || "__none__"}
+              onValueChange={(value) => setParentTaskId(value === "__none__" ? "" : value)}
             >
-              <option value="">{t("decompose.createRootTasks")}</option>
-              {tasks.map((task) => (
-                <option key={task.id} value={task.id}>
-                  {task.title}
-                </option>
-              ))}
-            </select>
+              <SelectTrigger className="w-full">
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__none__">{t("decompose.createRootTasks")}</SelectItem>
+                {tasks.map((task) => (
+                  <SelectItem key={task.id} value={task.id}>
+                    {task.title}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
           </div>
         </div>
 

@@ -235,6 +235,44 @@ func TestReviewCommand_StatusFailure(t *testing.T) {
 	}
 }
 
+func TestReviewCommand_StatusSuggestsFollowUpTasksFromFindings(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&client.Review{
+			ID:             "review-12345678",
+			PRURL:          "https://github.com/org/repo/pull/42",
+			Status:         "completed",
+			RiskLevel:      "high",
+			Summary:        "发现 2 个问题",
+			Recommendation: "request_changes",
+			Findings: []client.ReviewFinding{
+				{Severity: "high", Message: "Missing auth guard", File: "src-go/internal/service/review_service.go"},
+				{Severity: "medium", Message: "Rename unclear variable"},
+			},
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterReviewCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/review status review-123",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	for _, want := range []string{"后续任务建议", "/task create 修复审查问题", "Missing auth guard"} {
+		if !strings.Contains(platform.replies[0], want) {
+			t.Fatalf("reply = %q, want substring %q", platform.replies[0], want)
+		}
+	}
+}
+
 func TestReviewCommand_DeepCallsStandaloneEndpoint(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		if r.Method != http.MethodPost {
@@ -392,5 +430,31 @@ func TestBuildReviewCard_OmitsEmptyOptionalFields(t *testing.T) {
 	}
 	if len(card.Buttons) != 1 || card.Buttons[0].Action != "link:/reviews/review-12345678" {
 		t.Fatalf("buttons = %+v", card.Buttons)
+	}
+}
+
+func TestBuildReviewCard_IncludesFollowUpTaskSuggestionsForCompletedFindings(t *testing.T) {
+	card := buildReviewCard(&client.Review{
+		ID:             "review-12345678",
+		PRURL:          "https://example.test/pr/1",
+		Status:         "completed",
+		RiskLevel:      "high",
+		Recommendation: "request_changes",
+		Findings: []client.ReviewFinding{
+			{Severity: "high", Message: "Missing auth guard"},
+		},
+	})
+
+	found := false
+	for _, field := range card.Fields {
+		if field.Label == "后续任务" {
+			found = true
+			if !strings.Contains(field.Value, "/task create 修复审查问题") {
+				t.Fatalf("field.Value = %q", field.Value)
+			}
+		}
+	}
+	if !found {
+		t.Fatalf("fields = %+v", card.Fields)
 	}
 }

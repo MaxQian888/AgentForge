@@ -4,12 +4,12 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-React + Tauri desktop application starter: Next.js 16 (React 19) + Tauri 2.9 + TypeScript + Tailwind CSS v4 + shadcn/ui + Zustand.
+AgentForge — agent-driven development management platform. Multi-surface workspace with Next.js 16 (React 19) + Tauri 2.9 + TypeScript + Tailwind CSS v4 + shadcn/ui + Zustand frontend, Go orchestrator backend, Bun agent bridge, IM bridge, and Marketplace microservice.
 
 **Dual Runtime Model:**
 
 - **Web mode** (`pnpm dev`): Next.js dev server at <http://localhost:3000>
-- **Desktop mode** (`pnpm tauri dev`): Tauri wraps Next.js in a native window
+- **Desktop mode** (`pnpm tauri dev`): Tauri wraps Next.js in a native window with sidecar supervision
 
 ## Development Commands
 
@@ -33,6 +33,11 @@ pnpm tauri dev        # Dev mode with hot reload
 pnpm tauri build      # Build desktop installer
 pnpm tauri info       # Check Tauri environment
 
+# Full local stack
+pnpm dev:all          # Start compose infra + Go + Bridge + IM Bridge + frontend
+pnpm dev:all:status   # Check stack health
+pnpm dev:all:stop     # Stop managed services
+
 # Add shadcn/ui components
 pnpm dlx shadcn@latest add <component-name>
 ```
@@ -54,12 +59,6 @@ pnpm build:backend:dev
 
 # Cross-compile Go sidecar for all platforms
 pnpm build:backend
-
-# Start Tauri desktop app with auto-compiled backend
-pnpm tauri:dev
-
-# Full production build: Go binary + Next.js export + Tauri installer
-pnpm tauri:build
 ```
 
 ### Backend Environment (src-go/.env)
@@ -77,14 +76,82 @@ Auth flow notes:
 - Auth requests resolve the backend URL through the shared resolver: `NEXT_PUBLIC_API_URL` in web mode, Tauri `get_backend_url` in desktop mode, then `http://localhost:7777` as fallback.
 - Refresh, logout revocation, and blacklist-backed protected-route checks now fail closed when Redis/token-cache state is unavailable; do not document or reintroduce silent success on cache failure.
 
+## Marketplace Service
+
+The marketplace (`src-marketplace/`) is a standalone Go microservice for publishing, discovering, installing, and reviewing plugins, skills, and roles.
+
+```bash
+cd src-marketplace
+go run ./cmd/server    # Runs on port 7781 by default
+go test ./...          # Run marketplace tests
+go build ./cmd/server  # Build marketplace binary
+```
+
+Frontend store: `lib/stores/marketplace-store.ts`
+Frontend page: `app/(dashboard)/marketplace/page.tsx`
+Components: `components/marketplace/`
+
+Current marketplace delivery notes:
+
+- Default standalone port is `7781`; do not reuse the IM Bridge port.
+- The main Go backend now bridges marketplace installs and typed consumption state through `/api/v1/marketplace/install` and `/api/v1/marketplace/consumption`.
+- Marketplace installs materialize into existing consumer seams: plugins go to the plugin control plane, roles go into the repo-local roles store, and skills go into the authoritative role skill catalog.
+- Local side-load in the marketplace workspace currently reuses the plugin local-install seam. Unsupported role/skill side-load flows should stay explicitly blocked instead of pretending to succeed.
+
 ## Architecture
 
 ### Frontend Structure
 
 - `app/` - Next.js App Router (layout.tsx, page.tsx, globals.css)
+- `app/(auth)` - Login and registration pages
+- `app/(dashboard)` - Dashboard route group covering: overview, projects, agents, teams, reviews, cost, scheduler, memory, roles, plugins, marketplace, settings, IM, docs, workflow, sprints
 - `components/ui/` - shadcn/ui components using Radix UI + class-variance-authority
+- `lib/stores/` - Zustand stores (30+ stores covering all domain surfaces)
+- `lib/i18n/` - Internationalization (next-intl)
+- `hooks/` - Frontend hooks (use-mobile, use-backend-url, use-breadcrumbs, use-breakpoint, use-keyboard-navigation, use-platform-capability)
 - `lib/utils.ts` - `cn()` utility (clsx + tailwind-merge)
-- `__tests__/` - Jest tests with React Testing Library
+
+### Backend Structure (src-go/)
+
+Go orchestrator using Echo framework with layered architecture:
+- `cmd/server` - Entry point
+- `internal/handler` - HTTP handlers
+- `internal/service` - Business logic
+- `internal/repository` - Data access
+- `internal/model` - Domain models
+- `internal/middleware` - Auth, CORS, rate limiting
+- `internal/ws` - WebSocket hub
+- `internal/plugin` - Plugin control plane
+- `internal/scheduler` - Job scheduling
+- `internal/role` - Role management
+- `internal/worktree` - Git worktree management
+- `internal/cost` - Cost tracking
+- `internal/memory` - Project memory
+- `internal/pool` - Agent pool management
+
+### Marketplace Structure (src-marketplace/)
+
+Standalone Go microservice:
+- `cmd/server` - Entry point
+- `internal/handler` - HTTP handlers (items, versions, reviews, admin)
+- `internal/service` - Business logic
+- `internal/repository` - Data access
+- `internal/model` - Domain models
+- `internal/config` - Configuration
+- `internal/i18n` - Internationalization
+- `migrations/` - Database migrations
+
+### Bridge Structure (src-bridge/)
+
+TypeScript/Bun service using Hono:
+- `src/server.ts` - Entry point
+- `src/runtime/` - Runtime adapters (claude_code, codex, opencode, cursor, gemini, qoder, iflow)
+- `src/handlers/` - Request handlers
+- `src/plugins/` - Plugin hosting
+- `src/mcp/` - MCP integration
+- `src/session/` - Session management
+- `src/review/` - Review pipeline
+- `src/schemas.ts` - Shared schemas
 
 ### Tauri Integration
 
@@ -92,6 +159,7 @@ Auth flow notes:
   - `tauri.conf.json` - Config pointing `frontendDist` to `../out`
   - `beforeDevCommand`: runs `pnpm dev`
   - `beforeBuildCommand`: runs `pnpm build`
+  - Desktop supervises three sidecars: Go orchestrator (7777), TS Bridge (7778), IM Bridge (7779)
 
 ### Styling System
 
@@ -117,9 +185,23 @@ cn("base-classes", condition && "conditional", className)
 </Button>
 ```
 
+## Key Dependencies
+
+- UI: `shadcn/ui` (Radix UI), `lucide-react` icons, `@hello-pangea/dnd` drag-and-drop, `@tanstack/react-table`, `react-grid-layout`, `recharts`
+- Editor: `@blocknote/core` + `@blocknote/react` for wiki/docs editing
+- i18n: `next-intl`
+- State: `zustand` (30+ stores)
+- Charts: `recharts`
+- CLI: `cmdk` for command palette
+- Notifications: `sonner` for toast notifications
+- Date: `date-fns`
+- Diagrams: `mermaid`, `katex`
+
 ## Critical Notes
 
 - **Always use pnpm** (lockfile present)
 - **Tauri production builds require static export**: Add `output: "export"` to `next.config.ts` for `pnpm tauri build` to work
 - **Rust toolchain**: Requires v1.77.2+ for Tauri builds
 - shadcn/ui configured with "new-york" style and RSC mode
+- The repository includes both real implementation and design-stage artifacts
+- When in doubt about project intent, prefer `docs/PRD.md` as the latest source of truth

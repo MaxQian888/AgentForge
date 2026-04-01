@@ -373,6 +373,24 @@ type PluginBuiltInMetadata struct {
 	InstallBlockedReason string   `json:"installBlockedReason,omitempty"`
 }
 
+type PluginRoleDependency struct {
+	RoleID     string   `json:"roleId"`
+	RoleName   string   `json:"roleName,omitempty"`
+	Status     string   `json:"status"`
+	Blocking   bool     `json:"blocking"`
+	Message    string   `json:"message,omitempty"`
+	References []string `json:"references,omitempty"`
+}
+
+type PluginRoleConsumer struct {
+	RoleID        string `json:"roleId"`
+	RoleName      string `json:"roleName,omitempty"`
+	ReferenceType string `json:"referenceType"`
+	Status        string `json:"status"`
+	Blocking      bool   `json:"blocking"`
+	Message       string `json:"message,omitempty"`
+}
+
 type PluginRecord struct {
 	PluginManifest
 	LifecycleState     PluginLifecycleState    `json:"lifecycle_state"`
@@ -384,6 +402,8 @@ type PluginRecord struct {
 	RuntimeMetadata    *PluginRuntimeMetadata  `json:"runtime_metadata,omitempty"`
 	CurrentInstance    *PluginInstanceSnapshot `json:"current_instance,omitempty"`
 	BuiltIn            *PluginBuiltInMetadata  `json:"builtIn,omitempty"`
+	RoleDependencies   []PluginRoleDependency  `json:"roleDependencies,omitempty"`
+	RoleConsumers      []PluginRoleConsumer    `json:"roleConsumers,omitempty"`
 }
 
 type PluginFilter struct {

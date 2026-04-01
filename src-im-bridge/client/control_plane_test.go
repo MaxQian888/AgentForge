@@ -159,7 +159,14 @@ func TestControlPlaneConn_AckWritesBridgeCursorPayload(t *testing.T) {
 	}
 	defer conn.Close()
 
-	if err := conn.Ack(9, "delivery-9", "actioncard_send_failed"); err != nil {
+	if err := conn.Ack(ControlDeliveryAck{
+		Cursor:          9,
+		DeliveryID:      "delivery-9",
+		Status:          "failed",
+		FailureReason:   "rate_limit",
+		DowngradeReason: "actioncard_send_failed",
+		ProcessedAt:     "2026-03-26T08:00:00Z",
+	}); err != nil {
 		t.Fatalf("Ack error: %v", err)
 	}
 
@@ -168,8 +175,17 @@ func TestControlPlaneConn_AckWritesBridgeCursorPayload(t *testing.T) {
 		if ack.BridgeID != "bridge-1" || ack.Cursor != 9 || ack.DeliveryID != "delivery-9" {
 			t.Fatalf("ack = %+v", ack)
 		}
+		if ack.Status != "failed" {
+			t.Fatalf("Status = %q", ack.Status)
+		}
+		if ack.FailureReason != "rate_limit" {
+			t.Fatalf("FailureReason = %q", ack.FailureReason)
+		}
 		if ack.DowngradeReason != "actioncard_send_failed" {
 			t.Fatalf("DowngradeReason = %q", ack.DowngradeReason)
+		}
+		if ack.ProcessedAt != "2026-03-26T08:00:00Z" {
+			t.Fatalf("ProcessedAt = %q", ack.ProcessedAt)
 		}
 	case <-time.After(time.Second):
 		t.Fatal("timed out waiting for ack payload")

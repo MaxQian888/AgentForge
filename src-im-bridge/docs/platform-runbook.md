@@ -58,6 +58,17 @@ Canonical delivery expectations:
 - normalized `/im/action` callbacks now expect truthful backend states such as `started`, `completed`, `blocked`, or `failed`, rather than placeholder success text
 - when delivery metadata requests a supported formatted mode such as Telegram `text_format=markdown_v2`, the provider renderer applies escaping and transport-specific limits before issuing `sendMessage` or `editMessageText`
 
+Bridge event-forwarding preferences can also be expressed through bound
+`replyTarget.metadata` values. Current per-event keys follow the form:
+
+- `bridge_event_enabled.permission_request`
+- `bridge_event_enabled.status_change`
+- `bridge_event_enabled.budget.warning`
+
+When these keys are present, the control plane suppresses disabled Bridge event
+deliveries before they reach the IM transport while still keeping backend
+delivery history truthful.
+
 ## Rollout Checklist
 
 1. Set `IM_PLATFORM` to a single platform and `IM_TRANSPORT_MODE=live`.
@@ -143,3 +154,14 @@ For Feishu delayed-update validation, also confirm:
 1. A card action response returns within the callback window.
 2. A follow-on native update uses the preserved callback token when available.
 3. If the callback token is missing or unusable, `/im/notify` reports a `fallback_reason` instead of silently pretending the delayed update succeeded.
+
+## Operator Snapshot Notes
+
+The `/im` operator console now assumes the backend exposes a richer snapshot contract:
+
+- `/api/v1/im/bridge/status` should include pending backlog, recent failures, average settled latency, and provider diagnostics metadata in addition to registration health
+- `/api/v1/im/deliveries` should support explicit filtering so operators can isolate one delivery, platform, event type, or recent window
+- `/api/v1/im/deliveries/retry-batch` is the preferred workflow for retrying multiple failed or timed-out deliveries
+- `/api/v1/im/test-send` should reuse the canonical send pipeline and return the delivery id together with the current bounded settlement result
+
+Delivery status in that operator view is settlement-truthful. A delivery remains `pending` until the bridge returns a terminal ack with processed timestamp and any failure or downgrade metadata. Operators should not treat queue acceptance alone as successful delivery.

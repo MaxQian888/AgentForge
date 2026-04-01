@@ -30,6 +30,10 @@ const DEFAULT_BRIDGE_STATUS: IMBridgeStatus = {
   providers: [],
   providerDetails: [],
   health: "disconnected",
+  pendingDeliveries: 0,
+  recentFailures: 0,
+  recentDowngrades: 0,
+  averageLatencyMs: 0,
 };
 
 function makeApiClient(): MockIMApiClient {
@@ -78,6 +82,10 @@ describe("useIMStore", () => {
       channels: [],
       bridgeStatus: DEFAULT_BRIDGE_STATUS,
       deliveries: [],
+      eventTypes: [],
+      historyFilters: {},
+      lastBatchRetryResults: [],
+      lastTestSendResult: null,
       loading: false,
       error: null,
     });
@@ -143,8 +151,20 @@ describe("useIMStore", () => {
       registered: true,
       lastHeartbeat: "2026-03-26T08:30:00.000Z",
       providers: ["feishu", "telegram"],
-      providerDetails: [],
+      providerDetails: [
+        {
+          platform: "feishu",
+          pendingDeliveries: 2,
+          recentFailures: 1,
+          recentDowngrades: 1,
+          diagnostics: { provider_id: "feishu" },
+        },
+      ],
       health: "healthy",
+      pendingDeliveries: 2,
+      recentFailures: 1,
+      recentDowngrades: 1,
+      averageLatencyMs: 420,
     };
     api.get.mockResolvedValueOnce({ data: bridgeStatus });
     mockCreateApiClient.mockReturnValue(api);
@@ -168,6 +188,10 @@ describe("useIMStore", () => {
         lastHeartbeat: "2026-03-26T08:30:00.000Z",
         providers: ["feishu"],
         health: "healthy",
+        pendingDeliveries: 0,
+        recentFailures: 0,
+        recentDowngrades: 0,
+        averageLatencyMs: 0,
       },
     });
     mockCreateApiClient.mockReturnValue(api);
@@ -181,6 +205,10 @@ describe("useIMStore", () => {
         providers: ["feishu"],
         providerDetails: [],
         health: "healthy",
+        pendingDeliveries: 0,
+        recentFailures: 0,
+        recentDowngrades: 0,
+        averageLatencyMs: 0,
       },
       error: null,
     });
@@ -197,6 +225,10 @@ describe("useIMStore", () => {
         providers: ["feishu"],
         providerDetails: [],
         health: "healthy",
+        pendingDeliveries: 0,
+        recentFailures: 0,
+        recentDowngrades: 0,
+        averageLatencyMs: 0,
       },
       error: "stale",
     });
@@ -232,6 +264,30 @@ describe("useIMStore", () => {
       deliveries,
       loading: false,
       error: null,
+    });
+  });
+
+  it("fetches filtered delivery history using query params", async () => {
+    const api = makeApiClient();
+    api.get.mockResolvedValueOnce({
+      data: [makeDelivery({ id: "delivery-2", status: "failed", platform: "slack" })],
+    });
+    mockCreateApiClient.mockReturnValue(api);
+
+    await useIMStore.getState().fetchDeliveryHistory({
+      status: "failed",
+      platform: "slack",
+      eventType: "task.created",
+    });
+
+    expect(api.get).toHaveBeenCalledWith(
+      "/api/v1/im/deliveries?status=failed&platform=slack&eventType=task.created",
+      { token: "test-token" },
+    );
+    expect(useIMStore.getState().historyFilters).toMatchObject({
+      status: "failed",
+      platform: "slack",
+      eventType: "task.created",
     });
   });
 
@@ -290,6 +346,88 @@ describe("useIMStore", () => {
       loading: false,
       error: null,
     });
+  });
+
+  it("retries multiple deliveries and stores per-item outcomes", async () => {
+    const api = makeApiClient();
+    api.post.mockResolvedValueOnce({
+      data: {
+        results: [
+          { deliveryId: "delivery-1", status: "pending" },
+          { deliveryId: "delivery-2", status: "rejected", message: "not retryable" },
+        ],
+      },
+    });
+    api.get.mockResolvedValueOnce({
+      data: [makeDelivery({ id: "delivery-1", status: "pending" })],
+    });
+    mockCreateApiClient.mockReturnValue(api);
+
+    const results = await useIMStore.getState().retryDeliveries(["delivery-1", "delivery-2"]);
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/api/v1/im/deliveries/retry-batch",
+      { deliveryIds: ["delivery-1", "delivery-2"] },
+      { token: "test-token" },
+    );
+    expect(results).toEqual([
+      { deliveryId: "delivery-1", status: "pending" },
+      { deliveryId: "delivery-2", status: "rejected", message: "not retryable" },
+    ]);
+    expect(useIMStore.getState().lastBatchRetryResults).toEqual(results);
+  });
+
+  it("sends an IM test message and refreshes status plus history", async () => {
+    const api = makeApiClient();
+    api.post.mockResolvedValueOnce({
+      data: {
+        deliveryId: "delivery-test-1",
+        status: "delivered",
+        latencyMs: 320,
+      },
+    });
+    api.get
+      .mockResolvedValueOnce({
+        data: {
+          registered: true,
+          lastHeartbeat: "2026-03-26T08:30:00.000Z",
+          providers: ["slack"],
+          providerDetails: [],
+          health: "healthy",
+          pendingDeliveries: 0,
+          recentFailures: 0,
+          recentDowngrades: 0,
+          averageLatencyMs: 320,
+        },
+      })
+      .mockResolvedValueOnce({
+        data: [makeDelivery({ id: "delivery-test-1", latencyMs: 320 })],
+      });
+    mockCreateApiClient.mockReturnValue(api);
+
+    const result = await useIMStore.getState().testSend({
+      platform: "slack",
+      channelId: "C123",
+      text: "ping",
+      deliveryId: "delivery-test-1",
+    });
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/api/v1/im/test-send",
+      {
+        platform: "slack",
+        channelId: "C123",
+        text: "ping",
+        deliveryId: "delivery-test-1",
+      },
+      { token: "test-token" },
+    );
+    expect(result).toEqual({
+      deliveryId: "delivery-test-1",
+      status: "delivered",
+      latencyMs: 320,
+    });
+    expect(useIMStore.getState().lastTestSendResult).toEqual(result);
   });
 
   it("returns early when saving a channel without a token", async () => {

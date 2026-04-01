@@ -3,6 +3,13 @@
 import { useState } from "react";
 import { useTranslations } from "next-intl";
 import { Input } from "@/components/ui/input";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useCustomFieldStore, type CustomFieldDefinition, type CustomFieldValue } from "@/lib/stores/custom-field-store";
 
 export function FieldValueCell({
@@ -46,21 +53,26 @@ export function FieldValueCell({
   if (field.fieldType === "select" || field.fieldType === "multi_select") {
     const options = Array.isArray(field.options) ? field.options : [];
     return (
-      <select
-        className="h-8 min-w-28 rounded-md border bg-background px-2 text-sm"
-        value={draft}
-        onChange={(event) => {
-          setDraft(event.target.value);
-          void commit(event.target.value);
+      <Select
+        value={draft || "__none__"}
+        onValueChange={(value) => {
+          const resolved = value === "__none__" ? "" : value;
+          setDraft(resolved);
+          void commit(resolved);
         }}
       >
-        <option value="">{t("fields.unset")}</option>
-        {options.map((option) => (
-          <option key={String(option)} value={String(option)}>
-            {String(option)}
-          </option>
-        ))}
-      </select>
+        <SelectTrigger className="h-8 min-w-28 text-sm">
+          <SelectValue />
+        </SelectTrigger>
+        <SelectContent>
+          <SelectItem value="__none__">{t("fields.unset")}</SelectItem>
+          {options.map((option) => (
+            <SelectItem key={String(option)} value={String(option)}>
+              {String(option)}
+            </SelectItem>
+          ))}
+        </SelectContent>
+      </Select>
     );
   }
 

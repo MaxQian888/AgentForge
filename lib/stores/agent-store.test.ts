@@ -392,4 +392,122 @@ describe("useAgentStore", () => {
       }),
     );
   });
+
+  describe("streaming data methods", () => {
+    beforeEach(() => {
+      useAgentStore.setState({
+        agentToolCalls: new Map(),
+        agentToolResults: new Map(),
+        agentReasoning: new Map(),
+        agentFileChanges: new Map(),
+        agentTodos: new Map(),
+        agentPartialMessages: new Map(),
+        agentPermissionRequests: new Map(),
+      });
+    });
+
+    it("appendToolCall creates entry for new id and accumulates for existing", () => {
+      const store = useAgentStore.getState();
+      store.appendToolCall("a1", { toolName: "read_file", toolCallId: "tc-1" });
+      expect(useAgentStore.getState().agentToolCalls.get("a1")).toEqual([
+        { toolName: "read_file", toolCallId: "tc-1" },
+      ]);
+
+      store.appendToolCall("a1", { toolName: "write_file", turnNumber: 2 });
+      expect(useAgentStore.getState().agentToolCalls.get("a1")).toHaveLength(2);
+      expect(useAgentStore.getState().agentToolCalls.get("a1")![1]).toEqual(
+        expect.objectContaining({ toolName: "write_file" }),
+      );
+    });
+
+    it("appendToolResult creates entry for new id and accumulates for existing", () => {
+      const store = useAgentStore.getState();
+      store.appendToolResult("a1", { toolName: "read_file", toolCallId: "tc-1", output: "ok" });
+      store.appendToolResult("a1", { toolName: "write_file", isError: true });
+
+      const results = useAgentStore.getState().agentToolResults.get("a1")!;
+      expect(results).toHaveLength(2);
+      expect(results[0]).toEqual(expect.objectContaining({ toolName: "read_file", output: "ok" }));
+      expect(results[1]).toEqual(expect.objectContaining({ isError: true }));
+    });
+
+    it("setReasoning replaces previous value", () => {
+      const store = useAgentStore.getState();
+      store.setReasoning("a1", "thinking...");
+      expect(useAgentStore.getState().agentReasoning.get("a1")).toBe("thinking...");
+
+      store.setReasoning("a1", "revised reasoning");
+      expect(useAgentStore.getState().agentReasoning.get("a1")).toBe("revised reasoning");
+    });
+
+    it("appendFileChanges creates and accumulates file entries", () => {
+      const store = useAgentStore.getState();
+      store.appendFileChanges("a1", [{ path: "src/a.ts", changeType: "create" }]);
+      store.appendFileChanges("a1", [{ path: "src/b.ts" }, { path: "src/c.ts" }]);
+
+      const files = useAgentStore.getState().agentFileChanges.get("a1")!;
+      expect(files).toHaveLength(3);
+      expect(files[0]).toEqual({ path: "src/a.ts", changeType: "create" });
+    });
+
+    it("setTodos replaces the entire array", () => {
+      const store = useAgentStore.getState();
+      store.setTodos("a1", [{ id: "t1", content: "first", status: "pending" }]);
+      expect(useAgentStore.getState().agentTodos.get("a1")).toHaveLength(1);
+
+      store.setTodos("a1", [{ id: "t2", content: "second", status: "done" }]);
+      const todos = useAgentStore.getState().agentTodos.get("a1")!;
+      expect(todos).toHaveLength(1);
+      expect(todos[0].id).toBe("t2");
+    });
+
+    it("setPartialMessage replaces previous value", () => {
+      const store = useAgentStore.getState();
+      store.setPartialMessage("a1", "partial");
+      expect(useAgentStore.getState().agentPartialMessages.get("a1")).toBe("partial");
+
+      store.setPartialMessage("a1", "updated partial");
+      expect(useAgentStore.getState().agentPartialMessages.get("a1")).toBe("updated partial");
+    });
+
+    it("appendPermissionRequest creates and accumulates entries", () => {
+      const store = useAgentStore.getState();
+      store.appendPermissionRequest("a1", { requestId: "pr-1", toolName: "bash" });
+      store.appendPermissionRequest("a1", { requestId: "pr-2", elicitationType: "confirm" });
+
+      const reqs = useAgentStore.getState().agentPermissionRequests.get("a1")!;
+      expect(reqs).toHaveLength(2);
+      expect(reqs[0]).toEqual(expect.objectContaining({ requestId: "pr-1" }));
+      expect(reqs[1]).toEqual(expect.objectContaining({ requestId: "pr-2" }));
+    });
+
+    it("clearAgentStreamData removes data for the target id but not others", () => {
+      const store = useAgentStore.getState();
+
+      store.appendToolCall("a1", { toolName: "read_file" });
+      store.appendToolResult("a1", { toolName: "read_file" });
+      store.setReasoning("a1", "thinking");
+      store.appendFileChanges("a1", [{ path: "x.ts" }]);
+      store.setTodos("a1", [{ id: "t1", content: "do it" }]);
+      store.setPartialMessage("a1", "msg");
+      store.appendPermissionRequest("a1", { requestId: "pr-1" });
+
+      store.appendToolCall("a2", { toolName: "bash" });
+      store.setReasoning("a2", "other");
+
+      store.clearAgentStreamData("a1");
+
+      const s = useAgentStore.getState();
+      expect(s.agentToolCalls.has("a1")).toBe(false);
+      expect(s.agentToolResults.has("a1")).toBe(false);
+      expect(s.agentReasoning.has("a1")).toBe(false);
+      expect(s.agentFileChanges.has("a1")).toBe(false);
+      expect(s.agentTodos.has("a1")).toBe(false);
+      expect(s.agentPartialMessages.has("a1")).toBe(false);
+      expect(s.agentPermissionRequests.has("a1")).toBe(false);
+
+      expect(s.agentToolCalls.get("a2")).toHaveLength(1);
+      expect(s.agentReasoning.get("a2")).toBe("other");
+    });
+  });
 });

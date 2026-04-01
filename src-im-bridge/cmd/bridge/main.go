@@ -8,6 +8,7 @@ import (
 	log "github.com/sirupsen/logrus"
 	"os/signal"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 
@@ -219,6 +220,21 @@ func main() {
 
 	// Create engine and register commands.
 	engine := core.NewEngine(platform)
+	engine.SetBridgeCapabilityProbe(core.BridgeCapabilityProbeFunc(func(ctx context.Context, capability core.BridgeCapability) error {
+		switch capability {
+		case core.BridgeCapabilityDecompose,
+			core.BridgeCapabilityGenerate,
+			core.BridgeCapabilityClassifyIntent,
+			core.BridgeCapabilityPool,
+			core.BridgeCapabilityHealth,
+			core.BridgeCapabilityRuntimes,
+			core.BridgeCapabilityTools:
+			_, err := apiClient.GetBridgeHealth(ctx)
+			return err
+		default:
+			return nil
+		}
+	}))
 
 	// Configure rate limiter: 20 commands per minute per user (configurable via env).
 	rateLimitRate := 20
@@ -276,6 +292,9 @@ func main() {
 }
 
 func registerCommandHandlers(engine *core.Engine, apiClient *client.AgentForgeClient, bridgeID string) {
+	var historyMu sync.Mutex
+	historyBySession := make(map[string][]string)
+
 	commands.RegisterTaskCommands(engine, apiClient)
 	commands.RegisterAgentCommands(engine, apiClient)
 	commands.RegisterCostCommands(engine, apiClient)
@@ -290,6 +309,82 @@ func registerCommandHandlers(engine *core.Engine, apiClient *client.AgentForgeCl
 	engine.SetFallback(func(p core.Platform, msg *core.Message) {
 		ctx := context.Background()
 		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext(bridgeID, msg.ReplyTarget)
+		historyKey := strings.TrimSpace(msg.SessionKey)
+		if historyKey == "" {
+			historyKey = fmt.Sprintf("%s:%s:%s", msg.Platform, msg.ChatID, msg.UserID)
+		}
+		historyMu.Lock()
+		history := append([]string(nil), historyBySession[historyKey]...)
+		history = append(history, msg.Content)
+		if len(history) > 5 {
+			history = append([]string(nil), history[len(history)-5:]...)
+		}
+		historyBySession[historyKey] = append([]string(nil), history...)
+		historyMu.Unlock()
+
+		classified, classifyErr := scopedClient.ClassifyMentionIntent(ctx, client.MentionIntentRequest{
+			Text:       msg.Content,
+			UserID:     msg.UserID,
+			Candidates: commands.IntentCandidates(),
+			Context: map[string]any{
+				"platform":   msg.Platform,
+				"sessionKey": msg.SessionKey,
+				"threadId":   msg.ThreadID,
+				"chatId":     msg.ChatID,
+				"history":    history,
+			},
+		})
+		if classifyErr == nil && classified != nil {
+			if classified.Confidence >= 0.7 {
+				if resolved := commands.ResolveIntentCommand(classified.Intent, classified.Command, classified.Args); resolved != "" {
+					log.WithFields(log.Fields{
+						"component":  "main",
+						"intent":     classified.Intent,
+						"command":    resolved,
+						"confidence": classified.Confidence,
+						"platform":   msg.Platform,
+						"userId":     msg.UserID,
+					}).Info("Bridge mention intent routed to command")
+					cloned := *msg
+					cloned.Content = resolved
+					engine.HandleMessage(p, &cloned)
+					return
+				}
+				if strings.TrimSpace(classified.Reply) != "" {
+					log.WithFields(log.Fields{
+						"component":  "main",
+						"intent":     classified.Intent,
+						"confidence": classified.Confidence,
+						"platform":   msg.Platform,
+						"userId":     msg.UserID,
+					}).Info("Bridge mention intent replied directly")
+					_ = p.Reply(ctx, msg.ReplyCtx, classified.Reply)
+					return
+				}
+			}
+			log.WithFields(log.Fields{
+				"component":  "main",
+				"intent":     classified.Intent,
+				"command":    classified.Command,
+				"confidence": classified.Confidence,
+				"platform":   msg.Platform,
+				"userId":     msg.UserID,
+			}).Info("Bridge mention intent returned low-confidence disambiguation")
+			reply := commands.FormatIntentDisambiguation(msg.Content, commands.ResolveIntentCommand(classified.Intent, classified.Command, classified.Args))
+			if strings.TrimSpace(classified.Reply) != "" {
+				reply = strings.TrimSpace(classified.Reply) + "\n" + reply
+			}
+			_ = p.Reply(ctx, msg.ReplyCtx, reply)
+			return
+		}
+		if classifyErr != nil {
+			log.WithFields(log.Fields{
+				"component": "main",
+				"platform":  msg.Platform,
+				"userId":    msg.UserID,
+			}).WithError(classifyErr).Warn("Bridge mention classification failed; falling back to legacy intent endpoint")
+		}
+
 		reply, err := scopedClient.SendNLU(ctx, msg.Content, msg.UserID)
 		if err != nil || strings.TrimSpace(reply) == "" {
 			suggestion := commands.SuggestCommandFromCatalog(msg.Content)
@@ -298,6 +393,12 @@ func registerCommandHandlers(engine *core.Engine, apiClient *client.AgentForgeCl
 			} else {
 				reply = fmt.Sprintf("我建议先使用 %s", suggestion)
 			}
+			log.WithFields(log.Fields{
+				"component": "main",
+				"platform":  msg.Platform,
+				"userId":    msg.UserID,
+				"suggested": suggestion,
+			}).WithError(err).Warn("Legacy mention intent fallback returned no reply; using local command suggestion")
 		}
 		_ = p.Reply(ctx, msg.ReplyCtx, reply)
 	})

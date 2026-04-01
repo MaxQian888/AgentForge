@@ -185,6 +185,69 @@ func TestStub_HTTPHandlersExposeAndClearReplies(t *testing.T) {
 	}
 }
 
+func TestStub_FormattedTextSendAndReplyStoreReplies(t *testing.T) {
+	stub := NewStub("0")
+
+	if err := stub.SendFormattedText(context.Background(), "group:group-openid", &core.FormattedText{
+		Content: "## Formatted Send",
+		Format:  core.TextFormatQQBotMD,
+	}); err != nil {
+		t.Fatalf("SendFormattedText error: %v", err)
+	}
+	if err := stub.ReplyFormattedText(context.Background(), replyContext{ChatID: "group-openid", MessageID: "evt-1", IsGroup: true}, &core.FormattedText{
+		Content: "## Formatted Reply",
+		Format:  core.TextFormatQQBotMD,
+	}); err != nil {
+		t.Fatalf("ReplyFormattedText error: %v", err)
+	}
+	if err := stub.UpdateFormattedText(context.Background(), replyContext{ChatID: "group-openid", IsGroup: true}, &core.FormattedText{
+		Content: "## Formatted Update",
+		Format:  core.TextFormatQQBotMD,
+	}); err != nil {
+		t.Fatalf("UpdateFormattedText error: %v", err)
+	}
+
+	if len(stub.replies) != 3 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if stub.replies[0].Content != "## Formatted Send" || stub.replies[0].NativeSurface != string(core.TextFormatQQBotMD) {
+		t.Fatalf("first reply = %+v", stub.replies[0])
+	}
+	if stub.replies[1].Content != "## Formatted Reply" {
+		t.Fatalf("second reply = %+v", stub.replies[1])
+	}
+
+	if err := stub.SendFormattedText(context.Background(), "group:group-openid", nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil message error = %v", err)
+	}
+	if err := stub.ReplyFormattedText(context.Background(), replyContext{ChatID: "group-openid"}, nil); err == nil || !strings.Contains(err.Error(), "formatted text is required") {
+		t.Fatalf("nil reply message error = %v", err)
+	}
+}
+
+func TestStub_SendStructuredRendersAsMarkdown(t *testing.T) {
+	stub := NewStub("0")
+
+	if err := stub.SendStructured(context.Background(), "group:group-openid", &core.StructuredMessage{
+		Title: "Review Ready",
+		Body:  "Choose the next step.",
+		Fields: []core.StructuredField{
+			{Label: "Status", Value: "Open"},
+		},
+	}); err != nil {
+		t.Fatalf("SendStructured error: %v", err)
+	}
+	if len(stub.replies) != 1 {
+		t.Fatalf("replies = %+v", stub.replies)
+	}
+	if !strings.Contains(stub.replies[0].Content, "Review Ready") || !strings.Contains(stub.replies[0].Content, "Status") {
+		t.Fatalf("reply content = %q", stub.replies[0].Content)
+	}
+	if stub.replies[0].NativeSurface != string(core.TextFormatQQBotMD) {
+		t.Fatalf("reply format = %q", stub.replies[0].NativeSurface)
+	}
+}
+
 func TestStub_HelperConversionsAndReplyNative(t *testing.T) {
 	stub := NewStub("0")
 

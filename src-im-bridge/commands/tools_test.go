@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -170,5 +171,51 @@ func TestToolsCommand_InstallAndUninstallAllowLeadRole(t *testing.T) {
 	}
 	if !strings.Contains(strings.Join(calls, ","), "/api/v1/bridge/tools/install") || !strings.Contains(strings.Join(calls, ","), "/api/v1/bridge/tools/uninstall") {
 		t.Fatalf("calls = %v", calls)
+	}
+}
+
+func TestToolsCommand_InstallRejectsManifestURLOutsideAllowlist(t *testing.T) {
+	oldAllowlist := os.Getenv("BRIDGE_TOOL_MANIFEST_ALLOWLIST")
+	if err := os.Setenv("BRIDGE_TOOL_MANIFEST_ALLOWLIST", "registry.example.com"); err != nil {
+		t.Fatalf("Setenv() error = %v", err)
+	}
+	defer func() {
+		_ = os.Setenv("BRIDGE_TOOL_MANIFEST_ALLOWLIST", oldAllowlist)
+	}()
+
+	calls := make([]string, 0, 2)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		calls = append(calls, r.Method+" "+r.URL.Path)
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/proj/members":
+			_ = json.NewEncoder(w).Encode([]client.Member{
+				{ID: "member-1", Name: "Alice", Type: "human", Role: "lead", Status: "active", IsActive: true, IMUserID: "user-1"},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterToolsCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		UserID:   "user-1",
+		Content:  "/tools install https://untrusted.example.com/web-search.yaml",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "allowlist") {
+		t.Fatalf("reply = %q", platform.replies[0])
+	}
+	if strings.Contains(strings.Join(calls, ","), "/api/v1/bridge/tools/install") {
+		t.Fatalf("install should not be called, calls = %v", calls)
 	}
 }

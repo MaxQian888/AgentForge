@@ -13,6 +13,13 @@ import {
   Users,
   Zap,
 } from "lucide-react";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 import { OverviewLayout } from "@/components/layout/templates";
 import { MetricCard } from "@/components/shared/metric-card";
@@ -23,6 +30,11 @@ import { BudgetWidget } from "@/components/dashboard/budget-widget";
 import { DashboardWidgetsSkeleton } from "@/components/dashboard/dashboard-widget-skeletons";
 import { QuickActionShortcuts } from "@/components/dashboard/quick-action-shortcuts";
 import { Skeleton } from "@/components/ui/skeleton";
+import {
+  buildRecentCountSparkline,
+  buildRecentSumSparkline,
+  buildSparklineTrend,
+} from "@/lib/dashboard/metric-sparkline";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { useCostStore } from "@/lib/stores/cost-store";
@@ -58,6 +70,7 @@ export default function DashboardPage() {
   const summary = useDashboardStore((s) => s.summary);
   const projects = useDashboardStore((s) => s.projects);
   const loading = useDashboardStore((s) => s.loading);
+  const dashboardTasks = useDashboardStore((s) => s.tasks ?? []);
   const fetchSummary = useDashboardStore((s) => s.fetchSummary);
   const dashboardActivity = useDashboardStore((s) => s.activity);
   const dashboardMembers = useDashboardStore((s) => s.members);
@@ -130,6 +143,58 @@ export default function DashboardPage() {
   const budgetTotal = projectCost?.budgetSummary?.allocated ?? 0;
   const budgetSpent = projectCost?.budgetSummary?.spent ?? summary?.headline.weeklyCost ?? 0;
   const budgetRemaining = projectCost?.budgetSummary?.remaining ?? Math.max(budgetTotal - budgetSpent, 0);
+  const taskProgressSparkline = useMemo(
+    () =>
+      buildRecentCountSparkline(
+        dashboardTasks
+          .filter((task) => task.status === "in_progress")
+          .map((task) => ({
+            timestamp: task.updatedAt || task.createdAt,
+          })),
+      ),
+    [dashboardTasks],
+  );
+  const activeAgentsSparkline = useMemo(
+    () =>
+      buildRecentCountSparkline(
+        agents
+          .filter(
+            (agent) =>
+              agent.status === "running" ||
+              agent.status === "starting" ||
+              agent.status === "paused",
+          )
+          .map((agent) => ({
+            timestamp: agent.lastActivity || agent.startedAt || agent.createdAt,
+          })),
+      ),
+    [agents],
+  );
+  const pendingReviewsSparkline = useMemo(
+    () =>
+      buildRecentCountSparkline(
+        dashboardTasks
+          .filter((task) => task.status === "in_review")
+          .map((task) => ({
+            timestamp: task.updatedAt || task.createdAt,
+          })),
+      ),
+    [dashboardTasks],
+  );
+  const weeklyCostSparkline = useMemo(
+    () =>
+      buildRecentSumSparkline([
+        ...dashboardTasks.map((task) => ({
+          timestamp: task.updatedAt || task.createdAt,
+          amount: task.spentUsd ?? 0,
+        })),
+        ...agents.map((agent) => ({
+          timestamp: agent.lastActivity || agent.startedAt || agent.createdAt,
+          amount: agent.cost ?? 0,
+        })),
+      ]),
+    [agents, dashboardTasks],
+  );
   const quickActions = [
     {
       id: "create-task",
@@ -199,21 +264,29 @@ export default function DashboardPage() {
             label={t("cards.taskProgress")}
             value={`${summary?.progress.inProgress ?? 0}/${summary?.progress.total ?? 0}`}
             icon={Activity}
+            sparkline={taskProgressSparkline}
+            trend={buildSparklineTrend(taskProgressSparkline)}
           />
           <MetricCard
             label={t("cards.activeAgents")}
             value={String(summary?.headline.activeAgents ?? 0)}
             icon={Bot}
+            sparkline={activeAgentsSparkline}
+            trend={buildSparklineTrend(activeAgentsSparkline)}
           />
           <MetricCard
             label={t("cards.pendingReviews")}
             value={String(summary?.headline.pendingReviews ?? 0)}
             icon={ClipboardCheck}
+            sparkline={pendingReviewsSparkline}
+            trend={buildSparklineTrend(pendingReviewsSparkline)}
           />
           <MetricCard
             label={t("cards.weeklyCost")}
             value={formatCurrency(summary?.headline.weeklyCost ?? 0)}
             icon={DollarSign}
+            sparkline={weeklyCostSparkline}
+            trend={buildSparklineTrend(weeklyCostSparkline)}
           />
           <MetricCard
             label={t("cards.teamCapacity")}
@@ -225,22 +298,22 @@ export default function DashboardPage() {
     >
       {projects.length > 0 ? (
         <div className="flex flex-wrap items-end gap-4">
-          <label className="flex min-w-[220px] flex-col gap-2 text-sm font-medium">
+          <div className="flex min-w-[220px] flex-col gap-2 text-sm font-medium">
             <span>{t("projectFilterLabel")}</span>
-            <select
-              aria-label={t("projectFilterLabel")}
-              className="h-9 rounded-md border border-input bg-background px-3 text-sm font-normal"
-              value={projectId ?? ""}
-              onChange={(event) => handleProjectChange(event.target.value)}
-            >
-              <option value="">{t("allProjects")}</option>
-              {projects.map((project) => (
-                <option key={project.id} value={project.id}>
-                  {project.name}
-                </option>
-              ))}
-            </select>
-          </label>
+            <Select value={projectId ?? "__all__"} onValueChange={(v) => handleProjectChange(v === "__all__" ? "" : v)}>
+              <SelectTrigger className="h-9 font-normal" aria-label={t("projectFilterLabel")}>
+                <SelectValue placeholder={t("allProjects")} />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="__all__">{t("allProjects")}</SelectItem>
+                {projects.map((project) => (
+                  <SelectItem key={project.id} value={project.id}>
+                    {project.name}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
         </div>
       ) : null}
 

@@ -5,9 +5,7 @@ import { useTranslations } from "next-intl";
 import { Plus, Save, Trash2 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import {
-  EventBadgeList,
-} from "@/components/shared/event-badge-list";
+import { EventBadgeList } from "@/components/shared/event-badge-list";
 import {
   PLATFORM_DEFINITIONS,
   PlatformBadge,
@@ -29,23 +27,31 @@ import {
   SelectValue,
 } from "@/components/ui/select";
 import { cn } from "@/lib/utils";
-import {
-  useIMStore,
-  type IMChannel,
-  type IMPlatform,
-} from "@/lib/stores/im-store";
+import { useIMStore, type IMChannel, type IMPlatform } from "@/lib/stores/im-store";
 
-const EMPTY_FORM: Omit<IMChannel, "id"> & { id?: string } = {
-  platform: "feishu",
-  name: "",
-  channelId: "",
-  webhookUrl: "",
-  platformConfig: {},
-  events: [],
-  active: true,
-};
+function createEmptyForm(
+  preferredPlatform?: string | null,
+): Omit<IMChannel, "id"> & { id?: string } {
+  const platform =
+    preferredPlatform && preferredPlatform in PLATFORM_DEFINITIONS
+      ? (preferredPlatform as IMPlatform)
+      : "feishu";
+  return {
+    platform,
+    name: "",
+    channelId: "",
+    webhookUrl: "",
+    platformConfig: {},
+    events: [],
+    active: true,
+  };
+}
 
-export function IMChannelConfig() {
+export function IMChannelConfig({
+  preferredPlatform,
+}: {
+  preferredPlatform?: string | null;
+}) {
   const t = useTranslations("im");
   const channels = useIMStore((s) => s.channels);
   const loading = useIMStore((s) => s.loading);
@@ -54,8 +60,8 @@ export function IMChannelConfig() {
   const deleteChannel = useIMStore((s) => s.deleteChannel);
   const fetchEventTypes = useIMStore((s) => s.fetchEventTypes);
 
-  const [form, setForm] = useState<Omit<IMChannel, "id"> & { id?: string }>(
-    EMPTY_FORM
+  const [form, setForm] = useState<Omit<IMChannel, "id"> & { id?: string }>(() =>
+    createEmptyForm(preferredPlatform),
   );
   const [editing, setEditing] = useState(false);
 
@@ -69,7 +75,7 @@ export function IMChannelConfig() {
         value: value as IMPlatform,
         label: definition.label,
       })),
-    []
+    [],
   );
 
   const configFields = PLATFORM_DEFINITIONS[form.platform]?.configFields ?? [];
@@ -84,37 +90,37 @@ export function IMChannelConfig() {
   }, []);
 
   const handleNew = useCallback(() => {
-    setForm(EMPTY_FORM);
+    setForm(createEmptyForm(preferredPlatform));
     setEditing(true);
-  }, []);
+  }, [preferredPlatform]);
 
   const handleCancel = useCallback(() => {
-    setForm(EMPTY_FORM);
+    setForm(createEmptyForm(preferredPlatform));
     setEditing(false);
-  }, []);
+  }, [preferredPlatform]);
 
   const handleSave = useCallback(async () => {
     await saveChannel(form);
-    setForm(EMPTY_FORM);
+    setForm(createEmptyForm(preferredPlatform));
     setEditing(false);
-  }, [form, saveChannel]);
+  }, [form, preferredPlatform, saveChannel]);
 
   const handleDelete = useCallback(
     async (id: string) => {
       await deleteChannel(id);
       if (form.id === id) {
-        setForm(EMPTY_FORM);
+        setForm(createEmptyForm(preferredPlatform));
         setEditing(false);
       }
     },
-    [deleteChannel, form.id]
+    [deleteChannel, form.id, preferredPlatform],
   );
 
   const toggleEvent = useCallback((event: string) => {
     setForm((prev) => ({
       ...prev,
       events: prev.events.includes(event)
-        ? prev.events.filter((e) => e !== event)
+        ? prev.events.filter((entry) => entry !== event)
         : [...prev.events, event],
     }));
   }, []);
@@ -135,9 +141,7 @@ export function IMChannelConfig() {
             <CardTitle className="text-base">
               {form.id ? t("channels.editChannel") : t("channels.newChannelTitle")}
             </CardTitle>
-            <CardDescription>
-              {t("channels.channelDesc")}
-            </CardDescription>
+            <CardDescription>{t("channels.channelDesc")}</CardDescription>
           </CardHeader>
           <CardContent className="grid gap-4">
             <div className="grid gap-4 md:grid-cols-2">
@@ -158,9 +162,9 @@ export function IMChannelConfig() {
                     <SelectValue placeholder={t("channels.platformPlaceholder")} />
                   </SelectTrigger>
                   <SelectContent>
-                    {platformOptions.map((p) => (
-                      <SelectItem key={p.value} value={p.value}>
-                        {p.label}
+                    {platformOptions.map((platform) => (
+                      <SelectItem key={platform.value} value={platform.value}>
+                        {platform.label}
                       </SelectItem>
                     ))}
                   </SelectContent>
@@ -172,8 +176,8 @@ export function IMChannelConfig() {
                 <Input
                   id="im-name"
                   value={form.name}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, name: e.target.value }))
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, name: event.target.value }))
                   }
                   placeholder={t("channels.channelNamePlaceholder")}
                 />
@@ -184,8 +188,8 @@ export function IMChannelConfig() {
                 <Input
                   id="im-channel-id"
                   value={form.channelId}
-                  onChange={(e) =>
-                    setForm((prev) => ({ ...prev, channelId: e.target.value }))
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, channelId: event.target.value }))
                   }
                   placeholder={t("channels.channelIdPlaceholder")}
                 />
@@ -196,11 +200,8 @@ export function IMChannelConfig() {
                 <Input
                   id="im-webhook"
                   value={form.webhookUrl}
-                  onChange={(e) =>
-                    setForm((prev) => ({
-                      ...prev,
-                      webhookUrl: e.target.value,
-                    }))
+                  onChange={(event) =>
+                    setForm((prev) => ({ ...prev, webhookUrl: event.target.value }))
                   }
                   placeholder={t("channels.webhookUrlPlaceholder")}
                 />
@@ -216,12 +217,12 @@ export function IMChannelConfig() {
                       id={`im-platform-${field.key}`}
                       type={field.type ?? "text"}
                       value={form.platformConfig[field.key] ?? ""}
-                      onChange={(e) =>
+                      onChange={(event) =>
                         setForm((prev) => ({
                           ...prev,
                           platformConfig: {
                             ...prev.platformConfig,
-                            [field.key]: e.target.value,
+                            [field.key]: event.target.value,
                           },
                         }))
                       }
@@ -236,10 +237,7 @@ export function IMChannelConfig() {
               <Label>{t("channels.eventSubscriptions")}</Label>
               <div className="flex flex-wrap gap-3">
                 {availableEventTypes.map((event) => (
-                  <label
-                    key={event}
-                    className="flex items-center gap-2 text-sm"
-                  >
+                  <label key={event} className="flex items-center gap-2 text-sm">
                     <input
                       type="checkbox"
                       checked={form.events.includes(event)}
@@ -248,7 +246,7 @@ export function IMChannelConfig() {
                     />
                     {event}
                   </label>
-                  ))}
+                ))}
               </div>
             </div>
 
@@ -259,18 +257,16 @@ export function IMChannelConfig() {
                 type="button"
                 role="switch"
                 aria-checked={form.active}
-                onClick={() =>
-                  setForm((prev) => ({ ...prev, active: !prev.active }))
-                }
+                onClick={() => setForm((prev) => ({ ...prev, active: !prev.active }))}
                 className={cn(
                   "relative inline-flex h-5 w-9 shrink-0 cursor-pointer items-center rounded-full border-2 border-transparent transition-colors",
-                  form.active ? "bg-primary" : "bg-muted"
+                  form.active ? "bg-primary" : "bg-muted",
                 )}
               >
                 <span
                   className={cn(
                     "pointer-events-none block size-4 rounded-full bg-background shadow-sm transition-transform",
-                    form.active ? "translate-x-4" : "translate-x-0"
+                    form.active ? "translate-x-4" : "translate-x-0",
                   )}
                 />
               </button>
@@ -294,9 +290,7 @@ export function IMChannelConfig() {
 
       {channels.length === 0 ? (
         <div className="flex h-[120px] items-center justify-center rounded-md border border-dashed text-sm text-muted-foreground">
-          {loading
-            ? t("channels.loadingChannels")
-            : t("channels.noChannels")}
+          {loading ? t("channels.loadingChannels") : t("channels.noChannels")}
         </div>
       ) : (
         <div className="grid gap-4 sm:grid-cols-2">
@@ -305,7 +299,7 @@ export function IMChannelConfig() {
               key={channel.id}
               className={cn(
                 "cursor-pointer transition-colors hover:border-primary/40",
-                form.id === channel.id && "border-primary"
+                form.id === channel.id && "border-primary",
               )}
               onClick={() => handleEdit(channel)}
             >
@@ -320,16 +314,14 @@ export function IMChannelConfig() {
                         "text-xs",
                         channel.active
                           ? "bg-green-500/15 text-green-700 dark:text-green-400"
-                          : "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400"
+                          : "bg-zinc-500/15 text-zinc-600 dark:text-zinc-400",
                       )}
                     >
                       {channel.active ? "Active" : "Inactive"}
                     </Badge>
                   </div>
                 </div>
-                <CardDescription className="text-xs">
-                  {channel.channelId}
-                </CardDescription>
+                <CardDescription className="text-xs">{channel.channelId}</CardDescription>
               </CardHeader>
               <CardContent className="flex flex-col gap-3">
                 <EventBadgeList events={channel.events} />
@@ -337,8 +329,8 @@ export function IMChannelConfig() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onClick={(event) => {
+                      event.stopPropagation();
                       handleEdit(channel);
                     }}
                   >
@@ -347,8 +339,8 @@ export function IMChannelConfig() {
                   <Button
                     variant="outline"
                     size="sm"
-                    onClick={(e) => {
-                      e.stopPropagation();
+                    onClick={(event) => {
+                      event.stopPropagation();
                       void handleDelete(channel.id);
                     }}
                     disabled={loading}

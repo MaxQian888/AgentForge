@@ -12,6 +12,8 @@ export const ClassifyIntentRequestSchema = z.object({
   text: z.string().min(1),
   user_id: z.string().default(""),
   project_id: z.string().default(""),
+  candidates: z.array(z.string().min(1)).default([]),
+  context: z.unknown().optional(),
 });
 
 export const ClassifyIntentResponseSchema = z.object({
@@ -22,15 +24,19 @@ export const ClassifyIntentResponseSchema = z.object({
   reply: z.string().optional(),
 });
 
-export type ClassifyIntentRequest = z.infer<typeof ClassifyIntentRequestSchema>;
-export type ClassifyIntentResponse = z.infer<typeof ClassifyIntentResponseSchema>;
+export type ClassifyIntentRequest = z.input<typeof ClassifyIntentRequestSchema>;
+export type ClassifyIntentResponse = z.infer<
+  typeof ClassifyIntentResponseSchema
+>;
 
-export type IntentClassifierExecutor = (
-  params: { prompt: string; provider: ResolvedProviderSelection },
-) => Promise<ClassifyIntentResponse>;
+export type IntentClassifierExecutor = (params: {
+  prompt: string;
+  provider: ResolvedProviderSelection;
+}) => Promise<ClassifyIntentResponse>;
 
 function buildClassifyIntentPrompt(req: ClassifyIntentRequest): string {
-  return [
+  const candidates = req.candidates ?? [];
+  const sections = [
     "You are an intent classifier for AgentForge, a development management platform.",
     "Given a user's natural language message, classify it into one of the following intents and extract the corresponding command and arguments.",
     "",
@@ -52,8 +58,15 @@ function buildClassifyIntentPrompt(req: ClassifyIntentRequest): string {
     "If the message is greeting or casual conversation, set intent to 'chat' and provide a friendly reply.",
     "If you can't determine the intent, set intent to 'unknown' and provide a helpful reply.",
     "",
-    `User message: ${req.text}`,
-  ].join("\n");
+  ];
+  if (candidates.length > 0) {
+    sections.push(`Allowed intents: ${candidates.join(", ")}`);
+  }
+  if (req.context !== undefined) {
+    sections.push(`Conversation context: ${JSON.stringify(req.context)}`);
+  }
+  sections.push("", `User message: ${req.text}`);
+  return sections.join("\n");
 }
 
 function createModel(provider: ResolvedProviderSelection) {
@@ -68,9 +81,10 @@ function createModel(provider: ResolvedProviderSelection) {
 }
 
 function createDefaultExecutor(): IntentClassifierExecutor {
-  return async function classifyIntent(
-    params: { prompt: string; provider: ResolvedProviderSelection },
-  ): Promise<ClassifyIntentResponse> {
+  return async function classifyIntent(params: {
+    prompt: string;
+    provider: ResolvedProviderSelection;
+  }): Promise<ClassifyIntentResponse> {
     assertProviderCredentials(params.provider);
     const model = createModel(params.provider);
     const result = await generateText({

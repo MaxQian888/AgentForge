@@ -800,6 +800,7 @@ type agentRunRecord struct {
 	UpdatedAt       time.Time  `gorm:"column:updated_at"`
 	TeamID          *uuid.UUID `gorm:"column:team_id"`
 	TeamRole        string     `gorm:"column:team_role"`
+	CostAccounting  rawJSON    `gorm:"column:cost_accounting;type:jsonb"`
 }
 
 func (agentRunRecord) TableName() string { return "agent_runs" }
@@ -829,6 +830,7 @@ func newAgentRunRecord(run *model.AgentRun) *agentRunRecord {
 		UpdatedAt:       run.UpdatedAt,
 		TeamID:          run.TeamID,
 		TeamRole:        run.TeamRole,
+		CostAccounting:  mustMarshalAgentRunCostAccounting(run.CostAccounting),
 	}
 }
 
@@ -857,7 +859,33 @@ func (r *agentRunRecord) toModel() *model.AgentRun {
 		UpdatedAt:       r.UpdatedAt,
 		TeamID:          r.TeamID,
 		TeamRole:        r.TeamRole,
+		CostAccounting:  unmarshalAgentRunCostAccounting(r.CostAccounting),
 	}
+}
+
+func mustMarshalAgentRunCostAccounting(snapshot *model.CostAccountingSnapshot) rawJSON {
+	if snapshot == nil {
+		return newRawJSON(nil, "null")
+	}
+
+	payload, err := json.Marshal(snapshot)
+	if err != nil {
+		return newRawJSON(nil, "null")
+	}
+	return newRawJSON(payload, "null")
+}
+
+func unmarshalAgentRunCostAccounting(raw rawJSON) *model.CostAccountingSnapshot {
+	payload := raw.Bytes("null")
+	if len(payload) == 0 || string(payload) == "null" {
+		return nil
+	}
+
+	var snapshot model.CostAccountingSnapshot
+	if err := json.Unmarshal(payload, &snapshot); err != nil {
+		return nil
+	}
+	return snapshot.Clone()
 }
 
 type agentTeamRecord struct {
@@ -980,6 +1008,72 @@ func (r *agentMemoryRecord) toModel() *model.AgentMemory {
 		LastAccessedAt: cloneTimePointer(r.LastAccessedAt),
 		CreatedAt:      r.CreatedAt,
 		UpdatedAt:      r.UpdatedAt,
+	}
+}
+
+type logRecord struct {
+	ID           uuid.UUID  `gorm:"column:id;primaryKey"`
+	ProjectID    uuid.UUID  `gorm:"column:project_id"`
+	Tab          string     `gorm:"column:tab"`
+	Level        string     `gorm:"column:level"`
+	ActorType    string     `gorm:"column:actor_type"`
+	ActorID      string     `gorm:"column:actor_id"`
+	AgentID      *uuid.UUID `gorm:"column:agent_id"`
+	SessionID    string     `gorm:"column:session_id"`
+	EventType    string     `gorm:"column:event_type"`
+	Action       string     `gorm:"column:action"`
+	ResourceType string     `gorm:"column:resource_type"`
+	ResourceID   string     `gorm:"column:resource_id"`
+	Summary      string     `gorm:"column:summary"`
+	Detail       rawJSON    `gorm:"column:detail;type:jsonb"`
+	CreatedAt    time.Time  `gorm:"column:created_at"`
+}
+
+func (logRecord) TableName() string { return "logs" }
+
+func newLogRecord(l *model.Log) *logRecord {
+	if l == nil {
+		return nil
+	}
+	return &logRecord{
+		ID:           l.ID,
+		ProjectID:    l.ProjectID,
+		Tab:          l.Tab,
+		Level:        l.Level,
+		ActorType:    l.ActorType,
+		ActorID:      l.ActorID,
+		AgentID:      l.AgentID,
+		SessionID:    l.SessionID,
+		EventType:    l.EventType,
+		Action:       l.Action,
+		ResourceType: l.ResourceType,
+		ResourceID:   l.ResourceID,
+		Summary:      l.Summary,
+		Detail:       newRawJSON(l.Detail, "{}"),
+		CreatedAt:    l.CreatedAt,
+	}
+}
+
+func (r *logRecord) toModel() *model.Log {
+	if r == nil {
+		return nil
+	}
+	return &model.Log{
+		ID:           r.ID,
+		ProjectID:    r.ProjectID,
+		Tab:          r.Tab,
+		Level:        r.Level,
+		ActorType:    r.ActorType,
+		ActorID:      r.ActorID,
+		AgentID:      r.AgentID,
+		SessionID:    r.SessionID,
+		EventType:    r.EventType,
+		Action:       r.Action,
+		ResourceType: r.ResourceType,
+		ResourceID:   r.ResourceID,
+		Summary:      r.Summary,
+		Detail:       r.Detail.Bytes("{}"),
+		CreatedAt:    r.CreatedAt,
 	}
 }
 

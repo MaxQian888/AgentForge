@@ -1,7 +1,58 @@
+import { Children, isValidElement, type ReactElement, type ReactNode } from "react";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FieldValueCell } from "./field-value-cell";
 import { useCustomFieldStore } from "@/lib/stores/custom-field-store";
+
+jest.mock("@/components/ui/select", () => {
+  function flattenOptions(children: ReactNode): Array<{ value: string; label: string }> {
+    const options: Array<{ value: string; label: string }> = [];
+    function visit(node: ReactNode) {
+      Children.forEach(node, (child) => {
+        if (!isValidElement(child)) return;
+        const el = child as ReactElement<{ children?: ReactNode; value?: string }>;
+        if (el.props.value !== undefined) {
+          options.push({
+            value: el.props.value,
+            label: typeof el.props.children === "string" ? el.props.children : String(el.props.value),
+          });
+          return;
+        }
+        visit(el.props.children);
+      });
+    }
+    visit(children);
+    return options;
+  }
+
+  return {
+    Select: ({
+      value,
+      onValueChange,
+      children,
+    }: {
+      value?: string;
+      onValueChange?: (value: string) => void;
+      children?: ReactNode;
+    }) => {
+      const options = flattenOptions(children);
+      return (
+        <select
+          value={value}
+          onChange={(e) => onValueChange?.(e.target.value)}
+        >
+          {options.map((o) => (
+            <option key={o.value} value={o.value}>{o.label}</option>
+          ))}
+        </select>
+      );
+    },
+    SelectTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    SelectValue: () => null,
+    SelectContent: ({ children }: { children?: ReactNode }) => <>{children}</>,
+    SelectItem: ({ children }: { children?: ReactNode }) => <>{children}</>,
+  };
+});
 
 const setTaskValueMock = jest.fn();
 const clearTaskValueMock = jest.fn();
@@ -84,7 +135,7 @@ describe("FieldValueCell", () => {
       "P1",
     );
 
-    await user.selectOptions(screen.getByRole("combobox"), "");
+    await user.selectOptions(screen.getByRole("combobox"), "__none__");
     await waitFor(() => {
       expect(clearTaskValueMock).toHaveBeenCalledWith(
         "project-1",

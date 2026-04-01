@@ -60,6 +60,9 @@ name: React
 description: React UI implementation guidance
 requires:
   - skills/typescript
+tools:
+  - code_editor
+  - browser_preview
 ---
 
 # React
@@ -75,6 +78,9 @@ Prefer server-safe React and repository-aligned component structure.
 	mustWriteSkillFixture(t, filepath.Join(skillsDir, "typescript", "SKILL.md"), `---
 name: TypeScript
 description: Type-safe contracts and refactors
+tools:
+  - code_editor
+  - terminal
 --- 
 
 # TypeScript
@@ -84,6 +90,9 @@ Prefer explicit contracts and narrow public surfaces.
 	mustWriteSkillFixture(t, filepath.Join(skillsDir, "testing", "SKILL.md"), `---
 name: Testing
 description: Regression-oriented test guidance
+tools:
+  - code_editor
+  - terminal
 ---
 
 # Testing
@@ -123,6 +132,14 @@ Write targeted regression coverage before broad refactors.
 	if parts.Len() != 2 || parts.Index(0).String() != "agents" || parts.Index(1).String() != "references" {
 		t.Fatalf("LoadedSkills[0].AvailableParts = %v, want agents and references", parts)
 	}
+	requires := loadedSkills[0].FieldByName("Requires")
+	if requires.Len() != 1 || requires.Index(0).String() != "skills/typescript" {
+		t.Fatalf("LoadedSkills[0].Requires = %v, want skills/typescript", requires)
+	}
+	declaredTools := loadedSkills[0].FieldByName("Tools")
+	if declaredTools.Len() != 2 || declaredTools.Index(0).String() != "code_editor" || declaredTools.Index(1).String() != "browser_preview" {
+		t.Fatalf("LoadedSkills[0].Tools = %v, want normalized tool requirements", declaredTools)
+	}
 	availableSkills := assertExecutionProfileStructSlice(t, profile, "AvailableSkills")
 	if len(availableSkills) != 1 {
 		t.Fatalf("AvailableSkills len = %d, want 1", len(availableSkills))
@@ -132,6 +149,10 @@ Write targeted regression coverage before broad refactors.
 	}
 	if availableSkills[0].FieldByName("Instructions").String() != "" {
 		t.Fatalf("AvailableSkills[0].Instructions = %q, want empty on-demand inventory", availableSkills[0].FieldByName("Instructions").String())
+	}
+	availableTools := availableSkills[0].FieldByName("Tools")
+	if availableTools.Len() != 2 || availableTools.Index(0).String() != "code_editor" || availableTools.Index(1).String() != "terminal" {
+		t.Fatalf("AvailableSkills[0].Tools = %v, want normalized tool requirements", availableTools)
 	}
 	if diagnostics := assertExecutionProfileStructSlice(t, profile, "SkillDiagnostics"); len(diagnostics) != 0 {
 		t.Fatalf("SkillDiagnostics len = %d, want 0", len(diagnostics))
@@ -163,6 +184,102 @@ description: Regression-oriented test guidance
 	}
 	if diagnostics[0].FieldByName("Path").String() != "skills/react" {
 		t.Fatalf("SkillDiagnostics[0].Path = %q, want skills/react", diagnostics[0].FieldByName("Path").String())
+	}
+}
+
+func TestBuildExecutionProfileReportsBlockingDiagnosticsForMissingAutoLoadToolCompatibility(t *testing.T) {
+	skillsDir := t.TempDir()
+	mustWriteSkillFixture(t, filepath.Join(skillsDir, "react", "SKILL.md"), `---
+name: React
+tools:
+  - browser_preview
+---
+
+# React
+`)
+
+	manifest, err := role.Parse([]byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: ui-role
+  name: UI Role
+identity:
+  role: UI Role
+  goal: Build UI
+capabilities:
+  tools:
+    built_in: [Read, Edit]
+  skills:
+    - path: skills/react
+      auto_load: true
+security:
+  permission_mode: default
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	profile := role.BuildExecutionProfile(manifest, role.WithSkillRoot(skillsDir))
+	diagnostics := assertExecutionProfileStructSlice(t, profile, "SkillDiagnostics")
+	if len(diagnostics) != 1 {
+		t.Fatalf("SkillDiagnostics len = %d, want 1", len(diagnostics))
+	}
+	if diagnostics[0].FieldByName("Code").String() != "role_skill_tools_unavailable" {
+		t.Fatalf("SkillDiagnostics[0].Code = %q, want role_skill_tools_unavailable", diagnostics[0].FieldByName("Code").String())
+	}
+	if !diagnostics[0].FieldByName("Blocking").Bool() {
+		t.Fatalf("SkillDiagnostics[0].Blocking = %v, want true", diagnostics[0].FieldByName("Blocking").Bool())
+	}
+	if !strings.Contains(diagnostics[0].FieldByName("Message").String(), "browser_preview") {
+		t.Fatalf("SkillDiagnostics[0].Message = %q, want missing browser_preview detail", diagnostics[0].FieldByName("Message").String())
+	}
+}
+
+func TestBuildExecutionProfileReportsWarningDiagnosticsForOnDemandToolCompatibility(t *testing.T) {
+	skillsDir := t.TempDir()
+	mustWriteSkillFixture(t, filepath.Join(skillsDir, "testing", "SKILL.md"), `---
+name: Testing
+tools:
+  - terminal
+---
+
+# Testing
+`)
+
+	manifest, err := role.Parse([]byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: review-role
+  name: Review Role
+identity:
+  role: Review Role
+  goal: Review code
+capabilities:
+  tools:
+    built_in: [Read, Edit]
+  skills:
+    - path: skills/testing
+      auto_load: false
+security:
+  permission_mode: default
+`))
+	if err != nil {
+		t.Fatalf("Parse() error = %v", err)
+	}
+
+	profile := role.BuildExecutionProfile(manifest, role.WithSkillRoot(skillsDir))
+	diagnostics := assertExecutionProfileStructSlice(t, profile, "SkillDiagnostics")
+	if len(diagnostics) != 1 {
+		t.Fatalf("SkillDiagnostics len = %d, want 1", len(diagnostics))
+	}
+	if diagnostics[0].FieldByName("Code").String() != "role_skill_tools_unavailable" {
+		t.Fatalf("SkillDiagnostics[0].Code = %q, want role_skill_tools_unavailable", diagnostics[0].FieldByName("Code").String())
+	}
+	if diagnostics[0].FieldByName("Blocking").Bool() {
+		t.Fatalf("SkillDiagnostics[0].Blocking = %v, want false", diagnostics[0].FieldByName("Blocking").Bool())
+	}
+	if !strings.Contains(diagnostics[0].FieldByName("Message").String(), "terminal") {
+		t.Fatalf("SkillDiagnostics[0].Message = %q, want missing terminal detail", diagnostics[0].FieldByName("Message").String())
 	}
 }
 

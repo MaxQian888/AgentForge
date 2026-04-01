@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { RoleWorkspace } from "@/components/roles/role-workspace";
 import { useRoleStore, type RoleManifest } from "@/lib/stores/role-store";
+import { usePluginStore } from "@/lib/stores/plugin-store";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 export default function RolesPage() {
@@ -22,11 +23,14 @@ export default function RolesPage() {
     sandboxRole,
   } =
     useRoleStore();
+  const plugins = usePluginStore((state) => state.plugins);
+  const fetchPlugins = usePluginStore((state) => state.fetchPlugins);
 
   useEffect(() => {
     fetchRoles();
     fetchSkillCatalog();
-  }, [fetchRoles, fetchSkillCatalog]);
+    fetchPlugins();
+  }, [fetchRoles, fetchSkillCatalog, fetchPlugins]);
 
   async function handleSubmit(data: Partial<RoleManifest>) {
     await createRole(data);
@@ -36,6 +40,7 @@ export default function RolesPage() {
     <RoleWorkspace
       roles={roles}
       skillCatalog={skillCatalog}
+      availablePlugins={plugins.filter((plugin) => plugin.kind === "ToolPlugin")}
       skillCatalogLoading={skillCatalogLoading}
       loading={loading}
       error={error}

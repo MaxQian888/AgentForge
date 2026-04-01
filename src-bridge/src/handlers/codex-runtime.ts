@@ -1,11 +1,15 @@
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { calculateCost } from "../cost/calculator.js";
+import {
+  accumulateCostAccounting,
+  serializeCostAccounting,
+} from "../cost/accounting.js";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
 import type { PluginRecord } from "../plugins/types.js";
 import type { ExecuteRequest } from "../types.js";
 import type { EventStreamer } from "../ws/event-stream.js";
+import { emitBudgetAlertIfNeeded } from "./budget-events.js";
 
 type UnknownRecord = Record<string, unknown>;
 type EventSink = Pick<EventStreamer, "send">;
@@ -56,7 +60,9 @@ export async function streamCodexRuntime(
       : null;
   const mode = continuity?.thread_id ? "resume" : "start";
   const prompt =
-    mode === "resume" ? buildCodexResumePrompt(req.prompt) : buildCodexPrompt(req.prompt, systemPrompt);
+    mode === "resume"
+      ? buildCodexResumePrompt(req.prompt)
+      : buildCodexPrompt(req.prompt, systemPrompt);
 
   for await (const event of runner({
     mode,
@@ -111,7 +117,11 @@ export function prepareCodexLaunch(params: {
 
   if (params.req.output_schema?.schema) {
     const schemaPath = join(tempRoot, "output-schema.json");
-    writeFileSync(schemaPath, JSON.stringify(params.req.output_schema.schema, null, 2), "utf8");
+    writeFileSync(
+      schemaPath,
+      JSON.stringify(params.req.output_schema.schema, null, 2),
+      "utf8",
+    );
     cmd.push("--output-schema", schemaPath);
   }
 
@@ -129,7 +139,9 @@ export function prepareCodexLaunch(params: {
     cmd.push("--search");
   }
 
-  for (const configValue of buildCodexConfigOverrides(params.activePlugins ?? [])) {
+  for (const configValue of buildCodexConfigOverrides(
+    params.activePlugins ?? [],
+  )) {
     cmd.push("-c", configValue);
   }
 
@@ -146,7 +158,10 @@ export function prepareCodexLaunch(params: {
         Object.entries(process.env).map(([key, value]) => [key, value ?? ""]),
       ),
       ...Object.fromEntries(
-        Object.entries(params.req.env ?? {}).map(([key, value]) => [key, value ?? ""]),
+        Object.entries(params.req.env ?? {}).map(([key, value]) => [
+          key,
+          value ?? "",
+        ]),
       ),
       AGENTFORGE_RUNTIME: "codex",
       AGENTFORGE_MODEL: params.req.model ?? "",
@@ -162,7 +177,8 @@ export function getDefaultCodexAuthStatus(command = "codex"): CodexAuthStatus {
     stdout: "pipe",
     stderr: "pipe",
   });
-  const output = `${Buffer.from(result.stdout).toString("utf8")}\n${Buffer.from(result.stderr).toString("utf8")}`.trim();
+  const output =
+    `${Buffer.from(result.stdout).toString("utf8")}\n${Buffer.from(result.stderr).toString("utf8")}`.trim();
 
   if (result.exitCode !== 0) {
     return {
@@ -200,9 +216,10 @@ function emitCodexRuntimeEvent(
           captured_at: now(),
           thread_id: event.thread_id,
           fork_available: true,
-          rollback_turns: runtime.continuity?.runtime === "codex"
-            ? runtime.continuity.rollback_turns ?? 0
-            : 0,
+          rollback_turns:
+            runtime.continuity?.runtime === "codex"
+              ? (runtime.continuity.rollback_turns ?? 0)
+              : 0,
         };
       }
       return;
@@ -281,7 +298,8 @@ function emitCodexItemStarted(
     data: {
       tool_name: "shell",
       tool_input: JSON.stringify({
-        command: typeof event.item.command === "string" ? event.item.command : "",
+        command:
+          typeof event.item.command === "string" ? event.item.command : "",
       }),
       call_id: typeof event.item.id === "string" ? event.item.id : "",
     },
@@ -315,9 +333,7 @@ function emitCodexItemUpdated(
           ? event.item.aggregated_output
           : "",
       status:
-        typeof event.item.status === "string"
-          ? event.item.status
-          : undefined,
+        typeof event.item.status === "string" ? event.item.status : undefined,
     },
   });
 }
@@ -352,7 +368,8 @@ function emitCodexItemCompleted(
 
   if (itemType === "command_execution") {
     const exitCode =
-      typeof event.item.exit_code === "number" && Number.isFinite(event.item.exit_code)
+      typeof event.item.exit_code === "number" &&
+      Number.isFinite(event.item.exit_code)
         ? event.item.exit_code
         : 0;
     streamer.send({
@@ -363,7 +380,9 @@ function emitCodexItemCompleted(
       data: {
         call_id: typeof event.item.id === "string" ? event.item.id : "",
         output:
-          typeof event.item.aggregated_output === "string" ? event.item.aggregated_output : "",
+          typeof event.item.aggregated_output === "string"
+            ? event.item.aggregated_output
+            : "",
         is_error: exitCode !== 0,
       },
     });
@@ -382,27 +401,41 @@ function emitCodexTurnCompleted(
 ): void {
   const usage = isRecord(event.usage) ? event.usage : {};
   const inputTokens =
-    typeof usage.input_tokens === "number" ? Math.max(usage.input_tokens, 0) : 0;
+    typeof usage.input_tokens === "number"
+      ? Math.max(usage.input_tokens, 0)
+      : 0;
   const outputTokens =
-    typeof usage.output_tokens === "number" ? Math.max(usage.output_tokens, 0) : 0;
+    typeof usage.output_tokens === "number"
+      ? Math.max(usage.output_tokens, 0)
+      : 0;
   const cacheReadTokens =
-    typeof usage.cached_input_tokens === "number" ? Math.max(usage.cached_input_tokens, 0) : 0;
+    typeof usage.cached_input_tokens === "number"
+      ? Math.max(usage.cached_input_tokens, 0)
+      : 0;
   const reportedTotal =
-    typeof event.total_cost_usd === "number" && Number.isFinite(event.total_cost_usd)
+    typeof event.total_cost_usd === "number" &&
+    Number.isFinite(event.total_cost_usd)
       ? Math.max(event.total_cost_usd, 0)
       : undefined;
-
-  runtime.spentUsd =
-    reportedTotal ??
-    runtime.spentUsd +
-      calculateCost(
-        {
-          input_tokens: inputTokens,
-          output_tokens: outputTokens,
-          cache_read_input_tokens: cacheReadTokens,
-        },
-        req.model,
-      );
+  const snapshot = accumulateCostAccounting({
+    previous: runtime.costAccounting,
+    runtime: req.runtime ?? "codex",
+    provider: req.provider ?? "openai",
+    requestedModel: req.model,
+    usageDelta: {
+      inputTokens,
+      outputTokens,
+      cacheReadTokens,
+    },
+    authoritativeTotalCostUsd: reportedTotal,
+    source:
+      reportedTotal !== undefined
+        ? "codex_native_total"
+        : (req.provider ?? "openai") === "openai"
+          ? "openai_api_pricing"
+          : "codex_plan_usage",
+  });
+  runtime.applyCostAccounting(snapshot);
 
   if (runtime.continuity?.runtime === "codex") {
     runtime.continuity = {
@@ -424,8 +457,10 @@ function emitCodexTurnCompleted(
       cost_usd: runtime.spentUsd,
       budget_remaining_usd: Math.max(req.budget_usd - runtime.spentUsd, 0),
       turn_number: runtime.turnNumber,
+      cost_accounting: serializeCostAccounting(snapshot),
     },
   });
+  emitBudgetAlertIfNeeded(runtime, streamer, req, now);
 }
 
 function emitCodexTurnFailed(
@@ -536,7 +571,9 @@ async function* spawnCodexRuntime(params: {
     const exitCode = await proc.exited;
     const stderr = proc.stderr ? await readToString(proc.stderr) : "";
     if (exitCode !== 0 && !params.abortSignal.aborted) {
-      throw new Error(stderr.trim() || `codex runtime exited with code ${exitCode}`);
+      throw new Error(
+        stderr.trim() || `codex runtime exited with code ${exitCode}`,
+      );
     }
   } finally {
     params.abortSignal.removeEventListener("abort", onAbort);
@@ -567,12 +604,16 @@ function buildCodexConfigOverrides(activePlugins: PluginRecord[]): string[] {
     }
 
     if (plugin.spec.command) {
-      overrides.push(`mcp_servers.${id}.command=${tomlString(plugin.spec.command)}`);
+      overrides.push(
+        `mcp_servers.${id}.command=${tomlString(plugin.spec.command)}`,
+      );
       if (plugin.spec.args?.length) {
         overrides.push(`mcp_servers.${id}.args=${tomlArray(plugin.spec.args)}`);
       }
       if (plugin.spec.env && Object.keys(plugin.spec.env).length > 0) {
-        overrides.push(`mcp_servers.${id}.env=${tomlInlineTable(plugin.spec.env)}`);
+        overrides.push(
+          `mcp_servers.${id}.env=${tomlInlineTable(plugin.spec.env)}`,
+        );
       }
     }
   }
@@ -673,7 +714,10 @@ function emitCodexItemDetail(
         timestamp_ms: now(),
         type: "error",
         data: {
-          message: typeof detail.message === "string" ? detail.message : "codex item error",
+          message:
+            typeof detail.message === "string"
+              ? detail.message
+              : "codex item error",
           source: "codex",
         },
       });
@@ -789,7 +833,9 @@ async function* readLines(
   }
 }
 
-async function readToString(stream: ReadableStream<Uint8Array>): Promise<string> {
+async function readToString(
+  stream: ReadableStream<Uint8Array>,
+): Promise<string> {
   let output = "";
   for await (const line of readLines(stream)) {
     output += line;

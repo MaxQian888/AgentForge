@@ -49,6 +49,14 @@ describe("PluginKindDetail", () => {
               limits: { maxRetries: 2 },
             },
           },
+          roleDependencies: [
+            {
+              roleId: "lead",
+              status: "resolved",
+              blocking: false,
+              references: ["workflow.roles", "steps.plan.role"],
+            },
+          ],
         })}
       />,
     );
@@ -59,6 +67,45 @@ describe("PluginKindDetail", () => {
     expect(screen.getByText("Next: review")).toBeInTheDocument();
     expect(screen.getByText("task.created")).toBeInTheDocument();
     expect(screen.getByText("Max retries: 2")).toBeInTheDocument();
+  });
+
+  it("renders workflow role dependency health when bindings drift", () => {
+    render(
+      <PluginKindDetail
+        plugin={createPlugin({
+          kind: "WorkflowPlugin",
+          spec: {
+            runtime: "wasm",
+            workflow: {
+              process: "sequential",
+              roles: [{ id: "reviewer" }],
+              steps: [
+                {
+                  id: "review",
+                  role: "reviewer",
+                  action: "review",
+                },
+              ],
+            },
+          },
+          roleDependencies: [
+            {
+              roleId: "reviewer",
+              status: "missing",
+              blocking: true,
+              message: "Role reviewer no longer resolves from the authoritative role registry",
+              references: ["workflow.roles", "steps.review.role"],
+            },
+          ],
+        })}
+      />,
+    );
+
+    expect(screen.getByText("Role dependency health")).toBeInTheDocument();
+    expect(screen.getByText(/reviewer.*missing/i)).toBeInTheDocument();
+    expect(
+      screen.getByText("Role reviewer no longer resolves from the authoritative role registry"),
+    ).toBeInTheDocument();
   });
 
   it("renders review plugin details", () => {

@@ -17,6 +17,7 @@
     "roles": "Roles",
     "plugins": "Plugins",
     "marketplace": "Marketplace",
+    "logs": "Logs",
     "settings": "Settings",
     "group": {
       "workspace": "Workspace",

@@ -114,6 +114,87 @@ func renderStructuredSections(sections []core.StructuredSection) (telegramTextMe
 	return telegramTextMessage{Text: strings.TrimSpace(strings.Join(lines, "\n"))}, markup
 }
 
+// cardFallbackText renders a card as plain text for platforms or stubs.
+func cardFallbackText(card *core.Card) string {
+	if card == nil {
+		return ""
+	}
+	var parts []string
+	if title := strings.TrimSpace(card.Title); title != "" {
+		parts = append(parts, title)
+	}
+	for _, field := range card.Fields {
+		label := strings.TrimSpace(field.Label)
+		value := strings.TrimSpace(field.Value)
+		if label != "" && value != "" {
+			parts = append(parts, label+": "+value)
+		} else if value != "" {
+			parts = append(parts, value)
+		}
+	}
+	for _, button := range card.Buttons {
+		text := strings.TrimSpace(button.Text)
+		action := strings.TrimSpace(button.Action)
+		if text != "" && action != "" {
+			parts = append(parts, "["+text+"] "+action)
+		} else if text != "" {
+			parts = append(parts, "["+text+"]")
+		}
+	}
+	return strings.Join(parts, "\n")
+}
+
+// renderCardToTelegram converts a core.Card into a MarkdownV2 text body and
+// an inline keyboard markup suitable for the Telegram Bot API.
+func renderCardToTelegram(card *core.Card) (string, *inlineKeyboardMarkup) {
+	if card == nil {
+		return "", nil
+	}
+
+	var lines []string
+	if title := strings.TrimSpace(card.Title); title != "" {
+		lines = append(lines, "*"+escapeMarkdownV2(title)+"*")
+	}
+	for _, field := range card.Fields {
+		label := strings.TrimSpace(field.Label)
+		value := strings.TrimSpace(field.Value)
+		switch {
+		case label == "" && value == "":
+			continue
+		case label == "":
+			lines = append(lines, escapeMarkdownV2(value))
+		default:
+			lines = append(lines, "*"+escapeMarkdownV2(label)+":* "+escapeMarkdownV2(value))
+		}
+	}
+
+	var keyboard [][]inlineKeyboardButton
+	for _, button := range card.Buttons {
+		text := strings.TrimSpace(button.Text)
+		if text == "" {
+			continue
+		}
+		action := strings.TrimSpace(button.Action)
+		if action == "" {
+			continue
+		}
+		btn := inlineKeyboardButton{Text: text}
+		if strings.HasPrefix(action, "link:") {
+			btn.URL = strings.TrimPrefix(action, "link:")
+		} else {
+			btn.CallbackData = action
+		}
+		keyboard = append(keyboard, []inlineKeyboardButton{btn})
+	}
+
+	var markup *inlineKeyboardMarkup
+	if len(keyboard) > 0 {
+		markup = &inlineKeyboardMarkup{InlineKeyboard: keyboard}
+	}
+
+	return strings.Join(lines, "\n"), markup
+}
+
 func escapeMarkdownV2(content string) string {
 	replacer := strings.NewReplacer(
 		`\\`, `\\\\`,

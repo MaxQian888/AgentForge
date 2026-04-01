@@ -104,7 +104,6 @@ describe("PluginConfigForm", () => {
 
     const enabled = screen.getByLabelText("Enabled");
     const retries = screen.getByLabelText("Retries");
-    const mode = screen.getByLabelText("Mode");
     const apiToken = screen.getByLabelText("Api Token");
 
     expect(apiToken).toHaveAttribute("type", "password");
@@ -114,7 +113,8 @@ describe("PluginConfigForm", () => {
     await user.click(enabled);
     await user.clear(retries);
     await user.type(retries, "5");
-    await user.selectOptions(mode, "strict");
+    await user.click(screen.getByRole("combobox", { name: "Mode" }));
+    await user.click(screen.getByRole("option", { name: "strict" }));
     await user.clear(apiToken);
     await user.type(apiToken, "updated-token");
     await user.click(screen.getAllByRole("button", { name: "Reset to default" })[0]);

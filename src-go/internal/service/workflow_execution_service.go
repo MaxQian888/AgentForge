@@ -112,6 +112,12 @@ func (s *WorkflowExecutionService) Start(ctx context.Context, pluginID string, r
 	if !isExecutableWorkflowProcess(record.Spec.Workflow.Process) {
 		return nil, unsupportedWorkflowProcessError(record)
 	}
+	if err := FirstMissingWorkflowRoleError(record, s.roles); err != nil {
+		return nil, err
+	}
+	if err := s.validateWorkflowRolePluginDependencies(ctx, record); err != nil {
+		return nil, err
+	}
 
 	run := &model.WorkflowPluginRun{
 		ID:        uuid.New(),
@@ -328,6 +334,9 @@ func (s *WorkflowExecutionService) executeStep(
 	if rolepkg.HasBlockingSkillDiagnostics(roleProfile) {
 		return s.failRun(ctx, run, step, fmt.Errorf("resolve workflow role %s runtime skills: %s", step.RoleID, joinWorkflowBlockingSkillMessages(roleProfile.SkillDiagnostics)))
 	}
+	if err := s.validateSingleWorkflowRolePluginDependencies(ctx, step.RoleID); err != nil {
+		return s.failRun(ctx, run, step, err)
+	}
 
 	// Resolve step definition to pass Config through.
 	stepDef := model.WorkflowStepDefinition{ID: step.StepID, Role: step.RoleID, Action: step.Action}
@@ -409,6 +418,41 @@ func resolveWorkflowRoleSkillsDir(store PluginRoleStore) string {
 		return ""
 	}
 	return provider.SkillsDir()
+}
+
+func (s *WorkflowExecutionService) validateWorkflowRolePluginDependencies(ctx context.Context, record *model.PluginRecord) error {
+	if record == nil {
+		return nil
+	}
+	for _, dependency := range BuildPluginRoleDependencies(record, s.roles) {
+		if dependency.Blocking {
+			return fmt.Errorf("unknown workflow role reference: %s", dependency.RoleID)
+		}
+		if err := s.validateSingleWorkflowRolePluginDependencies(ctx, dependency.RoleID); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (s *WorkflowExecutionService) validateSingleWorkflowRolePluginDependencies(ctx context.Context, roleID string) error {
+	catalog, ok := s.plugins.(pluginCatalogListProvider)
+	if !ok {
+		return nil
+	}
+	plugins, err := ListDependencyPlugins(ctx, catalog)
+	if err != nil {
+		return fmt.Errorf("load workflow plugin dependency catalog: %w", err)
+	}
+	roleManifest, err := s.roles.Get(roleID)
+	if err != nil {
+		return fmt.Errorf("resolve workflow role %s: %w", roleID, err)
+	}
+	dependencies := BuildRolePluginDependencies(roleManifest, plugins)
+	if HasBlockingRolePluginDependencies(dependencies) {
+		return fmt.Errorf("resolve workflow role %s plugin dependencies: %s", roleID, JoinBlockingRolePluginDependencyMessages(dependencies))
+	}
+	return nil
 }
 
 func joinWorkflowBlockingSkillMessages(diagnostics []model.RoleExecutionSkillDiagnostic) string {

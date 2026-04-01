@@ -117,6 +117,16 @@ describe("task workspace helpers", () => {
     ).toEqual([expect.objectContaining({ id: "task-1" })]);
   });
 
+  it("can filter the workspace by due date range", () => {
+    const filters = createDefaultTaskWorkspaceFilters();
+    filters.dueDateStart = "2026-03-27";
+    filters.dueDateEnd = "2026-03-27";
+
+    expect(filterTasksForWorkspace(tasks, filters)).toEqual([
+      expect.objectContaining({ id: "task-1" }),
+    ]);
+  });
+
   it("preserves task duration when rescheduling onto a new day", () => {
     expect(
       getRescheduledPlanningWindow(

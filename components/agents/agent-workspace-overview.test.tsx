@@ -4,6 +4,19 @@ jest.mock("next-intl", () => ({
     values?: Record<string, string | number>,
   ) => {
     const map: Record<string, string> = {
+      "workspace.agentGridTitle": "Agent Pool",
+      "workspace.agentGridDescription": "Live runtime inventory and status cards.",
+      "workspace.emptyTitle": "No active agents yet",
+      "workspace.emptyDescription": "Start your first agent from the command palette.",
+      "workspace.emptyAction": "Spawn your first agent",
+      "workspace.cardRuntime": "Runtime",
+      "workspace.cardBudget": "Budget",
+      "workspace.cardTurns": "Turns",
+      "workspace.cardMemory": "Memory",
+      "workspace.filterAll": "All",
+      "workspace.filterRunning": "Running",
+      "workspace.filterPaused": "Paused",
+      "workspace.filterError": "Error",
       "diagnostics.title": "Pool Diagnostics",
       "diagnostics.description": "Live pool health",
       "diagnostics.warmReuseRatio": "Warm Reuse Ratio",
@@ -29,6 +42,9 @@ jest.mock("next-intl", () => ({
       "priority.high": "high",
       "dispatchStatus.started": "Started",
       "guardrail.budget": "budget",
+      "status.running": "running",
+      "status.paused": "paused",
+      "status.failed": "failed",
     };
     if (key === "diagnostics.warmActive") {
       return `${values?.warm ?? 0}/${values?.active ?? 0} warm`;
@@ -39,11 +55,15 @@ jest.mock("next-intl", () => ({
     if (key === "stats.medianWait") {
       return `${values?.seconds ?? 0}s median wait`;
     }
+    if (key === "workspace.cardBudgetValue") {
+      return `$${values?.cost ?? 0} / $${values?.budget ?? 0}`;
+    }
     return map[key] ?? key;
   },
 }));
 
 import { render, screen } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 import { AgentWorkspaceOverview } from "./agent-workspace-overview";
 
 describe("AgentWorkspaceOverview", () => {
@@ -54,13 +74,29 @@ describe("AgentWorkspaceOverview", () => {
         agents={[
           {
             id: "agent-1",
+            taskTitle: "Audit release",
+            roleName: "Reviewer",
             status: "running",
-            priority: 20,
+            runtime: "codex",
+            provider: "openai",
+            model: "gpt-5.4",
+            turns: 18,
+            cost: 3.2,
+            budget: 10,
+            memoryStatus: "available",
           } as never,
           {
             id: "agent-2",
+            taskTitle: "Plan roadmap",
+            roleName: "Planner",
             status: "paused",
-            priority: 10,
+            runtime: "claude_code",
+            provider: "anthropic",
+            model: "sonnet",
+            turns: 7,
+            cost: 1.5,
+            budget: 5,
+            memoryStatus: "warming",
           } as never,
         ]}
         pool={{
@@ -123,6 +159,9 @@ describe("AgentWorkspaceOverview", () => {
     );
 
     expect(screen.getByText("Bridge Health")).toBeInTheDocument();
+    expect(screen.getByText("Agent Pool")).toBeInTheDocument();
+    expect(screen.getByText("Audit release")).toBeInTheDocument();
+    expect(screen.getByText("running")).toBeInTheDocument();
     expect(screen.getByText(/Status: degraded/)).toBeInTheDocument();
     expect(screen.getByText("Pool Diagnostics")).toBeInTheDocument();
     expect(screen.getByText("1/2 warm")).toBeInTheDocument();
@@ -148,5 +187,76 @@ describe("AgentWorkspaceOverview", () => {
     );
 
     expect(screen.getByText("No dispatch data")).toBeInTheDocument();
+  });
+
+  it("filters monitor cards by status tabs and shows badge counts", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <AgentWorkspaceOverview
+        activeTab="monitor"
+        agents={[
+          {
+            id: "agent-1",
+            taskTitle: "Audit release",
+            roleName: "Reviewer",
+            status: "running",
+            runtime: "codex",
+            provider: "openai",
+            model: "gpt-5.4",
+            turns: 18,
+            cost: 3.2,
+            budget: 10,
+            memoryStatus: "available",
+          } as never,
+          {
+            id: "agent-2",
+            taskTitle: "Plan roadmap",
+            roleName: "Planner",
+            status: "paused",
+            runtime: "claude_code",
+            provider: "anthropic",
+            model: "sonnet",
+            turns: 7,
+            cost: 1.5,
+            budget: 5,
+            memoryStatus: "warming",
+          } as never,
+          {
+            id: "agent-3",
+            taskTitle: "Repair failed bridge",
+            roleName: "Operator",
+            status: "failed",
+            runtime: "codex",
+            provider: "openai",
+            model: "gpt-5.4",
+            turns: 3,
+            cost: 0.7,
+            budget: 5,
+            memoryStatus: "none",
+          } as never,
+        ]}
+        pool={null}
+        runtimeCatalog={null}
+        bridgeHealth={null}
+        dispatchStats={null}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "All 3" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Running 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Paused 1" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Error 1" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Error 1" }));
+
+    expect(screen.getByText("Repair failed bridge")).toBeInTheDocument();
+    expect(screen.queryByText("Audit release")).not.toBeInTheDocument();
+    expect(screen.queryByText("Plan roadmap")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "All 3" }));
+
+    expect(screen.getByText("Audit release")).toBeInTheDocument();
+    expect(screen.getByText("Plan roadmap")).toBeInTheDocument();
   });
 });

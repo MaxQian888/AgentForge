@@ -1,0 +1,41 @@
+skills:
+  - id: react
+    root: react
+    category: frontend
+    tags:
+      - react
+      - nextjs
+      - app-router
+    featured: true
+    docsRef: docs/role-yaml.md
+    repositoryUrl: https://github.com/agentforge/agentforge
+  - id: typescript
+    root: typescript
+    category: language
+    tags:
+      - typescript
+      - contracts
+      - refactor
+    featured: true
+    docsRef: docs/role-yaml.md
+    repositoryUrl: https://github.com/agentforge/agentforge
+  - id: testing
+    root: testing
+    category: verification
+    tags:
+      - testing
+      - regression
+      - verification
+    featured: true
+    docsRef: docs/role-authoring-guide.md
+    repositoryUrl: https://github.com/agentforge/agentforge
+  - id: css-animation
+    root: css-animation
+    category: motion
+    tags:
+      - css
+      - animation
+      - motion
+    featured: false
+    docsRef: docs/role-yaml.md
+    repositoryUrl: https://github.com/agentforge/agentforge

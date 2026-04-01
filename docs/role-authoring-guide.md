@@ -54,6 +54,7 @@ On wider layouts these surfaces may appear side by side. On narrower layouts the
 - Keep `goal` and `system_prompt` aligned. If they disagree, sandbox output becomes harder to trust.
 - Use `packages` for reusable capability groups and `skills` for explicit opt-in knowledge references.
 - Prefer catalog-backed repo-local skills when the workspace offers them. Manual skill paths remain valid for staged or future references, but the review context will flag them as unresolved until the current repository catalog can resolve them.
+- When a catalog-backed skill is selected, review its direct dependencies and declared tools instead of only the top-level path. The authoring flow now surfaces both so you can see what the role is implicitly pulling in.
 - Use `auto_load` only for skills that must become runtime prompt context immediately. Non-auto-load skills stay visible as on-demand inventory and are not injected into the current execution prompt by default.
 - Use `custom_settings` for role-specific execution hints that should stay structured, not buried in prompt text.
 - Use MCP server rows for named hosts that belong in the role definition, not for temporary per-run experiments.
@@ -62,7 +63,9 @@ On wider layouts these surfaces may appear side by side. On narrower layouts the
 - Add only triggers you can explain clearly to another operator.
 - Treat `overrides` as a surgical tool. If you cannot explain the patch path and save impact, go back and simplify the role instead of stacking more overrides.
 - If preview shows surprising inherited values, revisit `extends` before saving.
-- If preview or sandbox shows a blocking skill diagnostic, check whether an `auto_load` skill or one of its dependencies is missing from `skills/**/SKILL.md`. Auto-load failures now block execution-facing projection and launch.
+- If preview or sandbox shows a blocking skill diagnostic, check whether an `auto_load` skill or one of its dependencies is missing from `skills/**/SKILL.md`, or whether the role does not currently cover the skill's declared tool requirements. Auto-load failures now block execution-facing projection and launch.
 - If the Skills section marks a path as an unresolved manual reference, that means the role will still preserve the skill path in canonical YAML, but the current repository catalog cannot explain that skill yet. If that skill is not auto-loaded, it remains warning-only inventory context.
+- Current sample roles in this repository still use legacy runtime tool names such as `Read`, `Edit`, `Write`, and `Bash`. The compatibility checker normalizes those values, plus package and framework hints, into authoring capabilities such as `code_editor`, `terminal`, and `browser_preview`; you do not need to rewrite existing role YAML just to satisfy the new skill diagnostics.
+- If the Review rail shows transitive loaded skills, those came from dependency closure rather than direct skill rows. Treat them as part of the effective role-skill tree when deciding whether the role is safe to launch.
 - If preview or sandbox still shows a field under stored-only advanced sections, that means the field was preserved in canonical YAML but is not part of the current execution profile.
 - If the workspace is in a compact layout, reopen the review panel before saving so YAML and preview cues stay visible.

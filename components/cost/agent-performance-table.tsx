@@ -2,15 +2,8 @@
 
 import { useTranslations } from "next-intl";
 import { Badge } from "@/components/ui/badge";
-import {
-  Table,
-  TableBody,
-  TableCell,
-  TableHead,
-  TableHeader,
-  TableRow,
-} from "@/components/ui/table";
 import { EmptyState } from "@/components/shared/empty-state";
+import { ResponsiveTable } from "@/components/shared/responsive-table";
 import { BarChart3 } from "lucide-react";
 
 export interface AgentPerformanceRecord {
@@ -40,37 +33,51 @@ export function AgentPerformanceTable({ data }: AgentPerformanceTableProps) {
   }
 
   return (
-    <div className="overflow-x-auto">
-      <Table>
-        <TableHeader>
-          <TableRow>
-            <TableHead>{t("colBucket")}</TableHead>
-            <TableHead>{t("colRuns")}</TableHead>
-            <TableHead>{t("colSuccess")}</TableHead>
-            <TableHead>{t("colAvgCost")}</TableHead>
-            <TableHead>{t("colAvgDuration")}</TableHead>
-            <TableHead>{t("colTotalCost")}</TableHead>
-          </TableRow>
-        </TableHeader>
-        <TableBody>
-          {data.map((agent) => (
-            <TableRow key={agent.bucketId}>
-              <TableCell className="font-medium">{agent.label}</TableCell>
-              <TableCell>{agent.runCount}</TableCell>
-              <TableCell>
-                <Badge
-                  variant={agent.successRate >= 0.8 ? "secondary" : "destructive"}
-                >
-                  {Math.round(agent.successRate * 100)}%
-                </Badge>
-              </TableCell>
-              <TableCell>${agent.avgCostUsd.toFixed(2)}</TableCell>
-              <TableCell>{agent.avgDurationMinutes.toFixed(0)}m</TableCell>
-              <TableCell>${agent.totalCostUsd.toFixed(2)}</TableCell>
-            </TableRow>
-          ))}
-        </TableBody>
-      </Table>
-    </div>
+    <ResponsiveTable
+      columns={[
+        {
+          key: "bucket",
+          header: t("colBucket"),
+          renderCell: (agent) => <span className="font-medium">{agent.label}</span>,
+          hideOnCard: true,
+        },
+        {
+          key: "runs",
+          header: t("colRuns"),
+          renderCell: (agent) => agent.runCount,
+        },
+        {
+          key: "success",
+          header: t("colSuccess"),
+          renderCell: (agent) => (
+            <Badge
+              variant={agent.successRate >= 0.8 ? "secondary" : "destructive"}
+            >
+              {Math.round(agent.successRate * 100)}%
+            </Badge>
+          ),
+        },
+        {
+          key: "avg-cost",
+          header: t("colAvgCost"),
+          renderCell: (agent) => `$${agent.avgCostUsd.toFixed(2)}`,
+          hideOnTablet: true,
+        },
+        {
+          key: "avg-duration",
+          header: t("colAvgDuration"),
+          renderCell: (agent) => `${agent.avgDurationMinutes.toFixed(0)}m`,
+          hideOnTablet: true,
+        },
+        {
+          key: "total-cost",
+          header: t("colTotalCost"),
+          renderCell: (agent) => `$${agent.totalCostUsd.toFixed(2)}`,
+        },
+      ]}
+      data={data}
+      getRowId={(agent) => agent.bucketId}
+      mobileCardTitle={(agent) => agent.label}
+    />
   );
 }

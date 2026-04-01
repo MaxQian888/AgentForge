@@ -103,6 +103,7 @@ type sender interface {
 	EditText(ctx context.Context, chatID int64, messageID int, message telegramTextMessage) error
 	AnswerCallbackQuery(ctx context.Context, callbackQueryID string, text string) error
 	SendStructured(ctx context.Context, chatID int64, topicID int64, message telegramTextMessage, markup *inlineKeyboardMarkup) error
+	SendChatAction(ctx context.Context, chatID int64, action string) error
 }
 
 type LiveOption func(*Live) error
@@ -337,6 +338,46 @@ func (l *Live) ReplyNative(ctx context.Context, rawReplyCtx any, message *core.N
 	return l.sender.SendStructured(ctx, reply.ChatID, reply.TopicID, textMessage, markup)
 }
 
+func (l *Live) SendCard(ctx context.Context, chatID string, card *core.Card) error {
+	target, err := parseChatID(chatID)
+	if err != nil {
+		return err
+	}
+	text, keyboard := renderCardToTelegram(card)
+	if strings.TrimSpace(text) == "" {
+		text = cardFallbackText(card)
+	}
+	return l.sender.SendStructured(ctx, target, 0, telegramTextMessage{Text: text, ParseMode: "MarkdownV2"}, keyboard)
+}
+
+func (l *Live) ReplyCard(ctx context.Context, rawReplyCtx any, card *core.Card) error {
+	reply := toReplyContext(rawReplyCtx)
+	if reply.ChatID == 0 {
+		return errors.New("telegram reply requires chat id")
+	}
+	text, keyboard := renderCardToTelegram(card)
+	if strings.TrimSpace(text) == "" {
+		text = cardFallbackText(card)
+	}
+	return l.sender.SendStructured(ctx, reply.ChatID, reply.TopicID, telegramTextMessage{Text: text, ParseMode: "MarkdownV2"}, keyboard)
+}
+
+func (l *Live) StartTyping(ctx context.Context, chatID string) error {
+	id, err := strconv.ParseInt(strings.TrimSpace(chatID), 10, 64)
+	if err != nil {
+		return nil // non-critical
+	}
+	_ = l.sender.SendChatAction(ctx, id, "typing")
+	return nil
+}
+
+func (l *Live) StopTyping(ctx context.Context, chatID string) error {
+	return nil // Telegram typing indicator auto-expires after ~5 seconds
+}
+
+var _ core.CardSender = (*Live)(nil)
+var _ core.TypingIndicator = (*Live)(nil)
+
 func (l *Live) Stop() error {
 	l.mu.Lock()
 	defer l.mu.Unlock()
@@ -513,6 +554,13 @@ func (s *botAPISender) AnswerCallbackQuery(ctx context.Context, callbackQueryID 
 	})
 }
 
+func (s *botAPISender) SendChatAction(ctx context.Context, chatID int64, action string) error {
+	return s.client.sendChatAction(ctx, sendChatActionRequest{
+		ChatID: chatID,
+		Action: action,
+	})
+}
+
 func (s *botAPISender) SendStructured(ctx context.Context, chatID int64, topicID int64, message telegramTextMessage, markup *inlineKeyboardMarkup) error {
 	request := sendMessageRequest{
 		ChatID:      chatID,
@@ -582,6 +630,11 @@ type answerCallbackQueryRequest struct {
 	Text            string `json:"text,omitempty"`
 }
 
+type sendChatActionRequest struct {
+	ChatID int64  `json:"chat_id"`
+	Action string `json:"action"`
+}
+
 type replyParameters struct {
 	MessageID int `json:"message_id"`
 }
@@ -636,6 +689,14 @@ func (c *botAPIClient) answerCallbackQuery(ctx context.Context, request answerCa
 	}
 	var response botAPIResponse[bool]
 	return c.call(ctx, "answerCallbackQuery", request, &response)
+}
+
+func (c *botAPIClient) sendChatAction(ctx context.Context, request sendChatActionRequest) error {
+	if strings.TrimSpace(request.Action) == "" {
+		return errors.New("telegram sendChatAction requires action")
+	}
+	var response botAPIResponse[bool]
+	return c.call(ctx, "sendChatAction", request, &response)
 }
 
 func (c *botAPIClient) call(ctx context.Context, method string, request any, response any) error {

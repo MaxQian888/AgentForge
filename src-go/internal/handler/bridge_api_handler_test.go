@@ -4,10 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"net/url"
+	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -15,10 +18,19 @@ import (
 	"github.com/labstack/echo/v4"
 	bridge "github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type bridgeAPIValidator struct {
 	validator *validator.Validate
+}
+
+type bridgeHealthStatusReaderStub struct {
+	snapshot service.BridgeHealthSnapshot
+}
+
+func (s bridgeHealthStatusReaderStub) Snapshot() service.BridgeHealthSnapshot {
+	return s.snapshot
 }
 
 func (v *bridgeAPIValidator) Validate(i interface{}) error {
@@ -274,8 +286,11 @@ func TestBridgeAIHandler_ClassifyIntentProxiesTextPayload(t *testing.T) {
 	if client.classifyReq == nil || client.classifyReq.Text != "assign this task" {
 		t.Fatalf("unexpected proxied classify request: %#v", client.classifyReq)
 	}
-	if client.classifyReq.UserID != "" || client.classifyReq.ProjectID != "" {
-		t.Fatalf("expected empty user/project passthrough, got %#v", client.classifyReq)
+	if !reflect.DeepEqual(client.classifyReq.Candidates, []string{"task_assign", "chat"}) {
+		t.Fatalf("expected candidates passthrough, got %#v", client.classifyReq)
+	}
+	if client.classifyReq.UserID != "" || client.classifyReq.ProjectID != "" || client.classifyReq.Context != nil {
+		t.Fatalf("expected empty user/project/context passthrough, got %#v", client.classifyReq)
 	}
 }
 
@@ -681,5 +696,65 @@ func TestBridgeAPIHandlersWithConcreteBridgeClient(t *testing.T) {
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("Decompose(concrete client) status = %d, want 200", rec.Code)
+	}
+}
+
+func TestBridgePoolAndHealthHandlers_HandleConcurrentRequests(t *testing.T) {
+	e := newBridgeAPIHandlerTestEcho()
+	e.GET("/bridge/pool", NewBridgePoolHandler(&fakeBridgeAPIClient{
+		poolResp: &bridge.PoolSummaryResponse{
+			Active:        2,
+			Max:           5,
+			WarmTotal:     1,
+			WarmAvailable: 1,
+		},
+	}).Get)
+	e.GET("/bridge/health", NewBridgeHealthHandler(bridgeHealthStatusReaderStub{
+		snapshot: service.BridgeHealthSnapshot{
+			Status:    service.BridgeStatusReady,
+			LastCheck: time.Unix(1_700_000_000, 0).UTC(),
+			Pool: service.BridgeHealthPool{
+				Active:    2,
+				Available: 3,
+				Warm:      1,
+			},
+		},
+	}).Get)
+	srv := httptest.NewServer(e)
+	defer srv.Close()
+
+	client := srv.Client()
+	paths := []string{"/bridge/pool", "/bridge/health"}
+	var wg sync.WaitGroup
+	errCh := make(chan error, 64)
+
+	for worker := 0; worker < 16; worker++ {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			for iteration := 0; iteration < 10; iteration++ {
+				for _, path := range paths {
+					resp, err := client.Get(srv.URL + path)
+					if err != nil {
+						errCh <- err
+						return
+					}
+					_, _ = io.Copy(io.Discard, resp.Body)
+					resp.Body.Close()
+					if resp.StatusCode != http.StatusOK {
+						errCh <- errors.New("unexpected status code")
+						return
+					}
+				}
+			}
+		}()
+	}
+
+	wg.Wait()
+	close(errCh)
+	for err := range errCh {
+		if err != nil {
+			t.Fatalf("concurrent bridge handler request failed: %v", err)
+		}
 	}
 }

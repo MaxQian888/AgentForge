@@ -12,6 +12,7 @@ type Knowledge = model.RoleKnowledge
 type Security = model.RoleSecurity
 type RoleResponseStyle = model.RoleResponseStyle
 type RoleToolConfig = model.RoleToolConfig
+type RoleToolPluginBinding = model.RoleToolPluginBinding
 type RoleMCPServer = model.RoleMCPServer
 type RoleSkillReference = model.RoleSkillReference
 type RoleKnowledgeSource = model.RoleKnowledgeSource

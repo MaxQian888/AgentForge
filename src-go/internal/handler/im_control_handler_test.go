@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
@@ -13,21 +14,30 @@ import (
 )
 
 type imControlPlaneStub struct {
-	channels     []*model.IMChannel
-	status       *model.IMBridgeStatus
-	deliveries   []*model.IMDelivery
-	eventTypes   []string
-	savedChannel *model.IMChannel
-	deletedID    string
-	retriedID    string
-	ackInput     *model.IMDeliveryAck
+	channels              []*model.IMChannel
+	status                *model.IMBridgeStatus
+	deliveries            []*model.IMDelivery
+	eventTypes            []string
+	listDeliveryHistoryFn func(filters *model.IMDeliveryHistoryFilters) ([]*model.IMDelivery, error)
+	lastFilters           *model.IMDeliveryHistoryFilters
+	savedChannel          *model.IMChannel
+	deletedID             string
+	retriedID             string
+	retriedIDs            []string
+	retryErrors           map[string]error
+	ackInput              *model.IMDeliveryAck
+}
+
+type imControlSenderStub struct {
+	sent []*model.IMSendRequest
+	err  error
 }
 
 func (s *imControlPlaneStub) RegisterBridge(context.Context, *model.IMBridgeRegisterRequest) (*model.IMBridgeInstance, error) {
 	return nil, nil
 }
 
-func (s *imControlPlaneStub) RecordHeartbeat(context.Context, string) (*model.IMBridgeHeartbeatResponse, error) {
+func (s *imControlPlaneStub) RecordHeartbeat(context.Context, string, map[string]string) (*model.IMBridgeHeartbeatResponse, error) {
 	return nil, nil
 }
 
@@ -35,13 +45,13 @@ func (s *imControlPlaneStub) UnregisterBridge(context.Context, string) error { r
 func (s *imControlPlaneStub) BindAction(context.Context, *model.IMActionBinding) error {
 	return nil
 }
-func (s *imControlPlaneStub) AckDelivery(_ context.Context, bridgeID string, cursor int64, deliveryID string, downgradeReason string) error {
-	s.ackInput = &model.IMDeliveryAck{
-		BridgeID:        bridgeID,
-		Cursor:          cursor,
-		DeliveryID:      deliveryID,
-		DowngradeReason: downgradeReason,
+func (s *imControlPlaneStub) AckDelivery(_ context.Context, ack *model.IMDeliveryAck) error {
+	if ack == nil {
+		s.ackInput = nil
+		return nil
 	}
+	cloned := *ack
+	s.ackInput = &cloned
 	return nil
 }
 func (s *imControlPlaneStub) ListChannels(context.Context) ([]*model.IMChannel, error) {
@@ -61,15 +71,36 @@ func (s *imControlPlaneStub) DeleteChannel(_ context.Context, channelID string) 
 func (s *imControlPlaneStub) GetBridgeStatus(context.Context) (*model.IMBridgeStatus, error) {
 	return s.status, nil
 }
-func (s *imControlPlaneStub) ListDeliveryHistory(context.Context) ([]*model.IMDelivery, error) {
+func (s *imControlPlaneStub) ListDeliveryHistory(_ context.Context, filters *model.IMDeliveryHistoryFilters) ([]*model.IMDelivery, error) {
+	if filters != nil {
+		cloned := *filters
+		s.lastFilters = &cloned
+	} else {
+		s.lastFilters = nil
+	}
+	if s.listDeliveryHistoryFn != nil {
+		return s.listDeliveryHistoryFn(filters)
+	}
 	return s.deliveries, nil
 }
 func (s *imControlPlaneStub) ListEventTypes(context.Context) ([]string, error) {
 	return s.eventTypes, nil
 }
 func (s *imControlPlaneStub) RetryDelivery(_ context.Context, deliveryID string) (*model.IMDelivery, error) {
+	s.retriedIDs = append(s.retriedIDs, deliveryID)
 	s.retriedID = deliveryID
+	if err := s.retryErrors[deliveryID]; err != nil {
+		return nil, err
+	}
 	return &model.IMDelivery{ID: deliveryID, Status: model.IMDeliveryStatusPending}, nil
+}
+
+func (s *imControlSenderStub) Send(_ context.Context, req *model.IMSendRequest) error {
+	if req != nil {
+		cloned := *req
+		s.sent = append(s.sent, &cloned)
+	}
+	return s.err
 }
 
 func newIMControlTestContext(method, target, body string) (*echo.Echo, echo.Context, *httptest.ResponseRecorder) {
@@ -199,7 +230,7 @@ func TestIMControlHandlerAckDeliveryCapturesDowngradeReason(t *testing.T) {
 	stub := &imControlPlaneStub{}
 	h := NewIMControlHandler(stub)
 
-	_, ctx, rec := newIMControlTestContext(http.MethodPost, "/api/v1/im/bridge/ack", `{"bridgeId":"bridge-1","cursor":7,"deliveryId":"delivery-1","downgradeReason":"actioncard_send_failed"}`)
+	_, ctx, rec := newIMControlTestContext(http.MethodPost, "/api/v1/im/bridge/ack", `{"bridgeId":"bridge-1","cursor":7,"deliveryId":"delivery-1","status":"failed","failureReason":"rate_limit","downgradeReason":"actioncard_send_failed","processedAt":"2026-03-26T08:00:00Z"}`)
 	if err := h.AckDelivery(ctx); err != nil {
 		t.Fatalf("AckDelivery() error = %v", err)
 	}
@@ -208,6 +239,15 @@ func TestIMControlHandlerAckDeliveryCapturesDowngradeReason(t *testing.T) {
 	}
 	if stub.ackInput == nil || stub.ackInput.DowngradeReason != "actioncard_send_failed" {
 		t.Fatalf("ack input = %+v", stub.ackInput)
+	}
+	if stub.ackInput.Status != string(model.IMDeliveryStatusFailed) {
+		t.Fatalf("ack status = %q", stub.ackInput.Status)
+	}
+	if stub.ackInput.FailureReason != "rate_limit" {
+		t.Fatalf("ack failureReason = %q", stub.ackInput.FailureReason)
+	}
+	if stub.ackInput.ProcessedAt != "2026-03-26T08:00:00Z" {
+		t.Fatalf("ack processedAt = %q", stub.ackInput.ProcessedAt)
 	}
 }
 
@@ -263,5 +303,166 @@ func TestIMControlHandlerGetStatusIncludesEmptyProviderDetails(t *testing.T) {
 	}
 	if len(providerDetails) != 0 {
 		t.Fatalf("providerDetails = %#v, want empty array", providerDetails)
+	}
+}
+
+func TestIMControlHandlerListDeliveriesPassesFilters(t *testing.T) {
+	stub := &imControlPlaneStub{
+		deliveries: []*model.IMDelivery{{ID: "delivery-1", Platform: "slack", Status: model.IMDeliveryStatusFailed, CreatedAt: "2026-03-26T09:00:00Z"}},
+	}
+	h := NewIMControlHandler(stub)
+
+	_, ctx, rec := newIMControlTestContext(http.MethodGet, "/api/v1/im/deliveries?status=failed&platform=slack&eventType=task.created&kind=notify&since=2026-03-26T08:30:00Z", "")
+	if err := h.ListDeliveries(ctx); err != nil {
+		t.Fatalf("ListDeliveries() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("ListDeliveries() status = %d", rec.Code)
+	}
+	if stub.lastFilters == nil {
+		t.Fatal("expected filters to be forwarded")
+	}
+	if stub.lastFilters.Status != "failed" || stub.lastFilters.Platform != "slack" || stub.lastFilters.EventType != "task.created" || stub.lastFilters.Kind != "notify" || stub.lastFilters.Since != "2026-03-26T08:30:00Z" {
+		t.Fatalf("filters = %+v", stub.lastFilters)
+	}
+}
+
+func TestIMControlHandlerRetryBatchDeliveriesReturnsPerItemOutcomes(t *testing.T) {
+	stub := &imControlPlaneStub{
+		retryErrors: map[string]error{
+			"delivery-3": errors.New("not retryable"),
+		},
+	}
+	h := NewIMControlHandler(stub)
+
+	_, ctx, rec := newIMControlTestContext(http.MethodPost, "/api/v1/im/deliveries/retry-batch", `{"deliveryIds":["delivery-1","delivery-2","delivery-3"]}`)
+	if err := h.RetryBatchDeliveries(ctx); err != nil {
+		t.Fatalf("RetryBatchDeliveries() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("RetryBatchDeliveries() status = %d", rec.Code)
+	}
+
+	if len(stub.retriedIDs) != 3 {
+		t.Fatalf("retriedIDs = %+v, want all delivery ids attempted", stub.retriedIDs)
+	}
+
+	var payload model.IMRetryBatchResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal retry batch response: %v", err)
+	}
+	if len(payload.Results) != 3 {
+		t.Fatalf("results len = %d, want 3", len(payload.Results))
+	}
+	if payload.Results[0].DeliveryID != "delivery-1" || payload.Results[0].Status != model.IMDeliveryStatusPending {
+		t.Fatalf("result[0] = %+v", payload.Results[0])
+	}
+	if payload.Results[2].DeliveryID != "delivery-3" || string(payload.Results[2].Status) != "rejected" {
+		t.Fatalf("result[2] = %+v", payload.Results[2])
+	}
+}
+
+func TestIMControlHandlerTestSendReturnsSettledDeliveryResult(t *testing.T) {
+	stub := &imControlPlaneStub{
+		deliveries: []*model.IMDelivery{
+			{
+				ID:            "delivery-test-1",
+				Platform:      "slack",
+				ChannelID:     "C123",
+				Status:        model.IMDeliveryStatusDelivered,
+				FailureReason: "",
+				ProcessedAt:   "2026-03-26T08:00:01Z",
+				LatencyMs:     320,
+				CreatedAt:     "2026-03-26T08:00:00Z",
+			},
+		},
+	}
+	sender := &imControlSenderStub{}
+	h := NewIMControlHandler(stub, sender)
+
+	_, ctx, rec := newIMControlTestContext(http.MethodPost, "/api/v1/im/test-send", `{"platform":"slack","channelId":"C123","text":"ping","deliveryId":"delivery-test-1"}`)
+	if err := h.TestSend(ctx); err != nil {
+		t.Fatalf("TestSend() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("TestSend() status = %d", rec.Code)
+	}
+	if len(sender.sent) != 1 || sender.sent[0].DeliveryID != "delivery-test-1" {
+		t.Fatalf("sent requests = %+v", sender.sent)
+	}
+
+	var payload model.IMTestSendResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal test send response: %v", err)
+	}
+	if payload.DeliveryID != "delivery-test-1" || payload.Status != model.IMDeliveryStatusDelivered || payload.LatencyMs != 320 {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestIMControlHandlerTestSendGeneratesUniqueDeliveryIDsWhenOmitted(t *testing.T) {
+	stub := &imControlPlaneStub{
+		listDeliveryHistoryFn: func(filters *model.IMDeliveryHistoryFilters) ([]*model.IMDelivery, error) {
+			deliveryID := ""
+			if filters != nil {
+				deliveryID = strings.TrimSpace(filters.DeliveryID)
+			}
+			if deliveryID == "" {
+				return nil, nil
+			}
+			return []*model.IMDelivery{
+				{
+					ID:          deliveryID,
+					Platform:    "slack",
+					ChannelID:   "C123",
+					Status:      model.IMDeliveryStatusDelivered,
+					ProcessedAt: "2026-03-26T08:00:01Z",
+					LatencyMs:   320,
+					CreatedAt:   "2026-03-26T08:00:00Z",
+				},
+			}, nil
+		},
+	}
+	sender := &imControlSenderStub{}
+	h := NewIMControlHandler(stub, sender)
+
+	_, firstCtx, firstRec := newIMControlTestContext(http.MethodPost, "/api/v1/im/test-send", `{"platform":"slack","channelId":"C123","text":"ping"}`)
+	if err := h.TestSend(firstCtx); err != nil {
+		t.Fatalf("first TestSend() error = %v", err)
+	}
+	_, secondCtx, secondRec := newIMControlTestContext(http.MethodPost, "/api/v1/im/test-send", `{"platform":"slack","channelId":"C123","text":"pong"}`)
+	if err := h.TestSend(secondCtx); err != nil {
+		t.Fatalf("second TestSend() error = %v", err)
+	}
+
+	if len(sender.sent) != 2 {
+		t.Fatalf("sent requests = %+v", sender.sent)
+	}
+	if sender.sent[0].DeliveryID == "" || sender.sent[1].DeliveryID == "" {
+		t.Fatalf("delivery ids = %q, %q", sender.sent[0].DeliveryID, sender.sent[1].DeliveryID)
+	}
+	if !strings.HasPrefix(sender.sent[0].DeliveryID, "test-send-slack-") {
+		t.Fatalf("first delivery id = %q", sender.sent[0].DeliveryID)
+	}
+	if !strings.HasPrefix(sender.sent[1].DeliveryID, "test-send-slack-") {
+		t.Fatalf("second delivery id = %q", sender.sent[1].DeliveryID)
+	}
+	if sender.sent[0].DeliveryID == sender.sent[1].DeliveryID {
+		t.Fatalf("delivery ids must be unique, got %q", sender.sent[0].DeliveryID)
+	}
+
+	var firstPayload model.IMTestSendResponse
+	if err := json.Unmarshal(firstRec.Body.Bytes(), &firstPayload); err != nil {
+		t.Fatalf("unmarshal first test send response: %v", err)
+	}
+	var secondPayload model.IMTestSendResponse
+	if err := json.Unmarshal(secondRec.Body.Bytes(), &secondPayload); err != nil {
+		t.Fatalf("unmarshal second test send response: %v", err)
+	}
+	if firstPayload.DeliveryID != sender.sent[0].DeliveryID {
+		t.Fatalf("first payload = %+v, sent = %+v", firstPayload, sender.sent[0])
+	}
+	if secondPayload.DeliveryID != sender.sent[1].DeliveryID {
+		t.Fatalf("second payload = %+v, sent = %+v", secondPayload, sender.sent[1])
 	}
 }

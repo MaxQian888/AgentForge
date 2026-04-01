@@ -13,6 +13,8 @@ const (
 	TextFormatSlackMrkdwn TextFormatMode = "slack_mrkdwn"
 	TextFormatDiscordMD   TextFormatMode = "discord_md"
 	TextFormatDingTalkMD  TextFormatMode = "dingtalk_md"
+	TextFormatWeComMD    TextFormatMode = "wecom_md"
+	TextFormatQQBotMD    TextFormatMode = "qqbot_md"
 )
 
 // RenderingProfile describes provider-owned delivery formatting constraints.
@@ -153,7 +155,7 @@ func defaultRenderingProfileForSource(source string, capabilities PlatformCapabi
 		profile.StructuredSurface = StructuredSurfaceNone
 	case "qqbot":
 		profile.DefaultTextFormat = TextFormatPlainText
-		profile.SupportedFormats = []TextFormatMode{TextFormatPlainText}
+		profile.SupportedFormats = []TextFormatMode{TextFormatPlainText, TextFormatQQBotMD}
 		if len(profile.NativeSurfaces) == 0 {
 			profile.NativeSurfaces = []string{NativeSurfaceQQBotMarkdown}
 		}
@@ -161,7 +163,7 @@ func defaultRenderingProfileForSource(source string, capabilities PlatformCapabi
 		profile.StructuredSurface = StructuredSurfaceNone
 	case "wecom":
 		profile.DefaultTextFormat = TextFormatPlainText
-		profile.SupportedFormats = []TextFormatMode{TextFormatPlainText}
+		profile.SupportedFormats = []TextFormatMode{TextFormatPlainText, TextFormatWeComMD}
 		if len(profile.NativeSurfaces) == 0 {
 			profile.NativeSurfaces = []string{NativeSurfaceWeComCard}
 		}

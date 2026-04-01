@@ -251,6 +251,118 @@ func TestLive_SendStructuredFallsBackToTextWithExplicitDowngrade(t *testing.T) {
 	}
 }
 
+func TestLive_SendStructuredWithURLActionsProducesActionCard(t *testing.T) {
+	replier := &fakeWebhookReplier{}
+	messenger := &fakeDirectMessenger{}
+
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{}),
+		WithWebhookReplier(replier),
+		WithDirectMessenger(messenger),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	// Send via webhook target so that sendActionCardViaWebhook is used.
+	err = live.SendStructured(context.Background(), "https://session.example/hook", &core.StructuredMessage{
+		Title: "Deploy Ready",
+		Body:  "Choose an action.",
+		Actions: []core.StructuredAction{
+			{Label: "View Logs", URL: "https://example.test/logs"},
+			{Label: "Open Dashboard", URL: "https://example.test/dashboard"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("SendStructured error: %v", err)
+	}
+
+	if len(replier.messageCalls) != 1 {
+		t.Fatalf("expected 1 message call, got %d", len(replier.messageCalls))
+	}
+	if replier.messageCalls[0].Body["msgtype"] != "actionCard" {
+		t.Fatalf("expected actionCard, got %+v", replier.messageCalls[0].Body)
+	}
+	// Should NOT have fallen back to plain text.
+	if len(messenger.calls) != 0 {
+		t.Fatalf("expected no direct messenger calls, got %d", len(messenger.calls))
+	}
+	if len(replier.calls) != 0 {
+		t.Fatalf("expected no plain text webhook calls, got %d", len(replier.calls))
+	}
+}
+
+func TestLive_ReplyStructuredWithURLActionsProducesActionCard(t *testing.T) {
+	replier := &fakeWebhookReplier{}
+
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{}),
+		WithWebhookReplier(replier),
+		WithDirectMessenger(&fakeDirectMessenger{}),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	err = live.ReplyStructured(context.Background(), replyContext{
+		SessionWebhook: "https://session.example/reply",
+		ConversationID: "cid-group-1",
+	}, &core.StructuredMessage{
+		Title: "Build Complete",
+		Body:  "Pipeline finished successfully.",
+		Actions: []core.StructuredAction{
+			{Label: "View Report", URL: "https://example.test/report"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("ReplyStructured error: %v", err)
+	}
+
+	if len(replier.messageCalls) != 1 {
+		t.Fatalf("expected 1 message call, got %d", len(replier.messageCalls))
+	}
+	if replier.messageCalls[0].Body["msgtype"] != "actionCard" {
+		t.Fatalf("expected actionCard, got %+v", replier.messageCalls[0].Body)
+	}
+	if len(replier.calls) != 0 {
+		t.Fatalf("expected no plain text webhook calls, got %d", len(replier.calls))
+	}
+}
+
+func TestLive_SendStructuredNoActionsNoSectionsFallsBackToText(t *testing.T) {
+	messenger := &fakeDirectMessenger{}
+
+	live, err := NewLive(
+		"app-key",
+		"app-secret",
+		WithStreamRunner(&fakeStreamRunner{}),
+		WithWebhookReplier(&fakeWebhookReplier{}),
+		WithDirectMessenger(messenger),
+	)
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	err = live.SendStructured(context.Background(), "cid-group-2", &core.StructuredMessage{
+		Title: "Status Update",
+		Body:  "Everything is fine.",
+	})
+	if err != nil {
+		t.Fatalf("SendStructured error: %v", err)
+	}
+
+	if len(messenger.calls) != 1 {
+		t.Fatalf("expected 1 direct send call, got %d", len(messenger.calls))
+	}
+	if !strings.Contains(messenger.calls[0].Content, "Status Update") {
+		t.Fatalf("expected content to contain title, got %q", messenger.calls[0].Content)
+	}
+}
+
 func TestLive_ReplyCardUsesSessionWebhookActionCardForLinkButtons(t *testing.T) {
 	replier := &fakeWebhookReplier{}
 	live, err := NewLive(

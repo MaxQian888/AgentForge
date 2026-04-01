@@ -236,9 +236,6 @@ func synthesizeProviderNativeTextMessage(platform Platform, metadata PlatformMet
 	if target == nil {
 		return nil, false
 	}
-	if metadata.Source != "feishu" {
-		return nil, false
-	}
 	if strings.TrimSpace(target.ProgressMode) != string(AsyncUpdateDeferredCardUpdate) {
 		return nil, false
 	}
@@ -255,11 +252,16 @@ func synthesizeProviderNativeTextMessage(platform Platform, metadata PlatformMet
 			return message, true
 		}
 	}
-	message, err := NewFeishuMarkdownCardMessage("AgentForge Update", trimmed)
-	if err != nil || message == nil {
-		return nil, false
+	// Feishu fallback: build a markdown card even when the platform does not
+	// implement NativeTextMessageBuilder.
+	if metadata.Source == "feishu" {
+		message, err := NewFeishuMarkdownCardMessage("AgentForge Update", trimmed)
+		if err != nil || message == nil {
+			return nil, false
+		}
+		return message, true
 	}
-	return message, true
+	return nil, false
 }
 
 func inferStructuredFallbackReason(target *ReplyTarget) string {

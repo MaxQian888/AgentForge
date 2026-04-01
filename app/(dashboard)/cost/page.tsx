@@ -54,6 +54,24 @@ function renderMetric(
   return formatter(value ?? 0);
 }
 
+function formatCoverageLabel(
+  authoritativeRunCount: number,
+  estimatedRunCount: number,
+  unpricedRunCount: number,
+  t: (key: string) => string,
+): string {
+  if (unpricedRunCount > 0) {
+    return t("coverageUnpriced");
+  }
+  if (estimatedRunCount > 0) {
+    return t("coverageEstimated");
+  }
+  if (authoritativeRunCount > 0) {
+    return t("coverageAuthoritative");
+  }
+  return t("coverageUnpriced");
+}
+
 export default function CostPage() {
   useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Cost" }]);
   const t = useTranslations("cost");
@@ -93,6 +111,8 @@ export default function CostPage() {
   const sprintCosts = projectCost?.sprintCosts ?? [];
   const taskCosts = projectCost?.taskCosts ?? [];
   const chartData = projectCost?.dailyCosts?.map((d) => ({ date: d.date, cost: d.costUsd })) ?? [];
+  const costCoverage = projectCost?.costCoverage;
+  const runtimeBreakdown = projectCost?.runtimeBreakdown ?? [];
 
   return (
     <div className="flex flex-col gap-6">
@@ -134,6 +154,91 @@ export default function CostPage() {
           icon={Cpu}
         />
       </div>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("externalRuntimeCoverage")}</CardTitle>
+          <CardDescription>{t("externalRuntimeCoverageDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent className="space-y-4">
+          <div className="grid gap-4 md:grid-cols-3">
+            <MetricCard
+              label={t("authoritativeSpend")}
+              value={`$${(costCoverage?.authoritativeCostUsd ?? 0).toFixed(2)}`}
+              icon={DollarSign}
+            />
+            <MetricCard
+              label={t("estimatedSpend")}
+              value={`$${(costCoverage?.estimatedCostUsd ?? 0).toFixed(2)}`}
+              icon={TrendingUp}
+            />
+            <MetricCard
+              label={t("unpricedRuns")}
+              value={String(
+                (costCoverage?.unpricedRunCount ?? 0) +
+                  (costCoverage?.planIncludedRunCount ?? 0),
+              )}
+              icon={Hash}
+            />
+          </div>
+
+          {costCoverage?.hasCoverageGap ? (
+            <ErrorBanner message={t("coverageGapWarning")} />
+          ) : null}
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("runtimeCostBreakdown")}</CardTitle>
+          <CardDescription>{t("runtimeCostBreakdownDesc")}</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {runtimeBreakdown.length > 0 ? (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>{t("colRuntime")}</TableHead>
+                  <TableHead>{t("colProvider")}</TableHead>
+                  <TableHead>{t("colModel")}</TableHead>
+                  <TableHead>{t("colCoverage")}</TableHead>
+                  <TableHead className="text-right">{t("colPricedRuns")}</TableHead>
+                  <TableHead className="text-right">{t("colTotalCost")}</TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {runtimeBreakdown.map((entry) => (
+                  <TableRow
+                    key={`${entry.runtime}:${entry.provider}:${entry.model}`}
+                  >
+                    <TableCell className="font-medium">{entry.runtime}</TableCell>
+                    <TableCell>{entry.provider}</TableCell>
+                    <TableCell>{entry.model}</TableCell>
+                    <TableCell>
+                      <Badge variant={entry.unpricedRunCount > 0 ? "outline" : "secondary"}>
+                        {formatCoverageLabel(
+                          entry.authoritativeRunCount,
+                          entry.estimatedRunCount,
+                          entry.unpricedRunCount + entry.planIncludedRunCount,
+                          t,
+                        )}
+                      </Badge>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      {entry.pricedRunCount}/{entry.runCount}
+                    </TableCell>
+                    <TableCell className="text-right">
+                      ${entry.totalCostUsd.toFixed(2)}
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          ) : (
+            <p className="text-sm text-muted-foreground">{t("noRuntimeBreakdownData")}</p>
+          )}
+        </CardContent>
+      </Card>
 
       <Card>
         <CardHeader>

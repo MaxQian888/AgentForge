@@ -7,11 +7,14 @@ const fetchPool = jest.fn();
 const fetchRuntimeCatalog = jest.fn();
 const fetchBridgeHealth = jest.fn();
 const fetchDispatchStats = jest.fn();
+const fetchDispatchHistory = jest.fn();
 const resumeAgent = jest.fn();
 const searchParamsState = {
   member: "member-2",
   action: null as string | null,
   project: "project-1",
+  view: null as string | null,
+  vizNode: null as string | null,
 };
 
 const agentState = {
@@ -97,6 +100,7 @@ const agentState = {
   fetchRuntimeCatalog,
   fetchBridgeHealth,
   fetchDispatchStats,
+  fetchDispatchHistory,
   resumeAgent,
   runtimeCatalog: {
     defaultRuntime: "codex",
@@ -155,6 +159,7 @@ const agentState = {
     medianWaitSeconds: 20,
   },
   loading: false,
+  dispatchHistoryByTask: {},
 };
 
 jest.mock("next-intl", () => ({
@@ -177,6 +182,10 @@ jest.mock("next/navigation", () => ({
           ? searchParamsState.action
           : key === "project"
             ? searchParamsState.project
+            : key === "view"
+              ? searchParamsState.view
+              : key === "vizNode"
+                ? searchParamsState.vizNode
             : null,
     toString: () => {
       const params = new URLSearchParams();
@@ -188,6 +197,12 @@ jest.mock("next/navigation", () => ({
       }
       if (searchParamsState.project) {
         params.set("project", searchParamsState.project);
+      }
+      if (searchParamsState.view) {
+        params.set("view", searchParamsState.view);
+      }
+      if (searchParamsState.vizNode) {
+        params.set("vizNode", searchParamsState.vizNode);
       }
       return params.toString();
     },
@@ -211,10 +226,13 @@ describe("AgentsPage", () => {
     fetchRuntimeCatalog.mockReset();
     fetchBridgeHealth.mockReset();
     fetchDispatchStats.mockReset();
+    fetchDispatchHistory.mockReset();
     resumeAgent.mockReset();
     searchParamsState.member = "member-2";
     searchParamsState.action = null;
     searchParamsState.project = "project-1";
+    searchParamsState.view = null;
+    searchParamsState.vizNode = null;
   });
 
   it("keeps rendering the workspace when a legacy spawn action is present", () => {
@@ -233,8 +251,16 @@ describe("AgentsPage", () => {
     expect(fetchRuntimeCatalog).toHaveBeenCalled();
     expect(fetchBridgeHealth).toHaveBeenCalled();
     expect(fetchDispatchStats).toHaveBeenCalledWith("project-1");
-    expect(screen.getByText("Review queue")).toBeInTheDocument();
+    expect(screen.getAllByText("Review queue").length).toBeGreaterThan(0);
     expect(screen.queryByText("Timeline work")).not.toBeInTheDocument();
+  });
+
+  it("renders the visualization tab from URL-driven workspace state", async () => {
+    searchParamsState.view = "visualization";
+    render(<AgentsPage />);
+
+    expect(screen.getByText("visualization.legend.title")).toBeInTheDocument();
+    expect(screen.getByText("visualization.degraded.title")).toBeInTheDocument();
   });
 
   it("shows bridge degraded state and disables paused-agent resume", async () => {
@@ -254,12 +280,13 @@ describe("AgentsPage", () => {
     expect(degradedAlert).toHaveTextContent("Status: degraded");
     expect(screen.getAllByText("Paused verification").length).toBeGreaterThan(0);
 
-    const resumeButton = screen.getByRole("button", {
+    const resumeButtons = screen.getAllByRole("button", {
       name: "workspace.quickResume",
     });
-    expect(resumeButton).toBeDisabled();
+    expect(resumeButtons.length).toBeGreaterThan(0);
+    resumeButtons.forEach((button) => expect(button).toBeDisabled());
 
-    await user.click(resumeButton);
+    await user.click(resumeButtons[0]!);
     expect(resumeAgent).not.toHaveBeenCalled();
   });
 

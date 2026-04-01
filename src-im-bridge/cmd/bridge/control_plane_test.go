@@ -183,6 +183,12 @@ func TestBridgeRuntimeControl_StartProcessesDeliveriesAndStopsCleanly(t *testing
 		if ack.BridgeID != "bridge-1" || ack.Cursor != 7 || ack.DeliveryID != "delivery-1" {
 			t.Fatalf("ack = %+v", ack)
 		}
+		if ack.Status != "delivered" {
+			t.Fatalf("ack status = %q, want delivered", ack.Status)
+		}
+		if ack.ProcessedAt == "" {
+			t.Fatalf("ack processedAt = %q, want non-empty timestamp", ack.ProcessedAt)
+		}
 	case <-time.After(2 * time.Second):
 		t.Fatal("timed out waiting for delivery ack")
 	}
