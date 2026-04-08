@@ -5,9 +5,11 @@ import type {
   CodingAgentCatalog,
   Project,
   ProjectSettings,
+  ProjectUpdateInput,
   ReviewPolicy,
   WebhookConfig,
 } from "@/lib/stores/project-store";
+import { ApiError } from "@/lib/api-client";
 
 export type SettingsWorkspaceDraft = {
   name: string;
@@ -194,4 +196,70 @@ export function getPrimaryReviewLayerLabel(requiredLayers: string[]): string {
 
 export function getMinRiskLevelForBlockValue(minRiskLevelForBlock: string): string {
   return minRiskLevelForBlock || "none";
+}
+
+export function toProjectUpdateInput(draft: SettingsWorkspaceDraft): ProjectUpdateInput {
+  return {
+    name: draft.name.trim(),
+    description: draft.description,
+    repoUrl: draft.repoUrl,
+    defaultBranch: draft.defaultBranch.trim(),
+    settings: {
+      codingAgent: draft.settings.codingAgent,
+      budgetGovernance: draft.settings.budgetGovernance,
+      reviewPolicy: {
+        ...draft.settings.reviewPolicy,
+        requiredLayers: [...draft.settings.reviewPolicy.requiredLayers],
+      },
+      webhook: draft.settings.webhook,
+    } satisfies ProjectSettings,
+  };
+}
+
+export function extractServerError(error: unknown): {
+  fieldErrors: SettingsValidationErrors;
+  message: string;
+} {
+  if (error instanceof ApiError) {
+    const body = error.body as { message?: string; errors?: Record<string, unknown> } | null;
+    const rawErrors = body?.errors ?? {};
+    const fieldErrors: SettingsValidationErrors = {};
+    const mapping: Record<string, keyof SettingsValidationErrors> = {
+      name: "name",
+      defaultBranch: "defaultBranch",
+      maxTaskBudgetUsd: "maxTaskBudgetUsd",
+      maxDailySpendUsd: "maxDailySpendUsd",
+      alertThresholdPercent: "alertThresholdPercent",
+      runtime: "runtime",
+      provider: "provider",
+      webhookUrl: "webhookUrl",
+      webhookEvents: "webhookEvents",
+    };
+    Object.entries(mapping).forEach(([rawKey, fieldKey]) => {
+      const nextValue = rawErrors[rawKey];
+      if (typeof nextValue === "string") fieldErrors[fieldKey] = nextValue;
+    });
+    return { fieldErrors, message: body?.message ?? error.message };
+  }
+  if (error instanceof Error) return { fieldErrors: {}, message: error.message };
+  return { fieldErrors: {}, message: "Failed to save settings." };
+}
+
+export function preserveRedactedWebhookSecret(
+  project: Project,
+  submittedSecret: string,
+): Project {
+  if (!submittedSecret) return project;
+  if (project.settings.webhook?.secret) return project;
+  return {
+    ...project,
+    settings: {
+      ...project.settings,
+      webhook: {
+        ...DEFAULT_WEBHOOK,
+        ...project.settings.webhook,
+        secret: submittedSecret,
+      },
+    },
+  };
 }

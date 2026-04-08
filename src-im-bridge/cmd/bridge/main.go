@@ -115,6 +115,16 @@ type config struct {
 	DiscordPublicKey        string
 	DiscordInteractionsPort string
 	DiscordCommandGuildID   string
+	EmailSMTPHost           string
+	EmailSMTPPort           string
+	EmailSMTPUser           string
+	EmailSMTPPass           string
+	EmailFromAddress        string
+	EmailSMTPTLS            string
+	EmailIMAPHost           string
+	EmailIMAPPort           string
+	EmailIMAPUser           string
+	EmailIMAPPass           string
 	NotifyPort              string
 	TestPort                string
 }
@@ -159,6 +169,16 @@ func loadConfig() *config {
 		DiscordPublicKey:        os.Getenv("DISCORD_PUBLIC_KEY"),
 		DiscordInteractionsPort: os.Getenv("DISCORD_INTERACTIONS_PORT"),
 		DiscordCommandGuildID:   os.Getenv("DISCORD_COMMAND_GUILD_ID"),
+		EmailSMTPHost:           os.Getenv("EMAIL_SMTP_HOST"),
+		EmailSMTPPort:           envOrDefault("EMAIL_SMTP_PORT", "587"),
+		EmailSMTPUser:           os.Getenv("EMAIL_SMTP_USER"),
+		EmailSMTPPass:           os.Getenv("EMAIL_SMTP_PASS"),
+		EmailFromAddress:        os.Getenv("EMAIL_FROM_ADDRESS"),
+		EmailSMTPTLS:            envOrDefault("EMAIL_SMTP_TLS", "true"),
+		EmailIMAPHost:           os.Getenv("EMAIL_IMAP_HOST"),
+		EmailIMAPPort:           envOrDefault("EMAIL_IMAP_PORT", "993"),
+		EmailIMAPUser:           os.Getenv("EMAIL_IMAP_USER"),
+		EmailIMAPPass:           os.Getenv("EMAIL_IMAP_PASS"),
 		NotifyPort:              envOrDefault("NOTIFY_PORT", "7779"),
 		TestPort:                envOrDefault("TEST_PORT", "7780"),
 	}

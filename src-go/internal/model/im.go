@@ -7,7 +7,7 @@ import (
 
 // IMMessageRequest represents an incoming IM message webhook.
 type IMMessageRequest struct {
-	Platform  string `json:"platform" validate:"required,oneof=feishu dingtalk slack telegram discord wecom qq qqbot"`
+	Platform  string `json:"platform" validate:"required,oneof=feishu dingtalk slack telegram discord wecom qq qqbot email"`
 	ChannelID string `json:"channelId" validate:"required"`
 	UserID    string `json:"userId"`
 	UserName  string `json:"userName"`

@@ -101,9 +101,9 @@
     "title": "插件详情",
     "desc": "查看所选已安装插件的运行时、权限、健康状况和来源元数据。",
     "selectPrompt": "选择一个已安装的插件以查看运维详情。",
-    "tabOverview": "概览",
+    "tabOverview": "详情",
     "tabEvents": "事件",
-    "tabKind": "类型",
+    "tabKind": "贡献",
     "tabMcp": "MCP",
     "tabWorkflow": "工作流"
   },

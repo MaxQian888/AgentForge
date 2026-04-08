@@ -39,7 +39,7 @@ function resolveNotificationDeliveryPolicy(
   }
 }
 
-const FLUSH_ROUTES = ["/roles", "/agents"];
+const FLUSH_ROUTES = ["/roles", "/agents", "/settings"];
 
 export function DashboardShell({ children }: { children: React.ReactNode }) {
   const router = useRouter();

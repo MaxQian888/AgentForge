@@ -14,26 +14,6 @@ interface PluginDetailSidebarProps {
   plugin: PluginRecord | null;
 }
 
-export function PluginDetailSection({
-  title,
-  children,
-  action,
-}: {
-  title: string;
-  children: React.ReactNode;
-  action?: React.ReactNode;
-}) {
-  return (
-    <div className="rounded-lg border border-border/60 p-3">
-      <div className="flex items-center justify-between">
-        <p className="font-medium text-sm">{title}</p>
-        {action}
-      </div>
-      <div className="mt-2 text-sm text-muted-foreground">{children}</div>
-    </div>
-  );
-}
-
 function hasKindSpecificData(plugin: PluginRecord): boolean {
   if (plugin.kind === "WorkflowPlugin" && plugin.spec.workflow) return true;
   if (plugin.kind === "ReviewPlugin" && plugin.spec.review) return true;

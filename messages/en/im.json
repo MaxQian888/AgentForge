@@ -73,7 +73,8 @@
     "discord": "Discord",
     "wecom": "WeCom",
     "qq": "QQ",
-    "qqbot": "QQ Bot"
+    "qqbot": "QQ Bot",
+    "email": "Email"
   },
   "eventLabels": {
     "task.created": "Task created",

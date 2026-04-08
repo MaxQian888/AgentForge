@@ -498,11 +498,15 @@ interface PluginState {
   mcpSnapshots: Record<string, PluginMCPCapabilitySnapshot>;
   workflowRuns: Record<string, WorkflowPluginRun[]>;
   selectedWorkflowRunId: string | null;
+  viewCategory: "installed" | "builtin" | "marketplace" | "remote";
   filters: PluginPanelFilters;
   selectedPluginId: string | null;
+  selectedMarketplaceId: string | null;
   loading: boolean;
   error: string | null;
 
+  setViewCategory: (category: "installed" | "builtin" | "marketplace" | "remote") => void;
+  selectMarketplaceEntry: (id: string | null) => void;
   fetchPlugins: () => Promise<void>;
   discoverBuiltins: () => Promise<void>;
   fetchMarketplace: () => Promise<void>;
@@ -590,11 +594,15 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
   mcpSnapshots: {},
   workflowRuns: {},
   selectedWorkflowRunId: null,
+  viewCategory: "installed" as const,
   filters: DEFAULT_PLUGIN_PANEL_FILTERS,
   selectedPluginId: null,
+  selectedMarketplaceId: null,
   loading: false,
   error: null,
 
+  setViewCategory: (category) => set({ viewCategory: category }),
+  selectMarketplaceEntry: (id) => set({ selectedMarketplaceId: id }),
   fetchPlugins: async () => {
     const token = getToken();
     if (!token) return;

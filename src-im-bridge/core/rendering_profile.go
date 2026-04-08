@@ -169,6 +169,12 @@ func defaultRenderingProfileForSource(source string, capabilities PlatformCapabi
 		}
 		profile.MaxTextLength = 2000
 		profile.StructuredSurface = StructuredSurfaceNone
+	case "email":
+		profile.DefaultTextFormat = TextFormatHTML
+		profile.SupportedFormats = []TextFormatMode{TextFormatHTML, TextFormatPlainText}
+		profile.MaxTextLength = 0
+		profile.SupportsSegments = false
+		profile.StructuredSurface = StructuredSurfaceNone
 	default:
 		if profile.StructuredSurface == "" {
 			profile.StructuredSurface = StructuredSurfaceNone

@@ -2,6 +2,7 @@ import {
   Bot,
   Building2,
   Hash,
+  Mail,
   MessageCircleMore,
   MessagesSquare,
   Send,
@@ -101,6 +102,24 @@ export const PLATFORM_DEFINITIONS: Record<IMPlatform, PlatformDefinition> = {
         placeholder: "qqbot-app-secret",
         type: "password",
       },
+    ],
+  },
+  email: {
+    label: "Email",
+    icon: Mail,
+    configFields: [
+      {
+        key: "smtpHost",
+        label: "SMTP Host",
+        placeholder: "smtp.example.com",
+      },
+      { key: "smtpPort", label: "SMTP Port", placeholder: "587" },
+      {
+        key: "fromAddress",
+        label: "From Address",
+        placeholder: "noreply@example.com",
+      },
+      { key: "smtpTls", label: "TLS", placeholder: "true" },
     ],
   },
 };

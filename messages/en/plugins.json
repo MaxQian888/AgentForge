@@ -101,9 +101,9 @@
     "title": "Plugin details",
     "desc": "Inspect runtime, permissions, health, and source metadata for the selected installed plugin.",
     "selectPrompt": "Select an installed plugin to inspect operational details.",
-    "tabOverview": "Overview",
+    "tabOverview": "Details",
     "tabEvents": "Events",
-    "tabKind": "Kind",
+    "tabKind": "Contributions",
     "tabMcp": "MCP",
     "tabWorkflow": "Workflow"
   },

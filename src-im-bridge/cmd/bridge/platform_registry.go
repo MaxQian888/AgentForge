@@ -7,6 +7,7 @@ import (
 	"github.com/agentforge/im-bridge/core"
 	"github.com/agentforge/im-bridge/platform/dingtalk"
 	"github.com/agentforge/im-bridge/platform/discord"
+	"github.com/agentforge/im-bridge/platform/email"
 	"github.com/agentforge/im-bridge/platform/feishu"
 	"github.com/agentforge/im-bridge/platform/qq"
 	"github.com/agentforge/im-bridge/platform/qqbot"
@@ -32,6 +33,41 @@ func normalizeTransportMode(mode string) string {
 
 func providerDescriptors() map[string]providerDescriptor {
 	return map[string]providerDescriptor{
+		"email": {
+			ID:                      "email",
+			Metadata:                email.NewStub("0").Metadata(),
+			SupportedTransportModes: []string{transportModeStub, transportModeLive},
+			ValidateConfig: func(cfg *config, mode string) error {
+				if mode != transportModeLive {
+					return nil
+				}
+				switch {
+				case strings.TrimSpace(cfg.EmailSMTPHost) == "":
+					return fmt.Errorf("selected platform email requires EMAIL_SMTP_HOST for live transport")
+				case strings.TrimSpace(cfg.EmailFromAddress) == "":
+					return fmt.Errorf("selected platform email requires EMAIL_FROM_ADDRESS for live transport")
+				default:
+					return nil
+				}
+			},
+			NewStub: func(cfg *config) (core.Platform, error) {
+				return email.NewStub(cfg.TestPort), nil
+			},
+			NewLive: func(cfg *config) (core.Platform, error) {
+				opts := make([]email.LiveOption, 0, 1)
+				if strings.EqualFold(strings.TrimSpace(cfg.EmailSMTPTLS), "false") {
+					opts = append(opts, email.WithTLS(false))
+				}
+				return email.NewLive(
+					cfg.EmailSMTPHost,
+					cfg.EmailSMTPPort,
+					cfg.EmailSMTPUser,
+					cfg.EmailSMTPPass,
+					cfg.EmailFromAddress,
+					opts...,
+				)
+			},
+		},
 		"wecom": {
 			ID:                      "wecom",
 			Metadata:                wecom.NewStub("0").Metadata(),

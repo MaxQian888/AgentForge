@@ -295,6 +295,14 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 			MessageScopes:      []MessageScope{MessageScopeChat},
 			NativeSurfaces:     []string{NativeSurfaceWeComCard},
 		}
+	case "email":
+		return PlatformCapabilities{
+			CommandSurface:     CommandSurfaceNone,
+			StructuredSurface:  StructuredSurfaceNone,
+			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply},
+			ActionCallbackMode: ActionCallbackNone,
+			MessageScopes:      []MessageScope{MessageScopeChat},
+		}
 	default:
 		capabilities := PlatformCapabilities{
 			CommandSurface: CommandSurfaceNone,

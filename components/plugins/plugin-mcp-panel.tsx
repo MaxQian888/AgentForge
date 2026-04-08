@@ -14,7 +14,7 @@ import {
   type MCPPromptGetResult,
   type PluginRecord,
 } from "@/lib/stores/plugin-store";
-import { PluginDetailSection } from "./plugin-detail-sidebar";
+import { PluginDetailSection } from "./plugin-detail-section";
 import {
   ChevronDown,
   ChevronRight,

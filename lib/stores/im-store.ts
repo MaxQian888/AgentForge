@@ -13,7 +13,8 @@ export type IMPlatform =
   | "discord"
   | "wecom"
   | "qq"
-  | "qqbot";
+  | "qqbot"
+  | "email";
 
 export interface IMChannel {
   id: string;

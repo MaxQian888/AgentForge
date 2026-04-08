@@ -1,7 +1,7 @@
 "use client";
 
 import { Badge } from "@/components/ui/badge";
-import { PluginDetailSection } from "@/components/plugins/plugin-detail-sidebar";
+import { PluginDetailSection } from "@/components/plugins/plugin-detail-section";
 import type { PluginRecord } from "@/lib/stores/plugin-store";
 
 interface PluginKindDetailProps {

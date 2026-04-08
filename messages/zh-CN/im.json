@@ -73,7 +73,8 @@
     "discord": "Discord",
     "wecom": "企业微信",
     "qq": "QQ",
-    "qqbot": "QQ Bot"
+    "qqbot": "QQ Bot",
+    "email": "邮件"
   },
   "eventLabels": {
     "task.created": "任务已创建",
