@@ -162,5 +162,6 @@
   "budget.remaining": "Remaining",
   "budget.utilization": "Utilization",
   "actions.newSprint": "New Sprint",
-  "actions.createTeam": "Create Team"
+  "actions.createTeam": "Create Team",
+  "projectDashboard.title": "Project Dashboard"
 }

@@ -63,5 +63,7 @@
   "summary": "摘要",
   "findingsCount": "发现 ({count})",
   "suggestion": "建议：{text}",
-  "noFindings": "暂无发现记录。"
+  "noFindings": "暂无发现记录。",
+  "unassigned": "未分配",
+  "noBranch": "无分支"
 }

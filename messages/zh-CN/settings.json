@@ -104,16 +104,15 @@
     "filterPlaceholder": "筛选 {name}",
     "unset": "未设置"
   },
-  "automations": {
-    "ruleName": "规则名称",
-    "ruleNamePlaceholder": "完成时通知",
-    "event": "事件",
-    "conditionField": "条件字段",
-    "conditionValue": "条件值",
-    "action": "动作",
-    "createRule": "创建规则",
-    "disable": "禁用",
-    "enable": "启用",
-    "delete": "删除"
-  }
+  "automations": "自动化",
+  "automations.ruleName": "规则名称",
+  "automations.ruleNamePlaceholder": "完成时通知",
+  "automations.event": "事件",
+  "automations.conditionField": "条件字段",
+  "automations.conditionValue": "条件值",
+  "automations.action": "动作",
+  "automations.createRule": "创建规则",
+  "automations.disable": "禁用",
+  "automations.enable": "启用",
+  "automations.delete": "删除"
 }
