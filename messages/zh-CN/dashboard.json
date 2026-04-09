@@ -162,5 +162,6 @@
   "budget.remaining": "剩余",
   "budget.utilization": "利用率",
   "actions.newSprint": "新建冲刺",
-  "actions.createTeam": "创建团队"
+  "actions.createTeam": "创建团队",
+  "projectDashboard.title": "项目仪表盘"
 }

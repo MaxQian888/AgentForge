@@ -37,7 +37,8 @@
     "tauri:build": "pnpm tauri build",
     "build:desktop": "pnpm tauri build",
     "verify:updater-artifacts": "node scripts/validate-updater-artifacts.js",
-    "prepare": "husky"
+    "prepare": "husky",
+    "i18n:audit": "node scripts/i18n-audit.js"
   },
   "lint-staged": {
     "*.{js,jsx,ts,tsx,mjs,cjs}": [

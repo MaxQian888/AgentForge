@@ -104,16 +104,15 @@
     "filterPlaceholder": "Filter {name}",
     "unset": "Unset"
   },
-  "automations": {
-    "ruleName": "Rule name",
-    "ruleNamePlaceholder": "Notify when done",
-    "event": "Event",
-    "conditionField": "Condition field",
-    "conditionValue": "Condition value",
-    "action": "Action",
-    "createRule": "Create rule",
-    "disable": "Disable",
-    "enable": "Enable",
-    "delete": "Delete"
-  }
+  "automations": "Automations",
+  "automations.ruleName": "Rule name",
+  "automations.ruleNamePlaceholder": "Notify when done",
+  "automations.event": "Event",
+  "automations.conditionField": "Condition field",
+  "automations.conditionValue": "Condition value",
+  "automations.action": "Action",
+  "automations.createRule": "Create rule",
+  "automations.disable": "Disable",
+  "automations.enable": "Enable",
+  "automations.delete": "Delete"
 }

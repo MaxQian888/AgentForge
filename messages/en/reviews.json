@@ -63,5 +63,7 @@
   "summary": "Summary",
   "findingsCount": "Findings ({count})",
   "suggestion": "Suggestion: {text}",
-  "noFindings": "No findings recorded."
+  "noFindings": "No findings recorded.",
+  "unassigned": "Unassigned",
+  "noBranch": "No branch"
 }
