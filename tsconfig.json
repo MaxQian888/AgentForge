@@ -41,6 +41,11 @@
     ".next\\dev/types/**/*.ts"
   ],
   "exclude": [
-    "node_modules"
+    "node_modules",
+    "src-bridge",
+    "src-go",
+    "src-tauri",
+    "src-marketplace",
+    "plugins"
   ]
 }
