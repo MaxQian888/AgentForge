@@ -1,0 +1,383 @@
+import {
+  Play,
+  GitBranch,
+  Bot,
+  Bell,
+  ArrowRightLeft,
+  Lock,
+  Split,
+  Merge,
+  BrainCircuit,
+  Code2,
+  RefreshCw,
+  UserCheck,
+  Webhook,
+  Workflow,
+} from "lucide-react";
+import type { NodeCategory, NodeTypeMeta } from "../types";
+
+export const NODE_REGISTRY: NodeTypeMeta[] = [
+  // ── Entry ──────────────────────────────────────────────────────────────────
+  {
+    type: "trigger",
+    label: "Trigger",
+    category: "entry",
+    icon: Play,
+    color: "#22c55e",
+    description: "Starting point of the workflow",
+    configSchema: [],
+    defaultConfig: {},
+  },
+
+  // ── Logic ──────────────────────────────────────────────────────────────────
+  {
+    type: "condition",
+    label: "Condition",
+    category: "logic",
+    icon: GitBranch,
+    color: "#f59e0b",
+    description: "Branch based on a boolean expression",
+    configSchema: [
+      {
+        key: "expression",
+        label: "Expression",
+        type: "expression",
+        placeholder: "e.g. node.output.status === 'done'",
+        required: true,
+        group: "Condition",
+      },
+    ],
+    defaultConfig: {},
+  },
+  {
+    type: "gate",
+    label: "Gate",
+    category: "logic",
+    icon: Lock,
+    color: "#ef4444",
+    description: "Block execution until a condition is met",
+    configSchema: [
+      {
+        key: "expression",
+        label: "Expression",
+        type: "expression",
+        placeholder: "e.g. node.output.approved === true",
+        required: true,
+        group: "Gate",
+      },
+    ],
+    defaultConfig: {},
+  },
+  {
+    type: "function",
+    label: "Function",
+    category: "logic",
+    icon: Code2,
+    color: "#06b6d4",
+    description: "Execute a custom expression or script",
+    configSchema: [
+      {
+        key: "expression",
+        label: "Expression",
+        type: "expression",
+        placeholder: "e.g. return input.value * 2",
+        required: true,
+        group: "Function",
+      },
+    ],
+    defaultConfig: {},
+  },
+
+  // ── Agent ──────────────────────────────────────────────────────────────────
+  {
+    type: "agent_dispatch",
+    label: "Agent Dispatch",
+    category: "agent",
+    icon: Bot,
+    color: "#3b82f6",
+    description: "Dispatch a task to an AI agent",
+    configSchema: [
+      {
+        key: "runtime",
+        label: "Runtime",
+        type: "select",
+        options: ["claude_code", "codex", "cursor", "gemini", "opencode", "qoder"],
+        required: true,
+        group: "Agent Config",
+      },
+      {
+        key: "provider",
+        label: "Provider",
+        type: "select",
+        options: ["anthropic", "openai", "google"],
+        required: true,
+        group: "Agent Config",
+      },
+      {
+        key: "model",
+        label: "Model",
+        type: "select",
+        options: ["claude-sonnet-4-6", "claude-opus-4-6", "gpt-4o", "gemini-2.5-pro"],
+        required: true,
+        group: "Agent Config",
+      },
+      {
+        key: "budgetUsd",
+        label: "Budget (USD)",
+        type: "number",
+        placeholder: "e.g. 1.00",
+        group: "Agent Config",
+      },
+    ],
+    defaultConfig: {},
+  },
+  {
+    type: "llm_agent",
+    label: "LLM Agent",
+    category: "agent",
+    icon: BrainCircuit,
+    color: "#6366f1",
+    description: "Run an LLM prompt with configurable model and system prompt",
+    configSchema: [
+      {
+        key: "runtime",
+        label: "Runtime",
+        type: "select",
+        options: ["claude_code", "codex", "cursor", "gemini", "opencode", "qoder"],
+        required: true,
+        group: "Agent Config",
+      },
+      {
+        key: "provider",
+        label: "Provider",
+        type: "select",
+        options: ["anthropic", "openai", "google"],
+        required: true,
+        group: "Agent Config",
+      },
+      {
+        key: "model",
+        label: "Model",
+        type: "select",
+        options: ["claude-sonnet-4-6", "claude-opus-4-6", "gpt-4o", "gemini-2.5-pro"],
+        required: true,
+        group: "Agent Config",
+      },
+      {
+        key: "budgetUsd",
+        label: "Budget (USD)",
+        type: "number",
+        placeholder: "e.g. 1.00",
+        group: "Agent Config",
+      },
+      {
+        key: "prompt",
+        label: "Prompt",
+        type: "textarea",
+        placeholder: "User prompt template…",
+        required: true,
+        group: "Agent Config",
+      },
+      {
+        key: "systemPrompt",
+        label: "System Prompt",
+        type: "textarea",
+        placeholder: "System prompt template…",
+        group: "Agent Config",
+      },
+    ],
+    defaultConfig: {},
+  },
+
+  // ── Flow ───────────────────────────────────────────────────────────────────
+  {
+    type: "parallel_split",
+    label: "Parallel Split",
+    category: "flow",
+    icon: Split,
+    color: "#f97316",
+    description: "Fork execution into parallel branches",
+    configSchema: [],
+    defaultConfig: {},
+  },
+  {
+    type: "parallel_join",
+    label: "Parallel Join",
+    category: "flow",
+    icon: Merge,
+    color: "#f97316",
+    description: "Merge parallel branches back together",
+    configSchema: [],
+    defaultConfig: {},
+  },
+  {
+    type: "loop",
+    label: "Loop",
+    category: "flow",
+    icon: RefreshCw,
+    color: "#ec4899",
+    description: "Repeat a set of nodes until a condition is satisfied",
+    configSchema: [
+      {
+        key: "maxIterations",
+        label: "Max Iterations",
+        type: "number",
+        placeholder: "10",
+        group: "Loop Config",
+      },
+      {
+        key: "exitCondition",
+        label: "Exit Condition",
+        type: "expression",
+        placeholder: "e.g. node.output.done === true",
+        group: "Loop Config",
+      },
+    ],
+    defaultConfig: {},
+  },
+  {
+    type: "sub_workflow",
+    label: "Sub-Workflow",
+    category: "flow",
+    icon: Workflow,
+    color: "#8b5cf6",
+    description: "Embed and execute another workflow definition",
+    configSchema: [
+      {
+        key: "workflowId",
+        label: "Workflow ID",
+        type: "text",
+        placeholder: "Workflow definition ID",
+        required: true,
+        group: "Sub-Workflow",
+      },
+      {
+        key: "inputMapping",
+        label: "Input Mapping",
+        type: "json",
+        placeholder: '{"key": "{{node.output.value}}"}',
+        group: "Sub-Workflow",
+      },
+    ],
+    defaultConfig: {},
+  },
+
+  // ── Human ──────────────────────────────────────────────────────────────────
+  {
+    type: "human_review",
+    label: "Human Review",
+    category: "human",
+    icon: UserCheck,
+    color: "#10b981",
+    description: "Pause for human approval or review",
+    configSchema: [
+      {
+        key: "prompt",
+        label: "Review Prompt",
+        type: "textarea",
+        placeholder: "What should the reviewer check?",
+        group: "Review",
+      },
+      {
+        key: "reviewerHint",
+        label: "Reviewer Hint",
+        type: "text",
+        placeholder: "Optional hint for the reviewer",
+        group: "Review",
+      },
+    ],
+    defaultConfig: {},
+  },
+  {
+    type: "wait_event",
+    label: "Wait Event",
+    category: "human",
+    icon: Webhook,
+    color: "#64748b",
+    description: "Pause until an external event is received",
+    configSchema: [
+      {
+        key: "eventType",
+        label: "Event Type",
+        type: "text",
+        placeholder: "e.g. webhook_received",
+        required: true,
+        group: "Event",
+      },
+      {
+        key: "timeout",
+        label: "Timeout (seconds)",
+        type: "number",
+        placeholder: "Timeout in seconds",
+        group: "Event",
+      },
+    ],
+    defaultConfig: {},
+  },
+
+  // ── Action ─────────────────────────────────────────────────────────────────
+  {
+    type: "notification",
+    label: "Notification",
+    category: "action",
+    icon: Bell,
+    color: "#eab308",
+    description: "Send a notification message to a channel",
+    configSchema: [
+      {
+        key: "message",
+        label: "Message",
+        type: "textarea",
+        placeholder: "Supports {{node.output.field}} variables",
+        required: true,
+        group: "Notification",
+      },
+      {
+        key: "channel",
+        label: "Channel",
+        type: "text",
+        placeholder: "e.g. #general or email",
+        group: "Notification",
+      },
+    ],
+    defaultConfig: {},
+  },
+  {
+    type: "status_transition",
+    label: "Status Transition",
+    category: "action",
+    icon: ArrowRightLeft,
+    color: "#a855f7",
+    description: "Transition a work item to a new status",
+    configSchema: [
+      {
+        key: "targetStatus",
+        label: "Target Status",
+        type: "select",
+        options: [
+          "inbox",
+          "triaged",
+          "assigned",
+          "in_progress",
+          "blocked",
+          "in_review",
+          "changes_requested",
+          "done",
+          "cancelled",
+          "budget_exceeded",
+        ],
+        required: true,
+        group: "Status",
+      },
+    ],
+    defaultConfig: {},
+  },
+];
+
+export function getNodeMeta(type: string): NodeTypeMeta | undefined {
+  return NODE_REGISTRY.find((n) => n.type === type);
+}
+
+export function getNodesByCategory(category: NodeCategory): NodeTypeMeta[] {
+  return NODE_REGISTRY.filter((n) => n.category === category);
+}
