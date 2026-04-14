@@ -6,7 +6,7 @@
 
 ## Context
 
-AgentForge's backend workflow engine is production-grade: 12+ node types, DAG execution with data flow, template system, human review, external events, parallel execution, loops, and an expression engine. The frontend editor covers ~70-75% of backend capabilities. Key gaps: no node configuration UI, incomplete node palette (5 of 13 types missing from toolbar), no edge condition editing, no data flow preview, and limited canvas interactions (no undo/redo, copy/paste, or alignment aids).
+AgentForge's backend workflow engine is production-grade: 14 node types (trigger, condition, agent_dispatch, notification, status_transition, gate, parallel_split, parallel_join, llm_agent, function, loop, human_review, wait_event, sub_workflow), DAG execution with data flow, template system, human review, external events, parallel execution, loops, and an expression engine. The frontend editor covers ~70-75% of backend capabilities. Key gaps: no node configuration UI, incomplete node palette (6 of 14 types missing from toolbar), no edge condition editing, no data flow preview, and limited canvas interactions (no undo/redo, copy/paste, or alignment aids).
 
 This design extracts the workflow editor into a self-contained module and fills all feature gaps.
 
@@ -39,12 +39,12 @@ components/workflow-editor/
 │   ├── custom-edge.tsx           # Custom edge component with click-to-edit condition
 │   └── snap-grid.ts             # Alignment guide/snap logic
 ├── nodes/
-│   ├── node-types.tsx            # 13 node type definitions (migrated from workflow-node-types.tsx)
+│   ├── node-types.tsx            # 14 node type definitions (migrated from workflow-node-types.tsx)
 │   ├── node-registry.ts          # Node metadata registry (icon, color, config schema, category)
 │   └── node-styles.ts            # Node style constants extracted
 ├── toolbar/
 │   ├── editor-toolbar.tsx        # Toolbar (migrated from workflow-toolbar.tsx)
-│   └── node-palette.tsx          # Complete 13-node categorized drag palette
+│   └── node-palette.tsx          # Complete 14-node categorized drag palette
 ├── config-panel/
 │   ├── node-config-panel.tsx     # Right drawer accordion panel
 │   ├── edge-config-panel.tsx     # Edge condition editing panel
@@ -62,7 +62,8 @@ components/workflow-editor/
 │       ├── status-transition-config.tsx
 │       ├── gate-config.tsx
 │       ├── parallel-split-config.tsx
-│       └── parallel-join-config.tsx
+│       ├── parallel-join-config.tsx
+│       └── sub-workflow-config.tsx
 ```
 
 ### Public API
@@ -95,11 +96,13 @@ Editor-internal state is managed via React Context + `useReducer`, fully decoupl
 
 ```ts
 interface EditorState {
+  name: string;            // Workflow name (editable)
+  description: string;     // Workflow description (editable)
   nodes: Node[];           // ReactFlow Node[]
   edges: Edge[];           // ReactFlow Edge[]
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
-  undoStack: Snapshot[];   // { nodes, edges }
+  undoStack: Snapshot[];   // { nodes, edges } — name/description are excluded from undo/redo snapshots as they are metadata, not graph state
   redoStack: Snapshot[];
   dirty: boolean;
   clipboard: Node[];
@@ -110,7 +113,9 @@ interface EditorState {
 
 | Action | Effect |
 |--------|--------|
-| `LOAD` | Initialize from WorkflowDefinition; clear undo/redo |
+| `LOAD` | Initialize name, description, nodes, edges from WorkflowDefinition; clear undo/redo |
+| `UPDATE_NAME` | Set name → mark dirty |
+| `UPDATE_DESCRIPTION` | Set description → mark dirty |
 | `ADD_NODE` | Push snapshot → add node → mark dirty |
 | `DELETE_NODES` | Push snapshot → remove nodes + connected edges → mark dirty |
 | `UPDATE_NODE_CONFIG` | Push snapshot → merge config into node.data.config → mark dirty |
@@ -132,7 +137,7 @@ interface EditorState {
 - Every mutation action (ADD_NODE, DELETE_NODES, UPDATE_NODE_CONFIG, ADD_EDGE, etc.) pushes a `{nodes, edges}` snapshot onto undoStack before applying the change.
 - UNDO pops undoStack top, pushes current state to redoStack, restores popped snapshot.
 - Any new mutation clears redoStack.
-- Stack depth capped at 50.
+- Stack depth capped at 50. A snapshot of a 100-node/200-edge workflow is ~50KB serialized, so 50 snapshots ≈ 2.5MB — acceptable for browser memory. If workflows grow significantly larger, switch to storing diffs instead of full snapshots.
 
 ### Interaction with Zustand Store
 
@@ -147,6 +152,13 @@ Zustand workflow-store.updateDefinition() → PUT /api/v1/workflows/:id
 
 The editor module never imports or calls Zustand directly. The parent page provides callbacks.
 
+### Unsaved Changes Guard
+
+When `dirty === true`:
+- Register a `beforeunload` browser event listener to warn on tab close/refresh.
+- When the user clicks "Back to list" or navigates away from the editor, show a confirmation dialog: "You have unsaved changes. Discard and leave?"
+- The `dirty` flag is set by any mutation action and cleared by `MARK_CLEAN` (dispatched after successful save).
+
 ## 3. Node Palette
 
 ### Node Categories
@@ -156,7 +168,7 @@ The editor module never imports or calls Zustand directly. The parent page provi
 | **Entry** | trigger | Workflow entry point |
 | **Logic** | condition, gate, function | Control flow and computation |
 | **Agent** | agent_dispatch, llm_agent | AI task execution |
-| **Flow Control** | parallel_split, parallel_join, loop | Parallelism and iteration |
+| **Flow Control** | parallel_split, parallel_join, loop, sub_workflow | Parallelism, iteration, and hierarchical composition |
 | **Human** | human_review, wait_event | Human-in-the-loop and external signals |
 | **Action** | notification, status_transition | Side-effect actions |
 
@@ -237,13 +249,15 @@ Uses scrollable accordion pattern (not tabs). All config groups are collapsible 
 | gate | expression (pass condition) |
 | parallel_split | (label only) |
 | parallel_join | (label only) |
+| sub_workflow | workflowId (dropdown of available workflow definitions), inputMapping (JSON key-value for passing data to child workflow) |
 
 ### Schema-Driven vs Custom Override
 
-Most nodes render forms from `configSchema` automatically. Two nodes get custom override components:
+Most nodes render forms from `configSchema` automatically. Three nodes get custom override components:
 
 - **`llm-agent-config.tsx`**: runtime → provider → model cascade dropdowns (selecting runtime changes provider list, selecting provider changes model list).
 - **`condition-config.tsx`**: Embeds the shared hybrid condition builder component.
+- **`sub-workflow-config.tsx`**: Workflow selector dropdown (fetches available definitions for the project) + input mapping JSON editor for passing data to the child workflow.
 
 All other nodes use the generic schema-driven renderer.
 
@@ -283,7 +297,7 @@ Shared component used by edge conditions, condition nodes, gate nodes, and loop 
 **Visual Mode:**
 - Node dropdown: lists all upstream predecessor nodes (derived from DAG traversal).
 - Field dropdown: lists known output fields for the selected upstream node.
-- Operator dropdown: `==`, `!=`, `>`, `<`, `>=`, `<=`, `contains`.
+- Operator dropdown: `==`, `!=`, `>`, `<`, `>=`, `<=` (matching the backend expression engine's supported operators; no `contains` — use expression mode with `len()` for advanced checks).
 - Value input: free text, auto-infers type (number/boolean/string).
 - Live expression preview below: e.g., `{{planner.output.subtasks}} > 0`.
 
@@ -311,10 +325,10 @@ Embedded in the "Data Flow" accordion group of the node config panel. Available 
   - Known output field paths with copy-to-clipboard buttons (`{{node_id.output.field}}`).
 - Bottom hint: "Type `{{node.output.field}}` in any config to reference upstream data."
 
-**Field Discovery Logic:**
-1. If the upstream node has a known output structure from its `configSchema` metadata, show those fields.
-2. If the workflow has been executed before, parse actual output keys from the DataStore (requires fetching execution data).
-3. Fallback: show generic `output.*` placeholder.
+**Field Discovery Logic (initial implementation uses only tiers 1 and 3):**
+1. If the upstream node has a known output structure from its `configSchema` metadata (e.g., llm_agent always outputs `output`), show preset fields.
+2. *(Deferred to future phase)* If the workflow has been executed before, fetch execution via `GET /api/v1/executions/:id` and parse `dataStore[nodeId]` keys to show actual output structure. This requires discovering the most recent execution for the workflow, which is not yet specified in the API.
+3. Fallback: show generic `output.*` placeholder with a hint to run the workflow once for richer suggestions.
 
 ## 7. Canvas Interaction Enhancements
 
@@ -325,7 +339,7 @@ Embedded in the "Data Flow" accordion group of the node config panel. Available 
 
 ### Copy/Paste
 - `Ctrl+C`: copies selected nodes (single or multi-select) to clipboard within EditorContext.
-- `Ctrl+V`: pastes with new IDs and position offset (+50, +50). Internal edges between pasted nodes are preserved; edges to external nodes are dropped.
+- `Ctrl+V`: pastes with new IDs and position offset (+50, +50). An edge is "internal" if both its source and target are in the copied node ID set — these edges are preserved with remapped IDs. Edges connecting to nodes outside the copied set are dropped.
 
 ### Multi-Select
 - Enable ReactFlow's `selectionOnDrag` prop.
@@ -334,7 +348,7 @@ Embedded in the "Data Flow" accordion group of the node config panel. Available 
 ### Alignment Guides (`snap-grid.ts`)
 - On node drag, calculate proximity to other nodes' X/Y coordinates.
 - Display dashed guide lines when within 8px snap threshold.
-- Implemented via ReactFlow's `onNodeDrag` callback computing nearest alignment candidates.
+- Implemented via ReactFlow's `onNodeDrag` callback computing nearest alignment candidates. Limit alignment calculation to visible viewport nodes and cap at 20 nearest neighbors to avoid per-pixel overhead on large graphs.
 
 ### Keyboard Shortcuts
 
@@ -356,7 +370,7 @@ Embedded in the "Data Flow" accordion group of the node config panel. Available 
 3. Update `app/(dashboard)/workflow/page.tsx` to import `<WorkflowEditor>` from the new module.
 4. Verify all existing functionality works (create, edit, save, execute workflows).
 5. Delete old `components/workflow/workflow-canvas.tsx`, `workflow-node-types.tsx`, `workflow-toolbar.tsx`.
-6. Keep `workflow-config-panel.tsx` and `workflow-execution-view.tsx` in `components/workflow/` (out of scope for this design).
+6. Keep `workflow-config-panel.tsx` and `workflow-execution-view.tsx` in `components/workflow/` (out of scope for this design). Note: `workflow-config-panel.tsx` manages project-level workflow state-machine configuration (status transitions and automation triggers), not per-node configuration. It remains unchanged.
 
 ## 9. Out of Scope
 
