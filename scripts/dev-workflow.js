@@ -141,12 +141,17 @@ function getDockerDesktopExecutablePath() {
     return null;
   }
 
+  const programFiles = process.env.ProgramFiles ?? "C:\\Program Files";
+  const localAppData =
+    process.env.LocalAppData ??
+    (process.env.USERPROFILE
+      ? path.win32.join(process.env.USERPROFILE, "AppData", "Local")
+      : null);
+
   const candidates = [
-    process.env.ProgramFiles
-      ? path.join(process.env.ProgramFiles, "Docker", "Docker", "Docker Desktop.exe")
-      : null,
-    process.env.LocalAppData
-      ? path.join(process.env.LocalAppData, "Programs", "Docker", "Docker", "Docker Desktop.exe")
+    path.win32.join(programFiles, "Docker", "Docker", "Docker Desktop.exe"),
+    localAppData
+      ? path.win32.join(localAppData, "Programs", "Docker", "Docker", "Docker Desktop.exe")
       : null,
   ].filter(Boolean);
 

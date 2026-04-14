@@ -861,6 +861,11 @@ describe("dev-all workflow contract", () => {
 
   test("stops managed Windows processes and the current listening pid on the service port", async () => {
     jest.resetModules();
+    const originalPlatform = Object.getOwnPropertyDescriptor(process, "platform");
+    Object.defineProperty(process, "platform", {
+      value: "win32",
+      configurable: true,
+    });
 
     const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-devall-stop-"));
     const runCommandSync = jest.fn((command, args) => {
@@ -906,18 +911,23 @@ describe("dev-all workflow contract", () => {
 
     const { runDevAllStop } = require("./dev-all.js");
 
-    const result = await runDevAllStop({ repoRoot });
+    try {
+      const result = await runDevAllStop({ repoRoot });
 
-    expect(result.ok).toBe(true);
-    expect(runCommandSync).toHaveBeenCalledWith(
-      "cmd.exe",
-      ["/d", "/s", "/c", "netstat -ano | findstr LISTENING | findstr :3000"],
-      expect.any(Object),
-    );
-    expect(killSpy).toHaveBeenCalledWith(111);
-    expect(killSpy).toHaveBeenCalledWith(222);
-    expect(writeRuntimeState).toHaveBeenCalled();
-
-    killSpy.mockRestore();
+      expect(result.ok).toBe(true);
+      expect(runCommandSync).toHaveBeenCalledWith(
+        "cmd.exe",
+        ["/d", "/s", "/c", "netstat -ano | findstr LISTENING | findstr :3000"],
+        expect.any(Object),
+      );
+      expect(killSpy).toHaveBeenCalledWith(111);
+      expect(killSpy).toHaveBeenCalledWith(222);
+      expect(writeRuntimeState).toHaveBeenCalled();
+    } finally {
+      killSpy.mockRestore();
+      if (originalPlatform) {
+        Object.defineProperty(process, "platform", originalPlatform);
+      }
+    }
   });
 });
