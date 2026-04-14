@@ -26,28 +26,28 @@ export type Snapshot = {
   edges: Edge[];
 };
 
-// ── Editor actions ────────────────────────────────────────────────────────────
+// ── Editor actions (flat shape — no payload wrapper) ──────────────────────────
 
 export type EditorAction =
-  | { type: "LOAD"; payload: { nodes: Node[]; edges: Edge[]; name?: string; description?: string } }
-  | { type: "UPDATE_NAME"; payload: { name: string } }
-  | { type: "UPDATE_DESCRIPTION"; payload: { description: string } }
-  | { type: "ADD_NODE"; payload: { node: Node } }
-  | { type: "DELETE_NODES"; payload: { ids: string[] } }
-  | { type: "UPDATE_NODE_CONFIG"; payload: { id: string; config: Record<string, unknown> } }
-  | { type: "UPDATE_NODE_LABEL"; payload: { id: string; label: string } }
-  | { type: "ADD_EDGE"; payload: { edge: Edge } }
-  | { type: "DELETE_EDGE"; payload: { id: string } }
-  | { type: "UPDATE_EDGE_CONDITION"; payload: { id: string; condition: string } }
-  | { type: "SELECT_NODE"; payload: { id: string } }
-  | { type: "SELECT_EDGE"; payload: { id: string } }
+  | { type: "LOAD"; name: string; description: string; nodes: Node[]; edges: Edge[] }
+  | { type: "UPDATE_NAME"; name: string }
+  | { type: "UPDATE_DESCRIPTION"; description: string }
+  | { type: "ADD_NODE"; node: Node }
+  | { type: "DELETE_NODES"; nodeIds: string[] }
+  | { type: "UPDATE_NODE_CONFIG"; nodeId: string; config: Record<string, unknown> }
+  | { type: "UPDATE_NODE_LABEL"; nodeId: string; label: string }
+  | { type: "ADD_EDGE"; edge: Edge }
+  | { type: "DELETE_EDGE"; edgeId: string }
+  | { type: "UPDATE_EDGE_CONDITION"; edgeId: string; condition: string; label?: string }
+  | { type: "SELECT_NODE"; nodeId: string }
+  | { type: "SELECT_EDGE"; edgeId: string }
   | { type: "DESELECT" }
   | { type: "UNDO" }
   | { type: "REDO" }
-  | { type: "COPY"; payload: { nodes: Node[] } }
-  | { type: "PASTE"; payload: { offset?: { x: number; y: number } } }
+  | { type: "COPY"; nodes: Node[] }
+  | { type: "PASTE" }
   | { type: "MARK_CLEAN" }
-  | { type: "SYNC_REACTFLOW"; payload: { nodes: Node[]; edges: Edge[] } };
+  | { type: "SYNC_REACTFLOW"; nodes: Node[]; edges: Edge[] };
 
 // ── Editor state ──────────────────────────────────────────────────────────────
 
