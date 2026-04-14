@@ -631,7 +631,11 @@ export function TeamManagement({
               </SelectContent>
             </Select>
           </div>
-          <Button type="button" onClick={() => setShowCreateForm((value) => !value)}>
+          <Button
+            type="button"
+            disabled={!selectedProjectId}
+            onClick={() => setShowCreateForm((value) => !value)}
+          >
             <Plus className="mr-1 size-4" />
             Add Member
           </Button>
@@ -832,15 +836,26 @@ export function TeamManagement({
         <Card>
           <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
             <Users className="size-10 text-muted-foreground" />
-            <div className="space-y-1">
-              <p className="font-medium">No team members yet.</p>
-              <p className="text-sm text-muted-foreground">
-                Add the first human or agent collaborator for this project.
-              </p>
-            </div>
-            <Button type="button" onClick={() => setShowCreateForm(true)}>
-              Add the first member
-            </Button>
+            {selectedProjectId ? (
+              <>
+                <div className="space-y-1">
+                  <p className="font-medium">No team members yet.</p>
+                  <p className="text-sm text-muted-foreground">
+                    Add the first human or agent collaborator for this project.
+                  </p>
+                </div>
+                <Button type="button" onClick={() => setShowCreateForm(true)}>
+                  Add the first member
+                </Button>
+              </>
+            ) : (
+              <div className="space-y-1">
+                <p className="font-medium">No project selected.</p>
+                <p className="text-sm text-muted-foreground">
+                  Select a project above to view and manage its team members.
+                </p>
+              </div>
+            )}
           </CardContent>
         </Card>
       ) : (
