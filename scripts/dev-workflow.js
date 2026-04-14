@@ -12,6 +12,112 @@ const DOCKER_INFO_TIMEOUT_MS = 10000;
 const DOCKER_DESKTOP_START_TIMEOUT_MS = 10000;
 const DOCKER_DESKTOP_STATUS_TIMEOUT_MS = 5000;
 
+// --- ANSI Color Helpers ---
+
+const isTTY = process.stdout.isTTY && !process.env.NO_COLOR;
+
+function colorGreen(text) {
+  return isTTY ? `\x1b[32m${text}\x1b[0m` : text;
+}
+
+function colorRed(text) {
+  return isTTY ? `\x1b[31m${text}\x1b[0m` : text;
+}
+
+function colorYellow(text) {
+  return isTTY ? `\x1b[33m${text}\x1b[0m` : text;
+}
+
+function colorCyan(text) {
+  return isTTY ? `\x1b[36m${text}\x1b[0m` : text;
+}
+
+function colorDim(text) {
+  return isTTY ? `\x1b[2m${text}\x1b[0m` : text;
+}
+
+function colorBold(text) {
+  return isTTY ? `\x1b[1m${text}\x1b[0m` : text;
+}
+
+function statusIcon(ok) {
+  return ok ? colorGreen("\u2713") : colorRed("\u2717");
+}
+
+function statusLabel(status) {
+  switch (status) {
+    case "ready":
+      return colorGreen("ready");
+    case "healthy":
+      return colorGreen("healthy");
+    case "started":
+      return colorGreen("started");
+    case "reused":
+      return colorCyan("reused");
+    case "skipped":
+      return colorYellow("skipped");
+    case "degraded":
+      return colorYellow("degraded");
+    case "unhealthy":
+      return colorRed("unhealthy");
+    case "stopped":
+      return colorRed("stopped");
+    case "stale":
+      return colorRed("stale");
+    case "conflict":
+      return colorRed("conflict");
+    default:
+      return status;
+  }
+}
+
+// --- Version Checks ---
+
+function getCommandVersion(command) {
+  const args = command === "go" ? ["version"] : ["--version"];
+  const result = spawnSync(command, args, {
+    encoding: "utf8",
+    timeout: 5000,
+    stdio: ["ignore", "pipe", "pipe"],
+  });
+  if (result.status !== 0) return null;
+  return (result.stdout ?? "").trim().split(/\r?\n/u)[0] ?? null;
+}
+
+function checkPrerequisiteVersions(services) {
+  const checks = [];
+  const commandsSeen = new Set();
+
+  for (const service of services) {
+    const cmd = service.start?.command;
+    if (!cmd || commandsSeen.has(cmd)) continue;
+    commandsSeen.add(cmd);
+
+    if (fs.existsSync(cmd)) continue; // prepared binary, skip
+    const version = getCommandVersion(cmd);
+    checks.push({
+      command: cmd,
+      version,
+      available: version !== null,
+    });
+  }
+
+  return checks;
+}
+
+// --- Log Tail ---
+
+function tailFile(filePath, lines = 20) {
+  if (!filePath || !fs.existsSync(filePath)) return null;
+  try {
+    const content = fs.readFileSync(filePath, "utf8");
+    const allLines = content.split(/\r?\n/u);
+    return allLines.slice(-lines).join("\n").trim() || null;
+  } catch {
+    return null;
+  }
+}
+
 function getWorkflowPaths({
   repoRoot = getRepoRoot(),
   stateFileName = "dev-all-state.json",
@@ -335,6 +441,108 @@ function isProcessAlive(pid) {
   }
 }
 
+function killProcessTree(pid) {
+  if (!pid || typeof pid !== "number") {
+    return false;
+  }
+
+  if (process.platform === "win32") {
+    // taskkill /T kills the entire process tree, /F forces termination
+    const result = spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
+      encoding: "utf8",
+      stdio: "pipe",
+      timeout: 10000,
+    });
+    return result.status === 0;
+  }
+
+  // Unix: try SIGTERM first for graceful shutdown
+  try {
+    process.kill(-pid, "SIGTERM");
+  } catch {
+    try {
+      process.kill(pid, "SIGTERM");
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function forceKillProcessTree(pid) {
+  if (!pid || typeof pid !== "number") {
+    return false;
+  }
+
+  if (process.platform === "win32") {
+    const result = spawnSync("taskkill", ["/T", "/F", "/PID", String(pid)], {
+      encoding: "utf8",
+      stdio: "pipe",
+      timeout: 10000,
+    });
+    return result.status === 0;
+  }
+
+  try {
+    process.kill(-pid, "SIGKILL");
+  } catch {
+    try {
+      process.kill(pid, "SIGKILL");
+    } catch {
+      return false;
+    }
+  }
+  return true;
+}
+
+function getListeningPidForPort(port) {
+  if (process.platform === "win32") {
+    const result = spawnSync(
+      "cmd.exe",
+      ["/d", "/s", "/c", `netstat -ano | findstr LISTENING | findstr :${port}`],
+      { encoding: "utf8", timeout: 5000 },
+    );
+    if (result.status !== 0) return null;
+    const lines = (result.stdout ?? "").split(/\r?\n/u).map((l) => l.trim()).filter(Boolean);
+    const firstLine = lines[0] ?? "";
+    const parts = firstLine.split(/\s+/u);
+    const parsed = Number.parseInt(parts[parts.length - 1] ?? "", 10);
+    return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+  }
+
+  // Unix: use lsof
+  const result = spawnSync("lsof", ["-ti", `tcp:${port}`, "-sTCP:LISTEN"], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  if (result.status !== 0) return null;
+  const parsed = Number.parseInt((result.stdout ?? "").trim(), 10);
+  return Number.isFinite(parsed) && parsed > 0 ? parsed : null;
+}
+
+function getPortOwnerInfo(port) {
+  if (process.platform === "win32") {
+    const pid = getListeningPidForPort(port);
+    if (!pid) return null;
+    const result = spawnSync(
+      "cmd.exe",
+      ["/d", "/s", "/c", `tasklist /FI "PID eq ${pid}" /FO CSV /NH`],
+      { encoding: "utf8", timeout: 5000 },
+    );
+    const line = (result.stdout ?? "").trim().split(/\r?\n/u)[0] ?? "";
+    const match = line.match(/^"([^"]+)"/u);
+    return { pid, processName: match ? match[1] : "unknown" };
+  }
+
+  const pid = getListeningPidForPort(port);
+  if (!pid) return null;
+  const result = spawnSync("ps", ["-p", String(pid), "-o", "comm="], {
+    encoding: "utf8",
+    timeout: 5000,
+  });
+  return { pid, processName: (result.stdout ?? "").trim() || "unknown" };
+}
+
 function isPortListening(port, host = "127.0.0.1", timeoutMs = 750) {
   return new Promise((resolve) => {
     const socket = net.createConnection({ port, host });
@@ -463,17 +671,28 @@ function createStopPlan({ runtimeState } = {}) {
 
 module.exports = {
   canUseDockerCompose,
+  checkPrerequisiteVersions,
+  colorBold,
+  colorCyan,
+  colorDim,
+  colorGreen,
+  colorRed,
+  colorYellow,
   createEmptyRuntimeState,
   createStopPlan,
   ensureDirectory,
+  forceKillProcessTree,
   getDockerComposeAvailability,
   getDockerDesktopExecutablePath,
   getDockerDesktopStatus,
   getCommandVersionArgs,
+  getListeningPidForPort,
+  getPortOwnerInfo,
   getWorkflowPaths,
   isCommandAvailable,
   isPortListening,
   isProcessAlive,
+  killProcessTree,
   needsWindowsCmdWrapper,
   probeHealthUrl,
   probeServiceHealth,
@@ -481,5 +700,8 @@ module.exports = {
   reconcileRuntimeState,
   runCommandSync,
   startDockerDesktop,
+  statusIcon,
+  statusLabel,
+  tailFile,
   writeRuntimeState,
 };

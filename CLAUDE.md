@@ -38,6 +38,15 @@ pnpm dev:all          # Start compose infra + Go + Bridge + IM Bridge + frontend
 pnpm dev:all:status   # Check stack health
 pnpm dev:all:stop     # Stop managed services
 
+# Backend-only (no frontend)
+pnpm dev:backend            # Start PG + Redis + Go + Bridge + IM Bridge
+pnpm dev:backend:watch      # Same as above but with air hot-reload for Go
+pnpm dev:backend:status     # Check backend service health
+pnpm dev:backend:stop       # Stop backend services
+pnpm dev:backend:restart    # Restart a single service: pnpm dev:backend:restart go-orchestrator
+pnpm dev:backend:logs       # Show log file paths
+pnpm dev:backend:verify     # Full startup + health + smoke test
+
 # Add shadcn/ui components
 pnpm dlx shadcn@latest add <component-name>
 ```

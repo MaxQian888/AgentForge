@@ -14,19 +14,33 @@ const {
 } = require("./im-stub-smoke.js");
 const {
   canUseDockerCompose,
+  checkPrerequisiteVersions,
+  colorBold,
+  colorCyan,
+  colorDim,
+  colorGreen,
+  colorRed,
+  colorYellow,
   createEmptyRuntimeState,
   createStopPlan,
   ensureDirectory,
+  forceKillProcessTree,
   getDockerComposeAvailability,
+  getListeningPidForPort,
+  getPortOwnerInfo,
   getWorkflowPaths,
   isCommandAvailable,
   isPortListening,
   isProcessAlive,
+  killProcessTree,
   probeServiceHealth,
   readRuntimeState,
   reconcileRuntimeState,
   runCommandSync,
   startDockerDesktop,
+  statusIcon,
+  statusLabel,
+  tailFile,
   writeRuntimeState,
 } = require("./dev-workflow.js");
 
@@ -175,6 +189,41 @@ function getDevBackendPaths({ repoRoot = getRepoRoot() } = {}) {
   });
 }
 
+function detectAirAvailable() {
+  return isCommandAvailable("air", ["--version"]);
+}
+
+function getGoOrchestratorStartConfig({ repoRoot, jwtSecret, useAir = false }) {
+  const goEnv = {
+    ENV: "development",
+    PORT: "7777",
+    JWT_SECRET: jwtSecret,
+    GOCACHE: path.join(repoRoot, "src-go", ".gocache"),
+    GOFLAGS: "-p=1",
+    POSTGRES_URL: "postgres://dev:dev@127.0.0.1:5432/appdb?sslmode=disable",
+    REDIS_URL: "redis://127.0.0.1:6379",
+    BRIDGE_URL: "http://127.0.0.1:7778",
+  };
+
+  if (useAir) {
+    return {
+      source: "spawn",
+      command: "air",
+      args: [],
+      env: goEnv,
+      hotReload: true,
+    };
+  }
+
+  return {
+    source: "spawn",
+    command: "go",
+    args: ["run", "./cmd/server"],
+    env: goEnv,
+    hotReload: false,
+  };
+}
+
 function createServiceDefinitionsForProfile({
   profile = "all",
   repoRoot = getRepoRoot(),
@@ -188,6 +237,9 @@ function createServiceDefinitionsForProfile({
   const jwtSecret = LOCAL_DEV_JWT_SECRET;
   const imBridgeAccessToken =
     process.env.AGENTFORGE_API_KEY ?? createLocalDevAccessToken({ secret: jwtSecret });
+
+  const preferAir = process.env.PREFER_AIR === "1" || process.env.PREFER_AIR === "true";
+  const useAir = preferAir && detectAirAvailable();
 
   return [
     {
@@ -216,21 +268,7 @@ function createServiceDefinitionsForProfile({
       cwd: path.join(repoRoot, "src-go"),
       port: 7777,
       healthUrl: "http://127.0.0.1:7777/health",
-      start: {
-        source: "spawn",
-        command: "go",
-        args: ["run", "./cmd/server"],
-        env: {
-          ENV: "development",
-          PORT: "7777",
-          JWT_SECRET: jwtSecret,
-          GOCACHE: path.join(repoRoot, "src-go", ".gocache"),
-          GOFLAGS: "-p=1",
-          POSTGRES_URL: "postgres://dev:dev@127.0.0.1:5432/appdb?sslmode=disable",
-          REDIS_URL: "redis://127.0.0.1:6379",
-          BRIDGE_URL: "http://127.0.0.1:7778",
-        },
-      },
+      start: getGoOrchestratorStartConfig({ repoRoot, jwtSecret, useAir }),
     },
     {
       name: "ts-bridge",
@@ -453,12 +491,27 @@ async function ensureApplicationService(service, paths, runtimeState) {
   };
 }
 
+function isInfraOptional(serviceName) {
+  // Redis is optional — Go backend runs in degraded mode without it
+  return serviceName === "redis";
+}
+
+function getInfraInstallHint(serviceName) {
+  const hints = {
+    postgres: "Install PostgreSQL locally or start Docker Desktop. Native install: https://www.postgresql.org/download/",
+    redis: "Install Redis locally or start Docker Desktop. Native install: https://redis.io/download/",
+  };
+  return hints[serviceName] ?? `Install ${serviceName} or start Docker Desktop`;
+}
+
 async function ensureInfrastructure(repoRoot, services, runtimeState) {
   const results = [];
   const missingInfra = [];
 
   for (const service of services) {
     const trackedState = runtimeState.services?.[service.name];
+
+    // Probe 1: check if service is already healthy (native install, external, or previous run)
     if (await probeServiceHealth(service)) {
       results.push({
         ok: true,
@@ -476,11 +529,16 @@ async function ensureInfrastructure(repoRoot, services, runtimeState) {
       continue;
     }
 
+    // Probe 2: port is occupied by something else
     if (await isPortListening(service.port)) {
+      const ownerInfo = getPortOwnerInfo(service.port);
+      const ownerDetail = ownerInfo
+        ? ` (PID ${ownerInfo.pid}, ${ownerInfo.processName})`
+        : "";
       return {
         ok: false,
         reason: "external_unknown_listener",
-        detail: `Port ${service.port} is occupied but ${service.name} is not responding as expected`,
+        detail: `Port ${service.port} is occupied${ownerDetail} but ${service.name} is not responding as expected`,
         service,
         results,
       };
@@ -493,16 +551,46 @@ async function ensureInfrastructure(repoRoot, services, runtimeState) {
     return { ok: true, results };
   }
 
+  // Try docker-compose for missing infra
   const dockerComposeReady = await ensureDockerComposeReady();
   if (!dockerComposeReady.ok) {
-    return {
-      ok: false,
-      reason: dockerComposeReady.reason ?? "missing_prerequisite",
-      detail:
-        dockerComposeReady.detail ?? "docker compose is unavailable or Docker Desktop is not ready",
-      service: missingInfra[0],
-      results,
-    };
+    // Docker unavailable — check which services are optional vs required
+    const requiredMissing = missingInfra.filter((s) => !isInfraOptional(s.name));
+    const optionalMissing = missingInfra.filter((s) => isInfraOptional(s.name));
+
+    // Mark optional services as degraded
+    for (const service of optionalMissing) {
+      results.push({
+        ok: true,
+        action: "skipped",
+        service,
+        record: {
+          source: "unavailable",
+          pid: null,
+          port: service.port,
+          healthUrl: null,
+          composeService: service.composeService,
+          logPath: null,
+          errorLogPath: null,
+          startedAt: new Date().toISOString(),
+          lastKnownStatus: "degraded",
+        },
+      });
+    }
+
+    if (requiredMissing.length > 0) {
+      const hints = requiredMissing.map((s) => `  - ${s.name}: ${getInfraInstallHint(s.name)}`).join("\n");
+      return {
+        ok: false,
+        reason: "infra_unavailable",
+        detail: `Required infrastructure not running and Docker is unavailable:\n${hints}`,
+        service: requiredMissing[0],
+        results,
+      };
+    }
+
+    // All missing infra was optional
+    return { ok: true, results };
   }
 
   const composeServices = missingInfra.map((service) => service.composeService);
@@ -523,6 +611,26 @@ async function ensureInfrastructure(repoRoot, services, runtimeState) {
 
   for (const service of missingInfra) {
     if (!(await waitForServiceHealth(service))) {
+      if (isInfraOptional(service.name)) {
+        results.push({
+          ok: true,
+          action: "skipped",
+          service,
+          record: {
+            source: "unavailable",
+            pid: null,
+            port: service.port,
+            healthUrl: null,
+            composeService: service.composeService,
+            logPath: null,
+            errorLogPath: null,
+            startedAt: new Date().toISOString(),
+            lastKnownStatus: "degraded",
+          },
+        });
+        continue;
+      }
+
       return {
         ok: false,
         reason: "infra_unhealthy",
@@ -684,6 +792,9 @@ async function runWorkflowStart({
   const infrastructureServices = getInfrastructureServices(serviceDefinitions);
   const applicationServices = getApplicationServices(serviceDefinitions);
 
+  // Print prerequisite versions for visibility
+  printPrerequisiteVersions(applicationServices);
+
   const applicationChecks = applicationServices
     .map(getCommandAvailabilityCheck)
     .filter(Boolean);
@@ -729,6 +840,7 @@ async function runWorkflowStart({
       healthUrl: result.record.healthUrl ?? null,
       logPath: result.record.logPath ?? null,
       errorLogPath: result.record.errorLogPath ?? null,
+      hotReload: result.service.start?.hotReload ?? false,
     })),
   };
 }
@@ -1035,59 +1147,23 @@ async function runDevBackendStatus({ repoRoot = getRepoRoot() } = {}) {
   });
 }
 
-function getListeningPidForPort(port) {
-  if (process.platform !== "win32") {
-    return null;
-  }
-
-  const result = runCommandSync(
-    "cmd.exe",
-    ["/d", "/s", "/c", `netstat -ano | findstr LISTENING | findstr :${port}`],
-    {
-      encoding: "utf8",
-    },
-  );
-
-  if (result.status !== 0) {
-    return null;
-  }
-
-  const lines = (result.stdout ?? "")
-    .split(/\r?\n/u)
-    .map((line) => line.trim())
-    .filter(Boolean);
-  const firstLine = lines[0] ?? "";
-  const parts = firstLine.split(/\s+/u);
-  const parsed = Number.parseInt(parts[parts.length - 1] ?? "", 10);
-  return Number.isFinite(parsed) ? parsed : null;
-}
-
 async function stopManagedServiceProcesses(managedServices) {
   const stopped = [];
   for (const service of managedServices) {
+    // Phase 1: graceful kill via process tree
     if (service.pid && isProcessAlive(service.pid)) {
-      if (process.platform === "win32") {
-        try {
-          process.kill(service.pid);
-        } catch {
-          // ignore and let the listener-pid fallback handle any surviving process
-        }
-      } else {
-        try {
-          process.kill(service.pid);
-        } catch {
-          // ignore and let status reconciliation pick up the stale process later
-        }
-      }
+      killProcessTree(service.pid);
     }
 
-    if (process.platform === "win32" && service.port) {
-      const portOwnerPid = getListeningPidForPort(service.port);
-      if (portOwnerPid && portOwnerPid !== service.pid) {
-        try {
-          process.kill(portOwnerPid);
-        } catch {
-          // ignore and let status reconciliation report any remaining listener
+    // Phase 2: wait briefly for port release, then force kill residuals
+    if (service.port) {
+      await delay(500);
+      if (await isPortListening(service.port)) {
+        // Port still occupied — find and kill the residual process
+        const residualPid = getListeningPidForPort(service.port);
+        if (residualPid) {
+          forceKillProcessTree(residualPid);
+          await delay(300);
         }
       }
     }
@@ -1222,82 +1298,218 @@ function runDevBackendLogs({ repoRoot = getRepoRoot() } = {}) {
   });
 }
 
+function printPrerequisiteVersions(serviceDefinitions) {
+  const checks = checkPrerequisiteVersions(serviceDefinitions);
+  if (checks.length === 0) return;
+
+  console.log(colorDim("Prerequisites:"));
+  for (const check of checks) {
+    const icon = check.available ? colorGreen("\u2713") : colorRed("\u2717");
+    const ver = check.available ? colorDim(check.version) : colorRed("not found");
+    console.log(`  ${icon} ${check.command}: ${ver}`);
+  }
+  console.log();
+}
+
 function printStartResult(result, workflowProfile = WORKFLOW_PROFILES.all) {
   if (!result.ok) {
     console.error(
-      `${workflowProfile.commandLabel} failed for ${result.service?.name ?? "workflow"}: ${result.detail}`,
+      `${colorRed("FAIL")} ${workflowProfile.commandLabel} failed for ${colorBold(result.service?.name ?? "workflow")}`,
     );
-    if (result.logPaths?.stdoutPath || result.logPaths?.stderrPath) {
-      console.error(`Logs: ${result.logPaths?.stdoutPath ?? "-"} / ${result.logPaths?.stderrPath ?? "-"}`);
+    console.error(`      ${result.detail}`);
+    if (result.logPaths?.stderrPath) {
+      const tail = tailFile(result.logPaths.stderrPath, 15);
+      if (tail) {
+        console.error(colorDim("\n--- last stderr lines ---"));
+        console.error(colorDim(tail));
+        console.error(colorDim("--- end ---\n"));
+      }
+      console.error(`      Logs: ${result.logPaths.stdoutPath ?? "-"} / ${result.logPaths.stderrPath ?? "-"}`);
     }
     return 1;
   }
 
-  console.log(`${workflowProfile.displayName} workflow ready:`);
+  console.log(`${colorGreen("\u2713")} ${colorBold(workflowProfile.displayName)} workflow ready:\n`);
   for (const service of result.services) {
     const endpoint = service.healthUrl ?? (service.port ? `tcp://127.0.0.1:${service.port}` : "n/a");
-    console.log(`- ${service.name}: ${service.action} (${service.source}) -> ${endpoint}`);
+    const actionLabel = statusLabel(service.action);
+    const hotReload = service.hotReload ? colorCyan(" [hot-reload]") : "";
+    console.log(`  ${statusIcon(true)} ${colorBold(service.name)}: ${actionLabel} (${service.source})${hotReload}`);
+    console.log(`    ${colorDim(endpoint)}`);
     if (service.logPath || service.errorLogPath) {
-      console.log(`  logs: ${service.logPath ?? "-"} / ${service.errorLogPath ?? "-"}`);
+      console.log(`    ${colorDim(`logs: ${service.logPath ?? "-"} / ${service.errorLogPath ?? "-"}`)}`);
     }
   }
-  console.log(`State: ${result.paths.statePath}`);
+  console.log(`\n${colorDim(`State: ${result.paths.statePath}`)}`);
   return 0;
 }
 
 function printStatusResult(result, workflowProfile = WORKFLOW_PROFILES.all) {
-  console.log(`${workflowProfile.displayName} status:`);
+  console.log(`${colorBold(workflowProfile.displayName)} status:\n`);
   for (const service of Object.values(result.report.services)) {
     const endpoint = service.healthUrl ?? (service.port ? `tcp://127.0.0.1:${service.port}` : "n/a");
+    const icon = statusIcon(service.status === "ready");
     console.log(
-      `- ${service.name}: ${service.status} (${service.source}, ${service.health}) -> ${endpoint}`,
+      `  ${icon} ${colorBold(service.name)}: ${statusLabel(service.status)} (${service.source}, ${statusLabel(service.health)})`,
     );
+    console.log(`    ${colorDim(endpoint)}`);
     if (service.logPath || service.errorLogPath) {
-      console.log(`  logs: ${service.logPath ?? "-"} / ${service.errorLogPath ?? "-"}`);
+      console.log(`    ${colorDim(`logs: ${service.logPath ?? "-"} / ${service.errorLogPath ?? "-"}`)}`);
     }
   }
-  console.log(`State: ${result.paths.statePath}`);
+  console.log(`\n${colorDim(`State: ${result.paths.statePath}`)}`);
   return 0;
 }
 
 function printStopResult(result, workflowProfile = WORKFLOW_PROFILES.all) {
   if (!result.ok) {
-    console.error(`${workflowProfile.commandLabel}:stop failed: ${result.detail}`);
+    console.error(`${colorRed("FAIL")} ${workflowProfile.commandLabel}:stop failed: ${result.detail}`);
     return 1;
   }
 
-  console.log(`Stopped managed services: ${result.stopped.join(", ") || "none"}`);
-  console.log(`Preserved reused/external services: ${result.preserved.join(", ") || "none"}`);
-  console.log(`State: ${result.paths.statePath}`);
+  if (result.stopped.length > 0) {
+    console.log(`${colorGreen("\u2713")} Stopped: ${result.stopped.join(", ")}`);
+  } else {
+    console.log(`${colorDim("No managed services to stop.")}`);
+  }
+  if (result.preserved.length > 0) {
+    console.log(`${colorYellow("\u21B3")} Preserved (external): ${result.preserved.join(", ")}`);
+  }
+  console.log(colorDim(`State: ${result.paths.statePath}`));
   return 0;
 }
 
 function printLogsResult(result, workflowProfile = WORKFLOW_PROFILES.all) {
-  console.log(`Known ${workflowProfile.commandLabel} logs:`);
+  console.log(`${colorBold(workflowProfile.commandLabel)} logs:\n`);
   for (const log of result.logs) {
-    console.log(`- ${log.name}: ${log.logPath ?? "-"} / ${log.errorLogPath ?? "-"}`);
+    console.log(`  ${colorCyan(log.name)}:`);
+    console.log(`    stdout: ${log.logPath ?? colorDim("n/a")}`);
+    console.log(`    stderr: ${log.errorLogPath ?? colorDim("n/a")}`);
   }
-  console.log(`Runtime logs directory: ${result.paths.runtimeLogsDir}`);
+  console.log(`\n${colorDim(`Runtime logs directory: ${result.paths.runtimeLogsDir}`)}`);
   return 0;
 }
 
 function printVerifyResult(result, workflowProfile = WORKFLOW_PROFILES.backend) {
-  console.log(`${workflowProfile.displayName} verify:`);
+  console.log(`${colorBold(workflowProfile.displayName)} verify:\n`);
   for (const stage of result.stages) {
-    console.log(`${stage.ok ? "✓" : "✗"} ${stage.name}: ${stage.detail}`);
+    console.log(`  ${statusIcon(stage.ok)} ${stage.name}: ${stage.detail}`);
     if (stage.endpoint) {
-      console.log(`  endpoint: ${stage.endpoint}`);
+      console.log(`    ${colorDim(`endpoint: ${stage.endpoint}`)}`);
     }
     if (stage.logPath || stage.errorLogPath) {
-      console.log(`  logs: ${stage.logPath ?? "-"} / ${stage.errorLogPath ?? "-"}`);
+      console.log(`    ${colorDim(`logs: ${stage.logPath ?? "-"} / ${stage.errorLogPath ?? "-"}`)}`);
     }
     if (stage.fixturePath) {
-      console.log(`  fixture: ${stage.fixturePath}`);
+      console.log(`    ${colorDim(`fixture: ${stage.fixturePath}`)}`);
     }
   }
-  console.log(`State: ${result.paths.statePath}`);
-  console.log(`Use pnpm dev:backend:status / logs / stop for follow-up diagnostics.`);
+  console.log(`\n${colorDim(`State: ${result.paths.statePath}`)}`);
+  console.log(colorDim("Use pnpm dev:backend:status / logs / stop for follow-up diagnostics."));
   return result.ok ? 0 : 1;
+}
+
+async function runWorkflowRestart({
+  profile = "backend",
+  repoRoot = getRepoRoot(),
+  serviceName,
+} = {}) {
+  const workflowProfile = getWorkflowProfile(profile) ?? WORKFLOW_PROFILES.backend;
+  const paths = getWorkflowPathsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+  });
+  const runtimeState = readRuntimeState(paths.statePath);
+  const serviceDefinitions = createServiceDefinitionsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+  });
+
+  // Find the target service
+  const targetDef = serviceDefinitions.find((s) => s.name === serviceName);
+  if (!targetDef) {
+    const available = serviceDefinitions.map((s) => s.name).join(", ");
+    return {
+      ok: false,
+      reason: "unknown_service",
+      detail: `Unknown service "${serviceName}". Available: ${available}`,
+    };
+  }
+
+  // Infrastructure services restart via docker-compose
+  if (targetDef.kind === "infra") {
+    if (targetDef.composeService && canUseDockerCompose()) {
+      runCommandSync("docker", ["compose", "restart", targetDef.composeService], {
+        cwd: repoRoot,
+        encoding: "utf8",
+      });
+      if (!(await waitForServiceHealth(targetDef, 15000))) {
+        return {
+          ok: false,
+          reason: "restart_unhealthy",
+          detail: `${serviceName} did not become healthy after docker-compose restart`,
+        };
+      }
+      return { ok: true, service: serviceName, action: "restarted" };
+    }
+    return {
+      ok: false,
+      reason: "infra_no_restart",
+      detail: `Cannot restart infra service "${serviceName}" without docker-compose`,
+    };
+  }
+
+  // Application services: stop then re-launch
+  const trackedState = runtimeState.services?.[serviceName];
+  if (trackedState?.pid && isProcessAlive(trackedState.pid)) {
+    killProcessTree(trackedState.pid);
+    await delay(800);
+    if (targetDef.port && (await isPortListening(targetDef.port))) {
+      const residualPid = getListeningPidForPort(targetDef.port);
+      if (residualPid) {
+        forceKillProcessTree(residualPid);
+        await delay(300);
+      }
+    }
+  }
+
+  // Re-launch
+  const result = await ensureApplicationService(targetDef, paths, {
+    ...runtimeState,
+    services: {
+      ...runtimeState.services,
+      [serviceName]: undefined,
+    },
+  });
+
+  if (!result.ok) {
+    return {
+      ok: false,
+      reason: result.reason ?? "restart_failed",
+      detail: result.detail ?? `Failed to restart ${serviceName}`,
+    };
+  }
+
+  // Update state
+  const nextState = {
+    ...runtimeState,
+    services: {
+      ...runtimeState.services,
+      [serviceName]: result.record,
+    },
+  };
+  writeRuntimeState(paths.statePath, nextState);
+
+  return { ok: true, service: serviceName, action: "restarted" };
+}
+
+function printRestartResult(result) {
+  if (!result.ok) {
+    console.error(`${colorRed("FAIL")} restart failed: ${result.detail}`);
+    return 1;
+  }
+  console.log(`${colorGreen("\u2713")} ${colorBold(result.service)} restarted successfully`);
+  return 0;
 }
 
 function parseWorkflowCommand(argv = []) {
@@ -1306,17 +1518,36 @@ function parseWorkflowCommand(argv = []) {
     return {
       workflowProfile,
       command: argv[1] ?? "start",
+      extra: argv.slice(2),
     };
   }
 
   return {
     workflowProfile: WORKFLOW_PROFILES.all,
     command: argv[0] ?? "start",
+    extra: argv.slice(1),
   };
 }
 
 async function main(argv = process.argv.slice(2)) {
-  const { workflowProfile, command } = parseWorkflowCommand(argv);
+  const { workflowProfile, command, extra } = parseWorkflowCommand(argv);
+
+  if (command === "watch") {
+    process.env.PREFER_AIR = "1";
+    const airAvailable = detectAirAvailable();
+    if (!airAvailable) {
+      console.warn(
+        `${colorYellow("WARN")} air is not installed. Install with: go install github.com/air-verse/air@latest`,
+      );
+      console.warn(`      Falling back to \`go run\` (no hot-reload).`);
+    }
+    return printStartResult(
+      await runWorkflowStart({
+        profile: workflowProfile.profile,
+      }),
+      workflowProfile,
+    );
+  }
 
   if (command === "start") {
     return printStartResult(
@@ -1363,7 +1594,24 @@ async function main(argv = process.argv.slice(2)) {
     );
   }
 
+  if (command === "restart") {
+    const serviceName = extra[0];
+    if (!serviceName) {
+      console.error(`${colorRed("FAIL")} Usage: ${workflowProfile.commandLabel} restart <service-name>`);
+      const defs = createServiceDefinitionsForProfile({ profile: workflowProfile.profile });
+      console.error(`       Available services: ${defs.map((s) => s.name).join(", ")}`);
+      return 1;
+    }
+    return printRestartResult(
+      await runWorkflowRestart({
+        profile: workflowProfile.profile,
+        serviceName,
+      }),
+    );
+  }
+
   console.error(`Unknown ${workflowProfile.commandLabel} command: ${command}`);
+  console.error(`Available commands: start, watch, status, stop, restart, logs, verify`);
   return 1;
 }
 
@@ -1388,4 +1636,5 @@ module.exports = {
   runDevAllStart,
   runDevAllStatus,
   runDevAllStop,
+  runWorkflowRestart,
 };
