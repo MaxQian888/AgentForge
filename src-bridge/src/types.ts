@@ -79,6 +79,7 @@ export interface ExecuteRequest {
   role_config?: RoleConfig;
   team_id?: string;
   team_role?: "planner" | "coder" | "reviewer";
+  team_context?: string;
   thinking_config?: ThinkingConfig;
   output_schema?: StructuredOutputSchema;
   hooks_config?: HooksConfig;
@@ -154,6 +155,18 @@ export interface RoleConfig {
   skill_diagnostics?: RoleExecutionSkillDiagnostic[];
   /** Output filters to apply (e.g., "no_credentials", "no_pii"). */
   output_filters?: string[];
+  /** Tools explicitly blocked for this role. */
+  blocked_tools?: string[];
+  /** File path patterns the role is allowed to access. */
+  file_permissions?: {
+    allowed_patterns?: string[];
+    blocked_patterns?: string[];
+  };
+  /** Network access restrictions. */
+  network_permissions?: {
+    allowed_domains?: string[];
+    blocked?: boolean;
+  };
 }
 
 export interface RoleExecutionSkill {
@@ -257,6 +270,13 @@ export interface AgentStatus {
     mcp_status?: boolean;
   };
   cost_accounting?: CostAccountingData;
+  role_enforcement?: {
+    max_turns: number;
+    current_turn: number;
+    turns_remaining: number;
+    api_calls: number;
+    execution_duration_ms: number;
+  };
 }
 
 export interface RuntimeDiagnostic {

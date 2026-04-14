@@ -8,6 +8,7 @@ import type { SessionManager } from "../session/manager.js";
 import type {
   ClaudeContinuityState,
   ExecuteRequest,
+  RoleConfig,
   RuntimeContinuityState,
   SessionSnapshot,
 } from "../types.js";
@@ -64,6 +65,57 @@ export interface ClaudeRuntimeDeps {
   continuity?: RuntimeContinuityState;
   hookCallbackManager?: HookCallbackManager;
   forkSessionRunner?: ForkSessionRunner;
+}
+
+// ---------------------------------------------------------------------------
+// Role enforcement: tool and file permission helpers
+// ---------------------------------------------------------------------------
+
+/** Simple glob-like pattern matching without external dependencies. */
+function simpleGlobMatch(path: string, pattern: string): boolean {
+  if (pattern === "*") return true;
+  if (pattern.startsWith("**/")) return path.includes(pattern.slice(3));
+  if (pattern.endsWith("/**")) return path.startsWith(pattern.slice(0, -3));
+  if (pattern.includes("*")) {
+    const regex = new RegExp("^" + pattern.replace(/\*/g, ".*") + "$");
+    return regex.test(path);
+  }
+  return path === pattern || path.startsWith(pattern + "/");
+}
+
+/** Check if a tool call is allowed by the role config. */
+function isToolAllowed(toolName: string, roleConfig: RoleConfig | undefined): boolean {
+  if (!roleConfig) return true;
+
+  // Check blocked tools first
+  if (roleConfig.blocked_tools?.length) {
+    if (roleConfig.blocked_tools.includes(toolName)) return false;
+  }
+
+  // Check allowed tools (if specified, only those are allowed)
+  if (roleConfig.allowed_tools?.length) {
+    return roleConfig.allowed_tools.includes(toolName);
+  }
+
+  return true;
+}
+
+/** Check if a file path is allowed by the role config's file permissions. */
+function isFileAccessAllowed(filePath: string, roleConfig: RoleConfig | undefined): boolean {
+  if (!roleConfig?.file_permissions) return true;
+  const perms = roleConfig.file_permissions;
+
+  if (perms.blocked_patterns?.length) {
+    for (const pattern of perms.blocked_patterns) {
+      if (simpleGlobMatch(filePath, pattern)) return false;
+    }
+  }
+
+  if (perms.allowed_patterns?.length) {
+    return perms.allowed_patterns.some((p) => simpleGlobMatch(filePath, p));
+  }
+
+  return true;
 }
 
 /**
@@ -239,6 +291,36 @@ export async function streamClaudeRuntime(
       emitCompactBoundary(streamer, message, req, now);
       captureStructuredOutput(runtime, message);
       emitUsage(runtime, streamer, message, req, now);
+
+      // Role enforcement: turn limit warning at 80%
+      if (
+        runtime.maxTurnsLimit > 0 &&
+        !runtime.turnLimitWarningEmitted
+      ) {
+        const ratio = runtime.turnNumber / runtime.maxTurnsLimit;
+        if (ratio >= 0.8) {
+          runtime.turnLimitWarningEmitted = true;
+          streamer.send({
+            task_id: req.task_id,
+            session_id: req.session_id,
+            timestamp_ms: now(),
+            type: "budget_alert",
+            data: {
+              alert_type: "turn_limit_warning",
+              max_turns: runtime.maxTurnsLimit,
+              current_turn: runtime.turnNumber,
+              turns_remaining: Math.max(0, runtime.maxTurnsLimit - runtime.turnNumber),
+              message: `Agent approaching turn limit: ${runtime.turnNumber}/${runtime.maxTurnsLimit} turns used`,
+            },
+          });
+        }
+      }
+
+      // Role enforcement: hard turn limit
+      if (runtime.isTurnLimitExceeded()) {
+        runtime.abortController.abort("turn_limit_exceeded");
+        throw new Error(`turn limit exceeded for task ${req.task_id}: ${runtime.turnNumber}/${runtime.maxTurnsLimit}`);
+      }
 
       if (runtime.spentUsd >= req.budget_usd) {
         runtime.abortController.abort("budget_exceeded");
@@ -596,7 +678,50 @@ function emitAssistantBlocks(
 
     if (block.type === "tool_use" && typeof block.name === "string") {
       runtime.turnNumber += 1;
+      runtime.recordApiCall();
       runtime.lastTool = block.name;
+
+      // Role enforcement: check if tool is allowed
+      if (!isToolAllowed(block.name, req.role_config)) {
+        streamer.send({
+          task_id: req.task_id,
+          session_id: req.session_id,
+          timestamp_ms: now(),
+          type: "tool_result",
+          data: {
+            call_id: typeof block.id === "string" ? block.id : "",
+            output: `Tool "${block.name}" is not allowed by the current role configuration.`,
+            is_error: true,
+          },
+        });
+        continue;
+      }
+
+      // Role enforcement: check file permissions for file-related tools
+      const fileTools = ["Read", "Write", "Edit", "Bash"];
+      if (fileTools.includes(block.name) && isRecord(block.input)) {
+        const filePath =
+          typeof block.input.file_path === "string"
+            ? block.input.file_path
+            : typeof block.input.path === "string"
+              ? block.input.path
+              : null;
+        if (filePath && !isFileAccessAllowed(filePath, req.role_config)) {
+          streamer.send({
+            task_id: req.task_id,
+            session_id: req.session_id,
+            timestamp_ms: now(),
+            type: "tool_result",
+            data: {
+              call_id: typeof block.id === "string" ? block.id : "",
+              output: `Access to file "${filePath}" is not allowed by the current role configuration.`,
+              is_error: true,
+            },
+          });
+          continue;
+        }
+      }
+
       streamer.send({
         task_id: req.task_id,
         session_id: req.session_id,

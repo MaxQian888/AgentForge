@@ -69,8 +69,17 @@ export async function handleExecute(
   runtime.bindRequest(request);
   runtime.continuity = deps.continuity ? { ...deps.continuity } : runtime.continuity;
 
+  // Apply role enforcement limits
+  if (request.role_config) {
+    runtime.applyRoleLimits(request.role_config);
+  }
+
+  let baseSystemPrompt = request.system_prompt || defaultSystemPrompt(request.task_id);
+  if (request.team_context) {
+    baseSystemPrompt = `## Team Context\n\n${request.team_context}\n\n${baseSystemPrompt}`;
+  }
   const systemPrompt = buildSystemPrompt(
-    request.system_prompt || defaultSystemPrompt(request.task_id),
+    baseSystemPrompt,
     request.role_config,
   );
 
@@ -198,6 +207,9 @@ function classifyTerminalStatus(
 
   if (reason === "budget_exceeded" || message.includes("budget exceeded")) {
     return "budget_exceeded";
+  }
+  if (reason === "turn_limit_exceeded" || message.includes("turn limit exceeded")) {
+    return "failed";
   }
   if (reason === "cancelled_by_user") {
     return "cancelled";

@@ -1,6 +1,7 @@
 import type {
   AgentStatus,
   ExecuteRequest,
+  RoleConfig,
   RuntimeContinuityState,
 } from "../types.js";
 import {
@@ -45,6 +46,12 @@ export class AgentRuntime {
   budgetWarningEmitted: boolean;
   costAccounting: CostAccountingSnapshot | null;
 
+  // Role enforcement limits
+  maxTurnsLimit: number;
+  apiCallCount: number;
+  executionStartMs: number;
+  turnLimitWarningEmitted: boolean;
+
   constructor(taskId: string, sessionId: string) {
     this.taskId = taskId;
     this.sessionId = sessionId;
@@ -61,6 +68,10 @@ export class AgentRuntime {
     this.claudeQuery = null;
     this.budgetWarningEmitted = false;
     this.costAccounting = null;
+    this.maxTurnsLimit = 0;
+    this.apiCallCount = 0;
+    this.executionStartMs = Date.now();
+    this.turnLimitWarningEmitted = false;
   }
 
   bindRequest(request: ExecuteRequest): void {
@@ -70,6 +81,27 @@ export class AgentRuntime {
   applyCostAccounting(snapshot: CostAccountingSnapshot): void {
     this.costAccounting = snapshot;
     this.spentUsd = snapshot.totalCostUsd;
+  }
+
+  /** Check if the agent has exceeded its turn limit. */
+  isTurnLimitExceeded(): boolean {
+    return this.maxTurnsLimit > 0 && this.turnNumber >= this.maxTurnsLimit;
+  }
+
+  /** Apply role enforcement limits from config. */
+  applyRoleLimits(config: RoleConfig | undefined): void {
+    if (!config) return;
+    if (config.max_turns > 0) this.maxTurnsLimit = config.max_turns;
+  }
+
+  /** Increment API call count. */
+  recordApiCall(): void {
+    this.apiCallCount++;
+  }
+
+  /** Get execution duration in ms. */
+  executionDurationMs(): number {
+    return Date.now() - this.executionStartMs;
   }
 
   cancel(nextStatus: Extract<RuntimeStatus, "paused" | "cancelled" | "budget_exceeded" | "failed"> = "cancelled"): void {
@@ -135,6 +167,17 @@ export class AgentRuntime {
           ? liveControls
           : undefined,
       cost_accounting: serializeCostAccounting(this.costAccounting),
-    };
+      ...(this.maxTurnsLimit > 0
+        ? {
+            role_enforcement: {
+              max_turns: this.maxTurnsLimit,
+              current_turn: this.turnNumber,
+              turns_remaining: Math.max(0, this.maxTurnsLimit - this.turnNumber),
+              api_calls: this.apiCallCount,
+              execution_duration_ms: this.executionDurationMs(),
+            },
+          }
+        : {}),
+    } as AgentStatus;
   }
 }
