@@ -18,6 +18,8 @@ import { cn } from "@/lib/utils";
 import { getTeamStrategyLabel, useTeamStore, type TeamStatus } from "@/lib/stores/team-store";
 import { useAgentStore, type Agent } from "@/lib/stores/agent-store";
 import { TeamPipeline } from "./team-pipeline";
+import { TeamTimeline } from "./team-timeline";
+import { TeamArtifactsPanel } from "./team-artifacts-panel";
 import { OutputStream } from "@/components/agent/output-stream";
 import { Skeleton } from "@/components/ui/skeleton";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
@@ -254,6 +256,8 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
 
       <TeamPipeline team={team} />
 
+      <TeamTimeline team={team} />
+
       <div className="grid gap-4 sm:grid-cols-2">
         <Card>
           <CardHeader>
@@ -354,6 +358,7 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
       <Tabs defaultValue="overview">
         <TabsList>
           <TabsTrigger value="overview">Overview</TabsTrigger>
+          <TabsTrigger value="artifacts">Artifacts</TabsTrigger>
           <TabsTrigger value="planner">Planner</TabsTrigger>
           <TabsTrigger value="coders">Coders</TabsTrigger>
           <TabsTrigger value="reviewer">Reviewer</TabsTrigger>
@@ -418,6 +423,10 @@ export function TeamDetailView({ teamId }: TeamDetailViewProps) {
               </CardContent>
             </Card>
           </div>
+        </TabsContent>
+
+        <TabsContent value="artifacts" className="mt-4">
+          <TeamArtifactsPanel teamId={team.id} />
         </TabsContent>
 
         <TabsContent value="planner" className="mt-4">

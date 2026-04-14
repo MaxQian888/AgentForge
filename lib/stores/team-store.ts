@@ -47,6 +47,16 @@ export interface UpdateTeamInput {
   totalBudgetUsd?: number;
 }
 
+export interface TeamArtifact {
+  id: string;
+  teamId: string;
+  runId: string;
+  role: string;
+  key: string;
+  value: unknown;
+  createdAt: string;
+}
+
 interface TeamState {
   teams: AgentTeam[];
   loading: boolean;
@@ -61,6 +71,8 @@ interface TeamState {
   deleteTeam: (id: string) => Promise<void>;
   updateTeam: (id: string, input: UpdateTeamInput) => Promise<AgentTeam | null>;
   upsertTeam: (team: AgentTeam) => void;
+  artifacts: TeamArtifact[];
+  fetchArtifacts: (teamId: string) => Promise<void>;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -146,6 +158,7 @@ export const useTeamStore = create<TeamState>()((set) => ({
   error: null,
   loadingById: {},
   errorById: {},
+  artifacts: [],
 
   fetchTeams: async (projectId, status) => {
     const token = useAuthStore.getState().accessToken;
@@ -260,5 +273,17 @@ export const useTeamStore = create<TeamState>()((set) => ({
 
   upsertTeam: (team) => {
     set((state) => ({ teams: upsertTeams(state.teams, team) }));
+  },
+
+  fetchArtifacts: async (teamId) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.get<TeamArtifact[]>(`/api/v1/teams/${teamId}/artifacts`, { token });
+      set({ artifacts: Array.isArray(data) ? data : [] });
+    } catch {
+      set({ artifacts: [] });
+    }
   },
 }));

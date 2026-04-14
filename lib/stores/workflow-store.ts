@@ -30,6 +30,62 @@ export interface WorkflowActivityEntry {
   config?: Record<string, unknown>;
 }
 
+// --- DAG Workflow Types ---
+
+export interface WorkflowNodeData {
+  id: string;
+  type: string;
+  label: string;
+  position: { x: number; y: number };
+  config?: Record<string, unknown>;
+}
+
+export interface WorkflowEdgeData {
+  id: string;
+  source: string;
+  target: string;
+  condition?: string;
+  label?: string;
+}
+
+export interface WorkflowDefinition {
+  id: string;
+  projectId: string;
+  name: string;
+  description: string;
+  status: string;
+  nodes: WorkflowNodeData[];
+  edges: WorkflowEdgeData[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface WorkflowExecution {
+  id: string;
+  workflowId: string;
+  projectId: string;
+  taskId?: string;
+  status: string;
+  currentNodes: string[];
+  errorMessage?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+  updatedAt?: string;
+}
+
+export interface WorkflowNodeExecution {
+  id: string;
+  executionId: string;
+  nodeId: string;
+  status: string;
+  result?: unknown;
+  errorMessage?: string;
+  startedAt?: string;
+  completedAt?: string;
+  createdAt: string;
+}
+
 const MAX_WORKFLOW_ACTIVITY_ENTRIES = 10;
 
 interface WorkflowState {
@@ -51,6 +107,53 @@ interface WorkflowState {
     entry: Omit<WorkflowActivityEntry, "timestamp"> & { timestamp?: string }
   ) => void;
   clearActivity: (projectId: string) => void;
+
+  // DAG Workflow Definitions
+  definitions: WorkflowDefinition[];
+  definitionsLoading: boolean;
+  selectedDefinition: WorkflowDefinition | null;
+  fetchDefinitions: (projectId: string) => Promise<void>;
+  createDefinition: (
+    projectId: string,
+    data: {
+      name: string;
+      description: string;
+      nodes: WorkflowNodeData[];
+      edges: WorkflowEdgeData[];
+    }
+  ) => Promise<WorkflowDefinition | null>;
+  updateDefinition: (
+    id: string,
+    data: {
+      name?: string;
+      description?: string;
+      status?: string;
+      nodes?: WorkflowNodeData[];
+      edges?: WorkflowEdgeData[];
+    }
+  ) => Promise<boolean>;
+  deleteDefinition: (id: string) => Promise<boolean>;
+  selectDefinition: (def: WorkflowDefinition | null) => void;
+  fetchDefinition: (id: string) => Promise<WorkflowDefinition | null>;
+
+  // DAG Workflow Executions
+  executions: WorkflowExecution[];
+  executionsLoading: boolean;
+  selectedExecution: WorkflowExecution | null;
+  nodeExecutions: WorkflowNodeExecution[];
+  startExecution: (
+    workflowId: string,
+    taskId?: string
+  ) => Promise<WorkflowExecution | null>;
+  fetchExecutions: (workflowId: string) => Promise<void>;
+  fetchExecution: (
+    id: string
+  ) => Promise<{
+    execution: WorkflowExecution;
+    nodeExecutions: WorkflowNodeExecution[];
+  } | null>;
+  cancelExecution: (id: string) => Promise<boolean>;
+  selectExecution: (exec: WorkflowExecution | null) => void;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -80,6 +183,15 @@ export const useWorkflowStore = create<WorkflowState>()((set) => ({
   saving: false,
   error: null,
   recentActivityByProject: {},
+
+  // DAG state
+  definitions: [],
+  definitionsLoading: false,
+  selectedDefinition: null,
+  executions: [],
+  executionsLoading: false,
+  selectedExecution: null,
+  nodeExecutions: [],
 
   fetchWorkflow: async (projectId) => {
     const token = useAuthStore.getState().accessToken;
@@ -148,4 +260,210 @@ export const useWorkflowStore = create<WorkflowState>()((set) => ({
         [projectId]: [],
       },
     })),
+
+  // --- DAG Workflow Definitions ---
+
+  fetchDefinitions: async (projectId) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+
+    set({ definitionsLoading: true, error: null });
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.get<WorkflowDefinition[]>(
+        `/api/v1/projects/${projectId}/workflows`,
+        { token }
+      );
+      set({ definitions: data ?? [], error: null });
+    } catch {
+      set({ error: "Unable to load workflow definitions" });
+    } finally {
+      set({ definitionsLoading: false });
+    }
+  },
+
+  createDefinition: async (projectId, payload) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+
+    set({ saving: true, error: null });
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<WorkflowDefinition>(
+        `/api/v1/projects/${projectId}/workflows`,
+        payload,
+        { token }
+      );
+      set((state) => ({
+        definitions: [data, ...state.definitions],
+        error: null,
+      }));
+      return data;
+    } catch {
+      set({ error: "Unable to create workflow" });
+      return null;
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  fetchDefinition: async (id) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.get<WorkflowDefinition>(
+        `/api/v1/workflows/${id}`,
+        { token }
+      );
+      set({ selectedDefinition: data });
+      return data;
+    } catch {
+      set({ error: "Unable to load workflow" });
+      return null;
+    }
+  },
+
+  updateDefinition: async (id, payload) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return false;
+
+    set({ saving: true, error: null });
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.put<WorkflowDefinition>(
+        `/api/v1/workflows/${id}`,
+        payload,
+        { token }
+      );
+      set((state) => ({
+        definitions: state.definitions.map((d) => (d.id === id ? data : d)),
+        selectedDefinition:
+          state.selectedDefinition?.id === id
+            ? data
+            : state.selectedDefinition,
+        error: null,
+      }));
+      return true;
+    } catch {
+      set({ error: "Unable to update workflow" });
+      return false;
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  deleteDefinition: async (id) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return false;
+
+    try {
+      const api = createApiClient(API_URL);
+      await api.delete(`/api/v1/workflows/${id}`, { token });
+      set((state) => ({
+        definitions: state.definitions.filter((d) => d.id !== id),
+        selectedDefinition:
+          state.selectedDefinition?.id === id
+            ? null
+            : state.selectedDefinition,
+      }));
+      return true;
+    } catch {
+      set({ error: "Unable to delete workflow" });
+      return false;
+    }
+  },
+
+  selectDefinition: (def) => set({ selectedDefinition: def }),
+
+  // --- DAG Workflow Executions ---
+
+  startExecution: async (workflowId, taskId) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+
+    set({ saving: true, error: null });
+    try {
+      const api = createApiClient(API_URL);
+      const body: Record<string, unknown> = {};
+      if (taskId) body.taskId = taskId;
+      const { data } = await api.post<WorkflowExecution>(
+        `/api/v1/workflows/${workflowId}/execute`,
+        body,
+        { token }
+      );
+      set((state) => ({
+        executions: [data, ...state.executions],
+        error: null,
+      }));
+      return data;
+    } catch {
+      set({ error: "Unable to start execution" });
+      return null;
+    } finally {
+      set({ saving: false });
+    }
+  },
+
+  fetchExecutions: async (workflowId) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+
+    set({ executionsLoading: true, error: null });
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.get<WorkflowExecution[]>(
+        `/api/v1/workflows/${workflowId}/executions`,
+        { token }
+      );
+      set({ executions: data ?? [], error: null });
+    } catch {
+      set({ error: "Unable to load executions" });
+    } finally {
+      set({ executionsLoading: false });
+    }
+  },
+
+  fetchExecution: async (id) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.get<{
+        execution: WorkflowExecution;
+        nodeExecutions: WorkflowNodeExecution[];
+      }>(`/api/v1/executions/${id}`, { token });
+      set({
+        selectedExecution: data.execution ?? data,
+        nodeExecutions: data.nodeExecutions ?? [],
+      });
+      return data;
+    } catch {
+      set({ error: "Unable to load execution" });
+      return null;
+    }
+  },
+
+  cancelExecution: async (id) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return false;
+
+    try {
+      const api = createApiClient(API_URL);
+      await api.post(`/api/v1/executions/${id}/cancel`, {}, { token });
+      set((state) => ({
+        executions: state.executions.map((e) =>
+          e.id === id ? { ...e, status: "cancelled" } : e
+        ),
+      }));
+      return true;
+    } catch {
+      set({ error: "Unable to cancel execution" });
+      return false;
+    }
+  },
+
+  selectExecution: (exec) => set({ selectedExecution: exec }),
 }));
