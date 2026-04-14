@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"mime/multipart"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -1192,6 +1193,107 @@ func (c *AgentForgeClient) BindActionContext(ctx context.Context, binding IMActi
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusOK {
+		return c.readError(resp)
+	}
+	return nil
+}
+
+// --- Document operations ---
+
+// DocumentEntry represents a project document returned from the API.
+type DocumentEntry struct {
+	ID     string `json:"id"`
+	Name   string `json:"name"`
+	Type   string `json:"type"`
+	Size   string `json:"size"`
+	Status string `json:"status"`
+}
+
+// ListDocuments lists documents for the current project.
+func (c *AgentForgeClient) ListDocuments(ctx context.Context) ([]DocumentEntry, error) {
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/projects/%s/documents", projectID), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var docs []DocumentEntry
+	if err := json.NewDecoder(resp.Body).Decode(&docs); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return docs, nil
+}
+
+// UploadDocumentFromURL downloads a file from the given URL and uploads it
+// to the project documents endpoint as a multipart form.
+func (c *AgentForgeClient) UploadDocumentFromURL(ctx context.Context, fileURL string) error {
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return err
+	}
+
+	// Download the file from the remote URL.
+	dlReq, err := http.NewRequestWithContext(ctx, http.MethodGet, fileURL, nil)
+	if err != nil {
+		return fmt.Errorf("create download request: %w", err)
+	}
+	dlResp, err := c.client.Do(dlReq)
+	if err != nil {
+		return fmt.Errorf("download file: %w", err)
+	}
+	defer dlResp.Body.Close()
+	if dlResp.StatusCode != http.StatusOK {
+		return fmt.Errorf("download failed: HTTP %d", dlResp.StatusCode)
+	}
+
+	// Derive file name from URL path.
+	fileName := fileURL
+	if idx := strings.LastIndex(fileURL, "/"); idx >= 0 && idx+1 < len(fileURL) {
+		fileName = fileURL[idx+1:]
+	}
+	if qIdx := strings.Index(fileName, "?"); qIdx >= 0 {
+		fileName = fileName[:qIdx]
+	}
+	if fileName == "" {
+		fileName = "upload"
+	}
+
+	// Build multipart body.
+	var buf bytes.Buffer
+	writer := multipart.NewWriter(&buf)
+	part, err := writer.CreateFormFile("file", fileName)
+	if err != nil {
+		return fmt.Errorf("create form file: %w", err)
+	}
+	if _, err := io.Copy(part, dlResp.Body); err != nil {
+		return fmt.Errorf("copy file data: %w", err)
+	}
+	writer.Close()
+
+	uploadURL := fmt.Sprintf("%s/api/v1/projects/%s/documents/upload", c.baseURL, projectID)
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, uploadURL, &buf)
+	if err != nil {
+		return fmt.Errorf("create upload request: %w", err)
+	}
+	req.Header.Set("Content-Type", writer.FormDataContentType())
+	req.Header.Set("Authorization", "Bearer "+c.apiKey)
+	req.Header.Set("X-IM-Source", c.imSource)
+	if c.bridgeID != "" {
+		req.Header.Set("X-IM-Bridge-ID", c.bridgeID)
+	}
+
+	resp, err := c.client.Do(req)
+	if err != nil {
+		return fmt.Errorf("upload request: %w", err)
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
 		return c.readError(resp)
 	}
 	return nil

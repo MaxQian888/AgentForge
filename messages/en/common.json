@@ -13,6 +13,7 @@
     "workflow": "Workflow",
     "cost": "Cost",
     "memory": "Memory",
+    "documents": "Documents",
     "docs": "Docs",
     "imBridge": "IM Bridge",
     "roles": "Roles",

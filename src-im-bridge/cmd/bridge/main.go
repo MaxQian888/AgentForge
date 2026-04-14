@@ -336,6 +336,7 @@ func registerCommandHandlers(engine *core.Engine, apiClient *client.AgentForgeCl
 	commands.RegisterLoginCommands(engine, apiClient)
 	commands.RegisterProjectCommands(engine, apiClient)
 	commands.RegisterToolsCommands(engine, apiClient)
+	commands.RegisterDocumentCommands(engine, apiClient)
 	commands.RegisterHelpCommand(engine)
 
 	engine.SetFallback(func(p core.Platform, msg *core.Message) {

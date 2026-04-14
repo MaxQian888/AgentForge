@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"os"
 	"strings"
 	"time"
 
@@ -17,6 +18,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
+	"github.com/react-go-quick-starter/server/internal/storage"
 	"github.com/react-go-quick-starter/server/internal/version"
 	"github.com/react-go-quick-starter/server/internal/ws"
 )
@@ -210,7 +212,9 @@ func RegisterRoutes(
 		agentSvc.SetIMProgressNotifier(imControlPlane)
 	}
 	memorySvc := service.NewMemoryService(memoryRepo)
-	documentSvc := service.NewDocumentService(documentRepo, nil, memorySvc)
+	os.MkdirAll("./data/uploads", 0o755)
+	docStorage := storage.NewLocalStorage("./data/uploads")
+	documentSvc := service.NewDocumentService(documentRepo, docStorage, memorySvc)
 	episodicMemorySvc := service.NewEpisodicMemoryService(memoryRepo)
 	memoryExplorerSvc := service.NewMemoryExplorerService(memoryRepo).WithEpisodic(episodicMemorySvc)
 	memoryAPI := service.NewMemoryAPIService(memorySvc, memoryExplorerSvc)

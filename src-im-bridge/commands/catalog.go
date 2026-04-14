@@ -170,6 +170,16 @@ var operatorCommandCatalog = []commandCatalogEntry{
 		},
 	},
 	{
+		Command:   "/doc",
+		Summary:   "文档管理",
+		Usage:     "/doc list|upload",
+		UsageText: "用法: /doc list|upload <参数>",
+		Subcommands: []commandCatalogSubcommand{
+			{Name: "list", Usage: "/doc list", Summary: "查看项目文档列表"},
+			{Name: "upload", Usage: "/doc upload <url>", Summary: "从 URL 上传文档"},
+		},
+	},
+	{
 		Command:   "/cost",
 		Summary:   "费用统计",
 		Usage:     "/cost",
@@ -278,6 +288,8 @@ var operatorIntentCatalog = []IntentCandidate{
 	{Intent: "queue_list", Command: "/queue list", Summary: "查看 Agent 队列", Keywords: []string{"队列", "queue", "排队"}},
 	{Intent: "team_list", Command: "/team list", Summary: "查看团队成员摘要", Keywords: []string{"团队", "成员", "team"}},
 	{Intent: "memory_search", Command: "/memory search <query>", Summary: "搜索项目记忆", Keywords: []string{"记忆", "memory", "知识"}},
+	{Intent: "doc_list", Command: "/doc list", Summary: "查看项目文档", Keywords: []string{"文档", "document", "文件"}},
+	{Intent: "doc_upload", Command: "/doc upload", Summary: "上传文档", Keywords: []string{"上传", "upload", "文档上传"}},
 	{Intent: "agent_pause", Command: "/agent pause", Summary: "暂停指定 Agent", Keywords: []string{"暂停", "pause"}},
 	{Intent: "agent_resume", Command: "/agent resume", Summary: "恢复指定 Agent", Keywords: []string{"恢复", "resume"}},
 	{Intent: "agent_kill", Command: "/agent kill", Summary: "终止指定 Agent", Keywords: []string{"终止", "停止", "kill"}},
