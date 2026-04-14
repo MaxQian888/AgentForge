@@ -135,6 +135,12 @@ const (
 	MsgFailedToSearchMemories   = "FailedToSearchMemories"
 	MsgFailedToDeleteMemory     = "FailedToDeleteMemory"
 
+	// Document
+	MsgDocumentServiceUnavailable = "DocumentServiceUnavailable"
+	MsgFailedToListDocuments      = "FailedToListDocuments"
+	MsgDocumentNotFound           = "DocumentNotFound"
+	MsgFailedToDeleteDocument     = "FailedToDeleteDocument"
+
 	// Milestone
 	MsgFailedToListMilestones      = "FailedToListMilestones"
 	MsgFailedToLoadMilestoneMetrics = "FailedToLoadMilestoneMetrics"

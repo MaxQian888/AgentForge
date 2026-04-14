@@ -159,6 +159,7 @@ func RegisterRoutes(
 	pageCommentRepo *repository.PageCommentRepository,
 	pageFavoriteRepo *repository.PageFavoriteRepository,
 	pageRecentAccessRepo *repository.PageRecentAccessRepository,
+	documentRepo *repository.DocumentRepo,
 	logRepo *repository.LogRepository,
 	hub *ws.Hub,
 	bridgeClient *bridge.Client,
@@ -209,6 +210,7 @@ func RegisterRoutes(
 		agentSvc.SetIMProgressNotifier(imControlPlane)
 	}
 	memorySvc := service.NewMemoryService(memoryRepo)
+	documentSvc := service.NewDocumentService(documentRepo, nil, memorySvc)
 	episodicMemorySvc := service.NewEpisodicMemoryService(memoryRepo)
 	memoryExplorerSvc := service.NewMemoryExplorerService(memoryRepo).WithEpisodic(episodicMemorySvc)
 	memoryAPI := service.NewMemoryAPIService(memorySvc, memoryExplorerSvc)
@@ -364,6 +366,7 @@ func RegisterRoutes(
 		taskH = taskH.WithDispatcher(dispatchSvc)
 		agentH = agentH.WithDispatcher(dispatchSvc)
 	}
+	documentH := handler.NewDocumentHandler(documentSvc)
 	logSvc := service.NewLogService(logRepo, hub)
 	logH := handler.NewLogHandler(logSvc)
 
@@ -453,6 +456,11 @@ func RegisterRoutes(
 	projectGroup.POST("/memory/cleanup", memoryH.Cleanup)
 	projectGroup.GET("/memory/:mid", memoryH.Get)
 	projectGroup.DELETE("/memory/:mid", memoryH.Delete)
+	docs := projectGroup.Group("/documents")
+	docs.POST("/upload", documentH.Upload)
+	docs.GET("", documentH.List)
+	docs.GET("/:did", documentH.Get)
+	docs.DELETE("/:did", documentH.Delete)
 	projectGroup.GET("/logs", logH.List)
 	projectGroup.POST("/logs", logH.Create)
 	if dispatchPreflightH != nil {

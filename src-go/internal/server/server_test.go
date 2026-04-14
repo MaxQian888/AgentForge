@@ -78,6 +78,7 @@ func registerTestRoutesWithDependencies(e *echo.Echo, cfg *config.Config, authSv
 		repository.NewPageCommentRepository(nil),
 		repository.NewPageFavoriteRepository(nil),
 		repository.NewPageRecentAccessRepository(nil),
+		repository.NewDocumentRepo(nil),
 		repository.NewLogRepository(nil),
 		ws.NewHub(),
 		bridge.NewClient("http://localhost:7778"),

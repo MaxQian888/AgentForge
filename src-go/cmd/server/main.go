@@ -218,6 +218,7 @@ func main() {
 		pageCommentRepo,
 		pageFavoriteRepo,
 		pageRecentAccessRepo,
+		repository.NewDocumentRepo(db),
 		repository.NewLogRepository(db),
 		hub,
 		bridgeClient,

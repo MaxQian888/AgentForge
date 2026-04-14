@@ -16,6 +16,7 @@ const (
 	MemoryCategoryEpisodic   = "episodic"
 	MemoryCategorySemantic   = "semantic"
 	MemoryCategoryProcedural = "procedural"
+	MemoryCategoryDocument   = "document"
 )
 
 type AgentMemory struct {
