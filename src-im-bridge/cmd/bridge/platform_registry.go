@@ -13,6 +13,7 @@ import (
 	"github.com/agentforge/im-bridge/platform/qqbot"
 	"github.com/agentforge/im-bridge/platform/slack"
 	"github.com/agentforge/im-bridge/platform/telegram"
+	"github.com/agentforge/im-bridge/platform/wechat"
 	"github.com/agentforge/im-bridge/platform/wecom"
 )
 
@@ -103,6 +104,37 @@ func providerDescriptors() map[string]providerDescriptor {
 					cfg.WeComCallbackPort,
 					cfg.WeComCallbackPath,
 				)
+			},
+		},
+		"wechat": {
+			ID:                      "wechat",
+			Metadata:                wechat.NewStub("0").Metadata(),
+			SupportedTransportModes: []string{transportModeStub, transportModeLive},
+			ValidateConfig: func(cfg *config, mode string) error {
+				if mode != transportModeLive {
+					return nil
+				}
+				switch {
+				case strings.TrimSpace(cfg.WeChatAppID) == "":
+					return fmt.Errorf("selected platform wechat requires WECHAT_APP_ID for live transport")
+				case strings.TrimSpace(cfg.WeChatAppSecret) == "":
+					return fmt.Errorf("selected platform wechat requires WECHAT_APP_SECRET for live transport")
+				default:
+					return nil
+				}
+			},
+			NewStub: func(cfg *config) (core.Platform, error) {
+				return wechat.NewStub(cfg.TestPort), nil
+			},
+			NewLive: func(cfg *config) (core.Platform, error) {
+				opts := make([]wechat.LiveOption, 0, 2)
+				if strings.TrimSpace(cfg.WeChatCallbackPort) != "" {
+					opts = append(opts, wechat.WithCallbackPort(cfg.WeChatCallbackPort))
+				}
+				if strings.TrimSpace(cfg.WeChatCallbackPath) != "" {
+					opts = append(opts, wechat.WithCallbackPath(cfg.WeChatCallbackPath))
+				}
+				return wechat.NewLive(cfg.WeChatAppID, cfg.WeChatAppSecret, cfg.WeChatCallbackToken, opts...)
 			},
 		},
 		"qq": {

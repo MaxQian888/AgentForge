@@ -178,6 +178,12 @@ func defaultRenderingProfileForSource(source string, capabilities PlatformCapabi
 		profile.MaxTextLength = 2000
 		profile.StructuredSurface = StructuredSurfaceNone
 		profile.ReadinessTier = ReadinessTierNativeSendWithFallback
+	case "wechat":
+		profile.DefaultTextFormat = TextFormatPlainText
+		profile.SupportedFormats = []TextFormatMode{TextFormatPlainText}
+		profile.MaxTextLength = 2048
+		profile.StructuredSurface = StructuredSurfaceNone
+		profile.ReadinessTier = ReadinessTierTextFirst
 	case "email":
 		profile.DefaultTextFormat = TextFormatHTML
 		profile.SupportedFormats = []TextFormatMode{TextFormatHTML, TextFormatPlainText}

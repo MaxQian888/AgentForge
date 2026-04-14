@@ -101,6 +101,11 @@ type config struct {
 	WeComCallbackPath       string
 	QQOneBotWSURL           string
 	QQAccessToken           string
+	WeChatAppID             string
+	WeChatAppSecret         string
+	WeChatCallbackToken     string
+	WeChatCallbackPort      string
+	WeChatCallbackPath      string
 	QQBotAppID              string
 	QQBotAppSecret          string
 	QQBotCallbackPort       string
@@ -153,6 +158,11 @@ func loadConfig() *config {
 		WeComCallbackToken:      os.Getenv("WECOM_CALLBACK_TOKEN"),
 		WeComCallbackPort:       os.Getenv("WECOM_CALLBACK_PORT"),
 		WeComCallbackPath:       envOrDefault("WECOM_CALLBACK_PATH", "/wecom/callback"),
+		WeChatAppID:             os.Getenv("WECHAT_APP_ID"),
+		WeChatAppSecret:         os.Getenv("WECHAT_APP_SECRET"),
+		WeChatCallbackToken:     os.Getenv("WECHAT_CALLBACK_TOKEN"),
+		WeChatCallbackPort:      os.Getenv("WECHAT_CALLBACK_PORT"),
+		WeChatCallbackPath:      envOrDefault("WECHAT_CALLBACK_PATH", "/wechat/callback"),
 		QQOneBotWSURL:           os.Getenv("QQ_ONEBOT_WS_URL"),
 		QQAccessToken:           os.Getenv("QQ_ACCESS_TOKEN"),
 		QQBotAppID:              os.Getenv("QQBOT_APP_ID"),

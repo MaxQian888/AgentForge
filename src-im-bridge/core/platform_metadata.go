@@ -338,6 +338,17 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 			NativeSurfaces:           []string{NativeSurfaceWeComCard},
 			ReadinessTier:            ReadinessTierNativeSendWithFallback,
 		}
+	case "wechat":
+		return PlatformCapabilities{
+			CommandSurface:           CommandSurfaceMixed,
+			StructuredSurface:        StructuredSurfaceNone,
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply},
+			PreferredAsyncUpdateMode: AsyncUpdateReply,
+			ActionCallbackMode:       ActionCallbackWebhook,
+			MessageScopes:            []MessageScope{MessageScopeChat},
+			ReadinessTier:            ReadinessTierTextFirst,
+			SupportsMentions:         true,
+		}
 	case "email":
 		return PlatformCapabilities{
 			CommandSurface:           CommandSurfaceNone,
