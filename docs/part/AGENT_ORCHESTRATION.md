@@ -17,6 +17,7 @@
 - Codex 与 OpenCode continuity 已有真实实现：Codex 通过 `codex exec --json` / `codex exec resume <thread-id>` 保留 `thread_id`，OpenCode 通过 `OPENCODE_SERVER_URL` 指向的 `/session` / `/prompt_async` / `/abort` 维持上游 `session_id`。
 - 实时事件当前通过 TS Bridge 主动连回 Go 的 WebSocket hub，再由 Go 广播到前端与其他消费者；当前实现不是 Redis Streams 驱动的多跳主链路。
 - Team 生命周期上下文已显式进入运行时请求：planner / coder / reviewer 会保留 `team_id`、`team_role` 和统一的 runtime tuple，而不是只靠数据库侧推断阶段。
+- 官方 built-in starter catalog 已开始贴合编排主链路：`task-control` / `review-control` / `workflow-control` 通过 MCP 暴露任务、审查与 workflow control-plane，`standard-dev-flow` / `task-delivery-flow` / `review-escalation-flow` 则作为当前 repo-owned workflow starters 覆盖 quickstart、任务交付与审查升级三条顺序流。
 
 ---
 

@@ -98,7 +98,7 @@ type AgentQueueStore interface {
 	ListQueuedByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*model.AgentPoolQueueEntry, error)
 	ListRecentByProject(ctx context.Context, projectID uuid.UUID, limit int) ([]*model.AgentPoolQueueEntry, error)
 	ReserveNextQueuedByProject(ctx context.Context, projectID uuid.UUID) (*model.AgentPoolQueueEntry, error)
-	CompleteQueuedEntry(ctx context.Context, entryID string, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID) error
+	CompleteQueuedEntry(ctx context.Context, entryID string, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID, guardrailType string, guardrailScope string, recoveryDisposition string) error
 }
 
 type agentServiceQueueAdapter struct {
@@ -109,7 +109,21 @@ func (a agentServiceQueueAdapter) QueueAgentAdmission(ctx context.Context, input
 	if a.store == nil {
 		return nil, ErrAgentPoolFull
 	}
-	return a.store.QueueAgentAdmission(ctx, QueueAgentAdmissionInput(input))
+	return a.store.QueueAgentAdmission(ctx, QueueAgentAdmissionInput{
+		ProjectID:           input.ProjectID,
+		TaskID:              input.TaskID,
+		MemberID:            input.MemberID,
+		Runtime:             input.Runtime,
+		Provider:            input.Provider,
+		Model:               input.Model,
+		RoleID:              input.RoleID,
+		Priority:            input.Priority,
+		BudgetUSD:           input.BudgetUSD,
+		Reason:              input.Reason,
+		GuardrailType:       model.DispatchGuardrailTypePool,
+		GuardrailScope:      "project",
+		RecoveryDisposition: model.QueueRecoveryDispositionPending,
+	})
 }
 
 var (
@@ -149,6 +163,8 @@ type AgentService struct {
 	pluginCatalog         pluginCatalogListProvider
 	progress              *TaskProgressService
 	imProgress            IMBoundProgressNotifier
+	imNotifier            agentIMNotifier
+	imChannels            IMEventChannelResolver
 	pool                  *pool.Pool
 	queueStore            AgentQueueStore
 	teamSvc               *TeamService
@@ -156,10 +172,14 @@ type AgentService struct {
 	bridgeActivityMu      sync.Mutex
 	bridgeLastActivity    map[uuid.UUID]time.Time
 	bridgeActivityWaiters map[uuid.UUID][]chan struct{}
+	budgetAlertMu         sync.Mutex
+	lastBudgetAlertByRun  map[uuid.UUID]int
 	eventRepo             AgentEventRepository
 	sprintCostUp          SprintCostUpdater
 	automation            AutomationEventEvaluator
 	budgetCheck           DispatchBudgetChecker
+	dispatchMembers       DispatchMemberRepository
+	dispatchAttempts      DispatchAttemptRecorder
 }
 
 const bridgeSpawnHealthCheckAttempts = 3
@@ -213,6 +233,7 @@ func NewAgentService(
 		roleStore:             roles,
 		bridgeLastActivity:    make(map[uuid.UUID]time.Time),
 		bridgeActivityWaiters: make(map[uuid.UUID][]chan struct{}),
+		lastBudgetAlertByRun:  make(map[uuid.UUID]int),
 	}
 }
 
@@ -222,6 +243,18 @@ func (s *AgentService) SetProgressTracker(progress *TaskProgressService) {
 
 func (s *AgentService) SetIMProgressNotifier(notifier IMBoundProgressNotifier) {
 	s.imProgress = notifier
+}
+
+type agentIMNotifier interface {
+	Notify(ctx context.Context, req *model.IMNotifyRequest) error
+}
+
+func (s *AgentService) SetIMNotifier(notifier agentIMNotifier) {
+	s.imNotifier = notifier
+}
+
+func (s *AgentService) SetIMChannelResolver(resolver IMEventChannelResolver) {
+	s.imChannels = resolver
 }
 
 func (s *AgentService) SetPool(agentPool *pool.Pool) {
@@ -265,6 +298,14 @@ func (s *AgentService) SetSprintCostUpdater(up SprintCostUpdater) {
 
 func (s *AgentService) SetAutomationEvaluator(evaluator AutomationEventEvaluator) {
 	s.automation = evaluator
+}
+
+func (s *AgentService) SetDispatchMemberReader(members DispatchMemberRepository) {
+	s.dispatchMembers = members
+}
+
+func (s *AgentService) SetDispatchAttemptRecorder(attempts DispatchAttemptRecorder) {
+	s.dispatchAttempts = attempts
 }
 
 func (s *AgentService) SetDispatchBudgetChecker(checker DispatchBudgetChecker) {
@@ -931,12 +972,13 @@ func (s *AgentService) CancelQueueEntry(ctx context.Context, projectID uuid.UUID
 	if cancelReason == "" {
 		cancelReason = "cancelled_by_operator"
 	}
-	if err := s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusCancelled, cancelReason, nil); err != nil {
+	if err := s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusCancelled, cancelReason, nil, entry.GuardrailType, entry.GuardrailScope, model.QueueRecoveryDispositionCancelled); err != nil {
 		return nil, err
 	}
 
 	entry.Status = model.AgentPoolQueueStatusCancelled
 	entry.Reason = cancelReason
+	entry.RecoveryDisposition = model.QueueRecoveryDispositionCancelled
 	entry.AgentRunID = nil
 	entry.UpdatedAt = time.Now().UTC()
 
@@ -976,6 +1018,12 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 	if err != nil {
 		return nil, err
 	}
+	dispatchContext := model.DispatchOutcome{
+		Runtime:  selection.Runtime,
+		Provider: selection.Provider,
+		Model:    selection.Model,
+		RoleID:   strings.TrimSpace(roleID),
+	}
 
 	resolvedRoleID := strings.TrimSpace(roleID)
 	if _, err := s.resolveRoleConfig(resolvedRoleID); err != nil {
@@ -985,16 +1033,19 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 	if bridgePoolReason != "" {
 		if s.queueStore != nil {
 			entry, queueErr := s.queueStore.QueueAgentAdmission(ctx, QueueAgentAdmissionInput{
-				ProjectID: task.ProjectID,
-				TaskID:    taskID,
-				MemberID:  memberID,
-				Runtime:   selection.Runtime,
-				Provider:  selection.Provider,
-				Model:     selection.Model,
-				RoleID:    resolvedRoleID,
-				Priority:  priority,
-				BudgetUSD: budgetUsd,
-				Reason:    bridgePoolReason,
+				ProjectID:           task.ProjectID,
+				TaskID:              taskID,
+				MemberID:            memberID,
+				Runtime:             selection.Runtime,
+				Provider:            selection.Provider,
+				Model:               selection.Model,
+				RoleID:              resolvedRoleID,
+				Priority:            priority,
+				BudgetUSD:           budgetUsd,
+				Reason:              bridgePoolReason,
+				GuardrailType:       model.DispatchGuardrailTypePool,
+				GuardrailScope:      "bridge",
+				RecoveryDisposition: model.QueueRecoveryDispositionPending,
 			})
 			if queueErr == nil {
 				return &model.TaskDispatchResponse{
@@ -1002,6 +1053,10 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 					Dispatch: model.DispatchOutcome{
 						Status:         model.DispatchStatusQueued,
 						Reason:         bridgePoolReason,
+						Runtime:        dispatchContext.Runtime,
+						Provider:       dispatchContext.Provider,
+						Model:          dispatchContext.Model,
+						RoleID:         dispatchContext.RoleID,
 						GuardrailType:  model.DispatchGuardrailTypePool,
 						GuardrailScope: "bridge",
 						Queue:          entry,
@@ -1014,6 +1069,10 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 			Dispatch: model.DispatchOutcome{
 				Status:         model.DispatchStatusBlocked,
 				Reason:         bridgePoolReason,
+				Runtime:        dispatchContext.Runtime,
+				Provider:       dispatchContext.Provider,
+				Model:          dispatchContext.Model,
+				RoleID:         dispatchContext.RoleID,
 				GuardrailType:  model.DispatchGuardrailTypePool,
 				GuardrailScope: "bridge",
 			},
@@ -1040,9 +1099,13 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 		return &model.TaskDispatchResponse{
 			Task: task.ToDTO(),
 			Dispatch: model.DispatchOutcome{
-				Status: model.DispatchStatusQueued,
-				Reason: decision.Reason,
-				Queue:  decision.Queue,
+				Status:   model.DispatchStatusQueued,
+				Reason:   decision.Reason,
+				Runtime:  dispatchContext.Runtime,
+				Provider: dispatchContext.Provider,
+				Model:    dispatchContext.Model,
+				RoleID:   dispatchContext.RoleID,
+				Queue:    decision.Queue,
 			},
 		}, nil
 	}
@@ -1050,8 +1113,12 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 		return &model.TaskDispatchResponse{
 			Task: task.ToDTO(),
 			Dispatch: model.DispatchOutcome{
-				Status: model.DispatchStatusBlocked,
-				Reason: decision.Reason,
+				Status:   model.DispatchStatusBlocked,
+				Reason:   decision.Reason,
+				Runtime:  dispatchContext.Runtime,
+				Provider: dispatchContext.Provider,
+				Model:    dispatchContext.Model,
+				RoleID:   dispatchContext.RoleID,
 			},
 		}, nil
 	}
@@ -1064,6 +1131,10 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 				Dispatch: model.DispatchOutcome{
 					Status:         model.DispatchStatusBlocked,
 					Reason:         "Bridge is unavailable. Options: Retry / Cancel.",
+					Runtime:        dispatchContext.Runtime,
+					Provider:       dispatchContext.Provider,
+					Model:          dispatchContext.Model,
+					RoleID:         dispatchContext.RoleID,
 					GuardrailType:  model.DispatchGuardrailTypeSystem,
 					GuardrailScope: "bridge",
 				},
@@ -1071,24 +1142,33 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 		}
 		if errors.Is(err, ErrAgentPoolFull) && s.queueStore != nil {
 			entry, queueErr := s.queueStore.QueueAgentAdmission(ctx, QueueAgentAdmissionInput{
-				ProjectID: task.ProjectID,
-				TaskID:    taskID,
-				MemberID:  memberID,
-				Runtime:   selection.Runtime,
-				Provider:  selection.Provider,
-				Model:     selection.Model,
-				RoleID:    resolvedRoleID,
-				Priority:  priority,
-				BudgetUSD: budgetUsd,
-				Reason:    "agent pool is at capacity",
+				ProjectID:           task.ProjectID,
+				TaskID:              taskID,
+				MemberID:            memberID,
+				Runtime:             selection.Runtime,
+				Provider:            selection.Provider,
+				Model:               selection.Model,
+				RoleID:              resolvedRoleID,
+				Priority:            priority,
+				BudgetUSD:           budgetUsd,
+				Reason:              "agent pool is at capacity",
+				GuardrailType:       model.DispatchGuardrailTypePool,
+				GuardrailScope:      "project",
+				RecoveryDisposition: model.QueueRecoveryDispositionPending,
 			})
 			if queueErr == nil {
 				return &model.TaskDispatchResponse{
 					Task: task.ToDTO(),
 					Dispatch: model.DispatchOutcome{
-						Status: model.DispatchStatusQueued,
-						Reason: "agent pool is at capacity",
-						Queue:  entry,
+						Status:         model.DispatchStatusQueued,
+						Reason:         "agent pool is at capacity",
+						Runtime:        dispatchContext.Runtime,
+						Provider:       dispatchContext.Provider,
+						Model:          dispatchContext.Model,
+						RoleID:         dispatchContext.RoleID,
+						GuardrailType:  model.DispatchGuardrailTypePool,
+						GuardrailScope: "project",
+						Queue:          entry,
 					},
 				}, nil
 			}
@@ -1098,8 +1178,12 @@ func (s *AgentService) RequestSpawn(ctx context.Context, taskID, memberID uuid.U
 	return &model.TaskDispatchResponse{
 		Task: task.ToDTO(),
 		Dispatch: model.DispatchOutcome{
-			Status: model.DispatchStatusStarted,
-			Run:    dtoPtr(run.ToDTO()),
+			Status:   model.DispatchStatusStarted,
+			Runtime:  dispatchContext.Runtime,
+			Provider: dispatchContext.Provider,
+			Model:    dispatchContext.Model,
+			RoleID:   dispatchContext.RoleID,
+			Run:      dtoPtr(run.ToDTO()),
 		},
 	}, nil
 }
@@ -1630,43 +1714,83 @@ func (s *AgentService) promoteQueuedAdmission(ctx context.Context, completedRun 
 
 	taskID, err := uuid.Parse(entry.TaskID)
 	if err != nil {
-		_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusFailed, "invalid queued task id", nil)
+		_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusFailed, "invalid queued task id", nil, model.DispatchGuardrailTypeTask, "task", model.QueueRecoveryDispositionTerminal)
 		return
 	}
 	memberID, err := uuid.Parse(entry.MemberID)
 	if err != nil {
-		_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusFailed, "invalid queued member id", nil)
+		_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusFailed, "invalid queued member id", nil, model.DispatchGuardrailTypeTarget, "member", model.QueueRecoveryDispositionTerminal)
 		return
 	}
 
-	if s.budgetCheck != nil {
-		task, taskErr := s.taskRepo.GetByID(ctx, taskID)
-		if taskErr != nil || task == nil {
-			_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusFailed, "queued task is unavailable", nil)
-			return
+	task, taskErr := s.taskRepo.GetByID(ctx, taskID)
+	if taskErr != nil || task == nil {
+		s.completePromotionEntry(ctx, entry, model.AgentPoolQueueStatusFailed, "queued task is unavailable", nil, model.DispatchGuardrailTypeTask, "task", model.QueueRecoveryDispositionTerminal)
+		return
+	}
+	member, memberErr := s.loadPromotionMember(ctx, task, memberID)
+	if memberErr != nil {
+		outcome := model.DispatchOutcome{
+			Status:         model.DispatchStatusBlocked,
+			Reason:         "dispatch target is unavailable",
+			Runtime:        entry.Runtime,
+			Provider:       entry.Provider,
+			Model:          entry.Model,
+			RoleID:         entry.RoleID,
+			GuardrailType:  model.DispatchGuardrailTypeTarget,
+			GuardrailScope: "member",
 		}
-		check, checkErr := s.budgetCheck.CheckBudget(ctx, task.ProjectID, task.SprintID, entry.BudgetUSD)
-		if checkErr == nil && check != nil && !check.Allowed {
-			scope := strings.TrimSpace(check.Scope)
-			if scope == "" {
-				scope = inferBudgetScope(check.Reason)
-			}
-			_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusQueued, check.Reason, nil)
-			s.broadcastEvent(ws.EventTaskDispatchBlocked, task.ProjectID.String(), map[string]any{
-				"queue": entry,
-				"dispatch": model.DispatchOutcome{
-					Status:         model.DispatchStatusBlocked,
-					Reason:         check.Reason,
-					GuardrailType:  model.DispatchGuardrailTypeBudget,
-					GuardrailScope: scope,
-				},
-			})
-			return
+		s.completePromotionTerminal(ctx, task, entry, outcome)
+		return
+	}
+	preflight := EvaluateDispatchPreflight(ctx, task, member, DispatchSpawnInput{
+		TaskID:    taskID,
+		MemberID:  &memberID,
+		Runtime:   entry.Runtime,
+		Provider:  entry.Provider,
+		Model:     entry.Model,
+		RoleID:    entry.RoleID,
+		Priority:  entry.Priority,
+		BudgetUSD: entry.BudgetUSD,
+	}, s.budgetCheck, s.runRepo, nil)
+	if preflight.Outcome.Status == model.DispatchStatusBlocked || preflight.Outcome.Status == model.DispatchStatusSkipped {
+		if preflight.Outcome.GuardrailType == model.DispatchGuardrailTypeBudget || preflight.Outcome.GuardrailType == model.DispatchGuardrailTypeSystem || preflight.Outcome.GuardrailType == model.DispatchGuardrailTypePool {
+			s.completePromotionRecoverable(ctx, task, entry, preflight.Outcome)
+		} else {
+			s.completePromotionTerminal(ctx, task, entry, preflight.Outcome)
 		}
+		return
 	}
 
 	run, err := s.Spawn(ctx, taskID, memberID, entry.Runtime, entry.Provider, entry.Model, entry.BudgetUSD, entry.RoleID)
 	if err != nil {
+		var recoverableGuardrailType string
+		var recoverableGuardrailScope string
+		switch {
+		case errors.Is(err, ErrAgentBridgeUnavailable):
+			recoverableGuardrailType = model.DispatchGuardrailTypeSystem
+			recoverableGuardrailScope = "bridge"
+		case errors.Is(err, ErrAgentWorktreeUnavailable):
+			recoverableGuardrailType = model.DispatchGuardrailTypeSystem
+			recoverableGuardrailScope = "worktree"
+		case errors.Is(err, ErrAgentPoolFull):
+			recoverableGuardrailType = model.DispatchGuardrailTypePool
+			recoverableGuardrailScope = "project"
+		}
+		if recoverableGuardrailType != "" {
+			s.completePromotionRecoverable(ctx, task, entry, model.DispatchOutcome{
+				Status:         model.DispatchStatusBlocked,
+				Reason:         err.Error(),
+				Runtime:        entry.Runtime,
+				Provider:       entry.Provider,
+				Model:          entry.Model,
+				RoleID:         entry.RoleID,
+				GuardrailType:  recoverableGuardrailType,
+				GuardrailScope: recoverableGuardrailScope,
+			})
+			s.broadcastPoolStats(ctx, task.ProjectID.String())
+			return
+		}
 		log.WithFields(log.Fields{
 			"completedRunId": completedRun.ID.String(),
 			"queueEntryId":   entry.EntryID,
@@ -1677,26 +1801,130 @@ func (s *AgentService) promoteQueuedAdmission(ctx context.Context, completedRun 
 			"provider":       entry.Provider,
 			"model":          entry.Model,
 		}).WithError(err).Warn("queued agent admission promotion failed")
-		s.broadcastEvent(ws.EventAgentQueueFailed, completedTask.ProjectID.String(), map[string]any{
-			"queue": entry,
-			"error": err.Error(),
+		failedGuardrailType, failedGuardrailScope := inferDispatchGuardrail(err.Error())
+		s.completePromotionTerminal(ctx, task, entry, model.DispatchOutcome{
+			Status:         model.DispatchStatusBlocked,
+			Reason:         err.Error(),
+			Runtime:        entry.Runtime,
+			Provider:       entry.Provider,
+			Model:          entry.Model,
+			RoleID:         entry.RoleID,
+			GuardrailType:  failedGuardrailType,
+			GuardrailScope: failedGuardrailScope,
 		})
-		_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusFailed, err.Error(), nil)
 		return
 	}
+	_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusPromoted, "started", &run.ID, "", "", model.QueueRecoveryDispositionPromoted)
+	updateQueueEntryState(entry, model.AgentPoolQueueStatusPromoted, "started", &run.ID, "", "", model.QueueRecoveryDispositionPromoted)
+	s.recordPromotionDispatchAttempt(ctx, task, entry, model.DispatchOutcome{
+		Status:   model.DispatchStatusStarted,
+		Runtime:  entry.Runtime,
+		Provider: entry.Provider,
+		Model:    entry.Model,
+		RoleID:   entry.RoleID,
+		Run:      dtoPtr(run.ToDTO()),
+		Queue:    entry,
+	})
 	log.WithFields(log.Fields{
 		"completedRunId": completedRun.ID.String(),
 		"queueEntryId":   entry.EntryID,
-		"projectId":      completedTask.ProjectID.String(),
+		"projectId":      task.ProjectID.String(),
 		"taskId":         entry.TaskID,
 		"promotedRunId":  run.ID.String(),
 	}).Info("queued agent admission promoted")
-	s.broadcastEvent(ws.EventAgentQueuePromoted, completedTask.ProjectID.String(), map[string]any{
+	s.broadcastEvent(ws.EventAgentQueuePromoted, task.ProjectID.String(), map[string]any{
 		"queue": entry,
 		"run":   run.ToDTO(),
 	})
-	_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusPromoted, "started", &run.ID)
-	s.broadcastPoolStats(ctx, completedTask.ProjectID.String())
+	s.broadcastPoolStats(ctx, task.ProjectID.String())
+}
+
+func (s *AgentService) loadPromotionMember(ctx context.Context, task *model.Task, memberID uuid.UUID) (*model.Member, error) {
+	if s.dispatchMembers == nil {
+		if task == nil {
+			return nil, ErrDispatchMemberNotFound
+		}
+		return &model.Member{
+			ID:        memberID,
+			ProjectID: task.ProjectID,
+			Type:      model.MemberTypeAgent,
+			IsActive:  true,
+		}, nil
+	}
+	return s.dispatchMembers.GetByID(ctx, memberID)
+}
+
+func (s *AgentService) recordPromotionDispatchAttempt(ctx context.Context, task *model.Task, entry *model.AgentPoolQueueEntry, dispatch model.DispatchOutcome) {
+	if s.dispatchAttempts == nil || task == nil || entry == nil {
+		return
+	}
+	memberID, err := uuid.Parse(entry.MemberID)
+	if err != nil {
+		return
+	}
+	priority := entry.Priority
+	_ = s.dispatchAttempts.Create(ctx, &model.DispatchAttempt{
+		ID:                  uuid.New(),
+		ProjectID:           task.ProjectID,
+		TaskID:              task.ID,
+		MemberID:            &memberID,
+		Outcome:             dispatch.Status,
+		TriggerSource:       "promotion",
+		Reason:              dispatch.Reason,
+		Runtime:             dispatch.Runtime,
+		Provider:            dispatch.Provider,
+		Model:               dispatch.Model,
+		RoleID:              dispatch.RoleID,
+		QueueEntryID:        entry.EntryID,
+		QueuePriority:       &priority,
+		GuardrailType:       dispatch.GuardrailType,
+		GuardrailScope:      dispatch.GuardrailScope,
+		RecoveryDisposition: entry.RecoveryDisposition,
+		CreatedAt:           time.Now().UTC(),
+	})
+}
+
+func updateQueueEntryState(entry *model.AgentPoolQueueEntry, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID, guardrailType string, guardrailScope string, recoveryDisposition string) {
+	if entry == nil {
+		return
+	}
+	entry.Status = status
+	entry.Reason = reason
+	entry.GuardrailType = guardrailType
+	entry.GuardrailScope = guardrailScope
+	entry.RecoveryDisposition = recoveryDisposition
+	if runID != nil {
+		value := runID.String()
+		entry.AgentRunID = &value
+	} else {
+		entry.AgentRunID = nil
+	}
+	entry.UpdatedAt = time.Now().UTC()
+}
+
+func (s *AgentService) completePromotionEntry(ctx context.Context, entry *model.AgentPoolQueueEntry, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID, guardrailType string, guardrailScope string, recoveryDisposition string) {
+	_ = s.queueStore.CompleteQueuedEntry(ctx, entry.EntryID, status, reason, runID, guardrailType, guardrailScope, recoveryDisposition)
+	updateQueueEntryState(entry, status, reason, runID, guardrailType, guardrailScope, recoveryDisposition)
+}
+
+func (s *AgentService) completePromotionRecoverable(ctx context.Context, task *model.Task, entry *model.AgentPoolQueueEntry, outcome model.DispatchOutcome) {
+	s.completePromotionEntry(ctx, entry, model.AgentPoolQueueStatusQueued, outcome.Reason, nil, outcome.GuardrailType, outcome.GuardrailScope, model.QueueRecoveryDispositionRecoverable)
+	outcome.Queue = entry
+	s.recordPromotionDispatchAttempt(ctx, task, entry, outcome)
+	s.broadcastEvent(ws.EventTaskDispatchBlocked, task.ProjectID.String(), map[string]any{
+		"queue": entry,
+		"dispatch": outcome,
+	})
+}
+
+func (s *AgentService) completePromotionTerminal(ctx context.Context, task *model.Task, entry *model.AgentPoolQueueEntry, outcome model.DispatchOutcome) {
+	s.completePromotionEntry(ctx, entry, model.AgentPoolQueueStatusFailed, outcome.Reason, nil, outcome.GuardrailType, outcome.GuardrailScope, model.QueueRecoveryDispositionTerminal)
+	outcome.Queue = entry
+	s.recordPromotionDispatchAttempt(ctx, task, entry, outcome)
+	s.broadcastEvent(ws.EventAgentQueueFailed, task.ProjectID.String(), map[string]any{
+		"queue": entry,
+		"error": outcome.Reason,
+	})
 }
 
 func (s *AgentService) resolveRoleConfig(roleID string) (*bridgeclient.RoleConfig, error) {
@@ -1825,6 +2053,32 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		eventFields["reportedCostUsd"] = payload.CostUSD
 		log.WithFields(eventFields).Debug("bridge cost event received")
 		return s.UpdateCost(ctx, run.ID, payload.InputTokens, payload.OutputTokens, payload.CacheReadTokens, payload.CostUSD, payload.TurnNumber, payload.CostAccounting)
+
+	case ws.BridgeEventBudgetAlert:
+		var payload ws.BridgeEventBudgetAlertData
+		if err := event.DecodeData(&payload); err != nil {
+			return fmt.Errorf("decode bridge budget alert payload: %w", err)
+		}
+		eventFields["thresholdPercent"] = payload.ThresholdPercent
+		eventFields["costUsd"] = payload.CostUSD
+		eventFields["budgetRemainingUsd"] = payload.BudgetRemainingUSD
+		log.WithFields(eventFields).Warn("bridge budget alert event received")
+
+		task, err := s.taskRepo.GetByID(ctx, run.TaskID)
+		if err != nil {
+			return err
+		}
+		taskSnapshot := *task
+		if payload.CostUSD > 0 {
+			taskSnapshot.SpentUsd = payload.CostUSD
+		}
+		if budgetUSD := payload.CostUSD + payload.BudgetRemainingUSD; budgetUSD > 0 {
+			taskSnapshot.BudgetUsd = budgetUSD
+		}
+		if payload.ThresholdPercent > 0 {
+			s.notifyIMBudgetAlert(ctx, run, &taskSnapshot, float64(payload.ThresholdPercent))
+		}
+		return nil
 
 	case ws.BridgeEventStatusChange:
 		var payload ws.BridgeStatusChangeData
@@ -2129,6 +2383,28 @@ func (s *AgentService) verifySpawnStarted(taskID, runID uuid.UUID, startedAt tim
 		}
 		return
 	}
+	if s.runRepo == nil {
+		return
+	}
+	if run, runErr := s.runRepo.GetByID(ctx, runID); runErr == nil && run != nil {
+		expected := BridgeRuntimeContextFromRun(run)
+		actual := BridgeRuntimeContextFromStatus(status)
+		if field, expectedValue, actualValue, drift := DiffBridgeRuntimeContext(expected, actual); drift {
+			log.WithFields(log.Fields{
+				"taskId":   taskID.String(),
+				"runId":    runID.String(),
+				"field":    field,
+				"expected": expectedValue,
+				"actual":   actualValue,
+				"runtime":  status.Runtime,
+				"provider": status.Provider,
+				"model":    status.Model,
+				"teamId":   status.TeamID,
+				"teamRole": status.TeamRole,
+			}).Warn("agent spawn status verification detected runtime context drift")
+			return
+		}
+	}
 	if nextStatus, ok := mapBridgeRuntimeStatus(status.State); ok && nextStatus != "" && nextStatus != model.AgentRunStatusRunning {
 		_ = s.UpdateStatus(ctx, runID, nextStatus)
 	}
@@ -2237,9 +2513,9 @@ func buildBudgetAlertStructuredMessage(run *model.AgentRun, task *model.Task, pe
 	}
 }
 
-func (s *AgentService) queueIMProgress(ctx context.Context, req IMBoundProgressRequest, fields log.Fields, logMessage string) {
+func (s *AgentService) queueIMProgress(ctx context.Context, req IMBoundProgressRequest, fields log.Fields, logMessage string) bool {
 	if s.imProgress == nil {
-		return
+		return false
 	}
 	queued, err := s.imProgress.QueueBoundProgress(ctx, req)
 	if fields == nil {
@@ -2248,11 +2524,12 @@ func (s *AgentService) queueIMProgress(ctx context.Context, req IMBoundProgressR
 	fields["queued"] = queued
 	if err != nil {
 		log.WithFields(fields).WithError(err).Warn(logMessage)
-		return
+		return false
 	}
 	if queued {
 		log.WithFields(fields).Debug(logMessage + " queued")
 	}
+	return queued
 }
 
 func (s *AgentService) notifyIMRunUpdate(ctx context.Context, run *model.AgentRun, content string, terminal bool, eventType string) {
@@ -2301,10 +2578,17 @@ func (s *AgentService) notifyIMBudgetAlert(ctx context.Context, run *model.Agent
 	if run == nil || task == nil {
 		return
 	}
+	percentInt := int(percent)
+	if percentInt <= 0 {
+		return
+	}
+	if !s.shouldEmitBudgetAlert(run.ID, percentInt) {
+		return
+	}
 	content := fmt.Sprintf("Budget alert: task crossed the 80%% threshold and spent $%.2f of $%.2f budget (%.0f%%).", task.SpentUsd, task.BudgetUsd, percent)
 	fields := agentRunLogFields(run)
 	fields["budgetPercent"] = percent
-	s.queueIMProgress(ctx, IMBoundProgressRequest{
+	queued := s.queueIMProgress(ctx, IMBoundProgressRequest{
 		TaskID:     run.TaskID.String(),
 		RunID:      run.ID.String(),
 		Kind:       IMDeliveryKindProgress,
@@ -2315,6 +2599,50 @@ func (s *AgentService) notifyIMBudgetAlert(ctx context.Context, run *model.Agent
 			"budget_percent":    fmt.Sprintf("%.0f", percent),
 		},
 	}, fields, "agent IM budget alert notification")
+	if queued || s.imNotifier == nil || s.imChannels == nil {
+		return
+	}
+
+	channels, err := s.imChannels.ResolveChannelsForEvent(ctx, ws.EventBudgetWarning, "", "")
+	if err != nil {
+		log.WithFields(fields).WithError(err).Warn("agent IM budget alert channel resolution failed")
+		return
+	}
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		if err := s.imNotifier.Notify(ctx, &model.IMNotifyRequest{
+			Platform:  strings.TrimSpace(channel.Platform),
+			ChannelID: strings.TrimSpace(channel.ChannelID),
+			Event:     ws.EventBudgetWarning,
+			Title:     "Budget alert",
+			Body:      content,
+			ProjectID: task.ProjectID.String(),
+			Structured: &model.IMStructuredMessage{
+				Title: "Budget alert",
+				Body:  content,
+				Fields: []model.IMStructuredField{
+					{Label: "Task", Value: task.Title},
+					{Label: "Status", Value: task.Status},
+					{Label: "Budget", Value: fmt.Sprintf("$%.2f / $%.2f", task.SpentUsd, task.BudgetUsd)},
+				},
+			},
+		}); err != nil {
+			log.WithFields(fields).WithError(err).Warn("agent IM budget alert notify failed")
+		}
+	}
+}
+
+func (s *AgentService) shouldEmitBudgetAlert(runID uuid.UUID, percent int) bool {
+	s.budgetAlertMu.Lock()
+	defer s.budgetAlertMu.Unlock()
+
+	if last := s.lastBudgetAlertByRun[runID]; last >= percent {
+		return false
+	}
+	s.lastBudgetAlertByRun[runID] = percent
+	return true
 }
 
 func summarizeBridgeOutput(content string, turnNumber int) string {

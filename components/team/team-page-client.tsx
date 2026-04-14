@@ -1,10 +1,16 @@
 "use client";
 
-import { useEffect, useMemo } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import { usePathname, useRouter, useSearchParams } from "next/navigation";
 import { enrichTeamMembers } from "@/lib/dashboard/summary";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
-import { useMemberStore, type CreateMemberInput, type UpdateMemberInput } from "@/lib/stores/member-store";
+import {
+  useMemberStore,
+  type BulkUpdateMembersResponse,
+  type CreateMemberInput,
+  type UpdateMemberInput,
+} from "@/lib/stores/member-store";
+import type { MemberStatus } from "@/lib/team/member-status";
 import { useRoleStore } from "@/lib/stores/role-store";
 import { TeamManagement } from "./team-management";
 
@@ -30,8 +36,21 @@ export function TeamPageClient() {
   const createMember = useMemberStore((state) => state.createMember);
   const updateMember = useMemberStore((state) => state.updateMember);
   const deleteMember = useMemberStore((state) => state.deleteMember);
+  const bulkUpdatePendingByProject = useMemberStore(
+    (state) => state.bulkUpdatePendingByProject
+  );
+  const bulkUpdateResultsByProject = useMemberStore(
+    (state) => state.bulkUpdateResultsByProject
+  );
+  const bulkUpdateMemberAvailability = useMemberStore(
+    (state) => state.bulkUpdateMemberAvailability
+  );
+  const clearBulkUpdateResult = useMemberStore(
+    (state) => state.clearBulkUpdateResult
+  );
   const roles = useRoleStore((state) => state.roles);
   const fetchRoles = useRoleStore((state) => state.fetchRoles);
+  const previousProjectIdRef = useRef<string | null>(null);
 
   const activeProjectId = requestedProjectId ?? selectedProjectId;
   const projects = useMemo(
@@ -53,6 +72,18 @@ export function TeamPageClient() {
   }, [activeProjectId, fetchMembers]);
 
   useEffect(() => {
+    const previousProjectId = previousProjectIdRef.current;
+    if (
+      previousProjectId &&
+      activeProjectId &&
+      previousProjectId !== activeProjectId
+    ) {
+      clearBulkUpdateResult(previousProjectId);
+    }
+    previousProjectIdRef.current = activeProjectId;
+  }, [activeProjectId, clearBulkUpdateResult]);
+
+  useEffect(() => {
     void fetchRoles();
   }, [fetchRoles]);
 
@@ -67,6 +98,12 @@ export function TeamPageClient() {
     ? Boolean(loadingByProject[activeProjectId]) || (dashboardLoading && projectMembers.length === 0)
     : dashboardLoading;
   const error = activeProjectId ? errorByProject[activeProjectId] ?? null : null;
+  const bulkUpdatePending = activeProjectId
+    ? Boolean(bulkUpdatePendingByProject[activeProjectId])
+    : false;
+  const bulkUpdateResult = activeProjectId
+    ? bulkUpdateResultsByProject[activeProjectId] ?? null
+    : null;
   const roster = useMemo(
     () =>
       enrichTeamMembers({
@@ -102,13 +139,33 @@ export function TeamPageClient() {
     await fetchSummary({ projectId: activeProjectId });
   };
 
+  const handleBulkUpdateMembers = async (
+    memberIds: string[],
+    status: MemberStatus
+  ): Promise<BulkUpdateMembersResponse> => {
+    if (!activeProjectId) {
+      return { status, results: [] };
+    }
+
+    const result = await bulkUpdateMemberAvailability(
+      activeProjectId,
+      memberIds,
+      status
+    );
+    await fetchSummary({ projectId: activeProjectId });
+    return result;
+  };
+
   return (
     <TeamManagement
+      key={activeProjectId ?? "no-project"}
       projects={projects}
       selectedProjectId={activeProjectId}
       members={roster}
       loading={loading}
       error={error}
+      bulkUpdatePending={bulkUpdatePending}
+      bulkUpdateResult={bulkUpdateResult}
       availableRoles={roles}
       onRetry={() => {
         if (activeProjectId) {
@@ -120,6 +177,12 @@ export function TeamPageClient() {
       onCreateMember={handleCreateMember}
       onUpdateMember={handleUpdateMember}
       onDeleteMember={handleDeleteMember}
+      onBulkUpdateMembers={handleBulkUpdateMembers}
+      onClearBulkUpdateResult={() => {
+        if (activeProjectId) {
+          clearBulkUpdateResult(activeProjectId);
+        }
+      }}
     />
   );
 }

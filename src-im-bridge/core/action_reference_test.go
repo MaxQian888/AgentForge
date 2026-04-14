@@ -12,6 +12,25 @@ func TestParseActionReference_ParsesTrimmedActionAndEntity(t *testing.T) {
 	}
 }
 
+func TestActionReference_BuildAndParseMetadata(t *testing.T) {
+	raw := BuildActionReference("create-task", "project-1", map[string]string{
+		"title":    "Follow up",
+		"body":     "Created from IM card",
+		"priority": "high",
+	})
+
+	action, entityID, metadata, ok := ParseActionReferenceWithMetadata(raw)
+	if !ok {
+		t.Fatalf("expected action reference %q to parse", raw)
+	}
+	if action != "create-task" || entityID != "project-1" {
+		t.Fatalf("got action=%q entityID=%q", action, entityID)
+	}
+	if metadata["title"] != "Follow up" || metadata["body"] != "Created from IM card" || metadata["priority"] != "high" {
+		t.Fatalf("metadata = %+v", metadata)
+	}
+}
+
 func TestParseActionReference_RejectsInvalidShapes(t *testing.T) {
 	cases := []string{
 		"",

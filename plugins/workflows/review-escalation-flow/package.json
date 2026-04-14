@@ -1,0 +1,8 @@
+{
+  "name": "@agentforge/workflow-review-escalation-flow",
+  "private": true,
+  "scripts": {
+    "plugin:build": "node ../../../scripts/build-go-wasm-plugin.js --manifest plugins/workflows/review-escalation-flow/manifest.yaml --source ./cmd/review-escalation-flow",
+    "plugin:verify": "node ../../../scripts/verify-plugin-dev-workflow.js --manifest plugins/workflows/review-escalation-flow/manifest.yaml"
+  }
+}

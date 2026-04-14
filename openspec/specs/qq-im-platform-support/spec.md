@@ -2,7 +2,6 @@
 
 ## Purpose
 Define the runnable QQ (NapCat or OneBot) provider contract for the AgentForge IM Bridge, including startup validation, shared command normalization, provider-aware delivery downgrade, and reply-target preservation for asynchronous updates.
-
 ## Requirements
 ### Requirement: QQ provider SHALL be runnable through the shared IM Bridge platform contract
 The IM Bridge SHALL expose QQ (NapCat or OneBot) as a runnable built-in provider through the same provider descriptor, transport selection, and configuration validation path used by the other supported IM platforms. The QQ provider MUST support `stub` transport for local verification and MUST support a live transport path that validates the credentials and connection settings required by the documented QQ event and message delivery model before startup succeeds.
@@ -31,17 +30,17 @@ The system SHALL normalize supported QQ inbound messages or events into `core.Me
 - **AND** the resulting reply is routed back to the originating QQ conversation context
 
 ### Requirement: QQ outbound delivery SHALL support explicit structured downgrade semantics
-The system SHALL resolve QQ-targeted typed deliveries through a QQ rendering profile that can choose a QQ-supported representation for plain text, structured content, or provider-supported richer output. When the requested richer path cannot be honored by the current QQ reply target or payload shape, the Bridge MUST explicitly fall back to a supported QQ text or link delivery and preserve fallback metadata rather than pretending richer delivery succeeded.
+The system SHALL resolve QQ-targeted typed deliveries through a text-first QQ rendering profile. QQ MUST not advertise provider-native payload surfaces or mutable-update lifecycle it does not support. When the requested richer path cannot be honored, the Bridge SHALL convert the delivery into QQ-supported reply-segment-aware text or link output for the originating conversation and preserve explicit fallback metadata instead of pretending richer delivery succeeded.
 
-#### Scenario: Structured QQ notification uses the provider rendering profile
+#### Scenario: Structured QQ notification becomes text-first output
 - **WHEN** the notification receiver handles a QQ-targeted delivery with structured or richer content
-- **THEN** the Bridge resolves that delivery through the active QQ rendering profile before transport execution
-- **AND** the final transport path uses a QQ-supported representation instead of leaking cross-platform structured payload assumptions into the transport layer
+- **THEN** the Bridge resolves that delivery into QQ-supported text or link output for the active conversation
+- **AND** the delivery metadata records that QQ remained on its text-first path
 
-#### Scenario: Unsupported QQ richer payload degrades explicitly
-- **WHEN** a QQ-targeted typed delivery requests a richer card or mutable update path that the current reply target does not support
-- **THEN** the Bridge sends the supported QQ text or link fallback instead
-- **AND** operators can see from the delivery metadata that the original QQ update plan was unusable
+#### Scenario: Native or mutable QQ request degrades explicitly
+- **WHEN** a QQ-targeted typed delivery requests native payload or mutable update behavior
+- **THEN** the Bridge falls back to supported QQ text delivery
+- **AND** operators can see from the delivery metadata that the original richer request was unsupported for QQ
 
 ### Requirement: QQ reply targets SHALL preserve enough context for asynchronous updates
 When a QQ message starts a backend-backed action that may emit later progress or terminal updates, the Bridge SHALL preserve enough QQ reply-target context to route those later deliveries back to the same user-visible conversation when the platform supports it. That preserved reply target MUST survive control-plane queueing and replay, and any missing update affordance MUST trigger a truthful QQ fallback path rather than a silent drop.
@@ -55,3 +54,17 @@ When a QQ message starts a backend-backed action that may emit later progress or
 - **WHEN** a replayed or direct QQ delivery requires richer update context that was not preserved or is no longer valid
 - **THEN** the Bridge uses the documented QQ fallback delivery path instead of attempting an invalid update
 - **AND** operators can see from the delivery metadata that the original QQ update target was unusable
+
+### Requirement: QQ asynchronous completion SHALL remain text-first and conversation-scoped
+When a QQ command or action starts long-running work, asynchronous progress and terminal completion SHALL reuse preserved group or direct-message context through supported text delivery before considering a new unrelated send path. QQ MUST remain text-first: the Bridge SHALL not advertise or attempt provider-native payload or mutable-update semantics that QQ does not actually implement.
+
+#### Scenario: QQ terminal completion reuses reply-aware text delivery
+- **WHEN** a QQ-originated long-running action finishes and the preserved conversation or message context is still available
+- **THEN** the Bridge delivers the terminal completion back into that same QQ conversation through supported text delivery
+- **AND** users do not receive an invented richer payload type
+
+#### Scenario: QQ replay falls back explicitly when reply context is stale
+- **WHEN** a replayed QQ completion no longer has a usable reply-aware context
+- **THEN** the Bridge emits the documented text fallback
+- **AND** delivery metadata records that the original QQ completion context was unusable
+

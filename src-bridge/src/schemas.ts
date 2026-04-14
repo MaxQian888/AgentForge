@@ -7,6 +7,10 @@ const HookNameSchema = z.enum([
   "SubagentStart",
   "SubagentStop",
   "PermissionRequest",
+  "SessionStart",
+  "SessionEnd",
+  "Notification",
+  "UserPromptSubmit",
 ]);
 
 const RoleExecutionSkillSchema = z.object({
@@ -185,8 +189,20 @@ export const CommandRequestSchema = z.object({
   arguments: z.string().min(1).optional(),
 });
 
+export const ShellRequestSchema = z.object({
+  task_id: z.string().min(1),
+  command: z.string().min(1),
+  agent: z.string().min(1).optional(),
+  model: z.string().min(1).optional(),
+});
+
 export const InterruptRequestSchema = z.object({
   task_id: z.string().min(1),
+});
+
+export const ThinkingBudgetRequestSchema = z.object({
+  task_id: z.string().min(1),
+  max_thinking_tokens: z.number().int().positive().nullable().optional(),
 });
 
 export const ModelSwitchRequestSchema = z.object({

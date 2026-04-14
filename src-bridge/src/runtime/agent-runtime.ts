@@ -99,6 +99,17 @@ export class AgentRuntime {
     const subagentCount = this.request?.agents
       ? Object.keys(this.request.agents).length
       : undefined;
+    const liveControls =
+      runtime === "claude_code" && this.claudeQuery
+        ? {
+            interrupt: typeof this.claudeQuery.interrupt === "function" || undefined,
+            set_model: typeof this.claudeQuery.setModel === "function" || undefined,
+            set_thinking_budget:
+              typeof this.claudeQuery.setMaxThinkingTokens === "function" || undefined,
+            mcp_status:
+              typeof this.claudeQuery.mcpServerStatus === "function" || undefined,
+          }
+        : undefined;
     return {
       task_id: this.taskId,
       state: this.status,
@@ -119,6 +130,10 @@ export class AgentRuntime {
       file_checkpointing: this.request?.file_checkpointing,
       active_hooks: activeHooks && activeHooks.length > 0 ? activeHooks : undefined,
       subagent_count: subagentCount,
+      live_controls:
+        liveControls && Object.values(liveControls).some(Boolean)
+          ? liveControls
+          : undefined,
       cost_accounting: serializeCostAccounting(this.costAccounting),
     };
   }

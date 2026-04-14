@@ -30,37 +30,77 @@ type IntentCandidate struct {
 	Keywords []string
 }
 
+type directRuntimeMention struct {
+	Mentions []string
+	Runtime  string
+	Provider string
+}
+
 var operatorCommandCatalog = []commandCatalogEntry{
 	{
 		Command:   "/task",
 		Summary:   "任务管理",
-		Usage:     "/task create|list|status|assign|decompose|ai|move",
-		UsageText: "用法: /task create|list|status|assign|decompose|ai|move <参数>",
+		Usage:     "/task create|list|status|assign|decompose|ai|move|delete",
+		UsageText: "用法: /task create|list|status|assign|decompose|ai|move|delete <参数>",
 		Subcommands: []commandCatalogSubcommand{
-			{Name: "create", Usage: "/task create <标题>", Summary: "创建新任务"},
+			{Name: "create", Usage: "/task create <标题> [--priority <级别>] [--description <描述>]", Summary: "创建新任务"},
 			{Name: "list", Usage: "/task list [状态]", Summary: "查看任务列表"},
 			{Name: "status", Usage: "/task status <task-id>", Summary: "查看任务详情"},
 			{Name: "assign", Usage: "/task assign <id> <人员>", Summary: "分配任务"},
 			{Name: "decompose", Usage: "/task decompose <id>", Summary: "AI 分解现有任务"},
 			{Name: "ai", Usage: "/task ai generate|classify <参数>", Summary: "Bridge AI 生成与意图分类"},
 			{Name: "move", Usage: "/task move <task-id> <status>", Summary: "流转任务状态", Aliases: []string{"transition"}},
+			{Name: "delete", Usage: "/task delete <task-id>", Summary: "删除任务"},
 		},
 	},
 	{
 		Command:   "/agent",
 		Summary:   "Agent 运行控制",
-		Usage:     "/agent status|runtimes|health|spawn|run|logs|pause|resume|kill",
-		UsageText: "用法: /agent status|runtimes|health|spawn|run|logs|pause|resume|kill <参数>",
+		Usage:     "/agent status|runtimes|health|spawn|run|config|logs|pause|resume|kill",
+		UsageText: "用法: /agent status|runtimes|health|spawn|run|config|logs|pause|resume|kill <参数>",
 		Subcommands: []commandCatalogSubcommand{
 			{Name: "status", Usage: "/agent status [run-id]", Summary: "查看 Agent 池或运行状态", Aliases: []string{"list"}},
 			{Name: "runtimes", Usage: "/agent runtimes", Summary: "查看 Bridge runtimes"},
 			{Name: "health", Usage: "/agent health", Summary: "查看 Bridge health"},
 			{Name: "spawn", Usage: "/agent spawn <task-id>", Summary: "为任务启动 Agent"},
-			{Name: "run", Usage: "/agent run <描述>", Summary: "创建任务并自动启动 Agent"},
+			{Name: "run", Usage: "/agent run [--runtime <runtime>] [--provider <provider>] [--model <model>] <描述>", Summary: "创建任务并按指定 runtime 启动 Agent"},
+			{Name: "config", Usage: "/agent config get|set <参数>", Summary: "查看或设置当前项目的代码 Agent 默认配置"},
 			{Name: "logs", Usage: "/agent logs <run-id>", Summary: "查看 Agent 执行日志"},
 			{Name: "pause", Usage: "/agent pause <run-id>", Summary: "暂停 Agent 运行"},
 			{Name: "resume", Usage: "/agent resume <run-id>", Summary: "恢复 Agent 运行"},
 			{Name: "kill", Usage: "/agent kill <run-id>", Summary: "终止 Agent 运行"},
+		},
+	},
+	{
+		Command:   "/login",
+		Summary:   "运行时登录与凭据状态",
+		Usage:     "/login status|codex|claude|opencode|cursor|gemini|qoder|iflow",
+		UsageText: "用法: /login status|codex|claude|opencode|cursor|gemini|qoder|iflow",
+		Subcommands: []commandCatalogSubcommand{
+			{Name: "status", Usage: "/login status", Summary: "查看所有 runtime 登录/凭据状态"},
+			{Name: "codex", Usage: "/login codex", Summary: "查看 Codex 登录指引"},
+			{Name: "claude", Usage: "/login claude", Summary: "查看 Claude Code 凭据指引"},
+			{Name: "opencode", Usage: "/login opencode", Summary: "查看 OpenCode 登录/配置指引"},
+			{Name: "cursor", Usage: "/login cursor", Summary: "查看 Cursor CLI 可用性"},
+			{Name: "gemini", Usage: "/login gemini", Summary: "查看 Gemini CLI 可用性"},
+			{Name: "qoder", Usage: "/login qoder", Summary: "查看 Qoder CLI 可用性"},
+			{Name: "iflow", Usage: "/login iflow", Summary: "查看 iFlow CLI 可用性"},
+		},
+	},
+	{
+		Command:   "/project",
+		Summary:   "项目作用域与管理",
+		Usage:     "/project list|current|info|members|set|create|rename|delete",
+		UsageText: "用法: /project list|current|info|members|set|create|rename|delete <参数>",
+		Subcommands: []commandCatalogSubcommand{
+			{Name: "list", Usage: "/project list", Summary: "查看可用项目"},
+			{Name: "current", Usage: "/project current", Summary: "查看当前已选项目"},
+			{Name: "info", Usage: "/project info [project-id|slug]", Summary: "查看项目详情"},
+			{Name: "members", Usage: "/project members [project-id|slug]", Summary: "查看项目成员"},
+			{Name: "set", Usage: "/project set <project-id|slug>", Summary: "切换当前项目作用域"},
+			{Name: "create", Usage: "/project create <name>", Summary: "创建新项目并自动切换"},
+			{Name: "rename", Usage: "/project rename <project-id|slug> <new-name>", Summary: "重命名项目"},
+			{Name: "delete", Usage: "/project delete <project-id|slug>", Summary: "删除指定项目"},
 		},
 	},
 	{
@@ -99,10 +139,12 @@ var operatorCommandCatalog = []commandCatalogEntry{
 	{
 		Command:   "/team",
 		Summary:   "团队摘要",
-		Usage:     "/team list",
-		UsageText: "用法: /team list",
+		Usage:     "/team list|add|remove",
+		UsageText: "用法: /team list|add|remove <参数>",
 		Subcommands: []commandCatalogSubcommand{
 			{Name: "list", Usage: "/team list", Summary: "查看项目成员摘要"},
+			{Name: "add", Usage: "/team add <human|agent> <name> [role]", Summary: "添加项目成员"},
+			{Name: "remove", Usage: "/team remove <member-id|name>", Summary: "移除项目成员"},
 		},
 	},
 	{
@@ -117,14 +159,14 @@ var operatorCommandCatalog = []commandCatalogEntry{
 	},
 	{
 		Command:   "/tools",
-		Summary:   "Bridge 宸ュ叿绠＄悊",
+		Summary:   "Bridge 工具管理",
 		Usage:     "/tools list|install|uninstall|restart",
-		UsageText: "鐢ㄦ硶: /tools list|install|uninstall|restart <鍙傛暟>",
+		UsageText: "用法: /tools list|install|uninstall|restart <参数>",
 		Subcommands: []commandCatalogSubcommand{
-			{Name: "list", Usage: "/tools list", Summary: "鏌ョ湅 Bridge tools"},
-			{Name: "install", Usage: "/tools install <manifest-url>", Summary: "瀹夎 Bridge tool 鎻掍欢"},
-			{Name: "uninstall", Usage: "/tools uninstall <plugin-id>", Summary: "鍗歌浇 Bridge tool 鎻掍欢"},
-			{Name: "restart", Usage: "/tools restart <plugin-id>", Summary: "閲嶅惎 Bridge tool 鎻掍欢"},
+			{Name: "list", Usage: "/tools list", Summary: "查看 Bridge tools"},
+			{Name: "install", Usage: "/tools install <manifest-url>", Summary: "安装 Bridge tool 插件"},
+			{Name: "uninstall", Usage: "/tools uninstall <plugin-id>", Summary: "卸载 Bridge tool 插件"},
+			{Name: "restart", Usage: "/tools restart <plugin-id>", Summary: "重启 Bridge tool 插件"},
 		},
 	},
 	{
@@ -228,6 +270,8 @@ var operatorIntentCatalog = []IntentCandidate{
 	{Intent: "decompose_task", Command: "/task decompose", Summary: "分解任务", Keywords: []string{"decompose", "分解", "拆分任务"}},
 	{Intent: "task_list", Command: "/task list", Summary: "查看任务列表", Keywords: []string{"任务", "task", "列表", "list"}},
 	{Intent: "agent_spawn", Command: "/agent spawn", Summary: "为任务启动 Agent", Keywords: []string{"spawn agent", "启动 agent", "派 agent", "执行任务"}},
+	{Intent: "login_status", Command: "/login status", Summary: "查看 runtime 登录状态", Keywords: []string{"登录", "login", "auth", "认证"}},
+	{Intent: "project_list", Command: "/project list", Summary: "查看项目列表", Keywords: []string{"项目", "project", "workspace"}},
 	{Intent: "sprint_status", Command: "/sprint status", Summary: "查看当前 sprint", Keywords: []string{"sprint", "迭代", "进度", "状态"}},
 	{Intent: "review", Command: "/review", Summary: "触发代码审查", Keywords: []string{"review", "审查", "pr", "pull request"}},
 	{Intent: "review_followup_tasks", Command: "/review", Summary: "审查并生成后续任务建议", Keywords: []string{"review", "follow-up", "后续任务", "issues", "修复项"}},
@@ -237,6 +281,16 @@ var operatorIntentCatalog = []IntentCandidate{
 	{Intent: "agent_pause", Command: "/agent pause", Summary: "暂停指定 Agent", Keywords: []string{"暂停", "pause"}},
 	{Intent: "agent_resume", Command: "/agent resume", Summary: "恢复指定 Agent", Keywords: []string{"恢复", "resume"}},
 	{Intent: "agent_kill", Command: "/agent kill", Summary: "终止指定 Agent", Keywords: []string{"终止", "停止", "kill"}},
+}
+
+var directRuntimeMentions = []directRuntimeMention{
+	{Mentions: []string{"@claude", "@claudecode", "@claude-code"}, Runtime: "claude_code", Provider: "anthropic"},
+	{Mentions: []string{"@codex"}, Runtime: "codex", Provider: "openai"},
+	{Mentions: []string{"@opencode"}, Runtime: "opencode", Provider: "opencode"},
+	{Mentions: []string{"@cursor"}, Runtime: "cursor", Provider: "cursor"},
+	{Mentions: []string{"@gemini"}, Runtime: "gemini", Provider: "google"},
+	{Mentions: []string{"@qoder"}, Runtime: "qoder", Provider: "qoder"},
+	{Mentions: []string{"@iflow"}, Runtime: "iflow", Provider: "iflow"},
 }
 
 func IntentCandidates() []string {
@@ -385,4 +439,22 @@ func suggestCommandFromCatalog(content string) string {
 
 func SuggestCommandFromCatalog(content string) string {
 	return suggestCommandFromCatalog(content)
+}
+
+func ResolveDirectRuntimeMention(content string) string {
+	trimmed := strings.TrimSpace(content)
+	lowerTrimmed := strings.ToLower(trimmed)
+	for _, entry := range directRuntimeMentions {
+		for _, mention := range entry.Mentions {
+			if !strings.HasPrefix(lowerTrimmed, mention) {
+				continue
+			}
+			remainder := strings.TrimSpace(trimmed[len(mention):])
+			if remainder == "" {
+				return ""
+			}
+			return fmt.Sprintf("/agent run --runtime %s %s", entry.Runtime, remainder)
+		}
+	}
+	return ""
 }

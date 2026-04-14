@@ -140,6 +140,12 @@ func TestIMService_HandleActionPreservesReplyTargetAndMetadata(t *testing.T) {
 	if resp.Metadata["source"] != "block_actions" {
 		t.Fatalf("Metadata = %+v", resp.Metadata)
 	}
+	if resp.Metadata[imMetadataDeliverySource] != imDeliverySourceActionResult {
+		t.Fatalf("delivery source metadata = %+v", resp.Metadata)
+	}
+	if resp.Metadata[imMetadataBridgeBindingBridgeID] != "bridge-slack-1" {
+		t.Fatalf("bridge binding metadata = %+v", resp.Metadata)
+	}
 }
 
 func TestIMService_NotifyCompatibilityPayloadIncludesTypedDeliveryFields(t *testing.T) {
@@ -269,6 +275,12 @@ func TestIMService_SendQueuesPendingDeliveryForControlPlane(t *testing.T) {
 	}
 	if history[0].ID != "delivery-1" {
 		t.Fatalf("history[0].ID = %q, want delivery-1", history[0].ID)
+	}
+	if history[0].Metadata[imMetadataDeliverySource] != imDeliverySourceCompatSend {
+		t.Fatalf("metadata = %+v", history[0].Metadata)
+	}
+	if history[0].Metadata[imMetadataBridgeBindingBridgeID] != "bridge-slack-1" {
+		t.Fatalf("bridge binding metadata = %+v", history[0].Metadata)
 	}
 }
 

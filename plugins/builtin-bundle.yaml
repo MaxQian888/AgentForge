@@ -6,6 +6,10 @@
       "manifest": "tools/web-search/manifest.yaml",
       "docsRef": "docs/part/PLUGIN_SYSTEM_DESIGN.md#七工具插件系统tool-plugin",
       "verificationProfile": "mcp-tool",
+      "coreFlows": ["developer-assist"],
+      "starterFamily": "helper",
+      "dependencyRefs": ["runtime:ts-bridge", "service:mcp-client-hub"],
+      "workspaceRefs": ["workspace:plugins", "workspace:marketplace"],
       "readiness": {
         "readyMessage": "Bundled and ready for install.",
         "blockedMessage": "Web Search requires local setup before activation.",
@@ -23,6 +27,10 @@
       "manifest": "tools/github-tool/manifest.yaml",
       "docsRef": "docs/PRD.md#46-工具插件系统tool-plugin",
       "verificationProfile": "mcp-tool",
+      "coreFlows": ["repository-automation"],
+      "starterFamily": "helper",
+      "dependencyRefs": ["runtime:ts-bridge", "service:mcp-client-hub"],
+      "workspaceRefs": ["workspace:plugins", "workspace:marketplace"],
       "readiness": {
         "readyMessage": "GitHub Tool is ready for install.",
         "blockedMessage": "Requires GitHub credentials on the bridge host for authenticated API usage.",
@@ -47,6 +55,10 @@
       "manifest": "tools/db-query/manifest.yaml",
       "docsRef": "docs/part/PLUGIN_SYSTEM_DESIGN.md#七工具插件系统tool-plugin",
       "verificationProfile": "mcp-tool",
+      "coreFlows": ["data-inspection"],
+      "starterFamily": "helper",
+      "dependencyRefs": ["runtime:ts-bridge", "service:mcp-client-hub"],
+      "workspaceRefs": ["workspace:plugins", "workspace:marketplace"],
       "readiness": {
         "readyMessage": "DB Query is ready for install.",
         "blockedMessage": "Requires uvx plus a local SQLite database path before runtime activation can succeed.",
@@ -70,6 +82,105 @@
       "availability": {
         "status": "requires_prerequisite",
         "message": "Requires uvx plus a local SQLite database path before runtime activation can succeed."
+      }
+    },
+    {
+      "id": "task-control",
+      "kind": "ToolPlugin",
+      "manifest": "tools/task-control/manifest.yaml",
+      "docsRef": "docs/PRD.md",
+      "verificationProfile": "mcp-tool",
+      "coreFlows": ["task-delivery"],
+      "starterFamily": "core-starter",
+      "dependencyRefs": ["runtime:ts-bridge", "service:task-api"],
+      "workspaceRefs": ["workspace:tasks", "workspace:plugins"],
+      "readiness": {
+        "readyMessage": "Task Control is ready for install once the AgentForge backend is reachable.",
+        "blockedMessage": "Requires AgentForge backend access before control-plane calls can succeed.",
+        "nextStep": "Set AGENTFORGE_API_BASE_URL and AGENTFORGE_API_TOKEN before activation.",
+        "installable": true,
+        "configuration": [
+          {
+            "kind": "env",
+            "value": "AGENTFORGE_API_BASE_URL",
+            "label": "AgentForge API base URL"
+          },
+          {
+            "kind": "env",
+            "value": "AGENTFORGE_API_TOKEN",
+            "label": "AgentForge API token"
+          }
+        ]
+      },
+      "availability": {
+        "status": "requires_configuration",
+        "message": "Requires AgentForge backend access before control-plane calls can succeed."
+      }
+    },
+    {
+      "id": "review-control",
+      "kind": "ToolPlugin",
+      "manifest": "tools/review-control/manifest.yaml",
+      "docsRef": "docs/part/REVIEW_PIPELINE_DESIGN.md",
+      "verificationProfile": "mcp-tool",
+      "coreFlows": ["review-automation"],
+      "starterFamily": "core-starter",
+      "dependencyRefs": ["runtime:ts-bridge", "service:review-api"],
+      "workspaceRefs": ["workspace:reviews", "workspace:plugins"],
+      "readiness": {
+        "readyMessage": "Review Control is ready for install once the AgentForge backend is reachable.",
+        "blockedMessage": "Requires AgentForge backend access before review control calls can succeed.",
+        "nextStep": "Set AGENTFORGE_API_BASE_URL and AGENTFORGE_API_TOKEN before activation.",
+        "installable": true,
+        "configuration": [
+          {
+            "kind": "env",
+            "value": "AGENTFORGE_API_BASE_URL",
+            "label": "AgentForge API base URL"
+          },
+          {
+            "kind": "env",
+            "value": "AGENTFORGE_API_TOKEN",
+            "label": "AgentForge API token"
+          }
+        ]
+      },
+      "availability": {
+        "status": "requires_configuration",
+        "message": "Requires AgentForge backend access before review control calls can succeed."
+      }
+    },
+    {
+      "id": "workflow-control",
+      "kind": "ToolPlugin",
+      "manifest": "tools/workflow-control/manifest.yaml",
+      "docsRef": "docs/part/AGENT_ORCHESTRATION.md",
+      "verificationProfile": "mcp-tool",
+      "coreFlows": ["workflow-ops"],
+      "starterFamily": "core-starter",
+      "dependencyRefs": ["runtime:ts-bridge", "service:workflow-api"],
+      "workspaceRefs": ["workspace:workflow", "workspace:plugins"],
+      "readiness": {
+        "readyMessage": "Workflow Control is ready for install once the AgentForge backend is reachable.",
+        "blockedMessage": "Requires AgentForge backend access before workflow control calls can succeed.",
+        "nextStep": "Set AGENTFORGE_API_BASE_URL and AGENTFORGE_API_TOKEN before activation.",
+        "installable": true,
+        "configuration": [
+          {
+            "kind": "env",
+            "value": "AGENTFORGE_API_BASE_URL",
+            "label": "AgentForge API base URL"
+          },
+          {
+            "kind": "env",
+            "value": "AGENTFORGE_API_TOKEN",
+            "label": "AgentForge API token"
+          }
+        ]
+      },
+      "availability": {
+        "status": "requires_configuration",
+        "message": "Requires AgentForge backend access before workflow control calls can succeed."
       }
     },
     {
@@ -155,6 +266,10 @@
       "manifest": "workflows/standard-dev-flow/manifest.yaml",
       "docsRef": "docs/part/PLUGIN_SYSTEM_DESIGN.md#八工作流插件系统workflow-plugin",
       "verificationProfile": "workflow-wasm",
+      "coreFlows": ["task-delivery"],
+      "starterFamily": "quickstart",
+      "dependencyRefs": ["runtime:go-workflow", "role:coding-agent", "role:code-reviewer"],
+      "workspaceRefs": ["workspace:workflow", "workspace:plugins", "workspace:tasks"],
       "readiness": {
         "readyMessage": "Maintained sequential starter workflow for coding and review handoff.",
         "blockedMessage": "Workflow starter requires local setup before activation.",
@@ -164,6 +279,48 @@
       "availability": {
         "status": "ready",
         "message": "Maintained sequential starter workflow for coding and review handoff."
+      }
+    },
+    {
+      "id": "task-delivery-flow",
+      "kind": "WorkflowPlugin",
+      "manifest": "workflows/task-delivery-flow/manifest.yaml",
+      "docsRef": "docs/part/AGENT_ORCHESTRATION.md",
+      "verificationProfile": "workflow-wasm",
+      "coreFlows": ["task-delivery"],
+      "starterFamily": "core-starter",
+      "dependencyRefs": ["runtime:go-workflow", "role:planner-agent", "role:coding-agent", "role:code-reviewer"],
+      "workspaceRefs": ["workspace:tasks", "workspace:workflow", "workspace:plugins"],
+      "readiness": {
+        "readyMessage": "Maintained task delivery workflow starter for planner to coding to review handoff.",
+        "blockedMessage": "Workflow starter requires the local Go WASM workflow runtime before activation.",
+        "nextStep": "Install the built-in and activate it through the workflow runtime.",
+        "installable": true
+      },
+      "availability": {
+        "status": "ready",
+        "message": "Maintained task delivery workflow starter for planner to coding to review handoff."
+      }
+    },
+    {
+      "id": "review-escalation-flow",
+      "kind": "WorkflowPlugin",
+      "manifest": "workflows/review-escalation-flow/manifest.yaml",
+      "docsRef": "docs/part/REVIEW_PIPELINE_DESIGN.md",
+      "verificationProfile": "workflow-wasm",
+      "coreFlows": ["review-automation"],
+      "starterFamily": "core-starter",
+      "dependencyRefs": ["runtime:go-workflow", "role:code-reviewer", "role:planner-agent"],
+      "workspaceRefs": ["workspace:reviews", "workspace:workflow", "workspace:plugins"],
+      "readiness": {
+        "readyMessage": "Maintained review escalation workflow starter for deep review to approval handoff.",
+        "blockedMessage": "Workflow starter requires the local Go WASM workflow runtime before activation.",
+        "nextStep": "Install the built-in and activate it through the workflow runtime.",
+        "installable": true
+      },
+      "availability": {
+        "status": "ready",
+        "message": "Maintained review escalation workflow starter for deep review to approval handoff."
       }
     }
   ]

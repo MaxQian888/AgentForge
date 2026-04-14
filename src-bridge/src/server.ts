@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { Hono } from "hono";
 import type { Context } from "hono";
+import { AgentRuntime } from "./runtime/agent-runtime.js";
 import { RuntimePoolManager } from "./runtime/pool-manager.js";
 import { EventStreamer } from "./ws/event-stream.js";
 import { handleExecute } from "./handlers/execute.js";
@@ -12,6 +13,7 @@ import type { QueryRunner } from "./handlers/claude-runtime.js";
 import {
   type AgentRuntimeRegistry,
   createRuntimeRegistry,
+  ExecuteRequestValidationError,
   RuntimeConfigurationError,
   UnknownRuntimeError,
   UnsupportedRuntimeProviderError,
@@ -27,6 +29,8 @@ import {
   RevertRequestSchema,
   RollbackRequestSchema,
   ResumeRequestSchema,
+  ShellRequestSchema,
+  ThinkingBudgetRequestSchema,
   UnrevertRequestSchema,
   DecomposeTaskRequestSchema,
   DeepReviewRequestSchema,
@@ -46,7 +50,11 @@ import {
   UnknownProviderError,
 } from "./providers/registry.js";
 import { MCPClientHub } from "./mcp/client-hub.js";
-import type { OpenCodeTransport } from "./opencode/transport.js";
+import {
+  createOpenCodeTransport,
+  type OpenCodeTransport,
+} from "./opencode/transport.js";
+import { OpenCodePendingInteractionStore } from "./opencode/pending-interactions.js";
 import { BunSchedulerAdapter } from "./scheduler/bun-cron-adapter.js";
 import { HookCallbackManager } from "./runtime/hook-callback-manager.js";
 import { UnsupportedOperationError } from "./runtime/errors.js";
@@ -73,6 +81,37 @@ interface AppDeps {
   schedulerAdapter?: Pick<BunSchedulerAdapter, "start" | "stop">;
   runtimeRegistry?: AgentRuntimeRegistry;
   hookCallbackManager?: HookCallbackManager;
+  opencodePendingInteractions?: {
+    createPermissionRequest?: (input: {
+      sessionId: string;
+      permissionId: string;
+      toolName?: string;
+      context?: unknown;
+      ttlMs?: number;
+    }) => { requestId: string };
+    getPermissionRequest?: (
+      requestId: string,
+    ) => { sessionId: string; permissionId: string } | null;
+    consumePermissionRequest?: (requestId: string) => boolean;
+    resolvePermissionResponse?: (
+      requestId: string,
+      payload: { decision: "allow" | "deny"; reason?: string },
+    ) =>
+      | boolean
+      | {
+          sessionId: string;
+          permissionId: string;
+          allow: boolean;
+          reason?: string;
+        }
+      | null;
+    createProviderAuthRequest?: (input: { provider: string; ttlMs?: number }) => {
+      requestId: string;
+    };
+    consumeProviderAuthRequest?: (
+      requestId: string,
+    ) => { provider: string } | null;
+  };
 }
 
 type BridgeRouteMethod = "get" | "post";
@@ -149,6 +188,16 @@ export const BRIDGE_HTTP_ROUTE_GROUPS = {
     canonicalPath: "/bridge/messages/:task_id",
     compatibilityAliases: [],
   },
+  shell: {
+    method: "post",
+    canonicalPath: "/bridge/shell",
+    compatibilityAliases: [],
+  },
+  thinking: {
+    method: "post",
+    canonicalPath: "/bridge/thinking",
+    compatibilityAliases: [],
+  },
   command: {
     method: "post",
     canonicalPath: "/bridge/command",
@@ -162,6 +211,11 @@ export const BRIDGE_HTTP_ROUTE_GROUPS = {
   model: {
     method: "post",
     canonicalPath: "/bridge/model",
+    compatibilityAliases: [],
+  },
+  mcpStatus: {
+    method: "get",
+    canonicalPath: "/bridge/mcp-status/:task_id",
     compatibilityAliases: [],
   },
   permissionResponse: {
@@ -277,6 +331,22 @@ export function createApp(deps: AppDeps = {}): Hono {
   const pluginManager = deps.pluginManager ?? createDefaultPluginManager(mcpHub, streamer);
   const sessionManager = deps.sessionManager ?? createDefaultSessionManager();
   const hookCallbackManager = deps.hookCallbackManager ?? new HookCallbackManager();
+  const opencodeTransport =
+    deps.opencodeTransport ??
+    createOpenCodeTransport({
+      envLookup: deps.envLookup,
+    });
+  const opencodePendingInteractions =
+    deps.opencodePendingInteractions ?? new OpenCodePendingInteractionStore();
+  const opencodeRuntimePendingInteractions =
+    opencodePendingInteractions.createPermissionRequest
+      ? {
+          createPermissionRequest:
+            opencodePendingInteractions.createPermissionRequest.bind(
+              opencodePendingInteractions,
+            ),
+        }
+      : undefined;
 
   // Wire heartbeat status provider if streamer supports it
   if ("setStatusProvider" in streamer && typeof streamer.setStatusProvider === "function") {
@@ -301,11 +371,131 @@ export function createApp(deps: AppDeps = {}): Hono {
       executableLookup: deps.executableLookup,
       envLookup: deps.envLookup,
       codexAuthStatusProvider: deps.codexAuthStatusProvider,
-      opencodeTransport: deps.opencodeTransport,
+      opencodeTransport,
       opencodeEventRunner: deps.opencodeEventRunner,
       now,
+      opencodePendingInteractions: opencodeRuntimePendingInteractions,
     });
   }
+
+  function hydrateRuntimeFromSnapshot(snapshot: {
+    task_id: string;
+    session_id: string;
+    status: string;
+    turn_number: number;
+    spent_usd: number;
+    updated_at: number;
+    request?: Record<string, unknown>;
+    continuity?: Record<string, unknown>;
+  }): AgentRuntime {
+    const runtime = new AgentRuntime(snapshot.task_id, snapshot.session_id);
+    if (snapshot.request) {
+      runtime.bindRequest(snapshot.request as never);
+    }
+    runtime.continuity = snapshot.continuity as never;
+    runtime.status = snapshot.status as never;
+    runtime.turnNumber = snapshot.turn_number;
+    runtime.spentUsd = snapshot.spent_usd;
+    runtime.lastActivity = snapshot.updated_at;
+    return runtime;
+  }
+
+function resolveRuntimeForBridgeControl(taskId: string):
+  | { runtime: AgentRuntime }
+  | { error: { status: 404 | 409; body: Record<string, unknown> } } {
+    const activeRuntime = pool.get(taskId);
+    if (activeRuntime) {
+      return { runtime: activeRuntime };
+    }
+
+    const snapshot = sessionManager.restore(taskId);
+    if (!snapshot?.request) {
+      return {
+        error: {
+          status: 404,
+          body: { error: "task not found" },
+        },
+      };
+    }
+
+    const snapshotRuntime =
+      snapshot.request.runtime ?? inferRuntimeFromProvider(snapshot.request.provider);
+    if (snapshotRuntime !== "opencode") {
+      return {
+        error: {
+          status: 404,
+          body: { error: "task not found" },
+        },
+      };
+    }
+
+    if (
+      snapshot.continuity?.runtime !== "opencode" ||
+      !snapshot.continuity.upstream_session_id
+    ) {
+      return {
+        error: {
+          status: 409,
+          body: {
+            error: `OpenCode continuity state is not available for task ${taskId}`,
+            code: snapshot.continuity?.blocking_reason ?? "missing_continuity_state",
+            runtime: "opencode",
+          },
+        },
+      };
+    }
+
+    return {
+      runtime: hydrateRuntimeFromSnapshot(snapshot as never),
+    };
+  }
+
+  function resolveRuntimeForRollbackControl(taskId: string):
+    | { runtime: AgentRuntime }
+    | { error: { status: 404 | 409; body: Record<string, unknown> } } {
+      const activeRuntime = pool.get(taskId);
+      if (activeRuntime) {
+        return { runtime: activeRuntime };
+      }
+
+      const snapshot = sessionManager.restore(taskId);
+      if (!snapshot?.request) {
+        return {
+          error: {
+            status: 404,
+            body: { error: "task not found" },
+          },
+        };
+      }
+
+      const snapshotRuntime =
+        snapshot.request.runtime ?? inferRuntimeFromProvider(snapshot.request.provider);
+      if (!snapshotRuntime) {
+        return {
+          error: {
+            status: 404,
+            body: { error: "task not found" },
+          },
+        };
+      }
+
+      if (snapshot.continuity?.runtime !== snapshotRuntime) {
+        return {
+          error: {
+            status: 409,
+            body: {
+              error: `${runtimeDisplayLabel(snapshotRuntime)} continuity state is not available for task ${taskId}`,
+              code: snapshot.continuity?.blocking_reason ?? "missing_continuity_state",
+              runtime: snapshotRuntime,
+            },
+          },
+        };
+      }
+
+      return {
+        runtime: hydrateRuntimeFromSnapshot(snapshot as never),
+      };
+    }
 
   // ---- Named handlers ----
 
@@ -329,11 +519,12 @@ export function createApp(deps: AppDeps = {}): Hono {
         envLookup: deps.envLookup,
         now,
         codexAuthStatusProvider: deps.codexAuthStatusProvider,
-        opencodeTransport: deps.opencodeTransport,
+        opencodeTransport,
         opencodeEventRunner: deps.opencodeEventRunner,
         runtimeRegistry: deps.runtimeRegistry,
         hookCallbackManager,
         pluginManager,
+        opencodePendingInteractions: opencodeRuntimePendingInteractions,
       });
       return c.json(result, 200);
     } catch (err: unknown) {
@@ -345,6 +536,9 @@ export function createApp(deps: AppDeps = {}): Hono {
         return c.json({ error: message }, 409);
       }
       if (err instanceof UnknownRuntimeError || err instanceof UnsupportedRuntimeProviderError) {
+        return c.json({ error: message }, 400);
+      }
+      if (err instanceof ExecuteRequestValidationError) {
         return c.json({ error: message }, 400);
       }
       if (err instanceof RuntimeConfigurationError) {
@@ -438,7 +632,7 @@ export function createApp(deps: AppDeps = {}): Hono {
 
   async function handleRuntimeCatalogRoute() {
     const catalog = await createRegistry().getCatalog();
-    return Response.json({
+      return Response.json({
       default_runtime: catalog.defaultRuntime,
       runtimes: catalog.runtimes.map((runtime) => ({
         key: runtime.key,
@@ -450,8 +644,37 @@ export function createApp(deps: AppDeps = {}): Hono {
         available: runtime.available,
         diagnostics: runtime.diagnostics,
         supported_features: runtime.supportedFeatures,
+        interaction_capabilities: serializeInteractionCapabilities(
+          runtime.interactionCapabilities,
+        ),
+        launch_contract: runtime.launchContract
+          ? {
+              prompt_transport: runtime.launchContract.promptTransport,
+              output_mode: runtime.launchContract.outputMode,
+              supported_output_modes: runtime.launchContract.supportedOutputModes,
+              supported_approval_modes: runtime.launchContract.supportedApprovalModes,
+              additional_directories: runtime.launchContract.additionalDirectories,
+              env_overrides: runtime.launchContract.envOverrides,
+            }
+          : undefined,
+        lifecycle: runtime.lifecycle
+          ? {
+              stage: runtime.lifecycle.stage,
+              sunset_at: runtime.lifecycle.sunsetAt,
+              replacement_runtime: runtime.lifecycle.replacementRuntime,
+              message: runtime.lifecycle.message,
+            }
+          : undefined,
         agents: runtime.agents,
         skills: runtime.skills,
+        providers: runtime.providers?.map((provider) => ({
+          provider: provider.provider,
+          connected: provider.connected,
+          default_model: provider.defaultModel,
+          model_options: provider.modelOptions,
+          auth_required: provider.authRequired,
+          auth_methods: provider.authMethods,
+        })),
       })),
     });
   }
@@ -516,16 +739,16 @@ export function createApp(deps: AppDeps = {}): Hono {
         );
       }
 
-      const runtime = pool.get(parsed.data.task_id);
-      if (!runtime) {
-        return c.json({ error: "task not found" }, 404);
+      const resolvedRuntime = resolveRuntimeForRollbackControl(parsed.data.task_id);
+      if ("error" in resolvedRuntime) {
+        return c.json(resolvedRuntime.error.body, resolvedRuntime.error.status);
       }
 
-      await createRegistry().rollback(runtime, {
+      await createRegistry().rollback(resolvedRuntime.runtime, {
         checkpoint_id: parsed.data.checkpoint_id,
         turns: parsed.data.turns,
       });
-      runtime.lastActivity = now();
+      resolvedRuntime.runtime.lastActivity = now();
       return c.json({ success: true }, 200);
     } catch (err: unknown) {
       return handleOperationError(c, err);
@@ -543,16 +766,16 @@ export function createApp(deps: AppDeps = {}): Hono {
         );
       }
 
-      const runtime = pool.get(parsed.data.task_id);
-      if (!runtime) {
-        return c.json({ error: "task not found" }, 404);
+      const resolvedRuntime = resolveRuntimeForBridgeControl(parsed.data.task_id);
+      if ("error" in resolvedRuntime) {
+        return c.json(resolvedRuntime.error.body, resolvedRuntime.error.status);
       }
 
-      await createRegistry().revert(runtime, {
+      await createRegistry().revert(resolvedRuntime.runtime, {
         action: "revert",
         message_id: parsed.data.message_id,
       });
-      runtime.lastActivity = now();
+      resolvedRuntime.runtime.lastActivity = now();
       return c.json({ success: true }, 200);
     } catch (err: unknown) {
       return handleOperationError(c, err);
@@ -570,15 +793,15 @@ export function createApp(deps: AppDeps = {}): Hono {
         );
       }
 
-      const runtime = pool.get(parsed.data.task_id);
-      if (!runtime) {
-        return c.json({ error: "task not found" }, 404);
+      const resolvedRuntime = resolveRuntimeForBridgeControl(parsed.data.task_id);
+      if ("error" in resolvedRuntime) {
+        return c.json(resolvedRuntime.error.body, resolvedRuntime.error.status);
       }
 
-      await createRegistry().revert(runtime, {
+      await createRegistry().revert(resolvedRuntime.runtime, {
         action: "unrevert",
       });
-      runtime.lastActivity = now();
+      resolvedRuntime.runtime.lastActivity = now();
       return c.json({ success: true }, 200);
     } catch (err: unknown) {
       return handleOperationError(c, err);
@@ -588,12 +811,12 @@ export function createApp(deps: AppDeps = {}): Hono {
   async function handleDiffRoute(c: Context) {
     try {
       const taskId = c.req.param("task_id") ?? "";
-      const runtime = pool.get(taskId);
-      if (!runtime) {
-        return c.json({ error: "task not found" }, 404);
+      const resolvedRuntime = resolveRuntimeForBridgeControl(taskId);
+      if ("error" in resolvedRuntime) {
+        return c.json(resolvedRuntime.error.body, resolvedRuntime.error.status);
       }
 
-      const diff = await createRegistry().getDiff(runtime);
+      const diff = await createRegistry().getDiff(resolvedRuntime.runtime);
       return c.json(diff, 200);
     } catch (err: unknown) {
       return handleOperationError(c, err);
@@ -603,13 +826,67 @@ export function createApp(deps: AppDeps = {}): Hono {
   async function handleMessagesRoute(c: Context) {
     try {
       const taskId = c.req.param("task_id") ?? "";
-      const runtime = pool.get(taskId);
+      const resolvedRuntime = resolveRuntimeForBridgeControl(taskId);
+      if ("error" in resolvedRuntime) {
+        return c.json(resolvedRuntime.error.body, resolvedRuntime.error.status);
+      }
+
+      const messages = await createRegistry().getMessages(resolvedRuntime.runtime);
+      return c.json(messages, 200);
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
+  async function handleShellRoute(c: Context) {
+    try {
+      const body = await c.req.json();
+      const parsed = ShellRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { error: "Validation failed", details: parsed.error.flatten() },
+          400,
+        );
+      }
+
+      const resolvedRuntime = resolveRuntimeForBridgeControl(parsed.data.task_id);
+      if ("error" in resolvedRuntime) {
+        return c.json(resolvedRuntime.error.body, resolvedRuntime.error.status);
+      }
+
+      const result = await createRegistry().executeShell(resolvedRuntime.runtime, {
+        command: parsed.data.command,
+        agent: parsed.data.agent,
+        model: parsed.data.model,
+      });
+      resolvedRuntime.runtime.lastActivity = now();
+      return c.json(normalizeShellRouteResponse(resolvedRuntime.runtime, result), 200);
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
+  async function handleThinkingRoute(c: Context) {
+    try {
+      const body = await c.req.json();
+      const parsed = ThinkingBudgetRequestSchema.safeParse(body);
+      if (!parsed.success) {
+        return c.json(
+          { error: "Validation failed", details: parsed.error.flatten() },
+          400,
+        );
+      }
+
+      const runtime = pool.get(parsed.data.task_id);
       if (!runtime) {
         return c.json({ error: "task not found" }, 404);
       }
 
-      const messages = await createRegistry().getMessages(runtime);
-      return c.json(messages, 200);
+      await createRegistry().setThinkingBudget(runtime, {
+        max_thinking_tokens: parsed.data.max_thinking_tokens ?? null,
+      });
+      runtime.lastActivity = now();
+      return c.json({ success: true }, 200);
     } catch (err: unknown) {
       return handleOperationError(c, err);
     }
@@ -626,16 +903,16 @@ export function createApp(deps: AppDeps = {}): Hono {
         );
       }
 
-      const runtime = pool.get(parsed.data.task_id);
-      if (!runtime) {
-        return c.json({ error: "task not found" }, 404);
+      const resolvedRuntime = resolveRuntimeForBridgeControl(parsed.data.task_id);
+      if ("error" in resolvedRuntime) {
+        return c.json(resolvedRuntime.error.body, resolvedRuntime.error.status);
       }
 
-      const result = await createRegistry().executeCommand(runtime, {
+      const result = await createRegistry().executeCommand(resolvedRuntime.runtime, {
         command: parsed.data.command,
         arguments: parsed.data.arguments,
       });
-      runtime.lastActivity = now();
+      resolvedRuntime.runtime.lastActivity = now();
       return c.json(result ?? { success: true }, 200);
     } catch (err: unknown) {
       return handleOperationError(c, err);
@@ -696,6 +973,22 @@ export function createApp(deps: AppDeps = {}): Hono {
     }
   }
 
+  async function handleMcpStatusRoute(c: Context) {
+    try {
+      const taskId = c.req.param("task_id") ?? "";
+      const runtime = pool.get(taskId);
+      if (!runtime) {
+        return c.json({ error: "task not found" }, 404);
+      }
+
+      const status = await createRegistry().getMcpServerStatus(runtime);
+      runtime.lastActivity = now();
+      return c.json(status, 200);
+    } catch (err: unknown) {
+      return handleOperationError(c, err);
+    }
+  }
+
   async function handlePermissionResponseRoute(c: Context) {
     try {
       const body = await c.req.json();
@@ -708,6 +1001,33 @@ export function createApp(deps: AppDeps = {}): Hono {
       }
 
       const requestId = c.req.param("request_id") ?? "";
+      const pendingPermission =
+        opencodePendingInteractions.getPermissionRequest?.(requestId);
+      if (pendingPermission) {
+        await opencodeTransport.respondToPermission(
+          pendingPermission.sessionId,
+          pendingPermission.permissionId,
+          parsed.data.decision === "allow",
+        );
+        opencodePendingInteractions.consumePermissionRequest?.(requestId);
+        return c.json({ success: true }, 200);
+      }
+      const opencodeResolved =
+        opencodePendingInteractions.resolvePermissionResponse?.(requestId, parsed.data);
+      if (opencodeResolved) {
+        if (
+          typeof opencodeResolved === "object" &&
+          "sessionId" in opencodeResolved &&
+          "permissionId" in opencodeResolved
+        ) {
+          await opencodeTransport.respondToPermission(
+            opencodeResolved.sessionId,
+            opencodeResolved.permissionId,
+            opencodeResolved.allow,
+          );
+        }
+        return c.json({ success: true }, 200);
+      }
       const resolved = hookCallbackManager.resolve(requestId, parsed.data);
       if (!resolved) {
         return c.json({ error: "pending permission request not found" }, 404);
@@ -737,9 +1057,9 @@ export function createApp(deps: AppDeps = {}): Hono {
         runtime.request?.runtime === "opencode" &&
         runtime.continuity?.runtime === "opencode" &&
         runtime.continuity.upstream_session_id &&
-        deps.opencodeTransport
+        opencodeTransport
       ) {
-        await deps.opencodeTransport.abortSession(runtime.continuity.upstream_session_id);
+        await opencodeTransport.abortSession(runtime.continuity.upstream_session_id);
         runtime.continuity = {
           ...runtime.continuity,
           resume_ready: false,
@@ -777,9 +1097,9 @@ export function createApp(deps: AppDeps = {}): Hono {
         runtime.request.runtime === "opencode" &&
         runtime.continuity?.runtime === "opencode" &&
         runtime.continuity.upstream_session_id &&
-        deps.opencodeTransport
+        opencodeTransport
       ) {
-        await deps.opencodeTransport.abortSession(runtime.continuity.upstream_session_id);
+        await opencodeTransport.abortSession(runtime.continuity.upstream_session_id);
         runtime.continuity = {
           ...runtime.continuity,
           resume_ready: true,
@@ -841,6 +1161,17 @@ export function createApp(deps: AppDeps = {}): Hono {
           409,
         );
       }
+      const contextMismatch = getResumeContextMismatch(snapshot.request, parsed.data);
+      if (contextMismatch) {
+        return c.json(
+          {
+            error: `Resume request context mismatch for ${contextMismatch.field}: expected ${contextMismatch.expected}, got ${contextMismatch.actual}`,
+            code: "resume_context_mismatch",
+            field: contextMismatch.field,
+          },
+          409,
+        );
+      }
 
       const result = await handleExecute(pool, streamer, snapshot.request, {
         awaitCompletion: deps.awaitExecution,
@@ -853,10 +1184,11 @@ export function createApp(deps: AppDeps = {}): Hono {
         envLookup: deps.envLookup,
         now,
         codexAuthStatusProvider: deps.codexAuthStatusProvider,
-        opencodeTransport: deps.opencodeTransport,
+        opencodeTransport,
         opencodeEventRunner: deps.opencodeEventRunner,
         hookCallbackManager,
         pluginManager,
+        opencodePendingInteractions: opencodeRuntimePendingInteractions,
       });
 
       return c.json({ session_id: result.session_id, resumed: true }, 200);
@@ -1070,9 +1402,12 @@ export function createApp(deps: AppDeps = {}): Hono {
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.unrevert, handleUnrevertRoute);
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.diff, handleDiffRoute);
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.messages, handleMessagesRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.shell, handleShellRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.thinking, handleThinkingRoute);
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.command, handleCommandRoute);
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.interrupt, handleInterruptRoute);
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.model, handleModelRoute);
+  registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.mcpStatus, handleMcpStatusRoute);
   registerBridgeRouteGroup(
     app,
     BRIDGE_HTTP_ROUTE_GROUPS.permissionResponse,
@@ -1084,6 +1419,54 @@ export function createApp(deps: AppDeps = {}): Hono {
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.health, handleHealthRoute);
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.active, handleActiveRoute);
   registerBridgeRouteGroup(app, BRIDGE_HTTP_ROUTE_GROUPS.pool, handlePoolRoute);
+
+  app.post("/bridge/opencode/provider-auth/:provider/start", async (c) => {
+    try {
+      const provider = c.req.param("provider") ?? "";
+      if (!provider) {
+        return c.json({ error: "provider is required" }, 400);
+      }
+      const body = await c.req.json().catch(() => ({}));
+      const auth = await opencodeTransport.startProviderOAuth(
+        provider,
+        body && typeof body === "object" ? (body as Record<string, unknown>) : {},
+      );
+      const pending = opencodePendingInteractions.createProviderAuthRequest?.({ provider });
+      if (!pending) {
+        return c.json({ error: "OpenCode provider auth storage is unavailable" }, 500);
+      }
+      return c.json(
+        {
+          request_id: pending.requestId,
+          provider,
+          auth,
+        },
+        200,
+      );
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
+  });
+
+  app.post("/bridge/opencode/provider-auth/:request_id/complete", async (c) => {
+    try {
+      const requestId = c.req.param("request_id") ?? "";
+      const pending = opencodePendingInteractions.consumeProviderAuthRequest?.(requestId);
+      if (!pending) {
+        return c.json({ error: "pending provider auth request not found" }, 404);
+      }
+      const body = await c.req.json().catch(() => ({}));
+      const result = await opencodeTransport.completeProviderOAuth(
+        pending.provider,
+        body && typeof body === "object" ? (body as Record<string, unknown>) : {},
+      );
+      return c.json(result, 200);
+    } catch (err: unknown) {
+      const message = err instanceof Error ? err.message : String(err);
+      return c.json({ error: message }, 500);
+    }
+  });
 
   // Plugin management (internal — no PRD alias needed)
   app.post("/bridge/plugins/register", async (c) => {
@@ -1180,11 +1563,125 @@ function handleOperationError(c: Context, err: unknown) {
         error: message,
         operation: err.operation,
         runtime: err.runtime,
+        support_state: err.supportState,
+        reason_code: err.reasonCode,
       },
-      501,
+      err.supportState === "degraded" ? 409 : 501,
     );
   }
   return c.json({ error: message }, 500);
+}
+
+function normalizeShellRouteResponse(runtime: AgentRuntime, result: unknown) {
+  if (isObjectRecord(result) && typeof result.success === "boolean") {
+    return result;
+  }
+
+  const normalized: Record<string, unknown> = {
+    success: inferShellSuccess(result),
+    task_id: runtime.taskId,
+    session_id: runtime.sessionId,
+  };
+
+  if (typeof result === "string") {
+    normalized.output = result;
+    return normalized;
+  }
+
+  if (result == null) {
+    return normalized;
+  }
+
+  if (isObjectRecord(result)) {
+    if (typeof result.output === "string") {
+      normalized.output = result.output;
+      return normalized;
+    }
+    if (typeof result.error === "string") {
+      normalized.error = result.error;
+      return normalized;
+    }
+    if (typeof result.message === "string" && normalized.success === false) {
+      normalized.error = result.message;
+      return normalized;
+    }
+  }
+
+  const serialized = safeJSONStringify(result);
+  if (serialized) {
+    if (normalized.success === false) {
+      normalized.error = serialized;
+    } else {
+      normalized.output = serialized;
+    }
+  }
+  return normalized;
+}
+
+function inferShellSuccess(result: unknown): boolean {
+  if (isObjectRecord(result)) {
+    if (typeof result.success === "boolean") {
+      return result.success;
+    }
+    if (typeof result.ok === "boolean") {
+      return result.ok;
+    }
+    if (typeof result.error === "string" && result.error.trim().length > 0) {
+      return false;
+    }
+  }
+  return true;
+}
+
+function safeJSONStringify(value: unknown): string {
+  try {
+    return JSON.stringify(value) ?? "";
+  } catch {
+    return String(value);
+  }
+}
+
+function isObjectRecord(value: unknown): value is Record<string, unknown> {
+  return typeof value === "object" && value !== null;
+}
+
+function serializeInteractionCapabilities(
+  capabilities:
+    | {
+        inputs: Record<string, { state: string; reasonCode?: string; message?: string; requiresRequestFields?: string[] }>;
+        lifecycle: Record<string, { state: string; reasonCode?: string; message?: string; requiresRequestFields?: string[] }>;
+        approval: Record<string, { state: string; reasonCode?: string; message?: string; requiresRequestFields?: string[] }>;
+        mcp: Record<string, { state: string; reasonCode?: string; message?: string; requiresRequestFields?: string[] }>;
+        diagnostics: Record<string, { state: string; reasonCode?: string; message?: string; requiresRequestFields?: string[] }>;
+      }
+    | undefined,
+) {
+  if (!capabilities) {
+    return undefined;
+  }
+
+  const serializeGroup = (
+    group: Record<string, { state: string; reasonCode?: string; message?: string; requiresRequestFields?: string[] }>,
+  ) =>
+    Object.fromEntries(
+      Object.entries(group).map(([key, value]) => [
+        key,
+        {
+          state: value.state,
+          reason_code: value.reasonCode,
+          message: value.message,
+          requires_request_fields: value.requiresRequestFields,
+        },
+      ]),
+    );
+
+  return {
+    inputs: serializeGroup(capabilities.inputs),
+    lifecycle: serializeGroup(capabilities.lifecycle),
+    approval: serializeGroup(capabilities.approval),
+    mcp: serializeGroup(capabilities.mcp),
+    diagnostics: serializeGroup(capabilities.diagnostics),
+  };
 }
 
 function getResumeBlock(snapshot: {
@@ -1218,6 +1715,52 @@ function getResumeBlock(snapshot: {
     runtimeLabel: runtimeDisplayLabel(runtime),
     code: "missing_continuity_state",
   };
+}
+
+function getResumeContextMismatch(
+  snapshotRequest:
+    | {
+        session_id?: string;
+        runtime?: string;
+        provider?: string;
+        model?: string;
+        team_id?: string;
+        team_role?: string;
+      }
+    | undefined,
+  resumeRequest: {
+    session_id?: string;
+    runtime?: string;
+    provider?: string;
+    model?: string;
+    team_id?: string;
+    team_role?: string;
+  },
+): { field: string; expected: string; actual: string } | null {
+  if (!snapshotRequest) {
+    return null;
+  }
+  const comparisons: Array<[string, string | undefined, string | undefined]> = [
+    ["session_id", snapshotRequest.session_id, resumeRequest.session_id],
+    ["runtime", snapshotRequest.runtime, resumeRequest.runtime],
+    ["provider", snapshotRequest.provider, resumeRequest.provider],
+    ["model", snapshotRequest.model, resumeRequest.model],
+    ["team_id", snapshotRequest.team_id, resumeRequest.team_id],
+    ["team_role", snapshotRequest.team_role, resumeRequest.team_role],
+  ];
+  for (const [field, expected, actual] of comparisons) {
+    if (typeof actual !== "string" || actual.trim() === "") {
+      continue;
+    }
+    const normalizedExpected = typeof expected === "string" ? expected.trim() : "";
+    if (normalizedExpected === "") {
+      continue;
+    }
+    if (normalizedExpected !== actual.trim()) {
+      return { field, expected: normalizedExpected, actual: actual.trim() };
+    }
+  }
+  return null;
 }
 
 function inferRuntimeFromProvider(

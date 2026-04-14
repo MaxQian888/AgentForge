@@ -88,6 +88,7 @@ func (r *Receiver) Start() error {
 			"status":                 "ok",
 			"platform":               r.platform.Name(),
 			"source":                 r.metadata.Source,
+			"readiness_tier":         r.metadata.Capabilities.ReadinessTier,
 			"supports_rich_messages": r.metadata.Capabilities.SupportsRichMessages,
 			"capability_matrix":      r.metadata.Capabilities.Matrix(),
 		})
@@ -354,7 +355,7 @@ func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
 			ReplyTarget: target,
 			Metadata:    actionMetadata,
 		})
-		if receipt.FallbackReason != "" {
+		if receipt.FallbackReason != "" && strings.TrimSpace(actionMetadata["fallback_reason"]) == "" {
 			actionMetadata["fallback_reason"] = receipt.FallbackReason
 		}
 		if err != nil {

@@ -66,6 +66,19 @@ describe("desktop command contract", () => {
     });
   });
 
+  test("exposes standalone Rust desktop debug commands at the root", () => {
+    const packageJson = JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+    );
+
+    expect(packageJson.scripts).toMatchObject({
+      "desktop:standalone:check":
+        "pnpm desktop:dev:prepare && cargo run --manifest-path src-tauri/Cargo.toml --bin agentforge-desktop-cli -- check",
+      "desktop:standalone:dev":
+        "pnpm desktop:dev:prepare && cargo run --manifest-path src-tauri/Cargo.toml --bin agentforge-desktop-cli -- run",
+    });
+  });
+
   test("wires Tauri pre-commands and external binaries through the shared desktop prepare contract", () => {
     const tauriConfig = JSON.parse(
       fs.readFileSync(path.join(process.cwd(), "src-tauri", "tauri.conf.json"), "utf8"),
@@ -102,6 +115,11 @@ describe("desktop command contract", () => {
           label: "desktop:debug:prepare",
           dependsOn: ["desktop:dev:prepare", "ui:dev-if-needed"],
         }),
+        expect.objectContaining({
+          label: "desktop:standalone:prepare",
+          command: "pnpm",
+          args: ["desktop:dev:prepare"],
+        }),
       ]),
     );
 
@@ -114,6 +132,11 @@ describe("desktop command contract", () => {
         expect.objectContaining({
           name: "Tauri Production Debug",
           preLaunchTask: "desktop:build:prepare",
+        }),
+        expect.objectContaining({
+          name: "Tauri Standalone Rust Debug",
+          preLaunchTask: "desktop:standalone:prepare",
+          args: ["run"],
         }),
       ]),
     );

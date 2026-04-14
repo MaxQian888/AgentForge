@@ -66,6 +66,7 @@ type mockDispatchRuntime struct {
 	lastTaskID   uuid.UUID
 	lastMemberID uuid.UUID
 	spawnCalls   int
+	runs         []*model.AgentRun
 }
 
 func (m *mockDispatchRuntime) Spawn(_ context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error) {
@@ -84,6 +85,18 @@ func (m *mockDispatchRuntime) Spawn(_ context.Context, taskID, memberID uuid.UUI
 		MemberID: memberID,
 		Status:   model.AgentRunStatusRunning,
 	}, nil
+}
+
+func (m *mockDispatchRuntime) GetByTask(_ context.Context, taskID uuid.UUID) ([]*model.AgentRun, error) {
+	cloned := make([]*model.AgentRun, 0, len(m.runs))
+	for _, run := range m.runs {
+		if run == nil || run.TaskID != taskID {
+			continue
+		}
+		copyRun := *run
+		cloned = append(cloned, &copyRun)
+	}
+	return cloned, nil
 }
 
 type mockDispatchQueueWriter struct {
@@ -112,6 +125,9 @@ func (m *mockDispatchQueueWriter) QueueAgentAdmission(_ context.Context, input s
 		Model:     input.Model,
 		RoleID:    input.RoleID,
 		BudgetUSD: input.BudgetUSD,
+		GuardrailType:       input.GuardrailType,
+		GuardrailScope:      input.GuardrailScope,
+		RecoveryDisposition: input.RecoveryDisposition,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}, nil
@@ -330,8 +346,139 @@ func TestTaskDispatchService_AssignAgentQueuesWhenPoolIsFull(t *testing.T) {
 	if result.Dispatch.Queue.TaskID != taskID.String() || result.Dispatch.Queue.MemberID != memberID.String() {
 		t.Fatalf("dispatch queue payload = %+v", result.Dispatch.Queue)
 	}
+	if result.Dispatch.Queue.GuardrailType != model.DispatchGuardrailTypePool || result.Dispatch.Queue.GuardrailScope != "project" {
+		t.Fatalf("dispatch queue guardrail = %+v", result.Dispatch.Queue)
+	}
+	if result.Dispatch.Queue.RecoveryDisposition != model.QueueRecoveryDispositionPending {
+		t.Fatalf("dispatch queue recoveryDisposition = %q", result.Dispatch.Queue.RecoveryDisposition)
+	}
 	if queueWriter.last.TaskID != taskID || queueWriter.last.MemberID != memberID {
 		t.Fatalf("queue writer input = %+v", queueWriter.last)
+	}
+}
+
+type mockDispatchAttemptRecorder struct {
+	attempts []*model.DispatchAttempt
+}
+
+func (m *mockDispatchAttemptRecorder) Create(_ context.Context, attempt *model.DispatchAttempt) error {
+	if attempt == nil {
+		return nil
+	}
+	cloned := *attempt
+	if attempt.MemberID != nil {
+		memberID := *attempt.MemberID
+		cloned.MemberID = &memberID
+	}
+	if attempt.QueuePriority != nil {
+		priority := *attempt.QueuePriority
+		cloned.QueuePriority = &priority
+	}
+	m.attempts = append(m.attempts, &cloned)
+	return nil
+}
+
+func TestTaskDispatchService_SpawnPreservesDispatchTupleAndQueueVerdict(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	memberID := uuid.New()
+	taskRepo := &mockDispatchTaskRepo{
+		task: &model.Task{
+			ID:           taskID,
+			ProjectID:    projectID,
+			Title:        "Dispatch task",
+			Status:       model.TaskStatusAssigned,
+			AssigneeID:   &memberID,
+			AssigneeType: model.MemberTypeAgent,
+		},
+	}
+	memberRepo := &mockDispatchMemberRepo{
+		member: &model.Member{
+			ID:        memberID,
+			ProjectID: projectID,
+			Type:      model.MemberTypeAgent,
+			IsActive:  true,
+		},
+	}
+	runtime := &mockDispatchRuntime{err: service.ErrAgentPoolFull}
+	queueWriter := &mockDispatchQueueWriter{}
+
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).WithQueueWriter(queueWriter)
+
+	result, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
+		TaskID:    taskID,
+		Runtime:   "codex",
+		Provider:  "openai",
+		Model:     "gpt-5-codex",
+		RoleID:    "frontend-developer",
+		BudgetUSD: 9,
+	})
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+
+	if result.Dispatch.Runtime != "codex" || result.Dispatch.Provider != "openai" || result.Dispatch.Model != "gpt-5-codex" || result.Dispatch.RoleID != "frontend-developer" {
+		t.Fatalf("dispatch tuple = %+v", result.Dispatch)
+	}
+	if result.Dispatch.Queue == nil || result.Dispatch.Queue.GuardrailType != model.DispatchGuardrailTypePool {
+		t.Fatalf("dispatch queue = %+v", result.Dispatch.Queue)
+	}
+}
+
+func TestTaskDispatchService_RecordDispatchAttemptCapturesRichQueuedMetadata(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	memberID := uuid.New()
+	taskRepo := &mockDispatchTaskRepo{
+		task: &model.Task{
+			ID:           taskID,
+			ProjectID:    projectID,
+			Title:        "Dispatch task",
+			Status:       model.TaskStatusAssigned,
+			AssigneeID:   &memberID,
+			AssigneeType: model.MemberTypeAgent,
+		},
+	}
+	memberRepo := &mockDispatchMemberRepo{
+		member: &model.Member{
+			ID:        memberID,
+			ProjectID: projectID,
+			Type:      model.MemberTypeAgent,
+			IsActive:  true,
+		},
+	}
+	runtime := &mockDispatchRuntime{err: service.ErrAgentPoolFull}
+	queueWriter := &mockDispatchQueueWriter{}
+	recorder := &mockDispatchAttemptRecorder{}
+
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).
+		WithQueueWriter(queueWriter).
+		WithAttemptRecorder(recorder)
+
+	_, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
+		TaskID:    taskID,
+		Runtime:   "codex",
+		Provider:  "openai",
+		Model:     "gpt-5-codex",
+		RoleID:    "frontend-developer",
+		BudgetUSD: 9,
+	})
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+
+	if len(recorder.attempts) != 1 {
+		t.Fatalf("attempt count = %d, want 1", len(recorder.attempts))
+	}
+	attempt := recorder.attempts[0]
+	if attempt.Runtime != "codex" || attempt.Provider != "openai" || attempt.Model != "gpt-5-codex" || attempt.RoleID != "frontend-developer" {
+		t.Fatalf("attempt tuple = %+v", attempt)
+	}
+	if attempt.QueueEntryID == "" || attempt.QueuePriority == nil {
+		t.Fatalf("attempt queue linkage = %+v", attempt)
+	}
+	if attempt.GuardrailType != model.DispatchGuardrailTypePool || attempt.GuardrailScope != "project" {
+		t.Fatalf("attempt guardrail = %+v", attempt)
 	}
 }
 
@@ -517,6 +664,60 @@ func TestTaskDispatchService_AssignAgentReturnsBudgetWarningAndBroadcastsEvent(t
 	warning := waitForEventType(t, events, ws.EventBudgetWarning)
 	if warning.Type != ws.EventBudgetWarning {
 		t.Fatalf("warning event type = %q, want %q", warning.Type, ws.EventBudgetWarning)
+	}
+}
+
+func TestTaskDispatchService_SpawnBlocksWhenTaskAlreadyHasPausedRunInPreflight(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	memberID := uuid.New()
+	taskRepo := &mockDispatchTaskRepo{
+		task: &model.Task{
+			ID:           taskID,
+			ProjectID:    projectID,
+			Title:        "Dispatch task",
+			Status:       model.TaskStatusAssigned,
+			AssigneeID:   &memberID,
+			AssigneeType: model.MemberTypeAgent,
+		},
+	}
+	memberRepo := &mockDispatchMemberRepo{
+		member: &model.Member{
+			ID:        memberID,
+			ProjectID: projectID,
+			Type:      model.MemberTypeAgent,
+			IsActive:  true,
+		},
+	}
+	runtime := &mockDispatchRuntime{
+		run: &model.AgentRun{
+			ID:       uuid.New(),
+			TaskID:   taskID,
+			MemberID: memberID,
+			Status:   model.AgentRunStatusRunning,
+		},
+		runs: []*model.AgentRun{
+			{ID: uuid.New(), TaskID: taskID, MemberID: memberID, Status: model.AgentRunStatusPaused},
+		},
+	}
+
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil)
+
+	result, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
+		TaskID: taskID,
+	})
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+
+	if result.Dispatch.Status != model.DispatchStatusBlocked {
+		t.Fatalf("dispatch result = %+v, want blocked", result.Dispatch)
+	}
+	if result.Dispatch.GuardrailType != model.DispatchGuardrailTypeTask || result.Dispatch.GuardrailScope != "task" {
+		t.Fatalf("guardrail = %+v, want task conflict", result.Dispatch)
+	}
+	if runtime.spawnCalls != 0 {
+		t.Fatalf("runtime spawn calls = %d, want 0", runtime.spawnCalls)
 	}
 }
 

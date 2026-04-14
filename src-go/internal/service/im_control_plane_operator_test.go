@@ -229,6 +229,49 @@ func TestIMControlPlane_GetBridgeStatusIncludesOperatorSummary(t *testing.T) {
 	}
 }
 
+func TestIMControlPlane_ResolveChannelsForEventFiltersActiveSubscriptions(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{})
+
+	if _, err := control.UpsertChannel(context.Background(), &model.IMChannel{
+		Platform:  "slack",
+		Name:      "Workflow Alerts",
+		ChannelID: "C-workflow",
+		Events:    []string{"workflow.failed", "wiki.page.updated"},
+		Active:    true,
+	}); err != nil {
+		t.Fatalf("UpsertChannel(slack) error = %v", err)
+	}
+	if _, err := control.UpsertChannel(context.Background(), &model.IMChannel{
+		Platform:  "feishu",
+		Name:      "Review Alerts",
+		ChannelID: "chat-review",
+		Events:    []string{"review.requested"},
+		Active:    true,
+	}); err != nil {
+		t.Fatalf("UpsertChannel(feishu) error = %v", err)
+	}
+	if _, err := control.UpsertChannel(context.Background(), &model.IMChannel{
+		Platform:  "qqbot",
+		Name:      "Inactive Workflow",
+		ChannelID: "qqbot-workflow",
+		Events:    []string{"workflow.failed"},
+		Active:    false,
+	}); err != nil {
+		t.Fatalf("UpsertChannel(inactive) error = %v", err)
+	}
+
+	channels, err := control.ResolveChannelsForEvent(context.Background(), "workflow.failed", "", "")
+	if err != nil {
+		t.Fatalf("ResolveChannelsForEvent() error = %v", err)
+	}
+	if len(channels) != 1 {
+		t.Fatalf("len(channels) = %d, want 1 (%+v)", len(channels), channels)
+	}
+	if channels[0].Platform != "slack" || channels[0].ChannelID != "C-workflow" {
+		t.Fatalf("resolved channel = %+v", channels[0])
+	}
+}
+
 func TestIMControlPlane_ListDeliveryHistoryAppliesFilters(t *testing.T) {
 	now := time.Date(2026, 3, 26, 10, 0, 0, 0, time.UTC)
 	control := NewIMControlPlane(IMControlPlaneConfig{

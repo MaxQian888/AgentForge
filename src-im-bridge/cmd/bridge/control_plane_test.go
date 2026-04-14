@@ -428,6 +428,21 @@ func TestBridgeRuntimeControl_StartIncludesWeComCallbackPathInRegistration(t *te
 	if seen.lastReg.Capabilities["requires_public_callback"] != true {
 		t.Fatalf("capabilities = %+v", seen.lastReg.Capabilities)
 	}
+	if seen.lastReg.Metadata["readiness_tier"] != string(core.ReadinessTierNativeSendWithFallback) {
+		t.Fatalf("register metadata = %+v", seen.lastReg.Metadata)
+	}
+	if seen.lastReg.Metadata["preferred_async_update_mode"] != string(core.AsyncUpdateSessionWebhook) {
+		t.Fatalf("register metadata = %+v", seen.lastReg.Metadata)
+	}
+	if seen.lastReg.Metadata["fallback_async_update_mode"] != string(core.AsyncUpdateReply) {
+		t.Fatalf("register metadata = %+v", seen.lastReg.Metadata)
+	}
+	if seen.lastReg.CapabilityMatrix["preferredAsyncUpdateMode"] != string(core.AsyncUpdateSessionWebhook) {
+		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
+	}
+	if seen.lastReg.CapabilityMatrix["fallbackAsyncUpdateMode"] != string(core.AsyncUpdateReply) {
+		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
+	}
 }
 
 func TestBridgeRuntimeControl_ApplyDeliveryUsesWeComResponseURLReplyTarget(t *testing.T) {
@@ -572,6 +587,18 @@ func TestBridgeRuntimeControl_StartIncludesQQBotCallbackPathInRegistration(t *te
 	if seen.lastReg.CapabilityMatrix["commandSurface"] != "mixed" {
 		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
 	}
+	if seen.lastReg.Metadata["readiness_tier"] != string(core.ReadinessTierMarkdownFirst) {
+		t.Fatalf("register metadata = %+v", seen.lastReg.Metadata)
+	}
+	if seen.lastReg.Metadata["preferred_async_update_mode"] != string(core.AsyncUpdateReply) {
+		t.Fatalf("register metadata = %+v", seen.lastReg.Metadata)
+	}
+	if seen.lastReg.CapabilityMatrix["readinessTier"] != string(core.ReadinessTierMarkdownFirst) {
+		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
+	}
+	if seen.lastReg.CapabilityMatrix["preferredAsyncUpdateMode"] != string(core.AsyncUpdateReply) {
+		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
+	}
 }
 
 func TestBridgeRuntimeControl_StartIncludesQQCapabilityMatrixInRegistration(t *testing.T) {
@@ -671,6 +698,18 @@ func TestBridgeRuntimeControl_StartIncludesQQCapabilityMatrixInRegistration(t *t
 		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
 	}
 	if seen.lastReg.CapabilityMatrix["actionCallbackMode"] != "none" {
+		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
+	}
+	if seen.lastReg.Metadata["readiness_tier"] != string(core.ReadinessTierTextFirst) {
+		t.Fatalf("register metadata = %+v", seen.lastReg.Metadata)
+	}
+	if seen.lastReg.Metadata["preferred_async_update_mode"] != string(core.AsyncUpdateReply) {
+		t.Fatalf("register metadata = %+v", seen.lastReg.Metadata)
+	}
+	if seen.lastReg.CapabilityMatrix["readinessTier"] != string(core.ReadinessTierTextFirst) {
+		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
+	}
+	if seen.lastReg.CapabilityMatrix["preferredAsyncUpdateMode"] != string(core.AsyncUpdateReply) {
 		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
 	}
 	if scopes, ok := seen.lastReg.CapabilityMatrix["messageScopes"].([]interface{}); !ok || len(scopes) == 0 || scopes[0] != "chat" {

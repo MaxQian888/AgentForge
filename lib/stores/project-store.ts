@@ -16,6 +16,46 @@ export interface CodingAgentDiagnostic {
   blocking: boolean;
 }
 
+export interface CodingAgentCapabilityDescriptor {
+  state: string;
+  reasonCode?: string;
+  message?: string;
+  requiresRequestFields?: string[];
+}
+
+export interface CodingAgentInteractionCapabilities {
+  inputs: Record<string, CodingAgentCapabilityDescriptor>;
+  lifecycle: Record<string, CodingAgentCapabilityDescriptor>;
+  approval: Record<string, CodingAgentCapabilityDescriptor>;
+  mcp: Record<string, CodingAgentCapabilityDescriptor>;
+  diagnostics: Record<string, CodingAgentCapabilityDescriptor>;
+}
+
+export interface CodingAgentProvider {
+  provider: string;
+  connected: boolean;
+  defaultModel?: string;
+  modelOptions?: string[];
+  authRequired?: boolean;
+  authMethods?: string[];
+}
+
+export interface CodingAgentLaunchContract {
+  promptTransport: "stdin" | "positional" | "prompt_flag";
+  outputMode: "text" | "json" | "stream-json";
+  supportedOutputModes: Array<"text" | "json" | "stream-json">;
+  supportedApprovalModes: string[];
+  additionalDirectories: boolean;
+  envOverrides: boolean;
+}
+
+export interface CodingAgentLifecycle {
+  stage: "active" | "sunsetting" | "sunset";
+  sunsetAt?: string;
+  replacementRuntime?: string;
+  message?: string;
+}
+
 export interface CodingAgentRuntimeOption {
   runtime: string;
   label: string;
@@ -26,6 +66,10 @@ export interface CodingAgentRuntimeOption {
   available: boolean;
   diagnostics: CodingAgentDiagnostic[];
   supportedFeatures: string[];
+  interactionCapabilities?: CodingAgentInteractionCapabilities;
+  providers?: CodingAgentProvider[];
+  launchContract?: CodingAgentLaunchContract;
+  lifecycle?: CodingAgentLifecycle;
 }
 
 export interface CodingAgentCatalog {
@@ -136,6 +180,88 @@ function normalizeDiagnostics(raw: unknown): CodingAgentDiagnostic[] {
   }));
 }
 
+function normalizeCapabilityDescriptor(
+  raw: unknown,
+): CodingAgentCapabilityDescriptor {
+  return {
+    state: typeof (raw as { state?: unknown })?.state === "string"
+      ? (raw as { state: string }).state
+      : "unsupported",
+    reasonCode:
+      typeof (raw as { reasonCode?: unknown })?.reasonCode === "string"
+        ? (raw as { reasonCode: string }).reasonCode
+        : undefined,
+    message:
+      typeof (raw as { message?: unknown })?.message === "string"
+        ? (raw as { message: string }).message
+        : undefined,
+    requiresRequestFields: Array.isArray((raw as { requiresRequestFields?: unknown })?.requiresRequestFields)
+      ? ((raw as { requiresRequestFields: unknown[] }).requiresRequestFields).map((item) =>
+          String(item),
+        )
+      : undefined,
+  };
+}
+
+function normalizeCapabilityGroup(
+  raw: unknown,
+): Record<string, CodingAgentCapabilityDescriptor> {
+  if (!raw || typeof raw !== "object") {
+    return {};
+  }
+
+  return Object.fromEntries(
+    Object.entries(raw).map(([key, value]) => [
+      key,
+      normalizeCapabilityDescriptor(value),
+    ]),
+  );
+}
+
+function normalizeInteractionCapabilities(
+  raw: unknown,
+): CodingAgentInteractionCapabilities | undefined {
+  if (!raw || typeof raw !== "object") {
+    return undefined;
+  }
+
+  return {
+    inputs: normalizeCapabilityGroup((raw as { inputs?: unknown }).inputs),
+    lifecycle: normalizeCapabilityGroup((raw as { lifecycle?: unknown }).lifecycle),
+    approval: normalizeCapabilityGroup((raw as { approval?: unknown }).approval),
+    mcp: normalizeCapabilityGroup((raw as { mcp?: unknown }).mcp),
+    diagnostics: normalizeCapabilityGroup((raw as { diagnostics?: unknown }).diagnostics),
+  };
+}
+
+function normalizeRuntimeProviders(
+  raw: unknown,
+): CodingAgentProvider[] | undefined {
+  if (!Array.isArray(raw)) {
+    return undefined;
+  }
+
+  return raw.map((provider) => ({
+    provider:
+      typeof provider?.provider === "string" ? provider.provider : "",
+    connected: Boolean(provider?.connected),
+    defaultModel:
+      typeof provider?.defaultModel === "string"
+        ? provider.defaultModel
+        : undefined,
+    modelOptions: Array.isArray(provider?.modelOptions)
+      ? provider.modelOptions.map((item: unknown) => String(item))
+      : undefined,
+    authRequired:
+      typeof provider?.authRequired === "boolean"
+        ? provider.authRequired
+        : undefined,
+    authMethods: Array.isArray(provider?.authMethods)
+      ? provider.authMethods.map((item: unknown) => String(item))
+      : undefined,
+  }));
+}
+
 function normalizeCatalog(raw: unknown): CodingAgentCatalog | undefined {
   if (!raw || typeof raw !== "object") {
     return undefined;
@@ -172,6 +298,57 @@ function normalizeCatalog(raw: unknown): CodingAgentCatalog | undefined {
           supportedFeatures: Array.isArray(runtime?.supportedFeatures)
             ? runtime.supportedFeatures.map((item: unknown) => String(item))
             : [],
+          interactionCapabilities: normalizeInteractionCapabilities(
+            runtime?.interactionCapabilities,
+          ),
+          providers: normalizeRuntimeProviders(runtime?.providers),
+          launchContract:
+            runtime?.launchContract && typeof runtime.launchContract === "object"
+              ? {
+                  promptTransport:
+                    runtime.launchContract.promptTransport === "stdin" ||
+                    runtime.launchContract.promptTransport === "positional" ||
+                    runtime.launchContract.promptTransport === "prompt_flag"
+                      ? runtime.launchContract.promptTransport
+                      : "stdin",
+                  outputMode:
+                    runtime.launchContract.outputMode === "text" ||
+                    runtime.launchContract.outputMode === "json" ||
+                    runtime.launchContract.outputMode === "stream-json"
+                      ? runtime.launchContract.outputMode
+                      : "text",
+                  supportedOutputModes: Array.isArray(runtime.launchContract.supportedOutputModes)
+                    ? runtime.launchContract.supportedOutputModes.map((item: unknown) => String(item)) as Array<"text" | "json" | "stream-json">
+                    : [],
+                  supportedApprovalModes: Array.isArray(runtime.launchContract.supportedApprovalModes)
+                    ? runtime.launchContract.supportedApprovalModes.map((item: unknown) => String(item))
+                    : [],
+                  additionalDirectories: Boolean(runtime.launchContract.additionalDirectories),
+                  envOverrides: Boolean(runtime.launchContract.envOverrides),
+                }
+              : undefined,
+          lifecycle:
+            runtime?.lifecycle && typeof runtime.lifecycle === "object"
+              ? {
+                  stage:
+                    runtime.lifecycle.stage === "sunsetting" ||
+                    runtime.lifecycle.stage === "sunset"
+                      ? runtime.lifecycle.stage
+                      : "active",
+                  sunsetAt:
+                    typeof runtime.lifecycle.sunsetAt === "string"
+                      ? runtime.lifecycle.sunsetAt
+                      : undefined,
+                  replacementRuntime:
+                    typeof runtime.lifecycle.replacementRuntime === "string"
+                      ? runtime.lifecycle.replacementRuntime
+                      : undefined,
+                  message:
+                    typeof runtime.lifecycle.message === "string"
+                      ? runtime.lifecycle.message
+                      : undefined,
+                }
+              : undefined,
         }))
       : [],
   };

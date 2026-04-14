@@ -96,6 +96,9 @@ func TestLive_StartNormalizesChatbotMessage(t *testing.T) {
 	if replyCtx.ConversationID != "cid-group-1" {
 		t.Fatalf("ConversationID = %q", replyCtx.ConversationID)
 	}
+	if gotMessage.ReplyTarget == nil || gotMessage.ReplyTarget.ProgressMode != string(core.AsyncUpdateSessionWebhook) {
+		t.Fatalf("ReplyTarget = %+v", gotMessage.ReplyTarget)
+	}
 }
 
 func TestLive_StartRoutesCardCallbackToActionHandlerAndRepliesViaSessionWebhook(t *testing.T) {

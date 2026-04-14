@@ -140,3 +140,83 @@ The Bridge SHALL expose `POST /bridge/permission-response/:request_id` accepting
 - **WHEN** the Bridge has a pending permission request with `request_id: "req-1"` and `POST /bridge/permission-response/req-1` is called with `{ decision: "allow" }`
 - **THEN** the Bridge resolves the pending callback and the runtime receives the allow decision
 
+### Requirement: Backend service callers SHALL reach TS Bridge only through Go-owned surfaces
+All non-frontend backend service callers, including IM Bridge and operator-facing automation surfaces, SHALL access TS Bridge runtime inspection and lightweight AI capabilities only through Go backend-owned HTTP surfaces. They MUST NOT call TS Bridge service endpoints directly from IM Bridge or other backend helpers.
+
+#### Scenario: IM Bridge queries runtime catalog through Go proxy
+- **WHEN** an IM Bridge command needs the runtime catalog
+- **THEN** it calls the Go backend `GET /api/v1/bridge/runtimes` endpoint
+- **THEN** the Go backend proxies that request to the canonical TS Bridge `/bridge/runtimes` route
+- **THEN** the returned payload preserves the upstream runtime catalog semantics without inventing a parallel contract
+
+#### Scenario: IM Bridge requests AI classification through Go proxy
+- **WHEN** an IM Bridge command or natural-language routing flow needs intent classification
+- **THEN** it calls the Go backend `POST /api/v1/ai/classify-intent` endpoint
+- **THEN** the Go backend forwards the request to the canonical TS Bridge `/bridge/classify-intent` route
+- **THEN** the IM Bridge does not bypass the backend to call TS Bridge directly
+
+### Requirement: Go proxy endpoints SHALL expose upstream connectivity failures truthfully
+When a Go backend proxy endpoint for TS Bridge capabilities cannot reach its upstream or receives an upstream validation/runtime failure, the endpoint SHALL preserve the failure source and SHALL NOT report the issue as a successful local backend response.
+
+#### Scenario: Runtime catalog request fails because Bridge is unavailable
+- **WHEN** a caller invokes `GET /api/v1/bridge/runtimes` while the Go backend cannot reach TS Bridge
+- **THEN** the response reports that the Bridge upstream is unavailable
+- **THEN** operator or IM callers can distinguish that failure from an empty runtime catalog
+
+#### Scenario: AI proxy request fails due to upstream validation
+- **WHEN** a caller invokes `POST /api/v1/ai/decompose` with a payload rejected by TS Bridge validation
+- **THEN** the Go backend returns the upstream validation failure as a rejected proxy request
+- **THEN** the response does not claim that decomposition ran successfully in the backend
+
+### Requirement: Runtime interaction routes return capability-aware responses
+The Bridge SHALL keep runtime interaction routes canonical and capability-aware. For advanced runtime controls such as messages, command execution, model changes, shell execution, and permission callbacks, the route response MUST align with the runtime catalog support state and MUST identify unsupported or degraded operations explicitly.
+
+#### Scenario: Canonical interaction route succeeds for a supported runtime
+- **WHEN** a caller invokes a canonical Bridge interaction route whose selected runtime publishes the operation as supported
+- **THEN** the Bridge SHALL delegate to the runtime-specific control path and return the runtime's normalized result
+- **THEN** the route response SHALL remain consistent with the support state advertised in `/bridge/runtimes`
+
+#### Scenario: Canonical interaction route is unsupported for the selected runtime
+- **WHEN** a caller invokes a canonical Bridge interaction route whose selected runtime publishes the operation as unsupported or degraded
+- **THEN** the Bridge SHALL return a structured error that includes the runtime key, requested operation, support state, and reason code
+- **THEN** the response SHALL NOT collapse that outcome into an unqualified generic 500 error
+
+### Requirement: Bridge exposes a canonical shell control route
+The Bridge SHALL expose `POST /bridge/shell` for runtimes that publish shell execution support. The request MUST include the task identity plus the shell command payload, and runtimes that do not publish shell execution support MUST return an explicit unsupported response.
+
+#### Scenario: OpenCode-backed task uses the canonical shell route
+- **WHEN** a caller posts a shell command to `/bridge/shell` for an active OpenCode-backed task
+- **THEN** the Bridge SHALL resolve the task runtime, verify shell support from the runtime contract, and proxy the request through the OpenCode session shell API
+- **THEN** the normalized response SHALL identify the originating task and runtime session
+
+### Requirement: OpenCode session-backed interaction routes resolve through persisted continuity after pause
+The Bridge SHALL resolve OpenCode canonical interaction routes through either the active runtime or the persisted OpenCode continuity snapshot for the same task. For OpenCode-backed tasks, `messages`, `diff`, `command`, `shell`, `revert`, and `unrevert` MUST remain task-oriented canonical routes even after the task has been paused and released from the active pool.
+
+#### Scenario: Read-only control works after the OpenCode task is paused
+- **WHEN** `GET /bridge/messages/{task_id}` or `GET /bridge/diff/{task_id}` is called for a paused OpenCode task whose snapshot still contains an upstream session binding
+- **THEN** the Bridge resolves the task through persisted continuity rather than active pool lookup alone
+- **THEN** it returns the server-backed OpenCode result for the same upstream session
+
+#### Scenario: Mutating control works after the OpenCode task is paused
+- **WHEN** `POST /bridge/command`, `POST /bridge/shell`, or `POST /bridge/revert` targets a paused OpenCode task with valid persisted continuity
+- **THEN** the Bridge forwards the request to the bound upstream OpenCode session without forcing a resume or spawning a fresh runtime
+- **THEN** the route response remains consistent with the support state published for OpenCode in `/bridge/runtimes`
+
+#### Scenario: Persisted continuity is missing for a paused OpenCode control request
+- **WHEN** a caller invokes one of those canonical OpenCode interaction routes for a paused task whose snapshot no longer contains a valid upstream session binding
+- **THEN** the Bridge returns an explicit continuity or non-resumable control error
+- **THEN** it SHALL NOT degrade that outcome into an ambiguous `task not found` response
+
+### Requirement: Bridge exposes canonical OpenCode provider-auth routes
+The Bridge SHALL expose canonical provider-auth routes for OpenCode under the `/bridge/*` family so callers can initiate and complete provider authentication without invoking OpenCode server endpoints directly.
+
+#### Scenario: Start OpenCode provider auth through the Bridge
+- **WHEN** a caller posts to `/bridge/opencode/provider-auth/{provider}/start`
+- **THEN** the Bridge returns a request-scoped auth initiation payload derived from the upstream OpenCode provider authorize surface
+- **THEN** the caller does not need to call the upstream `/provider/{id}/oauth/authorize` endpoint directly
+
+#### Scenario: Complete OpenCode provider auth through the Bridge
+- **WHEN** a caller posts the callback payload to `/bridge/opencode/provider-auth/{request_id}/complete`
+- **THEN** the Bridge forwards that payload to the matching upstream provider callback surface
+- **THEN** the response truthfully reports success or upstream auth failure without pretending the provider is ready when callback completion failed
+

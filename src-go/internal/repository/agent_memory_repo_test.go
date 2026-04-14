@@ -136,6 +136,87 @@ func TestAgentMemoryRepository_ListByProjectAndTimeRangeAndDeleteOlderThan(t *te
 	}
 }
 
+func TestAgentMemoryRepository_ListFilteredAndDeleteMany(t *testing.T) {
+	db := openAgentMemoryRepoTestDB(t)
+	repo := NewAgentMemoryRepository(db)
+	projectID := uuid.New()
+	start := time.Date(2026, 4, 1, 8, 0, 0, 0, time.UTC)
+
+	records := []*model.AgentMemory{
+		{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			Scope:     model.MemoryScopeProject,
+			Category:  model.MemoryCategorySemantic,
+			Key:       "release-plan",
+			Content:   "Use staged rollout",
+			Metadata:  `{"source":"ops"}`,
+			CreatedAt: start,
+			UpdatedAt: start,
+		},
+		{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			Scope:     model.MemoryScopeRole,
+			RoleID:    "reviewer",
+			Category:  model.MemoryCategorySemantic,
+			Key:       "review-note",
+			Content:   "Focus on regressions",
+			Metadata:  `{"taskId":"task-1"}`,
+			CreatedAt: start.Add(time.Hour),
+			UpdatedAt: start.Add(time.Hour),
+		},
+		{
+			ID:        uuid.New(),
+			ProjectID: projectID,
+			Scope:     model.MemoryScopeProject,
+			Category:  model.MemoryCategoryProcedural,
+			Key:       "deploy-checklist",
+			Content:   "Verify migrations first",
+			Metadata:  `{"source":"runbook"}`,
+			CreatedAt: start.Add(2 * time.Hour),
+			UpdatedAt: start.Add(2 * time.Hour),
+		},
+	}
+	for _, record := range records {
+		if err := db.Create(newAgentMemoryRecord(record)).Error; err != nil {
+			t.Fatalf("seed memory: %v", err)
+		}
+	}
+
+	filtered, err := repo.ListFiltered(context.Background(), projectID, model.AgentMemoryFilter{
+		Query:    "task-1",
+		Scope:    model.MemoryScopeRole,
+		Category: model.MemoryCategorySemantic,
+		RoleID:   "reviewer",
+		StartAt:  ptrAgentMemoryTime(start),
+		EndAt:    ptrAgentMemoryTime(start.Add(90 * time.Minute)),
+		Limit:    10,
+	})
+	if err != nil {
+		t.Fatalf("ListFiltered() error = %v", err)
+	}
+	if len(filtered) != 1 || filtered[0].Key != "review-note" {
+		t.Fatalf("ListFiltered() = %#v, want only review-note", filtered)
+	}
+
+	deleted, err := repo.DeleteMany(context.Background(), []uuid.UUID{records[0].ID, records[2].ID})
+	if err != nil {
+		t.Fatalf("DeleteMany() error = %v", err)
+	}
+	if deleted != 2 {
+		t.Fatalf("DeleteMany() deleted = %d, want 2", deleted)
+	}
+
+	remaining, err := repo.ListByProject(context.Background(), projectID, "", "")
+	if err != nil {
+		t.Fatalf("ListByProject() error = %v", err)
+	}
+	if len(remaining) != 1 || remaining[0].Key != "review-note" {
+		t.Fatalf("remaining = %#v, want only review-note", remaining)
+	}
+}
+
 func openAgentMemoryRepoTestDB(t *testing.T) *gorm.DB {
 	t.Helper()
 
@@ -147,4 +228,8 @@ func openAgentMemoryRepoTestDB(t *testing.T) *gorm.DB {
 		t.Fatalf("migrate agent memory table: %v", err)
 	}
 	return db
+}
+
+func ptrAgentMemoryTime(value time.Time) *time.Time {
+	return &value
 }

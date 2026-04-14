@@ -293,6 +293,21 @@ func (s *IMService) HandleAction(ctx context.Context, req *model.IMActionRequest
 			return nil, err
 		}
 		if resp != nil {
+			resp.ReplyTarget = cloneReplyTarget(firstNonNilReplyTarget(resp.ReplyTarget, req.ReplyTarget))
+			resp.Metadata = buildIMConnectivityMetadata(
+				resp.Metadata,
+				imDeliverySourceActionResult,
+				req.BridgeID,
+				req.Platform,
+				"",
+				"",
+				"",
+				"",
+				resp.ReplyTarget,
+			)
+			if strings.TrimSpace(resp.Status) != "" {
+				resp.Metadata["action_status"] = strings.TrimSpace(resp.Status)
+			}
 			entry.WithField("status", resp.Status).Info("IM action executed")
 			return resp, nil
 		}
@@ -304,8 +319,8 @@ func (s *IMService) HandleAction(ctx context.Context, req *model.IMActionRequest
 		Result:      fmt.Sprintf("Action %q not handled by executor.", req.Action),
 		Success:     false,
 		Status:      model.IMActionStatusFailed,
-		ReplyTarget: req.ReplyTarget,
-		Metadata:    cloneStringMap(req.Metadata),
+		ReplyTarget: cloneReplyTarget(req.ReplyTarget),
+		Metadata:    buildIMActionResponseMetadata(req, model.IMActionStatusFailed),
 	}, nil
 }
 
@@ -322,6 +337,7 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 	})
 
 	if s.controlPlane != nil {
+		metadata := buildIMConnectivityMetadata(req.Metadata, imDeliverySourceCompatSend, req.BridgeID, req.Platform, req.ProjectID, "", "", "", req.ReplyTarget)
 		delivery, err := s.controlPlane.QueueDelivery(ctx, IMQueueDeliveryRequest{
 			DeliveryID:     strings.TrimSpace(req.DeliveryID),
 			TargetBridgeID: strings.TrimSpace(req.BridgeID),
@@ -331,7 +347,7 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 			Content:        req.Text,
 			Structured:     req.Structured,
 			Native:         req.Native,
-			Metadata:       req.Metadata,
+			Metadata:       metadata,
 			TargetChatID:   req.ChannelID,
 			ReplyTarget:    req.ReplyTarget,
 		})
@@ -359,7 +375,7 @@ func (s *IMService) Send(ctx context.Context, req *model.IMSendRequest) error {
 		"content":     req.Text,
 		"structured":  req.Structured,
 		"native":      req.Native,
-		"metadata":    req.Metadata,
+		"metadata":    buildIMConnectivityMetadata(req.Metadata, imDeliverySourceCompatSend, req.BridgeID, req.Platform, req.ProjectID, "", "", "", req.ReplyTarget),
 		"thread_id":   req.ThreadID,
 		"replyTarget": req.ReplyTarget,
 	}
@@ -413,6 +429,7 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 
 	if s.controlPlane != nil {
 		content := buildNotifyContent(req)
+		metadata := buildIMConnectivityMetadata(req.Metadata, imDeliverySourceCompatNotify, req.BridgeID, req.Platform, req.ProjectID, "", "", "", req.ReplyTarget)
 		delivery, err := s.controlPlane.QueueDelivery(ctx, IMQueueDeliveryRequest{
 			DeliveryID:     strings.TrimSpace(req.DeliveryID),
 			TargetBridgeID: strings.TrimSpace(req.BridgeID),
@@ -422,7 +439,7 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 			Content:        content,
 			Structured:     req.Structured,
 			Native:         req.Native,
-			Metadata:       req.Metadata,
+			Metadata:       metadata,
 			TargetChatID:   req.ChannelID,
 			ReplyTarget:    req.ReplyTarget,
 		})
@@ -451,7 +468,7 @@ func (s *IMService) Notify(ctx context.Context, req *model.IMNotifyRequest) erro
 		"content":        buildNotifyContent(req),
 		"structured":     req.Structured,
 		"native":         req.Native,
-		"metadata":       req.Metadata,
+		"metadata":       buildIMConnectivityMetadata(req.Metadata, imDeliverySourceCompatNotify, req.BridgeID, req.Platform, req.ProjectID, "", "", "", req.ReplyTarget),
 		"replyTarget":    req.ReplyTarget,
 	}
 	body, err := json.Marshal(payload)
@@ -648,7 +665,7 @@ func buildSendDeliveryRecord(req *model.IMSendRequest, status model.IMDeliverySt
 		Content:       strings.TrimSpace(req.Text),
 		Structured:    req.Structured,
 		Native:        req.Native,
-		Metadata:      cloneStringMap(req.Metadata),
+		Metadata:      buildIMConnectivityMetadata(req.Metadata, imDeliverySourceCompatSend, req.BridgeID, req.Platform, req.ProjectID, "", "", "", req.ReplyTarget),
 		ReplyTarget:   req.ReplyTarget,
 	}
 }
@@ -671,7 +688,14 @@ func buildNotifyDeliveryRecord(req *model.IMNotifyRequest, status model.IMDelive
 		Content:       buildNotifyContent(req),
 		Structured:    req.Structured,
 		Native:        req.Native,
-		Metadata:      cloneStringMap(req.Metadata),
+		Metadata:      buildIMConnectivityMetadata(req.Metadata, imDeliverySourceCompatNotify, req.BridgeID, req.Platform, req.ProjectID, "", "", "", req.ReplyTarget),
 		ReplyTarget:   req.ReplyTarget,
 	}
+}
+
+func firstNonNilReplyTarget(primary *model.IMReplyTarget, fallback *model.IMReplyTarget) *model.IMReplyTarget {
+	if primary != nil {
+		return primary
+	}
+	return fallback
 }

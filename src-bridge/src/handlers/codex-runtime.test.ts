@@ -5,7 +5,11 @@ import { join } from "node:path";
 import { AgentRuntime } from "../runtime/agent-runtime.js";
 import type { PluginRecord } from "../plugins/types.js";
 import type { ExecuteRequest } from "../types.js";
-import { prepareCodexLaunch, streamCodexRuntime } from "./codex-runtime.js";
+import {
+  buildCodexConfigOverlay,
+  prepareCodexLaunch,
+  streamCodexRuntime,
+} from "./codex-runtime.js";
 
 const tempDirs: string[] = [];
 
@@ -448,6 +452,7 @@ describe("streamCodexRuntime", () => {
       prompt: "Run Codex with advanced options",
       activePlugins: plugins,
     });
+    const overlay = buildCodexConfigOverlay(req, plugins);
 
     expect(launch.cmd).toEqual(
       expect.arrayContaining([
@@ -493,6 +498,18 @@ describe("streamCodexRuntime", () => {
         'mcp_servers.http-plugin.url="http://127.0.0.1:8787/mcp"',
       ]),
     );
+    expect(overlay.overrides).toEqual(
+      expect.arrayContaining([
+        'approval_policy="on-request"',
+        'sandbox_mode="workspace-write"',
+        'mcp_servers.stdio-plugin.command="node"',
+      ]),
+    );
+    expect(overlay.metadata).toEqual({
+      approvalPolicy: "on-request",
+      sandboxMode: "workspace-write",
+      mcpServerIds: ["stdio-plugin", "http-plugin"],
+    });
 
     launch.cleanup();
     expect(() => readFileSync(String(schemaPath), "utf8")).toThrow();

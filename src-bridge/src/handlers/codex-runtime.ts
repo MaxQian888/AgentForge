@@ -45,6 +45,15 @@ export interface CodexLaunch {
   cleanup: () => void;
 }
 
+export interface CodexConfigOverlay {
+  overrides: string[];
+  metadata: {
+    approvalPolicy: "on-request" | "never";
+    sandboxMode: "workspace-write" | "danger-full-access";
+    mcpServerIds: string[];
+  };
+}
+
 export async function streamCodexRuntime(
   runtime: AgentRuntime,
   streamer: EventSink,
@@ -139,9 +148,11 @@ export function prepareCodexLaunch(params: {
     cmd.push("--search");
   }
 
-  for (const configValue of buildCodexConfigOverrides(
+  const overlay = buildCodexConfigOverlay(
+    params.req,
     params.activePlugins ?? [],
-  )) {
+  );
+  for (const configValue of overlay.overrides) {
     cmd.push("-c", configValue);
   }
 
@@ -172,32 +183,40 @@ export function prepareCodexLaunch(params: {
 }
 
 export function getDefaultCodexAuthStatus(command = "codex"): CodexAuthStatus {
-  const result = Bun.spawnSync({
-    cmd: [command, "login", "status"],
-    stdout: "pipe",
-    stderr: "pipe",
-  });
-  const output =
-    `${Buffer.from(result.stdout).toString("utf8")}\n${Buffer.from(result.stderr).toString("utf8")}`.trim();
+  try {
+    const result = Bun.spawnSync({
+      cmd: [command, "login", "status"],
+      stdout: "pipe",
+      stderr: "pipe",
+    });
+    const output =
+      `${Buffer.from(result.stdout).toString("utf8")}\n${Buffer.from(result.stderr).toString("utf8")}`.trim();
 
-  if (result.exitCode !== 0) {
+    if (result.exitCode !== 0) {
+      return {
+        authenticated: false,
+        message: output || "Codex CLI authentication is unavailable",
+      };
+    }
+
+    if (/logged in/i.test(output)) {
+      return {
+        authenticated: true,
+        message: output,
+      };
+    }
+
     return {
       authenticated: false,
       message: output || "Codex CLI authentication is unavailable",
     };
-  }
-
-  if (/logged in/i.test(output)) {
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
     return {
-      authenticated: true,
-      message: output,
+      authenticated: false,
+      message: message || "Codex CLI authentication is unavailable",
     };
   }
-
-  return {
-    authenticated: false,
-    message: output || "Codex CLI authentication is unavailable",
-  };
 }
 
 function emitCodexRuntimeEvent(
@@ -593,11 +612,25 @@ function buildCodexResumePrompt(prompt: string): string {
   return `Continue the existing task from the saved Codex thread state. Preserve prior context and continue the unfinished work.\n\nOriginal task:\n${prompt}`;
 }
 
-function buildCodexConfigOverrides(activePlugins: PluginRecord[]): string[] {
+export function buildCodexConfigOverlay(
+  req: ExecuteRequest,
+  activePlugins: PluginRecord[],
+): CodexConfigOverlay {
   const overrides: string[] = [];
+  const approvalPolicy =
+    req.permission_mode === "bypassPermissions" ? "never" : "on-request";
+  const sandboxMode =
+    req.permission_mode === "bypassPermissions"
+      ? "danger-full-access"
+      : "workspace-write";
+
+  overrides.push(`approval_policy=${tomlString(approvalPolicy)}`);
+  overrides.push(`sandbox_mode=${tomlString(sandboxMode)}`);
+  const mcpServerIds: string[] = [];
 
   for (const plugin of activePlugins) {
     const id = plugin.metadata.id;
+    mcpServerIds.push(id);
     if (plugin.spec.transport === "http" && plugin.spec.url) {
       overrides.push(`mcp_servers.${id}.url=${tomlString(plugin.spec.url)}`);
       continue;
@@ -618,7 +651,14 @@ function buildCodexConfigOverrides(activePlugins: PluginRecord[]): string[] {
     }
   }
 
-  return overrides;
+  return {
+    overrides,
+    metadata: {
+      approvalPolicy,
+      sandboxMode,
+      mcpServerIds,
+    },
+  };
 }
 
 function emitCodexItemDetail(

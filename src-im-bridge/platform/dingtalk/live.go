@@ -824,6 +824,7 @@ func normalizeIncomingMessage(incoming chatbotMessage) (*core.Message, error) {
 			SessionWebhook: strings.TrimSpace(incoming.SessionWebhook),
 			UserID:         userID,
 			UseReply:       true,
+			ProgressMode:   string(core.AsyncUpdateSessionWebhook),
 			Metadata: map[string]string{
 				"conversation_type": strings.TrimSpace(incoming.ConversationType),
 			},
@@ -871,7 +872,7 @@ func normalizeCardActionRequest(request *dingtalkcard.CardRequest) (*notify.Acti
 		request.GetActionString("action_id"),
 		firstActionID(request.CardActionData.CardPrivateData.ActionIdList),
 	)
-	action, entityID, ok := core.ParseActionReference(actionRef)
+	action, entityID, actionMetadata, ok := core.ParseActionReferenceWithMetadata(actionRef)
 	if !ok {
 		return nil, errors.New("missing dingtalk action reference")
 	}
@@ -886,6 +887,7 @@ func normalizeCardActionRequest(request *dingtalkcard.CardRequest) (*notify.Acti
 		SessionWebhook:    callbackCtx.SessionWebhook,
 		UserID:            firstNonEmpty(strings.TrimSpace(request.UserId), callbackCtx.UserID),
 		UseReply:          true,
+		ProgressMode:      string(core.AsyncUpdateSessionWebhook),
 		PreferredRenderer: string(liveMetadata.Capabilities.StructuredSurface),
 	}
 	metadata := compactMetadata(map[string]string{
@@ -900,6 +902,9 @@ func normalizeCardActionRequest(request *dingtalkcard.CardRequest) (*notify.Acti
 		}
 	}
 
+	for key, value := range actionMetadata {
+		metadata[key] = value
+	}
 	return &notify.ActionRequest{
 		Platform:    liveMetadata.Source,
 		Action:      action,

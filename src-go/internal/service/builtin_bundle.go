@@ -24,6 +24,10 @@ type builtInBundleEntry struct {
 	Manifest            string                  `yaml:"manifest"`
 	DocsRef             string                  `yaml:"docsRef"`
 	VerificationProfile string                  `yaml:"verificationProfile"`
+	CoreFlows           []string                `yaml:"coreFlows"`
+	StarterFamily       string                  `yaml:"starterFamily"`
+	DependencyRefs      []string                `yaml:"dependencyRefs"`
+	WorkspaceRefs       []string                `yaml:"workspaceRefs"`
 	Availability        builtInBundleMetadata   `yaml:"availability"`
 	Readiness           *builtInBundleReadiness `yaml:"readiness"`
 }
@@ -135,6 +139,10 @@ func builtInMetadataFromEntry(entry builtInBundleEntry) *model.PluginBuiltInMeta
 		Official:            true,
 		DocsRef:             entry.DocsRef,
 		VerificationProfile: entry.VerificationProfile,
+		CoreFlows:           append([]string(nil), entry.CoreFlows...),
+		StarterFamily:       strings.TrimSpace(entry.StarterFamily),
+		DependencyRefs:      append([]string(nil), entry.DependencyRefs...),
+		WorkspaceRefs:       append([]string(nil), entry.WorkspaceRefs...),
 		Installable:         true,
 	}
 

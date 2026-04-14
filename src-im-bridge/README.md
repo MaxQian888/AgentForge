@@ -2,6 +2,13 @@
 
 `src-im-bridge` is the Go IM Bridge that connects one active IM platform instance to the shared AgentForge command engine and backend API.
 
+The backend topology is intentional:
+
+- IM Bridge talks to Go backend-owned `/api/v1/*` surfaces
+- Go backend mediates Bridge-backed AI and runtime diagnostics by proxying to TS Bridge `/bridge/*`
+- TS Bridge does not directly discover or invoke IM Bridge instances
+- asynchronous progress and terminal updates flow back through the Go control plane so the original `bridge_id` and reply target remain stable
+
 ## Platform Selection
 
 Startup now resolves `IM_PLATFORM` through a bridge-local provider contract rather than a hard-coded startup branch. Built-in providers still ship in-tree, but they now expose a normalized descriptor with:
@@ -75,14 +82,14 @@ On graceful shutdown the bridge unregisters itself. If the WebSocket drops, the 
 
 Every supported platform currently ships as a built-in provider with both a local stub adapter and a live transport path.
 
-- `feishu`: stub + live long connection, card-capable, native JSON/template card payload support, delayed card update support
+- `feishu`: stub + live long connection, readiness tier `full_native_lifecycle`, native JSON/template card payload support, callback-token-aware delayed card update support
 - `slack`: stub + live Socket Mode, Block Kit callbacks + `response_url`
-- `dingtalk`: stub + live Stream mode, session-webhook replies + explicit structured downgrade
+- `dingtalk`: stub + live Stream mode, readiness tier `native_send_with_fallback`, ActionCard send + session-webhook-first completion path + explicit mutable-update fallback
 - `telegram`: stub + live long polling, inline keyboard + callback query + message edit
 - `discord`: stub + live HTTP interactions, deferred reply + follow-up + original-response edit
-- `wecom`: stub + live callback-driven inbound flow, `response_url` reply path, direct app-message send, and explicit structured-text fallback
-- `qq`: stub + live OneBot WebSocket intake, slash-or-mention command normalization, reply-segment aware follow-ups, and explicit structured-text fallback
-- `qqbot`: stub + live webhook intake, QQ Bot OpenAPI text delivery, group or user reply-target restoration, and explicit structured-text fallback
+- `wecom`: stub + live callback-driven inbound flow, readiness tier `native_send_with_fallback`, `response_url`-first reply path, direct app-message send fallback, and explicit richer-update fallback
+- `qq`: stub + live OneBot WebSocket intake, readiness tier `text_first`, slash-or-mention command normalization, conversation-scoped reply-target reuse, and explicit richer fallback
+- `qqbot`: stub + live webhook intake, readiness tier `markdown_first`, QQ Bot OpenAPI markdown/keyboard-capable delivery, `msg_id`-aware reply-target reuse, and explicit mutable-update fallback
 
 Stub adapters expose local test endpoints on `TEST_PORT`:
 
@@ -140,9 +147,12 @@ The canonical outbound delivery contract now accepts the same typed fields on di
 Outbound delivery now resolves through a provider-aware rendering plan before transport execution. In practice this means:
 
 - provider descriptors declare rendering defaults such as supported text modes, structured rendering preference, and text length limits
+- provider metadata and `/im/health` expose `readiness_tier` plus `capability_matrix.readinessTier`, `capability_matrix.preferredAsyncUpdateMode`, and `capability_matrix.fallbackAsyncUpdateMode`, so operator-visible truth distinguishes full native lifecycle from native-send-only, text-first, or markdown-first providers
 - shared delivery code chooses a rendering plan first, then executes provider transport APIs
 - Telegram can opt into MarkdownV2 through delivery metadata such as `text_format=markdown_v2`, while still falling back to plain text when formatted delivery is not requested or not supported
 - Feishu delayed-update and action-completion paths now build richer provider-native card messages through typed helpers instead of hand-assembling raw card JSON inside shared delivery code
+- QQ, QQ Bot, DingTalk, and WeCom now report explicit fallback metadata when a preserved reply target requests editable or deferred update behavior they cannot actually honor
+- bound progress, action completion, and replayed deliveries now preserve provider completion hints through `reply_target_*` metadata such as `reply_target_progress_mode`, `reply_target_session_webhook`, `reply_target_response_url`, and `reply_target_conversation_id`
 
 Interactive callbacks normalized into `/api/v1/im/action` now expect truthful backend outcomes instead of placeholder acknowledgements. The backend returns canonical action states such as:
 
@@ -187,29 +197,35 @@ When `IM_CONTROL_SHARED_SECRET` is configured, unsigned or invalidly signed comp
 
 ## Live Transport Summary
 
-| Platform | Preferred live transport | Structured surface | Native callback path | Async update preference | Current downgrade rule |
-| --- | --- | --- | --- | --- | --- |
-| Feishu | long connection | interactive cards + template cards | card action callback | immediate toast/reply, delayed card update, native fallback reason reporting | falls back to reply/send when native card send or delayed update cannot be used |
-| Slack | Socket Mode | Block Kit | interactive payloads via Socket Mode | thread reply, `response_url`, follow-up | falls back to plain text only if blocks cannot be rendered |
-| DingTalk | Stream mode | ActionCard planned, text fallback active | Stream card callback | session webhook, then direct send | structured notifications explicitly degrade to text today |
-| Telegram | long polling | inline keyboard | callback query | reply or in-place edit | card-like content maps to text plus inline keyboard, and formatted text falls back to plain text when MarkdownV2 is not selected or safe |
-| Discord | outgoing webhook interactions | message components | `/interactions` message component payloads | deferred ack, follow-up, original-response edit | unsupported component cases return explicit ephemeral ack |
-| WeCom | callback-driven app messaging | card-compatible structured profile with text fallback | webhook/callback message payload | `response_url` reply first, direct app send fallback | structured or richer payloads degrade to text with explicit fallback when the current path cannot honor a richer update |
-| QQ | OneBot WebSocket | text-first shared rendering | OneBot message event payload | reply in the same chat, optionally with reply segment metadata | structured or richer payloads degrade to plain text or link output before send |
-| QQ Bot | webhook callback + OpenAPI send | text-first shared rendering | `/qqbot/callback` webhook payload | reply using preserved `msg_id` when present, otherwise direct follow-up send | structured or richer payloads degrade to plain text or link output before send |
+| Platform | Readiness tier | Preferred live transport | Structured surface | Native callback path | Async update preference | Current downgrade rule |
+| --- | --- | --- | --- | --- | --- | --- |
+| Feishu | `full_native_lifecycle` | long connection | interactive cards + template cards | card action callback | immediate toast/reply, delayed card update, native fallback reason reporting | falls back to reply/send when native card send or delayed update cannot be used |
+| Slack | n/a | Socket Mode | Block Kit | interactive payloads via Socket Mode | thread reply, `response_url`, follow-up | falls back to plain text only if blocks cannot be rendered |
+| DingTalk | `native_send_with_fallback` | Stream mode | ActionCard send + text fallback | Stream card callback | session webhook, then direct send | ActionCard or richer update requests degrade explicitly when mutable update is unavailable |
+| Telegram | n/a | long polling | inline keyboard | callback query | reply or in-place edit | card-like content maps to text plus inline keyboard, and formatted text falls back to plain text when MarkdownV2 is not selected or safe |
+| Discord | n/a | outgoing webhook interactions | message components | `/interactions` message component payloads | deferred ack, follow-up, original-response edit | unsupported component cases return explicit ephemeral ack |
+| WeCom | `native_send_with_fallback` | callback-driven app messaging | template-card/markdown-compatible richer send with text fallback | webhook/callback message payload | `response_url` reply first, direct app send fallback | richer or mutable updates degrade to markdown/text with explicit fallback when the current path cannot honor them |
+| QQ | `text_first` | OneBot WebSocket | text-first shared rendering | OneBot message event payload | reply in the same chat, optionally with reply segment metadata | structured, native, or mutable-update requests degrade to plain text or link output before send |
+| QQ Bot | `markdown_first` | webhook callback + OpenAPI send | markdown/keyboard-first shared rendering | `/qqbot/callback` webhook payload | reply using preserved `msg_id` when present, otherwise direct follow-up send | mutable-update or incompatible keyboard requests degrade explicitly to supported text follow-up |
+
+China-platform registration metadata now also publishes:
+
+- `preferred_async_update_mode`
+- `fallback_async_update_mode`
+- reply-target completion hints carried forward as `reply_target_*` metadata on compat send, compat notify, action results, bound progress, and replayed deliveries
 
 ## Native Interaction Matrix
 
 | Platform | Command surface | Reply target context preserved | Native action support | Native update support |
 | --- | --- | --- | --- | --- |
-| Feishu | slash + mention | chat, message, callback token | `card.action.trigger` normalized into `/im/action` with delayed-update context | reply, native card send, or delayed card update |
+| Feishu | slash + mention | chat, message, callback token | `card.action.trigger` normalized into `/im/action` with delayed-update context | reply, native card send, or delayed card update after synchronous callback acknowledgement |
 | Slack | slash + mention + interaction | channel, thread, `response_url` | block action and view submission normalized into `/im/action` | thread reply, `response_url`, follow-up |
-| DingTalk | mention + chatbot text | session webhook, conversation id, conversation type | card callback normalized when action reference is present | session webhook reply, conversation fallback |
+| DingTalk | mention + chatbot text | session webhook, conversation id, conversation type | card callback normalized when action reference is present | session webhook reply or direct send; no mutable-card parity claim |
 | Telegram | slash + mention | chat, message, topic | inline keyboard callback query normalized into `/im/action` | `sendMessage`, `editMessageText`, segmented follow-up sends for oversized formatted updates |
 | Discord | slash + component | channel, interaction token, original response | message component `custom_id` normalized into `/im/action` | deferred ack, follow-up webhook, original response patch |
-| WeCom | callback text + mention | chat, user, `response_url` | callback messages normalize into the shared command surface | `response_url` reply, then direct app send |
-| QQ | slash + mention | chat, message, sender | shared command engine via OneBot-compatible message payloads | group reply, private reply, or explicit text follow-up |
-| QQ Bot | slash + mention | group or user openid, `msg_id` | webhook events normalize into the shared command surface | group follow-up, user follow-up, or explicit text downgrade |
+| WeCom | callback text + mention | chat, user, `response_url` | callback messages normalize into the shared command surface | `response_url` reply first, then direct app send; richer updates fall back explicitly |
+| QQ | slash + mention | chat, message, sender | shared command engine via OneBot-compatible message payloads | group reply, private reply, or explicit text follow-up; no native mutable update |
+| QQ Bot | slash + mention | group or user openid, `msg_id` | webhook events normalize into the shared command surface | markdown/keyboard send or reply-target reuse when supported; mutable update falls back explicitly |
 
 ## Rollout And Rollback
 
@@ -220,7 +236,7 @@ When `IM_CONTROL_SHARED_SECRET` is configured, unsigned or invalidly signed comp
 - For WeCom, expose the configured callback endpoint and verify both callback delivery and direct app-message send before promoting the deployment.
 - For QQ, verify the OneBot websocket connects cleanly and that both inbound command handling and outbound send actions succeed before promoting the deployment.
 - For QQ Bot, expose the configured callback endpoint and verify both webhook delivery and OpenAPI text send before promoting the deployment.
-- For DingTalk, treat structured notifications as an explicit text downgrade until ActionCard sending is promoted from planned to active.
+- For DingTalk, verify ActionCard send where supported, and treat mutable-update requests beyond the current `native_send_with_fallback` tier as explicit fallback rather than fake parity.
 - To roll back, first disable the control-plane WebSocket or clear `IM_CONTROL_SHARED_SECRET` if compatibility HTTP fallback is needed, then switch the deployment back to the previous platform or move the current platform to `IM_TRANSPORT_MODE=stub` for local diagnosis.
 
 ## Smoke Tests
@@ -232,7 +248,7 @@ Recommended scoped validation after adapter changes:
 ```powershell
 cd src-im-bridge
 go test ./platform/slack ./platform/feishu ./platform/telegram ./platform/discord ./platform/dingtalk ./platform/wecom ./platform/qq ./platform/qqbot -count=1
-go test ./core -run 'Test(ResolveReplyPlan_|DeliverText_|DeliverNative_|MetadataForPlatform_|StructuredMessageFallbackText|ReplyTarget_JSONRoundTrip|NativeMessage_)' -count=1
+go test ./core -run 'Test(ResolveReplyPlan_|DeliverText_|DeliverNative_|DeliverEnvelope_|MetadataForPlatform_|StructuredMessageFallbackText|ReplyTarget_JSONRoundTrip|NativeMessage_)' -count=1
 go test ./client -run 'Test(HandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget|HandleIMAction_ParsesCanonicalActionOutcome|WithSource_NormalizesHeaderValue|WithPlatform_UsesTelegramMetadataSource|WithPlatform_UsesWeComMetadataSource|WithPlatform_UsesQQMetadataSource|WithPlatform_UsesQQBotMetadataSource)' -count=1
 go test ./notify -run 'TestReceiver_(ActionResponseUsesReplyTargetDelivery|HealthReportsNormalizedTelegramSourceAndCapabilities|HealthReportsNormalizedWeComSourceAndCapabilities|HealthReportsNormalizedQQSourceAndCapabilities|HealthReportsNormalizedQQBotSourceAndCapabilities|FallsBackToStructuredTextWhenNativeStructuredSenderUnavailable|PrefersNativePayloadWhenPlatformSupportsIt|UsesDeferredNativeUpdateWhenFeishuReplyTargetSupportsIt|ReportsFallbackReasonWhenDeferredUpdateContextMissing|SuppressesDuplicateSignedCompatibilityDelivery|RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured)' -count=1
 go test ./cmd/bridge -run 'Test(SelectProvider_|SelectPlatform_|LookupPlatformDescriptor_|BridgeRuntimeControl_)' -count=1

@@ -23,6 +23,10 @@ type DispatchBudgetWarning struct {
 type DispatchOutcome struct {
 	Status         string                 `json:"status"`
 	Reason         string                 `json:"reason,omitempty"`
+	Runtime        string                 `json:"runtime,omitempty"`
+	Provider       string                 `json:"provider,omitempty"`
+	Model          string                 `json:"model,omitempty"`
+	RoleID         string                 `json:"roleId,omitempty"`
 	GuardrailType  string                 `json:"guardrailType,omitempty"`
 	GuardrailScope string                 `json:"guardrailScope,omitempty"`
 	BudgetWarning  *DispatchBudgetWarning `json:"budgetWarning,omitempty"`

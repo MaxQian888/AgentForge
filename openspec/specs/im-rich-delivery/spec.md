@@ -30,56 +30,32 @@ If a structured or provider-native payload cannot be delivered through the reque
 - **AND** the canonical delivery result exposes a fallback reason instead of silently pretending native delivery succeeded
 
 ### Requirement: Canonical rich delivery SHALL be rendered through the active provider profile
-The canonical typed outbound IM envelope SHALL be resolved through the active provider's rendering profile before the Bridge executes transport delivery. That rendering step MUST choose the final provider-facing representation for native payloads (including new platform-specific native payloads beyond Feishu), structured payloads (including section-based structured messages), formatted text (including new platform markdown formats), segmented text, or explicit downgrade so the same typed envelope produces the same provider-aware outcome across direct notify, compatibility HTTP, queueing, and replay.
+The canonical typed outbound IM envelope SHALL be resolved through the active provider profile and readiness tier before the Bridge executes transport delivery. Chinese platform deliveries MUST preserve identical provider-aware outcomes and fallback metadata across direct notify, compatibility HTTP, control-plane replay, and action completion. The rendered outcome MUST honor provider-specific limits: Feishu may use native card send or delayed update, DingTalk may use ActionCard send or truthful text fallback, WeCom may use template-card or markdown or text without mutable-update pretence, QQ SHALL resolve to text or link output, and QQ Bot SHALL resolve to markdown or keyboard-first output or explicit text fallback.
 
-#### Scenario: Telegram structured delivery becomes text plus inline keyboard
-- **WHEN** a typed delivery containing structured content targets Telegram
-- **THEN** the rendering step resolves the delivery into Telegram-supported text plus inline-keyboard output instead of an unsupported card payload
-- **AND** the resulting delivery receipt records that Telegram-native structured rendering was chosen through the provider profile
+#### Scenario: Feishu delivery keeps native card or delayed-update semantics across transports
+- **WHEN** a Feishu-targeted typed delivery crosses direct notify, replay, or action-completion paths
+- **THEN** the rendering step preserves the same Feishu-native card or delayed-update plan whenever the preserved reply target permits it
+- **AND** fallback metadata is emitted only when that native lifecycle cannot be honored
 
-#### Scenario: WeCom typed delivery becomes supported app-message content
-- **WHEN** a typed delivery containing structured or richer card intent targets WeCom
-- **THEN** the rendering step resolves the delivery into a WeCom-supported text, news-style, or template-card-compatible representation according to the active WeCom provider profile
-- **AND** transport execution does not require shared layers to special-case WeCom outside the provider contract
+#### Scenario: DingTalk delivery uses ActionCard or explicit fallback consistently
+- **WHEN** a DingTalk-targeted typed delivery requests card-like richer output
+- **THEN** the rendering step chooses ActionCard delivery when the provider profile and reply target allow it
+- **AND** otherwise falls back to text with the same machine-readable downgrade reason regardless of transport path
 
-#### Scenario: Slack native Block Kit delivery dispatched through rendering plan
-- **WHEN** a typed delivery containing a Slack Block Kit native payload targets Slack
-- **THEN** the rendering step selects the native delivery path and dispatches through the Slack adapter's `NativeMessageSender`
-- **AND** the delivery receipt records `type: "native"` without fallback
+#### Scenario: WeCom delivery resolves through template-card-aware profile
+- **WHEN** a WeCom-targeted typed delivery requests structured or richer content
+- **THEN** the rendering step chooses a WeCom-supported template-card, markdown, or text representation according to the active WeCom profile
+- **AND** it does not pretend that mutable richer updates are available when only send-time richer payloads are supported
 
-#### Scenario: Discord native embed delivery dispatched through rendering plan
-- **WHEN** a typed delivery containing a Discord embed native payload targets Discord
-- **THEN** the rendering step selects the native delivery path and dispatches through the Discord adapter's `NativeMessageSender`
-- **AND** the delivery receipt records `type: "native"` without fallback
+#### Scenario: QQ delivery remains text-first with explicit richer fallback
+- **WHEN** a QQ-targeted typed delivery requests structured, native, or mutable-update behavior
+- **THEN** the rendering step resolves the delivery into QQ-supported text or link output
+- **AND** the delivery receipt records that the richer request degraded because QQ is text-first
 
-#### Scenario: DingTalk native card delivery dispatched through rendering plan
-- **WHEN** a typed delivery containing a DingTalk card native payload targets DingTalk
-- **THEN** the rendering step selects the native delivery path and dispatches through the DingTalk adapter's `NativeMessageSender`
-
-#### Scenario: Native payload targeting wrong platform uses fallback text
-- **WHEN** a typed delivery containing a Slack Block Kit native payload targets a Telegram bridge
-- **THEN** the rendering step falls back to text delivery using the payload's `FallbackText()`
-- **AND** the delivery receipt records `fallback_reason: "native_platform_mismatch"`
-
-#### Scenario: Section-based structured message renders richer platform output
-- **WHEN** a typed delivery containing a `StructuredMessage` with non-empty `Sections` targets Slack
-- **THEN** the rendering step converts sections to Slack Block Kit blocks (section, image, divider, context, actions)
-- **AND** the result is richer than the legacy title+body+fields rendering
-
-#### Scenario: Feishu typed delivery becomes builder-owned native content
-- **WHEN** a typed delivery containing richer card intent targets Feishu
-- **THEN** the rendering step resolves the delivery through Feishu's provider-owned builders into JSON-card, template-card, or `lark_md`-backed output as appropriate
-- **AND** transport execution does not require shared layers to assemble raw Feishu payload fragments directly
-
-#### Scenario: QQ typed delivery becomes provider-supported QQ content
-- **WHEN** a typed delivery containing structured or richer intent targets QQ
-- **THEN** the rendering step resolves the delivery into a QQ-supported text, link, or provider-supported structured representation according to the active QQ provider profile
-- **AND** transport execution does not require shared layers to special-case QQ outside the provider contract
-
-#### Scenario: QQ Bot typed delivery becomes provider-supported QQ Bot content
-- **WHEN** a typed delivery containing structured or richer intent targets QQ Bot
-- **THEN** the rendering step resolves the delivery into a QQ Bot-supported text, link, or provider-supported structured representation according to the active QQ Bot provider profile
-- **AND** transport execution does not require shared layers to special-case QQ Bot outside the provider contract
+#### Scenario: QQ Bot delivery remains markdown-first with explicit update limits
+- **WHEN** a QQ Bot-targeted typed delivery requests markdown, keyboard, or richer completion output
+- **THEN** the rendering step uses the QQ Bot markdown or keyboard path when the current reply target supports it
+- **AND** falls back explicitly when the request requires unsupported mutable-update behavior
 
 ### Requirement: Delivery fallback metadata SHALL reflect rendering-profile decisions
 

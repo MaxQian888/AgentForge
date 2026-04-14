@@ -170,6 +170,80 @@ func TestAutomationEngineServiceExecutesNotificationIMAndPluginActions(t *testin
 	}
 }
 
+func TestAutomationEngineServiceSendIMMessageUsesConfiguredChannelResolver(t *testing.T) {
+	projectID := uuid.New()
+	taskID := uuid.New()
+	rule := &model.AutomationRule{
+		ID:         uuid.New(),
+		ProjectID:  projectID,
+		Enabled:    true,
+		EventType:  model.AutomationEventTaskStatusChanged,
+		Conditions: `[]`,
+		Actions:    `[{"type":"send_im_message","config":{"text":"{{task.title}} done"}}]`,
+	}
+	logs := &stubAutomationLogRepo{}
+	tasks := &stubAutomationTaskRepo{task: &model.Task{ID: taskID, ProjectID: projectID, Title: "Ship", Status: model.TaskStatusDone}}
+	im := &stubAutomationIM{}
+	engine := NewAutomationEngineService(&stubAutomationRuleRepo{rules: []*model.AutomationRule{rule}}, logs, tasks, nil, nil, im, nil)
+	engine.SetIMChannelResolver(&stubIMEventChannelResolver{
+		channels: []*model.IMChannel{{
+			Platform:  "slack",
+			Name:      "Automation",
+			ChannelID: "C-automation",
+			Events:    []string{model.AutomationEventTaskStatusChanged},
+			Active:    true,
+		}},
+	})
+
+	if err := engine.EvaluateRules(context.Background(), AutomationEvent{
+		EventType: model.AutomationEventTaskStatusChanged,
+		ProjectID: projectID,
+		TaskID:    &taskID,
+		Task:      tasks.task,
+	}); err != nil {
+		t.Fatalf("EvaluateRules() error = %v", err)
+	}
+	if im.sent == nil {
+		t.Fatal("expected automation IM send request")
+	}
+	if im.sent.Platform != "slack" || im.sent.ChannelID != "C-automation" || im.sent.Text != "Ship done" {
+		t.Fatalf("im send = %+v", im.sent)
+	}
+}
+
+func TestAutomationEngineServiceSendIMMessageFailsExplicitlyWithoutUsableRoute(t *testing.T) {
+	projectID := uuid.New()
+	taskID := uuid.New()
+	rule := &model.AutomationRule{
+		ID:         uuid.New(),
+		ProjectID:  projectID,
+		Enabled:    true,
+		EventType:  model.AutomationEventTaskStatusChanged,
+		Conditions: `[]`,
+		Actions:    `[{"type":"send_im_message","config":{"text":"{{task.title}} done"}}]`,
+	}
+	logs := &stubAutomationLogRepo{}
+	tasks := &stubAutomationTaskRepo{task: &model.Task{ID: taskID, ProjectID: projectID, Title: "Ship", Status: model.TaskStatusDone}}
+	im := &stubAutomationIM{}
+	engine := NewAutomationEngineService(&stubAutomationRuleRepo{rules: []*model.AutomationRule{rule}}, logs, tasks, nil, nil, im, nil)
+	engine.SetIMChannelResolver(&stubIMEventChannelResolver{})
+
+	if err := engine.EvaluateRules(context.Background(), AutomationEvent{
+		EventType: model.AutomationEventTaskStatusChanged,
+		ProjectID: projectID,
+		TaskID:    &taskID,
+		Task:      tasks.task,
+	}); err != nil {
+		t.Fatalf("EvaluateRules() error = %v", err)
+	}
+	if im.sent != nil {
+		t.Fatalf("unexpected IM send = %+v", im.sent)
+	}
+	if len(logs.entries) != 1 || logs.entries[0].Status != model.AutomationLogStatusFailed {
+		t.Fatalf("logs = %+v", logs.entries)
+	}
+}
+
 func TestAutomationEngineServiceSupportsAssignSubtaskAndCustomField(t *testing.T) {
 	projectID := uuid.New()
 	taskID := uuid.New()

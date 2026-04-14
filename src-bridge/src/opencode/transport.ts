@@ -10,6 +10,10 @@ interface OpenCodeProviderResponse {
   connected?: unknown[];
 }
 
+interface OpenCodeProviderAuthResponse {
+  [providerId: string]: unknown;
+}
+
 interface OpenCodeConfigProvidersResponse {
   default?: Record<string, string>;
   providers?: unknown[];
@@ -22,6 +26,7 @@ interface OpenCodeSessionResponse {
 interface OpenCodeNamedEntry {
   id?: string;
   name?: string;
+  type?: string;
 }
 
 export interface OpenCodeProviderCatalog {
@@ -29,6 +34,7 @@ export interface OpenCodeProviderCatalog {
   availableProviders: string[];
   defaultModels: Record<string, string>;
   providerModels: Record<string, string[]>;
+  authMethods: Record<string, string[]>;
 }
 
 export interface OpenCodeReadinessSelection {
@@ -47,9 +53,25 @@ export interface OpenCodeSession {
   id: string;
 }
 
+export interface OpenCodeExecuteCapabilities {
+  attachments: boolean;
+  env: boolean;
+  web_search: boolean;
+  rollback: boolean;
+}
+
 export interface CreateOpenCodeSessionInput {
   title?: string;
   parentID?: string;
+  provider?: string;
+  model?: string;
+  env?: Record<string, string>;
+  web_search?: boolean;
+}
+
+export interface OpenCodePromptPart {
+  type: string;
+  [key: string]: unknown;
 }
 
 export interface OpenCodePromptAsyncInput {
@@ -57,6 +79,7 @@ export interface OpenCodePromptAsyncInput {
   prompt: string;
   provider: string;
   model?: string;
+  parts?: OpenCodePromptPart[];
 }
 
 export interface OpenCodeServerEvent extends Record<string, unknown> {
@@ -84,6 +107,15 @@ export class OpenCodeTransport {
 
   get serverUrl(): string | undefined {
     return this.config.serverUrl;
+  }
+
+  getExecuteCapabilities(): OpenCodeExecuteCapabilities {
+    return {
+      attachments: true,
+      env: true,
+      web_search: true,
+      rollback: true,
+    };
   }
 
   async getHealth(): Promise<{ healthy: boolean; version?: string }> {
@@ -123,6 +155,7 @@ export class OpenCodeTransport {
 
     const providerBody = (await providerResponse.json()) as OpenCodeProviderResponse;
     const configBody = (await configResponse.json()) as OpenCodeConfigProvidersResponse;
+    const authMethods = await this.getProviderAuthMethods();
 
     const availableProviders = extractProviderIDs(providerBody.all);
     const connectedProviders = extractStringArray(providerBody.connected);
@@ -133,7 +166,61 @@ export class OpenCodeTransport {
       availableProviders,
       defaultModels: isStringRecord(configBody.default) ? configBody.default : {},
       providerModels,
+      authMethods,
     };
+  }
+
+  async getProviderAuthMethods(): Promise<Record<string, string[]>> {
+    const response = await this.request("/provider/auth");
+    if (response.status === 401 || response.status === 403) {
+      throw new Error("OpenCode server authentication failed");
+    }
+    if (response.status === 404 || response.status === 405 || response.status === 501) {
+      return {};
+    }
+    if (!response.ok) {
+      throw new Error(`OpenCode provider authentication discovery failed with status ${response.status}`);
+    }
+
+    const body = (await response.json()) as OpenCodeProviderAuthResponse;
+    if (!body || typeof body !== "object") {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(body).map(([providerId, methods]) => [
+        providerId,
+        extractNamedEntries(methods).map((value) => value.toLowerCase()),
+      ]),
+    );
+  }
+
+  async startProviderOAuth(
+    provider: string,
+    payload: Record<string, unknown> = {},
+  ): Promise<unknown> {
+    const response = await this.request(`/provider/${provider}/oauth/authorize`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    return this.readJsonResponse(
+      response,
+      `OpenCode provider ${provider} oauth authorize failed`,
+    );
+  }
+
+  async completeProviderOAuth(
+    provider: string,
+    payload: Record<string, unknown>,
+  ): Promise<unknown> {
+    const response = await this.request(`/provider/${provider}/oauth/callback`, {
+      method: "POST",
+      body: JSON.stringify(payload),
+    });
+    return this.readJsonResponse(
+      response,
+      `OpenCode provider ${provider} oauth callback failed`,
+    );
   }
 
   async checkReadiness(
@@ -243,12 +330,16 @@ export class OpenCodeTransport {
       method: "POST",
       body: JSON.stringify({
         model: input.model,
-        parts: [
-          {
-            type: "text",
-            text: input.prompt,
-          },
-        ],
+        provider: input.provider,
+        parts:
+          input.parts && input.parts.length > 0
+            ? input.parts
+            : [
+                {
+                  type: "text",
+                  text: input.prompt,
+                },
+              ],
       }),
     });
     if (response.status === 401 || response.status === 403) {
@@ -327,6 +418,23 @@ export class OpenCodeTransport {
       }),
     });
     return this.readJsonResponse(response, "OpenCode session command failed");
+  }
+
+  async executeShell(
+    sessionId: string,
+    command: string,
+    agent?: string,
+    model?: string,
+  ): Promise<unknown> {
+    const response = await this.request(`/session/${sessionId}/shell`, {
+      method: "POST",
+      body: JSON.stringify({
+        agent: agent ?? "general",
+        command,
+        model,
+      }),
+    });
+    return this.readJsonResponse(response, "OpenCode session shell command failed");
   }
 
   async respondToPermission(
@@ -590,6 +698,8 @@ function extractNamedEntries(input: unknown): string[] {
         ? namedEntry.id
         : typeof namedEntry.name === "string"
           ? namedEntry.name
+          : typeof namedEntry.type === "string"
+            ? namedEntry.type
           : undefined;
     })
     .filter((value): value is string => Boolean(value));

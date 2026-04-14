@@ -1,6 +1,6 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { Plus, Users, Trash2, Search } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -27,8 +27,16 @@ import {
   TableRow,
 } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
-import type { TeamMember } from "@/lib/dashboard/summary";
+import {
+  buildTeamAttentionGroups,
+  getQuickLifecycleLabel,
+  getQuickLifecycleTargetStatus,
+  getTeamMemberAttentionCategories,
+  type TeamAttentionCategory,
+  type TeamMember,
+} from "@/lib/dashboard/summary";
 import type {
+  BulkUpdateMembersResponse,
   CreateMemberInput,
   UpdateMemberInput,
 } from "@/lib/stores/member-store";
@@ -49,11 +57,18 @@ interface TeamManagementProps {
   loading: boolean;
   error: string | null;
   availableRoles: RoleManifest[];
+  bulkUpdatePending?: boolean;
+  bulkUpdateResult?: BulkUpdateMembersResponse | null;
   onRetry: () => void;
   onProjectChange: (projectId: string) => void;
   onCreateMember: (input: CreateMemberInput) => Promise<void>;
   onUpdateMember: (memberId: string, input: UpdateMemberInput) => Promise<void>;
   onDeleteMember?: (memberId: string) => Promise<void>;
+  onBulkUpdateMembers?: (
+    memberIds: string[],
+    status: MemberStatus,
+  ) => Promise<BulkUpdateMembersResponse>;
+  onClearBulkUpdateResult?: () => void;
 }
 
 interface MemberFormState {
@@ -306,11 +321,15 @@ export function TeamManagement({
   loading,
   error,
   availableRoles,
+  bulkUpdatePending = false,
+  bulkUpdateResult = null,
   onRetry,
   onProjectChange,
   onCreateMember,
   onUpdateMember,
   onDeleteMember,
+  onBulkUpdateMembers,
+  onClearBulkUpdateResult,
 }: TeamManagementProps) {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] = useState<MemberFormState>(() =>
@@ -325,6 +344,15 @@ export function TeamManagement({
   const [searchQuery, setSearchQuery] = useState("");
   const [typeFilter, setTypeFilter] = useState("all");
   const [statusFilter, setStatusFilter] = useState("all");
+  const [attentionFilter, setAttentionFilter] = useState<
+    "all" | TeamAttentionCategory
+  >("all");
+  const [selectedMemberIds, setSelectedMemberIds] = useState<string[]>([]);
+  const [pendingMemberIds, setPendingMemberIds] = useState<string[]>([]);
+  const [quickActionError, setQuickActionError] = useState<string | null>(null);
+  const [localBulkUpdateResult, setLocalBulkUpdateResult] =
+    useState<BulkUpdateMembersResponse | null>(bulkUpdateResult);
+  const previousProjectIdRef = useRef<string | null>(selectedProjectId);
 
   const selectedProjectName = useMemo(
     () =>
@@ -341,9 +369,36 @@ export function TeamManagement({
     () => members.find((member) => member.id === deletingMemberId) ?? null,
     [deletingMemberId, members],
   );
+  const attentionGroups = useMemo(
+    () => buildTeamAttentionGroups(members),
+    [members],
+  );
+
+  useEffect(() => {
+    if (previousProjectIdRef.current === selectedProjectId) {
+      return;
+    }
+    previousProjectIdRef.current = selectedProjectId;
+    setAttentionFilter("all");
+    setSelectedMemberIds([]);
+    setPendingMemberIds([]);
+    setQuickActionError(null);
+    setLocalBulkUpdateResult(null);
+    onClearBulkUpdateResult?.();
+  }, [selectedProjectId, onClearBulkUpdateResult]);
+
+  useEffect(() => {
+    setLocalBulkUpdateResult(bulkUpdateResult);
+  }, [bulkUpdateResult]);
 
   const filteredMembers = useMemo(() => {
     return members.filter((member) => {
+      if (attentionFilter !== "all") {
+        const categories = getTeamMemberAttentionCategories(member);
+        if (!categories.includes(attentionFilter)) {
+          return false;
+        }
+      }
       if (searchQuery) {
         const q = searchQuery.toLowerCase();
         const matchesSearch =
@@ -356,7 +411,7 @@ export function TeamManagement({
       if (statusFilter !== "all" && member.status !== statusFilter) return false;
       return true;
     });
-  }, [members, searchQuery, typeFilter, statusFilter]);
+  }, [attentionFilter, members, searchQuery, typeFilter, statusFilter]);
 
   const openMemberEditor = (
     member: TeamMember,
@@ -383,6 +438,44 @@ export function TeamManagement({
     setupRequiredFields(member).some((field) =>
       ["runtime", "provider", "model"].includes(field)
     );
+
+  const handleAttentionFilter = (nextFilter: TeamAttentionCategory) => {
+    setSearchQuery("");
+    setTypeFilter("all");
+    setStatusFilter("all");
+    setAttentionFilter(nextFilter);
+    setSelectedMemberIds([]);
+    setQuickActionError(null);
+  };
+
+  const handleClearAttentionFilter = () => {
+    setAttentionFilter("all");
+    setSelectedMemberIds([]);
+  };
+
+  const toggleMemberSelection = (memberId: string) => {
+    setSelectedMemberIds((current) =>
+      current.includes(memberId)
+        ? current.filter((id) => id !== memberId)
+        : [...current, memberId]
+    );
+  };
+
+  const toggleAllVisibleMembers = () => {
+    const visibleIds = filteredMembers.map((member) => member.id);
+    setSelectedMemberIds((current) => {
+      const allVisibleSelected =
+        visibleIds.length > 0 && visibleIds.every((memberId) => current.includes(memberId));
+      if (allVisibleSelected) {
+        return current.filter((memberId) => !visibleIds.includes(memberId));
+      }
+      const next = new Set(current);
+      for (const memberId of visibleIds) {
+        next.add(memberId);
+      }
+      return Array.from(next);
+    });
+  };
 
   const handleCreateMember = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
@@ -433,6 +526,36 @@ export function TeamManagement({
     if (!deletingMemberId || !onDeleteMember) return;
     await onDeleteMember(deletingMemberId);
     setDeletingMemberId(null);
+  };
+
+  const handleBulkStatusUpdate = async (status: MemberStatus) => {
+    if (!onBulkUpdateMembers || selectedMemberIds.length === 0) return;
+    setQuickActionError(null);
+    const result = await onBulkUpdateMembers(selectedMemberIds, status);
+    setLocalBulkUpdateResult(result);
+    if (result.results.some((item) => item.success)) {
+      setSelectedMemberIds([]);
+    }
+  };
+
+  const handleQuickLifecycleAction = async (member: TeamMember) => {
+    const nextStatus = getQuickLifecycleTargetStatus(member);
+    if (!nextStatus) return;
+    if (pendingMemberIds.includes(member.id)) return;
+
+    setPendingMemberIds((current) => [...current, member.id]);
+    setQuickActionError(null);
+    try {
+      await onUpdateMember(member.id, { status: nextStatus });
+    } catch (error) {
+      setQuickActionError(
+        error instanceof Error ? error.message : "Failed to update member"
+      );
+    } finally {
+      setPendingMemberIds((current) =>
+        current.filter((memberId) => memberId !== member.id)
+      );
+    }
   };
 
   if (loading) {
@@ -640,6 +763,71 @@ export function TeamManagement({
         </Card>
       ) : null}
 
+      {attentionGroups.length > 0 ? (
+        <Card>
+          <CardHeader>
+            <CardTitle>Needs Attention</CardTitle>
+          </CardHeader>
+          <CardContent className="flex flex-wrap items-center gap-2">
+            {attentionGroups.map((group) => (
+              <Button
+                key={group.id}
+                type="button"
+                variant={attentionFilter === group.id ? "default" : "outline"}
+                onClick={() => handleAttentionFilter(group.id)}
+              >
+                {group.label} ({group.count})
+              </Button>
+            ))}
+            {attentionFilter !== "all" ? (
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={handleClearAttentionFilter}
+              >
+                Clear attention filter
+              </Button>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {localBulkUpdateResult ? (
+        <Card>
+          <CardContent className="flex flex-col gap-2 py-4">
+            <p className="text-sm font-medium">
+              Bulk update complete:{" "}
+              {localBulkUpdateResult.results.filter((item) => item.success).length} updated,{" "}
+              {localBulkUpdateResult.results.filter((item) => !item.success).length} failed.
+            </p>
+            {localBulkUpdateResult.results.some((item) => !item.success) ? (
+              <ul className="space-y-1 text-sm text-muted-foreground">
+                {localBulkUpdateResult.results
+                  .filter((item) => !item.success)
+                  .map((item) => {
+                    const memberName =
+                      members.find((member) => member.id === item.memberId)?.name ??
+                      item.memberId;
+                    return (
+                      <li key={item.memberId}>
+                        {memberName}: {item.error ?? "Failed to update"}
+                      </li>
+                    );
+                  })}
+              </ul>
+            ) : null}
+          </CardContent>
+        </Card>
+      ) : null}
+
+      {quickActionError ? (
+        <Card>
+          <CardContent className="py-4 text-sm text-destructive">
+            {quickActionError}
+          </CardContent>
+        </Card>
+      ) : null}
+
       {members.length === 0 ? (
         <Card>
           <CardContent className="flex flex-col items-center gap-4 py-12 text-center">
@@ -658,7 +846,41 @@ export function TeamManagement({
       ) : (
         <Card>
           <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
-            <CardTitle>Unified Roster</CardTitle>
+            <div className="flex flex-col gap-2">
+              <CardTitle>Unified Roster</CardTitle>
+              {selectedMemberIds.length > 0 && onBulkUpdateMembers ? (
+                <div className="flex flex-wrap items-center gap-2">
+                  <Badge variant="outline">{selectedMemberIds.length} selected</Badge>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={bulkUpdatePending}
+                    onClick={() => void handleBulkStatusUpdate("active")}
+                  >
+                    Mark selected active
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={bulkUpdatePending}
+                    onClick={() => void handleBulkStatusUpdate("inactive")}
+                  >
+                    Mark selected inactive
+                  </Button>
+                  <Button
+                    type="button"
+                    size="sm"
+                    variant="outline"
+                    disabled={bulkUpdatePending}
+                    onClick={() => void handleBulkStatusUpdate("suspended")}
+                  >
+                    Mark selected suspended
+                  </Button>
+                </div>
+              ) : null}
+            </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
                 <Search className="absolute left-2.5 top-2.5 size-4 text-muted-foreground" />
@@ -696,6 +918,19 @@ export function TeamManagement({
             <Table>
               <TableHeader>
                 <TableRow>
+                  <TableHead>
+                    <input
+                      type="checkbox"
+                      aria-label="Select all visible members"
+                      checked={
+                        filteredMembers.length > 0 &&
+                        filteredMembers.every((member) =>
+                          selectedMemberIds.includes(member.id)
+                        )
+                      }
+                      onChange={toggleAllVisibleMembers}
+                    />
+                  </TableHead>
                   <TableHead>Member</TableHead>
                   <TableHead>Type</TableHead>
                   <TableHead>Role</TableHead>
@@ -709,6 +944,14 @@ export function TeamManagement({
               <TableBody>
                 {filteredMembers.map((member) => (
                   <TableRow key={member.id}>
+                    <TableCell>
+                      <input
+                        type="checkbox"
+                        aria-label={`Select ${member.name}`}
+                        checked={selectedMemberIds.includes(member.id)}
+                        onChange={() => toggleMemberSelection(member.id)}
+                      />
+                    </TableCell>
                     <TableCell>
                       <div className="flex flex-col gap-1">
                         <Link
@@ -843,6 +1086,24 @@ export function TeamManagement({
                     </TableCell>
                     <TableCell className="text-right">
                       <div className="flex items-center justify-end gap-1">
+                        {getQuickLifecycleTargetStatus(member) ? (
+                          <Button
+                            type="button"
+                            size="sm"
+                            variant="ghost"
+                            disabled={pendingMemberIds.includes(member.id)}
+                            aria-label={
+                              pendingMemberIds.includes(member.id)
+                                ? `Updating ${member.name}...`
+                                : `${getQuickLifecycleLabel(member)} ${member.name}`
+                            }
+                            onClick={() => void handleQuickLifecycleAction(member)}
+                          >
+                            {pendingMemberIds.includes(member.id)
+                              ? "Updating..."
+                              : getQuickLifecycleLabel(member)}
+                          </Button>
+                        ) : null}
                         <Button
                           type="button"
                           size="sm"
@@ -871,7 +1132,7 @@ export function TeamManagement({
                 ))}
                 {filteredMembers.length === 0 && members.length > 0 && (
                   <TableRow>
-                    <TableCell colSpan={8} className="py-8 text-center text-muted-foreground">
+                    <TableCell colSpan={9} className="py-8 text-center text-muted-foreground">
                       No members match the current filters.
                     </TableCell>
                   </TableRow>

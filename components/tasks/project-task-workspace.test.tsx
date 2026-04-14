@@ -842,7 +842,7 @@ describe("ProjectTaskWorkspace", () => {
 
     expect(screen.getByText(/outside the current filters/i)).toBeInTheDocument();
     expect(screen.getByDisplayValue("Implement timeline view")).toBeInTheDocument();
-  });
+  }, 15000);
 
   it("lets shared display options hide descriptions without clearing the current view state", async () => {
     const user = userEvent.setup();

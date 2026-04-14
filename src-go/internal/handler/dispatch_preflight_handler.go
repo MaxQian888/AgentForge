@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/google/uuid"
@@ -25,6 +26,10 @@ type dispatchPreflightPoolStatsProvider interface {
 	PoolStats(ctx context.Context) model.AgentPoolStatsDTO
 }
 
+type dispatchPreflightRunReader interface {
+	GetByTask(ctx context.Context, taskID uuid.UUID) ([]*model.AgentRun, error)
+}
+
 type DispatchPreflightBudgetState struct {
 	Scope   string `json:"scope"`
 	Message string `json:"message"`
@@ -38,6 +43,13 @@ type PreflightResponse struct {
 	PoolAvailable       *int                          `json:"poolAvailable,omitempty"`
 	PoolQueued          *int                          `json:"poolQueued,omitempty"`
 	DispatchOutcomeHint string                        `json:"dispatchOutcomeHint"`
+	GuardrailType       string                        `json:"guardrailType,omitempty"`
+	GuardrailScope      string                        `json:"guardrailScope,omitempty"`
+	Reason              string                        `json:"reason,omitempty"`
+	Runtime             string                        `json:"runtime,omitempty"`
+	Provider            string                        `json:"provider,omitempty"`
+	Model               string                        `json:"model,omitempty"`
+	RoleID              string                        `json:"roleId,omitempty"`
 }
 
 type DispatchPreflightHandler struct {
@@ -45,6 +57,7 @@ type DispatchPreflightHandler struct {
 	members dispatchPreflightMemberReader
 	budget  service.DispatchBudgetChecker
 	pool    dispatchPreflightPoolStatsProvider
+	runs    dispatchPreflightRunReader
 }
 
 func NewDispatchPreflightHandler(
@@ -59,6 +72,11 @@ func NewDispatchPreflightHandler(
 		budget:  budget,
 		pool:    pool,
 	}
+}
+
+func (h *DispatchPreflightHandler) WithRunReader(runs dispatchPreflightRunReader) *DispatchPreflightHandler {
+	h.runs = runs
+	return h
 }
 
 func (h *DispatchPreflightHandler) Get(c echo.Context) error {
@@ -81,57 +99,53 @@ func (h *DispatchPreflightHandler) Get(c echo.Context) error {
 		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "member not found"})
 	}
 
-	if member.Type != model.MemberTypeAgent {
-		return c.JSON(http.StatusOK, PreflightResponse{
-			AdmissionLikely:     false,
-			DispatchOutcomeHint: model.DispatchStatusSkipped,
-		})
-	}
-	if !member.IsActive {
-		return c.JSON(http.StatusOK, PreflightResponse{
-			AdmissionLikely:     false,
-			DispatchOutcomeHint: model.DispatchStatusBlocked,
-			BudgetBlocked: &DispatchPreflightBudgetState{
-				Scope:   "member",
-				Message: "dispatch target is not an active agent member",
-			},
-		})
+	budgetUSD := 0.0
+	if rawBudget := strings.TrimSpace(c.QueryParam("budgetUsd")); rawBudget != "" {
+		parsedBudget, parseErr := strconv.ParseFloat(rawBudget, 64)
+		if parseErr != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "budgetUsd must be a valid number"})
+		}
+		budgetUSD = parsedBudget
 	}
 
-	response := PreflightResponse{}
-	if h.budget != nil {
-		budgetResult, budgetErr := h.budget.CheckBudget(c.Request().Context(), task.ProjectID, task.SprintID, task.BudgetUsd)
-		if budgetErr == nil && budgetResult != nil {
-			scope := budgetResult.Scope
-			if scope == "" {
-				scope = inferPreflightBudgetScope(budgetResult.Reason + " " + budgetResult.WarningMessage)
-			}
-			if !budgetResult.Allowed {
-				response.BudgetBlocked = &DispatchPreflightBudgetState{
-					Scope:   scope,
-					Message: budgetResult.Reason,
-				}
-				response.DispatchOutcomeHint = model.DispatchStatusBlocked
-				return c.JSON(http.StatusOK, response)
-			}
-			if budgetResult.Warning {
-				response.BudgetWarning = &DispatchPreflightBudgetState{
-					Scope:   scope,
-					Message: budgetResult.WarningMessage,
-				}
-			}
+	input := service.DispatchSpawnInput{
+		TaskID:    task.ID,
+		MemberID:  &member.ID,
+		Runtime:   strings.TrimSpace(c.QueryParam("runtime")),
+		Provider:  strings.TrimSpace(c.QueryParam("provider")),
+		Model:     strings.TrimSpace(c.QueryParam("model")),
+		RoleID:    strings.TrimSpace(c.QueryParam("roleId")),
+		BudgetUSD: budgetUSD,
+	}
+
+	result := service.EvaluateDispatchPreflight(c.Request().Context(), task, member, input, h.budget, h.runs, h.pool)
+	response := PreflightResponse{
+		AdmissionLikely:     result.AdmissionLikely,
+		DispatchOutcomeHint: result.Outcome.Status,
+		GuardrailType:       result.Outcome.GuardrailType,
+		GuardrailScope:      result.Outcome.GuardrailScope,
+		Reason:              result.Outcome.Reason,
+		Runtime:             result.Outcome.Runtime,
+		Provider:            result.Outcome.Provider,
+		Model:               result.Outcome.Model,
+		RoleID:              result.Outcome.RoleID,
+	}
+	if result.Outcome.BudgetWarning != nil {
+		response.BudgetWarning = &DispatchPreflightBudgetState{
+			Scope:   result.Outcome.BudgetWarning.Scope,
+			Message: result.Outcome.BudgetWarning.Message,
 		}
 	}
-
-	stats := h.pool.PoolStats(c.Request().Context())
-	response.PoolActive = intPtr(stats.Active)
-	response.PoolAvailable = intPtr(stats.Available)
-	response.PoolQueued = intPtr(stats.Queued)
-	response.AdmissionLikely = stats.Available > 0
-	if response.AdmissionLikely {
-		response.DispatchOutcomeHint = model.DispatchStatusStarted
-	} else {
-		response.DispatchOutcomeHint = model.DispatchStatusQueued
+	if result.Outcome.Status == model.DispatchStatusBlocked && result.Outcome.GuardrailType == model.DispatchGuardrailTypeBudget {
+		response.BudgetBlocked = &DispatchPreflightBudgetState{
+			Scope:   result.Outcome.GuardrailScope,
+			Message: result.Outcome.Reason,
+		}
+	}
+	if result.PoolStats != nil && (result.Outcome.Status == model.DispatchStatusStarted || result.Outcome.Status == model.DispatchStatusQueued) {
+		response.PoolActive = intPtr(result.PoolStats.Active)
+		response.PoolAvailable = intPtr(result.PoolStats.Available)
+		response.PoolQueued = intPtr(result.PoolStats.Queued)
 	}
 
 	return c.JSON(http.StatusOK, response)

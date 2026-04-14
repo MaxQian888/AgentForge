@@ -7,6 +7,7 @@ jest.mock("next-intl", () => ({
       "jobTable.colNextRun": "Next Run",
       "jobTable.noJobs": "No scheduler jobs.",
       "jobTable.disabled": "Disabled",
+      "jobTable.paused": "Paused",
       "jobTable.na": "N/A",
       "jobTable.notScheduled": "Not scheduled",
     };
@@ -55,7 +56,7 @@ describe("SchedulerJobTable", () => {
     expect(screen.getByText("No scheduler jobs.")).toBeInTheDocument();
   });
 
-  it("renders jobs, highlights the selected row, and notifies selection", async () => {
+  it("renders truthful paused and active statuses, highlights the selected row, and notifies selection", async () => {
     const user = userEvent.setup();
     const onSelectJob = jest.fn();
 
@@ -70,11 +71,41 @@ describe("SchedulerJobTable", () => {
             scope: "project",
             executionMode: "single",
             overlapPolicy: "skip",
+            controlState: "paused",
             lastRunStatus: "failed",
             nextRunAt: undefined,
             lastRunSummary: "",
             lastError: "",
             config: "{}",
+            supportedActions: [],
+            upcomingRuns: [],
+            createdAt: "",
+            updatedAt: "",
+          },
+          {
+            jobKey: "scheduler.sync",
+            name: "Sync",
+            schedule: "0 * * * *",
+            enabled: true,
+            scope: "system",
+            executionMode: "single",
+            overlapPolicy: "skip",
+            controlState: "active",
+            activeRun: {
+              runId: "run-1",
+              triggerSource: "manual",
+              status: "running",
+              startedAt: "2026-03-30T11:59:00.000Z",
+              summary: "Syncing",
+              errorMessage: "",
+            },
+            lastRunStatus: "succeeded",
+            nextRunAt: "2026-03-30T13:00:00.000Z",
+            lastRunSummary: "",
+            lastError: "",
+            config: "{}",
+            supportedActions: [],
+            upcomingRuns: [],
             createdAt: "",
             updatedAt: "",
           },
@@ -87,8 +118,8 @@ describe("SchedulerJobTable", () => {
 
     expect(screen.getByText("Cleanup")).toBeInTheDocument();
     expect(screen.getByText("scheduler.cleanup")).toBeInTheDocument();
-    expect(screen.getByText("*/5 * * * *")).toBeInTheDocument();
-    expect(screen.getByText("Disabled")).toBeInTheDocument();
+    expect(screen.getByText("Paused")).toBeInTheDocument();
+    expect(screen.getByText("running")).toBeInTheDocument();
     expect(screen.getByText("N/A")).toBeInTheDocument();
     expect(container.querySelector('tr[data-state="selected"]')).toBeInTheDocument();
 

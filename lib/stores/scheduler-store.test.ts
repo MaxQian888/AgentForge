@@ -56,6 +56,18 @@ describe("useSchedulerStore", () => {
         lastRunSummary: "checked 12 tasks",
         lastError: "",
         config: "{}",
+        controlState: "active",
+        activeRun: {
+          runId: "run-active",
+          triggerSource: "manual",
+          status: "running",
+          startedAt: "2026-03-25T10:00:00.000Z",
+          summary: "",
+          errorMessage: "",
+        },
+        supportedActions: [{ action: "pause", enabled: true }],
+        configMetadata: { editable: true, fields: [] },
+        upcomingRuns: [{ runAt: "2026-03-25T10:05:00.000Z" }],
         createdAt: "2026-03-25T10:00:00.000Z",
         updatedAt: "2026-03-25T10:00:00.000Z",
       },
@@ -71,6 +83,10 @@ describe("useSchedulerStore", () => {
         lastRunSummary: "bridge offline",
         lastError: "bridge offline",
         config: "{}",
+        controlState: "paused",
+        supportedActions: [{ action: "resume", enabled: true }],
+        configMetadata: { editable: true, fields: [] },
+        upcomingRuns: [],
         createdAt: "2026-03-25T10:00:00.000Z",
         updatedAt: "2026-03-25T10:00:00.000Z",
       },
@@ -96,7 +112,10 @@ describe("useSchedulerStore", () => {
         totalJobs: 2,
         enabledJobs: 1,
         disabledJobs: 1,
+        pausedJobs: 1,
         failedJobs: 1,
+        activeRuns: 1,
+        queueDepth: 1,
       },
     });
   });
@@ -261,6 +280,23 @@ describe("useSchedulerStore", () => {
     ]);
   });
 
+  it("fetches filtered scheduler run history using query parameters", async () => {
+    mockGet.mockResolvedValueOnce({ data: [] });
+
+    await useSchedulerStore.getState().fetchRuns("task-progress-detector", {
+      status: "failed",
+      triggerSource: "manual",
+      since: "2026-03-25T09:00:00.000Z",
+      before: "2026-03-25T12:00:00.000Z",
+      limit: 5,
+    });
+
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/v1/scheduler/jobs/task-progress-detector/runs?status=failed&triggerSource=manual&since=2026-03-25T09%3A00%3A00.000Z&before=2026-03-25T12%3A00%3A00.000Z&limit=5",
+      { token: "test-token" },
+    );
+  });
+
   it("stores run-history failures", async () => {
     mockGet.mockRejectedValueOnce(new Error("boom"));
 
@@ -276,14 +312,19 @@ describe("useSchedulerStore", () => {
       .mockResolvedValueOnce({
         data: {
           totalJobs: 4,
-          enabledJobs: 3,
-          disabledJobs: 1,
-          failedJobs: 1,
-          activeRuns: 2,
-          totalRuns24h: 9,
-          failedRuns24h: 2,
-        },
-      })
+        enabledJobs: 3,
+        disabledJobs: 1,
+        pausedJobs: 1,
+        failedJobs: 1,
+        activeRuns: 2,
+        queueDepth: 2,
+        totalRuns24h: 9,
+        successfulRuns24h: 7,
+        failedRuns24h: 2,
+        averageDurationMs: 1500,
+        successRate24h: 77.7,
+      },
+    })
       .mockRejectedValueOnce(new Error("boom"));
 
     await useSchedulerStore.getState().fetchStats();
@@ -291,6 +332,7 @@ describe("useSchedulerStore", () => {
       expect.objectContaining({
         totalJobs: 4,
         activeRuns: 2,
+        successRate24h: 77.7,
       }),
     );
 
@@ -318,6 +360,9 @@ describe("useSchedulerStore", () => {
           lastRunSummary: "",
           lastError: "",
           config: "{}",
+          controlState: "active",
+          supportedActions: [],
+          upcomingRuns: [],
           createdAt: "2026-03-25T10:00:00.000Z",
           updatedAt: "2026-03-25T10:00:00.000Z",
         },
@@ -358,6 +403,9 @@ describe("useSchedulerStore", () => {
       lastRunSummary: "failed",
       lastError: "failed",
       config: "{}",
+      controlState: "active",
+      supportedActions: [],
+      upcomingRuns: [],
       createdAt: "2026-03-25T10:00:00.000Z",
       updatedAt: "2026-03-25T10:05:00.000Z",
     });
@@ -422,5 +470,181 @@ describe("useSchedulerStore", () => {
     expect(mockGet).not.toHaveBeenCalled();
     expect(mockPost).not.toHaveBeenCalled();
     expect(mockPut).not.toHaveBeenCalled();
+  });
+
+  it("uses dedicated pause, resume, cancel, and cleanup endpoints", async () => {
+    useSchedulerStore.setState({
+      jobs: [
+        {
+          jobKey: "task-progress-detector",
+          name: "Task progress detector",
+          scope: "system",
+          schedule: "*/5 * * * *",
+          enabled: true,
+          executionMode: "in_process",
+          overlapPolicy: "skip",
+          lastRunStatus: "running",
+          lastRunSummary: "",
+          lastError: "",
+          config: "{}",
+          controlState: "active",
+          supportedActions: [
+            { action: "pause", enabled: true },
+            { action: "resume", enabled: false, reason: "job is already active" },
+            { action: "cancel", enabled: true },
+            { action: "cleanup", enabled: true },
+          ],
+          activeRun: {
+            runId: "run-1",
+            triggerSource: "manual",
+            status: "running",
+            startedAt: "2026-03-25T10:00:00.000Z",
+            summary: "",
+            errorMessage: "",
+          },
+          configMetadata: { editable: true, fields: [] },
+          upcomingRuns: [],
+          createdAt: "2026-03-25T10:00:00.000Z",
+          updatedAt: "2026-03-25T10:00:00.000Z",
+        },
+      ],
+      runsByJobKey: { "task-progress-detector": [] },
+      draftSchedules: {},
+      stats: null,
+      loading: false,
+      actionJobKey: null,
+      selectedJobKey: "task-progress-detector",
+      error: null,
+    });
+
+    mockPost
+      .mockResolvedValueOnce({
+        data: {
+          jobKey: "task-progress-detector",
+          name: "Task progress detector",
+          scope: "system",
+          schedule: "*/5 * * * *",
+          enabled: false,
+          executionMode: "in_process",
+          overlapPolicy: "skip",
+          lastRunStatus: "running",
+          lastRunSummary: "",
+          lastError: "",
+          config: "{}",
+          controlState: "paused",
+          supportedActions: [{ action: "resume", enabled: true }],
+          configMetadata: { editable: true, fields: [] },
+          upcomingRuns: [],
+          createdAt: "2026-03-25T10:00:00.000Z",
+          updatedAt: "2026-03-25T10:05:00.000Z",
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          jobKey: "task-progress-detector",
+          name: "Task progress detector",
+          scope: "system",
+          schedule: "*/5 * * * *",
+          enabled: true,
+          executionMode: "in_process",
+          overlapPolicy: "skip",
+          lastRunStatus: "running",
+          lastRunSummary: "",
+          lastError: "",
+          config: "{}",
+          controlState: "active",
+          supportedActions: [{ action: "pause", enabled: true }],
+          configMetadata: { editable: true, fields: [] },
+          upcomingRuns: [],
+          createdAt: "2026-03-25T10:00:00.000Z",
+          updatedAt: "2026-03-25T10:06:00.000Z",
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          runId: "run-1",
+          jobKey: "task-progress-detector",
+          triggerSource: "manual",
+          status: "cancel_requested",
+          startedAt: "2026-03-25T10:00:00.000Z",
+          summary: "cancellation requested",
+          errorMessage: "",
+          metrics: "{}",
+          createdAt: "2026-03-25T10:00:00.000Z",
+          updatedAt: "2026-03-25T10:02:00.000Z",
+        },
+      })
+      .mockResolvedValueOnce({ data: { deleted: 2 } });
+    mockGet.mockResolvedValue({ data: [] });
+
+    await useSchedulerStore.getState().pauseJob("task-progress-detector");
+    await useSchedulerStore.getState().resumeJob("task-progress-detector");
+    await useSchedulerStore.getState().cancelJob("task-progress-detector");
+    await useSchedulerStore
+      .getState()
+      .cleanupRuns("task-progress-detector", { retainRecent: 10 });
+
+    expect(mockPost).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/scheduler/jobs/task-progress-detector/pause",
+      {},
+      { token: "test-token" },
+    );
+    expect(mockPost).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/scheduler/jobs/task-progress-detector/resume",
+      {},
+      { token: "test-token" },
+    );
+    expect(mockPost).toHaveBeenNthCalledWith(
+      3,
+      "/api/v1/scheduler/jobs/task-progress-detector/cancel",
+      {},
+      { token: "test-token" },
+    );
+    expect(mockPost).toHaveBeenNthCalledWith(
+      4,
+      "/api/v1/scheduler/jobs/task-progress-detector/runs/cleanup",
+      { retainRecent: 10 },
+      { token: "test-token" },
+    );
+  });
+
+  it("surfaces unsupported action reasons without calling the API", async () => {
+    useSchedulerStore.setState({
+      jobs: [
+        {
+          jobKey: "task-progress-detector",
+          name: "Task progress detector",
+          scope: "system",
+          schedule: "*/5 * * * *",
+          enabled: true,
+          executionMode: "in_process",
+          overlapPolicy: "skip",
+          lastRunStatus: "succeeded",
+          lastRunSummary: "",
+          lastError: "",
+          config: "{}",
+          controlState: "active",
+          supportedActions: [{ action: "resume", enabled: false, reason: "job is already active" }],
+          configMetadata: { editable: true, fields: [] },
+          upcomingRuns: [],
+          createdAt: "2026-03-25T10:00:00.000Z",
+          updatedAt: "2026-03-25T10:00:00.000Z",
+        },
+      ],
+      runsByJobKey: {},
+      draftSchedules: {},
+      stats: null,
+      loading: false,
+      actionJobKey: null,
+      selectedJobKey: null,
+      error: null,
+    });
+
+    await useSchedulerStore.getState().resumeJob("task-progress-detector");
+
+    expect(mockPost).not.toHaveBeenCalled();
+    expect(useSchedulerStore.getState().error).toBe("job is already active");
   });
 });

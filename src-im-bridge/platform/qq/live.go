@@ -202,12 +202,14 @@ func normalizeIncomingEvent(event incomingEvent) (*core.Message, error) {
 
 	userID := fmt.Sprintf("%d", event.UserID)
 	reply := &core.ReplyTarget{
-		Platform:  liveMetadata.Source,
-		ChatID:    chatID,
-		ChannelID: chatID,
-		MessageID: fmt.Sprintf("%d", event.MessageID),
-		UserID:    userID,
-		UseReply:  true,
+		Platform:       liveMetadata.Source,
+		ChatID:         chatID,
+		ChannelID:      chatID,
+		ConversationID: chatID,
+		MessageID:      fmt.Sprintf("%d", event.MessageID),
+		UserID:         userID,
+		UseReply:       true,
+		ProgressMode:   string(core.AsyncUpdateReply),
 		Metadata: map[string]string{
 			"message_type": strings.TrimSpace(event.MessageType),
 		},

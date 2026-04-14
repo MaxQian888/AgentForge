@@ -43,18 +43,25 @@ func RegisterTaskCommands(engine *core.Engine, apiClient *client.AgentForgeClien
 			handleTaskAI(ctx, p, msg, engine, scopedClient, subArgs)
 		case "move":
 			handleTaskMove(ctx, p, msg, scopedClient, subArgs)
+		case "delete":
+			handleTaskDelete(ctx, p, msg, scopedClient, subArgs)
 		default:
 			_ = p.Reply(ctx, msg.ReplyCtx, taskUsage)
 		}
 	})
 }
 
-func handleTaskCreate(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, title string) {
-	if title == "" {
-		_ = p.Reply(ctx, msg.ReplyCtx, "用法: /task create <标题>")
+func handleTaskCreate(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, raw string) {
+	input, err := parseTaskCreateInput(raw)
+	if err != nil {
+		_ = p.Reply(ctx, msg.ReplyCtx, err.Error())
 		return
 	}
-	task, err := c.CreateTask(ctx, title, "")
+	task, err := c.CreateTaskWithInput(ctx, client.CreateTaskInput{
+		Title:       input.Title,
+		Description: input.Description,
+		Priority:    input.Priority,
+	})
 	if err != nil {
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("创建失败: %v", err))
 		return
@@ -65,6 +72,49 @@ func handleTaskCreate(ctx context.Context, p core.Platform, msg *core.Message, c
 		return
 	}
 	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已创建任务 #%s: %s", shortID(task.ID), task.Title))
+}
+
+type taskCreateInput struct {
+	Title       string
+	Description string
+	Priority    string
+}
+
+func parseTaskCreateInput(raw string) (*taskCreateInput, error) {
+	tokens := strings.Fields(strings.TrimSpace(raw))
+	if len(tokens) == 0 {
+		return nil, fmt.Errorf("用法: /task create <标题> [--priority <级别>] [--description <描述>]")
+	}
+	input := &taskCreateInput{Priority: "medium"}
+	titleTokens := make([]string, 0, len(tokens))
+	for i := 0; i < len(tokens); i++ {
+		switch tokens[i] {
+		case "--priority":
+			if i+1 >= len(tokens) {
+				return nil, fmt.Errorf("缺少 priority 值。用法: /task create <标题> [--priority <级别>] [--description <描述>]")
+			}
+			input.Priority = strings.TrimSpace(tokens[i+1])
+			i++
+		case "--description":
+			if i+1 >= len(tokens) {
+				return nil, fmt.Errorf("缺少 description 值。用法: /task create <标题> [--priority <级别>] [--description <描述>]")
+			}
+			input.Description = strings.TrimSpace(strings.Join(tokens[i+1:], " "))
+			i = len(tokens)
+		default:
+			titleTokens = append(titleTokens, tokens[i])
+		}
+	}
+	input.Title = strings.TrimSpace(strings.Join(titleTokens, " "))
+	if input.Title == "" {
+		return nil, fmt.Errorf("用法: /task create <标题> [--priority <级别>] [--description <描述>]")
+	}
+	switch input.Priority {
+	case "critical", "high", "medium", "low":
+	default:
+		return nil, fmt.Errorf("priority 只支持 critical|high|medium|low")
+	}
+	return input, nil
 }
 
 func handleTaskList(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, filter string) {
@@ -106,6 +156,19 @@ func handleTaskStatus(ctx context.Context, p core.Platform, msg *core.Message, c
 	}
 	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("#%s [%s] %s\n优先级: %s\n负责人: %s\n花费: $%.2f / $%.2f",
 		shortID(task.ID), task.Status, task.Title, task.Priority, task.AssigneeName, task.SpentUsd, task.BudgetUsd))
+}
+
+func handleTaskDelete(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, taskID string) {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		_ = p.Reply(ctx, msg.ReplyCtx, "用法: /task delete <task-id>")
+		return
+	}
+	if err := c.DeleteTask(ctx, taskID); err != nil {
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("删除任务失败: %v", err))
+		return
+	}
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已删除任务 #%s", shortID(taskID)))
 }
 
 func handleTaskAssign(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, args string) {
@@ -161,6 +224,7 @@ func handleTaskDecomposeBridgeFirst(ctx context.Context, p core.Platform, msg *c
 
 	route := engine.ResolveCommandRoute("/task", "decompose")
 	available, routeErr := engine.BridgeCapabilityAvailable(ctx, route.Capability)
+	fallbackReason := "Bridge unavailable"
 	if available {
 		result, err := c.DecomposeTaskViaBridge(ctx, taskID, provider, model)
 		if err == nil {
@@ -173,12 +237,15 @@ func handleTaskDecomposeBridgeFirst(ctx context.Context, p core.Platform, msg *c
 			_ = p.Reply(ctx, msg.ReplyCtx, formatBridgeTaskDecomposition(result))
 			return
 		}
+		fallbackReason = describeBridgeFailure(err)
 		log.WithFields(log.Fields{
 			"component": "commands.task",
 			"taskId":    taskID,
 			"provider":  provider,
 			"model":     model,
 		}).WithError(err).Warn("Bridge task decomposition failed; attempting legacy fallback")
+	} else if routeErr != nil {
+		fallbackReason = describeBridgeFailure(routeErr)
 	}
 
 	legacyResult, legacyErr := c.DecomposeTask(ctx, taskID)
@@ -191,13 +258,10 @@ func handleTaskDecomposeBridgeFirst(ctx context.Context, p core.Platform, msg *c
 		})
 	}
 	if legacyErr != nil {
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("任务分解失败: %v\n未创建任何子任务，请稍后重试。", legacyErr))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("任务分解失败（%s，fallback 也失败）: %v\n未创建任何子任务，请稍后重试。", fallbackReason, legacyErr))
 		return
 	}
-	prefix := "Using fallback (Bridge unavailable)\n"
-	if routeErr == nil && available {
-		prefix = "Using fallback (Bridge request failed)\n"
-	}
+	prefix := fmt.Sprintf("Using fallback (%s)\n", fallbackReason)
 	log.WithFields(log.Fields{
 		"component": "commands.task",
 		"taskId":    taskID,
@@ -381,7 +445,7 @@ func handleTaskAIGenerate(ctx context.Context, p core.Platform, msg *core.Messag
 
 	result, err := c.GenerateTaskAI(ctx, trimmed, "", model)
 	if err != nil {
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("AI 鐢熸垚澶辫触: %v", err))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("AI 鐢熸垚澶辫触（%s）: %v", describeBridgeFailure(err), err))
 		return
 	}
 	_ = p.Reply(ctx, msg.ReplyCtx, result.Text)
@@ -411,7 +475,7 @@ func handleTaskAIClassify(ctx context.Context, p core.Platform, msg *core.Messag
 
 	result, err := c.ClassifyTaskAI(ctx, text, candidates)
 	if err != nil {
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("AI 鎰忓浘鍒嗙被澶辫触: %v", err))
+		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("AI 鎰忓浘鍒嗙被澶辫触（%s）: %v", describeBridgeFailure(err), err))
 		return
 	}
 	reply := fmt.Sprintf("intent=%s confidence=%.2f", result.Intent, result.Confidence)
@@ -434,8 +498,56 @@ func buildTaskCard(task *client.Task) *core.Card {
 		card.AddField("预算", fmt.Sprintf("$%.2f / $%.2f", task.SpentUsd, task.BudgetUsd))
 	}
 	card.AddPrimaryButton("分配给 Agent", "act:assign-agent:"+task.ID)
+	if strings.TrimSpace(task.ProjectID) != "" {
+		docAction := core.BuildActionReference("save-as-doc", task.ProjectID, map[string]string{
+			"body":  buildTaskMessageBody(task),
+			"title": task.Title,
+		})
+		followupTitle := strings.TrimSpace(task.Title)
+		if followupTitle == "" {
+			followupTitle = "IM Task"
+		} else {
+			followupTitle = "Follow up: " + followupTitle
+		}
+		createTaskAction := core.BuildActionReference("create-task", task.ProjectID, map[string]string{
+			"body":     buildTaskMessageBody(task),
+			"priority": defaultTaskPriority(task.Priority),
+			"title":    followupTitle,
+		})
+		card.AddButton("保存为文档", docAction)
+		card.AddButton("创建跟进任务", createTaskAction)
+	}
 	card.AddButton("查看详情", "link:/tasks/"+task.ID)
 	return card
+}
+
+func buildTaskMessageBody(task *client.Task) string {
+	if task == nil {
+		return ""
+	}
+	description := strings.TrimSpace(task.Description)
+	if description != "" {
+		return description
+	}
+	parts := []string{
+		fmt.Sprintf("任务 #%s", shortID(task.ID)),
+		strings.TrimSpace(task.Title),
+	}
+	if status := strings.TrimSpace(task.Status); status != "" {
+		parts = append(parts, "状态: "+status)
+	}
+	if priority := strings.TrimSpace(task.Priority); priority != "" {
+		parts = append(parts, "优先级: "+priority)
+	}
+	return strings.Join(parts, "\n")
+}
+
+func defaultTaskPriority(priority string) string {
+	trimmed := strings.TrimSpace(priority)
+	if trimmed == "" {
+		return "medium"
+	}
+	return trimmed
 }
 
 func shortID(id string) string {
@@ -471,11 +583,34 @@ func formatTaskDispatchReply(result *client.TaskDispatchResponse, assigneeName s
 			return fmt.Sprintf("已将任务 #%s 分配给 %s，并启动 Agent #%s", taskID, assigneeName, shortID(result.Dispatch.Run.ID))
 		}
 		return fmt.Sprintf("已将任务 #%s 分配给 %s，并启动 Agent", taskID, assigneeName)
+	case "queued":
+		if result.Dispatch.Queue != nil {
+			prefix := fmt.Sprintf("已将任务 #%s 分配给 %s，并加入 Agent 队列 #%s", taskID, assigneeName, shortID(result.Dispatch.Queue.EntryID))
+			if result.Dispatch.Queue.RecoveryDisposition == "recoverable" {
+				prefix = fmt.Sprintf("已将任务 #%s 分配给 %s，且仍在 Agent 队列 #%s 中等待恢复", taskID, assigneeName, shortID(result.Dispatch.Queue.EntryID))
+			}
+			if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
+				return prefix + "：" + reason
+			}
+			return prefix
+		}
+		if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
+			return fmt.Sprintf("已将任务 #%s 分配给 %s，并加入 Agent 队列：%s", taskID, assigneeName, reason)
+		}
+		return fmt.Sprintf("已将任务 #%s 分配给 %s，并加入 Agent 队列", taskID, assigneeName)
 	case "blocked":
+		if result.Dispatch.GuardrailType == "budget" && strings.TrimSpace(result.Dispatch.GuardrailScope) != "" {
+			return fmt.Sprintf("已将任务 #%s 分配给 %s，但未启动 Agent：%s budget blocked dispatch: %s", taskID, assigneeName, strings.TrimSpace(result.Dispatch.GuardrailScope), defaultDispatchReplyReason(result.Dispatch.Reason, "budget guardrail"))
+		}
 		if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
 			return fmt.Sprintf("已将任务 #%s 分配给 %s，但未启动 Agent：%s", taskID, assigneeName, reason)
 		}
 		return fmt.Sprintf("已将任务 #%s 分配给 %s，但未启动 Agent", taskID, assigneeName)
+	case "skipped":
+		if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
+			return fmt.Sprintf("已将任务 #%s 分配给 %s，但本次未启动 Agent：%s", taskID, assigneeName, reason)
+		}
+		return fmt.Sprintf("已将任务 #%s 分配给 %s，但本次未启动 Agent", taskID, assigneeName)
 	default:
 		return fmt.Sprintf("已将任务 #%s 分配给 %s", taskID, assigneeName)
 	}

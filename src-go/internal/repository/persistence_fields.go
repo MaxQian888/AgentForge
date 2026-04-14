@@ -219,6 +219,14 @@ func cloneTimePointer(value *time.Time) *time.Time {
 	return &cloned
 }
 
+func cloneIntPointer(value *int) *int {
+	if value == nil {
+		return nil
+	}
+	cloned := *value
+	return &cloned
+}
+
 func applyPagination(db *gorm.DB, limit int, offset int) *gorm.DB {
 	if db == nil {
 		return nil

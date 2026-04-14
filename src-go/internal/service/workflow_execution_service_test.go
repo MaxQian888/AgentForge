@@ -17,6 +17,7 @@ type workflowStepExecutorMock struct {
 	calls      []service.WorkflowStepExecutionRequest
 	failCounts map[string]int
 	seen       map[string]int
+	outputs    map[string]map[string]any
 }
 
 func (m *workflowStepExecutorMock) Execute(_ context.Context, req service.WorkflowStepExecutionRequest) (*service.WorkflowStepExecutionResult, error) {
@@ -29,11 +30,15 @@ func (m *workflowStepExecutorMock) Execute(_ context.Context, req service.Workfl
 		m.failCounts[req.Step.ID] = remaining - 1
 		return nil, errors.New("step execution failed")
 	}
+	output := map[string]any{
+		"step":    req.Step.ID,
+		"attempt": req.Attempt,
+	}
+	if custom := m.outputs[req.Step.ID]; custom != nil {
+		output = custom
+	}
 	return &service.WorkflowStepExecutionResult{
-		Output: map[string]any{
-			"step":    req.Step.ID,
-			"attempt": req.Attempt,
-		},
+		Output: output,
 	}, nil
 }
 
@@ -331,6 +336,80 @@ func TestWorkflowExecutionService_StartRejectsStaleRoleReferenceBeforeCreatingRu
 	}
 	if len(runs) != 0 {
 		t.Fatalf("len(runs) = %d, want 0 when stale role blocks startup", len(runs))
+	}
+}
+
+func TestWorkflowExecutionService_PausesRunWhenApprovalStepRequestsApproval(t *testing.T) {
+	pluginRepo := repository.NewPluginRegistryRepository()
+	runRepo := repository.NewWorkflowPluginRunRepository()
+	executor := &workflowStepExecutorMock{
+		outputs: map[string]map[string]any{
+			"await-approval": {
+				"status": "awaiting_approval",
+			},
+		},
+	}
+	record := &model.PluginRecord{
+		PluginManifest: model.PluginManifest{
+			APIVersion: "agentforge/v1",
+			Kind:       model.PluginKindWorkflow,
+			Metadata: model.PluginMetadata{
+				ID:      "workflow.review-escalation",
+				Name:    "Review Escalation",
+				Version: "1.0.0",
+			},
+			Spec: model.PluginSpec{
+				Runtime:    model.PluginRuntimeWASM,
+				Module:     "./dist/review-escalation.wasm",
+				ABIVersion: "v1",
+				Workflow: &model.WorkflowPluginSpec{
+					Process: model.WorkflowProcessSequential,
+					Roles: []model.WorkflowRoleBinding{
+						{ID: "reviewer"},
+						{ID: "planner"},
+					},
+					Steps: []model.WorkflowStepDefinition{
+						{ID: "deep-review", Role: "reviewer", Action: model.WorkflowActionReview, Next: []string{"await-approval"}},
+						{ID: "await-approval", Role: "planner", Action: model.WorkflowActionApproval},
+					},
+				},
+			},
+		},
+		LifecycleState: model.PluginStateActive,
+		RuntimeHost:    model.PluginHostGoOrchestrator,
+	}
+	if err := pluginRepo.Save(context.Background(), record); err != nil {
+		t.Fatalf("save workflow plugin record: %v", err)
+	}
+	svc := service.NewWorkflowExecutionService(
+		pluginRepo,
+		runRepo,
+		&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"reviewer": {Metadata: model.RoleMetadata{ID: "reviewer", Name: "Reviewer"}},
+				"planner":  {Metadata: model.RoleMetadata{ID: "planner", Name: "Planner"}},
+			},
+		},
+		executor,
+	)
+
+	run, err := svc.Start(context.Background(), record.Metadata.ID, service.WorkflowExecutionRequest{
+		Trigger: map[string]any{"source": "manual"},
+	})
+	if err != nil {
+		t.Fatalf("start workflow: %v", err)
+	}
+	if run.Status != model.WorkflowRunStatusPaused {
+		t.Fatalf("workflow status = %s, want paused", run.Status)
+	}
+	if len(executor.calls) != 2 {
+		t.Fatalf("len(executor.calls) = %d, want 2", len(executor.calls))
+	}
+	if run.Steps[1].Status != model.WorkflowStepRunStatusCompleted {
+		t.Fatalf("approval step status = %s, want completed before pause", run.Steps[1].Status)
+	}
+	if got := run.Steps[1].Output["status"]; got != "awaiting_approval" {
+		t.Fatalf("approval step output status = %v, want awaiting_approval", got)
 	}
 }
 

@@ -411,8 +411,12 @@ func TestAssignTask_SendsCanonicalPayloadAndParsesDispatchResult(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(TaskDispatchResponse{
 			Task: Task{ID: "task-1"},
 			Dispatch: DispatchOutcome{
-				Status: "started",
-				Run:    &AgentRun{ID: "run-1", TaskID: "task-1", Status: "running"},
+				Status:   "started",
+				Runtime:  "codex",
+				Provider: "openai",
+				Model:    "gpt-5-codex",
+				RoleID:   "reviewer",
+				Run:      &AgentRun{ID: "run-1", TaskID: "task-1", Status: "running"},
 			},
 		})
 	}))
@@ -437,6 +441,9 @@ func TestAssignTask_SendsCanonicalPayloadAndParsesDispatchResult(t *testing.T) {
 	if result.Dispatch.Status != "started" || result.Dispatch.Run == nil || result.Dispatch.Run.ID != "run-1" {
 		t.Fatalf("result = %+v", result)
 	}
+	if result.Dispatch.Runtime != "codex" || result.Dispatch.Provider != "openai" || result.Dispatch.Model != "gpt-5-codex" {
+		t.Fatalf("dispatch tuple = %+v", result.Dispatch)
+	}
 }
 
 func TestSpawnAgent_CallsEndpointAndParsesDispatchResult(t *testing.T) {
@@ -455,8 +462,20 @@ func TestSpawnAgent_CallsEndpointAndParsesDispatchResult(t *testing.T) {
 		_ = json.NewEncoder(w).Encode(TaskDispatchResponse{
 			Task: Task{ID: "task-1"},
 			Dispatch: DispatchOutcome{
-				Status: "started",
-				Run:    &AgentRun{ID: "run-1", TaskID: "task-1", Status: "starting"},
+				Status:   "queued",
+				Runtime:  "codex",
+				Provider: "openai",
+				Model:    "gpt-5-codex",
+				Queue: &QueueEntry{
+					EntryID:             "entry-1",
+					TaskID:              "task-1",
+					MemberID:            "member-1",
+					Status:              "queued",
+					Priority:            20,
+					GuardrailType:       "pool",
+					GuardrailScope:      "project",
+					RecoveryDisposition: "pending",
+				},
 			},
 		})
 	}))
@@ -478,8 +497,11 @@ func TestSpawnAgent_CallsEndpointAndParsesDispatchResult(t *testing.T) {
 	if gotBody["taskId"] != "task-1" {
 		t.Fatalf("body = %+v", gotBody)
 	}
-	if result.Dispatch.Status != "started" || result.Dispatch.Run == nil || result.Dispatch.Run.ID != "run-1" {
+	if result.Dispatch.Status != "queued" || result.Dispatch.Queue == nil || result.Dispatch.Queue.EntryID != "entry-1" {
 		t.Fatalf("result = %+v", result)
+	}
+	if result.Dispatch.Queue.GuardrailType != "pool" || result.Dispatch.Queue.RecoveryDisposition != "pending" {
+		t.Fatalf("queue verdict = %+v", result.Dispatch.Queue)
 	}
 }
 
@@ -1019,7 +1041,7 @@ func TestProjectScopedOperations_RequireConfiguredProjectScope(t *testing.T) {
 		if err == nil {
 			t.Fatalf("%s: expected error", tc.name)
 		}
-		if !strings.Contains(err.Error(), "project scope is not configured") {
+		if !strings.Contains(err.Error(), "当前未设置 project") {
 			t.Fatalf("%s: err = %v", tc.name, err)
 		}
 	}

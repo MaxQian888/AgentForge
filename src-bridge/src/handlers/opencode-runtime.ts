@@ -2,7 +2,10 @@ import {
   accumulateCostAccounting,
   serializeCostAccounting,
 } from "../cost/accounting.js";
-import type { OpenCodeTransport } from "../opencode/transport.js";
+import type {
+  OpenCodePromptPart,
+  OpenCodeTransport,
+} from "../opencode/transport.js";
 import type { AgentRuntime } from "../runtime/agent-runtime.js";
 import type { ExecuteRequest } from "../types.js";
 import type { EventStreamer } from "../ws/event-stream.js";
@@ -25,6 +28,15 @@ export interface OpenCodeRuntimeDeps {
   transport: OpenCodeTransport;
   eventRunner?: OpenCodeEventRunner;
   now?: () => number;
+  opencodePendingInteractions?: {
+    createPermissionRequest: (input: {
+      sessionId: string;
+      permissionId: string;
+      toolName?: string;
+      context?: unknown;
+      ttlMs?: number;
+    }) => { requestId: string };
+  };
 }
 
 export async function streamOpenCodeRuntime(
@@ -43,7 +55,13 @@ export async function streamOpenCodeRuntime(
   const mode = continuity?.upstream_session_id ? "resume" : "start";
   const sessionId =
     continuity?.upstream_session_id ??
-    (await deps.transport.createSession({ title: req.task_id })).id;
+    (await deps.transport.createSession({
+      title: req.task_id,
+      provider: req.provider ?? "opencode",
+      model: req.model,
+      env: req.env,
+      web_search: req.web_search,
+    })).id;
 
   runtime.continuity = {
     runtime: "opencode",
@@ -62,6 +80,7 @@ export async function streamOpenCodeRuntime(
     provider: req.provider ?? "opencode",
     model: req.model,
     prompt,
+    parts: buildOpenCodePromptParts(prompt, req.attachments),
   });
 
   const runner = deps.eventRunner ?? defaultOpenCodeEventRunner;
@@ -76,7 +95,17 @@ export async function streamOpenCodeRuntime(
     abortSignal: runtime.abortController.signal,
   })) {
     runtime.lastActivity = now();
-    if (emitOpenCodeEvent(runtime, streamer, event, req, now, sessionId)) {
+    if (
+      emitOpenCodeEvent(
+        runtime,
+        streamer,
+        event,
+        req,
+        now,
+        sessionId,
+        deps.opencodePendingInteractions,
+      )
+    ) {
       sawTerminal = true;
       return;
     }
@@ -113,6 +142,7 @@ function emitOpenCodeEvent(
   req: ExecuteRequest,
   now: () => number,
   sessionId: string,
+  opencodePendingInteractions?: OpenCodeRuntimeDeps["opencodePendingInteractions"],
 ): boolean {
   const eventName = typeof event.event === "string" ? event.event : "";
   const data = isRecord(event.data) ? event.data : event;
@@ -171,6 +201,36 @@ function emitOpenCodeEvent(
         content: `Command /${typeof data.name === "string" ? data.name : "unknown"} executed`,
         content_type: "text",
         turn_number: runtime.turnNumber,
+      },
+    });
+    return false;
+  }
+  if (eventName === "permission.asked") {
+    const permissionId = getOpenCodePermissionID(data);
+    if (!permissionId || !opencodePendingInteractions) {
+      return false;
+    }
+    const toolName =
+      typeof data.toolName === "string"
+        ? data.toolName
+        : typeof data.tool_name === "string"
+          ? data.tool_name
+          : undefined;
+    const pending = opencodePendingInteractions.createPermissionRequest({
+      sessionId,
+      permissionId,
+      toolName,
+      context: data.context,
+    });
+    streamer.send({
+      task_id: req.task_id,
+      session_id: req.session_id,
+      timestamp_ms: now(),
+      type: "permission_request",
+      data: {
+        request_id: pending.requestId,
+        tool_name: toolName,
+        context: data.context,
       },
     });
     return false;
@@ -347,6 +407,35 @@ function emitOpenCodeEvent(
   }
 
   return false;
+}
+
+function buildOpenCodePromptParts(
+  prompt: string,
+  attachments: ExecuteRequest["attachments"],
+): OpenCodePromptPart[] {
+  const parts: OpenCodePromptPart[] = (attachments ?? []).map((attachment) => ({
+    type: attachment.type,
+    path: attachment.path,
+    ...(attachment.mime_type ? { mime_type: attachment.mime_type } : {}),
+  }));
+  parts.push({
+    type: "text",
+    text: prompt,
+  });
+  return parts;
+}
+
+function getOpenCodePermissionID(data: UnknownRecord): string | undefined {
+  if (typeof data.permissionID === "string" && data.permissionID.length > 0) {
+    return data.permissionID;
+  }
+  if (typeof data.permissionId === "string" && data.permissionId.length > 0) {
+    return data.permissionId;
+  }
+  if (typeof data.id === "string" && data.id.length > 0) {
+    return data.id;
+  }
+  return undefined;
 }
 
 function emitUsage(

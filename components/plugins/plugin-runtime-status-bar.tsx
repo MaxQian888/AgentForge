@@ -119,6 +119,7 @@ export function PluginRuntimeStatusBar({
             variant="ghost"
             size="sm"
             className="h-6 w-6 p-0"
+            aria-label={t("showRuntime")}
             onClick={() => setSheetOpen(true)}
           >
             <ChevronRight className="size-3.5" />

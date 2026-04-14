@@ -67,9 +67,16 @@ func (c *bridgeRuntimeControl) Start(ctx context.Context) error {
 		CapabilityMatrix: metadata.Capabilities.Matrix(),
 		CallbackPaths:    []string{"/im/notify", "/im/send"},
 		Metadata: map[string]string{
-			"platform_name": c.provider.Platform.Name(),
-			"provider_id":   c.provider.Descriptor.ID,
+			"platform_name":  c.provider.Platform.Name(),
+			"provider_id":    c.provider.Descriptor.ID,
+			"readiness_tier": string(metadata.Capabilities.ReadinessTier),
 		},
+	}
+	if preferredMode := string(metadata.Capabilities.PreferredAsyncUpdateMode); preferredMode != "" {
+		registration.Metadata["preferred_async_update_mode"] = preferredMode
+	}
+	if fallbackMode := string(metadata.Capabilities.FallbackAsyncUpdateMode); fallbackMode != "" {
+		registration.Metadata["fallback_async_update_mode"] = fallbackMode
 	}
 	if provider, ok := c.provider.Platform.(callbackPathProvider); ok {
 		for _, path := range provider.CallbackPaths() {
@@ -333,6 +340,15 @@ func (c *bridgeRuntimeControl) runtimeMetadata() map[string]string {
 	}
 	if surface := string(c.provider.Metadata().Capabilities.StructuredSurface); surface != "" {
 		metadata["structured_surface"] = surface
+	}
+	if readinessTier := string(c.provider.Metadata().Capabilities.ReadinessTier); readinessTier != "" {
+		metadata["readiness_tier"] = readinessTier
+	}
+	if preferredMode := string(c.provider.Metadata().Capabilities.PreferredAsyncUpdateMode); preferredMode != "" {
+		metadata["preferred_async_update_mode"] = preferredMode
+	}
+	if fallbackMode := string(c.provider.Metadata().Capabilities.FallbackAsyncUpdateMode); fallbackMode != "" {
+		metadata["fallback_async_update_mode"] = fallbackMode
 	}
 	return metadata
 }

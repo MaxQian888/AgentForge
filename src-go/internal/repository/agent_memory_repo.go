@@ -67,21 +67,43 @@ func (r *AgentMemoryRepository) ListByProject(ctx context.Context, projectID uui
 }
 
 func (r *AgentMemoryRepository) Search(ctx context.Context, projectID uuid.UUID, query string, limit int) ([]*model.AgentMemory, error) {
+	return r.ListFiltered(ctx, projectID, model.AgentMemoryFilter{Query: query, Limit: limit})
+}
+
+func (r *AgentMemoryRepository) ListFiltered(ctx context.Context, projectID uuid.UUID, filter model.AgentMemoryFilter) ([]*model.AgentMemory, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
-	if limit <= 0 {
-		limit = 20
+
+	query := r.db.WithContext(ctx).Where("project_id = ?", projectID)
+	if strings.TrimSpace(filter.Scope) != "" {
+		query = query.Where("scope = ?", filter.Scope)
 	}
-	pattern := "%" + query + "%"
+	if strings.TrimSpace(filter.Category) != "" {
+		query = query.Where("category = ?", filter.Category)
+	}
+	if strings.TrimSpace(filter.RoleID) != "" {
+		query = query.Where("role_id = ?", filter.RoleID)
+	}
+	if filter.StartAt != nil {
+		query = query.Where("created_at >= ?", *filter.StartAt)
+	}
+	if filter.EndAt != nil {
+		query = query.Where("created_at <= ?", *filter.EndAt)
+	}
+	if search := strings.TrimSpace(filter.Query); search != "" {
+		pattern := "%" + search + "%"
+		query = query.Where("LOWER(key) LIKE LOWER(?) OR LOWER(content) LIKE LOWER(?) OR LOWER(metadata) LIKE LOWER(?)", pattern, pattern, pattern)
+	}
+
+	query = query.Order("relevance_score DESC, created_at DESC")
+	if filter.Limit > 0 {
+		query = query.Limit(filter.Limit)
+	}
 
 	var records []agentMemoryRecord
-	if err := r.db.WithContext(ctx).
-		Where("project_id = ? AND (key ILIKE ? OR content ILIKE ?)", projectID, pattern, pattern).
-		Order("relevance_score DESC, created_at DESC").
-		Limit(limit).
-		Find(&records).Error; err != nil {
-		return nil, fmt.Errorf("search agent memories: %w", err)
+	if err := query.Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list filtered agent memories: %w", err)
 	}
 
 	memories := make([]*model.AgentMemory, len(records))
@@ -118,12 +140,23 @@ func (r *AgentMemoryRepository) Delete(ctx context.Context, id uuid.UUID) error 
 	return nil
 }
 
+func (r *AgentMemoryRepository) DeleteMany(ctx context.Context, ids []uuid.UUID) (int64, error) {
+	if r.db == nil {
+		return 0, ErrDatabaseUnavailable
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+	result := r.db.WithContext(ctx).Delete(&agentMemoryRecord{}, "id IN ?", ids)
+	if result.Error != nil {
+		return 0, fmt.Errorf("delete many agent memories: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
 func (r *AgentMemoryRepository) ListByProjectAndTimeRange(ctx context.Context, projectID uuid.UUID, category, scope, roleID string, start, end *time.Time, limit int) ([]*model.AgentMemory, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
-	}
-	if limit <= 0 {
-		limit = 100
 	}
 
 	query := r.db.WithContext(ctx).Where("project_id = ?", projectID)
@@ -143,8 +176,13 @@ func (r *AgentMemoryRepository) ListByProjectAndTimeRange(ctx context.Context, p
 		query = query.Where("created_at <= ?", *end)
 	}
 
+	query = query.Order("created_at ASC")
+	if limit > 0 {
+		query = query.Limit(limit)
+	}
+
 	var records []agentMemoryRecord
-	if err := query.Order("created_at ASC").Limit(limit).Find(&records).Error; err != nil {
+	if err := query.Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list agent memories by project and time range: %w", err)
 	}
 

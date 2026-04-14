@@ -22,7 +22,7 @@ func TestAgentCommand_RequiresSubcommand(t *testing.T) {
 		Content:  "/agent",
 	})
 
-	if len(platform.replies) != 1 || platform.replies[0] != "用法: /agent status|runtimes|health|spawn|run|logs|pause|resume|kill <参数>" {
+	if len(platform.replies) != 1 || platform.replies[0] != "用法: /agent status|runtimes|health|spawn|run|config|logs|pause|resume|kill <参数>" {
 		t.Fatalf("replies = %v", platform.replies)
 	}
 }
@@ -144,6 +144,33 @@ func TestAgentCommand_RequiresArgsForRuntimesOnlyViaSubcommandUsage(t *testing.T
 		t.Fatalf("replies = %v", platform.replies)
 	}
 	if !strings.Contains(platform.replies[0], "获取 Bridge runtimes 失败") && !strings.Contains(platform.replies[0], "Bridge runtimes") {
+		t.Fatalf("reply = %q", platform.replies[0])
+	}
+}
+
+func TestAgentCommand_RuntimesReportsRuntimeNotReadySource(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path != "/api/v1/bridge/runtimes" {
+			t.Fatalf("unexpected path = %s", r.URL.Path)
+		}
+		http.Error(w, `{"message":"runtime not ready: missing executable"}`, http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent runtimes",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "Runtime not ready") {
 		t.Fatalf("reply = %q", platform.replies[0])
 	}
 }
@@ -335,24 +362,31 @@ func TestFormatAgentSpawnReply_CoversDispatchBranches(t *testing.T) {
 	}
 
 	blocked := formatAgentSpawnReply(&client.TaskDispatchResponse{
-		Dispatch: client.DispatchOutcome{Status: "blocked", Reason: "budget exceeded"},
+		Dispatch: client.DispatchOutcome{Status: "blocked", GuardrailType: "budget", GuardrailScope: "project", Reason: "budget exceeded"},
 	}, "task-12345678")
-	if blocked != "未启动 Agent：budget exceeded" {
+	if blocked != "未启动 Agent：project budget blocked dispatch: budget exceeded" {
 		t.Fatalf("blocked = %q", blocked)
 	}
 
 	idle := formatAgentSpawnReply(&client.TaskDispatchResponse{
-		Dispatch: client.DispatchOutcome{Status: "queued"},
+		Dispatch: client.DispatchOutcome{Status: "queued", Queue: &client.QueueEntry{EntryID: "entry-12345678", RecoveryDisposition: "pending"}},
 	}, "task-12345678")
-	if idle != "任务 task-123 当前未启动 Agent" {
+	if idle != "已加入队列 #entry-12" {
 		t.Fatalf("idle = %q", idle)
 	}
 
 	queuedWithReason := formatAgentSpawnReply(&client.TaskDispatchResponse{
-		Dispatch: client.DispatchOutcome{Status: "queued", Reason: "Bridge pool at capacity (2/2 active). Options: Wait in queue / Proceed anyway."},
+		Dispatch: client.DispatchOutcome{Status: "queued", Reason: "Bridge pool at capacity (2/2 active). Options: Wait in queue / Proceed anyway.", Queue: &client.QueueEntry{EntryID: "entry-12345678", Priority: 20, RecoveryDisposition: "recoverable"}},
 	}, "task-12345678")
-	if queuedWithReason != "已加入队列：Bridge pool at capacity (2/2 active). Options: Wait in queue / Proceed anyway." {
+	if queuedWithReason != "仍在队列中等待恢复 #entry-12 优先级 20：Bridge pool at capacity (2/2 active). Options: Wait in queue / Proceed anyway." {
 		t.Fatalf("queuedWithReason = %q", queuedWithReason)
+	}
+
+	skipped := formatAgentSpawnReply(&client.TaskDispatchResponse{
+		Dispatch: client.DispatchOutcome{Status: "skipped", Reason: "task assigned to a human member"},
+	}, "task-12345678")
+	if skipped != "任务 task-123 本次未启动 Agent：task assigned to a human member" {
+		t.Fatalf("skipped = %q", skipped)
 	}
 }
 
@@ -370,7 +404,7 @@ func TestAgentCommand_RunRequiresPrompt(t *testing.T) {
 	if len(platform.replies) != 1 {
 		t.Fatalf("replies = %v", platform.replies)
 	}
-	if !strings.Contains(platform.replies[0], "/agent run <") {
+	if !strings.Contains(platform.replies[0], "/agent run [--runtime <runtime>]") {
 		t.Fatalf("usage reply = %q", platform.replies[0])
 	}
 }
@@ -380,6 +414,30 @@ func TestAgentCommand_RunCreatesTaskAndStartsAgent(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		requests = append(requests, r.Method+" "+r.URL.Path)
 		switch r.URL.Path {
+		case "/api/v1/projects/proj":
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(client.Project{
+				ID:   "proj",
+				Name: "Functional Sweep 01",
+				Slug: "functional-sweep-01",
+				Settings: client.ProjectSettings{
+					CodingAgent: client.CodingAgentSelection{Runtime: "codex", Provider: "openai", Model: "gpt-5-codex"},
+				},
+				CodingAgentCatalog: &client.ProjectCodingAgentCatalog{
+					DefaultRuntime: "codex",
+					Runtimes: []client.ProjectCodingAgentRuntime{
+						{
+							Runtime:             "codex",
+							Label:               "Codex",
+							DefaultProvider:     "openai",
+							CompatibleProviders: []string{"openai", "codex"},
+							DefaultModel:        "gpt-5-codex",
+							ModelOptions:        []string{"gpt-5-codex"},
+							Available:           true,
+						},
+					},
+				},
+			})
 		case "/api/v1/projects/proj/tasks":
 			var body map[string]string
 			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
@@ -429,7 +487,7 @@ func TestAgentCommand_RunCreatesTaskAndStartsAgent(t *testing.T) {
 		Content:  "/agent run Bridge smoke",
 	})
 
-	if len(requests) != 3 {
+	if len(requests) != 4 {
 		t.Fatalf("requests = %v", requests)
 	}
 	if len(platform.replies) != 2 {
@@ -446,8 +504,325 @@ func TestAgentCommand_RunCreatesTaskAndStartsAgent(t *testing.T) {
 	}
 }
 
+func TestAgentCommand_RunSupportsRuntimeOverrides(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/projects/proj":
+			_ = json.NewEncoder(w).Encode(client.Project{
+				ID:   "proj",
+				Name: "Functional Sweep 01",
+				Slug: "functional-sweep-01",
+				Settings: client.ProjectSettings{
+					CodingAgent: client.CodingAgentSelection{Runtime: "codex", Provider: "openai", Model: "gpt-5-codex"},
+				},
+				CodingAgentCatalog: &client.ProjectCodingAgentCatalog{
+					DefaultRuntime: "codex",
+					Runtimes: []client.ProjectCodingAgentRuntime{
+						{
+							Runtime:             "codex",
+							Label:               "Codex",
+							DefaultProvider:     "openai",
+							CompatibleProviders: []string{"openai", "codex"},
+							DefaultModel:        "gpt-5-codex",
+							ModelOptions:        []string{"gpt-5-codex", "o3"},
+							Available:           true,
+						},
+					},
+				},
+			})
+		case "/api/v1/projects/proj/tasks":
+			_ = json.NewEncoder(w).Encode(&client.Task{ID: "task-quick-456"})
+		case "/api/v1/agents/spawn":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode spawn body: %v", err)
+			}
+			if body["runtime"] != "codex" || body["provider"] != "openai" || body["model"] != "gpt-5-codex" {
+				t.Fatalf("spawn body = %+v", body)
+			}
+			_ = json.NewEncoder(w).Encode(&client.TaskDispatchResponse{
+				Task: client.Task{ID: "task-quick-456"},
+				Dispatch: client.DispatchOutcome{
+					Status:   "started",
+					Runtime:  "codex",
+					Provider: "openai",
+					Model:    "gpt-5-codex",
+					Run:      &client.AgentRun{ID: "run-quick-456", TaskID: "task-quick-456"},
+				},
+			})
+		case "/api/v1/bridge/tools":
+			_ = json.NewEncoder(w).Encode(map[string]any{"tools": []map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent run --runtime codex --provider openai --model gpt-5-codex Bridge override",
+	})
+
+	if len(platform.replies) != 2 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[1], "run-quic") {
+		t.Fatalf("final reply = %q", platform.replies[1])
+	}
+}
+
+func TestAgentCommand_RunUsesProjectDefaultCodingAgentWhenNoFlagsProvided(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/projects/proj":
+			_ = json.NewEncoder(w).Encode(client.Project{
+				ID:   "proj",
+				Name: "Functional Sweep 01",
+				Slug: "functional-sweep-01",
+				Settings: client.ProjectSettings{
+					CodingAgent: client.CodingAgentSelection{Runtime: "codex", Provider: "openai", Model: "gpt-5-codex"},
+				},
+				CodingAgentCatalog: &client.ProjectCodingAgentCatalog{
+					DefaultRuntime: "codex",
+					Runtimes: []client.ProjectCodingAgentRuntime{
+						{
+							Runtime:             "codex",
+							Label:               "Codex",
+							DefaultProvider:     "openai",
+							CompatibleProviders: []string{"openai", "codex"},
+							DefaultModel:        "gpt-5-codex",
+							ModelOptions:        []string{"gpt-5-codex"},
+							Available:           true,
+						},
+					},
+				},
+			})
+		case "/api/v1/projects/proj/tasks":
+			_ = json.NewEncoder(w).Encode(&client.Task{ID: "task-quick-789"})
+		case "/api/v1/agents/spawn":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode spawn body: %v", err)
+			}
+			if body["runtime"] != "codex" || body["provider"] != "openai" || body["model"] != "gpt-5-codex" {
+				t.Fatalf("spawn body = %+v", body)
+			}
+			_ = json.NewEncoder(w).Encode(&client.TaskDispatchResponse{
+				Task: client.Task{ID: "task-quick-789"},
+				Dispatch: client.DispatchOutcome{
+					Status:   "started",
+					Runtime:  "codex",
+					Provider: "openai",
+					Model:    "gpt-5-codex",
+					Run:      &client.AgentRun{ID: "run-quick-789", TaskID: "task-quick-789"},
+				},
+			})
+		case "/api/v1/bridge/tools":
+			_ = json.NewEncoder(w).Encode(map[string]any{"tools": []map[string]any{}})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent run Bridge default",
+	})
+
+	if len(platform.replies) != 2 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[1], "run-quic") {
+		t.Fatalf("final reply = %q", platform.replies[1])
+	}
+}
+
+func TestAgentCommand_RunReturnsLoginGuidanceWhenRuntimeUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Path != "/api/v1/projects/proj" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		_ = json.NewEncoder(w).Encode(client.Project{
+			ID:   "proj",
+			Name: "Functional Sweep 01",
+			Slug: "functional-sweep-01",
+			Settings: client.ProjectSettings{
+				CodingAgent: client.CodingAgentSelection{Runtime: "claude_code", Provider: "anthropic", Model: "claude-sonnet-4-5"},
+			},
+			CodingAgentCatalog: &client.ProjectCodingAgentCatalog{
+				DefaultRuntime: "claude_code",
+				Runtimes: []client.ProjectCodingAgentRuntime{
+					{
+						Runtime:             "claude_code",
+						Label:               "Claude Code",
+						DefaultProvider:     "anthropic",
+						CompatibleProviders: []string{"anthropic"},
+						DefaultModel:        "claude-sonnet-4-5",
+						ModelOptions:        []string{"claude-sonnet-4-5"},
+						Available:           false,
+						Diagnostics: []client.ProjectRuntimeDiagnostic{
+							{Code: "missing_credentials", Message: "Missing required environment variable for runtime claude_code: ANTHROPIC_API_KEY", Blocking: true},
+						},
+					},
+				},
+			},
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/agent run @claude test",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "ANTHROPIC_API_KEY") {
+		t.Fatalf("reply = %q", platform.replies[0])
+	}
+}
+
+func TestAgentCommand_ConfigGetAndSet(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch {
+		case r.Method == http.MethodGet && r.URL.Path == "/api/v1/projects/proj":
+			_ = json.NewEncoder(w).Encode(client.Project{
+				ID:   "proj",
+				Name: "Functional Sweep 01",
+				Slug: "functional-sweep-01",
+				Settings: client.ProjectSettings{
+					CodingAgent: client.CodingAgentSelection{Runtime: "claude_code", Provider: "anthropic", Model: "claude-sonnet-4-5"},
+				},
+				CodingAgentCatalog: &client.ProjectCodingAgentCatalog{
+					DefaultRuntime: "claude_code",
+					Runtimes: []client.ProjectCodingAgentRuntime{
+						{
+							Runtime:             "claude_code",
+							Label:               "Claude Code",
+							DefaultProvider:     "anthropic",
+							CompatibleProviders: []string{"anthropic"},
+							DefaultModel:        "claude-sonnet-4-5",
+							ModelOptions:        []string{"claude-sonnet-4-5"},
+							Available:           false,
+						},
+						{
+							Runtime:             "codex",
+							Label:               "Codex",
+							DefaultProvider:     "openai",
+							CompatibleProviders: []string{"openai", "codex"},
+							DefaultModel:        "gpt-5-codex",
+							ModelOptions:        []string{"gpt-5-codex", "o3"},
+							Available:           true,
+						},
+					},
+				},
+			})
+		case r.Method == http.MethodPut && r.URL.Path == "/api/v1/projects/proj":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode update body: %v", err)
+			}
+			settings := body["settings"].(map[string]any)
+			codingAgent := settings["codingAgent"].(map[string]any)
+			if codingAgent["runtime"] != "codex" || codingAgent["provider"] != "openai" || codingAgent["model"] != "gpt-5-codex" {
+				t.Fatalf("codingAgent = %+v", codingAgent)
+			}
+			_ = json.NewEncoder(w).Encode(client.Project{
+				ID:   "proj",
+				Name: "Functional Sweep 01",
+				Slug: "functional-sweep-01",
+				Settings: client.ProjectSettings{
+					CodingAgent: client.CodingAgentSelection{Runtime: "codex", Provider: "openai", Model: "gpt-5-codex"},
+				},
+				CodingAgentCatalog: &client.ProjectCodingAgentCatalog{
+					DefaultRuntime: "claude_code",
+					Runtimes: []client.ProjectCodingAgentRuntime{
+						{
+							Runtime:             "codex",
+							Label:               "Codex",
+							DefaultProvider:     "openai",
+							CompatibleProviders: []string{"openai", "codex"},
+							DefaultModel:        "gpt-5-codex",
+							ModelOptions:        []string{"gpt-5-codex", "o3"},
+							Available:           true,
+						},
+					},
+				},
+			})
+		default:
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterAgentCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{Platform: "slack-stub", Content: "/agent config get"})
+	engine.HandleMessage(platform, &core.Message{Platform: "slack-stub", Content: "/agent config set codex openai gpt-5-codex"})
+
+	if len(platform.replies) != 2 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "当前默认代码 Agent: claude_code / anthropic / claude-sonnet-4-5") {
+		t.Fatalf("get reply = %q", platform.replies[0])
+	}
+	if !strings.Contains(platform.replies[1], "已更新当前项目代码 Agent 默认配置") || !strings.Contains(platform.replies[1], "codex / openai / gpt-5-codex") {
+		t.Fatalf("set reply = %q", platform.replies[1])
+	}
+}
+
 func TestAgentCommand_RunReportsFailuresAfterProgressReply(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.URL.Path == "/api/v1/projects/proj" {
+			w.Header().Set("Content-Type", "application/json")
+			_ = json.NewEncoder(w).Encode(client.Project{
+				ID:   "proj",
+				Name: "Functional Sweep 01",
+				Slug: "functional-sweep-01",
+				Settings: client.ProjectSettings{
+					CodingAgent: client.CodingAgentSelection{Runtime: "codex", Provider: "openai", Model: "gpt-5-codex"},
+				},
+				CodingAgentCatalog: &client.ProjectCodingAgentCatalog{
+					DefaultRuntime: "codex",
+					Runtimes: []client.ProjectCodingAgentRuntime{
+						{
+							Runtime:             "codex",
+							Label:               "Codex",
+							DefaultProvider:     "openai",
+							CompatibleProviders: []string{"openai", "codex"},
+							DefaultModel:        "gpt-5-codex",
+							ModelOptions:        []string{"gpt-5-codex"},
+							Available:           true,
+						},
+					},
+				},
+			})
+			return
+		}
 		http.Error(w, `{"message":"create failed"}`, http.StatusBadGateway)
 	}))
 	defer server.Close()
@@ -550,7 +925,7 @@ func TestAgentCommand_UnknownSubcommandShowsUsage(t *testing.T) {
 	if len(platform.replies) != 1 {
 		t.Fatalf("replies = %v", platform.replies)
 	}
-	if !strings.Contains(platform.replies[0], "/agent status|runtimes|health|spawn|run|logs|pause|resume|kill") {
+	if !strings.Contains(platform.replies[0], "/agent status|runtimes|health|spawn|run|config|logs|pause|resume|kill") {
 		t.Fatalf("usage reply = %q", platform.replies[0])
 	}
 }

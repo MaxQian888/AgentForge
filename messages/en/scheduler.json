@@ -12,7 +12,10 @@
     "disabled": "Disabled",
     "activeRuns": "Active Runs",
     "failed24h": "Failed (24h)",
-    "successRate24h": "Success Rate (24h)"
+    "successRate24h": "Success Rate (24h)",
+    "paused": "Paused",
+    "queueDepth": "Queue Depth",
+    "avgDuration": "Avg Duration"
   },
   "jobTable": {
     "colJob": "Job",
@@ -22,7 +25,8 @@
     "noJobs": "No scheduler jobs registered yet.",
     "disabled": "Disabled",
     "na": "N/A",
-    "notScheduled": "Not scheduled"
+    "notScheduled": "Not scheduled",
+    "paused": "Paused"
   },
   "jobDetail": {
     "runNow": "Run now",
@@ -45,7 +49,18 @@
     "disableJobDesc": "This will stop automatic execution of \"{name}\". You can still trigger it manually.",
     "enableJobDesc": "This will resume automatic execution of \"{name}\" on schedule: {schedule}.",
     "cancel": "Cancel",
-    "selectJob": "Select a scheduler job to inspect details and history."
+    "selectJob": "Select a scheduler job to inspect details and history.",
+    "pause": "Pause",
+    "resume": "Resume",
+    "cancelRun": "Cancel Run",
+    "cleanupHistory": "Cleanup History",
+    "unsupportedActions": "Unsupported Actions",
+    "controlState": "Control State",
+    "executionMode": "Execution Mode",
+    "activeRun": "Active Run",
+    "upcomingRuns": "Upcoming Runs",
+    "configFields": "Config Fields",
+    "configManagedByBackend": "Managed by backend"
   },
   "runHistory": {
     "colStatus": "Status",
@@ -54,6 +69,11 @@
     "colDuration": "Duration",
     "colSummary": "Summary",
     "colMetrics": "Metrics",
-    "noRuns": "No run history recorded for this job yet."
+    "noRuns": "No run history recorded for this job yet.",
+    "filterStatus": "Status Filter",
+    "filterTrigger": "Trigger Filter",
+    "filterAll": "All",
+    "applyFilters": "Apply Filters",
+    "resetFilters": "Reset Filters"
   }
 }

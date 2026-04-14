@@ -59,6 +59,17 @@ const (
 	MessageScopeInteractionScoped MessageScope = "interaction_scoped"
 )
 
+// ReadinessTier captures how truthfully complete a provider's runtime and
+// delivery lifecycle is for operator-facing parity purposes.
+type ReadinessTier string
+
+const (
+	ReadinessTierFullNativeLifecycle    ReadinessTier = "full_native_lifecycle"
+	ReadinessTierNativeSendWithFallback ReadinessTier = "native_send_with_fallback"
+	ReadinessTierTextFirst              ReadinessTier = "text_first"
+	ReadinessTierMarkdownFirst          ReadinessTier = "markdown_first"
+)
+
 // MutabilitySemantics captures whether a platform can update an existing
 // message and whether in-place mutation is preferred for noisy progress.
 type MutabilitySemantics struct {
@@ -70,13 +81,16 @@ type MutabilitySemantics struct {
 // PlatformCapabilities describes behavior that higher-level bridge components
 // can use without hard-coding platform names.
 type PlatformCapabilities struct {
-	CommandSurface     CommandSurface      `json:"commandSurface,omitempty"`
-	StructuredSurface  StructuredSurface   `json:"structuredSurface,omitempty"`
-	AsyncUpdateModes   []AsyncUpdateMode   `json:"asyncUpdateModes,omitempty"`
-	ActionCallbackMode ActionCallbackMode  `json:"actionCallbackMode,omitempty"`
-	MessageScopes      []MessageScope      `json:"messageScopes,omitempty"`
-	NativeSurfaces     []string            `json:"nativeSurfaces,omitempty"`
-	Mutability         MutabilitySemantics `json:"mutability,omitempty"`
+	CommandSurface           CommandSurface      `json:"commandSurface,omitempty"`
+	StructuredSurface        StructuredSurface   `json:"structuredSurface,omitempty"`
+	AsyncUpdateModes         []AsyncUpdateMode   `json:"asyncUpdateModes,omitempty"`
+	PreferredAsyncUpdateMode AsyncUpdateMode     `json:"preferredAsyncUpdateMode,omitempty"`
+	FallbackAsyncUpdateMode  AsyncUpdateMode     `json:"fallbackAsyncUpdateMode,omitempty"`
+	ActionCallbackMode       ActionCallbackMode  `json:"actionCallbackMode,omitempty"`
+	MessageScopes            []MessageScope      `json:"messageScopes,omitempty"`
+	NativeSurfaces           []string            `json:"nativeSurfaces,omitempty"`
+	ReadinessTier            ReadinessTier       `json:"readinessTier,omitempty"`
+	Mutability               MutabilitySemantics `json:"mutability,omitempty"`
 
 	SupportsRichMessages   bool `json:"supportsRichMessages,omitempty"`
 	SupportsDeferredReply  bool `json:"supportsDeferredReply,omitempty"`
@@ -104,6 +118,12 @@ func (c PlatformCapabilities) Matrix() map[string]any {
 		}
 		matrix["asyncUpdateModes"] = modes
 	}
+	if c.PreferredAsyncUpdateMode != "" {
+		matrix["preferredAsyncUpdateMode"] = string(c.PreferredAsyncUpdateMode)
+	}
+	if c.FallbackAsyncUpdateMode != "" {
+		matrix["fallbackAsyncUpdateMode"] = string(c.FallbackAsyncUpdateMode)
+	}
 	if len(c.MessageScopes) > 0 {
 		scopes := make([]string, 0, len(c.MessageScopes))
 		for _, scope := range c.MessageScopes {
@@ -113,6 +133,9 @@ func (c PlatformCapabilities) Matrix() map[string]any {
 	}
 	if len(c.NativeSurfaces) > 0 {
 		matrix["nativeSurfaces"] = append([]string(nil), c.NativeSurfaces...)
+	}
+	if c.ReadinessTier != "" {
+		matrix["readinessTier"] = string(c.ReadinessTier)
 	}
 	return matrix
 }
@@ -209,21 +232,25 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 	switch source {
 	case "slack":
 		return PlatformCapabilities{
-			CommandSurface:     CommandSurfaceMixed,
-			StructuredSurface:  StructuredSurfaceBlocks,
-			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateThreadReply, AsyncUpdateFollowUp},
-			ActionCallbackMode: ActionCallbackSocketPayload,
-			MessageScopes:      []MessageScope{MessageScopeChat, MessageScopeThread},
-			NativeSurfaces:     []string{NativeSurfaceSlackBlockKit},
+			CommandSurface:           CommandSurfaceMixed,
+			StructuredSurface:        StructuredSurfaceBlocks,
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateThreadReply, AsyncUpdateFollowUp},
+			PreferredAsyncUpdateMode: AsyncUpdateThreadReply,
+			FallbackAsyncUpdateMode:  AsyncUpdateReply,
+			ActionCallbackMode:       ActionCallbackSocketPayload,
+			MessageScopes:            []MessageScope{MessageScopeChat, MessageScopeThread},
+			NativeSurfaces:           []string{NativeSurfaceSlackBlockKit},
 		}
 	case "discord":
 		return PlatformCapabilities{
-			CommandSurface:     CommandSurfaceInteraction,
-			StructuredSurface:  StructuredSurfaceComponents,
-			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateFollowUp, AsyncUpdateEdit},
-			ActionCallbackMode: ActionCallbackInteractionToken,
-			MessageScopes:      []MessageScope{MessageScopeInteractionScoped, MessageScopeChat},
-			NativeSurfaces:     []string{NativeSurfaceDiscordEmbed},
+			CommandSurface:           CommandSurfaceInteraction,
+			StructuredSurface:        StructuredSurfaceComponents,
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateFollowUp, AsyncUpdateEdit},
+			PreferredAsyncUpdateMode: AsyncUpdateFollowUp,
+			FallbackAsyncUpdateMode:  AsyncUpdateReply,
+			ActionCallbackMode:       ActionCallbackInteractionToken,
+			MessageScopes:            []MessageScope{MessageScopeInteractionScoped, MessageScopeChat},
+			NativeSurfaces:           []string{NativeSurfaceDiscordEmbed},
 			Mutability: MutabilitySemantics{
 				CanEdit:        true,
 				PrefersInPlace: true,
@@ -231,12 +258,14 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 		}
 	case "telegram":
 		return PlatformCapabilities{
-			CommandSurface:     CommandSurfaceMixed,
-			StructuredSurface:  StructuredSurfaceInlineKeyboard,
-			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateEdit},
-			ActionCallbackMode: ActionCallbackQuery,
-			MessageScopes:      []MessageScope{MessageScopeChat, MessageScopeTopic},
-			NativeSurfaces:     []string{NativeSurfaceTelegramRich},
+			CommandSurface:           CommandSurfaceMixed,
+			StructuredSurface:        StructuredSurfaceInlineKeyboard,
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateEdit},
+			PreferredAsyncUpdateMode: AsyncUpdateEdit,
+			FallbackAsyncUpdateMode:  AsyncUpdateReply,
+			ActionCallbackMode:       ActionCallbackQuery,
+			MessageScopes:            []MessageScope{MessageScopeChat, MessageScopeTopic},
+			NativeSurfaces:           []string{NativeSurfaceTelegramRich},
 			Mutability: MutabilitySemantics{
 				CanEdit:        true,
 				PrefersInPlace: true,
@@ -244,12 +273,15 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 		}
 	case "feishu":
 		return PlatformCapabilities{
-			CommandSurface:     CommandSurfaceMixed,
-			StructuredSurface:  StructuredSurfaceCards,
-			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateDeferredCardUpdate},
-			ActionCallbackMode: ActionCallbackWebhook,
-			MessageScopes:      []MessageScope{MessageScopeChat, MessageScopeThread},
-			NativeSurfaces:     []string{NativeSurfaceFeishuCard},
+			CommandSurface:           CommandSurfaceMixed,
+			StructuredSurface:        StructuredSurfaceCards,
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateDeferredCardUpdate},
+			PreferredAsyncUpdateMode: AsyncUpdateDeferredCardUpdate,
+			FallbackAsyncUpdateMode:  AsyncUpdateReply,
+			ActionCallbackMode:       ActionCallbackWebhook,
+			MessageScopes:            []MessageScope{MessageScopeChat, MessageScopeThread},
+			NativeSurfaces:           []string{NativeSurfaceFeishuCard},
+			ReadinessTier:            ReadinessTierFullNativeLifecycle,
 			Mutability: MutabilitySemantics{
 				CanEdit:        true,
 				PrefersInPlace: true,
@@ -257,51 +289,63 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 		}
 	case "dingtalk":
 		return PlatformCapabilities{
-			CommandSurface:     CommandSurfaceMixed,
-			StructuredSurface:  StructuredSurfaceActionCard,
-			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateSessionWebhook},
-			ActionCallbackMode: ActionCallbackWebhook,
-			MessageScopes:      []MessageScope{MessageScopeChat},
-			NativeSurfaces:     []string{NativeSurfaceDingTalkCard},
+			CommandSurface:           CommandSurfaceMixed,
+			StructuredSurface:        StructuredSurfaceActionCard,
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateSessionWebhook},
+			PreferredAsyncUpdateMode: AsyncUpdateSessionWebhook,
+			FallbackAsyncUpdateMode:  AsyncUpdateReply,
+			ActionCallbackMode:       ActionCallbackWebhook,
+			MessageScopes:            []MessageScope{MessageScopeChat},
+			NativeSurfaces:           []string{NativeSurfaceDingTalkCard},
+			ReadinessTier:            ReadinessTierNativeSendWithFallback,
+			SupportsRichMessages:     true,
 		}
 	case "qq":
 		return PlatformCapabilities{
-			CommandSurface:        CommandSurfaceMixed,
-			StructuredSurface:     StructuredSurfaceNone,
-			AsyncUpdateModes:      []AsyncUpdateMode{AsyncUpdateReply},
-			ActionCallbackMode:    ActionCallbackNone,
-			MessageScopes:         []MessageScope{MessageScopeChat},
-			SupportsMentions:      true,
-			SupportsSlashCommands: true,
+			CommandSurface:           CommandSurfaceMixed,
+			StructuredSurface:        StructuredSurfaceNone,
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply},
+			PreferredAsyncUpdateMode: AsyncUpdateReply,
+			ActionCallbackMode:       ActionCallbackNone,
+			MessageScopes:            []MessageScope{MessageScopeChat},
+			ReadinessTier:            ReadinessTierTextFirst,
+			SupportsMentions:         true,
+			SupportsSlashCommands:    true,
 		}
 	case "qqbot":
 		return PlatformCapabilities{
-			CommandSurface:         CommandSurfaceMixed,
-			StructuredSurface:      StructuredSurfaceNone,
-			AsyncUpdateModes:       []AsyncUpdateMode{AsyncUpdateReply},
-			ActionCallbackMode:     ActionCallbackWebhook,
-			MessageScopes:          []MessageScope{MessageScopeChat},
-			NativeSurfaces:         []string{NativeSurfaceQQBotMarkdown},
-			RequiresPublicCallback: true,
-			SupportsMentions:       true,
-			SupportsSlashCommands:  true,
+			CommandSurface:           CommandSurfaceMixed,
+			StructuredSurface:        StructuredSurfaceNone,
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply},
+			PreferredAsyncUpdateMode: AsyncUpdateReply,
+			ActionCallbackMode:       ActionCallbackWebhook,
+			MessageScopes:            []MessageScope{MessageScopeChat},
+			NativeSurfaces:           []string{NativeSurfaceQQBotMarkdown},
+			ReadinessTier:            ReadinessTierMarkdownFirst,
+			RequiresPublicCallback:   true,
+			SupportsMentions:         true,
+			SupportsSlashCommands:    true,
 		}
 	case "wecom":
 		return PlatformCapabilities{
-			CommandSurface:     CommandSurfaceInteraction,
-			StructuredSurface:  StructuredSurfaceNone,
-			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply},
-			ActionCallbackMode: ActionCallbackWebhook,
-			MessageScopes:      []MessageScope{MessageScopeChat},
-			NativeSurfaces:     []string{NativeSurfaceWeComCard},
+			CommandSurface:           CommandSurfaceInteraction,
+			StructuredSurface:        StructuredSurfaceNone,
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateSessionWebhook},
+			PreferredAsyncUpdateMode: AsyncUpdateSessionWebhook,
+			FallbackAsyncUpdateMode:  AsyncUpdateReply,
+			ActionCallbackMode:       ActionCallbackWebhook,
+			MessageScopes:            []MessageScope{MessageScopeChat},
+			NativeSurfaces:           []string{NativeSurfaceWeComCard},
+			ReadinessTier:            ReadinessTierNativeSendWithFallback,
 		}
 	case "email":
 		return PlatformCapabilities{
-			CommandSurface:     CommandSurfaceNone,
-			StructuredSurface:  StructuredSurfaceNone,
-			AsyncUpdateModes:   []AsyncUpdateMode{AsyncUpdateReply},
-			ActionCallbackMode: ActionCallbackNone,
-			MessageScopes:      []MessageScope{MessageScopeChat},
+			CommandSurface:           CommandSurfaceNone,
+			StructuredSurface:        StructuredSurfaceNone,
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply},
+			PreferredAsyncUpdateMode: AsyncUpdateReply,
+			ActionCallbackMode:       ActionCallbackNone,
+			MessageScopes:            []MessageScope{MessageScopeChat},
 		}
 	default:
 		capabilities := PlatformCapabilities{
@@ -377,6 +421,15 @@ func normalizeCapabilities(capabilities PlatformCapabilities, defaults PlatformC
 	}
 	if len(capabilities.NativeSurfaces) == 0 && len(defaults.NativeSurfaces) > 0 {
 		capabilities.NativeSurfaces = append([]string(nil), defaults.NativeSurfaces...)
+	}
+	if capabilities.ReadinessTier == "" {
+		capabilities.ReadinessTier = defaults.ReadinessTier
+	}
+	if capabilities.PreferredAsyncUpdateMode == "" {
+		capabilities.PreferredAsyncUpdateMode = defaults.PreferredAsyncUpdateMode
+	}
+	if capabilities.FallbackAsyncUpdateMode == "" {
+		capabilities.FallbackAsyncUpdateMode = defaults.FallbackAsyncUpdateMode
 	}
 
 	if capabilities.Mutability == (MutabilitySemantics{}) {

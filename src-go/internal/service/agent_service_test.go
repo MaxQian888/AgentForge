@@ -174,6 +174,19 @@ func (m *mockAgentIMProgressNotifier) QueueBoundProgress(_ context.Context, req 
 	return m.queued, nil
 }
 
+type mockAgentIMNotifier struct {
+	requests []*model.IMNotifyRequest
+}
+
+func (m *mockAgentIMNotifier) Notify(_ context.Context, req *model.IMNotifyRequest) error {
+	if req == nil {
+		return nil
+	}
+	cloned := *req
+	m.requests = append(m.requests, &cloned)
+	return nil
+}
+
 type bridgeIMDeliveryListener struct {
 	deliveries []*model.IMControlDelivery
 }
@@ -282,6 +295,18 @@ func (m *mockAgentProjectRepo) GetByID(_ context.Context, id uuid.UUID) (*model.
 	return &cloned, nil
 }
 
+type mockAgentDispatchMemberRepo struct {
+	member *model.Member
+}
+
+func (m *mockAgentDispatchMemberRepo) GetByID(_ context.Context, id uuid.UUID) (*model.Member, error) {
+	if m.member == nil || m.member.ID != id {
+		return nil, service.ErrDispatchMemberNotFound
+	}
+	cloned := *m.member
+	return &cloned, nil
+}
+
 type mockAgentRoleStore struct {
 	roles     map[string]*rolepkg.Manifest
 	skillsDir string
@@ -316,20 +341,27 @@ type mockAgentQueueStore struct {
 }
 
 func (m *mockAgentQueueStore) QueueAgentAdmission(_ context.Context, input service.QueueAgentAdmissionInput) (*model.AgentPoolQueueEntry, error) {
+	recoveryDisposition := input.RecoveryDisposition
+	if recoveryDisposition == "" {
+		recoveryDisposition = model.QueueRecoveryDispositionPending
+	}
 	entry := &model.AgentPoolQueueEntry{
-		EntryID:   uuid.NewString(),
-		ProjectID: input.ProjectID.String(),
-		TaskID:    input.TaskID.String(),
-		MemberID:  input.MemberID.String(),
-		Status:    model.AgentPoolQueueStatusQueued,
-		Reason:    "agent pool is at capacity",
-		Runtime:   input.Runtime,
-		Provider:  input.Provider,
-		Model:     input.Model,
-		RoleID:    input.RoleID,
-		BudgetUSD: input.BudgetUSD,
-		CreatedAt: time.Now().UTC(),
-		UpdatedAt: time.Now().UTC(),
+		EntryID:             uuid.NewString(),
+		ProjectID:           input.ProjectID.String(),
+		TaskID:              input.TaskID.String(),
+		MemberID:            input.MemberID.String(),
+		Status:              model.AgentPoolQueueStatusQueued,
+		Reason:              "agent pool is at capacity",
+		Runtime:             input.Runtime,
+		Provider:            input.Provider,
+		Model:               input.Model,
+		RoleID:              input.RoleID,
+		BudgetUSD:           input.BudgetUSD,
+		GuardrailType:       input.GuardrailType,
+		GuardrailScope:      input.GuardrailScope,
+		RecoveryDisposition: recoveryDisposition,
+		CreatedAt:           time.Now().UTC(),
+		UpdatedAt:           time.Now().UTC(),
 	}
 	m.queued = append(m.queued, entry)
 	return entry, nil
@@ -414,22 +446,41 @@ func (m *mockAgentQueueStore) ReserveNextQueuedByProject(_ context.Context, proj
 	return nil, nil
 }
 
-func (m *mockAgentQueueStore) CompleteQueuedEntry(_ context.Context, entryID string, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID) error {
+func (m *mockAgentQueueStore) CompleteQueuedEntry(_ context.Context, entryID string, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID, guardrailType string, guardrailScope string, recoveryDisposition string) error {
 	if m.completeErr != nil {
 		return m.completeErr
 	}
-	m.completed = append(m.completed, entryID+":"+string(status)+":"+reason)
+	m.completed = append(m.completed, entryID+":"+string(status)+":"+reason+":"+guardrailType+":"+guardrailScope+":"+recoveryDisposition)
 	for _, entry := range m.queued {
 		if entry.EntryID != entryID {
 			continue
 		}
 		entry.Status = status
 		entry.Reason = reason
+		entry.GuardrailType = guardrailType
+		entry.GuardrailScope = guardrailScope
+		entry.RecoveryDisposition = recoveryDisposition
 		if runID != nil {
 			id := runID.String()
 			entry.AgentRunID = &id
+		} else {
+			entry.AgentRunID = nil
 		}
 		entry.UpdatedAt = time.Now().UTC()
+	}
+	if m.next != nil && m.next.EntryID == entryID {
+		m.next.Status = status
+		m.next.Reason = reason
+		m.next.GuardrailType = guardrailType
+		m.next.GuardrailScope = guardrailScope
+		m.next.RecoveryDisposition = recoveryDisposition
+		if runID != nil {
+			id := runID.String()
+			m.next.AgentRunID = &id
+		} else {
+			m.next.AgentRunID = nil
+		}
+		m.next.UpdatedAt = time.Now().UTC()
 	}
 	return nil
 }
@@ -1216,6 +1267,48 @@ func TestAgentService_ResumeUsesPersistedRuntimeIdentity(t *testing.T) {
 	}
 }
 
+func TestDiffBridgeRuntimeContextDetectsMismatch(t *testing.T) {
+	expected := service.BridgeRuntimeContextSnapshot{
+		Runtime:  "codex",
+		Provider: "openai",
+		Model:    "gpt-5-codex",
+		TeamID:   "team-123",
+		TeamRole: model.TeamRoleReviewer,
+	}
+	actual := service.BridgeRuntimeContextSnapshot{
+		Runtime:  "opencode",
+		Provider: "openai",
+		Model:    "gpt-5-codex",
+		TeamID:   "team-123",
+		TeamRole: model.TeamRoleReviewer,
+	}
+
+	field, expectedValue, actualValue, ok := service.DiffBridgeRuntimeContext(expected, actual)
+	if !ok {
+		t.Fatal("expected context mismatch to be detected")
+	}
+	if field != "runtime" || expectedValue != "codex" || actualValue != "opencode" {
+		t.Fatalf("mismatch = %s %s %s", field, expectedValue, actualValue)
+	}
+}
+
+func TestDiffBridgeRuntimeContextTreatsMatchingValuesAsStable(t *testing.T) {
+	expected := service.BridgeRuntimeContextSnapshot{
+		Runtime:  "codex",
+		Provider: "openai",
+		Model:    "gpt-5-codex",
+	}
+	actual := service.BridgeRuntimeContextSnapshot{
+		Runtime:  "codex",
+		Provider: "openai",
+		Model:    "gpt-5-codex",
+	}
+
+	if field, expectedValue, actualValue, ok := service.DiffBridgeRuntimeContext(expected, actual); ok {
+		t.Fatalf("unexpected mismatch = %s %s %s", field, expectedValue, actualValue)
+	}
+}
+
 func TestAgentService_SpawnForTeamIncludesTeamExecutionContext(t *testing.T) {
 	taskID := uuid.New()
 	memberID := uuid.New()
@@ -1400,6 +1493,116 @@ func TestAgentService_ProcessBridgeEvent_PermissionRequestQueuesIMNotification(t
 	}
 	if req.Structured == nil || !strings.Contains(req.Structured.Title, "Permission") {
 		t.Fatalf("Structured = %+v", req.Structured)
+	}
+}
+
+func TestAgentService_ProcessBridgeEvent_BudgetAlertQueuesBoundIMNotification(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	runID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{
+		ID:       runID,
+		TaskID:   taskID,
+		MemberID: memberID,
+		Status:   model.AgentRunStatusRunning,
+	}
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Budget alert",
+		BudgetUsd: 5,
+		SpentUsd:  4.2,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	imNotifier := &mockAgentIMProgressNotifier{}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetIMProgressNotifier(imNotifier)
+
+	err := svc.ProcessBridgeEvent(context.Background(), &ws.BridgeAgentEvent{
+		TaskID:      taskID.String(),
+		SessionID:   "session-1",
+		TimestampMS: 790,
+		Type:        ws.BridgeEventBudgetAlert,
+		Data:        []byte(`{"cost_usd":4.2,"budget_remaining_usd":0.8,"threshold_ratio":0.8,"threshold_percent":80,"turn_number":2}`),
+	})
+	if err != nil {
+		t.Fatalf("ProcessBridgeEvent() error = %v", err)
+	}
+
+	if len(imNotifier.requests) != 1 {
+		t.Fatalf("im notifier requests = %d, want 1", len(imNotifier.requests))
+	}
+	req := imNotifier.requests[0]
+	if req.TaskID != taskID.String() || req.RunID != runID.String() {
+		t.Fatalf("request ids = %+v", req)
+	}
+	if req.Metadata["bridge_event_type"] != ws.EventBudgetWarning {
+		t.Fatalf("metadata = %+v", req.Metadata)
+	}
+	if req.Structured == nil || !strings.Contains(req.Structured.Title, "Budget") {
+		t.Fatalf("structured = %+v", req.Structured)
+	}
+}
+
+func TestAgentService_ProcessBridgeEvent_BudgetAlertFallsBackToConfiguredChannels(t *testing.T) {
+	taskID := uuid.New()
+	memberID := uuid.New()
+	projectID := uuid.New()
+	runID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{
+		ID:       runID,
+		TaskID:   taskID,
+		MemberID: memberID,
+		Status:   model.AgentRunStatusRunning,
+	}
+	taskRepo := &mockAgentTaskRepo{task: &model.Task{
+		ID:        taskID,
+		ProjectID: projectID,
+		Title:     "Budget alert",
+		BudgetUsd: 5,
+		SpentUsd:  4.2,
+	}}
+	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
+	control := service.NewIMControlPlane(service.IMControlPlaneConfig{})
+	if _, err := control.UpsertChannel(context.Background(), &model.IMChannel{
+		Platform:  "slack",
+		Name:      "Budget Alerts",
+		ChannelID: "C-budget",
+		Events:    []string{ws.EventBudgetWarning},
+		Active:    true,
+	}); err != nil {
+		t.Fatalf("UpsertChannel() error = %v", err)
+	}
+	imNotifier := &mockAgentIMNotifier{}
+
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetIMProgressNotifier(control)
+	svc.SetIMNotifier(imNotifier)
+	svc.SetIMChannelResolver(control)
+
+	err := svc.ProcessBridgeEvent(context.Background(), &ws.BridgeAgentEvent{
+		TaskID:      taskID.String(),
+		SessionID:   "session-1",
+		TimestampMS: 791,
+		Type:        ws.BridgeEventBudgetAlert,
+		Data:        []byte(`{"cost_usd":4.2,"budget_remaining_usd":0.8,"threshold_ratio":0.8,"threshold_percent":80,"turn_number":2}`),
+	})
+	if err != nil {
+		t.Fatalf("ProcessBridgeEvent() error = %v", err)
+	}
+
+	if len(imNotifier.requests) != 1 {
+		t.Fatalf("notify requests = %+v", imNotifier.requests)
+	}
+	if imNotifier.requests[0].Platform != "slack" || imNotifier.requests[0].ChannelID != "C-budget" {
+		t.Fatalf("notify request = %+v", imNotifier.requests[0])
+	}
+	if imNotifier.requests[0].Event != ws.EventBudgetWarning {
+		t.Fatalf("event = %q", imNotifier.requests[0].Event)
 	}
 }
 
@@ -1842,6 +2045,12 @@ func TestAgentService_RequestSpawnQueuesWhenAdmissionHasNoImmediateSlot(t *testi
 	if result.Dispatch.Queue == nil {
 		t.Fatal("expected queue payload for queued request")
 	}
+	if result.Dispatch.Runtime != "codex" || result.Dispatch.Provider != "openai" || result.Dispatch.Model != "gpt-5-codex" {
+		t.Fatalf("dispatch tuple = %+v", result.Dispatch)
+	}
+	if result.Dispatch.Queue.RecoveryDisposition != model.QueueRecoveryDispositionPending {
+		t.Fatalf("queue recovery disposition = %q", result.Dispatch.Queue.RecoveryDisposition)
+	}
 	if len(repo.runsByTask[taskID]) != 0 {
 		t.Fatalf("expected no real agent run to be created while queued, got %d", len(repo.runsByTask[taskID]))
 	}
@@ -1882,6 +2091,12 @@ func TestAgentService_RequestSpawnQueuesWhenBridgePoolAtCapacity(t *testing.T) {
 	}
 	if result.Dispatch.Queue == nil {
 		t.Fatal("expected queue payload")
+	}
+	if result.Dispatch.Runtime != "codex" || result.Dispatch.Provider != "openai" || result.Dispatch.Model != "gpt-5-codex" {
+		t.Fatalf("dispatch tuple = %+v", result.Dispatch)
+	}
+	if result.Dispatch.Queue.GuardrailType != model.DispatchGuardrailTypePool || result.Dispatch.Queue.GuardrailScope != "bridge" {
+		t.Fatalf("queue verdict = %+v", result.Dispatch.Queue)
 	}
 	for _, want := range []string{"Bridge pool at capacity", "Wait in queue", "Proceed anyway"} {
 		if !strings.Contains(result.Dispatch.Reason, want) {
@@ -1927,6 +2142,9 @@ func TestAgentService_RequestSpawnBlocksWhenBridgeHealthCheckFailsAfterRetries(t
 	}
 	if result.Dispatch.GuardrailType != model.DispatchGuardrailTypeSystem || result.Dispatch.GuardrailScope != "bridge" {
 		t.Fatalf("guardrail = %+v", result.Dispatch)
+	}
+	if result.Dispatch.Runtime != "codex" || result.Dispatch.Provider != "openai" || result.Dispatch.Model != "gpt-5-codex" {
+		t.Fatalf("dispatch tuple = %+v", result.Dispatch)
 	}
 	for _, want := range []string{"Bridge is unavailable", "Retry", "Cancel"} {
 		if !strings.Contains(result.Dispatch.Reason, want) {
@@ -2164,6 +2382,257 @@ func TestAgentService_UpdateStatusRequeuesPromotionWhenBudgetCheckBlocks(t *test
 	}
 	if got := queueStore.completed[0]; !strings.Contains(got, string(model.AgentPoolQueueStatusQueued)) || !strings.Contains(got, "project budget exceeded") {
 		t.Fatalf("queue completion = %q, want queued budget-blocked update", got)
+	}
+	if queueStore.next.GuardrailType != model.DispatchGuardrailTypeBudget || queueStore.next.GuardrailScope != "project" {
+		t.Fatalf("queue verdict = %+v", queueStore.next)
+	}
+	if queueStore.next.RecoveryDisposition != model.QueueRecoveryDispositionRecoverable {
+		t.Fatalf("queue recovery disposition = %q", queueStore.next.RecoveryDisposition)
+	}
+}
+
+func TestAgentService_UpdateStatusRequeuesPromotionWhenBudgetCheckBlocksRecordsDispatchAttempt(t *testing.T) {
+	projectID := uuid.New()
+	runID := uuid.New()
+	completedTaskID := uuid.New()
+	queuedTaskID := uuid.New()
+	memberID := uuid.New()
+	sprintID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{
+		ID:       runID,
+		TaskID:   completedTaskID,
+		MemberID: memberID,
+		Status:   model.AgentRunStatusRunning,
+	}
+	taskRepo := &mockAgentTaskRepo{
+		tasks: map[uuid.UUID]*model.Task{
+			completedTaskID: {ID: completedTaskID, ProjectID: projectID, Title: "Completed task"},
+			queuedTaskID: {
+				ID:          queuedTaskID,
+				ProjectID:   projectID,
+				SprintID:    &sprintID,
+				Title:       "Queued task",
+				Description: "Should record promotion requeue history",
+				BudgetUsd:   4,
+			},
+		},
+	}
+	queueStore := &mockAgentQueueStore{
+		next: &model.AgentPoolQueueEntry{
+			EntryID:   uuid.NewString(),
+			ProjectID: projectID.String(),
+			TaskID:    queuedTaskID.String(),
+			MemberID:  memberID.String(),
+			Status:    model.AgentPoolQueueStatusQueued,
+			Runtime:   "codex",
+			Provider:  "openai",
+			Model:     "gpt-5-codex",
+			RoleID:    "frontend-developer",
+			Priority:  model.PriorityHigh,
+			BudgetUSD: 4,
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	attempts := &mockDispatchAttemptRecorder{}
+
+	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetPool(pool.NewPool(2))
+	svc.SetQueueStore(queueStore)
+	svc.SetDispatchBudgetChecker(&mockDispatchBudgetChecker{
+		result: &service.BudgetCheckResult{
+			Allowed: false,
+			Reason:  "project budget exceeded",
+		},
+	})
+	svc.SetDispatchAttemptRecorder(attempts)
+
+	if err := svc.UpdateStatus(context.Background(), runID, model.AgentRunStatusCompleted); err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+
+	if len(attempts.attempts) != 1 {
+		t.Fatalf("attempt count = %d, want 1", len(attempts.attempts))
+	}
+	attempt := attempts.attempts[0]
+	if attempt.TriggerSource != "promotion" || attempt.Outcome != model.DispatchStatusBlocked {
+		t.Fatalf("attempt = %+v, want promotion blocked", attempt)
+	}
+	if attempt.QueueEntryID != queueStore.next.EntryID || attempt.QueuePriority == nil || *attempt.QueuePriority != model.PriorityHigh {
+		t.Fatalf("attempt queue linkage = %+v", attempt)
+	}
+	if attempt.GuardrailType != model.DispatchGuardrailTypeBudget || attempt.GuardrailScope != "project" {
+		t.Fatalf("attempt guardrail = %+v", attempt)
+	}
+	if attempt.RecoveryDisposition != model.QueueRecoveryDispositionRecoverable {
+		t.Fatalf("attempt recoveryDisposition = %q", attempt.RecoveryDisposition)
+	}
+}
+
+func TestAgentService_UpdateStatusPromotionFailsInvalidMemberAndRecordsAttempt(t *testing.T) {
+	projectID := uuid.New()
+	runID := uuid.New()
+	completedTaskID := uuid.New()
+	queuedTaskID := uuid.New()
+	memberID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{
+		ID:       runID,
+		TaskID:   completedTaskID,
+		MemberID: memberID,
+		Status:   model.AgentRunStatusRunning,
+	}
+	taskRepo := &mockAgentTaskRepo{
+		tasks: map[uuid.UUID]*model.Task{
+			completedTaskID: {ID: completedTaskID, ProjectID: projectID, Title: "Completed task"},
+			queuedTaskID: {
+				ID:          queuedTaskID,
+				ProjectID:   projectID,
+				Title:       "Queued task",
+				Description: "Should fail terminally when member is inactive",
+				BudgetUsd:   3,
+			},
+		},
+	}
+	queueStore := &mockAgentQueueStore{
+		next: &model.AgentPoolQueueEntry{
+			EntryID:   uuid.NewString(),
+			ProjectID: projectID.String(),
+			TaskID:    queuedTaskID.String(),
+			MemberID:  memberID.String(),
+			Status:    model.AgentPoolQueueStatusQueued,
+			Runtime:   "codex",
+			Provider:  "openai",
+			Model:     "gpt-5-codex",
+			BudgetUSD: 3,
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	memberRepo := &mockAgentDispatchMemberRepo{
+		member: &model.Member{ID: memberID, ProjectID: projectID, Type: model.MemberTypeAgent, IsActive: false},
+	}
+	attempts := &mockDispatchAttemptRecorder{}
+
+	hub := ws.NewHub()
+	stop, events := subscribeProjectEvents(t, hub, projectID.String())
+	defer stop()
+	waitForHubClient(t, hub)
+
+	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}, hub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetPool(pool.NewPool(2))
+	svc.SetQueueStore(queueStore)
+	svc.SetDispatchMemberReader(memberRepo)
+	svc.SetDispatchAttemptRecorder(attempts)
+
+	if err := svc.UpdateStatus(context.Background(), runID, model.AgentRunStatusCompleted); err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+
+	if queueStore.next.Status != model.AgentPoolQueueStatusFailed || queueStore.next.RecoveryDisposition != model.QueueRecoveryDispositionTerminal {
+		t.Fatalf("queue verdict = %+v", queueStore.next)
+	}
+	if len(attempts.attempts) != 1 {
+		t.Fatalf("attempt count = %d, want 1", len(attempts.attempts))
+	}
+	attempt := attempts.attempts[0]
+	if attempt.TriggerSource != "promotion" || attempt.Outcome != model.DispatchStatusBlocked {
+		t.Fatalf("attempt = %+v, want promotion blocked", attempt)
+	}
+	if attempt.GuardrailType != model.DispatchGuardrailTypeTarget || attempt.GuardrailScope != "member" {
+		t.Fatalf("attempt guardrail = %+v", attempt)
+	}
+	if attempt.RecoveryDisposition != model.QueueRecoveryDispositionTerminal {
+		t.Fatalf("attempt recoveryDisposition = %q", attempt.RecoveryDisposition)
+	}
+
+	failed := waitForEventType(t, events, ws.EventAgentQueueFailed)
+	var payload struct {
+		Queue model.QueueEntryDTO `json:"queue"`
+		Error string              `json:"error"`
+	}
+	if err := json.Unmarshal(failed.Payload, &payload); err != nil {
+		t.Fatalf("decode failed payload: %v", err)
+	}
+	if payload.Queue.Status != string(model.AgentPoolQueueStatusFailed) || payload.Queue.RecoveryDisposition != model.QueueRecoveryDispositionTerminal {
+		t.Fatalf("failed payload queue = %+v", payload.Queue)
+	}
+}
+
+func TestAgentService_UpdateStatusPromotionEmitsFinalizedPromotedPayload(t *testing.T) {
+	projectID := uuid.New()
+	runID := uuid.New()
+	completedTaskID := uuid.New()
+	queuedTaskID := uuid.New()
+	memberID := uuid.New()
+	repo := newMockAgentRunRepo()
+	repo.runs[runID] = &model.AgentRun{
+		ID:       runID,
+		TaskID:   completedTaskID,
+		MemberID: memberID,
+		Status:   model.AgentRunStatusRunning,
+	}
+	taskRepo := &mockAgentTaskRepo{
+		tasks: map[uuid.UUID]*model.Task{
+			completedTaskID: {ID: completedTaskID, ProjectID: projectID, Title: "Completed task"},
+			queuedTaskID: {
+				ID:          queuedTaskID,
+				ProjectID:   projectID,
+				Title:       "Queued task",
+				Description: "Should emit finalized promoted payload",
+				BudgetUsd:   4,
+			},
+		},
+	}
+	queueStore := &mockAgentQueueStore{
+		next: &model.AgentPoolQueueEntry{
+			EntryID:   uuid.NewString(),
+			ProjectID: projectID.String(),
+			TaskID:    queuedTaskID.String(),
+			MemberID:  memberID.String(),
+			Status:    model.AgentPoolQueueStatusQueued,
+			Runtime:   "codex",
+			Provider:  "openai",
+			Model:     "gpt-5-codex",
+			BudgetUSD: 4,
+			CreatedAt: time.Now().UTC(),
+			UpdatedAt: time.Now().UTC(),
+		},
+	}
+	memberRepo := &mockAgentDispatchMemberRepo{
+		member: &model.Member{ID: memberID, ProjectID: projectID, Type: model.MemberTypeAgent, IsActive: true},
+	}
+	hub := ws.NewHub()
+	stop, events := subscribeProjectEvents(t, hub, projectID.String())
+	defer stop()
+	waitForHubClient(t, hub)
+
+	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}, hub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc.SetPool(pool.NewPool(2))
+	svc.SetQueueStore(queueStore)
+	svc.SetDispatchMemberReader(memberRepo)
+
+	if err := svc.UpdateStatus(context.Background(), runID, model.AgentRunStatusCompleted); err != nil {
+		t.Fatalf("UpdateStatus() error = %v", err)
+	}
+
+	promoted := waitForEventType(t, events, ws.EventAgentQueuePromoted)
+	var payload struct {
+		Queue model.QueueEntryDTO `json:"queue"`
+		Run   model.AgentRunDTO   `json:"run"`
+	}
+	if err := json.Unmarshal(promoted.Payload, &payload); err != nil {
+		t.Fatalf("decode promoted payload: %v", err)
+	}
+	if payload.Queue.Status != string(model.AgentPoolQueueStatusPromoted) {
+		t.Fatalf("queue status = %q, want promoted", payload.Queue.Status)
+	}
+	if payload.Queue.RecoveryDisposition != model.QueueRecoveryDispositionPromoted {
+		t.Fatalf("queue recoveryDisposition = %q, want promoted", payload.Queue.RecoveryDisposition)
+	}
+	if payload.Queue.AgentRunID == nil || *payload.Queue.AgentRunID != payload.Run.ID {
+		t.Fatalf("payload linkage = %+v", payload)
 	}
 }
 

@@ -17,6 +17,12 @@ const MAINTAINED_GO_WASM_TARGETS = {
   "standard-dev-flow": {
     sourcePath: "./cmd/standard-dev-flow",
   },
+  "task-delivery-flow": {
+    sourcePath: "./cmd/task-delivery-flow",
+  },
+  "review-escalation-flow": {
+    sourcePath: "./cmd/review-escalation-flow",
+  },
 };
 
 function getRepoRoot() {

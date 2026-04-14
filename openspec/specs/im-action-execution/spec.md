@@ -38,3 +38,51 @@ If a normalized IM action cannot be executed because the entity is missing, the 
 - **WHEN** an executable or blocked action result is returned to the Bridge
 - **THEN** the result preserves the canonical reply target and metadata needed for follow-up delivery
 - **AND** the Bridge can render the terminal outcome back into the originating conversation without guessing a new destination
+
+### Requirement: IM action execution SHALL preserve bridge binding and reply-target lineage
+When IM Bridge submits an executable action through the backend, the backend SHALL preserve the originating bridge binding and reply-target lineage needed for follow-up progress and terminal delivery. The backend MUST return enough canonical context for the IM Bridge or control plane to deliver the eventual outcome back to the originating conversation without inventing a new destination.
+
+#### Scenario: Assign-agent action keeps the originating bridge binding
+- **WHEN** an IM-originated `assign-agent` action starts a real backend dispatch workflow
+- **THEN** the backend action result preserves the bridge binding or reply-target context associated with that originating IM conversation
+- **THEN** later progress and terminal updates can be routed through the control plane to the same conversation
+
+#### Scenario: Review action terminal result returns to the same conversation
+- **WHEN** an IM-originated review action completes successfully or is blocked
+- **THEN** the backend action result preserves the reply-target-aware completion context
+- **THEN** the IM Bridge can render the final result in the originating conversation without resolving a new reply target
+
+### Requirement: Workflow success and delivery settlement SHALL remain distinct
+The backend SHALL distinguish between successful execution of a workflow and successful delivery of the follow-up IM message. If a workflow completes but the terminal IM delivery cannot be settled, the action result and diagnostics MUST preserve that distinction instead of reporting a fully successful end-to-end IM completion.
+
+#### Scenario: Workflow succeeds but terminal delivery is blocked
+- **WHEN** an IM action starts or completes the requested backend workflow but the bound bridge instance is unavailable for the terminal response
+- **THEN** the backend records the workflow outcome and the delivery settlement failure separately
+- **THEN** operators can see that the action logic succeeded even though the user-facing IM reply did not settle
+
+### Requirement: Message conversion actions SHALL execute canonical wiki and task workflows
+The system SHALL treat `save-as-doc` and `create-task` as executable shared IM actions backed by the existing wiki and task creation workflows. When the Bridge submits either action through `/api/v1/im/action`, the backend MUST create the corresponding wiki page or task instead of returning a placeholder acknowledgement, and it MUST return a canonical action result containing the created entity reference needed for follow-up delivery.
+
+#### Scenario: Save-as-doc action creates a wiki page through the canonical backend workflow
+- **WHEN** the Bridge submits `save-as-doc` with a valid project entity and source message metadata
+- **THEN** the backend resolves the project's wiki space and creates a wiki page through the existing wiki creation workflow
+- **AND** the returned IM action result includes a link or identifier for the created page
+
+#### Scenario: Create-task action creates a backlog task through the canonical backend workflow
+- **WHEN** the Bridge submits `create-task` with a valid project entity and source message metadata
+- **THEN** the backend creates a task through the existing task creation workflow instead of an IM-only shortcut path
+- **AND** the returned IM action result includes the created task identity and task link
+
+### Requirement: Message conversion action results SHALL preserve source context for IM follow-up delivery
+The backend SHALL preserve reply-target lineage and message-derived metadata when completing message conversion actions so the Bridge can render the final outcome back into the originating IM conversation without inventing a new destination or losing the source content summary.
+
+#### Scenario: Save-as-doc result returns to the originating reply target
+- **WHEN** a `save-as-doc` action completes successfully for a message that originated from Slack thread context
+- **THEN** the IM action result preserves that reply-target-aware completion context
+- **AND** the Bridge can post the resulting page link back into the same Slack thread
+
+#### Scenario: Create-task failure remains source-aware
+- **WHEN** a `create-task` action fails because task creation workflow is unavailable or rejects the request
+- **THEN** the backend returns an explicit failed IM action outcome
+- **AND** the result still preserves the originating reply target and source message metadata needed for a truthful user-visible failure response
+

@@ -264,22 +264,12 @@ func (e *BackendIMActionExecutor) executeReviewAction(ctx context.Context, req *
 }
 
 func newIMActionResponse(req *model.IMActionRequest, status string, message string, success bool) *model.IMActionResponse {
-	metadata := cloneStringMap(nil)
-	if req != nil {
-		metadata = cloneStringMap(req.Metadata)
-	}
-	if metadata == nil {
-		metadata = map[string]string{}
-	}
-	if strings.TrimSpace(status) != "" {
-		metadata["action_status"] = strings.TrimSpace(status)
-	}
 	return &model.IMActionResponse{
 		Result:      strings.TrimSpace(message),
 		Success:     success,
 		Status:      strings.TrimSpace(status),
 		ReplyTarget: cloneReplyTarget(req.ReplyTarget),
-		Metadata:    metadata,
+		Metadata:    buildIMActionResponseMetadata(req, status),
 	}
 }
 

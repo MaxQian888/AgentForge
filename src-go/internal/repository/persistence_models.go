@@ -1178,6 +1178,9 @@ type agentPoolQueueEntryRecord struct {
 	RoleID     *string   `gorm:"column:role_id"`
 	Priority   int       `gorm:"column:priority"`
 	BudgetUSD  float64   `gorm:"column:budget_usd"`
+	GuardrailType       *string   `gorm:"column:guardrail_type"`
+	GuardrailScope      *string   `gorm:"column:guardrail_scope"`
+	RecoveryDisposition *string   `gorm:"column:recovery_disposition"`
 	AgentRunID *string   `gorm:"column:agent_run_id"`
 	CreatedAt  time.Time `gorm:"column:created_at"`
 	UpdatedAt  time.Time `gorm:"column:updated_at"`
@@ -1202,6 +1205,9 @@ func newAgentPoolQueueEntryRecord(entry *model.AgentPoolQueueEntry) *agentPoolQu
 		RoleID:     cloneStringPointer(optionalStringPointer(entry.RoleID)),
 		Priority:   entry.Priority,
 		BudgetUSD:  entry.BudgetUSD,
+		GuardrailType:       cloneStringPointer(optionalStringPointer(entry.GuardrailType)),
+		GuardrailScope:      cloneStringPointer(optionalStringPointer(entry.GuardrailScope)),
+		RecoveryDisposition: cloneStringPointer(optionalStringPointer(entry.RecoveryDisposition)),
 		AgentRunID: cloneStringPointer(entry.AgentRunID),
 		CreatedAt:  entry.CreatedAt,
 		UpdatedAt:  entry.UpdatedAt,
@@ -1225,6 +1231,9 @@ func (r *agentPoolQueueEntryRecord) toModel() *model.AgentPoolQueueEntry {
 		RoleID:     valueOrEmpty(r.RoleID),
 		Priority:   r.Priority,
 		BudgetUSD:  r.BudgetUSD,
+		GuardrailType:       valueOrEmpty(r.GuardrailType),
+		GuardrailScope:      valueOrEmpty(r.GuardrailScope),
+		RecoveryDisposition: valueOrEmpty(r.RecoveryDisposition),
 		AgentRunID: cloneStringPointer(r.AgentRunID),
 		CreatedAt:  r.CreatedAt,
 		UpdatedAt:  r.UpdatedAt,

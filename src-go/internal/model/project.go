@@ -75,16 +75,54 @@ type CodingAgentDiagnosticDTO struct {
 	Blocking bool   `json:"blocking"`
 }
 
+type CodingAgentCapabilityDescriptorDTO struct {
+	State                 string   `json:"state"`
+	ReasonCode            string   `json:"reasonCode,omitempty"`
+	Message               string   `json:"message,omitempty"`
+	RequiresRequestFields []string `json:"requiresRequestFields,omitempty"`
+}
+
+type CodingAgentInteractionCapabilitiesDTO map[string]map[string]CodingAgentCapabilityDescriptorDTO
+
+type CodingAgentProviderDTO struct {
+	Provider     string   `json:"provider"`
+	Connected    bool     `json:"connected"`
+	DefaultModel string   `json:"defaultModel,omitempty"`
+	ModelOptions []string `json:"modelOptions,omitempty"`
+	AuthRequired bool     `json:"authRequired,omitempty"`
+	AuthMethods  []string `json:"authMethods,omitempty"`
+}
+
+type CodingAgentLaunchContractDTO struct {
+	PromptTransport        string   `json:"promptTransport"`
+	OutputMode             string   `json:"outputMode"`
+	SupportedOutputModes   []string `json:"supportedOutputModes,omitempty"`
+	SupportedApprovalModes []string `json:"supportedApprovalModes,omitempty"`
+	AdditionalDirectories  bool     `json:"additionalDirectories"`
+	EnvOverrides           bool     `json:"envOverrides"`
+}
+
+type CodingAgentLifecycleDTO struct {
+	Stage              string `json:"stage"`
+	SunsetAt           string `json:"sunsetAt,omitempty"`
+	ReplacementRuntime string `json:"replacementRuntime,omitempty"`
+	Message            string `json:"message,omitempty"`
+}
+
 type CodingAgentRuntimeOptionDTO struct {
-	Runtime             string                     `json:"runtime"`
-	Label               string                     `json:"label"`
-	DefaultProvider     string                     `json:"defaultProvider"`
-	CompatibleProviders []string                   `json:"compatibleProviders"`
-	DefaultModel        string                     `json:"defaultModel"`
-	ModelOptions        []string                   `json:"modelOptions,omitempty"`
-	Available           bool                       `json:"available"`
-	Diagnostics         []CodingAgentDiagnosticDTO `json:"diagnostics"`
-	SupportedFeatures   []string                   `json:"supportedFeatures,omitempty"`
+	Runtime                 string                                `json:"runtime"`
+	Label                   string                                `json:"label"`
+	DefaultProvider         string                                `json:"defaultProvider"`
+	CompatibleProviders     []string                              `json:"compatibleProviders"`
+	DefaultModel            string                                `json:"defaultModel"`
+	ModelOptions            []string                              `json:"modelOptions,omitempty"`
+	Available               bool                                  `json:"available"`
+	Diagnostics             []CodingAgentDiagnosticDTO            `json:"diagnostics"`
+	SupportedFeatures       []string                              `json:"supportedFeatures,omitempty"`
+	InteractionCapabilities CodingAgentInteractionCapabilitiesDTO `json:"interactionCapabilities,omitempty"`
+	Providers               []CodingAgentProviderDTO              `json:"providers,omitempty"`
+	LaunchContract          *CodingAgentLaunchContractDTO         `json:"launchContract,omitempty"`
+	Lifecycle               *CodingAgentLifecycleDTO              `json:"lifecycle,omitempty"`
 }
 
 type CodingAgentCatalogDTO struct {

@@ -86,6 +86,7 @@
       "todo_update",
       "messages",
       "command",
+      "shell",
       "permission_response",
       "agents",
       "skills",
@@ -117,9 +118,9 @@
     ],
     "strict_model_options": true,
     "command": {
-      "default_command": "cursor-agent",
+      "default_command": "agent",
       "env_var": "CURSOR_RUNTIME_COMMAND",
-      "install_hint": "Install Cursor Agent CLI from Cursor or npm."
+      "install_hint": "Install Cursor CLI from cursor.com or ensure the `agent` command is available."
     },
     "auth": {
       "mode": "env_any",
@@ -153,7 +154,7 @@
       "env_vars": ["GEMINI_API_KEY", "GOOGLE_API_KEY"],
       "message": "Gemini CLI authentication is unavailable"
     },
-    "supported_features": ["reasoning", "plan_mode", "progress"]
+    "supported_features": ["reasoning", "plan_mode", "progress", "additional_directories"]
   },
   {
     "key": "qoder",
@@ -195,6 +196,6 @@
       "env_vars": ["IFLOW_API_KEY", "IFLOW_apiKey"],
       "message": "iFlow CLI authentication is unavailable"
     },
-    "supported_features": ["plan_mode", "auto_edit", "progress"]
+    "supported_features": ["plan_mode", "auto_edit", "progress", "additional_directories"]
   }
 ]

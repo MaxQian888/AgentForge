@@ -2,7 +2,12 @@ import { act, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TeamPageClient } from "./team-page-client";
 import type { TeamMember } from "@/lib/dashboard/summary";
-import type { CreateMemberInput, UpdateMemberInput } from "@/lib/stores/member-store";
+import type { MemberStatus } from "@/lib/team/member-status";
+import type {
+  BulkUpdateMembersResponse,
+  CreateMemberInput,
+  UpdateMemberInput,
+} from "@/lib/stores/member-store";
 import type { RoleManifest } from "@/lib/stores/role-store";
 
 const replace = jest.fn();
@@ -11,8 +16,13 @@ const createMember = jest.fn();
 const updateMember = jest.fn();
 const fetchMembers = jest.fn();
 const fetchRoles = jest.fn();
+const bulkUpdateMemberAvailability = jest.fn();
+const clearBulkUpdateResult = jest.fn();
 const teamManagementProjectsRefs: Array<Array<{ id: string; name: string }>> = [];
 const teamManagementRoleRefs: Array<RoleManifest[]> = [];
+const searchParamsState = {
+  project: "project-1" as string | null,
+};
 
 const roster: TeamMember[] = [
   {
@@ -53,7 +63,18 @@ const dashboardState = {
   fetchSummary,
 };
 
-const memberState = {
+const memberState: {
+  membersByProject: Record<string, TeamMember[]>;
+  loadingByProject: Record<string, boolean>;
+  errorByProject: Record<string, string | null>;
+  bulkUpdatePendingByProject: Record<string, boolean>;
+  bulkUpdateResultsByProject: Record<string, BulkUpdateMembersResponse | null>;
+  fetchMembers: typeof fetchMembers;
+  createMember: typeof createMember;
+  updateMember: typeof updateMember;
+  bulkUpdateMemberAvailability: typeof bulkUpdateMemberAvailability;
+  clearBulkUpdateResult: typeof clearBulkUpdateResult;
+} = {
   membersByProject: {
     "project-1": roster,
   },
@@ -63,9 +84,17 @@ const memberState = {
   errorByProject: {
     "project-1": null,
   },
+  bulkUpdatePendingByProject: {
+    "project-1": false,
+  },
+  bulkUpdateResultsByProject: {
+    "project-1": null,
+  },
   fetchMembers,
   createMember,
   updateMember,
+  bulkUpdateMemberAvailability,
+  clearBulkUpdateResult,
 };
 
 const roleState = {
@@ -118,7 +147,7 @@ jest.mock("next/navigation", () => ({
   usePathname: () => "/team",
   useRouter: () => ({ replace }),
   useSearchParams: () => ({
-    get: (key: string) => (key === "project" ? "project-1" : null),
+    get: (key: string) => (key === "project" ? searchParamsState.project : null),
   }),
 }));
 
@@ -144,6 +173,7 @@ jest.mock("./team-management", () => ({
     onProjectChange,
     onCreateMember,
     onUpdateMember,
+    onBulkUpdateMembers,
     availableRoles,
   }: {
     projects: Array<{ id: string; name: string }>;
@@ -151,6 +181,10 @@ jest.mock("./team-management", () => ({
     onProjectChange: (projectId: string) => void;
     onCreateMember: (input: CreateMemberInput) => Promise<void>;
     onUpdateMember: (memberId: string, input: UpdateMemberInput) => Promise<void>;
+    onBulkUpdateMembers?: (
+      memberIds: string[],
+      status: MemberStatus,
+    ) => Promise<unknown>;
     availableRoles: RoleManifest[];
   }) => (
     (() => {
@@ -174,6 +208,12 @@ jest.mock("./team-management", () => ({
           >
             Update Member
           </button>
+          <button
+            type="button"
+            onClick={() => onBulkUpdateMembers?.(["member-1"], "suspended")}
+          >
+            Bulk Suspend
+          </button>
         </div>
       );
     })()
@@ -188,8 +228,14 @@ describe("TeamPageClient", () => {
     createMember.mockReset().mockResolvedValue(undefined);
     updateMember.mockReset().mockResolvedValue(undefined);
     fetchRoles.mockReset().mockResolvedValue(undefined);
+    bulkUpdateMemberAvailability.mockReset().mockResolvedValue({
+      status: "suspended",
+      results: [{ memberId: "member-1", success: true, status: "suspended" }],
+    });
+    clearBulkUpdateResult.mockReset();
     teamManagementProjectsRefs.length = 0;
     teamManagementRoleRefs.length = 0;
+    searchParamsState.project = "project-1";
   });
 
   it("keeps project options referentially stable when dashboard state is unchanged", async () => {
@@ -231,5 +277,33 @@ describe("TeamPageClient", () => {
       role: "lead-frontend",
     });
     expect(fetchMembers).toHaveBeenLastCalledWith("project-1");
+
+    await user.click(screen.getByRole("button", { name: "Bulk Suspend" }));
+    expect(bulkUpdateMemberAvailability).toHaveBeenCalledWith(
+      "project-1",
+      ["member-1"],
+      "suspended",
+    );
+    expect(fetchSummary).toHaveBeenLastCalledWith({ projectId: "project-1" });
+  });
+
+  it("clears previous-project bulk results when the active project scope changes", async () => {
+    const { rerender } = render(<TeamPageClient />);
+
+    searchParamsState.project = "project-2";
+    memberState.membersByProject["project-2"] = roster.map((member) => ({
+      ...member,
+      projectId: "project-2",
+    }));
+    memberState.loadingByProject["project-2"] = false;
+    memberState.errorByProject["project-2"] = null;
+    memberState.bulkUpdatePendingByProject["project-2"] = false;
+    memberState.bulkUpdateResultsByProject["project-2"] = null;
+
+    await act(async () => {
+      rerender(<TeamPageClient />);
+    });
+
+    expect(clearBulkUpdateResult).toHaveBeenCalledWith("project-1");
   });
 });

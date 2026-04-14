@@ -76,6 +76,42 @@ func (f *fakeMemberRepo) Update(_ context.Context, id uuid.UUID, req *model.Upda
 	return nil
 }
 
+func (f *fakeMemberRepo) BulkUpdateStatus(
+	_ context.Context,
+	projectID uuid.UUID,
+	memberIDs []uuid.UUID,
+	status string,
+) ([]model.BulkUpdateMemberResult, error) {
+	results := make([]model.BulkUpdateMemberResult, 0, len(memberIDs))
+	for _, memberID := range memberIDs {
+		var matched *model.Member
+		for _, member := range f.members {
+			if member != nil && member.ID == memberID && member.ProjectID == projectID {
+				matched = member
+				break
+			}
+		}
+		if matched == nil {
+			results = append(results, model.BulkUpdateMemberResult{
+				MemberID: memberID.String(),
+				Success:  false,
+				Error:    "member not found in project",
+			})
+			continue
+		}
+
+		matched.Status = model.NormalizeMemberStatus(status, status == model.MemberStatusActive)
+		matched.IsActive = model.IsMemberStatusActive(matched.Status)
+		results = append(results, model.BulkUpdateMemberResult{
+			MemberID: memberID.String(),
+			Success:  true,
+			Status:   matched.Status,
+		})
+	}
+
+	return results, nil
+}
+
 func (f *fakeMemberRepo) GetByID(_ context.Context, id uuid.UUID) (*model.Member, error) {
 	for _, member := range f.members {
 		if member != nil && member.ID == id {
@@ -249,6 +285,91 @@ func TestMemberHandlerUpdateRoundTripsCanonicalStatusAndIMIdentity(t *testing.T)
 	}
 }
 
+func TestMemberHandlerBulkUpdateReturnsPerMemberResults(t *testing.T) {
+	projectID := uuid.New()
+	memberID := uuid.New()
+	otherProjectMemberID := uuid.New()
+	now := time.Now().UTC()
+	repo := &fakeMemberRepo{
+		members: []*model.Member{
+			{
+				ID:        memberID,
+				ProjectID: projectID,
+				Name:      "Review Bot",
+				Type:      model.MemberTypeAgent,
+				Role:      "code-reviewer",
+				IsActive:  true,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+			{
+				ID:        otherProjectMemberID,
+				ProjectID: uuid.New(),
+				Name:      "Other Bot",
+				Type:      model.MemberTypeAgent,
+				Role:      "observer",
+				IsActive:  true,
+				CreatedAt: now,
+				UpdatedAt: now,
+			},
+		},
+	}
+	setStringFieldIfPresent(repo.members[0], "Status", stringPtr("active"))
+	setStringFieldIfPresent(repo.members[1], "Status", stringPtr("active"))
+
+	e := echo.New()
+	e.Validator = validatorStub{}
+	body := `{"memberIds":["` + memberID.String() + `","` + otherProjectMemberID.String() + `"],"status":"suspended"}`
+	req := httptest.NewRequest(http.MethodPost, "/projects/"+projectID.String()+"/members/bulk-update", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetPath("/projects/:pid/members/bulk-update")
+	ctx.SetParamNames("pid")
+	ctx.SetParamValues(projectID.String())
+	ctx.Set(appMiddleware.ProjectIDContextKey, projectID)
+
+	h := handler.NewMemberHandler(repo)
+	method := reflect.ValueOf(h).MethodByName("BulkUpdate")
+	if !method.IsValid() {
+		t.Fatalf("BulkUpdate method is missing")
+	}
+
+	results := method.Call([]reflect.Value{reflect.ValueOf(ctx)})
+	if len(results) != 1 {
+		t.Fatalf("BulkUpdate() returned %d values, want 1", len(results))
+	}
+	if errValue := results[0]; !errValue.IsNil() {
+		t.Fatalf("BulkUpdate() error = %v", errValue.Interface())
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var response struct {
+		Results []map[string]any `json:"results"`
+	}
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if len(response.Results) != 2 {
+		t.Fatalf("len(results) = %d, want 2", len(response.Results))
+	}
+	if response.Results[0]["memberId"] != memberID.String() || response.Results[0]["success"] != true {
+		t.Fatalf("first result = %#v, want successful update for project member", response.Results[0])
+	}
+	if response.Results[0]["status"] != "suspended" {
+		t.Fatalf("first result status = %#v, want suspended", response.Results[0]["status"])
+	}
+	if response.Results[1]["memberId"] != otherProjectMemberID.String() || response.Results[1]["success"] != false {
+		t.Fatalf("second result = %#v, want failed update for out-of-scope member", response.Results[1])
+	}
+	if !strings.Contains(strings.ToLower(asString(response.Results[1]["error"])), "project") {
+		t.Fatalf("second result error = %#v, want project-scoped failure", response.Results[1]["error"])
+	}
+}
+
 type validatorStub struct{}
 
 func (validatorStub) Validate(any) error { return nil }
@@ -309,4 +430,11 @@ func getOptionalStringField(target any, fieldName string) *string {
 
 func stringPtr(value string) *string {
 	return &value
+}
+
+func asString(value any) string {
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return ""
 }

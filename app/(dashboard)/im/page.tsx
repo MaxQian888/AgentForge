@@ -12,7 +12,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IMChannelConfig } from "@/components/im/im-channel-config";
 import { IMBridgeHealth } from "@/components/im/im-bridge-health";
 import { IMMessageHistory } from "@/components/im/im-message-history";
-import { useIMStore } from "@/lib/stores/im-store";
+import { useIMStore, type IMPlatform } from "@/lib/stores/im-store";
 import { PageHeader } from "@/components/shared/page-header";
 import { ErrorBanner } from "@/components/shared/error-banner";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
@@ -34,7 +34,7 @@ export default function IMBridgePage() {
   const [activeTab, setActiveTab] = useState("channels");
   const [preferredPlatform, setPreferredPlatform] = useState<string | null>(null);
   const [channelConfigSeed, setChannelConfigSeed] = useState(0);
-  const [testPlatform, setTestPlatform] = useState("slack");
+  const [testPlatform, setTestPlatform] = useState<IMPlatform | "">("");
   const [testChannelId, setTestChannelId] = useState("");
   const [testMessage, setTestMessage] = useState("ping");
 
@@ -58,9 +58,14 @@ export default function IMBridgePage() {
     setChannelConfigSeed((current) => current + 1);
   };
 
-  const availablePlatforms = useMemo(
-    () => Array.from(new Set(channels.map((channel) => channel.platform).filter(Boolean))).sort(),
+  const activeChannels = useMemo(
+    () => channels.filter((channel) => channel.active !== false),
     [channels],
+  );
+  const availablePlatforms = useMemo(
+    () =>
+      Array.from(new Set(activeChannels.map((channel) => channel.platform).filter(Boolean))).sort(),
+    [activeChannels],
   );
   const successRateText = useMemo(() => {
     const settled = deliveries.filter((delivery) =>
@@ -74,10 +79,13 @@ export default function IMBridgePage() {
     );
     return `${Math.round((successful.length / settled.length) * 100)}%`;
   }, [deliveries]);
-  const effectiveTestPlatform = testPlatform || availablePlatforms[0] || "slack";
+  const effectiveTestPlatform =
+    (testPlatform && availablePlatforms.includes(testPlatform) ? testPlatform : "") ||
+    availablePlatforms[0] ||
+    "";
   const platformChannels = useMemo(
-    () => channels.filter((channel) => channel.platform === effectiveTestPlatform),
-    [channels, effectiveTestPlatform],
+    () => activeChannels.filter((channel) => channel.platform === effectiveTestPlatform),
+    [activeChannels, effectiveTestPlatform],
   );
   const effectiveTestChannelId = testChannelId || platformChannels[0]?.channelId || "";
 
@@ -131,8 +139,12 @@ export default function IMBridgePage() {
               id="im-test-platform"
               className="rounded-md border bg-background px-3 py-2 text-sm"
               value={effectiveTestPlatform}
-              onChange={(event) => setTestPlatform(event.target.value)}
+              onChange={(event) => setTestPlatform(event.target.value as IMPlatform | "")}
+              disabled={availablePlatforms.length === 0}
             >
+              {availablePlatforms.length === 0 ? (
+                <option value="">{t("channels.noChannels")}</option>
+              ) : null}
               {availablePlatforms.map((platform) => (
                 <option key={platform} value={platform}>
                   {platform}
@@ -165,10 +177,18 @@ export default function IMBridgePage() {
             </Button>
           </div>
           {lastTestSendResult ? (
-            <div className="md:col-span-4">
+            <div className="md:col-span-4 flex flex-col gap-2">
               <Badge variant="secondary">
                 {`${t("testSendResult")}: ${lastTestSendResult.status}`}
               </Badge>
+              {lastTestSendResult.failureReason ? (
+                <p className="text-sm text-destructive">{lastTestSendResult.failureReason}</p>
+              ) : null}
+              {lastTestSendResult.downgradeReason ? (
+                <p className="text-sm text-muted-foreground">
+                  {`downgrade: ${lastTestSendResult.downgradeReason}`}
+                </p>
+              ) : null}
             </div>
           ) : null}
         </CardContent>

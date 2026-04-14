@@ -36,6 +36,12 @@ func TestLive_NormalizeMessageEventPreservesReplyTargetContext(t *testing.T) {
 	if message.ReplyTarget == nil || message.ReplyTarget.ChatID != "2002" || message.ReplyTarget.MessageID != "1001" {
 		t.Fatalf("ReplyTarget = %+v", message.ReplyTarget)
 	}
+	if message.ReplyTarget.ConversationID != "2002" {
+		t.Fatalf("ConversationID = %q", message.ReplyTarget.ConversationID)
+	}
+	if message.ReplyTarget.ProgressMode != string(core.AsyncUpdateReply) {
+		t.Fatalf("ProgressMode = %q", message.ReplyTarget.ProgressMode)
+	}
 }
 
 func TestLive_ReplyAndSendDispatchOneBotActions(t *testing.T) {

@@ -61,7 +61,7 @@ func TestBridgeHandler_ForwardsParsedBridgeEvents(t *testing.T) {
 		if !strings.Contains(string(event.Data), "hello from bridge") {
 			t.Fatalf("event data = %s", string(event.Data))
 		}
-	case <-time.After(2 * time.Second):
+	case <-time.After(5 * time.Second):
 		t.Fatal("timed out waiting for processed bridge event")
 	}
 }

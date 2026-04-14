@@ -270,6 +270,44 @@ func (s *IMControlPlane) DeleteChannel(_ context.Context, channelID string) erro
 	return nil
 }
 
+func (s *IMControlPlane) ResolveChannelsForEvent(_ context.Context, eventType string, platform string, channelID string) ([]*model.IMChannel, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+
+	normalizedEvent := strings.TrimSpace(eventType)
+	normalizedPlatform := normalizePlatform(platform)
+	normalizedChannelID := strings.TrimSpace(channelID)
+
+	channels := make([]*model.IMChannel, 0, len(s.channels))
+	for _, channel := range s.channels {
+		if channel == nil || !channel.Active {
+			continue
+		}
+		if normalizedPlatform != "" && normalizePlatform(channel.Platform) != normalizedPlatform {
+			continue
+		}
+		if normalizedChannelID != "" && strings.TrimSpace(channel.ChannelID) != normalizedChannelID {
+			continue
+		}
+		if normalizedEvent != "" && !containsFold(channel.Events, normalizedEvent) {
+			continue
+		}
+		channels = append(channels, cloneChannel(channel))
+	}
+
+	sort.Slice(channels, func(i, j int) bool {
+		if channels[i].Platform == channels[j].Platform {
+			if channels[i].Name == channels[j].Name {
+				return channels[i].ChannelID < channels[j].ChannelID
+			}
+			return channels[i].Name < channels[j].Name
+		}
+		return channels[i].Platform < channels[j].Platform
+	})
+
+	return channels, nil
+}
+
 func (s *IMControlPlane) GetBridgeStatus(_ context.Context) (*model.IMBridgeStatus, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -465,18 +503,7 @@ func (s *IMControlPlane) ListDeliveryHistory(_ context.Context, filters *model.I
 }
 
 func (s *IMControlPlane) ListEventTypes(_ context.Context) ([]string, error) {
-	return []string{
-		"task.created",
-		"task.completed",
-		"review.completed",
-		"agent.started",
-		"agent.completed",
-		"budget.warning",
-		"sprint.started",
-		"sprint.completed",
-		"review.requested",
-		"workflow.failed",
-	}, nil
+	return CanonicalIMEventInventory(), nil
 }
 
 func (s *IMControlPlane) ResolveBridgeTarget(platform string, projectID string, targetBridgeID string) (*model.IMBridgeInstance, error) {
@@ -761,7 +788,22 @@ func (s *IMControlPlane) QueueBoundProgress(ctx context.Context, req IMBoundProg
 	if req.IsTerminal {
 		kind = IMDeliveryKindTerminal
 	}
-	_, err := s.QueueDelivery(ctx, IMQueueDeliveryRequest{
+	source := imDeliverySourceBoundProgress
+	if req.IsTerminal {
+		source = imDeliverySourceBoundTerminal
+	}
+	metadata := buildIMConnectivityMetadata(
+		req.Metadata,
+		source,
+		binding.BridgeID,
+		binding.Platform,
+		binding.ProjectID,
+		binding.TaskID,
+		binding.RunID,
+		binding.ReviewID,
+		binding.ReplyTarget,
+	)
+	delivery, err := s.QueueDelivery(ctx, IMQueueDeliveryRequest{
 		TargetBridgeID: binding.BridgeID,
 		Platform:       binding.Platform,
 		ProjectID:      binding.ProjectID,
@@ -769,11 +811,27 @@ func (s *IMControlPlane) QueueBoundProgress(ctx context.Context, req IMBoundProg
 		Content:        req.Content,
 		Structured:     req.Structured,
 		Native:         req.Native,
-		Metadata:       req.Metadata,
+		Metadata:       metadata,
 		ReplyTarget:    binding.ReplyTarget,
 		TargetChatID:   resolveTargetChatID(binding.ReplyTarget),
 	})
 	if err != nil {
+		s.RecordDeliveryResult(model.IMDelivery{
+			BridgeID:      binding.BridgeID,
+			ProjectID:     binding.ProjectID,
+			ChannelID:     resolveTargetChatID(binding.ReplyTarget),
+			TargetChatID:  resolveTargetChatID(binding.ReplyTarget),
+			Platform:      binding.Platform,
+			EventType:     firstNonEmpty(strings.TrimSpace(metadata["bridge_event_type"]), "bound.progress"),
+			Kind:          kind,
+			Status:        model.IMDeliveryStatusFailed,
+			FailureReason: err.Error(),
+			Content:       normalizeDeliveryContent(req.Content, req.Structured),
+			Structured:    req.Structured,
+			Native:        req.Native,
+			Metadata:      metadata,
+			ReplyTarget:   binding.ReplyTarget,
+		})
 		log.WithFields(log.Fields{
 			"bridgeId":   binding.BridgeID,
 			"platform":   binding.Platform,
@@ -786,6 +844,26 @@ func (s *IMControlPlane) QueueBoundProgress(ctx context.Context, req IMBoundProg
 		}).WithError(err).Warn("IM control plane bound progress queue failed")
 		return false, err
 	}
+	deliveryID := ""
+	if delivery != nil {
+		deliveryID = strings.TrimSpace(delivery.DeliveryID)
+	}
+	s.RecordDeliveryResult(model.IMDelivery{
+		ID:           deliveryID,
+		BridgeID:     binding.BridgeID,
+		ProjectID:    binding.ProjectID,
+		ChannelID:    resolveTargetChatID(binding.ReplyTarget),
+		TargetChatID: resolveTargetChatID(binding.ReplyTarget),
+		Platform:     binding.Platform,
+		EventType:    firstNonEmpty(strings.TrimSpace(metadata["bridge_event_type"]), "bound.progress"),
+		Kind:         kind,
+		Status:       model.IMDeliveryStatusPending,
+		Content:      normalizeDeliveryContent(req.Content, req.Structured),
+		Structured:   req.Structured,
+		Native:       req.Native,
+		Metadata:     metadata,
+		ReplyTarget:  binding.ReplyTarget,
+	})
 	log.WithFields(log.Fields{
 		"bridgeId":   binding.BridgeID,
 		"platform":   binding.Platform,
@@ -827,6 +905,19 @@ func parseMetadataBool(raw string) (bool, bool) {
 	default:
 		return false, false
 	}
+}
+
+func containsFold(values []string, target string) bool {
+	trimmedTarget := strings.TrimSpace(target)
+	if trimmedTarget == "" {
+		return false
+	}
+	for _, value := range values {
+		if strings.EqualFold(strings.TrimSpace(value), trimmedTarget) {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *IMControlPlane) SignDelivery(delivery *model.IMControlDelivery) string {

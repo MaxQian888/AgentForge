@@ -138,6 +138,7 @@ func TestBackendIMActionExecutor_AssignAgentUsesDispatchWorkflow(t *testing.T) {
 		Action:    "assign-agent",
 		EntityID:  taskID.String(),
 		ChannelID: "C123",
+		BridgeID:  "bridge-slack-1",
 		ReplyTarget: &model.IMReplyTarget{
 			Platform:  "slack",
 			ChannelID: "C123",
@@ -162,6 +163,15 @@ func TestBackendIMActionExecutor_AssignAgentUsesDispatchWorkflow(t *testing.T) {
 	}
 	if resp.ReplyTarget == nil || resp.ReplyTarget.ThreadID != "thread-1" {
 		t.Fatalf("replyTarget = %+v", resp.ReplyTarget)
+	}
+	if resp.Metadata[imMetadataDeliverySource] != imDeliverySourceActionResult {
+		t.Fatalf("delivery source metadata = %+v", resp.Metadata)
+	}
+	if resp.Metadata[imMetadataBridgeBindingBridgeID] != "bridge-slack-1" {
+		t.Fatalf("bridge binding metadata = %+v", resp.Metadata)
+	}
+	if resp.Metadata[imMetadataReplyTargetThreadID] != "thread-1" {
+		t.Fatalf("reply target metadata = %+v", resp.Metadata)
 	}
 }
 
@@ -377,6 +387,39 @@ func TestBackendIMActionExecutor_CreateTaskCreatesBacklogTask(t *testing.T) {
 	}
 	if resp.Task == nil || resp.Task.Title != "Follow up" {
 		t.Fatalf("response task = %+v", resp.Task)
+	}
+}
+
+func TestBackendIMActionExecutor_CreateTaskFailsWhenWorkflowUnavailable(t *testing.T) {
+	projectID := uuid.New()
+	executor := NewBackendIMActionExecutor(nil, nil, nil)
+
+	resp, err := executor.Execute(context.Background(), &model.IMActionRequest{
+		Platform:  "slack",
+		Action:    "create-task",
+		EntityID:  projectID.String(),
+		ChannelID: "C123",
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C123",
+			ThreadID:  "thread-1",
+		},
+		Metadata: map[string]string{
+			"title": "Follow up",
+			"body":  "Created from message",
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if resp == nil || resp.Success {
+		t.Fatalf("response = %+v", resp)
+	}
+	if resp.Status != model.IMActionStatusFailed {
+		t.Fatalf("status = %q", resp.Status)
+	}
+	if resp.ReplyTarget == nil || resp.ReplyTarget.ThreadID != "thread-1" {
+		t.Fatalf("reply target = %+v", resp.ReplyTarget)
 	}
 }
 

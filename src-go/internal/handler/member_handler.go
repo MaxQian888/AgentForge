@@ -19,6 +19,7 @@ type memberRepository interface {
 	Create(ctx context.Context, member *model.Member) error
 	ListByProject(ctx context.Context, projectID uuid.UUID) ([]*model.Member, error)
 	Update(ctx context.Context, id uuid.UUID, req *model.UpdateMemberRequest) error
+	BulkUpdateStatus(ctx context.Context, projectID uuid.UUID, memberIDs []uuid.UUID, status string) ([]model.BulkUpdateMemberResult, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Member, error)
 	Delete(ctx context.Context, id uuid.UUID) error
 }
@@ -97,6 +98,35 @@ func (h *MemberHandler) Update(c echo.Context) error {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToFetchUpdatedMember)
 	}
 	return c.JSON(http.StatusOK, member.ToDTO())
+}
+
+func (h *MemberHandler) BulkUpdate(c echo.Context) error {
+	req := new(model.BulkUpdateMembersRequest)
+	if err := c.Bind(req); err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
+	}
+	if validator, ok := c.Echo().Validator.(interface{ Validate(any) error }); ok && validator != nil {
+		if err := validator.Validate(req); err != nil {
+			return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+		}
+	}
+
+	projectID := appMiddleware.GetProjectID(c)
+	memberIDs := make([]uuid.UUID, 0, len(req.MemberIDs))
+	for _, rawID := range req.MemberIDs {
+		memberID, err := uuid.Parse(rawID)
+		if err != nil {
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidMemberID)
+		}
+		memberIDs = append(memberIDs, memberID)
+	}
+
+	results, err := h.repo.BulkUpdateStatus(c.Request().Context(), projectID, memberIDs, req.Status)
+	if err != nil {
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateMember)
+	}
+
+	return c.JSON(http.StatusOK, model.BulkUpdateMembersResponse{Results: results})
 }
 
 func (h *MemberHandler) Delete(c echo.Context) error {

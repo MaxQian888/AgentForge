@@ -184,7 +184,7 @@ func TestLive_StartRoutesBlockActionToActionHandler(t *testing.T) {
 					{
 						ActionID: "approve_button",
 						BlockID:  "review_actions",
-						Value:    "act:approve:review-1",
+						Value:    "act:create-task:project-1?title=Follow+up&body=Created+from+Slack",
 					},
 				},
 			},
@@ -205,7 +205,7 @@ func TestLive_StartRoutesBlockActionToActionHandler(t *testing.T) {
 	if req.Platform != "slack" {
 		t.Fatalf("Platform = %q, want slack", req.Platform)
 	}
-	if req.Action != "approve" || req.EntityID != "review-1" {
+	if req.Action != "create-task" || req.EntityID != "project-1" {
 		t.Fatalf("action request = %+v", req)
 	}
 	if req.ChatID != "C456" || req.UserID != "U123" {
@@ -225,6 +225,9 @@ func TestLive_StartRoutesBlockActionToActionHandler(t *testing.T) {
 	}
 	if req.Metadata["source"] != "block_actions" || req.Metadata["action_id"] != "approve_button" || req.Metadata["block_id"] != "review_actions" {
 		t.Fatalf("Metadata = %+v", req.Metadata)
+	}
+	if req.Metadata["title"] != "Follow up" || req.Metadata["body"] != "Created from Slack" {
+		t.Fatalf("metadata query params = %+v", req.Metadata)
 	}
 }
 

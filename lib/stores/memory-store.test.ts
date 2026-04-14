@@ -28,7 +28,7 @@ function makeApiClient(): MockMemoryApiClient {
 
 describe("useMemoryStore", () => {
   const mockCreateApiClient = createApiClient as jest.Mock;
-  const mockGetAuthState = (useAuthStore.getState as unknown as jest.Mock);
+  const mockGetAuthState = useAuthStore.getState as unknown as jest.Mock;
 
   beforeEach(() => {
     jest.clearAllMocks();
@@ -36,40 +36,80 @@ describe("useMemoryStore", () => {
     useMemoryStore.setState({
       entries: [],
       loading: false,
-    });
+    } as never);
   });
 
-  it("searches memory with query params and normalizes response entries", async () => {
+  it("loads workspace list and stats with canonical explorer filters", async () => {
     const api = makeApiClient();
-    api.get.mockResolvedValueOnce({
-      data: [
-        {
-          id: 123,
-          projectId: "project-1",
-          scope: "role",
-          roleId: "reviewer",
-          category: "episodic",
-          key: "incident",
-          content: "Handle review escalations",
-          metadata: { source: "feedback" },
-          relevanceScore: "0.9",
-          accessCount: "4",
-          createdAt: "2026-03-25T10:00:00.000Z",
+    api.get
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: 123,
+            projectId: "project-1",
+            scope: "role",
+            roleId: "reviewer",
+            category: "episodic",
+            key: "incident",
+            content: "Handle review escalations",
+            metadata: { source: "feedback" },
+            metadataObject: { source: "feedback" },
+            relatedContext: [{ type: "task", id: "task-1", label: "Related task" }],
+            relevanceScore: "0.9",
+            accessCount: "4",
+            lastAccessedAt: "2026-03-25T10:05:00.000Z",
+            createdAt: "2026-03-25T10:00:00.000Z",
+            updatedAt: "2026-03-25T10:06:00.000Z",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        data: {
+          totalCount: 3,
+          approxStorageBytes: 4096,
+          byCategory: { episodic: 2, semantic: 1 },
+          byScope: { role: 2, project: 1 },
+          oldestCreatedAt: "2026-03-01T00:00:00.000Z",
+          newestCreatedAt: "2026-03-25T10:00:00.000Z",
+          lastAccessedAt: "2026-03-25T10:05:00.000Z",
         },
-      ],
-    });
+      });
     mockCreateApiClient.mockReturnValue(api);
 
-    await useMemoryStore
-      .getState()
-      .searchMemory("project-1", "review", "role", "episodic");
+    await useMemoryStore.getState().loadWorkspace("project-1", {
+      query: "review",
+      scope: "role",
+      category: "episodic",
+      roleId: "reviewer",
+      startAt: "2026-03-01T00:00:00.000Z",
+      endAt: "2026-03-31T23:59:59.000Z",
+      limit: 50,
+    });
 
-    expect(api.get).toHaveBeenCalledWith(
-      "/api/v1/projects/project-1/memory?query=review&scope=role&category=episodic",
+    expect(api.get).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/projects/project-1/memory?query=review&scope=role&category=episodic&roleId=reviewer&startAt=2026-03-01T00%3A00%3A00.000Z&endAt=2026-03-31T23%3A59%3A59.000Z&limit=50",
       { token: "test-token" },
     );
+    expect(api.get).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/projects/project-1/memory/stats?query=review&scope=role&category=episodic&roleId=reviewer&startAt=2026-03-01T00%3A00%3A00.000Z&endAt=2026-03-31T23%3A59%3A59.000Z&limit=50",
+      { token: "test-token" },
+    );
+
     expect(useMemoryStore.getState()).toMatchObject({
+      currentProjectId: "project-1",
+      filters: {
+        query: "review",
+        scope: "role",
+        category: "episodic",
+        roleId: "reviewer",
+        startAt: "2026-03-01T00:00:00.000Z",
+        endAt: "2026-03-31T23:59:59.000Z",
+        limit: 50,
+      },
       loading: false,
+      statsLoading: false,
       entries: [
         {
           id: "123",
@@ -80,24 +120,300 @@ describe("useMemoryStore", () => {
           key: "incident",
           content: "Handle review escalations",
           metadata: JSON.stringify({ source: "feedback" }),
+          metadataObject: { source: "feedback" },
+          relatedContext: [{ type: "task", id: "task-1", label: "Related task" }],
           relevanceScore: 0.9,
           accessCount: 4,
+          lastAccessedAt: "2026-03-25T10:05:00.000Z",
           createdAt: "2026-03-25T10:00:00.000Z",
+          updatedAt: "2026-03-25T10:06:00.000Z",
         },
       ],
+      stats: {
+        totalCount: 3,
+        approxStorageBytes: 4096,
+        byCategory: { episodic: 2, semantic: 1 },
+        byScope: { role: 2, project: 1 },
+        oldestCreatedAt: "2026-03-01T00:00:00.000Z",
+        newestCreatedAt: "2026-03-25T10:00:00.000Z",
+        lastAccessedAt: "2026-03-25T10:05:00.000Z",
+      },
     });
   });
 
-  it("resets loading even when searchMemory fails", async () => {
+  it("fetches memory detail for the selected entry", async () => {
     const api = makeApiClient();
-    api.get.mockRejectedValueOnce(new Error("network failure"));
+    api.get.mockResolvedValueOnce({
+      data: {
+        id: "memory-1",
+        projectId: "project-1",
+        scope: "role",
+        roleId: "reviewer",
+        category: "episodic",
+        key: "incident",
+        content: "Full incident timeline",
+        metadata: "{\"source\":\"feedback\"}",
+        metadataObject: { source: "feedback", taskId: "task-1" },
+        relatedContext: [{ type: "task", id: "task-1", label: "Related task" }],
+        relevanceScore: 0.75,
+        accessCount: 6,
+        lastAccessedAt: "2026-03-25T11:00:00.000Z",
+        createdAt: "2026-03-25T10:00:00.000Z",
+        updatedAt: "2026-03-25T10:30:00.000Z",
+      },
+    });
     mockCreateApiClient.mockReturnValue(api);
 
-    await expect(
-      useMemoryStore.getState().searchMemory("project-1", "review"),
-    ).rejects.toThrow("network failure");
+    await useMemoryStore.getState().fetchMemoryDetail(
+      "project-1",
+      "memory-1",
+      "reviewer",
+    );
 
-    expect(useMemoryStore.getState().loading).toBe(false);
+    expect(api.get).toHaveBeenCalledWith(
+      "/api/v1/projects/project-1/memory/memory-1?roleId=reviewer",
+      { token: "test-token" },
+    );
+    expect(useMemoryStore.getState()).toMatchObject({
+      detailLoading: false,
+      detailError: null,
+      detail: {
+        id: "memory-1",
+        key: "incident",
+        content: "Full incident timeline",
+        metadataObject: { source: "feedback", taskId: "task-1" },
+        relatedContext: [{ type: "task", id: "task-1", label: "Related task" }],
+      },
+    });
+  });
+
+  it("bulk deletes selected memories and refreshes explorer truth", async () => {
+    const api = makeApiClient();
+    api.post.mockResolvedValueOnce({ data: { deletedCount: 2 } });
+    api.get
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: "memory-3",
+            projectId: "project-1",
+            scope: "project",
+            roleId: "",
+            category: "semantic",
+            key: "remaining",
+            content: "Only one entry left",
+            metadata: "{}",
+            relevanceScore: 1,
+            accessCount: 1,
+            createdAt: "2026-03-25T12:00:00.000Z",
+            updatedAt: "2026-03-25T12:00:00.000Z",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        data: {
+          totalCount: 1,
+          approxStorageBytes: 512,
+          byCategory: { semantic: 1 },
+          byScope: { project: 1 },
+        },
+      });
+    mockCreateApiClient.mockReturnValue(api);
+    useMemoryStore.setState({
+      currentProjectId: "project-1",
+      filters: {
+        query: "",
+        scope: "all",
+        category: "all",
+        roleId: "",
+        startAt: "",
+        endAt: "",
+        limit: 20,
+      },
+      selectedMemoryIds: ["memory-1", "memory-2"],
+      selectedMemoryId: "memory-1",
+      detail: {
+        id: "memory-1",
+        projectId: "project-1",
+        scope: "project",
+        roleId: "",
+        category: "episodic",
+        key: "alpha",
+        content: "Alpha",
+        metadata: "{}",
+        metadataObject: {},
+        relatedContext: [],
+        relevanceScore: 0.4,
+        accessCount: 1,
+        createdAt: "2026-03-25T10:00:00.000Z",
+        updatedAt: "2026-03-25T10:00:00.000Z",
+      },
+      entries: [
+        {
+          id: "memory-1",
+          projectId: "project-1",
+          scope: "project",
+          roleId: "",
+          category: "episodic",
+          key: "alpha",
+          content: "Alpha",
+          metadata: "{}",
+          relevanceScore: 0.4,
+          accessCount: 1,
+          createdAt: "2026-03-25T10:00:00.000Z",
+          updatedAt: "2026-03-25T10:00:00.000Z",
+        },
+        {
+          id: "memory-2",
+          projectId: "project-1",
+          scope: "project",
+          roleId: "",
+          category: "semantic",
+          key: "beta",
+          content: "Beta",
+          metadata: "{}",
+          relevanceScore: 0.5,
+          accessCount: 2,
+          createdAt: "2026-03-25T11:00:00.000Z",
+          updatedAt: "2026-03-25T11:00:00.000Z",
+        },
+      ],
+    } as never);
+
+    await useMemoryStore.getState().bulkDeleteMemories("project-1", [
+      "memory-1",
+      "memory-2",
+    ]);
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/api/v1/projects/project-1/memory/bulk-delete",
+      { ids: ["memory-1", "memory-2"], roleId: undefined },
+      { token: "test-token" },
+    );
+    expect(useMemoryStore.getState()).toMatchObject({
+      selectedMemoryIds: [],
+      selectedMemoryId: null,
+      detail: null,
+      lastMutation: { type: "bulk-delete", deletedCount: 2 },
+      entries: [expect.objectContaining({ id: "memory-3" })],
+      stats: expect.objectContaining({ totalCount: 1 }),
+    });
+  });
+
+  it("preserves explorer context when cleanup fails", async () => {
+    const api = makeApiClient();
+    api.post.mockRejectedValueOnce(new Error("cleanup failed"));
+    mockCreateApiClient.mockReturnValue(api);
+    useMemoryStore.setState({
+      currentProjectId: "project-1",
+      filters: {
+        query: "incident",
+        scope: "all",
+        category: "episodic",
+        roleId: "",
+        startAt: "",
+        endAt: "",
+        limit: 20,
+      },
+      selectedMemoryId: "memory-1",
+      entries: [
+        {
+          id: "memory-1",
+          projectId: "project-1",
+          scope: "project",
+          roleId: "",
+          category: "episodic",
+          key: "incident",
+          content: "Keep this entry",
+          metadata: "{}",
+          relevanceScore: 0.8,
+          accessCount: 3,
+          createdAt: "2026-03-25T12:00:00.000Z",
+          updatedAt: "2026-03-25T12:00:00.000Z",
+        },
+      ],
+    } as never);
+
+    await expect(
+      useMemoryStore.getState().cleanupMemories("project-1", {
+        retentionDays: 30,
+      }),
+    ).rejects.toThrow("cleanup failed");
+
+    expect(useMemoryStore.getState()).toMatchObject({
+      filters: expect.objectContaining({ query: "incident", category: "episodic" }),
+      selectedMemoryId: "memory-1",
+      entries: [expect.objectContaining({ id: "memory-1" })],
+      actionError: "cleanup failed",
+      actionLoading: false,
+    });
+  });
+
+  it("exports the current filtered scope without mutating list state", async () => {
+    const api = makeApiClient();
+    api.get.mockResolvedValueOnce({
+      data: {
+        projectId: "project-1",
+        exportedAt: "2026-03-25T12:30:00.000Z",
+        entries: [
+          {
+            id: "memory-1",
+            scope: "project",
+            roleId: "",
+            category: "episodic",
+            key: "incident",
+            content: "Full export payload",
+            metadata: "{}",
+            createdAt: "2026-03-25T10:00:00.000Z",
+            updatedAt: "2026-03-25T10:30:00.000Z",
+          },
+        ],
+      },
+    });
+    mockCreateApiClient.mockReturnValue(api);
+    useMemoryStore.setState({
+      currentProjectId: "project-1",
+      filters: {
+        query: "incident",
+        scope: "all",
+        category: "episodic",
+        roleId: "",
+        startAt: "2026-03-01T00:00:00.000Z",
+        endAt: "2026-03-31T23:59:59.000Z",
+        limit: 20,
+      },
+      entries: [
+        {
+          id: "memory-1",
+          projectId: "project-1",
+          scope: "project",
+          roleId: "",
+          category: "episodic",
+          key: "incident",
+          content: "Keep the list stable",
+          metadata: "{}",
+          relevanceScore: 0.8,
+          accessCount: 3,
+          createdAt: "2026-03-25T12:00:00.000Z",
+          updatedAt: "2026-03-25T12:00:00.000Z",
+        },
+      ],
+    } as never);
+
+    const exported = await useMemoryStore.getState().exportMemories("project-1");
+
+    expect(api.get).toHaveBeenCalledWith(
+      "/api/v1/projects/project-1/memory/export?query=incident&category=episodic&startAt=2026-03-01T00%3A00%3A00.000Z&endAt=2026-03-31T23%3A59%3A59.000Z&limit=20",
+      { token: "test-token" },
+    );
+    expect(exported).toEqual(
+      expect.objectContaining({
+        projectId: "project-1",
+        entries: [expect.objectContaining({ id: "memory-1", key: "incident" })],
+      }),
+    );
+    expect(useMemoryStore.getState().entries).toEqual([
+      expect.objectContaining({ id: "memory-1", content: "Keep the list stable" }),
+    ]);
   });
 
   it("stores a new memory entry and appends the normalized result", async () => {
@@ -141,61 +457,12 @@ describe("useMemoryStore", () => {
         metadata: JSON.stringify({ channel: "ops" }),
       }),
     ]);
-    expect(useMemoryStore.getState().entries[0]?.createdAt).toEqual(
-      expect.any(String),
-    );
-  });
-
-  it("deletes a memory entry from local state after the API succeeds", async () => {
-    const api = makeApiClient();
-    api.delete.mockResolvedValueOnce({ data: null });
-    mockCreateApiClient.mockReturnValue(api);
-    useMemoryStore.setState({
-      entries: [
-        {
-          id: "memory-1",
-          projectId: "project-1",
-          scope: "project",
-          roleId: "",
-          category: "semantic",
-          key: "alpha",
-          content: "Alpha",
-          metadata: "",
-          relevanceScore: 0,
-          accessCount: 0,
-          createdAt: "2026-03-25T10:00:00.000Z",
-        },
-        {
-          id: "memory-2",
-          projectId: "project-1",
-          scope: "project",
-          roleId: "",
-          category: "semantic",
-          key: "beta",
-          content: "Beta",
-          metadata: "",
-          relevanceScore: 0,
-          accessCount: 0,
-          createdAt: "2026-03-25T10:05:00.000Z",
-        },
-      ],
-    });
-
-    await useMemoryStore.getState().deleteMemory("project-1", "memory-1");
-
-    expect(api.delete).toHaveBeenCalledWith(
-      "/api/v1/projects/project-1/memory/memory-1",
-      { token: "test-token" },
-    );
-    expect(useMemoryStore.getState().entries).toEqual([
-      expect.objectContaining({ id: "memory-2" }),
-    ]);
   });
 
   it("returns early when no auth token is available", async () => {
     mockGetAuthState.mockReturnValueOnce({ accessToken: null });
 
-    await useMemoryStore.getState().searchMemory("project-1", "review");
+    await useMemoryStore.getState().loadWorkspace("project-1", { query: "review" });
 
     expect(mockCreateApiClient).not.toHaveBeenCalled();
     expect(useMemoryStore.getState()).toMatchObject({

@@ -245,6 +245,48 @@ func (r *ScheduledJobRunRepository) Complete(ctx context.Context, runID string, 
 	return nil
 }
 
+func (r *ScheduledJobRunRepository) UpdateStatus(ctx context.Context, runID string, status model.ScheduledJobRunStatus, summary string, errorMessage string, updatedAt time.Time) error {
+	if runID == "" {
+		return fmt.Errorf("scheduled job run id is required")
+	}
+	if updatedAt.IsZero() {
+		updatedAt = time.Now().UTC()
+	}
+
+	if r.db == nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+		for _, run := range r.runs {
+			if run.RunID != runID {
+				continue
+			}
+			run.Status = status
+			run.Summary = summary
+			run.ErrorMessage = errorMessage
+			run.UpdatedAt = updatedAt
+			return nil
+		}
+		return ErrNotFound
+	}
+
+	result := r.db.WithContext(ctx).
+		Model(&scheduledJobRunRecord{}).
+		Where("run_id = ?", runID).
+		Updates(map[string]any{
+			"status":        status,
+			"summary":       optionalSchedulerString(summary),
+			"error_message": optionalSchedulerString(errorMessage),
+			"updated_at":    updatedAt,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("update scheduled job run status: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *ScheduledJobRunRepository) ListByJobKey(ctx context.Context, jobKey string, limit int) ([]*model.ScheduledJobRun, error) {
 	if limit <= 0 {
 		limit = 20
@@ -274,6 +316,57 @@ func (r *ScheduledJobRunRepository) ListByJobKey(ctx context.Context, jobKey str
 		Limit(limit).
 		Find(&rows).Error; err != nil {
 		return nil, fmt.Errorf("list scheduled job runs: %w", err)
+	}
+
+	runs := make([]*model.ScheduledJobRun, 0, len(rows))
+	for _, row := range rows {
+		runs = append(runs, row.toModel())
+	}
+	return runs, nil
+}
+
+func (r *ScheduledJobRunRepository) ListFiltered(ctx context.Context, filters model.ScheduledJobRunFilters) ([]*model.ScheduledJobRun, error) {
+	if filters.Limit <= 0 {
+		filters.Limit = 20
+	}
+
+	if r.db == nil {
+		r.mu.RLock()
+		defer r.mu.RUnlock()
+		runs := make([]*model.ScheduledJobRun, 0, filters.Limit)
+		for i := len(r.runs) - 1; i >= 0; i-- {
+			run := r.runs[i]
+			if !matchesScheduledJobRunFilters(run, filters) {
+				continue
+			}
+			runs = append(runs, cloneScheduledJobRun(run))
+			if len(runs) == filters.Limit {
+				break
+			}
+		}
+		return runs, nil
+	}
+
+	query := r.db.WithContext(ctx).Model(&scheduledJobRunRecord{}).Order("started_at DESC")
+	if filters.JobKey != "" {
+		query = query.Where("job_key = ?", filters.JobKey)
+	}
+	if len(filters.Statuses) > 0 {
+		query = query.Where("status IN ?", filters.Statuses)
+	}
+	if len(filters.TriggerSources) > 0 {
+		query = query.Where("trigger_source IN ?", filters.TriggerSources)
+	}
+	if filters.StartedAfter != nil {
+		query = query.Where("started_at >= ?", *filters.StartedAfter)
+	}
+	if filters.StartedBefore != nil {
+		query = query.Where("started_at < ?", *filters.StartedBefore)
+	}
+
+	var rows []scheduledJobRunRecord
+	if err := query.Limit(filters.Limit).Find(&rows).Error; err != nil {
+		return nil, fmt.Errorf("list filtered scheduled job runs: %w", err)
 	}
 
 	runs := make([]*model.ScheduledJobRun, 0, len(rows))
@@ -368,6 +461,93 @@ func (r *ScheduledJobRunRepository) DeleteOlderThan(ctx context.Context, before 
 	return result.RowsAffected, nil
 }
 
+func (r *ScheduledJobRunRepository) DeleteTerminalRuns(ctx context.Context, policy model.ScheduledJobRunCleanupPolicy) (int64, error) {
+	if r.db == nil {
+		r.mu.Lock()
+		defer r.mu.Unlock()
+
+		protected := buildRetainedRunIDSet(r.runs, policy)
+		kept := make([]*model.ScheduledJobRun, 0, len(r.runs))
+		deleted := int64(0)
+		for _, run := range r.runs {
+			_, keepProtected := protected[run.RunID]
+			if !matchesCleanupPolicy(run, policy) || keepProtected {
+				kept = append(kept, run)
+				continue
+			}
+			deleted++
+		}
+		r.runs = kept
+		return deleted, nil
+	}
+
+	var rows []scheduledJobRunRecord
+	query := r.db.WithContext(ctx).
+		Model(&scheduledJobRunRecord{}).
+		Where("status IN ?", []model.ScheduledJobRunStatus{
+			model.ScheduledJobRunStatusSucceeded,
+			model.ScheduledJobRunStatusFailed,
+			model.ScheduledJobRunStatusSkipped,
+			model.ScheduledJobRunStatusCancelled,
+		}).
+		Order("started_at DESC")
+	if policy.JobKey != "" {
+		query = query.Where("job_key = ?", policy.JobKey)
+	}
+	if policy.StartedBefore != nil {
+		query = query.Where("started_at < ?", *policy.StartedBefore)
+	}
+	if err := query.Find(&rows).Error; err != nil {
+		return 0, fmt.Errorf("list terminal scheduled job runs for cleanup: %w", err)
+	}
+
+	if len(rows) == 0 {
+		return 0, nil
+	}
+
+	retained := make(map[string]struct{}, policy.RetainRecent)
+	if policy.RetainRecent > 0 {
+		fullHistoryFilters := model.ScheduledJobRunFilters{
+			JobKey: policy.JobKey,
+			Limit:  1000,
+			Statuses: []model.ScheduledJobRunStatus{
+				model.ScheduledJobRunStatusSucceeded,
+				model.ScheduledJobRunStatusFailed,
+				model.ScheduledJobRunStatusSkipped,
+				model.ScheduledJobRunStatusCancelled,
+			},
+		}
+		fullHistory, err := r.ListFiltered(ctx, fullHistoryFilters)
+		if err != nil {
+			return 0, err
+		}
+		for _, run := range fullHistory {
+			if policy.RetainRecent == 0 {
+				break
+			}
+			retained[run.RunID] = struct{}{}
+			policy.RetainRecent--
+		}
+	}
+
+	ids := make([]string, 0, len(rows))
+	for _, row := range rows {
+		if _, ok := retained[row.RunID]; ok {
+			continue
+		}
+		ids = append(ids, row.RunID)
+	}
+	if len(ids) == 0 {
+		return 0, nil
+	}
+
+	result := r.db.WithContext(ctx).Where("run_id IN ?", ids).Delete(&scheduledJobRunRecord{})
+	if result.Error != nil {
+		return 0, fmt.Errorf("delete terminal scheduled job runs: %w", result.Error)
+	}
+	return result.RowsAffected, nil
+}
+
 func (r *ScheduledJobRunRepository) HasActiveRun(ctx context.Context, jobKey string) (bool, error) {
 	if r.db == nil {
 		r.mu.RLock()
@@ -411,6 +591,74 @@ func cloneScheduledJobRun(run *model.ScheduledJobRun) *model.ScheduledJobRun {
 	cloned.FinishedAt = cloneTimePointer(run.FinishedAt)
 	cloned.ComputeDuration()
 	return &cloned
+}
+
+func matchesScheduledJobRunFilters(run *model.ScheduledJobRun, filters model.ScheduledJobRunFilters) bool {
+	if run == nil {
+		return false
+	}
+	if filters.JobKey != "" && run.JobKey != filters.JobKey {
+		return false
+	}
+	if len(filters.Statuses) > 0 && !slices.Contains(filters.Statuses, run.Status) {
+		return false
+	}
+	if len(filters.TriggerSources) > 0 && !slices.Contains(filters.TriggerSources, run.TriggerSource) {
+		return false
+	}
+	if filters.StartedAfter != nil && run.StartedAt.Before(*filters.StartedAfter) {
+		return false
+	}
+	if filters.StartedBefore != nil && !run.StartedAt.Before(*filters.StartedBefore) {
+		return false
+	}
+	return true
+}
+
+func matchesCleanupPolicy(run *model.ScheduledJobRun, policy model.ScheduledJobRunCleanupPolicy) bool {
+	if run == nil || !run.Status.IsTerminal() {
+		return false
+	}
+	if policy.JobKey != "" && run.JobKey != policy.JobKey {
+		return false
+	}
+	if policy.StartedBefore != nil && !run.StartedAt.Before(*policy.StartedBefore) {
+		return false
+	}
+	return true
+}
+
+func buildRetainedRunIDSet(runs []*model.ScheduledJobRun, policy model.ScheduledJobRunCleanupPolicy) map[string]struct{} {
+	retained := make(map[string]struct{}, policy.RetainRecent)
+	if policy.RetainRecent <= 0 {
+		return retained
+	}
+	candidates := make([]*model.ScheduledJobRun, 0, len(runs))
+	for _, run := range runs {
+		if run == nil || !run.Status.IsTerminal() {
+			continue
+		}
+		if policy.JobKey != "" && run.JobKey != policy.JobKey {
+			continue
+		}
+		candidates = append(candidates, run)
+	}
+	slices.SortFunc(candidates, func(a, b *model.ScheduledJobRun) int {
+		if a.StartedAt.After(b.StartedAt) {
+			return -1
+		}
+		if a.StartedAt.Before(b.StartedAt) {
+			return 1
+		}
+		return 0
+	})
+	for _, run := range candidates {
+		if len(retained) >= policy.RetainRecent {
+			break
+		}
+		retained[run.RunID] = struct{}{}
+	}
+	return retained
 }
 
 func optionalSchedulerString(value string) *string {

@@ -67,6 +67,7 @@ func ResolveReplyPlan(metadata PlatformMetadata, target *ReplyTarget, fallbackCh
 	case target.UseReply:
 		plan.Method = DeliveryMethodReply
 	}
+	plan.FallbackReason = firstNonEmpty(plan.FallbackReason, requestedReplyModeFallback(metadata, target, plan))
 	return plan
 }
 
@@ -237,6 +238,41 @@ func nativeFallbackReason(method DeliveryMethod, target *ReplyTarget, replyCtx a
 	default:
 		return ""
 	}
+}
+
+func requestedReplyModeFallback(metadata PlatformMetadata, target *ReplyTarget, plan ReplyPlan) string {
+	if target == nil {
+		return ""
+	}
+
+	if target.PreferEdit && plan.Method != DeliveryMethodEdit {
+		switch {
+		case strings.TrimSpace(target.MessageID) == "":
+			return "native message edit unavailable: missing message id"
+		case !metadata.Capabilities.Mutability.CanEdit:
+			return "native message edit unavailable: platform does not support editable updates"
+		}
+	}
+
+	progressMode := strings.TrimSpace(target.ProgressMode)
+	if progressMode == string(AsyncUpdateDeferredCardUpdate) && plan.Method != DeliveryMethodDeferredCardUpdate {
+		switch {
+		case strings.TrimSpace(target.CallbackToken) == "":
+			return nativeFallbackReason(DeliveryMethodDeferredCardUpdate, target, nil, false)
+		case !metadata.Capabilities.HasAsyncUpdateMode(AsyncUpdateDeferredCardUpdate):
+			return "deferred card update unavailable: platform does not support deferred card updates"
+		}
+	}
+
+	if progressMode == string(AsyncUpdateFollowUp) && target.InteractionToken != "" && plan.Method != DeliveryMethodFollowUp && !metadata.Capabilities.HasAsyncUpdateMode(AsyncUpdateFollowUp) {
+		return "follow-up delivery unavailable: platform does not support follow-up updates"
+	}
+
+	if target.SessionWebhook != "" && plan.Method != DeliveryMethodSessionWebhook && !metadata.Capabilities.HasAsyncUpdateMode(AsyncUpdateSessionWebhook) {
+		return "session webhook delivery unavailable: platform does not support session webhook replies"
+	}
+
+	return ""
 }
 
 func DeliverNativePlan(metadata PlatformMetadata, target *ReplyTarget, fallbackChatID string, message *NativeMessage) (ReplyPlan, error) {

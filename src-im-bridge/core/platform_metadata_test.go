@@ -267,6 +267,9 @@ func TestNormalizeMetadata_UsesFallbackSourceForRenderingDefaults(t *testing.T) 
 
 func TestDefaultCapabilitiesForSource_CoversAdditionalPlatformsAndFallbacks(t *testing.T) {
 	qqbot := defaultCapabilitiesForSource("qqbot", nil)
+	if qqbot.ReadinessTier != ReadinessTierMarkdownFirst {
+		t.Fatalf("qqbot ReadinessTier = %q, want %q", qqbot.ReadinessTier, ReadinessTierMarkdownFirst)
+	}
 	if !qqbot.RequiresPublicCallback {
 		t.Fatal("expected qqbot to require public callback")
 	}
@@ -278,11 +281,32 @@ func TestDefaultCapabilitiesForSource_CoversAdditionalPlatformsAndFallbacks(t *t
 	}
 
 	wecom := defaultCapabilitiesForSource("wecom", nil)
+	if wecom.ReadinessTier != ReadinessTierNativeSendWithFallback {
+		t.Fatalf("wecom ReadinessTier = %q, want %q", wecom.ReadinessTier, ReadinessTierNativeSendWithFallback)
+	}
 	if wecom.CommandSurface != CommandSurfaceInteraction {
 		t.Fatalf("wecom CommandSurface = %q", wecom.CommandSurface)
 	}
 	if !reflect.DeepEqual(wecom.NativeSurfaces, []string{NativeSurfaceWeComCard}) {
 		t.Fatalf("wecom NativeSurfaces = %+v", wecom.NativeSurfaces)
+	}
+
+	feishu := defaultCapabilitiesForSource("feishu", nil)
+	if feishu.ReadinessTier != ReadinessTierFullNativeLifecycle {
+		t.Fatalf("feishu ReadinessTier = %q, want %q", feishu.ReadinessTier, ReadinessTierFullNativeLifecycle)
+	}
+
+	dingtalk := defaultCapabilitiesForSource("dingtalk", nil)
+	if dingtalk.ReadinessTier != ReadinessTierNativeSendWithFallback {
+		t.Fatalf("dingtalk ReadinessTier = %q, want %q", dingtalk.ReadinessTier, ReadinessTierNativeSendWithFallback)
+	}
+	if !dingtalk.SupportsRichMessages {
+		t.Fatalf("dingtalk capabilities = %+v, want SupportsRichMessages", dingtalk)
+	}
+
+	qq := defaultCapabilitiesForSource("qq", nil)
+	if qq.ReadinessTier != ReadinessTierTextFirst {
+		t.Fatalf("qq ReadinessTier = %q, want %q", qq.ReadinessTier, ReadinessTierTextFirst)
 	}
 
 	customCard := defaultCapabilitiesForSource("custom", &metadataCardPlatform{name: "custom-card"})
@@ -358,5 +382,74 @@ func TestNormalizeCapabilities_DefaultsWebhookForStructuredSurface(t *testing.T)
 	}
 	if !reflect.DeepEqual(got.MessageScopes, []MessageScope{MessageScopeChat}) {
 		t.Fatalf("MessageScopes = %+v", got.MessageScopes)
+	}
+}
+
+func TestDefaultRenderingProfileForSource_AssignsChinaPlatformReadinessTiers(t *testing.T) {
+	tests := []struct {
+		source string
+		want   ReadinessTier
+	}{
+		{source: "feishu", want: ReadinessTierFullNativeLifecycle},
+		{source: "dingtalk", want: ReadinessTierNativeSendWithFallback},
+		{source: "wecom", want: ReadinessTierNativeSendWithFallback},
+		{source: "qq", want: ReadinessTierTextFirst},
+		{source: "qqbot", want: ReadinessTierMarkdownFirst},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.source, func(t *testing.T) {
+			profile := defaultRenderingProfileForSource(tc.source, defaultCapabilitiesForSource(tc.source, nil))
+			if profile.ReadinessTier != tc.want {
+				t.Fatalf("ReadinessTier = %q, want %q", profile.ReadinessTier, tc.want)
+			}
+		})
+	}
+}
+
+func TestPlatformCapabilities_MatrixIncludesReadinessTier(t *testing.T) {
+	matrix := PlatformCapabilities{
+		CommandSurface:           CommandSurfaceMixed,
+		ReadinessTier:            ReadinessTierNativeSendWithFallback,
+		PreferredAsyncUpdateMode: AsyncUpdateSessionWebhook,
+		FallbackAsyncUpdateMode:  AsyncUpdateReply,
+	}.Matrix()
+
+	if matrix["readinessTier"] != string(ReadinessTierNativeSendWithFallback) {
+		t.Fatalf("matrix = %+v", matrix)
+	}
+	if matrix["preferredAsyncUpdateMode"] != string(AsyncUpdateSessionWebhook) {
+		t.Fatalf("matrix = %+v", matrix)
+	}
+	if matrix["fallbackAsyncUpdateMode"] != string(AsyncUpdateReply) {
+		t.Fatalf("matrix = %+v", matrix)
+	}
+}
+
+func TestDefaultCapabilitiesForSource_ExposeChinaPlatformCompletionPreferences(t *testing.T) {
+	dingtalk := defaultCapabilitiesForSource("dingtalk", nil)
+	if dingtalk.PreferredAsyncUpdateMode != AsyncUpdateSessionWebhook {
+		t.Fatalf("dingtalk PreferredAsyncUpdateMode = %q, want %q", dingtalk.PreferredAsyncUpdateMode, AsyncUpdateSessionWebhook)
+	}
+	if dingtalk.FallbackAsyncUpdateMode != AsyncUpdateReply {
+		t.Fatalf("dingtalk FallbackAsyncUpdateMode = %q, want %q", dingtalk.FallbackAsyncUpdateMode, AsyncUpdateReply)
+	}
+
+	wecom := defaultCapabilitiesForSource("wecom", nil)
+	if wecom.PreferredAsyncUpdateMode != AsyncUpdateSessionWebhook {
+		t.Fatalf("wecom PreferredAsyncUpdateMode = %q, want %q", wecom.PreferredAsyncUpdateMode, AsyncUpdateSessionWebhook)
+	}
+	if wecom.FallbackAsyncUpdateMode != AsyncUpdateReply {
+		t.Fatalf("wecom FallbackAsyncUpdateMode = %q, want %q", wecom.FallbackAsyncUpdateMode, AsyncUpdateReply)
+	}
+
+	qqbot := defaultCapabilitiesForSource("qqbot", nil)
+	if qqbot.PreferredAsyncUpdateMode != AsyncUpdateReply {
+		t.Fatalf("qqbot PreferredAsyncUpdateMode = %q, want %q", qqbot.PreferredAsyncUpdateMode, AsyncUpdateReply)
+	}
+
+	qq := defaultCapabilitiesForSource("qq", nil)
+	if qq.PreferredAsyncUpdateMode != AsyncUpdateReply {
+		t.Fatalf("qq PreferredAsyncUpdateMode = %q, want %q", qq.PreferredAsyncUpdateMode, AsyncUpdateReply)
 	}
 }

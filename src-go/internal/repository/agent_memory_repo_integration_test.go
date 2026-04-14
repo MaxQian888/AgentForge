@@ -39,6 +39,19 @@ func TestAgentMemoryRepository_TimeRangeAndRetention_Postgres(t *testing.T) {
 	repo := repository.NewAgentMemoryRepository(db)
 	projectID := uuid.New()
 	now := time.Now().UTC()
+	projectSlug := "agent-memory-" + projectID.String()[:8]
+
+	if err := db.WithContext(context.Background()).Exec(
+		`INSERT INTO projects (id, name, slug, description, repo_url, default_branch, settings) VALUES (?, ?, ?, '', '', 'main', '{}')`,
+		projectID,
+		"Agent Memory Integration",
+		projectSlug,
+	).Error; err != nil {
+		t.Fatalf("seed project: %v", err)
+	}
+	t.Cleanup(func() {
+		_ = db.WithContext(context.Background()).Exec("DELETE FROM projects WHERE id = ?", projectID).Error
+	})
 
 	memories := []*model.AgentMemory{
 		{

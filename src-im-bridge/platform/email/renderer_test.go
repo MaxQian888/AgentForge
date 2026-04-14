@@ -171,7 +171,10 @@ func TestRenderEmailHTML_EmptyFields(t *testing.T) {
 		},
 	}
 	html, _ := renderEmailHTML(msg)
-	if strings.Count(html, "<tr>") != 1 {
+	if strings.Count(html, "font-weight:bold;padding-right:8px;") != 1 {
 		t.Error("empty fields should be skipped")
+	}
+	if strings.Contains(html, "<td style=\"font-weight:bold;padding-right:8px;\"></td><td></td>") {
+		t.Error("blank field row should not be rendered")
 	}
 }

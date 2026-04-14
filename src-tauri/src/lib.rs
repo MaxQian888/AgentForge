@@ -18,6 +18,7 @@ use tauri_plugin_shell::{
 
 mod process_cleanup;
 mod runtime_logic;
+mod standalone_cli;
 
 use crate::runtime_logic::{
     active_runtime_count, active_runtime_summary_unavailable_warning, bridge_plugin_count,
@@ -36,6 +37,14 @@ use process_cleanup::{
 
 #[cfg(test)]
 use crate::runtime_logic::shell_action_event_payload;
+
+pub fn run_standalone_cli<I, S>(args: I) -> Result<(), String>
+where
+    I: IntoIterator<Item = S>,
+    S: Into<String>,
+{
+    standalone_cli::run_standalone_cli(args)
+}
 
 const BACKEND_LABEL: &str = "backend";
 const BACKEND_PORT: u16 = 7777;

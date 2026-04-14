@@ -267,6 +267,45 @@ func (r *stubPageFavoriteRepo) ListByPage(_ context.Context, pageID uuid.UUID) (
 	return favorites, nil
 }
 
+type stubWikiIMNotifier struct {
+	requests []*model.IMNotifyRequest
+}
+
+func (s *stubWikiIMNotifier) Notify(_ context.Context, req *model.IMNotifyRequest) error {
+	if req == nil {
+		return nil
+	}
+	cloned := *req
+	if req.Metadata != nil {
+		cloned.Metadata = map[string]string{}
+		for key, value := range req.Metadata {
+			cloned.Metadata[key] = value
+		}
+	}
+	s.requests = append(s.requests, &cloned)
+	return nil
+}
+
+type stubIMEventChannelResolver struct {
+	channels []*model.IMChannel
+	err      error
+}
+
+func (s *stubIMEventChannelResolver) ResolveChannelsForEvent(_ context.Context, eventType string, platform string, channelID string) ([]*model.IMChannel, error) {
+	if s.err != nil {
+		return nil, s.err
+	}
+	result := make([]*model.IMChannel, 0, len(s.channels))
+	for _, channel := range s.channels {
+		if channel == nil {
+			continue
+		}
+		cloned := *channel
+		result = append(result, &cloned)
+	}
+	return result, nil
+}
+
 type stubPageRecentAccessRepo struct {
 	accesses map[string]*model.PageRecentAccess
 }
@@ -706,6 +745,92 @@ func TestWikiServiceCommentTemplateAndFavoriteFlows(t *testing.T) {
 	}
 	if !foundResolved {
 		t.Fatalf("expected %q in broadcasted events, got %#v", ws.EventWikiCommentResolved, broadcaster.events)
+	}
+}
+
+func TestWikiServiceForwardIMEventUsesConfiguredChannelRoutingBeforeFallback(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	spaceID := uuid.New()
+	pageID := uuid.New()
+	actorID := uuid.New()
+	pageRepo := &stubWikiPageRepo{pages: map[uuid.UUID]*model.WikiPage{
+		pageID: {
+			ID:          pageID,
+			SpaceID:     spaceID,
+			Title:       "ADR",
+			Content:     `[{"type":"paragraph","content":"draft"}]`,
+			ContentText: "draft",
+			Path:        "/" + pageID.String(),
+			SortOrder:   0,
+			CreatedAt:   time.Date(2026, 3, 26, 17, 0, 0, 0, time.UTC),
+			UpdatedAt:   time.Date(2026, 3, 26, 17, 0, 0, 0, time.UTC),
+		},
+	}}
+	versionRepo := &stubPageVersionRepo{}
+	notifier := &stubWikiIMNotifier{}
+	resolver := &stubIMEventChannelResolver{
+		channels: []*model.IMChannel{{
+			Platform:  "slack",
+			Name:      "Docs",
+			ChannelID: "C-docs",
+			Events:    []string{"wiki.version.published"},
+			Active:    true,
+		}},
+	}
+	svc := NewWikiService(nil, pageRepo, versionRepo, nil, nil, nil, &stubWikiBroadcaster{}).
+		WithIMForwarder(notifier, "feishu", "legacy-chat").
+		WithIMChannelResolver(resolver)
+
+	if _, err := svc.CreateVersion(ctx, projectID, pageID, "Published", &actorID); err != nil {
+		t.Fatalf("CreateVersion() error = %v", err)
+	}
+
+	if len(notifier.requests) != 1 {
+		t.Fatalf("notify requests = %+v, want 1", notifier.requests)
+	}
+	if notifier.requests[0].Platform != "slack" || notifier.requests[0].ChannelID != "C-docs" {
+		t.Fatalf("notify request = %+v", notifier.requests[0])
+	}
+	if notifier.requests[0].Event != model.NotificationTypeWikiVersionPublished {
+		t.Fatalf("event = %q", notifier.requests[0].Event)
+	}
+}
+
+func TestWikiServiceForwardIMEventFallsBackWhenNoConfiguredChannelMatches(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+	spaceID := uuid.New()
+	pageID := uuid.New()
+	actorID := uuid.New()
+	pageRepo := &stubWikiPageRepo{pages: map[uuid.UUID]*model.WikiPage{
+		pageID: {
+			ID:          pageID,
+			SpaceID:     spaceID,
+			Title:       "ADR",
+			Content:     `[{"type":"paragraph","content":"draft"}]`,
+			ContentText: "draft",
+			Path:        "/" + pageID.String(),
+			SortOrder:   0,
+			CreatedAt:   time.Date(2026, 3, 26, 17, 0, 0, 0, time.UTC),
+			UpdatedAt:   time.Date(2026, 3, 26, 17, 0, 0, 0, time.UTC),
+		},
+	}}
+	versionRepo := &stubPageVersionRepo{}
+	notifier := &stubWikiIMNotifier{}
+	svc := NewWikiService(nil, pageRepo, versionRepo, nil, nil, nil, &stubWikiBroadcaster{}).
+		WithIMForwarder(notifier, "feishu", "legacy-chat").
+		WithIMChannelResolver(&stubIMEventChannelResolver{})
+
+	if _, err := svc.CreateVersion(ctx, projectID, pageID, "Published", &actorID); err != nil {
+		t.Fatalf("CreateVersion() error = %v", err)
+	}
+
+	if len(notifier.requests) != 1 {
+		t.Fatalf("notify requests = %+v, want 1", notifier.requests)
+	}
+	if notifier.requests[0].Platform != "feishu" || notifier.requests[0].ChannelID != "legacy-chat" {
+		t.Fatalf("notify request = %+v", notifier.requests[0])
 	}
 }
 

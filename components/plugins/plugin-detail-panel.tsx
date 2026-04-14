@@ -239,6 +239,18 @@ function MarketplaceEntryDetail({
                 {entry.builtIn.nextStep ? (
                   <p>Next: {entry.builtIn.nextStep}</p>
                 ) : null}
+                {entry.builtIn.starterFamily ? (
+                  <p>Starter family: {entry.builtIn.starterFamily}</p>
+                ) : null}
+                {entry.builtIn.coreFlows?.length ? (
+                  <p>Core flows: {entry.builtIn.coreFlows.join(", ")}</p>
+                ) : null}
+                {entry.builtIn.dependencyRefs?.length ? (
+                  <p>Dependencies: {entry.builtIn.dependencyRefs.join(", ")}</p>
+                ) : null}
+                {entry.builtIn.workspaceRefs?.length ? (
+                  <p>Workspaces: {entry.builtIn.workspaceRefs.join(", ")}</p>
+                ) : null}
                 {entry.builtIn.missingPrerequisites?.length ? (
                   <p>
                     Missing: {entry.builtIn.missingPrerequisites.join(", ")}
@@ -630,6 +642,18 @@ export function PluginDetailPanel({
                     ) : null}
                     {plugin.builtIn.nextStep ? (
                       <p>Next: {plugin.builtIn.nextStep}</p>
+                    ) : null}
+                    {plugin.builtIn.starterFamily ? (
+                      <p>Starter family: {plugin.builtIn.starterFamily}</p>
+                    ) : null}
+                    {plugin.builtIn.coreFlows?.length ? (
+                      <p>Core flows: {plugin.builtIn.coreFlows.join(", ")}</p>
+                    ) : null}
+                    {plugin.builtIn.dependencyRefs?.length ? (
+                      <p>Dependencies: {plugin.builtIn.dependencyRefs.join(", ")}</p>
+                    ) : null}
+                    {plugin.builtIn.workspaceRefs?.length ? (
+                      <p>Workspaces: {plugin.builtIn.workspaceRefs.join(", ")}</p>
                     ) : null}
                     {plugin.builtIn.missingPrerequisites?.length ? (
                       <p>

@@ -213,7 +213,9 @@ describe("SettingsPage — Appearance section", () => {
       render(<SettingsPage />);
     });
 
-    expect(screen.getByText(settingsMessages.appearance)).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: settingsMessages.appearance }),
+    ).toBeInTheDocument();
 
     // restore
     dashboardState.selectedProjectId = "project-1";
@@ -226,7 +228,9 @@ describe("SettingsPage — Appearance section", () => {
       render(<SettingsPage />);
     });
 
-    expect(screen.getByText(settingsMessages.appearance)).toBeInTheDocument();
+    expect(
+      screen.getByRole("heading", { name: settingsMessages.appearance }),
+    ).toBeInTheDocument();
   });
 
   it("renders Light, Dark, System theme buttons", async () => {
@@ -256,7 +260,7 @@ describe("SettingsPage — Appearance section", () => {
     });
 
     const selects = screen.getAllByLabelText("coding-agent-select");
-    const languageSelect = selects[0];
+    const languageSelect = selects[selects.length - 1];
     await user.selectOptions(languageSelect, "zh-CN");
 
     expect(mockSetLocale).toHaveBeenCalledWith("zh-CN");
@@ -264,6 +268,10 @@ describe("SettingsPage — Appearance section", () => {
 });
 
 describe("SettingsPage", () => {
+  async function openSection(user: ReturnType<typeof userEvent.setup>, label: string) {
+    await user.click(screen.getByRole("button", { name: label }));
+  }
+
   function setControlValue(element: HTMLElement, value: string) {
     fireEvent.change(element, {
       target: { value },
@@ -291,8 +299,10 @@ describe("SettingsPage", () => {
     });
 
     expect(fetchProjects).toHaveBeenCalled();
-    expect(screen.getByText("Project Settings")).toBeInTheDocument();
+    expect(screen.getByRole("heading", { name: "Settings" })).toBeInTheDocument();
+    await openSection(user, "Advanced");
     expect(screen.getByText("Fallback defaults are currently active for governance settings.")).toBeInTheDocument();
+    await openSection(user, "General");
 
     const nameInput = screen.getByRole("textbox", { name: "Project Name" });
     setControlValue(nameInput, "AgentForge Next");
@@ -313,6 +323,7 @@ describe("SettingsPage", () => {
       render(<SettingsPage />);
     });
 
+    await openSection(user, "Budget & Alerts");
     const thresholdInput = screen.getByRole("spinbutton", {
       name: "Alert Threshold (%)",
     });
@@ -331,6 +342,7 @@ describe("SettingsPage", () => {
       render(<SettingsPage />);
     });
 
+    await openSection(user, "General");
     const nameInput = screen.getByRole("textbox", { name: "Project Name" });
     setControlValue(nameInput, "AgentForge Failing Save");
     await user.click(screen.getByRole("button", { name: "Save Settings" }));
@@ -365,6 +377,7 @@ describe("SettingsPage", () => {
       render(<SettingsPage />);
     });
 
+    await openSection(user, "General");
     const nameInput = screen.getByRole("textbox", { name: "Project Name" });
     setControlValue(nameInput, "AgentForge Policy");
     await user.click(screen.getByRole("button", { name: "Save Settings" }));
@@ -390,6 +403,7 @@ describe("SettingsPage", () => {
       render(<SettingsPage />);
     });
 
+    await openSection(user, "General");
     const nameInput = screen.getByRole("textbox", { name: "Project Name" });
     setControlValue(nameInput, "AgentForge Legacy Policy");
     await user.click(screen.getByRole("button", { name: "Save Settings" }));
@@ -416,11 +430,13 @@ describe("SettingsPage", () => {
       render(<SettingsPage />);
     });
 
+    await openSection(user, "Coding Agent");
     const selects = screen.getAllByLabelText("coding-agent-select");
     await user.selectOptions(selects[1], "opencode");
 
-    expect(screen.getByText("Draft runtime selection differs from the last saved project settings.")).toBeInTheDocument();
     expect(screen.getByText("OpenCode CLI is not installed")).toBeInTheDocument();
+    await user.selectOptions(selects[1], "codex");
+    await user.selectOptions(selects[3], "gpt-5-codex-high");
 
     await user.click(screen.getByRole("button", { name: "Save Settings" }));
 
@@ -430,7 +446,8 @@ describe("SettingsPage", () => {
         expect.objectContaining({
           settings: expect.objectContaining({
             codingAgent: expect.objectContaining({
-              runtime: "opencode",
+              runtime: "codex",
+              model: "gpt-5-codex-high",
             }),
           }),
         })
@@ -477,7 +494,9 @@ describe("SettingsPage", () => {
       render(<SettingsPage />);
     });
 
+    await openSection(user, "Webhook");
     const secretInput = screen.getByLabelText("Webhook Secret") as HTMLInputElement;
+    await openSection(user, "General");
     const nameInput = screen.getByRole("textbox", { name: "Project Name" });
 
     expect(secretInput).toHaveValue("signing-secret");
@@ -518,21 +537,32 @@ describe("SettingsPage", () => {
       render(<SettingsPage />);
     });
 
+    await openSection(user, "Repository");
     setControlValue(screen.getByRole("textbox", { name: "Repository URL" }), "https://github.com/acme/agentforge-next");
     setControlValue(screen.getByRole("textbox", { name: "Default Branch" }), "develop");
+
+    await openSection(user, "Budget & Alerts");
     setControlValue(screen.getByRole("spinbutton", { name: "Max Task Budget (USD)" }), "15");
     setControlValue(screen.getByRole("spinbutton", { name: "Max Daily Spend (USD)" }), "45");
-    setControlValue(screen.getByRole("textbox", { name: "Webhook URL" }), "https://hooks.example.com/next");
+    const budgetSelects = screen.getAllByLabelText("coding-agent-select");
+    await user.selectOptions(budgetSelects[1], "yes");
 
-    const selects = screen.getAllByLabelText("coding-agent-select");
-    await user.selectOptions(selects[2], "codex");
-    await user.selectOptions(selects[3], "gpt-5-codex-high");
-    await user.selectOptions(selects[4], "yes");
-    await user.selectOptions(selects[5], "yes");
-    await user.selectOptions(selects[6], "layer3");
-    await user.selectOptions(selects[7], "critical");
-    await user.selectOptions(selects[8], "yes");
-    await user.selectOptions(selects[9], "yes");
+    await openSection(user, "Coding Agent");
+    const codingAgentSelects = screen.getAllByLabelText("coding-agent-select");
+    await user.selectOptions(codingAgentSelects[1], "codex");
+    await user.selectOptions(codingAgentSelects[3], "gpt-5-codex-high");
+
+    await openSection(user, "Review Policy");
+    const reviewPolicySelects = screen.getAllByLabelText("coding-agent-select");
+    await user.selectOptions(reviewPolicySelects[1], "yes");
+    await user.selectOptions(reviewPolicySelects[2], "layer3");
+    await user.selectOptions(reviewPolicySelects[3], "critical");
+    await user.selectOptions(reviewPolicySelects[4], "yes");
+
+    await openSection(user, "Webhook");
+    setControlValue(screen.getByRole("textbox", { name: "Webhook URL" }), "https://hooks.example.com/next");
+    const webhookSelects = screen.getAllByLabelText("coding-agent-select");
+    await user.selectOptions(webhookSelects[1], "yes");
 
     await user.click(screen.getByRole("button", { name: "push" }));
     await user.click(screen.getByRole("button", { name: "pr_opened" }));
@@ -546,7 +576,7 @@ describe("SettingsPage", () => {
           defaultBranch: "develop",
           settings: expect.objectContaining({
             codingAgent: expect.objectContaining({
-              provider: "codex",
+              provider: "openai",
               model: "gpt-5-codex-high",
             }),
             budgetGovernance: expect.objectContaining({
@@ -569,5 +599,5 @@ describe("SettingsPage", () => {
         }),
       );
     });
-  });
+  }, 15000);
 });

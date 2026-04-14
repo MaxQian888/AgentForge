@@ -1,0 +1,23 @@
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: workflow-control
+  name: Workflow Control
+  version: 0.1.0
+  description: Built-in MCP control tool for AgentForge workflow run start and run history inspection.
+  tags:
+    - builtin
+    - tool
+    - workflow
+    - control-plane
+spec:
+  runtime: mcp
+  transport: stdio
+  command: bun
+  args:
+    - run
+    - src/index.ts
+permissions: {}
+source:
+  type: builtin
+  path: ./plugins/tools/workflow-control/manifest.yaml

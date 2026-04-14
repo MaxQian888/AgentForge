@@ -17,6 +17,8 @@ import {
   RevertRequestSchema,
   RollbackRequestSchema,
   ResumeRequestSchema,
+  ShellRequestSchema,
+  ThinkingBudgetRequestSchema,
   TodoUpdateEventDataSchema,
   UnrevertRequestSchema,
 } from "./schemas.js";
@@ -286,6 +288,12 @@ describe("bridge request schemas", () => {
               tools: ["Read"],
             },
           },
+          {
+            hook: "SessionStart",
+          },
+          {
+            hook: "Notification",
+          },
         ],
         callback_url: "http://127.0.0.1:7777/hooks",
         timeout_ms: 4000,
@@ -325,6 +333,8 @@ describe("bridge request schemas", () => {
     });
     expect(parsed.output_schema?.type).toBe("json_schema");
     expect(parsed.hooks_config?.hooks[0]?.hook).toBe("PreToolUse");
+    expect(parsed.hooks_config?.hooks[1]?.hook).toBe("SessionStart");
+    expect(parsed.hooks_config?.hooks[2]?.hook).toBe("Notification");
     expect(parsed.attachments?.[0]?.type).toBe("image");
     expect(parsed.agents?.reviewer?.tools).toEqual(["Read", "Grep"]);
     expect(parsed.additional_directories).toEqual(["D:/Shared"]);
@@ -378,11 +388,33 @@ describe("bridge request schemas", () => {
       arguments: "--full",
     });
     expect(
+      ShellRequestSchema.parse({
+        task_id: "task-advanced",
+        command: "pnpm lint",
+        agent: "reviewer",
+        model: "opencode-fast",
+      }),
+    ).toEqual({
+      task_id: "task-advanced",
+      command: "pnpm lint",
+      agent: "reviewer",
+      model: "opencode-fast",
+    });
+    expect(
       InterruptRequestSchema.parse({
         task_id: "task-advanced",
       }),
     ).toEqual({
       task_id: "task-advanced",
+    });
+    expect(
+      ThinkingBudgetRequestSchema.parse({
+        task_id: "task-advanced",
+        max_thinking_tokens: 2_048,
+      }),
+    ).toEqual({
+      task_id: "task-advanced",
+      max_thinking_tokens: 2_048,
     });
     expect(
       ModelSwitchRequestSchema.parse({

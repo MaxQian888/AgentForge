@@ -1,0 +1,23 @@
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: review-control
+  name: Review Control
+  version: 0.1.0
+  description: Built-in MCP control tool for AgentForge review trigger, detail, and task review history workflows.
+  tags:
+    - builtin
+    - tool
+    - reviews
+    - control-plane
+spec:
+  runtime: mcp
+  transport: stdio
+  command: bun
+  args:
+    - run
+    - src/index.ts
+permissions: {}
+source:
+  type: builtin
+  path: ./plugins/tools/review-control/manifest.yaml

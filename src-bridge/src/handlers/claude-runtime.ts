@@ -540,6 +540,8 @@ function hasClaudeQueryControls(query: QueryRunnerResult): boolean {
   return (
     typeof query.interrupt === "function" ||
     typeof query.setModel === "function" ||
+    typeof query.setMaxThinkingTokens === "function" ||
+    typeof query.mcpServerStatus === "function" ||
     typeof query.rewindFiles === "function"
   );
 }

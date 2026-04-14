@@ -85,6 +85,56 @@ describe("project-settings-workspace", () => {
     });
   });
 
+  it("falls back to the catalog default selection when stored runtime is unavailable", () => {
+    const project: Project = {
+      ...baseProject,
+      settings: {
+        ...baseProject.settings,
+        codingAgent: {
+          runtime: "iflow",
+          provider: "iflow",
+          model: "Qwen3-Coder",
+        },
+      },
+      codingAgentCatalog: {
+        defaultRuntime: "codex",
+        defaultSelection: {
+          runtime: "codex",
+          provider: "openai",
+          model: "gpt-5-codex",
+        },
+        runtimes: [
+          ...codingAgentCatalog.runtimes,
+          {
+            runtime: "iflow",
+            label: "iFlow CLI",
+            defaultProvider: "iflow",
+            compatibleProviders: ["iflow"],
+            defaultModel: "Qwen3-Coder",
+            modelOptions: ["Qwen3-Coder"],
+            available: false,
+            diagnostics: [
+              {
+                code: "runtime_sunset",
+                message: "iFlow sunset",
+                blocking: true,
+              },
+            ],
+            supportedFeatures: ["progress"],
+          },
+        ],
+      },
+    };
+
+    const draft = createSettingsWorkspaceDraft(project);
+
+    expect(draft.settings.codingAgent).toEqual({
+      runtime: "codex",
+      provider: "openai",
+      model: "gpt-5-codex",
+    });
+  });
+
   it("tracks whether settings sections are falling back to defaults", () => {
     expect(getSettingsFallbackState(baseProject)).toEqual({
       budgetGovernance: true,
@@ -171,6 +221,53 @@ describe("project-settings-workspace", () => {
     ).toEqual(
       expect.objectContaining({
         provider: "Selected provider is not supported by the current runtime.",
+      }),
+    );
+  });
+
+  it("rejects unavailable runtime selections", () => {
+    const draft = createSettingsWorkspaceDraft(baseProject);
+
+    expect(
+      validateSettingsWorkspaceDraft(
+        {
+          ...draft,
+          settings: {
+            ...draft.settings,
+            codingAgent: {
+              runtime: "iflow",
+              provider: "iflow",
+              model: "Qwen3-Coder",
+            },
+          },
+        },
+        {
+          ...codingAgentCatalog,
+          runtimes: [
+            ...codingAgentCatalog.runtimes,
+            {
+              runtime: "iflow",
+              label: "iFlow CLI",
+              defaultProvider: "iflow",
+              compatibleProviders: ["iflow"],
+              defaultModel: "Qwen3-Coder",
+              modelOptions: ["Qwen3-Coder"],
+              available: false,
+              diagnostics: [
+                {
+                  code: "runtime_sunset",
+                  message: "iFlow sunset",
+                  blocking: true,
+                },
+              ],
+              supportedFeatures: ["progress"],
+            },
+          ],
+        },
+      ),
+    ).toEqual(
+      expect.objectContaining({
+        runtime: "Selected runtime is currently unavailable.",
       }),
     );
   });

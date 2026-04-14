@@ -183,6 +183,7 @@ func TestEpisodicMemoryService_AccessControlRetentionExportImportAndMigration(t 
 	}
 	repo := &episodicMemoryRepoStub{
 		listResult:      []*model.AgentMemory{roleEntry},
+		rangeResult:     []*model.AgentMemory{roleEntry},
 		getResult:       roleEntry,
 		deleteOlderRows: 2,
 	}
@@ -271,6 +272,60 @@ func TestEpisodicMemoryService_AccessControlRetentionExportImportAndMigration(t 
 	}
 	if migrated != 1 {
 		t.Fatalf("ImportSessionSnapshots() = %d, want 1", migrated)
+	}
+}
+
+func TestEpisodicMemoryService_ExportHonorsQueryAndCategoryFilters(t *testing.T) {
+	t.Parallel()
+
+	projectID := uuid.New()
+	now := time.Date(2026, 4, 10, 10, 0, 0, 0, time.UTC)
+	matched := &model.AgentMemory{
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		Scope:     model.MemoryScopeProject,
+		Category:  model.MemoryCategoryEpisodic,
+		Key:       "session:s1:turn:2",
+		Content:   "matched detail for export",
+		CreatedAt: now.Add(-time.Hour),
+		UpdatedAt: now.Add(-time.Hour),
+	}
+	unrelated := &model.AgentMemory{
+		ID:        uuid.New(),
+		ProjectID: projectID,
+		Scope:     model.MemoryScopeProject,
+		Category:  model.MemoryCategoryEpisodic,
+		Key:       "session:s1:turn:3",
+		Content:   "background context",
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	repo := &episodicMemoryRepoStub{
+		rangeResult: []*model.AgentMemory{matched, unrelated},
+	}
+	svc := service.NewEpisodicMemoryService(repo)
+
+	filtered, err := svc.Export(context.Background(), service.EpisodicMemoryExportRequest{
+		ProjectID: projectID,
+		Query:     "matched",
+		Category:  model.MemoryCategoryEpisodic,
+	})
+	if err != nil {
+		t.Fatalf("Export(filtered) error = %v", err)
+	}
+	if len(filtered.Entries) != 1 || filtered.Entries[0].ID != matched.ID.String() {
+		t.Fatalf("Export(filtered) = %#v", filtered)
+	}
+
+	empty, err := svc.Export(context.Background(), service.EpisodicMemoryExportRequest{
+		ProjectID: projectID,
+		Category:  model.MemoryCategorySemantic,
+	})
+	if err != nil {
+		t.Fatalf("Export(non-episodic) error = %v", err)
+	}
+	if len(empty.Entries) != 0 {
+		t.Fatalf("Export(non-episodic) = %#v, want empty export", empty)
 	}
 }
 

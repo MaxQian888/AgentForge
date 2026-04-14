@@ -7,6 +7,7 @@ const path = require("node:path");
 const YAML = require("yaml");
 
 const { getRepoRoot } = require("./plugin-dev-targets.js");
+const { runInternalSkillVerification } = require("./internal-skill-governance.js");
 
 function loadBuiltInSkillBundle({ repoRoot = getRepoRoot() } = {}) {
   const bundlePath = path.join(repoRoot, "skills", "builtin-bundle.yaml");
@@ -70,6 +71,14 @@ function validateSkillBundleEntry(entry, { repoRoot = getRepoRoot() } = {}) {
 function runBuiltInSkillBundleVerification({ repoRoot = getRepoRoot() } = {}) {
   const bundle = loadBuiltInSkillBundle({ repoRoot });
   const failures = [];
+  const governance = runInternalSkillVerification({
+    repoRoot,
+    families: ["built-in-runtime"],
+  });
+
+  if (!governance.ok) {
+    failures.push(...governance.failures);
+  }
 
   for (const entry of bundle.entries) {
     const issues = validateSkillBundleEntry(entry, { repoRoot });

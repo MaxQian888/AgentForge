@@ -250,6 +250,24 @@ describe("useAgentStore", () => {
             available: true,
             diagnostics: [],
             supported_features: ["structured_output", "interrupt"],
+            interaction_capabilities: {
+              lifecycle: {
+                interrupt: {
+                  state: "supported",
+                  message: "Interrupt is available",
+                },
+              },
+            },
+            providers: [
+              {
+                provider: "anthropic",
+                connected: true,
+                default_model: "claude-sonnet-4-5",
+                model_options: ["claude-sonnet-4-5", "claude-opus-4-1"],
+                auth_required: false,
+                auth_methods: ["api_key"],
+              },
+            ],
           },
           {
             key: "cursor",
@@ -261,6 +279,17 @@ describe("useAgentStore", () => {
             available: true,
             diagnostics: [],
             supported_features: ["progress", "reasoning"],
+            launch_contract: {
+              prompt_transport: "positional",
+              output_mode: "stream-json",
+              supported_output_modes: ["text", "json", "stream-json"],
+              supported_approval_modes: ["default", "ask", "plan", "yolo"],
+              additional_directories: false,
+              env_overrides: false,
+            },
+            lifecycle: {
+              stage: "active",
+            },
           },
         ],
       }),
@@ -280,9 +309,37 @@ describe("useAgentStore", () => {
         }),
         runtimes: expect.arrayContaining([
           expect.objectContaining({
+            runtime: "claude_code",
+            interactionCapabilities: expect.objectContaining({
+              lifecycle: expect.objectContaining({
+                interrupt: expect.objectContaining({
+                  state: "supported",
+                }),
+              }),
+            }),
+            providers: [
+              expect.objectContaining({
+                provider: "anthropic",
+                connected: true,
+                defaultModel: "claude-sonnet-4-5",
+                modelOptions: ["claude-sonnet-4-5", "claude-opus-4-1"],
+                authRequired: false,
+                authMethods: ["api_key"],
+              }),
+            ],
+          }),
+          expect.objectContaining({
             runtime: "cursor",
             modelOptions: ["claude-sonnet-4-20250514", "gpt-4o"],
             supportedFeatures: ["progress", "reasoning"],
+            launchContract: expect.objectContaining({
+              promptTransport: "positional",
+              outputMode: "stream-json",
+              supportedApprovalModes: ["default", "ask", "plan", "yolo"],
+            }),
+            lifecycle: expect.objectContaining({
+              stage: "active",
+            }),
           }),
         ]),
       }),

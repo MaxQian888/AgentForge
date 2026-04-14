@@ -57,7 +57,12 @@ type MemoryAccessRequest struct {
 
 type EpisodicMemoryExportRequest struct {
 	ProjectID uuid.UUID
+	Query     string
+	Category  string
 	RoleID    string
+	Scope     string
+	StartAt   *time.Time
+	EndAt     *time.Time
 }
 
 type EpisodicMemoryExport struct {
@@ -208,23 +213,34 @@ func (s *EpisodicMemoryService) ApplyRetention(ctx context.Context, projectID uu
 }
 
 func (s *EpisodicMemoryService) Export(ctx context.Context, req EpisodicMemoryExportRequest) (*EpisodicMemoryExport, error) {
-	entries, err := s.repo.ListByProject(ctx, req.ProjectID, "", model.MemoryCategoryEpisodic)
+	if category := strings.TrimSpace(req.Category); category != "" && category != model.MemoryCategoryEpisodic {
+		return &EpisodicMemoryExport{
+			ProjectID:  req.ProjectID.String(),
+			ExportedAt: s.now().Format(time.RFC3339),
+			Entries:    []EpisodicMemoryExportEntry{},
+		}, nil
+	}
+
+	entries, err := s.ListHistory(ctx, EpisodicMemoryQuery{
+		ProjectID: req.ProjectID,
+		Scope:     strings.TrimSpace(req.Scope),
+		RoleID:    strings.TrimSpace(req.RoleID),
+		StartAt:   req.StartAt,
+		EndAt:     req.EndAt,
+		Limit:     0,
+	})
 	if err != nil {
 		return nil, fmt.Errorf("export episodic memory: %w", err)
 	}
-	filtered, err := filterAccessibleMemories(entries, MemoryAccessRequest{
-		ProjectID: req.ProjectID,
-		RoleID:    req.RoleID,
-	})
-	if err != nil {
-		return nil, err
+	if query := strings.TrimSpace(req.Query); query != "" {
+		entries = filterMemoriesBySearch(entries, query)
 	}
 	exported := &EpisodicMemoryExport{
 		ProjectID:  req.ProjectID.String(),
 		ExportedAt: s.now().Format(time.RFC3339),
-		Entries:    make([]EpisodicMemoryExportEntry, 0, len(filtered)),
+		Entries:    make([]EpisodicMemoryExportEntry, 0, len(entries)),
 	}
-	for _, entry := range filtered {
+	for _, entry := range entries {
 		exported.Entries = append(exported.Entries, EpisodicMemoryExportEntry{
 			ID:        entry.ID.String(),
 			Scope:     entry.Scope,

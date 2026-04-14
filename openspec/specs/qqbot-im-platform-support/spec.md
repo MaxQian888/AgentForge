@@ -2,7 +2,6 @@
 
 ## Purpose
 Define the runnable QQ Bot provider contract for the AgentForge IM Bridge, including startup validation, shared command normalization, provider-aware delivery downgrade, and reply-target preservation for asynchronous updates.
-
 ## Requirements
 ### Requirement: QQ Bot provider SHALL be runnable through the shared IM Bridge platform contract
 The IM Bridge SHALL expose QQ Bot 官方 as a runnable built-in provider through the same provider descriptor, transport selection, and configuration validation path used by the other supported IM platforms. The QQ Bot provider MUST support `stub` transport for local verification and MUST support a live transport path that validates the credentials and connection settings required by the documented QQ Bot event and message delivery model before startup succeeds.
@@ -31,17 +30,22 @@ The system SHALL normalize supported QQ Bot inbound messages or events into `cor
 - **AND** the resulting reply is routed back to the originating QQ Bot conversation context
 
 ### Requirement: QQ Bot outbound delivery SHALL support explicit structured downgrade semantics
-The system SHALL resolve QQ Bot-targeted typed deliveries through a QQ Bot rendering profile that can choose a QQ Bot-supported representation for plain text, structured content, or provider-supported richer output. When the requested richer path cannot be honored by the current QQ Bot reply target or payload shape, the Bridge MUST explicitly fall back to a supported QQ Bot text or link delivery and preserve fallback metadata rather than pretending richer delivery succeeded.
+The system SHALL resolve QQ Bot-targeted typed deliveries through a markdown-first QQ Bot rendering profile that may include keyboard buttons when the current scene and payload support them. QQ Bot MUST preserve the truthful boundary between markdown or keyboard send, reply-target reuse via preserved conversation metadata, and the absence of Feishu-style mutable card lifecycle. When the requested richer path cannot be honored, the Bridge SHALL fall back explicitly to supported QQ Bot text output and preserve fallback metadata.
 
-#### Scenario: Structured QQ Bot notification uses the provider rendering profile
-- **WHEN** the notification receiver handles a QQ Bot-targeted delivery with structured or richer content
-- **THEN** the Bridge resolves that delivery through the active QQ Bot rendering profile before transport execution
-- **AND** the final transport path uses a QQ Bot-supported representation instead of leaking cross-platform structured payload assumptions into the transport layer
+#### Scenario: Markdown QQ Bot notification uses the provider rendering profile
+- **WHEN** the notification receiver handles a QQ Bot-targeted delivery with markdown-compatible richer content
+- **THEN** the Bridge resolves that delivery through the active QQ Bot rendering profile and uses the QQ Bot markdown path
+- **AND** the resulting delivery metadata preserves that QQ Bot-native markdown rendering was chosen
 
-#### Scenario: Unsupported QQ Bot richer payload degrades explicitly
-- **WHEN** a QQ Bot-targeted typed delivery requests a richer card or mutable update path that the current reply target does not support
-- **THEN** the Bridge sends the supported QQ Bot text or link fallback instead
-- **AND** operators can see from the delivery metadata that the original QQ Bot update plan was unusable
+#### Scenario: QQ Bot keyboard or mutable update request degrades explicitly when context is incompatible
+- **WHEN** a QQ Bot-targeted delivery requests keyboard-assisted completion or mutable richer update behavior that the current reply target cannot honor
+- **THEN** the Bridge falls back to a supported QQ Bot text follow-up path
+- **AND** the resulting delivery metadata records that the original richer update plan was unavailable
+
+#### Scenario: QQ Bot reply-target reuse remains truthful
+- **WHEN** a QQ Bot-originated action preserves conversation metadata that supports replying in place to the same chat context
+- **THEN** the Bridge reuses that preserved reply target for the follow-up delivery path it actually supports
+- **AND** it does not claim full rich-card lifecycle parity when only markdown or keyboard send is available
 
 ### Requirement: QQ Bot reply targets SHALL preserve enough context for asynchronous updates
 When a QQ Bot message starts a backend-backed action that may emit later progress or terminal updates, the Bridge SHALL preserve enough QQ Bot reply-target context to route those later deliveries back to the same user-visible conversation when the platform supports it. That preserved reply target MUST survive control-plane queueing and replay, and any missing update affordance MUST trigger a truthful QQ Bot fallback path rather than a silent drop.
@@ -55,3 +59,17 @@ When a QQ Bot message starts a backend-backed action that may emit later progres
 - **WHEN** a replayed or direct QQ Bot delivery requires richer update context that was not preserved or is no longer valid
 - **THEN** the Bridge uses the documented QQ Bot fallback delivery path instead of attempting an invalid update
 - **AND** operators can see from the delivery metadata that the original QQ Bot update target was unusable
+
+### Requirement: QQ Bot asynchronous completion SHALL prefer msg-id-aware reply before generic follow-up
+When a QQ Bot inbound message or interaction starts long-running work, asynchronous progress and terminal completion SHALL first use preserved `msg_id` and conversation context for the provider-supported reply path. If the requested richer behavior cannot be honored in that context, the Bridge SHALL fall back to supported markdown or text follow-up and preserve explicit downgrade metadata.
+
+#### Scenario: QQ Bot completion uses preserved msg_id reply context
+- **WHEN** a QQ Bot-originated long-running action finishes while preserved `msg_id` and conversation context are still usable
+- **THEN** the Bridge delivers the completion through the provider-supported reply path tied to that context
+- **AND** the completion remains visible in the same user-facing conversation
+
+#### Scenario: QQ Bot mutable-update request degrades explicitly
+- **WHEN** a QQ Bot progress or terminal update requests mutable richer behavior that the preserved reply context cannot honor
+- **THEN** the Bridge falls back to supported markdown or text follow-up delivery
+- **AND** the resulting metadata records that the original mutable-update plan was unavailable
+

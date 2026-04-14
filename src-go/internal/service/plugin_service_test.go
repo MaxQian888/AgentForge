@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"os"
 	"path/filepath"
 	"strings"
@@ -249,6 +250,19 @@ func writeBuiltInBundle(t *testing.T, dir string, content string) string {
 	return path
 }
 
+func equalStringSliceAny(value any, want []string) bool {
+	items, ok := value.([]any)
+	if !ok || len(items) != len(want) {
+		return false
+	}
+	for index, item := range items {
+		if item != want[index] {
+			return false
+		}
+	}
+	return true
+}
+
 func TestPluginService_DiscoversBuiltInsWithoutInstallingRecords(t *testing.T) {
 	ctx := context.Background()
 	pluginsDir := t.TempDir()
@@ -372,6 +386,10 @@ plugins:
     manifest: tools/web-search/manifest.yaml
     docsRef: docs/part/PLUGIN_SYSTEM_DESIGN.md#七工具插件系统tool-plugin
     verificationProfile: mcp-tool
+    coreFlows: [developer-assist]
+    starterFamily: helper
+    dependencyRefs: [ts-bridge, mcp-client-hub]
+    workspaceRefs: [/plugins, /marketplace]
     availability:
       status: ready
       message: Bundled and ready for install.
@@ -421,6 +439,49 @@ plugins:
 	}
 	if architecture.BuiltIn.ReadinessStatus != "ready" {
 		t.Fatalf("readiness status = %q, want ready", architecture.BuiltIn.ReadinessStatus)
+	}
+
+	payload, err := json.Marshal(architecture.BuiltIn)
+	if err != nil {
+		t.Fatalf("marshal built-in metadata: %v", err)
+	}
+	var raw map[string]any
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		t.Fatalf("unmarshal built-in metadata: %v", err)
+	}
+	if _, ok := raw["coreFlows"]; ok {
+		t.Fatalf("expected review plugin without starter metadata to omit coreFlows, got %+v", raw["coreFlows"])
+	}
+
+	var webSearch *model.PluginRecord
+	for _, record := range records {
+		if record.Metadata.ID == "web-search" {
+			webSearch = record
+			break
+		}
+	}
+	if webSearch == nil || webSearch.BuiltIn == nil {
+		t.Fatalf("expected web-search built-in metadata, got %+v", webSearch)
+	}
+	payload, err = json.Marshal(webSearch.BuiltIn)
+	if err != nil {
+		t.Fatalf("marshal web-search built-in metadata: %v", err)
+	}
+	raw = map[string]any{}
+	if err := json.Unmarshal(payload, &raw); err != nil {
+		t.Fatalf("unmarshal web-search built-in metadata: %v", err)
+	}
+	if got := raw["starterFamily"]; got != "helper" {
+		t.Fatalf("starterFamily = %#v, want helper", got)
+	}
+	if got := raw["coreFlows"]; !equalStringSliceAny(got, []string{"developer-assist"}) {
+		t.Fatalf("coreFlows = %#v, want [developer-assist]", got)
+	}
+	if got := raw["dependencyRefs"]; !equalStringSliceAny(got, []string{"ts-bridge", "mcp-client-hub"}) {
+		t.Fatalf("dependencyRefs = %#v, want bridge refs", got)
+	}
+	if got := raw["workspaceRefs"]; !equalStringSliceAny(got, []string{"/plugins", "/marketplace"}) {
+		t.Fatalf("workspaceRefs = %#v, want workspace refs", got)
 	}
 }
 

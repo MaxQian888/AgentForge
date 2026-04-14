@@ -1,0 +1,23 @@
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: task-control
+  name: Task Control
+  version: 0.1.0
+  description: Built-in MCP control tool for AgentForge task lookup, decomposition, and dispatch observability.
+  tags:
+    - builtin
+    - tool
+    - tasks
+    - control-plane
+spec:
+  runtime: mcp
+  transport: stdio
+  command: bun
+  args:
+    - run
+    - src/index.ts
+permissions: {}
+source:
+  type: builtin
+  path: ./plugins/tools/task-control/manifest.yaml

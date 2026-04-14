@@ -1,0 +1,42 @@
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: task-delivery-flow
+  name: Task Delivery Flow
+  version: 0.1.0
+  description: Built-in sequential workflow starter that hands off from planner to coding to review for task delivery.
+  tags:
+    - builtin
+    - workflow
+    - starter
+    - task-delivery
+spec:
+  runtime: wasm
+  module: ./dist/task-delivery-flow.wasm
+  abiVersion: v1
+  capabilities:
+    - run_workflow
+  workflow:
+    process: sequential
+    roles:
+      - id: planner-agent
+      - id: coding-agent
+      - id: code-reviewer
+    steps:
+      - id: plan
+        role: planner-agent
+        action: agent
+        next: [implement]
+      - id: implement
+        role: coding-agent
+        action: agent
+        next: [review]
+      - id: review
+        role: code-reviewer
+        action: review
+    triggers:
+      - event: manual
+permissions: {}
+source:
+  type: builtin
+  path: ./plugins/workflows/task-delivery-flow/manifest.yaml

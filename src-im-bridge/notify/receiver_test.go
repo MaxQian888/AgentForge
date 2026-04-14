@@ -561,12 +561,18 @@ func TestReceiver_HealthReportsNormalizedWeComSourceAndCapabilities(t *testing.T
 	if payload["source"] != "wecom" {
 		t.Fatalf("source = %v", payload["source"])
 	}
+	if payload["readiness_tier"] != string(core.ReadinessTierNativeSendWithFallback) {
+		t.Fatalf("readiness_tier = %v", payload["readiness_tier"])
+	}
 	if payload["supports_rich_messages"] != true {
 		t.Fatalf("supports_rich_messages = %v", payload["supports_rich_messages"])
 	}
 	matrix, ok := payload["capability_matrix"].(map[string]any)
 	if !ok {
 		t.Fatalf("capability_matrix = %#v", payload["capability_matrix"])
+	}
+	if matrix["readinessTier"] != string(core.ReadinessTierNativeSendWithFallback) {
+		t.Fatalf("capability_matrix = %#v", matrix)
 	}
 	if matrix["structuredSurface"] != "cards" {
 		t.Fatalf("structuredSurface = %v", matrix["structuredSurface"])
@@ -628,6 +634,16 @@ func TestReceiver_HealthReportsNormalizedQQSourceAndCapabilities(t *testing.T) {
 	if payload["source"] != "qq" {
 		t.Fatalf("source = %v", payload["source"])
 	}
+	if payload["readiness_tier"] != string(core.ReadinessTierTextFirst) {
+		t.Fatalf("readiness_tier = %v", payload["readiness_tier"])
+	}
+	matrix, ok := payload["capability_matrix"].(map[string]any)
+	if !ok {
+		t.Fatalf("capability_matrix = %#v", payload["capability_matrix"])
+	}
+	if matrix["readinessTier"] != string(core.ReadinessTierTextFirst) {
+		t.Fatalf("capability_matrix = %#v", matrix)
+	}
 
 	if err := r.Stop(); err != nil {
 		t.Fatalf("Stop error: %v", err)
@@ -687,8 +703,18 @@ func TestReceiver_HealthReportsNormalizedQQBotSourceAndCapabilities(t *testing.T
 	if payload["source"] != "qqbot" {
 		t.Fatalf("source = %v", payload["source"])
 	}
+	if payload["readiness_tier"] != string(core.ReadinessTierMarkdownFirst) {
+		t.Fatalf("readiness_tier = %v", payload["readiness_tier"])
+	}
 	if payload["supports_rich_messages"] != false {
 		t.Fatalf("supports_rich_messages = %v", payload["supports_rich_messages"])
+	}
+	matrix, ok := payload["capability_matrix"].(map[string]any)
+	if !ok {
+		t.Fatalf("capability_matrix = %#v", payload["capability_matrix"])
+	}
+	if matrix["readinessTier"] != string(core.ReadinessTierMarkdownFirst) {
+		t.Fatalf("capability_matrix = %#v", matrix)
 	}
 
 	if err := r.Stop(); err != nil {

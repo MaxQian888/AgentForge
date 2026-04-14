@@ -14,7 +14,11 @@ export type HookName =
   | "PostToolUse"
   | "SubagentStart"
   | "SubagentStop"
-  | "PermissionRequest";
+  | "PermissionRequest"
+  | "SessionStart"
+  | "SessionEnd"
+  | "Notification"
+  | "UserPromptSubmit";
 export type ResumeBlockingReason =
   | "missing_continuity_state"
   | "expired_continuity_state"
@@ -246,6 +250,12 @@ export interface AgentStatus {
   file_checkpointing?: boolean;
   active_hooks?: HookName[];
   subagent_count?: number;
+  live_controls?: {
+    interrupt?: boolean;
+    set_model?: boolean;
+    set_thinking_budget?: boolean;
+    mcp_status?: boolean;
+  };
   cost_accounting?: CostAccountingData;
 }
 
@@ -258,9 +268,57 @@ export interface RuntimeDiagnostic {
     | "server_unreachable"
     | "authentication_failed"
     | "provider_unavailable"
-    | "model_unavailable";
+    | "model_unavailable"
+    | "catalog_agents_unavailable"
+    | "catalog_skills_unavailable"
+    | "catalog_providers_unavailable"
+    | "sunset_window"
+    | "runtime_sunset"
+    | "stale_default_selection";
   message: string;
   blocking: boolean;
+}
+
+export type RuntimeSupportState = "supported" | "degraded" | "unsupported";
+
+export interface RuntimeCapabilityDescriptor {
+  state: RuntimeSupportState;
+  reasonCode?: string;
+  message?: string;
+  requiresRequestFields?: string[];
+}
+
+export interface RuntimeInteractionCapabilities {
+  inputs: Record<string, RuntimeCapabilityDescriptor>;
+  lifecycle: Record<string, RuntimeCapabilityDescriptor>;
+  approval: Record<string, RuntimeCapabilityDescriptor>;
+  mcp: Record<string, RuntimeCapabilityDescriptor>;
+  diagnostics: Record<string, RuntimeCapabilityDescriptor>;
+}
+
+export interface RuntimeCatalogProvider {
+  provider: string;
+  connected: boolean;
+  defaultModel?: string;
+  modelOptions?: string[];
+  authRequired?: boolean;
+  authMethods?: string[];
+}
+
+export interface RuntimeLaunchContract {
+  promptTransport: "stdin" | "positional" | "prompt_flag";
+  outputMode: "text" | "json" | "stream-json";
+  supportedOutputModes: Array<"text" | "json" | "stream-json">;
+  supportedApprovalModes: string[];
+  additionalDirectories: boolean;
+  envOverrides: boolean;
+}
+
+export interface RuntimeLifecycleMetadata {
+  stage: "active" | "sunsetting" | "sunset";
+  sunsetAt?: string;
+  replacementRuntime?: AgentRuntimeKey;
+  message?: string;
 }
 
 export interface RuntimeCatalogEntry {
@@ -273,8 +331,12 @@ export interface RuntimeCatalogEntry {
   available: boolean;
   diagnostics: RuntimeDiagnostic[];
   supportedFeatures: string[];
+  interactionCapabilities?: RuntimeInteractionCapabilities;
   agents?: string[];
   skills?: string[];
+  providers?: RuntimeCatalogProvider[];
+  launchContract?: RuntimeLaunchContract;
+  lifecycle?: RuntimeLifecycleMetadata;
 }
 
 export interface RuntimeCatalog {

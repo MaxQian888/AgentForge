@@ -38,6 +38,10 @@ export default function SchedulerPage() {
   const fetchStats = useSchedulerStore((s) => s.fetchStats);
   const updateJob = useSchedulerStore((s) => s.updateJob);
   const triggerJob = useSchedulerStore((s) => s.triggerJob);
+  const pauseJob = useSchedulerStore((s) => s.pauseJob);
+  const resumeJob = useSchedulerStore((s) => s.resumeJob);
+  const cancelJob = useSchedulerStore((s) => s.cancelJob);
+  const cleanupRuns = useSchedulerStore((s) => s.cleanupRuns);
   const selectJob = useSchedulerStore((s) => s.selectJob);
   const setDraftSchedule = useSchedulerStore((s) => s.setDraftSchedule);
 
@@ -126,6 +130,11 @@ export default function SchedulerPage() {
                 actionLoading={actionJobKey === selectedJob.jobKey}
                 onUpdateJob={(input) => void updateJob(selectedJob.jobKey, input)}
                 onTriggerJob={() => void triggerJob(selectedJob.jobKey)}
+                onPauseJob={() => void pauseJob(selectedJob.jobKey)}
+                onResumeJob={() => void resumeJob(selectedJob.jobKey)}
+                onCancelJob={() => void cancelJob(selectedJob.jobKey)}
+                onCleanupRuns={() => void cleanupRuns(selectedJob.jobKey, { retainRecent: 10 })}
+                onFetchRuns={(filters) => void fetchRuns(selectedJob.jobKey, filters)}
                 onSetDraftSchedule={(schedule) =>
                   setDraftSchedule(selectedJob.jobKey, schedule)
                 }

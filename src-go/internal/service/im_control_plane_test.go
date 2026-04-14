@@ -296,6 +296,229 @@ func TestIMControlPlane_AckDeliverySettlesPendingDeliveryAsDelivered(t *testing.
 	}
 }
 
+func TestIMControlPlane_QueueBoundProgressRecordsPendingDeliveryMetadata(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+
+	if _, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
+		BridgeID:   "bridge-slack-1",
+		Platform:   "slack",
+		Transport:  "live",
+		ProjectIDs: []string{"project-1"},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+	if err := control.BindAction(context.Background(), &IMActionBinding{
+		BridgeID:  "bridge-slack-1",
+		Platform:  "slack",
+		ProjectID: "project-1",
+		TaskID:    "task-1",
+		RunID:     "run-1",
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C123",
+			ThreadID:  "thread-1",
+		},
+	}); err != nil {
+		t.Fatalf("BindAction error: %v", err)
+	}
+
+	queued, err := control.QueueBoundProgress(context.Background(), IMBoundProgressRequest{
+		TaskID:  "task-1",
+		RunID:   "run-1",
+		Kind:    IMDeliveryKindProgress,
+		Content: "Agent is still running",
+		Metadata: map[string]string{
+			"bridge_event_type": "agent.progress",
+		},
+	})
+	if err != nil {
+		t.Fatalf("QueueBoundProgress error: %v", err)
+	}
+	if !queued {
+		t.Fatal("expected bound progress to be queued")
+	}
+
+	history, err := control.ListDeliveryHistory(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListDeliveryHistory error: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	record := history[0]
+	if record.Status != model.IMDeliveryStatusPending {
+		t.Fatalf("status = %q", record.Status)
+	}
+	if record.Metadata[imMetadataDeliverySource] != imDeliverySourceBoundProgress {
+		t.Fatalf("metadata = %+v", record.Metadata)
+	}
+	if record.Metadata[imMetadataBridgeBindingRunID] != "run-1" || record.Metadata[imMetadataBridgeBindingTaskID] != "task-1" {
+		t.Fatalf("bridge binding metadata = %+v", record.Metadata)
+	}
+	if record.Metadata[imMetadataReplyTargetThreadID] != "thread-1" {
+		t.Fatalf("reply target metadata = %+v", record.Metadata)
+	}
+}
+
+func TestIMControlPlane_QueueBoundProgressPreservesDeliveryIDForAckSettlement(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+
+	if _, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
+		BridgeID:   "bridge-slack-1",
+		Platform:   "slack",
+		Transport:  "live",
+		ProjectIDs: []string{"project-1"},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+
+	listener := &fakeBridgeDeliveryListener{}
+	if _, err := control.AttachBridgeListener(context.Background(), "bridge-slack-1", 0, listener); err != nil {
+		t.Fatalf("AttachBridgeListener error: %v", err)
+	}
+
+	if err := control.BindAction(context.Background(), &IMActionBinding{
+		BridgeID:  "bridge-slack-1",
+		Platform:  "slack",
+		ProjectID: "project-1",
+		TaskID:    "task-ack",
+		RunID:     "run-ack",
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C123",
+			ThreadID:  "thread-ack",
+		},
+	}); err != nil {
+		t.Fatalf("BindAction error: %v", err)
+	}
+
+	queued, err := control.QueueBoundProgress(context.Background(), IMBoundProgressRequest{
+		TaskID:  "task-ack",
+		RunID:   "run-ack",
+		Kind:    IMDeliveryKindProgress,
+		Content: "Agent is still running",
+		Metadata: map[string]string{
+			"bridge_event_type": "agent.progress",
+		},
+	})
+	if err != nil {
+		t.Fatalf("QueueBoundProgress error: %v", err)
+	}
+	if !queued {
+		t.Fatal("expected bound progress to be queued")
+	}
+	if len(listener.deliveries) != 1 {
+		t.Fatalf("listener deliveries = %d, want 1", len(listener.deliveries))
+	}
+
+	history, err := control.ListDeliveryHistory(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListDeliveryHistory error: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	record := history[0]
+	if record.ID != listener.deliveries[0].DeliveryID {
+		t.Fatalf("history delivery id = %q, want queued delivery id %q", record.ID, listener.deliveries[0].DeliveryID)
+	}
+
+	if err := control.AckDelivery(context.Background(), &model.IMDeliveryAck{
+		BridgeID:   "bridge-slack-1",
+		Cursor:     listener.deliveries[0].Cursor,
+		DeliveryID: listener.deliveries[0].DeliveryID,
+		Status:     string(model.IMDeliveryStatusDelivered),
+	}); err != nil {
+		t.Fatalf("AckDelivery error: %v", err)
+	}
+
+	history, err = control.ListDeliveryHistory(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListDeliveryHistory error after ack: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len after ack = %d, want 1", len(history))
+	}
+	if history[0].Status != model.IMDeliveryStatusDelivered {
+		t.Fatalf("history[0].Status = %q, want delivered", history[0].Status)
+	}
+}
+
+func TestIMControlPlane_QueueBoundProgressRecordsFailedSettlementWhenBoundBridgeIsMissing(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+
+	if _, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
+		BridgeID:   "bridge-slack-1",
+		Platform:   "slack",
+		Transport:  "live",
+		ProjectIDs: []string{"project-1"},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+	if err := control.BindAction(context.Background(), &IMActionBinding{
+		BridgeID:  "bridge-slack-1",
+		Platform:  "slack",
+		ProjectID: "project-1",
+		TaskID:    "task-2",
+		RunID:     "run-2",
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C999",
+			ThreadID:  "thread-2",
+		},
+	}); err != nil {
+		t.Fatalf("BindAction error: %v", err)
+	}
+	if err := control.UnregisterBridge(context.Background(), "bridge-slack-1"); err != nil {
+		t.Fatalf("UnregisterBridge error: %v", err)
+	}
+
+	queued, err := control.QueueBoundProgress(context.Background(), IMBoundProgressRequest{
+		TaskID:     "task-2",
+		RunID:      "run-2",
+		Kind:       IMDeliveryKindProgress,
+		Content:    "terminal result",
+		IsTerminal: true,
+		Metadata:   map[string]string{"bridge_event_type": "agent.completed"},
+	})
+	if err == nil {
+		t.Fatal("expected QueueBoundProgress error")
+	}
+	if queued {
+		t.Fatal("expected bound terminal delivery not to queue successfully")
+	}
+
+	history, listErr := control.ListDeliveryHistory(context.Background(), nil)
+	if listErr != nil {
+		t.Fatalf("ListDeliveryHistory error: %v", listErr)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	record := history[0]
+	if record.Status != model.IMDeliveryStatusFailed {
+		t.Fatalf("status = %q", record.Status)
+	}
+	if record.Metadata[imMetadataDeliverySource] != imDeliverySourceBoundTerminal {
+		t.Fatalf("metadata = %+v", record.Metadata)
+	}
+	if record.Metadata[imMetadataBridgeBindingBridgeID] != "bridge-slack-1" {
+		t.Fatalf("bridge binding metadata = %+v", record.Metadata)
+	}
+}
+
 func TestIMControlPlane_ListEventTypesReturnsCanonicalSet(t *testing.T) {
 	control := NewIMControlPlane(IMControlPlaneConfig{})
 
@@ -303,14 +526,28 @@ func TestIMControlPlane_ListEventTypesReturnsCanonicalSet(t *testing.T) {
 	if err != nil {
 		t.Fatalf("ListEventTypes error: %v", err)
 	}
-	if len(eventTypes) < 10 {
-		t.Fatalf("event types len = %d, want at least 10", len(eventTypes))
+	want := []string{
+		"task.created",
+		"task.completed",
+		"review.completed",
+		"agent.started",
+		"agent.completed",
+		"budget.warning",
+		"sprint.started",
+		"sprint.completed",
+		"review.requested",
+		"wiki.page.updated",
+		"wiki.version.published",
+		"wiki.comment.mention",
+		"workflow.failed",
 	}
-	if eventTypes[0] != "task.created" {
-		t.Fatalf("first event type = %q, want task.created", eventTypes[0])
+	if len(eventTypes) != len(want) {
+		t.Fatalf("event types len = %d, want %d (%v)", len(eventTypes), len(want), eventTypes)
 	}
-	if eventTypes[len(eventTypes)-1] != "workflow.failed" {
-		t.Fatalf("last event type = %q, want workflow.failed", eventTypes[len(eventTypes)-1])
+	for idx, expected := range want {
+		if eventTypes[idx] != expected {
+			t.Fatalf("eventTypes[%d] = %q, want %q", idx, eventTypes[idx], expected)
+		}
 	}
 }
 
@@ -509,6 +746,7 @@ func TestIMControlPlane_QueueBoundProgressRespectsBridgeEventPreferenceMetadata(
 			ThreadID:  "1700000000.1",
 			Metadata: map[string]string{
 				"bridge_event_enabled.permission_request": "false",
+				"bridge_event_enabled.budget.warning":     "false",
 				"bridge_event_enabled.status_change":      "true",
 			},
 		},
@@ -530,6 +768,22 @@ func TestIMControlPlane_QueueBoundProgressRespectsBridgeEventPreferenceMetadata(
 	}
 	if sent {
 		t.Fatal("expected disabled permission_request delivery to be skipped")
+	}
+
+	sent, err = control.QueueBoundProgress(context.Background(), IMBoundProgressRequest{
+		RunID:   "run-1",
+		TaskID:  "task-1",
+		Kind:    IMDeliveryKindProgress,
+		Content: "budget warning should be filtered",
+		Metadata: map[string]string{
+			"bridge_event_type": "budget.warning",
+		},
+	})
+	if err != nil {
+		t.Fatalf("QueueBoundProgress(budget.warning) error: %v", err)
+	}
+	if sent {
+		t.Fatal("expected disabled budget.warning delivery to be skipped")
 	}
 
 	sent, err = control.QueueBoundProgress(context.Background(), IMBoundProgressRequest{

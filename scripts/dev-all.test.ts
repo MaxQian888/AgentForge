@@ -5,7 +5,107 @@ import * as fs from "node:fs";
 import * as os from "node:os";
 import * as path from "node:path";
 
+function currentHostTripleForTest() {
+  if (process.platform === "win32" && process.arch === "x64") {
+    return "x86_64-pc-windows-msvc";
+  }
+
+  if (process.platform === "linux" && process.arch === "x64") {
+    return "x86_64-unknown-linux-gnu";
+  }
+
+  if (process.platform === "linux" && process.arch === "arm64") {
+    return "aarch64-unknown-linux-gnu";
+  }
+
+  if (process.platform === "darwin" && process.arch === "x64") {
+    return "x86_64-apple-darwin";
+  }
+
+  if (process.platform === "darwin" && process.arch === "arm64") {
+    return "aarch64-apple-darwin";
+  }
+
+  return "x86_64-pc-windows-msvc";
+}
+
+function hostExecutableExtensionForTest() {
+  return process.platform === "win32" ? ".exe" : "";
+}
+
 describe("dev-all workflow contract", () => {
+  afterEach(() => {
+    jest.resetModules();
+    jest.dontMock("./dev-workflow.js");
+    jest.dontMock("./im-stub-smoke.js");
+  });
+
+  test("builds the backend-only service matrix and repo-local paths", () => {
+    const {
+      createDevBackendServiceDefinitions,
+      getDevBackendPaths,
+    } = require("./dev-all.js");
+
+    const repoRoot = process.cwd();
+    const paths = getDevBackendPaths({ repoRoot });
+    const services = createDevBackendServiceDefinitions({ repoRoot });
+
+    expect(paths.repoRoot).toBe(repoRoot);
+    expect(paths.statePath).toBe(path.join(paths.codexDir, "dev-backend-state.json"));
+    expect(services.find((service: { name: string }) => service.name === "frontend")).toBeUndefined();
+    expect(
+      services.map((service: {
+        name: string;
+        kind: string;
+        start: { source: string };
+        port: number;
+        healthUrl: string | null;
+      }) => ({
+        name: service.name,
+        kind: service.kind,
+        source: service.start.source,
+        port: service.port,
+        healthUrl: service.healthUrl,
+      })),
+    ).toEqual([
+      {
+        name: "postgres",
+        kind: "infra",
+        source: "docker-compose",
+        port: 5432,
+        healthUrl: null,
+      },
+      {
+        name: "redis",
+        kind: "infra",
+        source: "docker-compose",
+        port: 6379,
+        healthUrl: null,
+      },
+      {
+        name: "go-orchestrator",
+        kind: "application",
+        source: "spawn",
+        port: 7777,
+        healthUrl: "http://127.0.0.1:7777/health",
+      },
+      {
+        name: "ts-bridge",
+        kind: "application",
+        source: "spawn",
+        port: 7778,
+        healthUrl: "http://127.0.0.1:7778/health",
+      },
+      {
+        name: "im-bridge",
+        kind: "application",
+        source: "spawn",
+        port: 7779,
+        healthUrl: "http://127.0.0.1:7779/im/health",
+      },
+    ]);
+  });
+
   test("builds the full-stack service matrix and repo-local paths", () => {
     const {
       createDevAllServiceDefinitions,
@@ -215,14 +315,215 @@ describe("dev-all workflow contract", () => {
     });
   });
 
+  test("exposes the root dev:backend command family", () => {
+    const packageJson = JSON.parse(
+      fs.readFileSync(path.join(process.cwd(), "package.json"), "utf8"),
+    );
+
+    expect(packageJson.scripts).toMatchObject({
+      "dev:backend": "node scripts/dev-all.js backend",
+      "dev:backend:status": "node scripts/dev-all.js backend status",
+      "dev:backend:stop": "node scripts/dev-all.js backend stop",
+      "dev:backend:logs": "node scripts/dev-all.js backend logs",
+      "dev:backend:verify": "node scripts/dev-all.js backend verify",
+    });
+  });
+
+  test("runs backend verify with staged smoke output and keeps the managed stack running", async () => {
+    jest.resetModules();
+
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-devbackend-verify-"));
+    const writeRuntimeState = jest.fn();
+    const runIMStubSmoke = jest.fn(async () => ({
+      ok: true,
+      stages: [
+        { name: "stub-command", ok: true, detail: "Injected /agent runtimes" },
+        { name: "reply-capture", ok: true, detail: "Captured non-empty reply" },
+      ],
+      firstReply: { content: "codex: ready" },
+      baseUrl: "http://127.0.0.1:7780",
+    }));
+
+    jest.doMock("./im-stub-smoke.js", () => ({
+      DEFAULT_VERIFY_COMMAND_CONTENT: "/agent runtimes",
+      runIMStubSmoke,
+    }));
+
+    jest.doMock("./dev-workflow.js", () => {
+      const actual = jest.requireActual("./dev-workflow.js");
+      return {
+        ...actual,
+        canUseDockerCompose: jest.fn(() => true),
+        getDockerComposeAvailability: jest.fn(() => ({
+          ready: true,
+          dockerAvailable: true,
+          canAutoStart: true,
+          reason: null,
+          detail: null,
+        })),
+        isCommandAvailable: jest.fn(() => true),
+        isPortListening: jest.fn(async () => false),
+        runCommandSync: jest.fn(() => ({ status: 0, stdout: "", stderr: "" })),
+        probeServiceHealth: jest.fn(async () => true),
+        readRuntimeState: jest.fn(() => ({
+          version: 1,
+          services: {},
+        })),
+        writeRuntimeState,
+      };
+    });
+
+    const { runDevBackendVerify, getDevBackendPaths } = require("./dev-all.js");
+
+    const result = await runDevBackendVerify({ repoRoot });
+
+    expect(result.ok).toBe(true);
+    expect(result.keepRunning).toBe(true);
+    expect(result.failureStage).toBeNull();
+    expect(result.stages.map((stage: { name: string }) => stage.name)).toEqual([
+      "startup",
+      "go-health",
+      "bridge-health",
+      "im-health",
+      "stub-command",
+      "reply-capture",
+    ]);
+    expect(runIMStubSmoke).toHaveBeenCalledWith(
+      expect.objectContaining({
+        repoRoot,
+        platform: "feishu",
+        port: 7780,
+        commandContent: "/agent runtimes",
+      }),
+    );
+    expect(result.paths).toEqual(getDevBackendPaths({ repoRoot }));
+  });
+
+  test("surfaces the failing backend verify stage while preserving runtime diagnostics", async () => {
+    jest.resetModules();
+
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-devbackend-verify-fail-"));
+
+    jest.doMock("./im-stub-smoke.js", () => ({
+      DEFAULT_VERIFY_COMMAND_CONTENT: "/agent runtimes",
+      runIMStubSmoke: jest.fn(async () => ({
+        ok: false,
+        failureStage: "reply-capture",
+        stages: [
+          { name: "stub-command", ok: true, detail: "Injected /agent runtimes" },
+          { name: "reply-capture", ok: false, detail: "No replies captured" },
+        ],
+        baseUrl: "http://127.0.0.1:7780",
+      })),
+    }));
+
+    jest.doMock("./dev-workflow.js", () => {
+      const actual = jest.requireActual("./dev-workflow.js");
+      return {
+        ...actual,
+        canUseDockerCompose: jest.fn(() => true),
+        getDockerComposeAvailability: jest.fn(() => ({
+          ready: true,
+          dockerAvailable: true,
+          canAutoStart: true,
+          reason: null,
+          detail: null,
+        })),
+        isCommandAvailable: jest.fn(() => true),
+        isPortListening: jest.fn(async () => false),
+        runCommandSync: jest.fn(() => ({ status: 0, stdout: "", stderr: "" })),
+        probeServiceHealth: jest.fn(async () => true),
+        readRuntimeState: jest.fn(() => ({
+          version: 1,
+          services: {},
+        })),
+        writeRuntimeState: jest.fn(),
+      };
+    });
+
+    const { runDevBackendVerify } = require("./dev-all.js");
+
+    const result = await runDevBackendVerify({ repoRoot });
+
+    expect(result.ok).toBe(false);
+    expect(result.failureStage).toBe("reply-capture");
+    expect(result.keepRunning).toBe(true);
+    expect(result.stages).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "reply-capture", ok: false, detail: "No replies captured" }),
+      ]),
+    );
+    expect(result.statusReport).toEqual(
+      expect.objectContaining({
+        ok: true,
+        report: expect.objectContaining({
+          services: expect.any(Object),
+        }),
+      }),
+    );
+  });
+
+  test("backend verify can reuse prepared sidecars when source toolchains are unavailable", async () => {
+    jest.resetModules();
+
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-devbackend-verify-sidecars-"));
+    const binariesDir = path.join(repoRoot, "src-tauri", "binaries");
+    fs.mkdirSync(binariesDir, { recursive: true });
+    for (const name of [
+      `server-${currentHostTripleForTest()}${hostExecutableExtensionForTest()}`,
+      `bridge-${currentHostTripleForTest()}${hostExecutableExtensionForTest()}`,
+      `im-bridge-${currentHostTripleForTest()}${hostExecutableExtensionForTest()}`,
+    ]) {
+      fs.writeFileSync(path.join(binariesDir, name), "", "utf8");
+    }
+
+    jest.doMock("./im-stub-smoke.js", () => ({
+      DEFAULT_VERIFY_COMMAND_CONTENT: "/agent runtimes",
+      runIMStubSmoke: jest.fn(async () => ({
+        ok: true,
+        stages: [
+          { name: "stub-command", ok: true, detail: "Injected /agent runtimes" },
+          { name: "reply-capture", ok: true, detail: "Captured non-empty reply" },
+        ],
+      })),
+    }));
+
+    jest.doMock("./dev-workflow.js", () => {
+      const actual = jest.requireActual("./dev-workflow.js");
+      return {
+        ...actual,
+        canUseDockerCompose: jest.fn(() => true),
+        getDockerComposeAvailability: jest.fn(() => ({
+          ready: true,
+          dockerAvailable: true,
+          canAutoStart: true,
+          reason: null,
+          detail: null,
+        })),
+        isCommandAvailable: jest.fn(() => false),
+        isPortListening: jest.fn(async () => false),
+        runCommandSync: jest.fn(() => ({ status: 0, stdout: "", stderr: "" })),
+        probeServiceHealth: jest.fn(async () => true),
+        readRuntimeState: jest.fn(() => ({
+          version: 1,
+          services: {},
+        })),
+        writeRuntimeState: jest.fn(),
+      };
+    });
+
+    const { runDevBackendVerify } = require("./dev-all.js");
+
+    const result = await runDevBackendVerify({ repoRoot });
+
+    expect(result.ok).toBe(true);
+  });
+
   test("reads known log paths from the persisted runtime state", () => {
     const { runDevAllLogs, getDevAllPaths } = require("./dev-all.js");
 
-    const repoRoot = process.cwd();
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-devall-logs-"));
     const paths = getDevAllPaths({ repoRoot });
-    const originalState = fs.existsSync(paths.statePath)
-      ? fs.readFileSync(paths.statePath, "utf8")
-      : null;
 
     fs.mkdirSync(path.dirname(paths.statePath), { recursive: true });
     fs.writeFileSync(
@@ -253,12 +554,6 @@ describe("dev-all workflow contract", () => {
         errorLogPath: path.join(repoRoot, ".codex", "runtime-logs", "frontend.stderr.log"),
       }),
     ]);
-
-    if (originalState === null) {
-      fs.rmSync(paths.statePath, { force: true });
-    } else {
-      fs.writeFileSync(paths.statePath, originalState, "utf8");
-    }
   });
 
   test("reuses already healthy services instead of spawning duplicates", async () => {
@@ -297,6 +592,66 @@ describe("dev-all workflow contract", () => {
         expect.objectContaining({ name: "frontend", action: "reused", source: "reused" }),
       ]),
     );
+    expect(writeRuntimeState).toHaveBeenCalledTimes(1);
+  });
+
+  test("reuses a healthy backend stack and only starts the frontend for dev:all", async () => {
+    jest.resetModules();
+
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-devall-frontend-only-"));
+    const writeRuntimeState = jest.fn();
+    const probeCounts = new Map<string, number>();
+    const spawn = jest.fn(() => ({
+      pid: 5150,
+      unref: jest.fn(),
+    }));
+
+    jest.doMock("node:child_process", () => {
+      const actual = jest.requireActual("node:child_process");
+      return {
+        ...actual,
+        spawn,
+      };
+    });
+
+    jest.doMock("./dev-workflow.js", () => {
+      const actual = jest.requireActual("./dev-workflow.js");
+      return {
+        ...actual,
+        canUseDockerCompose: jest.fn(() => true),
+        isCommandAvailable: jest.fn(() => true),
+        isPortListening: jest.fn(async () => false),
+        probeServiceHealth: jest.fn(async (service) => {
+          if (service.name === "frontend") {
+            const count = probeCounts.get(service.name) ?? 0;
+            probeCounts.set(service.name, count + 1);
+            return count > 0;
+          }
+
+          return true;
+        }),
+        readRuntimeState: jest.fn(() => ({
+          version: 1,
+          services: {},
+        })),
+        writeRuntimeState,
+      };
+    });
+
+    const { runDevAllStart } = require("./dev-all.js");
+
+    const result = await runDevAllStart({ repoRoot });
+
+    expect(result.ok).toBe(true);
+    expect(result.services).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({ name: "go-orchestrator", action: "reused", source: "reused" }),
+        expect.objectContaining({ name: "ts-bridge", action: "reused", source: "reused" }),
+        expect.objectContaining({ name: "im-bridge", action: "reused", source: "reused" }),
+        expect.objectContaining({ name: "frontend", action: "started", source: "managed" }),
+      ]),
+    );
+    expect(spawn).toHaveBeenCalledTimes(1);
     expect(writeRuntimeState).toHaveBeenCalledTimes(1);
   });
 

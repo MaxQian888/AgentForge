@@ -3,10 +3,15 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 
 const fs = require("node:fs");
+const crypto = require("node:crypto");
 const path = require("node:path");
 const { spawn } = require("node:child_process");
 const { setTimeout: delay } = require("node:timers/promises");
 const { getRepoRoot } = require("./plugin-dev-targets.js");
+const {
+  DEFAULT_VERIFY_COMMAND_CONTENT,
+  runIMStubSmoke,
+} = require("./im-stub-smoke.js");
 const {
   canUseDockerCompose,
   createEmptyRuntimeState,
@@ -25,15 +30,165 @@ const {
   writeRuntimeState,
 } = require("./dev-workflow.js");
 
-function getDevAllPaths({ repoRoot = getRepoRoot() } = {}) {
+const WORKFLOW_PROFILES = {
+  all: {
+    profile: "all",
+    commandLabel: "dev-all",
+    displayName: "Full-stack local development",
+    stateFileName: "dev-all-state.json",
+    serviceNames: [
+      "postgres",
+      "redis",
+      "go-orchestrator",
+      "ts-bridge",
+      "im-bridge",
+      "frontend",
+    ],
+  },
+  backend: {
+    profile: "backend",
+    commandLabel: "dev-backend",
+    displayName: "Backend-only local development",
+    stateFileName: "dev-backend-state.json",
+    serviceNames: [
+      "postgres",
+      "redis",
+      "go-orchestrator",
+      "ts-bridge",
+      "im-bridge",
+    ],
+  },
+};
+
+const LOCAL_DEV_JWT_SECRET =
+  process.env.JWT_SECRET ?? "agentforge-local-dev-jwt-secret-for-runtime-smoke";
+
+function currentHostTriple() {
+  if (process.platform === "win32" && process.arch === "x64") {
+    return "x86_64-pc-windows-msvc";
+  }
+
+  if (process.platform === "linux" && process.arch === "x64") {
+    return "x86_64-unknown-linux-gnu";
+  }
+
+  if (process.platform === "linux" && process.arch === "arm64") {
+    return "aarch64-unknown-linux-gnu";
+  }
+
+  if (process.platform === "darwin" && process.arch === "x64") {
+    return "x86_64-apple-darwin";
+  }
+
+  if (process.platform === "darwin" && process.arch === "arm64") {
+    return "aarch64-apple-darwin";
+  }
+
+  return "x86_64-pc-windows-msvc";
+}
+
+function executableExtension() {
+  return process.platform === "win32" ? ".exe" : "";
+}
+
+function getPreparedSidecarBinaryName(serviceName) {
+  if (serviceName === "go-orchestrator") {
+    return "server";
+  }
+
+  if (serviceName === "ts-bridge") {
+    return "bridge";
+  }
+
+  if (serviceName === "im-bridge") {
+    return "im-bridge";
+  }
+
+  return null;
+}
+
+function getPreparedSidecarBinaryPath({ repoRoot = getRepoRoot(), serviceName } = {}) {
+  const binaryName = getPreparedSidecarBinaryName(serviceName);
+  if (!binaryName) {
+    return null;
+  }
+
+  const candidate = path.join(
+    repoRoot,
+    "src-tauri",
+    "binaries",
+    `${binaryName}-${currentHostTriple()}${executableExtension()}`,
+  );
+
+  return fs.existsSync(candidate) ? candidate : null;
+}
+
+function applyPreparedSidecarOverrides(service, { repoRoot = getRepoRoot(), preferPreparedSidecars = false } = {}) {
+  if (!preferPreparedSidecars || service.kind !== "application") {
+    return service;
+  }
+
+  const preparedBinary = getPreparedSidecarBinaryPath({
+    repoRoot,
+    serviceName: service.name,
+  });
+
+  if (!preparedBinary) {
+    return service;
+  }
+
+  return {
+    ...service,
+    cwd: repoRoot,
+    start: {
+      ...service.start,
+      command: preparedBinary,
+      args: [],
+      preparedBinary,
+    },
+  };
+}
+
+function getWorkflowProfile(profile = "all") {
+  return WORKFLOW_PROFILES[profile] ?? null;
+}
+
+function getWorkflowPathsForProfile({ profile = "all", repoRoot = getRepoRoot() } = {}) {
+  const workflowProfile = getWorkflowProfile(profile) ?? WORKFLOW_PROFILES.all;
   return getWorkflowPaths({
     repoRoot,
-    stateFileName: "dev-all-state.json",
+    stateFileName: workflowProfile.stateFileName,
   });
 }
 
-function createDevAllServiceDefinitions({ repoRoot = getRepoRoot() } = {}) {
-  const workflowPaths = getDevAllPaths({ repoRoot });
+function getDevAllPaths({ repoRoot = getRepoRoot() } = {}) {
+  return getWorkflowPathsForProfile({
+    profile: "all",
+    repoRoot,
+  });
+}
+
+function getDevBackendPaths({ repoRoot = getRepoRoot() } = {}) {
+  return getWorkflowPathsForProfile({
+    profile: "backend",
+    repoRoot,
+  });
+}
+
+function createServiceDefinitionsForProfile({
+  profile = "all",
+  repoRoot = getRepoRoot(),
+  preferPreparedSidecars = false,
+} = {}) {
+  const workflowProfile = getWorkflowProfile(profile) ?? WORKFLOW_PROFILES.all;
+  const workflowPaths = getWorkflowPathsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+  });
+  const jwtSecret = LOCAL_DEV_JWT_SECRET;
+  const imBridgeAccessToken =
+    process.env.AGENTFORGE_API_KEY ?? createLocalDevAccessToken({ secret: jwtSecret });
+
   return [
     {
       name: "postgres",
@@ -68,6 +223,7 @@ function createDevAllServiceDefinitions({ repoRoot = getRepoRoot() } = {}) {
         env: {
           ENV: "development",
           PORT: "7777",
+          JWT_SECRET: jwtSecret,
           GOCACHE: path.join(repoRoot, "src-go", ".gocache"),
           GOFLAGS: "-p=1",
           POSTGRES_URL: "postgres://dev:dev@127.0.0.1:5432/appdb?sslmode=disable",
@@ -105,6 +261,7 @@ function createDevAllServiceDefinitions({ repoRoot = getRepoRoot() } = {}) {
         args: ["run", "./cmd/bridge"],
         env: {
           AGENTFORGE_API_BASE: "http://127.0.0.1:7777",
+          AGENTFORGE_API_KEY: imBridgeAccessToken,
           AGENTFORGE_PROJECT_ID: process.env.AGENTFORGE_PROJECT_ID ?? "",
           IM_BRIDGE_ID_FILE: path.join(workflowPaths.codexDir, "im-bridge-id"),
           IM_PLATFORM: "feishu",
@@ -129,7 +286,28 @@ function createDevAllServiceDefinitions({ repoRoot = getRepoRoot() } = {}) {
         },
       },
     },
-  ];
+  ]
+    .filter((service) => workflowProfile.serviceNames.includes(service.name))
+    .map((service) =>
+      applyPreparedSidecarOverrides(service, {
+        repoRoot,
+        preferPreparedSidecars,
+      }),
+    );
+}
+
+function createDevAllServiceDefinitions({ repoRoot = getRepoRoot() } = {}) {
+  return createServiceDefinitionsForProfile({
+    profile: "all",
+    repoRoot,
+  });
+}
+
+function createDevBackendServiceDefinitions({ repoRoot = getRepoRoot() } = {}) {
+  return createServiceDefinitionsForProfile({
+    profile: "backend",
+    repoRoot,
+  });
 }
 
 function getApplicationServices(serviceDefinitions) {
@@ -150,6 +328,14 @@ function getServiceLogPaths(paths, serviceName) {
 function getCommandAvailabilityCheck(service) {
   if (!service.start?.command) {
     return null;
+  }
+
+  if (fs.existsSync(service.start.command)) {
+    return {
+      serviceName: service.name,
+      command: service.start.command,
+      available: true,
+    };
   }
 
   return {
@@ -476,13 +662,25 @@ function persistPartialState(paths, runtimeState, successfulResults, failingResu
   writeRuntimeState(paths.statePath, buildRuntimeStateFromResults(runtimeState, resultsToPersist));
 }
 
-async function runDevAllStart({ repoRoot = getRepoRoot() } = {}) {
-  const paths = getDevAllPaths({ repoRoot });
+async function runWorkflowStart({
+  profile = "all",
+  repoRoot = getRepoRoot(),
+  preferPreparedSidecars = false,
+} = {}) {
+  const workflowProfile = getWorkflowProfile(profile) ?? WORKFLOW_PROFILES.all;
+  const paths = getWorkflowPathsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+  });
   ensureDirectory(paths.codexDir);
   ensureDirectory(paths.runtimeLogsDir);
 
   const runtimeState = readRuntimeState(paths.statePath);
-  const serviceDefinitions = createDevAllServiceDefinitions({ repoRoot });
+  const serviceDefinitions = createServiceDefinitionsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+    preferPreparedSidecars,
+  });
   const infrastructureServices = getInfrastructureServices(serviceDefinitions);
   const applicationServices = getApplicationServices(serviceDefinitions);
 
@@ -535,6 +733,228 @@ async function runDevAllStart({ repoRoot = getRepoRoot() } = {}) {
   };
 }
 
+function base64UrlEncode(value) {
+  return Buffer.from(value).toString("base64url");
+}
+
+function createLocalDevAccessToken({
+  secret = LOCAL_DEV_JWT_SECRET,
+  userId = "im-bridge-local",
+  email = "im-bridge@agentforge.local",
+  ttlSeconds = 24 * 60 * 60,
+  now = Math.floor(Date.now() / 1000),
+} = {}) {
+  const header = {
+    alg: "HS256",
+    typ: "JWT",
+  };
+  const payload = {
+    user_id: userId,
+    email,
+    jti: crypto.randomUUID(),
+    sub: userId,
+    iat: now,
+    exp: now + ttlSeconds,
+  };
+  const encodedHeader = base64UrlEncode(JSON.stringify(header));
+  const encodedPayload = base64UrlEncode(JSON.stringify(payload));
+  const signature = crypto
+    .createHmac("sha256", secret)
+    .update(`${encodedHeader}.${encodedPayload}`)
+    .digest("base64url");
+  return `${encodedHeader}.${encodedPayload}.${signature}`;
+}
+
+async function runDevAllStart({ repoRoot = getRepoRoot() } = {}) {
+  return runWorkflowStart({
+    profile: "all",
+    repoRoot,
+  });
+}
+
+async function runDevBackendStart({ repoRoot = getRepoRoot() } = {}) {
+  return runWorkflowStart({
+    profile: "backend",
+    repoRoot,
+  });
+}
+
+function createVerifyStage(name, ok, detail, extras = {}) {
+  return {
+    name,
+    ok,
+    detail,
+    ...extras,
+  };
+}
+
+function getServiceResultByName(startResult, serviceName) {
+  return startResult.services.find((service) => service.name === serviceName) ?? null;
+}
+
+async function runWorkflowVerify({ profile = "backend", repoRoot = getRepoRoot() } = {}) {
+  const workflowProfile = getWorkflowProfile(profile) ?? WORKFLOW_PROFILES.backend;
+  const paths = getWorkflowPathsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+  });
+  const stages = [];
+  const startResult = await runWorkflowStart({
+    profile: workflowProfile.profile,
+    repoRoot,
+    preferPreparedSidecars: true,
+  });
+
+  if (!startResult.ok) {
+    stages.push(
+      createVerifyStage(
+        "startup",
+        false,
+        startResult.detail ?? `${workflowProfile.displayName} startup failed`,
+        {
+          service: startResult.service?.name ?? null,
+          paths,
+        },
+      ),
+    );
+    return {
+      ok: false,
+      status: "startup_failed",
+      keepRunning: true,
+      failureStage: "startup",
+      paths,
+      startResult,
+      stages,
+      statusReport: await runWorkflowStatus({
+        profile: workflowProfile.profile,
+        repoRoot,
+      }),
+    };
+  }
+
+  stages.push(
+    createVerifyStage("startup", true, `${workflowProfile.displayName} ready`, {
+      paths,
+      services: startResult.services,
+    }),
+  );
+
+  const serviceDefinitions = createServiceDefinitionsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+  });
+  const healthChecks = [
+    { name: "go-health", serviceName: "go-orchestrator" },
+    { name: "bridge-health", serviceName: "ts-bridge" },
+    { name: "im-health", serviceName: "im-bridge" },
+  ];
+
+  for (const check of healthChecks) {
+    const service = serviceDefinitions.find((candidate) => candidate.name === check.serviceName);
+    const serviceResult = getServiceResultByName(startResult, check.serviceName);
+    if (!service) {
+      stages.push(
+        createVerifyStage(check.name, false, `Missing service definition for ${check.serviceName}`, {
+          paths,
+        }),
+      );
+      return {
+        ok: false,
+        status: "verify_failed",
+        keepRunning: true,
+        failureStage: check.name,
+        paths,
+        startResult,
+        stages,
+        statusReport: await runWorkflowStatus({
+          profile: workflowProfile.profile,
+          repoRoot,
+        }),
+      };
+    }
+
+    const healthy = await probeServiceHealth(service);
+    if (!healthy) {
+      stages.push(
+        createVerifyStage(check.name, false, `Health check failed for ${service.name}`, {
+          endpoint: service.healthUrl,
+          logPath: serviceResult?.logPath ?? null,
+          errorLogPath: serviceResult?.errorLogPath ?? null,
+          paths,
+        }),
+      );
+      return {
+        ok: false,
+        status: "verify_failed",
+        keepRunning: true,
+        failureStage: check.name,
+        paths,
+        startResult,
+        stages,
+        statusReport: await runWorkflowStatus({
+          profile: workflowProfile.profile,
+          repoRoot,
+        }),
+      };
+    }
+
+    stages.push(
+      createVerifyStage(check.name, true, `Health check passed for ${service.name}`, {
+        endpoint: service.healthUrl,
+        logPath: serviceResult?.logPath ?? null,
+        errorLogPath: serviceResult?.errorLogPath ?? null,
+      }),
+    );
+  }
+
+  const imBridgeService = serviceDefinitions.find((service) => service.name === "im-bridge");
+  const smokeResult = await runIMStubSmoke({
+    repoRoot,
+    platform: imBridgeService?.start?.env?.IM_PLATFORM ?? "feishu",
+    port: Number(imBridgeService?.start?.env?.TEST_PORT ?? 7780),
+    commandContent: DEFAULT_VERIFY_COMMAND_CONTENT,
+  });
+  stages.push(...smokeResult.stages);
+
+  const statusReport = await runWorkflowStatus({
+    profile: workflowProfile.profile,
+    repoRoot,
+  });
+
+  if (!smokeResult.ok) {
+    return {
+      ok: false,
+      status: "verify_failed",
+      keepRunning: true,
+      failureStage: smokeResult.failureStage,
+      paths,
+      startResult,
+      smokeResult,
+      stages,
+      statusReport,
+    };
+  }
+
+  return {
+    ok: true,
+    status: "verified",
+    keepRunning: true,
+    failureStage: null,
+    paths,
+    startResult,
+    smokeResult,
+    stages,
+    statusReport,
+  };
+}
+
+async function runDevBackendVerify({ repoRoot = getRepoRoot() } = {}) {
+  return runWorkflowVerify({
+    profile: "backend",
+    repoRoot,
+  });
+}
+
 async function collectLiveHealth(serviceDefinitions) {
   const liveHealthByService = {};
   const pidExistsByService = {};
@@ -546,10 +966,17 @@ async function collectLiveHealth(serviceDefinitions) {
   return { liveHealthByService, pidExistsByService };
 }
 
-async function runDevAllStatus({ repoRoot = getRepoRoot() } = {}) {
-  const paths = getDevAllPaths({ repoRoot });
+async function runWorkflowStatus({ profile = "all", repoRoot = getRepoRoot() } = {}) {
+  const workflowProfile = getWorkflowProfile(profile) ?? WORKFLOW_PROFILES.all;
+  const paths = getWorkflowPathsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+  });
   const runtimeState = readRuntimeState(paths.statePath);
-  const serviceDefinitions = createDevAllServiceDefinitions({ repoRoot });
+  const serviceDefinitions = createServiceDefinitionsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+  });
   const { liveHealthByService, pidExistsByService } = await collectLiveHealth(serviceDefinitions);
 
   for (const service of serviceDefinitions) {
@@ -592,6 +1019,20 @@ async function runDevAllStatus({ repoRoot = getRepoRoot() } = {}) {
     paths,
     report,
   };
+}
+
+async function runDevAllStatus({ repoRoot = getRepoRoot() } = {}) {
+  return runWorkflowStatus({
+    profile: "all",
+    repoRoot,
+  });
+}
+
+async function runDevBackendStatus({ repoRoot = getRepoRoot() } = {}) {
+  return runWorkflowStatus({
+    profile: "backend",
+    repoRoot,
+  });
 }
 
 function getListeningPidForPort(port) {
@@ -681,8 +1122,12 @@ function stopManagedInfrastructure(repoRoot, managedServices) {
   return { ok: true };
 }
 
-async function runDevAllStop({ repoRoot = getRepoRoot() } = {}) {
-  const paths = getDevAllPaths({ repoRoot });
+async function runWorkflowStop({ profile = "all", repoRoot = getRepoRoot() } = {}) {
+  const workflowProfile = getWorkflowProfile(profile) ?? WORKFLOW_PROFILES.all;
+  const paths = getWorkflowPathsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+  });
   const runtimeState = readRuntimeState(paths.statePath);
   const plan = createStopPlan({ runtimeState });
 
@@ -729,8 +1174,26 @@ async function runDevAllStop({ repoRoot = getRepoRoot() } = {}) {
   };
 }
 
-function runDevAllLogs({ repoRoot = getRepoRoot() } = {}) {
-  const paths = getDevAllPaths({ repoRoot });
+async function runDevAllStop({ repoRoot = getRepoRoot() } = {}) {
+  return runWorkflowStop({
+    profile: "all",
+    repoRoot,
+  });
+}
+
+async function runDevBackendStop({ repoRoot = getRepoRoot() } = {}) {
+  return runWorkflowStop({
+    profile: "backend",
+    repoRoot,
+  });
+}
+
+function runWorkflowLogs({ profile = "all", repoRoot = getRepoRoot() } = {}) {
+  const workflowProfile = getWorkflowProfile(profile) ?? WORKFLOW_PROFILES.all;
+  const paths = getWorkflowPathsForProfile({
+    profile: workflowProfile.profile,
+    repoRoot,
+  });
   const runtimeState = readRuntimeState(paths.statePath);
   const logs = Object.entries(runtimeState.services ?? {}).map(([name, service]) => ({
     name,
@@ -745,16 +1208,32 @@ function runDevAllLogs({ repoRoot = getRepoRoot() } = {}) {
   };
 }
 
-function printStartResult(result) {
+function runDevAllLogs({ repoRoot = getRepoRoot() } = {}) {
+  return runWorkflowLogs({
+    profile: "all",
+    repoRoot,
+  });
+}
+
+function runDevBackendLogs({ repoRoot = getRepoRoot() } = {}) {
+  return runWorkflowLogs({
+    profile: "backend",
+    repoRoot,
+  });
+}
+
+function printStartResult(result, workflowProfile = WORKFLOW_PROFILES.all) {
   if (!result.ok) {
-    console.error(`dev:all failed for ${result.service?.name ?? "workflow"}: ${result.detail}`);
+    console.error(
+      `${workflowProfile.commandLabel} failed for ${result.service?.name ?? "workflow"}: ${result.detail}`,
+    );
     if (result.logPaths?.stdoutPath || result.logPaths?.stderrPath) {
       console.error(`Logs: ${result.logPaths?.stdoutPath ?? "-"} / ${result.logPaths?.stderrPath ?? "-"}`);
     }
     return 1;
   }
 
-  console.log("Full-stack local development workflow ready:");
+  console.log(`${workflowProfile.displayName} workflow ready:`);
   for (const service of result.services) {
     const endpoint = service.healthUrl ?? (service.port ? `tcp://127.0.0.1:${service.port}` : "n/a");
     console.log(`- ${service.name}: ${service.action} (${service.source}) -> ${endpoint}`);
@@ -766,8 +1245,8 @@ function printStartResult(result) {
   return 0;
 }
 
-function printStatusResult(result) {
-  console.log("Full-stack local development status:");
+function printStatusResult(result, workflowProfile = WORKFLOW_PROFILES.all) {
+  console.log(`${workflowProfile.displayName} status:`);
   for (const service of Object.values(result.report.services)) {
     const endpoint = service.healthUrl ?? (service.port ? `tcp://127.0.0.1:${service.port}` : "n/a");
     console.log(
@@ -781,9 +1260,9 @@ function printStatusResult(result) {
   return 0;
 }
 
-function printStopResult(result) {
+function printStopResult(result, workflowProfile = WORKFLOW_PROFILES.all) {
   if (!result.ok) {
-    console.error(`dev:all:stop failed: ${result.detail}`);
+    console.error(`${workflowProfile.commandLabel}:stop failed: ${result.detail}`);
     return 1;
   }
 
@@ -793,8 +1272,8 @@ function printStopResult(result) {
   return 0;
 }
 
-function printLogsResult(result) {
-  console.log("Known dev:all logs:");
+function printLogsResult(result, workflowProfile = WORKFLOW_PROFILES.all) {
+  console.log(`Known ${workflowProfile.commandLabel} logs:`);
   for (const log of result.logs) {
     console.log(`- ${log.name}: ${log.logPath ?? "-"} / ${log.errorLogPath ?? "-"}`);
   }
@@ -802,26 +1281,89 @@ function printLogsResult(result) {
   return 0;
 }
 
+function printVerifyResult(result, workflowProfile = WORKFLOW_PROFILES.backend) {
+  console.log(`${workflowProfile.displayName} verify:`);
+  for (const stage of result.stages) {
+    console.log(`${stage.ok ? "✓" : "✗"} ${stage.name}: ${stage.detail}`);
+    if (stage.endpoint) {
+      console.log(`  endpoint: ${stage.endpoint}`);
+    }
+    if (stage.logPath || stage.errorLogPath) {
+      console.log(`  logs: ${stage.logPath ?? "-"} / ${stage.errorLogPath ?? "-"}`);
+    }
+    if (stage.fixturePath) {
+      console.log(`  fixture: ${stage.fixturePath}`);
+    }
+  }
+  console.log(`State: ${result.paths.statePath}`);
+  console.log(`Use pnpm dev:backend:status / logs / stop for follow-up diagnostics.`);
+  return result.ok ? 0 : 1;
+}
+
+function parseWorkflowCommand(argv = []) {
+  const workflowProfile = getWorkflowProfile(argv[0]);
+  if (workflowProfile) {
+    return {
+      workflowProfile,
+      command: argv[1] ?? "start",
+    };
+  }
+
+  return {
+    workflowProfile: WORKFLOW_PROFILES.all,
+    command: argv[0] ?? "start",
+  };
+}
+
 async function main(argv = process.argv.slice(2)) {
-  const command = argv[0] ?? "start";
+  const { workflowProfile, command } = parseWorkflowCommand(argv);
 
   if (command === "start") {
-    return printStartResult(await runDevAllStart());
+    return printStartResult(
+      await runWorkflowStart({
+        profile: workflowProfile.profile,
+      }),
+      workflowProfile,
+    );
   }
 
   if (command === "status") {
-    return printStatusResult(await runDevAllStatus());
+    return printStatusResult(
+      await runWorkflowStatus({
+        profile: workflowProfile.profile,
+      }),
+      workflowProfile,
+    );
   }
 
   if (command === "stop") {
-    return printStopResult(await runDevAllStop());
+    return printStopResult(
+      await runWorkflowStop({
+        profile: workflowProfile.profile,
+      }),
+      workflowProfile,
+    );
   }
 
   if (command === "logs") {
-    return printLogsResult(runDevAllLogs());
+    return printLogsResult(
+      runWorkflowLogs({
+        profile: workflowProfile.profile,
+      }),
+      workflowProfile,
+    );
   }
 
-  console.error(`Unknown dev-all command: ${command}`);
+  if (command === "verify") {
+    return printVerifyResult(
+      await runWorkflowVerify({
+        profile: workflowProfile.profile,
+      }),
+      workflowProfile,
+    );
+  }
+
+  console.error(`Unknown ${workflowProfile.commandLabel} command: ${command}`);
   return 1;
 }
 
@@ -832,9 +1374,16 @@ if (require.main === module) {
 }
 
 module.exports = {
+  createDevBackendServiceDefinitions,
   createDevAllServiceDefinitions,
+  getDevBackendPaths,
   getDevAllPaths,
   main,
+  runDevBackendLogs,
+  runDevBackendStart,
+  runDevBackendVerify,
+  runDevBackendStatus,
+  runDevBackendStop,
   runDevAllLogs,
   runDevAllStart,
   runDevAllStatus,

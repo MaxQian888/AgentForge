@@ -1,0 +1,2345 @@
+asyncapi: 3.0.0
+info:
+  title: AgentForge Realtime and Event Streams
+  version: 2026-04-08
+  
+  description: |-
+    This AsyncAPI document covers the current realtime contracts that are not fully represented by the REST-focused OpenAPI document.
+
+    Source of truth:
+    - `src-go/internal/server/routes.go`
+    - `src-go/internal/ws/events.go`
+    - `src-go/internal/ws/handler.go`
+    - `src-go/internal/ws/bridge_handler.go`
+    - `src-go/internal/ws/im_control_handler.go`
+    - `src-go/internal/model/im.go`
+
+    Scope:
+    - `/ws` browser-facing realtime push channel
+    - `/ws/bridge` TS bridge -> Go runtime event ingress
+    - `/ws/im-bridge` Go -> IM bridge delivery stream and websocket ack flow
+
+    Related REST documents remain in `docs/api/openapi.json` and `docs/api/openapi.yaml`.
+defaultContentType: application/json
+servers:
+  localWebSocket:
+    host: localhost:7777
+    protocol: ws
+    pathname: /
+    description: Default local websocket server exposed by the Go backend
+channels:
+  frontendRealtime:
+    address: /ws
+    title: Frontend realtime websocket
+    description: |-
+      JWT-protected websocket used by browser/Tauri clients for server-push updates.
+      Connection-time query parameters in current repo truth:
+      - `token`: optional JWT bearer token when not sent in the Authorization header
+      - `projectId`: optional project filter; when present, the hub only pushes matching project events
+
+      Client messages are currently ignored after the handshake; this is a server-push channel.
+    messages:
+      frontendServerEvent:
+        $ref: "#/components/messages/FrontendServerEvent"
+  bridgeRuntimeIngress:
+    address: /ws/bridge
+    title: Bridge runtime ingress websocket
+    description: |-
+      Internal websocket used by the TS bridge runtime to push normalized agent runtime events into the Go backend.
+      The Go backend currently does not emit application-level messages back on this channel; only websocket protocol ping/pong frames apply.
+    messages:
+      bridgeAgentEvent:
+        $ref: "#/components/messages/BridgeAgentEventMessage"
+  imBridgeControl:
+    address: /ws/im-bridge
+    title: IM bridge control websocket
+    description: |-
+      Control-plane websocket used by IM bridge workers.
+      Connection-time query parameters in current repo truth:
+      - `bridgeId` (required): bridge instance identifier
+      - `afterCursor` (optional): replay deliveries strictly after this cursor
+
+      Server -> bridge messages are delivery payloads. Bridge -> server messages are delivery acknowledgements.
+
+      Companion HTTP control-plane endpoints:
+      - `POST /api/v1/im/bridge/register`
+      - `POST /api/v1/im/bridge/heartbeat`
+      - `POST /api/v1/im/bridge/unregister`
+      - `POST /api/v1/im/bridge/bind`
+      - `POST /api/v1/im/bridge/ack`
+    messages:
+      imControlDelivery:
+        $ref: "#/components/messages/IMControlDeliveryMessage"
+      imDeliveryAck:
+        $ref: "#/components/messages/IMDeliveryAckMessage"
+operations:
+  sendFrontendServerEvent:
+    action: send
+    channel:
+      $ref: "#/channels/frontendRealtime"
+    summary: Backend pushes realtime frontend events
+    messages:
+      - $ref: "#/channels/frontendRealtime/messages/frontendServerEvent"
+  receiveBridgeAgentEvent:
+    action: receive
+    channel:
+      $ref: "#/channels/bridgeRuntimeIngress"
+    summary: Backend receives normalized bridge runtime events
+    messages:
+      - $ref: "#/channels/bridgeRuntimeIngress/messages/bridgeAgentEvent"
+  sendIMControlDelivery:
+    action: send
+    channel:
+      $ref: "#/channels/imBridgeControl"
+    summary: Backend delivers IM control-plane work items to an IM bridge
+    messages:
+      - $ref: "#/channels/imBridgeControl/messages/imControlDelivery"
+  receiveIMDeliveryAck:
+    action: receive
+    channel:
+      $ref: "#/channels/imBridgeControl"
+    summary: Backend receives websocket delivery acknowledgements from an IM bridge
+    messages:
+      - $ref: "#/channels/imBridgeControl/messages/imDeliveryAck"
+components:
+  messages:
+    FrontendServerEvent:
+      name: FrontendServerEvent
+      title: Frontend websocket event envelope
+      summary: Project-scoped or global server-push event emitted on `/ws`
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/FrontendEventEnvelope"
+      examples:
+        - name: taskCreated
+          summary: A task was created
+          payload:
+            type: task.created
+            projectId: project-123
+            payload:
+              id: task-123
+              projectId: project-123
+              title: Implement review detail panel
+              description: Wire decision actions and loading states
+              status: inbox
+              priority: high
+        - name: reviewCompleted
+          summary: A review completed
+          payload:
+            type: review.completed
+            projectId: project-123
+            payload:
+              id: review-123
+              taskId: task-123
+              prUrl: https://github.com/org/repo/pull/123
+              layer: 2
+              status: completed
+              riskLevel: high
+              recommendation: request_changes
+        - name: budgetWarning
+          summary: A task budget crossed the warning threshold
+          payload:
+            type: budget.warning
+            projectId: project-123
+            payload:
+              taskId: task-123
+              projectId: project-123
+              scope: task
+              message: "task budget warning: projected $4.20 / $5.00 (84% utilized)"
+    BridgeAgentEventMessage:
+      name: BridgeAgentEvent
+      title: Bridge runtime event envelope
+      summary: Normalized runtime event sent from the TS bridge into Go orchestration
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/BridgeAgentEvent"
+      examples:
+        - name: output
+          payload:
+            task_id: task-123
+            session_id: session-456
+            timestamp_ms: 1770000000000
+            type: output
+            data:
+              content: Running tests...
+              content_type: text/plain
+              turn_number: 3
+        - name: costUpdate
+          payload:
+            task_id: task-123
+            session_id: session-456
+            timestamp_ms: 1770000000100
+            type: cost_update
+            data:
+              input_tokens: 1200
+              output_tokens: 180
+              cache_read_tokens: 0
+              cache_creation_tokens: 0
+              cost_usd: 0.18
+              budget_remaining_usd: 4.82
+              turn_number: 3
+    IMControlDeliveryMessage:
+      name: IMControlDelivery
+      title: IM control-plane delivery
+      summary: Backend delivery sent from Go to an IM bridge over `/ws/im-bridge`
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/IMControlDelivery"
+      examples:
+        - name: terminalReviewUpdate
+          payload:
+            cursor: 42
+            deliveryId: delivery-123
+            targetBridgeId: bridge-feishu-main
+            platform: feishu
+            projectId: project-123
+            kind: terminal
+            content: 代码审查已完成。
+            structured:
+              title: Code Review Completed
+              body: Review review-123 finished.
+            targetChatId: oc_xxx
+            timestamp: 2026-04-08T12:00:00Z
+            signature: sha256=...
+    IMDeliveryAckMessage:
+      name: IMDeliveryAck
+      title: IM control-plane acknowledgement
+      summary: Ack frame sent from an IM bridge back to Go over `/ws/im-bridge`
+      contentType: application/json
+      payload:
+        $ref: "#/components/schemas/IMDeliveryAck"
+      examples:
+        - name: delivered
+          payload:
+            bridgeId: bridge-feishu-main
+            cursor: 42
+            deliveryId: delivery-123
+            status: delivered
+            processedAt: 2026-04-08T12:00:02Z
+  schemas:
+    DynamicObject:
+      type: object
+      additionalProperties: true
+    StringMap:
+      type: object
+      additionalProperties:
+        type: string
+    FrontendEventType:
+      type: string
+      enum:
+        - task.created
+        - task.updated
+        - task.transitioned
+        - task.assigned
+        - task.dispatch_blocked
+        - task.deleted
+        - agent.started
+        - agent.queued
+        - agent.queue.cancelled
+        - agent.queue.promoted
+        - agent.queue.failed
+        - agent.pool.updated
+        - agent.progress
+        - agent.completed
+        - agent.failed
+        - agent.output
+        - agent.cost_update
+        - review.created
+        - review.completed
+        - review.updated
+        - review.pending_human
+        - review.fix_requested
+        - notification
+        - budget.warning
+        - budget.exceeded
+        - task.progress.updated
+        - task.progress.alerted
+        - task.progress.recovered
+        - sprint.created
+        - sprint.updated
+        - sprint.transitioned
+        - task.dependency_resolved
+        - workflow.trigger_fired
+        - team.created
+        - team.planning
+        - team.executing
+        - team.reviewing
+        - team.completed
+        - team.failed
+        - team.cancelled
+        - team.cost_update
+        - plugin.lifecycle
+        - scheduler.job.updated
+        - scheduler.run.started
+        - scheduler.run.completed
+        - log.created
+        - wiki.page.created
+        - wiki.page.updated
+        - wiki.page.moved
+        - wiki.page.deleted
+        - wiki.comment.created
+        - wiki.comment.resolved
+        - wiki.version.published
+        - link.created
+        - link.deleted
+        - task_comment.created
+        - task_comment.resolved
+        - agent.permission_request
+        - agent.tool_call
+        - agent.tool_result
+        - agent.reasoning
+        - agent.file_change
+        - agent.todo_update
+        - agent.rate_limit
+        - agent.partial_message
+        - agent.snapshot
+    BridgeEventType:
+      type: string
+      enum:
+        - output
+        - tool_call
+        - tool_result
+        - status_change
+        - cost_update
+        - error
+        - snapshot
+        - reasoning
+        - file_change
+        - todo_update
+        - progress
+        - rate_limit
+        - partial_message
+        - permission_request
+        - tool.status_change
+        - tool.call_log
+    TaskTransitionPayload:
+      type: object
+      properties:
+        task:
+          $ref: ./openapi.json#/components/schemas/TaskDTO
+        reason:
+          type: string
+      required:
+        - task
+    DispatchBlockedPayload:
+      type: object
+      properties:
+        task:
+          $ref: ./openapi.json#/components/schemas/TaskDTO
+        dispatch:
+          $ref: ./openapi.json#/components/schemas/DispatchOutcome
+      required:
+        - task
+        - dispatch
+    AgentQueuedPayload:
+      type: object
+      properties:
+        task:
+          $ref: ./openapi.json#/components/schemas/TaskDTO
+        dispatch:
+          $ref: ./openapi.json#/components/schemas/DispatchOutcome
+      required:
+        - task
+        - dispatch
+    BudgetAlertPayload:
+      type: object
+      properties:
+        taskId:
+          type: string
+        projectId:
+          type: string
+        scope:
+          type: string
+        message:
+          type: string
+        budget:
+          type: number
+        spent:
+          type: number
+        percent:
+          type: number
+      required:
+        - taskId
+    TaskProgressEventPayload:
+      type: object
+      properties:
+        taskId:
+          type: string
+        task:
+          $ref: ./openapi.json#/components/schemas/TaskDTO
+        progress:
+          $ref: ./openapi.json#/components/schemas/TaskProgressSnapshotDTO
+        transition:
+          type: string
+        healthStatus:
+          type: string
+        riskReason:
+          type: string
+      required:
+        - taskId
+        - task
+        - progress
+    AgentOutputPayload:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        task_id:
+          type: string
+        session_id:
+          type: string
+        line:
+          type: string
+        content_type:
+          type: string
+        turn_number:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - agent_id
+        - task_id
+        - session_id
+        - line
+        - timestamp
+    AgentFailurePayload:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        task_id:
+          type: string
+        session_id:
+          type: string
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - agent_id
+        - task_id
+        - session_id
+        - message
+        - timestamp
+    AgentPermissionRequestPayload:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        task_id:
+          type: string
+        session_id:
+          type: string
+        request_id:
+          type: string
+        tool_name:
+          type: string
+        context:
+          $ref: "#/components/schemas/DynamicObject"
+        elicitation_type:
+          type: string
+        fields:
+          type: array
+          items: {}
+        mcp_server_id:
+          type: string
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - agent_id
+        - task_id
+        - session_id
+        - request_id
+        - timestamp
+    AgentToolCallPayload:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        task_id:
+          type: string
+        session_id:
+          type: string
+        tool_name:
+          type: string
+        tool_call_id:
+          type: string
+        input:
+          $ref: "#/components/schemas/DynamicObject"
+        turn_number:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - agent_id
+        - task_id
+        - session_id
+        - tool_name
+        - timestamp
+    AgentToolResultPayload:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        task_id:
+          type: string
+        session_id:
+          type: string
+        tool_name:
+          type: string
+        tool_call_id:
+          type: string
+        output:
+          $ref: "#/components/schemas/DynamicObject"
+        is_error:
+          type: boolean
+        turn_number:
+          type: integer
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - agent_id
+        - task_id
+        - session_id
+        - tool_name
+        - timestamp
+    AgentGenericDataPayload:
+      type: object
+      properties:
+        agent_id:
+          type: string
+        task_id:
+          type: string
+        session_id:
+          type: string
+        data:
+          $ref: "#/components/schemas/DynamicObject"
+        timestamp:
+          type: string
+          format: date-time
+      required:
+        - agent_id
+        - task_id
+        - session_id
+        - timestamp
+    TeamCostPayload:
+      type: object
+      properties:
+        teamId:
+          type: string
+        spent:
+          type: number
+        budget:
+          type: number
+      required:
+        - teamId
+        - spent
+        - budget
+    WorkflowTriggerPayload:
+      type: object
+      properties:
+        taskId:
+          type: string
+        action:
+          type: string
+        from:
+          type: string
+        to:
+          type: string
+        config:
+          $ref: "#/components/schemas/DynamicObject"
+      required:
+        - taskId
+        - action
+    SchedulerBroadcastPayload:
+      type: object
+      properties:
+        job:
+          $ref: ./openapi.json#/components/schemas/ScheduledJob
+        run:
+          $ref: ./openapi.json#/components/schemas/ScheduledJobRun
+    WikiPageChangePayload:
+      type: object
+      properties:
+        id:
+          type: string
+        title:
+          type: string
+        parentId:
+          type: string
+        spaceId:
+          type: string
+      required:
+        - id
+    WikiPageMovePayload:
+      type: object
+      properties:
+        id:
+          type: string
+        oldParentId:
+          type: string
+        newParentId:
+          type: string
+        sortOrder:
+          type: integer
+      required:
+        - id
+    WikiCommentStatePayload:
+      type: object
+      properties:
+        id:
+          type: string
+        pageId:
+          type: string
+        resolved:
+          type: boolean
+      required:
+        - id
+        - pageId
+        - resolved
+    WikiVersionPublishedPayload:
+      type: object
+      properties:
+        id:
+          type: string
+        pageId:
+          type: string
+        versionNumber:
+          type: integer
+        name:
+          type: string
+      required:
+        - id
+        - pageId
+        - versionNumber
+        - name
+    IdOnlyPayload:
+      type: object
+      properties:
+        id:
+          type: string
+      required:
+        - id
+    PluginEventRecord:
+      type: object
+      properties:
+        id:
+          type: string
+        plugin_id:
+          type: string
+        event_type:
+          type: string
+        event_source:
+          type: string
+        lifecycle_state:
+          type: string
+        summary:
+          type: string
+        payload:
+          $ref: "#/components/schemas/DynamicObject"
+        created_at:
+          type: string
+          format: date-time
+      required:
+        - id
+        - plugin_id
+        - event_type
+        - event_source
+    FrontendEventEnvelope:
+      oneOf:
+        - $ref: "#/components/schemas/task.created"
+        - $ref: "#/components/schemas/task.updated"
+        - $ref: "#/components/schemas/task.transitioned"
+        - $ref: "#/components/schemas/task.assigned"
+        - $ref: "#/components/schemas/task.dispatch_blocked"
+        - $ref: "#/components/schemas/task.deleted"
+        - $ref: "#/components/schemas/agent.started"
+        - $ref: "#/components/schemas/agent.queued"
+        - $ref: "#/components/schemas/agent.queue.cancelled"
+        - $ref: "#/components/schemas/agent.queue.promoted"
+        - $ref: "#/components/schemas/agent.queue.failed"
+        - $ref: "#/components/schemas/agent.pool.updated"
+        - $ref: "#/components/schemas/agent.progress"
+        - $ref: "#/components/schemas/agent.completed"
+        - $ref: "#/components/schemas/agent.failed"
+        - $ref: "#/components/schemas/agent.output"
+        - $ref: "#/components/schemas/agent.cost_update"
+        - $ref: "#/components/schemas/review.created"
+        - $ref: "#/components/schemas/review.completed"
+        - $ref: "#/components/schemas/review.updated"
+        - $ref: "#/components/schemas/review.pending_human"
+        - $ref: "#/components/schemas/review.fix_requested"
+        - $ref: "#/components/schemas/notification"
+        - $ref: "#/components/schemas/budget.warning"
+        - $ref: "#/components/schemas/budget.exceeded"
+        - $ref: "#/components/schemas/task.progress.updated"
+        - $ref: "#/components/schemas/task.progress.alerted"
+        - $ref: "#/components/schemas/task.progress.recovered"
+        - $ref: "#/components/schemas/sprint.created"
+        - $ref: "#/components/schemas/sprint.updated"
+        - $ref: "#/components/schemas/sprint.transitioned"
+        - $ref: "#/components/schemas/task.dependency_resolved"
+        - $ref: "#/components/schemas/workflow.trigger_fired"
+        - $ref: "#/components/schemas/team.created"
+        - $ref: "#/components/schemas/team.planning"
+        - $ref: "#/components/schemas/team.executing"
+        - $ref: "#/components/schemas/team.reviewing"
+        - $ref: "#/components/schemas/team.completed"
+        - $ref: "#/components/schemas/team.failed"
+        - $ref: "#/components/schemas/team.cancelled"
+        - $ref: "#/components/schemas/team.cost_update"
+        - $ref: "#/components/schemas/plugin.lifecycle"
+        - $ref: "#/components/schemas/scheduler.job.updated"
+        - $ref: "#/components/schemas/scheduler.run.started"
+        - $ref: "#/components/schemas/scheduler.run.completed"
+        - $ref: "#/components/schemas/log.created"
+        - $ref: "#/components/schemas/wiki.page.created"
+        - $ref: "#/components/schemas/wiki.page.updated"
+        - $ref: "#/components/schemas/wiki.page.moved"
+        - $ref: "#/components/schemas/wiki.page.deleted"
+        - $ref: "#/components/schemas/wiki.comment.created"
+        - $ref: "#/components/schemas/wiki.comment.resolved"
+        - $ref: "#/components/schemas/wiki.version.published"
+        - $ref: "#/components/schemas/link.created"
+        - $ref: "#/components/schemas/link.deleted"
+        - $ref: "#/components/schemas/task_comment.created"
+        - $ref: "#/components/schemas/task_comment.resolved"
+        - $ref: "#/components/schemas/agent.permission_request"
+        - $ref: "#/components/schemas/agent.tool_call"
+        - $ref: "#/components/schemas/agent.tool_result"
+        - $ref: "#/components/schemas/agent.reasoning"
+        - $ref: "#/components/schemas/agent.file_change"
+        - $ref: "#/components/schemas/agent.todo_update"
+        - $ref: "#/components/schemas/agent.rate_limit"
+        - $ref: "#/components/schemas/agent.partial_message"
+        - $ref: "#/components/schemas/agent.snapshot"
+      discriminator: type
+    BridgeEventStatusChangeData:
+      type: object
+      properties:
+        old_status:
+          type: string
+        new_status:
+          type: string
+        reason:
+          type: string
+      required:
+        - old_status
+        - new_status
+    BridgeEventCostUpdateData:
+      type: object
+      properties:
+        input_tokens:
+          type: integer
+        output_tokens:
+          type: integer
+        cache_read_tokens:
+          type: integer
+        cache_creation_tokens:
+          type: integer
+        cost_usd:
+          type: number
+        budget_remaining_usd:
+          type: number
+        turn_number:
+          type: integer
+        cost_accounting:
+          $ref: ./openapi.json#/components/schemas/CostAccountingSnapshot
+      required:
+        - input_tokens
+        - output_tokens
+        - cache_read_tokens
+        - cache_creation_tokens
+        - cost_usd
+        - budget_remaining_usd
+    BridgeEventOutputData:
+      type: object
+      properties:
+        content:
+          type: string
+        content_type:
+          type: string
+        turn_number:
+          type: integer
+      required:
+        - content
+    BridgeEventErrorData:
+      type: object
+      properties:
+        code:
+          type: string
+        message:
+          type: string
+        retryable:
+          type: boolean
+      required:
+        - code
+        - message
+        - retryable
+    BridgeEventPermissionRequestData:
+      type: object
+      properties:
+        request_id:
+          type: string
+        tool_name:
+          type: string
+        context:
+          $ref: "#/components/schemas/DynamicObject"
+        elicitation_type:
+          type: string
+        fields:
+          type: array
+          items: {}
+        mcp_server_id:
+          type: string
+      required:
+        - request_id
+    BridgeEventToolCallData:
+      type: object
+      properties:
+        tool_name:
+          type: string
+        tool_call_id:
+          type: string
+        input:
+          $ref: "#/components/schemas/DynamicObject"
+        turn_number:
+          type: integer
+      required:
+        - tool_name
+    BridgeEventToolResultData:
+      type: object
+      properties:
+        tool_name:
+          type: string
+        tool_call_id:
+          type: string
+        output:
+          $ref: "#/components/schemas/DynamicObject"
+        is_error:
+          type: boolean
+        turn_number:
+          type: integer
+      required:
+        - tool_name
+    BridgeFileChangeEntry:
+      type: object
+      properties:
+        path:
+          type: string
+        change_type:
+          type: string
+      required:
+        - path
+    BridgeEventFileChangeData:
+      type: object
+      properties:
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/BridgeFileChangeEntry"
+      required:
+        - files
+    BridgeEventReasoningData:
+      type: object
+      properties:
+        content:
+          type: string
+      required:
+        - content
+    BridgeEventProgressData:
+      type: object
+      properties:
+        tool_name:
+          type: string
+        progress_text:
+          type: string
+        item_type:
+          type: string
+        partial_output:
+          $ref: "#/components/schemas/DynamicObject"
+    BridgeEventRateLimitData:
+      type: object
+      properties:
+        utilization:
+          type: number
+        reset_at: {}
+    BridgeEventPartialMessageData:
+      type: object
+      properties:
+        content:
+          type: string
+        is_complete:
+          type: boolean
+      required:
+        - content
+        - is_complete
+    BridgeTodoEntry:
+      type: object
+      properties:
+        id:
+          type: string
+        content:
+          type: string
+        status:
+          type: string
+    BridgeEventTodoUpdateData:
+      type: object
+      properties:
+        todos:
+          type: array
+          items:
+            $ref: "#/components/schemas/BridgeTodoEntry"
+      required:
+        - todos
+    BridgeAgentEventData:
+      oneOf:
+        - $ref: "#/components/schemas/BridgeEventStatusChangeData"
+        - $ref: "#/components/schemas/BridgeEventCostUpdateData"
+        - $ref: "#/components/schemas/BridgeEventOutputData"
+        - $ref: "#/components/schemas/BridgeEventErrorData"
+        - $ref: "#/components/schemas/BridgeEventPermissionRequestData"
+        - $ref: "#/components/schemas/BridgeEventToolCallData"
+        - $ref: "#/components/schemas/BridgeEventToolResultData"
+        - $ref: "#/components/schemas/BridgeEventFileChangeData"
+        - $ref: "#/components/schemas/BridgeEventReasoningData"
+        - $ref: "#/components/schemas/BridgeEventProgressData"
+        - $ref: "#/components/schemas/BridgeEventRateLimitData"
+        - $ref: "#/components/schemas/BridgeEventPartialMessageData"
+        - $ref: "#/components/schemas/BridgeEventTodoUpdateData"
+        - $ref: "#/components/schemas/DynamicObject"
+    BridgeAgentEvent:
+      oneOf:
+        - $ref: "#/components/schemas/bridge.output"
+        - $ref: "#/components/schemas/bridge.tool_call"
+        - $ref: "#/components/schemas/bridge.tool_result"
+        - $ref: "#/components/schemas/bridge.status_change"
+        - $ref: "#/components/schemas/bridge.cost_update"
+        - $ref: "#/components/schemas/bridge.error"
+        - $ref: "#/components/schemas/bridge.snapshot"
+        - $ref: "#/components/schemas/bridge.reasoning"
+        - $ref: "#/components/schemas/bridge.file_change"
+        - $ref: "#/components/schemas/bridge.todo_update"
+        - $ref: "#/components/schemas/bridge.progress"
+        - $ref: "#/components/schemas/bridge.rate_limit"
+        - $ref: "#/components/schemas/bridge.partial_message"
+        - $ref: "#/components/schemas/bridge.permission_request"
+        - $ref: "#/components/schemas/bridge.tool.status_change"
+        - $ref: "#/components/schemas/bridge.tool.call_log"
+      discriminator: type
+    IMControlDelivery:
+      type: object
+      properties:
+        cursor:
+          type: integer
+        deliveryId:
+          type: string
+        targetBridgeId:
+          type: string
+        platform:
+          type: string
+        projectId:
+          type: string
+        kind:
+          type: string
+        content:
+          type: string
+        structured:
+          $ref: ./openapi.json#/components/schemas/IMStructuredMessage
+        native:
+          $ref: ./openapi.json#/components/schemas/IMNativeMessage
+        metadata:
+          $ref: "#/components/schemas/StringMap"
+        targetChatId:
+          type: string
+        replyTarget:
+          $ref: ./openapi.json#/components/schemas/IMReplyTarget
+        timestamp:
+          type: string
+          format: date-time
+        signature:
+          type: string
+      required:
+        - cursor
+        - deliveryId
+        - targetBridgeId
+        - platform
+        - kind
+        - content
+        - timestamp
+    IMDeliveryAck:
+      type: object
+      properties:
+        bridgeId:
+          type: string
+        cursor:
+          type: integer
+        deliveryId:
+          type: string
+        status:
+          type: string
+        failureReason:
+          type: string
+        downgradeReason:
+          type: string
+        processedAt:
+          type: string
+          format: date-time
+      required:
+        - bridgeId
+        - cursor
+    QueueEntryDTO:
+      type: object
+      properties:
+        entryId:
+          type: string
+        projectId:
+          type: string
+        taskId:
+          type: string
+        memberId:
+          type: string
+        status:
+          type: string
+        reason:
+          type: string
+        runtime:
+          type: string
+        provider:
+          type: string
+        model:
+          type: string
+        roleId:
+          type: string
+        priority:
+          type: integer
+        budgetUsd:
+          type: number
+        agentRunId:
+          type: string
+        createdAt:
+          type: string
+          format: date-time
+        updatedAt:
+          type: string
+          format: date-time
+      required:
+        - entryId
+        - projectId
+        - taskId
+        - memberId
+        - status
+        - reason
+        - runtime
+        - provider
+        - model
+        - priority
+        - budgetUsd
+        - createdAt
+        - updatedAt
+    ReviewFixRequestedPayload:
+      type: object
+      properties:
+        reviewId:
+          type: string
+        taskId:
+          type: string
+        recommendation:
+          type: string
+        findings:
+          type: array
+          items:
+            $ref: ./openapi.json#/components/schemas/ReviewFinding
+        summary:
+          type: string
+      required:
+        - reviewId
+        - taskId
+        - recommendation
+        - findings
+        - summary
+    AgentQueueCancelledPayload:
+      type: object
+      properties:
+        entryId:
+          type: string
+        taskId:
+          type: string
+        memberId:
+          type: string
+        projectId:
+          type: string
+        reason:
+          type: string
+        status:
+          type: string
+        queue:
+          $ref: "#/components/schemas/QueueEntryDTO"
+      required:
+        - entryId
+        - taskId
+        - memberId
+        - projectId
+        - reason
+        - status
+        - queue
+    AgentQueuePromotedPayload:
+      type: object
+      description: Finalized promoted queue payload with the persisted queue state and linked run identity.
+      properties:
+        queue:
+          $ref: "#/components/schemas/QueueEntryDTO"
+        run:
+          $ref: ./openapi.json#/components/schemas/AgentRunDTO
+      required:
+        - queue
+        - run
+    AgentQueueFailedPayload:
+      type: object
+      description: Finalized terminal queue failure payload with the persisted failed queue state.
+      properties:
+        queue:
+          $ref: "#/components/schemas/QueueEntryDTO"
+        error:
+          type: string
+      required:
+        - queue
+        - error
+    TaskDependencyResolvedPayload:
+      type: object
+      properties:
+        taskId:
+          type: string
+        resolvedTaskId:
+          type: string
+        newStatus:
+          type: string
+      required:
+        - taskId
+        - resolvedTaskId
+        - newStatus
+    SprintLifecyclePayload:
+      type: object
+      properties:
+        sprint:
+          $ref: ./openapi.json#/components/schemas/SprintDTO
+        oldStatus:
+          type: string
+      required:
+        - sprint
+    TaskCommentResolvedPayload:
+      type: object
+      properties:
+        id:
+          type: string
+        taskId:
+          type: string
+        resolved:
+          type: boolean
+      required:
+        - id
+        - taskId
+        - resolved
+    task.created:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task.created
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/TaskDTO
+      required:
+        - type
+        - payload
+    task.updated:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task.updated
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/TaskDTO
+      required:
+        - type
+        - payload
+    task.transitioned:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task.transitioned
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/TaskTransitionPayload"
+      required:
+        - type
+        - payload
+    task.assigned:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task.assigned
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/TaskDTO
+      required:
+        - type
+        - payload
+    task.dispatch_blocked:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task.dispatch_blocked
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/DispatchBlockedPayload"
+      required:
+        - type
+        - payload
+    task.deleted:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task.deleted
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/IdOnlyPayload"
+      required:
+        - type
+        - payload
+    agent.started:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.started
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/AgentRunDTO
+      required:
+        - type
+        - payload
+    agent.queued:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.queued
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentQueuedPayload"
+      required:
+        - type
+        - payload
+    agent.queue.cancelled:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.queue.cancelled
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentQueueCancelledPayload"
+      required:
+        - type
+        - payload
+    agent.queue.promoted:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.queue.promoted
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentQueuePromotedPayload"
+      required:
+        - type
+        - payload
+    agent.queue.failed:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.queue.failed
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentQueueFailedPayload"
+      required:
+        - type
+        - payload
+    agent.pool.updated:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.pool.updated
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/AgentPoolStatsDTO
+      required:
+        - type
+        - payload
+    agent.progress:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.progress
+        projectId:
+          type: string
+        payload:
+          oneOf:
+            - $ref: ./openapi.json#/components/schemas/AgentRunDTO
+            - $ref: "#/components/schemas/AgentGenericDataPayload"
+      required:
+        - type
+        - payload
+    agent.completed:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.completed
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/AgentRunDTO
+      required:
+        - type
+        - payload
+    agent.failed:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.failed
+        projectId:
+          type: string
+        payload:
+          oneOf:
+            - $ref: ./openapi.json#/components/schemas/AgentRunDTO
+            - $ref: "#/components/schemas/AgentFailurePayload"
+      required:
+        - type
+        - payload
+    agent.output:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.output
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentOutputPayload"
+      required:
+        - type
+        - payload
+    agent.cost_update:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.cost_update
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/AgentRunDTO
+      required:
+        - type
+        - payload
+    review.created:
+      type: object
+      properties:
+        type:
+          type: string
+          const: review.created
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/ReviewDTO
+      required:
+        - type
+        - payload
+    review.completed:
+      type: object
+      properties:
+        type:
+          type: string
+          const: review.completed
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/ReviewDTO
+      required:
+        - type
+        - payload
+    review.updated:
+      type: object
+      properties:
+        type:
+          type: string
+          const: review.updated
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/ReviewDTO
+      required:
+        - type
+        - payload
+    review.pending_human:
+      type: object
+      properties:
+        type:
+          type: string
+          const: review.pending_human
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/ReviewDTO
+      required:
+        - type
+        - payload
+    review.fix_requested:
+      type: object
+      properties:
+        type:
+          type: string
+          const: review.fix_requested
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/ReviewFixRequestedPayload"
+      required:
+        - type
+        - payload
+    notification:
+      type: object
+      properties:
+        type:
+          type: string
+          const: notification
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/NotificationDTO
+      required:
+        - type
+        - payload
+    budget.warning:
+      type: object
+      properties:
+        type:
+          type: string
+          const: budget.warning
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/BudgetAlertPayload"
+      required:
+        - type
+        - payload
+    budget.exceeded:
+      type: object
+      properties:
+        type:
+          type: string
+          const: budget.exceeded
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/BudgetAlertPayload"
+      required:
+        - type
+        - payload
+    task.progress.updated:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task.progress.updated
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/TaskProgressEventPayload"
+      required:
+        - type
+        - payload
+    task.progress.alerted:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task.progress.alerted
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/TaskProgressEventPayload"
+      required:
+        - type
+        - payload
+    task.progress.recovered:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task.progress.recovered
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/TaskProgressEventPayload"
+      required:
+        - type
+        - payload
+    sprint.created:
+      type: object
+      properties:
+        type:
+          type: string
+          const: sprint.created
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/SprintDTO
+      required:
+        - type
+        - payload
+    sprint.updated:
+      type: object
+      properties:
+        type:
+          type: string
+          const: sprint.updated
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/SprintLifecyclePayload"
+      required:
+        - type
+        - payload
+    sprint.transitioned:
+      type: object
+      properties:
+        type:
+          type: string
+          const: sprint.transitioned
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/SprintLifecyclePayload"
+      required:
+        - type
+        - payload
+    task.dependency_resolved:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task.dependency_resolved
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/TaskDependencyResolvedPayload"
+      required:
+        - type
+        - payload
+    workflow.trigger_fired:
+      type: object
+      properties:
+        type:
+          type: string
+          const: workflow.trigger_fired
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/WorkflowTriggerPayload"
+      required:
+        - type
+        - payload
+    team.created:
+      type: object
+      properties:
+        type:
+          type: string
+          const: team.created
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/AgentTeamDTO
+      required:
+        - type
+        - payload
+    team.planning:
+      type: object
+      properties:
+        type:
+          type: string
+          const: team.planning
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/AgentTeamDTO
+      required:
+        - type
+        - payload
+    team.executing:
+      type: object
+      properties:
+        type:
+          type: string
+          const: team.executing
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/AgentTeamDTO
+      required:
+        - type
+        - payload
+    team.reviewing:
+      type: object
+      properties:
+        type:
+          type: string
+          const: team.reviewing
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/AgentTeamDTO
+      required:
+        - type
+        - payload
+    team.completed:
+      type: object
+      properties:
+        type:
+          type: string
+          const: team.completed
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/AgentTeamDTO
+      required:
+        - type
+        - payload
+    team.failed:
+      type: object
+      properties:
+        type:
+          type: string
+          const: team.failed
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/AgentTeamDTO
+      required:
+        - type
+        - payload
+    team.cancelled:
+      type: object
+      properties:
+        type:
+          type: string
+          const: team.cancelled
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/AgentTeamDTO
+      required:
+        - type
+        - payload
+    team.cost_update:
+      type: object
+      properties:
+        type:
+          type: string
+          const: team.cost_update
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/TeamCostPayload"
+      required:
+        - type
+        - payload
+    plugin.lifecycle:
+      type: object
+      properties:
+        type:
+          type: string
+          const: plugin.lifecycle
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/PluginEventRecord"
+      required:
+        - type
+        - payload
+    scheduler.job.updated:
+      type: object
+      properties:
+        type:
+          type: string
+          const: scheduler.job.updated
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/SchedulerBroadcastPayload"
+      required:
+        - type
+        - payload
+    scheduler.run.started:
+      type: object
+      properties:
+        type:
+          type: string
+          const: scheduler.run.started
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/SchedulerBroadcastPayload"
+      required:
+        - type
+        - payload
+    scheduler.run.completed:
+      type: object
+      properties:
+        type:
+          type: string
+          const: scheduler.run.completed
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/SchedulerBroadcastPayload"
+      required:
+        - type
+        - payload
+    log.created:
+      type: object
+      properties:
+        type:
+          type: string
+          const: log.created
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/LogDTO
+      required:
+        - type
+        - payload
+    wiki.page.created:
+      type: object
+      properties:
+        type:
+          type: string
+          const: wiki.page.created
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/WikiPageChangePayload"
+      required:
+        - type
+        - payload
+    wiki.page.updated:
+      type: object
+      properties:
+        type:
+          type: string
+          const: wiki.page.updated
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/WikiPageChangePayload"
+      required:
+        - type
+        - payload
+    wiki.page.moved:
+      type: object
+      properties:
+        type:
+          type: string
+          const: wiki.page.moved
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/WikiPageMovePayload"
+      required:
+        - type
+        - payload
+    wiki.page.deleted:
+      type: object
+      properties:
+        type:
+          type: string
+          const: wiki.page.deleted
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/IdOnlyPayload"
+      required:
+        - type
+        - payload
+    wiki.comment.created:
+      type: object
+      properties:
+        type:
+          type: string
+          const: wiki.comment.created
+        projectId:
+          type: string
+        payload:
+          type: object
+          properties:
+            id:
+              type: string
+            pageId:
+              type: string
+            anchorBlockId:
+              type: string
+            parentId:
+              type: string
+          required:
+            - id
+            - pageId
+      required:
+        - type
+        - payload
+    wiki.comment.resolved:
+      type: object
+      properties:
+        type:
+          type: string
+          const: wiki.comment.resolved
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/WikiCommentStatePayload"
+      required:
+        - type
+        - payload
+    wiki.version.published:
+      type: object
+      properties:
+        type:
+          type: string
+          const: wiki.version.published
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/WikiVersionPublishedPayload"
+      required:
+        - type
+        - payload
+    link.created:
+      type: object
+      properties:
+        type:
+          type: string
+          const: link.created
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/EntityLinkDTO
+      required:
+        - type
+        - payload
+    link.deleted:
+      type: object
+      properties:
+        type:
+          type: string
+          const: link.deleted
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/IdOnlyPayload"
+      required:
+        - type
+        - payload
+    task_comment.created:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task_comment.created
+        projectId:
+          type: string
+        payload:
+          $ref: ./openapi.json#/components/schemas/TaskCommentDTO
+      required:
+        - type
+        - payload
+    task_comment.resolved:
+      type: object
+      properties:
+        type:
+          type: string
+          const: task_comment.resolved
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/TaskCommentResolvedPayload"
+      required:
+        - type
+        - payload
+    agent.permission_request:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.permission_request
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentPermissionRequestPayload"
+      required:
+        - type
+        - payload
+    agent.tool_call:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.tool_call
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentToolCallPayload"
+      required:
+        - type
+        - payload
+    agent.tool_result:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.tool_result
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentToolResultPayload"
+      required:
+        - type
+        - payload
+    agent.reasoning:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.reasoning
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentGenericDataPayload"
+      required:
+        - type
+        - payload
+    agent.file_change:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.file_change
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentGenericDataPayload"
+      required:
+        - type
+        - payload
+    agent.todo_update:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.todo_update
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentGenericDataPayload"
+      required:
+        - type
+        - payload
+    agent.rate_limit:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.rate_limit
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentGenericDataPayload"
+      required:
+        - type
+        - payload
+    agent.partial_message:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.partial_message
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentGenericDataPayload"
+      required:
+        - type
+        - payload
+    agent.snapshot:
+      type: object
+      properties:
+        type:
+          type: string
+          const: agent.snapshot
+        projectId:
+          type: string
+        payload:
+          $ref: "#/components/schemas/AgentGenericDataPayload"
+      required:
+        - type
+        - payload
+    bridge.output:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: output
+        data:
+          $ref: "#/components/schemas/BridgeEventOutputData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.tool_call:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: tool_call
+        data:
+          $ref: "#/components/schemas/BridgeEventToolCallData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.tool_result:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: tool_result
+        data:
+          $ref: "#/components/schemas/BridgeEventToolResultData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.status_change:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: status_change
+        data:
+          $ref: "#/components/schemas/BridgeEventStatusChangeData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.cost_update:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: cost_update
+        data:
+          $ref: "#/components/schemas/BridgeEventCostUpdateData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.error:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: error
+        data:
+          $ref: "#/components/schemas/BridgeEventErrorData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.snapshot:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: snapshot
+        data:
+          $ref: "#/components/schemas/DynamicObject"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.reasoning:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: reasoning
+        data:
+          $ref: "#/components/schemas/BridgeEventReasoningData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.file_change:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: file_change
+        data:
+          $ref: "#/components/schemas/BridgeEventFileChangeData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.todo_update:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: todo_update
+        data:
+          $ref: "#/components/schemas/BridgeEventTodoUpdateData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.progress:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: progress
+        data:
+          $ref: "#/components/schemas/BridgeEventProgressData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.rate_limit:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: rate_limit
+        data:
+          $ref: "#/components/schemas/BridgeEventRateLimitData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.partial_message:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: partial_message
+        data:
+          $ref: "#/components/schemas/BridgeEventPartialMessageData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.permission_request:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: permission_request
+        data:
+          $ref: "#/components/schemas/BridgeEventPermissionRequestData"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.tool.status_change:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: tool.status_change
+        data:
+          $ref: "#/components/schemas/DynamicObject"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data
+    bridge.tool.call_log:
+      type: object
+      properties:
+        task_id:
+          type: string
+        session_id:
+          type: string
+        timestamp_ms:
+          type: integer
+        type:
+          type: string
+          const: tool.call_log
+        data:
+          $ref: "#/components/schemas/DynamicObject"
+      required:
+        - task_id
+        - session_id
+        - timestamp_ms
+        - type
+        - data

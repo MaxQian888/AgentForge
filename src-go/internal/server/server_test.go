@@ -547,6 +547,38 @@ func TestRegisterRoutes_IMOperatorRoutesPresent(t *testing.T) {
 	}
 }
 
+func TestRegisterRoutes_IMTestSendUsesConfiguredSenderWiring(t *testing.T) {
+	cfg := testConfig()
+	redisServer := miniredis.RunT(t)
+	cache := repository.NewCacheRepository(redis.NewClient(&redis.Options{Addr: redisServer.Addr()}))
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	req := httptest.NewRequest(http.MethodPost, "/api/v1/im/test-send", strings.NewReader(`{"platform":"slack","channelId":"C123","text":"ping"}`))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Authorization", signedBearerToken(t, cfg.JWTSecret))
+	rec := httptest.NewRecorder()
+	e.ServeHTTP(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("POST /api/v1/im/test-send status = %d, want 200", rec.Code)
+	}
+
+	var payload model.IMTestSendResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if payload.DeliveryID == "" {
+		t.Fatalf("delivery id = %q, want non-empty", payload.DeliveryID)
+	}
+	if payload.Status != model.IMDeliveryStatusFailed {
+		t.Fatalf("status = %q, want failed when no live notify target is available", payload.Status)
+	}
+}
+
 func TestRegisterRoutes_DispatcherInfraGapRoutesPresent(t *testing.T) {
 	cfg := testConfig()
 	cache := repository.NewCacheRepository(nil)

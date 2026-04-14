@@ -63,6 +63,22 @@ type fakeBridgeAPIClient struct {
 	restartID      string
 	restartResp    *model.PluginRecord
 	restartErr     error
+	shellReq       *bridge.ShellRequest
+	shellResp      *bridge.ShellResponse
+	shellErr       error
+	thinkingReq    *bridge.ThinkingBudgetRequest
+	thinkingErr    error
+	mcpStatusTask  string
+	mcpStatusResp  []map[string]any
+	mcpStatusErr   error
+	authProvider   string
+	authStartBody  map[string]any
+	authStartResp  map[string]any
+	authStartErr   error
+	authRequestID  string
+	authDoneBody   map[string]any
+	authDoneResp   map[string]any
+	authDoneErr    error
 }
 
 func (f *fakeBridgeAPIClient) GetRuntimeCatalog(_ context.Context) (*bridge.RuntimeCatalogResponse, error) {
@@ -133,6 +149,101 @@ func (f *fakeBridgeAPIClient) RestartTool(_ context.Context, pluginID string) (*
 		return nil, f.restartErr
 	}
 	return f.restartResp, nil
+}
+
+func (f *fakeBridgeAPIClient) Fork(_ context.Context, req bridge.ForkRequest) (*bridge.ForkResponse, error) {
+	return &bridge.ForkResponse{NewTaskID: req.TaskID}, nil
+}
+
+func (f *fakeBridgeAPIClient) Rollback(_ context.Context, _ bridge.RollbackRequest) error {
+	return nil
+}
+
+func (f *fakeBridgeAPIClient) Revert(_ context.Context, _ bridge.RevertRequest) error {
+	return nil
+}
+
+func (f *fakeBridgeAPIClient) Unrevert(_ context.Context, _ bridge.UnrevertRequest) error {
+	return nil
+}
+
+func (f *fakeBridgeAPIClient) GetDiff(_ context.Context, _ string) (*bridge.DiffResponse, error) {
+	return &bridge.DiffResponse{}, nil
+}
+
+func (f *fakeBridgeAPIClient) GetMessages(_ context.Context, _ string) (*bridge.MessagesResponse, error) {
+	return &bridge.MessagesResponse{}, nil
+}
+
+func (f *fakeBridgeAPIClient) ExecuteCommand(_ context.Context, _ bridge.CommandRequest) error {
+	return nil
+}
+
+func (f *fakeBridgeAPIClient) ExecuteShell(_ context.Context, req bridge.ShellRequest) (*bridge.ShellResponse, error) {
+	f.shellReq = &req
+	if f.shellErr != nil {
+		return nil, f.shellErr
+	}
+	return f.shellResp, nil
+}
+
+func (f *fakeBridgeAPIClient) Interrupt(_ context.Context, _ string) error {
+	return nil
+}
+
+func (f *fakeBridgeAPIClient) SwitchModel(_ context.Context, _ bridge.ModelSwitchRequest) error {
+	return nil
+}
+
+func (f *fakeBridgeAPIClient) SetThinkingBudget(_ context.Context, req bridge.ThinkingBudgetRequest) error {
+	f.thinkingReq = &req
+	return f.thinkingErr
+}
+
+func (f *fakeBridgeAPIClient) GetMCPStatus(_ context.Context, taskID string) ([]map[string]any, error) {
+	f.mcpStatusTask = taskID
+	if f.mcpStatusErr != nil {
+		return nil, f.mcpStatusErr
+	}
+	return f.mcpStatusResp, nil
+}
+
+func (f *fakeBridgeAPIClient) PermissionResponse(_ context.Context, _ string, _ bridge.PermissionResponsePayload) error {
+	return nil
+}
+
+func (f *fakeBridgeAPIClient) StartOpenCodeProviderAuth(_ context.Context, provider string, payload map[string]any) (map[string]any, error) {
+	f.authProvider = provider
+	f.authStartBody = payload
+	if f.authStartErr != nil {
+		return nil, f.authStartErr
+	}
+	return f.authStartResp, nil
+}
+
+func (f *fakeBridgeAPIClient) CompleteOpenCodeProviderAuth(_ context.Context, requestID string, payload map[string]any) (map[string]any, error) {
+	f.authRequestID = requestID
+	f.authDoneBody = payload
+	if f.authDoneErr != nil {
+		return nil, f.authDoneErr
+	}
+	return f.authDoneResp, nil
+}
+
+func (f *fakeBridgeAPIClient) GetActive(_ context.Context) ([]bridge.StatusResponse, error) {
+	return []bridge.StatusResponse{}, nil
+}
+
+func (f *fakeBridgeAPIClient) ListPlugins(_ context.Context) (*bridge.PluginListResponse, error) {
+	return &bridge.PluginListResponse{}, nil
+}
+
+func (f *fakeBridgeAPIClient) EnablePlugin(_ context.Context, _ string) (*model.PluginRuntimeStatus, error) {
+	return &model.PluginRuntimeStatus{}, nil
+}
+
+func (f *fakeBridgeAPIClient) DisablePlugin(_ context.Context, _ string) (*model.PluginRuntimeStatus, error) {
+	return &model.PluginRuntimeStatus{}, nil
 }
 
 func newBridgeAPIHandlerTestEcho() *echo.Echo {
@@ -696,6 +807,117 @@ func TestBridgeAPIHandlersWithConcreteBridgeClient(t *testing.T) {
 	}
 	if rec.Code != http.StatusOK {
 		t.Fatalf("Decompose(concrete client) status = %d, want 200", rec.Code)
+	}
+}
+
+func TestBridgeConversationHandler_ProxiesAdvancedControlRoutes(t *testing.T) {
+	e := newBridgeAPIHandlerTestEcho()
+	client := &fakeBridgeAPIClient{
+		shellResp: &bridge.ShellResponse{
+			Success: true,
+			Output:  "lint ok",
+		},
+		mcpStatusResp: []map[string]any{
+			{"name": "github", "healthy": true},
+		},
+		authStartResp: map[string]any{
+			"request_id": "provider-auth-1",
+			"provider":   "anthropic",
+		},
+		authDoneResp: map[string]any{
+			"connected": true,
+			"provider":  "anthropic",
+		},
+	}
+	handler := NewBridgeConversationHandler(client)
+
+	shellReq := httptest.NewRequest(http.MethodPost, "/bridge/shell", strings.NewReader(`{"task_id":"task-1","command":"pnpm lint","agent":"reviewer"}`))
+	shellReq.Header.Set("Content-Type", "application/json")
+	shellRec := httptest.NewRecorder()
+	if err := handler.ExecuteShell(e.NewContext(shellReq, shellRec)); err != nil {
+		t.Fatalf("ExecuteShell() error = %v", err)
+	}
+	if shellRec.Code != http.StatusOK {
+		t.Fatalf("ExecuteShell() status = %d, want 200", shellRec.Code)
+	}
+	if client.shellReq == nil || client.shellReq.TaskID != "task-1" || client.shellReq.Agent != "reviewer" {
+		t.Fatalf("unexpected shell request = %#v", client.shellReq)
+	}
+
+	thinkingReq := httptest.NewRequest(http.MethodPost, "/bridge/thinking", strings.NewReader(`{"task_id":"task-1","max_thinking_tokens":4096}`))
+	thinkingReq.Header.Set("Content-Type", "application/json")
+	thinkingRec := httptest.NewRecorder()
+	if err := handler.SetThinkingBudget(e.NewContext(thinkingReq, thinkingRec)); err != nil {
+		t.Fatalf("SetThinkingBudget() error = %v", err)
+	}
+	if thinkingRec.Code != http.StatusOK {
+		t.Fatalf("SetThinkingBudget() status = %d, want 200", thinkingRec.Code)
+	}
+	if client.thinkingReq == nil || client.thinkingReq.MaxThinkingTokens == nil || *client.thinkingReq.MaxThinkingTokens != 4096 {
+		t.Fatalf("unexpected thinking request = %#v", client.thinkingReq)
+	}
+
+	nullThinkingReq := httptest.NewRequest(http.MethodPost, "/bridge/thinking", strings.NewReader(`{"task_id":"task-1","max_thinking_tokens":null}`))
+	nullThinkingReq.Header.Set("Content-Type", "application/json")
+	nullThinkingRec := httptest.NewRecorder()
+	if err := handler.SetThinkingBudget(e.NewContext(nullThinkingReq, nullThinkingRec)); err != nil {
+		t.Fatalf("SetThinkingBudget() null error = %v", err)
+	}
+	if nullThinkingRec.Code != http.StatusOK {
+		t.Fatalf("SetThinkingBudget() null status = %d, want 200", nullThinkingRec.Code)
+	}
+	if client.thinkingReq == nil || client.thinkingReq.MaxThinkingTokens != nil {
+		t.Fatalf("unexpected null thinking request = %#v", client.thinkingReq)
+	}
+
+	mcpReq := httptest.NewRequest(http.MethodGet, "/bridge/mcp-status/task-1", nil)
+	mcpRec := httptest.NewRecorder()
+	mcpCtx := e.NewContext(mcpReq, mcpRec)
+	mcpCtx.SetPath("/bridge/mcp-status/:task_id")
+	mcpCtx.SetParamNames("task_id")
+	mcpCtx.SetParamValues("task-1")
+	if err := handler.GetMCPStatus(mcpCtx); err != nil {
+		t.Fatalf("GetMCPStatus() error = %v", err)
+	}
+	if mcpRec.Code != http.StatusOK {
+		t.Fatalf("GetMCPStatus() status = %d, want 200", mcpRec.Code)
+	}
+	if client.mcpStatusTask != "task-1" {
+		t.Fatalf("mcp status task = %q, want task-1", client.mcpStatusTask)
+	}
+
+	authStartReq := httptest.NewRequest(http.MethodPost, "/bridge/opencode/provider-auth/anthropic/start", strings.NewReader(`{"redirect_uri":"http://127.0.0.1:7777/callback"}`))
+	authStartReq.Header.Set("Content-Type", "application/json")
+	authStartRec := httptest.NewRecorder()
+	authStartCtx := e.NewContext(authStartReq, authStartRec)
+	authStartCtx.SetPath("/bridge/opencode/provider-auth/:provider/start")
+	authStartCtx.SetParamNames("provider")
+	authStartCtx.SetParamValues("anthropic")
+	if err := handler.StartOpenCodeProviderAuth(authStartCtx); err != nil {
+		t.Fatalf("StartOpenCodeProviderAuth() error = %v", err)
+	}
+	if authStartRec.Code != http.StatusOK {
+		t.Fatalf("StartOpenCodeProviderAuth() status = %d, want 200", authStartRec.Code)
+	}
+	if client.authProvider != "anthropic" || client.authStartBody["redirect_uri"] != "http://127.0.0.1:7777/callback" {
+		t.Fatalf("unexpected provider auth start payload = %#v %#v", client.authProvider, client.authStartBody)
+	}
+
+	authDoneReq := httptest.NewRequest(http.MethodPost, "/bridge/opencode/provider-auth/provider-auth-1/complete", strings.NewReader(`{"code":"oauth-code-1","state":"oauth-state-1"}`))
+	authDoneReq.Header.Set("Content-Type", "application/json")
+	authDoneRec := httptest.NewRecorder()
+	authDoneCtx := e.NewContext(authDoneReq, authDoneRec)
+	authDoneCtx.SetPath("/bridge/opencode/provider-auth/:request_id/complete")
+	authDoneCtx.SetParamNames("request_id")
+	authDoneCtx.SetParamValues("provider-auth-1")
+	if err := handler.CompleteOpenCodeProviderAuth(authDoneCtx); err != nil {
+		t.Fatalf("CompleteOpenCodeProviderAuth() error = %v", err)
+	}
+	if authDoneRec.Code != http.StatusOK {
+		t.Fatalf("CompleteOpenCodeProviderAuth() status = %d, want 200", authDoneRec.Code)
+	}
+	if client.authRequestID != "provider-auth-1" || client.authDoneBody["code"] != "oauth-code-1" {
+		t.Fatalf("unexpected provider auth completion payload = %#v %#v", client.authRequestID, client.authDoneBody)
 	}
 }
 

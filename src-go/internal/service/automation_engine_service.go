@@ -65,6 +65,7 @@ type AutomationEngineService struct {
 	customFields  automationCustomFieldWriter
 	notifications automationNotificationSender
 	im            automationIMSender
+	imChannels    IMEventChannelResolver
 	plugins       automationPluginInvoker
 	now           func() time.Time
 }
@@ -91,6 +92,10 @@ func NewAutomationEngineService(
 }
 
 func (s *AutomationEngineService) SetIMSender(im automationIMSender) { s.im = im }
+
+func (s *AutomationEngineService) SetIMChannelResolver(resolver IMEventChannelResolver) {
+	s.imChannels = resolver
+}
 
 func (s *AutomationEngineService) EvaluateRules(ctx context.Context, event AutomationEvent) error {
 	if event.TriggeredByAutomation {
@@ -411,12 +416,43 @@ func (s *AutomationEngineService) executeSendIMMessage(ctx context.Context, even
 	if s.im == nil {
 		return nil
 	}
-	return s.im.Send(ctx, &model.IMSendRequest{
-		Platform:  stringValue(config["platform"]),
-		ChannelID: stringValue(config["channelId"]),
-		Text:      renderAutomationTemplate(stringValue(config["text"]), event),
-		ProjectID: event.ProjectID.String(),
-	})
+	platform := stringValue(config["platform"])
+	channelID := stringValue(config["channelId"])
+	text := renderAutomationTemplate(stringValue(config["text"]), event)
+
+	channels := make([]*model.IMChannel, 0)
+	if s.imChannels != nil {
+		resolved, err := s.imChannels.ResolveChannelsForEvent(ctx, event.EventType, platform, channelID)
+		if err != nil {
+			return err
+		}
+		channels = resolved
+	} else if strings.TrimSpace(platform) != "" && strings.TrimSpace(channelID) != "" {
+		channels = append(channels, &model.IMChannel{
+			Platform:  strings.TrimSpace(platform),
+			ChannelID: strings.TrimSpace(channelID),
+			Active:    true,
+		})
+	}
+
+	if len(channels) == 0 {
+		return fmt.Errorf("no usable IM route configured")
+	}
+
+	for _, channel := range channels {
+		if channel == nil {
+			continue
+		}
+		if err := s.im.Send(ctx, &model.IMSendRequest{
+			Platform:  strings.TrimSpace(channel.Platform),
+			ChannelID: strings.TrimSpace(channel.ChannelID),
+			Text:      text,
+			ProjectID: event.ProjectID.String(),
+		}); err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func (s *AutomationEngineService) executeInvokePlugin(ctx context.Context, event AutomationEvent, config map[string]any) error {

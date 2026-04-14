@@ -389,6 +389,9 @@ func TestAgentAndQueueDTOHelpers(t *testing.T) {
 		RoleID:     "reviewer",
 		Priority:   PriorityHigh,
 		BudgetUSD:  3.5,
+		GuardrailType:       DispatchGuardrailTypePool,
+		GuardrailScope:      "project",
+		RecoveryDisposition: QueueRecoveryDispositionRecoverable,
 		AgentRunID: &agentRunID,
 		CreatedAt:  now,
 		UpdatedAt:  now,
@@ -399,8 +402,41 @@ func TestAgentAndQueueDTOHelpers(t *testing.T) {
 	if queueDTO.AgentRunID == nil || *queueDTO.AgentRunID != agentRunID {
 		t.Fatalf("queueDTO.AgentRunID = %#v", queueDTO.AgentRunID)
 	}
+	if queueDTO.GuardrailType != DispatchGuardrailTypePool || queueDTO.GuardrailScope != "project" {
+		t.Fatalf("queueDTO guardrail = %q/%q", queueDTO.GuardrailType, queueDTO.GuardrailScope)
+	}
+	if queueDTO.RecoveryDisposition != QueueRecoveryDispositionRecoverable {
+		t.Fatalf("queueDTO.RecoveryDisposition = %q", queueDTO.RecoveryDisposition)
+	}
 	if dto := (*AgentPoolQueueEntry)(nil).ToDTO(); dto != (QueueEntryDTO{}) {
 		t.Fatalf("nil QueueEntryDTO = %#v, want zero value", dto)
+	}
+
+	priority := PriorityHigh
+	dispatchMemberID := uuid.MustParse("51515151-1111-2222-3333-444444444444")
+	attemptDTO := (&DispatchAttempt{
+		ID:             uuid.MustParse("21212121-2222-3333-4444-555555555555"),
+		ProjectID:      uuid.MustParse("31313131-1111-2222-3333-444444444444"),
+		TaskID:         uuid.MustParse("41414141-1111-2222-3333-444444444444"),
+		MemberID:       &dispatchMemberID,
+		Outcome:        DispatchStatusQueued,
+		TriggerSource:  "manual",
+		Reason:         "agent pool is at capacity",
+		Runtime:        "codex",
+		Provider:       "openai",
+		Model:          "gpt-5-codex",
+		RoleID:         "reviewer",
+		QueueEntryID:   "entry-1",
+		QueuePriority:  &priority,
+		GuardrailType:  DispatchGuardrailTypePool,
+		GuardrailScope: "project",
+		CreatedAt:      now,
+	}).ToDTO()
+	if attemptDTO.Runtime != "codex" || attemptDTO.Provider != "openai" || attemptDTO.Model != "gpt-5-codex" {
+		t.Fatalf("attemptDTO runtime tuple = %#v", attemptDTO)
+	}
+	if attemptDTO.QueueEntryID != "entry-1" || attemptDTO.QueuePriority == nil || *attemptDTO.QueuePriority != PriorityHigh {
+		t.Fatalf("attemptDTO queue context = %#v", attemptDTO)
 	}
 
 	memoryDTO := (&AgentMemory{

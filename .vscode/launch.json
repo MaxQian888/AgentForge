@@ -63,6 +63,21 @@
     {
       "type": "lldb",
       "request": "launch",
+      "name": "Tauri Standalone Rust Debug",
+      "cargo": {
+        "args": [
+          "build",
+          "--manifest-path=./src-tauri/Cargo.toml",
+          "--bin",
+          "agentforge-desktop-cli"
+        ]
+      },
+      "args": ["run"],
+      "preLaunchTask": "desktop:standalone:prepare"
+    },
+    {
+      "type": "lldb",
+      "request": "launch",
       "name": "Tauri Production Debug",
       "cargo": {
         "args": ["build", "--release", "--manifest-path=./src-tauri/Cargo.toml"]

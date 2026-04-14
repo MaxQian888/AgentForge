@@ -75,6 +75,36 @@ function validateReadinessContract(entry) {
   return issues;
 }
 
+function requiresStarterCatalogMetadata(entry) {
+  const kind = String(entry?.kind || "").trim();
+  return kind === "ToolPlugin" || kind === "WorkflowPlugin";
+}
+
+function validateStarterCatalogMetadata(entry) {
+  const issues = [];
+  if (!requiresStarterCatalogMetadata(entry)) {
+    return issues;
+  }
+
+  if (!String(entry?.starterFamily || "").trim()) {
+    issues.push("missing starterFamily");
+  }
+
+  if (!Array.isArray(entry?.coreFlows) || entry.coreFlows.length === 0) {
+    issues.push("missing coreFlows");
+  }
+
+  if (!Array.isArray(entry?.dependencyRefs) || entry.dependencyRefs.length === 0) {
+    issues.push("missing dependencyRefs");
+  }
+
+  if (!Array.isArray(entry?.workspaceRefs) || entry.workspaceRefs.length === 0) {
+    issues.push("missing workspaceRefs");
+  }
+
+  return issues;
+}
+
 function evaluateReadiness(entry, {
   env = process.env,
   hasExecutable = (value) => {
@@ -185,18 +215,24 @@ function createBundleVerificationPlan(bundle, { repoRoot = getRepoRoot() } = {})
 }
 
 function createStagesForProfile(profile, manifestPath, { repoRoot = getRepoRoot() } = {}) {
+  const pluginDir = path.dirname(path.join(repoRoot, manifestPath));
   switch (profile) {
     case "go-wasm":
     case "workflow-wasm":
       return createGoWasmVerificationStages({ manifestPath });
     case "mcp-review": {
-      const pluginDir = path.dirname(path.join(repoRoot, manifestPath));
       return [
         { name: "manifest" },
         { name: "package-validate", cwd: pluginDir },
       ];
     }
     case "mcp-tool":
+      return fs.existsSync(path.join(pluginDir, "package.json"))
+        ? [
+            { name: "manifest" },
+            { name: "package-validate", cwd: pluginDir },
+          ]
+        : [{ name: "manifest" }];
     default:
       return [{ name: "manifest" }];
   }
@@ -277,6 +313,19 @@ function runBundleVerification({ repoRoot = getRepoRoot() } = {}) {
         ok: false,
         pluginId: entry.id,
         stage: "readiness-contract",
+        stdout: "",
+        stderr: `${issues.join("\n")}\n`,
+      };
+    }
+  }
+
+  for (const entry of bundle.entries) {
+    const issues = validateStarterCatalogMetadata(entry);
+    if (issues.length > 0) {
+      return {
+        ok: false,
+        pluginId: entry.id,
+        stage: "starter-catalog",
         stdout: "",
         stderr: `${issues.join("\n")}\n`,
       };
@@ -383,5 +432,6 @@ module.exports = {
   loadBuiltInBundle,
   main,
   runBundleVerification,
+  validateStarterCatalogMetadata,
   validateReadinessContract,
 };

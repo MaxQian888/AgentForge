@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -194,23 +195,61 @@ type RuntimeCatalogResponse struct {
 }
 
 type RuntimeCatalogEntryDTO struct {
-	Key                 string                 `json:"key"`
-	Label               string                 `json:"label"`
-	DefaultProvider     string                 `json:"default_provider"`
-	CompatibleProviders []string               `json:"compatible_providers"`
-	DefaultModel        string                 `json:"default_model"`
-	ModelOptions        []string               `json:"model_options,omitempty"`
-	Available           bool                   `json:"available"`
-	Diagnostics         []RuntimeDiagnosticDTO `json:"diagnostics"`
-	SupportedFeatures   []string               `json:"supported_features,omitempty"`
-	Agents              []string               `json:"agents,omitempty"`
-	Skills              []string               `json:"skills,omitempty"`
+	Key                     string                         `json:"key"`
+	Label                   string                         `json:"label"`
+	DefaultProvider         string                         `json:"default_provider"`
+	CompatibleProviders     []string                       `json:"compatible_providers"`
+	DefaultModel            string                         `json:"default_model"`
+	ModelOptions            []string                       `json:"model_options,omitempty"`
+	Available               bool                           `json:"available"`
+	Diagnostics             []RuntimeDiagnosticDTO         `json:"diagnostics"`
+	SupportedFeatures       []string                       `json:"supported_features,omitempty"`
+	InteractionCapabilities RuntimeInteractionCapabilities `json:"interaction_capabilities,omitempty"`
+	Agents                  []string                       `json:"agents,omitempty"`
+	Skills                  []string                       `json:"skills,omitempty"`
+	Providers               []RuntimeCatalogProviderDTO    `json:"providers,omitempty"`
+	LaunchContract          *RuntimeLaunchContractDTO      `json:"launch_contract,omitempty"`
+	Lifecycle               *RuntimeLifecycleDTO           `json:"lifecycle,omitempty"`
 }
 
 type RuntimeDiagnosticDTO struct {
 	Code     string `json:"code"`
 	Message  string `json:"message"`
 	Blocking bool   `json:"blocking"`
+}
+
+type RuntimeCapabilityDescriptor struct {
+	State                 string   `json:"state"`
+	ReasonCode            string   `json:"reason_code,omitempty"`
+	Message               string   `json:"message,omitempty"`
+	RequiresRequestFields []string `json:"requires_request_fields,omitempty"`
+}
+
+type RuntimeInteractionCapabilities map[string]map[string]RuntimeCapabilityDescriptor
+
+type RuntimeCatalogProviderDTO struct {
+	Provider     string   `json:"provider"`
+	Connected    bool     `json:"connected"`
+	DefaultModel string   `json:"default_model,omitempty"`
+	ModelOptions []string `json:"model_options,omitempty"`
+	AuthRequired bool     `json:"auth_required,omitempty"`
+	AuthMethods  []string `json:"auth_methods,omitempty"`
+}
+
+type RuntimeLaunchContractDTO struct {
+	PromptTransport       string   `json:"prompt_transport"`
+	OutputMode            string   `json:"output_mode"`
+	SupportedOutputModes  []string `json:"supported_output_modes,omitempty"`
+	SupportedApprovalModes []string `json:"supported_approval_modes,omitempty"`
+	AdditionalDirectories bool     `json:"additional_directories"`
+	EnvOverrides          bool     `json:"env_overrides"`
+}
+
+type RuntimeLifecycleDTO struct {
+	Stage              string `json:"stage"`
+	SunsetAt           string `json:"sunset_at,omitempty"`
+	ReplacementRuntime string `json:"replacement_runtime,omitempty"`
+	Message            string `json:"message,omitempty"`
 }
 
 type DecomposeRequest struct {
@@ -327,6 +366,14 @@ func logBridgeRequestResult(fields log.Fields, start time.Time, status int, err 
 	log.WithFields(fields).Info(successMessage)
 }
 
+func bridgeUpstreamError(path string, status int, respBody []byte) error {
+	body := strings.TrimSpace(string(respBody))
+	if body == "" {
+		return fmt.Errorf("bridge upstream %s returned %d", path, status)
+	}
+	return fmt.Errorf("bridge upstream %s returned %d: %s", path, status, body)
+}
+
 // NewClient creates a new bridge client.
 func NewClient(baseURL string) *Client {
 	return &Client{
@@ -404,7 +451,7 @@ func (c *Client) GetStatus(ctx context.Context, taskID string) (*StatusResponse,
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge status returned non-OK status"), "", "bridge status returned non-OK status")
-		return nil, fmt.Errorf("bridge status returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, bridgeUpstreamError(bridgeStatusPathTemplate, resp.StatusCode, respBody)
 	}
 
 	var result StatusResponse
@@ -460,7 +507,7 @@ func (c *Client) GetRuntimeCatalog(ctx context.Context) (*RuntimeCatalogResponse
 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
-		return nil, fmt.Errorf("bridge runtime catalog returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, bridgeUpstreamError(bridgeRuntimeCatalogPath, resp.StatusCode, respBody)
 	}
 
 	var result RuntimeCatalogResponse
@@ -571,7 +618,7 @@ func (c *Client) Resume(ctx context.Context, req ExecuteRequest) (*ResumeRespons
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge resume returned non-OK status"), "", "bridge resume returned non-OK status")
-		return nil, fmt.Errorf("bridge resume returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, bridgeUpstreamError(bridgeResumePath, resp.StatusCode, respBody)
 	}
 
 	var result ResumeResponse
@@ -649,7 +696,7 @@ func (c *Client) DecomposeTask(ctx context.Context, req DecomposeRequest) (*Deco
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge decompose returned non-OK status"), "", "bridge decompose returned non-OK status")
-		return nil, fmt.Errorf("bridge decompose returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, bridgeUpstreamError(bridgeDecomposePath, resp.StatusCode, respBody)
 	}
 
 	var result DecomposeResponse
@@ -691,7 +738,7 @@ func (c *Client) Generate(ctx context.Context, req GenerateRequest) (*GenerateRe
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge generate returned non-OK status"), "", "bridge generate returned non-OK status")
-		return nil, fmt.Errorf("bridge generate returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, bridgeUpstreamError(bridgeGeneratePath, resp.StatusCode, respBody)
 	}
 
 	var result GenerateResponse
@@ -801,11 +848,41 @@ func (c *Client) ExecuteCommand(ctx context.Context, req CommandRequest) error {
 	return c.doJSONRequest(ctx, http.MethodPost, "/bridge/command", req, nil)
 }
 
+type ShellRequest struct {
+	TaskID  string `json:"task_id"`
+	Command string `json:"command"`
+	Agent   string `json:"agent,omitempty"`
+	Model   string `json:"model,omitempty"`
+}
+
+type ShellResponse struct {
+	Success bool   `json:"success"`
+	Output  string `json:"output,omitempty"`
+	Error   string `json:"error,omitempty"`
+}
+
+func (c *Client) ExecuteShell(ctx context.Context, req ShellRequest) (*ShellResponse, error) {
+	var result ShellResponse
+	if err := c.doJSONRequest(ctx, http.MethodPost, "/bridge/shell", req, &result); err != nil {
+		return nil, err
+	}
+	return &result, nil
+}
+
 // --- Runtime control ---
 
 // Interrupt interrupts a running agent without cancelling.
 func (c *Client) Interrupt(ctx context.Context, taskID string) error {
 	return c.doJSONRequest(ctx, http.MethodPost, "/bridge/interrupt", map[string]string{"task_id": taskID}, nil)
+}
+
+type ThinkingBudgetRequest struct {
+	TaskID            string `json:"task_id"`
+	MaxThinkingTokens *int   `json:"max_thinking_tokens"`
+}
+
+func (c *Client) SetThinkingBudget(ctx context.Context, req ThinkingBudgetRequest) error {
+	return c.doJSONRequest(ctx, http.MethodPost, "/bridge/thinking", req, nil)
 }
 
 // ModelSwitchRequest switches the model of a running agent.
@@ -828,6 +905,30 @@ type PermissionResponsePayload struct {
 // PermissionResponse submits a permission decision to the bridge.
 func (c *Client) PermissionResponse(ctx context.Context, requestID string, payload PermissionResponsePayload) error {
 	return c.doJSONRequest(ctx, http.MethodPost, "/bridge/permission-response/"+requestID, payload, nil)
+}
+
+func (c *Client) GetMCPStatus(ctx context.Context, taskID string) ([]map[string]any, error) {
+	var result []map[string]any
+	if err := c.doJSONRequest(ctx, http.MethodGet, "/bridge/mcp-status/"+taskID, nil, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *Client) StartOpenCodeProviderAuth(ctx context.Context, provider string, payload map[string]any) (map[string]any, error) {
+	var result map[string]any
+	if err := c.doJSONRequest(ctx, http.MethodPost, "/bridge/opencode/provider-auth/"+provider+"/start", payload, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+func (c *Client) CompleteOpenCodeProviderAuth(ctx context.Context, requestID string, payload map[string]any) (map[string]any, error) {
+	var result map[string]any
+	if err := c.doJSONRequest(ctx, http.MethodPost, "/bridge/opencode/provider-auth/"+requestID+"/complete", payload, &result); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 
 // GetActive returns the list of all active agent runtimes.
@@ -921,7 +1022,7 @@ func (c *Client) ClassifyIntent(ctx context.Context, req ClassifyIntentRequest) 
 	if resp.StatusCode != http.StatusOK {
 		respBody, _ := io.ReadAll(resp.Body)
 		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge classify intent returned non-OK status"), "", "bridge classify intent returned non-OK status")
-		return nil, fmt.Errorf("bridge classify intent returned %d: %s", resp.StatusCode, string(respBody))
+		return nil, bridgeUpstreamError(bridgeClassifyIntentPath, resp.StatusCode, respBody)
 	}
 
 	var result ClassifyIntentResponse
@@ -1225,7 +1326,7 @@ func (c *Client) doJSONRequest(ctx context.Context, method, path string, payload
 	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
 		respBody, _ := io.ReadAll(resp.Body)
 		logBridgeRequestResult(fields, start, resp.StatusCode, fmt.Errorf("bridge JSON request returned non-OK status"), "", "bridge JSON request returned non-OK status")
-		return fmt.Errorf("bridge request %s %s returned %d: %s", method, path, resp.StatusCode, string(respBody))
+		return bridgeUpstreamError(path, resp.StatusCode, respBody)
 	}
 
 	if out == nil {

@@ -68,6 +68,22 @@ The Tauri config uses:
 - `beforeDevCommand`: `pnpm desktop:dev:prepare && pnpm dev`
 - `devUrl`: `http://localhost:3000`
 
+## Standalone Rust Debug Mode
+
+When you want to debug only the Rust/Tauri runtime and keep frontend startup separate:
+
+```bash
+pnpm dev
+pnpm desktop:standalone:check
+pnpm desktop:standalone:dev
+```
+
+Notes:
+
+- `desktop:standalone:check` reuses `pnpm desktop:dev:prepare` and validates the current `devUrl`, current-host sidecar binaries, and known runtime ports.
+- `desktop:standalone:dev` reuses the same current-host sidecar prepare contract, but it does **not** start `pnpm dev` for you.
+- The maintained VS Code `Tauri Standalone Rust Debug` launch entrypoint follows the same rule: current-host sidecars are prepared automatically, frontend availability remains an external prerequisite.
+
 ## Cross-Platform Notes
 
 ### Go sidecars

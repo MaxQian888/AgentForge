@@ -388,6 +388,14 @@ describe("bridge execute route", () => {
           default_provider: "anthropic",
           compatible_providers: ["anthropic"],
           supported_features: expect.arrayContaining(["structured_output", "interrupt"]),
+          interaction_capabilities: expect.objectContaining({
+            inputs: expect.objectContaining({
+              structured_output: expect.objectContaining({
+                state: "degraded",
+                reason_code: "missing_credentials",
+              }),
+            }),
+          }),
           available: false,
         }),
         expect.objectContaining({
@@ -396,6 +404,13 @@ describe("bridge execute route", () => {
           compatible_providers: ["openai", "codex"],
           model_options: expect.arrayContaining(["gpt-5-codex", "o3"]),
           supported_features: expect.arrayContaining(["reasoning", "output_schema"]),
+          interaction_capabilities: expect.objectContaining({
+            mcp: expect.objectContaining({
+              config_overlay: expect.objectContaining({
+                state: "supported",
+              }),
+            }),
+          }),
           available: true,
         }),
         expect.objectContaining({
@@ -403,6 +418,17 @@ describe("bridge execute route", () => {
           default_provider: "cursor",
           compatible_providers: ["cursor"],
           model_options: expect.arrayContaining(["claude-sonnet-4-20250514", "gpt-4o"]),
+        }),
+        expect.objectContaining({
+          key: "opencode",
+          interaction_capabilities: expect.objectContaining({
+            lifecycle: expect.objectContaining({
+              shell: expect.objectContaining({
+                state: "degraded",
+                reason_code: "missing_server_url",
+              }),
+            }),
+          }),
         }),
       ]),
     });
@@ -1054,6 +1080,71 @@ describe("bridge execute route", () => {
     });
   });
 
+  test("rejects resume when the provided runtime context drifts from the persisted snapshot", async () => {
+    const sessionManager = new SessionManager();
+    sessionManager.save("task-context-drift", {
+      task_id: "task-context-drift",
+      session_id: "session-context-drift",
+      status: "paused",
+      turn_number: 2,
+      spent_usd: 0.11,
+      created_at: 100,
+      updated_at: 200,
+      request: {
+        task_id: "task-context-drift",
+        session_id: "session-context-drift",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        prompt: "Resume codex task",
+        worktree_path: "D:/Project/AgentForge",
+        branch_name: "agent/task-context-drift",
+        system_prompt: "",
+        max_turns: 8,
+        budget_usd: 2,
+        allowed_tools: ["Read"],
+        permission_mode: "default",
+        team_id: "team-123",
+        team_role: "reviewer",
+      },
+      continuity: {
+        runtime: "codex",
+        resume_ready: true,
+        captured_at: 200,
+        thread_id: "thread-123",
+      },
+    });
+
+    const app = createApp({
+      sessionManager,
+      streamer: {
+        close() {},
+        connect() {},
+        send() {},
+      } as never,
+    });
+
+    const response = await app.request("/bridge/resume", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        task_id: "task-context-drift",
+        runtime: "opencode",
+        provider: "openai",
+        model: "gpt-5-codex",
+        team_id: "team-123",
+        team_role: "reviewer",
+      }),
+    });
+
+    expect(response.status).toBe(409);
+    expect(await response.json()).toEqual({
+      error: "Resume request context mismatch for runtime: expected codex, got opencode",
+      code: "resume_context_mismatch",
+      field: "runtime",
+    });
+  });
+
   test("pauses and resumes OpenCode through the same upstream session", async () => {
     const pool = new RuntimePoolManager(1);
     const sessionManager = new SessionManager();
@@ -1312,7 +1403,7 @@ describe("bridge execute route", () => {
         }
       },
       executableLookup(command) {
-        return command === "cursor-agent" ? "C:/mock/cursor-agent.exe" : null;
+        return command === "agent" ? "C:/mock/agent.exe" : null;
       },
       envLookup(name) {
         return name === "CURSOR_API_KEY" ? "cursor-token" : undefined;

@@ -13,3 +13,10 @@ func optionalStringPointer(value string) *string {
 	}
 	return &value
 }
+
+func nullableStringUpdate(value string) any {
+	if value == "" {
+		return nil
+	}
+	return value
+}

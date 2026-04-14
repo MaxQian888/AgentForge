@@ -3,7 +3,11 @@
 import { create } from "zustand";
 import { toast } from "sonner";
 import { createApiClient } from "@/lib/api-client";
-import type { CodingAgentCatalog } from "./project-store";
+import type {
+  CodingAgentCatalog,
+  CodingAgentInteractionCapabilities,
+  CodingAgentProvider,
+} from "./project-store";
 import { useAuthStore } from "./auth-store";
 
 export type AgentStatus =
@@ -188,8 +192,76 @@ interface RuntimeCatalogApiShape {
       blocking?: boolean;
     }>;
     supported_features?: string[];
+    interaction_capabilities?: {
+      inputs?: Record<string, {
+        state?: string;
+        reason_code?: string;
+        message?: string;
+        requires_request_fields?: string[];
+      }>;
+      lifecycle?: Record<string, {
+        state?: string;
+        reason_code?: string;
+        message?: string;
+        requires_request_fields?: string[];
+      }>;
+      approval?: Record<string, {
+        state?: string;
+        reason_code?: string;
+        message?: string;
+        requires_request_fields?: string[];
+      }>;
+      mcp?: Record<string, {
+        state?: string;
+        reason_code?: string;
+        message?: string;
+        requires_request_fields?: string[];
+      }>;
+      diagnostics?: Record<string, {
+        state?: string;
+        reason_code?: string;
+        message?: string;
+        requires_request_fields?: string[];
+      }>;
+    };
+    providers?: Array<{
+      provider?: string;
+      connected?: boolean;
+      default_model?: string;
+      model_options?: string[];
+      auth_required?: boolean;
+      auth_methods?: string[];
+    }>;
+    launch_contract?: {
+      prompt_transport?: string;
+      output_mode?: string;
+      supported_output_modes?: string[];
+      supported_approval_modes?: string[];
+      additional_directories?: boolean;
+      env_overrides?: boolean;
+    };
+    lifecycle?: {
+      stage?: string;
+      sunset_at?: string;
+      replacement_runtime?: string;
+      message?: string;
+    };
   }>;
 }
+
+type RuntimeCatalogApiRuntime = NonNullable<RuntimeCatalogApiShape["runtimes"]>[number];
+type RuntimeCatalogApiCapabilityGroup =
+  | Record<
+      string,
+      {
+        state?: string;
+        reason_code?: string;
+        message?: string;
+        requires_request_fields?: string[];
+      }
+    >
+  | undefined;
+type RuntimeCatalogApiProviders = RuntimeCatalogApiRuntime["providers"];
 
 interface BridgeHealthApiShape {
   status?: string;
@@ -389,7 +461,109 @@ function normalizeRuntimeCatalog(raw: RuntimeCatalogApiShape | null | undefined)
     return null;
   }
 
-  const runtimes = Array.isArray(raw.runtimes)
+  const normalizeCapabilityGroup = (
+    group: RuntimeCatalogApiCapabilityGroup,
+  ): Record<
+    string,
+    {
+      state: string;
+      reasonCode?: string;
+      message?: string;
+      requiresRequestFields?: string[];
+    }
+  > => {
+    if (!group) {
+      return {};
+    }
+
+    return Object.fromEntries(
+      Object.entries(group).map(([key, descriptor]) => [
+        key,
+        {
+          state: typeof descriptor?.state === "string" ? descriptor.state : "unsupported",
+          reasonCode:
+            typeof descriptor?.reason_code === "string"
+              ? descriptor.reason_code
+              : undefined,
+          message:
+            typeof descriptor?.message === "string" ? descriptor.message : undefined,
+          requiresRequestFields: Array.isArray(descriptor?.requires_request_fields)
+            ? descriptor.requires_request_fields.map((item) => String(item))
+            : undefined,
+        },
+      ]),
+    );
+  };
+
+  const normalizeInteractionCapabilities = (
+    capabilities: RuntimeCatalogApiRuntime["interaction_capabilities"] | undefined,
+  ): CodingAgentInteractionCapabilities | undefined => {
+    if (!capabilities) {
+      return undefined;
+    }
+
+    return {
+      inputs: normalizeCapabilityGroup(capabilities.inputs),
+      lifecycle: normalizeCapabilityGroup(capabilities.lifecycle),
+      approval: normalizeCapabilityGroup(capabilities.approval),
+      mcp: normalizeCapabilityGroup(capabilities.mcp),
+      diagnostics: normalizeCapabilityGroup(capabilities.diagnostics),
+    };
+  };
+
+  const normalizeProviders = (
+    providers: RuntimeCatalogApiProviders,
+  ): CodingAgentProvider[] | undefined => {
+    if (!Array.isArray(providers)) {
+      return undefined;
+    }
+
+    return providers.map((provider) => ({
+      provider: typeof provider?.provider === "string" ? provider.provider : "",
+      connected: Boolean(provider?.connected),
+      defaultModel:
+        typeof provider?.default_model === "string" ? provider.default_model : undefined,
+      modelOptions: Array.isArray(provider?.model_options)
+        ? provider.model_options.map((item) => String(item))
+        : undefined,
+      authRequired:
+        typeof provider?.auth_required === "boolean"
+          ? provider.auth_required
+          : undefined,
+      authMethods: Array.isArray(provider?.auth_methods)
+        ? provider.auth_methods.map((item) => String(item))
+        : undefined,
+    }));
+  };
+
+  const normalizeOutputMode = (
+    value: unknown,
+  ): "text" | "json" | "stream-json" => {
+    if (value === "json" || value === "stream-json") {
+      return value;
+    }
+    return "text";
+  };
+
+  const normalizePromptTransport = (
+    value: unknown,
+  ): "stdin" | "positional" | "prompt_flag" => {
+    if (value === "positional" || value === "prompt_flag") {
+      return value;
+    }
+    return "stdin";
+  };
+
+  const normalizeOutputModes = (values: unknown): Array<"text" | "json" | "stream-json"> => {
+    if (!Array.isArray(values)) {
+      return [];
+    }
+    return values
+      .map((item) => normalizeOutputMode(item))
+      .filter((item, index, array) => array.indexOf(item) === index);
+  };
+
+  const runtimes: CodingAgentCatalog["runtimes"] = Array.isArray(raw.runtimes)
     ? raw.runtimes.map((runtime) => ({
         runtime: typeof runtime?.key === "string" ? runtime.key : "",
         label:
@@ -420,6 +594,49 @@ function normalizeRuntimeCatalog(raw: RuntimeCatalogApiShape | null | undefined)
         supportedFeatures: Array.isArray(runtime?.supported_features)
           ? runtime.supported_features.map((item) => String(item))
           : [],
+        interactionCapabilities: normalizeInteractionCapabilities(
+          runtime?.interaction_capabilities,
+        ),
+        providers: normalizeProviders(runtime?.providers),
+        launchContract:
+          runtime?.launch_contract
+            ? {
+                promptTransport: normalizePromptTransport(
+                  runtime.launch_contract.prompt_transport,
+                ),
+                outputMode: normalizeOutputMode(runtime.launch_contract.output_mode),
+                supportedOutputModes: normalizeOutputModes(
+                  runtime.launch_contract.supported_output_modes,
+                ),
+                supportedApprovalModes: Array.isArray(runtime.launch_contract.supported_approval_modes)
+                  ? runtime.launch_contract.supported_approval_modes.map((item) => String(item))
+                  : [],
+                additionalDirectories: Boolean(runtime.launch_contract.additional_directories),
+                envOverrides: Boolean(runtime.launch_contract.env_overrides),
+              }
+            : undefined,
+        lifecycle:
+          runtime?.lifecycle
+            ? {
+                stage:
+                  runtime.lifecycle.stage === "sunsetting" ||
+                  runtime.lifecycle.stage === "sunset"
+                    ? runtime.lifecycle.stage
+                    : "active",
+                sunsetAt:
+                  typeof runtime.lifecycle.sunset_at === "string"
+                    ? runtime.lifecycle.sunset_at
+                    : undefined,
+                replacementRuntime:
+                  typeof runtime.lifecycle.replacement_runtime === "string"
+                    ? runtime.lifecycle.replacement_runtime
+                    : undefined,
+                message:
+                  typeof runtime.lifecycle.message === "string"
+                    ? runtime.lifecycle.message
+                    : undefined,
+              }
+            : undefined,
       }))
     : [];
 

@@ -10,6 +10,14 @@ describe("SchedulerStatusBadge", () => {
     expect(badge).toHaveClass("custom-badge");
   });
 
+  it("supports paused and cancelled lifecycle states", () => {
+    const { rerender } = render(<SchedulerStatusBadge status="paused" />);
+    expect(screen.getByText("paused")).toHaveClass("bg-muted");
+
+    rerender(<SchedulerStatusBadge status="cancelled" />);
+    expect(screen.getByText("cancelled")).toHaveClass("text-orange-700");
+  });
+
   it("falls back to never-run when the status is missing or unknown", () => {
     const { rerender } = render(<SchedulerStatusBadge status={undefined} />);
     expect(screen.getByText("never-run")).toHaveClass("bg-muted");

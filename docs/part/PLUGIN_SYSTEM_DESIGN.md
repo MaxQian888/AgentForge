@@ -1030,7 +1030,7 @@ spec:
     max_concurrent: 5
 ```
 
-> 当前仓库实现说明：官方内置工具插件清单现在由 `plugins/builtin-bundle.yaml` 管理，当前随仓库交付的 ToolPlugin 包括 `web-search`、`github-tool` 和 `db-query`。它们都会通过 built-in discovery 与 catalog 暴露真实来源和可用性说明，而不是只保留文档示例。
+> 当前仓库实现说明：官方内置工具插件清单现在由 `plugins/builtin-bundle.yaml` 管理。当前随仓库交付的 ToolPlugin 既包括 `web-search`、`github-tool`、`db-query` 这类 helper，也包括 `task-control`、`review-control`、`workflow-control` 三个平台原生 control tools。它们都会通过 built-in discovery 与 catalog 暴露真实来源、core-flow 归属和可用性说明，而不是只保留文档示例。
 
 ### 5.4 MCP Server 集成流程
 
@@ -1106,7 +1106,7 @@ spec:
       - event: "manual"
 ```
 
-> 当前仓库实现说明：repo 内置 starter 位于 `plugins/workflows/standard-dev-flow/manifest.yaml`，并使用现有 `coding-agent` / `code-reviewer` role id，因此它可以直接走当前 Go workflow runtime 的顺序执行路径。
+> 当前仓库实现说明：repo 内置 workflow starter library 现在位于 `plugins/workflows/*/manifest.yaml`。其中 `standard-dev-flow` 作为最小 quickstart starter 保留，`task-delivery-flow` 对齐 `planner-agent -> coding-agent -> code-reviewer` 的任务交付链路，`review-escalation-flow` 对齐 deep review 到 approval pause 的审查升级链路；三者都直接走当前 Go workflow runtime 的顺序执行路径。
 
 ### 6.3 层级编排模式
 

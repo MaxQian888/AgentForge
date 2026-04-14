@@ -99,9 +99,9 @@ describe("PluginDetailSidebar", () => {
 
     render(<PluginDetailSidebar plugin={workflowPlugin} />);
 
-    expect(screen.getByRole("tab", { name: "Overview" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Details" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Events" })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: "Kind" })).toBeInTheDocument();
+    expect(screen.getByRole("tab", { name: "Contributions" })).toBeInTheDocument();
     expect(screen.getByRole("tab", { name: "Workflow" })).toBeInTheDocument();
     expect(screen.queryByRole("tab", { name: "MCP" })).not.toBeInTheDocument();
 

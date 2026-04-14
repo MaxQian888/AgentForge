@@ -212,6 +212,101 @@ describe("streamOpenCodeRuntime", () => {
     expect(String((calls[0] as { payload: { prompt: string } }).payload.prompt)).toContain("Continue");
   });
 
+  test("preserves parity-sensitive execute inputs through session bootstrap and prompt payloads", async () => {
+    const req = createRequest({
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      env: {
+        FEATURE_FLAG: "enabled",
+      },
+      web_search: true,
+      attachments: [
+        {
+          type: "image",
+          path: "D:/tmp/screen.png",
+          mime_type: "image/png",
+        },
+        {
+          type: "file",
+          path: "D:/tmp/spec.md",
+          mime_type: "text/markdown",
+        },
+      ],
+    });
+    const runtime = new AgentRuntime(req.task_id, req.session_id);
+    runtime.bindRequest(req);
+    const calls: Array<{ kind: string; payload: unknown }> = [];
+
+    await streamOpenCodeRuntime(
+      runtime,
+      { send() {} },
+      req,
+      "System prompt",
+      {
+        transport: {
+          async createSession(input: unknown) {
+            calls.push({ kind: "createSession", payload: input });
+            return { id: "opencode-session-parity" };
+          },
+          async sendPromptAsync(input: unknown) {
+            calls.push({ kind: "sendPromptAsync", payload: input });
+          },
+          async abortSession() {
+            return true;
+          },
+        } as never,
+        async *eventRunner(params: { sessionId: string }) {
+          yield {
+            event: "session.idle",
+            data: {
+              sessionID: params.sessionId,
+            },
+          };
+        },
+      } as never,
+    );
+
+    expect(calls).toEqual([
+      {
+        kind: "createSession",
+        payload: {
+          title: "task-opencode",
+          provider: "anthropic",
+          model: "claude-sonnet-4-5",
+          env: {
+            FEATURE_FLAG: "enabled",
+          },
+          web_search: true,
+        },
+      },
+      {
+        kind: "sendPromptAsync",
+        payload: {
+          sessionId: "opencode-session-parity",
+          provider: "anthropic",
+          model: "claude-sonnet-4-5",
+          prompt: "Inspect the bridge task.",
+          parts: [
+            {
+              type: "image",
+              path: "D:/tmp/screen.png",
+              mime_type: "image/png",
+            },
+            {
+              type: "file",
+              path: "D:/tmp/spec.md",
+              mime_type: "text/markdown",
+            },
+            {
+              type: "text",
+              text: "Inspect the bridge task.",
+            },
+          ],
+        },
+      },
+    ]);
+  });
+
   test("treats an event stream that ends before session idle as a runtime failure", async () => {
     const req = createRequest();
     const runtime = new AgentRuntime(req.task_id, req.session_id);
@@ -389,5 +484,78 @@ describe("streamOpenCodeRuntime", () => {
       revert_message_ids: expect.arrayContaining(["msg-3", "msg-4", "msg-5", "msg-6", "msg-7"]),
       fork_available: true,
     });
+  });
+
+  test("emits permission_request events for OpenCode permission prompts", async () => {
+    const req = createRequest();
+    const runtime = new AgentRuntime(req.task_id, req.session_id);
+    runtime.bindRequest(req);
+    const events: Array<{ type: string; data: unknown }> = [];
+    const pendingCalls: Array<unknown> = [];
+
+    await streamOpenCodeRuntime(
+      runtime,
+      {
+        send(event) {
+          events.push(event);
+        },
+      },
+      req,
+      "System prompt",
+      {
+        transport: {
+          async createSession() {
+            return { id: "opencode-session-permission" };
+          },
+          async sendPromptAsync() {},
+          async abortSession() {
+            return true;
+          },
+        } as never,
+        opencodePendingInteractions: {
+          createPermissionRequest(input: unknown) {
+            pendingCalls.push(input);
+            return { requestId: "opencode-permission-1" };
+          },
+        } as never,
+        async *eventRunner(params: { sessionId: string }) {
+          yield {
+            event: "permission.asked",
+            data: {
+              sessionID: params.sessionId,
+              permissionID: "perm-1",
+              toolName: "Read",
+              context: {
+                file_path: "README.md",
+              },
+            },
+          };
+          yield {
+            event: "session.idle",
+            data: {
+              sessionID: params.sessionId,
+            },
+          };
+        },
+      } as never,
+    );
+
+    expect(events).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          type: "permission_request",
+          data: expect.objectContaining({
+            request_id: "opencode-permission-1",
+            tool_name: "Read",
+          }),
+        }),
+      ]),
+    );
+    expect(pendingCalls).toEqual([
+      expect.objectContaining({
+        sessionId: "opencode-session-permission",
+        permissionId: "perm-1",
+      }),
+    ]);
   });
 });

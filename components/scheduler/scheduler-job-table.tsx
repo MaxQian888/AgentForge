@@ -22,6 +22,13 @@ import { formatRelativeTime } from "@/lib/format-relative-time";
 import type { SchedulerJob } from "@/lib/stores/scheduler-store";
 import { Skeleton } from "@/components/ui/skeleton";
 
+function schedulerTableStatus(job: SchedulerJob): string | undefined {
+  if (job.controlState === "paused") {
+    return "paused";
+  }
+  return job.activeRun?.status ?? job.lastRunStatus;
+}
+
 interface SchedulerJobTableProps {
   jobs: SchedulerJob[];
   selectedJobKey: string | null;
@@ -92,8 +99,11 @@ export function SchedulerJobTable({
               </TableCell>
               <TableCell>
                 <div className="flex flex-col gap-1">
-                  <SchedulerStatusBadge status={job.lastRunStatus} />
-                  {!job.enabled && (
+                  <SchedulerStatusBadge status={schedulerTableStatus(job)} />
+                  {job.controlState === "paused" && (
+                    <span className="text-xs text-muted-foreground">{t("jobTable.paused")}</span>
+                  )}
+                  {!job.enabled && job.controlState !== "paused" && (
                     <span className="text-xs text-muted-foreground">{t("jobTable.disabled")}</span>
                   )}
                 </div>

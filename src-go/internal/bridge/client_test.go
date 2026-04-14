@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"reflect"
+	"strings"
 	"testing"
 
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -352,6 +353,24 @@ func TestClientGetRuntimeCatalogUsesBridgeRoute(t *testing.T) {
 					"available":            true,
 					"diagnostics":          []map[string]any{},
 					"supported_features":   []string{"structured_output", "interrupt"},
+					"interaction_capabilities": map[string]any{
+						"lifecycle": map[string]any{
+							"interrupt": map[string]any{
+								"state":   "supported",
+								"message": "Interrupt is available",
+							},
+						},
+					},
+					"providers": []map[string]any{
+						{
+							"provider":      "anthropic",
+							"connected":     true,
+							"default_model": "claude-sonnet-4-5",
+							"model_options": []string{"claude-sonnet-4-5", "claude-opus-4-1"},
+							"auth_required": false,
+							"auth_methods":  []string{"api_key"},
+						},
+					},
 				},
 				{
 					"key":                  "codex",
@@ -407,6 +426,200 @@ func TestClientGetRuntimeCatalogUsesBridgeRoute(t *testing.T) {
 	}
 	if !reflect.DeepEqual(catalog.Runtimes[2].SupportedFeatures, []string{"progress", "reasoning"}) {
 		t.Fatalf("cursor supported features = %#v, want progress/reasoning", catalog.Runtimes[2].SupportedFeatures)
+	}
+	if catalog.Runtimes[0].InteractionCapabilities["lifecycle"]["interrupt"].State != "supported" {
+		t.Fatalf("claude interaction capabilities = %#v, want supported interrupt", catalog.Runtimes[0].InteractionCapabilities)
+	}
+	if len(catalog.Runtimes[0].Providers) != 1 || catalog.Runtimes[0].Providers[0].Provider != "anthropic" {
+		t.Fatalf("claude providers = %#v, want anthropic provider metadata", catalog.Runtimes[0].Providers)
+	}
+}
+
+func TestClientGetRuntimeCatalogPreservesUpstreamFailureDetails(t *testing.T) {
+	t.Parallel()
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, `{"message":"bridge unavailable"}`, http.StatusServiceUnavailable)
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	_, err := client.GetRuntimeCatalog(context.Background())
+	if err == nil {
+		t.Fatal("expected GetRuntimeCatalog() error")
+	}
+	if !strings.Contains(err.Error(), "bridge upstream /bridge/runtimes returned 503") {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(err.Error(), "bridge unavailable") {
+		t.Fatalf("unexpected error body: %v", err)
+	}
+}
+
+func TestClientAdvancedBridgeControlRoutesUseCanonicalContracts(t *testing.T) {
+	t.Parallel()
+
+	type requestCapture struct {
+		Method string
+		Path   string
+		Body   map[string]any
+	}
+
+	var calls []requestCapture
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var body map[string]any
+		if r.Body != nil && r.ContentLength != 0 {
+			defer r.Body.Close()
+			_ = json.NewDecoder(r.Body).Decode(&body)
+		}
+		calls = append(calls, requestCapture{
+			Method: r.Method,
+			Path:   r.URL.Path,
+			Body:   body,
+		})
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/bridge/shell":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+				"output":  "lint ok",
+			})
+		case "/bridge/thinking":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"success": true,
+			})
+		case "/bridge/mcp-status/task-123":
+			_ = json.NewEncoder(w).Encode([]map[string]any{
+				{"name": "github", "healthy": true},
+			})
+		case "/bridge/opencode/provider-auth/anthropic/start":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"request_id": "provider-auth-1",
+				"provider":   "anthropic",
+				"auth": map[string]any{
+					"url":   "https://auth.example.com/start",
+					"state": "oauth-state-1",
+				},
+			})
+		case "/bridge/opencode/provider-auth/provider-auth-1/complete":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"connected": true,
+				"provider":  "anthropic",
+			})
+		default:
+			http.NotFound(w, r)
+		}
+	}))
+	defer server.Close()
+
+	client := NewClient(server.URL)
+	thinkingBudget := 2048
+
+	shellResult, err := client.ExecuteShell(context.Background(), ShellRequest{
+		TaskID:  "task-123",
+		Command: "pnpm lint",
+		Agent:   "reviewer",
+	})
+	if err != nil {
+		t.Fatalf("ExecuteShell() error: %v", err)
+	}
+	if !shellResult.Success || shellResult.Output != "lint ok" {
+		t.Fatalf("unexpected shell response: %#v", shellResult)
+	}
+
+	if err := client.SetThinkingBudget(context.Background(), ThinkingBudgetRequest{
+		TaskID:            "task-123",
+		MaxThinkingTokens: &thinkingBudget,
+	}); err != nil {
+		t.Fatalf("SetThinkingBudget() error: %v", err)
+	}
+
+	if err := client.SetThinkingBudget(context.Background(), ThinkingBudgetRequest{
+		TaskID: "task-123",
+	}); err != nil {
+		t.Fatalf("SetThinkingBudget() error: %v", err)
+	}
+
+	mcpStatus, err := client.GetMCPStatus(context.Background(), "task-123")
+	if err != nil {
+		t.Fatalf("GetMCPStatus() error: %v", err)
+	}
+	if len(mcpStatus) != 1 || mcpStatus[0]["name"] != "github" {
+		t.Fatalf("unexpected MCP status: %#v", mcpStatus)
+	}
+
+	started, err := client.StartOpenCodeProviderAuth(context.Background(), "anthropic", map[string]any{
+		"redirect_uri": "http://127.0.0.1:7777/callback",
+	})
+	if err != nil {
+		t.Fatalf("StartOpenCodeProviderAuth() error: %v", err)
+	}
+	if started["request_id"] != "provider-auth-1" {
+		t.Fatalf("unexpected provider auth start payload: %#v", started)
+	}
+
+	completed, err := client.CompleteOpenCodeProviderAuth(context.Background(), "provider-auth-1", map[string]any{
+		"code":  "oauth-code-1",
+		"state": "oauth-state-1",
+	})
+	if err != nil {
+		t.Fatalf("CompleteOpenCodeProviderAuth() error: %v", err)
+	}
+	if completed["provider"] != "anthropic" || completed["connected"] != true {
+		t.Fatalf("unexpected provider auth complete payload: %#v", completed)
+	}
+
+	expected := []requestCapture{
+		{
+			Method: http.MethodPost,
+			Path:   "/bridge/shell",
+			Body: map[string]any{
+				"task_id": "task-123",
+				"command": "pnpm lint",
+				"agent":   "reviewer",
+			},
+		},
+		{
+			Method: http.MethodPost,
+			Path:   "/bridge/thinking",
+			Body: map[string]any{
+				"task_id":             "task-123",
+				"max_thinking_tokens": float64(2048),
+			},
+		},
+		{
+			Method: http.MethodPost,
+			Path:   "/bridge/thinking",
+			Body: map[string]any{
+				"task_id":             "task-123",
+				"max_thinking_tokens": nil,
+			},
+		},
+		{
+			Method: http.MethodGet,
+			Path:   "/bridge/mcp-status/task-123",
+			Body:   nil,
+		},
+		{
+			Method: http.MethodPost,
+			Path:   "/bridge/opencode/provider-auth/anthropic/start",
+			Body: map[string]any{
+				"redirect_uri": "http://127.0.0.1:7777/callback",
+			},
+		},
+		{
+			Method: http.MethodPost,
+			Path:   "/bridge/opencode/provider-auth/provider-auth-1/complete",
+			Body: map[string]any{
+				"code":  "oauth-code-1",
+				"state": "oauth-state-1",
+			},
+		},
+	}
+
+	if !reflect.DeepEqual(calls, expected) {
+		t.Fatalf("unexpected advanced route calls:\n got %#v\nwant %#v", calls, expected)
 	}
 }
 

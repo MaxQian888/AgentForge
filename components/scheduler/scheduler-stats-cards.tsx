@@ -7,7 +7,9 @@ import {
   XCircle,
   Activity,
   Power,
-  PowerOff,
+  PauseCircle,
+  Timer,
+  Gauge,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import type { SchedulerStats } from "@/lib/stores/scheduler-store";
@@ -53,12 +55,14 @@ function StatCard({
 export function SchedulerStatsCards({ stats, loading }: SchedulerStatsCardsProps) {
   const t = useTranslations("scheduler");
   const successRate =
-    stats && stats.totalRuns24h > 0
-      ? Math.round(((stats.totalRuns24h - stats.failedRuns24h) / stats.totalRuns24h) * 100)
-      : null;
+    stats && stats.successRate24h > 0
+      ? Math.round(stats.successRate24h)
+      : stats && stats.totalRuns24h > 0
+        ? Math.round(((stats.totalRuns24h - stats.failedRuns24h) / stats.totalRuns24h) * 100)
+        : null;
 
   return (
-    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+    <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4 xl:grid-cols-8">
       <StatCard
         label={t("stats.totalJobs")}
         value={stats?.totalJobs ?? 0}
@@ -72,9 +76,9 @@ export function SchedulerStatsCards({ stats, loading }: SchedulerStatsCardsProps
         loading={loading}
       />
       <StatCard
-        label={t("stats.disabled")}
-        value={stats?.disabledJobs ?? 0}
-        icon={PowerOff}
+        label={t("stats.paused")}
+        value={stats?.pausedJobs ?? 0}
+        icon={PauseCircle}
         loading={loading}
       />
       <StatCard
@@ -85,11 +89,23 @@ export function SchedulerStatsCards({ stats, loading }: SchedulerStatsCardsProps
         accent={stats && stats.activeRuns > 0 ? "text-blue-600 dark:text-blue-400" : undefined}
       />
       <StatCard
+        label={t("stats.queueDepth")}
+        value={stats?.queueDepth ?? 0}
+        icon={Gauge}
+        loading={loading}
+      />
+      <StatCard
         label={t("stats.failed24h")}
         value={stats?.failedRuns24h ?? 0}
         icon={XCircle}
         loading={loading}
         accent={stats && stats.failedRuns24h > 0 ? "text-red-600 dark:text-red-400" : undefined}
+      />
+      <StatCard
+        label={t("stats.avgDuration")}
+        value={stats?.averageDurationMs ? `${Math.round(stats.averageDurationMs)}ms` : "-"}
+        icon={Timer}
+        loading={loading}
       />
       <StatCard
         label={t("stats.successRate24h")}

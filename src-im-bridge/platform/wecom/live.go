@@ -212,7 +212,7 @@ func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
 		return nil
 	}
 	return replyContext{
-		ResponseURL: strings.TrimSpace(target.SessionWebhook),
+		ResponseURL: firstNonEmpty(target.ResponseURL, target.SessionWebhook),
 		ChatID:      firstNonEmpty(target.ChatID, target.ChannelID, target.ConversationID),
 		UserID:      strings.TrimSpace(target.UserID),
 	}
@@ -456,9 +456,11 @@ func normalizeInboundMessage(incoming callbackMessage) (*core.Message, error) {
 		ChatID:         chatID,
 		ChannelID:      chatID,
 		ConversationID: chatID,
+		ResponseURL:    strings.TrimSpace(incoming.ResponseURL),
 		SessionWebhook: strings.TrimSpace(incoming.ResponseURL),
 		UserID:         userID,
 		UseReply:       true,
+		ProgressMode:   string(core.AsyncUpdateSessionWebhook),
 		Metadata: map[string]string{
 			"chat_type": strings.TrimSpace(incoming.ChatType),
 			"msgid":     strings.TrimSpace(incoming.MsgID),

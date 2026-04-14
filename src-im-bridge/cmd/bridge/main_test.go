@@ -857,6 +857,78 @@ func TestRegisterCommandHandlers_FallbackShowsDisambiguationForLowConfidenceInte
 	}
 }
 
+func TestRegisterCommandHandlers_FallbackRoutesDirectRuntimeMentionWithoutClassifier(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/projects/proj":
+			_ = json.NewEncoder(w).Encode(client.Project{
+				ID:   "proj",
+				Name: "Functional Sweep 01",
+				Slug: "functional-sweep-01",
+				Settings: client.ProjectSettings{
+					CodingAgent: client.CodingAgentSelection{Runtime: "claude_code", Provider: "anthropic", Model: "claude-sonnet-4-5"},
+				},
+				CodingAgentCatalog: &client.ProjectCodingAgentCatalog{
+					DefaultRuntime: "claude_code",
+					Runtimes: []client.ProjectCodingAgentRuntime{
+						{
+							Runtime:             "claude_code",
+							Label:               "Claude Code",
+							DefaultProvider:     "anthropic",
+							CompatibleProviders: []string{"anthropic"},
+							DefaultModel:        "claude-sonnet-4-5",
+							ModelOptions:        []string{"claude-sonnet-4-5"},
+							Available:           true,
+						},
+					},
+				},
+			})
+		case "/api/v1/projects/proj/tasks":
+			_ = json.NewEncoder(w).Encode(&client.Task{ID: "task-direct-123"})
+		case "/api/v1/agents/spawn":
+			var body map[string]any
+			if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+				t.Fatalf("decode spawn body: %v", err)
+			}
+			if body["runtime"] != "claude_code" || body["provider"] != "anthropic" {
+				t.Fatalf("spawn body = %+v", body)
+			}
+			_ = json.NewEncoder(w).Encode(&client.TaskDispatchResponse{
+				Task: client.Task{ID: "task-direct-123"},
+				Dispatch: client.DispatchOutcome{
+					Status: "started",
+					Run:    &client.AgentRun{ID: "run-direct-123", TaskID: "task-direct-123"},
+				},
+			})
+		case "/api/v1/bridge/tools":
+			_ = json.NewEncoder(w).Encode(map[string]any{"tools": []map[string]any{}})
+		case "/api/v1/ai/classify-intent", "/api/v1/intent":
+			t.Fatalf("direct runtime mention should bypass classifier: %s", r.URL.Path)
+		default:
+			t.Fatalf("unexpected path: %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &replyCapturePlatform{}
+	engine := core.NewEngine(platform)
+	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "@claude 帮我总结这个任务",
+	})
+
+	if len(platform.replies) != 2 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[1], "run-dire") {
+		t.Fatalf("final reply = %q", platform.replies[1])
+	}
+}
+
 func TestRegisterCommandHandlers_FallbackSupportsReviewFollowUpWorkflow(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
@@ -1225,6 +1297,54 @@ func TestBackendActionRelay_HandleAction_UsesRequestPlatformAndBridgeContext(t *
 	}
 	if gotBody.Action != "approve" || gotBody.EntityID != "review-1" || gotBody.BridgeID != "bridge-default" {
 		t.Fatalf("body = %+v", gotBody)
+	}
+}
+
+func TestBackendActionRelay_HandleAction_PreservesActionMetadata(t *testing.T) {
+	var gotBody client.IMActionRequest
+
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if err := json.NewDecoder(r.Body).Decode(&gotBody); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(client.IMActionResponse{
+			Result:      "Saved",
+			ReplyTarget: gotBody.ReplyTarget,
+			Metadata:    map[string]string{"source": "block_actions"},
+		})
+	}))
+	defer server.Close()
+
+	relay := &backendActionRelay{
+		client:   client.NewAgentForgeClient(server.URL, "proj", "secret"),
+		bridgeID: "bridge-default",
+	}
+
+	resp, err := relay.HandleAction(context.Background(), &notify.ActionRequest{
+		Platform: "slack-stub",
+		Action:   "save-as-doc",
+		EntityID: "project-1",
+		ChatID:   "C123",
+		UserID:   "U123",
+		Metadata: map[string]string{
+			"title": "Bridge rollout",
+			"body":  "Captured from IM card",
+		},
+		ReplyTarget: &core.ReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C123",
+			ThreadID:  "thread-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleAction error: %v", err)
+	}
+	if resp == nil || resp.Result != "Saved" {
+		t.Fatalf("response = %+v", resp)
+	}
+	if gotBody.Metadata["title"] != "Bridge rollout" || gotBody.Metadata["body"] != "Captured from IM card" {
+		t.Fatalf("body metadata = %+v", gotBody.Metadata)
 	}
 }
 

@@ -4,22 +4,27 @@
 Define the provider-owned rendering profile contract for AgentForge IM Bridge so each active IM provider can declare how typed outbound delivery should be formatted, segmented, downgraded, and turned into final provider payloads.
 ## Requirements
 ### Requirement: Active IM provider SHALL publish a rendering profile
+Each runnable IM provider SHALL define supported text formatting modes, structured rendering preferences, message length limits, mutable-update constraints, accepted native surfaces, and a readiness tier that matches the live adapter's real behavior. Chinese platform profiles MUST only advertise provider surfaces that can actually be produced by the current adapter and reply-target lifecycle, rather than inheriting Feishu's richest behavior by implication.
 
-Each runnable IM provider SHALL define supported text formatting modes, structured rendering preferences, message length limits, mutable-update constraints, and card capability declarations. Optional provider-owned builders SHALL turn typed delivery into final provider payloads.
+#### Scenario: Feishu provider publishes full native-card rendering profile
+- **WHEN** the Feishu provider initializes
+- **THEN** its rendering profile declares readiness tier `full_native_lifecycle`, supports Feishu-native card payloads, and reports delayed card update compatibility
 
-The DingTalk provider SHALL declare `card: true` and `cardUpdate: false` in its rendering profile, indicating support for sending ActionCard messages but no support for in-place card updates. The profile SHALL include an ActionCard builder that maps typed envelope actions to DingTalk ActionCard button payloads.
+#### Scenario: DingTalk provider publishes ActionCard-send profile without card-update support
+- **WHEN** the DingTalk provider initializes
+- **THEN** its rendering profile declares readiness tier `native_send_with_fallback`, includes `dingtalk_card` as an accepted native surface, and reports that mutable card updates are unavailable
 
-#### Scenario: DingTalk provider publishes rendering profile with card support
-- **WHEN** DingTalk provider initializes
-- **THEN** its rendering profile declares `{text: true, markdown: false, card: true, cardUpdate: false, callback: "stream"}` and includes an ActionCard payload builder
+#### Scenario: WeCom provider publishes template-card-aware fallback profile
+- **WHEN** the WeCom provider initializes
+- **THEN** its rendering profile declares readiness tier `native_send_with_fallback`, includes only the WeCom native surfaces the adapter can actually send, and reports richer update limits explicitly
 
-#### Scenario: Feishu provider declares full card lifecycle
-- **WHEN** Feishu provider initializes
-- **THEN** its rendering profile declares `{text: true, markdown: true, card: true, cardUpdate: true, callback: "longConnection"}` with delayed-update constraints
+#### Scenario: QQ Bot provider publishes markdown-first profile
+- **WHEN** the QQ Bot provider initializes
+- **THEN** its rendering profile declares readiness tier `markdown_first`, includes `qqbot_markdown` as an accepted native surface, and does not advertise card mutation support
 
-#### Scenario: QQ provider declares text-only profile
-- **WHEN** QQ provider initializes
-- **THEN** its rendering profile declares `{text: true, markdown: false, card: false, cardUpdate: false, callback: "websocket"}` with reply-segment awareness
+#### Scenario: QQ provider publishes text-first profile
+- **WHEN** the QQ provider initializes
+- **THEN** its rendering profile declares readiness tier `text_first`, leaves native surfaces empty, and routes all richer requests to explicit text or link fallback
 
 ### Requirement: Rendering profiles SHALL declare accepted native payload surfaces
 The `RenderingProfile` struct SHALL include a `NativeSurfaces []string` field listing the native payload types accepted by the platform (e.g., `["feishu_card"]`, `["slack_block_kit"]`, `["discord_embed"]`). The delivery pipeline SHALL check this field before attempting native delivery; if the payload type is not in the list, the pipeline SHALL fall back to structured or text delivery with explicit reason.

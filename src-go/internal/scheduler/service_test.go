@@ -3,6 +3,7 @@ package scheduler
 import (
 	"context"
 	"errors"
+	"reflect"
 	"testing"
 	"time"
 
@@ -475,6 +476,346 @@ func TestService_TriggerManualBroadcastsRunLifecycle(t *testing.T) {
 	}
 }
 
+func TestService_PauseAndResumeJobProjectTruthfulControlState(t *testing.T) {
+	ctx := context.Background()
+	jobRepo := repository.NewScheduledJobRepository()
+	runRepo := repository.NewScheduledJobRunRepository()
+	now := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+	next := now.Add(5 * time.Minute)
+	job := &model.ScheduledJob{
+		JobKey:        "task-progress-detector",
+		Name:          "Task progress detector",
+		Scope:         model.ScheduledJobScopeSystem,
+		Schedule:      "*/5 * * * *",
+		Enabled:       true,
+		ExecutionMode: model.ScheduledJobExecutionModeInProcess,
+		OverlapPolicy: model.ScheduledJobOverlapSkip,
+		NextRunAt:     &next,
+		Config:        "{}",
+	}
+	if err := jobRepo.Upsert(ctx, job); err != nil {
+		t.Fatalf("jobRepo.Upsert() error = %v", err)
+	}
+
+	service := NewService(jobRepo, runRepo)
+	service.now = func() time.Time { return now }
+
+	paused := callSchedulerJobMethod(t, service, "PauseJob", ctx, job.JobKey)
+	if paused.ControlState != model.ScheduledJobControlStatePaused {
+		t.Fatalf("paused.ControlState = %q, want paused", paused.ControlState)
+	}
+	if paused.Enabled {
+		t.Fatal("paused.Enabled = true, want false after pause")
+	}
+	if paused.NextRunAt != nil {
+		t.Fatalf("paused.NextRunAt = %v, want nil while paused", paused.NextRunAt)
+	}
+
+	resumed := callSchedulerJobMethod(t, service, "ResumeJob", ctx, job.JobKey)
+	if resumed.ControlState != model.ScheduledJobControlStateActive {
+		t.Fatalf("resumed.ControlState = %q, want active", resumed.ControlState)
+	}
+	if !resumed.Enabled {
+		t.Fatal("resumed.Enabled = false, want true after resume")
+	}
+	if resumed.NextRunAt == nil || !resumed.NextRunAt.After(now) {
+		t.Fatalf("resumed.NextRunAt = %v, want recalculated next due time after %v", resumed.NextRunAt, now)
+	}
+}
+
+func TestService_ListJobsProjectsOperatorMetadata(t *testing.T) {
+	ctx := context.Background()
+	jobRepo := repository.NewScheduledJobRepository()
+	runRepo := repository.NewScheduledJobRunRepository()
+	now := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+	next := now.Add(5 * time.Minute)
+	job := &model.ScheduledJob{
+		JobKey:        "cost-reconcile",
+		Name:          "Cost reconcile",
+		Scope:         model.ScheduledJobScopeSystem,
+		Schedule:      "*/5 * * * *",
+		Enabled:       true,
+		ExecutionMode: model.ScheduledJobExecutionModeInProcess,
+		OverlapPolicy: model.ScheduledJobOverlapSkip,
+		NextRunAt:     &next,
+		Config:        "{}",
+	}
+	if err := jobRepo.Upsert(ctx, job); err != nil {
+		t.Fatalf("jobRepo.Upsert() error = %v", err)
+	}
+	if err := runRepo.Create(ctx, &model.ScheduledJobRun{
+		RunID:         "active-run",
+		JobKey:        job.JobKey,
+		TriggerSource: model.ScheduledJobTriggerManual,
+		Status:        model.ScheduledJobRunStatusRunning,
+		StartedAt:     now.Add(-30 * time.Second),
+		Metrics:       "{}",
+	}); err != nil {
+		t.Fatalf("runRepo.Create() error = %v", err)
+	}
+
+	service := NewService(jobRepo, runRepo)
+	service.now = func() time.Time { return now }
+
+	jobs, err := service.ListJobs(ctx)
+	if err != nil {
+		t.Fatalf("ListJobs() error = %v", err)
+	}
+	if len(jobs) != 1 {
+		t.Fatalf("len(jobs) = %d, want 1", len(jobs))
+	}
+	got := jobs[0]
+	if got.ControlState != model.ScheduledJobControlStateActive {
+		t.Fatalf("got.ControlState = %q, want active", got.ControlState)
+	}
+	if got.ActiveRun == nil || got.ActiveRun.RunID != "active-run" {
+		t.Fatalf("got.ActiveRun = %+v, want active run summary", got.ActiveRun)
+	}
+	if len(got.SupportedActions) == 0 {
+		t.Fatal("got.SupportedActions is empty, want operator action metadata")
+	}
+	if got.ConfigMetadata == nil || !got.ConfigMetadata.Editable {
+		t.Fatalf("got.ConfigMetadata = %+v, want editable config metadata", got.ConfigMetadata)
+	}
+	if len(got.UpcomingRuns) == 0 {
+		t.Fatal("got.UpcomingRuns is empty, want schedule preview")
+	}
+}
+
+func TestService_GetStatsIncludesOperatorMetrics(t *testing.T) {
+	ctx := context.Background()
+	jobRepo := repository.NewScheduledJobRepository()
+	runRepo := repository.NewScheduledJobRunRepository()
+	now := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+
+	activeNext := now.Add(5 * time.Minute)
+	pausedNext := now.Add(10 * time.Minute)
+	activeJob := &model.ScheduledJob{
+		JobKey:        "bridge-health-reconcile",
+		Name:          "Bridge health reconcile",
+		Scope:         model.ScheduledJobScopeSystem,
+		Schedule:      "*/5 * * * *",
+		Enabled:       true,
+		ExecutionMode: model.ScheduledJobExecutionModeInProcess,
+		OverlapPolicy: model.ScheduledJobOverlapSkip,
+		NextRunAt:     &activeNext,
+		Config:        "{}",
+	}
+	pausedJob := &model.ScheduledJob{
+		JobKey:        "cost-reconcile",
+		Name:          "Cost reconcile",
+		Scope:         model.ScheduledJobScopeSystem,
+		Schedule:      "0 * * * *",
+		Enabled:       false,
+		ExecutionMode: model.ScheduledJobExecutionModeInProcess,
+		OverlapPolicy: model.ScheduledJobOverlapSkip,
+		NextRunAt:     &pausedNext,
+		Config:        "{}",
+	}
+	for _, job := range []*model.ScheduledJob{activeJob, pausedJob} {
+		if err := jobRepo.Upsert(ctx, job); err != nil {
+			t.Fatalf("jobRepo.Upsert(%s) error = %v", job.JobKey, err)
+		}
+	}
+
+	successStart := now.Add(-2 * time.Hour)
+	successEnd := successStart.Add(10 * time.Second)
+	if err := runRepo.Create(ctx, &model.ScheduledJobRun{
+		RunID:         "success-run",
+		JobKey:        activeJob.JobKey,
+		TriggerSource: model.ScheduledJobTriggerCron,
+		Status:        model.ScheduledJobRunStatusRunning,
+		StartedAt:     successStart,
+		Metrics:       "{}",
+	}); err != nil {
+		t.Fatalf("runRepo.Create(success) error = %v", err)
+	}
+	if err := runRepo.Complete(ctx, "success-run", model.ScheduledJobRunStatusSucceeded, "ok", "", `{}`, successEnd); err != nil {
+		t.Fatalf("runRepo.Complete(success) error = %v", err)
+	}
+
+	failedStart := now.Add(-90 * time.Minute)
+	failedEnd := failedStart.Add(5 * time.Second)
+	if err := runRepo.Create(ctx, &model.ScheduledJobRun{
+		RunID:         "failed-run",
+		JobKey:        activeJob.JobKey,
+		TriggerSource: model.ScheduledJobTriggerManual,
+		Status:        model.ScheduledJobRunStatusRunning,
+		StartedAt:     failedStart,
+		Metrics:       "{}",
+	}); err != nil {
+		t.Fatalf("runRepo.Create(failed) error = %v", err)
+	}
+	if err := runRepo.Complete(ctx, "failed-run", model.ScheduledJobRunStatusFailed, "boom", "boom", `{}`, failedEnd); err != nil {
+		t.Fatalf("runRepo.Complete(failed) error = %v", err)
+	}
+
+	if err := runRepo.Create(ctx, &model.ScheduledJobRun{
+		RunID:         "queued-run",
+		JobKey:        activeJob.JobKey,
+		TriggerSource: model.ScheduledJobTriggerManual,
+		Status:        model.ScheduledJobRunStatusRunning,
+		StartedAt:     now.Add(-48 * time.Hour),
+		Metrics:       "{}",
+	}); err != nil {
+		t.Fatalf("runRepo.Create(queued) error = %v", err)
+	}
+
+	service := NewService(jobRepo, runRepo)
+	service.now = func() time.Time { return now }
+
+	stats, err := service.GetStats(ctx)
+	if err != nil {
+		t.Fatalf("GetStats() error = %v", err)
+	}
+	if stats.PausedJobs != 1 {
+		t.Fatalf("stats.PausedJobs = %d, want 1", stats.PausedJobs)
+	}
+	if stats.QueueDepth != 1 {
+		t.Fatalf("stats.QueueDepth = %d, want 1", stats.QueueDepth)
+	}
+	if stats.SuccessfulRuns24h != 1 {
+		t.Fatalf("stats.SuccessfulRuns24h = %d, want 1", stats.SuccessfulRuns24h)
+	}
+	if stats.AverageDurationMs != 7500 {
+		t.Fatalf("stats.AverageDurationMs = %d, want 7500", stats.AverageDurationMs)
+	}
+	if stats.SuccessRate24h != 50 {
+		t.Fatalf("stats.SuccessRate24h = %v, want 50", stats.SuccessRate24h)
+	}
+}
+
+func TestService_CancelJobMarksLifecycleAndBroadcastsTransitions(t *testing.T) {
+	ctx := context.Background()
+	jobRepo := repository.NewScheduledJobRepository()
+	runRepo := repository.NewScheduledJobRunRepository()
+	now := time.Date(2026, 4, 13, 10, 0, 0, 0, time.UTC)
+	next := now.Add(5 * time.Minute)
+	job := &model.ScheduledJob{
+		JobKey:        "cost-reconcile",
+		Name:          "Cost reconcile",
+		Scope:         model.ScheduledJobScopeSystem,
+		Schedule:      "*/5 * * * *",
+		Enabled:       true,
+		ExecutionMode: model.ScheduledJobExecutionModeInProcess,
+		OverlapPolicy: model.ScheduledJobOverlapSkip,
+		NextRunAt:     &next,
+		Config:        "{}",
+	}
+	if err := jobRepo.Upsert(ctx, job); err != nil {
+		t.Fatalf("jobRepo.Upsert() error = %v", err)
+	}
+
+	events := &schedulerEventCapture{}
+	service := NewService(jobRepo, runRepo)
+	service.now = func() time.Time { return now }
+	service.SetBroadcaster(events)
+
+	started := make(chan struct{})
+	done := make(chan *model.ScheduledJobRun, 1)
+	service.RegisterHandler(job.JobKey, func(ctx context.Context, job *model.ScheduledJob, run *model.ScheduledJobRun) (*RunResult, error) {
+		close(started)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+
+	go func() {
+		run, err := service.TriggerManual(ctx, job.JobKey)
+		if err != nil {
+			t.Errorf("TriggerManual() error = %v", err)
+			done <- nil
+			return
+		}
+		done <- run
+	}()
+
+	<-started
+	cancelRequested := callSchedulerRunMethod(t, service, "CancelJob", ctx, job.JobKey)
+	if cancelRequested.Status != model.ScheduledJobRunStatusCancelRequested {
+		t.Fatalf("cancelRequested.Status = %q, want cancel_requested", cancelRequested.Status)
+	}
+
+	finalRun := <-done
+	if finalRun == nil {
+		t.Fatal("finalRun = nil, want cancelled run")
+	}
+	if finalRun.Status != model.ScheduledJobRunStatusCancelled {
+		t.Fatalf("finalRun.Status = %q, want cancelled", finalRun.Status)
+	}
+
+	storedRuns, err := runRepo.ListByJobKey(ctx, job.JobKey, 10)
+	if err != nil {
+		t.Fatalf("runRepo.ListByJobKey() error = %v", err)
+	}
+	if len(storedRuns) != 1 || storedRuns[0].Status != model.ScheduledJobRunStatusCancelled {
+		t.Fatalf("storedRuns = %+v, want persisted cancelled run", storedRuns)
+	}
+
+	if len(events.types) != 3 {
+		t.Fatalf("events.types = %v, want 3 lifecycle events", events.types)
+	}
+	if events.types[1] != "scheduler.run.cancel_requested" {
+		t.Fatalf("events.types[1] = %q, want cancel-requested event", events.types[1])
+	}
+	if events.types[2] != ws.EventSchedulerRunCompleted {
+		t.Fatalf("events.types[2] = %q, want completion event", events.types[2])
+	}
+}
+
 func stringPointer(value string) *string {
 	return &value
+}
+
+func callSchedulerJobMethod(t *testing.T, service *Service, methodName string, ctx context.Context, jobKey string) *model.ScheduledJob {
+	t.Helper()
+
+	method := reflect.ValueOf(service).MethodByName(methodName)
+	if !method.IsValid() {
+		t.Fatalf("Service is missing method %s", methodName)
+	}
+
+	results := method.Call([]reflect.Value{
+		reflect.ValueOf(ctx),
+		reflect.ValueOf(jobKey),
+	})
+	if len(results) != 2 {
+		t.Fatalf("%s returned %d results, want 2", methodName, len(results))
+	}
+
+	if !results[1].IsNil() {
+		t.Fatalf("%s() error = %v", methodName, results[1].Interface())
+	}
+
+	job, ok := results[0].Interface().(*model.ScheduledJob)
+	if !ok {
+		t.Fatalf("%s() first result = %T, want *model.ScheduledJob", methodName, results[0].Interface())
+	}
+	return job
+}
+
+func callSchedulerRunMethod(t *testing.T, service *Service, methodName string, ctx context.Context, jobKey string) *model.ScheduledJobRun {
+	t.Helper()
+
+	method := reflect.ValueOf(service).MethodByName(methodName)
+	if !method.IsValid() {
+		t.Fatalf("Service is missing method %s", methodName)
+	}
+
+	results := method.Call([]reflect.Value{
+		reflect.ValueOf(ctx),
+		reflect.ValueOf(jobKey),
+	})
+	if len(results) != 2 {
+		t.Fatalf("%s returned %d results, want 2", methodName, len(results))
+	}
+
+	if !results[1].IsNil() {
+		t.Fatalf("%s() error = %v", methodName, results[1].Interface())
+	}
+
+	run, ok := results[0].Interface().(*model.ScheduledJobRun)
+	if !ok {
+		t.Fatalf("%s() first result = %T, want *model.ScheduledJobRun", methodName, results[0].Interface())
+	}
+	return run
 }

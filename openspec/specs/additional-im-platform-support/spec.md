@@ -213,20 +213,48 @@ The system SHALL preserve enough platform-specific reply target data when normal
 - **AND** later updates use the preserved target instead of inferring a destination only from task metadata
 
 ### Requirement: Platform metadata exposes delivery-relevant runtime characteristics
-The active IM platform runtime SHALL expose the delivery characteristics needed by the control plane, including whether it requires a public callback endpoint, whether it supports deferred follow-up delivery, and whether it supports rich or editable messages for progress updates. Registration and health surfaces MUST reflect those characteristics so the backend can route deliveries and choose the correct update strategy.
+The active IM platform runtime SHALL expose the delivery characteristics and readiness tier needed by health, registration, control-plane routing, and operator documentation. Registration and health surfaces MUST distinguish whether a platform is `full_native_lifecycle`, `native_send_with_fallback`, `text_first`, or `markdown_first`, and MUST keep that tier aligned with the provider's actual callback, mutable-update, structured-rendering, and reply-target behavior instead of implying flat parity across all supported Chinese platforms.
 
-#### Scenario: Health and registration reflect callback requirements
-- **WHEN** a platform such as Discord requires a public interactions endpoint for live delivery
-- **THEN** the Bridge health or registration payload identifies that callback exposure requirement
-- **AND** the backend can distinguish it from platforms that do not require a public callback
+#### Scenario: Feishu exposes full native lifecycle metadata
+- **WHEN** the active platform is Feishu
+- **THEN** health and registration metadata report readiness tier `full_native_lifecycle`
+- **AND** the capability matrix indicates native callback response plus delayed card update support
 
-#### Scenario: Health and registration reflect deferred update capabilities
-- **WHEN** a platform supports deferred replies or editable progress updates
-- **THEN** the Bridge health or registration payload reports those capabilities
-- **AND** the backend can choose a compatible progress delivery strategy for that platform
+#### Scenario: DingTalk and WeCom expose native send without mutable card parity
+- **WHEN** the active platform is DingTalk or WeCom
+- **THEN** health and registration metadata report readiness tier `native_send_with_fallback`
+- **AND** the capability matrix indicates provider-native send and callback semantics without claiming Feishu-style mutable card updates
 
-#### Scenario: Health and registration reflect QQ-family runtime characteristics
-- **WHEN** the active platform is QQ or QQ Bot
-- **THEN** the Bridge health or registration payload reports the QQ-family callback exposure, mutable-update, and richer-message characteristics that the active provider actually supports
-- **AND** operators can distinguish runnable QQ-family providers from documentation-only placeholders
+#### Scenario: QQ exposes text-first runtime truth
+- **WHEN** the active platform is QQ
+- **THEN** health and registration metadata report readiness tier `text_first`
+- **AND** the capability matrix does not advertise native payload surfaces or mutable update support
+
+#### Scenario: QQ Bot exposes markdown-first runtime truth
+- **WHEN** the active platform is QQ Bot
+- **THEN** health and registration metadata report readiness tier `markdown_first`
+- **AND** the capability matrix indicates markdown or keyboard send support without claiming full rich-card lifecycle parity
+
+### Requirement: Chinese-platform registration and health SHALL expose async completion truth
+The active IM platform runtime SHALL expose enough metadata for operators and downstream routing to distinguish whether DingTalk, WeCom, QQ Bot, or QQ can complete long-running work through provider-native reply or update paths, reply-only paths, or text-first fallback. Health, registration, and capability matrix payloads MUST keep this async completion truth aligned with the provider's actual reply target restoration and replay behavior instead of collapsing those platforms into one generic `native_send_with_fallback` label.
+
+#### Scenario: DingTalk publishes session-webhook completion truth
+- **WHEN** the active platform is DingTalk
+- **THEN** health and registration metadata expose that asynchronous completion prefers session webhook or conversation-scoped reply
+- **AND** the capability matrix does not imply delayed mutable-card update parity with Feishu
+
+#### Scenario: WeCom publishes reply-first completion truth
+- **WHEN** the active platform is WeCom
+- **THEN** health and registration metadata expose that asynchronous completion prefers preserved `response_url` and may fall back to direct app send
+- **AND** the capability matrix makes that fallback boundary visible to operators
+
+#### Scenario: QQ Bot publishes msg-id-aware completion truth
+- **WHEN** the active platform is QQ Bot
+- **THEN** health and registration metadata expose that asynchronous completion may reuse preserved `msg_id` or conversation context for markdown or text follow-up
+- **AND** the capability matrix does not claim mutable native update support unless the adapter truly implements it
+
+#### Scenario: QQ remains text-first in completion metadata
+- **WHEN** the active platform is QQ
+- **THEN** health and registration metadata continue to report QQ as `text_first`
+- **AND** the capability matrix describes reply reuse and text fallback without advertising richer update surfaces
 

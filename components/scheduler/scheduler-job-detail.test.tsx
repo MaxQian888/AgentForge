@@ -5,24 +5,42 @@ jest.mock("next-intl", () => ({
   ) => {
     const map: Record<string, string> = {
       "jobDetail.runNow": "Run Now",
-      "jobDetail.disable": "Disable",
-      "jobDetail.enable": "Enable",
+      "jobDetail.pause": "Pause",
+      "jobDetail.resume": "Resume",
+      "jobDetail.cancelRun": "Cancel Run",
+      "jobDetail.cleanupHistory": "Cleanup History",
+      "jobDetail.unsupportedActions": "Unsupported Actions",
       "jobDetail.tabOverview": "Overview",
       "jobDetail.tabHistory": "History",
       "jobDetail.tabConfig": "Config",
       "jobDetail.lastRun": "Last Run",
+      "jobDetail.controlState": "Control State",
       "jobDetail.nextRun": "Next Run",
       "jobDetail.notScheduled": "Not scheduled",
       "jobDetail.scope": "Scope",
       "jobDetail.overlapPolicy": "Overlap Policy",
+      "jobDetail.executionMode": "Execution Mode",
+      "jobDetail.activeRun": "Active Run",
       "jobDetail.lastSummary": "Last Summary",
       "jobDetail.lastError": "Last Error",
       "jobDetail.scheduleExpression": "Schedule Expression",
       "jobDetail.save": "Save",
-      "jobDetail.disableJobTitle": "Disable Job",
-      "jobDetail.enableJobTitle": "Enable Job",
-      "jobDetail.cancel": "Cancel",
+      "jobDetail.upcomingRuns": "Upcoming Runs",
+      "jobDetail.configFields": "Config Fields",
+      "jobDetail.configManagedByBackend": "Managed by backend",
       "jobDetail.selectJob": "Select a job",
+      "runHistory.filterStatus": "Status Filter",
+      "runHistory.filterTrigger": "Trigger Filter",
+      "runHistory.filterAll": "All",
+      "runHistory.applyFilters": "Apply Filters",
+      "runHistory.resetFilters": "Reset Filters",
+      "runHistory.noRuns": "No runs",
+      "runHistory.colStatus": "Status",
+      "runHistory.colTrigger": "Trigger",
+      "runHistory.colStarted": "Started",
+      "runHistory.colDuration": "Duration",
+      "runHistory.colSummary": "Summary",
+      "runHistory.colMetrics": "Metrics",
     };
     if (key === "jobDetail.disableJobDesc") {
       return `Stop ${values?.name ?? ""}`;
@@ -34,8 +52,7 @@ jest.mock("next-intl", () => ({
   },
 }));
 
-import { render, screen } from "@testing-library/react";
-import { fireEvent, within } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SchedulerJobDetail, SchedulerJobDetailEmpty } from "./scheduler-job-detail";
 
@@ -50,10 +67,15 @@ describe("SchedulerJobDetail", () => {
     jest.restoreAllMocks();
   });
 
-  it("renders overview information, saves schedule edits, and triggers runs", async () => {
+  it("renders operator controls, schedule preview, and config metadata", async () => {
     const user = userEvent.setup();
     const onUpdateJob = jest.fn();
     const onTriggerJob = jest.fn();
+    const onPauseJob = jest.fn();
+    const onResumeJob = jest.fn();
+    const onCancelJob = jest.fn();
+    const onCleanupRuns = jest.fn();
+    const onFetchRuns = jest.fn();
     const onSetDraftSchedule = jest.fn();
 
     render(
@@ -64,9 +86,34 @@ describe("SchedulerJobDetail", () => {
           scope: "project",
           schedule: "0 0 * * *",
           enabled: true,
-          executionMode: "single",
+          executionMode: "in_process",
           overlapPolicy: "skip",
           lastRunStatus: "succeeded",
+          controlState: "active",
+          activeRun: {
+            runId: "run-active",
+            triggerSource: "manual",
+            status: "running",
+            startedAt: "2026-03-30T11:30:00.000Z",
+            summary: "Processing files",
+            errorMessage: "",
+          },
+          supportedActions: [
+            { action: "pause", enabled: true },
+            { action: "trigger", enabled: true },
+            { action: "cancel", enabled: true },
+            { action: "cleanup", enabled: false, reason: "cleanup is disabled while a run is active" },
+          ],
+          configMetadata: {
+            editable: true,
+            fields: [
+              { key: "schedule", label: "Schedule", type: "string", helpText: "Cron expression" },
+            ],
+          },
+          upcomingRuns: [
+            { runAt: "2026-03-31T00:00:00.000Z" },
+            { runAt: "2026-04-01T00:00:00.000Z" },
+          ],
           lastRunAt: "2026-03-30T11:00:00.000Z",
           nextRunAt: "2026-03-31T00:00:00.000Z",
           lastRunSummary: "Finished cleanly",
@@ -94,18 +141,28 @@ describe("SchedulerJobDetail", () => {
         actionLoading={false}
         onUpdateJob={onUpdateJob}
         onTriggerJob={onTriggerJob}
+        onPauseJob={onPauseJob}
+        onResumeJob={onResumeJob}
+        onCancelJob={onCancelJob}
+        onCleanupRuns={onCleanupRuns}
+        onFetchRuns={onFetchRuns}
         onSetDraftSchedule={onSetDraftSchedule}
       />,
     );
 
     expect(screen.getByText("Cleanup")).toBeInTheDocument();
-    expect(screen.getByText("scheduler.cleanup")).toBeInTheDocument();
-    expect(screen.getByText("Finished cleanly")).toBeInTheDocument();
-    expect(screen.getByText("Previous failure")).toBeInTheDocument();
-    expect(screen.getByText("Every 15 minutes")).toBeInTheDocument();
+    expect(screen.getByText("Processing files")).toBeInTheDocument();
+    expect(screen.getByText("Upcoming Runs")).toBeInTheDocument();
+    expect(screen.getByText("cleanup: cleanup is disabled while a run is active")).toBeInTheDocument();
 
     await user.click(screen.getByRole("button", { name: "Run Now" }));
     expect(onTriggerJob).toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Pause" }));
+    expect(onPauseJob).toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Cancel Run" }));
+    expect(onCancelJob).toHaveBeenCalled();
 
     await user.click(screen.getByRole("button", { name: "Save" }));
     expect(onUpdateJob).toHaveBeenCalledWith({ schedule: "*/15 * * * *" });
@@ -115,11 +172,25 @@ describe("SchedulerJobDetail", () => {
     });
     fireEvent.change(scheduleInput, { target: { value: "0 */6 * * *" } });
     expect(onSetDraftSchedule).toHaveBeenLastCalledWith("0 */6 * * *");
+
+    await user.click(screen.getByRole("tab", { name: /History/i }));
+    await user.selectOptions(screen.getByLabelText("Status Filter"), "failed");
+    await user.selectOptions(screen.getByLabelText("Trigger Filter"), "manual");
+    await user.click(screen.getByRole("button", { name: "Apply Filters" }));
+    expect(onFetchRuns).toHaveBeenCalledWith({
+      status: "failed",
+      triggerSource: "manual",
+      limit: 20,
+    });
+
+    await user.click(screen.getByRole("tab", { name: /Config/i }));
+    expect(screen.getByText("Config Fields")).toBeInTheDocument();
   });
 
-  it("switches to config and history tabs and confirms disable actions", async () => {
+  it("renders paused jobs truthfully and allows resume or cleanup reset", async () => {
     const user = userEvent.setup();
-    const onUpdateJob = jest.fn();
+    const onResumeJob = jest.fn();
+    const onFetchRuns = jest.fn();
 
     render(
       <SchedulerJobDetail
@@ -128,54 +199,53 @@ describe("SchedulerJobDetail", () => {
           name: "Cleanup",
           scope: "project",
           schedule: "0 0 * * *",
-          enabled: true,
-          executionMode: "single",
+          enabled: false,
+          executionMode: "in_process",
           overlapPolicy: "skip",
           lastRunStatus: "failed",
+          controlState: "paused",
+          supportedActions: [
+            { action: "resume", enabled: true },
+            { action: "trigger", enabled: false, reason: "job is paused" },
+            { action: "cancel", enabled: false, reason: "no active run" },
+            { action: "cleanup", enabled: true },
+          ],
+          configMetadata: { editable: false, reason: "Managed by backend" },
+          upcomingRuns: [],
           lastRunAt: "2026-03-30T11:00:00.000Z",
           nextRunAt: undefined,
           lastRunSummary: "",
           lastError: "",
-          config: '{"retries":2}',
+          config: "{}",
           createdAt: "",
           updatedAt: "",
         }}
-        runs={[
-          {
-            runId: "run-1",
-            jobKey: "scheduler.cleanup",
-            triggerSource: "manual",
-            status: "failed",
-            startedAt: "2026-03-30T11:00:00.000Z",
-            durationMs: 1500,
-            summary: "",
-            errorMessage: "Bridge unavailable",
-            metrics: "{}",
-            createdAt: "",
-            updatedAt: "",
-          },
-        ]}
+        runs={[]}
         draftSchedule="0 0 * * *"
         actionLoading={false}
-        onUpdateJob={onUpdateJob}
+        onUpdateJob={jest.fn()}
         onTriggerJob={jest.fn()}
+        onPauseJob={jest.fn()}
+        onResumeJob={onResumeJob}
+        onCancelJob={jest.fn()}
+        onCleanupRuns={jest.fn()}
+        onFetchRuns={onFetchRuns}
         onSetDraftSchedule={jest.fn()}
       />,
     );
 
+    expect(screen.getAllByText("paused")).toHaveLength(2);
+    expect(screen.getByTitle("job is paused")).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Resume" }));
+    expect(onResumeJob).toHaveBeenCalled();
+
     await user.click(screen.getByRole("tab", { name: /History/i }));
-    expect(screen.getByText("Bridge unavailable")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Reset Filters" }));
+    expect(onFetchRuns).toHaveBeenCalledWith();
 
-    await user.click(screen.getByRole("tab", { name: "Config" }));
-    expect(screen.getByText(/"retries": 2/)).toBeInTheDocument();
-
-    await user.click(screen.getAllByRole("button", { name: "Disable" })[0]);
-    expect(screen.getByText("Disable Job")).toBeInTheDocument();
-    expect(screen.getByText("Stop Cleanup")).toBeInTheDocument();
-
-    const dialog = screen.getByRole("dialog");
-    await user.click(within(dialog).getByRole("button", { name: "Disable" }));
-    expect(onUpdateJob).toHaveBeenCalledWith({ enabled: false });
+    await user.click(screen.getByRole("tab", { name: /Config/i }));
+    expect(screen.getByText("Managed by backend")).toBeInTheDocument();
   });
 });
 
@@ -185,3 +255,4 @@ describe("SchedulerJobDetailEmpty", () => {
     expect(screen.getByText("Select a job")).toBeInTheDocument();
   });
 });
+

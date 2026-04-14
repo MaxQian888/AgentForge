@@ -141,6 +141,18 @@ export function PluginDetailOverview({ plugin }: PluginDetailOverviewProps) {
               {plugin.builtIn.nextStep ? (
                 <p>Next step: {plugin.builtIn.nextStep}</p>
               ) : null}
+              {plugin.builtIn.starterFamily ? (
+                <p>Starter family: {plugin.builtIn.starterFamily}</p>
+              ) : null}
+              {plugin.builtIn.coreFlows?.length ? (
+                <p>Core flows: {plugin.builtIn.coreFlows.join(", ")}</p>
+              ) : null}
+              {plugin.builtIn.dependencyRefs?.length ? (
+                <p>Dependencies: {plugin.builtIn.dependencyRefs.join(", ")}</p>
+              ) : null}
+              {plugin.builtIn.workspaceRefs?.length ? (
+                <p>Workspaces: {plugin.builtIn.workspaceRefs.join(", ")}</p>
+              ) : null}
               {plugin.builtIn.missingPrerequisites?.length ? (
                 <p>
                   Missing prerequisites: {plugin.builtIn.missingPrerequisites.join(", ")}

@@ -39,10 +39,6 @@ type DispatchBudgetChecker interface {
 	CheckBudget(ctx context.Context, projectID uuid.UUID, sprintID *uuid.UUID, requestedUsd float64) (*BudgetCheckResult, error)
 }
 
-type dispatchPoolStatsProvider interface {
-	PoolStats(ctx context.Context) model.AgentPoolStatsDTO
-}
-
 type runtimeAdmissionSpawner interface {
 	RequestSpawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string, priority int) (*model.TaskDispatchResponse, error)
 }
@@ -213,11 +209,32 @@ func (s *TaskDispatchService) Spawn(ctx context.Context, input DispatchSpawnInpu
 }
 
 func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task, memberID uuid.UUID, input DispatchSpawnInput) (*model.TaskDispatchResponse, error) {
-	warning, blocked := s.checkBudget(ctx, task, input.BudgetUSD)
-	if blocked != nil {
-		s.recordDispatchAttempt(ctx, task, &memberID, blocked.Dispatch, input.TriggerSource)
-		return blocked, nil
+	contextFields := dispatchOutcomeContextFromInput(input)
+	member, memberErr := s.members.GetByID(ctx, memberID)
+	if memberErr != nil {
+		result := s.blockedResult(ctx, task, "dispatch target is unavailable")
+		result.Dispatch = applyDispatchOutcomeContext(result.Dispatch, contextFields)
+		s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
+		return result, nil
 	}
+	var runReader DispatchRunReader
+	if reader, ok := s.runtime.(DispatchRunReader); ok {
+		runReader = reader
+	}
+	var poolProvider DispatchPoolStatsProvider
+	if provider, ok := s.runtime.(DispatchPoolStatsProvider); ok {
+		poolProvider = provider
+	}
+	preflight := EvaluateDispatchPreflight(ctx, task, member, input, s.budgetChecker, runReader, poolProvider)
+	if preflight.Outcome.Status == model.DispatchStatusBlocked || preflight.Outcome.Status == model.DispatchStatusSkipped {
+		result := &model.TaskDispatchResponse{
+			Task:     task.ToDTO(),
+			Dispatch: applyDispatchOutcomeContext(preflight.Outcome, contextFields),
+		}
+		s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
+		return result, nil
+	}
+	warning := preflight.Outcome.BudgetWarning
 	if admissionSpawner, ok := s.runtime.(runtimeAdmissionSpawner); ok {
 		result, err := admissionSpawner.RequestSpawn(ctx, task.ID, memberID, input.Runtime, input.Provider, input.Model, input.BudgetUSD, input.RoleID, input.Priority)
 		if err != nil {
@@ -228,6 +245,7 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 			s.broadcastBudgetWarning(task, warning)
 		}
 		if result != nil {
+			result.Dispatch = applyDispatchOutcomeContext(result.Dispatch, contextFields)
 			s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
 		}
 		return result, nil
@@ -238,11 +256,13 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 		switch {
 		case errors.Is(err, ErrAgentAlreadyRunning):
 			result := s.blockedResult(ctx, task, "task already has an active agent run")
+			result.Dispatch = applyDispatchOutcomeContext(result.Dispatch, contextFields)
 			s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
 			return result, nil
 		case errors.Is(err, ErrAgentPoolFull):
 			if s.queueWriter == nil {
 				result := s.blockedResult(ctx, task, "agent pool is at capacity")
+				result.Dispatch = applyDispatchOutcomeContext(result.Dispatch, contextFields)
 				s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
 				return result, nil
 			}
@@ -257,9 +277,13 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 				Priority:  input.Priority,
 				BudgetUSD: input.BudgetUSD,
 				Reason:    "agent pool is at capacity",
+				GuardrailType:       model.DispatchGuardrailTypePool,
+				GuardrailScope:      "project",
+				RecoveryDisposition: model.QueueRecoveryDispositionPending,
 			})
 			if queueErr != nil {
 				result := s.blockedResult(ctx, task, "agent pool is at capacity")
+				result.Dispatch = applyDispatchOutcomeContext(result.Dispatch, contextFields)
 				s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
 				return result, nil
 			}
@@ -272,10 +296,12 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 			return result, nil
 		case errors.Is(err, ErrAgentWorktreeUnavailable):
 			result := s.blockedResult(ctx, task, "agent dispatch is blocked by worktree availability")
+			result.Dispatch = applyDispatchOutcomeContext(result.Dispatch, contextFields)
 			s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
 			return result, nil
 		default:
 			result := s.blockedResult(ctx, task, err.Error())
+			result.Dispatch = applyDispatchOutcomeContext(result.Dispatch, contextFields)
 			s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
 			return result, nil
 		}
@@ -294,6 +320,10 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 		Task: updatedTask.ToDTO(),
 		Dispatch: model.DispatchOutcome{
 			Status:        model.DispatchStatusStarted,
+			Runtime:       contextFields.Runtime,
+			Provider:      contextFields.Provider,
+			Model:         contextFields.Model,
+			RoleID:        contextFields.RoleID,
 			BudgetWarning: warning,
 			Run:           dtoPtr(run.ToDTO()),
 		},
@@ -314,6 +344,12 @@ func (s *TaskDispatchService) recordDispatchAttempt(ctx context.Context, task *m
 		Outcome:        dispatch.Status,
 		TriggerSource:  resolveDispatchTriggerSource(triggerSource, "manual"),
 		Reason:         dispatch.Reason,
+		Runtime:        dispatch.Runtime,
+		Provider:       dispatch.Provider,
+		Model:          dispatch.Model,
+		RoleID:         dispatch.RoleID,
+		QueueEntryID:   queueEntryIDFromDispatch(dispatch),
+		QueuePriority:  queuePriorityFromDispatch(dispatch),
 		GuardrailType:  dispatch.GuardrailType,
 		GuardrailScope: dispatch.GuardrailScope,
 		CreatedAt:      time.Now().UTC(),
@@ -363,9 +399,15 @@ func (s *TaskDispatchService) queuedResult(task *model.Task, entry *model.AgentP
 	return &model.TaskDispatchResponse{
 		Task: taskDTO,
 		Dispatch: model.DispatchOutcome{
-			Status: model.DispatchStatusQueued,
-			Reason: reason,
-			Queue:  entry,
+			Status:         model.DispatchStatusQueued,
+			Reason:         reason,
+			Runtime:        entry.Runtime,
+			Provider:       entry.Provider,
+			Model:          entry.Model,
+			RoleID:         entry.RoleID,
+			GuardrailType:  entry.GuardrailType,
+			GuardrailScope: entry.GuardrailScope,
+			Queue:          entry,
 		},
 	}
 }
@@ -416,7 +458,7 @@ func (s *TaskDispatchService) broadcastDispatchQueued(task *model.Task, entry *m
 			},
 		},
 	})
-	if provider, ok := s.runtime.(dispatchPoolStatsProvider); ok {
+	if provider, ok := s.runtime.(DispatchPoolStatsProvider); ok {
 		s.hub.BroadcastEvent(&ws.Event{
 			Type:      ws.EventAgentPoolUpdated,
 			ProjectID: task.ProjectID.String(),
@@ -444,41 +486,11 @@ func (s *TaskDispatchService) createBlockedNotification(ctx context.Context, tas
 }
 
 func (s *TaskDispatchService) checkBudget(ctx context.Context, task *model.Task, requestedUSD float64) (*model.DispatchBudgetWarning, *model.TaskDispatchResponse) {
-	if task == nil {
-		return nil, nil
-	}
-
-	var warning *model.DispatchBudgetWarning
-	if taskWarning, taskBlocked := checkTaskBudget(task, requestedUSD); taskBlocked != nil {
-		return nil, s.blockedResultWithGuardrail(ctx, task, taskBlocked.Reason, model.DispatchGuardrailTypeBudget, "task")
-	} else if taskWarning != nil {
-		warning = taskWarning
-	}
-
-	if s.budgetChecker == nil {
+	warning, blocked := evaluateDispatchBudget(ctx, task, requestedUSD, s.budgetChecker)
+	if blocked == nil {
 		return warning, nil
 	}
-	result, err := s.budgetChecker.CheckBudget(ctx, task.ProjectID, task.SprintID, requestedUSD)
-	if err != nil || result == nil {
-		return warning, nil
-	}
-	scope := strings.TrimSpace(result.Scope)
-	if !result.Allowed {
-		if scope == "" {
-			scope = inferBudgetScope(result.Reason)
-		}
-		return nil, s.blockedResultWithGuardrail(ctx, task, result.Reason, model.DispatchGuardrailTypeBudget, scope)
-	}
-	if result.Warning {
-		if scope == "" {
-			scope = inferBudgetScope(result.WarningMessage)
-		}
-		return &model.DispatchBudgetWarning{
-			Scope:   scope,
-			Message: result.WarningMessage,
-		}, nil
-	}
-	return warning, nil
+	return nil, s.blockedResultWithGuardrail(ctx, task, blocked.Reason, blocked.GuardrailType, blocked.GuardrailScope)
 }
 
 func checkTaskBudget(task *model.Task, requestedUSD float64) (*model.DispatchBudgetWarning, *model.DispatchOutcome) {
@@ -559,4 +571,44 @@ func (s *TaskDispatchService) recordProgress(ctx context.Context, taskID uuid.UU
 
 func dtoPtr(dto model.AgentRunDTO) *model.AgentRunDTO {
 	return &dto
+}
+
+func dispatchOutcomeContextFromInput(input DispatchSpawnInput) model.DispatchOutcome {
+	return model.DispatchOutcome{
+		Runtime:  strings.TrimSpace(input.Runtime),
+		Provider: strings.TrimSpace(input.Provider),
+		Model:    strings.TrimSpace(input.Model),
+		RoleID:   strings.TrimSpace(input.RoleID),
+	}
+}
+
+func applyDispatchOutcomeContext(outcome model.DispatchOutcome, context model.DispatchOutcome) model.DispatchOutcome {
+	if outcome.Runtime == "" {
+		outcome.Runtime = context.Runtime
+	}
+	if outcome.Provider == "" {
+		outcome.Provider = context.Provider
+	}
+	if outcome.Model == "" {
+		outcome.Model = context.Model
+	}
+	if outcome.RoleID == "" {
+		outcome.RoleID = context.RoleID
+	}
+	return outcome
+}
+
+func queueEntryIDFromDispatch(dispatch model.DispatchOutcome) string {
+	if dispatch.Queue == nil {
+		return ""
+	}
+	return strings.TrimSpace(dispatch.Queue.EntryID)
+}
+
+func queuePriorityFromDispatch(dispatch model.DispatchOutcome) *int {
+	if dispatch.Queue == nil {
+		return nil
+	}
+	priority := dispatch.Queue.Priority
+	return &priority
 }

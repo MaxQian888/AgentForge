@@ -264,6 +264,97 @@ func TestProjectHandler_UpdateFallsBackToDefaultCatalogWhenBridgeUnavailable(t *
 	}
 }
 
+func TestProjectHandler_GetFallsBackFromUnavailableCLISelection(t *testing.T) {
+	projectID := uuid.New()
+	repo := &mockProjectRepo{
+		projects: map[uuid.UUID]*model.Project{
+			projectID: {
+				ID:            projectID,
+				Name:          "AgentForge",
+				Slug:          "agentforge",
+				DefaultBranch: "main",
+				Settings:      `{"coding_agent":{"runtime":"iflow","provider":"iflow","model":"Qwen3-Coder"}}`,
+			},
+		},
+	}
+	client := &mockProjectRuntimeCatalogClient{
+		response: &bridge.RuntimeCatalogResponse{
+			DefaultRuntime: "codex",
+			Runtimes: []bridge.RuntimeCatalogEntryDTO{
+				{
+					Key:                 "iflow",
+					Label:               "iFlow CLI",
+					DefaultProvider:     "iflow",
+					CompatibleProviders: []string{"iflow"},
+					DefaultModel:        "Qwen3-Coder",
+					Available:           false,
+					Diagnostics: []bridge.RuntimeDiagnosticDTO{
+						{Code: "runtime_sunset", Message: "iFlow sunset", Blocking: true},
+					},
+				},
+				{
+					Key:                 "codex",
+					Label:               "Codex",
+					DefaultProvider:     "openai",
+					CompatibleProviders: []string{"openai"},
+					DefaultModel:        "gpt-5-codex",
+					Available:           true,
+				},
+			},
+		},
+	}
+
+	e := newProjectTestEcho()
+	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+projectID.String(), nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v1/projects/:id")
+	c.SetParamNames("id")
+	c.SetParamValues(projectID.String())
+
+	h := handler.NewProjectHandler(repo, client)
+	if err := h.Get(c); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+
+	var body model.ProjectDTO
+	if err := json.Unmarshal(rec.Body.Bytes(), &body); err != nil {
+		t.Fatalf("unmarshal response: %v", err)
+	}
+
+	if body.CodingAgentCatalog == nil {
+		t.Fatal("expected coding agent catalog")
+	}
+	if body.CodingAgentCatalog.DefaultSelection.Runtime != "codex" {
+		t.Fatalf("default selection = %+v, want codex fallback", body.CodingAgentCatalog.DefaultSelection)
+	}
+
+	var iflow *model.CodingAgentRuntimeOptionDTO
+	for i := range body.CodingAgentCatalog.Runtimes {
+		if body.CodingAgentCatalog.Runtimes[i].Runtime == "iflow" {
+			iflow = &body.CodingAgentCatalog.Runtimes[i]
+			break
+		}
+	}
+	if iflow == nil {
+		t.Fatal("expected iflow runtime entry")
+	}
+	foundStaleSelection := false
+	for _, diagnostic := range iflow.Diagnostics {
+		if diagnostic.Code == "stale_default_selection" {
+			foundStaleSelection = true
+			break
+		}
+	}
+	if !foundStaleSelection {
+		t.Fatalf("iflow diagnostics = %+v, want stale_default_selection", iflow.Diagnostics)
+	}
+}
+
 func TestProjectHandler_CreateBootstrapsWikiSpace(t *testing.T) {
 	repo := &mockProjectRepo{}
 	client := &mockProjectRuntimeCatalogClient{}

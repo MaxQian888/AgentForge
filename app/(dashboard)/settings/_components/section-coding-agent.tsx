@@ -66,7 +66,9 @@ export function SectionCodingAgent({ draft, patchDraft, validationErrors, clearV
                 </SelectTrigger>
                 <SelectContent>
                   {runtimeOptions.map((o) => (
-                    <SelectItem key={o.runtime} value={o.runtime}>{o.label}</SelectItem>
+                    <SelectItem key={o.runtime} value={o.runtime} disabled={!o.available}>
+                      {o.label}
+                    </SelectItem>
                   ))}
                 </SelectContent>
               </Select>

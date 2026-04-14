@@ -63,8 +63,17 @@ func TestLive_NormalizeInboundMessagePreservesReplyTargetContext(t *testing.T) {
 	if message.ReplyTarget.SessionWebhook != "https://work.weixin.qq.com/response" {
 		t.Fatalf("SessionWebhook = %q", message.ReplyTarget.SessionWebhook)
 	}
+	if message.ReplyTarget.ResponseURL != "https://work.weixin.qq.com/response" {
+		t.Fatalf("ResponseURL = %q", message.ReplyTarget.ResponseURL)
+	}
 	if message.ReplyTarget.ChatID != "chat-1" {
 		t.Fatalf("ChatID = %q", message.ReplyTarget.ChatID)
+	}
+	if message.ReplyTarget.ConversationID != "chat-1" {
+		t.Fatalf("ConversationID = %q", message.ReplyTarget.ConversationID)
+	}
+	if message.ReplyTarget.ProgressMode != string(core.AsyncUpdateSessionWebhook) {
+		t.Fatalf("ProgressMode = %q", message.ReplyTarget.ProgressMode)
 	}
 	if !message.ReplyTarget.UseReply {
 		t.Fatalf("ReplyTarget = %+v", message.ReplyTarget)

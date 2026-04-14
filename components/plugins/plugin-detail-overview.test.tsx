@@ -54,6 +54,10 @@ const plugin: PluginRecord = {
     official: true,
     docsRef: "docs/GO_WASM_PLUGIN_RUNTIME.md",
     verificationProfile: "go-wasm",
+    starterFamily: "core-starter",
+    coreFlows: ["task-delivery", "review-automation"],
+    dependencyRefs: ["runtime:go-workflow", "role:code-reviewer"],
+    workspaceRefs: ["workspace:workflow", "workspace:reviews"],
     availabilityStatus: "requires_configuration",
     availabilityMessage: "Built-in plugin requires configuration before activation can succeed.",
     readinessStatus: "requires_configuration",
@@ -88,6 +92,10 @@ describe("PluginDetailOverview", () => {
     expect(screen.getByText("Built-in plugin requires configuration before activation can succeed.")).toBeInTheDocument();
     expect(screen.getByText("Next step: Set FEISHU_APP_ID and FEISHU_APP_SECRET before activation.")).toBeInTheDocument();
     expect(screen.getByText("Missing configuration: FEISHU_APP_ID, FEISHU_APP_SECRET")).toBeInTheDocument();
+    expect(screen.getByText("Starter family: core-starter")).toBeInTheDocument();
+    expect(screen.getByText("Core flows: task-delivery, review-automation")).toBeInTheDocument();
+    expect(screen.getByText("Dependencies: runtime:go-workflow, role:code-reviewer")).toBeInTheDocument();
+    expect(screen.getByText("Workspaces: workspace:workflow, workspace:reviews")).toBeInTheDocument();
   });
 
   it("renders marketplace provenance and a deep-link back to the marketplace workspace", () => {

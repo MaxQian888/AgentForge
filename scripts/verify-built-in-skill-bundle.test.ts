@@ -25,6 +25,19 @@ describe("verify-built-in-skill-bundle", () => {
   test("flags missing skill package files before the marketplace surface can drift", async () => {
     const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-skill-builtins-"));
     fs.mkdirSync(path.join(repoRoot, "skills"), { recursive: true });
+    fs.mkdirSync(path.join(repoRoot, "skills", "react"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoRoot, "internal-skills.yaml"),
+      [
+        "version: 1",
+        "skills:",
+        "  - id: react",
+        "    family: built-in-runtime",
+        "    verificationProfile: built-in-runtime",
+        "    canonicalRoot: skills/react",
+        "    sourceType: repo-authored",
+      ].join("\n"),
+    );
     fs.writeFileSync(
       path.join(repoRoot, "skills", "builtin-bundle.yaml"),
       [
@@ -52,6 +65,18 @@ describe("verify-built-in-skill-bundle", () => {
     const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-skill-builtins-"));
     const skillDir = path.join(repoRoot, "skills", "react");
     fs.mkdirSync(path.join(skillDir, "agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoRoot, "internal-skills.yaml"),
+      [
+        "version: 1",
+        "skills:",
+        "  - id: react",
+        "    family: built-in-runtime",
+        "    verificationProfile: built-in-runtime",
+        "    canonicalRoot: skills/react",
+        "    sourceType: repo-authored",
+      ].join("\n"),
+    );
     fs.writeFileSync(
       path.join(repoRoot, "skills", "builtin-bundle.yaml"),
       [
@@ -92,6 +117,54 @@ describe("verify-built-in-skill-bundle", () => {
         ok: true,
         skills: ["react"],
       }),
+    );
+  });
+
+  test("fails when built-in bundle entries are not covered by internal skill governance", async () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-skill-builtins-"));
+    const skillDir = path.join(repoRoot, "skills", "react");
+    fs.mkdirSync(path.join(skillDir, "agents"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoRoot, "skills", "builtin-bundle.yaml"),
+      [
+        "skills:",
+        "  - id: react",
+        "    root: react",
+        "    category: frontend",
+        "    tags:",
+        "      - react",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(skillDir, "SKILL.md"),
+      [
+        "---",
+        "name: React",
+        "description: Build React surfaces.",
+        "---",
+        "",
+        "# React",
+      ].join("\n"),
+    );
+    fs.writeFileSync(
+      path.join(skillDir, "agents", "openai.yaml"),
+      [
+        "interface:",
+        '  display_name: "AgentForge React"',
+      ].join("\n"),
+    );
+
+    const { runBuiltInSkillBundleVerification } = await loadBundleModule();
+
+    const result = runBuiltInSkillBundleVerification({ repoRoot });
+    expect(result.ok).toBe(false);
+    if (result.ok || !result.failures) {
+      throw new Error("expected built-in governance verification to fail");
+    }
+    expect(result.failures[0]?.issues).toEqual(
+      expect.arrayContaining([
+        expect.stringContaining("internal skill governance"),
+      ]),
     );
   });
 });

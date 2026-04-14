@@ -4,123 +4,63 @@
 Define how TS Bridge events are forwarded through the Go backend to IM platforms with ordered, preference-aware delivery.
 ## Requirements
 ### Requirement: Budget alerts forwarded to IM platforms
-TS Bridge SHALL forward `budget_alert` events to Go backend, which then forwards them to IM platforms based on user preferences and budget thresholds, and alert frequency.
+The system SHALL treat budget alerts as canonical forwarded runtime events whether they originate in TS Bridge or are synthesized by Go from the same agent-budget threshold transition. When a budget alert belongs to an IM-originated run with preserved reply-target lineage, the backend MUST return the alert through that bound IM context. When no bound reply target is available, the backend SHALL resolve delivery through authoritative channel/event routing or an explicit compatibility fallback. Routing filters and preference metadata MUST be able to suppress delivery without pretending the underlying alert never occurred.
 
-#### Scenario: Budget alert with default thresholds
-- **WHEN** Bridge emits `budget_alert` with default thresholds (80%, 90%, 100%)
-- **then** go backend checks user preferences, finds default thresholds acceptable
-    - Go backend forwards to all IM platforms
-    - if enabled, send alert to users subscribed to task
-    - otherwise, log and alert without sending
- notification
-  - If disabled, send "Budget alerts disabled for this task" message
+#### Scenario: Bound budget alert returns to the originating IM conversation
+- **WHEN** a running IM-originated agent crosses the budget warning threshold
+- **AND** the run has a preserved reply target bound to its originating bridge conversation
+- **THEN** the backend queues the budget alert back to that same bound IM context through the control plane
+- **AND** the forwarded delivery preserves budget-related event metadata for diagnostics and preference filtering
 
-#### Scenario: Budget alert with frequency limit
-- **WHEN** user sets frequency limit to 3 alerts per day
-- **then** Bridge emits `budget_alert` with frequency limit of 3 alerts per day
-    - if user preferences don't limit, alert, - **then** IM Bridge sends "Budget alerts temporarily disabled for this task" message
-    - otherwise, send critical alert with links to adjust budget
-- **then** if frequency still 3/day, IM Bridge sends critical alert to user
- in DM immediately
-      - IM Bridge replies: "⚠️ Budget alert: 3 alerts per day threshold reached. Consider pausing agent or adjusting budget."
-"
+#### Scenario: Unbound budget alert routes through configured channel subscriptions
+- **WHEN** a budget alert is emitted for work that has no bound IM reply target
+- **AND** an active IM channel subscribes to the corresponding budget warning event type
+- **THEN** the backend routes the alert to the subscribed channel through the canonical IM delivery pipeline
+- **AND** it does not fabricate watcher-specific delivery to an unrelated IM destination
 
 ### Requirement: Agent status changes forwarded to IM for operational visibility
-TS Bridge SHALL forward `agent_status_change` events to Go backend, which then forwards them to IM platforms for real-time status updates for#### Scenario: Agent started successfully
-- **WHEN** Bridge emits `agent_status_change` event with `{ old_status: "starting", new_status: "running" }` for task "task-123", runtime: "claude_code" }`
-- **then** bridge calls `POST http://localhost:7778/ws/bridge` to`forward toGo backend WebSocket
- - **then** go backend determines task watchers ( from subscriptions
-    - if watchers exist, forward to their IM clients
-      - IM Bridge sends notification: "🚀 Agent started\n - **then** IM Bridge updates message with agent status card
- - **if no watchers, just update task status in database
-- **then** IM Bridge logs the change for monitoring
+The system SHALL forward agent status changes through Go backend mediation using authoritative routing sources instead of implicit watcher fan-out. If the affected run has a bound IM reply target, the status change MUST be delivered back to that same conversation or interaction context in order. If no bound reply target exists, the backend MUST still update orchestration state and MAY emit a channel-scoped IM delivery only when another configured routing source explicitly applies.
 
- - **then** IM Bridge replies with confirmation
+#### Scenario: Bound status change updates the same conversation
+- **WHEN** TS Bridge emits `status_change` from `running` to `paused` for an IM-originated run
+- **AND** the run has a preserved reply target bound to the originating bridge conversation
+- **THEN** the backend forwards the paused update to that same IM conversation in order
+- **AND** the delivery does not require the backend to rediscover a watcher list
 
-#### Scenario: Agent paused successfully
-- **WHEN** Bridge emits `agent_status_change` event with `{ old_status: "running", new_status: "paused" }` for task "task-123", runtime: "claude_code" }
-`
-- **then** bridge calls `POST http://localhost:7778/ws/bridge` to forward to Go backend
-    - Go backend updates task status in database to `paused`
-    - Go backend determines task watchers from subscriptions
-      - If watchers exist, forward to their IM clients
-        - IM Bridge sends notification: "⏸ Agent paused"
-    - **then** IM Bridge logs status change in task timeline
-    - **if no watchers, just log "No watchers" (won't spam)
- - **then** IM Bridge replies with "Agent paused (no watchers)"
-
-#### Scenario: Agent failed
-- **WHEN** Bridge emits `agent_status_change` event with `{ old_status: "running", new_status: "failed" }` for task "task-123", runtime: "claude_code" }`
-- **then** bridge calls `POST http://localhost:7778/ws/bridge` to forward to Go backend
-    - Go backend updates task status to `failed` in database
-    - Go backend marks task as degraded (not subscribed to IM)
-    - IM Bridge sends notification: "❌ Agent failed"
-      - Error details available
-    - **if watchers exist**, suggest creating follow-up task from findings
-
-      - IM Bridge replies with "Agent failed" and action buttons
-
-#### Scenario: Agent completed successfully
-- **WHEN** Bridge emits `agent_status_change` event with `{ old_status: "running", new_status: "completed" }` for task "task-123", runtime: "claude_code" }`
-- **then** bridge calls `POST http://localhost:7778/ws/bridge` to forward to Go backend
-    - Go backend updates task status in database to `completed`
-    - Go backend removes task from IM subscriber list
-    - **if watchers exist**, forward to their IM clients
-      - IM Bridge sends notification: "✅ Agent completed"
-    - **then** IM Bridge logs completion in task timeline
-    - **if watchers exist**, forward to agent-spawned subtasks
-      - IM Bridge replies with "Agent completed successfully"
+#### Scenario: Unbound status change does not invent IM delivery
+- **WHEN** TS Bridge emits `status_change` for a run that has no bound IM reply target
+- **AND** no configured channel routing rule applies to that event
+- **THEN** the backend still records the orchestration state transition and websocket-visible status change
+- **AND** it does not fabricate a synthetic IM watcher delivery just to satisfy the forwarding path
 
 ### Requirement: Event ordering guarantees delivery
-Go backend and IM notification system SHALL preserve event ordering when forwarding events from Bridge to IM platforms.
+Go backend and the IM control plane SHALL preserve enqueue order for forwarded events that belong to the same bound entity or delivery stream. Permission requests, status changes, terminal updates, and replayed deliveries MUST remain causally ordered for the same task or run instead of being reordered by ad hoc batching.
 
-#### Scenario: Permission request delivered before agent request event
-- **WHEN** bridge emits `permission_request` then agent status change events
-- **THEN** Go backend forwards permission request to IM platforms
-- **Bircuit:**
- events should be processed in order:
-  1. Deduplicate similar events from different providers
-  2. Avoid event loss by removing duplicate fields
-  3. Use consistent event type mapping across both system
+#### Scenario: Permission request is delivered before a later paused status
+- **WHEN** TS Bridge emits `permission_request`
+- **AND** then emits a later `status_change` to `paused` for the same run
+- **THEN** the backend enqueues the permission request before the paused status for that bound IM context
+- **AND** IM Bridge receives those deliveries in the same order
 
-#### Scenario: Permission request and status change events
-- **WHEN** Bridge emits `permission_request`, then `status_change` event to `paused`
- state
-    - **then** bridge emits `permission_request` event again with updated status `paused`
- (permission request now pending)
-    - **then** IM Bridge receives both events in order: permission request first, status change event second
- then bridge's final state
-
-#### Scenario: Agent status change events processed quickly
-- **WHEN** Bridge emits multiple rapid `agent_status_change` events in succession
-    - **then** go backend processes and event in sequence and preserves ordering
-    - **then** go backend forwards to IM platforms in batch
-    - **then** IM clients receive and display the updates in real-time
-
-#### Scenario: High-priority budget alert skips agent status updates
-- **WHEN** user configures budget alerts as high priority for agent status updates
-- **then** bridge sends budget alert before of agent status updates
-    - **then** go backend processes agent status update and budget alert before forwarding to IM
-    - **then** IM Bridge receives the budget alert first, then forwards the agent status update
+#### Scenario: Replayed deliveries preserve cursor order after reconnect
+- **WHEN** an IM Bridge reconnects and requests replay for queued forwarded events
+- **THEN** the control plane replays those pending deliveries in cursor order for that bridge instance
+- **AND** the bridge does not receive a later terminal event ahead of an earlier permission or progress event from the same queue
 
 ### Requirement: Event forwarding respects user notification preferences
-The user's preferences for IM platform (via Go backend) SHALL determine which Bridge events are forwarded to IM platforms and how they are formatted.
+The system SHALL honor authoritative forwarding preferences encoded in runtime routing metadata. For bound flows this includes reply-target metadata such as `bridge_event_enabled.<type>`; for channel-scoped flows this includes configured channel event subscriptions. A suppressed delivery MUST remain truthful in delivery history or diagnostics instead of being silently rerouted to an unrelated target.
 
-#### Scenario: User enables detailed budget alerts
-- **WHEN** user preferences show detailed budget alerts
-    - **and** go backend has user preferences for a `budget_alerts.detailed` flag set to true
-    - Bridge forwards detailed budget alert to IM
-  - **then** IM Bridge displays detailed alert with breakdown by budget percentage, current usage, and trend analysis
+#### Scenario: Bound preference disables permission request delivery
+- **WHEN** a bound IM reply target contains `bridge_event_enabled.permission_request = false`
+- **AND** the backend receives a forwarded permission request event for that same bound run
+- **THEN** the backend suppresses IM delivery for that event type
+- **AND** the resulting diagnostics remain truthful about the suppressed forwarding decision
 
-#### Scenario: User disables specific event types
-- **WHEN** user preferences have `budget_alerts.enabled` set to false for some event types
-  - **then** go backend filters out budget alerts from forwarding logic
-  - **then** those event types are not forwarded to IM
-
-#### Scenario: User customizes notification format per event type
-- **WHEN** user preferences have custom notification format for permission requests
-  - **then** go backend uses user's custom format for permission request notifications
-  - **then** IM Bridge receives and displays custom-formatted permission request
+#### Scenario: Missing channel subscription suppresses broadcast forwarding
+- **WHEN** the backend emits a channel-scoped runtime event such as a budget warning
+- **AND** no active configured channel subscribes to that event type
+- **THEN** the event is not delivered to unrelated channels
+- **AND** only an explicit compatibility fallback may send it elsewhere
 
 ### Requirement: Go backend provides event forwarding configuration
 The Go backend SHALL provide configuration for which Bridge event types to forward to IM platforms, default timeout, and format mappings per event type.
@@ -137,3 +77,4 @@ The Go backend SHALL provide configuration for which Bridge event types to forwa
 - **WHEN** admin configures custom event types to forward (e.g., `mcp_server_added`, `plugin_crashed`)
   - **THEN** Go backend adds these event types to forwarding configuration
   - **THEN** Bridge events of these new types are forwarded to IM with appropriate formatting
+

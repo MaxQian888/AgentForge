@@ -115,6 +115,7 @@ Each runtime entry can include diagnostics such as:
 
 - missing credentials
 - missing executables
+- sunset-window or runtime-sunset notices
 - incompatible provider/runtime combinations
 
 The runtime tuple is:
@@ -122,6 +123,16 @@ The runtime tuple is:
 - `runtime`
 - `provider`
 - `model`
+
+The catalog can also include:
+
+- `interactionCapabilities`
+- `launchContract`
+- `lifecycle`
+
+For CLI-backed runtimes, these fields let the frontend distinguish documented
+headless launch semantics, supported approval modes, additional-directory
+support, and deprecation or migration guidance before launch.
 
 ## Bridge Tool Management
 

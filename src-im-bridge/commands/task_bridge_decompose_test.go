@@ -166,7 +166,63 @@ func TestTaskCommand_DecomposeFailureAfterBridgeAndFallbackExplainsNoSubtasksCre
 	if len(platform.replies) != 2 {
 		t.Fatalf("replies = %v", platform.replies)
 	}
+	if !strings.Contains(platform.replies[1], "Bridge unavailable") {
+		t.Fatalf("reply = %q", platform.replies[1])
+	}
 	if !strings.Contains(platform.replies[1], "未创建任何子任务") {
+		t.Fatalf("reply = %q", platform.replies[1])
+	}
+}
+
+func TestTaskCommand_DecomposeFallbackLabelsRuntimeNotReadyWhenBridgeCannotExecute(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		switch r.URL.Path {
+		case "/api/v1/tasks/task-123":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"id":          "task-123",
+				"projectId":   "proj",
+				"title":       "Bridge decomposition",
+				"description": "Break bridge work down",
+				"status":      "triaged",
+				"priority":    "high",
+			})
+		case "/api/v1/ai/decompose":
+			http.Error(w, `{"message":"runtime not ready: missing executable"}`, http.StatusServiceUnavailable)
+		case "/api/v1/tasks/task-123/decompose":
+			_ = json.NewEncoder(w).Encode(map[string]any{
+				"parentTask": map[string]any{
+					"id":        "task-123",
+					"projectId": "proj",
+					"title":     "Bridge decomposition",
+					"status":    "triaged",
+					"priority":  "high",
+				},
+				"summary": "legacy fallback summary",
+				"subtasks": []map[string]any{
+					{"id": "child-1", "title": "legacy subtask", "status": "inbox", "priority": "high"},
+				},
+			})
+		default:
+			t.Fatalf("unexpected path = %s", r.URL.Path)
+		}
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task decompose task-123",
+	})
+
+	if len(platform.replies) != 2 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[1], "Using fallback (Runtime not ready)") {
 		t.Fatalf("reply = %q", platform.replies[1])
 	}
 }

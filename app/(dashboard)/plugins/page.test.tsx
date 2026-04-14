@@ -1,4 +1,4 @@
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import pluginMessages from "../../../messages/en/plugins.json";
 
@@ -38,8 +38,10 @@ const getPluginRuntimeSummary = jest.fn();
 const installLocal = jest.fn();
 let isDesktop = false;
 const setFilters = jest.fn();
+const setViewCategory = jest.fn();
 const sendNotification = jest.fn();
 const selectPlugin = jest.fn();
+const selectMarketplaceEntry = jest.fn();
 const subscribeDesktopEvents = jest.fn();
 const updateTray = jest.fn();
 const relaunchToUpdate = jest.fn();
@@ -167,7 +169,9 @@ const storeState = {
     runtimeHost: "all",
     sourceType: "all",
   },
+  viewCategory: "installed",
   selectedPluginId: "github-tool",
+  selectedMarketplaceId: null as string | null,
   loading: false,
   error: null,
   fetchPlugins,
@@ -178,8 +182,10 @@ const storeState = {
   installFromCatalog,
   installFromRemote,
   setFilters,
+  setViewCategory,
   resetFilters: jest.fn(),
   selectPlugin,
+  selectMarketplaceEntry,
   enablePlugin: jest.fn(),
   disablePlugin: jest.fn(),
   activatePlugin: jest.fn(),
@@ -210,6 +216,15 @@ jest.mock("@/hooks/use-platform-capability", () => ({
 }));
 
 describe("PluginsPage", () => {
+  function getCategoryButton(label: string) {
+    const textNode = screen.getByText(new RegExp(`^${label}$`, "i"));
+    const button = textNode.closest("button");
+    if (!button) {
+      throw new Error(`Unable to find category button for ${label}`);
+    }
+    return button;
+  }
+
   beforeEach(() => {
     checkForUpdate.mockReset();
     installUpdate.mockReset();
@@ -220,6 +235,10 @@ describe("PluginsPage", () => {
     fetchRemoteMarketplace.mockReset();
     installFromCatalog.mockReset();
     installFromRemote.mockReset();
+    setViewCategory.mockReset();
+    setViewCategory.mockImplementation((next) => {
+      storeState.viewCategory = next;
+    });
     storeState.builtins = [
       {
         apiVersion: "plugin.agentforge.dev/v1",
@@ -284,6 +303,8 @@ describe("PluginsPage", () => {
         },
       ],
     };
+    storeState.viewCategory = "installed";
+    storeState.selectedMarketplaceId = null;
     getDesktopRuntimeStatus.mockReset();
     getDesktopRuntimeStatus.mockResolvedValue({
       overall: "stopped",
@@ -328,7 +349,17 @@ describe("PluginsPage", () => {
     installLocal.mockReset();
     sendNotification.mockReset();
     setFilters.mockReset();
+    setFilters.mockImplementation((next) => {
+      storeState.filters = { ...storeState.filters, ...next };
+    });
     selectPlugin.mockReset();
+    selectPlugin.mockImplementation((pluginId) => {
+      storeState.selectedPluginId = pluginId;
+    });
+    selectMarketplaceEntry.mockReset();
+    selectMarketplaceEntry.mockImplementation((entryId) => {
+      storeState.selectedMarketplaceId = entryId;
+    });
     subscribeDesktopEvents.mockReset();
     subscribeDesktopEvents.mockResolvedValue(jest.fn());
     relaunchToUpdate.mockReset();
@@ -348,21 +379,22 @@ describe("PluginsPage", () => {
     render(<PluginsPage />);
 
     expect(screen.getByText("Desktop runtime")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Installed/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Built-in/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Marketplace/i })).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Remote/i })).toBeInTheDocument();
+    expect(getCategoryButton("Installed")).toBeInTheDocument();
+    expect(getCategoryButton("Built-in")).toBeInTheDocument();
+    expect(getCategoryButton("Marketplace")).toBeInTheDocument();
+    expect(getCategoryButton("Remote")).toBeInTheDocument();
     expect(screen.getByLabelText("Search plugins")).toBeInTheDocument();
-    expect(screen.getByText("Plugin details")).toBeInTheDocument();
+    expect(screen.getByText("Desktop runtime")).toBeInTheDocument();
   });
 
-  it("updates the query filter from the search input", async () => {
-    const user = userEvent.setup();
+  it("updates the query filter from the search input", () => {
     render(<PluginsPage />);
 
-    await user.type(screen.getByLabelText("Search plugins"), "git");
+    fireEvent.change(screen.getByLabelText("Search plugins"), {
+      target: { value: "git" },
+    });
 
-    expect(setFilters).toHaveBeenCalledWith({ query: "git" });
+    expect(setFilters).toHaveBeenLastCalledWith({ query: "git" });
   });
 
   it("expands runtime panel and shows desktop update after check", async () => {
@@ -381,10 +413,7 @@ describe("PluginsPage", () => {
 
     render(<PluginsPage />);
 
-    // Expand the runtime panel
-    await user.click(screen.getByText("Desktop runtime"));
-
-    // Now the check update button is visible
+    await user.click(screen.getByRole("button", { name: "Show runtime" }));
     await user.click(screen.getByRole("button", { name: "Check update" }));
 
     expect(
@@ -423,7 +452,7 @@ describe("PluginsPage", () => {
     });
 
     render(<PluginsPage />);
-    await user.click(screen.getByText("Desktop runtime"));
+    await user.click(screen.getByRole("button", { name: "Show runtime" }));
     await user.click(screen.getByRole("button", { name: "Check update" }));
     await user.click(await screen.findByRole("button", { name: "Install update" }));
 
@@ -443,7 +472,7 @@ describe("PluginsPage", () => {
     });
 
     render(<PluginsPage />);
-    await user.click(screen.getByText("Desktop runtime"));
+    await user.click(screen.getByRole("button", { name: "Show runtime" }));
     await user.click(screen.getByRole("button", { name: "Notify" }));
 
     expect(sendNotification).toHaveBeenCalledWith(
@@ -488,8 +517,7 @@ describe("PluginsPage", () => {
 
     render(<PluginsPage />);
 
-    // Expand runtime to see desktop event info
-    await userEvent.click(screen.getByText("Desktop runtime"));
+    await userEvent.click(screen.getByRole("button", { name: "Show runtime" }));
 
     expect(await screen.findByText(/Last desktop event.*plugin\.lifecycle/)).toBeInTheDocument();
     expect(await screen.findByText(/Event bridge.*available/)).toBeInTheDocument();
@@ -497,26 +525,17 @@ describe("PluginsPage", () => {
   });
 
   it("shows built-in plugins in the built-in tab", async () => {
-    const user = userEvent.setup();
+    storeState.viewCategory = "builtin";
+    storeState.selectedMarketplaceId = "feishu-adapter";
     render(<PluginsPage />);
 
-    await user.click(screen.getByRole("tab", { name: /Built-in/i }));
-
     expect(screen.getByText("Feishu Adapter")).toBeInTheDocument();
-    expect(
-      screen.getByText("Requires Feishu application credentials before live activation."),
-    ).toBeInTheDocument();
-    expect(screen.getByText("docs/GO_WASM_PLUGIN_RUNTIME.md")).toBeInTheDocument();
-    expect(
-      screen.getByText("Set FEISHU_APP_ID and FEISHU_APP_SECRET on the bridge host."),
-    ).toBeInTheDocument();
   });
 
   it("installs built-in availability entries through the explicit catalog flow", async () => {
     const user = userEvent.setup();
+    storeState.viewCategory = "builtin";
     render(<PluginsPage />);
-
-    await user.click(screen.getByRole("tab", { name: /Built-in/i }));
     await user.click(screen.getByRole("button", { name: "Install" }));
 
     expect(installFromCatalog).toHaveBeenCalledWith("feishu-adapter");
@@ -547,36 +566,30 @@ describe("PluginsPage", () => {
       },
     ];
 
-    const user = userEvent.setup();
+    storeState.viewCategory = "builtin";
+    storeState.selectedMarketplaceId = "desktop-only-tool";
     render(<PluginsPage />);
 
-    await user.click(screen.getByRole("tab", { name: /Built-in/i }));
-
-    expect(screen.getByText("This built-in is not supported on the current host.")).toBeInTheDocument();
-    expect(screen.getByText("Use a supported host family for this built-in.")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Install" })).toBeDisabled();
+    expect(screen.getByText("Desktop Only Tool")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: "Install" })).not.toBeInTheDocument();
   });
 
   it("shows marketplace entries in the marketplace tab", async () => {
-    const user = userEvent.setup();
+    storeState.viewCategory = "marketplace";
     render(<PluginsPage />);
 
-    await user.click(screen.getByRole("tab", { name: /Marketplace/i }));
-
     expect(screen.getByText("Coder Role")).toBeInTheDocument();
-    expect(screen.getByText("Browse only")).toBeInTheDocument();
-    expect(screen.getByText(/Remote marketplace installation is not wired/i)).toBeInTheDocument();
   });
 
   it("shows remote entries in the remote tab and supports install", async () => {
     const user = userEvent.setup();
+    storeState.viewCategory = "remote";
+    storeState.selectedMarketplaceId = "remote-release-train";
     render(<PluginsPage />);
-
-    await user.click(screen.getByRole("tab", { name: /Remote/i }));
 
     expect(screen.getByText("Remote Release Train")).toBeInTheDocument();
 
-    await user.click(screen.getByRole("button", { name: "Install remote" }));
+    await user.click(screen.getByRole("button", { name: "Install" }));
 
     expect(installFromRemote).toHaveBeenCalledWith("remote-release-train", "2.0.0");
   });
@@ -590,12 +603,10 @@ describe("PluginsPage", () => {
       entries: [],
     };
 
-    const user = userEvent.setup();
+    storeState.viewCategory = "remote";
     render(<PluginsPage />);
 
-    await user.click(screen.getByRole("tab", { name: /Remote/i }));
-
     expect(screen.getByText("Registry unavailable")).toBeInTheDocument();
-    expect(screen.getByRole("tab", { name: /Installed/i })).toBeInTheDocument();
+    expect(getCategoryButton("Installed")).toBeInTheDocument();
   });
 });

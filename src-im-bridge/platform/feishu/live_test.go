@@ -176,8 +176,9 @@ func TestLive_StartRoutesCardActionCallbackToActionHandler(t *testing.T) {
 	runner := &fakeEventRunner{}
 	sender := &fakeMessageClient{}
 	actions := &fakeFeishuActionHandler{}
+	updater := &fakeCardUpdater{}
 
-	live, err := NewLive("app-id", "app-secret", WithEventRunner(runner), WithMessageClient(sender))
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(runner), WithMessageClient(sender), WithCardUpdater(updater))
 	if err != nil {
 		t.Fatalf("NewLive error: %v", err)
 	}
@@ -241,6 +242,9 @@ func TestLive_StartRoutesCardActionCallbackToActionHandler(t *testing.T) {
 	}
 	if resp == nil || resp.Toast == nil || resp.Toast.Content != "Approved" {
 		t.Fatalf("callback response = %+v", resp)
+	}
+	if updater.callbackToken != "" || updater.message != nil {
+		t.Fatalf("delayed update should not run during synchronous callback ack, updater = %+v", updater)
 	}
 }
 

@@ -7,8 +7,8 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
-	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/bridge"
+	"github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
@@ -191,15 +191,19 @@ func projectCatalogFromBridge(
 			})
 		}
 		runtimes = append(runtimes, model.CodingAgentRuntimeOptionDTO{
-			Runtime:             runtime.Key,
-			Label:               runtime.Label,
-			DefaultProvider:     runtime.DefaultProvider,
-			CompatibleProviders: append([]string(nil), runtime.CompatibleProviders...),
-			DefaultModel:        runtime.DefaultModel,
-			ModelOptions:        append([]string(nil), runtime.ModelOptions...),
-			Available:           runtime.Available,
-			Diagnostics:         diagnostics,
-			SupportedFeatures:   append([]string(nil), runtime.SupportedFeatures...),
+			Runtime:                 runtime.Key,
+			Label:                   runtime.Label,
+			DefaultProvider:         runtime.DefaultProvider,
+			CompatibleProviders:     append([]string(nil), runtime.CompatibleProviders...),
+			DefaultModel:            runtime.DefaultModel,
+			ModelOptions:            append([]string(nil), runtime.ModelOptions...),
+			Available:               runtime.Available,
+			Diagnostics:             diagnostics,
+			SupportedFeatures:       append([]string(nil), runtime.SupportedFeatures...),
+			InteractionCapabilities: projectInteractionCapabilitiesFromBridge(runtime.InteractionCapabilities),
+			Providers:               projectProvidersFromBridge(runtime.Providers),
+			LaunchContract:          projectLaunchContractFromBridge(runtime.LaunchContract),
+			Lifecycle:               projectLifecycleFromBridge(runtime.Lifecycle),
 		})
 	}
 
@@ -208,9 +212,145 @@ func projectCatalogFromBridge(
 		defaultRuntime = model.DefaultCodingAgentRuntime
 	}
 
+	defaultSelection := selection
+	selectedIndex := -1
+	for i := range runtimes {
+		if runtimes[i].Runtime == selection.Runtime {
+			selectedIndex = i
+			break
+		}
+	}
+	isSelectionLaunchable := selectedIndex >= 0 && runtimes[selectedIndex].Available
+	if !isSelectionLaunchable {
+		if selectedIndex >= 0 {
+			runtimes[selectedIndex].Diagnostics = append(
+				runtimes[selectedIndex].Diagnostics,
+				model.CodingAgentDiagnosticDTO{
+					Code:     "stale_default_selection",
+					Message:  "Saved coding-agent default is unavailable; falling back to the next launchable runtime.",
+					Blocking: false,
+				},
+			)
+		}
+		if fallback := findFirstLaunchableRuntime(runtimes, defaultRuntime); fallback != nil {
+			defaultSelection = model.CodingAgentSelection{
+				Runtime:  fallback.Runtime,
+				Provider: fallback.DefaultProvider,
+				Model:    firstNonEmptyModel(fallback),
+			}
+			defaultRuntime = fallback.Runtime
+		}
+	}
+
 	return &model.CodingAgentCatalogDTO{
 		DefaultRuntime:   defaultRuntime,
-		DefaultSelection: selection,
+		DefaultSelection: defaultSelection,
 		Runtimes:         runtimes,
 	}
+}
+
+func projectInteractionCapabilitiesFromBridge(
+	raw bridge.RuntimeInteractionCapabilities,
+) model.CodingAgentInteractionCapabilitiesDTO {
+	if len(raw) == 0 {
+		return nil
+	}
+
+	result := make(model.CodingAgentInteractionCapabilitiesDTO, len(raw))
+	for category, group := range raw {
+		if len(group) == 0 {
+			continue
+		}
+		result[category] = make(map[string]model.CodingAgentCapabilityDescriptorDTO, len(group))
+		for key, descriptor := range group {
+			result[category][key] = model.CodingAgentCapabilityDescriptorDTO{
+				State:                 descriptor.State,
+				ReasonCode:            descriptor.ReasonCode,
+				Message:               descriptor.Message,
+				RequiresRequestFields: append([]string(nil), descriptor.RequiresRequestFields...),
+			}
+		}
+	}
+	return result
+}
+
+func projectProvidersFromBridge(
+	providers []bridge.RuntimeCatalogProviderDTO,
+) []model.CodingAgentProviderDTO {
+	if len(providers) == 0 {
+		return nil
+	}
+
+	result := make([]model.CodingAgentProviderDTO, 0, len(providers))
+	for _, provider := range providers {
+		result = append(result, model.CodingAgentProviderDTO{
+			Provider:     provider.Provider,
+			Connected:    provider.Connected,
+			DefaultModel: provider.DefaultModel,
+			ModelOptions: append([]string(nil), provider.ModelOptions...),
+			AuthRequired: provider.AuthRequired,
+			AuthMethods:  append([]string(nil), provider.AuthMethods...),
+		})
+	}
+	return result
+}
+
+func projectLaunchContractFromBridge(
+	raw *bridge.RuntimeLaunchContractDTO,
+) *model.CodingAgentLaunchContractDTO {
+	if raw == nil {
+		return nil
+	}
+	return &model.CodingAgentLaunchContractDTO{
+		PromptTransport:        raw.PromptTransport,
+		OutputMode:             raw.OutputMode,
+		SupportedOutputModes:   append([]string(nil), raw.SupportedOutputModes...),
+		SupportedApprovalModes: append([]string(nil), raw.SupportedApprovalModes...),
+		AdditionalDirectories:  raw.AdditionalDirectories,
+		EnvOverrides:           raw.EnvOverrides,
+	}
+}
+
+func projectLifecycleFromBridge(
+	raw *bridge.RuntimeLifecycleDTO,
+) *model.CodingAgentLifecycleDTO {
+	if raw == nil {
+		return nil
+	}
+	return &model.CodingAgentLifecycleDTO{
+		Stage:              raw.Stage,
+		SunsetAt:           raw.SunsetAt,
+		ReplacementRuntime: raw.ReplacementRuntime,
+		Message:            raw.Message,
+	}
+}
+
+func firstNonEmptyModel(runtime *model.CodingAgentRuntimeOptionDTO) string {
+	if runtime == nil {
+		return ""
+	}
+	if len(runtime.ModelOptions) > 0 && strings.TrimSpace(runtime.ModelOptions[0]) != "" {
+		return runtime.ModelOptions[0]
+	}
+	return runtime.DefaultModel
+}
+
+func findFirstLaunchableRuntime(
+	runtimes []model.CodingAgentRuntimeOptionDTO,
+	preferredRuntime string,
+) *model.CodingAgentRuntimeOptionDTO {
+	for i := range runtimes {
+		if runtimes[i].Runtime == preferredRuntime && runtimes[i].Available {
+			return &runtimes[i]
+		}
+	}
+	for i := range runtimes {
+		if runtimes[i].Available {
+			return &runtimes[i]
+		}
+	}
+	if len(runtimes) == 0 {
+		return nil
+	}
+	return &runtimes[0]
 }

@@ -32,7 +32,7 @@ var liveMetadata = core.NormalizeMetadata(core.PlatformMetadata{
 	},
 	Rendering: core.RenderingProfile{
 		DefaultTextFormat: core.TextFormatPlainText,
-		SupportedFormats:  []core.TextFormatMode{core.TextFormatPlainText},
+		SupportedFormats:  []core.TextFormatMode{core.TextFormatPlainText, core.TextFormatQQBotMD},
 		NativeSurfaces:    []string{core.NativeSurfaceQQBotMarkdown},
 		MaxTextLength:     2000,
 		SupportsSegments:  true,
@@ -372,12 +372,14 @@ func normalizeInboundPayload(payload webhookPayload) (*core.Message, error) {
 	isGroup := payload.Data.GroupOpenID != "" || strings.Contains(strings.ToUpper(eventType), "GROUP")
 
 	reply := &core.ReplyTarget{
-		Platform:  liveMetadata.Source,
-		ChatID:    chatID,
-		ChannelID: chatID,
-		MessageID: strings.TrimSpace(payload.Data.ID),
-		UserID:    userID,
-		UseReply:  true,
+		Platform:       liveMetadata.Source,
+		ChatID:         chatID,
+		ChannelID:      chatID,
+		ConversationID: chatID,
+		MessageID:      strings.TrimSpace(payload.Data.ID),
+		UserID:         userID,
+		UseReply:       true,
+		ProgressMode:   string(core.AsyncUpdateReply),
 		Metadata: map[string]string{
 			"event_type": eventType,
 			"scope":      map[bool]string{true: "group", false: "user"}[isGroup],

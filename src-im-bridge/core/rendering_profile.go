@@ -25,6 +25,7 @@ type RenderingProfile struct {
 	MaxTextLength             int               `json:"maxTextLength,omitempty"`
 	SupportsSegments          bool              `json:"supportsSegments,omitempty"`
 	StructuredSurface         StructuredSurface `json:"structuredSurface,omitempty"`
+	ReadinessTier             ReadinessTier     `json:"readinessTier,omitempty"`
 	UsesProviderOwnedBuilders bool              `json:"usesProviderOwnedBuilders,omitempty"`
 }
 
@@ -63,6 +64,9 @@ func normalizeRenderingProfile(profile RenderingProfile, defaults RenderingProfi
 	}
 	if profile.StructuredSurface == "" {
 		profile.StructuredSurface = defaults.StructuredSurface
+	}
+	if profile.ReadinessTier == "" {
+		profile.ReadinessTier = defaults.ReadinessTier
 	}
 	profile.UsesProviderOwnedBuilders = profile.UsesProviderOwnedBuilders || defaults.UsesProviderOwnedBuilders
 
@@ -115,6 +119,7 @@ func defaultRenderingProfileForSource(source string, capabilities PlatformCapabi
 		}
 		profile.MaxTextLength = 30000
 		profile.StructuredSurface = StructuredSurfaceCards
+		profile.ReadinessTier = ReadinessTierFullNativeLifecycle
 		profile.UsesProviderOwnedBuilders = true
 	case "telegram":
 		profile.DefaultTextFormat = TextFormatPlainText
@@ -148,11 +153,13 @@ func defaultRenderingProfileForSource(source string, capabilities PlatformCapabi
 		}
 		profile.MaxTextLength = 20000
 		profile.StructuredSurface = StructuredSurfaceActionCard
+		profile.ReadinessTier = ReadinessTierNativeSendWithFallback
 	case "qq":
 		profile.DefaultTextFormat = TextFormatPlainText
 		profile.SupportedFormats = []TextFormatMode{TextFormatPlainText}
 		profile.MaxTextLength = 4096
 		profile.StructuredSurface = StructuredSurfaceNone
+		profile.ReadinessTier = ReadinessTierTextFirst
 	case "qqbot":
 		profile.DefaultTextFormat = TextFormatPlainText
 		profile.SupportedFormats = []TextFormatMode{TextFormatPlainText, TextFormatQQBotMD}
@@ -161,6 +168,7 @@ func defaultRenderingProfileForSource(source string, capabilities PlatformCapabi
 		}
 		profile.MaxTextLength = 2000
 		profile.StructuredSurface = StructuredSurfaceNone
+		profile.ReadinessTier = ReadinessTierMarkdownFirst
 	case "wecom":
 		profile.DefaultTextFormat = TextFormatPlainText
 		profile.SupportedFormats = []TextFormatMode{TextFormatPlainText, TextFormatWeComMD}
@@ -169,6 +177,7 @@ func defaultRenderingProfileForSource(source string, capabilities PlatformCapabi
 		}
 		profile.MaxTextLength = 2000
 		profile.StructuredSurface = StructuredSurfaceNone
+		profile.ReadinessTier = ReadinessTierNativeSendWithFallback
 	case "email":
 		profile.DefaultTextFormat = TextFormatHTML
 		profile.SupportedFormats = []TextFormatMode{TextFormatHTML, TextFormatPlainText}

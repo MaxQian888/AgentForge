@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"strings"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -33,14 +34,19 @@ type StoreMemoryInput struct {
 
 type MemoryService struct {
 	repo MemoryRepository
+	now  func() time.Time
 }
 
 func NewMemoryService(repo MemoryRepository) *MemoryService {
-	return &MemoryService{repo: repo}
+	return &MemoryService{
+		repo: repo,
+		now:  func() time.Time { return time.Now().UTC() },
+	}
 }
 
 // Store creates a new memory entry.
 func (s *MemoryService) Store(ctx context.Context, input StoreMemoryInput) (*model.AgentMemory, error) {
+	now := s.now()
 	mem := &model.AgentMemory{
 		ID:             uuid.New(),
 		ProjectID:      input.ProjectID,
@@ -51,6 +57,8 @@ func (s *MemoryService) Store(ctx context.Context, input StoreMemoryInput) (*mod
 		Content:        input.Content,
 		Metadata:       input.Metadata,
 		RelevanceScore: input.RelevanceScore,
+		CreatedAt:      now,
+		UpdatedAt:      now,
 	}
 	if strings.TrimSpace(mem.Scope) == "" {
 		mem.Scope = model.MemoryScopeProject

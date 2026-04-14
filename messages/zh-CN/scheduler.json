@@ -12,7 +12,10 @@
     "disabled": "已禁用",
     "activeRuns": "活跃运行",
     "failed24h": "失败 (24h)",
-    "successRate24h": "成功率 (24h)"
+    "successRate24h": "成功率 (24h)",
+    "paused": "已暂停",
+    "queueDepth": "队列深度",
+    "avgDuration": "平均耗时"
   },
   "jobTable": {
     "colJob": "任务",
@@ -22,7 +25,8 @@
     "noJobs": "暂无已注册的调度任务。",
     "disabled": "已禁用",
     "na": "N/A",
-    "notScheduled": "未安排"
+    "notScheduled": "未安排",
+    "paused": "已暂停"
   },
   "jobDetail": {
     "runNow": "立即运行",
@@ -45,7 +49,18 @@
     "disableJobDesc": "这将停止 \"{name}\" 的自动执行。你仍可以手动触发。",
     "enableJobDesc": "这将按调度恢复 \"{name}\" 的自动执行：{schedule}。",
     "cancel": "取消",
-    "selectJob": "选择一个调度任务以查看详情和历史。"
+    "selectJob": "选择一个调度任务以查看详情和历史。",
+    "pause": "暂停",
+    "resume": "恢复",
+    "cancelRun": "取消运行",
+    "cleanupHistory": "清理历史",
+    "unsupportedActions": "当前不可执行的操作",
+    "controlState": "控制状态",
+    "executionMode": "执行模式",
+    "activeRun": "当前运行",
+    "upcomingRuns": "后续运行预览",
+    "configFields": "配置字段",
+    "configManagedByBackend": "由后端管理"
   },
   "runHistory": {
     "colStatus": "状态",
@@ -54,6 +69,11 @@
     "colDuration": "持续时间",
     "colSummary": "摘要",
     "colMetrics": "指标",
-    "noRuns": "此任务暂无运行历史记录。"
+    "noRuns": "此任务暂无运行历史记录。",
+    "filterStatus": "状态筛选",
+    "filterTrigger": "触发方式筛选",
+    "filterAll": "全部",
+    "applyFilters": "应用筛选",
+    "resetFilters": "重置筛选"
   }
 }

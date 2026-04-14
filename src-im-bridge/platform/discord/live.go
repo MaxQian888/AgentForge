@@ -909,7 +909,7 @@ func normalizeComponentAction(raw *interaction) (*notify.ActionRequest, error) {
 	}
 
 	customID := strings.TrimSpace(raw.Data.CustomID)
-	action, entityID, ok := core.ParseActionReference(customID)
+	action, entityID, actionMetadata, ok := core.ParseActionReferenceWithMetadata(customID)
 	if !ok {
 		return nil, errors.New("discord component interaction missing action reference")
 	}
@@ -927,6 +927,16 @@ func normalizeComponentAction(raw *interaction) (*notify.ActionRequest, error) {
 		PreferredRenderer:  string(liveMetadata.Capabilities.StructuredSurface),
 	}
 
+	metadata := compactMetadata(map[string]string{
+		"source":         "message_component",
+		"custom_id":      customID,
+		"component_type": fmt.Sprintf("%d", raw.Data.ComponentType),
+		"message_id":     valueOrEmpty(raw.Message, func(m *interactionMessage) string { return m.ID }),
+	})
+	for key, value := range actionMetadata {
+		metadata[key] = value
+	}
+
 	return &notify.ActionRequest{
 		Platform:    liveMetadata.Source,
 		Action:      action,
@@ -934,12 +944,7 @@ func normalizeComponentAction(raw *interaction) (*notify.ActionRequest, error) {
 		ChatID:      strings.TrimSpace(raw.ChannelID),
 		UserID:      strings.TrimSpace(user.ID),
 		ReplyTarget: replyTarget,
-		Metadata: compactMetadata(map[string]string{
-			"source":         "message_component",
-			"custom_id":      customID,
-			"component_type": fmt.Sprintf("%d", raw.Data.ComponentType),
-			"message_id":     valueOrEmpty(raw.Message, func(m *interactionMessage) string { return m.ID }),
-		}),
+		Metadata:    metadata,
 	}, nil
 }
 

@@ -6,6 +6,19 @@ The bridge now resolves providers through a local provider contract before start
 
 That descriptor now also carries provider rendering-profile metadata. Delivery paths resolve a rendering plan before transport execution, so formatting decisions, mutable-update rules, and provider-specific richer builders stay aligned across `/im/send`, `/im/notify`, `/im/action`, and replay.
 
+For Chinese platforms, the runtime truth now also exposes a readiness tier in both `/im/health` and bridge-registration metadata:
+
+- `full_native_lifecycle`: the provider can preserve callback context through synchronous acknowledgement and later native update flows
+- `native_send_with_fallback`: the provider can send richer/native payloads, but mutable-update parity is not claimed and explicit fallback remains part of the contract
+- `text_first`: the provider resolves richer requests into text or link-safe output first
+- `markdown_first`: the provider resolves richer requests into markdown/keyboard-safe output first, with explicit fallback when mutable update is requested
+
+Registration and health metadata for those providers also expose completion-mode truth through:
+
+- `capability_matrix.preferredAsyncUpdateMode`
+- `capability_matrix.fallbackAsyncUpdateMode`
+- bridge-registration metadata keys such as `preferred_async_update_mode` and `fallback_async_update_mode`
+
 ## Preferred Live Transport
 
 | Platform | Preferred transport | Required live credentials | Notes |
@@ -23,16 +36,16 @@ All platforms support `IM_TRANSPORT_MODE=stub` for local verification and `IM_TR
 
 ## Feature Matrix
 
-| Platform | Structured surface | Action callback mode | Reply target restored | Preferred async update path | Explicit downgrade |
-| --- | --- | --- | --- | --- | --- |
-| Feishu | interactive cards, JSON cards, template cards | card callback | chat id, message id, callback token | immediate toast/reply first, delayed native card update when available | reply/send fallback with explicit fallback reason when delayed update cannot be used; shared action completions use provider-owned richer text/card builders |
-| Slack | Block Kit | Socket Mode interactive payload | channel, thread, `response_url` | thread reply or `response_url` follow-up | plain text only if block rendering is unavailable |
-| DingTalk | ActionCard planned, text fallback active | Stream card callback | session webhook, conversation id, conversation type | session webhook first, direct send fallback | structured payloads are sent as explicit downgraded text today |
-| WeCom | card-compatible structured profile with text fallback | webhook callback payload | chat id, user id, `response_url` | `response_url` reply first, direct app send fallback | richer or mutable updates fall back to text when the current WeCom path cannot honor them |
-| QQ | text-first shared rendering | OneBot message event payload | group id, user id, message id | reply in the same chat using reply-segment compatible sends | structured payloads are sent as explicit downgraded text today |
-| QQ Bot | text-first shared rendering | webhook callback payload | group openid or user openid, `msg_id` | reply when `msg_id` exists, direct follow-up otherwise | structured payloads are sent as explicit downgraded text today |
-| Telegram | inline keyboard | callback query | chat id, message id, `message_thread_id` topic | reply or `editMessageText` depending on target | card-like payloads collapse to text plus inline keyboard; optional MarkdownV2 delivery escapes content first and oversized formatted updates fall back to segmented replies |
-| Discord | message components | `/interactions` component payload | channel id, interaction token, original response id | deferred ack, follow-up, original response patch | unsupported interaction types return explicit ephemeral failure |
+| Platform | Readiness tier | Structured surface | Action callback mode | Reply target restored | Preferred async update path | Explicit downgrade |
+| --- | --- | --- | --- | --- | --- | --- |
+| Feishu | `full_native_lifecycle` | interactive cards, JSON cards, template cards | card callback | chat id, message id, callback token | immediate toast/reply first, delayed native card update when available | reply/send fallback with explicit fallback reason when delayed update cannot be used; shared action completions use provider-owned richer text/card builders |
+| Slack | n/a | Block Kit | Socket Mode interactive payload | channel, thread, `response_url` | thread reply or `response_url` follow-up | plain text only if block rendering is unavailable |
+| DingTalk | `native_send_with_fallback` | ActionCard send with text fallback | Stream card callback | session webhook, conversation id, conversation type | session webhook first, direct send fallback | ActionCard or editable-update requests degrade explicitly when mutable update is unavailable |
+| WeCom | `native_send_with_fallback` | template-card/markdown-compatible richer send with text fallback | webhook callback payload | chat id, user id, `response_url` | `response_url` reply first, direct app send fallback | richer or mutable updates fall back to markdown/text when the current WeCom path cannot honor them |
+| QQ | `text_first` | text-first shared rendering | OneBot message event payload | group id, user id, message id | reply in the same chat using reply-segment compatible sends | structured, native, or mutable-update requests are sent as explicit downgraded text/link output |
+| QQ Bot | `markdown_first` | markdown/keyboard-first shared rendering | webhook callback payload | group openid or user openid, `msg_id` | reply when `msg_id` exists, direct follow-up otherwise | mutable-update or incompatible richer requests are sent as explicit downgraded text output |
+| Telegram | n/a | inline keyboard | callback query | chat id, message id, `message_thread_id` topic | reply or `editMessageText` depending on target | card-like payloads collapse to text plus inline keyboard; optional MarkdownV2 delivery escapes content first and oversized formatted updates fall back to segmented replies |
+| Discord | n/a | message components | `/interactions` component payload | channel id, interaction token, original response id | deferred ack, follow-up, original response patch | unsupported interaction types return explicit ephemeral failure |
 
 ## Control-Plane Prerequisites
 
@@ -57,6 +70,7 @@ Canonical delivery expectations:
 - `metadata.fallback_reason` and similar operator diagnostics must survive queueing, replay, and compatibility fallback
 - normalized `/im/action` callbacks now expect truthful backend states such as `started`, `completed`, `blocked`, or `failed`, rather than placeholder success text
 - when delivery metadata requests a supported formatted mode such as Telegram `text_format=markdown_v2`, the provider renderer applies escaping and transport-specific limits before issuing `sendMessage` or `editMessageText`
+- compat send, compat notify, action results, bound progress, and replayed deliveries preserve provider completion hints through `reply_target_*` metadata such as `reply_target_progress_mode`, `reply_target_session_webhook`, `reply_target_response_url`, and `reply_target_conversation_id`
 
 Bridge event-forwarding preferences can also be expressed through bound
 `replyTarget.metadata` values. Current per-event keys follow the form:
@@ -78,7 +92,7 @@ delivery history truthful.
 5. For WeCom, expose the configured callback endpoint and verify the callback token/path match the live deployment.
 6. For QQ, verify the OneBot websocket connects cleanly and the bridge can receive one inbound command plus one outbound send action before promotion.
 7. For QQ Bot, expose the configured callback endpoint and verify the OpenAPI text-send path can deliver one group or user follow-up before promotion.
-8. Start the bridge and confirm `/im/health` reports the expected `platform`, normalized `source`, and capability matrix fields.
+8. Start the bridge and confirm `/im/health` reports the expected `platform`, normalized `source`, `readiness_tier`, and capability matrix fields.
 9. Run a command path, a native action path, a control-plane replay path, and a notification path before promoting the deployment.
 10. For Feishu, verify both JSON-card and template-card notifications if the deployment depends on richer card payloads.
 11. For Telegram, verify one `text_format=markdown_v2` delivery and one oversized formatted completion so the segmented fallback path is exercised explicitly.
@@ -92,7 +106,7 @@ delivery history truthful.
 - If WeCom callback delivery fails, verify the exposed callback URL, callback token, and direct-send credentials before falling back to stub mode for diagnosis.
 - If QQ websocket delivery fails, verify the OneBot websocket URL, access token, and upstream adapter availability before falling back to stub mode for diagnosis.
 - If QQ Bot callback delivery fails, verify the exposed callback URL, app credentials, and OpenAPI reachability before falling back to stub mode for diagnosis.
-- If DingTalk users need structured controls before ActionCard send is promoted, do not fake parity; keep the current explicit text downgrade and document the missing card-send step in rollout notes.
+- If DingTalk users need mutable card updates or richer lifecycle parity beyond the current `native_send_with_fallback` tier, do not fake parity; keep the explicit fallback behavior and document the missing capability in rollout notes.
 - If the new control-plane WebSocket path is unstable, keep the bridge registered but temporarily fall back to signed compatibility `POST /im/send` and `POST /im/notify` while investigating.
 - If duplicate notifications appear, verify the bridge still uses a stable `IM_BRIDGE_ID_FILE` and confirm `delivery_id` headers are preserved by any reverse proxy.
 
@@ -102,10 +116,10 @@ delivery history truthful.
 | --- | --- | --- | --- | --- | --- | --- |
 | Feishu | Bridge starts with `feishu-live`, registers a stable `bridge_id`, and `/im/health` source `feishu` | Send a message or mention to the app in a subscribed chat | Click a card button and confirm the callback reaches `/im/action` with message and callback metadata preserved | Confirm the card callback returns an immediate toast, and long-running work can later use the preserved callback token for delayed native card update | `POST /im/notify` with signed headers and `platform=feishu` can send JSON cards, template cards, builder-owned richer text cards, or fallback replies depending on reply-target context | `scripts/smoke/fixtures/feishu.json` |
 | Slack | Bridge logs `slack-live`, registers, and Socket Mode connects cleanly | Trigger `/queue list` or an app mention | Click a Block Kit button or submit a modal and confirm `/im/action` receives channel, thread, and `response_url` context | Confirm a threaded or `response_url` reply arrives after the Socket Mode ack | Matching Slack notification reaches the target channel, mismatched platform is rejected, replay stays in the original thread | `scripts/smoke/fixtures/slack.json` |
-| DingTalk | Bridge logs `dingtalk-live`, registers, and Stream intake starts | Send `/agent list` as the compatibility alias or `/agent status` in a chat using Stream mode | Trigger a card callback payload and confirm it normalizes into `/im/action` with session webhook or conversation context | Confirm callback results use session webhook first, then conversation-scoped fallback when webhook is absent | Structured notifications fall back to explicit text when rich send is unavailable and duplicate `delivery_id` values are suppressed | `scripts/smoke/fixtures/dingtalk.json` |
-| WeCom | Bridge starts with `wecom-live`, registers, and exposes the configured callback path | Post a callback payload or send a message through the configured WeCom bot/application path | Confirm the callback normalizes into shared commands with `wecom` source, chat id, user id, and `response_url` preserved | Confirm reply flows prefer `response_url`, while replayed or later notifications can fall back to direct app send when no callback reply is available | Matching WeCom notifications use provider-owned structured/text resolution and report explicit fallback when a richer update path is unavailable | `scripts/smoke/fixtures/wecom.json` |
-| QQ | Bridge starts with `qq-live`, registers, and connects to the configured OneBot websocket | Send `/memory search release` or `/help` through the OneBot-compatible QQ transport | Confirm the inbound message normalizes into shared commands with `qq` source, chat id, user id, and message id preserved | Confirm replies stay in the originating group or private chat and include reply-target-aware follow-up behavior when message context is available | Matching QQ notifications use text delivery and explicit fallback when a richer payload cannot be honored | `scripts/smoke/fixtures/qq.json` |
-| QQ Bot | Bridge starts with `qqbot-live`, registers, and exposes the configured callback path | Post a QQ Bot webhook payload for `/team list` or another group or direct message command | Confirm the callback normalizes into shared commands with `qqbot` source, group or user openid, and `msg_id` preserved | Confirm replies use preserved `msg_id` when present and later notifications can fall back to direct group or user sends through OpenAPI | Matching QQ Bot notifications use text delivery and explicit fallback when a richer payload cannot be honored | `scripts/smoke/fixtures/qqbot.json` |
+| DingTalk | Bridge logs `dingtalk-live`, registers, and `/im/health` reports readiness tier `native_send_with_fallback` | Send `/agent list` as the compatibility alias or `/agent status` in a chat using Stream mode | Trigger a card callback payload and confirm it normalizes into `/im/action` with session webhook or conversation context | Confirm callback results use session webhook first, then conversation-scoped fallback when webhook is absent; editable-update requests should report explicit fallback | Structured notifications fall back to explicit text when richer send/update is unavailable and duplicate `delivery_id` values are suppressed | `scripts/smoke/fixtures/dingtalk.json` |
+| WeCom | Bridge starts with `wecom-live`, registers, and `/im/health` reports readiness tier `native_send_with_fallback` | Post a callback payload or send a message through the configured WeCom bot/application path | Confirm the callback normalizes into shared commands with `wecom` source, chat id, user id, and `response_url` preserved | Confirm reply flows prefer `response_url`, while replayed or later notifications can fall back to direct app send when no callback reply is available; editable-update requests should report explicit fallback | Matching WeCom notifications use provider-owned structured/text resolution and report explicit fallback when a richer update path is unavailable | `scripts/smoke/fixtures/wecom.json` |
+| QQ | Bridge starts with `qq-live`, registers, and `/im/health` reports readiness tier `text_first` | Send `/memory search release` or `/help` through the OneBot-compatible QQ transport | Confirm the inbound message normalizes into shared commands with `qq` source, chat id, user id, and message id preserved | Confirm replies stay in the originating group or private chat and any request for editable/native update reports explicit fallback instead of claiming rich-card parity | Matching QQ notifications use text delivery and explicit fallback when a richer payload cannot be honored | `scripts/smoke/fixtures/qq.json` |
+| QQ Bot | Bridge starts with `qqbot-live`, registers, and `/im/health` reports readiness tier `markdown_first` | Post a QQ Bot webhook payload for `/team list` or another group or direct message command | Confirm the callback normalizes into shared commands with `qqbot` source, group or user openid, and `msg_id` preserved | Confirm replies use preserved `msg_id` when present, markdown/keyboard sends remain available when supported, and mutable-update requests fall back explicitly | Matching QQ Bot notifications use markdown/text delivery and explicit fallback when a richer payload cannot be honored | `scripts/smoke/fixtures/qqbot.json` |
 | Telegram | Bridge starts with `telegram-live`, registers, and no webhook env configured | Send `/memory search release` or `/help` to the bot while polling is running | Tap an inline keyboard button and confirm callback query metadata reaches `/im/action` | Confirm `answerCallbackQuery` clears the spinner and later completion edits or replies to the original message/topic; verify oversized formatted completion degrades to segmented replies | Matching Telegram notification sends plain text or inline keyboard to the configured chat id, and `text_format=markdown_v2` deliveries send escaped MarkdownV2 with `parse_mode` | `scripts/smoke/fixtures/telegram.json` |
 | Discord | Bridge starts with `discord-live`, registers, syncs commands, and listens on `/interactions` | Trigger `/agent status` or `/help` from a guild or DM | Click a message component and confirm `/im/action` receives `custom_id`, interaction token, and original response context | Confirm the deferred ack is immediate and later progress edits the original response or posts a follow-up as expected | Matching Discord notification sends a channel message using the bot token and replay does not duplicate the first ack | `scripts/smoke/fixtures/discord.json` |
 
@@ -134,7 +148,7 @@ Recommended focused verification after native interaction changes:
 ```powershell
 cd src-im-bridge
 go test ./platform/slack ./platform/feishu ./platform/telegram ./platform/discord ./platform/dingtalk ./platform/wecom ./platform/qq ./platform/qqbot -count=1
-go test ./core -run 'Test(ResolveReplyPlan_|DeliverText_|DeliverNative_|MetadataForPlatform_|StructuredMessageFallbackText|ReplyTarget_JSONRoundTrip|NativeMessage_)' -count=1
+go test ./core -run 'Test(ResolveReplyPlan_|DeliverText_|DeliverNative_|DeliverEnvelope_|MetadataForPlatform_|StructuredMessageFallbackText|ReplyTarget_JSONRoundTrip|NativeMessage_)' -count=1
 go test ./client -run 'Test(HandleIMAction_SendsCanonicalPayloadAndParsesReplyTarget|HandleIMAction_ParsesCanonicalActionOutcome|WithSource_NormalizesHeaderValue|WithPlatform_UsesTelegramMetadataSource|WithPlatform_UsesWeComMetadataSource|WithPlatform_UsesQQMetadataSource|WithPlatform_UsesQQBotMetadataSource)' -count=1
 go test ./notify -run 'TestReceiver_(ActionResponseUsesReplyTargetDelivery|HealthReportsNormalizedTelegramSourceAndCapabilities|HealthReportsNormalizedWeComSourceAndCapabilities|HealthReportsNormalizedQQSourceAndCapabilities|HealthReportsNormalizedQQBotSourceAndCapabilities|FallsBackToStructuredTextWhenNativeStructuredSenderUnavailable|PrefersNativePayloadWhenPlatformSupportsIt|UsesDeferredNativeUpdateWhenFeishuReplyTargetSupportsIt|ReportsFallbackReasonWhenDeferredUpdateContextMissing|SuppressesDuplicateSignedCompatibilityDelivery|RejectsUnsignedCompatibilityDeliveryWhenSecretConfigured)' -count=1
 go test ./cmd/bridge -run 'Test(ConfigurePlatformActionCallbacks_|SelectProvider_|SelectPlatform_|LookupPlatformDescriptor_|BridgeRuntimeControl_)' -count=1
@@ -154,6 +168,13 @@ For Feishu delayed-update validation, also confirm:
 1. A card action response returns within the callback window.
 2. A follow-on native update uses the preserved callback token when available.
 3. If the callback token is missing or unusable, `/im/notify` reports a `fallback_reason` instead of silently pretending the delayed update succeeded.
+
+For China-platform parity checks, also confirm:
+
+1. `/im/health` exposes the expected `readiness_tier` for Feishu, DingTalk, WeCom, QQ, and QQ Bot.
+2. Bridge registration metadata carries the same readiness tier plus matching preferred/fallback async update mode hints.
+3. `capability_matrix.readinessTier`, `capability_matrix.preferredAsyncUpdateMode`, and `capability_matrix.fallbackAsyncUpdateMode` match the provider's actual completion path.
+4. Requests for unsupported editable/deferred update behavior produce explicit fallback metadata instead of silently degrading.
 
 ## Operator Snapshot Notes
 

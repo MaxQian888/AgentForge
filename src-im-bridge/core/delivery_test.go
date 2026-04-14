@@ -495,3 +495,103 @@ func TestDeliveryHelpers_TrimAndResolveFallbackReasons(t *testing.T) {
 		t.Fatalf("metadataValue(nil) = %q", got)
 	}
 }
+
+func TestDeliverEnvelope_ReportsFallbackReasonWhenQQCannotHonorEditableUpdate(t *testing.T) {
+	platform := &deliveryTestPlatform{}
+	metadata := NormalizeMetadata(PlatformMetadata{Source: "qq"}, "qq")
+
+	receipt, err := DeliverEnvelope(context.Background(), platform, metadata, "chat-1", &DeliveryEnvelope{
+		Content: "qq completion",
+		ReplyTarget: &ReplyTarget{
+			Platform:   "qq",
+			ChatID:     "chat-1",
+			MessageID:  "msg-1",
+			PreferEdit: true,
+			UseReply:   true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope error: %v", err)
+	}
+	if receipt.Method != DeliveryMethodReply {
+		t.Fatalf("receipt = %+v, want reply fallback", receipt)
+	}
+	if !strings.Contains(receipt.FallbackReason, "editable updates") {
+		t.Fatalf("fallback_reason = %q", receipt.FallbackReason)
+	}
+}
+
+func TestDeliverEnvelope_ReportsFallbackReasonWhenQQBotCannotHonorDeferredUpdate(t *testing.T) {
+	platform := &deliveryTestPlatform{}
+	metadata := NormalizeMetadata(PlatformMetadata{Source: "qqbot"}, "qqbot")
+
+	receipt, err := DeliverEnvelope(context.Background(), platform, metadata, "group-openid", &DeliveryEnvelope{
+		Content: "qqbot completion",
+		ReplyTarget: &ReplyTarget{
+			Platform:      "qqbot",
+			ChatID:        "group-openid",
+			CallbackToken: "cb-token-1",
+			ProgressMode:  string(AsyncUpdateDeferredCardUpdate),
+			UseReply:      true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope error: %v", err)
+	}
+	if receipt.Method != DeliveryMethodReply {
+		t.Fatalf("receipt = %+v, want reply fallback", receipt)
+	}
+	if !strings.Contains(receipt.FallbackReason, "deferred card updates") {
+		t.Fatalf("fallback_reason = %q", receipt.FallbackReason)
+	}
+}
+
+func TestDeliverEnvelope_ReportsFallbackReasonWhenWeComCannotHonorEditableUpdate(t *testing.T) {
+	platform := &deliveryTestPlatform{}
+	metadata := NormalizeMetadata(PlatformMetadata{Source: "wecom"}, "wecom")
+
+	receipt, err := DeliverEnvelope(context.Background(), platform, metadata, "chat-1", &DeliveryEnvelope{
+		Content: "wecom completion",
+		ReplyTarget: &ReplyTarget{
+			Platform:   "wecom",
+			ChatID:     "chat-1",
+			MessageID:  "msg-1",
+			PreferEdit: true,
+			UseReply:   true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope error: %v", err)
+	}
+	if receipt.Method != DeliveryMethodReply {
+		t.Fatalf("receipt = %+v, want reply fallback", receipt)
+	}
+	if !strings.Contains(receipt.FallbackReason, "editable updates") {
+		t.Fatalf("fallback_reason = %q", receipt.FallbackReason)
+	}
+}
+
+func TestDeliverEnvelope_ReportsFallbackReasonWhenDingTalkCannotHonorEditableUpdate(t *testing.T) {
+	platform := &deliveryTestPlatform{}
+	metadata := NormalizeMetadata(PlatformMetadata{Source: "dingtalk"}, "dingtalk")
+
+	receipt, err := DeliverEnvelope(context.Background(), platform, metadata, "chat-1", &DeliveryEnvelope{
+		Content: "dingtalk completion",
+		ReplyTarget: &ReplyTarget{
+			Platform:   "dingtalk",
+			ChatID:     "chat-1",
+			MessageID:  "msg-1",
+			PreferEdit: true,
+			UseReply:   true,
+		},
+	})
+	if err != nil {
+		t.Fatalf("DeliverEnvelope error: %v", err)
+	}
+	if receipt.Method != DeliveryMethodReply {
+		t.Fatalf("receipt = %+v, want reply fallback", receipt)
+	}
+	if !strings.Contains(receipt.FallbackReason, "editable updates") {
+		t.Fatalf("fallback_reason = %q", receipt.FallbackReason)
+	}
+}

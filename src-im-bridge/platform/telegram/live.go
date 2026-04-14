@@ -826,7 +826,7 @@ func normalizeCallbackQueryAction(query *callbackQuery) (*notify.ActionRequest, 
 		return nil, errors.New("telegram callback query missing sender")
 	}
 
-	action, entityID, ok := core.ParseActionReference(query.Data)
+	action, entityID, actionMetadata, ok := core.ParseActionReferenceWithMetadata(query.Data)
 	if !ok {
 		return nil, errors.New("telegram callback query missing action reference")
 	}
@@ -846,6 +846,15 @@ func normalizeCallbackQueryAction(query *callbackQuery) (*notify.ActionRequest, 
 		replyTarget.TopicID = strconv.FormatInt(query.Message.MessageThreadID, 10)
 	}
 
+	metadata := compactMetadata(map[string]string{
+		"source":            "callback_query",
+		"callback_query_id": strings.TrimSpace(query.ID),
+		"callback_data":     strings.TrimSpace(query.Data),
+	})
+	for key, value := range actionMetadata {
+		metadata[key] = value
+	}
+
 	return &notify.ActionRequest{
 		Platform:    liveMetadata.Source,
 		Action:      action,
@@ -853,11 +862,7 @@ func normalizeCallbackQueryAction(query *callbackQuery) (*notify.ActionRequest, 
 		ChatID:      chatID,
 		UserID:      strconv.FormatInt(query.From.ID, 10),
 		ReplyTarget: replyTarget,
-		Metadata: compactMetadata(map[string]string{
-			"source":            "callback_query",
-			"callback_query_id": strings.TrimSpace(query.ID),
-			"callback_data":     strings.TrimSpace(query.Data),
-		}),
+		Metadata:    metadata,
 	}, nil
 }
 

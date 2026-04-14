@@ -14,6 +14,10 @@ rust-version = "1.77.2"
 name = "agentforge_desktop_lib"
 crate-type = ["staticlib", "cdylib", "rlib"]
 
+[[bin]]
+name = "agentforge-desktop-cli"
+path = "src/bin/agentforge-desktop-cli.rs"
+
 [build-dependencies]
 tauri-build = { version = "2.5.0", features = [] }
 

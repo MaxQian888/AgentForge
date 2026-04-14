@@ -29,6 +29,9 @@ func TestAgentPoolQueueRepository_InMemoryLifecycle(t *testing.T) {
 		RoleID:    "planner-agent",
 		BudgetUSD: 5,
 		Reason:    "agent pool is at capacity",
+		GuardrailType:       model.DispatchGuardrailTypePool,
+		GuardrailScope:      "project",
+		RecoveryDisposition: model.QueueRecoveryDispositionPending,
 	})
 	if err != nil {
 		t.Fatalf("QueueAgentAdmission() error = %v", err)
@@ -36,6 +39,9 @@ func TestAgentPoolQueueRepository_InMemoryLifecycle(t *testing.T) {
 
 	if entry.Status != model.AgentPoolQueueStatusQueued {
 		t.Fatalf("entry.Status = %q, want queued", entry.Status)
+	}
+	if entry.GuardrailType != model.DispatchGuardrailTypePool || entry.RecoveryDisposition != model.QueueRecoveryDispositionPending {
+		t.Fatalf("entry verdict = %+v", entry)
 	}
 	if count, err := repo.CountQueuedByProject(ctx, projectID); err != nil || count != 1 {
 		t.Fatalf("CountQueuedByProject() = %d, %v, want 1, nil", count, err)
@@ -53,7 +59,7 @@ func TestAgentPoolQueueRepository_InMemoryLifecycle(t *testing.T) {
 	}
 
 	runID := uuid.New()
-	if err := repo.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusPromoted, "started", &runID); err != nil {
+	if err := repo.CompleteQueuedEntry(ctx, entry.EntryID, model.AgentPoolQueueStatusPromoted, "started", &runID, "", "", model.QueueRecoveryDispositionPromoted); err != nil {
 		t.Fatalf("CompleteQueuedEntry() error = %v", err)
 	}
 
@@ -83,6 +89,9 @@ func TestAgentPoolQueueRepository_PersistsThroughDatabase(t *testing.T) {
 		RoleID:    "coding-agent",
 		BudgetUSD: 8,
 		Reason:    "agent pool is at capacity",
+		GuardrailType:       model.DispatchGuardrailTypePool,
+		GuardrailScope:      "bridge",
+		RecoveryDisposition: model.QueueRecoveryDispositionPending,
 	})
 	if err != nil {
 		t.Fatalf("QueueAgentAdmission() error = %v", err)
@@ -102,6 +111,9 @@ func TestAgentPoolQueueRepository_PersistsThroughDatabase(t *testing.T) {
 	}
 	if len(projectQueued) != 1 || projectQueued[0].TaskID != taskID.String() {
 		t.Fatalf("unexpected project queue: %+v", projectQueued)
+	}
+	if projectQueued[0].GuardrailType != model.DispatchGuardrailTypePool || projectQueued[0].GuardrailScope != "bridge" {
+		t.Fatalf("unexpected project queue verdict: %+v", projectQueued[0])
 	}
 
 	reserved, err := repo.ReserveNextQueuedByProject(ctx, projectID)
@@ -131,6 +143,9 @@ func TestAgentPoolQueueRepository_ReserveNextQueuedByProjectPrefersHigherPriorit
 		Model:     "gpt-5-codex",
 		Priority:  model.PriorityLow,
 		Reason:    "agent pool is at capacity",
+		GuardrailType:       model.DispatchGuardrailTypePool,
+		GuardrailScope:      "project",
+		RecoveryDisposition: model.QueueRecoveryDispositionPending,
 	})
 	if err != nil {
 		t.Fatalf("QueueAgentAdmission() low error = %v", err)
@@ -145,6 +160,9 @@ func TestAgentPoolQueueRepository_ReserveNextQueuedByProjectPrefersHigherPriorit
 		Model:     "gpt-5-codex",
 		Priority:  model.PriorityHigh,
 		Reason:    "agent pool is at capacity",
+		GuardrailType:       model.DispatchGuardrailTypePool,
+		GuardrailScope:      "project",
+		RecoveryDisposition: model.QueueRecoveryDispositionPending,
 	})
 	if err != nil {
 		t.Fatalf("QueueAgentAdmission() high error = %v", err)
@@ -182,6 +200,9 @@ func TestAgentPoolQueueRepository_ListQueuedByProjectUsesPriorityThenFIFO(t *tes
 		Model:     "gpt-5-codex",
 		Priority:  model.PriorityCritical,
 		Reason:    "agent pool is at capacity",
+		GuardrailType:       model.DispatchGuardrailTypePool,
+		GuardrailScope:      "project",
+		RecoveryDisposition: model.QueueRecoveryDispositionPending,
 	})
 	if err != nil {
 		t.Fatalf("QueueAgentAdmission() critical error = %v", err)
@@ -195,6 +216,9 @@ func TestAgentPoolQueueRepository_ListQueuedByProjectUsesPriorityThenFIFO(t *tes
 		Model:     "gpt-5-codex",
 		Priority:  model.PriorityNormal,
 		Reason:    "agent pool is at capacity",
+		GuardrailType:       model.DispatchGuardrailTypePool,
+		GuardrailScope:      "project",
+		RecoveryDisposition: model.QueueRecoveryDispositionPending,
 	})
 	if err != nil {
 		t.Fatalf("QueueAgentAdmission() normalFirst error = %v", err)
@@ -208,6 +232,9 @@ func TestAgentPoolQueueRepository_ListQueuedByProjectUsesPriorityThenFIFO(t *tes
 		Model:     "gpt-5-codex",
 		Priority:  model.PriorityNormal,
 		Reason:    "agent pool is at capacity",
+		GuardrailType:       model.DispatchGuardrailTypePool,
+		GuardrailScope:      "project",
+		RecoveryDisposition: model.QueueRecoveryDispositionPending,
 	})
 	if err != nil {
 		t.Fatalf("QueueAgentAdmission() normalSecond error = %v", err)
@@ -244,6 +271,9 @@ func TestAgentPoolQueueRepository_DefaultPriorityIsLow(t *testing.T) {
 		Provider:  "openai",
 		Model:     "gpt-5-codex",
 		Reason:    "agent pool is at capacity",
+		GuardrailType:       model.DispatchGuardrailTypePool,
+		GuardrailScope:      "project",
+		RecoveryDisposition: model.QueueRecoveryDispositionPending,
 	})
 	if err != nil {
 		t.Fatalf("QueueAgentAdmission() error = %v", err)
@@ -275,6 +305,9 @@ func openAgentPoolQueueRepoTestDB(t *testing.T) *gorm.DB {
 			role_id TEXT,
 			priority INTEGER NOT NULL DEFAULT 0,
 			budget_usd REAL NOT NULL DEFAULT 0,
+			guardrail_type TEXT,
+			guardrail_scope TEXT,
+			recovery_disposition TEXT,
 			agent_run_id TEXT,
 			created_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
 			updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP

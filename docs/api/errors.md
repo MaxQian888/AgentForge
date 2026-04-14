@@ -77,6 +77,9 @@ Bridge/runtime catalog responses can contain diagnostic `code` values such as:
 - `missing_runtime_catalog`
 - `unknown_runtime`
 - `unsupported_probe_provider`
+- `sunset_window`
+- `runtime_sunset`
+- `stale_default_selection`
 
 These appear inside diagnostics arrays rather than top-level API error bodies.
 

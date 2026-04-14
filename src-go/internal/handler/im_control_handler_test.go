@@ -400,6 +400,52 @@ func TestIMControlHandlerTestSendReturnsSettledDeliveryResult(t *testing.T) {
 	}
 }
 
+func TestIMControlHandlerTestSendReturnsPendingWhenNoSettlementArrives(t *testing.T) {
+	stub := &imControlPlaneStub{
+		listDeliveryHistoryFn: func(filters *model.IMDeliveryHistoryFilters) ([]*model.IMDelivery, error) {
+			return nil, nil
+		},
+	}
+	sender := &imControlSenderStub{}
+	h := NewIMControlHandler(stub, sender)
+
+	_, ctx, rec := newIMControlTestContext(http.MethodPost, "/api/v1/im/test-send", `{"platform":"slack","channelId":"C123","text":"ping","deliveryId":"delivery-test-pending"}`)
+	if err := h.TestSend(ctx); err != nil {
+		t.Fatalf("TestSend() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("TestSend() status = %d", rec.Code)
+	}
+
+	var payload model.IMTestSendResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal test send response: %v", err)
+	}
+	if payload.DeliveryID != "delivery-test-pending" || payload.Status != model.IMDeliveryStatusPending {
+		t.Fatalf("payload = %+v", payload)
+	}
+}
+
+func TestIMControlHandlerTestSendReturnsUnavailableWithoutSender(t *testing.T) {
+	h := NewIMControlHandler(&imControlPlaneStub{})
+
+	_, ctx, rec := newIMControlTestContext(http.MethodPost, "/api/v1/im/test-send", `{"platform":"slack","channelId":"C123","text":"ping"}`)
+	if err := h.TestSend(ctx); err != nil {
+		t.Fatalf("TestSend() error = %v", err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("TestSend() status = %d, want 503", rec.Code)
+	}
+
+	var payload model.ErrorResponse
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("unmarshal error response: %v", err)
+	}
+	if payload.Message != "IM send service unavailable" {
+		t.Fatalf("message = %q", payload.Message)
+	}
+}
+
 func TestIMControlHandlerTestSendGeneratesUniqueDeliveryIDsWhenOmitted(t *testing.T) {
 	stub := &imControlPlaneStub{
 		listDeliveryHistoryFn: func(filters *model.IMDeliveryHistoryFilters) ([]*model.IMDelivery, error) {

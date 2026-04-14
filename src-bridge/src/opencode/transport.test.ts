@@ -52,6 +52,11 @@ describe("OpenCode transport", () => {
           connected: ["opencode"],
         });
       }
+      if (url.endsWith("/provider/auth")) {
+        return Response.json({
+          opencode: [{ type: "oauth" }],
+        });
+      }
       if (url.endsWith("/config/providers")) {
         return Response.json({
           default: { opencode: "opencode/gpt-oss" },
@@ -74,6 +79,7 @@ describe("OpenCode transport", () => {
       "http://127.0.0.1:4096/global/health",
       "http://127.0.0.1:4096/provider",
       "http://127.0.0.1:4096/config/providers",
+      "http://127.0.0.1:4096/provider/auth",
     ]);
   });
 
@@ -135,6 +141,44 @@ describe("OpenCode transport", () => {
     });
   });
 
+  test("treats provider auth discovery as optional when the endpoint is not exposed yet", async () => {
+    process.env.OPENCODE_SERVER_URL = "http://127.0.0.1:4096";
+
+    globalThis.fetch = (async (input) => {
+      const url = String(input);
+      if (url.endsWith("/global/health")) {
+        return Response.json({ healthy: true, version: "0.1.0" });
+      }
+      if (url.endsWith("/provider")) {
+        return Response.json({
+          all: [{ id: "opencode", name: "OpenCode" }],
+          connected: ["opencode"],
+        });
+      }
+      if (url.endsWith("/config/providers")) {
+        return Response.json({
+          default: { opencode: "opencode/gpt-oss" },
+          providers: [{ id: "opencode", models: [{ id: "opencode/gpt-oss" }] }],
+        });
+      }
+      if (url.endsWith("/provider/auth")) {
+        return new Response("not found", { status: 404 });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    }) as typeof fetch;
+
+    const mod = await import("./transport.js");
+    const transport = mod.createOpenCodeTransport();
+    const readiness = await transport.checkReadiness({
+      provider: "opencode",
+      model: "opencode/gpt-oss",
+    });
+
+    expect(readiness.ok).toBe(true);
+    expect(readiness.diagnostics).toEqual([]);
+    expect(readiness.catalog?.authMethods).toEqual({});
+  });
+
   test("creates sessions, sends prompts asynchronously, and aborts the upstream session through the official APIs", async () => {
     process.env.OPENCODE_SERVER_URL = "http://127.0.0.1:4096";
 
@@ -178,6 +222,99 @@ describe("OpenCode transport", () => {
     });
   });
 
+  test("carries parity-sensitive execute inputs through session bootstrap and prompt parts", async () => {
+    process.env.OPENCODE_SERVER_URL = "http://127.0.0.1:4096";
+
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ input, init });
+      const url = String(input);
+      if (url.endsWith("/session") && init?.method === "POST") {
+        return Response.json({ id: "session-456" });
+      }
+      if (url.endsWith("/session/session-456/prompt_async") && init?.method === "POST") {
+        return new Response(null, { status: 204 });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    }) as typeof fetch;
+
+    const mod = await import("./transport.js");
+    const transport = mod.createOpenCodeTransport();
+    const session = await (
+      transport as {
+        createSession: (input: Record<string, unknown>) => Promise<{ id: string }>;
+      }
+    ).createSession({
+      title: "AgentForge parity task",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      env: {
+        FEATURE_FLAG: "enabled",
+      },
+      web_search: true,
+    });
+    await (
+      transport as unknown as {
+        sendPromptAsync: (input: Record<string, unknown>) => Promise<void>;
+      }
+    ).sendPromptAsync({
+      sessionId: session.id,
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      prompt: "Continue the existing task",
+      parts: [
+        {
+          type: "image",
+          path: "D:/tmp/screen.png",
+          mime_type: "image/png",
+        },
+        {
+          type: "file",
+          path: "D:/tmp/spec.md",
+          mime_type: "text/markdown",
+        },
+        {
+          type: "text",
+          text: "Continue the existing task",
+        },
+      ],
+    });
+
+    expect(calls.map((call) => ({ input: String(call.input), method: call.init?.method ?? "GET" }))).toEqual([
+      { input: "http://127.0.0.1:4096/session", method: "POST" },
+      { input: "http://127.0.0.1:4096/session/session-456/prompt_async", method: "POST" },
+    ]);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      title: "AgentForge parity task",
+      provider: "anthropic",
+      model: "claude-sonnet-4-5",
+      env: {
+        FEATURE_FLAG: "enabled",
+      },
+      web_search: true,
+    });
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
+      model: "claude-sonnet-4-5",
+      provider: "anthropic",
+      parts: [
+        {
+          type: "image",
+          path: "D:/tmp/screen.png",
+          mime_type: "image/png",
+        },
+        {
+          type: "file",
+          path: "D:/tmp/spec.md",
+          mime_type: "text/markdown",
+        },
+        {
+          type: "text",
+          text: "Continue the existing task",
+        },
+      ],
+    });
+  });
+
   test("supports advanced session control, discovery, and config endpoints", async () => {
     process.env.OPENCODE_SERVER_URL = "http://127.0.0.1:4096";
 
@@ -206,6 +343,9 @@ describe("OpenCode transport", () => {
       if (url.endsWith("/session/session-123/command") && init?.method === "POST") {
         return Response.json({ ok: true });
       }
+      if (url.endsWith("/session/session-123/shell") && init?.method === "POST") {
+        return Response.json({ ok: true, command: "pnpm lint" });
+      }
       if (url.endsWith("/session/session-123/permissions/perm-1") && init?.method === "POST") {
         return Response.json({ ok: true });
       }
@@ -231,6 +371,10 @@ describe("OpenCode transport", () => {
     expect(await transport.getTodos("session-123")).toEqual([{ id: "todo-1", content: "Ship OpenCode transport" }]);
     expect(await transport.getMessages("session-123")).toEqual([{ id: "msg-1", role: "assistant", content: "hello" }]);
     expect(await transport.executeCommand("session-123", "/compact", "--full")).toEqual({ ok: true });
+    expect(await transport.executeShell("session-123", "pnpm lint", "reviewer")).toEqual({
+      ok: true,
+      command: "pnpm lint",
+    });
     expect(await transport.respondToPermission("session-123", "perm-1", true)).toEqual({ ok: true });
     expect(await transport.getAgents()).toEqual(["planner", "reviewer"]);
     expect(await transport.getSkills()).toEqual(["opsx-apply", "opsx-archive"]);
@@ -244,6 +388,7 @@ describe("OpenCode transport", () => {
       { input: "http://127.0.0.1:4096/session/session-123/todo", method: "GET" },
       { input: "http://127.0.0.1:4096/session/session-123/message", method: "GET" },
       { input: "http://127.0.0.1:4096/session/session-123/command", method: "POST" },
+      { input: "http://127.0.0.1:4096/session/session-123/shell", method: "POST" },
       { input: "http://127.0.0.1:4096/session/session-123/permissions/perm-1", method: "POST" },
       { input: "http://127.0.0.1:4096/agent", method: "GET" },
       { input: "http://127.0.0.1:4096/skill", method: "GET" },
@@ -252,7 +397,73 @@ describe("OpenCode transport", () => {
     expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({ messageID: "msg-42" });
     expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({ messageID: "msg-42" });
     expect(JSON.parse(String(calls[6]?.init?.body))).toEqual({ name: "compact", args: ["--full"] });
-    expect(JSON.parse(String(calls[7]?.init?.body))).toEqual({ allow: true });
-    expect(JSON.parse(String(calls[10]?.init?.body))).toEqual({ provider: "opencode", model: "opencode-fast" });
+    expect(JSON.parse(String(calls[7]?.init?.body))).toEqual({
+      agent: "reviewer",
+      command: "pnpm lint",
+      model: undefined,
+    });
+    expect(JSON.parse(String(calls[8]?.init?.body))).toEqual({ allow: true });
+    expect(JSON.parse(String(calls[11]?.init?.body))).toEqual({ provider: "opencode", model: "opencode-fast" });
+  });
+
+  test("supports provider OAuth authorization start and callback completion with opaque payloads", async () => {
+    process.env.OPENCODE_SERVER_URL = "http://127.0.0.1:4096";
+
+    const calls: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
+    globalThis.fetch = (async (input, init) => {
+      calls.push({ input, init });
+      const url = String(input);
+      if (url.endsWith("/provider/anthropic/oauth/authorize") && init?.method === "POST") {
+        return Response.json({
+          url: "https://auth.example.com/start",
+          state: "oauth-state-1",
+        });
+      }
+      if (url.endsWith("/provider/anthropic/oauth/callback") && init?.method === "POST") {
+        return Response.json({ connected: true, provider: "anthropic" });
+      }
+      throw new Error(`Unexpected fetch ${url}`);
+    }) as typeof fetch;
+
+    const mod = await import("./transport.js");
+    const transport = mod.createOpenCodeTransport();
+
+    expect(typeof (transport as { startProviderOAuth?: unknown }).startProviderOAuth).toBe("function");
+    expect(typeof (transport as { completeProviderOAuth?: unknown }).completeProviderOAuth).toBe("function");
+
+    const started = await (
+      transport as {
+        startProviderOAuth: (provider: string, payload: Record<string, unknown>) => Promise<unknown>;
+      }
+    ).startProviderOAuth("anthropic", {
+      redirect_uri: "http://127.0.0.1:7777/callback",
+      state: "oauth-state-1",
+    });
+    const completed = await (
+      transport as {
+        completeProviderOAuth: (provider: string, payload: Record<string, unknown>) => Promise<unknown>;
+      }
+    ).completeProviderOAuth("anthropic", {
+      code: "oauth-code-1",
+      state: "oauth-state-1",
+    });
+
+    expect(started).toEqual({
+      url: "https://auth.example.com/start",
+      state: "oauth-state-1",
+    });
+    expect(completed).toEqual({ connected: true, provider: "anthropic" });
+    expect(calls.map((call) => ({ input: String(call.input), method: call.init?.method ?? "GET" }))).toEqual([
+      { input: "http://127.0.0.1:4096/provider/anthropic/oauth/authorize", method: "POST" },
+      { input: "http://127.0.0.1:4096/provider/anthropic/oauth/callback", method: "POST" },
+    ]);
+    expect(JSON.parse(String(calls[0]?.init?.body))).toEqual({
+      redirect_uri: "http://127.0.0.1:7777/callback",
+      state: "oauth-state-1",
+    });
+    expect(JSON.parse(String(calls[1]?.init?.body))).toEqual({
+      code: "oauth-code-1",
+      state: "oauth-state-1",
+    });
   });
 });

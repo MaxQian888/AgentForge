@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -107,6 +108,74 @@ func (r *MemberRepository) Update(ctx context.Context, id uuid.UUID, req *model.
 		return fmt.Errorf("update member: %w", err)
 	}
 	return nil
+}
+
+func (r *MemberRepository) BulkUpdateStatus(
+	ctx context.Context,
+	projectID uuid.UUID,
+	memberIDs []uuid.UUID,
+	status string,
+) ([]model.BulkUpdateMemberResult, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	normalizedStatus := model.NormalizeMemberStatus(status, status == model.MemberStatusActive)
+	now := time.Now().UTC()
+
+	var records []memberRecord
+	if err := r.db.WithContext(ctx).
+		Where("project_id = ? AND id IN ?", projectID, memberIDs).
+		Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list members for bulk update: %w", err)
+	}
+
+	recordMap := make(map[uuid.UUID]memberRecord, len(records))
+	for _, record := range records {
+		recordMap[record.ID] = record
+	}
+
+	results := make([]model.BulkUpdateMemberResult, 0, len(memberIDs))
+	for _, memberID := range memberIDs {
+		record, ok := recordMap[memberID]
+		if !ok {
+			results = append(results, model.BulkUpdateMemberResult{
+				MemberID: memberID.String(),
+				Success:  false,
+				Error:    "member not found in project",
+			})
+			continue
+		}
+
+		err := r.db.WithContext(ctx).
+			Model(&memberRecord{}).
+			Where("id = ? AND project_id = ?", memberID, projectID).
+			Updates(map[string]any{
+				"status":     normalizedStatus,
+				"is_active":  model.IsMemberStatusActive(normalizedStatus),
+				"updated_at": now,
+			}).Error
+		if err != nil {
+			results = append(results, model.BulkUpdateMemberResult{
+				MemberID: memberID.String(),
+				Success:  false,
+				Error:    err.Error(),
+			})
+			continue
+		}
+
+		record.Status = normalizedStatus
+		record.IsActive = model.IsMemberStatusActive(normalizedStatus)
+		record.UpdatedAt = now
+		recordMap[memberID] = record
+		results = append(results, model.BulkUpdateMemberResult{
+			MemberID: memberID.String(),
+			Success:  true,
+			Status:   normalizedStatus,
+		})
+	}
+
+	return results, nil
 }
 
 func (r *MemberRepository) Delete(ctx context.Context, id uuid.UUID) error {

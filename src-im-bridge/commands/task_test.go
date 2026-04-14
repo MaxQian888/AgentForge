@@ -57,7 +57,7 @@ func TestTaskCommand_CreateRequiresTitle(t *testing.T) {
 		Content:  "/task create",
 	})
 
-	if len(platform.replies) != 1 || platform.replies[0] != "用法: /task create <标题>" {
+	if len(platform.replies) != 1 || platform.replies[0] != "用法: /task create <标题> [--priority <级别>] [--description <描述>]" {
 		t.Fatalf("replies = %v", platform.replies)
 	}
 }
@@ -543,10 +543,89 @@ func TestTaskCommand_TransitionAliasUsesCanonicalMoveFlow(t *testing.T) {
 	}
 }
 
+func TestTaskCommand_CreateSupportsPriorityAndDescriptionFlags(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodPost {
+			t.Fatalf("method = %s, want POST", r.Method)
+		}
+		if r.URL.Path != "/api/v1/projects/proj/tasks" {
+			t.Fatalf("path = %s", r.URL.Path)
+		}
+
+		var body map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&body); err != nil {
+			t.Fatalf("decode body: %v", err)
+		}
+		if body["title"] != "Bridge rollout" || body["priority"] != "high" || body["description"] != "Fix the bridge pipeline" {
+			t.Fatalf("body = %+v", body)
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&client.Task{
+			ID:           "task-654321",
+			Title:        "Bridge rollout",
+			Description:  "Fix the bridge pipeline",
+			Status:       "inbox",
+			Priority:     "high",
+			AssigneeName: "",
+			SpentUsd:     0,
+			BudgetUsd:    0,
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskCardPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task create Bridge rollout --priority high --description Fix the bridge pipeline",
+	})
+
+	if len(platform.cards) != 1 {
+		t.Fatalf("cards len = %d, want 1", len(platform.cards))
+	}
+	if platform.cards[0].Title != "任务 #task-654" {
+		t.Fatalf("card title = %q", platform.cards[0].Title)
+	}
+}
+
+func TestTaskCommand_DeleteRemovesTask(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if r.Method != http.MethodDelete || r.URL.Path != "/api/v1/tasks/task-789" {
+			t.Fatalf("unexpected request: %s %s", r.Method, r.URL.Path)
+		}
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(map[string]string{"message": "task deleted"})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task delete task-789",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	if !strings.Contains(platform.replies[0], "已删除任务 #task-789") {
+		t.Fatalf("reply = %q", platform.replies[0])
+	}
+}
+
 func TestTaskHelpers_BuildCardShortIDResolveMemberAndDispatchReply(t *testing.T) {
 	card := buildTaskCard(&client.Task{
 		ID:           "task-12345678",
+		ProjectID:    "project-1",
 		Title:        "Bridge rollout",
+		Description:  "Capture the bridge rollout details",
 		Status:       "triaged",
 		Priority:     "high",
 		AssigneeName: "Alice",
@@ -559,8 +638,25 @@ func TestTaskHelpers_BuildCardShortIDResolveMemberAndDispatchReply(t *testing.T)
 	if len(card.Fields) != 5 {
 		t.Fatalf("fields = %+v", card.Fields)
 	}
-	if len(card.Buttons) != 2 || card.Buttons[0].Style != "primary" {
+	if len(card.Buttons) != 4 || card.Buttons[0].Style != "primary" {
 		t.Fatalf("buttons = %+v", card.Buttons)
+	}
+	if card.Buttons[1].Text != "保存为文档" || card.Buttons[2].Text != "创建跟进任务" {
+		t.Fatalf("buttons = %+v", card.Buttons)
+	}
+	action, entityID, metadata, ok := core.ParseActionReferenceWithMetadata(card.Buttons[1].Action)
+	if !ok || action != "save-as-doc" || entityID != "project-1" {
+		t.Fatalf("doc action = %q", card.Buttons[1].Action)
+	}
+	if metadata["title"] != "Bridge rollout" || metadata["body"] != "Capture the bridge rollout details" {
+		t.Fatalf("doc metadata = %+v", metadata)
+	}
+	action, entityID, metadata, ok = core.ParseActionReferenceWithMetadata(card.Buttons[2].Action)
+	if !ok || action != "create-task" || entityID != "project-1" {
+		t.Fatalf("task action = %q", card.Buttons[2].Action)
+	}
+	if metadata["title"] != "Follow up: Bridge rollout" || metadata["priority"] != "high" {
+		t.Fatalf("task metadata = %+v", metadata)
 	}
 
 	if got := shortID("task-12345678"); got != "task-123" {
@@ -606,9 +702,37 @@ func TestTaskHelpers_BuildCardShortIDResolveMemberAndDispatchReply(t *testing.T)
 		Dispatch: client.DispatchOutcome{
 			Status: "blocked",
 			Reason: "budget exceeded",
+			GuardrailType: "budget",
+			GuardrailScope: "project",
 		},
 	}, "Alice")
-	if blocked != "已将任务 #task-123 分配给 Alice，但未启动 Agent：budget exceeded" {
+	if blocked != "已将任务 #task-123 分配给 Alice，但未启动 Agent：project budget blocked dispatch: budget exceeded" {
 		t.Fatalf("blocked = %q", blocked)
+	}
+
+	queued := formatTaskDispatchReply(&client.TaskDispatchResponse{
+		Task: client.Task{ID: "task-12345678"},
+		Dispatch: client.DispatchOutcome{
+			Status: "queued",
+			Reason: "Bridge pool at capacity (2/2 active)",
+			Queue: &client.QueueEntry{
+				EntryID:             "entry-12345678",
+				RecoveryDisposition: "recoverable",
+			},
+		},
+	}, "Alice")
+	if queued != "已将任务 #task-123 分配给 Alice，且仍在 Agent 队列 #entry-12 中等待恢复：Bridge pool at capacity (2/2 active)" {
+		t.Fatalf("queued = %q", queued)
+	}
+
+	skipped := formatTaskDispatchReply(&client.TaskDispatchResponse{
+		Task: client.Task{ID: "task-12345678"},
+		Dispatch: client.DispatchOutcome{
+			Status: "skipped",
+			Reason: "task assigned to a human member",
+		},
+	}, "Alice")
+	if skipped != "已将任务 #task-123 分配给 Alice，但本次未启动 Agent：task assigned to a human member" {
+		t.Fatalf("skipped = %q", skipped)
 	}
 }

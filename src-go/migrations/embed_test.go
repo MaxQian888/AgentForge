@@ -2,6 +2,7 @@ package migrations
 
 import (
 	"io/fs"
+	"regexp"
 	"testing"
 )
 
@@ -55,11 +56,37 @@ func TestEmbeddedMigrationsKeepReleasedFilenamesStable(t *testing.T) {
 		"041_align_member_contract_with_documented_status_and_im_identity.down.sql",
 		"042_add_agent_run_cost_accounting.up.sql",
 		"042_add_agent_run_cost_accounting.down.sql",
+		"043_create_logs_table.up.sql",
+		"043_create_logs_table.down.sql",
+		"044_add_dispatch_observability_fields.up.sql",
+		"044_add_dispatch_observability_fields.down.sql",
 	}
 
 	for _, name := range expected {
 		if _, err := fs.Stat(FS, name); err != nil {
 			t.Fatalf("expected released migration %q to remain embedded: %v", name, err)
 		}
+	}
+}
+
+func TestDispatchObservabilityMigrationIncludesRecoveryDispositionColumns(t *testing.T) {
+	t.Parallel()
+
+	upSQL, err := fs.ReadFile(FS, "044_add_dispatch_observability_fields.up.sql")
+	if err != nil {
+		t.Fatalf("read up migration: %v", err)
+	}
+	upText := string(upSQL)
+	if !regexp.MustCompile(`(?s)ALTER TABLE dispatch_attempts\s+ADD COLUMN IF NOT EXISTS recovery_disposition`).MatchString(upText) {
+		t.Fatalf("044 up migration must add dispatch_attempts.recovery_disposition, got:\n%s", upText)
+	}
+
+	downSQL, err := fs.ReadFile(FS, "044_add_dispatch_observability_fields.down.sql")
+	if err != nil {
+		t.Fatalf("read down migration: %v", err)
+	}
+	downText := string(downSQL)
+	if !regexp.MustCompile(`(?s)ALTER TABLE dispatch_attempts\s+DROP COLUMN IF EXISTS recovery_disposition`).MatchString(downText) {
+		t.Fatalf("044 down migration must drop dispatch_attempts.recovery_disposition, got:\n%s", downText)
 	}
 }

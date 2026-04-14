@@ -75,6 +75,22 @@ type UpdateMemberRequest struct {
 	IsActive    *bool     `json:"isActive"`
 }
 
+type BulkUpdateMembersRequest struct {
+	MemberIDs []string `json:"memberIds" validate:"required,min=1,dive,required"`
+	Status    string   `json:"status" validate:"required,oneof=active inactive suspended"`
+}
+
+type BulkUpdateMemberResult struct {
+	MemberID string `json:"memberId"`
+	Success  bool   `json:"success"`
+	Status   string `json:"status,omitempty"`
+	Error    string `json:"error,omitempty"`
+}
+
+type BulkUpdateMembersResponse struct {
+	Results []BulkUpdateMemberResult `json:"results"`
+}
+
 func NormalizeMemberStatus(status string, isActive bool) string {
 	switch status {
 	case MemberStatusActive, MemberStatusInactive, MemberStatusSuspended:

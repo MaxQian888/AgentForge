@@ -39,6 +39,13 @@ The current documentation describes AgentForge around these major layers:
 - `Review Pipeline`: layered review flow covering fast checks, deep review, and human approval
 - `Data Layer`: PostgreSQL, Redis, WebSocket/event flow, and related infra
 
+Backend connectivity rule of truth:
+
+- `Go Orchestrator` is the backend mediator between `TS Agent Bridge` and `IM Bridge`
+- `IM Bridge` talks to Go-owned `/api/v1/*` surfaces for workflow, runtime diagnostics, and bridge-backed AI capabilities
+- `TS Agent Bridge` exposes canonical `/bridge/*` routes to Go; it does not directly discover or invoke IM Bridge instances
+- outbound IM progress and terminal delivery return through the Go control plane so the original `bridge_id` and reply target stay intact
+
 ```mermaid
 flowchart LR
   IM[IM Bridge] --> GO[Go Orchestrator]
@@ -80,6 +87,7 @@ As of `2026-03-31`, the repository has already moved beyond a thin starter shell
 - `Memory workspace`: `app/(dashboard)/memory/page.tsx` now supports project-scoped memory search, category filtering, scope/category badges, and entry deletion.
 - `Plugin operator surfaces`: the plugin control plane now distinguishes catalog entries from installed plugins, includes built-in bundle/readiness verification, and exposes maintained authoring commands such as `pnpm create-plugin`, `pnpm plugin:verify`, and `pnpm plugin:verify:builtins`.
 - `Repo-owned skills`: canonical built-in skills now remain explicitly declared through `skills/builtin-bundle.yaml`, with a matching `pnpm skill:verify:builtins` drift check and marketplace-ready preview metadata derived from `SKILL.md` plus `agents/*.yaml`.
+- `Internal skill governance`: repo-managed runtime skills, repo-assistant skills, and OpenSpec workflow skill mirrors are now declared in `internal-skills.yaml`, verified through `pnpm skill:verify:internal`, and synchronized via `pnpm skill:sync:mirrors`.
 - `IM operator UI`: the current frontend contract covers `feishu`, `dingtalk`, `slack`, `telegram`, `discord`, `wecom`, `qq`, and `qqbot`, with backend-driven event types, richer delivery diagnostics, payload preview, and platform-specific config fields.
 - `Marketplace`: `app/(dashboard)/marketplace/page.tsx` now provides a unified Skills/Plugin/Role marketplace with search, category filtering, featured items, detail views with version history and reviews, publish workflows, and install confirmation. The backend is a standalone Go microservice in `src-marketplace/` with its own database migrations, handler/service/repository layers, and admin moderation endpoints.
 - `Desktop shell`: the Tauri app now includes shared desktop window chrome with frameless titlebar controls, bounded sidecar supervision, runtime status queries, shell actions, and window-state synchronization through `lib/platform-runtime.ts`.
@@ -96,6 +104,15 @@ As of `2026-03-31`, the repository has already moved beyond a thin starter shell
 | Marketplace | Standalone Go microservice + Next.js frontend for publishing, discovering, and installing plugins, skills, and roles | `cd src-marketplace && go run ./cmd/server`, browse `app/(dashboard)/marketplace/` |
 | Plugins | Built-in/local/catalog/remote plugin management plus MCP and workflow runs | `pnpm create-plugin`, `pnpm plugin:verify` |
 
+### TS Bridge OpenCode control-plane notes
+
+`src-bridge/` now treats OpenCode as a server-backed runtime control plane rather than a start-only execution adapter. The current Bridge contract includes:
+
+- canonical provider-auth routes under `/bridge/opencode/provider-auth/*` for initiating and completing provider OAuth through the Bridge
+- OpenCode permission request mapping through Bridge-owned request IDs before a caller responds to `/bridge/permission-response/:request_id`
+- paused-session control continuity for `/bridge/messages/:task_id`, `/bridge/diff/:task_id`, `/bridge/command`, `/bridge/shell`, `/bridge/revert`, and `/bridge/unrevert` when the saved snapshot still carries an upstream OpenCode session binding
+- explicit degraded diagnostics in `/bridge/runtimes` when OpenCode agent, skill, or provider discovery is unavailable even though base runtime readiness still succeeds
+
 ## Repository Map
 
 ```text
@@ -111,6 +128,7 @@ AgentForge/
 ├── src-tauri/           # Tauri desktop shell
 ├── docs/                # PRD, research, architecture, design docs
 ├── openspec/            # OpenSpec change artifacts
+├── internal-skills.yaml # Registry for maintained internal skill assets
 ├── roles/               # Role definitions and related assets
 ├── plugins/             # Built-in plugin bundle, integrations, tools, reviews, workflows
 └── scripts/             # Build helpers such as backend sidecar compilation
@@ -138,6 +156,7 @@ Start here if you want the latest project narrative:
 - [`docs/adr/`](./docs/adr): architecture decision records
 - [`docs/guides/`](./docs/guides): plugin, frontend component, and state-management guides
 - [`docs/desktop-updater-release.md`](./docs/desktop-updater-release.md): desktop updater signing inputs, `latest.json` generation, and release validation flow
+- [`docs/guides/internal-skill-governance.md`](./docs/guides/internal-skill-governance.md): canonical internal skill families, provenance, verification, and mirror-sync workflow
 - [`docs/role-authoring-guide.md`](./docs/role-authoring-guide.md): current dashboard role workspace flow, preview/sandbox loop, and operator guidance
 - [`docs/role-yaml.md`](./docs/role-yaml.md): canonical role YAML layout, runtime projection rules, and skill-catalog behavior
 - [`docs/part/PLUGIN_RESEARCH_PLATFORMS.md`](./docs/part/PLUGIN_RESEARCH_PLATFORMS.md): platform comparison for extension ecosystems
@@ -178,6 +197,19 @@ Helpful companion commands:
 - `pnpm dev:all:logs`
 - `pnpm dev:all:stop`
 
+If you want the backend stack without the Next.js frontend, use:
+
+```bash
+pnpm dev:backend
+```
+
+Helpful backend-only companion commands:
+
+- `pnpm dev:backend:status`
+- `pnpm dev:backend:logs`
+- `pnpm dev:backend:stop`
+- `pnpm dev:backend:verify`
+
 Current `dev:all` scope:
 
 - Starts or reuses local PostgreSQL + Redis through `docker compose` when they are not already reachable on `5432` / `6379`
@@ -189,10 +221,31 @@ Current `dev:all` scope:
 - Persists repo-local runtime metadata in `.codex/dev-all-state.json`
 - Writes managed service logs under `.codex/runtime-logs/`
 
+Current `dev:backend` scope:
+
+- Starts or reuses local PostgreSQL + Redis through `docker compose` when they are not already reachable on `5432` / `6379`
+- Starts or reuses the Go Orchestrator on `http://127.0.0.1:7777/health`
+- Starts or reuses the TS Bridge on `http://127.0.0.1:7778/bridge/health`
+- Starts or reuses the IM Bridge on `http://127.0.0.1:7779/im/health`
+- Persists the managed IM Bridge identity file at `.codex/im-bridge-id`
+- Persists repo-local runtime metadata in `.codex/dev-backend-state.json`
+- Writes managed service logs under `.codex/runtime-logs/`
+
+Current `dev:backend:verify` scope:
+
+- Starts or reuses the same backend-only managed stack as `pnpm dev:backend`
+- Verifies Go health at `http://127.0.0.1:7777/health`
+- Verifies TS Bridge health at `http://127.0.0.1:7778/bridge/health`
+- Verifies IM Bridge health at `http://127.0.0.1:7779/im/health`
+- Injects one zero-credential IM stub command roundtrip through the managed IM Bridge test port and requires a non-empty reply before reporting success
+- Leaves the managed backend stack running by default so follow-up debugging can continue immediately
+
 Notes:
 
 - `dev:all` is intentionally the local web-mode workflow. It does not replace `pnpm tauri:dev`.
+- `dev:all` can be run after `pnpm dev:backend`; it will reuse healthy backend services and only take ownership of the frontend it starts itself.
 - If a required port is occupied by a non-AgentForge listener, `dev:all` reports a conflict instead of starting a duplicate service.
+- `dev:backend:verify` is the supported backend smoke proof. It reports stage-level failures (`startup`, health checks, stub command injection, reply capture) and keeps managed services running; use `pnpm dev:backend:status`, `pnpm dev:backend:logs`, or `pnpm dev:backend:stop` afterward.
 - This checkout currently does not include `.env.local.example` or `src-go/.env.example`; the workflow uses code defaults plus environment overrides instead of blocking on missing example files.
 
 ### 1. Frontend Dashboard
@@ -224,7 +277,7 @@ Note: `next.config.ts` currently enables `output: "export"`. `pnpm build` genera
 
 ### 2. Go Backend
 
-If you want the full local stack, prefer `pnpm dev:all`. The manual steps below remain useful when you are only debugging the Go service.
+If you want the full local stack, prefer `pnpm dev:all`. If you want all backend services without the frontend, prefer `pnpm dev:backend`. If you want the supported backend smoke proof for Go + TS Bridge + IM Bridge, prefer `pnpm dev:backend:verify`. The manual steps below remain useful when you are only debugging the Go service internals.
 
 From the repository root, start infrastructure if needed:
 
@@ -295,6 +348,8 @@ Runtime notes:
 - The OpenCode connector creates or resumes upstream sessions through `/session`, sends work with `/session/:id/prompt_async`, aborts active work with `/session/:id/abort`, and normalizes OpenCode session events into the canonical bridge stream.
 - OpenCode pause and resume now preserve upstream `session_id` continuity instead of replaying the original prompt as a fresh command process.
 - `cursor`, `gemini`, `qoder`, and `iflow` now register as CLI-backed runtime profiles. They use one shared catalog and validation contract, but they do not pretend to support the same pause/resume/fork/rollback semantics as Claude Code, Codex, or OpenCode. When truthful continuity is unavailable, the bridge records a blocked continuity state and rejects resume instead of silently starting a fresh run.
+- CLI-backed runtime launches are now aligned to documented headless entrypoints instead of Bridge-only stdin/flag guesses: Cursor uses headless print mode with a positional prompt, Gemini uses `-p/--output-format` plus documented approval and include-directory flags, Qoder uses `--print`/`--output-format`, and iFlow uses `--prompt` with text-mode output.
+- iFlow is in a published shutdown window and the Bridge surfaces that lifecycle truth directly in runtime diagnostics and catalog metadata. Before the published sunset date (`2026-04-17`, Beijing Time) it remains degraded with migration guidance to Qoder; after that date, new launches are rejected unless the upstream contract is revalidated.
 
 ### Coding Agent Runtime Catalog
 
@@ -314,12 +369,22 @@ Current runtime compatibility rules:
 | `claude_code` | `anthropic` | `anthropic` | `claude-sonnet-4-5` | `ANTHROPIC_API_KEY` |
 | `codex` | `openai` | `openai`, `codex` | `gpt-5-codex` | `CODEX_RUNTIME_COMMAND` plus a valid Codex CLI login |
 | `opencode` | `opencode` | `opencode` | `opencode-default` | `OPENCODE_SERVER_URL` and optional basic-auth credentials |
-| `cursor` | `cursor` | `cursor` | `claude-sonnet-4-20250514` | `CURSOR_RUNTIME_COMMAND` plus a working Cursor Agent CLI and any required local auth |
+| `cursor` | `cursor` | `cursor` | `claude-sonnet-4-20250514` | `CURSOR_RUNTIME_COMMAND` pointing to the official Cursor CLI `agent` command plus any required local auth |
 | `gemini` | `google` | `google`, `vertex` | `gemini-2.5-pro` | `GEMINI_RUNTIME_COMMAND` plus Gemini CLI auth (`GEMINI_API_KEY` / `GOOGLE_API_KEY` or equivalent login) |
 | `qoder` | `qoder` | `qoder` | `auto` | `QODER_RUNTIME_COMMAND` plus a working Qoder CLI install |
-| `iflow` | `iflow` | `iflow` | `Qwen3-Coder` | `IFLOW_RUNTIME_COMMAND` plus iFlow CLI auth (`IFLOW_API_KEY` or equivalent login) |
+| `iflow` | `iflow` | `iflow` | `Qwen3-Coder` | `IFLOW_RUNTIME_COMMAND` plus iFlow CLI auth (`IFLOW_API_KEY` or equivalent login); lifecycle is sunsetting and migration should target Qoder |
 
 Bridge readiness diagnostics now surface missing credentials, missing executables, bounded model incompatibilities, and incompatible runtime/provider combinations before launch. The project settings page, single-agent launch, and Team start dialog all consume that catalog instead of hard-coded Claude-only defaults.
+
+`GET /bridge/runtimes` now keeps `supported_features` for compatibility and also publishes:
+
+- `interaction_capabilities`, grouped into `inputs`, `lifecycle`, `approval`, `mcp`, and `diagnostics`
+- `launch_contract`, covering prompt transport, output mode, supported approval modes, additional-directory support, and env-override support
+- `lifecycle`, covering runtime lifecycle state, sunset metadata, replacement runtime, and operator-facing migration guidance
+
+This lets upstream consumers distinguish supported, degraded, unsupported, and sunsetting runtime controls without inferring behavior from the runtime key alone.
+
+The bridge's advanced runtime controls now include `POST /bridge/shell` for OpenCode session shell commands, `POST /bridge/thinking` for Claude thinking-budget updates, and `GET /bridge/mcp-status/:task_id` for Claude Query MCP status. When a runtime does not truthfully support a control, the bridge returns a structured `{ error, operation, runtime, support_state, reason_code }` response instead of collapsing the failure into a generic 500.
 
 Focused bridge-runtime verification commands:
 
@@ -341,7 +406,7 @@ CODEX_RUNTIME_COMMAND=codex
 OPENCODE_RUNTIME_COMMAND=opencode
 
 # Cursor Agent runtime adapter
-CURSOR_RUNTIME_COMMAND=cursor-agent
+CURSOR_RUNTIME_COMMAND=agent
 CURSOR_API_KEY=...
 
 # Gemini CLI runtime adapter
@@ -377,7 +442,7 @@ Suggested operator checks for the expanded backend matrix:
 
 ```bash
 # Cursor Agent
-cursor-agent --help
+agent --help
 
 # Gemini CLI
 gemini --version
@@ -507,11 +572,21 @@ Or build desktop artifacts through the shared desktop packaging contract:
 pnpm build:desktop
 ```
 
+If you want to debug only the Rust/Tauri runtime after the frontend is already up, use the standalone desktop flow:
+
+```bash
+pnpm dev
+pnpm desktop:standalone:check
+pnpm desktop:standalone:dev
+```
+
 Desktop capability contract in the current Tauri shell:
 
 - Tauri now supervises three required sidecars: the Go orchestrator on `http://127.0.0.1:7777`, the TS bridge on `http://127.0.0.1:7778`, and the IM Bridge on `http://127.0.0.1:7779`.
 - The desktop runtime is only reported as `ready` after all three sidecars pass health checks. Unexpected exits trigger bounded restart attempts before the runtime is marked `degraded`.
 - The shared desktop prepare contract is split into `pnpm desktop:dev:prepare` for current-host development binaries and `pnpm desktop:build:prepare` for packaging binaries plus the frontend production build. `tauri:dev`, `build:desktop`, Tauri pre-commands, and the maintained VS Code desktop debug entry points all reuse that contract.
+- `pnpm desktop:standalone:check` and `pnpm desktop:standalone:dev` reuse the same current-host sidecar prepare contract, but they treat frontend availability on `http://localhost:3000` as an external prerequisite instead of starting `pnpm dev` for you.
+- The maintained VS Code `Tauri Standalone Rust Debug` launch entrypoint follows the same rule: it prepares current-host sidecars, but expects the frontend dev server to already be running.
 - Frontend desktop access is centralized through `lib/platform-runtime.ts` and `hooks/use-platform-capability.ts`. Supported desktop commands include backend URL resolution, runtime status, native file picking, system notifications, tray updates, global shortcut registration, update checks, and read-only runtime summary queries.
 - The main window now uses shared frameless chrome via `components/layout/desktop-window-frame.tsx`, including drag region handling plus minimize / maximize / restore / close actions wired through the platform capability facade.
 - Web mode keeps explicit fallback semantics: file picking falls back to browser input, notifications fall back to the Web Notification API, tray updates fall back to document title updates, global shortcuts return `unsupported`, and update checks return `not_applicable`.
@@ -540,17 +615,26 @@ Current limitations:
 | `pnpm build:im-bridge` | Cross-compile IM Bridge sidecar binaries for Tauri |
 | `pnpm build:im-bridge:dev` | Build the IM Bridge sidecar for the current platform |
 | `pnpm desktop:dev:prepare` | Prepare current-host backend + TS bridge + IM Bridge sidecars for desktop development |
+| `pnpm desktop:standalone:check` | Validate standalone Rust desktop debug prerequisites without starting the frontend |
+| `pnpm desktop:standalone:dev` | Launch the standalone Rust desktop debug flow after the frontend is already running |
 | `pnpm desktop:build:prepare` | Prepare packaging backend + TS bridge + IM Bridge sidecars and build the frontend bundle |
 | `pnpm dev:all` | Start or reuse the full local web development stack: compose infra + Go + TS bridge + IM Bridge + frontend |
 | `pnpm dev:all:status` | Report source, health, ports, and known log paths for the local dev stack |
 | `pnpm dev:all:logs` | Show the repo-local log files tracked for the local dev stack |
 | `pnpm dev:all:stop` | Stop only the services managed by `dev:all` and preserve reused or external listeners |
+| `pnpm dev:backend` | Start or reuse the backend-only local development stack: compose infra + Go + TS bridge + IM Bridge |
+| `pnpm dev:backend:status` | Report source, health, ports, and known log paths for the backend-only local dev stack |
+| `pnpm dev:backend:logs` | Show the repo-local log files tracked for the backend-only local dev stack |
+| `pnpm dev:backend:stop` | Stop only the services managed by `dev:backend` and preserve reused or external listeners |
+| `pnpm dev:backend:verify` | Run the supported backend runtime smoke workflow: start/reuse the backend stack, verify health hops, inject one IM stub command roundtrip, and keep managed services running |
 | `pnpm build:plugin:wasm` | Build the Go WASM sample plugin artifact |
 | `pnpm plugin:build` | Build a maintained Go-hosted plugin target from a manifest |
 | `pnpm plugin:debug` | Run a local Go WASM plugin debug invocation through the real runtime envelope |
 | `pnpm plugin:dev` | Start or reuse the minimal plugin authoring stack: Go orchestrator + TS bridge |
 | `pnpm plugin:verify` | Run the maintained sample plugin smoke workflow: build -> debug health |
 | `pnpm plugin:verify:builtins` | Verify the built-in plugin bundle contract and generated registry metadata |
+| `pnpm skill:sync:mirrors` | Refresh declared workflow skill mirrors from their canonical `.codex` source |
+| `pnpm skill:verify:internal` | Verify internal skill registry coverage, profile rules, provenance, and mirror drift |
 | `pnpm skill:verify:builtins`  | Verify the built-in skill bundle contract and marketplace preview prerequisites |
 | `pnpm tauri:dev` | Start Tauri dev mode with shared desktop prepare hooks for backend + TS bridge + IM Bridge |
 | `pnpm tauri:build` | Build the desktop app |

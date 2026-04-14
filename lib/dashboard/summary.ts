@@ -115,6 +115,15 @@ export interface TeamMember {
   agentSummary?: string[];
 }
 
+export type TeamAttentionCategory = "setup-required" | "inactive" | "suspended";
+
+export interface TeamAttentionGroup {
+  id: TeamAttentionCategory;
+  label: string;
+  count: number;
+  memberIds: string[];
+}
+
 export interface DashboardActivityItem {
   id: string;
   type: string;
@@ -360,6 +369,86 @@ export function enrichTeamMembers(input: {
   return input.members
     .map((member) => memberMap.get(member.id))
     .filter((member): member is TeamMember => Boolean(member));
+}
+
+export function getTeamMemberAttentionCategories(
+  member: TeamMember
+): TeamAttentionCategory[] {
+  const categories: TeamAttentionCategory[] = [];
+
+  if (
+    member.type === "agent" &&
+    (member.readinessMissing ?? []).some((field) =>
+      ["runtime", "provider", "model", "roleId"].includes(field)
+    )
+  ) {
+    categories.push("setup-required");
+  }
+
+  if (member.status === "inactive") {
+    categories.push("inactive");
+  }
+
+  if (member.status === "suspended") {
+    categories.push("suspended");
+  }
+
+  return categories;
+}
+
+export function buildTeamAttentionGroups(
+  members: TeamMember[]
+): TeamAttentionGroup[] {
+  const groups: TeamAttentionGroup[] = [
+    {
+      id: "setup-required",
+      label: "Setup Required",
+      count: 0,
+      memberIds: [],
+    },
+    {
+      id: "inactive",
+      label: "Inactive",
+      count: 0,
+      memberIds: [],
+    },
+    {
+      id: "suspended",
+      label: "Suspended",
+      count: 0,
+      memberIds: [],
+    },
+  ];
+
+  const groupMap = new Map(groups.map((group) => [group.id, group]));
+  for (const member of members) {
+    for (const category of getTeamMemberAttentionCategories(member)) {
+      const group = groupMap.get(category);
+      if (!group) continue;
+      group.count += 1;
+      group.memberIds.push(member.id);
+    }
+  }
+
+  return groups.filter((group) => group.count > 0);
+}
+
+export function getQuickLifecycleTargetStatus(
+  member: TeamMember
+): MemberStatus | null {
+  if (member.status === "active") {
+    return "suspended";
+  }
+  if (member.status === "inactive" || member.status === "suspended") {
+    return "active";
+  }
+  return null;
+}
+
+export function getQuickLifecycleLabel(member: TeamMember): string | null {
+  const status = getQuickLifecycleTargetStatus(member);
+  if (!status) return null;
+  return status === "active" ? "Activate" : "Suspend";
 }
 
 function buildActivityItems(

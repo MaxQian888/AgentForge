@@ -17,7 +17,7 @@ import (
 )
 
 var errProjectScopeNotConfigured = errors.New(
-	"project scope is not configured; set AGENTFORGE_PROJECT_ID to a project UUID",
+	"当前未设置 project。先用 /project list 查看项目，再用 /project set <project-id|slug> 选择项目。",
 )
 
 // AgentForgeClient communicates with the AgentForge Go backend API.
@@ -57,6 +57,23 @@ func (c *AgentForgeClient) WithPlatform(platform core.Platform) *AgentForgeClien
 	return c.WithSource(core.MetadataForPlatform(platform).Source)
 }
 
+// WithProjectScope returns a shallow copy using the given project scope.
+func (c *AgentForgeClient) WithProjectScope(projectID string) *AgentForgeClient {
+	clone := *c
+	clone.projectID = strings.TrimSpace(projectID)
+	return &clone
+}
+
+// SetProjectScope updates the current project scope in-place.
+func (c *AgentForgeClient) SetProjectScope(projectID string) {
+	c.projectID = strings.TrimSpace(projectID)
+}
+
+// ProjectScope returns the currently configured project scope.
+func (c *AgentForgeClient) ProjectScope() string {
+	return strings.TrimSpace(c.projectID)
+}
+
 // WithBridgeContext returns a shallow copy tagged with the runtime bridge id and
 // the current reply target for asynchronous progress delivery.
 func (c *AgentForgeClient) WithBridgeContext(bridgeID string, replyTarget *core.ReplyTarget) *AgentForgeClient {
@@ -81,10 +98,36 @@ func (c *AgentForgeClient) WithBridgeContext(bridgeID string, replyTarget *core.
 
 // --- Task operations ---
 
+type CreateTaskInput struct {
+	Title       string `json:"title"`
+	Description string `json:"description"`
+	Priority    string `json:"priority"`
+}
+
 // CreateTask creates a new task via the AgentForge API.
 func (c *AgentForgeClient) CreateTask(ctx context.Context, title, description string) (*Task, error) {
-	body := map[string]string{"title": title, "description": description}
-	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/tasks", c.projectID), body)
+	return c.CreateTaskWithInput(ctx, CreateTaskInput{
+		Title:       title,
+		Description: description,
+		Priority:    "medium",
+	})
+}
+
+// CreateTaskWithInput creates a new task via the AgentForge API with explicit payload fields.
+func (c *AgentForgeClient) CreateTaskWithInput(ctx context.Context, input CreateTaskInput) (*Task, error) {
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	body := map[string]string{
+		"title":       input.Title,
+		"description": input.Description,
+		"priority":    strings.TrimSpace(input.Priority),
+	}
+	if strings.TrimSpace(body["priority"]) == "" {
+		body["priority"] = "medium"
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/tasks", projectID), body)
 	if err != nil {
 		return nil, err
 	}
@@ -101,7 +144,11 @@ func (c *AgentForgeClient) CreateTask(ctx context.Context, title, description st
 
 // ListTasks lists tasks, optionally filtered by status.
 func (c *AgentForgeClient) ListTasks(ctx context.Context, filter string) ([]Task, error) {
-	path := fmt.Sprintf("/api/v1/projects/%s/tasks", c.projectID)
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/api/v1/projects/%s/tasks", projectID)
 	if filter != "" {
 		path = fmt.Sprintf("%s?status=%s", path, filter)
 	}
@@ -135,6 +182,19 @@ func (c *AgentForgeClient) GetTask(ctx context.Context, taskID string) (*Task, e
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return &task, nil
+}
+
+// DeleteTask deletes a task by ID.
+func (c *AgentForgeClient) DeleteTask(ctx context.Context, taskID string) error {
+	resp, err := c.doRequest(ctx, http.MethodDelete, "/api/v1/tasks/"+strings.TrimSpace(taskID), nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return c.readError(resp)
+	}
+	return nil
 }
 
 // AssignTask assigns a task to the given assignee.
@@ -214,7 +274,27 @@ func (c *AgentForgeClient) DecomposeTaskViaBridge(ctx context.Context, taskID, p
 
 // SpawnAgent spawns an AI agent for a task.
 func (c *AgentForgeClient) SpawnAgent(ctx context.Context, taskID string) (*TaskDispatchResponse, error) {
-	body := map[string]string{"taskId": taskID}
+	return c.SpawnAgentWithOptions(ctx, taskID, AgentSpawnOptions{})
+}
+
+// SpawnAgentWithOptions spawns an AI agent for a task with optional runtime overrides.
+func (c *AgentForgeClient) SpawnAgentWithOptions(ctx context.Context, taskID string, options AgentSpawnOptions) (*TaskDispatchResponse, error) {
+	body := map[string]any{"taskId": taskID}
+	if trimmed := strings.TrimSpace(options.Runtime); trimmed != "" {
+		body["runtime"] = trimmed
+	}
+	if trimmed := strings.TrimSpace(options.Provider); trimmed != "" {
+		body["provider"] = trimmed
+	}
+	if trimmed := strings.TrimSpace(options.Model); trimmed != "" {
+		body["model"] = trimmed
+	}
+	if trimmed := strings.TrimSpace(options.RoleID); trimmed != "" {
+		body["roleId"] = trimmed
+	}
+	if options.MaxBudgetUsd > 0 {
+		body["maxBudgetUsd"] = options.MaxBudgetUsd
+	}
 	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/agents/spawn", body)
 	if err != nil {
 		return nil, err
@@ -228,6 +308,133 @@ func (c *AgentForgeClient) SpawnAgent(ctx context.Context, taskID string) (*Task
 		return nil, fmt.Errorf("decode response: %w", err)
 	}
 	return &result, nil
+}
+
+func (c *AgentForgeClient) ListProjects(ctx context.Context) ([]Project, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/projects", nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var projects []Project
+	if err := json.NewDecoder(resp.Body).Decode(&projects); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return projects, nil
+}
+
+func (c *AgentForgeClient) GetProject(ctx context.Context, projectID string) (*Project, error) {
+	resp, err := c.doRequest(ctx, http.MethodGet, "/api/v1/projects/"+strings.TrimSpace(projectID), nil)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var project Project
+	if err := json.NewDecoder(resp.Body).Decode(&project); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &project, nil
+}
+
+func (c *AgentForgeClient) UpdateProject(ctx context.Context, projectID string, input ProjectUpdateInput) (*Project, error) {
+	resp, err := c.doRequest(ctx, http.MethodPut, "/api/v1/projects/"+strings.TrimSpace(projectID), input)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return nil, c.readError(resp)
+	}
+	var project Project
+	if err := json.NewDecoder(resp.Body).Decode(&project); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &project, nil
+}
+
+type CreateProjectInput struct {
+	Name        string `json:"name"`
+	Slug        string `json:"slug"`
+	Description string `json:"description,omitempty"`
+	RepoURL     string `json:"repoUrl,omitempty"`
+}
+
+type CreateMemberInput struct {
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Role        string   `json:"role,omitempty"`
+	Status      string   `json:"status,omitempty"`
+	Email       string   `json:"email,omitempty"`
+	IMPlatform  string   `json:"imPlatform,omitempty"`
+	IMUserID    string   `json:"imUserId,omitempty"`
+	AgentConfig string   `json:"agentConfig,omitempty"`
+	Skills      []string `json:"skills,omitempty"`
+}
+
+func (c *AgentForgeClient) CreateProject(ctx context.Context, input CreateProjectInput) (*Project, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/projects", input)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, c.readError(resp)
+	}
+	var project Project
+	if err := json.NewDecoder(resp.Body).Decode(&project); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &project, nil
+}
+
+func (c *AgentForgeClient) DeleteProject(ctx context.Context, projectID string) error {
+	resp, err := c.doRequest(ctx, http.MethodDelete, "/api/v1/projects/"+strings.TrimSpace(projectID), nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return c.readError(resp)
+	}
+	return nil
+}
+
+func (c *AgentForgeClient) CreateMember(ctx context.Context, input CreateMemberInput) (*Member, error) {
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/projects/"+projectID+"/members", input)
+	if err != nil {
+		return nil, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated {
+		return nil, c.readError(resp)
+	}
+	var member Member
+	if err := json.NewDecoder(resp.Body).Decode(&member); err != nil {
+		return nil, fmt.Errorf("decode response: %w", err)
+	}
+	return &member, nil
+}
+
+func (c *AgentForgeClient) DeleteMember(ctx context.Context, memberID string) error {
+	resp, err := c.doRequest(ctx, http.MethodDelete, "/api/v1/members/"+strings.TrimSpace(memberID), nil)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return c.readError(resp)
+	}
+	return nil
 }
 
 // ListProjectMembers returns project members that can be used for command-side assignee resolution.
@@ -640,7 +847,11 @@ func (c *AgentForgeClient) StoreProjectMemoryNote(ctx context.Context, key, cont
 
 // GetCostStats returns cost statistics for the project.
 func (c *AgentForgeClient) GetCostStats(ctx context.Context) (*CostStats, error) {
-	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/stats/cost?projectId=%s", c.projectID), nil)
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	resp, err := c.doRequest(ctx, http.MethodGet, fmt.Sprintf("/api/v1/stats/cost?projectId=%s", projectID), nil)
 	if err != nil {
 		return nil, err
 	}
@@ -678,7 +889,11 @@ func (c *AgentForgeClient) GetCostStats(ctx context.Context) (*CostStats, error)
 
 // TriggerReview triggers a code review for a PR URL.
 func (c *AgentForgeClient) TriggerReview(ctx context.Context, prURL string) (*Review, error) {
-	body := map[string]string{"prUrl": prURL, "projectId": c.projectID}
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	body := map[string]string{"prUrl": prURL, "projectId": projectID}
 	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/reviews/trigger", body)
 	if err != nil {
 		return nil, err
@@ -696,7 +911,11 @@ func (c *AgentForgeClient) TriggerReview(ctx context.Context, prURL string) (*Re
 
 // TriggerStandaloneDeepReview triggers a detached deep review for a PR URL.
 func (c *AgentForgeClient) TriggerStandaloneDeepReview(ctx context.Context, prURL string) (*Review, error) {
-	body := map[string]string{"prUrl": prURL, "projectId": c.projectID, "trigger": "manual"}
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	body := map[string]string{"prUrl": prURL, "projectId": projectID, "trigger": "manual"}
 	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/reviews/trigger", body)
 	if err != nil {
 		return nil, err
@@ -769,7 +988,11 @@ func (c *AgentForgeClient) GetReview(ctx context.Context, reviewID string) (*Rev
 
 // GetCurrentSprint returns the active sprint for the project.
 func (c *AgentForgeClient) GetCurrentSprint(ctx context.Context) (*Sprint, error) {
-	path := fmt.Sprintf("/api/v1/projects/%s/sprints?status=active", c.projectID)
+	projectID, err := c.requireProjectScope()
+	if err != nil {
+		return nil, err
+	}
+	path := fmt.Sprintf("/api/v1/projects/%s/sprints?status=active", projectID)
 	resp, err := c.doRequest(ctx, http.MethodGet, path, nil)
 	if err != nil {
 		return nil, err
@@ -809,13 +1032,26 @@ func (c *AgentForgeClient) GetSprintBurndown(ctx context.Context, sprintID strin
 
 // QuickAgentRun creates a task and spawns an agent in one step.
 func (c *AgentForgeClient) QuickAgentRun(ctx context.Context, prompt string) (*TaskDispatchResponse, error) {
+	return c.QuickAgentRunWithOptions(ctx, prompt, AgentSpawnOptions{})
+}
+
+type AgentSpawnOptions struct {
+	Runtime      string
+	Provider     string
+	Model        string
+	RoleID       string
+	MaxBudgetUsd float64
+}
+
+// QuickAgentRunWithOptions creates a task and spawns an agent in one step with optional runtime overrides.
+func (c *AgentForgeClient) QuickAgentRunWithOptions(ctx context.Context, prompt string, options AgentSpawnOptions) (*TaskDispatchResponse, error) {
 	// Step 1: create a task from the prompt.
 	task, err := c.CreateTask(ctx, prompt, prompt)
 	if err != nil {
 		return nil, fmt.Errorf("create task: %w", err)
 	}
 	// Step 2: spawn an agent for the task.
-	result, err := c.SpawnAgent(ctx, task.ID)
+	result, err := c.SpawnAgentWithOptions(ctx, task.ID, options)
 	if err != nil {
 		return nil, fmt.Errorf("spawn agent: %w", err)
 	}
@@ -1078,14 +1314,27 @@ type AgentRunSummary struct {
 }
 
 type DispatchOutcome struct {
-	Status string    `json:"status"`
-	Reason string    `json:"reason,omitempty"`
-	Run    *AgentRun `json:"run,omitempty"`
+	Status         string                 `json:"status"`
+	Reason         string                 `json:"reason,omitempty"`
+	Runtime        string                 `json:"runtime,omitempty"`
+	Provider       string                 `json:"provider,omitempty"`
+	Model          string                 `json:"model,omitempty"`
+	RoleID         string                 `json:"roleId,omitempty"`
+	GuardrailType  string                 `json:"guardrailType,omitempty"`
+	GuardrailScope string                 `json:"guardrailScope,omitempty"`
+	BudgetWarning  *DispatchBudgetWarning `json:"budgetWarning,omitempty"`
+	Queue          *QueueEntry            `json:"queue,omitempty"`
+	Run            *AgentRun              `json:"run,omitempty"`
 }
 
 type TaskDispatchResponse struct {
 	Task     Task            `json:"task"`
 	Dispatch DispatchOutcome `json:"dispatch"`
+}
+
+type DispatchBudgetWarning struct {
+	Scope   string `json:"scope"`
+	Message string `json:"message"`
 }
 
 type Member struct {
@@ -1143,6 +1392,7 @@ type BridgeRuntimeEntry struct {
 	DefaultProvider string `json:"default_provider"`
 	DefaultModel    string `json:"default_model"`
 	Available       bool   `json:"available"`
+	Diagnostics     []ProjectRuntimeDiagnostic `json:"diagnostics,omitempty"`
 }
 
 type BridgeRuntimeCatalog struct {
@@ -1166,6 +1416,72 @@ type TaskAIClassifyResponse struct {
 	Args       string  `json:"args"`
 	Confidence float64 `json:"confidence"`
 	Reply      string  `json:"reply,omitempty"`
+}
+
+type CodingAgentSelection struct {
+	Runtime  string `json:"runtime,omitempty"`
+	Provider string `json:"provider,omitempty"`
+	Model    string `json:"model,omitempty"`
+}
+
+type ProjectSettings struct {
+	CodingAgent CodingAgentSelection `json:"codingAgent"`
+}
+
+type ProjectSettingsPatch struct {
+	CodingAgent *CodingAgentSelection `json:"codingAgent,omitempty"`
+}
+
+type ProjectUpdateInput struct {
+	Name          *string              `json:"name,omitempty"`
+	Description   *string              `json:"description,omitempty"`
+	RepoURL       *string              `json:"repoUrl,omitempty"`
+	DefaultBranch *string              `json:"defaultBranch,omitempty"`
+	Settings      *ProjectSettingsPatch `json:"settings,omitempty"`
+}
+
+type ProjectRuntimeDiagnostic struct {
+	Code     string `json:"code"`
+	Message  string `json:"message"`
+	Blocking bool   `json:"blocking"`
+}
+
+type ProjectRuntimeProvider struct {
+	Provider     string   `json:"provider"`
+	Connected    bool     `json:"connected"`
+	DefaultModel string   `json:"defaultModel,omitempty"`
+	ModelOptions []string `json:"modelOptions,omitempty"`
+	AuthRequired bool     `json:"authRequired,omitempty"`
+	AuthMethods  []string `json:"authMethods,omitempty"`
+}
+
+type ProjectCodingAgentRuntime struct {
+	Runtime             string                   `json:"runtime"`
+	Label               string                   `json:"label"`
+	DefaultProvider     string                   `json:"defaultProvider"`
+	CompatibleProviders []string                 `json:"compatibleProviders"`
+	DefaultModel        string                   `json:"defaultModel"`
+	ModelOptions        []string                 `json:"modelOptions,omitempty"`
+	Available           bool                     `json:"available"`
+	Diagnostics         []ProjectRuntimeDiagnostic `json:"diagnostics,omitempty"`
+	Providers           []ProjectRuntimeProvider `json:"providers,omitempty"`
+}
+
+type ProjectCodingAgentCatalog struct {
+	DefaultRuntime   string                    `json:"defaultRuntime"`
+	DefaultSelection CodingAgentSelection      `json:"defaultSelection"`
+	Runtimes         []ProjectCodingAgentRuntime `json:"runtimes"`
+}
+
+type Project struct {
+	ID                 string                    `json:"id"`
+	Name               string                    `json:"name"`
+	Slug               string                    `json:"slug"`
+	Description        string                    `json:"description"`
+	RepoURL            string                    `json:"repoUrl,omitempty"`
+	DefaultBranch      string                    `json:"defaultBranch,omitempty"`
+	Settings           ProjectSettings           `json:"settings"`
+	CodingAgentCatalog *ProjectCodingAgentCatalog `json:"codingAgentCatalog,omitempty"`
 }
 
 type MentionIntentRequest struct {
@@ -1199,6 +1515,9 @@ type QueueEntry struct {
 	RoleID     string  `json:"roleId,omitempty"`
 	Priority   int     `json:"priority"`
 	BudgetUSD  float64 `json:"budgetUsd"`
+	GuardrailType       string  `json:"guardrailType,omitempty"`
+	GuardrailScope      string  `json:"guardrailScope,omitempty"`
+	RecoveryDisposition string  `json:"recoveryDisposition,omitempty"`
 	AgentRunID *string `json:"agentRunId,omitempty"`
 }
 

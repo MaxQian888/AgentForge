@@ -46,6 +46,11 @@ func TestRegisterRoutes_WiresBridgeAPISurface(t *testing.T) {
 		`protected.POST("/ai/decompose", bridgeAIH.Decompose)`,
 		`protected.POST("/ai/generate", bridgeAIH.Generate)`,
 		`protected.POST("/ai/classify-intent", bridgeAIH.ClassifyIntent)`,
+		`protected.POST("/bridge/shell", bridgeConvH.ExecuteShell)`,
+		`protected.POST("/bridge/thinking", bridgeConvH.SetThinkingBudget)`,
+		`protected.GET("/bridge/mcp-status/:task_id", bridgeConvH.GetMCPStatus)`,
+		`protected.POST("/bridge/opencode/provider-auth/:provider/start", bridgeConvH.StartOpenCodeProviderAuth)`,
+		`protected.POST("/bridge/opencode/provider-auth/:request_id/complete", bridgeConvH.CompleteOpenCodeProviderAuth)`,
 	}
 	for _, route := range expectedRoutes {
 		if !strings.Contains(source, route) {
@@ -96,6 +101,29 @@ func TestRegisterRoutes_DoesNotWireInstructionIntrospectionRoutes(t *testing.T) 
 	for _, route := range unexpected {
 		if strings.Contains(source, route) {
 			t.Fatalf("expected RegisterRoutes not to contain %s", route)
+		}
+	}
+}
+
+func TestRegisterRoutes_WiresMemoryExplorerRoutes(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("routes.go"))
+	if err != nil {
+		t.Fatalf("ReadFile(routes.go) error = %v", err)
+	}
+	source := string(content)
+	expectedRoutes := []string{
+		`projectGroup.POST("/memory", memoryH.Store)`,
+		`projectGroup.GET("/memory", memoryH.Search)`,
+		`projectGroup.GET("/memory/stats", memoryH.Stats)`,
+		`projectGroup.GET("/memory/export", memoryH.Export)`,
+		`projectGroup.POST("/memory/bulk-delete", memoryH.BulkDelete)`,
+		`projectGroup.POST("/memory/cleanup", memoryH.Cleanup)`,
+		`projectGroup.GET("/memory/:mid", memoryH.Get)`,
+		`projectGroup.DELETE("/memory/:mid", memoryH.Delete)`,
+	}
+	for _, route := range expectedRoutes {
+		if !strings.Contains(source, route) {
+			t.Fatalf("expected RegisterRoutes to contain %s", route)
 		}
 	}
 }

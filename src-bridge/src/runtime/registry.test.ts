@@ -126,6 +126,26 @@ describe("agent runtime registry", () => {
           diagnostics: expect.arrayContaining([
             expect.objectContaining({ code: "missing_credentials" }),
           ]),
+          interactionCapabilities: expect.objectContaining({
+            inputs: expect.objectContaining({
+              structured_output: expect.objectContaining({
+                state: "degraded",
+                reasonCode: "missing_credentials",
+              }),
+            }),
+            approval: expect.objectContaining({
+              hooks: expect.objectContaining({
+                state: "degraded",
+                requiresRequestFields: ["hook_callback_url"],
+              }),
+            }),
+            diagnostics: expect.objectContaining({
+              readiness: expect.objectContaining({
+                state: "degraded",
+                reasonCode: "missing_credentials",
+              }),
+            }),
+          }),
         }),
         expect.objectContaining({
           key: "codex",
@@ -137,6 +157,20 @@ describe("agent runtime registry", () => {
           diagnostics: expect.arrayContaining([
             expect.objectContaining({ code: "missing_credentials" }),
           ]),
+          interactionCapabilities: expect.objectContaining({
+            lifecycle: expect.objectContaining({
+              fork: expect.objectContaining({
+                state: "degraded",
+                reasonCode: "missing_credentials",
+              }),
+            }),
+            mcp: expect.objectContaining({
+              config_overlay: expect.objectContaining({
+                state: "degraded",
+                reasonCode: "missing_credentials",
+              }),
+            }),
+          }),
         }),
         expect.objectContaining({
           key: "opencode",
@@ -147,6 +181,20 @@ describe("agent runtime registry", () => {
           diagnostics: expect.arrayContaining([
             expect.objectContaining({ code: "server_unreachable" }),
           ]),
+          interactionCapabilities: expect.objectContaining({
+            lifecycle: expect.objectContaining({
+              shell: expect.objectContaining({
+                state: "degraded",
+                reasonCode: "server_unreachable",
+              }),
+            }),
+            approval: expect.objectContaining({
+              provider_auth: expect.objectContaining({
+                state: "degraded",
+                reasonCode: "server_unreachable",
+              }),
+            }),
+          }),
         }),
       ]),
     );
@@ -156,7 +204,7 @@ describe("agent runtime registry", () => {
     const registry = createRuntimeRegistry({
       executableLookup(command) {
         switch (command) {
-          case "cursor-agent":
+          case "agent":
           case "gemini":
           case "qodercli":
           case "iflow":
@@ -390,6 +438,23 @@ describe("agent runtime registry", () => {
         getSkills() {
           return Promise.resolve(["opsx-apply", "opsx-archive"]);
         },
+        getProviderCatalog() {
+          return Promise.resolve({
+            availableProviders: ["opencode", "anthropic"],
+            connectedProviders: ["opencode"],
+            defaultModels: {
+              opencode: "opencode-default",
+              anthropic: "claude-sonnet-4-5",
+            },
+            providerModels: {
+              opencode: ["opencode-default"],
+              anthropic: ["claude-sonnet-4-5", "claude-opus-4-1"],
+            },
+            authMethods: {
+              anthropic: ["oauth"],
+            },
+          });
+        },
       } as never,
     });
 
@@ -400,9 +465,594 @@ describe("agent runtime registry", () => {
           key: "opencode",
           agents: ["planner", "reviewer"],
           skills: ["opsx-apply", "opsx-archive"],
+          providers: expect.arrayContaining([
+            expect.objectContaining({
+              provider: "opencode",
+              connected: true,
+              defaultModel: "opencode-default",
+            }),
+            expect.objectContaining({
+              provider: "anthropic",
+              connected: false,
+              authRequired: true,
+              authMethods: ["oauth"],
+            }),
+          ]),
         }),
       ]),
     );
+  });
+
+  test("launches cursor through documented headless print mode with positional prompt transport", async () => {
+    const launches: Array<{
+      runtime: string;
+      command: string;
+      commandArgs?: string[];
+      stdinPayload?: string;
+    }> = [];
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        switch (command) {
+          case "agent":
+            return "C:/mock/agent.exe";
+          default:
+            return null;
+        }
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          case "CURSOR_API_KEY":
+            return "cursor-token";
+          default:
+            return undefined;
+        }
+      },
+      commandRuntimeRunner: async function* capture(params) {
+        launches.push({
+          runtime: params.runtime,
+          command: params.command,
+          commandArgs: params.commandArgs,
+          stdinPayload: params.stdinPayload,
+        });
+      },
+    });
+
+    const { adapter, request } = await registry.resolveExecute(
+      createRequest({
+        runtime: "cursor",
+        provider: "cursor",
+        model: "gpt-4o",
+        permission_mode: "plan",
+      }),
+    );
+    const runtime = new AgentRuntime(request.task_id, request.session_id);
+    runtime.bindRequest(request);
+
+    await adapter.execute(runtime, { send() {} }, request, "System prompt");
+
+    expect(launches).toEqual([
+      expect.objectContaining({
+        runtime: "cursor",
+        command: "agent",
+        commandArgs: [
+          "-p",
+          "--output-format",
+          "stream-json",
+          "--trust",
+          "--mode",
+          "plan",
+          "--model",
+          "gpt-4o",
+          "System prompt\n\nImplement the requested bridge change.",
+        ],
+        stdinPayload: "",
+      }),
+    ]);
+  });
+
+  test("launches gemini through documented prompt and output flags with include-directories support", async () => {
+    const launches: Array<{
+      runtime: string;
+      command: string;
+      commandArgs?: string[];
+      stdinPayload?: string;
+    }> = [];
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        return command === "gemini" ? "C:/mock/gemini.exe" : null;
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          case "GEMINI_API_KEY":
+            return "gemini-token";
+          default:
+            return undefined;
+        }
+      },
+      commandRuntimeRunner: async function* capture(params) {
+        launches.push({
+          runtime: params.runtime,
+          command: params.command,
+          commandArgs: params.commandArgs,
+          stdinPayload: params.stdinPayload,
+        });
+      },
+    });
+
+    const { adapter, request } = await registry.resolveExecute(
+      createRequest({
+        runtime: "gemini",
+        provider: "google",
+        model: "gemini-2.5-pro",
+        permission_mode: "auto_edit",
+        additional_directories: ["D:/Project/shared", "D:/Project/docs"],
+      }),
+    );
+    const runtime = new AgentRuntime(request.task_id, request.session_id);
+    runtime.bindRequest(request);
+
+    await adapter.execute(runtime, { send() {} }, request, "System prompt");
+
+    expect(launches).toEqual([
+      expect.objectContaining({
+        runtime: "gemini",
+        command: "gemini",
+        commandArgs: [
+          "-p",
+          "System prompt\n\nImplement the requested bridge change.",
+          "--output-format",
+          "stream-json",
+          "--approval-mode=auto_edit",
+          "--model",
+          "gemini-2.5-pro",
+          "--include-directories",
+          "D:/Project/shared,D:/Project/docs",
+        ],
+        stdinPayload: undefined,
+      }),
+    ]);
+  });
+
+  test("launches qoder through documented print mode and yolo flag instead of legacy aliases", async () => {
+    const launches: Array<{
+      runtime: string;
+      command: string;
+      commandArgs?: string[];
+      stdinPayload?: string;
+    }> = [];
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        return command === "qodercli" ? "C:/mock/qodercli.exe" : null;
+      },
+      envLookup(name) {
+        return name === "ANTHROPIC_API_KEY" ? "test-token" : undefined;
+      },
+      commandRuntimeRunner: async function* capture(params) {
+        launches.push({
+          runtime: params.runtime,
+          command: params.command,
+          commandArgs: params.commandArgs,
+          stdinPayload: params.stdinPayload,
+        });
+      },
+    });
+
+    const { adapter, request } = await registry.resolveExecute(
+      createRequest({
+        runtime: "qoder",
+        provider: "qoder",
+        model: "ultimate",
+        permission_mode: "bypassPermissions",
+      }),
+    );
+    const runtime = new AgentRuntime(request.task_id, request.session_id);
+    runtime.bindRequest(request);
+
+    await adapter.execute(runtime, { send() {} }, request, "System prompt");
+
+    expect(launches).toEqual([
+      expect.objectContaining({
+        runtime: "qoder",
+        command: "qodercli",
+        commandArgs: [
+          "--print",
+          "-p",
+          "System prompt\n\nImplement the requested bridge change.",
+          "--output-format",
+          "stream-json",
+          "--yolo",
+          "-m",
+          "ultimate",
+          "-w",
+          "D:/Project/AgentForge",
+        ],
+        stdinPayload: undefined,
+      }),
+    ]);
+  });
+
+  test("launches iflow through documented non-interactive prompt path and publishes sunset guidance", async () => {
+    const launches: Array<{
+      runtime: string;
+      command: string;
+      commandArgs?: string[];
+      stdinPayload?: string;
+    }> = [];
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        switch (command) {
+          case "iflow":
+            return "C:/mock/iflow.exe";
+          default:
+            return null;
+        }
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          case "IFLOW_API_KEY":
+            return "iflow-token";
+          default:
+            return undefined;
+        }
+      },
+      now: () => Date.parse("2026-04-13T08:00:00+08:00"),
+      commandRuntimeRunner: async function* capture(params) {
+        launches.push({
+          runtime: params.runtime,
+          command: params.command,
+          commandArgs: params.commandArgs,
+          stdinPayload: params.stdinPayload,
+        });
+      },
+    });
+
+    const catalog = await registry.getCatalog();
+    expect(catalog.runtimes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "iflow",
+          available: true,
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({
+              code: "sunset_window",
+              blocking: false,
+            }),
+          ]),
+          launchContract: expect.objectContaining({
+            promptTransport: "prompt_flag",
+            outputMode: "text",
+            supportedApprovalModes: ["default", "yolo"],
+            additionalDirectories: true,
+            envOverrides: false,
+          }),
+          lifecycle: expect.objectContaining({
+            stage: "sunsetting",
+            replacementRuntime: "qoder",
+          }),
+        }),
+      ]),
+    );
+
+    const { adapter, request } = await registry.resolveExecute(
+      createRequest({
+        runtime: "iflow",
+        provider: "iflow",
+        model: "Qwen3-Coder",
+        additional_directories: ["D:/Project/shared"],
+      }),
+    );
+    const runtime = new AgentRuntime(request.task_id, request.session_id);
+    runtime.bindRequest(request);
+
+    await adapter.execute(runtime, { send() {} }, request, "System prompt");
+
+    expect(launches).toEqual([
+      expect.objectContaining({
+        runtime: "iflow",
+        command: "iflow",
+        commandArgs: [
+          "--prompt",
+          "System prompt\n\nImplement the requested bridge change.",
+          "--model",
+          "Qwen3-Coder",
+          "--add-dir",
+          "D:/Project/shared",
+        ],
+        stdinPayload: undefined,
+      }),
+    ]);
+  });
+
+  test("rejects iflow after the published sunset date", async () => {
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        switch (command) {
+          case "iflow":
+            return "C:/mock/iflow.exe";
+          default:
+            return null;
+        }
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          case "IFLOW_API_KEY":
+            return "iflow-token";
+          default:
+            return undefined;
+        }
+      },
+      now: () => Date.parse("2026-04-18T08:00:00+08:00"),
+    });
+
+    const catalog = await registry.getCatalog();
+    expect(catalog.runtimes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "iflow",
+          available: false,
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({
+              code: "runtime_sunset",
+              blocking: true,
+            }),
+          ]),
+          lifecycle: expect.objectContaining({
+            stage: "sunset",
+          }),
+        }),
+      ]),
+    );
+
+    await expect(
+      registry.resolveExecute(
+        createRequest({
+          runtime: "iflow",
+          provider: "iflow",
+          model: "Qwen3-Coder",
+        }),
+      ),
+    ).rejects.toThrow("Runtime iflow has reached its published sunset date");
+  });
+
+  test("surfaces degraded OpenCode catalog diagnostics when discovery helpers fail", async () => {
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        return `C:/mock/${command}.exe`;
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          case "OPENCODE_SERVER_URL":
+            return "http://127.0.0.1:4096";
+          case "OPENCODE_RUNTIME_MODEL":
+            return "opencode-default";
+          default:
+            return undefined;
+        }
+      },
+      opencodeTransport: {
+        checkReadiness() {
+          return Promise.resolve({ ok: true, diagnostics: [] });
+        },
+        getAgents() {
+          throw new Error("agent discovery offline");
+        },
+        getSkills() {
+          throw new Error("skill discovery offline");
+        },
+        getProviderCatalog() {
+          throw new Error("provider catalog offline");
+        },
+      } as never,
+    });
+
+    const catalog = await registry.getCatalog();
+    expect(catalog.runtimes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "opencode",
+          available: true,
+          diagnostics: expect.arrayContaining([
+            expect.objectContaining({
+              code: "catalog_agents_unavailable",
+              blocking: false,
+            }),
+            expect.objectContaining({
+              code: "catalog_skills_unavailable",
+              blocking: false,
+            }),
+            expect.objectContaining({
+              code: "catalog_providers_unavailable",
+              blocking: false,
+            }),
+          ]),
+        }),
+      ]),
+    );
+  });
+
+  test("publishes provider-auth guidance when OpenCode providers require Bridge-startable auth", async () => {
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        return `C:/mock/${command}.exe`;
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          case "OPENCODE_SERVER_URL":
+            return "http://127.0.0.1:4096";
+          case "OPENCODE_RUNTIME_MODEL":
+            return "opencode-default";
+          default:
+            return undefined;
+        }
+      },
+      opencodeTransport: {
+        checkReadiness() {
+          return Promise.resolve({ ok: true, diagnostics: [] });
+        },
+        getProviderCatalog() {
+          return Promise.resolve({
+            availableProviders: ["anthropic"],
+            connectedProviders: [],
+            defaultModels: {
+              anthropic: "claude-sonnet-4-5",
+            },
+            providerModels: {
+              anthropic: ["claude-sonnet-4-5"],
+            },
+            authMethods: {
+              anthropic: ["oauth"],
+            },
+          });
+        },
+      } as never,
+    });
+
+    const catalog = await registry.getCatalog();
+    expect(catalog.runtimes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "opencode",
+          interactionCapabilities: expect.objectContaining({
+            approval: expect.objectContaining({
+              provider_auth: expect.objectContaining({
+                state: "degraded",
+                reasonCode: "provider_auth_required",
+                message: expect.stringContaining("/bridge/opencode/provider-auth"),
+              }),
+            }),
+          }),
+        }),
+      ]),
+    );
+  });
+
+  test("publishes OpenCode parity input and rollback capability truth from the transport surface", async () => {
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        return `C:/mock/${command}.exe`;
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          case "OPENCODE_SERVER_URL":
+            return "http://127.0.0.1:4096";
+          case "OPENCODE_RUNTIME_MODEL":
+            return "opencode-default";
+          default:
+            return undefined;
+        }
+      },
+      opencodeTransport: {
+        checkReadiness() {
+          return Promise.resolve({ ok: true, diagnostics: [] });
+        },
+        getExecuteCapabilities() {
+          return {
+            attachments: true,
+            env: true,
+            web_search: true,
+            rollback: true,
+          };
+        },
+      } as never,
+    });
+
+    const catalog = await registry.getCatalog();
+    expect(catalog.runtimes).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          key: "opencode",
+          interactionCapabilities: expect.objectContaining({
+            inputs: expect.objectContaining({
+              attachments: expect.objectContaining({ state: "supported" }),
+              env: expect.objectContaining({ state: "supported" }),
+              web_search: expect.objectContaining({ state: "supported" }),
+            }),
+            lifecycle: expect.objectContaining({
+              rollback: expect.objectContaining({ state: "supported" }),
+            }),
+          }),
+        }),
+      ]),
+    );
+  });
+
+  test("rejects OpenCode parity-sensitive execute inputs when the transport cannot honor them truthfully", async () => {
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        return `C:/mock/${command}.exe`;
+      },
+      envLookup(name) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          case "OPENCODE_SERVER_URL":
+            return "http://127.0.0.1:4096";
+          case "OPENCODE_RUNTIME_MODEL":
+            return "opencode-default";
+          default:
+            return undefined;
+        }
+      },
+      opencodeTransport: {
+        checkReadiness() {
+          return Promise.resolve({ ok: true, diagnostics: [] });
+        },
+        getExecuteCapabilities() {
+          return {
+            attachments: false,
+            env: false,
+            web_search: false,
+            rollback: false,
+          };
+        },
+      } as never,
+    });
+
+    await expect(
+      registry.resolveExecute(
+        createRequest({
+          runtime: "opencode",
+          provider: "opencode",
+          attachments: [{ type: "image", path: "D:/tmp/screen.png" }],
+        }),
+      ),
+    ).rejects.toThrow("Runtime opencode cannot honor attachments");
+
+    await expect(
+      registry.resolveExecute(
+        createRequest({
+          runtime: "opencode",
+          provider: "opencode",
+          env: {
+            FEATURE_FLAG: "enabled",
+          },
+        }),
+      ),
+    ).rejects.toThrow("Runtime opencode cannot honor env");
+
+    await expect(
+      registry.resolveExecute(
+        createRequest({
+          runtime: "opencode",
+          provider: "opencode",
+          web_search: true,
+        }),
+      ),
+    ).rejects.toThrow("Runtime opencode cannot honor web_search");
   });
 
   test("rejects explicit runtime/provider combinations that are incompatible", async () => {
@@ -459,6 +1109,37 @@ describe("agent runtime registry", () => {
     await expect(registry.resolveExecute(createRequest({ runtime: "claude_code" }))).rejects.toThrow(
       "Missing required environment variable for runtime claude_code: ANTHROPIC_API_KEY",
     );
+  });
+
+  test("rejects callback-dependent Claude requests that omit a callback target", async () => {
+    const registry = createRuntimeRegistry({
+      executableLookup(command) {
+        return `C:/mock/${command}.exe`;
+      },
+      envLookup(name) {
+        return name === "ANTHROPIC_API_KEY" ? "test-token" : undefined;
+      },
+    });
+
+    await expect(
+      registry.resolveExecute(
+        createRequest({
+          runtime: "claude_code",
+          hooks_config: {
+            hooks: [{ hook: "PreToolUse" }],
+          },
+        }),
+      ),
+    ).rejects.toThrow("hook_callback_url is required when Claude callback interactions are enabled");
+
+    await expect(
+      registry.resolveExecute(
+        createRequest({
+          runtime: "claude_code",
+          tool_permission_callback: true,
+        }),
+      ),
+    ).rejects.toThrow("hook_callback_url is required when Claude callback interactions are enabled");
   });
 
   test("dispatches supported advanced operations and throws typed errors for unsupported ones", async () => {
@@ -568,10 +1249,14 @@ describe("agent runtime registry", () => {
       setModel: async (model?: string) => {
         calls.push({ kind: "setModel", payload: model });
       },
+      setMaxThinkingTokens: async (tokens: number | null) => {
+        calls.push({ kind: "setMaxThinkingTokens", payload: tokens });
+      },
       rewindFiles: async (messageId: string) => {
         calls.push({ kind: "rewindFiles", payload: messageId });
         return { canRewind: true };
       },
+      mcpServerStatus: async () => [{ name: "github", healthy: true }],
     };
 
     const forkCalls: Array<{ sessionId: string; upToMessageId?: string; dir?: string }> = [];
@@ -591,7 +1276,11 @@ describe("agent runtime registry", () => {
 
     await registry.interrupt(runtime);
     await registry.setModel(runtime, { model: "claude-haiku-4-5" });
+    await registry.setThinkingBudget(runtime, { max_thinking_tokens: 2_048 });
     await registry.rollback(runtime, { checkpoint_id: "assistant-uuid-2" });
+    await expect(registry.getMcpServerStatus(runtime)).resolves.toEqual([
+      { name: "github", healthy: true },
+    ]);
     await expect(
       registry.fork(runtime, {
         message_id: "assistant-uuid-2",
@@ -608,6 +1297,7 @@ describe("agent runtime registry", () => {
     expect(calls).toEqual([
       { kind: "interrupt" },
       { kind: "setModel", payload: "claude-haiku-4-5" },
+      { kind: "setMaxThinkingTokens", payload: 2_048 },
       { kind: "rewindFiles", payload: "assistant-uuid-2" },
     ]);
     expect(forkCalls).toEqual([
@@ -683,6 +1373,81 @@ describe("agent runtime registry", () => {
         cwd: "D:/Project/AgentForge",
       },
     ]);
+  });
+
+  test("dispatches Codex rollback through an injected rollback runner and refreshes continuity", async () => {
+    const runtime = new AgentRuntime("task-codex-rollback", "session-codex-rollback");
+    runtime.bindRequest(
+      createRequest({
+        task_id: "task-codex-rollback",
+        session_id: "session-codex-rollback",
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+      }),
+    );
+    runtime.continuity = {
+      runtime: "codex",
+      resume_ready: true,
+      captured_at: 100,
+      thread_id: "thread-codex-source",
+      fork_available: true,
+      rollback_turns: 3,
+    };
+
+    const rollbackCalls: Array<{ command: string; threadId: string; cwd?: string; turns?: number; checkpointId?: string }> = [];
+    const registry = createRuntimeRegistry(({
+      envLookup(name: string) {
+        switch (name) {
+          case "ANTHROPIC_API_KEY":
+            return "test-token";
+          default:
+            return undefined;
+        }
+      },
+      executableLookup(command: string) {
+        return `C:/mock/${command}.exe`;
+      },
+      codexAuthStatusProvider() {
+        return {
+          authenticated: true,
+          message: "Logged in",
+        };
+      },
+      codexRollbackRunner: async ({ command, threadId, cwd, turns, checkpointId }: {
+        command: string;
+        threadId: string;
+        cwd?: string;
+        turns?: number;
+        checkpointId?: string;
+      }) => {
+        rollbackCalls.push({ command, threadId, cwd, turns, checkpointId });
+        return {
+          threadId,
+          rollbackTurns: 2,
+        };
+      },
+      now: () => 777,
+    }) as unknown as Parameters<typeof createRuntimeRegistry>[0]);
+
+    await registry.rollback(runtime, { turns: 1 });
+
+    expect(rollbackCalls).toEqual([
+      {
+        command: "codex",
+        threadId: "thread-codex-source",
+        cwd: "D:/Project/AgentForge",
+        turns: 1,
+        checkpointId: undefined,
+      },
+    ]);
+    expect(runtime.continuity).toMatchObject({
+      runtime: "codex",
+      thread_id: "thread-codex-source",
+      rollback_turns: 2,
+      captured_at: 777,
+      resume_ready: true,
+    });
   });
 
   test("default Codex fork runner detects the newly materialized rollout file", async () => {

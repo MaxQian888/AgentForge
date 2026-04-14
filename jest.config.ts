@@ -227,6 +227,7 @@ const config: Config = {
     "/app/page.test.tsx",
     "/scripts/build-go-wasm-plugin.test.mjs",
     "/plugins/reviews/",
+    "/plugins/tools/",
     "/src-bridge/",
     "/src-tauri/",
   ],

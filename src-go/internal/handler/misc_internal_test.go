@@ -9,7 +9,6 @@ import (
 
 	"github.com/labstack/echo/v4"
 	bridge "github.com/react-go-quick-starter/server/internal/bridge"
-	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
@@ -108,8 +107,11 @@ func TestProjectCatalogHelpers(t *testing.T) {
 			}},
 		}},
 	}, selection)
-	if catalog.DefaultRuntime != model.DefaultCodingAgentRuntime {
-		t.Fatalf("catalog.DefaultRuntime = %q, want %q", catalog.DefaultRuntime, model.DefaultCodingAgentRuntime)
+	if catalog.DefaultRuntime != "codex" {
+		t.Fatalf("catalog.DefaultRuntime = %q, want %q", catalog.DefaultRuntime, "codex")
+	}
+	if catalog.DefaultSelection.Runtime != "codex" {
+		t.Fatalf("catalog.DefaultSelection = %#v, want runtime codex", catalog.DefaultSelection)
 	}
 	if len(catalog.Runtimes) != 1 || len(catalog.Runtimes[0].Diagnostics) != 1 || catalog.Runtimes[0].Diagnostics[0].Code != "missing_token" {
 		t.Fatalf("catalog.Runtimes = %#v", catalog.Runtimes)

@@ -1,0 +1,94 @@
+version: 1
+skills:
+  - id: react
+    family: built-in-runtime
+    verificationProfile: built-in-runtime
+    canonicalRoot: skills/react
+    sourceType: repo-authored
+    docsRef: docs/role-yaml.md
+  - id: typescript
+    family: built-in-runtime
+    verificationProfile: built-in-runtime
+    canonicalRoot: skills/typescript
+    sourceType: repo-authored
+    docsRef: docs/role-yaml.md
+  - id: testing
+    family: built-in-runtime
+    verificationProfile: built-in-runtime
+    canonicalRoot: skills/testing
+    sourceType: repo-authored
+    docsRef: docs/role-authoring-guide.md
+  - id: css-animation
+    family: built-in-runtime
+    verificationProfile: built-in-runtime
+    canonicalRoot: skills/css-animation
+    sourceType: repo-authored
+    docsRef: docs/role-yaml.md
+
+  - id: deploying-and-running-react-go-quick-starter
+    family: repo-assistant
+    verificationProfile: repo-assistant
+    canonicalRoot: .agents/skills/deploying-and-running-react-go-quick-starter
+    sourceType: repo-authored
+  - id: echo-go-backend
+    family: repo-assistant
+    verificationProfile: repo-assistant
+    canonicalRoot: .agents/skills/echo-go-backend
+    sourceType: repo-authored
+  - id: fumadocs-ui-css-design
+    family: repo-assistant
+    verificationProfile: repo-assistant
+    canonicalRoot: .agents/skills/fumadocs-ui-css-design
+    sourceType: repo-authored
+  - id: tauri-v2
+    family: repo-assistant
+    verificationProfile: repo-assistant
+    canonicalRoot: .agents/skills/tauri-v2
+    sourceType: repo-authored
+  - id: next-best-practices
+    family: repo-assistant
+    verificationProfile: repo-assistant
+    canonicalRoot: .agents/skills/next-best-practices
+    sourceType: upstream-sync
+    lockKey: next-best-practices
+  - id: shadcn
+    family: repo-assistant
+    verificationProfile: repo-assistant
+    canonicalRoot: .agents/skills/shadcn
+    sourceType: upstream-sync
+    lockKey: shadcn
+    allowedExceptions:
+      - noncanonical-agent-config-extension
+
+  - id: openspec-apply-change
+    family: workflow-mirror
+    verificationProfile: workflow-mirror
+    canonicalRoot: .codex/skills/openspec-apply-change
+    sourceType: repo-authored
+    mirrorTargets:
+      - .claude/skills/openspec-apply-change/SKILL.md
+      - .github/skills/openspec-apply-change/SKILL.md
+  - id: openspec-archive-change
+    family: workflow-mirror
+    verificationProfile: workflow-mirror
+    canonicalRoot: .codex/skills/openspec-archive-change
+    sourceType: repo-authored
+    mirrorTargets:
+      - .claude/skills/openspec-archive-change/SKILL.md
+      - .github/skills/openspec-archive-change/SKILL.md
+  - id: openspec-explore
+    family: workflow-mirror
+    verificationProfile: workflow-mirror
+    canonicalRoot: .codex/skills/openspec-explore
+    sourceType: repo-authored
+    mirrorTargets:
+      - .claude/skills/openspec-explore/SKILL.md
+      - .github/skills/openspec-explore/SKILL.md
+  - id: openspec-propose
+    family: workflow-mirror
+    verificationProfile: workflow-mirror
+    canonicalRoot: .codex/skills/openspec-propose
+    sourceType: repo-authored
+    mirrorTargets:
+      - .claude/skills/openspec-propose/SKILL.md
+      - .github/skills/openspec-propose/SKILL.md

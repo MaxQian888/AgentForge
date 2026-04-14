@@ -4,11 +4,12 @@ metadata:
   id: standard-dev-flow
   name: Standard Dev Flow
   version: 0.1.0
-  description: Built-in sequential workflow starter that hands off from coding to review using maintained role ids.
+  description: Minimal sequential quickstart workflow starter that hands off from coding to review using maintained role ids.
   tags:
     - builtin
     - workflow
     - starter
+    - quickstart
 spec:
   runtime: wasm
   module: ./dist/standard-dev-flow.wasm

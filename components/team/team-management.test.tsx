@@ -2,6 +2,7 @@ import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { TeamManagement } from "./team-management";
 import type { TeamMember } from "@/lib/dashboard/summary";
+import type { MemberStatus } from "@/lib/team/member-status";
 import type { RoleManifest } from "@/lib/stores/role-store";
 
 describe("TeamManagement", () => {
@@ -428,5 +429,164 @@ describe("TeamManagement", () => {
     expect(screen.getByLabelText("Edit Runtime")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByLabelText("Edit Provider")).toHaveAttribute("aria-invalid", "true");
     expect(screen.getByLabelText("Edit Model")).toHaveAttribute("aria-invalid", "true");
+  });
+
+  it("focuses attention categories and shows inline bulk-governance results", async () => {
+    const user = userEvent.setup();
+    const onBulkUpdateMembers = jest.fn().mockResolvedValue({
+      status: "inactive" satisfies MemberStatus,
+      results: [
+        { memberId: "member-1", success: true, status: "inactive" },
+        { memberId: "member-2", success: false, error: "member not found in project" },
+      ],
+    });
+
+    render(
+      <TeamManagement
+        projects={projects}
+        selectedProjectId="project-1"
+        members={members}
+        loading={false}
+        error={null}
+        availableRoles={availableRoles}
+        onRetry={jest.fn()}
+        onProjectChange={jest.fn()}
+        onCreateMember={jest.fn().mockResolvedValue(undefined)}
+        onUpdateMember={jest.fn().mockResolvedValue(undefined)}
+        onBulkUpdateMembers={onBulkUpdateMembers}
+        bulkUpdatePending={false}
+        bulkUpdateResult={null}
+        onClearBulkUpdateResult={jest.fn()}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Setup Required (1)" }));
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+    expect(screen.getByText("Builder Bot")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Clear attention filter" }));
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("checkbox", { name: "Select Alice" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Review Bot" }));
+    await user.click(screen.getByRole("button", { name: "Mark selected inactive" }));
+
+    expect(onBulkUpdateMembers).toHaveBeenCalledWith(
+      ["member-1", "member-2"],
+      "inactive",
+    );
+
+    expect(
+      await screen.findByText("Bulk update complete: 1 updated, 1 failed.")
+    ).toBeInTheDocument();
+    expect(
+      screen.getByText("Review Bot: member not found in project")
+    ).toBeInTheDocument();
+  });
+
+  it("disables quick lifecycle actions while a member update is in flight", async () => {
+    const user = userEvent.setup();
+    let resolveUpdate: (() => void) | null = null;
+    const onUpdateMember = jest.fn().mockImplementation(
+      () =>
+        new Promise<void>((resolve) => {
+          resolveUpdate = resolve;
+        })
+    );
+
+    render(
+      <TeamManagement
+        projects={projects}
+        selectedProjectId="project-1"
+        members={members}
+        loading={false}
+        error={null}
+        availableRoles={availableRoles}
+        onRetry={jest.fn()}
+        onProjectChange={jest.fn()}
+        onCreateMember={jest.fn().mockResolvedValue(undefined)}
+        onUpdateMember={onUpdateMember}
+      />
+    );
+
+    const activateButton = screen.getByRole("button", { name: "Activate Review Bot" });
+    await user.click(activateButton);
+
+    expect(onUpdateMember).toHaveBeenCalledWith("member-2", {
+      status: "active",
+    });
+    expect(screen.getByRole("button", { name: "Updating Review Bot..." })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Updating Review Bot..." }));
+    expect(onUpdateMember).toHaveBeenCalledTimes(1);
+
+    const releaseUpdate = resolveUpdate as (() => void) | null;
+    if (!releaseUpdate) {
+      throw new Error("expected member update promise resolver to be captured");
+    }
+    releaseUpdate();
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Activate Review Bot" })).toBeEnabled()
+    );
+  });
+
+  it("clears attention filters and bulk selection when the project scope changes", async () => {
+    const user = userEvent.setup();
+    const onClearBulkUpdateResult = jest.fn();
+    const { rerender } = render(
+      <TeamManagement
+        projects={projects}
+        selectedProjectId="project-1"
+        members={members}
+        loading={false}
+        error={null}
+        availableRoles={availableRoles}
+        onRetry={jest.fn()}
+        onProjectChange={jest.fn()}
+        onCreateMember={jest.fn().mockResolvedValue(undefined)}
+        onUpdateMember={jest.fn().mockResolvedValue(undefined)}
+        onBulkUpdateMembers={jest.fn().mockResolvedValue({
+          status: "suspended",
+          results: [],
+        })}
+        bulkUpdatePending={false}
+        bulkUpdateResult={null}
+        onClearBulkUpdateResult={onClearBulkUpdateResult}
+      />
+    );
+
+    await user.click(screen.getByRole("button", { name: "Setup Required (1)" }));
+    await user.click(screen.getByRole("checkbox", { name: "Select Builder Bot" }));
+
+    expect(screen.queryByText("Alice")).not.toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Mark selected suspended" })).toBeInTheDocument();
+
+    rerender(
+      <TeamManagement
+        projects={projects}
+        selectedProjectId="project-2"
+        members={members}
+        loading={false}
+        error={null}
+        availableRoles={availableRoles}
+        onRetry={jest.fn()}
+        onProjectChange={jest.fn()}
+        onCreateMember={jest.fn().mockResolvedValue(undefined)}
+        onUpdateMember={jest.fn().mockResolvedValue(undefined)}
+        onBulkUpdateMembers={jest.fn().mockResolvedValue({
+          status: "suspended",
+          results: [],
+        })}
+        bulkUpdatePending={false}
+        bulkUpdateResult={null}
+        onClearBulkUpdateResult={onClearBulkUpdateResult}
+      />
+    );
+
+    expect(screen.getByText("Alice")).toBeInTheDocument();
+    expect(
+      screen.queryByRole("button", { name: "Mark selected suspended" })
+    ).not.toBeInTheDocument();
+    expect(onClearBulkUpdateResult).toHaveBeenCalled();
   });
 });

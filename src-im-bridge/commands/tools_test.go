@@ -28,6 +28,12 @@ func TestToolsCommand_RequiresSubcommand(t *testing.T) {
 	}
 }
 
+func TestToolsCommand_UsageTextIsReadableChinese(t *testing.T) {
+	if got, want := commandUsage("/tools"), "用法: /tools list|install|uninstall|restart <参数>"; got != want {
+		t.Fatalf("commandUsage(/tools) = %q, want %q", got, want)
+	}
+}
+
 func TestToolsCommand_ListAndRestart(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.Header().Set("Content-Type", "application/json")

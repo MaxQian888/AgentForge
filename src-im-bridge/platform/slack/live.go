@@ -760,7 +760,7 @@ func normalizeBlockAction(interaction *goslack.InteractionCallback) (*notify.Act
 		return nil, errors.New("slack block action missing actions")
 	}
 	actionPayload := interaction.ActionCallback.BlockActions[0]
-	action, entityID, ok := core.ParseActionReference(actionPayload.Value)
+	action, entityID, actionMetadata, ok := core.ParseActionReferenceWithMetadata(actionPayload.Value)
 	if !ok {
 		return nil, errIgnoreEnvelope
 	}
@@ -789,6 +789,9 @@ func normalizeBlockAction(interaction *goslack.InteractionCallback) (*notify.Act
 		metadata["callback_id"] = callbackID
 	}
 
+	for key, value := range actionMetadata {
+		metadata[key] = value
+	}
 	return &notify.ActionRequest{
 		Platform:    liveMetadata.Source,
 		Action:      action,
@@ -801,7 +804,7 @@ func normalizeBlockAction(interaction *goslack.InteractionCallback) (*notify.Act
 }
 
 func normalizeViewSubmission(interaction *goslack.InteractionCallback) (*notify.ActionRequest, error) {
-	action, entityID, ok := core.ParseActionReference(firstNonEmpty(interaction.View.PrivateMetadata, interaction.CallbackID))
+	action, entityID, actionMetadata, ok := core.ParseActionReferenceWithMetadata(firstNonEmpty(interaction.View.PrivateMetadata, interaction.CallbackID))
 	if !ok {
 		return nil, errIgnoreEnvelope
 	}
@@ -841,6 +844,9 @@ func normalizeViewSubmission(interaction *goslack.InteractionCallback) (*notify.
 		}
 	}
 
+	for key, value := range actionMetadata {
+		metadata[key] = value
+	}
 	return &notify.ActionRequest{
 		Platform:    liveMetadata.Source,
 		Action:      action,

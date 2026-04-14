@@ -24,6 +24,9 @@ type QueueAgentAdmissionRecord struct {
 	Priority  int
 	BudgetUSD float64
 	Reason    string
+	GuardrailType       string
+	GuardrailScope      string
+	RecoveryDisposition string
 }
 
 type AgentPoolQueueRepository struct {
@@ -44,6 +47,10 @@ func NewAgentPoolQueueRepository(db ...*gorm.DB) *AgentPoolQueueRepository {
 }
 
 func (r *AgentPoolQueueRepository) QueueAgentAdmission(ctx context.Context, input QueueAgentAdmissionRecord) (*model.AgentPoolQueueEntry, error) {
+	recoveryDisposition := input.RecoveryDisposition
+	if recoveryDisposition == "" {
+		recoveryDisposition = model.QueueRecoveryDispositionPending
+	}
 	entry := &model.AgentPoolQueueEntry{
 		EntryID:   uuid.NewString(),
 		ProjectID: input.ProjectID.String(),
@@ -57,6 +64,9 @@ func (r *AgentPoolQueueRepository) QueueAgentAdmission(ctx context.Context, inpu
 		RoleID:    input.RoleID,
 		Priority:  input.Priority,
 		BudgetUSD: input.BudgetUSD,
+		GuardrailType:       input.GuardrailType,
+		GuardrailScope:      input.GuardrailScope,
+		RecoveryDisposition: recoveryDisposition,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -208,7 +218,7 @@ func (r *AgentPoolQueueRepository) ReserveNextQueuedByProject(ctx context.Contex
 	return entry, nil
 }
 
-func (r *AgentPoolQueueRepository) CompleteQueuedEntry(ctx context.Context, entryID string, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID) error {
+func (r *AgentPoolQueueRepository) CompleteQueuedEntry(ctx context.Context, entryID string, status model.AgentPoolQueueStatus, reason string, runID *uuid.UUID, guardrailType string, guardrailScope string, recoveryDisposition string) error {
 	if r.db == nil {
 		r.mu.Lock()
 		defer r.mu.Unlock()
@@ -218,9 +228,14 @@ func (r *AgentPoolQueueRepository) CompleteQueuedEntry(ctx context.Context, entr
 		}
 		entry.Status = status
 		entry.Reason = reason
+		entry.GuardrailType = guardrailType
+		entry.GuardrailScope = guardrailScope
+		entry.RecoveryDisposition = recoveryDisposition
 		if runID != nil {
 			value := runID.String()
 			entry.AgentRunID = &value
+		} else {
+			entry.AgentRunID = nil
 		}
 		entry.UpdatedAt = time.Now().UTC()
 		return nil
@@ -229,6 +244,9 @@ func (r *AgentPoolQueueRepository) CompleteQueuedEntry(ctx context.Context, entr
 	updates := map[string]any{
 		"status":     status,
 		"reason":     reason,
+		"guardrail_type":        nullableStringUpdate(guardrailType),
+		"guardrail_scope":       nullableStringUpdate(guardrailScope),
+		"recovery_disposition":  nullableStringUpdate(recoveryDisposition),
 		"updated_at": time.Now().UTC(),
 	}
 	if runID != nil {

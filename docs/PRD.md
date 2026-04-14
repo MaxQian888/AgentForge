@@ -22,7 +22,7 @@
 - `文档/知识库`：`app/(dashboard)/docs/page.tsx` 与 `app/(dashboard)/docs/[pageId]/page-client.tsx` 已落地项目级 wiki、BlockNote 编辑器、评论、版本、模板、最近/收藏和任务关联。
 - `团队工作区`：`app/(dashboard)/team/page.tsx` 与 `app/(dashboard)/teams/page.tsx` 已覆盖项目成员管理、角色感知 roster 编辑、Team 运行统计/筛选，以及 Team 创建流程。
 - `工作流 / 调度 / 记忆`：`app/(dashboard)/workflow/page.tsx`、`app/(dashboard)/scheduler/page.tsx`、`app/(dashboard)/memory/page.tsx` 已分别落地 workflow draft/save、调度统计与手动触发、项目级记忆检索与清理等运维工作区。
-- `插件系统现状`：当前仓库已落地 Go-hosted WASM Integration/Workflow plugin、TS-hosted MCP Tool/Review plugin、catalog 与 trust gate、内置插件 bundle/readiness 校验，以及 repo-local 插件脚手架命令。
+- `插件系统现状`：当前仓库已落地 Go-hosted WASM Integration/Workflow plugin、TS-hosted MCP Tool/Review plugin、catalog 与 trust gate、内置插件 bundle/readiness 校验，以及 repo-local 插件脚手架命令；官方 built-in catalog 现在除了通用 helper 外，还包含 `task-control` / `review-control` / `workflow-control` 三个 control tools，以及 `standard-dev-flow` / `task-delivery-flow` / `review-escalation-flow` 三个 workflow starters，分别对齐任务交付、审查自动化和工作流运维主链路。
 - `IM 控制面`：前端已覆盖 `feishu`、`dingtalk`、`slack`、`telegram`、`discord`、`wecom`、`qq`、`qqbot`，并补齐事件类型拉取、payload 预览和降级诊断。
 - `桌面壳`：Tauri 已具备 sidecar 监督、桌面能力 facade、shell action、共享 frameless titlebar/window chrome 与窗口状态同步。
 - `Marketplace 市场`：`app/(dashboard)/marketplace/page.tsx` 已落地统一的 Skills/Plugin/Role 市场，支持搜索、分类过滤、精选推荐、详情查看（含版本历史与评价）、发布流程与安装确认。后端为独立 Go 微服务 `src-marketplace/`，含数据库迁移、handler/service/repository 分层、管理员审核端点与摘要校验。

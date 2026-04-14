@@ -30,17 +30,22 @@ The Feishu provider SHALL normalize `card.action.trigger` interactions using the
 - **AND** the preserved reply target still retains the context required for later delayed update if needed
 
 ### Requirement: Feishu long-running card actions SHALL coordinate immediate acknowledgement and delayed update
-When a Feishu card action triggers work that cannot complete within the synchronous callback window, the Bridge SHALL first acknowledge the callback in time and then use the preserved delayed-update context to update the originating card within the provider-supported validity window. If the update token is expired, exhausted, or invalid for the requested update mode, the Bridge MUST fall back explicitly to a supported reply path and record the reason for that fallback.
+When a Feishu card action triggers work that cannot complete within the synchronous callback window, the Bridge SHALL acknowledge the callback within the provider's immediate response deadline and SHALL only attempt delayed card mutation after that acknowledgement succeeds. When delayed update is used, the preserved token MUST be treated as provider-scoped context with the documented 30-minute validity window and no more than two updates per token. If the token is missing, expired, exhausted, or incompatible with the requested update mode, the Bridge MUST fall back explicitly to a supported reply or send path and record the provider-aware fallback reason.
 
-#### Scenario: Long-running card action uses delayed update after acknowledgement
+#### Scenario: Long-running card action acknowledges first and updates later
 - **WHEN** a Feishu card action starts work that outlives the immediate callback window
-- **THEN** the Bridge acknowledges the callback first
-- **AND** later updates the originating card through the preserved delayed-update token instead of sending an unrelated duplicate message
+- **THEN** the Bridge returns the callback acknowledgement within 3 seconds
+- **AND** later uses the preserved delayed-update token to mutate the originating card instead of sending an unrelated duplicate message
 
-#### Scenario: Expired delayed-update token falls back explicitly
-- **WHEN** a Feishu completion update is ready but the preserved delayed-update token can no longer be used
+#### Scenario: Expired or exhausted delayed-update token falls back explicitly
+- **WHEN** a Feishu completion update is ready but the preserved delayed-update token is expired, exhausted, or otherwise unusable
 - **THEN** the Bridge falls back to a supported Feishu reply or send path
 - **AND** the delivery outcome records that native card mutation was skipped because the delayed-update context was no longer valid
+
+#### Scenario: Delayed update is never attempted before callback acknowledgement
+- **WHEN** a Feishu action completion path requires delayed update
+- **THEN** the Bridge waits until the synchronous callback acknowledgement has succeeded before calling the delayed-update path
+- **AND** it does not perform a parallel mutation attempt that could be reverted or rejected by the provider
 
 ### Requirement: Feishu provider SHALL own message and card construction semantics
 The Feishu provider SHALL expose provider-owned builders that turn typed outbound delivery intent into Feishu-supported text, `lark_md` content blocks, JSON cards, or template cards without requiring shared Bridge layers to assemble raw Feishu payloads. Those builders MUST preserve the provider-aware downgrade path between plain text, richer card content, and delayed native update flows.
@@ -67,3 +72,4 @@ If a Feishu-targeted delivery is tied to a preserved reply target that supports 
 - **WHEN** the requested Feishu richer output cannot be delivered through the preserved reply target or current delayed-update context
 - **THEN** the Feishu provider falls back to a supported reply or send representation
 - **AND** the delivery metadata records the provider-aware fallback instead of silently pretending the richer path succeeded
+

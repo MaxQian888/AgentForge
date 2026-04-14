@@ -52,6 +52,9 @@ func TestQueueManagementHandler_ListReturnsEntries(t *testing.T) {
 		TaskID:    uuid.NewString(),
 		MemberID:  uuid.NewString(),
 		Status:    model.AgentPoolQueueStatusQueued,
+		GuardrailType:       model.DispatchGuardrailTypePool,
+		GuardrailScope:      "project",
+		RecoveryDisposition: model.QueueRecoveryDispositionPending,
 		CreatedAt: time.Now().UTC(),
 		UpdatedAt: time.Now().UTC(),
 	}
@@ -79,6 +82,9 @@ func TestQueueManagementHandler_ListReturnsEntries(t *testing.T) {
 	}
 	if len(response) != 1 || response[0].EntryID != entry.EntryID {
 		t.Fatalf("response = %+v, want one entry %s", response, entry.EntryID)
+	}
+	if response[0].GuardrailType != model.DispatchGuardrailTypePool || response[0].RecoveryDisposition != model.QueueRecoveryDispositionPending {
+		t.Fatalf("response = %+v", response[0])
 	}
 }
 
@@ -128,6 +134,7 @@ func TestQueueManagementHandler_CancelReturnsUpdatedEntry(t *testing.T) {
 			MemberID:  uuid.NewString(),
 			Status:    model.AgentPoolQueueStatusCancelled,
 			Reason:    "manual_cancel",
+			RecoveryDisposition: model.QueueRecoveryDispositionCancelled,
 			CreatedAt: time.Now().UTC().Add(-time.Minute),
 			UpdatedAt: time.Now().UTC(),
 		},
@@ -153,6 +160,9 @@ func TestQueueManagementHandler_CancelReturnsUpdatedEntry(t *testing.T) {
 	}
 	if response.EntryID != entryID || response.Status != string(model.AgentPoolQueueStatusCancelled) {
 		t.Fatalf("response = %+v, want cancelled entry %s", response, entryID)
+	}
+	if response.RecoveryDisposition != model.QueueRecoveryDispositionCancelled {
+		t.Fatalf("response = %+v", response)
 	}
 }
 

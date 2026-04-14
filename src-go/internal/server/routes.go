@@ -209,6 +209,9 @@ func RegisterRoutes(
 		agentSvc.SetIMProgressNotifier(imControlPlane)
 	}
 	memorySvc := service.NewMemoryService(memoryRepo)
+	episodicMemorySvc := service.NewEpisodicMemoryService(memoryRepo)
+	memoryExplorerSvc := service.NewMemoryExplorerService(memoryRepo).WithEpisodic(episodicMemorySvc)
+	memoryAPI := service.NewMemoryAPIService(memorySvc, memoryExplorerSvc)
 	var teamSvc *service.TeamService
 	if agentSvc != nil {
 		teamSvc = service.NewTeamService(teamRepo, agentRunRepo, agentSvc, taskRepo, projectRepo, memorySvc, hub)
@@ -299,7 +302,7 @@ func RegisterRoutes(
 		teamRuntime = teamSvc
 	}
 	teamH := handler.NewTeamHandler(teamRuntime)
-	memoryH := handler.NewMemoryHandler(memorySvc)
+	memoryH := handler.NewMemoryHandler(memoryAPI)
 	reviewH := handler.NewReviewHandler(reviewSvc).WithAggregationService(reviewAggSvc)
 	workflowRoleStore := role.NewFileStore(cfg.RolesDir)
 	if pluginSvc == nil {
@@ -326,6 +329,7 @@ func RegisterRoutes(
 		nil,
 		pluginSvc,
 	)
+	automationEngine.SetIMChannelResolver(imControlPlane)
 	taskH = taskH.WithAutomation(automationEngine)
 	customFieldH = customFieldH.WithAutomation(automationEngine)
 	reviewSvc.SetAutomationEvaluator(automationEngine)
@@ -346,11 +350,13 @@ func RegisterRoutes(
 		budgetSvc = service.NewBudgetGovernanceService(sprintRepo, taskRepo)
 		budgetSvc.SetAutomationEvaluator(automationEngine)
 		agentSvc.SetDispatchBudgetChecker(budgetSvc)
+		agentSvc.SetDispatchMemberReader(memberRepo)
+		agentSvc.SetDispatchAttemptRecorder(dispatchAttemptRepo)
 		dispatchSvc = service.NewTaskDispatchService(taskRepo, memberRepo, agentSvc, hub, notificationSvc, taskProgressSvc)
 		dispatchSvc = dispatchSvc.WithQueueWriter(agentSvc)
 		dispatchSvc = dispatchSvc.WithBudgetChecker(budgetSvc)
 		dispatchSvc = dispatchSvc.WithAttemptRecorder(dispatchAttemptRepo)
-		dispatchPreflightH = handler.NewDispatchPreflightHandler(taskRepo, memberRepo, budgetSvc, agentSvc)
+		dispatchPreflightH = handler.NewDispatchPreflightHandler(taskRepo, memberRepo, budgetSvc, agentSvc).WithRunReader(agentSvc)
 		dispatchStatsH = handler.NewDispatchStatsHandler(dispatchAttemptRepo, agentPoolQueueRepo)
 		dispatchHistoryH = handler.NewDispatchHistoryHandler(dispatchAttemptRepo)
 		queueManagementH = handler.NewQueueManagementHandler(agentSvc)
@@ -389,6 +395,7 @@ func RegisterRoutes(
 	projectGroup := protected.Group("/projects/:pid", projectMw)
 	projectGroup.POST("/members", memberH.Create)
 	projectGroup.GET("/members", memberH.List)
+	projectGroup.POST("/members/bulk-update", memberH.BulkUpdate)
 	projectGroup.POST("/tasks", taskH.Create)
 	projectGroup.GET("/tasks", taskH.List)
 	projectGroup.POST("/links", entityLinkH.Create)
@@ -440,6 +447,11 @@ func RegisterRoutes(
 	projectGroup.PUT("/workflow", workflowH.Put)
 	projectGroup.POST("/memory", memoryH.Store)
 	projectGroup.GET("/memory", memoryH.Search)
+	projectGroup.GET("/memory/stats", memoryH.Stats)
+	projectGroup.GET("/memory/export", memoryH.Export)
+	projectGroup.POST("/memory/bulk-delete", memoryH.BulkDelete)
+	projectGroup.POST("/memory/cleanup", memoryH.Cleanup)
+	projectGroup.GET("/memory/:mid", memoryH.Get)
 	projectGroup.DELETE("/memory/:mid", memoryH.Delete)
 	projectGroup.GET("/logs", logH.List)
 	projectGroup.POST("/logs", logH.Create)
@@ -521,9 +533,14 @@ func RegisterRoutes(
 	protected.GET("/bridge/diff/:task_id", bridgeConvH.GetDiff)
 	protected.GET("/bridge/messages/:task_id", bridgeConvH.GetMessages)
 	protected.POST("/bridge/command", bridgeConvH.ExecuteCommand)
+	protected.POST("/bridge/shell", bridgeConvH.ExecuteShell)
 	protected.POST("/bridge/interrupt", bridgeConvH.Interrupt)
 	protected.POST("/bridge/model", bridgeConvH.SwitchModel)
+	protected.POST("/bridge/thinking", bridgeConvH.SetThinkingBudget)
+	protected.GET("/bridge/mcp-status/:task_id", bridgeConvH.GetMCPStatus)
 	protected.POST("/bridge/permission-response/:request_id", bridgeConvH.PermissionResponse)
+	protected.POST("/bridge/opencode/provider-auth/:provider/start", bridgeConvH.StartOpenCodeProviderAuth)
+	protected.POST("/bridge/opencode/provider-auth/:request_id/complete", bridgeConvH.CompleteOpenCodeProviderAuth)
 	protected.GET("/bridge/active", bridgeConvH.GetActive)
 	protected.GET("/bridge/plugins", bridgeConvH.ListPlugins)
 	protected.POST("/bridge/plugins/:id/enable", bridgeConvH.EnablePlugin)
@@ -552,7 +569,13 @@ func RegisterRoutes(
 	protected.GET("/scheduler/stats", schedulerH.GetStats)
 	protected.GET("/scheduler/jobs", schedulerH.ListJobs)
 	protected.GET("/scheduler/jobs/:jobKey", schedulerH.GetJob)
+	protected.GET("/scheduler/jobs/:jobKey/preview", schedulerH.GetPreview)
+	protected.GET("/scheduler/jobs/:jobKey/config-metadata", schedulerH.GetConfigMetadata)
 	protected.GET("/scheduler/jobs/:jobKey/runs", schedulerH.ListRuns)
+	protected.POST("/scheduler/jobs/:jobKey/pause", schedulerH.PauseJob)
+	protected.POST("/scheduler/jobs/:jobKey/resume", schedulerH.ResumeJob)
+	protected.POST("/scheduler/jobs/:jobKey/cancel", schedulerH.CancelJob)
+	protected.POST("/scheduler/jobs/:jobKey/runs/cleanup", schedulerH.CleanupRuns)
 	protected.PUT("/scheduler/jobs/:jobKey", schedulerH.UpdateJob)
 	protected.POST("/scheduler/jobs/:jobKey/trigger", schedulerH.TriggerManual)
 	e.GET("/internal/scheduler/jobs", schedulerH.ListJobs)
@@ -637,11 +660,15 @@ func RegisterRoutes(
 	if bridgeClient != nil {
 		imSvc.SetClassifier(bridgeIntentAdapter{client: bridgeClient})
 	}
+	if agentSvc != nil {
+		agentSvc.SetIMNotifier(imSvc)
+		agentSvc.SetIMChannelResolver(imControlPlane)
+	}
 	imSvc.SetActionExecutor(service.NewBackendIMActionExecutor(dispatchSvc, taskDecomposeSvc, reviewSvc, taskSvc, wikiSvc))
 	automationEngine.SetIMSender(imSvc)
-	wikiSvc.WithIMForwarder(imSvc, cfg.IMNotifyPlatform, cfg.IMNotifyTargetChatID)
+	wikiSvc.WithIMForwarder(imSvc, cfg.IMNotifyPlatform, cfg.IMNotifyTargetChatID).WithIMChannelResolver(imControlPlane)
 	imH := handler.NewIMHandler(imSvc)
-	imControlH := handler.NewIMControlHandler(imControlPlane)
+	imControlH := handler.NewIMControlHandler(imControlPlane, imSvc)
 	v1.POST("/im/message", imH.HandleMessage)
 	v1.POST("/im/command", imH.HandleCommand)
 	v1.POST("/intent", imH.HandleIntent)

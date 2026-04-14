@@ -109,7 +109,7 @@ func TestInstructionRouter_ValidationAndTimeout(t *testing.T) {
 			select {
 			case <-ctx.Done():
 				return nil, ctx.Err()
-			case <-time.After(50 * time.Millisecond):
+			case <-time.After(500 * time.Millisecond):
 				return map[string]any{"ok": true}, nil
 			}
 		}),

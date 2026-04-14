@@ -281,6 +281,12 @@
       "dependsOn": ["desktop:dev:prepare", "ui:dev-if-needed"]
     },
     {
+      "label": "desktop:standalone:prepare",
+      "type": "shell",
+      "command": "pnpm",
+      "args": ["desktop:dev:prepare"]
+    },
+    {
       "label": "ui:stop",
       "type": "shell",
       "command": "",

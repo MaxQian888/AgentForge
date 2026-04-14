@@ -585,7 +585,7 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 	}
 
 	actionValue := feishuActionReference(event.Event.Action.Value)
-	action, entityID, ok := core.ParseActionReference(actionValue)
+	action, entityID, actionMetadata, ok := core.ParseActionReferenceWithMetadata(actionValue)
 	if !ok {
 		return nil, errIgnoreCardAction
 	}
@@ -612,6 +612,9 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 		"delivery_type": strings.TrimSpace(event.Event.DeliveryType),
 	}
 
+	for key, value := range actionMetadata {
+		metadata[key] = value
+	}
 	return &notify.ActionRequest{
 		Platform:    liveMetadata.Source,
 		Action:      action,

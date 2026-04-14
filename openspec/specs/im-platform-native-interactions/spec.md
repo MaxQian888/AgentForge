@@ -4,39 +4,27 @@
 Define the platform-native interaction contract for AgentForge IM Bridge so capability matrices, interactive callbacks, mutable reply targets, and explicit downgrade paths remain consistent across Slack, Discord, Telegram, Feishu, and DingTalk.
 ## Requirements
 ### Requirement: Platform capability matrix SHALL describe native interaction strategy, not just transport availability
-The system SHALL publish a capability matrix for each active IM platform that describes the platform's native command surface, structured-message surface, callback mode, asynchronous update mode, message scope, mutability semantics, and accepted native payload surfaces. The Bridge, control-plane registration payload, and health surfaces MUST use this matrix to choose delivery behavior instead of inferring behavior from platform names or from a single rich-message boolean.
+The system SHALL publish a capability matrix for each active IM platform that describes native command intake, structured surface, callback mode, asynchronous completion strategy, mutable-update truth, and readiness tier. The matrix MUST describe Chinese platforms according to their real provider model: Feishu as full card lifecycle with delayed update, DingTalk and WeCom as callback-capable but fallback-aware native-send platforms, QQ Bot as markdown or keyboard-first, and QQ as text-first with no native interaction surface. The Bridge, control-plane registration payload, and health surfaces MUST use this matrix instead of inferring behavior from platform names or from a single rich-message boolean.
 
-#### Scenario: Slack declares threaded block-capable interactions with native Block Kit payloads
-- **WHEN** the active platform is Slack
-- **THEN** the Bridge publishes capability metadata that identifies Socket Mode command intake, Block Kit structured output, threaded reply scope, response-driven follow-up behavior, and `slack_block_kit` as an accepted native payload surface
-- **AND** downstream delivery code can choose thread-aware block responses or dispatch native Block Kit payloads without hard-coding `"slack"`
+#### Scenario: Feishu declares delayed-update-native interaction lifecycle
+- **WHEN** the active platform is Feishu
+- **THEN** the capability matrix identifies callback-token preservation, immediate callback acknowledgement, and delayed card update as the preferred asynchronous completion path
+- **AND** downstream delivery code can distinguish that lifecycle from ordinary reply-only providers
 
-#### Scenario: Discord declares deferred interaction lifecycle with native embed payloads
-- **WHEN** the active platform is Discord
-- **THEN** the Bridge publishes capability metadata that identifies public interaction callback requirements, deferred acknowledgement support, follow-up or original-response mutation behavior, and `discord_embed` as an accepted native payload surface
-- **AND** asynchronous work can be routed through the correct interaction lifecycle including native embed delivery
-
-#### Scenario: Telegram declares mutable text-first updates with inline keyboard
-- **WHEN** the active platform is Telegram
-- **THEN** the Bridge publishes capability metadata that identifies inline-keyboard callbacks, mutable message updates, text-first rendering constraints, and `telegram_rich` as an accepted native payload surface
-- **AND** progress delivery can prefer low-noise message edits with rich keyboard layouts
-
-#### Scenario: DingTalk declares ActionCard and native card support
+#### Scenario: DingTalk declares ActionCard callbacks without mutable-card parity
 - **WHEN** the active platform is DingTalk
-- **THEN** the Bridge publishes capability metadata that identifies stream mode command intake, ActionCard structured output, session webhook async updates, and `dingtalk_card` as an accepted native payload surface
+- **THEN** the capability matrix identifies Stream callback intake, ActionCard send or callback semantics, and session-webhook follow-up delivery
+- **AND** it does not claim in-place card mutation parity with Feishu
 
-#### Scenario: WeCom declares native card support
+#### Scenario: WeCom declares callback-driven richer send with explicit update limits
 - **WHEN** the active platform is WeCom
-- **THEN** the Bridge publishes capability metadata that identifies callback-driven command intake, and `wecom_card` as an accepted native payload surface for news articles and template cards
+- **THEN** the capability matrix identifies callback-driven command intake plus template-card or markdown-capable outbound delivery
+- **AND** it marks richer updates as fallback-aware instead of implying guaranteed mutable-card support
 
-#### Scenario: QQ Bot declares markdown native support
-- **WHEN** the active platform is QQ Bot
-- **THEN** the Bridge publishes capability metadata that identifies webhook command intake and `qqbot_markdown` as an accepted native payload surface
-
-#### Scenario: QQ declares text-only capabilities
-- **WHEN** the active platform is QQ
-- **THEN** the Bridge publishes capability metadata with no native payload surfaces and no structured surface
-- **AND** all deliveries resolve to plain text
+#### Scenario: QQ Bot and QQ publish truthful non-Feishu interaction tiers
+- **WHEN** the active platform is QQ Bot or QQ
+- **THEN** the capability matrix distinguishes QQ Bot markdown or keyboard send from QQ text-first delivery
+- **AND** neither platform claims Feishu-style card callback or delayed-update semantics unless the adapter truly implements them
 
 ### Requirement: Asynchronous progress and completion updates SHALL use the platform-native update path before fallback
 For IM-initiated long-running actions, the system SHALL prefer the update path that is native to the originating platform and reply target. If a platform supports message edits, follow-ups, thread replies, session webhooks, or delayed card updates, the Bridge MUST use that strategy first. Only when the originating reply target or capability matrix does not support the preferred strategy MAY the system fall back to a new plain-text message. For Feishu, the preferred path MUST distinguish between immediate callback responses and delayed card mutation so the Bridge does not collapse all card interactions into generic reply semantics.
@@ -163,4 +151,35 @@ The Bridge command engine SHALL handle `/review deep <taskId>`, `/review approve
 #### Scenario: /review request-changes with reason
 - **WHEN** user sends `/review request-changes REV-10 missing error handling`
 - **THEN** Bridge calls `POST /api/v1/reviews/REV-10/decide` with `{"decision": "request_changes", "reason": "missing error handling"}` and replies with the decision result
+
+### Requirement: China-platform asynchronous completions SHALL prefer provider-owned reply or update paths before fallback
+When a DingTalk, WeCom, QQ Bot, or QQ interaction or command triggers long-running work, the Bridge SHALL evaluate the preserved reply target against the active provider's native completion semantics before emitting a new plain-text message. The Bridge MUST prefer the provider-owned path that the current platform can actually honor, such as DingTalk session webhook reply, WeCom `response_url` reply, QQ Bot `msg_id`-aware markdown or text follow-up, or QQ reply-segment-aware text reply. Only when the preserved reply target is unusable or the provider does not support the requested richer behavior MAY the Bridge fall back to a new text send.
+
+#### Scenario: DingTalk completion prefers session webhook reply
+- **WHEN** a DingTalk card action or command preserves a session webhook reply target
+- **THEN** asynchronous progress or terminal completion uses that session webhook path first
+- **AND** the Bridge falls back to conversation-scoped or plain-text send only when the session webhook path is unavailable
+
+#### Scenario: WeCom completion prefers callback reply context
+- **WHEN** a WeCom callback-triggered action preserves a `response_url`
+- **THEN** asynchronous progress or terminal completion uses the callback reply path before direct app-message send
+- **AND** any fallback to direct send remains explicit in delivery metadata
+
+#### Scenario: QQ Bot completion prefers msg-id-aware reply context
+- **WHEN** a QQ Bot interaction or inbound message preserves a `msg_id` and conversation target
+- **THEN** asynchronous completion uses the provider-supported reply path tied to that `msg_id` before generic follow-up send
+- **AND** incompatible mutable-update requests degrade explicitly to supported markdown or text output
+
+#### Scenario: QQ completion stays text-first
+- **WHEN** a QQ command preserves conversation and message identity for later completion
+- **THEN** asynchronous completion reuses that context through reply-segment-aware text delivery when possible
+- **AND** the Bridge does not attempt a native payload or mutable update path that QQ does not advertise
+
+### Requirement: China-platform downgrade metadata SHALL identify unusable completion context
+When a Chinese-platform completion cannot honor the preferred provider-native reply or update path, the Bridge SHALL record a stable downgrade category that identifies why the provider-native path could not be used. The resulting metadata MUST survive direct delivery, bound progress delivery, action completion, and replay recovery.
+
+#### Scenario: Replayed completion reports missing provider reply context
+- **WHEN** a replayed DingTalk, WeCom, QQ Bot, or QQ completion no longer has a usable provider-native reply target
+- **THEN** the Bridge emits a supported fallback delivery
+- **AND** the resulting metadata identifies that the original provider-native completion context was unavailable during replay
 

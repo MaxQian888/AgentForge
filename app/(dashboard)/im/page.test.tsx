@@ -16,7 +16,9 @@ const imState = {
     { id: "delivery-2", status: "failed" },
     { id: "delivery-3", status: "suppressed" },
   ],
-  lastTestSendResult: null as null | { status: string },
+  lastTestSendResult: null as
+    | null
+    | { status: string; failureReason?: string; downgradeReason?: string },
   fetchChannels: jest.fn(),
   fetchBridgeStatus: jest.fn(),
   fetchDeliveryHistory: jest.fn(),
@@ -138,7 +140,7 @@ describe("IMBridgePage", () => {
     expect(imState.fetchEventTypes).toHaveBeenCalledTimes(3);
   });
 
-  it("uses the fallback channel for the currently selected platform when sending a test message", async () => {
+  it("uses the configured channel for the currently selected test platform", async () => {
     const user = userEvent.setup();
     imState.channels = [
       {
@@ -155,6 +157,7 @@ describe("IMBridgePage", () => {
 
     render(<IMBridgePage />);
 
+    await user.selectOptions(screen.getByLabelText("im.testSendPlatform"), "slack");
     await user.click(screen.getByRole("button", { name: "im.testSendButton" }));
 
     await waitFor(() => {
@@ -164,5 +167,29 @@ describe("IMBridgePage", () => {
         text: "ping",
       });
     });
+  });
+
+  it("does not invent a fallback test target when no configured channel exists", () => {
+    imState.channels = [];
+
+    render(<IMBridgePage />);
+
+    expect(screen.getByLabelText("im.testSendPlatform")).toBeDisabled();
+    expect(screen.getByRole("button", { name: "im.testSendButton" })).toBeDisabled();
+    expect(screen.getByDisplayValue("im.channels.noChannels")).toBeInTheDocument();
+  });
+
+  it("surfaces explicit test-send failure details from the backend result", () => {
+    imState.lastTestSendResult = {
+      status: "failed",
+      failureReason: "notify URL not configured",
+      downgradeReason: "compatibility_fallback",
+    };
+
+    render(<IMBridgePage />);
+
+    expect(screen.getByText("im.testSendResult: failed")).toBeInTheDocument();
+    expect(screen.getByText("notify URL not configured")).toBeInTheDocument();
+    expect(screen.getByText("downgrade: compatibility_fallback")).toBeInTheDocument();
   });
 });

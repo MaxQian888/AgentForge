@@ -182,31 +182,62 @@ go test ./...
 go build ./...
 ```
 
+## Backend Runtime Smoke Workflow
+
+Use this when you need the supported zero-credential proof that the backend-only
+local stack is actually wired end to end across Go, TS Bridge, and IM Bridge.
+
+```bash
+pnpm dev:backend:verify
+```
+
+Current verify behavior:
+
+- starts or reuses the same managed backend stack as `pnpm dev:backend`
+- checks Go health at `http://127.0.0.1:7777/health`
+- checks TS Bridge health at `http://127.0.0.1:7778/bridge/health`
+- checks IM Bridge health at `http://127.0.0.1:7779/im/health`
+- injects one IM stub command through the managed IM Bridge test surface and
+  requires a non-empty reply before reporting success
+- keeps the managed backend stack running by default so you can immediately
+  follow up with `pnpm dev:backend:status`, `pnpm dev:backend:logs`, or
+  `pnpm dev:backend:stop`
+
+This is a smoke proof, not a replacement for `go test ./...`, `bun test ...`,
+`bun run typecheck`, or `go build ./...`.
+
 ## IM Bridge End-To-End Flow
 
-Use this when you need to verify the IM bridge against the real backend control
-plane instead of only unit tests.
+Use this when you need a deeper manual IM-bridge session against the real
+backend control plane instead of the supported zero-credential smoke path above.
 
 1. Start the shared local stack:
 
 ```bash
-pnpm dev:all
+pnpm dev:backend
 ```
 
 2. Configure `src-im-bridge/.env` from the values in
    `src-im-bridge/.env.example`.
-3. Start the bridge from `src-im-bridge/`:
+3. If you need to run a custom IM Bridge instance, stop the managed backend IM
+   bridge first:
+
+```bash
+pnpm dev:backend:stop
+```
+
+4. Start the bridge from `src-im-bridge/`:
 
 ```bash
 go run ./cmd/bridge
 ```
 
-4. Verify control-plane registration and status:
+5. Verify control-plane registration and status:
    - `POST /api/v1/im/bridge/register`
    - `POST /api/v1/im/bridge/heartbeat`
    - `GET /api/v1/im/bridge/status`
    - `GET /api/v1/im/event-types`
-5. Exercise at least one inbound and one outbound path for the platform you are
+6. Exercise at least one inbound and one outbound path for the platform you are
    testing.
 
 ## Bridge Test Matrix

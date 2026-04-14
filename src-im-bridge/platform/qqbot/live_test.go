@@ -46,6 +46,12 @@ func TestLive_NormalizeInboundMessagePreservesReplyTargetContext(t *testing.T) {
 	if message.ReplyTarget == nil || message.ReplyTarget.ChatID != "group-openid" || message.ReplyTarget.MessageID != "evt-1" {
 		t.Fatalf("ReplyTarget = %+v", message.ReplyTarget)
 	}
+	if message.ReplyTarget.ConversationID != "group-openid" {
+		t.Fatalf("ConversationID = %q", message.ReplyTarget.ConversationID)
+	}
+	if message.ReplyTarget.ProgressMode != string(core.AsyncUpdateReply) {
+		t.Fatalf("ProgressMode = %q", message.ReplyTarget.ProgressMode)
+	}
 }
 
 func TestLive_ReplyPrefersReplyContextAndFallsBackToDirectSend(t *testing.T) {
@@ -139,8 +145,21 @@ func TestLive_MetadataDeclaresQQBotCallbackCapabilities(t *testing.T) {
 	if !metadata.Capabilities.SupportsSlashCommands {
 		t.Fatal("expected slash command capability")
 	}
+	if metadata.Capabilities.ReadinessTier != core.ReadinessTierMarkdownFirst {
+		t.Fatalf("ReadinessTier = %q, want %q", metadata.Capabilities.ReadinessTier, core.ReadinessTierMarkdownFirst)
+	}
 	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != core.NativeSurfaceQQBotMarkdown {
 		t.Fatalf("NativeSurfaces = %+v", metadata.Rendering.NativeSurfaces)
+	}
+	foundMarkdown := false
+	for _, format := range metadata.Rendering.SupportedFormats {
+		if format == core.TextFormatQQBotMD {
+			foundMarkdown = true
+			break
+		}
+	}
+	if !foundMarkdown {
+		t.Fatalf("SupportedFormats = %+v, want qqbot_md", metadata.Rendering.SupportedFormats)
 	}
 }
 

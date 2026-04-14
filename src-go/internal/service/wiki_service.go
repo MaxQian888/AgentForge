@@ -95,6 +95,7 @@ type WikiService struct {
 	broadcaster wikiBroadcaster
 	notifier    wikiNotificationCreator
 	imNotifier  wikiIMNotifier
+	imChannels  IMEventChannelResolver
 	imPlatform  string
 	imChannelID string
 	linkSyncer  mentionLinkSyncer
@@ -131,6 +132,11 @@ func (s *WikiService) WithIMForwarder(notifier wikiIMNotifier, platform, channel
 	s.imNotifier = notifier
 	s.imPlatform = strings.TrimSpace(platform)
 	s.imChannelID = strings.TrimSpace(channelID)
+	return s
+}
+
+func (s *WikiService) WithIMChannelResolver(resolver IMEventChannelResolver) *WikiService {
+	s.imChannels = resolver
 	return s
 }
 
@@ -996,7 +1002,29 @@ func (s *WikiService) notifyMentionedUsers(ctx context.Context, pageID uuid.UUID
 }
 
 func (s *WikiService) forwardIMEvent(ctx context.Context, eventType, title, body string, data map[string]string) {
-	if s.imNotifier == nil || s.imPlatform == "" || s.imChannelID == "" {
+	if s.imNotifier == nil {
+		return
+	}
+	if s.imChannels != nil {
+		channels, err := s.imChannels.ResolveChannelsForEvent(ctx, eventType, "", "")
+		if err == nil && len(channels) > 0 {
+			for _, channel := range channels {
+				if channel == nil {
+					continue
+				}
+				_ = s.imNotifier.Notify(ctx, &model.IMNotifyRequest{
+					Platform:  strings.TrimSpace(channel.Platform),
+					ChannelID: strings.TrimSpace(channel.ChannelID),
+					Event:     eventType,
+					Title:     title,
+					Body:      body,
+					Data:      data,
+				})
+			}
+			return
+		}
+	}
+	if s.imPlatform == "" || s.imChannelID == "" {
 		return
 	}
 	_ = s.imNotifier.Notify(ctx, &model.IMNotifyRequest{

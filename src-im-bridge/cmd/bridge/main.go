@@ -323,12 +323,26 @@ func registerCommandHandlers(engine *core.Engine, apiClient *client.AgentForgeCl
 	commands.RegisterQueueCommands(engine, apiClient)
 	commands.RegisterTeamCommands(engine, apiClient)
 	commands.RegisterMemoryCommands(engine, apiClient)
+	commands.RegisterLoginCommands(engine, apiClient)
+	commands.RegisterProjectCommands(engine, apiClient)
 	commands.RegisterToolsCommands(engine, apiClient)
 	commands.RegisterHelpCommand(engine)
 
 	engine.SetFallback(func(p core.Platform, msg *core.Message) {
 		ctx := context.Background()
 		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext(bridgeID, msg.ReplyTarget)
+		if resolved := commands.ResolveDirectRuntimeMention(msg.Content); resolved != "" {
+			log.WithFields(log.Fields{
+				"component": "main",
+				"platform":  msg.Platform,
+				"userId":    msg.UserID,
+				"command":   resolved,
+			}).Info("Direct runtime mention routed to agent run command")
+			cloned := *msg
+			cloned.Content = resolved
+			engine.HandleMessage(p, &cloned)
+			return
+		}
 		historyKey := strings.TrimSpace(msg.SessionKey)
 		if historyKey == "" {
 			historyKey = fmt.Sprintf("%s:%s:%s", msg.Platform, msg.ChatID, msg.UserID)

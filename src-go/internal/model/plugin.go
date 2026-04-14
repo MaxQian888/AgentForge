@@ -24,12 +24,12 @@ const (
 type PluginSourceType string
 
 const (
-	PluginSourceBuiltin      PluginSourceType = "builtin"
-	PluginSourceLocal        PluginSourceType = "local"
-	PluginSourceGit          PluginSourceType = "git"
-	PluginSourceNPM          PluginSourceType = "npm"
-	PluginSourceCatalog      PluginSourceType = "catalog"
-	PluginSourceMarketplace  PluginSourceType = "marketplace"
+	PluginSourceBuiltin     PluginSourceType = "builtin"
+	PluginSourceLocal       PluginSourceType = "local"
+	PluginSourceGit         PluginSourceType = "git"
+	PluginSourceNPM         PluginSourceType = "npm"
+	PluginSourceCatalog     PluginSourceType = "catalog"
+	PluginSourceMarketplace PluginSourceType = "marketplace"
 )
 
 type PluginTrustState string
@@ -361,6 +361,10 @@ type PluginBuiltInMetadata struct {
 	Official             bool     `json:"official,omitempty"`
 	DocsRef              string   `json:"docsRef,omitempty"`
 	VerificationProfile  string   `json:"verificationProfile,omitempty"`
+	CoreFlows            []string `json:"coreFlows,omitempty"`
+	StarterFamily        string   `json:"starterFamily,omitempty"`
+	DependencyRefs       []string `json:"dependencyRefs,omitempty"`
+	WorkspaceRefs        []string `json:"workspaceRefs,omitempty"`
 	AvailabilityStatus   string   `json:"availabilityStatus,omitempty"`
 	AvailabilityMessage  string   `json:"availabilityMessage,omitempty"`
 	ReadinessStatus      string   `json:"readinessStatus,omitempty"`

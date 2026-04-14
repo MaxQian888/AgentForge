@@ -1,0 +1,8 @@
+{
+  "name": "@agentforge/workflow-task-delivery-flow",
+  "private": true,
+  "scripts": {
+    "plugin:build": "node ../../../scripts/build-go-wasm-plugin.js --manifest plugins/workflows/task-delivery-flow/manifest.yaml --source ./cmd/task-delivery-flow",
+    "plugin:verify": "node ../../../scripts/verify-plugin-dev-workflow.js --manifest plugins/workflows/task-delivery-flow/manifest.yaml"
+  }
+}

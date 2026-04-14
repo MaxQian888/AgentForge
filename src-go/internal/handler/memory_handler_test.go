@@ -15,6 +15,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/handler"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
@@ -27,18 +28,33 @@ func (v *memoryHandlerValidator) Validate(i interface{}) error {
 }
 
 type memoryServiceStub struct {
-	storeInput  *service.StoreMemoryInput
-	searchPID   uuid.UUID
-	searchQuery string
-	searchLimit int
-	deleteID    uuid.UUID
+	storeInput   *service.StoreMemoryInput
+	searchInput  *service.MemoryExplorerQuery
+	getProjectID uuid.UUID
+	getMemoryID  uuid.UUID
+	getRoleID    string
+	bulkProject  uuid.UUID
+	bulkIDs      []uuid.UUID
+	bulkRoleID   string
+	cleanupInput *service.MemoryCleanupInput
+	deleteID     uuid.UUID
 
 	storeResult  *model.AgentMemory
 	searchResult []model.AgentMemoryDTO
+	detailResult *model.AgentMemoryDetailDTO
+	statsResult  *model.MemoryExplorerStatsDTO
+	exportResult *service.EpisodicMemoryExport
+	bulkDeleted  int64
+	cleanupCount int64
 
-	storeErr  error
-	searchErr error
-	deleteErr error
+	storeErr   error
+	searchErr  error
+	getErr     error
+	statsErr   error
+	exportErr  error
+	bulkErr    error
+	cleanupErr error
+	deleteErr  error
 }
 
 func (s *memoryServiceStub) Store(_ context.Context, input service.StoreMemoryInput) (*model.AgentMemory, error) {
@@ -46,11 +62,38 @@ func (s *memoryServiceStub) Store(_ context.Context, input service.StoreMemoryIn
 	return s.storeResult, s.storeErr
 }
 
-func (s *memoryServiceStub) Search(_ context.Context, projectID uuid.UUID, query string, limit int) ([]model.AgentMemoryDTO, error) {
-	s.searchPID = projectID
-	s.searchQuery = query
-	s.searchLimit = limit
+func (s *memoryServiceStub) Search(_ context.Context, input service.MemoryExplorerQuery) ([]model.AgentMemoryDTO, error) {
+	s.searchInput = &input
 	return s.searchResult, s.searchErr
+}
+
+func (s *memoryServiceStub) Get(_ context.Context, projectID uuid.UUID, id uuid.UUID, roleID string) (*model.AgentMemoryDetailDTO, error) {
+	s.getProjectID = projectID
+	s.getMemoryID = id
+	s.getRoleID = roleID
+	return s.detailResult, s.getErr
+}
+
+func (s *memoryServiceStub) Stats(_ context.Context, input service.MemoryExplorerQuery) (*model.MemoryExplorerStatsDTO, error) {
+	s.searchInput = &input
+	return s.statsResult, s.statsErr
+}
+
+func (s *memoryServiceStub) ExportEpisodic(_ context.Context, input service.MemoryExplorerQuery) (*service.EpisodicMemoryExport, error) {
+	s.searchInput = &input
+	return s.exportResult, s.exportErr
+}
+
+func (s *memoryServiceStub) BulkDelete(_ context.Context, projectID uuid.UUID, ids []uuid.UUID, roleID string) (int64, error) {
+	s.bulkProject = projectID
+	s.bulkIDs = append([]uuid.UUID(nil), ids...)
+	s.bulkRoleID = roleID
+	return s.bulkDeleted, s.bulkErr
+}
+
+func (s *memoryServiceStub) CleanupEpisodic(_ context.Context, input service.MemoryCleanupInput) (int64, error) {
+	s.cleanupInput = &input
+	return s.cleanupCount, s.cleanupErr
 }
 
 func (s *memoryServiceStub) Delete(_ context.Context, id uuid.UUID) error {
@@ -70,7 +113,8 @@ func newMemoryHandlerContext(method, target, body string) (*echo.Echo, echo.Cont
 func TestMemoryHandlerStoreSearchAndDelete(t *testing.T) {
 	projectID := uuid.New()
 	memoryID := uuid.New()
-	now := time.Date(2026, 3, 30, 18, 0, 0, 0, time.UTC)
+	start := time.Date(2026, 4, 1, 8, 0, 0, 0, time.UTC)
+	end := start.Add(2 * time.Hour)
 	stub := &memoryServiceStub{
 		storeResult: &model.AgentMemory{
 			ID:             memoryID,
@@ -83,7 +127,8 @@ func TestMemoryHandlerStoreSearchAndDelete(t *testing.T) {
 			Metadata:       `{"source":"ops"}`,
 			RelevanceScore: 0.8,
 			AccessCount:    1,
-			CreatedAt:      now,
+			CreatedAt:      start,
+			UpdatedAt:      end,
 		},
 		searchResult: []model.AgentMemoryDTO{{
 			ID:        memoryID.String(),
@@ -91,7 +136,8 @@ func TestMemoryHandlerStoreSearchAndDelete(t *testing.T) {
 			Scope:     model.MemoryScopeProject,
 			Key:       "release-plan",
 			Content:   "Coordinate deployment in phases",
-			CreatedAt: now.Format(time.RFC3339),
+			CreatedAt: start.Format(time.RFC3339),
+			UpdatedAt: end.Format(time.RFC3339),
 		}},
 	}
 	h := handler.NewMemoryHandler(stub)
@@ -107,17 +153,18 @@ func TestMemoryHandlerStoreSearchAndDelete(t *testing.T) {
 		t.Fatalf("Store() status/input = %d / %#v", storeRec.Code, stub.storeInput)
 	}
 
-	_, searchCtx, searchRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory?q=release&limit=5", "")
+	_, searchCtx, searchRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory?query=release&scope=project&category=semantic&roleId=planner&startAt="+start.Format(time.RFC3339)+"&endAt="+end.Format(time.RFC3339)+"&limit=5", "")
 	searchCtx.SetPath("/api/v1/projects/:pid/memory")
 	searchCtx.SetParamNames("pid")
 	searchCtx.SetParamValues(projectID.String())
-	searchCtx.QueryParams().Set("q", "release")
-	searchCtx.QueryParams().Set("limit", "5")
 	if err := h.Search(searchCtx); err != nil {
 		t.Fatalf("Search() error = %v", err)
 	}
-	if searchRec.Code != http.StatusOK || stub.searchPID != projectID || stub.searchQuery != "release" || stub.searchLimit != 5 {
-		t.Fatalf("Search() status/input = %d / %s / %q / %d", searchRec.Code, stub.searchPID, stub.searchQuery, stub.searchLimit)
+	if searchRec.Code != http.StatusOK || stub.searchInput == nil {
+		t.Fatalf("Search() status/input = %d / %#v", searchRec.Code, stub.searchInput)
+	}
+	if stub.searchInput.Query != "release" || stub.searchInput.Scope != model.MemoryScopeProject || stub.searchInput.Category != model.MemoryCategorySemantic || stub.searchInput.RoleID != "planner" || stub.searchInput.Limit != 5 {
+		t.Fatalf("searchInput = %#v", stub.searchInput)
 	}
 
 	_, deleteCtx, deleteRec := newMemoryHandlerContext(http.MethodDelete, "/api/v1/projects/"+projectID.String()+"/memory/"+memoryID.String(), "")
@@ -132,115 +179,200 @@ func TestMemoryHandlerStoreSearchAndDelete(t *testing.T) {
 	}
 }
 
-func TestMemoryHandlerErrorBranches(t *testing.T) {
-	projectID := uuid.New()
-
-	t.Run("service unavailable", func(t *testing.T) {
-		h := handler.NewMemoryHandler(nil)
-		_, ctx, rec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory", "")
-		ctx.SetPath("/api/v1/projects/:pid/memory")
-		ctx.SetParamNames("pid")
-		ctx.SetParamValues(projectID.String())
-		if err := h.Search(ctx); err != nil {
-			t.Fatalf("Search() error = %v", err)
-		}
-		if rec.Code != http.StatusServiceUnavailable {
-			t.Fatalf("status = %d, want 503", rec.Code)
-		}
-	})
-
-	t.Run("invalid project id", func(t *testing.T) {
-		h := handler.NewMemoryHandler(&memoryServiceStub{})
-		_, ctx, rec := newMemoryHandlerContext(http.MethodPost, "/api/v1/projects/bad/memory", `{}`)
-		ctx.SetPath("/api/v1/projects/:pid/memory")
-		ctx.SetParamNames("pid")
-		ctx.SetParamValues("bad")
-		if err := h.Store(ctx); err != nil {
-			t.Fatalf("Store() error = %v", err)
-		}
-		if rec.Code != http.StatusBadRequest {
-			t.Fatalf("status = %d, want 400", rec.Code)
-		}
-	})
-
-	t.Run("validation error", func(t *testing.T) {
-		h := handler.NewMemoryHandler(&memoryServiceStub{})
-		_, ctx, rec := newMemoryHandlerContext(http.MethodPost, "/api/v1/projects/"+projectID.String()+"/memory", `{}`)
-		ctx.SetPath("/api/v1/projects/:pid/memory")
-		ctx.SetParamNames("pid")
-		ctx.SetParamValues(projectID.String())
-		if err := h.Store(ctx); err != nil {
-			t.Fatalf("Store() error = %v", err)
-		}
-		if rec.Code != http.StatusUnprocessableEntity {
-			t.Fatalf("status = %d, want 422", rec.Code)
-		}
-	})
-
-	t.Run("internal errors", func(t *testing.T) {
-		stub := &memoryServiceStub{
-			searchErr: errors.New("search failed"),
-		}
-		h := handler.NewMemoryHandler(stub)
-
-		_, searchCtx, searchRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory", "")
-		searchCtx.SetPath("/api/v1/projects/:pid/memory")
-		searchCtx.SetParamNames("pid")
-		searchCtx.SetParamValues(projectID.String())
-		if err := h.Search(searchCtx); err != nil {
-			t.Fatalf("Search() error = %v", err)
-		}
-		if searchRec.Code != http.StatusInternalServerError {
-			t.Fatalf("search status = %d, want 500", searchRec.Code)
-		}
-
-		_, deleteCtx, deleteRec := newMemoryHandlerContext(http.MethodDelete, "/api/v1/projects/"+projectID.String()+"/memory/not-a-uuid", "")
-		deleteCtx.SetPath("/api/v1/projects/:pid/memory/:mid")
-		deleteCtx.SetParamNames("pid", "mid")
-		deleteCtx.SetParamValues(projectID.String(), "not-a-uuid")
-		if err := h.Delete(deleteCtx); err != nil {
-			t.Fatalf("Delete() error = %v", err)
-		}
-		if deleteRec.Code != http.StatusBadRequest {
-			t.Fatalf("delete invalid mid status = %d, want 400", deleteRec.Code)
-		}
-	})
-}
-
-func TestMemoryHandlerDeleteServiceFailureAndDefaultLimit(t *testing.T) {
+func TestMemoryHandlerExplorerRoutes(t *testing.T) {
 	projectID := uuid.New()
 	memoryID := uuid.New()
+	now := time.Date(2026, 4, 9, 12, 0, 0, 0, time.UTC)
 	stub := &memoryServiceStub{
-		deleteErr:    errors.New("delete failed"),
-		searchResult: []model.AgentMemoryDTO{},
+		detailResult: &model.AgentMemoryDetailDTO{AgentMemoryDTO: model.AgentMemoryDTO{ID: memoryID.String(), ProjectID: projectID.String(), Key: "release-plan", CreatedAt: now.Format(time.RFC3339), UpdatedAt: now.Format(time.RFC3339)}},
+		statsResult:  &model.MemoryExplorerStatsDTO{TotalCount: 3},
+		exportResult: &service.EpisodicMemoryExport{ProjectID: projectID.String()},
+		bulkDeleted:  2,
+		cleanupCount: 5,
 	}
 	h := handler.NewMemoryHandler(stub)
 
-	_, searchCtx, searchRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory?limit=0", "")
+	_, getCtx, getRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory/"+memoryID.String()+"?roleId=planner", "")
+	getCtx.SetPath("/api/v1/projects/:pid/memory/:mid")
+	getCtx.SetParamNames("pid", "mid")
+	getCtx.SetParamValues(projectID.String(), memoryID.String())
+	if err := h.Get(getCtx); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+	if getRec.Code != http.StatusOK || stub.getProjectID != projectID || stub.getMemoryID != memoryID || stub.getRoleID != "planner" {
+		t.Fatalf("Get() status/captured = %d / %s / %s / %q", getRec.Code, stub.getProjectID, stub.getMemoryID, stub.getRoleID)
+	}
+
+	_, statsCtx, statsRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory/stats?category=semantic", "")
+	statsCtx.SetPath("/api/v1/projects/:pid/memory/stats")
+	statsCtx.SetParamNames("pid")
+	statsCtx.SetParamValues(projectID.String())
+	if err := h.Stats(statsCtx); err != nil {
+		t.Fatalf("Stats() error = %v", err)
+	}
+	if statsRec.Code != http.StatusOK || stub.searchInput == nil || stub.searchInput.Category != model.MemoryCategorySemantic {
+		t.Fatalf("Stats() status/input = %d / %#v", statsRec.Code, stub.searchInput)
+	}
+
+	_, exportCtx, exportRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory/export?scope=role&roleId=planner", "")
+	exportCtx.SetPath("/api/v1/projects/:pid/memory/export")
+	exportCtx.SetParamNames("pid")
+	exportCtx.SetParamValues(projectID.String())
+	if err := h.Export(exportCtx); err != nil {
+		t.Fatalf("Export() error = %v", err)
+	}
+	if exportRec.Code != http.StatusOK || stub.searchInput == nil || stub.searchInput.Scope != model.MemoryScopeRole || stub.searchInput.RoleID != "planner" {
+		t.Fatalf("Export() status/input = %d / %#v", exportRec.Code, stub.searchInput)
+	}
+
+	_, bulkCtx, bulkRec := newMemoryHandlerContext(http.MethodPost, "/api/v1/projects/"+projectID.String()+"/memory/bulk-delete", `{"ids":["`+memoryID.String()+`"],"roleId":"planner"}`)
+	bulkCtx.SetPath("/api/v1/projects/:pid/memory/bulk-delete")
+	bulkCtx.SetParamNames("pid")
+	bulkCtx.SetParamValues(projectID.String())
+	if err := h.BulkDelete(bulkCtx); err != nil {
+		t.Fatalf("BulkDelete() error = %v", err)
+	}
+	if bulkRec.Code != http.StatusOK || stub.bulkProject != projectID || len(stub.bulkIDs) != 1 || stub.bulkRoleID != "planner" {
+		t.Fatalf("BulkDelete() status/input = %d / %s / %#v / %q", bulkRec.Code, stub.bulkProject, stub.bulkIDs, stub.bulkRoleID)
+	}
+
+	_, cleanupCtx, cleanupRec := newMemoryHandlerContext(http.MethodPost, "/api/v1/projects/"+projectID.String()+"/memory/cleanup", `{"scope":"role","roleId":"planner","before":"`+now.Format(time.RFC3339)+`"}`)
+	cleanupCtx.SetPath("/api/v1/projects/:pid/memory/cleanup")
+	cleanupCtx.SetParamNames("pid")
+	cleanupCtx.SetParamValues(projectID.String())
+	if err := h.Cleanup(cleanupCtx); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if cleanupRec.Code != http.StatusOK || stub.cleanupInput == nil || stub.cleanupInput.Scope != model.MemoryScopeRole || stub.cleanupInput.RoleID != "planner" || stub.cleanupInput.Before == nil {
+		t.Fatalf("Cleanup() status/input = %d / %#v", cleanupRec.Code, stub.cleanupInput)
+	}
+}
+
+func TestMemoryHandlerSearchSupportsLegacyQAndErrorBranches(t *testing.T) {
+	projectID := uuid.New()
+	memoryID := uuid.New()
+	stub := &memoryServiceStub{searchResult: []model.AgentMemoryDTO{}, getErr: repository.ErrNotFound, cleanupErr: errors.New("cleanup before or retentionDays is required")}
+	h := handler.NewMemoryHandler(stub)
+
+	_, searchCtx, searchRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory?q=release", "")
 	searchCtx.SetPath("/api/v1/projects/:pid/memory")
 	searchCtx.SetParamNames("pid")
 	searchCtx.SetParamValues(projectID.String())
-	searchCtx.QueryParams().Set("limit", "0")
 	if err := h.Search(searchCtx); err != nil {
 		t.Fatalf("Search() error = %v", err)
 	}
-	if searchRec.Code != http.StatusOK || stub.searchLimit != 20 {
-		t.Fatalf("Search() status/limit = %d / %d", searchRec.Code, stub.searchLimit)
+	if searchRec.Code != http.StatusOK || stub.searchInput == nil || stub.searchInput.Query != "release" {
+		t.Fatalf("legacy search input = %#v status=%d", stub.searchInput, searchRec.Code)
 	}
 
-	_, deleteCtx, deleteRec := newMemoryHandlerContext(http.MethodDelete, "/api/v1/projects/"+projectID.String()+"/memory/"+memoryID.String(), "")
-	deleteCtx.SetPath("/api/v1/projects/:pid/memory/:mid")
-	deleteCtx.SetParamNames("pid", "mid")
-	deleteCtx.SetParamValues(projectID.String(), memoryID.String())
-	if err := h.Delete(deleteCtx); err != nil {
-		t.Fatalf("Delete() error = %v", err)
+	_, badSearchCtx, badSearchRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory?startAt=bad", "")
+	badSearchCtx.SetPath("/api/v1/projects/:pid/memory")
+	badSearchCtx.SetParamNames("pid")
+	badSearchCtx.SetParamValues(projectID.String())
+	if err := h.Search(badSearchCtx); err != nil {
+		t.Fatalf("Search(bad) error = %v", err)
 	}
-	if deleteRec.Code != http.StatusInternalServerError {
-		t.Fatalf("Delete() status = %d, want 500", deleteRec.Code)
+	if badSearchRec.Code != http.StatusBadRequest {
+		t.Fatalf("Search(bad) status = %d, want 400", badSearchRec.Code)
+	}
+
+	_, getCtx, getRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory/"+memoryID.String(), "")
+	getCtx.SetPath("/api/v1/projects/:pid/memory/:mid")
+	getCtx.SetParamNames("pid", "mid")
+	getCtx.SetParamValues(projectID.String(), memoryID.String())
+	if err := h.Get(getCtx); err != nil {
+		t.Fatalf("Get(notfound) error = %v", err)
+	}
+	if getRec.Code != http.StatusNotFound {
+		t.Fatalf("Get(notfound) status = %d, want 404", getRec.Code)
+	}
+
+	_, cleanupCtx, cleanupRec := newMemoryHandlerContext(http.MethodPost, "/api/v1/projects/"+projectID.String()+"/memory/cleanup", `{}`)
+	cleanupCtx.SetPath("/api/v1/projects/:pid/memory/cleanup")
+	cleanupCtx.SetParamNames("pid")
+	cleanupCtx.SetParamValues(projectID.String())
+	if err := h.Cleanup(cleanupCtx); err != nil {
+		t.Fatalf("Cleanup() error = %v", err)
+	}
+	if cleanupRec.Code != http.StatusBadRequest {
+		t.Fatalf("Cleanup() status = %d, want 400", cleanupRec.Code)
+	}
+}
+
+func TestMemoryHandlerRoleScopedExplorerQueriesRequireRoleID(t *testing.T) {
+	projectID := uuid.New()
+	stub := &memoryServiceStub{}
+	h := handler.NewMemoryHandler(stub)
+
+	_, searchCtx, searchRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory?scope=role", "")
+	searchCtx.SetPath("/api/v1/projects/:pid/memory")
+	searchCtx.SetParamNames("pid")
+	searchCtx.SetParamValues(projectID.String())
+	if err := h.Search(searchCtx); err != nil {
+		t.Fatalf("Search(role scope) error = %v", err)
+	}
+	if searchRec.Code != http.StatusBadRequest {
+		t.Fatalf("Search(role scope) status = %d, want 400", searchRec.Code)
+	}
+
+	_, statsCtx, statsRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory/stats?scope=role", "")
+	statsCtx.SetPath("/api/v1/projects/:pid/memory/stats")
+	statsCtx.SetParamNames("pid")
+	statsCtx.SetParamValues(projectID.String())
+	if err := h.Stats(statsCtx); err != nil {
+		t.Fatalf("Stats(role scope) error = %v", err)
+	}
+	if statsRec.Code != http.StatusBadRequest {
+		t.Fatalf("Stats(role scope) status = %d, want 400", statsRec.Code)
+	}
+
+	_, exportCtx, exportRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory/export?scope=role", "")
+	exportCtx.SetPath("/api/v1/projects/:pid/memory/export")
+	exportCtx.SetParamNames("pid")
+	exportCtx.SetParamValues(projectID.String())
+	if err := h.Export(exportCtx); err != nil {
+		t.Fatalf("Export(role scope) error = %v", err)
+	}
+	if exportRec.Code != http.StatusBadRequest {
+		t.Fatalf("Export(role scope) status = %d, want 400", exportRec.Code)
+	}
+
+	if stub.searchInput != nil {
+		t.Fatalf("service should not be called for malformed role-scoped explorer query: %#v", stub.searchInput)
+	}
+}
+
+func TestMemoryHandlerServiceUnavailableAndAccessDenied(t *testing.T) {
+	projectID := uuid.New()
+	memoryID := uuid.New()
+
+	h := handler.NewMemoryHandler(nil)
+	_, ctx, rec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory", "")
+	ctx.SetPath("/api/v1/projects/:pid/memory")
+	ctx.SetParamNames("pid")
+	ctx.SetParamValues(projectID.String())
+	if err := h.Search(ctx); err != nil {
+		t.Fatalf("Search() error = %v", err)
+	}
+	if rec.Code != http.StatusServiceUnavailable {
+		t.Fatalf("status = %d, want 503", rec.Code)
+	}
+
+	stub := &memoryServiceStub{getErr: service.ErrMemoryAccessDenied}
+	h = handler.NewMemoryHandler(stub)
+	_, getCtx, getRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory/"+memoryID.String(), "")
+	getCtx.SetPath("/api/v1/projects/:pid/memory/:mid")
+	getCtx.SetParamNames("pid", "mid")
+	getCtx.SetParamValues(projectID.String(), memoryID.String())
+	if err := h.Get(getCtx); err != nil {
+		t.Fatalf("Get(access denied) error = %v", err)
+	}
+	if getRec.Code != http.StatusForbidden {
+		t.Fatalf("Get(access denied) status = %d, want 403", getRec.Code)
 	}
 
 	var payload map[string]any
-	if err := json.Unmarshal(deleteRec.Body.Bytes(), &payload); err != nil {
+	if err := json.Unmarshal(getRec.Body.Bytes(), &payload); err != nil {
 		t.Fatalf("decode payload: %v", err)
 	}
 	if payload["message"] == "" {

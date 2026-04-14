@@ -63,8 +63,38 @@ func (s *dispatchPreflightBudgetCheckerStub) CheckBudget(context.Context, uuid.U
 	return &cloned, nil
 }
 
+type dispatchPreflightRunReaderStub struct {
+	runs []*model.AgentRun
+}
+
+func (s *dispatchPreflightRunReaderStub) GetByTask(context.Context, uuid.UUID) ([]*model.AgentRun, error) {
+	cloned := make([]*model.AgentRun, 0, len(s.runs))
+	for _, run := range s.runs {
+		if run == nil {
+			continue
+		}
+		copyRun := *run
+		cloned = append(cloned, &copyRun)
+	}
+	return cloned, nil
+}
+
 func newDispatchPreflightContext(e *echo.Echo, projectID, taskID, memberID uuid.UUID) echo.Context {
 	req := httptest.NewRequest(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/dispatch/preflight?taskId="+taskID.String()+"&memberId="+memberID.String(), nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(appMiddleware.ProjectIDContextKey, projectID)
+	c.SetParamNames("pid")
+	c.SetParamValues(projectID.String())
+	return c
+}
+
+func newDispatchPreflightContextWithQuery(e *echo.Echo, projectID, taskID, memberID uuid.UUID, rawQuery string) echo.Context {
+	path := "/api/v1/projects/" + projectID.String() + "/dispatch/preflight?taskId=" + taskID.String() + "&memberId=" + memberID.String()
+	if rawQuery != "" {
+		path += "&" + rawQuery
+	}
+	req := httptest.NewRequest(http.MethodGet, path, nil)
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
 	c.Set(appMiddleware.ProjectIDContextKey, projectID)
@@ -184,6 +214,100 @@ func TestDispatchPreflightHandler_GetReturnsSkippedForNonAgentMember(t *testing.
 	}
 	if resp.PoolActive != nil || resp.BudgetWarning != nil || resp.BudgetBlocked != nil {
 		t.Fatalf("skipped response should omit runtime-only fields: %+v", resp)
+	}
+}
+
+func TestDispatchPreflightHandler_GetBlocksWhenTaskBudgetWouldBeExceeded(t *testing.T) {
+	e := newAgentTestEcho()
+	projectID := uuid.New()
+	taskID := uuid.New()
+	memberID := uuid.New()
+	handlerUnderTest := handler.NewDispatchPreflightHandler(
+		&dispatchPreflightTaskRepoStub{task: &model.Task{ID: taskID, ProjectID: projectID, BudgetUsd: 3, SpentUsd: 2.75}},
+		&dispatchPreflightMemberRepoStub{member: &model.Member{ID: memberID, ProjectID: projectID, Type: model.MemberTypeAgent, IsActive: true}},
+		nil,
+		&dispatchPreflightPoolStatsStub{stats: model.AgentPoolStatsDTO{Available: 2}},
+	)
+
+	c := newDispatchPreflightContextWithQuery(
+		e,
+		projectID,
+		taskID,
+		memberID,
+		"runtime=codex&provider=openai&model=gpt-5-codex&roleId=frontend-developer&budgetUsd=0.5",
+	)
+
+	if err := handlerUnderTest.Get(c); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	type responseShape struct {
+		AdmissionLikely     bool   `json:"admissionLikely"`
+		DispatchOutcomeHint string `json:"dispatchOutcomeHint"`
+		GuardrailType       string `json:"guardrailType"`
+		GuardrailScope      string `json:"guardrailScope"`
+		Runtime             string `json:"runtime"`
+		Provider            string `json:"provider"`
+		Model               string `json:"model"`
+		RoleID              string `json:"roleId"`
+		BudgetBlocked       *struct {
+			Scope   string `json:"scope"`
+			Message string `json:"message"`
+		} `json:"budgetBlocked"`
+	}
+
+	resp := decodeJSON[responseShape](t, c.Response().Writer.(*httptest.ResponseRecorder))
+	if resp.DispatchOutcomeHint != model.DispatchStatusBlocked || resp.AdmissionLikely {
+		t.Fatalf("response = %+v, want blocked advisory", resp)
+	}
+	if resp.GuardrailType != model.DispatchGuardrailTypeBudget || resp.GuardrailScope != "task" {
+		t.Fatalf("guardrail = %+v, want task budget", resp)
+	}
+	if resp.BudgetBlocked == nil || resp.BudgetBlocked.Scope != "task" {
+		t.Fatalf("response = %+v, want task budgetBlocked", resp)
+	}
+	if resp.Runtime != "codex" || resp.Provider != "openai" || resp.Model != "gpt-5-codex" || resp.RoleID != "frontend-developer" {
+		t.Fatalf("dispatch tuple = %+v", resp)
+	}
+}
+
+func TestDispatchPreflightHandler_GetBlocksWhenTaskAlreadyHasPausedRun(t *testing.T) {
+	e := newAgentTestEcho()
+	projectID := uuid.New()
+	taskID := uuid.New()
+	memberID := uuid.New()
+	handlerUnderTest := handler.NewDispatchPreflightHandler(
+		&dispatchPreflightTaskRepoStub{task: &model.Task{ID: taskID, ProjectID: projectID}},
+		&dispatchPreflightMemberRepoStub{member: &model.Member{ID: memberID, ProjectID: projectID, Type: model.MemberTypeAgent, IsActive: true}},
+		nil,
+		&dispatchPreflightPoolStatsStub{stats: model.AgentPoolStatsDTO{Available: 1}},
+	).WithRunReader(&dispatchPreflightRunReaderStub{
+		runs: []*model.AgentRun{{ID: uuid.New(), TaskID: taskID, MemberID: memberID, Status: model.AgentRunStatusPaused}},
+	})
+
+	c := newDispatchPreflightContext(e, projectID, taskID, memberID)
+
+	if err := handlerUnderTest.Get(c); err != nil {
+		t.Fatalf("Get() error = %v", err)
+	}
+
+	type responseShape struct {
+		AdmissionLikely     bool   `json:"admissionLikely"`
+		DispatchOutcomeHint string `json:"dispatchOutcomeHint"`
+		GuardrailType       string `json:"guardrailType"`
+		GuardrailScope      string `json:"guardrailScope"`
+		BudgetBlocked       any    `json:"budgetBlocked"`
+	}
+
+	resp := decodeJSON[responseShape](t, c.Response().Writer.(*httptest.ResponseRecorder))
+	if resp.DispatchOutcomeHint != model.DispatchStatusBlocked || resp.AdmissionLikely {
+		t.Fatalf("response = %+v, want blocked advisory", resp)
+	}
+	if resp.GuardrailType != model.DispatchGuardrailTypeTask || resp.GuardrailScope != "task" {
+		t.Fatalf("guardrail = %+v, want task conflict", resp)
+	}
+	if resp.BudgetBlocked != nil {
+		t.Fatalf("response = %+v, want non-budget block", resp)
 	}
 }
 

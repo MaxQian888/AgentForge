@@ -130,6 +130,10 @@ export interface PluginBuiltInMetadata {
   official?: boolean;
   docsRef?: string;
   verificationProfile?: string;
+  coreFlows?: string[];
+  starterFamily?: string;
+  dependencyRefs?: string[];
+  workspaceRefs?: string[];
   availabilityStatus?: string;
   availabilityMessage?: string;
   readinessStatus?: string;

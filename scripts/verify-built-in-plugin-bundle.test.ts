@@ -27,10 +27,15 @@ describe("verify-built-in-plugin-bundle", () => {
         "web-search",
         "github-tool",
         "db-query",
+        "task-control",
+        "review-control",
+        "workflow-control",
         "feishu-adapter",
         "architecture-check",
         "performance-check",
         "standard-dev-flow",
+        "task-delivery-flow",
+        "review-escalation-flow",
       ]),
     );
     expect(
@@ -54,8 +59,13 @@ describe("verify-built-in-plugin-bundle", () => {
     );
 
     expect(summary["web-search"]).toEqual(["manifest"]);
+    expect(summary["task-control"]).toEqual(["manifest", "package-validate"]);
+    expect(summary["review-control"]).toEqual(["manifest", "package-validate"]);
+    expect(summary["workflow-control"]).toEqual(["manifest", "package-validate"]);
     expect(summary["architecture-check"]).toEqual(["manifest", "package-validate"]);
     expect(summary["standard-dev-flow"]).toEqual(["build", "debug-health"]);
+    expect(summary["task-delivery-flow"]).toEqual(["build", "debug-health"]);
+    expect(summary["review-escalation-flow"]).toEqual(["build", "debug-health"]);
     expect(summary["feishu-adapter"]).toEqual(["build", "debug-health"]);
   });
 
@@ -169,6 +179,61 @@ describe("verify-built-in-plugin-bundle", () => {
         "missing readiness.prerequisites[0].label",
       ]),
     );
+  });
+
+  test("fails tool and workflow built-ins that omit starter catalog metadata", async () => {
+    const repoRoot = fs.mkdtempSync(path.join(os.tmpdir(), "agentforge-builtins-"));
+    fs.mkdirSync(path.join(repoRoot, "plugins", "tools", "web-search"), { recursive: true });
+    fs.writeFileSync(
+      path.join(repoRoot, "plugins", "builtin-bundle.yaml"),
+      JSON.stringify({
+        plugins: [
+          {
+            id: "web-search",
+            kind: "ToolPlugin",
+            manifest: "tools/web-search/manifest.yaml",
+            verificationProfile: "mcp-tool",
+            readiness: {
+              readyMessage: "Web Search is ready for install.",
+              blockedMessage: "Needs local setup before activation.",
+              nextStep: "Install the built-in and confirm the bridge runtime is available.",
+              installable: true,
+            },
+            availability: {
+              status: "ready",
+              message: "ready",
+            },
+          },
+        ],
+      }),
+    );
+    fs.writeFileSync(
+      path.join(repoRoot, "plugins", "tools", "web-search", "manifest.yaml"),
+      [
+        "apiVersion: agentforge/v1",
+        "kind: ToolPlugin",
+        "metadata:",
+        "  id: web-search",
+        "  name: Web Search",
+        "  version: 1.0.0",
+        "spec:",
+        "  runtime: mcp",
+        "  transport: stdio",
+        "  command: node",
+        '  args: ["tool.js"]',
+        "",
+      ].join("\n"),
+    );
+
+    const { runBundleVerification } = await loadBundleModule();
+    const result = runBundleVerification({ repoRoot });
+
+    expect(result.ok).toBe(false);
+    expect(result.stage).toBe("starter-catalog");
+    expect(result.stderr).toContain("missing starterFamily");
+    expect(result.stderr).toContain("missing coreFlows");
+    expect(result.stderr).toContain("missing dependencyRefs");
+    expect(result.stderr).toContain("missing workspaceRefs");
   });
 
   test("evaluates deterministic readiness preflight without requiring live execution", async () => {

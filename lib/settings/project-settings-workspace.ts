@@ -69,26 +69,27 @@ export const DEFAULT_WEBHOOK: WebhookConfig = {
 };
 
 export function createSettingsWorkspaceDraft(project: Project): SettingsWorkspaceDraft {
+  const runtimeOptions = project.codingAgentCatalog?.runtimes ?? [];
+  const storedSelection = project.settings?.codingAgent ?? {
+    runtime: "",
+    provider: "",
+    model: "",
+  };
+  const selectedRuntime = runtimeOptions.find(
+    (option) => option.runtime === storedSelection.runtime,
+  );
+  const shouldUseCatalogDefault =
+    !storedSelection.runtime || (selectedRuntime != null && !selectedRuntime.available);
+  const resolvedSelection = shouldUseCatalogDefault
+    ? project.codingAgentCatalog?.defaultSelection ?? storedSelection
+    : storedSelection;
   return {
     name: project.name,
     description: project.description ?? "",
     repoUrl: project.repoUrl ?? "",
     defaultBranch: project.defaultBranch ?? "main",
     settings: {
-      codingAgent: {
-        runtime:
-          project.settings?.codingAgent.runtime ||
-          project.codingAgentCatalog?.defaultSelection.runtime ||
-          "",
-        provider:
-          project.settings?.codingAgent.provider ||
-          project.codingAgentCatalog?.defaultSelection.provider ||
-          "",
-        model:
-          project.settings?.codingAgent.model ||
-          project.codingAgentCatalog?.defaultSelection.model ||
-          "",
-      },
+      codingAgent: resolvedSelection,
       budgetGovernance: {
         ...DEFAULT_BUDGET_GOVERNANCE,
         ...project.settings?.budgetGovernance,
@@ -166,6 +167,10 @@ export function validateSettingsWorkspaceDraft(
     !selectedRuntime.compatibleProviders.includes(draft.settings.codingAgent.provider)
   ) {
     errors.provider = "Selected provider is not supported by the current runtime.";
+  }
+
+  if (selectedRuntime && !selectedRuntime.available) {
+    errors.runtime = "Selected runtime is currently unavailable.";
   }
 
   if (
