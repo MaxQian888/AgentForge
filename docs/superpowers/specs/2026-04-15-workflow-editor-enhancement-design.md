@@ -102,7 +102,7 @@ interface EditorState {
   edges: Edge[];           // ReactFlow Edge[]
   selectedNodeId: string | null;
   selectedEdgeId: string | null;
-  undoStack: Snapshot[];   // { nodes, edges } — name/description are excluded from undo/redo snapshots as they are metadata, not graph state
+  undoStack: Snapshot[];   // type Snapshot = { nodes: Node[]; edges: Edge[] } — name/description excluded as they are metadata, not graph state
   redoStack: Snapshot[];
   dirty: boolean;
   clipboard: Node[];
@@ -128,7 +128,7 @@ interface EditorState {
 | `DESELECT` | Clear both selection IDs |
 | `UNDO` | Pop undoStack → push current to redoStack → restore |
 | `REDO` | Pop redoStack → push current to undoStack → restore |
-| `COPY` | Copy selected nodes to clipboard |
+| `COPY` | Copy selected nodes to clipboard (reads from ReactFlow's internal selection state via `getNodes().filter(n => n.selected)`, not from `selectedNodeId`) |
 | `PASTE` | Push snapshot → add clipboard nodes with new IDs + offset (50,50) → mark dirty |
 | `MARK_CLEAN` | Set dirty = false (after successful save) |
 
