@@ -54,8 +54,12 @@ export interface WorkflowDefinition {
   name: string;
   description: string;
   status: string;
+  category: string;
   nodes: WorkflowNodeData[];
   edges: WorkflowEdgeData[];
+  templateVars?: Record<string, unknown>;
+  version: number;
+  sourceId?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -154,6 +158,35 @@ interface WorkflowState {
   } | null>;
   cancelExecution: (id: string) => Promise<boolean>;
   selectExecution: (exec: WorkflowExecution | null) => void;
+
+  // Workflow Templates
+  templates: WorkflowDefinition[];
+  templatesLoading: boolean;
+  fetchTemplates: (category?: string) => Promise<void>;
+  cloneTemplate: (
+    templateId: string,
+    projectId: string,
+    overrides?: Record<string, unknown>
+  ) => Promise<WorkflowDefinition | null>;
+  executeTemplate: (
+    templateId: string,
+    projectId: string,
+    taskId?: string,
+    variables?: Record<string, unknown>
+  ) => Promise<WorkflowExecution | null>;
+
+  // Human Review
+  resolveReview: (
+    executionId: string,
+    nodeId: string,
+    decision: string,
+    comment?: string
+  ) => Promise<boolean>;
+  sendExternalEvent: (
+    executionId: string,
+    nodeId: string,
+    payload: unknown
+  ) => Promise<boolean>;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -466,4 +499,101 @@ export const useWorkflowStore = create<WorkflowState>()((set) => ({
   },
 
   selectExecution: (exec) => set({ selectedExecution: exec }),
+
+  // --- Templates ---
+  templates: [],
+  templatesLoading: false,
+
+  fetchTemplates: async (category) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    set({ templatesLoading: true });
+    try {
+      const api = createApiClient(API_URL);
+      const params = category ? `?category=${category}` : "";
+      const { data } = await api.get<WorkflowDefinition[]>(
+        `/api/v1/workflow-templates${params}`,
+        { token }
+      );
+      set({ templates: data, templatesLoading: false });
+    } catch {
+      set({ templatesLoading: false, error: "Unable to fetch templates" });
+    }
+  },
+
+  cloneTemplate: async (templateId, projectId, overrides) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<WorkflowDefinition>(
+        `/api/v1/workflow-templates/${templateId}/clone`,
+        { overrides },
+        { token, headers: { "X-Project-ID": projectId } }
+      );
+      set((state) => ({
+        definitions: [data, ...state.definitions],
+      }));
+      return data;
+    } catch {
+      set({ error: "Unable to clone template" });
+      return null;
+    }
+  },
+
+  executeTemplate: async (templateId, projectId, taskId, variables) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<WorkflowExecution>(
+        `/api/v1/workflow-templates/${templateId}/execute`,
+        { taskId, variables },
+        { token, headers: { "X-Project-ID": projectId } }
+      );
+      set((state) => ({
+        executions: [data, ...state.executions],
+      }));
+      return data;
+    } catch {
+      set({ error: "Unable to execute template" });
+      return null;
+    }
+  },
+
+  // --- Human Review & Events ---
+
+  resolveReview: async (executionId, nodeId, decision, comment) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return false;
+    try {
+      const api = createApiClient(API_URL);
+      await api.post(
+        `/api/v1/executions/${executionId}/review`,
+        { nodeId, decision, comment: comment ?? "" },
+        { token }
+      );
+      return true;
+    } catch {
+      set({ error: "Unable to resolve review" });
+      return false;
+    }
+  },
+
+  sendExternalEvent: async (executionId, nodeId, payload) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return false;
+    try {
+      const api = createApiClient(API_URL);
+      await api.post(
+        `/api/v1/executions/${executionId}/events`,
+        { nodeId, payload },
+        { token }
+      );
+      return true;
+    } catch {
+      set({ error: "Unable to send event" });
+      return false;
+    }
+  },
 }));

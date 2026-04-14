@@ -11,6 +11,11 @@ import {
   Lock,
   Split,
   Merge,
+  BrainCircuit,
+  Code2,
+  RefreshCw,
+  UserCheck,
+  Webhook,
 } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -70,6 +75,36 @@ const nodeStyles: Record<
     border: "border-orange-400 dark:border-orange-600",
     icon: Merge,
     iconColor: "text-orange-600 dark:text-orange-400",
+  },
+  llm_agent: {
+    bg: "bg-indigo-50 dark:bg-indigo-950",
+    border: "border-indigo-400 dark:border-indigo-600",
+    icon: BrainCircuit,
+    iconColor: "text-indigo-600 dark:text-indigo-400",
+  },
+  function: {
+    bg: "bg-cyan-50 dark:bg-cyan-950",
+    border: "border-cyan-400 dark:border-cyan-600",
+    icon: Code2,
+    iconColor: "text-cyan-600 dark:text-cyan-400",
+  },
+  loop: {
+    bg: "bg-pink-50 dark:bg-pink-950",
+    border: "border-pink-400 dark:border-pink-600",
+    icon: RefreshCw,
+    iconColor: "text-pink-600 dark:text-pink-400",
+  },
+  human_review: {
+    bg: "bg-emerald-50 dark:bg-emerald-950",
+    border: "border-emerald-400 dark:border-emerald-600",
+    icon: UserCheck,
+    iconColor: "text-emerald-600 dark:text-emerald-400",
+  },
+  wait_event: {
+    bg: "bg-slate-50 dark:bg-slate-950",
+    border: "border-slate-400 dark:border-slate-600",
+    icon: Webhook,
+    iconColor: "text-slate-600 dark:text-slate-400",
   },
 };
 
@@ -210,6 +245,58 @@ export const ParallelJoinNode = memo(function ParallelJoinNode(
   );
 });
 
+export const LLMAgentNode = memo(function LLMAgentNode(props: NodeProps) {
+  return (
+    <BaseWorkflowNode
+      data={props.data as unknown as WorkflowNodeBase}
+      nodeType="llm_agent"
+      selected={props.selected}
+    />
+  );
+});
+
+export const FunctionNode = memo(function FunctionNode(props: NodeProps) {
+  return (
+    <BaseWorkflowNode
+      data={props.data as unknown as WorkflowNodeBase}
+      nodeType="function"
+      selected={props.selected}
+    />
+  );
+});
+
+export const LoopNode = memo(function LoopNode(props: NodeProps) {
+  return (
+    <BaseWorkflowNode
+      data={props.data as unknown as WorkflowNodeBase}
+      nodeType="loop"
+      selected={props.selected}
+    />
+  );
+});
+
+export const HumanReviewNode = memo(function HumanReviewNode(
+  props: NodeProps
+) {
+  return (
+    <BaseWorkflowNode
+      data={props.data as unknown as WorkflowNodeBase}
+      nodeType="human_review"
+      selected={props.selected}
+    />
+  );
+});
+
+export const WaitEventNode = memo(function WaitEventNode(props: NodeProps) {
+  return (
+    <BaseWorkflowNode
+      data={props.data as unknown as WorkflowNodeBase}
+      nodeType="wait_event"
+      selected={props.selected}
+    />
+  );
+});
+
 export const workflowNodeTypes = {
   trigger: TriggerNode,
   condition: ConditionNode,
@@ -219,6 +306,11 @@ export const workflowNodeTypes = {
   gate: GateNode,
   parallel_split: ParallelSplitNode,
   parallel_join: ParallelJoinNode,
+  llm_agent: LLMAgentNode,
+  function: FunctionNode,
+  loop: LoopNode,
+  human_review: HumanReviewNode,
+  wait_event: WaitEventNode,
 };
 
 export const NODE_TYPE_LABELS: Record<string, string> = {
@@ -230,4 +322,9 @@ export const NODE_TYPE_LABELS: Record<string, string> = {
   gate: "Gate",
   parallel_split: "Parallel Split",
   parallel_join: "Parallel Join",
+  llm_agent: "LLM Agent",
+  function: "Function",
+  loop: "Loop",
+  human_review: "Human Review",
+  wait_event: "Wait Event",
 };

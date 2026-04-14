@@ -219,6 +219,19 @@ func (r *AgentTeamRepository) SetReviewerRun(ctx context.Context, id uuid.UUID, 
 	return nil
 }
 
+func (r *AgentTeamRepository) SetWorkflowExecutionID(ctx context.Context, id uuid.UUID, execID uuid.UUID) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if err := r.db.WithContext(ctx).Model(&agentTeamRecord{}).Where("id = ?", id).Updates(map[string]any{
+		"workflow_execution_id": execID,
+		"updated_at":           gorm.Expr("NOW()"),
+	}).Error; err != nil {
+		return fmt.Errorf("set workflow execution ID: %w", err)
+	}
+	return nil
+}
+
 func (r *AgentTeamRepository) buildTeamSummaries(ctx context.Context, teams []*model.AgentTeam) ([]*model.AgentTeamSummaryDTO, error) {
 	summaries := make([]*model.AgentTeamSummaryDTO, 0, len(teams))
 	if len(teams) == 0 {

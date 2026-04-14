@@ -370,11 +370,13 @@ func (s *DAGWorkflowService) HandleAgentRunCompletion(ctx context.Context, runID
 
 	// Determine node status from agent status
 	nodeStatus := model.NodeExecCompleted
-	if status != "completed" {
+	errorMsg := ""
+	if status != model.AgentRunStatusCompleted {
 		nodeStatus = model.NodeExecFailed
+		errorMsg = fmt.Sprintf("agent run %s terminated with status: %s", runID, status)
 	}
 
-	if err := s.nodeRepo.UpdateNodeExecution(ctx, targetNodeExec.ID, nodeStatus, result, ""); err != nil {
+	if err := s.nodeRepo.UpdateNodeExecution(ctx, targetNodeExec.ID, nodeStatus, result, errorMsg); err != nil {
 		return fmt.Errorf("update node execution: %w", err)
 	}
 

@@ -313,9 +313,14 @@ func RegisterRoutes(
 	wfReviewRepo := repository.NewWorkflowPendingReviewRepository(taskRepo.DB())
 	dagWorkflowSvc.SetReviewRepo(wfReviewRepo)
 	workflowH = workflowH.WithReviewRepo(wfReviewRepo)
-	// Seed system templates on startup
+	// Seed system templates on startup, then wire team-to-workflow adapter
 	go func() {
 		_ = templateSvc.SeedSystemTemplates(context.Background())
+		// Wire workflow adapter to team service after templates are seeded
+		if teamSvc != nil {
+			adapter := service.NewTeamWorkflowAdapter(templateSvc)
+			teamSvc.SetWorkflowAdapter(adapter)
+		}
 	}()
 	roleH := handler.NewRoleHandler(cfg.RolesDir).WithBridgeClient(bridgeClient)
 	customFieldH := handler.NewCustomFieldHandler(service.NewCustomFieldService(customFieldRepo))

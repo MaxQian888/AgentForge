@@ -130,6 +130,14 @@ func (m *mockTeamRunRepo) Update(_ context.Context, id uuid.UUID, req *model.Upd
 	return nil
 }
 
+func (m *mockTeamRunRepo) SetWorkflowExecutionID(_ context.Context, id uuid.UUID, execID uuid.UUID) error {
+	if m.team == nil || m.team.ID != id {
+		return service.ErrTeamNotFound
+	}
+	m.team.WorkflowExecutionID = &execID
+	return nil
+}
+
 type mockTeamAgentRunRepo struct {
 	runsByTeam     map[uuid.UUID][]*model.AgentRun
 	teamFieldsByID map[uuid.UUID]struct {

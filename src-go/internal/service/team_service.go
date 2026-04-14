@@ -39,6 +39,7 @@ type TeamRunRepository interface {
 	SetReviewerRun(ctx context.Context, id uuid.UUID, reviewerRunID uuid.UUID) error
 	Delete(ctx context.Context, id uuid.UUID) error
 	Update(ctx context.Context, id uuid.UUID, req *model.UpdateTeamRequest) error
+	SetWorkflowExecutionID(ctx context.Context, id uuid.UUID, execID uuid.UUID) error
 }
 
 // TeamAgentRunRepository defines run persistence needed by the team service.
@@ -82,15 +83,17 @@ type StartTeamInput struct {
 }
 
 type TeamService struct {
-	teamRepo    TeamRunRepository
-	runRepo     TeamAgentRunRepository
-	spawner     TeamAgentSpawner
-	taskRepo    TeamTaskRepository
-	projectRepo TeamProjectRepository
-	memorySvc   *MemoryService
-	hub         *ws.Hub
-	maxTeamSize int
-	artifactSvc *TeamArtifactService
+	teamRepo         TeamRunRepository
+	runRepo          TeamAgentRunRepository
+	spawner          TeamAgentSpawner
+	taskRepo         TeamTaskRepository
+	projectRepo      TeamProjectRepository
+	memorySvc        *MemoryService
+	hub              *ws.Hub
+	maxTeamSize      int
+	artifactSvc      *TeamArtifactService
+	workflowAdapter  *TeamWorkflowAdapter
+	useWorkflowEngine bool
 }
 
 func NewTeamService(
@@ -117,6 +120,12 @@ func NewTeamService(
 		svc.artifactSvc = artifactSvc[0]
 	}
 	return svc
+}
+
+// SetWorkflowAdapter enables the workflow engine for team orchestration.
+func (s *TeamService) SetWorkflowAdapter(adapter *TeamWorkflowAdapter) {
+	s.workflowAdapter = adapter
+	s.useWorkflowEngine = adapter != nil
 }
 
 func (s *TeamService) WithMaxTeamSize(limit int) *TeamService {
@@ -189,9 +198,27 @@ func (s *TeamService) StartTeam(ctx context.Context, input StartTeamInput) (*mod
 		"provider":  selection.Provider,
 		"model":     selection.Model,
 		"budgetUsd": team.TotalBudgetUsd,
+		"workflow":  s.useWorkflowEngine,
 	}).Info("team created")
 
 	s.broadcastEvent(ws.EventTeamCreated, task.ProjectID.String(), team.ToDTO())
+
+	// Delegate to workflow engine if enabled
+	if s.useWorkflowEngine && s.workflowAdapter != nil {
+		variables := map[string]any{
+			"runtime":  selection.Runtime,
+			"provider": selection.Provider,
+			"model":    selection.Model,
+		}
+		execID, err := s.workflowAdapter.StartTeamAsWorkflow(ctx, task.ProjectID, task.ID, team.Strategy, variables)
+		if err != nil {
+			log.WithError(err).Warn("team: workflow engine delegation failed, falling back to strategies")
+		} else {
+			team.WorkflowExecutionID = execID
+			_ = s.teamRepo.SetWorkflowExecutionID(ctx, team.ID, *execID)
+			return team, nil
+		}
+	}
 
 	strategy := s.resolveStrategy(team.Strategy)
 	if err := strategy.Start(ctx, s, team, task, input); err != nil {
