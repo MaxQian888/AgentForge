@@ -161,4 +161,8 @@ describe("useWorkflowStore", () => {
     expect(mockGet).not.toHaveBeenCalled();
     expect(mockPut).not.toHaveBeenCalled();
   });
+
+  it("fetchPendingReviews is a function on the store", () => {
+    expect(typeof useWorkflowStore.getState().fetchPendingReviews).toBe("function");
+  });
 });

@@ -90,6 +90,20 @@ export interface WorkflowNodeExecution {
   createdAt: string;
 }
 
+export interface WorkflowPendingReview {
+  id: string;
+  executionId: string;
+  nodeId: string;
+  projectId: string;
+  reviewerId?: string;
+  prompt: string;
+  context?: Record<string, unknown>;
+  decision: string;
+  comment: string;
+  createdAt: string;
+  resolvedAt?: string;
+}
+
 const MAX_WORKFLOW_ACTIVITY_ENTRIES = 10;
 
 interface WorkflowState {
@@ -187,6 +201,10 @@ interface WorkflowState {
     nodeId: string,
     payload: unknown
   ) => Promise<boolean>;
+
+  pendingReviews: WorkflowPendingReview[];
+  pendingReviewsLoading: boolean;
+  fetchPendingReviews: (projectId: string) => Promise<void>;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -225,6 +243,8 @@ export const useWorkflowStore = create<WorkflowState>()((set) => ({
   executionsLoading: false,
   selectedExecution: null,
   nodeExecutions: [],
+  pendingReviews: [],
+  pendingReviewsLoading: false,
 
   fetchWorkflow: async (projectId) => {
     const token = useAuthStore.getState().accessToken;
@@ -594,6 +614,22 @@ export const useWorkflowStore = create<WorkflowState>()((set) => ({
     } catch {
       set({ error: "Unable to send event" });
       return false;
+    }
+  },
+
+  fetchPendingReviews: async (projectId) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    set({ pendingReviewsLoading: true });
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.get<WorkflowPendingReview[]>(
+        `/api/v1/projects/${projectId}/workflow-reviews`,
+        { token }
+      );
+      set({ pendingReviews: data ?? [], pendingReviewsLoading: false });
+    } catch {
+      set({ pendingReviewsLoading: false, error: "Unable to fetch reviews" });
     }
   },
 }));
