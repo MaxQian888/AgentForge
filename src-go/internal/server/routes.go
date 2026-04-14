@@ -220,7 +220,7 @@ func RegisterRoutes(
 	memoryAPI := service.NewMemoryAPIService(memorySvc, memoryExplorerSvc)
 	var teamSvc *service.TeamService
 	if agentSvc != nil {
-		teamSvc = service.NewTeamService(teamRepo, agentRunRepo, agentSvc, taskRepo, projectRepo, memorySvc, hub)
+		teamSvc = service.NewTeamService(teamRepo, agentRunRepo, agentSvc, taskRepo, projectRepo, memorySvc, hub, agentSvc.TeamArtifactService())
 		agentSvc.SetTeamService(teamSvc)
 		agentSvc.SetMemoryService(memorySvc)
 	}
@@ -294,6 +294,16 @@ func RegisterRoutes(
 	bridgeConvH := handler.NewBridgeConversationHandler(bridgeClient)
 	notifH := handler.NewNotificationHandler(notifRepo)
 	workflowH := handler.NewWorkflowHandler(workflowRepo)
+	// DAG workflow engine
+	dagDefRepo := repository.NewWorkflowDefinitionRepository(taskRepo.DB())
+	dagExecRepo := repository.NewWorkflowExecutionRepository(taskRepo.DB())
+	dagNodeExecRepo := repository.NewWorkflowNodeExecutionRepository(taskRepo.DB())
+	dagWorkflowSvc := service.NewDAGWorkflowService(dagDefRepo, dagExecRepo, dagNodeExecRepo, hub)
+	dagWorkflowSvc.SetTaskRepo(taskRepo)
+	if agentSvc != nil {
+		dagWorkflowSvc.SetAgentSpawner(agentSvc)
+	}
+	workflowH = workflowH.WithDAGService(dagWorkflowSvc, dagDefRepo, dagExecRepo, dagNodeExecRepo)
 	roleH := handler.NewRoleHandler(cfg.RolesDir).WithBridgeClient(bridgeClient)
 	customFieldH := handler.NewCustomFieldHandler(service.NewCustomFieldService(customFieldRepo))
 	savedViewH := handler.NewSavedViewHandler(service.NewSavedViewService(savedViewRepo), memberRepo)
@@ -452,6 +462,8 @@ func RegisterRoutes(
 	projectGroup.GET("/sprints/:sid/metrics", sprintH.Metrics)
 	projectGroup.GET("/workflow", workflowH.Get)
 	projectGroup.PUT("/workflow", workflowH.Put)
+	projectGroup.POST("/workflows", workflowH.CreateDefinition)
+	projectGroup.GET("/workflows", workflowH.ListDefinitions)
 	projectGroup.POST("/memory", memoryH.Store)
 	projectGroup.GET("/memory", memoryH.Search)
 	projectGroup.GET("/memory/stats", memoryH.Stats)
@@ -518,6 +530,15 @@ func RegisterRoutes(
 	v1.GET("/forms/:slug", formH.GetBySlug)
 	v1.POST("/forms/:slug/submit", formH.Submit)
 
+	// Workflow definitions & executions (not project-scoped, ID is unique)
+	protected.GET("/workflows/:id", workflowH.GetDefinition)
+	protected.PUT("/workflows/:id", workflowH.UpdateDefinition)
+	protected.DELETE("/workflows/:id", workflowH.DeleteDefinition)
+	protected.POST("/workflows/:id/execute", workflowH.StartExecution)
+	protected.GET("/workflows/:id/executions", workflowH.ListExecutions)
+	protected.GET("/executions/:id", workflowH.GetExecution)
+	protected.POST("/executions/:id/cancel", workflowH.CancelExecution)
+
 	// Members (global)
 	protected.PUT("/members/:id", memberH.Update)
 	protected.DELETE("/members/:id", memberH.Delete)
@@ -571,6 +592,7 @@ func RegisterRoutes(
 	protected.DELETE("/teams/:id", teamH.Delete)
 	protected.POST("/teams/:id/cancel", teamH.Cancel)
 	protected.POST("/teams/:id/retry", teamH.Retry)
+	protected.GET("/teams/:id/artifacts", teamH.ListArtifacts)
 
 	// Notifications
 	protected.GET("/notifications", notifH.List)

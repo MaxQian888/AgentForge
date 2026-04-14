@@ -2,6 +2,7 @@ package service_test
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 
@@ -175,6 +176,18 @@ func (m *mockTeamAgentRunRepo) GetByID(_ context.Context, id uuid.UUID) (*model.
 		}
 	}
 	return nil, service.ErrAgentNotFound
+}
+
+func (m *mockTeamAgentRunRepo) UpdateStructuredOutput(_ context.Context, id uuid.UUID, output json.RawMessage) error {
+	for _, runs := range m.runsByTeam {
+		for _, run := range runs {
+			if run.ID == id {
+				run.StructuredOutput = output
+				return nil
+			}
+		}
+	}
+	return service.ErrAgentNotFound
 }
 
 type teamSpawnCall struct {

@@ -798,9 +798,10 @@ type agentRunRecord struct {
 	CompletedAt     *time.Time `gorm:"column:completed_at"`
 	CreatedAt       time.Time  `gorm:"column:created_at"`
 	UpdatedAt       time.Time  `gorm:"column:updated_at"`
-	TeamID          *uuid.UUID `gorm:"column:team_id"`
-	TeamRole        string     `gorm:"column:team_role"`
-	CostAccounting  rawJSON    `gorm:"column:cost_accounting;type:jsonb"`
+	TeamID           *uuid.UUID `gorm:"column:team_id"`
+	TeamRole         string     `gorm:"column:team_role"`
+	CostAccounting   rawJSON    `gorm:"column:cost_accounting;type:jsonb"`
+	StructuredOutput rawJSON    `gorm:"column:structured_output;type:jsonb"`
 }
 
 func (agentRunRecord) TableName() string { return "agent_runs" }
@@ -828,9 +829,10 @@ func newAgentRunRecord(run *model.AgentRun) *agentRunRecord {
 		CompletedAt:     cloneTimePointer(run.CompletedAt),
 		CreatedAt:       run.CreatedAt,
 		UpdatedAt:       run.UpdatedAt,
-		TeamID:          run.TeamID,
-		TeamRole:        run.TeamRole,
-		CostAccounting:  mustMarshalAgentRunCostAccounting(run.CostAccounting),
+		TeamID:           run.TeamID,
+		TeamRole:         run.TeamRole,
+		CostAccounting:   mustMarshalAgentRunCostAccounting(run.CostAccounting),
+		StructuredOutput: newRawJSON(run.StructuredOutput, "null"),
 	}
 }
 
@@ -857,10 +859,19 @@ func (r *agentRunRecord) toModel() *model.AgentRun {
 		CompletedAt:     cloneTimePointer(r.CompletedAt),
 		CreatedAt:       r.CreatedAt,
 		UpdatedAt:       r.UpdatedAt,
-		TeamID:          r.TeamID,
-		TeamRole:        r.TeamRole,
-		CostAccounting:  unmarshalAgentRunCostAccounting(r.CostAccounting),
+		TeamID:           r.TeamID,
+		TeamRole:         r.TeamRole,
+		CostAccounting:   unmarshalAgentRunCostAccounting(r.CostAccounting),
+		StructuredOutput: unmarshalStructuredOutput(r.StructuredOutput),
 	}
+}
+
+func unmarshalStructuredOutput(raw rawJSON) json.RawMessage {
+	payload := raw.Bytes("null")
+	if len(payload) == 0 || string(payload) == "null" {
+		return nil
+	}
+	return append(json.RawMessage(nil), payload...)
 }
 
 func mustMarshalAgentRunCostAccounting(snapshot *model.CostAccountingSnapshot) rawJSON {

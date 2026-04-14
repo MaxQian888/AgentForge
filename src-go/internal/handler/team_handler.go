@@ -20,6 +20,7 @@ type TeamRuntimeService interface {
 	RetryTeam(ctx context.Context, teamID uuid.UUID) error
 	DeleteTeam(ctx context.Context, teamID uuid.UUID) error
 	UpdateTeam(ctx context.Context, teamID uuid.UUID, req *model.UpdateTeamRequest) (*model.AgentTeam, error)
+	ListArtifacts(ctx context.Context, teamID uuid.UUID) ([]model.TeamArtifactDTO, error)
 }
 
 type TeamHandler struct {
@@ -235,4 +236,21 @@ func (h *TeamHandler) Update(c echo.Context) error {
 		return c.JSON(http.StatusOK, summary)
 	}
 	return c.JSON(http.StatusOK, team.ToDTO())
+}
+
+func (h *TeamHandler) ListArtifacts(c echo.Context) error {
+	if h.service == nil {
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgTeamServiceUnavailable)
+	}
+
+	id, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTeamID)
+	}
+
+	artifacts, err := h.service.ListArtifacts(c.Request().Context(), id)
+	if err != nil {
+		return localizedError(c, http.StatusNotFound, i18n.MsgTeamNotFound)
+	}
+	return c.JSON(http.StatusOK, artifacts)
 }

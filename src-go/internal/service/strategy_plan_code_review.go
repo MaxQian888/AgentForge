@@ -113,6 +113,12 @@ func handlePCRPlannerDone(ctx context.Context, svc *TeamService, team *model.Age
 		return
 	}
 
+	// Try to create subtasks from planner structured output first.
+	if children, ok := svc.tryCreateSubtasksFromStructuredOutput(ctx, team, task, run); ok {
+		svc.spawnCodersForTasks(ctx, team, task, children)
+		return
+	}
+
 	hasChildren, err := svc.taskRepo.HasChildren(ctx, task.ID)
 	if err != nil {
 		log.WithError(err).WithField("teamId", team.ID.String()).Error("team service: failed to check children")

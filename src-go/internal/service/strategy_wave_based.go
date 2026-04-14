@@ -95,6 +95,17 @@ func handleWavePlannerDone(ctx context.Context, svc *TeamService, team *model.Ag
 		return
 	}
 
+	// Try to create subtasks from planner structured output first.
+	if children, ok := svc.tryCreateSubtasksFromStructuredOutput(ctx, team, task, run); ok {
+		unblocked := findUnblockedTasks(children, nil)
+		if len(unblocked) == 0 {
+			svc.spawnCodersForTasks(ctx, team, task, children)
+		} else {
+			svc.spawnCodersForTasks(ctx, team, task, unblocked)
+		}
+		return
+	}
+
 	hasChildren, err := svc.taskRepo.HasChildren(ctx, task.ID)
 	if err != nil {
 		_ = svc.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, "failed to check subtasks")

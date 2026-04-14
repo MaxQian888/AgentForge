@@ -1,0 +1,2 @@
+ALTER TABLE agent_runs
+ADD COLUMN IF NOT EXISTS structured_output JSONB DEFAULT NULL;

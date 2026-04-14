@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"strings"
@@ -45,6 +46,7 @@ type TeamAgentRunRepository interface {
 	ListByTeam(ctx context.Context, teamID uuid.UUID) ([]*model.AgentRun, error)
 	SetTeamFields(ctx context.Context, id uuid.UUID, teamID uuid.UUID, teamRole string) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.AgentRun, error)
+	UpdateStructuredOutput(ctx context.Context, id uuid.UUID, output json.RawMessage) error
 }
 
 // TeamAgentSpawner spawns and cancels agent runs.
@@ -88,6 +90,7 @@ type TeamService struct {
 	memorySvc   *MemoryService
 	hub         *ws.Hub
 	maxTeamSize int
+	artifactSvc *TeamArtifactService
 }
 
 func NewTeamService(
@@ -98,8 +101,9 @@ func NewTeamService(
 	projectRepo TeamProjectRepository,
 	memorySvc *MemoryService,
 	hub *ws.Hub,
+	artifactSvc ...*TeamArtifactService,
 ) *TeamService {
-	return &TeamService{
+	svc := &TeamService{
 		teamRepo:    teamRepo,
 		runRepo:     runRepo,
 		spawner:     spawner,
@@ -109,6 +113,10 @@ func NewTeamService(
 		hub:         hub,
 		maxTeamSize: defaultMaxTeamSize,
 	}
+	if len(artifactSvc) > 0 {
+		svc.artifactSvc = artifactSvc[0]
+	}
+	return svc
 }
 
 func (s *TeamService) WithMaxTeamSize(limit int) *TeamService {
@@ -213,6 +221,19 @@ func (s *TeamService) ProcessRunCompletion(ctx context.Context, run *model.Agent
 
 	// Update team cost
 	s.updateTeamCost(ctx, team)
+
+	// Store structured output as team artifact.
+	if s.artifactSvc != nil && run.StructuredOutput != nil && len(run.StructuredOutput) > 0 {
+		if err := s.artifactSvc.StoreFromRun(ctx, *run.TeamID, run); err != nil {
+			logArtifactStoreError(*run.TeamID, err)
+		} else {
+			s.broadcastEvent(ws.EventTeamArtifactCreated, team.ProjectID.String(), map[string]any{
+				"teamId": team.ID.String(),
+				"runId":  run.ID.String(),
+				"role":   run.TeamRole,
+			})
+		}
+	}
 
 	strategy := s.resolveStrategy(team.Strategy)
 	if err := strategy.HandleRunCompletion(ctx, s, team, run); err != nil {
@@ -633,6 +654,22 @@ func (s *TeamService) UpdateTeam(ctx context.Context, teamID uuid.UUID, req *mod
 	return updated, nil
 }
 
+// ListArtifacts returns all artifacts for a team as DTOs.
+func (s *TeamService) ListArtifacts(ctx context.Context, teamID uuid.UUID) ([]model.TeamArtifactDTO, error) {
+	if s.artifactSvc == nil {
+		return []model.TeamArtifactDTO{}, nil
+	}
+	artifacts, err := s.artifactSvc.ListByTeam(ctx, teamID)
+	if err != nil {
+		return nil, fmt.Errorf("list team artifacts: %w", err)
+	}
+	dtos := make([]model.TeamArtifactDTO, 0, len(artifacts))
+	for _, a := range artifacts {
+		dtos = append(dtos, a.ToDTO())
+	}
+	return dtos, nil
+}
+
 func (s *TeamService) broadcastEvent(eventType, projectID string, payload any) {
 	if s.hub == nil {
 		return
@@ -642,6 +679,56 @@ func (s *TeamService) broadcastEvent(eventType, projectID string, payload any) {
 		ProjectID: projectID,
 		Payload:   payload,
 	})
+}
+
+// tryCreateSubtasksFromStructuredOutput attempts to create subtasks from the planner's structured output.
+// Returns the created children and true if successful, nil and false otherwise.
+func (s *TeamService) tryCreateSubtasksFromStructuredOutput(ctx context.Context, team *model.AgentTeam, task *model.Task, run *model.AgentRun) ([]*model.Task, bool) {
+	if run == nil || run.StructuredOutput == nil || len(run.StructuredOutput) == 0 {
+		return nil, false
+	}
+
+	var plannerOutput struct {
+		Subtasks []struct {
+			Title       string   `json:"title"`
+			Description string   `json:"description"`
+			Labels      []string `json:"labels"`
+			BudgetPct   float64  `json:"budget_pct"`
+		} `json:"subtasks"`
+	}
+	if err := json.Unmarshal(run.StructuredOutput, &plannerOutput); err != nil || len(plannerOutput.Subtasks) == 0 {
+		return nil, false
+	}
+
+	var inputs []model.TaskChildInput
+	for _, sub := range plannerOutput.Subtasks {
+		budgetUSD := task.BudgetUsd * 0.6
+		if sub.BudgetPct > 0 {
+			budgetUSD = team.TotalBudgetUsd * sub.BudgetPct / 100
+		}
+		inputs = append(inputs, model.TaskChildInput{
+			ParentID:    task.ID,
+			ProjectID:   task.ProjectID,
+			SprintID:    task.SprintID,
+			ReporterID:  task.ReporterID,
+			Title:       sub.Title,
+			Description: sub.Description,
+			Priority:    task.Priority,
+			Labels:      sub.Labels,
+			BudgetUSD:   budgetUSD,
+		})
+	}
+
+	children, err := s.taskRepo.CreateChildren(ctx, inputs)
+	if err != nil || len(children) == 0 {
+		return nil, false
+	}
+
+	log.WithFields(log.Fields{
+		"teamId":     team.ID.String(),
+		"childCount": len(children),
+	}).Info("team created subtasks from planner structured output")
+	return children, true
 }
 
 func teamLogFields(team *model.AgentTeam) log.Fields {

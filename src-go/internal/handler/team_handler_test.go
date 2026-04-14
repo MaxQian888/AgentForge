@@ -64,6 +64,10 @@ func (m *mockTeamRuntimeService) UpdateTeam(_ context.Context, _ uuid.UUID, _ *m
 	return nil, nil
 }
 
+func (m *mockTeamRuntimeService) ListArtifacts(_ context.Context, _ uuid.UUID) ([]model.TeamArtifactDTO, error) {
+	return []model.TeamArtifactDTO{}, nil
+}
+
 func TestTeamHandlerListReturnsSummaryDTOs(t *testing.T) {
 	projectID := uuid.New()
 	taskID := uuid.New()

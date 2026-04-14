@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"time"
 
@@ -164,6 +165,16 @@ func (r *AgentRunRepository) UpdateCost(ctx context.Context, id uuid.UUID, input
 	updates["cost_accounting"] = mustMarshalAgentRunCostAccounting(costAccounting)
 	if err := r.db.WithContext(ctx).Model(&agentRunRecord{}).Where("id = ?", id).Updates(updates).Error; err != nil {
 		return fmt.Errorf("update agent run cost: %w", err)
+	}
+	return nil
+}
+
+func (r *AgentRunRepository) UpdateStructuredOutput(ctx context.Context, id uuid.UUID, output json.RawMessage) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if err := r.db.WithContext(ctx).Model(&agentRunRecord{}).Where("id = ?", id).Update("structured_output", string(output)).Error; err != nil {
+		return fmt.Errorf("update agent run structured output: %w", err)
 	}
 	return nil
 }

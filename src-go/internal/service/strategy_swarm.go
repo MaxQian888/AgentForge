@@ -86,6 +86,16 @@ func handleSwarmPlannerDone(ctx context.Context, svc *TeamService, team *model.A
 		return
 	}
 
+	// Try to create subtasks from planner structured output first.
+	if structuredChildren, ok := svc.tryCreateSubtasksFromStructuredOutput(ctx, team, task, run); ok {
+		log.WithFields(log.Fields{
+			"teamId":     team.ID.String(),
+			"childCount": len(structuredChildren),
+		}).Info("swarm: spawning all coders from structured output in parallel")
+		svc.spawnCodersForTasks(ctx, team, task, structuredChildren)
+		return
+	}
+
 	// Try to get children via ListChildren for full parallel spawn
 	children, err := svc.taskRepo.ListChildren(ctx, task.ID)
 	if err != nil || len(children) == 0 {

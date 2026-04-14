@@ -30,6 +30,7 @@ type AgentRunRepository interface {
 	ListActive(ctx context.Context) ([]*model.AgentRun, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	UpdateCost(ctx context.Context, id uuid.UUID, inputTokens, outputTokens, cacheReadTokens int64, costUsd float64, turnCount int, costAccounting *model.CostAccountingSnapshot) error
+	UpdateStructuredOutput(ctx context.Context, id uuid.UUID, output json.RawMessage) error
 }
 
 type AgentTaskRepository interface {
@@ -180,6 +181,7 @@ type AgentService struct {
 	budgetCheck           DispatchBudgetChecker
 	dispatchMembers       DispatchMemberRepository
 	dispatchAttempts      DispatchAttemptRecorder
+	artifactSvc           *TeamArtifactService
 }
 
 const bridgeSpawnHealthCheckAttempts = 3
@@ -310,6 +312,18 @@ func (s *AgentService) SetDispatchAttemptRecorder(attempts DispatchAttemptRecord
 
 func (s *AgentService) SetDispatchBudgetChecker(checker DispatchBudgetChecker) {
 	s.budgetCheck = checker
+}
+
+func (s *AgentService) SetTeamArtifactService(svc *TeamArtifactService) {
+	s.artifactSvc = svc
+}
+
+// TeamArtifactService returns the artifact service if set.
+func (s *AgentService) TeamArtifactService() *TeamArtifactService {
+	if s == nil {
+		return nil
+	}
+	return s.artifactSvc
 }
 
 type bridgeExecutionContext struct {
@@ -446,6 +460,13 @@ func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uu
 	)
 	if memoryContext != "" {
 		bridgeReq.SystemPrompt = strings.TrimSpace(bridgeReq.SystemPrompt + "\n" + memoryContext)
+	}
+	// Inject team artifact context for downstream agents.
+	if s.artifactSvc != nil && execCtx != nil && execCtx.TeamID != nil {
+		teamContext := s.artifactSvc.BuildTeamContext(ctx, *execCtx.TeamID, execCtx.TeamRole)
+		if teamContext != "" {
+			bridgeReq.TeamContext = teamContext
+		}
 	}
 	resp, err := s.bridge.Execute(ctx, bridgeReq)
 	if err != nil {
@@ -1961,7 +1982,7 @@ func (s *AgentService) resolveRoleConfig(roleID string) (*bridgeclient.RoleConfi
 		}
 	}
 
-	return &bridgeclient.RoleConfig{
+	rc := &bridgeclient.RoleConfig{
 		RoleID:           profile.RoleID,
 		Name:             profile.Name,
 		Role:             profile.Role,
@@ -1979,7 +2000,32 @@ func (s *AgentService) resolveRoleConfig(roleID string) (*bridgeclient.RoleConfi
 		LoadedSkills:     append([]model.RoleExecutionSkill(nil), profile.LoadedSkills...),
 		AvailableSkills:  append([]model.RoleExecutionSkill(nil), profile.AvailableSkills...),
 		SkillDiagnostics: append([]model.RoleExecutionSkillDiagnostic(nil), profile.SkillDiagnostics...),
-	}, nil
+	}
+
+	// Map security file permissions from manifest to bridge role config.
+	if len(manifest.Security.Permissions.FileAccess.AllowedPaths) > 0 || len(manifest.Security.Permissions.FileAccess.DeniedPaths) > 0 {
+		rc.FilePermissions = &bridgeclient.RoleFilePerms{
+			AllowedPatterns: append([]string(nil), manifest.Security.Permissions.FileAccess.AllowedPaths...),
+			BlockedPatterns: append([]string(nil), manifest.Security.Permissions.FileAccess.DeniedPaths...),
+		}
+	}
+
+	// Map security network permissions from manifest to bridge role config.
+	if len(manifest.Security.Permissions.Network.AllowedDomains) > 0 {
+		rc.NetworkPermissions = &bridgeclient.RoleNetworkPerms{
+			AllowedDomains: append([]string(nil), manifest.Security.Permissions.Network.AllowedDomains...),
+		}
+	}
+
+	// Map denied paths from legacy security field as blocked file patterns.
+	if rc.FilePermissions == nil && len(manifest.Security.DeniedPaths) > 0 {
+		rc.FilePermissions = &bridgeclient.RoleFilePerms{
+			AllowedPatterns: append([]string(nil), manifest.Security.AllowedPaths...),
+			BlockedPatterns: append([]string(nil), manifest.Security.DeniedPaths...),
+		}
+	}
+
+	return rc, nil
 }
 
 func (s *AgentService) resolveRoleConfigForResume(roleID string) (*bridgeclient.RoleConfig, error) {
@@ -2084,6 +2130,11 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		var payload ws.BridgeStatusChangeData
 		if err := event.DecodeData(&payload); err != nil {
 			return fmt.Errorf("decode bridge status payload: %w", err)
+		}
+		// Persist structured output if present in the status change event.
+		if len(payload.StructuredOutput) > 0 {
+			_ = s.runRepo.UpdateStructuredOutput(ctx, run.ID, payload.StructuredOutput)
+			run.StructuredOutput = payload.StructuredOutput
 		}
 		nextStatus, ok := mapBridgeRuntimeStatus(payload.NewStatus)
 		if !ok || !isTerminalAgentStatus(nextStatus) || run.Status == nextStatus {

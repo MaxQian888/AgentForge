@@ -100,6 +100,15 @@ func (m *mockAgentRunRepo) UpdateCost(_ context.Context, id uuid.UUID, inputToke
 	return nil
 }
 
+func (m *mockAgentRunRepo) UpdateStructuredOutput(_ context.Context, id uuid.UUID, output json.RawMessage) error {
+	run, ok := m.runs[id]
+	if !ok {
+		return service.ErrAgentNotFound
+	}
+	run.StructuredOutput = output
+	return nil
+}
+
 type mockAgentBridge struct {
 	executeErr   error
 	lastExecute  service.BridgeExecuteRequest

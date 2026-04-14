@@ -1,6 +1,7 @@
 package model
 
 import (
+	"encoding/json"
 	"time"
 
 	"github.com/google/uuid"
@@ -25,9 +26,10 @@ type AgentRun struct {
 	CompletedAt     *time.Time              `db:"completed_at"`
 	CreatedAt       time.Time               `db:"created_at"`
 	UpdatedAt       time.Time               `db:"updated_at"`
-	TeamID          *uuid.UUID              `db:"team_id"`
-	TeamRole        string                  `db:"team_role"`
-	CostAccounting  *CostAccountingSnapshot `db:"cost_accounting"`
+	TeamID           *uuid.UUID              `db:"team_id"`
+	TeamRole         string                  `db:"team_role"`
+	CostAccounting   *CostAccountingSnapshot `db:"cost_accounting"`
+	StructuredOutput json.RawMessage         `db:"structured_output"`
 }
 
 const (
@@ -41,26 +43,27 @@ const (
 )
 
 type AgentRunDTO struct {
-	ID              string                  `json:"id"`
-	TaskID          string                  `json:"taskId"`
-	MemberID        string                  `json:"memberId"`
-	RoleID          string                  `json:"roleId,omitempty"`
-	Status          string                  `json:"status"`
-	Runtime         string                  `json:"runtime"`
-	Provider        string                  `json:"provider"`
-	Model           string                  `json:"model"`
-	InputTokens     int64                   `json:"inputTokens"`
-	OutputTokens    int64                   `json:"outputTokens"`
-	CacheReadTokens int64                   `json:"cacheReadTokens"`
-	CostUsd         float64                 `json:"costUsd"`
-	TurnCount       int                     `json:"turnCount"`
-	ErrorMessage    string                  `json:"errorMessage"`
-	StartedAt       string                  `json:"startedAt"`
-	CompletedAt     *string                 `json:"completedAt,omitempty"`
-	CreatedAt       string                  `json:"createdAt"`
-	TeamID          *string                 `json:"teamId,omitempty"`
-	TeamRole        string                  `json:"teamRole,omitempty"`
-	CostAccounting  *CostAccountingSnapshot `json:"costAccounting,omitempty"`
+	ID               string                  `json:"id"`
+	TaskID           string                  `json:"taskId"`
+	MemberID         string                  `json:"memberId"`
+	RoleID           string                  `json:"roleId,omitempty"`
+	Status           string                  `json:"status"`
+	Runtime          string                  `json:"runtime"`
+	Provider         string                  `json:"provider"`
+	Model            string                  `json:"model"`
+	InputTokens      int64                   `json:"inputTokens"`
+	OutputTokens     int64                   `json:"outputTokens"`
+	CacheReadTokens  int64                   `json:"cacheReadTokens"`
+	CostUsd          float64                 `json:"costUsd"`
+	TurnCount        int                     `json:"turnCount"`
+	ErrorMessage     string                  `json:"errorMessage"`
+	StartedAt        string                  `json:"startedAt"`
+	CompletedAt      *string                 `json:"completedAt,omitempty"`
+	CreatedAt        string                  `json:"createdAt"`
+	TeamID           *string                 `json:"teamId,omitempty"`
+	TeamRole         string                  `json:"teamRole,omitempty"`
+	CostAccounting   *CostAccountingSnapshot `json:"costAccounting,omitempty"`
+	StructuredOutput json.RawMessage         `json:"structuredOutput,omitempty"`
 }
 
 type AgentRunSummaryDTO struct {
@@ -195,6 +198,9 @@ func (a *AgentRun) ToDTO() AgentRunDTO {
 	if a.TeamID != nil {
 		s := a.TeamID.String()
 		dto.TeamID = &s
+	}
+	if len(a.StructuredOutput) > 0 {
+		dto.StructuredOutput = append(json.RawMessage(nil), a.StructuredOutput...)
 	}
 	return dto
 }

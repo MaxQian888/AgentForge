@@ -301,6 +301,18 @@ const (
 	MsgInvalidTransitions          = "InvalidTransitions"
 	MsgInvalidTriggers             = "InvalidTriggers"
 	MsgFailedToSaveWorkflowConfig  = "FailedToSaveWorkflowConfig"
+	MsgInvalidWorkflowID           = "InvalidWorkflowID"
+	MsgInvalidExecutionID          = "InvalidExecutionID"
+	MsgWorkflowNotFound            = "WorkflowNotFound"
+	MsgExecutionNotFound           = "ExecutionNotFound"
+	MsgFailedToCreateWorkflow      = "FailedToCreateWorkflow"
+	MsgFailedToListWorkflows       = "FailedToListWorkflows"
+	MsgFailedToUpdateWorkflow      = "FailedToUpdateWorkflow"
+	MsgFailedToDeleteWorkflow      = "FailedToDeleteWorkflow"
+	MsgFailedToStartExecution      = "FailedToStartExecution"
+	MsgFailedToListExecutions      = "FailedToListExecutions"
+	MsgFailedToCancelExecution     = "FailedToCancelExecution"
+	MsgDAGWorkflowServiceUnavailable = "DAGWorkflowServiceUnavailable"
 
 	// Middleware - Project
 	MsgProjectIDRequired = "ProjectIDRequired"

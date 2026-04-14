@@ -107,26 +107,42 @@ type ExecuteRequest struct {
 	ToolPermissionCallback *bool                      `json:"tool_permission_callback,omitempty"`
 	WebSearch              *bool                      `json:"web_search,omitempty"`
 	Env                    map[string]string          `json:"env,omitempty"`
+	TeamContext            string                     `json:"team_context,omitempty"`
 }
 
 type RoleConfig struct {
-	RoleID           string                               `json:"role_id"`
-	Name             string                               `json:"name"`
-	Role             string                               `json:"role"`
-	Goal             string                               `json:"goal"`
-	Backstory        string                               `json:"backstory"`
-	SystemPrompt     string                               `json:"system_prompt"`
-	AllowedTools     []string                             `json:"allowed_tools"`
-	Tools            []string                             `json:"tools,omitempty"`
-	PluginBindings   []model.RoleToolPluginBinding        `json:"plugin_bindings,omitempty"`
-	KnowledgeContext string                               `json:"knowledge_context,omitempty"`
-	OutputFilters    []string                             `json:"output_filters,omitempty"`
-	MaxBudgetUsd     float64                              `json:"max_budget_usd"`
-	MaxTurns         int                                  `json:"max_turns"`
-	PermissionMode   string                               `json:"permission_mode"`
-	LoadedSkills     []model.RoleExecutionSkill           `json:"loaded_skills,omitempty"`
-	AvailableSkills  []model.RoleExecutionSkill           `json:"available_skills,omitempty"`
-	SkillDiagnostics []model.RoleExecutionSkillDiagnostic `json:"skill_diagnostics,omitempty"`
+	RoleID             string                               `json:"role_id"`
+	Name               string                               `json:"name"`
+	Role               string                               `json:"role"`
+	Goal               string                               `json:"goal"`
+	Backstory          string                               `json:"backstory"`
+	SystemPrompt       string                               `json:"system_prompt"`
+	AllowedTools       []string                             `json:"allowed_tools"`
+	Tools              []string                             `json:"tools,omitempty"`
+	PluginBindings     []model.RoleToolPluginBinding        `json:"plugin_bindings,omitempty"`
+	KnowledgeContext   string                               `json:"knowledge_context,omitempty"`
+	OutputFilters      []string                             `json:"output_filters,omitempty"`
+	MaxBudgetUsd       float64                              `json:"max_budget_usd"`
+	MaxTurns           int                                  `json:"max_turns"`
+	PermissionMode     string                               `json:"permission_mode"`
+	BlockedTools       []string                             `json:"blocked_tools,omitempty"`
+	FilePermissions    *RoleFilePerms                       `json:"file_permissions,omitempty"`
+	NetworkPermissions *RoleNetworkPerms                    `json:"network_permissions,omitempty"`
+	LoadedSkills       []model.RoleExecutionSkill           `json:"loaded_skills,omitempty"`
+	AvailableSkills    []model.RoleExecutionSkill           `json:"available_skills,omitempty"`
+	SkillDiagnostics   []model.RoleExecutionSkillDiagnostic `json:"skill_diagnostics,omitempty"`
+}
+
+// RoleFilePerms defines file path access restrictions for a role.
+type RoleFilePerms struct {
+	AllowedPatterns []string `json:"allowed_patterns,omitempty"`
+	BlockedPatterns []string `json:"blocked_patterns,omitempty"`
+}
+
+// RoleNetworkPerms defines network access restrictions for a role.
+type RoleNetworkPerms struct {
+	AllowedDomains []string `json:"allowed_domains,omitempty"`
+	Blocked        bool     `json:"blocked,omitempty"`
 }
 
 // ExecuteResponse is returned after an agent is started.

@@ -145,6 +145,9 @@ func main() {
 	agentSvc.SetBridgeHealth(bridgeHealthSvc)
 	agentSvc.SetPool(pool.NewPool(cfg.MaxActiveAgents))
 	agentSvc.SetQueueStore(agentPoolQueueRepo)
+	teamArtifactRepo := repository.NewTeamArtifactRepository(db)
+	teamArtifactSvc := service.NewTeamArtifactService(teamArtifactRepo)
+	agentSvc.SetTeamArtifactService(teamArtifactSvc)
 	pluginSvc := service.NewPluginService(
 		repository.NewPluginRegistryRepository(db),
 		bridgeClient,

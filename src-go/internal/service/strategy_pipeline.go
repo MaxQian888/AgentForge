@@ -88,6 +88,12 @@ func handlePipelinePlannerDone(ctx context.Context, svc *TeamService, team *mode
 		return
 	}
 
+	// Try to create subtasks from planner structured output first.
+	if children, ok := svc.tryCreateSubtasksFromStructuredOutput(ctx, team, task, run); ok && len(children) > 0 {
+		spawnSingleCoder(ctx, svc, team, task, children[0])
+		return
+	}
+
 	children, err := svc.taskRepo.ListChildren(ctx, task.ID)
 	if err != nil || len(children) == 0 {
 		// Fallback: spawn single coder

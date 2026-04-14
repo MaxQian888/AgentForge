@@ -50,6 +50,7 @@ const (
 	EventTeamFailed                  = "team.failed"
 	EventTeamCancelled               = "team.cancelled"
 	EventTeamCostUpdate              = "team.cost_update"
+	EventTeamArtifactCreated         = "team.artifact.created"
 	EventPluginLifecycle             = "plugin.lifecycle"
 	EventSchedulerJobUpdated         = "scheduler.job.updated"
 	EventSchedulerRunStarted         = "scheduler.run.started"
@@ -76,6 +77,12 @@ const (
 	EventAgentRateLimit              = "agent.rate_limit"
 	EventAgentPartialMessage         = "agent.partial_message"
 	EventAgentSnapshot               = "agent.snapshot"
+
+	// Workflow DAG execution events
+	EventWorkflowExecutionStarted   = "workflow.execution.started"
+	EventWorkflowExecutionAdvanced  = "workflow.execution.advanced"
+	EventWorkflowExecutionCompleted = "workflow.execution.completed"
+	EventWorkflowNodeCompleted      = "workflow.node.completed"
 )
 
 // Event types pushed from the TS bridge into Go orchestration.
@@ -122,9 +129,10 @@ type BridgeAgentEvent struct {
 }
 
 type BridgeEventStatusChangeData struct {
-	OldStatus string `json:"old_status"`
-	NewStatus string `json:"new_status"`
-	Reason    string `json:"reason,omitempty"`
+	OldStatus        string          `json:"old_status"`
+	NewStatus        string          `json:"new_status"`
+	Reason           string          `json:"reason,omitempty"`
+	StructuredOutput json.RawMessage `json:"structured_output,omitempty"`
 }
 
 type BridgeEventCostUpdateData struct {
