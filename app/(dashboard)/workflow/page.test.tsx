@@ -32,6 +32,18 @@ jest.mock("@/components/workflow/workflow-execution-view", () => ({
   WorkflowExecutionView: () => <div data-testid="workflow-execution-view" />,
 }));
 
+jest.mock("@/components/workflow/workflow-reviews-tab", () => ({
+  WorkflowReviewsTab: ({ projectId }: { projectId: string }) => (
+    <div data-testid="workflow-reviews-tab">{projectId}</div>
+  ),
+}));
+
+jest.mock("@/components/workflow/workflow-templates-tab", () => ({
+  WorkflowTemplatesTab: ({ projectId }: { projectId: string; setActiveTab: (tab: string) => void }) => (
+    <div data-testid="workflow-templates-tab">{projectId}</div>
+  ),
+}));
+
 jest.mock("@/components/workflow-editor", () => ({
   WorkflowEditor: ({ definition }: { definition: { name: string } }) => (
     <div data-testid="workflow-editor">{definition.name}</div>

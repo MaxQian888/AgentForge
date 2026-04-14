@@ -22,6 +22,8 @@ import {
 import { WorkflowConfigPanel } from "@/components/workflow/workflow-config-panel";
 import { WorkflowEditor } from "@/components/workflow-editor";
 import { WorkflowExecutionView } from "@/components/workflow/workflow-execution-view";
+import { WorkflowReviewsTab } from "@/components/workflow/workflow-reviews-tab";
+import { WorkflowTemplatesTab } from "@/components/workflow/workflow-templates-tab";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
@@ -490,6 +492,7 @@ export default function WorkflowPage() {
   useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Workflow" }]);
   const t = useTranslations("workflow");
   const selectedProjectId = useDashboardStore((s) => s.selectedProjectId);
+  const [activeTab, setActiveTab] = useState("workflows");
 
   if (!selectedProjectId) {
     return (
@@ -503,11 +506,13 @@ export default function WorkflowPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} />
-      <Tabs defaultValue="workflows" className="w-full">
+      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
         <TabsList>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="workflows">Workflows</TabsTrigger>
           <TabsTrigger value="executions">Executions</TabsTrigger>
+          <TabsTrigger value="reviews">Reviews</TabsTrigger>
+          <TabsTrigger value="templates">Templates</TabsTrigger>
         </TabsList>
         <TabsContent value="config" className="mt-4">
           <WorkflowConfigPanel projectId={selectedProjectId} />
@@ -517,6 +522,12 @@ export default function WorkflowPage() {
         </TabsContent>
         <TabsContent value="executions" className="mt-4">
           <ExecutionsTab projectId={selectedProjectId} />
+        </TabsContent>
+        <TabsContent value="reviews" className="mt-4">
+          <WorkflowReviewsTab projectId={selectedProjectId} />
+        </TabsContent>
+        <TabsContent value="templates" className="mt-4">
+          <WorkflowTemplatesTab projectId={selectedProjectId} setActiveTab={setActiveTab} />
         </TabsContent>
       </Tabs>
     </div>
