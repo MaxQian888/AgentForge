@@ -10,7 +10,7 @@ The workflow editor enhancement (completed earlier today) covers the DAG editor.
 
 | Endpoint | Store Function | Gap |
 |----------|---------------|-----|
-| `GET /workflow-reviews` | missing | No store function, no UI |
+| `GET /projects/:projectId/workflow-reviews` | missing | No store function, no UI |
 | `POST /executions/:id/review` | `resolveReview` | Store exists, no UI |
 | `POST /executions/:id/events` | `sendExternalEvent` | Store exists, no UI |
 | `GET /workflow-templates` | `fetchTemplates` | Store exists, no UI |
@@ -121,7 +121,11 @@ Enhance the existing `NodeCard` component to show inline actions for waiting nod
 
 The execution view already polls every 3 seconds while running/pending. After resolving a review or sending an event, the node should transition out of `waiting` on the next poll cycle.
 
-Note: The execution view currently creates its own `apiClient` directly instead of using the Zustand store. To call `resolveReview` and `sendExternalEvent`, import `useWorkflowStore` and call the store functions. This keeps the API call logic centralized.
+**Implementation notes for execution view changes:**
+- Add `waiting` to `nodeStatusIcons` (use `Clock` or `Hourglass` icon) and `nodeStatusColors` (amber/yellow). Add `human_review` and `wait_event` to `nodeTypeColors`.
+- The execution view currently re-declares `WorkflowExecution`, `WorkflowNodeExecution`, and `WorkflowNodeData` types locally. Refactor to import these from `workflow-store.ts` to eliminate duplication.
+- The execution view currently creates its own `apiClient` directly. To call `resolveReview` and `sendExternalEvent`, import `useWorkflowStore` and call the store functions. This keeps the API call logic centralized.
+- After resolving a review, optimistically remove the review from the local list before re-fetching to avoid a brief stale-pending flash.
 
 ## 5. Templates Tab
 
@@ -181,7 +185,7 @@ interface TemplateVarsDialogProps {
 4. Calls `executeTemplate(templateId, projectId, taskId, variables)`
 5. On success: toast, close dialog, switch to Executions tab
 
-Tab switching after clone/execute: the workflow page manages the active tab via state. The template tab's callbacks update this state to switch tabs programmatically.
+**Tab switching after clone/execute:** The workflow page currently uses uncontrolled `<Tabs defaultValue="workflows">`. This must be converted to controlled mode: `<Tabs value={activeTab} onValueChange={setActiveTab}>` with `useState("workflows")`. The template and review tab components receive a `setActiveTab` callback prop to switch tabs programmatically after clone (→ "workflows") or execute (→ "executions").
 
 ## 6. File Summary
 
