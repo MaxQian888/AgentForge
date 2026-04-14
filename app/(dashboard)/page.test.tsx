@@ -284,6 +284,15 @@ describe("DashboardPage", () => {
     expect(screen.getByTestId("agent-fleet-widget")).toHaveTextContent("agent-1,agent-2");
     expect(screen.getByTestId("team-health-widget")).toHaveTextContent("Alice:Active:Lead");
     expect(screen.getByTestId("budget-widget")).toHaveTextContent("100/40/60");
+
+    // Widgets are inside OverviewLayout; project filter and quick actions are outside (full-width rows)
+    const overviewChildren = screen.getByTestId("overview-children");
+    expect(overviewChildren).toContainElement(screen.getByTestId("activity-feed"));
+    expect(overviewChildren).toContainElement(screen.getByTestId("team-health-widget"));
+    expect(overviewChildren).toContainElement(screen.getByTestId("agent-fleet-widget"));
+    expect(overviewChildren).toContainElement(screen.getByTestId("budget-widget"));
+    expect(overviewChildren).not.toContainElement(screen.getByLabelText("dashboard.projectFilterLabel").closest("div[class]")!);
+    expect(overviewChildren).not.toContainElement(screen.getByRole("link", { name: "dashboard.actions.createTask N" }));
     expect(screen.getByRole("link", { name: "dashboard.actions.createTask N" })).toHaveAttribute(
       "href",
       "/project?id=project-1",

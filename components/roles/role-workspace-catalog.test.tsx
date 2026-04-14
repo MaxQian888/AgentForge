@@ -72,6 +72,25 @@ describe("RoleWorkspaceCatalog", () => {
     expect(screen.getByText("No roles yet.")).toBeInTheDocument();
   });
 
+  it("renders header title and buttons in separate rows", () => {
+    render(
+      <RoleWorkspaceCatalog
+        roles={[]}
+        skillCatalog={[]}
+        loading={false}
+        error={null}
+        onCreateNew={jest.fn()}
+        onEditRole={jest.fn()}
+        onDeleteRole={jest.fn()}
+      />,
+    );
+
+    const title = screen.getByText("Role Library");
+    const newRoleButton = screen.getByRole("button", { name: "New Role" });
+    // Title and button must NOT share the same parent element — they are in separate rows
+    expect(title.parentElement).not.toBe(newRoleButton.parentElement);
+  });
+
   it("renders role cards and routes create, edit, and delete actions", async () => {
     const user = userEvent.setup();
     const onCreateNew = jest.fn();

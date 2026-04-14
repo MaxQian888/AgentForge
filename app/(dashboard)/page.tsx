@@ -249,54 +249,73 @@ export default function DashboardPage() {
         breadcrumbs={[{ label: t("breadcrumb.home") }]}
         metrics={<MetricsSkeleton />}
       >
-        <WidgetsSkeleton />
+        <div className="lg:col-span-2">
+          <WidgetsSkeleton />
+        </div>
       </OverviewLayout>
     );
   }
 
+  const metrics = (
+    <>
+      <MetricCard
+        label={t("cards.taskProgress")}
+        value={`${summary?.progress.inProgress ?? 0}/${summary?.progress.total ?? 0}`}
+        icon={Activity}
+        sparkline={taskProgressSparkline}
+        trend={buildSparklineTrend(taskProgressSparkline)}
+      />
+      <MetricCard
+        label={t("cards.activeAgents")}
+        value={String(summary?.headline.activeAgents ?? 0)}
+        icon={Bot}
+        sparkline={activeAgentsSparkline}
+        trend={buildSparklineTrend(activeAgentsSparkline)}
+      />
+      <MetricCard
+        label={t("cards.pendingReviews")}
+        value={String(summary?.headline.pendingReviews ?? 0)}
+        icon={ClipboardCheck}
+        sparkline={pendingReviewsSparkline}
+        trend={buildSparklineTrend(pendingReviewsSparkline)}
+      />
+      <MetricCard
+        label={t("cards.weeklyCost")}
+        value={formatCurrency(summary?.headline.weeklyCost ?? 0)}
+        icon={DollarSign}
+        sparkline={weeklyCostSparkline}
+        trend={buildSparklineTrend(weeklyCostSparkline)}
+      />
+      <MetricCard
+        label={t("cards.teamCapacity")}
+        value={t("cards.members", { count: summary?.team.totalMembers ?? 0 })}
+        icon={Users}
+      />
+    </>
+  );
+
   return (
-    <OverviewLayout
-      title={t("pageTitle")}
-      breadcrumbs={[{ label: t("breadcrumb.home") }]}
-      metrics={
-        <>
-          <MetricCard
-            label={t("cards.taskProgress")}
-            value={`${summary?.progress.inProgress ?? 0}/${summary?.progress.total ?? 0}`}
-            icon={Activity}
-            sparkline={taskProgressSparkline}
-            trend={buildSparklineTrend(taskProgressSparkline)}
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
+      <OverviewLayout
+        title={t("pageTitle")}
+        breadcrumbs={[{ label: t("breadcrumb.home") }]}
+        metrics={metrics}
+      >
+        <div className="flex flex-col gap-[var(--space-grid-gap)]">
+          <ActivityFeed events={activityEvents} />
+          <TeamHealthWidget members={teamMembers} />
+        </div>
+        <div className="flex flex-col gap-[var(--space-grid-gap)]">
+          <AgentFleetWidget agents={fleetAgents} />
+          <BudgetWidget
+            totalBudget={budgetTotal}
+            spent={budgetSpent}
+            remaining={budgetRemaining}
           />
-          <MetricCard
-            label={t("cards.activeAgents")}
-            value={String(summary?.headline.activeAgents ?? 0)}
-            icon={Bot}
-            sparkline={activeAgentsSparkline}
-            trend={buildSparklineTrend(activeAgentsSparkline)}
-          />
-          <MetricCard
-            label={t("cards.pendingReviews")}
-            value={String(summary?.headline.pendingReviews ?? 0)}
-            icon={ClipboardCheck}
-            sparkline={pendingReviewsSparkline}
-            trend={buildSparklineTrend(pendingReviewsSparkline)}
-          />
-          <MetricCard
-            label={t("cards.weeklyCost")}
-            value={formatCurrency(summary?.headline.weeklyCost ?? 0)}
-            icon={DollarSign}
-            sparkline={weeklyCostSparkline}
-            trend={buildSparklineTrend(weeklyCostSparkline)}
-          />
-          <MetricCard
-            label={t("cards.teamCapacity")}
-            value={t("cards.members", { count: summary?.team.totalMembers ?? 0 })}
-            icon={Users}
-          />
-        </>
-      }
-    >
-      {projects.length > 0 ? (
+        </div>
+      </OverviewLayout>
+
+      {projects.length > 0 && (
         <div className="flex flex-wrap items-end gap-4">
           <div className="flex min-w-[220px] flex-col gap-2 text-sm font-medium">
             <span>{t("projectFilterLabel")}</span>
@@ -315,20 +334,9 @@ export default function DashboardPage() {
             </Select>
           </div>
         </div>
-      ) : null}
-
-      <div className="grid gap-4 lg:grid-cols-2">
-        <ActivityFeed events={activityEvents} />
-        <AgentFleetWidget agents={fleetAgents} />
-        <TeamHealthWidget members={teamMembers} />
-        <BudgetWidget
-          totalBudget={budgetTotal}
-          spent={budgetSpent}
-          remaining={budgetRemaining}
-        />
-      </div>
+      )}
 
       <QuickActionShortcuts actions={quickActions} />
-    </OverviewLayout>
+    </div>
   );
 }
