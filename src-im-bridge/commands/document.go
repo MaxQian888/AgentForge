@@ -48,7 +48,30 @@ func handleDocList(ctx context.Context, p core.Platform, msg *core.Message, c *c
 		_ = p.Reply(ctx, msg.ReplyCtx, "No documents found.")
 		return
 	}
+	if sm := buildDocListStructuredMessage(docs); sm != nil {
+		if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+			return
+		}
+	}
 	_ = p.Reply(ctx, msg.ReplyCtx, formatDocumentList(docs))
+}
+
+func buildDocListStructuredMessage(docs []client.DocumentEntry) *core.StructuredMessage {
+	if len(docs) == 0 {
+		return nil
+	}
+	fields := make([]core.StructuredField, 0, len(docs))
+	for _, doc := range docs {
+		label := doc.Name
+		value := fmt.Sprintf("%s, %s — %s", doc.Type, doc.Size, doc.Status)
+		fields = append(fields, core.StructuredField{Label: label, Value: value})
+	}
+	return &core.StructuredMessage{
+		Title: fmt.Sprintf("项目文档 (%d)", len(docs)),
+		Sections: []core.StructuredSection{
+			{Type: core.StructuredSectionTypeFields, FieldsSection: &core.FieldsSection{Fields: fields}},
+		},
+	}
 }
 
 func handleDocUpload(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, rawURL string) {

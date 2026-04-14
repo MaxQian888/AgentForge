@@ -14,8 +14,10 @@ import (
 )
 
 var (
-	_ core.FormattedTextSender = (*Stub)(nil)
-	_ core.MessageUpdater      = (*Stub)(nil)
+	_ core.FormattedTextSender   = (*Stub)(nil)
+	_ core.MessageUpdater        = (*Stub)(nil)
+	_ core.StructuredSender      = (*Stub)(nil)
+	_ core.ReplyStructuredSender = (*Stub)(nil)
 )
 
 // Stub is a test-only Feishu platform implementation that exposes HTTP
@@ -25,10 +27,17 @@ type Stub struct {
 	handler core.MessageHandler
 	server  *http.Server
 
-	mu      sync.Mutex
-	replies []stubReply
-	cards   []stubCardReply
-	native  []stubNativeReply
+	mu         sync.Mutex
+	replies    []stubReply
+	cards      []stubCardReply
+	native     []stubNativeReply
+	structured []stubStructuredReply
+}
+
+type stubStructuredReply struct {
+	ChatID    string                  `json:"chat_id,omitempty"`
+	Message   *core.StructuredMessage `json:"message"`
+	Timestamp time.Time               `json:"timestamp"`
 }
 
 type stubReply struct {
@@ -107,6 +116,7 @@ func (s *Stub) Start(handler core.MessageHandler) error {
 	mux.HandleFunc("POST /test/message", s.handleTestMessage)
 	mux.HandleFunc("GET /test/replies", s.handleGetReplies)
 	mux.HandleFunc("GET /test/cards", s.handleGetCards)
+	mux.HandleFunc("GET /test/structured", s.handleGetStructured)
 	mux.HandleFunc("DELETE /test/replies", s.handleClearReplies)
 
 	s.server = &http.Server{
@@ -213,6 +223,33 @@ func (s *Stub) ReplyNative(ctx context.Context, replyCtx any, message *core.Nati
 		Timestamp: time.Now(),
 	})
 	s.mu.Unlock()
+	return nil
+}
+
+// SendStructured implements core.StructuredSender.
+func (s *Stub) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	s.mu.Lock()
+	s.structured = append(s.structured, stubStructuredReply{
+		ChatID:    chatID,
+		Message:   message,
+		Timestamp: time.Now(),
+	})
+	s.mu.Unlock()
+	log.WithFields(log.Fields{"component": "feishu-stub", "chat_id": chatID}).Info("SendStructured")
+	return nil
+}
+
+// ReplyStructured implements core.ReplyStructuredSender.
+func (s *Stub) ReplyStructured(ctx context.Context, replyCtx any, message *core.StructuredMessage) error {
+	chatID := stubChatIDFromReplyContext(replyCtx)
+	s.mu.Lock()
+	s.structured = append(s.structured, stubStructuredReply{
+		ChatID:    chatID,
+		Message:   message,
+		Timestamp: time.Now(),
+	})
+	s.mu.Unlock()
+	log.WithFields(log.Fields{"component": "feishu-stub", "chat_id": chatID}).Info("ReplyStructured")
 	return nil
 }
 
@@ -363,11 +400,22 @@ func (s *Stub) handleGetCards(w http.ResponseWriter, r *http.Request) {
 	json.NewEncoder(w).Encode(cards)
 }
 
+func (s *Stub) handleGetStructured(w http.ResponseWriter, r *http.Request) {
+	s.mu.Lock()
+	structured := make([]stubStructuredReply, len(s.structured))
+	copy(structured, s.structured)
+	s.mu.Unlock()
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(structured)
+}
+
 func (s *Stub) handleClearReplies(w http.ResponseWriter, r *http.Request) {
 	s.mu.Lock()
 	s.replies = nil
 	s.cards = nil
 	s.native = nil
+	s.structured = nil
 	s.mu.Unlock()
 
 	w.Header().Set("Content-Type", "application/json")

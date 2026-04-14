@@ -83,3 +83,10 @@ type TypingIndicator interface {
 	StartTyping(ctx context.Context, chatID string) error
 	StopTyping(ctx context.Context, chatID string) error
 }
+
+// LifecycleHandler is an optional callback interface for bot lifecycle events
+// such as being added to or removed from a group chat.
+type LifecycleHandler interface {
+	OnBotAdded(ctx context.Context, platform Platform, chatID string) error
+	OnBotRemoved(ctx context.Context, platform Platform, chatID string) error
+}

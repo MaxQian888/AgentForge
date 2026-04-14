@@ -289,8 +289,14 @@ func main() {
 		client:   apiClient,
 		bridgeID: bridgeID,
 	}
-	notifyServer.SetActionHandler(relay)
-	configurePlatformActionCallbacks(platform, relay)
+	cmdHandler := &commands.CommandActionHandler{
+		Engine:      engine,
+		Inner:       relay,
+		GetPlatform: func() core.Platform { return platform },
+	}
+	notifyServer.SetActionHandler(cmdHandler)
+	configurePlatformActionCallbacks(platform, cmdHandler)
+	configurePlatformLifecycle(platform)
 	go func() {
 		if err := notifyServer.Start(); err != nil {
 			log.WithField("component", "main").WithError(err).Error("Notification receiver error")
@@ -447,6 +453,19 @@ func registerCommandHandlers(engine *core.Engine, apiClient *client.AgentForgeCl
 		}
 		_ = p.Reply(ctx, msg.ReplyCtx, reply)
 	})
+}
+
+type platformLifecycleHandlerSetter interface {
+	SetLifecycleHandler(core.LifecycleHandler)
+}
+
+func configurePlatformLifecycle(platform core.Platform) {
+	if platform == nil {
+		return
+	}
+	if setter, ok := platform.(platformLifecycleHandlerSetter); ok {
+		setter.SetLifecycleHandler(&commands.BotLifecycleHandler{})
+	}
 }
 
 func configurePlatformActionCallbacks(platform core.Platform, handler notify.ActionHandler) {

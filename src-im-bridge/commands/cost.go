@@ -18,6 +18,26 @@ func RegisterCostCommands(engine *core.Engine, apiClient *client.AgentForgeClien
 			return
 		}
 
+		sm := &core.StructuredMessage{
+			Title: "费用统计",
+			Sections: []core.StructuredSection{
+				{
+					Type: core.StructuredSectionTypeFields,
+					FieldsSection: &core.FieldsSection{
+						Fields: []core.StructuredField{
+							{Label: "总费用", Value: fmt.Sprintf("$%.2f", stats.TotalUsd)},
+							{Label: "预算", Value: fmt.Sprintf("$%.2f", stats.BudgetUsd)},
+							{Label: "今日", Value: fmt.Sprintf("$%.2f", stats.DailyUsd)},
+							{Label: "本周", Value: fmt.Sprintf("$%.2f", stats.WeeklyUsd)},
+							{Label: "本月", Value: fmt.Sprintf("$%.2f", stats.MonthlyUsd)},
+						},
+					},
+				},
+			},
+		}
+		if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+			return
+		}
 		if cs, ok := p.(core.CardSender); ok {
 			card := core.NewCard().
 				SetTitle("费用统计").

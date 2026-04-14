@@ -36,6 +36,11 @@ func RegisterToolsCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				return
 			}
 			log.WithFields(log.Fields{"component": "commands.tools", "toolCount": len(tools)}).Info("Bridge tools listed")
+			if sm := buildToolsListStructuredMessage(tools); sm != nil {
+				if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+					return
+				}
+			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatBridgeTools(tools))
 		case "install":
 			if len(parts) < 2 {
@@ -152,6 +157,30 @@ func isToolsAdminRole(role string) bool {
 		return true
 	default:
 		return false
+	}
+}
+
+func buildToolsListStructuredMessage(tools []client.BridgeTool) *core.StructuredMessage {
+	if len(tools) == 0 {
+		return nil
+	}
+	fields := make([]core.StructuredField, 0, len(tools))
+	for _, tool := range tools {
+		label := tool.PluginID
+		if label == "" {
+			label = tool.Name
+		}
+		value := tool.Name
+		if desc := strings.TrimSpace(tool.Description); desc != "" {
+			value = desc
+		}
+		fields = append(fields, core.StructuredField{Label: label, Value: value})
+	}
+	return &core.StructuredMessage{
+		Title: fmt.Sprintf("Bridge Tools (%d)", len(tools)),
+		Sections: []core.StructuredSection{
+			{Type: core.StructuredSectionTypeFields, FieldsSection: &core.FieldsSection{Fields: fields}},
+		},
 	}
 }
 

@@ -44,11 +44,11 @@ func RegisterReviewCommands(engine *core.Engine, apiClient *client.AgentForgeCli
 }
 
 func handleReviewTrigger(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, prURL string) {
-	_ = p.Reply(ctx, msg.ReplyCtx, "正在触发代码审查，请稍候...")
+	replyProcessing(ctx, p, msg.ReplyCtx, "正在触发代码审查...")
 
 	review, err := c.TriggerReview(ctx, prURL)
 	if err != nil {
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("触发审查失败: %v", err))
+		replyError(ctx, p, msg.ReplyCtx, "触发审查失败", fmt.Sprintf("%v", err), "请确认 PR URL 有效且项目已配置")
 		return
 	}
 	bindReviewActionContext(ctx, c, msg, review)
@@ -62,7 +62,7 @@ func handleReviewDeep(ctx context.Context, p core.Platform, msg *core.Message, c
 		return
 	}
 
-	_ = p.Reply(ctx, msg.ReplyCtx, "正在创建独立深度审查，请稍候...")
+	replyProcessing(ctx, p, msg.ReplyCtx, "正在创建深度审查...")
 	review, err := c.TriggerStandaloneDeepReview(ctx, prURL)
 	if err != nil {
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("创建深度审查失败: %v", err))
@@ -146,6 +146,11 @@ func replyReview(ctx context.Context, p core.Platform, msg *core.Message, review
 		_ = p.Reply(ctx, msg.ReplyCtx, "审查结果为空")
 		return
 	}
+	if sm := buildReviewStructuredMessage(review); sm != nil {
+		if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+			return
+		}
+	}
 	if cs, ok := p.(core.CardSender); ok {
 		card := buildReviewCard(review)
 		_ = cs.ReplyCard(ctx, msg.ReplyCtx, card)
@@ -166,6 +171,62 @@ func replyReview(ctx context.Context, p core.Platform, msg *core.Message, review
 		reply += "\n后续任务建议:\n" + followups
 	}
 	_ = p.Reply(ctx, msg.ReplyCtx, reply)
+}
+
+func buildReviewStructuredMessage(review *client.Review) *core.StructuredMessage {
+	if review == nil {
+		return nil
+	}
+	fields := []core.StructuredField{
+		{Label: "PR", Value: review.PRURL},
+		{Label: "状态", Value: review.Status},
+		{Label: "风险等级", Value: review.RiskLevel},
+	}
+	if review.Summary != "" {
+		fields = append(fields, core.StructuredField{Label: "摘要", Value: review.Summary})
+	}
+	if review.Recommendation != "" {
+		fields = append(fields, core.StructuredField{Label: "建议", Value: review.Recommendation})
+	}
+	if review.CostUSD > 0 {
+		fields = append(fields, core.StructuredField{Label: "费用", Value: fmt.Sprintf("$%.2f", review.CostUSD)})
+	}
+
+	sections := []core.StructuredSection{
+		{Type: core.StructuredSectionTypeFields, FieldsSection: &core.FieldsSection{Fields: fields}},
+	}
+
+	if followups := formatReviewFollowUpTasks(review); followups != "" {
+		sections = append(sections, core.StructuredSection{
+			Type: core.StructuredSectionTypeDivider, DividerSection: &core.DividerSection{},
+		})
+		sections = append(sections, core.StructuredSection{
+			Type:        core.StructuredSectionTypeText,
+			TextSection: &core.TextSection{Body: "**后续任务建议**\n" + followups},
+		})
+	}
+
+	actions := make([]core.StructuredAction, 0, 3)
+	actions = append(actions, core.StructuredAction{
+		Label: "查看详情", URL: "/reviews/" + review.ID, Style: core.ActionStyleDefault,
+	})
+	if review.Status == "pending_human" {
+		actions = append(actions, core.StructuredAction{
+			ID: "act:approve:" + review.ID, Label: "Approve", Style: core.ActionStylePrimary,
+		})
+		actions = append(actions, core.StructuredAction{
+			ID: "act:request-changes:" + review.ID, Label: "Request Changes", Style: core.ActionStyleDanger,
+		})
+	}
+	sections = append(sections, core.StructuredSection{
+		Type:           core.StructuredSectionTypeActions,
+		ActionsSection: &core.ActionsSection{Actions: actions},
+	})
+
+	return &core.StructuredMessage{
+		Title:    fmt.Sprintf("代码审查 #%s", shortID(review.ID)),
+		Sections: sections,
+	}
 }
 
 func buildReviewCard(review *client.Review) *core.Card {

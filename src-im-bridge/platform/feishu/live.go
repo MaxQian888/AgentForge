@@ -25,8 +25,10 @@ import (
 )
 
 var (
-	_ core.FormattedTextSender = (*Live)(nil)
-	_ core.MessageUpdater      = (*Live)(nil)
+	_ core.FormattedTextSender    = (*Live)(nil)
+	_ core.MessageUpdater         = (*Live)(nil)
+	_ core.StructuredSender       = (*Live)(nil)
+	_ core.ReplyStructuredSender  = (*Live)(nil)
 )
 
 var liveMetadata = core.PlatformMetadata{
@@ -51,6 +53,18 @@ type replyContext struct {
 	MessageID     string
 	ChatID        string
 	CallbackToken string
+}
+
+// lifecycleEventRunner extends eventRunner with lifecycle event registration.
+type lifecycleEventRunner interface {
+	StartFull(
+		ctx context.Context,
+		handler func(context.Context, *larkim.P2MessageReceiveV1) error,
+		cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error),
+		botAddedHandler func(context.Context, *larkim.P2ChatMemberBotAddedV1) error,
+		botRemovedHandler func(context.Context, *larkim.P2ChatMemberBotDeletedV1) error,
+		reactionHandler func(context.Context, *larkim.P2MessageReactionCreatedV1) error,
+	) error
 }
 
 type eventRunner interface {
@@ -86,15 +100,16 @@ type Live struct {
 	appID     string
 	appSecret string
 
-	runner         eventRunner
-	messages       messageClient
-	cardUpdater    cardUpdater
-	callbackHTTP   http.Handler
-	actionHandler  notify.ActionHandler
-	startCancel    context.CancelFunc
-	started        bool
-	startedContext context.Context
-	mu             sync.Mutex
+	runner           eventRunner
+	messages         messageClient
+	cardUpdater      cardUpdater
+	callbackHTTP     http.Handler
+	actionHandler    notify.ActionHandler
+	lifecycleHandler core.LifecycleHandler
+	startCancel      context.CancelFunc
+	started          bool
+	startedContext   context.Context
+	mu               sync.Mutex
 }
 
 func NewLive(appID, appSecret string, opts ...LiveOption) (*Live, error) {
@@ -187,6 +202,10 @@ func (l *Live) SetActionHandler(handler notify.ActionHandler) {
 	l.actionHandler = handler
 }
 
+func (l *Live) SetLifecycleHandler(handler core.LifecycleHandler) {
+	l.lifecycleHandler = handler
+}
+
 func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
 	if target == nil {
 		return nil
@@ -220,19 +239,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 	l.startCancel = cancel
 	l.startedContext = ctx
 
-	if runner, ok := l.runner.(cardActionEventRunner); ok && l.actionHandler != nil {
-		return runner.StartWithCardActions(ctx, func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
-			msg, err := normalizeIncomingMessage(event)
-			if err != nil {
-				log.WithField("component", "feishu-live").WithError(err).Warn("Ignoring inbound event")
-				return nil
-			}
-			handler(l, msg)
-			return nil
-		}, l.handleCardAction)
-	}
-
-	return l.runner.Start(ctx, func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
+	messageHandler := func(ctx context.Context, event *larkim.P2MessageReceiveV1) error {
 		msg, err := normalizeIncomingMessage(event)
 		if err != nil {
 			log.WithField("component", "feishu-live").WithError(err).Warn("Ignoring inbound event")
@@ -240,7 +247,64 @@ func (l *Live) Start(handler core.MessageHandler) error {
 		}
 		handler(l, msg)
 		return nil
-	})
+	}
+
+	// Try full lifecycle runner first (supports bot added/removed + reactions).
+	if runner, ok := l.runner.(lifecycleEventRunner); ok {
+		var cardHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)
+		if l.actionHandler != nil {
+			cardHandler = l.handleCardAction
+		}
+		return runner.StartFull(ctx, messageHandler, cardHandler,
+			l.handleBotAdded, l.handleBotRemoved, l.handleReaction)
+	}
+
+	// Fall back to card action runner.
+	if runner, ok := l.runner.(cardActionEventRunner); ok && l.actionHandler != nil {
+		return runner.StartWithCardActions(ctx, messageHandler, l.handleCardAction)
+	}
+
+	return l.runner.Start(ctx, messageHandler)
+}
+
+func (l *Live) handleBotAdded(ctx context.Context, event *larkim.P2ChatMemberBotAddedV1) error {
+	if event == nil || event.Event == nil {
+		return nil
+	}
+	chatID := ""
+	if event.Event.ChatId != nil {
+		chatID = strings.TrimSpace(*event.Event.ChatId)
+	}
+	log.WithFields(log.Fields{"component": "feishu-live", "chat_id": chatID}).Info("Bot added to group")
+	if l.lifecycleHandler != nil && chatID != "" {
+		return l.lifecycleHandler.OnBotAdded(ctx, l, chatID)
+	}
+	return nil
+}
+
+func (l *Live) handleBotRemoved(ctx context.Context, event *larkim.P2ChatMemberBotDeletedV1) error {
+	if event == nil || event.Event == nil {
+		return nil
+	}
+	chatID := ""
+	if event.Event.ChatId != nil {
+		chatID = strings.TrimSpace(*event.Event.ChatId)
+	}
+	log.WithFields(log.Fields{"component": "feishu-live", "chat_id": chatID}).Info("Bot removed from group")
+	if l.lifecycleHandler != nil && chatID != "" {
+		return l.lifecycleHandler.OnBotRemoved(ctx, l, chatID)
+	}
+	return nil
+}
+
+func (l *Live) handleReaction(ctx context.Context, event *larkim.P2MessageReactionCreatedV1) error {
+	if event == nil || event.Event == nil {
+		return nil
+	}
+	log.WithField("component", "feishu-live").Debug("Reaction event received")
+	// Reactions are logged but not forwarded as action requests yet; the
+	// action handler interface does not have a reaction-specific path.
+	return nil
 }
 
 func (l *Live) Reply(ctx context.Context, replyCtx any, content string) error {
@@ -294,6 +358,34 @@ func (l *Live) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) err
 	}
 	if replyTarget.ChatID == "" {
 		return errors.New("feishu reply card requires message id or chat id")
+	}
+	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, replyTarget.ChatID, larkim.MsgTypeInteractive, payload)
+}
+
+// SendStructured implements core.StructuredSender.
+func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
+	if strings.TrimSpace(chatID) == "" {
+		return errors.New("feishu structured send requires chat id")
+	}
+	payload, err := renderStructuredMessage(message)
+	if err != nil {
+		return err
+	}
+	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, chatID, larkim.MsgTypeInteractive, payload)
+}
+
+// ReplyStructured implements core.ReplyStructuredSender.
+func (l *Live) ReplyStructured(ctx context.Context, replyCtx any, message *core.StructuredMessage) error {
+	payload, err := renderStructuredMessage(message)
+	if err != nil {
+		return err
+	}
+	replyTarget := toReplyContext(replyCtx)
+	if replyTarget.MessageID != "" {
+		return l.messages.Reply(ctx, replyTarget.MessageID, larkim.MsgTypeInteractive, payload)
+	}
+	if replyTarget.ChatID == "" {
+		return errors.New("feishu structured reply requires message id or chat id")
 	}
 	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, replyTarget.ChatID, larkim.MsgTypeInteractive, payload)
 }
@@ -408,13 +500,33 @@ type sdkEventRunner struct {
 }
 
 func (r *sdkEventRunner) Start(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error) error {
-	return r.StartWithCardActions(ctx, handler, nil)
+	return r.StartFull(ctx, handler, nil, nil, nil, nil)
 }
 
 func (r *sdkEventRunner) StartWithCardActions(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error, cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)) error {
+	return r.StartFull(ctx, handler, cardActionHandler, nil, nil, nil)
+}
+
+func (r *sdkEventRunner) StartFull(
+	ctx context.Context,
+	handler func(context.Context, *larkim.P2MessageReceiveV1) error,
+	cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error),
+	botAddedHandler func(context.Context, *larkim.P2ChatMemberBotAddedV1) error,
+	botRemovedHandler func(context.Context, *larkim.P2ChatMemberBotDeletedV1) error,
+	reactionHandler func(context.Context, *larkim.P2MessageReactionCreatedV1) error,
+) error {
 	dispatcher := larkdispatcher.NewEventDispatcher("", "").OnP2MessageReceiveV1(handler)
 	if cardActionHandler != nil {
 		dispatcher = dispatcher.OnP2CardActionTrigger(cardActionHandler)
+	}
+	if botAddedHandler != nil {
+		dispatcher = dispatcher.OnP2ChatMemberBotAddedV1(botAddedHandler)
+	}
+	if botRemovedHandler != nil {
+		dispatcher = dispatcher.OnP2ChatMemberBotDeletedV1(botRemovedHandler)
+	}
+	if reactionHandler != nil {
+		dispatcher = dispatcher.OnP2MessageReactionCreatedV1(reactionHandler)
 	}
 	client := larkws.NewClient(r.appID, r.appSecret, larkws.WithEventHandler(dispatcher))
 
@@ -509,9 +621,7 @@ func normalizeIncomingMessage(event *larkim.P2MessageReceiveV1) (*core.Message, 
 	}
 
 	message := event.Event.Message
-	if value(message.MessageType) != larkim.MsgTypeText {
-		return nil, fmt.Errorf("unsupported feishu message type %q", value(message.MessageType))
-	}
+	msgType := value(message.MessageType)
 
 	chatID := value(message.ChatId)
 	if chatID == "" {
@@ -522,9 +632,41 @@ func normalizeIncomingMessage(event *larkim.P2MessageReceiveV1) (*core.Message, 
 		return nil, errors.New("missing feishu sender id")
 	}
 
-	content, err := decodeTextMessage(message.Content, message.Mentions)
-	if err != nil {
-		return nil, err
+	var content string
+	var metadata map[string]string
+	var attachments []core.Attachment
+	var err error
+
+	switch msgType {
+	case larkim.MsgTypeText:
+		content, err = decodeTextMessage(message.Content, message.Mentions)
+		if err != nil {
+			return nil, err
+		}
+	case "post":
+		content, err = decodePostMessage(message.Content)
+		if err != nil {
+			return nil, err
+		}
+	case "image":
+		content, metadata, attachments, err = decodeImageMessage(message.Content)
+		if err != nil {
+			return nil, err
+		}
+	case "file":
+		content, metadata, attachments, err = decodeFileMessage(message.Content)
+		if err != nil {
+			return nil, err
+		}
+	default:
+		return nil, fmt.Errorf("unsupported feishu message type %q", msgType)
+	}
+
+	threadID := value(message.ThreadId)
+	rootID := value(message.RootId)
+	// For topic groups, RootId identifies the thread the message belongs to.
+	if threadID == "" && rootID != "" {
+		threadID = rootID
 	}
 
 	return &core.Message{
@@ -543,10 +685,15 @@ func normalizeIncomingMessage(event *larkim.P2MessageReceiveV1) (*core.Message, 
 			ChatID:    chatID,
 			ChannelID: chatID,
 			MessageID: value(message.MessageId),
+			ThreadID:  threadID,
 			UseReply:  true,
 		},
-		Timestamp: parseUnixMillis(value(message.CreateTime)),
-		IsGroup:   value(message.ChatType) != "p2p",
+		Timestamp:   parseUnixMillis(value(message.CreateTime)),
+		IsGroup:     value(message.ChatType) != "p2p",
+		ThreadID:    threadID,
+		MessageType: msgType,
+		Metadata:    metadata,
+		Attachments: attachments,
 	}, nil
 }
 
@@ -584,10 +731,46 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 		return nil, errors.New("missing feishu card action payload")
 	}
 
-	actionValue := feishuActionReference(event.Event.Action.Value)
+	act := event.Event.Action
+
+	// Determine the action tag type for richer interactive elements.
+	actionTag := strings.TrimSpace(act.Tag)
+
+	// Extract action reference — buttons use .Value, selects use .Option,
+	// date/time pickers use .Value (as date string), form submits use .FormValue.
+	actionValue := feishuActionReference(act.Value)
+	selectedOption := strings.TrimSpace(act.Option)
+	selectedTime := feishuSelectedTimeFromValue(act.Value)
+	formValues := feishuFormValues(act.FormValue)
+
+	// Try to parse as structured action reference.
 	action, entityID, actionMetadata, ok := core.ParseActionReferenceWithMetadata(actionValue)
 	if !ok {
-		return nil, errIgnoreCardAction
+		// For select/picker/form elements, use the tag as action type and the
+		// selected value as entity ID.
+		switch actionTag {
+		case "select_static", "select_person", "multi_select_static", "multi_select_person":
+			action = "select"
+			entityID = selectedOption
+			if entityID == "" {
+				entityID = actionValue
+			}
+		case "date_picker", "time_picker", "datetime_picker":
+			action = "date_pick"
+			entityID = selectedTime
+		case "overflow":
+			action = "overflow"
+			entityID = selectedOption
+		default:
+			// Check if form values carry an action reference.
+			if formAction, formOk := formValues["action"]; formOk {
+				action = "form_submit"
+				entityID = formAction
+			} else {
+				return nil, errIgnoreCardAction
+			}
+		}
+		actionMetadata = nil
 	}
 
 	chatID := ""
@@ -611,7 +794,18 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 		"host":          strings.TrimSpace(event.Event.Host),
 		"delivery_type": strings.TrimSpace(event.Event.DeliveryType),
 	}
-
+	if actionTag != "" {
+		metadata["action_tag"] = actionTag
+	}
+	if selectedOption != "" {
+		metadata["selected_option"] = selectedOption
+	}
+	if selectedTime != "" {
+		metadata["selected_time"] = selectedTime
+	}
+	for k, v := range formValues {
+		metadata["form_"+k] = v
+	}
 	for key, value := range actionMetadata {
 		metadata[key] = value
 	}
@@ -624,6 +818,37 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 		ReplyTarget: replyTarget,
 		Metadata:    compactMetadata(metadata),
 	}, nil
+}
+
+func feishuSelectedTimeFromValue(values map[string]interface{}) string {
+	if len(values) == 0 {
+		return ""
+	}
+	// Date/time pickers put the value in the value map under common keys.
+	for _, key := range []string{"date", "time", "datetime", "value"} {
+		if v, ok := values[key]; ok {
+			if s, isStr := v.(string); isStr && strings.TrimSpace(s) != "" {
+				return strings.TrimSpace(s)
+			}
+		}
+	}
+	return ""
+}
+
+func feishuFormValues(formValue map[string]interface{}) map[string]string {
+	if len(formValue) == 0 {
+		return nil
+	}
+	result := make(map[string]string, len(formValue))
+	for k, v := range formValue {
+		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			result[strings.TrimSpace(k)] = strings.TrimSpace(s)
+		}
+	}
+	if len(result) == 0 {
+		return nil
+	}
+	return result
 }
 
 func decodeTextMessage(raw *string, mentions []*larkim.MentionEvent) (string, error) {
@@ -648,6 +873,114 @@ func decodeTextMessage(raw *string, mentions []*larkim.MentionEvent) (string, er
 		text = strings.ReplaceAll(text, key, "@"+strings.TrimPrefix(name, "@"))
 	}
 	return strings.TrimSpace(text), nil
+}
+
+// decodePostMessage parses a Feishu rich text (post) message and extracts
+// plain text content from the nested structure.
+func decodePostMessage(raw *string) (string, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return "", errors.New("missing feishu post message content")
+	}
+
+	var payload struct {
+		Title   string `json:"title"`
+		Content [][]struct {
+			Tag  string `json:"tag"`
+			Text string `json:"text,omitempty"`
+			Href string `json:"href,omitempty"`
+		} `json:"content"`
+	}
+	if err := json.Unmarshal([]byte(*raw), &payload); err != nil {
+		return "", fmt.Errorf("decode feishu post payload: %w", err)
+	}
+
+	var sb strings.Builder
+	if title := strings.TrimSpace(payload.Title); title != "" {
+		sb.WriteString(title)
+		sb.WriteString("\n")
+	}
+	for _, paragraph := range payload.Content {
+		for _, element := range paragraph {
+			switch element.Tag {
+			case "text":
+				sb.WriteString(element.Text)
+			case "a":
+				sb.WriteString(element.Text)
+				if element.Href != "" {
+					sb.WriteString(" (")
+					sb.WriteString(element.Href)
+					sb.WriteString(")")
+				}
+			case "at":
+				sb.WriteString(element.Text)
+			}
+		}
+		sb.WriteString("\n")
+	}
+	return strings.TrimSpace(sb.String()), nil
+}
+
+// decodeImageMessage parses a Feishu image message and extracts the image key.
+func decodeImageMessage(raw *string) (string, map[string]string, []core.Attachment, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return "", nil, nil, errors.New("missing feishu image message content")
+	}
+
+	var payload struct {
+		ImageKey string `json:"image_key"`
+	}
+	if err := json.Unmarshal([]byte(*raw), &payload); err != nil {
+		return "", nil, nil, fmt.Errorf("decode feishu image payload: %w", err)
+	}
+
+	imageKey := strings.TrimSpace(payload.ImageKey)
+	if imageKey == "" {
+		return "", nil, nil, errors.New("missing feishu image key")
+	}
+
+	metadata := map[string]string{
+		"image_key": imageKey,
+	}
+	attachments := []core.Attachment{
+		{Type: "image", Key: imageKey},
+	}
+	return "[image:" + imageKey + "]", metadata, attachments, nil
+}
+
+// decodeFileMessage parses a Feishu file message and extracts file metadata.
+func decodeFileMessage(raw *string) (string, map[string]string, []core.Attachment, error) {
+	if raw == nil || strings.TrimSpace(*raw) == "" {
+		return "", nil, nil, errors.New("missing feishu file message content")
+	}
+
+	var payload struct {
+		FileKey  string `json:"file_key"`
+		FileName string `json:"file_name"`
+	}
+	if err := json.Unmarshal([]byte(*raw), &payload); err != nil {
+		return "", nil, nil, fmt.Errorf("decode feishu file payload: %w", err)
+	}
+
+	fileKey := strings.TrimSpace(payload.FileKey)
+	if fileKey == "" {
+		return "", nil, nil, errors.New("missing feishu file key")
+	}
+	fileName := strings.TrimSpace(payload.FileName)
+
+	metadata := map[string]string{
+		"file_key": fileKey,
+	}
+	if fileName != "" {
+		metadata["file_name"] = fileName
+	}
+	attachments := []core.Attachment{
+		{Type: "file", Key: fileKey, Name: fileName},
+	}
+	content := "[file:" + fileKey + "]"
+	if fileName != "" {
+		content = "[file:" + fileName + "]"
+	}
+	return content, metadata, attachments, nil
 }
 
 func renderTextPayload(content string) (string, error) {

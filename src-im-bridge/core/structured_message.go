@@ -120,10 +120,40 @@ func (m *StructuredMessage) LegacyCard() *Card {
 		return nil
 	}
 	card := NewCard().SetTitle(strings.TrimSpace(m.Title))
+
+	// Collect fields and actions from flat fields first.
 	for _, field := range m.Fields {
 		card.AddField(strings.TrimSpace(field.Label), strings.TrimSpace(field.Value))
 	}
-	for _, action := range m.Actions {
+	addActionsToCard(card, m.Actions)
+
+	// Then extract from sections for richer messages.
+	for _, section := range m.Sections {
+		switch strings.ToLower(strings.TrimSpace(section.Type)) {
+		case StructuredSectionTypeFields:
+			if section.FieldsSection != nil {
+				for _, field := range section.FieldsSection.Fields {
+					card.AddField(strings.TrimSpace(field.Label), strings.TrimSpace(field.Value))
+				}
+			}
+		case StructuredSectionTypeActions:
+			if section.ActionsSection != nil {
+				addActionsToCard(card, section.ActionsSection.Actions)
+			}
+		case StructuredSectionTypeText:
+			if section.TextSection != nil {
+				body := strings.TrimSpace(section.TextSection.Body)
+				if body != "" {
+					card.AddField("", body)
+				}
+			}
+		}
+	}
+	return card
+}
+
+func addActionsToCard(card *Card, actions []StructuredAction) {
+	for _, action := range actions {
 		if strings.TrimSpace(action.URL) != "" {
 			card.AddButton(strings.TrimSpace(action.Label), "link:"+strings.TrimSpace(action.URL))
 			continue
@@ -137,7 +167,6 @@ func (m *StructuredMessage) LegacyCard() *Card {
 			card.AddButton(strings.TrimSpace(action.Label), strings.TrimSpace(action.ID))
 		}
 	}
-	return card
 }
 
 func (s StructuredSection) FallbackText() string {

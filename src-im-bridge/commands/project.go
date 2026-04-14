@@ -27,6 +27,11 @@ func RegisterProjectCommands(engine *core.Engine, apiClient *client.AgentForgeCl
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取项目列表失败: %v", err))
 				return
 			}
+			if sm := buildProjectListStructuredMessage(projects, scopedClient.ProjectScope()); sm != nil {
+				if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+					return
+				}
+			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatProjectList(projects, scopedClient.ProjectScope()))
 		case "current":
 			projectID := scopedClient.ProjectScope()
@@ -197,6 +202,34 @@ func resolveProjectSelection(projects []client.Project, raw string) (*client.Pro
 		return nil, fmt.Errorf("匹配到多个项目：%s", strings.Join(names, "、"))
 	default:
 		return nil, fmt.Errorf("找不到项目 %q。先用 /project list 查看可用项目。", query)
+	}
+}
+
+func buildProjectListStructuredMessage(projects []client.Project, currentProjectID string) *core.StructuredMessage {
+	if len(projects) == 0 {
+		return nil
+	}
+	fields := make([]core.StructuredField, 0, len(projects))
+	for _, project := range projects {
+		label := project.Name
+		if strings.TrimSpace(project.ID) != "" && project.ID == strings.TrimSpace(currentProjectID) {
+			label = "* " + label
+		}
+		fields = append(fields, core.StructuredField{Label: label, Value: project.Slug})
+	}
+	sections := []core.StructuredSection{
+		{
+			Type:          core.StructuredSectionTypeFields,
+			FieldsSection: &core.FieldsSection{Fields: fields},
+		},
+		{
+			Type:           core.StructuredSectionTypeContext,
+			ContextSection: &core.ContextSection{Elements: []string{"使用 /project set <slug> 切换项目"}},
+		},
+	}
+	return &core.StructuredMessage{
+		Title:    fmt.Sprintf("项目列表 (%d)", len(projects)),
+		Sections: sections,
 	}
 }
 

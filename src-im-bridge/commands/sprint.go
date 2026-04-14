@@ -40,6 +40,11 @@ func handleSprintStatus(ctx context.Context, p core.Platform, msg *core.Message,
 		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取 Sprint 失败: %v", err))
 		return
 	}
+	if sm := buildSprintStructuredMessage(sprint); sm != nil {
+		if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+			return
+		}
+	}
 	if cs, ok := p.(core.CardSender); ok {
 		card := buildSprintCard(sprint)
 		_ = cs.ReplyCard(ctx, msg.ReplyCtx, card)
@@ -47,6 +52,37 @@ func handleSprintStatus(ctx context.Context, p core.Platform, msg *core.Message,
 	}
 	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("Sprint: %s\n日期: %s ~ %s\n预算: $%.2f / $%.2f\n状态: %s",
 		sprint.Name, sprint.StartDate, sprint.EndDate, sprint.SpentUsd, sprint.TotalBudgetUsd, sprint.Status))
+}
+
+func buildSprintStructuredMessage(sprint *client.Sprint) *core.StructuredMessage {
+	if sprint == nil {
+		return nil
+	}
+	return &core.StructuredMessage{
+		Title: fmt.Sprintf("Sprint: %s", sprint.Name),
+		Sections: []core.StructuredSection{
+			{
+				Type: core.StructuredSectionTypeFields,
+				FieldsSection: &core.FieldsSection{
+					Fields: []core.StructuredField{
+						{Label: "名称", Value: sprint.Name},
+						{Label: "状态", Value: sprint.Status},
+						{Label: "起止日期", Value: fmt.Sprintf("%s ~ %s", sprint.StartDate, sprint.EndDate)},
+						{Label: "预算", Value: fmt.Sprintf("$%.2f / $%.2f", sprint.SpentUsd, sprint.TotalBudgetUsd)},
+					},
+				},
+			},
+			{
+				Type: core.StructuredSectionTypeActions,
+				ActionsSection: &core.ActionsSection{
+					Actions: []core.StructuredAction{
+						{ID: "act:cmd:/sprint burndown", Label: "查看燃尽图", Style: core.ActionStylePrimary},
+						{ID: "act:cmd:/task list", Label: "任务列表", Style: core.ActionStyleDefault},
+					},
+				},
+			},
+		},
+	}
 }
 
 func handleSprintBurndown(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient) {

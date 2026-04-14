@@ -151,6 +151,31 @@ func (e *Engine) HandleMessage(p Platform, msg *Message) {
 		"发送 /help 查看可用命令，或 @AgentForge <你的需求> 使用自然语言")
 }
 
+// ExecuteCommand runs a slash command programmatically as if the user had
+// typed it. Returns true if a handler was found and executed.
+func (e *Engine) ExecuteCommand(p Platform, msg *Message, command string) bool {
+	content := strings.TrimSpace(command)
+	if !strings.HasPrefix(content, "/") {
+		return false
+	}
+	parts := strings.SplitN(content, " ", 2)
+	cmd := parts[0]
+	args := ""
+	if len(parts) > 1 {
+		args = parts[1]
+	}
+
+	e.mu.RLock()
+	handler, exists := e.commands[cmd]
+	e.mu.RUnlock()
+
+	if !exists {
+		return false
+	}
+	handler(p, msg, args)
+	return true
+}
+
 // Start starts the platform and begins receiving messages.
 func (e *Engine) Start() error {
 	return e.platform.Start(e.HandleMessage)

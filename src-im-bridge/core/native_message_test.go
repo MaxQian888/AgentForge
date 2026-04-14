@@ -444,3 +444,127 @@ func TestNativeMessageHelpers_ParseUtilityValues(t *testing.T) {
 		t.Fatalf("asString(int) = %q", got)
 	}
 }
+
+func TestNewFeishuFieldsCardMessage(t *testing.T) {
+	msg, err := NewFeishuFieldsCardMessage("Status", []StructuredField{
+		{Label: "Agent", Value: "claude-1"},
+		{Label: "Status", Value: "Running"},
+		{Label: "Duration", Value: "5m"},
+	}, []StructuredAction{
+		{ID: "act:stop:1", Label: "Stop", Style: ActionStyleDanger},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Platform != "feishu" || msg.FeishuCard == nil {
+		t.Fatalf("msg = %+v", msg)
+	}
+	if msg.FeishuCard.Mode != FeishuCardModeJSON {
+		t.Fatalf("Mode = %q, want json", msg.FeishuCard.Mode)
+	}
+	fallback := msg.FallbackText()
+	if !strings.Contains(fallback, "Status") {
+		t.Errorf("fallback = %q, want title", fallback)
+	}
+}
+
+func TestNewFeishuTableCardMessage(t *testing.T) {
+	msg, err := NewFeishuTableCardMessage("Results", []string{"Test", "Status"}, [][]string{
+		{"auth", "pass"},
+		{"db", "fail"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Platform != "feishu" {
+		t.Fatalf("Platform = %q", msg.Platform)
+	}
+	fallback := msg.FallbackText()
+	if !strings.Contains(fallback, "auth") || !strings.Contains(fallback, "fail") {
+		t.Errorf("fallback = %q, want table content", fallback)
+	}
+}
+
+func TestNewFeishuTableCardMessage_NoHeaders(t *testing.T) {
+	_, err := NewFeishuTableCardMessage("Empty", nil, nil)
+	if err == nil {
+		t.Fatal("expected error for empty headers")
+	}
+}
+
+func TestNewFeishuSelectCardMessage(t *testing.T) {
+	msg, err := NewFeishuSelectCardMessage("Choose Agent", "Pick one:", []FeishuSelectOption{
+		{Text: "Claude", Value: "claude"},
+		{Text: "GPT", Value: "gpt"},
+	}, "act:choose-agent:task-1")
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if msg.Platform != "feishu" {
+		t.Fatalf("Platform = %q", msg.Platform)
+	}
+}
+
+func TestNewFeishuSelectCardMessage_NoOptions(t *testing.T) {
+	_, err := NewFeishuSelectCardMessage("Empty", "", nil, "act:x:1")
+	if err == nil {
+		t.Fatal("expected error for empty options")
+	}
+}
+
+func TestNewFeishuProgressCardMessage(t *testing.T) {
+	msg, err := NewFeishuProgressCardMessage("Deploy", []FeishuProgressStep{
+		{Label: "Build", Status: "done"},
+		{Label: "Test", Status: "running"},
+		{Label: "Deploy", Status: "pending"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	fallback := msg.FallbackText()
+	if !strings.Contains(fallback, "Build") || !strings.Contains(fallback, "Test") {
+		t.Errorf("fallback = %q", fallback)
+	}
+}
+
+func TestNewFeishuProgressCardMessage_FailedSetsRedHeader(t *testing.T) {
+	msg, err := NewFeishuProgressCardMessage("Deploy", []FeishuProgressStep{
+		{Label: "Build", Status: "done"},
+		{Label: "Test", Status: "failed"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	// Verify the card JSON contains red template
+	var decoded map[string]any
+	if err := json.Unmarshal(msg.FeishuCard.JSON, &decoded); err != nil {
+		t.Fatalf("decode: %v", err)
+	}
+	header := decoded["header"].(map[string]any)
+	if header["template"] != "red" {
+		t.Errorf("header template = %v, want red", header["template"])
+	}
+}
+
+func TestNewFeishuProgressCardMessage_AllDoneSetsGreenHeader(t *testing.T) {
+	msg, err := NewFeishuProgressCardMessage("Done", []FeishuProgressStep{
+		{Label: "Step 1", Status: "done"},
+		{Label: "Step 2", Status: "done"},
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	var decoded map[string]any
+	json.Unmarshal(msg.FeishuCard.JSON, &decoded)
+	header := decoded["header"].(map[string]any)
+	if header["template"] != "green" {
+		t.Errorf("header template = %v, want green", header["template"])
+	}
+}
+
+func TestNewFeishuProgressCardMessage_NoSteps(t *testing.T) {
+	_, err := NewFeishuProgressCardMessage("Empty", nil)
+	if err == nil {
+		t.Fatal("expected error for no steps")
+	}
+}

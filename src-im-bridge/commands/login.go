@@ -27,6 +27,11 @@ func RegisterLoginCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 
 		target := normalizeLoginTarget(parts[0])
 		if target == "" || target == "status" {
+			if sm := buildLoginStatusStructuredMessage(catalog); sm != nil {
+				if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+					return
+				}
+			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatLoginStatus(catalog))
 			return
 		}
@@ -73,6 +78,38 @@ func findBridgeRuntime(catalog *client.BridgeRuntimeCatalog, runtimeKey string) 
 		}
 	}
 	return nil
+}
+
+func buildLoginStatusStructuredMessage(catalog *client.BridgeRuntimeCatalog) *core.StructuredMessage {
+	if catalog == nil || len(catalog.Runtimes) == 0 {
+		return nil
+	}
+	fields := make([]core.StructuredField, 0, len(catalog.Runtimes))
+	for _, runtime := range catalog.Runtimes {
+		status := "ready"
+		if !runtime.Available {
+			status = "blocked"
+		}
+		label := fmt.Sprintf("%s [%s]", runtime.Key, status)
+		value := fmt.Sprintf("%s / %s", runtime.DefaultProvider, runtime.DefaultModel)
+		if !runtime.Available {
+			value = firstRuntimeDiagnostic(runtime)
+		}
+		fields = append(fields, core.StructuredField{Label: label, Value: value})
+	}
+	return &core.StructuredMessage{
+		Title: "Runtime 登录状态",
+		Sections: []core.StructuredSection{
+			{
+				Type:          core.StructuredSectionTypeFields,
+				FieldsSection: &core.FieldsSection{Fields: fields},
+			},
+			{
+				Type:           core.StructuredSectionTypeContext,
+				ContextSection: &core.ContextSection{Elements: []string{"使用 /login <runtime> 查看对应登录指引"}},
+			},
+		},
+	}
 }
 
 func formatLoginStatus(catalog *client.BridgeRuntimeCatalog) string {

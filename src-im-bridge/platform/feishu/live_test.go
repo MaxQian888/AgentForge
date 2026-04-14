@@ -466,6 +466,10 @@ func (u *fakeCardUpdater) Update(ctx context.Context, callbackToken string, mess
 }
 
 func newMessageReceiveEvent(messageID, chatID, chatType, content, createTime, senderOpenID string, mentions []*larkim.MentionEvent) *larkim.P2MessageReceiveV1 {
+	return newMessageReceiveEventWithType(messageID, chatID, chatType, larkim.MsgTypeText, content, createTime, senderOpenID, mentions)
+}
+
+func newMessageReceiveEventWithType(messageID, chatID, chatType, msgType, content, createTime, senderOpenID string, mentions []*larkim.MentionEvent) *larkim.P2MessageReceiveV1 {
 	return &larkim.P2MessageReceiveV1{
 		Event: &larkim.P2MessageReceiveV1Data{
 			Sender: &larkim.EventSender{
@@ -477,7 +481,7 @@ func newMessageReceiveEvent(messageID, chatID, chatType, content, createTime, se
 				MessageId:   stringPtr(messageID),
 				ChatId:      stringPtr(chatID),
 				ChatType:    stringPtr(chatType),
-				MessageType: stringPtr(larkim.MsgTypeText),
+				MessageType: stringPtr(msgType),
 				Content:     stringPtr(content),
 				CreateTime:  stringPtr(createTime),
 				Mentions:    mentions,
@@ -810,5 +814,348 @@ func TestFeishuLive_DecodeTextMessageAndReplyCardErrors(t *testing.T) {
 	}
 	if err := live.ReplyCard(context.Background(), replyContext{}, core.NewCard().SetTitle("missing target")); err == nil || !strings.Contains(err.Error(), "requires message id or chat id") {
 		t.Fatalf("ReplyCard missing target err = %v", err)
+	}
+}
+
+// --- Post message tests ---
+
+func TestLive_NormalizePostMessage(t *testing.T) {
+	runner := &fakeEventRunner{}
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(runner), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	var got *core.Message
+	live.Start(func(_ core.Platform, msg *core.Message) { got = msg })
+	defer live.Stop()
+
+	postContent := `{"title":"Update","content":[[{"tag":"text","text":"Hello "},{"tag":"a","text":"link","href":"https://example.com"}],[{"tag":"text","text":"second line"}]]}`
+	runner.dispatch(context.Background(), newMessageReceiveEventWithType(
+		"msg-post", "chat-1", "group", "post", postContent, "1700000000000", "ou_user_1", nil,
+	))
+
+	if got == nil {
+		t.Fatal("expected normalized message")
+	}
+	if got.MessageType != "post" {
+		t.Fatalf("MessageType = %q, want post", got.MessageType)
+	}
+	if !strings.Contains(got.Content, "Hello") {
+		t.Fatalf("Content = %q, want to contain Hello", got.Content)
+	}
+	if !strings.Contains(got.Content, "https://example.com") {
+		t.Fatalf("Content = %q, want to contain URL", got.Content)
+	}
+}
+
+func TestDecodePostMessage_TitleAndParagraphs(t *testing.T) {
+	raw := `{"title":"Update","content":[[{"tag":"text","text":"Hello "},{"tag":"a","text":"link","href":"https://example.com"}],[{"tag":"text","text":"second"}]]}`
+	content, err := decodePostMessage(&raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(content, "Update") {
+		t.Errorf("missing title in content: %q", content)
+	}
+	if !strings.Contains(content, "link (https://example.com)") {
+		t.Errorf("missing link in content: %q", content)
+	}
+	if !strings.Contains(content, "second") {
+		t.Errorf("missing second paragraph: %q", content)
+	}
+}
+
+func TestDecodePostMessage_NilReturnsError(t *testing.T) {
+	if _, err := decodePostMessage(nil); err == nil {
+		t.Fatal("expected error for nil")
+	}
+}
+
+// --- Image message tests ---
+
+func TestDecodeImageMessage(t *testing.T) {
+	raw := `{"image_key":"img_v2_abc123"}`
+	content, metadata, attachments, err := decodeImageMessage(&raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(content, "img_v2_abc123") {
+		t.Errorf("content = %q, want image key", content)
+	}
+	if metadata["image_key"] != "img_v2_abc123" {
+		t.Errorf("metadata = %v", metadata)
+	}
+	if len(attachments) != 1 || attachments[0].Type != "image" {
+		t.Errorf("attachments = %v", attachments)
+	}
+}
+
+func TestDecodeImageMessage_MissingKeyReturnsError(t *testing.T) {
+	raw := `{}`
+	if _, _, _, err := decodeImageMessage(&raw); err == nil {
+		t.Fatal("expected error for missing image key")
+	}
+}
+
+// --- File message tests ---
+
+func TestDecodeFileMessage(t *testing.T) {
+	raw := `{"file_key":"file_v2_xyz","file_name":"report.pdf"}`
+	content, metadata, attachments, err := decodeFileMessage(&raw)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !strings.Contains(content, "report.pdf") {
+		t.Errorf("content = %q, want file name", content)
+	}
+	if metadata["file_key"] != "file_v2_xyz" {
+		t.Errorf("metadata = %v", metadata)
+	}
+	if metadata["file_name"] != "report.pdf" {
+		t.Errorf("metadata = %v", metadata)
+	}
+	if len(attachments) != 1 || attachments[0].Name != "report.pdf" {
+		t.Errorf("attachments = %v", attachments)
+	}
+}
+
+func TestDecodeFileMessage_MissingKeyReturnsError(t *testing.T) {
+	raw := `{}`
+	if _, _, _, err := decodeFileMessage(&raw); err == nil {
+		t.Fatal("expected error for missing file key")
+	}
+}
+
+// --- StructuredSender tests ---
+
+func TestLive_SendStructured(t *testing.T) {
+	sender := &fakeMessageClient{}
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	msg := &core.StructuredMessage{
+		Title: "Test",
+		Body:  "Hello",
+	}
+	if err := live.SendStructured(context.Background(), "chat-1", msg); err != nil {
+		t.Fatalf("SendStructured error: %v", err)
+	}
+	if len(sender.sendCalls) != 1 {
+		t.Fatalf("sendCalls = %d, want 1", len(sender.sendCalls))
+	}
+	if sender.sendCalls[0].MsgType != larkim.MsgTypeInteractive {
+		t.Fatalf("MsgType = %q, want interactive", sender.sendCalls[0].MsgType)
+	}
+}
+
+func TestLive_ReplyStructured(t *testing.T) {
+	sender := &fakeMessageClient{}
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(sender))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	msg := &core.StructuredMessage{
+		Title: "Reply",
+		Sections: []core.StructuredSection{
+			{Type: "text", TextSection: &core.TextSection{Body: "content"}},
+		},
+	}
+	if err := live.ReplyStructured(context.Background(), replyContext{MessageID: "msg-1"}, msg); err != nil {
+		t.Fatalf("ReplyStructured error: %v", err)
+	}
+	if len(sender.replyCalls) != 1 {
+		t.Fatalf("replyCalls = %d, want 1", len(sender.replyCalls))
+	}
+}
+
+// --- Expanded action callback tests ---
+
+func TestNormalizeCardActionRequest_SelectStatic(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:    "select_static",
+				Option: "option_1",
+				Value:  map[string]interface{}{"action": "act:choose:task-1"},
+			},
+			Token: "token-1",
+			Context: &larkcallback.Context{
+				OpenChatID:    "chat-1",
+				OpenMessageID: "msg-1",
+			},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != "choose" {
+		t.Errorf("Action = %q, want choose", req.Action)
+	}
+	if req.EntityID != "task-1" {
+		t.Errorf("EntityID = %q, want task-1", req.EntityID)
+	}
+	if req.Metadata["action_tag"] != "select_static" {
+		t.Errorf("missing action_tag in metadata")
+	}
+	if req.Metadata["selected_option"] != "option_1" {
+		t.Errorf("missing selected_option in metadata")
+	}
+}
+
+func TestNormalizeCardActionRequest_SelectFallback(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:    "select_static",
+				Option: "opt_deploy",
+				Value:  map[string]interface{}{},
+			},
+			Token:   "token-1",
+			Context: &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != "select" {
+		t.Errorf("Action = %q, want select", req.Action)
+	}
+	if req.EntityID != "opt_deploy" {
+		t.Errorf("EntityID = %q, want opt_deploy", req.EntityID)
+	}
+}
+
+func TestNormalizeCardActionRequest_DatePicker(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:   "date_picker",
+				Value: map[string]interface{}{"date": "2026-04-15"},
+			},
+			Token:   "token-1",
+			Context: &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != "date_pick" {
+		t.Errorf("Action = %q, want date_pick", req.Action)
+	}
+	if req.EntityID != "2026-04-15" {
+		t.Errorf("EntityID = %q, want 2026-04-15", req.EntityID)
+	}
+}
+
+func TestNormalizeCardActionRequest_FormSubmit(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:       "button",
+				Value:     map[string]interface{}{},
+				FormValue: map[string]interface{}{"action": "create-task", "title": "New task"},
+			},
+			Token:   "token-1",
+			Context: &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != "form_submit" {
+		t.Errorf("Action = %q, want form_submit", req.Action)
+	}
+	if req.EntityID != "create-task" {
+		t.Errorf("EntityID = %q, want create-task", req.EntityID)
+	}
+	if req.Metadata["form_title"] != "New task" {
+		t.Errorf("missing form_title in metadata: %v", req.Metadata)
+	}
+}
+
+// --- Lifecycle event tests ---
+
+type fakeLifecycleHandler struct {
+	addedChats   []string
+	removedChats []string
+}
+
+func (h *fakeLifecycleHandler) OnBotAdded(_ context.Context, _ core.Platform, chatID string) error {
+	h.addedChats = append(h.addedChats, chatID)
+	return nil
+}
+
+func (h *fakeLifecycleHandler) OnBotRemoved(_ context.Context, _ core.Platform, chatID string) error {
+	h.removedChats = append(h.removedChats, chatID)
+	return nil
+}
+
+func TestLive_HandleBotAdded(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	handler := &fakeLifecycleHandler{}
+	live.SetLifecycleHandler(handler)
+
+	chatID := "chat-added"
+	live.handleBotAdded(context.Background(), &larkim.P2ChatMemberBotAddedV1{
+		Event: &larkim.P2ChatMemberBotAddedV1Data{
+			ChatId: &chatID,
+		},
+	})
+
+	if len(handler.addedChats) != 1 || handler.addedChats[0] != "chat-added" {
+		t.Fatalf("addedChats = %v", handler.addedChats)
+	}
+}
+
+func TestLive_HandleBotRemoved(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	handler := &fakeLifecycleHandler{}
+	live.SetLifecycleHandler(handler)
+
+	chatID := "chat-removed"
+	live.handleBotRemoved(context.Background(), &larkim.P2ChatMemberBotDeletedV1{
+		Event: &larkim.P2ChatMemberBotDeletedV1Data{
+			ChatId: &chatID,
+		},
+	})
+
+	if len(handler.removedChats) != 1 || handler.removedChats[0] != "chat-removed" {
+		t.Fatalf("removedChats = %v", handler.removedChats)
+	}
+}
+
+func TestLive_HandleBotAddedNilEvent(t *testing.T) {
+	live, _ := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	// Should not panic on nil event.
+	if err := live.handleBotAdded(context.Background(), nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestLive_HandleReactionNoError(t *testing.T) {
+	live, _ := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	// Reactions are logged only; should not error.
+	if err := live.handleReaction(context.Background(), nil); err != nil {
+		t.Fatalf("unexpected error: %v", err)
 	}
 }

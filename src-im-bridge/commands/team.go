@@ -27,6 +27,11 @@ func RegisterTeamCommands(engine *core.Engine, apiClient *client.AgentForgeClien
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取团队失败: %v", err))
 				return
 			}
+			if sm := buildTeamListStructuredMessage(members); sm != nil {
+				if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+					return
+				}
+			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatTeamMembers(members))
 		case "add":
 			if len(parts) < 3 {
@@ -74,6 +79,35 @@ func RegisterTeamCommands(engine *core.Engine, apiClient *client.AgentForgeClien
 			_ = p.Reply(ctx, msg.ReplyCtx, commandUsage("/team"))
 		}
 	})
+}
+
+func buildTeamListStructuredMessage(members []client.Member) *core.StructuredMessage {
+	if len(members) == 0 {
+		return nil
+	}
+	fields := make([]core.StructuredField, 0, len(members))
+	for _, m := range members {
+		label := fmt.Sprintf("%s [%s]", m.Name, m.Type)
+		value := fmt.Sprintf("%s — %s", m.Role, m.Status)
+		fields = append(fields, core.StructuredField{Label: label, Value: value})
+	}
+	return &core.StructuredMessage{
+		Title: fmt.Sprintf("项目成员 (%d)", len(members)),
+		Sections: []core.StructuredSection{
+			{
+				Type:          core.StructuredSectionTypeFields,
+				FieldsSection: &core.FieldsSection{Fields: fields},
+			},
+			{
+				Type: core.StructuredSectionTypeActions,
+				ActionsSection: &core.ActionsSection{
+					Actions: []core.StructuredAction{
+						{ID: "/team add", Label: "添加成员", Style: core.ActionStylePrimary},
+					},
+				},
+			},
+		},
+	}
 }
 
 func formatTeamMembers(members []client.Member) string {

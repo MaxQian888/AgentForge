@@ -55,6 +55,11 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("%s\nBridge pool unavailable: %v", formatAgentPoolStatus(status), bridgeErr))
 				return
 			}
+			if sm := buildAgentPoolStructuredMessage(status, bridgePool); sm != nil {
+				if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+					return
+				}
+			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatAgentPoolStatusWithBridge(status, bridgePool))
 		case "runtimes":
 			route := engine.ResolveCommandRoute("/agent", "runtimes")
@@ -67,6 +72,11 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 			if err != nil {
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取 Bridge runtimes 失败（%s）: %v", describeBridgeFailure(err), err))
 				return
+			}
+			if sm := buildRuntimeCatalogStructuredMessage(runtimes); sm != nil {
+				if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+					return
+				}
 			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatBridgeRuntimeCatalog(runtimes))
 		case "health":
@@ -81,6 +91,11 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取 Bridge health 失败（%s）: %v", describeBridgeFailure(err), err))
 				return
 			}
+			if sm := buildBridgeHealthStructuredMessage(health); sm != nil {
+				if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+					return
+				}
+			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatBridgeHealthStatus(health))
 		case "spawn":
 			if subArgs == "" {
@@ -89,7 +104,7 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 			}
 			result, err := scopedClient.SpawnAgent(ctx, subArgs)
 			if err != nil {
-				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("启动 Agent 失败: %v", err))
+				replyError(ctx, p, msg.ReplyCtx, "启动 Agent 失败", fmt.Sprintf("%v", err), "请检查 task-id 是否存在，或使用 /login status 确认 runtime 就绪")
 				return
 			}
 			log.WithFields(log.Fields{
@@ -98,6 +113,11 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				"status":    result.Dispatch.Status,
 			}).Info("Agent spawn command completed")
 			bindAgentDispatch(ctx, scopedClient, result, msg)
+			if sm := buildAgentSpawnStructuredMessage(result, subArgs); sm != nil {
+				if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+					return
+				}
+			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatAgentSpawnReplyWithBridgeTools(ctx, scopedClient, result, subArgs))
 		case "run":
 			runRequest, err := parseAgentRunRequest(subArgs)
@@ -110,7 +130,7 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 				_ = p.Reply(ctx, msg.ReplyCtx, err.Error())
 				return
 			}
-			_ = p.Reply(ctx, msg.ReplyCtx, "正在创建任务并启动 Agent...")
+			replyProcessing(ctx, p, msg.ReplyCtx, "正在创建任务并启动 Agent...")
 			result, err := scopedClient.QuickAgentRunWithOptions(ctx, runRequest.Prompt, client.AgentSpawnOptions{
 				Runtime:  selection.Runtime,
 				Provider: selection.Provider,
@@ -136,8 +156,13 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 			}
 			logs, err := scopedClient.GetAgentLogs(ctx, subArgs)
 			if err != nil {
-				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取日志失败: %v", err))
+				replyError(ctx, p, msg.ReplyCtx, "获取日志失败", fmt.Sprintf("%v", err), "请检查 run-id 是否正确")
 				return
+			}
+			if sm := buildAgentLogsStructuredMessage(logs, subArgs); sm != nil {
+				if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+					return
+				}
 			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatAgentLogs(logs, subArgs))
 		case "pause":
@@ -460,6 +485,58 @@ func bindAgentDispatch(ctx context.Context, apiClient *client.AgentForgeClient, 
 	_ = apiClient.BindActionContext(ctx, binding)
 }
 
+func buildAgentLogsStructuredMessage(logs []client.AgentLogEntry, runID string) *core.StructuredMessage {
+	if len(logs) == 0 {
+		return nil
+	}
+	limit := len(logs)
+	if limit > 15 {
+		limit = 15
+	}
+	var sb strings.Builder
+	for _, entry := range logs[:limit] {
+		icon := logLevelIcon(entry.Type)
+		sb.WriteString(fmt.Sprintf("%s `[%s]` **%s** %s\n", icon, entry.Timestamp, entry.Type, entry.Content))
+	}
+	if len(logs) > 15 {
+		sb.WriteString(fmt.Sprintf("\n... 还有 %d 条日志", len(logs)-15))
+	}
+
+	sections := []core.StructuredSection{
+		{
+			Type:        core.StructuredSectionTypeText,
+			TextSection: &core.TextSection{Body: strings.TrimRight(sb.String(), "\n")},
+		},
+	}
+	actions := []core.StructuredAction{
+		{ID: "act:cmd:/agent status " + runID, Label: "查看状态", Style: core.ActionStyleDefault},
+	}
+	sections = append(sections, core.StructuredSection{
+		Type:           core.StructuredSectionTypeActions,
+		ActionsSection: &core.ActionsSection{Actions: actions},
+	})
+
+	return &core.StructuredMessage{
+		Title:    fmt.Sprintf("Agent #%s 日志", shortID(runID)),
+		Sections: sections,
+	}
+}
+
+func logLevelIcon(logType string) string {
+	switch strings.ToLower(strings.TrimSpace(logType)) {
+	case "error", "fatal":
+		return "[ERR]"
+	case "warn", "warning":
+		return "[WARN]"
+	case "info":
+		return "[INFO]"
+	case "debug":
+		return "[DBG]"
+	default:
+		return "[LOG]"
+	}
+}
+
 func formatAgentLogs(logs []client.AgentLogEntry, runID string) string {
 	if len(logs) == 0 {
 		return fmt.Sprintf("Agent #%s 暂无日志", shortID(runID))
@@ -477,6 +554,55 @@ func formatAgentLogs(logs []client.AgentLogEntry, runID string) string {
 		sb.WriteString(fmt.Sprintf("  ... 还有 %d 条日志\n", len(logs)-15))
 	}
 	return strings.TrimRight(sb.String(), "\n")
+}
+
+func buildAgentSpawnStructuredMessage(result *client.TaskDispatchResponse, requestedTaskID string) *core.StructuredMessage {
+	if result == nil {
+		return nil
+	}
+	fields := []core.StructuredField{
+		{Label: "状态", Value: result.Dispatch.Status},
+		{Label: "任务", Value: fmt.Sprintf("#%s %s", shortID(result.Task.ID), result.Task.Title)},
+	}
+	if result.Dispatch.Run != nil {
+		fields = append(fields, core.StructuredField{Label: "Agent", Value: "#" + shortID(result.Dispatch.Run.ID)})
+	}
+	if reason := strings.TrimSpace(result.Dispatch.Reason); reason != "" {
+		fields = append(fields, core.StructuredField{Label: "原因", Value: reason})
+	}
+
+	sections := []core.StructuredSection{
+		{Type: core.StructuredSectionTypeFields, FieldsSection: &core.FieldsSection{Fields: fields}},
+	}
+
+	actions := make([]core.StructuredAction, 0, 2)
+	if result.Dispatch.Run != nil {
+		actions = append(actions, core.StructuredAction{
+			ID: "act:cmd:/agent logs " + result.Dispatch.Run.ID, Label: "查看日志", Style: core.ActionStyleDefault,
+		})
+		if result.Dispatch.Status == "started" {
+			actions = append(actions, core.StructuredAction{
+				ID: "act:cmd:/agent kill " + result.Dispatch.Run.ID, Label: "终止", Style: core.ActionStyleDanger,
+			})
+		}
+	}
+	if len(actions) > 0 {
+		sections = append(sections, core.StructuredSection{
+			Type:           core.StructuredSectionTypeActions,
+			ActionsSection: &core.ActionsSection{Actions: actions},
+		})
+	}
+
+	title := "Agent 派发结果"
+	switch result.Dispatch.Status {
+	case "started":
+		title = "Agent 已启动"
+	case "queued":
+		title = "已加入队列"
+	case "blocked":
+		title = "派发被阻止"
+	}
+	return &core.StructuredMessage{Title: title, Sections: sections}
 }
 
 func formatAgentSpawnReply(result *client.TaskDispatchResponse, requestedTaskID string) string {
@@ -589,6 +715,52 @@ func formatAgentPoolStatus(status *client.PoolStatus) string {
 	)
 }
 
+func buildAgentPoolStructuredMessage(status *client.PoolStatus, bridgePool *client.BridgePoolStatus) *core.StructuredMessage {
+	if status == nil {
+		return nil
+	}
+	active := status.ActiveAgents
+	if active == 0 {
+		active = status.Active
+	}
+	max := status.MaxAgents
+	if max == 0 {
+		max = status.Max
+	}
+
+	fields := []core.StructuredField{
+		{Label: "活跃", Value: fmt.Sprintf("%d / %d", active, max)},
+		{Label: "可用", Value: fmt.Sprintf("%d", status.Available)},
+		{Label: "排队", Value: fmt.Sprintf("%d", status.Queued)},
+		{Label: "可恢复", Value: fmt.Sprintf("%d", status.PausedResumable)},
+	}
+	if bridgePool != nil {
+		fields = append(fields,
+			core.StructuredField{Label: "Bridge Active", Value: fmt.Sprintf("%d / %d", bridgePool.Active, bridgePool.Max)},
+			core.StructuredField{Label: "Bridge Warm", Value: fmt.Sprintf("%d / %d", bridgePool.WarmAvailable, bridgePool.WarmTotal)},
+		)
+	}
+
+	return &core.StructuredMessage{
+		Title: "Agent 池状态",
+		Sections: []core.StructuredSection{
+			{
+				Type:          core.StructuredSectionTypeFields,
+				FieldsSection: &core.FieldsSection{Fields: fields},
+			},
+			{
+				Type: core.StructuredSectionTypeActions,
+				ActionsSection: &core.ActionsSection{
+					Actions: []core.StructuredAction{
+						{ID: "act:cmd:/queue list", Label: "查看队列", Style: core.ActionStyleDefault},
+						{ID: "act:cmd:/agent runtimes", Label: "Runtimes", Style: core.ActionStyleDefault},
+					},
+				},
+			},
+		},
+	}
+}
+
 func formatAgentPoolStatusWithBridge(status *client.PoolStatus, bridgePool *client.BridgePoolStatus) string {
 	base := formatAgentPoolStatus(status)
 	if bridgePool == nil {
@@ -602,6 +774,54 @@ func formatAgentPoolStatusWithBridge(status *client.PoolStatus, bridgePool *clie
 		bridgePool.WarmAvailable,
 		bridgePool.WarmTotal,
 	)
+}
+
+func buildRuntimeCatalogStructuredMessage(catalog *client.BridgeRuntimeCatalog) *core.StructuredMessage {
+	if catalog == nil || len(catalog.Runtimes) == 0 {
+		return nil
+	}
+	fields := make([]core.StructuredField, 0, len(catalog.Runtimes))
+	for _, runtime := range catalog.Runtimes {
+		status := "available"
+		if !runtime.Available {
+			status = "unavailable"
+		}
+		label := fmt.Sprintf("%s [%s]", runtime.Key, status)
+		value := fmt.Sprintf("%s / %s", runtime.DefaultProvider, runtime.DefaultModel)
+		fields = append(fields, core.StructuredField{Label: label, Value: value})
+	}
+	return &core.StructuredMessage{
+		Title: fmt.Sprintf("Bridge Runtimes (default=%s)", catalog.DefaultRuntime),
+		Sections: []core.StructuredSection{
+			{Type: core.StructuredSectionTypeFields, FieldsSection: &core.FieldsSection{Fields: fields}},
+			{
+				Type:           core.StructuredSectionTypeContext,
+				ContextSection: &core.ContextSection{Elements: []string{"使用 /login <runtime> 查看登录指引"}},
+			},
+		},
+	}
+}
+
+func buildBridgeHealthStructuredMessage(health *client.BridgeHealthStatus) *core.StructuredMessage {
+	if health == nil {
+		return nil
+	}
+	return &core.StructuredMessage{
+		Title: "Bridge Health",
+		Sections: []core.StructuredSection{
+			{
+				Type: core.StructuredSectionTypeFields,
+				FieldsSection: &core.FieldsSection{
+					Fields: []core.StructuredField{
+						{Label: "状态", Value: health.Status},
+						{Label: "Active", Value: fmt.Sprintf("%d", health.Pool.Active)},
+						{Label: "Available", Value: fmt.Sprintf("%d", health.Pool.Available)},
+						{Label: "Warm", Value: fmt.Sprintf("%d", health.Pool.Warm)},
+					},
+				},
+			},
+		},
+	}
 }
 
 func formatBridgeRuntimeCatalog(catalog *client.BridgeRuntimeCatalog) string {

@@ -63,7 +63,7 @@ func handleTaskCreate(ctx context.Context, p core.Platform, msg *core.Message, c
 		Priority:    input.Priority,
 	})
 	if err != nil {
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("创建失败: %v", err))
+		replyError(ctx, p, msg.ReplyCtx, "创建任务失败", fmt.Sprintf("%v", err), "请检查参数后重试，或使用 /task list 查看现有任务")
 		return
 	}
 	if cs, ok := p.(core.CardSender); ok {
@@ -127,6 +127,13 @@ func handleTaskList(ctx context.Context, p core.Platform, msg *core.Message, c *
 		_ = p.Reply(ctx, msg.ReplyCtx, "暂无任务")
 		return
 	}
+
+	// Try rich rendering.
+	message := buildTaskListStructuredMessage(tasks)
+	if err := replyStructured(ctx, p, msg.ReplyCtx, message); err == nil {
+		return
+	}
+
 	var sb strings.Builder
 	sb.WriteString(fmt.Sprintf("任务列表 (%d):\n", len(tasks)))
 	for _, t := range tasks {
@@ -139,6 +146,52 @@ func handleTaskList(ctx context.Context, p core.Platform, msg *core.Message, c *
 	_ = p.Reply(ctx, msg.ReplyCtx, sb.String())
 }
 
+func buildTaskListStructuredMessage(tasks []client.Task) *core.StructuredMessage {
+	sections := make([]core.StructuredSection, 0, len(tasks)+2)
+
+	// Task rows as fields.
+	fields := make([]core.StructuredField, 0, len(tasks))
+	for _, t := range tasks {
+		label := fmt.Sprintf("#%s [%s]", shortID(t.ID), t.Status)
+		value := t.Title
+		if t.AssigneeName != "" {
+			value += fmt.Sprintf(" (@%s)", t.AssigneeName)
+		}
+		fields = append(fields, core.StructuredField{Label: label, Value: value})
+	}
+	sections = append(sections, core.StructuredSection{
+		Type:          core.StructuredSectionTypeFields,
+		FieldsSection: &core.FieldsSection{Fields: fields},
+	})
+
+	// Quick action buttons for first few tasks.
+	actions := make([]core.StructuredAction, 0, 3)
+	limit := len(tasks)
+	if limit > 3 {
+		limit = 3
+	}
+	for _, t := range tasks[:limit] {
+		if t.Status != "done" && t.Status != "cancelled" {
+			actions = append(actions, core.StructuredAction{
+				ID:    "act:assign-agent:" + t.ID,
+				Label: fmt.Sprintf("启动 #%s", shortID(t.ID)),
+				Style: core.ActionStylePrimary,
+			})
+		}
+	}
+	if len(actions) > 0 {
+		sections = append(sections, core.StructuredSection{
+			Type:           core.StructuredSectionTypeActions,
+			ActionsSection: &core.ActionsSection{Actions: actions, ButtonsPerRow: 3},
+		})
+	}
+
+	return &core.StructuredMessage{
+		Title:    fmt.Sprintf("任务列表 (%d)", len(tasks)),
+		Sections: sections,
+	}
+}
+
 func handleTaskStatus(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, taskID string) {
 	if taskID == "" {
 		_ = p.Reply(ctx, msg.ReplyCtx, "用法: /task status <task-id>")
@@ -146,7 +199,7 @@ func handleTaskStatus(ctx context.Context, p core.Platform, msg *core.Message, c
 	}
 	task, err := c.GetTask(ctx, taskID)
 	if err != nil {
-		_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取任务失败: %v", err))
+		replyError(ctx, p, msg.ReplyCtx, "获取任务失败", fmt.Sprintf("%v", err), "请检查 task-id 是否正确")
 		return
 	}
 	if cs, ok := p.(core.CardSender); ok {
@@ -276,7 +329,7 @@ func handleTaskDecompose(ctx context.Context, p core.Platform, msg *core.Message
 		return
 	}
 
-	_ = p.Reply(ctx, msg.ReplyCtx, "正在分解任务，请稍候...")
+	replyProcessing(ctx, p, msg.ReplyCtx, "正在分解任务...")
 
 	result, err := c.DecomposeTask(ctx, strings.TrimSpace(taskID))
 	if err != nil {

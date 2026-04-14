@@ -31,6 +31,11 @@ func RegisterMemoryCommands(engine *core.Engine, apiClient *client.AgentForgeCli
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("搜索记忆失败: %v", err))
 				return
 			}
+			if sm := buildMemorySearchStructuredMessage(results); sm != nil {
+				if err := replyStructured(ctx, p, msg.ReplyCtx, sm); err == nil {
+					return
+				}
+			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatMemorySearchResults(results))
 		case "note":
 			if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
@@ -47,6 +52,27 @@ func RegisterMemoryCommands(engine *core.Engine, apiClient *client.AgentForgeCli
 			_ = p.Reply(ctx, msg.ReplyCtx, commandUsage("/memory"))
 		}
 	})
+}
+
+func buildMemorySearchStructuredMessage(entries []client.MemoryEntry) *core.StructuredMessage {
+	if len(entries) == 0 {
+		return nil
+	}
+	fields := make([]core.StructuredField, 0, len(entries))
+	for _, entry := range entries {
+		label := fmt.Sprintf("%s [%s]", entry.Key, entry.Category)
+		content := strings.TrimSpace(entry.Content)
+		if len(content) > 120 {
+			content = content[:120] + "..."
+		}
+		fields = append(fields, core.StructuredField{Label: label, Value: content})
+	}
+	return &core.StructuredMessage{
+		Title: fmt.Sprintf("项目记忆 (%d)", len(entries)),
+		Sections: []core.StructuredSection{
+			{Type: core.StructuredSectionTypeFields, FieldsSection: &core.FieldsSection{Fields: fields}},
+		},
+	}
 }
 
 func formatMemorySearchResults(entries []client.MemoryEntry) string {

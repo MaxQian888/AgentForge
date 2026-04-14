@@ -152,14 +152,30 @@ func TestTaskCommand_ListIncludesAssigneeAndCount(t *testing.T) {
 		Content:  "/task list triaged",
 	})
 
-	if len(platform.replies) != 1 {
-		t.Fatalf("replies = %v", platform.replies)
-	}
-	if !strings.Contains(platform.replies[0], "任务列表 (2)") {
-		t.Fatalf("reply = %q", platform.replies[0])
-	}
-	if !strings.Contains(platform.replies[0], "(@Alice)") {
-		t.Fatalf("reply = %q, want assignee mention", platform.replies[0])
+	// With CardSender available, task list renders as a card via replyStructured.
+	if len(platform.cards) == 1 {
+		card := platform.cards[0]
+		if !strings.Contains(card.Title, "任务列表") {
+			t.Fatalf("card title = %q, want task list title", card.Title)
+		}
+		foundAlice := false
+		for _, field := range card.Fields {
+			if strings.Contains(field.Value, "Alice") {
+				foundAlice = true
+			}
+		}
+		if !foundAlice {
+			t.Fatalf("card fields = %+v, want assignee Alice", card.Fields)
+		}
+	} else if len(platform.replies) == 1 {
+		if !strings.Contains(platform.replies[0], "任务列表 (2)") {
+			t.Fatalf("reply = %q", platform.replies[0])
+		}
+		if !strings.Contains(platform.replies[0], "(@Alice)") {
+			t.Fatalf("reply = %q, want assignee mention", platform.replies[0])
+		}
+	} else {
+		t.Fatalf("expected either 1 card or 1 reply, got cards=%d replies=%d", len(platform.cards), len(platform.replies))
 	}
 }
 

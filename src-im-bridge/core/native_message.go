@@ -200,6 +200,276 @@ func NewFeishuMarkdownCardMessage(title, content string) (*NativeMessage, error)
 	return NewFeishuJSONCardMessage(payload)
 }
 
+// FeishuSelectOption is a single option in a Feishu select menu card.
+type FeishuSelectOption struct {
+	Text  string `json:"text"`
+	Value string `json:"value"`
+}
+
+// FeishuProgressStep describes one step in a progress/status card.
+type FeishuProgressStep struct {
+	Label  string `json:"label"`
+	Status string `json:"status"` // "done", "running", "pending", "failed"
+}
+
+// NewFeishuFieldsCardMessage creates a Feishu card with multi-column field
+// layout and optional action buttons at the bottom.
+func NewFeishuFieldsCardMessage(title string, fields []StructuredField, actions []StructuredAction) (*NativeMessage, error) {
+	elements := make([]map[string]any, 0, len(fields)/2+2)
+
+	// render fields as column_set pairs
+	for i := 0; i < len(fields); i += 2 {
+		columns := make([]map[string]any, 0, 2)
+		columns = append(columns, feishuFieldColumn(fields[i]))
+		if i+1 < len(fields) {
+			columns = append(columns, feishuFieldColumn(fields[i+1]))
+		}
+		elements = append(elements, map[string]any{
+			"tag":            "column_set",
+			"flex_mode":      "bisect",
+			"background_style": "default",
+			"columns":        columns,
+		})
+	}
+
+	if len(actions) > 0 {
+		elements = append(elements, map[string]any{"tag": "hr"})
+		elements = append(elements, feishuActionsElement(actions))
+	}
+
+	payload := map[string]any{
+		"config":   map[string]any{"wide_screen_mode": true},
+		"header":   feishuHeader(title, "blue"),
+		"elements": elements,
+	}
+	return NewFeishuJSONCardMessage(payload)
+}
+
+// NewFeishuTableCardMessage creates a Feishu card with tabular data rendered
+// as a markdown table.
+func NewFeishuTableCardMessage(title string, headers []string, rows [][]string) (*NativeMessage, error) {
+	if len(headers) == 0 {
+		return nil, fmt.Errorf("feishu table card requires at least one header")
+	}
+
+	var sb strings.Builder
+	// header row
+	sb.WriteString("| ")
+	for i, h := range headers {
+		if i > 0 {
+			sb.WriteString(" | ")
+		}
+		sb.WriteString(strings.TrimSpace(h))
+	}
+	sb.WriteString(" |\n")
+	// separator
+	sb.WriteString("| ")
+	for i := range headers {
+		if i > 0 {
+			sb.WriteString(" | ")
+		}
+		sb.WriteString("---")
+	}
+	sb.WriteString(" |\n")
+	// data rows
+	for _, row := range rows {
+		sb.WriteString("| ")
+		for i := 0; i < len(headers); i++ {
+			if i > 0 {
+				sb.WriteString(" | ")
+			}
+			if i < len(row) {
+				sb.WriteString(strings.TrimSpace(row[i]))
+			}
+		}
+		sb.WriteString(" |\n")
+	}
+
+	payload := map[string]any{
+		"config": map[string]any{"wide_screen_mode": true},
+		"header": feishuHeader(title, "blue"),
+		"elements": []map[string]any{
+			{
+				"tag": "div",
+				"text": map[string]any{
+					"tag":     "lark_md",
+					"content": sb.String(),
+				},
+			},
+		},
+	}
+	return NewFeishuJSONCardMessage(payload)
+}
+
+// NewFeishuSelectCardMessage creates a Feishu interactive card with a select
+// menu. The selected value is reported via the action callback with the given
+// actionRef.
+func NewFeishuSelectCardMessage(title, prompt string, options []FeishuSelectOption, actionRef string) (*NativeMessage, error) {
+	if len(options) == 0 {
+		return nil, fmt.Errorf("feishu select card requires at least one option")
+	}
+	selectOptions := make([]map[string]any, 0, len(options))
+	for _, opt := range options {
+		selectOptions = append(selectOptions, map[string]any{
+			"text":  map[string]any{"tag": "plain_text", "content": strings.TrimSpace(opt.Text)},
+			"value": strings.TrimSpace(opt.Value),
+		})
+	}
+
+	elements := make([]map[string]any, 0, 2)
+	if trimmedPrompt := strings.TrimSpace(prompt); trimmedPrompt != "" {
+		elements = append(elements, map[string]any{
+			"tag":  "div",
+			"text": map[string]any{"tag": "lark_md", "content": trimmedPrompt},
+		})
+	}
+	elements = append(elements, map[string]any{
+		"tag": "action",
+		"actions": []map[string]any{
+			{
+				"tag":     "select_static",
+				"placeholder": map[string]any{"tag": "plain_text", "content": "Select..."},
+				"options": selectOptions,
+				"value":   map[string]any{"action": strings.TrimSpace(actionRef)},
+			},
+		},
+	})
+
+	payload := map[string]any{
+		"config":   map[string]any{"wide_screen_mode": true},
+		"header":   feishuHeader(title, "blue"),
+		"elements": elements,
+	}
+	return NewFeishuJSONCardMessage(payload)
+}
+
+// NewFeishuProgressCardMessage creates a Feishu card showing step-by-step
+// progress with status indicators.
+func NewFeishuProgressCardMessage(title string, steps []FeishuProgressStep) (*NativeMessage, error) {
+	if len(steps) == 0 {
+		return nil, fmt.Errorf("feishu progress card requires at least one step")
+	}
+
+	var sb strings.Builder
+	for _, step := range steps {
+		icon := progressIcon(step.Status)
+		sb.WriteString(fmt.Sprintf("%s %s\n", icon, strings.TrimSpace(step.Label)))
+	}
+
+	headerColor := "blue"
+	for _, step := range steps {
+		if strings.ToLower(strings.TrimSpace(step.Status)) == "failed" {
+			headerColor = "red"
+			break
+		}
+	}
+	allDone := true
+	for _, step := range steps {
+		if strings.ToLower(strings.TrimSpace(step.Status)) != "done" {
+			allDone = false
+			break
+		}
+	}
+	if allDone {
+		headerColor = "green"
+	}
+
+	payload := map[string]any{
+		"config": map[string]any{"wide_screen_mode": true},
+		"header": feishuHeader(title, headerColor),
+		"elements": []map[string]any{
+			{
+				"tag":  "div",
+				"text": map[string]any{"tag": "lark_md", "content": strings.TrimSpace(sb.String())},
+			},
+		},
+	}
+	return NewFeishuJSONCardMessage(payload)
+}
+
+func feishuHeader(title, color string) map[string]any {
+	header := map[string]any{
+		"title": map[string]any{
+			"tag":     "plain_text",
+			"content": strings.TrimSpace(title),
+		},
+	}
+	if c := strings.TrimSpace(color); c != "" {
+		header["template"] = c
+	}
+	return header
+}
+
+func feishuFieldColumn(field StructuredField) map[string]any {
+	label := strings.TrimSpace(field.Label)
+	value := strings.TrimSpace(field.Value)
+	content := value
+	if label != "" {
+		content = fmt.Sprintf("**%s**\n%s", label, value)
+	}
+	return map[string]any{
+		"tag":             "column",
+		"width":           "weighted",
+		"weight":          1,
+		"vertical_align":  "top",
+		"elements": []map[string]any{
+			{
+				"tag":  "div",
+				"text": map[string]any{"tag": "lark_md", "content": content},
+			},
+		},
+	}
+}
+
+func feishuActionsElement(actions []StructuredAction) map[string]any {
+	buttons := make([]map[string]any, 0, len(actions))
+	for _, action := range actions {
+		label := strings.TrimSpace(action.Label)
+		if label == "" {
+			continue
+		}
+		btn := map[string]any{
+			"tag":  "button",
+			"text": map[string]any{"tag": "plain_text", "content": label},
+			"type": feishuButtonStyle(string(action.Style)),
+		}
+		if url := strings.TrimSpace(action.URL); url != "" {
+			btn["url"] = url
+		} else if id := strings.TrimSpace(action.ID); id != "" {
+			btn["value"] = map[string]any{"action": id}
+		}
+		buttons = append(buttons, btn)
+	}
+	return map[string]any{
+		"tag":     "action",
+		"actions": buttons,
+	}
+}
+
+func feishuButtonStyle(style string) string {
+	switch strings.ToLower(strings.TrimSpace(style)) {
+	case "primary":
+		return "primary"
+	case "danger":
+		return "danger"
+	default:
+		return "default"
+	}
+}
+
+func progressIcon(status string) string {
+	switch strings.ToLower(strings.TrimSpace(status)) {
+	case "done":
+		return "[Done]"
+	case "running":
+		return "[...]"
+	case "failed":
+		return "[FAIL]"
+	default:
+		return "[ ]"
+	}
+}
+
 func NewSlackBlockKitMessage(blocks []map[string]any) (*NativeMessage, error) {
 	body, err := json.Marshal(blocks)
 	if err != nil {
