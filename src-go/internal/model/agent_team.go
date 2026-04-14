@@ -25,20 +25,21 @@ const (
 )
 
 type AgentTeam struct {
-	ID             uuid.UUID  `db:"id"`
-	ProjectID      uuid.UUID  `db:"project_id"`
-	TaskID         uuid.UUID  `db:"task_id"`
-	Name           string     `db:"name"`
-	Status         string     `db:"status"`
-	Strategy       string     `db:"strategy"`
-	PlannerRunID   *uuid.UUID `db:"planner_run_id"`
-	ReviewerRunID  *uuid.UUID `db:"reviewer_run_id"`
-	TotalBudgetUsd float64    `db:"total_budget_usd"`
-	TotalSpentUsd  float64    `db:"total_spent_usd"`
-	Config         string     `db:"config"`
-	ErrorMessage   string     `db:"error_message"`
-	CreatedAt      time.Time  `db:"created_at"`
-	UpdatedAt      time.Time  `db:"updated_at"`
+	ID                    uuid.UUID  `db:"id"`
+	ProjectID             uuid.UUID  `db:"project_id"`
+	TaskID                uuid.UUID  `db:"task_id"`
+	Name                  string     `db:"name"`
+	Status                string     `db:"status"`
+	Strategy              string     `db:"strategy"`
+	PlannerRunID          *uuid.UUID `db:"planner_run_id"`
+	ReviewerRunID         *uuid.UUID `db:"reviewer_run_id"`
+	TotalBudgetUsd        float64    `db:"total_budget_usd"`
+	TotalSpentUsd         float64    `db:"total_spent_usd"`
+	Config                string     `db:"config"`
+	ErrorMessage          string     `db:"error_message"`
+	WorkflowExecutionID   *uuid.UUID `db:"workflow_execution_id"`
+	CreatedAt             time.Time  `db:"created_at"`
+	UpdatedAt             time.Time  `db:"updated_at"`
 }
 
 type AgentTeamDTO struct {

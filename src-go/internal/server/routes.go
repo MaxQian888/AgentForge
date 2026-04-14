@@ -300,10 +300,23 @@ func RegisterRoutes(
 	dagNodeExecRepo := repository.NewWorkflowNodeExecutionRepository(taskRepo.DB())
 	dagWorkflowSvc := service.NewDAGWorkflowService(dagDefRepo, dagExecRepo, dagNodeExecRepo, hub)
 	dagWorkflowSvc.SetTaskRepo(taskRepo)
+	dagRunMappingRepo := repository.NewWorkflowRunMappingRepository(taskRepo.DB())
+	dagWorkflowSvc.SetRunMappingRepo(dagRunMappingRepo)
 	if agentSvc != nil {
 		dagWorkflowSvc.SetAgentSpawner(agentSvc)
+		agentSvc.SetDAGWorkflowService(dagWorkflowSvc)
 	}
 	workflowH = workflowH.WithDAGService(dagWorkflowSvc, dagDefRepo, dagExecRepo, dagNodeExecRepo)
+	// Template and review services
+	templateSvc := service.NewWorkflowTemplateService(dagDefRepo, dagWorkflowSvc)
+	workflowH = workflowH.WithTemplateService(templateSvc)
+	wfReviewRepo := repository.NewWorkflowPendingReviewRepository(taskRepo.DB())
+	dagWorkflowSvc.SetReviewRepo(wfReviewRepo)
+	workflowH = workflowH.WithReviewRepo(wfReviewRepo)
+	// Seed system templates on startup
+	go func() {
+		_ = templateSvc.SeedSystemTemplates(context.Background())
+	}()
 	roleH := handler.NewRoleHandler(cfg.RolesDir).WithBridgeClient(bridgeClient)
 	customFieldH := handler.NewCustomFieldHandler(service.NewCustomFieldService(customFieldRepo))
 	savedViewH := handler.NewSavedViewHandler(service.NewSavedViewService(savedViewRepo), memberRepo)
@@ -538,6 +551,16 @@ func RegisterRoutes(
 	protected.GET("/workflows/:id/executions", workflowH.ListExecutions)
 	protected.GET("/executions/:id", workflowH.GetExecution)
 	protected.POST("/executions/:id/cancel", workflowH.CancelExecution)
+	protected.POST("/executions/:id/review", workflowH.ResolveHumanReview)
+	protected.POST("/executions/:id/events", workflowH.HandleExternalEvent)
+
+	// Workflow reviews
+	projectGroup.GET("/workflow-reviews", workflowH.ListPendingReviews)
+
+	// Workflow templates
+	protected.GET("/workflow-templates", workflowH.ListTemplates)
+	protected.POST("/workflow-templates/:id/clone", workflowH.CloneTemplate)
+	protected.POST("/workflow-templates/:id/execute", workflowH.ExecuteTemplate)
 
 	// Members (global)
 	protected.PUT("/members/:id", memberH.Update)

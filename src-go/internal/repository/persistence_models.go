@@ -900,20 +900,21 @@ func unmarshalAgentRunCostAccounting(raw rawJSON) *model.CostAccountingSnapshot 
 }
 
 type agentTeamRecord struct {
-	ID             uuid.UUID  `gorm:"column:id;primaryKey"`
-	ProjectID      uuid.UUID  `gorm:"column:project_id"`
-	TaskID         uuid.UUID  `gorm:"column:task_id"`
-	Name           string     `gorm:"column:name"`
-	Status         string     `gorm:"column:status"`
-	Strategy       string     `gorm:"column:strategy"`
-	PlannerRunID   *uuid.UUID `gorm:"column:planner_run_id"`
-	ReviewerRunID  *uuid.UUID `gorm:"column:reviewer_run_id"`
-	TotalBudgetUsd float64    `gorm:"column:total_budget_usd"`
-	TotalSpentUsd  float64    `gorm:"column:total_spent_usd"`
-	Config         jsonText   `gorm:"column:config;type:jsonb"`
-	ErrorMessage   string     `gorm:"column:error_message"`
-	CreatedAt      time.Time  `gorm:"column:created_at"`
-	UpdatedAt      time.Time  `gorm:"column:updated_at"`
+	ID                    uuid.UUID  `gorm:"column:id;primaryKey"`
+	ProjectID             uuid.UUID  `gorm:"column:project_id"`
+	TaskID                uuid.UUID  `gorm:"column:task_id"`
+	Name                  string     `gorm:"column:name"`
+	Status                string     `gorm:"column:status"`
+	Strategy              string     `gorm:"column:strategy"`
+	PlannerRunID          *uuid.UUID `gorm:"column:planner_run_id"`
+	ReviewerRunID         *uuid.UUID `gorm:"column:reviewer_run_id"`
+	TotalBudgetUsd        float64    `gorm:"column:total_budget_usd"`
+	TotalSpentUsd         float64    `gorm:"column:total_spent_usd"`
+	Config                jsonText   `gorm:"column:config;type:jsonb"`
+	ErrorMessage          string     `gorm:"column:error_message"`
+	WorkflowExecutionID   *uuid.UUID `gorm:"column:workflow_execution_id"`
+	CreatedAt             time.Time  `gorm:"column:created_at"`
+	UpdatedAt             time.Time  `gorm:"column:updated_at"`
 }
 
 func (agentTeamRecord) TableName() string { return "agent_teams" }
@@ -923,20 +924,21 @@ func newAgentTeamRecord(team *model.AgentTeam) *agentTeamRecord {
 		return nil
 	}
 	return &agentTeamRecord{
-		ID:             team.ID,
-		ProjectID:      team.ProjectID,
-		TaskID:         team.TaskID,
-		Name:           team.Name,
-		Status:         team.Status,
-		Strategy:       team.Strategy,
-		PlannerRunID:   team.PlannerRunID,
-		ReviewerRunID:  team.ReviewerRunID,
-		TotalBudgetUsd: team.TotalBudgetUsd,
-		TotalSpentUsd:  team.TotalSpentUsd,
-		Config:         newJSONText(team.Config, "{}"),
-		ErrorMessage:   team.ErrorMessage,
-		CreatedAt:      team.CreatedAt,
-		UpdatedAt:      team.UpdatedAt,
+		ID:                    team.ID,
+		ProjectID:             team.ProjectID,
+		TaskID:                team.TaskID,
+		Name:                  team.Name,
+		Status:                team.Status,
+		Strategy:              team.Strategy,
+		PlannerRunID:          team.PlannerRunID,
+		ReviewerRunID:         team.ReviewerRunID,
+		TotalBudgetUsd:        team.TotalBudgetUsd,
+		TotalSpentUsd:         team.TotalSpentUsd,
+		Config:                newJSONText(team.Config, "{}"),
+		ErrorMessage:          team.ErrorMessage,
+		WorkflowExecutionID:   team.WorkflowExecutionID,
+		CreatedAt:             team.CreatedAt,
+		UpdatedAt:             team.UpdatedAt,
 	}
 }
 
@@ -945,20 +947,21 @@ func (r *agentTeamRecord) toModel() *model.AgentTeam {
 		return nil
 	}
 	return &model.AgentTeam{
-		ID:             r.ID,
-		ProjectID:      r.ProjectID,
-		TaskID:         r.TaskID,
-		Name:           r.Name,
-		Status:         r.Status,
-		Strategy:       r.Strategy,
-		PlannerRunID:   r.PlannerRunID,
-		ReviewerRunID:  r.ReviewerRunID,
-		TotalBudgetUsd: r.TotalBudgetUsd,
-		TotalSpentUsd:  r.TotalSpentUsd,
-		Config:         r.Config.String("{}"),
-		ErrorMessage:   r.ErrorMessage,
-		CreatedAt:      r.CreatedAt,
-		UpdatedAt:      r.UpdatedAt,
+		ID:                    r.ID,
+		ProjectID:             r.ProjectID,
+		TaskID:                r.TaskID,
+		Name:                  r.Name,
+		Status:                r.Status,
+		Strategy:              r.Strategy,
+		PlannerRunID:          r.PlannerRunID,
+		ReviewerRunID:         r.ReviewerRunID,
+		TotalBudgetUsd:        r.TotalBudgetUsd,
+		TotalSpentUsd:         r.TotalSpentUsd,
+		Config:                r.Config.String("{}"),
+		ErrorMessage:          r.ErrorMessage,
+		WorkflowExecutionID:   r.WorkflowExecutionID,
+		CreatedAt:             r.CreatedAt,
+		UpdatedAt:             r.UpdatedAt,
 	}
 }
 

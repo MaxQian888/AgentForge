@@ -169,6 +169,7 @@ type AgentService struct {
 	pool                  *pool.Pool
 	queueStore            AgentQueueStore
 	teamSvc               *TeamService
+	dagWorkflowSvc        *DAGWorkflowService
 	memorySvc             *MemoryService
 	bridgeActivityMu      sync.Mutex
 	bridgeLastActivity    map[uuid.UUID]time.Time
@@ -284,6 +285,10 @@ func (s *AgentService) SetQueueStore(store AgentQueueStore) {
 
 func (s *AgentService) SetTeamService(ts *TeamService) {
 	s.teamSvc = ts
+}
+
+func (s *AgentService) SetDAGWorkflowService(ds *DAGWorkflowService) {
+	s.dagWorkflowSvc = ds
 }
 
 func (s *AgentService) SetMemoryService(ms *MemoryService) {
@@ -571,6 +576,12 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 		}
 		if run.TeamID != nil && s.teamSvc != nil {
 			go s.teamSvc.ProcessRunCompletion(context.Background(), run)
+		}
+		// Route to DAG workflow engine if agent run is workflow-mapped
+		if s.dagWorkflowSvc != nil {
+			go func() {
+				_ = s.dagWorkflowSvc.HandleAgentRunCompletion(context.Background(), run.ID, run.StructuredOutput, string(run.Status))
+			}()
 		}
 		s.promoteQueuedAdmission(ctx, run)
 		if projectID := s.lookupProjectID(ctx, run.TaskID); projectID != "" {

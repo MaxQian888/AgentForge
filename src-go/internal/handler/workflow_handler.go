@@ -22,6 +22,15 @@ type DAGWorkflowServiceInterface interface {
 	StartExecution(ctx context.Context, workflowID uuid.UUID, taskID *uuid.UUID) (*model.WorkflowExecution, error)
 	AdvanceExecution(ctx context.Context, executionID uuid.UUID) error
 	CancelExecution(ctx context.Context, executionID uuid.UUID) error
+	ResolveHumanReview(ctx context.Context, executionID uuid.UUID, nodeID string, decision string, comment string) error
+	HandleExternalEvent(ctx context.Context, executionID uuid.UUID, nodeID string, payload json.RawMessage) error
+}
+
+// WorkflowTemplateServiceInterface defines the template service methods needed by the handler.
+type WorkflowTemplateServiceInterface interface {
+	ListTemplates(ctx context.Context, category string) ([]*model.WorkflowDefinition, error)
+	CloneTemplate(ctx context.Context, templateID uuid.UUID, projectID uuid.UUID, overrides map[string]any) (*model.WorkflowDefinition, error)
+	CreateFromTemplate(ctx context.Context, templateID uuid.UUID, projectID uuid.UUID, taskID *uuid.UUID, variables map[string]any) (*model.WorkflowExecution, error)
 }
 
 // DAGWorkflowDefRepoInterface defines the definition CRUD methods needed by the handler.
@@ -44,12 +53,19 @@ type DAGWorkflowNodeExecRepoInterface interface {
 	ListNodeExecutions(ctx context.Context, executionID uuid.UUID) ([]*model.WorkflowNodeExecution, error)
 }
 
+// WorkflowReviewRepoInterface defines the review persistence methods needed by the handler.
+type WorkflowReviewRepoInterface interface {
+	ListPendingByProject(ctx context.Context, projectID uuid.UUID) ([]*model.WorkflowPendingReview, error)
+}
+
 type WorkflowHandler struct {
 	repo        workflowRepository
 	dagSvc      DAGWorkflowServiceInterface
 	dagDefRepo  DAGWorkflowDefRepoInterface
 	dagExecRepo DAGWorkflowExecRepoInterface
 	dagNodeRepo DAGWorkflowNodeExecRepoInterface
+	templateSvc WorkflowTemplateServiceInterface
+	reviewRepo  WorkflowReviewRepoInterface
 }
 
 func NewWorkflowHandler(repo workflowRepository) *WorkflowHandler {
@@ -67,6 +83,18 @@ func (h *WorkflowHandler) WithDAGService(
 	h.dagDefRepo = defRepo
 	h.dagExecRepo = execRepo
 	h.dagNodeRepo = nodeRepo
+	return h
+}
+
+// WithTemplateService wires the workflow template service.
+func (h *WorkflowHandler) WithTemplateService(svc WorkflowTemplateServiceInterface) *WorkflowHandler {
+	h.templateSvc = svc
+	return h
+}
+
+// WithReviewRepo wires the pending review repository.
+func (h *WorkflowHandler) WithReviewRepo(repo WorkflowReviewRepoInterface) *WorkflowHandler {
+	h.reviewRepo = repo
 	return h
 }
 
@@ -350,4 +378,145 @@ func (h *WorkflowHandler) CancelExecution(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+// --- Template endpoints ---
+
+// ListTemplates lists workflow templates, optionally filtered by category.
+func (h *WorkflowHandler) ListTemplates(c echo.Context) error {
+	if h.templateSvc == nil {
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
+	}
+	category := c.QueryParam("category")
+	templates, err := h.templateSvc.ListTemplates(c.Request().Context(), category)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	result := make([]model.WorkflowDefinitionDTO, len(templates))
+	for i, t := range templates {
+		result[i] = t.ToDTO()
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// CloneTemplate creates a new workflow from a template.
+func (h *WorkflowHandler) CloneTemplate(c echo.Context) error {
+	if h.templateSvc == nil {
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
+	}
+	templateID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidWorkflowID)
+	}
+	projectID := appMiddleware.GetProjectID(c)
+
+	var body struct {
+		Overrides map[string]any `json:"overrides"`
+	}
+	_ = c.Bind(&body)
+
+	clone, err := h.templateSvc.CloneTemplate(c.Request().Context(), templateID, projectID, body.Overrides)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusCreated, clone.ToDTO())
+}
+
+// ExecuteTemplate clones a template and immediately starts execution.
+func (h *WorkflowHandler) ExecuteTemplate(c echo.Context) error {
+	if h.templateSvc == nil {
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
+	}
+	templateID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidWorkflowID)
+	}
+	projectID := appMiddleware.GetProjectID(c)
+
+	var body struct {
+		TaskID    *string        `json:"taskId"`
+		Variables map[string]any `json:"variables"`
+	}
+	_ = c.Bind(&body)
+
+	var taskID *uuid.UUID
+	if body.TaskID != nil {
+		parsed, err := uuid.Parse(*body.TaskID)
+		if err != nil {
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTaskID)
+		}
+		taskID = &parsed
+	}
+
+	exec, err := h.templateSvc.CreateFromTemplate(c.Request().Context(), templateID, projectID, taskID, body.Variables)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusCreated, exec.ToDTO())
+}
+
+// --- Human review and external event endpoints ---
+
+// ListPendingReviews lists pending human reviews for the current project.
+func (h *WorkflowHandler) ListPendingReviews(c echo.Context) error {
+	if h.reviewRepo == nil {
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
+	}
+	projectID := appMiddleware.GetProjectID(c)
+	reviews, err := h.reviewRepo.ListPendingByProject(c.Request().Context(), projectID)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	result := make([]model.WorkflowPendingReviewDTO, len(reviews))
+	for i, r := range reviews {
+		result[i] = r.ToDTO()
+	}
+	return c.JSON(http.StatusOK, result)
+}
+
+// ResolveHumanReview resolves a pending human review to resume execution.
+func (h *WorkflowHandler) ResolveHumanReview(c echo.Context) error {
+	if h.dagSvc == nil {
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
+	}
+	executionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidExecutionID)
+	}
+	var body struct {
+		NodeID   string `json:"nodeId" validate:"required"`
+		Decision string `json:"decision" validate:"required"` // approved, rejected
+		Comment  string `json:"comment"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
+	}
+
+	if err := h.dagSvc.ResolveHumanReview(c.Request().Context(), executionID, body.NodeID, body.Decision, body.Comment); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.NoContent(http.StatusOK)
+}
+
+// HandleExternalEvent receives an external event to resume a waiting node.
+func (h *WorkflowHandler) HandleExternalEvent(c echo.Context) error {
+	if h.dagSvc == nil {
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
+	}
+	executionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidExecutionID)
+	}
+	var body struct {
+		NodeID  string          `json:"nodeId" validate:"required"`
+		Payload json.RawMessage `json:"payload"`
+	}
+	if err := c.Bind(&body); err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
+	}
+
+	if err := h.dagSvc.HandleExternalEvent(c.Request().Context(), executionID, body.NodeID, body.Payload); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.NoContent(http.StatusOK)
 }

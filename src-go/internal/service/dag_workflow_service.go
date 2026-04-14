@@ -4,6 +4,8 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"regexp"
+	"strconv"
 	"strings"
 	"time"
 
@@ -28,6 +30,7 @@ type DAGWorkflowExecutionRepo interface {
 	GetExecution(ctx context.Context, id uuid.UUID) (*model.WorkflowExecution, error)
 	ListExecutions(ctx context.Context, workflowID uuid.UUID) ([]*model.WorkflowExecution, error)
 	UpdateExecution(ctx context.Context, id uuid.UUID, status string, currentNodes json.RawMessage, errorMessage string) error
+	UpdateExecutionDataStore(ctx context.Context, id uuid.UUID, dataStore json.RawMessage) error
 	CompleteExecution(ctx context.Context, id uuid.UUID, status string) error
 }
 
@@ -36,6 +39,7 @@ type DAGWorkflowNodeExecRepo interface {
 	CreateNodeExecution(ctx context.Context, nodeExec *model.WorkflowNodeExecution) error
 	UpdateNodeExecution(ctx context.Context, id uuid.UUID, status string, result json.RawMessage, errorMessage string) error
 	ListNodeExecutions(ctx context.Context, executionID uuid.UUID) ([]*model.WorkflowNodeExecution, error)
+	DeleteNodeExecutionsByNodeIDs(ctx context.Context, executionID uuid.UUID, nodeIDs []string) error
 }
 
 // DAGWorkflowTaskRepo defines the task operations needed by DAG workflows.
@@ -49,6 +53,22 @@ type DAGWorkflowAgentSpawner interface {
 	Spawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error)
 }
 
+// DAGWorkflowRunMappingRepo persists workflow-to-agent-run mappings.
+type DAGWorkflowRunMappingRepo interface {
+	Create(ctx context.Context, mapping *model.WorkflowRunMapping) error
+	GetByAgentRunID(ctx context.Context, agentRunID uuid.UUID) (*model.WorkflowRunMapping, error)
+	ListByExecution(ctx context.Context, executionID uuid.UUID) ([]*model.WorkflowRunMapping, error)
+}
+
+// DAGWorkflowReviewRepo persists human review requests.
+type DAGWorkflowReviewRepo interface {
+	Create(ctx context.Context, review *model.WorkflowPendingReview) error
+	GetByID(ctx context.Context, id uuid.UUID) (*model.WorkflowPendingReview, error)
+	ListPendingByProject(ctx context.Context, projectID uuid.UUID) ([]*model.WorkflowPendingReview, error)
+	Resolve(ctx context.Context, id uuid.UUID, decision, comment string) error
+	FindPendingByExecutionAndNode(ctx context.Context, executionID uuid.UUID, nodeID string) (*model.WorkflowPendingReview, error)
+}
+
 // DAGWorkflowService orchestrates workflow DAG execution.
 type DAGWorkflowService struct {
 	defRepo      DAGWorkflowDefinitionRepo
@@ -56,6 +76,8 @@ type DAGWorkflowService struct {
 	nodeRepo     DAGWorkflowNodeExecRepo
 	taskRepo     DAGWorkflowTaskRepo
 	agentSpawner DAGWorkflowAgentSpawner
+	mappingRepo  DAGWorkflowRunMappingRepo
+	reviewRepo   DAGWorkflowReviewRepo
 	hub          *ws.Hub
 }
 
@@ -75,18 +97,25 @@ func NewDAGWorkflowService(
 }
 
 // SetTaskRepo sets the task repository for status transitions.
-func (s *DAGWorkflowService) SetTaskRepo(r DAGWorkflowTaskRepo) {
-	s.taskRepo = r
-}
+func (s *DAGWorkflowService) SetTaskRepo(r DAGWorkflowTaskRepo) { s.taskRepo = r }
 
-// SetAgentSpawner sets the agent spawner for agent_dispatch nodes.
+// SetAgentSpawner sets the agent spawner for agent_dispatch and llm_agent nodes.
 func (s *DAGWorkflowService) SetAgentSpawner(spawner DAGWorkflowAgentSpawner) {
 	s.agentSpawner = spawner
 }
 
+// SetRunMappingRepo sets the run mapping repository for async agent completion.
+func (s *DAGWorkflowService) SetRunMappingRepo(r DAGWorkflowRunMappingRepo) { s.mappingRepo = r }
+
+// SetReviewRepo sets the pending review repository for human review nodes.
+func (s *DAGWorkflowService) SetReviewRepo(r DAGWorkflowReviewRepo) { s.reviewRepo = r }
+
+// ---------------------------------------------------------------------------
+// Execution lifecycle
+// ---------------------------------------------------------------------------
+
 // StartExecution creates a new execution and advances from trigger nodes.
 func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid.UUID, taskID *uuid.UUID) (*model.WorkflowExecution, error) {
-	// 1. Load workflow definition
 	def, err := s.defRepo.GetByID(ctx, workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("load workflow definition: %w", err)
@@ -95,7 +124,6 @@ func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid
 		return nil, fmt.Errorf("workflow %s is not active (status: %s)", workflowID, def.Status)
 	}
 
-	// 2. Parse nodes and edges
 	var nodes []model.WorkflowNode
 	var edges []model.WorkflowEdge
 	if err := json.Unmarshal(def.Nodes, &nodes); err != nil {
@@ -105,7 +133,7 @@ func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid
 		return nil, fmt.Errorf("parse workflow edges: %w", err)
 	}
 
-	// 3. Find trigger nodes (nodes with no incoming edges)
+	// Find trigger nodes (nodes with no incoming edges or type=trigger)
 	incomingSet := make(map[string]bool)
 	for _, edge := range edges {
 		incomingSet[edge.Target] = true
@@ -120,7 +148,6 @@ func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid
 		return nil, fmt.Errorf("workflow has no trigger nodes")
 	}
 
-	// 4. Create execution record
 	now := time.Now().UTC()
 	execContext := json.RawMessage("{}")
 	if taskID != nil {
@@ -136,19 +163,19 @@ func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid
 		Status:       model.WorkflowExecStatusRunning,
 		CurrentNodes: currentNodesJSON,
 		Context:      execContext,
+		DataStore:    json.RawMessage("{}"),
 		StartedAt:    &now,
 	}
 	if err := s.execRepo.CreateExecution(ctx, exec); err != nil {
 		return nil, fmt.Errorf("create execution: %w", err)
 	}
 
-	// Broadcast start event
 	s.broadcastEvent(ws.EventWorkflowExecutionStarted, def.ProjectID.String(), map[string]any{
 		"executionId": exec.ID.String(),
 		"workflowId":  workflowID.String(),
 	})
 
-	// 5. Mark trigger nodes as completed and create node execution records
+	// Mark trigger nodes as completed
 	for _, nodeID := range triggerNodeIDs {
 		nodeExec := &model.WorkflowNodeExecution{
 			ID:          uuid.New(),
@@ -163,7 +190,6 @@ func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid
 		}
 	}
 
-	// 6. Advance to next nodes
 	if err := s.AdvanceExecution(ctx, exec.ID); err != nil {
 		log.WithError(err).WithField("executionId", exec.ID).Warn("failed to advance execution after start")
 	}
@@ -200,29 +226,33 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 		nodeMap[nodes[i].ID] = &nodes[i]
 	}
 
-	// Get completed nodes from node executions
+	// Load DataStore for condition evaluation
+	dataStore := s.loadDataStore(exec)
+
 	nodeExecs, err := s.nodeRepo.ListNodeExecutions(ctx, executionID)
 	if err != nil {
 		return fmt.Errorf("list node executions: %w", err)
 	}
 	completedNodes := make(map[string]bool)
 	runningNodes := make(map[string]bool)
+	waitingNodes := make(map[string]bool)
 	for _, ne := range nodeExecs {
-		if ne.Status == model.NodeExecCompleted {
+		switch ne.Status {
+		case model.NodeExecCompleted:
 			completedNodes[ne.NodeID] = true
-		}
-		if ne.Status == model.NodeExecRunning {
+		case model.NodeExecRunning:
 			runningNodes[ne.NodeID] = true
+		case model.NodeExecWaiting:
+			waitingNodes[ne.NodeID] = true
 		}
 	}
 
-	// Find the next nodes to activate: nodes whose all incoming edges come from completed nodes
+	// Find next nodes: all predecessors completed and edge conditions met
 	var nextNodeIDs []string
 	for _, node := range nodes {
-		if completedNodes[node.ID] || runningNodes[node.ID] {
+		if completedNodes[node.ID] || runningNodes[node.ID] || waitingNodes[node.ID] {
 			continue
 		}
-		// Check if all predecessors (via incoming edges) are completed
 		allPredCompleted := true
 		hasPredecessors := false
 		for _, edge := range edges {
@@ -232,8 +262,7 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 					allPredCompleted = false
 					break
 				}
-				// Evaluate condition if present
-				if edge.Condition != "" && !s.evaluateCondition(exec, edge.Condition) {
+				if edge.Condition != "" && !s.evaluateCondition(exec, edge.Condition, dataStore) {
 					allPredCompleted = false
 					break
 				}
@@ -244,13 +273,10 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 		}
 	}
 
-	// If no more nodes to process, check if workflow is complete
 	if len(nextNodeIDs) == 0 {
-		// Check if there are still running nodes
-		if len(runningNodes) > 0 {
-			return nil // Wait for running nodes to finish
+		if len(runningNodes) > 0 || len(waitingNodes) > 0 {
+			return nil // Wait for async/waiting nodes
 		}
-		// Workflow is complete
 		if err := s.execRepo.CompleteExecution(ctx, executionID, model.WorkflowExecStatusCompleted); err != nil {
 			return fmt.Errorf("complete execution: %w", err)
 		}
@@ -262,7 +288,6 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 		return nil
 	}
 
-	// Execute each next node
 	currentNodesJSON, _ := json.Marshal(nextNodeIDs)
 	if err := s.execRepo.UpdateExecution(ctx, executionID, model.WorkflowExecStatusRunning, currentNodesJSON, ""); err != nil {
 		return fmt.Errorf("update current nodes: %w", err)
@@ -278,9 +303,8 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 		if node == nil {
 			continue
 		}
-		if err := s.executeNode(ctx, exec, node); err != nil {
+		if err := s.executeNode(ctx, exec, node, dataStore); err != nil {
 			log.WithError(err).WithField("nodeId", nodeID).Warn("workflow node execution failed")
-			// Mark execution as failed
 			if updateErr := s.execRepo.UpdateExecution(ctx, executionID, model.WorkflowExecStatusFailed, currentNodesJSON, err.Error()); updateErr != nil {
 				log.WithError(updateErr).Warn("failed to update execution status to failed")
 			}
@@ -288,7 +312,6 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 		}
 	}
 
-	// Recurse to advance further
 	return s.AdvanceExecution(ctx, executionID)
 }
 
@@ -298,7 +321,7 @@ func (s *DAGWorkflowService) CancelExecution(ctx context.Context, executionID uu
 	if err != nil {
 		return fmt.Errorf("load execution: %w", err)
 	}
-	if exec.Status != model.WorkflowExecStatusRunning && exec.Status != model.WorkflowExecStatusPending {
+	if exec.Status != model.WorkflowExecStatusRunning && exec.Status != model.WorkflowExecStatusPending && exec.Status != model.WorkflowExecStatusPaused {
 		return fmt.Errorf("cannot cancel execution in status: %s", exec.Status)
 	}
 	if err := s.execRepo.CompleteExecution(ctx, executionID, model.WorkflowExecStatusCancelled); err != nil {
@@ -312,8 +335,75 @@ func (s *DAGWorkflowService) CancelExecution(ctx context.Context, executionID uu
 	return nil
 }
 
-// executeNode handles a single node based on its type.
-func (s *DAGWorkflowService) executeNode(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode) error {
+// HandleAgentRunCompletion is called when an agent run reaches terminal status.
+// It maps the run back to the workflow node and advances execution.
+func (s *DAGWorkflowService) HandleAgentRunCompletion(ctx context.Context, runID uuid.UUID, result json.RawMessage, status string) error {
+	if s.mappingRepo == nil {
+		return nil
+	}
+	mapping, err := s.mappingRepo.GetByAgentRunID(ctx, runID)
+	if err != nil {
+		return nil // No mapping = not a workflow-spawned run
+	}
+
+	nodeExecs, err := s.nodeRepo.ListNodeExecutions(ctx, mapping.ExecutionID)
+	if err != nil {
+		return fmt.Errorf("list node executions: %w", err)
+	}
+
+	// Find the running node execution for this node
+	var targetNodeExec *model.WorkflowNodeExecution
+	for _, ne := range nodeExecs {
+		if ne.NodeID == mapping.NodeID && ne.Status == model.NodeExecRunning {
+			targetNodeExec = ne
+			break
+		}
+	}
+	if targetNodeExec == nil {
+		log.WithFields(log.Fields{
+			"runId":       runID.String(),
+			"executionId": mapping.ExecutionID.String(),
+			"nodeId":      mapping.NodeID,
+		}).Warn("workflow: no running node execution found for completed agent run")
+		return nil
+	}
+
+	// Determine node status from agent status
+	nodeStatus := model.NodeExecCompleted
+	if status != "completed" {
+		nodeStatus = model.NodeExecFailed
+	}
+
+	if err := s.nodeRepo.UpdateNodeExecution(ctx, targetNodeExec.ID, nodeStatus, result, ""); err != nil {
+		return fmt.Errorf("update node execution: %w", err)
+	}
+
+	// Store result in DataStore
+	if len(result) > 0 && nodeStatus == model.NodeExecCompleted {
+		s.storeNodeResult(ctx, mapping.ExecutionID, mapping.NodeID, result)
+	}
+
+	s.broadcastEvent(ws.EventWorkflowNodeCompleted, "", map[string]any{
+		"executionId": mapping.ExecutionID.String(),
+		"nodeId":      mapping.NodeID,
+		"status":      nodeStatus,
+	})
+
+	if nodeStatus == model.NodeExecFailed {
+		if err := s.execRepo.UpdateExecution(ctx, mapping.ExecutionID, model.WorkflowExecStatusFailed, nil, fmt.Sprintf("agent run %s failed", runID)); err != nil {
+			log.WithError(err).Warn("failed to mark workflow as failed")
+		}
+		return nil
+	}
+
+	return s.AdvanceExecution(ctx, mapping.ExecutionID)
+}
+
+// ---------------------------------------------------------------------------
+// Node execution
+// ---------------------------------------------------------------------------
+
+func (s *DAGWorkflowService) executeNode(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, dataStore map[string]any) error {
 	now := time.Now().UTC()
 	nodeExec := &model.WorkflowNodeExecution{
 		ID:          uuid.New(),
@@ -326,42 +416,65 @@ func (s *DAGWorkflowService) executeNode(ctx context.Context, exec *model.Workfl
 		return fmt.Errorf("create node execution: %w", err)
 	}
 
+	// Resolve node config with template variables
+	config := s.resolveNodeConfig(node, dataStore)
+
 	var execErr error
+	var nodeResult json.RawMessage
+	asyncNode := false
+
 	switch node.Type {
+	case model.NodeTypeLLMAgent:
+		execErr = s.executeLLMAgent(ctx, exec, node, nodeExec.ID, config)
+		asyncNode = true // Don't mark completed — wait for HandleAgentRunCompletion
 	case model.NodeTypeAgentDispatch:
-		execErr = s.executeAgentDispatch(ctx, exec, node)
+		execErr = s.executeLLMAgent(ctx, exec, node, nodeExec.ID, config) // Treat as llm_agent
+		asyncNode = true
+	case model.NodeTypeFunction:
+		nodeResult, execErr = s.executeFunction(ctx, exec, node, config, dataStore)
 	case model.NodeTypeNotification:
-		execErr = s.executeNotification(ctx, exec, node)
+		execErr = s.executeNotification(ctx, exec, node, config)
 	case model.NodeTypeStatusTransition:
-		execErr = s.executeStatusTransition(ctx, exec, node)
+		execErr = s.executeStatusTransition(ctx, exec, node, config)
 	case model.NodeTypeCondition:
-		execErr = s.executeCondition(ctx, exec, node)
+		execErr = s.executeCondition(ctx, exec, node, config, dataStore)
+	case model.NodeTypeLoop:
+		execErr = s.executeLoop(ctx, exec, node, config, dataStore)
+	case model.NodeTypeHumanReview:
+		execErr = s.executeHumanReview(ctx, exec, node, nodeExec.ID, config)
+		asyncNode = true // Wait for external resolution
+	case model.NodeTypeWaitEvent:
+		execErr = s.executeWaitEvent(ctx, exec, node, nodeExec.ID, config)
+		asyncNode = true
 	case model.NodeTypeGate:
-		// Gate waits for manual/external signal - mark as completed for now
 		execErr = nil
 	case model.NodeTypeParallelSplit:
-		execErr = nil // Split just activates all outgoing edges, handled by advance
+		execErr = nil
 	case model.NodeTypeParallelJoin:
-		execErr = nil // Join is handled by the predecessor check in AdvanceExecution
+		execErr = nil
 	case model.NodeTypeTrigger:
-		execErr = nil // Triggers are already handled at start
+		execErr = nil
 	default:
 		execErr = fmt.Errorf("unknown node type: %s", node.Type)
 	}
 
 	if execErr != nil {
-		completedAt := time.Now().UTC()
-		nodeExec.Status = model.NodeExecFailed
-		nodeExec.ErrorMessage = execErr.Error()
-		nodeExec.CompletedAt = &completedAt
 		_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecFailed, nil, execErr.Error())
 		return execErr
 	}
 
-	completedAt := time.Now().UTC()
-	nodeExec.Status = model.NodeExecCompleted
-	nodeExec.CompletedAt = &completedAt
-	_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecCompleted, nil, "")
+	if asyncNode {
+		// Node stays in running/waiting state until external callback
+		return nil
+	}
+
+	// Synchronous completion
+	_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecCompleted, nodeResult, "")
+
+	// Store result in DataStore
+	if len(nodeResult) > 0 {
+		s.storeNodeResult(ctx, exec.ID, node.ID, nodeResult)
+	}
 
 	s.broadcastEvent(ws.EventWorkflowNodeCompleted, exec.ProjectID.String(), map[string]any{
 		"executionId": exec.ID.String(),
@@ -373,21 +486,18 @@ func (s *DAGWorkflowService) executeNode(ctx context.Context, exec *model.Workfl
 	return nil
 }
 
-// executeAgentDispatch spawns an agent run using configuration from the node.
-// Config fields: runtime, provider, model, roleId, budgetUsd.
-// The task ID is taken from the workflow execution context.
-func (s *DAGWorkflowService) executeAgentDispatch(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode) error {
+// ---------------------------------------------------------------------------
+// Node type executors
+// ---------------------------------------------------------------------------
+
+// executeLLMAgent spawns an agent run via the bridge and registers it for async callback.
+func (s *DAGWorkflowService) executeLLMAgent(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, nodeExecID uuid.UUID, config map[string]any) error {
 	if s.agentSpawner == nil {
-		log.WithField("nodeId", node.ID).Warn("workflow: agent_dispatch skipped - agent spawner not available")
+		log.WithField("nodeId", node.ID).Warn("workflow: llm_agent skipped - agent spawner not available")
 		return nil
 	}
 	if exec.TaskID == nil {
-		return fmt.Errorf("agent_dispatch requires a task ID in the execution context")
-	}
-
-	var config map[string]any
-	if len(node.Config) > 0 {
-		_ = json.Unmarshal(node.Config, &config)
+		return fmt.Errorf("llm_agent requires a task ID in the execution context")
 	}
 
 	runtime, _ := config["runtime"].(string)
@@ -408,28 +518,61 @@ func (s *DAGWorkflowService) executeAgentDispatch(ctx context.Context, exec *mod
 
 	run, err := s.agentSpawner.Spawn(ctx, *exec.TaskID, memberID, runtime, provider, modelName, budgetUsd, roleID)
 	if err != nil {
-		return fmt.Errorf("agent_dispatch spawn: %w", err)
+		return fmt.Errorf("llm_agent spawn: %w", err)
+	}
+
+	// Register mapping for async completion callback
+	if s.mappingRepo != nil {
+		mapping := &model.WorkflowRunMapping{
+			ID:          uuid.New(),
+			ExecutionID: exec.ID,
+			NodeID:      node.ID,
+			AgentRunID:  run.ID,
+		}
+		if err := s.mappingRepo.Create(ctx, mapping); err != nil {
+			log.WithError(err).Warn("workflow: failed to create run mapping")
+		}
 	}
 
 	log.WithFields(log.Fields{
 		"executionId": exec.ID.String(),
 		"nodeId":      node.ID,
 		"runId":       run.ID.String(),
-		"taskId":      exec.TaskID.String(),
 		"runtime":     runtime,
-		"provider":    provider,
 		"model":       modelName,
 		"budgetUsd":   budgetUsd,
-	}).Info("workflow: agent dispatched")
+	}).Info("workflow: llm_agent dispatched")
 	return nil
 }
 
-// executeNotification logs and broadcasts a WebSocket event.
-func (s *DAGWorkflowService) executeNotification(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode) error {
-	var config map[string]any
-	if len(node.Config) > 0 {
-		_ = json.Unmarshal(node.Config, &config)
+// executeFunction evaluates an expression and produces a result.
+func (s *DAGWorkflowService) executeFunction(_ context.Context, _ *model.WorkflowExecution, node *model.WorkflowNode, config map[string]any, dataStore map[string]any) (json.RawMessage, error) {
+	expression, _ := config["expression"].(string)
+	if expression == "" {
+		// If no expression, pass through input as output
+		if input, ok := config["input"]; ok {
+			result, _ := json.Marshal(input)
+			return result, nil
+		}
+		return json.RawMessage("null"), nil
 	}
+
+	// Resolve template vars in expression
+	resolved := resolveTemplateVars(expression, dataStore)
+
+	// Try to parse as JSON and return directly
+	if json.Valid([]byte(resolved)) {
+		return json.RawMessage(resolved), nil
+	}
+
+	// Evaluate simple expressions
+	val := evaluateExpression(resolved, dataStore)
+	result, _ := json.Marshal(val)
+	return result, nil
+}
+
+// executeNotification logs and broadcasts a WebSocket event.
+func (s *DAGWorkflowService) executeNotification(_ context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, config map[string]any) error {
 	message := "Workflow notification"
 	if msg, ok := config["message"].(string); ok {
 		message = msg
@@ -448,8 +591,8 @@ func (s *DAGWorkflowService) executeNotification(ctx context.Context, exec *mode
 	return nil
 }
 
-// executeStatusTransition parses config for target status and updates the task.
-func (s *DAGWorkflowService) executeStatusTransition(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode) error {
+// executeStatusTransition updates the task status.
+func (s *DAGWorkflowService) executeStatusTransition(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, config map[string]any) error {
 	if s.taskRepo == nil {
 		log.WithField("nodeId", node.ID).Warn("workflow: status_transition skipped - task repo not available")
 		return nil
@@ -457,48 +600,312 @@ func (s *DAGWorkflowService) executeStatusTransition(ctx context.Context, exec *
 	if exec.TaskID == nil {
 		return fmt.Errorf("status_transition requires a task ID in the execution context")
 	}
-
-	var config map[string]any
-	if len(node.Config) > 0 {
-		_ = json.Unmarshal(node.Config, &config)
-	}
 	targetStatus, ok := config["targetStatus"].(string)
 	if !ok || targetStatus == "" {
 		return fmt.Errorf("status_transition node %s missing targetStatus config", node.ID)
 	}
-
 	if err := s.taskRepo.TransitionStatus(ctx, *exec.TaskID, targetStatus); err != nil {
 		return fmt.Errorf("status_transition to %s: %w", targetStatus, err)
 	}
-	log.WithFields(log.Fields{
-		"executionId":  exec.ID.String(),
-		"nodeId":       node.ID,
-		"targetStatus": targetStatus,
-		"taskId":       exec.TaskID.String(),
-	}).Info("workflow: status transition completed")
 	return nil
 }
 
-// executeCondition evaluates a simple condition against execution context.
-func (s *DAGWorkflowService) executeCondition(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode) error {
-	var config map[string]any
-	if len(node.Config) > 0 {
-		_ = json.Unmarshal(node.Config, &config)
-	}
+// executeCondition evaluates a condition expression.
+func (s *DAGWorkflowService) executeCondition(_ context.Context, exec *model.WorkflowExecution, _ *model.WorkflowNode, config map[string]any, dataStore map[string]any) error {
 	expression, _ := config["expression"].(string)
 	if expression == "" {
-		// No condition = pass through
-		return nil
+		return nil // No condition = pass through
 	}
-	if !s.evaluateCondition(exec, expression) {
+	if !s.evaluateCondition(exec, expression, dataStore) {
 		return fmt.Errorf("condition not met: %s", expression)
 	}
 	return nil
 }
 
-// evaluateCondition evaluates a simple condition expression against the execution context.
-// Supported: "task.status == \"done\"", "true", "false"
-func (s *DAGWorkflowService) evaluateCondition(exec *model.WorkflowExecution, expression string) bool {
+// executeLoop handles a feedback loop by resetting downstream nodes and re-advancing.
+func (s *DAGWorkflowService) executeLoop(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, config map[string]any, dataStore map[string]any) error {
+	targetNode, _ := config["target_node"].(string)
+	maxIterations := 3
+	if m, ok := config["max_iterations"].(float64); ok && m > 0 {
+		maxIterations = int(m)
+	}
+	exitCondition, _ := config["exit_condition"].(string)
+
+	if targetNode == "" {
+		return fmt.Errorf("loop node %s missing target_node config", node.ID)
+	}
+
+	// Track iteration count in DataStore
+	loopKey := "_loop_" + node.ID + "_count"
+	currentIter := 0
+	if v, ok := dataStore[loopKey]; ok {
+		if f, ok := v.(float64); ok {
+			currentIter = int(f)
+		}
+	}
+
+	// Check exit conditions
+	if currentIter >= maxIterations {
+		log.WithFields(log.Fields{
+			"nodeId":    node.ID,
+			"iteration": currentIter,
+			"max":       maxIterations,
+		}).Info("workflow: loop max iterations reached")
+		return nil // Exit loop, continue DAG
+	}
+	if exitCondition != "" && s.evaluateCondition(exec, exitCondition, dataStore) {
+		log.WithFields(log.Fields{
+			"nodeId":    node.ID,
+			"iteration": currentIter,
+			"condition": exitCondition,
+		}).Info("workflow: loop exit condition met")
+		return nil
+	}
+
+	// Increment iteration count
+	currentIter++
+	dataStore[loopKey] = float64(currentIter)
+	dsJSON, _ := json.Marshal(dataStore)
+	if err := s.execRepo.UpdateExecutionDataStore(ctx, exec.ID, dsJSON); err != nil {
+		log.WithError(err).Warn("workflow: failed to update DataStore for loop")
+	}
+
+	// Find all nodes between target_node and this loop node, reset them
+	def, err := s.defRepo.GetByID(ctx, exec.WorkflowID)
+	if err != nil {
+		return fmt.Errorf("load definition for loop: %w", err)
+	}
+	var allNodes []model.WorkflowNode
+	var allEdges []model.WorkflowEdge
+	_ = json.Unmarshal(def.Nodes, &allNodes)
+	_ = json.Unmarshal(def.Edges, &allEdges)
+
+	nodesToReset := s.findNodesBetween(targetNode, node.ID, allNodes, allEdges)
+	nodesToReset = append(nodesToReset, targetNode) // Include the target itself
+
+	if len(nodesToReset) > 0 {
+		if err := s.nodeRepo.DeleteNodeExecutionsByNodeIDs(ctx, exec.ID, nodesToReset); err != nil {
+			return fmt.Errorf("reset nodes for loop: %w", err)
+		}
+	}
+
+	log.WithFields(log.Fields{
+		"nodeId":       node.ID,
+		"iteration":    currentIter,
+		"targetNode":   targetNode,
+		"resetNodes":   len(nodesToReset),
+	}).Info("workflow: loop iteration, resetting nodes")
+
+	// Re-advance from the beginning — AdvanceExecution will find the reset nodes
+	return nil // The caller (AdvanceExecution) will recurse and pick up the reset nodes
+}
+
+// executeHumanReview pauses execution and waits for human input.
+func (s *DAGWorkflowService) executeHumanReview(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, nodeExecID uuid.UUID, config map[string]any) error {
+	_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExecID, model.NodeExecWaiting, nil, "")
+	_ = s.execRepo.UpdateExecution(ctx, exec.ID, model.WorkflowExecStatusPaused, nil, "")
+
+	prompt, _ := config["prompt"].(string)
+	if prompt == "" {
+		prompt = "Review required"
+	}
+
+	// Persist the review request
+	if s.reviewRepo != nil {
+		reviewCtx, _ := json.Marshal(config)
+		review := &model.WorkflowPendingReview{
+			ID:          uuid.New(),
+			ExecutionID: exec.ID,
+			NodeID:      node.ID,
+			ProjectID:   exec.ProjectID,
+			Prompt:      prompt,
+			Context:     reviewCtx,
+			Decision:    model.ReviewDecisionPending,
+		}
+		if err := s.reviewRepo.Create(ctx, review); err != nil {
+			log.WithError(err).Warn("workflow: failed to persist pending review")
+		}
+	}
+
+	s.broadcastEvent(ws.EventWorkflowReviewRequested, exec.ProjectID.String(), map[string]any{
+		"executionId": exec.ID.String(),
+		"nodeId":      node.ID,
+		"nodeExecId":  nodeExecID.String(),
+		"prompt":      prompt,
+	})
+
+	log.WithFields(log.Fields{
+		"executionId": exec.ID.String(),
+		"nodeId":      node.ID,
+		"prompt":      prompt,
+	}).Info("workflow: human review requested, execution paused")
+
+	return nil
+}
+
+// ResolveHumanReview resumes a paused workflow after human review.
+func (s *DAGWorkflowService) ResolveHumanReview(ctx context.Context, executionID uuid.UUID, nodeID string, decision string, comment string) error {
+	exec, err := s.execRepo.GetExecution(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("load execution: %w", err)
+	}
+	if exec.Status != model.WorkflowExecStatusPaused {
+		return fmt.Errorf("execution is not paused (status: %s)", exec.Status)
+	}
+
+	// Find the waiting node execution
+	nodeExecs, err := s.nodeRepo.ListNodeExecutions(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("list node executions: %w", err)
+	}
+	var waitingExec *model.WorkflowNodeExecution
+	for _, ne := range nodeExecs {
+		if ne.NodeID == nodeID && ne.Status == model.NodeExecWaiting {
+			waitingExec = ne
+			break
+		}
+	}
+	if waitingExec == nil {
+		return fmt.Errorf("no waiting node execution found for node %s", nodeID)
+	}
+
+	// Resolve the persistent review record
+	if s.reviewRepo != nil {
+		pendingReview, findErr := s.reviewRepo.FindPendingByExecutionAndNode(ctx, executionID, nodeID)
+		if findErr == nil && pendingReview != nil {
+			_ = s.reviewRepo.Resolve(ctx, pendingReview.ID, decision, comment)
+		}
+	}
+
+	// Store decision as result
+	result, _ := json.Marshal(map[string]any{
+		"decision": decision,
+		"comment":  comment,
+	})
+	_ = s.nodeRepo.UpdateNodeExecution(ctx, waitingExec.ID, model.NodeExecCompleted, result, "")
+
+	// Store in DataStore
+	s.storeNodeResult(ctx, executionID, nodeID, result)
+
+	// Resume execution
+	_ = s.execRepo.UpdateExecution(ctx, executionID, model.WorkflowExecStatusRunning, nil, "")
+
+	s.broadcastEvent(ws.EventWorkflowReviewResolved, exec.ProjectID.String(), map[string]any{
+		"executionId": executionID.String(),
+		"nodeId":      nodeID,
+		"decision":    decision,
+	})
+
+	return s.AdvanceExecution(ctx, executionID)
+}
+
+// executeWaitEvent sets a node to waiting for an external event.
+func (s *DAGWorkflowService) executeWaitEvent(_ context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, nodeExecID uuid.UUID, config map[string]any) error {
+	_ = s.nodeRepo.UpdateNodeExecution(context.Background(), nodeExecID, model.NodeExecWaiting, nil, "")
+
+	eventType, _ := config["event_type"].(string)
+	s.broadcastEvent(ws.EventWorkflowNodeWaiting, exec.ProjectID.String(), map[string]any{
+		"executionId": exec.ID.String(),
+		"nodeId":      node.ID,
+		"nodeExecId":  nodeExecID.String(),
+		"eventType":   eventType,
+	})
+	return nil
+}
+
+// HandleExternalEvent resumes a waiting node with external data.
+func (s *DAGWorkflowService) HandleExternalEvent(ctx context.Context, executionID uuid.UUID, nodeID string, payload json.RawMessage) error {
+	nodeExecs, err := s.nodeRepo.ListNodeExecutions(ctx, executionID)
+	if err != nil {
+		return fmt.Errorf("list node executions: %w", err)
+	}
+
+	var waitingExec *model.WorkflowNodeExecution
+	for _, ne := range nodeExecs {
+		if ne.NodeID == nodeID && ne.Status == model.NodeExecWaiting {
+			waitingExec = ne
+			break
+		}
+	}
+	if waitingExec == nil {
+		return fmt.Errorf("no waiting node execution found for node %s", nodeID)
+	}
+
+	_ = s.nodeRepo.UpdateNodeExecution(ctx, waitingExec.ID, model.NodeExecCompleted, payload, "")
+	s.storeNodeResult(ctx, executionID, nodeID, payload)
+
+	// If execution was paused, resume it
+	exec, _ := s.execRepo.GetExecution(ctx, executionID)
+	if exec != nil && exec.Status == model.WorkflowExecStatusPaused {
+		_ = s.execRepo.UpdateExecution(ctx, executionID, model.WorkflowExecStatusRunning, nil, "")
+	}
+
+	return s.AdvanceExecution(ctx, executionID)
+}
+
+// ---------------------------------------------------------------------------
+// Template variable resolution & expression evaluation
+// ---------------------------------------------------------------------------
+
+// resolveTemplateVars replaces {{node_id.output.field}} patterns with values from the dataStore.
+func resolveTemplateVars(template string, dataStore map[string]any) string {
+	re := regexp.MustCompile(`\{\{([^}]+)\}\}`)
+	return re.ReplaceAllStringFunc(template, func(match string) string {
+		path := strings.TrimSpace(match[2 : len(match)-2])
+		val := lookupPath(dataStore, path)
+		if val == nil {
+			return match // Keep original if not found
+		}
+		switch v := val.(type) {
+		case string:
+			return v
+		default:
+			b, _ := json.Marshal(v)
+			return string(b)
+		}
+	})
+}
+
+// lookupPath traverses a nested map using dot-separated path.
+func lookupPath(data map[string]any, path string) any {
+	parts := strings.Split(path, ".")
+	var current any = data
+	for _, part := range parts {
+		switch c := current.(type) {
+		case map[string]any:
+			current = c[part]
+		default:
+			return nil
+		}
+	}
+	return current
+}
+
+// resolveNodeConfig parses node config JSON and resolves template variables.
+func (s *DAGWorkflowService) resolveNodeConfig(node *model.WorkflowNode, dataStore map[string]any) map[string]any {
+	config := make(map[string]any)
+	if len(node.Config) > 0 {
+		_ = json.Unmarshal(node.Config, &config)
+	}
+	// Deep-resolve string values
+	resolveMapValues(config, dataStore)
+	return config
+}
+
+// resolveMapValues recursively resolves template vars in string values of a map.
+func resolveMapValues(m map[string]any, dataStore map[string]any) {
+	for k, v := range m {
+		switch val := v.(type) {
+		case string:
+			m[k] = resolveTemplateVars(val, dataStore)
+		case map[string]any:
+			resolveMapValues(val, dataStore)
+		}
+	}
+}
+
+// evaluateCondition evaluates a condition expression against execution context and DataStore.
+func (s *DAGWorkflowService) evaluateCondition(exec *model.WorkflowExecution, expression string, dataStore map[string]any) bool {
 	expression = strings.TrimSpace(expression)
 	if expression == "" || expression == "true" {
 		return true
@@ -507,29 +914,185 @@ func (s *DAGWorkflowService) evaluateCondition(exec *model.WorkflowExecution, ex
 		return false
 	}
 
-	// Simple expression evaluator: "task.status == \"value\""
-	if strings.HasPrefix(expression, "task.status") && strings.Contains(expression, "==") {
-		parts := strings.SplitN(expression, "==", 2)
-		if len(parts) != 2 {
-			return false
-		}
-		expectedStatus := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+	// Resolve template variables first
+	expression = resolveTemplateVars(expression, dataStore)
 
-		if exec.TaskID != nil && s.taskRepo != nil {
-			task, err := s.taskRepo.GetByID(context.Background(), *exec.TaskID)
-			if err == nil {
-				return task.Status == expectedStatus
-			}
-		}
+	// Re-check after resolution
+	expression = strings.TrimSpace(expression)
+	if expression == "true" {
+		return true
+	}
+	if expression == "false" {
 		return false
 	}
 
-	// Default: any unrecognized expression passes
-	log.WithField("expression", expression).Warn("workflow: unrecognized condition expression, defaulting to true")
+	// Comparison operators: ==, !=, >, <, >=, <=
+	for _, op := range []string{"==", "!=", ">=", "<=", ">", "<"} {
+		if strings.Contains(expression, op) {
+			parts := strings.SplitN(expression, op, 2)
+			if len(parts) == 2 {
+				left := strings.TrimSpace(parts[0])
+				right := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
+
+				// Resolve left side: e.g., "task.status"
+				if strings.HasPrefix(left, "task.status") && exec.TaskID != nil && s.taskRepo != nil {
+					task, err := s.taskRepo.GetByID(context.Background(), *exec.TaskID)
+					if err == nil {
+						left = task.Status
+					}
+				}
+				// Try resolving left as DataStore path
+				if val := lookupPath(dataStore, left); val != nil {
+					left = fmt.Sprintf("%v", val)
+				}
+
+				return compareValues(left, op, right)
+			}
+		}
+	}
+
+	log.WithField("expression", expression).Warn("workflow: unrecognized condition, defaulting to true")
 	return true
 }
 
-// broadcastEvent sends a WebSocket event.
+// compareValues compares two string values using the given operator.
+func compareValues(left, op, right string) bool {
+	// Try numeric comparison
+	leftNum, leftErr := strconv.ParseFloat(left, 64)
+	rightNum, rightErr := strconv.ParseFloat(right, 64)
+
+	if leftErr == nil && rightErr == nil {
+		switch op {
+		case "==":
+			return leftNum == rightNum
+		case "!=":
+			return leftNum != rightNum
+		case ">":
+			return leftNum > rightNum
+		case "<":
+			return leftNum < rightNum
+		case ">=":
+			return leftNum >= rightNum
+		case "<=":
+			return leftNum <= rightNum
+		}
+	}
+
+	// String comparison
+	switch op {
+	case "==":
+		return left == right
+	case "!=":
+		return left != right
+	case ">":
+		return left > right
+	case "<":
+		return left < right
+	case ">=":
+		return left >= right
+	case "<=":
+		return left <= right
+	}
+	return false
+}
+
+// evaluateExpression evaluates a simple expression and returns the result.
+func evaluateExpression(expr string, dataStore map[string]any) any {
+	expr = strings.TrimSpace(expr)
+
+	// len(path) — returns length of array or string
+	if strings.HasPrefix(expr, "len(") && strings.HasSuffix(expr, ")") {
+		path := strings.TrimSpace(expr[4 : len(expr)-1])
+		val := lookupPath(dataStore, path)
+		if val == nil {
+			return 0
+		}
+		switch v := val.(type) {
+		case []any:
+			return len(v)
+		case string:
+			return len(v)
+		case map[string]any:
+			return len(v)
+		default:
+			return 0
+		}
+	}
+
+	// Try to parse as number
+	if num, err := strconv.ParseFloat(expr, 64); err == nil {
+		return num
+	}
+
+	// Boolean literals
+	if expr == "true" {
+		return true
+	}
+	if expr == "false" {
+		return false
+	}
+
+	// Return as string
+	return expr
+}
+
+// ---------------------------------------------------------------------------
+// Helpers
+// ---------------------------------------------------------------------------
+
+func (s *DAGWorkflowService) loadDataStore(exec *model.WorkflowExecution) map[string]any {
+	ds := make(map[string]any)
+	if len(exec.DataStore) > 0 {
+		_ = json.Unmarshal(exec.DataStore, &ds)
+	}
+	return ds
+}
+
+func (s *DAGWorkflowService) storeNodeResult(ctx context.Context, executionID uuid.UUID, nodeID string, result json.RawMessage) {
+	exec, err := s.execRepo.GetExecution(ctx, executionID)
+	if err != nil {
+		return
+	}
+	ds := s.loadDataStore(exec)
+
+	var resultVal any
+	_ = json.Unmarshal(result, &resultVal)
+	ds[nodeID] = map[string]any{"output": resultVal}
+
+	dsJSON, _ := json.Marshal(ds)
+	_ = s.execRepo.UpdateExecutionDataStore(ctx, executionID, dsJSON)
+}
+
+// findNodesBetween returns node IDs reachable from `fromID` that lead to `toID` (exclusive of toID).
+func (s *DAGWorkflowService) findNodesBetween(fromID, toID string, nodes []model.WorkflowNode, edges []model.WorkflowEdge) []string {
+	// BFS from fromID, collect nodes that are on paths to toID
+	adjacency := make(map[string][]string)
+	for _, e := range edges {
+		adjacency[e.Source] = append(adjacency[e.Source], e.Target)
+	}
+
+	visited := make(map[string]bool)
+	var result []string
+	queue := []string{fromID}
+	for len(queue) > 0 {
+		current := queue[0]
+		queue = queue[1:]
+		if visited[current] || current == toID {
+			continue
+		}
+		visited[current] = true
+		if current != fromID {
+			result = append(result, current)
+		}
+		for _, next := range adjacency[current] {
+			if !visited[next] {
+				queue = append(queue, next)
+			}
+		}
+	}
+	return result
+}
+
 func (s *DAGWorkflowService) broadcastEvent(eventType, projectID string, payload map[string]any) {
 	if s.hub == nil {
 		return

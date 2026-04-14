@@ -14,15 +14,19 @@ import (
 // --- Persistence records ---
 
 type workflowDefinitionRecord struct {
-	ID          uuid.UUID `gorm:"column:id;primaryKey"`
-	ProjectID   uuid.UUID `gorm:"column:project_id"`
-	Name        string    `gorm:"column:name"`
-	Description string    `gorm:"column:description"`
-	Status      string    `gorm:"column:status"`
-	Nodes       rawJSON   `gorm:"column:nodes;type:jsonb"`
-	Edges       rawJSON   `gorm:"column:edges;type:jsonb"`
-	CreatedAt   time.Time `gorm:"column:created_at"`
-	UpdatedAt   time.Time `gorm:"column:updated_at"`
+	ID           uuid.UUID  `gorm:"column:id;primaryKey"`
+	ProjectID    uuid.UUID  `gorm:"column:project_id"`
+	Name         string     `gorm:"column:name"`
+	Description  string     `gorm:"column:description"`
+	Status       string     `gorm:"column:status"`
+	Category     string     `gorm:"column:category"`
+	Nodes        rawJSON    `gorm:"column:nodes;type:jsonb"`
+	Edges        rawJSON    `gorm:"column:edges;type:jsonb"`
+	TemplateVars rawJSON    `gorm:"column:template_vars;type:jsonb"`
+	Version      int        `gorm:"column:version"`
+	SourceID     *uuid.UUID `gorm:"column:source_id"`
+	CreatedAt    time.Time  `gorm:"column:created_at"`
+	UpdatedAt    time.Time  `gorm:"column:updated_at"`
 }
 
 func (workflowDefinitionRecord) TableName() string { return "workflow_definitions" }
@@ -32,27 +36,32 @@ func (r *workflowDefinitionRecord) toModel() *model.WorkflowDefinition {
 		return nil
 	}
 	return &model.WorkflowDefinition{
-		ID:          r.ID,
-		ProjectID:   r.ProjectID,
-		Name:        r.Name,
-		Description: r.Description,
-		Status:      r.Status,
-		Nodes:       r.Nodes.Bytes("[]"),
-		Edges:       r.Edges.Bytes("[]"),
-		CreatedAt:   r.CreatedAt,
-		UpdatedAt:   r.UpdatedAt,
+		ID:           r.ID,
+		ProjectID:    r.ProjectID,
+		Name:         r.Name,
+		Description:  r.Description,
+		Status:       r.Status,
+		Category:     r.Category,
+		Nodes:        r.Nodes.Bytes("[]"),
+		Edges:        r.Edges.Bytes("[]"),
+		TemplateVars: r.TemplateVars.Bytes("{}"),
+		Version:      r.Version,
+		SourceID:     r.SourceID,
+		CreatedAt:    r.CreatedAt,
+		UpdatedAt:    r.UpdatedAt,
 	}
 }
 
 type workflowExecutionRecord struct {
-	ID           uuid.UUID `gorm:"column:id;primaryKey"`
-	WorkflowID   uuid.UUID `gorm:"column:workflow_id"`
-	ProjectID    uuid.UUID `gorm:"column:project_id"`
+	ID           uuid.UUID  `gorm:"column:id;primaryKey"`
+	WorkflowID   uuid.UUID  `gorm:"column:workflow_id"`
+	ProjectID    uuid.UUID  `gorm:"column:project_id"`
 	TaskID       *uuid.UUID `gorm:"column:task_id"`
-	Status       string    `gorm:"column:status"`
-	CurrentNodes rawJSON   `gorm:"column:current_nodes;type:jsonb"`
-	Context      rawJSON   `gorm:"column:context;type:jsonb"`
-	ErrorMessage string    `gorm:"column:error_message"`
+	Status       string     `gorm:"column:status"`
+	CurrentNodes rawJSON    `gorm:"column:current_nodes;type:jsonb"`
+	Context      rawJSON    `gorm:"column:context;type:jsonb"`
+	DataStore    rawJSON    `gorm:"column:data_store;type:jsonb"`
+	ErrorMessage string     `gorm:"column:error_message"`
 	StartedAt    *time.Time `gorm:"column:started_at"`
 	CompletedAt  *time.Time `gorm:"column:completed_at"`
 	CreatedAt    time.Time  `gorm:"column:created_at"`
@@ -73,6 +82,7 @@ func (r *workflowExecutionRecord) toModel() *model.WorkflowExecution {
 		Status:       r.Status,
 		CurrentNodes: r.CurrentNodes.Bytes("[]"),
 		Context:      r.Context.Bytes("{}"),
+		DataStore:    r.DataStore.Bytes("{}"),
 		ErrorMessage: r.ErrorMessage,
 		StartedAt:    r.StartedAt,
 		CompletedAt:  r.CompletedAt,
@@ -82,15 +92,16 @@ func (r *workflowExecutionRecord) toModel() *model.WorkflowExecution {
 }
 
 type workflowNodeExecutionRecord struct {
-	ID           uuid.UUID       `gorm:"column:id;primaryKey"`
-	ExecutionID  uuid.UUID       `gorm:"column:execution_id"`
-	NodeID       string          `gorm:"column:node_id"`
-	Status       string          `gorm:"column:status"`
-	Result       rawJSON         `gorm:"column:result;type:jsonb"`
-	ErrorMessage string          `gorm:"column:error_message"`
-	StartedAt    *time.Time      `gorm:"column:started_at"`
-	CompletedAt  *time.Time      `gorm:"column:completed_at"`
-	CreatedAt    time.Time       `gorm:"column:created_at"`
+	ID             uuid.UUID  `gorm:"column:id;primaryKey"`
+	ExecutionID    uuid.UUID  `gorm:"column:execution_id"`
+	NodeID         string     `gorm:"column:node_id"`
+	Status         string     `gorm:"column:status"`
+	Result         rawJSON    `gorm:"column:result;type:jsonb"`
+	ErrorMessage   string     `gorm:"column:error_message"`
+	IterationIndex int        `gorm:"column:iteration_index"`
+	StartedAt      *time.Time `gorm:"column:started_at"`
+	CompletedAt    *time.Time `gorm:"column:completed_at"`
+	CreatedAt      time.Time  `gorm:"column:created_at"`
 }
 
 func (workflowNodeExecutionRecord) TableName() string { return "workflow_node_executions" }
@@ -100,15 +111,16 @@ func (r *workflowNodeExecutionRecord) toModel() *model.WorkflowNodeExecution {
 		return nil
 	}
 	return &model.WorkflowNodeExecution{
-		ID:           r.ID,
-		ExecutionID:  r.ExecutionID,
-		NodeID:       r.NodeID,
-		Status:       r.Status,
-		Result:       r.Result.Bytes("null"),
-		ErrorMessage: r.ErrorMessage,
-		StartedAt:    r.StartedAt,
-		CompletedAt:  r.CompletedAt,
-		CreatedAt:    r.CreatedAt,
+		ID:             r.ID,
+		ExecutionID:    r.ExecutionID,
+		NodeID:         r.NodeID,
+		Status:         r.Status,
+		Result:         r.Result.Bytes("null"),
+		ErrorMessage:   r.ErrorMessage,
+		IterationIndex: r.IterationIndex,
+		StartedAt:      r.StartedAt,
+		CompletedAt:    r.CompletedAt,
+		CreatedAt:      r.CreatedAt,
 	}
 }
 
@@ -127,13 +139,17 @@ func (r *WorkflowDefinitionRepository) Create(ctx context.Context, def *model.Wo
 		return ErrDatabaseUnavailable
 	}
 	record := &workflowDefinitionRecord{
-		ID:          def.ID,
-		ProjectID:   def.ProjectID,
-		Name:        def.Name,
-		Description: def.Description,
-		Status:      def.Status,
-		Nodes:       newRawJSON(def.Nodes, "[]"),
-		Edges:       newRawJSON(def.Edges, "[]"),
+		ID:           def.ID,
+		ProjectID:    def.ProjectID,
+		Name:         def.Name,
+		Description:  def.Description,
+		Status:       def.Status,
+		Category:     def.Category,
+		Nodes:        newRawJSON(def.Nodes, "[]"),
+		Edges:        newRawJSON(def.Edges, "[]"),
+		TemplateVars: newRawJSON(def.TemplateVars, "{}"),
+		Version:      def.Version,
+		SourceID:     def.SourceID,
 	}
 	if err := r.db.WithContext(ctx).Create(record).Error; err != nil {
 		return fmt.Errorf("create workflow definition: %w", err)
@@ -167,6 +183,40 @@ func (r *WorkflowDefinitionRepository) ListByProject(ctx context.Context, projec
 	return result, nil
 }
 
+func (r *WorkflowDefinitionRepository) ListTemplates(ctx context.Context, category string) ([]*model.WorkflowDefinition, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	q := r.db.WithContext(ctx).Where("status = ?", model.WorkflowDefStatusTemplate)
+	if category != "" {
+		q = q.Where("category = ?", category)
+	}
+	var records []workflowDefinitionRecord
+	if err := q.Order("name ASC").Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list workflow templates: %w", err)
+	}
+	result := make([]*model.WorkflowDefinition, len(records))
+	for i := range records {
+		result[i] = records[i].toModel()
+	}
+	return result, nil
+}
+
+func (r *WorkflowDefinitionRepository) ListTemplatesByName(ctx context.Context, name string) ([]*model.WorkflowDefinition, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	var records []workflowDefinitionRecord
+	if err := r.db.WithContext(ctx).Where("status = ? AND name = ?", model.WorkflowDefStatusTemplate, name).Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list workflow templates by name: %w", err)
+	}
+	result := make([]*model.WorkflowDefinition, len(records))
+	for i := range records {
+		result[i] = records[i].toModel()
+	}
+	return result, nil
+}
+
 func (r *WorkflowDefinitionRepository) Update(ctx context.Context, id uuid.UUID, def *model.WorkflowDefinition) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
@@ -183,11 +233,20 @@ func (r *WorkflowDefinitionRepository) Update(ctx context.Context, id uuid.UUID,
 	if def.Status != "" {
 		updates["status"] = def.Status
 	}
+	if def.Category != "" {
+		updates["category"] = def.Category
+	}
 	if len(def.Nodes) > 0 {
 		updates["nodes"] = newRawJSON(def.Nodes, "[]")
 	}
 	if len(def.Edges) > 0 {
 		updates["edges"] = newRawJSON(def.Edges, "[]")
+	}
+	if len(def.TemplateVars) > 0 {
+		updates["template_vars"] = newRawJSON(def.TemplateVars, "{}")
+	}
+	if def.Version > 0 {
+		updates["version"] = def.Version
 	}
 	result := r.db.WithContext(ctx).Model(&workflowDefinitionRecord{}).Where("id = ?", id).Updates(updates)
 	if result.Error != nil {
@@ -235,6 +294,7 @@ func (r *WorkflowExecutionRepository) CreateExecution(ctx context.Context, exec 
 		Status:       exec.Status,
 		CurrentNodes: newRawJSON(exec.CurrentNodes, "[]"),
 		Context:      newRawJSON(exec.Context, "{}"),
+		DataStore:    newRawJSON(exec.DataStore, "{}"),
 		ErrorMessage: exec.ErrorMessage,
 		StartedAt:    exec.StartedAt,
 		CompletedAt:  exec.CompletedAt,
@@ -302,6 +362,21 @@ func (r *WorkflowExecutionRepository) CompleteExecution(ctx context.Context, id 
 	result := r.db.WithContext(ctx).Model(&workflowExecutionRecord{}).Where("id = ?", id).Updates(updates)
 	if result.Error != nil {
 		return fmt.Errorf("complete workflow execution: %w", result.Error)
+	}
+	return nil
+}
+
+func (r *WorkflowExecutionRepository) UpdateExecutionDataStore(ctx context.Context, id uuid.UUID, dataStore json.RawMessage) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	updates := map[string]any{
+		"data_store": newRawJSON(dataStore, "{}"),
+		"updated_at": gorm.Expr("NOW()"),
+	}
+	result := r.db.WithContext(ctx).Model(&workflowExecutionRecord{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("update workflow execution data_store: %w", result.Error)
 	}
 	return nil
 }
@@ -375,4 +450,20 @@ func (r *WorkflowNodeExecutionRepository) ListNodeExecutions(ctx context.Context
 		result[i] = records[i].toModel()
 	}
 	return result, nil
+}
+
+// DeleteNodeExecutionsByNodeIDs removes node execution records for given node IDs
+// within an execution, used by loop nodes to reset downstream nodes for re-execution.
+func (r *WorkflowNodeExecutionRepository) DeleteNodeExecutionsByNodeIDs(ctx context.Context, executionID uuid.UUID, nodeIDs []string) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if len(nodeIDs) == 0 {
+		return nil
+	}
+	result := r.db.WithContext(ctx).Where("execution_id = ? AND node_id IN ?", executionID, nodeIDs).Delete(&workflowNodeExecutionRecord{})
+	if result.Error != nil {
+		return fmt.Errorf("delete workflow node executions: %w", result.Error)
+	}
+	return nil
 }

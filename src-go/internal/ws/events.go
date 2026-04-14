@@ -82,7 +82,11 @@ const (
 	EventWorkflowExecutionStarted   = "workflow.execution.started"
 	EventWorkflowExecutionAdvanced  = "workflow.execution.advanced"
 	EventWorkflowExecutionCompleted = "workflow.execution.completed"
+	EventWorkflowExecutionPaused    = "workflow.execution.paused"
 	EventWorkflowNodeCompleted      = "workflow.node.completed"
+	EventWorkflowNodeWaiting        = "workflow.node.waiting"
+	EventWorkflowReviewRequested    = "workflow.review.requested"
+	EventWorkflowReviewResolved     = "workflow.review.resolved"
 )
 
 // Event types pushed from the TS bridge into Go orchestration.
