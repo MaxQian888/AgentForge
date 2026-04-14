@@ -4,6 +4,7 @@ import { useAuthStore } from "./auth-store";
 
 jest.mock("@/lib/api-client", () => ({
   createApiClient: jest.fn(),
+  registerTokenRefresh: jest.fn(),
 }));
 
 jest.mock("@/lib/backend-url", () => ({
@@ -318,6 +319,85 @@ describe("useAuthStore", () => {
       refreshToken: null,
       user: null,
       status: "unauthenticated",
+    });
+  });
+
+  describe("refreshSession", () => {
+    it("refreshes the token and returns the new access token", async () => {
+      const api = makeApiClient();
+      api.post.mockResolvedValueOnce({
+        data: {
+          accessToken: "new-access",
+          refreshToken: "new-refresh",
+          user: { id: "user-1", email: "test@example.com", name: "Test User" },
+        },
+        status: 200,
+      });
+      (createApiClient as jest.Mock).mockReturnValue(api);
+
+      useAuthStore.setState({
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        user: { id: "user-1", email: "test@example.com", name: "Test User" },
+        status: "authenticated",
+      } as never);
+
+      let newToken: string | undefined;
+      await act(async () => {
+        newToken = await useAuthStore.getState().refreshSession();
+      });
+
+      expect(newToken).toBe("new-access");
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: "new-access",
+        refreshToken: "new-refresh",
+        status: "authenticated",
+      });
+    });
+
+    it("clears the session and throws when refresh fails", async () => {
+      const api = makeApiClient();
+      api.post.mockRejectedValueOnce(
+        Object.assign(new Error("refresh rejected"), { status: 401 })
+      );
+      (createApiClient as jest.Mock).mockReturnValue(api);
+
+      useAuthStore.setState({
+        accessToken: "old-access",
+        refreshToken: "old-refresh",
+        user: { id: "user-1", email: "test@example.com", name: "Test User" },
+        status: "authenticated",
+      } as never);
+
+      await act(async () => {
+        await expect(useAuthStore.getState().refreshSession()).rejects.toThrow(
+          "refresh rejected"
+        );
+      });
+
+      expect(useAuthStore.getState()).toMatchObject({
+        accessToken: null,
+        refreshToken: null,
+        user: null,
+        status: "unauthenticated",
+      });
+    });
+
+    it("throws when no refresh token is available", async () => {
+      useAuthStore.setState({
+        accessToken: null,
+        refreshToken: null,
+        user: null,
+        status: "unauthenticated",
+      } as never);
+
+      await act(async () => {
+        await expect(useAuthStore.getState().refreshSession()).rejects.toThrow(
+          "No refresh token available"
+        );
+      });
+
+      expect(useAuthStore.getState().status).toBe("unauthenticated");
     });
   });
 

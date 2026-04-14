@@ -1,7 +1,7 @@
 "use client";
 import { create } from "zustand";
 import { persist } from "zustand/middleware";
-import { createApiClient } from "@/lib/api-client";
+import { createApiClient, registerTokenRefresh } from "@/lib/api-client";
 import { resolveBackendUrl } from "@/lib/backend-url";
 
 export interface AuthUser {
@@ -32,6 +32,8 @@ interface AuthState {
   register: (email: string, password: string, name: string) => Promise<void>;
   logout: () => Promise<void>;
   bootstrapSession: () => Promise<void>;
+  /** Refresh the access token using the stored refresh token. Returns the new access token or throws. */
+  refreshSession: () => Promise<string>;
   clearSession: () => void;
   getAccessToken: () => string | null;
 }
@@ -59,7 +61,7 @@ async function fetchCurrentUser(accessToken: string): Promise<AuthUser> {
   return data;
 }
 
-async function refreshSession(refreshToken: string): Promise<AuthSession> {
+async function callRefreshEndpoint(refreshToken: string): Promise<AuthSession> {
   const api = await getApiClient();
   const { data } = await api.post<AuthSession>("/api/v1/auth/refresh", {
     refreshToken,
@@ -132,6 +134,25 @@ export const useAuthStore = create<AuthState>()(
         }
       },
 
+      refreshSession: async () => {
+        const { refreshToken } = get();
+        if (!refreshToken) {
+          set(unauthenticatedState);
+          throw new Error("No refresh token available");
+        }
+        try {
+          const session = await callRefreshEndpoint(refreshToken);
+          set({
+            ...session,
+            status: "authenticated",
+          });
+          return session.accessToken;
+        } catch (error) {
+          set(unauthenticatedState);
+          throw error;
+        }
+      },
+
       bootstrapSession: async () => {
         const { accessToken, refreshToken, status } = get();
         if (status === "checking") {
@@ -164,13 +185,9 @@ export const useAuthStore = create<AuthState>()(
         }
 
         try {
-          const session = await refreshSession(refreshToken);
-          const user = await fetchCurrentUser(session.accessToken);
-          set({
-            ...session,
-            user,
-            status: "authenticated",
-          });
+          const newToken = await get().refreshSession();
+          const user = await fetchCurrentUser(newToken);
+          set({ user, status: "authenticated" });
         } catch {
           set(unauthenticatedState);
         }
@@ -200,3 +217,11 @@ export const useAuthStore = create<AuthState>()(
     }
   )
 );
+
+// Register the refresh callback so the API client can transparently refresh
+// expired tokens without a circular import on this module.
+// Guard: registerTokenRefresh may be undefined in test environments where
+// api-client is mocked without this export.
+if (typeof registerTokenRefresh === "function") {
+  registerTokenRefresh(() => useAuthStore.getState().refreshSession());
+}

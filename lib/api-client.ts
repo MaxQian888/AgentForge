@@ -15,10 +15,50 @@ type ApiResponse<T> = {
   status: number;
 };
 
+// ---------------------------------------------------------------------------
+// Token-refresh registration (avoids circular import with auth-store)
+// ---------------------------------------------------------------------------
+
+type TokenRefreshFn = () => Promise<string>;
+
+let _onTokenRefresh: TokenRefreshFn | null = null;
+let _refreshPromise: Promise<string> | null = null;
+
+/**
+ * Register the callback the API client will invoke when a 401 is received on
+ * an authenticated request. The callback should refresh the session and return
+ * the new access token (or throw).
+ *
+ * Called once by the auth store at module-init time.
+ */
+export function registerTokenRefresh(fn: TokenRefreshFn) {
+  _onTokenRefresh = fn;
+}
+
+/**
+ * Attempt to refresh the access token, coalescing concurrent callers into a
+ * single in-flight request. Returns the new access token or throws.
+ */
+async function refreshAccessToken(): Promise<string> {
+  if (!_onTokenRefresh) throw new Error("No token refresh handler registered");
+
+  // Coalesce: reuse an existing in-flight refresh if present
+  if (_refreshPromise) return _refreshPromise;
+
+  _refreshPromise = _onTokenRefresh().finally(() => {
+    _refreshPromise = null;
+  });
+
+  return _refreshPromise;
+}
+
+// ---------------------------------------------------------------------------
+
 async function request<T>(
   baseUrl: string,
   path: string,
-  init: RequestInit
+  init: RequestInit,
+  _isRetry = false
 ): Promise<ApiResponse<T>> {
   const url = `${baseUrl.replace(/\/$/, "")}${path}`;
   const res = await fetch(url, {
@@ -33,6 +73,24 @@ async function request<T>(
   const data = await res.json().catch(() => null);
 
   if (!res.ok) {
+    // 401 on an authenticated request → try refresh + retry (once)
+    const hadToken = !!(init.headers as Record<string, string>)?.Authorization;
+    if (res.status === 401 && hadToken && !_isRetry && _onTokenRefresh) {
+      try {
+        const newToken = await refreshAccessToken();
+        const retryInit: RequestInit = {
+          ...init,
+          headers: {
+            ...((init.headers as Record<string, string>) ?? {}),
+            Authorization: `Bearer ${newToken}`,
+          },
+        };
+        return request<T>(baseUrl, path, retryInit, true);
+      } catch {
+        // Refresh failed — fall through to throw the original 401 error
+      }
+    }
+
     const message =
       (data as { message?: string })?.message ?? `HTTP ${res.status}`;
     throw new ApiError(message, res.status, data);

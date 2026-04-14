@@ -1,4 +1,4 @@
-import { createApiClient, ApiError } from "./api-client";
+import { createApiClient, ApiError, registerTokenRefresh } from "./api-client";
 import { LOCALE_STORAGE_KEY, useLocaleStore } from "@/lib/stores/locale-store";
 
 const BASE = "http://localhost:7777";
@@ -228,6 +228,140 @@ describe("createApiClient", () => {
         "http://localhost:7777/test",
         expect.anything()
       );
+    });
+  });
+
+  describe("401 interceptor", () => {
+    afterEach(() => {
+      // Reset the registered handler
+      registerTokenRefresh(null as never);
+    });
+
+    it("retries with new token after 401 on authenticated request", async () => {
+      const refreshFn = jest.fn().mockResolvedValue("new-token");
+      registerTokenRefresh(refreshFn);
+
+      let callCount = 0;
+      global.fetch = jest.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount === 1) {
+          return Promise.resolve({
+            ok: false,
+            status: 401,
+            json: () => Promise.resolve({ message: "unauthorized" }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ id: 1 }),
+        });
+      }) as unknown as typeof fetch;
+
+      const res = await api.get("/protected", { token: "expired-token" });
+
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+      expect(res).toEqual({ data: { id: 1 }, status: 200 });
+      // Second call should use the new token
+      expect(fetch).toHaveBeenCalledTimes(2);
+    });
+
+    it("does not retry on 401 for unauthenticated requests (no token)", async () => {
+      const refreshFn = jest.fn().mockResolvedValue("new-token");
+      registerTokenRefresh(refreshFn);
+
+      global.fetch = mockFetch(401, { message: "unauthorized" });
+
+      await expect(api.get("/public")).rejects.toThrow("unauthorized");
+      expect(refreshFn).not.toHaveBeenCalled();
+    });
+
+    it("propagates the original error when refresh fails", async () => {
+      const refreshFn = jest
+        .fn()
+        .mockRejectedValue(new Error("refresh failed"));
+      registerTokenRefresh(refreshFn);
+
+      global.fetch = mockFetch(401, { message: "token expired" });
+
+      await expect(api.get("/protected", { token: "bad" })).rejects.toThrow(
+        "token expired"
+      );
+    });
+
+    it("does not retry more than once (no infinite loop)", async () => {
+      const refreshFn = jest.fn().mockResolvedValue("new-token");
+      registerTokenRefresh(refreshFn);
+
+      // Both the original and retry return 401
+      global.fetch = jest.fn().mockResolvedValue({
+        ok: false,
+        status: 401,
+        json: () => Promise.resolve({ message: "still unauthorized" }),
+      }) as unknown as typeof fetch;
+
+      await expect(
+        api.get("/protected", { token: "expired" })
+      ).rejects.toThrow("still unauthorized");
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+      expect(fetch).toHaveBeenCalledTimes(2); // original + one retry
+    });
+
+    it("passes through non-401 errors without refresh", async () => {
+      const refreshFn = jest.fn().mockResolvedValue("new-token");
+      registerTokenRefresh(refreshFn);
+
+      global.fetch = mockFetch(403, { message: "forbidden" });
+
+      await expect(api.get("/admin", { token: "tok" })).rejects.toThrow(
+        "forbidden"
+      );
+      expect(refreshFn).not.toHaveBeenCalled();
+    });
+
+    it("coalesces concurrent refresh calls into one", async () => {
+      let resolveRefresh!: (token: string) => void;
+      const refreshFn = jest.fn().mockImplementation(
+        () =>
+          new Promise<string>((resolve) => {
+            resolveRefresh = resolve;
+          })
+      );
+      registerTokenRefresh(refreshFn);
+
+      let callCount = 0;
+      global.fetch = jest.fn().mockImplementation(() => {
+        callCount++;
+        if (callCount <= 2) {
+          return Promise.resolve({
+            ok: false,
+            status: 401,
+            json: () => Promise.resolve({ message: "unauthorized" }),
+          });
+        }
+        return Promise.resolve({
+          ok: true,
+          status: 200,
+          json: () => Promise.resolve({ ok: true }),
+        });
+      }) as unknown as typeof fetch;
+
+      // Fire two authenticated requests concurrently
+      const p1 = api.get("/a", { token: "expired" });
+      const p2 = api.get("/b", { token: "expired" });
+
+      // Wait for both to hit 401 and trigger refresh
+      await new Promise((r) => setTimeout(r, 10));
+
+      // Only one refresh should be in flight
+      expect(refreshFn).toHaveBeenCalledTimes(1);
+
+      // Resolve the single refresh
+      resolveRefresh("new-token");
+
+      const [r1, r2] = await Promise.all([p1, p2]);
+      expect(r1.data).toEqual({ ok: true });
+      expect(r2.data).toEqual({ ok: true });
     });
   });
 });
