@@ -69,7 +69,7 @@ jobs:
       run:
         working-directory: src-bridge
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: oven-sh/setup-bun@v2
       - run: bun install --frozen-lockfile
       - run: bun run typecheck
@@ -82,7 +82,7 @@ jobs:
       run:
         working-directory: src-im-bridge
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
       - uses: actions/setup-go@v5
         with:
           go-version-file: src-im-bridge/go.mod
