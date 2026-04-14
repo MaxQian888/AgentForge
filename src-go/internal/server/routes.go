@@ -701,7 +701,8 @@ func RegisterRoutes(
 	protected.GET("/plugins/workflow-runs/:runId", pluginH.GetWorkflowRun)
 
 	// Marketplace integration
-	marketplaceH := handler.NewMarketplaceHandler(pluginSvc, cfg.MarketplaceURL, cfg.PluginsDir, cfg.RolesDir)
+	marketplaceH := handler.NewMarketplaceHandler(pluginSvc, cfg.MarketplaceURL, cfg.PluginsDir, cfg.RolesDir).
+		WithWorkflowTemplateRepo(dagDefRepo)
 	protected.POST("/marketplace/install", marketplaceH.Install)
 	protected.POST("/marketplace/uninstall", marketplaceH.Uninstall)
 	protected.POST("/marketplace/sideload", marketplaceH.Sideload)

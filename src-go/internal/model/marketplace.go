@@ -5,17 +5,19 @@ import "time"
 type MarketplaceItemType string
 
 const (
-	MarketplaceItemTypePlugin MarketplaceItemType = "plugin"
-	MarketplaceItemTypeSkill  MarketplaceItemType = "skill"
-	MarketplaceItemTypeRole   MarketplaceItemType = "role"
+	MarketplaceItemTypePlugin           MarketplaceItemType = "plugin"
+	MarketplaceItemTypeSkill            MarketplaceItemType = "skill"
+	MarketplaceItemTypeRole             MarketplaceItemType = "role"
+	MarketplaceItemTypeWorkflowTemplate MarketplaceItemType = "workflow_template"
 )
 
 type MarketplaceConsumerSurface string
 
 const (
-	MarketplaceConsumerSurfacePluginManagementPanel MarketplaceConsumerSurface = "plugin-management-panel"
-	MarketplaceConsumerSurfaceRoleWorkspace         MarketplaceConsumerSurface = "roles-workspace"
-	MarketplaceConsumerSurfaceRoleSkillCatalog      MarketplaceConsumerSurface = "role-skill-catalog"
+	MarketplaceConsumerSurfacePluginManagementPanel    MarketplaceConsumerSurface = "plugin-management-panel"
+	MarketplaceConsumerSurfaceRoleWorkspace            MarketplaceConsumerSurface = "roles-workspace"
+	MarketplaceConsumerSurfaceRoleSkillCatalog         MarketplaceConsumerSurface = "role-skill-catalog"
+	MarketplaceConsumerSurfaceWorkflowTemplateLibrary  MarketplaceConsumerSurface = "workflow-template-library"
 )
 
 type MarketplaceConsumptionStatus string

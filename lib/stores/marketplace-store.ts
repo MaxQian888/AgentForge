@@ -4,7 +4,7 @@ import { create } from "zustand";
 import { ApiError, createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
 
-export type MarketplaceItemType = "plugin" | "skill" | "role" | "all";
+export type MarketplaceItemType = "plugin" | "skill" | "role" | "workflow_template" | "all";
 export type MarketplaceItemSourceType = "marketplace" | "builtin";
 export type MarketplaceServiceStatus =
   | "idle"
@@ -15,7 +15,8 @@ export type MarketplaceConsumptionStatus = "installed" | "blocked" | "warning";
 export type MarketplaceConsumerSurface =
   | "plugin-management-panel"
   | "roles-workspace"
-  | "role-skill-catalog";
+  | "role-skill-catalog"
+  | "workflow-template-library";
 
 export interface MarketplaceItem {
   id: string;

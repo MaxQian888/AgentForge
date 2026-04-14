@@ -73,6 +73,8 @@ func requiredMarketplaceArtifactRootFile(itemType string) string {
 		return "role.yaml"
 	case model.ItemTypeSkill:
 		return "SKILL.md"
+	case model.ItemTypeWorkflowTemplate:
+		return "workflow.json"
 	default:
 		return ""
 	}

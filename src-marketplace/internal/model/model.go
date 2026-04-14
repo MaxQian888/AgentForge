@@ -11,9 +11,10 @@ import (
 
 // Item type constants
 const (
-	ItemTypePlugin = "plugin"
-	ItemTypeSkill  = "skill"
-	ItemTypeRole   = "role"
+	ItemTypePlugin           = "plugin"
+	ItemTypeSkill            = "skill"
+	ItemTypeRole             = "role"
+	ItemTypeWorkflowTemplate = "workflow_template"
 )
 
 // Pagination defaults
@@ -99,7 +100,7 @@ func (MarketplaceReview) TableName() string { return "marketplace_reviews" }
 // --------------------------------------------------------------------------
 
 type CreateItemRequest struct {
-	Type          string          `json:"type" validate:"required,oneof=plugin skill role"`
+	Type          string          `json:"type" validate:"required,oneof=plugin skill role workflow_template"`
 	Slug          string          `json:"slug" validate:"required,min=2,max=100,alphanumdash"`
 	Name          string          `json:"name" validate:"required,min=1,max=255"`
 	Description   string          `json:"description"`

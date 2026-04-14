@@ -16,19 +16,36 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/model"
 	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
 
+// MarketplaceWorkflowTemplateRepo is the repo interface needed for workflow template install.
+type MarketplaceWorkflowTemplateRepo interface {
+	Create(ctx context.Context, def *model.WorkflowDefinition) error
+	GetByID(ctx context.Context, id uuid.UUID) (*model.WorkflowDefinition, error)
+	Update(ctx context.Context, id uuid.UUID, def *model.WorkflowDefinition) error
+	ListTemplates(ctx context.Context, category string) ([]*model.WorkflowDefinition, error)
+	ListTemplatesByName(ctx context.Context, name string) ([]*model.WorkflowDefinition, error)
+}
+
 // MarketplaceHandler handles marketplace install integration endpoints on the src-go backend.
 type MarketplaceHandler struct {
-	pluginSvc  *service.PluginService
-	marketURL  string
-	httpClient *http.Client
-	pluginsDir string
-	rolesDir   string
+	pluginSvc            *service.PluginService
+	marketURL            string
+	httpClient           *http.Client
+	pluginsDir           string
+	rolesDir             string
+	workflowTemplateRepo MarketplaceWorkflowTemplateRepo
+}
+
+// WithWorkflowTemplateRepo wires the workflow template repository for marketplace installs.
+func (h *MarketplaceHandler) WithWorkflowTemplateRepo(repo MarketplaceWorkflowTemplateRepo) *MarketplaceHandler {
+	h.workflowTemplateRepo = repo
+	return h
 }
 
 const marketplaceConsumptionStateFile = "marketplace-consumption.json"
@@ -418,6 +435,8 @@ func (h *MarketplaceHandler) completeInstall(
 		return h.installRoleArtifact(itemMeta, destDir, installState)
 	case model.MarketplaceItemTypeSkill:
 		return h.installSkillArtifact(itemMeta, destDir, installState)
+	case model.MarketplaceItemTypeWorkflowTemplate:
+		return h.installWorkflowTemplateArtifact(ctx, itemMeta, destDir, installState)
 	default:
 		stagingDir, err := h.extractZipPackage(filepath.Join(destDir, "artifact"), destDir)
 		if err != nil {
@@ -541,6 +560,66 @@ func (h *MarketplaceHandler) installSkillArtifact(
 	installState.LocalPath = targetDir
 	installState.Provenance.RecordID = itemMeta.Slug
 	installState.Provenance.LocalPath = targetDir
+	return nil
+}
+
+func (h *MarketplaceHandler) installWorkflowTemplateArtifact(
+	ctx context.Context,
+	itemMeta *marketplaceItemMetadata,
+	destDir string,
+	installState *model.MarketplaceConsumptionRecord,
+) error {
+	if h.workflowTemplateRepo == nil {
+		return fmt.Errorf("workflow template install not available: repo not configured")
+	}
+
+	stagingDir, err := h.extractZipPackage(filepath.Join(destDir, "artifact"), destDir)
+	if err != nil {
+		return err
+	}
+
+	// Find workflow.json in staging dir
+	workflowFile := filepath.Join(stagingDir, "workflow.json")
+	if _, err := os.Stat(workflowFile); os.IsNotExist(err) {
+		// Try in subdirectories
+		entries, _ := os.ReadDir(stagingDir)
+		for _, e := range entries {
+			if e.IsDir() {
+				candidate := filepath.Join(stagingDir, e.Name(), "workflow.json")
+				if _, err := os.Stat(candidate); err == nil {
+					workflowFile = candidate
+					break
+				}
+			}
+		}
+	}
+
+	data, err := os.ReadFile(workflowFile)
+	if err != nil {
+		return fmt.Errorf("read workflow.json: %w", err)
+	}
+
+	var pkg service.WorkflowTemplatePackage
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return fmt.Errorf("parse workflow.json: %w", err)
+	}
+	if pkg.Kind != "WorkflowTemplate" {
+		return fmt.Errorf("invalid workflow package kind: %s", pkg.Kind)
+	}
+
+	// Import as a marketplace template (project-agnostic, using uuid.Nil)
+	def, err := service.ImportTemplate(ctx, h.workflowTemplateRepo, uuid.Nil, &pkg)
+	if err != nil {
+		return fmt.Errorf("import workflow template: %w", err)
+	}
+
+	installState.Status = model.MarketplaceConsumptionStatusInstalled
+	installState.Installed = true
+	installState.Used = true
+	installState.RecordID = def.ID.String()
+	installState.LocalPath = destDir
+	installState.Provenance.RecordID = def.ID.String()
+	installState.Provenance.LocalPath = destDir
 	return nil
 }
 
@@ -715,6 +794,8 @@ func marketplaceConsumerSurface(itemType string) model.MarketplaceConsumerSurfac
 		return model.MarketplaceConsumerSurfaceRoleWorkspace
 	case model.MarketplaceItemTypeSkill:
 		return model.MarketplaceConsumerSurfaceRoleSkillCatalog
+	case model.MarketplaceItemTypeWorkflowTemplate:
+		return model.MarketplaceConsumerSurfaceWorkflowTemplateLibrary
 	default:
 		return model.MarketplaceConsumerSurfacePluginManagementPanel
 	}
@@ -793,7 +874,7 @@ func (h *MarketplaceHandler) Uninstall(c echo.Context) error {
 func (h *MarketplaceHandler) Sideload(c echo.Context) error {
 	itemType := strings.TrimSpace(c.FormValue("type"))
 	if itemType == "" {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "type is required (plugin, role, or skill)"})
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "type is required (plugin, role, skill, or workflow_template)"})
 	}
 
 	file, err := c.FormFile("file")
@@ -959,6 +1040,35 @@ func (h *MarketplaceHandler) Sideload(c echo.Context) error {
 		installState.LocalPath = targetDir
 		installState.Provenance.RecordID = record.Metadata.ID
 		installState.Provenance.LocalPath = targetDir
+
+	case model.MarketplaceItemTypeWorkflowTemplate:
+		if h.workflowTemplateRepo == nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "workflow template install not available"})
+		}
+		stagingDir, err := h.extractZipPackage(tmpPath, os.TempDir())
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: fmt.Sprintf("invalid artifact: %v", err)})
+		}
+		defer os.RemoveAll(stagingDir)
+
+		workflowFile := filepath.Join(stagingDir, "workflow.json")
+		data, err := os.ReadFile(workflowFile)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid workflow template: workflow.json is required"})
+		}
+		var pkg service.WorkflowTemplatePackage
+		if err := json.Unmarshal(data, &pkg); err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: fmt.Sprintf("invalid workflow.json: %v", err)})
+		}
+		def, err := service.ImportTemplate(ctx, h.workflowTemplateRepo, uuid.Nil, &pkg)
+		if err != nil {
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: fmt.Sprintf("failed to import template: %v", err)})
+		}
+		installState.Status = model.MarketplaceConsumptionStatusInstalled
+		installState.Installed = true
+		installState.Used = true
+		installState.RecordID = def.ID.String()
+		installState.Provenance.RecordID = def.ID.String()
 
 	default:
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "unsupported item type: " + itemType})
