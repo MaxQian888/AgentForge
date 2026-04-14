@@ -83,7 +83,7 @@ jobs:
         working-directory: src-im-bridge
     steps:
       - uses: actions/checkout@v6
-      - uses: actions/setup-go@v5
+      - uses: actions/setup-go@v6
         with:
           go-version-file: src-im-bridge/go.mod
           cache: true
