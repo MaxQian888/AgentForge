@@ -9,59 +9,27 @@ import {
   Loader2,
   AlertCircle,
   SkipForward,
+  Hourglass,
 } from "lucide-react";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Skeleton } from "@/components/ui/skeleton";
+import { Textarea } from "@/components/ui/textarea";
 import { cn } from "@/lib/utils";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "@/lib/stores/auth-store";
+import { toast } from "sonner";
+import {
+  useWorkflowStore,
+  type WorkflowExecution,
+  type WorkflowNodeExecution,
+  type WorkflowNodeData,
+  type WorkflowEdgeData,
+} from "@/lib/stores/workflow-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
-
-interface WorkflowExecution {
-  id: string;
-  workflowId: string;
-  projectId: string;
-  taskId?: string;
-  status: string;
-  currentNodes: string[];
-  errorMessage?: string;
-  startedAt?: string;
-  completedAt?: string;
-  createdAt: string;
-  updatedAt: string;
-}
-
-interface WorkflowNodeExecution {
-  id: string;
-  executionId: string;
-  nodeId: string;
-  status: string;
-  result?: unknown;
-  errorMessage?: string;
-  startedAt?: string;
-  completedAt?: string;
-  createdAt: string;
-}
-
-interface WorkflowNodeData {
-  id: string;
-  type: string;
-  label: string;
-  position: { x: number; y: number };
-  config?: Record<string, unknown>;
-}
-
-interface WorkflowEdgeData {
-  id: string;
-  source: string;
-  target: string;
-  condition?: string;
-  label?: string;
-}
 
 const nodeStatusIcons: Record<string, React.ElementType> = {
   pending: Clock,
@@ -69,6 +37,7 @@ const nodeStatusIcons: Record<string, React.ElementType> = {
   completed: CheckCircle,
   failed: XCircle,
   skipped: SkipForward,
+  waiting: Hourglass,
 };
 
 const nodeStatusColors: Record<string, string> = {
@@ -79,6 +48,8 @@ const nodeStatusColors: Record<string, string> = {
   failed: "border-red-400 bg-red-50 dark:border-red-600 dark:bg-red-950",
   skipped:
     "border-zinc-300 bg-zinc-50/50 dark:border-zinc-700 dark:bg-zinc-900/50",
+  waiting:
+    "border-amber-400 bg-amber-50 dark:border-amber-600 dark:bg-amber-950",
 };
 
 const nodeTypeColors: Record<string, string> = {
@@ -90,6 +61,12 @@ const nodeTypeColors: Record<string, string> = {
   gate: "text-red-600 dark:text-red-400",
   parallel_split: "text-orange-600 dark:text-orange-400",
   parallel_join: "text-orange-600 dark:text-orange-400",
+  human_review: "text-emerald-600 dark:text-emerald-400",
+  wait_event: "text-slate-600 dark:text-slate-400",
+  llm_agent: "text-indigo-600 dark:text-indigo-400",
+  function: "text-cyan-600 dark:text-cyan-400",
+  loop: "text-pink-600 dark:text-pink-400",
+  sub_workflow: "text-violet-600 dark:text-violet-400",
 };
 
 function ExecutionStatusBadge({ status }: { status: string }) {
@@ -116,59 +93,216 @@ function ExecutionStatusBadge({ status }: { status: string }) {
   );
 }
 
+interface NodeCardProps {
+  node: WorkflowNodeData;
+  nodeExec?: WorkflowNodeExecution;
+  isActive: boolean;
+  executionId: string;
+  onRefresh: () => void;
+}
+
 function NodeCard({
   node,
   nodeExec,
   isActive,
-}: {
-  node: WorkflowNodeData;
-  nodeExec?: WorkflowNodeExecution;
-  isActive: boolean;
-}) {
+  executionId,
+  onRefresh,
+}: NodeCardProps) {
   const status = nodeExec?.status ?? "pending";
   const StatusIcon = nodeStatusIcons[status] ?? Clock;
+
+  // Review form state
+  const [showReviewForm, setShowReviewForm] = useState(false);
+  const [reviewComment, setReviewComment] = useState("");
+  const [reviewSubmitting, setReviewSubmitting] = useState(false);
+
+  // Event form state
+  const [showEventForm, setShowEventForm] = useState(false);
+  const [eventPayload, setEventPayload] = useState("");
+  const [eventError, setEventError] = useState<string | null>(null);
+  const [eventSubmitting, setEventSubmitting] = useState(false);
+
+  const handleReview = useCallback(
+    async (decision: "approved" | "rejected") => {
+      setReviewSubmitting(true);
+      try {
+        await useWorkflowStore
+          .getState()
+          .resolveReview(executionId, node.id, decision, reviewComment);
+        toast.success(
+          `Review ${decision === "approved" ? "approved" : "rejected"} successfully`
+        );
+        setShowReviewForm(false);
+        setReviewComment("");
+        onRefresh();
+      } catch {
+        toast.error("Failed to submit review");
+      } finally {
+        setReviewSubmitting(false);
+      }
+    },
+    [executionId, node.id, reviewComment, onRefresh]
+  );
+
+  const handleSendEvent = useCallback(async () => {
+    setEventError(null);
+    let parsed: unknown;
+    try {
+      parsed = JSON.parse(eventPayload);
+    } catch {
+      setEventError("Invalid JSON");
+      return;
+    }
+    setEventSubmitting(true);
+    try {
+      await useWorkflowStore
+        .getState()
+        .sendExternalEvent(executionId, node.id, parsed);
+      toast.success("Event sent successfully");
+      setShowEventForm(false);
+      setEventPayload("");
+      onRefresh();
+    } catch {
+      toast.error("Failed to send event");
+    } finally {
+      setEventSubmitting(false);
+    }
+  }, [executionId, node.id, eventPayload, onRefresh]);
 
   return (
     <div
       className={cn(
-        "flex items-center gap-3 rounded-lg border-2 p-3 transition-all",
+        "flex flex-col gap-2 rounded-lg border-2 p-3 transition-all",
         nodeStatusColors[status],
         isActive && "ring-2 ring-blue-400 ring-offset-2 dark:ring-offset-zinc-900"
       )}
     >
-      <StatusIcon
-        className={cn(
-          "size-5 shrink-0",
-          status === "running" && "animate-spin text-blue-500",
-          status === "completed" && "text-green-500",
-          status === "failed" && "text-red-500",
-          status === "pending" && "text-zinc-400",
-          status === "skipped" && "text-zinc-400"
-        )}
-      />
-      <div className="flex flex-col gap-0.5 min-w-0">
-        <div className="flex items-center gap-2">
-          <span className="text-sm font-medium truncate">{node.label}</span>
-          <Badge
-            variant="outline"
-            className={cn("text-[10px] shrink-0", nodeTypeColors[node.type])}
-          >
-            {node.type.replace(/_/g, " ")}
-          </Badge>
+      <div className="flex items-center gap-3">
+        <StatusIcon
+          className={cn(
+            "size-5 shrink-0",
+            status === "running" && "animate-spin text-blue-500",
+            status === "completed" && "text-green-500",
+            status === "failed" && "text-red-500",
+            status === "pending" && "text-zinc-400",
+            status === "skipped" && "text-zinc-400",
+            status === "waiting" && "text-amber-500"
+          )}
+        />
+        <div className="flex flex-col gap-0.5 min-w-0">
+          <div className="flex items-center gap-2">
+            <span className="text-sm font-medium truncate">{node.label}</span>
+            <Badge
+              variant="outline"
+              className={cn("text-[10px] shrink-0", nodeTypeColors[node.type])}
+            >
+              {node.type.replace(/_/g, " ")}
+            </Badge>
+          </div>
+          {nodeExec?.errorMessage && (
+            <span className="text-xs text-destructive truncate">
+              {nodeExec.errorMessage}
+            </span>
+          )}
+          {nodeExec?.startedAt && (
+            <span className="text-xs text-muted-foreground">
+              {new Date(nodeExec.startedAt).toLocaleTimeString()}
+              {nodeExec.completedAt &&
+                ` - ${new Date(nodeExec.completedAt).toLocaleTimeString()}`}
+            </span>
+          )}
         </div>
-        {nodeExec?.errorMessage && (
-          <span className="text-xs text-destructive truncate">
-            {nodeExec.errorMessage}
-          </span>
-        )}
-        {nodeExec?.startedAt && (
-          <span className="text-xs text-muted-foreground">
-            {new Date(nodeExec.startedAt).toLocaleTimeString()}
-            {nodeExec.completedAt &&
-              ` - ${new Date(nodeExec.completedAt).toLocaleTimeString()}`}
-          </span>
-        )}
       </div>
+
+      {/* Inline review form for human_review nodes */}
+      {status === "waiting" && node.type === "human_review" && (
+        <div className="mt-2 space-y-2">
+          <Badge className="bg-amber-500/15 text-amber-700 dark:text-amber-400 text-[10px]">
+            Awaiting Review
+          </Badge>
+          {showReviewForm && (
+            <div className="space-y-2">
+              <Textarea
+                placeholder="Optional comment..."
+                value={reviewComment}
+                onChange={(e) => setReviewComment(e.target.value)}
+                className="text-xs"
+                rows={2}
+              />
+              <div className="flex gap-2">
+                <Button
+                  size="sm"
+                  className="bg-green-600 hover:bg-green-700 text-white text-xs h-7"
+                  disabled={reviewSubmitting}
+                  onClick={() => handleReview("approved")}
+                >
+                  Approve
+                </Button>
+                <Button
+                  variant="destructive"
+                  size="sm"
+                  className="text-xs h-7"
+                  disabled={reviewSubmitting}
+                  onClick={() => handleReview("rejected")}
+                >
+                  Reject
+                </Button>
+              </div>
+            </div>
+          )}
+          {!showReviewForm && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7"
+              onClick={() => setShowReviewForm(true)}
+            >
+              Review
+            </Button>
+          )}
+        </div>
+      )}
+
+      {/* Inline event form for wait_event nodes */}
+      {status === "waiting" && node.type === "wait_event" && (
+        <div className="mt-2 space-y-2">
+          <Badge className="bg-slate-500/15 text-slate-700 dark:text-slate-400 text-[10px]">
+            Waiting for Event
+          </Badge>
+          {showEventForm && (
+            <div className="space-y-2">
+              <Textarea
+                placeholder='{"event": "value"}'
+                value={eventPayload}
+                onChange={(e) => setEventPayload(e.target.value)}
+                className="text-xs font-mono"
+                rows={3}
+              />
+              {eventError && (
+                <p className="text-xs text-destructive">{eventError}</p>
+              )}
+              <Button
+                size="sm"
+                className="text-xs h-7"
+                disabled={eventSubmitting}
+                onClick={handleSendEvent}
+              >
+                Send Event
+              </Button>
+            </div>
+          )}
+          {!showEventForm && (
+            <Button
+              variant="outline"
+              size="sm"
+              className="text-xs h-7"
+              onClick={() => setShowEventForm(true)}
+            >
+              Send Event
+            </Button>
+          )}
+        </div>
+      )}
     </div>
   );
 }
@@ -308,6 +442,8 @@ export function WorkflowExecutionView({
                   node={node}
                   nodeExec={nodeExecMap.get(node.id)}
                   isActive={activeNodes.has(node.id)}
+                  executionId={execution.id}
+                  onRefresh={fetchExecution}
                 />
               ))}
             </div>
