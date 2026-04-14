@@ -28,6 +28,35 @@ jest.mock("@/components/workflow/workflow-config-panel", () => ({
   ),
 }));
 
+jest.mock("@/components/workflow/workflow-execution-view", () => ({
+  WorkflowExecutionView: () => <div data-testid="workflow-execution-view" />,
+}));
+
+jest.mock("@/components/workflow-editor", () => ({
+  WorkflowEditor: ({ definition }: { definition: { name: string } }) => (
+    <div data-testid="workflow-editor">{definition.name}</div>
+  ),
+}));
+
+jest.mock("@/lib/stores/workflow-store", () => ({
+  useWorkflowStore: () => ({
+    definitions: [],
+    definitionsLoading: false,
+    fetchDefinitions: jest.fn(),
+    deleteDefinition: jest.fn(),
+    selectDefinition: jest.fn(),
+    selectedDefinition: null,
+    startExecution: jest.fn(),
+    updateDefinition: jest.fn(),
+    executions: [],
+    executionsLoading: false,
+    fetchExecutions: jest.fn(),
+    cancelExecution: jest.fn(),
+    saving: false,
+    createDefinition: jest.fn(),
+  }),
+}));
+
 jest.mock("@/lib/stores/dashboard-store", () => ({
   useDashboardStore: (selector: (state: typeof dashboardState) => unknown) => selector(dashboardState),
 }));
@@ -44,12 +73,14 @@ describe("WorkflowPage", () => {
     expect(screen.getByTestId("empty-state")).toHaveTextContent("workflow.selectProject");
   });
 
-  it("renders the workflow configuration panel for the active project", () => {
+  it("renders the workflow tabs for the active project", () => {
     dashboardState.selectedProjectId = "project-99";
 
     render(<WorkflowPage />);
 
-    expect(screen.getByTestId("workflow-config-panel")).toHaveTextContent("project-99");
-    expect(screen.queryByTestId("empty-state")).not.toBeInTheDocument();
+    // The default tab is "workflows", WorkflowListTab renders with empty list
+    expect(screen.getByRole("heading", { name: "workflow.title" })).toBeInTheDocument();
+    // Config tab panel is not visible (not the default tab), no "select project" empty state
+    expect(screen.queryByTestId("workflow-config-panel")).not.toBeInTheDocument();
   });
 });

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   FolderOpen,
@@ -20,7 +20,7 @@ import {
   type WorkflowDefinition,
 } from "@/lib/stores/workflow-store";
 import { WorkflowConfigPanel } from "@/components/workflow/workflow-config-panel";
-import { WorkflowCanvas } from "@/components/workflow/workflow-canvas";
+import { WorkflowEditor } from "@/components/workflow-editor";
 import { WorkflowExecutionView } from "@/components/workflow/workflow-execution-view";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
@@ -125,6 +125,7 @@ function CreateWorkflowDialog({
 }
 
 function WorkflowListTab({ projectId }: { projectId: string }) {
+  const isDirtyRef = useRef(false);
   const {
     definitions,
     definitionsLoading,
@@ -177,7 +178,10 @@ function WorkflowListTab({ projectId }: { projectId: string }) {
           <Button
             variant="ghost"
             size="sm"
-            onClick={() => selectDefinition(null)}
+            onClick={() => {
+              if (isDirtyRef.current && !confirm("You have unsaved changes. Discard and leave?")) return;
+              selectDefinition(null);
+            }}
           >
             Back to list
           </Button>
@@ -185,9 +189,18 @@ function WorkflowListTab({ projectId }: { projectId: string }) {
             / {selectedDefinition.name}
           </span>
         </div>
-        <WorkflowCanvas
+        <WorkflowEditor
           definition={selectedDefinition}
+          onSave={async (data) => {
+            const ok = await updateDefinition(selectedDefinition.id, data);
+            if (ok) toast.success("Workflow saved");
+            return ok;
+          }}
           onExecute={handleExecute}
+          onDirtyChange={(dirty) => {
+            // Store dirty state for navigation guard
+            isDirtyRef.current = dirty;
+          }}
         />
       </div>
     );
