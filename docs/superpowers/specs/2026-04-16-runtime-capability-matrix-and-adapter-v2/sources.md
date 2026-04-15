@@ -38,9 +38,19 @@
 
 ## Claude Agent SDK（前缀 `sdk-`）
 
-_待填充。建议来源：_
-- `@anthropic-ai/claude-agent-sdk` 的 `types.d.ts`
-- SDK 官方示例
+证据快照日：**2026-04-18**。基准 = `@anthropic-ai/claude-agent-sdk@0.2.109`（TypeScript）+ `claude-agent-sdk` for Python（GitHub wiki `anthropics/claude-agent-sdk-python`）。两端保持版本同步（claudeCodeVersion 2.1.109）。
+TS 类型权威：npm tarball 解压后的 `package/sdk.d.ts`（4688 行，本机校对路径 `/tmp/sdk-ts/package/sdk.d.ts`）。Python 权威：`ClaudeAgentOptions` dataclass、`ClaudeSDKClient` class、`SubprocessCLITransport`。
+
+| ID | 项目 | URL | 访问日期 | 归档位置 |
+|---|---|---|---|---|
+| sdk-1 | Claude Agent SDK (TS) | https://registry.npmjs.org/@anthropic-ai/claude-agent-sdk/0.2.109 | 2026-04-18 | sources/screenshots/sdk-1.png (TODO); tarball at /tmp/sdk-ts/package/sdk.d.ts |
+| sdk-2 | Claude Agent SDK (TS) | https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/README.md | 2026-04-18 | sources/screenshots/sdk-2.png (TODO) |
+| sdk-3 | Claude Agent SDK (Python) | https://github.com/anthropics/claude-agent-sdk-python | 2026-04-18 | sources/screenshots/sdk-3.png (TODO); deepwiki anthropics/claude-agent-sdk-python wiki 2.3/3.2/5.3/6.1/6.2 |
+| sdk-4 | Claude Agent SDK (Python) | https://deepwiki.com/anthropics/claude-agent-sdk-python/6.2 | 2026-04-18 | sources/screenshots/sdk-4.png (TODO) — file checkpointing + rewind_files |
+| sdk-5 | Claude Agent SDK (Python) | https://deepwiki.com/anthropics/claude-agent-sdk-python/3.2 | 2026-04-18 | sources/screenshots/sdk-5.png (TODO) — ClaudeSDKClient.set_model / set_permission_mode |
+| sdk-6 | Claude Agent SDK (TS) | https://github.com/anthropics/claude-agent-sdk-typescript/blob/main/CHANGELOG.md | 2026-04-18 | sources/screenshots/sdk-6.png (TODO) — 0.2.76 planFilePath; 0.1.45 structured output; 0.2.21 reconnect/toggleMcpServer; 0.2.63 supportedAgents; 0.2.72 getSettings; 0.2.74 skills user-invocable |
+| sdk-7 | Claude Agent SDK | https://docs.claude.com/en/api/agent-sdk/custom-tools | 2026-04-18 | sources/screenshots/sdk-7.png (TODO) — @tool decorator + create_sdk_mcp_server |
+| sdk-8 | Claude Agent SDK | https://docs.claude.com/en/api/agent-sdk/overview | 2026-04-18 | sources/screenshots/sdk-8.png (TODO) — Agent SDK reference overview |
 
 ## Cursor（前缀 `cur-`）
 
