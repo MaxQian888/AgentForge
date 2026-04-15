@@ -27,6 +27,7 @@ const TYPES: { value: MarketplaceItemType; label: string }[] = [
   { value: "plugin", label: "Plugins" },
   { value: "skill", label: "Skills" },
   { value: "role", label: "Roles" },
+  { value: "workflow_template", label: "Workflows" },
 ];
 
 export function MarketplaceFilterPanel({ filters, onChange }: Props) {

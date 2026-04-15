@@ -1,15 +1,17 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { AlertTriangle, Plus, Store } from "lucide-react";
+import { AlertTriangle, PackageSearch, Plus, Store } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { useMarketplaceStore, resolveMarketplaceConsumptionRecord } from "@/lib/stores/marketplace-store";
+import { useMarketplaceStore, resolveMarketplaceConsumptionRecord, typeDisplayLabel } from "@/lib/stores/marketplace-store";
 import { MarketplaceFilterPanel } from "@/components/marketplace/marketplace-filter-panel";
 import { MarketplaceSearchBar } from "@/components/marketplace/marketplace-search-bar";
 import { MarketplaceItemCard } from "@/components/marketplace/marketplace-item-card";
 import { MarketplaceItemDetail } from "@/components/marketplace/marketplace-item-detail";
 import { MarketplacePublishDialog } from "@/components/marketplace/marketplace-publish-dialog";
 import { MarketplaceInstallConfirm } from "@/components/marketplace/marketplace-install-confirm";
+import { EmptyState } from "@/components/shared/empty-state";
+import { Skeleton } from "@/components/ui/skeleton";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { usePlatformCapability } from "@/hooks/use-platform-capability";
 import { toast } from "sonner";
@@ -130,7 +132,7 @@ export default function MarketplacePage() {
     async (item: { id: string; type: string }) => {
       try {
         await uninstallItem(item.id, item.type);
-        toast.success(`${item.type} uninstalled successfully.`);
+        toast.success(`${typeDisplayLabel(item.type)} uninstalled successfully.`);
         selectItem(null);
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Uninstall failed");
@@ -242,13 +244,15 @@ export default function MarketplacePage() {
               ) : null}
 
               {builtInLoading ? (
-                <div className="flex h-20 items-center justify-center text-sm text-muted-foreground">
-                  Loading built-in skills...
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {Array.from({ length: 3 }).map((_, i) => (
+                    <Skeleton key={i} className="h-40 rounded-lg" />
+                  ))}
                 </div>
               ) : filteredBuiltInItems.length > 0 ? (
                 <div>
                   <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
-                    Built-in skills
+                    {filters.type !== "all" ? `Built-in ${filters.type === "workflow_template" ? "workflows" : `${filters.type}s`}` : "Built-in items"}
                   </h2>
                   <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                     {filteredBuiltInItems.map((item) => (
@@ -278,9 +282,11 @@ export default function MarketplacePage() {
                         <MarketplaceItemCard
                           item={item}
                           consumption={resolveMarketplaceConsumptionRecord(consumptionItems, item.id)}
+                          updateInfo={updatesByItemId.get(item.id)}
                           selected={selectedItem?.id === item.id}
                           onSelect={selectItem}
                           onInstall={setInstallConfirmItem}
+                          onTagClick={handleTagClick}
                         />
                       </div>
                     ))}
@@ -293,13 +299,18 @@ export default function MarketplacePage() {
                   Remote marketplace items are temporarily unavailable.
                 </div>
               ) : loading ? (
-                <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-                  Loading marketplace items...
+                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  {Array.from({ length: 6 }).map((_, i) => (
+                    <Skeleton key={i} className="h-40 rounded-lg" />
+                  ))}
                 </div>
               ) : items.length === 0 ? (
-                <div className="flex h-32 items-center justify-center text-sm text-muted-foreground">
-                  No items found. Adjust the filters or publish a new item.
-                </div>
+                <EmptyState
+                  icon={PackageSearch}
+                  title="No items found"
+                  description="Adjust the filters or publish a new item to get started."
+                  action={{ label: "Publish", onClick: () => setPublishDialogOpen(true) }}
+                />
               ) : (
                 <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
                   {items.map((item) => (
@@ -307,9 +318,11 @@ export default function MarketplacePage() {
                       key={item.id}
                       item={item}
                       consumption={resolveMarketplaceConsumptionRecord(consumptionItems, item.id)}
+                      updateInfo={updatesByItemId.get(item.id)}
                       selected={selectedItem?.id === item.id}
                       onSelect={selectItem}
                       onInstall={setInstallConfirmItem}
+                      onTagClick={handleTagClick}
                     />
                   ))}
                 </div>

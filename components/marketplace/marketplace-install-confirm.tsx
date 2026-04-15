@@ -15,6 +15,7 @@ import {
   useMarketplaceStore,
   type MarketplaceConsumptionRecord,
   type MarketplaceItem,
+  typeDisplayLabel,
 } from "@/lib/stores/marketplace-store";
 import { toast } from "sonner";
 
@@ -76,7 +77,7 @@ export function MarketplaceInstallConfirm({ item, consumption, onClose }: Props)
             ) : (
               <>
                 This will download and install version{" "}
-                {item.latest_version ?? "latest"} of {item.name} ({item.type}) into
+                {item.latest_version ?? "latest"} of {item.name} ({typeDisplayLabel(item.type)}) into
                 AgentForge.
               </>
             )}

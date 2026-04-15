@@ -94,6 +94,7 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
                   <SelectItem value="plugin">Plugin</SelectItem>
                   <SelectItem value="skill">Skill</SelectItem>
                   <SelectItem value="role">Role</SelectItem>
+                  <SelectItem value="workflow_template">Workflow Template</SelectItem>
                 </SelectContent>
               </Select>
             </div>
@@ -168,6 +169,23 @@ export function MarketplacePublishDialog({ open, onClose }: Props) {
                 }
               />
             </div>
+          </div>
+          <div>
+            <Label htmlFor="pub-tags">Tags (comma-separated)</Label>
+            <Input
+              id="pub-tags"
+              placeholder="e.g. testing, automation, ci"
+              value={form.tags.join(", ")}
+              onChange={(e) =>
+                setForm((f) => ({
+                  ...f,
+                  tags: e.target.value
+                    .split(",")
+                    .map((t) => t.trim())
+                    .filter(Boolean),
+                }))
+              }
+            />
           </div>
           <div className="flex justify-end gap-2">
             <Button type="button" variant="outline" onClick={onClose}>

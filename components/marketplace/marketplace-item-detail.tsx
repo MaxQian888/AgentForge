@@ -22,6 +22,7 @@ import {
 import { ArrowUpCircle, ExternalLink, ShieldCheck, Sparkles, Star, Trash2, Upload } from "lucide-react";
 import {
   useMarketplaceStore,
+  typeDisplayLabel,
   type MarketplaceConsumptionRecord,
   type MarketplaceItem,
   type MarketplaceUpdateInfo,
@@ -84,6 +85,8 @@ function downstreamHref(item: MarketplaceItem): string {
   switch (item.type) {
     case "plugin":
       return "/plugins";
+    case "workflow_template":
+      return "/workflow";
     default:
       return "/roles";
   }
@@ -95,8 +98,21 @@ function downstreamLabel(item: MarketplaceItem): string {
       return "Open plugin console";
     case "role":
       return "Open roles workspace";
+    case "workflow_template":
+      return "Open workflow editor";
     default:
       return "Open role authoring";
+  }
+}
+
+function sideloadRootFile(type: string): string {
+  switch (type) {
+    case "role":
+      return "role.yaml";
+    case "workflow_template":
+      return "workflow.json";
+    default:
+      return "SKILL.md";
   }
 }
 
@@ -193,7 +209,7 @@ export function MarketplaceItemDetail({
     if (!sideloadFile) return;
     try {
       await sideloadItem(item.type, sideloadFile);
-      toast.success(`Side-loaded ${item.type} from ${sideloadFile.name}.`);
+      toast.success(`Side-loaded ${typeDisplayLabel(item.type).toLowerCase()} from ${sideloadFile.name}.`);
       setSideloadFile(null);
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Sideload failed");
@@ -248,7 +264,7 @@ export function MarketplaceItemDetail({
                       <AlertDialogHeader>
                         <AlertDialogTitle>Uninstall {item.name}?</AlertDialogTitle>
                         <AlertDialogDescription>
-                          This will remove the installed files and consumption state for this {item.type}. This action cannot be undone.
+                          This will remove the installed files and consumption state for this {typeDisplayLabel(item.type).toLowerCase()}. This action cannot be undone.
                         </AlertDialogDescription>
                       </AlertDialogHeader>
                       <AlertDialogFooter>
@@ -275,7 +291,7 @@ export function MarketplaceItemDetail({
         </div>
         <div className="flex flex-wrap items-center gap-2">
           <Badge variant="outline" className="text-xs">
-            {item.type}
+            {typeDisplayLabel(item.type)}
           </Badge>
           {item.sourceType ? (
             <Badge variant="secondary" className="text-xs">
@@ -430,7 +446,7 @@ export function MarketplaceItemDetail({
               ) : (
                 <>
                   <p className="text-xs text-muted-foreground">
-                    Upload a zip package containing a valid {item.type === "role" ? "role.yaml" : "SKILL.md"} at its root.
+                    Upload a zip package containing a valid {sideloadRootFile(item.type)} at its root.
                   </p>
                   <div className="flex items-center gap-2">
                     <Input
@@ -447,7 +463,7 @@ export function MarketplaceItemDetail({
                       onClick={() => void handleSideload()}
                     >
                       <Upload className="mr-1 size-3" />
-                      {sideloadLoading ? "Installing..." : `Side-load ${item.type}`}
+                      {sideloadLoading ? "Installing..." : `Side-load ${typeDisplayLabel(item.type).toLowerCase()}`}
                     </Button>
                   </div>
                 </>

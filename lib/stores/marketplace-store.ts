@@ -20,7 +20,7 @@ export type MarketplaceConsumerSurface =
 
 export interface MarketplaceItem {
   id: string;
-  type: "plugin" | "skill" | "role";
+  type: "plugin" | "skill" | "role" | "workflow_template";
   slug: string;
   sourceType?: MarketplaceItemSourceType;
   name: string;
@@ -111,7 +111,7 @@ export interface MarketplaceFilters {
 }
 
 export interface CreateItemRequest {
-  type: "plugin" | "skill" | "role";
+  type: "plugin" | "skill" | "role" | "workflow_template";
   slug: string;
   name: string;
   description: string;
@@ -229,6 +229,17 @@ async function postMarketplaceMultipart<T>(
   }
 
   return data as T;
+}
+
+const TYPE_DISPLAY_LABELS: Record<string, string> = {
+  plugin: "Plugin",
+  skill: "Skill",
+  role: "Role",
+  workflow_template: "Workflow",
+};
+
+export function typeDisplayLabel(type: string): string {
+  return TYPE_DISPLAY_LABELS[type] ?? type;
 }
 
 function consumptionRank(status: MarketplaceConsumptionStatus): number {

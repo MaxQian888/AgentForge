@@ -9,10 +9,11 @@ import {
 } from "@/components/ui/card";
 import { cn } from "@/lib/utils";
 import { ArrowUpCircle, CheckCircle, Download, Star } from "lucide-react";
-import type {
-  MarketplaceConsumptionRecord,
-  MarketplaceItem,
-  MarketplaceUpdateInfo,
+import {
+  typeDisplayLabel,
+  type MarketplaceConsumptionRecord,
+  type MarketplaceItem,
+  type MarketplaceUpdateInfo,
 } from "@/lib/stores/marketplace-store";
 
 interface Props {
@@ -31,7 +32,10 @@ const TYPE_BADGE_VARIANTS: Record<string, string> = {
   skill:
     "bg-green-100 text-green-800 dark:bg-green-900 dark:text-green-200",
   role: "bg-purple-100 text-purple-800 dark:bg-purple-900 dark:text-purple-200",
+  workflow_template:
+    "bg-orange-100 text-orange-800 dark:bg-orange-900 dark:text-orange-200",
 };
+
 
 export function MarketplaceItemCard({
   item,
@@ -92,7 +96,7 @@ export function MarketplaceItemCard({
               TYPE_BADGE_VARIANTS[item.type],
             )}
           >
-            {item.type}
+            {typeDisplayLabel(item.type)}
           </span>
         </div>
         {item.sourceType === "builtin" ? (
