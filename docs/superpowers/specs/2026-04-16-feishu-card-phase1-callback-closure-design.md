@@ -217,7 +217,9 @@ No feature flag is required. Rollout order: merge → bridge redeploy → backen
 
 4. **Reaction spam** — bots or spammy channels may generate many reactions. Phase 1 writes every reaction to `im_reaction_events` unconditionally. Consider rate limits in Phase 5; for Phase 1, rely on Feishu's own rate limits.
 
-5. **target_action whitelist** — a bridge-provided `target_action` could attempt to call internal-only actions. Phase 1 restricts `target_action` to the existing 7 actions (hard-coded whitelist) plus the new synthetic ones (no recursion into `select/multi_select/overflow` target values).
+5. **target_action whitelist** — a bridge-provided `target_action` could attempt to call internal-only actions. Phase 1 restricts `target_action` to the 8 existing action strings (`assign-agent`, `decompose`, `transition-task`, `move-task`, `save-as-doc`, `create-task`, `approve`, `request-changes`) via a hard-coded whitelist. `select`, `multi_select`, and `overflow` are explicitly excluded from the whitelist to prevent recursion.
+
+6. **`selected_options` CSV encoding** — Phase 1 joins multi-select values with `,`. This is safe because Feishu option values are developer-controlled identifiers, not free text. If a later phase needs arbitrary strings, switch to JSON-array encoding.
 
 ## Success criteria
 
