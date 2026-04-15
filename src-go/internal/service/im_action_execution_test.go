@@ -850,3 +850,56 @@ func TestExecuteMultiSelect_WithoutTargetActionReturnsBlocked(t *testing.T) {
 		t.Errorf("Status = %q, want blocked", resp.Status)
 	}
 }
+
+func TestExecuteToggle_TrueTransitionsTaskToDone(t *testing.T) {
+	mover := &fakeIMActionTaskTransitioner{
+		getTask: &model.Task{ID: uuid.New(), Title: "t", Status: model.TaskStatusInProgress},
+	}
+	exec := NewBackendIMActionExecutor(nil, nil, nil, mover)
+	taskID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "toggle",
+		EntityID: taskID.String(),
+		Metadata: map[string]string{"checker_state": "true"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusCompleted {
+		t.Errorf("Status = %q, want completed", resp.Status)
+	}
+	if mover.lastTargetState != model.TaskStatusDone {
+		t.Errorf("TargetState = %q, want done", mover.lastTargetState)
+	}
+}
+
+func TestExecuteToggle_FalseReopensTask(t *testing.T) {
+	mover := &fakeIMActionTaskTransitioner{
+		getTask: &model.Task{ID: uuid.New(), Title: "t", Status: model.TaskStatusDone},
+	}
+	exec := NewBackendIMActionExecutor(nil, nil, nil, mover)
+	taskID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "toggle",
+		EntityID: taskID.String(),
+		Metadata: map[string]string{"checker_state": "false"},
+	}
+	_, _ = exec.Execute(context.Background(), req)
+	if mover.lastTargetState != model.TaskStatusInProgress {
+		t.Errorf("TargetState = %q, want in_progress", mover.lastTargetState)
+	}
+}
+
+func TestExecuteToggle_WithoutMoverReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "toggle",
+		EntityID: uuid.New().String(),
+		Metadata: map[string]string{"checker_state": "true"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+}

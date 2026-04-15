@@ -148,6 +148,8 @@ func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActi
 		return e.executeSelect(ctx, req), nil
 	case "multi_select":
 		return e.executeMultiSelect(ctx, req), nil
+	case "toggle":
+		return e.executeToggle(ctx, req), nil
 	default:
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unknown action: %s", req.Action), false), nil
 	}
@@ -464,6 +466,29 @@ func (e *BackendIMActionExecutor) executeMultiSelect(ctx context.Context, req *m
 		}
 	}
 	return e.dispatchAllowedAction(ctx, &delegated)
+}
+
+func (e *BackendIMActionExecutor) executeToggle(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	if e.taskMover == nil {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Task transition workflow is unavailable.", false)
+	}
+	taskID, err := parseIMEntityUUID(req.EntityID)
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Invalid task identifier.", false)
+	}
+	checkerState := strings.ToLower(strings.TrimSpace(req.Metadata["checker_state"]))
+	targetStatus := model.TaskStatusInProgress
+	if checkerState == "true" {
+		targetStatus = model.TaskStatusDone
+	}
+	updated, err := e.taskMover.Transition(ctx, taskID, &model.TransitionRequest{Status: targetStatus})
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Toggle failed: %s", err.Error()), false)
+	}
+	resp := newIMActionResponse(req, model.IMActionStatusCompleted, fmt.Sprintf("Task %s set to %s.", updated.Title, targetStatus), true)
+	dto := updated.ToDTO()
+	resp.Task = &dto
+	return resp
 }
 
 func splitCSV(s string) []string {
