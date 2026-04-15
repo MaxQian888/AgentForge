@@ -58,6 +58,35 @@ type automationPluginInvoker interface {
 	Invoke(ctx context.Context, pluginID, operation string, payload map[string]any) (map[string]any, error)
 }
 
+type automationWorkflowStarter interface {
+	Start(ctx context.Context, pluginID string, req WorkflowExecutionRequest) (*model.WorkflowPluginRun, error)
+	ListRuns(ctx context.Context, pluginID string, limit int) ([]*model.WorkflowPluginRun, error)
+}
+
+type AutomationActionOutcome struct {
+	Type       string `json:"type"`
+	Outcome    string `json:"outcome"`
+	ReasonCode string `json:"reasonCode,omitempty"`
+	Reason     string `json:"reason,omitempty"`
+	PluginID   string `json:"pluginId,omitempty"`
+	RunID      string `json:"runId,omitempty"`
+}
+
+type AutomationEvaluationSummary struct {
+	MatchedRules     int `json:"matchedRules"`
+	StartedWorkflows int `json:"startedWorkflows"`
+	BlockedWorkflows int `json:"blockedWorkflows"`
+	FailedWorkflows  int `json:"failedWorkflows"`
+}
+
+type AutomationDueDateSummary struct {
+	EvaluatedTasks   int `json:"evaluatedTasks"`
+	MatchedRules     int `json:"matchedRules"`
+	StartedWorkflows int `json:"startedWorkflows"`
+	BlockedWorkflows int `json:"blockedWorkflows"`
+	FailedWorkflows  int `json:"failedWorkflows"`
+}
+
 type AutomationEngineService struct {
 	rules         automationRuleReader
 	logs          automationLogWriter
@@ -67,6 +96,7 @@ type AutomationEngineService struct {
 	im            automationIMSender
 	imChannels    IMEventChannelResolver
 	plugins       automationPluginInvoker
+	workflows     automationWorkflowStarter
 	now           func() time.Time
 }
 
@@ -93,29 +123,39 @@ func NewAutomationEngineService(
 
 func (s *AutomationEngineService) SetIMSender(im automationIMSender) { s.im = im }
 
+func (s *AutomationEngineService) SetWorkflowStarter(workflows automationWorkflowStarter) {
+	s.workflows = workflows
+}
+
 func (s *AutomationEngineService) SetIMChannelResolver(resolver IMEventChannelResolver) {
 	s.imChannels = resolver
 }
 
 func (s *AutomationEngineService) EvaluateRules(ctx context.Context, event AutomationEvent) error {
+	_, err := s.EvaluateRulesWithSummary(ctx, event)
+	return err
+}
+
+func (s *AutomationEngineService) EvaluateRulesWithSummary(ctx context.Context, event AutomationEvent) (AutomationEvaluationSummary, error) {
+	var summary AutomationEvaluationSummary
 	if event.TriggeredByAutomation {
-		return nil
+		return summary, nil
 	}
 	if event.ProjectID == uuid.Nil || strings.TrimSpace(event.EventType) == "" {
-		return nil
+		return summary, nil
 	}
 
 	if event.Task == nil && event.TaskID != nil && s.tasks != nil {
 		task, err := s.tasks.GetByID(ctx, *event.TaskID)
 		if err != nil {
-			return fmt.Errorf("load automation task: %w", err)
+			return summary, fmt.Errorf("load automation task: %w", err)
 		}
 		event.Task = task
 	}
 
 	rules, err := s.rules.ListByProjectAndEvent(ctx, event.ProjectID, event.EventType)
 	if err != nil {
-		return fmt.Errorf("list automation rules: %w", err)
+		return summary, fmt.Errorf("list automation rules: %w", err)
 	}
 	for _, rule := range rules {
 		if rule == nil || !rule.Enabled {
@@ -131,27 +171,38 @@ func (s *AutomationEngineService) EvaluateRules(ctx context.Context, event Autom
 			s.writeAutomationLog(ctx, rule, event, model.AutomationLogStatusSkipped, map[string]any{"reason": reason})
 			continue
 		}
+		summary.MatchedRules++
 		actions, err := decodeAutomationActions(rule.Actions)
 		if err != nil {
 			s.writeAutomationLog(ctx, rule, event, model.AutomationLogStatusFailed, map[string]any{"error": err.Error(), "stage": "decode_actions"})
 			continue
 		}
-		if err := s.executeActions(ctx, event, actions); err != nil {
-			s.writeAutomationLog(ctx, rule, event, model.AutomationLogStatusFailed, map[string]any{"error": err.Error()})
+		actionOutcomes, err := s.executeActions(ctx, rule, event, actions)
+		summary.addActionOutcomes(actionOutcomes)
+		detail := map[string]any{
+			"actionCount": len(actions),
+		}
+		if len(actionOutcomes) > 0 {
+			detail["actionOutcomes"] = actionOutcomes
+		}
+		if err != nil {
+			detail["error"] = err.Error()
+			s.writeAutomationLog(ctx, rule, event, model.AutomationLogStatusFailed, detail)
 			continue
 		}
-		s.writeAutomationLog(ctx, rule, event, model.AutomationLogStatusSuccess, map[string]any{"actionCount": len(actions)})
+		s.writeAutomationLog(ctx, rule, event, model.AutomationLogStatusSuccess, detail)
 	}
-	return nil
+	return summary, nil
 }
 
-func (s *AutomationEngineService) CheckDueDateApproaching(ctx context.Context, threshold time.Duration) error {
+func (s *AutomationEngineService) CheckDueDateApproaching(ctx context.Context, threshold time.Duration) (*AutomationDueDateSummary, error) {
+	summary := &AutomationDueDateSummary{}
 	if s.tasks == nil {
-		return nil
+		return summary, nil
 	}
 	tasks, err := s.tasks.ListOpenForProgress(ctx)
 	if err != nil {
-		return fmt.Errorf("list open tasks: %w", err)
+		return nil, fmt.Errorf("list open tasks: %w", err)
 	}
 	now := s.now()
 	for _, task := range tasks {
@@ -162,8 +213,9 @@ func (s *AutomationEngineService) CheckDueDateApproaching(ctx context.Context, t
 			continue
 		}
 		if task.PlannedEndAt.Sub(now) <= threshold {
+			summary.EvaluatedTasks++
 			taskID := task.ID
-			_ = s.EvaluateRules(ctx, AutomationEvent{
+			evalSummary, err := s.EvaluateRulesWithSummary(ctx, AutomationEvent{
 				EventType: model.AutomationEventTaskDueDateApproach,
 				ProjectID: task.ProjectID,
 				TaskID:    &taskID,
@@ -173,9 +225,16 @@ func (s *AutomationEngineService) CheckDueDateApproaching(ctx context.Context, t
 					"threshold_ms": threshold.Milliseconds(),
 				},
 			})
+			if err != nil {
+				return nil, err
+			}
+			summary.MatchedRules += evalSummary.MatchedRules
+			summary.StartedWorkflows += evalSummary.StartedWorkflows
+			summary.BlockedWorkflows += evalSummary.BlockedWorkflows
+			summary.FailedWorkflows += evalSummary.FailedWorkflows
 		}
 	}
-	return nil
+	return summary, nil
 }
 
 type automationCondition struct {
@@ -283,33 +342,40 @@ func compareAutomationValue(actual any, op string, expected any) bool {
 	return false
 }
 
-func (s *AutomationEngineService) executeActions(ctx context.Context, event AutomationEvent, actions []automationAction) error {
+func (s *AutomationEngineService) executeActions(ctx context.Context, rule *model.AutomationRule, event AutomationEvent, actions []automationAction) ([]AutomationActionOutcome, error) {
+	outcomes := make([]AutomationActionOutcome, 0, len(actions))
 	for _, action := range actions {
-		if err := s.executeAction(ctx, event, action); err != nil {
-			return err
+		outcome, err := s.executeAction(ctx, rule, event, action)
+		if outcome != nil {
+			outcomes = append(outcomes, *outcome)
+		}
+		if err != nil {
+			return outcomes, err
 		}
 	}
-	return nil
+	return outcomes, nil
 }
 
-func (s *AutomationEngineService) executeAction(ctx context.Context, event AutomationEvent, action automationAction) error {
+func (s *AutomationEngineService) executeAction(ctx context.Context, rule *model.AutomationRule, event AutomationEvent, action automationAction) (*AutomationActionOutcome, error) {
 	switch action.Type {
 	case "update_field":
-		return s.executeUpdateField(ctx, event, action.Config)
+		return nil, s.executeUpdateField(ctx, event, action.Config)
 	case "assign_user":
-		return s.executeAssignUser(ctx, event, action.Config)
+		return nil, s.executeAssignUser(ctx, event, action.Config)
 	case "send_notification":
-		return s.executeSendNotification(ctx, event, action.Config)
+		return nil, s.executeSendNotification(ctx, event, action.Config)
 	case "move_to_column":
-		return s.executeMoveToColumn(ctx, event, action.Config)
+		return nil, s.executeMoveToColumn(ctx, event, action.Config)
 	case "create_subtask":
-		return s.executeCreateSubtask(ctx, event, action.Config)
+		return nil, s.executeCreateSubtask(ctx, event, action.Config)
 	case "send_im_message":
-		return s.executeSendIMMessage(ctx, event, action.Config)
+		return nil, s.executeSendIMMessage(ctx, event, action.Config)
 	case "invoke_plugin":
-		return s.executeInvokePlugin(ctx, event, action.Config)
+		return nil, s.executeInvokePlugin(ctx, event, action.Config)
+	case "start_workflow":
+		return s.executeStartWorkflow(ctx, rule, event, action.Config)
 	default:
-		return fmt.Errorf("unsupported automation action %q", action.Type)
+		return nil, fmt.Errorf("unsupported automation action %q", action.Type)
 	}
 }
 
@@ -463,6 +529,95 @@ func (s *AutomationEngineService) executeInvokePlugin(ctx context.Context, event
 	return err
 }
 
+func (s *AutomationEngineService) executeStartWorkflow(
+	ctx context.Context,
+	rule *model.AutomationRule,
+	event AutomationEvent,
+	config map[string]any,
+) (*AutomationActionOutcome, error) {
+	pluginID := stringValue(config["pluginId"])
+	if pluginID == "" {
+		return &AutomationActionOutcome{
+			Type:       "start_workflow",
+			Outcome:    "failed",
+			ReasonCode: "missing_plugin_id",
+			Reason:     "start_workflow requires pluginId",
+		}, fmt.Errorf("start_workflow requires pluginId")
+	}
+	if s.workflows == nil {
+		return &AutomationActionOutcome{
+			Type:       "start_workflow",
+			Outcome:    "failed",
+			ReasonCode: "workflow_runtime_unavailable",
+			Reason:     "workflow starter is not configured",
+			PluginID:   pluginID,
+		}, fmt.Errorf("workflow starter is not configured")
+	}
+	duplicate, err := s.hasActiveAutomationWorkflowRun(ctx, pluginID, rule, event)
+	if err != nil {
+		return &AutomationActionOutcome{
+			Type:       "start_workflow",
+			Outcome:    "failed",
+			ReasonCode: "duplicate_check_failed",
+			Reason:     err.Error(),
+			PluginID:   pluginID,
+		}, err
+	}
+	if duplicate {
+		return &AutomationActionOutcome{
+			Type:       "start_workflow",
+			Outcome:    "blocked",
+			ReasonCode: "duplicate_active_run",
+			Reason:     "an equivalent automation-triggered workflow run is already active",
+			PluginID:   pluginID,
+		}, nil
+	}
+
+	trigger := cloneWorkflowPayload(triggerObjectValue(config["trigger"]))
+	if trigger == nil {
+		trigger = map[string]any{}
+	}
+	trigger["source"] = "automation_rule"
+	trigger["eventType"] = event.EventType
+	trigger["projectId"] = event.ProjectID.String()
+	if rule != nil {
+		trigger["ruleId"] = rule.ID.String()
+	}
+	if event.TaskID != nil {
+		trigger["taskId"] = event.TaskID.String()
+	}
+	if event.Task != nil {
+		trigger["task"] = map[string]any{
+			"id":     event.Task.ID.String(),
+			"title":  event.Task.Title,
+			"status": event.Task.Status,
+		}
+	}
+	for key, value := range cloneWorkflowPayload(event.Data) {
+		if _, exists := trigger[key]; exists {
+			continue
+		}
+		trigger[key] = value
+	}
+
+	run, err := s.workflows.Start(ctx, pluginID, WorkflowExecutionRequest{Trigger: trigger})
+	if err != nil {
+		return &AutomationActionOutcome{
+			Type:       "start_workflow",
+			Outcome:    "failed",
+			ReasonCode: "workflow_start_failed",
+			Reason:     err.Error(),
+			PluginID:   pluginID,
+		}, err
+	}
+	return &AutomationActionOutcome{
+		Type:     "start_workflow",
+		Outcome:  "started",
+		PluginID: pluginID,
+		RunID:    run.ID.String(),
+	}, nil
+}
+
 func (s *AutomationEngineService) writeAutomationLog(ctx context.Context, rule *model.AutomationRule, event AutomationEvent, status string, detail map[string]any) {
 	if s.logs == nil || rule == nil {
 		return
@@ -496,6 +651,16 @@ func mapValue(value any) map[string]any {
 	return map[string]any{"value": value}
 }
 
+func triggerObjectValue(value any) map[string]any {
+	if value == nil {
+		return nil
+	}
+	if typed, ok := value.(map[string]any); ok {
+		return typed
+	}
+	return nil
+}
+
 func marshalAutomationValue(value any) string {
 	raw, err := json.Marshal(value)
 	if err != nil {
@@ -527,4 +692,61 @@ func stringPtrValue(value *uuid.UUID) string {
 		return ""
 	}
 	return value.String()
+}
+
+func (s *AutomationEngineService) hasActiveAutomationWorkflowRun(
+	ctx context.Context,
+	pluginID string,
+	rule *model.AutomationRule,
+	event AutomationEvent,
+) (bool, error) {
+	runs, err := s.workflows.ListRuns(ctx, pluginID, 50)
+	if err != nil {
+		return false, err
+	}
+	projectID := event.ProjectID.String()
+	taskID := stringPtrValue(event.TaskID)
+	ruleID := ""
+	if rule != nil {
+		ruleID = rule.ID.String()
+	}
+	for _, run := range runs {
+		if run == nil || !isWorkflowRunActive(run.Status) {
+			continue
+		}
+		if workflowTriggerString(run.Trigger, "source") != "automation_rule" {
+			continue
+		}
+		if workflowTriggerString(run.Trigger, "projectId") != projectID {
+			continue
+		}
+		if workflowTriggerString(run.Trigger, "eventType") != event.EventType {
+			continue
+		}
+		if ruleID != "" && workflowTriggerString(run.Trigger, "ruleId") != ruleID {
+			continue
+		}
+		if taskID == "" {
+			if workflowTriggerString(run.Trigger, "taskId") != "" {
+				continue
+			}
+		} else if workflowTriggerString(run.Trigger, "taskId") != taskID {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func (s *AutomationEvaluationSummary) addActionOutcomes(outcomes []AutomationActionOutcome) {
+	for _, outcome := range outcomes {
+		switch outcome.Outcome {
+		case "started":
+			s.StartedWorkflows++
+		case "blocked":
+			s.BlockedWorkflows++
+		case "failed":
+			s.FailedWorkflows++
+		}
+	}
 }

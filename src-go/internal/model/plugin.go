@@ -153,7 +153,9 @@ type WorkflowStepDefinition struct {
 }
 
 type PluginWorkflowTrigger struct {
-	Event string `yaml:"event,omitempty" json:"event,omitempty"`
+	Event        string `yaml:"event,omitempty" json:"event,omitempty"`
+	Profile      string `yaml:"profile,omitempty" json:"profile,omitempty"`
+	RequiresTask bool   `yaml:"requiresTask,omitempty" json:"requiresTask,omitempty"`
 }
 
 type WorkflowExecutionLimits struct {

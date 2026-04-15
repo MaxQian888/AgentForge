@@ -15,7 +15,10 @@ export interface AgentMemoryEntry {
   projectId: string;
   scope: "global" | "project" | "role";
   roleId: string;
-  category: "episodic" | "semantic" | "procedural";
+  category: "episodic" | "semantic" | "procedural" | "document";
+  kind?: string;
+  tags: string[];
+  editable: boolean;
   key: string;
   content: string;
   metadata: string;
@@ -38,6 +41,7 @@ export interface MemorySearchOptions {
   scope?: string;
   category?: string;
   roleId?: string;
+  tag?: string;
   startAt?: string;
   endAt?: string;
   limit?: number;
@@ -48,6 +52,7 @@ export interface MemoryExplorerFilters {
   scope: AgentMemoryEntry["scope"] | "all";
   category: AgentMemoryEntry["category"] | "all";
   roleId: string;
+  tag: string;
   startAt: string;
   endAt: string;
   limit: number;
@@ -93,7 +98,7 @@ export interface MemoryExportPayload {
 }
 
 export interface MemoryMutationResult {
-  type: "single-delete" | "bulk-delete" | "cleanup";
+  type: "single-delete" | "bulk-delete" | "cleanup" | "create-note" | "update-note";
   deletedCount: number;
 }
 
@@ -131,8 +136,20 @@ interface MemoryState {
       scope?: string;
       roleId?: string;
       category?: string;
+      kind?: string;
+      tags?: string[];
     },
   ) => Promise<void>;
+  updateMemory: (
+    projectId: string,
+    memoryId: string,
+    input: {
+      key?: string;
+      content?: string;
+      tags?: string[];
+      roleId?: string;
+    },
+  ) => Promise<AgentMemoryDetail | null>;
   deleteMemory: (projectId: string, memoryId: string) => Promise<void>;
   bulkDeleteMemories: (
     projectId: string,
@@ -147,6 +164,11 @@ interface MemoryState {
     projectId: string,
     options?: MemorySearchOptions,
   ) => Promise<MemoryExportPayload | null>;
+  exportMemoryEntry: (
+    projectId: string,
+    memoryId: string,
+    roleId?: string,
+  ) => Promise<AgentMemoryDetail | null>;
   clearActionFeedback: () => void;
 }
 
@@ -157,6 +179,7 @@ const DEFAULT_FILTERS: MemoryExplorerFilters = {
   scope: "all",
   category: "all",
   roleId: "",
+  tag: "",
   startAt: "",
   endAt: "",
   limit: 20,
@@ -182,6 +205,14 @@ function normalizeMemoryEntry(raw: Record<string, unknown>): AgentMemoryEntry {
     category: (typeof raw.category === "string"
       ? raw.category
       : "semantic") as AgentMemoryEntry["category"],
+    kind: typeof raw.kind === "string" ? raw.kind : undefined,
+    tags: Array.isArray(raw.tags)
+      ? raw.tags
+          .filter((tag): tag is string => typeof tag === "string")
+          .map((tag) => tag.trim())
+          .filter(Boolean)
+      : [],
+    editable: Boolean(raw.editable),
     key: String(raw.key ?? ""),
     content: String(raw.content ?? ""),
     metadata:
@@ -295,6 +326,7 @@ function resolveFilters(
     category: (options.category ??
       current.category) as MemoryExplorerFilters["category"],
     roleId: options.roleId ?? current.roleId,
+    tag: options.tag ?? current.tag,
     startAt: options.startAt ?? current.startAt,
     endAt: options.endAt ?? current.endAt,
     limit:
@@ -312,6 +344,7 @@ function buildSearchParams(filters: MemoryExplorerFilters): URLSearchParams {
     params.set("category", filters.category);
   }
   if (filters.roleId) params.set("roleId", filters.roleId);
+  if (filters.tag) params.set("tag", filters.tag);
   if (filters.startAt) params.set("startAt", filters.startAt);
   if (filters.endAt) params.set("endAt", filters.endAt);
   if (filters.limit > 0) params.set("limit", String(filters.limit));
@@ -335,6 +368,21 @@ function pruneSelection(
     selectedMemoryId: currentSelection,
     selectedMemoryIds: selectedIds,
   };
+}
+
+function normalizeTags(tags?: string[]) {
+  if (!tags?.length) return [];
+  const seen = new Set<string>();
+  const normalized: string[] = [];
+  for (const tag of tags) {
+    const value = tag.trim();
+    if (!value) continue;
+    const key = value.toLowerCase();
+    if (seen.has(key)) continue;
+    seen.add(key);
+    normalized.push(value);
+  }
+  return normalized;
 }
 
 export const useMemoryStore = create<MemoryState>()((set, get) => ({
@@ -507,6 +555,15 @@ export const useMemoryStore = create<MemoryState>()((set, get) => ({
     if (!token) return;
 
     const api = createApiClient(API_URL);
+    const tags = normalizeTags(input.tags);
+    const metadata =
+      input.kind || tags.length > 0
+        ? JSON.stringify({
+            ...(input.kind ? { kind: input.kind } : {}),
+            ...(input.kind === "operator_note" ? { editable: true } : {}),
+            ...(tags.length > 0 ? { tags } : {}),
+          })
+        : undefined;
     const { data } = await api.post<Record<string, unknown>>(
       `/api/v1/projects/${projectId}/memory`,
       {
@@ -515,11 +572,68 @@ export const useMemoryStore = create<MemoryState>()((set, get) => ({
         scope: input.scope,
         roleId: input.roleId,
         category: input.category,
+        tags: tags.length > 0 ? tags : undefined,
+        metadata,
       },
       { token },
     );
     const entry = normalizeMemoryEntry(data);
-    set((state) => ({ entries: [...state.entries, entry] }));
+    await get().loadWorkspace(projectId);
+    set({
+      selectedMemoryId: entry.id,
+      detail: entry,
+      actionError: null,
+      lastMutation: { type: "create-note", deletedCount: 1 },
+    });
+  },
+
+  updateMemory: async (projectId, memoryId, input) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) {
+      return null;
+    }
+
+    const api = createApiClient(API_URL);
+    set({
+      actionLoading: true,
+      actionError: null,
+      lastMutation: null,
+    });
+
+    const params = new URLSearchParams();
+    if (normalizeString(input.roleId)) {
+      params.set("roleId", normalizeString(input.roleId));
+    }
+    const qs = params.toString();
+
+    try {
+      const { data } = await api.patch<Record<string, unknown>>(
+        `/api/v1/projects/${projectId}/memory/${memoryId}${qs ? `?${qs}` : ""}`,
+        {
+          ...(typeof input.key === "string" ? { key: input.key } : {}),
+          ...(typeof input.content === "string" ? { content: input.content } : {}),
+          ...(input.tags ? { tags: normalizeTags(input.tags) } : {}),
+        },
+        { token },
+      );
+      const detail = normalizeMemoryDetail(data);
+      await get().loadWorkspace(projectId);
+      set({
+        selectedMemoryId: memoryId,
+        detail,
+        actionLoading: false,
+        actionError: null,
+        lastMutation: { type: "update-note", deletedCount: 1 },
+      });
+      return detail;
+    } catch (error) {
+      const message = extractErrorMessage(error);
+      set({
+        actionLoading: false,
+        actionError: message,
+      });
+      throw error;
+    }
   },
 
   deleteMemory: async (projectId, memoryId) => {
@@ -687,6 +801,31 @@ export const useMemoryStore = create<MemoryState>()((set, get) => ({
       });
       throw error;
     }
+  },
+
+  exportMemoryEntry: async (projectId, memoryId, roleId) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) {
+      return null;
+    }
+
+    const currentDetail = get().detail;
+    if (currentDetail && currentDetail.id === memoryId) {
+      return currentDetail;
+    }
+
+    const api = createApiClient(API_URL);
+    const params = new URLSearchParams();
+    if (normalizeString(roleId)) {
+      params.set("roleId", normalizeString(roleId));
+    }
+    const qs = params.toString();
+
+    const { data } = await api.get<Record<string, unknown>>(
+      `/api/v1/projects/${projectId}/memory/${memoryId}${qs ? `?${qs}` : ""}`,
+      { token },
+    );
+    return normalizeMemoryDetail(data);
   },
 
   clearActionFeedback: () => {

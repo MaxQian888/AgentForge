@@ -100,4 +100,33 @@ describe("RuleEditor", () => {
       });
     });
   });
+
+  it("requires a workflow plugin id for start_workflow actions", async () => {
+    const user = userEvent.setup();
+
+    render(<RuleEditor projectId="project-1" />);
+
+    const textboxes = screen.getAllByRole("textbox");
+    await user.type(textboxes[0], "Escalate due work");
+    const selects = screen.getAllByRole("combobox");
+    await user.selectOptions(selects[1], "start_workflow");
+
+    const createButton = screen.getByRole("button", { name: "Create Rule" });
+    expect(createButton).toBeDisabled();
+
+    await user.type(screen.getByPlaceholderText("task-delivery-flow"), "task-delivery-flow");
+    expect(createButton).toBeEnabled();
+
+    await user.click(createButton);
+
+    await waitFor(() => {
+      expect(createRuleMock).toHaveBeenCalledWith("project-1", {
+        name: "Escalate due work",
+        enabled: true,
+        eventType: "task.status_changed",
+        conditions: [{ field: "status", op: "eq", value: "done" }],
+        actions: [{ type: "start_workflow", config: { pluginId: "task-delivery-flow" } }],
+      });
+    });
+  });
 });

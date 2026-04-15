@@ -28,7 +28,9 @@ type MarketplaceWorkflowTemplateRepo interface {
 	Create(ctx context.Context, def *model.WorkflowDefinition) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.WorkflowDefinition, error)
 	Update(ctx context.Context, id uuid.UUID, def *model.WorkflowDefinition) error
+	Delete(ctx context.Context, id uuid.UUID) error
 	ListTemplates(ctx context.Context, category string) ([]*model.WorkflowDefinition, error)
+	ListTemplatesForProject(ctx context.Context, projectID uuid.UUID, query string, category string, source string) ([]*model.WorkflowDefinition, error)
 	ListTemplatesByName(ctx context.Context, name string) ([]*model.WorkflowDefinition, error)
 }
 

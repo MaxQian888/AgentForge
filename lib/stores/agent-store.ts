@@ -353,6 +353,13 @@ interface AgentState {
     projectId: string,
     taskId: string,
     memberId: string,
+    options?: {
+      runtime?: string;
+      provider?: string;
+      model?: string;
+      roleId?: string;
+      budgetUsd?: number;
+    },
   ) => Promise<DispatchPreflightSummary | null>;
   fetchDispatchHistory: (taskId: string) => Promise<DispatchAttemptRecord[]>;
   fetchDispatchStats: (projectId: string) => Promise<DispatchStatsSummary | null>;
@@ -755,12 +762,23 @@ export const useAgentStore = create<AgentState>()((set, get) => ({
     return bridgeHealth;
   },
 
-  fetchDispatchPreflight: async (projectId, taskId, memberId) => {
+  fetchDispatchPreflight: async (projectId, taskId, memberId, options) => {
     const token = useAuthStore.getState().accessToken;
     if (!token || !projectId || !taskId || !memberId) return null;
     const api = createApiClient(API_URL);
+    const params = new URLSearchParams({
+      taskId,
+      memberId,
+    });
+    if (options?.runtime) params.set("runtime", options.runtime);
+    if (options?.provider) params.set("provider", options.provider);
+    if (options?.model) params.set("model", options.model);
+    if (options?.roleId) params.set("roleId", options.roleId);
+    if (options?.budgetUsd != null && !Number.isNaN(options.budgetUsd)) {
+      params.set("budgetUsd", String(options.budgetUsd));
+    }
     const { data } = await api.get<DispatchPreflightSummary>(
-      `/api/v1/projects/${projectId}/dispatch/preflight?taskId=${encodeURIComponent(taskId)}&memberId=${encodeURIComponent(memberId)}`,
+      `/api/v1/projects/${projectId}/dispatch/preflight?${params.toString()}`,
       { token },
     );
     return data;

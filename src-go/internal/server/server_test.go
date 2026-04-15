@@ -472,6 +472,7 @@ func TestRegisterRoutes_WikiRoutesPresent(t *testing.T) {
 		http.MethodPost + " /api/v1/projects/:pid/wiki/pages/:id/comments":        {},
 		http.MethodPost + " /api/v1/projects/:pid/wiki/pages/:id/decompose-tasks": {},
 		http.MethodGet + " /api/v1/projects/:pid/wiki/templates":                  {},
+		http.MethodPost + " /api/v1/projects/:pid/wiki/templates":                 {},
 		http.MethodPost + " /api/v1/projects/:pid/wiki/pages/from-template":       {},
 		http.MethodGet + " /api/v1/projects/:pid/wiki/favorites":                  {},
 		http.MethodPut + " /api/v1/projects/:pid/wiki/pages/:id/favorite":         {},
@@ -545,6 +546,64 @@ func TestRegisterRoutes_IMOperatorRoutesPresent(t *testing.T) {
 
 	if len(expected) != 0 {
 		t.Fatalf("expected IM operator routes to be registered, missing: %+v", expected)
+	}
+}
+
+func TestRegisterRoutes_WorkflowTemplateRoutesPresent(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	expected := map[string]struct{}{
+		http.MethodGet + " /api/v1/workflow-templates":                  {},
+		http.MethodPost + " /api/v1/workflows/:id/publish-template":     {},
+		http.MethodPost + " /api/v1/workflow-templates/:id/duplicate":   {},
+		http.MethodPost + " /api/v1/workflow-templates/:id/clone":       {},
+		http.MethodPost + " /api/v1/workflow-templates/:id/execute":     {},
+		http.MethodDelete + " /api/v1/workflow-templates/:id":           {},
+		http.MethodGet + " /api/v1/projects/:pid/workflow-reviews":      {},
+	}
+
+	for _, route := range e.Routes() {
+		delete(expected, route.Method+" "+route.Path)
+	}
+
+	if len(expected) != 0 {
+		t.Fatalf("expected workflow template routes to be registered, missing: %+v", expected)
+	}
+}
+
+func TestRegisterRoutes_MemoryRoutesPresent(t *testing.T) {
+	cfg := testConfig()
+	cache := repository.NewCacheRepository(nil)
+	userRepo := repository.NewUserRepository(nil)
+	authSvc := service.NewAuthService(userRepo, cache, cfg)
+
+	e := server.New(cfg, cache)
+	registerTestRoutes(e, cfg, authSvc, cache)
+
+	expected := map[string]struct{}{
+		http.MethodPost + " /api/v1/projects/:pid/memory":        {},
+		http.MethodGet + " /api/v1/projects/:pid/memory":         {},
+		http.MethodGet + " /api/v1/projects/:pid/memory/stats":   {},
+		http.MethodGet + " /api/v1/projects/:pid/memory/export":  {},
+		http.MethodPost + " /api/v1/projects/:pid/memory/bulk-delete": {},
+		http.MethodPost + " /api/v1/projects/:pid/memory/cleanup":     {},
+		http.MethodGet + " /api/v1/projects/:pid/memory/:mid":    {},
+		http.MethodPatch + " /api/v1/projects/:pid/memory/:mid":  {},
+		http.MethodDelete + " /api/v1/projects/:pid/memory/:mid": {},
+	}
+
+	for _, route := range e.Routes() {
+		delete(expected, route.Method+" "+route.Path)
+	}
+
+	if len(expected) != 0 {
+		t.Fatalf("expected memory routes to be registered, missing: %+v", expected)
 	}
 }
 

@@ -51,6 +51,7 @@ const (
 	MsgInvalidTeamID        = "InvalidTeamID"
 	MsgInvalidVersionID     = "InvalidVersionID"
 	MsgInvalidTemplateID    = "InvalidTemplateID"
+	MsgWikiTemplateImmutable = "WikiTemplateImmutable"
 	MsgInvalidMemoryID      = "InvalidMemoryID"
 	MsgInvalidUserID        = "InvalidUserID"
 	MsgInvalidAssigneeID    = "InvalidAssigneeID"

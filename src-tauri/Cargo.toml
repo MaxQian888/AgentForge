@@ -5,6 +5,7 @@ description = "AgentForge desktop shell"
 authors = ["AgentForge"]
 license = ""
 repository = ""
+default-run = "agentforge-desktop"
 edition = "2021"
 rust-version = "1.77.2"
 

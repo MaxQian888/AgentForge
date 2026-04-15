@@ -308,6 +308,7 @@ func (s *IMService) HandleAction(ctx context.Context, req *model.IMActionRequest
 			if strings.TrimSpace(resp.Status) != "" {
 				resp.Metadata["action_status"] = strings.TrimSpace(resp.Status)
 			}
+			s.storeActionBinding(ctx, req, resp)
 			entry.WithField("status", resp.Status).Info("IM action executed")
 			return resp, nil
 		}
@@ -698,4 +699,45 @@ func firstNonNilReplyTarget(primary *model.IMReplyTarget, fallback *model.IMRepl
 		return primary
 	}
 	return fallback
+}
+
+func (s *IMService) storeActionBinding(ctx context.Context, req *model.IMActionRequest, resp *model.IMActionResponse) {
+	if s == nil || s.controlPlane == nil || req == nil || resp == nil {
+		return
+	}
+	replyTarget := firstNonNilReplyTarget(resp.ReplyTarget, req.ReplyTarget)
+	if replyTarget == nil {
+		return
+	}
+	binding := &model.IMActionBinding{
+		BridgeID:    strings.TrimSpace(req.BridgeID),
+		Platform:    req.Platform,
+		ReplyTarget: cloneReplyTarget(replyTarget),
+	}
+	if resp.Task != nil {
+		binding.ProjectID = strings.TrimSpace(resp.Task.ProjectID)
+		binding.TaskID = strings.TrimSpace(resp.Task.ID)
+	}
+	if binding.TaskID == "" && strings.TrimSpace(req.Action) == "transition-task" {
+		binding.TaskID = strings.TrimSpace(req.EntityID)
+	}
+	if resp.Dispatch != nil && resp.Dispatch.Run != nil {
+		binding.RunID = strings.TrimSpace(resp.Dispatch.Run.ID)
+		if binding.TaskID == "" {
+			binding.TaskID = strings.TrimSpace(resp.Dispatch.Run.TaskID)
+		}
+	}
+	if resp.Review != nil {
+		binding.ReviewID = strings.TrimSpace(resp.Review.ID)
+		if binding.TaskID == "" {
+			binding.TaskID = strings.TrimSpace(resp.Review.TaskID)
+		}
+	}
+	if binding.ProjectID == "" && binding.TaskID != "" {
+		binding.ProjectID = strings.TrimSpace(resp.Metadata[imMetadataBridgeBindingProject])
+	}
+	if strings.TrimSpace(binding.TaskID) == "" && strings.TrimSpace(binding.RunID) == "" && strings.TrimSpace(binding.ReviewID) == "" {
+		return
+	}
+	_ = s.controlPlane.BindAction(ctx, binding)
 }

@@ -36,6 +36,9 @@ spec:
         action: review
     triggers:
       - event: manual
+      - event: task.transition
+        profile: task-delivery
+        requiresTask: true
 permissions: {}
 source:
   type: builtin

@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { FolderOpen } from "lucide-react";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
@@ -37,10 +38,16 @@ const RUNTIME_KEYS = ["claude_code", "codex", "opencode", "cursor", "gemini", "q
 
 type SaveState = "idle" | "saving" | "saved" | "error";
 
-function SettingsOrchestrator({ project }: { project: Project }) {
+function SettingsOrchestrator({
+  project,
+  initialSection,
+}: {
+  project: Project;
+  initialSection?: string | null;
+}) {
   const t = useTranslations("settings");
   const { updateProject } = useProjectStore();
-  const [activeSection, setActiveSection] = useState("appearance");
+  const [activeSection, setActiveSection] = useState(initialSection ?? "appearance");
   const [persistedSnapshot, setPersistedSnapshot] = useState(() => createSettingsWorkspaceDraft(project));
   const [draft, setDraft] = useState(() => createSettingsWorkspaceDraft(project));
   const [validationErrors, setValidationErrors] = useState<SettingsValidationErrors>({});
@@ -94,6 +101,7 @@ function SettingsOrchestrator({ project }: { project: Project }) {
       const next = createSettingsWorkspaceDraft(updated);
       setPersistedSnapshot(next);
       setDraft(next);
+      void useDashboardStore.getState().fetchSummary({ projectId: project.id });
       setSaveState("saved");
       if (savedTimeoutRef.current) clearTimeout(savedTimeoutRef.current);
       savedTimeoutRef.current = setTimeout(() => {
@@ -173,9 +181,13 @@ function SettingsOrchestrator({ project }: { project: Project }) {
   );
 }
 
-function SettingsPageNoProject() {
+function SettingsPageNoProject({
+  initialSection,
+}: {
+  initialSection?: string | null;
+} = {}) {
   const t = useTranslations("settings");
-  const [activeSection, setActiveSection] = useState("appearance");
+  const [activeSection, setActiveSection] = useState(initialSection ?? "appearance");
 
   const renderSection = () => {
     // Handle runtime-* sections (app-level, no project needed)
@@ -220,19 +232,37 @@ function SettingsPageNoProject() {
   );
 }
 
-export default function SettingsPage() {
+function SettingsPageContent() {
   useBreadcrumbs([{ label: "Configuration", href: "/" }, { label: "Settings" }]);
+  const searchParams = useSearchParams();
+  const requestedProjectId = searchParams.get("project");
+  const requestedSection = searchParams.get("section");
   const { selectedProjectId } = useDashboardStore();
   const { projects, fetchProjects } = useProjectStore();
-  const project = projects.find((p) => p.id === selectedProjectId);
+  const activeProjectId = requestedProjectId ?? selectedProjectId;
+  const project = projects.find((p) => p.id === activeProjectId);
 
   useEffect(() => {
     void fetchProjects();
   }, [fetchProjects]);
 
-  if (!selectedProjectId || !project) {
-    return <SettingsPageNoProject />;
+  if (!activeProjectId || !project) {
+    return <SettingsPageNoProject initialSection={requestedSection} />;
   }
 
-  return <SettingsOrchestrator key={project.id} project={project} />;
+  return (
+    <SettingsOrchestrator
+      key={`${project.id}:${requestedSection ?? "appearance"}`}
+      project={project}
+      initialSection={requestedSection}
+    />
+  );
+}
+
+export default function SettingsPage() {
+  return (
+    <Suspense fallback={<SettingsPageNoProject />}>
+      <SettingsPageContent />
+    </Suspense>
+  );
 }

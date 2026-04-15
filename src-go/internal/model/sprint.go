@@ -45,6 +45,7 @@ type CreateSprintRequest struct {
 	Name           string  `json:"name" validate:"required,min=1,max=100"`
 	StartDate      string  `json:"startDate" validate:"required"`
 	EndDate        string  `json:"endDate" validate:"required"`
+	MilestoneID    *string `json:"milestoneId"`
 	TotalBudgetUsd float64 `json:"totalBudgetUsd"`
 }
 

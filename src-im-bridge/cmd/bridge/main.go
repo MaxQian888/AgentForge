@@ -88,6 +88,9 @@ type config struct {
 	TransportMode           string
 	FeishuApp               string
 	FeishuSec               string
+	FeishuVerificationToken string
+	FeishuEventEncryptKey   string
+	FeishuCallbackPath      string
 	SlackBotToken           string
 	SlackAppToken           string
 	DingTalkAppKey          string
@@ -147,6 +150,9 @@ func loadConfig() *config {
 		TransportMode:           envOrDefault("IM_TRANSPORT_MODE", transportModeStub),
 		FeishuApp:               os.Getenv("FEISHU_APP_ID"),
 		FeishuSec:               os.Getenv("FEISHU_APP_SECRET"),
+		FeishuVerificationToken: os.Getenv("FEISHU_VERIFICATION_TOKEN"),
+		FeishuEventEncryptKey:   os.Getenv("FEISHU_EVENT_ENCRYPT_KEY"),
+		FeishuCallbackPath:      envOrDefault("FEISHU_CALLBACK_PATH", "/feishu/callback"),
 		SlackBotToken:           os.Getenv("SLACK_BOT_TOKEN"),
 		SlackAppToken:           os.Getenv("SLACK_APP_TOKEN"),
 		DingTalkAppKey:          os.Getenv("DINGTALK_APP_KEY"),

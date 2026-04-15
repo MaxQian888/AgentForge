@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Plus, CalendarRange } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
@@ -26,14 +27,17 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { BurndownChart } from "@/components/sprint/burndown-chart";
 import {
+  normalizeSprintDateInput,
   useSprintStore,
   type Sprint,
+  type SprintBudgetDetail,
   type SprintStatus,
 } from "@/lib/stores/sprint-store";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useMilestoneStore } from "@/lib/stores/milestone-store";
 import { MilestoneEditor } from "@/components/milestones/milestone-editor";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
+import { buildProjectTaskWorkspaceHref } from "@/lib/route-hrefs";
 
 const EMPTY_SPRINTS: Sprint[] = [];
 
@@ -105,21 +109,46 @@ function SprintCard({
   );
 }
 
-export default function SprintsPage() {
+function budgetThresholdVariant(
+  thresholdStatus: SprintBudgetDetail["thresholdStatus"],
+): "default" | "secondary" | "outline" {
+  switch (thresholdStatus) {
+    case "exceeded":
+      return "default";
+    case "warning":
+      return "secondary";
+    default:
+      return "outline";
+  }
+}
+
+function formatCurrency(value: number): string {
+  return `$${value.toFixed(2)}`;
+}
+
+function SprintsPageContent() {
   useBreadcrumbs([{ label: "Project", href: "/" }, { label: "Sprints" }]);
   const t = useTranslations("sprints");
-  const { selectedProjectId } = useDashboardStore();
+  const searchParams = useSearchParams();
+  const router = useRouter();
+  const requestedProjectId = searchParams.get("project");
+  const requestedAction = searchParams.get("action");
+  const { selectedProjectId, fetchSummary } = useDashboardStore();
   const {
     sprintsByProject,
     loadingByProject,
     metricsBySprintId,
+    budgetDetailBySprintId,
     fetchSprints,
     fetchSprintMetrics,
+    fetchSprintBudgetDetail,
     createSprint,
     updateSprint,
   } = useSprintStore();
+  const budgetLoadingBySprintId = useSprintStore((state) => state.budgetLoadingBySprintId);
+  const budgetErrorBySprintId = useSprintStore((state) => state.budgetErrorBySprintId);
 
-  const projectId = selectedProjectId ?? "";
+  const projectId = requestedProjectId ?? selectedProjectId ?? "";
   const sprints = useMemo(
     () => sprintsByProject[projectId] ?? EMPTY_SPRINTS,
     [projectId, sprintsByProject]
@@ -136,6 +165,8 @@ export default function SprintsPage() {
   const [formBudget, setFormBudget] = useState("");
   const [formStatus, setFormStatus] = useState<SprintStatus>("planning");
   const [formMilestoneId, setFormMilestoneId] = useState("");
+  const [formError, setFormError] = useState<string | null>(null);
+  const [submitting, setSubmitting] = useState<"create" | "update" | null>(null);
   const milestonesByProject = useMilestoneStore((state) => state.milestonesByProject);
   const fetchMilestones = useMilestoneStore((state) => state.fetchMilestones);
   const milestones = milestonesByProject[projectId] ?? [];
@@ -148,27 +179,77 @@ export default function SprintsPage() {
   }, [fetchMilestones, fetchSprints, projectId]);
 
   const activeSprint = useMemo(() => sprints.find((s) => s.status === "active"), [sprints]);
-  const effectiveSelectedSprintId = selectedSprintId ?? activeSprint?.id ?? null;
+  const effectiveSelectedSprintId = selectedSprintId ?? activeSprint?.id ?? sprints[0]?.id ?? null;
+  const selectedSprint = useMemo(
+    () => sprints.find((sprint) => sprint.id === effectiveSelectedSprintId) ?? null,
+    [effectiveSelectedSprintId, sprints],
+  );
   const selectedMetrics = effectiveSelectedSprintId
     ? metricsBySprintId[effectiveSelectedSprintId]
     : null;
+  const selectedBudgetDetail = effectiveSelectedSprintId
+    ? budgetDetailBySprintId[effectiveSelectedSprintId] ?? null
+    : null;
+  const selectedBudgetLoading = effectiveSelectedSprintId
+    ? budgetLoadingBySprintId[effectiveSelectedSprintId] ?? false
+    : false;
+  const selectedBudgetError = effectiveSelectedSprintId
+    ? budgetErrorBySprintId[effectiveSelectedSprintId] ?? null
+    : null;
+  const selectedSprintRefreshKey = selectedSprint
+    ? [
+        selectedSprint.id,
+        selectedSprint.status,
+        selectedSprint.startDate,
+        selectedSprint.endDate,
+        selectedSprint.totalBudgetUsd,
+        selectedSprint.spentUsd,
+        selectedSprint.milestoneId ?? "",
+      ].join("|")
+    : "";
 
   useEffect(() => {
-    if (effectiveSelectedSprintId && projectId) {
-      void fetchSprintMetrics(projectId, effectiveSelectedSprintId);
+    if (selectedSprintRefreshKey && selectedSprint && projectId) {
+      void fetchSprintMetrics(projectId, selectedSprint.id);
+      void fetchSprintBudgetDetail(selectedSprint.id);
     }
-  }, [effectiveSelectedSprintId, fetchSprintMetrics, projectId]);
+  }, [
+    fetchSprintBudgetDetail,
+    fetchSprintMetrics,
+    projectId,
+    selectedSprint,
+    selectedSprintRefreshKey,
+  ]);
 
-  const openCreate = () => {
+  useEffect(() => {
+    if (selectedSprintId && !sprints.some((sprint) => sprint.id === selectedSprintId)) {
+      setSelectedSprintId(null);
+    }
+  }, [selectedSprintId, sprints]);
+
+  const resetForm = useCallback(() => {
     setFormName("");
     setFormStart("");
     setFormEnd("");
     setFormBudget("");
+    setFormStatus("planning");
     setFormMilestoneId("");
+    setFormError(null);
+  }, []);
+
+  const openCreate = useCallback(() => {
+    resetForm();
     setCreateOpen(true);
-  };
+  }, [resetForm]);
+
+  useEffect(() => {
+    if (requestedAction === "create-sprint" && projectId) {
+      openCreate();
+    }
+  }, [openCreate, projectId, requestedAction]);
 
   const openEdit = (sprint: Sprint) => {
+    setFormError(null);
     setFormName(sprint.name);
     setFormStart(sprint.startDate.slice(0, 10));
     setFormEnd(sprint.endDate.slice(0, 10));
@@ -179,27 +260,60 @@ export default function SprintsPage() {
   };
 
   const handleCreate = async () => {
-    if (!projectId || !formName || !formStart || !formEnd) return;
-    await createSprint(projectId, {
-      name: formName,
-      startDate: formStart,
-      endDate: formEnd,
-      totalBudgetUsd: parseFloat(formBudget) || 0,
-    });
-    setCreateOpen(false);
+    if (!projectId || !formName || !formStart || !formEnd) {
+      setFormError(t("dialog.error.requiredFields"));
+      return;
+    }
+
+    setSubmitting("create");
+    setFormError(null);
+
+    try {
+      const createdSprint = await createSprint(projectId, {
+        name: formName.trim(),
+        startDate: normalizeSprintDateInput(formStart),
+        endDate: normalizeSprintDateInput(formEnd),
+        totalBudgetUsd: parseFloat(formBudget) || 0,
+        milestoneId: formMilestoneId || undefined,
+      });
+      await fetchSummary({ projectId });
+      setSelectedSprintId(createdSprint.id);
+      resetForm();
+      setCreateOpen(false);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : t("dialog.error.saveFailed"));
+    } finally {
+      setSubmitting(null);
+    }
   };
 
   const handleUpdate = async () => {
-    if (!projectId || !editSprint) return;
-    await updateSprint(projectId, editSprint.id, {
-      name: formName,
-      startDate: formStart,
-      endDate: formEnd,
-      status: formStatus,
-      totalBudgetUsd: parseFloat(formBudget) || 0,
-      milestoneId: formMilestoneId || null,
-    });
-    setEditSprint(null);
+    if (!projectId || !editSprint || !formName || !formStart || !formEnd) {
+      setFormError(t("dialog.error.requiredFields"));
+      return;
+    }
+
+    setSubmitting("update");
+    setFormError(null);
+
+    try {
+      const updatedSprint = await updateSprint(projectId, editSprint.id, {
+        name: formName.trim(),
+        startDate: normalizeSprintDateInput(formStart),
+        endDate: normalizeSprintDateInput(formEnd),
+        status: formStatus,
+        totalBudgetUsd: parseFloat(formBudget) || 0,
+        milestoneId: formMilestoneId,
+      });
+      await fetchSummary({ projectId });
+      setSelectedSprintId(updatedSprint.id);
+      setEditSprint(null);
+      setFormError(null);
+    } catch (error) {
+      setFormError(error instanceof Error ? error.message : t("dialog.error.saveFailed"));
+    } finally {
+      setSubmitting(null);
+    }
   };
 
   if (!projectId) {
@@ -253,32 +367,110 @@ export default function SprintsPage() {
         )}
       </div>
 
-      {selectedMetrics && (
+      {selectedSprint && (
         <Card>
-          <CardHeader>
+          <CardHeader className="flex flex-row items-center justify-between gap-4">
             <CardTitle>
-              {t("burndown.title")} &mdash; {selectedMetrics.sprint.name}
+              {t("burndown.title")} &mdash; {selectedSprint.name}
             </CardTitle>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() =>
+                router.push(
+                  buildProjectTaskWorkspaceHref({
+                    projectId,
+                    sprintId: selectedSprint.id,
+                  }),
+                )
+              }
+            >
+              {t("actions.openTasks")}
+            </Button>
           </CardHeader>
           <CardContent className="space-y-4">
             <div className="flex flex-wrap gap-4 text-sm">
               <Badge variant="secondary">
-                {t("burndown.completed", { completed: selectedMetrics.completedTasks, planned: selectedMetrics.plannedTasks })}
+                {t("burndown.completed", {
+                  completed: selectedMetrics?.completedTasks ?? 0,
+                  planned: selectedMetrics?.plannedTasks ?? 0,
+                })}
               </Badge>
               <Badge variant="outline">
-                {t("burndown.completion", { rate: Math.round(selectedMetrics.completionRate * 100) })}
+                {t("burndown.completion", {
+                  rate: Math.round(selectedMetrics?.completionRate ?? 0),
+                })}
               </Badge>
               <Badge variant="outline">
-                {t("burndown.velocity", { velocity: selectedMetrics.velocityPerWeek.toFixed(1) })}
+                {t("burndown.velocity", {
+                  velocity: (selectedMetrics?.velocityPerWeek ?? 0).toFixed(1),
+                })}
               </Badge>
               <Badge variant="secondary">
-                {t("burndown.cost", { spent: selectedMetrics.taskSpentUsd.toFixed(2), budget: selectedMetrics.taskBudgetUsd.toFixed(2) })}
+                {t("burndown.cost", {
+                  spent: (selectedMetrics?.taskSpentUsd ?? 0).toFixed(2),
+                  budget: (selectedMetrics?.taskBudgetUsd ?? 0).toFixed(2),
+                })}
               </Badge>
             </div>
             <BurndownChart
-              burndown={selectedMetrics.burndown}
-              plannedTasks={selectedMetrics.plannedTasks}
+              burndown={selectedMetrics?.burndown ?? []}
+              plannedTasks={selectedMetrics?.plannedTasks ?? 0}
             />
+
+            <div className="space-y-3 border-t pt-4">
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div className="text-sm font-medium">{t("detail.budgetTitle")}</div>
+                {selectedBudgetDetail ? (
+                  <Badge variant={budgetThresholdVariant(selectedBudgetDetail.thresholdStatus)}>
+                    {selectedBudgetDetail.thresholdStatus}
+                  </Badge>
+                ) : null}
+              </div>
+
+              {selectedBudgetLoading ? (
+                <p className="text-sm text-muted-foreground">{t("detail.loadingBudget")}</p>
+              ) : selectedBudgetError ? (
+                <p className="text-sm text-destructive">{selectedBudgetError}</p>
+              ) : selectedBudgetDetail ? (
+                <div className="space-y-3">
+                  <div className="grid gap-3 sm:grid-cols-3">
+                    <div className="rounded-md border px-3 py-2 text-sm">
+                      <div className="text-muted-foreground">{t("detail.allocated")}</div>
+                      <div className="font-medium">{formatCurrency(selectedBudgetDetail.allocated)}</div>
+                    </div>
+                    <div className="rounded-md border px-3 py-2 text-sm">
+                      <div className="text-muted-foreground">{t("detail.spent")}</div>
+                      <div className="font-medium">{formatCurrency(selectedBudgetDetail.spent)}</div>
+                    </div>
+                    <div className="rounded-md border px-3 py-2 text-sm">
+                      <div className="text-muted-foreground">{t("detail.remaining")}</div>
+                      <div className="font-medium">{formatCurrency(selectedBudgetDetail.remaining)}</div>
+                    </div>
+                  </div>
+
+                  {selectedBudgetDetail.tasks.length > 0 ? (
+                    <div className="space-y-2">
+                      {selectedBudgetDetail.tasks.map((task) => (
+                        <div
+                          key={task.taskId}
+                          className="flex items-center justify-between gap-3 rounded-md border px-3 py-2 text-sm"
+                        >
+                          <div className="font-medium">{task.title}</div>
+                          <div className="text-muted-foreground">
+                            {formatCurrency(task.spent)} / {formatCurrency(task.allocated)}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="text-sm text-muted-foreground">{t("detail.budgetEmpty")}</p>
+                  )}
+                </div>
+              ) : (
+                <p className="text-sm text-muted-foreground">{t("detail.budgetEmpty")}</p>
+              )}
+            </div>
           </CardContent>
         </Card>
       )}
@@ -324,13 +516,21 @@ export default function SprintsPage() {
                 </SelectContent>
               </Select>
             </div>
+            {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setCreateOpen(false)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                resetForm();
+                setCreateOpen(false);
+              }}
+            >
               {t("dialog.cancel")}
             </Button>
-            <Button type="button" onClick={() => void handleCreate()}>
-              {t("dialog.create")}
+            <Button type="button" onClick={() => void handleCreate()} disabled={submitting === "create"}>
+              {submitting === "create" ? t("dialog.saving") : t("dialog.create")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -390,13 +590,21 @@ export default function SprintsPage() {
                 </SelectContent>
               </Select>
             </div>
+            {formError ? <p className="text-sm text-destructive">{formError}</p> : null}
           </div>
           <DialogFooter>
-            <Button type="button" variant="outline" onClick={() => setEditSprint(null)}>
+            <Button
+              type="button"
+              variant="outline"
+              onClick={() => {
+                setEditSprint(null);
+                setFormError(null);
+              }}
+            >
               {t("dialog.cancel")}
             </Button>
-            <Button type="button" onClick={() => void handleUpdate()}>
-              {t("dialog.save")}
+            <Button type="button" onClick={() => void handleUpdate()} disabled={submitting === "update"}>
+              {submitting === "update" ? t("dialog.saving") : t("dialog.save")}
             </Button>
           </DialogFooter>
         </DialogContent>
@@ -408,5 +616,13 @@ export default function SprintsPage() {
         projectId={projectId}
       />
     </div>
+  );
+}
+
+export default function SprintsPage() {
+  return (
+    <Suspense fallback={null}>
+      <SprintsPageContent />
+    </Suspense>
   );
 }

@@ -87,6 +87,7 @@ const bulkDeleteResults: unknown[] = [];
 const searchParamsState = {
   id: "project-1" as string | null,
   member: null as string | null,
+  sprint: null as string | null,
   action: null as string | null,
 };
 
@@ -160,6 +161,8 @@ jest.mock("next/navigation", () => ({
         ? searchParamsState.id
         : key === "member"
           ? searchParamsState.member
+          : key === "sprint"
+            ? searchParamsState.sprint
           : key === "action"
             ? searchParamsState.action
             : null,
@@ -170,6 +173,9 @@ jest.mock("next/navigation", () => ({
       }
       if (searchParamsState.member) {
         params.set("member", searchParamsState.member);
+      }
+      if (searchParamsState.sprint) {
+        params.set("sprint", searchParamsState.sprint);
       }
       if (searchParamsState.action) {
         params.set("action", searchParamsState.action);
@@ -322,6 +328,7 @@ describe("ProjectPage", () => {
     bulkDeleteResults.length = 0;
     searchParamsState.id = "project-1";
     searchParamsState.member = null;
+    searchParamsState.sprint = null;
     searchParamsState.action = null;
     taskState.tasks = [
       createMockTask({
@@ -370,14 +377,16 @@ describe("ProjectPage", () => {
     });
   });
 
-  it("ignores the legacy create-task route action until the user opens the dialog", () => {
+  it("opens the create-task dialog when the route action requests it", async () => {
     searchParamsState.action = "create-task";
 
     render(<ProjectPage />);
 
-    expect(
-      screen.queryByText("Capture the task goal and initial priority before the workspace fills in the rest.")
-    ).not.toBeInTheDocument();
+    await waitFor(() => {
+      expect(
+        screen.getByText("Capture the task goal and initial priority before the workspace fills in the rest.")
+      ).toBeInTheDocument();
+    });
   });
 
   it("includes a dialog description for the create task modal", async () => {
@@ -401,6 +410,44 @@ describe("ProjectPage", () => {
     await act(async () => undefined);
 
     expect(useTaskWorkspaceStore.getState().filters.assigneeId).toBe("member-1");
+  });
+
+  it("consumes the sprint query parameter into the shared task workspace sprint filter", async () => {
+    searchParamsState.sprint = "sprint-1";
+
+    render(<ProjectPage />);
+
+    await waitFor(() => {
+      expect(useTaskWorkspaceStore.getState().filters.sprintId).toBe("sprint-1");
+    });
+    expect(fetchSprintMetrics).toHaveBeenCalledWith("project-1", "sprint-1");
+  });
+
+  it("ignores an invalid sprint query parameter and falls back to the normal workspace state", async () => {
+    searchParamsState.sprint = "missing-sprint";
+
+    render(<ProjectPage />);
+
+    await act(async () => undefined);
+
+    expect(useTaskWorkspaceStore.getState().filters.sprintId).toBe("all");
+    expect(fetchSprintMetrics).not.toHaveBeenCalledWith("project-1", "missing-sprint");
+  });
+
+  it("resets a stale sprint filter when the route no longer includes a sprint query parameter", async () => {
+    useTaskWorkspaceStore.setState((state) => ({
+      ...state,
+      filters: {
+        ...state.filters,
+        sprintId: "sprint-1",
+      },
+    }));
+
+    render(<ProjectPage />);
+
+    await waitFor(() => {
+      expect(useTaskWorkspaceStore.getState().filters.sprintId).toBe("all");
+    });
   });
 
   it("submits the create-task dialog with the current project context", async () => {

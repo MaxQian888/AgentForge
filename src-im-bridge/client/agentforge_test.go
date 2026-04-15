@@ -1485,11 +1485,11 @@ func TestQueueAndMemoryEndpoints_ParseCanonicalResponses(t *testing.T) {
 			if err := json.NewDecoder(r.Body).Decode(&payload); err != nil {
 				t.Fatalf("decode body: %v", err)
 			}
-			if payload["scope"] != "project" || payload["category"] != "operator_note" {
+			if payload["scope"] != "project" || payload["category"] != "episodic" || payload["metadata"] != `{"kind":"operator_note","editable":true,"tags":[]}` {
 				t.Fatalf("payload = %+v", payload)
 			}
 			_ = json.NewEncoder(w).Encode(MemoryEntry{
-				ID: "mem-2", Key: "operator-note", Content: "Remember to reuse Codex", Category: "operator_note", Scope: "project",
+				ID: "mem-2", Key: "operator-note", Content: "Remember to reuse Codex", Category: "episodic", Kind: "operator_note", Editable: true, Scope: "project",
 			})
 		default:
 			t.Fatalf("unexpected request: %s %s?%s", r.Method, r.URL.Path, r.URL.RawQuery)
@@ -1527,14 +1527,14 @@ func TestQueueAndMemoryEndpoints_ParseCanonicalResponses(t *testing.T) {
 	if err != nil {
 		t.Fatalf("StoreProjectMemoryNote error: %v", err)
 	}
-	if created.Category != "operator_note" || created.Scope != "project" {
+	if created.Category != "episodic" || created.Kind != "operator_note" || !created.Editable || created.Scope != "project" {
 		t.Fatalf("created = %+v", created)
 	}
 
 	wantCalls := []string{
 		"GET /api/v1/projects/proj-1/queue?status=queued",
 		"DELETE /api/v1/projects/proj-1/queue/entry-1?reason=manual_cancel",
-		"GET /api/v1/projects/proj-1/memory?limit=5&q=release",
+		"GET /api/v1/projects/proj-1/memory?limit=5&query=release",
 		"POST /api/v1/projects/proj-1/memory?",
 	}
 	if !reflect.DeepEqual(calls, wantCalls) {

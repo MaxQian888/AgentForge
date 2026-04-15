@@ -127,6 +127,9 @@ other = "invalid version ID"
 [InvalidTemplateID]
 other = "invalid template ID"
 
+[WikiTemplateImmutable]
+other = "built-in templates cannot be edited or deleted in place"
+
 [InvalidMemoryID]
 other = "invalid memory ID"
 

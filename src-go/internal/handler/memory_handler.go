@@ -18,6 +18,7 @@ import (
 
 type MemoryRuntimeService interface {
 	Store(ctx context.Context, input service.StoreMemoryInput) (*model.AgentMemory, error)
+	Update(ctx context.Context, input service.UpdateMemoryInput) (*model.AgentMemory, error)
 	Search(ctx context.Context, query service.MemoryExplorerQuery) ([]model.AgentMemoryDTO, error)
 	Get(ctx context.Context, projectID uuid.UUID, id uuid.UUID, roleID string) (*model.AgentMemoryDetailDTO, error)
 	Stats(ctx context.Context, query service.MemoryExplorerQuery) (*model.MemoryExplorerStatsDTO, error)
@@ -36,13 +37,20 @@ func NewMemoryHandler(service MemoryRuntimeService) *MemoryHandler {
 }
 
 type StoreMemoryRequest struct {
-	Scope          string  `json:"scope"`
-	RoleID         string  `json:"roleId"`
-	Category       string  `json:"category"`
-	Key            string  `json:"key" validate:"required"`
-	Content        string  `json:"content" validate:"required"`
-	Metadata       string  `json:"metadata"`
-	RelevanceScore float64 `json:"relevanceScore"`
+	Scope          string   `json:"scope"`
+	RoleID         string   `json:"roleId"`
+	Category       string   `json:"category"`
+	Tags           []string `json:"tags"`
+	Key            string   `json:"key" validate:"required"`
+	Content        string   `json:"content" validate:"required"`
+	Metadata       string   `json:"metadata"`
+	RelevanceScore float64  `json:"relevanceScore"`
+}
+
+type UpdateMemoryRequest struct {
+	Key     *string   `json:"key"`
+	Content *string   `json:"content"`
+	Tags    *[]string `json:"tags"`
 }
 
 type BulkDeleteMemoriesRequest struct {
@@ -80,6 +88,7 @@ func (h *MemoryHandler) Store(c echo.Context) error {
 		Scope:          req.Scope,
 		RoleID:         req.RoleID,
 		Category:       req.Category,
+		Tags:           req.Tags,
 		Key:            req.Key,
 		Content:        req.Content,
 		Metadata:       req.Metadata,
@@ -89,6 +98,43 @@ func (h *MemoryHandler) Store(c echo.Context) error {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToStoreMemory)
 	}
 	return c.JSON(http.StatusCreated, mem.ToDTO())
+}
+
+func (h *MemoryHandler) Update(c echo.Context) error {
+	if h.service == nil {
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgMemoryServiceUnavailable)
+	}
+	projectID, err := uuid.Parse(c.Param("pid"))
+	if err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidProjectID)
+	}
+	memoryID, err := uuid.Parse(c.Param("mid"))
+	if err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidMemoryID)
+	}
+	req := new(UpdateMemoryRequest)
+	if err := c.Bind(req); err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
+	}
+	updated, err := h.service.Update(c.Request().Context(), service.UpdateMemoryInput{
+		ProjectID: projectID,
+		ID:        memoryID,
+		RoleID:    strings.TrimSpace(c.QueryParam("roleId")),
+		Key:       req.Key,
+		Content:   req.Content,
+		Tags:      req.Tags,
+	})
+	if err != nil {
+		switch {
+		case errors.Is(err, service.ErrMemoryNotEditable):
+			return c.JSON(http.StatusConflict, model.ErrorResponse{Message: err.Error()})
+		case errors.Is(err, service.ErrMemoryUpdateRequired):
+			return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+		default:
+			return h.writeMemoryError(c, err, http.StatusInternalServerError, "failed to update memory")
+		}
+	}
+	return c.JSON(http.StatusOK, updated.ToDetailDTO())
 }
 
 func (h *MemoryHandler) Search(c echo.Context) error {
@@ -271,6 +317,7 @@ func (h *MemoryHandler) parseExplorerQuery(c echo.Context, defaultLimit int) (se
 		Scope:     scope,
 		Category:  strings.TrimSpace(c.QueryParam("category")),
 		RoleID:    roleID,
+		Tag:       strings.TrimSpace(c.QueryParam("tag")),
 		StartAt:   startAt,
 		EndAt:     endAt,
 		Limit:     limit,

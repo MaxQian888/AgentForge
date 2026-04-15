@@ -11,6 +11,7 @@ import {
   CardHeader,
   CardTitle,
 } from "@/components/ui/card";
+import { Input } from "@/components/ui/input";
 import {
   Select,
   SelectContent,
@@ -180,7 +181,7 @@ function TriggerEditor({
   const addTrigger = () => {
     onChange([
       ...triggers,
-      { fromStatus: "triaged", toStatus: "assigned", action: "auto_assign" },
+      { fromStatus: "triaged", toStatus: "assigned", action: "dispatch_agent" },
     ]);
   };
 
@@ -192,6 +193,20 @@ function TriggerEditor({
     const updated = triggers.map((trigger, i) =>
       i === index ? { ...trigger, [field]: value } : trigger
     );
+    onChange(updated);
+  };
+
+  const updateTriggerConfig = (index: number, patch: Record<string, unknown>) => {
+    const updated = triggers.map((trigger, i) => {
+      if (i !== index) return trigger;
+      return {
+        ...trigger,
+        config: {
+          ...(trigger.config ?? {}),
+          ...patch,
+        },
+      };
+    });
     onChange(updated);
   };
 
@@ -259,6 +274,28 @@ function TriggerEditor({
           >
             {t("remove")}
           </Button>
+          {trigger.action === "start_workflow" ? (
+            <>
+              <Input
+                aria-label={`Trigger ${index + 1} workflow plugin`}
+                className="h-8 w-48 text-sm"
+                placeholder="Workflow plugin ID"
+                value={String((trigger.config as Record<string, unknown> | undefined)?.pluginId ?? "")}
+                onChange={(e) =>
+                  updateTriggerConfig(index, { pluginId: e.target.value })
+                }
+              />
+              <Input
+                aria-label={`Trigger ${index + 1} workflow profile`}
+                className="h-8 w-40 text-sm"
+                placeholder="Trigger profile"
+                value={String((trigger.config as Record<string, unknown> | undefined)?.profile ?? "")}
+                onChange={(e) =>
+                  updateTriggerConfig(index, { profile: e.target.value })
+                }
+              />
+            </>
+          ) : null}
         </div>
       ))}
       <Button type="button" size="sm" variant="outline" onClick={addTrigger}>

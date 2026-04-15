@@ -117,6 +117,39 @@ describe("DashboardOverview", () => {
           },
           activity: [],
           risks: [],
+          bootstrap: {
+            unresolvedCount: 2,
+            phases: [
+              {
+                id: "governance",
+                title: "Governance",
+                state: "attention",
+                reason: "Repository or coding-agent defaults still need configuration.",
+                href: "/settings?project=project-1&section=repository",
+                actionLabel: "Configure Governance",
+              },
+              {
+                id: "team",
+                title: "Team",
+                state: "attention",
+                reason: "Add the first human or agent collaborator.",
+                href: "/team?project=project-1&focus=add-member",
+                actionLabel: "Add First Member",
+              },
+            ],
+            nextActions: [
+              {
+                id: "configure-governance",
+                label: "Configure Governance",
+                href: "/settings?project=project-1&section=repository",
+              },
+              {
+                id: "add-member",
+                label: "Add First Member",
+                href: "/team?project=project-1&focus=add-member",
+              },
+            ],
+          },
         }}
         loading={false}
         error={null}
@@ -129,7 +162,65 @@ describe("DashboardOverview", () => {
       screen.getByText("No delivery signals yet for this scope.")
     ).toBeInTheDocument();
     expect(
-      screen.getByRole("link", { name: "Create or open a project" })
-    ).toHaveAttribute("href", "/projects");
+      screen.getByRole("link", { name: "Configure Governance" })
+    ).toHaveAttribute("href", "/settings?project=project-1&section=repository");
+  });
+
+  it("surfaces lifecycle-aware bootstrap actions for incomplete projects", () => {
+    render(
+      <DashboardOverview
+        summary={{
+          ...summary,
+          bootstrap: {
+            unresolvedCount: 2,
+            phases: [
+              {
+                id: "governance",
+                title: "Governance",
+                state: "attention",
+                reason: "Repository or coding-agent defaults still need configuration.",
+                href: "/settings?project=project-1&section=repository",
+                actionLabel: "Configure Governance",
+              },
+              {
+                id: "team",
+                title: "Team",
+                state: "attention",
+                reason: "Add the first human or agent collaborator.",
+                href: "/team?project=project-1&focus=add-member",
+                actionLabel: "Add First Member",
+              },
+            ],
+            nextActions: [
+              {
+                id: "configure-governance",
+                label: "Configure Governance",
+                href: "/settings?project=project-1&section=repository",
+              },
+              {
+                id: "add-member",
+                label: "Add First Member",
+                href: "/team?project=project-1&focus=add-member",
+              },
+            ],
+          },
+        } as DashboardSummary}
+        loading={false}
+        error={null}
+        sectionErrors={{}}
+        onRetry={jest.fn()}
+      />
+    );
+
+    expect(screen.getByText("Project bootstrap")).toBeInTheDocument();
+    expect(
+      screen.getByText("Repository or coding-agent defaults still need configuration."),
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("link", { name: "Configure Governance" }),
+    ).toHaveAttribute("href", "/settings?project=project-1&section=repository");
+    expect(
+      screen.getByRole("link", { name: "Add First Member" }),
+    ).toHaveAttribute("href", "/team?project=project-1&focus=add-member");
   });
 });

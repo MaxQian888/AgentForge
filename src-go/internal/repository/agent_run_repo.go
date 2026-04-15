@@ -136,6 +136,28 @@ func (r *AgentRunRepository) ListByTeam(ctx context.Context, teamID uuid.UUID) (
 	return runs, nil
 }
 
+func (r *AgentRunRepository) ListByRole(ctx context.Context, roleID string, limit int) ([]*model.AgentRun, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	if limit <= 0 {
+		limit = 100
+	}
+	var records []agentRunRecord
+	if err := r.db.WithContext(ctx).
+		Where("role_id = ?", roleID).
+		Order("created_at DESC").
+		Limit(limit).
+		Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list agent runs by role: %w", err)
+	}
+	runs := make([]*model.AgentRun, len(records))
+	for i := range records {
+		runs[i] = records[i].toModel()
+	}
+	return runs, nil
+}
+
 func (r *AgentRunRepository) SetTeamFields(ctx context.Context, id uuid.UUID, teamID uuid.UUID, teamRole string) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable

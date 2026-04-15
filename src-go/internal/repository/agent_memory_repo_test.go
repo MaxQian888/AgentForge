@@ -150,7 +150,7 @@ func TestAgentMemoryRepository_ListFilteredAndDeleteMany(t *testing.T) {
 			Category:  model.MemoryCategorySemantic,
 			Key:       "release-plan",
 			Content:   "Use staged rollout",
-			Metadata:  `{"source":"ops"}`,
+			Metadata:  `{"source":"ops","tags":["ops"]}`,
 			CreatedAt: start,
 			UpdatedAt: start,
 		},
@@ -198,6 +198,16 @@ func TestAgentMemoryRepository_ListFilteredAndDeleteMany(t *testing.T) {
 	}
 	if len(filtered) != 1 || filtered[0].Key != "review-note" {
 		t.Fatalf("ListFiltered() = %#v, want only review-note", filtered)
+	}
+
+	tagFiltered, err := repo.ListFiltered(context.Background(), projectID, model.AgentMemoryFilter{
+		Tag: "ops",
+	})
+	if err != nil {
+		t.Fatalf("ListFiltered(tag) error = %v", err)
+	}
+	if len(tagFiltered) != 1 || tagFiltered[0].Key != "release-plan" {
+		t.Fatalf("ListFiltered(tag) = %#v, want only release-plan", tagFiltered)
 	}
 
 	deleted, err := repo.DeleteMany(context.Background(), []uuid.UUID{records[0].ID, records[2].ID})

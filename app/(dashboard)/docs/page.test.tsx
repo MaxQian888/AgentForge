@@ -2,8 +2,11 @@ import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import DocsLandingPage from "./page";
 
+const push = jest.fn();
 const searchParamsState = {
   pageId: null as string | null,
+  project: null as string | null,
+  action: null as string | null,
 };
 
 const docsStoreState = {
@@ -29,7 +32,10 @@ const docsStoreState = {
   fetchFavorites: jest.fn(),
   fetchRecentAccess: jest.fn(),
   createPage: jest.fn().mockResolvedValue(undefined),
+  createTemplate: jest.fn().mockResolvedValue(undefined),
   createPageFromTemplate: jest.fn().mockResolvedValue(undefined),
+  duplicateTemplate: jest.fn().mockResolvedValue(undefined),
+  deleteTemplate: jest.fn().mockResolvedValue(undefined),
   movePage: jest.fn().mockResolvedValue(undefined),
   toggleFavorite: jest.fn().mockResolvedValue(undefined),
   togglePinned: jest.fn().mockResolvedValue(undefined),
@@ -46,8 +52,16 @@ jest.mock("next-intl", () => ({
 }));
 
 jest.mock("next/navigation", () => ({
+  useRouter: () => ({ push }),
   useSearchParams: () => ({
-    get: (key: string) => (key === "pageId" ? searchParamsState.pageId : null),
+    get: (key: string) =>
+      key === "pageId"
+        ? searchParamsState.pageId
+        : key === "project"
+          ? searchParamsState.project
+          : key === "action"
+            ? searchParamsState.action
+            : null,
   }),
 }));
 
@@ -104,12 +118,35 @@ jest.mock("@/components/docs/docs-sidebar-panel", () => ({
 jest.mock("@/components/docs/template-center", () => ({
   TemplateCenter: ({
     onCreateFromTemplate,
+    onCreateTemplate,
+    onEditTemplate,
+    onDuplicateTemplate,
+    onDeleteTemplate,
   }: {
     onCreateFromTemplate: (templateId: string) => void;
+    onCreateTemplate: (input: { title: string; category: string }) => void;
+    onEditTemplate: (templateId: string) => void;
+    onDuplicateTemplate: (input: { templateId: string; name: string; category: string }) => void;
+    onDeleteTemplate: (templateId: string) => void;
   }) => (
     <div data-testid="template-center">
       <button type="button" onClick={() => onCreateFromTemplate("template-1")}>
         create-from-center
+      </button>
+      <button type="button" onClick={() => onCreateTemplate({ title: "Blank Template", category: "custom" })}>
+        create-template
+      </button>
+      <button type="button" onClick={() => onEditTemplate("template-1")}>
+        edit-template
+      </button>
+      <button
+        type="button"
+        onClick={() => onDuplicateTemplate({ templateId: "template-1", name: "Template Copy", category: "custom" })}
+      >
+        duplicate-template
+      </button>
+      <button type="button" onClick={() => onDeleteTemplate("template-1")}>
+        delete-template
       </button>
     </div>
   ),
@@ -121,11 +158,11 @@ jest.mock("@/components/docs/template-picker", () => ({
     onPick,
   }: {
     open: boolean;
-    onPick: (templateId: string) => void;
+    onPick: (selection: { templateId: string; title: string; parentId?: string | null }) => void;
   }) =>
     open ? (
       <div data-testid="template-picker">
-        <button type="button" onClick={() => onPick("template-1")}>
+        <button type="button" onClick={() => onPick({ templateId: "template-1", title: "Template Draft", parentId: "page-1" })}>
           pick-template
         </button>
       </div>
@@ -156,13 +193,19 @@ jest.mock("@/lib/stores/docs-store", () => ({
 describe("DocsLandingPage", () => {
   beforeEach(() => {
     searchParamsState.pageId = null;
+    searchParamsState.project = null;
+    searchParamsState.action = null;
     dashboardState.selectedProjectId = null;
     docsStoreState.fetchTree.mockReset();
     docsStoreState.fetchTemplates.mockReset();
     docsStoreState.fetchFavorites.mockReset();
     docsStoreState.fetchRecentAccess.mockReset();
     docsStoreState.createPage.mockReset().mockResolvedValue(undefined);
+    docsStoreState.createTemplate.mockReset().mockResolvedValue(undefined);
+    docsStoreState.duplicateTemplate.mockReset().mockResolvedValue(undefined);
+    docsStoreState.deleteTemplate.mockReset().mockResolvedValue(undefined);
     docsStoreState.setProjectId.mockReset();
+    push.mockReset();
   });
 
   it("shows the empty state until a project is selected", () => {
@@ -171,6 +214,27 @@ describe("DocsLandingPage", () => {
     expect(screen.getByRole("heading", { name: "docs.title" })).toBeInTheDocument();
     expect(screen.getByTestId("empty-state")).toHaveTextContent("docs.selectProject");
     expect(docsStoreState.fetchTree).not.toHaveBeenCalled();
+  });
+
+  it("uses explicit project scope and opens the template picker for bootstrap handoffs", async () => {
+    const user = userEvent.setup();
+    searchParamsState.project = "project-5";
+    searchParamsState.action = "use-template";
+
+    render(<DocsLandingPage />);
+
+    await waitFor(() => {
+      expect(docsStoreState.setProjectId).toHaveBeenCalledWith("project-5");
+    });
+    expect(screen.getByTestId("template-picker")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "pick-template" }));
+    expect(docsStoreState.createPageFromTemplate).toHaveBeenCalledWith(
+      expect.objectContaining({
+        projectId: "project-5",
+        templateId: "template-1",
+      }),
+    );
   });
 
   it("delegates to the page detail client when a page id query param is present", () => {
@@ -206,6 +270,10 @@ describe("DocsLandingPage", () => {
     await user.click(screen.getByRole("button", { name: "favorite-doc" }));
     await user.click(screen.getByRole("button", { name: "pin-doc" }));
     await user.click(screen.getByRole("button", { name: "create-from-center" }));
+    await user.click(screen.getByRole("button", { name: "create-template" }));
+    await user.click(screen.getByRole("button", { name: "edit-template" }));
+    await user.click(screen.getByRole("button", { name: "duplicate-template" }));
+    await user.click(screen.getByRole("button", { name: "delete-template" }));
     await user.click(screen.getByRole("button", { name: "docs.useTemplate" }));
     await user.click(screen.getByRole("button", { name: "pick-template" }));
     await user.click(screen.getByRole("button", { name: "docs.newPage" }));
@@ -226,19 +294,31 @@ describe("DocsLandingPage", () => {
       pageId: "page-1",
       pinned: true,
     });
-    expect(docsStoreState.createPageFromTemplate).toHaveBeenNthCalledWith(1, {
+    expect(docsStoreState.createPageFromTemplate).toHaveBeenCalledWith({
       projectId: "project-5",
       templateId: "template-1",
-      title: "docs.newFromTemplate",
-    });
-    expect(docsStoreState.createPageFromTemplate).toHaveBeenNthCalledWith(2, {
-      projectId: "project-5",
-      templateId: "template-1",
-      title: "docs.newFromTemplate",
+      title: "Template Draft",
+      parentId: "page-1",
     });
     expect(docsStoreState.createPage).toHaveBeenCalledWith({
       projectId: "project-5",
       title: "docs.untitledDoc",
     });
+    expect(docsStoreState.createTemplate).toHaveBeenCalledWith({
+      projectId: "project-5",
+      title: "Blank Template",
+      category: "custom",
+    });
+    expect(docsStoreState.duplicateTemplate).toHaveBeenCalledWith({
+      projectId: "project-5",
+      templateId: "template-1",
+      name: "Template Copy",
+      category: "custom",
+    });
+    expect(docsStoreState.deleteTemplate).toHaveBeenCalledWith({
+      projectId: "project-5",
+      templateId: "template-1",
+    });
+    expect(push).toHaveBeenNthCalledWith(1, "/docs?pageId=template-1");
   });
 });

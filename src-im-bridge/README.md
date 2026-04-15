@@ -39,7 +39,7 @@ Set `IM_TRANSPORT_MODE` explicitly:
 
 The bridge validates credentials for the selected platform before startup:
 
-- `feishu`: `FEISHU_APP_ID` and `FEISHU_APP_SECRET` for live long connection
+- `feishu`: `FEISHU_APP_ID` and `FEISHU_APP_SECRET` for live long connection; optional `FEISHU_VERIFICATION_TOKEN`, `FEISHU_EVENT_ENCRYPT_KEY`, and `FEISHU_CALLBACK_PATH` when the deployment also exposes a webhook callback endpoint
 - `slack`: required `SLACK_BOT_TOKEN` and `SLACK_APP_TOKEN`
 - `dingtalk`: required `DINGTALK_APP_KEY` and `DINGTALK_APP_SECRET`
 - `wecom`: required `WECOM_CORP_ID`, `WECOM_AGENT_ID`, `WECOM_AGENT_SECRET`, `WECOM_CALLBACK_TOKEN`, and `WECOM_CALLBACK_PORT`; optional `WECOM_CALLBACK_PATH`
@@ -179,6 +179,7 @@ For Feishu specifically, the native payload surface now supports:
 - provider-owned richer text/card builders for action completion and delayed-update content
 - delayed card updates through preserved callback token context when the originating reply target supports it
 - explicit `fallback_reason` reporting when delayed update cannot be used and the bridge has to fall back to a reply/send path
+- `/help` quick actions only when the active runtime can actually receive `card.action.trigger` through long connection or an exposed webhook callback; otherwise the help card falls back to manual command guidance
 
 For Telegram specifically, the rendering profile now supports:
 

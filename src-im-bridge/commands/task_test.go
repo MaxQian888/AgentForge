@@ -23,6 +23,11 @@ type taskCardPlatform struct {
 	cards []*core.Card
 }
 
+type feishuTaskCardPlatform struct {
+	taskCardPlatform
+	metadata core.PlatformMetadata
+}
+
 func (p *taskTestPlatform) Name() string                                                  { return "slack-stub" }
 func (p *taskTestPlatform) Start(handler core.MessageHandler) error                       { return nil }
 func (p *taskTestPlatform) Stop() error                                                   { return nil }
@@ -44,6 +49,24 @@ func (p *taskCardPlatform) ReplyCard(ctx context.Context, replyCtx any, card *co
 	defer p.mu.Unlock()
 	p.cards = append(p.cards, card)
 	return nil
+}
+
+func (p *feishuTaskCardPlatform) Name() string { return "feishu-live" }
+
+func (p *feishuTaskCardPlatform) Metadata() core.PlatformMetadata {
+	if p.metadata.Source != "" {
+		return p.metadata
+	}
+	return core.NormalizeMetadata(core.PlatformMetadata{
+		Source: "feishu",
+		Capabilities: core.PlatformCapabilities{
+			CommandSurface:         core.CommandSurfaceMixed,
+			StructuredSurface:      core.StructuredSurfaceCards,
+			SupportsRichMessages:   true,
+			ActionCallbackMode:     core.ActionCallbackWebhook,
+			RequiresPublicCallback: true,
+		},
+	}, "feishu")
 }
 
 func TestTaskCommand_CreateRequiresTitle(t *testing.T) {
@@ -117,7 +140,11 @@ func TestTaskCommand_CreateRepliesWithCardWhenSupported(t *testing.T) {
 	if platform.cards[0].Title != "任务 #task-123" {
 		t.Fatalf("card title = %q", platform.cards[0].Title)
 	}
-	if len(platform.cards[0].Buttons) != 2 {
+	if len(platform.cards[0].Buttons) != 3 {
+		t.Fatalf("buttons = %+v", platform.cards[0].Buttons)
+	}
+	action, entityID, metadata, ok := core.ParseActionReferenceWithMetadata(platform.cards[0].Buttons[0].Action)
+	if !ok || action != "transition-task" || entityID != "task-123456" || metadata["targetStatus"] != "assigned" {
 		t.Fatalf("buttons = %+v", platform.cards[0].Buttons)
 	}
 }
@@ -258,6 +285,142 @@ func TestTaskCommand_StatusRepliesWithCardWhenSupported(t *testing.T) {
 	}
 	if len(card.Fields) < 4 {
 		t.Fatalf("fields = %+v", card.Fields)
+	}
+}
+
+func TestTaskCommand_StatusPlainTextIncludesNextStepGuidance(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&client.Task{
+			ID:           "task-123",
+			Title:        "Bridge rollout",
+			Status:       "assigned",
+			Priority:     "high",
+			AssigneeName: "Alice",
+			SpentUsd:     1.25,
+			BudgetUsd:    3.5,
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &taskTestPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "slack-stub",
+		Content:  "/task status task-123",
+	})
+
+	if len(platform.replies) != 1 {
+		t.Fatalf("replies = %v", platform.replies)
+	}
+	for _, want := range []string{"Bridge rollout", "状态: assigned", "/task move task-123 in_progress"} {
+		if !strings.Contains(platform.replies[0], want) {
+			t.Fatalf("reply = %q, want substring %q", platform.replies[0], want)
+		}
+	}
+}
+
+func TestTaskCommand_StatusOmitsCallbackActionsWhenFeishuCallbackUnavailable(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&client.Task{
+			ID:           "task-123456",
+			ProjectID:    "project-1",
+			Title:        "Bridge rollout",
+			Status:       "triaged",
+			Priority:     "high",
+			AssigneeName: "Alice",
+			SpentUsd:     1.25,
+			BudgetUsd:    3.5,
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &feishuTaskCardPlatform{}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "feishu",
+		Content:  "/task status task-123456",
+	})
+
+	if len(platform.cards) != 1 {
+		t.Fatalf("cards len = %d, want 1", len(platform.cards))
+	}
+	for _, button := range platform.cards[0].Buttons {
+		if strings.HasPrefix(button.Action, "act:") {
+			t.Fatalf("buttons = %+v, want no callback-backed actions", platform.cards[0].Buttons)
+		}
+	}
+	foundGuidance := false
+	for _, field := range platform.cards[0].Fields {
+		if strings.Contains(field.Value, "/task move task-123456 assigned") {
+			foundGuidance = true
+			break
+		}
+	}
+	if !foundGuidance {
+		t.Fatalf("fields = %+v, want manual next-step guidance", platform.cards[0].Fields)
+	}
+}
+
+func TestTaskCommand_StatusExposesTransitionActionWhenFeishuCallbackReady(t *testing.T) {
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		_ = json.NewEncoder(w).Encode(&client.Task{
+			ID:           "task-654321",
+			ProjectID:    "project-1",
+			Title:        "Bridge rollout",
+			Status:       "assigned",
+			Priority:     "high",
+			AssigneeName: "Alice",
+			SpentUsd:     1.25,
+			BudgetUsd:    3.5,
+		})
+	}))
+	defer server.Close()
+
+	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
+	platform := &feishuTaskCardPlatform{
+		metadata: core.NormalizeMetadata(core.PlatformMetadata{
+			Source: "feishu",
+			Capabilities: core.PlatformCapabilities{
+				CommandSurface:       core.CommandSurfaceMixed,
+				StructuredSurface:    core.StructuredSurfaceCards,
+				SupportsRichMessages: true,
+				ActionCallbackMode:   core.ActionCallbackSocketPayload,
+			},
+		}, "feishu"),
+	}
+	engine := core.NewEngine(platform)
+	RegisterTaskCommands(engine, apiClient)
+
+	engine.HandleMessage(platform, &core.Message{
+		Platform: "feishu",
+		Content:  "/task status task-654321",
+	})
+
+	if len(platform.cards) != 1 {
+		t.Fatalf("cards len = %d, want 1", len(platform.cards))
+	}
+	foundTransition := false
+	for _, button := range platform.cards[0].Buttons {
+		action, entityID, metadata, ok := core.ParseActionReferenceWithMetadata(button.Action)
+		if !ok {
+			continue
+		}
+		if action == "transition-task" && entityID == "task-654321" && metadata["targetStatus"] == "in_progress" {
+			foundTransition = true
+			break
+		}
+	}
+	if !foundTransition {
+		t.Fatalf("buttons = %+v, want transition-task action", platform.cards[0].Buttons)
 	}
 }
 
@@ -651,25 +814,29 @@ func TestTaskHelpers_BuildCardShortIDResolveMemberAndDispatchReply(t *testing.T)
 	if card.Title != "任务 #task-123" {
 		t.Fatalf("title = %q", card.Title)
 	}
-	if len(card.Fields) != 5 {
+	if len(card.Fields) != 6 {
 		t.Fatalf("fields = %+v", card.Fields)
 	}
-	if len(card.Buttons) != 4 || card.Buttons[0].Style != "primary" {
+	if len(card.Buttons) != 5 || card.Buttons[0].Style != "primary" {
 		t.Fatalf("buttons = %+v", card.Buttons)
 	}
-	if card.Buttons[1].Text != "保存为文档" || card.Buttons[2].Text != "创建跟进任务" {
+	action, entityID, metadata, ok := core.ParseActionReferenceWithMetadata(card.Buttons[0].Action)
+	if !ok || action != "transition-task" || entityID != "task-12345678" || metadata["targetStatus"] != "assigned" {
+		t.Fatalf("transition action = %+v", card.Buttons[0])
+	}
+	if card.Buttons[2].Text != "保存为文档" || card.Buttons[3].Text != "创建跟进任务" {
 		t.Fatalf("buttons = %+v", card.Buttons)
 	}
-	action, entityID, metadata, ok := core.ParseActionReferenceWithMetadata(card.Buttons[1].Action)
+	action, entityID, metadata, ok = core.ParseActionReferenceWithMetadata(card.Buttons[2].Action)
 	if !ok || action != "save-as-doc" || entityID != "project-1" {
-		t.Fatalf("doc action = %q", card.Buttons[1].Action)
+		t.Fatalf("doc action = %q", card.Buttons[2].Action)
 	}
 	if metadata["title"] != "Bridge rollout" || metadata["body"] != "Capture the bridge rollout details" {
 		t.Fatalf("doc metadata = %+v", metadata)
 	}
-	action, entityID, metadata, ok = core.ParseActionReferenceWithMetadata(card.Buttons[2].Action)
+	action, entityID, metadata, ok = core.ParseActionReferenceWithMetadata(card.Buttons[3].Action)
 	if !ok || action != "create-task" || entityID != "project-1" {
-		t.Fatalf("task action = %q", card.Buttons[2].Action)
+		t.Fatalf("task action = %q", card.Buttons[3].Action)
 	}
 	if metadata["title"] != "Follow up: Bridge rollout" || metadata["priority"] != "high" {
 		t.Fatalf("task metadata = %+v", metadata)

@@ -127,6 +127,9 @@ other = "无效的版本 ID"
 [InvalidTemplateID]
 other = "无效的模板 ID"
 
+[WikiTemplateImmutable]
+other = "内置模板不允许直接编辑或删除"
+
 [InvalidMemoryID]
 other = "无效的记忆 ID"
 

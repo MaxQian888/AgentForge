@@ -2,9 +2,11 @@ import { useWorkflowStore } from "./workflow-store";
 
 const mockGet = jest.fn();
 const mockPut = jest.fn();
+const mockPost = jest.fn();
+const mockDelete = jest.fn();
 
 jest.mock("@/lib/api-client", () => ({
-  createApiClient: () => ({ get: mockGet, put: mockPut }),
+  createApiClient: () => ({ get: mockGet, put: mockPut, post: mockPost, delete: mockDelete }),
 }));
 
 jest.mock("./auth-store", () => ({
@@ -24,9 +26,14 @@ beforeEach(() => {
     saving: false,
     error: null,
     recentActivityByProject: {},
+    definitions: [],
+    templates: [],
+    selectedDefinition: null,
   });
   mockGet.mockReset();
   mockPut.mockReset();
+  mockPost.mockReset();
+  mockDelete.mockReset();
   authStoreModule.useAuthStore.getState.mockReturnValue({
     accessToken: "test-token",
   });
@@ -38,7 +45,7 @@ describe("useWorkflowStore", () => {
       id: "wf-1",
       projectId: "proj-1",
       transitions: { inbox: ["triaged"] },
-      triggers: [{ fromStatus: "triaged", toStatus: "assigned", action: "auto_assign" }],
+      triggers: [{ fromStatus: "triaged", toStatus: "assigned", action: "dispatch_agent" }],
     };
 
     mockGet.mockResolvedValueOnce({ data: mockConfig });
@@ -164,5 +171,136 @@ describe("useWorkflowStore", () => {
 
   it("fetchPendingReviews is a function on the store", () => {
     expect(typeof useWorkflowStore.getState().fetchPendingReviews).toBe("function");
+  });
+
+  it("fetches project-aware workflow templates", async () => {
+    mockGet.mockResolvedValueOnce({
+      data: [
+        {
+          id: "template-1",
+          projectId: "00000000-0000-0000-0000-000000000000",
+          name: "Plan Code Review",
+          description: "System template",
+          status: "template",
+          category: "system",
+          templateSource: "system",
+          canClone: true,
+          canExecute: true,
+          nodes: [],
+          edges: [],
+          version: 1,
+          createdAt: "2026-04-15T00:00:00.000Z",
+          updatedAt: "2026-04-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    await useWorkflowStore.getState().fetchTemplates("proj-1", {
+      query: "plan",
+      source: "system",
+    });
+
+    expect(mockGet).toHaveBeenCalledWith(
+      "/api/v1/workflow-templates?q=plan&source=system",
+      { token: "test-token", headers: { "X-Project-ID": "proj-1" } },
+    );
+    expect(useWorkflowStore.getState().templates).toEqual([
+      expect.objectContaining({ id: "template-1", templateSource: "system" }),
+    ]);
+  });
+
+  it("publishes, duplicates, and deletes workflow templates", async () => {
+    useWorkflowStore.setState({
+      definitions: [
+        {
+          id: "workflow-9",
+          projectId: "proj-1",
+          name: "Active Workflow",
+          description: "Project workflow",
+          status: "active",
+          category: "user",
+          nodes: [],
+          edges: [],
+          version: 1,
+          createdAt: "2026-04-15T00:00:00.000Z",
+          updatedAt: "2026-04-15T00:00:00.000Z",
+        },
+      ],
+    });
+
+    mockPost
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-2",
+          projectId: "proj-1",
+          name: "Project Template",
+          description: "Reusable flow",
+          status: "template",
+          category: "user",
+          templateSource: "user",
+          canEdit: true,
+          canDelete: true,
+          nodes: [],
+          edges: [],
+          version: 1,
+          createdAt: "2026-04-15T00:00:00.000Z",
+          updatedAt: "2026-04-15T00:00:00.000Z",
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "template-3",
+          projectId: "proj-1",
+          name: "Template Copy",
+          description: "Custom copy",
+          status: "template",
+          category: "user",
+          templateSource: "user",
+          canEdit: true,
+          canDelete: true,
+          nodes: [],
+          edges: [],
+          version: 1,
+          createdAt: "2026-04-15T00:01:00.000Z",
+          updatedAt: "2026-04-15T00:01:00.000Z",
+        },
+      });
+    mockDelete.mockResolvedValueOnce({});
+
+    const published = await useWorkflowStore.getState().publishTemplate("wf-1", "proj-1", {
+      name: "Project Template",
+      description: "Reusable flow",
+    });
+    const duplicated = await useWorkflowStore.getState().duplicateTemplate("template-1", "proj-1", {
+      name: "Template Copy",
+      description: "Custom copy",
+    });
+    const deleted = await useWorkflowStore.getState().deleteTemplate("template-2", "proj-1");
+
+    expect(mockPost).toHaveBeenNthCalledWith(
+      1,
+      "/api/v1/workflows/wf-1/publish-template",
+      { name: "Project Template", description: "Reusable flow" },
+      { token: "test-token", headers: { "X-Project-ID": "proj-1" } },
+    );
+    expect(mockPost).toHaveBeenNthCalledWith(
+      2,
+      "/api/v1/workflow-templates/template-1/duplicate",
+      { name: "Template Copy", description: "Custom copy" },
+      { token: "test-token", headers: { "X-Project-ID": "proj-1" } },
+    );
+    expect(mockDelete).toHaveBeenCalledWith("/api/v1/workflow-templates/template-2", {
+      token: "test-token",
+      headers: { "X-Project-ID": "proj-1" },
+    });
+    expect(published).toEqual(expect.objectContaining({ id: "template-2" }));
+    expect(duplicated).toEqual(expect.objectContaining({ id: "template-3" }));
+    expect(deleted).toBe(true);
+    expect(useWorkflowStore.getState().templates).toEqual([
+      expect.objectContaining({ id: "template-3" }),
+    ]);
+    expect(useWorkflowStore.getState().definitions).toEqual([
+      expect.objectContaining({ id: "workflow-9", status: "active" }),
+    ]);
   });
 });

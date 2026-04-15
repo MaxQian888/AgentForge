@@ -21,6 +21,7 @@ export function TeamPageClient() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const requestedProjectId = searchParams.get("project");
+  const requestedFocus = searchParams.get("focus");
   const dashboardProjects = useDashboardStore((state) => state.projects);
   const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
   const tasks = useDashboardStore((state) => state.tasks);
@@ -164,6 +165,14 @@ export function TeamPageClient() {
       members={roster}
       loading={loading}
       error={error}
+      initialFocus={
+        requestedFocus === "add-member" ||
+        requestedFocus === "setup-required" ||
+        requestedFocus === "inactive" ||
+        requestedFocus === "suspended"
+          ? requestedFocus
+          : null
+      }
       bulkUpdatePending={bulkUpdatePending}
       bulkUpdateResult={bulkUpdateResult}
       availableRoles={roles}

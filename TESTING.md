@@ -123,7 +123,7 @@ Important current behavior:
   - `.next/`
   - `out/`
   - `app/page.test.tsx`
-  - `scripts/build-go-wasm-plugin.test.mjs`
+  - `scripts/plugin/build-go-wasm-plugin.test.mjs`
 
 That means root Jest is intentionally **not** the authoritative test surface for
 the bridge, Rust desktop code, or review-plugin workspaces.

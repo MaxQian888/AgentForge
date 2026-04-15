@@ -18,8 +18,8 @@ Comprehensively improve `pnpm dev:backend` to fix Windows process management, su
 - Add graceful shutdown attempt before force kill (SIGTERM equivalent timeout)
 
 ### Files
-- `scripts/dev-workflow.js` — new `killProcessTree()` function
-- `scripts/dev-all.js` — update `stopManagedServiceProcesses()`
+- `scripts/dev/dev-workflow.js` — new `killProcessTree()` function
+- `scripts/dev/dev-all.js` — update `stopManagedServiceProcesses()`
 
 ## 2. No-Docker Degradation
 
@@ -34,7 +34,7 @@ When Docker Desktop is unavailable, `pnpm dev:backend` fails completely even if 
 - New infra service kind: `probe-or-compose` — probe first, compose as fallback
 
 ### Files
-- `scripts/dev-all.js` — update `ensureInfrastructure()` with probe-first logic
+- `scripts/dev/dev-all.js` — update `ensureInfrastructure()` with probe-first logic
 
 ## 3. Air Hot-Reload Integration
 
@@ -50,7 +50,7 @@ Go backend requires manual restart after code changes.
 
 ### Files
 - `src-go/.air.toml` — air configuration
-- `scripts/dev-all.js` — conditional air detection in service definitions
+- `scripts/dev/dev-all.js` — conditional air detection in service definitions
 
 ## 4. Single-Service Restart
 
@@ -64,7 +64,7 @@ No way to restart one service without stopping everything.
 - Validate health before reporting success
 
 ### Files
-- `scripts/dev-all.js` — new `runWorkflowRestart()` function, update `main()` CLI parser
+- `scripts/dev/dev-all.js` — new `runWorkflowRestart()` function, update `main()` CLI parser
 
 ## 5. Enhanced Output & Diagnostics
 
@@ -81,8 +81,8 @@ No way to restart one service without stopping everything.
 - Warn if versions are below minimum (Go 1.22+, Bun 1.0+)
 
 ### Files
-- `scripts/dev-workflow.js` — color helpers, version checks
-- `scripts/dev-all.js` — update all `print*()` functions
+- `scripts/dev/dev-workflow.js` — color helpers, version checks
+- `scripts/dev/dev-all.js` — update all `print*()` functions
 
 ## Implementation Order
 

@@ -1,7 +1,17 @@
 "use client";
 
 import { useEffect } from "react";
-import { useAutomationStore } from "@/lib/stores/automation-store";
+import {
+  type AutomationLogActionOutcome,
+  useAutomationStore,
+} from "@/lib/stores/automation-store";
+
+function renderActionOutcome(outcome: AutomationLogActionOutcome) {
+  const target = outcome.pluginId ? ` ${outcome.pluginId}` : "";
+  const run = outcome.runId ? ` (#${outcome.runId})` : "";
+  const reason = outcome.reason ? ` - ${outcome.reason}` : "";
+  return `${outcome.type} ${outcome.outcome}${target}${run}${reason}`;
+}
 
 export function AutomationLogViewer({ projectId }: { projectId: string }) {
   const logs = useAutomationStore((state) => state.logsByProject[projectId] ?? []);
@@ -19,6 +29,15 @@ export function AutomationLogViewer({ projectId }: { projectId: string }) {
             {log.eventType} · {log.status}
           </div>
           <div className="text-muted-foreground">{log.triggeredAt}</div>
+          {log.detail.actionOutcomes?.length ? (
+            <div className="mt-1 text-xs text-muted-foreground">
+              {log.detail.actionOutcomes.map((outcome) => (
+                <div key={`${log.id}-${outcome.type}-${outcome.runId ?? outcome.reasonCode ?? outcome.outcome}`}>
+                  {renderActionOutcome(outcome)}
+                </div>
+              ))}
+            </div>
+          ) : null}
         </div>
       ))}
     </div>

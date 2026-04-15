@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useEffect, useMemo, useState } from "react";
+import { Suspense, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Plus } from "lucide-react";
@@ -241,6 +241,8 @@ function ProjectView() {
   const router = useRouter();
   const projectId = searchParams.get("id");
   const requestedMemberId = searchParams.get("member");
+  const requestedSprintId = searchParams.get("sprint");
+  const requestedAction = searchParams.get("action");
   const loading = useTaskStore((state) => state.loading);
   const error = useTaskStore((state) => state.error);
   const tasks = useTaskStore((state) => state.tasks);
@@ -259,6 +261,7 @@ function ProjectView() {
   const realtimeConnected = useWSStore((state) => state.connected);
   const sprintFilterId = useTaskWorkspaceStore((state) => state.filters.sprintId);
   const setAssigneeId = useTaskWorkspaceStore((state) => state.setAssigneeId);
+  const setSprintId = useTaskWorkspaceStore((state) => state.setSprintId);
   const sprintsByProject = useSprintStore((state) => state.sprintsByProject);
   const metricsBySprintId = useSprintStore((state) => state.metricsBySprintId);
   const metricsLoadingBySprintId = useSprintStore(
@@ -266,10 +269,24 @@ function ProjectView() {
   );
   const fetchSprints = useSprintStore((state) => state.fetchSprints);
   const fetchSprintMetrics = useSprintStore((state) => state.fetchSprintMetrics);
-  const [createTaskDialogOpen, setCreateTaskDialogOpen] = useState(false);
+  const createTaskActionSeed = requestedAction === "create-task" && projectId ? projectId : null;
+  const [manualCreateTaskDialogOpen, setManualCreateTaskDialogOpen] = useState(false);
+  const [dismissedCreateTaskActionSeed, setDismissedCreateTaskActionSeed] = useState<string | null>(
+    null
+  );
+  const seededSprintScopeRef = useRef<string | null>(null);
   const project = useProjectStore((state) =>
     state.projects.find((item) => item.id === projectId)
   );
+  const createTaskDialogOpen =
+    manualCreateTaskDialogOpen ||
+    (createTaskActionSeed !== null && dismissedCreateTaskActionSeed !== createTaskActionSeed);
+  const handleCreateTaskDialogOpenChange = (open: boolean) => {
+    setManualCreateTaskDialogOpen(open);
+    if (!open && createTaskActionSeed) {
+      setDismissedCreateTaskActionSeed(createTaskActionSeed);
+    }
+  };
 
   useEffect(() => {
     if (!projectId) {
@@ -293,6 +310,10 @@ function ProjectView() {
   const sprints = useMemo(
     () => (projectId ? sprintsByProject[projectId] ?? [] : []),
     [projectId, sprintsByProject]
+  );
+  const hasLoadedProjectSprintScope = useMemo(
+    () => (projectId ? Object.prototype.hasOwnProperty.call(sprintsByProject, projectId) : false),
+    [projectId, sprintsByProject],
   );
   const projectTaskIds = useMemo(
     () => new Set(projectTasks.map((task) => task.id)),
@@ -332,6 +353,41 @@ function ProjectView() {
     setAssigneeId(requestedMemberId ?? "all");
   }, [requestedMemberId, setAssigneeId, projectId]);
 
+  useEffect(() => {
+    if (!projectId) {
+      seededSprintScopeRef.current = null;
+      return;
+    }
+
+    const seedKey = `${projectId}:${requestedSprintId ?? "__none__"}`;
+    if (seededSprintScopeRef.current === seedKey) {
+      return;
+    }
+
+    if (!requestedSprintId) {
+      setSprintId("all");
+      seededSprintScopeRef.current = seedKey;
+      return;
+    }
+
+    if (!hasLoadedProjectSprintScope) {
+      return;
+    }
+
+    if (sprints.some((sprint) => sprint.id === requestedSprintId)) {
+      setSprintId(requestedSprintId);
+    } else {
+      setSprintId("all");
+    }
+    seededSprintScopeRef.current = seedKey;
+  }, [
+    hasLoadedProjectSprintScope,
+    projectId,
+    requestedSprintId,
+    setSprintId,
+    sprints,
+  ]);
+
   if (!projectId) return null;
 
   return (
@@ -341,7 +397,7 @@ function ProjectView() {
         sprints={sprints}
         tasks={projectTasks}
         open={createTaskDialogOpen}
-        onOpenChange={setCreateTaskDialogOpen}
+        onOpenChange={handleCreateTaskDialogOpenChange}
       />
       <ProjectTaskWorkspace
         projectId={projectId}
@@ -361,7 +417,7 @@ function ProjectView() {
         onTaskStatusChange={transitionTask}
         onTaskScheduleChange={(taskId, changes) => updateTask(taskId, changes)}
         onTaskSave={updateTask}
-        onCreateTask={() => setCreateTaskDialogOpen(true)}
+        onCreateTask={() => setManualCreateTaskDialogOpen(true)}
         onTaskAssign={handleTaskAssign}
         onBulkStatusChange={async (ids, status) => {
           const failed = (

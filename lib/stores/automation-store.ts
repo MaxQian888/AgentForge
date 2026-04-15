@@ -7,14 +7,62 @@ import { useAuthStore } from "./auth-store";
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
+export interface AutomationCondition {
+  field: string;
+  op: string;
+  value: unknown;
+}
+
+export interface AutomationAction {
+  type: string;
+  config: Record<string, unknown>;
+}
+
+export interface AutomationLogActionOutcome {
+  type: string;
+  outcome: string;
+  reasonCode?: string;
+  reason?: string;
+  pluginId?: string;
+  runId?: string;
+}
+
+export interface AutomationLogDetail {
+  actionCount?: number;
+  actionOutcomes?: AutomationLogActionOutcome[];
+  error?: string;
+  reason?: string;
+  [key: string]: unknown;
+}
+
+export const AUTOMATION_EVENT_TYPES = [
+  "task.status_changed",
+  "task.assignee_changed",
+  "task.field_changed",
+  "task.due_date_approaching",
+  "review.completed",
+  "budget.threshold_reached",
+] as const;
+
+export const AUTOMATION_ACTION_TYPES = [
+  "send_notification",
+  "send_im_message",
+  "update_field",
+  "assign_user",
+  "move_to_column",
+  "create_subtask",
+  "invoke_plugin",
+  "start_workflow",
+] as const;
+
 export interface AutomationRule {
   id: string;
   projectId: string;
   name: string;
   enabled: boolean;
   eventType: string;
-  conditions: unknown;
-  actions: unknown;
+  conditions: AutomationCondition[];
+  actions: AutomationAction[];
   createdBy: string;
   createdAt: string;
   updatedAt: string;
@@ -27,7 +75,7 @@ export interface AutomationLog {
   eventType: string;
   triggeredAt: string;
   status: string;
-  detail: unknown;
+  detail: AutomationLogDetail;
 }
 
 interface AutomationState {

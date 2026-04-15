@@ -16,9 +16,9 @@ check-only stub:
 - `src-tauri/tauri.conf.json` carries the production updater endpoint, while
   `src-tauri/tauri.updater.conf.json` enables `bundle.createUpdaterArtifacts`
   for releasable builds.
-- `scripts/build-updater-manifest.js` builds a Tauri v2-compatible static
+- `scripts/release/build-updater-manifest.js` builds a Tauri v2-compatible static
   manifest from authoritative artifacts, and
-  `scripts/validate-updater-artifacts.js` rejects missing files or missing
+  `scripts/release/validate-updater-artifacts.js` rejects missing files or missing
   required platform entries before release publication.
 
 ## Required Release Inputs
@@ -46,9 +46,9 @@ check-only stub:
   `src-tauri/tauri.updater.conf.json` overlay and requires updater signing
   inputs.
 - The release job generates `artifacts/latest.json` with
-  `scripts/build-updater-manifest.js`.
+  `scripts/release/build-updater-manifest.js`.
 - The release job then validates that every manifest entry resolves to a real
-  downloaded artifact through `scripts/validate-updater-artifacts.js`.
+  downloaded artifact through `scripts/release/validate-updater-artifacts.js`.
 
 ## Local And Release Commands
 

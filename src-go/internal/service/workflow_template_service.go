@@ -3,11 +3,18 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
 	log "github.com/sirupsen/logrus"
+)
+
+var (
+	ErrWorkflowTemplateNotFound = errors.New("workflow template not found")
+	ErrWorkflowTemplateImmutable = errors.New("workflow template is immutable")
 )
 
 // WorkflowTemplateRepo is the subset of DAGWorkflowDefinitionRepo needed by the template service,
@@ -16,7 +23,9 @@ type WorkflowTemplateRepo interface {
 	Create(ctx context.Context, def *model.WorkflowDefinition) error
 	GetByID(ctx context.Context, id uuid.UUID) (*model.WorkflowDefinition, error)
 	Update(ctx context.Context, id uuid.UUID, def *model.WorkflowDefinition) error
+	Delete(ctx context.Context, id uuid.UUID) error
 	ListTemplates(ctx context.Context, category string) ([]*model.WorkflowDefinition, error)
+	ListTemplatesForProject(ctx context.Context, projectID uuid.UUID, query string, category string, source string) ([]*model.WorkflowDefinition, error)
 	ListTemplatesByName(ctx context.Context, name string) ([]*model.WorkflowDefinition, error)
 }
 
@@ -30,19 +39,19 @@ func NewWorkflowTemplateService(repo WorkflowTemplateRepo, dagSvc *DAGWorkflowSe
 	return &WorkflowTemplateService{repo: repo, dagSvc: dagSvc}
 }
 
-// ListTemplates returns all workflow templates, optionally filtered by category.
-func (s *WorkflowTemplateService) ListTemplates(ctx context.Context, category string) ([]*model.WorkflowDefinition, error) {
-	return s.repo.ListTemplates(ctx, category)
+// ListTemplates returns workflow templates visible to the current project.
+func (s *WorkflowTemplateService) ListTemplates(ctx context.Context, projectID uuid.UUID, query string, category string, source string) ([]*model.WorkflowDefinition, error) {
+	return s.repo.ListTemplatesForProject(ctx, projectID, query, category, source)
 }
 
 // CloneTemplate creates a new active workflow definition from a template.
 func (s *WorkflowTemplateService) CloneTemplate(ctx context.Context, templateID uuid.UUID, projectID uuid.UUID, overrides map[string]any) (*model.WorkflowDefinition, error) {
 	tmpl, err := s.repo.GetByID(ctx, templateID)
 	if err != nil {
-		return nil, fmt.Errorf("get template: %w", err)
+		return nil, ErrWorkflowTemplateNotFound
 	}
 	if tmpl.Status != model.WorkflowDefStatusTemplate {
-		return nil, fmt.Errorf("definition %s is not a template (status: %s)", templateID, tmpl.Status)
+		return nil, ErrWorkflowTemplateNotFound
 	}
 
 	// Merge overrides into template vars
@@ -72,7 +81,81 @@ func (s *WorkflowTemplateService) CloneTemplate(ctx context.Context, templateID 
 	if err := s.repo.Create(ctx, clone); err != nil {
 		return nil, fmt.Errorf("create clone: %w", err)
 	}
-	return clone, nil
+	created, err := s.repo.GetByID(ctx, clone.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load clone: %w", err)
+	}
+	return created, nil
+}
+
+func (s *WorkflowTemplateService) PublishDefinitionAsTemplate(ctx context.Context, definitionID uuid.UUID, projectID uuid.UUID, name string, description string) (*model.WorkflowDefinition, error) {
+	def, err := s.repo.GetByID(ctx, definitionID)
+	if err != nil || def.ProjectID != projectID {
+		return nil, ErrWorkflowTemplateNotFound
+	}
+	template := &model.WorkflowDefinition{
+		ID:           uuid.New(),
+		ProjectID:    projectID,
+		Name:         defaultWorkflowTemplateName(strings.TrimSpace(name), def.Name),
+		Description:  defaultWorkflowTemplateDescription(strings.TrimSpace(description), def.Description),
+		Status:       model.WorkflowDefStatusTemplate,
+		Category:     model.WorkflowCategoryUser,
+		Nodes:        def.Nodes,
+		Edges:        def.Edges,
+		TemplateVars: def.TemplateVars,
+		Version:      maxWorkflowVersion(def.Version, 1),
+		SourceID:     &definitionID,
+	}
+	if err := s.repo.Create(ctx, template); err != nil {
+		return nil, fmt.Errorf("publish workflow template: %w", err)
+	}
+	created, err := s.repo.GetByID(ctx, template.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load published workflow template: %w", err)
+	}
+	return created, nil
+}
+
+func (s *WorkflowTemplateService) DuplicateTemplate(ctx context.Context, templateID uuid.UUID, projectID uuid.UUID, name string, description string) (*model.WorkflowDefinition, error) {
+	tmpl, err := s.repo.GetByID(ctx, templateID)
+	if err != nil || tmpl.Status != model.WorkflowDefStatusTemplate {
+		return nil, ErrWorkflowTemplateNotFound
+	}
+	duplicate := &model.WorkflowDefinition{
+		ID:           uuid.New(),
+		ProjectID:    projectID,
+		Name:         defaultWorkflowTemplateName(strings.TrimSpace(name), tmpl.Name+" Copy"),
+		Description:  defaultWorkflowTemplateDescription(strings.TrimSpace(description), tmpl.Description),
+		Status:       model.WorkflowDefStatusTemplate,
+		Category:     model.WorkflowCategoryUser,
+		Nodes:        tmpl.Nodes,
+		Edges:        tmpl.Edges,
+		TemplateVars: tmpl.TemplateVars,
+		Version:      maxWorkflowVersion(tmpl.Version, 1),
+		SourceID:     &templateID,
+	}
+	if err := s.repo.Create(ctx, duplicate); err != nil {
+		return nil, fmt.Errorf("duplicate workflow template: %w", err)
+	}
+	created, err := s.repo.GetByID(ctx, duplicate.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load duplicated workflow template: %w", err)
+	}
+	return created, nil
+}
+
+func (s *WorkflowTemplateService) DeleteTemplate(ctx context.Context, templateID uuid.UUID, projectID uuid.UUID) error {
+	tmpl, err := s.repo.GetByID(ctx, templateID)
+	if err != nil || tmpl.Status != model.WorkflowDefStatusTemplate {
+		return ErrWorkflowTemplateNotFound
+	}
+	if tmpl.Category != model.WorkflowCategoryUser || tmpl.ProjectID != projectID {
+		return ErrWorkflowTemplateImmutable
+	}
+	if err := s.repo.Delete(ctx, templateID); err != nil {
+		return fmt.Errorf("delete workflow template: %w", err)
+	}
+	return nil
 }
 
 // CreateFromTemplate clones a template and immediately starts execution.
@@ -82,6 +165,27 @@ func (s *WorkflowTemplateService) CreateFromTemplate(ctx context.Context, templa
 		return nil, err
 	}
 	return s.dagSvc.StartExecution(ctx, clone.ID, taskID)
+}
+
+func defaultWorkflowTemplateName(name string, fallback string) string {
+	if name != "" {
+		return name
+	}
+	return fallback
+}
+
+func defaultWorkflowTemplateDescription(description string, fallback string) string {
+	if description != "" {
+		return description
+	}
+	return fallback
+}
+
+func maxWorkflowVersion(value int, fallback int) int {
+	if value > 0 {
+		return value
+	}
+	return fallback
 }
 
 // SeedSystemTemplates inserts or updates all built-in system templates.

@@ -10,6 +10,7 @@ import {
   normalizeMemberStatus,
   type MemberStatus,
 } from "@/lib/team/member-status";
+import { buildProjectScopedHref } from "@/lib/route-hrefs";
 
 export type DashboardTaskStatus =
   | "inbox"
@@ -109,6 +110,7 @@ export interface TeamMember {
   workload: TeamMemberWorkload;
   agentProfile?: AgentProfile | null;
   roleBindingLabel?: string | null;
+  roleBindingState?: "ready" | "missing" | "stale" | null;
   readinessState?: "ready" | "incomplete" | null;
   readinessLabel?: string | null;
   readinessMissing?: string[];
@@ -171,6 +173,7 @@ export interface DashboardSummary {
   };
   activity: DashboardActivityItem[];
   risks: DashboardRiskItem[];
+  bootstrap?: DashboardBootstrapSummary;
   links: {
     projects: string;
     team: string;
@@ -188,6 +191,56 @@ interface BuildDashboardSummaryInput {
   members: DashboardMemberSource[];
   activity: DashboardActivitySource[];
   now?: string;
+  projectMeta?: {
+    id: string;
+    name: string;
+    repoUrl?: string;
+    settings?: {
+      codingAgent?: {
+        runtime?: string;
+        provider?: string;
+        model?: string;
+      };
+    };
+  } | null;
+  sprintCount?: number | null;
+  docsTemplateCount?: number | null;
+  workflowTemplateCount?: number | null;
+}
+
+export type DashboardBootstrapPhaseId =
+  | "governance"
+  | "team"
+  | "playbooks"
+  | "planning"
+  | "delivery";
+
+export type DashboardBootstrapPhaseState = "ready" | "attention" | "blocked";
+
+export interface DashboardBootstrapPhase {
+  id: DashboardBootstrapPhaseId;
+  title: string;
+  state: DashboardBootstrapPhaseState;
+  reason: string;
+  href: string;
+  actionLabel: string;
+}
+
+export interface DashboardBootstrapAction {
+  id:
+    | "configure-governance"
+    | "add-member"
+    | "open-playbooks"
+    | "create-sprint"
+    | "open-task-workspace";
+  label: string;
+  href: string;
+}
+
+export interface DashboardBootstrapSummary {
+  unresolvedCount: number;
+  phases: DashboardBootstrapPhase[];
+  nextActions: DashboardBootstrapAction[];
 }
 
 const ACTIVE_AGENT_STATUSES = new Set(["starting", "running", "paused"]);
@@ -245,6 +298,12 @@ export function normalizeTeamMember(member: DashboardMemberSource): TeamMember {
     roleBindingLabel:
       member.type === "agent"
         ? agentProfile?.roleId || "Unbound role"
+        : null,
+    roleBindingState:
+      member.type === "agent"
+        ? agentProfile?.roleId
+          ? "ready"
+          : "missing"
         : null,
     readinessState: readiness?.state ?? null,
     readinessLabel: readiness?.label ?? null,
@@ -488,10 +547,13 @@ function buildRiskItems(input: {
 }): DashboardRiskItem[] {
   const risks: DashboardRiskItem[] = [];
   const projectHref = input.scopeProjectId
-    ? `/project?id=${input.scopeProjectId}`
+    ? buildProjectScopedHref("/project", {
+        projectId: input.scopeProjectId,
+        projectParam: "id",
+      })
     : "/projects";
   const teamHref = input.scopeProjectId
-    ? `/team?project=${input.scopeProjectId}`
+    ? buildProjectScopedHref("/team", { projectId: input.scopeProjectId })
     : "/team";
 
   for (const task of input.tasks) {
@@ -572,6 +634,175 @@ function buildRiskItems(input: {
   return risks.slice(0, 5);
 }
 
+function buildBootstrapSummary(
+  input: BuildDashboardSummaryInput,
+): DashboardBootstrapSummary | undefined {
+  if (!input.scopeProjectId) {
+    return undefined;
+  }
+
+  const codingAgent = input.projectMeta?.settings?.codingAgent;
+  const hasCodingAgentSelection = Boolean(
+    codingAgent?.runtime && codingAgent?.provider && codingAgent?.model,
+  );
+  const hasRepository = Boolean(input.projectMeta?.repoUrl?.trim());
+
+  const governanceHref = buildProjectScopedHref("/settings", {
+    projectId: input.scopeProjectId,
+    params: {
+      section: hasRepository ? "coding-agent" : "repository",
+    },
+  });
+  const teamHref = buildProjectScopedHref("/team", {
+    projectId: input.scopeProjectId,
+    params: { focus: "add-member" },
+  });
+  const playbooksHref = buildProjectScopedHref("/workflow", {
+    projectId: input.scopeProjectId,
+    params: { tab: "templates" },
+  });
+  const planningHref = buildProjectScopedHref("/sprints", {
+    projectId: input.scopeProjectId,
+    params: { action: "create-sprint" },
+  });
+  const deliveryHref = buildProjectScopedHref("/project", {
+    projectId: input.scopeProjectId,
+    projectParam: "id",
+  });
+
+  const phases: DashboardBootstrapPhase[] = [
+    {
+      id: "governance",
+      title: "Governance",
+      state: hasRepository && hasCodingAgentSelection ? "ready" : "attention",
+      reason:
+        hasRepository && hasCodingAgentSelection
+          ? "Repository and coding-agent defaults are configured."
+          : "Repository or coding-agent defaults still need configuration.",
+      href: governanceHref,
+      actionLabel: "Configure Governance",
+    },
+    {
+      id: "team",
+      title: "Team",
+      state: input.members.length > 0 ? "ready" : "attention",
+      reason:
+        input.members.length > 0
+          ? "Human and agent collaborators are available."
+          : "Add the first human or agent collaborator.",
+      href: teamHref,
+      actionLabel: "Add First Member",
+    },
+    {
+      id: "playbooks",
+      title: "Playbooks",
+      state:
+        input.docsTemplateCount == null || input.workflowTemplateCount == null
+          ? "blocked"
+          : input.docsTemplateCount > 0 && input.workflowTemplateCount > 0
+            ? "ready"
+            : "attention",
+      reason:
+        input.docsTemplateCount == null || input.workflowTemplateCount == null
+          ? "Template baselines are unavailable right now."
+          : input.docsTemplateCount > 0 && input.workflowTemplateCount > 0
+            ? "Document and workflow templates are available."
+            : "Document or workflow template baselines still need attention.",
+      href: playbooksHref,
+      actionLabel: "Open Templates",
+    },
+    {
+      id: "planning",
+      title: "Planning",
+      state:
+        (input.sprintCount ?? 0) > 0 || input.tasks.length > 0
+          ? "ready"
+          : "attention",
+      reason:
+        (input.sprintCount ?? 0) > 0 || input.tasks.length > 0
+          ? "Planning already has an initial sprint or backlog."
+          : "Create the first sprint or planning container for the backlog.",
+      href: planningHref,
+      actionLabel: "Create First Sprint",
+    },
+    {
+      id: "delivery",
+      title: "Delivery",
+      state: input.tasks.length > 0 ? "ready" : "attention",
+      reason:
+        input.tasks.length > 0
+          ? "The task workspace already has work items to manage."
+          : "Open the task workspace and create the first work item.",
+      href: deliveryHref,
+      actionLabel: "Open Task Workspace",
+    },
+  ];
+
+  const nextActions = phases
+    .filter((phase) => phase.state !== "ready")
+    .map((phase): DashboardBootstrapAction => {
+      switch (phase.id) {
+        case "governance":
+          return { id: "configure-governance", label: phase.actionLabel, href: phase.href };
+        case "team":
+          return { id: "add-member", label: phase.actionLabel, href: phase.href };
+        case "playbooks":
+          return { id: "open-playbooks", label: phase.actionLabel, href: phase.href };
+        case "planning":
+          return { id: "create-sprint", label: phase.actionLabel, href: phase.href };
+        case "delivery":
+        default:
+          return { id: "open-task-workspace", label: phase.actionLabel, href: phase.href };
+      }
+    });
+
+  return {
+    unresolvedCount: phases.filter((phase) => phase.state !== "ready").length,
+    phases,
+    nextActions,
+  };
+}
+
+export function applyRoleRegistryState(
+  members: TeamMember[],
+  roles: Array<{ metadata: { id: string } }>,
+): TeamMember[] {
+  const knownRoleIds = new Set(roles.map((role) => role.metadata.id));
+
+  return members.map((member) => {
+    if (member.type !== "agent") {
+      return member;
+    }
+
+    const boundRoleId = member.agentProfile?.roleId?.trim() ?? "";
+    if (!boundRoleId) {
+      return {
+        ...member,
+        roleBindingState: "missing",
+        roleBindingLabel: "Unbound role",
+      };
+    }
+
+    if (!knownRoleIds.has(boundRoleId)) {
+      const missing = Array.from(new Set([...(member.readinessMissing ?? []), "roleId"]));
+      return {
+        ...member,
+        roleBindingState: "stale",
+        roleBindingLabel: `${boundRoleId} (stale)`,
+        readinessState: "incomplete",
+        readinessLabel: "Stale role binding",
+        readinessMissing: missing,
+      };
+    }
+
+    return {
+      ...member,
+      roleBindingState: "ready",
+      roleBindingLabel: boundRoleId,
+    };
+  });
+}
+
 export function buildDashboardSummary(
   input: BuildDashboardSummaryInput
 ): DashboardSummary {
@@ -642,11 +873,18 @@ export function buildDashboardSummary(
       scopeProjectId: input.scopeProjectId,
       now,
     }),
+    bootstrap: buildBootstrapSummary(input),
     links: {
       projects: "/projects",
-      team: input.scopeProjectId ? `/team?project=${input.scopeProjectId}` : "/team",
-      agents: "/agents",
-      reviews: "/reviews",
+      team: input.scopeProjectId
+        ? buildProjectScopedHref("/team", { projectId: input.scopeProjectId })
+        : "/team",
+      agents: input.scopeProjectId
+        ? buildProjectScopedHref("/agents", { projectId: input.scopeProjectId })
+        : "/agents",
+      reviews: input.scopeProjectId
+        ? buildProjectScopedHref("/reviews", { projectId: input.scopeProjectId })
+        : "/reviews",
     },
   };
 }

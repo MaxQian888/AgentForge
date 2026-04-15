@@ -113,7 +113,7 @@ jobs:
           cache-dependency-path: src-go/go.sum
 
       - name: Build Go sidecar
-        run: node scripts/build-backend.js --current-only
+        run: node scripts/build/build-backend.js --current-only
 
       - name: Validate updater signing inputs
         if: inputs.updater-enabled

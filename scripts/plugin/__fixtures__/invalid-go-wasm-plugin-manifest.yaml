@@ -1,0 +1,12 @@
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: broken-wasm-plugin
+  name: Broken WASM Plugin
+  version: 0.1.0
+spec:
+  runtime: wasm
+  abiVersion: v1
+source:
+  type: local
+  path: ./scripts/plugin/__fixtures__/invalid-go-wasm-plugin-manifest.yaml

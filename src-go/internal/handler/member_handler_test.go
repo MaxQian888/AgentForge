@@ -6,6 +6,7 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,12 +17,24 @@ import (
 	"github.com/react-go-quick-starter/server/internal/handler"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
+	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 )
 
 type fakeMemberRepo struct {
 	members         []*model.Member
 	createdMembers  []*model.Member
 	updatedRequests map[uuid.UUID]*model.UpdateMemberRequest
+}
+
+type fakeMemberRoleStore struct {
+	roles map[string]*rolepkg.Manifest
+}
+
+func (f *fakeMemberRoleStore) Get(id string) (*rolepkg.Manifest, error) {
+	if role, ok := f.roles[id]; ok {
+		return role, nil
+	}
+	return nil, os.ErrNotExist
 }
 
 func (f *fakeMemberRepo) Create(_ context.Context, member *model.Member) error {
@@ -223,6 +236,42 @@ func TestMemberHandlerCreateAcceptsDocumentedStatusAndIMIdentity(t *testing.T) {
 	}
 }
 
+func TestMemberHandlerCreateRejectsUnknownBoundRole(t *testing.T) {
+	projectID := uuid.New()
+	repo := &fakeMemberRepo{}
+	e := echo.New()
+	e.Validator = validatorStub{}
+
+	body := `{"name":"Ops Bot","type":"agent","role":"operator","agentConfig":"{\"roleId\":\"missing-role\",\"runtime\":\"codex\"}","skills":["ops"]}`
+	req := httptest.NewRequest(http.MethodPost, "/members", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.Set(appMiddleware.ProjectIDContextKey, projectID)
+
+	h := handler.NewMemberHandler(repo).WithRoleStore(&fakeMemberRoleStore{
+		roles: map[string]*rolepkg.Manifest{},
+	})
+	if err := h.Create(ctx); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+	if len(repo.createdMembers) != 0 {
+		t.Fatalf("created members = %d, want 0", len(repo.createdMembers))
+	}
+
+	var response map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &response); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if response["field"] != "agentConfig.roleId" {
+		t.Fatalf("field = %#v, want agentConfig.roleId", response["field"])
+	}
+}
+
 func TestMemberHandlerUpdateRoundTripsCanonicalStatusAndIMIdentity(t *testing.T) {
 	projectID := uuid.New()
 	memberID := uuid.New()
@@ -282,6 +331,50 @@ func TestMemberHandlerUpdateRoundTripsCanonicalStatusAndIMIdentity(t *testing.T)
 	}
 	if response["imUserId"] != "ou_456" {
 		t.Fatalf("response imUserId = %#v, want ou_456", response["imUserId"])
+	}
+}
+
+func TestMemberHandlerUpdateRejectsUnknownBoundRole(t *testing.T) {
+	projectID := uuid.New()
+	memberID := uuid.New()
+	now := time.Now().UTC()
+	repo := &fakeMemberRepo{
+		members: []*model.Member{
+			{
+				ID:          memberID,
+				ProjectID:   projectID,
+				Name:        "Review Bot",
+				Type:        model.MemberTypeAgent,
+				Role:        "code-reviewer",
+				AgentConfig: `{"roleId":"frontend-developer","runtime":"codex"}`,
+				IsActive:    true,
+				CreatedAt:   now,
+				UpdatedAt:   now,
+			},
+		},
+	}
+	e := echo.New()
+	body := `{"agentConfig":"{\"roleId\":\"missing-role\",\"runtime\":\"codex\"}"}`
+	req := httptest.NewRequest(http.MethodPut, "/members/"+memberID.String(), strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetPath("/members/:id")
+	ctx.SetParamNames("id")
+	ctx.SetParamValues(memberID.String())
+
+	h := handler.NewMemberHandler(repo).WithRoleStore(&fakeMemberRoleStore{
+		roles: map[string]*rolepkg.Manifest{},
+	})
+	if err := h.Update(ctx); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+
+	if rec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("status = %d, want 422", rec.Code)
+	}
+	if len(repo.updatedRequests) != 0 {
+		t.Fatalf("updated requests = %d, want 0", len(repo.updatedRequests))
 	}
 }
 

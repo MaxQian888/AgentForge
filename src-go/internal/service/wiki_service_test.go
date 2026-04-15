@@ -40,6 +40,15 @@ func (r *stubWikiSpaceRepo) GetByProjectID(_ context.Context, projectID uuid.UUI
 	return nil, errors.New("space not found")
 }
 
+func (r *stubWikiSpaceRepo) GetByID(_ context.Context, id uuid.UUID) (*model.WikiSpace, error) {
+	space, ok := r.spaces[id]
+	if !ok || space.DeletedAt != nil {
+		return nil, errors.New("space not found")
+	}
+	cloned := *space
+	return &cloned, nil
+}
+
 func (r *stubWikiSpaceRepo) Delete(_ context.Context, id uuid.UUID) error {
 	space, ok := r.spaces[id]
 	if !ok {
@@ -405,7 +414,7 @@ func TestWikiServiceCreateUpdateMoveDeletePageLifecycle(t *testing.T) {
 	}
 
 	expected := child.UpdatedAt
-	updated, err := svc.UpdatePage(ctx, projectID, child.ID, "Child Updated", `[{"type":"heading"}]`, "Heading", uuidPtr(uuid.New()), &expected)
+	updated, err := svc.UpdatePage(ctx, projectID, child.ID, "Child Updated", `[{"type":"heading"}]`, "Heading", uuidPtr(uuid.New()), &expected, nil)
 	if err != nil {
 		t.Fatalf("UpdatePage() error = %v", err)
 	}
@@ -413,7 +422,7 @@ func TestWikiServiceCreateUpdateMoveDeletePageLifecycle(t *testing.T) {
 		t.Fatalf("updated page = %+v", updated)
 	}
 	stale := updated.UpdatedAt.Add(-time.Nanosecond)
-	if _, err := svc.UpdatePage(ctx, projectID, child.ID, "stale", `[]`, "", nil, &stale); !errors.Is(err, ErrWikiPageConflict) {
+	if _, err := svc.UpdatePage(ctx, projectID, child.ID, "stale", `[]`, "", nil, &stale, nil); !errors.Is(err, ErrWikiPageConflict) {
 		t.Fatalf("UpdatePage() stale error = %v, want %v", err, ErrWikiPageConflict)
 	}
 
@@ -465,7 +474,7 @@ func TestWikiServiceUpdatePageSyncsMentionLinks(t *testing.T) {
 	svc := NewWikiService(nil, pages, nil, nil, nil, nil, &stubWikiBroadcaster{}).WithEntityLinkSyncer(linkSyncer)
 
 	expected := pages.pages[pageID].UpdatedAt
-	updated, err := svc.UpdatePage(ctx, projectID, pageID, "Docs", "See [[task-"+uuid.New().String()+"]]", "See mention", &actorID, &expected)
+	updated, err := svc.UpdatePage(ctx, projectID, pageID, "Docs", "See [[task-"+uuid.New().String()+"]]", "See mention", &actorID, &expected, nil)
 	if err != nil {
 		t.Fatalf("UpdatePage() error = %v", err)
 	}
@@ -555,7 +564,7 @@ func TestWikiServiceUpdatePageRollsBackWhenMentionSyncFails(t *testing.T) {
 	}
 	svc := NewWikiService(nil, pageRepo, nil, nil, nil, nil, &stubWikiBroadcaster{}).WithEntityLinkSyncer(syncer)
 
-	if _, err := svc.UpdatePage(context.Background(), projectID, pageID, "Doc updated", "after [[task-"+uuid.New().String()+"]]", "after", &actorID, &updatedAt); err == nil {
+	if _, err := svc.UpdatePage(context.Background(), projectID, pageID, "Doc updated", "after [[task-"+uuid.New().String()+"]]", "after", &actorID, &updatedAt, nil); err == nil {
 		t.Fatal("expected UpdatePage() to fail when mention sync fails")
 	}
 
@@ -653,7 +662,14 @@ func TestWikiServiceCommentTemplateAndFavoriteFlows(t *testing.T) {
 	favorites := &stubPageFavoriteRepo{}
 	recent := &stubPageRecentAccessRepo{}
 	broadcaster := &stubWikiBroadcaster{}
-	svc := NewWikiService(nil, pages, &stubPageVersionRepo{}, comments, favorites, recent, broadcaster)
+	spaces := &stubWikiSpaceRepo{spaces: map[uuid.UUID]*model.WikiSpace{
+		spaceID: {
+			ID:        spaceID,
+			ProjectID: projectID,
+			CreatedAt: time.Date(2026, 3, 26, 18, 0, 0, 0, time.UTC),
+		},
+	}}
+	svc := NewWikiService(spaces, pages, &stubPageVersionRepo{}, comments, favorites, recent, broadcaster)
 
 	comment, err := svc.CreateComment(ctx, projectID, pageID, "please review", stringPtr("block-a"), nil, &userID, `["alice"]`)
 	if err != nil {

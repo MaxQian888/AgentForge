@@ -40,7 +40,21 @@ const WorkflowSpecSchema = z.object({
       next: z.array(z.string().min(1)).optional(),
     }),
   ).min(1),
-  triggers: z.array(z.object({ event: z.string().min(1).optional() })).optional(),
+  triggers: z.array(
+    z.object({
+      event: z.string().min(1).optional(),
+      profile: z.string().min(1).optional(),
+      requiresTask: z.boolean().optional(),
+    }).superRefine((trigger, ctx) => {
+      if (trigger.event === "task.transition" && !trigger.profile) {
+        ctx.addIssue({
+          code: z.ZodIssueCode.custom,
+          message: "task.transition workflow triggers must define profile",
+          path: ["profile"],
+        });
+      }
+    }),
+  ).optional(),
   limits: z.object({ maxRetries: z.number().int().min(0).optional() }).optional(),
 });
 

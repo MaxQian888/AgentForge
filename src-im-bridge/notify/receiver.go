@@ -48,6 +48,14 @@ type Receiver struct {
 	processed     map[string]struct{}
 }
 
+type callbackHTTPProvider interface {
+	HTTPCallbackHandler() http.Handler
+}
+
+type callbackPathProvider interface {
+	CallbackPaths() []string
+}
+
 // NewReceiver creates a notification receiver bound to a platform.
 func NewReceiver(platform core.Platform, port string) *Receiver {
 	return NewReceiverWithMetadata(platform, core.MetadataForPlatform(platform), port)
@@ -93,6 +101,7 @@ func (r *Receiver) Start() error {
 			"capability_matrix":      r.metadata.Capabilities.Matrix(),
 		})
 	})
+	r.mountPlatformCallbacks(mux)
 
 	r.server = &http.Server{
 		Addr:    ":" + r.port,
@@ -104,6 +113,34 @@ func (r *Receiver) Start() error {
 		return fmt.Errorf("notification server: %w", err)
 	}
 	return nil
+}
+
+func (r *Receiver) mountPlatformCallbacks(mux *http.ServeMux) {
+	if mux == nil || r == nil || r.platform == nil {
+		return
+	}
+	handlerProvider, ok := r.platform.(callbackHTTPProvider)
+	if !ok {
+		return
+	}
+	handler := handlerProvider.HTTPCallbackHandler()
+	if handler == nil {
+		return
+	}
+	pathProvider, ok := r.platform.(callbackPathProvider)
+	if !ok {
+		return
+	}
+	for _, rawPath := range pathProvider.CallbackPaths() {
+		path := strings.TrimSpace(rawPath)
+		if path == "" {
+			continue
+		}
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		mux.Handle(path, handler)
+	}
 }
 
 // Stop gracefully shuts down the notification receiver.

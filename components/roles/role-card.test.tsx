@@ -1,3 +1,4 @@
+import userEvent from "@testing-library/user-event";
 import rolesMessages from "../../messages/en/roles.json";
 
 jest.mock("next-intl", () => ({
@@ -92,9 +93,12 @@ const skillCatalog: RoleSkillCatalogEntry[] = [
 ];
 
 describe("RoleCard", () => {
-  it("surfaces execution-relevant summaries and safety cues", () => {
+  it("surfaces execution-relevant summaries and safety cues", async () => {
+    const user = userEvent.setup();
+    const onDelete = jest.fn();
+
     render(
-      <RoleCard role={reviewRole} skillCatalog={skillCatalog} onEdit={jest.fn()} onDelete={jest.fn()} />,
+      <RoleCard role={reviewRole} skillCatalog={skillCatalog} onEdit={jest.fn()} onDelete={onDelete} />,
     );
 
     expect(screen.getByText("Extends base-reviewer")).toBeInTheDocument();
@@ -103,6 +107,9 @@ describe("RoleCard", () => {
     expect(screen.getByText("1 unresolved")).toBeInTheDocument();
     expect(screen.getByText("1 warning")).toBeInTheDocument();
     expect(screen.getByText("1 plugin consumer")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete Reviewer" })).toBeDisabled();
+
+    await user.click(screen.getByRole("button", { name: "Delete Reviewer" }));
+
+    expect(onDelete).toHaveBeenCalledTimes(1);
   });
 });

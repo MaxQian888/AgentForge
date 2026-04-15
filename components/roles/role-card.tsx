@@ -37,7 +37,6 @@ export function RoleCard({ role, skillCatalog = [], onEdit, onDelete }: RoleCard
     (skill) => skill.compatibilityStatus === "warning",
   ).length;
   const pluginConsumerCount = role.pluginConsumers?.length ?? 0;
-  const deleteBlocked = pluginConsumerCount > 0;
 
   return (
     <div className="relative overflow-hidden rounded-lg border bg-card text-card-foreground shadow-sm transition-colors hover:bg-accent/30">
@@ -142,12 +141,6 @@ export function RoleCard({ role, skillCatalog = [], onEdit, onDelete }: RoleCard
           size="sm"
           className="h-7 px-2 text-xs text-muted-foreground"
           onClick={onDelete}
-          disabled={deleteBlocked}
-          title={
-            deleteBlocked
-              ? `Cannot delete while ${pluginConsumerCount} plugin consumer still references this role.`
-              : undefined
-          }
           aria-label={`Delete ${role.metadata.name}`}
         >
           <Trash2 className="mr-1 size-3" />

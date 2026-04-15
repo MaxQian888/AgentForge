@@ -5,6 +5,22 @@ import SettingsPage from "./page";
 import settingsMessages from "@/messages/en/settings.json";
 import type { Project } from "@/lib/stores/project-store";
 
+const searchParamsState = {
+  project: null as string | null,
+  section: null as string | null,
+};
+
+jest.mock("next/navigation", () => ({
+  useSearchParams: () => ({
+    get: (key: string) =>
+      key === "project"
+        ? searchParamsState.project
+        : key === "section"
+          ? searchParamsState.section
+          : null,
+  }),
+}));
+
 const mockSetTheme = jest.fn();
 jest.mock("@/lib/theme/provider", () => ({
   useTheme: () => ({ theme: "system", setTheme: mockSetTheme }),
@@ -201,6 +217,8 @@ describe("SettingsPage — Appearance section", () => {
   beforeEach(() => {
     mockSetTheme.mockReset();
     mockSetLocale.mockReset();
+    searchParamsState.project = null;
+    searchParamsState.section = null;
     projectState.projects = [createProjectFixture()];
     fetchProjects.mockReset().mockResolvedValue(undefined);
     updateProject.mockReset();
@@ -218,6 +236,25 @@ describe("SettingsPage — Appearance section", () => {
     ).toBeInTheDocument();
 
     // restore
+    dashboardState.selectedProjectId = "project-1";
+  });
+
+  it("honors explicit project and section query params when no ambient project is selected", async () => {
+    dashboardState.selectedProjectId = null as unknown as string;
+    searchParamsState.project = "project-1";
+    searchParamsState.section = "budget";
+
+    await act(async () => {
+      render(<SettingsPage />);
+    });
+
+    expect(
+      screen.getByRole("heading", { name: settingsMessages.budgetGovernance }),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByText(settingsMessages.selectProject),
+    ).not.toBeInTheDocument();
+
     dashboardState.selectedProjectId = "project-1";
   });
 
@@ -454,7 +491,7 @@ describe("SettingsPage", () => {
       );
     });
 
-    expect(screen.getByText("Settings saved")).toBeInTheDocument();
+    expect(screen.getByText(settingsMessages.allChangesSaved)).toBeInTheDocument();
     expect(screen.queryByText("Unsaved changes")).not.toBeInTheDocument();
   });
 

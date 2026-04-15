@@ -1,11 +1,37 @@
 package commands
 
 import (
+	"context"
+	"net/http"
 	"strings"
 	"testing"
 
 	"github.com/agentforge/im-bridge/core"
 )
+
+type feishuHelpPlatform struct {
+	callbackHandler http.Handler
+	callbackPaths   []string
+	metadata        core.PlatformMetadata
+}
+
+func (p *feishuHelpPlatform) Name() string                            { return "feishu-live" }
+func (p *feishuHelpPlatform) Start(handler core.MessageHandler) error { return nil }
+func (p *feishuHelpPlatform) Reply(ctx context.Context, replyCtx any, content string) error {
+	return nil
+}
+func (p *feishuHelpPlatform) Send(ctx context.Context, chatID string, content string) error {
+	return nil
+}
+func (p *feishuHelpPlatform) Stop() error { return nil }
+func (p *feishuHelpPlatform) Metadata() core.PlatformMetadata {
+	if p.metadata.Source != "" {
+		return p.metadata
+	}
+	return core.PlatformMetadata{Source: "feishu"}
+}
+func (p *feishuHelpPlatform) HTTPCallbackHandler() http.Handler { return p.callbackHandler }
+func (p *feishuHelpPlatform) CallbackPaths() []string           { return p.callbackPaths }
 
 func TestHelpCommand_RepliesWithHelpText(t *testing.T) {
 	platform := &taskTestPlatform{}
@@ -72,6 +98,65 @@ func TestHelpCommand_ShowsReadableChineseForToolsCommands(t *testing.T) {
 	}
 	if strings.Contains(reply, "鏌ョ湅") || strings.Contains(reply, "瀹夎") {
 		t.Fatalf("reply = %q, want readable Chinese instead of mojibake", reply)
+	}
+}
+
+func TestBuildHelpStructuredMessage_OmitsFeishuQuickActionsWithoutWebhookCallback(t *testing.T) {
+	message := buildHelpStructuredMessage(&feishuHelpPlatform{})
+	for _, section := range message.Sections {
+		if section.Type == core.StructuredSectionTypeActions {
+			t.Fatalf("sections = %+v, want no actions without webhook callback", message.Sections)
+		}
+	}
+	if !strings.Contains(message.FallbackText(), "飞书快捷按钮依赖卡片回调") {
+		t.Fatalf("fallback text = %q, want callback guidance", message.FallbackText())
+	}
+}
+
+func TestBuildHelpStructuredMessage_IncludesFeishuQuickActionsWhenWebhookReady(t *testing.T) {
+	message := buildHelpStructuredMessage(&feishuHelpPlatform{
+		callbackHandler: http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}),
+		callbackPaths:   []string{"/feishu/callback"},
+	})
+
+	var actions *core.ActionsSection
+	for _, section := range message.Sections {
+		if section.Type == core.StructuredSectionTypeActions {
+			actions = section.ActionsSection
+			break
+		}
+	}
+	if actions == nil {
+		t.Fatalf("sections = %+v, want quick actions", message.Sections)
+	}
+	if actions.ButtonsPerRow != 2 {
+		t.Fatalf("ButtonsPerRow = %d, want 2", actions.ButtonsPerRow)
+	}
+	if len(actions.Actions) != 4 {
+		t.Fatalf("actions = %+v, want 4 quick actions", actions.Actions)
+	}
+}
+
+func TestBuildHelpStructuredMessage_IncludesFeishuQuickActionsWhenLongConnectionHandlesCallbacks(t *testing.T) {
+	message := buildHelpStructuredMessage(&feishuHelpPlatform{
+		metadata: core.PlatformMetadata{
+			Source: "feishu",
+			Capabilities: core.PlatformCapabilities{
+				ActionCallbackMode:     core.ActionCallbackSocketPayload,
+				RequiresPublicCallback: false,
+			},
+		},
+	})
+
+	var actions *core.ActionsSection
+	for _, section := range message.Sections {
+		if section.Type == core.StructuredSectionTypeActions {
+			actions = section.ActionsSection
+			break
+		}
+	}
+	if actions == nil {
+		t.Fatalf("sections = %+v, want quick actions for long connection callback mode", message.Sections)
 	}
 }
 

@@ -483,19 +483,28 @@ describe("useWSStore", () => {
       projectId: "project-1",
       payload: {
         taskId: "task-3",
-        action: "notify",
+        action: "start_workflow",
         from: "triaged",
         to: "assigned",
         config: { channel: "team" },
+        outcome: {
+          action: "start_workflow",
+          status: "started",
+          workflowPluginId: "task-delivery-flow",
+          workflowRunId: "run-123",
+        },
       },
     });
 
     expect(useWorkflowStore.getState().recentActivityByProject["project-1"]).toEqual([
       expect.objectContaining({
         taskId: "task-3",
-        action: "notify",
+        action: "start_workflow",
         from: "triaged",
         to: "assigned",
+        outcomeStatus: "started",
+        workflowPluginId: "task-delivery-flow",
+        workflowRunId: "run-123",
       }),
     ]);
   });

@@ -143,10 +143,10 @@ func TestCostHandler_GetStats_ProjectSummaryIncludesAuthoritativeBreakdowns(t *t
 			updated_at DATETIME
 		)`,
 		`CREATE TABLE agent_runs (
-			id TEXT PRIMARY KEY,
-			task_id TEXT NOT NULL,
-			member_id TEXT NOT NULL,
-			role_id TEXT,
+				id TEXT PRIMARY KEY,
+				task_id TEXT NOT NULL,
+				member_id TEXT NOT NULL,
+				role_id TEXT,
 			status TEXT,
 			runtime TEXT,
 			provider TEXT,
@@ -159,12 +159,13 @@ func TestCostHandler_GetStats_ProjectSummaryIncludesAuthoritativeBreakdowns(t *t
 			error_message TEXT,
 			started_at DATETIME,
 			completed_at DATETIME,
-			created_at DATETIME,
-			updated_at DATETIME,
-			team_id TEXT,
-			team_role TEXT,
-			cost_accounting JSON
-		)`,
+				created_at DATETIME,
+				updated_at DATETIME,
+				team_id TEXT,
+				team_role TEXT,
+				cost_accounting JSON,
+				structured_output JSON
+			)`,
 	} {
 		if err := db.Exec(stmt).Error; err != nil {
 			t.Fatalf("exec schema %q: %v", stmt, err)

@@ -55,6 +55,9 @@ describe("bridge HTTP contract", () => {
         summary: "Alias route uses the same handler.",
         subtasks: [],
       }),
+      executableLookup() {
+        return null;
+      },
       streamer: {
         close() {},
         connect() {},

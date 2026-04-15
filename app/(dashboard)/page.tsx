@@ -28,6 +28,7 @@ import { AgentFleetWidget } from "@/components/dashboard/agent-fleet-widget";
 import { TeamHealthWidget } from "@/components/dashboard/team-health-widget";
 import { BudgetWidget } from "@/components/dashboard/budget-widget";
 import { DashboardWidgetsSkeleton } from "@/components/dashboard/dashboard-widget-skeletons";
+import { ProjectBootstrapPanel } from "@/components/dashboard/project-bootstrap-panel";
 import { QuickActionShortcuts } from "@/components/dashboard/quick-action-shortcuts";
 import { Skeleton } from "@/components/ui/skeleton";
 import {
@@ -38,6 +39,7 @@ import {
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useAgentStore } from "@/lib/stores/agent-store";
 import { useCostStore } from "@/lib/stores/cost-store";
+import { buildProjectScopedHref } from "@/lib/route-hrefs";
 
 function formatCurrency(value: number) {
   return new Intl.NumberFormat("en-US", {
@@ -201,7 +203,11 @@ export default function DashboardPage() {
       label: t("actions.createTask"),
       href:
         summary?.scope.projectId
-          ? `/project?id=${summary.scope.projectId}`
+          ? buildProjectScopedHref("/project", {
+              projectId: summary.scope.projectId,
+              projectParam: "id",
+              params: { action: "create-task" },
+            })
           : "/projects",
       icon: Plus,
       shortcut: "N",
@@ -218,7 +224,12 @@ export default function DashboardPage() {
     {
       id: "new-sprint",
       label: t("actions.newSprint"),
-      href: "/sprints",
+      href: summary?.scope.projectId
+        ? buildProjectScopedHref("/sprints", {
+            projectId: summary.scope.projectId,
+            params: { action: "create-sprint" },
+          })
+        : "/sprints",
       icon: Zap,
       shortcut: "S",
       variant: "ghost" as const,
@@ -226,7 +237,12 @@ export default function DashboardPage() {
     {
       id: "create-team",
       label: t("actions.createTeam"),
-      href: "/team",
+      href: summary?.scope.projectId
+        ? buildProjectScopedHref("/team", {
+            projectId: summary.scope.projectId,
+            params: { focus: "add-member" },
+          })
+        : "/team",
       icon: Users,
       shortcut: "T",
       variant: "ghost" as const,
@@ -335,6 +351,8 @@ export default function DashboardPage() {
           </div>
         </div>
       )}
+
+      <ProjectBootstrapPanel bootstrap={summary?.bootstrap} />
 
       <QuickActionShortcuts actions={quickActions} />
     </div>

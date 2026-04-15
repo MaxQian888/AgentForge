@@ -21,6 +21,8 @@ var (
 	ErrWikiPageNotFound    = errors.New("wiki page not found")
 	ErrWikiPageConflict    = errors.New("wiki page conflict")
 	ErrWikiCircularMove    = errors.New("wiki circular move")
+	ErrWikiTemplateNotFound = errors.New("wiki template not found")
+	ErrWikiTemplateImmutable = errors.New("wiki template is immutable")
 	ErrPageVersionNotFound = errors.New("page version not found")
 	ErrPageCommentNotFound = errors.New("page comment not found")
 )
@@ -298,6 +300,7 @@ func (s *WikiService) UpdatePage(
 	contentText string,
 	updatedBy *uuid.UUID,
 	expectedUpdatedAt *time.Time,
+	templateCategory *string,
 ) (*model.WikiPage, error) {
 	if s.linkSyncer != nil && updatedBy != nil {
 		if binder, ok := s.pages.(wikiPageRepositoryTxBinder); ok && binder.DB() != nil {
@@ -313,6 +316,9 @@ func (s *WikiService) UpdatePage(
 					if expectedUpdatedAt != nil && current.UpdatedAt.After(*expectedUpdatedAt) {
 						return ErrWikiPageConflict
 					}
+					if current.IsTemplate && current.IsSystem {
+						return ErrWikiTemplateImmutable
+					}
 					current.Title = strings.TrimSpace(title)
 					if current.Title == "" {
 						current.Title = "Untitled"
@@ -322,6 +328,11 @@ func (s *WikiService) UpdatePage(
 						current.ContentText = extractPlainText(current.Content)
 					} else {
 						current.ContentText = contentText
+					}
+					if current.IsTemplate && templateCategory != nil {
+						if trimmed := strings.TrimSpace(*templateCategory); trimmed != "" {
+							current.TemplateCategory = trimmed
+						}
 					}
 					current.UpdatedBy = cloneUUIDPointer(updatedBy)
 					current.UpdatedAt = s.now()
@@ -358,6 +369,9 @@ func (s *WikiService) UpdatePage(
 	if expectedUpdatedAt != nil && page.UpdatedAt.After(*expectedUpdatedAt) {
 		return nil, ErrWikiPageConflict
 	}
+	if page.IsTemplate && page.IsSystem {
+		return nil, ErrWikiTemplateImmutable
+	}
 
 	page.Title = strings.TrimSpace(title)
 	if page.Title == "" {
@@ -368,6 +382,11 @@ func (s *WikiService) UpdatePage(
 		page.ContentText = extractPlainText(page.Content)
 	} else {
 		page.ContentText = contentText
+	}
+	if page.IsTemplate && templateCategory != nil {
+		if trimmed := strings.TrimSpace(*templateCategory); trimmed != "" {
+			page.TemplateCategory = trimmed
+		}
 	}
 	page.UpdatedBy = cloneUUIDPointer(updatedBy)
 	page.UpdatedAt = s.now()
@@ -396,6 +415,9 @@ func (s *WikiService) DeletePage(ctx context.Context, projectID uuid.UUID, pageI
 	page, err := s.getPage(ctx, pageID)
 	if err != nil {
 		return err
+	}
+	if page.IsTemplate && page.IsSystem {
+		return ErrWikiTemplateImmutable
 	}
 	tree, err := s.pages.ListTree(ctx, page.SpaceID)
 	if err != nil {
@@ -753,6 +775,49 @@ func (s *WikiService) SeedBuiltInTemplates(ctx context.Context, projectID uuid.U
 	return seeded, nil
 }
 
+func (s *WikiService) CreateTemplate(
+	ctx context.Context,
+	projectID uuid.UUID,
+	spaceID uuid.UUID,
+	title string,
+	category string,
+	content string,
+	createdBy *uuid.UUID,
+) (*model.WikiPage, error) {
+	_ = projectID
+	now := s.now()
+	trimmedTitle := strings.TrimSpace(title)
+	if trimmedTitle == "" {
+		trimmedTitle = "Untitled Template"
+	}
+	trimmedCategory := strings.TrimSpace(category)
+	if trimmedCategory == "" {
+		trimmedCategory = "custom"
+	}
+	normalizedContent := normalizeWikiContent(content)
+	template := &model.WikiPage{
+		ID:               uuid.New(),
+		SpaceID:          spaceID,
+		Title:            trimmedTitle,
+		Content:          normalizedContent,
+		ContentText:      extractPlainText(normalizedContent),
+		Path:             "/templates/custom/" + uuid.NewString(),
+		SortOrder:        0,
+		IsTemplate:       true,
+		TemplateCategory: trimmedCategory,
+		IsSystem:         false,
+		IsPinned:         false,
+		CreatedBy:        cloneUUIDPointer(createdBy),
+		UpdatedBy:        cloneUUIDPointer(createdBy),
+		CreatedAt:        now,
+		UpdatedAt:        now,
+	}
+	if err := s.pages.Create(ctx, template); err != nil {
+		return nil, fmt.Errorf("create wiki template: %w", err)
+	}
+	return template, nil
+}
+
 func (s *WikiService) CreateTemplateFromPage(
 	ctx context.Context,
 	projectID uuid.UUID,
@@ -765,7 +830,13 @@ func (s *WikiService) CreateTemplateFromPage(
 	if err != nil {
 		return nil, err
 	}
-	_ = projectID
+	space, err := s.GetSpaceByProjectID(ctx, projectID)
+	if err != nil {
+		return nil, err
+	}
+	if page.SpaceID != space.ID {
+		return nil, ErrWikiPageNotFound
+	}
 	template := &model.WikiPage{
 		ID:               uuid.New(),
 		SpaceID:          page.SpaceID,
@@ -803,19 +874,45 @@ func (s *WikiService) CreatePageFromTemplate(
 ) (*model.WikiPage, error) {
 	template, err := s.getPage(ctx, templateID)
 	if err != nil {
-		return nil, err
+		return nil, ErrWikiTemplateNotFound
+	}
+	if !template.IsTemplate || template.SpaceID != spaceID {
+		return nil, ErrWikiTemplateNotFound
 	}
 	return s.CreatePage(ctx, projectID, spaceID, title, parentID, template.Content, createdBy)
 }
 
-func (s *WikiService) ListTemplates(ctx context.Context, spaceID uuid.UUID) ([]*model.WikiPage, error) {
+func (s *WikiService) ListTemplates(ctx context.Context, spaceID uuid.UUID, query string, category string, source string) ([]*model.WikiPage, error) {
 	tree, err := s.pages.ListTree(ctx, spaceID)
 	if err != nil {
 		return nil, fmt.Errorf("list wiki templates: %w", err)
 	}
+	normalizedQuery := strings.ToLower(strings.TrimSpace(query))
+	normalizedCategory := strings.ToLower(strings.TrimSpace(category))
+	normalizedSource := strings.ToLower(strings.TrimSpace(source))
 	templates := make([]*model.WikiPage, 0)
 	for _, page := range tree {
 		if page.IsTemplate {
+			if normalizedCategory != "" && strings.ToLower(page.TemplateCategory) != normalizedCategory {
+				continue
+			}
+			templateSource := "custom"
+			if page.IsSystem {
+				templateSource = "system"
+			}
+			if normalizedSource != "" && normalizedSource != templateSource {
+				continue
+			}
+			if normalizedQuery != "" {
+				haystack := strings.ToLower(strings.Join([]string{
+					page.Title,
+					page.TemplateCategory,
+					page.ContentText,
+				}, " "))
+				if !strings.Contains(haystack, normalizedQuery) {
+					continue
+				}
+			}
 			templates = append(templates, page)
 		}
 	}

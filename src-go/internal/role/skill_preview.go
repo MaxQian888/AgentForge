@@ -18,19 +18,19 @@ type SkillAgentConfigPreview struct {
 }
 
 type SkillPackagePreview struct {
-	CanonicalPath   string                   `json:"canonicalPath"`
-	Label           string                   `json:"label"`
-	DisplayName     string                   `json:"displayName,omitempty"`
-	Description     string                   `json:"description,omitempty"`
-	DefaultPrompt   string                   `json:"defaultPrompt,omitempty"`
-	MarkdownBody    string                   `json:"markdownBody"`
-	FrontmatterYAML string                   `json:"frontmatterYaml"`
-	Requires        []string                 `json:"requires,omitempty"`
-	Tools           []string                 `json:"tools,omitempty"`
-	AvailableParts  []string                 `json:"availableParts,omitempty"`
-	ReferenceCount  int                      `json:"referenceCount,omitempty"`
-	ScriptCount     int                      `json:"scriptCount,omitempty"`
-	AssetCount      int                      `json:"assetCount,omitempty"`
+	CanonicalPath   string                    `json:"canonicalPath"`
+	Label           string                    `json:"label"`
+	DisplayName     string                    `json:"displayName,omitempty"`
+	Description     string                    `json:"description,omitempty"`
+	DefaultPrompt   string                    `json:"defaultPrompt,omitempty"`
+	MarkdownBody    string                    `json:"markdownBody"`
+	FrontmatterYAML string                    `json:"frontmatterYaml"`
+	Requires        []string                  `json:"requires,omitempty"`
+	Tools           []string                  `json:"tools,omitempty"`
+	AvailableParts  []string                  `json:"availableParts,omitempty"`
+	ReferenceCount  int                       `json:"referenceCount,omitempty"`
+	ScriptCount     int                       `json:"scriptCount,omitempty"`
+	AssetCount      int                       `json:"assetCount,omitempty"`
 	AgentConfigs    []SkillAgentConfigPreview `json:"agentConfigs,omitempty"`
 }
 
@@ -41,6 +41,20 @@ func ReadSkillPackagePreview(root, canonicalPath string) (*SkillPackagePreview, 
 	}
 
 	skillDir := filepath.Join(root, filepath.FromSlash(strings.TrimPrefix(document.Path, "skills/")))
+	return readSkillPackagePreviewFromDir(skillDir, document)
+}
+
+func ReadManagedSkillPackagePreview(root, canonicalPath string) (*SkillPackagePreview, error) {
+	document, err := readManagedSkillPackageDocument(root, canonicalPath)
+	if err != nil {
+		return nil, err
+	}
+
+	skillDir := filepath.Join(root, filepath.FromSlash(document.Path))
+	return readSkillPackagePreviewFromDir(skillDir, document)
+}
+
+func readSkillPackagePreviewFromDir(skillDir string, document *skillPackageDocument) (*SkillPackagePreview, error) {
 	agentConfigs, err := readSkillAgentConfigPreviews(skillDir)
 	if err != nil {
 		return nil, err

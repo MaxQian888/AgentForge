@@ -83,7 +83,7 @@ const stableConfig = {
   projectId: "proj-1",
   transitions: { inbox: ["triaged"] },
   triggers: [
-    { fromStatus: "triaged", toStatus: "assigned", action: "auto_assign" },
+    { fromStatus: "triaged", toStatus: "assigned", action: "dispatch_agent" },
   ],
 };
 
@@ -123,9 +123,10 @@ jest.mock("@/lib/stores/workflow-store", () => ({
     "budget_exceeded",
   ],
   TRIGGER_ACTIONS: [
-    { value: "auto_assign", label: "Auto-assign agent" },
-    { value: "notify", label: "Send notification" },
     { value: "dispatch_agent", label: "Dispatch agent run" },
+    { value: "start_workflow", label: "Start workflow starter" },
+    { value: "notify", label: "Send notification" },
+    { value: "auto_transition", label: "Auto-transition task" },
   ],
 }));
 
@@ -216,6 +217,32 @@ describe("WorkflowConfigPanel", () => {
           fromStatus: "blocked",
           toStatus: "in_review",
           action: "dispatch_agent",
+        },
+      ],
+    });
+  });
+
+  it("captures workflow starter config for start_workflow triggers", async () => {
+    const user = userEvent.setup();
+    render(<WorkflowConfigPanel projectId="proj-1" />);
+
+    const actionSelects = screen.getAllByLabelText(/action/i);
+    await user.selectOptions(actionSelects[0]!, "start_workflow");
+    await user.type(screen.getByLabelText("Trigger 1 workflow plugin"), "task-delivery-flow");
+    await user.type(screen.getByLabelText("Trigger 1 workflow profile"), "task-delivery");
+
+    await user.click(screen.getByRole("button", { name: "Save Workflow Config" }));
+    expect(mockUpdateWorkflow).toHaveBeenCalledWith("proj-1", {
+      transitions: expect.any(Object),
+      triggers: [
+        {
+          fromStatus: "triaged",
+          toStatus: "assigned",
+          action: "start_workflow",
+          config: {
+            pluginId: "task-delivery-flow",
+            profile: "task-delivery",
+          },
         },
       ],
     });

@@ -66,9 +66,7 @@ func handleTaskCreate(ctx context.Context, p core.Platform, msg *core.Message, c
 		replyError(ctx, p, msg.ReplyCtx, "创建任务失败", fmt.Sprintf("%v", err), "请检查参数后重试，或使用 /task list 查看现有任务")
 		return
 	}
-	if cs, ok := p.(core.CardSender); ok {
-		card := buildTaskCard(task)
-		_ = cs.ReplyCard(ctx, msg.ReplyCtx, card)
+	if err := replyTaskSummary(ctx, p, msg.ReplyCtx, task, "已创建任务"); err == nil {
 		return
 	}
 	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已创建任务 #%s: %s", shortID(task.ID), task.Title))
@@ -202,13 +200,10 @@ func handleTaskStatus(ctx context.Context, p core.Platform, msg *core.Message, c
 		replyError(ctx, p, msg.ReplyCtx, "获取任务失败", fmt.Sprintf("%v", err), "请检查 task-id 是否正确")
 		return
 	}
-	if cs, ok := p.(core.CardSender); ok {
-		card := buildTaskCard(task)
-		_ = cs.ReplyCard(ctx, msg.ReplyCtx, card)
+	if err := replyTaskSummary(ctx, p, msg.ReplyCtx, task, ""); err == nil {
 		return
 	}
-	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("#%s [%s] %s\n优先级: %s\n负责人: %s\n花费: $%.2f / $%.2f",
-		shortID(task.ID), task.Status, task.Title, task.Priority, task.AssigneeName, task.SpentUsd, task.BudgetUsd))
+	_ = p.Reply(ctx, msg.ReplyCtx, formatTaskSummaryText(task, ""))
 }
 
 func handleTaskDelete(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, taskID string) {
@@ -446,7 +441,10 @@ func handleTaskMove(ctx context.Context, p core.Platform, msg *core.Message, c *
 		return
 	}
 
-	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("任务 #%s 已流转到 %s", shortID(task.ID), task.Status))
+	if err := replyTaskSummary(ctx, p, msg.ReplyCtx, task, "任务状态已更新"); err == nil {
+		return
+	}
+	_ = p.Reply(ctx, msg.ReplyCtx, formatTaskSummaryText(task, "任务状态已更新"))
 }
 
 func handleTaskAI(ctx context.Context, p core.Platform, msg *core.Message, engine *core.Engine, c *client.AgentForgeClient, args string) {
@@ -538,40 +536,258 @@ func handleTaskAIClassify(ctx context.Context, p core.Platform, msg *core.Messag
 	_ = p.Reply(ctx, msg.ReplyCtx, reply)
 }
 
+func replyTaskSummary(ctx context.Context, p core.Platform, replyCtx any, task *client.Task, lead string) error {
+	message := buildTaskSummaryMessage(p, task, lead)
+	if err := replyStructured(ctx, p, replyCtx, message); err == nil {
+		return nil
+	}
+	if message == nil {
+		return errNoRichSender
+	}
+	return p.Reply(ctx, replyCtx, message.FallbackText())
+}
+
 func buildTaskCard(task *client.Task) *core.Card {
-	card := core.NewCard().
-		SetTitle(fmt.Sprintf("任务 #%s", shortID(task.ID))).
-		AddField("标题", task.Title).
-		AddField("状态", task.Status).
-		AddField("优先级", task.Priority)
-	if task.AssigneeName != "" {
-		card.AddField("负责人", task.AssigneeName)
+	if message := buildTaskSummaryMessage(nil, task, ""); message != nil {
+		return message.LegacyCard()
+	}
+	return nil
+}
+
+func buildTaskSummaryMessage(p core.Platform, task *client.Task, lead string) *core.StructuredMessage {
+	if task == nil {
+		return nil
+	}
+	sections := []core.StructuredSection{
+		{
+			Type: core.StructuredSectionTypeText,
+			TextSection: &core.TextSection{
+				Body: formatTaskHeader(task, lead),
+			},
+		},
+		{
+			Type: core.StructuredSectionTypeFields,
+			FieldsSection: &core.FieldsSection{
+				Fields: buildTaskSummaryFields(task),
+			},
+		},
+	}
+
+	actionsEnabled := taskCallbackActionsEnabled(p)
+	actions := buildTaskSummaryActions(task, actionsEnabled)
+	if len(actions) > 0 {
+		sections = append(sections, core.StructuredSection{
+			Type:           core.StructuredSectionTypeActions,
+			ActionsSection: &core.ActionsSection{Actions: actions, ButtonsPerRow: 2},
+		})
+	}
+	if !actionsEnabled {
+		if guidanceFields := buildTaskManualGuidanceFields(task); len(guidanceFields) > 0 {
+			sections = append(sections, core.StructuredSection{
+				Type:          core.StructuredSectionTypeFields,
+				FieldsSection: &core.FieldsSection{Fields: guidanceFields},
+			})
+		}
+	}
+
+	return &core.StructuredMessage{
+		Title:    fmt.Sprintf("任务 #%s", shortID(task.ID)),
+		Sections: sections,
+	}
+}
+
+func buildTaskSummaryFields(task *client.Task) []core.StructuredField {
+	fields := []core.StructuredField{
+		{Label: "标题", Value: strings.TrimSpace(task.Title)},
+		{Label: "状态", Value: strings.TrimSpace(task.Status)},
+		{Label: "优先级", Value: strings.TrimSpace(task.Priority)},
+	}
+	if trimmed := strings.TrimSpace(task.AssigneeName); trimmed != "" {
+		fields = append(fields, core.StructuredField{Label: "负责人", Value: trimmed})
 	}
 	if task.BudgetUsd > 0 {
-		card.AddField("预算", fmt.Sprintf("$%.2f / $%.2f", task.SpentUsd, task.BudgetUsd))
+		fields = append(fields, core.StructuredField{Label: "预算", Value: fmt.Sprintf("$%.2f / $%.2f", task.SpentUsd, task.BudgetUsd)})
 	}
-	card.AddPrimaryButton("分配给 Agent", "act:assign-agent:"+task.ID)
-	if strings.TrimSpace(task.ProjectID) != "" {
-		docAction := core.BuildActionReference("save-as-doc", task.ProjectID, map[string]string{
-			"body":  buildTaskMessageBody(task),
-			"title": task.Title,
-		})
-		followupTitle := strings.TrimSpace(task.Title)
-		if followupTitle == "" {
-			followupTitle = "IM Task"
-		} else {
-			followupTitle = "Follow up: " + followupTitle
+	return fields
+}
+
+func buildTaskSummaryActions(task *client.Task, actionsEnabled bool) []core.StructuredAction {
+	if task == nil {
+		return nil
+	}
+	actions := make([]core.StructuredAction, 0, 5)
+	if actionsEnabled {
+		if nextStatus, ok := suggestedNextTaskStatus(task.Status); ok {
+			actions = append(actions, core.StructuredAction{
+				ID: core.BuildActionReference("transition-task", task.ID, map[string]string{
+					"targetStatus": nextStatus,
+				}),
+				Label: transitionActionLabel(nextStatus),
+				Style: core.ActionStylePrimary,
+			})
 		}
-		createTaskAction := core.BuildActionReference("create-task", task.ProjectID, map[string]string{
-			"body":     buildTaskMessageBody(task),
-			"priority": defaultTaskPriority(task.Priority),
-			"title":    followupTitle,
-		})
-		card.AddButton("保存为文档", docAction)
-		card.AddButton("创建跟进任务", createTaskAction)
+		if canAssignAgent(task.Status) {
+			actions = append(actions, core.StructuredAction{
+				ID:    "act:assign-agent:" + task.ID,
+				Label: "分配给 Agent",
+				Style: core.ActionStyleDefault,
+			})
+		}
+		if strings.TrimSpace(task.ProjectID) != "" {
+			actions = append(actions, core.StructuredAction{
+				ID: core.BuildActionReference("save-as-doc", task.ProjectID, map[string]string{
+					"body":  buildTaskMessageBody(task),
+					"title": task.Title,
+				}),
+				Label: "保存为文档",
+				Style: core.ActionStyleDefault,
+			})
+			followupTitle := strings.TrimSpace(task.Title)
+			if followupTitle == "" {
+				followupTitle = "IM Task"
+			} else {
+				followupTitle = "Follow up: " + followupTitle
+			}
+			actions = append(actions, core.StructuredAction{
+				ID: core.BuildActionReference("create-task", task.ProjectID, map[string]string{
+					"body":     buildTaskMessageBody(task),
+					"priority": defaultTaskPriority(task.Priority),
+					"title":    followupTitle,
+				}),
+				Label: "创建跟进任务",
+				Style: core.ActionStyleDefault,
+			})
+		}
 	}
-	card.AddButton("查看详情", "link:/tasks/"+task.ID)
-	return card
+	if strings.TrimSpace(task.ID) != "" {
+		actions = append(actions, core.StructuredAction{
+			Label: "查看详情",
+			URL:   "/tasks/" + task.ID,
+			Style: core.ActionStyleDefault,
+		})
+	}
+	return actions
+}
+
+func taskCallbackActionsEnabled(p core.Platform) bool {
+	if p == nil {
+		return true
+	}
+	if _, ok := p.(core.ReplyStructuredSender); !ok {
+		if _, ok := p.(core.CardSender); !ok {
+			return false
+		}
+	}
+	return helpQuickActionsEnabled(p)
+}
+
+func formatTaskHeader(task *client.Task, lead string) string {
+	parts := make([]string, 0, 2)
+	if trimmed := strings.TrimSpace(lead); trimmed != "" {
+		parts = append(parts, trimmed)
+	}
+	parts = append(parts, fmt.Sprintf("任务 %s [%s] %s", shortID(task.ID), strings.TrimSpace(task.Status), strings.TrimSpace(task.Title)))
+	return strings.Join(parts, "\n")
+}
+
+func formatTaskSummaryText(task *client.Task, lead string) string {
+	if task == nil {
+		return strings.TrimSpace(lead)
+	}
+	lines := []string{formatTaskHeader(task, lead)}
+	for _, field := range buildTaskSummaryFields(task) {
+		if strings.TrimSpace(field.Value) == "" {
+			continue
+		}
+		lines = append(lines, fmt.Sprintf("%s: %s", field.Label, field.Value))
+	}
+	if guidance := formatTaskNextStepGuidance(task); guidance != "" {
+		lines = append(lines, guidance)
+	}
+	return strings.Join(lines, "\n")
+}
+
+func formatTaskNextStepGuidance(task *client.Task) string {
+	if task == nil {
+		return ""
+	}
+	commands := make([]string, 0, 2)
+	if nextStatus, ok := suggestedNextTaskStatus(task.Status); ok && strings.TrimSpace(task.ID) != "" {
+		commands = append(commands, fmt.Sprintf("/task move %s %s", task.ID, nextStatus))
+	}
+	if canAssignAgent(task.Status) && strings.TrimSpace(task.ID) != "" {
+		commands = append(commands, fmt.Sprintf("/task assign %s <assignee>", task.ID))
+	}
+	if len(commands) == 0 {
+		return ""
+	}
+	return "下一步:\n- " + strings.Join(commands, "\n- ")
+}
+
+func buildTaskManualGuidanceFields(task *client.Task) []core.StructuredField {
+	commands := make([]string, 0, 2)
+	if task == nil {
+		return nil
+	}
+	if nextStatus, ok := suggestedNextTaskStatus(task.Status); ok && strings.TrimSpace(task.ID) != "" {
+		commands = append(commands, fmt.Sprintf("/task move %s %s", task.ID, nextStatus))
+	}
+	if canAssignAgent(task.Status) && strings.TrimSpace(task.ID) != "" {
+		commands = append(commands, fmt.Sprintf("/task assign %s <assignee>", task.ID))
+	}
+	if len(commands) == 0 {
+		return nil
+	}
+	return []core.StructuredField{{Label: "下一步", Value: strings.Join(commands, "\n")}}
+}
+
+func suggestedNextTaskStatus(status string) (string, bool) {
+	switch strings.TrimSpace(status) {
+	case "inbox":
+		return "triaged", true
+	case "triaged":
+		return "assigned", true
+	case "assigned":
+		return "in_progress", true
+	case "in_progress":
+		return "in_review", true
+	case "in_review":
+		return "done", true
+	case "changes_requested":
+		return "in_progress", true
+	case "blocked":
+		return "in_progress", true
+	case "budget_exceeded":
+		return "in_progress", true
+	default:
+		return "", false
+	}
+}
+
+func transitionActionLabel(status string) string {
+	switch strings.TrimSpace(status) {
+	case "triaged":
+		return "标记为已分诊"
+	case "assigned":
+		return "标记为已分配"
+	case "in_progress":
+		return "开始处理"
+	case "in_review":
+		return "提交审查"
+	case "done":
+		return "标记为完成"
+	default:
+		return "流转任务"
+	}
+}
+
+func canAssignAgent(status string) bool {
+	switch strings.TrimSpace(status) {
+	case "done", "cancelled":
+		return false
+	default:
+		return true
+	}
 }
 
 func buildTaskMessageBody(task *client.Task) string {

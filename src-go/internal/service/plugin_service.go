@@ -1393,6 +1393,11 @@ func (s *PluginService) validateWorkflowManifest(manifest *model.PluginManifest)
 			}
 		}
 	}
+	for _, trigger := range workflow.Triggers {
+		if strings.TrimSpace(trigger.Event) == "task.transition" && strings.TrimSpace(trigger.Profile) == "" {
+			return fmt.Errorf("workflow task.transition trigger must declare a profile")
+		}
+	}
 	return nil
 }
 

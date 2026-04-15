@@ -40,6 +40,23 @@ type IMActionTaskCreator interface {
 	Create(ctx context.Context, projectID uuid.UUID, req *model.CreateTaskRequest, reporterID *uuid.UUID) (*model.Task, error)
 }
 
+type IMActionTaskTransitioner interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*model.Task, error)
+	Transition(ctx context.Context, id uuid.UUID, req *model.TransitionRequest) (*model.Task, error)
+}
+
+type IMActionBindingWriter interface {
+	BindAction(ctx context.Context, binding *model.IMActionBinding) error
+}
+
+type IMActionProgressRecorder interface {
+	RecordActivity(ctx context.Context, taskID uuid.UUID, input TaskActivityInput) (*model.TaskProgressSnapshot, error)
+}
+
+type IMActionWorkflowEvaluator interface {
+	EvaluateTransition(ctx context.Context, task *model.Task, fromStatus, toStatus string) []TriggerResult
+}
+
 type IMActionWikiCreator interface {
 	GetSpaceByProjectID(ctx context.Context, projectID uuid.UUID) (*model.WikiSpace, error)
 	CreatePage(ctx context.Context, projectID uuid.UUID, spaceID uuid.UUID, title string, parentID *uuid.UUID, content string, createdBy *uuid.UUID) (*model.WikiPage, error)
@@ -50,6 +67,10 @@ type BackendIMActionExecutor struct {
 	decomposer IMActionTaskDecomposer
 	reviewer   IMActionReviewer
 	taskMaker  IMActionTaskCreator
+	taskMover  IMActionTaskTransitioner
+	binder     IMActionBindingWriter
+	progress   IMActionProgressRecorder
+	workflow   IMActionWorkflowEvaluator
 	wikiMaker  IMActionWikiCreator
 }
 
@@ -63,6 +84,14 @@ func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IM
 		switch value := extra.(type) {
 		case IMActionTaskCreator:
 			executor.taskMaker = value
+		case IMActionTaskTransitioner:
+			executor.taskMover = value
+		case IMActionBindingWriter:
+			executor.binder = value
+		case IMActionProgressRecorder:
+			executor.progress = value
+		case IMActionWorkflowEvaluator:
+			executor.workflow = value
 		case IMActionWikiCreator:
 			executor.wikiMaker = value
 		}
@@ -80,6 +109,8 @@ func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActi
 		return e.executeAssignAgent(ctx, req), nil
 	case "decompose":
 		return e.executeDecompose(ctx, req), nil
+	case "transition-task", "move-task":
+		return e.executeTransitionTask(ctx, req), nil
 	case "save-as-doc":
 		return e.executeSaveAsDoc(ctx, req), nil
 	case "create-task":
@@ -127,6 +158,7 @@ func (e *BackendIMActionExecutor) executeAssignAgent(ctx context.Context, req *m
 	if result.Task.ID != "" {
 		task := result.Task
 		resp.Task = &task
+		attachTaskBindingMetadata(resp, req, task.ProjectID, task.ID)
 	}
 	return resp
 }
@@ -176,6 +208,7 @@ func (e *BackendIMActionExecutor) executeCreateTask(ctx context.Context, req *mo
 	resp := newIMActionResponse(req, model.IMActionStatusCompleted, fmt.Sprintf("Created task %s.", task.Title), true)
 	dto := task.ToDTO()
 	resp.Task = &dto
+	attachTaskBindingMetadata(resp, req, dto.ProjectID, dto.ID)
 	resp.Metadata["href"] = "/project?taskId=" + task.ID.String()
 	return resp
 }
@@ -207,6 +240,62 @@ func (e *BackendIMActionExecutor) executeDecompose(ctx context.Context, req *mod
 	resp := newIMActionResponse(req, model.IMActionStatusCompleted, fmt.Sprintf("Task %s was decomposed into %d subtasks.", result.ParentTask.ID, len(result.Subtasks)), true)
 	resp.Task = cloneTaskDTOPtr(&result.ParentTask)
 	resp.Decomposition = cloneTaskDecompositionResponse(result)
+	if resp.Task != nil {
+		attachTaskBindingMetadata(resp, req, resp.Task.ProjectID, resp.Task.ID)
+	}
+	return resp
+}
+
+func (e *BackendIMActionExecutor) executeTransitionTask(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	taskID, err := parseIMEntityUUID(req.EntityID)
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Invalid task identifier.", false)
+	}
+	if e.taskMover == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Task transition workflow is unavailable.", false)
+	}
+
+	targetStatus := firstMetadataValue(req.Metadata, "targetStatus", "target_status", "status")
+	if targetStatus == "" {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Task transition requires target status.", false)
+	}
+
+	currentTask, currentErr := e.taskMover.GetByID(ctx, taskID)
+	updatedTask, err := e.taskMover.Transition(ctx, taskID, &model.TransitionRequest{Status: targetStatus})
+	if err != nil {
+		status := model.IMActionStatusFailed
+		message := fmt.Sprintf("Task transition failed: %s", err.Error())
+		if currentTask != nil {
+			status = model.IMActionStatusBlocked
+			message = fmt.Sprintf("Task %s could not transition to %s: %s", currentTask.Title, targetStatus, err.Error())
+		} else if currentErr != nil {
+			message = fmt.Sprintf("Task transition failed: %s", currentErr.Error())
+		}
+		resp := newIMActionResponse(req, status, message, false)
+		if currentTask != nil {
+			dto := currentTask.ToDTO()
+			resp.Task = &dto
+			attachTaskBindingMetadata(resp, req, dto.ProjectID, dto.ID)
+		}
+		return resp
+	}
+
+	if updatedTask == nil {
+		updatedTask, _ = e.taskMover.GetByID(ctx, taskID)
+	}
+	if updatedTask == nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Task transition returned no task.", false)
+	}
+
+	e.bindTaskAction(ctx, req, updatedTask)
+	e.recordTaskTransitionActivity(ctx, updatedTask)
+	e.evaluateTaskTransitionWorkflow(ctx, currentTask, updatedTask)
+
+	dto := updatedTask.ToDTO()
+	resp := newIMActionResponse(req, model.IMActionStatusCompleted, fmt.Sprintf("Task %s moved to %s.", updatedTask.Title, dto.Status), true)
+	resp.Task = &dto
+	resp.Structured = buildTaskLifecycleStructuredMessage(dto)
+	attachTaskBindingMetadata(resp, req, dto.ProjectID, dto.ID)
 	return resp
 }
 
@@ -261,6 +350,130 @@ func (e *BackendIMActionExecutor) executeReviewAction(ctx context.Context, req *
 	dto := updated.ToDTO()
 	resp.Review = &dto
 	return resp
+}
+
+func attachTaskBindingMetadata(resp *model.IMActionResponse, req *model.IMActionRequest, projectID string, taskID string) {
+	if resp == nil {
+		return
+	}
+	resp.Metadata = buildIMConnectivityMetadata(
+		resp.Metadata,
+		imDeliverySourceActionResult,
+		req.BridgeID,
+		req.Platform,
+		projectID,
+		taskID,
+		"",
+		"",
+		resp.ReplyTarget,
+	)
+	if trimmed := strings.TrimSpace(resp.Status); trimmed != "" {
+		resp.Metadata["action_status"] = trimmed
+	}
+}
+
+func (e *BackendIMActionExecutor) bindTaskAction(ctx context.Context, req *model.IMActionRequest, task *model.Task) {
+	if e == nil || e.binder == nil || req == nil || req.ReplyTarget == nil || task == nil {
+		return
+	}
+	_ = e.binder.BindAction(ctx, &model.IMActionBinding{
+		BridgeID:    strings.TrimSpace(req.BridgeID),
+		Platform:    req.Platform,
+		ProjectID:   task.ProjectID.String(),
+		TaskID:      task.ID.String(),
+		ReplyTarget: cloneReplyTarget(req.ReplyTarget),
+	})
+}
+
+func (e *BackendIMActionExecutor) recordTaskTransitionActivity(ctx context.Context, task *model.Task) {
+	if e == nil || e.progress == nil || task == nil {
+		return
+	}
+	_, _ = e.progress.RecordActivity(ctx, task.ID, TaskActivityInput{
+		Source:         model.TaskProgressSourceTaskTransition,
+		UpdateHealth:   true,
+		MarkTransition: true,
+		OccurredAt:     task.UpdatedAt,
+	})
+}
+
+func (e *BackendIMActionExecutor) evaluateTaskTransitionWorkflow(ctx context.Context, previousTask *model.Task, updatedTask *model.Task) {
+	if e == nil || e.workflow == nil || previousTask == nil || updatedTask == nil {
+		return
+	}
+	if strings.TrimSpace(previousTask.Status) == "" || strings.TrimSpace(updatedTask.Status) == "" {
+		return
+	}
+	e.workflow.EvaluateTransition(ctx, updatedTask, previousTask.Status, updatedTask.Status)
+}
+
+func buildTaskLifecycleStructuredMessage(task model.TaskDTO) *model.IMStructuredMessage {
+	fields := []model.IMStructuredField{
+		{Label: "Task", Value: task.Title},
+		{Label: "Status", Value: task.Status},
+		{Label: "Priority", Value: task.Priority},
+	}
+	if nextStatus, ok := nextTaskLifecycleStatus(task.Status); ok {
+		fields = append(fields, model.IMStructuredField{Label: "Next", Value: nextStatus})
+	}
+
+	actions := []model.IMStructuredAction{
+		{Label: "View Task", URL: "/tasks/" + task.ID, Style: "default"},
+	}
+	if nextStatus, ok := nextTaskLifecycleStatus(task.Status); ok {
+		actions = append([]model.IMStructuredAction{{
+			ID:    "act:transition-task:" + task.ID + "?targetStatus=" + nextStatus,
+			Label: nextTaskLifecycleLabel(nextStatus),
+			Style: "primary",
+		}}, actions...)
+	}
+
+	return &model.IMStructuredMessage{
+		Title:   "Task Update",
+		Body:    fmt.Sprintf("Task %s is now %s.", task.Title, task.Status),
+		Fields:  fields,
+		Actions: actions,
+	}
+}
+
+func nextTaskLifecycleStatus(status string) (string, bool) {
+	switch strings.TrimSpace(status) {
+	case model.TaskStatusInbox:
+		return model.TaskStatusTriaged, true
+	case model.TaskStatusTriaged:
+		return model.TaskStatusAssigned, true
+	case model.TaskStatusAssigned:
+		return model.TaskStatusInProgress, true
+	case model.TaskStatusInProgress:
+		return model.TaskStatusInReview, true
+	case model.TaskStatusInReview:
+		return model.TaskStatusDone, true
+	case model.TaskStatusChangesRequested:
+		return model.TaskStatusInProgress, true
+	case model.TaskStatusBlocked:
+		return model.TaskStatusInProgress, true
+	case model.TaskStatusBudgetExceeded:
+		return model.TaskStatusInProgress, true
+	default:
+		return "", false
+	}
+}
+
+func nextTaskLifecycleLabel(status string) string {
+	switch strings.TrimSpace(status) {
+	case model.TaskStatusTriaged:
+		return "Mark Triaged"
+	case model.TaskStatusAssigned:
+		return "Mark Assigned"
+	case model.TaskStatusInProgress:
+		return "Start Work"
+	case model.TaskStatusInReview:
+		return "Request Review"
+	case model.TaskStatusDone:
+		return "Mark Done"
+	default:
+		return "Transition Task"
+	}
 }
 
 func newIMActionResponse(req *model.IMActionRequest, status string, message string, success bool) *model.IMActionResponse {

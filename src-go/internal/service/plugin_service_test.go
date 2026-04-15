@@ -1159,6 +1159,97 @@ spec:
 	}
 }
 
+func TestPluginService_RegisterWorkflowRejectsTaskDrivenTriggerWithoutProfile(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	localPath := writeManifest(t, pluginsDir, "local/broken-task-delivery.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: broken-task-delivery
+  name: Broken Task Delivery
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/task-delivery.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: planner
+    steps:
+      - id: plan
+        role: planner
+        action: agent
+    triggers:
+      - event: task.transition
+        requiresTask: true
+`)
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, pluginsDir).
+		WithRoleStore(&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"planner": {Metadata: model.RoleMetadata{ID: "planner", Name: "Planner"}},
+			},
+		})
+
+	if _, err := svc.RegisterLocalPath(ctx, localPath); err == nil || !strings.Contains(err.Error(), "profile") {
+		t.Fatalf("RegisterLocalPath() error = %v, want missing trigger profile failure", err)
+	}
+}
+
+func TestPluginService_RegisterWorkflowAcceptsTaskDrivenTriggerProfile(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	localPath := writeManifest(t, pluginsDir, "local/task-delivery.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: task-delivery-flow
+  name: Task Delivery Flow
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/task-delivery.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: planner
+      - id: coder
+    steps:
+      - id: plan
+        role: planner
+        action: agent
+        next: [implement]
+      - id: implement
+        role: coder
+        action: agent
+    triggers:
+      - event: manual
+      - event: task.transition
+        profile: task-delivery
+        requiresTask: true
+`)
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, pluginsDir).
+		WithRoleStore(&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"planner": {Metadata: model.RoleMetadata{ID: "planner", Name: "Planner"}},
+				"coder":   {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+			},
+		})
+
+	record, err := svc.RegisterLocalPath(ctx, localPath)
+	if err != nil {
+		t.Fatalf("RegisterLocalPath() error = %v", err)
+	}
+	if got := len(record.Spec.Workflow.Triggers); got != 2 {
+		t.Fatalf("len(record.Spec.Workflow.Triggers) = %d, want 2", got)
+	}
+	if got := record.Spec.Workflow.Triggers[1].Profile; got != "task-delivery" {
+		t.Fatalf("task trigger profile = %q, want task-delivery", got)
+	}
+}
+
 func TestPluginService_ActivateSequentialWorkflowDelegatesToGoRuntime(t *testing.T) {
 	ctx := context.Background()
 	pluginsDir := t.TempDir()

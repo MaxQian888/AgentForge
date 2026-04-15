@@ -25,16 +25,16 @@
 - SDK：`src-go/plugin-sdk-go`
 - 样例插件：`src-go/cmd/sample-wasm-plugin`
 - 工作流样例：`src-go/cmd/standard-dev-flow`
-- 脚手架入口：`scripts/create-plugin.js`
+- 脚手架入口：`scripts/plugin/create-plugin.js`
 - built-in bundle：`plugins/builtin-bundle.yaml`
 - 内置示例 manifest：`plugins/integrations/feishu-adapter/manifest.yaml`
 - 内置工作流 manifest：`plugins/workflows/standard-dev-flow/manifest.yaml`
-- 构建脚本：`scripts/build-go-wasm-plugin.js`
-- 调试脚本：`scripts/debug-go-wasm-plugin.js`
-- 最小运行栈脚本：`scripts/run-plugin-dev-stack.js`
-- smoke 验证脚本：`scripts/verify-plugin-dev-workflow.js`
-- built-in bundle 校验脚本：`scripts/verify-built-in-plugin-bundle.js`
-- 校验 fixture：`scripts/__fixtures__/invalid-go-wasm-plugin-manifest.yaml`
+- 构建脚本：`scripts/plugin/build-go-wasm-plugin.js`
+- 调试脚本：`scripts/plugin/debug-go-wasm-plugin.js`
+- 最小运行栈脚本：`scripts/plugin/run-plugin-dev-stack.js`
+- smoke 验证脚本：`scripts/plugin/verify-plugin-dev-workflow.js`
+- built-in bundle 校验脚本：`scripts/plugin/verify-built-in-plugin-bundle.js`
+- 校验 fixture：`scripts/plugin/__fixtures__/invalid-go-wasm-plugin-manifest.yaml`
 
 ## SDK 契约
 
@@ -175,7 +175,7 @@ pnpm plugin:build -- --manifest path/to/manifest.yaml --source ./cmd/sample-wasm
 - `source.path` 仍然表示 manifest 来源，不会被误当成 `go build` 的包路径。
 - `pnpm create-plugin -- --type workflow --name <name>` / `integration` 会生成一条与这些 build helper 对齐的 repo-local starter，而不是另一套平行模板。
 
-`scripts/__fixtures__/invalid-go-wasm-plugin-manifest.yaml` 用来验证缺少 `spec.module` 时的提前失败语义。
+`scripts/plugin/__fixtures__/invalid-go-wasm-plugin-manifest.yaml` 用来验证缺少 `spec.module` 时的提前失败语义。
 
 ## 本地调试
 
@@ -216,7 +216,7 @@ pnpm plugin:dev
 推荐的聚焦验证命令：
 
 ```bash
-pnpm exec jest --runInBand scripts/build-go-wasm-plugin.test.ts scripts/debug-go-wasm-plugin.test.ts scripts/run-plugin-dev-stack.test.ts scripts/verify-plugin-dev-workflow.test.ts scripts/verify-built-in-plugin-bundle.test.ts
+pnpm exec jest --runInBand scripts/plugin/build-go-wasm-plugin.test.ts scripts/plugin/debug-go-wasm-plugin.test.ts scripts/plugin/run-plugin-dev-stack.test.ts scripts/plugin/verify-plugin-dev-workflow.test.ts scripts/plugin/verify-built-in-plugin-bundle.test.ts
 pnpm plugin:verify -- --manifest plugins/integrations/feishu-adapter/manifest.yaml
 pnpm plugin:verify:builtins
 cd src-go
@@ -229,7 +229,7 @@ go test ./internal/service -run PluginService -count=1
 
 覆盖范围：
 
-- `scripts/*.test.ts`：manifest 驱动构建、debug envelope、最小开发栈合同、verify stage 计划，以及 built-in bundle 合同校验
+- `scripts/plugin/*.test.ts`：manifest 驱动构建、debug envelope、最小开发栈合同、verify stage 计划，以及 built-in bundle 合同校验
 - `plugin:verify`：受维护样例的 `build -> debug health` smoke 路径
 - `plugin:verify:builtins`：校验内置 bundle 清单、manifest 存在性、以及 built-in readiness/verify 元数据
 - `plugin-sdk-go`：typed descriptor/context/result/error helper 和 export helper

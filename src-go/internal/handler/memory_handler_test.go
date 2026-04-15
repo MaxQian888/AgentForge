@@ -62,6 +62,23 @@ func (s *memoryServiceStub) Store(_ context.Context, input service.StoreMemoryIn
 	return s.storeResult, s.storeErr
 }
 
+func (s *memoryServiceStub) Update(_ context.Context, input service.UpdateMemoryInput) (*model.AgentMemory, error) {
+	s.storeInput = &service.StoreMemoryInput{
+		ProjectID: input.ProjectID,
+		RoleID:    input.RoleID,
+	}
+	if input.Key != nil {
+		s.storeInput.Key = *input.Key
+	}
+	if input.Content != nil {
+		s.storeInput.Content = *input.Content
+	}
+	if input.Tags != nil {
+		s.storeInput.Tags = append([]string(nil), (*input.Tags)...)
+	}
+	return s.storeResult, s.storeErr
+}
+
 func (s *memoryServiceStub) Search(_ context.Context, input service.MemoryExplorerQuery) ([]model.AgentMemoryDTO, error) {
 	s.searchInput = &input
 	return s.searchResult, s.searchErr
@@ -246,6 +263,28 @@ func TestMemoryHandlerExplorerRoutes(t *testing.T) {
 	if cleanupRec.Code != http.StatusOK || stub.cleanupInput == nil || stub.cleanupInput.Scope != model.MemoryScopeRole || stub.cleanupInput.RoleID != "planner" || stub.cleanupInput.Before == nil {
 		t.Fatalf("Cleanup() status/input = %d / %#v", cleanupRec.Code, stub.cleanupInput)
 	}
+
+	stub.storeResult = &model.AgentMemory{
+		ID:        memoryID,
+		ProjectID: projectID,
+		Scope:     model.MemoryScopeProject,
+		Category:  model.MemoryCategoryEpisodic,
+		Key:       "release-note",
+		Content:   "Pinned release detail",
+		Metadata:  `{"kind":"operator_note","tags":["ops"]}`,
+		CreatedAt: now,
+		UpdatedAt: now,
+	}
+	_, updateCtx, updateRec := newMemoryHandlerContext(http.MethodPatch, "/api/v1/projects/"+projectID.String()+"/memory/"+memoryID.String()+"?roleId=planner", `{"key":"release-note","content":"Pinned release detail","tags":["ops","release"]}`)
+	updateCtx.SetPath("/api/v1/projects/:pid/memory/:mid")
+	updateCtx.SetParamNames("pid", "mid")
+	updateCtx.SetParamValues(projectID.String(), memoryID.String())
+	if err := h.Update(updateCtx); err != nil {
+		t.Fatalf("Update() error = %v", err)
+	}
+	if updateRec.Code != http.StatusOK || stub.storeInput == nil || stub.storeInput.Key != "release-note" || stub.storeInput.Content != "Pinned release detail" || len(stub.storeInput.Tags) != 2 {
+		t.Fatalf("Update() status/input = %d / %#v", updateRec.Code, stub.storeInput)
+	}
 }
 
 func TestMemoryHandlerSearchSupportsLegacyQAndErrorBranches(t *testing.T) {
@@ -263,6 +302,17 @@ func TestMemoryHandlerSearchSupportsLegacyQAndErrorBranches(t *testing.T) {
 	}
 	if searchRec.Code != http.StatusOK || stub.searchInput == nil || stub.searchInput.Query != "release" {
 		t.Fatalf("legacy search input = %#v status=%d", stub.searchInput, searchRec.Code)
+	}
+
+	_, taggedSearchCtx, taggedSearchRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory?query=release&tag=ops", "")
+	taggedSearchCtx.SetPath("/api/v1/projects/:pid/memory")
+	taggedSearchCtx.SetParamNames("pid")
+	taggedSearchCtx.SetParamValues(projectID.String())
+	if err := h.Search(taggedSearchCtx); err != nil {
+		t.Fatalf("Search(tagged) error = %v", err)
+	}
+	if taggedSearchRec.Code != http.StatusOK || stub.searchInput == nil || stub.searchInput.Tag != "ops" {
+		t.Fatalf("tagged search input = %#v status=%d", stub.searchInput, taggedSearchRec.Code)
 	}
 
 	_, badSearchCtx, badSearchRec := newMemoryHandlerContext(http.MethodGet, "/api/v1/projects/"+projectID.String()+"/memory?startAt=bad", "")

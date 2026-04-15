@@ -9,6 +9,22 @@ today.
 - Auth: every endpoint requires an access token
 - Project creation also bootstraps a wiki space and built-in wiki templates
 
+## Bootstrap And Handoff Notes
+
+The repository's current project-management flow treats project creation as the
+start of a bootstrap lifecycle rather than the end of setup.
+
+- Frontend project-entry surfaces SHOULD preserve explicit project context after
+  creation or selection instead of relying only on ambient dashboard selection.
+- The canonical bootstrap entry used by the current dashboard surfaces is
+  `/?project=<project-id>`.
+- Project-scoped workspaces MAY also accept explicit handoff query params such
+  as `project`, `section`, `tab`, `focus`, or `action` to open the relevant
+  management surface directly for the same project context.
+- Project creation returning `ProjectDTO` is therefore important not only for
+  CRUD confirmation, but also for the immediate handoff into settings, team,
+  template, planning, and delivery workspaces.
+
 ## Core DTOs
 
 ### `ProjectDTO`

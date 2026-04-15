@@ -5,6 +5,7 @@ import { Loader2 } from "lucide-react"
 import {
   Dialog,
   DialogContent,
+  DialogDescription,
   DialogFooter,
   DialogHeader,
   DialogTitle,
@@ -32,7 +33,11 @@ export function WorkflowTemplateVarsDialog({
   loading,
 }: TemplateVarsDialogProps) {
   const title =
-    (mode === "clone" ? "Clone Template: " : "Execute Template: ") + template.name
+    (mode === "clone" ? "Create Workflow Copy: " : "Start Template Execution: ") + template.name
+  const description =
+    mode === "clone"
+      ? "This creates a project-owned workflow definition you can continue editing safely."
+      : "This starts an execution by cloning the template into your project with the variables below."
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
@@ -61,6 +66,7 @@ export function WorkflowTemplateVarsDialog({
       <DialogContent>
         <DialogHeader>
           <DialogTitle>{title}</DialogTitle>
+          <DialogDescription>{description}</DialogDescription>
         </DialogHeader>
 
         <form id="template-vars-form" onSubmit={handleSubmit}>
@@ -100,7 +106,7 @@ export function WorkflowTemplateVarsDialog({
           </Button>
           <Button type="submit" form="template-vars-form" disabled={loading}>
             {loading && <Loader2 className="mr-2 h-4 w-4 animate-spin" />}
-            {mode === "clone" ? "Clone" : "Execute"}
+            {mode === "clone" ? "Create Workflow Copy" : "Start Execution"}
           </Button>
         </DialogFooter>
       </DialogContent>

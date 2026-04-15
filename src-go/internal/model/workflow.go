@@ -12,7 +12,7 @@ type WorkflowConfig struct {
 	ID          uuid.UUID       `db:"id"`
 	ProjectID   uuid.UUID       `db:"project_id"`
 	Transitions json.RawMessage `db:"transitions"` // map[string][]string
-	Triggers    json.RawMessage `db:"triggers"`     // []WorkflowTrigger
+	Triggers    json.RawMessage `db:"triggers"`    // []WorkflowTrigger
 	CreatedAt   time.Time       `db:"created_at"`
 	UpdatedAt   time.Time       `db:"updated_at"`
 }
@@ -25,13 +25,37 @@ type WorkflowTrigger struct {
 	Config     any    `json:"config,omitempty"`
 }
 
+const (
+	WorkflowTriggerActionDispatchAgent  = "dispatch_agent"
+	WorkflowTriggerActionStartWorkflow  = "start_workflow"
+	WorkflowTriggerActionNotify         = "notify"
+	WorkflowTriggerActionAutoTransition = "auto_transition"
+)
+
+const (
+	WorkflowTriggerOutcomeStarted   = "started"
+	WorkflowTriggerOutcomeCompleted = "completed"
+	WorkflowTriggerOutcomeBlocked   = "blocked"
+	WorkflowTriggerOutcomeSkipped   = "skipped"
+	WorkflowTriggerOutcomeFailed    = "failed"
+)
+
+type WorkflowTriggerOutcome struct {
+	Action           string `json:"action"`
+	Status           string `json:"status"`
+	Reason           string `json:"reason,omitempty"`
+	ReasonCode       string `json:"reasonCode,omitempty"`
+	WorkflowPluginID string `json:"workflowPluginId,omitempty"`
+	WorkflowRunID    string `json:"workflowRunId,omitempty"`
+}
+
 type WorkflowConfigDTO struct {
-	ID          string            `json:"id"`
-	ProjectID   string            `json:"projectId"`
+	ID          string              `json:"id"`
+	ProjectID   string              `json:"projectId"`
 	Transitions map[string][]string `json:"transitions"`
-	Triggers    []WorkflowTrigger `json:"triggers"`
-	CreatedAt   string            `json:"createdAt"`
-	UpdatedAt   string            `json:"updatedAt"`
+	Triggers    []WorkflowTrigger   `json:"triggers"`
+	CreatedAt   string              `json:"createdAt"`
+	UpdatedAt   string              `json:"updatedAt"`
 }
 
 type UpdateWorkflowRequest struct {

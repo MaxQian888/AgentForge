@@ -15,6 +15,7 @@ import { useMemoryStore } from "./memory-store";
 type MockMemoryApiClient = {
   get: jest.Mock;
   post: jest.Mock;
+  patch: jest.Mock;
   delete: jest.Mock;
 };
 
@@ -22,6 +23,7 @@ function makeApiClient(): MockMemoryApiClient {
   return {
     get: jest.fn(),
     post: jest.fn(),
+    patch: jest.fn(),
     delete: jest.fn(),
   };
 }
@@ -104,6 +106,7 @@ describe("useMemoryStore", () => {
         scope: "role",
         category: "episodic",
         roleId: "reviewer",
+        tag: "",
         startAt: "2026-03-01T00:00:00.000Z",
         endAt: "2026-03-31T23:59:59.000Z",
         limit: 50,
@@ -225,6 +228,7 @@ describe("useMemoryStore", () => {
         scope: "all",
         category: "all",
         roleId: "",
+        tag: "",
         startAt: "",
         endAt: "",
         limit: 20,
@@ -310,6 +314,7 @@ describe("useMemoryStore", () => {
         scope: "all",
         category: "episodic",
         roleId: "",
+        tag: "",
         startAt: "",
         endAt: "",
         limit: 20,
@@ -377,6 +382,7 @@ describe("useMemoryStore", () => {
         scope: "all",
         category: "episodic",
         roleId: "",
+        tag: "",
         startAt: "2026-03-01T00:00:00.000Z",
         endAt: "2026-03-31T23:59:59.000Z",
         limit: 20,
@@ -422,19 +428,68 @@ describe("useMemoryStore", () => {
       data: {
         id: "memory-1",
         projectId: "project-1",
+        category: "episodic",
+        kind: "operator_note",
+        tags: ["ops", "release"],
+        editable: true,
         key: "deployment",
         content: "Use staged rollout",
         metadata: { channel: "ops" },
       },
     });
+    api.get
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: "memory-1",
+            projectId: "project-1",
+            scope: "project",
+            roleId: "",
+            category: "episodic",
+            kind: "operator_note",
+            tags: ["ops", "release"],
+            editable: true,
+            key: "deployment",
+            content: "Use staged rollout",
+            metadata: { channel: "ops", kind: "operator_note", tags: ["ops", "release"] },
+            relevanceScore: 1,
+            accessCount: 0,
+            createdAt: "2026-03-25T12:00:00.000Z",
+            updatedAt: "2026-03-25T12:00:00.000Z",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        data: {
+          totalCount: 1,
+          approxStorageBytes: 256,
+          byCategory: { episodic: 1 },
+          byScope: { project: 1 },
+        },
+      });
     mockCreateApiClient.mockReturnValue(api);
+    useMemoryStore.setState({
+      currentProjectId: "project-1",
+      filters: {
+        query: "",
+        scope: "all",
+        category: "all",
+        roleId: "",
+        tag: "",
+        startAt: "",
+        endAt: "",
+        limit: 20,
+      },
+    } as never);
 
     await useMemoryStore.getState().storeMemory("project-1", {
       key: "deployment",
       content: "Use staged rollout",
       scope: "project",
       roleId: "ops",
-      category: "procedural",
+      category: "episodic",
+      kind: "operator_note",
+      tags: ["ops", "release"],
     });
 
     expect(api.post).toHaveBeenCalledWith(
@@ -444,7 +499,13 @@ describe("useMemoryStore", () => {
         content: "Use staged rollout",
         scope: "project",
         roleId: "ops",
-        category: "procedural",
+        category: "episodic",
+        tags: ["ops", "release"],
+        metadata: JSON.stringify({
+          kind: "operator_note",
+          editable: true,
+          tags: ["ops", "release"],
+        }),
       },
       { token: "test-token" },
     );
@@ -453,10 +514,142 @@ describe("useMemoryStore", () => {
         id: "memory-1",
         projectId: "project-1",
         scope: "project",
-        category: "semantic",
-        metadata: JSON.stringify({ channel: "ops" }),
+        category: "episodic",
+        kind: "operator_note",
+        tags: ["ops", "release"],
+        editable: true,
+        metadata: JSON.stringify({
+          channel: "ops",
+          kind: "operator_note",
+          tags: ["ops", "release"],
+        }),
       }),
     ]);
+  });
+
+  it("updates a memory note, preserves tag filters, and exports a single entry", async () => {
+    const api = makeApiClient();
+    api.patch.mockResolvedValueOnce({
+      data: {
+        id: "memory-1",
+        projectId: "project-1",
+        scope: "project",
+        roleId: "",
+        category: "episodic",
+        kind: "operator_note",
+        tags: ["ops", "release"],
+        editable: true,
+        key: "release-note",
+        content: "Pinned release checklist",
+        metadata: { kind: "operator_note", editable: true, tags: ["ops", "release"] },
+        metadataObject: { kind: "operator_note", editable: true, tags: ["ops", "release"] },
+        relevanceScore: 1,
+        accessCount: 1,
+        createdAt: "2026-03-25T10:00:00.000Z",
+        updatedAt: "2026-03-25T12:00:00.000Z",
+      },
+    });
+    api.get
+      .mockResolvedValueOnce({
+        data: [
+          {
+            id: "memory-1",
+            projectId: "project-1",
+            scope: "project",
+            roleId: "",
+            category: "episodic",
+            kind: "operator_note",
+            tags: ["ops", "release"],
+            editable: true,
+            key: "release-note",
+            content: "Pinned release checklist",
+            metadata: { kind: "operator_note", editable: true, tags: ["ops", "release"] },
+            relevanceScore: 1,
+            accessCount: 1,
+            createdAt: "2026-03-25T10:00:00.000Z",
+            updatedAt: "2026-03-25T12:00:00.000Z",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        data: {
+          totalCount: 1,
+          approxStorageBytes: 300,
+          byCategory: { episodic: 1 },
+          byScope: { project: 1 },
+        },
+      })
+      .mockResolvedValueOnce({
+        data: {
+          id: "memory-1",
+          projectId: "project-1",
+          scope: "project",
+          roleId: "",
+          category: "episodic",
+          kind: "operator_note",
+          tags: ["ops", "release"],
+          editable: true,
+          key: "release-note",
+          content: "Pinned release checklist",
+          metadata: { kind: "operator_note", editable: true, tags: ["ops", "release"] },
+          metadataObject: { kind: "operator_note", editable: true, tags: ["ops", "release"] },
+          relevanceScore: 1,
+          accessCount: 1,
+          createdAt: "2026-03-25T10:00:00.000Z",
+          updatedAt: "2026-03-25T12:00:00.000Z",
+        },
+      });
+    mockCreateApiClient.mockReturnValue(api);
+    useMemoryStore.setState({
+      currentProjectId: "project-1",
+      filters: {
+        query: "",
+        scope: "all",
+        category: "all",
+        roleId: "",
+        tag: "ops",
+        startAt: "",
+        endAt: "",
+        limit: 20,
+      },
+      selectedMemoryId: "memory-1",
+    } as never);
+
+    await useMemoryStore.getState().updateMemory("project-1", "memory-1", {
+      key: "release-note",
+      content: "Pinned release checklist",
+      tags: ["ops", "release"],
+    });
+
+    expect(api.patch).toHaveBeenCalledWith(
+      "/api/v1/projects/project-1/memory/memory-1",
+      {
+        key: "release-note",
+        content: "Pinned release checklist",
+        tags: ["ops", "release"],
+      },
+      { token: "test-token" },
+    );
+    expect(useMemoryStore.getState()).toMatchObject({
+      filters: expect.objectContaining({ tag: "ops" }),
+      detail: expect.objectContaining({
+        id: "memory-1",
+        kind: "operator_note",
+        tags: ["ops", "release"],
+        editable: true,
+      }),
+    });
+
+    const exported = await useMemoryStore.getState().exportMemoryEntry(
+      "project-1",
+      "memory-1",
+    );
+    expect(exported).toEqual(
+      expect.objectContaining({
+        id: "memory-1",
+        tags: ["ops", "release"],
+      }),
+    );
   });
 
   it("returns early when no auth token is available", async () => {

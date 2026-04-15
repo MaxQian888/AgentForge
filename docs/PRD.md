@@ -4681,7 +4681,7 @@ npx @agentforge/create-plugin
 
 #### 4.14.3 当前仓库真相（2026-03-25）
 
-- 当前 repo 已经提供 repo-local `pnpm create-plugin -- --type <tool|review|workflow|integration> --name <name>`，对应实现位于 `scripts/create-plugin.js`，不是纯文档占位。
+- 当前 repo 已经提供 repo-local `pnpm create-plugin -- --type <tool|review|workflow|integration> --name <name>`，对应实现位于 `scripts/plugin/create-plugin.js`，不是纯文档占位。
 - TypeScript 插件 SDK 当前位于 `src-bridge/src/plugin-sdk/`，覆盖 Tool/Review manifest helper、MCP bootstrap、normalized review finding/result helper、以及 local harness。
 - Go SDK 与构建辅助当前位于 `src-go/plugin-sdk-go/` 和根级 `plugin:build` / `plugin:debug` / `plugin:verify` 命令；Workflow starter 与 Integration starter 复用同一条 Go-hosted WASM authoring contract。
 - Go 控制面现在已经提供 catalog search/install、external source trust gate、update、deactivate 等 surface；公开 marketplace UI、远程拉取器和更强的签名链路仍属于后续阶段。

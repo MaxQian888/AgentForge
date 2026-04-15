@@ -50,6 +50,7 @@
   "editor": {
     "saveVersion": "保存版本",
     "saveAsTemplate": "另存为模板",
+    "duplicateTemplate": "复制模板",
     "shareVersion": "分享版本"
   },
   "versionHistory": {
@@ -65,6 +66,14 @@
   "templatePicker": {
     "title": "选择模板",
     "desc": "从预置文档或团队保存的模板开始。",
+    "previewTitle": "模板预览",
+    "noPreview": "该模板暂时没有预览摘要。",
+    "noSelection": "选择一个模板后可先查看内容，再创建文档。",
+    "titleField": "文档标题",
+    "titlePlaceholder": "新文档标题",
+    "locationField": "目标位置",
+    "rootLocation": "工作区根目录",
+    "createDocument": "创建文档",
     "uncategorized": "未分类",
     "system": "系统",
     "custom": "自定义",
@@ -74,8 +83,47 @@
   "templateCenter": {
     "title": "模板中心",
     "desc": "复用预置的 PRD、ADR、操作手册及团队自定义模板。",
+    "searchPlaceholder": "按标题、分类或预览内容筛选模板",
+    "newTemplate": "新建模板",
+    "previewTitle": "预览",
+    "uncategorized": "未分类",
+    "noPreview": "该模板暂时没有预览摘要。",
+    "noSelection": "选择一个模板后即可查看详情或进行管理。",
+    "edit": "编辑模板",
+    "duplicate": "复制模板",
+    "delete": "删除模板",
+    "confirmDelete": "确认删除 {title}？",
+    "filters": {
+      "all": "全部",
+      "system": "系统",
+      "custom": "自定义"
+    },
+    "createDialog": {
+      "title": "创建模板",
+      "desc": "创建一个空白自定义模板，并继续在文档工作区中编辑它。",
+      "confirm": "创建模板"
+    },
+    "duplicateDialog": {
+      "title": "复制模板",
+      "desc": "生成一个项目内副本，后续可安全地继续自定义。",
+      "confirm": "创建副本"
+    },
+    "dialog": {
+      "titleLabel": "模板标题",
+      "titlePlaceholder": "输入模板标题",
+      "categoryLabel": "分类",
+      "defaultCategory": "custom",
+      "cancel": "取消"
+    },
     "useTemplate": "使用模板",
     "noTemplates": "模板加载后会显示在这里。"
+  },
+  "templateMode": {
+    "title": "模板编辑模式",
+    "systemBadge": "内置模板",
+    "customBadge": "自定义模板",
+    "systemDesc": "这是一个内置模板。你可以预览、用它创建文档或复制它，但不能直接原地编辑或删除。",
+    "customDesc": "你正在编辑一个项目自有模板。这里的修改只会影响今后基于它创建的新文档。"
   },
   "relatedTasks": {
     "title": "关联任务",

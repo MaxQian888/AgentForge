@@ -47,6 +47,66 @@ func (f *fakeWorkflowRepo) Upsert(_ context.Context, projectID uuid.UUID, transi
 	return wf, nil
 }
 
+type fakeWorkflowTemplateService struct {
+	templates         []*model.WorkflowDefinition
+	publishedTemplate *model.WorkflowDefinition
+	duplicatedTemplate *model.WorkflowDefinition
+	deletedTemplateID uuid.UUID
+}
+
+func (f *fakeWorkflowTemplateService) ListTemplates(_ context.Context, projectID uuid.UUID, query string, category string, source string) ([]*model.WorkflowDefinition, error) {
+	_ = projectID
+	_ = query
+	_ = category
+	_ = source
+	return f.templates, nil
+}
+
+func (f *fakeWorkflowTemplateService) CloneTemplate(_ context.Context, templateID uuid.UUID, projectID uuid.UUID, overrides map[string]any) (*model.WorkflowDefinition, error) {
+	_ = projectID
+	_ = overrides
+	return &model.WorkflowDefinition{ID: templateID, Name: "Clone", Status: model.WorkflowDefStatusActive}, nil
+}
+
+func (f *fakeWorkflowTemplateService) CreateFromTemplate(_ context.Context, templateID uuid.UUID, projectID uuid.UUID, taskID *uuid.UUID, variables map[string]any) (*model.WorkflowExecution, error) {
+	_ = projectID
+	_ = taskID
+	_ = variables
+	return &model.WorkflowExecution{ID: uuid.New(), WorkflowID: templateID, Status: model.WorkflowExecStatusPending}, nil
+}
+
+func (f *fakeWorkflowTemplateService) PublishDefinitionAsTemplate(_ context.Context, definitionID uuid.UUID, projectID uuid.UUID, name string, description string) (*model.WorkflowDefinition, error) {
+	_ = projectID
+	f.publishedTemplate = &model.WorkflowDefinition{
+		ID:          uuid.New(),
+		Name:        name,
+		Description: description,
+		Status:      model.WorkflowDefStatusTemplate,
+		Category:    model.WorkflowCategoryUser,
+		SourceID:    &definitionID,
+	}
+	return f.publishedTemplate, nil
+}
+
+func (f *fakeWorkflowTemplateService) DuplicateTemplate(_ context.Context, templateID uuid.UUID, projectID uuid.UUID, name string, description string) (*model.WorkflowDefinition, error) {
+	_ = projectID
+	f.duplicatedTemplate = &model.WorkflowDefinition{
+		ID:          uuid.New(),
+		Name:        name,
+		Description: description,
+		Status:      model.WorkflowDefStatusTemplate,
+		Category:    model.WorkflowCategoryUser,
+		SourceID:    &templateID,
+	}
+	return f.duplicatedTemplate, nil
+}
+
+func (f *fakeWorkflowTemplateService) DeleteTemplate(_ context.Context, templateID uuid.UUID, projectID uuid.UUID) error {
+	_ = projectID
+	f.deletedTemplateID = templateID
+	return nil
+}
+
 func TestWorkflowHandler_Get_ReturnsDefault(t *testing.T) {
 	projectID := uuid.New()
 	repo := &fakeWorkflowRepo{getErr: errors.New("not found")}
@@ -130,5 +190,85 @@ func TestWorkflowHandler_Put_RepoError(t *testing.T) {
 	}
 	if rec.Code != http.StatusInternalServerError {
 		t.Fatalf("status = %d, want %d", rec.Code, http.StatusInternalServerError)
+	}
+}
+
+func TestWorkflowHandler_TemplateManagementEndpoints(t *testing.T) {
+	projectID := uuid.New()
+	templateID := uuid.New()
+	definitionID := uuid.New()
+	templateSvc := &fakeWorkflowTemplateService{
+		templates: []*model.WorkflowDefinition{{
+			ID:          templateID,
+			ProjectID:   projectID,
+			Name:        "Plan Code Review",
+			Description: "Default workflow template",
+			Status:      model.WorkflowDefStatusTemplate,
+			Category:    model.WorkflowCategorySystem,
+		}},
+	}
+
+	e := echo.New()
+	h := handler.NewWorkflowHandler(&fakeWorkflowRepo{}).WithTemplateService(templateSvc)
+
+	listReq := httptest.NewRequest(http.MethodGet, "/?category=system", nil)
+	listRec := httptest.NewRecorder()
+	listCtx := e.NewContext(listReq, listRec)
+	listCtx.Set(appMiddleware.ProjectIDContextKey, projectID)
+	if err := h.ListTemplates(listCtx); err != nil {
+		t.Fatalf("ListTemplates() error: %v", err)
+	}
+	if listRec.Code != http.StatusOK {
+		t.Fatalf("ListTemplates() status = %d, want %d", listRec.Code, http.StatusOK)
+	}
+
+	publishReq := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"Project Template","description":"Reusable flow"}`))
+	publishReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	publishRec := httptest.NewRecorder()
+	publishCtx := e.NewContext(publishReq, publishRec)
+	publishCtx.Set(appMiddleware.ProjectIDContextKey, projectID)
+	publishCtx.SetParamNames("id")
+	publishCtx.SetParamValues(definitionID.String())
+	if err := h.PublishTemplate(publishCtx); err != nil {
+		t.Fatalf("PublishTemplate() error: %v", err)
+	}
+	if publishRec.Code != http.StatusCreated {
+		t.Fatalf("PublishTemplate() status = %d, want %d", publishRec.Code, http.StatusCreated)
+	}
+	if templateSvc.publishedTemplate == nil || templateSvc.publishedTemplate.Name != "Project Template" {
+		t.Fatalf("publishedTemplate = %+v", templateSvc.publishedTemplate)
+	}
+
+	duplicateReq := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"name":"Template Copy","description":"Custom copy"}`))
+	duplicateReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	duplicateRec := httptest.NewRecorder()
+	duplicateCtx := e.NewContext(duplicateReq, duplicateRec)
+	duplicateCtx.Set(appMiddleware.ProjectIDContextKey, projectID)
+	duplicateCtx.SetParamNames("id")
+	duplicateCtx.SetParamValues(templateID.String())
+	if err := h.DuplicateTemplate(duplicateCtx); err != nil {
+		t.Fatalf("DuplicateTemplate() error: %v", err)
+	}
+	if duplicateRec.Code != http.StatusCreated {
+		t.Fatalf("DuplicateTemplate() status = %d, want %d", duplicateRec.Code, http.StatusCreated)
+	}
+	if templateSvc.duplicatedTemplate == nil || templateSvc.duplicatedTemplate.Name != "Template Copy" {
+		t.Fatalf("duplicatedTemplate = %+v", templateSvc.duplicatedTemplate)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/", nil)
+	deleteRec := httptest.NewRecorder()
+	deleteCtx := e.NewContext(deleteReq, deleteRec)
+	deleteCtx.Set(appMiddleware.ProjectIDContextKey, projectID)
+	deleteCtx.SetParamNames("id")
+	deleteCtx.SetParamValues(templateID.String())
+	if err := h.DeleteTemplate(deleteCtx); err != nil {
+		t.Fatalf("DeleteTemplate() error: %v", err)
+	}
+	if deleteRec.Code != http.StatusNoContent {
+		t.Fatalf("DeleteTemplate() status = %d, want %d", deleteRec.Code, http.StatusNoContent)
+	}
+	if templateSvc.deletedTemplateID != templateID {
+		t.Fatalf("deletedTemplateID = %s, want %s", templateSvc.deletedTemplateID, templateID)
 	}
 }

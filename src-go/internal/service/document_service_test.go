@@ -217,6 +217,10 @@ func (m *docTestMemoryRepo) IncrementAccess(_ context.Context, _ uuid.UUID) erro
 	return nil
 }
 
+func (m *docTestMemoryRepo) Update(_ context.Context, _ *model.AgentMemory) error {
+	return nil
+}
+
 func (m *docTestMemoryRepo) Delete(_ context.Context, _ uuid.UUID) error {
 	return nil
 }

@@ -31,12 +31,16 @@ Behavior:
 
 - validates `taskId`
 - optionally validates `memberId`
+- validates the effective role binding before queue admission or runtime startup
+  - explicit `roleId` is checked directly
+  - if `roleId` is omitted, dispatch-driven flows may derive it from the target agent member's saved `agentConfig.roleId`
 - may return a queued dispatch outcome instead of a direct run if the
   dispatcher is enabled
 - performs Bridge health retries before runtime execution when the Go service
   path owns the spawn
 - may queue early when the Bridge runtime pool is already at capacity
 - refuses to start when the bridge is degraded
+- refuses to queue or start when the effective role binding is stale
 
 ## Endpoint Summary
 
@@ -59,6 +63,7 @@ Behavior:
 | `POST` | `/api/v1/bridge/tools/:id/restart` | Restart a Bridge tool/plugin |
 | `POST` | `/api/v1/ai/generate` | Run bridge-backed generation |
 | `POST` | `/api/v1/ai/classify-intent` | Run bridge-backed intent classification |
+| `GET` | `/api/v1/roles/:id/references` | Inspect blocking and advisory downstream role consumers |
 
 ## `AgentRunSummaryDTO`
 
@@ -181,5 +186,12 @@ Notes:
 - `400 Bad Request`: malformed JSON or invalid UUID
 - `404 Not Found`: task, member, or run missing
 - `409 Conflict`: pool full, run already active, worktree unavailable
+- `422 Unprocessable Entity`: stale or invalid member-bound role configuration when the current flow validates structured agent profile input
 - `502 Bad Gateway`: bridge/runtime start failure
 - `503 Service Unavailable`: bridge unavailable (`{"error":"bridge_unavailable"}`)
+
+For dispatch-driven launch flows, a stale effective role binding now shows up as a blocked dispatch outcome with:
+
+- `guardrailType=target`
+- `guardrailScope=role`
+- a reason explaining that the bound role no longer resolves from the authoritative role registry

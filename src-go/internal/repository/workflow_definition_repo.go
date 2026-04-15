@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -194,6 +195,41 @@ func (r *WorkflowDefinitionRepository) ListTemplates(ctx context.Context, catego
 	var records []workflowDefinitionRecord
 	if err := q.Order("name ASC").Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list workflow templates: %w", err)
+	}
+	result := make([]*model.WorkflowDefinition, len(records))
+	for i := range records {
+		result[i] = records[i].toModel()
+	}
+	return result, nil
+}
+
+func (r *WorkflowDefinitionRepository) ListTemplatesForProject(ctx context.Context, projectID uuid.UUID, query string, category string, source string) ([]*model.WorkflowDefinition, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	q := r.db.WithContext(ctx).
+		Where("status = ?", model.WorkflowDefStatusTemplate).
+		Where("(category IN ? OR (category = ? AND project_id = ?))",
+			[]string{model.WorkflowCategorySystem, model.WorkflowCategoryMarketplace},
+			model.WorkflowCategoryUser,
+			projectID,
+		)
+
+	filterCategory := source
+	if filterCategory == "" {
+		filterCategory = category
+	}
+	if filterCategory != "" {
+		q = q.Where("category = ?", filterCategory)
+	}
+	if query != "" {
+		like := "%" + strings.ToLower(query) + "%"
+		q = q.Where("(LOWER(name) LIKE ? OR LOWER(description) LIKE ?)", like, like)
+	}
+
+	var records []workflowDefinitionRecord
+	if err := q.Order("category ASC, name ASC").Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list project workflow templates: %w", err)
 	}
 	result := make([]*model.WorkflowDefinition, len(records))
 	for i := range records {

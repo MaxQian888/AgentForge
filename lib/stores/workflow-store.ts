@@ -28,6 +28,10 @@ export interface WorkflowActivityEntry {
   to: string;
   timestamp: string;
   config?: Record<string, unknown>;
+  outcomeStatus?: string;
+  reason?: string;
+  workflowPluginId?: string;
+  workflowRunId?: string;
 }
 
 // --- DAG Workflow Types ---
@@ -62,6 +66,18 @@ export interface WorkflowDefinition {
   sourceId?: string;
   createdAt: string;
   updatedAt: string;
+  templateSource?: string;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canDuplicate?: boolean;
+  canClone?: boolean;
+  canExecute?: boolean;
+}
+
+export interface WorkflowTemplateFilters {
+  query?: string;
+  category?: string;
+  source?: string;
 }
 
 export interface WorkflowExecution {
@@ -176,7 +192,23 @@ interface WorkflowState {
   // Workflow Templates
   templates: WorkflowDefinition[];
   templatesLoading: boolean;
-  fetchTemplates: (category?: string) => Promise<void>;
+  fetchTemplates: (projectId: string, filters?: WorkflowTemplateFilters) => Promise<void>;
+  publishTemplate: (
+    definitionId: string,
+    projectId: string,
+    data?: {
+      name?: string;
+      description?: string;
+    }
+  ) => Promise<WorkflowDefinition | null>;
+  duplicateTemplate: (
+    templateId: string,
+    projectId: string,
+    data?: {
+      name?: string;
+      description?: string;
+    }
+  ) => Promise<WorkflowDefinition | null>;
   cloneTemplate: (
     templateId: string,
     projectId: string,
@@ -188,6 +220,7 @@ interface WorkflowState {
     taskId?: string,
     variables?: Record<string, unknown>
   ) => Promise<WorkflowExecution | null>;
+  deleteTemplate: (templateId: string, projectId: string) => Promise<boolean>;
 
   // Human Review
   resolveReview: (
@@ -223,9 +256,10 @@ export const ALL_TASK_STATUSES: TaskStatus[] = [
 ];
 
 export const TRIGGER_ACTIONS = [
-  { value: "auto_assign", label: "Auto-assign agent" },
-  { value: "notify", label: "Send notification" },
   { value: "dispatch_agent", label: "Dispatch agent run" },
+  { value: "start_workflow", label: "Start workflow starter" },
+  { value: "notify", label: "Send notification" },
+  { value: "auto_transition", label: "Auto-transition task" },
 ];
 
 export const useWorkflowStore = create<WorkflowState>()((set) => ({
@@ -524,20 +558,69 @@ export const useWorkflowStore = create<WorkflowState>()((set) => ({
   templates: [],
   templatesLoading: false,
 
-  fetchTemplates: async (category) => {
+  fetchTemplates: async (projectId, filters) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
     set({ templatesLoading: true });
     try {
       const api = createApiClient(API_URL);
-      const params = category ? `?category=${category}` : "";
+      const params = new URLSearchParams();
+      if (filters?.query?.trim()) {
+        params.set("q", filters.query.trim());
+      }
+      if (filters?.category?.trim()) {
+        params.set("category", filters.category.trim());
+      }
+      if (filters?.source?.trim()) {
+        params.set("source", filters.source.trim());
+      }
       const { data } = await api.get<WorkflowDefinition[]>(
-        `/api/v1/workflow-templates${params}`,
-        { token }
+        `/api/v1/workflow-templates${params.size ? `?${params.toString()}` : ""}`,
+        { token, headers: { "X-Project-ID": projectId } }
       );
       set({ templates: data, templatesLoading: false });
     } catch {
       set({ templatesLoading: false, error: "Unable to fetch templates" });
+    }
+  },
+
+  publishTemplate: async (definitionId, projectId, payload) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<WorkflowDefinition>(
+        `/api/v1/workflows/${definitionId}/publish-template`,
+        payload ?? {},
+        { token, headers: { "X-Project-ID": projectId } }
+      );
+      set((state) => ({
+        templates: [data, ...state.templates],
+      }));
+      return data;
+    } catch {
+      set({ error: "Unable to publish template" });
+      return null;
+    }
+  },
+
+  duplicateTemplate: async (templateId, projectId, payload) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return null;
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<WorkflowDefinition>(
+        `/api/v1/workflow-templates/${templateId}/duplicate`,
+        payload ?? {},
+        { token, headers: { "X-Project-ID": projectId } }
+      );
+      set((state) => ({
+        templates: [data, ...state.templates],
+      }));
+      return data;
+    } catch {
+      set({ error: "Unable to duplicate template" });
+      return null;
     }
   },
 
@@ -578,6 +661,28 @@ export const useWorkflowStore = create<WorkflowState>()((set) => ({
     } catch {
       set({ error: "Unable to execute template" });
       return null;
+    }
+  },
+
+  deleteTemplate: async (templateId, projectId) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return false;
+    try {
+      const api = createApiClient(API_URL);
+      await api.delete(`/api/v1/workflow-templates/${templateId}`, {
+        token,
+        headers: { "X-Project-ID": projectId },
+      });
+      set((state) => ({
+        templates: state.templates.filter((template) => template.id !== templateId),
+        definitions: state.definitions.filter((definition) => definition.id !== templateId),
+        selectedDefinition:
+          state.selectedDefinition?.id === templateId ? null : state.selectedDefinition,
+      }));
+      return true;
+    } catch {
+      set({ error: "Unable to delete template" });
+      return false;
     }
   },
 

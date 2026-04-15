@@ -22,10 +22,12 @@ type fakeSprintRepo struct {
 	sprint    *model.Sprint
 	err       error
 	updateErr error
+	created   *model.Sprint
 	updated   *model.Sprint
 }
 
-func (f *fakeSprintRepo) Create(context.Context, *model.Sprint) error {
+func (f *fakeSprintRepo) Create(_ context.Context, sprint *model.Sprint) error {
+	f.created = sprint
 	return nil
 }
 
@@ -325,3 +327,102 @@ func TestSprintHandler_Update_NotFound(t *testing.T) {
 	}
 }
 
+func TestSprintHandler_Create_PersistsOptionalMilestone(t *testing.T) {
+	projectID := uuid.New()
+	milestoneID := uuid.New()
+	repo := &fakeSprintRepo{}
+
+	body := `{"name":"Sprint 7","startDate":"2026-03-01T00:00:00Z","endDate":"2026-03-14T00:00:00Z","totalBudgetUsd":80,"milestoneId":"` + milestoneID.String() + `"}`
+	e := newAgentTestEcho()
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v1/projects/:pid/sprints")
+	c.SetParamNames("pid")
+	c.SetParamValues(projectID.String())
+	c.Set(appMiddleware.ProjectIDContextKey, projectID)
+
+	h := handler.NewSprintHandler(repo)
+	if err := h.Create(c); err != nil {
+		t.Fatalf("Create() error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusCreated)
+	}
+	if repo.created == nil || repo.created.MilestoneID == nil || *repo.created.MilestoneID != milestoneID {
+		t.Fatalf("created sprint = %+v", repo.created)
+	}
+}
+
+func TestSprintHandler_Update_PersistsMilestone(t *testing.T) {
+	projectID := uuid.New()
+	sprintID := uuid.New()
+	milestoneID := uuid.New()
+	repo := &fakeSprintRepo{
+		sprint: &model.Sprint{
+			ID:        sprintID,
+			ProjectID: projectID,
+			Name:      "Sprint 4",
+			StartDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+			EndDate:   time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC),
+			Status:    model.SprintStatusPlanning,
+		},
+	}
+
+	body := `{"milestoneId":"` + milestoneID.String() + `"}`
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v1/projects/:pid/sprints/:sid")
+	c.SetParamNames("pid", "sid")
+	c.SetParamValues(projectID.String(), sprintID.String())
+	c.Set(appMiddleware.ProjectIDContextKey, projectID)
+
+	h := handler.NewSprintHandler(repo)
+	if err := h.Update(c); err != nil {
+		t.Fatalf("Update() error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusOK)
+	}
+	if repo.updated == nil || repo.updated.MilestoneID == nil || *repo.updated.MilestoneID != milestoneID {
+		t.Fatalf("updated sprint = %+v", repo.updated)
+	}
+}
+
+func TestSprintHandler_Update_InvalidMilestoneID(t *testing.T) {
+	projectID := uuid.New()
+	sprintID := uuid.New()
+	repo := &fakeSprintRepo{
+		sprint: &model.Sprint{
+			ID:        sprintID,
+			ProjectID: projectID,
+			Name:      "Sprint 4",
+			StartDate: time.Date(2026, 3, 1, 0, 0, 0, 0, time.UTC),
+			EndDate:   time.Date(2026, 3, 14, 0, 0, 0, 0, time.UTC),
+			Status:    model.SprintStatusPlanning,
+		},
+	}
+
+	body := `{"milestoneId":"not-a-uuid"}`
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetPath("/api/v1/projects/:pid/sprints/:sid")
+	c.SetParamNames("pid", "sid")
+	c.SetParamValues(projectID.String(), sprintID.String())
+	c.Set(appMiddleware.ProjectIDContextKey, projectID)
+
+	h := handler.NewSprintHandler(repo)
+	if err := h.Update(c); err != nil {
+		t.Fatalf("Update() error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d", rec.Code, http.StatusBadRequest)
+	}
+}

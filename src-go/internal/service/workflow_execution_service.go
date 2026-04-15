@@ -34,14 +34,14 @@ type WorkflowExecutionRequest struct {
 }
 
 type WorkflowStepExecutionRequest struct {
-	RunID        uuid.UUID
-	PluginID     string
-	Process      model.WorkflowProcessMode
-	Step         model.WorkflowStepDefinition
-	RoleProfile  *model.RoleExecutionProfile
-	Attempt      int
-	Input        map[string]any
-	StartedAt    time.Time
+	RunID       uuid.UUID
+	PluginID    string
+	Process     model.WorkflowProcessMode
+	Step        model.WorkflowStepDefinition
+	RoleProfile *model.RoleExecutionProfile
+	Attempt     int
+	Input       map[string]any
+	StartedAt   time.Time
 }
 
 type WorkflowStepExecutionResult struct {
@@ -83,6 +83,20 @@ func (s *WorkflowExecutionService) WithClock(now func() time.Time) *WorkflowExec
 }
 
 func (s *WorkflowExecutionService) Start(ctx context.Context, pluginID string, req WorkflowExecutionRequest) (*model.WorkflowPluginRun, error) {
+	record, err := s.loadExecutableWorkflowRecord(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	return s.startWithRecord(ctx, record, req)
+}
+
+func (s *WorkflowExecutionService) StartTaskTriggered(
+	ctx context.Context,
+	pluginID string,
+	profile string,
+	taskID uuid.UUID,
+	req WorkflowExecutionRequest,
+) (*model.WorkflowPluginRun, error) {
 	if s.plugins == nil {
 		return nil, fmt.Errorf("workflow plugin catalog is not configured")
 	}
@@ -95,7 +109,51 @@ func (s *WorkflowExecutionService) Start(ctx context.Context, pluginID string, r
 	if s.executor == nil {
 		return nil, fmt.Errorf("workflow step executor is not configured")
 	}
+	if taskID == uuid.Nil {
+		return nil, fmt.Errorf("task-triggered workflow start requires task ID")
+	}
+	if strings.TrimSpace(profile) == "" {
+		return nil, fmt.Errorf("task-triggered workflow start requires trigger profile")
+	}
 
+	record, err := s.loadExecutableWorkflowRecord(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	if !supportsTaskTriggeredProfile(record, profile) {
+		return nil, fmt.Errorf("workflow plugin %s does not support task-triggered profile %s", pluginID, profile)
+	}
+	duplicate, err := s.hasActiveTaskTriggeredRun(ctx, pluginID, profile, taskID)
+	if err != nil {
+		return nil, err
+	}
+	if duplicate {
+		return nil, fmt.Errorf("workflow plugin %s already has an active workflow run for task %s and profile %s", pluginID, taskID, profile)
+	}
+	trigger := cloneWorkflowPayload(req.Trigger)
+	if trigger == nil {
+		trigger = map[string]any{}
+	}
+	trigger["source"] = "task.trigger"
+	trigger["taskId"] = taskID.String()
+	trigger["profile"] = profile
+
+	return s.startWithRecord(ctx, record, WorkflowExecutionRequest{Trigger: trigger})
+}
+
+func (s *WorkflowExecutionService) loadExecutableWorkflowRecord(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
+	if s.plugins == nil {
+		return nil, fmt.Errorf("workflow plugin catalog is not configured")
+	}
+	if s.runs == nil {
+		return nil, fmt.Errorf("workflow run store is not configured")
+	}
+	if s.roles == nil {
+		return nil, fmt.Errorf("workflow role store is not configured")
+	}
+	if s.executor == nil {
+		return nil, fmt.Errorf("workflow step executor is not configured")
+	}
 	record, err := s.plugins.GetByID(ctx, pluginID)
 	if err != nil {
 		return nil, err
@@ -118,7 +176,10 @@ func (s *WorkflowExecutionService) Start(ctx context.Context, pluginID string, r
 	if err := s.validateWorkflowRolePluginDependencies(ctx, record); err != nil {
 		return nil, err
 	}
+	return record, nil
+}
 
+func (s *WorkflowExecutionService) startWithRecord(ctx context.Context, record *model.PluginRecord, req WorkflowExecutionRequest) (*model.WorkflowPluginRun, error) {
 	run := &model.WorkflowPluginRun{
 		ID:        uuid.New(),
 		PluginID:  record.Metadata.ID,
@@ -149,6 +210,62 @@ func (s *WorkflowExecutionService) Start(ctx context.Context, pluginID string, r
 	default:
 		return s.failRun(ctx, run, nil, fmt.Errorf("unsupported workflow process mode: %s", run.Process))
 	}
+}
+
+func supportsTaskTriggeredProfile(record *model.PluginRecord, profile string) bool {
+	if record == nil || record.Spec.Workflow == nil {
+		return false
+	}
+	for _, trigger := range record.Spec.Workflow.Triggers {
+		if trigger.Event == "task.transition" && strings.TrimSpace(trigger.Profile) == profile {
+			return true
+		}
+	}
+	return false
+}
+
+func (s *WorkflowExecutionService) hasActiveTaskTriggeredRun(ctx context.Context, pluginID, profile string, taskID uuid.UUID) (bool, error) {
+	runs, err := s.runs.ListByPluginID(ctx, pluginID, 50)
+	if err != nil {
+		return false, err
+	}
+	taskIDString := taskID.String()
+	for _, run := range runs {
+		if run == nil || !isWorkflowRunActive(run.Status) {
+			continue
+		}
+		if workflowTriggerString(run.Trigger, "taskId") != taskIDString {
+			continue
+		}
+		if workflowTriggerString(run.Trigger, "profile") != profile {
+			continue
+		}
+		return true, nil
+	}
+	return false, nil
+}
+
+func isWorkflowRunActive(status model.WorkflowRunStatus) bool {
+	switch status {
+	case model.WorkflowRunStatusPending, model.WorkflowRunStatusRunning, model.WorkflowRunStatusPaused:
+		return true
+	default:
+		return false
+	}
+}
+
+func workflowTriggerString(trigger map[string]any, key string) string {
+	if trigger == nil {
+		return ""
+	}
+	value, ok := trigger[key]
+	if !ok {
+		return ""
+	}
+	if text, ok := value.(string); ok {
+		return text
+	}
+	return fmt.Sprint(value)
 }
 
 // executeSequential processes steps one at a time in order (the original behaviour).
@@ -262,9 +379,9 @@ func (s *WorkflowExecutionService) executeWave(ctx context.Context, run *model.W
 
 		// Multiple steps: execute in parallel.
 		type stepResult struct {
-			index  int
-			run    *model.WorkflowPluginRun
-			err    error
+			index int
+			run   *model.WorkflowPluginRun
+			err   error
 		}
 
 		var mu sync.Mutex

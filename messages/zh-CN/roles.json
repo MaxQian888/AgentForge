@@ -167,6 +167,17 @@
     "skillPartScripts": "Scripts",
     "skillPartAssets": "Assets"
   },
+  "deleteDialog": {
+    "title": "删除角色",
+    "loading": "正在加载角色引用...",
+    "blockingTitle": "阻塞中的下游引用",
+    "advisoryTitle": "提示性历史引用",
+    "noReferences": "未发现下游角色引用。",
+    "confirm": "删除角色",
+    "close": "关闭",
+    "loadError": "加载角色引用失败。",
+    "deleteError": "删除角色失败。"
+  },
   "contextRail": {
     "authoringGuide": "编辑指南",
     "guidanceFor": "当前 {section} 步骤的专注指引。",

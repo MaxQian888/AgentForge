@@ -511,14 +511,37 @@ export const useWSStore = create<WSState>()((set) => ({
         return;
       }
 
+      const outcome =
+        payload.outcome && typeof payload.outcome === "object"
+          ? (payload.outcome as Record<string, unknown>)
+          : undefined;
+      const resolvedAction =
+        typeof payload.action === "string"
+          ? payload.action
+          : typeof outcome?.action === "string"
+            ? outcome.action
+            : "unknown";
+
       useWorkflowStore.getState().appendActivity(projectId, {
         taskId: typeof payload.taskId === "string" ? payload.taskId : "",
-        action: typeof payload.action === "string" ? payload.action : "unknown",
+        action: resolvedAction,
         from: typeof payload.from === "string" ? payload.from : "",
         to: typeof payload.to === "string" ? payload.to : "",
         config:
           payload.config && typeof payload.config === "object"
             ? (payload.config as Record<string, unknown>)
+            : undefined,
+        outcomeStatus:
+          typeof outcome?.status === "string" ? outcome.status : undefined,
+        reason:
+          typeof outcome?.reason === "string" ? outcome.reason : undefined,
+        workflowPluginId:
+          typeof outcome?.workflowPluginId === "string"
+            ? outcome.workflowPluginId
+            : undefined,
+        workflowRunId:
+          typeof outcome?.workflowRunId === "string"
+            ? outcome.workflowRunId
             : undefined,
       });
     });

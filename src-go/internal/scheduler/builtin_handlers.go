@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/worktree"
 )
 
@@ -32,7 +33,7 @@ type BridgeHealthChecker interface {
 }
 
 type AutomationDueDateChecker interface {
-	CheckDueDateApproaching(ctx context.Context, threshold time.Duration) error
+	CheckDueDateApproaching(ctx context.Context, threshold time.Duration) (*service.AutomationDueDateSummary, error)
 }
 
 type CostReconcileProjectRepository interface {
@@ -178,12 +179,31 @@ func NewAutomationDueDateDetectorHandler(checker AutomationDueDateChecker, thres
 		if threshold <= 0 {
 			threshold = 24 * time.Hour
 		}
-		if err := checker.CheckDueDateApproaching(ctx, threshold); err != nil {
+		summary, err := checker.CheckDueDateApproaching(ctx, threshold)
+		if err != nil {
 			return nil, err
 		}
-		payload, _ := json.Marshal(map[string]any{"thresholdHours": int(threshold.Hours())})
+		if summary == nil {
+			summary = &service.AutomationDueDateSummary{}
+		}
+		payload, _ := json.Marshal(map[string]any{
+			"thresholdHours":   int(threshold.Hours()),
+			"evaluatedTasks":   summary.EvaluatedTasks,
+			"matchedRules":     summary.MatchedRules,
+			"startedWorkflows": summary.StartedWorkflows,
+			"blockedWorkflows": summary.BlockedWorkflows,
+			"failedWorkflows":  summary.FailedWorkflows,
+		})
 		return &RunResult{
-			Summary: fmt.Sprintf("evaluated due-date automations within %d hours", int(threshold.Hours())),
+			Summary: fmt.Sprintf(
+				"evaluated %d due-date tasks within %d hours, matched %d rules, started %d workflows, blocked %d, failed %d",
+				summary.EvaluatedTasks,
+				int(threshold.Hours()),
+				summary.MatchedRules,
+				summary.StartedWorkflows,
+				summary.BlockedWorkflows,
+				summary.FailedWorkflows,
+			),
 			Metrics: string(payload),
 		}, nil
 	}

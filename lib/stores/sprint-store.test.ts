@@ -30,10 +30,13 @@ describe("useSprintStore", () => {
     useSprintStore.setState({
       sprintsByProject: {},
       metricsBySprintId: {},
+      budgetDetailBySprintId: {},
       loadingByProject: {},
       metricsLoadingBySprintId: {},
+      budgetLoadingBySprintId: {},
       errorByProject: {},
       metricsErrorBySprintId: {},
+      budgetErrorBySprintId: {},
     });
   });
 
@@ -71,6 +74,7 @@ describe("useSprintStore", () => {
       name: "Sprint Beta",
       startDate: "2026-04-01T00:00:00.000Z",
       endDate: "2026-04-14T23:59:59.000Z",
+      milestoneId: "milestone-1",
       status: "planning" as const,
       totalBudgetUsd: 50,
       spentUsd: 0,
@@ -81,11 +85,25 @@ describe("useSprintStore", () => {
 
     const result = await useSprintStore.getState().createSprint("project-1", {
       name: "Sprint Beta",
-      startDate: "2026-04-01T00:00:00.000Z",
-      endDate: "2026-04-14T23:59:59.000Z",
+      startDate: "2026-04-01",
+      endDate: "2026-04-14",
       totalBudgetUsd: 50,
+      milestoneId: "milestone-1",
     });
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:7777/api/v1/projects/project-1/sprints",
+      expect.objectContaining({
+        body: JSON.stringify({
+          name: "Sprint Beta",
+          startDate: "2026-04-01T00:00:00.000Z",
+          endDate: "2026-04-14T00:00:00.000Z",
+          totalBudgetUsd: 50,
+          milestoneId: "milestone-1",
+        }),
+        method: "POST",
+      }),
+    );
     expect(result).toEqual(expect.objectContaining({ id: "sprint-new" }));
     expect(useSprintStore.getState().sprintsByProject["project-1"]).toEqual([
       expect.objectContaining({ id: "sprint-new", name: "Sprint Beta" }),
@@ -118,6 +136,7 @@ describe("useSprintStore", () => {
       name: "Sprint Alpha",
       startDate: "2026-03-24T00:00:00.000Z",
       endDate: "2026-03-30T23:59:59.000Z",
+      milestoneId: "milestone-1",
       status: "active" as const,
       totalBudgetUsd: 20,
       spentUsd: 0,
@@ -128,8 +147,25 @@ describe("useSprintStore", () => {
 
     const result = await useSprintStore
       .getState()
-      .updateSprint("project-1", "sprint-1", { status: "active" });
+      .updateSprint("project-1", "sprint-1", {
+        status: "active",
+        startDate: "2026-03-24",
+        endDate: "2026-03-30",
+        milestoneId: "milestone-1",
+      });
 
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:7777/api/v1/projects/project-1/sprints/sprint-1",
+      expect.objectContaining({
+        body: JSON.stringify({
+          status: "active",
+          startDate: "2026-03-24T00:00:00.000Z",
+          endDate: "2026-03-30T00:00:00.000Z",
+          milestoneId: "milestone-1",
+        }),
+        method: "PUT",
+      }),
+    );
     expect(result.status).toBe("active");
     expect(useSprintStore.getState().sprintsByProject["project-1"]?.[0]?.status).toBe("active");
   });
@@ -176,19 +212,59 @@ describe("useSprintStore", () => {
     );
   });
 
-  it("stores sprint list and metrics failures per project", async () => {
+  it("fetches sprint budget detail for a specific sprint", async () => {
+    fetchMock.mockResolvedValueOnce(
+      mockJsonResponse({
+        sprintId: "sprint-1",
+        projectId: "project-1",
+        sprintName: "Sprint Alpha",
+        allocated: 20,
+        spent: 8,
+        remaining: 12,
+        thresholdStatus: "healthy",
+        warningThresholdPercent: 80,
+        tasksWithBudgetCount: 2,
+        tasks: [
+          {
+            taskId: "task-1",
+            title: "Polish burndown",
+            allocated: 12,
+            spent: 5,
+            remaining: 7,
+            thresholdStatus: "healthy",
+          },
+        ],
+      }),
+    );
+
+    await useSprintStore.getState().fetchSprintBudgetDetail("sprint-1");
+
+    expect(useSprintStore.getState().budgetDetailBySprintId["sprint-1"]).toEqual(
+      expect.objectContaining({
+        sprintId: "sprint-1",
+        sprintName: "Sprint Alpha",
+        tasks: [expect.objectContaining({ taskId: "task-1" })],
+      }),
+    );
+  });
+
+  it("stores sprint list, metrics, and budget failures", async () => {
     fetchMock
       .mockRejectedValueOnce(new Error("sprints unavailable"))
-      .mockRejectedValueOnce(new Error("metrics unavailable"));
+      .mockRejectedValueOnce(new Error("metrics unavailable"))
+      .mockRejectedValueOnce(new Error("budget unavailable"));
 
     await useSprintStore.getState().fetchSprints("project-1");
     await useSprintStore.getState().fetchSprintMetrics("project-1", "sprint-1");
+    await useSprintStore.getState().fetchSprintBudgetDetail("sprint-1");
 
     expect(useSprintStore.getState()).toMatchObject({
       loadingByProject: { "project-1": false },
       metricsLoadingBySprintId: { "sprint-1": false },
+      budgetLoadingBySprintId: { "sprint-1": false },
       errorByProject: { "project-1": "sprints unavailable" },
       metricsErrorBySprintId: { "sprint-1": "metrics unavailable" },
+      budgetErrorBySprintId: { "sprint-1": "budget unavailable" },
     });
   });
 
@@ -231,11 +307,12 @@ describe("useSprintStore", () => {
 
     await useSprintStore.getState().fetchSprints("project-1");
     await useSprintStore.getState().fetchSprintMetrics("project-1", "sprint-1");
+    await useSprintStore.getState().fetchSprintBudgetDetail("sprint-1");
     await expect(
       useSprintStore.getState().createSprint("project-1", {
         name: "Blocked",
-        startDate: "2026-04-01T00:00:00.000Z",
-        endDate: "2026-04-14T23:59:59.000Z",
+        startDate: "2026-04-01",
+        endDate: "2026-04-14",
         totalBudgetUsd: 50,
       }),
     ).rejects.toThrow("Not authenticated");

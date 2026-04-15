@@ -10,12 +10,16 @@ export function EditorToolbar({
   onShareVersion,
   readonly = false,
   saving,
+  templateActionLabel,
+  templateActionDisabled,
 }: {
   onSaveVersion?: () => void;
   onSaveTemplate?: () => void;
   onShareVersion?: () => void;
   readonly?: boolean;
   saving?: boolean;
+  templateActionLabel?: string;
+  templateActionDisabled?: boolean;
 }) {
   const t = useTranslations("docs");
 
@@ -25,9 +29,14 @@ export function EditorToolbar({
         <Save className="mr-1 size-4" />
         {t("editor.saveVersion")}
       </Button>
-      <Button size="sm" variant="outline" onClick={onSaveTemplate} disabled={readonly}>
+      <Button
+        size="sm"
+        variant="outline"
+        onClick={onSaveTemplate}
+        disabled={templateActionDisabled ?? readonly}
+      >
         <LayoutTemplate className="mr-1 size-4" />
-        {t("editor.saveAsTemplate")}
+        {templateActionLabel ?? t("editor.saveAsTemplate")}
       </Button>
       <Button size="sm" variant="outline" onClick={onShareVersion}>
         <Copy className="mr-1 size-4" />

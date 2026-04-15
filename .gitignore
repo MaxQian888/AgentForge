@@ -19,6 +19,8 @@ junit.xml
 *.test.js.snap
 *.test.ts.snap
 *.test.tsx.snap
+/playwright-report
+/test-results
 
 # next.js
 /.next/
@@ -78,3 +80,4 @@ tmp-runtime
 bridge.exe
 marketplace.exe
 server.exe
+tmp-go-cache

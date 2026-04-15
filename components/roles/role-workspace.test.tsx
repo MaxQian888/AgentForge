@@ -790,4 +790,82 @@ describe("RoleWorkspace", () => {
 
     expect(screen.getByText("Resource Limits")).toBeInTheDocument();
   });
+
+  it("shows blocking and advisory role references before delete and only deletes when unblocked", async () => {
+    const user = userEvent.setup();
+    const onDeleteRole = jest.fn().mockResolvedValue(undefined);
+    const onLoadRoleReferences = jest
+      .fn()
+      .mockResolvedValueOnce({
+        roleId: "frontend-developer",
+        blockingConsumers: [
+          {
+            consumerType: "member-binding",
+            consumerId: "member-1",
+            label: "Frontend Bot",
+            blocking: true,
+            lifecycleState: "active",
+            reason: "Agent member Frontend Bot is still bound to role frontend-developer",
+            remediation: "Rebind or clear the member's role assignment before deleting this role.",
+          },
+        ],
+        advisoryConsumers: [
+          {
+            consumerType: "historical-run",
+            consumerId: "run-1",
+            label: "run-1",
+            blocking: false,
+            lifecycleState: "completed",
+            reason: "Historical agent run retains this role for audit context.",
+            remediation: "Historical run records keep their stored role_id after deletion.",
+          },
+        ],
+      })
+      .mockResolvedValueOnce({
+        roleId: "frontend-developer",
+        blockingConsumers: [],
+        advisoryConsumers: [
+          {
+            consumerType: "historical-run",
+            consumerId: "run-2",
+            label: "run-2",
+            blocking: false,
+            lifecycleState: "completed",
+            reason: "Historical agent run retains this role for audit context.",
+            remediation: "Historical run records keep their stored role_id after deletion.",
+          },
+        ],
+      });
+
+    render(
+      <RoleWorkspace
+        roles={[frontendRole]}
+        skillCatalog={skillCatalog}
+        loading={false}
+        error={null}
+        onCreateRole={jest.fn().mockResolvedValue(undefined)}
+        onUpdateRole={jest.fn().mockResolvedValue(undefined)}
+        onDeleteRole={onDeleteRole}
+        onLoadRoleReferences={onLoadRoleReferences}
+        onPreviewRole={jest.fn().mockResolvedValue(undefined)}
+        onSandboxRole={jest.fn().mockResolvedValue(undefined)}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Delete Frontend Developer" }));
+
+    expect(onLoadRoleReferences).toHaveBeenCalledWith("frontend-developer");
+    expect(await screen.findByText("Delete Role")).toBeInTheDocument();
+    expect(screen.getByText("Frontend Bot")).toBeInTheDocument();
+    expect(screen.getByText("run-1")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Close" }));
+    expect(onDeleteRole).not.toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: "Delete Frontend Developer" }));
+    expect(await screen.findByText("run-2")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Delete Role" }));
+    expect(onDeleteRole).toHaveBeenCalledWith(frontendRole);
+  });
 });

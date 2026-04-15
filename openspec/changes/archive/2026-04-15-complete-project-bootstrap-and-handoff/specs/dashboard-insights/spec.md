@@ -1,0 +1,51 @@
+## MODIFIED Requirements
+
+### Requirement: Dashboard presents actionable operational insights
+The system SHALL provide an authenticated dashboard summary experience that surfaces actionable project insights instead of only static headline counts. The summary MUST include task progress, active agents, pending reviews, weekly cost, and team/member capacity indicators for the selected dashboard scope.
+
+The dashboard widget area SHALL lay out the four primary widgets (Activity Feed, Agent Fleet, Team Health, Budget) in a symmetric two-column grid where the left column contains Activity Feed and Team Health, and the right column contains Agent Fleet and Budget. The project scope filter and quick action shortcuts SHALL each render as independent full-width rows outside the two-column widget grid, with no empty grid columns.
+
+When the selected scope is a specific project, the dashboard MUST also surface lifecycle-aware next steps whenever that project still lacks key governance, staffing, planning, playbook, or delivery prerequisites. Those next steps MUST be grounded in the project's current bootstrap state rather than hard-coded generic shortcuts.
+
+#### Scenario: Summary data loads successfully
+- **WHEN** an authenticated user opens the dashboard and summary data is available for the selected scope
+- **THEN** the system displays populated insight sections for task progress, active agents, pending reviews, weekly cost, and team/member capacity
+- **AND** each section uses labels and values that can be understood without opening another page
+
+#### Scenario: Selected project still needs lifecycle setup
+- **WHEN** the selected dashboard scope is a project whose bootstrap state still requires operator action
+- **THEN** the dashboard surfaces the unresolved lifecycle steps for that project
+- **AND** the user can continue into the recommended management surface from the dashboard without manually rediscovering the next step
+
+#### Scenario: Selected scope has no work yet
+- **WHEN** the selected dashboard scope has no tasks, agents, reviews, or members
+- **THEN** the system displays an explicit empty state instead of blank cards
+- **AND** the empty state includes lifecycle-aware next-step actions such as configuring the project, adding team members, or creating the first work item for the current scope
+
+#### Scenario: Widget area has no empty columns
+- **WHEN** the dashboard renders at desktop width (lg breakpoint and above)
+- **THEN** the four widget cards occupy both columns of the widget grid with no empty grid cells
+- **AND** neither column contains a large blank area taller than its content
+
+#### Scenario: Project filter renders full width
+- **WHEN** one or more projects exist and the project scope filter is visible
+- **THEN** the project filter spans the full available width as its own layout row
+- **AND** it does not share a grid row with widget cards
+
+### Requirement: Dashboard supports consistent drill-down and resilient section states
+The system SHALL let users move from summary insights or lifecycle-aware bootstrap guidance into the underlying project, agent, review, team, settings, workflow, docs, or planning surfaces, and it SHALL handle partial failures without collapsing the entire dashboard.
+
+#### Scenario: User drills down from an insight card
+- **WHEN** a user selects a dashboard card or activity item
+- **THEN** the system navigates to the related detailed surface with relevant scope preserved
+- **AND** the destination view is filtered or contextualized enough for the user to continue the same investigation
+
+#### Scenario: User follows dashboard lifecycle guidance
+- **WHEN** a user selects a lifecycle-aware next-step action from the dashboard
+- **THEN** the system navigates to the targeted management surface with the same project scope preserved
+- **AND** the destination consumes any provided focus intent for the missing lifecycle step
+
+#### Scenario: One summary section fails to load
+- **WHEN** one insight section cannot be loaded but other dashboard data remains available
+- **THEN** the dashboard keeps the healthy sections visible
+- **AND** the failed section renders an inline error state with a retry affordance instead of blanking the whole page

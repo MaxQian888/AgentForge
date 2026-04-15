@@ -9,6 +9,7 @@ import (
 	larkcallback "github.com/larksuite/oapi-sdk-go/v3/event/dispatcher/callback"
 	larkim "github.com/larksuite/oapi-sdk-go/v3/service/im/v1"
 	"net/http"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -172,6 +173,43 @@ func TestLive_HTTPCallbackHandlerRequiresExplicitRegistration(t *testing.T) {
 	}
 }
 
+func TestLive_CardCallbackWebhookExposesHandlerAndPath(t *testing.T) {
+	live, err := NewLive(
+		"app-id",
+		"app-secret",
+		WithEventRunner(&fakeEventRunner{}),
+		WithMessageClient(&fakeMessageClient{}),
+		WithCardCallbackWebhook("verification-token", "encrypt-key", "/feishu/callback"),
+	)
+	if err != nil {
+		t.Fatalf("NewLive with webhook callback error: %v", err)
+	}
+	if live.HTTPCallbackHandler() == nil {
+		t.Fatal("expected webhook callback handler")
+	}
+	if !reflect.DeepEqual(live.CallbackPaths(), []string{"/feishu/callback"}) {
+		t.Fatalf("CallbackPaths = %+v", live.CallbackPaths())
+	}
+	if !live.Metadata().Capabilities.RequiresPublicCallback {
+		t.Fatal("expected webhook-enabled Feishu live transport to require public callback")
+	}
+}
+
+func TestLive_MetadataUsesSocketPayloadCallbackModeWithoutWebhook(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+
+	metadata := live.Metadata()
+	if metadata.Capabilities.ActionCallbackMode != core.ActionCallbackSocketPayload {
+		t.Fatalf("ActionCallbackMode = %q, want %q", metadata.Capabilities.ActionCallbackMode, core.ActionCallbackSocketPayload)
+	}
+	if metadata.Capabilities.RequiresPublicCallback {
+		t.Fatal("expected long-connection callback mode to avoid requiring a public callback")
+	}
+}
+
 func TestLive_StartRoutesCardActionCallbackToActionHandler(t *testing.T) {
 	runner := &fakeEventRunner{}
 	sender := &fakeMessageClient{}
@@ -245,6 +283,114 @@ func TestLive_StartRoutesCardActionCallbackToActionHandler(t *testing.T) {
 	}
 	if updater.callbackToken != "" || updater.message != nil {
 		t.Fatalf("delayed update should not run during synchronous callback ack, updater = %+v", updater)
+	}
+}
+
+func TestLive_HandleCardActionReturnsTemplateCardResponseWhenActionHandlerProvidesNativeCard(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+	live.SetActionHandler(&replyingFeishuActionHandler{
+		response: &notify.ActionResponse{
+			Result: "Updated",
+			Native: &core.NativeMessage{
+				Platform: "feishu",
+				FeishuCard: &core.FeishuCardPayload{
+					Mode:                core.FeishuCardModeTemplate,
+					TemplateID:          "ctp_123",
+					TemplateVersionName: "1.0.0",
+					TemplateVariable: map[string]any{
+						"title": "Done",
+					},
+				},
+			},
+		},
+	})
+
+	resp, err := live.handleCardAction(context.Background(), &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Token: "cb-token-1",
+			Action: &larkcallback.CallBackAction{
+				Value: map[string]interface{}{
+					"action": "act:approve:review-1",
+				},
+			},
+			Context: &larkcallback.Context{
+				OpenMessageID: "om_123",
+				OpenChatID:    "oc_456",
+			},
+			Operator: &larkcallback.Operator{OpenID: "ou_123"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("handleCardAction error: %v", err)
+	}
+	if resp == nil || resp.Card == nil {
+		t.Fatalf("response = %+v, want template card response", resp)
+	}
+	if resp.Card.Type != "template" {
+		t.Fatalf("card type = %q, want template", resp.Card.Type)
+	}
+	data, ok := resp.Card.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("card data = %#v", resp.Card.Data)
+	}
+	if data["template_id"] != "ctp_123" {
+		t.Fatalf("card data = %+v", data)
+	}
+	if resp.Toast == nil || resp.Toast.Content != "Updated" {
+		t.Fatalf("toast = %+v", resp.Toast)
+	}
+}
+
+func TestLive_HandleCardActionReturnsRawCardResponseWhenActionHandlerProvidesStructuredMessage(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+	live.SetActionHandler(&replyingFeishuActionHandler{
+		response: &notify.ActionResponse{
+			Result: "Updated",
+			Structured: &core.StructuredMessage{
+				Title: "AgentForge IM 助手",
+				Sections: []core.StructuredSection{
+					{Type: core.StructuredSectionTypeText, TextSection: &core.TextSection{Body: "同步更新完成"}},
+				},
+			},
+		},
+	})
+
+	resp, err := live.handleCardAction(context.Background(), &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Token: "cb-token-1",
+			Action: &larkcallback.CallBackAction{
+				Value: map[string]interface{}{
+					"action": "act:approve:review-1",
+				},
+			},
+			Context: &larkcallback.Context{
+				OpenMessageID: "om_123",
+				OpenChatID:    "oc_456",
+			},
+			Operator: &larkcallback.Operator{OpenID: "ou_123"},
+		},
+	})
+	if err != nil {
+		t.Fatalf("handleCardAction error: %v", err)
+	}
+	if resp == nil || resp.Card == nil {
+		t.Fatalf("response = %+v, want raw card response", resp)
+	}
+	if resp.Card.Type != "raw" {
+		t.Fatalf("card type = %q, want raw", resp.Card.Type)
+	}
+	data, ok := resp.Card.Data.(map[string]any)
+	if !ok {
+		t.Fatalf("card data = %#v", resp.Card.Data)
+	}
+	if data["header"] == nil || data["elements"] == nil {
+		t.Fatalf("card data = %+v, want raw card payload", data)
 	}
 }
 
@@ -518,6 +664,14 @@ type fakeFeishuActionHandler struct {
 func (h *fakeFeishuActionHandler) HandleAction(ctx context.Context, req *notify.ActionRequest) (*notify.ActionResponse, error) {
 	h.requests = append(h.requests, req)
 	return &notify.ActionResponse{Result: "Approved"}, nil
+}
+
+type replyingFeishuActionHandler struct {
+	response *notify.ActionResponse
+}
+
+func (h *replyingFeishuActionHandler) HandleAction(context.Context, *notify.ActionRequest) (*notify.ActionResponse, error) {
+	return h.response, nil
 }
 
 func TestFeishuLive_NameReplyContextAndHelperFunctions(t *testing.T) {
@@ -1016,8 +1170,8 @@ func TestNormalizeCardActionRequest_SelectFallback(t *testing.T) {
 				Option: "opt_deploy",
 				Value:  map[string]interface{}{},
 			},
-			Token:   "token-1",
-			Context: &larkcallback.Context{OpenChatID: "chat-1"},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
 			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
 		},
 	}
@@ -1040,8 +1194,8 @@ func TestNormalizeCardActionRequest_DatePicker(t *testing.T) {
 				Tag:   "date_picker",
 				Value: map[string]interface{}{"date": "2026-04-15"},
 			},
-			Token:   "token-1",
-			Context: &larkcallback.Context{OpenChatID: "chat-1"},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
 			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
 		},
 	}
@@ -1065,8 +1219,8 @@ func TestNormalizeCardActionRequest_FormSubmit(t *testing.T) {
 				Value:     map[string]interface{}{},
 				FormValue: map[string]interface{}{"action": "create-task", "title": "New task"},
 			},
-			Token:   "token-1",
-			Context: &larkcallback.Context{OpenChatID: "chat-1"},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
 			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
 		},
 	}

@@ -211,7 +211,15 @@ func providerDescriptors() map[string]providerDescriptor {
 				return feishu.NewStub(cfg.TestPort), nil
 			},
 			NewLive: func(cfg *config) (core.Platform, error) {
-				return feishu.NewLive(cfg.FeishuApp, cfg.FeishuSec)
+				opts := make([]feishu.LiveOption, 0, 1)
+				if strings.TrimSpace(cfg.FeishuVerificationToken) != "" {
+					opts = append(opts, feishu.WithCardCallbackWebhook(
+						cfg.FeishuVerificationToken,
+						cfg.FeishuEventEncryptKey,
+						cfg.FeishuCallbackPath,
+					))
+				}
+				return feishu.NewLive(cfg.FeishuApp, cfg.FeishuSec, opts...)
 			},
 		},
 		"slack": {

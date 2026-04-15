@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -97,7 +98,8 @@ func (r *AgentMemoryRepository) ListFiltered(ctx context.Context, projectID uuid
 	}
 
 	query = query.Order("relevance_score DESC, created_at DESC")
-	if filter.Limit > 0 {
+	applyLimitAfterFilter := strings.TrimSpace(filter.Tag) != ""
+	if filter.Limit > 0 && !applyLimitAfterFilter {
 		query = query.Limit(filter.Limit)
 	}
 
@@ -109,6 +111,12 @@ func (r *AgentMemoryRepository) ListFiltered(ctx context.Context, projectID uuid
 	memories := make([]*model.AgentMemory, len(records))
 	for i := range records {
 		memories[i] = records[i].toModel()
+	}
+	if tag := strings.TrimSpace(filter.Tag); tag != "" {
+		memories = filterMemoriesByTag(memories, tag)
+		if filter.Limit > 0 && len(memories) > filter.Limit {
+			memories = memories[:filter.Limit]
+		}
 	}
 	return memories, nil
 }
@@ -126,6 +134,37 @@ func (r *AgentMemoryRepository) IncrementAccess(ctx context.Context, id uuid.UUI
 			"updated_at":       gorm.Expr("NOW()"),
 		}).Error; err != nil {
 		return fmt.Errorf("increment agent memory access: %w", err)
+	}
+	return nil
+}
+
+func (r *AgentMemoryRepository) Update(ctx context.Context, mem *model.AgentMemory) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if mem == nil {
+		return fmt.Errorf("update agent memory: memory is required")
+	}
+	result := r.db.WithContext(ctx).
+		Model(&agentMemoryRecord{}).
+		Where("id = ?", mem.ID).
+		Updates(map[string]any{
+			"scope":            mem.Scope,
+			"role_id":          mem.RoleID,
+			"category":         mem.Category,
+			"key":              mem.Key,
+			"content":          mem.Content,
+			"metadata":         newJSONText(mem.Metadata, "{}"),
+			"relevance_score":  mem.RelevanceScore,
+			"access_count":     mem.AccessCount,
+			"last_accessed_at": cloneTimePointer(mem.LastAccessedAt),
+			"updated_at":       mem.UpdatedAt,
+		})
+	if result.Error != nil {
+		return fmt.Errorf("update agent memory: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }
@@ -208,4 +247,45 @@ func (r *AgentMemoryRepository) DeleteOlderThan(ctx context.Context, projectID u
 		return 0, fmt.Errorf("delete agent memories older than cutoff: %w", result.Error)
 	}
 	return result.RowsAffected, nil
+}
+
+func filterMemoriesByTag(entries []*model.AgentMemory, tag string) []*model.AgentMemory {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return entries
+	}
+	filtered := make([]*model.AgentMemory, 0, len(entries))
+	for _, entry := range entries {
+		if entry == nil {
+			continue
+		}
+		if memoryHasTag(entry.Metadata, tag) {
+			filtered = append(filtered, entry)
+		}
+	}
+	return filtered
+}
+
+func memoryHasTag(rawMetadata string, tag string) bool {
+	if strings.TrimSpace(rawMetadata) == "" || strings.TrimSpace(tag) == "" {
+		return false
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(rawMetadata), &metadata); err != nil {
+		return false
+	}
+	items, ok := metadata["tags"].([]any)
+	if !ok {
+		return false
+	}
+	for _, item := range items {
+		value, ok := item.(string)
+		if !ok {
+			continue
+		}
+		if strings.EqualFold(strings.TrimSpace(value), tag) {
+			return true
+		}
+	}
+	return false
 }

@@ -276,3 +276,23 @@ type RolePluginConsumer struct {
 	Message        string   `yaml:"-" json:"message,omitempty"`
 	References     []string `yaml:"-" json:"references,omitempty"`
 }
+
+type RoleReferenceConsumer struct {
+	ConsumerType   string   `json:"consumerType"`
+	ConsumerID     string   `json:"consumerId"`
+	Label          string   `json:"label,omitempty"`
+	ProjectID      string   `json:"projectId,omitempty"`
+	TaskID         string   `json:"taskId,omitempty"`
+	MemberID       string   `json:"memberId,omitempty"`
+	LifecycleState string   `json:"lifecycleState,omitempty"`
+	Blocking       bool     `json:"blocking"`
+	Reason         string   `json:"reason,omitempty"`
+	Remediation    string   `json:"remediation,omitempty"`
+	References     []string `json:"references,omitempty"`
+}
+
+type RoleReferenceInventory struct {
+	RoleID            string                  `json:"roleId"`
+	BlockingConsumers []RoleReferenceConsumer `json:"blockingConsumers,omitempty"`
+	AdvisoryConsumers []RoleReferenceConsumer `json:"advisoryConsumers,omitempty"`
+}

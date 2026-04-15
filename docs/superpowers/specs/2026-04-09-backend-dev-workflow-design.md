@@ -13,14 +13,14 @@ Add a backend-only local development command family for AgentForge and make the 
 
 ## Current Repo Truth
 
-- `scripts/dev-all.js` already owns cross-platform startup, health probing, runtime logs, and state persistence for the full local stack
-- `scripts/dev-workflow.js` already provides shared helpers for runtime state, stop planning, command availability, and Docker Desktop readiness
+- `scripts/dev/dev-all.js` already owns cross-platform startup, health probing, runtime logs, and state persistence for the full local stack
+- `scripts/dev/dev-workflow.js` already provides shared helpers for runtime state, stop planning, command availability, and Docker Desktop readiness
 - `scripts/dev-all.test.ts` already verifies service matrices, package script exposure, reuse behavior, conflict handling, and stop semantics
 - `README.md` and `README_zh.md` document `pnpm dev:all` plus a manual backend-only path, but there is no root backend-only command family yet
 
 ## Design
 
-1. Keep a single Node control plane in `scripts/dev-all.js`, but add workflow profiles so the same implementation can serve both `all` and `backend` modes.
+1. Keep a single Node control plane in `scripts/dev/dev-all.js`, but add workflow profiles so the same implementation can serve both `all` and `backend` modes.
 2. Expose the backend command family from `package.json` as:
    - `pnpm dev:backend`
    - `pnpm dev:backend:status`

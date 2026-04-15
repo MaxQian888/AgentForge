@@ -13,16 +13,17 @@ const (
 )
 
 const (
-	TaskProgressSourceTaskCreated    = "task_created"
-	TaskProgressSourceTaskUpdated    = "task_updated"
-	TaskProgressSourceTaskAssigned   = "task_assigned"
-	TaskProgressSourceTaskTransition = "task_transition"
-	TaskProgressSourceAgentStarted   = "agent_started"
-	TaskProgressSourceAgentHeartbeat = "agent_heartbeat"
-	TaskProgressSourceAgentStatus    = "agent_status"
-	TaskProgressSourceReviewCreated  = "review_created"
-	TaskProgressSourceReviewComplete = "review_complete"
-	TaskProgressSourceDetector       = "detector"
+	TaskProgressSourceTaskCreated     = "task_created"
+	TaskProgressSourceTaskUpdated     = "task_updated"
+	TaskProgressSourceTaskAssigned    = "task_assigned"
+	TaskProgressSourceTaskTransition  = "task_transition"
+	TaskProgressSourceWorkflowTrigger = "workflow_trigger"
+	TaskProgressSourceAgentStarted    = "agent_started"
+	TaskProgressSourceAgentHeartbeat  = "agent_heartbeat"
+	TaskProgressSourceAgentStatus     = "agent_status"
+	TaskProgressSourceReviewCreated   = "review_created"
+	TaskProgressSourceReviewComplete  = "review_complete"
+	TaskProgressSourceDetector        = "detector"
 )
 
 const (

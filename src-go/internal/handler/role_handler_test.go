@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/handler"
@@ -28,6 +30,30 @@ type fakeRoleBridgeClient struct {
 type fakeRolePluginCatalog struct {
 	records []*model.PluginRecord
 	err     error
+}
+
+type fakeRoleMemberCatalog struct {
+	members []*model.Member
+}
+
+func (f *fakeRoleMemberCatalog) ListAll(_ context.Context) ([]*model.Member, error) {
+	return f.members, nil
+}
+
+type fakeRoleQueueCatalog struct {
+	entries []*model.AgentPoolQueueEntry
+}
+
+func (f *fakeRoleQueueCatalog) ListAllQueued(_ context.Context, _ int) ([]*model.AgentPoolQueueEntry, error) {
+	return f.entries, nil
+}
+
+type fakeRoleRunCatalog struct {
+	runs []*model.AgentRun
+}
+
+func (f *fakeRoleRunCatalog) ListByRole(_ context.Context, _ string, _ int) ([]*model.AgentRun, error) {
+	return f.runs, nil
 }
 
 func (f *fakeRolePluginCatalog) List(_ context.Context, _ service.PluginListFilter) ([]*model.PluginRecord, error) {
@@ -340,6 +366,173 @@ identity:
 	}
 	if !strings.Contains(rec.Body.String(), "workflow.release-train") {
 		t.Fatalf("response = %s, want blocking plugin id", rec.Body.String())
+	}
+}
+
+func TestRoleHandler_GetReferencesReturnsBlockingAndAdvisoryConsumers(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "roles")
+	if err := os.MkdirAll(filepath.Join(dir, "frontend-developer"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "frontend-developer", "role.yaml"), []byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: frontend-developer
+  name: Frontend Developer
+identity:
+  role: Frontend Developer
+  goal: build ui
+`), 0o600); err != nil {
+		t.Fatalf("seed role error = %v", err)
+	}
+
+	projectID := uuid.New()
+	memberID := uuid.New()
+	taskID := uuid.New()
+	runID := uuid.New()
+	now := time.Now().UTC()
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/roles/frontend-developer/references", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("frontend-developer")
+
+	h := handler.NewRoleHandler(dir).
+		WithPluginCatalog(&fakeRolePluginCatalog{
+			records: []*model.PluginRecord{
+				{
+					PluginManifest: model.PluginManifest{
+						APIVersion: "agentforge/v1",
+						Kind:       model.PluginKindWorkflow,
+						Metadata: model.PluginMetadata{
+							ID:      "workflow.release-train",
+							Name:    "Release Train",
+							Version: "1.0.0",
+						},
+						Spec: model.PluginSpec{
+							Workflow: &model.WorkflowPluginSpec{
+								Process: model.WorkflowProcessSequential,
+								Roles:   []model.WorkflowRoleBinding{{ID: "frontend-developer"}},
+								Steps:   []model.WorkflowStepDefinition{{ID: "implement", Role: "frontend-developer", Action: model.WorkflowActionAgent}},
+							},
+						},
+					},
+					LifecycleState: model.PluginStateEnabled,
+				},
+			},
+		}).
+		WithMemberCatalog(&fakeRoleMemberCatalog{
+			members: []*model.Member{
+				{
+					ID:          memberID,
+					ProjectID:   projectID,
+					Name:        "Frontend Bot",
+					Type:        model.MemberTypeAgent,
+					AgentConfig: `{"roleId":"frontend-developer","runtime":"codex"}`,
+				},
+			},
+		}).
+		WithQueueCatalog(&fakeRoleQueueCatalog{
+			entries: []*model.AgentPoolQueueEntry{
+				{
+					EntryID:   "queue-1",
+					ProjectID: projectID.String(),
+					TaskID:    taskID.String(),
+					MemberID:  memberID.String(),
+					Status:    model.AgentPoolQueueStatusQueued,
+					RoleID:    "frontend-developer",
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+			},
+		}).
+		WithRunCatalog(&fakeRoleRunCatalog{
+			runs: []*model.AgentRun{
+				{
+					ID:        runID,
+					TaskID:    taskID,
+					MemberID:  memberID,
+					RoleID:    "frontend-developer",
+					Status:    model.AgentRunStatusCompleted,
+					CreatedAt: now,
+					UpdatedAt: now,
+				},
+			},
+		})
+
+	if err := h.GetReferences(ctx); err != nil {
+		t.Fatalf("GetReferences() error = %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200", rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	blocking, ok := payload["blockingConsumers"].([]any)
+	if !ok || len(blocking) != 3 {
+		t.Fatalf("blockingConsumers = %#v, want 3 entries", payload["blockingConsumers"])
+	}
+	advisory, ok := payload["advisoryConsumers"].([]any)
+	if !ok || len(advisory) != 1 {
+		t.Fatalf("advisoryConsumers = %#v, want 1 entry", payload["advisoryConsumers"])
+	}
+}
+
+func TestRoleHandler_DeleteReturnsStructuredConflictDetails(t *testing.T) {
+	dir := filepath.Join(t.TempDir(), "roles")
+	if err := os.MkdirAll(filepath.Join(dir, "frontend-developer"), 0o755); err != nil {
+		t.Fatalf("MkdirAll() error = %v", err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "frontend-developer", "role.yaml"), []byte(`apiVersion: agentforge/v1
+kind: Role
+metadata:
+  id: frontend-developer
+  name: Frontend Developer
+identity:
+  role: Frontend Developer
+  goal: build ui
+`), 0o600); err != nil {
+		t.Fatalf("seed role error = %v", err)
+	}
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodDelete, "/roles/frontend-developer", nil)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.SetParamNames("id")
+	ctx.SetParamValues("frontend-developer")
+
+	h := handler.NewRoleHandler(dir).
+		WithMemberCatalog(&fakeRoleMemberCatalog{
+			members: []*model.Member{
+				{
+					ID:          uuid.New(),
+					ProjectID:   uuid.New(),
+					Name:        "Frontend Bot",
+					Type:        model.MemberTypeAgent,
+					AgentConfig: `{"roleId":"frontend-developer","runtime":"codex"}`,
+				},
+			},
+		})
+
+	if err := h.Delete(ctx); err != nil {
+		t.Fatalf("Delete() error = %v", err)
+	}
+	if rec.Code != http.StatusConflict {
+		t.Fatalf("status = %d, want 409", rec.Code)
+	}
+
+	var payload map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &payload); err != nil {
+		t.Fatalf("decode response: %v", err)
+	}
+	if _, ok := payload["references"].(map[string]any); !ok {
+		t.Fatalf("references = %#v, want structured inventory", payload["references"])
 	}
 }
 

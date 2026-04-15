@@ -22,12 +22,15 @@ function makeTemplate(overrides: Partial<DocsPage> = {}): DocsPage {
     createdAt: "2026-03-26T12:00:00.000Z",
     updatedAt: "2026-03-26T12:00:00.000Z",
     deletedAt: null,
+    templateSource: "system",
+    previewSnippet: "Operational checklist",
+    canUse: true,
     ...overrides,
   };
 }
 
 describe("TemplatePicker", () => {
-  it("renders available templates and supports picking or closing the dialog", async () => {
+  it("renders templates, captures title and location, and submits the selection", async () => {
     const user = userEvent.setup();
     const onOpenChange = jest.fn();
     const onPick = jest.fn();
@@ -36,14 +39,38 @@ describe("TemplatePicker", () => {
       <TemplatePicker
         open
         onOpenChange={onOpenChange}
-        templates={[makeTemplate()]}
+        templates={[
+          makeTemplate(),
+          makeTemplate({
+            id: "template-2",
+            title: "Custom RFC",
+            templateCategory: "rfc",
+            templateSource: "custom",
+          }),
+        ]}
+        destinations={[
+          { id: null, title: "Workspace Root" },
+          { id: "page-1", title: "Architecture" },
+        ]}
+        initialTemplateId="template-2"
         onPick={onPick}
       />,
     );
 
     expect(screen.getByText("Select a template")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: /Incident Runbook/i }));
-    expect(onPick).toHaveBeenCalledWith("template-1");
+    expect(screen.getByDisplayValue("Custom RFC")).toBeInTheDocument();
+    expect(screen.getByText("Template Preview")).toBeInTheDocument();
+
+    await user.clear(screen.getByLabelText("Document Title"));
+    await user.type(screen.getByLabelText("Document Title"), "RFC Draft");
+    await user.selectOptions(screen.getByLabelText("Destination"), "page-1");
+    await user.click(screen.getByRole("button", { name: "Create Document" }));
+
+    expect(onPick).toHaveBeenCalledWith({
+      templateId: "template-2",
+      title: "RFC Draft",
+      parentId: "page-1",
+    });
 
     await user.click(screen.getAllByRole("button", { name: "Close" })[0]);
     expect(onOpenChange).toHaveBeenCalledWith(false);

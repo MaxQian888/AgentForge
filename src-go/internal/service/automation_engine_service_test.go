@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -95,6 +96,39 @@ type stubAutomationPlugin struct {
 func (p *stubAutomationPlugin) Invoke(_ context.Context, pluginID, operation string, payload map[string]any) (map[string]any, error) {
 	p.pluginID, p.operation, p.payload = pluginID, operation, payload
 	return map[string]any{"ok": true}, nil
+}
+
+type stubAutomationWorkflowRunner struct {
+	startedPlugin string
+	startedReq    WorkflowExecutionRequest
+	started       int
+	runs          []*model.WorkflowPluginRun
+	err           error
+}
+
+func (r *stubAutomationWorkflowRunner) Start(_ context.Context, pluginID string, req WorkflowExecutionRequest) (*model.WorkflowPluginRun, error) {
+	r.startedPlugin = pluginID
+	r.startedReq = req
+	r.started++
+	if r.err != nil {
+		return nil, r.err
+	}
+	return &model.WorkflowPluginRun{
+		ID:       uuid.New(),
+		PluginID: pluginID,
+		Status:   model.WorkflowRunStatusRunning,
+		Trigger:  req.Trigger,
+	}, nil
+}
+
+func (r *stubAutomationWorkflowRunner) ListRuns(_ context.Context, pluginID string, _ int) ([]*model.WorkflowPluginRun, error) {
+	filtered := make([]*model.WorkflowPluginRun, 0, len(r.runs))
+	for _, run := range r.runs {
+		if run != nil && run.PluginID == pluginID {
+			filtered = append(filtered, run)
+		}
+	}
+	return filtered, nil
 }
 
 func TestAutomationEngineServiceExecutesActionsAndLogs(t *testing.T) {
@@ -312,10 +346,124 @@ func TestAutomationEngineServiceSkipsTriggeredByAutomationAndChecksDueDates(t *t
 		t.Fatalf("expected no logs for automation-triggered event, got %+v", logs.entries)
 	}
 
-	if err := engine.CheckDueDateApproaching(context.Background(), time.Hour); err != nil {
+	summary, err := engine.CheckDueDateApproaching(context.Background(), time.Hour)
+	if err != nil {
 		t.Fatalf("CheckDueDateApproaching() error = %v", err)
+	}
+	if summary == nil || summary.EvaluatedTasks != 1 || summary.MatchedRules != 1 {
+		t.Fatalf("due-date summary = %+v, want evaluated task and matched rule counts", summary)
 	}
 	if tasks.transitionedTo != "blocked" {
 		t.Fatalf("due-date action transition = %q, want blocked", tasks.transitionedTo)
+	}
+}
+
+func TestAutomationEngineServiceStartsWorkflowThroughCanonicalRuntimeAndLogsOutcome(t *testing.T) {
+	projectID := uuid.New()
+	taskID := uuid.New()
+	rule := &model.AutomationRule{
+		ID:         uuid.New(),
+		ProjectID:  projectID,
+		Enabled:    true,
+		EventType:  model.AutomationEventTaskDueDateApproach,
+		Conditions: `[]`,
+		Actions:    `[{"type":"start_workflow","config":{"pluginId":"task-delivery-flow","trigger":{"from":"automation"}}}]`,
+	}
+	logs := &stubAutomationLogRepo{}
+	tasks := &stubAutomationTaskRepo{task: &model.Task{ID: taskID, ProjectID: projectID, Title: "Ship", Status: model.TaskStatusBlocked}}
+	workflows := &stubAutomationWorkflowRunner{}
+	engine := NewAutomationEngineService(&stubAutomationRuleRepo{rules: []*model.AutomationRule{rule}}, logs, tasks, nil, nil, nil, nil)
+	engine.SetWorkflowStarter(workflows)
+
+	if err := engine.EvaluateRules(context.Background(), AutomationEvent{
+		EventType: model.AutomationEventTaskDueDateApproach,
+		ProjectID: projectID,
+		TaskID:    &taskID,
+		Task:      tasks.task,
+		Data:      map[string]any{"due_at": "2026-04-16T09:00:00Z"},
+	}); err != nil {
+		t.Fatalf("EvaluateRules() error = %v", err)
+	}
+	if workflows.started != 1 || workflows.startedPlugin != "task-delivery-flow" {
+		t.Fatalf("workflow starts = %d via %q", workflows.started, workflows.startedPlugin)
+	}
+	if got := workflows.startedReq.Trigger["source"]; got != "automation_rule" {
+		t.Fatalf("workflow trigger source = %v, want automation_rule", got)
+	}
+	if got := workflows.startedReq.Trigger["taskId"]; got != taskID.String() {
+		t.Fatalf("workflow trigger taskId = %v, want %s", got, taskID.String())
+	}
+	if got := workflows.startedReq.Trigger["ruleId"]; got != rule.ID.String() {
+		t.Fatalf("workflow trigger ruleId = %v, want %s", got, rule.ID.String())
+	}
+	if got := workflows.startedReq.Trigger["from"]; got != "automation" {
+		t.Fatalf("workflow trigger custom field = %v, want automation", got)
+	}
+	if len(logs.entries) != 1 || logs.entries[0].Status != model.AutomationLogStatusSuccess {
+		t.Fatalf("logs = %+v", logs.entries)
+	}
+	var detail struct {
+		ActionOutcomes []AutomationActionOutcome `json:"actionOutcomes"`
+	}
+	if err := json.Unmarshal([]byte(logs.entries[0].Detail), &detail); err != nil {
+		t.Fatalf("unmarshal automation log detail: %v", err)
+	}
+	if len(detail.ActionOutcomes) != 1 || detail.ActionOutcomes[0].Outcome != "started" || detail.ActionOutcomes[0].RunID == "" {
+		t.Fatalf("action outcomes = %+v", detail.ActionOutcomes)
+	}
+}
+
+func TestAutomationEngineServiceBlocksDuplicateWorkflowStartsAndDoesNotCreateSecondRun(t *testing.T) {
+	projectID := uuid.New()
+	taskID := uuid.New()
+	rule := &model.AutomationRule{
+		ID:         uuid.New(),
+		ProjectID:  projectID,
+		Enabled:    true,
+		EventType:  model.AutomationEventTaskDueDateApproach,
+		Conditions: `[]`,
+		Actions:    `[{"type":"start_workflow","config":{"pluginId":"task-delivery-flow"}}]`,
+	}
+	logs := &stubAutomationLogRepo{}
+	tasks := &stubAutomationTaskRepo{task: &model.Task{ID: taskID, ProjectID: projectID, Title: "Ship", Status: model.TaskStatusBlocked}}
+	workflows := &stubAutomationWorkflowRunner{
+		runs: []*model.WorkflowPluginRun{{
+			ID:       uuid.New(),
+			PluginID: "task-delivery-flow",
+			Status:   model.WorkflowRunStatusRunning,
+			Trigger: map[string]any{
+				"source":    "automation_rule",
+				"projectId": projectID.String(),
+				"taskId":    taskID.String(),
+				"eventType": model.AutomationEventTaskDueDateApproach,
+				"ruleId":    rule.ID.String(),
+			},
+		}},
+	}
+	engine := NewAutomationEngineService(&stubAutomationRuleRepo{rules: []*model.AutomationRule{rule}}, logs, tasks, nil, nil, nil, nil)
+	engine.SetWorkflowStarter(workflows)
+
+	if err := engine.EvaluateRules(context.Background(), AutomationEvent{
+		EventType: model.AutomationEventTaskDueDateApproach,
+		ProjectID: projectID,
+		TaskID:    &taskID,
+		Task:      tasks.task,
+	}); err != nil {
+		t.Fatalf("EvaluateRules() error = %v", err)
+	}
+	if workflows.started != 0 {
+		t.Fatalf("workflow starts = %d, want duplicate block before start", workflows.started)
+	}
+	if len(logs.entries) != 1 || logs.entries[0].Status != model.AutomationLogStatusSuccess {
+		t.Fatalf("logs = %+v", logs.entries)
+	}
+	var detail struct {
+		ActionOutcomes []AutomationActionOutcome `json:"actionOutcomes"`
+	}
+	if err := json.Unmarshal([]byte(logs.entries[0].Detail), &detail); err != nil {
+		t.Fatalf("unmarshal automation log detail: %v", err)
+	}
+	if len(detail.ActionOutcomes) != 1 || detail.ActionOutcomes[0].Outcome != "blocked" || detail.ActionOutcomes[0].ReasonCode != "duplicate_active_run" {
+		t.Fatalf("action outcomes = %+v", detail.ActionOutcomes)
 	}
 }

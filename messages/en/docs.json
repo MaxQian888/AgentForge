@@ -50,6 +50,7 @@
   "editor": {
     "saveVersion": "Save Version",
     "saveAsTemplate": "Save as Template",
+    "duplicateTemplate": "Duplicate Template",
     "shareVersion": "Share Version"
   },
   "versionHistory": {
@@ -65,6 +66,14 @@
   "templatePicker": {
     "title": "Select a template",
     "desc": "Start from a seeded document or one of your saved team templates.",
+    "previewTitle": "Template Preview",
+    "noPreview": "This template does not have a preview snippet yet.",
+    "noSelection": "Choose a template to inspect it before creating a document.",
+    "titleField": "Document Title",
+    "titlePlaceholder": "New document title",
+    "locationField": "Destination",
+    "rootLocation": "Workspace Root",
+    "createDocument": "Create Document",
     "uncategorized": "uncategorized",
     "system": "System",
     "custom": "Custom",
@@ -74,8 +83,47 @@
   "templateCenter": {
     "title": "Template Center",
     "desc": "Reuse seeded PRDs, ADRs, runbooks, and your own team templates.",
+    "searchPlaceholder": "Filter templates by title, category, or preview",
+    "newTemplate": "New Template",
+    "previewTitle": "Preview",
+    "uncategorized": "uncategorized",
+    "noPreview": "This template does not have a preview snippet yet.",
+    "noSelection": "Select a template to inspect or manage it.",
+    "edit": "Edit Template",
+    "duplicate": "Duplicate Template",
+    "delete": "Delete Template",
+    "confirmDelete": "Delete {title}?",
+    "filters": {
+      "all": "All",
+      "system": "System",
+      "custom": "Custom"
+    },
+    "createDialog": {
+      "title": "Create Template",
+      "desc": "Create a blank custom template and continue editing it in the docs workspace.",
+      "confirm": "Create Template"
+    },
+    "duplicateDialog": {
+      "title": "Duplicate Template",
+      "desc": "Make a project-owned copy that you can customize safely.",
+      "confirm": "Create Duplicate"
+    },
+    "dialog": {
+      "titleLabel": "Template Title",
+      "titlePlaceholder": "Template title",
+      "categoryLabel": "Category",
+      "defaultCategory": "custom",
+      "cancel": "Cancel"
+    },
     "useTemplate": "Use Template",
     "noTemplates": "Templates will appear here after they load."
+  },
+  "templateMode": {
+    "title": "Template editing mode",
+    "systemBadge": "Built-in Template",
+    "customBadge": "Custom Template",
+    "systemDesc": "This is a built-in template. You can preview it, use it to create documents, or duplicate it, but you cannot edit or delete it in place.",
+    "customDesc": "You are editing a project-owned template. Changes here affect future documents created from this template only."
   },
   "relatedTasks": {
     "title": "Related Tasks",

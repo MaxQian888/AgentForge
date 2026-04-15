@@ -18,6 +18,7 @@ type MemoryExplorerQuery struct {
 	Scope     string
 	Category  string
 	RoleID    string
+	Tag       string
 	StartAt   *time.Time
 	EndAt     *time.Time
 	Limit     int
@@ -145,7 +146,7 @@ func (s *MemoryExplorerService) ExportEpisodic(ctx context.Context, query Memory
 	if s.episodic == nil {
 		return nil, fmt.Errorf("episodic memory explorer is not configured")
 	}
-	return s.episodic.Export(ctx, EpisodicMemoryExportRequest{
+	exported, err := s.episodic.Export(ctx, EpisodicMemoryExportRequest{
 		ProjectID: query.ProjectID,
 		Query:     strings.TrimSpace(query.Query),
 		Category:  strings.TrimSpace(query.Category),
@@ -154,6 +155,20 @@ func (s *MemoryExplorerService) ExportEpisodic(ctx context.Context, query Memory
 		StartAt:   query.StartAt,
 		EndAt:     query.EndAt,
 	})
+	if err != nil {
+		return nil, err
+	}
+	if strings.TrimSpace(query.Tag) == "" {
+		return exported, nil
+	}
+	filtered := make([]EpisodicMemoryExportEntry, 0, len(exported.Entries))
+	for _, entry := range exported.Entries {
+		if filterMemoryExportEntryByTag(entry, query.Tag) {
+			filtered = append(filtered, entry)
+		}
+	}
+	exported.Entries = filtered
+	return exported, nil
 }
 
 func (s *MemoryExplorerService) BulkDelete(ctx context.Context, projectID uuid.UUID, ids []uuid.UUID, roleID string) (int64, error) {
@@ -220,7 +235,7 @@ func (s *MemoryExplorerService) listEntries(ctx context.Context, query MemoryExp
 	if strings.TrimSpace(query.Category) == model.MemoryCategoryEpisodic && s.episodic != nil {
 		search := strings.TrimSpace(query.Query)
 		episodicLimit := query.Limit
-		if search != "" {
+		if search != "" || strings.TrimSpace(query.Tag) != "" {
 			episodicLimit = 0
 		}
 		entries, err := s.episodic.ListHistory(ctx, EpisodicMemoryQuery{
@@ -236,8 +251,9 @@ func (s *MemoryExplorerService) listEntries(ctx context.Context, query MemoryExp
 		}
 		if search != "" {
 			entries = filterMemoriesBySearch(entries, search)
-			entries = limitExplorerEntries(entries, query.Limit)
 		}
+		entries = filterMemoriesByTag(entries, query.Tag)
+		entries = limitExplorerEntries(entries, query.Limit)
 		return entries, nil
 	}
 	entries, err := s.repo.ListFiltered(ctx, query.ProjectID, model.AgentMemoryFilter{
@@ -245,6 +261,7 @@ func (s *MemoryExplorerService) listEntries(ctx context.Context, query MemoryExp
 		Scope:    strings.TrimSpace(query.Scope),
 		Category: strings.TrimSpace(query.Category),
 		RoleID:   strings.TrimSpace(query.RoleID),
+		Tag:      strings.TrimSpace(query.Tag),
 		StartAt:  query.StartAt,
 		EndAt:    query.EndAt,
 		Limit:    query.Limit,
@@ -299,6 +316,38 @@ func filterMemoriesBySearch(entries []*model.AgentMemory, query string) []*model
 		}
 	}
 	return filtered
+}
+
+func filterMemoriesByTag(entries []*model.AgentMemory, tag string) []*model.AgentMemory {
+	tag = strings.TrimSpace(tag)
+	if tag == "" {
+		return entries
+	}
+	filtered := make([]*model.AgentMemory, 0, len(entries))
+	for _, entry := range entries {
+		if entry == nil {
+			continue
+		}
+		for _, entryTag := range entry.ToDTO().Tags {
+			if strings.EqualFold(entryTag, tag) {
+				filtered = append(filtered, entry)
+				break
+			}
+		}
+	}
+	return filtered
+}
+
+func filterMemoryExportEntryByTag(entry EpisodicMemoryExportEntry, tag string) bool {
+	dto := (&model.AgentMemory{
+		Metadata: entry.Metadata,
+	}).ToDTO()
+	for _, entryTag := range dto.Tags {
+		if strings.EqualFold(entryTag, strings.TrimSpace(tag)) {
+			return true
+		}
+	}
+	return false
 }
 
 func resolveCleanupCutoff(input MemoryCleanupInput, now func() time.Time) (*time.Time, error) {

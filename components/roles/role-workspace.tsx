@@ -8,6 +8,7 @@ import { cn } from "@/lib/utils";
 import type {
   RoleManifest,
   RolePreviewResponse,
+  RoleReferenceInventory,
   RoleSandboxResponse,
   RoleSkillCatalogEntry,
 } from "@/lib/stores/role-store";
@@ -31,6 +32,7 @@ import {
   type RoleTriggerDraft,
 } from "@/lib/roles/role-management";
 import { Button } from "@/components/ui/button";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
   Sheet,
   SheetContent,
@@ -55,6 +57,7 @@ interface RoleWorkspaceProps {
   skillCatalogLoading?: boolean;
   loading: boolean;
   error: string | null;
+  onLoadRoleReferences?: (roleId: string) => Promise<RoleReferenceInventory | void>;
   onCreateRole: (data: Partial<RoleManifest>) => Promise<unknown>;
   onUpdateRole: (id: string, data: Partial<RoleManifest>) => Promise<unknown>;
   onDeleteRole: (role: RoleManifest) => Promise<unknown>;
@@ -76,6 +79,7 @@ export function RoleWorkspace({
   skillCatalogLoading = false,
   loading,
   error,
+  onLoadRoleReferences,
   onCreateRole,
   onUpdateRole,
   onDeleteRole,
@@ -97,6 +101,10 @@ export function RoleWorkspace({
   const [activeSection, setActiveSection] =
     useState<RoleWorkspaceSectionId>("setup");
   const sandboxInputRef = useRef("");
+  const [deletingRole, setDeletingRole] = useState<RoleManifest | null>(null);
+  const [deleteReferences, setDeleteReferences] = useState<RoleReferenceInventory | null>(null);
+  const [deleteLoading, setDeleteLoading] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
 
   // Panel visibility
   const [catalogOpen, setCatalogOpen] = useState(true);
@@ -319,6 +327,59 @@ export function RoleWorkspace({
     }
   };
 
+  const closeDeleteDialog = () => {
+    setDeletingRole(null);
+    setDeleteReferences(null);
+    setDeleteLoading(false);
+    setDeleteError(null);
+  };
+
+  const handleRequestDelete = async (role: RoleManifest) => {
+    if (!onLoadRoleReferences) {
+      await onDeleteRole(role);
+      return;
+    }
+
+    setDeletingRole(role);
+    setDeleteLoading(true);
+    setDeleteError(null);
+    try {
+      setDeleteReferences(
+        (await onLoadRoleReferences(role.metadata.id)) ?? {
+          roleId: role.metadata.id,
+          blockingConsumers: [],
+          advisoryConsumers: [],
+        },
+      );
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : t("deleteDialog.loadError"));
+      setDeleteReferences({
+        roleId: role.metadata.id,
+        blockingConsumers: [],
+        advisoryConsumers: [],
+      });
+    } finally {
+      setDeleteLoading(false);
+    }
+  };
+
+  const handleConfirmDelete = async () => {
+    if (!deletingRole) {
+      closeDeleteDialog();
+      return;
+    }
+    if ((deleteReferences?.blockingConsumers?.length ?? 0) > 0) {
+      closeDeleteDialog();
+      return;
+    }
+    try {
+      await onDeleteRole(deletingRole);
+      closeDeleteDialog();
+    } catch (err) {
+      setDeleteError(err instanceof Error ? err.message : t("deleteDialog.deleteError"));
+    }
+  };
+
   const selectedTemplateName =
     selectedTemplateRole?.metadata.name ?? null;
   const selectedParentRole = roles.find((role) => role.metadata.id === draft.extendsValue);
@@ -447,7 +508,7 @@ export function RoleWorkspace({
       error={error}
       onCreateNew={handleNewRole}
       onEditRole={handleEditRole}
-      onDeleteRole={(role) => void onDeleteRole(role)}
+      onDeleteRole={(role) => void handleRequestDelete(role)}
     />
   );
 
@@ -488,8 +549,57 @@ export function RoleWorkspace({
     }
   };
 
+  const deleteBlockingConsumers = deleteReferences?.blockingConsumers ?? [];
+  const deleteAdvisoryConsumers = deleteReferences?.advisoryConsumers ?? [];
+  const deleteDialogDescription = (
+    <div className="space-y-3">
+      {deleteLoading ? <p>{t("deleteDialog.loading")}</p> : null}
+      {deleteError ? <p className="text-destructive">{deleteError}</p> : null}
+      {deleteBlockingConsumers.length > 0 ? (
+        <div className="space-y-1">
+          <p className="font-medium">{t("deleteDialog.blockingTitle")}</p>
+          <ul className="list-disc space-y-1 pl-5">
+            {deleteBlockingConsumers.map((consumer) => (
+              <li key={`${consumer.consumerType}:${consumer.consumerId}`}>
+                {consumer.label || consumer.consumerId}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {deleteAdvisoryConsumers.length > 0 ? (
+        <div className="space-y-1">
+          <p className="font-medium">{t("deleteDialog.advisoryTitle")}</p>
+          <ul className="list-disc space-y-1 pl-5">
+            {deleteAdvisoryConsumers.map((consumer) => (
+              <li key={`${consumer.consumerType}:${consumer.consumerId}`}>
+                {consumer.label || consumer.consumerId}
+              </li>
+            ))}
+          </ul>
+        </div>
+      ) : null}
+      {!deleteLoading && !deleteError && deleteBlockingConsumers.length === 0 && deleteAdvisoryConsumers.length === 0 ? (
+        <p>{t("deleteDialog.noReferences")}</p>
+      ) : null}
+    </div>
+  );
+
   return (
     <TooltipProvider>
+    <ConfirmDialog
+      open={Boolean(deletingRole)}
+      title={t("deleteDialog.title")}
+      description={deleteDialogDescription}
+      confirmLabel={
+        deleteBlockingConsumers.length > 0
+          ? t("deleteDialog.close")
+          : t("deleteDialog.confirm")
+      }
+      variant={deleteBlockingConsumers.length > 0 ? "default" : "destructive"}
+      onConfirm={() => void handleConfirmDelete()}
+      onCancel={closeDeleteDialog}
+    />
     <div className="flex h-[calc(100vh-3.5rem)]">
       {/* Catalog panel: collapsible secondary sidebar */}
       {isMobile ? (

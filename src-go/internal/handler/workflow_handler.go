@@ -28,9 +28,12 @@ type DAGWorkflowServiceInterface interface {
 
 // WorkflowTemplateServiceInterface defines the template service methods needed by the handler.
 type WorkflowTemplateServiceInterface interface {
-	ListTemplates(ctx context.Context, category string) ([]*model.WorkflowDefinition, error)
+	ListTemplates(ctx context.Context, projectID uuid.UUID, query string, category string, source string) ([]*model.WorkflowDefinition, error)
 	CloneTemplate(ctx context.Context, templateID uuid.UUID, projectID uuid.UUID, overrides map[string]any) (*model.WorkflowDefinition, error)
 	CreateFromTemplate(ctx context.Context, templateID uuid.UUID, projectID uuid.UUID, taskID *uuid.UUID, variables map[string]any) (*model.WorkflowExecution, error)
+	PublishDefinitionAsTemplate(ctx context.Context, definitionID uuid.UUID, projectID uuid.UUID, name string, description string) (*model.WorkflowDefinition, error)
+	DuplicateTemplate(ctx context.Context, templateID uuid.UUID, projectID uuid.UUID, name string, description string) (*model.WorkflowDefinition, error)
+	DeleteTemplate(ctx context.Context, templateID uuid.UUID, projectID uuid.UUID) error
 }
 
 // DAGWorkflowDefRepoInterface defines the definition CRUD methods needed by the handler.
@@ -387,8 +390,11 @@ func (h *WorkflowHandler) ListTemplates(c echo.Context) error {
 	if h.templateSvc == nil {
 		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
 	}
+	projectID := appMiddleware.GetProjectID(c)
+	query := c.QueryParam("q")
 	category := c.QueryParam("category")
-	templates, err := h.templateSvc.ListTemplates(c.Request().Context(), category)
+	source := c.QueryParam("source")
+	templates, err := h.templateSvc.ListTemplates(c.Request().Context(), projectID, query, category, source)
 	if err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
 	}
@@ -397,6 +403,52 @@ func (h *WorkflowHandler) ListTemplates(c echo.Context) error {
 		result[i] = t.ToDTO()
 	}
 	return c.JSON(http.StatusOK, result)
+}
+
+// PublishTemplate creates a project-owned reusable template from a workflow definition.
+func (h *WorkflowHandler) PublishTemplate(c echo.Context) error {
+	if h.templateSvc == nil {
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
+	}
+	definitionID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidWorkflowID)
+	}
+	projectID := appMiddleware.GetProjectID(c)
+	var body struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	_ = c.Bind(&body)
+
+	template, err := h.templateSvc.PublishDefinitionAsTemplate(c.Request().Context(), definitionID, projectID, body.Name, body.Description)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusCreated, template.ToDTO())
+}
+
+// DuplicateTemplate creates a project-owned custom template copy from an existing template.
+func (h *WorkflowHandler) DuplicateTemplate(c echo.Context) error {
+	if h.templateSvc == nil {
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
+	}
+	templateID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidWorkflowID)
+	}
+	projectID := appMiddleware.GetProjectID(c)
+	var body struct {
+		Name        string `json:"name"`
+		Description string `json:"description"`
+	}
+	_ = c.Bind(&body)
+
+	template, err := h.templateSvc.DuplicateTemplate(c.Request().Context(), templateID, projectID, body.Name, body.Description)
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusCreated, template.ToDTO())
 }
 
 // CloneTemplate creates a new workflow from a template.
@@ -453,6 +505,22 @@ func (h *WorkflowHandler) ExecuteTemplate(c echo.Context) error {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
 	}
 	return c.JSON(http.StatusCreated, exec.ToDTO())
+}
+
+// DeleteTemplate deletes a project-owned custom template.
+func (h *WorkflowHandler) DeleteTemplate(c echo.Context) error {
+	if h.templateSvc == nil {
+		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
+	}
+	templateID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidWorkflowID)
+	}
+	projectID := appMiddleware.GetProjectID(c)
+	if err := h.templateSvc.DeleteTemplate(c.Request().Context(), templateID, projectID); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.NoContent(http.StatusNoContent)
 }
 
 // --- Human review and external event endpoints ---

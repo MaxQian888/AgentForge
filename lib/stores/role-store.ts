@@ -177,6 +177,26 @@ export interface RolePluginConsumer {
   references?: string[];
 }
 
+export interface RoleReferenceConsumer {
+  consumerType: string;
+  consumerId: string;
+  label?: string;
+  projectId?: string;
+  taskId?: string;
+  memberId?: string;
+  lifecycleState?: string;
+  blocking: boolean;
+  reason?: string;
+  remediation?: string;
+  references?: string[];
+}
+
+export interface RoleReferenceInventory {
+  roleId: string;
+  blockingConsumers?: RoleReferenceConsumer[];
+  advisoryConsumers?: RoleReferenceConsumer[];
+}
+
 export interface RoleManifest {
   apiVersion: string;
   kind: string;
@@ -285,6 +305,7 @@ interface RoleState {
   error: string | null;
   fetchRoles: () => Promise<void>;
   fetchSkillCatalog: () => Promise<void>;
+  fetchRoleReferences: (id: string) => Promise<RoleReferenceInventory>;
   createRole: (data: Partial<RoleManifest>) => Promise<RoleManifest>;
   updateRole: (id: string, data: Partial<RoleManifest>) => Promise<RoleManifest>;
   deleteRole: (id: string) => Promise<void>;
@@ -356,6 +377,19 @@ export const useRoleStore = create<RoleState>()((set) => ({
     } finally {
       set({ skillCatalogLoading: false });
     }
+  },
+
+  fetchRoleReferences: async (id) => {
+    const token = getToken();
+    if (!token) throw new Error("Not authenticated");
+
+    const api = createApiClient(API_URL);
+    const { data } = await api.get<RoleReferenceInventory>(
+      `/api/v1/roles/${id}/references`,
+      { token },
+    );
+
+    return data;
   },
 
   createRole: async (data) => {

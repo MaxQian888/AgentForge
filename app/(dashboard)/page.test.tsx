@@ -74,6 +74,39 @@ const dashboardState = {
     links: {
       agents: "/agents/live",
     },
+    bootstrap: {
+      unresolvedCount: 2,
+      phases: [
+        {
+          id: "governance",
+          title: "Governance",
+          state: "attention",
+          reason: "Repository or coding-agent defaults still need configuration.",
+          href: "/settings?project=project-1&section=repository",
+          actionLabel: "Configure Governance",
+        },
+        {
+          id: "team",
+          title: "Team",
+          state: "attention",
+          reason: "Add the first human or agent collaborator.",
+          href: "/team?project=project-1&focus=add-member",
+          actionLabel: "Add First Member",
+        },
+      ],
+      nextActions: [
+        {
+          id: "configure-governance",
+          label: "Configure Governance",
+          href: "/settings?project=project-1&section=repository",
+        },
+        {
+          id: "add-member",
+          label: "Add First Member",
+          href: "/team?project=project-1&focus=add-member",
+        },
+      ],
+    },
   },
   projects: [
     {
@@ -278,6 +311,10 @@ describe("DashboardPage", () => {
     render(<DashboardPage />);
 
     expect(screen.getByRole("heading", { name: "dashboard.pageTitle" })).toBeInTheDocument();
+    expect(screen.getByText("Project bootstrap")).toBeInTheDocument();
+    expect(
+      screen.getByText("Repository or coding-agent defaults still need configuration."),
+    ).toBeInTheDocument();
     expect(screen.getByTestId("metric-dashboard.cards.taskProgress")).toHaveTextContent("2/5");
     expect(screen.getByTestId("metric-dashboard.cards.activeAgents")).toHaveTextContent("3");
     expect(screen.getByTestId("activity-feed")).toHaveTextContent("deploy-start:running");
@@ -293,21 +330,15 @@ describe("DashboardPage", () => {
     expect(overviewChildren).toContainElement(screen.getByTestId("budget-widget"));
     expect(overviewChildren).not.toContainElement(screen.getByLabelText("dashboard.projectFilterLabel").closest("div[class]")!);
     expect(overviewChildren).not.toContainElement(screen.getByRole("link", { name: "dashboard.actions.createTask N" }));
-    expect(screen.getByRole("link", { name: "dashboard.actions.createTask N" })).toHaveAttribute(
-      "href",
-      "/project?id=project-1",
-    );
+    expect(
+      screen.getByRole("link", { name: "Configure Governance" }),
+    ).toHaveAttribute("href", "/settings?project=project-1&section=repository");
+    expect(
+      screen.getByRole("link", { name: "Add First Member" }),
+    ).toHaveAttribute("href", "/team?project=project-1&focus=add-member");
     expect(screen.getByRole("link", { name: "dashboard.actions.spawnAgent A" })).toHaveAttribute(
       "href",
       "/agents/live",
-    );
-    expect(screen.getByRole("link", { name: "dashboard.actions.newSprint S" })).toHaveAttribute(
-      "href",
-      "/sprints",
-    );
-    expect(screen.getByRole("link", { name: "dashboard.actions.createTeam T" })).toHaveAttribute(
-      "href",
-      "/team",
     );
     expect(screen.getByText("N")).toBeInTheDocument();
     expect(screen.getByText("A")).toBeInTheDocument();

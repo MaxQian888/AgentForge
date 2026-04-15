@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 
 	"github.com/google/uuid"
@@ -9,10 +10,13 @@ import (
 	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
+	rolepkg "github.com/react-go-quick-starter/server/internal/role"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type MemberHandler struct {
 	repo memberRepository
+	roleStore memberRoleStore
 }
 
 type memberRepository interface {
@@ -24,8 +28,17 @@ type memberRepository interface {
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
+type memberRoleStore interface {
+	Get(id string) (*rolepkg.Manifest, error)
+}
+
 func NewMemberHandler(repo memberRepository) *MemberHandler {
 	return &MemberHandler{repo: repo}
+}
+
+func (h *MemberHandler) WithRoleStore(store memberRoleStore) *MemberHandler {
+	h.roleStore = store
+	return h
 }
 
 func (h *MemberHandler) Create(c echo.Context) error {
@@ -35,6 +48,9 @@ func (h *MemberHandler) Create(c echo.Context) error {
 	}
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	if validationErr := h.validateAgentRoleBinding(c.Request().Context(), req.Type, req.AgentConfig); validationErr != nil {
+		return c.JSON(http.StatusUnprocessableEntity, validationErr)
 	}
 
 	projectID := appMiddleware.GetProjectID(c)
@@ -84,6 +100,11 @@ func (h *MemberHandler) Update(c echo.Context) error {
 	if validator, ok := c.Echo().Validator.(interface{ Validate(any) error }); ok && validator != nil {
 		if err := validator.Validate(req); err != nil {
 			return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+		}
+	}
+	if req.AgentConfig != nil {
+		if validationErr := h.validateAgentRoleBinding(c.Request().Context(), model.MemberTypeAgent, *req.AgentConfig); validationErr != nil {
+			return c.JSON(http.StatusUnprocessableEntity, validationErr)
 		}
 	}
 	if req.Status == nil && req.IsActive != nil {
@@ -138,4 +159,27 @@ func (h *MemberHandler) Delete(c echo.Context) error {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteMember)
 	}
 	return c.NoContent(http.StatusNoContent)
+}
+
+func (h *MemberHandler) validateAgentRoleBinding(ctx context.Context, memberType string, agentConfig string) *model.ErrorResponse {
+	if memberType != model.MemberTypeAgent {
+		return nil
+	}
+	roleID := service.ExtractRoleIDFromAgentConfig(agentConfig)
+	if roleID == "" {
+		return nil
+	}
+	err := service.NewRoleReferenceGovernanceService(nil, nil, nil, nil).
+		WithRoleStore(h.roleStore).
+		ValidateRoleBinding(ctx, roleID)
+	if err == nil {
+		return nil
+	}
+	if errors.Is(err, service.ErrRoleBindingNotFound) {
+		return &model.ErrorResponse{
+			Message: err.Error(),
+			Field:   "agentConfig.roleId",
+		}
+	}
+	return &model.ErrorResponse{Message: err.Error()}
 }

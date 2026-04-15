@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
+import { buildProjectScopedHref } from "@/lib/route-hrefs";
 import type { Project } from "@/lib/stores/project-store";
 
 const statusColors: Record<string, string> = {
@@ -28,7 +29,7 @@ export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
 
   return (
     <>
-      <Link href={`/project?id=${project.id}`}>
+      <Link href={buildProjectScopedHref("/", { projectId: project.id })}>
         <Card className="transition-shadow hover:shadow-md">
           <CardContent className="flex flex-col gap-3 py-4">
             {/* Header: icon + name + status + actions */}

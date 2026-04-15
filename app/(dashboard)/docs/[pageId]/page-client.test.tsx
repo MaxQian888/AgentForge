@@ -125,6 +125,7 @@ jest.mock("@/lib/stores/dashboard-store", () => ({
 }));
 
 jest.mock("@/lib/stores/docs-store", () => ({
+  flattenDocsTree: (tree: Array<Record<string, unknown>>) => tree,
   useDocsStore: () => docsStoreState,
 }));
 
@@ -293,9 +294,12 @@ jest.mock("@/components/docs/template-picker", () => ({
   TemplatePicker: ({
     onPick,
   }: {
-    onPick: (templateId: string) => void;
+    onPick: (selection: { templateId: string; title: string; parentId?: string | null }) => void;
   }) => (
-    <button type="button" onClick={() => onPick("template-1")}>
+    <button
+      type="button"
+      onClick={() => onPick({ templateId: "template-1", title: "Template Draft", parentId: "page-2" })}
+    >
       pick-template
     </button>
   ),
@@ -511,6 +515,7 @@ describe("DocsPageDetailClient", () => {
       content: '[{"id":"block-1","content":"Updated"}]',
       contentText: "Updated",
       expectedUpdatedAt: "2026-03-26T12:05:00.000Z",
+      templateCategory: undefined,
     });
     expect(createLink).toHaveBeenCalledWith({
       projectId: "project-2",
@@ -536,7 +541,8 @@ describe("DocsPageDetailClient", () => {
     expect(createPageFromTemplate).toHaveBeenCalledWith({
       projectId: "project-2",
       templateId: "template-1",
-      title: expect.any(String),
+      title: "Template Draft",
+      parentId: "page-2",
     });
     expect(restoreVersion).toHaveBeenCalledWith({
       projectId: "project-2",

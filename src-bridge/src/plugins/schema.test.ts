@@ -123,6 +123,63 @@ describe("plugin schemas", () => {
     expect(workflow.success).toBe(true);
   });
 
+  test("accepts workflow manifests with a structured task-driven trigger profile", () => {
+    const workflow = PluginManifestSchema.safeParse({
+      apiVersion: "agentforge.dev/v1",
+      kind: "WorkflowPlugin",
+      metadata: {
+        id: "workflow.task-delivery",
+        name: "Task Delivery",
+        version: "1.0.0",
+      },
+      spec: {
+        runtime: "wasm",
+        module: "./dist/task-delivery.wasm",
+        abiVersion: "v1",
+        workflow: {
+          process: "sequential",
+          roles: [{ id: "planner" }, { id: "coder" }],
+          steps: [
+            { id: "plan", role: "planner", action: "agent", next: ["implement"] },
+            { id: "implement", role: "coder", action: "agent" },
+          ],
+          triggers: [
+            { event: "manual" },
+            { event: "task.transition", profile: "task-delivery", requiresTask: true },
+          ],
+        },
+      },
+    });
+
+    expect(workflow.success).toBe(true);
+  });
+
+  test("rejects task-driven workflow triggers without a profile identifier", () => {
+    const workflow = PluginManifestSchema.safeParse({
+      apiVersion: "agentforge.dev/v1",
+      kind: "WorkflowPlugin",
+      metadata: {
+        id: "workflow.task-delivery",
+        name: "Task Delivery",
+        version: "1.0.0",
+      },
+      spec: {
+        runtime: "wasm",
+        module: "./dist/task-delivery.wasm",
+        abiVersion: "v1",
+        workflow: {
+          process: "sequential",
+          roles: [{ id: "planner" }],
+          steps: [{ id: "plan", role: "planner", action: "agent" }],
+          triggers: [{ event: "task.transition", requiresTask: true }],
+        },
+      },
+    });
+
+    expect(workflow.success).toBe(false);
+    expect(JSON.stringify(workflow.error?.issues)).toContain("profile");
+  });
+
   test("accepts review manifests with trigger contract and npm trust metadata", () => {
     const review = PluginManifestSchema.safeParse({
       apiVersion: "agentforge.dev/v1",

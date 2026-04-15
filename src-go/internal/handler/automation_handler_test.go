@@ -150,3 +150,34 @@ func TestAutomationHandler_ListCreateAndLogs(t *testing.T) {
 		t.Fatalf("unexpected logs payload: %#v", payload)
 	}
 }
+
+func TestAutomationHandler_CreateRuleRejectsMalformedStartWorkflowAction(t *testing.T) {
+	projectID := uuid.New()
+	ruleRepo := &automationRuleRepoMock{}
+	logRepo := &automationLogRepoMock{}
+
+	e := echo.New()
+	e.Validator = &customFieldValidator{validator: validator.New()}
+	h := handler.NewAutomationHandler(ruleRepo, logRepo)
+
+	createReq := httptest.NewRequest(
+		http.MethodPost,
+		"/api/v1/projects/"+projectID.String()+"/automations",
+		strings.NewReader(`{"name":"Start workflow","eventType":"task.due_date_approaching","conditions":[],"actions":[{"type":"start_workflow","config":{}}]}`),
+	)
+	createReq.Header.Set("Content-Type", "application/json")
+	createRec := httptest.NewRecorder()
+	createCtx := e.NewContext(createReq, createRec)
+	createCtx.Set(appMiddleware.ProjectIDContextKey, projectID)
+	createCtx.Set(appMiddleware.JWTContextKey, &service.Claims{UserID: uuid.New().String()})
+
+	if err := h.CreateRule(createCtx); err != nil {
+		t.Fatalf("CreateRule() error: %v", err)
+	}
+	if createRec.Code != http.StatusUnprocessableEntity {
+		t.Fatalf("create status = %d, want %d", createRec.Code, http.StatusUnprocessableEntity)
+	}
+	if ruleRepo.created != nil {
+		t.Fatalf("unexpected created rule: %+v", ruleRepo.created)
+	}
+}

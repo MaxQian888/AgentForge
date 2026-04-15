@@ -28,6 +28,7 @@ import {
 } from "@/components/ui/table";
 import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import {
+  applyRoleRegistryState,
   buildTeamAttentionGroups,
   getQuickLifecycleLabel,
   getQuickLifecycleTargetStatus,
@@ -57,6 +58,7 @@ interface TeamManagementProps {
   loading: boolean;
   error: string | null;
   availableRoles: RoleManifest[];
+  initialFocus?: "add-member" | TeamAttentionCategory | null;
   bulkUpdatePending?: boolean;
   bulkUpdateResult?: BulkUpdateMembersResponse | null;
   onRetry: () => void;
@@ -321,6 +323,7 @@ export function TeamManagement({
   loading,
   error,
   availableRoles,
+  initialFocus = null,
   bulkUpdatePending = false,
   bulkUpdateResult = null,
   onRetry,
@@ -335,8 +338,11 @@ export function TeamManagement({
   const [createForm, setCreateForm] = useState<MemberFormState>(() =>
     buildInitialCreateForm(),
   );
+  const [createError, setCreateError] = useState<string | null>(null);
+  const [createHighlightedAgentFields, setCreateHighlightedAgentFields] = useState<string[]>([]);
   const [editingMemberId, setEditingMemberId] = useState<string | null>(null);
   const [editForm, setEditForm] = useState<MemberFormState | null>(null);
+  const [editError, setEditError] = useState<string | null>(null);
   const [highlightedAgentFields, setHighlightedAgentFields] = useState<string[]>([]);
   const [deletingMemberId, setDeletingMemberId] = useState<string | null>(null);
 
@@ -369,9 +375,13 @@ export function TeamManagement({
     () => members.find((member) => member.id === deletingMemberId) ?? null,
     [deletingMemberId, members],
   );
+  const governedMembers = useMemo(
+    () => applyRoleRegistryState(members, availableRoles),
+    [availableRoles, members],
+  );
   const attentionGroups = useMemo(
-    () => buildTeamAttentionGroups(members),
-    [members],
+    () => buildTeamAttentionGroups(governedMembers),
+    [governedMembers],
   );
 
   useEffect(() => {
@@ -391,8 +401,21 @@ export function TeamManagement({
     setLocalBulkUpdateResult(bulkUpdateResult);
   }, [bulkUpdateResult]);
 
+  useEffect(() => {
+    if (!selectedProjectId || !initialFocus) {
+      return;
+    }
+
+    if (initialFocus === "add-member") {
+      setShowCreateForm(true);
+      return;
+    }
+
+    setAttentionFilter(initialFocus);
+  }, [initialFocus, selectedProjectId]);
+
   const filteredMembers = useMemo(() => {
-    return members.filter((member) => {
+    return governedMembers.filter((member) => {
       if (attentionFilter !== "all") {
         const categories = getTeamMemberAttentionCategories(member);
         if (!categories.includes(attentionFilter)) {
@@ -411,7 +434,7 @@ export function TeamManagement({
       if (statusFilter !== "all" && member.status !== statusFilter) return false;
       return true;
     });
-  }, [attentionFilter, members, searchQuery, typeFilter, statusFilter]);
+  }, [attentionFilter, governedMembers, searchQuery, typeFilter, statusFilter]);
 
   const openMemberEditor = (
     member: TeamMember,
@@ -420,6 +443,7 @@ export function TeamManagement({
     setEditingMemberId(member.id);
     setEditForm(buildEditForm(member));
     setHighlightedAgentFields(options?.highlightedFields ?? []);
+    setEditError(null);
   };
 
   const clearEditState = () => {
@@ -438,6 +462,20 @@ export function TeamManagement({
     setupRequiredFields(member).some((field) =>
       ["runtime", "provider", "model"].includes(field)
     );
+
+  const hasStaleRoleBinding = (member: TeamMember) =>
+    member.type === "agent" && member.roleBindingState === "stale";
+
+  const extractRoleFieldError = (error: unknown): string | null => {
+    if (!error || typeof error !== "object") {
+      return null;
+    }
+    const body = (error as { body?: { field?: string } }).body;
+    return body?.field ?? null;
+  };
+
+  const extractErrorMessage = (error: unknown, fallback: string) =>
+    error instanceof Error ? error.message : fallback;
 
   const handleAttentionFilter = (nextFilter: TeamAttentionCategory) => {
     setSearchQuery("");
@@ -479,6 +517,8 @@ export function TeamManagement({
 
   const handleCreateMember = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
+    setCreateError(null);
+    setCreateHighlightedAgentFields([]);
 
     const payload: CreateMemberInput = {
       name: createForm.name.trim(),
@@ -495,14 +535,25 @@ export function TeamManagement({
       payload.agentProfile = { ...createForm.agentProfile };
     }
 
-    await onCreateMember(payload);
-    setCreateForm(buildInitialCreateForm());
-    setShowCreateForm(false);
+    try {
+      await onCreateMember(payload);
+      setCreateForm(buildInitialCreateForm());
+      setShowCreateForm(false);
+      setCreateError(null);
+      setCreateHighlightedAgentFields([]);
+    } catch (error) {
+      if (extractRoleFieldError(error) === "agentConfig.roleId") {
+        setCreateHighlightedAgentFields(["roleId"]);
+      }
+      setCreateError(extractErrorMessage(error, "Failed to create member"));
+    }
   };
 
   const handleEditMember = async (event: React.FormEvent<HTMLFormElement>) => {
     event.preventDefault();
     if (!editingMemberId || !editForm) return;
+    setEditError(null);
+    setHighlightedAgentFields([]);
 
     const payload: UpdateMemberInput = {
       name: editForm.name.trim(),
@@ -518,8 +569,15 @@ export function TeamManagement({
       payload.agentProfile = { ...editForm.agentProfile };
     }
 
-    await onUpdateMember(editingMemberId, payload);
-    clearEditState();
+    try {
+      await onUpdateMember(editingMemberId, payload);
+      clearEditState();
+    } catch (error) {
+      if (extractRoleFieldError(error) === "agentConfig.roleId") {
+        setHighlightedAgentFields(["roleId"]);
+      }
+      setEditError(extractErrorMessage(error, "Failed to update member"));
+    }
   };
 
   const handleConfirmDelete = async () => {
@@ -750,10 +808,14 @@ export function TeamManagement({
                       mode="create"
                       availableRoles={availableRoles}
                       value={createForm.agentProfile}
+                      highlightedFields={createHighlightedAgentFields}
                       onChange={(agentProfile) =>
                         setCreateForm((state) => ({ ...state, agentProfile }))
                       }
                     />
+                    {createError ? (
+                      <p className="mt-3 text-sm text-destructive">{createError}</p>
+                    ) : null}
                   </div>
                 </>
               ) : null}
@@ -1005,7 +1067,7 @@ export function TeamManagement({
                     <TableCell>
                       {member.type === "agent" ? (
                         <div className="flex flex-col gap-1 text-xs">
-                          {hasSetupRequired(member) ? (
+                          {hasSetupRequired(member) || hasStaleRoleBinding(member) ? (
                             <Button
                               type="button"
                               size="sm"
@@ -1013,11 +1075,13 @@ export function TeamManagement({
                               className="h-6 w-fit border-destructive/50 px-2 text-destructive"
                               onClick={() =>
                                 openMemberEditor(member, {
-                                  highlightedFields: setupRequiredFields(member),
+                                  highlightedFields: hasStaleRoleBinding(member)
+                                    ? ["roleId"]
+                                    : setupRequiredFields(member),
                                 })
                               }
                             >
-                              Setup Required
+                              {member.readinessLabel ?? "Needs attention"}
                             </Button>
                           ) : (
                             <Badge
@@ -1267,6 +1331,9 @@ export function TeamManagement({
                         )
                       }
                     />
+                    {editError ? (
+                      <p className="mt-3 text-sm text-destructive">{editError}</p>
+                    ) : null}
                   </div>
                 </>
               ) : (

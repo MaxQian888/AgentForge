@@ -9,6 +9,7 @@ import {
   Download,
   FileSearch,
   HardDrive,
+  Pencil,
   Search,
   Trash2,
 } from "lucide-react";
@@ -16,6 +17,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { Textarea } from "@/components/ui/textarea";
 import {
   Select,
   SelectContent,
@@ -144,13 +146,28 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
   const bulkDeleteMemories = useMemoryStore((s) => s.bulkDeleteMemories);
   const cleanupMemories = useMemoryStore((s) => s.cleanupMemories);
   const exportMemories = useMemoryStore((s) => s.exportMemories);
+  const exportMemoryEntry = useMemoryStore((s) => s.exportMemoryEntry);
+  const storeMemory = useMemoryStore((s) => s.storeMemory);
+  const updateMemory = useMemoryStore((s) => s.updateMemory);
   const clearActionFeedback = useMemoryStore((s) => s.clearActionFeedback);
 
   const [singleDeleteTarget, setSingleDeleteTarget] = useState<AgentMemoryEntry | null>(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
   const [queryDraft, setQueryDraft] = useState(filters.query);
+  const [tagDraft, setTagDraft] = useState(filters.tag);
+  const [noteDraft, setNoteDraft] = useState({
+    key: "",
+    content: "",
+    tags: "",
+  });
+  const [editDraft, setEditDraft] = useState({
+    key: "",
+    content: "",
+    tags: "",
+  });
   const [cleanupDraft, setCleanupDraft] = useState({
     retentionDays: 30,
     before: "",
@@ -168,9 +185,10 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
     () => roles.find((role) => role.metadata.id === filters.roleId)?.metadata.name,
     [filters.roleId, roles],
   );
+  const selectedEntry = entries.find((entry) => entry.id === selectedMemoryId) ?? null;
   const currentDetail = detail && detail.id === selectedMemoryId
-    ? detail
-    : entries.find((entry) => entry.id === selectedMemoryId) ?? null;
+    ? ({ ...(selectedEntry ?? {}), ...detail } as AgentMemoryDetail)
+    : selectedEntry;
 
   const handleOpenEntry = async (entry: AgentMemoryEntry) => {
     selectMemory(entry.id);
@@ -178,11 +196,17 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
     await fetchMemoryDetail(projectId, entry.id, filters.roleId || undefined);
   };
 
+  const applyTagFilter = (tag: string) => {
+    setTagDraft(tag);
+    setFilters({ tag });
+  };
+
   const activeBadges = [
     filters.query ? t("activeFilter.query", { value: filters.query }) : null,
     filters.scope !== ALL_VALUE ? t(`scopeOption.${filters.scope}`) : null,
     filters.category !== ALL_VALUE ? t(`categoryOption.${filters.category}`) : null,
     filters.roleId ? t("activeFilter.role", { value: selectedRoleLabel ?? filters.roleId }) : null,
+    filters.tag ? t("activeFilter.tag", { value: filters.tag }) : null,
     t("activeFilter.limit", { count: filters.limit }),
   ].filter(Boolean) as string[];
 
@@ -286,6 +310,15 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
 
           <div className="grid gap-3 xl:grid-cols-[minmax(0,1fr)_minmax(0,1fr)_auto]">
             <Input aria-label={t("endAtLabel")} type="datetime-local" value={toDateTimeInputValue(filters.endAt)} onChange={(event) => setFilters({ endAt: fromDateTimeInputValue(event.target.value) })} />
+            <Input
+              aria-label={t("tagFilterLabel")}
+              placeholder={t("tagFilterPlaceholder")}
+              value={tagDraft}
+              onChange={(event) => {
+                setTagDraft(event.target.value);
+                setFilters({ tag: event.target.value });
+              }}
+            />
             <Tabs value={filters.category as "episodic" | "semantic" | "procedural" | "all"} onValueChange={(value) => setFilters({ category: value as "episodic" | "semantic" | "procedural" | "all" })}>
               <TabsList className="w-full justify-start">
                 <TabsTrigger value={ALL_VALUE}>{t("categoryOption.all")}</TabsTrigger>
@@ -294,13 +327,72 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
                 <TabsTrigger value="procedural">{t("categoryOption.procedural")}</TabsTrigger>
               </TabsList>
             </Tabs>
-            <Button variant="ghost" onClick={() => { setQueryDraft(""); resetFilters(); clearSelection(); }}>{t("actionResetFilters")}</Button>
+          </div>
+          <div className="flex justify-end">
+            <Button variant="ghost" onClick={() => { setQueryDraft(""); setTagDraft(""); resetFilters(); clearSelection(); }}>{t("actionResetFilters")}</Button>
           </div>
 
           <div className="flex flex-wrap gap-2">
             {activeBadges.map((badge) => <Badge key={badge} variant="secondary">{badge}</Badge>)}
           </div>
         </CardHeader>
+      </Card>
+
+      <Card>
+        <CardHeader>
+          <CardTitle>{t("noteComposerTitle")}</CardTitle>
+          <CardDescription>{t("noteComposerDescription")}</CardDescription>
+        </CardHeader>
+        <CardContent className="grid gap-4">
+          <div className="grid gap-4 md:grid-cols-2">
+            <div className="space-y-2">
+              <label htmlFor="memory-note-title" className="text-sm font-medium">{t("noteTitleLabel")}</label>
+              <Input
+                id="memory-note-title"
+                aria-label={t("noteTitleLabel")}
+                value={noteDraft.key}
+                onChange={(event) => setNoteDraft((current) => ({ ...current, key: event.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="memory-note-tags" className="text-sm font-medium">{t("noteTagsLabel")}</label>
+              <Input
+                id="memory-note-tags"
+                aria-label={t("noteTagsLabel")}
+                placeholder={t("noteTagsPlaceholder")}
+                value={noteDraft.tags}
+                onChange={(event) => setNoteDraft((current) => ({ ...current, tags: event.target.value }))}
+              />
+            </div>
+          </div>
+          <div className="space-y-2">
+            <label htmlFor="memory-note-content" className="text-sm font-medium">{t("noteContentLabel")}</label>
+            <Textarea
+              id="memory-note-content"
+              aria-label={t("noteContentLabel")}
+              value={noteDraft.content}
+              onChange={(event) => setNoteDraft((current) => ({ ...current, content: event.target.value }))}
+            />
+          </div>
+          <div className="flex justify-end">
+            <Button
+              onClick={async () => {
+                await storeMemory(projectId, {
+                  key: noteDraft.key.trim(),
+                  content: noteDraft.content.trim(),
+                  scope: "project",
+                  category: "episodic",
+                  kind: "operator_note",
+                  tags: noteDraft.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+                });
+                setNoteDraft({ key: "", content: "", tags: "" });
+              }}
+              disabled={actionLoading || !noteDraft.key.trim() || !noteDraft.content.trim()}
+            >
+              {t("createNote")}
+            </Button>
+          </div>
+        </CardContent>
       </Card>
 
       <div className="grid gap-6 xl:grid-cols-[minmax(0,0.9fr)_minmax(0,1.1fr)]">
@@ -318,7 +410,7 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
             {loading ? (
               <p className="text-sm text-muted-foreground">{t("loading")}</p>
             ) : entries.length === 0 ? (
-              <EmptyState icon={FileSearch} title={t("noEntries")} description={t("noEntriesDescription")} action={{ label: t("actionResetFilters"), onClick: () => { setQueryDraft(""); resetFilters(); clearSelection(); } }} />
+              <EmptyState icon={FileSearch} title={t("noEntries")} description={t("noEntriesDescription")} action={{ label: t("actionResetFilters"), onClick: () => { setQueryDraft(""); setTagDraft(""); resetFilters(); clearSelection(); } }} />
             ) : (
               entries.map((entry) => {
                 const selected = selectedMemoryId === entry.id;
@@ -333,6 +425,12 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
                               <h3 className="text-sm font-semibold">{entry.key}</h3>
                               <Badge variant="secondary" className={cn(scopeColors[entry.scope] ?? "")}>{t(`scopeOption.${entry.scope}`)}</Badge>
                               <Badge variant="outline">{t(`categoryOption.${entry.category}`)}</Badge>
+                              {entry.kind === "operator_note" && <Badge variant="outline">{t("kind.operator_note")}</Badge>}
+                              {entry.tags.map((tag) => (
+                                <button key={`${entry.id}-${tag}`} type="button" onClick={() => applyTagFilter(tag)}>
+                                  <Badge variant="secondary">{tag}</Badge>
+                                </button>
+                              ))}
                             </div>
                             <p className="line-clamp-2 text-sm text-muted-foreground">{entry.content}</p>
                             <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
@@ -366,7 +464,21 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
             <CardContent>
               <MemoryDetail detail={currentDetail} detailLoading={detailLoading} detailError={detailError} t={t} onCopy={async () => {
                 if (currentDetail && navigator?.clipboard?.writeText) await navigator.clipboard.writeText(currentDetail.content);
-              }} onDelete={() => currentDetail && setSingleDeleteTarget(currentDetail)} />
+              }} onDelete={() => currentDetail && setSingleDeleteTarget(currentDetail)} onEdit={() => {
+                if (!currentDetail || !currentDetail.editable) return;
+                setEditDraft({
+                  key: currentDetail.key,
+                  content: currentDetail.content,
+                  tags: (currentDetail.tags ?? []).join(", "),
+                });
+                setEditOpen(true);
+              }} onExport={async () => {
+                if (!currentDetail) return;
+                const exported = await exportMemoryEntry(projectId, currentDetail.id, filters.roleId || undefined);
+                if (exported) {
+                  downloadJson(`memory-entry-${currentDetail.id}.json`, exported);
+                }
+              }} onTagClick={applyTagFilter} />
             </CardContent>
           </Card>
         )}
@@ -381,7 +493,21 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
           <div className="px-4 pb-4">
             <MemoryDetail detail={currentDetail} detailLoading={detailLoading} detailError={detailError} t={t} onCopy={async () => {
               if (currentDetail && navigator?.clipboard?.writeText) await navigator.clipboard.writeText(currentDetail.content);
-            }} onDelete={() => currentDetail && setSingleDeleteTarget(currentDetail)} />
+            }} onDelete={() => currentDetail && setSingleDeleteTarget(currentDetail)} onEdit={() => {
+              if (!currentDetail || !currentDetail.editable) return;
+              setEditDraft({
+                key: currentDetail.key,
+                content: currentDetail.content,
+                tags: (currentDetail.tags ?? []).join(", "),
+              });
+              setEditOpen(true);
+            }} onExport={async () => {
+              if (!currentDetail) return;
+              const exported = await exportMemoryEntry(projectId, currentDetail.id, filters.roleId || undefined);
+              if (exported) {
+                downloadJson(`memory-entry-${currentDetail.id}.json`, exported);
+              }
+            }} onTagClick={applyTagFilter} />
           </div>
         </SheetContent>
       </Sheet>
@@ -440,6 +566,62 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
           </DialogFooter>
         </DialogContent>
       </Dialog>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>{t("editNoteTitle")}</DialogTitle>
+            <DialogDescription>{t("editNoteDescription")}</DialogDescription>
+          </DialogHeader>
+          <div className="grid gap-4">
+            <div className="space-y-2">
+              <label htmlFor="memory-edit-title" className="text-sm font-medium">{t("noteTitleLabel")}</label>
+              <Input
+                id="memory-edit-title"
+                aria-label={t("noteTitleLabel")}
+                value={editDraft.key}
+                onChange={(event) => setEditDraft((current) => ({ ...current, key: event.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="memory-edit-content" className="text-sm font-medium">{t("noteContentLabel")}</label>
+              <Textarea
+                id="memory-edit-content"
+                aria-label={t("noteContentLabel")}
+                value={editDraft.content}
+                onChange={(event) => setEditDraft((current) => ({ ...current, content: event.target.value }))}
+              />
+            </div>
+            <div className="space-y-2">
+              <label htmlFor="memory-edit-tags" className="text-sm font-medium">{t("editNoteTagsLabel")}</label>
+              <Input
+                id="memory-edit-tags"
+                aria-label={t("editNoteTagsLabel")}
+                value={editDraft.tags}
+                onChange={(event) => setEditDraft((current) => ({ ...current, tags: event.target.value }))}
+              />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setEditOpen(false)}>{t("cancel")}</Button>
+            <Button
+              onClick={async () => {
+                if (!currentDetail) return;
+                await updateMemory(projectId, currentDetail.id, {
+                  key: editDraft.key.trim(),
+                  content: editDraft.content.trim(),
+                  tags: editDraft.tags.split(",").map((tag) => tag.trim()).filter(Boolean),
+                  roleId: filters.roleId || undefined,
+                });
+                setEditOpen(false);
+              }}
+              disabled={!editDraft.key.trim() || !editDraft.content.trim()}
+            >
+              {t("saveNote")}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -464,6 +646,9 @@ function MemoryDetail({
   detailError,
   onCopy,
   onDelete,
+  onEdit,
+  onExport,
+  onTagClick,
   t,
 }: {
   detail: AgentMemoryDetail | AgentMemoryEntry | null;
@@ -471,6 +656,9 @@ function MemoryDetail({
   detailError: string | null;
   onCopy: () => void;
   onDelete: () => void;
+  onEdit: () => void;
+  onExport: () => void;
+  onTagClick: (tag: string) => void;
   t: ReturnType<typeof useTranslations<"memory">>;
 }) {
   if (detailLoading) return <p className="text-sm text-muted-foreground">{t("loadingDetail")}</p>;
@@ -482,6 +670,18 @@ function MemoryDetail({
       <div className="flex flex-wrap items-center gap-2">
         <Badge variant="secondary" className={cn(scopeColors[detail.scope] ?? "")}>{t(`scopeOption.${detail.scope}`)}</Badge>
         <Badge variant="outline">{t(`categoryOption.${detail.category}`)}</Badge>
+        {detail.kind === "operator_note" && <Badge variant="outline">{t("kind.operator_note")}</Badge>}
+        {(detail.tags ?? []).map((tag) => (
+          <button key={`${detail.id}-${tag}`} type="button" onClick={() => onTagClick(tag)}>
+            <Badge variant="secondary">{tag}</Badge>
+          </button>
+        ))}
+        <Button variant="outline" size="sm" className="gap-2" onClick={onExport}>{t("exportEntry")}</Button>
+        {detail.editable ? (
+          <Button variant="outline" size="sm" className="gap-2" onClick={onEdit}><Pencil className="size-4" />{t("editNote")}</Button>
+        ) : (
+          <span className="text-xs text-muted-foreground">{t("detailReadOnly")}</span>
+        )}
         <Button variant="outline" size="sm" className="ml-auto gap-2" onClick={onCopy}><Copy className="size-4" />{t("copyContent")}</Button>
         <Button variant="ghost" size="icon-sm" onClick={onDelete}><Trash2 className="size-4" /></Button>
       </div>

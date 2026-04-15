@@ -93,14 +93,14 @@ const project: Project = {
 };
 
 describe("ProjectCard", () => {
-  it("renders project metadata and links to the project workspace", () => {
+  it("renders project metadata and links to the project bootstrap dashboard", () => {
     render(
       <ProjectCard project={project} onEdit={jest.fn()} onDelete={jest.fn()} />,
     );
 
     expect(screen.getByRole("link")).toHaveAttribute(
       "href",
-      "/project?id=project-1",
+      "/?project=project-1",
     );
     expect(screen.getByText("Release Ops")).toBeInTheDocument();
     expect(screen.getByText("No description")).toBeInTheDocument();

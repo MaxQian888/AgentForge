@@ -24,6 +24,9 @@ type RoleHandler struct {
 	store        *rolepkg.FileStore
 	bridgeClient roleAuthoringBridgeClient
 	pluginCatalog roleDependencyPluginCatalog
+	memberCatalog roleReferenceMemberCatalog
+	queueCatalog  roleReferenceQueueCatalog
+	runCatalog    roleReferenceRunCatalog
 	skillsDir    string
 }
 
@@ -41,6 +44,18 @@ type roleAuthoringBridgeClient interface {
 
 type roleDependencyPluginCatalog interface {
 	List(ctx context.Context, filter service.PluginListFilter) ([]*model.PluginRecord, error)
+}
+
+type roleReferenceMemberCatalog interface {
+	ListAll(ctx context.Context) ([]*model.Member, error)
+}
+
+type roleReferenceQueueCatalog interface {
+	ListAllQueued(ctx context.Context, limit int) ([]*model.AgentPoolQueueEntry, error)
+}
+
+type roleReferenceRunCatalog interface {
+	ListByRole(ctx context.Context, roleID string, limit int) ([]*model.AgentRun, error)
 }
 
 type rolePreviewRequest struct {
@@ -110,6 +125,21 @@ func (h *RoleHandler) WithPluginCatalog(catalog roleDependencyPluginCatalog) *Ro
 	return h
 }
 
+func (h *RoleHandler) WithMemberCatalog(catalog roleReferenceMemberCatalog) *RoleHandler {
+	h.memberCatalog = catalog
+	return h
+}
+
+func (h *RoleHandler) WithQueueCatalog(catalog roleReferenceQueueCatalog) *RoleHandler {
+	h.queueCatalog = catalog
+	return h
+}
+
+func (h *RoleHandler) WithRunCatalog(catalog roleReferenceRunCatalog) *RoleHandler {
+	h.runCatalog = catalog
+	return h
+}
+
 func (h *RoleHandler) List(c echo.Context) error {
 	roles, err := h.store.List()
 	if err != nil {
@@ -139,6 +169,22 @@ func (h *RoleHandler) Get(c echo.Context) error {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToLoadRole)
 	}
 	return c.JSON(http.StatusOK, h.enrichRoleManifest(loadedRole, plugins))
+}
+
+func (h *RoleHandler) GetReferences(c echo.Context) error {
+	roleID := c.Param("id")
+	if _, err := h.store.Get(roleID); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return localizedError(c, http.StatusNotFound, i18n.MsgRoleNotFound)
+		}
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToLoadRole)
+	}
+
+	inventory, err := h.referenceGovernance().ListReferences(c.Request().Context(), roleID)
+	if err != nil {
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToLoadRole)
+	}
+	return c.JSON(http.StatusOK, inventory)
 }
 
 func (h *RoleHandler) ListSkills(c echo.Context) error {
@@ -206,18 +252,14 @@ func (h *RoleHandler) Delete(c echo.Context) error {
 	if roleID == "" {
 		return localizedError(c, http.StatusBadRequest, i18n.MsgRoleIDRequired)
 	}
-	plugins, err := h.listDependencyPlugins(c.Request().Context())
+	inventory, err := h.referenceGovernance().ListReferences(c.Request().Context(), roleID)
 	if err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteRole)
 	}
-	consumers := service.BuildRolePluginConsumers(roleID, plugins)
-	if len(consumers) > 0 {
-		blockers := make([]string, 0, len(consumers))
-		for _, consumer := range consumers {
-			blockers = append(blockers, consumer.PluginID)
-		}
-		return c.JSON(http.StatusConflict, model.ErrorResponse{
-			Message: fmt.Sprintf("role %s is still referenced by installed plugins: %s", roleID, strings.Join(blockers, ", ")),
+	if len(inventory.BlockingConsumers) > 0 {
+		return c.JSON(http.StatusConflict, map[string]any{
+			"message":    fmt.Sprintf("role %s still has blocking downstream consumers", roleID),
+			"references": inventory,
 		})
 	}
 	if err := h.store.Delete(roleID); err != nil {
@@ -692,6 +734,15 @@ func (h *RoleHandler) listDependencyPlugins(ctx context.Context) ([]*model.Plugi
 		return nil, nil
 	}
 	return h.pluginCatalog.List(ctx, service.PluginListFilter{})
+}
+
+func (h *RoleHandler) referenceGovernance() *service.RoleReferenceGovernanceService {
+	return service.NewRoleReferenceGovernanceService(
+		h.pluginCatalog,
+		h.memberCatalog,
+		h.queueCatalog,
+		h.runCatalog,
+	).WithRoleStore(h.store)
 }
 
 func (h *RoleHandler) enrichRoleManifest(manifest *rolepkg.Manifest, plugins []*model.PluginRecord) *rolepkg.Manifest {

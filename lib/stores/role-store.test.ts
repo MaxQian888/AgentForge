@@ -13,6 +13,7 @@ import { useAuthStore } from "./auth-store";
 import {
   useRoleStore,
   type RoleManifest,
+  type RoleReferenceInventory,
   type RoleSkillCatalogEntry,
 } from "./role-store";
 
@@ -294,6 +295,46 @@ describe("useRoleStore", () => {
       skillCatalog: catalog,
       skillCatalogLoading: false,
     });
+  });
+
+  it("fetches role reference inventory for delete governance", async () => {
+    const api = makeApiClient();
+    const inventory: RoleReferenceInventory = {
+      roleId: "frontend-developer",
+      blockingConsumers: [
+        {
+          consumerType: "member-binding",
+          consumerId: "member-1",
+          label: "Frontend Bot",
+          blocking: true,
+          lifecycleState: "active",
+          reason: "Agent member Frontend Bot is still bound to role frontend-developer",
+          remediation: "Rebind or clear the member's role assignment before deleting this role.",
+        },
+      ],
+      advisoryConsumers: [
+        {
+          consumerType: "historical-run",
+          consumerId: "run-1",
+          label: "run-1",
+          blocking: false,
+          lifecycleState: "completed",
+          reason: "Historical agent run retains this role for audit context.",
+          remediation: "Historical run records keep their stored role_id after deletion.",
+        },
+      ],
+    };
+    api.get.mockResolvedValueOnce({ data: inventory });
+    mockCreateApiClient.mockReturnValue(api);
+
+    await expect(
+      useRoleStore.getState().fetchRoleReferences("frontend-developer"),
+    ).resolves.toEqual(inventory);
+
+    expect(api.get).toHaveBeenCalledWith(
+      "/api/v1/roles/frontend-developer/references",
+      { token: "test-token" },
+    );
   });
 
   it("throws when mutating role data without authentication", async () => {

@@ -6,6 +6,7 @@ import { Activity, AlertTriangle, Bot, ClipboardCheck, DollarSign, Users } from 
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { QuickActionShortcuts } from "./quick-action-shortcuts";
+import { ProjectBootstrapPanel } from "./project-bootstrap-panel";
 import type { DashboardSummary } from "@/lib/dashboard/summary";
 
 interface DashboardOverviewProps {
@@ -70,6 +71,7 @@ export function DashboardOverview({
   }
 
   if (isEmptySummary(summary)) {
+    const primaryAction = summary.bootstrap?.nextActions[0];
     return (
       <Card>
         <CardHeader>
@@ -81,7 +83,9 @@ export function DashboardOverview({
           </p>
           <div>
             <Button asChild>
-              <Link href={summary.links.projects}>{t("empty.createProject")}</Link>
+              <Link href={primaryAction?.href ?? summary.links.projects}>
+                {primaryAction?.label ?? t("empty.createProject")}
+              </Link>
             </Button>
           </div>
         </CardContent>
@@ -182,6 +186,8 @@ export function DashboardOverview({
           <Link href={summary.links.team}>{t("header.openTeam")}</Link>
         </Button>
       </div>
+
+      <ProjectBootstrapPanel bootstrap={summary.bootstrap} />
 
       <div className="grid gap-4 lg:grid-cols-5">
         {insightCards.map((card) => {

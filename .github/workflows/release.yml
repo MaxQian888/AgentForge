@@ -89,7 +89,7 @@ jobs:
 
       - name: Build updater manifest
         run: |
-          node scripts/build-updater-manifest.js \
+          node scripts/release/build-updater-manifest.js \
             --artifacts-root artifacts \
             --base-download-url "${{ github.server_url }}/${{ github.repository }}/releases/download/${{ github.ref_name }}" \
             --release-version "${{ github.ref_name }}" \
@@ -97,7 +97,7 @@ jobs:
 
       - name: Validate updater artifacts
         run: |
-          node scripts/validate-updater-artifacts.js \
+          node scripts/release/validate-updater-artifacts.js \
             --artifacts-root artifacts \
             --manifest artifacts/latest.json
 

@@ -170,6 +170,17 @@
     "resCostAlertThreshold": "Cost Alert Threshold",
     "provenanceSummary": "Provenance: {inherited} inherited, {template} template, {explicit} explicit"
   },
+  "deleteDialog": {
+    "title": "Delete Role",
+    "loading": "Loading role references...",
+    "blockingTitle": "Blocking consumers",
+    "advisoryTitle": "Advisory history",
+    "noReferences": "No downstream role references found.",
+    "confirm": "Delete Role",
+    "close": "Close",
+    "loadError": "Failed to load role references.",
+    "deleteError": "Failed to delete role."
+  },
   "contextRail": {
     "authoringGuide": "Authoring Guide",
     "guidanceFor": "Focused guidance for the current {section} step.",

@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Plus, FolderKanban, Search, ListChecks } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
@@ -31,6 +32,7 @@ import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 function CreateProjectDialog() {
   const t = useTranslations("projects");
+  const router = useRouter();
   const createProject = useProjectStore((s) => s.createProject);
   const [open, setOpen] = useState(false);
   const [name, setName] = useState("");
@@ -38,10 +40,13 @@ function CreateProjectDialog() {
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    await createProject({ name, description });
+    const createdProject = await createProject({ name, description });
     setName("");
     setDescription("");
     setOpen(false);
+    if (createdProject?.id) {
+      router.replace(`/?project=${createdProject.id}`);
+    }
   };
 
   return (

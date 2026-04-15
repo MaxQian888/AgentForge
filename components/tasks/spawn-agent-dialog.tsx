@@ -133,12 +133,19 @@ export function SpawnAgentDialog({
       setPreflight(null);
       return;
     }
+    const budgetUsd = parseFloat(budget);
     let cancelled = false;
-    void fetchDispatchPreflight(currentProjectId, tid, mid).then((result) => {
+    void fetchDispatchPreflight(currentProjectId, tid, mid, {
+      runtime: selection.runtime || undefined,
+      provider: selection.provider || undefined,
+      model: selection.model || undefined,
+      roleId: selectedRoleId || undefined,
+      budgetUsd: Number.isNaN(budgetUsd) ? undefined : budgetUsd,
+    }).then((result) => {
       if (!cancelled) setPreflight(result);
     });
     return () => { cancelled = true; };
-  }, [open, currentProjectId, taskId, selectedTaskId, memberId, selectedMemberId, fetchDispatchPreflight]);
+  }, [open, currentProjectId, taskId, selectedTaskId, memberId, selectedMemberId, fetchDispatchPreflight, selection.runtime, selection.provider, selection.model, selectedRoleId, budget]);
 
   const selectedRuntime = useMemo(
     () =>

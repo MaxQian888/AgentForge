@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/worktree"
 )
 
@@ -160,16 +161,31 @@ func TestNewBridgeHealthReconcileHandler_PropagatesFailures(t *testing.T) {
 
 type automationDueDateCheckerStub struct {
 	thresholds []time.Duration
+	summary    *service.AutomationDueDateSummary
 	err        error
 }
 
-func (s *automationDueDateCheckerStub) CheckDueDateApproaching(_ context.Context, threshold time.Duration) error {
+func (s *automationDueDateCheckerStub) CheckDueDateApproaching(_ context.Context, threshold time.Duration) (*service.AutomationDueDateSummary, error) {
 	s.thresholds = append(s.thresholds, threshold)
-	return s.err
+	if s.err != nil {
+		return nil, s.err
+	}
+	if s.summary == nil {
+		s.summary = &service.AutomationDueDateSummary{}
+	}
+	return s.summary, nil
 }
 
 func TestNewAutomationDueDateDetectorHandler_ReturnsSummaryAndMetrics(t *testing.T) {
-	checker := &automationDueDateCheckerStub{}
+	checker := &automationDueDateCheckerStub{
+		summary: &service.AutomationDueDateSummary{
+			EvaluatedTasks:   5,
+			MatchedRules:     3,
+			StartedWorkflows: 2,
+			BlockedWorkflows: 1,
+			FailedWorkflows:  0,
+		},
+	}
 	handler := NewAutomationDueDateDetectorHandler(checker, 24*time.Hour)
 
 	result, err := handler(context.Background(), &model.ScheduledJob{JobKey: "automation-due-date-detector"}, &model.ScheduledJobRun{})
@@ -179,10 +195,10 @@ func TestNewAutomationDueDateDetectorHandler_ReturnsSummaryAndMetrics(t *testing
 	if len(checker.thresholds) != 1 || checker.thresholds[0] != 24*time.Hour {
 		t.Fatalf("thresholds = %+v", checker.thresholds)
 	}
-	if result == nil || result.Summary != "evaluated due-date automations within 24 hours" {
+	if result == nil || result.Summary != "evaluated 5 due-date tasks within 24 hours, matched 3 rules, started 2 workflows, blocked 1, failed 0" {
 		t.Fatalf("result = %+v", result)
 	}
-	if result.Metrics != `{"thresholdHours":24}` {
+	if result.Metrics != `{"blockedWorkflows":1,"evaluatedTasks":5,"failedWorkflows":0,"matchedRules":3,"startedWorkflows":2,"thresholdHours":24}` {
 		t.Fatalf("result.Metrics = %q", result.Metrics)
 	}
 }

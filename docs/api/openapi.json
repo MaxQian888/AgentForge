@@ -8137,10 +8137,75 @@
           {
             "description": "",
             "in": "query",
+            "name": "query",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "query",
             "name": "q",
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "query",
+            "name": "scope",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "query",
+            "name": "category",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "query",
+            "name": "roleId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "query",
+            "name": "tag",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "query",
+            "name": "startAt",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
+            }
+          },
+          {
+            "description": "",
+            "in": "query",
+            "name": "endAt",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "format": "date-time"
             }
           },
           {
@@ -8254,6 +8319,190 @@
       }
     },
     "/api/v1/projects/{pid}/memory/{mid}": {
+      "get": {
+        "parameters": [
+          {
+            "description": "Project ID",
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Memory ID",
+            "in": "path",
+            "name": "mid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "query",
+            "name": "roleId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMemoryDetailDTO"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Get memory detail",
+        "tags": [
+          "memory"
+        ]
+      },
+      "patch": {
+        "parameters": [
+          {
+            "description": "Project ID",
+            "in": "path",
+            "name": "pid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "Memory ID",
+            "in": "path",
+            "name": "mid",
+            "required": true,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "description": "",
+            "in": "query",
+            "name": "roleId",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMemoryRequest"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "OK",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AgentMemoryDetailDTO"
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "Bad Request",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "Forbidden",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "Not Found",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "Conflict",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ErrorResponse"
+                }
+              }
+            }
+          }
+        },
+        "security": [
+          {
+            "bearerAuth": []
+          }
+        ],
+        "summary": "Update memory curation fields",
+        "tags": [
+          "memory"
+        ]
+      },
       "delete": {
         "parameters": [
           {
@@ -14782,6 +15031,7 @@
         "type": "object"
       },
       "AgentMemoryDTO": {
+        "type": "object",
         "properties": {
           "accessCount": {
             "type": "integer"
@@ -14789,18 +15039,28 @@
           "category": {
             "type": "string"
           },
+          "editable": {
+            "type": "boolean"
+          },
           "content": {
             "type": "string"
           },
           "createdAt": {
-            "format": "date-time",
-            "type": "string"
+            "type": "string",
+            "format": "date-time"
           },
           "id": {
             "type": "string"
           },
+          "kind": {
+            "type": "string"
+          },
           "key": {
             "type": "string"
+          },
+          "lastAccessedAt": {
+            "type": "string",
+            "format": "date-time"
           },
           "metadata": {
             "type": "string"
@@ -14816,6 +15076,16 @@
           },
           "scope": {
             "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          },
+          "updatedAt": {
+            "type": "string",
+            "format": "date-time"
           }
         },
         "required": [
@@ -14824,14 +15094,14 @@
           "scope",
           "roleId",
           "category",
+          "editable",
           "key",
           "content",
           "metadata",
           "relevanceScore",
           "accessCount",
           "createdAt"
-        ],
-        "type": "object"
+        ]
       },
       "AgentPerformanceDTO": {
         "properties": {
@@ -19570,6 +19840,7 @@
         "type": "object"
       },
       "StoreMemoryRequest": {
+        "type": "object",
         "properties": {
           "category": {
             "type": "string"
@@ -19591,13 +19862,18 @@
           },
           "scope": {
             "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
           }
         },
         "required": [
           "key",
           "content"
-        ],
-        "type": "object"
+        ]
       },
       "StringMap": {
         "additionalProperties": {
@@ -20715,6 +20991,63 @@
           }
         },
         "type": "object"
+      },
+      "AgentMemoryDetailDTO": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/AgentMemoryDTO"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "metadataObject": {
+                "type": "object",
+                "additionalProperties": true
+              },
+              "relatedContext": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/AgentMemoryRelatedContextDTO"
+                }
+              }
+            }
+          }
+        ]
+      },
+      "AgentMemoryRelatedContextDTO": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string"
+          },
+          "label": {
+            "type": "string"
+          },
+          "type": {
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "type"
+        ]
+      },
+      "UpdateMemoryRequest": {
+        "type": "object",
+        "properties": {
+          "content": {
+            "type": "string"
+          },
+          "key": {
+            "type": "string"
+          },
+          "tags": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            }
+          }
+        }
       }
     },
     "responses": {

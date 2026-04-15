@@ -20,6 +20,10 @@ func (s *MemoryAPIService) Store(ctx context.Context, input StoreMemoryInput) (*
 	return s.memory.Store(ctx, input)
 }
 
+func (s *MemoryAPIService) Update(ctx context.Context, input UpdateMemoryInput) (*model.AgentMemory, error) {
+	return s.memory.Update(ctx, input)
+}
+
 func (s *MemoryAPIService) Search(ctx context.Context, query MemoryExplorerQuery) ([]model.AgentMemoryDTO, error) {
 	return s.explorer.Search(ctx, query)
 }

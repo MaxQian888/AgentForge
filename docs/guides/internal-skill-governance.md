@@ -152,6 +152,33 @@ pnpm skill:sync:mirrors
 - `skill:verify:builtins`: verifies the built-in runtime subset plus bundle-specific marketplace metadata
 - `skill:sync:mirrors`: refreshes `.claude` and `.github` workflow mirrors from `.codex`
 
+## Skills Workspace
+
+AgentForge now also exposes an operator-facing `/skills` workspace in the dashboard.
+
+Use `/skills` when you need one place to inspect:
+
+- registry-declared internal skills across `built-in-runtime`, `repo-assistant`, and `workflow-mirror`
+- canonical roots, bundle membership, lock provenance, and mirror targets
+- structured `SKILL.md` / agent YAML preview for governed skill packages
+- per-skill health diagnostics before handing off to `/roles` or `/marketplace`
+
+The workspace intentionally exposes only truthful actions that already exist in the repository:
+
+- `Verify Internal Skills`
+- `Verify Built-in Skills`
+- `Sync Mirrors` for `workflow-mirror` entries only
+
+It does **not** replace the CLI workflow. The UI should be treated as the operator surface for inspection and bounded actions, while the CLI remains the maintainer-grade fallback and automation entrypoint.
+
+Recommended workflow:
+
+1. Open `/skills` to identify the affected skill family and current health state.
+2. Use the detail pane to inspect preview, provenance, and downstream consumer surfaces.
+3. Run `Verify Internal Skills` or `Verify Built-in Skills` when you need fresh health diagnostics.
+4. Use `Sync Mirrors` only for workflow mirrors that report drift.
+5. If a deeper maintainer workflow is still needed, fall back to `pnpm skill:verify:*` or `pnpm skill:sync:mirrors`.
+
 ## Maintainer Notes
 
 - `skills/*` remains the only product/runtime skill source root.

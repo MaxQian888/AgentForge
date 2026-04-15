@@ -16,6 +16,7 @@ export default function RolesPage() {
     error,
     fetchRoles,
     fetchSkillCatalog,
+    fetchRoleReferences,
     createRole,
     updateRole,
     deleteRole,
@@ -44,6 +45,7 @@ export default function RolesPage() {
       skillCatalogLoading={skillCatalogLoading}
       loading={loading}
       error={error}
+      onLoadRoleReferences={fetchRoleReferences}
       onCreateRole={handleSubmit}
       onUpdateRole={updateRole}
       onDeleteRole={async (role) => {

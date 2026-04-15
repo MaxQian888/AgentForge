@@ -160,6 +160,15 @@ Behavior:
 - may auto-unblock dependent tasks
 - emits workflow and automation events
 
+Project workflow trigger configs currently normalize to these canonical action names:
+
+- `dispatch_agent`
+- `start_workflow`
+- `notify`
+- `auto_transition`
+
+Legacy aliases may still be accepted by the backend for compatibility, but new configs should use the canonical names above.
+
 ## `POST /api/v1/tasks/:id/assign`
 
 Request body:

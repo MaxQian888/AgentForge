@@ -1,4 +1,6 @@
-import rawProfiles from "../../../src-go/internal/service/coding_agent_backend_profiles.json";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AgentRuntimeKey } from "../types.js";
 
 export interface RuntimeProfileCommand {
@@ -106,7 +108,17 @@ const CLI_RUNTIME_METADATA: Partial<
   },
 };
 
-const runtimeProfiles = (rawProfiles as RuntimeProfile[]).map((profile) => {
+function loadRuntimeProfiles(): RuntimeProfile[] {
+  const currentFile = fileURLToPath(import.meta.url);
+  const profilesPath = join(
+    dirname(currentFile),
+    "../../../src-go/internal/service/coding_agent_backend_profiles.json",
+  );
+  const rawProfiles = JSON.parse(readFileSync(profilesPath, "utf8")) as RuntimeProfile[];
+  return rawProfiles;
+}
+
+const runtimeProfiles = loadRuntimeProfiles().map((profile) => {
   const runtimeMetadata = CLI_RUNTIME_METADATA[profile.key];
   return {
     ...profile,

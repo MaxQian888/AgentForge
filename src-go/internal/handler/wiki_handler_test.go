@@ -73,6 +73,31 @@ func (m *mockWikiHandlerService) CreatePage(ctx echo.Context, projectID uuid.UUI
 	_ = projectID
 	return page, nil
 }
+func (m *mockWikiHandlerService) CreateTemplate(ctx echo.Context, projectID uuid.UUID, spaceID uuid.UUID, title string, category string, content string, createdBy *uuid.UUID) (*model.WikiPage, error) {
+	_ = ctx
+	_ = projectID
+	template := &model.WikiPage{
+		ID:               uuid.New(),
+		SpaceID:          spaceID,
+		Title:            title,
+		Content:          content,
+		ContentText:      content,
+		Path:             "/templates/custom/" + title,
+		SortOrder:        0,
+		IsTemplate:       true,
+		TemplateCategory: category,
+		IsSystem:         false,
+		CreatedBy:        createdBy,
+		UpdatedBy:        createdBy,
+		CreatedAt:        time.Now().UTC(),
+		UpdatedAt:        time.Now().UTC(),
+	}
+	if m.pages == nil {
+		m.pages = map[uuid.UUID]*model.WikiPage{}
+	}
+	m.pages[template.ID] = template
+	return template, nil
+}
 func (m *mockWikiHandlerService) GetPageTree(ctx echo.Context, spaceID uuid.UUID) ([]*model.WikiPage, error) {
 	_ = ctx
 	out := make([]*model.WikiPage, 0)
@@ -100,7 +125,7 @@ func (m *mockWikiHandlerService) GetPageContext(ctx echo.Context, pageID uuid.UU
 	}
 	return m.space, page, nil
 }
-func (m *mockWikiHandlerService) UpdatePage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID, title string, content string, contentText string, updatedBy *uuid.UUID, expectedUpdatedAt *time.Time) (*model.WikiPage, error) {
+func (m *mockWikiHandlerService) UpdatePage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID, title string, content string, contentText string, updatedBy *uuid.UUID, expectedUpdatedAt *time.Time, templateCategory *string) (*model.WikiPage, error) {
 	_ = ctx
 	_ = projectID
 	page, ok := m.pages[pageID]
@@ -110,9 +135,15 @@ func (m *mockWikiHandlerService) UpdatePage(ctx echo.Context, projectID uuid.UUI
 	if expectedUpdatedAt != nil && page.UpdatedAt.After(*expectedUpdatedAt) {
 		return nil, service.ErrWikiPageConflict
 	}
+	if page.IsTemplate && page.IsSystem {
+		return nil, service.ErrWikiTemplateImmutable
+	}
 	page.Title = title
 	page.Content = content
 	page.ContentText = contentText
+	if templateCategory != nil {
+		page.TemplateCategory = *templateCategory
+	}
 	page.UpdatedBy = updatedBy
 	page.UpdatedAt = time.Now().UTC().Truncate(time.Second)
 	cloned := *page
@@ -121,6 +152,9 @@ func (m *mockWikiHandlerService) UpdatePage(ctx echo.Context, projectID uuid.UUI
 func (m *mockWikiHandlerService) DeletePage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID) error {
 	_ = ctx
 	_ = projectID
+	if page, ok := m.pages[pageID]; ok && page.IsTemplate && page.IsSystem {
+		return service.ErrWikiTemplateImmutable
+	}
 	delete(m.pages, pageID)
 	return nil
 }
@@ -282,11 +316,24 @@ func (m *mockWikiHandlerService) CreatePageFromTemplate(ctx echo.Context, projec
 	m.pages[page.ID] = page
 	return page, nil
 }
-func (m *mockWikiHandlerService) ListTemplates(ctx echo.Context, spaceID uuid.UUID) ([]*model.WikiPage, error) {
+func (m *mockWikiHandlerService) ListTemplates(ctx echo.Context, spaceID uuid.UUID, query string, category string, source string) ([]*model.WikiPage, error) {
 	_ = ctx
 	out := make([]*model.WikiPage, 0)
 	for _, page := range m.pages {
 		if page.SpaceID == spaceID && page.IsTemplate {
+			if category != "" && page.TemplateCategory != category {
+				continue
+			}
+			templateSource := "custom"
+			if page.IsSystem {
+				templateSource = "system"
+			}
+			if source != "" && source != templateSource {
+				continue
+			}
+			if query != "" && !strings.Contains(strings.ToLower(page.Title+" "+page.TemplateCategory), strings.ToLower(query)) {
+				continue
+			}
 			cloned := *page
 			out = append(out, &cloned)
 		}
@@ -476,6 +523,72 @@ func TestWikiHandlerListVersionsCommentsAndTemplates(t *testing.T) {
 	}
 	if templateRec.Code != http.StatusOK {
 		t.Fatalf("ListTemplates() status = %d", templateRec.Code)
+	}
+}
+
+func TestWikiHandlerCreateTemplateAndProtectBuiltInTemplates(t *testing.T) {
+	_, c, _, projectID, userID := newWikiTestContext(http.MethodPost, "/", "")
+	space := &model.WikiSpace{ID: uuid.New(), ProjectID: projectID, CreatedAt: time.Now().UTC()}
+	systemTemplateID := uuid.New()
+	svc := &mockWikiHandlerService{
+		space: space,
+		pages: map[uuid.UUID]*model.WikiPage{
+			systemTemplateID: {
+				ID:               systemTemplateID,
+				SpaceID:          space.ID,
+				Title:            "PRD",
+				IsTemplate:       true,
+				TemplateCategory: "prd",
+				IsSystem:         true,
+				CreatedAt:        time.Now().UTC(),
+				UpdatedAt:        time.Now().UTC(),
+			},
+		},
+		versions: map[uuid.UUID]*model.PageVersion{},
+		comments: map[uuid.UUID]*model.PageComment{},
+	}
+	h := &WikiHandler{service: svc}
+
+	createReq := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"title":"Runbook Template","category":"runbook","content":"[]"}`))
+	createReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	createRec := httptest.NewRecorder()
+	createCtx := c.Echo().NewContext(createReq, createRec)
+	createCtx.Set(appMiddleware.ProjectIDContextKey, projectID)
+	createCtx.Set(appMiddleware.JWTContextKey, &service.Claims{UserID: userID.String()})
+	if err := h.CreateTemplate(createCtx); err != nil {
+		t.Fatalf("CreateTemplate() error = %v", err)
+	}
+	if createRec.Code != http.StatusCreated {
+		t.Fatalf("CreateTemplate() status = %d", createRec.Code)
+	}
+
+	updateReq := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(`{"title":"Mutated","content":"[]","contentText":"","expectedUpdatedAt":"2026-04-15T20:00:00Z","templateCategory":"custom"}`))
+	updateReq.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	updateRec := httptest.NewRecorder()
+	updateCtx := c.Echo().NewContext(updateReq, updateRec)
+	updateCtx.SetParamNames("id")
+	updateCtx.SetParamValues(systemTemplateID.String())
+	updateCtx.Set(appMiddleware.ProjectIDContextKey, projectID)
+	updateCtx.Set(appMiddleware.JWTContextKey, &service.Claims{UserID: userID.String()})
+	if err := h.UpdatePage(updateCtx); err != nil {
+		t.Fatalf("UpdatePage() error = %v", err)
+	}
+	if updateRec.Code != http.StatusForbidden {
+		t.Fatalf("UpdatePage() status = %d, want %d", updateRec.Code, http.StatusForbidden)
+	}
+
+	deleteReq := httptest.NewRequest(http.MethodDelete, "/", nil)
+	deleteRec := httptest.NewRecorder()
+	deleteCtx := c.Echo().NewContext(deleteReq, deleteRec)
+	deleteCtx.SetParamNames("id")
+	deleteCtx.SetParamValues(systemTemplateID.String())
+	deleteCtx.Set(appMiddleware.ProjectIDContextKey, projectID)
+	deleteCtx.Set(appMiddleware.JWTContextKey, &service.Claims{UserID: userID.String()})
+	if err := h.DeletePage(deleteCtx); err != nil {
+		t.Fatalf("DeletePage() error = %v", err)
+	}
+	if deleteRec.Code != http.StatusForbidden {
+		t.Fatalf("DeletePage() status = %d, want %d", deleteRec.Code, http.StatusForbidden)
 	}
 }
 

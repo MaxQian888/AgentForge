@@ -125,6 +125,7 @@ func TestMemoryExplorerService_SearchHonorsFiltersAndAccess(t *testing.T) {
 		Query:     "release",
 		Scope:     model.MemoryScopeProject,
 		Category:  model.MemoryCategorySemantic,
+		Tag:       "ops",
 		StartAt:   &start,
 		EndAt:     &end,
 		Limit:     5,
@@ -135,7 +136,7 @@ func TestMemoryExplorerService_SearchHonorsFiltersAndAccess(t *testing.T) {
 	if repo.lastProjectID != projectID {
 		t.Fatalf("projectID = %s, want %s", repo.lastProjectID, projectID)
 	}
-	if repo.lastFilter.Query != "release" || repo.lastFilter.Scope != model.MemoryScopeProject || repo.lastFilter.Category != model.MemoryCategorySemantic || repo.lastFilter.Limit != 5 {
+	if repo.lastFilter.Query != "release" || repo.lastFilter.Scope != model.MemoryScopeProject || repo.lastFilter.Category != model.MemoryCategorySemantic || repo.lastFilter.Tag != "ops" || repo.lastFilter.Limit != 5 {
 		t.Fatalf("lastFilter = %#v", repo.lastFilter)
 	}
 	if len(results) != 1 || results[0].Key != "release-plan" {
@@ -224,6 +225,7 @@ func TestMemoryExplorerService_StatsBulkDeleteCleanupAndExport(t *testing.T) {
 		Scope:     model.MemoryScopeRole,
 		Category:  model.MemoryCategoryEpisodic,
 		RoleID:    "planner",
+		Tag:       "ops",
 	})
 	if err != nil {
 		t.Fatalf("ExportEpisodic() error = %v", err)
@@ -319,6 +321,32 @@ func TestMemoryExplorerService_SearchAppliesEpisodicSearchBeforeLimit(t *testing
 	}
 	if len(repo.incremented) != 1 || repo.incremented[0] != episodic.history[1].ID {
 		t.Fatalf("incremented = %#v", repo.incremented)
+	}
+}
+
+func TestMemoryExplorerService_ExportFiltersByTagAfterEpisodicExport(t *testing.T) {
+	projectID := uuid.New()
+	episodic := &episodicExplorerStub{
+		exportResult: &EpisodicMemoryExport{
+			ProjectID: projectID.String(),
+			Entries: []EpisodicMemoryExportEntry{
+				{ID: uuid.NewString(), Key: "release", Metadata: `{"tags":["ops","release"]}`},
+				{ID: uuid.NewString(), Key: "other", Metadata: `{"tags":["feedback"]}`},
+			},
+		},
+	}
+	svc := NewMemoryExplorerService(&memoryExplorerRepoStub{}).WithEpisodic(episodic)
+
+	exported, err := svc.ExportEpisodic(context.Background(), MemoryExplorerQuery{
+		ProjectID: projectID,
+		Category:  model.MemoryCategoryEpisodic,
+		Tag:       "ops",
+	})
+	if err != nil {
+		t.Fatalf("ExportEpisodic(tag) error = %v", err)
+	}
+	if len(exported.Entries) != 1 || exported.Entries[0].Key != "release" {
+		t.Fatalf("exported entries = %#v", exported.Entries)
 	}
 }
 

@@ -25,10 +25,10 @@ import (
 )
 
 var (
-	_ core.FormattedTextSender    = (*Live)(nil)
-	_ core.MessageUpdater         = (*Live)(nil)
-	_ core.StructuredSender       = (*Live)(nil)
-	_ core.ReplyStructuredSender  = (*Live)(nil)
+	_ core.FormattedTextSender   = (*Live)(nil)
+	_ core.MessageUpdater        = (*Live)(nil)
+	_ core.StructuredSender      = (*Live)(nil)
+	_ core.ReplyStructuredSender = (*Live)(nil)
 )
 
 var liveMetadata = core.PlatformMetadata{
@@ -37,7 +37,7 @@ var liveMetadata = core.PlatformMetadata{
 		CommandSurface:     core.CommandSurfaceMixed,
 		StructuredSurface:  core.StructuredSurfaceCards,
 		AsyncUpdateModes:   []core.AsyncUpdateMode{core.AsyncUpdateReply, core.AsyncUpdateEdit, core.AsyncUpdateDeferredCardUpdate},
-		ActionCallbackMode: core.ActionCallbackWebhook,
+		ActionCallbackMode: core.ActionCallbackSocketPayload,
 		MessageScopes:      []core.MessageScope{core.MessageScopeChat, core.MessageScopeThread},
 		Mutability: core.MutabilitySemantics{
 			CanEdit:        true,
@@ -100,16 +100,19 @@ type Live struct {
 	appID     string
 	appSecret string
 
-	runner           eventRunner
-	messages         messageClient
-	cardUpdater      cardUpdater
-	callbackHTTP     http.Handler
-	actionHandler    notify.ActionHandler
-	lifecycleHandler core.LifecycleHandler
-	startCancel      context.CancelFunc
-	started          bool
-	startedContext   context.Context
-	mu               sync.Mutex
+	runner            eventRunner
+	messages          messageClient
+	cardUpdater       cardUpdater
+	callbackHTTP      http.Handler
+	callbackPath      string
+	verificationToken string
+	eventEncryptKey   string
+	actionHandler     notify.ActionHandler
+	lifecycleHandler  core.LifecycleHandler
+	startCancel       context.CancelFunc
+	started           bool
+	startedContext    context.Context
+	mu                sync.Mutex
 }
 
 func NewLive(appID, appSecret string, opts ...LiveOption) (*Live, error) {
@@ -187,6 +190,31 @@ func WithLegacyCardCallbackHandler(verificationToken, eventEncryptKey string, ha
 
 		dispatcher := larkdispatcher.NewEventDispatcher(verificationToken, eventEncryptKey).
 			OnP2CardActionTrigger(handler)
+		if strings.TrimSpace(live.callbackPath) == "" {
+			live.callbackPath = "/feishu/callback"
+		}
+		live.callbackHTTP = newHTTPCallbackHandler(dispatcher)
+		return nil
+	}
+}
+
+func WithCardCallbackWebhook(verificationToken, eventEncryptKey, callbackPath string) LiveOption {
+	return func(live *Live) error {
+		if strings.TrimSpace(verificationToken) == "" {
+			return errors.New("feishu card callback webhook requires verification token")
+		}
+		path := strings.TrimSpace(callbackPath)
+		if path == "" {
+			path = "/feishu/callback"
+		}
+		if !strings.HasPrefix(path, "/") {
+			path = "/" + path
+		}
+		live.verificationToken = strings.TrimSpace(verificationToken)
+		live.eventEncryptKey = strings.TrimSpace(eventEncryptKey)
+		live.callbackPath = path
+		dispatcher := larkdispatcher.NewEventDispatcher(live.verificationToken, live.eventEncryptKey).
+			OnP2CardActionTrigger(live.handleCardAction)
 		live.callbackHTTP = newHTTPCallbackHandler(dispatcher)
 		return nil
 	}
@@ -195,7 +223,15 @@ func WithLegacyCardCallbackHandler(verificationToken, eventEncryptKey string, ha
 func (l *Live) Name() string { return "feishu-live" }
 
 func (l *Live) Metadata() core.PlatformMetadata {
-	return core.NormalizeMetadata(liveMetadata, liveMetadata.Source)
+	metadata := liveMetadata
+	if l != nil && l.callbackHTTP != nil {
+		metadata.Capabilities.ActionCallbackMode = core.ActionCallbackWebhook
+		metadata.Capabilities.RequiresPublicCallback = true
+	} else {
+		metadata.Capabilities.ActionCallbackMode = core.ActionCallbackSocketPayload
+		metadata.Capabilities.RequiresPublicCallback = false
+	}
+	return core.NormalizeMetadata(metadata, metadata.Source)
 }
 
 func (l *Live) SetActionHandler(handler notify.ActionHandler) {
@@ -218,6 +254,13 @@ func (l *Live) ReplyContextFromTarget(target *core.ReplyTarget) any {
 }
 
 func (l *Live) HTTPCallbackHandler() http.Handler { return l.callbackHTTP }
+
+func (l *Live) CallbackPaths() []string {
+	if l == nil || l.callbackHTTP == nil || strings.TrimSpace(l.callbackPath) == "" {
+		return nil
+	}
+	return []string{l.callbackPath}
+}
 
 func (l *Live) BuildNativeTextMessage(title, content string) (*core.NativeMessage, error) {
 	return core.NewFeishuMarkdownCardMessage(title, content)
@@ -713,15 +756,14 @@ func (l *Live) handleCardAction(ctx context.Context, event *larkcallback.CardAct
 	if err != nil {
 		return nil, err
 	}
-	if result == nil || strings.TrimSpace(result.Result) == "" {
+	response, err := renderCardActionTriggerResponse(result)
+	if err != nil {
+		return nil, err
+	}
+	if response == nil {
 		return &larkcallback.CardActionTriggerResponse{}, nil
 	}
-	return &larkcallback.CardActionTriggerResponse{
-		Toast: &larkcallback.Toast{
-			Type:    "info",
-			Content: strings.TrimSpace(result.Result),
-		},
-	}, nil
+	return response, nil
 }
 
 var errIgnoreCardAction = errors.New("ignore feishu card action")
@@ -817,6 +859,100 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 		UserID:      feishuOperatorID(event.Event.Operator),
 		ReplyTarget: replyTarget,
 		Metadata:    compactMetadata(metadata),
+	}, nil
+}
+
+func renderCardActionTriggerResponse(result *notify.ActionResponse) (*larkcallback.CardActionTriggerResponse, error) {
+	if result == nil {
+		return &larkcallback.CardActionTriggerResponse{}, nil
+	}
+
+	response := &larkcallback.CardActionTriggerResponse{}
+	if message := strings.TrimSpace(result.Result); message != "" {
+		response.Toast = &larkcallback.Toast{
+			Type:    "info",
+			Content: message,
+		}
+	}
+
+	switch {
+	case result.Native != nil:
+		card, err := renderCallbackResponseCardFromNativeMessage(result.Native)
+		if err != nil {
+			return nil, err
+		}
+		response.Card = card
+	case result.Structured != nil:
+		card, err := renderCallbackResponseCardFromStructuredMessage(result.Structured)
+		if err != nil {
+			return nil, err
+		}
+		response.Card = card
+	}
+
+	if response.Toast == nil && response.Card == nil {
+		return &larkcallback.CardActionTriggerResponse{}, nil
+	}
+	return response, nil
+}
+
+func renderCallbackResponseCardFromNativeMessage(message *core.NativeMessage) (*larkcallback.Card, error) {
+	if message == nil {
+		return nil, nil
+	}
+	if strings.TrimSpace(message.Platform) == "" {
+		message.Platform = liveMetadata.Source
+	}
+	if err := message.Validate(); err != nil {
+		return nil, err
+	}
+	if message.NormalizedPlatform() != liveMetadata.Source || message.FeishuCard == nil {
+		return nil, fmt.Errorf("feishu callback response requires feishu native card payload")
+	}
+
+	switch core.FeishuCardMode(strings.ToLower(strings.TrimSpace(string(message.FeishuCard.Mode)))) {
+	case core.FeishuCardModeJSON:
+		var decoded map[string]any
+		if err := json.Unmarshal(message.FeishuCard.JSON, &decoded); err != nil {
+			return nil, fmt.Errorf("decode feishu callback raw card payload: %w", err)
+		}
+		return &larkcallback.Card{
+			Type: "raw",
+			Data: decoded,
+		}, nil
+	case core.FeishuCardModeTemplate:
+		payload, err := renderFeishuNativePayload(message)
+		if err != nil {
+			return nil, err
+		}
+		data, ok := payload["data"]
+		if !ok {
+			return nil, fmt.Errorf("feishu callback template response requires data payload")
+		}
+		return &larkcallback.Card{
+			Type: "template",
+			Data: data,
+		}, nil
+	default:
+		return nil, fmt.Errorf("unsupported feishu callback card mode %q", message.FeishuCard.Mode)
+	}
+}
+
+func renderCallbackResponseCardFromStructuredMessage(message *core.StructuredMessage) (*larkcallback.Card, error) {
+	if message == nil {
+		return nil, nil
+	}
+	payload, err := renderStructuredMessage(message)
+	if err != nil {
+		return nil, err
+	}
+	var decoded map[string]any
+	if err := json.Unmarshal([]byte(payload), &decoded); err != nil {
+		return nil, fmt.Errorf("decode feishu structured callback payload: %w", err)
+	}
+	return &larkcallback.Card{
+		Type: "raw",
+		Data: decoded,
 	}, nil
 }
 

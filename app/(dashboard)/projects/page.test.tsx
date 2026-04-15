@@ -164,6 +164,7 @@ describe("ProjectsPage", () => {
 
   it("submits the create-project dialog and fetches projects on mount", async () => {
     const user = userEvent.setup();
+    createProject.mockResolvedValueOnce({ id: "project-3" });
     render(<ProjectsPage />);
 
     expect(fetchProjects).toHaveBeenCalledTimes(1);
@@ -179,6 +180,7 @@ describe("ProjectsPage", () => {
         description: "Sidecar workspace",
       });
     });
+    expect(replace).toHaveBeenCalledWith("/?project=project-3");
   });
 
   it("filters, edits, and deletes projects through the page callbacks", async () => {

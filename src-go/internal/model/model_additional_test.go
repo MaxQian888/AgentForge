@@ -447,13 +447,16 @@ func TestAgentAndQueueDTOHelpers(t *testing.T) {
 		Category:       MemoryCategoryProcedural,
 		Key:            "deploy",
 		Content:        "Use staged rollout",
-		Metadata:       `{"source":"ops"}`,
+		Metadata:       `{"source":"ops","kind":"operator_note","tags":["ops","release"],"editable":true}`,
 		RelevanceScore: 0.8,
 		AccessCount:    2,
 		CreatedAt:      now,
 	}).ToDTO()
 	if memoryDTO.Scope != MemoryScopeProject || memoryDTO.AccessCount != 2 {
 		t.Fatalf("memoryDTO = %#v", memoryDTO)
+	}
+	if memoryDTO.Kind != "operator_note" || !memoryDTO.Editable || len(memoryDTO.Tags) != 2 {
+		t.Fatalf("memoryDTO curation fields = %#v", memoryDTO)
 	}
 }
 

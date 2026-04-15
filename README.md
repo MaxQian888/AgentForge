@@ -88,6 +88,7 @@ As of `2026-03-31`, the repository has already moved beyond a thin starter shell
 - `Plugin operator surfaces`: the plugin control plane now distinguishes catalog entries from installed plugins, includes built-in bundle/readiness verification, and exposes maintained authoring commands such as `pnpm create-plugin`, `pnpm plugin:verify`, and `pnpm plugin:verify:builtins`.
 - `Repo-owned skills`: canonical built-in skills now remain explicitly declared through `skills/builtin-bundle.yaml`, with a matching `pnpm skill:verify:builtins` drift check and marketplace-ready preview metadata derived from `SKILL.md` plus `agents/*.yaml`.
 - `Internal skill governance`: repo-managed runtime skills, repo-assistant skills, and OpenSpec workflow skill mirrors are now declared in `internal-skills.yaml`, verified through `pnpm skill:verify:internal`, and synchronized via `pnpm skill:sync:mirrors`.
+- `Skills workspace`: `app/(dashboard)/skills/page.tsx` now provides one governed-skills operator surface for inventory, preview, diagnostics, built-in verification, workflow mirror sync, and downstream handoff into role authoring or marketplace.
 - `IM operator UI`: the current frontend contract covers `feishu`, `dingtalk`, `slack`, `telegram`, `discord`, `wecom`, `qq`, and `qqbot`, with backend-driven event types, richer delivery diagnostics, payload preview, and platform-specific config fields.
 - `Marketplace`: `app/(dashboard)/marketplace/page.tsx` now provides a unified Skills/Plugin/Role marketplace with search, category filtering, featured items, detail views with version history and reviews, publish workflows, and install confirmation. The backend is a standalone Go microservice in `src-marketplace/` with its own database migrations, handler/service/repository layers, and admin moderation endpoints.
 - `Desktop shell`: the Tauri app now includes shared desktop window chrome with frameless titlebar controls, bounded sidecar supervision, runtime status queries, shell actions, and window-state synchronization through `lib/platform-runtime.ts`.
@@ -138,6 +139,7 @@ Notable frontend route groups already present:
 
 - `app/(auth)` for login and registration
 - `app/(dashboard)` for overview, projects, project dashboard/task workspaces, team/team-run orchestration, agents, sprints, reviews, cost, scheduler, memory, roles, plugins, marketplace, settings, IM, docs, and workflow operations
+- `app/(dashboard)/skills` for governed internal skill inventory, diagnostics, mirror sync, and skill-package preview
 
 ## Documentation Guide
 
@@ -157,6 +159,7 @@ Start here if you want the latest project narrative:
 - [`docs/guides/`](./docs/guides): plugin, frontend component, and state-management guides
 - [`docs/desktop-updater-release.md`](./docs/desktop-updater-release.md): desktop updater signing inputs, `latest.json` generation, and release validation flow
 - [`docs/guides/internal-skill-governance.md`](./docs/guides/internal-skill-governance.md): canonical internal skill families, provenance, verification, and mirror-sync workflow
+- [`app/(dashboard)/skills/page.tsx`](./app/(dashboard)/skills/page.tsx): governed skills operator workspace for inventory, preview, diagnostics, and bounded verify/sync actions
 - [`docs/role-authoring-guide.md`](./docs/role-authoring-guide.md): current dashboard role workspace flow, preview/sandbox loop, and operator guidance
 - [`docs/role-yaml.md`](./docs/role-yaml.md): canonical role YAML layout, runtime projection rules, and skill-catalog behavior
 - [`docs/part/PLUGIN_RESEARCH_PLATFORMS.md`](./docs/part/PLUGIN_RESEARCH_PLATFORMS.md): platform comparison for extension ecosystems

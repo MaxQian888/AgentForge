@@ -115,6 +115,15 @@ func (p *capabilityAwareTextPlatform) Metadata() core.PlatformMetadata {
 	return p.metadata
 }
 
+type callbackAwareTextPlatform struct {
+	textOnlyPlatform
+	callbackHandler http.Handler
+	callbackPaths   []string
+}
+
+func (p *callbackAwareTextPlatform) HTTPCallbackHandler() http.Handler { return p.callbackHandler }
+func (p *callbackAwareTextPlatform) CallbackPaths() []string           { return p.callbackPaths }
+
 type structuredNotificationPlatform struct {
 	replyAwareTextPlatform
 	metadata   core.PlatformMetadata
@@ -424,6 +433,64 @@ func TestReceiver_StartExposesHealthAndStopShutsDownServer(t *testing.T) {
 	}
 	if !bytes.Contains(body, []byte(`"platform":"slack-stub"`)) {
 		t.Fatalf("body = %s", string(body))
+	}
+
+	if err := r.Stop(); err != nil {
+		t.Fatalf("Stop error: %v", err)
+	}
+	if err := <-done; err != nil {
+		t.Fatalf("Start returned error after stop: %v", err)
+	}
+}
+
+func TestReceiver_StartMountsPlatformHTTPCallbacks(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatalf("listen: %v", err)
+	}
+	port := listener.Addr().(*net.TCPAddr).Port
+	listener.Close()
+
+	hits := 0
+	r := NewReceiver(&callbackAwareTextPlatform{
+		textOnlyPlatform: textOnlyPlatform{name: "feishu-live"},
+		callbackHandler: http.HandlerFunc(func(w http.ResponseWriter, req *http.Request) {
+			hits++
+			w.WriteHeader(http.StatusAccepted)
+			_, _ = w.Write([]byte("callback ok"))
+		}),
+		callbackPaths: []string{"/feishu/callback"},
+	}, strconv.Itoa(port))
+	done := make(chan error, 1)
+	go func() {
+		done <- r.Start()
+	}()
+
+	var resp *http.Response
+	for i := 0; i < 20; i++ {
+		resp, err = http.Post("http://127.0.0.1:"+strconv.Itoa(port)+"/feishu/callback", "application/json", strings.NewReader(`{"type":"ping"}`))
+		if err == nil {
+			break
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+	if err != nil {
+		t.Fatalf("callback request failed: %v", err)
+	}
+	defer resp.Body.Close()
+
+	body, err := io.ReadAll(resp.Body)
+	if err != nil {
+		t.Fatalf("read body: %v", err)
+	}
+	if resp.StatusCode != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d", resp.StatusCode, http.StatusAccepted)
+	}
+	if string(body) != "callback ok" {
+		t.Fatalf("body = %q, want callback ok", string(body))
+	}
+	if hits != 1 {
+		t.Fatalf("hits = %d, want 1", hits)
 	}
 
 	if err := r.Stop(); err != nil {

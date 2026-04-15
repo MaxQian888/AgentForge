@@ -3,6 +3,7 @@ package handler
 import (
 	"context"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -42,6 +43,23 @@ func NewSprintHandler(repo sprintRepository, taskRepo ...sprintTaskRepository) *
 	return handler
 }
 
+func parseOptionalMilestoneID(value *string) (*uuid.UUID, error) {
+	if value == nil {
+		return nil, nil
+	}
+
+	trimmed := strings.TrimSpace(*value)
+	if trimmed == "" {
+		return nil, nil
+	}
+
+	parsed, err := uuid.Parse(trimmed)
+	if err != nil {
+		return nil, err
+	}
+	return &parsed, nil
+}
+
 func (h *SprintHandler) Create(c echo.Context) error {
 	req := new(model.CreateSprintRequest)
 	if err := c.Bind(req); err != nil {
@@ -59,6 +77,10 @@ func (h *SprintHandler) Create(c echo.Context) error {
 	if err != nil {
 		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidEndDateFormat)
 	}
+	milestoneID, err := parseOptionalMilestoneID(req.MilestoneID)
+	if err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidMilestoneID)
+	}
 
 	projectID := appMiddleware.GetProjectID(c)
 	sprint := &model.Sprint{
@@ -67,6 +89,7 @@ func (h *SprintHandler) Create(c echo.Context) error {
 		Name:           req.Name,
 		StartDate:      startDate,
 		EndDate:        endDate,
+		MilestoneID:    milestoneID,
 		Status:         model.SprintStatusPlanning,
 		TotalBudgetUsd: req.TotalBudgetUsd,
 	}
@@ -184,6 +207,13 @@ func (h *SprintHandler) Update(c echo.Context) error {
 			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidEndDateFormat)
 		}
 		sprint.EndDate = parsed
+	}
+	if req.MilestoneID != nil {
+		parsed, err := parseOptionalMilestoneID(req.MilestoneID)
+		if err != nil {
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidMilestoneID)
+		}
+		sprint.MilestoneID = parsed
 	}
 	if req.TotalBudgetUsd != nil {
 		sprint.TotalBudgetUsd = *req.TotalBudgetUsd

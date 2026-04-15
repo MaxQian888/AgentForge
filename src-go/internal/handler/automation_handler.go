@@ -10,6 +10,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type automationRuleRepository interface {
@@ -69,6 +70,9 @@ func (h *AutomationHandler) CreateRule(c echo.Context) error {
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
+	if err := service.ValidateAutomationActions(req.Actions); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
 	rule := &model.AutomationRule{
 		ID:         uuid.New(),
 		ProjectID:  projectID,
@@ -115,6 +119,9 @@ func (h *AutomationHandler) UpdateRule(c echo.Context) error {
 		rule.Conditions = string(req.Conditions)
 	}
 	if len(req.Actions) > 0 {
+		if err := service.ValidateAutomationActions(req.Actions); err != nil {
+			return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+		}
 		rule.Actions = string(req.Actions)
 	}
 	if err := h.rules.Update(c.Request().Context(), rule); err != nil {

@@ -3,6 +3,7 @@ package server
 import (
 	"context"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -18,6 +19,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
+	skillspkg "github.com/react-go-quick-starter/server/internal/skills"
 	"github.com/react-go-quick-starter/server/internal/storage"
 	"github.com/react-go-quick-starter/server/internal/version"
 	"github.com/react-go-quick-starter/server/internal/ws"
@@ -126,6 +128,11 @@ func (a imControlPlaneWSAdapter) DetachBridgeListener(bridgeID string) {
 	a.control.DetachBridgeListener(bridgeID)
 }
 
+type RouteServices struct {
+	TaskProgress *service.TaskProgressService
+	Automation   *service.AutomationEngineService
+}
+
 func RegisterRoutes(
 	e *echo.Echo,
 	cfg *config.Config,
@@ -169,7 +176,7 @@ func RegisterRoutes(
 	pluginSvc *service.PluginService,
 	agentSvc *service.AgentService,
 	schedulerSvc handler.SchedulerService,
-) *service.TaskProgressService {
+) *RouteServices {
 	jwtMw := appMiddleware.JWTMiddleware(cfg.JWTSecret, cache)
 	reviewTriggerMw := appMiddleware.ReviewTriggerAuthMiddleware(cfg.JWTSecret, cache, cfg.AgentForgeToken)
 	notificationSvc := service.NewNotificationService(notifRepo, hub)
@@ -323,6 +330,7 @@ func RegisterRoutes(
 		}
 	}()
 	roleH := handler.NewRoleHandler(cfg.RolesDir).WithBridgeClient(bridgeClient)
+	skillsH := handler.NewSkillsHandler(skillspkg.NewService(filepath.Dir(cfg.RolesDir)))
 	customFieldH := handler.NewCustomFieldHandler(service.NewCustomFieldService(customFieldRepo))
 	savedViewH := handler.NewSavedViewHandler(service.NewSavedViewService(savedViewRepo), memberRepo)
 	formH := handler.NewFormHandler(service.NewFormService(formRepo, taskRepo, customFieldRepo))
@@ -339,6 +347,7 @@ func RegisterRoutes(
 	memoryH := handler.NewMemoryHandler(memoryAPI)
 	reviewH := handler.NewReviewHandler(reviewSvc).WithAggregationService(reviewAggSvc)
 	workflowRoleStore := role.NewFileStore(cfg.RolesDir)
+	memberH = memberH.WithRoleStore(workflowRoleStore)
 	if pluginSvc == nil {
 		pluginSvc = service.NewPluginService(
 			repository.NewPluginRegistryRepository(),
@@ -351,6 +360,9 @@ func RegisterRoutes(
 		WithRoleStore(workflowRoleStore).
 		WithBroadcaster(ws.NewPluginEventBroadcaster(hub))
 	roleH = roleH.WithPluginCatalog(pluginSvc)
+	roleH = roleH.WithMemberCatalog(memberRepo)
+	roleH = roleH.WithQueueCatalog(agentPoolQueueRepo)
+	roleH = roleH.WithRunCatalog(agentRunRepo)
 	if agentSvc != nil {
 		agentSvc.SetPluginCatalog(pluginSvc)
 	}
@@ -390,7 +402,8 @@ func RegisterRoutes(
 		dispatchSvc = dispatchSvc.WithQueueWriter(agentSvc)
 		dispatchSvc = dispatchSvc.WithBudgetChecker(budgetSvc)
 		dispatchSvc = dispatchSvc.WithAttemptRecorder(dispatchAttemptRepo)
-		dispatchPreflightH = handler.NewDispatchPreflightHandler(taskRepo, memberRepo, budgetSvc, agentSvc).WithRunReader(agentSvc)
+		dispatchSvc = dispatchSvc.WithRoleStore(workflowRoleStore)
+		dispatchPreflightH = handler.NewDispatchPreflightHandler(taskRepo, memberRepo, budgetSvc, agentSvc).WithRunReader(agentSvc).WithRoleStore(workflowRoleStore)
 		dispatchStatsH = handler.NewDispatchStatsHandler(dispatchAttemptRepo, agentPoolQueueRepo)
 		dispatchHistoryH = handler.NewDispatchHistoryHandler(dispatchAttemptRepo)
 		queueManagementH = handler.NewQueueManagementHandler(agentSvc)
@@ -411,6 +424,16 @@ func RegisterRoutes(
 		workflowRoleStore,
 		service.NewWorkflowStepRouterExecutor(agentSvc, reviewSvc, dispatchSvc),
 	)
+	automationEngine.SetWorkflowStarter(workflowExec)
+	taskWorkflowSvc := service.NewTaskWorkflowService(workflowRepo, hub)
+	taskWorkflowSvc.SetTaskRepository(taskRepo)
+	taskWorkflowSvc.SetNotifier(notifRepo)
+	taskWorkflowSvc.SetProgressRecorder(taskProgressSvc)
+	taskWorkflowSvc.SetWorkflowRuntime(workflowExec)
+	if dispatchSvc != nil {
+		taskWorkflowSvc.SetDispatcher(dispatchSvc)
+	}
+	taskH = taskH.WithWorkflowService(taskWorkflowSvc)
 	pluginH := handler.NewPluginHandler(pluginSvc).WithWorkflowExecution(workflowExec)
 	schedulerH := handler.NewSchedulerHandler(schedulerSvc)
 
@@ -489,6 +512,7 @@ func RegisterRoutes(
 	projectGroup.POST("/memory/bulk-delete", memoryH.BulkDelete)
 	projectGroup.POST("/memory/cleanup", memoryH.Cleanup)
 	projectGroup.GET("/memory/:mid", memoryH.Get)
+	projectGroup.PATCH("/memory/:mid", memoryH.Update)
 	projectGroup.DELETE("/memory/:mid", memoryH.Delete)
 	docs := projectGroup.Group("/documents")
 	docs.POST("/upload", documentH.Upload)
@@ -526,6 +550,7 @@ func RegisterRoutes(
 	projectGroup.DELETE("/wiki/pages/:id/comments/:cid", wikiH.DeleteComment)
 	projectGroup.POST("/wiki/pages/:id/decompose-tasks", docDecomposeH.Decompose)
 	projectGroup.GET("/wiki/templates", wikiH.ListTemplates)
+	projectGroup.POST("/wiki/templates", wikiH.CreateTemplate)
 	projectGroup.POST("/wiki/pages/:id/templates", wikiH.CreateTemplateFromPage)
 	projectGroup.POST("/wiki/pages/from-template", wikiH.CreatePageFromTemplate)
 	projectGroup.GET("/wiki/favorites", wikiH.ListFavorites)
@@ -562,10 +587,13 @@ func RegisterRoutes(
 	// Workflow reviews
 	projectGroup.GET("/workflow-reviews", workflowH.ListPendingReviews)
 
-	// Workflow templates
-	protected.GET("/workflow-templates", workflowH.ListTemplates)
-	protected.POST("/workflow-templates/:id/clone", workflowH.CloneTemplate)
-	protected.POST("/workflow-templates/:id/execute", workflowH.ExecuteTemplate)
+		// Workflow templates
+		protected.GET("/workflow-templates", workflowH.ListTemplates)
+		protected.POST("/workflows/:id/publish-template", workflowH.PublishTemplate)
+		protected.POST("/workflow-templates/:id/duplicate", workflowH.DuplicateTemplate)
+		protected.POST("/workflow-templates/:id/clone", workflowH.CloneTemplate)
+		protected.POST("/workflow-templates/:id/execute", workflowH.ExecuteTemplate)
+		protected.DELETE("/workflow-templates/:id", workflowH.DeleteTemplate)
 
 	// Members (global)
 	protected.PUT("/members/:id", memberH.Update)
@@ -665,8 +693,13 @@ func RegisterRoutes(
 	}
 
 	// Roles
+	protected.GET("/skills", skillsH.List)
+	protected.GET("/skills/:id", skillsH.Get)
+	protected.POST("/skills/verify", skillsH.Verify)
+	protected.POST("/skills/sync-mirrors", skillsH.SyncMirrors)
 	protected.GET("/roles", roleH.List)
 	protected.GET("/roles/skills", roleH.ListSkills)
+	protected.GET("/roles/:id/references", roleH.GetReferences)
 	protected.GET("/roles/:id", roleH.Get)
 	protected.POST("/roles", roleH.Create)
 	protected.PUT("/roles/:id", roleH.Update)
@@ -727,7 +760,16 @@ func RegisterRoutes(
 		agentSvc.SetIMNotifier(imSvc)
 		agentSvc.SetIMChannelResolver(imControlPlane)
 	}
-	imSvc.SetActionExecutor(service.NewBackendIMActionExecutor(dispatchSvc, taskDecomposeSvc, reviewSvc, taskSvc, wikiSvc))
+	imSvc.SetActionExecutor(service.NewBackendIMActionExecutor(
+		dispatchSvc,
+		taskDecomposeSvc,
+		reviewSvc,
+		taskSvc,
+		imControlPlane,
+		taskProgressSvc,
+		taskWorkflowSvc,
+		wikiSvc,
+	))
 	automationEngine.SetIMSender(imSvc)
 	wikiSvc.WithIMForwarder(imSvc, cfg.IMNotifyPlatform, cfg.IMNotifyTargetChatID).WithIMChannelResolver(imControlPlane)
 	imH := handler.NewIMHandler(imSvc)
@@ -757,5 +799,8 @@ func RegisterRoutes(
 	// Bridge-to-registry runtime sync
 	e.POST("/internal/plugins/runtime-state", pluginH.SyncRuntimeState)
 
-	return taskProgressSvc
+	return &RouteServices{
+		TaskProgress: taskProgressSvc,
+		Automation:   automationEngine,
+	}
 }

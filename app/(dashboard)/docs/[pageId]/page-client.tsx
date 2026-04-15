@@ -4,10 +4,11 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
 import { Copy } from "lucide-react";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { createApiClient } from "@/lib/api-client";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
-import { useDocsStore } from "@/lib/stores/docs-store";
+import { flattenDocsTree, useDocsStore } from "@/lib/stores/docs-store";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { buildDocsHref } from "@/lib/route-hrefs";
 import { DocsSidebarPanel } from "@/components/docs/docs-sidebar-panel";
@@ -114,7 +115,9 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
     () => versions.find((version) => version.id === selectedVersionId) ?? versions[0] ?? null,
     [selectedVersionId, versions]
   );
-  const displayContent = readonly && selectedVersion ? selectedVersion.content : currentPage?.content ?? "[]";
+  const templateReadonly = currentPage?.isTemplate && currentPage.canEdit === false;
+  const effectiveReadonly = readonly || Boolean(templateReadonly);
+  const displayContent = effectiveReadonly && selectedVersion ? selectedVersion.content : currentPage?.content ?? "[]";
   const commentedBlockIds = useMemo(
     () =>
       comments
@@ -199,6 +202,16 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
     }
     return counts;
   }, [entityLinks]);
+  const templateDestinations = useMemo(
+    () =>
+      flattenDocsTree(tree)
+        .filter((page) => !page.isTemplate)
+        .map((page) => ({
+          id: page.id,
+          title: page.title,
+        })),
+    [tree],
+  );
 
   if (loading && !currentPage) {
     return <p className="text-sm text-muted-foreground">{t("pageDetail.loading")}</p>;
@@ -249,6 +262,24 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
       />
 
       <div className="flex flex-col gap-4">
+        {currentPage.isTemplate ? (
+          <div className="rounded-xl border border-border/60 bg-card/70 p-4">
+            <div className="flex flex-wrap items-center gap-2">
+              <Badge variant="secondary">
+                {currentPage.templateSource === "system"
+                  ? t("templateMode.systemBadge")
+                  : t("templateMode.customBadge")}
+              </Badge>
+              <span className="text-sm font-medium">{t("templateMode.title")}</span>
+            </div>
+            <p className="mt-2 text-sm text-muted-foreground">
+              {templateReadonly
+                ? t("templateMode.systemDesc")
+                : t("templateMode.customDesc")}
+            </p>
+          </div>
+        ) : null}
+
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
             <h1 className="text-3xl font-semibold">{currentPage.title}</h1>
@@ -265,7 +296,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
                 {t("pageDetail.newFromTemplate")}
               </Button>
             ) : null}
-            {!readonly ? (
+            {!effectiveReadonly ? (
               <Button variant="outline" onClick={() => setDecomposeOpen(true)}>
                 {t("pageDetail.createTasks")}
               </Button>
@@ -283,7 +314,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
         </div>
 
         <EditorToolbar
-          readonly={readonly}
+          readonly={effectiveReadonly}
           saving={saving}
           onSaveVersion={() =>
             void createVersion({
@@ -296,10 +327,14 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
             void createTemplateFromPage({
               projectId: projectId ?? selectedProjectId ?? "",
               pageId: currentPage.id,
-              name: `${currentPage.title} Template`,
+              name: currentPage.isTemplate ? `${currentPage.title} Copy` : `${currentPage.title} Template`,
               category: currentPage.templateCategory || "custom",
             })
           }
+          templateActionLabel={
+            currentPage.isTemplate ? t("editor.duplicateTemplate") : undefined
+          }
+          templateActionDisabled={currentPage.isTemplate ? false : effectiveReadonly}
           onShareVersion={() => {
             const versionId = selectedVersion?.id;
             if (!versionId) return;
@@ -311,7 +346,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
 
         <BlockEditor
           value={displayContent}
-          editable={!readonly}
+          editable={!effectiveReadonly}
           commentedBlockIds={commentedBlockIds}
           taskCountsByBlock={Object.fromEntries(blockTaskCounts.entries())}
           onCreateTasksFromSelection={(blockIds) => {
@@ -319,7 +354,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
             setDecomposeOpen(true);
           }}
           onChange={(content, contentText) =>
-            readonly
+            effectiveReadonly
               ? undefined
               : void updatePage({
                   projectId: projectId ?? selectedProjectId ?? "",
@@ -328,6 +363,9 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
                   content,
                   contentText,
                   expectedUpdatedAt: currentPage.updatedAt,
+                  templateCategory: currentPage.isTemplate
+                    ? currentPage.templateCategory || "custom"
+                    : undefined,
                 })
           }
         />
@@ -365,7 +403,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
         />
         <BacklinksPanel items={backlinks} />
         <VersionHistoryPanel
-          readonly={readonly}
+          readonly={effectiveReadonly}
           versions={versions}
           selectedVersionId={selectedVersionId}
           onSelect={setSelectedVersionId}
@@ -423,11 +461,15 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         templates={templates}
-        onPick={(templateId) => {
+        destinations={templateDestinations}
+        initialTemplateId={currentPage.isTemplate ? currentPage.id : undefined}
+        defaultTitle={t("newFromTemplate")}
+        onPick={({ templateId, title, parentId }) => {
           void createPageFromTemplate({
             projectId: projectId ?? selectedProjectId ?? "",
             templateId,
-            title: t("newFromTemplate"),
+            title,
+            parentId,
           });
           setPickerOpen(false);
         }}

@@ -420,7 +420,13 @@ describe("useAgentStore", () => {
         }),
       } as Response);
 
-    const preflight = await useAgentStore.getState().fetchDispatchPreflight("project-1", "task-1", "member-1");
+    const preflight = await useAgentStore.getState().fetchDispatchPreflight("project-1", "task-1", "member-1", {
+      runtime: "codex",
+      provider: "openai",
+      model: "gpt-5-codex",
+      roleId: "frontend-developer",
+      budgetUsd: 7.5,
+    });
     const history = await useAgentStore.getState().fetchDispatchHistory("task-1");
     const stats = await useAgentStore.getState().fetchDispatchStats("project-1");
 
@@ -446,6 +452,12 @@ describe("useAgentStore", () => {
     expect(useAgentStore.getState().dispatchStats).toEqual(
       expect.objectContaining({
         queueDepth: 3,
+      }),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:7777/api/v1/projects/project-1/dispatch/preflight?taskId=task-1&memberId=member-1&runtime=codex&provider=openai&model=gpt-5-codex&roleId=frontend-developer&budgetUsd=7.5",
+      expect.objectContaining({
+        method: "GET",
       }),
     );
   });

@@ -23,7 +23,7 @@ Registration and health metadata for those providers also expose completion-mode
 
 | Platform | Preferred transport | Required live credentials | Notes |
 | --- | --- | --- | --- |
-| Feishu | long connection | `FEISHU_APP_ID`, `FEISHU_APP_SECRET` | HTTP callback remains an explicit seam for callback types that still require it. |
+| Feishu | long connection | `FEISHU_APP_ID`, `FEISHU_APP_SECRET` | Optional webhook callback config uses `FEISHU_VERIFICATION_TOKEN`, `FEISHU_EVENT_ENCRYPT_KEY`, and `FEISHU_CALLBACK_PATH`; long connection remains the default callback intake. |
 | Slack | Socket Mode | `SLACK_BOT_TOKEN`, `SLACK_APP_TOKEN` | Requires app-level token and Socket Mode enablement. |
 | DingTalk | Stream mode | `DINGTALK_APP_KEY`, `DINGTALK_APP_SECRET` | Stream mode is the default live intake; structured notifications currently downgrade to text explicitly. |
 | WeCom | callback-driven app messaging | `WECOM_CORP_ID`, `WECOM_AGENT_ID`, `WECOM_AGENT_SECRET`, `WECOM_CALLBACK_TOKEN`, `WECOM_CALLBACK_PORT` | `WECOM_CALLBACK_PATH` defaults to `/wecom/callback`; inbound callbacks can reply through `response_url` and later direct sends use app-message APIs. |
@@ -114,7 +114,7 @@ delivery history truthful.
 
 | Platform | Startup check | Inbound check | Native action check | Reply/update check | Notification check | Stub smoke fixture |
 | --- | --- | --- | --- | --- | --- | --- |
-| Feishu | Bridge starts with `feishu-live`, registers a stable `bridge_id`, and `/im/health` source `feishu` | Send a message or mention to the app in a subscribed chat | Click a card button and confirm the callback reaches `/im/action` with message and callback metadata preserved | Confirm the card callback returns an immediate toast, and long-running work can later use the preserved callback token for delayed native card update | `POST /im/notify` with signed headers and `platform=feishu` can send JSON cards, template cards, builder-owned richer text cards, or fallback replies depending on reply-target context | `scripts/smoke/fixtures/feishu.json` |
+| Feishu | Bridge starts with `feishu-live`, registers a stable `bridge_id`, and `/im/health` source `feishu` | Send a message or mention to the app in a subscribed chat | Click a card button and confirm the callback reaches `/im/action` with message and callback metadata preserved, whether the deployment uses long connection only or an exposed webhook callback | Confirm the card callback returns an immediate toast or card update, and long-running work can later use the preserved callback token for delayed native card update | `POST /im/notify` with signed headers and `platform=feishu` can send JSON cards, template cards, builder-owned richer text cards, or fallback replies depending on reply-target context | `scripts/smoke/fixtures/feishu.json` |
 | Slack | Bridge logs `slack-live`, registers, and Socket Mode connects cleanly | Trigger `/queue list` or an app mention | Click a Block Kit button or submit a modal and confirm `/im/action` receives channel, thread, and `response_url` context | Confirm a threaded or `response_url` reply arrives after the Socket Mode ack | Matching Slack notification reaches the target channel, mismatched platform is rejected, replay stays in the original thread | `scripts/smoke/fixtures/slack.json` |
 | DingTalk | Bridge logs `dingtalk-live`, registers, and `/im/health` reports readiness tier `native_send_with_fallback` | Send `/agent list` as the compatibility alias or `/agent status` in a chat using Stream mode | Trigger a card callback payload and confirm it normalizes into `/im/action` with session webhook or conversation context | Confirm callback results use session webhook first, then conversation-scoped fallback when webhook is absent; editable-update requests should report explicit fallback | Structured notifications fall back to explicit text when richer send/update is unavailable and duplicate `delivery_id` values are suppressed | `scripts/smoke/fixtures/dingtalk.json` |
 | WeCom | Bridge starts with `wecom-live`, registers, and `/im/health` reports readiness tier `native_send_with_fallback` | Post a callback payload or send a message through the configured WeCom bot/application path | Confirm the callback normalizes into shared commands with `wecom` source, chat id, user id, and `response_url` preserved | Confirm reply flows prefer `response_url`, while replayed or later notifications can fall back to direct app send when no callback reply is available; editable-update requests should report explicit fallback | Matching WeCom notifications use provider-owned structured/text resolution and report explicit fallback when a richer update path is unavailable | `scripts/smoke/fixtures/wecom.json` |
@@ -166,8 +166,9 @@ go test ./cmd/bridge -run 'Test(ConfigurePlatformActionCallbacks_|SelectProvider
 For Feishu delayed-update validation, also confirm:
 
 1. A card action response returns within the callback window.
-2. A follow-on native update uses the preserved callback token when available.
-3. If the callback token is missing or unusable, `/im/notify` reports a `fallback_reason` instead of silently pretending the delayed update succeeded.
+2. `/help` only shows callback-backed quick actions when the active runtime can actually intake `card.action.trigger`; otherwise it falls back to plain command guidance.
+3. A follow-on native update uses the preserved callback token when available.
+4. If the callback token is missing or unusable, `/im/notify` reports a `fallback_reason` instead of silently pretending the delayed update succeeded.
 
 For China-platform parity checks, also confirm:
 

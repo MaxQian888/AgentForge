@@ -136,7 +136,7 @@ interface ProjectState {
   loading: boolean;
   fetchProjects: () => Promise<void>;
   setCurrentProject: (id: string) => void;
-  createProject: (data: { name: string; description: string }) => Promise<void>;
+  createProject: (data: { name: string; description: string }) => Promise<Project | undefined>;
   updateProject: (id: string, data: ProjectUpdateInput) => Promise<Project | undefined>;
   deleteProject: (id: string) => Promise<void>;
 }
@@ -470,6 +470,7 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
       );
       const project = normalizeProject(createdProjectRaw);
       set((s) => ({ projects: [...s.projects, project] }));
+      return project;
     } catch (error) {
       toast.error("Failed to create project", {
         description: error instanceof Error ? error.message : "Unknown error",

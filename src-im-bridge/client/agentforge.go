@@ -797,7 +797,7 @@ func (c *AgentForgeClient) SearchProjectMemory(ctx context.Context, queryText st
 		return nil, err
 	}
 	query := url.Values{}
-	query.Set("q", strings.TrimSpace(queryText))
+	query.Set("query", strings.TrimSpace(queryText))
 	if limit > 0 {
 		query.Set("limit", strconv.Itoa(limit))
 	}
@@ -824,9 +824,10 @@ func (c *AgentForgeClient) StoreProjectMemoryNote(ctx context.Context, key, cont
 	}
 	body := map[string]any{
 		"scope":          "project",
-		"category":       "operator_note",
+		"category":       "episodic",
 		"key":            key,
 		"content":        content,
+		"metadata":       `{"kind":"operator_note","editable":true,"tags":[]}`,
 		"relevanceScore": 0.5,
 	}
 	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/projects/%s/memory", projectID), body)
@@ -1629,6 +1630,9 @@ type MemoryEntry struct {
 	Scope          string  `json:"scope"`
 	RoleID         string  `json:"roleId"`
 	Category       string  `json:"category"`
+	Kind           string  `json:"kind,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
+	Editable       bool    `json:"editable"`
 	Key            string  `json:"key"`
 	Content        string  `json:"content"`
 	Metadata       string  `json:"metadata"`

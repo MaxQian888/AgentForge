@@ -589,4 +589,59 @@ describe("TeamManagement", () => {
     ).not.toBeInTheDocument();
     expect(onClearBulkUpdateResult).toHaveBeenCalled();
   });
+
+  it("shows stale role bindings as an attention state and highlights role on failed save", async () => {
+    const user = userEvent.setup();
+    const onUpdateMember = jest
+      .fn()
+      .mockRejectedValueOnce(
+        Object.assign(
+          new Error("role binding missing-role no longer resolves from the authoritative role registry"),
+          {
+            body: { field: "agentConfig.roleId" },
+          },
+        ),
+      );
+
+    render(
+      <TeamManagement
+        projects={projects}
+        selectedProjectId="project-1"
+        members={[
+          {
+            ...members[1],
+            roleBindingLabel: "missing-role",
+            readinessState: "ready",
+            readinessLabel: "Ready",
+            agentProfile: {
+              roleId: "missing-role",
+              runtime: "codex",
+              provider: "openai",
+              model: "gpt-5-codex",
+              maxBudgetUsd: 8,
+              notes: "keep reviews concise",
+            },
+          } as TeamMember,
+        ]}
+        loading={false}
+        error={null}
+        availableRoles={availableRoles}
+        onRetry={jest.fn()}
+        onProjectChange={jest.fn()}
+        onCreateMember={jest.fn().mockResolvedValue(undefined)}
+        onUpdateMember={onUpdateMember}
+      />
+    );
+
+    expect(screen.getByText("Stale role binding")).toBeInTheDocument();
+    expect(screen.getByText("Bound role: missing-role (stale)")).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Edit Review Bot" }));
+    await user.click(screen.getByRole("button", { name: "Save Member" }));
+
+    expect(
+      await screen.findByText(/no longer resolves from the authoritative role registry/),
+    ).toBeInTheDocument();
+    expect(screen.getByLabelText("Edit Bound Role")).toHaveAttribute("aria-invalid", "true");
+  });
 });

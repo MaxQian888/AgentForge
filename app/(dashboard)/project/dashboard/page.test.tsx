@@ -29,6 +29,7 @@ jest.mock("@/components/dashboard/dashboard-grid", () => ({
 }));
 
 const searchParamsState = {
+  project: null as string | null,
   dashboard: null as string | null,
   action: null as string | null,
 };
@@ -40,13 +41,18 @@ jest.mock("next/navigation", () => ({
   usePathname: () => "/project/dashboard",
   useSearchParams: () => ({
     get: (key: string) =>
-      key === "dashboard"
+      key === "project"
+        ? searchParamsState.project
+        : key === "dashboard"
         ? searchParamsState.dashboard
         : key === "action"
           ? searchParamsState.action
           : null,
     toString: () => {
       const params = new URLSearchParams();
+      if (searchParamsState.project) {
+        params.set("project", searchParamsState.project);
+      }
       if (searchParamsState.dashboard) {
         params.set("dashboard", searchParamsState.dashboard);
       }
@@ -65,6 +71,7 @@ const deleteDashboard = jest.fn().mockResolvedValue(undefined);
 
 describe("ProjectDashboardPage", () => {
   beforeEach(() => {
+    searchParamsState.project = null;
     searchParamsState.dashboard = null;
     searchParamsState.action = null;
     replace.mockClear();
@@ -95,6 +102,16 @@ describe("ProjectDashboardPage", () => {
   });
 
   it("renders the create dashboard action when the selected project has no dashboards yet", () => {
+    render(<ProjectDashboardPage />);
+
+    expect(screen.getByRole("button", { name: "Create Dashboard" })).toBeInTheDocument();
+    expect(fetchDashboards).toHaveBeenCalledWith("project-1");
+  });
+
+  it("uses the explicit project query param when ambient selection is missing", () => {
+    searchParamsState.project = "project-1";
+    useDashboardStore.setState({ selectedProjectId: null });
+
     render(<ProjectDashboardPage />);
 
     expect(screen.getByRole("button", { name: "Create Dashboard" })).toBeInTheDocument();

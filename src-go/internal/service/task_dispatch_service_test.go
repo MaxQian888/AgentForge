@@ -2,11 +2,13 @@ package service_test
 
 import (
 	"context"
+	"os"
 	"testing"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/ws"
 )
@@ -65,6 +67,7 @@ type mockDispatchRuntime struct {
 	err          error
 	lastTaskID   uuid.UUID
 	lastMemberID uuid.UUID
+	lastRoleID   string
 	spawnCalls   int
 	runs         []*model.AgentRun
 }
@@ -73,6 +76,7 @@ func (m *mockDispatchRuntime) Spawn(_ context.Context, taskID, memberID uuid.UUI
 	m.spawnCalls++
 	m.lastTaskID = taskID
 	m.lastMemberID = memberID
+	m.lastRoleID = roleID
 	if m.err != nil {
 		return nil, m.err
 	}
@@ -103,6 +107,17 @@ type mockDispatchQueueWriter struct {
 	entry *model.AgentPoolQueueEntry
 	err   error
 	last  service.QueueAgentAdmissionInput
+}
+
+type mockDispatchRoleStore struct {
+	roles map[string]*rolepkg.Manifest
+}
+
+func (m *mockDispatchRoleStore) Get(id string) (*rolepkg.Manifest, error) {
+	if role, ok := m.roles[id]; ok {
+		return role, nil
+	}
+	return nil, os.ErrNotExist
 }
 
 func (m *mockDispatchQueueWriter) QueueAgentAdmission(_ context.Context, input service.QueueAgentAdmissionInput) (*model.AgentPoolQueueEntry, error) {
@@ -301,6 +316,109 @@ func TestTaskDispatchService_SpawnUsesAssignedAgentWhenMemberIDMissing(t *testin
 	}
 	if runtime.lastMemberID != memberID {
 		t.Fatalf("runtime member = %s, want %s", runtime.lastMemberID, memberID)
+	}
+}
+
+func TestTaskDispatchService_SpawnUsesMemberBoundRoleWhenExplicitRoleIsMissing(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	memberID := uuid.New()
+	taskRepo := &mockDispatchTaskRepo{
+		task: &model.Task{
+			ID:           taskID,
+			ProjectID:    projectID,
+			Title:        "Dispatch task",
+			Status:       model.TaskStatusAssigned,
+			AssigneeID:   &memberID,
+			AssigneeType: model.MemberTypeAgent,
+		},
+	}
+	memberRepo := &mockDispatchMemberRepo{
+		member: &model.Member{
+			ID:          memberID,
+			ProjectID:   projectID,
+			Type:        model.MemberTypeAgent,
+			IsActive:    true,
+			AgentConfig: `{"roleId":"frontend-developer","runtime":"codex"}`,
+		},
+	}
+	runtime := &mockDispatchRuntime{
+		run: &model.AgentRun{
+			ID:       uuid.New(),
+			TaskID:   taskID,
+			MemberID: memberID,
+			Status:   model.AgentRunStatusRunning,
+		},
+	}
+	roleStore := &mockDispatchRoleStore{
+		roles: map[string]*rolepkg.Manifest{
+			"frontend-developer": {
+				Metadata: model.RoleMetadata{ID: "frontend-developer", Name: "Frontend Developer"},
+			},
+		},
+	}
+
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).
+		WithRoleStore(roleStore)
+
+	result, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
+		TaskID: taskID,
+	})
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+
+	if result.Dispatch.RoleID != "frontend-developer" {
+		t.Fatalf("dispatch roleId = %q, want frontend-developer", result.Dispatch.RoleID)
+	}
+	if runtime.lastRoleID != "frontend-developer" {
+		t.Fatalf("runtime lastRoleID = %q, want frontend-developer", runtime.lastRoleID)
+	}
+}
+
+func TestTaskDispatchService_SpawnBlocksWhenMemberBoundRoleIsStale(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	memberID := uuid.New()
+	taskRepo := &mockDispatchTaskRepo{
+		task: &model.Task{
+			ID:           taskID,
+			ProjectID:    projectID,
+			Title:        "Dispatch task",
+			Status:       model.TaskStatusAssigned,
+			AssigneeID:   &memberID,
+			AssigneeType: model.MemberTypeAgent,
+		},
+	}
+	memberRepo := &mockDispatchMemberRepo{
+		member: &model.Member{
+			ID:          memberID,
+			ProjectID:   projectID,
+			Type:        model.MemberTypeAgent,
+			IsActive:    true,
+			AgentConfig: `{"roleId":"missing-role","runtime":"codex"}`,
+		},
+	}
+	runtime := &mockDispatchRuntime{}
+
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).
+		WithRoleStore(&mockDispatchRoleStore{roles: map[string]*rolepkg.Manifest{}})
+
+	result, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
+		TaskID: taskID,
+	})
+	if err != nil {
+		t.Fatalf("Spawn() error = %v", err)
+	}
+
+	if result.Dispatch.Status != model.DispatchStatusBlocked {
+		t.Fatalf("dispatch result = %+v, want blocked", result.Dispatch)
+	}
+	if result.Dispatch.GuardrailType != model.DispatchGuardrailTypeTarget || result.Dispatch.GuardrailScope != "role" {
+		t.Fatalf("guardrail = %+v, want target/role", result.Dispatch)
+	}
+	if runtime.spawnCalls != 0 {
+		t.Fatalf("runtime spawn calls = %d, want 0", runtime.spawnCalls)
 	}
 }
 

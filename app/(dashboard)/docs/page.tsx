@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useSearchParams } from "next/navigation";
 import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
@@ -20,8 +21,12 @@ import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 export default function DocsLandingPage() {
   useBreadcrumbs([{ label: "Configuration", href: "/" }, { label: "Docs" }]);
   const t = useTranslations("docs");
+  const router = useRouter();
   const searchParams = useSearchParams();
   const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
+  const requestedProjectId = searchParams.get("project");
+  const requestedAction = searchParams.get("action");
+  const activeProjectId = requestedProjectId ?? selectedProjectId;
   const {
     tree,
     templates,
@@ -32,32 +37,48 @@ export default function DocsLandingPage() {
     fetchFavorites,
     fetchRecentAccess,
     createPage,
+    createTemplate,
     createPageFromTemplate,
+    duplicateTemplate,
+    deleteTemplate,
     movePage,
     toggleFavorite,
     togglePinned,
   } = useDocsStore();
   const [query, setQuery] = useState("");
-  const [pickerOpen, setPickerOpen] = useState(false);
+  const [pickerOpen, setPickerOpen] = useState(
+    () => requestedAction === "use-template" && Boolean(activeProjectId),
+  );
+  const [selectedTemplateId, setSelectedTemplateId] = useState<string | null>(null);
   const pageId = searchParams.get("pageId");
 
   useEffect(() => {
-    if (!selectedProjectId) return;
-    useDocsStore.getState().setProjectId(selectedProjectId);
-    void fetchTree(selectedProjectId);
-    void fetchTemplates(selectedProjectId);
-    void fetchFavorites(selectedProjectId);
-    void fetchRecentAccess(selectedProjectId);
-  }, [fetchFavorites, fetchRecentAccess, fetchTemplates, fetchTree, selectedProjectId]);
+    if (!activeProjectId) return;
+    useDocsStore.getState().setProjectId(activeProjectId);
+    void fetchTree(activeProjectId);
+    void fetchTemplates(activeProjectId);
+    void fetchFavorites(activeProjectId);
+    void fetchRecentAccess(activeProjectId);
+  }, [activeProjectId, fetchFavorites, fetchRecentAccess, fetchTemplates, fetchTree]);
 
   const allPages = useMemo(() => flattenDocsTree(tree), [tree]);
   const pinnedPages = useMemo(() => allPages.filter((page) => page.isPinned), [allPages]);
+  const templateDestinations = useMemo(
+    () =>
+      allPages
+        .filter((page) => !page.isTemplate)
+        .map((page) => ({
+          id: page.id,
+          title: page.title,
+        })),
+    [allPages],
+  );
 
   if (pageId) {
     return <DocsPageDetailClient pageId={pageId} />;
   }
 
-  if (!selectedProjectId) {
+  if (!activeProjectId) {
     return (
       <div className="flex flex-col gap-4">
         <PageHeader title={t("title")} />
@@ -78,13 +99,13 @@ export default function DocsLandingPage() {
         favorites={favorites}
         recentAccess={recentAccess}
         onMovePage={(targetPageId, parentId, sortOrder) =>
-          void movePage({ projectId: selectedProjectId, pageId: targetPageId, parentId, sortOrder })
+          void movePage({ projectId: activeProjectId, pageId: targetPageId, parentId, sortOrder })
         }
         onToggleFavorite={(targetPageId, favorite) =>
-          void toggleFavorite({ projectId: selectedProjectId, pageId: targetPageId, favorite })
+          void toggleFavorite({ projectId: activeProjectId, pageId: targetPageId, favorite })
         }
         onTogglePinned={(targetPageId, pinned) =>
-          void togglePinned({ projectId: selectedProjectId, pageId: targetPageId, pinned })
+          void togglePinned({ projectId: activeProjectId, pageId: targetPageId, pinned })
         }
       />
 
@@ -100,7 +121,7 @@ export default function DocsLandingPage() {
               <Button
                 onClick={() =>
                   void createPage({
-                    projectId: selectedProjectId,
+                    projectId: activeProjectId,
                     title: t("untitledDoc"),
                   })
                 }
@@ -166,12 +187,34 @@ export default function DocsLandingPage() {
 
         <TemplateCenter
           templates={templates}
-          onCreateFromTemplate={(templateId) =>
-            void createPageFromTemplate({
-              projectId: selectedProjectId,
+          onCreateFromTemplate={(templateId) => {
+            setSelectedTemplateId(templateId);
+            setPickerOpen(true);
+          }}
+          onCreateTemplate={async ({ title, category }) => {
+            const template = await createTemplate({
+              projectId: activeProjectId,
+              title,
+              category,
+            });
+            if (template) {
+              router.push(buildDocsHref(template.id));
+            }
+          }}
+          onEditTemplate={(templateId) => router.push(buildDocsHref(templateId))}
+          onDuplicateTemplate={async ({ templateId, name, category }) => {
+            const template = await duplicateTemplate({
+              projectId: activeProjectId,
               templateId,
-              title: t("newFromTemplate"),
-            })
+              name,
+              category,
+            });
+            if (template) {
+              router.push(buildDocsHref(template.id));
+            }
+          }}
+          onDeleteTemplate={(templateId) =>
+            deleteTemplate({ projectId: activeProjectId, templateId })
           }
         />
 
@@ -199,13 +242,18 @@ export default function DocsLandingPage() {
         open={pickerOpen}
         onOpenChange={setPickerOpen}
         templates={templates}
-        onPick={(templateId) => {
+        destinations={templateDestinations}
+        initialTemplateId={selectedTemplateId}
+        defaultTitle={t("newFromTemplate")}
+        onPick={({ templateId, title, parentId }) => {
           void createPageFromTemplate({
-            projectId: selectedProjectId,
+            projectId: activeProjectId,
             templateId,
-            title: t("newFromTemplate"),
+            title,
+            parentId,
           });
           setPickerOpen(false);
+          setSelectedTemplateId(null);
         }}
       />
     </div>

@@ -89,6 +89,25 @@ func TestLoadConfig_ReadsWeComSettings(t *testing.T) {
 	}
 }
 
+func TestLoadConfig_ReadsFeishuCallbackSettings(t *testing.T) {
+	t.Setenv("IM_PLATFORM", "feishu")
+	t.Setenv("IM_TRANSPORT_MODE", "live")
+	t.Setenv("FEISHU_APP_ID", "app-id")
+	t.Setenv("FEISHU_APP_SECRET", "app-secret")
+	t.Setenv("FEISHU_VERIFICATION_TOKEN", "verification-token")
+	t.Setenv("FEISHU_EVENT_ENCRYPT_KEY", "encrypt-key")
+	t.Setenv("FEISHU_CALLBACK_PATH", "/feishu/callback")
+
+	cfg := loadConfig()
+
+	if cfg.Platform != "feishu" {
+		t.Fatalf("Platform = %q, want feishu", cfg.Platform)
+	}
+	if cfg.FeishuVerificationToken != "verification-token" || cfg.FeishuEventEncryptKey != "encrypt-key" || cfg.FeishuCallbackPath != "/feishu/callback" {
+		t.Fatalf("cfg = %+v", cfg)
+	}
+}
+
 func TestLoadConfig_ReadsQQAndQQBotSettings(t *testing.T) {
 	t.Setenv("IM_PLATFORM", "qq")
 	t.Setenv("IM_TRANSPORT_MODE", "live")
@@ -185,6 +204,33 @@ func TestSelectPlatform_ReturnsLiveFeishuAdapterWhenConfigured(t *testing.T) {
 	}
 	if _, ok := platform.(*feishu.Live); !ok {
 		t.Fatalf("platform type = %T, want *feishu.Live", platform)
+	}
+}
+
+func TestSelectPlatform_ConfiguresFeishuWebhookCallbackHandler(t *testing.T) {
+	cfg := &config{
+		Platform:                "feishu",
+		TransportMode:           "live",
+		FeishuApp:               "app-id",
+		FeishuSec:               "app-secret",
+		FeishuVerificationToken: "verification-token",
+		FeishuEventEncryptKey:   "encrypt-key",
+		FeishuCallbackPath:      "/feishu/callback",
+	}
+
+	platform, err := selectPlatform(cfg)
+	if err != nil {
+		t.Fatalf("selectPlatform error: %v", err)
+	}
+	live, ok := platform.(*feishu.Live)
+	if !ok {
+		t.Fatalf("platform type = %T, want *feishu.Live", platform)
+	}
+	if live.HTTPCallbackHandler() == nil {
+		t.Fatal("expected configured webhook callback handler")
+	}
+	if got := live.CallbackPaths(); len(got) != 1 || got[0] != "/feishu/callback" {
+		t.Fatalf("CallbackPaths = %+v", got)
 	}
 }
 

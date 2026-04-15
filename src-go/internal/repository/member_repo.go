@@ -60,6 +60,25 @@ func (r *MemberRepository) ListByProject(ctx context.Context, projectID uuid.UUI
 	return members, nil
 }
 
+func (r *MemberRepository) ListAll(ctx context.Context) ([]*model.Member, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+
+	var records []memberRecord
+	if err := r.db.WithContext(ctx).
+		Order("created_at").
+		Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list all members: %w", err)
+	}
+
+	members := make([]*model.Member, 0, len(records))
+	for i := range records {
+		members = append(members, records[i].toModel())
+	}
+	return members, nil
+}
+
 func (r *MemberRepository) Update(ctx context.Context, id uuid.UUID, req *model.UpdateMemberRequest) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable

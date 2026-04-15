@@ -2,7 +2,7 @@ Auto-translate missing i18n keys detected by the audit script.
 
 **Steps:**
 
-1. Run `node scripts/i18n-audit.js --json` and capture the JSON output from stdout
+1. Run `node scripts/i18n/i18n-audit.js --json` and capture the JSON output from stdout
 2. Parse the JSON array of `AuditResult` objects — each has `moduleName`, `missing[]` with `key`, `en`, `zh`, and `missingIn`
 3. For each missing entry:
    - If `missingIn` includes `"en"`: the `zh` value is present — translate it to English

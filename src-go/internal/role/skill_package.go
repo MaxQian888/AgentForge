@@ -41,6 +41,20 @@ func readSkillPackageDocument(root, canonicalPath string) (*skillPackageDocument
 
 	relative := strings.TrimPrefix(canonicalPath, "skills/")
 	skillDir := filepath.Join(root, filepath.FromSlash(relative))
+	return readSkillPackageDocumentFromDir(skillDir, canonicalPath, relative)
+}
+
+func readManagedSkillPackageDocument(root, canonicalPath string) (*skillPackageDocument, error) {
+	canonicalPath = normalizeManagedSkillCanonicalPath(canonicalPath)
+	if canonicalPath == "" {
+		return nil, os.ErrNotExist
+	}
+
+	skillDir := filepath.Join(root, filepath.FromSlash(canonicalPath))
+	return readSkillPackageDocumentFromDir(skillDir, canonicalPath, canonicalPath)
+}
+
+func readSkillPackageDocumentFromDir(skillDir, canonicalPath, relative string) (*skillPackageDocument, error) {
 	content, err := os.ReadFile(filepath.Join(skillDir, "SKILL.md"))
 	if err != nil {
 		return nil, err
@@ -79,6 +93,16 @@ func readSkillPackageDocument(root, canonicalPath string) (*skillPackageDocument
 		ScriptCount:    scriptCount,
 		AssetCount:     assetCount,
 	}, nil
+}
+
+func normalizeManagedSkillCanonicalPath(value string) string {
+	value = strings.TrimSpace(strings.ReplaceAll(value, "\\", "/"))
+	value = strings.TrimPrefix(value, "./")
+	value = strings.TrimPrefix(value, "/")
+	if value == "" {
+		return ""
+	}
+	return filepath.ToSlash(filepath.Clean(value))
 }
 
 func readSkillInterfaceMetadata(skillDir string) (skillInterfaceMetadata, bool) {

@@ -124,6 +124,31 @@ Unresolved manual skill paths remain a valid authoring state as long as the role
 - unresolved non-auto-load skills remain warning-level inventory gaps
 - resolved skills whose declared tool requirements are not covered by the effective role capability set follow the same severity split: blocking for auto-load closure, warning-only for on-demand inventory
 
+## Role Reference Governance
+
+Roles are now treated as governed system assets, not just editable YAML files.
+
+- `GET /api/v1/roles/:id/references`
+  - returns the authoritative downstream reference inventory for the current role
+  - separates `blockingConsumers` from `advisoryConsumers`
+  - current blocking consumers include:
+    - installed workflow or plugin bindings
+    - agent-member bindings whose `agentConfig.roleId` still points at that role
+    - queued execution requests that still carry that role id
+  - current advisory consumers include:
+    - historical or already-materialized agent runs that keep the role id for audit context
+
+- `DELETE /api/v1/roles/:id`
+  - now returns a structured conflict payload when blocking consumers still exist
+  - no longer relies on a single generic plugin-only delete error
+
+This means the dashboard role workspace can show delete blockers before a destructive action proceeds, and operators can distinguish:
+
+- a role that is still actively referenced and cannot be removed yet
+- a role that only has advisory historical references and can still be cleaned up
+
+Historical `agent_runs` keep their stored `role_id` after deletion for audit and diagnostics. They are not treated as proof that the role is still safe to execute.
+
 ## Role-Skill Compatibility Normalization
 
 Compatibility checks do not compare raw role YAML tool strings to `SKILL.md` tool hints directly.
@@ -152,6 +177,19 @@ The current backend runtime accepts an optional `roleId` when creating an agent 
 ```
 
 Go resolves that `roleId` through the unified YAML-backed role store before execution starts, projects it into the normalized `role_config`, and forwards the projected settings to the Bridge request. Unknown role ids are rejected before runtime startup. The resulting `agent_runs` record also retains the selected `role_id` for inspection and API responses.
+
+When no explicit `roleId` is supplied, task-dispatch and team/member-driven spawn flows now derive the effective role binding from the target agent member's saved `agentConfig.roleId`. That derived binding is validated through the same role registry before queue admission or runtime startup.
+
+If an operator-selected or member-derived binding no longer resolves from the current role registry:
+
+- dispatch preflight returns a blocked role guardrail instead of implying the agent is ready
+- spawn or dispatch does not create a queue entry or start a runtime
+- team management should repair the member's bound role before retrying launch
+
+Team management also treats stale bound roles differently from missing role setup:
+
+- missing `roleId` remains `Needs role binding`
+- a previously saved but now missing role becomes `Stale role binding`
 
 The Bridge-bound `role_config` is now expected to carry the runtime-facing advanced fields that the current Bridge path actually consumes:
 

@@ -1,6 +1,7 @@
 "use client";
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useSearchParams } from "next/navigation";
 import { useTranslations } from "next-intl";
 import {
   FolderOpen,
@@ -12,6 +13,7 @@ import {
   CheckCircle2,
   XCircle,
   Loader2,
+  LayoutTemplate,
 } from "lucide-react";
 import { toast } from "sonner";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
@@ -126,7 +128,90 @@ function CreateWorkflowDialog({
   );
 }
 
-function WorkflowListTab({ projectId }: { projectId: string }) {
+function PublishTemplateDialog({
+  definition,
+  projectId,
+  onPublished,
+}: {
+  definition: WorkflowDefinition;
+  projectId: string;
+  onPublished: (template: WorkflowDefinition) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [name, setName] = useState(definition.name);
+  const [description, setDescription] = useState(definition.description);
+  const { publishTemplate, saving } = useWorkflowStore();
+
+  const handlePublish = useCallback(async () => {
+    const template = await publishTemplate(definition.id, projectId, {
+      name: name.trim() || definition.name,
+      description: description.trim() || definition.description,
+    });
+    if (template) {
+      toast.success("Template published");
+      setOpen(false);
+      onPublished(template);
+    }
+  }, [
+    definition.description,
+    definition.id,
+    definition.name,
+    description,
+    name,
+    onPublished,
+    projectId,
+    publishTemplate,
+  ]);
+
+  return (
+    <Dialog open={open} onOpenChange={setOpen}>
+      <DialogTrigger asChild>
+        <Button variant="ghost" size="icon" className="h-7 w-7" title="Publish as template">
+          <LayoutTemplate className="h-3.5 w-3.5" />
+        </Button>
+      </DialogTrigger>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Publish as Template</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-4 py-2">
+          <div className="space-y-2">
+            <Label htmlFor={`publish-template-name-${definition.id}`}>Template Name</Label>
+            <Input
+              id={`publish-template-name-${definition.id}`}
+              value={name}
+              onChange={(event) => setName(event.target.value)}
+            />
+          </div>
+          <div className="space-y-2">
+            <Label htmlFor={`publish-template-description-${definition.id}`}>Description</Label>
+            <Input
+              id={`publish-template-description-${definition.id}`}
+              value={description}
+              onChange={(event) => setDescription(event.target.value)}
+            />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={() => setOpen(false)}>
+            Cancel
+          </Button>
+          <Button onClick={handlePublish} disabled={saving}>
+            {saving ? "Publishing..." : "Publish"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  );
+}
+
+function WorkflowListTab({
+  projectId,
+  setActiveTab,
+}: {
+  projectId: string;
+  setActiveTab: (tab: string) => void;
+}) {
   const isDirtyRef = useRef(false);
   const {
     definitions,
@@ -190,6 +275,13 @@ function WorkflowListTab({ projectId }: { projectId: string }) {
           <span className="text-sm text-muted-foreground">
             / {selectedDefinition.name}
           </span>
+          {selectedDefinition.status !== "template" ? (
+            <PublishTemplateDialog
+              definition={selectedDefinition}
+              projectId={projectId}
+              onPublished={() => setActiveTab("templates")}
+            />
+          ) : null}
         </div>
         <WorkflowEditor
           definition={selectedDefinition}
@@ -255,6 +347,13 @@ function WorkflowListTab({ projectId }: { projectId: string }) {
                     </Badge>
                   </div>
                   <div className="flex items-center gap-1 opacity-0 group-hover:opacity-100 transition-opacity">
+                    {def.status !== "template" ? (
+                      <PublishTemplateDialog
+                        definition={def}
+                        projectId={projectId}
+                        onPublished={() => setActiveTab("templates")}
+                      />
+                    ) : null}
                     <Button
                       variant="ghost"
                       size="icon"
@@ -488,13 +587,30 @@ function ExecutionsTab({ projectId }: { projectId: string }) {
   );
 }
 
-export default function WorkflowPage() {
+function WorkflowPageContent() {
   useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Workflow" }]);
   const t = useTranslations("workflow");
+  const searchParams = useSearchParams();
+  const requestedProjectId = searchParams.get("project");
+  const requestedTab = searchParams.get("tab");
   const selectedProjectId = useDashboardStore((s) => s.selectedProjectId);
-  const [activeTab, setActiveTab] = useState("workflows");
+  const activeProjectId = requestedProjectId ?? selectedProjectId;
+  const requestedTabSeed = requestedTab ?? "__default__";
+  const [manualActiveTab, setManualActiveTab] = useState<string | null>(null);
+  const [manualTabSeed, setManualTabSeed] = useState<string | null>(null);
+  const activeTab =
+    manualTabSeed === requestedTabSeed
+      ? manualActiveTab ?? requestedTab ?? "workflows"
+      : requestedTab ?? "workflows";
+  const handleActiveTabChange = useCallback(
+    (nextTab: string) => {
+      setManualTabSeed(requestedTabSeed);
+      setManualActiveTab(nextTab);
+    },
+    [requestedTabSeed],
+  );
 
-  if (!selectedProjectId) {
+  if (!activeProjectId) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader title={t("title")} />
@@ -506,7 +622,7 @@ export default function WorkflowPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader title={t("title")} />
-      <Tabs value={activeTab} onValueChange={setActiveTab} className="w-full">
+      <Tabs value={activeTab} onValueChange={handleActiveTabChange} className="w-full">
         <TabsList>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="workflows">Workflows</TabsTrigger>
@@ -515,21 +631,29 @@ export default function WorkflowPage() {
           <TabsTrigger value="templates">Templates</TabsTrigger>
         </TabsList>
         <TabsContent value="config" className="mt-4">
-          <WorkflowConfigPanel projectId={selectedProjectId} />
+          <WorkflowConfigPanel projectId={activeProjectId} />
         </TabsContent>
         <TabsContent value="workflows" className="mt-4">
-          <WorkflowListTab projectId={selectedProjectId} />
+          <WorkflowListTab projectId={activeProjectId} setActiveTab={handleActiveTabChange} />
         </TabsContent>
         <TabsContent value="executions" className="mt-4">
-          <ExecutionsTab projectId={selectedProjectId} />
+          <ExecutionsTab projectId={activeProjectId} />
         </TabsContent>
         <TabsContent value="reviews" className="mt-4">
-          <WorkflowReviewsTab projectId={selectedProjectId} />
+          <WorkflowReviewsTab projectId={activeProjectId} />
         </TabsContent>
         <TabsContent value="templates" className="mt-4">
-          <WorkflowTemplatesTab projectId={selectedProjectId} setActiveTab={setActiveTab} />
+          <WorkflowTemplatesTab projectId={activeProjectId} setActiveTab={handleActiveTabChange} />
         </TabsContent>
       </Tabs>
     </div>
+  );
+}
+
+export default function WorkflowPage() {
+  return (
+    <Suspense fallback={null}>
+      <WorkflowPageContent />
+    </Suspense>
   );
 }

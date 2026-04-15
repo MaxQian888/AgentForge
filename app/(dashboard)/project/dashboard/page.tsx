@@ -21,7 +21,9 @@ function ProjectDashboardView() {
   const router = useRouter();
   const pathname = usePathname();
   const searchParams = useSearchParams();
-  const projectId = useDashboardStore((state) => state.selectedProjectId);
+  const requestedProjectId = searchParams.get("project");
+  const selectedProjectId = useDashboardStore((state) => state.selectedProjectId);
+  const projectId = requestedProjectId ?? selectedProjectId;
   const activeDashboardIdByProject = useDashboardStore(
     (state) => state.activeDashboardIdByProject
   );

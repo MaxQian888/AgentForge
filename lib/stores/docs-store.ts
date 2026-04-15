@@ -24,6 +24,18 @@ export interface DocsPage {
   createdAt: string;
   updatedAt: string;
   deletedAt?: string | null;
+  templateSource?: "system" | "custom" | null;
+  previewSnippet?: string | null;
+  canEdit?: boolean;
+  canDelete?: boolean;
+  canDuplicate?: boolean;
+  canUse?: boolean;
+}
+
+export interface DocsTemplateFilters {
+  query?: string;
+  category?: string;
+  source?: "system" | "custom" | "all";
 }
 
 export interface DocsPageTreeNode extends DocsPage {
@@ -97,6 +109,7 @@ interface DocsState {
     content: string;
     contentText: string;
     expectedUpdatedAt?: string;
+    templateCategory?: string;
   }) => Promise<DocsPage | null>;
   movePage: (input: {
     projectId: string;
@@ -128,18 +141,43 @@ interface DocsState {
     pageId: string;
     commentId: string;
   }) => Promise<void>;
-  fetchTemplates: (projectId: string) => Promise<void>;
+  fetchTemplates: (projectId: string, filters?: DocsTemplateFilters) => Promise<void>;
   createPageFromTemplate: (input: {
     projectId: string;
     templateId: string;
     title: string;
     parentId?: string | null;
   }) => Promise<DocsPage | null>;
+  createTemplate: (input: {
+    projectId: string;
+    title: string;
+    category: string;
+    content?: string;
+  }) => Promise<DocsPage | null>;
   createTemplateFromPage: (input: {
     projectId: string;
     pageId: string;
     name: string;
     category: string;
+  }) => Promise<DocsPage | null>;
+  duplicateTemplate: (input: {
+    projectId: string;
+    templateId: string;
+    name: string;
+    category: string;
+  }) => Promise<DocsPage | null>;
+  updateTemplate: (input: {
+    projectId: string;
+    templateId: string;
+    title: string;
+    content: string;
+    contentText: string;
+    expectedUpdatedAt?: string;
+    templateCategory?: string;
+  }) => Promise<DocsPage | null>;
+  deleteTemplate: (input: {
+    projectId: string;
+    templateId: string;
   }) => Promise<void>;
   fetchFavorites: (projectId: string) => Promise<void>;
   toggleFavorite: (input: {
@@ -186,6 +224,28 @@ function toDocsPage(raw: Record<string, unknown>): DocsPage {
     createdAt: String(raw.createdAt ?? new Date().toISOString()),
     updatedAt: String(raw.updatedAt ?? new Date().toISOString()),
     deletedAt: typeof raw.deletedAt === "string" ? raw.deletedAt : null,
+    templateSource:
+      raw.templateSource === "system" || raw.templateSource === "custom"
+        ? raw.templateSource
+        : Boolean(raw.isTemplate)
+          ? (Boolean(raw.isSystem) ? "system" : "custom")
+          : null,
+    previewSnippet:
+      typeof raw.previewSnippet === "string" ? raw.previewSnippet : null,
+    canEdit:
+      typeof raw.canEdit === "boolean"
+        ? raw.canEdit
+        : Boolean(raw.isTemplate) && !Boolean(raw.isSystem),
+    canDelete:
+      typeof raw.canDelete === "boolean"
+        ? raw.canDelete
+        : Boolean(raw.isTemplate) && !Boolean(raw.isSystem),
+    canDuplicate:
+      typeof raw.canDuplicate === "boolean"
+        ? raw.canDuplicate
+        : Boolean(raw.isTemplate),
+    canUse:
+      typeof raw.canUse === "boolean" ? raw.canUse : Boolean(raw.isTemplate),
   };
 }
 
@@ -376,6 +436,7 @@ export const useDocsStore = create<DocsState>()((set, get) => ({
     content,
     contentText,
     expectedUpdatedAt,
+    templateCategory,
   }) => {
     const { api, token } = getApi();
     set({ saving: true });
@@ -387,6 +448,7 @@ export const useDocsStore = create<DocsState>()((set, get) => ({
           content,
           contentText,
           expectedUpdatedAt,
+          templateCategory,
         },
         { token }
       );
@@ -494,13 +556,39 @@ export const useDocsStore = create<DocsState>()((set, get) => ({
     await get().fetchComments(projectId, pageId);
   },
 
-  fetchTemplates: async (projectId) => {
+  fetchTemplates: async (projectId, filters) => {
     const { api, token } = getApi();
+    const params = new URLSearchParams();
+    if (filters?.query?.trim()) {
+      params.set("q", filters.query.trim());
+    }
+    if (filters?.category?.trim()) {
+      params.set("category", filters.category.trim());
+    }
+    if (filters?.source && filters.source !== "all") {
+      params.set("source", filters.source);
+    }
     const { data } = await api.get<Record<string, unknown>[]>(
-      `/api/v1/projects/${projectId}/wiki/templates`,
+      `/api/v1/projects/${projectId}/wiki/templates${params.size ? `?${params.toString()}` : ""}`,
       { token }
     );
     set({ templates: data.map(toDocsPage) });
+  },
+
+  createTemplate: async ({ projectId, title, category, content }) => {
+    const { api, token } = getApi();
+    const { data } = await api.post<Record<string, unknown>>(
+      `/api/v1/projects/${projectId}/wiki/templates`,
+      {
+        title,
+        category,
+        content: content ?? "[]",
+      },
+      { token }
+    );
+    const template = toDocsPage(data);
+    await Promise.all([get().fetchTemplates(projectId), get().fetchTree(projectId)]);
+    return template;
   },
 
   createPageFromTemplate: async ({ projectId, templateId, title, parentId }) => {
@@ -521,12 +609,55 @@ export const useDocsStore = create<DocsState>()((set, get) => ({
 
   createTemplateFromPage: async ({ projectId, pageId, name, category }) => {
     const { api, token } = getApi();
-    await api.post(
+    const { data } = await api.post<Record<string, unknown>>(
       `/api/v1/projects/${projectId}/wiki/pages/${pageId}/templates`,
       { name, category },
       { token }
     );
+    await Promise.all([get().fetchTemplates(projectId), get().fetchTree(projectId)]);
+    return toDocsPage(data);
+  },
+
+  duplicateTemplate: async ({ projectId, templateId, name, category }) => {
+    return get().createTemplateFromPage({
+      projectId,
+      pageId: templateId,
+      name,
+      category,
+    });
+  },
+
+  updateTemplate: async ({
+    projectId,
+    templateId,
+    title,
+    content,
+    contentText,
+    expectedUpdatedAt,
+    templateCategory,
+  }) => {
+    const updated = await get().updatePage({
+      projectId,
+      pageId: templateId,
+      title,
+      content,
+      contentText,
+      expectedUpdatedAt,
+      templateCategory,
+    });
     await get().fetchTemplates(projectId);
+    return updated;
+  },
+
+  deleteTemplate: async ({ projectId, templateId }) => {
+    const { api, token } = getApi();
+    await api.delete(`/api/v1/projects/${projectId}/wiki/pages/${templateId}`, {
+      token,
+    });
+    if (get().currentPage?.id === templateId) {
+      set({ currentPage: null });
+    }
+    await Promise.all([get().fetchTemplates(projectId), get().fetchTree(projectId)]);
   },
 
   fetchFavorites: async (projectId) => {

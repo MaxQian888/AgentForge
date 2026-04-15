@@ -524,3 +524,150 @@ func TestWorkflowExecutionService_GetRunReturnsNotFound(t *testing.T) {
 		t.Fatal("expected missing run lookup to fail")
 	}
 }
+
+func TestWorkflowExecutionService_StartTaskTriggeredAddsTaskContextAndProfile(t *testing.T) {
+	pluginRepo := repository.NewPluginRegistryRepository()
+	runRepo := repository.NewWorkflowPluginRunRepository()
+	executor := &workflowStepExecutorMock{}
+	record := &model.PluginRecord{
+		PluginManifest: model.PluginManifest{
+			APIVersion: "agentforge/v1",
+			Kind:       model.PluginKindWorkflow,
+			Metadata: model.PluginMetadata{
+				ID:      "task-delivery-flow",
+				Name:    "Task Delivery Flow",
+				Version: "1.0.0",
+			},
+			Spec: model.PluginSpec{
+				Runtime:    model.PluginRuntimeWASM,
+				Module:     "./dist/task-delivery-flow.wasm",
+				ABIVersion: "v1",
+				Workflow: &model.WorkflowPluginSpec{
+					Process: model.WorkflowProcessSequential,
+					Roles: []model.WorkflowRoleBinding{
+						{ID: "planner"},
+						{ID: "coder"},
+					},
+					Steps: []model.WorkflowStepDefinition{
+						{ID: "plan", Role: "planner", Action: model.WorkflowActionAgent, Next: []string{"implement"}},
+						{ID: "implement", Role: "coder", Action: model.WorkflowActionAgent},
+					},
+					Triggers: []model.PluginWorkflowTrigger{
+						{Event: "manual"},
+						{Event: "task.transition", Profile: "task-delivery", RequiresTask: true},
+					},
+				},
+			},
+		},
+		LifecycleState: model.PluginStateActive,
+		RuntimeHost:    model.PluginHostGoOrchestrator,
+	}
+	if err := pluginRepo.Save(context.Background(), record); err != nil {
+		t.Fatalf("save workflow plugin record: %v", err)
+	}
+
+	svc := service.NewWorkflowExecutionService(
+		pluginRepo,
+		runRepo,
+		&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"planner": {Metadata: model.RoleMetadata{ID: "planner", Name: "Planner"}},
+				"coder":   {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+			},
+		},
+		executor,
+	)
+
+	taskID := uuid.New()
+	run, err := svc.StartTaskTriggered(context.Background(), record.Metadata.ID, "task-delivery", taskID, service.WorkflowExecutionRequest{
+		Trigger: map[string]any{
+			"fromStatus": "triaged",
+			"toStatus":   "assigned",
+		},
+	})
+	if err != nil {
+		t.Fatalf("StartTaskTriggered() error = %v", err)
+	}
+	if got := run.Trigger["taskId"]; got != taskID.String() {
+		t.Fatalf("run trigger taskId = %v, want %s", got, taskID.String())
+	}
+	if got := run.Trigger["profile"]; got != "task-delivery" {
+		t.Fatalf("run trigger profile = %v, want task-delivery", got)
+	}
+	if got := run.Trigger["source"]; got != "task.trigger" {
+		t.Fatalf("run trigger source = %v, want task.trigger", got)
+	}
+}
+
+func TestWorkflowExecutionService_StartTaskTriggeredRejectsDuplicateActiveRun(t *testing.T) {
+	pluginRepo := repository.NewPluginRegistryRepository()
+	runRepo := repository.NewWorkflowPluginRunRepository()
+	executor := &workflowStepExecutorMock{}
+	record := &model.PluginRecord{
+		PluginManifest: model.PluginManifest{
+			APIVersion: "agentforge/v1",
+			Kind:       model.PluginKindWorkflow,
+			Metadata: model.PluginMetadata{
+				ID:      "task-delivery-flow",
+				Name:    "Task Delivery Flow",
+				Version: "1.0.0",
+			},
+			Spec: model.PluginSpec{
+				Runtime:    model.PluginRuntimeWASM,
+				Module:     "./dist/task-delivery-flow.wasm",
+				ABIVersion: "v1",
+				Workflow: &model.WorkflowPluginSpec{
+					Process: model.WorkflowProcessSequential,
+					Roles: []model.WorkflowRoleBinding{
+						{ID: "planner"},
+					},
+					Steps: []model.WorkflowStepDefinition{
+						{ID: "plan", Role: "planner", Action: model.WorkflowActionAgent},
+					},
+					Triggers: []model.PluginWorkflowTrigger{
+						{Event: "task.transition", Profile: "task-delivery", RequiresTask: true},
+					},
+				},
+			},
+		},
+		LifecycleState: model.PluginStateActive,
+		RuntimeHost:    model.PluginHostGoOrchestrator,
+	}
+	if err := pluginRepo.Save(context.Background(), record); err != nil {
+		t.Fatalf("save workflow plugin record: %v", err)
+	}
+
+	taskID := uuid.New()
+	if err := runRepo.Create(context.Background(), &model.WorkflowPluginRun{
+		ID:       uuid.New(),
+		PluginID: record.Metadata.ID,
+		Process:  model.WorkflowProcessSequential,
+		Status:   model.WorkflowRunStatusPaused,
+		Trigger: map[string]any{
+			"source":  "task.trigger",
+			"taskId":  taskID.String(),
+			"profile": "task-delivery",
+		},
+	}); err != nil {
+		t.Fatalf("seed duplicate workflow run: %v", err)
+	}
+
+	svc := service.NewWorkflowExecutionService(
+		pluginRepo,
+		runRepo,
+		&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"planner": {Metadata: model.RoleMetadata{ID: "planner", Name: "Planner"}},
+			},
+		},
+		executor,
+	)
+
+	_, err := svc.StartTaskTriggered(context.Background(), record.Metadata.ID, "task-delivery", taskID, service.WorkflowExecutionRequest{})
+	if err == nil {
+		t.Fatal("expected duplicate active task-triggered run to be rejected")
+	}
+	if !strings.Contains(err.Error(), "active workflow run") {
+		t.Fatalf("duplicate error = %v, want active workflow run hint", err)
+	}
+}

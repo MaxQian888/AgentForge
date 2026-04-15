@@ -103,9 +103,34 @@ type WikiPageDTO struct {
 	CreatedAt        string  `json:"createdAt"`
 	UpdatedAt        string  `json:"updatedAt"`
 	DeletedAt        *string `json:"deletedAt,omitempty"`
+	TemplateSource   string  `json:"templateSource,omitempty"`
+	PreviewSnippet   string  `json:"previewSnippet,omitempty"`
+	CanEdit          bool    `json:"canEdit,omitempty"`
+	CanDelete        bool    `json:"canDelete,omitempty"`
+	CanDuplicate     bool    `json:"canDuplicate,omitempty"`
+	CanUse           bool    `json:"canUse,omitempty"`
 }
 
 func (p *WikiPage) ToDTO() WikiPageDTO {
+	templateSource := ""
+	previewSnippet := ""
+	canEdit := false
+	canDelete := false
+	canDuplicate := false
+	canUse := false
+
+	if p.IsTemplate {
+		templateSource = "custom"
+		if p.IsSystem {
+			templateSource = "system"
+		}
+		previewSnippet = buildWikiTemplatePreviewSnippet(p.ContentText, p.Content)
+		canEdit = !p.IsSystem
+		canDelete = !p.IsSystem
+		canDuplicate = true
+		canUse = true
+	}
+
 	return WikiPageDTO{
 		ID:               p.ID.String(),
 		SpaceID:          p.SpaceID.String(),
@@ -124,6 +149,12 @@ func (p *WikiPage) ToDTO() WikiPageDTO {
 		CreatedAt:        p.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:        p.UpdatedAt.Format(time.RFC3339),
 		DeletedAt:        formatOptionalTime(p.DeletedAt),
+		TemplateSource:   templateSource,
+		PreviewSnippet:   previewSnippet,
+		CanEdit:          canEdit,
+		CanDelete:        canDelete,
+		CanDuplicate:     canDuplicate,
+		CanUse:           canUse,
 	}
 }
 
@@ -228,6 +259,7 @@ type UpdateWikiPageRequest struct {
 	Content           string  `json:"content,omitempty"`
 	ContentText       string  `json:"contentText,omitempty"`
 	ExpectedUpdatedAt *string `json:"expectedUpdatedAt,omitempty"`
+	TemplateCategory  *string `json:"templateCategory,omitempty"`
 }
 
 type MoveWikiPageRequest struct {
@@ -255,6 +287,13 @@ type CreatePageFromTemplateRequest struct {
 	TemplateID string  `json:"templateId" validate:"required"`
 	Title      string  `json:"title" validate:"required,min=1,max=200"`
 	ParentID   *string `json:"parentId,omitempty"`
+}
+
+type CreateWikiTemplateRequest struct {
+	Title    string  `json:"title" validate:"required,min=1,max=200"`
+	Category string  `json:"category" validate:"required,min=1,max=100"`
+	Content  string  `json:"content,omitempty"`
+	ParentID *string `json:"parentId,omitempty"`
 }
 
 type CreateTemplateFromPageRequest struct {
@@ -303,4 +342,15 @@ func cloneStringPointer(value *string) *string {
 	}
 	cloned := *value
 	return &cloned
+}
+
+func buildWikiTemplatePreviewSnippet(contentText string, content string) string {
+	snippet := contentText
+	if snippet == "" {
+		snippet = content
+	}
+	if len(snippet) <= 160 {
+		return snippet
+	}
+	return snippet[:157] + "..."
 }

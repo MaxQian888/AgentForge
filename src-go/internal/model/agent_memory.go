@@ -17,6 +17,8 @@ const (
 	MemoryCategorySemantic   = "semantic"
 	MemoryCategoryProcedural = "procedural"
 	MemoryCategoryDocument   = "document"
+
+	MemoryKindOperatorNote = "operator_note"
 )
 
 type AgentMemory struct {
@@ -36,19 +38,22 @@ type AgentMemory struct {
 }
 
 type AgentMemoryDTO struct {
-	ID             string  `json:"id"`
-	ProjectID      string  `json:"projectId"`
-	Scope          string  `json:"scope"`
-	RoleID         string  `json:"roleId"`
-	Category       string  `json:"category"`
-	Key            string  `json:"key"`
-	Content        string  `json:"content"`
-	Metadata       string  `json:"metadata"`
-	RelevanceScore float64 `json:"relevanceScore"`
-	AccessCount    int     `json:"accessCount"`
-	LastAccessedAt string  `json:"lastAccessedAt,omitempty"`
-	CreatedAt      string  `json:"createdAt"`
-	UpdatedAt      string  `json:"updatedAt"`
+	ID             string   `json:"id"`
+	ProjectID      string   `json:"projectId"`
+	Scope          string   `json:"scope"`
+	RoleID         string   `json:"roleId"`
+	Category       string   `json:"category"`
+	Kind           string   `json:"kind,omitempty"`
+	Tags           []string `json:"tags,omitempty"`
+	Editable       bool     `json:"editable"`
+	Key            string   `json:"key"`
+	Content        string   `json:"content"`
+	Metadata       string   `json:"metadata"`
+	RelevanceScore float64  `json:"relevanceScore"`
+	AccessCount    int      `json:"accessCount"`
+	LastAccessedAt string   `json:"lastAccessedAt,omitempty"`
+	CreatedAt      string   `json:"createdAt"`
+	UpdatedAt      string   `json:"updatedAt"`
 }
 
 type AgentMemoryDetailDTO struct {
@@ -68,6 +73,7 @@ type AgentMemoryFilter struct {
 	Scope    string
 	Category string
 	RoleID   string
+	Tag      string
 	StartAt  *time.Time
 	EndAt    *time.Time
 	Limit    int
@@ -88,12 +94,16 @@ type MemoryDeleteResultDTO struct {
 }
 
 func (m *AgentMemory) ToDTO() AgentMemoryDTO {
+	metadata := parseAgentMemoryMetadata(m.Metadata)
 	dto := AgentMemoryDTO{
 		ID:             m.ID.String(),
 		ProjectID:      m.ProjectID.String(),
 		Scope:          m.Scope,
 		RoleID:         m.RoleID,
 		Category:       m.Category,
+		Kind:           deriveAgentMemoryKind(metadata),
+		Tags:           normalizeAgentMemoryTags(metadata["tags"]),
+		Editable:       deriveAgentMemoryEditable(metadata),
 		Key:            m.Key,
 		Content:        m.Content,
 		Metadata:       m.Metadata,
@@ -148,4 +158,59 @@ func deriveAgentMemoryRelatedContext(metadata map[string]any) []AgentMemoryRelat
 		})
 	}
 	return related
+}
+
+func deriveAgentMemoryKind(metadata map[string]any) string {
+	if len(metadata) == 0 {
+		return ""
+	}
+	kind, _ := metadata["kind"].(string)
+	return strings.TrimSpace(kind)
+}
+
+func deriveAgentMemoryEditable(metadata map[string]any) bool {
+	if len(metadata) == 0 {
+		return false
+	}
+	if editable, ok := metadata["editable"].(bool); ok {
+		return editable
+	}
+	return deriveAgentMemoryKind(metadata) == MemoryKindOperatorNote
+}
+
+func normalizeAgentMemoryTags(raw any) []string {
+	var values []any
+	switch typed := raw.(type) {
+	case []any:
+		values = typed
+	case []string:
+		values = make([]any, 0, len(typed))
+		for _, value := range typed {
+			values = append(values, value)
+		}
+	default:
+		return nil
+	}
+	seen := make(map[string]struct{}, len(values))
+	tags := make([]string, 0, len(values))
+	for _, item := range values {
+		tag, ok := item.(string)
+		if !ok {
+			continue
+		}
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		key := strings.ToLower(tag)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		tags = append(tags, tag)
+	}
+	if len(tags) == 0 {
+		return nil
+	}
+	return tags
 }

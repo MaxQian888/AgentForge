@@ -333,6 +333,89 @@ type intentClassifierStub struct {
 	err  error
 }
 
+func TestIMService_HandleActionStoresTaskBindingForLaterFollowUp(t *testing.T) {
+	control := NewIMControlPlane(IMControlPlaneConfig{
+		HeartbeatTTL:              time.Minute,
+		ProgressHeartbeatInterval: 30 * time.Second,
+		DeliverySecret:            "shared-secret",
+	})
+	if _, err := control.RegisterBridge(context.Background(), &IMBridgeRegisterRequest{
+		BridgeID:   "bridge-slack-1",
+		Platform:   "slack",
+		Transport:  "live",
+		ProjectIDs: []string{"project-1"},
+	}); err != nil {
+		t.Fatalf("RegisterBridge error: %v", err)
+	}
+
+	svc := NewIMService("", "slack", control)
+	svc.SetActionExecutor(IMActionExecutorFunc(func(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error) {
+		return &model.IMActionResponse{
+			Result:  "Task moved to in_progress",
+			Success: true,
+			Status:  model.IMActionStatusCompleted,
+			Task: &model.TaskDTO{
+				ID:        req.EntityID,
+				ProjectID: "project-1",
+				Title:     "Bridge rollout",
+				Status:    model.TaskStatusInProgress,
+				Priority:  "high",
+			},
+		}, nil
+	}))
+
+	taskID := "550e8400-e29b-41d4-a716-446655440000"
+	resp, err := svc.HandleAction(context.Background(), &model.IMActionRequest{
+		Platform:  "slack",
+		Action:    "transition-task",
+		EntityID:  taskID,
+		ChannelID: "C123",
+		UserID:    "U123",
+		BridgeID:  "bridge-slack-1",
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C123",
+			ThreadID:  "thread-1",
+		},
+	})
+	if err != nil {
+		t.Fatalf("HandleAction error: %v", err)
+	}
+	if resp == nil || !resp.Success {
+		t.Fatalf("response = %+v", resp)
+	}
+
+	queued, err := control.QueueBoundProgress(context.Background(), IMBoundProgressRequest{
+		TaskID:     taskID,
+		Kind:       IMDeliveryKindTerminal,
+		Content:    "workflow follow-up",
+		IsTerminal: true,
+		Metadata: map[string]string{
+			"bridge_event_type": "task.workflow_trigger",
+		},
+	})
+	if err != nil {
+		t.Fatalf("QueueBoundProgress error: %v", err)
+	}
+	if !queued {
+		t.Fatal("expected task binding to allow bound follow-up delivery")
+	}
+
+	history, err := control.ListDeliveryHistory(context.Background(), nil)
+	if err != nil {
+		t.Fatalf("ListDeliveryHistory error: %v", err)
+	}
+	if len(history) != 1 {
+		t.Fatalf("history len = %d, want 1", len(history))
+	}
+	if history[0].Metadata[imMetadataBridgeBindingTaskID] != taskID {
+		t.Fatalf("metadata = %+v", history[0].Metadata)
+	}
+	if history[0].Metadata[imMetadataReplyTargetThreadID] != "thread-1" {
+		t.Fatalf("reply target metadata = %+v", history[0].Metadata)
+	}
+}
+
 func (s intentClassifierStub) ClassifyIntent(_ context.Context, req ClassifyIntentRequest) (*ClassifyIntentResponse, error) {
 	if s.err != nil {
 		return nil, s.err

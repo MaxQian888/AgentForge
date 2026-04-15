@@ -70,4 +70,5 @@ type ChangePasswordRequest struct {
 type ErrorResponse struct {
 	Message string `json:"message"`
 	Code    int    `json:"code,omitempty"`
+	Field   string `json:"field,omitempty"`
 }

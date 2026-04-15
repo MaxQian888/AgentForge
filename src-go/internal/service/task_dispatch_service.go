@@ -67,6 +67,7 @@ type TaskDispatchService struct {
 	tasks         DispatchTaskRepository
 	members       DispatchMemberRepository
 	runtime       DispatchRuntimeService
+	roleStore     roleReferenceRoleStore
 	hub           *ws.Hub
 	notifications DispatchNotificationService
 	progress      *TaskProgressService
@@ -105,6 +106,11 @@ func (s *TaskDispatchService) WithBudgetChecker(checker DispatchBudgetChecker) *
 
 func (s *TaskDispatchService) WithAttemptRecorder(attempts DispatchAttemptRecorder) *TaskDispatchService {
 	s.attempts = attempts
+	return s
+}
+
+func (s *TaskDispatchService) WithRoleStore(store roleReferenceRoleStore) *TaskDispatchService {
+	s.roleStore = store
 	return s
 }
 
@@ -209,13 +215,25 @@ func (s *TaskDispatchService) Spawn(ctx context.Context, input DispatchSpawnInpu
 }
 
 func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task, memberID uuid.UUID, input DispatchSpawnInput) (*model.TaskDispatchResponse, error) {
-	contextFields := dispatchOutcomeContextFromInput(input)
 	member, memberErr := s.members.GetByID(ctx, memberID)
 	if memberErr != nil {
+		contextFields := dispatchOutcomeContextFromInput(input)
 		result := s.blockedResult(ctx, task, "dispatch target is unavailable")
 		result.Dispatch = applyDispatchOutcomeContext(result.Dispatch, contextFields)
 		s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
 		return result, nil
+	}
+	input.RoleID = ResolveEffectiveRoleID(input.RoleID, member)
+	contextFields := dispatchOutcomeContextFromInput(input)
+	if s.roleStore != nil {
+		if err := NewRoleReferenceGovernanceService(nil, nil, nil, nil).
+			WithRoleStore(s.roleStore).
+			ValidateRoleBinding(ctx, input.RoleID); err != nil {
+			result := s.blockedResultWithGuardrail(ctx, task, err.Error(), model.DispatchGuardrailTypeTarget, "role")
+			result.Dispatch = applyDispatchOutcomeContext(result.Dispatch, contextFields)
+			s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
+			return result, nil
+		}
 	}
 	var runReader DispatchRunReader
 	if reader, ok := s.runtime.(DispatchRunReader); ok {

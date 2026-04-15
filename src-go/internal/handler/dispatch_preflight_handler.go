@@ -55,6 +55,7 @@ type PreflightResponse struct {
 type DispatchPreflightHandler struct {
 	tasks   dispatchPreflightTaskReader
 	members dispatchPreflightMemberReader
+	roleStore memberRoleStore
 	budget  service.DispatchBudgetChecker
 	pool    dispatchPreflightPoolStatsProvider
 	runs    dispatchPreflightRunReader
@@ -76,6 +77,11 @@ func NewDispatchPreflightHandler(
 
 func (h *DispatchPreflightHandler) WithRunReader(runs dispatchPreflightRunReader) *DispatchPreflightHandler {
 	h.runs = runs
+	return h
+}
+
+func (h *DispatchPreflightHandler) WithRoleStore(store memberRoleStore) *DispatchPreflightHandler {
+	h.roleStore = store
 	return h
 }
 
@@ -116,6 +122,24 @@ func (h *DispatchPreflightHandler) Get(c echo.Context) error {
 		Model:     strings.TrimSpace(c.QueryParam("model")),
 		RoleID:    strings.TrimSpace(c.QueryParam("roleId")),
 		BudgetUSD: budgetUSD,
+	}
+	input.RoleID = service.ResolveEffectiveRoleID(input.RoleID, member)
+	if h.roleStore != nil {
+		if err := service.NewRoleReferenceGovernanceService(nil, nil, nil, nil).
+			WithRoleStore(h.roleStore).
+			ValidateRoleBinding(c.Request().Context(), input.RoleID); err != nil {
+			return c.JSON(http.StatusOK, PreflightResponse{
+				AdmissionLikely:     false,
+				DispatchOutcomeHint: model.DispatchStatusBlocked,
+				GuardrailType:       model.DispatchGuardrailTypeTarget,
+				GuardrailScope:      "role",
+				Reason:              err.Error(),
+				Runtime:             input.Runtime,
+				Provider:            input.Provider,
+				Model:               input.Model,
+				RoleID:              input.RoleID,
+			})
+		}
 	}
 
 	result := service.EvaluateDispatchPreflight(c.Request().Context(), task, member, input, h.budget, h.runs, h.pool)

@@ -134,6 +134,64 @@ describe("useDashboardStore", () => {
     expect(state.error).toBeNull();
   });
 
+  it("loads bootstrap readiness inputs for the selected project scope", async () => {
+    fetchMock
+      .mockResolvedValueOnce(
+        mockJsonResponse([
+          {
+            id: "project-1",
+            name: "AgentForge",
+            slug: "agentforge",
+            description: "Main project",
+            repoUrl: "",
+            defaultBranch: "main",
+            createdAt: "2026-03-20T10:00:00.000Z",
+            settings: {
+              codingAgent: {
+                runtime: "",
+                provider: "",
+                model: "",
+              },
+            },
+          },
+        ]),
+      )
+      .mockResolvedValueOnce(
+        mockJsonResponse({
+          items: [],
+          total: 0,
+          page: 1,
+          limit: 20,
+        }),
+      )
+      .mockResolvedValueOnce(mockJsonResponse([]))
+      .mockResolvedValueOnce(mockJsonResponse([]))
+      .mockResolvedValueOnce(mockJsonResponse([]))
+      .mockResolvedValueOnce(mockJsonResponse([{ id: "template-1" }]))
+      .mockResolvedValueOnce(mockJsonResponse([{ id: "wf-template-1" }]))
+      .mockResolvedValueOnce(mockJsonResponse([]));
+
+    await useDashboardStore.getState().fetchSummary({ projectId: "project-1" });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:7777/api/v1/projects/project-1/wiki/templates",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:7777/api/v1/workflow-templates",
+      expect.any(Object),
+    );
+    expect(fetchMock).toHaveBeenCalledWith(
+      "http://localhost:7777/api/v1/projects/project-1/sprints",
+      expect.any(Object),
+    );
+    expect(useDashboardStore.getState().summary?.bootstrap).toEqual(
+      expect.objectContaining({
+        unresolvedCount: 4,
+      }),
+    );
+  });
+
   it("builds an all-projects summary when there is no selectable project", async () => {
     fetchMock.mockResolvedValueOnce(
       mockJsonResponse([

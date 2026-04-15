@@ -20,10 +20,11 @@ type WikiHandler struct {
 type wikiHandlerService interface {
 	GetSpaceByProjectID(ctx echo.Context, projectID uuid.UUID) (*model.WikiSpace, error)
 	CreatePage(ctx echo.Context, projectID uuid.UUID, spaceID uuid.UUID, title string, parentID *uuid.UUID, content string, createdBy *uuid.UUID) (*model.WikiPage, error)
+	CreateTemplate(ctx echo.Context, projectID uuid.UUID, spaceID uuid.UUID, title string, category string, content string, createdBy *uuid.UUID) (*model.WikiPage, error)
 	GetPageTree(ctx echo.Context, spaceID uuid.UUID) ([]*model.WikiPage, error)
 	GetPage(ctx echo.Context, pageID uuid.UUID) (*model.WikiPage, error)
 	GetPageContext(ctx echo.Context, pageID uuid.UUID) (*model.WikiSpace, *model.WikiPage, error)
-	UpdatePage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID, title string, content string, contentText string, updatedBy *uuid.UUID, expectedUpdatedAt *time.Time) (*model.WikiPage, error)
+	UpdatePage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID, title string, content string, contentText string, updatedBy *uuid.UUID, expectedUpdatedAt *time.Time, templateCategory *string) (*model.WikiPage, error)
 	DeletePage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID) error
 	MovePage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID, newParentID *uuid.UUID, sortOrder int) (*model.WikiPage, error)
 	ListVersions(ctx echo.Context, pageID uuid.UUID) ([]*model.PageVersion, error)
@@ -38,7 +39,7 @@ type wikiHandlerService interface {
 	SeedBuiltInTemplates(ctx echo.Context, projectID uuid.UUID, spaceID uuid.UUID) ([]*model.WikiPage, error)
 	CreateTemplateFromPage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID, name string, category string, createdBy *uuid.UUID) (*model.WikiPage, error)
 	CreatePageFromTemplate(ctx echo.Context, projectID uuid.UUID, spaceID uuid.UUID, templateID uuid.UUID, parentID *uuid.UUID, title string, createdBy *uuid.UUID) (*model.WikiPage, error)
-	ListTemplates(ctx echo.Context, spaceID uuid.UUID) ([]*model.WikiPage, error)
+	ListTemplates(ctx echo.Context, spaceID uuid.UUID, query string, category string, source string) ([]*model.WikiPage, error)
 	AddFavorite(ctx echo.Context, pageID, userID uuid.UUID) error
 	RemoveFavorite(ctx echo.Context, pageID, userID uuid.UUID) error
 	ListFavorites(ctx echo.Context, userID uuid.UUID) ([]*model.PageFavorite, error)
@@ -63,6 +64,9 @@ func (a *wikiHandlerServiceAdapter) GetSpaceByProjectID(ctx echo.Context, projec
 func (a *wikiHandlerServiceAdapter) CreatePage(ctx echo.Context, projectID uuid.UUID, spaceID uuid.UUID, title string, parentID *uuid.UUID, content string, createdBy *uuid.UUID) (*model.WikiPage, error) {
 	return a.svc.CreatePage(ctx.Request().Context(), projectID, spaceID, title, parentID, content, createdBy)
 }
+func (a *wikiHandlerServiceAdapter) CreateTemplate(ctx echo.Context, projectID uuid.UUID, spaceID uuid.UUID, title string, category string, content string, createdBy *uuid.UUID) (*model.WikiPage, error) {
+	return a.svc.CreateTemplate(ctx.Request().Context(), projectID, spaceID, title, category, content, createdBy)
+}
 func (a *wikiHandlerServiceAdapter) GetPageTree(ctx echo.Context, spaceID uuid.UUID) ([]*model.WikiPage, error) {
 	return a.svc.GetPageTree(ctx.Request().Context(), spaceID)
 }
@@ -72,8 +76,8 @@ func (a *wikiHandlerServiceAdapter) GetPage(ctx echo.Context, pageID uuid.UUID) 
 func (a *wikiHandlerServiceAdapter) GetPageContext(ctx echo.Context, pageID uuid.UUID) (*model.WikiSpace, *model.WikiPage, error) {
 	return a.svc.GetPageContext(ctx.Request().Context(), pageID)
 }
-func (a *wikiHandlerServiceAdapter) UpdatePage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID, title string, content string, contentText string, updatedBy *uuid.UUID, expectedUpdatedAt *time.Time) (*model.WikiPage, error) {
-	return a.svc.UpdatePage(ctx.Request().Context(), projectID, pageID, title, content, contentText, updatedBy, expectedUpdatedAt)
+func (a *wikiHandlerServiceAdapter) UpdatePage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID, title string, content string, contentText string, updatedBy *uuid.UUID, expectedUpdatedAt *time.Time, templateCategory *string) (*model.WikiPage, error) {
+	return a.svc.UpdatePage(ctx.Request().Context(), projectID, pageID, title, content, contentText, updatedBy, expectedUpdatedAt, templateCategory)
 }
 func (a *wikiHandlerServiceAdapter) DeletePage(ctx echo.Context, projectID uuid.UUID, pageID uuid.UUID) error {
 	return a.svc.DeletePage(ctx.Request().Context(), projectID, pageID)
@@ -117,8 +121,8 @@ func (a *wikiHandlerServiceAdapter) CreateTemplateFromPage(ctx echo.Context, pro
 func (a *wikiHandlerServiceAdapter) CreatePageFromTemplate(ctx echo.Context, projectID uuid.UUID, spaceID uuid.UUID, templateID uuid.UUID, parentID *uuid.UUID, title string, createdBy *uuid.UUID) (*model.WikiPage, error) {
 	return a.svc.CreatePageFromTemplate(ctx.Request().Context(), projectID, spaceID, templateID, parentID, title, createdBy)
 }
-func (a *wikiHandlerServiceAdapter) ListTemplates(ctx echo.Context, spaceID uuid.UUID) ([]*model.WikiPage, error) {
-	return a.svc.ListTemplates(ctx.Request().Context(), spaceID)
+func (a *wikiHandlerServiceAdapter) ListTemplates(ctx echo.Context, spaceID uuid.UUID, query string, category string, source string) ([]*model.WikiPage, error) {
+	return a.svc.ListTemplates(ctx.Request().Context(), spaceID, query, category, source)
 }
 func (a *wikiHandlerServiceAdapter) AddFavorite(ctx echo.Context, pageID, userID uuid.UUID) error {
 	return a.svc.AddFavorite(ctx.Request().Context(), pageID, userID)
@@ -228,8 +232,11 @@ func (h *WikiHandler) UpdatePage(c echo.Context) error {
 	if err != nil {
 		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidExpectedUpdatedAt)
 	}
-	page, err := h.service.UpdatePage(c, appMiddleware.GetProjectID(c), pageID, req.Title, req.Content, req.ContentText, currentUserID(c), expectedUpdatedAt)
+	page, err := h.service.UpdatePage(c, appMiddleware.GetProjectID(c), pageID, req.Title, req.Content, req.ContentText, currentUserID(c), expectedUpdatedAt, req.TemplateCategory)
 	if err != nil {
+		if errors.Is(err, service.ErrWikiTemplateImmutable) {
+			return localizedError(c, http.StatusForbidden, i18n.MsgWikiTemplateImmutable)
+		}
 		if errors.Is(err, service.ErrWikiPageConflict) {
 			return localizedError(c, http.StatusConflict, i18n.MsgWikiPageHasNewerChanges)
 		}
@@ -247,6 +254,9 @@ func (h *WikiHandler) DeletePage(c echo.Context) error {
 		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidPageID)
 	}
 	if err := h.service.DeletePage(c, appMiddleware.GetProjectID(c), pageID); err != nil {
+		if errors.Is(err, service.ErrWikiTemplateImmutable) {
+			return localizedError(c, http.StatusForbidden, i18n.MsgWikiTemplateImmutable)
+		}
 		if errors.Is(err, service.ErrWikiPageNotFound) {
 			return localizedError(c, http.StatusNotFound, i18n.MsgWikiPageNotFound)
 		}
@@ -444,7 +454,7 @@ func (h *WikiHandler) ListTemplates(c echo.Context) error {
 	if err != nil {
 		return localizedError(c, http.StatusNotFound, i18n.MsgWikiSpaceNotFound)
 	}
-	templates, err := h.service.ListTemplates(c, space.ID)
+	templates, err := h.service.ListTemplates(c, space.ID, c.QueryParam("q"), c.QueryParam("category"), c.QueryParam("source"))
 	if err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListWikiTemplates)
 	}
@@ -453,6 +463,26 @@ func (h *WikiHandler) ListTemplates(c echo.Context) error {
 		payload = append(payload, template.ToDTO())
 	}
 	return c.JSON(http.StatusOK, payload)
+}
+
+func (h *WikiHandler) CreateTemplate(c echo.Context) error {
+	req := new(model.CreateWikiTemplateRequest)
+	if err := c.Bind(req); err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	projectID := appMiddleware.GetProjectID(c)
+	space, err := h.service.GetSpaceByProjectID(c, projectID)
+	if err != nil {
+		return localizedError(c, http.StatusNotFound, i18n.MsgWikiSpaceNotFound)
+	}
+	template, err := h.service.CreateTemplate(c, projectID, space.ID, req.Title, req.Category, req.Content, currentUserID(c))
+	if err != nil {
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateTemplate)
+	}
+	return c.JSON(http.StatusCreated, template.ToDTO())
 }
 
 func (h *WikiHandler) CreateTemplateFromPage(c echo.Context) error {
@@ -469,6 +499,9 @@ func (h *WikiHandler) CreateTemplateFromPage(c echo.Context) error {
 	}
 	template, err := h.service.CreateTemplateFromPage(c, appMiddleware.GetProjectID(c), pageID, req.Name, req.Category, currentUserID(c))
 	if err != nil {
+		if errors.Is(err, service.ErrWikiPageNotFound) {
+			return localizedError(c, http.StatusNotFound, i18n.MsgWikiPageNotFound)
+		}
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateTemplate)
 	}
 	return c.JSON(http.StatusCreated, template.ToDTO())
@@ -497,6 +530,9 @@ func (h *WikiHandler) CreatePageFromTemplate(c echo.Context) error {
 	}
 	page, err := h.service.CreatePageFromTemplate(c, projectID, space.ID, templateID, parentID, req.Title, currentUserID(c))
 	if err != nil {
+		if errors.Is(err, service.ErrWikiTemplateNotFound) {
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidTemplateID)
+		}
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreatePageFromTemplate)
 	}
 	return c.JSON(http.StatusCreated, page.ToDTO())

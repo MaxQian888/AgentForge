@@ -18,7 +18,16 @@ describe("AutomationLogViewer", () => {
             eventType: "task.status_changed",
             status: "success",
             triggeredAt: "2026-03-30T10:00:00.000Z",
-            detail: {},
+            detail: {
+              actionOutcomes: [
+                {
+                  type: "start_workflow",
+                  outcome: "started",
+                  pluginId: "task-delivery-flow",
+                  runId: "run-1",
+                },
+              ],
+            },
           },
         ],
       },
@@ -35,5 +44,6 @@ describe("AutomationLogViewer", () => {
 
     expect(screen.getByText(/task\.status_changed/)).toBeInTheDocument();
     expect(screen.getByText(/2026-03-30T10:00:00.000Z/)).toBeInTheDocument();
+    expect(screen.getByText(/start_workflow started task-delivery-flow/)).toBeInTheDocument();
   });
 });

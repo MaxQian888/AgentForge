@@ -183,7 +183,7 @@ Current steps per platform:
 - install Rust stable
 - install dependencies
 - setup Go
-- `node scripts/build-backend.js --current-only`
+- `node scripts/build/build-backend.js --current-only`
 - `pnpm tauri build --target <target>`
 
 Produced artifacts:

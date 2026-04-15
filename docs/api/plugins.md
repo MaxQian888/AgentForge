@@ -194,6 +194,20 @@ Workflow start body:
 }
 ```
 
+Task-triggered workflow starts reuse the same runtime surface but carry task lineage in the trigger payload. A representative trigger looks like:
+
+```json
+{
+  "trigger": {
+    "source": "task.trigger",
+    "taskId": "task-uuid",
+    "profile": "task-delivery",
+    "fromStatus": "triaged",
+    "toStatus": "assigned"
+  }
+}
+```
+
 ## Remote Registry Error Codes
 
 Remote installs can return:

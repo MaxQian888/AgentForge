@@ -22,6 +22,13 @@ export interface DashboardProject {
   repoUrl: string;
   defaultBranch: string;
   createdAt: string;
+  settings?: {
+    codingAgent?: {
+      runtime?: string;
+      provider?: string;
+      model?: string;
+    };
+  };
 }
 
 export interface DashboardConfig {
@@ -314,9 +321,24 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
         ),
         api.get<DashboardAgentSource[]>("/api/v1/agents", { token }),
         api.get<Array<DashboardActivitySource & { body?: string }>>("/api/v1/notifications", { token }),
+        api.get<Array<{ id: string }>>(`/api/v1/projects/${selectedProjectId}/wiki/templates`, {
+          token,
+        }),
+        api.get<Array<{ id: string }>>("/api/v1/workflow-templates", { token }),
+        api.get<Array<{ id: string }>>(`/api/v1/projects/${selectedProjectId}/sprints`, {
+          token,
+        }),
       ]);
 
-      const [tasksResult, membersResult, agentsResult, activityResult] = results;
+      const [
+        tasksResult,
+        membersResult,
+        agentsResult,
+        activityResult,
+        docsTemplatesResult,
+        workflowTemplatesResult,
+        sprintsResult,
+      ] = results;
       const sectionErrors: Record<string, string> = {};
 
       const tasks =
@@ -353,6 +375,32 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
               : "Failed to load activity",
             []);
 
+      const docsTemplateCount =
+        docsTemplatesResult.status === "fulfilled"
+          ? docsTemplatesResult.value.data.length
+          : (sectionErrors.bootstrap = docsTemplatesResult.reason instanceof Error
+              ? docsTemplatesResult.reason.message
+              : "Failed to load docs templates",
+            undefined);
+
+      const workflowTemplateCount =
+        workflowTemplatesResult.status === "fulfilled"
+          ? workflowTemplatesResult.value.data.length
+          : (sectionErrors.bootstrap ??=
+              workflowTemplatesResult.reason instanceof Error
+                ? workflowTemplatesResult.reason.message
+                : "Failed to load workflow templates",
+            undefined);
+
+      const sprintCount =
+        sprintsResult.status === "fulfilled"
+          ? sprintsResult.value.data.length
+          : (sectionErrors.bootstrap ??=
+              sprintsResult.reason instanceof Error
+                ? sprintsResult.reason.message
+                : "Failed to load sprint data",
+            undefined);
+
       const summary = buildDashboardSummary({
         scopeProjectId: selectedProjectId,
         scopeProjectName: selectedProject.name,
@@ -362,6 +410,10 @@ export const useDashboardStore = create<DashboardState>()((set) => ({
         members,
         activity,
         now: options?.now,
+        projectMeta: selectedProject,
+        docsTemplateCount,
+        workflowTemplateCount,
+        sprintCount,
       });
 
       set({

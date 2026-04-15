@@ -2,6 +2,8 @@ package service
 
 import (
 	"context"
+	"encoding/json"
+	"errors"
 	"fmt"
 	"strings"
 	"time"
@@ -17,6 +19,7 @@ type MemoryRepository interface {
 	ListByProject(ctx context.Context, projectID uuid.UUID, scope, category string) ([]*model.AgentMemory, error)
 	Search(ctx context.Context, projectID uuid.UUID, query string, limit int) ([]*model.AgentMemory, error)
 	IncrementAccess(ctx context.Context, id uuid.UUID) error
+	Update(ctx context.Context, mem *model.AgentMemory) error
 	Delete(ctx context.Context, id uuid.UUID) error
 }
 
@@ -26,11 +29,26 @@ type StoreMemoryInput struct {
 	Scope          string    `json:"scope"`
 	RoleID         string    `json:"roleId"`
 	Category       string    `json:"category"`
+	Tags           []string  `json:"tags"`
 	Key            string    `json:"key"`
 	Content        string    `json:"content"`
 	Metadata       string    `json:"metadata"`
 	RelevanceScore float64   `json:"relevanceScore"`
 }
+
+type UpdateMemoryInput struct {
+	ProjectID uuid.UUID
+	ID        uuid.UUID
+	RoleID    string
+	Key       *string
+	Content   *string
+	Tags      *[]string
+}
+
+var (
+	ErrMemoryNotEditable    = errors.New("memory is read-only")
+	ErrMemoryUpdateRequired = errors.New("at least one memory field must be updated")
+)
 
 type MemoryService struct {
 	repo MemoryRepository
@@ -63,15 +81,75 @@ func (s *MemoryService) Store(ctx context.Context, input StoreMemoryInput) (*mod
 	if strings.TrimSpace(mem.Scope) == "" {
 		mem.Scope = model.MemoryScopeProject
 	}
-	if strings.TrimSpace(mem.Category) == "" {
-		mem.Category = model.MemoryCategoryEpisodic
-	}
+	mem.Category, mem.Metadata = normalizeMemoryCuration(strings.TrimSpace(mem.Category), mem.Metadata, input.Tags)
 	if mem.RelevanceScore <= 0 {
 		mem.RelevanceScore = 1.0
 	}
 
 	if err := s.repo.Create(ctx, mem); err != nil {
 		return nil, fmt.Errorf("store memory: %w", err)
+	}
+	return mem, nil
+}
+
+func (s *MemoryService) Update(ctx context.Context, input UpdateMemoryInput) (*model.AgentMemory, error) {
+	if input.Key == nil && input.Content == nil && input.Tags == nil {
+		return nil, ErrMemoryUpdateRequired
+	}
+	mem, err := s.repo.GetByID(ctx, input.ID)
+	if err != nil {
+		return nil, fmt.Errorf("load memory: %w", err)
+	}
+	if input.ProjectID != uuid.Nil && mem.ProjectID != input.ProjectID {
+		return nil, ErrMemoryAccessDenied
+	}
+	if mem.Scope == model.MemoryScopeRole && strings.TrimSpace(mem.RoleID) != "" && strings.TrimSpace(input.RoleID) != "" && strings.TrimSpace(input.RoleID) != mem.RoleID {
+		return nil, ErrMemoryAccessDenied
+	}
+
+	metadata := parseMemoryMetadata(mem.Metadata)
+	changed := false
+
+	if input.Tags != nil {
+		metadata["tags"] = normalizeTags(*input.Tags)
+		changed = true
+	}
+
+	editable := isMemoryEditable(metadata)
+	if input.Key != nil {
+		if !editable {
+			return nil, ErrMemoryNotEditable
+		}
+		key := strings.TrimSpace(*input.Key)
+		if key == "" {
+			return nil, errors.New("memory key is required")
+		}
+		if mem.Key != key {
+			mem.Key = key
+			changed = true
+		}
+	}
+	if input.Content != nil {
+		if !editable {
+			return nil, ErrMemoryNotEditable
+		}
+		content := strings.TrimSpace(*input.Content)
+		if content == "" {
+			return nil, errors.New("memory content is required")
+		}
+		if mem.Content != content {
+			mem.Content = content
+			changed = true
+		}
+	}
+	if !changed {
+		return mem, nil
+	}
+
+	mem.Metadata = marshalMemoryMetadata(metadata, mem.Metadata)
+	mem.UpdatedAt = s.now()
+	if err := s.repo.Update(ctx, mem); err != nil {
+		return nil, fmt.Errorf("update memory: %w", err)
 	}
 	return mem, nil
 }
@@ -158,4 +236,100 @@ func (s *MemoryService) RecordTeamLearnings(ctx context.Context, projectID uuid.
 		RelevanceScore: 0.8,
 	})
 	return err
+}
+
+func normalizeMemoryCuration(category string, rawMetadata string, tags []string) (string, string) {
+	metadata := parseMemoryMetadata(rawMetadata)
+	if category == "" {
+		category = model.MemoryCategoryEpisodic
+	}
+	kind, _ := metadata["kind"].(string)
+	if strings.EqualFold(category, model.MemoryKindOperatorNote) || strings.TrimSpace(kind) == model.MemoryKindOperatorNote {
+		category = model.MemoryCategoryEpisodic
+		metadata["kind"] = model.MemoryKindOperatorNote
+		metadata["editable"] = true
+	}
+
+	normalizedTags := normalizeTags(tags)
+	if len(normalizedTags) == 0 {
+		normalizedTags = normalizeTagsFromMetadata(metadata["tags"])
+	}
+	if len(normalizedTags) > 0 || strings.TrimSpace(kind) == model.MemoryKindOperatorNote {
+		metadata["tags"] = normalizedTags
+	}
+
+	return category, marshalMemoryMetadata(metadata, rawMetadata)
+}
+
+func parseMemoryMetadata(raw string) map[string]any {
+	if strings.TrimSpace(raw) == "" {
+		return make(map[string]any)
+	}
+	var metadata map[string]any
+	if err := json.Unmarshal([]byte(raw), &metadata); err != nil || metadata == nil {
+		return make(map[string]any)
+	}
+	return metadata
+}
+
+func marshalMemoryMetadata(metadata map[string]any, fallback string) string {
+	if len(metadata) == 0 {
+		if strings.TrimSpace(fallback) == "" {
+			return "{}"
+		}
+		return fallback
+	}
+	encoded, err := json.Marshal(metadata)
+	if err != nil {
+		if strings.TrimSpace(fallback) == "" {
+			return "{}"
+		}
+		return fallback
+	}
+	return string(encoded)
+}
+
+func normalizeTags(tags []string) []string {
+	seen := make(map[string]struct{}, len(tags))
+	normalized := make([]string, 0, len(tags))
+	for _, tag := range tags {
+		tag = strings.TrimSpace(tag)
+		if tag == "" {
+			continue
+		}
+		key := strings.ToLower(tag)
+		if _, exists := seen[key]; exists {
+			continue
+		}
+		seen[key] = struct{}{}
+		normalized = append(normalized, tag)
+	}
+	return normalized
+}
+
+func normalizeTagsFromMetadata(raw any) []string {
+	switch value := raw.(type) {
+	case []string:
+		return normalizeTags(value)
+	case []any:
+		items := make([]string, 0, len(value))
+		for _, item := range value {
+			text, ok := item.(string)
+			if !ok {
+				continue
+			}
+			items = append(items, text)
+		}
+		return normalizeTags(items)
+	default:
+		return nil
+	}
+}
+
+func isMemoryEditable(metadata map[string]any) bool {
+	if editable, ok := metadata["editable"].(bool); ok {
+		return editable
+	}
+	kind, _ := metadata["kind"].(string)
+	return strings.TrimSpace(kind) == model.MemoryKindOperatorNote
 }

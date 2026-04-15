@@ -12,25 +12,34 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
-import { useAutomationStore } from "@/lib/stores/automation-store";
-
-const EVENT_TYPES = [
-  "task.status_changed",
-  "task.assignee_changed",
-  "task.field_changed",
-  "task.due_date_approaching",
-  "review.completed",
-  "budget.threshold_reached",
-];
+import {
+  AUTOMATION_ACTION_TYPES,
+  AUTOMATION_EVENT_TYPES,
+  useAutomationStore,
+} from "@/lib/stores/automation-store";
 
 export function RuleEditor({ projectId }: { projectId: string }) {
   const t = useTranslations("settings");
   const createRule = useAutomationStore((state) => state.createRule);
   const [name, setName] = useState("");
-  const [eventType, setEventType] = useState(EVENT_TYPES[0]);
+  const [eventType, setEventType] = useState<(typeof AUTOMATION_EVENT_TYPES)[number]>(
+    AUTOMATION_EVENT_TYPES[0]
+  );
   const [conditionField, setConditionField] = useState("status");
   const [conditionValue, setConditionValue] = useState("done");
   const [actionType, setActionType] = useState("send_notification");
+  const [workflowPluginId, setWorkflowPluginId] = useState("");
+
+  const actionConfig =
+    actionType === "start_workflow"
+      ? { pluginId: workflowPluginId.trim() }
+      : {};
+
+  const handleEventTypeChange = (value: string) => {
+    if ((AUTOMATION_EVENT_TYPES as readonly string[]).includes(value)) {
+      setEventType(value as (typeof AUTOMATION_EVENT_TYPES)[number]);
+    }
+  };
 
   return (
     <div className="space-y-4">
@@ -41,12 +50,12 @@ export function RuleEditor({ projectId }: { projectId: string }) {
       <div className="grid gap-3 md:grid-cols-3">
         <div className="space-y-2">
           <Label>{t("automations.event")}</Label>
-          <Select value={eventType} onValueChange={setEventType}>
+          <Select value={eventType} onValueChange={handleEventTypeChange}>
             <SelectTrigger>
               <SelectValue />
             </SelectTrigger>
             <SelectContent>
-              {EVENT_TYPES.map((eventTypeOption) => (
+              {AUTOMATION_EVENT_TYPES.map((eventTypeOption) => (
                 <SelectItem key={eventTypeOption} value={eventTypeOption}>
                   {eventTypeOption}
                 </SelectItem>
@@ -70,7 +79,7 @@ export function RuleEditor({ projectId }: { projectId: string }) {
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
-            {["send_notification", "send_im_message", "update_field", "assign_user", "move_to_column", "create_subtask", "invoke_plugin"].map((type) => (
+            {AUTOMATION_ACTION_TYPES.map((type) => (
               <SelectItem key={type} value={type}>
                 {type}
               </SelectItem>
@@ -78,16 +87,29 @@ export function RuleEditor({ projectId }: { projectId: string }) {
           </SelectContent>
         </Select>
       </div>
+      {actionType === "start_workflow" ? (
+        <div className="space-y-2">
+          <Label>Workflow Plugin ID</Label>
+          <Input
+            value={workflowPluginId}
+            onChange={(event) => setWorkflowPluginId(event.target.value)}
+            placeholder="task-delivery-flow"
+          />
+          <p className="text-xs text-muted-foreground">
+            Use <code>start_workflow</code> for canonical workflow orchestration. <code>invoke_plugin</code> remains for generic plugin operations.
+          </p>
+        </div>
+      ) : null}
       <Button
         type="button"
-        disabled={!name.trim()}
+        disabled={!name.trim() || (actionType === "start_workflow" && workflowPluginId.trim() === "")}
         onClick={() =>
           void createRule(projectId, {
             name,
             enabled: true,
             eventType,
             conditions: [{ field: conditionField, op: "eq", value: conditionValue }],
-            actions: [{ type: actionType, config: {} }],
+            actions: [{ type: actionType, config: actionConfig }],
           })
         }
       >

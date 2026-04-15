@@ -39,11 +39,40 @@ export interface SprintMetrics {
   burndown: SprintBurndownPoint[];
 }
 
+export type BudgetThresholdStatus =
+  | "inactive"
+  | "healthy"
+  | "warning"
+  | "exceeded";
+
+export interface SprintBudgetTaskEntry {
+  taskId: string;
+  title: string;
+  allocated: number;
+  spent: number;
+  remaining: number;
+  thresholdStatus: BudgetThresholdStatus;
+}
+
+export interface SprintBudgetDetail {
+  sprintId: string;
+  projectId: string;
+  sprintName: string;
+  allocated: number;
+  spent: number;
+  remaining: number;
+  thresholdStatus: BudgetThresholdStatus;
+  warningThresholdPercent: number;
+  tasksWithBudgetCount: number;
+  tasks: SprintBudgetTaskEntry[];
+}
+
 export interface CreateSprintRequest {
   name: string;
   startDate: string;
   endDate: string;
   totalBudgetUsd: number;
+  milestoneId?: string | null;
 }
 
 export interface UpdateSprintRequest {
@@ -58,15 +87,43 @@ export interface UpdateSprintRequest {
 interface SprintState {
   sprintsByProject: Record<string, Sprint[]>;
   metricsBySprintId: Record<string, SprintMetrics>;
+  budgetDetailBySprintId: Record<string, SprintBudgetDetail>;
   loadingByProject: Record<string, boolean>;
   metricsLoadingBySprintId: Record<string, boolean>;
+  budgetLoadingBySprintId: Record<string, boolean>;
   errorByProject: Record<string, string | null>;
   metricsErrorBySprintId: Record<string, string | null>;
+  budgetErrorBySprintId: Record<string, string | null>;
   fetchSprints: (projectId: string) => Promise<void>;
   fetchSprintMetrics: (projectId: string, sprintId: string) => Promise<void>;
+  fetchSprintBudgetDetail: (sprintId: string) => Promise<void>;
   createSprint: (projectId: string, data: CreateSprintRequest) => Promise<Sprint>;
   updateSprint: (projectId: string, sprintId: string, data: UpdateSprintRequest) => Promise<Sprint>;
   upsertSprint: (sprint: Sprint) => void;
+}
+
+const DATE_ONLY_PATTERN = /^\d{4}-\d{2}-\d{2}$/;
+
+export function normalizeSprintDateInput(value: string): string {
+  const trimmed = value.trim();
+  if (!trimmed) {
+    return trimmed;
+  }
+  if (DATE_ONLY_PATTERN.test(trimmed)) {
+    return new Date(`${trimmed}T00:00:00.000Z`).toISOString();
+  }
+  return trimmed;
+}
+
+function normalizeSprintPayload<T extends CreateSprintRequest | UpdateSprintRequest>(data: T): T {
+  const next = { ...data };
+  if (typeof next.startDate === "string") {
+    next.startDate = normalizeSprintDateInput(next.startDate);
+  }
+  if (typeof next.endDate === "string") {
+    next.endDate = normalizeSprintDateInput(next.endDate);
+  }
+  return next;
 }
 
 function getToken() {
@@ -80,10 +137,13 @@ function getToken() {
 export const useSprintStore = create<SprintState>()((set) => ({
   sprintsByProject: {},
   metricsBySprintId: {},
+  budgetDetailBySprintId: {},
   loadingByProject: {},
   metricsLoadingBySprintId: {},
+  budgetLoadingBySprintId: {},
   errorByProject: {},
   metricsErrorBySprintId: {},
+  budgetErrorBySprintId: {},
 
   fetchSprints: async (projectId) => {
     const token = getToken();
@@ -125,9 +185,10 @@ export const useSprintStore = create<SprintState>()((set) => ({
     if (!token) throw new Error("Not authenticated");
 
     const api = createApiClient(API_URL);
+    const payload = normalizeSprintPayload(data);
     const { data: sprint } = await api.post<Sprint>(
       `/api/v1/projects/${projectId}/sprints`,
-      data,
+      payload,
       { token }
     );
 
@@ -146,9 +207,10 @@ export const useSprintStore = create<SprintState>()((set) => ({
     if (!token) throw new Error("Not authenticated");
 
     const api = createApiClient(API_URL);
+    const payload = normalizeSprintPayload(data);
     const { data: sprint } = await api.put<Sprint>(
       `/api/v1/projects/${projectId}/sprints/${sprintId}`,
-      data,
+      payload,
       { token }
     );
 
@@ -222,6 +284,53 @@ export const useSprintStore = create<SprintState>()((set) => ({
       set((state) => ({
         metricsLoadingBySprintId: {
           ...state.metricsLoadingBySprintId,
+          [sprintId]: false,
+        },
+      }));
+    }
+  },
+
+  fetchSprintBudgetDetail: async (sprintId) => {
+    const token = getToken();
+    if (!token) return;
+
+    set((state) => ({
+      budgetLoadingBySprintId: {
+        ...state.budgetLoadingBySprintId,
+        [sprintId]: true,
+      },
+      budgetErrorBySprintId: {
+        ...state.budgetErrorBySprintId,
+        [sprintId]: null,
+      },
+    }));
+
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.get<SprintBudgetDetail>(
+        `/api/v1/sprints/${sprintId}/budget`,
+        { token }
+      );
+
+      set((state) => ({
+        budgetDetailBySprintId: {
+          ...state.budgetDetailBySprintId,
+          [sprintId]: data,
+        },
+      }));
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Failed to load sprint budget";
+      set((state) => ({
+        budgetErrorBySprintId: {
+          ...state.budgetErrorBySprintId,
+          [sprintId]: message,
+        },
+      }));
+    } finally {
+      set((state) => ({
+        budgetLoadingBySprintId: {
+          ...state.budgetLoadingBySprintId,
           [sprintId]: false,
         },
       }));

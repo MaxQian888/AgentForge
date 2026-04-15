@@ -4,7 +4,7 @@
 
 **Goal:** Add backend-only local dev commands and let the full-stack workflow reuse a separately started backend stack without duplicate ownership.
 
-**Architecture:** Generalize the existing `scripts/dev-all.js` control plane into profile-aware workflow helpers so `all` and `backend` modes share startup, status, stop, logs, and health semantics. Keep ownership isolation by giving each workflow profile its own runtime state file while reusing the same repo-local log directory and service health probes.
+**Architecture:** Generalize the existing `scripts/dev/dev-all.js` control plane into profile-aware workflow helpers so `all` and `backend` modes share startup, status, stop, logs, and health semantics. Keep ownership isolation by giving each workflow profile its own runtime state file while reusing the same repo-local log directory and service health probes.
 
 **Tech Stack:** Node.js scripts, Jest node-environment tests, repo-local runtime state under `.codex/`, existing Docker/Go/Bun/Next.js startup commands.
 
@@ -24,7 +24,7 @@
 ## Chunk 2: Implement profile-aware workflow support
 
 **Files:**
-- Modify: `scripts/dev-all.js`
+- Modify: `scripts/dev/dev-all.js`
 - Modify: `package.json`
 
 - [ ] Add profile metadata for `all` and `backend`, including state file names, human-readable labels, and the included services.

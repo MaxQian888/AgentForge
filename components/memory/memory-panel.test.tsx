@@ -1,5 +1,5 @@
 import userEvent from "@testing-library/user-event";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { MemoryPanel } from "./memory-panel";
 
 const loadWorkspace = jest.fn().mockResolvedValue(undefined);
@@ -16,6 +16,27 @@ const exportMemories = jest.fn().mockResolvedValue({
   exportedAt: "2026-04-13T12:00:00.000Z",
   entries: [{ id: "memory-1", key: "design-note" }],
 });
+const exportMemoryEntry = jest.fn().mockResolvedValue({
+  id: "memory-1",
+  projectId: "project-1",
+  scope: "project",
+  roleId: "",
+  category: "episodic",
+  kind: "operator_note",
+  tags: ["ops", "release"],
+  editable: true,
+  key: "design-note",
+  content: "Editable note",
+  metadata: "{}",
+  metadataObject: { kind: "operator_note", tags: ["ops", "release"] },
+  relatedContext: [{ type: "task", id: "task-1", label: "Related task" }],
+  relevanceScore: 0.9,
+  accessCount: 2,
+  createdAt: "2026-03-25T08:00:00.000Z",
+  updatedAt: "2026-03-25T08:30:00.000Z",
+});
+const storeMemory = jest.fn().mockResolvedValue(undefined);
+const updateMemory = jest.fn().mockResolvedValue(undefined);
 const clearActionFeedback = jest.fn();
 
 const storeState = {
@@ -25,6 +46,7 @@ const storeState = {
     scope: "all",
     category: "all",
     roleId: "",
+    tag: "",
     startAt: "",
     endAt: "",
     limit: 20,
@@ -35,7 +57,10 @@ const storeState = {
       projectId: "project-1",
       scope: "project" as const,
       roleId: "",
-      category: "semantic" as const,
+      category: "episodic" as const,
+      kind: "operator_note",
+      tags: ["ops", "release"],
+      editable: true,
       key: "design-note",
       content: "Keep the review queue stable.",
       metadata: "{}",
@@ -52,6 +77,9 @@ const storeState = {
       scope: "role" as const,
       roleId: "reviewer",
       category: "episodic" as const,
+      kind: "",
+      tags: ["feedback"],
+      editable: false,
       key: "incident-log",
       content: "Remember reviewer escalations.",
       metadata: "{\"source\":\"feedback\"}",
@@ -96,10 +124,13 @@ const storeState = {
   selectMemory,
   toggleMemorySelection,
   clearSelection,
+  storeMemory,
+  updateMemory,
   deleteMemory,
   bulkDeleteMemories,
   cleanupMemories,
   exportMemories,
+  exportMemoryEntry,
   clearActionFeedback,
 };
 
@@ -167,6 +198,9 @@ describe("MemoryPanel", () => {
     bulkDeleteMemories.mockClear();
     cleanupMemories.mockClear();
     exportMemories.mockClear();
+    exportMemoryEntry.mockClear();
+    storeMemory.mockClear();
+    updateMemory.mockClear();
     clearActionFeedback.mockClear();
     roleStoreState.fetchRoles.mockClear();
 
@@ -175,6 +209,7 @@ describe("MemoryPanel", () => {
       scope: "all",
       category: "all",
       roleId: "",
+      tag: "",
       startAt: "",
       endAt: "",
       limit: 20,
@@ -259,4 +294,76 @@ describe("MemoryPanel", () => {
       undefined,
     );
   });
+
+  it("supports note authoring, tag filtering, and editable note actions", async () => {
+    const user = userEvent.setup();
+    const { rerender } = render(<MemoryPanel projectId="project-1" />);
+
+    fireEvent.change(screen.getByLabelText("Note title"), {
+      target: { value: "Release note" },
+    });
+    fireEvent.change(screen.getByLabelText("Note content"), {
+      target: { value: "Remember the rollout checklist." },
+    });
+    fireEvent.change(screen.getByLabelText("Note tags"), {
+      target: { value: "ops, release" },
+    });
+    await user.click(screen.getByRole("button", { name: "Create Note" }));
+
+    expect(storeMemory).toHaveBeenCalledWith("project-1", {
+      key: "Release note",
+      content: "Remember the rollout checklist.",
+      scope: "project",
+      category: "episodic",
+      kind: "operator_note",
+      tags: ["ops", "release"],
+    });
+
+    fireEvent.change(screen.getByLabelText("Tag"), {
+      target: { value: "ops" },
+    });
+    expect(setFilters).toHaveBeenLastCalledWith({ tag: "ops" });
+
+    storeState.selectedMemoryId = "memory-1";
+    storeState.detail = {
+      id: "memory-1",
+      projectId: "project-1",
+      scope: "project",
+      roleId: "",
+      category: "episodic",
+      kind: "operator_note",
+      tags: ["ops", "release"],
+      editable: true,
+      key: "design-note",
+      content: "Editable note",
+      metadata: "{}",
+      metadataObject: { kind: "operator_note", tags: ["ops", "release"] },
+      relatedContext: [{ type: "task", id: "task-1", label: "Related task" }],
+      relevanceScore: 0.9,
+      accessCount: 2,
+      createdAt: "2026-03-25T08:00:00.000Z",
+      updatedAt: "2026-03-25T08:30:00.000Z",
+    } as never;
+    rerender(<MemoryPanel projectId="project-1" />);
+
+    await user.click(screen.getByRole("button", { name: "Edit Note" }));
+    fireEvent.change(screen.getByLabelText("Edit note tags"), {
+      target: { value: "ops, release, pinned" },
+    });
+    await user.click(screen.getByRole("button", { name: "Save Note" }));
+
+    expect(updateMemory).toHaveBeenCalledWith("project-1", "memory-1", {
+      key: "design-note",
+      content: "Editable note",
+      tags: ["ops", "release", "pinned"],
+      roleId: undefined,
+    });
+
+    await user.click(screen.getByRole("button", { name: "Export Entry" }));
+    expect(exportMemoryEntry).toHaveBeenCalledWith(
+      "project-1",
+      "memory-1",
+      undefined,
+    );
+  }, 10000);
 });

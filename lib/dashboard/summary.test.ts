@@ -1,4 +1,5 @@
 import {
+  applyRoleRegistryState,
   buildDashboardSummary,
   summarizeMemberRoster,
   type DashboardActivitySource,
@@ -6,6 +7,8 @@ import {
   type DashboardAgentSource,
   type DashboardMemberSource,
 } from "./summary";
+
+type BuildDashboardSummaryInput = Parameters<typeof buildDashboardSummary>[0];
 
 describe("dashboard summary helpers", () => {
   const projectId = "project-1";
@@ -230,5 +233,90 @@ describe("dashboard summary helpers", () => {
       readinessLabel: "Needs role binding",
       roleBindingLabel: "Unbound role",
     });
+  });
+
+  it("marks bound agent roles as stale when the current role registry no longer resolves them", () => {
+    const roster = summarizeMemberRoster({
+      members,
+      tasks: [],
+      agents: [],
+      activity: [],
+    });
+
+    const governed = applyRoleRegistryState(roster, []);
+
+    expect(governed[1]).toMatchObject({
+      id: "member-agent-1",
+      readinessState: "incomplete",
+      readinessLabel: "Stale role binding",
+      roleBindingLabel: "frontend-developer (stale)",
+      readinessMissing: ["roleId"],
+      roleBindingState: "stale",
+    });
+  });
+
+  it("derives bootstrap phases and next actions for an incomplete project", () => {
+    const input = {
+      scopeProjectId: projectId,
+      scopeProjectName: "AgentForge",
+      projectsCount: 1,
+      tasks: [],
+      agents: [],
+      members: [],
+      activity: [],
+      now: "2026-03-24T12:00:00.000Z",
+      projectMeta: {
+        id: projectId,
+        name: "AgentForge",
+        repoUrl: "",
+        settings: {
+          codingAgent: {
+            runtime: "",
+            provider: "",
+            model: "",
+          },
+        },
+      },
+      sprintCount: 0,
+      docsTemplateCount: 2,
+      workflowTemplateCount: 1,
+    } satisfies BuildDashboardSummaryInput;
+    const summary = buildDashboardSummary(input);
+
+    expect(summary.bootstrap).toEqual(
+      expect.objectContaining({
+        unresolvedCount: 4,
+        nextActions: expect.arrayContaining([
+          expect.objectContaining({
+            id: "configure-governance",
+            href: "/settings?project=project-1&section=repository",
+          }),
+          expect.objectContaining({
+            id: "add-member",
+            href: "/team?project=project-1&focus=add-member",
+          }),
+          expect.objectContaining({
+            id: "create-sprint",
+            href: "/sprints?project=project-1&action=create-sprint",
+          }),
+          expect.objectContaining({
+            id: "open-task-workspace",
+            href: "/project?id=project-1",
+          }),
+        ]),
+      }),
+    );
+    expect(summary.bootstrap?.phases).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          id: "governance",
+          state: "attention",
+        }),
+        expect.objectContaining({
+          id: "playbooks",
+          state: "ready",
+        }),
+      ]),
+    );
   });
 });

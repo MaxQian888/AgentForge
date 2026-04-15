@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
@@ -99,6 +100,83 @@ func (f *fakeIMActionTaskCreator) Create(ctx context.Context, projectID uuid.UUI
 		Priority:    req.Priority,
 	}
 	return f.created, nil
+}
+
+type fakeIMActionTaskTransitioner struct {
+	getTask         *model.Task
+	getErr          error
+	lastTaskID      uuid.UUID
+	lastTargetState string
+	transitionErr   error
+}
+
+func (f *fakeIMActionTaskTransitioner) GetByID(ctx context.Context, id uuid.UUID) (*model.Task, error) {
+	f.lastTaskID = id
+	if f.getErr != nil {
+		return nil, f.getErr
+	}
+	return f.getTask, nil
+}
+
+func (f *fakeIMActionTaskTransitioner) TransitionStatus(ctx context.Context, id uuid.UUID, newStatus string) error {
+	f.lastTaskID = id
+	f.lastTargetState = newStatus
+	return f.transitionErr
+}
+
+func (f *fakeIMActionTaskTransitioner) Transition(ctx context.Context, id uuid.UUID, req *model.TransitionRequest) (*model.Task, error) {
+	status := ""
+	if req != nil {
+		status = req.Status
+	}
+	if err := f.TransitionStatus(ctx, id, status); err != nil {
+		return nil, err
+	}
+	if f.getTask == nil {
+		return nil, nil
+	}
+	taskCopy := *f.getTask
+	taskCopy.Status = status
+	return &taskCopy, nil
+}
+
+type fakeIMActionBindingWriter struct {
+	calls []*model.IMActionBinding
+}
+
+func (f *fakeIMActionBindingWriter) BindAction(ctx context.Context, binding *model.IMActionBinding) error {
+	f.calls = append(f.calls, binding)
+	return nil
+}
+
+type fakeIMActionProgressRecorder struct {
+	calls []TaskActivityInput
+}
+
+func (f *fakeIMActionProgressRecorder) RecordActivity(ctx context.Context, taskID uuid.UUID, input TaskActivityInput) (*model.TaskProgressSnapshot, error) {
+	f.calls = append(f.calls, input)
+	return &model.TaskProgressSnapshot{TaskID: taskID}, nil
+}
+
+type fakeIMActionWorkflowEvaluator struct {
+	calls []struct {
+		from string
+		to   string
+		task *model.Task
+	}
+}
+
+func (f *fakeIMActionWorkflowEvaluator) EvaluateTransition(ctx context.Context, task *model.Task, fromStatus, toStatus string) []TriggerResult {
+	f.calls = append(f.calls, struct {
+		from string
+		to   string
+		task *model.Task
+	}{
+		from: fromStatus,
+		to:   toStatus,
+		task: task,
+	})
+	return nil
 }
 
 type fakeIMActionWikiCreator struct {
@@ -420,6 +498,153 @@ func TestBackendIMActionExecutor_CreateTaskFailsWhenWorkflowUnavailable(t *testi
 	}
 	if resp.ReplyTarget == nil || resp.ReplyTarget.ThreadID != "thread-1" {
 		t.Fatalf("reply target = %+v", resp.ReplyTarget)
+	}
+}
+
+func TestBackendIMActionExecutor_TransitionTaskUsesCanonicalTransitionWorkflow(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	transitioner := &fakeIMActionTaskTransitioner{
+		getTask: &model.Task{
+			ID:        taskID,
+			ProjectID: projectID,
+			Title:     "Bridge rollout",
+			Status:    model.TaskStatusInProgress,
+			Priority:  "high",
+		},
+	}
+	executor := NewBackendIMActionExecutor(nil, nil, nil, transitioner)
+
+	resp, err := executor.Execute(context.Background(), &model.IMActionRequest{
+		Platform:  "feishu",
+		Action:    "transition-task",
+		EntityID:  taskID.String(),
+		ChannelID: "chat-1",
+		BridgeID:  "bridge-feishu-1",
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:      "feishu",
+			ChatID:        "chat-1",
+			CallbackToken: "cb-token-1",
+		},
+		Metadata: map[string]string{
+			"targetStatus": model.TaskStatusInProgress,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	if transitioner.lastTaskID != taskID {
+		t.Fatalf("lastTaskID = %s, want %s", transitioner.lastTaskID, taskID)
+	}
+	if transitioner.lastTargetState != model.TaskStatusInProgress {
+		t.Fatalf("lastTargetState = %q, want %q", transitioner.lastTargetState, model.TaskStatusInProgress)
+	}
+	if resp.Status != model.IMActionStatusCompleted {
+		t.Fatalf("status = %q", resp.Status)
+	}
+	if resp.Task == nil || resp.Task.ID != taskID.String() || resp.Task.Status != model.TaskStatusInProgress {
+		t.Fatalf("task = %+v", resp.Task)
+	}
+	if resp.Metadata[imMetadataBridgeBindingTaskID] != taskID.String() {
+		t.Fatalf("metadata = %+v", resp.Metadata)
+	}
+	if resp.Structured == nil || len(resp.Structured.Fields) == 0 {
+		t.Fatalf("structured = %+v", resp.Structured)
+	}
+}
+
+func TestBackendIMActionExecutor_TransitionTaskReturnsBlockedOutcomeForInvalidTransition(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	transitioner := &fakeIMActionTaskTransitioner{
+		getTask: &model.Task{
+			ID:        taskID,
+			ProjectID: projectID,
+			Title:     "Bridge rollout",
+			Status:    model.TaskStatusDone,
+			Priority:  "high",
+		},
+		transitionErr: errors.New("invalid transition from done to in_progress"),
+	}
+	executor := NewBackendIMActionExecutor(nil, nil, nil, transitioner)
+
+	resp, err := executor.Execute(context.Background(), &model.IMActionRequest{
+		Platform:  "slack",
+		Action:    "transition-task",
+		EntityID:  taskID.String(),
+		ChannelID: "C123",
+		Metadata: map[string]string{
+			"target_status": model.TaskStatusInProgress,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Fatalf("status = %q, want blocked", resp.Status)
+	}
+	if resp.Success {
+		t.Fatal("expected blocked transition to be unsuccessful")
+	}
+	if resp.Task == nil || resp.Task.Status != model.TaskStatusDone {
+		t.Fatalf("task = %+v, want original task context", resp.Task)
+	}
+}
+
+func TestBackendIMActionExecutor_TransitionTaskStoresBindingAndEvaluatesWorkflow(t *testing.T) {
+	taskID := uuid.New()
+	projectID := uuid.New()
+	transitioner := &fakeIMActionTaskTransitioner{
+		getTask: &model.Task{
+			ID:        taskID,
+			ProjectID: projectID,
+			Title:     "Bridge rollout",
+			Status:    model.TaskStatusAssigned,
+			Priority:  "high",
+		},
+	}
+	binder := &fakeIMActionBindingWriter{}
+	progress := &fakeIMActionProgressRecorder{}
+	workflow := &fakeIMActionWorkflowEvaluator{}
+	executor := NewBackendIMActionExecutor(nil, nil, nil, transitioner, binder, progress, workflow)
+
+	resp, err := executor.Execute(context.Background(), &model.IMActionRequest{
+		Platform:  "slack",
+		Action:    "transition-task",
+		EntityID:  taskID.String(),
+		ChannelID: "C123",
+		BridgeID:  "bridge-slack-1",
+		ReplyTarget: &model.IMReplyTarget{
+			Platform:  "slack",
+			ChannelID: "C123",
+			ThreadID:  "thread-1",
+		},
+		Metadata: map[string]string{
+			"target_status": model.TaskStatusInProgress,
+		},
+	})
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if resp == nil || !resp.Success {
+		t.Fatalf("response = %+v", resp)
+	}
+	if len(binder.calls) != 1 {
+		t.Fatalf("binder calls = %d, want 1", len(binder.calls))
+	}
+	if binder.calls[0].TaskID != taskID.String() || binder.calls[0].ProjectID != projectID.String() {
+		t.Fatalf("binding = %+v", binder.calls[0])
+	}
+	if len(progress.calls) != 1 || progress.calls[0].Source != model.TaskProgressSourceTaskTransition {
+		t.Fatalf("progress calls = %+v", progress.calls)
+	}
+	if len(workflow.calls) != 1 {
+		t.Fatalf("workflow calls = %d, want 1", len(workflow.calls))
+	}
+	if workflow.calls[0].from != model.TaskStatusAssigned || workflow.calls[0].to != model.TaskStatusInProgress {
+		t.Fatalf("workflow call = %+v", workflow.calls[0])
 	}
 }
 

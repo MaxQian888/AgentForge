@@ -257,6 +257,36 @@ describe("SpawnAgentDialog", () => {
     }));
   });
 
+  it("passes selected role and runtime tuple into dispatch preflight requests", async () => {
+    const user = userEvent.setup();
+
+    render(
+      <SpawnAgentDialog
+        taskId="task-4b"
+        taskTitle="Role preflight test"
+        memberId="member-4b"
+        open
+        onOpenChange={jest.fn()}
+      />,
+    );
+
+    await waitFor(() => expect(fetchRuntimeCatalog).toHaveBeenCalled());
+
+    await user.clear(screen.getByLabelText("Budget (USD)"));
+    await user.type(screen.getByLabelText("Budget (USD)"), "7.5");
+    await user.selectOptions(screen.getByLabelText("Role"), "frontend-developer");
+
+    await waitFor(() =>
+      expect(fetchDispatchPreflight).toHaveBeenLastCalledWith("project-1", "task-4b", "member-4b", {
+        runtime: "codex",
+        provider: "openai",
+        model: "gpt-5-codex",
+        roleId: "frontend-developer",
+        budgetUsd: 7.5,
+      }),
+    );
+  });
+
   it("passes undefined roleId when no role is selected", async () => {
     const user = userEvent.setup();
 

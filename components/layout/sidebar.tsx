@@ -102,6 +102,7 @@ const navGroups: NavGroup[] = [
     defaultOpen: false,
     items: [
       { href: "/roles", labelKey: "nav.roles", icon: Shield },
+      { href: "/skills", labelKey: "nav.skills", icon: Search },
       { href: "/plugins", labelKey: "nav.plugins", icon: Puzzle },
       { href: "/marketplace", labelKey: "nav.marketplace", icon: Store },
       { href: "/settings", labelKey: "nav.settings", icon: Settings },

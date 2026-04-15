@@ -4,9 +4,9 @@ This document describes the current Tauri desktop packaging flow defined by:
 
 - `src-tauri/tauri.conf.json`
 - `package.json`
-- `scripts/build-backend.js`
-- `scripts/build-bridge.js`
-- `scripts/build-im-bridge.js`
+- `scripts/build/build-backend.js`
+- `scripts/build/build-bridge.js`
+- `scripts/build/build-im-bridge.js`
 - `docs/desktop-updater-release.md`
 
 ## Prerequisites
@@ -88,7 +88,7 @@ Notes:
 
 ### Go sidecars
 
-`scripts/build-backend.js` and `scripts/build-im-bridge.js` cross-compile for:
+`scripts/build/build-backend.js` and `scripts/build/build-im-bridge.js` cross-compile for:
 
 - Linux x64 / arm64
 - Windows x64
@@ -96,7 +96,7 @@ Notes:
 
 ### TS bridge
 
-`scripts/build-bridge.js` uses `bun build --compile` for:
+`scripts/build/build-bridge.js` uses `bun build --compile` for:
 
 - `bun-linux-x64`
 - `bun-linux-arm64`

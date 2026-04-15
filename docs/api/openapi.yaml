@@ -4872,9 +4872,53 @@ paths:
             type: string
         - description: ""
           in: query
+          name: query
+          required: false
+          schema:
+            type: string
+        - description: ""
+          in: query
           name: q
           required: false
           schema:
+            type: string
+        - description: ""
+          in: query
+          name: scope
+          required: false
+          schema:
+            type: string
+        - description: ""
+          in: query
+          name: category
+          required: false
+          schema:
+            type: string
+        - description: ""
+          in: query
+          name: roleId
+          required: false
+          schema:
+            type: string
+        - description: ""
+          in: query
+          name: tag
+          required: false
+          schema:
+            type: string
+        - description: ""
+          in: query
+          name: startAt
+          required: false
+          schema:
+            format: date-time
+            type: string
+        - description: ""
+          in: query
+          name: endAt
+          required: false
+          schema:
+            format: date-time
             type: string
         - description: ""
           in: query
@@ -4941,6 +4985,118 @@ paths:
       tags:
         - memory
   /api/v1/projects/{pid}/memory/{mid}:
+    get:
+      parameters:
+        - description: Project ID
+          in: path
+          name: pid
+          required: true
+          schema:
+            type: string
+        - description: Memory ID
+          in: path
+          name: mid
+          required: true
+          schema:
+            type: string
+        - description: ""
+          in: query
+          name: roleId
+          required: false
+          schema:
+            type: string
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentMemoryDetailDTO"
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Not Found
+      security:
+        - bearerAuth: []
+      summary: Get memory detail
+      tags:
+        - memory
+    patch:
+      parameters:
+        - description: Project ID
+          in: path
+          name: pid
+          required: true
+          schema:
+            type: string
+        - description: Memory ID
+          in: path
+          name: mid
+          required: true
+          schema:
+            type: string
+        - description: ""
+          in: query
+          name: roleId
+          required: false
+          schema:
+            type: string
+      requestBody:
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/UpdateMemoryRequest"
+        required: true
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AgentMemoryDetailDTO"
+          description: OK
+        "400":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Bad Request
+        "403":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Forbidden
+        "404":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Not Found
+        "409":
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ErrorResponse"
+          description: Conflict
+      security:
+        - bearerAuth: []
+      summary: Update memory curation fields
+      tags:
+        - memory
     delete:
       parameters:
         - description: Project ID
@@ -8856,6 +9012,8 @@ components:
           type: integer
         category:
           type: string
+        editable:
+          type: boolean
         content:
           type: string
         createdAt:
@@ -8863,7 +9021,12 @@ components:
           type: string
         id:
           type: string
+        kind:
+          type: string
         key:
+          type: string
+        lastAccessedAt:
+          format: date-time
           type: string
         metadata:
           type: string
@@ -8875,18 +9038,50 @@ components:
           type: string
         scope:
           type: string
+        tags:
+          items:
+            type: string
+          type: array
+        updatedAt:
+          format: date-time
+          type: string
       required:
         - id
         - projectId
         - scope
         - roleId
         - category
+        - editable
         - key
         - content
         - metadata
         - relevanceScore
         - accessCount
         - createdAt
+      type: object
+    AgentMemoryDetailDTO:
+      allOf:
+        - $ref: "#/components/schemas/AgentMemoryDTO"
+        - properties:
+            metadataObject:
+              additionalProperties: true
+              type: object
+            relatedContext:
+              items:
+                $ref: "#/components/schemas/AgentMemoryRelatedContextDTO"
+              type: array
+          type: object
+    AgentMemoryRelatedContextDTO:
+      properties:
+        id:
+          type: string
+        label:
+          type: string
+        type:
+          type: string
+      required:
+        - id
+        - type
       type: object
     AgentPerformanceDTO:
       properties:
@@ -12180,9 +12375,24 @@ components:
           type: string
         scope:
           type: string
+        tags:
+          items:
+            type: string
+          type: array
       required:
         - key
         - content
+      type: object
+    UpdateMemoryRequest:
+      properties:
+        content:
+          type: string
+        key:
+          type: string
+        tags:
+          items:
+            type: string
+          type: array
       type: object
     StringMap:
       additionalProperties:

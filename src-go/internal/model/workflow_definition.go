@@ -216,6 +216,12 @@ type WorkflowDefinitionDTO struct {
 	SourceID     *string         `json:"sourceId,omitempty"`
 	CreatedAt    string          `json:"createdAt"`
 	UpdatedAt    string          `json:"updatedAt"`
+	TemplateSource string        `json:"templateSource,omitempty"`
+	CanEdit      bool            `json:"canEdit,omitempty"`
+	CanDelete    bool            `json:"canDelete,omitempty"`
+	CanDuplicate bool            `json:"canDuplicate,omitempty"`
+	CanClone     bool            `json:"canClone,omitempty"`
+	CanExecute   bool            `json:"canExecute,omitempty"`
 }
 
 // WorkflowExecutionDTO is the API representation for an execution.
@@ -270,6 +276,22 @@ type StartWorkflowExecutionRequest struct {
 
 // ToDTO converts a WorkflowDefinition to its API representation.
 func (w *WorkflowDefinition) ToDTO() WorkflowDefinitionDTO {
+	templateSource := ""
+	canEdit := false
+	canDelete := false
+	canDuplicate := false
+	canClone := false
+	canExecute := false
+
+	if w.Status == WorkflowDefStatusTemplate {
+		templateSource = w.Category
+		canEdit = w.Category == WorkflowCategoryUser
+		canDelete = w.Category == WorkflowCategoryUser
+		canDuplicate = true
+		canClone = true
+		canExecute = true
+	}
+
 	dto := WorkflowDefinitionDTO{
 		ID:           w.ID.String(),
 		ProjectID:    w.ProjectID.String(),
@@ -283,6 +305,12 @@ func (w *WorkflowDefinition) ToDTO() WorkflowDefinitionDTO {
 		Version:      w.Version,
 		CreatedAt:    w.CreatedAt.Format(time.RFC3339),
 		UpdatedAt:    w.UpdatedAt.Format(time.RFC3339),
+		TemplateSource: templateSource,
+		CanEdit:      canEdit,
+		CanDelete:    canDelete,
+		CanDuplicate: canDuplicate,
+		CanClone:     canClone,
+		CanExecute:   canExecute,
 	}
 	if w.SourceID != nil {
 		s := w.SourceID.String()
