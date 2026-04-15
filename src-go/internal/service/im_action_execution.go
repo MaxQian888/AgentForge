@@ -146,6 +146,8 @@ func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActi
 		return e.executeReact(ctx, req), nil
 	case "select":
 		return e.executeSelect(ctx, req), nil
+	case "multi_select":
+		return e.executeMultiSelect(ctx, req), nil
 	default:
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unknown action: %s", req.Action), false), nil
 	}
@@ -438,6 +440,41 @@ func (e *BackendIMActionExecutor) executeSelect(ctx context.Context, req *model.
 func (e *BackendIMActionExecutor) dispatchAllowedAction(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
 	resp, _ := e.Execute(ctx, req)
 	return resp
+}
+
+func (e *BackendIMActionExecutor) executeMultiSelect(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	target := strings.TrimSpace(req.Metadata["target_action"])
+	if target == "" {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Multi-select action requires target_action metadata.", false)
+	}
+	if !isAllowedTargetAction(target) {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, fmt.Sprintf("target_action %q is not allowed.", target), false)
+	}
+
+	delegated := *req
+	delegated.Action = target
+	delegated.Metadata = cloneStringMap(req.Metadata)
+	options := splitCSV(delegated.Metadata["selected_options"])
+	if len(options) > 0 {
+		switch target {
+		case "assign-agent":
+			if delegated.Metadata["assigneeId"] == "" {
+				delegated.Metadata["assigneeId"] = options[0]
+			}
+		}
+	}
+	return e.dispatchAllowedAction(ctx, &delegated)
+}
+
+func splitCSV(s string) []string {
+	raw := strings.Split(strings.TrimSpace(s), ",")
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func attachTaskBindingMetadata(resp *model.IMActionResponse, req *model.IMActionRequest, projectID string, taskID string) {

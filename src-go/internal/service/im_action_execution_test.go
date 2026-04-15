@@ -810,3 +810,43 @@ func TestExecuteSelect_WithWhitelistedTargetActionDispatches(t *testing.T) {
 		t.Errorf("assigneeId not propagated: %+v", dispatcher.lastAssign)
 	}
 }
+
+func TestExecuteMultiSelect_PromotesSelectedOptionsAsCSV(t *testing.T) {
+	dispatcher := &fakeIMActionDispatcher{
+		assignResp: &model.TaskDispatchResponse{
+			Dispatch: model.DispatchOutcome{Status: model.DispatchStatusStarted},
+			Task:     model.TaskDTO{ID: uuid.New().String()},
+		},
+	}
+	exec := NewBackendIMActionExecutor(dispatcher, nil, nil)
+	taskID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "multi_select",
+		EntityID: taskID.String(),
+		Metadata: map[string]string{
+			"target_action":    "assign-agent",
+			"selected_options": "agent-a,agent-b",
+		},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status == model.IMActionStatusFailed {
+		t.Fatalf("unexpected failure: %q", resp.Result)
+	}
+	if dispatcher.lastAssign == nil || dispatcher.lastAssign.AssigneeID != "agent-a" {
+		t.Errorf("AssigneeID = %+v", dispatcher.lastAssign)
+	}
+}
+
+func TestExecuteMultiSelect_WithoutTargetActionReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "multi_select",
+		Metadata: map[string]string{"selected_options": "a,b"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+}
