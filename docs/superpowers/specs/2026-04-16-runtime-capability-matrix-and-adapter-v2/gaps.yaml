@@ -1,0 +1,20 @@
+# Gap list placeholder. Schema per main spec §8.6.
+# Entries will be populated during spec filling phase; see §10.3 for plan generation rules.
+
+gaps: []
+
+# Example (do not commit with real data before matrix is filled):
+#
+# gaps:
+#   - id: CC-001
+#     adapter: claude_code
+#     capability: "6.5.1"
+#     axis:
+#       value: high
+#       complexity: M
+#       risk: low
+#       stability: stable
+#     priority: P0
+#     depends_on: []
+#     roadmap_track: D2
+#     hint_plan_merge_group: "claude_code:skills"
