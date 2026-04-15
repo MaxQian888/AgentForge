@@ -14,7 +14,7 @@ blocks: []
 
 ## 1. 背景与目标
 
-AgentForge 在 `src-bridge` 已实装 7 个 runtime adapter（`claude_code` / `codex` / `opencode` / `command` / `cursor` / `gemini` / `qoder` / `iflow`），但当前实现处于**单点参照**阶段：
+AgentForge 在 `src-bridge` 已实装 8 个 runtime adapter（`claude_code` / `codex` / `opencode` / `command` / `cursor` / `gemini` / `qoder` / `iflow`），但当前实现处于**单点参照**阶段：
 - `AgentRuntime.claudeQuery: ClaudeQueryControl` 和 `AgentStatus.live_controls` 等关键字段硬编码 `runtime === "claude_code"`（见 `src-bridge/src/runtime/agent-runtime.ts:134-144`）；
 - `registry.ts:144-175` 已具备 14 操作 `RuntimeAdapter` 接口骨架，但对 skills / subagents / slash commands / plan mode / memory / output styles 这些 Claude CLI 一等能力**尚未建模**；
 - 非 claude adapter 的 "完整度" 没有可核验的对齐基线，不知道哪里是"不支持"、哪里是"应支持但没做"。
@@ -181,17 +181,31 @@ AgentForge 在 `src-bridge` 已实装 7 个 runtime adapter（`claude_code` / `c
 
 ### 5.5 机器可读导出
 
-Spec 同时导出 `matrix.csv`（见附件目录）。CSV 列头与子表格式一致，row key：`<group>.<seq>`。
+Spec 同时导出 `matrix.csv`（见附件目录）。CSV 在 §5.4 的"行"列基础上**拆两列**以便 awk/jq/sql 处理：
+
+| CSV 列序 | 列名 | 对应 §5.4 子表位置 | 语义 |
+|---|---|---|---|
+| 1 | `row_key` | "行"列的编号部分，如 `8.1` | group.seq，唯一键 |
+| 2 | `capability` | "行"列的命名部分，如 `hook:pre_tool_use` | 可读能力名（纯文本，非状态格） |
+| 3–9 | `claude_cli` / `claude_sdk` / `cursor` / `aider` / `codex` / `opencode` / `gemini_cli` | 对标 7 列 | 状态格 `✓/~/✗/N-A` |
+| 10–12 | `fe` / `go` / `br` | AgentForge 3 列 | 状态格 `✓/~/✗/N-A` |
+| 13 | `anchor` | "Anchor"列，如 `§6.8.1` | 指向分能力节 |
+
+状态格列位因此从**第 3 列开始**（第 1-2 列是文本键）。
 
 **完整性验证脚本**（spec 附带，review 流程强制跑）：
 
 ```bash
-# 确保无 ? 单元格
-awk -F, 'NR>1 { for (i=2; i<=NF; i++) if ($i == "?") { print NR":"i; exit 1 } }' \
+# 确保无 ? 单元格（仅扫描状态列 3-12，跳过 row_key / capability / anchor）
+awk -F, 'NR>1 { for (i=3; i<=12; i++) if ($i == "?") { print NR":"i; exit 1 } }' \
     2026-04-16-runtime-capability-matrix-and-adapter-v2/matrix.csv
 
-# 确保每行都有 Anchor
+# 确保每行都有 Anchor（最后一列）
 awk -F, 'NR>1 && $NF == "" { print "row " NR " missing anchor"; exit 1 }' \
+    2026-04-16-runtime-capability-matrix-and-adapter-v2/matrix.csv
+
+# 确保 row_key 全唯一
+awk -F, 'NR>1 { if (seen[$1]++) { print "duplicate row_key: " $1; exit 1 } }' \
     2026-04-16-runtime-capability-matrix-and-adapter-v2/matrix.csv
 ```
 
@@ -344,6 +358,13 @@ export interface RuntimeAdapterV2 {
 
 共 **22 个方法**（较当前 14 个扩充 8 个）。所有类型声明（`HookBinding` / `SkillDescriptor` / `PermissionMode` 等）由分能力节细化。
 
+#### 7.2.1 为何 Group 3 / Group 4 不出现独立方法签名
+
+- **Group 3（Tool & File Permissions）**：tool allowlist/denylist / file scope / network policy 是**启动期配置**而非可变操作，通过 `ExecuteCtx` 的 `ExecuteRequest` 字段与 `launchContract` 供给；`setPermissionMode`（运行期切换）在 Group 2 已覆盖。
+- **Group 4（Context & Memory）**：`CLAUDE.md` / `AGENTS.md` / `GEMINI.md` 三级记忆通过**环境自动加载**（工作目录层级扫描）而非 adapter API；程序化的 memory CRUD 属于 Go 侧 `internal/memory` 的能力，不是 bridge adapter 的职责；如果后续需要暴露 adapter 层 memory 查询接口，将在分能力节 §6.4.* 讨论并酌情扩充 v2 方法集。
+
+矩阵仍然对 Group 3 / 4 独立列出行；其状态体现在 `RuntimeCapabilityMatrix.permissions` / `.memory` 自报字段与对应的 §6 能力节中。
+
 ### 7.3 RuntimeCapabilityMatrix 自报
 
 ```ts
@@ -370,7 +391,9 @@ export interface RuntimeCapabilityMatrix {
 **约束**：
 - 全局矩阵（§5）是 `capabilities` 的规范真相；
 - Spec 附带 helper：`validateAdapterAgainstMatrix(adapter)`——启动时校验 adapter 自报 与 全局矩阵一致，不一致直接拒绝注册；
-- adapter 声明 `partial` 必须在 adapter 文件顶部注释说明缺失点。
+- adapter 声明 `partial` 必须在 adapter 文件顶部注释说明缺失点；
+- `/* ... */` 省略的 key 集合**由矩阵派生**：每个原子能力 row 对应一个 key；矩阵填充完成后自动导出完整 TS 类型声明（脚本见 `validateAdapterAgainstMatrix` 附带工具）；
+- **依赖 §13.1**：Group 14（Output Styles）是否保留独立分组待矩阵填充时观察；若合并到 Group 4，`outputStyle` 键整体下沉到 `memory.outputStyle.*`，其余 adapter 实现不受影响。
 
 ### 7.4 错误类型细化
 
@@ -589,7 +612,7 @@ docs/superpowers/specs/
 
 本次 brainstorm 仅定义**框架**。下列附件的实际内容由后续 `writing-plans` 产生的第一份 plan 负责填充（"对标项目能力调研 + 矩阵填充"）：
 
-- `matrix.csv` — 模板头行已确定（对标 7 列 + AgentForge 3 列 + Anchor）；行内容待填；
+- `matrix.csv` — 模板头行已确定（13 列：`row_key` / `capability` / 对标 7 列 / AgentForge 3 列 / `anchor`，详见 §5.5）；行内容待填；
 - `gaps.yaml` — schema 已定（§8.6）；entries 待填；
 - `sources.md` — 表头已定（`[prefix-n]` 编号 / URL / 访问日期 / 归档位置）；内容待填；
 - `sources/screenshots/` — 空目录；调研期间入库。
@@ -615,3 +638,4 @@ docs/superpowers/specs/
 | 日期 | 版本 | 作者 | 变更 |
 |---|---|---|---|
 | 2026-04-16 | draft-0 | Max Qian | 初稿（brainstorm 输出） |
+| 2026-04-16 | draft-1 | Max Qian | Spec-review 修订：§1 adapter 计数 7→8；§5.5 CSV 13 列与 awk 扫描区间显式化、新增 row_key 唯一性校验；新增 §7.2.1 解释 Group 3/4 不占独立方法签名；§7.3 补 `/* ... */` 键集派生规则与 §13.1 依赖链；§12 对齐 13 列措辞 |
