@@ -680,7 +680,7 @@ func (s *DAGWorkflowService) executeLoop(ctx context.Context, exec *model.Workfl
 	_ = json.Unmarshal(def.Nodes, &allNodes)
 	_ = json.Unmarshal(def.Edges, &allEdges)
 
-	nodesToReset := s.findNodesBetween(targetNode, node.ID, allNodes, allEdges)
+	nodesToReset := nodetypes.FindNodesBetween(targetNode, node.ID, allNodes, allEdges)
 	nodesToReset = append(nodesToReset, targetNode) // Include the target itself
 
 	if len(nodesToReset) > 0 {
@@ -895,36 +895,6 @@ func (s *DAGWorkflowService) storeNodeResult(ctx context.Context, executionID uu
 
 	dsJSON, _ := json.Marshal(ds)
 	_ = s.execRepo.UpdateExecutionDataStore(ctx, executionID, dsJSON)
-}
-
-// findNodesBetween returns node IDs reachable from `fromID` that lead to `toID` (exclusive of toID).
-func (s *DAGWorkflowService) findNodesBetween(fromID, toID string, nodes []model.WorkflowNode, edges []model.WorkflowEdge) []string {
-	// BFS from fromID, collect nodes that are on paths to toID
-	adjacency := make(map[string][]string)
-	for _, e := range edges {
-		adjacency[e.Source] = append(adjacency[e.Source], e.Target)
-	}
-
-	visited := make(map[string]bool)
-	var result []string
-	queue := []string{fromID}
-	for len(queue) > 0 {
-		current := queue[0]
-		queue = queue[1:]
-		if visited[current] || current == toID {
-			continue
-		}
-		visited[current] = true
-		if current != fromID {
-			result = append(result, current)
-		}
-		for _, next := range adjacency[current] {
-			if !visited[next] {
-				queue = append(queue, next)
-			}
-		}
-	}
-	return result
 }
 
 func (s *DAGWorkflowService) broadcastEvent(eventType, projectID string, payload map[string]any) {
