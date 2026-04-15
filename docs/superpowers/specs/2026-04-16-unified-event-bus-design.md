@@ -28,7 +28,7 @@ Verified against real sources on branch `develop`:
   - `BridgeAgentEvent` (`src-go/internal/ws/events.go`) — TS Bridge ingress
 - No shared base; each sink (repo, WS hub, bridge handler, IM forwarder) has its own envelope.
 - **Event type strings already follow `{domain}.{entity}.{action}`** — 80+ constants in `src-go/internal/ws/events.go` (`task.created`, `workflow.execution.started`, `plugin.lifecycle`, …). This naming is preserved by this design.
-- `Hub.BroadcastEvent` (`src-go/internal/ws/hub.go` L88-L116) filters only by `projectID`. The frontend `lib/ws-client.ts` already has a `subscribe(channel)` stub, but the server never consumes it. Frontend stores filter the firehose client-side.
+- `Hub.BroadcastEvent` (`src-go/internal/ws/hub.go` L97-L116) filters only by `projectID`. The frontend `lib/ws-client.ts` already has a `subscribe(channel)` stub, but the server never consumes it. Frontend stores filter the firehose client-side.
 - Go middleware is HTTP-only; review-trigger / audit / rate-limit logic is scattered across `service` and custom middleware (`src-go/internal/middleware/review_trigger.go`).
 - TS Bridge has a unified `RuntimeAdapter` interface; the real hot-spot is `src-bridge/src/handlers/claude-runtime.ts` at 1052 LOC, which is **out of scope** for this spec.
 
@@ -97,9 +97,9 @@ const (
 )
 ```
 
-Reserved metadata keys:
+Reserved metadata keys (the bus exposes helper accessors `GetChannels(e)`, `SetChannels(e, []string)` etc. that assert the expected concrete type; direct map access is discouraged):
 
-- `metadata.channels` — `[]string` of channel URIs this event fans out to; populated by `core.channel-router`.
+- `metadata.channels` — `[]string` of channel URIs this event fans out to; populated by `core.channel-router`. `core.validate` (guard) rejects events whose `channels` exists but is not a `[]string`.
 - `metadata.span_id`, `metadata.trace_id` — tracing.
 - `metadata.causation_id`, `metadata.correlation_id` — event chains.
 - `metadata.user_id`, `metadata.project_id` — enriched from auth context.
@@ -181,7 +181,7 @@ type PipelineCtx struct {
 2. Group mods by mode. Sort each group by priority asc.
 3. For each `GuardMod` matching `e.Type`: call `Guard`. Any non-nil error → abandon event, emit synthetic `event.error` (target = original `source`).
 4. For each `TransformMod` matching `e.Type`: call `Transform`. Returned `*Event` becomes input for the next. Nil-with-error → same as guard rejection with a different `reason`.
-5. `ObserveMod`s are run in parallel with `ctx` carrying a 5s deadline. Panics are recovered and logged. Mutual isolation: one slow observer must not block another.
+5. `ObserveMod`s are run in parallel with `ctx` carrying a 5s deadline. Panics are recovered and logged. Mutual isolation: one slow observer must not block another. **Observer ordering is explicitly not guaranteed** — mods must not depend on another observer's side-effect having completed (e.g., an audit observer must not assume `core.persist` already wrote the row; if that dependency is needed, model it as a subsequent event via `PipelineCtx.Emits`).
 6. If `PipelineCtx.Emits` is non-empty, recurse. `metadata.causation_depth` must not exceed 3; deeper chains error and drop the new event.
 
 ### Built-in mods (delivered with M1)
@@ -242,6 +242,7 @@ type PipelineCtx struct {
 
 - New package `internal/eventbus` with `Event`, `Address`, `Bus`, `Pipeline`, `Mod`, `Mode`, 7 built-in mods.
 - New `events` table; drop `agent_events`. Migration replaces the old table; historical rows are discarded.
+- New `events_dead_letter` table used by `core.persist` when a persist attempt fails after retries (see Risk 2). Schema mirrors `events` plus `last_error`, `retry_count`, `first_seen_at`.
 - All service/handler/bridge_handler call sites migrate from `hub.BroadcastEvent` or `*Repository.Create` (for event rows) to `bus.Publish`.
 - Delete `AgentEvent`, `PluginEventRecord`, `ws.Event`, `BridgeAgentEvent`.
 - `im_event_routing` keeps its current surface but its producer side goes through the bus; M1 wraps it as an `ObserveMod` named `im.forward-legacy` to minimize IM-side churn. (It is removed in M4 when proper `core.im-forward` lands.)
@@ -297,7 +298,7 @@ type PipelineCtx struct {
 
 ## Migration checklist (for plan phase, informal)
 
-- New migration `NNN_events_table.sql` creating `events` and dropping `agent_events`.
+- New migration `NNN_events_table.sql` creating `events` and `events_dead_letter`, dropping `agent_events`.
 - Code-mod every `hub.BroadcastEvent(&ws.Event{...})` → `bus.Publish(Event{...})`.
 - Code-mod every `*EventRepository.Create` call site.
 - Remove `src-go/internal/ws/events.go` struct definitions (keep the string constants file, renamed).
