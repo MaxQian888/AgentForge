@@ -93,7 +93,7 @@ type NodeExecRequest struct {
     Execution  *model.WorkflowExecution  // read-only snapshot
     Node       *model.WorkflowNode        // read-only
     Config     map[string]any             // template-resolved (done by service)
-    DataStore  map[string]any             // read-only snapshot
+    DataStore  map[string]any             // read-only snapshot; handlers MUST NOT mutate
     NodeExecID uuid.UUID
     ProjectID  uuid.UUID
 }
@@ -150,7 +150,7 @@ type Effect struct {
 | `invoke_sub_workflow` | `{workflowId, variables}` — parks; resumed by new `HandleSubWorkflowCompletion` (stub in Track A, wired in later) |
 | `broadcast_event` | `{eventType, payload}` |
 | `update_task_status` | `{targetStatus}` |
-| `reset_nodes` | `{nodeIds[]}` — deletes node executions for given IDs so AdvanceExecution re-picks them up |
+| `reset_nodes` | `{nodeIds[], counterKey?, counterValue?}` — deletes node executions for given IDs so AdvanceExecution re-picks them up; optional `counterKey/counterValue` lets the loop handler persist its iteration count through the EffectApplier instead of mutating DataStore (replaces the current `_loop_{nodeId}_count` in-place mutation) |
 
 ### 4.4 NodeTypeRegistry
 
@@ -256,6 +256,11 @@ spec:
 | IntegrationPlugin  | wasm, go-plugin           | unchanged                        |
 | ReviewPlugin       | mcp                       | unchanged                        |
 | **NodeTypePlugin** | **wasm, mcp**             | **new — Track A**                |
+
+Required schema updates:
+- `src-go/internal/model/plugin.go`: add `PluginKindNodeType` constant; extend `isAllowedRuntime` to accept the new kind/runtime pair.
+- `src-bridge/src/plugins/schema.ts`: add `"NodeTypePlugin"` to `PluginKindSchema` enum; extend kind-to-runtime enforcement block with `NodeTypePlugin → {wasm, mcp}`; add `nodeTypes[]` structure to `spec` schema.
+- `src-go/internal/plugin/parser.go`: parse & validate `spec.nodeTypes[]`; enforce namespacing rules (§4.4).
 
 ## 6. Runtime Dispatch Protocols
 
@@ -449,8 +454,11 @@ Modify:
 - `StartTeam`: remove the `if s.useWorkflowEngine && s.workflowAdapter != nil` branch and the strategy-fallback path. Always call `WorkflowTemplateService.CreateFromTemplate` using a new helper `mapStrategyToTemplateName(strategy string) string` (logic inlined from deleted adapter, or promoted into `WorkflowTemplateService`).
 - `ProcessRunCompletion`: remove `strategy.HandleRunCompletion` call entirely. Run completion routing is already handled by `DAGWorkflowService.HandleAgentRunCompletion` (Phase 5 wiring).
 
+Also delete (verified 2026-04-16 via grep: all callers live in deleted strategy files):
+- `TeamService.spawnCodersForTasks`
+- `TeamService.spawnCodersForTask`
+
 Preserve:
-- `spawnCodersForTasks` / `spawnCodersForTask`: audit callers post-strategy-deletion; if unused, delete. Otherwise retain.
 - All other `TeamService` public methods (`CancelTeam`, `RetryTeam`, `GetSummary`, `ListByProject`, `ListSummaries`, `DeleteTeam`, `UpdateTeam`, `ListArtifacts`): untouched unless they transitively reference deleted code.
 
 ### 9.3 Initialization order (`cmd/server/main.go` or equivalent)
