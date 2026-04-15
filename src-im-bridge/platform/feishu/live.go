@@ -792,17 +792,29 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 		// For select/picker/form elements, use the tag as action type and the
 		// selected value as entity ID.
 		switch actionTag {
-		case "select_static", "select_person", "multi_select_static", "multi_select_person":
-			action = "select"
-			entityID = selectedOption
-			if entityID == "" {
-				entityID = actionValue
+		case "select_static", "select_person":
+			action = core.ActionNameSelect
+			if parsedAction, parsedEntity, parsedMeta, parsedOK := core.ParseActionReferenceWithMetadata(actionValue); parsedOK {
+				_ = parsedAction
+				entityID = parsedEntity
+				actionMetadata = parsedMeta
+			} else {
+				entityID = selectedOption
+			}
+		case "multi_select_static", "multi_select_person":
+			action = core.ActionNameMultiSelect
+			if parsedAction, parsedEntity, parsedMeta, parsedOK := core.ParseActionReferenceWithMetadata(actionValue); parsedOK {
+				_ = parsedAction
+				entityID = parsedEntity
+				actionMetadata = parsedMeta
+			} else {
+				entityID = ""
 			}
 		case "date_picker", "time_picker", "datetime_picker":
-			action = "date_pick"
+			action = core.ActionNameDatePick
 			entityID = selectedTime
 		case "overflow":
-			action = "overflow"
+			action = core.ActionNameOverflow
 			entityID = selectedOption
 		case "checker":
 			action = core.ActionNameToggle
@@ -810,7 +822,7 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 		default:
 			// Check if form values carry an action reference.
 			if formAction, formOk := formValues["action"]; formOk {
-				action = "form_submit"
+				action = core.ActionNameFormSubmit
 				entityID = formAction
 			} else {
 				return nil, errIgnoreCardAction
@@ -824,6 +836,12 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 	// carries a different action prefix.
 	if actionTag == "checker" {
 		action = core.ActionNameToggle
+	}
+	// Multi-select elements always map to the multi_select action regardless of
+	// the parsed action reference — the tag is the authoritative signal for what
+	// kind of interaction occurred.
+	if actionTag == "multi_select_static" || actionTag == "multi_select_person" {
+		action = core.ActionNameMultiSelect
 	}
 
 	chatID := ""
@@ -855,6 +873,9 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 	}
 	if selectedOption != "" {
 		metadata["selected_option"] = selectedOption
+	}
+	if strings.HasPrefix(actionTag, "multi_select") && len(act.Options) > 0 {
+		metadata["selected_options"] = strings.Join(act.Options, ",")
 	}
 	if selectedTime != "" {
 		metadata["selected_time"] = selectedTime

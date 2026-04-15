@@ -1372,3 +1372,56 @@ func TestNormalizeCardActionRequest_CheckerUncheckedWithoutActionRef(t *testing.
 		t.Errorf("checker_state = %q, want false", req.Metadata["checker_state"])
 	}
 }
+
+func TestNormalizeCardActionRequest_MultiSelectWithActionRef(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:     "multi_select_static",
+				Options: []string{"opt_a", "opt_b", "opt_c"},
+				Value:   map[string]interface{}{"action": "act:assign-agent:task-xyz"},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != core.ActionNameMultiSelect {
+		t.Errorf("Action = %q, want multi_select", req.Action)
+	}
+	if req.EntityID != "task-xyz" {
+		t.Errorf("EntityID = %q, want task-xyz", req.EntityID)
+	}
+	if req.Metadata["selected_options"] != "opt_a,opt_b,opt_c" {
+		t.Errorf("selected_options = %q, want opt_a,opt_b,opt_c", req.Metadata["selected_options"])
+	}
+}
+
+func TestNormalizeCardActionRequest_MultiSelectPersonFallback(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:     "multi_select_person",
+				Options: []string{"ou_user_a", "ou_user_b"},
+				Value:   map[string]interface{}{},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != core.ActionNameMultiSelect {
+		t.Errorf("Action = %q, want multi_select", req.Action)
+	}
+	if req.Metadata["selected_options"] != "ou_user_a,ou_user_b" {
+		t.Errorf("selected_options = %q", req.Metadata["selected_options"])
+	}
+}
