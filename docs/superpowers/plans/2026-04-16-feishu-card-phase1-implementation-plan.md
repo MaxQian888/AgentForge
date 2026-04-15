@@ -560,6 +560,8 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 
 ## Task 6 — Bridge: Reaction Created + Deleted forwarding
 
+> **Scope note:** the spec said Phase 1 scaffolds `MessageReactionDeletedV1`; the plan implements it fully because doing so is the same LOC as scaffolding and avoids a stub in the interface. The backend executor handles both `event_type=created` and `event_type=deleted` via the same path in Task 10.
+
 **Files:**
 - Modify: `src-im-bridge/platform/feishu/live.go`
 - Modify: `src-im-bridge/platform/feishu/live_test.go`
@@ -801,15 +803,21 @@ type lifecycleEventRunner interface {
 }
 ```
 
-Propagate the new parameter through `Live.Start` (line ~301) and through `sdkEventRunner.StartFull` (line ~553). In `sdkEventRunner.StartFull`:
+Propagate the new parameter through **every call site**. The full cascade (grep for "StartFull" in `src-im-bridge/platform/feishu/`):
 
-```go
-if reactionDeletedHandler != nil {
-	dispatcher = dispatcher.OnP2MessageReactionDeletedV1(reactionDeletedHandler)
-}
-```
+1. `lifecycleEventRunner` interface declaration — add the parameter as shown above.
+2. `sdkEventRunner.Start` (~line 546) — add a trailing `nil` when delegating to `StartFull`.
+3. `sdkEventRunner.StartWithCardActions` (~line 550) — add a trailing `nil`.
+4. `sdkEventRunner.StartFull` (~line 553) — accept the new parameter and wire:
+   ```go
+   if reactionDeletedHandler != nil {
+       dispatcher = dispatcher.OnP2MessageReactionDeletedV1(reactionDeletedHandler)
+   }
+   ```
+5. `Live.Start` (~line 301) — when the runner is a `lifecycleEventRunner`, pass `l.handleReactionDeleted` as the new argument.
+6. `fakeEventRunner` in `live_test.go` — add a `reactionDeletedHandler` field and accept the new arg in its `StartFull` method; add a `dispatchReactionDeleted` helper if any test needs to exercise it.
 
-Update `fakeEventRunner` in `live_test.go` to match the new interface (add a `reactionDeletedHandler` parameter and dispatch helper). The existing `StartFull` on the runner must accept the extra argument.
+If you miss any of these, `go build ./...` will fail with "wrong number of arguments" — fix before running tests.
 
 - [ ] **Step 6.4: Run to confirm pass**
 
@@ -1502,7 +1510,12 @@ func TestExecuteSelect_WithInvalidTargetActionReturnsBlocked(t *testing.T) {
 }
 
 func TestExecuteSelect_WithWhitelistedTargetActionDispatches(t *testing.T) {
-	dispatcher := &fakeTaskDispatcher{/* same type used by existing executeAssignAgent tests */}
+	dispatcher := &fakeIMActionDispatcher{
+		assignResp: &model.TaskDispatchResponse{
+			Dispatch: model.DispatchOutcome{Status: model.DispatchStatusStarted},
+			Task:     model.TaskDTO{ID: uuid.New().String()},
+		},
+	}
 	exec := NewBackendIMActionExecutor(dispatcher, nil, nil)
 	taskID := uuid.New()
 	req := &model.IMActionRequest{
@@ -1522,13 +1535,13 @@ func TestExecuteSelect_WithWhitelistedTargetActionDispatches(t *testing.T) {
 		t.Errorf("unexpected status %q; result=%q", resp.Status, resp.Result)
 	}
 	// The selected_option should have been promoted into assigneeId
-	if dispatcher.lastAssignRequest == nil || dispatcher.lastAssignRequest.AssigneeID != "agent-alpha" {
-		t.Errorf("assigneeId not propagated: %+v", dispatcher.lastAssignRequest)
+	if dispatcher.lastAssign == nil || dispatcher.lastAssign.AssigneeID != "agent-alpha" {
+		t.Errorf("assigneeId not propagated: %+v", dispatcher.lastAssign)
 	}
 }
 ```
 
-Note: use existing `fakeTaskDispatcher` from `im_action_execution_test.go` if present; otherwise create a minimal one that captures `lastAssignRequest`.
+**Existing fakes to reuse** (defined in `im_action_execution_test.go`): `fakeIMActionDispatcher` (field: `lastAssign`), `fakeIMActionDecomposer` (fields: `last`, `resp`, `err`), `fakeIMActionTaskCreator` (field: `created`), `fakeIMActionTaskTransitioner` (fields: `getTask`, `lastTaskID`, `lastTargetState`, `transitionErr`). Use these exact names throughout the Phase 1 tests rather than inventing new ones.
 
 - [ ] **Step 11.2: Run to confirm failure**
 
@@ -1633,7 +1646,12 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 
 ```go
 func TestExecuteMultiSelect_PromotesSelectedOptionsAsCSV(t *testing.T) {
-	dispatcher := &fakeTaskDispatcher{}
+	dispatcher := &fakeIMActionDispatcher{
+		assignResp: &model.TaskDispatchResponse{
+			Dispatch: model.DispatchOutcome{Status: model.DispatchStatusStarted},
+			Task:     model.TaskDTO{ID: uuid.New().String()},
+		},
+	}
 	exec := NewBackendIMActionExecutor(dispatcher, nil, nil)
 	taskID := uuid.New()
 	req := &model.IMActionRequest{
@@ -1650,8 +1668,8 @@ func TestExecuteMultiSelect_PromotesSelectedOptionsAsCSV(t *testing.T) {
 		t.Fatalf("unexpected failure: %q", resp.Result)
 	}
 	// First option becomes assigneeId; full list stays in metadata.
-	if dispatcher.lastAssignRequest.AssigneeID != "agent-a" {
-		t.Errorf("AssigneeID = %q", dispatcher.lastAssignRequest.AssigneeID)
+	if dispatcher.lastAssign == nil || dispatcher.lastAssign.AssigneeID != "agent-a" {
+		t.Errorf("AssigneeID = %+v", dispatcher.lastAssign)
 	}
 }
 
@@ -1748,7 +1766,9 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 
 ```go
 func TestExecuteToggle_TrueTransitionsTaskToDone(t *testing.T) {
-	mover := &fakeTaskMover{/* captures TransitionRequest */}
+	mover := &fakeIMActionTaskTransitioner{
+		getTask: &model.Task{ID: uuid.New(), Title: "t", Status: model.TaskStatusInProgress},
+	}
 	exec := NewBackendIMActionExecutor(nil, nil, nil, mover)
 	taskID := uuid.New()
 	req := &model.IMActionRequest{
@@ -1761,13 +1781,15 @@ func TestExecuteToggle_TrueTransitionsTaskToDone(t *testing.T) {
 	if resp.Status != model.IMActionStatusCompleted {
 		t.Errorf("Status = %q, want completed", resp.Status)
 	}
-	if mover.lastRequest == nil || mover.lastRequest.Status != model.TaskStatusDone {
-		t.Errorf("Transition = %+v, want done", mover.lastRequest)
+	if mover.lastTargetState != model.TaskStatusDone {
+		t.Errorf("TargetState = %q, want done", mover.lastTargetState)
 	}
 }
 
 func TestExecuteToggle_FalseReopensTask(t *testing.T) {
-	mover := &fakeTaskMover{}
+	mover := &fakeIMActionTaskTransitioner{
+		getTask: &model.Task{ID: uuid.New(), Title: "t", Status: model.TaskStatusDone},
+	}
 	exec := NewBackendIMActionExecutor(nil, nil, nil, mover)
 	taskID := uuid.New()
 	req := &model.IMActionRequest{
@@ -1777,8 +1799,8 @@ func TestExecuteToggle_FalseReopensTask(t *testing.T) {
 		Metadata: map[string]string{"checker_state": "false"},
 	}
 	_, _ = exec.Execute(context.Background(), req)
-	if mover.lastRequest == nil || mover.lastRequest.Status != model.TaskStatusInProgress {
-		t.Errorf("Transition = %+v, want in_progress", mover.lastRequest)
+	if mover.lastTargetState != model.TaskStatusInProgress {
+		t.Errorf("TargetState = %q, want in_progress", mover.lastTargetState)
 	}
 }
 
@@ -1982,6 +2004,12 @@ func (e *BackendIMActionExecutor) executeInputSubmit(ctx context.Context, req *m
 		TaskID: taskID,
 		Body:   body,
 	}
+	// Best-effort author: if req.UserID is a parseable UUID, record it; otherwise
+	// leave zero-UUID. (Feishu open_id is not a UUID, so this usually stays zero
+	// in Phase 1. A later phase will map IM identities to internal user UUIDs.)
+	if authorID, err := uuid.Parse(strings.TrimSpace(req.UserID)); err == nil {
+		comment.CreatedBy = authorID
+	}
 	if err := e.commenter.Create(ctx, comment); err != nil {
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Failed to append comment: %s", err.Error()), false)
 	}
@@ -2083,7 +2111,11 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 
 ```go
 func TestExecuteOverflow_ParsesInnerActionReferenceAndDispatches(t *testing.T) {
-	decomposer := &fakeTaskDecomposer{/* captures Decompose call */}
+	decomposer := &fakeIMActionDecomposer{
+		resp: &model.TaskDecompositionResponse{
+			ParentTask: model.TaskDTO{ID: uuid.New().String()},
+		},
+	}
 	exec := NewBackendIMActionExecutor(nil, decomposer, nil)
 	taskID := uuid.New()
 	req := &model.IMActionRequest{
@@ -2095,8 +2127,8 @@ func TestExecuteOverflow_ParsesInnerActionReferenceAndDispatches(t *testing.T) {
 	if resp.Status == model.IMActionStatusBlocked || resp.Status == model.IMActionStatusFailed {
 		t.Errorf("unexpected %q: %q", resp.Status, resp.Result)
 	}
-	if decomposer.lastTaskID != taskID {
-		t.Errorf("decomposer called with %s, want %s", decomposer.lastTaskID, taskID)
+	if decomposer.last != taskID {
+		t.Errorf("decomposer called with %s, want %s", decomposer.last, taskID)
 	}
 }
 
@@ -2237,7 +2269,7 @@ Co-Authored-By: Claude Opus 4.6 (1M context) <noreply@anthropic.com>"
 
 ```go
 func TestExecuteFormSubmit_CreateTaskForm(t *testing.T) {
-	taskMaker := &fakeTaskCreator{}
+	taskMaker := &fakeIMActionTaskCreator{}
 	exec := NewBackendIMActionExecutor(nil, nil, nil, taskMaker)
 	projectID := uuid.New()
 	req := &model.IMActionRequest{
@@ -2245,9 +2277,9 @@ func TestExecuteFormSubmit_CreateTaskForm(t *testing.T) {
 		Action:   "form_submit",
 		EntityID: projectID.String(),
 		Metadata: map[string]string{
-			"element_name": "create-task-form",
-			"form_title":   "fix login",
-			"form_body":    "users cannot log in with SSO",
+			"element_name":  "create-task-form",
+			"form_title":    "fix login",
+			"form_body":     "users cannot log in with SSO",
 			"form_priority": "high",
 		},
 	}
@@ -2255,8 +2287,8 @@ func TestExecuteFormSubmit_CreateTaskForm(t *testing.T) {
 	if resp.Status != model.IMActionStatusCompleted {
 		t.Errorf("Status = %q: %q", resp.Status, resp.Result)
 	}
-	if taskMaker.captured == nil || taskMaker.captured.Title != "fix login" {
-		t.Errorf("task = %+v", taskMaker.captured)
+	if taskMaker.created == nil || taskMaker.created.Title != "fix login" {
+		t.Errorf("task = %+v", taskMaker.created)
 	}
 }
 
