@@ -1,2 +1,3 @@
+#!/bin/sh
 pnpm exec lint-staged --concurrent false --max-arg-length 8000
 pnpm exec tsc --noEmit
