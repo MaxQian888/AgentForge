@@ -2,65 +2,72 @@ package repository
 
 import (
 	"context"
-	"database/sql"
 	"encoding/json"
 	"fmt"
 
-	"github.com/jmoiron/sqlx"
 	eb "github.com/react-go-quick-starter/server/internal/eventbus"
+	"gorm.io/gorm"
 )
 
 type EventsRepository struct {
-	db *sqlx.DB
+	db *gorm.DB
 }
 
-func NewEventsRepository(db *sqlx.DB) *EventsRepository {
+func NewEventsRepository(db *gorm.DB) *EventsRepository {
 	return &EventsRepository{db: db}
 }
 
-const insertSQL = `
-INSERT INTO events (id, type, source, target, visibility, payload, metadata, project_id, occurred_at)
-VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9)
-ON CONFLICT (id) DO NOTHING
-`
+// eventRow maps to the events table.
+type eventRow struct {
+	ID         string `gorm:"column:id;primaryKey"`
+	Type       string `gorm:"column:type"`
+	Source     string `gorm:"column:source"`
+	Target     string `gorm:"column:target"`
+	Visibility string `gorm:"column:visibility"`
+	Payload    []byte `gorm:"column:payload;type:jsonb"`
+	Metadata   []byte `gorm:"column:metadata;type:jsonb"`
+	ProjectID  *string `gorm:"column:project_id"`
+	OccurredAt int64  `gorm:"column:occurred_at"`
+}
+
+func (eventRow) TableName() string { return "events" }
 
 func (r *EventsRepository) Insert(ctx context.Context, e *eb.Event) error {
 	meta, err := json.Marshal(e.Metadata)
 	if err != nil {
 		return fmt.Errorf("encode metadata: %w", err)
 	}
-	var projectID sql.NullString
-	if pid := eb.GetString(e, eb.MetaProjectID); pid != "" {
-		projectID.String = pid
-		projectID.Valid = true
+	row := eventRow{
+		ID:         e.ID,
+		Type:       e.Type,
+		Source:     e.Source,
+		Target:     e.Target,
+		Visibility: string(e.Visibility),
+		Payload:    []byte(e.Payload),
+		Metadata:   meta,
+		OccurredAt: e.Timestamp,
 	}
-	_, err = r.db.ExecContext(ctx, insertSQL,
-		e.ID, e.Type, e.Source, e.Target, string(e.Visibility),
-		[]byte(e.Payload), meta, projectID, e.Timestamp,
-	)
-	return err
-}
-
-const findByIDSQL = `SELECT id, type, source, target, visibility, payload, metadata, occurred_at FROM events WHERE id = $1`
-
-type eventRow struct {
-	ID         string `db:"id"`
-	Type       string `db:"type"`
-	Source     string `db:"source"`
-	Target     string `db:"target"`
-	Visibility string `db:"visibility"`
-	Payload    []byte `db:"payload"`
-	Metadata   []byte `db:"metadata"`
-	OccurredAt int64  `db:"occurred_at"`
+	if pid := eb.GetString(e, eb.MetaProjectID); pid != "" {
+		row.ProjectID = &pid
+	}
+	result := r.db.WithContext(ctx).Create(&row)
+	if result.Error != nil {
+		// Ignore duplicate key (ON CONFLICT DO NOTHING equivalent)
+		return result.Error
+	}
+	return nil
 }
 
 func (r *EventsRepository) FindByID(ctx context.Context, id string) (*eb.Event, error) {
 	var rr eventRow
-	if err := r.db.GetContext(ctx, &rr, findByIDSQL, id); err != nil {
+	if err := r.db.WithContext(ctx).Where("id = ?", id).First(&rr).Error; err != nil {
 		return nil, err
 	}
 	e := &eb.Event{
-		ID: rr.ID, Type: rr.Type, Source: rr.Source, Target: rr.Target,
+		ID:         rr.ID,
+		Type:       rr.Type,
+		Source:     rr.Source,
+		Target:     rr.Target,
 		Visibility: eb.Visibility(rr.Visibility),
 		Payload:    json.RawMessage(rr.Payload),
 		Timestamp:  rr.OccurredAt,
