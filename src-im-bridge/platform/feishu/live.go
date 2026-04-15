@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	log "github.com/sirupsen/logrus"
 	"strings"
@@ -803,6 +804,9 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 		case "overflow":
 			action = "overflow"
 			entityID = selectedOption
+		case "checker":
+			action = core.ActionNameToggle
+			entityID = ""
 		default:
 			// Check if form values carry an action reference.
 			if formAction, formOk := formValues["action"]; formOk {
@@ -811,8 +815,15 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 			} else {
 				return nil, errIgnoreCardAction
 			}
+			actionMetadata = nil
 		}
-		actionMetadata = nil
+	}
+
+	// Checker elements always map to the toggle action regardless of the parsed
+	// action reference, so the semantic intent is preserved even when the value
+	// carries a different action prefix.
+	if actionTag == "checker" {
+		action = core.ActionNameToggle
 	}
 
 	chatID := ""
@@ -838,6 +849,9 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 	}
 	if actionTag != "" {
 		metadata["action_tag"] = actionTag
+	}
+	if actionTag == "checker" {
+		metadata["checker_state"] = strconv.FormatBool(act.Checked)
 	}
 	if selectedOption != "" {
 		metadata["selected_option"] = selectedOption

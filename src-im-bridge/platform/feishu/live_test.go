@@ -1313,3 +1313,62 @@ func TestLive_HandleReactionNoError(t *testing.T) {
 		t.Fatalf("unexpected error: %v", err)
 	}
 }
+
+func TestNormalizeCardActionRequest_CheckerChecked(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:     "checker",
+				Checked: true,
+				Value:   map[string]interface{}{"action": "act:toggle:task-xyz"},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1", OpenMessageID: "msg-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != core.ActionNameToggle {
+		t.Errorf("Action = %q, want toggle", req.Action)
+	}
+	if req.EntityID != "task-xyz" {
+		t.Errorf("EntityID = %q, want task-xyz", req.EntityID)
+	}
+	if req.Metadata["checker_state"] != "true" {
+		t.Errorf("checker_state = %q, want true", req.Metadata["checker_state"])
+	}
+	if req.Metadata["action_tag"] != "checker" {
+		t.Errorf("action_tag = %q, want checker", req.Metadata["action_tag"])
+	}
+}
+
+func TestNormalizeCardActionRequest_CheckerUncheckedWithoutActionRef(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:     "checker",
+				Checked: false,
+				Value:   map[string]interface{}{},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != core.ActionNameToggle {
+		t.Errorf("Action = %q, want toggle", req.Action)
+	}
+	if req.EntityID != "" {
+		t.Errorf("EntityID = %q, want empty", req.EntityID)
+	}
+	if req.Metadata["checker_state"] != "false" {
+		t.Errorf("checker_state = %q, want false", req.Metadata["checker_state"])
+	}
+}
