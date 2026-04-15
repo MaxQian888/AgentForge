@@ -4,13 +4,13 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"regexp"
 	"strconv"
 	"strings"
 	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
 	"github.com/react-go-quick-starter/server/internal/ws"
 	log "github.com/sirupsen/logrus"
 )
@@ -560,7 +560,7 @@ func (s *DAGWorkflowService) executeFunction(_ context.Context, _ *model.Workflo
 	}
 
 	// Resolve template vars in expression
-	resolved := resolveTemplateVars(expression, dataStore)
+	resolved := nodetypes.ResolveTemplateVars(expression, dataStore)
 
 	// Try to parse as JSON and return directly
 	if json.Valid([]byte(resolved)) {
@@ -568,7 +568,7 @@ func (s *DAGWorkflowService) executeFunction(_ context.Context, _ *model.Workflo
 	}
 
 	// Evaluate simple expressions
-	val := evaluateExpression(resolved, dataStore)
+	val := nodetypes.EvaluateExpression(resolved, dataStore)
 	result, _ := json.Marshal(val)
 	return result, nil
 }
@@ -849,40 +849,6 @@ func (s *DAGWorkflowService) HandleExternalEvent(ctx context.Context, executionI
 // Template variable resolution & expression evaluation
 // ---------------------------------------------------------------------------
 
-// resolveTemplateVars replaces {{node_id.output.field}} patterns with values from the dataStore.
-func resolveTemplateVars(template string, dataStore map[string]any) string {
-	re := regexp.MustCompile(`\{\{([^}]+)\}\}`)
-	return re.ReplaceAllStringFunc(template, func(match string) string {
-		path := strings.TrimSpace(match[2 : len(match)-2])
-		val := lookupPath(dataStore, path)
-		if val == nil {
-			return match // Keep original if not found
-		}
-		switch v := val.(type) {
-		case string:
-			return v
-		default:
-			b, _ := json.Marshal(v)
-			return string(b)
-		}
-	})
-}
-
-// lookupPath traverses a nested map using dot-separated path.
-func lookupPath(data map[string]any, path string) any {
-	parts := strings.Split(path, ".")
-	var current any = data
-	for _, part := range parts {
-		switch c := current.(type) {
-		case map[string]any:
-			current = c[part]
-		default:
-			return nil
-		}
-	}
-	return current
-}
-
 // resolveNodeConfig parses node config JSON and resolves template variables.
 func (s *DAGWorkflowService) resolveNodeConfig(node *model.WorkflowNode, dataStore map[string]any) map[string]any {
 	config := make(map[string]any)
@@ -899,7 +865,7 @@ func resolveMapValues(m map[string]any, dataStore map[string]any) {
 	for k, v := range m {
 		switch val := v.(type) {
 		case string:
-			m[k] = resolveTemplateVars(val, dataStore)
+			m[k] = nodetypes.ResolveTemplateVars(val, dataStore)
 		case map[string]any:
 			resolveMapValues(val, dataStore)
 		}
@@ -917,7 +883,7 @@ func (s *DAGWorkflowService) evaluateCondition(exec *model.WorkflowExecution, ex
 	}
 
 	// Resolve template variables first
-	expression = resolveTemplateVars(expression, dataStore)
+	expression = nodetypes.ResolveTemplateVars(expression, dataStore)
 
 	// Re-check after resolution
 	expression = strings.TrimSpace(expression)
@@ -944,7 +910,7 @@ func (s *DAGWorkflowService) evaluateCondition(exec *model.WorkflowExecution, ex
 					}
 				}
 				// Try resolving left as DataStore path
-				if val := lookupPath(dataStore, left); val != nil {
+				if val := nodetypes.LookupPath(dataStore, left); val != nil {
 					left = fmt.Sprintf("%v", val)
 				}
 
@@ -996,46 +962,6 @@ func compareValues(left, op, right string) bool {
 		return left <= right
 	}
 	return false
-}
-
-// evaluateExpression evaluates a simple expression and returns the result.
-func evaluateExpression(expr string, dataStore map[string]any) any {
-	expr = strings.TrimSpace(expr)
-
-	// len(path) — returns length of array or string
-	if strings.HasPrefix(expr, "len(") && strings.HasSuffix(expr, ")") {
-		path := strings.TrimSpace(expr[4 : len(expr)-1])
-		val := lookupPath(dataStore, path)
-		if val == nil {
-			return 0
-		}
-		switch v := val.(type) {
-		case []any:
-			return len(v)
-		case string:
-			return len(v)
-		case map[string]any:
-			return len(v)
-		default:
-			return 0
-		}
-	}
-
-	// Try to parse as number
-	if num, err := strconv.ParseFloat(expr, 64); err == nil {
-		return num
-	}
-
-	// Boolean literals
-	if expr == "true" {
-		return true
-	}
-	if expr == "false" {
-		return false
-	}
-
-	// Return as string
-	return expr
 }
 
 // ---------------------------------------------------------------------------
