@@ -5,10 +5,12 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/notify"
 )
 
 func TestStub_MapsInboundMessageAndAppliesDefaults(t *testing.T) {
@@ -256,5 +258,39 @@ func TestFeishuStub_HelperBranches(t *testing.T) {
 	}
 	if stub.native[0].ChatID != "chat-3" || stub.native[1].ChatID != "chat-4" || stub.native[2].ChatID != "chat-5" || !stub.native[2].Updated {
 		t.Fatalf("native replies = %+v", stub.native)
+	}
+}
+
+func TestStub_CardClickEndpointInvokesActionHandler(t *testing.T) {
+	stub := NewStub("0")
+	var captured *notify.ActionRequest
+	stub.SetActionHandler(func(_ context.Context, req *notify.ActionRequest) (*notify.ActionResponse, error) {
+		captured = req
+		return &notify.ActionResponse{Result: "ok"}, nil
+	})
+
+	payload := map[string]any{
+		"action":     "act:approve:review-1",
+		"chat_id":    "chat-click",
+		"user_id":    "ou_user",
+		"message_id": "om_1",
+	}
+	body, _ := json.Marshal(payload)
+
+	req := httptest.NewRequest(http.MethodPost, "/test/cardclick", bytes.NewReader(body))
+	rec := httptest.NewRecorder()
+	stub.handleTestCardClick(rec, req)
+
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, body = %s", rec.Code, rec.Body.String())
+	}
+	if captured == nil {
+		t.Fatalf("action handler not invoked")
+	}
+	if captured.Action != "approve" || captured.EntityID != "review-1" {
+		t.Errorf("action = %q / entity = %q", captured.Action, captured.EntityID)
+	}
+	if captured.ChatID != "chat-click" {
+		t.Errorf("chat_id = %q", captured.ChatID)
 	}
 }
