@@ -87,3 +87,17 @@ func ParseActionReferenceWithMetadata(raw string) (action string, entityID strin
 	}
 	return action, entityID, metadata, true
 }
+
+// Synthetic framework-level action names used when a card element click is
+// not represented by an `act:<verb>:<entity>` reference. These are generated
+// by the bridge-side normalizer and dispatched by the backend executor.
+const (
+	ActionNameReact       = "react"        // emoji reaction on a message
+	ActionNameSelect      = "select"       // single-select click
+	ActionNameMultiSelect = "multi_select" // multi-select click
+	ActionNameDatePick    = "date_pick"    // date/time/datetime picker
+	ActionNameOverflow    = "overflow"     // overflow ("…") menu click
+	ActionNameToggle      = "toggle"       // checker element click
+	ActionNameInputSubmit = "input_submit" // input element commit
+	ActionNameFormSubmit  = "form_submit"  // form container submit
+)

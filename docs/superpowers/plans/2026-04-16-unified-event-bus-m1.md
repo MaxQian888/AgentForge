@@ -1612,7 +1612,15 @@ rtk git commit -am "feat(eventbus): core.metrics observer with prometheus counte
 - Create: `src-go/migrations/054_create_event_bus_tables.up.sql`
 - Create: `src-go/migrations/054_create_event_bus_tables.down.sql`
 
-- [ ] **Step 1: Write up migration**
+- [ ] **Step 1: Confirm the next migration number**
+
+```bash
+ls src-go/migrations/*.up.sql | sort | tail -1
+```
+
+If the highest existing number is not `053`, bump the two new filenames accordingly. The rest of this task assumes `054`; rename if needed.
+
+- [ ] **Step 2: Write up migration**
 
 ```sql
 -- src-go/migrations/054_create_event_bus_tables.up.sql
@@ -1650,7 +1658,7 @@ DROP TABLE IF EXISTS agent_events;
 COMMIT;
 ```
 
-- [ ] **Step 2: Write down migration**
+- [ ] **Step 3: Write down migration**
 
 ```sql
 -- src-go/migrations/054_create_event_bus_tables.down.sql
@@ -1673,13 +1681,13 @@ CREATE TABLE IF NOT EXISTS agent_events (
 COMMIT;
 ```
 
-- [ ] **Step 3: Apply migration locally**
+- [ ] **Step 4: Apply migration locally**
 
 Run: `pnpm dev:backend:restart go-orchestrator` (picks up migration on startup) or the project's standard migration command (e.g. `cd src-go && go run ./cmd/migrate up` if present — check the repo for how migrations are executed; adapt this step to match).
 
 Verify: connect to local Postgres, `\d events` and `\d events_dead_letter` show expected columns; `\d agent_events` reports "no relation".
 
-- [ ] **Step 4: Commit**
+- [ ] **Step 5: Commit**
 
 ```bash
 rtk git add src-go/migrations/054_create_event_bus_tables.*.sql
@@ -1689,6 +1697,10 @@ rtk git commit -m "feat(eventbus): migration 054 creates events + dead-letter, d
 ---
 
 ## Task 13: EventsRepository + DeadLetterRepository (TDD against real DB)
+
+> **Note:** The new package `internal/eventbus/repository` sits beside — not inside — `internal/repository`. The test-DB helper used by existing repo tests is likely unexported inside `internal/repository`. Two options, pick one:
+> 1. Move the helper into an exported shared test helper (e.g. `internal/testdb`), then import from both packages.
+> 2. Duplicate the minimal helper inside `internal/eventbus/repository/helpers_test.go`. Acceptable for v1; remove when (1) happens.
 
 **Files:**
 - Create: `src-go/internal/eventbus/repository/events_repo.go`
@@ -2028,6 +2040,8 @@ rtk git commit -am "feat(eventbus): core.persist observer with DLQ fallback (TDD
 - Modify: any callers that refer to `ws.Hub.BroadcastEvent` — **do not fix them yet**. They will be migrated in later tasks. Keep this task strictly about Hub surface.
 
 This is a **breaking** change; the project allows it. Expect the tree to not compile until Tasks 17-22 land. To manage this, introduce the new Hub API in parallel and add a deprecated shim that fails loudly.
+
+> **Tree-broken window:** Tasks 15 through 22 leave the repo in a state where `go build ./...` fails. This is intentional and matches the spec's "full replacement over parallel-old/new patterns". Commit small and often so work is not lost, but **do not push or merge until Task 23 makes the tree green again**. If bisectability matters for your review, squash Tasks 15-23 into a single commit at PR time.
 
 - [ ] **Step 1: Extend Hub with channel-index and per-client subscription set**
 
@@ -2409,7 +2423,25 @@ rtk git commit -am "feat(eventbus): im.forward-legacy transitional observer (TDD
 ## Task 18: Wire bus + mods in cmd/server/main.go
 
 **Files:**
+- Create: `src-go/internal/eventbus/publisher.go` (Publisher interface — referenced by services in Tasks 19-22)
 - Modify: `src-go/cmd/server/main.go`
+
+- [ ] **Step 0: Create the Publisher interface up front**
+
+```go
+// src-go/internal/eventbus/publisher.go
+package eventbus
+
+import "context"
+
+// Publisher is the minimal interface services take so they can be tested
+// with a fake bus. *Bus satisfies it.
+type Publisher interface {
+    Publish(ctx context.Context, e *Event) error
+}
+```
+
+Compile check: `cd src-go && go build ./internal/eventbus/...` — should pass independently.
 
 - [ ] **Step 1: Import and construct bus**
 
