@@ -62,6 +62,10 @@ type IMActionWikiCreator interface {
 	CreatePage(ctx context.Context, projectID uuid.UUID, spaceID uuid.UUID, title string, parentID *uuid.UUID, content string, createdBy *uuid.UUID) (*model.WikiPage, error)
 }
 
+type IMReactionRecorder interface {
+	Record(ctx context.Context, event *model.IMReactionEvent) error
+}
+
 type BackendIMActionExecutor struct {
 	dispatcher IMActionTaskDispatcher
 	decomposer IMActionTaskDecomposer
@@ -72,6 +76,7 @@ type BackendIMActionExecutor struct {
 	progress   IMActionProgressRecorder
 	workflow   IMActionWorkflowEvaluator
 	wikiMaker  IMActionWikiCreator
+	reactions  IMReactionRecorder
 }
 
 func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IMActionTaskDecomposer, reviewer IMActionReviewer, extras ...any) *BackendIMActionExecutor {
@@ -94,6 +99,8 @@ func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IM
 			executor.workflow = value
 		case IMActionWikiCreator:
 			executor.wikiMaker = value
+		case IMReactionRecorder:
+			executor.reactions = value
 		}
 	}
 	return executor
@@ -119,6 +126,8 @@ func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActi
 		return e.executeReviewAction(ctx, req, model.ReviewRecommendationApprove), nil
 	case "request-changes":
 		return e.executeReviewAction(ctx, req, model.ReviewRecommendationRequestChanges), nil
+	case "react":
+		return e.executeReact(ctx, req), nil
 	default:
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unknown action: %s", req.Action), false), nil
 	}
@@ -350,6 +359,35 @@ func (e *BackendIMActionExecutor) executeReviewAction(ctx context.Context, req *
 	dto := updated.ToDTO()
 	resp.Review = &dto
 	return resp
+}
+
+func (e *BackendIMActionExecutor) executeReact(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	if e.reactions == nil {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Reaction recording is not configured.", false)
+	}
+	messageID := strings.TrimSpace(req.EntityID)
+	if messageID == "" {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Reaction event missing message id.", false)
+	}
+	eventType := strings.TrimSpace(req.Metadata["event_type"])
+	if eventType == "" {
+		eventType = model.IMReactionEventTypeCreated
+	}
+	if eventType != model.IMReactionEventTypeCreated && eventType != model.IMReactionEventTypeDeleted {
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unknown reaction event type %q.", eventType), false)
+	}
+	event := &model.IMReactionEvent{
+		Platform:  strings.TrimSpace(req.Platform),
+		ChatID:    strings.TrimSpace(req.ChannelID),
+		MessageID: messageID,
+		UserID:    strings.TrimSpace(req.UserID),
+		Emoji:     strings.TrimSpace(req.Metadata["emoji"]),
+		EventType: eventType,
+	}
+	if err := e.reactions.Record(ctx, event); err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Record reaction failed: %s", err.Error()), false)
+	}
+	return newIMActionResponse(req, model.IMActionStatusCompleted, "", true)
 }
 
 func attachTaskBindingMetadata(resp *model.IMActionResponse, req *model.IMActionRequest, projectID string, taskID string) {

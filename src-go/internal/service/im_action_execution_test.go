@@ -684,3 +684,64 @@ func TestIMService_HandleActionUsesExecutorOutcome(t *testing.T) {
 		t.Fatalf("metadata = %+v", resp.Metadata)
 	}
 }
+
+type fakeReactionRecorder struct {
+	recorded []*model.IMReactionEvent
+	err      error
+}
+
+func (r *fakeReactionRecorder) Record(ctx context.Context, event *model.IMReactionEvent) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.recorded = append(r.recorded, event)
+	return nil
+}
+
+func TestExecuteReact_RecordsEventAndReturnsCompleted(t *testing.T) {
+	recorder := &fakeReactionRecorder{}
+	exec := NewBackendIMActionExecutor(nil, nil, nil, recorder)
+
+	req := &model.IMActionRequest{
+		Platform:  "feishu",
+		Action:    "react",
+		EntityID:  "om_msg_1",
+		ChannelID: "chat-1",
+		UserID:    "ou_user",
+		Metadata: map[string]string{
+			"emoji":      "THUMBSUP",
+			"event_type": "created",
+		},
+	}
+	resp, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if resp.Status != model.IMActionStatusCompleted {
+		t.Errorf("Status = %q, want completed", resp.Status)
+	}
+	if resp.Result != "" {
+		t.Errorf("expected empty Result (so bridge does not post a reply); got %q", resp.Result)
+	}
+	if len(recorder.recorded) != 1 {
+		t.Fatalf("expected 1 recorded event, got %d", len(recorder.recorded))
+	}
+	rec := recorder.recorded[0]
+	if rec.MessageID != "om_msg_1" || rec.Emoji != "THUMBSUP" || rec.EventType != "created" {
+		t.Errorf("recorded event = %+v", rec)
+	}
+}
+
+func TestExecuteReact_WithoutRecorderReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "react",
+		EntityID: "om_msg_1",
+		Metadata: map[string]string{"emoji": "OK", "event_type": "created"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+}
