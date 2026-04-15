@@ -3,6 +3,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -682,5 +684,389 @@ func TestIMService_HandleActionUsesExecutorOutcome(t *testing.T) {
 	}
 	if resp.Metadata["source"] != "block_actions" {
 		t.Fatalf("metadata = %+v", resp.Metadata)
+	}
+}
+
+type fakeReactionRecorder struct {
+	recorded []*model.IMReactionEvent
+	err      error
+}
+
+func (r *fakeReactionRecorder) Record(ctx context.Context, event *model.IMReactionEvent) error {
+	if r.err != nil {
+		return r.err
+	}
+	r.recorded = append(r.recorded, event)
+	return nil
+}
+
+func TestExecuteReact_RecordsEventAndReturnsCompleted(t *testing.T) {
+	recorder := &fakeReactionRecorder{}
+	exec := NewBackendIMActionExecutor(nil, nil, nil, recorder)
+
+	req := &model.IMActionRequest{
+		Platform:  "feishu",
+		Action:    "react",
+		EntityID:  "om_msg_1",
+		ChannelID: "chat-1",
+		UserID:    "ou_user",
+		Metadata: map[string]string{
+			"emoji":      "THUMBSUP",
+			"event_type": "created",
+		},
+	}
+	resp, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if resp.Status != model.IMActionStatusCompleted {
+		t.Errorf("Status = %q, want completed", resp.Status)
+	}
+	if resp.Result != "" {
+		t.Errorf("expected empty Result (so bridge does not post a reply); got %q", resp.Result)
+	}
+	if len(recorder.recorded) != 1 {
+		t.Fatalf("expected 1 recorded event, got %d", len(recorder.recorded))
+	}
+	rec := recorder.recorded[0]
+	if rec.MessageID != "om_msg_1" || rec.Emoji != "THUMBSUP" || rec.EventType != "created" {
+		t.Errorf("recorded event = %+v", rec)
+	}
+}
+
+func TestExecuteReact_WithoutRecorderReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "react",
+		EntityID: "om_msg_1",
+		Metadata: map[string]string{"emoji": "OK", "event_type": "created"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+}
+
+func TestExecuteSelect_WithoutTargetActionReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "select",
+		EntityID: "task-xyz",
+		Metadata: map[string]string{"selected_option": "agent-alpha"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+	if !strings.Contains(resp.Result, "target_action") {
+		t.Errorf("expected mention of target_action in %q", resp.Result)
+	}
+}
+
+func TestExecuteSelect_WithInvalidTargetActionReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "select",
+		EntityID: "task-xyz",
+		Metadata: map[string]string{"target_action": "dangerous-internal-op", "selected_option": "x"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+	if !strings.Contains(resp.Result, "not allowed") {
+		t.Errorf("Result = %q", resp.Result)
+	}
+}
+
+func TestExecuteSelect_WithWhitelistedTargetActionDispatches(t *testing.T) {
+	dispatcher := &fakeIMActionDispatcher{
+		assignResp: &model.TaskDispatchResponse{
+			Dispatch: model.DispatchOutcome{Status: model.DispatchStatusStarted},
+			Task:     model.TaskDTO{ID: uuid.New().String()},
+		},
+	}
+	exec := NewBackendIMActionExecutor(dispatcher, nil, nil)
+	taskID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "select",
+		EntityID: taskID.String(),
+		Metadata: map[string]string{
+			"target_action":   "assign-agent",
+			"selected_option": "agent-alpha",
+		},
+	}
+	resp, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if resp.Status == model.IMActionStatusBlocked || resp.Status == model.IMActionStatusFailed {
+		t.Errorf("unexpected status %q; result=%q", resp.Status, resp.Result)
+	}
+	if dispatcher.lastAssign == nil || dispatcher.lastAssign.AssigneeID != "agent-alpha" {
+		t.Errorf("assigneeId not propagated: %+v", dispatcher.lastAssign)
+	}
+}
+
+func TestExecuteMultiSelect_PromotesSelectedOptionsAsCSV(t *testing.T) {
+	dispatcher := &fakeIMActionDispatcher{
+		assignResp: &model.TaskDispatchResponse{
+			Dispatch: model.DispatchOutcome{Status: model.DispatchStatusStarted},
+			Task:     model.TaskDTO{ID: uuid.New().String()},
+		},
+	}
+	exec := NewBackendIMActionExecutor(dispatcher, nil, nil)
+	taskID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "multi_select",
+		EntityID: taskID.String(),
+		Metadata: map[string]string{
+			"target_action":    "assign-agent",
+			"selected_options": "agent-a,agent-b",
+		},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status == model.IMActionStatusFailed {
+		t.Fatalf("unexpected failure: %q", resp.Result)
+	}
+	if dispatcher.lastAssign == nil || dispatcher.lastAssign.AssigneeID != "agent-a" {
+		t.Errorf("AssigneeID = %+v", dispatcher.lastAssign)
+	}
+}
+
+func TestExecuteMultiSelect_WithoutTargetActionReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "multi_select",
+		Metadata: map[string]string{"selected_options": "a,b"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+}
+
+func TestExecuteToggle_TrueTransitionsTaskToDone(t *testing.T) {
+	mover := &fakeIMActionTaskTransitioner{
+		getTask: &model.Task{ID: uuid.New(), Title: "t", Status: model.TaskStatusInProgress},
+	}
+	exec := NewBackendIMActionExecutor(nil, nil, nil, mover)
+	taskID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "toggle",
+		EntityID: taskID.String(),
+		Metadata: map[string]string{"checker_state": "true"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusCompleted {
+		t.Errorf("Status = %q, want completed", resp.Status)
+	}
+	if mover.lastTargetState != model.TaskStatusDone {
+		t.Errorf("TargetState = %q, want done", mover.lastTargetState)
+	}
+}
+
+func TestExecuteToggle_FalseReopensTask(t *testing.T) {
+	mover := &fakeIMActionTaskTransitioner{
+		getTask: &model.Task{ID: uuid.New(), Title: "t", Status: model.TaskStatusDone},
+	}
+	exec := NewBackendIMActionExecutor(nil, nil, nil, mover)
+	taskID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "toggle",
+		EntityID: taskID.String(),
+		Metadata: map[string]string{"checker_state": "false"},
+	}
+	_, _ = exec.Execute(context.Background(), req)
+	if mover.lastTargetState != model.TaskStatusInProgress {
+		t.Errorf("TargetState = %q, want in_progress", mover.lastTargetState)
+	}
+}
+
+func TestExecuteToggle_WithoutMoverReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "toggle",
+		EntityID: uuid.New().String(),
+		Metadata: map[string]string{"checker_state": "true"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+}
+
+type fakeTaskCommenter struct {
+	captured *model.TaskComment
+	err      error
+}
+
+func (f *fakeTaskCommenter) Create(_ context.Context, comment *model.TaskComment) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.captured = comment
+	return nil
+}
+
+func TestExecuteInputSubmit_AppendsComment(t *testing.T) {
+	commenter := &fakeTaskCommenter{}
+	exec := NewBackendIMActionExecutor(nil, nil, nil, commenter)
+	taskID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "input_submit",
+		EntityID: taskID.String(),
+		Metadata: map[string]string{"input_value": "please reconsider"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusCompleted {
+		t.Errorf("Status = %q, want completed", resp.Status)
+	}
+	if commenter.captured == nil || commenter.captured.Body != "please reconsider" {
+		t.Errorf("captured comment = %+v", commenter.captured)
+	}
+	if commenter.captured.TaskID != taskID {
+		t.Errorf("TaskID = %s, want %s", commenter.captured.TaskID, taskID)
+	}
+}
+
+func TestExecuteInputSubmit_WithoutValueReturnsFailed(t *testing.T) {
+	commenter := &fakeTaskCommenter{}
+	exec := NewBackendIMActionExecutor(nil, nil, nil, commenter)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "input_submit",
+		EntityID: uuid.New().String(),
+		Metadata: map[string]string{},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusFailed {
+		t.Errorf("Status = %q, want failed", resp.Status)
+	}
+}
+
+func TestExecuteInputSubmit_WithoutCommenterReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "input_submit",
+		EntityID: uuid.New().String(),
+		Metadata: map[string]string{"input_value": "hi"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+}
+
+func TestExecuteDatePick_ReturnsBlockedWithReason(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "date_pick",
+		EntityID: uuid.New().String(),
+		Metadata: map[string]string{"selected_time": "2026-04-20"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+	if !strings.Contains(resp.Result, "Due-date") {
+		t.Errorf("Result = %q", resp.Result)
+	}
+}
+
+func TestExecuteOverflow_ParsesInnerActionReferenceAndDispatches(t *testing.T) {
+	decomposer := &fakeIMActionDecomposer{
+		resp: &model.TaskDecompositionResponse{
+			ParentTask: model.TaskDTO{ID: uuid.New().String()},
+		},
+	}
+	exec := NewBackendIMActionExecutor(nil, decomposer, nil)
+	taskID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "overflow",
+		Metadata: map[string]string{"selected_option": fmt.Sprintf("act:decompose:%s", taskID)},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status == model.IMActionStatusBlocked || resp.Status == model.IMActionStatusFailed {
+		t.Errorf("unexpected %q: %q", resp.Status, resp.Result)
+	}
+	if decomposer.last != taskID {
+		t.Errorf("decomposer called with %s, want %s", decomposer.last, taskID)
+	}
+}
+
+func TestExecuteOverflow_RefusesNonAllowedTargetAction(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "overflow",
+		Metadata: map[string]string{"selected_option": "act:select:x?target_action=dangerous"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+}
+
+func TestExecuteOverflow_InvalidSelectedOption(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "overflow",
+		Metadata: map[string]string{"selected_option": "not-an-action-ref"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+}
+
+func TestExecuteFormSubmit_CreateTaskForm(t *testing.T) {
+	taskMaker := &fakeIMActionTaskCreator{}
+	exec := NewBackendIMActionExecutor(nil, nil, nil, taskMaker)
+	projectID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "form_submit",
+		EntityID: projectID.String(),
+		Metadata: map[string]string{
+			"element_name":  "create-task-form",
+			"form_title":    "fix login",
+			"form_body":     "users cannot log in with SSO",
+			"form_priority": "high",
+		},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusCompleted {
+		t.Errorf("Status = %q: %q", resp.Status, resp.Result)
+	}
+	if taskMaker.created == nil || taskMaker.created.Title != "fix login" {
+		t.Errorf("task = %+v", taskMaker.created)
+	}
+}
+
+func TestExecuteFormSubmit_UnknownFormReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "form_submit",
+		Metadata: map[string]string{"element_name": "not-a-real-form"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
 	}
 }

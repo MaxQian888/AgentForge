@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
 
 	log "github.com/sirupsen/logrus"
 	"strings"
@@ -64,6 +65,7 @@ type lifecycleEventRunner interface {
 		botAddedHandler func(context.Context, *larkim.P2ChatMemberBotAddedV1) error,
 		botRemovedHandler func(context.Context, *larkim.P2ChatMemberBotDeletedV1) error,
 		reactionHandler func(context.Context, *larkim.P2MessageReactionCreatedV1) error,
+		reactionDeletedHandler func(context.Context, *larkim.P2MessageReactionDeletedV1) error,
 	) error
 }
 
@@ -299,7 +301,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 			cardHandler = l.handleCardAction
 		}
 		return runner.StartFull(ctx, messageHandler, cardHandler,
-			l.handleBotAdded, l.handleBotRemoved, l.handleReaction)
+			l.handleBotAdded, l.handleBotRemoved, l.handleReaction, l.handleReactionDeleted)
 	}
 
 	// Fall back to card action runner.
@@ -341,13 +343,99 @@ func (l *Live) handleBotRemoved(ctx context.Context, event *larkim.P2ChatMemberB
 }
 
 func (l *Live) handleReaction(ctx context.Context, event *larkim.P2MessageReactionCreatedV1) error {
-	if event == nil || event.Event == nil {
+	if event == nil {
 		return nil
 	}
-	log.WithField("component", "feishu-live").Debug("Reaction event received")
-	// Reactions are logged but not forwarded as action requests yet; the
-	// action handler interface does not have a reaction-specific path.
-	return nil
+	req := buildReactionRequestFromCreated(event.Event)
+	if req == nil {
+		return nil
+	}
+	if l.actionHandler == nil {
+		return nil
+	}
+	_, err := l.actionHandler.HandleAction(ctx, req)
+	return err
+}
+
+func (l *Live) handleReactionDeleted(ctx context.Context, event *larkim.P2MessageReactionDeletedV1) error {
+	if event == nil {
+		return nil
+	}
+	req := buildReactionRequestFromDeleted(event.Event)
+	if req == nil {
+		return nil
+	}
+	if l.actionHandler == nil {
+		return nil
+	}
+	_, err := l.actionHandler.HandleAction(ctx, req)
+	return err
+}
+
+func buildReactionRequestFromCreated(data *larkim.P2MessageReactionCreatedV1Data) *notify.ActionRequest {
+	if data == nil {
+		return nil
+	}
+	return assembleReactionRequest(
+		value(data.MessageId),
+		reactionEmoji(data.ReactionType),
+		reactionUserID(data.UserId),
+		"created",
+	)
+}
+
+func buildReactionRequestFromDeleted(data *larkim.P2MessageReactionDeletedV1Data) *notify.ActionRequest {
+	if data == nil {
+		return nil
+	}
+	return assembleReactionRequest(
+		value(data.MessageId),
+		reactionEmoji(data.ReactionType),
+		reactionUserID(data.UserId),
+		"deleted",
+	)
+}
+
+func assembleReactionRequest(messageID, emoji, userID, eventType string) *notify.ActionRequest {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return nil
+	}
+	metadata := map[string]string{
+		"emoji":      emoji,
+		"event_type": eventType,
+	}
+	return &notify.ActionRequest{
+		Platform: liveMetadata.Source,
+		Action:   core.ActionNameReact,
+		EntityID: messageID,
+		UserID:   userID,
+		Metadata: compactMetadata(metadata),
+		ReplyTarget: &core.ReplyTarget{
+			Platform:  liveMetadata.Source,
+			MessageID: messageID,
+		},
+	}
+}
+
+func reactionEmoji(emoji *larkim.Emoji) string {
+	if emoji == nil || emoji.EmojiType == nil {
+		return ""
+	}
+	return strings.TrimSpace(*emoji.EmojiType)
+}
+
+func reactionUserID(user *larkim.UserId) string {
+	if user == nil {
+		return ""
+	}
+	if user.OpenId != nil && strings.TrimSpace(*user.OpenId) != "" {
+		return strings.TrimSpace(*user.OpenId)
+	}
+	if user.UserId != nil && strings.TrimSpace(*user.UserId) != "" {
+		return strings.TrimSpace(*user.UserId)
+	}
+	return ""
 }
 
 func (l *Live) Reply(ctx context.Context, replyCtx any, content string) error {
@@ -543,11 +631,11 @@ type sdkEventRunner struct {
 }
 
 func (r *sdkEventRunner) Start(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error) error {
-	return r.StartFull(ctx, handler, nil, nil, nil, nil)
+	return r.StartFull(ctx, handler, nil, nil, nil, nil, nil)
 }
 
 func (r *sdkEventRunner) StartWithCardActions(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error, cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)) error {
-	return r.StartFull(ctx, handler, cardActionHandler, nil, nil, nil)
+	return r.StartFull(ctx, handler, cardActionHandler, nil, nil, nil, nil)
 }
 
 func (r *sdkEventRunner) StartFull(
@@ -557,6 +645,7 @@ func (r *sdkEventRunner) StartFull(
 	botAddedHandler func(context.Context, *larkim.P2ChatMemberBotAddedV1) error,
 	botRemovedHandler func(context.Context, *larkim.P2ChatMemberBotDeletedV1) error,
 	reactionHandler func(context.Context, *larkim.P2MessageReactionCreatedV1) error,
+	reactionDeletedHandler func(context.Context, *larkim.P2MessageReactionDeletedV1) error,
 ) error {
 	dispatcher := larkdispatcher.NewEventDispatcher("", "").OnP2MessageReceiveV1(handler)
 	if cardActionHandler != nil {
@@ -570,6 +659,9 @@ func (r *sdkEventRunner) StartFull(
 	}
 	if reactionHandler != nil {
 		dispatcher = dispatcher.OnP2MessageReactionCreatedV1(reactionHandler)
+	}
+	if reactionDeletedHandler != nil {
+		dispatcher = dispatcher.OnP2MessageReactionDeletedV1(reactionDeletedHandler)
 	}
 	client := larkws.NewClient(r.appID, r.appSecret, larkws.WithEventHandler(dispatcher))
 
@@ -791,28 +883,70 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 		// For select/picker/form elements, use the tag as action type and the
 		// selected value as entity ID.
 		switch actionTag {
-		case "select_static", "select_person", "multi_select_static", "multi_select_person":
-			action = "select"
-			entityID = selectedOption
-			if entityID == "" {
-				entityID = actionValue
+		case "select_static", "select_person":
+			action = core.ActionNameSelect
+			if parsedAction, parsedEntity, parsedMeta, parsedOK := core.ParseActionReferenceWithMetadata(actionValue); parsedOK {
+				_ = parsedAction
+				entityID = parsedEntity
+				actionMetadata = parsedMeta
+			} else {
+				entityID = selectedOption
+			}
+		case "multi_select_static", "multi_select_person":
+			action = core.ActionNameMultiSelect
+			if parsedAction, parsedEntity, parsedMeta, parsedOK := core.ParseActionReferenceWithMetadata(actionValue); parsedOK {
+				_ = parsedAction
+				entityID = parsedEntity
+				actionMetadata = parsedMeta
+			} else {
+				entityID = ""
 			}
 		case "date_picker", "time_picker", "datetime_picker":
-			action = "date_pick"
+			action = core.ActionNameDatePick
 			entityID = selectedTime
 		case "overflow":
-			action = "overflow"
+			action = core.ActionNameOverflow
 			entityID = selectedOption
+		case "checker":
+			action = core.ActionNameToggle
+			entityID = ""
+		case "input":
+			action = core.ActionNameInputSubmit
+			if parsedAction, parsedEntity, parsedMeta, parsedOK := core.ParseActionReferenceWithMetadata(actionValue); parsedOK {
+				_ = parsedAction
+				entityID = parsedEntity
+				actionMetadata = parsedMeta
+			} else {
+				return nil, errIgnoreCardAction
+			}
 		default:
 			// Check if form values carry an action reference.
 			if formAction, formOk := formValues["action"]; formOk {
-				action = "form_submit"
+				action = core.ActionNameFormSubmit
 				entityID = formAction
 			} else {
 				return nil, errIgnoreCardAction
 			}
+			actionMetadata = nil
 		}
-		actionMetadata = nil
+	}
+
+	// Checker elements always map to the toggle action regardless of the parsed
+	// action reference, so the semantic intent is preserved even when the value
+	// carries a different action prefix.
+	if actionTag == "checker" {
+		action = core.ActionNameToggle
+	}
+	// Multi-select elements always map to the multi_select action regardless of
+	// the parsed action reference — the tag is the authoritative signal for what
+	// kind of interaction occurred.
+	if actionTag == "multi_select_static" || actionTag == "multi_select_person" {
+		action = core.ActionNameMultiSelect
+	}
+	// Input elements always map to the input_submit action regardless of the
+	// parsed action reference — the tag is the authoritative signal.
+	if actionTag == "input" {
+		action = core.ActionNameInputSubmit
 	}
 
 	chatID := ""
@@ -839,17 +973,32 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 	if actionTag != "" {
 		metadata["action_tag"] = actionTag
 	}
+	if actionTag == "checker" {
+		metadata["checker_state"] = strconv.FormatBool(act.Checked)
+	}
 	if selectedOption != "" {
 		metadata["selected_option"] = selectedOption
 	}
+	if strings.HasPrefix(actionTag, "multi_select") && len(act.Options) > 0 {
+		metadata["selected_options"] = strings.Join(act.Options, ",")
+	}
 	if selectedTime != "" {
 		metadata["selected_time"] = selectedTime
+	}
+	if strings.TrimSpace(act.InputValue) != "" {
+		metadata["input_value"] = strings.TrimSpace(act.InputValue)
 	}
 	for k, v := range formValues {
 		metadata["form_"+k] = v
 	}
 	for key, value := range actionMetadata {
 		metadata[key] = value
+	}
+	if name := strings.TrimSpace(act.Name); name != "" {
+		metadata["element_name"] = name
+	}
+	if tz := strings.TrimSpace(act.Timezone); tz != "" {
+		metadata["timezone"] = tz
 	}
 	return &notify.ActionRequest{
 		Platform:    liveMetadata.Source,

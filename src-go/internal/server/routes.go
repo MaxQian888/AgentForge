@@ -144,6 +144,7 @@ func RegisterRoutes(
 	taskRepo *repository.TaskRepository,
 	entityLinkRepo *repository.EntityLinkRepository,
 	taskCommentRepo *repository.TaskCommentRepository,
+	imReactionEventRepo *repository.IMReactionEventRepository,
 	customFieldRepo *repository.CustomFieldRepository,
 	savedViewRepo *repository.SavedViewRepository,
 	formRepo *repository.FormRepository,
@@ -769,6 +770,8 @@ func RegisterRoutes(
 		taskProgressSvc,
 		taskWorkflowSvc,
 		wikiSvc,
+		imReactionEventRepo,
+		taskCommentRepo,
 	))
 	automationEngine.SetIMSender(imSvc)
 	wikiSvc.WithIMForwarder(imSvc, cfg.IMNotifyPlatform, cfg.IMNotifyTargetChatID).WithIMChannelResolver(imControlPlane)

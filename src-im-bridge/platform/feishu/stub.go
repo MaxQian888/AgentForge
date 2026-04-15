@@ -5,12 +5,14 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http"
+	"strings"
 
 	log "github.com/sirupsen/logrus"
 	"sync"
 	"time"
 
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/notify"
 )
 
 var (
@@ -27,11 +29,18 @@ type Stub struct {
 	handler core.MessageHandler
 	server  *http.Server
 
-	mu         sync.Mutex
-	replies    []stubReply
-	cards      []stubCardReply
-	native     []stubNativeReply
-	structured []stubStructuredReply
+	mu            sync.Mutex
+	replies       []stubReply
+	cards         []stubCardReply
+	native        []stubNativeReply
+	structured    []stubStructuredReply
+	actionHandler func(context.Context, *notify.ActionRequest) (*notify.ActionResponse, error)
+}
+
+// SetActionHandler registers a handler that will be invoked by the
+// POST /test/cardclick endpoint to simulate card button click events.
+func (s *Stub) SetActionHandler(h func(context.Context, *notify.ActionRequest) (*notify.ActionResponse, error)) {
+	s.actionHandler = h
 }
 
 type stubStructuredReply struct {
@@ -114,6 +123,7 @@ func (s *Stub) Start(handler core.MessageHandler) error {
 
 	mux := http.NewServeMux()
 	mux.HandleFunc("POST /test/message", s.handleTestMessage)
+	mux.HandleFunc("POST /test/cardclick", s.handleTestCardClick)
 	mux.HandleFunc("GET /test/replies", s.handleGetReplies)
 	mux.HandleFunc("GET /test/cards", s.handleGetCards)
 	mux.HandleFunc("GET /test/structured", s.handleGetStructured)
@@ -420,4 +430,67 @@ func (s *Stub) handleClearReplies(w http.ResponseWriter, r *http.Request) {
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "cleared"})
+}
+
+type stubCardClickRequest struct {
+	Action    string            `json:"action"`
+	EntityID  string            `json:"entity_id,omitempty"`
+	ChatID    string            `json:"chat_id"`
+	UserID    string            `json:"user_id"`
+	MessageID string            `json:"message_id,omitempty"`
+	Metadata  map[string]string `json:"metadata,omitempty"`
+}
+
+func (s *Stub) handleTestCardClick(w http.ResponseWriter, r *http.Request) {
+	var req stubCardClickRequest
+	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
+		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
+		return
+	}
+	if s.actionHandler == nil {
+		http.Error(w, "action handler not configured", http.StatusServiceUnavailable)
+		return
+	}
+
+	actionName := strings.TrimSpace(req.Action)
+	entityID := strings.TrimSpace(req.EntityID)
+	if strings.HasPrefix(actionName, "act:") {
+		if parsedAction, parsedEntity, _, ok := core.ParseActionReferenceWithMetadata(actionName); ok {
+			actionName = parsedAction
+			if entityID == "" {
+				entityID = parsedEntity
+			}
+		}
+	}
+
+	ar := &notify.ActionRequest{
+		Platform: "feishu",
+		Action:   actionName,
+		EntityID: entityID,
+		ChatID:   req.ChatID,
+		UserID:   req.UserID,
+		Metadata: req.Metadata,
+		ReplyTarget: &core.ReplyTarget{
+			Platform:  "feishu",
+			ChatID:    req.ChatID,
+			ChannelID: req.ChatID,
+			MessageID: req.MessageID,
+			UseReply:  true,
+		},
+	}
+	resp, err := s.actionHandler(r.Context(), ar)
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if resp == nil {
+		resp = &notify.ActionResponse{}
+	}
+	w.Header().Set("Content-Type", "application/json")
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"action":   actionName,
+		"entityId": entityID,
+		"result":   resp.Result,
+		"status":   resp.Metadata["action_status"],
+	})
 }

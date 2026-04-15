@@ -509,11 +509,12 @@ func TestLive_BuildNativeTextMessageReturnsMarkdownCard(t *testing.T) {
 }
 
 type fakeEventRunner struct {
-	started           bool
-	stopped           bool
-	handler           func(context.Context, *larkim.P2MessageReceiveV1) error
-	cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)
-	stopErr           error
+	started                bool
+	stopped                bool
+	handler                func(context.Context, *larkim.P2MessageReceiveV1) error
+	cardActionHandler      func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)
+	reactionDeletedHandler func(context.Context, *larkim.P2MessageReactionDeletedV1) error
+	stopErr                error
 }
 
 func (r *fakeEventRunner) Start(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error) error {
@@ -541,11 +542,34 @@ func (r *fakeEventRunner) StartWithCardActions(ctx context.Context, handler func
 	return nil
 }
 
+func (r *fakeEventRunner) StartFull(
+	ctx context.Context,
+	handler func(context.Context, *larkim.P2MessageReceiveV1) error,
+	cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error),
+	botAddedHandler func(context.Context, *larkim.P2ChatMemberBotAddedV1) error,
+	botRemovedHandler func(context.Context, *larkim.P2ChatMemberBotDeletedV1) error,
+	reactionHandler func(context.Context, *larkim.P2MessageReactionCreatedV1) error,
+	reactionDeletedHandler func(context.Context, *larkim.P2MessageReactionDeletedV1) error,
+) error {
+	r.started = true
+	r.handler = handler
+	r.cardActionHandler = cardActionHandler
+	r.reactionDeletedHandler = reactionDeletedHandler
+	return nil
+}
+
 func (r *fakeEventRunner) dispatchCardAction(ctx context.Context, event *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error) {
 	if r.cardActionHandler == nil {
 		return nil, errors.New("card action handler not registered")
 	}
 	return r.cardActionHandler(ctx, event)
+}
+
+func (r *fakeEventRunner) dispatchReactionDeleted(ctx context.Context, event *larkim.P2MessageReactionDeletedV1) error {
+	if r.reactionDeletedHandler == nil {
+		return errors.New("reaction deleted handler not registered")
+	}
+	return r.reactionDeletedHandler(ctx, event)
 }
 
 type fakeMessageClient struct {
@@ -1311,5 +1335,284 @@ func TestLive_HandleReactionNoError(t *testing.T) {
 	// Reactions are logged only; should not error.
 	if err := live.handleReaction(context.Background(), nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
+	}
+}
+
+func TestNormalizeCardActionRequest_CheckerChecked(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:     "checker",
+				Checked: true,
+				Value:   map[string]interface{}{"action": "act:toggle:task-xyz"},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1", OpenMessageID: "msg-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != core.ActionNameToggle {
+		t.Errorf("Action = %q, want toggle", req.Action)
+	}
+	if req.EntityID != "task-xyz" {
+		t.Errorf("EntityID = %q, want task-xyz", req.EntityID)
+	}
+	if req.Metadata["checker_state"] != "true" {
+		t.Errorf("checker_state = %q, want true", req.Metadata["checker_state"])
+	}
+	if req.Metadata["action_tag"] != "checker" {
+		t.Errorf("action_tag = %q, want checker", req.Metadata["action_tag"])
+	}
+}
+
+func TestNormalizeCardActionRequest_CheckerUncheckedWithoutActionRef(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:     "checker",
+				Checked: false,
+				Value:   map[string]interface{}{},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != core.ActionNameToggle {
+		t.Errorf("Action = %q, want toggle", req.Action)
+	}
+	if req.EntityID != "" {
+		t.Errorf("EntityID = %q, want empty", req.EntityID)
+	}
+	if req.Metadata["checker_state"] != "false" {
+		t.Errorf("checker_state = %q, want false", req.Metadata["checker_state"])
+	}
+}
+
+func TestNormalizeCardActionRequest_MultiSelectWithActionRef(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:     "multi_select_static",
+				Options: []string{"opt_a", "opt_b", "opt_c"},
+				Value:   map[string]interface{}{"action": "act:assign-agent:task-xyz"},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != core.ActionNameMultiSelect {
+		t.Errorf("Action = %q, want multi_select", req.Action)
+	}
+	if req.EntityID != "task-xyz" {
+		t.Errorf("EntityID = %q, want task-xyz", req.EntityID)
+	}
+	if req.Metadata["selected_options"] != "opt_a,opt_b,opt_c" {
+		t.Errorf("selected_options = %q, want opt_a,opt_b,opt_c", req.Metadata["selected_options"])
+	}
+}
+
+func TestNormalizeCardActionRequest_MultiSelectPersonFallback(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:     "multi_select_person",
+				Options: []string{"ou_user_a", "ou_user_b"},
+				Value:   map[string]interface{}{},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != core.ActionNameMultiSelect {
+		t.Errorf("Action = %q, want multi_select", req.Action)
+	}
+	if req.Metadata["selected_options"] != "ou_user_a,ou_user_b" {
+		t.Errorf("selected_options = %q", req.Metadata["selected_options"])
+	}
+}
+
+func TestNormalizeCardActionRequest_InputWithActionRef(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:        "input",
+				InputValue: "please reconsider",
+				Value:      map[string]interface{}{"action": "act:input_submit:task-xyz"},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != core.ActionNameInputSubmit {
+		t.Errorf("Action = %q, want input_submit", req.Action)
+	}
+	if req.EntityID != "task-xyz" {
+		t.Errorf("EntityID = %q, want task-xyz", req.EntityID)
+	}
+	if req.Metadata["input_value"] != "please reconsider" {
+		t.Errorf("input_value = %q", req.Metadata["input_value"])
+	}
+}
+
+func TestNormalizeCardActionRequest_InputWithoutActionRefIsIgnored(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:        "input",
+				InputValue: "typed text",
+				Value:      map[string]interface{}{},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	_, err := normalizeCardActionRequest(event)
+	if !errors.Is(err, errIgnoreCardAction) {
+		t.Fatalf("err = %v, want errIgnoreCardAction", err)
+	}
+}
+
+func TestNormalizeCardActionRequest_PassesElementNameAndTimezone(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:      "date_picker",
+				Name:     "due_date_picker",
+				Timezone: "Asia/Shanghai",
+				Value:    map[string]interface{}{"date": "2026-04-20"},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Metadata["element_name"] != "due_date_picker" {
+		t.Errorf("element_name = %q", req.Metadata["element_name"])
+	}
+	if req.Metadata["timezone"] != "Asia/Shanghai" {
+		t.Errorf("timezone = %q", req.Metadata["timezone"])
+	}
+}
+
+type recordingActionHandler struct {
+	reqs []*notify.ActionRequest
+}
+
+func (h *recordingActionHandler) HandleAction(_ context.Context, req *notify.ActionRequest) (*notify.ActionResponse, error) {
+	h.reqs = append(h.reqs, req)
+	return &notify.ActionResponse{}, nil
+}
+
+func TestLive_HandleReactionCreatedForwardsToActionHandler(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+	rec := &recordingActionHandler{}
+	live.SetActionHandler(rec)
+
+	msgID := "om_reaction_msg"
+	emojiType := "THUMBSUP"
+	openID := "ou_reactor"
+	event := &larkim.P2MessageReactionCreatedV1{
+		Event: &larkim.P2MessageReactionCreatedV1Data{
+			MessageId:    &msgID,
+			ReactionType: &larkim.Emoji{EmojiType: &emojiType},
+			UserId:       &larkim.UserId{OpenId: &openID},
+		},
+	}
+	if err := live.handleReaction(context.Background(), event); err != nil {
+		t.Fatalf("handleReaction error: %v", err)
+	}
+	if len(rec.reqs) != 1 {
+		t.Fatalf("expected 1 forwarded request, got %d", len(rec.reqs))
+	}
+	got := rec.reqs[0]
+	if got.Action != core.ActionNameReact {
+		t.Errorf("Action = %q, want react", got.Action)
+	}
+	if got.EntityID != msgID {
+		t.Errorf("EntityID = %q, want %s", got.EntityID, msgID)
+	}
+	if got.UserID != openID {
+		t.Errorf("UserID = %q, want %s", got.UserID, openID)
+	}
+	if got.Metadata["emoji"] != emojiType {
+		t.Errorf("emoji = %q, want %s", got.Metadata["emoji"], emojiType)
+	}
+	if got.Metadata["event_type"] != "created" {
+		t.Errorf("event_type = %q, want created", got.Metadata["event_type"])
+	}
+}
+
+func TestLive_HandleReactionDeletedForwardsWithDeletedEventType(t *testing.T) {
+	live, _ := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	rec := &recordingActionHandler{}
+	live.SetActionHandler(rec)
+
+	msgID := "om_reaction_msg"
+	emojiType := "THUMBSUP"
+	openID := "ou_reactor"
+	event := &larkim.P2MessageReactionDeletedV1{
+		Event: &larkim.P2MessageReactionDeletedV1Data{
+			MessageId:    &msgID,
+			ReactionType: &larkim.Emoji{EmojiType: &emojiType},
+			UserId:       &larkim.UserId{OpenId: &openID},
+		},
+	}
+	if err := live.handleReactionDeleted(context.Background(), event); err != nil {
+		t.Fatalf("handleReactionDeleted error: %v", err)
+	}
+	if len(rec.reqs) != 1 {
+		t.Fatalf("expected 1 forwarded request")
+	}
+	if rec.reqs[0].Metadata["event_type"] != "deleted" {
+		t.Errorf("event_type = %q, want deleted", rec.reqs[0].Metadata["event_type"])
+	}
+}
+
+func TestLive_HandleReactionWithNoHandlerIsNoOp(t *testing.T) {
+	live, _ := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	msgID := "om_x"
+	emojiType := "OK"
+	openID := "ou_x"
+	event := &larkim.P2MessageReactionCreatedV1{
+		Event: &larkim.P2MessageReactionCreatedV1Data{
+			MessageId:    &msgID,
+			ReactionType: &larkim.Emoji{EmojiType: &emojiType},
+			UserId:       &larkim.UserId{OpenId: &openID},
+		},
+	}
+	if err := live.handleReaction(context.Background(), event); err != nil {
+		t.Fatalf("expected no error when handler missing, got %v", err)
 	}
 }

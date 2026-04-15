@@ -187,3 +187,24 @@ The `/im` operator console now assumes the backend exposes a richer snapshot con
 - `/api/v1/im/test-send` should reuse the canonical send pipeline and return the delivery id together with the current bounded settlement result
 
 Delivery status in that operator view is settlement-truthful. A delivery remains `pending` until the bridge returns a terminal ack with processed timestamp and any failure or downgrade metadata. Operators should not treat queue acceptance alone as successful delivery.
+
+## Phase 1 Feishu Callback Closure Smoke
+
+Requires:
+- Feishu live bridge running with `FEISHU_APP_ID`, `FEISHU_APP_SECRET`, and (optional) callback webhook config
+- Go backend running with migration 054 applied
+- A card published in a Feishu test chat that contains one instance of each element type
+
+Steps:
+
+1. **Button (existing behavior)** — click approve button on a card with action ref `act:approve:<reviewID>`. Expect review transitions to approved, toast "Review … was approved".
+2. **Select** — click a `select_static` whose value is `{"action": "act:transition-task:<taskID>"}` and options `["inbox", "triaged", …]`. Pick "done". Expect task transitions, toast success.
+3. **Multi-select** — pick two agents on a multi_select with value `{"action": "act:assign-agent:<taskID>"}`. Expect task assigned to the first agent, `selected_options` in backend logs.
+4. **Date picker** — pick a date. Expect Blocked toast "Due-date workflow is not configured; received YYYY-MM-DD …".
+5. **Overflow** — pick an option whose value is `act:decompose:<taskID>`. Expect task decomposed.
+6. **Checker** — toggle on a card whose value is `act:toggle:<taskID>`. Expect task moves to done; toggle back → task moves to in_progress.
+7. **Input** — type "please reconsider" and submit on a card whose value is `act:input_submit:<taskID>`. Expect comment appended.
+8. **Form** — submit a form with `name="create-task-form"` and fields `title`, `body`, `priority`. Expect task created.
+9. **Reaction** — react with 👍 on a task notification message. Expect row in `im_reaction_events` with `emoji="THUMBSUP"` and `event_type="created"`. Remove the reaction — expect row with `event_type="deleted"`.
+
+Each step must produce a deterministic toast or status — none should show "Unknown action".

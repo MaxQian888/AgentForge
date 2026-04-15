@@ -107,6 +107,7 @@ func main() {
 	taskRepo := repository.NewTaskRepository(db)
 	entityLinkRepo := repository.NewEntityLinkRepository(db)
 	taskCommentRepo := repository.NewTaskCommentRepository(db)
+	imReactionEventRepo := repository.NewIMReactionEventRepository(db)
 	customFieldRepo := repository.NewCustomFieldRepository(db)
 	savedViewRepo := repository.NewSavedViewRepository(db)
 	formRepo := repository.NewFormRepository(db)
@@ -188,6 +189,7 @@ func main() {
 		taskRepo,
 		entityLinkRepo,
 		taskCommentRepo,
+		imReactionEventRepo,
 		customFieldRepo,
 		savedViewRepo,
 		formRepo,

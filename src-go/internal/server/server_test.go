@@ -54,6 +54,7 @@ func registerTestRoutesWithDependencies(e *echo.Echo, cfg *config.Config, authSv
 		repository.NewTaskRepository(nil),
 		repository.NewEntityLinkRepository(nil),
 		repository.NewTaskCommentRepository(nil),
+		repository.NewIMReactionEventRepository(nil),
 		repository.NewCustomFieldRepository(nil),
 		repository.NewSavedViewRepository(nil),
 		repository.NewFormRepository(nil),

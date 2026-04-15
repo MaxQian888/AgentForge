@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/google/uuid"
@@ -62,6 +63,30 @@ type IMActionWikiCreator interface {
 	CreatePage(ctx context.Context, projectID uuid.UUID, spaceID uuid.UUID, title string, parentID *uuid.UUID, content string, createdBy *uuid.UUID) (*model.WikiPage, error)
 }
 
+type IMReactionRecorder interface {
+	Record(ctx context.Context, event *model.IMReactionEvent) error
+}
+
+type IMActionTaskCommenter interface {
+	Create(ctx context.Context, comment *model.TaskComment) error
+}
+
+var allowedSelectTargetActions = map[string]struct{}{
+	"assign-agent":    {},
+	"decompose":       {},
+	"transition-task": {},
+	"move-task":       {},
+	"save-as-doc":     {},
+	"create-task":     {},
+	"approve":         {},
+	"request-changes": {},
+}
+
+func isAllowedTargetAction(action string) bool {
+	_, ok := allowedSelectTargetActions[strings.TrimSpace(action)]
+	return ok
+}
+
 type BackendIMActionExecutor struct {
 	dispatcher IMActionTaskDispatcher
 	decomposer IMActionTaskDecomposer
@@ -72,6 +97,8 @@ type BackendIMActionExecutor struct {
 	progress   IMActionProgressRecorder
 	workflow   IMActionWorkflowEvaluator
 	wikiMaker  IMActionWikiCreator
+	reactions  IMReactionRecorder
+	commenter  IMActionTaskCommenter
 }
 
 func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IMActionTaskDecomposer, reviewer IMActionReviewer, extras ...any) *BackendIMActionExecutor {
@@ -94,6 +121,10 @@ func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IM
 			executor.workflow = value
 		case IMActionWikiCreator:
 			executor.wikiMaker = value
+		case IMReactionRecorder:
+			executor.reactions = value
+		case IMActionTaskCommenter:
+			executor.commenter = value
 		}
 	}
 	return executor
@@ -119,6 +150,22 @@ func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActi
 		return e.executeReviewAction(ctx, req, model.ReviewRecommendationApprove), nil
 	case "request-changes":
 		return e.executeReviewAction(ctx, req, model.ReviewRecommendationRequestChanges), nil
+	case "react":
+		return e.executeReact(ctx, req), nil
+	case "select":
+		return e.executeSelect(ctx, req), nil
+	case "multi_select":
+		return e.executeMultiSelect(ctx, req), nil
+	case "toggle":
+		return e.executeToggle(ctx, req), nil
+	case "input_submit":
+		return e.executeInputSubmit(ctx, req), nil
+	case "date_pick":
+		return e.executeDatePick(ctx, req), nil
+	case "overflow":
+		return e.executeOverflow(ctx, req), nil
+	case "form_submit":
+		return e.executeFormSubmit(ctx, req), nil
 	default:
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unknown action: %s", req.Action), false), nil
 	}
@@ -350,6 +397,238 @@ func (e *BackendIMActionExecutor) executeReviewAction(ctx context.Context, req *
 	dto := updated.ToDTO()
 	resp.Review = &dto
 	return resp
+}
+
+func (e *BackendIMActionExecutor) executeReact(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	if e.reactions == nil {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Reaction recording is not configured.", false)
+	}
+	messageID := strings.TrimSpace(req.EntityID)
+	if messageID == "" {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Reaction event missing message id.", false)
+	}
+	eventType := strings.TrimSpace(req.Metadata["event_type"])
+	if eventType == "" {
+		eventType = model.IMReactionEventTypeCreated
+	}
+	if eventType != model.IMReactionEventTypeCreated && eventType != model.IMReactionEventTypeDeleted {
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unknown reaction event type %q.", eventType), false)
+	}
+	event := &model.IMReactionEvent{
+		Platform:  strings.TrimSpace(req.Platform),
+		ChatID:    strings.TrimSpace(req.ChannelID),
+		MessageID: messageID,
+		UserID:    strings.TrimSpace(req.UserID),
+		Emoji:     strings.TrimSpace(req.Metadata["emoji"]),
+		EventType: eventType,
+	}
+	if err := e.reactions.Record(ctx, event); err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Record reaction failed: %s", err.Error()), false)
+	}
+	return newIMActionResponse(req, model.IMActionStatusCompleted, "", true)
+}
+
+func (e *BackendIMActionExecutor) executeSelect(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	target := strings.TrimSpace(req.Metadata["target_action"])
+	if target == "" {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Select action requires target_action metadata.", false)
+	}
+	if !isAllowedTargetAction(target) {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, fmt.Sprintf("target_action %q is not allowed.", target), false)
+	}
+
+	delegated := *req
+	delegated.Action = target
+	delegated.Metadata = cloneStringMap(req.Metadata)
+	if opt := strings.TrimSpace(delegated.Metadata["selected_option"]); opt != "" {
+		switch target {
+		case "assign-agent":
+			if delegated.Metadata["assigneeId"] == "" {
+				delegated.Metadata["assigneeId"] = opt
+			}
+		case "transition-task", "move-task":
+			if delegated.Metadata["targetStatus"] == "" {
+				delegated.Metadata["targetStatus"] = opt
+			}
+		}
+	}
+	return e.dispatchAllowedAction(ctx, &delegated)
+}
+
+func (e *BackendIMActionExecutor) dispatchAllowedAction(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	resp, _ := e.Execute(ctx, req)
+	return resp
+}
+
+func (e *BackendIMActionExecutor) executeMultiSelect(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	target := strings.TrimSpace(req.Metadata["target_action"])
+	if target == "" {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Multi-select action requires target_action metadata.", false)
+	}
+	if !isAllowedTargetAction(target) {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, fmt.Sprintf("target_action %q is not allowed.", target), false)
+	}
+
+	delegated := *req
+	delegated.Action = target
+	delegated.Metadata = cloneStringMap(req.Metadata)
+	options := splitCSV(delegated.Metadata["selected_options"])
+	if len(options) > 0 {
+		switch target {
+		case "assign-agent":
+			if delegated.Metadata["assigneeId"] == "" {
+				delegated.Metadata["assigneeId"] = options[0]
+			}
+		}
+	}
+	return e.dispatchAllowedAction(ctx, &delegated)
+}
+
+func (e *BackendIMActionExecutor) executeToggle(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	if e.taskMover == nil {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Task transition workflow is unavailable.", false)
+	}
+	taskID, err := parseIMEntityUUID(req.EntityID)
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Invalid task identifier.", false)
+	}
+	checkerState := strings.ToLower(strings.TrimSpace(req.Metadata["checker_state"]))
+	targetStatus := model.TaskStatusInProgress
+	if checkerState == "true" {
+		targetStatus = model.TaskStatusDone
+	}
+	updated, err := e.taskMover.Transition(ctx, taskID, &model.TransitionRequest{Status: targetStatus})
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Toggle failed: %s", err.Error()), false)
+	}
+	resp := newIMActionResponse(req, model.IMActionStatusCompleted, fmt.Sprintf("Task %s set to %s.", updated.Title, targetStatus), true)
+	dto := updated.ToDTO()
+	resp.Task = &dto
+	return resp
+}
+
+func (e *BackendIMActionExecutor) executeInputSubmit(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	if e.commenter == nil {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Task comment workflow is unavailable.", false)
+	}
+	body := strings.TrimSpace(req.Metadata["input_value"])
+	if body == "" {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Input submission missing value.", false)
+	}
+	taskID, err := parseIMEntityUUID(req.EntityID)
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Invalid task identifier.", false)
+	}
+	comment := &model.TaskComment{
+		TaskID: taskID,
+		Body:   body,
+	}
+	if authorID, err := uuid.Parse(strings.TrimSpace(req.UserID)); err == nil {
+		comment.CreatedBy = authorID
+	}
+	if err := e.commenter.Create(ctx, comment); err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Failed to append comment: %s", err.Error()), false)
+	}
+	return newIMActionResponse(req, model.IMActionStatusCompleted, "Comment appended to task.", true)
+}
+
+func (e *BackendIMActionExecutor) executeDatePick(_ context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	selected := strings.TrimSpace(req.Metadata["selected_time"])
+	reason := "Due-date workflow is not configured; date picker click received."
+	if selected != "" {
+		reason = fmt.Sprintf("Due-date workflow is not configured; received %s but could not record it.", selected)
+	}
+	return newIMActionResponse(req, model.IMActionStatusBlocked, reason, false)
+}
+
+func (e *BackendIMActionExecutor) executeOverflow(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	opt := strings.TrimSpace(req.Metadata["selected_option"])
+	innerAction, innerEntity, innerMeta, ok := parseBackendActionReference(opt)
+	if !ok {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Overflow selection is not a valid action reference.", false)
+	}
+	if !isAllowedTargetAction(innerAction) {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, fmt.Sprintf("Overflow target action %q is not allowed.", innerAction), false)
+	}
+	delegated := *req
+	delegated.Action = innerAction
+	delegated.EntityID = innerEntity
+	delegated.Metadata = cloneStringMap(req.Metadata)
+	for k, v := range innerMeta {
+		delegated.Metadata[k] = v
+	}
+	return e.dispatchAllowedAction(ctx, &delegated)
+}
+
+func (e *BackendIMActionExecutor) executeFormSubmit(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	formID := strings.TrimSpace(req.Metadata["element_name"])
+	if formID == "" {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Form submit missing element_name.", false)
+	}
+	switch formID {
+	case "create-task-form":
+		delegated := *req
+		delegated.Action = "create-task"
+		delegated.Metadata = cloneStringMap(req.Metadata)
+		delegated.Metadata["title"] = firstNonEmptyMetadata(delegated.Metadata, "", "form_title", "title")
+		delegated.Metadata["body"] = firstNonEmptyMetadata(delegated.Metadata, "", "form_body", "body")
+		if p := firstNonEmptyMetadata(delegated.Metadata, "", "form_priority", "priority"); p != "" {
+			delegated.Metadata["priority"] = p
+		}
+		return e.dispatchAllowedAction(ctx, &delegated)
+	default:
+		return newIMActionResponse(req, model.IMActionStatusBlocked, fmt.Sprintf("Unknown form %q; no handler configured.", formID), false)
+	}
+}
+
+func parseBackendActionReference(raw string) (action, entityID string, metadata map[string]string, ok bool) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "act:") {
+		return "", "", nil, false
+	}
+	body := strings.TrimPrefix(trimmed, "act:")
+	queryString := ""
+	if idx := strings.Index(body, "?"); idx >= 0 {
+		queryString = body[idx+1:]
+		body = body[:idx]
+	}
+	parts := strings.SplitN(body, ":", 2)
+	if len(parts) != 2 {
+		return "", "", nil, false
+	}
+	action = strings.TrimSpace(parts[0])
+	entityID = strings.TrimSpace(parts[1])
+	if action == "" || entityID == "" {
+		return "", "", nil, false
+	}
+	if queryString != "" {
+		values, err := url.ParseQuery(queryString)
+		if err == nil && len(values) > 0 {
+			metadata = make(map[string]string, len(values))
+			for key, entries := range values {
+				if len(entries) == 0 {
+					continue
+				}
+				value := strings.TrimSpace(entries[len(entries)-1])
+				if strings.TrimSpace(key) == "" || value == "" {
+					continue
+				}
+				metadata[strings.TrimSpace(key)] = value
+			}
+		}
+	}
+	return action, entityID, metadata, true
+}
+
+func splitCSV(s string) []string {
+	raw := strings.Split(strings.TrimSpace(s), ",")
+	out := make([]string, 0, len(raw))
+	for _, item := range raw {
+		if trimmed := strings.TrimSpace(item); trimmed != "" {
+			out = append(out, trimmed)
+		}
+	}
+	return out
 }
 
 func attachTaskBindingMetadata(resp *model.IMActionResponse, req *model.IMActionRequest, projectID string, taskID string) {
