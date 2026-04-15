@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/google/uuid"
@@ -743,5 +744,69 @@ func TestExecuteReact_WithoutRecorderReturnsBlocked(t *testing.T) {
 	resp, _ := exec.Execute(context.Background(), req)
 	if resp.Status != model.IMActionStatusBlocked {
 		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+}
+
+func TestExecuteSelect_WithoutTargetActionReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "select",
+		EntityID: "task-xyz",
+		Metadata: map[string]string{"selected_option": "agent-alpha"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+	if !strings.Contains(resp.Result, "target_action") {
+		t.Errorf("expected mention of target_action in %q", resp.Result)
+	}
+}
+
+func TestExecuteSelect_WithInvalidTargetActionReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "select",
+		EntityID: "task-xyz",
+		Metadata: map[string]string{"target_action": "dangerous-internal-op", "selected_option": "x"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+	if !strings.Contains(resp.Result, "not allowed") {
+		t.Errorf("Result = %q", resp.Result)
+	}
+}
+
+func TestExecuteSelect_WithWhitelistedTargetActionDispatches(t *testing.T) {
+	dispatcher := &fakeIMActionDispatcher{
+		assignResp: &model.TaskDispatchResponse{
+			Dispatch: model.DispatchOutcome{Status: model.DispatchStatusStarted},
+			Task:     model.TaskDTO{ID: uuid.New().String()},
+		},
+	}
+	exec := NewBackendIMActionExecutor(dispatcher, nil, nil)
+	taskID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "select",
+		EntityID: taskID.String(),
+		Metadata: map[string]string{
+			"target_action":   "assign-agent",
+			"selected_option": "agent-alpha",
+		},
+	}
+	resp, err := exec.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute error: %v", err)
+	}
+	if resp.Status == model.IMActionStatusBlocked || resp.Status == model.IMActionStatusFailed {
+		t.Errorf("unexpected status %q; result=%q", resp.Status, resp.Result)
+	}
+	if dispatcher.lastAssign == nil || dispatcher.lastAssign.AssigneeID != "agent-alpha" {
+		t.Errorf("assigneeId not propagated: %+v", dispatcher.lastAssign)
 	}
 }

@@ -66,6 +66,22 @@ type IMReactionRecorder interface {
 	Record(ctx context.Context, event *model.IMReactionEvent) error
 }
 
+var allowedSelectTargetActions = map[string]struct{}{
+	"assign-agent":    {},
+	"decompose":       {},
+	"transition-task": {},
+	"move-task":       {},
+	"save-as-doc":     {},
+	"create-task":     {},
+	"approve":         {},
+	"request-changes": {},
+}
+
+func isAllowedTargetAction(action string) bool {
+	_, ok := allowedSelectTargetActions[strings.TrimSpace(action)]
+	return ok
+}
+
 type BackendIMActionExecutor struct {
 	dispatcher IMActionTaskDispatcher
 	decomposer IMActionTaskDecomposer
@@ -128,6 +144,8 @@ func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActi
 		return e.executeReviewAction(ctx, req, model.ReviewRecommendationRequestChanges), nil
 	case "react":
 		return e.executeReact(ctx, req), nil
+	case "select":
+		return e.executeSelect(ctx, req), nil
 	default:
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unknown action: %s", req.Action), false), nil
 	}
@@ -388,6 +406,38 @@ func (e *BackendIMActionExecutor) executeReact(ctx context.Context, req *model.I
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Record reaction failed: %s", err.Error()), false)
 	}
 	return newIMActionResponse(req, model.IMActionStatusCompleted, "", true)
+}
+
+func (e *BackendIMActionExecutor) executeSelect(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	target := strings.TrimSpace(req.Metadata["target_action"])
+	if target == "" {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Select action requires target_action metadata.", false)
+	}
+	if !isAllowedTargetAction(target) {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, fmt.Sprintf("target_action %q is not allowed.", target), false)
+	}
+
+	delegated := *req
+	delegated.Action = target
+	delegated.Metadata = cloneStringMap(req.Metadata)
+	if opt := strings.TrimSpace(delegated.Metadata["selected_option"]); opt != "" {
+		switch target {
+		case "assign-agent":
+			if delegated.Metadata["assigneeId"] == "" {
+				delegated.Metadata["assigneeId"] = opt
+			}
+		case "transition-task", "move-task":
+			if delegated.Metadata["targetStatus"] == "" {
+				delegated.Metadata["targetStatus"] = opt
+			}
+		}
+	}
+	return e.dispatchAllowedAction(ctx, &delegated)
+}
+
+func (e *BackendIMActionExecutor) dispatchAllowedAction(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	resp, _ := e.Execute(ctx, req)
+	return resp
 }
 
 func attachTaskBindingMetadata(resp *model.IMActionResponse, req *model.IMActionRequest, projectID string, taskID string) {
