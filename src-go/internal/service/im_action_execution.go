@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net/url"
 	"strings"
 
 	"github.com/google/uuid"
@@ -159,6 +160,12 @@ func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActi
 		return e.executeToggle(ctx, req), nil
 	case "input_submit":
 		return e.executeInputSubmit(ctx, req), nil
+	case "date_pick":
+		return e.executeDatePick(ctx, req), nil
+	case "overflow":
+		return e.executeOverflow(ctx, req), nil
+	case "form_submit":
+		return e.executeFormSubmit(ctx, req), nil
 	default:
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unknown action: %s", req.Action), false), nil
 	}
@@ -523,6 +530,94 @@ func (e *BackendIMActionExecutor) executeInputSubmit(ctx context.Context, req *m
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Failed to append comment: %s", err.Error()), false)
 	}
 	return newIMActionResponse(req, model.IMActionStatusCompleted, "Comment appended to task.", true)
+}
+
+func (e *BackendIMActionExecutor) executeDatePick(_ context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	selected := strings.TrimSpace(req.Metadata["selected_time"])
+	reason := "Due-date workflow is not configured; date picker click received."
+	if selected != "" {
+		reason = fmt.Sprintf("Due-date workflow is not configured; received %s but could not record it.", selected)
+	}
+	return newIMActionResponse(req, model.IMActionStatusBlocked, reason, false)
+}
+
+func (e *BackendIMActionExecutor) executeOverflow(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	opt := strings.TrimSpace(req.Metadata["selected_option"])
+	innerAction, innerEntity, innerMeta, ok := parseBackendActionReference(opt)
+	if !ok {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Overflow selection is not a valid action reference.", false)
+	}
+	if !isAllowedTargetAction(innerAction) {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, fmt.Sprintf("Overflow target action %q is not allowed.", innerAction), false)
+	}
+	delegated := *req
+	delegated.Action = innerAction
+	delegated.EntityID = innerEntity
+	delegated.Metadata = cloneStringMap(req.Metadata)
+	for k, v := range innerMeta {
+		delegated.Metadata[k] = v
+	}
+	return e.dispatchAllowedAction(ctx, &delegated)
+}
+
+func (e *BackendIMActionExecutor) executeFormSubmit(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	formID := strings.TrimSpace(req.Metadata["element_name"])
+	if formID == "" {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Form submit missing element_name.", false)
+	}
+	switch formID {
+	case "create-task-form":
+		delegated := *req
+		delegated.Action = "create-task"
+		delegated.Metadata = cloneStringMap(req.Metadata)
+		delegated.Metadata["title"] = firstNonEmptyMetadata(delegated.Metadata, "", "form_title", "title")
+		delegated.Metadata["body"] = firstNonEmptyMetadata(delegated.Metadata, "", "form_body", "body")
+		if p := firstNonEmptyMetadata(delegated.Metadata, "", "form_priority", "priority"); p != "" {
+			delegated.Metadata["priority"] = p
+		}
+		return e.dispatchAllowedAction(ctx, &delegated)
+	default:
+		return newIMActionResponse(req, model.IMActionStatusBlocked, fmt.Sprintf("Unknown form %q; no handler configured.", formID), false)
+	}
+}
+
+func parseBackendActionReference(raw string) (action, entityID string, metadata map[string]string, ok bool) {
+	trimmed := strings.TrimSpace(raw)
+	if !strings.HasPrefix(trimmed, "act:") {
+		return "", "", nil, false
+	}
+	body := strings.TrimPrefix(trimmed, "act:")
+	queryString := ""
+	if idx := strings.Index(body, "?"); idx >= 0 {
+		queryString = body[idx+1:]
+		body = body[:idx]
+	}
+	parts := strings.SplitN(body, ":", 2)
+	if len(parts) != 2 {
+		return "", "", nil, false
+	}
+	action = strings.TrimSpace(parts[0])
+	entityID = strings.TrimSpace(parts[1])
+	if action == "" || entityID == "" {
+		return "", "", nil, false
+	}
+	if queryString != "" {
+		values, err := url.ParseQuery(queryString)
+		if err == nil && len(values) > 0 {
+			metadata = make(map[string]string, len(values))
+			for key, entries := range values {
+				if len(entries) == 0 {
+					continue
+				}
+				value := strings.TrimSpace(entries[len(entries)-1])
+				if strings.TrimSpace(key) == "" || value == "" {
+					continue
+				}
+				metadata[strings.TrimSpace(key)] = value
+			}
+		}
+	}
+	return action, entityID, metadata, true
 }
 
 func splitCSV(s string) []string {
