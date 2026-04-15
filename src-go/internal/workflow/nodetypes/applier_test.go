@@ -290,10 +290,135 @@ func TestApplier_ResetNodes_WithCounter(t *testing.T) {
 	}
 }
 
-func TestApplier_ParkEffect_ReturnsError(t *testing.T) {
-	applier := &EffectApplier{}
+// ── Park-effect fakes ───────────────────────────────────────────────────
 
-	exec := newExec()
+type fakeAgentSpawner struct {
+	calls     []spawnCall
+	returnRun *model.AgentRun
+	returnErr error
+}
+
+type spawnCall struct {
+	taskID    uuid.UUID
+	memberID  uuid.UUID
+	runtime   string
+	provider  string
+	modelName string
+	budgetUsd float64
+	roleID    string
+}
+
+func (f *fakeAgentSpawner) Spawn(_ context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error) {
+	f.calls = append(f.calls, spawnCall{taskID, memberID, runtime, provider, modelName, budgetUsd, roleID})
+	if f.returnErr != nil {
+		return nil, f.returnErr
+	}
+	if f.returnRun != nil {
+		return f.returnRun, nil
+	}
+	return &model.AgentRun{ID: uuid.New(), TaskID: taskID, MemberID: memberID}, nil
+}
+
+type fakeRunMappingRepo struct {
+	created []*model.WorkflowRunMapping
+	err     error
+}
+
+func (f *fakeRunMappingRepo) Create(_ context.Context, mapping *model.WorkflowRunMapping) error {
+	f.created = append(f.created, mapping)
+	return f.err
+}
+
+type fakeReviewRepo struct {
+	created []*model.WorkflowPendingReview
+	err     error
+}
+
+func (f *fakeReviewRepo) Create(_ context.Context, review *model.WorkflowPendingReview) error {
+	f.created = append(f.created, review)
+	return f.err
+}
+
+// ── Park-effect tests ───────────────────────────────────────────────────
+
+func TestApplier_SpawnAgent_CreatesRunAndMapping(t *testing.T) {
+	runID := uuid.New()
+	spawner := &fakeAgentSpawner{returnRun: &model.AgentRun{ID: runID}}
+	mappingRepo := &fakeRunMappingRepo{}
+	applier := &EffectApplier{AgentSpawner: spawner, MappingRepo: mappingRepo}
+
+	exec := newExecWithTask()
+	memberID := uuid.New()
+	node := &model.WorkflowNode{ID: "n-llm"}
+
+	effects := []Effect{
+		{
+			Kind: EffectSpawnAgent,
+			Payload: mustJSON(SpawnAgentPayload{
+				Runtime:   "claude_code",
+				Provider:  "anthropic",
+				Model:     "claude-opus-4-6",
+				RoleID:    "role-qa",
+				MemberID:  memberID.String(),
+				BudgetUsd: 7.5,
+			}),
+		},
+	}
+
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), node, effects)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !parked {
+		t.Fatal("expected parked=true")
+	}
+
+	if len(spawner.calls) != 1 {
+		t.Fatalf("expected 1 spawn call, got %d", len(spawner.calls))
+	}
+	call := spawner.calls[0]
+	if call.taskID != *exec.TaskID {
+		t.Errorf("taskID = %s, want %s", call.taskID, *exec.TaskID)
+	}
+	if call.memberID != memberID {
+		t.Errorf("memberID = %s, want %s", call.memberID, memberID)
+	}
+	if call.runtime != "claude_code" {
+		t.Errorf("runtime = %q, want %q", call.runtime, "claude_code")
+	}
+	if call.provider != "anthropic" {
+		t.Errorf("provider = %q, want %q", call.provider, "anthropic")
+	}
+	if call.modelName != "claude-opus-4-6" {
+		t.Errorf("model = %q, want %q", call.modelName, "claude-opus-4-6")
+	}
+	if call.budgetUsd != 7.5 {
+		t.Errorf("budgetUsd = %v, want 7.5", call.budgetUsd)
+	}
+	if call.roleID != "role-qa" {
+		t.Errorf("roleID = %q, want %q", call.roleID, "role-qa")
+	}
+
+	if len(mappingRepo.created) != 1 {
+		t.Fatalf("expected 1 mapping create, got %d", len(mappingRepo.created))
+	}
+	mapping := mappingRepo.created[0]
+	if mapping.ExecutionID != exec.ID {
+		t.Errorf("mapping.ExecutionID = %s, want %s", mapping.ExecutionID, exec.ID)
+	}
+	if mapping.NodeID != node.ID {
+		t.Errorf("mapping.NodeID = %q, want %q", mapping.NodeID, node.ID)
+	}
+	if mapping.AgentRunID != runID {
+		t.Errorf("mapping.AgentRunID = %s, want %s", mapping.AgentRunID, runID)
+	}
+}
+
+func TestApplier_SpawnAgent_NilTaskID_ReturnsError(t *testing.T) {
+	spawner := &fakeAgentSpawner{}
+	applier := &EffectApplier{AgentSpawner: spawner}
+
+	exec := newExec() // no TaskID
 	effects := []Effect{
 		{
 			Kind:    EffectSpawnAgent,
@@ -301,12 +426,222 @@ func TestApplier_ParkEffect_ReturnsError(t *testing.T) {
 		},
 	}
 
-	_, err := applier.Apply(context.Background(), exec, uuid.New(), nil, effects)
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), &model.WorkflowNode{ID: "n"}, effects)
 	if err == nil {
-		t.Fatal("expected error for park effect stub")
+		t.Fatal("expected error for nil TaskID")
 	}
-	if got := err.Error(); !contains(got, "not yet implemented") {
-		t.Errorf("error = %q, want it to contain 'not yet implemented'", got)
+	if parked {
+		t.Fatal("expected parked=false on error")
+	}
+	if len(spawner.calls) != 0 {
+		t.Errorf("expected Spawn not to be called, got %d calls", len(spawner.calls))
+	}
+}
+
+func TestApplier_SpawnAgent_NilSpawner_ReturnsError(t *testing.T) {
+	applier := &EffectApplier{AgentSpawner: nil}
+
+	exec := newExecWithTask()
+	effects := []Effect{
+		{
+			Kind:    EffectSpawnAgent,
+			Payload: mustJSON(SpawnAgentPayload{Runtime: "claude_code"}),
+		},
+	}
+
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), &model.WorkflowNode{ID: "n"}, effects)
+	if err == nil {
+		t.Fatal("expected error for nil AgentSpawner")
+	}
+	if parked {
+		t.Fatal("expected parked=false on error")
+	}
+}
+
+func TestApplier_SpawnAgent_NilMappingRepo_StillParks(t *testing.T) {
+	spawner := &fakeAgentSpawner{}
+	applier := &EffectApplier{AgentSpawner: spawner, MappingRepo: nil}
+
+	exec := newExecWithTask()
+	effects := []Effect{
+		{
+			Kind: EffectSpawnAgent,
+			Payload: mustJSON(SpawnAgentPayload{
+				Runtime: "claude_code",
+				RoleID:  "role-qa",
+			}),
+		},
+	}
+
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), &model.WorkflowNode{ID: "n"}, effects)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !parked {
+		t.Fatal("expected parked=true even with nil MappingRepo")
+	}
+	if len(spawner.calls) != 1 {
+		t.Fatalf("expected spawn to happen, got %d calls", len(spawner.calls))
+	}
+}
+
+func TestApplier_RequestReview_PersistsReview(t *testing.T) {
+	reviewRepo := &fakeReviewRepo{}
+	applier := &EffectApplier{ReviewRepo: reviewRepo}
+
+	exec := newExec()
+	node := &model.WorkflowNode{ID: "n-review"}
+
+	effects := []Effect{
+		{
+			Kind: EffectRequestReview,
+			Payload: mustJSON(RequestReviewPayload{
+				Prompt:  "Approve this deployment?",
+				Context: json.RawMessage(`{"env":"prod"}`),
+			}),
+		},
+	}
+
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), node, effects)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !parked {
+		t.Fatal("expected parked=true")
+	}
+
+	if len(reviewRepo.created) != 1 {
+		t.Fatalf("expected 1 review create, got %d", len(reviewRepo.created))
+	}
+	r := reviewRepo.created[0]
+	if r.ExecutionID != exec.ID {
+		t.Errorf("ExecutionID = %s, want %s", r.ExecutionID, exec.ID)
+	}
+	if r.NodeID != "n-review" {
+		t.Errorf("NodeID = %q, want %q", r.NodeID, "n-review")
+	}
+	if r.ProjectID != exec.ProjectID {
+		t.Errorf("ProjectID = %s, want %s", r.ProjectID, exec.ProjectID)
+	}
+	if r.Prompt != "Approve this deployment?" {
+		t.Errorf("Prompt = %q, want %q", r.Prompt, "Approve this deployment?")
+	}
+	if r.Decision != model.ReviewDecisionPending {
+		t.Errorf("Decision = %q, want %q", r.Decision, model.ReviewDecisionPending)
+	}
+	if string(r.Context) != `{"env":"prod"}` {
+		t.Errorf("Context = %q, want %q", string(r.Context), `{"env":"prod"}`)
+	}
+}
+
+func TestApplier_RequestReview_NilReviewRepo_StillParks(t *testing.T) {
+	applier := &EffectApplier{ReviewRepo: nil}
+
+	exec := newExec()
+	effects := []Effect{
+		{
+			Kind:    EffectRequestReview,
+			Payload: mustJSON(RequestReviewPayload{Prompt: "review?"}),
+		},
+	}
+
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), &model.WorkflowNode{ID: "n"}, effects)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !parked {
+		t.Fatal("expected parked=true even with nil ReviewRepo")
+	}
+}
+
+func TestApplier_WaitEvent_BroadcastsAndParks(t *testing.T) {
+	hub := &fakeBroadcastHub{}
+	applier := &EffectApplier{Hub: hub}
+
+	exec := newExec()
+	node := &model.WorkflowNode{ID: "n-wait"}
+
+	effects := []Effect{
+		{
+			Kind: EffectWaitEvent,
+			Payload: mustJSON(WaitEventPayload{
+				EventType: "webhook.received",
+				MatchKey:  "order-123",
+			}),
+		},
+	}
+
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), node, effects)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !parked {
+		t.Fatal("expected parked=true")
+	}
+
+	if len(hub.calls) != 1 {
+		t.Fatalf("expected 1 broadcast, got %d", len(hub.calls))
+	}
+	call := hub.calls[0]
+	if call.eventType != "workflow.node.waiting" {
+		t.Errorf("eventType = %q, want %q", call.eventType, "workflow.node.waiting")
+	}
+	if call.projectID != exec.ProjectID.String() {
+		t.Errorf("projectID = %q, want %q", call.projectID, exec.ProjectID.String())
+	}
+	if call.payload["eventType"] != "webhook.received" {
+		t.Errorf("payload[eventType] = %v, want %q", call.payload["eventType"], "webhook.received")
+	}
+	if call.payload["matchKey"] != "order-123" {
+		t.Errorf("payload[matchKey] = %v, want %q", call.payload["matchKey"], "order-123")
+	}
+	if call.payload["nodeId"] != "n-wait" {
+		t.Errorf("payload[nodeId] = %v, want %q", call.payload["nodeId"], "n-wait")
+	}
+	if call.payload["executionId"] != exec.ID.String() {
+		t.Errorf("payload[executionId] = %v, want %q", call.payload["executionId"], exec.ID.String())
+	}
+}
+
+func TestApplier_WaitEvent_NilHub_StillParks(t *testing.T) {
+	applier := &EffectApplier{Hub: nil}
+
+	exec := newExec()
+	effects := []Effect{
+		{
+			Kind:    EffectWaitEvent,
+			Payload: mustJSON(WaitEventPayload{EventType: "webhook.received"}),
+		},
+	}
+
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), &model.WorkflowNode{ID: "n"}, effects)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !parked {
+		t.Fatal("expected parked=true even with nil Hub")
+	}
+}
+
+func TestApplier_InvokeSubWorkflow_StubParks(t *testing.T) {
+	applier := &EffectApplier{}
+
+	exec := newExec()
+	effects := []Effect{
+		{
+			Kind: EffectInvokeSubWorkflow,
+			Payload: mustJSON(InvokeSubWorkflowPayload{
+				WorkflowID: "wf-child",
+			}),
+		},
+	}
+
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), &model.WorkflowNode{ID: "n"}, effects)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !parked {
+		t.Fatal("expected parked=true for sub_workflow stub")
 	}
 }
 
