@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
 )
@@ -69,6 +70,7 @@ type TaskDispatchService struct {
 	runtime       DispatchRuntimeService
 	roleStore     roleReferenceRoleStore
 	hub           *ws.Hub
+	bus           eventbus.Publisher
 	notifications DispatchNotificationService
 	progress      *TaskProgressService
 	queueWriter   DispatchQueueWriter
@@ -81,6 +83,7 @@ func NewTaskDispatchService(
 	members DispatchMemberRepository,
 	runtime DispatchRuntimeService,
 	hub *ws.Hub,
+	bus eventbus.Publisher,
 	notifications DispatchNotificationService,
 	progress *TaskProgressService,
 ) *TaskDispatchService {
@@ -89,6 +92,7 @@ func NewTaskDispatchService(
 		members:       members,
 		runtime:       runtime,
 		hub:           hub,
+		bus:           bus,
 		notifications: notifications,
 		progress:      progress,
 	}
@@ -159,7 +163,7 @@ func (s *TaskDispatchService) Assign(ctx context.Context, taskID uuid.UUID, req 
 	if err != nil {
 		return nil, fmt.Errorf("fetch assigned task: %w", err)
 	}
-	s.broadcastTaskAssigned(updatedTask)
+	s.broadcastTaskAssigned(ctx, updatedTask)
 	s.recordProgress(ctx, updatedTask.ID, TaskActivityInput{
 		Source:       model.TaskProgressSourceTaskAssigned,
 		UpdateHealth: true,
@@ -260,7 +264,7 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 		}
 		if warning != nil && result != nil {
 			result.Dispatch.BudgetWarning = warning
-			s.broadcastBudgetWarning(task, warning)
+			s.broadcastBudgetWarning(ctx, task, warning)
 		}
 		if result != nil {
 			result.Dispatch = applyDispatchOutcomeContext(result.Dispatch, contextFields)
@@ -305,10 +309,10 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 				s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
 				return result, nil
 			}
-			result := s.queuedResult(task, entry, "agent pool is at capacity")
+			result := s.queuedResult(ctx, task, entry, "agent pool is at capacity")
 			if warning != nil {
 				result.Dispatch.BudgetWarning = warning
-				s.broadcastBudgetWarning(task, warning)
+				s.broadcastBudgetWarning(ctx, task, warning)
 			}
 			s.recordDispatchAttempt(ctx, task, &memberID, result.Dispatch, input.TriggerSource)
 			return result, nil
@@ -331,7 +335,7 @@ func (s *TaskDispatchService) spawnForTask(ctx context.Context, task *model.Task
 	}
 
 	if warning != nil {
-		s.broadcastBudgetWarning(task, warning)
+		s.broadcastBudgetWarning(ctx, task, warning)
 	}
 
 	result := &model.TaskDispatchResponse{
@@ -388,7 +392,7 @@ func (s *TaskDispatchService) blockedResult(ctx context.Context, task *model.Tas
 
 func (s *TaskDispatchService) blockedResultWithGuardrail(ctx context.Context, task *model.Task, reason string, guardrailType string, guardrailScope string) *model.TaskDispatchResponse {
 	if task != nil {
-		s.broadcastDispatchBlocked(task, reason, guardrailType, guardrailScope)
+		s.broadcastDispatchBlocked(ctx, task, reason, guardrailType, guardrailScope)
 		s.createBlockedNotification(ctx, task, reason)
 	}
 	taskDTO := model.TaskDTO{}
@@ -406,9 +410,9 @@ func (s *TaskDispatchService) blockedResultWithGuardrail(ctx context.Context, ta
 	}
 }
 
-func (s *TaskDispatchService) queuedResult(task *model.Task, entry *model.AgentPoolQueueEntry, reason string) *model.TaskDispatchResponse {
+func (s *TaskDispatchService) queuedResult(ctx context.Context, task *model.Task, entry *model.AgentPoolQueueEntry, reason string) *model.TaskDispatchResponse {
 	if task != nil {
-		s.broadcastDispatchQueued(task, entry, reason)
+		s.broadcastDispatchQueued(ctx, task, entry, reason)
 	}
 	taskDTO := model.TaskDTO{}
 	if task != nil {
@@ -430,58 +434,42 @@ func (s *TaskDispatchService) queuedResult(task *model.Task, entry *model.AgentP
 	}
 }
 
-func (s *TaskDispatchService) broadcastTaskAssigned(task *model.Task) {
-	if s.hub == nil || task == nil {
+func (s *TaskDispatchService) broadcastTaskAssigned(ctx context.Context, task *model.Task) {
+	if task == nil {
 		return
 	}
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskAssigned,
-		ProjectID: task.ProjectID.String(),
-		Payload:   task.ToDTO(),
-	})
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventTaskAssigned, task.ProjectID.String(), task.ToDTO())
 }
 
-func (s *TaskDispatchService) broadcastDispatchBlocked(task *model.Task, reason string, guardrailType string, guardrailScope string) {
-	if s.hub == nil || task == nil {
+func (s *TaskDispatchService) broadcastDispatchBlocked(ctx context.Context, task *model.Task, reason string, guardrailType string, guardrailScope string) {
+	if task == nil {
 		return
 	}
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskDispatchBlocked,
-		ProjectID: task.ProjectID.String(),
-		Payload: map[string]any{
-			"task": task.ToDTO(),
-			"dispatch": model.DispatchOutcome{
-				Status:         model.DispatchStatusBlocked,
-				Reason:         reason,
-				GuardrailType:  guardrailType,
-				GuardrailScope: guardrailScope,
-			},
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventTaskDispatchBlocked, task.ProjectID.String(), map[string]any{
+		"task": task.ToDTO(),
+		"dispatch": model.DispatchOutcome{
+			Status:         model.DispatchStatusBlocked,
+			Reason:         reason,
+			GuardrailType:  guardrailType,
+			GuardrailScope: guardrailScope,
 		},
 	})
 }
 
-func (s *TaskDispatchService) broadcastDispatchQueued(task *model.Task, entry *model.AgentPoolQueueEntry, reason string) {
-	if s.hub == nil || task == nil {
+func (s *TaskDispatchService) broadcastDispatchQueued(ctx context.Context, task *model.Task, entry *model.AgentPoolQueueEntry, reason string) {
+	if task == nil {
 		return
 	}
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventAgentQueued,
-		ProjectID: task.ProjectID.String(),
-		Payload: map[string]any{
-			"task": task.ToDTO(),
-			"dispatch": model.DispatchOutcome{
-				Status: model.DispatchStatusQueued,
-				Reason: reason,
-				Queue:  entry,
-			},
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventAgentQueued, task.ProjectID.String(), map[string]any{
+		"task": task.ToDTO(),
+		"dispatch": model.DispatchOutcome{
+			Status: model.DispatchStatusQueued,
+			Reason: reason,
+			Queue:  entry,
 		},
 	})
 	if provider, ok := s.runtime.(DispatchPoolStatsProvider); ok {
-		s.hub.BroadcastEvent(&ws.Event{
-			Type:      ws.EventAgentPoolUpdated,
-			ProjectID: task.ProjectID.String(),
-			Payload:   provider.PoolStats(context.Background()),
-		})
+		_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventAgentPoolUpdated, task.ProjectID.String(), provider.PoolStats(ctx))
 	}
 }
 
@@ -534,19 +522,15 @@ func checkTaskBudget(task *model.Task, requestedUSD float64) (*model.DispatchBud
 	return nil, nil
 }
 
-func (s *TaskDispatchService) broadcastBudgetWarning(task *model.Task, warning *model.DispatchBudgetWarning) {
-	if s.hub == nil || task == nil || warning == nil {
+func (s *TaskDispatchService) broadcastBudgetWarning(ctx context.Context, task *model.Task, warning *model.DispatchBudgetWarning) {
+	if task == nil || warning == nil {
 		return
 	}
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventBudgetWarning,
-		ProjectID: task.ProjectID.String(),
-		Payload: map[string]any{
-			"taskId":    task.ID.String(),
-			"projectId": task.ProjectID.String(),
-			"scope":     warning.Scope,
-			"message":   warning.Message,
-		},
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventBudgetWarning, task.ProjectID.String(), map[string]any{
+		"taskId":    task.ID.String(),
+		"projectId": task.ProjectID.String(),
+		"scope":     warning.Scope,
+		"message":   warning.Message,
 	})
 }
 

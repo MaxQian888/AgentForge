@@ -13,6 +13,7 @@ import (
 
 	"github.com/google/uuid"
 	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/pool"
 	"github.com/react-go-quick-starter/server/internal/repository"
@@ -77,14 +78,6 @@ type BridgePauseResponse = bridgeclient.PauseResponse
 type BridgeResumeResponse = bridgeclient.ResumeResponse
 
 type QueueAgentAdmissionInput = repository.QueueAgentAdmissionRecord
-
-// AgentEventRepository defines persistence for agent lifecycle events.
-type AgentEventRepository interface {
-	Create(ctx context.Context, event *model.AgentEvent) error
-	ListByRunID(ctx context.Context, runID uuid.UUID, limit int) ([]*model.AgentEvent, error)
-	ListByTaskID(ctx context.Context, taskID uuid.UUID, limit int) ([]*model.AgentEvent, error)
-	ListByProjectID(ctx context.Context, projectID uuid.UUID, limit int) ([]*model.AgentEvent, error)
-}
 
 // SprintCostUpdater rolls up task costs to sprint level.
 type SprintCostUpdater interface {
@@ -157,6 +150,7 @@ type AgentService struct {
 	taskRepo              AgentTaskRepository
 	projects              AgentProjectRepository
 	hub                   *ws.Hub
+	bus                   eventbus.Publisher
 	bridge                BridgeClient
 	bridgeHealth          *BridgeHealthService
 	worktrees             WorktreeManager
@@ -176,7 +170,6 @@ type AgentService struct {
 	bridgeActivityWaiters map[uuid.UUID][]chan struct{}
 	budgetAlertMu         sync.Mutex
 	lastBudgetAlertByRun  map[uuid.UUID]int
-	eventRepo             AgentEventRepository
 	sprintCostUp          SprintCostUpdater
 	automation            AutomationEventEvaluator
 	budgetCheck           DispatchBudgetChecker
@@ -218,6 +211,7 @@ func NewAgentService(
 	taskRepo AgentTaskRepository,
 	projects AgentProjectRepository,
 	hub *ws.Hub,
+	bus eventbus.Publisher,
 	bridge BridgeClient,
 	worktrees WorktreeManager,
 	roleStore ...AgentRoleStore,
@@ -231,6 +225,7 @@ func NewAgentService(
 		taskRepo:              taskRepo,
 		projects:              projects,
 		hub:                   hub,
+		bus:                   bus,
 		bridge:                bridge,
 		worktrees:             worktrees,
 		roleStore:             roles,
@@ -293,10 +288,6 @@ func (s *AgentService) SetDAGWorkflowService(ds *DAGWorkflowService) {
 
 func (s *AgentService) SetMemoryService(ms *MemoryService) {
 	s.memorySvc = ms
-}
-
-func (s *AgentService) SetEventRepository(repo AgentEventRepository) {
-	s.eventRepo = repo
 }
 
 func (s *AgentService) SetSprintCostUpdater(up SprintCostUpdater) {
@@ -497,12 +488,7 @@ func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uu
 
 	run.Status = model.AgentRunStatusRunning
 	log.WithFields(spawnFields).Info("agent spawn started bridge runtime")
-	s.broadcastEvent(ws.EventAgentStarted, task.ProjectID.String(), run.ToDTO())
-	s.emitEvent(ctx, run, task.ProjectID, model.AgentEventSpawn, map[string]any{
-		"runtime": selection.Runtime, "provider": selection.Provider, "model": selection.Model,
-		"budgetUsd": budgetUsd, "roleId": resolvedRoleID,
-	})
-	s.emitEvent(ctx, run, task.ProjectID, model.AgentEventRunning, nil)
+	s.broadcastEvent(ctx, ws.EventAgentStarted, task.ProjectID.String(), run.ToDTO())
 	s.recordProgress(ctx, taskID, TaskActivityInput{
 		Source:       model.TaskProgressSourceAgentStarted,
 		OccurredAt:   run.StartedAt,
@@ -539,25 +525,6 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 	run.Status = status
 	log.WithFields(fields).Info("agent status updated")
 
-	// Emit persistent audit event for status change.
-	if projectID := s.lookupProjectID(ctx, run.TaskID); projectID != "" {
-		pid, _ := uuid.Parse(projectID)
-		agentEventType := status // map run status to event type
-		switch status {
-		case model.AgentRunStatusCompleted:
-			agentEventType = model.AgentEventCompleted
-		case model.AgentRunStatusFailed:
-			agentEventType = model.AgentEventFailed
-		case model.AgentRunStatusCancelled:
-			agentEventType = model.AgentEventCancelled
-		case model.AgentRunStatusBudgetExceeded:
-			agentEventType = model.AgentEventBudgetExceeded
-		case model.AgentRunStatusRunning:
-			agentEventType = model.AgentEventRunning
-		}
-		s.emitEvent(ctx, run, pid, agentEventType, map[string]any{"previousStatus": fields["nextStatus"]})
-	}
-
 	eventType := ws.EventAgentProgress
 	switch status {
 	case model.AgentRunStatusCompleted:
@@ -589,7 +556,7 @@ func (s *AgentService) UpdateStatus(ctx context.Context, id uuid.UUID, status st
 		}
 	}
 
-	s.broadcastEvent(eventType, s.lookupProjectID(ctx, run.TaskID), run.ToDTO())
+	s.broadcastEvent(ctx, eventType, s.lookupProjectID(ctx, run.TaskID), run.ToDTO())
 	s.recordProgress(ctx, run.TaskID, TaskActivityInput{
 		Source:       model.TaskProgressSourceAgentStatus,
 		UpdateHealth: true,
@@ -649,13 +616,6 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 	costFields["updatedTaskSpentUsd"] = updatedTask.SpentUsd
 	log.WithFields(costFields).Info("agent cost updated")
 
-	// Emit cost_update audit event.
-	s.emitEvent(ctx, run, updatedTask.ProjectID, model.AgentEventCostUpdate, map[string]any{
-		"inputTokens": inputTokens, "outputTokens": outputTokens, "costUsd": costUsd, "turnCount": turnCount,
-		"taskSpentUsd": totalSpent, "taskBudgetUsd": task.BudgetUsd,
-		"costAccounting": costAccounting,
-	})
-
 	// Roll up task costs to sprint.
 	if s.sprintCostUp != nil && updatedTask.SprintID != nil {
 		sprintTotal, err := s.sprintCostUp.SumTaskSpent(ctx, *updatedTask.SprintID)
@@ -664,8 +624,8 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 		}
 	}
 
-	s.broadcastEvent(ws.EventAgentCostUpdate, updatedTask.ProjectID.String(), run.ToDTO())
-	s.broadcastEvent(ws.EventTaskUpdated, updatedTask.ProjectID.String(), updatedTask.ToDTO())
+	s.broadcastEvent(ctx, ws.EventAgentCostUpdate, updatedTask.ProjectID.String(), run.ToDTO())
+	s.broadcastEvent(ctx, ws.EventTaskUpdated, updatedTask.ProjectID.String(), updatedTask.ToDTO())
 
 	if task.BudgetUsd > 0 {
 		previousRatio := task.SpentUsd / task.BudgetUsd
@@ -673,7 +633,7 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 
 		if previousRatio < 0.8 && currentRatio >= 0.8 && currentRatio < 1 {
 			log.WithFields(costFields).WithField("budgetPercent", currentRatio*100).Warn("agent cost crossed budget warning threshold")
-			s.broadcastBudgetEvent(ws.EventBudgetWarning, updatedTask, currentRatio*100)
+			s.broadcastBudgetEvent(ctx, ws.EventBudgetWarning, updatedTask, currentRatio*100)
 			s.notifyIMBudgetAlert(ctx, run, updatedTask, currentRatio*100)
 			if s.automation != nil {
 				taskID := updatedTask.ID
@@ -697,7 +657,7 @@ func (s *AgentService) UpdateCost(ctx context.Context, id uuid.UUID, inputTokens
 				_ = s.bridge.Cancel(ctx, run.TaskID.String(), "budget_exceeded")
 			}
 			log.WithFields(costFields).WithField("budgetPercent", currentRatio*100).Warn("agent cost crossed budget exceeded threshold")
-			s.broadcastBudgetEvent(ws.EventBudgetExceeded, updatedTask, currentRatio*100)
+			s.broadcastBudgetEvent(ctx, ws.EventBudgetExceeded, updatedTask, currentRatio*100)
 			if s.automation != nil {
 				taskID := updatedTask.ID
 				_ = s.automation.EvaluateRules(ctx, AutomationEvent{
@@ -753,7 +713,7 @@ func (s *AgentService) sumTaskRunCost(ctx context.Context, taskID uuid.UUID) (fl
 	return total, nil
 }
 
-func (s *AgentService) broadcastBudgetEvent(eventType string, task *model.Task, percent float64) {
+func (s *AgentService) broadcastBudgetEvent(ctx context.Context, eventType string, task *model.Task, percent float64) {
 	if task == nil {
 		return
 	}
@@ -765,7 +725,7 @@ func (s *AgentService) broadcastBudgetEvent(eventType string, task *model.Task, 
 	if eventType == ws.EventBudgetWarning {
 		payload["percent"] = percent
 	}
-	s.broadcastEvent(eventType, task.ProjectID.String(), payload)
+	s.broadcastEvent(ctx, eventType, task.ProjectID.String(), payload)
 }
 
 // GetByID returns an agent run by ID.
@@ -773,41 +733,16 @@ func (s *AgentService) GetByID(ctx context.Context, id uuid.UUID) (*model.AgentR
 	return s.runRepo.GetByID(ctx, id)
 }
 
-// GetLogs returns log entries for an agent run sourced from persistent agent events.
-// Falls back to synthetic reconstruction from run record when event repo is unavailable.
+// GetLogs returns log entries for an agent run. Since the eventbus persist
+// mod writes lifecycle events via a separate pipeline, GetLogs now reconstructs
+// a synthetic log feed from the run record (status + errors + completion).
 func (s *AgentService) GetLogs(ctx context.Context, id uuid.UUID) ([]model.AgentLogEntry, error) {
 	run, err := s.runRepo.GetByID(ctx, id)
 	if err != nil {
 		return nil, ErrAgentNotFound
 	}
 
-	// Use persistent events if available.
-	if s.eventRepo != nil {
-		events, err := s.eventRepo.ListByRunID(ctx, id, 200)
-		if err == nil && len(events) > 0 {
-			logs := make([]model.AgentLogEntry, 0, len(events))
-			for _, e := range events {
-				logType := "status"
-				if e.EventType == model.AgentEventFailed || e.EventType == model.AgentEventBudgetExceeded {
-					logType = "error"
-				} else if e.EventType == model.AgentEventCostUpdate {
-					logType = "cost"
-				}
-				content := fmt.Sprintf("Event: %s", e.EventType)
-				if e.Payload != "" && e.Payload != "{}" {
-					content = fmt.Sprintf("Event: %s | %s", e.EventType, e.Payload)
-				}
-				logs = append(logs, model.AgentLogEntry{
-					Timestamp: e.OccurredAt.Format(time.RFC3339),
-					Content:   content,
-					Type:      logType,
-				})
-			}
-			return logs, nil
-		}
-	}
-
-	// Fallback: synthetic reconstruction from run record.
+	// Synthetic reconstruction from run record.
 	var logs []model.AgentLogEntry
 	logs = append(logs, model.AgentLogEntry{
 		Timestamp: run.StartedAt.Format(time.RFC3339),
@@ -1014,7 +949,7 @@ func (s *AgentService) CancelQueueEntry(ctx context.Context, projectID uuid.UUID
 	entry.AgentRunID = nil
 	entry.UpdatedAt = time.Now().UTC()
 
-	s.broadcastEvent(ws.EventAgentQueueCancelled, entry.ProjectID, map[string]any{
+	s.broadcastEvent(ctx, ws.EventAgentQueueCancelled, entry.ProjectID, map[string]any{
 		"entryId":   entry.EntryID,
 		"taskId":    entry.TaskID,
 		"memberId":  entry.MemberID,
@@ -1282,7 +1217,7 @@ func (s *AgentService) failSpawn(ctx context.Context, run *model.AgentRun, task 
 	if allocation != nil && !allocation.Reused && s.worktrees != nil {
 		_ = s.worktrees.Release(ctx, projectSlug, task.ID.String())
 	}
-	s.broadcastEvent(ws.EventAgentFailed, task.ProjectID.String(), run.ToDTO())
+	s.broadcastEvent(ctx, ws.EventAgentFailed, task.ProjectID.String(), run.ToDTO())
 	return nil
 }
 
@@ -1357,8 +1292,7 @@ func (s *AgentService) pauseRun(ctx context.Context, run *model.AgentRun) error 
 	run.Status = model.AgentRunStatusPaused
 	log.WithFields(agentRunLogFields(run)).WithField("sessionId", sessionID).Info("agent runtime paused")
 	s.releasePoolSlot(run.ID.String())
-	s.broadcastEvent(ws.EventAgentProgress, s.lookupProjectID(ctx, run.TaskID), run.ToDTO())
-	s.emitEvent(ctx, run, task.ProjectID, model.AgentEventPaused, nil)
+	s.broadcastEvent(ctx, ws.EventAgentProgress, s.lookupProjectID(ctx, run.TaskID), run.ToDTO())
 	return nil
 }
 
@@ -1421,8 +1355,7 @@ func (s *AgentService) resumeRun(ctx context.Context, run *model.AgentRun) error
 	}
 	run.Status = model.AgentRunStatusRunning
 	log.WithFields(agentRunLogFields(run)).WithField("sessionId", sessionID).Info("agent runtime resumed")
-	s.broadcastEvent(ws.EventAgentProgress, s.lookupProjectID(ctx, run.TaskID), run.ToDTO())
-	s.emitEvent(ctx, run, task.ProjectID, model.AgentEventResumed, nil)
+	s.broadcastEvent(ctx, ws.EventAgentProgress, s.lookupProjectID(ctx, run.TaskID), run.ToDTO())
 	return nil
 }
 
@@ -1437,15 +1370,8 @@ func (s *AgentService) lookupProjectID(ctx context.Context, taskID uuid.UUID) st
 	return task.ProjectID.String()
 }
 
-func (s *AgentService) broadcastEvent(eventType, projectID string, payload any) {
-	if s.hub == nil {
-		return
-	}
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      eventType,
-		ProjectID: projectID,
-		Payload:   payload,
-	})
+func (s *AgentService) broadcastEvent(ctx context.Context, eventType, projectID string, payload any) {
+	_ = eventbus.PublishLegacy(ctx, s.bus, eventType, projectID, payload)
 }
 
 func (s *AgentService) recordProgress(ctx context.Context, taskID uuid.UUID, input TaskActivityInput) {
@@ -1652,35 +1578,6 @@ func (s *AgentService) releasePoolSlot(runID string) {
 	_ = s.pool.Release(runID)
 }
 
-// emitEvent persists an agent lifecycle event for audit purposes.
-func (s *AgentService) emitEvent(ctx context.Context, run *model.AgentRun, projectID uuid.UUID, eventType string, payload map[string]any) {
-	if s.eventRepo == nil || run == nil {
-		return
-	}
-	payloadJSON := "{}"
-	if payload != nil {
-		if b, err := json.Marshal(payload); err == nil {
-			payloadJSON = string(b)
-		}
-	}
-	event := &model.AgentEvent{
-		ID:         uuid.New(),
-		RunID:      run.ID,
-		TaskID:     run.TaskID,
-		ProjectID:  projectID,
-		EventType:  eventType,
-		Payload:    payloadJSON,
-		OccurredAt: time.Now().UTC(),
-		CreatedAt:  time.Now().UTC(),
-	}
-	if err := s.eventRepo.Create(ctx, event); err != nil {
-		log.WithFields(log.Fields{
-			"runId":     run.ID.String(),
-			"eventType": eventType,
-		}).WithError(err).Warn("failed to persist agent event")
-	}
-}
-
 // injectMemoryContext retrieves project memory and returns it as system prompt context.
 func (s *AgentService) injectMemoryContext(ctx context.Context, projectID uuid.UUID, roleID string) string {
 	if s.memorySvc == nil {
@@ -1701,7 +1598,7 @@ func (s *AgentService) broadcastPoolStats(ctx context.Context, projectID string)
 	if projectID == "" {
 		return
 	}
-	s.broadcastEvent(ws.EventAgentPoolUpdated, projectID, s.PoolStats(ctx))
+	s.broadcastEvent(ctx, ws.EventAgentPoolUpdated, projectID, s.PoolStats(ctx))
 }
 
 func (s *AgentService) findQueueEntry(ctx context.Context, projectID uuid.UUID, entryID string) (*model.AgentPoolQueueEntry, error) {
@@ -1864,7 +1761,7 @@ func (s *AgentService) promoteQueuedAdmission(ctx context.Context, completedRun 
 		"taskId":         entry.TaskID,
 		"promotedRunId":  run.ID.String(),
 	}).Info("queued agent admission promoted")
-	s.broadcastEvent(ws.EventAgentQueuePromoted, task.ProjectID.String(), map[string]any{
+	s.broadcastEvent(ctx, ws.EventAgentQueuePromoted, task.ProjectID.String(), map[string]any{
 		"queue": entry,
 		"run":   run.ToDTO(),
 	})
@@ -1943,8 +1840,8 @@ func (s *AgentService) completePromotionRecoverable(ctx context.Context, task *m
 	s.completePromotionEntry(ctx, entry, model.AgentPoolQueueStatusQueued, outcome.Reason, nil, outcome.GuardrailType, outcome.GuardrailScope, model.QueueRecoveryDispositionRecoverable)
 	outcome.Queue = entry
 	s.recordPromotionDispatchAttempt(ctx, task, entry, outcome)
-	s.broadcastEvent(ws.EventTaskDispatchBlocked, task.ProjectID.String(), map[string]any{
-		"queue": entry,
+	s.broadcastEvent(ctx, ws.EventTaskDispatchBlocked, task.ProjectID.String(), map[string]any{
+		"queue":    entry,
 		"dispatch": outcome,
 	})
 }
@@ -1953,7 +1850,7 @@ func (s *AgentService) completePromotionTerminal(ctx context.Context, task *mode
 	s.completePromotionEntry(ctx, entry, model.AgentPoolQueueStatusFailed, outcome.Reason, nil, outcome.GuardrailType, outcome.GuardrailScope, model.QueueRecoveryDispositionTerminal)
 	outcome.Queue = entry
 	s.recordPromotionDispatchAttempt(ctx, task, entry, outcome)
-	s.broadcastEvent(ws.EventAgentQueueFailed, task.ProjectID.String(), map[string]any{
+	s.broadcastEvent(ctx, ws.EventAgentQueueFailed, task.ProjectID.String(), map[string]any{
 		"queue": entry,
 		"error": outcome.Reason,
 	})
@@ -2081,7 +1978,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		eventFields["turnNumber"] = payload.TurnNumber
 		eventFields["contentType"] = payload.ContentType
 		log.WithFields(eventFields).Debug("bridge output event received")
-		s.broadcastEvent(ws.EventAgentOutput, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentOutput, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":     run.ID.String(),
 			"task_id":      run.TaskID.String(),
 			"session_id":   event.SessionID,
@@ -2165,7 +2062,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		eventFields["errorMessage"] = payload.Message
 		eventFields["retryable"] = payload.Retryable
 		log.WithFields(eventFields).Warn("bridge error event received")
-		s.broadcastEvent(ws.EventAgentFailed, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentFailed, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":   run.ID.String(),
 			"task_id":    run.TaskID.String(),
 			"session_id": event.SessionID,
@@ -2187,7 +2084,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		eventFields["requestId"] = payload.RequestID
 		eventFields["toolName"] = payload.ToolName
 		log.WithFields(eventFields).Info("bridge permission request event received")
-		s.broadcastEvent(ws.EventAgentPermissionRequest, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentPermissionRequest, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":         run.ID.String(),
 			"task_id":          run.TaskID.String(),
 			"session_id":       event.SessionID,
@@ -2208,7 +2105,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 			return fmt.Errorf("decode bridge tool_call payload: %w", err)
 		}
 		log.WithFields(eventFields).Debug("bridge tool_call event received")
-		s.broadcastEvent(ws.EventAgentToolCall, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentToolCall, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":     run.ID.String(),
 			"task_id":      run.TaskID.String(),
 			"session_id":   event.SessionID,
@@ -2226,7 +2123,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 			return fmt.Errorf("decode bridge tool_result payload: %w", err)
 		}
 		log.WithFields(eventFields).Debug("bridge tool_result event received")
-		s.broadcastEvent(ws.EventAgentToolResult, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentToolResult, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":     run.ID.String(),
 			"task_id":      run.TaskID.String(),
 			"session_id":   event.SessionID,
@@ -2241,7 +2138,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 
 	case ws.BridgeEventReasoning:
 		log.WithFields(eventFields).Debug("bridge reasoning event received")
-		s.broadcastEvent(ws.EventAgentReasoning, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentReasoning, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":   run.ID.String(),
 			"task_id":    run.TaskID.String(),
 			"session_id": event.SessionID,
@@ -2252,7 +2149,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 
 	case ws.BridgeEventFileChange:
 		log.WithFields(eventFields).Debug("bridge file_change event received")
-		s.broadcastEvent(ws.EventAgentFileChange, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentFileChange, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":   run.ID.String(),
 			"task_id":    run.TaskID.String(),
 			"session_id": event.SessionID,
@@ -2263,7 +2160,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 
 	case ws.BridgeEventTodoUpdate:
 		log.WithFields(eventFields).Debug("bridge todo_update event received")
-		s.broadcastEvent(ws.EventAgentTodoUpdate, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentTodoUpdate, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":   run.ID.String(),
 			"task_id":    run.TaskID.String(),
 			"session_id": event.SessionID,
@@ -2274,7 +2171,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 
 	case ws.BridgeEventProgress:
 		log.WithFields(eventFields).Debug("bridge progress event received")
-		s.broadcastEvent(ws.EventAgentProgress, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentProgress, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":   run.ID.String(),
 			"task_id":    run.TaskID.String(),
 			"session_id": event.SessionID,
@@ -2290,7 +2187,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 
 	case ws.BridgeEventRateLimit:
 		log.WithFields(eventFields).Warn("bridge rate_limit event received")
-		s.broadcastEvent(ws.EventAgentRateLimit, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentRateLimit, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":   run.ID.String(),
 			"task_id":    run.TaskID.String(),
 			"session_id": event.SessionID,
@@ -2300,7 +2197,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 		return nil
 
 	case ws.BridgeEventPartialMessage:
-		s.broadcastEvent(ws.EventAgentPartialMessage, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentPartialMessage, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":   run.ID.String(),
 			"task_id":    run.TaskID.String(),
 			"session_id": event.SessionID,
@@ -2311,7 +2208,7 @@ func (s *AgentService) ProcessBridgeEvent(ctx context.Context, event *ws.BridgeA
 
 	case ws.BridgeEventSnapshot:
 		log.WithFields(eventFields).Debug("bridge snapshot event received")
-		s.broadcastEvent(ws.EventAgentSnapshot, s.lookupProjectID(ctx, run.TaskID), map[string]any{
+		s.broadcastEvent(ctx, ws.EventAgentSnapshot, s.lookupProjectID(ctx, run.TaskID), map[string]any{
 			"agent_id":   run.ID.String(),
 			"task_id":    run.TaskID.String(),
 			"session_id": event.SessionID,
