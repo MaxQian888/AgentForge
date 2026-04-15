@@ -1425,3 +1425,50 @@ func TestNormalizeCardActionRequest_MultiSelectPersonFallback(t *testing.T) {
 		t.Errorf("selected_options = %q", req.Metadata["selected_options"])
 	}
 }
+
+func TestNormalizeCardActionRequest_InputWithActionRef(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:        "input",
+				InputValue: "please reconsider",
+				Value:      map[string]interface{}{"action": "act:input_submit:task-xyz"},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Action != core.ActionNameInputSubmit {
+		t.Errorf("Action = %q, want input_submit", req.Action)
+	}
+	if req.EntityID != "task-xyz" {
+		t.Errorf("EntityID = %q, want task-xyz", req.EntityID)
+	}
+	if req.Metadata["input_value"] != "please reconsider" {
+		t.Errorf("input_value = %q", req.Metadata["input_value"])
+	}
+}
+
+func TestNormalizeCardActionRequest_InputWithoutActionRefIsIgnored(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:        "input",
+				InputValue: "typed text",
+				Value:      map[string]interface{}{},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	_, err := normalizeCardActionRequest(event)
+	if !errors.Is(err, errIgnoreCardAction) {
+		t.Fatalf("err = %v, want errIgnoreCardAction", err)
+	}
+}

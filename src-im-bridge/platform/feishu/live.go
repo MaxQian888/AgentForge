@@ -819,6 +819,15 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 		case "checker":
 			action = core.ActionNameToggle
 			entityID = ""
+		case "input":
+			action = core.ActionNameInputSubmit
+			if parsedAction, parsedEntity, parsedMeta, parsedOK := core.ParseActionReferenceWithMetadata(actionValue); parsedOK {
+				_ = parsedAction
+				entityID = parsedEntity
+				actionMetadata = parsedMeta
+			} else {
+				return nil, errIgnoreCardAction
+			}
 		default:
 			// Check if form values carry an action reference.
 			if formAction, formOk := formValues["action"]; formOk {
@@ -842,6 +851,11 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 	// kind of interaction occurred.
 	if actionTag == "multi_select_static" || actionTag == "multi_select_person" {
 		action = core.ActionNameMultiSelect
+	}
+	// Input elements always map to the input_submit action regardless of the
+	// parsed action reference — the tag is the authoritative signal.
+	if actionTag == "input" {
+		action = core.ActionNameInputSubmit
 	}
 
 	chatID := ""
@@ -879,6 +893,9 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 	}
 	if selectedTime != "" {
 		metadata["selected_time"] = selectedTime
+	}
+	if strings.TrimSpace(act.InputValue) != "" {
+		metadata["input_value"] = strings.TrimSpace(act.InputValue)
 	}
 	for k, v := range formValues {
 		metadata["form_"+k] = v
