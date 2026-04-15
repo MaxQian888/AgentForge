@@ -4,8 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"strconv"
-	"strings"
 	"time"
 
 	"github.com/google/uuid"
@@ -262,7 +260,7 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 					allPredCompleted = false
 					break
 				}
-				if edge.Condition != "" && !s.evaluateCondition(exec, edge.Condition, dataStore) {
+				if edge.Condition != "" && !nodetypes.EvaluateCondition(ctx, exec, edge.Condition, dataStore, s.taskRepo) {
 					allPredCompleted = false
 					break
 				}
@@ -613,12 +611,12 @@ func (s *DAGWorkflowService) executeStatusTransition(ctx context.Context, exec *
 }
 
 // executeCondition evaluates a condition expression.
-func (s *DAGWorkflowService) executeCondition(_ context.Context, exec *model.WorkflowExecution, _ *model.WorkflowNode, config map[string]any, dataStore map[string]any) error {
+func (s *DAGWorkflowService) executeCondition(ctx context.Context, exec *model.WorkflowExecution, _ *model.WorkflowNode, config map[string]any, dataStore map[string]any) error {
 	expression, _ := config["expression"].(string)
 	if expression == "" {
 		return nil // No condition = pass through
 	}
-	if !s.evaluateCondition(exec, expression, dataStore) {
+	if !nodetypes.EvaluateCondition(ctx, exec, expression, dataStore, s.taskRepo) {
 		return fmt.Errorf("condition not met: %s", expression)
 	}
 	return nil
@@ -655,7 +653,7 @@ func (s *DAGWorkflowService) executeLoop(ctx context.Context, exec *model.Workfl
 		}).Info("workflow: loop max iterations reached")
 		return nil // Exit loop, continue DAG
 	}
-	if exitCondition != "" && s.evaluateCondition(exec, exitCondition, dataStore) {
+	if exitCondition != "" && nodetypes.EvaluateCondition(ctx, exec, exitCondition, dataStore, s.taskRepo) {
 		log.WithFields(log.Fields{
 			"nodeId":    node.ID,
 			"iteration": currentIter,
@@ -870,98 +868,6 @@ func resolveMapValues(m map[string]any, dataStore map[string]any) {
 			resolveMapValues(val, dataStore)
 		}
 	}
-}
-
-// evaluateCondition evaluates a condition expression against execution context and DataStore.
-func (s *DAGWorkflowService) evaluateCondition(exec *model.WorkflowExecution, expression string, dataStore map[string]any) bool {
-	expression = strings.TrimSpace(expression)
-	if expression == "" || expression == "true" {
-		return true
-	}
-	if expression == "false" {
-		return false
-	}
-
-	// Resolve template variables first
-	expression = nodetypes.ResolveTemplateVars(expression, dataStore)
-
-	// Re-check after resolution
-	expression = strings.TrimSpace(expression)
-	if expression == "true" {
-		return true
-	}
-	if expression == "false" {
-		return false
-	}
-
-	// Comparison operators: ==, !=, >, <, >=, <=
-	for _, op := range []string{"==", "!=", ">=", "<=", ">", "<"} {
-		if strings.Contains(expression, op) {
-			parts := strings.SplitN(expression, op, 2)
-			if len(parts) == 2 {
-				left := strings.TrimSpace(parts[0])
-				right := strings.Trim(strings.TrimSpace(parts[1]), "\"'")
-
-				// Resolve left side: e.g., "task.status"
-				if strings.HasPrefix(left, "task.status") && exec.TaskID != nil && s.taskRepo != nil {
-					task, err := s.taskRepo.GetByID(context.Background(), *exec.TaskID)
-					if err == nil {
-						left = task.Status
-					}
-				}
-				// Try resolving left as DataStore path
-				if val := nodetypes.LookupPath(dataStore, left); val != nil {
-					left = fmt.Sprintf("%v", val)
-				}
-
-				return compareValues(left, op, right)
-			}
-		}
-	}
-
-	log.WithField("expression", expression).Warn("workflow: unrecognized condition, defaulting to true")
-	return true
-}
-
-// compareValues compares two string values using the given operator.
-func compareValues(left, op, right string) bool {
-	// Try numeric comparison
-	leftNum, leftErr := strconv.ParseFloat(left, 64)
-	rightNum, rightErr := strconv.ParseFloat(right, 64)
-
-	if leftErr == nil && rightErr == nil {
-		switch op {
-		case "==":
-			return leftNum == rightNum
-		case "!=":
-			return leftNum != rightNum
-		case ">":
-			return leftNum > rightNum
-		case "<":
-			return leftNum < rightNum
-		case ">=":
-			return leftNum >= rightNum
-		case "<=":
-			return leftNum <= rightNum
-		}
-	}
-
-	// String comparison
-	switch op {
-	case "==":
-		return left == right
-	case "!=":
-		return left != right
-	case ">":
-		return left > right
-	case "<":
-		return left < right
-	case ">=":
-		return left >= right
-	case "<=":
-		return left <= right
-	}
-	return false
 }
 
 // ---------------------------------------------------------------------------

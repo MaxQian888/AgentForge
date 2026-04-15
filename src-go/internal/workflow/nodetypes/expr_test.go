@@ -1,8 +1,12 @@
 package nodetypes
 
 import (
+	"context"
 	"strings"
 	"testing"
+
+	"github.com/google/uuid"
+	"github.com/react-go-quick-starter/server/internal/model"
 )
 
 func TestResolveTemplateVars(t *testing.T) {
@@ -149,5 +153,128 @@ func TestResolveAndEvaluate_Composes(t *testing.T) {
 	}
 	if !strings.HasPrefix(resolved, "len(") {
 		t.Errorf("expected resolved to remain %q-like, got %q", "len(items)", resolved)
+	}
+}
+
+// fakeTaskRepo satisfies ConditionTaskResolver for testing task.status lookups.
+type fakeTaskRepo struct {
+	status string
+	called bool
+}
+
+func (f *fakeTaskRepo) GetByID(_ context.Context, _ uuid.UUID) (*model.Task, error) {
+	f.called = true
+	return &model.Task{Status: f.status}, nil
+}
+
+func TestEvaluateCondition(t *testing.T) {
+	ctx := context.Background()
+	taskID := uuid.New()
+	exec := &model.WorkflowExecution{TaskID: &taskID}
+	dsCount := map[string]any{
+		"input": map[string]any{"count": float64(10)},
+	}
+
+	tests := []struct {
+		name       string
+		expression string
+		ds         map[string]any
+		repo       ConditionTaskResolver
+		exec       *model.WorkflowExecution
+		want       bool
+	}{
+		{"empty → true", "", nil, nil, exec, true},
+		{"literal true", "true", nil, nil, exec, true},
+		{"literal false", "false", nil, nil, exec, false},
+		{"literal true with whitespace", "  true  ", nil, nil, exec, true},
+		{"numeric ==", "5 == 5", nil, nil, exec, true},
+		{"numeric !=", "5 != 6", nil, nil, exec, true},
+		{"numeric >", "10 > 5", nil, nil, exec, true},
+		{"numeric <", "5 < 10", nil, nil, exec, true},
+		{"numeric >=", "10 >= 10", nil, nil, exec, true},
+		{"numeric <=", "5 <= 10", nil, nil, exec, true},
+		// Note: existing implementation strips quotes from RHS only; LHS is
+		// looked up via DataStore/task.status. So a literal-vs-literal string
+		// comparison only matches if the LHS is unquoted.
+		{"string == (unquoted lhs)", `hi == "hi"`, nil, nil, exec, true},
+		{"string != (unquoted lhs)", `hi != "bye"`, nil, nil, exec, true},
+		{"template var resolution",
+			"{{input.count}} > 5",
+			dsCount, nil, exec, true},
+		{"template var resolution false branch",
+			"{{input.count}} < 5",
+			dsCount, nil, exec, false},
+		{"unrecognized → true (no panic)",
+			"some random expression with no operator",
+			nil, nil, exec, true},
+	}
+
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := EvaluateCondition(ctx, tc.exec, tc.expression, tc.ds, tc.repo)
+			if got != tc.want {
+				t.Errorf("EvaluateCondition(%q) = %v, want %v", tc.expression, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestEvaluateCondition_TaskStatus(t *testing.T) {
+	ctx := context.Background()
+	taskID := uuid.New()
+	exec := &model.WorkflowExecution{TaskID: &taskID}
+
+	repo := &fakeTaskRepo{status: "done"}
+	got := EvaluateCondition(ctx, exec, `task.status == "done"`, nil, repo)
+	if !got {
+		t.Errorf("EvaluateCondition(task.status == done) = false, want true")
+	}
+	if !repo.called {
+		t.Errorf("expected taskRepo.GetByID to be called")
+	}
+
+	repo2 := &fakeTaskRepo{status: "in_progress"}
+	got = EvaluateCondition(ctx, exec, `task.status == "done"`, nil, repo2)
+	if got {
+		t.Errorf("EvaluateCondition(in_progress vs done) = true, want false")
+	}
+}
+
+func TestEvaluateCondition_NilRepoIsSafe(t *testing.T) {
+	ctx := context.Background()
+	taskID := uuid.New()
+	exec := &model.WorkflowExecution{TaskID: &taskID}
+
+	// With no repo, task.status falls through to LookupPath (which returns nil),
+	// so the left side stays the literal "task.status" and compares unequally.
+	got := EvaluateCondition(ctx, exec, `task.status == "done"`, nil, nil)
+	if got {
+		t.Errorf("EvaluateCondition with nil repo should be false (literal vs done), got true")
+	}
+}
+
+func TestCompareValues(t *testing.T) {
+	tests := []struct {
+		name           string
+		left, op, right string
+		want           bool
+	}{
+		{"numeric ==", "5", "==", "5", true},
+		{"numeric != true", "5", "!=", "6", true},
+		{"numeric >", "10", ">", "5", true},
+		{"numeric <", "5", "<", "10", true},
+		{"numeric >= eq", "5", ">=", "5", true},
+		{"numeric <= eq", "5", "<=", "5", true},
+		{"string ==", "hi", "==", "hi", true},
+		{"string !=", "hi", "!=", "bye", true},
+		{"unknown op falls through to false", "a", "??", "b", false},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			got := compareValues(tc.left, tc.op, tc.right)
+			if got != tc.want {
+				t.Errorf("compareValues(%q,%q,%q) = %v, want %v", tc.left, tc.op, tc.right, got, tc.want)
+			}
+		})
 	}
 }
