@@ -13,9 +13,12 @@ type Client struct {
 	hub        *Hub
 	conn       *websocket.Conn
 	send       chan []byte
-	projectID  string // filter events by project, empty = all
+	projectID  string
 	userID     string
 	remoteAddr string
+
+	subMu         sync.Mutex
+	subscriptions map[string]struct{}
 }
 
 func (c *Client) logFields() log.Fields {
@@ -26,7 +29,40 @@ func (c *Client) logFields() log.Fields {
 	}
 }
 
-// Hub maintains the set of active clients and broadcasts events.
+func (c *Client) subscribe(channels []string) {
+	c.subMu.Lock()
+	defer c.subMu.Unlock()
+	if c.subscriptions == nil {
+		c.subscriptions = map[string]struct{}{}
+	}
+	for _, ch := range channels {
+		if ch == "" {
+			continue
+		}
+		c.subscriptions[ch] = struct{}{}
+	}
+}
+
+func (c *Client) unsubscribe(channels []string) {
+	c.subMu.Lock()
+	defer c.subMu.Unlock()
+	for _, ch := range channels {
+		delete(c.subscriptions, ch)
+	}
+}
+
+func (c *Client) matchesAny(channels []string) bool {
+	c.subMu.Lock()
+	defer c.subMu.Unlock()
+	for _, ch := range channels {
+		if _, ok := c.subscriptions[ch]; ok {
+			return true
+		}
+	}
+	return false
+}
+
+// Hub maintains the set of active clients and fans out pre-serialized frames.
 type Hub struct {
 	mu         sync.RWMutex
 	clients    map[*Client]struct{}
@@ -76,7 +112,6 @@ func (h *Hub) Run() {
 				select {
 				case client.send <- message:
 				default:
-					// Slow client, drop
 					h.mu.RUnlock()
 					h.mu.Lock()
 					delete(h.clients, client)
@@ -94,23 +129,36 @@ func (h *Hub) Run() {
 	}
 }
 
-// BroadcastEvent sends an event to all connected clients.
-// If the event has a ProjectID, only clients subscribed to that project receive it.
-func (h *Hub) BroadcastEvent(event *Event) {
-	data := event.JSON()
-
+// FanoutBytes delivers a pre-serialized frame to every client subscribed to
+// any of the given channels. Callers must supply at least one channel; an
+// empty list short-circuits to a no-op (use BroadcastAllBytes for public
+// events instead).
+func (h *Hub) FanoutBytes(data []byte, channels []string) {
+	if len(channels) == 0 {
+		return
+	}
 	h.mu.RLock()
 	defer h.mu.RUnlock()
-
 	for client := range h.clients {
-		// Filter by project if both event and client have projectID set.
-		if event.ProjectID != "" && client.projectID != "" && client.projectID != event.ProjectID {
+		if !client.matchesAny(channels) {
 			continue
 		}
 		select {
 		case client.send <- data:
 		default:
-			// Skip slow client.
+		}
+	}
+}
+
+// BroadcastAllBytes delivers a pre-serialized frame to every connected
+// client regardless of subscriptions. Use only for Visibility=public events.
+func (h *Hub) BroadcastAllBytes(data []byte) {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	for client := range h.clients {
+		select {
+		case client.send <- data:
+		default:
 		}
 	}
 }

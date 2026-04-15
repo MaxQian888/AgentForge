@@ -1,6 +1,10 @@
 package ws
 
-import "github.com/react-go-quick-starter/server/internal/model"
+import (
+	"encoding/json"
+
+	"github.com/react-go-quick-starter/server/internal/model"
+)
 
 type PluginEventBroadcaster struct {
 	hub *Hub
@@ -14,9 +18,13 @@ func (b *PluginEventBroadcaster) BroadcastPluginEvent(event *model.PluginEventRe
 	if b == nil || b.hub == nil || event == nil {
 		return
 	}
-
-	b.hub.BroadcastEvent(&Event{
-		Type:    EventPluginLifecycle,
-		Payload: event,
-	})
+	frame := map[string]any{
+		"type":    EventPluginLifecycle,
+		"payload": event,
+	}
+	data, err := json.Marshal(frame)
+	if err != nil {
+		return
+	}
+	b.hub.BroadcastAllBytes(data)
 }

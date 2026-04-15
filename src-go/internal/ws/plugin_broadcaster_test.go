@@ -33,28 +33,21 @@ func TestPluginEventBroadcaster_EmitsLifecycleEvent(t *testing.T) {
 
 	select {
 	case message := <-client.send:
-		var event Event
-		if err := json.Unmarshal(message, &event); err != nil {
+		var frame struct {
+			Type    string                  `json:"type"`
+			Payload model.PluginEventRecord `json:"payload"`
+		}
+		if err := json.Unmarshal(message, &frame); err != nil {
 			t.Fatalf("decode websocket event: %v", err)
 		}
-		if event.Type != EventPluginLifecycle {
-			t.Fatalf("event type = %q, want %q", event.Type, EventPluginLifecycle)
+		if frame.Type != EventPluginLifecycle {
+			t.Fatalf("event type = %q, want %q", frame.Type, EventPluginLifecycle)
 		}
-
-		payloadBytes, err := json.Marshal(event.Payload)
-		if err != nil {
-			t.Fatalf("re-marshal payload: %v", err)
+		if frame.Payload.PluginID != "feishu" {
+			t.Fatalf("payload plugin id = %q, want feishu", frame.Payload.PluginID)
 		}
-
-		var payload model.PluginEventRecord
-		if err := json.Unmarshal(payloadBytes, &payload); err != nil {
-			t.Fatalf("decode plugin payload: %v", err)
-		}
-		if payload.PluginID != "feishu" {
-			t.Fatalf("payload plugin id = %q, want feishu", payload.PluginID)
-		}
-		if payload.LifecycleState != model.PluginStateActive {
-			t.Fatalf("payload lifecycle state = %q, want %q", payload.LifecycleState, model.PluginStateActive)
+		if frame.Payload.LifecycleState != model.PluginStateActive {
+			t.Fatalf("payload lifecycle state = %q, want %q", frame.Payload.LifecycleState, model.PluginStateActive)
 		}
 	default:
 		t.Fatal("expected plugin lifecycle event to be broadcast")

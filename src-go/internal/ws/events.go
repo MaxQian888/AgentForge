@@ -110,19 +110,6 @@ const (
 	BridgeEventToolCallLog       = "tool.call_log"
 )
 
-// Event is a message sent over WebSocket connections.
-type Event struct {
-	Type      string `json:"type"`
-	ProjectID string `json:"projectId,omitempty"`
-	Payload   any    `json:"payload"`
-}
-
-// JSON serializes the event.
-func (e *Event) JSON() []byte {
-	data, _ := json.Marshal(e)
-	return data
-}
-
 // BridgeAgentEvent is the canonical runtime event envelope emitted by the TS bridge.
 type BridgeAgentEvent struct {
 	TaskID      string          `json:"task_id"`

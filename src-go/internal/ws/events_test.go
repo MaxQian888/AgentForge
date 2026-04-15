@@ -1,39 +1,8 @@
 package ws
 
 import (
-	"encoding/json"
 	"testing"
 )
-
-func TestEventJSON(t *testing.T) {
-	event := &Event{
-		Type:      EventAgentStarted,
-		ProjectID: "project-123",
-		Payload: map[string]any{
-			"status": "running",
-			"turn":   2,
-		},
-	}
-
-	var decoded map[string]any
-	if err := json.Unmarshal(event.JSON(), &decoded); err != nil {
-		t.Fatalf("Event.JSON() produced invalid JSON: %v", err)
-	}
-
-	if decoded["type"] != EventAgentStarted {
-		t.Fatalf("decoded type = %v, want %q", decoded["type"], EventAgentStarted)
-	}
-	if decoded["projectId"] != "project-123" {
-		t.Fatalf("decoded projectId = %v", decoded["projectId"])
-	}
-	payload, ok := decoded["payload"].(map[string]any)
-	if !ok {
-		t.Fatalf("decoded payload type = %T, want object", decoded["payload"])
-	}
-	if payload["status"] != "running" || payload["turn"] != float64(2) {
-		t.Fatalf("decoded payload = %#v", payload)
-	}
-}
 
 func TestBridgeAgentEventDecodeData(t *testing.T) {
 	event := &BridgeAgentEvent{

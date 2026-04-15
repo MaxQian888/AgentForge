@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"encoding/json"
 	"fmt"
 	"net/http"
 	"strings"
@@ -106,7 +107,7 @@ func (c *Client) readPump() {
 		return nil
 	})
 	for {
-		_, _, err := c.conn.ReadMessage()
+		_, message, err := c.conn.ReadMessage()
 		if err != nil {
 			entry := log.WithFields(c.logFields())
 			if websocket.IsUnexpectedCloseError(err, websocket.CloseGoingAway, websocket.CloseAbnormalClosure) {
@@ -116,7 +117,51 @@ func (c *Client) readPump() {
 			}
 			break
 		}
-		// Client messages are currently ignored; server-push only.
+		c.handleFrame(message)
+	}
+}
+
+// clientFrame is the shape of inbound client->server control frames.
+type clientFrame struct {
+	Op       string   `json:"op"`
+	Channels []string `json:"channels,omitempty"`
+}
+
+// handleFrame parses a single inbound frame and mutates subscription state.
+// Unknown ops are silently ignored. Malformed JSON sends a one-shot
+// `event.error.rejected` frame without disconnecting the client.
+func (c *Client) handleFrame(raw []byte) {
+	trimmed := strings.TrimSpace(string(raw))
+	if trimmed == "" {
+		return
+	}
+	var frame clientFrame
+	if err := json.Unmarshal(raw, &frame); err != nil {
+		c.sendRejected("bad frame")
+		return
+	}
+	switch frame.Op {
+	case "subscribe":
+		c.subscribe(frame.Channels)
+	case "unsubscribe":
+		c.unsubscribe(frame.Channels)
+	default:
+		// Ignore unknown ops per protocol.
+	}
+}
+
+func (c *Client) sendRejected(reason string) {
+	payload := map[string]any{
+		"type":    "event.error.rejected",
+		"payload": map[string]string{"reason": reason},
+	}
+	data, err := json.Marshal(payload)
+	if err != nil {
+		return
+	}
+	select {
+	case c.send <- data:
+	default:
 	}
 }
 

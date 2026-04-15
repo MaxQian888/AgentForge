@@ -1,6 +1,10 @@
 package ws
 
-import "github.com/react-go-quick-starter/server/internal/model"
+import (
+	"encoding/json"
+
+	"github.com/react-go-quick-starter/server/internal/model"
+)
 
 type SchedulerEventBroadcaster struct {
 	hub *Hub
@@ -14,12 +18,16 @@ func (b *SchedulerEventBroadcaster) BroadcastSchedulerEvent(eventType string, jo
 	if b == nil || b.hub == nil {
 		return
 	}
-
-	b.hub.BroadcastEvent(&Event{
-		Type: eventType,
-		Payload: map[string]any{
+	frame := map[string]any{
+		"type": eventType,
+		"payload": map[string]any{
 			"job": job,
 			"run": run,
 		},
-	})
+	}
+	data, err := json.Marshal(frame)
+	if err != nil {
+		return
+	}
+	b.hub.BroadcastAllBytes(data)
 }
