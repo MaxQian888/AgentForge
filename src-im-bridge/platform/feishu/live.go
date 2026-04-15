@@ -65,6 +65,7 @@ type lifecycleEventRunner interface {
 		botAddedHandler func(context.Context, *larkim.P2ChatMemberBotAddedV1) error,
 		botRemovedHandler func(context.Context, *larkim.P2ChatMemberBotDeletedV1) error,
 		reactionHandler func(context.Context, *larkim.P2MessageReactionCreatedV1) error,
+		reactionDeletedHandler func(context.Context, *larkim.P2MessageReactionDeletedV1) error,
 	) error
 }
 
@@ -300,7 +301,7 @@ func (l *Live) Start(handler core.MessageHandler) error {
 			cardHandler = l.handleCardAction
 		}
 		return runner.StartFull(ctx, messageHandler, cardHandler,
-			l.handleBotAdded, l.handleBotRemoved, l.handleReaction)
+			l.handleBotAdded, l.handleBotRemoved, l.handleReaction, l.handleReactionDeleted)
 	}
 
 	// Fall back to card action runner.
@@ -342,13 +343,99 @@ func (l *Live) handleBotRemoved(ctx context.Context, event *larkim.P2ChatMemberB
 }
 
 func (l *Live) handleReaction(ctx context.Context, event *larkim.P2MessageReactionCreatedV1) error {
-	if event == nil || event.Event == nil {
+	if event == nil {
 		return nil
 	}
-	log.WithField("component", "feishu-live").Debug("Reaction event received")
-	// Reactions are logged but not forwarded as action requests yet; the
-	// action handler interface does not have a reaction-specific path.
-	return nil
+	req := buildReactionRequestFromCreated(event.Event)
+	if req == nil {
+		return nil
+	}
+	if l.actionHandler == nil {
+		return nil
+	}
+	_, err := l.actionHandler.HandleAction(ctx, req)
+	return err
+}
+
+func (l *Live) handleReactionDeleted(ctx context.Context, event *larkim.P2MessageReactionDeletedV1) error {
+	if event == nil {
+		return nil
+	}
+	req := buildReactionRequestFromDeleted(event.Event)
+	if req == nil {
+		return nil
+	}
+	if l.actionHandler == nil {
+		return nil
+	}
+	_, err := l.actionHandler.HandleAction(ctx, req)
+	return err
+}
+
+func buildReactionRequestFromCreated(data *larkim.P2MessageReactionCreatedV1Data) *notify.ActionRequest {
+	if data == nil {
+		return nil
+	}
+	return assembleReactionRequest(
+		value(data.MessageId),
+		reactionEmoji(data.ReactionType),
+		reactionUserID(data.UserId),
+		"created",
+	)
+}
+
+func buildReactionRequestFromDeleted(data *larkim.P2MessageReactionDeletedV1Data) *notify.ActionRequest {
+	if data == nil {
+		return nil
+	}
+	return assembleReactionRequest(
+		value(data.MessageId),
+		reactionEmoji(data.ReactionType),
+		reactionUserID(data.UserId),
+		"deleted",
+	)
+}
+
+func assembleReactionRequest(messageID, emoji, userID, eventType string) *notify.ActionRequest {
+	messageID = strings.TrimSpace(messageID)
+	if messageID == "" {
+		return nil
+	}
+	metadata := map[string]string{
+		"emoji":      emoji,
+		"event_type": eventType,
+	}
+	return &notify.ActionRequest{
+		Platform: liveMetadata.Source,
+		Action:   core.ActionNameReact,
+		EntityID: messageID,
+		UserID:   userID,
+		Metadata: compactMetadata(metadata),
+		ReplyTarget: &core.ReplyTarget{
+			Platform:  liveMetadata.Source,
+			MessageID: messageID,
+		},
+	}
+}
+
+func reactionEmoji(emoji *larkim.Emoji) string {
+	if emoji == nil || emoji.EmojiType == nil {
+		return ""
+	}
+	return strings.TrimSpace(*emoji.EmojiType)
+}
+
+func reactionUserID(user *larkim.UserId) string {
+	if user == nil {
+		return ""
+	}
+	if user.OpenId != nil && strings.TrimSpace(*user.OpenId) != "" {
+		return strings.TrimSpace(*user.OpenId)
+	}
+	if user.UserId != nil && strings.TrimSpace(*user.UserId) != "" {
+		return strings.TrimSpace(*user.UserId)
+	}
+	return ""
 }
 
 func (l *Live) Reply(ctx context.Context, replyCtx any, content string) error {
@@ -544,11 +631,11 @@ type sdkEventRunner struct {
 }
 
 func (r *sdkEventRunner) Start(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error) error {
-	return r.StartFull(ctx, handler, nil, nil, nil, nil)
+	return r.StartFull(ctx, handler, nil, nil, nil, nil, nil)
 }
 
 func (r *sdkEventRunner) StartWithCardActions(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error, cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)) error {
-	return r.StartFull(ctx, handler, cardActionHandler, nil, nil, nil)
+	return r.StartFull(ctx, handler, cardActionHandler, nil, nil, nil, nil)
 }
 
 func (r *sdkEventRunner) StartFull(
@@ -558,6 +645,7 @@ func (r *sdkEventRunner) StartFull(
 	botAddedHandler func(context.Context, *larkim.P2ChatMemberBotAddedV1) error,
 	botRemovedHandler func(context.Context, *larkim.P2ChatMemberBotDeletedV1) error,
 	reactionHandler func(context.Context, *larkim.P2MessageReactionCreatedV1) error,
+	reactionDeletedHandler func(context.Context, *larkim.P2MessageReactionDeletedV1) error,
 ) error {
 	dispatcher := larkdispatcher.NewEventDispatcher("", "").OnP2MessageReceiveV1(handler)
 	if cardActionHandler != nil {
@@ -571,6 +659,9 @@ func (r *sdkEventRunner) StartFull(
 	}
 	if reactionHandler != nil {
 		dispatcher = dispatcher.OnP2MessageReactionCreatedV1(reactionHandler)
+	}
+	if reactionDeletedHandler != nil {
+		dispatcher = dispatcher.OnP2MessageReactionDeletedV1(reactionDeletedHandler)
 	}
 	client := larkws.NewClient(r.appID, r.appSecret, larkws.WithEventHandler(dispatcher))
 

@@ -509,11 +509,12 @@ func TestLive_BuildNativeTextMessageReturnsMarkdownCard(t *testing.T) {
 }
 
 type fakeEventRunner struct {
-	started           bool
-	stopped           bool
-	handler           func(context.Context, *larkim.P2MessageReceiveV1) error
-	cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)
-	stopErr           error
+	started                bool
+	stopped                bool
+	handler                func(context.Context, *larkim.P2MessageReceiveV1) error
+	cardActionHandler      func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error)
+	reactionDeletedHandler func(context.Context, *larkim.P2MessageReactionDeletedV1) error
+	stopErr                error
 }
 
 func (r *fakeEventRunner) Start(ctx context.Context, handler func(context.Context, *larkim.P2MessageReceiveV1) error) error {
@@ -541,11 +542,34 @@ func (r *fakeEventRunner) StartWithCardActions(ctx context.Context, handler func
 	return nil
 }
 
+func (r *fakeEventRunner) StartFull(
+	ctx context.Context,
+	handler func(context.Context, *larkim.P2MessageReceiveV1) error,
+	cardActionHandler func(context.Context, *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error),
+	botAddedHandler func(context.Context, *larkim.P2ChatMemberBotAddedV1) error,
+	botRemovedHandler func(context.Context, *larkim.P2ChatMemberBotDeletedV1) error,
+	reactionHandler func(context.Context, *larkim.P2MessageReactionCreatedV1) error,
+	reactionDeletedHandler func(context.Context, *larkim.P2MessageReactionDeletedV1) error,
+) error {
+	r.started = true
+	r.handler = handler
+	r.cardActionHandler = cardActionHandler
+	r.reactionDeletedHandler = reactionDeletedHandler
+	return nil
+}
+
 func (r *fakeEventRunner) dispatchCardAction(ctx context.Context, event *larkcallback.CardActionTriggerEvent) (*larkcallback.CardActionTriggerResponse, error) {
 	if r.cardActionHandler == nil {
 		return nil, errors.New("card action handler not registered")
 	}
 	return r.cardActionHandler(ctx, event)
+}
+
+func (r *fakeEventRunner) dispatchReactionDeleted(ctx context.Context, event *larkim.P2MessageReactionDeletedV1) error {
+	if r.reactionDeletedHandler == nil {
+		return errors.New("reaction deleted handler not registered")
+	}
+	return r.reactionDeletedHandler(ctx, event)
 }
 
 type fakeMessageClient struct {
@@ -1496,5 +1520,99 @@ func TestNormalizeCardActionRequest_PassesElementNameAndTimezone(t *testing.T) {
 	}
 	if req.Metadata["timezone"] != "Asia/Shanghai" {
 		t.Errorf("timezone = %q", req.Metadata["timezone"])
+	}
+}
+
+type recordingActionHandler struct {
+	reqs []*notify.ActionRequest
+}
+
+func (h *recordingActionHandler) HandleAction(_ context.Context, req *notify.ActionRequest) (*notify.ActionResponse, error) {
+	h.reqs = append(h.reqs, req)
+	return &notify.ActionResponse{}, nil
+}
+
+func TestLive_HandleReactionCreatedForwardsToActionHandler(t *testing.T) {
+	live, err := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	if err != nil {
+		t.Fatalf("NewLive error: %v", err)
+	}
+	rec := &recordingActionHandler{}
+	live.SetActionHandler(rec)
+
+	msgID := "om_reaction_msg"
+	emojiType := "THUMBSUP"
+	openID := "ou_reactor"
+	event := &larkim.P2MessageReactionCreatedV1{
+		Event: &larkim.P2MessageReactionCreatedV1Data{
+			MessageId:    &msgID,
+			ReactionType: &larkim.Emoji{EmojiType: &emojiType},
+			UserId:       &larkim.UserId{OpenId: &openID},
+		},
+	}
+	if err := live.handleReaction(context.Background(), event); err != nil {
+		t.Fatalf("handleReaction error: %v", err)
+	}
+	if len(rec.reqs) != 1 {
+		t.Fatalf("expected 1 forwarded request, got %d", len(rec.reqs))
+	}
+	got := rec.reqs[0]
+	if got.Action != core.ActionNameReact {
+		t.Errorf("Action = %q, want react", got.Action)
+	}
+	if got.EntityID != msgID {
+		t.Errorf("EntityID = %q, want %s", got.EntityID, msgID)
+	}
+	if got.UserID != openID {
+		t.Errorf("UserID = %q, want %s", got.UserID, openID)
+	}
+	if got.Metadata["emoji"] != emojiType {
+		t.Errorf("emoji = %q, want %s", got.Metadata["emoji"], emojiType)
+	}
+	if got.Metadata["event_type"] != "created" {
+		t.Errorf("event_type = %q, want created", got.Metadata["event_type"])
+	}
+}
+
+func TestLive_HandleReactionDeletedForwardsWithDeletedEventType(t *testing.T) {
+	live, _ := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	rec := &recordingActionHandler{}
+	live.SetActionHandler(rec)
+
+	msgID := "om_reaction_msg"
+	emojiType := "THUMBSUP"
+	openID := "ou_reactor"
+	event := &larkim.P2MessageReactionDeletedV1{
+		Event: &larkim.P2MessageReactionDeletedV1Data{
+			MessageId:    &msgID,
+			ReactionType: &larkim.Emoji{EmojiType: &emojiType},
+			UserId:       &larkim.UserId{OpenId: &openID},
+		},
+	}
+	if err := live.handleReactionDeleted(context.Background(), event); err != nil {
+		t.Fatalf("handleReactionDeleted error: %v", err)
+	}
+	if len(rec.reqs) != 1 {
+		t.Fatalf("expected 1 forwarded request")
+	}
+	if rec.reqs[0].Metadata["event_type"] != "deleted" {
+		t.Errorf("event_type = %q, want deleted", rec.reqs[0].Metadata["event_type"])
+	}
+}
+
+func TestLive_HandleReactionWithNoHandlerIsNoOp(t *testing.T) {
+	live, _ := NewLive("app-id", "app-secret", WithEventRunner(&fakeEventRunner{}), WithMessageClient(&fakeMessageClient{}))
+	msgID := "om_x"
+	emojiType := "OK"
+	openID := "ou_x"
+	event := &larkim.P2MessageReactionCreatedV1{
+		Event: &larkim.P2MessageReactionCreatedV1Data{
+			MessageId:    &msgID,
+			ReactionType: &larkim.Emoji{EmojiType: &emojiType},
+			UserId:       &larkim.UserId{OpenId: &openID},
+		},
+	}
+	if err := live.handleReaction(context.Background(), event); err != nil {
+		t.Fatalf("expected no error when handler missing, got %v", err)
 	}
 }
