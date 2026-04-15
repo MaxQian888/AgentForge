@@ -903,6 +903,12 @@ func normalizeCardActionRequest(event *larkcallback.CardActionTriggerEvent) (*no
 	for key, value := range actionMetadata {
 		metadata[key] = value
 	}
+	if name := strings.TrimSpace(act.Name); name != "" {
+		metadata["element_name"] = name
+	}
+	if tz := strings.TrimSpace(act.Timezone); tz != "" {
+		metadata["timezone"] = tz
+	}
 	return &notify.ActionRequest{
 		Platform:    liveMetadata.Source,
 		Action:      action,

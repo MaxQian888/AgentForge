@@ -1472,3 +1472,29 @@ func TestNormalizeCardActionRequest_InputWithoutActionRefIsIgnored(t *testing.T)
 		t.Fatalf("err = %v, want errIgnoreCardAction", err)
 	}
 }
+
+func TestNormalizeCardActionRequest_PassesElementNameAndTimezone(t *testing.T) {
+	event := &larkcallback.CardActionTriggerEvent{
+		Event: &larkcallback.CardActionTriggerRequest{
+			Action: &larkcallback.CallBackAction{
+				Tag:      "date_picker",
+				Name:     "due_date_picker",
+				Timezone: "Asia/Shanghai",
+				Value:    map[string]interface{}{"date": "2026-04-20"},
+			},
+			Token:    "token-1",
+			Context:  &larkcallback.Context{OpenChatID: "chat-1"},
+			Operator: &larkcallback.Operator{OpenID: "ou_user_1"},
+		},
+	}
+	req, err := normalizeCardActionRequest(event)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if req.Metadata["element_name"] != "due_date_picker" {
+		t.Errorf("element_name = %q", req.Metadata["element_name"])
+	}
+	if req.Metadata["timezone"] != "Asia/Shanghai" {
+		t.Errorf("timezone = %q", req.Metadata["timezone"])
+	}
+}
