@@ -903,3 +903,67 @@ func TestExecuteToggle_WithoutMoverReturnsBlocked(t *testing.T) {
 		t.Errorf("Status = %q, want blocked", resp.Status)
 	}
 }
+
+type fakeTaskCommenter struct {
+	captured *model.TaskComment
+	err      error
+}
+
+func (f *fakeTaskCommenter) Create(_ context.Context, comment *model.TaskComment) error {
+	if f.err != nil {
+		return f.err
+	}
+	f.captured = comment
+	return nil
+}
+
+func TestExecuteInputSubmit_AppendsComment(t *testing.T) {
+	commenter := &fakeTaskCommenter{}
+	exec := NewBackendIMActionExecutor(nil, nil, nil, commenter)
+	taskID := uuid.New()
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "input_submit",
+		EntityID: taskID.String(),
+		Metadata: map[string]string{"input_value": "please reconsider"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusCompleted {
+		t.Errorf("Status = %q, want completed", resp.Status)
+	}
+	if commenter.captured == nil || commenter.captured.Body != "please reconsider" {
+		t.Errorf("captured comment = %+v", commenter.captured)
+	}
+	if commenter.captured.TaskID != taskID {
+		t.Errorf("TaskID = %s, want %s", commenter.captured.TaskID, taskID)
+	}
+}
+
+func TestExecuteInputSubmit_WithoutValueReturnsFailed(t *testing.T) {
+	commenter := &fakeTaskCommenter{}
+	exec := NewBackendIMActionExecutor(nil, nil, nil, commenter)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "input_submit",
+		EntityID: uuid.New().String(),
+		Metadata: map[string]string{},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusFailed {
+		t.Errorf("Status = %q, want failed", resp.Status)
+	}
+}
+
+func TestExecuteInputSubmit_WithoutCommenterReturnsBlocked(t *testing.T) {
+	exec := NewBackendIMActionExecutor(nil, nil, nil)
+	req := &model.IMActionRequest{
+		Platform: "feishu",
+		Action:   "input_submit",
+		EntityID: uuid.New().String(),
+		Metadata: map[string]string{"input_value": "hi"},
+	}
+	resp, _ := exec.Execute(context.Background(), req)
+	if resp.Status != model.IMActionStatusBlocked {
+		t.Errorf("Status = %q, want blocked", resp.Status)
+	}
+}

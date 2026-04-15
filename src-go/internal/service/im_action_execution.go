@@ -66,6 +66,10 @@ type IMReactionRecorder interface {
 	Record(ctx context.Context, event *model.IMReactionEvent) error
 }
 
+type IMActionTaskCommenter interface {
+	Create(ctx context.Context, comment *model.TaskComment) error
+}
+
 var allowedSelectTargetActions = map[string]struct{}{
 	"assign-agent":    {},
 	"decompose":       {},
@@ -93,6 +97,7 @@ type BackendIMActionExecutor struct {
 	workflow   IMActionWorkflowEvaluator
 	wikiMaker  IMActionWikiCreator
 	reactions  IMReactionRecorder
+	commenter  IMActionTaskCommenter
 }
 
 func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IMActionTaskDecomposer, reviewer IMActionReviewer, extras ...any) *BackendIMActionExecutor {
@@ -117,6 +122,8 @@ func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IM
 			executor.wikiMaker = value
 		case IMReactionRecorder:
 			executor.reactions = value
+		case IMActionTaskCommenter:
+			executor.commenter = value
 		}
 	}
 	return executor
@@ -150,6 +157,8 @@ func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActi
 		return e.executeMultiSelect(ctx, req), nil
 	case "toggle":
 		return e.executeToggle(ctx, req), nil
+	case "input_submit":
+		return e.executeInputSubmit(ctx, req), nil
 	default:
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Unknown action: %s", req.Action), false), nil
 	}
@@ -489,6 +498,31 @@ func (e *BackendIMActionExecutor) executeToggle(ctx context.Context, req *model.
 	dto := updated.ToDTO()
 	resp.Task = &dto
 	return resp
+}
+
+func (e *BackendIMActionExecutor) executeInputSubmit(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {
+	if e.commenter == nil {
+		return newIMActionResponse(req, model.IMActionStatusBlocked, "Task comment workflow is unavailable.", false)
+	}
+	body := strings.TrimSpace(req.Metadata["input_value"])
+	if body == "" {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Input submission missing value.", false)
+	}
+	taskID, err := parseIMEntityUUID(req.EntityID)
+	if err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, "Invalid task identifier.", false)
+	}
+	comment := &model.TaskComment{
+		TaskID: taskID,
+		Body:   body,
+	}
+	if authorID, err := uuid.Parse(strings.TrimSpace(req.UserID)); err == nil {
+		comment.CreatedBy = authorID
+	}
+	if err := e.commenter.Create(ctx, comment); err != nil {
+		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Failed to append comment: %s", err.Error()), false)
+	}
+	return newIMActionResponse(req, model.IMActionStatusCompleted, "Comment appended to task.", true)
 }
 
 func splitCSV(s string) []string {
