@@ -244,12 +244,9 @@ func RegisterRoutes(
 	episodicMemorySvc := service.NewEpisodicMemoryService(memoryRepo)
 	memoryExplorerSvc := service.NewMemoryExplorerService(memoryRepo).WithEpisodic(episodicMemorySvc)
 	memoryAPI := service.NewMemoryAPIService(memorySvc, memoryExplorerSvc)
+	// teamSvc is constructed below after templateSvc is built — TeamService now
+	// requires the workflow template service to start team executions.
 	var teamSvc *service.TeamService
-	if agentSvc != nil {
-		teamSvc = service.NewTeamService(teamRepo, agentRunRepo, agentSvc, taskRepo, projectRepo, memorySvc, hub, agentSvc.TeamArtifactService())
-		agentSvc.SetTeamService(teamSvc)
-		agentSvc.SetMemoryService(memorySvc)
-	}
 	reviewSvc := service.NewReviewService(reviewRepo, taskRepo, notificationSvc, hub, bridgeClient, taskProgressSvc)
 	reviewSvc.SetIMProgressNotifier(imControlPlane)
 	reviewSvc.WithProjectRepository(projectRepo)
@@ -364,14 +361,17 @@ func RegisterRoutes(
 	templateSvc := service.NewWorkflowTemplateService(dagDefRepo, dagWorkflowSvc)
 	workflowH = workflowH.WithTemplateService(templateSvc)
 	workflowH = workflowH.WithReviewRepo(wfReviewRepo)
-	// Seed system templates on startup, then wire team-to-workflow adapter
+	// Construct TeamService now that templateSvc exists. Team startup delegates
+	// to WorkflowTemplateService.CreateFromStrategy, which maps strategy names
+	// to seeded system templates.
+	if agentSvc != nil {
+		teamSvc = service.NewTeamService(teamRepo, agentRunRepo, agentSvc, taskRepo, projectRepo, memorySvc, hub, templateSvc, agentSvc.TeamArtifactService())
+		agentSvc.SetTeamService(teamSvc)
+		agentSvc.SetMemoryService(memorySvc)
+	}
+	// Seed system templates on startup so CreateFromStrategy can resolve them.
 	go func() {
 		_ = templateSvc.SeedSystemTemplates(context.Background())
-		// Wire workflow adapter to team service after templates are seeded
-		if teamSvc != nil {
-			adapter := service.NewTeamWorkflowAdapter(templateSvc)
-			teamSvc.SetWorkflowAdapter(adapter)
-		}
 	}()
 	roleH := handler.NewRoleHandler(cfg.RolesDir).WithBridgeClient(bridgeClient)
 	skillsH := handler.NewSkillsHandler(skillspkg.NewService(filepath.Dir(cfg.RolesDir)))
