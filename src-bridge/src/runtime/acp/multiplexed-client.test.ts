@@ -30,14 +30,24 @@ function mkCtx(overrides: Partial<PerSessionContext> = {}): PerSessionContext {
 describe("MultiplexedClient", () => {
   test("routes readTextFile by sessionId", async () => {
     const mc = new MultiplexedClient({ logger });
-    const ctx = mkCtx();
+    let resolvedPath: string | undefined;
+    const ctx = mkCtx({
+      fsSandbox: {
+        resolve: (_s, p) => {
+          resolvedPath = p;
+          // Return a non-existent path so fs.readFile rejects; we only
+          // care that routing reached the real fs handler with the
+          // correct per-session sandbox.
+          return "/non-existent-for-routing-check/" + p;
+        },
+      },
+    });
     mc.register("s1", ctx);
-    // The T4a stub throws 'not yet implemented' — that's fine, we only need to
-    // confirm routing reaches the handler (if it reached, the throw surfaces).
     await expect(
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       mc.readTextFile!({ sessionId: "s1", path: "foo.ts" } as any),
-    ).rejects.toThrow(/not yet implemented/i);
+    ).rejects.toThrow(/ENOENT|no such file/i);
+    expect(resolvedPath).toBe("foo.ts");
   });
 
   test("rejects unknown sessionId with -32602", async () => {
@@ -87,19 +97,29 @@ describe("MultiplexedClient", () => {
     ).rejects.toMatchObject({ code: -32602 });
   });
 
-  test("requestPermission delegates to permissionRouter via handler stub", async () => {
+  test("requestPermission delegates to per-session router", async () => {
     const mc = new MultiplexedClient({ logger });
-    mc.register("s3", mkCtx());
-    // handler stub throws 'not yet implemented' (T4c) — confirms routing reached handler
-    await expect(
-      mc.requestPermission({
-        sessionId: "s3",
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        toolCall: { name: "Write" } as any,
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        options: [] as any,
+    let seenTaskId: string | undefined;
+    mc.register(
+      "s3",
+      mkCtx({
+        permissionRouter: {
+          request: async (taskId) => {
+            seenTaskId = taskId;
+            return { outcome: "selected", optionId: "allow" };
+          },
+        },
+      }),
+    );
+    const res = await mc.requestPermission({
+      sessionId: "s3",
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
-      } as any),
-    ).rejects.toThrow(/not yet implemented/i);
+      toolCall: { name: "Write" } as any,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      options: [] as any,
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+    expect(res.outcome).toEqual({ outcome: "selected", optionId: "allow" });
+    expect(seenTaskId).toBe("t1");
   });
 });
