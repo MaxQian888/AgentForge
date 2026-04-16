@@ -20,6 +20,11 @@ export class RingBuffer {
   private bytes = 0;
   constructor(private readonly limit: number) {}
   append(chunk: string): void {
+    if (chunk.length >= this.limit) {
+      this.parts = [chunk.slice(-this.limit)];
+      this.bytes = this.parts[0].length;
+      return;
+    }
     this.parts.push(chunk);
     this.bytes += chunk.length;
     while (this.bytes > this.limit && this.parts.length > 1) {
@@ -34,8 +39,8 @@ export class RingBuffer {
 export class ChildProcessHost {
   readonly stderrBuffer = new RingBuffer(8 * 1024);
   private proc?: ReturnType<typeof Bun.spawn>;
-  private resolveExit!: (code: number) => void;
-  readonly exited = new Promise<number>((r) => {
+  private resolveExit!: (code: number | null) => void;
+  readonly exited = new Promise<number | null>((r) => {
     this.resolveExit = r;
   });
   private startingEnv: Record<string, string>;
@@ -48,6 +53,9 @@ export class ChildProcessHost {
     stdin: WritableStream<Uint8Array>;
     stdout: ReadableStream<Uint8Array>;
   }> {
+    if (this.proc) {
+      throw new Error("ChildProcessHost.start() called twice");
+    }
     try {
       this.proc = Bun.spawn([this.opts.command, ...this.opts.args], {
         stdin: "pipe",
@@ -74,7 +82,7 @@ export class ChildProcessHost {
       }
     })().catch((e) => this.opts.logger.warn("stderr drain error", e));
 
-    this.proc.exited.then((code) => this.resolveExit(code as number));
+    this.proc.exited.then((code) => this.resolveExit(code ?? null));
 
     return {
       stdin: this.proc.stdin as unknown as WritableStream<Uint8Array>,

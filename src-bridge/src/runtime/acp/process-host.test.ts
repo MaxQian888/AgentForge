@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ChildProcessHost } from "./process-host.js";
+import { ChildProcessHost, RingBuffer } from "./process-host.js";
 
 describe("ChildProcessHost", () => {
   test("spawns child and exposes stdin/stdout streams", async () => {
@@ -55,6 +55,46 @@ describe("ChildProcessHost", () => {
     const t0 = Date.now();
     await host.shutdown(50);
     expect(Date.now() - t0).toBeLessThan(3000);
-    expect(await host.exited).toBeGreaterThanOrEqual(0);
+    const code = await host.exited;
+    expect(code === null || code >= 0).toBe(true);
+  });
+
+  test("start() called twice throws", async () => {
+    const host = new ChildProcessHost({
+      adapterId: "claude_code",
+      command: "node",
+      args: ["-e", "setInterval(()=>{},1000)"],
+      env: {},
+      logger: console,
+    });
+    await host.start();
+    await expect(host.start()).rejects.toThrow(/called twice/);
+    await host.shutdown(100);
+  });
+});
+
+describe("RingBuffer", () => {
+  test("keeps trailing bytes when one chunk exceeds limit", () => {
+    const rb = new RingBuffer(100);
+    rb.append("A".repeat(250));
+    const tail = rb.tail();
+    expect(tail.length).toBe(100);
+    expect(tail).toBe("A".repeat(100));
+  });
+
+  test("evicts oldest parts when sum exceeds limit", () => {
+    const rb = new RingBuffer(10);
+    rb.append("aaaa");  // 4
+    rb.append("bbbb");  // 8
+    rb.append("cccc");  // 12 → evict "aaaa" → 8
+    rb.append("dddd");  // 12 → evict "bbbb" → 8
+    expect(rb.tail()).toBe("ccccdddd");
+  });
+
+  test("retains below-limit contents as-is", () => {
+    const rb = new RingBuffer(100);
+    rb.append("hello ");
+    rb.append("world");
+    expect(rb.tail()).toBe("hello world");
   });
 });
