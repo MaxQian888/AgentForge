@@ -16,6 +16,14 @@ export interface PooledEntry {
 
 export type PooledEntryFactory = (adapterId: AdapterId) => Promise<PooledEntry>;
 
+// AcquireContext is a forward-compatibility seam for T3b (AcpSession.open).
+// The pool accepts but does not act on ctx in T2c; callers wire
+// clientDispatcher.register(sessionId, perSessionContext) after session creation.
+export interface AcquireContext {
+  registerSession(sessionId: string, ctx: unknown): void;
+  unregisterSession(sessionId: string): void;
+}
+
 export interface AcpConnectionPoolOptions {
   logger: Logger;
   factory: PooledEntryFactory;
@@ -32,16 +40,25 @@ export class AcpConnectionPool {
     this.idleMs = opts.idleMs ?? 600_000;
   }
 
-  async acquire(adapterId: AdapterId): Promise<PooledEntry> {
+  // ctx is a forward-compatibility seam per spec §4.3; forwarded by the caller
+  // to clientDispatcher.register() after session creation. Not used in T2c.
+  async acquire(adapterId: AdapterId, ctx?: AcquireContext): Promise<PooledEntry> {
+    void ctx; // ctx forwarded by caller to clientDispatcher after session creation
     this.cancelIdle(adapterId);
     const existing = this.entries.get(adapterId);
-    if (existing && !existing.restartPending) return existing;
+    // C1 fix (spec §4.3): also respawn when host.exited is already settled.
+    // Use a unique string sentinel — never in host.exited's resolution domain —
+    // so Promise.race distinguishes "pending" from "resolved to number|null".
+    const hasExited = existing
+      ? (await Promise.race([existing.host.exited, Promise.resolve("__pending__" as const)])) !== "__pending__"
+      : false;
+    if (existing && !existing.restartPending && !hasExited) return existing;
 
     const pending = this.mutex.get(adapterId);
     if (pending) return pending;
 
     const p = (async () => {
-      if (existing?.restartPending) {
+      if (existing && (existing.restartPending || hasExited)) {
         await existing.host.shutdown(500).catch(() => {});
         this.entries.delete(adapterId);
       }
