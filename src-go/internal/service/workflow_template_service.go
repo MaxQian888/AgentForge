@@ -167,6 +167,37 @@ func (s *WorkflowTemplateService) CreateFromTemplate(ctx context.Context, templa
 	return s.dagSvc.StartExecution(ctx, clone.ID, taskID)
 }
 
+// CreateFromStrategy resolves a team-strategy name to a system workflow template
+// and starts an execution from it. This is the seam team startup uses now that
+// the legacy TeamStrategy interface has been removed.
+func (s *WorkflowTemplateService) CreateFromStrategy(ctx context.Context, projectID, taskID uuid.UUID, strategy string, variables map[string]any) (*model.WorkflowExecution, error) {
+	name := mapStrategyToTemplate(strategy)
+	templates, err := s.repo.ListTemplatesByName(ctx, name)
+	if err != nil {
+		return nil, fmt.Errorf("lookup system template %q for strategy %q: %w", name, strategy, err)
+	}
+	if len(templates) == 0 {
+		return nil, fmt.Errorf("no system template for strategy %q (template %q)", strategy, name)
+	}
+	return s.CreateFromTemplate(ctx, templates[0].ID, projectID, &taskID, variables)
+}
+
+// mapStrategyToTemplate maps legacy team strategy names to seeded system
+// workflow templates. Unknown values fall back to plan-code-review, matching
+// the previous strategy-fallback behavior.
+func mapStrategyToTemplate(strategy string) string {
+	switch strategy {
+	case "pipeline":
+		return TemplatePipeline
+	case "swarm":
+		return TemplateSwarm
+	case "plan-code-review", "wave-based", "":
+		fallthrough
+	default:
+		return TemplatePlanCodeReview
+	}
+}
+
 func defaultWorkflowTemplateName(name string, fallback string) string {
 	if name != "" {
 		return name

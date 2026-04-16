@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -23,8 +24,22 @@ import (
 	skillspkg "github.com/react-go-quick-starter/server/internal/skills"
 	"github.com/react-go-quick-starter/server/internal/storage"
 	"github.com/react-go-quick-starter/server/internal/version"
+	"github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
 	"github.com/react-go-quick-starter/server/internal/ws"
 )
+
+// wsHubAdapter bridges the eventbus.Publisher to the nodetypes.BroadcastHub
+// interface that EffectApplier consumes (eventType, projectID, payload). On
+// master ws.Hub no longer exposes BroadcastEvent directly; events flow through
+// the eventbus and are fanned out to WebSocket clients by the core.ws-fanout
+// observer module.
+type wsHubAdapter struct {
+	bus eventbus.Publisher
+}
+
+func (a wsHubAdapter) BroadcastEvent(eventType, projectID string, payload map[string]any) {
+	_ = eventbus.PublishLegacy(context.Background(), a.bus, eventType, projectID, payload)
+}
 
 type bridgeIntentAdapter struct {
 	client *bridge.Client
@@ -230,12 +245,9 @@ func RegisterRoutes(
 	episodicMemorySvc := service.NewEpisodicMemoryService(memoryRepo)
 	memoryExplorerSvc := service.NewMemoryExplorerService(memoryRepo).WithEpisodic(episodicMemorySvc)
 	memoryAPI := service.NewMemoryAPIService(memorySvc, memoryExplorerSvc)
+	// teamSvc is constructed below after templateSvc is built — TeamService now
+	// requires the workflow template service to start team executions.
 	var teamSvc *service.TeamService
-	if agentSvc != nil {
-		teamSvc = service.NewTeamService(teamRepo, agentRunRepo, agentSvc, taskRepo, projectRepo, memorySvc, hub, bus, agentSvc.TeamArtifactService())
-		agentSvc.SetTeamService(teamSvc)
-		agentSvc.SetMemoryService(memorySvc)
-	}
 	reviewSvc := service.NewReviewService(reviewRepo, taskRepo, notificationSvc, hub, bus, bridgeClient, taskProgressSvc)
 	reviewSvc.SetIMProgressNotifier(imControlPlane)
 	reviewSvc.WithProjectRepository(projectRepo)
@@ -310,29 +322,57 @@ func RegisterRoutes(
 	dagDefRepo := repository.NewWorkflowDefinitionRepository(taskRepo.DB())
 	dagExecRepo := repository.NewWorkflowExecutionRepository(taskRepo.DB())
 	dagNodeExecRepo := repository.NewWorkflowNodeExecutionRepository(taskRepo.DB())
-	dagWorkflowSvc := service.NewDAGWorkflowService(dagDefRepo, dagExecRepo, dagNodeExecRepo, hub, bus)
-	dagWorkflowSvc.SetTaskRepo(taskRepo)
+	// Hoisted: needed by EffectApplier construction below.
 	dagRunMappingRepo := repository.NewWorkflowRunMappingRepository(taskRepo.DB())
+	wfReviewRepo := repository.NewWorkflowPendingReviewRepository(taskRepo.DB())
+
+	// Build node-type registry and seed with built-ins.
+	nodeRegistry := nodetypes.NewRegistry(nil)
+	if err := nodetypes.RegisterBuiltins(nodeRegistry, nodetypes.BuiltinDeps{
+		TaskRepo: taskRepo,
+		DefRepo:  dagDefRepo,
+	}); err != nil {
+		panic(fmt.Errorf("register built-in node types: %w", err))
+	}
+	nodeRegistry.LockGlobal()
+
+	// Build effect applier with all back-end deps.
+	effectApplier := &nodetypes.EffectApplier{
+		Hub:         wsHubAdapter{bus: bus},
+		TaskRepo:    taskRepo,
+		NodeRepo:    dagNodeExecRepo,
+		ExecRepo:    dagExecRepo,
+		MappingRepo: dagRunMappingRepo,
+		ReviewRepo:  wfReviewRepo,
+		// AgentSpawner wired below once agentSvc is known to exist.
+	}
+
+	dagWorkflowSvc := service.NewDAGWorkflowService(
+		dagDefRepo, dagExecRepo, dagNodeExecRepo, hub, bus, nodeRegistry, effectApplier,
+	)
+	dagWorkflowSvc.SetTaskRepo(taskRepo)
 	dagWorkflowSvc.SetRunMappingRepo(dagRunMappingRepo)
+	dagWorkflowSvc.SetReviewRepo(wfReviewRepo)
 	if agentSvc != nil {
-		dagWorkflowSvc.SetAgentSpawner(agentSvc)
+		effectApplier.AgentSpawner = agentSvc
 		agentSvc.SetDAGWorkflowService(dagWorkflowSvc)
 	}
 	workflowH = workflowH.WithDAGService(dagWorkflowSvc, dagDefRepo, dagExecRepo, dagNodeExecRepo)
 	// Template and review services
 	templateSvc := service.NewWorkflowTemplateService(dagDefRepo, dagWorkflowSvc)
 	workflowH = workflowH.WithTemplateService(templateSvc)
-	wfReviewRepo := repository.NewWorkflowPendingReviewRepository(taskRepo.DB())
-	dagWorkflowSvc.SetReviewRepo(wfReviewRepo)
 	workflowH = workflowH.WithReviewRepo(wfReviewRepo)
-	// Seed system templates on startup, then wire team-to-workflow adapter
+	// Construct TeamService now that templateSvc exists. Team startup delegates
+	// to WorkflowTemplateService.CreateFromStrategy, which maps strategy names
+	// to seeded system templates.
+	if agentSvc != nil {
+		teamSvc = service.NewTeamService(teamRepo, agentRunRepo, agentSvc, taskRepo, projectRepo, memorySvc, hub, bus, templateSvc, agentSvc.TeamArtifactService())
+		agentSvc.SetTeamService(teamSvc)
+		agentSvc.SetMemoryService(memorySvc)
+	}
+	// Seed system templates on startup so CreateFromStrategy can resolve them.
 	go func() {
 		_ = templateSvc.SeedSystemTemplates(context.Background())
-		// Wire workflow adapter to team service after templates are seeded
-		if teamSvc != nil {
-			adapter := service.NewTeamWorkflowAdapter(templateSvc)
-			teamSvc.SetWorkflowAdapter(adapter)
-		}
 	}()
 	roleH := handler.NewRoleHandler(cfg.RolesDir).WithBridgeClient(bridgeClient)
 	skillsH := handler.NewSkillsHandler(skillspkg.NewService(filepath.Dir(cfg.RolesDir)))

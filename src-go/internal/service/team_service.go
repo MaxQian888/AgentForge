@@ -19,10 +19,7 @@ var (
 	ErrTeamAlreadyActive = errors.New("team already active for this task")
 	ErrTeamNotActive     = errors.New("team is not active")
 	ErrTeamTaskNotFound  = errors.New("team task not found")
-	ErrTeamSizeLimit     = errors.New("team size limit exceeded")
 )
-
-const defaultMaxTeamSize = 8
 
 // TeamRunRepository defines persistence for agent teams.
 type TeamRunRepository interface {
@@ -84,18 +81,16 @@ type StartTeamInput struct {
 }
 
 type TeamService struct {
-	teamRepo         TeamRunRepository
-	runRepo          TeamAgentRunRepository
-	spawner          TeamAgentSpawner
-	taskRepo         TeamTaskRepository
-	projectRepo      TeamProjectRepository
-	memorySvc        *MemoryService
-	hub              *ws.Hub
-	bus              eventbus.Publisher
-	maxTeamSize      int
-	artifactSvc      *TeamArtifactService
-	workflowAdapter  *TeamWorkflowAdapter
-	useWorkflowEngine bool
+	teamRepo    TeamRunRepository
+	runRepo     TeamAgentRunRepository
+	spawner     TeamAgentSpawner
+	taskRepo    TeamTaskRepository
+	projectRepo TeamProjectRepository
+	memorySvc   *MemoryService
+	hub         *ws.Hub
+	bus         eventbus.Publisher
+	artifactSvc *TeamArtifactService
+	templateSvc *WorkflowTemplateService
 }
 
 func NewTeamService(
@@ -107,6 +102,7 @@ func NewTeamService(
 	memorySvc *MemoryService,
 	hub *ws.Hub,
 	bus eventbus.Publisher,
+	templateSvc *WorkflowTemplateService,
 	artifactSvc ...*TeamArtifactService,
 ) *TeamService {
 	svc := &TeamService{
@@ -118,7 +114,7 @@ func NewTeamService(
 		memorySvc:   memorySvc,
 		hub:         hub,
 		bus:         bus,
-		maxTeamSize: defaultMaxTeamSize,
+		templateSvc: templateSvc,
 	}
 	if len(artifactSvc) > 0 {
 		svc.artifactSvc = artifactSvc[0]
@@ -126,38 +122,8 @@ func NewTeamService(
 	return svc
 }
 
-// SetWorkflowAdapter enables the workflow engine for team orchestration.
-func (s *TeamService) SetWorkflowAdapter(adapter *TeamWorkflowAdapter) {
-	s.workflowAdapter = adapter
-	s.useWorkflowEngine = adapter != nil
-}
-
-func (s *TeamService) WithMaxTeamSize(limit int) *TeamService {
-	if limit > 0 {
-		s.maxTeamSize = limit
-	}
-	return s
-}
-
-// resolveStrategy returns the TeamStrategy implementation for the given name.
-// Falls back to PlanCodeReviewStrategy if the name is unrecognized.
-func (s *TeamService) resolveStrategy(name string) TeamStrategy {
-	switch name {
-	case "plan-code-review", "":
-		return PlanCodeReviewStrategy{}
-	case "wave-based":
-		return WaveBasedStrategy{}
-	case "pipeline":
-		return PipelineStrategy{}
-	case "swarm":
-		return SwarmStrategy{}
-	default:
-		log.WithField("strategy", name).Warn("unknown team strategy, falling back to plan-code-review")
-		return PlanCodeReviewStrategy{}
-	}
-}
-
-// StartTeam creates a new team and delegates to the resolved strategy.
+// StartTeam creates a new team and starts its workflow execution by mapping
+// the requested strategy name to a seeded system workflow template.
 func (s *TeamService) StartTeam(ctx context.Context, input StartTeamInput) (*model.AgentTeam, error) {
 	task, err := s.taskRepo.GetByID(ctx, input.TaskID)
 	if err != nil {
@@ -202,38 +168,35 @@ func (s *TeamService) StartTeam(ctx context.Context, input StartTeamInput) (*mod
 		"provider":  selection.Provider,
 		"model":     selection.Model,
 		"budgetUsd": team.TotalBudgetUsd,
-		"workflow":  s.useWorkflowEngine,
 	}).Info("team created")
 
 	s.broadcastEvent(ws.EventTeamCreated, task.ProjectID.String(), team.ToDTO())
 
-	// Delegate to workflow engine if enabled
-	if s.useWorkflowEngine && s.workflowAdapter != nil {
-		variables := map[string]any{
-			"runtime":  selection.Runtime,
-			"provider": selection.Provider,
-			"model":    selection.Model,
-		}
-		execID, err := s.workflowAdapter.StartTeamAsWorkflow(ctx, task.ProjectID, task.ID, team.Strategy, variables)
-		if err != nil {
-			log.WithError(err).Warn("team: workflow engine delegation failed, falling back to strategies")
-		} else {
-			team.WorkflowExecutionID = execID
-			_ = s.teamRepo.SetWorkflowExecutionID(ctx, team.ID, *execID)
-			return team, nil
-		}
+	if s.templateSvc == nil {
+		return nil, fmt.Errorf("team service: workflow template service not configured")
 	}
-
-	strategy := s.resolveStrategy(team.Strategy)
-	if err := strategy.Start(ctx, s, team, task, input); err != nil {
-		return nil, err
+	variables := map[string]any{
+		"runtime":  selection.Runtime,
+		"provider": selection.Provider,
+		"model":    selection.Model,
+	}
+	exec, err := s.templateSvc.CreateFromStrategy(ctx, task.ProjectID, task.ID, team.Strategy, variables)
+	if err != nil {
+		return nil, fmt.Errorf("start team workflow: %w", err)
+	}
+	team.WorkflowExecutionID = &exec.ID
+	if err := s.teamRepo.SetWorkflowExecutionID(ctx, team.ID, exec.ID); err != nil {
+		log.WithError(err).WithFields(teamLogFields(team)).Warn("team service: failed to persist workflow execution id")
 	}
 
 	return team, nil
 }
 
-// ProcessRunCompletion is called when an agent run in a team completes.
-// It delegates to the team's resolved strategy.
+// ProcessRunCompletion is called when an agent run belonging to a team reaches
+// a terminal status. Phase progression is now driven by the workflow engine
+// (DAGWorkflowService.HandleAgentRunCompletion) — TeamService is only
+// responsible for refreshing aggregate team cost and persisting any structured
+// output as a team artifact.
 func (s *TeamService) ProcessRunCompletion(ctx context.Context, run *model.AgentRun) {
 	if run == nil || run.TeamID == nil {
 		return
@@ -265,100 +228,6 @@ func (s *TeamService) ProcessRunCompletion(ctx context.Context, run *model.Agent
 			})
 		}
 	}
-
-	strategy := s.resolveStrategy(team.Strategy)
-	if err := strategy.HandleRunCompletion(ctx, s, team, run); err != nil {
-		log.WithError(err).WithFields(teamRunLogFields(team, run)).Error("team service: strategy HandleRunCompletion failed")
-	}
-}
-
-func (s *TeamService) spawnCodersForTasks(ctx context.Context, team *model.AgentTeam, parentTask *model.Task, children []*model.Task) {
-	if err := s.enforceTeamSize(ctx, team, len(children)); err != nil {
-		return
-	}
-
-	memberID := uuid.Nil
-	if parentTask.AssigneeID != nil {
-		memberID = *parentTask.AssigneeID
-	}
-
-	coderBudget := team.TotalBudgetUsd * 0.6 / float64(len(children))
-	if coderBudget < 1 {
-		coderBudget = 1
-	}
-
-	selection := team.CodingAgentSelection()
-	log.WithFields(log.Fields{
-		"teamId":       team.ID.String(),
-		"projectId":    team.ProjectID.String(),
-		"parentTaskId": parentTask.ID.String(),
-		"childCount":   len(children),
-		"budgetUsd":    coderBudget,
-		"runtime":      selection.Runtime,
-		"provider":     selection.Provider,
-		"model":        selection.Model,
-	}).Info("team spawning coders for subtasks")
-	for _, child := range children {
-		coderRun, err := s.spawner.SpawnForTeam(ctx, team.ID, model.TeamRoleCoder, child.ID, memberID, selection.Runtime, selection.Provider, selection.Model, coderBudget, "coding-agent")
-		if err != nil {
-			log.WithError(err).WithFields(log.Fields{"teamId": team.ID.String(), "taskId": child.ID.String()}).Error("team service: failed to spawn coder")
-			continue
-		}
-		log.WithFields(log.Fields{
-			"teamId":    team.ID.String(),
-			"projectId": team.ProjectID.String(),
-			"taskId":    child.ID.String(),
-			"runId":     coderRun.ID.String(),
-			"role":      model.TeamRoleCoder,
-			"budgetUsd": coderBudget,
-			"runtime":   selection.Runtime,
-			"provider":  selection.Provider,
-			"model":     selection.Model,
-		}).Info("team spawned coder")
-		if err := s.runRepo.SetTeamFields(ctx, coderRun.ID, team.ID, model.TeamRoleCoder); err != nil {
-			log.WithError(err).WithFields(log.Fields{"teamId": team.ID.String(), "runId": coderRun.ID.String()}).Error("team service: failed to set coder team fields")
-		}
-	}
-}
-
-func (s *TeamService) spawnCodersForTask(ctx context.Context, team *model.AgentTeam, task *model.Task) {
-	if err := s.enforceTeamSize(ctx, team, 1); err != nil {
-		return
-	}
-
-	memberID := uuid.Nil
-	if task.AssigneeID != nil {
-		memberID = *task.AssigneeID
-	}
-
-	selection := team.CodingAgentSelection()
-	coderBudget := team.TotalBudgetUsd * 0.6
-	if coderBudget < 1 {
-		coderBudget = 1
-	}
-
-	coderRun, err := s.spawner.SpawnForTeam(ctx, team.ID, model.TeamRoleCoder, task.ID, memberID, selection.Runtime, selection.Provider, selection.Model, coderBudget, "coding-agent")
-	if err != nil {
-		log.WithError(err).WithFields(log.Fields{"teamId": team.ID.String(), "taskId": task.ID.String()}).Error("team service: failed to spawn coder for task")
-		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, fmt.Sprintf("failed to spawn coder: %v", err))
-		team.Status = model.TeamStatusFailed
-		s.broadcastEvent(ws.EventTeamFailed, team.ProjectID.String(), team.ToDTO())
-		return
-	}
-	log.WithFields(log.Fields{
-		"teamId":    team.ID.String(),
-		"projectId": team.ProjectID.String(),
-		"taskId":    task.ID.String(),
-		"runId":     coderRun.ID.String(),
-		"role":      model.TeamRoleCoder,
-		"budgetUsd": coderBudget,
-		"runtime":   selection.Runtime,
-		"provider":  selection.Provider,
-		"model":     selection.Model,
-	}).Info("team spawned coder for task")
-	if err := s.runRepo.SetTeamFields(ctx, coderRun.ID, team.ID, model.TeamRoleCoder); err != nil {
-		log.WithError(err).WithFields(log.Fields{"teamId": team.ID.String(), "runId": coderRun.ID.String()}).Error("team service: failed to set coder team fields")
-	}
 }
 
 func (s *TeamService) updateTeamCost(ctx context.Context, team *model.AgentTeam) {
@@ -385,44 +254,6 @@ func (s *TeamService) updateTeamCost(ctx context.Context, team *model.AgentTeam)
 		"spent":  totalSpent,
 		"budget": team.TotalBudgetUsd,
 	})
-}
-
-func (s *TeamService) enforceTeamSize(ctx context.Context, team *model.AgentTeam, coderCount int) error {
-	if s == nil || team == nil {
-		return nil
-	}
-	if coderCount < 0 {
-		coderCount = 0
-	}
-
-	plannedSize := coderCount + 2 // planner + reviewer + coders
-	if s.maxTeamSize > 0 && plannedSize > s.maxTeamSize {
-		err := fmt.Errorf("%w: planned size %d exceeds limit %d", ErrTeamSizeLimit, plannedSize, s.maxTeamSize)
-		log.WithFields(log.Fields{
-			"teamId":      team.ID.String(),
-			"projectId":   team.ProjectID.String(),
-			"taskId":      team.TaskID.String(),
-			"plannedSize": plannedSize,
-			"maxTeamSize": s.maxTeamSize,
-		}).WithError(err).Warn("team size limit rejected team expansion")
-		_ = s.teamRepo.UpdateStatusWithError(ctx, team.ID, model.TeamStatusFailed, err.Error())
-		team.Status = model.TeamStatusFailed
-		team.ErrorMessage = err.Error()
-		s.broadcastEvent(ws.EventTeamFailed, team.ProjectID.String(), team.ToDTO())
-		return err
-	}
-
-	if s.maxTeamSize > 0 && plannedSize >= s.maxTeamSize-1 {
-		log.WithFields(log.Fields{
-			"teamId":      team.ID.String(),
-			"projectId":   team.ProjectID.String(),
-			"taskId":      team.TaskID.String(),
-			"plannedSize": plannedSize,
-			"maxTeamSize": s.maxTeamSize,
-		}).Warn("team size is approaching configured limit")
-	}
-
-	return nil
 }
 
 // CancelTeam cancels all active runs in a team.
@@ -703,56 +534,6 @@ func (s *TeamService) ListArtifacts(ctx context.Context, teamID uuid.UUID) ([]mo
 
 func (s *TeamService) broadcastEvent(eventType, projectID string, payload any) {
 	_ = eventbus.PublishLegacy(context.Background(), s.bus, eventType, projectID, payload)
-}
-
-// tryCreateSubtasksFromStructuredOutput attempts to create subtasks from the planner's structured output.
-// Returns the created children and true if successful, nil and false otherwise.
-func (s *TeamService) tryCreateSubtasksFromStructuredOutput(ctx context.Context, team *model.AgentTeam, task *model.Task, run *model.AgentRun) ([]*model.Task, bool) {
-	if run == nil || run.StructuredOutput == nil || len(run.StructuredOutput) == 0 {
-		return nil, false
-	}
-
-	var plannerOutput struct {
-		Subtasks []struct {
-			Title       string   `json:"title"`
-			Description string   `json:"description"`
-			Labels      []string `json:"labels"`
-			BudgetPct   float64  `json:"budget_pct"`
-		} `json:"subtasks"`
-	}
-	if err := json.Unmarshal(run.StructuredOutput, &plannerOutput); err != nil || len(plannerOutput.Subtasks) == 0 {
-		return nil, false
-	}
-
-	var inputs []model.TaskChildInput
-	for _, sub := range plannerOutput.Subtasks {
-		budgetUSD := task.BudgetUsd * 0.6
-		if sub.BudgetPct > 0 {
-			budgetUSD = team.TotalBudgetUsd * sub.BudgetPct / 100
-		}
-		inputs = append(inputs, model.TaskChildInput{
-			ParentID:    task.ID,
-			ProjectID:   task.ProjectID,
-			SprintID:    task.SprintID,
-			ReporterID:  task.ReporterID,
-			Title:       sub.Title,
-			Description: sub.Description,
-			Priority:    task.Priority,
-			Labels:      sub.Labels,
-			BudgetUSD:   budgetUSD,
-		})
-	}
-
-	children, err := s.taskRepo.CreateChildren(ctx, inputs)
-	if err != nil || len(children) == 0 {
-		return nil, false
-	}
-
-	log.WithFields(log.Fields{
-		"teamId":     team.ID.String(),
-		"childCount": len(children),
-	}).Info("team created subtasks from planner structured output")
-	return children, true
 }
 
 func teamLogFields(team *model.AgentTeam) log.Fields {
