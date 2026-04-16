@@ -41,14 +41,10 @@ type DAGWorkflowNodeExecRepo interface {
 }
 
 // DAGWorkflowTaskRepo defines the task operations needed by DAG workflows.
+// Retained because AdvanceExecution still calls EvaluateCondition on edges
+// with a task-status resolver.
 type DAGWorkflowTaskRepo interface {
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Task, error)
-	TransitionStatus(ctx context.Context, id uuid.UUID, newStatus string) error
-}
-
-// DAGWorkflowAgentSpawner spawns agent runs from workflow nodes.
-type DAGWorkflowAgentSpawner interface {
-	Spawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error)
 }
 
 // DAGWorkflowRunMappingRepo persists workflow-to-agent-run mappings.
@@ -69,14 +65,15 @@ type DAGWorkflowReviewRepo interface {
 
 // DAGWorkflowService orchestrates workflow DAG execution.
 type DAGWorkflowService struct {
-	defRepo      DAGWorkflowDefinitionRepo
-	execRepo     DAGWorkflowExecutionRepo
-	nodeRepo     DAGWorkflowNodeExecRepo
-	taskRepo     DAGWorkflowTaskRepo
-	agentSpawner DAGWorkflowAgentSpawner
-	mappingRepo  DAGWorkflowRunMappingRepo
-	reviewRepo   DAGWorkflowReviewRepo
-	hub          *ws.Hub
+	defRepo     DAGWorkflowDefinitionRepo
+	execRepo    DAGWorkflowExecutionRepo
+	nodeRepo    DAGWorkflowNodeExecRepo
+	taskRepo    DAGWorkflowTaskRepo
+	mappingRepo DAGWorkflowRunMappingRepo
+	reviewRepo  DAGWorkflowReviewRepo
+	hub         *ws.Hub
+	registry    *nodetypes.NodeTypeRegistry
+	applier     *nodetypes.EffectApplier
 }
 
 // NewDAGWorkflowService creates a new DAG workflow execution service.
@@ -85,22 +82,22 @@ func NewDAGWorkflowService(
 	execRepo DAGWorkflowExecutionRepo,
 	nodeRepo DAGWorkflowNodeExecRepo,
 	hub *ws.Hub,
+	registry *nodetypes.NodeTypeRegistry,
+	applier *nodetypes.EffectApplier,
 ) *DAGWorkflowService {
 	return &DAGWorkflowService{
 		defRepo:  defRepo,
 		execRepo: execRepo,
 		nodeRepo: nodeRepo,
 		hub:      hub,
+		registry: registry,
+		applier:  applier,
 	}
 }
 
-// SetTaskRepo sets the task repository for status transitions.
+// SetTaskRepo sets the task repository used by AdvanceExecution for edge
+// condition evaluation (task.status lookups).
 func (s *DAGWorkflowService) SetTaskRepo(r DAGWorkflowTaskRepo) { s.taskRepo = r }
-
-// SetAgentSpawner sets the agent spawner for agent_dispatch and llm_agent nodes.
-func (s *DAGWorkflowService) SetAgentSpawner(spawner DAGWorkflowAgentSpawner) {
-	s.agentSpawner = spawner
-}
 
 // SetRunMappingRepo sets the run mapping repository for async agent completion.
 func (s *DAGWorkflowService) SetRunMappingRepo(r DAGWorkflowRunMappingRepo) { s.mappingRepo = r }
@@ -400,7 +397,7 @@ func (s *DAGWorkflowService) HandleAgentRunCompletion(ctx context.Context, runID
 }
 
 // ---------------------------------------------------------------------------
-// Node execution
+// Node execution — registry + applier dispatch
 // ---------------------------------------------------------------------------
 
 func (s *DAGWorkflowService) executeNode(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, dataStore map[string]any) error {
@@ -416,331 +413,127 @@ func (s *DAGWorkflowService) executeNode(ctx context.Context, exec *model.Workfl
 		return fmt.Errorf("create node execution: %w", err)
 	}
 
-	// Resolve node config with template variables
-	config := s.resolveNodeConfig(node, dataStore)
-
-	var execErr error
-	var nodeResult json.RawMessage
-	asyncNode := false
-
-	switch node.Type {
-	case model.NodeTypeLLMAgent:
-		execErr = s.executeLLMAgent(ctx, exec, node, nodeExec.ID, config)
-		asyncNode = true // Don't mark completed — wait for HandleAgentRunCompletion
-	case model.NodeTypeAgentDispatch:
-		execErr = s.executeLLMAgent(ctx, exec, node, nodeExec.ID, config) // Treat as llm_agent
-		asyncNode = true
-	case model.NodeTypeFunction:
-		nodeResult, execErr = s.executeFunction(ctx, exec, node, config, dataStore)
-	case model.NodeTypeNotification:
-		execErr = s.executeNotification(ctx, exec, node, config)
-	case model.NodeTypeStatusTransition:
-		execErr = s.executeStatusTransition(ctx, exec, node, config)
-	case model.NodeTypeCondition:
-		execErr = s.executeCondition(ctx, exec, node, config, dataStore)
-	case model.NodeTypeLoop:
-		execErr = s.executeLoop(ctx, exec, node, config, dataStore)
-	case model.NodeTypeHumanReview:
-		execErr = s.executeHumanReview(ctx, exec, node, nodeExec.ID, config)
-		asyncNode = true // Wait for external resolution
-	case model.NodeTypeWaitEvent:
-		execErr = s.executeWaitEvent(ctx, exec, node, nodeExec.ID, config)
-		asyncNode = true
-	case model.NodeTypeGate:
-		execErr = nil
-	case model.NodeTypeParallelSplit:
-		execErr = nil
-	case model.NodeTypeParallelJoin:
-		execErr = nil
-	case model.NodeTypeTrigger:
-		execErr = nil
-	default:
-		execErr = fmt.Errorf("unknown node type: %s", node.Type)
-	}
-
-	if execErr != nil {
+	// Resolve via two-layer registry (project overlay + global built-ins).
+	entry, err := s.registry.Resolve(exec.ProjectID, node.Type)
+	if err != nil {
+		execErr := fmt.Errorf("unknown node type: %s", node.Type)
 		_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecFailed, nil, execErr.Error())
 		return execErr
 	}
 
-	if asyncNode {
-		// Node stays in running/waiting state until external callback
+	config := s.resolveNodeConfig(node, dataStore)
+
+	req := &nodetypes.NodeExecRequest{
+		Execution:  exec,
+		Node:       node,
+		Config:     config,
+		DataStore:  cloneDataStore(dataStore), // defensive copy: handlers must be pure
+		NodeExecID: nodeExec.ID,
+		ProjectID:  exec.ProjectID,
+	}
+
+	result, err := entry.Handler.Execute(ctx, req)
+	if err != nil {
+		_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecFailed, nil, err.Error())
+		return err
+	}
+	if result == nil {
+		result = &nodetypes.NodeExecResult{}
+	}
+
+	// Capability enforcement: emitted effects must be declared.
+	if bad := firstUndeclaredEffect(entry.DeclaredCaps, result.Effects); bad != "" {
+		execErr := fmt.Errorf("node type %q emitted undeclared effect %q", node.Type, bad)
+		recordCapabilityViolation(ctx, s.nodeRepo, nodeExec.ID, execErr)
+		return execErr
+	}
+
+	// At most one park effect per node.
+	if result.ParkCount() > 1 {
+		execErr := fmt.Errorf("node type %q emitted multiple park effects", node.Type)
+		_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecFailed, nil, execErr.Error())
+		return execErr
+	}
+
+	parked, err := s.applier.Apply(ctx, exec, nodeExec.ID, node, result.Effects)
+	if err != nil {
+		_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecFailed, nil, err.Error())
+		return err
+	}
+
+	if parked {
+		// Determine which kind of park to flip statuses correctly.
+		park := firstParkEffect(result.Effects)
+		switch park.Kind {
+		case nodetypes.EffectRequestReview:
+			_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecWaiting, nil, "")
+			_ = s.execRepo.UpdateExecution(ctx, exec.ID, model.WorkflowExecStatusPaused, exec.CurrentNodes, "")
+		case nodetypes.EffectWaitEvent:
+			_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecWaiting, nil, "")
+		case nodetypes.EffectSpawnAgent, nodetypes.EffectInvokeSubWorkflow:
+			// Stays running — async callback (HandleAgentRunCompletion / sub-workflow completion) will resume.
+		}
 		return nil
 	}
 
-	// Synchronous completion
-	_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecCompleted, nodeResult, "")
-
-	// Store result in DataStore
-	if len(nodeResult) > 0 {
-		s.storeNodeResult(ctx, exec.ID, node.ID, nodeResult)
+	// Synchronous completion path
+	_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecCompleted, result.Result, "")
+	if len(result.Result) > 0 {
+		s.storeNodeResult(ctx, exec.ID, node.ID, result.Result)
 	}
-
 	s.broadcastEvent(ws.EventWorkflowNodeCompleted, exec.ProjectID.String(), map[string]any{
 		"executionId": exec.ID.String(),
 		"nodeId":      node.ID,
 		"nodeType":    node.Type,
 		"status":      model.NodeExecCompleted,
 	})
-
 	return nil
 }
 
 // ---------------------------------------------------------------------------
-// Node type executors
+// Park-status / capability helpers
 // ---------------------------------------------------------------------------
 
-// executeLLMAgent spawns an agent run via the bridge and registers it for async callback.
-func (s *DAGWorkflowService) executeLLMAgent(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, nodeExecID uuid.UUID, config map[string]any) error {
-	if s.agentSpawner == nil {
-		log.WithField("nodeId", node.ID).Warn("workflow: llm_agent skipped - agent spawner not available")
+func cloneDataStore(in map[string]any) map[string]any {
+	if in == nil {
 		return nil
 	}
-	if exec.TaskID == nil {
-		return fmt.Errorf("llm_agent requires a task ID in the execution context")
+	out := make(map[string]any, len(in))
+	for k, v := range in {
+		out[k] = v
 	}
-
-	runtime, _ := config["runtime"].(string)
-	provider, _ := config["provider"].(string)
-	modelName, _ := config["model"].(string)
-	roleID, _ := config["roleId"].(string)
-	budgetUsd := 5.0
-	if b, ok := config["budgetUsd"].(float64); ok && b > 0 {
-		budgetUsd = b
-	}
-
-	memberID := uuid.Nil
-	if mid, ok := config["memberId"].(string); ok {
-		if parsed, err := uuid.Parse(mid); err == nil {
-			memberID = parsed
-		}
-	}
-
-	run, err := s.agentSpawner.Spawn(ctx, *exec.TaskID, memberID, runtime, provider, modelName, budgetUsd, roleID)
-	if err != nil {
-		return fmt.Errorf("llm_agent spawn: %w", err)
-	}
-
-	// Register mapping for async completion callback
-	if s.mappingRepo != nil {
-		mapping := &model.WorkflowRunMapping{
-			ID:          uuid.New(),
-			ExecutionID: exec.ID,
-			NodeID:      node.ID,
-			AgentRunID:  run.ID,
-		}
-		if err := s.mappingRepo.Create(ctx, mapping); err != nil {
-			log.WithError(err).Warn("workflow: failed to create run mapping")
-		}
-	}
-
-	log.WithFields(log.Fields{
-		"executionId": exec.ID.String(),
-		"nodeId":      node.ID,
-		"runId":       run.ID.String(),
-		"runtime":     runtime,
-		"model":       modelName,
-		"budgetUsd":   budgetUsd,
-	}).Info("workflow: llm_agent dispatched")
-	return nil
+	return out
 }
 
-// executeFunction evaluates an expression and produces a result.
-func (s *DAGWorkflowService) executeFunction(_ context.Context, _ *model.WorkflowExecution, node *model.WorkflowNode, config map[string]any, dataStore map[string]any) (json.RawMessage, error) {
-	expression, _ := config["expression"].(string)
-	if expression == "" {
-		// If no expression, pass through input as output
-		if input, ok := config["input"]; ok {
-			result, _ := json.Marshal(input)
-			return result, nil
+func firstUndeclaredEffect(declared map[nodetypes.EffectKind]bool, effects []nodetypes.Effect) nodetypes.EffectKind {
+	if declared == nil {
+		// Nothing declared = strictly nothing allowed.
+		if len(effects) > 0 {
+			return effects[0].Kind
 		}
-		return json.RawMessage("null"), nil
+		return ""
 	}
-
-	// Resolve template vars in expression
-	resolved := nodetypes.ResolveTemplateVars(expression, dataStore)
-
-	// Try to parse as JSON and return directly
-	if json.Valid([]byte(resolved)) {
-		return json.RawMessage(resolved), nil
-	}
-
-	// Evaluate simple expressions
-	val := nodetypes.EvaluateExpression(resolved, dataStore)
-	result, _ := json.Marshal(val)
-	return result, nil
-}
-
-// executeNotification logs and broadcasts a WebSocket event.
-func (s *DAGWorkflowService) executeNotification(_ context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, config map[string]any) error {
-	message := "Workflow notification"
-	if msg, ok := config["message"].(string); ok {
-		message = msg
-	}
-	log.WithFields(log.Fields{
-		"executionId": exec.ID.String(),
-		"nodeId":      node.ID,
-		"message":     message,
-	}).Info("workflow: notification sent")
-
-	s.broadcastEvent("workflow.notification", exec.ProjectID.String(), map[string]any{
-		"executionId": exec.ID.String(),
-		"nodeId":      node.ID,
-		"message":     message,
-	})
-	return nil
-}
-
-// executeStatusTransition updates the task status.
-func (s *DAGWorkflowService) executeStatusTransition(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, config map[string]any) error {
-	if s.taskRepo == nil {
-		log.WithField("nodeId", node.ID).Warn("workflow: status_transition skipped - task repo not available")
-		return nil
-	}
-	if exec.TaskID == nil {
-		return fmt.Errorf("status_transition requires a task ID in the execution context")
-	}
-	targetStatus, ok := config["targetStatus"].(string)
-	if !ok || targetStatus == "" {
-		return fmt.Errorf("status_transition node %s missing targetStatus config", node.ID)
-	}
-	if err := s.taskRepo.TransitionStatus(ctx, *exec.TaskID, targetStatus); err != nil {
-		return fmt.Errorf("status_transition to %s: %w", targetStatus, err)
-	}
-	return nil
-}
-
-// executeCondition evaluates a condition expression.
-func (s *DAGWorkflowService) executeCondition(ctx context.Context, exec *model.WorkflowExecution, _ *model.WorkflowNode, config map[string]any, dataStore map[string]any) error {
-	expression, _ := config["expression"].(string)
-	if expression == "" {
-		return nil // No condition = pass through
-	}
-	if !nodetypes.EvaluateCondition(ctx, exec, expression, dataStore, s.taskRepo) {
-		return fmt.Errorf("condition not met: %s", expression)
-	}
-	return nil
-}
-
-// executeLoop handles a feedback loop by resetting downstream nodes and re-advancing.
-func (s *DAGWorkflowService) executeLoop(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, config map[string]any, dataStore map[string]any) error {
-	targetNode, _ := config["target_node"].(string)
-	maxIterations := 3
-	if m, ok := config["max_iterations"].(float64); ok && m > 0 {
-		maxIterations = int(m)
-	}
-	exitCondition, _ := config["exit_condition"].(string)
-
-	if targetNode == "" {
-		return fmt.Errorf("loop node %s missing target_node config", node.ID)
-	}
-
-	// Track iteration count in DataStore
-	loopKey := "_loop_" + node.ID + "_count"
-	currentIter := 0
-	if v, ok := dataStore[loopKey]; ok {
-		if f, ok := v.(float64); ok {
-			currentIter = int(f)
+	for _, e := range effects {
+		if !declared[e.Kind] {
+			return e.Kind
 		}
 	}
-
-	// Check exit conditions
-	if currentIter >= maxIterations {
-		log.WithFields(log.Fields{
-			"nodeId":    node.ID,
-			"iteration": currentIter,
-			"max":       maxIterations,
-		}).Info("workflow: loop max iterations reached")
-		return nil // Exit loop, continue DAG
-	}
-	if exitCondition != "" && nodetypes.EvaluateCondition(ctx, exec, exitCondition, dataStore, s.taskRepo) {
-		log.WithFields(log.Fields{
-			"nodeId":    node.ID,
-			"iteration": currentIter,
-			"condition": exitCondition,
-		}).Info("workflow: loop exit condition met")
-		return nil
-	}
-
-	// Increment iteration count
-	currentIter++
-	dataStore[loopKey] = float64(currentIter)
-	dsJSON, _ := json.Marshal(dataStore)
-	if err := s.execRepo.UpdateExecutionDataStore(ctx, exec.ID, dsJSON); err != nil {
-		log.WithError(err).Warn("workflow: failed to update DataStore for loop")
-	}
-
-	// Find all nodes between target_node and this loop node, reset them
-	def, err := s.defRepo.GetByID(ctx, exec.WorkflowID)
-	if err != nil {
-		return fmt.Errorf("load definition for loop: %w", err)
-	}
-	var allNodes []model.WorkflowNode
-	var allEdges []model.WorkflowEdge
-	_ = json.Unmarshal(def.Nodes, &allNodes)
-	_ = json.Unmarshal(def.Edges, &allEdges)
-
-	nodesToReset := nodetypes.FindNodesBetween(targetNode, node.ID, allNodes, allEdges)
-	nodesToReset = append(nodesToReset, targetNode) // Include the target itself
-
-	if len(nodesToReset) > 0 {
-		if err := s.nodeRepo.DeleteNodeExecutionsByNodeIDs(ctx, exec.ID, nodesToReset); err != nil {
-			return fmt.Errorf("reset nodes for loop: %w", err)
-		}
-	}
-
-	log.WithFields(log.Fields{
-		"nodeId":       node.ID,
-		"iteration":    currentIter,
-		"targetNode":   targetNode,
-		"resetNodes":   len(nodesToReset),
-	}).Info("workflow: loop iteration, resetting nodes")
-
-	// Re-advance from the beginning — AdvanceExecution will find the reset nodes
-	return nil // The caller (AdvanceExecution) will recurse and pick up the reset nodes
+	return ""
 }
 
-// executeHumanReview pauses execution and waits for human input.
-func (s *DAGWorkflowService) executeHumanReview(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, nodeExecID uuid.UUID, config map[string]any) error {
-	_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExecID, model.NodeExecWaiting, nil, "")
-	_ = s.execRepo.UpdateExecution(ctx, exec.ID, model.WorkflowExecStatusPaused, nil, "")
-
-	prompt, _ := config["prompt"].(string)
-	if prompt == "" {
-		prompt = "Review required"
-	}
-
-	// Persist the review request
-	if s.reviewRepo != nil {
-		reviewCtx, _ := json.Marshal(config)
-		review := &model.WorkflowPendingReview{
-			ID:          uuid.New(),
-			ExecutionID: exec.ID,
-			NodeID:      node.ID,
-			ProjectID:   exec.ProjectID,
-			Prompt:      prompt,
-			Context:     reviewCtx,
-			Decision:    model.ReviewDecisionPending,
-		}
-		if err := s.reviewRepo.Create(ctx, review); err != nil {
-			log.WithError(err).Warn("workflow: failed to persist pending review")
+func firstParkEffect(effects []nodetypes.Effect) nodetypes.Effect {
+	for _, e := range effects {
+		switch e.Kind {
+		case nodetypes.EffectSpawnAgent, nodetypes.EffectRequestReview,
+			nodetypes.EffectWaitEvent, nodetypes.EffectInvokeSubWorkflow:
+			return e
 		}
 	}
+	return nodetypes.Effect{}
+}
 
-	s.broadcastEvent(ws.EventWorkflowReviewRequested, exec.ProjectID.String(), map[string]any{
-		"executionId": exec.ID.String(),
-		"nodeId":      node.ID,
-		"nodeExecId":  nodeExecID.String(),
-		"prompt":      prompt,
-	})
-
-	log.WithFields(log.Fields{
-		"executionId": exec.ID.String(),
-		"nodeId":      node.ID,
-		"prompt":      prompt,
-	}).Info("workflow: human review requested, execution paused")
-
-	return nil
+func recordCapabilityViolation(ctx context.Context, nodeRepo DAGWorkflowNodeExecRepo, nodeExecID uuid.UUID, err error) {
+	_ = nodeRepo.UpdateNodeExecution(ctx, nodeExecID, model.NodeExecFailed, nil, err.Error())
 }
 
 // ResolveHumanReview resumes a paused workflow after human review.
@@ -799,20 +592,6 @@ func (s *DAGWorkflowService) ResolveHumanReview(ctx context.Context, executionID
 	return s.AdvanceExecution(ctx, executionID)
 }
 
-// executeWaitEvent sets a node to waiting for an external event.
-func (s *DAGWorkflowService) executeWaitEvent(_ context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, nodeExecID uuid.UUID, config map[string]any) error {
-	_ = s.nodeRepo.UpdateNodeExecution(context.Background(), nodeExecID, model.NodeExecWaiting, nil, "")
-
-	eventType, _ := config["event_type"].(string)
-	s.broadcastEvent(ws.EventWorkflowNodeWaiting, exec.ProjectID.String(), map[string]any{
-		"executionId": exec.ID.String(),
-		"nodeId":      node.ID,
-		"nodeExecId":  nodeExecID.String(),
-		"eventType":   eventType,
-	})
-	return nil
-}
-
 // HandleExternalEvent resumes a waiting node with external data.
 func (s *DAGWorkflowService) HandleExternalEvent(ctx context.Context, executionID uuid.UUID, nodeID string, payload json.RawMessage) error {
 	nodeExecs, err := s.nodeRepo.ListNodeExecutions(ctx, executionID)
@@ -844,7 +623,7 @@ func (s *DAGWorkflowService) HandleExternalEvent(ctx context.Context, executionI
 }
 
 // ---------------------------------------------------------------------------
-// Template variable resolution & expression evaluation
+// Template variable resolution
 // ---------------------------------------------------------------------------
 
 // resolveNodeConfig parses node config JSON and resolves template variables.

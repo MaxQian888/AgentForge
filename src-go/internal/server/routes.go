@@ -2,6 +2,7 @@ package server
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -22,8 +23,26 @@ import (
 	skillspkg "github.com/react-go-quick-starter/server/internal/skills"
 	"github.com/react-go-quick-starter/server/internal/storage"
 	"github.com/react-go-quick-starter/server/internal/version"
+	"github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
 	"github.com/react-go-quick-starter/server/internal/ws"
 )
+
+// wsHubAdapter bridges the ws.Hub event struct API to the nodetypes.BroadcastHub
+// interface that EffectApplier consumes (eventType, projectID, payload).
+type wsHubAdapter struct {
+	h *ws.Hub
+}
+
+func (a wsHubAdapter) BroadcastEvent(eventType, projectID string, payload map[string]any) {
+	if a.h == nil {
+		return
+	}
+	a.h.BroadcastEvent(&ws.Event{
+		Type:      eventType,
+		ProjectID: projectID,
+		Payload:   payload,
+	})
+}
 
 type bridgeIntentAdapter struct {
 	client *bridge.Client
@@ -305,20 +324,45 @@ func RegisterRoutes(
 	dagDefRepo := repository.NewWorkflowDefinitionRepository(taskRepo.DB())
 	dagExecRepo := repository.NewWorkflowExecutionRepository(taskRepo.DB())
 	dagNodeExecRepo := repository.NewWorkflowNodeExecutionRepository(taskRepo.DB())
-	dagWorkflowSvc := service.NewDAGWorkflowService(dagDefRepo, dagExecRepo, dagNodeExecRepo, hub)
-	dagWorkflowSvc.SetTaskRepo(taskRepo)
+	// Hoisted: needed by EffectApplier construction below.
 	dagRunMappingRepo := repository.NewWorkflowRunMappingRepository(taskRepo.DB())
+	wfReviewRepo := repository.NewWorkflowPendingReviewRepository(taskRepo.DB())
+
+	// Build node-type registry and seed with built-ins.
+	nodeRegistry := nodetypes.NewRegistry(nil)
+	if err := nodetypes.RegisterBuiltins(nodeRegistry, nodetypes.BuiltinDeps{
+		TaskRepo: taskRepo,
+		DefRepo:  dagDefRepo,
+	}); err != nil {
+		panic(fmt.Errorf("register built-in node types: %w", err))
+	}
+	nodeRegistry.LockGlobal()
+
+	// Build effect applier with all back-end deps.
+	effectApplier := &nodetypes.EffectApplier{
+		Hub:         wsHubAdapter{h: hub},
+		TaskRepo:    taskRepo,
+		NodeRepo:    dagNodeExecRepo,
+		ExecRepo:    dagExecRepo,
+		MappingRepo: dagRunMappingRepo,
+		ReviewRepo:  wfReviewRepo,
+		// AgentSpawner wired below once agentSvc is known to exist.
+	}
+
+	dagWorkflowSvc := service.NewDAGWorkflowService(
+		dagDefRepo, dagExecRepo, dagNodeExecRepo, hub, nodeRegistry, effectApplier,
+	)
+	dagWorkflowSvc.SetTaskRepo(taskRepo)
 	dagWorkflowSvc.SetRunMappingRepo(dagRunMappingRepo)
+	dagWorkflowSvc.SetReviewRepo(wfReviewRepo)
 	if agentSvc != nil {
-		dagWorkflowSvc.SetAgentSpawner(agentSvc)
+		effectApplier.AgentSpawner = agentSvc
 		agentSvc.SetDAGWorkflowService(dagWorkflowSvc)
 	}
 	workflowH = workflowH.WithDAGService(dagWorkflowSvc, dagDefRepo, dagExecRepo, dagNodeExecRepo)
 	// Template and review services
 	templateSvc := service.NewWorkflowTemplateService(dagDefRepo, dagWorkflowSvc)
 	workflowH = workflowH.WithTemplateService(templateSvc)
-	wfReviewRepo := repository.NewWorkflowPendingReviewRepository(taskRepo.DB())
-	dagWorkflowSvc.SetReviewRepo(wfReviewRepo)
 	workflowH = workflowH.WithReviewRepo(wfReviewRepo)
 	// Seed system templates on startup, then wire team-to-workflow adapter
 	go func() {
