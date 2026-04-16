@@ -132,11 +132,11 @@ func (m *mockWikiHandlerService) UpdatePage(ctx echo.Context, projectID uuid.UUI
 	if !ok {
 		return nil, service.ErrWikiPageNotFound
 	}
-	if expectedUpdatedAt != nil && page.UpdatedAt.After(*expectedUpdatedAt) {
-		return nil, service.ErrWikiPageConflict
-	}
 	if page.IsTemplate && page.IsSystem {
 		return nil, service.ErrWikiTemplateImmutable
+	}
+	if expectedUpdatedAt != nil && page.UpdatedAt.After(*expectedUpdatedAt) {
+		return nil, service.ErrWikiPageConflict
 	}
 	page.Title = title
 	page.Content = content

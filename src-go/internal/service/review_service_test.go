@@ -4,14 +4,14 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
-	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/google/uuid"
 	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/ws"
@@ -256,34 +256,42 @@ func (m *mockReviewBridge) Review(_ context.Context, req bridgeclient.ReviewRequ
 	return m.response, nil
 }
 
-func attachProjectListener(hub *ws.Hub, projectID string) chan []byte {
-	client := &ws.Client{}
-	send := make(chan []byte, 8)
-
-	clientValue := reflect.ValueOf(client).Elem()
-
-	projectField := clientValue.FieldByName("projectID")
-	reflect.NewAt(projectField.Type(), unsafe.Pointer(projectField.UnsafeAddr())).Elem().SetString(projectID)
-
-	sendField := clientValue.FieldByName("send")
-	reflect.NewAt(sendField.Type(), unsafe.Pointer(sendField.UnsafeAddr())).Elem().Set(reflect.ValueOf(send))
-
-	hubValue := reflect.ValueOf(hub).Elem()
-	clientsField := hubValue.FieldByName("clients")
-	clientsMap := reflect.NewAt(clientsField.Type(), unsafe.Pointer(clientsField.UnsafeAddr())).Elem()
-	clientsMap.SetMapIndex(reflect.ValueOf(client), reflect.ValueOf(struct{}{}))
-
-	return send
+type reviewEventCapture struct {
+	Type      string
+	ProjectID string
+	Payload   any
 }
 
-func decodeReviewEvent(t *testing.T, raw []byte) ws.Event {
-	t.Helper()
+type reviewBusCapture struct {
+	mu     sync.Mutex
+	events []reviewEventCapture
+}
 
-	var event ws.Event
-	if err := json.Unmarshal(raw, &event); err != nil {
-		t.Fatalf("unmarshal ws event: %v", err)
+func (c *reviewBusCapture) Publish(_ context.Context, e *eventbus.Event) error {
+	var payload any
+	if len(e.Payload) > 0 {
+		_ = json.Unmarshal(e.Payload, &payload)
 	}
-	return event
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, reviewEventCapture{
+		Type:      e.Type,
+		ProjectID: eventbus.GetString(e, eventbus.MetaProjectID),
+		Payload:   payload,
+	})
+	return nil
+}
+
+func (c *reviewBusCapture) next(t *testing.T) reviewEventCapture {
+	t.Helper()
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.events) == 0 {
+		t.Fatal("expected at least one event, got none")
+	}
+	head := c.events[0]
+	c.events = c.events[1:]
+	return head
 }
 
 func TestReviewService_Trigger_CompletesApproveReview(t *testing.T) {
@@ -313,7 +321,7 @@ func TestReviewService_Trigger_CompletesApproveReview(t *testing.T) {
 		},
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, notifications, ws.NewHub(), bridge)
+	svc := service.NewReviewService(reviewRepo, taskRepo, notifications, ws.NewHub(), nil, bridge)
 
 	review, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
 		TaskID:     taskID.String(),
@@ -355,7 +363,7 @@ func TestReviewService_CompleteEmitsAutomationEvent(t *testing.T) {
 		Status: model.ReviewStatusInProgress,
 	}
 	automation := &automationEventProbe{}
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil)
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil)
 	svc.SetAutomationEvaluator(automation)
 
 	if _, err := svc.Complete(context.Background(), reviewID, &model.CompleteReviewRequest{
@@ -437,7 +445,7 @@ func TestReviewService_CompleteRunsAutomationIMFlow(t *testing.T) {
 		im,
 		nil,
 	)
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil)
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil)
 	svc.SetAutomationEvaluator(engine)
 
 	if _, err := svc.Complete(context.Background(), reviewID, &model.CompleteReviewRequest{
@@ -476,7 +484,7 @@ func TestReviewService_Complete_RequestChangesTransitionsTask(t *testing.T) {
 		Status:   model.ReviewStatusInProgress,
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil)
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil)
 
 	review, err := svc.Complete(context.Background(), reviewID, &model.CompleteReviewRequest{
 		RiskLevel:      model.ReviewRiskLevelHigh,
@@ -527,7 +535,7 @@ func TestReviewService_CompleteWritesBackToRequirementDoc(t *testing.T) {
 		}},
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil).
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil).
 		WithDocWriteback(linkRepo, pageRepo, versionRepo)
 
 	review, err := svc.Complete(context.Background(), reviewID, &model.CompleteReviewRequest{
@@ -563,7 +571,7 @@ func TestReviewService_CompleteSkipsWritebackWithoutLinkedDoc(t *testing.T) {
 	linkRepo := &mockReviewEntityLinkRepo{}
 	pageRepo := &mockReviewWikiPageRepo{pages: map[uuid.UUID]*model.WikiPage{}}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil).
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil).
 		WithDocWriteback(linkRepo, pageRepo, versionRepo)
 
 	if _, err := svc.Complete(context.Background(), reviewID, &model.CompleteReviewRequest{
@@ -607,7 +615,7 @@ func TestReviewService_CompleteRetriesWritebackOnConflict(t *testing.T) {
 		}},
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil).
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil).
 		WithDocWriteback(linkRepo, pageRepo, versionRepo)
 
 	if _, err := svc.Complete(context.Background(), reviewID, &model.CompleteReviewRequest{
@@ -640,8 +648,7 @@ func TestReviewService_Trigger_DryRunPersistsResultAndBroadcastsEvents(t *testin
 	}
 	reviewRepo := newMockReviewRepo()
 	notifications := &mockReviewNotifications{}
-	hub := ws.NewHub()
-	eventCh := attachProjectListener(hub, projectID.String())
+	capture := &reviewBusCapture{}
 	bridge := &mockReviewBridge{
 		response: &bridgeclient.ReviewResponse{
 			RiskLevel:      model.ReviewRiskLevelHigh,
@@ -654,7 +661,7 @@ func TestReviewService_Trigger_DryRunPersistsResultAndBroadcastsEvents(t *testin
 		},
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, notifications, hub, bridge)
+	svc := service.NewReviewService(reviewRepo, taskRepo, notifications, ws.NewHub(), capture, bridge)
 
 	review, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
 		TaskID:     taskID.String(),
@@ -681,8 +688,8 @@ func TestReviewService_Trigger_DryRunPersistsResultAndBroadcastsEvents(t *testin
 		t.Fatalf("expected one persisted finding, got %d", len(stored.Findings))
 	}
 
-	created := decodeReviewEvent(t, <-eventCh)
-	completed := decodeReviewEvent(t, <-eventCh)
+	created := capture.next(t)
+	completed := capture.next(t)
 
 	if created.Type != ws.EventReviewCreated {
 		t.Fatalf("expected first event %s, got %s", ws.EventReviewCreated, created.Type)
@@ -746,7 +753,7 @@ func TestReviewService_Trigger_ForwardsMatchingReviewPluginPlanToBridge(t *testi
 		},
 	})
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), bridge).
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, bridge).
 		WithExecutionPlanner(planner)
 
 	_, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
@@ -833,7 +840,7 @@ func TestReviewService_Trigger_PersistsExecutionMetadataFromBridgeResponse(t *te
 		},
 	})
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), bridge).
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, bridge).
 		WithExecutionPlanner(planner)
 
 	review, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
@@ -881,8 +888,7 @@ func TestReviewService_Trigger_BroadcastsExecutionMetadataInCompletedEvent(t *te
 		},
 	}
 	reviewRepo := newMockReviewRepo()
-	hub := ws.NewHub()
-	eventCh := attachProjectListener(hub, projectID.String())
+	capture := &reviewBusCapture{}
 	bridge := &mockReviewBridge{
 		response: &bridgeclient.ReviewResponse{
 			RiskLevel:      model.ReviewRiskLevelLow,
@@ -915,7 +921,7 @@ func TestReviewService_Trigger_BroadcastsExecutionMetadataInCompletedEvent(t *te
 		},
 	})
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, hub, bridge).
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), capture, bridge).
 		WithExecutionPlanner(planner)
 
 	if _, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
@@ -927,8 +933,8 @@ func TestReviewService_Trigger_BroadcastsExecutionMetadataInCompletedEvent(t *te
 		t.Fatalf("Trigger() error = %v", err)
 	}
 
-	_ = decodeReviewEvent(t, <-eventCh)
-	completed := decodeReviewEvent(t, <-eventCh)
+	_ = capture.next(t)
+	completed := capture.next(t)
 	payload, ok := completed.Payload.(map[string]any)
 	if !ok {
 		t.Fatalf("expected payload map, got %#v", completed.Payload)
@@ -971,7 +977,7 @@ func TestReviewService_CompleteRoutesToPendingHumanWhenManualApprovalRequired(t 
 		},
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil).
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil).
 		WithProjectRepository(projectRepo)
 
 	review, err := svc.Complete(context.Background(), reviewID, &model.CompleteReviewRequest{
@@ -1019,7 +1025,7 @@ func TestReviewService_CompleteRoutesToPendingHumanWhenRiskThresholdExceeded(t *
 		},
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil).
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil).
 		WithProjectRepository(projectRepo)
 
 	review, err := svc.Complete(context.Background(), reviewID, &model.CompleteReviewRequest{
@@ -1067,7 +1073,7 @@ func TestReviewService_CompleteAutoResolvesWhenPolicyPasses(t *testing.T) {
 		},
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil).
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil).
 		WithProjectRepository(projectRepo)
 
 	review, err := svc.Complete(context.Background(), reviewID, &model.CompleteReviewRequest{
@@ -1119,7 +1125,7 @@ func TestReviewService_ApproveReviewPreservesEvidenceAndAppendsDecision(t *testi
 		CostUSD:        1.2,
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil)
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil)
 
 	review, err := svc.ApproveReview(context.Background(), reviewID, "reviewer-1", "Looks good")
 	if err != nil {
@@ -1175,7 +1181,7 @@ func TestReviewService_RequestChangesReviewPreservesEvidenceAndAppendsDecision(t
 		CostUSD:        1.2,
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil)
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil)
 
 	review, err := svc.RequestChangesReview(context.Background(), reviewID, "reviewer-2", "Needs hardening")
 	if err != nil {
@@ -1231,7 +1237,7 @@ func TestReviewService_RejectReviewPreservesEvidenceAndAppendsDecision(t *testin
 		CostUSD:        2.1,
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil)
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil)
 
 	review, err := svc.RejectReview(context.Background(), reviewID, "reviewer-3", "Security risk", "must close")
 	if err != nil {
@@ -1280,7 +1286,7 @@ func TestReviewService_MarkFalsePositiveDismissesMatchedFinding(t *testing.T) {
 		ExecutionMetadata: &model.ReviewExecutionMetadata{},
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil)
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, nil)
 
 	review, err := svc.MarkFalsePositive(context.Background(), reviewID, "reviewer-2", []string{"finding-1"}, "known acceptable risk")
 	if err != nil {
@@ -1315,7 +1321,7 @@ func TestReviewService_TriggerAllowsStandaloneDeepReview(t *testing.T) {
 		},
 	}
 
-	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), bridge)
+	svc := service.NewReviewService(reviewRepo, taskRepo, &mockReviewNotifications{}, ws.NewHub(), nil, bridge)
 
 	review, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
 		TaskID:    "",

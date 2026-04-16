@@ -7,6 +7,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
 	log "github.com/sirupsen/logrus"
@@ -48,6 +49,7 @@ type TaskWorkflowFollowUpNotifier interface {
 type TaskWorkflowService struct {
 	workflowRepo WorkflowConfigProvider
 	hub          *ws.Hub
+	bus          eventbus.Publisher
 	dispatcher   TaskWorkflowDispatcher
 	taskRepo     WorkflowTaskTransitioner
 	notifier     WorkflowNotifier
@@ -57,10 +59,11 @@ type TaskWorkflowService struct {
 }
 
 // NewTaskWorkflowService creates a new trigger engine.
-func NewTaskWorkflowService(workflowRepo WorkflowConfigProvider, hub *ws.Hub) *TaskWorkflowService {
+func NewTaskWorkflowService(workflowRepo WorkflowConfigProvider, hub *ws.Hub, bus eventbus.Publisher) *TaskWorkflowService {
 	return &TaskWorkflowService{
 		workflowRepo: workflowRepo,
 		hub:          hub,
+		bus:          bus,
 	}
 }
 
@@ -499,19 +502,12 @@ func (s *TaskWorkflowService) executeNotify(ctx context.Context, task *model.Tas
 }
 
 func (s *TaskWorkflowService) broadcastTriggerFired(task *model.Task, trigger model.WorkflowTrigger, outcome model.WorkflowTriggerOutcome) {
-	if s.hub == nil {
-		return
-	}
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventWorkflowTriggerFired,
-		ProjectID: task.ProjectID.String(),
-		Payload: map[string]any{
-			"taskId":  task.ID.String(),
-			"action":  trigger.Action,
-			"from":    trigger.FromStatus,
-			"to":      trigger.ToStatus,
-			"config":  trigger.Config,
-			"outcome": outcome,
-		},
+	_ = eventbus.PublishLegacy(context.Background(), s.bus, ws.EventWorkflowTriggerFired, task.ProjectID.String(), map[string]any{
+		"taskId":  task.ID.String(),
+		"action":  trigger.Action,
+		"from":    trigger.FromStatus,
+		"to":      trigger.ToStatus,
+		"config":  trigger.Config,
+		"outcome": outcome,
 	})
 }

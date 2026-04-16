@@ -79,7 +79,7 @@ func (f *fakeWorkflowConfigRepo) GetByProject(_ context.Context, _ uuid.UUID) (*
 }
 
 func TestTaskWorkflowService_EvaluateTransition_NoConfig(t *testing.T) {
-	svc := service.NewTaskWorkflowService(&fakeWorkflowConfigRepo{err: errors.New("not found")}, nil)
+	svc := service.NewTaskWorkflowService(&fakeWorkflowConfigRepo{err: errors.New("not found")}, nil, nil)
 	task := &model.Task{ID: uuid.New(), ProjectID: uuid.New(), Status: "assigned"}
 	results := svc.EvaluateTransition(context.Background(), task, "triaged", "assigned")
 	if len(results) != 0 {
@@ -102,7 +102,7 @@ func TestTaskWorkflowService_EvaluateTransition_MatchesTrigger(t *testing.T) {
 		},
 	}
 
-	svc := service.NewTaskWorkflowService(repo, nil)
+	svc := service.NewTaskWorkflowService(repo, nil, nil)
 	task := &model.Task{ID: uuid.New(), ProjectID: repo.config.ProjectID, Status: "assigned"}
 
 	results := svc.EvaluateTransition(context.Background(), task, "triaged", "assigned")
@@ -131,7 +131,7 @@ func TestTaskWorkflowService_EvaluateTransition_NoMatch(t *testing.T) {
 		},
 	}
 
-	svc := service.NewTaskWorkflowService(repo, nil)
+	svc := service.NewTaskWorkflowService(repo, nil, nil)
 	task := &model.Task{ID: uuid.New(), ProjectID: repo.config.ProjectID, Status: "assigned"}
 
 	results := svc.EvaluateTransition(context.Background(), task, "triaged", "assigned")
@@ -141,7 +141,7 @@ func TestTaskWorkflowService_EvaluateTransition_NoMatch(t *testing.T) {
 }
 
 func TestTaskWorkflowService_EvaluateTransition_NilTask(t *testing.T) {
-	svc := service.NewTaskWorkflowService(&fakeWorkflowConfigRepo{}, nil)
+	svc := service.NewTaskWorkflowService(&fakeWorkflowConfigRepo{}, nil, nil)
 	results := svc.EvaluateTransition(context.Background(), nil, "a", "b")
 	if results != nil {
 		t.Fatalf("expected nil results, got %v", results)
@@ -169,7 +169,7 @@ func TestTaskWorkflowService_EvaluateTransition_NormalizesLegacyDispatchAlias(t 
 		},
 	}
 	dispatcher := &fakeTaskWorkflowDispatcher{}
-	svc := service.NewTaskWorkflowService(repo, nil)
+	svc := service.NewTaskWorkflowService(repo, nil, nil)
 	svc.SetDispatcher(dispatcher)
 
 	task := &model.Task{ID: uuid.New(), ProjectID: repo.config.ProjectID, Status: "assigned"}
@@ -214,7 +214,7 @@ func TestTaskWorkflowService_EvaluateTransition_InvalidStartWorkflowConfigReturn
 			Triggers:  triggersJSON,
 		},
 	}
-	svc := service.NewTaskWorkflowService(repo, nil)
+	svc := service.NewTaskWorkflowService(repo, nil, nil)
 	task := &model.Task{ID: uuid.New(), ProjectID: repo.config.ProjectID, Status: "in_progress"}
 
 	results := svc.EvaluateTransition(context.Background(), task, "assigned", "in_progress")
@@ -254,7 +254,7 @@ func TestTaskWorkflowService_EvaluateTransition_StartWorkflowUsesTaskTriggeredRu
 		},
 	}
 	runtime := &fakeTaskWorkflowRuntime{}
-	svc := service.NewTaskWorkflowService(repo, nil)
+	svc := service.NewTaskWorkflowService(repo, nil, nil)
 	svc.SetWorkflowRuntime(runtime)
 	task := &model.Task{ID: uuid.New(), ProjectID: repo.config.ProjectID, Status: "in_progress"}
 
@@ -312,7 +312,7 @@ func TestTaskWorkflowService_EvaluateTransition_DuplicateWorkflowRunIsBlocked(t 
 	runtime := &fakeTaskWorkflowRuntime{
 		err: errors.New("workflow plugin task-delivery-flow already has an active workflow run for task and profile"),
 	}
-	svc := service.NewTaskWorkflowService(repo, nil)
+	svc := service.NewTaskWorkflowService(repo, nil, nil)
 	svc.SetWorkflowRuntime(runtime)
 	task := &model.Task{ID: uuid.New(), ProjectID: repo.config.ProjectID, Status: "in_progress"}
 
@@ -351,7 +351,7 @@ func TestTaskWorkflowService_EvaluateTransition_QueuesTaskFollowUpForWorkflowOut
 	}
 	runtime := &fakeTaskWorkflowRuntime{}
 	followUp := &fakeTaskWorkflowFollowUpNotifier{}
-	svc := service.NewTaskWorkflowService(repo, nil)
+	svc := service.NewTaskWorkflowService(repo, nil, nil)
 	svc.SetWorkflowRuntime(runtime)
 	svc.SetFollowUpNotifier(followUp)
 	task := &model.Task{ID: uuid.New(), ProjectID: repo.config.ProjectID, Title: "Bridge rollout", Status: "in_progress"}

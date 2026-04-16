@@ -9,14 +9,15 @@ import (
 	"path/filepath"
 	"reflect"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
-	"github.com/golang-jwt/jwt/v5"
 	"github.com/google/uuid"
 	"github.com/gorilla/websocket"
 	"github.com/labstack/echo/v4"
 	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/pool"
 	"github.com/react-go-quick-starter/server/internal/repository"
@@ -558,7 +559,7 @@ func TestAgentService_SpawnCreatesStartingRun(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, nil)
 
 	run, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 5, "")
 	if err != nil {
@@ -605,7 +606,7 @@ func TestAgentService_SpawnRejectsExistingActiveRun(t *testing.T) {
 	}}
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 
 	_, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 5, "")
 	if err != service.ErrAgentAlreadyRunning {
@@ -629,7 +630,7 @@ func TestAgentService_SpawnMapsWorktreeGuardrailErrors(t *testing.T) {
 	worktrees := &mockWorktreeManager{prepareErr: worktree.ErrCapacityReached}
 	bridge := &mockAgentBridge{}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, nil)
 
 	_, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 5, "")
 	if !errors.Is(err, service.ErrAgentWorktreeUnavailable) {
@@ -666,7 +667,7 @@ func TestAgentService_SpawnPrefersExplicitRuntime(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, nil)
 
 	_, err := svc.Spawn(context.Background(), taskID, memberID, "opencode", "opencode", "opencode-default", 5, "")
 	if err != nil {
@@ -700,7 +701,7 @@ func TestAgentService_SpawnPrefersExplicitCliBackedRuntime(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, nil)
 
 	run, err := svc.Spawn(
 		context.Background(),
@@ -751,7 +752,7 @@ func TestAgentService_SpawnResolvesProjectDefaultsAndPersistsRuntime(t *testing.
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, nil)
 
 	run, err := svc.Spawn(context.Background(), taskID, memberID, "", "", "", 5, "")
 	if err != nil {
@@ -833,7 +834,7 @@ func TestAgentService_SpawnProjectsSelectedRoleIntoBridgeRequest(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, roleStore)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, roleStore)
 
 	run, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 0, "frontend-developer")
 	if err != nil {
@@ -894,7 +895,7 @@ func TestAgentService_SpawnRejectsUnknownRole(t *testing.T) {
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 	bridge := &mockAgentBridge{}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, &mockWorktreeManager{}, &mockAgentRoleStore{})
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, &mockWorktreeManager{}, &mockAgentRoleStore{})
 
 	_, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 0, "missing-role")
 	if !errors.Is(err, service.ErrAgentRoleNotFound) {
@@ -950,7 +951,7 @@ func TestAgentService_SpawnRejectsBlockingAutoLoadSkillProjection(t *testing.T) 
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, roleStore)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, roleStore)
 
 	_, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 0, "frontend-developer")
 	if err == nil || !strings.Contains(err.Error(), "skills/react") {
@@ -999,7 +1000,7 @@ func TestAgentService_SpawnRejectsBlockingPluginDependency(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, roleStore)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, roleStore)
 	svc.SetPluginCatalog(&mockAgentPluginCatalog{})
 
 	_, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 0, "design-lead")
@@ -1107,7 +1108,7 @@ plugins:
       message: Web search ships with AgentForge.
 `)
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, roleStore)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, roleStore)
 	svc.SetPluginCatalog(service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, pluginsDir))
 
 	run, err := svc.Spawn(context.Background(), taskID, memberID, "", "anthropic", "claude-sonnet", 0, "frontend-developer")
@@ -1149,7 +1150,7 @@ func TestAgentService_CancelReleasesCanonicalManagedWorktree(t *testing.T) {
 	bridge := &mockAgentBridge{}
 	worktrees := &mockWorktreeManager{}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, nil)
 
 	if err := svc.Cancel(context.Background(), runID, "user_cancelled"); err != nil {
 		t.Fatalf("Cancel() error = %v", err)
@@ -1200,7 +1201,7 @@ func TestAgentService_PauseAndResumePreserveManagedRuntimeContext(t *testing.T) 
 	bridge := &mockAgentBridge{}
 	worktrees := &mockWorktreeManager{}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, nil)
 
 	if err := svc.UpdateStatus(context.Background(), runID, model.AgentRunStatusPaused); err != nil {
 		t.Fatalf("pause UpdateStatus() error = %v", err)
@@ -1265,7 +1266,7 @@ func TestAgentService_ResumeUsesPersistedRuntimeIdentity(t *testing.T) {
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 	bridge := &mockAgentBridge{}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, &mockWorktreeManager{}, nil)
 
 	if err := svc.UpdateStatus(context.Background(), runID, model.AgentRunStatusRunning); err != nil {
 		t.Fatalf("resume UpdateStatus() error = %v", err)
@@ -1342,7 +1343,7 @@ func TestAgentService_SpawnForTeamIncludesTeamExecutionContext(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, nil)
 
 	run, err := svc.SpawnForTeam(context.Background(), teamID, model.TeamRolePlanner, taskID, memberID, "codex", "openai", "gpt-5-codex", 5, "")
 	if err != nil {
@@ -1379,7 +1380,7 @@ func TestAgentService_ProcessBridgeEvent_UpdatesCostFromRuntimeEvent(t *testing.
 	}}
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 
 	err := svc.ProcessBridgeEvent(context.Background(), &ws.BridgeAgentEvent{
 		TaskID:      taskID.String(),
@@ -1428,7 +1429,7 @@ func TestAgentService_ProcessBridgeEvent_CompletesRunFromTerminalStatusChange(t 
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 	worktrees := &mockWorktreeManager{}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, &mockAgentBridge{}, worktrees, nil)
 
 	err := svc.ProcessBridgeEvent(context.Background(), &ws.BridgeAgentEvent{
 		TaskID:      taskID.String(),
@@ -1473,7 +1474,7 @@ func TestAgentService_ProcessBridgeEvent_PermissionRequestQueuesIMNotification(t
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 	imNotifier := &mockAgentIMProgressNotifier{}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetIMProgressNotifier(imNotifier)
 
 	err := svc.ProcessBridgeEvent(context.Background(), &ws.BridgeAgentEvent{
@@ -1527,7 +1528,7 @@ func TestAgentService_ProcessBridgeEvent_BudgetAlertQueuesBoundIMNotification(t 
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 	imNotifier := &mockAgentIMProgressNotifier{}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetIMProgressNotifier(imNotifier)
 
 	err := svc.ProcessBridgeEvent(context.Background(), &ws.BridgeAgentEvent{
@@ -1588,7 +1589,7 @@ func TestAgentService_ProcessBridgeEvent_BudgetAlertFallsBackToConfiguredChannel
 	}
 	imNotifier := &mockAgentIMNotifier{}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetIMProgressNotifier(control)
 	svc.SetIMNotifier(imNotifier)
 	svc.SetIMChannelResolver(control)
@@ -1644,11 +1645,10 @@ func TestAgentService_UpdateCost_SyncsTaskSpendAndBroadcastsBudgetWarning(t *tes
 		AgentSessionID: "session-1",
 	}}
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
-	hub := ws.NewHub()
-	stop, events := subscribeProjectEvents(t, hub, projectID.String())
+	pub, stop, events := subscribeProjectEvents(t, projectID.String())
 	defer stop()
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, hub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), pub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 
 	if err := svc.UpdateCost(context.Background(), runID, 260, 80, 10, 4.2, 3, nil); err != nil {
 		t.Fatalf("UpdateCost() error = %v", err)
@@ -1696,7 +1696,7 @@ func TestAgentService_ProcessBridgeCostEvent_PersistsAccountingMetadata(t *testi
 	}}
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 
 	err := svc.ProcessBridgeEvent(context.Background(), &ws.BridgeAgentEvent{
 		TaskID:      taskID.String(),
@@ -1745,7 +1745,7 @@ func TestAgentService_UpdateCost_BudgetWarningQueuesIMNotification(t *testing.T)
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 	imNotifier := &mockAgentIMProgressNotifier{}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetIMProgressNotifier(imNotifier)
 
 	if err := svc.UpdateCost(context.Background(), runID, 260, 80, 10, 4.2, 3, nil); err != nil {
@@ -1824,7 +1824,7 @@ func TestBridgeWS_PreservesEventOrderingIntoIMDeliveries(t *testing.T) {
 		t.Fatalf("BindAction error: %v", err)
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetIMProgressNotifier(control)
 
 	e := echo.New()
@@ -1916,11 +1916,10 @@ func TestAgentService_UpdateCost_BudgetExceededCancelsRunAndKeepsRuntimeForResum
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 	bridge := &mockAgentBridge{}
 	worktrees := &mockWorktreeManager{}
-	hub := ws.NewHub()
-	stop, events := subscribeProjectEvents(t, hub, projectID.String())
+	pub, stop, events := subscribeProjectEvents(t, projectID.String())
 	defer stop()
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, hub, bridge, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), pub, bridge, worktrees, nil)
 
 	if err := svc.UpdateCost(context.Background(), runID, 320, 140, 10, 5.3, 5, nil); err != nil {
 		t.Fatalf("UpdateCost() error = %v", err)
@@ -1975,7 +1974,7 @@ func TestAgentService_UpdateCostEmitsAutomationBudgetEvent(t *testing.T) {
 	}}
 	projectRepo := &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 	automation := &automationEventProbe{}
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetAutomationEvaluator(automation)
 
 	if err := svc.UpdateCost(context.Background(), runID, 260, 80, 10, 4.2, 3, nil); err != nil {
@@ -2000,7 +1999,7 @@ func TestAgentService_PoolStatsIncludesQueuedEntries(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), &mockAgentBridge{
+	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), nil, &mockAgentBridge{
 		poolSummary: &bridgeclient.PoolSummaryResponse{
 			Active:        1,
 			Max:           2,
@@ -2039,7 +2038,7 @@ func TestAgentService_RequestSpawnQueuesWhenAdmissionHasNoImmediateSlot(t *testi
 		t.Fatalf("Acquire() error = %v", err)
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetPool(agentPool)
 	svc.SetQueueStore(queueStore)
 
@@ -2086,7 +2085,7 @@ func TestAgentService_RequestSpawnQueuesWhenBridgePoolAtCapacity(t *testing.T) {
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, &mockWorktreeManager{}, nil)
 	svc.SetPool(pool.NewPool(4))
 	svc.SetQueueStore(queueStore)
 
@@ -2138,7 +2137,7 @@ func TestAgentService_RequestSpawnBlocksWhenBridgeHealthCheckFailsAfterRetries(t
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, &mockWorktreeManager{}, nil)
 	svc.SetPool(pool.NewPool(4))
 
 	result, err := svc.RequestSpawn(context.Background(), taskID, memberID, "codex", "openai", "gpt-5-codex", 5, "", model.PriorityNormal)
@@ -2189,7 +2188,7 @@ func TestAgentService_SpawnRetriesBridgeHealthCheckBeforeExecution(t *testing.T)
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, &mockWorktreeManager{}, nil)
 	svc.SetPool(pool.NewPool(4))
 
 	run, err := svc.Spawn(context.Background(), taskID, memberID, "codex", "openai", "gpt-5-codex", 5, "")
@@ -2296,7 +2295,7 @@ func TestAgentService_UpdateStatusPromotesQueuedAdmissionAfterTerminalRelease(t 
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, roleStore)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, roleStore)
 	svc.SetPool(pool.NewPool(2))
 	svc.SetQueueStore(queueStore)
 
@@ -2369,7 +2368,7 @@ func TestAgentService_UpdateStatusRequeuesPromotionWhenBudgetCheckBlocks(t *test
 		},
 	}
 
-	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), bridge, worktrees, nil)
+	svc := service.NewAgentService(repo, taskRepo, projectRepo, ws.NewHub(), nil, bridge, worktrees, nil)
 	svc.SetPool(pool.NewPool(2))
 	svc.SetQueueStore(queueStore)
 	svc.SetDispatchBudgetChecker(&mockDispatchBudgetChecker{
@@ -2446,7 +2445,7 @@ func TestAgentService_UpdateStatusRequeuesPromotionWhenBudgetCheckBlocksRecordsD
 	}
 	attempts := &mockDispatchAttemptRecorder{}
 
-	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetPool(pool.NewPool(2))
 	svc.SetQueueStore(queueStore)
 	svc.SetDispatchBudgetChecker(&mockDispatchBudgetChecker{
@@ -2524,12 +2523,10 @@ func TestAgentService_UpdateStatusPromotionFailsInvalidMemberAndRecordsAttempt(t
 	}
 	attempts := &mockDispatchAttemptRecorder{}
 
-	hub := ws.NewHub()
-	stop, events := subscribeProjectEvents(t, hub, projectID.String())
+	pub, stop, events := subscribeProjectEvents(t, projectID.String())
 	defer stop()
-	waitForHubClient(t, hub)
 
-	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}, hub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}, ws.NewHub(), pub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetPool(pool.NewPool(2))
 	svc.SetQueueStore(queueStore)
 	svc.SetDispatchMemberReader(memberRepo)
@@ -2612,12 +2609,10 @@ func TestAgentService_UpdateStatusPromotionEmitsFinalizedPromotedPayload(t *test
 	memberRepo := &mockAgentDispatchMemberRepo{
 		member: &model.Member{ID: memberID, ProjectID: projectID, Type: model.MemberTypeAgent, IsActive: true},
 	}
-	hub := ws.NewHub()
-	stop, events := subscribeProjectEvents(t, hub, projectID.String())
+	pub, stop, events := subscribeProjectEvents(t, projectID.String())
 	defer stop()
-	waitForHubClient(t, hub)
 
-	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}, hub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}, ws.NewHub(), pub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetPool(pool.NewPool(2))
 	svc.SetQueueStore(queueStore)
 	svc.SetDispatchMemberReader(memberRepo)
@@ -2678,12 +2673,10 @@ func TestAgentService_CancelQueueEntryCancelsQueuedEntryAndBroadcastsEvents(t *t
 			},
 		},
 	}
-	hub := ws.NewHub()
-	stop, events := subscribeProjectEvents(t, hub, projectID.String())
+	pub, stop, events := subscribeProjectEvents(t, projectID.String())
 	defer stop()
-	waitForHubClient(t, hub)
 
-	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{}, hub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(repo, taskRepo, &mockAgentProjectRepo{}, ws.NewHub(), pub, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetPool(pool.NewPool(2))
 	svc.SetQueueStore(queueStore)
 
@@ -2743,7 +2736,7 @@ func TestAgentService_CancelQueueEntryReturnsConflictForPromotedEntry(t *testing
 			},
 		},
 	}
-	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetQueueStore(queueStore)
 
 	_, err := svc.CancelQueueEntry(context.Background(), projectID, queueStore.queued[0].EntryID, "cancelled_by_operator")
@@ -2764,7 +2757,7 @@ func TestAgentService_CancelQueueEntryReturnsConflictForPromotedEntry(t *testing
 
 func TestAgentService_CancelQueueEntryReturnsNotFoundForUnknownEntry(t *testing.T) {
 	projectID := uuid.New()
-	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetQueueStore(&mockAgentQueueStore{})
 
 	_, err := svc.CancelQueueEntry(context.Background(), projectID, uuid.NewString(), "cancelled_by_operator")
@@ -2809,7 +2802,7 @@ func TestAgentService_ListQueueEntriesSortsAndFiltersStatuses(t *testing.T) {
 		UpdatedAt: base.Add(40 * time.Second),
 	}
 	queueStore := &mockAgentQueueStore{queued: []*model.AgentPoolQueueEntry{normalNewer, highPriority, cancelled, normalOlder}}
-	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), &mockAgentBridge{}, &mockWorktreeManager{}, nil)
+	svc := service.NewAgentService(newMockAgentRunRepo(), &mockAgentTaskRepo{}, &mockAgentProjectRepo{}, ws.NewHub(), nil, &mockAgentBridge{}, &mockWorktreeManager{}, nil)
 	svc.SetQueueStore(queueStore)
 
 	entries, err := svc.ListQueueEntries(context.Background(), projectID, "")
@@ -2875,69 +2868,46 @@ type observedEvent struct {
 	Payload json.RawMessage `json:"payload"`
 }
 
-func subscribeProjectEvents(t *testing.T, hub *ws.Hub, projectID string) (func(), <-chan observedEvent) {
+type captureBusPublisher struct {
+	mu        sync.Mutex
+	events    chan observedEvent
+	projectID string
+	closed    bool
+}
+
+func (c *captureBusPublisher) Publish(_ context.Context, e *eventbus.Event) error {
+	if c == nil || e == nil {
+		return nil
+	}
+	if c.projectID != "" && eventbus.GetString(e, eventbus.MetaProjectID) != c.projectID {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if c.closed {
+		return nil
+	}
+	payload := append(json.RawMessage(nil), e.Payload...)
+	select {
+	case c.events <- observedEvent{Type: e.Type, Payload: payload}:
+	default:
+	}
+	return nil
+}
+
+func subscribeProjectEvents(t *testing.T, projectID string) (eventbus.Publisher, func(), <-chan observedEvent) {
 	t.Helper()
-
-	go hub.Run()
-
-	e := echo.New()
-	secret := "test-secret"
-	e.GET("/ws", ws.NewHandler(hub, secret).HandleWS)
-
-	server := httptest.NewServer(e)
-
-	token := jwt.NewWithClaims(jwt.SigningMethodHS256, jwt.MapClaims{
-		"sub": "tester",
-	})
-	tokenString, err := token.SignedString([]byte(secret))
-	if err != nil {
-		server.Close()
-		t.Fatalf("sign jwt: %v", err)
-	}
-
-	wsURL := "ws" + strings.TrimPrefix(server.URL, "http") + "/ws?token=" + tokenString + "&projectId=" + projectID
-	conn, _, err := websocket.DefaultDialer.Dial(wsURL, nil)
-	if err != nil {
-		server.Close()
-		t.Fatalf("dial websocket: %v", err)
-	}
-
-	events := make(chan observedEvent, 16)
-	done := make(chan struct{})
-	ready := make(chan struct{})
-
-	go func() {
-		close(ready)
-		defer close(events)
-		for {
-			if err := conn.SetReadDeadline(time.Now().Add(5 * time.Second)); err != nil {
-				return
-			}
-			_, message, err := conn.ReadMessage()
-			if err != nil {
-				return
-			}
-
-			var event observedEvent
-			if err := json.Unmarshal(message, &event); err != nil {
-				return
-			}
-
-			select {
-			case events <- event:
-			case <-done:
-				return
-			}
+	events := make(chan observedEvent, 64)
+	pub := &captureBusPublisher{events: events, projectID: projectID}
+	stop := func() {
+		pub.mu.Lock()
+		defer pub.mu.Unlock()
+		if !pub.closed {
+			pub.closed = true
+			close(events)
 		}
-	}()
-	<-ready
-	time.Sleep(25 * time.Millisecond)
-
-	return func() {
-		close(done)
-		_ = conn.Close()
-		server.Close()
-	}, events
+	}
+	return pub, stop, events
 }
 
 func waitForEventType(t *testing.T, events <-chan observedEvent, eventType string) observedEvent {

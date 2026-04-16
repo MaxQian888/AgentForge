@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
 	log "github.com/sirupsen/logrus"
@@ -79,6 +80,7 @@ type DAGWorkflowService struct {
 	mappingRepo  DAGWorkflowRunMappingRepo
 	reviewRepo   DAGWorkflowReviewRepo
 	hub          *ws.Hub
+	bus          eventbus.Publisher
 }
 
 // NewDAGWorkflowService creates a new DAG workflow execution service.
@@ -87,12 +89,14 @@ func NewDAGWorkflowService(
 	execRepo DAGWorkflowExecutionRepo,
 	nodeRepo DAGWorkflowNodeExecRepo,
 	hub *ws.Hub,
+	bus eventbus.Publisher,
 ) *DAGWorkflowService {
 	return &DAGWorkflowService{
 		defRepo:  defRepo,
 		execRepo: execRepo,
 		nodeRepo: nodeRepo,
 		hub:      hub,
+		bus:      bus,
 	}
 }
 
@@ -170,7 +174,7 @@ func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid
 		return nil, fmt.Errorf("create execution: %w", err)
 	}
 
-	s.broadcastEvent(ws.EventWorkflowExecutionStarted, def.ProjectID.String(), map[string]any{
+	s.broadcastEvent(ctx, ws.EventWorkflowExecutionStarted, def.ProjectID.String(), map[string]any{
 		"executionId": exec.ID.String(),
 		"workflowId":  workflowID.String(),
 	})
@@ -280,7 +284,7 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 		if err := s.execRepo.CompleteExecution(ctx, executionID, model.WorkflowExecStatusCompleted); err != nil {
 			return fmt.Errorf("complete execution: %w", err)
 		}
-		s.broadcastEvent(ws.EventWorkflowExecutionCompleted, exec.ProjectID.String(), map[string]any{
+		s.broadcastEvent(ctx, ws.EventWorkflowExecutionCompleted, exec.ProjectID.String(), map[string]any{
 			"executionId": exec.ID.String(),
 			"workflowId":  exec.WorkflowID.String(),
 			"status":      model.WorkflowExecStatusCompleted,
@@ -293,7 +297,7 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 		return fmt.Errorf("update current nodes: %w", err)
 	}
 
-	s.broadcastEvent(ws.EventWorkflowExecutionAdvanced, exec.ProjectID.String(), map[string]any{
+	s.broadcastEvent(ctx, ws.EventWorkflowExecutionAdvanced, exec.ProjectID.String(), map[string]any{
 		"executionId":  exec.ID.String(),
 		"currentNodes": nextNodeIDs,
 	})
@@ -327,7 +331,7 @@ func (s *DAGWorkflowService) CancelExecution(ctx context.Context, executionID uu
 	if err := s.execRepo.CompleteExecution(ctx, executionID, model.WorkflowExecStatusCancelled); err != nil {
 		return fmt.Errorf("cancel execution: %w", err)
 	}
-	s.broadcastEvent(ws.EventWorkflowExecutionCompleted, exec.ProjectID.String(), map[string]any{
+	s.broadcastEvent(ctx, ws.EventWorkflowExecutionCompleted, exec.ProjectID.String(), map[string]any{
 		"executionId": exec.ID.String(),
 		"workflowId":  exec.WorkflowID.String(),
 		"status":      model.WorkflowExecStatusCancelled,
@@ -385,7 +389,7 @@ func (s *DAGWorkflowService) HandleAgentRunCompletion(ctx context.Context, runID
 		s.storeNodeResult(ctx, mapping.ExecutionID, mapping.NodeID, result)
 	}
 
-	s.broadcastEvent(ws.EventWorkflowNodeCompleted, "", map[string]any{
+	s.broadcastEvent(ctx, ws.EventWorkflowNodeCompleted, "", map[string]any{
 		"executionId": mapping.ExecutionID.String(),
 		"nodeId":      mapping.NodeID,
 		"status":      nodeStatus,
@@ -478,7 +482,7 @@ func (s *DAGWorkflowService) executeNode(ctx context.Context, exec *model.Workfl
 		s.storeNodeResult(ctx, exec.ID, node.ID, nodeResult)
 	}
 
-	s.broadcastEvent(ws.EventWorkflowNodeCompleted, exec.ProjectID.String(), map[string]any{
+	s.broadcastEvent(ctx, ws.EventWorkflowNodeCompleted, exec.ProjectID.String(), map[string]any{
 		"executionId": exec.ID.String(),
 		"nodeId":      node.ID,
 		"nodeType":    node.Type,
@@ -574,7 +578,7 @@ func (s *DAGWorkflowService) executeFunction(_ context.Context, _ *model.Workflo
 }
 
 // executeNotification logs and broadcasts a WebSocket event.
-func (s *DAGWorkflowService) executeNotification(_ context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, config map[string]any) error {
+func (s *DAGWorkflowService) executeNotification(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, config map[string]any) error {
 	message := "Workflow notification"
 	if msg, ok := config["message"].(string); ok {
 		message = msg
@@ -585,7 +589,7 @@ func (s *DAGWorkflowService) executeNotification(_ context.Context, exec *model.
 		"message":     message,
 	}).Info("workflow: notification sent")
 
-	s.broadcastEvent("workflow.notification", exec.ProjectID.String(), map[string]any{
+	s.broadcastEvent(ctx, "workflow.notification", exec.ProjectID.String(), map[string]any{
 		"executionId": exec.ID.String(),
 		"nodeId":      node.ID,
 		"message":     message,
@@ -729,7 +733,7 @@ func (s *DAGWorkflowService) executeHumanReview(ctx context.Context, exec *model
 		}
 	}
 
-	s.broadcastEvent(ws.EventWorkflowReviewRequested, exec.ProjectID.String(), map[string]any{
+	s.broadcastEvent(ctx, ws.EventWorkflowReviewRequested, exec.ProjectID.String(), map[string]any{
 		"executionId": exec.ID.String(),
 		"nodeId":      node.ID,
 		"nodeExecId":  nodeExecID.String(),
@@ -792,7 +796,7 @@ func (s *DAGWorkflowService) ResolveHumanReview(ctx context.Context, executionID
 	// Resume execution
 	_ = s.execRepo.UpdateExecution(ctx, executionID, model.WorkflowExecStatusRunning, nil, "")
 
-	s.broadcastEvent(ws.EventWorkflowReviewResolved, exec.ProjectID.String(), map[string]any{
+	s.broadcastEvent(ctx, ws.EventWorkflowReviewResolved, exec.ProjectID.String(), map[string]any{
 		"executionId": executionID.String(),
 		"nodeId":      nodeID,
 		"decision":    decision,
@@ -802,11 +806,11 @@ func (s *DAGWorkflowService) ResolveHumanReview(ctx context.Context, executionID
 }
 
 // executeWaitEvent sets a node to waiting for an external event.
-func (s *DAGWorkflowService) executeWaitEvent(_ context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, nodeExecID uuid.UUID, config map[string]any) error {
+func (s *DAGWorkflowService) executeWaitEvent(ctx context.Context, exec *model.WorkflowExecution, node *model.WorkflowNode, nodeExecID uuid.UUID, config map[string]any) error {
 	_ = s.nodeRepo.UpdateNodeExecution(context.Background(), nodeExecID, model.NodeExecWaiting, nil, "")
 
 	eventType, _ := config["event_type"].(string)
-	s.broadcastEvent(ws.EventWorkflowNodeWaiting, exec.ProjectID.String(), map[string]any{
+	s.broadcastEvent(ctx, ws.EventWorkflowNodeWaiting, exec.ProjectID.String(), map[string]any{
 		"executionId": exec.ID.String(),
 		"nodeId":      node.ID,
 		"nodeExecId":  nodeExecID.String(),
@@ -1095,13 +1099,6 @@ func (s *DAGWorkflowService) findNodesBetween(fromID, toID string, nodes []model
 	return result
 }
 
-func (s *DAGWorkflowService) broadcastEvent(eventType, projectID string, payload map[string]any) {
-	if s.hub == nil {
-		return
-	}
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      eventType,
-		ProjectID: projectID,
-		Payload:   payload,
-	})
+func (s *DAGWorkflowService) broadcastEvent(ctx context.Context, eventType, projectID string, payload map[string]any) {
+	_ = eventbus.PublishLegacy(ctx, s.bus, eventType, projectID, payload)
 }

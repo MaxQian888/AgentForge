@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
 )
@@ -22,15 +23,17 @@ type CostService struct {
 	agentRunRepo  AgentRunRepository
 	taskRepo      TaskRepository
 	hub           *ws.Hub
+	bus           eventbus.Publisher
 	budgetWarnPct float64 // 0.8 = warn at 80%
 	budgetKillPct float64 // 1.0 = kill at 100%
 }
 
-func NewCostService(agentRunRepo AgentRunRepository, taskRepo TaskRepository, hub *ws.Hub) *CostService {
+func NewCostService(agentRunRepo AgentRunRepository, taskRepo TaskRepository, hub *ws.Hub, bus eventbus.Publisher) *CostService {
 	return &CostService{
 		agentRunRepo:  agentRunRepo,
 		taskRepo:      taskRepo,
 		hub:           hub,
+		bus:           bus,
 		budgetWarnPct: 0.8,
 		budgetKillPct: 1.0,
 	}
@@ -62,25 +65,17 @@ func (s *CostService) RecordCost(ctx context.Context, runID uuid.UUID, inputToke
 		ratio := taskCost.TotalCostUsd / task.BudgetUsd
 
 		if ratio >= s.budgetKillPct {
-			s.hub.BroadcastEvent(&ws.Event{
-				Type:      ws.EventBudgetExceeded,
-				ProjectID: task.ProjectID.String(),
-				Payload: map[string]any{
-					"taskId": task.ID.String(),
-					"budget": task.BudgetUsd,
-					"spent":  taskCost.TotalCostUsd,
-				},
+			_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventBudgetExceeded, task.ProjectID.String(), map[string]any{
+				"taskId": task.ID.String(),
+				"budget": task.BudgetUsd,
+				"spent":  taskCost.TotalCostUsd,
 			})
 		} else if ratio >= s.budgetWarnPct {
-			s.hub.BroadcastEvent(&ws.Event{
-				Type:      ws.EventBudgetWarning,
-				ProjectID: task.ProjectID.String(),
-				Payload: map[string]any{
-					"taskId":  task.ID.String(),
-					"budget":  task.BudgetUsd,
-					"spent":   taskCost.TotalCostUsd,
-					"percent": ratio * 100,
-				},
+			_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventBudgetWarning, task.ProjectID.String(), map[string]any{
+				"taskId":  task.ID.String(),
+				"budget":  task.BudgetUsd,
+				"spent":   taskCost.TotalCostUsd,
+				"percent": ratio * 100,
 			})
 		}
 	}

@@ -113,7 +113,7 @@ func (r *costServiceTaskRepo) GetByID(context.Context, uuid.UUID) (*model.Task, 
 func TestCostServiceConstructionAndAggregates(t *testing.T) {
 	runRepo := &costServiceRunRepo{}
 	taskRepo := &costServiceTaskRepo{}
-	svc := NewCostService(runRepo, taskRepo, ws.NewHub())
+	svc := NewCostService(runRepo, taskRepo, ws.NewHub(), nil)
 	if svc.budgetWarnPct != 0.8 || svc.budgetKillPct != 1.0 {
 		t.Fatalf("budget thresholds = %v/%v, want 0.8/1.0", svc.budgetWarnPct, svc.budgetKillPct)
 	}
@@ -138,7 +138,7 @@ func TestCostServiceGettersAndErrors(t *testing.T) {
 			{TaskID: taskID, CostUsd: 3.5, InputTokens: 7, OutputTokens: 9, TurnCount: 2},
 		},
 	}
-	svc := NewCostService(runRepo, &costServiceTaskRepo{}, ws.NewHub())
+	svc := NewCostService(runRepo, &costServiceTaskRepo{}, ws.NewHub(), nil)
 
 	taskStats, err := svc.GetTaskCost(context.Background(), taskID)
 	if err != nil {
@@ -176,7 +176,7 @@ func TestCostServiceRecordCostCoversHealthyWarningAndExceededBranches(t *testing
 		run := &model.AgentRun{ID: runID, TaskID: taskID, Status: model.AgentRunStatusRunning}
 		runRepo := &costServiceRunRepo{run: run, taskRuns: existingRuns}
 		taskRepo := &costServiceTaskRepo{task: &model.Task{ID: taskID, ProjectID: projectID, BudgetUsd: budget}}
-		return NewCostService(runRepo, taskRepo, ws.NewHub()), runRepo
+		return NewCostService(runRepo, taskRepo, ws.NewHub(), nil), runRepo
 	}
 
 	svc, runRepo := makeService(0, []*model.AgentRun{{ID: runID, TaskID: taskID, CostUsd: 1}})
@@ -205,7 +205,7 @@ func TestCostServiceRecordCostCoversHealthyWarningAndExceededBranches(t *testing
 func TestCostServiceRecordCostPropagatesRepositoryErrors(t *testing.T) {
 	runID := uuid.New()
 	runRepo := &costServiceRunRepo{updateCostErr: errors.New("update failed")}
-	svc := NewCostService(runRepo, &costServiceTaskRepo{}, ws.NewHub())
+	svc := NewCostService(runRepo, &costServiceTaskRepo{}, ws.NewHub(), nil)
 	if err := svc.RecordCost(context.Background(), runID, 1, 2, 0, 0.5, 1); err == nil {
 		t.Fatal("RecordCost() expected update error")
 	}
@@ -214,7 +214,7 @@ func TestCostServiceRecordCostPropagatesRepositoryErrors(t *testing.T) {
 		run:        &model.AgentRun{ID: runID, TaskID: uuid.New()},
 		getByIDErr: errors.New("run missing"),
 	}
-	svc = NewCostService(runRepo, &costServiceTaskRepo{}, ws.NewHub())
+	svc = NewCostService(runRepo, &costServiceTaskRepo{}, ws.NewHub(), nil)
 	if err := svc.RecordCost(context.Background(), runID, 1, 2, 0, 0.5, 1); err == nil {
 		t.Fatal("RecordCost() expected GetByID error")
 	}
@@ -224,7 +224,7 @@ func TestCostServiceRecordCostPropagatesRepositoryErrors(t *testing.T) {
 		taskRuns: []*model.AgentRun{{ID: runID, TaskID: uuid.New(), CostUsd: 0.5}},
 	}
 	taskRepo := &costServiceTaskRepo{getByIDErr: errors.New("task missing")}
-	svc = NewCostService(runRepo, taskRepo, ws.NewHub())
+	svc = NewCostService(runRepo, taskRepo, ws.NewHub(), nil)
 	if err := svc.RecordCost(context.Background(), runID, 1, 2, 0, 0.5, 1); err == nil {
 		t.Fatal("RecordCost() expected task lookup error")
 	}

@@ -201,7 +201,7 @@ func TestTaskDispatchService_AssignAgentStartsRuntime(t *testing.T) {
 		},
 	}
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil)
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil)
 
 	result, err := svc.Assign(context.Background(), taskID, &model.AssignRequest{
 		AssigneeID:   memberID.String(),
@@ -250,7 +250,7 @@ func TestTaskDispatchService_AssignAgentReturnsBlockedWhenRunAlreadyActive(t *te
 	}
 	runtime := &mockDispatchRuntime{err: service.ErrAgentAlreadyRunning}
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil)
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil)
 
 	result, err := svc.Assign(context.Background(), taskID, &model.AssignRequest{
 		AssigneeID:   memberID.String(),
@@ -302,7 +302,7 @@ func TestTaskDispatchService_SpawnUsesAssignedAgentWhenMemberIDMissing(t *testin
 		},
 	}
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil)
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil)
 
 	result, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
 		TaskID: taskID,
@@ -358,7 +358,7 @@ func TestTaskDispatchService_SpawnUsesMemberBoundRoleWhenExplicitRoleIsMissing(t
 		},
 	}
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil).
 		WithRoleStore(roleStore)
 
 	result, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
@@ -401,7 +401,7 @@ func TestTaskDispatchService_SpawnBlocksWhenMemberBoundRoleIsStale(t *testing.T)
 	}
 	runtime := &mockDispatchRuntime{}
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil).
 		WithRoleStore(&mockDispatchRoleStore{roles: map[string]*rolepkg.Manifest{}})
 
 	result, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
@@ -445,7 +445,7 @@ func TestTaskDispatchService_AssignAgentQueuesWhenPoolIsFull(t *testing.T) {
 	runtime := &mockDispatchRuntime{err: service.ErrAgentPoolFull}
 	queueWriter := &mockDispatchQueueWriter{}
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).WithQueueWriter(queueWriter)
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil).WithQueueWriter(queueWriter)
 
 	result, err := svc.Assign(context.Background(), taskID, &model.AssignRequest{
 		AssigneeID:   memberID.String(),
@@ -521,7 +521,7 @@ func TestTaskDispatchService_SpawnPreservesDispatchTupleAndQueueVerdict(t *testi
 	runtime := &mockDispatchRuntime{err: service.ErrAgentPoolFull}
 	queueWriter := &mockDispatchQueueWriter{}
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).WithQueueWriter(queueWriter)
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil).WithQueueWriter(queueWriter)
 
 	result, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
 		TaskID:    taskID,
@@ -569,7 +569,7 @@ func TestTaskDispatchService_RecordDispatchAttemptCapturesRichQueuedMetadata(t *
 	queueWriter := &mockDispatchQueueWriter{}
 	recorder := &mockDispatchAttemptRecorder{}
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil).
 		WithQueueWriter(queueWriter).
 		WithAttemptRecorder(recorder)
 
@@ -630,7 +630,7 @@ func TestTaskDispatchService_AssignAgentBlocksWhenSprintBudgetExceeded(t *testin
 		},
 	}
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).WithBudgetChecker(checker)
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil).WithBudgetChecker(checker)
 
 	result, err := svc.Assign(context.Background(), taskID, &model.AssignRequest{
 		AssigneeID:   memberID.String(),
@@ -687,7 +687,7 @@ func TestTaskDispatchService_SpawnBlocksWhenProjectBudgetExceeded(t *testing.T) 
 		},
 	}
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil).WithBudgetChecker(checker)
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil).WithBudgetChecker(checker)
 
 	result, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
 		TaskID:    taskID,
@@ -751,12 +751,10 @@ func TestTaskDispatchService_AssignAgentReturnsBudgetWarningAndBroadcastsEvent(t
 			WarningMessage: "sprint budget warning",
 		},
 	}
-	hub := ws.NewHub()
-	stop, events := subscribeProjectEvents(t, hub, projectID.String())
+	pub, stop, events := subscribeProjectEvents(t, projectID.String())
 	defer stop()
-	waitForHubClient(t, hub)
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, hub, nil, nil).WithBudgetChecker(checker)
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), pub, nil, nil).WithBudgetChecker(checker)
 
 	result, err := svc.Assign(context.Background(), taskID, &model.AssignRequest{
 		AssigneeID:   memberID.String(),
@@ -819,7 +817,7 @@ func TestTaskDispatchService_SpawnBlocksWhenTaskAlreadyHasPausedRunInPreflight(t
 		},
 	}
 
-	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil)
+	svc := service.NewTaskDispatchService(taskRepo, memberRepo, runtime, ws.NewHub(), nil, nil, nil)
 
 	result, err := svc.Spawn(context.Background(), service.DispatchSpawnInput{
 		TaskID: taskID,
@@ -839,15 +837,3 @@ func TestTaskDispatchService_SpawnBlocksWhenTaskAlreadyHasPausedRunInPreflight(t
 	}
 }
 
-func waitForHubClient(t *testing.T, hub *ws.Hub) {
-	t.Helper()
-
-	deadline := time.Now().Add(2 * time.Second)
-	for time.Now().Before(deadline) {
-		if hub.ClientCount() > 0 {
-			return
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	t.Fatalf("timed out waiting for websocket client registration")
-}

@@ -92,7 +92,7 @@ func TestTaskServiceUpdateSyncsMentionLinksWhenDescriptionChanges(t *testing.T) 
 	}
 	linkSyncer := &stubMentionLinkSyncer{}
 	description := "See [[page-" + uuid.New().String() + "]]"
-	svc := NewTaskService(repo, ws.NewHub()).WithEntityLinkSyncer(linkSyncer)
+	svc := NewTaskService(repo, ws.NewHub(), nil).WithEntityLinkSyncer(linkSyncer)
 
 	updated, err := svc.Update(context.Background(), taskID, &model.UpdateTaskRequest{
 		Description: &description,
@@ -188,7 +188,7 @@ func TestTaskServiceUpdateRollsBackWhenMentionSyncFails(t *testing.T) {
 		base: NewEntityLinkService(repository.NewEntityLinkRepository(db), nil, nil),
 		fail: true,
 	}
-	svc := NewTaskService(taskRepo, ws.NewHub()).WithEntityLinkSyncer(syncer)
+	svc := NewTaskService(taskRepo, ws.NewHub(), nil).WithEntityLinkSyncer(syncer)
 	description := "after [[page-" + uuid.New().String() + "]]"
 
 	if _, err := svc.Update(context.Background(), taskID, &model.UpdateTaskRequest{Description: &description}); err == nil {

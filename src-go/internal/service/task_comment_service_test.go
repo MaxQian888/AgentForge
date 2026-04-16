@@ -2,11 +2,8 @@ package service
 
 import (
 	"context"
-	"encoding/json"
-	"reflect"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -177,14 +174,13 @@ func TestTaskCommentServiceBroadcastsLifecycleEvents(t *testing.T) {
 	taskID := uuid.New()
 	repo := &stubTaskCommentRepo{}
 	memberRepo := &stubTaskCommentMemberRepo{}
-	hub := ws.NewHub()
-	eventCh := attachTaskCommentProjectListener(t, hub, projectID.String())
+	pub := &capturingPublisher{}
 	taskRepo := &stubEntityLinkTaskRepo{
 		tasks: map[uuid.UUID]*model.Task{
 			taskID: {ID: taskID, ProjectID: projectID, Title: "Task"},
 		},
 	}
-	svc := NewTaskCommentService(repo, memberRepo, nil, taskRepo).WithHub(hub)
+	svc := NewTaskCommentService(repo, memberRepo, nil, taskRepo).WithBus(pub)
 
 	comment, err := svc.CreateComment(context.Background(), &CreateTaskCommentInput{
 		ProjectID: projectID,
@@ -199,42 +195,13 @@ func TestTaskCommentServiceBroadcastsLifecycleEvents(t *testing.T) {
 		t.Fatalf("ResolveComment() error = %v", err)
 	}
 
-	created := decodeTaskCommentEvent(t, <-eventCh)
-	resolved := decodeTaskCommentEvent(t, <-eventCh)
-	if created.Type != ws.EventTaskCommentCreated {
-		t.Fatalf("created event type = %q, want %q", created.Type, ws.EventTaskCommentCreated)
+	if len(pub.events) != 2 {
+		t.Fatalf("published events = %d, want 2", len(pub.events))
 	}
-	if resolved.Type != ws.EventTaskCommentResolved {
-		t.Fatalf("resolved event type = %q, want %q", resolved.Type, ws.EventTaskCommentResolved)
+	if pub.events[0].Type != ws.EventTaskCommentCreated {
+		t.Fatalf("created event type = %q, want %q", pub.events[0].Type, ws.EventTaskCommentCreated)
 	}
-}
-
-func attachTaskCommentProjectListener(t *testing.T, hub *ws.Hub, projectID string) chan []byte {
-	t.Helper()
-
-	client := &ws.Client{}
-	send := make(chan []byte, 8)
-
-	clientValue := reflect.ValueOf(client).Elem()
-	projectField := clientValue.FieldByName("projectID")
-	reflect.NewAt(projectField.Type(), unsafe.Pointer(projectField.UnsafeAddr())).Elem().SetString(projectID)
-	sendField := clientValue.FieldByName("send")
-	reflect.NewAt(sendField.Type(), unsafe.Pointer(sendField.UnsafeAddr())).Elem().Set(reflect.ValueOf(send))
-
-	hubValue := reflect.ValueOf(hub).Elem()
-	clientsField := hubValue.FieldByName("clients")
-	clientsMap := reflect.NewAt(clientsField.Type(), unsafe.Pointer(clientsField.UnsafeAddr())).Elem()
-	clientsMap.SetMapIndex(reflect.ValueOf(client), reflect.ValueOf(struct{}{}))
-
-	return send
-}
-
-func decodeTaskCommentEvent(t *testing.T, raw []byte) ws.Event {
-	t.Helper()
-
-	var event ws.Event
-	if err := json.Unmarshal(raw, &event); err != nil {
-		t.Fatalf("unmarshal ws event: %v", err)
+	if pub.events[1].Type != ws.EventTaskCommentResolved {
+		t.Fatalf("resolved event type = %q, want %q", pub.events[1].Type, ws.EventTaskCommentResolved)
 	}
-	return event
 }

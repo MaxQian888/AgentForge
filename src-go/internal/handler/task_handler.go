@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -33,6 +34,7 @@ type TaskHandler struct {
 	dispatcher  taskDispatcher
 	recommender taskRecommender
 	hub         *ws.Hub
+	bus         eventbus.Publisher
 	workflowSvc taskWorkflowEvaluator
 	automation  service.AutomationEventEvaluator
 }
@@ -80,6 +82,11 @@ func (h *TaskHandler) WithDispatcher(dispatcher taskDispatcher) *TaskHandler {
 
 func (h *TaskHandler) WithHub(hub *ws.Hub) *TaskHandler {
 	h.hub = hub
+	return h
+}
+
+func (h *TaskHandler) WithBus(bus eventbus.Publisher) *TaskHandler {
+	h.bus = bus
 	return h
 }
 
@@ -566,43 +573,31 @@ func (h *TaskHandler) autoUnblockDependents(ctx context.Context, task *model.Tas
 }
 
 func (h *TaskHandler) broadcastTaskUpdated(task *model.Task) {
-	if h.hub == nil || task == nil {
+	if task == nil {
 		return
 	}
-	h.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskUpdated,
-		ProjectID: task.ProjectID.String(),
-		Payload: map[string]any{
-			"task": task.ToDTO(),
-		},
+	_ = eventbus.PublishLegacy(context.Background(), h.bus, ws.EventTaskUpdated, task.ProjectID.String(), map[string]any{
+		"task": task.ToDTO(),
 	})
 }
 
 func (h *TaskHandler) broadcastDependencyResolved(dependent *model.Task, resolved *model.Task) {
-	if h.hub == nil || dependent == nil || resolved == nil {
+	if dependent == nil || resolved == nil {
 		return
 	}
-	h.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskDependencyResolved,
-		ProjectID: dependent.ProjectID.String(),
-		Payload: map[string]any{
-			"taskId":         dependent.ID.String(),
-			"resolvedTaskId": resolved.ID.String(),
-			"newStatus":      dependent.Status,
-		},
+	_ = eventbus.PublishLegacy(context.Background(), h.bus, ws.EventTaskDependencyResolved, dependent.ProjectID.String(), map[string]any{
+		"taskId":         dependent.ID.String(),
+		"resolvedTaskId": resolved.ID.String(),
+		"newStatus":      dependent.Status,
 	})
 }
 
 func (h *TaskHandler) broadcastTaskTransitioned(task *model.Task, reason string) {
-	if h.hub == nil || task == nil {
+	if task == nil {
 		return
 	}
-	h.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskTransitioned,
-		ProjectID: task.ProjectID.String(),
-		Payload: map[string]any{
-			"task":   task.ToDTO(),
-			"reason": reason,
-		},
+	_ = eventbus.PublishLegacy(context.Background(), h.bus, ws.EventTaskTransitioned, task.ProjectID.String(), map[string]any{
+		"task":   task.ToDTO(),
+		"reason": reason,
 	})
 }

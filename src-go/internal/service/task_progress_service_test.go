@@ -2,13 +2,12 @@ package service_test
 
 import (
 	"context"
-	"encoding/json"
-	"reflect"
+	"sync"
 	"testing"
 	"time"
-	"unsafe"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
 	"github.com/react-go-quick-starter/server/internal/ws"
@@ -77,33 +76,29 @@ func (m *mockTaskProgressNotifications) Create(_ context.Context, _ uuid.UUID, n
 	}, nil
 }
 
-func attachTaskProgressListener(hub *ws.Hub, projectID string) chan []byte {
-	client := &ws.Client{}
-	send := make(chan []byte, 16)
-
-	clientValue := reflect.ValueOf(client).Elem()
-
-	projectField := clientValue.FieldByName("projectID")
-	reflect.NewAt(projectField.Type(), unsafe.Pointer(projectField.UnsafeAddr())).Elem().SetString(projectID)
-
-	sendField := clientValue.FieldByName("send")
-	reflect.NewAt(sendField.Type(), unsafe.Pointer(sendField.UnsafeAddr())).Elem().Set(reflect.ValueOf(send))
-
-	hubValue := reflect.ValueOf(hub).Elem()
-	clientsField := hubValue.FieldByName("clients")
-	clientsMap := reflect.NewAt(clientsField.Type(), unsafe.Pointer(clientsField.UnsafeAddr())).Elem()
-	clientsMap.SetMapIndex(reflect.ValueOf(client), reflect.ValueOf(struct{}{}))
-
-	return send
+type taskProgressBusCapture struct {
+	mu     sync.Mutex
+	events []*eventbus.Event
 }
 
-func decodeTaskProgressEvent(t *testing.T, raw []byte) ws.Event {
+func (c *taskProgressBusCapture) Publish(_ context.Context, e *eventbus.Event) error {
+	cloned := *e
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	c.events = append(c.events, &cloned)
+	return nil
+}
+
+func (c *taskProgressBusCapture) next(t *testing.T) *eventbus.Event {
 	t.Helper()
-	var event ws.Event
-	if err := json.Unmarshal(raw, &event); err != nil {
-		t.Fatalf("unmarshal ws event: %v", err)
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	if len(c.events) == 0 {
+		t.Fatal("expected at least one event, got none")
 	}
-	return event
+	head := c.events[0]
+	c.events = c.events[1:]
+	return head
 }
 
 func TestTaskProgressService_EvaluateTaskEmitsStalledAlertOnlyOnceUntilRecovery(t *testing.T) {
@@ -134,14 +129,14 @@ func TestTaskProgressService_EvaluateTaskEmitsStalledAlertOnlyOnceUntilRecovery(
 		HealthStatus:       model.TaskProgressHealthHealthy,
 	}
 	notifications := &mockTaskProgressNotifications{}
-	hub := ws.NewHub()
-	eventCh := attachTaskProgressListener(hub, projectID.String())
+	capture := &taskProgressBusCapture{}
 
 	svc := service.NewTaskProgressService(
 		taskRepo,
 		snapshotRepo,
 		notifications,
-		hub,
+		ws.NewHub(),
+		capture,
 		service.TaskProgressConfig{
 			WarningAfter:   2 * time.Hour,
 			StalledAfter:   4 * time.Hour,
@@ -161,7 +156,7 @@ func TestTaskProgressService_EvaluateTaskEmitsStalledAlertOnlyOnceUntilRecovery(
 	if len(notifications.created) != 1 {
 		t.Fatalf("expected one notification, got %d", len(notifications.created))
 	}
-	firstEvent := decodeTaskProgressEvent(t, <-eventCh)
+	firstEvent := capture.next(t)
 	if firstEvent.Type != ws.EventTaskProgressUpdated {
 		t.Fatalf("expected first progress event, got %s", firstEvent.Type)
 	}
@@ -218,6 +213,7 @@ func TestTaskProgressService_EvaluateTaskMarksUnassignedWorkAsWarning(t *testing
 		snapshotRepo,
 		notifications,
 		ws.NewHub(),
+		nil,
 		service.TaskProgressConfig{
 			WarningAfter:   2 * time.Hour,
 			StalledAfter:   4 * time.Hour,

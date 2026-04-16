@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/ws"
@@ -75,9 +76,6 @@ type pageRecentAccessRepository interface {
 	ListByUser(ctx context.Context, userID uuid.UUID, limit int) ([]*model.PageRecentAccess, error)
 }
 
-type wikiBroadcaster interface {
-	BroadcastEvent(event *ws.Event)
-}
 
 type wikiNotificationCreator interface {
 	Create(ctx context.Context, targetID uuid.UUID, ntype, title, body, data string) (*model.Notification, error)
@@ -94,7 +92,7 @@ type WikiService struct {
 	comments    pageCommentRepository
 	favorites   pageFavoriteRepository
 	recent      pageRecentAccessRepository
-	broadcaster wikiBroadcaster
+	bus         eventbus.Publisher
 	notifier    wikiNotificationCreator
 	imNotifier  wikiIMNotifier
 	imChannels  IMEventChannelResolver
@@ -111,17 +109,17 @@ func NewWikiService(
 	comments pageCommentRepository,
 	favorites pageFavoriteRepository,
 	recent pageRecentAccessRepository,
-	broadcaster wikiBroadcaster,
+	bus eventbus.Publisher,
 ) *WikiService {
 	return &WikiService{
-		spaces:      spaces,
-		pages:       pages,
-		versions:    versions,
-		comments:    comments,
-		favorites:   favorites,
-		recent:      recent,
-		broadcaster: broadcaster,
-		now:         func() time.Time { return time.Now().UTC() },
+		spaces:    spaces,
+		pages:     pages,
+		versions:  versions,
+		comments:  comments,
+		favorites: favorites,
+		recent:    recent,
+		bus:       bus,
+		now:       func() time.Time { return time.Now().UTC() },
 	}
 }
 
@@ -996,14 +994,7 @@ func (s *WikiService) getComment(ctx context.Context, pageID uuid.UUID, commentI
 }
 
 func (s *WikiService) broadcast(projectID uuid.UUID, eventType string, payload any) {
-	if s.broadcaster == nil {
-		return
-	}
-	s.broadcaster.BroadcastEvent(&ws.Event{
-		Type:      eventType,
-		ProjectID: projectID.String(),
-		Payload:   payload,
-	})
+	_ = eventbus.PublishLegacy(context.Background(), s.bus, eventType, projectID.String(), payload)
 }
 
 func normalizeWikiContent(content string) string {

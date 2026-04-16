@@ -12,6 +12,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/jackc/pgx/v5"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
 	log "github.com/sirupsen/logrus"
@@ -57,6 +58,7 @@ type TaskProgressService struct {
 	snapshotRepo   TaskProgressSnapshotRepository
 	notifications  TaskProgressNotificationCreator
 	hub            *ws.Hub
+	bus            eventbus.Publisher
 	cfg            TaskProgressConfig
 	now            func() time.Time
 	imNotifier     TaskProgressIMNotifier
@@ -83,6 +85,7 @@ func NewTaskProgressService(
 	snapshotRepo TaskProgressSnapshotRepository,
 	notifications TaskProgressNotificationCreator,
 	hub *ws.Hub,
+	bus eventbus.Publisher,
 	cfg TaskProgressConfig,
 	now func() time.Time,
 ) *TaskProgressService {
@@ -101,6 +104,7 @@ func NewTaskProgressService(
 		snapshotRepo:   snapshotRepo,
 		notifications:  notifications,
 		hub:            hub,
+		bus:            bus,
 		cfg:            cfg,
 		now:            now,
 		exemptStatuses: exemptStatuses,
@@ -222,12 +226,12 @@ func (s *TaskProgressService) afterSnapshotMutation(
 	fields["recovered"] = recovered
 	log.WithFields(fields).Info("task progress snapshot updated")
 
-	s.broadcastProgressUpdate(task, snapshot, alertEvent)
+	s.broadcastProgressUpdate(ctx, task, snapshot, alertEvent)
 	if alertSent {
-		s.broadcastProgressAlert(task, snapshot)
+		s.broadcastProgressAlert(ctx, task, snapshot)
 	}
 	if recovered {
-		s.broadcastProgressRecovered(task, snapshot)
+		s.broadcastProgressRecovered(ctx, task, snapshot)
 	}
 	return nil
 }
@@ -395,57 +399,36 @@ func (s *TaskProgressService) resolveRiskReason(task *model.Task) string {
 	return model.TaskProgressReasonNoRecentUpdate
 }
 
-func (s *TaskProgressService) broadcastProgressUpdate(task *model.Task, snapshot *model.TaskProgressSnapshot, transition string) {
-	if s.hub == nil {
-		return
-	}
+func (s *TaskProgressService) broadcastProgressUpdate(ctx context.Context, task *model.Task, snapshot *model.TaskProgressSnapshot, transition string) {
 	log.WithFields(taskProgressLogFields(task, snapshot)).WithField("transition", transition).Debug("task progress update broadcast")
 	task.Progress = snapshot
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskProgressUpdated,
-		ProjectID: task.ProjectID.String(),
-		Payload: map[string]any{
-			"taskId":       task.ID.String(),
-			"task":         task.ToDTO(),
-			"progress":     snapshot.ToDTO(),
-			"transition":   transition,
-			"healthStatus": snapshot.HealthStatus,
-			"riskReason":   snapshot.RiskReason,
-		},
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventTaskProgressUpdated, task.ProjectID.String(), map[string]any{
+		"taskId":       task.ID.String(),
+		"task":         task.ToDTO(),
+		"progress":     snapshot.ToDTO(),
+		"transition":   transition,
+		"healthStatus": snapshot.HealthStatus,
+		"riskReason":   snapshot.RiskReason,
 	})
 }
 
-func (s *TaskProgressService) broadcastProgressAlert(task *model.Task, snapshot *model.TaskProgressSnapshot) {
-	if s.hub == nil {
-		return
-	}
+func (s *TaskProgressService) broadcastProgressAlert(ctx context.Context, task *model.Task, snapshot *model.TaskProgressSnapshot) {
 	log.WithFields(taskProgressLogFields(task, snapshot)).Warn("task progress alert broadcast")
 	task.Progress = snapshot
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskProgressAlerted,
-		ProjectID: task.ProjectID.String(),
-		Payload: map[string]any{
-			"taskId":   task.ID.String(),
-			"task":     task.ToDTO(),
-			"progress": snapshot.ToDTO(),
-		},
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventTaskProgressAlerted, task.ProjectID.String(), map[string]any{
+		"taskId":   task.ID.String(),
+		"task":     task.ToDTO(),
+		"progress": snapshot.ToDTO(),
 	})
 }
 
-func (s *TaskProgressService) broadcastProgressRecovered(task *model.Task, snapshot *model.TaskProgressSnapshot) {
-	if s.hub == nil {
-		return
-	}
+func (s *TaskProgressService) broadcastProgressRecovered(ctx context.Context, task *model.Task, snapshot *model.TaskProgressSnapshot) {
 	log.WithFields(taskProgressLogFields(task, snapshot)).Info("task progress recovery broadcast")
 	task.Progress = snapshot
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskProgressRecovered,
-		ProjectID: task.ProjectID.String(),
-		Payload: map[string]any{
-			"taskId":   task.ID.String(),
-			"task":     task.ToDTO(),
-			"progress": snapshot.ToDTO(),
-		},
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventTaskProgressRecovered, task.ProjectID.String(), map[string]any{
+		"taskId":   task.ID.String(),
+		"task":     task.ToDTO(),
+		"progress": snapshot.ToDTO(),
 	})
 }
 

@@ -58,7 +58,7 @@ func (b *spawnVerificationBridge) calls() int {
 
 func TestVerifySpawnStartedSkipsFallbackWhenBridgeActivityArrives(t *testing.T) {
 	bridge := &spawnVerificationBridge{}
-	svc := NewAgentService(nil, nil, nil, nil, bridge, nil)
+	svc := NewAgentService(nil, nil, nil, nil, nil, bridge, nil)
 	taskID := uuid.New()
 
 	done := make(chan struct{})
@@ -83,7 +83,7 @@ func TestVerifySpawnStartedSkipsFallbackWhenBridgeActivityArrives(t *testing.T) 
 
 func TestVerifySpawnStartedFallsBackToGetStatusWithoutBridgeActivity(t *testing.T) {
 	bridge := &spawnVerificationBridge{}
-	svc := NewAgentService(nil, nil, nil, nil, bridge, nil)
+	svc := NewAgentService(nil, nil, nil, nil, nil, bridge, nil)
 
 	svc.verifySpawnStarted(uuid.New(), uuid.New(), time.Now().UTC())
 

@@ -12,6 +12,7 @@ import (
 	echomiddleware "github.com/labstack/echo/v4/middleware"
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
+	"github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/handler"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -172,6 +173,7 @@ func RegisterRoutes(
 	documentRepo *repository.DocumentRepo,
 	logRepo *repository.LogRepository,
 	hub *ws.Hub,
+	bus *eventbus.Bus,
 	bridgeClient *bridge.Client,
 	bridgeHealthSvc *service.BridgeHealthService,
 	pluginSvc *service.PluginService,
@@ -180,7 +182,8 @@ func RegisterRoutes(
 ) *RouteServices {
 	jwtMw := appMiddleware.JWTMiddleware(cfg.JWTSecret, cache)
 	reviewTriggerMw := appMiddleware.ReviewTriggerAuthMiddleware(cfg.JWTSecret, cache, cfg.AgentForgeToken)
-	notificationSvc := service.NewNotificationService(notifRepo, hub)
+
+	notificationSvc := service.NewNotificationService(notifRepo, hub, bus)
 	imControlPlane := service.NewIMControlPlane(service.IMControlPlaneConfig{
 		HeartbeatTTL:              cfg.IMBridgeHeartbeatTTL,
 		ProgressHeartbeatInterval: cfg.IMBridgeProgressInterval,
@@ -191,6 +194,7 @@ func RegisterRoutes(
 		taskProgressRepo,
 		notificationSvc,
 		hub,
+		bus,
 		service.TaskProgressConfig{
 			WarningAfter:     cfg.TaskProgressWarningAfter,
 			StalledAfter:     cfg.TaskProgressStalledAfter,
@@ -213,7 +217,7 @@ func RegisterRoutes(
 		pageCommentRepo,
 		pageFavoriteRepo,
 		pageRecentAccessRepo,
-		hub,
+		bus,
 	).WithNotificationCreator(notificationSvc)
 	if agentSvc != nil {
 		agentSvc.SetProgressTracker(taskProgressSvc)
@@ -228,11 +232,11 @@ func RegisterRoutes(
 	memoryAPI := service.NewMemoryAPIService(memorySvc, memoryExplorerSvc)
 	var teamSvc *service.TeamService
 	if agentSvc != nil {
-		teamSvc = service.NewTeamService(teamRepo, agentRunRepo, agentSvc, taskRepo, projectRepo, memorySvc, hub, agentSvc.TeamArtifactService())
+		teamSvc = service.NewTeamService(teamRepo, agentRunRepo, agentSvc, taskRepo, projectRepo, memorySvc, hub, bus, agentSvc.TeamArtifactService())
 		agentSvc.SetTeamService(teamSvc)
 		agentSvc.SetMemoryService(memorySvc)
 	}
-	reviewSvc := service.NewReviewService(reviewRepo, taskRepo, notificationSvc, hub, bridgeClient, taskProgressSvc)
+	reviewSvc := service.NewReviewService(reviewRepo, taskRepo, notificationSvc, hub, bus, bridgeClient, taskProgressSvc)
 	reviewSvc.SetIMProgressNotifier(imControlPlane)
 	reviewSvc.WithProjectRepository(projectRepo)
 	reviewAggSvc := service.NewReviewAggregationService(reviewRepo, reviewAggRepo, falsePosRepo, taskRepo)
@@ -240,9 +244,9 @@ func RegisterRoutes(
 	reviewSvc.WithDocWriteback(entityLinkRepo, wikiPageRepo, pageVersionRepo)
 	taskDecomposeSvc := service.NewTaskDecompositionService(taskRepo, taskDecompositionBridgeAdapter{client: bridgeClient})
 	docDecomposeSvc := service.NewDocDecompositionService(taskRepo, docDecompositionWikiRepositoryAdapter{pages: wikiPageRepo, spaces: wikiSpaceRepo}, entityLinkRepo)
-	entityLinkSvc := service.NewEntityLinkService(entityLinkRepo, taskRepo, wikiPageRepo).WithHub(hub)
-	taskCommentSvc := service.NewTaskCommentService(taskCommentRepo, memberRepo, notificationSvc, taskRepo).WithHub(hub)
-	taskSvc := service.NewTaskService(taskRepo, hub).WithEntityLinkSyncer(entityLinkSvc)
+	entityLinkSvc := service.NewEntityLinkService(entityLinkRepo, taskRepo, wikiPageRepo).WithHub(hub).WithBus(bus)
+	taskCommentSvc := service.NewTaskCommentService(taskCommentRepo, memberRepo, notificationSvc, taskRepo).WithHub(hub).WithBus(bus)
+	taskSvc := service.NewTaskService(taskRepo, hub, bus).WithEntityLinkSyncer(entityLinkSvc)
 	wikiSvc.WithEntityLinkSyncer(entityLinkSvc)
 
 	// Health
@@ -279,8 +283,8 @@ func RegisterRoutes(
 	// --- New resource handlers ---
 	projectH := handler.NewProjectHandler(projectRepo, bridgeClient, wikiSvc)
 	memberH := handler.NewMemberHandler(memberRepo)
-	sprintH := handler.NewSprintHandler(sprintRepo, taskRepo).WithHub(hub)
-	taskH := handler.NewTaskHandler(taskRepo, taskDecomposeSvc).WithProgress(taskProgressSvc).WithHub(hub)
+	sprintH := handler.NewSprintHandler(sprintRepo, taskRepo).WithHub(hub).WithBus(bus)
+	taskH := handler.NewTaskHandler(taskRepo, taskDecomposeSvc).WithProgress(taskProgressSvc).WithHub(hub).WithBus(bus)
 	wikiH := handler.NewWikiHandler(wikiSvc)
 	entityLinkH := handler.NewEntityLinkHandler(entityLinkSvc)
 	taskCommentH := handler.NewTaskCommentHandler(taskCommentSvc)
@@ -306,7 +310,7 @@ func RegisterRoutes(
 	dagDefRepo := repository.NewWorkflowDefinitionRepository(taskRepo.DB())
 	dagExecRepo := repository.NewWorkflowExecutionRepository(taskRepo.DB())
 	dagNodeExecRepo := repository.NewWorkflowNodeExecutionRepository(taskRepo.DB())
-	dagWorkflowSvc := service.NewDAGWorkflowService(dagDefRepo, dagExecRepo, dagNodeExecRepo, hub)
+	dagWorkflowSvc := service.NewDAGWorkflowService(dagDefRepo, dagExecRepo, dagNodeExecRepo, hub, bus)
 	dagWorkflowSvc.SetTaskRepo(taskRepo)
 	dagRunMappingRepo := repository.NewWorkflowRunMappingRepository(taskRepo.DB())
 	dagWorkflowSvc.SetRunMappingRepo(dagRunMappingRepo)
@@ -399,7 +403,7 @@ func RegisterRoutes(
 		agentSvc.SetDispatchBudgetChecker(budgetSvc)
 		agentSvc.SetDispatchMemberReader(memberRepo)
 		agentSvc.SetDispatchAttemptRecorder(dispatchAttemptRepo)
-		dispatchSvc = service.NewTaskDispatchService(taskRepo, memberRepo, agentSvc, hub, notificationSvc, taskProgressSvc)
+		dispatchSvc = service.NewTaskDispatchService(taskRepo, memberRepo, agentSvc, hub, bus, notificationSvc, taskProgressSvc)
 		dispatchSvc = dispatchSvc.WithQueueWriter(agentSvc)
 		dispatchSvc = dispatchSvc.WithBudgetChecker(budgetSvc)
 		dispatchSvc = dispatchSvc.WithAttemptRecorder(dispatchAttemptRepo)
@@ -413,7 +417,7 @@ func RegisterRoutes(
 		agentH = agentH.WithDispatcher(dispatchSvc)
 	}
 	documentH := handler.NewDocumentHandler(documentSvc)
-	logSvc := service.NewLogService(logRepo, hub)
+	logSvc := service.NewLogService(logRepo, hub, bus)
 	logH := handler.NewLogHandler(logSvc)
 
 	costQuerySvc := service.NewCostQueryService(taskRepo, sprintRepo, agentRunRepo, budgetSvc)
@@ -426,7 +430,7 @@ func RegisterRoutes(
 		service.NewWorkflowStepRouterExecutor(agentSvc, reviewSvc, dispatchSvc),
 	)
 	automationEngine.SetWorkflowStarter(workflowExec)
-	taskWorkflowSvc := service.NewTaskWorkflowService(workflowRepo, hub)
+	taskWorkflowSvc := service.NewTaskWorkflowService(workflowRepo, hub, bus)
 	taskWorkflowSvc.SetTaskRepository(taskRepo)
 	taskWorkflowSvc.SetNotifier(notifRepo)
 	taskWorkflowSvc.SetProgressRecorder(taskProgressSvc)

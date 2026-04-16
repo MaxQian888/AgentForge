@@ -11,6 +11,7 @@ import (
 
 	"github.com/google/uuid"
 	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
 	log "github.com/sirupsen/logrus"
@@ -55,6 +56,7 @@ type ReviewService struct {
 	projects      ReviewProjectRepository
 	notifications ReviewNotificationCreator
 	hub           *ws.Hub
+	bus           eventbus.Publisher
 	bridge        ReviewBridgeClient
 	planner       *ReviewExecutionPlanner
 	progress      *TaskProgressService
@@ -88,6 +90,7 @@ func NewReviewService(
 	tasks ReviewTaskRepository,
 	notifications ReviewNotificationCreator,
 	hub *ws.Hub,
+	bus eventbus.Publisher,
 	bridge ReviewBridgeClient,
 	progress ...*TaskProgressService,
 ) *ReviewService {
@@ -100,6 +103,7 @@ func NewReviewService(
 		tasks:         tasks,
 		notifications: notifications,
 		hub:           hub,
+		bus:           bus,
 		bridge:        bridge,
 		progress:      tracker,
 	}
@@ -224,7 +228,7 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	}
 
 	if projectID != uuid.Nil {
-		s.broadcast(ws.EventReviewCreated, projectID.String(), review.ToDTO())
+		s.broadcast(ctx, ws.EventReviewCreated, projectID.String(), review.ToDTO())
 	}
 	if task != nil {
 		s.recordProgress(ctx, task.ID, TaskActivityInput{
@@ -393,7 +397,7 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 	}
 
 	if projectID != uuid.Nil {
-		s.broadcast(ws.EventReviewCompleted, projectID.String(), review.ToDTO())
+		s.broadcast(ctx, ws.EventReviewCompleted, projectID.String(), review.ToDTO())
 	}
 	if task != nil {
 		s.recordProgress(ctx, task.ID, TaskActivityInput{
@@ -529,7 +533,7 @@ func (s *ReviewService) IngestCIResult(ctx context.Context, req *model.CIReviewR
 	fields["needsDeepReview"] = needsDeepReview
 	log.WithFields(fields).Info("CI review ingested")
 
-	s.broadcast(ws.EventReviewCreated, task.ProjectID.String(), review.ToDTO())
+	s.broadcast(ctx, ws.EventReviewCreated, task.ProjectID.String(), review.ToDTO())
 
 	// Trigger aggregation if available.
 	if s.aggregation != nil {
@@ -574,7 +578,7 @@ func (s *ReviewService) RequestHumanApproval(ctx context.Context, reviewID uuid.
 	log.WithFields(fields).Info("review set to pending_human")
 
 	if projectID != uuid.Nil {
-		s.broadcast(ws.EventReviewPendingHuman, projectID.String(), review.ToDTO())
+		s.broadcast(ctx, ws.EventReviewPendingHuman, projectID.String(), review.ToDTO())
 	}
 
 	if task != nil && task.AssigneeID != nil && s.notifications != nil {
@@ -621,7 +625,7 @@ func (s *ReviewService) RouteFixRequest(ctx context.Context, reviewID uuid.UUID)
 	fields := reviewLogFields(review, task)
 	log.WithFields(fields).Info("routing fix request to agent")
 
-	s.broadcast(ws.EventReviewFixRequested, task.ProjectID.String(), fixPayload)
+	s.broadcast(ctx, ws.EventReviewFixRequested, task.ProjectID.String(), fixPayload)
 
 	return nil
 }
@@ -711,7 +715,7 @@ func (s *ReviewService) MarkFalsePositive(ctx context.Context, reviewID uuid.UUI
 
 	projectID, _ := s.resolveReviewProject(ctx, review)
 	if projectID != uuid.Nil {
-		s.broadcast(ws.EventReviewUpdated, projectID.String(), review.ToDTO())
+		s.broadcast(ctx, ws.EventReviewUpdated, projectID.String(), review.ToDTO())
 	}
 	return review, nil
 }
@@ -770,7 +774,7 @@ func (s *ReviewService) applyHumanTransition(
 		eventType = ws.EventReviewCompleted
 	}
 	if projectID != uuid.Nil {
-		s.broadcast(eventType, projectID.String(), review.ToDTO())
+		s.broadcast(ctx, eventType, projectID.String(), review.ToDTO())
 	}
 
 	return review, nil
@@ -947,15 +951,8 @@ func projectIDFromMetadata(metadata ...*model.ReviewExecutionMetadata) uuid.UUID
 	return uuid.Nil
 }
 
-func (s *ReviewService) broadcast(eventType, projectID string, payload any) {
-	if s.hub == nil {
-		return
-	}
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      eventType,
-		ProjectID: projectID,
-		Payload:   payload,
-	})
+func (s *ReviewService) broadcast(ctx context.Context, eventType, projectID string, payload any) {
+	_ = eventbus.PublishLegacy(ctx, s.bus, eventType, projectID, payload)
 }
 
 func (s *ReviewService) recordProgress(ctx context.Context, taskID uuid.UUID, input TaskActivityInput) {

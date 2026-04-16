@@ -11,6 +11,7 @@ import (
 
 	"github.com/glebarez/sqlite"
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/ws"
@@ -347,12 +348,13 @@ func (r *stubPageRecentAccessRepo) ListByUser(_ context.Context, userID uuid.UUI
 }
 
 type stubWikiBroadcaster struct {
-	events []*ws.Event
+	events []*eventbus.Event
 }
 
-func (b *stubWikiBroadcaster) BroadcastEvent(event *ws.Event) {
+func (b *stubWikiBroadcaster) Publish(_ context.Context, event *eventbus.Event) error {
 	cloned := *event
 	b.events = append(b.events, &cloned)
+	return nil
 }
 
 type stubMentionLinkSyncer struct {

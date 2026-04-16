@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
 	log "github.com/sirupsen/logrus"
@@ -90,6 +91,7 @@ type TeamService struct {
 	projectRepo      TeamProjectRepository
 	memorySvc        *MemoryService
 	hub              *ws.Hub
+	bus              eventbus.Publisher
 	maxTeamSize      int
 	artifactSvc      *TeamArtifactService
 	workflowAdapter  *TeamWorkflowAdapter
@@ -104,6 +106,7 @@ func NewTeamService(
 	projectRepo TeamProjectRepository,
 	memorySvc *MemoryService,
 	hub *ws.Hub,
+	bus eventbus.Publisher,
 	artifactSvc ...*TeamArtifactService,
 ) *TeamService {
 	svc := &TeamService{
@@ -114,6 +117,7 @@ func NewTeamService(
 		projectRepo: projectRepo,
 		memorySvc:   memorySvc,
 		hub:         hub,
+		bus:         bus,
 		maxTeamSize: defaultMaxTeamSize,
 	}
 	if len(artifactSvc) > 0 {
@@ -698,14 +702,7 @@ func (s *TeamService) ListArtifacts(ctx context.Context, teamID uuid.UUID) ([]mo
 }
 
 func (s *TeamService) broadcastEvent(eventType, projectID string, payload any) {
-	if s.hub == nil {
-		return
-	}
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      eventType,
-		ProjectID: projectID,
-		Payload:   payload,
-	})
+	_ = eventbus.PublishLegacy(context.Background(), s.bus, eventType, projectID, payload)
 }
 
 // tryCreateSubtasksFromStructuredOutput attempts to create subtasks from the planner's structured output.

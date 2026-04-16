@@ -6,6 +6,7 @@ import (
 	"regexp"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/ws"
@@ -35,6 +36,7 @@ type EntityLinkService struct {
 	tasks entityLinkTaskReader
 	pages entityLinkWikiReader
 	hub   *ws.Hub
+	bus   eventbus.Publisher
 }
 
 type mentionLinkSyncer interface {
@@ -70,11 +72,17 @@ func (s *EntityLinkService) WithDB(db *gorm.DB) mentionLinkSyncer {
 		tasks: s.tasks,
 		pages: s.pages,
 		hub:   s.hub,
+		bus:   s.bus,
 	}
 }
 
 func (s *EntityLinkService) WithHub(hub *ws.Hub) *EntityLinkService {
 	s.hub = hub
+	return s
+}
+
+func (s *EntityLinkService) WithBus(bus eventbus.Publisher) *EntityLinkService {
+	s.bus = bus
 	return s
 }
 
@@ -93,13 +101,13 @@ func (s *EntityLinkService) CreateLink(ctx context.Context, input *CreateEntityL
 	if err := s.repo.Create(ctx, link); err != nil {
 		return nil, fmt.Errorf("create entity link: %w", err)
 	}
-	s.broadcast(input.ProjectID, ws.EventLinkCreated, link.ToDTO())
+	s.broadcast(ctx, input.ProjectID, ws.EventLinkCreated, link.ToDTO())
 	return link, nil
 }
 
 func (s *EntityLinkService) DeleteLink(ctx context.Context, linkID uuid.UUID) error {
 	projectID := uuid.Nil
-	if s.hub != nil {
+	if s.bus != nil || s.hub != nil {
 		if link, err := s.repo.GetByID(ctx, linkID); err == nil && link != nil {
 			projectID = link.ProjectID
 		}
@@ -108,7 +116,7 @@ func (s *EntityLinkService) DeleteLink(ctx context.Context, linkID uuid.UUID) er
 		return fmt.Errorf("delete entity link: %w", err)
 	}
 	if projectID != uuid.Nil {
-		s.broadcast(projectID, ws.EventLinkDeleted, map[string]string{"id": linkID.String()})
+		s.broadcast(ctx, projectID, ws.EventLinkDeleted, map[string]string{"id": linkID.String()})
 	}
 	return nil
 }
@@ -242,13 +250,6 @@ func ExtractBacklinkTargets(content string) []model.EntityLinkTarget {
 	return targets
 }
 
-func (s *EntityLinkService) broadcast(projectID uuid.UUID, eventType string, payload any) {
-	if s.hub == nil {
-		return
-	}
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      eventType,
-		ProjectID: projectID.String(),
-		Payload:   payload,
-	})
+func (s *EntityLinkService) broadcast(ctx context.Context, projectID uuid.UUID, eventType string, payload any) {
+	_ = eventbus.PublishLegacy(ctx, s.bus, eventType, projectID.String(), payload)
 }

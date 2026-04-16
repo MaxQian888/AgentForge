@@ -17,6 +17,7 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
+	"github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/server"
@@ -82,6 +83,7 @@ func registerTestRoutesWithDependencies(e *echo.Echo, cfg *config.Config, authSv
 		repository.NewDocumentRepo(nil),
 		repository.NewLogRepository(nil),
 		ws.NewHub(),
+		eventbus.NewBus(),
 		bridge.NewClient("http://localhost:7778"),
 		nil,
 		pluginSvc,
@@ -113,6 +115,7 @@ func testAgentService() *service.AgentService {
 		repository.NewTaskRepository(nil),
 		repository.NewProjectRepository(nil),
 		ws.NewHub(),
+		nil,
 		bridge.NewClient("http://localhost:7778"),
 		nil,
 	)

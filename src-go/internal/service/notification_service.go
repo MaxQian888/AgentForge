@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
 )
@@ -20,10 +21,11 @@ type NotificationRepository interface {
 type NotificationService struct {
 	repo NotificationRepository
 	hub  *ws.Hub
+	bus  eventbus.Publisher
 }
 
-func NewNotificationService(repo NotificationRepository, hub *ws.Hub) *NotificationService {
-	return &NotificationService{repo: repo, hub: hub}
+func NewNotificationService(repo NotificationRepository, hub *ws.Hub, bus eventbus.Publisher) *NotificationService {
+	return &NotificationService{repo: repo, hub: hub, bus: bus}
 }
 
 // Create stores a notification and broadcasts it via WebSocket.
@@ -41,10 +43,7 @@ func (s *NotificationService) Create(ctx context.Context, targetID uuid.UUID, nt
 		return nil, fmt.Errorf("create notification: %w", err)
 	}
 
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:    ws.EventNotification,
-		Payload: n.ToDTO(),
-	})
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventNotification, "", n.ToDTO())
 	return n, nil
 }
 

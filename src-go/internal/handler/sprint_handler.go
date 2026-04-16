@@ -8,6 +8,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -18,6 +19,7 @@ type SprintHandler struct {
 	repo     sprintRepository
 	taskRepo sprintTaskRepository
 	hub      *ws.Hub
+	bus      eventbus.Publisher
 	now      func() time.Time
 }
 
@@ -164,6 +166,11 @@ func (h *SprintHandler) WithHub(hub *ws.Hub) *SprintHandler {
 	return h
 }
 
+func (h *SprintHandler) WithBus(bus eventbus.Publisher) *SprintHandler {
+	h.bus = bus
+	return h
+}
+
 func (h *SprintHandler) Update(c echo.Context) error {
 	sprintID, err := uuid.Parse(c.Param("sid"))
 	if err != nil {
@@ -224,20 +231,14 @@ func (h *SprintHandler) Update(c echo.Context) error {
 	}
 
 	dto := sprint.ToDTO()
-	if h.hub != nil {
-		eventType := ws.EventSprintUpdated
-		if transitioned {
-			eventType = ws.EventSprintTransitioned
-		}
-		h.hub.BroadcastEvent(&ws.Event{
-			Type:      eventType,
-			ProjectID: projectID.String(),
-			Payload: map[string]interface{}{
-				"sprint":    dto,
-				"oldStatus": oldStatus,
-			},
-		})
+	eventType := ws.EventSprintUpdated
+	if transitioned {
+		eventType = ws.EventSprintTransitioned
 	}
+	_ = eventbus.PublishLegacy(c.Request().Context(), h.bus, eventType, projectID.String(), map[string]interface{}{
+		"sprint":    dto,
+		"oldStatus": oldStatus,
+	})
 
 	return c.JSON(http.StatusOK, dto)
 }

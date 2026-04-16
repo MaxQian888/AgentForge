@@ -1,9 +1,3 @@
-//go:build eventbus_m1_service_green
-// +build eventbus_m1_service_green
-
-// Temporarily excluded during the eventbus M1 tree-broken window (Tasks 15-22).
-// Remove the build tag once Task 23 restores service package compilation.
-
 package ws_test
 
 import (

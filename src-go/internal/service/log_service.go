@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
 )
@@ -20,11 +21,12 @@ type logRepository interface {
 type LogService struct {
 	repo logRepository
 	hub  *ws.Hub
+	bus  eventbus.Publisher
 }
 
 // NewLogService creates a new LogService.
-func NewLogService(repo logRepository, hub *ws.Hub) *LogService {
-	return &LogService{repo: repo, hub: hub}
+func NewLogService(repo logRepository, hub *ws.Hub, bus eventbus.Publisher) *LogService {
+	return &LogService{repo: repo, hub: hub, bus: bus}
 }
 
 // CreateLog persists a new log entry and broadcasts it over WebSocket.
@@ -63,13 +65,7 @@ func (s *LogService) CreateLog(ctx context.Context, input model.CreateLogInput) 
 		return nil, fmt.Errorf("create log: %w", err)
 	}
 
-	if s.hub != nil {
-		s.hub.BroadcastEvent(&ws.Event{
-			Type:      ws.EventLogCreated,
-			ProjectID: entry.ProjectID.String(),
-			Payload:   entry.ToDTO(),
-		})
-	}
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventLogCreated, entry.ProjectID.String(), entry.ToDTO())
 
 	return entry, nil
 }

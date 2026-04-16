@@ -6,6 +6,7 @@ import (
 	"fmt"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/ws"
@@ -27,6 +28,7 @@ type TaskRepository interface {
 type TaskService struct {
 	repo       TaskRepository
 	hub        *ws.Hub
+	bus        eventbus.Publisher
 	linkSyncer mentionLinkSyncer
 }
 
@@ -41,8 +43,8 @@ type mentionLinkSyncerTxBinder interface {
 	WithDB(db *gorm.DB) mentionLinkSyncer
 }
 
-func NewTaskService(repo TaskRepository, hub *ws.Hub) *TaskService {
-	return &TaskService{repo: repo, hub: hub}
+func NewTaskService(repo TaskRepository, hub *ws.Hub, bus eventbus.Publisher) *TaskService {
+	return &TaskService{repo: repo, hub: hub, bus: bus}
 }
 
 func (s *TaskService) WithEntityLinkSyncer(linkSyncer mentionLinkSyncer) *TaskService {
@@ -81,11 +83,7 @@ func (s *TaskService) Create(ctx context.Context, projectID uuid.UUID, req *mode
 		return nil, fmt.Errorf("create task: %w", err)
 	}
 
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskCreated,
-		ProjectID: projectID.String(),
-		Payload:   task.ToDTO(),
-	})
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventTaskCreated, projectID.String(), task.ToDTO())
 
 	return task, nil
 }
@@ -124,11 +122,7 @@ func (s *TaskService) Update(ctx context.Context, id uuid.UUID, req *model.Updat
 				if err != nil {
 					return nil, fmt.Errorf("update task: %w", err)
 				}
-				s.hub.BroadcastEvent(&ws.Event{
-					Type:      ws.EventTaskUpdated,
-					ProjectID: task.ProjectID.String(),
-					Payload:   task.ToDTO(),
-				})
+				_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventTaskUpdated, task.ProjectID.String(), task.ToDTO())
 				return task, nil
 			}
 		}
@@ -147,11 +141,7 @@ func (s *TaskService) Update(ctx context.Context, id uuid.UUID, req *model.Updat
 		}
 	}
 
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskUpdated,
-		ProjectID: task.ProjectID.String(),
-		Payload:   task.ToDTO(),
-	})
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventTaskUpdated, task.ProjectID.String(), task.ToDTO())
 
 	return task, nil
 }
@@ -165,11 +155,7 @@ func (s *TaskService) Delete(ctx context.Context, id uuid.UUID) error {
 		return fmt.Errorf("delete task: %w", err)
 	}
 
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskDeleted,
-		ProjectID: task.ProjectID.String(),
-		Payload:   map[string]string{"id": id.String()},
-	})
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventTaskDeleted, task.ProjectID.String(), map[string]string{"id": id.String()})
 	return nil
 }
 
@@ -182,13 +168,9 @@ func (s *TaskService) Transition(ctx context.Context, id uuid.UUID, req *model.T
 		return nil, err
 	}
 
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskTransitioned,
-		ProjectID: task.ProjectID.String(),
-		Payload: map[string]any{
-			"task":   task.ToDTO(),
-			"reason": req.Reason,
-		},
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventTaskTransitioned, task.ProjectID.String(), map[string]any{
+		"task":   task.ToDTO(),
+		"reason": req.Reason,
 	})
 	return task, nil
 }
@@ -214,10 +196,6 @@ func (s *TaskService) Assign(ctx context.Context, id uuid.UUID, req *model.Assig
 		return nil, err
 	}
 
-	s.hub.BroadcastEvent(&ws.Event{
-		Type:      ws.EventTaskAssigned,
-		ProjectID: task.ProjectID.String(),
-		Payload:   task.ToDTO(),
-	})
+	_ = eventbus.PublishLegacy(ctx, s.bus, ws.EventTaskAssigned, task.ProjectID.String(), task.ToDTO())
 	return task, nil
 }

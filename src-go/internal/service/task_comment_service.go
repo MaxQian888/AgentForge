@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/ws"
 )
@@ -41,6 +42,7 @@ type TaskCommentService struct {
 	notifier taskCommentNotificationCreator
 	tasks    entityLinkTaskReader
 	hub      *ws.Hub
+	bus      eventbus.Publisher
 }
 
 func NewTaskCommentService(repo taskCommentRepository, members taskCommentMemberRepository, notifier taskCommentNotificationCreator, tasks ...entityLinkTaskReader) *TaskCommentService {
@@ -56,6 +58,11 @@ func (s *TaskCommentService) WithHub(hub *ws.Hub) *TaskCommentService {
 	return s
 }
 
+func (s *TaskCommentService) WithBus(bus eventbus.Publisher) *TaskCommentService {
+	s.bus = bus
+	return s
+}
+
 func (s *TaskCommentService) CreateComment(ctx context.Context, input *CreateTaskCommentInput) (*model.TaskComment, error) {
 	comment := &model.TaskComment{
 		ID:        uuid.New(),
@@ -68,7 +75,7 @@ func (s *TaskCommentService) CreateComment(ctx context.Context, input *CreateTas
 		return nil, fmt.Errorf("create task comment: %w", err)
 	}
 	s.notifyMentions(ctx, input.ProjectID, input.TaskID, comment)
-	s.broadcast(input.ProjectID, ws.EventTaskCommentCreated, comment.ToDTO())
+	s.broadcast(ctx, input.ProjectID, ws.EventTaskCommentCreated, comment.ToDTO())
 	return comment, nil
 }
 
@@ -98,7 +105,7 @@ func (s *TaskCommentService) ResolveComment(ctx context.Context, commentID uuid.
 	if err := s.repo.Update(ctx, comment); err != nil {
 		return nil, fmt.Errorf("resolve task comment: %w", err)
 	}
-	s.broadcast(s.projectIDForTask(ctx, comment.TaskID), ws.EventTaskCommentResolved, map[string]any{
+	s.broadcast(ctx, s.projectIDForTask(ctx, comment.TaskID), ws.EventTaskCommentResolved, map[string]any{
 		"id":       comment.ID.String(),
 		"taskId":   comment.TaskID.String(),
 		"resolved": true,
@@ -115,7 +122,7 @@ func (s *TaskCommentService) ReopenComment(ctx context.Context, commentID uuid.U
 	if err := s.repo.Update(ctx, comment); err != nil {
 		return nil, fmt.Errorf("reopen task comment: %w", err)
 	}
-	s.broadcast(s.projectIDForTask(ctx, comment.TaskID), ws.EventTaskCommentResolved, map[string]any{
+	s.broadcast(ctx, s.projectIDForTask(ctx, comment.TaskID), ws.EventTaskCommentResolved, map[string]any{
 		"id":       comment.ID.String(),
 		"taskId":   comment.TaskID.String(),
 		"resolved": false,
@@ -197,16 +204,10 @@ func (s *TaskCommentService) projectIDForTask(ctx context.Context, taskID uuid.U
 	return task.ProjectID
 }
 
-func (s *TaskCommentService) broadcast(projectID uuid.UUID, eventType string, payload any) {
-	if s.hub == nil {
-		return
-	}
-	event := &ws.Event{
-		Type:    eventType,
-		Payload: payload,
-	}
+func (s *TaskCommentService) broadcast(ctx context.Context, projectID uuid.UUID, eventType string, payload any) {
+	projectIDStr := ""
 	if projectID != uuid.Nil {
-		event.ProjectID = projectID.String()
+		projectIDStr = projectID.String()
 	}
-	s.hub.BroadcastEvent(event)
+	_ = eventbus.PublishLegacy(ctx, s.bus, eventType, projectIDStr, payload)
 }

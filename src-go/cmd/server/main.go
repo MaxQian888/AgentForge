@@ -15,6 +15,9 @@ import (
 
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
+	"github.com/react-go-quick-starter/server/internal/eventbus"
+	ebmods "github.com/react-go-quick-starter/server/internal/eventbus/mods"
+	ebrepo "github.com/react-go-quick-starter/server/internal/eventbus/repository"
 	appI18n "github.com/react-go-quick-starter/server/internal/i18n"
 	"github.com/react-go-quick-starter/server/internal/model"
 	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
@@ -135,6 +138,20 @@ func main() {
 	scheduledJobRunRepo := repository.NewScheduledJobRunRepository(db)
 	hub := ws.NewHub()
 	go hub.Run()
+
+	// Event bus — unified producer pipeline. All mods must be registered
+	// before the first Publish, which happens on the first HTTP request.
+	eventsRepo := ebrepo.NewEventsRepository(taskRepo.DB())
+	dlqRepo := ebrepo.NewDeadLetterRepository(taskRepo.DB())
+	bus := eventbus.NewBus()
+	bus.Register(ebmods.NewValidate())
+	bus.Register(ebmods.NewAuth())
+	bus.Register(ebmods.NewEnrich())
+	bus.Register(ebmods.NewChannelRouter())
+	bus.Register(ebmods.NewPersistFromRepos(eventsRepo, dlqRepo))
+	bus.Register(ebmods.NewWSFanout(hub))
+	bus.Register(ebmods.NewMetrics())
+
 	bridgeClient := bridge.NewClient(cfg.BridgeURL)
 	bridgeHealthCtx, bridgeHealthCancel := context.WithCancel(context.Background())
 	bridgeHealthSvc := service.NewBridgeHealthService(bridgeClient)
@@ -142,7 +159,7 @@ func main() {
 	worktreeMgr := worktree.NewManager(cfg.WorktreeBasePath, cfg.RepoBasePath, cfg.MaxActiveAgents)
 	runStartupWorktreeSweep(cfg, worktreeMgr)
 	roleStore := role.NewFileStore(cfg.RolesDir)
-	agentSvc := service.NewAgentService(agentRunRepo, taskRepo, projectRepo, hub, bridgeClient, worktreeMgr, roleStore)
+	agentSvc := service.NewAgentService(agentRunRepo, taskRepo, projectRepo, hub, bus, bridgeClient, worktreeMgr, roleStore)
 	agentSvc.SetBridgeHealth(bridgeHealthSvc)
 	agentSvc.SetPool(pool.NewPool(cfg.MaxActiveAgents))
 	agentSvc.SetQueueStore(agentPoolQueueRepo)
@@ -217,6 +234,7 @@ func main() {
 		repository.NewDocumentRepo(db),
 		repository.NewLogRepository(db),
 		hub,
+		bus,
 		bridgeClient,
 		bridgeHealthSvc,
 		pluginSvc,

@@ -329,7 +329,7 @@ func TestTeamService_StartTeamUsesProjectDefaultsAndPersistsRuntimeConfig(t *tes
 		Settings: `{"coding_agent":{"runtime":"codex","provider":"openai","model":"gpt-5-codex"}}`,
 	}}
 
-	svc := service.NewTeamService(teamRepo, runRepo, spawner, taskRepo, projectRepo, nil, ws.NewHub())
+	svc := service.NewTeamService(teamRepo, runRepo, spawner, taskRepo, projectRepo, nil, ws.NewHub(), nil)
 
 	team, err := svc.StartTeam(context.Background(), service.StartTeamInput{
 		TaskID:         taskID,
@@ -380,7 +380,7 @@ func TestTeamService_StartTeamAcceptsExplicitCliBackedRuntime(t *testing.T) {
 		Settings: "{}",
 	}}
 
-	svc := service.NewTeamService(teamRepo, runRepo, spawner, taskRepo, projectRepo, nil, ws.NewHub())
+	svc := service.NewTeamService(teamRepo, runRepo, spawner, taskRepo, projectRepo, nil, ws.NewHub(), nil)
 
 	team, err := svc.StartTeam(context.Background(), service.StartTeamInput{
 		TaskID:         taskID,
@@ -438,7 +438,7 @@ func TestTeamService_ProcessRunCompletionPropagatesRuntimeConfigToCoders(t *test
 	}}
 	projectRepo := &mockTeamProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 
-	svc := service.NewTeamService(teamRepo, runRepo, spawner, taskRepo, projectRepo, nil, ws.NewHub())
+	svc := service.NewTeamService(teamRepo, runRepo, spawner, taskRepo, projectRepo, nil, ws.NewHub(), nil)
 
 	svc.ProcessRunCompletion(context.Background(), &model.AgentRun{
 		ID:       uuid.New(),
@@ -497,7 +497,7 @@ func TestTeamService_ProcessRunCompletionFailsWhenTeamSizeWouldExceedLimit(t *te
 	}
 	projectRepo := &mockTeamProjectRepo{project: &model.Project{ID: projectID, Slug: "agentforge"}}
 
-	svc := service.NewTeamService(teamRepo, runRepo, spawner, taskRepo, projectRepo, nil, ws.NewHub()).WithMaxTeamSize(4)
+	svc := service.NewTeamService(teamRepo, runRepo, spawner, taskRepo, projectRepo, nil, ws.NewHub(), nil).WithMaxTeamSize(4)
 
 	svc.ProcessRunCompletion(context.Background(), &model.AgentRun{
 		ID:       uuid.New(),
