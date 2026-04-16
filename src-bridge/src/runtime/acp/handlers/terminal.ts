@@ -1,4 +1,3 @@
-// T4b placeholder: real implementation lands in T4b (TerminalManager PTY pool).
 import type {
   CreateTerminalRequest,
   CreateTerminalResponse,
@@ -12,39 +11,57 @@ import type {
   WaitForTerminalExitResponse,
 } from "@agentclientprotocol/sdk";
 import type { PerSessionContext } from "../multiplexed-client.js";
+import type { TerminalManager } from "../terminal-manager.js";
 
-/* eslint-disable @typescript-eslint/no-unused-vars */
+function tm(ctx: PerSessionContext): TerminalManager {
+  return ctx.terminalManager as unknown as TerminalManager;
+}
+
 export async function createTerminal(
-  _c: PerSessionContext,
-  _p: CreateTerminalRequest,
+  ctx: PerSessionContext,
+  p: CreateTerminalRequest,
 ): Promise<CreateTerminalResponse> {
-  throw new Error("terminal.create not yet implemented (T4b)");
+  const id = tm(ctx).create({
+    command: p.command,
+    args: p.args,
+    cwd: (p as unknown as { cwd?: string }).cwd ?? ctx.cwd,
+    env: (p as unknown as { env?: Record<string, string> }).env,
+  });
+  return { terminalId: id };
 }
 
 export async function terminalOutput(
-  _c: PerSessionContext,
-  _p: TerminalOutputRequest,
+  ctx: PerSessionContext,
+  p: TerminalOutputRequest,
 ): Promise<TerminalOutputResponse> {
-  throw new Error("terminal.output not yet implemented (T4b)");
+  const o = tm(ctx).getOutput(p.terminalId);
+  return {
+    output: o.output,
+    truncated: o.truncated,
+    exitStatus: o.exitStatus
+      ? { exitCode: o.exitStatus.exitCode, signal: o.exitStatus.signal }
+      : null,
+  };
 }
 
 export async function waitForExit(
-  _c: PerSessionContext,
-  _p: WaitForTerminalExitRequest,
+  ctx: PerSessionContext,
+  p: WaitForTerminalExitRequest,
 ): Promise<WaitForTerminalExitResponse> {
-  throw new Error("terminal.waitForExit not yet implemented (T4b)");
+  const x = await tm(ctx).waitForExit(p.terminalId);
+  return { exitCode: x.exitCode, signal: x.signal };
 }
 
 export async function kill(
-  _c: PerSessionContext,
-  _p: KillTerminalRequest,
+  ctx: PerSessionContext,
+  p: KillTerminalRequest,
 ): Promise<KillTerminalResponse | void> {
-  throw new Error("terminal.kill not yet implemented (T4b)");
+  tm(ctx).kill(p.terminalId);
 }
 
 export async function release(
-  _c: PerSessionContext,
-  _p: ReleaseTerminalRequest,
+  ctx: PerSessionContext,
+  p: ReleaseTerminalRequest,
 ): Promise<ReleaseTerminalResponse | void> {
-  throw new Error("terminal.release not yet implemented (T4b)");
+  tm(ctx).release(p.terminalId);
 }
