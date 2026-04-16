@@ -84,8 +84,32 @@ export class ChildProcessHost {
 
     this.proc.exited.then((code) => this.resolveExit(code ?? null));
 
+    // Bun.spawn's stdin is a FileSink (write/end API), not a WritableStream.
+    // The SDK's ndJsonStream() expects a WritableStream<Uint8Array> and calls
+    // getWriter() on it. Wrap the FileSink so callers see a real WritableStream.
+    const sink = this.proc.stdin as import("bun").FileSink;
+    const stdin = new WritableStream<Uint8Array>({
+      write(chunk) {
+        sink.write(chunk);
+      },
+      close() {
+        try {
+          sink.end();
+        } catch {
+          /* already closed */
+        }
+      },
+      abort() {
+        try {
+          sink.end();
+        } catch {
+          /* already closed */
+        }
+      },
+    });
+
     return {
-      stdin: this.proc.stdin as unknown as WritableStream<Uint8Array>,
+      stdin,
       stdout: this.proc.stdout as unknown as ReadableStream<Uint8Array>,
     };
   }
