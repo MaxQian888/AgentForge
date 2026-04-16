@@ -2,8 +2,8 @@
 // `src/agent-registry.ts` and the spec §5.1 table. T6 reads this when
 // constructing the per-task `AcpClient`.
 
-/** The four adapters this phase migrates to ACP. */
-export type AdapterId = "claude_code" | "codex" | "opencode" | "cursor";
+/** The five adapters this phase migrates to ACP. */
+export type AdapterId = "claude_code" | "codex" | "opencode" | "cursor" | "gemini";
 
 /** Per-adapter spawn descriptor + capability hints. */
 export interface AcpAdapterConfig {
@@ -55,5 +55,16 @@ export const ACP_ADAPTERS = {
     args: ["acp"],
     envRequired: [],
     cursorExtensions: true,
+  },
+  gemini: {
+    // Upstream-verified 2026-04-16: gemini-cli config.ts defines two flags —
+    // `--acp` (current) and `--experimental-acp` (deprecated alias). We use
+    // the non-deprecated form. If a user is pinned to an older gemini CLI
+    // that only knows `--experimental-acp`, they can override spawn via
+    // GEMINI_RUNTIME_COMMAND / GEMINI_RUNTIME_ARGS env.
+    command: "gemini",
+    args: ["--acp"],
+    envRequired: [],
+    cursorExtensions: false,
   },
 } as const satisfies Record<AdapterId, AcpAdapterConfig>;

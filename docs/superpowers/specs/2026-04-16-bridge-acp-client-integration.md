@@ -423,14 +423,14 @@ export const ACP_ADAPTERS = {
   },
   gemini: {
     command: "gemini",
-    args: ["--experimental-acp"],        // flag to verify in T0; alias accepted
+    args: ["--acp"],                     // verified: upstream deprecated --experimental-acp in favor of --acp
     envRequired: [],                     // gemini handles own auth
     cursorExtensions: false,
   },
 } as const satisfies Record<AdapterId, AcpAdapterConfig>;
 ```
 
-T0 verification: the exact flag/subcommand for `gemini` may be `acp` rather than `--experimental-acp`. Pin the correct form during implementation before shipping.
+T0 verification (2026-04-16): google-gemini/gemini-cli `packages/cli/src/config/config.ts` defines two flags — `--acp` (current) and `--experimental-acp` (deprecated alias). Our registry uses `--acp`.
 
 ### 5.2 Deprecation caveat
 
@@ -682,7 +682,7 @@ After phase 2 and the emergency-fallback window closes:
 4. Cursor-specific `cursor/*` extensions (`ask_question / create_plan / update_todos / task / generate_image`) — passthrough via `extMethod` this phase; UI mapping later spec.
 5. Usage / cost telemetry outside Claude — codex/opencode/cursor/gemini `_meta.usage` payloads need inspection in T7 to decide uniform `cost_update` emission.
 6. Linux build paths for `@zed-industries/codex-acp` — platform optionalDep resolution in CI + Tauri. Validate during T6.
-7. Gemini ACP spawn flag — `--experimental-acp` vs. `acp` vs. other. T0 verifies before T7.
+7. ~~Gemini ACP spawn flag~~ — **resolved** (T0, 2026-04-16): `--acp` is current (`--experimental-acp` is deprecated alias).
 8. Sub-agent IM folding per platform — 飞书 interactive card嵌套、Slack thread、Telegram reply chain 差异由 IM bridge 既有 per-platform renderer 承接；若差异过大（例如 QQ 不支持嵌套），是否引入"子任务只走前端不发 IM"开关？待 T8 审视 `im_forward` 后定。
 
 ## 13. References
@@ -692,7 +692,7 @@ After phase 2 and the emergency-fallback window closes:
 - ACP schema (stable): https://github.com/agentclientprotocol/agent-client-protocol/tree/12cb17d/schema
 - Official SDK: https://www.npmjs.com/package/@agentclientprotocol/sdk — `ClientSideConnection`, `ndJsonStream`, `Client`/`Agent` interfaces, `schema.*`, `RequestError`.
 - `openclaw/acpx` (reduced relevance): https://github.com/openclaw/acpx
-- Adapter wrappers: `@agentclientprotocol/claude-agent-acp@^0.28.0`, `@zed-industries/codex-acp@^0.11.1`, `opencode acp` (native), `cursor-agent acp` (native), `gemini --experimental-acp`/`acp` (T0).
+- Adapter wrappers: `@agentclientprotocol/claude-agent-acp@^0.28.0`, `@zed-industries/codex-acp@^0.11.1`, `opencode acp` (native), `cursor-agent acp` (native), `gemini --acp` (native; `--experimental-acp` deprecated alias).
 - Gemini CLI ACP integration (SDK README's canonical reference): `@google-gemini/gemini-cli` `zedIntegration.ts`.
 
 ## 14. Changelog
