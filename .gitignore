@@ -2,6 +2,7 @@
 
 # Git worktrees
 .worktrees/
+.claude/worktrees/
 
 # dependencies
 node_modules
