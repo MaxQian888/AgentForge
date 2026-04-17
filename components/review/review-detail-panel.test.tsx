@@ -26,6 +26,11 @@ jest.mock("next-intl", () => ({
       cancelTrigger: "Cancel",
       statusPendingHuman: "Pending Human",
       riskHigh: "High",
+      detailsOverviewTab: "Overview",
+      detailsHistoryTab: "History",
+      detailsCommentsTab: "Comments",
+      historyEmpty: "No history recorded for this review.",
+      commentsEmpty: "No comments yet.",
     };
     const template = messages[key] ?? key;
     return template.replace(/\{(\w+)\}/g, (_, token) => String(values?.[token] ?? ""));
@@ -95,5 +100,43 @@ describe("ReviewDetailPanel", () => {
     );
     await user.click(screen.getByRole("button", { name: "Confirm Request Changes" }));
     expect(onRequestChanges).toHaveBeenCalledWith("review-1", "Still missing tests");
+  });
+
+  it("renders history and comments tabs from execution metadata decisions", async () => {
+    const user = userEvent.setup();
+    const reviewWithHistory: ReviewDTO = {
+      ...review,
+      executionMetadata: {
+        decisions: [
+          {
+            actor: "alice",
+            action: "approve",
+            comment: "Looks ready to ship.",
+            timestamp: "2026-03-25T09:00:00.000Z",
+          },
+          {
+            actor: "bob",
+            action: "reject",
+            comment: "",
+            timestamp: "2026-03-25T09:05:00.000Z",
+          },
+        ],
+      },
+    };
+
+    render(<ReviewDetailPanel review={reviewWithHistory} />);
+
+    await user.click(screen.getByRole("tab", { name: "History" }));
+    expect(screen.getByTestId("review-history-tab")).toHaveTextContent("alice");
+    expect(screen.getByTestId("review-history-tab")).toHaveTextContent("bob");
+
+    await user.click(screen.getByRole("tab", { name: "Comments" }));
+    expect(screen.getByTestId("review-comments-tab")).toHaveTextContent(
+      "Looks ready to ship.",
+    );
+    // bob's decision has empty comment so it should not appear
+    expect(screen.getByTestId("review-comments-tab")).not.toHaveTextContent(
+      "bob",
+    );
   });
 });

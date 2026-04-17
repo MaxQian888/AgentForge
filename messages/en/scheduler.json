@@ -2,10 +2,15 @@
   "title": "Scheduler Control Plane",
   "subtitle": "Manage background jobs, inspect run history, and trigger reruns.",
   "refresh": "Refresh",
+  "createJob": "Create Job",
   "registeredJobs": "Registered Jobs",
   "registeredJobsDesc": "Built-in background jobs with their cadence, health, and next due time.",
   "jobDetails": "Job Details",
   "jobDetailsDesc": "Inspect, configure, and manage the selected job.",
+  "tabs": {
+    "queue": "Queue",
+    "calendar": "Calendar"
+  },
   "stats": {
     "totalJobs": "Total Jobs",
     "enabled": "Enabled",
@@ -27,6 +32,15 @@
     "na": "N/A",
     "notScheduled": "Not scheduled",
     "paused": "Paused"
+  },
+  "jobFilters": {
+    "allStatus": "Status",
+    "allScopes": "Scope",
+    "statusScheduled": "Scheduled",
+    "statusRunning": "Running",
+    "statusSucceeded": "Succeeded",
+    "statusFailed": "Failed",
+    "statusPaused": "Paused"
   },
   "jobDetail": {
     "runNow": "Run now",
@@ -75,5 +89,32 @@
     "filterAll": "All",
     "applyFilters": "Apply Filters",
     "resetFilters": "Reset Filters"
+  },
+  "calendar": {
+    "title": "Upcoming Schedule",
+    "description": "Calendar view of upcoming runs across all registered jobs.",
+    "noUpcoming": "No upcoming runs scheduled. Jobs will appear here once the backend publishes next run times.",
+    "prevMonth": "Previous month",
+    "nextMonth": "Next month",
+    "today": "Today",
+    "gridLabel": "Upcoming job runs calendar",
+    "moreItems": "+{count} more",
+    "dayDetail": "Runs on {date}"
+  },
+  "createDialog": {
+    "title": "Create Scheduler Job",
+    "description": "Register a new background job with cron cadence.",
+    "jobKey": "Job key",
+    "jobKeyPlaceholder": "my.project.job",
+    "invalidJobKey": "Job key must start with a letter or digit and contain only letters, digits, dot, underscore, or hyphen.",
+    "name": "Display name",
+    "namePlaceholder": "Human readable name",
+    "nameRequired": "Name is required",
+    "scope": "Scope",
+    "scopePlaceholder": "system | project",
+    "schedule": "Schedule (cron)",
+    "cancel": "Cancel",
+    "create": "Create",
+    "submitFailed": "Failed to create scheduler job. The backend may not accept new job registration yet."
   }
 }

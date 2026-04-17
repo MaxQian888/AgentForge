@@ -27,6 +27,10 @@ interface ReviewListProps {
   onSelect: (review: ReviewDTO) => void;
   onApprove?: (id: string, comment?: string) => void | Promise<void>;
   onRequestChanges?: (id: string, comment?: string) => void | Promise<void>;
+  onReject?: (id: string, reason: string, comment?: string) => void | Promise<void>;
+  onBlock?: (id: string, reason: string, comment?: string) => void | Promise<void>;
+  selectedIds?: Set<string>;
+  onToggleSelect?: (reviewId: string) => void;
 }
 
 function formatReviewAge(createdAt: string): string {
@@ -50,6 +54,10 @@ export function ReviewList({
   onSelect,
   onApprove,
   onRequestChanges,
+  onReject,
+  onBlock,
+  selectedIds,
+  onToggleSelect,
 }: ReviewListProps) {
   const t = useTranslations("reviews");
   const tasks = useTaskStore((state) => state.tasks);
@@ -87,6 +95,8 @@ export function ReviewList({
     );
   }
 
+  const selectionEnabled = Boolean(onToggleSelect);
+
   return (
     <div className="flex gap-3 overflow-x-auto pb-1">
       {reviewsByStatus.map(({ status, reviews: statusReviews }) => (
@@ -109,66 +119,99 @@ export function ReviewList({
                 {t("noReviewsYet")}
               </p>
             ) : null}
-            {statusReviews.map((review) => (
-              <Card
-                key={review.id}
-                className="cursor-pointer transition-shadow hover:shadow-md"
-                onClick={() => onSelect(review)}
-              >
-                <CardHeader className="p-3 pb-1">
-                  <div className="flex items-center justify-between gap-2">
-                    <CardTitle className="text-sm font-medium">
-                      {t("layerReview", { layer: review.layer })}
-                    </CardTitle>
-                    <div className="flex items-center gap-1.5">
-                      <ReviewStatusBadge status={review.status} t={t} />
-                      <ReviewRiskBadge riskLevel={review.riskLevel} t={t} />
+            {statusReviews.map((review) => {
+              const isSelected = selectedIds?.has(review.id) ?? false;
+              return (
+                <Card
+                  key={review.id}
+                  data-testid={`review-card-${review.id}`}
+                  className={`cursor-pointer transition-shadow hover:shadow-md${
+                    isSelected ? " ring-2 ring-primary" : ""
+                  }`}
+                  onClick={() => onSelect(review)}
+                >
+                  <CardHeader className="p-3 pb-1">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="flex items-center gap-2">
+                        {selectionEnabled ? (
+                          <input
+                            type="checkbox"
+                            aria-label={t("selectReview")}
+                            data-testid={`review-select-${review.id}`}
+                            checked={isSelected}
+                            onClick={(event) => event.stopPropagation()}
+                            onChange={() => onToggleSelect?.(review.id)}
+                            className="size-3.5 cursor-pointer"
+                          />
+                        ) : null}
+                        <CardTitle className="text-sm font-medium">
+                          {t("layerReview", { layer: review.layer })}
+                        </CardTitle>
+                      </div>
+                      <div className="flex items-center gap-1.5">
+                        <ReviewStatusBadge status={review.status} t={t} />
+                        <ReviewRiskBadge riskLevel={review.riskLevel} t={t} />
+                      </div>
                     </div>
-                  </div>
-                </CardHeader>
-                <CardContent className="p-3 pt-1">
-                  <p className="mb-2 line-clamp-2 text-xs text-muted-foreground">
-                    {review.summary || t("noSummary")}
-                  </p>
-                  {(() => {
-                    const task = taskById.get(review.taskId);
-                    const assigneeLabel = task?.assigneeName ?? t("unassigned");
-                    const branchLabel = task?.agentBranch || t("noBranch");
+                  </CardHeader>
+                  <CardContent className="p-3 pt-1">
+                    <p className="mb-2 line-clamp-2 text-xs text-muted-foreground">
+                      {review.summary || t("noSummary")}
+                    </p>
+                    {(() => {
+                      const task = taskById.get(review.taskId);
+                      const assigneeLabel = task?.assigneeName ?? t("unassigned");
+                      const branchLabel = task?.agentBranch || t("noBranch");
+                      const isUnassigned = !task?.assigneeName;
 
-                    return (
-                      <div className="mb-2 flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
-                        <span className="inline-flex items-center gap-1.5">
-                          <Avatar className="size-5">
-                            <AvatarFallback className="text-[10px]">
-                              {task?.assigneeName?.[0]?.toUpperCase() ?? "U"}
-                            </AvatarFallback>
-                          </Avatar>
-                          <span>{assigneeLabel}</span>
+                      return (
+                        <div
+                          className={`mb-2 flex flex-wrap items-center gap-2 text-xs ${
+                            isUnassigned
+                              ? "text-amber-700 dark:text-amber-400"
+                              : "text-muted-foreground"
+                          }`}
+                        >
+                          <span className="inline-flex items-center gap-1.5">
+                            <Avatar className="size-5">
+                              <AvatarFallback className="text-[10px]">
+                                {task?.assigneeName?.[0]?.toUpperCase() ?? "U"}
+                              </AvatarFallback>
+                            </Avatar>
+                            <span>{assigneeLabel}</span>
+                          </span>
+                          <span className="font-mono">{branchLabel}</span>
+                          <span>{formatReviewAge(review.createdAt)}</span>
+                        </div>
+                      );
+                    })()}
+                    <div className="flex items-center justify-between gap-3">
+                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                        <span>
+                          {getReviewRecommendationLabel(t, review.recommendation)}
                         </span>
-                        <span className="font-mono">{branchLabel}</span>
-                        <span>{formatReviewAge(review.createdAt)}</span>
+                        <span>${review.costUsd.toFixed(2)}</span>
                       </div>
-                    );
-                  })()}
-                  <div className="flex items-center justify-between gap-3">
-                    <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                      <span>{getReviewRecommendationLabel(t, review.recommendation)}</span>
-                      <span>${review.costUsd.toFixed(2)}</span>
+                      {review.status === "pending_human" ? (
+                        <div
+                          className="min-w-[220px]"
+                          onClick={(event) => event.stopPropagation()}
+                        >
+                          <ReviewDecisionActions
+                            reviewId={review.id}
+                            onApprove={onApprove}
+                            onRequestChanges={onRequestChanges}
+                            onReject={onReject}
+                            onBlock={onBlock}
+                            compact
+                          />
+                        </div>
+                      ) : null}
                     </div>
-                    {review.status === "pending_human" ? (
-                      <div className="min-w-[220px]" onClick={(event) => event.stopPropagation()}>
-                        <ReviewDecisionActions
-                          reviewId={review.id}
-                          onApprove={onApprove}
-                          onRequestChanges={onRequestChanges}
-                          compact
-                        />
-                      </div>
-                    ) : null}
-                  </div>
-                </CardContent>
-              </Card>
-            ))}
+                  </CardContent>
+                </Card>
+              );
+            })}
           </div>
         </div>
       ))}

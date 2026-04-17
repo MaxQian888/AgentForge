@@ -20,6 +20,7 @@ import {
 } from "@/lib/settings/project-settings-workspace";
 import { SettingsShell } from "./_components/settings-shell";
 import { SectionAppearance } from "./_components/section-appearance";
+import { SectionAccessibility } from "./_components/section-accessibility";
 import { SectionApiConnection } from "./_components/section-api-connection";
 import { SectionIMBridge } from "./_components/section-im-bridge";
 import { SectionGeneral } from "./_components/section-general";
@@ -136,6 +137,8 @@ function SettingsOrchestrator({
     switch (activeSection) {
       case "appearance":
         return <SectionAppearance />;
+      case "accessibility":
+        return <SectionAccessibility />;
       case "api-connection":
         return <SectionApiConnection />;
       case "im-bridge":
@@ -201,6 +204,8 @@ function SettingsPageNoProject({
     switch (activeSection) {
       case "appearance":
         return <SectionAppearance />;
+      case "accessibility":
+        return <SectionAccessibility />;
       case "api-connection":
         return <SectionApiConnection />;
       case "im-bridge":

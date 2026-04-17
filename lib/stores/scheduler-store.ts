@@ -124,6 +124,57 @@ export interface UpdateSchedulerJobInput {
   schedule?: string;
 }
 
+export interface CreateSchedulerJobInput {
+  jobKey: string;
+  name: string;
+  schedule: string;
+  scope?: string;
+  executionMode?: string;
+  overlapPolicy?: string;
+  config?: string;
+}
+
+export interface SchedulerJobListFilters {
+  status: string;
+  scope: string;
+}
+
+export const DEFAULT_SCHEDULER_JOB_LIST_FILTERS: SchedulerJobListFilters = {
+  status: "all",
+  scope: "all",
+};
+
+export function deriveJobListStatus(job: SchedulerJob): string {
+  if (job.controlState === "paused" || !job.enabled) {
+    return "paused";
+  }
+  if (job.activeRun) {
+    return "running";
+  }
+  if (job.lastRunStatus === "failed") {
+    return "failed";
+  }
+  if (job.lastRunStatus === "succeeded") {
+    return "succeeded";
+  }
+  return "scheduled";
+}
+
+export function filterSchedulerJobs(
+  jobs: SchedulerJob[],
+  filters: SchedulerJobListFilters,
+): SchedulerJob[] {
+  return jobs.filter((job) => {
+    if (filters.status !== "all" && deriveJobListStatus(job) !== filters.status) {
+      return false;
+    }
+    if (filters.scope !== "all" && job.scope !== filters.scope) {
+      return false;
+    }
+    return true;
+  });
+}
+
 export interface SchedulerRunHistoryFilters {
   status?: SchedulerJobRunStatus;
   triggerSource?: string;
@@ -146,10 +197,12 @@ interface SchedulerState {
   loading: boolean;
   actionJobKey: string | null;
   error: string | null;
+  listFilters: SchedulerJobListFilters;
   fetchJobs: () => Promise<void>;
   fetchRuns: (jobKey: string, filters?: SchedulerRunHistoryFilters) => Promise<void>;
   fetchStats: () => Promise<void>;
   updateJob: (jobKey: string, input: UpdateSchedulerJobInput) => Promise<void>;
+  createJob: (input: CreateSchedulerJobInput) => Promise<boolean>;
   triggerJob: (jobKey: string) => Promise<void>;
   pauseJob: (jobKey: string) => Promise<void>;
   resumeJob: (jobKey: string) => Promise<void>;
@@ -157,6 +210,8 @@ interface SchedulerState {
   cleanupRuns: (jobKey: string, policy: SchedulerRunCleanupPolicy) => Promise<void>;
   selectJob: (jobKey: string) => void;
   setDraftSchedule: (jobKey: string, schedule: string) => void;
+  setListFilters: (filters: Partial<SchedulerJobListFilters>) => void;
+  resetListFilters: () => void;
   upsertJob: (job: SchedulerJob) => void;
   recordRun: (run: SchedulerJobRun) => void;
 }
@@ -233,6 +288,7 @@ export const useSchedulerStore = create<SchedulerState>()((set, get) => ({
   loading: false,
   actionJobKey: null,
   error: null,
+  listFilters: DEFAULT_SCHEDULER_JOB_LIST_FILTERS,
 
   fetchJobs: async () => {
     const token = useAuthStore.getState().accessToken;
@@ -465,6 +521,41 @@ export const useSchedulerStore = create<SchedulerState>()((set, get) => ({
       set({ actionJobKey: null });
     }
   },
+
+  createJob: async (input) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) {
+      return false;
+    }
+
+    set({ loading: true, error: null });
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<SchedulerJob>(
+        "/api/v1/scheduler/jobs",
+        input,
+        { token }
+      );
+      if (data) {
+        get().upsertJob(data);
+      } else {
+        await get().fetchJobs();
+      }
+      return true;
+    } catch {
+      set({ error: "Unable to create scheduler job" });
+      return false;
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  setListFilters: (filters) =>
+    set((state) => ({
+      listFilters: { ...state.listFilters, ...filters },
+    })),
+
+  resetListFilters: () => set({ listFilters: DEFAULT_SCHEDULER_JOB_LIST_FILTERS }),
 
   selectJob: (jobKey) => set({ selectedJobKey: jobKey }),
 

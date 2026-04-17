@@ -5,6 +5,15 @@ jest.mock("next-intl", () => ({
       triggerReview: "Trigger Review",
       backToList: "Back to list",
       loading: "Loading reviews...",
+      transitionInvalidTitle: "Invalid transition",
+      transitionInvalidApprove:
+        "Only reviews awaiting human decision can be approved.",
+      transitionInvalidReject:
+        "Only reviews awaiting human decision can be rejected.",
+      transitionInvalidBlock:
+        "Only reviews awaiting human decision can be blocked.",
+      transitionInvalidRequestChanges:
+        "Only reviews awaiting human decision can request changes.",
     };
     return map[key] ?? key;
   },
@@ -14,19 +23,67 @@ jest.mock("./review-list", () => ({
   ReviewList: ({
     reviews,
     onSelect,
+    onApprove,
+    onToggleSelect,
+    selectedIds,
   }: {
     reviews: Array<{ id: string }>;
     onSelect: (review: { id: string }) => void;
+    onApprove?: (id: string, comment?: string) => void | Promise<void>;
+    onToggleSelect?: (id: string) => void;
+    selectedIds?: Set<string>;
   }) => (
     <div>
       <div data-testid="review-list-count">{reviews.length}</div>
+      <div data-testid="review-list-selected">
+        {selectedIds ? Array.from(selectedIds).join(",") : ""}
+      </div>
       {reviews[0] ? (
         <button type="button" onClick={() => onSelect(reviews[0])}>
           Open review
         </button>
       ) : null}
+      {onToggleSelect && reviews[0] ? (
+        <button
+          type="button"
+          onClick={() => onToggleSelect(reviews[0].id)}
+        >
+          Toggle select
+        </button>
+      ) : null}
+      {onApprove && reviews[0] ? (
+        <button type="button" onClick={() => onApprove(reviews[0].id)}>
+          Approve first
+        </button>
+      ) : null}
     </div>
   ),
+}));
+
+jest.mock("./review-bulk-actions", () => ({
+  ReviewBulkActions: ({
+    selectedCount,
+    eligibleCount,
+    onBulkApprove,
+    onClearSelection,
+  }: {
+    selectedCount: number;
+    eligibleCount: number;
+    onBulkApprove: () => void | Promise<void>;
+    onClearSelection: () => void;
+  }) =>
+    selectedCount === 0 ? null : (
+      <div data-testid="review-bulk-actions">
+        <span data-testid="bulk-count">{selectedCount}</span>
+        <span data-testid="bulk-eligible">{eligibleCount}</span>
+        <button type="button" onClick={() => void onBulkApprove()}>
+          Bulk approve
+        </button>
+        <button type="button" onClick={onClearSelection}>
+          Clear selection
+        </button>
+      </div>
+    ),
 }));
 
 jest.mock("./review-detail-panel", () => ({
@@ -126,5 +183,50 @@ describe("ReviewWorkspace", () => {
 
     await user.click(screen.getByRole("button", { name: "Back to list" }));
     expect(screen.getByTestId("review-list-count")).toHaveTextContent("1");
+  });
+
+  it("surfaces a transition error when approving a review not awaiting human decision", async () => {
+    const user = userEvent.setup();
+    const onApproveReview = jest.fn().mockResolvedValue(undefined);
+
+    render(
+      <ReviewWorkspace
+        reviews={[...reviews]}
+        onApproveReview={onApproveReview}
+      />,
+    );
+
+    await user.click(screen.getByRole("button", { name: "Approve first" }));
+    expect(onApproveReview).not.toHaveBeenCalled();
+    expect(screen.getByTestId("review-transition-error")).toHaveTextContent(
+      "Only reviews awaiting human decision can be approved.",
+    );
+  });
+
+  it("renders the bulk toolbar when selection is enabled and forwards the approve action", async () => {
+    const user = userEvent.setup();
+    const onApproveReview = jest.fn().mockResolvedValue(undefined);
+    const pendingHumanReviews: ReviewDTO[] = [
+      { ...reviews[0], id: "review-ph", status: "pending_human" },
+    ];
+
+    render(
+      <ReviewWorkspace
+        reviews={pendingHumanReviews}
+        enableBulkActions
+        onApproveReview={onApproveReview}
+      />,
+    );
+
+    // No selection yet - bulk toolbar hidden
+    expect(screen.queryByTestId("review-bulk-actions")).not.toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Toggle select" }));
+    expect(screen.getByTestId("review-bulk-actions")).toBeInTheDocument();
+    expect(screen.getByTestId("bulk-count")).toHaveTextContent("1");
+    expect(screen.getByTestId("bulk-eligible")).toHaveTextContent("1");
+
+    await user.click(screen.getByRole("button", { name: "Bulk approve" }));
+    expect(onApproveReview).toHaveBeenCalledWith("review-ph");
   });
 });

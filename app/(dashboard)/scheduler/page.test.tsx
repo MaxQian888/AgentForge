@@ -6,9 +6,12 @@ const fetchJobs = jest.fn();
 const fetchRuns = jest.fn();
 const fetchStats = jest.fn();
 const updateJob = jest.fn();
+const createJob = jest.fn().mockResolvedValue(true);
 const triggerJob = jest.fn();
 const selectJob = jest.fn();
 const setDraftSchedule = jest.fn();
+const setListFilters = jest.fn();
+const resetListFilters = jest.fn();
 
 const storeState = {
   jobs: [
@@ -64,19 +67,25 @@ const storeState = {
   loading: false,
   actionJobKey: null,
   error: null as string | null,
+  listFilters: { status: "all", scope: "all" },
   fetchJobs,
   fetchRuns,
   fetchStats,
   updateJob,
+  createJob,
   triggerJob,
   selectJob,
   setDraftSchedule,
+  setListFilters,
+  resetListFilters,
   upsertJob: jest.fn(),
   recordRun: jest.fn(),
 };
 
 jest.mock("@/lib/stores/scheduler-store", () => ({
   useSchedulerStore: (selector: (state: typeof storeState) => unknown) => selector(storeState),
+  filterSchedulerJobs: (jobs: unknown[]) => jobs,
+  DEFAULT_SCHEDULER_JOB_LIST_FILTERS: { status: "all", scope: "all" },
 }));
 
 jest.mock("@/components/scheduler/scheduler-stats-cards", () => ({
@@ -93,6 +102,54 @@ jest.mock("@/components/scheduler/scheduler-job-table", () => ({
       select-job
     </button>
   ),
+}));
+
+jest.mock("@/components/scheduler/scheduler-job-filters", () => ({
+  SchedulerJobFilters: ({
+    onFiltersChange,
+    onReset,
+  }: {
+    onFiltersChange: (f: { status: string }) => void;
+    onReset: () => void;
+  }) => (
+    <div>
+      <button type="button" onClick={() => onFiltersChange({ status: "failed" })}>
+        filter-status
+      </button>
+      <button type="button" onClick={onReset}>
+        reset-filters
+      </button>
+    </div>
+  ),
+}));
+
+jest.mock("@/components/scheduler/scheduler-job-create-dialog", () => ({
+  SchedulerJobCreateDialog: ({
+    open,
+    onCreate,
+    onOpenChange,
+  }: {
+    open: boolean;
+    onCreate: (input: { jobKey: string; name: string; schedule: string }) => Promise<boolean>;
+    onOpenChange: (open: boolean) => void;
+  }) =>
+    open ? (
+      <div>
+        <button
+          type="button"
+          onClick={async () => {
+            await onCreate({ jobKey: "new", name: "New", schedule: "0 * * * *" });
+            onOpenChange(false);
+          }}
+        >
+          submit-create
+        </button>
+      </div>
+    ) : null,
+}));
+
+jest.mock("@/components/scheduler/scheduler-upcoming-calendar", () => ({
+  SchedulerUpcomingCalendar: () => <div data-testid="scheduler-calendar" />,
 }));
 
 jest.mock("@/components/scheduler/scheduler-job-detail", () => ({
@@ -140,11 +197,15 @@ describe("SchedulerPage", () => {
     fetchRuns.mockReset();
     fetchStats.mockReset();
     updateJob.mockReset();
+    createJob.mockReset().mockResolvedValue(true);
     triggerJob.mockReset();
     selectJob.mockReset();
     setDraftSchedule.mockReset();
+    setListFilters.mockReset();
+    resetListFilters.mockReset();
     storeState.error = null;
     storeState.selectedJobKey = "task-progress-detector";
+    storeState.listFilters = { status: "all", scope: "all" };
   });
 
   it("loads jobs and renders scheduler management controls", () => {
@@ -184,5 +245,23 @@ describe("SchedulerPage", () => {
     expect(fetchStats).toHaveBeenCalledTimes(3);
     expect(selectJob).toHaveBeenCalledWith("task-progress-detector");
     expect(updateJob).toHaveBeenCalledWith("task-progress-detector", { enabled: false });
+  });
+
+  it("opens the create dialog, submits a new job, and applies list filters", async () => {
+    const user = userEvent.setup();
+    render(<SchedulerPage />);
+
+    await user.click(screen.getByRole("button", { name: "filter-status" }));
+    await user.click(screen.getByRole("button", { name: "reset-filters" }));
+    expect(setListFilters).toHaveBeenCalledWith({ status: "failed" });
+    expect(resetListFilters).toHaveBeenCalled();
+
+    await user.click(screen.getByRole("button", { name: /Create Job/i }));
+    await user.click(screen.getByRole("button", { name: "submit-create" }));
+    expect(createJob).toHaveBeenCalledWith({
+      jobKey: "new",
+      name: "New",
+      schedule: "0 * * * *",
+    });
   });
 });

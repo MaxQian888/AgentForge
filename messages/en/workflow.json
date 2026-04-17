@@ -36,5 +36,20 @@
   "saving": "Saving...",
   "saveWorkflowConfig": "Save Workflow Config",
   "unsavedChanges": "Unsaved changes",
-  "remove": "Remove"
+  "remove": "Remove",
+  "editor": {
+    "export": "Export JSON",
+    "import": "Import JSON",
+    "exportSuccess": "Workflow exported",
+    "importSuccess": "Workflow imported",
+    "importInvalid": "Invalid workflow file",
+    "importParseError": "Unable to parse JSON",
+    "importConfirmDiscard": "Importing will replace the current workflow. Discard unsaved changes?",
+    "save": "Save",
+    "execute": "Execute",
+    "undo": "Undo",
+    "redo": "Redo",
+    "hidePalette": "Hide palette",
+    "showPalette": "Show palette"
+  }
 }

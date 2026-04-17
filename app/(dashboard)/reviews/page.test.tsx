@@ -65,6 +65,21 @@ const fetchAllReviews = jest.fn().mockResolvedValue(undefined);
 const triggerReview = jest.fn().mockResolvedValue(undefined);
 const approveReview = jest.fn().mockResolvedValue(undefined);
 const requestChanges = jest.fn().mockResolvedValue(undefined);
+const rejectReview = jest.fn().mockResolvedValue(undefined);
+
+const taskStoreState = {
+  tasks: [] as Array<{
+    id: string;
+    assigneeId: string | null;
+    assigneeName: string | null;
+    agentBranch: string;
+  }>,
+};
+
+jest.mock("@/lib/stores/task-store", () => ({
+  useTaskStore: (selector?: (state: typeof taskStoreState) => unknown) =>
+    typeof selector === "function" ? selector(taskStoreState) : taskStoreState,
+}));
 
 const storeState = {
   allReviews: [
@@ -105,6 +120,7 @@ const storeState = {
   triggerReview,
   approveReview,
   requestChanges,
+  rejectReview,
 };
 
 jest.mock("@/lib/stores/review-store", () => ({
@@ -115,9 +131,11 @@ jest.mock("@/lib/stores/review-store", () => ({
 jest.mock("@/components/shared/filter-bar", () => ({
   FilterBar: ({
     onReset,
+    onSearch,
     filters,
   }: {
     onReset: () => void;
+    onSearch?: (value: string) => void;
     filters: Array<{ onChange: (value: string) => void }>;
   }) => (
     <div>
@@ -127,6 +145,12 @@ jest.mock("@/components/shared/filter-bar", () => ({
       <button type="button" onClick={() => filters[1]?.onChange("high")}>
         filter-risk
       </button>
+      {onSearch ? (
+        <input
+          aria-label="search-input"
+          onChange={(event) => onSearch(event.target.value)}
+        />
+      ) : null}
       <button type="button" onClick={onReset}>
         reset-filters
       </button>
@@ -135,8 +159,26 @@ jest.mock("@/components/shared/filter-bar", () => ({
 }));
 
 jest.mock("@/components/review/review-workspace", () => ({
-  ReviewWorkspace: ({ selectedReviewId }: { selectedReviewId: string | null }) => (
-    <div data-testid="review-workspace">{selectedReviewId ?? "none"}</div>
+  ReviewWorkspace: ({
+    selectedReviewId,
+    reviews,
+  }: {
+    selectedReviewId: string | null;
+    reviews: Array<{ id: string }>;
+  }) => (
+    <div data-testid="review-workspace">
+      <span data-testid="review-workspace-selected">
+        {selectedReviewId ?? "none"}
+      </span>
+      <span data-testid="review-workspace-count">{reviews.length}</span>
+      <ul>
+        {reviews.map((r) => (
+          <li key={r.id} data-testid={`workspace-review-${r.id}`}>
+            {r.id}
+          </li>
+        ))}
+      </ul>
+    </div>
   ),
 }));
 
@@ -150,6 +192,8 @@ describe("ReviewsPage", () => {
     triggerReview.mockClear();
     approveReview.mockClear();
     requestChanges.mockClear();
+    rejectReview.mockClear();
+    taskStoreState.tasks = [];
     storeState.allReviews = [
       {
         id: "review-task",
@@ -251,5 +295,30 @@ describe("ReviewsPage", () => {
     });
 
     expect(screen.getByText("No reviews found.")).toBeInTheDocument();
+  });
+
+  it("filters reviews by search query against the summary", async () => {
+    const user = userEvent.setup();
+
+    await act(async () => {
+      render(<ReviewsPage searchParams={Promise.resolve({})} />);
+    });
+
+    // Baseline: both reviews pass to workspace
+    expect(screen.getByTestId("review-workspace-count")).toHaveTextContent("2");
+
+    await user.type(screen.getByLabelText("search-input"), "Standalone");
+
+    await waitFor(() => {
+      expect(screen.getByTestId("review-workspace-count")).toHaveTextContent(
+        "1",
+      );
+    });
+    expect(
+      screen.getByTestId("workspace-review-review-standalone"),
+    ).toBeInTheDocument();
+    expect(
+      screen.queryByTestId("workspace-review-review-task"),
+    ).not.toBeInTheDocument();
   });
 });

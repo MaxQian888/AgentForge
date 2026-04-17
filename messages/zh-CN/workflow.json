@@ -36,5 +36,20 @@
   "saving": "正在保存...",
   "saveWorkflowConfig": "保存工作流配置",
   "unsavedChanges": "有未保存的变更",
-  "remove": "移除"
+  "remove": "移除",
+  "editor": {
+    "export": "导出 JSON",
+    "import": "导入 JSON",
+    "exportSuccess": "工作流已导出",
+    "importSuccess": "工作流已导入",
+    "importInvalid": "无效的工作流文件",
+    "importParseError": "无法解析 JSON",
+    "importConfirmDiscard": "导入将替换当前工作流。放弃未保存的更改？",
+    "save": "保存",
+    "execute": "执行",
+    "undo": "撤销",
+    "redo": "重做",
+    "hidePalette": "隐藏调色板",
+    "showPalette": "显示调色板"
+  }
 }

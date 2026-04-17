@@ -58,6 +58,11 @@ export interface MemoryExplorerFilters {
   limit: number;
 }
 
+export interface MemoryPaginationState {
+  page: number;
+  pageSize: number;
+}
+
 export interface MemoryExplorerStats {
   totalCount: number;
   approxStorageBytes: number;
@@ -98,13 +103,30 @@ export interface MemoryExportPayload {
 }
 
 export interface MemoryMutationResult {
-  type: "single-delete" | "bulk-delete" | "cleanup" | "create-note" | "update-note";
+  type:
+    | "single-delete"
+    | "bulk-delete"
+    | "bulk-delete-criteria"
+    | "cleanup"
+    | "create-note"
+    | "update-note"
+    | "tag-added"
+    | "tag-removed";
   deletedCount: number;
+}
+
+export type MemoryExportFormat = "json" | "csv";
+
+export interface MemoryExportBlob {
+  content: string;
+  mimeType: string;
+  extension: "json" | "csv";
 }
 
 interface MemoryState {
   currentProjectId: string | null;
   filters: MemoryExplorerFilters;
+  pagination: MemoryPaginationState;
   entries: AgentMemoryEntry[];
   stats: MemoryExplorerStats | null;
   detail: AgentMemoryDetail | null;
@@ -121,6 +143,7 @@ interface MemoryState {
   lastMutation: MemoryMutationResult | null;
   setFilters: (partial: Partial<MemoryExplorerFilters>) => void;
   resetFilters: () => void;
+  setPagination: (partial: Partial<MemoryPaginationState>) => void;
   loadWorkspace: (projectId: string, options?: MemorySearchOptions) => Promise<void>;
   searchMemory: (projectId: string, options?: MemorySearchOptions) => Promise<void>;
   fetchMemoryDetail: (projectId: string, memoryId: string, roleId?: string) => Promise<void>;
@@ -156,6 +179,20 @@ interface MemoryState {
     memoryIds: string[],
     roleId?: string,
   ) => Promise<MemoryDeleteResult>;
+  bulkDeleteByCriteria: (
+    projectId: string,
+    criteria?: { ids?: string[]; roleId?: string },
+  ) => Promise<MemoryDeleteResult>;
+  addMemoryTag: (
+    projectId: string,
+    memoryId: string,
+    tag: string,
+  ) => Promise<AgentMemoryDetail | null>;
+  removeMemoryTag: (
+    projectId: string,
+    memoryId: string,
+    tag: string,
+  ) => Promise<AgentMemoryDetail | null>;
   cleanupMemories: (
     projectId: string,
     input: MemoryCleanupInput,
@@ -169,6 +206,10 @@ interface MemoryState {
     memoryId: string,
     roleId?: string,
   ) => Promise<AgentMemoryDetail | null>;
+  buildExportBlob: (
+    payload: MemoryExportPayload | AgentMemoryEntry | AgentMemoryDetail,
+    format: MemoryExportFormat,
+  ) => MemoryExportBlob;
   clearActionFeedback: () => void;
 }
 
@@ -183,6 +224,11 @@ const DEFAULT_FILTERS: MemoryExplorerFilters = {
   startAt: "",
   endAt: "",
   limit: 20,
+};
+
+const DEFAULT_PAGINATION: MemoryPaginationState = {
+  page: 1,
+  pageSize: 10,
 };
 
 function normalizeString(value: unknown): string {
@@ -388,6 +434,7 @@ function normalizeTags(tags?: string[]) {
 export const useMemoryStore = create<MemoryState>()((set, get) => ({
   currentProjectId: null,
   filters: DEFAULT_FILTERS,
+  pagination: DEFAULT_PAGINATION,
   entries: [],
   stats: null,
   detail: null,
@@ -409,11 +456,33 @@ export const useMemoryStore = create<MemoryState>()((set, get) => ({
         ...state.filters,
         ...partial,
       },
+      pagination: { ...state.pagination, page: 1 },
     }));
   },
 
   resetFilters: () => {
-    set({ filters: DEFAULT_FILTERS });
+    set({ filters: DEFAULT_FILTERS, pagination: DEFAULT_PAGINATION });
+  },
+
+  setPagination: (partial) => {
+    set((state) => {
+      const nextSize =
+        typeof partial.pageSize === "number" && partial.pageSize > 0
+          ? partial.pageSize
+          : state.pagination.pageSize;
+      const nextPage =
+        typeof partial.page === "number" && partial.page > 0
+          ? partial.page
+          : partial.pageSize
+            ? 1
+            : state.pagination.page;
+      return {
+        pagination: {
+          page: nextPage,
+          pageSize: nextSize,
+        },
+      };
+    });
   },
 
   loadWorkspace: async (projectId, options) => {
@@ -727,6 +796,100 @@ export const useMemoryStore = create<MemoryState>()((set, get) => ({
     }
   },
 
+  bulkDeleteByCriteria: async (projectId, criteria) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) {
+      return { deletedCount: 0 };
+    }
+
+    const state = get();
+    const roleId =
+      normalizeString(criteria?.roleId) || state.filters.roleId || undefined;
+    let ids = criteria?.ids;
+    if (!ids || ids.length === 0) {
+      ids = state.entries.map((entry) => entry.id);
+    }
+    if (!ids || ids.length === 0) {
+      return { deletedCount: 0 };
+    }
+
+    const api = createApiClient(API_URL);
+    set({
+      actionLoading: true,
+      actionError: null,
+      lastMutation: null,
+    });
+
+    try {
+      const { data } = await api.post<Record<string, unknown>>(
+        `/api/v1/projects/${projectId}/memory/bulk-delete`,
+        {
+          ids,
+          roleId,
+        },
+        { token },
+      );
+      const result = {
+        deletedCount: Number(data.deletedCount ?? 0),
+      };
+      await get().loadWorkspace(projectId);
+      set({
+        selectedMemoryIds: [],
+        actionLoading: false,
+        lastMutation: {
+          type: "bulk-delete-criteria",
+          deletedCount: result.deletedCount,
+        },
+      });
+      return result;
+    } catch (error) {
+      const message = extractErrorMessage(error);
+      set({
+        actionLoading: false,
+        actionError: message,
+      });
+      throw error;
+    }
+  },
+
+  addMemoryTag: async (projectId, memoryId, tag) => {
+    const value = tag.trim();
+    if (!value) return null;
+
+    const entry =
+      get().entries.find((item) => item.id === memoryId) ??
+      (get().detail?.id === memoryId ? get().detail : null);
+    if (!entry) return null;
+
+    const tags = normalizeTags([...(entry.tags ?? []), value]);
+    const updated = await get().updateMemory(projectId, memoryId, {
+      tags,
+      roleId: entry.roleId || undefined,
+    });
+    set({ lastMutation: { type: "tag-added", deletedCount: 1 } });
+    return updated;
+  },
+
+  removeMemoryTag: async (projectId, memoryId, tag) => {
+    const target = tag.trim();
+    if (!target) return null;
+
+    const entry =
+      get().entries.find((item) => item.id === memoryId) ??
+      (get().detail?.id === memoryId ? get().detail : null);
+    if (!entry) return null;
+
+    const tags = (entry.tags ?? []).filter(
+      (existing) => existing.trim().toLowerCase() !== target.toLowerCase(),
+    );
+    const updated = await get().updateMemory(projectId, memoryId, {
+      tags,
+      roleId: entry.roleId || undefined,
+    });
+    set({ lastMutation: { type: "tag-removed", deletedCount: 1 } });
+    return updated;
+  },
+
   cleanupMemories: async (projectId, input) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) {
@@ -826,6 +989,58 @@ export const useMemoryStore = create<MemoryState>()((set, get) => ({
       { token },
     );
     return normalizeMemoryDetail(data);
+  },
+
+  buildExportBlob: (payload, format) => {
+    if (format === "csv") {
+      const candidate = payload as { entries?: unknown };
+      const entries: AgentMemoryEntry[] = Array.isArray(candidate?.entries)
+        ? (candidate.entries as unknown as AgentMemoryEntry[])
+        : [payload as AgentMemoryEntry];
+      const header = [
+        "id",
+        "scope",
+        "roleId",
+        "category",
+        "key",
+        "content",
+        "tags",
+        "createdAt",
+        "updatedAt",
+      ];
+      const escape = (value: unknown) => {
+        const text = value === undefined || value === null ? "" : String(value);
+        if (/[",\n]/.test(text)) {
+          return `"${text.replace(/"/g, '""')}"`;
+        }
+        return text;
+      };
+      const rows = entries.map((entry) =>
+        [
+          entry.id,
+          entry.scope,
+          entry.roleId,
+          entry.category,
+          entry.key,
+          entry.content,
+          Array.isArray(entry.tags) ? entry.tags.join("|") : "",
+          entry.createdAt,
+          entry.updatedAt ?? "",
+        ]
+          .map(escape)
+          .join(","),
+      );
+      return {
+        content: [header.join(","), ...rows].join("\n"),
+        mimeType: "text/csv",
+        extension: "csv",
+      };
+    }
+    return {
+      content: JSON.stringify(payload, null, 2),
+      mimeType: "application/json",
+      extension: "json",
+    };
   },
 
   clearActionFeedback: () => {

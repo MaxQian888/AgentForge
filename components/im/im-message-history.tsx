@@ -12,6 +12,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { PlatformBadge } from "@/components/shared/platform-badge";
 import {
   Sheet,
@@ -45,6 +46,7 @@ export function IMMessageHistory() {
   const loading = useIMStore((s) => s.loading);
   const retryDelivery = useIMStore((s) => s.retryDelivery);
   const retryDeliveries = useIMStore((s) => s.retryDeliveries);
+  const clearRetryQueue = useIMStore((s) => s.clearRetryQueue);
   const fetchDeliveryHistory = useIMStore((s) => s.fetchDeliveryHistory);
   const setHistoryFilters = useIMStore((s) => s.setHistoryFilters);
   const historyFilters = useIMStore((s) => s.historyFilters);
@@ -55,6 +57,16 @@ export function IMMessageHistory() {
     platform: historyFilters.platform ?? "",
     eventType: historyFilters.eventType ?? "",
   });
+  const [clearQueueOpen, setClearQueueOpen] = useState(false);
+
+  const pendingRetryCount = useMemo(
+    () =>
+      deliveries.filter((delivery) =>
+        ["failed", "timeout", "pending"].includes(delivery.status),
+      ).length,
+    [deliveries],
+  );
+  const matchCount = deliveries.length;
 
   const selectedDelivery = useMemo(
     () => deliveries.find((delivery) => delivery.id === selectedDeliveryId) ?? null,
@@ -114,6 +126,11 @@ export function IMMessageHistory() {
     setSelectedIds([]);
   };
 
+  const handleConfirmClearQueue = async () => {
+    setClearQueueOpen(false);
+    await clearRetryQueue();
+  };
+
   const toggleSelection = (deliveryId: string, checked: boolean) => {
     setSelectedIds((current) =>
       checked ? [...new Set([...current, deliveryId])] : current.filter((id) => id !== deliveryId),
@@ -123,8 +140,15 @@ export function IMMessageHistory() {
   return (
     <div className="flex flex-col gap-6">
       <div className="flex flex-col gap-4 md:flex-row md:items-end md:justify-between">
-        <div>
+        <div className="flex items-center gap-2">
           <h2 className="text-lg font-semibold">{t("history.title")}</h2>
+          {matchCount > 0 ? (
+            <Badge variant="secondary" data-testid="history-match-count">
+              {t(matchCount === 1 ? "history.filterMatchCount" : "history.filterMatchCountPlural", {
+                count: matchCount,
+              })}
+            </Badge>
+          ) : null}
         </div>
         <div className="grid gap-3 rounded-md border p-4 md:min-w-[420px] md:grid-cols-3">
           <div className="flex flex-col gap-1">
@@ -177,7 +201,7 @@ export function IMMessageHistory() {
               }
             />
           </div>
-          <div className="flex gap-2 md:col-span-3">
+          <div className="flex flex-wrap gap-2 md:col-span-3">
             <Button variant="outline" size="sm" onClick={() => void applyFilters()}>
               {t("history.applyFilters")}
             </Button>
@@ -190,6 +214,14 @@ export function IMMessageHistory() {
               disabled={retryableSelectedIds.length === 0}
             >
               {t("history.retrySelected")}
+            </Button>
+            <Button
+              variant="destructive"
+              size="sm"
+              onClick={() => setClearQueueOpen(true)}
+              disabled={pendingRetryCount === 0 || loading}
+            >
+              {t("history.clearRetryQueue")}
             </Button>
           </div>
         </div>
@@ -284,6 +316,16 @@ export function IMMessageHistory() {
           </Table>
         </div>
       )}
+
+      <ConfirmDialog
+        open={clearQueueOpen}
+        title={t("history.clearRetryQueueTitle")}
+        description={t("history.clearRetryQueueDescription", { count: pendingRetryCount })}
+        confirmLabel={t("history.clearRetryQueueAction")}
+        variant="destructive"
+        onConfirm={() => void handleConfirmClearQueue()}
+        onCancel={() => setClearQueueOpen(false)}
+      />
 
       <Sheet
         open={selectedDelivery !== null}

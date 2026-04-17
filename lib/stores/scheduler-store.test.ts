@@ -14,7 +14,13 @@ jest.mock("./auth-store", () => ({
   useAuthStore: { getState: jest.fn(() => ({ accessToken: "test-token" })) },
 }));
 
-import { useSchedulerStore } from "./scheduler-store";
+import {
+  DEFAULT_SCHEDULER_JOB_LIST_FILTERS,
+  deriveJobListStatus,
+  filterSchedulerJobs,
+  useSchedulerStore,
+  type SchedulerJob,
+} from "./scheduler-store";
 
 const authStoreModule = jest.requireMock("./auth-store") as {
   useAuthStore: {
@@ -32,6 +38,7 @@ beforeEach(() => {
     actionJobKey: null,
     selectedJobKey: null,
     error: null,
+    listFilters: DEFAULT_SCHEDULER_JOB_LIST_FILTERS,
   });
   mockGet.mockReset();
   mockPost.mockReset();
@@ -608,6 +615,162 @@ describe("useSchedulerStore", () => {
       { retainRecent: 10 },
       { token: "test-token" },
     );
+  });
+
+  it("creates a new scheduler job via the create endpoint and upserts it", async () => {
+    mockPost.mockResolvedValueOnce({
+      data: {
+        jobKey: "new-job",
+        name: "New Job",
+        scope: "system",
+        schedule: "0 * * * *",
+        enabled: true,
+        executionMode: "in_process",
+        overlapPolicy: "skip",
+        lastRunSummary: "",
+        lastError: "",
+        config: "{}",
+        createdAt: "2026-04-16T00:00:00.000Z",
+        updatedAt: "2026-04-16T00:00:00.000Z",
+      },
+    });
+
+    const ok = await useSchedulerStore.getState().createJob({
+      jobKey: "new-job",
+      name: "New Job",
+      schedule: "0 * * * *",
+    });
+
+    expect(ok).toBe(true);
+    expect(mockPost).toHaveBeenCalledWith(
+      "/api/v1/scheduler/jobs",
+      { jobKey: "new-job", name: "New Job", schedule: "0 * * * *" },
+      { token: "test-token" },
+    );
+    expect(useSchedulerStore.getState().jobs.map((j) => j.jobKey)).toContain(
+      "new-job",
+    );
+  });
+
+  it("records create failures truthfully and returns false", async () => {
+    mockPost.mockRejectedValueOnce(new Error("boom"));
+
+    const ok = await useSchedulerStore.getState().createJob({
+      jobKey: "new-job",
+      name: "New Job",
+      schedule: "0 * * * *",
+    });
+
+    expect(ok).toBe(false);
+    expect(useSchedulerStore.getState().error).toBe(
+      "Unable to create scheduler job",
+    );
+  });
+
+  it("updates and resets job list filters", () => {
+    useSchedulerStore.getState().setListFilters({ status: "failed" });
+    expect(useSchedulerStore.getState().listFilters).toMatchObject({
+      status: "failed",
+      scope: "all",
+    });
+
+    useSchedulerStore.getState().setListFilters({ scope: "system" });
+    expect(useSchedulerStore.getState().listFilters).toMatchObject({
+      status: "failed",
+      scope: "system",
+    });
+
+    useSchedulerStore.getState().resetListFilters();
+    expect(useSchedulerStore.getState().listFilters).toEqual(
+      DEFAULT_SCHEDULER_JOB_LIST_FILTERS,
+    );
+  });
+
+  it("derives job list status from control state, active run, and history", () => {
+    const base: SchedulerJob = {
+      jobKey: "j",
+      name: "j",
+      scope: "system",
+      schedule: "*/5 * * * *",
+      enabled: true,
+      executionMode: "in_process",
+      overlapPolicy: "skip",
+      lastRunSummary: "",
+      lastError: "",
+      config: "{}",
+      controlState: "active",
+      createdAt: "",
+      updatedAt: "",
+    };
+    expect(deriveJobListStatus({ ...base, controlState: "paused" })).toBe(
+      "paused",
+    );
+    expect(deriveJobListStatus({ ...base, enabled: false })).toBe("paused");
+    expect(
+      deriveJobListStatus({
+        ...base,
+        activeRun: {
+          runId: "r",
+          triggerSource: "manual",
+          status: "running",
+          startedAt: "",
+          summary: "",
+          errorMessage: "",
+        },
+      }),
+    ).toBe("running");
+    expect(deriveJobListStatus({ ...base, lastRunStatus: "failed" })).toBe(
+      "failed",
+    );
+    expect(deriveJobListStatus({ ...base, lastRunStatus: "succeeded" })).toBe(
+      "succeeded",
+    );
+    expect(deriveJobListStatus(base)).toBe("scheduled");
+  });
+
+  it("filters scheduler jobs by status and scope", () => {
+    const jobs: SchedulerJob[] = [
+      {
+        jobKey: "a",
+        name: "A",
+        scope: "system",
+        schedule: "*/5 * * * *",
+        enabled: true,
+        executionMode: "in_process",
+        overlapPolicy: "skip",
+        lastRunStatus: "succeeded",
+        lastRunSummary: "",
+        lastError: "",
+        config: "{}",
+        controlState: "active",
+        createdAt: "",
+        updatedAt: "",
+      },
+      {
+        jobKey: "b",
+        name: "B",
+        scope: "project",
+        schedule: "*/5 * * * *",
+        enabled: false,
+        executionMode: "in_process",
+        overlapPolicy: "skip",
+        lastRunStatus: "failed",
+        lastRunSummary: "",
+        lastError: "",
+        config: "{}",
+        controlState: "paused",
+        createdAt: "",
+        updatedAt: "",
+      },
+    ];
+
+    expect(filterSchedulerJobs(jobs, { status: "paused", scope: "all" }).map((j) => j.jobKey)).toEqual([
+      "b",
+    ]);
+    expect(filterSchedulerJobs(jobs, { status: "all", scope: "system" }).map((j) => j.jobKey)).toEqual([
+      "a",
+    ]);
+    expect(filterSchedulerJobs(jobs, { status: "all", scope: "all" })).toHaveLength(2);
   });
 
   it("surfaces unsupported action reasons without calling the API", async () => {

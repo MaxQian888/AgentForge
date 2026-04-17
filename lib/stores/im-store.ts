@@ -129,6 +129,7 @@ interface IMState {
   deleteChannel: (id: string) => Promise<void>;
   retryDelivery: (id: string) => Promise<void>;
   retryDeliveries: (ids: string[]) => Promise<IMBatchRetryItemResult[]>;
+  clearRetryQueue: () => Promise<number>;
   testSend: (request: IMTestSendRequest) => Promise<IMTestSendResponse | null>;
   setHistoryFilters: (filters: IMDeliveryHistoryFilters) => void;
 }
@@ -444,6 +445,32 @@ export const useIMStore = create<IMState>()((set, get) => ({
       toast.error("Failed to retry deliveries");
       set({ error: "Failed to retry deliveries" });
       return [];
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  clearRetryQueue: async () => {
+    const token = getToken();
+    if (!token) return 0;
+
+    set({ loading: true, error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.post<{ cleared?: number }>(
+        "/api/v1/im/deliveries/retry-clear",
+        {},
+        { token },
+      );
+      const cleared = typeof data?.cleared === "number" ? data.cleared : 0;
+      await get().fetchDeliveryHistory(get().historyFilters);
+      await get().fetchBridgeStatus();
+      set({ error: null });
+      return cleared;
+    } catch {
+      toast.error("Failed to clear retry queue");
+      set({ error: "Failed to clear retry queue" });
+      return 0;
     } finally {
       set({ loading: false });
     }

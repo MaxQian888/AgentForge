@@ -8,6 +8,7 @@ import {
   type Node,
   type Edge,
 } from "@xyflow/react";
+import { toast } from "sonner";
 import type { WorkflowDefinition } from "@/lib/stores/workflow-store";
 import type { WorkflowNodeData, WorkflowEdgeData } from "./types";
 import { EditorProvider, useEditor } from "./context";
@@ -101,16 +102,37 @@ function WorkflowEditorInner({
     [onSave]
   );
 
-  const { handleSave, handleAddNode } = useEditorActions({
-    onSave: wrappedSave,
-    onExecute,
-    definitionId: definition.id,
-    status: definition.status,
-  });
+  const { handleSave, handleAddNode, handleExport, handleImport } =
+    useEditorActions({
+      onSave: wrappedSave,
+      onExecute,
+      definitionId: definition.id,
+      status: definition.status,
+    });
 
   const handleExecute = useCallback(() => {
     onExecute(definition.id);
   }, [onExecute, definition.id]);
+
+  const onImportFile = useCallback(
+    async (file: File) => {
+      if (
+        state.dirty &&
+        !window.confirm(
+          "Importing will replace the current workflow. Discard unsaved changes?"
+        )
+      ) {
+        return;
+      }
+      const result = await handleImport(file);
+      if (result.ok) {
+        toast.success("Workflow imported");
+      } else {
+        toast.error(result.error);
+      }
+    },
+    [handleImport, state.dirty]
+  );
 
   // Drop handler — converts screen coords to flow coords and adds a node
   const onDrop = useCallback(
@@ -152,6 +174,8 @@ function WorkflowEditorInner({
         onExecute={handleExecute}
         onSave={handleSave}
         onAddNode={handleAddNode}
+        onExport={handleExport}
+        onImport={onImportFile}
       />
 
       {/* Main area: canvas + optional right panel */}

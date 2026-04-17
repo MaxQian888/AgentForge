@@ -76,6 +76,38 @@ jest.mock("@/components/im/im-message-history", () => ({
   IMMessageHistory: () => <div data-testid="im-message-history" />,
 }));
 
+jest.mock("@/components/im/im-aggregate-metrics", () => ({
+  IMAggregateMetrics: () => <div data-testid="im-aggregate-metrics" />,
+}));
+
+jest.mock("@/components/im/im-bridge-status-cards", () => ({
+  IMBridgeStatusCards: () => <div data-testid="im-bridge-status-cards" />,
+}));
+
+jest.mock("@/components/shared/confirm-dialog", () => ({
+  ConfirmDialog: ({
+    open,
+    onConfirm,
+    onCancel,
+    confirmLabel,
+  }: {
+    open: boolean;
+    onConfirm: () => void;
+    onCancel: () => void;
+    confirmLabel?: string;
+  }) =>
+    open ? (
+      <div data-testid="confirm-dialog">
+        <button type="button" onClick={onConfirm}>
+          {confirmLabel ?? "Confirm"}
+        </button>
+        <button type="button" onClick={onCancel}>
+          Cancel
+        </button>
+      </div>
+    ) : null,
+}));
+
 jest.mock("@/components/ui/tabs", () => ({
   Tabs: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
   TabsList: ({ children }: { children: React.ReactNode }) => <div>{children}</div>,
@@ -123,6 +155,8 @@ describe("IMBridgePage", () => {
     expect(screen.getByTestId("im-channel-config")).toBeInTheDocument();
     expect(screen.getByTestId("im-bridge-health")).toBeInTheDocument();
     expect(screen.getByTestId("im-message-history")).toBeInTheDocument();
+    expect(screen.getByTestId("im-aggregate-metrics")).toBeInTheDocument();
+    expect(screen.getByTestId("im-bridge-status-cards")).toBeInTheDocument();
   });
 
   it("retries the page fetches from both the refresh button and the error banner", async () => {
@@ -160,6 +194,9 @@ describe("IMBridgePage", () => {
     await user.selectOptions(screen.getByLabelText("im.testSendPlatform"), "slack");
     await user.click(screen.getByRole("button", { name: "im.testSendButton" }));
 
+    expect(screen.getByTestId("confirm-dialog")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "im.testSendConfirmAction" }));
+
     await waitFor(() => {
       expect(imState.testSend).toHaveBeenCalledWith({
         platform: "slack",
@@ -167,6 +204,18 @@ describe("IMBridgePage", () => {
         text: "ping",
       });
     });
+  });
+
+  it("does not submit the test send when the confirm dialog is cancelled", async () => {
+    const user = userEvent.setup();
+
+    render(<IMBridgePage />);
+
+    await user.click(screen.getByRole("button", { name: "im.testSendButton" }));
+    expect(screen.getByTestId("confirm-dialog")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Cancel" }));
+
+    expect(imState.testSend).not.toHaveBeenCalled();
   });
 
   it("does not invent a fallback test target when no configured channel exists", () => {

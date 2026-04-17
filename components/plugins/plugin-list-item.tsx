@@ -12,12 +12,11 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { PluginIcon } from "./plugin-icon";
+import { PluginEnableToggle } from "./plugin-enable-toggle";
 import type { PluginRecord, PluginLifecycleState } from "@/lib/stores/plugin-store";
 import { usePluginStore } from "@/lib/stores/plugin-store";
 import {
   ArrowUpCircle,
-  Play,
-  Pause,
   Square,
   Terminal,
   Zap,
@@ -62,8 +61,6 @@ export function PluginListItem({
   selected = false,
 }: PluginListItemProps) {
   const t = useTranslations("plugins");
-  const enablePlugin = usePluginStore((s) => s.enablePlugin);
-  const disablePlugin = usePluginStore((s) => s.disablePlugin);
   const activatePlugin = usePluginStore((s) => s.activatePlugin);
   const deactivatePlugin = usePluginStore((s) => s.deactivatePlugin);
   const updatePlugin = usePluginStore((s) => s.updatePlugin);
@@ -76,12 +73,6 @@ export function PluginListItem({
   const isExecutable =
     plugin.spec.runtime !== "declarative" && Boolean(plugin.runtime_host);
 
-  const canEnable = state === "installed" || state === "disabled";
-  const canDisable =
-    state === "enabled" ||
-    state === "active" ||
-    state === "activating" ||
-    state === "degraded";
   const canActivate = state === "enabled" && isExecutable;
   const canRestart = isExecutable && (state === "active" || state === "degraded");
   const canDeactivate = state === "active" && isExecutable;
@@ -148,17 +139,9 @@ export function PluginListItem({
           if (e.key === "Enter" || e.key === " ") e.stopPropagation();
         }}
       >
-        {canEnable ? (
-          <Button
-            variant="default"
-            size="sm"
-            className="h-6 px-2 text-[11px]"
-            onClick={() => void enablePlugin(id)}
-          >
-            <Play className="mr-1 size-3" />
-            {t("pluginCard.enable")}
-          </Button>
-        ) : canActivate ? (
+        <PluginEnableToggle plugin={plugin} showLabel={false} />
+
+        {canActivate ? (
           <Button
             variant="default"
             size="sm"
@@ -167,16 +150,6 @@ export function PluginListItem({
           >
             <Zap className="mr-1 size-3" />
             {t("pluginCard.activate")}
-          </Button>
-        ) : canDisable ? (
-          <Button
-            variant="outline"
-            size="sm"
-            className="h-6 px-2 text-[11px]"
-            onClick={() => void disablePlugin(id)}
-          >
-            <Pause className="mr-1 size-3" />
-            {t("pluginCard.disable")}
           </Button>
         ) : null}
 

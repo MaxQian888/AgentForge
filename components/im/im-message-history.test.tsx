@@ -81,6 +81,7 @@ jest.mock("next-intl", () => ({
 
 const retryDelivery = jest.fn();
 const retryDeliveries = jest.fn();
+const clearRetryQueue = jest.fn();
 const fetchDeliveryHistory = jest.fn();
 const setHistoryFilters = jest.fn();
 
@@ -89,6 +90,7 @@ const storeState: {
   loading: boolean;
   retryDelivery: typeof retryDelivery;
   retryDeliveries: typeof retryDeliveries;
+  clearRetryQueue: typeof clearRetryQueue;
   fetchDeliveryHistory: typeof fetchDeliveryHistory;
   setHistoryFilters: typeof setHistoryFilters;
   historyFilters: {
@@ -101,6 +103,7 @@ const storeState: {
   loading: false,
   retryDelivery,
   retryDeliveries,
+  clearRetryQueue,
   fetchDeliveryHistory,
   setHistoryFilters,
   historyFilters: {},
@@ -118,6 +121,7 @@ describe("IMMessageHistory", () => {
     storeState.loading = false;
     retryDelivery.mockReset().mockResolvedValue(undefined);
     retryDeliveries.mockReset().mockResolvedValue([]);
+    clearRetryQueue.mockReset().mockResolvedValue(0);
     fetchDeliveryHistory.mockReset().mockResolvedValue(undefined);
     setHistoryFilters.mockReset();
     storeState.historyFilters = {};
@@ -178,6 +182,52 @@ describe("IMMessageHistory", () => {
     expect(screen.getByText("Queued at")).toBeInTheDocument();
     expect(screen.getByText("Processed at")).toBeInTheDocument();
     expect(screen.getAllByText("Latency").length).toBeGreaterThan(0);
+  });
+
+  it("prompts for confirmation before clearing the retry queue", async () => {
+    const user = userEvent.setup();
+    storeState.deliveries = [
+      {
+        id: "delivery-1",
+        channelId: "c1",
+        platform: "slack",
+        eventType: "task.created",
+        status: "failed",
+        createdAt: "2026-04-16T10:00:00.000Z",
+      },
+      {
+        id: "delivery-2",
+        channelId: "c1",
+        platform: "slack",
+        eventType: "task.created",
+        status: "timeout",
+        createdAt: "2026-04-16T10:00:10.000Z",
+      },
+    ];
+
+    render(<IMMessageHistory />);
+
+    await user.click(screen.getByRole("button", { name: "Clear retry queue" }));
+    await user.click(screen.getByRole("button", { name: "Clear queue" }));
+
+    expect(clearRetryQueue).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables Clear retry queue when there are no retryable deliveries", () => {
+    storeState.deliveries = [
+      {
+        id: "delivery-ok",
+        channelId: "c1",
+        platform: "slack",
+        eventType: "task.created",
+        status: "delivered",
+        createdAt: "2026-04-16T10:00:00.000Z",
+      },
+    ];
+
+    render(<IMMessageHistory />);
+
+    expect(screen.getByRole("button", { name: "Clear retry queue" })).toBeDisabled();
   });
 
   it("applies and clears delivery filters", async () => {

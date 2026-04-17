@@ -2,10 +2,15 @@
   "title": "调度器控制面板",
   "subtitle": "管理后台任务、查看运行历史并触发重试。",
   "refresh": "刷新",
+  "createJob": "新建任务",
   "registeredJobs": "已注册任务",
   "registeredJobsDesc": "内置后台任务及其执行周期、健康状态和下次执行时间。",
   "jobDetails": "任务详情",
   "jobDetailsDesc": "查看、配置和管理所选任务。",
+  "tabs": {
+    "queue": "队列",
+    "calendar": "日历"
+  },
   "stats": {
     "totalJobs": "总任务数",
     "enabled": "已启用",
@@ -27,6 +32,15 @@
     "na": "N/A",
     "notScheduled": "未安排",
     "paused": "已暂停"
+  },
+  "jobFilters": {
+    "allStatus": "状态",
+    "allScopes": "作用域",
+    "statusScheduled": "已调度",
+    "statusRunning": "运行中",
+    "statusSucceeded": "成功",
+    "statusFailed": "失败",
+    "statusPaused": "已暂停"
   },
   "jobDetail": {
     "runNow": "立即运行",
@@ -75,5 +89,32 @@
     "filterAll": "全部",
     "applyFilters": "应用筛选",
     "resetFilters": "重置筛选"
+  },
+  "calendar": {
+    "title": "即将运行的任务",
+    "description": "以日历视图查看所有已注册任务的后续运行。",
+    "noUpcoming": "暂无待执行的运行。当后端提供下次运行时间时，此处将显示任务。",
+    "prevMonth": "上一月",
+    "nextMonth": "下一月",
+    "today": "今天",
+    "gridLabel": "即将运行的任务日历",
+    "moreItems": "另 {count} 个",
+    "dayDetail": "{date} 的运行"
+  },
+  "createDialog": {
+    "title": "新建调度任务",
+    "description": "以 cron 表达式注册一个新的后台任务。",
+    "jobKey": "任务标识",
+    "jobKeyPlaceholder": "my.project.job",
+    "invalidJobKey": "任务标识必须以字母或数字开头，且只能包含字母、数字、点、下划线或连字符。",
+    "name": "显示名称",
+    "namePlaceholder": "便于识别的名称",
+    "nameRequired": "名称为必填项",
+    "scope": "作用域",
+    "scopePlaceholder": "system | project",
+    "schedule": "调度表达式 (cron)",
+    "cancel": "取消",
+    "create": "创建",
+    "submitFailed": "创建调度任务失败。后端可能暂未开放动态注册功能。"
   }
 }

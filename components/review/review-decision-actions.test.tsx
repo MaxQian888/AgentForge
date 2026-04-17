@@ -3,12 +3,22 @@ jest.mock("next-intl", () => ({
     const map: Record<string, string> = {
       recommendationApprove: "Approve",
       recommendationRequestChanges: "Request Changes",
+      rejectReview: "Reject",
+      blockReview: "Block",
       approveCommentLabel: "Comment (optional)",
       requestChangesCommentLabel: "Comment (optional)",
+      rejectCommentLabel: "Reject reason (required)",
+      blockCommentLabel: "Blocking reason (required)",
       approveCommentPlaceholder: "Optional approval comment...",
       requestChangesCommentPlaceholder: "Describe what needs to change...",
+      rejectCommentPlaceholder: "Describe why this review is rejected...",
+      blockCommentPlaceholder: "Describe why this review is blocked...",
       confirmApprove: "Confirm Approve",
       confirmRequestChanges: "Confirm Request Changes",
+      confirmReject: "Confirm Reject",
+      confirmBlock: "Confirm Block",
+      rejectReasonRequired: "A reject reason is required.",
+      blockReasonRequired: "A blocking reason is required.",
       cancelTrigger: "Cancel",
     };
     return map[key] ?? key;
@@ -71,5 +81,47 @@ describe("ReviewDecisionActions", () => {
     await user.click(screen.getByRole("button", { name: "Confirm Request Changes" }));
 
     expect(onRequestChanges).toHaveBeenCalledWith("review-2", "Needs more tests");
+  });
+
+  it("requires a reason before rejecting and forwards the trimmed value", async () => {
+    const user = userEvent.setup();
+    const onReject = jest.fn().mockResolvedValue(undefined);
+
+    render(<ReviewDecisionActions reviewId="review-3" onReject={onReject} />);
+
+    await user.click(screen.getByRole("button", { name: "Reject" }));
+    await user.click(screen.getByRole("button", { name: "Confirm Reject" }));
+    expect(onReject).not.toHaveBeenCalled();
+    expect(screen.getByTestId("review-decision-validation-error")).toHaveTextContent(
+      "A reject reason is required.",
+    );
+
+    await user.type(
+      screen.getByPlaceholderText("Describe why this review is rejected..."),
+      "  Security risk  ",
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm Reject" }));
+    expect(onReject).toHaveBeenCalledWith("review-3", "Security risk", "Security risk");
+  });
+
+  it("requires a reason before blocking and forwards the trimmed value", async () => {
+    const user = userEvent.setup();
+    const onBlock = jest.fn().mockResolvedValue(undefined);
+
+    render(<ReviewDecisionActions reviewId="review-4" onBlock={onBlock} />);
+
+    await user.click(screen.getByRole("button", { name: "Block" }));
+    await user.click(screen.getByRole("button", { name: "Confirm Block" }));
+    expect(onBlock).not.toHaveBeenCalled();
+    expect(screen.getByTestId("review-decision-validation-error")).toHaveTextContent(
+      "A blocking reason is required.",
+    );
+
+    await user.type(
+      screen.getByPlaceholderText("Describe why this review is blocked..."),
+      "Waiting on infra",
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm Block" }));
+    expect(onBlock).toHaveBeenCalledWith("review-4", "Waiting on infra", "Waiting on infra");
   });
 });

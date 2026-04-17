@@ -1,7 +1,11 @@
 import React from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { WorkflowEditor } from "./workflow-editor";
+
+jest.mock("sonner", () => ({
+  toast: { success: jest.fn(), error: jest.fn() },
+}));
 
 jest.mock("@xyflow/react", () => ({
   ReactFlow: ({ children }: { children: React.ReactNode }) => <div data-testid="reactflow">{children}</div>,
@@ -48,6 +52,10 @@ function renderEditor(props?: Partial<React.ComponentProps<typeof WorkflowEditor
 }
 
 describe("WorkflowEditor", () => {
+  beforeEach(() => {
+    jest.clearAllMocks();
+  });
+
   it("renders toolbar with workflow name", () => {
     renderEditor();
     expect(screen.getByDisplayValue("Test Workflow")).toBeInTheDocument();
@@ -56,5 +64,60 @@ describe("WorkflowEditor", () => {
   it("renders the canvas area", () => {
     renderEditor();
     expect(screen.getByTestId("reactflow")).toBeInTheDocument();
+  });
+
+  it("exposes Export and Import controls in the toolbar", () => {
+    renderEditor();
+    expect(
+      screen.getByRole("button", { name: /export workflow/i })
+    ).toBeInTheDocument();
+    expect(
+      screen.getByRole("button", { name: /import workflow/i })
+    ).toBeInTheDocument();
+  });
+
+  it("triggers a download when Export is clicked", () => {
+    const createObjectURL = jest.fn(() => "blob:mock");
+    const revokeObjectURL = jest.fn();
+    // jsdom does not implement URL.createObjectURL by default
+    (global.URL as unknown as { createObjectURL: typeof createObjectURL }).createObjectURL =
+      createObjectURL;
+    (global.URL as unknown as { revokeObjectURL: typeof revokeObjectURL }).revokeObjectURL =
+      revokeObjectURL;
+
+    renderEditor();
+    fireEvent.click(screen.getByRole("button", { name: /export workflow/i }));
+    expect(createObjectURL).toHaveBeenCalled();
+    expect(revokeObjectURL).toHaveBeenCalledWith("blob:mock");
+  });
+
+  it("loads imported workflow JSON into the editor", async () => {
+    renderEditor();
+
+    const fileInput = screen.getByTestId(
+      "import-workflow-file-input"
+    ) as HTMLInputElement;
+
+    const payload = {
+      version: 1,
+      name: "Imported Flow",
+      description: "Desc",
+      nodes: [{ id: "n1", type: "trigger", label: "Start", position: { x: 0, y: 0 } }],
+      edges: [],
+    };
+
+    // jsdom's File polyfill lacks .text() on older versions — stub it.
+    const file = new File([JSON.stringify(payload)], "wf.json", {
+      type: "application/json",
+    });
+    Object.defineProperty(file, "text", {
+      value: () => Promise.resolve(JSON.stringify(payload)),
+    });
+
+    fireEvent.change(fileInput, { target: { files: [file] } });
+
+    await waitFor(() => {
+      expect(screen.getByDisplayValue("Imported Flow")).toBeInTheDocument();
+    });
   });
 });

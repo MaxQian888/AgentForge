@@ -377,6 +377,55 @@ describe("useIMStore", () => {
     expect(useIMStore.getState().lastBatchRetryResults).toEqual(results);
   });
 
+  it("clears the retry queue and refreshes bridge status plus history", async () => {
+    const api = makeApiClient();
+    api.post.mockResolvedValueOnce({ data: { cleared: 3 } });
+    api.get
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({
+        data: {
+          registered: true,
+          lastHeartbeat: "2026-03-26T08:30:00.000Z",
+          providers: [],
+          providerDetails: [],
+          health: "healthy",
+          pendingDeliveries: 0,
+          recentFailures: 0,
+          recentDowngrades: 0,
+          averageLatencyMs: 0,
+        },
+      });
+    mockCreateApiClient.mockReturnValue(api);
+
+    const cleared = await useIMStore.getState().clearRetryQueue();
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/api/v1/im/deliveries/retry-clear",
+      {},
+      { token: "test-token" },
+    );
+    expect(cleared).toBe(3);
+    expect(useIMStore.getState()).toMatchObject({
+      deliveries: [],
+      loading: false,
+      error: null,
+    });
+  });
+
+  it("surfaces a clear-queue error when the request fails", async () => {
+    const api = makeApiClient();
+    api.post.mockRejectedValueOnce(new Error("boom"));
+    mockCreateApiClient.mockReturnValue(api);
+
+    const cleared = await useIMStore.getState().clearRetryQueue();
+
+    expect(cleared).toBe(0);
+    expect(useIMStore.getState()).toMatchObject({
+      loading: false,
+      error: "Failed to clear retry queue",
+    });
+  });
+
   it("sends an IM test message and refreshes status plus history", async () => {
     const api = makeApiClient();
     api.post.mockResolvedValueOnce({

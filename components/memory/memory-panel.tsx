@@ -4,14 +4,18 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import {
   CalendarClock,
+  ChevronLeft,
+  ChevronRight,
   Copy,
   Database,
   Download,
   FileSearch,
   HardDrive,
   Pencil,
+  Plus,
   Search,
   Trash2,
+  X,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -54,12 +58,15 @@ import {
 } from "@/components/ui/sheet";
 import { ErrorBanner } from "@/components/shared/error-banner";
 import { EmptyState } from "@/components/shared/empty-state";
+import { MetricCard } from "@/components/shared/metric-card";
+import { HighlightedText } from "@/components/shared/highlighted-text";
 import { useBreakpoint } from "@/hooks/use-breakpoint";
 import { cn } from "@/lib/utils";
 import {
   useMemoryStore,
   type AgentMemoryDetail,
   type AgentMemoryEntry,
+  type MemoryExportFormat,
 } from "@/lib/stores/memory-store";
 import { useRoleStore } from "@/lib/stores/role-store";
 
@@ -100,12 +107,10 @@ function fromDateTimeInputValue(value: string) {
   return Number.isNaN(date.getTime()) ? "" : date.toISOString();
 }
 
-function downloadJson(filename: string, payload: unknown) {
+function downloadBlob(filename: string, content: string, mimeType: string) {
   if (typeof window === "undefined" || typeof document === "undefined") return;
   if (typeof window.URL?.createObjectURL !== "function") return;
-  const blob = new Blob([JSON.stringify(payload, null, 2)], {
-    type: "application/json",
-  });
+  const blob = new Blob([content], { type: mimeType });
   const url = window.URL.createObjectURL(blob);
   const anchor = document.createElement("a");
   anchor.href = url;
@@ -121,6 +126,7 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
   const fetchRoles = useRoleStore((s) => s.fetchRoles);
 
   const filters = useMemoryStore((s) => s.filters);
+  const pagination = useMemoryStore((s) => s.pagination);
   const entries = useMemoryStore((s) => s.entries);
   const stats = useMemoryStore((s) => s.stats);
   const detail = useMemoryStore((s) => s.detail);
@@ -138,26 +144,33 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
   const loadWorkspace = useMemoryStore((s) => s.loadWorkspace);
   const setFilters = useMemoryStore((s) => s.setFilters);
   const resetFilters = useMemoryStore((s) => s.resetFilters);
+  const setPagination = useMemoryStore((s) => s.setPagination);
   const fetchMemoryDetail = useMemoryStore((s) => s.fetchMemoryDetail);
   const selectMemory = useMemoryStore((s) => s.selectMemory);
   const toggleMemorySelection = useMemoryStore((s) => s.toggleMemorySelection);
   const clearSelection = useMemoryStore((s) => s.clearSelection);
   const deleteMemory = useMemoryStore((s) => s.deleteMemory);
   const bulkDeleteMemories = useMemoryStore((s) => s.bulkDeleteMemories);
+  const bulkDeleteByCriteria = useMemoryStore((s) => s.bulkDeleteByCriteria);
   const cleanupMemories = useMemoryStore((s) => s.cleanupMemories);
   const exportMemories = useMemoryStore((s) => s.exportMemories);
   const exportMemoryEntry = useMemoryStore((s) => s.exportMemoryEntry);
   const storeMemory = useMemoryStore((s) => s.storeMemory);
   const updateMemory = useMemoryStore((s) => s.updateMemory);
+  const addMemoryTag = useMemoryStore((s) => s.addMemoryTag);
+  const removeMemoryTag = useMemoryStore((s) => s.removeMemoryTag);
+  const buildExportBlob = useMemoryStore((s) => s.buildExportBlob);
   const clearActionFeedback = useMemoryStore((s) => s.clearActionFeedback);
 
   const [singleDeleteTarget, setSingleDeleteTarget] = useState<AgentMemoryEntry | null>(null);
   const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+  const [bulkCriteriaOpen, setBulkCriteriaOpen] = useState(false);
   const [cleanupOpen, setCleanupOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [detailSheetOpen, setDetailSheetOpen] = useState(false);
   const [queryDraft, setQueryDraft] = useState(filters.query);
   const [tagDraft, setTagDraft] = useState(filters.tag);
+  const [detailTagDraft, setDetailTagDraft] = useState("");
   const [noteDraft, setNoteDraft] = useState({
     key: "",
     content: "",
@@ -210,6 +223,77 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
     t("activeFilter.limit", { count: filters.limit }),
   ].filter(Boolean) as string[];
 
+  const totalEntries = entries.length;
+  const pageSize = pagination && pagination.pageSize > 0 ? pagination.pageSize : 10;
+  const totalPages = totalEntries > 0 ? Math.ceil(totalEntries / pageSize) : 1;
+  const currentPage = Math.min(Math.max(pagination?.page ?? 1, 1), totalPages);
+  const pageStart = totalEntries === 0 ? 0 : (currentPage - 1) * pageSize;
+  const pageEnd = Math.min(pageStart + pageSize, totalEntries);
+  const pagedEntries = entries.slice(pageStart, pageEnd);
+
+  const handleExport = async (format: MemoryExportFormat) => {
+    const exported = await exportMemories(projectId);
+    if (!exported) return;
+    const blob = buildExportBlob(exported, format);
+    downloadBlob(
+      `memory-export-${projectId}.${blob.extension}`,
+      blob.content,
+      blob.mimeType,
+    );
+  };
+
+  const detailPanelProps = {
+    detail: currentDetail,
+    detailLoading,
+    detailError,
+    queryHighlight: filters.query,
+    tagDraft: detailTagDraft,
+    onTagDraftChange: setDetailTagDraft,
+    onAddTag: async () => {
+      if (!currentDetail) return;
+      const value = detailTagDraft.trim();
+      if (!value) return;
+      await addMemoryTag(projectId, currentDetail.id, value);
+      setDetailTagDraft("");
+    },
+    onRemoveTag: (tag: string) => {
+      if (!currentDetail) return;
+      void removeMemoryTag(projectId, currentDetail.id, tag);
+    },
+    onCopy: async () => {
+      if (currentDetail && navigator?.clipboard?.writeText)
+        await navigator.clipboard.writeText(currentDetail.content);
+    },
+    onDelete: () => currentDetail && setSingleDeleteTarget(currentDetail),
+    onEdit: () => {
+      if (!currentDetail || !currentDetail.editable) return;
+      setEditDraft({
+        key: currentDetail.key,
+        content: currentDetail.content,
+        tags: (currentDetail.tags ?? []).join(", "),
+      });
+      setEditOpen(true);
+    },
+    onExport: async (format: MemoryExportFormat) => {
+      if (!currentDetail) return;
+      const exported = await exportMemoryEntry(
+        projectId,
+        currentDetail.id,
+        filters.roleId || undefined,
+      );
+      if (exported) {
+        const blob = buildExportBlob(exported, format);
+        downloadBlob(
+          `memory-entry-${currentDetail.id}.${blob.extension}`,
+          blob.content,
+          blob.mimeType,
+        );
+      }
+    },
+    onTagClick: applyTagFilter,
+    t,
+  };
+
   return (
     <div className="flex flex-col gap-6">
       {(error || statsError || actionError) && (
@@ -234,10 +318,28 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
       )}
 
       <div className="grid gap-4 md:grid-cols-2 xl:grid-cols-4">
-        <StatCard testId="memory-stat-total" icon={Database} label={t("stats.total")} value={statsLoading ? t("loadingShort") : String(stats?.totalCount ?? 0)} />
-        <StatCard icon={HardDrive} label={t("stats.storage")} value={statsLoading ? t("loadingShort") : formatBytes(stats?.approxStorageBytes ?? 0)} />
-        <StatCard icon={FileSearch} label={t("stats.categories")} value={Object.keys(stats?.byCategory ?? {}).length} />
-        <StatCard icon={CalendarClock} label={t("stats.lastAccessed")} value={statsLoading ? t("loadingShort") : formatTime(stats?.lastAccessedAt)} />
+        <div data-testid="memory-stat-total">
+          <MetricCard
+            icon={Database}
+            label={t("stats.total")}
+            value={statsLoading ? t("loadingShort") : String(stats?.totalCount ?? 0)}
+          />
+        </div>
+        <MetricCard
+          icon={HardDrive}
+          label={t("stats.storage")}
+          value={statsLoading ? t("loadingShort") : formatBytes(stats?.approxStorageBytes ?? 0)}
+        />
+        <MetricCard
+          icon={FileSearch}
+          label={t("stats.categories")}
+          value={Object.keys(stats?.byCategory ?? {}).length}
+        />
+        <MetricCard
+          icon={CalendarClock}
+          label={t("stats.lastAccessed")}
+          value={statsLoading ? t("loadingShort") : formatTime(stats?.lastAccessedAt)}
+        />
       </div>
 
       <Card>
@@ -248,17 +350,39 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
               <CardDescription>{t("workspaceDescription")}</CardDescription>
             </div>
             <div className="flex flex-wrap gap-2">
-              <Button variant="outline" className="gap-2" onClick={async () => {
-                const exported = await exportMemories(projectId);
-                if (exported) downloadJson(`memory-export-${projectId}.json`, exported);
-              }} disabled={actionLoading}>
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => void handleExport("json")}
+                disabled={actionLoading}
+              >
                 <Download className="size-4" />
                 {t("actionExport")}
+              </Button>
+              <Button
+                variant="outline"
+                className="gap-2"
+                onClick={() => void handleExport("csv")}
+                disabled={actionLoading}
+              >
+                <Download className="size-4" />
+                {t("actionExportCsv")}
               </Button>
               <Button variant="outline" className="gap-2" onClick={() => setCleanupOpen(true)} disabled={actionLoading}>
                 <CalendarClock className="size-4" />
                 {t("actionCleanup")}
               </Button>
+              {entries.length > 0 && (
+                <Button
+                  variant="outline"
+                  className="gap-2"
+                  onClick={() => setBulkCriteriaOpen(true)}
+                  disabled={actionLoading}
+                >
+                  <Trash2 className="size-4" />
+                  {t("actionBulkDeleteByCriteria", { count: entries.length })}
+                </Button>
+              )}
               {selectedMemoryIds.length > 0 && (
                 <Button variant="destructive" className="gap-2" onClick={() => setBulkDeleteOpen(true)} disabled={actionLoading}>
                   <Trash2 className="size-4" />
@@ -412,46 +536,131 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
             ) : entries.length === 0 ? (
               <EmptyState icon={FileSearch} title={t("noEntries")} description={t("noEntriesDescription")} action={{ label: t("actionResetFilters"), onClick: () => { setQueryDraft(""); setTagDraft(""); resetFilters(); clearSelection(); } }} />
             ) : (
-              entries.map((entry) => {
-                const selected = selectedMemoryId === entry.id;
-                return (
-                  <Card key={entry.id} className={cn("border-border/60", selected && "border-primary bg-primary/5")}>
-                    <CardContent className="flex flex-col gap-3 py-4">
-                      <div className="flex items-start justify-between gap-3">
-                        <div className="flex items-start gap-3">
-                          <input type="checkbox" aria-label={t("selectEntry", { key: entry.key })} checked={selectedMemoryIds.includes(entry.id)} onChange={() => toggleMemorySelection(entry.id)} className="mt-1 size-4" />
-                          <div className="space-y-2">
-                            <div className="flex flex-wrap items-center gap-2">
-                              <h3 className="text-sm font-semibold">{entry.key}</h3>
-                              <Badge variant="secondary" className={cn(scopeColors[entry.scope] ?? "")}>{t(`scopeOption.${entry.scope}`)}</Badge>
-                              <Badge variant="outline">{t(`categoryOption.${entry.category}`)}</Badge>
-                              {entry.kind === "operator_note" && <Badge variant="outline">{t("kind.operator_note")}</Badge>}
-                              {entry.tags.map((tag) => (
-                                <button key={`${entry.id}-${tag}`} type="button" onClick={() => applyTagFilter(tag)}>
-                                  <Badge variant="secondary">{tag}</Badge>
-                                </button>
-                              ))}
-                            </div>
-                            <p className="line-clamp-2 text-sm text-muted-foreground">{entry.content}</p>
-                            <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
-                              <span>{t("accessed", { count: entry.accessCount })}</span>
-                              <span>{formatTime(entry.createdAt)}</span>
+              <>
+                {pagedEntries.map((entry) => {
+                  const selected = selectedMemoryId === entry.id;
+                  return (
+                    <Card key={entry.id} className={cn("border-border/60", selected && "border-primary bg-primary/5")}>
+                      <CardContent className="flex flex-col gap-3 py-4">
+                        <div className="flex items-start justify-between gap-3">
+                          <div className="flex items-start gap-3">
+                            <input type="checkbox" aria-label={t("selectEntry", { key: entry.key })} checked={selectedMemoryIds.includes(entry.id)} onChange={() => toggleMemorySelection(entry.id)} className="mt-1 size-4" />
+                            <div className="space-y-2">
+                              <div className="flex flex-wrap items-center gap-2">
+                                <h3 className="text-sm font-semibold">
+                                  <HighlightedText text={entry.key} query={filters.query} />
+                                </h3>
+                                <Badge variant="secondary" className={cn(scopeColors[entry.scope] ?? "")}>{t(`scopeOption.${entry.scope}`)}</Badge>
+                                <Badge variant="outline">{t(`categoryOption.${entry.category}`)}</Badge>
+                                {entry.kind === "operator_note" && <Badge variant="outline">{t("kind.operator_note")}</Badge>}
+                                {entry.tags.map((tag) => (
+                                  <span
+                                    key={`${entry.id}-${tag}`}
+                                    className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-1.5 py-0.5 text-xs"
+                                  >
+                                    <button
+                                      type="button"
+                                      onClick={() => applyTagFilter(tag)}
+                                      className="font-medium text-foreground/80 hover:text-foreground"
+                                    >
+                                      {tag}
+                                    </button>
+                                    {entry.editable && (
+                                      <button
+                                        type="button"
+                                        aria-label={t("tag.remove", { tag })}
+                                        onClick={() => void removeMemoryTag(projectId, entry.id, tag)}
+                                        className="text-muted-foreground hover:text-destructive"
+                                      >
+                                        <X className="size-3" />
+                                      </button>
+                                    )}
+                                  </span>
+                                ))}
+                              </div>
+                              <p className="line-clamp-2 text-sm text-muted-foreground">
+                                <HighlightedText text={entry.content} query={filters.query} />
+                              </p>
+                              <div className="flex flex-wrap gap-3 text-xs text-muted-foreground">
+                                <span>{t("accessed", { count: entry.accessCount })}</span>
+                                <span>{formatTime(entry.createdAt)}</span>
+                              </div>
                             </div>
                           </div>
+                          <div className="flex items-center gap-2">
+                            <Button variant="outline" size="sm" aria-label={t("openEntry", { key: entry.key })} onClick={() => void handleOpenEntry(entry)}>
+                              {t("openEntryShort")}
+                            </Button>
+                            <Button variant="ghost" size="icon-sm" aria-label={t("deleteEntry", { key: entry.key })} onClick={() => setSingleDeleteTarget(entry)}>
+                              <Trash2 className="size-4" />
+                            </Button>
+                          </div>
                         </div>
-                        <div className="flex items-center gap-2">
-                          <Button variant="outline" size="sm" aria-label={t("openEntry", { key: entry.key })} onClick={() => void handleOpenEntry(entry)}>
-                            {t("openEntryShort")}
-                          </Button>
-                          <Button variant="ghost" size="icon-sm" aria-label={t("deleteEntry", { key: entry.key })} onClick={() => setSingleDeleteTarget(entry)}>
-                            <Trash2 className="size-4" />
-                          </Button>
-                        </div>
-                      </div>
-                    </CardContent>
-                  </Card>
-                );
-              })
+                      </CardContent>
+                    </Card>
+                  );
+                })}
+                <div
+                  data-testid="memory-pagination"
+                  className="flex flex-col gap-2 pt-2 text-xs text-muted-foreground sm:flex-row sm:items-center sm:justify-between"
+                >
+                  <span>
+                    {t("pagination.summary", {
+                      from: totalEntries === 0 ? 0 : pageStart + 1,
+                      to: pageEnd,
+                      count: totalEntries,
+                    })}
+                  </span>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <label
+                      htmlFor="memory-page-size"
+                      className="text-xs text-muted-foreground"
+                    >
+                      {t("pagination.pageSize")}
+                    </label>
+                    <Select
+                      value={String(pageSize)}
+                      onValueChange={(value) => setPagination({ pageSize: Number(value), page: 1 })}
+                    >
+                      <SelectTrigger
+                        id="memory-page-size"
+                        aria-label={t("pagination.pageSize")}
+                        className="h-8 w-[5rem]"
+                      >
+                        <SelectValue placeholder={String(pageSize)} />
+                      </SelectTrigger>
+                      <SelectContent>
+                        {[5, 10, 20, 50].map((size) => (
+                          <SelectItem key={size} value={String(size)}>
+                            {size}
+                          </SelectItem>
+                        ))}
+                      </SelectContent>
+                    </Select>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label={t("pagination.prev")}
+                      onClick={() => setPagination({ page: Math.max(1, currentPage - 1) })}
+                      disabled={currentPage <= 1}
+                    >
+                      <ChevronLeft className="size-4" />
+                    </Button>
+                    <span data-testid="memory-page-indicator">
+                      {t("pagination.page", { page: currentPage, total: totalPages })}
+                    </span>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      aria-label={t("pagination.next")}
+                      onClick={() => setPagination({ page: Math.min(totalPages, currentPage + 1) })}
+                      disabled={currentPage >= totalPages}
+                    >
+                      <ChevronRight className="size-4" />
+                    </Button>
+                  </div>
+                </div>
+              </>
             )}
           </CardContent>
         </Card>
@@ -462,23 +671,7 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
               <CardDescription>{t("detailDescription")}</CardDescription>
             </CardHeader>
             <CardContent>
-              <MemoryDetail detail={currentDetail} detailLoading={detailLoading} detailError={detailError} t={t} onCopy={async () => {
-                if (currentDetail && navigator?.clipboard?.writeText) await navigator.clipboard.writeText(currentDetail.content);
-              }} onDelete={() => currentDetail && setSingleDeleteTarget(currentDetail)} onEdit={() => {
-                if (!currentDetail || !currentDetail.editable) return;
-                setEditDraft({
-                  key: currentDetail.key,
-                  content: currentDetail.content,
-                  tags: (currentDetail.tags ?? []).join(", "),
-                });
-                setEditOpen(true);
-              }} onExport={async () => {
-                if (!currentDetail) return;
-                const exported = await exportMemoryEntry(projectId, currentDetail.id, filters.roleId || undefined);
-                if (exported) {
-                  downloadJson(`memory-entry-${currentDetail.id}.json`, exported);
-                }
-              }} onTagClick={applyTagFilter} />
+              <MemoryDetail {...detailPanelProps} />
             </CardContent>
           </Card>
         )}
@@ -491,23 +684,7 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
             <SheetDescription>{t("detailDescription")}</SheetDescription>
           </SheetHeader>
           <div className="px-4 pb-4">
-            <MemoryDetail detail={currentDetail} detailLoading={detailLoading} detailError={detailError} t={t} onCopy={async () => {
-              if (currentDetail && navigator?.clipboard?.writeText) await navigator.clipboard.writeText(currentDetail.content);
-            }} onDelete={() => currentDetail && setSingleDeleteTarget(currentDetail)} onEdit={() => {
-              if (!currentDetail || !currentDetail.editable) return;
-              setEditDraft({
-                key: currentDetail.key,
-                content: currentDetail.content,
-                tags: (currentDetail.tags ?? []).join(", "),
-              });
-              setEditOpen(true);
-            }} onExport={async () => {
-              if (!currentDetail) return;
-              const exported = await exportMemoryEntry(projectId, currentDetail.id, filters.roleId || undefined);
-              if (exported) {
-                downloadJson(`memory-entry-${currentDetail.id}.json`, exported);
-              }
-            }} onTagClick={applyTagFilter} />
+            <MemoryDetail {...detailPanelProps} />
           </div>
         </SheetContent>
       </Sheet>
@@ -539,6 +716,33 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
             <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
             <AlertDialogAction variant="destructive" aria-label={t("confirmBulkDelete")} onClick={() => void bulkDeleteMemories(projectId, selectedMemoryIds, filters.roleId || undefined)}>
               {t("confirmBulkDelete")}
+            </AlertDialogAction>
+          </AlertDialogFooter>
+        </AlertDialogContent>
+      </AlertDialog>
+
+      <AlertDialog open={bulkCriteriaOpen} onOpenChange={setBulkCriteriaOpen}>
+        <AlertDialogContent>
+          <AlertDialogHeader>
+            <AlertDialogTitle>{t("confirmBulkDeleteByCriteriaTitle")}</AlertDialogTitle>
+            <AlertDialogDescription>
+              {t("confirmBulkDeleteByCriteriaDescription", { count: entries.length })}
+            </AlertDialogDescription>
+          </AlertDialogHeader>
+          <AlertDialogFooter>
+            <AlertDialogCancel>{t("cancel")}</AlertDialogCancel>
+            <AlertDialogAction
+              variant="destructive"
+              aria-label={t("confirmBulkDeleteByCriteria")}
+              onClick={() => {
+                void bulkDeleteByCriteria(projectId, {
+                  ids: entries.map((entry) => entry.id),
+                  roleId: filters.roleId || undefined,
+                });
+                setBulkCriteriaOpen(false);
+              }}
+            >
+              {t("confirmBulkDeleteByCriteria")}
             </AlertDialogAction>
           </AlertDialogFooter>
         </AlertDialogContent>
@@ -626,24 +830,15 @@ export function MemoryPanel({ projectId }: MemoryPanelProps) {
   );
 }
 
-function StatCard({ icon: Icon, label, value, testId }: { icon: typeof Database; label: string; value: string | number; testId?: string }) {
-  return (
-    <Card data-testid={testId}>
-      <CardContent className="flex items-start justify-between gap-3 py-5">
-        <div>
-          <p className="text-sm text-muted-foreground">{label}</p>
-          <p className="text-2xl font-semibold">{value}</p>
-        </div>
-        <div className="rounded-full bg-muted p-2"><Icon className="size-4 text-muted-foreground" /></div>
-      </CardContent>
-    </Card>
-  );
-}
-
 function MemoryDetail({
   detail,
   detailLoading,
   detailError,
+  queryHighlight,
+  tagDraft,
+  onTagDraftChange,
+  onAddTag,
+  onRemoveTag,
   onCopy,
   onDelete,
   onEdit,
@@ -654,10 +849,15 @@ function MemoryDetail({
   detail: AgentMemoryDetail | AgentMemoryEntry | null;
   detailLoading: boolean;
   detailError: string | null;
+  queryHighlight?: string;
+  tagDraft: string;
+  onTagDraftChange: (value: string) => void;
+  onAddTag: () => void;
+  onRemoveTag: (tag: string) => void;
   onCopy: () => void;
   onDelete: () => void;
   onEdit: () => void;
-  onExport: () => void;
+  onExport: (format: MemoryExportFormat) => void;
   onTagClick: (tag: string) => void;
   t: ReturnType<typeof useTranslations<"memory">>;
 }) {
@@ -672,11 +872,45 @@ function MemoryDetail({
         <Badge variant="outline">{t(`categoryOption.${detail.category}`)}</Badge>
         {detail.kind === "operator_note" && <Badge variant="outline">{t("kind.operator_note")}</Badge>}
         {(detail.tags ?? []).map((tag) => (
-          <button key={`${detail.id}-${tag}`} type="button" onClick={() => onTagClick(tag)}>
-            <Badge variant="secondary">{tag}</Badge>
-          </button>
+          <span
+            key={`${detail.id}-${tag}`}
+            className="inline-flex items-center gap-1 rounded-md bg-muted/60 px-1.5 py-0.5 text-xs"
+          >
+            <button
+              type="button"
+              onClick={() => onTagClick(tag)}
+              className="font-medium text-foreground/80 hover:text-foreground"
+            >
+              {tag}
+            </button>
+            {detail.editable && (
+              <button
+                type="button"
+                aria-label={t("tag.remove", { tag })}
+                onClick={() => onRemoveTag(tag)}
+                className="text-muted-foreground hover:text-destructive"
+              >
+                <X className="size-3" />
+              </button>
+            )}
+          </span>
         ))}
-        <Button variant="outline" size="sm" className="gap-2" onClick={onExport}>{t("exportEntry")}</Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          onClick={() => onExport("json")}
+        >
+          {t("exportEntry")}
+        </Button>
+        <Button
+          variant="outline"
+          size="sm"
+          className="gap-2"
+          onClick={() => onExport("csv")}
+        >
+          {t("exportEntryCsv")}
+        </Button>
         {detail.editable ? (
           <Button variant="outline" size="sm" className="gap-2" onClick={onEdit}><Pencil className="size-4" />{t("editNote")}</Button>
         ) : (
@@ -685,9 +919,34 @@ function MemoryDetail({
         <Button variant="outline" size="sm" className="ml-auto gap-2" onClick={onCopy}><Copy className="size-4" />{t("copyContent")}</Button>
         <Button variant="ghost" size="icon-sm" onClick={onDelete}><Trash2 className="size-4" /></Button>
       </div>
+      {detail.editable && (
+        <div className="flex flex-wrap items-center gap-2">
+          <Input
+            aria-label={t("tag.addLabel")}
+            placeholder={t("tag.addPlaceholder")}
+            value={tagDraft}
+            onChange={(event) => onTagDraftChange(event.target.value)}
+            className="h-8 w-40 text-xs"
+          />
+          <Button
+            variant="outline"
+            size="sm"
+            className="gap-1"
+            onClick={onAddTag}
+            disabled={!tagDraft.trim()}
+          >
+            <Plus className="size-3" />
+            {t("tag.add")}
+          </Button>
+        </div>
+      )}
       <div className="space-y-1">
-        <h3 className="text-lg font-semibold">{detail.key}</h3>
-        <p className="whitespace-pre-wrap text-sm">{detail.content}</p>
+        <h3 className="text-lg font-semibold">
+          <HighlightedText text={detail.key} query={queryHighlight} />
+        </h3>
+        <p className="whitespace-pre-wrap text-sm">
+          <HighlightedText text={detail.content} query={queryHighlight} />
+        </p>
       </div>
       <Separator />
       <dl className="grid gap-3 text-sm sm:grid-cols-2">

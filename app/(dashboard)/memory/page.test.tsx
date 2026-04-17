@@ -1,5 +1,9 @@
-import { render, screen } from "@testing-library/react";
+import { act, render, screen } from "@testing-library/react";
 import MemoryPage from "./page";
+import {
+  clearFeatureFlagOverrides,
+  setFeatureFlagOverride,
+} from "@/lib/feature-flags";
 
 const dashboardState = {
   selectedProjectId: null as string | null,
@@ -35,6 +39,15 @@ jest.mock("@/lib/stores/dashboard-store", () => ({
 describe("MemoryPage", () => {
   beforeEach(() => {
     dashboardState.selectedProjectId = null;
+    act(() => {
+      clearFeatureFlagOverrides();
+    });
+  });
+
+  afterEach(() => {
+    act(() => {
+      clearFeatureFlagOverrides();
+    });
   });
 
   it("shows a project selection empty state when no project is active", () => {
@@ -52,5 +65,17 @@ describe("MemoryPage", () => {
 
     expect(screen.getByTestId("memory-panel")).toHaveTextContent("project-42");
     expect(screen.queryByTestId("empty-state")).not.toBeInTheDocument();
+  });
+
+  it("renders a disabled notice when the MEMORY_EXPLORER feature flag is off", () => {
+    dashboardState.selectedProjectId = "project-42";
+    act(() => {
+      setFeatureFlagOverride("MEMORY_EXPLORER", false);
+    });
+
+    render(<MemoryPage />);
+
+    expect(screen.queryByTestId("memory-panel")).not.toBeInTheDocument();
+    expect(screen.getByTestId("empty-state")).toBeInTheDocument();
   });
 });

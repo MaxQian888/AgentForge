@@ -12,9 +12,12 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IMChannelConfig } from "@/components/im/im-channel-config";
 import { IMBridgeHealth } from "@/components/im/im-bridge-health";
 import { IMMessageHistory } from "@/components/im/im-message-history";
+import { IMAggregateMetrics } from "@/components/im/im-aggregate-metrics";
+import { IMBridgeStatusCards } from "@/components/im/im-bridge-status-cards";
 import { useIMStore, type IMPlatform } from "@/lib/stores/im-store";
 import { PageHeader } from "@/components/shared/page-header";
 import { ErrorBanner } from "@/components/shared/error-banner";
+import { ConfirmDialog } from "@/components/shared/confirm-dialog";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 export default function IMBridgePage() {
@@ -37,6 +40,7 @@ export default function IMBridgePage() {
   const [testPlatform, setTestPlatform] = useState<IMPlatform | "">("");
   const [testChannelId, setTestChannelId] = useState("");
   const [testMessage, setTestMessage] = useState("ping");
+  const [testConfirmOpen, setTestConfirmOpen] = useState(false);
 
   useEffect(() => {
     void fetchChannels();
@@ -44,6 +48,15 @@ export default function IMBridgePage() {
     void fetchDeliveryHistory();
     void fetchEventTypes();
   }, [fetchChannels, fetchBridgeStatus, fetchDeliveryHistory, fetchEventTypes]);
+
+  // Poll bridge status + deliveries every 5s per spec (queue metrics refresh).
+  useEffect(() => {
+    const interval = window.setInterval(() => {
+      void fetchBridgeStatus();
+      void fetchDeliveryHistory();
+    }, 5000);
+    return () => window.clearInterval(interval);
+  }, [fetchBridgeStatus, fetchDeliveryHistory]);
 
   const handleRefresh = () => {
     void fetchChannels();
@@ -89,12 +102,28 @@ export default function IMBridgePage() {
   );
   const effectiveTestChannelId = testChannelId || platformChannels[0]?.channelId || "";
 
-  const handleTestSend = async () => {
+  const handleRequestTestSend = () => {
+    if (!effectiveTestChannelId || !effectiveTestPlatform) return;
+    setTestConfirmOpen(true);
+  };
+
+  const handleConfirmTestSend = async () => {
+    setTestConfirmOpen(false);
     await testSend({
       platform: effectiveTestPlatform,
       channelId: effectiveTestChannelId,
       text: testMessage,
     });
+  };
+
+  const handleBridgeSendTest = (platform: string) => {
+    const candidatePlatform = availablePlatforms.includes(platform as IMPlatform)
+      ? (platform as IMPlatform)
+      : effectiveTestPlatform;
+    setTestPlatform(candidatePlatform || "");
+    setTestChannelId("");
+    // Queue the confirmation open on the next tick so state has settled.
+    setTimeout(() => setTestConfirmOpen(true), 0);
   };
 
   return (
@@ -127,6 +156,13 @@ export default function IMBridgePage() {
       />
 
       {error && <ErrorBanner message={error} onRetry={handleRefresh} />}
+
+      <IMAggregateMetrics />
+
+      <IMBridgeStatusCards
+        onConfigureProvider={handleConfigureProvider}
+        onSendTest={handleBridgeSendTest}
+      />
 
       <Card>
         <CardHeader>
@@ -170,7 +206,7 @@ export default function IMBridgePage() {
           </div>
           <div className="flex items-end">
             <Button
-              onClick={() => void handleTestSend()}
+              onClick={handleRequestTestSend}
               disabled={loading || !effectiveTestChannelId}
             >
               {t("testSendButton")}
@@ -181,8 +217,16 @@ export default function IMBridgePage() {
               <Badge variant="secondary">
                 {`${t("testSendResult")}: ${lastTestSendResult.status}`}
               </Badge>
+              {typeof lastTestSendResult.latencyMs === "number" && lastTestSendResult.latencyMs > 0 ? (
+                <p className="text-sm text-muted-foreground">
+                  {t("testSendSuccessLatency", { latencyMs: lastTestSendResult.latencyMs })}
+                </p>
+              ) : null}
               {lastTestSendResult.failureReason ? (
-                <p className="text-sm text-destructive">{lastTestSendResult.failureReason}</p>
+                <>
+                  <p className="text-sm text-destructive">{lastTestSendResult.failureReason}</p>
+                  <p className="text-xs text-muted-foreground">{t("testSendRemediation")}</p>
+                </>
               ) : null}
               {lastTestSendResult.downgradeReason ? (
                 <p className="text-sm text-muted-foreground">
@@ -193,6 +237,18 @@ export default function IMBridgePage() {
           ) : null}
         </CardContent>
       </Card>
+
+      <ConfirmDialog
+        open={testConfirmOpen}
+        title={t("testSendConfirmTitle")}
+        description={t("testSendConfirmDescription", {
+          platform: effectiveTestPlatform || "?",
+          channelId: effectiveTestChannelId || "?",
+        })}
+        confirmLabel={t("testSendConfirmAction")}
+        onConfirm={() => void handleConfirmTestSend()}
+        onCancel={() => setTestConfirmOpen(false)}
+      />
 
       <Tabs value={activeTab} onValueChange={setActiveTab}>
         <TabsList>

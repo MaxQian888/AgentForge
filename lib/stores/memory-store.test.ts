@@ -663,4 +663,253 @@ describe("useMemoryStore", () => {
       loading: false,
     });
   });
+
+  it("resets pagination to page 1 whenever filters change", () => {
+    useMemoryStore.setState({
+      filters: {
+        query: "",
+        scope: "all",
+        category: "all",
+        roleId: "",
+        tag: "",
+        startAt: "",
+        endAt: "",
+        limit: 20,
+      },
+      pagination: { page: 3, pageSize: 10 },
+    } as never);
+
+    useMemoryStore.getState().setFilters({ query: "incident" });
+
+    expect(useMemoryStore.getState().pagination).toEqual({
+      page: 1,
+      pageSize: 10,
+    });
+  });
+
+  it("updates page and pageSize via setPagination", () => {
+    useMemoryStore.setState({
+      pagination: { page: 1, pageSize: 10 },
+    } as never);
+
+    useMemoryStore.getState().setPagination({ page: 4 });
+    expect(useMemoryStore.getState().pagination).toEqual({
+      page: 4,
+      pageSize: 10,
+    });
+
+    useMemoryStore.getState().setPagination({ pageSize: 25 });
+    expect(useMemoryStore.getState().pagination).toEqual({
+      page: 1,
+      pageSize: 25,
+    });
+  });
+
+  it("bulk deletes by criteria using the current entry window", async () => {
+    const api = makeApiClient();
+    api.post.mockResolvedValueOnce({ data: { deletedCount: 3 } });
+    api.get
+      .mockResolvedValueOnce({ data: [] })
+      .mockResolvedValueOnce({
+        data: {
+          totalCount: 0,
+          approxStorageBytes: 0,
+          byCategory: {},
+          byScope: {},
+        },
+      });
+    mockCreateApiClient.mockReturnValue(api);
+    useMemoryStore.setState({
+      currentProjectId: "project-1",
+      filters: {
+        query: "",
+        scope: "all",
+        category: "all",
+        roleId: "reviewer",
+        tag: "",
+        startAt: "",
+        endAt: "",
+        limit: 20,
+      },
+      entries: [
+        {
+          id: "memory-1",
+          projectId: "project-1",
+          scope: "project",
+          roleId: "",
+          category: "episodic",
+          key: "alpha",
+          content: "alpha",
+          metadata: "{}",
+          relevanceScore: 1,
+          accessCount: 0,
+          createdAt: "2026-03-25T10:00:00.000Z",
+        },
+        {
+          id: "memory-2",
+          projectId: "project-1",
+          scope: "project",
+          roleId: "",
+          category: "episodic",
+          key: "beta",
+          content: "beta",
+          metadata: "{}",
+          relevanceScore: 1,
+          accessCount: 0,
+          createdAt: "2026-03-25T11:00:00.000Z",
+        },
+        {
+          id: "memory-3",
+          projectId: "project-1",
+          scope: "project",
+          roleId: "",
+          category: "episodic",
+          key: "gamma",
+          content: "gamma",
+          metadata: "{}",
+          relevanceScore: 1,
+          accessCount: 0,
+          createdAt: "2026-03-25T12:00:00.000Z",
+        },
+      ],
+    } as never);
+
+    const result = await useMemoryStore
+      .getState()
+      .bulkDeleteByCriteria("project-1");
+
+    expect(api.post).toHaveBeenCalledWith(
+      "/api/v1/projects/project-1/memory/bulk-delete",
+      {
+        ids: ["memory-1", "memory-2", "memory-3"],
+        roleId: "reviewer",
+      },
+      { token: "test-token" },
+    );
+    expect(result).toEqual({ deletedCount: 3 });
+    expect(useMemoryStore.getState()).toMatchObject({
+      selectedMemoryIds: [],
+      lastMutation: { type: "bulk-delete-criteria", deletedCount: 3 },
+    });
+  });
+
+  it("adds and removes memory tags by delegating to updateMemory", async () => {
+    const api = makeApiClient();
+    api.patch.mockResolvedValue({
+      data: {
+        id: "memory-1",
+        projectId: "project-1",
+        scope: "project",
+        roleId: "",
+        category: "episodic",
+        kind: "operator_note",
+        tags: ["ops", "pinned"],
+        editable: true,
+        key: "design-note",
+        content: "body",
+        metadata: "{}",
+        metadataObject: {},
+        relevanceScore: 1,
+        accessCount: 0,
+        createdAt: "2026-03-25T10:00:00.000Z",
+      },
+    });
+    api.get.mockResolvedValue({ data: [] });
+    mockCreateApiClient.mockReturnValue(api);
+
+    const initialEntry = {
+      id: "memory-1",
+      projectId: "project-1",
+      scope: "project" as const,
+      roleId: "",
+      category: "episodic" as const,
+      kind: "operator_note",
+      tags: ["ops"],
+      editable: true,
+      key: "design-note",
+      content: "body",
+      metadata: "{}",
+      metadataObject: {},
+      relatedContext: [],
+      relevanceScore: 1,
+      accessCount: 0,
+      createdAt: "2026-03-25T10:00:00.000Z",
+    };
+
+    useMemoryStore.setState({
+      currentProjectId: "project-1",
+      entries: [initialEntry],
+    } as never);
+
+    await useMemoryStore
+      .getState()
+      .addMemoryTag("project-1", "memory-1", "pinned");
+
+    expect(api.patch).toHaveBeenCalledWith(
+      "/api/v1/projects/project-1/memory/memory-1",
+      expect.objectContaining({ tags: ["ops", "pinned"] }),
+      { token: "test-token" },
+    );
+    expect(useMemoryStore.getState().lastMutation).toEqual({
+      type: "tag-added",
+      deletedCount: 1,
+    });
+
+    useMemoryStore.setState({
+      entries: [{ ...initialEntry, tags: ["ops", "pinned"] }],
+    } as never);
+
+    await useMemoryStore
+      .getState()
+      .removeMemoryTag("project-1", "memory-1", "ops");
+
+    expect(api.patch).toHaveBeenLastCalledWith(
+      "/api/v1/projects/project-1/memory/memory-1",
+      expect.objectContaining({ tags: ["pinned"] }),
+      { token: "test-token" },
+    );
+    expect(useMemoryStore.getState().lastMutation).toEqual({
+      type: "tag-removed",
+      deletedCount: 1,
+    });
+  });
+
+  it("builds JSON and CSV export blobs", () => {
+    const payload = {
+      projectId: "project-1",
+      exportedAt: "2026-03-25T12:00:00.000Z",
+      entries: [
+        {
+          id: "memory-1",
+          scope: "project",
+          roleId: "",
+          category: "episodic",
+          key: "title",
+          content: "body, with comma",
+          tags: ["ops", "release"],
+          createdAt: "2026-03-25T10:00:00.000Z",
+          updatedAt: "2026-03-25T11:00:00.000Z",
+        },
+      ],
+    };
+
+    const json = useMemoryStore
+      .getState()
+      .buildExportBlob(payload as never, "json");
+    expect(json.mimeType).toBe("application/json");
+    expect(json.extension).toBe("json");
+    expect(JSON.parse(json.content)).toEqual(payload);
+
+    const csv = useMemoryStore
+      .getState()
+      .buildExportBlob(payload as never, "csv");
+    expect(csv.mimeType).toBe("text/csv");
+    expect(csv.extension).toBe("csv");
+    const lines = csv.content.split("\n");
+    expect(lines[0]).toBe(
+      "id,scope,roleId,category,key,content,tags,createdAt,updatedAt",
+    );
+    expect(lines[1]).toContain("\"body, with comma\"");
+    expect(lines[1]).toContain("ops|release");
+  });
 });

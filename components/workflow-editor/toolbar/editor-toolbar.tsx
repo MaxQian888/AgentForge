@@ -1,7 +1,16 @@
 "use client";
 
-import { useState } from "react";
-import { Save, PlayCircle, Undo2, Redo2, GripVertical, Loader2 } from "lucide-react";
+import { useRef, useState } from "react";
+import {
+  Save,
+  PlayCircle,
+  Undo2,
+  Redo2,
+  GripVertical,
+  Loader2,
+  Download,
+  Upload,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Badge } from "@/components/ui/badge";
@@ -22,6 +31,8 @@ export interface EditorToolbarProps {
   onExecute: () => void;
   onSave: () => void;
   onAddNode: (type: string) => void;
+  onExport?: () => void;
+  onImport?: (file: File) => void;
 }
 
 // ── Component ─────────────────────────────────────────────────────────────────
@@ -32,10 +43,26 @@ export function EditorToolbar({
   onExecute,
   onSave,
   onAddNode,
+  onExport,
+  onImport,
 }: EditorToolbarProps) {
   const { state, dispatch } = useEditor();
   const { canUndo, canRedo, undo, redo } = useUndoRedo();
   const [showPalette, setShowPalette] = useState(true);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  function triggerImport() {
+    fileInputRef.current?.click();
+  }
+
+  function handleFileChange(e: React.ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    if (file && onImport) {
+      onImport(file);
+    }
+    // Reset so picking the same file again re-triggers onChange
+    if (fileInputRef.current) fileInputRef.current.value = "";
+  }
 
   return (
     <div className="flex flex-col gap-3 p-3 border-b bg-background">
@@ -98,6 +125,53 @@ export function EditorToolbar({
             </TooltipTrigger>
             <TooltipContent>Redo (Ctrl+Shift+Z)</TooltipContent>
           </Tooltip>
+
+          {/* Import (hidden file input + trigger button) */}
+          {onImport && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json"
+                className="hidden"
+                onChange={handleFileChange}
+                aria-label="Import workflow JSON"
+                data-testid="import-workflow-file-input"
+              />
+              <Tooltip>
+                <TooltipTrigger asChild>
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="h-8 w-8"
+                    onClick={triggerImport}
+                    aria-label="Import workflow"
+                  >
+                    <Upload className="h-4 w-4" />
+                  </Button>
+                </TooltipTrigger>
+                <TooltipContent>Import JSON</TooltipContent>
+              </Tooltip>
+            </>
+          )}
+
+          {/* Export */}
+          {onExport && (
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Button
+                  variant="ghost"
+                  size="icon"
+                  className="h-8 w-8"
+                  onClick={onExport}
+                  aria-label="Export workflow"
+                >
+                  <Download className="h-4 w-4" />
+                </Button>
+              </TooltipTrigger>
+              <TooltipContent>Export JSON</TooltipContent>
+            </Tooltip>
+          )}
 
           {/* Save */}
           <Button

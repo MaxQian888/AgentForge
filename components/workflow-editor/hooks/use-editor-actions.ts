@@ -2,10 +2,37 @@
 
 import { useEffect, useCallback, useRef } from "react";
 import type { Node, Edge } from "@xyflow/react";
-import { useReactFlow } from "@xyflow/react";
+import { useReactFlow, MarkerType } from "@xyflow/react";
 import { useEditor } from "../context";
 import { getNodeMeta } from "../nodes/node-registry";
 import type { WorkflowNodeData, WorkflowEdgeData } from "../types";
+
+// ── Export payload shape ──────────────────────────────────────────────────────
+
+/**
+ * Serialized workflow — stable, minimal JSON shape suitable for export/import.
+ * Mirrors the persisted WorkflowDefinition sub-shape that the backend accepts.
+ */
+export interface WorkflowExportPayload {
+  version: 1;
+  name: string;
+  description: string;
+  nodes: WorkflowNodeData[];
+  edges: WorkflowEdgeData[];
+  exportedAt: string;
+}
+
+export function isWorkflowExportPayload(
+  value: unknown
+): value is WorkflowExportPayload {
+  if (!value || typeof value !== "object") return false;
+  const v = value as Record<string, unknown>;
+  return (
+    typeof v.name === "string" &&
+    Array.isArray(v.nodes) &&
+    Array.isArray(v.edges)
+  );
+}
 
 // ── Conversion helpers ────────────────────────────────────────────────────────
 
@@ -118,6 +145,93 @@ export function useEditorActions(props: UseEditorActionsProps) {
     [state.nodes.length, dispatch]
   );
 
+  // ── Export / Import (JSON) ────────────────────────────────────────────────
+
+  /**
+   * Builds the portable JSON payload from the current editor state.
+   * Exposed as a pure function so it can be unit-tested without a DOM.
+   */
+  const buildExportPayload = useCallback((): WorkflowExportPayload => {
+    const rfNodes = reactFlow.getNodes();
+    const rfEdges = reactFlow.getEdges();
+    return {
+      version: 1,
+      name: state.name,
+      description: state.description,
+      nodes: fromReactFlowNodes(rfNodes),
+      edges: fromReactFlowEdges(rfEdges),
+      exportedAt: new Date().toISOString(),
+    };
+  }, [reactFlow, state.name, state.description]);
+
+  const handleExport = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const payload = buildExportPayload();
+    const json = JSON.stringify(payload, null, 2);
+    const blob = new Blob([json], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const safeName = (state.name || "workflow").replace(/[^a-z0-9-_]+/gi, "_");
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${safeName}.workflow.json`;
+    document.body.appendChild(anchor);
+    anchor.click();
+    document.body.removeChild(anchor);
+    URL.revokeObjectURL(url);
+  }, [buildExportPayload, state.name]);
+
+  /**
+   * Replaces the current canvas with the contents of `payload`. Dispatches a
+   * LOAD action — the caller is responsible for prompting/confirming when the
+   * editor is dirty.
+   */
+  const applyImportPayload = useCallback(
+    (payload: WorkflowExportPayload) => {
+      const rfNodes: Node[] = (payload.nodes ?? []).map((n) => ({
+        id: n.id,
+        type: n.type,
+        position: n.position,
+        data: { label: n.label, config: n.config },
+      }));
+      const rfEdges: Edge[] = (payload.edges ?? []).map((e) => ({
+        id: e.id,
+        source: e.source,
+        target: e.target,
+        label: e.label || e.condition || undefined,
+        data: { condition: e.condition },
+        markerEnd: { type: MarkerType.ArrowClosed },
+        style: { strokeWidth: 2 },
+      }));
+      dispatch({
+        type: "LOAD",
+        name: payload.name ?? state.name,
+        description: payload.description ?? state.description,
+        nodes: rfNodes,
+        edges: rfEdges,
+      });
+    },
+    [dispatch, state.name, state.description]
+  );
+
+  const handleImport = useCallback(
+    async (
+      file: File
+    ): Promise<{ ok: true } | { ok: false; error: string }> => {
+      try {
+        const text = await file.text();
+        const parsed: unknown = JSON.parse(text);
+        if (!isWorkflowExportPayload(parsed)) {
+          return { ok: false, error: "Invalid workflow file" };
+        }
+        applyImportPayload(parsed);
+        return { ok: true };
+      } catch {
+        return { ok: false, error: "Unable to parse JSON" };
+      }
+    },
+    [applyImportPayload]
+  );
+
   // ── Keyboard shortcuts ────────────────────────────────────────────────────
 
   useEffect(() => {
@@ -190,6 +304,10 @@ export function useEditorActions(props: UseEditorActionsProps) {
     handlePaste,
     handleDelete,
     handleAddNode,
+    handleExport,
+    handleImport,
+    buildExportPayload,
+    applyImportPayload,
     definitionId,
   };
 }

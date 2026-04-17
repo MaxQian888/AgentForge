@@ -7,13 +7,24 @@ jest.mock("next-intl", () => ({
       recommendationApprove: "Approve",
       recommendationRequestChanges: "Request Changes",
       recommendationReject: "Reject",
+      rejectReview: "Reject",
+      blockReview: "Block",
       approveCommentLabel: "Comment (optional)",
       requestChangesCommentLabel: "Comment (optional)",
+      rejectCommentLabel: "Reject reason (required)",
+      blockCommentLabel: "Blocking reason (required)",
       approveCommentPlaceholder: "Optional approval comment...",
       requestChangesCommentPlaceholder: "Describe what needs to change...",
+      rejectCommentPlaceholder: "Describe why this review is rejected...",
+      blockCommentPlaceholder: "Describe why this review is blocked...",
       confirmApprove: "Confirm Approve",
       confirmRequestChanges: "Confirm Request Changes",
+      confirmReject: "Confirm Reject",
+      confirmBlock: "Confirm Block",
+      rejectReasonRequired: "A reject reason is required.",
+      blockReasonRequired: "A blocking reason is required.",
       cancelTrigger: "Cancel",
+      selectReview: "Select review",
       statusPendingHuman: "Pending Human",
       statusCompleted: "Completed",
       statusPending: "Pending",
@@ -159,5 +170,55 @@ describe("ReviewList", () => {
 
     expect(onSelect).toHaveBeenCalledTimes(1);
     promptSpy.mockRestore();
+  });
+
+  it("renders selection checkboxes and invokes onToggleSelect without opening the card", async () => {
+    const user = userEvent.setup();
+    const onSelect = jest.fn();
+    const onToggleSelect = jest.fn();
+
+    render(
+      <ReviewList
+        reviews={[makeReview()]}
+        onSelect={onSelect}
+        onToggleSelect={onToggleSelect}
+        selectedIds={new Set()}
+      />,
+    );
+
+    const checkbox = screen.getByTestId("review-select-review-1");
+    await user.click(checkbox);
+    expect(onToggleSelect).toHaveBeenCalledWith("review-1");
+    expect(onSelect).not.toHaveBeenCalled();
+  });
+
+  it("exposes reject and block actions for pending_human reviews", async () => {
+    const user = userEvent.setup();
+    const onReject = jest.fn();
+    const onBlock = jest.fn();
+
+    render(
+      <ReviewList
+        reviews={[makeReview()]}
+        onSelect={jest.fn()}
+        onReject={onReject}
+        onBlock={onBlock}
+      />,
+    );
+
+    expect(screen.getByRole("button", { name: "Reject" })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "Block" })).toBeInTheDocument();
+
+    await user.click(screen.getByRole("button", { name: "Block" }));
+    await user.type(
+      screen.getByPlaceholderText("Describe why this review is blocked..."),
+      "Waiting on infra",
+    );
+    await user.click(screen.getByRole("button", { name: "Confirm Block" }));
+    expect(onBlock).toHaveBeenCalledWith(
+      "review-1",
+      "Waiting on infra",
+      "Waiting on infra",
+    );
   });
 });

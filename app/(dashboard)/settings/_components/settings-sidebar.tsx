@@ -3,6 +3,7 @@
 import { useTranslations } from "next-intl";
 import {
   Palette,
+  Accessibility,
   Globe,
   MessageCircle,
   Settings2,
@@ -37,6 +38,7 @@ export interface SettingsSection {
 export const SETTINGS_SECTIONS: SettingsSection[] = [
   // App settings
   { id: "appearance", labelKey: "nav.appearance", icon: Palette, group: "app" },
+  { id: "accessibility", labelKey: "nav.accessibility", icon: Accessibility, group: "app" },
   { id: "api-connection", labelKey: "nav.apiConnection", icon: Globe, group: "app" },
   { id: "im-bridge", labelKey: "nav.imBridge", icon: MessageCircle, group: "app" },
   // Runtime configurations
