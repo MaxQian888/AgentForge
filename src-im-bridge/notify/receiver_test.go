@@ -1429,7 +1429,7 @@ func TestCloneMetadata_ReturnsIndependentWritableCopy(t *testing.T) {
 }
 
 func applySignedHeaders(req *http.Request, path string, deliveryID string, body []byte, secret string) {
-	timestamp := "2026-03-25T00:00:00Z"
+	timestamp := time.Now().UTC().Format(time.RFC3339)
 	mac := hmac.New(sha256.New, []byte(secret))
 	_, _ = mac.Write([]byte(strings.Join([]string{
 		req.Method,

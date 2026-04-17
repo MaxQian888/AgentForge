@@ -90,3 +90,31 @@ type LifecycleHandler interface {
 	OnBotAdded(ctx context.Context, platform Platform, chatID string) error
 	OnBotRemoved(ctx context.Context, platform Platform, chatID string) error
 }
+
+// ReconcileConfig carries the new credentials or tunable values the bridge
+// has read from its environment (or secrets vault in a future iteration)
+// and wants the provider to reconcile against without a process restart.
+type ReconcileConfig struct {
+	// Credentials is a key-value map of provider-specific secrets. Keys
+	// mirror the env-var names (e.g. FEISHU_APP_SECRET, SLACK_BOT_TOKEN).
+	// Providers MUST treat missing keys as "leave unchanged".
+	Credentials map[string]string
+}
+
+// ReconcileResult reports what the provider reconciled in response to a
+// ReconcileConfig. Applied and Deferred are human-readable field names
+// used in operator logs/audit; they do not affect control flow.
+type ReconcileResult struct {
+	Applied  []string
+	Deferred []string
+	Errors   []error
+}
+
+// HotReloader is an optional interface for platforms that can refresh
+// credentials or transport state in-place, typically in response to SIGHUP.
+// Providers that cannot honor hot reload (e.g. webhook-port bound) MUST NOT
+// implement this interface; the bridge's SIGHUP handler treats them as
+// `manual_restart_required`.
+type HotReloader interface {
+	Reconcile(ctx context.Context, cfg ReconcileConfig) ReconcileResult
+}

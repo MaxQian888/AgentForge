@@ -20,6 +20,24 @@ type Engine struct {
 	bridgeCapabilityProbe BridgeCapabilityProbe
 	bridgeCapabilityTTL   time.Duration
 	bridgeCapabilityCache map[BridgeCapability]bridgeCapabilityCacheEntry
+	bridgeID              string
+	allowlist             *CommandAllowlist
+}
+
+// SetCommandAllowlist installs a coarse-grained command gate. Passing nil
+// or an empty allowlist makes the gate admit everything (default).
+func (e *Engine) SetCommandAllowlist(al *CommandAllowlist) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.allowlist = al
+}
+
+// SetBridgeID attaches the stable bridge_id to the engine so rate limiting
+// policies can bucket on the DimBridge axis.
+func (e *Engine) SetBridgeID(id string) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.bridgeID = strings.TrimSpace(id)
 }
 
 // NewEngine creates an engine bound to a specific platform.
@@ -107,27 +125,51 @@ func (e *Engine) SetFallback(handler func(p Platform, msg *Message)) {
 func (e *Engine) HandleMessage(p Platform, msg *Message) {
 	content := strings.TrimSpace(msg.Content)
 
+	// Parse slash command upfront so rate limit scope carries command +
+	// action_class information for multi-dim policies.
+	var cmd, args string
+	if strings.HasPrefix(content, "/") {
+		parts := strings.SplitN(content, " ", 2)
+		cmd = parts[0]
+		if len(parts) > 1 {
+			args = parts[1]
+		}
+	}
+	actionClass := ActionClassForCommand(cmd)
+
+	// Command allowlist gate (applies before rate limit so denied commands
+	// never enter the rate counters).
+	if cmd != "" && e.allowlist != nil && e.allowlist.Enabled() {
+		if !e.allowlist.Permit(msg.Platform, cmd) {
+			_ = p.Reply(context.Background(), msg.ReplyCtx, "该命令在此平台未启用，请联系管理员。")
+			return
+		}
+	}
+
 	// Rate limit check.
 	if e.rateLimiter != nil {
-		key := msg.SessionKey
-		if key == "" {
-			key = msg.Platform + ":" + msg.ChatID + ":" + msg.UserID
+		scope := Scope{
+			Chat:        msg.ChatID,
+			User:        msg.UserID,
+			Bridge:      e.bridgeID,
+			Command:     cmd,
+			ActionClass: actionClass,
 		}
-		if !e.rateLimiter.Allow(key) {
-			_ = p.Reply(context.Background(), msg.ReplyCtx, "操作过于频繁，请稍后再试。")
+		decision, err := e.rateLimiter.Allow(context.Background(), scope)
+		if err != nil {
+			// Fail closed: treat rate store errors as refusal to avoid
+			// silently admitting traffic under storage outages.
+			_ = p.Reply(context.Background(), msg.ReplyCtx, "限速检查失败，请稍后再试。")
+			return
+		}
+		if !decision.Allowed {
+			_ = p.Reply(context.Background(), msg.ReplyCtx, "操作过于频繁，请稍后再试（policy="+decision.Policy+"）。")
 			return
 		}
 	}
 
 	// Check for slash commands.
-	if strings.HasPrefix(content, "/") {
-		parts := strings.SplitN(content, " ", 2)
-		cmd := parts[0]
-		args := ""
-		if len(parts) > 1 {
-			args = parts[1]
-		}
-
+	if cmd != "" {
 		e.mu.RLock()
 		handler, exists := e.commands[cmd]
 		e.mu.RUnlock()

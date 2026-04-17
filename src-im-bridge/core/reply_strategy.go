@@ -72,9 +72,37 @@ func ResolveReplyPlan(metadata PlatformMetadata, target *ReplyTarget, fallbackCh
 }
 
 // DeliverText routes a text payload through the shared reply strategy before
-// falling back to a plain send.
+// falling back to a plain send. The content is sanitized according to the
+// process-wide SanitizeMode before any provider call so broadcast mentions,
+// zero-width characters, control bytes, and over-limit text are normalized
+// consistently across all providers.
 func DeliverText(ctx context.Context, platform Platform, metadata PlatformMetadata, target *ReplyTarget, fallbackChatID, content string) (ReplyPlan, error) {
 	plan := ResolveReplyPlan(metadata, target, fallbackChatID)
+
+	sanitized := SanitizeEgress(metadata.Rendering, DefaultSanitizeMode(), content)
+	if len(sanitized.Warnings) > 0 {
+		plan.FallbackReason = appendSanitizeReason(plan.FallbackReason, sanitized.Warnings)
+	}
+
+	// Segmented delivery: only the send path (new message in a chat) can
+	// be split into multiple messages. Reply/edit paths collapse segments
+	// into a single joined message to preserve reply-target semantics.
+	if len(sanitized.Segments) > 1 && plan.Method == DeliveryMethodSend {
+		if plan.TargetChatID == "" {
+			return plan, errors.New("delivery missing target chat id")
+		}
+		for _, seg := range sanitized.Segments {
+			if err := platform.Send(ctx, plan.TargetChatID, seg); err != nil {
+				return plan, err
+			}
+		}
+		return plan, nil
+	}
+	content = sanitized.Text
+	if len(sanitized.Segments) > 0 {
+		content = strings.Join(sanitized.Segments, "")
+	}
+
 	if plan.Method == DeliveryMethodSend {
 		if plan.TargetChatID == "" {
 			return plan, errors.New("delivery missing target chat id")
@@ -99,6 +127,21 @@ func DeliverText(ctx context.Context, platform Platform, metadata PlatformMetada
 	}
 	plan.Method = DeliveryMethodSend
 	return plan, platform.Send(ctx, plan.TargetChatID, content)
+}
+
+// appendSanitizeReason augments an existing fallback reason string with
+// pipe-separated sanitize warnings. Multiple concurrent sanitize warnings
+// are visible to operators in audit + delivery receipt metadata.
+func appendSanitizeReason(existing string, warnings []SanitizeWarning) string {
+	var sb strings.Builder
+	sb.WriteString(existing)
+	for _, w := range warnings {
+		if sb.Len() > 0 {
+			sb.WriteString("|")
+		}
+		sb.WriteString(string(w))
+	}
+	return sb.String()
 }
 
 // DeliverCard routes a legacy card payload through the shared reply strategy.

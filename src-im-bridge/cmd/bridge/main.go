@@ -7,14 +7,18 @@ import (
 
 	log "github.com/sirupsen/logrus"
 	"os/signal"
+	"path/filepath"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
 	"time"
 
+	"github.com/agentforge/im-bridge/audit"
 	"github.com/agentforge/im-bridge/client"
 	"github.com/agentforge/im-bridge/commands"
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/core/state"
 	"github.com/agentforge/im-bridge/notify"
 	"github.com/google/uuid"
 )
@@ -84,6 +88,15 @@ type config struct {
 	ControlSharedSecret     string
 	HeartbeatInterval       time.Duration
 	ControlReconnectDelay   time.Duration
+	StateDir                string
+	DisableDurableState     bool
+	SignatureSkew           time.Duration
+	AuditDir                string
+	DisableAudit            bool
+	AuditRotateSizeMB       int
+	AuditRetainDays         int
+	AuditHashSalt           string
+	AuditShipViaControlPlane bool
 	Platform                string
 	TransportMode           string
 	FeishuApp               string
@@ -146,6 +159,15 @@ func loadConfig() *config {
 		ControlSharedSecret:     os.Getenv("IM_CONTROL_SHARED_SECRET"),
 		HeartbeatInterval:       durationEnvOrDefault("IM_BRIDGE_HEARTBEAT_INTERVAL", 30*time.Second),
 		ControlReconnectDelay:   durationEnvOrDefault("IM_BRIDGE_RECONNECT_DELAY", 3*time.Second),
+		StateDir:                envOrDefault("IM_BRIDGE_STATE_DIR", ".agentforge"),
+		DisableDurableState:     boolEnvOrDefault("IM_DISABLE_DURABLE_STATE", false),
+		SignatureSkew:           skewEnvOrDefault("IM_SIGNATURE_SKEW_SECONDS", 5*time.Minute),
+		AuditDir:                envOrDefault("IM_BRIDGE_AUDIT_DIR", ".agentforge/audit"),
+		DisableAudit:            boolEnvOrDefault("IM_DISABLE_AUDIT", false),
+		AuditRotateSizeMB:       intEnvOrDefault("IM_AUDIT_ROTATE_SIZE_MB", 128),
+		AuditRetainDays:         intEnvOrDefault("IM_AUDIT_RETAIN_DAYS", 14),
+		AuditHashSalt:           os.Getenv("IM_AUDIT_HASH_SALT"),
+		AuditShipViaControlPlane: boolEnvOrDefault("IM_AUDIT_SHIP_VIA_CONTROL_PLANE", false),
 		Platform:                envOrDefault("IM_PLATFORM", "feishu"),
 		TransportMode:           envOrDefault("IM_TRANSPORT_MODE", transportModeStub),
 		FeishuApp:               os.Getenv("FEISHU_APP_ID"),
@@ -227,6 +249,78 @@ func durationEnvOrDefault(key string, fallback time.Duration) time.Duration {
 	return fallback
 }
 
+func boolEnvOrDefault(key string, fallback bool) bool {
+	raw := strings.TrimSpace(strings.ToLower(os.Getenv(key)))
+	switch raw {
+	case "":
+		return fallback
+	case "1", "true", "yes", "on":
+		return true
+	case "0", "false", "no", "off":
+		return false
+	default:
+		return fallback
+	}
+}
+
+// skewEnvOrDefault parses IM_SIGNATURE_SKEW_SECONDS. Operators specify raw
+// seconds (e.g. "300") rather than Go duration syntax; we accept both.
+func skewEnvOrDefault(key string, fallback time.Duration) time.Duration {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	if n, err := strconv.Atoi(raw); err == nil {
+		return time.Duration(n) * time.Second
+	}
+	if parsed, err := time.ParseDuration(raw); err == nil {
+		return parsed
+	}
+	return fallback
+}
+
+// collectProviderCredentials builds the ReconcileConfig.Credentials map
+// from the current environment. The map covers all known provider secrets
+// and optional tunables so providers that implement HotReloader can pick
+// the fields they care about and ignore the rest.
+func collectProviderCredentials(cfg *config) map[string]string {
+	out := map[string]string{
+		"FEISHU_APP_ID":                  cfg.FeishuApp,
+		"FEISHU_APP_SECRET":              cfg.FeishuSec,
+		"FEISHU_VERIFICATION_TOKEN":      cfg.FeishuVerificationToken,
+		"FEISHU_EVENT_ENCRYPT_KEY":       cfg.FeishuEventEncryptKey,
+		"SLACK_BOT_TOKEN":                cfg.SlackBotToken,
+		"SLACK_APP_TOKEN":                cfg.SlackAppToken,
+		"DINGTALK_APP_KEY":               cfg.DingTalkAppKey,
+		"DINGTALK_APP_SECRET":            cfg.DingTalkAppSecret,
+		"WECOM_CORP_ID":                  cfg.WeComCorpID,
+		"WECOM_AGENT_ID":                 cfg.WeComAgentID,
+		"WECOM_AGENT_SECRET":             cfg.WeComAgentSecret,
+		"WECOM_CALLBACK_TOKEN":           cfg.WeComCallbackToken,
+		"QQ_ONEBOT_WS_URL":               cfg.QQOneBotWSURL,
+		"QQ_ACCESS_TOKEN":                cfg.QQAccessToken,
+		"QQBOT_APP_ID":                   cfg.QQBotAppID,
+		"QQBOT_APP_SECRET":               cfg.QQBotAppSecret,
+		"TELEGRAM_BOT_TOKEN":             cfg.TelegramBotToken,
+		"DISCORD_APP_ID":                 cfg.DiscordAppID,
+		"DISCORD_BOT_TOKEN":              cfg.DiscordBotToken,
+		"DISCORD_PUBLIC_KEY":             cfg.DiscordPublicKey,
+		"IM_CONTROL_SHARED_SECRET":       cfg.ControlSharedSecret,
+	}
+	return out
+}
+
+func intEnvOrDefault(key string, fallback int) int {
+	raw := strings.TrimSpace(os.Getenv(key))
+	if raw == "" {
+		return fallback
+	}
+	if n, err := strconv.Atoi(raw); err == nil {
+		return n
+	}
+	return fallback
+}
+
 func selectPlatform(cfg *config) (core.Platform, error) {
 	provider, err := selectProvider(cfg)
 	if err != nil {
@@ -251,6 +345,58 @@ func main() {
 		log.WithField("component", "main").WithError(err).Fatal("Failed to initialize bridge id")
 	}
 
+	// Open durable state store (SQLite). Authoritative for dedupe/rate/nonce.
+	// When IM_DISABLE_DURABLE_STATE is set the bridge falls back to the
+	// historical in-memory behaviour with a clear warning in the log.
+	var stateStore *state.Store
+	if cfg.DisableDurableState {
+		log.WithField("component", "main").Warn("durable_state=disabled fallback=memory: dedupe/rate state lost on restart")
+	} else {
+		statePath := filepath.Join(cfg.StateDir, "state.db")
+		stateStore, err = state.Open(state.Config{Path: statePath})
+		if err != nil {
+			log.WithField("component", "main").WithError(err).Fatal("Failed to open durable state store")
+		}
+		log.WithFields(log.Fields{"component": "main", "state_path": statePath}).Info("Durable state store ready")
+	}
+
+	// Resolve audit hash salt (env > state.db-persisted > generate+persist).
+	auditSalt := strings.TrimSpace(cfg.AuditHashSalt)
+	auditSaltSource := "env"
+	if auditSalt == "" && stateStore != nil {
+		if v, ok, _ := stateStore.SettingsGet("audit_salt"); ok && v != "" {
+			auditSalt = v
+			auditSaltSource = "state"
+		} else {
+			generated, err := audit.GenerateSalt()
+			if err != nil {
+				log.WithField("component", "main").WithError(err).Fatal("Failed to generate audit salt")
+			}
+			if err := stateStore.SettingsPut("audit_salt", generated); err != nil {
+				log.WithField("component", "main").WithError(err).Fatal("Failed to persist audit salt")
+			}
+			auditSalt = generated
+			auditSaltSource = "generated"
+		}
+	}
+
+	// Open structured audit writer.
+	auditWriter, err := audit.New(audit.RotatingConfig{
+		Dir:            cfg.AuditDir,
+		MaxSizeBytes:   int64(cfg.AuditRotateSizeMB) * 1024 * 1024,
+		RetainDuration: time.Duration(cfg.AuditRetainDays) * 24 * time.Hour,
+		DisableWriter:  cfg.DisableAudit,
+	})
+	if err != nil {
+		log.WithField("component", "main").WithError(err).Fatal("Failed to open audit writer")
+	}
+	log.WithFields(log.Fields{
+		"component":         "main",
+		"audit_dir":         cfg.AuditDir,
+		"audit_disabled":    cfg.DisableAudit,
+		"audit_salt_source": auditSaltSource,
+	}).Info("Audit writer ready")
+
 	// Create API client.
 	apiClient := client.NewAgentForgeClient(cfg.APIBase, cfg.ProjectID, cfg.APIKey).WithSource(provider.Source()).WithBridgeContext(bridgeID, nil)
 
@@ -272,14 +418,41 @@ func main() {
 		}
 	}))
 
-	// Configure rate limiter: 20 commands per minute per user (configurable via env).
-	rateLimitRate := 20
-	if v := os.Getenv("RATE_LIMIT_RATE"); v != "" {
-		if n, err := fmt.Sscanf(v, "%d", &rateLimitRate); n == 0 || err != nil {
-			rateLimitRate = 20
+	// Configure rate limiter. Operators override the default policy set
+	// via IM_RATE_POLICY (JSON array); otherwise DefaultPolicies() applies.
+	var policies []core.RateLimitPolicy
+	if raw := os.Getenv("IM_RATE_POLICY"); strings.TrimSpace(raw) != "" {
+		parsed, err := core.ParsePolicies(raw)
+		if err != nil {
+			log.WithField("component", "main").WithError(err).Fatal("Invalid IM_RATE_POLICY")
+		}
+		policies = parsed
+	}
+	// Back-compat: if the legacy RATE_LIMIT_RATE is set, treat it as an
+	// override for the session-default policy.
+	if v := os.Getenv("RATE_LIMIT_RATE"); v != "" && len(policies) == 0 {
+		n, err := strconv.Atoi(strings.TrimSpace(v))
+		if err == nil && n > 0 {
+			policies = []core.RateLimitPolicy{{
+				ID:         "session-default",
+				Dimensions: []core.RateDimension{core.DimChat, core.DimUser},
+				Rate:       n,
+				Window:     time.Minute,
+			}}
 		}
 	}
-	engine.SetRateLimiter(core.NewRateLimiter(rateLimitRate, time.Minute))
+	rateLimiter := core.NewRateLimiter(policies)
+	if stateStore != nil {
+		rateLimiter.SetStore(stateStore)
+	}
+	engine.SetRateLimiter(rateLimiter)
+	engine.SetBridgeID(bridgeID)
+
+	// Configure egress sanitization mode.
+	core.SetDefaultSanitizeMode(core.ParseSanitizeMode(envOrDefault("IM_SANITIZE_EGRESS", "strict")))
+
+	// Command allowlist gate (coarse-grained operator kill-switch).
+	engine.SetCommandAllowlist(core.NewCommandAllowlist(os.Getenv("IM_COMMAND_ALLOWLIST")))
 
 	registerCommandHandlers(engine, apiClient, bridgeID)
 
@@ -291,6 +464,12 @@ func main() {
 	// Start notification receiver in background.
 	notifyServer := notify.NewReceiverWithMetadata(platform, provider.Metadata(), cfg.NotifyPort)
 	notifyServer.SetSharedSecret(cfg.ControlSharedSecret)
+	notifyServer.SetSignatureSkew(cfg.SignatureSkew)
+	notifyServer.SetBridgeID(bridgeID)
+	notifyServer.SetAuditWriter(auditWriter, auditSalt)
+	if stateStore != nil {
+		notifyServer.SetDedupeStore(stateStore)
+	}
 	relay := &backendActionRelay{
 		client:   apiClient,
 		bridgeID: bridgeID,
@@ -321,15 +500,62 @@ func main() {
 		"test_port":   cfg.TestPort,
 	}).Info("IM Bridge started successfully")
 
+	// Hot-reload handler: SIGHUP reloads env-driven values and asks the
+	// active provider to reconcile in-place. Providers that cannot honor
+	// hot reload log `manual_restart_required`.
+	hup := make(chan os.Signal, 1)
+	installHotReloadSignal(hup)
+	go func() {
+		for range hup {
+			newCfg := loadConfig()
+			core.SetDefaultSanitizeMode(core.ParseSanitizeMode(envOrDefault("IM_SANITIZE_EGRESS", "strict")))
+			engine.SetCommandAllowlist(core.NewCommandAllowlist(os.Getenv("IM_COMMAND_ALLOWLIST")))
+			notifyServer.SetSignatureSkew(newCfg.SignatureSkew)
+
+			creds := collectProviderCredentials(newCfg)
+			if reloader, ok := platform.(core.HotReloader); ok {
+				result := reloader.Reconcile(context.Background(), core.ReconcileConfig{Credentials: creds})
+				fields := log.Fields{
+					"component": "main",
+					"applied":   result.Applied,
+					"deferred":  result.Deferred,
+				}
+				if len(result.Errors) > 0 {
+					errStrings := make([]string, 0, len(result.Errors))
+					for _, e := range result.Errors {
+						errStrings = append(errStrings, e.Error())
+					}
+					fields["errors"] = errStrings
+					log.WithFields(fields).Warn("SIGHUP reconcile reported errors")
+				} else {
+					log.WithFields(fields).Info("SIGHUP reconcile complete")
+				}
+			} else {
+				log.WithFields(log.Fields{
+					"component": "main",
+					"platform":  core.NormalizePlatformName(platform.Name()),
+				}).Warn("SIGHUP ignored: manual_restart_required")
+			}
+		}
+	}()
+
 	// Wait for shutdown signal.
 	sig := make(chan os.Signal, 1)
 	signal.Notify(sig, syscall.SIGINT, syscall.SIGTERM)
 	<-sig
 
 	log.WithField("component", "main").Info("Shutting down...")
+	signal.Stop(hup)
+	close(hup)
 	_ = engine.Stop()
 	_ = runtimeControl.Stop(context.Background())
 	_ = notifyServer.Stop()
+	if stateStore != nil {
+		_ = stateStore.Close()
+	}
+	if auditWriter != nil {
+		_ = auditWriter.Close()
+	}
 	log.WithField("component", "main").Info("Goodbye")
 }
 

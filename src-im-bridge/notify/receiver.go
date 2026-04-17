@@ -9,13 +9,26 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"strconv"
+	"time"
 
 	log "github.com/sirupsen/logrus"
 	"strings"
 	"sync"
 
+	"github.com/agentforge/im-bridge/audit"
 	"github.com/agentforge/im-bridge/core"
 )
+
+// DefaultSignatureSkew is the fallback window for timestamp skew checks
+// when the bridge operator hasn't configured IM_SIGNATURE_SKEW_SECONDS.
+const DefaultSignatureSkew = 5 * time.Minute
+
+// DedupeStore is the subset of the durable state API the receiver needs
+// for idempotency. core/state.Store satisfies this interface.
+type DedupeStore interface {
+	Seen(id, surface string, ttl time.Duration) (bool, error)
+}
 
 // Notification is the payload sent from the Go backend.
 type Notification struct {
@@ -45,7 +58,13 @@ type Receiver struct {
 	actionHandler ActionHandler
 	sharedSecret  string
 	mu            sync.Mutex
-	processed     map[string]struct{}
+	processed     map[string]struct{} // L1 fallback when no DedupeStore is wired; authoritative is the store.
+	dedupe        DedupeStore
+	skew          time.Duration
+	now           func() time.Time
+	audit         audit.Writer
+	auditSalt     string
+	bridgeID      string
 }
 
 type callbackHTTPProvider interface {
@@ -72,7 +91,87 @@ func NewReceiverWithMetadata(platform core.Platform, metadata core.PlatformMetad
 		metadata:  metadata,
 		port:      port,
 		processed: make(map[string]struct{}),
+		skew:      DefaultSignatureSkew,
+		now:       time.Now,
 	}
+}
+
+// SetDedupeStore wires a durable dedupe backend. When set, the in-memory
+// processed map is bypassed and the store is the source of truth.
+func (r *Receiver) SetDedupeStore(store DedupeStore) {
+	r.dedupe = store
+}
+
+// SetSignatureSkew configures the timestamp window around
+// X-AgentForge-Delivery-Timestamp. Values <= 0 fall back to DefaultSignatureSkew.
+func (r *Receiver) SetSignatureSkew(skew time.Duration) {
+	if skew <= 0 {
+		skew = DefaultSignatureSkew
+	}
+	r.skew = skew
+}
+
+// setNow lets tests inject a deterministic clock.
+func (r *Receiver) setNow(fn func() time.Time) { r.now = fn }
+
+// SetAuditWriter wires a structured audit log writer. Pass nil (or omit
+// this setter) to disable audit emission entirely.
+func (r *Receiver) SetAuditWriter(writer audit.Writer, salt string) {
+	r.audit = writer
+	r.auditSalt = salt
+}
+
+// SetBridgeID attaches the stable bridge_id emitted in audit events.
+func (r *Receiver) SetBridgeID(id string) { r.bridgeID = strings.TrimSpace(id) }
+
+func (r *Receiver) emitAudit(ev audit.Event) {
+	if r.audit == nil {
+		return
+	}
+	if ev.V == 0 {
+		ev.V = audit.SchemaVersion
+	}
+	if ev.Ts.IsZero() {
+		ev.Ts = r.now().UTC()
+	}
+	if ev.Platform == "" {
+		ev.Platform = r.metadata.Source
+	}
+	if ev.BridgeID == "" {
+		ev.BridgeID = r.bridgeID
+	}
+	if err := r.audit.Emit(ev); err != nil {
+		log.WithField("component", "notify").WithError(err).Warn("audit emit failed")
+	}
+}
+
+func (r *Receiver) emitDelivered(surface, deliveryID, action, chatID, userID string, receipt core.DeliveryReceipt, start time.Time) {
+	r.emitAudit(audit.Event{
+		Direction:      audit.DirectionEgress,
+		Surface:        surface,
+		DeliveryID:     deliveryID,
+		Action:         action,
+		Status:         audit.StatusDelivered,
+		DeliveryMethod: string(receipt.Method),
+		FallbackReason: receipt.FallbackReason,
+		ChatIDHash:     audit.HashID(r.auditSalt, chatID),
+		UserIDHash:     audit.HashID(r.auditSalt, userID),
+		LatencyMs:      r.now().Sub(start).Milliseconds(),
+	})
+}
+
+func (r *Receiver) emitFailed(surface, deliveryID, action, chatID, userID, reason string, start time.Time) {
+	r.emitAudit(audit.Event{
+		Direction:      audit.DirectionEgress,
+		Surface:        surface,
+		DeliveryID:     deliveryID,
+		Action:         action,
+		Status:         audit.StatusFailed,
+		FallbackReason: reason,
+		ChatIDHash:     audit.HashID(r.auditSalt, chatID),
+		UserIDHash:     audit.HashID(r.auditSalt, userID),
+		LatencyMs:      r.now().Sub(start).Milliseconds(),
+	})
 }
 
 // SetActionHandler sets the handler for card button actions.
@@ -152,6 +251,8 @@ func (r *Receiver) Stop() error {
 }
 
 func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
+	start := r.now()
+	deliveryID := strings.TrimSpace(req.Header.Get("X-AgentForge-Delivery-Id"))
 	bodyBytes, ok := r.verifyAndRememberDelivery(w, req, "/im/notify")
 	if !ok {
 		return
@@ -192,9 +293,11 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 		if err != nil {
 			log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send typed payload")
 			http.Error(w, err.Error(), http.StatusInternalServerError)
+			r.emitFailed("/im/notify", deliveryID, n.Type, chatID, n.TargetIMUserID, err.Error(), start)
 			return
 		}
 		writeDeliveryReceipt(w, receipt)
+		r.emitDelivered("/im/notify", deliveryID, n.Type, chatID, n.TargetIMUserID, receipt, start)
 		return
 	}
 
@@ -204,10 +307,12 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 			if _, err := core.DeliverCard(ctx, r.platform, r.metadata, n.ReplyTarget, chatID, n.Card); err != nil {
 				log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send card")
 				http.Error(w, err.Error(), http.StatusInternalServerError)
+				r.emitFailed("/im/notify", deliveryID, n.Type, chatID, n.TargetIMUserID, err.Error(), start)
 				return
 			}
 			w.Header().Set("Content-Type", "application/json")
 			json.NewEncoder(w).Encode(map[string]string{"status": "sent", "type": "card"})
+			r.emitDelivered("/im/notify", deliveryID, n.Type, chatID, n.TargetIMUserID, core.DeliveryReceipt{Type: "card"}, start)
 			return
 		}
 	}
@@ -216,11 +321,13 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	if _, err := core.DeliverText(ctx, r.platform, r.metadata, n.ReplyTarget, chatID, n.Content); err != nil {
 		log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send message")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		r.emitFailed("/im/notify", deliveryID, n.Type, chatID, n.TargetIMUserID, err.Error(), start)
 		return
 	}
 
 	w.Header().Set("Content-Type", "application/json")
 	json.NewEncoder(w).Encode(map[string]string{"status": "sent", "type": "text"})
+	r.emitDelivered("/im/notify", deliveryID, n.Type, chatID, n.TargetIMUserID, core.DeliveryReceipt{Type: "text"}, start)
 }
 
 // SendRequest is the payload for the /im/send endpoint.
@@ -236,6 +343,8 @@ type SendRequest struct {
 }
 
 func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
+	start := r.now()
+	deliveryID := strings.TrimSpace(req.Header.Get("X-AgentForge-Delivery-Id"))
 	bodyBytes, ok := r.verifyAndRememberDelivery(w, req, "/im/send")
 	if !ok {
 		return
@@ -270,13 +379,37 @@ func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send message")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		r.emitFailed("/im/send", deliveryID, "send", chatID, "", err.Error(), start)
 		return
 	}
 
 	writeDeliveryReceipt(w, receipt)
+	r.emitDelivered("/im/send", deliveryID, "send", chatID, "", receipt, start)
+}
+
+// rejectReason enumerates the classified reasons the receiver may refuse a
+// signed compatibility delivery. These values are stable and appear in the
+// error response body so the backend can branch retry policy on them.
+type rejectReason string
+
+const (
+	reasonInvalidSignature     rejectReason = "invalid_signature"
+	reasonTimestampOutOfWindow rejectReason = "timestamp_out_of_window"
+	reasonDuplicateDelivery    rejectReason = "duplicate_delivery"
+	reasonMissingHeaders       rejectReason = "missing_signed_delivery_headers"
+)
+
+func writeRejection(w http.ResponseWriter, status int, reason rejectReason, retryable bool) {
+	w.Header().Set("Content-Type", "application/json")
+	w.WriteHeader(status)
+	_ = json.NewEncoder(w).Encode(map[string]any{
+		"error":     string(reason),
+		"retryable": retryable,
+	})
 }
 
 func (r *Receiver) verifyAndRememberDelivery(w http.ResponseWriter, req *http.Request, path string) ([]byte, bool) {
+	start := r.now()
 	bodyBytes, err := io.ReadAll(req.Body)
 	if err != nil {
 		http.Error(w, fmt.Sprintf("read request body: %v", err), http.StatusBadRequest)
@@ -285,31 +418,132 @@ func (r *Receiver) verifyAndRememberDelivery(w http.ResponseWriter, req *http.Re
 	deliveryID := strings.TrimSpace(req.Header.Get("X-AgentForge-Delivery-Id"))
 	timestamp := strings.TrimSpace(req.Header.Get("X-AgentForge-Delivery-Timestamp"))
 	signature := strings.TrimSpace(req.Header.Get("X-AgentForge-Signature"))
+	signatureSource := "unsigned"
+	if r.sharedSecret != "" {
+		signatureSource = "shared_secret"
+	}
 
+	rejectAudit := func(reason rejectReason) {
+		r.emitAudit(audit.Event{
+			Direction:       audit.DirectionIngress,
+			Surface:         path,
+			DeliveryID:      deliveryID,
+			Status:          audit.StatusRejected,
+			LatencyMs:       r.now().Sub(start).Milliseconds(),
+			SignatureSource: signatureSource,
+			Metadata:        map[string]string{"reason": string(reason)},
+		})
+	}
+
+	// 1. HMAC verification (when shared secret configured).
 	if r.sharedSecret != "" {
 		if deliveryID == "" || timestamp == "" || signature == "" {
-			http.Error(w, "missing signed delivery headers", http.StatusUnauthorized)
+			writeRejection(w, http.StatusUnauthorized, reasonMissingHeaders, false)
+			rejectAudit(reasonMissingHeaders)
 			return nil, false
 		}
 		if !verifyCompatibilitySignature(r.sharedSecret, req.Method, path, deliveryID, timestamp, bodyBytes, signature) {
-			http.Error(w, "invalid delivery signature", http.StatusUnauthorized)
+			writeRejection(w, http.StatusUnauthorized, reasonInvalidSignature, false)
+			rejectAudit(reasonInvalidSignature)
 			return nil, false
+		}
+
+		// 2. Timestamp skew window. A captured-but-valid signature is only
+		// honored within the configured window; retrying with the same
+		// timestamp outside the window cannot succeed, hence retryable=false.
+		if r.skew > 0 {
+			ts, ok := parseDeliveryTimestamp(timestamp)
+			if !ok {
+				writeRejection(w, http.StatusUnauthorized, reasonInvalidSignature, false)
+				rejectAudit(reasonInvalidSignature)
+				return nil, false
+			}
+			delta := r.now().Sub(ts)
+			if delta < 0 {
+				delta = -delta
+			}
+			if delta > r.skew {
+				writeRejection(w, http.StatusRequestTimeout, reasonTimestampOutOfWindow, false)
+				rejectAudit(reasonTimestampOutOfWindow)
+				return nil, false
+			}
 		}
 	}
 
+	// 3. Idempotency (durable store preferred, in-memory fallback).
 	if deliveryID != "" {
-		r.mu.Lock()
-		if _, exists := r.processed[deliveryID]; exists {
+		if r.dedupe != nil {
+			ttl := r.skew + time.Minute // align with design: skew + 60s grace
+			if ttl <= 0 {
+				ttl = DefaultSignatureSkew + time.Minute
+			}
+			duplicate, err := r.dedupe.Seen(deliveryID, path, ttl)
+			if err != nil {
+				log.WithField("component", "notify").WithError(err).Error("durable dedupe failed")
+				http.Error(w, "dedupe store unavailable", http.StatusServiceUnavailable)
+				return nil, false
+			}
+			if duplicate {
+				w.Header().Set("Content-Type", "application/json")
+				w.WriteHeader(http.StatusConflict)
+				_ = json.NewEncoder(w).Encode(map[string]any{
+					"status":    "duplicate",
+					"error":     string(reasonDuplicateDelivery),
+					"retryable": false,
+				})
+				r.emitAudit(audit.Event{
+					Direction:       audit.DirectionIngress,
+					Surface:         path,
+					DeliveryID:      deliveryID,
+					Status:          audit.StatusDuplicate,
+					LatencyMs:       r.now().Sub(start).Milliseconds(),
+					SignatureSource: signatureSource,
+				})
+				return nil, false
+			}
+		} else {
+			r.mu.Lock()
+			if _, exists := r.processed[deliveryID]; exists {
+				r.mu.Unlock()
+				w.Header().Set("Content-Type", "application/json")
+				_ = json.NewEncoder(w).Encode(map[string]string{"status": "duplicate"})
+				r.emitAudit(audit.Event{
+					Direction:       audit.DirectionIngress,
+					Surface:         path,
+					DeliveryID:      deliveryID,
+					Status:          audit.StatusDuplicate,
+					LatencyMs:       r.now().Sub(start).Milliseconds(),
+					SignatureSource: signatureSource,
+				})
+				return nil, false
+			}
+			r.processed[deliveryID] = struct{}{}
 			r.mu.Unlock()
-			w.Header().Set("Content-Type", "application/json")
-			_ = json.NewEncoder(w).Encode(map[string]string{"status": "duplicate"})
-			return nil, false
 		}
-		r.processed[deliveryID] = struct{}{}
-		r.mu.Unlock()
 	}
 
 	return bodyBytes, true
+}
+
+// parseDeliveryTimestamp accepts either a Unix-seconds integer or an
+// RFC3339 string and returns the parsed time.Time. Both forms are in use:
+// Unix seconds is the canonical form for new signers, RFC3339 is the form
+// the existing backend emitter and tests still use.
+func parseDeliveryTimestamp(raw string) (time.Time, bool) {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		return time.Time{}, false
+	}
+	if n, err := strconv.ParseInt(raw, 10, 64); err == nil {
+		return time.Unix(n, 0), true
+	}
+	if t, err := time.Parse(time.RFC3339, raw); err == nil {
+		return t, true
+	}
+	if t, err := time.Parse(time.RFC3339Nano, raw); err == nil {
+		return t, true
+	}
+	return time.Time{}, false
 }
 
 func verifyCompatibilitySignature(secret, method, path, deliveryID, timestamp string, body []byte, signature string) bool {
@@ -347,6 +581,7 @@ type ActionResponse struct {
 }
 
 func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
+	start := r.now()
 	var a ActionRequest
 	if err := json.NewDecoder(req.Body).Decode(&a); err != nil {
 		http.Error(w, fmt.Sprintf("invalid JSON: %v", err), http.StatusBadRequest)
@@ -367,6 +602,16 @@ func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
 	if err != nil {
 		log.WithFields(log.Fields{"component": "notify", "action": a.Action, "entity_id": a.EntityID}).WithError(err).Error("Action failed")
 		http.Error(w, err.Error(), http.StatusInternalServerError)
+		r.emitAudit(audit.Event{
+			Direction:  audit.DirectionAction,
+			Surface:    "/im/action",
+			Action:     a.Action,
+			Status:     audit.StatusFailed,
+			ChatIDHash: audit.HashID(r.auditSalt, a.ChatID),
+			UserIDHash: audit.HashID(r.auditSalt, a.UserID),
+			LatencyMs:  r.now().Sub(start).Milliseconds(),
+			Metadata:   map[string]string{"entity_id": a.EntityID, "error": err.Error()},
+		})
 		return
 	}
 	if result == nil {
@@ -401,6 +646,16 @@ func (r *Receiver) handleAction(w http.ResponseWriter, req *http.Request) {
 		result.Metadata = actionMetadata
 	}
 
+	r.emitAudit(audit.Event{
+		Direction:  audit.DirectionAction,
+		Surface:    "/im/action",
+		Action:     a.Action,
+		Status:     audit.StatusDelivered,
+		ChatIDHash: audit.HashID(r.auditSalt, a.ChatID),
+		UserIDHash: audit.HashID(r.auditSalt, a.UserID),
+		LatencyMs:  r.now().Sub(start).Milliseconds(),
+		Metadata:   map[string]string{"entity_id": a.EntityID},
+	})
 	w.Header().Set("Content-Type", "application/json")
 	_ = json.NewEncoder(w).Encode(map[string]any{
 		"status":      "ok",

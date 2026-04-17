@@ -141,8 +141,13 @@ func TestEngine_SetRateLimiterBlocksRepeatedMessagesUsingDerivedKey(t *testing.T
 		_ = plat.Reply(context.Background(), msg.ReplyCtx, "pong")
 	})
 
-	rl := NewRateLimiter(1, time.Hour)
-	rl.now = func() time.Time { return time.Unix(1, 0) }
+	rl := NewRateLimiter([]RateLimitPolicy{{
+		ID:         "test-session",
+		Dimensions: []RateDimension{DimChat, DimUser},
+		Rate:       1,
+		Window:     time.Hour,
+	}})
+	rl.setNow(func() time.Time { return time.Unix(1, 0) })
 	e.SetRateLimiter(rl)
 
 	msg := &Message{
@@ -162,9 +167,6 @@ func TestEngine_SetRateLimiterBlocksRepeatedMessagesUsingDerivedKey(t *testing.T
 	}
 	if p.replies[1] == "pong" || !strings.Contains(p.replies[1], "频繁") {
 		t.Fatalf("second reply = %q", p.replies[1])
-	}
-	if _, exists := rl.buckets["slack:chat-1:user-1"]; !exists {
-		t.Fatalf("rate limiter buckets = %+v", rl.buckets)
 	}
 }
 

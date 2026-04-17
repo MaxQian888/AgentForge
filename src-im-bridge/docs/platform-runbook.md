@@ -208,3 +208,45 @@ Steps:
 9. **Reaction** — react with 👍 on a task notification message. Expect row in `im_reaction_events` with `emoji="THUMBSUP"` and `event_type="created"`. Remove the reaction — expect row with `event_type="deleted"`.
 
 Each step must produce a deterministic toast or status — none should show "Unknown action".
+
+## Security & ops troubleshooting
+
+### Timestamp window rejections (`408 timestamp_out_of_window`)
+
+- Confirm NTP is healthy on the bridge host: a 10+ minute clock drift immediately triggers rejections even for freshly signed requests.
+- Check the control-plane emitter's timezone: timestamps must be UTC and valid RFC3339 or Unix seconds.
+- If a planned maintenance window produced a burst of `408`s across many deliveries, widen `IM_SIGNATURE_SKEW_SECONDS` temporarily and investigate why the emitter's clock drifted.
+
+### Duplicate delivery spam (`409 duplicate_delivery`)
+
+- Expected behavior for retries; verify the backend's retry policy does not loop on 409s (they are `retryable=false`).
+- If a restart triggered `409`s on deliveries the backend thought were new, the durable state store is working as designed — the retry found the prior success in SQLite.
+
+### Rate limit 429-equivalent responses
+
+- The bridge reply text includes the policy id (`policy=write-action`). Map that to the JSON override in `IM_RATE_POLICY` if you need to widen the gate.
+- `audit.jsonl` carries `status=rate_limited` with `metadata.rate_policy` — the quickest way to spot noisy actors.
+
+### Audit file ingestion
+
+- The writer is append-only JSONL; existing log-shipper pipelines (Fluent Bit / Filebeat / Vector) that tail-follow JSONL files work without config beyond path.
+- Rotation produces `audit.YYYY-MM-DD-HHMM.jsonl`; ensure your shipper picks up the rotated files or run the cleanup cadence high enough to avoid data loss during backpressure.
+
+### Hot reload (SIGHUP)
+
+- `kill -HUP <pid>` triggers a reload. Non-reloadable providers log `manual_restart_required`; check the log for the exact field names deferred.
+- Windows installations do not receive SIGHUP; rotate credentials by restarting the service.
+
+### Rolling back the hardening
+
+Each capability has an explicit disable switch; prefer disabling the narrowest offender first:
+
+| Capability | Disable |
+|------------|---------|
+| Durable state store | `IM_DISABLE_DURABLE_STATE=true` |
+| Skew window | `IM_SIGNATURE_SKEW_SECONDS=86400` (24h, effectively off) |
+| Audit log | `IM_DISABLE_AUDIT=true` |
+| Egress sanitizer | `IM_SANITIZE_EGRESS=off` |
+| Command allowlist | Unset `IM_COMMAND_ALLOWLIST` |
+| Rate policies | Unset `IM_RATE_POLICY` to return to defaults |
+

@@ -240,6 +240,95 @@ China-platform registration metadata now also publishes:
 - For DingTalk, verify ActionCard send where supported, and treat mutable-update requests beyond the current `native_send_with_fallback` tier as explicit fallback rather than fake parity.
 - To roll back, first disable the control-plane WebSocket or clear `IM_CONTROL_SHARED_SECRET` if compatibility HTTP fallback is needed, then switch the deployment back to the previous platform or move the current platform to `IM_TRANSPORT_MODE=stub` for local diagnosis.
 
+## Security & Ops Hardening
+
+The bridge runs a defense-in-depth stack for the security-sensitive surfaces exposed to the backend control plane and local operators.
+
+### Durable state store (SQLite)
+
+- Location: `${IM_BRIDGE_STATE_DIR}/state.db` (default `.agentforge/state.db`).
+- Holds delivery dedupe, nonce history, rate-limit counters, and the `audit_salt` settings row.
+- WAL mode with `busy_timeout=5s`; a single writer serializes concurrent updates.
+- Background cleanup every 30s evicts expired rows; rate-limit retention defaults to 1h.
+- Set `IM_DISABLE_DURABLE_STATE=true` to force in-memory fallback — **not recommended** in production; the bridge logs a warning on startup.
+
+### Signed delivery contract
+
+`POST /im/send`, `POST /im/notify`, and control-plane replayed deliveries all carry:
+
+- `X-AgentForge-Delivery-Id`
+- `X-AgentForge-Delivery-Timestamp` (RFC3339 or Unix seconds)
+- `X-AgentForge-Signature` (HMAC-SHA256 over `method | path | delivery_id | timestamp | body`)
+
+When `IM_CONTROL_SHARED_SECRET` is configured the receiver enforces three layered checks, each with a classified error:
+
+| Failure | Status | `error` body | `retryable` |
+|---------|--------|--------------|-------------|
+| Missing headers | 401 | `missing_signed_delivery_headers` | false |
+| Invalid HMAC | 401 | `invalid_signature` | false |
+| Outside skew window | 408 | `timestamp_out_of_window` | false |
+| Duplicate delivery id | 409 | `duplicate_delivery` | false |
+
+`IM_SIGNATURE_SKEW_SECONDS` (default `300`) bounds how old/new a signed timestamp may be. Dedupe TTL is `skew + 60s grace`, so replays outside the window are caught by the timestamp check rather than the dedupe store.
+
+### Structured audit log
+
+- Append-only JSONL at `${IM_BRIDGE_AUDIT_DIR}/audit.jsonl`.
+- Rotation: `IM_AUDIT_ROTATE_SIZE_MB` (default 128 MB) or daily, whichever triggers first.
+- Retention: `IM_AUDIT_RETAIN_DAYS` (default 14). The current `audit.jsonl` is never pruned.
+- `chatId` / `userId` are HMAC-SHA256-hashed with `IM_AUDIT_HASH_SALT`. If unset, the bridge generates a random salt on first boot and persists it to `state.db.settings(key='audit_salt')` so later runs stay consistent.
+- Set `IM_DISABLE_AUDIT=true` to disable audit locally; the log still records the disable decision on startup.
+
+Event schema (`v=1`) includes `direction`, `surface`, `deliveryId`, `platform`, `bridgeId`, `chatIdHash`, `userIdHash`, `action`, `status`, `deliveryMethod`, `fallbackReason`, `latencyMs`, `signatureSource`, and `metadata`.
+
+### Multi-dimensional rate limiting
+
+Rate limits are expressed as a list of policies; each policy names the dimensions it buckets on (`tenant` / `chat` / `user` / `command` / `action_class` / `bridge`), a rate, and a window. Policies are evaluated top-to-bottom; the first that rejects wins. The durable state store is authoritative when wired, so counters survive restart.
+
+Default policy set (override with `IM_RATE_POLICY` JSON):
+
+| id | dimensions | rate / window | purpose |
+|----|-----------|----------------|---------|
+| `session-default` | chat + user | 20/min | legacy session envelope |
+| `write-action` | user + action_class=write | 10/min | per-user writes (/task create, /agent spawn) |
+| `destructive-action` | user + action_class=destructive | 3/min | /tools install/uninstall/restart |
+| `per-chat` | chat | 60/min | aggregate chat ceiling |
+
+`IM_RATE_POLICY` example:
+
+```json
+[{"id":"per-user","dimensions":["user"],"rate":30,"window":"1m"}]
+```
+
+`ActionClassForCommand` maps slash commands to read/write/destructive buckets. Unknown commands default to `read`.
+
+### Egress sanitization
+
+`IM_SANITIZE_EGRESS=strict|permissive|off` (default `strict`) controls how outbound text is rewritten before any provider call:
+
+- Broadcast mentions (`@everyone`, `@here`, `@all`, Slack `<!channel>`, Telegram `@channel`) are replaced with `[广播已屏蔽]` in strict mode.
+- Zero-width characters (`U+200B/200C/200D/FEFF`) and non-newline control bytes are stripped in permissive + strict modes.
+- Oversized text is segmented when the provider declares `SupportsSegments=true`, otherwise truncated with `…[已截断]`.
+- Warnings are appended to the reply plan's `FallbackReason` and captured in the audit event.
+
+### Command allowlist
+
+`IM_COMMAND_ALLOWLIST` is a coarse-grained kill-switch that short-circuits unpermitted commands without round-tripping to the backend. Grammar (comma-separated):
+
+- `<platform-or-*>:<command-or-*>` — allow
+- `!<platform>:<command>` — deny (beats allow)
+- empty entry or empty env — disabled, admits everything
+
+Example: `feishu:/task,feishu:/help,slack:/*,!slack:/tools`
+
+The allowlist is intentionally coarse; it does not replace backend RBAC.
+
+### Hot reload (SIGHUP, Unix only)
+
+`kill -HUP <pid>` causes the bridge to reload its environment and ask the active platform to reconcile credentials in place. Providers that implement `core.HotReloader` can refresh tokens / reconnect without process restart. Providers that don't implement it log `manual_restart_required`; at the time of writing per-provider reconcile implementations are not yet landed, so plan on a rolling-restart for credential rotation.
+
+Windows installations have SIGHUP unavailable; the bridge logs that hot reload is not wired and operators should use a service restart.
+
 ## Smoke Tests
 
 Local stub smoke fixtures are stored under [scripts/smoke](/d:/Project/AgentForge/src-im-bridge/scripts/smoke). Use [Invoke-StubSmoke.ps1](/d:/Project/AgentForge/src-im-bridge/scripts/smoke/Invoke-StubSmoke.ps1) with the matching platform fixture after starting the bridge in stub mode.
