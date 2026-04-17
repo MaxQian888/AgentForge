@@ -27,8 +27,8 @@ jest.mock("next-intl", () => ({
   },
 }));
 
-jest.mock("@/lib/stores/document-store", () => ({
-  useDocumentStore: () => storeState,
+jest.mock("@/lib/stores/knowledge-store", () => ({
+  useKnowledgeStore: () => storeState,
 }));
 
 jest.mock("@/components/shared/error-banner", () => ({

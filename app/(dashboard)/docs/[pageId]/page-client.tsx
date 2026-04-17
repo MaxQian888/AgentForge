@@ -8,7 +8,7 @@ import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { createApiClient } from "@/lib/api-client";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
-import { flattenDocsTree, useDocsStore } from "@/lib/stores/docs-store";
+import { flattenKnowledgeTree, useKnowledgeStore } from "@/lib/stores/knowledge-store";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { buildDocsHref } from "@/lib/route-hrefs";
 import { DocsSidebarPanel } from "@/components/docs/docs-sidebar-panel";
@@ -22,6 +22,8 @@ import { TemplatePicker } from "@/components/docs/template-picker";
 import { VersionHistoryPanel } from "@/components/docs/version-history-panel";
 import { VersionViewer } from "@/components/docs/version-viewer";
 import { BacklinksPanel, type BacklinkItem } from "@/components/shared/backlinks-panel";
+import { MaterializedFromPill } from "@/components/knowledge/MaterializedFromPill";
+import { SourceUpdatedBanner } from "@/components/knowledge/SourceUpdatedBanner";
 import { useEntityLinkStore } from "@/lib/stores/entity-link-store";
 import { useTaskStore } from "@/lib/stores/task-store";
 
@@ -32,7 +34,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
   const {
     projectId,
     tree,
-    currentPage,
+    currentAsset,
     comments,
     versions,
     templates,
@@ -54,7 +56,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
     toggleFavorite,
     togglePinned,
     updatePage,
-  } = useDocsStore();
+  } = useKnowledgeStore();
   const [query, setQuery] = useState("");
   const [selectedVersionId, setSelectedVersionId] = useState<string | null>(null);
   const [pickerOpen, setPickerOpen] = useState(false);
@@ -63,7 +65,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
   const [preselectedBlockIds, setPreselectedBlockIds] = useState<string[]>([]);
   const [readonly, setReadonly] = useState(false);
   const entityLinks = useEntityLinkStore(
-    (state) => (currentPage ? state.linksByEntity[`wiki_page:${currentPage.id}`] ?? [] : []),
+    (state) => (currentAsset ? state.linksByEntity[`wiki_page:${currentAsset.id}`] ?? [] : []),
   );
   const fetchEntityLinks = useEntityLinkStore((state) => state.fetchLinks);
   const createEntityLink = useEntityLinkStore((state) => state.createLink);
@@ -105,19 +107,19 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
   }, [fetchPageWorkspace, fetchTasks, fetchTree, pageId, resolvePageContext, selectedProjectId, setProjectId]);
 
   useEffect(() => {
-    if (!(projectId ?? selectedProjectId) || !currentPage) {
+    if (!(projectId ?? selectedProjectId) || !currentAsset) {
       return;
     }
-    void fetchEntityLinks(projectId ?? selectedProjectId ?? "", "wiki_page", currentPage.id);
-  }, [currentPage, fetchEntityLinks, projectId, selectedProjectId]);
+    void fetchEntityLinks(projectId ?? selectedProjectId ?? "", "wiki_page", currentAsset.id);
+  }, [currentAsset, fetchEntityLinks, projectId, selectedProjectId]);
 
   const selectedVersion = useMemo(
     () => versions.find((version) => version.id === selectedVersionId) ?? versions[0] ?? null,
     [selectedVersionId, versions]
   );
-  const templateReadonly = currentPage?.isTemplate && currentPage.canEdit === false;
+  const templateReadonly = currentAsset?.kind === "template" && currentAsset.canEdit === false;
   const effectiveReadonly = readonly || Boolean(templateReadonly);
-  const displayContent = effectiveReadonly && selectedVersion ? selectedVersion.content : currentPage?.content ?? "[]";
+  const displayContent = effectiveReadonly && selectedVersion ? selectedVersion.contentJson ?? "[]" : currentAsset?.contentJson ?? "[]";
   const commentedBlockIds = useMemo(
     () =>
       comments
@@ -141,16 +143,16 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
         };
       });
   }, [entityLinks, tasks]);
-  const currentPageId = currentPage?.id ?? null;
+  const currentAssetId = currentAsset?.id ?? null;
   const backlinks = useMemo<BacklinkItem[]>(
     () =>
-      currentPageId
+      currentAssetId
         ? entityLinks
             .filter(
               (link) =>
                 link.linkType === "mention" &&
                 link.targetType === "wiki_page" &&
-                link.targetId === currentPageId,
+                link.targetId === currentAssetId,
             )
             .map((link) => ({
               linkId: link.id,
@@ -162,11 +164,11 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
                   : link.sourceId,
             }))
         : [],
-    [currentPageId, entityLinks, tasks],
+    [currentAssetId, entityLinks, tasks],
   );
   const availableBlocks = useMemo(() => {
     try {
-      const parsed = JSON.parse(currentPage?.content ?? "[]") as Array<Record<string, unknown>>;
+      const parsed = JSON.parse(currentAsset?.contentJson ?? "[]") as Array<Record<string, unknown>>;
       return parsed
         .map((block) => {
           const content = block.content;
@@ -191,7 +193,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
     } catch {
       return [];
     }
-  }, [currentPage]);
+  }, [currentAsset]);
   const blockTaskCounts = useMemo(() => {
     const counts = new Map<string, number>();
     for (const link of entityLinks) {
@@ -204,8 +206,8 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
   }, [entityLinks]);
   const templateDestinations = useMemo(
     () =>
-      flattenDocsTree(tree)
-        .filter((page) => !page.isTemplate)
+      flattenKnowledgeTree(tree)
+        .filter((page) => page.kind !== "template")
         .map((page) => ({
           id: page.id,
           title: page.title,
@@ -213,11 +215,11 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
     [tree],
   );
 
-  if (loading && !currentPage) {
+  if (loading && !currentAsset) {
     return <p className="text-sm text-muted-foreground">{t("pageDetail.loading")}</p>;
   }
 
-  if (!currentPage) {
+  if (!currentAsset) {
     return (
       <div className="flex flex-col gap-3">
         <h1 className="text-2xl font-bold">{t("pageDetail.notFound")}</h1>
@@ -234,7 +236,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
         query={query}
         onQueryChange={setQuery}
         tree={tree}
-        currentPageId={currentPage.id}
+        currentPageId={currentAsset.id}
         favorites={favorites}
         recentAccess={recentAccess}
         onMovePage={(movedPageId, parentId, sortOrder) =>
@@ -262,11 +264,11 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
       />
 
       <div className="flex flex-col gap-4">
-        {currentPage.isTemplate ? (
+        {currentAsset.kind === "template" ? (
           <div className="rounded-xl border border-border/60 bg-card/70 p-4">
             <div className="flex flex-wrap items-center gap-2">
               <Badge variant="secondary">
-                {currentPage.templateSource === "system"
+                {currentAsset.templateSource === "system"
                   ? t("templateMode.systemBadge")
                   : t("templateMode.customBadge")}
               </Badge>
@@ -280,13 +282,20 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           </div>
         ) : null}
 
+        {currentAsset.sourceUpdatedSinceMaterialize ? <SourceUpdatedBanner /> : null}
+
         <div className="flex flex-wrap items-center justify-between gap-3">
           <div>
-            <h1 className="text-3xl font-semibold">{currentPage.title}</h1>
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-3xl font-semibold">{currentAsset.title}</h1>
+              {currentAsset.materializedFromId ? (
+                <MaterializedFromPill sourceAssetId={currentAsset.materializedFromId} />
+              ) : null}
+            </div>
             <p className="text-sm text-muted-foreground">
-              {currentPage.path} · {t("pageDetail.lastUpdated")}{" "}
+              {currentAsset.path ?? ""} · {t("pageDetail.lastUpdated")}{" "}
               {new Date(
-                readonly && selectedVersion ? selectedVersion.createdAt : currentPage.updatedAt
+                readonly && selectedVersion ? selectedVersion.createdAt : currentAsset.updatedAt
               ).toLocaleString()}
             </p>
           </div>
@@ -304,7 +313,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
             <Button
               variant="outline"
               onClick={() =>
-                void navigator.clipboard.writeText(`${window.location.origin}${buildDocsHref(currentPage.id)}`)
+                void navigator.clipboard.writeText(`${window.location.origin}${buildDocsHref(currentAsset.id)}`)
               }
             >
               <Copy className="mr-1 size-4" />
@@ -319,27 +328,27 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           onSaveVersion={() =>
             void createVersion({
               projectId: projectId ?? selectedProjectId ?? "",
-              pageId: currentPage.id,
+              assetId: currentAsset.id,
               name: `Snapshot ${new Date().toLocaleTimeString()}`,
             })
           }
           onSaveTemplate={() =>
             void createTemplateFromPage({
               projectId: projectId ?? selectedProjectId ?? "",
-              pageId: currentPage.id,
-              name: currentPage.isTemplate ? `${currentPage.title} Copy` : `${currentPage.title} Template`,
-              category: currentPage.templateCategory || "custom",
+              pageId: currentAsset.id,
+              name: currentAsset.kind === "template" ? `${currentAsset.title} Copy` : `${currentAsset.title} Template`,
+              category: currentAsset.templateCategory || "custom",
             })
           }
           templateActionLabel={
-            currentPage.isTemplate ? t("editor.duplicateTemplate") : undefined
+            currentAsset.kind === "template" ? t("editor.duplicateTemplate") : undefined
           }
-          templateActionDisabled={currentPage.isTemplate ? false : effectiveReadonly}
+          templateActionDisabled={currentAsset.kind === "template" ? false : effectiveReadonly}
           onShareVersion={() => {
             const versionId = selectedVersion?.id;
             if (!versionId) return;
             void navigator.clipboard.writeText(
-              `${window.location.origin}${buildDocsHref(currentPage.id)}?version=${versionId}&readonly=1`
+              `${window.location.origin}${buildDocsHref(currentAsset.id)}?version=${versionId}&readonly=1`
             );
           }}
         />
@@ -358,13 +367,13 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
               ? undefined
               : void updatePage({
                   projectId: projectId ?? selectedProjectId ?? "",
-                  pageId: currentPage.id,
-                  title: currentPage.title,
+                  pageId: currentAsset.id,
+                  title: currentAsset.title,
                   content,
                   contentText,
-                  expectedUpdatedAt: currentPage.updatedAt,
-                  templateCategory: currentPage.isTemplate
-                    ? currentPage.templateCategory || "custom"
+                  expectedUpdatedAt: currentAsset.updatedAt,
+                  templateCategory: currentAsset.kind === "template"
+                    ? currentAsset.templateCategory || "custom"
                     : undefined,
                 })
           }
@@ -398,7 +407,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           tasks={relatedTasks}
           onAddTask={() => setTaskPickerOpen(true)}
           onRemoveTask={(linkId) =>
-            void deleteEntityLink(projectId ?? selectedProjectId ?? "", "wiki_page", currentPage.id, linkId)
+            void deleteEntityLink(projectId ?? selectedProjectId ?? "", "wiki_page", currentAsset.id, linkId)
           }
         />
         <BacklinksPanel items={backlinks} />
@@ -410,13 +419,13 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           onRestore={(versionId) =>
             void restoreVersion({
               projectId: projectId ?? selectedProjectId ?? "",
-              pageId: currentPage.id,
+              assetId: currentAsset.id,
               versionId,
             })
           }
           onShare={(versionId) =>
             void navigator.clipboard.writeText(
-              `${window.location.origin}${buildDocsHref(currentPage.id)}?version=${versionId}&readonly=1`
+              `${window.location.origin}${buildDocsHref(currentAsset.id)}?version=${versionId}&readonly=1`
             )
           }
         />
@@ -427,7 +436,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           onCreateComment={(body) =>
             createComment({
               projectId: projectId ?? selectedProjectId ?? "",
-              pageId: currentPage.id,
+              assetId: currentAsset.id,
               body,
               mentions: "[]",
             })
@@ -435,7 +444,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           onResolve={(commentId) =>
             void setCommentResolved({
               projectId: projectId ?? selectedProjectId ?? "",
-              pageId: currentPage.id,
+              assetId: currentAsset.id,
               commentId,
               resolved: true,
             })
@@ -443,14 +452,14 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           onReopen={(commentId) =>
             void setCommentResolved({
               projectId: projectId ?? selectedProjectId ?? "",
-              pageId: currentPage.id,
+              assetId: currentAsset.id,
               commentId,
               resolved: false,
             })
           }
           onCopyLink={(commentId) =>
             void navigator.clipboard.writeText(
-              `${window.location.origin}${buildDocsHref(currentPage.id)}#comment-${commentId}`
+              `${window.location.origin}${buildDocsHref(currentAsset.id)}#comment-${commentId}`
             )
           }
           mentionSuggestions={["alice", "bob", "carol"]}
@@ -462,7 +471,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
         onOpenChange={setPickerOpen}
         templates={templates}
         destinations={templateDestinations}
-        initialTemplateId={currentPage.isTemplate ? currentPage.id : undefined}
+        initialTemplateId={currentAsset.kind === "template" ? currentAsset.id : undefined}
         defaultTitle={t("newFromTemplate")}
         onPick={({ templateId, title, parentId }) => {
           void createPageFromTemplate({
@@ -486,7 +495,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           void createEntityLink({
             projectId: projectId ?? selectedProjectId ?? "",
             sourceType: "wiki_page",
-            sourceId: currentPage.id,
+            sourceId: currentAsset.id,
             targetType: "task",
             targetId: taskId,
             linkType: "design",
@@ -507,7 +516,7 @@ export function DocsPageDetailClient({ pageId }: { pageId: string }) {
           }
           const api = createApiClient(process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777");
           void api.post(
-            `/api/v1/projects/${projectId ?? selectedProjectId ?? ""}/wiki/pages/${currentPage.id}/decompose-tasks`,
+            `/api/v1/projects/${projectId ?? selectedProjectId ?? ""}/knowledge/assets/${currentAsset.id}/decompose-tasks`,
             {
               blockIds,
               parentTaskId: parentTaskId ?? undefined,

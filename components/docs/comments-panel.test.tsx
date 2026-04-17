@@ -1,5 +1,5 @@
 import { render, screen } from "@testing-library/react";
-import type { DocsComment } from "@/lib/stores/docs-store";
+import type { AssetComment } from "@/lib/stores/knowledge-store";
 import { CommentsPanel } from "./comments-panel";
 
 const mockCommentInput = jest.fn();
@@ -21,18 +21,18 @@ jest.mock("./comment-input", () => ({
 
 jest.mock("./comment-thread", () => ({
   CommentThread: (props: {
-    comment: DocsComment;
-    replies?: DocsComment[];
+    comment: AssetComment;
+    replies?: AssetComment[];
   }) => {
     mockCommentThread(props);
     return <div data-testid={`comment-thread-${props.comment.id}`}>{props.comment.body}</div>;
   },
 }));
 
-function makeComment(overrides: Partial<DocsComment> = {}): DocsComment {
+function makeComment(overrides: Partial<AssetComment> = {}): AssetComment {
   return {
     id: "comment-1",
-    pageId: "page-1",
+    assetId: "page-1",
     anchorBlockId: null,
     parentCommentId: null,
     body: "Root comment",

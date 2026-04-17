@@ -12,7 +12,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { DocsPage } from "@/lib/stores/docs-store";
+import type { KnowledgeAsset } from "@/lib/stores/knowledge-store";
 
 export interface TemplatePickerDestination {
   id: string | null;
@@ -28,7 +28,7 @@ function TemplatePickerContent({
   defaultTitle,
   defaultParentId,
 }: {
-  templates: DocsPage[];
+  templates: KnowledgeAsset[];
   onOpenChange: (open: boolean) => void;
   onPick: (selection: {
     templateId: string;
@@ -41,7 +41,7 @@ function TemplatePickerContent({
   defaultParentId?: string | null;
 }) {
   const t = useTranslations("docs");
-  const selectableTemplates = templates.filter((template) => template.canUse ?? template.isTemplate);
+  const selectableTemplates = templates.filter((template) => template.canUse ?? template.kind === "template");
   const initialSelectedTemplate =
     (initialTemplateId
       ? selectableTemplates.find((template) => template.id === initialTemplateId)
@@ -189,7 +189,7 @@ export function TemplatePicker({
 }: {
   open: boolean;
   onOpenChange: (open: boolean) => void;
-  templates: DocsPage[];
+  templates: KnowledgeAsset[];
   onPick: (selection: {
     templateId: string;
     title: string;

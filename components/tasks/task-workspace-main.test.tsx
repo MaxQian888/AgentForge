@@ -103,7 +103,7 @@ import {
   createDefaultTaskWorkspaceFilters,
   useTaskWorkspaceStore,
 } from "@/lib/stores/task-workspace-store";
-import { useDocsStore } from "@/lib/stores/docs-store";
+import { useKnowledgeStore } from "@/lib/stores/knowledge-store";
 import { useEntityLinkStore } from "@/lib/stores/entity-link-store";
 import { useCustomFieldStore } from "@/lib/stores/custom-field-store";
 import type { Sprint, SprintMetrics } from "@/lib/stores/sprint-store";
@@ -180,9 +180,10 @@ describe("TaskWorkspaceMain", () => {
         showLinkedDocs: false,
       },
     });
-    useDocsStore.setState({
+    useKnowledgeStore.setState({
       tree: [],
-      currentPage: null,
+      ingestedFiles: [],
+      currentAsset: null,
       comments: [],
       versions: [],
       templates: [],
@@ -531,25 +532,26 @@ describe("TaskWorkspaceMain", () => {
         showLinkedDocs: true,
       },
     }));
-    useDocsStore.setState({
+    useKnowledgeStore.setState({
       tree: [
         {
           id: "page-1",
+          projectId: "project-1",
+          kind: "wiki_page",
           spaceId: "space-1",
           parentId: null,
           title: "Architecture brief",
-          content: "[]",
+          contentJson: "[]",
           contentText: "Doc preview",
           path: "/architecture-brief",
           sortOrder: 0,
-          isTemplate: false,
-          isSystem: false,
           isPinned: false,
           createdBy: null,
           updatedBy: null,
           createdAt: "2026-03-24T09:00:00.000Z",
           updatedAt: "2026-03-24T09:00:00.000Z",
           deletedAt: null,
+          version: 1,
           children: [],
         },
       ],

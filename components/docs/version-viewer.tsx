@@ -1,9 +1,9 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import type { DocsVersion } from "@/lib/stores/docs-store";
+import type { AssetVersion } from "@/lib/stores/knowledge-store";
 
-export function VersionViewer({ version }: { version: DocsVersion | null }) {
+export function VersionViewer({ version }: { version: AssetVersion | null }) {
   const t = useTranslations("docs");
 
   return (
@@ -17,7 +17,7 @@ export function VersionViewer({ version }: { version: DocsVersion | null }) {
             </p>
           </div>
           <pre className="overflow-x-auto rounded-lg bg-muted/40 p-3 text-xs">
-            {version.content}
+            {version.contentJson}
           </pre>
         </div>
       ) : (

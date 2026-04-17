@@ -77,15 +77,15 @@ jest.mock("@/lib/stores/auth-store", () => ({
   },
 }));
 
-jest.mock("@/lib/stores/docs-store", () => ({
-  useDocsStore: (
+jest.mock("@/lib/stores/knowledge-store", () => ({
+  useKnowledgeStore: (
     selector: (state: { tree: []; fetchTree: jest.Mock }) => unknown
   ) =>
     selector({
       tree: [],
       fetchTree: jest.fn(),
     }),
-  flattenDocsTree: () => [],
+  flattenKnowledgeTree: () => [],
 }));
 
 type EntityLinkStoreSlice = {

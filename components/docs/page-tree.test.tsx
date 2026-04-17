@@ -1,35 +1,36 @@
 import { render, screen } from "@testing-library/react";
-import type { DocsPageTreeNode } from "@/lib/stores/docs-store";
+import type { KnowledgeAssetTreeNode } from "@/lib/stores/knowledge-store";
 import { PageTree } from "./page-tree";
 
 const mockPageTreeItem = jest.fn();
 
 jest.mock("./page-tree-item", () => ({
-  PageTreeItem: (props: { node: DocsPageTreeNode; currentPageId?: string | null }) => {
+  PageTreeItem: (props: { node: KnowledgeAssetTreeNode; currentPageId?: string | null }) => {
     mockPageTreeItem(props);
     return <div data-testid={`page-tree-item-${props.node.id}`}>{props.node.title}</div>;
   },
 }));
 
-function makeNode(overrides: Partial<DocsPageTreeNode> = {}): DocsPageTreeNode {
+function makeNode(overrides: Partial<KnowledgeAssetTreeNode> = {}): KnowledgeAssetTreeNode {
   return {
     id: "page-1",
+    projectId: "project-1",
+    kind: "wiki_page",
     spaceId: "space-1",
     parentId: null,
     title: "Runbook",
-    content: "[]",
+    contentJson: "[]",
     contentText: "",
     path: "/runbook",
     sortOrder: 0,
-    isTemplate: false,
     templateCategory: undefined,
-    isSystem: false,
     isPinned: false,
     createdBy: "user-1",
     updatedBy: "user-1",
     createdAt: "2026-03-26T12:00:00.000Z",
     updatedAt: "2026-03-26T12:00:00.000Z",
     deletedAt: null,
+    version: 1,
     children: [],
     ...overrides,
   };

@@ -1,12 +1,12 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { DocsComment } from "@/lib/stores/docs-store";
+import type { AssetComment } from "@/lib/stores/knowledge-store";
 import { CommentThread } from "./comment-thread";
 
-function makeComment(overrides: Partial<DocsComment> = {}): DocsComment {
+function makeComment(overrides: Partial<AssetComment> = {}): AssetComment {
   return {
     id: "comment-1",
-    pageId: "page-1",
+    assetId: "page-1",
     anchorBlockId: "block-1",
     parentCommentId: null,
     body: "Please update the deployment checklist.",

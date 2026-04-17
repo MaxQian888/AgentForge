@@ -2,7 +2,7 @@
 
 import { useMemo } from "react";
 import { useTranslations } from "next-intl";
-import type { DocsComment } from "@/lib/stores/docs-store";
+import type { AssetComment } from "@/lib/stores/knowledge-store";
 import { CommentInput } from "./comment-input";
 import { CommentThread } from "./comment-thread";
 
@@ -15,7 +15,7 @@ export function CommentsPanel({
   mentionSuggestions = [],
   readonly = false,
 }: {
-  comments: DocsComment[];
+  comments: AssetComment[];
   onCreateComment: (body: string) => void | Promise<void>;
   onResolve?: (commentId: string) => void;
   onReopen?: (commentId: string) => void;

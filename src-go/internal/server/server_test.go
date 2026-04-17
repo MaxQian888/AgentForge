@@ -463,26 +463,21 @@ func TestRegisterRoutes_WikiRoutesPresent(t *testing.T) {
 	e := server.New(cfg, cache)
 	registerTestRoutes(e, cfg, authSvc, cache)
 
+	// Wiki routes have been replaced by unified /knowledge/assets routes.
 	expected := map[string]struct{}{
-		http.MethodGet + " /api/v1/projects/:pid/wiki/pages":                      {},
-		http.MethodPost + " /api/v1/projects/:pid/wiki/pages":                     {},
-		http.MethodGet + " /api/v1/projects/:pid/wiki/pages/:id":                  {},
-		http.MethodPut + " /api/v1/projects/:pid/wiki/pages/:id":                  {},
-		http.MethodDelete + " /api/v1/projects/:pid/wiki/pages/:id":               {},
-		http.MethodPatch + " /api/v1/projects/:pid/wiki/pages/:id/move":           {},
-		http.MethodGet + " /api/v1/projects/:pid/wiki/pages/:id/versions":         {},
-		http.MethodPost + " /api/v1/projects/:pid/wiki/pages/:id/versions":        {},
-		http.MethodGet + " /api/v1/projects/:pid/wiki/pages/:id/comments":         {},
-		http.MethodPost + " /api/v1/projects/:pid/wiki/pages/:id/comments":        {},
-		http.MethodPost + " /api/v1/projects/:pid/wiki/pages/:id/decompose-tasks": {},
-		http.MethodGet + " /api/v1/projects/:pid/wiki/templates":                  {},
-		http.MethodPost + " /api/v1/projects/:pid/wiki/templates":                 {},
-		http.MethodPost + " /api/v1/projects/:pid/wiki/pages/from-template":       {},
-		http.MethodGet + " /api/v1/projects/:pid/wiki/favorites":                  {},
-		http.MethodPut + " /api/v1/projects/:pid/wiki/pages/:id/favorite":         {},
-		http.MethodGet + " /api/v1/projects/:pid/wiki/recent":                     {},
-		http.MethodPut + " /api/v1/projects/:pid/wiki/pages/:id/pin":              {},
-		http.MethodGet + " /api/v1/wiki/pages/:id":                                {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets":                                {},
+		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets":                               {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/:id":                            {},
+		http.MethodPut + " /api/v1/projects/:pid/knowledge/assets/:id":                            {},
+		http.MethodDelete + " /api/v1/projects/:pid/knowledge/assets/:id":                         {},
+		http.MethodPatch + " /api/v1/projects/:pid/knowledge/assets/:id/move":                     {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/:id/versions":                   {},
+		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets/:id/versions":                  {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/:id/comments":                   {},
+		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets/:id/comments":                  {},
+		http.MethodPost + " /api/v1/projects/:pid/knowledge/assets/:id/decompose-tasks":            {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/assets/tree":                           {},
+		http.MethodGet + " /api/v1/projects/:pid/knowledge/search":                                {},
 	}
 
 	for _, route := range e.Routes() {
@@ -490,7 +485,7 @@ func TestRegisterRoutes_WikiRoutesPresent(t *testing.T) {
 	}
 
 	if len(expected) != 0 {
-		t.Fatalf("expected wiki routes to be registered, missing: %+v", expected)
+		t.Fatalf("expected knowledge asset routes to be registered, missing: %+v", expected)
 	}
 }
 

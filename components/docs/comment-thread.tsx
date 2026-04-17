@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { MessageSquareQuote, RotateCcw, CheckCircle2, Link2 } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { DocsComment } from "@/lib/stores/docs-store";
+import type { AssetComment } from "@/lib/stores/knowledge-store";
 
 export function CommentThread({
   comment,
@@ -12,8 +12,8 @@ export function CommentThread({
   onReopen,
   onCopyLink,
 }: {
-  comment: DocsComment;
-  replies?: DocsComment[];
+  comment: AssetComment;
+  replies?: AssetComment[];
   onResolve?: (commentId: string) => void;
   onReopen?: (commentId: string) => void;
   onCopyLink?: (commentId: string) => void;

@@ -1,15 +1,16 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { DocsVersion } from "@/lib/stores/docs-store";
+import type { AssetVersion } from "@/lib/stores/knowledge-store";
 import { VersionHistoryPanel } from "./version-history-panel";
 
-function makeVersion(overrides: Partial<DocsVersion> = {}): DocsVersion {
+function makeVersion(overrides: Partial<AssetVersion> = {}): AssetVersion {
   return {
     id: "version-1",
-    pageId: "page-1",
+    assetId: "page-1",
     versionNumber: 3,
     name: "Draft review",
-    content: "[]",
+    kindSnapshot: "wiki_page",
+    contentJson: "[]",
     createdBy: "user-1",
     createdAt: "2026-03-26T12:00:00.000Z",
     ...overrides,

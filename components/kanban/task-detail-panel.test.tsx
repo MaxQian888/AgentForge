@@ -98,8 +98,8 @@ jest.mock("@/lib/stores/member-store", () => ({
     }),
 }));
 
-jest.mock("@/lib/stores/docs-store", () => ({
-  useDocsStore: (selector: (state: {
+jest.mock("@/lib/stores/knowledge-store", () => ({
+  useKnowledgeStore: (selector: (state: {
     tree: unknown[];
     fetchTree: typeof fetchDocsTree;
   }) => unknown) =>
@@ -107,7 +107,7 @@ jest.mock("@/lib/stores/docs-store", () => ({
       tree: [],
       fetchTree: fetchDocsTree,
     }),
-  flattenDocsTree: () => [],
+  flattenKnowledgeTree: () => [],
 }));
 
 jest.mock("@/lib/stores/entity-link-store", () => ({

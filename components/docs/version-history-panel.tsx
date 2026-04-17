@@ -3,7 +3,7 @@
 import { useTranslations } from "next-intl";
 import { Copy, History, RotateCcw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import type { DocsVersion } from "@/lib/stores/docs-store";
+import type { AssetVersion } from "@/lib/stores/knowledge-store";
 
 export function VersionHistoryPanel({
   versions,
@@ -13,7 +13,7 @@ export function VersionHistoryPanel({
   onShare,
   readonly = false,
 }: {
-  versions: DocsVersion[];
+  versions: AssetVersion[];
   selectedVersionId?: string | null;
   onSelect?: (versionId: string) => void;
   onRestore?: (versionId: string) => void;

@@ -39,7 +39,7 @@ import { getTaskDependencyState } from "@/lib/tasks/task-dependencies";
 import { useTaskWorkspaceStore } from "@/lib/stores/task-workspace-store";
 import { cn } from "@/lib/utils";
 import { useCustomFieldStore } from "@/lib/stores/custom-field-store";
-import { useDocsStore, flattenDocsTree } from "@/lib/stores/docs-store";
+import { useKnowledgeStore, flattenKnowledgeTree } from "@/lib/stores/knowledge-store";
 import { useEntityLinkStore } from "@/lib/stores/entity-link-store";
 import { useTaskStore } from "@/lib/stores/task-store";
 import { FieldValueCell } from "@/components/fields/field-value-cell";
@@ -1959,7 +1959,7 @@ export function TaskWorkspaceMain({
   const definitionsByProject = useCustomFieldStore((state) => state.definitionsByProject);
   const valuesByTask = useCustomFieldStore((state) => state.valuesByTask);
   const [bulkFailures, setBulkFailures] = useState<BulkActionFailure[]>([]);
-  const docsTree = useDocsStore((state) => state.tree);
+  const docsTree = useKnowledgeStore((state) => state.tree);
   const linksByEntity = useEntityLinkStore((state) => state.linksByEntity);
 
   const filteredTasks = useMemo(
@@ -1971,8 +1971,8 @@ export function TaskWorkspaceMain({
     [definitionsByProject, projectId]
   );
   const docsById = useMemo(() => {
-    const map = new Map<string, ReturnType<typeof flattenDocsTree>[number]>();
-    for (const doc of flattenDocsTree(docsTree)) {
+    const map = new Map<string, ReturnType<typeof flattenKnowledgeTree>[number]>();
+    for (const doc of flattenKnowledgeTree(docsTree)) {
       map.set(doc.id, doc);
     }
     return map;

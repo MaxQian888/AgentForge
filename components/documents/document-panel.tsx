@@ -43,7 +43,7 @@ import {
 import { ErrorBanner } from "@/components/shared/error-banner";
 import { EmptyState } from "@/components/shared/empty-state";
 import { DocumentUploadZone } from "./document-upload-zone";
-import { useDocumentStore, type ProjectDocument } from "@/lib/stores/document-store";
+import { useKnowledgeStore, type KnowledgeAsset } from "@/lib/stores/knowledge-store";
 
 interface DocumentPanelProps {
   projectId: string;
@@ -71,7 +71,7 @@ function StatusBadge({
   status,
   t,
 }: {
-  status: ProjectDocument["status"];
+  status: KnowledgeAsset["ingestStatus"];
   t: (key: string) => string;
 }) {
   switch (status) {
@@ -100,27 +100,26 @@ function StatusBadge({
 export function DocumentPanel({ projectId }: DocumentPanelProps) {
   const t = useTranslations("documents");
   const {
-    documents,
+    ingestedFiles: documents,
     loading,
     uploading,
     error,
-    loadDocuments,
-    uploadDocument,
-    deleteDocument,
-    clearError,
-  } = useDocumentStore();
+    fetchIngestedFiles,
+    uploadFile,
+    deleteIngestedFile,
+  } = useKnowledgeStore();
 
-  const [deleteTarget, setDeleteTarget] = useState<ProjectDocument | null>(
+  const [deleteTarget, setDeleteTarget] = useState<KnowledgeAsset | null>(
     null,
   );
 
   useEffect(() => {
-    loadDocuments(projectId);
-  }, [projectId, loadDocuments]);
+    void fetchIngestedFiles(projectId);
+  }, [projectId, fetchIngestedFiles]);
 
   const handleUpload = async (file: File) => {
     try {
-      await uploadDocument(projectId, file);
+      await uploadFile(projectId, file);
       toast.success(t("uploadSuccess"));
     } catch {
       toast.error(t("uploadError"));
@@ -130,7 +129,7 @@ export function DocumentPanel({ projectId }: DocumentPanelProps) {
   const handleDelete = async () => {
     if (!deleteTarget) return;
     try {
-      await deleteDocument(projectId, deleteTarget.id);
+      await deleteIngestedFile({ projectId, assetId: deleteTarget.id });
       toast.success(t("deleteSuccess"));
     } catch {
       toast.error(t("deleteError"));
@@ -146,10 +145,7 @@ export function DocumentPanel({ projectId }: DocumentPanelProps) {
       {error && (
         <ErrorBanner
           message={error}
-          onRetry={() => {
-            clearError();
-            loadDocuments(projectId);
-          }}
+          onRetry={() => void fetchIngestedFiles(projectId)}
         />
       )}
 
@@ -189,30 +185,31 @@ export function DocumentPanel({ projectId }: DocumentPanelProps) {
                 </TableHeader>
                 <TableBody>
                   {documents.map((doc) => {
-                    const Icon = getFileTypeIcon(doc.fileType);
+                    const mimeShort = (doc.mimeType ?? "").split("/").pop() ?? "file";
+                    const Icon = getFileTypeIcon(mimeShort);
                     return (
                       <TableRow key={doc.id}>
                         <TableCell>
                           <div className="flex items-center gap-2">
                             <Icon className="size-4 shrink-0 text-muted-foreground" />
                             <span className="truncate font-medium">
-                              {doc.fileName}
+                              {doc.title}
                             </span>
                           </div>
                         </TableCell>
                         <TableCell>
                           <Badge variant="outline" className="uppercase">
-                            {doc.fileType}
+                            {mimeShort}
                           </Badge>
                         </TableCell>
                         <TableCell className="text-muted-foreground">
-                          {formatBytes(doc.fileSize)}
+                          {formatBytes(doc.fileSize ?? 0)}
                         </TableCell>
                         <TableCell>
-                          <StatusBadge status={doc.status} t={t} />
+                          <StatusBadge status={doc.ingestStatus} t={t} />
                         </TableCell>
                         <TableCell className="text-muted-foreground">
-                          {formatDistanceToNow(new Date(doc.uploadedAt), {
+                          {formatDistanceToNow(new Date(doc.createdAt), {
                             addSuffix: true,
                           })}
                         </TableCell>
@@ -245,7 +242,7 @@ export function DocumentPanel({ projectId }: DocumentPanelProps) {
             <AlertDialogTitle>{t("deleteConfirmTitle")}</AlertDialogTitle>
             <AlertDialogDescription>
               {t("deleteConfirmDescription", {
-                name: deleteTarget?.fileName ?? "",
+                name: deleteTarget?.title ?? "",
               })}
             </AlertDialogDescription>
           </AlertDialogHeader>

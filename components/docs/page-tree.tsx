@@ -1,7 +1,7 @@
 "use client";
 
 import { useTranslations } from "next-intl";
-import type { DocsPageTreeNode } from "@/lib/stores/docs-store";
+import type { KnowledgeAssetTreeNode } from "@/lib/stores/knowledge-store";
 import { PageTreeItem } from "./page-tree-item";
 
 export function PageTree({
@@ -12,7 +12,7 @@ export function PageTree({
   onTogglePinned,
   onDeletePage,
 }: {
-  nodes: DocsPageTreeNode[];
+  nodes: KnowledgeAssetTreeNode[];
   currentPageId?: string | null;
   onMovePage?: (pageId: string, parentId: string | null, sortOrder: number) => void;
   onToggleFavorite?: (pageId: string, favorite: boolean) => void;

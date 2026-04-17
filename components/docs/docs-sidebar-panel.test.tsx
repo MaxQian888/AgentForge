@@ -1,10 +1,6 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type {
-  DocsFavorite,
-  DocsPageTreeNode,
-  DocsRecentAccess,
-} from "@/lib/stores/docs-store";
+import type { KnowledgeAssetTreeNode } from "@/lib/stores/knowledge-store";
 import { DocsSidebarPanel } from "./docs-sidebar-panel";
 
 const mockPageTree = jest.fn();
@@ -26,7 +22,7 @@ jest.mock("next/link", () => ({
 }));
 
 jest.mock("./page-tree", () => ({
-  PageTree: (props: { nodes: DocsPageTreeNode[] }) => {
+  PageTree: (props: { nodes: KnowledgeAssetTreeNode[] }) => {
     mockPageTree(props);
     return (
       <div data-testid="page-tree">
@@ -36,25 +32,26 @@ jest.mock("./page-tree", () => ({
   },
 }));
 
-function makeNode(overrides: Partial<DocsPageTreeNode> = {}): DocsPageTreeNode {
+function makeNode(overrides: Partial<KnowledgeAssetTreeNode> = {}): KnowledgeAssetTreeNode {
   return {
     id: "page-1",
+    projectId: "project-1",
+    kind: "wiki_page",
     spaceId: "space-1",
     parentId: null,
     title: "Runbook",
-    content: "[]",
+    contentJson: "[]",
     contentText: "",
     path: "/runbook",
     sortOrder: 0,
-    isTemplate: false,
     templateCategory: undefined,
-    isSystem: false,
     isPinned: false,
     createdBy: "user-1",
     updatedBy: "user-1",
     createdAt: "2026-03-26T12:00:00.000Z",
     updatedAt: "2026-03-26T12:00:00.000Z",
     deletedAt: null,
+    version: 1,
     children: [],
     ...overrides,
   };
@@ -72,16 +69,16 @@ describe("DocsSidebarPanel", () => {
       makeNode({ id: "runbook", title: "Ops Runbook" }),
       makeNode({ id: "adr", title: "Architecture ADR" }),
     ];
-    const favorites: DocsFavorite[] = [
+    const favorites = [
       {
-        pageId: "adr",
+        assetId: "adr",
         userId: "user-1",
         createdAt: "2026-03-26T12:01:00.000Z",
       },
     ];
-    const recentAccess: DocsRecentAccess[] = [
+    const recentAccess = [
       {
-        pageId: "runbook",
+        assetId: "runbook",
         userId: "user-1",
         accessedAt: "2026-03-26T12:02:00.000Z",
       },

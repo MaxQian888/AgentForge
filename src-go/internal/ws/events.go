@@ -78,6 +78,17 @@ const (
 	EventAgentPartialMessage         = "agent.partial_message"
 	EventAgentSnapshot               = "agent.snapshot"
 
+	// Knowledge asset events (replaces wiki.page.* and knowledge.comment.*)
+	EventKnowledgeAssetCreated        = "knowledge.asset.created"
+	EventKnowledgeAssetUpdated        = "knowledge.asset.updated"
+	EventKnowledgeAssetMoved          = "knowledge.asset.moved"
+	EventKnowledgeAssetDeleted        = "knowledge.asset.deleted"
+	EventKnowledgeAssetContentChanged = "knowledge.asset.content_changed"
+	EventKnowledgeCommentCreated      = "knowledge.comment.created"
+	EventKnowledgeCommentResolved     = "knowledge.comment.resolved"
+	EventKnowledgeCommentDeleted      = "knowledge.comment.deleted"
+	EventKnowledgeIngestStatusChanged = "knowledge.ingest.status_changed"
+
 	// Workflow DAG execution events
 	EventWorkflowExecutionStarted   = "workflow.execution.started"
 	EventWorkflowExecutionAdvanced  = "workflow.execution.advanced"

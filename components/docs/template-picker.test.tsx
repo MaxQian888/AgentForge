@@ -1,27 +1,29 @@
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import type { DocsPage } from "@/lib/stores/docs-store";
+import type { KnowledgeAsset } from "@/lib/stores/knowledge-store";
 import { TemplatePicker } from "./template-picker";
 
-function makeTemplate(overrides: Partial<DocsPage> = {}): DocsPage {
+function makeTemplate(overrides: Partial<KnowledgeAsset> = {}): KnowledgeAsset {
   return {
     id: "template-1",
+    projectId: "project-1",
+    kind: "template",
     spaceId: "space-1",
     parentId: null,
     title: "Incident Runbook",
-    content: "[]",
+    contentJson: "[]",
     contentText: "",
     path: "/incident-runbook",
     sortOrder: 0,
-    isTemplate: true,
     templateCategory: "runbook",
-    isSystem: true,
+    isSystemTemplate: true,
     isPinned: false,
     createdBy: "user-1",
     updatedBy: "user-1",
     createdAt: "2026-03-26T12:00:00.000Z",
     updatedAt: "2026-03-26T12:00:00.000Z",
     deletedAt: null,
+    version: 1,
     templateSource: "system",
     previewSnippet: "Operational checklist",
     canUse: true,

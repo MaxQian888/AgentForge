@@ -14,7 +14,7 @@ import {
   DialogHeader,
   DialogTitle,
 } from "@/components/ui/dialog";
-import type { DocsPage } from "@/lib/stores/docs-store";
+import type { KnowledgeAsset } from "@/lib/stores/knowledge-store";
 
 type TemplateDraftMode = "create" | "duplicate";
 
@@ -26,7 +26,7 @@ export function TemplateCenter({
   onDuplicateTemplate,
   onDeleteTemplate,
 }: {
-  templates: DocsPage[];
+  templates: KnowledgeAsset[];
   onCreateFromTemplate?: (templateId: string) => void;
   onCreateTemplate?: (input: { title: string; category: string }) => void | Promise<void>;
   onEditTemplate?: (templateId: string) => void;
@@ -58,7 +58,7 @@ export function TemplateCenter({
   const filteredTemplates = useMemo(() => {
     const normalizedQuery = query.trim().toLowerCase();
     return templates.filter((template) => {
-      const templateSource = template.templateSource ?? (template.isSystem ? "system" : "custom");
+      const templateSource = template.templateSource ?? (template.isSystemTemplate ? "system" : "custom");
       if (source !== "all" && templateSource !== source) {
         return false;
       }
@@ -139,7 +139,7 @@ export function TemplateCenter({
           <div className="grid gap-3 md:grid-cols-2">
             {filteredTemplates.map((template) => {
               const templateSource =
-                template.templateSource ?? (template.isSystem ? "system" : "custom");
+                template.templateSource ?? (template.isSystemTemplate ? "system" : "custom");
               const selected = template.id === selectedTemplateId;
               return (
                 <button
@@ -177,7 +177,7 @@ export function TemplateCenter({
                     {selectedTemplate.templateCategory || t("templateCenter.uncategorized")} ·{" "}
                     {t(
                       `templateCenter.filters.${
-                        selectedTemplate.templateSource ?? (selectedTemplate.isSystem ? "system" : "custom")
+                        selectedTemplate.templateSource ?? (selectedTemplate.isSystemTemplate ? "system" : "custom")
                       }`,
                     )}
                   </div>

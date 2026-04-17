@@ -15,6 +15,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/handler"
+	"github.com/react-go-quick-starter/server/internal/knowledge"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
@@ -142,6 +143,15 @@ func (a imControlPlaneWSAdapter) AckDelivery(ctx context.Context, ack *model.IMD
 
 func (a imControlPlaneWSAdapter) DetachBridgeListener(bridgeID string) {
 	a.control.DetachBridgeListener(bridgeID)
+}
+
+// knowledgeEventBusAdapter bridges *eventbus.Bus to the knowledge.eventPublisher interface.
+type knowledgeEventBusAdapter struct {
+	bus *eventbus.Bus
+}
+
+func (a knowledgeEventBusAdapter) PublishKnowledgeEvent(ctx context.Context, eventType string, projectID string, payload map[string]any) error {
+	return eventbus.PublishLegacy(ctx, a.bus, eventType, projectID, payload)
 }
 
 type RouteServices struct {
@@ -297,7 +307,8 @@ func RegisterRoutes(
 	memberH := handler.NewMemberHandler(memberRepo)
 	sprintH := handler.NewSprintHandler(sprintRepo, taskRepo).WithHub(hub).WithBus(bus)
 	taskH := handler.NewTaskHandler(taskRepo, taskDecomposeSvc).WithProgress(taskProgressSvc).WithHub(hub).WithBus(bus)
-	wikiH := handler.NewWikiHandler(wikiSvc)
+	// wikiH is kept for reference but routes have been migrated to knowledgeH.
+	_ = handler.NewWikiHandler(wikiSvc)
 	entityLinkH := handler.NewEntityLinkHandler(entityLinkSvc)
 	taskCommentH := handler.NewTaskCommentHandler(taskCommentSvc)
 	docDecomposeH := handler.NewDocDecompositionHandler(docDecomposeSvc)
@@ -457,6 +468,26 @@ func RegisterRoutes(
 		agentH = agentH.WithDispatcher(dispatchSvc)
 	}
 	documentH := handler.NewDocumentHandler(documentSvc)
+
+	// Knowledge asset handler (unified wiki + ingested documents).
+	knowledgeAssetRepo := knowledge.NewPgKnowledgeAssetRepository(taskRepo.DB())
+	knowledgeVersionRepo := knowledge.NewPgAssetVersionRepository(taskRepo.DB())
+	knowledgeCommentRepo := knowledge.NewPgAssetCommentRepository(taskRepo.DB())
+	knowledgeChunkRepo := knowledge.NewPgAssetIngestChunkRepository(taskRepo.DB())
+	knowledgeBlobStorage := knowledge.NewLocalBlobStorage("./data/uploads")
+	knowledgeSearchProvider := knowledge.NewPgFTSProvider(taskRepo.DB())
+	knowledgeAssetSvc := knowledge.NewKnowledgeAssetService(
+		knowledgeAssetRepo,
+		knowledgeVersionRepo,
+		knowledgeCommentRepo,
+		knowledgeChunkRepo,
+		knowledgeSearchProvider,
+		knowledge.NoopIndexPipeline{},
+		knowledgeEventBusAdapter{bus: bus},
+	)
+	knowledgeH := handler.NewKnowledgeAssetHandler(knowledgeAssetSvc)
+	_ = knowledgeBlobStorage // available for upload service wiring when implemented
+
 	logSvc := service.NewLogService(logRepo, hub, bus)
 	logH := handler.NewLogHandler(logSvc)
 
@@ -559,11 +590,8 @@ func RegisterRoutes(
 	projectGroup.GET("/memory/:mid", memoryH.Get)
 	projectGroup.PATCH("/memory/:mid", memoryH.Update)
 	projectGroup.DELETE("/memory/:mid", memoryH.Delete)
-	docs := projectGroup.Group("/documents")
-	docs.POST("/upload", documentH.Upload)
-	docs.GET("", documentH.List)
-	docs.GET("/:did", documentH.Get)
-	docs.DELETE("/:did", documentH.Delete)
+	// Old /documents routes removed; ingested files are now served via /knowledge/assets.
+	_ = documentH
 	projectGroup.GET("/logs", logH.List)
 	projectGroup.POST("/logs", logH.Create)
 	if dispatchPreflightH != nil {
@@ -579,30 +607,27 @@ func RegisterRoutes(
 	if budgetQueryH != nil {
 		projectGroup.GET("/budget/summary", budgetQueryH.ProjectSummary)
 	}
-	projectGroup.GET("/wiki/pages", wikiH.ListPages)
-	projectGroup.POST("/wiki/pages", wikiH.CreatePage)
-	projectGroup.GET("/wiki/pages/:id", wikiH.GetPage)
-	projectGroup.PUT("/wiki/pages/:id", wikiH.UpdatePage)
-	projectGroup.DELETE("/wiki/pages/:id", wikiH.DeletePage)
-	projectGroup.PATCH("/wiki/pages/:id/move", wikiH.MovePage)
-	projectGroup.GET("/wiki/pages/:id/versions", wikiH.ListVersions)
-	projectGroup.POST("/wiki/pages/:id/versions", wikiH.CreateVersion)
-	projectGroup.GET("/wiki/pages/:id/versions/:vid", wikiH.GetVersion)
-	projectGroup.POST("/wiki/pages/:id/versions/:vid/restore", wikiH.RestoreVersion)
-	projectGroup.GET("/wiki/pages/:id/comments", wikiH.ListComments)
-	projectGroup.POST("/wiki/pages/:id/comments", wikiH.CreateComment)
-	projectGroup.PATCH("/wiki/pages/:id/comments/:cid", wikiH.UpdateComment)
-	projectGroup.DELETE("/wiki/pages/:id/comments/:cid", wikiH.DeleteComment)
-	projectGroup.POST("/wiki/pages/:id/decompose-tasks", docDecomposeH.Decompose)
-	projectGroup.GET("/wiki/templates", wikiH.ListTemplates)
-	projectGroup.POST("/wiki/templates", wikiH.CreateTemplate)
-	projectGroup.POST("/wiki/pages/:id/templates", wikiH.CreateTemplateFromPage)
-	projectGroup.POST("/wiki/pages/from-template", wikiH.CreatePageFromTemplate)
-	projectGroup.GET("/wiki/favorites", wikiH.ListFavorites)
-	projectGroup.PUT("/wiki/pages/:id/favorite", wikiH.ToggleFavorite)
-	projectGroup.GET("/wiki/recent", wikiH.ListRecentAccess)
-	projectGroup.PUT("/wiki/pages/:id/pin", wikiH.TogglePinned)
-	protected.GET("/wiki/pages/:id", wikiH.GetPageContext)
+	// Knowledge asset routes (unified: replaces /wiki and /documents).
+	projectGroup.GET("/knowledge/assets", knowledgeH.ListAssets)
+	projectGroup.POST("/knowledge/assets", knowledgeH.CreateAsset)
+	projectGroup.GET("/knowledge/assets/tree", knowledgeH.GetTree)
+	projectGroup.GET("/knowledge/search", knowledgeH.Search)
+	projectGroup.GET("/knowledge/assets/:id", knowledgeH.GetAsset)
+	projectGroup.PUT("/knowledge/assets/:id", knowledgeH.UpdateAsset)
+	projectGroup.DELETE("/knowledge/assets/:id", knowledgeH.DeleteAsset)
+	projectGroup.POST("/knowledge/assets/:id/restore", knowledgeH.RestoreAsset)
+	projectGroup.PATCH("/knowledge/assets/:id/move", knowledgeH.MoveAsset)
+	projectGroup.POST("/knowledge/assets/:id/reupload", knowledgeH.ReuploadAsset)
+	projectGroup.POST("/knowledge/assets/:id/materialize-as-wiki", knowledgeH.MaterializeAsWiki)
+	projectGroup.GET("/knowledge/assets/:id/versions", knowledgeH.ListVersions)
+	projectGroup.POST("/knowledge/assets/:id/versions", knowledgeH.CreateVersion)
+	projectGroup.GET("/knowledge/assets/:id/versions/:vid", knowledgeH.GetVersion)
+	projectGroup.POST("/knowledge/assets/:id/versions/:vid/restore", knowledgeH.RestoreVersion)
+	projectGroup.GET("/knowledge/assets/:id/comments", knowledgeH.ListComments)
+	projectGroup.POST("/knowledge/assets/:id/comments", knowledgeH.CreateComment)
+	projectGroup.PATCH("/knowledge/assets/:id/comments/:cid", knowledgeH.UpdateComment)
+	projectGroup.DELETE("/knowledge/assets/:id/comments/:cid", knowledgeH.DeleteComment)
+	projectGroup.POST("/knowledge/assets/:id/decompose-tasks", docDecomposeH.Decompose)
 
 	// Task operations (not project-scoped, task ID is unique)
 	protected.GET("/tasks/:id", taskH.Get)
@@ -805,6 +830,9 @@ func RegisterRoutes(
 		agentSvc.SetIMNotifier(imSvc)
 		agentSvc.SetIMChannelResolver(imControlPlane)
 	}
+	if imReactionEventRepo != nil {
+		imSvc.SetReactionStore(service.NewIMReactionStoreAdapter(imReactionEventRepo))
+	}
 	imSvc.SetActionExecutor(service.NewBackendIMActionExecutor(
 		dispatchSvc,
 		taskDecomposeSvc,
@@ -825,6 +853,8 @@ func RegisterRoutes(
 	v1.POST("/im/command", imH.HandleCommand)
 	v1.POST("/intent", imH.HandleIntent)
 	v1.POST("/im/action", imH.HandleAction)
+	v1.POST("/im/reactions", imH.HandleReaction)
+	v1.POST("/im/reactions/shortcuts", imH.BindReactionShortcut)
 	v1.POST("/im/bridge/register", imControlH.Register)
 	v1.POST("/im/bridge/heartbeat", imControlH.Heartbeat)
 	v1.POST("/im/bridge/unregister", imControlH.Unregister)

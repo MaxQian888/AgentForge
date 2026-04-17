@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { DocsPageDetailClient } from "./page-client";
 import { useAuthStore } from "@/lib/stores/auth-store";
 
-type DocsPage = import("@/lib/stores/docs-store").DocsPage;
+type DocsPage = import("@/lib/stores/knowledge-store").KnowledgeAsset;
 
 const push = jest.fn();
 const setProjectId = jest.fn();
@@ -32,30 +32,32 @@ const dashboardState = {
 
 const currentPage: DocsPage = {
   id: "page-1",
+  projectId: "project-1",
+  kind: "wiki_page",
   spaceId: "space-1",
   parentId: null,
   title: "Runbook",
-  content: '[{"type":"paragraph","content":"Latest draft"}]',
+  contentJson: '[{"type":"paragraph","content":"Latest draft"}]',
   contentText: "Latest draft",
   path: "/runbook",
   sortOrder: 0,
-  isTemplate: false,
-  templateCategory: "",
-  isSystem: false,
+  templateCategory: null,
   isPinned: false,
   createdBy: "user-1",
   updatedBy: "user-1",
   createdAt: "2026-03-26T12:00:00.000Z",
   updatedAt: "2026-03-26T12:05:00.000Z",
   deletedAt: null,
+  version: 1,
 };
 
 const sharedVersion = {
   id: "version-1",
-  pageId: "page-1",
+  assetId: "page-1",
   versionNumber: 2,
   name: "Shared snapshot",
-  content: '[{"type":"paragraph","content":"Shared snapshot"}]',
+  kindSnapshot: "wiki_page",
+  contentJson: '[{"type":"paragraph","content":"Shared snapshot"}]',
   createdBy: "user-1",
   createdAt: "2026-03-26T12:03:00.000Z",
 };
@@ -63,7 +65,7 @@ const sharedVersion = {
 const docsStoreState = {
   projectId: null as string | null,
   tree: [],
-  currentPage: currentPage as DocsPage | null,
+  currentAsset: currentPage as DocsPage | null,
   comments: [],
   versions: [sharedVersion],
   templates: [],
@@ -124,9 +126,9 @@ jest.mock("@/lib/stores/dashboard-store", () => ({
     selector(dashboardState),
 }));
 
-jest.mock("@/lib/stores/docs-store", () => ({
-  flattenDocsTree: (tree: Array<Record<string, unknown>>) => tree,
-  useDocsStore: () => docsStoreState,
+jest.mock("@/lib/stores/knowledge-store", () => ({
+  flattenKnowledgeTree: (tree: Array<Record<string, unknown>>) => tree,
+  useKnowledgeStore: () => docsStoreState,
 }));
 
 jest.mock("@/components/docs/docs-sidebar-panel", () => ({
@@ -378,7 +380,7 @@ jest.mock("@/lib/stores/task-store", () => ({
 describe("DocsPageDetailClient", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    docsStoreState.currentPage = currentPage;
+    docsStoreState.currentAsset = currentPage;
     docsStoreState.projectId = null;
     dashboardState.selectedProjectId = null;
     setProjectId.mockImplementation((nextProjectId: string) => {
@@ -432,7 +434,7 @@ describe("DocsPageDetailClient", () => {
   });
 
   it("renders the not-found state when the page workspace never loads a document", async () => {
-    docsStoreState.currentPage = null;
+    docsStoreState.currentAsset = null;
     resolvePageContext.mockResolvedValue(null);
 
     await act(async () => {

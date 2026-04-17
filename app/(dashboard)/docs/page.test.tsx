@@ -183,9 +183,9 @@ jest.mock("@/lib/stores/dashboard-store", () => ({
   useDashboardStore: (selector: (state: typeof dashboardState) => unknown) => selector(dashboardState),
 }));
 
-jest.mock("@/lib/stores/docs-store", () => ({
-  flattenDocsTree: (tree: Array<{ id: string; title: string; path: string; isPinned: boolean }>) => tree,
-  useDocsStore: Object.assign(() => docsStoreState, {
+jest.mock("@/lib/stores/knowledge-store", () => ({
+  flattenKnowledgeTree: (tree: Array<{ id: string; title: string; path: string; isPinned: boolean }>) => tree,
+  useKnowledgeStore: Object.assign(() => docsStoreState, {
     getState: () => docsStoreState,
   }),
 }));

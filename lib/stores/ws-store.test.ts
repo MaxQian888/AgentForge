@@ -44,7 +44,7 @@ jest.mock("sonner", () => ({
 
 import { useAgentStore } from "./agent-store";
 import { useDashboardStore } from "./dashboard-store";
-import { useDocsStore } from "./docs-store";
+import { useKnowledgeStore } from "./knowledge-store";
 import { useEntityLinkStore } from "./entity-link-store";
 import { useNotificationStore } from "./notification-store";
 import { useReviewStore } from "./review-store";
@@ -99,30 +99,34 @@ describe("useWSStore", () => {
     useNotificationStore.setState({ notifications: [], unreadCount: 0 });
     useEntityLinkStore.setState({ linksByEntity: {}, loading: false, error: null });
     useTaskCommentStore.setState({ commentsByTask: {}, loading: false, error: null });
-    useDocsStore.setState({
+    useKnowledgeStore.setState({
       projectId: "project-1",
       tree: [],
-      currentPage: {
+      currentAsset: {
         id: "page-1",
+        projectId: "project-1",
+        kind: "wiki_page",
         spaceId: "space-1",
         title: "Runbook",
-        content: "[]",
+        contentJson: "[]",
         contentText: "",
         path: "/page-1",
         sortOrder: 0,
-        isTemplate: false,
-        isSystem: false,
         isPinned: false,
         createdAt: "2026-03-26T10:00:00.000Z",
         updatedAt: "2026-03-26T10:00:00.000Z",
+        version: 1,
       },
+      ingestedFiles: [],
       comments: [],
       versions: [],
       templates: [],
       favorites: [],
       recentAccess: [],
+      searchResults: null,
       loading: false,
       saving: false,
+      uploading: false,
       error: null,
     });
     useDashboardStore.setState({
@@ -695,16 +699,16 @@ describe("useWSStore", () => {
 
   it("refreshes docs workspace slices on wiki websocket events", () => {
     const refreshTree = jest
-      .spyOn(useDocsStore.getState(), "refreshActiveProjectTree")
+      .spyOn(useKnowledgeStore.getState(), "refreshActiveProjectTree")
       .mockResolvedValue(undefined);
     const refreshComments = jest
-      .spyOn(useDocsStore.getState(), "refreshActivePageComments")
+      .spyOn(useKnowledgeStore.getState(), "refreshActiveAssetComments")
       .mockResolvedValue(undefined);
     const fetchPage = jest
-      .spyOn(useDocsStore.getState(), "fetchPage")
+      .spyOn(useKnowledgeStore.getState(), "fetchAsset")
       .mockResolvedValue(undefined);
     const fetchVersions = jest
-      .spyOn(useDocsStore.getState(), "fetchVersions")
+      .spyOn(useKnowledgeStore.getState(), "fetchVersions")
       .mockResolvedValue(undefined);
 
     useWSStore.getState().connect("ws://localhost:7777/ws", "token");
@@ -733,10 +737,10 @@ describe("useWSStore", () => {
 
   it("refreshes docs tree for move, delete, and comment resolution events", () => {
     const refreshTree = jest
-      .spyOn(useDocsStore.getState(), "refreshActiveProjectTree")
+      .spyOn(useKnowledgeStore.getState(), "refreshActiveProjectTree")
       .mockResolvedValue(undefined);
     const refreshComments = jest
-      .spyOn(useDocsStore.getState(), "refreshActivePageComments")
+      .spyOn(useKnowledgeStore.getState(), "refreshActiveAssetComments")
       .mockResolvedValue(undefined);
 
     useWSStore.getState().connect("ws://localhost:7777/ws", "token");
@@ -1099,16 +1103,16 @@ describe("useWSStore", () => {
 
   it("refreshes docs tree when the active page context is missing", () => {
     const refreshTree = jest
-      .spyOn(useDocsStore.getState(), "refreshActiveProjectTree")
+      .spyOn(useKnowledgeStore.getState(), "refreshActiveProjectTree")
       .mockResolvedValue(undefined);
     const fetchPage = jest
-      .spyOn(useDocsStore.getState(), "fetchPage")
+      .spyOn(useKnowledgeStore.getState(), "fetchAsset")
       .mockResolvedValue(undefined);
 
-    useDocsStore.setState({
+    useKnowledgeStore.setState({
       projectId: "project-1",
       tree: [],
-      currentPage: null,
+      currentAsset: null,
       comments: [],
       versions: [],
       templates: [],

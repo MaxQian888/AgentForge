@@ -10,11 +10,13 @@ import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
-import { flattenDocsTree, useDocsStore } from "@/lib/stores/docs-store";
+import { flattenKnowledgeTree, useKnowledgeStore } from "@/lib/stores/knowledge-store";
 import { buildDocsHref } from "@/lib/route-hrefs";
 import { DocsSidebarPanel } from "@/components/docs/docs-sidebar-panel";
 import { TemplateCenter } from "@/components/docs/template-center";
 import { TemplatePicker } from "@/components/docs/template-picker";
+import { IngestedFilesPane } from "@/components/knowledge/IngestedFilesPane";
+import { KnowledgeSearch } from "@/components/knowledge/KnowledgeSearch";
 import { DocsPageDetailClient } from "./[pageId]/page-client";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
@@ -36,6 +38,8 @@ export default function DocsLandingPage() {
     fetchTemplates,
     fetchFavorites,
     fetchRecentAccess,
+    fetchIngestedFiles,
+    materializeAsWiki,
     createPage,
     createTemplate,
     createPageFromTemplate,
@@ -44,7 +48,7 @@ export default function DocsLandingPage() {
     movePage,
     toggleFavorite,
     togglePinned,
-  } = useDocsStore();
+  } = useKnowledgeStore();
   const [query, setQuery] = useState("");
   const [pickerOpen, setPickerOpen] = useState(
     () => requestedAction === "use-template" && Boolean(activeProjectId),
@@ -54,19 +58,20 @@ export default function DocsLandingPage() {
 
   useEffect(() => {
     if (!activeProjectId) return;
-    useDocsStore.getState().setProjectId(activeProjectId);
+    useKnowledgeStore.getState().setProjectId(activeProjectId);
     void fetchTree(activeProjectId);
     void fetchTemplates(activeProjectId);
     void fetchFavorites(activeProjectId);
     void fetchRecentAccess(activeProjectId);
-  }, [activeProjectId, fetchFavorites, fetchRecentAccess, fetchTemplates, fetchTree]);
+    void fetchIngestedFiles(activeProjectId);
+  }, [activeProjectId, fetchFavorites, fetchIngestedFiles, fetchRecentAccess, fetchTemplates, fetchTree]);
 
-  const allPages = useMemo(() => flattenDocsTree(tree), [tree]);
+  const allPages = useMemo(() => flattenKnowledgeTree(tree), [tree]);
   const pinnedPages = useMemo(() => allPages.filter((page) => page.isPinned), [allPages]);
   const templateDestinations = useMemo(
     () =>
       allPages
-        .filter((page) => !page.isTemplate)
+        .filter((page) => page.kind !== "template")
         .map((page) => ({
           id: page.id,
           title: page.title,
@@ -92,22 +97,32 @@ export default function DocsLandingPage() {
 
   return (
     <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-      <DocsSidebarPanel
-        query={query}
-        onQueryChange={setQuery}
-        tree={tree}
-        favorites={favorites}
-        recentAccess={recentAccess}
-        onMovePage={(targetPageId, parentId, sortOrder) =>
-          void movePage({ projectId: activeProjectId, pageId: targetPageId, parentId, sortOrder })
-        }
-        onToggleFavorite={(targetPageId, favorite) =>
-          void toggleFavorite({ projectId: activeProjectId, pageId: targetPageId, favorite })
-        }
-        onTogglePinned={(targetPageId, pinned) =>
-          void togglePinned({ projectId: activeProjectId, pageId: targetPageId, pinned })
-        }
-      />
+      <div className="flex flex-col gap-4">
+        <KnowledgeSearch projectId={activeProjectId} />
+        <DocsSidebarPanel
+          query={query}
+          onQueryChange={setQuery}
+          tree={tree}
+          favorites={favorites}
+          recentAccess={recentAccess}
+          onMovePage={(targetPageId, parentId, sortOrder) =>
+            void movePage({ projectId: activeProjectId, pageId: targetPageId, parentId, sortOrder })
+          }
+          onToggleFavorite={(targetPageId, favorite) =>
+            void toggleFavorite({ projectId: activeProjectId, pageId: targetPageId, favorite })
+          }
+          onTogglePinned={(targetPageId, pinned) =>
+            void togglePinned({ projectId: activeProjectId, pageId: targetPageId, pinned })
+          }
+        />
+        <IngestedFilesPane
+          projectId={activeProjectId}
+          onMaterializeAsWiki={async (assetId) => {
+            const page = await materializeAsWiki(activeProjectId, assetId);
+            if (page) router.push(buildDocsHref(page.id));
+          }}
+        />
+      </div>
 
       <div className="flex flex-col gap-6">
         <PageHeader
@@ -152,10 +167,10 @@ export default function DocsLandingPage() {
             <h2 className="text-base font-semibold">{t("favorites")}</h2>
             <div className="mt-3 flex flex-col gap-2">
               {favorites.map((favorite) => {
-                const page = allPages.find((item) => item.id === favorite.pageId);
+                const page = allPages.find((item) => item.id === favorite.assetId);
                 if (!page) return null;
                 return (
-                  <Link key={favorite.pageId} href={buildDocsHref(favorite.pageId)} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
+                  <Link key={favorite.assetId} href={buildDocsHref(favorite.assetId)} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
                     {page.title}
                   </Link>
                 );
@@ -170,10 +185,10 @@ export default function DocsLandingPage() {
             <h2 className="text-base font-semibold">{t("recent")}</h2>
             <div className="mt-3 flex flex-col gap-2">
               {recentAccess.map((access) => {
-                const page = allPages.find((item) => item.id === access.pageId);
+                const page = allPages.find((item) => item.id === access.assetId);
                 if (!page) return null;
                 return (
-                  <Link key={`${access.pageId}-${access.accessedAt}`} href={buildDocsHref(access.pageId)} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
+                  <Link key={`${access.assetId}-${access.accessedAt}`} href={buildDocsHref(access.assetId)} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
                     {page.title}
                   </Link>
                 );

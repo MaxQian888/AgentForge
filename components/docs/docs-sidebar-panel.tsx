@@ -6,13 +6,18 @@ import { useTranslations } from "next-intl";
 import { Clock3, Search, Star, Pin } from "lucide-react";
 import { Input } from "@/components/ui/input";
 import {
-  flattenDocsTree,
-  type DocsFavorite,
-  type DocsPageTreeNode,
-  type DocsRecentAccess,
-} from "@/lib/stores/docs-store";
+  flattenKnowledgeTree,
+  type KnowledgeAssetTreeNode,
+} from "@/lib/stores/knowledge-store";
 import { buildDocsHref } from "@/lib/route-hrefs";
 import { PageTree } from "./page-tree";
+
+type FavoriteEntry = { assetId?: string; pageId?: string; userId: string; createdAt: string };
+type RecentEntry = { assetId?: string; pageId?: string; userId: string; accessedAt: string };
+
+function resolveId(entry: FavoriteEntry | RecentEntry): string {
+  return ("assetId" in entry && entry.assetId) ? entry.assetId : (entry.pageId ?? "");
+}
 
 export function DocsSidebarPanel({
   query,
@@ -28,22 +33,22 @@ export function DocsSidebarPanel({
 }: {
   query: string;
   onQueryChange: (query: string) => void;
-  tree: DocsPageTreeNode[];
+  tree: KnowledgeAssetTreeNode[];
   currentPageId?: string | null;
-  favorites: DocsFavorite[];
-  recentAccess: DocsRecentAccess[];
+  favorites: FavoriteEntry[];
+  recentAccess: RecentEntry[];
   onMovePage?: (pageId: string, parentId: string | null, sortOrder: number) => void;
   onToggleFavorite?: (pageId: string, favorite: boolean) => void;
   onTogglePinned?: (pageId: string, pinned: boolean) => void;
   onDeletePage?: (pageId: string) => void;
 }) {
   const t = useTranslations("docs");
-  const flattened = useMemo(() => flattenDocsTree(tree), [tree]);
+  const flattened = useMemo(() => flattenKnowledgeTree(tree), [tree]);
   const favoritePages = flattened.filter((page) =>
-    favorites.some((favorite) => favorite.pageId === page.id)
+    favorites.some((favorite) => resolveId(favorite) === page.id)
   );
   const recentPages = recentAccess
-    .map((access) => flattened.find((page) => page.id === access.pageId))
+    .map((access) => flattened.find((page) => page.id === resolveId(access)))
     .filter((page): page is NonNullable<typeof page> => Boolean(page));
   const filteredTree = query.trim()
     ? flattened
@@ -68,7 +73,7 @@ export function DocsSidebarPanel({
       <section className="space-y-2">
         <h2 className="text-sm font-semibold">{t("sidebar.pageTree")}</h2>
         <PageTree
-          nodes={filteredTree as DocsPageTreeNode[]}
+          nodes={filteredTree as KnowledgeAssetTreeNode[]}
           currentPageId={currentPageId}
           onMovePage={onMovePage}
           onToggleFavorite={onToggleFavorite}

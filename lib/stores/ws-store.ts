@@ -6,7 +6,7 @@ import { useTaskStore } from "./task-store";
 import { useAgentStore } from "./agent-store";
 import { useNotificationStore } from "./notification-store";
 import { useDashboardStore } from "./dashboard-store";
-import { useDocsStore } from "./docs-store";
+import { useKnowledgeStore } from "./knowledge-store";
 import { useEntityLinkStore } from "./entity-link-store";
 import { useReviewStore } from "./review-store";
 import { useSprintStore, type Sprint } from "./sprint-store";
@@ -603,18 +603,18 @@ export const useWSStore = create<WSState>()((set) => ({
     client.on("team.cost_update", applyTeamEvent);
 
     const refreshDocsTree = () => {
-      void useDocsStore.getState().refreshActiveProjectTree();
+      void useKnowledgeStore.getState().refreshActiveProjectTree();
     };
 
     const refreshDocsPage = (pageId?: string) => {
-      const docsState = useDocsStore.getState();
-      if (!docsState.projectId || !docsState.currentPage) {
+      const docsState = useKnowledgeStore.getState();
+      if (!docsState.projectId || !docsState.currentAsset) {
         refreshDocsTree();
         return;
       }
-      void docsState.fetchPage(docsState.projectId, pageId ?? docsState.currentPage.id);
-      void docsState.fetchVersions(docsState.projectId, pageId ?? docsState.currentPage.id);
-      void docsState.fetchComments(docsState.projectId, pageId ?? docsState.currentPage.id);
+      void docsState.fetchAsset(docsState.projectId, pageId ?? docsState.currentAsset.id);
+      void docsState.fetchVersions(docsState.projectId, pageId ?? docsState.currentAsset.id);
+      void docsState.fetchComments(docsState.projectId, pageId ?? docsState.currentAsset.id);
     };
 
     client.on("wiki.page.created", (data) => {
@@ -636,15 +636,15 @@ export const useWSStore = create<WSState>()((set) => ({
       refreshDocsTree();
     });
     client.on("wiki.comment.created", () => {
-      void useDocsStore.getState().refreshActivePageComments();
+      void useKnowledgeStore.getState().refreshActiveAssetComments();
     });
     client.on("wiki.comment.resolved", () => {
-      void useDocsStore.getState().refreshActivePageComments();
+      void useKnowledgeStore.getState().refreshActiveAssetComments();
     });
     client.on("wiki.version.published", () => {
-      const docsState = useDocsStore.getState();
-      if (docsState.projectId && docsState.currentPage) {
-        void docsState.fetchVersions(docsState.projectId, docsState.currentPage.id);
+      const docsState = useKnowledgeStore.getState();
+      if (docsState.projectId && docsState.currentAsset) {
+        void docsState.fetchVersions(docsState.projectId, docsState.currentAsset.id);
       }
     });
 

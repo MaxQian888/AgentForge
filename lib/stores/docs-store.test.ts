@@ -4,7 +4,11 @@ jest.mock("@/lib/stores/auth-store", () => ({
   },
 }));
 
-import { flattenDocsTree, findDocsPageById, useDocsStore } from "./docs-store";
+import {
+  flattenKnowledgeTree as flattenDocsTree,
+  findKnowledgeAssetById as findDocsPageById,
+  useKnowledgeStore as useDocsStore,
+} from "./knowledge-store";
 
 describe("useDocsStore", () => {
   const fetchMock = jest.fn();
@@ -21,14 +25,17 @@ describe("useDocsStore", () => {
     useDocsStore.setState({
       projectId: null,
       tree: [],
-      currentPage: null,
+      ingestedFiles: [],
+      currentAsset: null,
       comments: [],
       versions: [],
       templates: [],
       favorites: [],
       recentAccess: [],
+      searchResults: null,
       loading: false,
       saving: false,
+      uploading: false,
       error: null,
     });
   });
@@ -126,7 +133,7 @@ describe("useDocsStore", () => {
         title: "Runbook",
       })
     );
-    expect(useDocsStore.getState().currentPage).toEqual(
+    expect(useDocsStore.getState().currentAsset).toEqual(
       expect.objectContaining({
         id: "page-2",
         title: "Runbook",
@@ -169,7 +176,7 @@ describe("useDocsStore", () => {
       .mockResolvedValueOnce(
         mockJsonResponse([
           {
-            pageId: "page-3",
+            assetId: "page-3",
             userId: "user-1",
             createdAt: "2026-03-26T12:09:00.000Z",
           },
@@ -188,7 +195,7 @@ describe("useDocsStore", () => {
 
     expect(page).toEqual(expect.objectContaining({ id: "page-3", title: "ADR" }));
     expect(useDocsStore.getState().favorites).toEqual([
-      expect.objectContaining({ pageId: "page-3", userId: "user-1" }),
+      expect.objectContaining({ assetId: "page-3", userId: "user-1" }),
     ]);
   });
 
@@ -218,7 +225,7 @@ describe("useDocsStore", () => {
     expect(resolvedProjectId).toBe("project-2");
     expect(useDocsStore.getState()).toMatchObject({
       projectId: "project-2",
-      currentPage: expect.objectContaining({
+      currentAsset: expect.objectContaining({
         id: "page-9",
         title: "Shared page",
       }),
@@ -352,10 +359,10 @@ describe("useDocsStore", () => {
 
     expect(fetchMock).toHaveBeenNthCalledWith(
       1,
-      "http://localhost:7777/api/v1/projects/project-1/wiki/templates?q=runbook&category=runbook&source=system",
+      "http://localhost:7777/api/v1/projects/project-1/knowledge/assets?kind=template&q=runbook&category=runbook&source=system",
       expect.any(Object),
     );
-    expect(created).toEqual(expect.objectContaining({ id: "template-2", isTemplate: true }));
+    expect(created).toEqual(expect.objectContaining({ id: "template-2", kind: "template" }));
     expect(updated).toEqual(
       expect.objectContaining({
         id: "template-2",

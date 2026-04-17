@@ -3,7 +3,7 @@
 import { useMemo, useState } from "react"
 import { TemplateCenter } from "@/components/docs/template-center"
 import { TemplatePicker } from "@/components/docs/template-picker"
-import type { DocsPage } from "@/lib/stores/docs-store"
+import type { KnowledgeAsset } from "@/lib/stores/knowledge-store"
 
 type CreatedDocument = {
   id: string
@@ -12,41 +12,44 @@ type CreatedDocument = {
   templateId: string
 }
 
-function createTemplate(overrides: Partial<DocsPage> = {}): DocsPage {
+function createTemplate(overrides: Partial<KnowledgeAsset> = {}): KnowledgeAsset {
+  const isSystemTemplate = overrides.isSystemTemplate ?? true;
   return {
     id: overrides.id ?? crypto.randomUUID(),
+    projectId: overrides.projectId ?? "playwright-project",
+    kind: "template",
     spaceId: "playwright-space",
     parentId: null,
     title: overrides.title ?? "Incident Runbook",
-    content: overrides.content ?? "[]",
+    contentJson: overrides.contentJson ?? "[]",
     contentText: overrides.contentText ?? "Operational checklist",
     path: overrides.path ?? `/templates/${overrides.id ?? "incident-runbook"}`,
     sortOrder: overrides.sortOrder ?? 0,
-    isTemplate: true,
     templateCategory: overrides.templateCategory ?? "runbook",
-    isSystem: overrides.isSystem ?? true,
+    isSystemTemplate,
     isPinned: false,
     createdBy: "playwright-user",
     updatedBy: "playwright-user",
     createdAt: "2026-04-15T00:00:00.000Z",
     updatedAt: "2026-04-15T00:00:00.000Z",
     deletedAt: null,
-    templateSource: overrides.templateSource ?? (overrides.isSystem === false ? "custom" : "system"),
+    version: 1,
+    templateSource: overrides.templateSource ?? (isSystemTemplate ? "system" : "custom"),
     previewSnippet: overrides.previewSnippet ?? "Operational checklist",
-    canEdit: overrides.canEdit ?? !overrides.isSystem,
-    canDelete: overrides.canDelete ?? !overrides.isSystem,
+    canEdit: overrides.canEdit ?? !isSystemTemplate,
+    canDelete: overrides.canDelete ?? !isSystemTemplate,
     canDuplicate: overrides.canDuplicate ?? true,
     canUse: overrides.canUse ?? true,
-  }
+  };
 }
 
 export default function DocsTemplatePlaywrightPage() {
-  const [templates, setTemplates] = useState<DocsPage[]>([
+  const [templates, setTemplates] = useState<KnowledgeAsset[]>([
     createTemplate({
       id: "template-system",
       title: "Incident Runbook",
       templateCategory: "runbook",
-      isSystem: true,
+      isSystemTemplate: true,
       templateSource: "system",
     }),
   ])
@@ -75,7 +78,7 @@ export default function DocsTemplatePlaywrightPage() {
               id: title.toLowerCase().replace(/\s+/g, "-"),
               title,
               templateCategory: category,
-              isSystem: false,
+              isSystemTemplate: false,
               templateSource: "custom",
               canEdit: true,
               canDelete: true,
@@ -93,7 +96,7 @@ export default function DocsTemplatePlaywrightPage() {
               id: `${templateId}-copy`,
               title: name,
               templateCategory: category,
-              isSystem: false,
+              isSystemTemplate: false,
               templateSource: "custom",
               canEdit: true,
               canDelete: true,

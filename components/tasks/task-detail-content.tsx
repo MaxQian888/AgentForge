@@ -33,7 +33,7 @@ import { createApiClient } from "@/lib/api-client";
 import { BacklinksPanel, type BacklinkItem } from "@/components/shared/backlinks-panel";
 import type { TeamMember } from "@/lib/dashboard/summary";
 import type { Agent } from "@/lib/stores/agent-store";
-import { flattenDocsTree, useDocsStore } from "@/lib/stores/docs-store";
+import { flattenKnowledgeTree, useKnowledgeStore } from "@/lib/stores/knowledge-store";
 import { useEntityLinkStore } from "@/lib/stores/entity-link-store";
 import { useAuthStore } from "@/lib/stores/auth-store";
 import { useCustomFieldStore } from "@/lib/stores/custom-field-store";
@@ -185,8 +185,8 @@ export function TaskDetailContent({
   onTaskDelete,
 }: TaskDetailContentProps) {
   const t = useTranslations("tasks");
-  const docsTree = useDocsStore((state) => state.tree);
-  const fetchDocsTree = useDocsStore((state) => state.fetchTree);
+  const docsTree = useKnowledgeStore((state) => state.tree);
+  const fetchDocsTree = useKnowledgeStore((state) => state.fetchTree);
   const entityLinks = useEntityLinkStore(
     (state) => state.linksByEntity[`task:${task.id}`] ?? EMPTY_LINKS,
   );
@@ -1169,7 +1169,7 @@ export function TaskDetailContent({
       <DocLinkPicker
         open={docPickerOpen}
         onOpenChange={setDocPickerOpen}
-        docs={flattenDocsTree(docsTree).map((doc) => ({
+        docs={flattenKnowledgeTree(docsTree).map((doc) => ({
           id: doc.id,
           title: doc.title,
           path: doc.path,

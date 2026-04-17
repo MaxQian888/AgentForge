@@ -4,7 +4,7 @@ import { Star, Pin, Trash2, GripVertical, ChevronRight } from "lucide-react";
 import Link from "next/link";
 import { useState } from "react";
 import { Button } from "@/components/ui/button";
-import type { DocsPageTreeNode } from "@/lib/stores/docs-store";
+import type { KnowledgeAssetTreeNode } from "@/lib/stores/knowledge-store";
 import { buildDocsHref } from "@/lib/route-hrefs";
 
 export function PageTreeItem({
@@ -15,7 +15,7 @@ export function PageTreeItem({
   onTogglePinned,
   onDelete,
 }: {
-  node: DocsPageTreeNode;
+  node: KnowledgeAssetTreeNode;
   currentPageId?: string | null;
   onMove?: (pageId: string, parentId: string | null, sortOrder: number) => void;
   onToggleFavorite?: (pageId: string, favorite: boolean) => void;
@@ -32,7 +32,7 @@ export function PageTreeItem({
       onDrop={(event) => {
         const draggedId = event.dataTransfer.getData("text/page-id");
         if (draggedId && draggedId !== node.id) {
-          onMove?.(draggedId, node.parentId ?? null, node.sortOrder);
+          onMove?.(draggedId, node.parentId ?? null, node.sortOrder ?? 0);
         }
         event.preventDefault();
       }}
