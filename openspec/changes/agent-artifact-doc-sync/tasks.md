@@ -1,7 +1,9 @@
 ## 1. Prerequisites
 
-- [ ] 1.1 Confirm `unify-wiki-and-ingested-documents` is archived and the unified `KnowledgeAsset` model is live in the codebase; abort this change until it is
-- [ ] 1.2 Audit existing WebSocket event names for `agent_run.*`, `cost.*`, `review.*`, `task.*` to make sure the hub emits what the subscription filters will need; file follow-up tasks if any are missing
+- [x] 1.1 Confirm `unify-wiki-and-ingested-documents` is archived and the unified `KnowledgeAsset` model is live in the codebase; abort this change until it is
+- [x] 1.2 Audit existing WebSocket event names for `agent_run.*`, `cost.*`, `review.*`, `task.*` to make sure the hub emits what the subscription filters will need; file follow-up tasks if any are missing
+
+> **Audit findings (1.2):** hub uses `agent.*` prefix (not `agent_run.*`); no dedicated `cost.accounting_updated` (use `agent.cost_update`/`team.cost_update`); `review.updated` covers both state and findings changes (no distinct `findings_updated`); `task.*` matches as-is; `knowledge.asset.live_artifacts_changed` is the only net-new event (added in 9.4). Projectors' `Subscribe()` will map logical topics → concrete hub event names — no hub rename/new-emit required.
 
 ## 2. Projector interface and registry
 
