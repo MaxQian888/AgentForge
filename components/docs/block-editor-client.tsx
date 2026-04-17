@@ -1,20 +1,30 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
-import { BlockNoteSchema } from "@blocknote/core";
-import { useCreateBlockNote } from "@blocknote/react";
+import { useEffect, useMemo, useState, type ReactNode } from "react";
+import { BlockNoteSchema, filterSuggestionItems } from "@blocknote/core";
+import {
+  SuggestionMenuController,
+  getDefaultReactSlashMenuItems,
+  useCreateBlockNote,
+} from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/shadcn";
 import "@blocknote/core/fonts/inter.css";
 import "@blocknote/shadcn/style.css";
 import { createEntityCardBlock } from "./blocknote-entity-card-block";
 import { createFormulaBlock } from "./blocknote-formula-block";
 import { createMermaidBlock } from "./blocknote-mermaid-block";
+import { createLiveArtifactBlock } from "./live-blocks/live-artifact-block";
+import {
+  LiveArtifactProvider,
+  type LiveArtifactContextValue,
+} from "./live-blocks/live-artifact-context";
 
 const docsSchema = BlockNoteSchema.create().extend({
   blockSpecs: {
     formula: createFormulaBlock(),
     mermaid: createMermaidBlock(),
     entityCard: createEntityCardBlock(),
+    liveArtifact: createLiveArtifactBlock(),
   },
 });
 
@@ -27,6 +37,34 @@ function parseContent(content: string) {
   }
 }
 
+export interface BlockEditorClientProps {
+  value: string;
+  editable?: boolean;
+  commentedBlockIds?: string[];
+  taskCountsByBlock?: Record<string, number>;
+  onCreateTasksFromSelection?: (blockIds: string[]) => void;
+  onChange?: (content: string, contentText: string) => void;
+  /**
+   * Extra slash-menu items (live-artifact insertion entries). Pass the array
+   * returned by `useLiveArtifactSlashMenu`. When present, the default slash
+   * menu is augmented with these items.
+   */
+  extraSlashMenuItems?: readonly unknown[];
+  /**
+   * Elements that must be rendered alongside the editor (dialogs opened by
+   * slash-menu items). Pass the `menuDialogs` node from
+   * `useLiveArtifactSlashMenu`.
+   */
+  slashMenuDialogs?: ReactNode;
+  /**
+   * If provided, wraps the editor in a `LiveArtifactProvider` so embedded
+   * live-artifact blocks receive projections + actions. Supply the hook
+   * output from `useLiveArtifactProjections` plus `{assetId, projectId,
+   * token, apiUrl}`.
+   */
+  liveArtifactValue?: Partial<LiveArtifactContextValue>;
+}
+
 export function BlockEditorClient({
   value,
   editable = true,
@@ -34,14 +72,10 @@ export function BlockEditorClient({
   taskCountsByBlock = {},
   onCreateTasksFromSelection,
   onChange,
-}: {
-  value: string;
-  editable?: boolean;
-  commentedBlockIds?: string[];
-  taskCountsByBlock?: Record<string, number>;
-  onCreateTasksFromSelection?: (blockIds: string[]) => void;
-  onChange?: (content: string, contentText: string) => void;
-}) {
+  extraSlashMenuItems,
+  slashMenuDialogs,
+  liveArtifactValue,
+}: BlockEditorClientProps) {
   const editor = useCreateBlockNote(
     {
       schema: docsSchema,
@@ -69,6 +103,41 @@ export function BlockEditorClient({
             : JSON.stringify(block),
       })),
     [editor.document],
+  );
+
+  const hasLiveArtifacts = Boolean(
+    extraSlashMenuItems && extraSlashMenuItems.length > 0,
+  );
+  const usesProvider = Boolean(liveArtifactValue);
+
+  const editorBody = (
+    <BlockNoteView
+      editor={editor}
+      editable={editable}
+      slashMenu={!hasLiveArtifacts}
+      onChange={() => {
+        const serialized = JSON.stringify(editor.document);
+        const plainText = editor.document
+          .map((block) => JSON.stringify(block))
+          .join("\n");
+        onChange?.(serialized, plainText);
+      }}
+    >
+      {hasLiveArtifacts ? (
+        <SuggestionMenuController
+          triggerCharacter="/"
+          getItems={async (query: string) =>
+            filterSuggestionItems(
+              [
+                ...getDefaultReactSlashMenuItems(editor),
+                ...(extraSlashMenuItems ?? []),
+              ] as never,
+              query,
+            )
+          }
+        />
+      ) : null}
+    </BlockNoteView>
   );
 
   return (
@@ -121,17 +190,14 @@ export function BlockEditorClient({
           Inline comment anchors: {commentedBlockIds.join(", ")}
         </div>
       ) : null}
-      <BlockNoteView
-        editor={editor}
-        editable={editable}
-        onChange={() => {
-          const serialized = JSON.stringify(editor.document);
-          const plainText = editor.document
-            .map((block) => JSON.stringify(block))
-            .join("\n");
-          onChange?.(serialized, plainText);
-        }}
-      />
+      {usesProvider ? (
+        <LiveArtifactProvider value={liveArtifactValue}>
+          {editorBody}
+        </LiveArtifactProvider>
+      ) : (
+        editorBody
+      )}
+      {slashMenuDialogs}
     </div>
   );
 }

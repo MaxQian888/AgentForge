@@ -122,9 +122,13 @@ func (c *Client) readPump() {
 }
 
 // clientFrame is the shape of inbound client->server control frames.
+// Legacy subscribe/unsubscribe frames use `op` + `channels`. Live-artifact
+// asset_open / asset_close frames use `type` + `payload`, handled by the
+// subscription router via Hub.DeliverClientMessage.
 type clientFrame struct {
 	Op       string   `json:"op"`
 	Channels []string `json:"channels,omitempty"`
+	Type     string   `json:"type,omitempty"`
 }
 
 // handleFrame parses a single inbound frame and mutates subscription state.
@@ -138,6 +142,14 @@ func (c *Client) handleFrame(raw []byte) {
 	var frame clientFrame
 	if err := json.Unmarshal(raw, &frame); err != nil {
 		c.sendRejected("bad frame")
+		return
+	}
+	// Live-artifact subscription frames route through the router.
+	switch frame.Type {
+	case "asset_open", "asset_close":
+		if err := c.hub.DeliverClientMessage(c.id, raw); err != nil {
+			c.sendRejected(err.Error())
+		}
 		return
 	}
 	switch frame.Op {

@@ -16,6 +16,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/handler"
 	"github.com/react-go-quick-starter/server/internal/knowledge"
+	"github.com/react-go-quick-starter/server/internal/knowledge/liveartifact"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
@@ -488,6 +489,21 @@ func RegisterRoutes(
 	knowledgeH := handler.NewKnowledgeAssetHandler(knowledgeAssetSvc)
 	_ = knowledgeBlobStorage // available for upload service wiring when implemented
 
+	// Live-artifact projector registry. The projection endpoint and WS
+	// subscription router look projectors up by LiveArtifactKind.
+	liveArtifactRegistry := liveartifact.NewRegistry()
+	liveArtifactRegistry.Register(liveartifact.NewAgentRunProjector(agentRunRepo))
+	liveArtifactRegistry.Register(liveartifact.NewCostSummaryProjector(agentRunRepo))
+	liveArtifactRegistry.Register(liveartifact.NewReviewProjector(reviewRepo, taskRepo))
+	liveArtifactRegistry.Register(liveartifact.NewTaskGroupProjector(taskRepo, savedViewRepo))
+	knowledgeH = knowledgeH.WithLiveArtifactRegistry(liveArtifactRegistry)
+
+	// Wire the WS subscription router so live-artifact block refs get
+	// per-asset fan-out on entity events. The router consumes events from
+	// Hub.BroadcastEvent; legacy FanoutBytes callers do not trigger it.
+	liveArtifactRouter := ws.NewLiveArtifactRouter(hub, liveArtifactRegistry)
+	hub.SetSubscriptionRouter(liveArtifactRouter)
+
 	logSvc := service.NewLogService(logRepo, hub, bus)
 	logH := handler.NewLogHandler(logSvc)
 
@@ -628,6 +644,8 @@ func RegisterRoutes(
 	projectGroup.PATCH("/knowledge/assets/:id/comments/:cid", knowledgeH.UpdateComment)
 	projectGroup.DELETE("/knowledge/assets/:id/comments/:cid", knowledgeH.DeleteComment)
 	projectGroup.POST("/knowledge/assets/:id/decompose-tasks", docDecomposeH.Decompose)
+	projectGroup.POST("/knowledge/assets/:id/live-artifacts/project", knowledgeH.ProjectLiveArtifacts)
+	projectGroup.POST("/knowledge/assets/:id/live-artifacts/:blockId/freeze", knowledgeH.FreezeLiveArtifact)
 
 	// Task operations (not project-scoped, task ID is unique)
 	protected.GET("/tasks/:id", taskH.Get)

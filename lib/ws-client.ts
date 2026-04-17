@@ -76,6 +76,11 @@ export class WSClient {
     this.ws = null;
   }
 
+  /** Send an arbitrary JSON-serialisable control frame to the server (e.g. asset_open/asset_close). No-op if the socket is not OPEN. */
+  sendControl(data: unknown): void {
+    this.send(data);
+  }
+
   private send(data: unknown): void {
     if (this.ws?.readyState === WebSocket.OPEN) {
       this.ws.send(JSON.stringify(data));

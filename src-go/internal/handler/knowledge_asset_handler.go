@@ -2,13 +2,16 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"io"
 	"net/http"
 	"strconv"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/knowledge"
+	"github.com/react-go-quick-starter/server/internal/knowledge/liveartifact"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 )
@@ -45,8 +48,9 @@ type knowledgeUploadService interface {
 
 // KnowledgeAssetHandler handles all /knowledge/* endpoints.
 type KnowledgeAssetHandler struct {
-	svc    knowledgeAssetHandlerService
-	upload knowledgeUploadService
+	svc           knowledgeAssetHandlerService
+	upload        knowledgeUploadService
+	liveArtifacts *liveartifact.Registry
 }
 
 // NewKnowledgeAssetHandler creates a new handler with the provided service.
@@ -57,6 +61,13 @@ func NewKnowledgeAssetHandler(svc *knowledge.KnowledgeAssetService) *KnowledgeAs
 // WithUploadService attaches an upload service for multipart operations.
 func (h *KnowledgeAssetHandler) WithUploadService(upload knowledgeUploadService) *KnowledgeAssetHandler {
 	h.upload = upload
+	return h
+}
+
+// WithLiveArtifactRegistry attaches a projector registry for live-artifact
+// projection and freeze endpoints.
+func (h *KnowledgeAssetHandler) WithLiveArtifactRegistry(reg *liveartifact.Registry) *KnowledgeAssetHandler {
+	h.liveArtifacts = reg
 	return h
 }
 
@@ -503,6 +514,243 @@ func (h *KnowledgeAssetHandler) Search(c echo.Context) error {
 func (h *KnowledgeAssetHandler) DecomposeTasks(c echo.Context) error {
 	// This endpoint is wired to the existing DocDecompositionHandler for now.
 	return c.JSON(http.StatusNotImplemented, map[string]string{"message": "use the doc-decompose endpoint"})
+}
+
+// --- Live artifacts ---
+
+// projectLiveArtifactsRequest is the POST body for the projection endpoint.
+type projectLiveArtifactsRequest struct {
+	Blocks []projectBlockRef `json:"blocks"`
+}
+
+type projectBlockRef struct {
+	BlockID   string          `json:"block_id"`
+	LiveKind  string          `json:"live_kind"`
+	TargetRef json.RawMessage `json:"target_ref"`
+	ViewOpts  json.RawMessage `json:"view_opts"`
+}
+
+type projectLiveArtifactsResponse struct {
+	Results map[string]liveartifact.ProjectionResult `json:"results"`
+}
+
+const maxProjectBlocksPerRequest = 50
+
+// ProjectLiveArtifacts runs the registered projector for each block in the
+// request and returns a per-block map of ProjectionResult.
+func (h *KnowledgeAssetHandler) ProjectLiveArtifacts(c echo.Context) error {
+	pc := resolvePrincipal(c)
+	projectID := appMiddleware.GetProjectID(c)
+
+	assetID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid asset id"})
+	}
+
+	asset, err := h.svc.Get(c.Request().Context(), pc, assetID)
+	if err != nil {
+		return knowledgeError(c, err)
+	}
+	if asset.ProjectID != projectID {
+		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: knowledge.ErrAssetNotFound.Error()})
+	}
+
+	req := new(projectLiveArtifactsRequest)
+	if err := c.Bind(req); err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid request body"})
+	}
+	if len(req.Blocks) > maxProjectBlocksPerRequest {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "too many blocks (max 50)"})
+	}
+
+	results := make(map[string]liveartifact.ProjectionResult, len(req.Blocks))
+	for _, b := range req.Blocks {
+		if b.BlockID == "" {
+			continue
+		}
+		results[b.BlockID] = h.projectOne(c.Request().Context(), pc, projectID, b)
+	}
+
+	return c.JSON(http.StatusOK, projectLiveArtifactsResponse{Results: results})
+}
+
+// projectOne looks up the projector and runs the projection for a single block.
+func (h *KnowledgeAssetHandler) projectOne(
+	ctx context.Context,
+	pc model.PrincipalContext,
+	projectID uuid.UUID,
+	b projectBlockRef,
+) liveartifact.ProjectionResult {
+	if h.liveArtifacts == nil {
+		return liveartifact.ProjectionResult{
+			Status:      liveartifact.StatusNotFound,
+			ProjectedAt: time.Now().UTC(),
+			Diagnostics: "unsupported live_kind",
+		}
+	}
+	p, ok := h.liveArtifacts.Lookup(liveartifact.LiveArtifactKind(b.LiveKind))
+	if !ok {
+		return liveartifact.ProjectionResult{
+			Status:      liveartifact.StatusNotFound,
+			ProjectedAt: time.Now().UTC(),
+			Diagnostics: "unsupported live_kind",
+		}
+	}
+	res, err := p.Project(ctx, pc, projectID, b.TargetRef, b.ViewOpts)
+	if err != nil {
+		return liveartifact.ProjectionResult{
+			Status:      liveartifact.StatusDegraded,
+			ProjectedAt: time.Now().UTC(),
+			Diagnostics: err.Error(),
+		}
+	}
+	return res
+}
+
+// freezeResponseError is a 409/422 body with diagnostics.
+type freezeResponseError struct {
+	Message     string `json:"message"`
+	Diagnostics string `json:"diagnostics,omitempty"`
+}
+
+// FreezeLiveArtifact replaces a live-artifact block in an asset's BlockNote
+// content with a callout + the latest projection, snapshots the pre-freeze
+// state as a version, then saves the mutated content.
+func (h *KnowledgeAssetHandler) FreezeLiveArtifact(c echo.Context) error {
+	pc := resolvePrincipal(c)
+	projectID := appMiddleware.GetProjectID(c)
+
+	assetID, err := uuid.Parse(c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid asset id"})
+	}
+	blockID := c.Param("blockId")
+	if blockID == "" {
+		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: "invalid block id"})
+	}
+
+	ctx := c.Request().Context()
+	asset, err := h.svc.Get(ctx, pc, assetID)
+	if err != nil {
+		return knowledgeError(c, err)
+	}
+	if asset.ProjectID != projectID {
+		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: knowledge.ErrAssetNotFound.Error()})
+	}
+
+	var blocks []map[string]any
+	if err := json.Unmarshal([]byte(asset.ContentJSON), &blocks); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: "asset content is not a BlockNote array"})
+	}
+
+	idx := -1
+	for i, blk := range blocks {
+		if id, _ := blk["id"].(string); id == blockID {
+			idx = i
+			break
+		}
+	}
+	if idx < 0 {
+		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: "block not found"})
+	}
+
+	block := blocks[idx]
+	if t, _ := block["type"].(string); t != "live_artifact" {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: "block is not a live artifact"})
+	}
+	props, _ := block["props"].(map[string]any)
+	if props == nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: "block is not a live artifact"})
+	}
+	liveKind, _ := props["live_kind"].(string)
+
+	targetRefJSON, err := marshalPropField(props["target_ref"])
+	if err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: "invalid target_ref"})
+	}
+	viewOptsJSON, err := marshalPropField(props["view_opts"])
+	if err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: "invalid view_opts"})
+	}
+
+	if h.liveArtifacts == nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: "unsupported live_kind"})
+	}
+	p, ok := h.liveArtifacts.Lookup(liveartifact.LiveArtifactKind(liveKind))
+	if !ok {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: "unsupported live_kind"})
+	}
+
+	result, err := p.Project(ctx, pc, projectID, targetRefJSON, viewOptsJSON)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	if result.Status != liveartifact.StatusOK {
+		return c.JSON(http.StatusConflict, freezeResponseError{
+			Message:     "cannot freeze: " + string(result.Status),
+			Diagnostics: result.Diagnostics,
+		})
+	}
+
+	var fragment []map[string]any
+	if len(result.Projection) > 0 {
+		if err := json.Unmarshal(result.Projection, &fragment); err != nil {
+			return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "invalid projection fragment"})
+		}
+	}
+
+	callout := map[string]any{
+		"id":    uuid.NewString(),
+		"type":  "callout",
+		"props": map[string]any{"variant": "frozen"},
+		"content": []any{map[string]any{
+			"type":   "text",
+			"text":   "Frozen from " + liveKind + " on " + time.Now().UTC().Format(time.RFC3339),
+			"styles": map[string]any{},
+		}},
+	}
+
+	// Splice: replace blocks[idx] with [callout, fragment...].
+	replacement := make([]map[string]any, 0, 1+len(fragment))
+	replacement = append(replacement, callout)
+	replacement = append(replacement, fragment...)
+
+	newBlocks := make([]map[string]any, 0, len(blocks)-1+len(replacement))
+	newBlocks = append(newBlocks, blocks[:idx]...)
+	newBlocks = append(newBlocks, replacement...)
+	newBlocks = append(newBlocks, blocks[idx+1:]...)
+
+	newContentJSON, err := json.Marshal(newBlocks)
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: "failed to marshal new content"})
+	}
+
+	// Snapshot pre-freeze state before mutating.
+	if _, err := h.svc.CreateVersion(ctx, pc, assetID, "Frozen live artifact "+blockID); err != nil {
+		return knowledgeError(c, err)
+	}
+
+	updated, err := h.svc.Update(ctx, pc, assetID, model.UpdateKnowledgeAssetRequest{
+		Title:       asset.Title,
+		ContentJSON: string(newContentJSON),
+	})
+	if err != nil {
+		return knowledgeError(c, err)
+	}
+	return c.JSON(http.StatusOK, updated.ToDTO())
+}
+
+// marshalPropField re-marshals a map-decoded BlockNote prop so it can be
+// passed into a projector as json.RawMessage.
+func marshalPropField(v any) (json.RawMessage, error) {
+	if v == nil {
+		return nil, nil
+	}
+	b, err := json.Marshal(v)
+	if err != nil {
+		return nil, err
+	}
+	return json.RawMessage(b), nil
 }
 
 // --- helpers ---
