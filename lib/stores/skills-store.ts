@@ -112,6 +112,7 @@ interface SkillsState {
   actionLoading: boolean;
   error: string | null;
   filters: SkillsFilters;
+  lastVerificationResult: SkillsVerifyResult | null;
   fetchSkills: () => Promise<void>;
   fetchSkillDetail: (id: string) => Promise<void>;
   verifySkills: (families?: SkillFamily[]) => Promise<SkillsVerifyResult>;
@@ -140,6 +141,7 @@ export const useSkillsStore = create<SkillsState>()((set, get) => ({
     status: "all",
     query: "",
   },
+  lastVerificationResult: null,
 
   fetchSkills: async () => {
     const token = getToken();
@@ -214,6 +216,7 @@ export const useSkillsStore = create<SkillsState>()((set, get) => ({
         families && families.length > 0 ? { families } : {},
         { token },
       );
+      set({ lastVerificationResult: data });
       await get().fetchSkills();
       return data;
     } finally {
