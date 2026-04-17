@@ -1,8 +1,5 @@
-# workflow-template-library Specification
+## MODIFIED Requirements
 
-## Purpose
-Define the project-aware workflow template library so operators can discover, publish, manage, clone, and execute built-in, marketplace, and current-project workflow templates without cross-project leakage or mutating immutable shipped templates in place.
-## Requirements
 ### Requirement: Workflow template library resolves templates in current project context
 The system SHALL provide a workflow template library that resolves the active project context from an explicit, validated project-scoped request contract and returns built-in, marketplace, and current-project custom workflow templates without exposing custom templates owned by other projects. Requests that do not provide a valid project context for project-owned template discovery MUST fail explicitly instead of falling back to ambient selection, implicit header defaults, or zero-value project scope.
 
@@ -20,17 +17,6 @@ The system SHALL provide a workflow template library that resolves the active pr
 - **THEN** the system rejects the request with a client-visible error
 - **THEN** the library does not silently return a zero-project or globally over-broad result set
 
-### Requirement: Workflow template preview exposes reuse and compatibility context
-The workflow template library SHALL let operators inspect a template before using or managing it. Preview MUST include name, description, source, category, topology summary, required template variables, and any immutable or compatibility cues relevant to the current source.
-
-#### Scenario: Preview built-in or marketplace template before use
-- **WHEN** the operator opens preview for a built-in or marketplace workflow template
-- **THEN** the system shows the template metadata, required variables, and immutable-source cues before the operator clones or executes it
-
-#### Scenario: Preview custom project template before management
-- **WHEN** the operator opens preview for a custom workflow template owned by the current project
-- **THEN** the system shows the same template metadata together with management actions allowed for that custom template
-
 ### Requirement: Operators can publish saved workflows as custom templates
 The system SHALL allow operators to publish a saved workflow definition as a project-owned custom template without mutating the original workflow definition in place. The published template SHALL retain lineage to the source workflow definition so future management surfaces can explain where the template came from, and the publish operation MUST verify that the source workflow definition belongs to the explicit current project context before creating the template.
 
@@ -43,19 +29,6 @@ The system SHALL allow operators to publish a saved workflow definition as a pro
 - **WHEN** a client attempts to publish a workflow definition that belongs to a different project than the explicit request scope
 - **THEN** the system rejects the publish request as an ownership mismatch
 - **THEN** no template record is created for that mismatched workflow definition
-
-### Requirement: Operators can manage project-owned workflow templates
-The system SHALL allow operators to edit and delete workflow templates owned by the current project. Built-in and marketplace templates MUST remain immutable in place and SHALL require clone or publish-a-copy flows for customization.
-
-#### Scenario: Edit or delete custom workflow template
-- **WHEN** the operator edits or deletes a workflow template owned by the current project
-- **THEN** the system applies that change to the custom template record only
-- **THEN** previously cloned workflows or prior executions remain unchanged
-
-#### Scenario: Immutable shipped template cannot be edited in place
-- **WHEN** the operator attempts to manage a built-in or marketplace workflow template as if it were custom
-- **THEN** the system blocks in-place edit and delete actions
-- **THEN** the system offers clone or copy-based customization actions instead
 
 ### Requirement: Workflow templates can be cloned or executed with scoped overrides
 The system SHALL allow operators to clone or execute a workflow template within the current project using template-variable overrides. The resulting workflow definition or execution SHALL belong to the explicit current project and SHALL remain independent from the source template afterward. The system MUST reject clone or execute requests when the explicit project context is missing or when the requested template source is not visible to that project.
@@ -74,4 +47,3 @@ The system SHALL allow operators to clone or execute a workflow template within 
 - **WHEN** a client attempts to clone or execute a template that is neither global nor owned by the explicitly requested project
 - **THEN** the system rejects the request instead of creating a workflow definition or execution in the current project
 - **THEN** the request does not leak custom template behavior across project boundaries
-

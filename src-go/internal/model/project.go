@@ -10,6 +10,12 @@ import (
 
 const DefaultCodingAgentRuntime = "claude_code"
 
+const (
+	ProjectStatusActive   = "active"
+	ProjectStatusPaused   = "paused"
+	ProjectStatusArchived = "archived"
+)
+
 type CodingAgentSelection struct {
 	Runtime  string `json:"runtime,omitempty"`
 	Provider string `json:"provider,omitempty"`
@@ -139,6 +145,9 @@ type Project struct {
 	RepoURL       string    `db:"repo_url"`
 	DefaultBranch string    `db:"default_branch"`
 	Settings      string    `db:"settings"` // JSON string
+	Status        string    `db:"-"`
+	TaskCount     int       `db:"-"`
+	AgentCount    int       `db:"-"`
 	CreatedAt     time.Time `db:"created_at"`
 	UpdatedAt     time.Time `db:"updated_at"`
 }
@@ -150,6 +159,9 @@ type ProjectDTO struct {
 	Description        string                 `json:"description"`
 	RepoURL            string                 `json:"repoUrl"`
 	DefaultBranch      string                 `json:"defaultBranch"`
+	Status             string                 `json:"status"`
+	TaskCount          int                    `json:"taskCount"`
+	AgentCount         int                    `json:"agentCount"`
 	Settings           ProjectSettingsDTO     `json:"settings"`
 	CodingAgentCatalog *CodingAgentCatalogDTO `json:"codingAgentCatalog,omitempty"`
 	CreatedAt          time.Time              `json:"createdAt"`
@@ -178,6 +190,9 @@ func (p *Project) ToDTO() ProjectDTO {
 		Description:   p.Description,
 		RepoURL:       p.RepoURL,
 		DefaultBranch: p.DefaultBranch,
+		Status:        p.Status,
+		TaskCount:     p.TaskCount,
+		AgentCount:    p.AgentCount,
 		Settings:      p.SettingsDTO(),
 		CreatedAt:     p.CreatedAt,
 	}
