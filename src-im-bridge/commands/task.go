@@ -13,7 +13,7 @@ import (
 var taskUsage = commandUsage("/task")
 
 // RegisterTaskCommands registers /task sub-commands on the engine.
-func RegisterTaskCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterTaskCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/task", func(p core.Platform, msg *core.Message, args string) {
 		parts := strings.SplitN(strings.TrimSpace(args), " ", 2)
 		if len(parts) == 0 || parts[0] == "" {
@@ -27,7 +27,7 @@ func RegisterTaskCommands(engine *core.Engine, apiClient *client.AgentForgeClien
 		}
 
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		switch subCmd {
 		case "create":
 			handleTaskCreate(ctx, p, msg, scopedClient, subArgs)
@@ -45,10 +45,60 @@ func RegisterTaskCommands(engine *core.Engine, apiClient *client.AgentForgeClien
 			handleTaskMove(ctx, p, msg, scopedClient, subArgs)
 		case "delete":
 			handleTaskDelete(ctx, p, msg, scopedClient, subArgs)
+		case "attach":
+			handleTaskAttach(ctx, p, msg, scopedClient, subArgs)
+		case "upload-log":
+			handleTaskUploadLog(ctx, p, msg, scopedClient, subArgs)
 		default:
 			_ = p.Reply(ctx, msg.ReplyCtx, taskUsage)
 		}
 	})
+}
+
+// handleTaskAttach attaches a previously-staged attachment to a backend task.
+// Usage: /task attach <task-id> <staged-id> [kind]
+// The staged id comes from a prior POST /im/attachments response. The backend
+// persists the attachment metadata + reference against the task.
+func handleTaskAttach(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, args string) {
+	fields := strings.Fields(strings.TrimSpace(args))
+	if len(fields) < 2 {
+		_ = p.Reply(ctx, msg.ReplyCtx, "Usage: /task attach <task-id> <staged-id> [kind]")
+		return
+	}
+	taskID := strings.TrimSpace(fields[0])
+	stagedID := strings.TrimSpace(fields[1])
+	kind := "file"
+	if len(fields) >= 3 {
+		kind = strings.TrimSpace(fields[2])
+	}
+	if err := c.AttachToTask(ctx, taskID, client.TaskAttachmentRef{
+		StagedID: stagedID,
+		Kind:     kind,
+	}); err != nil {
+		replyError(ctx, p, msg.ReplyCtx, "添加附件失败", fmt.Sprintf("%v", err), "请先通过 POST /im/attachments 暂存文件，再引用返回的 staged_id")
+		return
+	}
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已为任务 #%s 添加附件 (staged_id=%s, kind=%s)", shortID(taskID), stagedID, kind))
+}
+
+// handleTaskUploadLog is a shortcut that classifies the attachment as
+// AttachmentKindLogs. Same underlying contract as /task attach.
+func handleTaskUploadLog(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, args string) {
+	fields := strings.Fields(strings.TrimSpace(args))
+	if len(fields) < 2 {
+		_ = p.Reply(ctx, msg.ReplyCtx, "Usage: /task upload-log <task-id> <staged-id>")
+		return
+	}
+	taskID := strings.TrimSpace(fields[0])
+	stagedID := strings.TrimSpace(fields[1])
+	if err := c.AttachToTask(ctx, taskID, client.TaskAttachmentRef{
+		StagedID: stagedID,
+		Kind:     "logs",
+	}); err != nil {
+		replyError(ctx, p, msg.ReplyCtx, "上传日志失败", fmt.Sprintf("%v", err), "请先通过 POST /im/attachments 暂存 log 文件")
+		return
+	}
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已为任务 #%s 上传日志 (staged_id=%s)", shortID(taskID), stagedID))
 }
 
 func handleTaskCreate(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, raw string) {

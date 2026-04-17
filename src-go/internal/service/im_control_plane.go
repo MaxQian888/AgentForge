@@ -27,10 +27,11 @@ const (
 )
 
 var (
-	ErrIMBridgeNotFound     = errors.New("im bridge instance not found")
-	ErrIMBridgeUnavailable  = errors.New("im bridge instance unavailable")
-	ErrIMDeliveryRejected   = errors.New("im delivery rejected")
-	ErrIMActionBindingEmpty = errors.New("im action binding requires at least one entity id")
+	ErrIMBridgeNotFound           = errors.New("im bridge instance not found")
+	ErrIMBridgeUnavailable        = errors.New("im bridge instance unavailable")
+	ErrIMDeliveryRejected         = errors.New("im delivery rejected")
+	ErrIMActionBindingEmpty       = errors.New("im action binding requires at least one entity id")
+	ErrIMTenantProviderMismatch   = errors.New("im tenant not served by the targeted bridge/provider")
 )
 
 type IMControlPlaneConfig struct {
@@ -52,13 +53,17 @@ type IMQueueDeliveryRequest struct {
 	TargetBridgeID string
 	Platform       string
 	ProjectID      string
-	Kind           string
-	Content        string
-	Structured     *model.IMStructuredMessage
-	Native         *model.IMNativeMessage
-	Metadata       map[string]string
-	TargetChatID   string
-	ReplyTarget    *model.IMReplyTarget
+	// TenantID narrows the routing decision to bridges that advertise the
+	// (platform, tenantId) pair. Empty tenantId preserves legacy behaviour
+	// (match any bridge that serves the platform/project).
+	TenantID     string
+	Kind         string
+	Content      string
+	Structured   *model.IMStructuredMessage
+	Native       *model.IMNativeMessage
+	Metadata     map[string]string
+	TargetChatID string
+	ReplyTarget  *model.IMReplyTarget
 }
 
 type IMBoundProgressRequest struct {
@@ -173,6 +178,8 @@ func (s *IMControlPlane) RegisterBridge(_ context.Context, req *IMBridgeRegister
 		CapabilityMatrix: cloneAnyMap(req.CapabilityMatrix),
 		CallbackPaths:    dedupeStrings(req.CallbackPaths),
 		Metadata:         cloneStringMap(req.Metadata),
+		Tenants:          dedupeStrings(req.Tenants),
+		TenantManifest:   cloneTenantManifest(req.TenantManifest),
 		Status:           "online",
 	}
 	s.applyHeartbeat(record)
@@ -558,13 +565,19 @@ func (s *IMControlPlane) DetachBridgeListener(bridgeID string) {
 
 func (s *IMControlPlane) QueueDelivery(ctx context.Context, req IMQueueDeliveryRequest) (*model.IMControlDelivery, error) {
 	s.mu.Lock()
-	instance, err := s.resolveBridgeLocked(normalizePlatform(req.Platform), strings.TrimSpace(req.ProjectID), strings.TrimSpace(req.TargetBridgeID))
+	instance, err := s.resolveBridgeTenantLocked(
+		normalizePlatform(req.Platform),
+		strings.TrimSpace(req.ProjectID),
+		strings.TrimSpace(req.TenantID),
+		strings.TrimSpace(req.TargetBridgeID),
+	)
 	if err != nil {
 		s.mu.Unlock()
 		log.WithFields(log.Fields{
 			"bridgeId":  strings.TrimSpace(req.TargetBridgeID),
 			"platform":  normalizePlatform(req.Platform),
 			"projectId": strings.TrimSpace(req.ProjectID),
+			"tenantId":  strings.TrimSpace(req.TenantID),
 			"kind":      normalizeDeliveryKind(req.Kind),
 		}).WithError(err).Warn("IM control plane delivery target resolution failed")
 		return nil, err
@@ -578,6 +591,7 @@ func (s *IMControlPlane) QueueDelivery(ctx context.Context, req IMQueueDeliveryR
 		TargetBridgeID: instance.record.BridgeID,
 		Platform:       instance.record.Platform,
 		ProjectID:      strings.TrimSpace(req.ProjectID),
+		TenantID:       strings.TrimSpace(req.TenantID),
 		Kind:           normalizeDeliveryKind(req.Kind),
 		Content:        normalizeDeliveryContent(req.Content, req.Structured),
 		Structured:     cloneStructuredMessage(req.Structured),
@@ -925,6 +939,17 @@ func (s *IMControlPlane) SignDelivery(delivery *model.IMControlDelivery) string 
 }
 
 func (s *IMControlPlane) resolveBridgeLocked(platform string, projectID string, targetBridgeID string) (*bridgeInstanceState, error) {
+	return s.resolveBridgeTenantLocked(platform, projectID, "", targetBridgeID)
+}
+
+// resolveBridgeTenantLocked extends resolveBridgeLocked with an explicit
+// tenantId filter. When tenantID is set, only bridges that advertise that
+// tenant in their registration survive the filter. An explicit
+// targetBridgeID that does not advertise the tenant triggers
+// ErrIMTenantProviderMismatch (distinct from the bare "not found" path) so
+// the backend can surface a truthful rejection to the operator.
+func (s *IMControlPlane) resolveBridgeTenantLocked(platform string, projectID string, tenantID string, targetBridgeID string) (*bridgeInstanceState, error) {
+	tenantID = strings.TrimSpace(tenantID)
 	if targetBridgeID != "" {
 		instance, ok := s.instances[targetBridgeID]
 		if !ok {
@@ -932,6 +957,9 @@ func (s *IMControlPlane) resolveBridgeLocked(platform string, projectID string, 
 		}
 		if !s.isInstanceLive(instance.record) {
 			return nil, ErrIMBridgeUnavailable
+		}
+		if tenantID != "" && !bridgeServesTenant(instance.record, tenantID) {
+			return nil, ErrIMTenantProviderMismatch
 		}
 		return instance, nil
 	}
@@ -947,6 +975,9 @@ func (s *IMControlPlane) resolveBridgeLocked(platform string, projectID string, 
 		if projectID != "" && !containsString(instance.record.ProjectIDs, projectID) {
 			continue
 		}
+		if tenantID != "" && !bridgeServesTenant(instance.record, tenantID) {
+			continue
+		}
 		candidates = append(candidates, instance)
 	}
 	if len(candidates) == 0 {
@@ -957,6 +988,25 @@ func (s *IMControlPlane) resolveBridgeLocked(platform string, projectID string, 
 		return candidates[i].record.BridgeID < candidates[j].record.BridgeID
 	})
 	return candidates[0], nil
+}
+
+// bridgeServesTenant returns true when the bridge registration explicitly
+// lists the tenant or, for legacy registrations that predate the tenants
+// field, when the registration has no tenants list at all (in which case
+// we treat every tenant as served to avoid breaking old clients).
+func bridgeServesTenant(record *model.IMBridgeInstance, tenantID string) bool {
+	if record == nil {
+		return false
+	}
+	if len(record.Tenants) == 0 {
+		return true
+	}
+	for _, t := range record.Tenants {
+		if strings.TrimSpace(t) == tenantID {
+			return true
+		}
+	}
+	return false
 }
 
 func (s *IMControlPlane) resolveBoundActionLocked(runID string, taskID string, reviewID string) *boundActionState {
@@ -1068,6 +1118,8 @@ func cloneBridgeInstance(record *model.IMBridgeInstance) *model.IMBridgeInstance
 	clone.Capabilities = cloneBoolMap(record.Capabilities)
 	clone.CapabilityMatrix = cloneAnyMap(record.CapabilityMatrix)
 	clone.Metadata = cloneStringMap(record.Metadata)
+	clone.Tenants = append([]string(nil), record.Tenants...)
+	clone.TenantManifest = cloneTenantManifest(record.TenantManifest)
 	return &clone
 }
 
@@ -1166,6 +1218,15 @@ func cloneStringMap(input map[string]string) map[string]string {
 		output[key] = value
 	}
 	return output
+}
+
+func cloneTenantManifest(input []model.IMTenantBinding) []model.IMTenantBinding {
+	if len(input) == 0 {
+		return nil
+	}
+	out := make([]model.IMTenantBinding, len(input))
+	copy(out, input)
+	return out
 }
 
 func cloneAnyMap(input map[string]any) map[string]any {

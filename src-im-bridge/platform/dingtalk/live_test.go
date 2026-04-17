@@ -597,6 +597,15 @@ func TestLive_MetadataDeclaresActionCardCapabilities(t *testing.T) {
 	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != core.NativeSurfaceDingTalkCard {
 		t.Fatalf("NativeSurfaces = %+v", metadata.Rendering.NativeSurfaces)
 	}
+	if metadata.Capabilities.ReadinessTier != core.ReadinessTierFullNativeLifecycle {
+		t.Fatalf("ReadinessTier = %q, want %q", metadata.Capabilities.ReadinessTier, core.ReadinessTierFullNativeLifecycle)
+	}
+	if metadata.Capabilities.MutableUpdateMethod != "openapi_only" {
+		t.Fatalf("MutableUpdateMethod = %q, want openapi_only", metadata.Capabilities.MutableUpdateMethod)
+	}
+	if !metadata.Capabilities.Mutability.CanEdit {
+		t.Fatalf("DingTalk should advertise CanEdit=true")
+	}
 }
 
 func TestLive_SendNativeUsesWebhookActionCard(t *testing.T) {

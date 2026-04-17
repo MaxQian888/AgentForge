@@ -2,10 +2,14 @@ package main
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/agentforge/im-bridge/core"
 )
+
+// osGetenv indirects os.Getenv so tests can stub provider override lookups.
+var osGetenv = os.Getenv
 
 type providerFeatureSet struct {
 	FeishuCards *feishuProviderFeatures
@@ -36,6 +40,9 @@ type activeProvider struct {
 	Descriptor    providerDescriptor
 	Platform      core.Platform
 	TransportMode string
+	// Tenants this provider binding serves (subset of the bridge's tenant
+	// registry). Empty when no tenant registry is configured.
+	Tenants []string
 }
 
 func (d providerDescriptor) normalizedMetadata() core.PlatformMetadata {
@@ -94,14 +101,18 @@ func lookupPlatformDescriptor(name string) (platformDescriptor, error) {
 }
 
 func selectProvider(cfg *config) (*activeProvider, error) {
-	descriptor, err := lookupProviderDescriptor(cfg.Platform)
+	return selectProviderForPlatform(cfg, cfg.Platform, cfg.TransportMode)
+}
+
+func selectProviderForPlatform(cfg *config, platformID, transportMode string) (*activeProvider, error) {
+	descriptor, err := lookupProviderDescriptor(platformID)
 	if err != nil {
 		return nil, err
 	}
 
-	mode := normalizeTransportMode(cfg.TransportMode)
+	mode := normalizeTransportMode(transportMode)
 	if mode != transportModeStub && mode != transportModeLive {
-		return nil, fmt.Errorf("unsupported IM_TRANSPORT_MODE %q", cfg.TransportMode)
+		return nil, fmt.Errorf("unsupported IM_TRANSPORT_MODE for %s: %q", platformID, transportMode)
 	}
 	if !descriptor.supportsTransport(mode) {
 		return nil, fmt.Errorf("selected platform %s does not support %s transport", descriptor.normalizedMetadata().Source, mode)
@@ -125,4 +136,46 @@ func selectProvider(cfg *config) (*activeProvider, error) {
 		Platform:      platform,
 		TransportMode: mode,
 	}, nil
+}
+
+// selectProviders builds an activeProvider for every entry in IM_PLATFORMS
+// (comma-separated). It preserves legacy IM_PLATFORM behavior by falling
+// back to a single-element list when IM_PLATFORMS is empty. All listed
+// providers MUST be valid; a failure in any of them fails the whole
+// selection so the bridge does not come up partially.
+func selectProviders(cfg *config, platforms []string) ([]*activeProvider, error) {
+	if len(platforms) == 0 {
+		platforms = []string{cfg.Platform}
+	}
+	out := make([]*activeProvider, 0, len(platforms))
+	seen := map[string]struct{}{}
+	for _, p := range platforms {
+		name := strings.TrimSpace(p)
+		if name == "" {
+			continue
+		}
+		normalized := core.NormalizePlatformName(name)
+		if _, dup := seen[normalized]; dup {
+			return nil, fmt.Errorf("provider %q declared twice in IM_PLATFORMS", name)
+		}
+		seen[normalized] = struct{}{}
+		// Per-provider transport override: IM_TRANSPORT_MODE_<PROVIDER> with
+		// the normalized id (UPPERCASE) overrides the shared IM_TRANSPORT_MODE.
+		mode := cfg.TransportMode
+		if override := strings.TrimSpace(providerTransportOverride(normalized)); override != "" {
+			mode = override
+		}
+		provider, err := selectProviderForPlatform(cfg, name, mode)
+		if err != nil {
+			return nil, fmt.Errorf("provider %s: %w", name, err)
+		}
+		out = append(out, provider)
+	}
+	return out, nil
+}
+
+// providerTransportOverride reads IM_TRANSPORT_MODE_<PROVIDER> (e.g.
+// IM_TRANSPORT_MODE_FEISHU). Exposed as a hook so tests can stub the env.
+var providerTransportOverride = func(normalized string) string {
+	return osGetenv("IM_TRANSPORT_MODE_" + strings.ToUpper(normalized))
 }

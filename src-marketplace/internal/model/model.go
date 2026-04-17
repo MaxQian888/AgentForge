@@ -166,6 +166,47 @@ type SkillAgentConfigPreview struct {
 	DefaultPrompt    string `json:"defaultPrompt,omitempty"`
 }
 
+// PluginIMCommand describes one IM slash command contributed by a
+// marketplace plugin. It mirrors the subset of the IM Bridge plugin
+// manifest the marketplace needs to advertise to operators and ship to
+// the bridge's IM_BRIDGE_PLUGIN_DIR after install.
+type PluginIMCommand struct {
+	Slash       string                `json:"slash"`
+	Description string                `json:"description,omitempty"`
+	ActionClass string                `json:"actionClass,omitempty"`
+	Subcommands []PluginIMSubcommand  `json:"subcommands,omitempty"`
+	Invoke      *PluginIMInvokeSpec   `json:"invoke,omitempty"`
+}
+
+type PluginIMSubcommand struct {
+	Name        string              `json:"name"`
+	Description string              `json:"description,omitempty"`
+	ActionClass string              `json:"actionClass,omitempty"`
+	Invoke      *PluginIMInvokeSpec `json:"invoke"`
+}
+
+type PluginIMInvokeSpec struct {
+	Kind    string            `json:"kind"` // http, mcp, builtin
+	URL     string            `json:"url,omitempty"`
+	Method  string            `json:"method,omitempty"`
+	Timeout string            `json:"timeout,omitempty"`
+	Headers map[string]string `json:"headers,omitempty"`
+	// MCP fields
+	ServerID string `json:"serverId,omitempty"`
+	Tool     string `json:"tool,omitempty"`
+	// Builtin registration key
+	Key string `json:"key,omitempty"`
+}
+
+// PluginExtraMetadata is the typed form of MarketplaceItem.ExtraMetadata
+// for plugin items. `ImCommands`, when present, is shipped to the bridge's
+// plugin directory on install so the bridge can pick it up via its
+// filesystem watcher.
+type PluginExtraMetadata struct {
+	ImCommands []PluginIMCommand `json:"im_commands,omitempty"`
+	Tenants    []string          `json:"im_tenants,omitempty"`
+}
+
 type SkillPackagePreview struct {
 	CanonicalPath   string                   `json:"canonicalPath"`
 	Label           string                   `json:"label"`

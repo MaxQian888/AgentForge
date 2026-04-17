@@ -10,7 +10,7 @@ import (
 )
 
 // RegisterMemoryCommands registers /memory sub-commands on the engine.
-func RegisterMemoryCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterMemoryCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/memory", func(p core.Platform, msg *core.Message, args string) {
 		parts := strings.SplitN(strings.TrimSpace(args), " ", 2)
 		if len(parts) == 0 || parts[0] == "" {
@@ -19,7 +19,7 @@ func RegisterMemoryCommands(engine *core.Engine, apiClient *client.AgentForgeCli
 		}
 
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		switch canonicalSubcommand("/memory", parts[0]) {
 		case "search":
 			if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {

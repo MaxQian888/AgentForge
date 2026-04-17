@@ -1,6 +1,6 @@
 # IM Bridge
 
-`src-im-bridge` is the Go IM Bridge that connects one active IM platform instance to the shared AgentForge command engine and backend API.
+`src-im-bridge` is the Go IM Bridge that gateways one or more IM platforms into the shared AgentForge command engine and backend API.
 
 The backend topology is intentional:
 
@@ -9,9 +9,72 @@ The backend topology is intentional:
 - TS Bridge does not directly discover or invoke IM Bridge instances
 - asynchronous progress and terminal updates flow back through the Go control plane so the original `bridge_id` and reply target remain stable
 
-## Platform Selection
+## Gateway mode (multi-provider + multi-tenant)
 
-Startup now resolves `IM_PLATFORM` through a bridge-local provider contract rather than a hard-coded startup branch. Built-in providers still ship in-tree, but they now expose a normalized descriptor with:
+A single bridge process can host multiple IM providers and multiple tenants concurrently. Configure via:
+
+- `IM_PLATFORMS` — comma-separated provider ids (`feishu,dingtalk,wecom`). Falls back to legacy single-value `IM_PLATFORM` when unset.
+- `IM_TRANSPORT_MODE` — default transport mode. Per-provider overrides via `IM_TRANSPORT_MODE_<PROVIDER>`.
+- `IM_SECRET_<PROVIDER>` — per-provider HMAC shared secret override. Falls back to `IM_CONTROL_SHARED_SECRET` when absent.
+- `IM_NOTIFY_PORT_<PROVIDER>` — per-provider HTTP listen port override. Default is `NOTIFY_PORT + index` when multiple providers run together; you can pin specific ports here.
+- `IM_TENANTS_CONFIG` — path to a YAML file declaring tenants and resolver bindings. Empty disables tenant routing (legacy single-tenant mode).
+- `IM_TENANT_DEFAULT` — tenant id used when no resolver matches an inbound message. Empty = reject unresolved messages with an explicit reply.
+- `IM_BRIDGE_PLUGIN_DIR` — directory watched for command plugin manifests (`<plugin-id>/plugin.yaml`). Empty disables plugin loading.
+
+### tenants.yaml example
+
+```yaml
+tenants:
+  - id: acme
+    projectId: 4a1e5c6f-0000-0000-0000-000000000001
+    name: "ACME Corp"
+    resolvers:
+      - kind: chat
+        platform: feishu
+        chatIds: ["oc_abc123", "oc_def456"]
+      - kind: workspace
+        workspaceIds: ["T0ABC"]
+    credentials:
+      - providerId: agentforge
+        source: env
+        keyPrefix: ACME_
+    plugins:
+      - "@acme/jira"
+  - id: beta
+    projectId: 4a1e5c6f-0000-0000-0000-000000000002
+    resolvers:
+      - kind: chat
+        chatIds: ["oc_ghi789"]
+defaultTenant: acme
+```
+
+Resolver kinds in scope today: `chat` (inbound `(platform, chatId)`), `workspace` (`msg.Metadata["workspaceId"]`), `domain` (`msg.Metadata["domain"]`). SIGHUP reloads the file in place.
+
+### Plugin manifest example
+
+```yaml
+id: "@acme/jira"
+version: "1.0.0"
+name: "Jira Commands"
+commands:
+  - slash: "/jira"
+    subcommands:
+      - name: "create"
+        action_class: write
+        invoke:
+          kind: http
+          url: http://localhost:9090/plugins/jira/create
+          timeout: 10s
+          headers:
+            X-Tenant: "${TENANT_META_tenant_slug}"
+tenants: ["acme"]
+```
+
+Invoke kinds: `http` (fully wired), `mcp` (placeholder — transport pending), `builtin` (in-process handler registered via `Registry.RegisterBuiltin`).
+
+## Platform Selection (single-provider legacy path)
+
+Startup resolves `IM_PLATFORM` through a bridge-local provider contract rather than a hard-coded startup branch. Built-in providers still ship in-tree, but they now expose a normalized descriptor with:
 
 - provider id
 - supported transport modes
@@ -227,6 +290,32 @@ China-platform registration metadata now also publishes:
 | WeCom | callback text + mention | chat, user, `response_url` | callback messages normalize into the shared command surface | `response_url` reply first, then direct app send; richer updates fall back explicitly |
 | QQ | slash + mention | chat, message, sender | shared command engine via OneBot-compatible message payloads | group reply, private reply, or explicit text follow-up; no native mutable update |
 | QQ Bot | slash + mention | group or user openid, `msg_id` | webhook events normalize into the shared command surface | markdown/keyboard send or reply-target reuse when supported; mutable update falls back explicitly |
+
+## Attachments, Reactions, Threads
+
+The bridge exposes three first-class rich-delivery primitives beyond text, structured payloads, and provider-native surfaces. Each is optional per provider and negotiated through the capability matrix surfaced by `/im/health`.
+
+### Attachments
+
+- Egress: populate `DeliveryEnvelope.Attachments` (or the `attachments` array on `POST /im/send`). The delivery ladder adds an attachment layer ahead of text/structured/native: attachments go up through `AttachmentSender.UploadAttachment` + `SendAttachment/ReplyAttachment`, size/kind-checked against the provider's `MaxAttachmentSize` / `AllowedAttachmentKinds`.
+- Ingress: `POST /im/attachments` stages a file (multipart or raw body) into `${IM_BRIDGE_ATTACHMENT_DIR}` (default `${IM_BRIDGE_STATE_DIR}/attachments`) and returns a `staged_id`. The backend passes that id back to `/im/send` via `attachments[].staged_id`.
+- Lifecycle: residual files are cleaned at startup; a TTL worker (default 1h) evicts older files; a capacity GC (default 2 GB) removes oldest-first when the staging dir grows beyond threshold.
+- Fallback: providers that do not implement `AttachmentSender` or declare `SupportsAttachments=false` receive a text summary "[attachments degraded to text…]" plus any original content; `fallback_reason` carries `attachments_unsupported` or `attachments_sender_unavailable`.
+
+### Reactions
+
+- Egress: set `DeliveryEnvelope.Metadata["ack_reaction"] = "<unified code>"` (e.g. `done`, `running`, `ack`). After a successful primary delivery, the bridge calls `ReactionSender.SendReaction` with the provider-native representation resolved from `core.ReactionEmojiMapFor(platform)`. Providers that do not advertise reaction support silently skip; reaction failures never fail the primary delivery.
+- Ingress: provider adapters build a `notify.ReactionEvent` and dispatch it to the configured `ReactionSink`. In production that sink forwards to the Go backend via `POST /api/v1/im/reactions`, which writes to `im_reaction_events` and may trigger review shortcuts (see `/review approve-reaction`).
+- Unified codes: `ack`, `running`, `done`, `failed`, `thumbs_up`, `thumbs_down`, `eyes`, `question`. Callers pass a unified code; `core.NativeEmojiForCode(platform, code)` maps to provider-native representations (Slack `white_check_mark`, Telegram `✅`, Feishu `DONE`, etc.).
+
+### Threads
+
+- Policy lives on `ReplyTarget.ThreadPolicy`: `reuse` (default; continue existing thread), `open` (create a new thread for long tasks), `isolate` (prefix every message with a `[session: <short-id>]` marker — useful for batch broadcasts across recipients).
+- Providers with native threads (Slack, Discord, Feishu, Telegram topics) carry `SupportsThreads=true` + `ThreadPolicySupport` listing the modes they honor. Unsupported providers degrade to `Reply` and set `fallback_reason=thread_<policy>_unsupported`.
+
+### Capability matrix
+
+Call `GET /im/health` for the live `capability_matrix`; new fields: `supportsAttachments`, `maxAttachmentSize`, `allowedAttachmentKinds`, `supportsReactions`, `reactionEmojiSet`, `supportsThreads`, `threadPolicySupport`, `mutableUpdateMethod`.
 
 ## Rollout And Rollback
 

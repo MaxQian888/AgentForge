@@ -267,8 +267,8 @@ func TestNormalizeMetadata_UsesFallbackSourceForRenderingDefaults(t *testing.T) 
 
 func TestDefaultCapabilitiesForSource_CoversAdditionalPlatformsAndFallbacks(t *testing.T) {
 	qqbot := defaultCapabilitiesForSource("qqbot", nil)
-	if qqbot.ReadinessTier != ReadinessTierMarkdownFirst {
-		t.Fatalf("qqbot ReadinessTier = %q, want %q", qqbot.ReadinessTier, ReadinessTierMarkdownFirst)
+	if qqbot.ReadinessTier != ReadinessTierNativeSendWithFallback {
+		t.Fatalf("qqbot ReadinessTier = %q, want %q", qqbot.ReadinessTier, ReadinessTierNativeSendWithFallback)
 	}
 	if !qqbot.RequiresPublicCallback {
 		t.Fatal("expected qqbot to require public callback")
@@ -279,16 +279,22 @@ func TestDefaultCapabilitiesForSource_CoversAdditionalPlatformsAndFallbacks(t *t
 	if !reflect.DeepEqual(qqbot.NativeSurfaces, []string{NativeSurfaceQQBotMarkdown}) {
 		t.Fatalf("qqbot NativeSurfaces = %+v", qqbot.NativeSurfaces)
 	}
+	if qqbot.MutableUpdateMethod != "openapi_patch" {
+		t.Fatalf("qqbot MutableUpdateMethod = %q, want openapi_patch", qqbot.MutableUpdateMethod)
+	}
 
 	wecom := defaultCapabilitiesForSource("wecom", nil)
-	if wecom.ReadinessTier != ReadinessTierNativeSendWithFallback {
-		t.Fatalf("wecom ReadinessTier = %q, want %q", wecom.ReadinessTier, ReadinessTierNativeSendWithFallback)
+	if wecom.ReadinessTier != ReadinessTierFullNativeLifecycle {
+		t.Fatalf("wecom ReadinessTier = %q, want %q", wecom.ReadinessTier, ReadinessTierFullNativeLifecycle)
 	}
 	if wecom.CommandSurface != CommandSurfaceInteraction {
 		t.Fatalf("wecom CommandSurface = %q", wecom.CommandSurface)
 	}
 	if !reflect.DeepEqual(wecom.NativeSurfaces, []string{NativeSurfaceWeComCard}) {
 		t.Fatalf("wecom NativeSurfaces = %+v", wecom.NativeSurfaces)
+	}
+	if wecom.MutableUpdateMethod != "template_card_update" {
+		t.Fatalf("wecom MutableUpdateMethod = %q, want template_card_update", wecom.MutableUpdateMethod)
 	}
 
 	feishu := defaultCapabilitiesForSource("feishu", nil)
@@ -297,16 +303,22 @@ func TestDefaultCapabilitiesForSource_CoversAdditionalPlatformsAndFallbacks(t *t
 	}
 
 	dingtalk := defaultCapabilitiesForSource("dingtalk", nil)
-	if dingtalk.ReadinessTier != ReadinessTierNativeSendWithFallback {
-		t.Fatalf("dingtalk ReadinessTier = %q, want %q", dingtalk.ReadinessTier, ReadinessTierNativeSendWithFallback)
+	if dingtalk.ReadinessTier != ReadinessTierFullNativeLifecycle {
+		t.Fatalf("dingtalk ReadinessTier = %q, want %q", dingtalk.ReadinessTier, ReadinessTierFullNativeLifecycle)
 	}
 	if !dingtalk.SupportsRichMessages {
 		t.Fatalf("dingtalk capabilities = %+v, want SupportsRichMessages", dingtalk)
+	}
+	if dingtalk.MutableUpdateMethod != "openapi_only" {
+		t.Fatalf("dingtalk MutableUpdateMethod = %q, want openapi_only", dingtalk.MutableUpdateMethod)
 	}
 
 	qq := defaultCapabilitiesForSource("qq", nil)
 	if qq.ReadinessTier != ReadinessTierTextFirst {
 		t.Fatalf("qq ReadinessTier = %q, want %q", qq.ReadinessTier, ReadinessTierTextFirst)
+	}
+	if qq.MutableUpdateMethod != "simulated" {
+		t.Fatalf("qq MutableUpdateMethod = %q, want simulated", qq.MutableUpdateMethod)
 	}
 
 	customCard := defaultCapabilitiesForSource("custom", &metadataCardPlatform{name: "custom-card"})

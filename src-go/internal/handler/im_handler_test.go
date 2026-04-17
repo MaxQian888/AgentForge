@@ -74,6 +74,14 @@ func (s *imServiceStub) Notify(_ context.Context, req *model.IMNotifyRequest) er
 	return s.notifyErr
 }
 
+func (s *imServiceStub) HandleReaction(_ context.Context, _ *model.IMReactionRequest) error {
+	return nil
+}
+
+func (s *imServiceStub) BindReactionShortcut(_ context.Context, _ *model.IMReactionShortcutBinding) error {
+	return nil
+}
+
 func newIMHandlerContext(method, target, body string) (*echo.Echo, echo.Context, *httptest.ResponseRecorder) {
 	e := echo.New()
 	e.Validator = &imHandlerValidator{validator: validator.New()}

@@ -118,3 +118,44 @@ type ReconcileResult struct {
 type HotReloader interface {
 	Reconcile(ctx context.Context, cfg ReconcileConfig) ReconcileResult
 }
+
+// AttachmentSender is an optional interface for platforms that accept file
+// uploads. Implementations MUST populate Attachment.ExternalRef on success
+// so the caller can reference the uploaded artifact in subsequent messages.
+type AttachmentSender interface {
+	UploadAttachment(ctx context.Context, chatID string, attachment *Attachment) error
+	SendAttachment(ctx context.Context, chatID string, attachment *Attachment, caption string) error
+	ReplyAttachment(ctx context.Context, replyCtx any, attachment *Attachment, caption string) error
+}
+
+// AttachmentReceiver is an optional interface for platforms that can download
+// inbound attachments into the bridge's staging directory. Implementations
+// write the payload to `stagingDir/<attachment.ID>` and set ContentRef to the
+// absolute path.
+type AttachmentReceiver interface {
+	DownloadAttachment(ctx context.Context, stagingDir string, attachment *Attachment) error
+}
+
+// ReactionSender is an optional interface for platforms that expose a
+// lightweight reaction primitive (emoji reactions). The caller passes a
+// unified emoji code; implementations map to the provider-native representation.
+type ReactionSender interface {
+	SendReaction(ctx context.Context, replyCtx any, emojiCode string) error
+	RemoveReaction(ctx context.Context, replyCtx any, emojiCode string) error
+}
+
+// ReactionReceiver is an optional marker interface for platforms that surface
+// inbound reaction events as Messages with Kind=MessageKindReaction. The
+// engine inspects this marker for audit/health purposes; reaction events are
+// dispatched through the normal MessageHandler path.
+type ReactionReceiver interface {
+	SupportsReactions() bool
+}
+
+// ThreadOpener is an optional interface for platforms that can open a new
+// thread explicitly (as opposed to replying into an existing thread). Not
+// every thread-capable provider needs this: Slack/Feishu open implicitly on
+// the first reply. Discord requires an explicit create-thread API.
+type ThreadOpener interface {
+	OpenThread(ctx context.Context, replyCtx any, title string) (string, error)
+}

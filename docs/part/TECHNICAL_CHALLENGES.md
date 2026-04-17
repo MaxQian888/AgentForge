@@ -15,6 +15,7 @@
 - TS Bridge 已有多 runtime catalog 与 continuity 语义，不再只是 Claude 单一路径；当前真实运行时包括 `claude_code`、`codex`、`opencode`。
 - 实时事件广播当前由 Go 侧 WebSocket hub 承担 project-scoped fan-out，任务、审查、插件、调度和文档相关事件都走这条主链。
 - 审查工作区、`pending_human` 状态、项目设置 runtime catalog、docs/wiki、以及桌面 window chrome 都已经有真实实现，因此后续章节中把这些面写成纯规划时，应优先服从当前代码真相。
+- **IM Bridge** 自 2026-04 起以 gateway 形态运行（change `add-im-bridge-multi-tenant-gateway`）：`IM_PLATFORMS` 支持多 provider 并发、`IM_TENANTS_CONFIG` 提供 tenant 路由（chat/workspace/domain resolver）、`ClientFactory.For(tenant)` 替代进程级单 client、session history/intent/reply-binding 持久化到 `state.db`、命令插件通过 `IM_BRIDGE_PLUGIN_DIR` 的 YAML 清单加载（invoke: http/mcp/builtin）。控制面 registration 扩展 `Tenants[]` + `TenantManifest[]`，后端 `QueueDelivery` 按 `(bridgeId, providerId, tenantId)` 三元组路由。
 
 ---
 

@@ -12,7 +12,7 @@ import (
 	log "github.com/sirupsen/logrus"
 )
 
-func RegisterToolsCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterToolsCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/tools", func(p core.Platform, msg *core.Message, args string) {
 		parts := strings.Fields(strings.TrimSpace(args))
 		if len(parts) == 0 {
@@ -21,7 +21,7 @@ func RegisterToolsCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 		}
 
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		switch canonicalSubcommand("/tools", parts[0]) {
 		case "list":
 			route := engine.ResolveCommandRoute("/tools", "list")

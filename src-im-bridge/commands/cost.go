@@ -9,10 +9,10 @@ import (
 )
 
 // RegisterCostCommands registers the /cost command on the engine.
-func RegisterCostCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterCostCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/cost", func(p core.Platform, msg *core.Message, args string) {
 		ctx := context.Background()
-		stats, err := apiClient.WithSource(msg.Platform).GetCostStats(ctx)
+		stats, err := factory.For(msg.TenantID).WithSource(msg.Platform).GetCostStats(ctx)
 		if err != nil {
 			_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("获取费用统计失败: %v", err))
 			return

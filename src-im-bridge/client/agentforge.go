@@ -1126,6 +1126,112 @@ func (c *AgentForgeClient) HandleIMAction(ctx context.Context, req IMActionReque
 	return &result, nil
 }
 
+// TaskAttachmentRef references an attachment staged by the IM Bridge and
+// asks the backend to persist the reference against a task. The backend is
+// expected to materialize the staged file into persistent storage.
+type TaskAttachmentRef struct {
+	StagedID string            `json:"staged_id,omitempty"`
+	URL      string            `json:"url,omitempty"`
+	Kind     string            `json:"kind,omitempty"`
+	Filename string            `json:"filename,omitempty"`
+	MimeType string            `json:"mime_type,omitempty"`
+	Metadata map[string]string `json:"metadata,omitempty"`
+}
+
+// AttachToTask persists an attachment reference against a task.
+func (c *AgentForgeClient) AttachToTask(ctx context.Context, taskID string, ref TaskAttachmentRef) error {
+	taskID = strings.TrimSpace(taskID)
+	if taskID == "" {
+		return errors.New("task id is required")
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, fmt.Sprintf("/api/v1/tasks/%s/attachments", url.PathEscape(taskID)), ref)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return c.readError(resp)
+	}
+	return nil
+}
+
+// ReactionEvent is the payload shape shipped to the Go backend's
+// POST /api/v1/im/reactions endpoint. Field names match the Go handler.
+type ReactionEvent struct {
+	Platform    string            `json:"platform"`
+	ChatID      string            `json:"chat_id,omitempty"`
+	MessageID   string            `json:"message_id,omitempty"`
+	UserID      string            `json:"user_id,omitempty"`
+	EmojiCode   string            `json:"emoji_code,omitempty"`
+	RawEmoji    string            `json:"raw_emoji,omitempty"`
+	ReactedAt   time.Time         `json:"reacted_at"`
+	Removed     bool              `json:"removed,omitempty"`
+	ReplyTarget *core.ReplyTarget `json:"reply_target,omitempty"`
+	BridgeID    string            `json:"bridge_id,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+// ReactionShortcutBinding tells the backend to treat a specific unified
+// emoji code on a specific reply target as a review decision shortcut.
+type ReactionShortcutBinding struct {
+	ReviewID    string            `json:"review_id"`
+	Outcome     string            `json:"outcome"`
+	EmojiCode   string            `json:"emoji_code"`
+	Platform    string            `json:"platform,omitempty"`
+	BridgeID    string            `json:"bridge_id,omitempty"`
+	ReplyTarget *core.ReplyTarget `json:"reply_target,omitempty"`
+}
+
+// BindReviewReactionShortcut creates a binding so the backend turns a
+// reaction event (via /api/v1/im/reactions) into a review approve /
+// request-changes action.
+func (c *AgentForgeClient) BindReviewReactionShortcut(ctx context.Context, reviewID, outcome, emojiCode string, target *core.ReplyTarget) error {
+	reviewID = strings.TrimSpace(reviewID)
+	if reviewID == "" {
+		return errors.New("review id is required")
+	}
+	binding := ReactionShortcutBinding{
+		ReviewID:    reviewID,
+		Outcome:     strings.TrimSpace(outcome),
+		EmojiCode:   strings.TrimSpace(emojiCode),
+		Platform:    c.imSource,
+		BridgeID:    c.bridgeID,
+		ReplyTarget: target,
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/im/reactions/shortcuts", binding)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return c.readError(resp)
+	}
+	return nil
+}
+
+// PostReaction persists an inbound reaction event on the backend. The backend
+// uses it to drive review/approval shortcuts and audit trails.
+func (c *AgentForgeClient) PostReaction(ctx context.Context, event ReactionEvent) error {
+	if strings.TrimSpace(event.Platform) == "" {
+		event.Platform = c.imSource
+	}
+	if strings.TrimSpace(event.BridgeID) == "" {
+		event.BridgeID = c.bridgeID
+	}
+	if event.ReactedAt.IsZero() {
+		event.ReactedAt = time.Now().UTC()
+	}
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/im/reactions", event)
+	if err != nil {
+		return err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK && resp.StatusCode != http.StatusCreated && resp.StatusCode != http.StatusAccepted {
+		return c.readError(resp)
+	}
+	return nil
+}
+
 func (c *AgentForgeClient) RegisterBridge(ctx context.Context, req BridgeRegistration) (*BridgeInstance, error) {
 	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/im/bridge/register", req)
 	if err != nil {
@@ -1771,6 +1877,21 @@ type BridgeRegistration struct {
 	CapabilityMatrix map[string]any    `json:"capabilityMatrix,omitempty"`
 	CallbackPaths    []string          `json:"callbackPaths,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty"`
+	// Tenants this provider serves on this bridge. Empty in legacy single-
+	// tenant mode; backend treats empty as the default tenant derived from
+	// ProjectIDs[0] for compatibility.
+	Tenants []string `json:"tenants,omitempty"`
+	// TenantManifest enumerates every tenant declared on this bridge with
+	// its backend projectId so the control plane can index by (bridgeId,
+	// providerId, tenantId) without a separate lookup.
+	TenantManifest []TenantBinding `json:"tenantManifest,omitempty"`
+}
+
+// TenantBinding is the registration-time declaration of a tenant hosted
+// by this bridge process.
+type TenantBinding struct {
+	ID        string `json:"id"`
+	ProjectID string `json:"projectId"`
 }
 
 type BridgeInstance struct {

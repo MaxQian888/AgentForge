@@ -22,6 +22,19 @@ type Engine struct {
 	bridgeCapabilityCache map[BridgeCapability]bridgeCapabilityCacheEntry
 	bridgeID              string
 	allowlist             *CommandAllowlist
+	tenantResolver        TenantResolver
+	defaultTenant         *Tenant
+}
+
+// SetTenantResolver installs the resolver that maps inbound messages to a
+// tenant. Passing nil disables tenant routing (legacy single-tenant mode).
+// `defaultFallback` is used when the resolver reports a miss and is a
+// trusted tenant the operator wants to treat as the catch-all.
+func (e *Engine) SetTenantResolver(resolver TenantResolver, defaultFallback *Tenant) {
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	e.tenantResolver = resolver
+	e.defaultTenant = defaultFallback
 }
 
 // SetCommandAllowlist installs a coarse-grained command gate. Passing nil
@@ -125,6 +138,33 @@ func (e *Engine) SetFallback(handler func(p Platform, msg *Message)) {
 func (e *Engine) HandleMessage(p Platform, msg *Message) {
 	content := strings.TrimSpace(msg.Content)
 
+	// Tenant resolution runs before any rate-limit / command dispatch so
+	// every downstream decision is tenant-aware. A miss with no default
+	// fallback short-circuits the message with an explicit reply; we do
+	// not silently dispatch an unresolved message.
+	if msg.TenantID == "" {
+		e.mu.RLock()
+		resolver := e.tenantResolver
+		fallback := e.defaultTenant
+		e.mu.RUnlock()
+		if resolver != nil {
+			if t, err := resolver.Resolve(msg); err == nil && t != nil {
+				msg.TenantID = t.ID
+				if msg.ReplyTarget != nil {
+					msg.ReplyTarget.TenantID = t.ID
+				}
+			} else if fallback != nil {
+				msg.TenantID = fallback.ID
+				if msg.ReplyTarget != nil {
+					msg.ReplyTarget.TenantID = fallback.ID
+				}
+			} else {
+				_ = p.Reply(context.Background(), msg.ReplyCtx, "该会话未配置 tenant 绑定，请联系管理员。")
+				return
+			}
+		}
+	}
+
 	// Parse slash command upfront so rate limit scope carries command +
 	// action_class information for multi-dim policies.
 	var cmd, args string
@@ -138,9 +178,10 @@ func (e *Engine) HandleMessage(p Platform, msg *Message) {
 	actionClass := ActionClassForCommand(cmd)
 
 	// Command allowlist gate (applies before rate limit so denied commands
-	// never enter the rate counters).
+	// never enter the rate counters). Tenant-scoped rules are honored when
+	// the message has a resolved tenant.
 	if cmd != "" && e.allowlist != nil && e.allowlist.Enabled() {
-		if !e.allowlist.Permit(msg.Platform, cmd) {
+		if !e.allowlist.PermitTenant(msg.TenantID, msg.Platform, cmd) {
 			_ = p.Reply(context.Background(), msg.ReplyCtx, "该命令在此平台未启用，请联系管理员。")
 			return
 		}
@@ -149,6 +190,7 @@ func (e *Engine) HandleMessage(p Platform, msg *Message) {
 	// Rate limit check.
 	if e.rateLimiter != nil {
 		scope := Scope{
+			Tenant:      msg.TenantID,
 			Chat:        msg.ChatID,
 			User:        msg.UserID,
 			Bridge:      e.bridgeID,

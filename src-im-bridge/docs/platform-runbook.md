@@ -34,18 +34,58 @@ Registration and health metadata for those providers also expose completion-mode
 
 All platforms support `IM_TRANSPORT_MODE=stub` for local verification and `IM_TRANSPORT_MODE=live` for production traffic.
 
+## Gateway deployment (multi-provider + multi-tenant)
+
+A single bridge process can host multiple providers concurrently. Each provider gets its own engine, notify receiver, and control-plane connection; state store, audit writer, rate limiter, and client factory are shared process-wide.
+
+### Rollout from single-provider to gateway
+
+1. Retain `IM_PLATFORM=<current>` and deploy the gateway binary. Single-provider semantics are preserved end-to-end (`IM_PLATFORMS` falls back to `IM_PLATFORM`).
+2. Create `tenants.yaml` describing your current chat → project mapping and set `IM_TENANTS_CONFIG=/etc/agentforge/tenants.yaml`. Keep `IM_TENANT_DEFAULT` pointing at your existing tenant so misses route cleanly.
+3. Verify registration payload reports `tenants: [...]` by inspecting `POST /api/v1/im/bridge/register` traffic or the operator dashboard.
+4. Switch to `IM_PLATFORMS=<current>,<new>` and deploy again. Confirm both providers' notify ports are bound (default `NOTIFY_PORT` and `NOTIFY_PORT+1`) or override via `IM_NOTIFY_PORT_<PROVIDER>`.
+5. Narrow `tenants.yaml` resolvers to add the new provider's chats/workspaces per tenant.
+6. Remove `IM_PLATFORM` once every deployment is on `IM_PLATFORMS`; the alias is retained only for transitional compatibility.
+
+### Diagnostics
+
+| Symptom | Likely cause | Where to look |
+| --- | --- | --- |
+| "该会话未配置 tenant 绑定" replies in chat | Resolver miss without `IM_TENANT_DEFAULT` | `tenants.yaml` resolver bindings; operator audit events `metadata.reason=tenant_unresolved` |
+| One provider healthy, another silent | Per-provider credential missing; startup logged `provider <id>` fail | `journalctl`/container logs for the startup line identifying the offending provider |
+| Notify port in-use error | Default offset clashes with another service | Set `IM_NOTIFY_PORT_<PROVIDER>` per provider |
+| Plugin command not dispatching | Manifest invalid or watcher hasn't picked up the new file yet | Check `${IM_BRIDGE_PLUGIN_DIR}/<id>/plugin.yaml`; watcher polls every 30s |
+| Tenant leaking rate limit counters | Policy does not declare `DimTenant` | Set `IM_RATE_POLICY` to include `tenant` dimension in at least one policy |
+
 ## Feature Matrix
 
 | Platform | Readiness tier | Structured surface | Action callback mode | Reply target restored | Preferred async update path | Explicit downgrade |
 | --- | --- | --- | --- | --- | --- | --- |
 | Feishu | `full_native_lifecycle` | interactive cards, JSON cards, template cards | card callback | chat id, message id, callback token | immediate toast/reply first, delayed native card update when available | reply/send fallback with explicit fallback reason when delayed update cannot be used; shared action completions use provider-owned richer text/card builders |
-| Slack | n/a | Block Kit | Socket Mode interactive payload | channel, thread, `response_url` | thread reply or `response_url` follow-up | plain text only if block rendering is unavailable |
-| DingTalk | `native_send_with_fallback` | ActionCard send with text fallback | Stream card callback | session webhook, conversation id, conversation type | session webhook first, direct send fallback | ActionCard or editable-update requests degrade explicitly when mutable update is unavailable |
-| WeCom | `native_send_with_fallback` | template-card/markdown-compatible richer send with text fallback | webhook callback payload | chat id, user id, `response_url` | `response_url` reply first, direct app send fallback | richer or mutable updates fall back to markdown/text when the current WeCom path cannot honor them |
-| QQ | `text_first` | text-first shared rendering | OneBot message event payload | group id, user id, message id | reply in the same chat using reply-segment compatible sends | structured, native, or mutable-update requests are sent as explicit downgraded text/link output |
-| QQ Bot | `markdown_first` | markdown/keyboard-first shared rendering | webhook callback payload | group openid or user openid, `msg_id` | reply when `msg_id` exists, direct follow-up otherwise | mutable-update or incompatible richer requests are sent as explicit downgraded text output |
+| Slack | `full_native_lifecycle` | Block Kit | Socket Mode interactive payload | channel, thread, `response_url` | thread reply or `response_url` follow-up | plain text only if block rendering is unavailable |
+| DingTalk | `full_native_lifecycle` (mutable_update_method=`openapi_only`) | ActionCard send with text fallback | Stream card callback | session webhook, conversation id, conversation type | session webhook first, OpenAPI update when the card originated via OpenAPI | ActionCard or editable-update requests for webhook-origin cards degrade explicitly |
+| WeCom | `full_native_lifecycle` (mutable_update_method=`template_card_update`) | template-card/markdown-compatible richer send | webhook callback payload | chat id, user id, `response_url` | `response_url` reply first, template_card_update fallback | richer updates outside template_card scope degrade to markdown/text |
+| QQ | `text_first` (mutable_update=`simulated`) | text-first shared rendering | OneBot message event payload | group id, user id, message id | reply in the same chat using reply-segment compatible sends | mutable-update is simulated via delete+resend with thread context; structured/native requests downgrade to text |
+| QQ Bot | `native_send_with_fallback` (mutable_update_method=`openapi_patch`) | markdown/keyboard-first shared rendering | webhook callback payload | group openid or user openid, `msg_id` | reply when `msg_id` exists, OpenAPI PATCH when available | mutable-update or incompatible richer requests are sent as explicit downgraded text output |
 | Telegram | n/a | inline keyboard | callback query | chat id, message id, `message_thread_id` topic | reply or `editMessageText` depending on target | card-like payloads collapse to text plus inline keyboard; optional MarkdownV2 delivery escapes content first and oversized formatted updates fall back to segmented replies |
 | Discord | n/a | message components | `/interactions` component payload | channel id, interaction token, original response id | deferred ack, follow-up, original response patch | unsupported interaction types return explicit ephemeral failure |
+
+### Attachments / Reactions / Threads capability matrix
+
+| Platform | Attachments (max size) | Reactions | Threads (policies) |
+| --- | --- | --- | --- |
+| Slack | ✅ (1 GB) | ✅ unified set | reuse / open / isolate |
+| Discord | ✅ (25 MB) | ✅ unified set | reuse / open / isolate |
+| Feishu | ✅ (20 MB) | ✅ unified set | reuse / open / isolate |
+| Telegram | ✅ (50 MB) | ✅ unified set | reuse / isolate |
+| DingTalk | ❌ | ❌ | prefix via isolate |
+| WeCom | ❌ | ❌ | prefix via isolate |
+| QQ | ❌ | ❌ | prefix via isolate |
+| QQ Bot | ❌ | ❌ | prefix via isolate |
+
+Unified reaction codes: `ack`, `running`, `done`, `failed`, `thumbs_up`, `thumbs_down`, `eyes`, `question`.
+
+Unsupported attachment/reaction/thread requests degrade to a text summary or a `[session: ...]` prefixed reply and always carry a `fallback_reason` (`attachments_unsupported`, `thread_open_unsupported`, etc.) in the delivery receipt.
 
 ## Control-Plane Prerequisites
 

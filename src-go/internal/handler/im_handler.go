@@ -14,6 +14,8 @@ type imService interface {
 	HandleCommand(ctx context.Context, req *model.IMCommandRequest) (*model.IMCommandResponse, error)
 	HandleIntent(ctx context.Context, req *model.IMIntentRequest) (*model.IMIntentResponse, error)
 	HandleAction(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error)
+	HandleReaction(ctx context.Context, req *model.IMReactionRequest) error
+	BindReactionShortcut(ctx context.Context, req *model.IMReactionShortcutBinding) error
 	Send(ctx context.Context, req *model.IMSendRequest) error
 	Notify(ctx context.Context, req *model.IMNotifyRequest) error
 }
@@ -118,4 +120,37 @@ func (h *IMHandler) HandleIntent(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
 	}
 	return c.JSON(http.StatusOK, resp)
+}
+
+// HandleReaction persists an inbound reaction event forwarded by the IM
+// bridge. The service layer decides whether the reaction also triggers a
+// review shortcut.
+func (h *IMHandler) HandleReaction(c echo.Context) error {
+	req := new(model.IMReactionRequest)
+	if err := c.Bind(req); err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := h.service.HandleReaction(c.Request().Context(), req); err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusAccepted, map[string]string{"status": "recorded"})
+}
+
+// BindReactionShortcut registers a mapping from a unified emoji code on a
+// reply target to a review decision.
+func (h *IMHandler) BindReactionShortcut(c echo.Context) error {
+	req := new(model.IMReactionShortcutBinding)
+	if err := c.Bind(req); err != nil {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
+	}
+	if err := c.Validate(req); err != nil {
+		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
+	}
+	if err := h.service.BindReactionShortcut(c.Request().Context(), req); err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusCreated, map[string]string{"status": "bound"})
 }

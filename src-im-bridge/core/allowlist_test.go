@@ -14,6 +14,29 @@ func TestAllowlist_EmptyAdmitsAll(t *testing.T) {
 	}
 }
 
+func TestAllowlist_TenantScopedRule(t *testing.T) {
+	al := NewCommandAllowlist("acme:feishu:/task,!beta:feishu:/task")
+	if !al.PermitTenant("acme", "feishu", "/task") {
+		t.Fatal("acme should be allowed")
+	}
+	if al.PermitTenant("beta", "feishu", "/task") {
+		t.Fatal("beta should be denied by deny rule")
+	}
+	if al.PermitTenant("gamma", "feishu", "/task") {
+		t.Fatal("gamma has no allow rule; should be denied")
+	}
+}
+
+func TestAllowlist_TenantWildcardAdmitsAnyTenant(t *testing.T) {
+	al := NewCommandAllowlist("*:feishu:/help")
+	if !al.PermitTenant("acme", "feishu", "/help") {
+		t.Fatal("tenant wildcard should admit acme")
+	}
+	if !al.PermitTenant("", "feishu", "/help") {
+		t.Fatal("tenant wildcard should admit empty tenant")
+	}
+}
+
 func TestAllowlist_WildcardAdmitsAllForPlatform(t *testing.T) {
 	al := NewCommandAllowlist("slack:/*")
 	if !al.Permit("slack", "/task") {

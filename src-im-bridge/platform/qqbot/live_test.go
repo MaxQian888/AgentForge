@@ -145,8 +145,8 @@ func TestLive_MetadataDeclaresQQBotCallbackCapabilities(t *testing.T) {
 	if !metadata.Capabilities.SupportsSlashCommands {
 		t.Fatal("expected slash command capability")
 	}
-	if metadata.Capabilities.ReadinessTier != core.ReadinessTierMarkdownFirst {
-		t.Fatalf("ReadinessTier = %q, want %q", metadata.Capabilities.ReadinessTier, core.ReadinessTierMarkdownFirst)
+	if metadata.Capabilities.ReadinessTier != core.ReadinessTierNativeSendWithFallback {
+		t.Fatalf("ReadinessTier = %q, want %q", metadata.Capabilities.ReadinessTier, core.ReadinessTierNativeSendWithFallback)
 	}
 	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != core.NativeSurfaceQQBotMarkdown {
 		t.Fatalf("NativeSurfaces = %+v", metadata.Rendering.NativeSurfaces)

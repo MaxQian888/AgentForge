@@ -3,6 +3,7 @@ package model
 import (
 	"encoding/json"
 	"strings"
+	"time"
 )
 
 // IMMessageRequest represents an incoming IM message webhook.
@@ -48,8 +49,52 @@ type IMSendRequest struct {
 	DeliveryID  string               `json:"deliveryId,omitempty"`
 	Structured  *IMStructuredMessage `json:"structured,omitempty"`
 	Native      *IMNativeMessage     `json:"native,omitempty"`
+	Attachments []IMAttachmentRef    `json:"attachments,omitempty"`
 	Metadata    map[string]string    `json:"metadata,omitempty"`
 	ReplyTarget *IMReplyTarget       `json:"replyTarget,omitempty"`
+}
+
+// IMAttachmentRef points at a file that the IM Bridge has staged. The Go
+// backend persists the reference when it relays an envelope; the bridge
+// resolves the actual bytes at delivery time.
+type IMAttachmentRef struct {
+	ID         string            `json:"id,omitempty"`
+	StagedID   string            `json:"staged_id,omitempty"`
+	Kind       string            `json:"kind,omitempty"`
+	MimeType   string            `json:"mime_type,omitempty"`
+	Filename   string            `json:"filename,omitempty"`
+	SizeBytes  int64             `json:"size_bytes,omitempty"`
+	ContentRef string            `json:"content_ref,omitempty"`
+	URL        string            `json:"url,omitempty"`
+	DataBase64 string            `json:"data_base64,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
+}
+
+// IMReactionRequest is the payload the IM Bridge posts to
+// /api/v1/im/reactions when it observes an inbound emoji reaction.
+type IMReactionRequest struct {
+	Platform    string            `json:"platform" validate:"required"`
+	ChatID      string            `json:"chat_id,omitempty"`
+	MessageID   string            `json:"message_id,omitempty"`
+	UserID      string            `json:"user_id,omitempty"`
+	EmojiCode   string            `json:"emoji_code,omitempty"`
+	RawEmoji    string            `json:"raw_emoji,omitempty"`
+	ReactedAt   time.Time         `json:"reacted_at"`
+	Removed     bool              `json:"removed,omitempty"`
+	BridgeID    string            `json:"bridge_id,omitempty"`
+	ReplyTarget *IMReplyTarget    `json:"reply_target,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
+}
+
+// IMReactionShortcutBinding maps a unified emoji code on a reply target to a
+// review decision. Registered via POST /api/v1/im/reactions/shortcuts.
+type IMReactionShortcutBinding struct {
+	ReviewID    string         `json:"review_id" validate:"required"`
+	Outcome     string         `json:"outcome" validate:"required,oneof=approve request-changes"`
+	EmojiCode   string         `json:"emoji_code" validate:"required"`
+	Platform    string         `json:"platform,omitempty"`
+	BridgeID    string         `json:"bridge_id,omitempty"`
+	ReplyTarget *IMReplyTarget `json:"reply_target,omitempty"`
 }
 
 // IMNotifyRequest sends a notification event to an IM channel.
@@ -120,6 +165,7 @@ type IMIntentResponse struct {
 // progress or terminal updates back to the original IM conversation.
 type IMReplyTarget struct {
 	Platform           string            `json:"platform"`
+	TenantID           string            `json:"tenantId,omitempty"`
 	ChatID             string            `json:"chatId,omitempty"`
 	ChannelID          string            `json:"channelId,omitempty"`
 	ThreadID           string            `json:"threadId,omitempty"`
@@ -378,6 +424,19 @@ type IMBridgeRegisterRequest struct {
 	CapabilityMatrix map[string]any    `json:"capabilityMatrix,omitempty"`
 	CallbackPaths    []string          `json:"callbackPaths,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty"`
+	// Tenants served by this provider on this bridge. Empty = single-tenant
+	// legacy registration. Control plane indexes (BridgeID, Platform, TenantID).
+	Tenants []string `json:"tenants,omitempty"`
+	// TenantManifest enumerates every tenant hosted on this bridge with its
+	// backend projectId so the router can resolve (bridge, provider, tenant)
+	// triples without a separate lookup.
+	TenantManifest []IMTenantBinding `json:"tenantManifest,omitempty"`
+}
+
+// IMTenantBinding maps a tenantID to a backend project.
+type IMTenantBinding struct {
+	ID        string `json:"id"`
+	ProjectID string `json:"projectId"`
 }
 
 // IMBridgeInstance describes the server-side view of a registered Bridge.
@@ -390,6 +449,8 @@ type IMBridgeInstance struct {
 	CapabilityMatrix map[string]any    `json:"capabilityMatrix,omitempty"`
 	CallbackPaths    []string          `json:"callbackPaths,omitempty"`
 	Metadata         map[string]string `json:"metadata,omitempty"`
+	Tenants          []string          `json:"tenants,omitempty"`
+	TenantManifest   []IMTenantBinding `json:"tenantManifest,omitempty"`
 	LastSeenAt       string            `json:"lastSeenAt,omitempty"`
 	ExpiresAt        string            `json:"expiresAt,omitempty"`
 	Status           string            `json:"status,omitempty"`
@@ -410,6 +471,7 @@ type IMControlDelivery struct {
 	TargetBridgeID string               `json:"targetBridgeId"`
 	Platform       string               `json:"platform"`
 	ProjectID      string               `json:"projectId,omitempty"`
+	TenantID       string               `json:"tenantId,omitempty"`
 	Kind           string               `json:"kind"`
 	Content        string               `json:"content"`
 	Structured     *IMStructuredMessage `json:"structured,omitempty"`

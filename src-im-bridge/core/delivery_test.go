@@ -546,7 +546,7 @@ func TestDeliverEnvelope_ReportsFallbackReasonWhenQQBotCannotHonorDeferredUpdate
 	}
 }
 
-func TestDeliverEnvelope_ReportsFallbackReasonWhenWeComCannotHonorEditableUpdate(t *testing.T) {
+func TestDeliverEnvelope_SelectsEditPathWhenWeComSupportsMutableUpdate(t *testing.T) {
 	platform := &deliveryTestPlatform{}
 	metadata := NormalizeMetadata(PlatformMetadata{Source: "wecom"}, "wecom")
 
@@ -563,15 +563,15 @@ func TestDeliverEnvelope_ReportsFallbackReasonWhenWeComCannotHonorEditableUpdate
 	if err != nil {
 		t.Fatalf("DeliverEnvelope error: %v", err)
 	}
-	if receipt.Method != DeliveryMethodReply {
-		t.Fatalf("receipt = %+v, want reply fallback", receipt)
+	if receipt.Method != DeliveryMethodEdit {
+		t.Fatalf("receipt = %+v, want edit method", receipt)
 	}
-	if !strings.Contains(receipt.FallbackReason, "editable updates") {
-		t.Fatalf("fallback_reason = %q", receipt.FallbackReason)
+	if metadata.Capabilities.MutableUpdateMethod != "template_card_update" {
+		t.Fatalf("wecom MutableUpdateMethod = %q, want template_card_update", metadata.Capabilities.MutableUpdateMethod)
 	}
 }
 
-func TestDeliverEnvelope_ReportsFallbackReasonWhenDingTalkCannotHonorEditableUpdate(t *testing.T) {
+func TestDeliverEnvelope_SelectsEditPathWhenDingTalkSupportsOpenAPIUpdate(t *testing.T) {
 	platform := &deliveryTestPlatform{}
 	metadata := NormalizeMetadata(PlatformMetadata{Source: "dingtalk"}, "dingtalk")
 
@@ -588,10 +588,10 @@ func TestDeliverEnvelope_ReportsFallbackReasonWhenDingTalkCannotHonorEditableUpd
 	if err != nil {
 		t.Fatalf("DeliverEnvelope error: %v", err)
 	}
-	if receipt.Method != DeliveryMethodReply {
-		t.Fatalf("receipt = %+v, want reply fallback", receipt)
+	if receipt.Method != DeliveryMethodEdit {
+		t.Fatalf("receipt = %+v, want edit method", receipt)
 	}
-	if !strings.Contains(receipt.FallbackReason, "editable updates") {
-		t.Fatalf("fallback_reason = %q", receipt.FallbackReason)
+	if metadata.Capabilities.MutableUpdateMethod != "openapi_only" {
+		t.Fatalf("dingtalk MutableUpdateMethod = %q, want openapi_only", metadata.Capabilities.MutableUpdateMethod)
 	}
 }

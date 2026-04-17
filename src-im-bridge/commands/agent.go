@@ -12,7 +12,7 @@ import (
 )
 
 // RegisterAgentCommands registers /agent sub-commands on the engine.
-func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterAgentCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/agent", func(p core.Platform, msg *core.Message, args string) {
 		parts := strings.SplitN(strings.TrimSpace(args), " ", 2)
 		if len(parts) == 0 || parts[0] == "" {
@@ -26,7 +26,7 @@ func RegisterAgentCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 		}
 
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		switch subCmd {
 		case "status":
 			if strings.TrimSpace(subArgs) != "" {

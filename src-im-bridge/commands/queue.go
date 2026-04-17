@@ -10,7 +10,7 @@ import (
 )
 
 // RegisterQueueCommands registers /queue sub-commands on the engine.
-func RegisterQueueCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterQueueCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/queue", func(p core.Platform, msg *core.Message, args string) {
 		parts := strings.Fields(strings.TrimSpace(args))
 		if len(parts) == 0 {
@@ -19,7 +19,7 @@ func RegisterQueueCommands(engine *core.Engine, apiClient *client.AgentForgeClie
 		}
 
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		switch canonicalSubcommand("/queue", parts[0]) {
 		case "list":
 			filter := ""

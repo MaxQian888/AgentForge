@@ -93,6 +93,12 @@ func TestLive_MetadataDeclaresQQCapabilities(t *testing.T) {
 	if !metadata.Capabilities.SupportsSlashCommands {
 		t.Fatal("expected qq slash-style commands")
 	}
+	if metadata.Capabilities.MutableUpdateMethod != "simulated" {
+		t.Fatalf("MutableUpdateMethod = %q, want simulated", metadata.Capabilities.MutableUpdateMethod)
+	}
+	if metadata.Capabilities.ReadinessTier != core.ReadinessTierTextFirst {
+		t.Fatalf("ReadinessTier = %q, want text_first", metadata.Capabilities.ReadinessTier)
+	}
 }
 
 type fakeTransport struct {

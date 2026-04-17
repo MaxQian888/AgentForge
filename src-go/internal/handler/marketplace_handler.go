@@ -21,6 +21,8 @@ import (
 	"github.com/react-go-quick-starter/server/internal/model"
 	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
+	log "github.com/sirupsen/logrus"
+	"gopkg.in/yaml.v3"
 )
 
 // MarketplaceWorkflowTemplateRepo is the repo interface needed for workflow template install.
@@ -41,12 +43,21 @@ type MarketplaceHandler struct {
 	httpClient           *http.Client
 	pluginsDir           string
 	rolesDir             string
+	imBridgePluginDir    string
 	workflowTemplateRepo MarketplaceWorkflowTemplateRepo
 }
 
 // WithWorkflowTemplateRepo wires the workflow template repository for marketplace installs.
 func (h *MarketplaceHandler) WithWorkflowTemplateRepo(repo MarketplaceWorkflowTemplateRepo) *MarketplaceHandler {
 	h.workflowTemplateRepo = repo
+	return h
+}
+
+// WithIMBridgePluginDir sets the directory shared with the IM Bridge for
+// delivering marketplace-sourced command plugins. When empty, marketplace
+// installs do not ship `im_commands` payloads to the bridge.
+func (h *MarketplaceHandler) WithIMBridgePluginDir(dir string) *MarketplaceHandler {
+	h.imBridgePluginDir = strings.TrimSpace(dir)
 	return h
 }
 
@@ -375,11 +386,46 @@ func (h *MarketplaceHandler) GetBuiltInSkill(c echo.Context) error {
 }
 
 type marketplaceItemMetadata struct {
-	ID            string `json:"id"`
-	Type          string `json:"type"`
-	Name          string `json:"name"`
-	Slug          string `json:"slug"`
-	LatestVersion string `json:"latest_version"`
+	ID            string          `json:"id"`
+	Type          string          `json:"type"`
+	Name          string          `json:"name"`
+	Slug          string          `json:"slug"`
+	LatestVersion string          `json:"latest_version"`
+	ExtraMetadata json.RawMessage `json:"extra_metadata,omitempty"`
+}
+
+// pluginIMCommandSpec mirrors the marketplace-side typed shape so the
+// backend can parse `extra_metadata.im_commands` without depending on the
+// marketplace module.
+type pluginIMCommandSpec struct {
+	Slash       string                `yaml:"slash" json:"slash"`
+	Description string                `yaml:"description,omitempty" json:"description,omitempty"`
+	ActionClass string                `yaml:"action_class,omitempty" json:"actionClass,omitempty"`
+	Subcommands []pluginIMSubcommand  `yaml:"subcommands,omitempty" json:"subcommands,omitempty"`
+	Invoke      *pluginIMInvokeSpec   `yaml:"invoke,omitempty" json:"invoke,omitempty"`
+}
+
+type pluginIMSubcommand struct {
+	Name        string              `yaml:"name" json:"name"`
+	Description string              `yaml:"description,omitempty" json:"description,omitempty"`
+	ActionClass string              `yaml:"action_class,omitempty" json:"actionClass,omitempty"`
+	Invoke      *pluginIMInvokeSpec `yaml:"invoke" json:"invoke"`
+}
+
+type pluginIMInvokeSpec struct {
+	Kind     string            `yaml:"kind" json:"kind"`
+	URL      string            `yaml:"url,omitempty" json:"url,omitempty"`
+	Method   string            `yaml:"method,omitempty" json:"method,omitempty"`
+	Timeout  string            `yaml:"timeout,omitempty" json:"timeout,omitempty"`
+	Headers  map[string]string `yaml:"headers,omitempty" json:"headers,omitempty"`
+	ServerID string            `yaml:"serverId,omitempty" json:"serverId,omitempty"`
+	Tool     string            `yaml:"tool,omitempty" json:"tool,omitempty"`
+	Key      string            `yaml:"key,omitempty" json:"key,omitempty"`
+}
+
+type pluginExtraMetadata struct {
+	ImCommands []pluginIMCommandSpec `json:"im_commands,omitempty"`
+	Tenants    []string              `json:"im_tenants,omitempty"`
 }
 
 type marketplaceArtifactError struct {
@@ -468,8 +514,63 @@ func (h *MarketplaceHandler) completeInstall(
 		installState.LocalPath = targetDir
 		installState.Provenance.RecordID = record.Metadata.ID
 		installState.Provenance.LocalPath = targetDir
+
+		// Marketplace-sourced IM command manifests: when the item declares
+		// `im_commands` in ExtraMetadata, materialize a plugin.yaml into
+		// IM_BRIDGE_PLUGIN_DIR so the bridge's hot-reload watcher picks it
+		// up. Missing dir or missing im_commands → no-op.
+		if err := h.shipIMCommandsToBridge(itemMeta, req.ItemID); err != nil {
+			log.Warnf("failed to ship marketplace im_commands to bridge: %v", err)
+		}
 		return nil
 	}
+}
+
+// shipIMCommandsToBridge writes <pluginDir>/<itemID>/plugin.yaml when the
+// marketplace item's ExtraMetadata contains an im_commands list.
+func (h *MarketplaceHandler) shipIMCommandsToBridge(itemMeta *marketplaceItemMetadata, pluginID string) error {
+	if h == nil || h.imBridgePluginDir == "" || itemMeta == nil || len(itemMeta.ExtraMetadata) == 0 {
+		return nil
+	}
+	var parsed pluginExtraMetadata
+	if err := json.Unmarshal(itemMeta.ExtraMetadata, &parsed); err != nil {
+		return fmt.Errorf("parse extra_metadata: %w", err)
+	}
+	if len(parsed.ImCommands) == 0 {
+		return nil
+	}
+	manifest := map[string]any{
+		"id":       firstNonEmpty(itemMeta.Slug, pluginID),
+		"version":  itemMeta.LatestVersion,
+		"name":     itemMeta.Name,
+		"commands": parsed.ImCommands,
+	}
+	if len(parsed.Tenants) > 0 {
+		manifest["tenants"] = parsed.Tenants
+	}
+	body, err := yaml.Marshal(manifest)
+	if err != nil {
+		return fmt.Errorf("marshal plugin manifest: %w", err)
+	}
+	targetDir := filepath.Join(h.imBridgePluginDir, firstNonEmpty(itemMeta.Slug, pluginID))
+	if err := os.MkdirAll(targetDir, 0o755); err != nil {
+		return fmt.Errorf("mkdir plugin dir: %w", err)
+	}
+	manifestPath := filepath.Join(targetDir, "plugin.yaml")
+	if err := os.WriteFile(manifestPath, body, 0o644); err != nil {
+		return fmt.Errorf("write plugin manifest: %w", err)
+	}
+	log.Infof("shipped marketplace im_commands to %s", manifestPath)
+	return nil
+}
+
+func firstNonEmpty(values ...string) string {
+	for _, v := range values {
+		if t := strings.TrimSpace(v); t != "" {
+			return t
+		}
+	}
+	return ""
 }
 
 func (h *MarketplaceHandler) installRoleArtifact(

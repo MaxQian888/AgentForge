@@ -1227,7 +1227,7 @@ func decodeImageMessage(raw *string) (string, map[string]string, []core.Attachme
 		"image_key": imageKey,
 	}
 	attachments := []core.Attachment{
-		{Type: "image", Key: imageKey},
+		{Kind: core.AttachmentKindImage, ExternalRef: imageKey},
 	}
 	return "[image:" + imageKey + "]", metadata, attachments, nil
 }
@@ -1259,7 +1259,7 @@ func decodeFileMessage(raw *string) (string, map[string]string, []core.Attachmen
 		metadata["file_name"] = fileName
 	}
 	attachments := []core.Attachment{
-		{Type: "file", Key: fileKey, Name: fileName},
+		{Kind: core.AttachmentKindFile, ExternalRef: fileKey, Filename: fileName},
 	}
 	content := "[file:" + fileKey + "]"
 	if fileName != "" {

@@ -9,6 +9,7 @@ require (
 	github.com/larksuite/oapi-sdk-go/v3 v3.5.3
 	github.com/open-dingtalk/dingtalk-stream-sdk-go v0.9.1
 	github.com/slack-go/slack v0.20.0
+	gopkg.in/yaml.v3 v3.0.1
 )
 
 require (

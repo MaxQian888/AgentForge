@@ -217,6 +217,41 @@ export function IMBridgeHealth({
                       </div>
                     </div>
 
+                    {provider.tenants && provider.tenants.length > 0 ? (
+                      <div className="mt-4 space-y-1">
+                        <p className="text-sm font-medium">
+                          {t("health.tenantMounts", {
+                            defaultValue: "Tenant mounts",
+                          })}
+                        </p>
+                        <div className="flex flex-wrap gap-2">
+                          {provider.tenants.map((tenantId) => {
+                            const binding = provider.tenantManifest?.find(
+                              (b) => b.id === tenantId,
+                            );
+                            return (
+                              <span
+                                key={tenantId}
+                                className="rounded-md border border-dashed border-muted-foreground/40 bg-muted/30 px-2 py-1 text-xs"
+                                title={
+                                  binding
+                                    ? `projectId=${binding.projectId}`
+                                    : undefined
+                                }
+                              >
+                                {tenantId}
+                                {binding ? (
+                                  <span className="ml-1 text-muted-foreground">
+                                    → {binding.projectId.slice(0, 8)}…
+                                  </span>
+                                ) : null}
+                              </span>
+                            );
+                          })}
+                        </div>
+                      </div>
+                    ) : null}
+
                     <div className="mt-4 space-y-2">
                       {onConfigureProvider ? (
                         <Button

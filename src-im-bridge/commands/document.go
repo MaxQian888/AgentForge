@@ -12,7 +12,7 @@ import (
 var docUsage = commandUsage("/doc")
 
 // RegisterDocumentCommands registers /doc sub-commands on the engine.
-func RegisterDocumentCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterDocumentCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/doc", func(p core.Platform, msg *core.Message, args string) {
 		parts := strings.SplitN(strings.TrimSpace(args), " ", 2)
 		if len(parts) == 0 || parts[0] == "" {
@@ -26,7 +26,7 @@ func RegisterDocumentCommands(engine *core.Engine, apiClient *client.AgentForgeC
 		}
 
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		switch subCmd {
 		case "list":
 			handleDocList(ctx, p, msg, scopedClient)

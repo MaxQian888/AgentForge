@@ -12,7 +12,7 @@ import (
 var sprintUsage = commandUsage("/sprint")
 
 // RegisterSprintCommands registers /sprint sub-commands on the engine.
-func RegisterSprintCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterSprintCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/sprint", func(p core.Platform, msg *core.Message, args string) {
 		trimmed := strings.TrimSpace(args)
 		if trimmed == "" {
@@ -21,7 +21,7 @@ func RegisterSprintCommands(engine *core.Engine, apiClient *client.AgentForgeCli
 		}
 
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform)
 
 		switch trimmed {
 		case "status":

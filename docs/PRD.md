@@ -2883,6 +2883,19 @@ flowchart TD
 2. 剥离原有 Agent 层（`agent/claudecode` 等），替换为 AgentForge Agent 适配器
 3. 保留 `platform/` 和 `daemon/` 目录，通过 `git remote add upstream` 定期同步上游更新
 
+**Gateway 模式（2026-04 起 — 见 change `add-im-bridge-multi-tenant-gateway`）：**
+
+原 cc-connect 的 single-active-provider, single-project 模型扩展为网关：
+
+- `IM_PLATFORMS=feishu,dingtalk,wecom`：一个 bridge 进程承载多 provider，每 provider 独立 `activeProvider`、`engine`、`notify.Receiver`、`runtimeControl`。
+- `IM_TENANTS_CONFIG` YAML 声明 tenant → `projectId` + resolver（chat id / workspace id / domain）。入站消息先解析 `TenantID`，下游命令、限速、审计、客户端 projectId 都以 tenant 为维度。
+- `ClientFactory.For(tenantId) → AgentForgeClient`：替代进程级单 client，实现 tenant 隔离。
+- `SessionStore`（复用 change C 的 SQLite `state.db`）持久化 NLU history / intent cache / reply target binding，重启后保留。
+- `core/plugin/` 新增 YAML 插件清单 + HTTP/MCP/builtin invoke；marketplace 安装带 `im_commands` 的 plugin 时会写入 `IM_BRIDGE_PLUGIN_DIR`，bridge 轮询 30s 热加载。
+- 控制面 registration payload 增 `Tenants[]` + `TenantManifest[]`，后端 `QueueDelivery` 按 `(bridgeId, providerId, tenantId)` 三元组路由，缺配对返回 `ErrIMTenantProviderMismatch`。
+
+详见 `src-im-bridge/README.md` "Gateway mode" 章节与 `src-im-bridge/docs/platform-runbook.md` "Gateway deployment"。
+
 **配置模板（Fork 后）：**
 
 ```toml

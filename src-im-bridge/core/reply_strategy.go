@@ -13,6 +13,7 @@ const (
 	DeliveryMethodSend               DeliveryMethod = "send"
 	DeliveryMethodReply              DeliveryMethod = "reply"
 	DeliveryMethodThreadReply        DeliveryMethod = "thread_reply"
+	DeliveryMethodOpenThread         DeliveryMethod = "open_thread"
 	DeliveryMethodEdit               DeliveryMethod = "edit"
 	DeliveryMethodFollowUp           DeliveryMethod = "follow_up"
 	DeliveryMethodSessionWebhook     DeliveryMethod = "session_webhook"
@@ -51,6 +52,7 @@ func ResolveReplyPlan(metadata PlatformMetadata, target *ReplyTarget, fallbackCh
 		plan.TargetChatID = firstNonEmpty(target.ChatID, target.ChannelID, target.ConversationID)
 	}
 	progressMode := strings.TrimSpace(target.ProgressMode)
+	threadPolicy := target.ThreadPolicy
 	switch {
 	case target.SessionWebhook != "" && metadata.Capabilities.HasAsyncUpdateMode(AsyncUpdateSessionWebhook):
 		plan.Method = DeliveryMethodSessionWebhook
@@ -62,13 +64,35 @@ func ResolveReplyPlan(metadata PlatformMetadata, target *ReplyTarget, fallbackCh
 		plan.Method = DeliveryMethodFollowUp
 	case target.InteractionToken != "" && metadata.Capabilities.HasAsyncUpdateMode(AsyncUpdateFollowUp):
 		plan.Method = DeliveryMethodFollowUp
+	case threadPolicy == ThreadPolicyOpen && metadata.Capabilities.SupportsThreads && metadata.Capabilities.HasThreadPolicy(ThreadPolicyOpen):
+		plan.Method = DeliveryMethodOpenThread
+	case threadPolicy == ThreadPolicyIsolate:
+		plan.Method = DeliveryMethodSend
+	case (threadPolicy == "" || threadPolicy == ThreadPolicyReuse) && target.ThreadID != "" && metadata.Capabilities.HasAsyncUpdateMode(AsyncUpdateThreadReply):
+		plan.Method = DeliveryMethodThreadReply
 	case target.ThreadID != "" && metadata.Capabilities.HasAsyncUpdateMode(AsyncUpdateThreadReply):
 		plan.Method = DeliveryMethodThreadReply
 	case target.UseReply:
 		plan.Method = DeliveryMethodReply
 	}
-	plan.FallbackReason = firstNonEmpty(plan.FallbackReason, requestedReplyModeFallback(metadata, target, plan))
+	plan.FallbackReason = firstNonEmpty(plan.FallbackReason, requestedReplyModeFallback(metadata, target, plan), threadPolicyFallback(metadata, target, plan))
 	return plan
+}
+
+// threadPolicyFallback reports a fallback reason when the requested thread
+// policy cannot be honored by the platform.
+func threadPolicyFallback(metadata PlatformMetadata, target *ReplyTarget, plan ReplyPlan) string {
+	if target == nil {
+		return ""
+	}
+	policy := target.ThreadPolicy
+	if policy == "" {
+		return ""
+	}
+	if metadata.Capabilities.SupportsThreads && metadata.Capabilities.HasThreadPolicy(policy) {
+		return ""
+	}
+	return "thread_" + string(policy) + "_unsupported"
 }
 
 // DeliverText routes a text payload through the shared reply strategy before
@@ -116,8 +140,21 @@ func DeliverText(ctx context.Context, platform Platform, metadata PlatformMetada
 		if updater, ok := platform.(MessageUpdater); ok && replyCtx != nil {
 			return plan, updater.UpdateMessage(ctx, replyCtx, content)
 		}
+	case DeliveryMethodOpenThread:
+		if opener, ok := platform.(ThreadOpener); ok && replyCtx != nil {
+			if _, err := opener.OpenThread(ctx, replyCtx, deriveThreadTitle(target)); err == nil {
+				return plan, platform.Reply(ctx, replyCtx, content)
+			}
+		}
+		if replyCtx != nil {
+			plan.Method = DeliveryMethodReply
+			return plan, platform.Reply(ctx, replyCtx, content)
+		}
 	case DeliveryMethodReply, DeliveryMethodThreadReply, DeliveryMethodFollowUp, DeliveryMethodSessionWebhook, DeliveryMethodDeferredCardUpdate:
 		if replyCtx != nil {
+			if target != nil && target.ThreadPolicy == ThreadPolicyIsolate {
+				content = applyIsolatePrefix(target, content)
+			}
 			return plan, platform.Reply(ctx, replyCtx, content)
 		}
 	}
@@ -126,7 +163,44 @@ func DeliverText(ctx context.Context, platform Platform, metadata PlatformMetada
 		return plan, errors.New("delivery missing target chat id")
 	}
 	plan.Method = DeliveryMethodSend
+	if target != nil && target.ThreadPolicy == ThreadPolicyIsolate {
+		content = applyIsolatePrefix(target, content)
+	}
 	return plan, platform.Send(ctx, plan.TargetChatID, content)
+}
+
+// applyIsolatePrefix adds a `[session: short-id]` prefix so the recipient can
+// visually correlate the isolated message with an active session without
+// provider-native thread UX.
+func applyIsolatePrefix(target *ReplyTarget, content string) string {
+	if target == nil {
+		return content
+	}
+	id := firstNonEmpty(target.ThreadParentID, target.ThreadID, target.MessageID, target.InteractionToken)
+	if id == "" {
+		return content
+	}
+	short := id
+	if len(short) > 12 {
+		short = short[:12]
+	}
+	prefix := "[session: " + short + "] "
+	if strings.HasPrefix(content, prefix) {
+		return content
+	}
+	return prefix + content
+}
+
+// deriveThreadTitle picks a reasonable title for a newly opened thread from
+// the reply target metadata.
+func deriveThreadTitle(target *ReplyTarget) string {
+	if target == nil {
+		return "AgentForge session"
+	}
+	if t := strings.TrimSpace(target.Metadata["thread_title"]); t != "" {
+		return t
+	}
+	return "AgentForge session"
 }
 
 // appendSanitizeReason augments an existing fallback reason string with

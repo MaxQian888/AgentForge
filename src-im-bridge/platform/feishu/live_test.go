@@ -1064,7 +1064,7 @@ func TestDecodeImageMessage(t *testing.T) {
 	if metadata["image_key"] != "img_v2_abc123" {
 		t.Errorf("metadata = %v", metadata)
 	}
-	if len(attachments) != 1 || attachments[0].Type != "image" {
+	if len(attachments) != 1 || attachments[0].Kind != core.AttachmentKindImage {
 		t.Errorf("attachments = %v", attachments)
 	}
 }
@@ -1093,7 +1093,7 @@ func TestDecodeFileMessage(t *testing.T) {
 	if metadata["file_name"] != "report.pdf" {
 		t.Errorf("metadata = %v", metadata)
 	}
-	if len(attachments) != 1 || attachments[0].Name != "report.pdf" {
+	if len(attachments) != 1 || attachments[0].Filename != "report.pdf" {
 		t.Errorf("attachments = %v", attachments)
 	}
 }

@@ -97,6 +97,17 @@ type PlatformCapabilities struct {
 	RequiresPublicCallback bool `json:"requiresPublicCallback,omitempty"`
 	SupportsSlashCommands  bool `json:"supportsSlashCommands,omitempty"`
 	SupportsMentions       bool `json:"supportsMentions,omitempty"`
+
+	SupportsAttachments    bool             `json:"supportsAttachments,omitempty"`
+	MaxAttachmentSize      int64            `json:"maxAttachmentSize,omitempty"`
+	AllowedAttachmentKinds []AttachmentKind `json:"allowedAttachmentKinds,omitempty"`
+
+	SupportsReactions bool     `json:"supportsReactions,omitempty"`
+	ReactionEmojiSet  []string `json:"reactionEmojiSet,omitempty"`
+
+	SupportsThreads     bool           `json:"supportsThreads,omitempty"`
+	ThreadPolicySupport []ThreadPolicy `json:"threadPolicySupport,omitempty"`
+	MutableUpdateMethod string         `json:"mutableUpdateMethod,omitempty"`
 }
 
 // Matrix returns the structured capability matrix in a transport-friendly form.
@@ -137,7 +148,62 @@ func (c PlatformCapabilities) Matrix() map[string]any {
 	if c.ReadinessTier != "" {
 		matrix["readinessTier"] = string(c.ReadinessTier)
 	}
+	matrix["supportsAttachments"] = c.SupportsAttachments
+	if c.MaxAttachmentSize > 0 {
+		matrix["maxAttachmentSize"] = c.MaxAttachmentSize
+	}
+	if len(c.AllowedAttachmentKinds) > 0 {
+		kinds := make([]string, 0, len(c.AllowedAttachmentKinds))
+		for _, k := range c.AllowedAttachmentKinds {
+			kinds = append(kinds, string(k))
+		}
+		matrix["allowedAttachmentKinds"] = kinds
+	}
+	matrix["supportsReactions"] = c.SupportsReactions
+	if len(c.ReactionEmojiSet) > 0 {
+		matrix["reactionEmojiSet"] = append([]string(nil), c.ReactionEmojiSet...)
+	}
+	matrix["supportsThreads"] = c.SupportsThreads
+	if len(c.ThreadPolicySupport) > 0 {
+		policies := make([]string, 0, len(c.ThreadPolicySupport))
+		for _, p := range c.ThreadPolicySupport {
+			policies = append(policies, string(p))
+		}
+		matrix["threadPolicySupport"] = policies
+	}
+	if c.MutableUpdateMethod != "" {
+		matrix["mutableUpdateMethod"] = c.MutableUpdateMethod
+	}
 	return matrix
+}
+
+// HasThreadPolicy reports whether the capability matrix declares the given
+// thread policy mode.
+func (c PlatformCapabilities) HasThreadPolicy(target ThreadPolicy) bool {
+	for _, p := range c.ThreadPolicySupport {
+		if p == target {
+			return true
+		}
+	}
+	return false
+}
+
+// HasAttachmentKind reports whether the provider accepts the given attachment
+// kind. An empty AllowedAttachmentKinds list means "all kinds allowed iff
+// SupportsAttachments is true".
+func (c PlatformCapabilities) HasAttachmentKind(target AttachmentKind) bool {
+	if !c.SupportsAttachments {
+		return false
+	}
+	if len(c.AllowedAttachmentKinds) == 0 {
+		return true
+	}
+	for _, k := range c.AllowedAttachmentKinds {
+		if k == target {
+			return true
+		}
+	}
+	return false
 }
 
 // HasAsyncUpdateMode reports whether the capability matrix declares the given
@@ -240,21 +306,35 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 			ActionCallbackMode:       ActionCallbackSocketPayload,
 			MessageScopes:            []MessageScope{MessageScopeChat, MessageScopeThread},
 			NativeSurfaces:           []string{NativeSurfaceSlackBlockKit},
+			SupportsAttachments:      true,
+			MaxAttachmentSize:        int64(1024 * 1024 * 1024),
+			AllowedAttachmentKinds:   []AttachmentKind{AttachmentKindFile, AttachmentKindImage, AttachmentKindLogs, AttachmentKindPatch, AttachmentKindReport},
+			SupportsReactions:        true,
+			ReactionEmojiSet:         DefaultReactionEmojiCodes(),
+			SupportsThreads:          true,
+			ThreadPolicySupport:      []ThreadPolicy{ThreadPolicyReuse, ThreadPolicyOpen, ThreadPolicyIsolate},
 		}
 	case "discord":
 		return PlatformCapabilities{
 			CommandSurface:           CommandSurfaceInteraction,
 			StructuredSurface:        StructuredSurfaceComponents,
-			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateFollowUp, AsyncUpdateEdit},
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateThreadReply, AsyncUpdateFollowUp, AsyncUpdateEdit},
 			PreferredAsyncUpdateMode: AsyncUpdateFollowUp,
 			FallbackAsyncUpdateMode:  AsyncUpdateReply,
 			ActionCallbackMode:       ActionCallbackInteractionToken,
-			MessageScopes:            []MessageScope{MessageScopeInteractionScoped, MessageScopeChat},
+			MessageScopes:            []MessageScope{MessageScopeInteractionScoped, MessageScopeChat, MessageScopeThread},
 			NativeSurfaces:           []string{NativeSurfaceDiscordEmbed},
 			Mutability: MutabilitySemantics{
 				CanEdit:        true,
 				PrefersInPlace: true,
 			},
+			SupportsAttachments:    true,
+			MaxAttachmentSize:      int64(25 * 1024 * 1024),
+			AllowedAttachmentKinds: []AttachmentKind{AttachmentKindFile, AttachmentKindImage, AttachmentKindLogs, AttachmentKindPatch, AttachmentKindReport},
+			SupportsReactions:      true,
+			ReactionEmojiSet:       DefaultReactionEmojiCodes(),
+			SupportsThreads:        true,
+			ThreadPolicySupport:    []ThreadPolicy{ThreadPolicyReuse, ThreadPolicyOpen, ThreadPolicyIsolate},
 		}
 	case "telegram":
 		return PlatformCapabilities{
@@ -270,35 +350,54 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 				CanEdit:        true,
 				PrefersInPlace: true,
 			},
+			SupportsAttachments:    true,
+			MaxAttachmentSize:      int64(50 * 1024 * 1024),
+			AllowedAttachmentKinds: []AttachmentKind{AttachmentKindFile, AttachmentKindImage, AttachmentKindLogs, AttachmentKindPatch, AttachmentKindReport},
+			SupportsReactions:      true,
+			ReactionEmojiSet:       DefaultReactionEmojiCodes(),
+			SupportsThreads:        true,
+			ThreadPolicySupport:    []ThreadPolicy{ThreadPolicyReuse, ThreadPolicyIsolate},
 		}
 	case "feishu":
 		return PlatformCapabilities{
 			CommandSurface:           CommandSurfaceMixed,
 			StructuredSurface:        StructuredSurfaceCards,
-			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateDeferredCardUpdate},
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateThreadReply, AsyncUpdateDeferredCardUpdate},
 			PreferredAsyncUpdateMode: AsyncUpdateDeferredCardUpdate,
 			FallbackAsyncUpdateMode:  AsyncUpdateReply,
 			ActionCallbackMode:       ActionCallbackWebhook,
-			MessageScopes:            []MessageScope{MessageScopeChat, MessageScopeThread},
+			MessageScopes:            []MessageScope{MessageScopeChat, MessageScopeThread, MessageScopeTopic},
 			NativeSurfaces:           []string{NativeSurfaceFeishuCard},
 			ReadinessTier:            ReadinessTierFullNativeLifecycle,
 			Mutability: MutabilitySemantics{
 				CanEdit:        true,
 				PrefersInPlace: true,
 			},
+			SupportsAttachments:    true,
+			MaxAttachmentSize:      int64(20 * 1024 * 1024),
+			AllowedAttachmentKinds: []AttachmentKind{AttachmentKindFile, AttachmentKindImage, AttachmentKindLogs, AttachmentKindPatch, AttachmentKindReport},
+			SupportsReactions:      true,
+			ReactionEmojiSet:       DefaultReactionEmojiCodes(),
+			SupportsThreads:        true,
+			ThreadPolicySupport:    []ThreadPolicy{ThreadPolicyReuse, ThreadPolicyOpen, ThreadPolicyIsolate},
 		}
 	case "dingtalk":
 		return PlatformCapabilities{
 			CommandSurface:           CommandSurfaceMixed,
 			StructuredSurface:        StructuredSurfaceActionCard,
-			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateSessionWebhook},
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateSessionWebhook, AsyncUpdateEdit},
 			PreferredAsyncUpdateMode: AsyncUpdateSessionWebhook,
 			FallbackAsyncUpdateMode:  AsyncUpdateReply,
 			ActionCallbackMode:       ActionCallbackWebhook,
 			MessageScopes:            []MessageScope{MessageScopeChat},
 			NativeSurfaces:           []string{NativeSurfaceDingTalkCard},
-			ReadinessTier:            ReadinessTierNativeSendWithFallback,
+			ReadinessTier:            ReadinessTierFullNativeLifecycle,
 			SupportsRichMessages:     true,
+			Mutability: MutabilitySemantics{
+				CanEdit:        true,
+				PrefersInPlace: true,
+			},
+			MutableUpdateMethod: "openapi_only",
 		}
 	case "qq":
 		return PlatformCapabilities{
@@ -311,32 +410,43 @@ func defaultCapabilitiesForSource(source string, platform Platform) PlatformCapa
 			ReadinessTier:            ReadinessTierTextFirst,
 			SupportsMentions:         true,
 			SupportsSlashCommands:    true,
+			MutableUpdateMethod:      "simulated",
 		}
 	case "qqbot":
 		return PlatformCapabilities{
 			CommandSurface:           CommandSurfaceMixed,
 			StructuredSurface:        StructuredSurfaceNone,
-			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply},
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateEdit},
 			PreferredAsyncUpdateMode: AsyncUpdateReply,
 			ActionCallbackMode:       ActionCallbackWebhook,
 			MessageScopes:            []MessageScope{MessageScopeChat},
 			NativeSurfaces:           []string{NativeSurfaceQQBotMarkdown},
-			ReadinessTier:            ReadinessTierMarkdownFirst,
+			ReadinessTier:            ReadinessTierNativeSendWithFallback,
 			RequiresPublicCallback:   true,
 			SupportsMentions:         true,
 			SupportsSlashCommands:    true,
+			Mutability: MutabilitySemantics{
+				CanEdit:        true,
+				PrefersInPlace: true,
+			},
+			MutableUpdateMethod: "openapi_patch",
 		}
 	case "wecom":
 		return PlatformCapabilities{
 			CommandSurface:           CommandSurfaceInteraction,
 			StructuredSurface:        StructuredSurfaceNone,
-			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateSessionWebhook},
+			AsyncUpdateModes:         []AsyncUpdateMode{AsyncUpdateReply, AsyncUpdateSessionWebhook, AsyncUpdateEdit},
 			PreferredAsyncUpdateMode: AsyncUpdateSessionWebhook,
 			FallbackAsyncUpdateMode:  AsyncUpdateReply,
 			ActionCallbackMode:       ActionCallbackWebhook,
 			MessageScopes:            []MessageScope{MessageScopeChat},
 			NativeSurfaces:           []string{NativeSurfaceWeComCard},
-			ReadinessTier:            ReadinessTierNativeSendWithFallback,
+			ReadinessTier:            ReadinessTierFullNativeLifecycle,
+			Mutability: MutabilitySemantics{
+				CanEdit:        true,
+				PrefersInPlace: true,
+			},
+			MutableUpdateMethod: "template_card_update",
 		}
 	case "wechat":
 		return PlatformCapabilities{
@@ -445,6 +555,31 @@ func normalizeCapabilities(capabilities PlatformCapabilities, defaults PlatformC
 
 	if capabilities.Mutability == (MutabilitySemantics{}) {
 		capabilities.Mutability = defaults.Mutability
+	}
+
+	if !capabilities.SupportsAttachments {
+		capabilities.SupportsAttachments = defaults.SupportsAttachments
+	}
+	if capabilities.MaxAttachmentSize == 0 {
+		capabilities.MaxAttachmentSize = defaults.MaxAttachmentSize
+	}
+	if len(capabilities.AllowedAttachmentKinds) == 0 && len(defaults.AllowedAttachmentKinds) > 0 {
+		capabilities.AllowedAttachmentKinds = append([]AttachmentKind(nil), defaults.AllowedAttachmentKinds...)
+	}
+	if !capabilities.SupportsReactions {
+		capabilities.SupportsReactions = defaults.SupportsReactions
+	}
+	if len(capabilities.ReactionEmojiSet) == 0 && len(defaults.ReactionEmojiSet) > 0 {
+		capabilities.ReactionEmojiSet = append([]string(nil), defaults.ReactionEmojiSet...)
+	}
+	if !capabilities.SupportsThreads {
+		capabilities.SupportsThreads = defaults.SupportsThreads
+	}
+	if len(capabilities.ThreadPolicySupport) == 0 && len(defaults.ThreadPolicySupport) > 0 {
+		capabilities.ThreadPolicySupport = append([]ThreadPolicy(nil), defaults.ThreadPolicySupport...)
+	}
+	if capabilities.MutableUpdateMethod == "" {
+		capabilities.MutableUpdateMethod = defaults.MutableUpdateMethod
 	}
 
 	capabilities.SupportsDeferredReply = capabilities.SupportsDeferredReply ||

@@ -754,7 +754,7 @@ func TestRegisterCommandHandlers_WiresOperatorCommands(t *testing.T) {
 	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
 	platform := &replyCapturePlatform{}
 	engine := core.NewEngine(platform)
-	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+	registerCommandHandlers(engine, apiClient, "bridge-test-1", nil)
 
 	for _, content := range []string{"/queue list queued", "/team list", "/memory search release", "/tools list"} {
 		engine.HandleMessage(platform, &core.Message{
@@ -796,7 +796,7 @@ func TestRegisterCommandHandlers_FallbackSuggestsCanonicalCommand(t *testing.T) 
 	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
 	platform := &replyCapturePlatform{}
 	engine := core.NewEngine(platform)
-	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+	registerCommandHandlers(engine, apiClient, "bridge-test-1", nil)
 
 	engine.HandleMessage(platform, &core.Message{
 		Platform: "slack-stub",
@@ -848,7 +848,7 @@ func TestRegisterCommandHandlers_FallbackRoutesHighConfidenceIntentToCanonicalCo
 	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
 	platform := &replyCapturePlatform{}
 	engine := core.NewEngine(platform)
-	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+	registerCommandHandlers(engine, apiClient, "bridge-test-1", nil)
 
 	engine.HandleMessage(platform, &core.Message{
 		Platform:   "slack-stub",
@@ -884,7 +884,7 @@ func TestRegisterCommandHandlers_FallbackShowsDisambiguationForLowConfidenceInte
 	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
 	platform := &replyCapturePlatform{}
 	engine := core.NewEngine(platform)
-	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+	registerCommandHandlers(engine, apiClient, "bridge-test-1", nil)
 
 	engine.HandleMessage(platform, &core.Message{
 		Platform:   "slack-stub",
@@ -960,7 +960,7 @@ func TestRegisterCommandHandlers_FallbackRoutesDirectRuntimeMentionWithoutClassi
 	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
 	platform := &replyCapturePlatform{}
 	engine := core.NewEngine(platform)
-	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+	registerCommandHandlers(engine, apiClient, "bridge-test-1", nil)
 
 	engine.HandleMessage(platform, &core.Message{
 		Platform: "slack-stub",
@@ -1027,7 +1027,7 @@ func TestRegisterCommandHandlers_FallbackSupportsReviewFollowUpWorkflow(t *testi
 	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
 	platform := &replyCapturePlatform{}
 	engine := core.NewEngine(platform)
-	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+	registerCommandHandlers(engine, apiClient, "bridge-test-1", nil)
 
 	engine.HandleMessage(platform, &core.Message{
 		Platform:   "slack-stub",
@@ -1094,7 +1094,7 @@ func TestRegisterCommandHandlers_FallbackIncludesRecentSessionHistoryInClassific
 	apiClient := client.NewAgentForgeClient(server.URL, "proj", "secret")
 	platform := &replyCapturePlatform{}
 	engine := core.NewEngine(platform)
-	registerCommandHandlers(engine, apiClient, "bridge-test-1")
+	registerCommandHandlers(engine, apiClient, "bridge-test-1", nil)
 
 	for _, content := range []string{"@AgentForge 先看一下任务", "@AgentForge 再看看 sprint"} {
 		engine.HandleMessage(platform, &core.Message{

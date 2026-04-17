@@ -10,10 +10,10 @@ import (
 )
 
 // RegisterLoginCommands registers /login sub-commands on the engine.
-func RegisterLoginCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterLoginCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/login", func(p core.Platform, msg *core.Message, args string) {
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		parts := strings.Fields(strings.TrimSpace(args))
 		if len(parts) == 0 {
 			parts = []string{"status"}

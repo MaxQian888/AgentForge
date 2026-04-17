@@ -56,6 +56,7 @@ type Receiver struct {
 	port          string
 	server        *http.Server
 	actionHandler ActionHandler
+	reactionSink  ReactionSink
 	sharedSecret  string
 	mu            sync.Mutex
 	processed     map[string]struct{} // L1 fallback when no DedupeStore is wired; authoritative is the store.
@@ -65,6 +66,27 @@ type Receiver struct {
 	audit         audit.Writer
 	auditSalt     string
 	bridgeID      string
+	staging       *StagingStore
+}
+
+// ReactionSink persists inbound reaction events (typically shipping them to
+// the Go backend via POST /api/v1/im/reactions).
+type ReactionSink interface {
+	RecordReaction(ctx context.Context, event ReactionEvent) error
+}
+
+// ReactionEvent is the payload the bridge persists for an inbound reaction.
+type ReactionEvent struct {
+	Platform    string            `json:"platform"`
+	ChatID      string            `json:"chat_id,omitempty"`
+	MessageID   string            `json:"message_id,omitempty"`
+	UserID      string            `json:"user_id,omitempty"`
+	EmojiCode   string            `json:"emoji_code,omitempty"`
+	RawEmoji    string            `json:"raw_emoji,omitempty"`
+	ReactedAt   time.Time         `json:"reacted_at"`
+	Removed     bool              `json:"removed,omitempty"`
+	ReplyTarget *core.ReplyTarget `json:"reply_target,omitempty"`
+	Metadata    map[string]string `json:"metadata,omitempty"`
 }
 
 type callbackHTTPProvider interface {
@@ -146,11 +168,16 @@ func (r *Receiver) emitAudit(ev audit.Event) {
 }
 
 func (r *Receiver) emitDelivered(surface, deliveryID, action, chatID, userID string, receipt core.DeliveryReceipt, start time.Time) {
+	r.emitDeliveredTenant(surface, deliveryID, action, "", chatID, userID, receipt, start)
+}
+
+func (r *Receiver) emitDeliveredTenant(surface, deliveryID, action, tenantID, chatID, userID string, receipt core.DeliveryReceipt, start time.Time) {
 	r.emitAudit(audit.Event{
 		Direction:      audit.DirectionEgress,
 		Surface:        surface,
 		DeliveryID:     deliveryID,
 		Action:         action,
+		TenantID:       tenantID,
 		Status:         audit.StatusDelivered,
 		DeliveryMethod: string(receipt.Method),
 		FallbackReason: receipt.FallbackReason,
@@ -161,11 +188,16 @@ func (r *Receiver) emitDelivered(surface, deliveryID, action, chatID, userID str
 }
 
 func (r *Receiver) emitFailed(surface, deliveryID, action, chatID, userID, reason string, start time.Time) {
+	r.emitFailedTenant(surface, deliveryID, action, "", chatID, userID, reason, start)
+}
+
+func (r *Receiver) emitFailedTenant(surface, deliveryID, action, tenantID, chatID, userID, reason string, start time.Time) {
 	r.emitAudit(audit.Event{
 		Direction:      audit.DirectionEgress,
 		Surface:        surface,
 		DeliveryID:     deliveryID,
 		Action:         action,
+		TenantID:       tenantID,
 		Status:         audit.StatusFailed,
 		FallbackReason: reason,
 		ChatIDHash:     audit.HashID(r.auditSalt, chatID),
@@ -179,6 +211,17 @@ func (r *Receiver) SetActionHandler(h ActionHandler) {
 	r.actionHandler = h
 }
 
+// SetStagingStore wires the staging dir used for inbound attachments. Pass nil
+// to treat attachments as unsupported (receiver rejects attachment payloads).
+func (r *Receiver) SetStagingStore(store *StagingStore) {
+	r.staging = store
+}
+
+// SetReactionSink wires the sink that records inbound reaction events.
+func (r *Receiver) SetReactionSink(sink ReactionSink) {
+	r.reactionSink = sink
+}
+
 func (r *Receiver) SetSharedSecret(secret string) {
 	r.sharedSecret = strings.TrimSpace(secret)
 }
@@ -189,14 +232,24 @@ func (r *Receiver) Start() error {
 	mux.HandleFunc("POST /im/notify", r.handleNotify)
 	mux.HandleFunc("POST /im/send", r.handleSend)
 	mux.HandleFunc("POST /im/action", r.handleAction)
+	mux.HandleFunc("POST /im/attachments", r.handleUploadAttachment)
+	mux.HandleFunc("POST /im/reactions", r.handleReactionIngress)
 	mux.HandleFunc("GET /im/health", func(w http.ResponseWriter, req *http.Request) {
 		w.Header().Set("Content-Type", "application/json")
+		stagingDir := ""
+		if r.staging != nil {
+			stagingDir = r.staging.Dir()
+		}
 		_ = json.NewEncoder(w).Encode(map[string]any{
 			"status":                 "ok",
 			"platform":               r.platform.Name(),
 			"source":                 r.metadata.Source,
 			"readiness_tier":         r.metadata.Capabilities.ReadinessTier,
 			"supports_rich_messages": r.metadata.Capabilities.SupportsRichMessages,
+			"supports_attachments":   r.metadata.Capabilities.SupportsAttachments,
+			"supports_reactions":     r.metadata.Capabilities.SupportsReactions,
+			"supports_threads":       r.metadata.Capabilities.SupportsThreads,
+			"staging_dir":            stagingDir,
 			"capability_matrix":      r.metadata.Capabilities.Matrix(),
 		})
 	})
@@ -337,9 +390,27 @@ type SendRequest struct {
 	Content     string                  `json:"content"`
 	Structured  *core.StructuredMessage `json:"structured,omitempty"`
 	Native      *core.NativeMessage     `json:"native,omitempty"`
+	Attachments []AttachmentRequest     `json:"attachments,omitempty"`
 	Metadata    map[string]string       `json:"metadata,omitempty"`
 	ThreadID    string                  `json:"thread_id,omitempty"`
 	ReplyTarget *core.ReplyTarget       `json:"replyTarget,omitempty"`
+}
+
+// AttachmentRequest is the wire shape for an egress attachment reference. The
+// caller supplies one of: a staged_id (materialized via POST /im/attachments),
+// a raw base64 blob, or a remote URL. The receiver resolves each to a
+// ContentRef before delivery.
+type AttachmentRequest struct {
+	ID         string            `json:"id,omitempty"`
+	StagedID   string            `json:"staged_id,omitempty"`
+	Kind       string            `json:"kind,omitempty"`
+	MimeType   string            `json:"mime_type,omitempty"`
+	Filename   string            `json:"filename,omitempty"`
+	SizeBytes  int64             `json:"size_bytes,omitempty"`
+	ContentRef string            `json:"content_ref,omitempty"`
+	URL        string            `json:"url,omitempty"`
+	DataBase64 string            `json:"data_base64,omitempty"`
+	Metadata   map[string]string `json:"metadata,omitempty"`
 }
 
 func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
@@ -368,11 +439,19 @@ func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	attachments, attErr := r.resolveAttachments(s.Attachments)
+	if attErr != nil {
+		http.Error(w, attErr.Error(), http.StatusBadRequest)
+		r.emitFailed("/im/send", deliveryID, "send", chatID, "", attErr.Error(), start)
+		return
+	}
+
 	ctx := context.Background()
 	receipt, err := core.DeliverEnvelope(ctx, r.platform, r.metadata, chatID, &core.DeliveryEnvelope{
 		Content:     s.Content,
 		Structured:  s.Structured,
 		Native:      s.Native,
+		Attachments: attachments,
 		ReplyTarget: s.ReplyTarget,
 		Metadata:    s.Metadata,
 	})

@@ -18,10 +18,32 @@ import (
 	"github.com/agentforge/im-bridge/client"
 	"github.com/agentforge/im-bridge/commands"
 	"github.com/agentforge/im-bridge/core"
+	"github.com/agentforge/im-bridge/core/plugin"
 	"github.com/agentforge/im-bridge/core/state"
 	"github.com/agentforge/im-bridge/notify"
 	"github.com/google/uuid"
 )
+
+// reactionSinkAdapter bridges notify.ReactionSink to the AgentForge backend
+// by forwarding events through AgentForgeClient.PostReaction.
+type reactionSinkAdapter struct {
+	client *client.AgentForgeClient
+}
+
+func (a *reactionSinkAdapter) RecordReaction(ctx context.Context, event notify.ReactionEvent) error {
+	return a.client.PostReaction(ctx, client.ReactionEvent{
+		Platform:    event.Platform,
+		ChatID:      event.ChatID,
+		MessageID:   event.MessageID,
+		UserID:      event.UserID,
+		EmojiCode:   event.EmojiCode,
+		RawEmoji:    event.RawEmoji,
+		ReactedAt:   event.ReactedAt,
+		Removed:     event.Removed,
+		ReplyTarget: event.ReplyTarget,
+		Metadata:    event.Metadata,
+	})
+}
 
 type backendActionRelay struct {
 	client   *client.AgentForgeClient
@@ -98,7 +120,10 @@ type config struct {
 	AuditHashSalt           string
 	AuditShipViaControlPlane bool
 	Platform                string
+	Platforms               []string // derived from IM_PLATFORMS (comma separated); falls back to [Platform]
 	TransportMode           string
+	TenantsConfigPath       string
+	PluginDir               string
 	FeishuApp               string
 	FeishuSec               string
 	FeishuVerificationToken string
@@ -169,7 +194,10 @@ func loadConfig() *config {
 		AuditHashSalt:           os.Getenv("IM_AUDIT_HASH_SALT"),
 		AuditShipViaControlPlane: boolEnvOrDefault("IM_AUDIT_SHIP_VIA_CONTROL_PLANE", false),
 		Platform:                envOrDefault("IM_PLATFORM", "feishu"),
+		Platforms:               parsePlatformList(os.Getenv("IM_PLATFORMS"), envOrDefault("IM_PLATFORM", "feishu")),
 		TransportMode:           envOrDefault("IM_TRANSPORT_MODE", transportModeStub),
+		TenantsConfigPath:       strings.TrimSpace(os.Getenv("IM_TENANTS_CONFIG")),
+		PluginDir:               strings.TrimSpace(os.Getenv("IM_BRIDGE_PLUGIN_DIR")),
 		FeishuApp:               os.Getenv("FEISHU_APP_ID"),
 		FeishuSec:               os.Getenv("FEISHU_APP_SECRET"),
 		FeishuVerificationToken: os.Getenv("FEISHU_VERIFICATION_TOKEN"),
@@ -225,6 +253,51 @@ func loadConfig() *config {
 func envOrDefault(key, fallback string) string {
 	if v := os.Getenv(key); v != "" {
 		return v
+	}
+	return fallback
+}
+
+// parsePlatformList turns the comma-separated IM_PLATFORMS value into a
+// deduplicated slice. An empty value falls back to [legacy], preserving the
+// single-provider semantics of IM_PLATFORM. Whitespace around entries is
+// trimmed. Empty entries are silently dropped; duplicate detection is done
+// downstream in selectProviders where we can report the duplicate name.
+func parsePlatformList(raw, legacy string) []string {
+	raw = strings.TrimSpace(raw)
+	if raw == "" {
+		if legacy = strings.TrimSpace(legacy); legacy != "" {
+			return []string{legacy}
+		}
+		return nil
+	}
+	pieces := strings.Split(raw, ",")
+	out := make([]string, 0, len(pieces))
+	for _, p := range pieces {
+		p = strings.TrimSpace(p)
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// providerSpecificSecret returns the HMAC shared secret for a given
+// provider id. It prefers IM_SECRET_<NORMALIZED> and falls back to the
+// process-wide IM_CONTROL_SHARED_SECRET.
+func providerSpecificSecret(providerID, fallback string) string {
+	if override := strings.TrimSpace(os.Getenv("IM_SECRET_" + strings.ToUpper(core.NormalizePlatformName(providerID)))); override != "" {
+		return override
+	}
+	return fallback
+}
+
+// providerSpecificNotifyPort returns the per-provider notify port, if
+// configured. Operators may set IM_NOTIFY_PORT_<PROVIDER> to give a
+// provider its own HTTP server. When no override exists, callers supply a
+// fallback port (typically derived by offset from the base NOTIFY_PORT).
+func providerSpecificNotifyPort(providerID, fallback string) string {
+	if override := strings.TrimSpace(os.Getenv("IM_NOTIFY_PORT_" + strings.ToUpper(core.NormalizePlatformName(providerID)))); override != "" {
+		return override
 	}
 	return fallback
 }
@@ -330,15 +403,40 @@ func selectPlatform(cfg *config) (core.Platform, error) {
 	return provider.Platform, nil
 }
 
+// providerBinding is the per-provider runtime wiring produced by setup.
+// Every active provider has its own engine, notify receiver, and runtime
+// control-plane connection. State store / audit writer / client factory
+// are shared across all providers in the bridge process.
+type providerBinding struct {
+	Provider       *activeProvider
+	Engine         *core.Engine
+	NotifyServer   *notify.Receiver
+	RuntimeControl *bridgeRuntimeControl
+	NotifyPort     string
+}
+
 func main() {
 	cfg := loadConfig()
 
-	provider, err := selectProvider(cfg)
+	platforms := cfg.Platforms
+	if len(platforms) == 0 {
+		platforms = []string{cfg.Platform}
+	}
+
+	providers, err := selectProviders(cfg, platforms)
 	if err != nil {
 		log.WithField("component", "main").WithError(err).Fatal("Invalid IM bridge configuration")
 	}
-	platform := provider.Platform
-	log.WithFields(log.Fields{"component": "main", "platform": core.NormalizePlatformName(platform.Name())}).Info("IM platform selected")
+	if len(providers) == 0 {
+		log.WithField("component", "main").Fatal("No IM providers selected")
+	}
+	primary := providers[0]
+	platform := primary.Platform
+	log.WithFields(log.Fields{
+		"component":       "main",
+		"platform_count":  len(providers),
+		"primary":         core.NormalizePlatformName(platform.Name()),
+	}).Info("IM platforms selected")
 
 	bridgeID, err := loadOrCreateBridgeID(cfg.BridgeIDFile)
 	if err != nil {
@@ -397,26 +495,78 @@ func main() {
 		"audit_salt_source": auditSaltSource,
 	}).Info("Audit writer ready")
 
-	// Create API client.
-	apiClient := client.NewAgentForgeClient(cfg.APIBase, cfg.ProjectID, cfg.APIKey).WithSource(provider.Source()).WithBridgeContext(bridgeID, nil)
+	// Load tenant registry + resolver. Empty file path disables tenant
+	// routing (legacy single-tenant mode). Any parse error fails fast.
+	tenantResult, err := core.LoadTenantsConfig(cfg.TenantsConfigPath)
+	if err != nil {
+		log.WithField("component", "main").WithError(err).Fatal("Failed to load tenants config")
+	}
+	if tenantResult.Registry != nil {
+		log.WithFields(log.Fields{
+			"component":     "main",
+			"tenant_count":  tenantResult.Registry.Len(),
+			"default_tenant": func() string {
+				if tenantResult.Default != nil {
+					return tenantResult.Default.ID
+				}
+				return ""
+			}(),
+		}).Info("Tenants configuration loaded")
+	}
 
-	// Create engine and register commands.
-	engine := core.NewEngine(platform)
-	engine.SetBridgeCapabilityProbe(core.BridgeCapabilityProbeFunc(func(ctx context.Context, capability core.BridgeCapability) error {
-		switch capability {
-		case core.BridgeCapabilityDecompose,
-			core.BridgeCapabilityGenerate,
-			core.BridgeCapabilityClassifyIntent,
-			core.BridgeCapabilityPool,
-			core.BridgeCapabilityHealth,
-			core.BridgeCapabilityRuntimes,
-			core.BridgeCapabilityTools:
-			_, err := apiClient.GetBridgeHealth(ctx)
-			return err
-		default:
-			return nil
-		}
-	}))
+	// Pair every provider with the list of tenants that serve it. Today we
+	// don't yet have per-(provider,tenant) scoping in tenants.yaml, so we
+	// attach every tenant id to every provider. The registration payload
+	// can later narrow this using provider-specific resolvers.
+	tenantIDs := []string{}
+	if tenantResult.Registry != nil {
+		tenantIDs = tenantResult.Registry.IDs()
+	}
+	for _, p := range providers {
+		p.Tenants = append([]string(nil), tenantIDs...)
+	}
+
+	// Shared client factory. Produces per-tenant AgentForgeClient.
+	clientFactory := client.NewClientFactory(client.FactoryOptions{
+		BaseURL:        cfg.APIBase,
+		DefaultProject: cfg.ProjectID,
+		DefaultAPIKey:  cfg.APIKey,
+		DefaultSource:  primary.Source(),
+		Registry:       tenantResult.Registry,
+	})
+	// Legacy apiClient retained for the capability probe and action relay —
+	// both of which operate on bridge-level state rather than per-tenant.
+	apiClient := clientFactory.Default().WithBridgeContext(bridgeID, nil)
+
+	// Create an engine per provider so each platform is serviced in its
+	// own context. Commands are registered against each engine in a shared
+	// loop so the command surface is identical across providers.
+	bindings := make([]*providerBinding, 0, len(providers))
+	for i, p := range providers {
+		engine := core.NewEngine(p.Platform)
+		engine.SetBridgeCapabilityProbe(core.BridgeCapabilityProbeFunc(func(ctx context.Context, capability core.BridgeCapability) error {
+			switch capability {
+			case core.BridgeCapabilityDecompose,
+				core.BridgeCapabilityGenerate,
+				core.BridgeCapabilityClassifyIntent,
+				core.BridgeCapabilityPool,
+				core.BridgeCapabilityHealth,
+				core.BridgeCapabilityRuntimes,
+				core.BridgeCapabilityTools:
+				_, err := apiClient.GetBridgeHealth(ctx)
+				return err
+			default:
+				return nil
+			}
+		}))
+		bindings = append(bindings, &providerBinding{
+			Provider:   p,
+			Engine:     engine,
+			NotifyPort: providerSpecificNotifyPort(p.Descriptor.ID, offsetPort(cfg.NotifyPort, i)),
+		})
+	}
+	// Default engine/platform variables kept for legacy reload paths.
+	_ = bindings[0].Engine
 
 	// Configure rate limiter. Operators override the default policy set
 	// via IM_RATE_POLICY (JSON array); otherwise DefaultPolicies() applies.
@@ -441,66 +591,123 @@ func main() {
 			}}
 		}
 	}
+	// Rate limiter is shared across providers — policies apply per tenant /
+	// chat / user but the counter storage is global to the bridge process.
 	rateLimiter := core.NewRateLimiter(policies)
 	if stateStore != nil {
 		rateLimiter.SetStore(stateStore)
 	}
-	engine.SetRateLimiter(rateLimiter)
-	engine.SetBridgeID(bridgeID)
 
-	// Configure egress sanitization mode.
+	// Configure egress sanitization mode (process-wide).
 	core.SetDefaultSanitizeMode(core.ParseSanitizeMode(envOrDefault("IM_SANITIZE_EGRESS", "strict")))
 
-	// Command allowlist gate (coarse-grained operator kill-switch).
-	engine.SetCommandAllowlist(core.NewCommandAllowlist(os.Getenv("IM_COMMAND_ALLOWLIST")))
-
-	registerCommandHandlers(engine, apiClient, bridgeID)
-
-	runtimeControl := newBridgeRuntimeControl(cfg, bridgeID, provider, apiClient)
-	if err := runtimeControl.Start(context.Background()); err != nil {
-		log.WithField("component", "main").WithError(err).Fatal("Failed to start runtime control plane")
+	// Attachment staging directory for inbound/outbound file payloads. When
+	// IM_BRIDGE_STATE_DIR is unset the staging store is nil and the receiver
+	// rejects attachment payloads.
+	stagingDir := strings.TrimSpace(os.Getenv("IM_BRIDGE_ATTACHMENT_DIR"))
+	if stagingDir == "" {
+		stagingDir = filepath.Join(cfg.StateDir, "attachments")
+	}
+	var staging *notify.StagingStore
+	if s, err := notify.NewStagingStore(stagingDir); err != nil {
+		log.WithField("component", "main").WithError(err).Warn("attachment staging disabled")
+	} else if s != nil {
+		s.StartWorker(time.Minute)
+		staging = s
 	}
 
-	// Start notification receiver in background.
-	notifyServer := notify.NewReceiverWithMetadata(platform, provider.Metadata(), cfg.NotifyPort)
-	notifyServer.SetSharedSecret(cfg.ControlSharedSecret)
-	notifyServer.SetSignatureSkew(cfg.SignatureSkew)
-	notifyServer.SetBridgeID(bridgeID)
-	notifyServer.SetAuditWriter(auditWriter, auditSalt)
-	if stateStore != nil {
-		notifyServer.SetDedupeStore(stateStore)
-	}
-	relay := &backendActionRelay{
-		client:   apiClient,
-		bridgeID: bridgeID,
-	}
-	cmdHandler := &commands.CommandActionHandler{
-		Engine:      engine,
-		Inner:       relay,
-		GetPlatform: func() core.Platform { return platform },
-	}
-	notifyServer.SetActionHandler(cmdHandler)
-	configurePlatformActionCallbacks(platform, cmdHandler)
-	configurePlatformLifecycle(platform)
-	go func() {
-		if err := notifyServer.Start(); err != nil {
-			log.WithField("component", "main").WithError(err).Error("Notification receiver error")
+	// Command plugin registry: when IM_BRIDGE_PLUGIN_DIR is set, load
+	// plugin.yaml manifests from that dir and install the registry's
+	// dispatch as a fallback for unknown commands. Missing dir disables
+	// the feature — built-in commands still work as before.
+	var pluginRegistry *plugin.Registry
+	if cfg.PluginDir != "" {
+		pluginRegistry = plugin.NewRegistry(cfg.PluginDir)
+		if err := pluginRegistry.ReloadAll(); err != nil {
+			log.WithField("component", "main").WithError(err).Warn("plugin reload failed; continuing without plugins")
 		}
-	}()
+		pluginCtx, pluginCancel := context.WithCancel(context.Background())
+		defer pluginCancel()
+		pluginRegistry.StartWatcher(pluginCtx, 30*time.Second)
+		log.WithFields(log.Fields{
+			"component":    "main",
+			"plugin_count": len(pluginRegistry.Plugins()),
+			"plugin_dir":   cfg.PluginDir,
+		}).Info("Plugin registry loaded")
+	}
 
-	// Start engine (starts platform).
-	if err := engine.Start(); err != nil {
-		log.WithField("component", "main").WithError(err).Fatal("Failed to start engine")
+	// Wire each provider binding. Each gets its own engine / notify receiver /
+	// runtime control-plane connection but shares state/audit/factory/rate.
+	for _, b := range bindings {
+		provider := b.Provider
+		b.Engine.SetRateLimiter(rateLimiter)
+		b.Engine.SetBridgeID(bridgeID)
+		b.Engine.SetCommandAllowlist(core.NewCommandAllowlist(os.Getenv("IM_COMMAND_ALLOWLIST")))
+		b.Engine.SetTenantResolver(tenantResult.Resolver, tenantResult.Default)
+		registerCommandHandlers(b.Engine, clientFactory, bridgeID, stateStore)
+		if pluginRegistry != nil {
+			attachPluginRegistry(b.Engine, pluginRegistry)
+		}
+
+		b.RuntimeControl = newBridgeRuntimeControl(cfg, bridgeID, provider, apiClient)
+		// Registration payload: tenants the provider serves + tenant list.
+		b.RuntimeControl.SetTenants(provider.Tenants, buildTenantManifest(tenantResult))
+		if err := b.RuntimeControl.Start(context.Background()); err != nil {
+			log.WithField("component", "main").WithError(err).Fatal("Failed to start runtime control plane")
+		}
+
+		notifyServer := notify.NewReceiverWithMetadata(provider.Platform, provider.Metadata(), b.NotifyPort)
+		notifyServer.SetSharedSecret(providerSpecificSecret(provider.Descriptor.ID, cfg.ControlSharedSecret))
+		notifyServer.SetSignatureSkew(cfg.SignatureSkew)
+		notifyServer.SetBridgeID(bridgeID)
+		notifyServer.SetAuditWriter(auditWriter, auditSalt)
+		if stateStore != nil {
+			notifyServer.SetDedupeStore(stateStore)
+		}
+		relay := &backendActionRelay{client: apiClient, bridgeID: bridgeID}
+		cmdHandler := &commands.CommandActionHandler{
+			Engine:      b.Engine,
+			Inner:       relay,
+			GetPlatform: func() core.Platform { return provider.Platform },
+		}
+		notifyServer.SetActionHandler(cmdHandler)
+		configurePlatformActionCallbacks(provider.Platform, cmdHandler)
+		configurePlatformLifecycle(provider.Platform)
+		if staging != nil {
+			notifyServer.SetStagingStore(staging)
+			notifyServer.SetReactionSink(&reactionSinkAdapter{client: apiClient})
+		}
+		b.NotifyServer = notifyServer
+
+		go func(nsvr *notify.Receiver, port string) {
+			if err := nsvr.Start(); err != nil {
+				log.WithField("component", "main").WithField("port", port).WithError(err).Error("Notification receiver error")
+			}
+		}(notifyServer, b.NotifyPort)
+	}
+
+	// Start every engine (starts each platform transport).
+	for _, b := range bindings {
+		if err := b.Engine.Start(); err != nil {
+			log.WithField("component", "main").WithField("provider", b.Provider.Descriptor.ID).WithError(err).Fatal("Failed to start engine")
+		}
+	}
+
+	portList := make([]string, 0, len(bindings))
+	platformList := make([]string, 0, len(bindings))
+	for _, b := range bindings {
+		portList = append(portList, b.NotifyPort)
+		platformList = append(platformList, core.NormalizePlatformName(b.Provider.Platform.Name()))
 	}
 	log.WithFields(log.Fields{
 		"component":   "main",
-		"platform":    core.NormalizePlatformName(platform.Name()),
+		"platforms":   strings.Join(platformList, ","),
 		"transport":   normalizeTransportMode(cfg.TransportMode),
-		"notify_port": cfg.NotifyPort,
+		"notify_ports": strings.Join(portList, ","),
 		"test_port":   cfg.TestPort,
 	}).Info("IM Bridge started successfully")
 
-	// Hot-reload handler: SIGHUP reloads env-driven values and asks the
+	// Hot-reload handler: SIGHUP reloads env-driven values and asks every
 	// active provider to reconcile in-place. Providers that cannot honor
 	// hot reload log `manual_restart_required`.
 	hup := make(chan os.Signal, 1)
@@ -509,32 +716,54 @@ func main() {
 		for range hup {
 			newCfg := loadConfig()
 			core.SetDefaultSanitizeMode(core.ParseSanitizeMode(envOrDefault("IM_SANITIZE_EGRESS", "strict")))
-			engine.SetCommandAllowlist(core.NewCommandAllowlist(os.Getenv("IM_COMMAND_ALLOWLIST")))
-			notifyServer.SetSignatureSkew(newCfg.SignatureSkew)
+			allowlist := core.NewCommandAllowlist(os.Getenv("IM_COMMAND_ALLOWLIST"))
+			for _, b := range bindings {
+				b.Engine.SetCommandAllowlist(allowlist)
+				if b.NotifyServer != nil {
+					b.NotifyServer.SetSignatureSkew(newCfg.SignatureSkew)
+				}
+			}
+
+			// Reload tenants if path is set.
+			if newCfg.TenantsConfigPath != "" {
+				if tResult, terr := core.LoadTenantsConfig(newCfg.TenantsConfigPath); terr == nil && tResult.Registry != nil {
+					clientFactory.SetTenantRegistry(tResult.Registry)
+					for _, b := range bindings {
+						b.Engine.SetTenantResolver(tResult.Resolver, tResult.Default)
+					}
+					log.WithField("component", "main").Info("Tenant registry reloaded on SIGHUP")
+				} else if terr != nil {
+					log.WithField("component", "main").WithError(terr).Warn("Tenant reload failed; keeping previous registry")
+				}
+			}
 
 			creds := collectProviderCredentials(newCfg)
-			if reloader, ok := platform.(core.HotReloader); ok {
-				result := reloader.Reconcile(context.Background(), core.ReconcileConfig{Credentials: creds})
-				fields := log.Fields{
-					"component": "main",
-					"applied":   result.Applied,
-					"deferred":  result.Deferred,
-				}
-				if len(result.Errors) > 0 {
-					errStrings := make([]string, 0, len(result.Errors))
-					for _, e := range result.Errors {
-						errStrings = append(errStrings, e.Error())
+			for _, b := range bindings {
+				platform := b.Provider.Platform
+				if reloader, ok := platform.(core.HotReloader); ok {
+					result := reloader.Reconcile(context.Background(), core.ReconcileConfig{Credentials: creds})
+					fields := log.Fields{
+						"component": "main",
+						"provider":  b.Provider.Descriptor.ID,
+						"applied":   result.Applied,
+						"deferred":  result.Deferred,
 					}
-					fields["errors"] = errStrings
-					log.WithFields(fields).Warn("SIGHUP reconcile reported errors")
+					if len(result.Errors) > 0 {
+						errStrings := make([]string, 0, len(result.Errors))
+						for _, e := range result.Errors {
+							errStrings = append(errStrings, e.Error())
+						}
+						fields["errors"] = errStrings
+						log.WithFields(fields).Warn("SIGHUP reconcile reported errors")
+					} else {
+						log.WithFields(fields).Info("SIGHUP reconcile complete")
+					}
 				} else {
-					log.WithFields(fields).Info("SIGHUP reconcile complete")
+					log.WithFields(log.Fields{
+						"component": "main",
+						"provider":  b.Provider.Descriptor.ID,
+					}).Warn("SIGHUP ignored: manual_restart_required")
 				}
-			} else {
-				log.WithFields(log.Fields{
-					"component": "main",
-					"platform":  core.NormalizePlatformName(platform.Name()),
-				}).Warn("SIGHUP ignored: manual_restart_required")
 			}
 		}
 	}()
@@ -547,9 +776,31 @@ func main() {
 	log.WithField("component", "main").Info("Shutting down...")
 	signal.Stop(hup)
 	close(hup)
-	_ = engine.Stop()
-	_ = runtimeControl.Stop(context.Background())
-	_ = notifyServer.Stop()
+
+	// Stop every provider in parallel with a shared deadline so one hung
+	// provider does not starve the others.
+	var shutdownWG sync.WaitGroup
+	for _, b := range bindings {
+		shutdownWG.Add(1)
+		go func(b *providerBinding) {
+			defer shutdownWG.Done()
+			_ = b.Engine.Stop()
+			if b.RuntimeControl != nil {
+				_ = b.RuntimeControl.Stop(context.Background())
+			}
+			if b.NotifyServer != nil {
+				_ = b.NotifyServer.Stop()
+			}
+		}(b)
+	}
+	done := make(chan struct{})
+	go func() { shutdownWG.Wait(); close(done) }()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		log.WithField("component", "main").Warn("Shutdown deadline exceeded; some providers still draining")
+	}
+
 	if stateStore != nil {
 		_ = stateStore.Close()
 	}
@@ -557,29 +808,116 @@ func main() {
 		_ = auditWriter.Close()
 	}
 	log.WithField("component", "main").Info("Goodbye")
+	_ = platform // retained for legacy referrers; see bindings[0].Provider.Platform
 }
 
-func registerCommandHandlers(engine *core.Engine, apiClient *client.AgentForgeClient, bridgeID string) {
-	var historyMu sync.Mutex
-	historyBySession := make(map[string][]string)
+// offsetPort adds `i` to the numeric form of `base`. Non-numeric base
+// values are returned unchanged (ignoring offset) so operators can override
+// individual ports via IM_NOTIFY_PORT_<PROVIDER> when they need named ports.
+func offsetPort(base string, i int) string {
+	n, err := strconv.Atoi(strings.TrimSpace(base))
+	if err != nil {
+		return base
+	}
+	return strconv.Itoa(n + i)
+}
 
-	commands.RegisterTaskCommands(engine, apiClient)
-	commands.RegisterAgentCommands(engine, apiClient)
-	commands.RegisterCostCommands(engine, apiClient)
-	commands.RegisterReviewCommands(engine, apiClient)
-	commands.RegisterSprintCommands(engine, apiClient)
-	commands.RegisterQueueCommands(engine, apiClient)
-	commands.RegisterTeamCommands(engine, apiClient)
-	commands.RegisterMemoryCommands(engine, apiClient)
-	commands.RegisterLoginCommands(engine, apiClient)
-	commands.RegisterProjectCommands(engine, apiClient)
-	commands.RegisterToolsCommands(engine, apiClient)
-	commands.RegisterDocumentCommands(engine, apiClient)
+// attachPluginRegistry registers every plugin-declared slash command on
+// the engine so operator-installed plugins participate in the same
+// dispatch path as builtin commands. For now, plugin commands register
+// only when a same-named command is not already registered; the builtin
+// handlers win conflicts so marketplace plugins cannot shadow core flows.
+func attachPluginRegistry(engine *core.Engine, registry *plugin.Registry) {
+	if engine == nil || registry == nil {
+		return
+	}
+	for _, p := range registry.Plugins() {
+		for _, cmd := range p.Manifest.Commands {
+			slash := strings.TrimSpace(cmd.Slash)
+			if slash == "" {
+				continue
+			}
+			cmdID := p.Manifest.ID
+			slashName := slash
+			engine.RegisterCommand(slashName, func(pl core.Platform, msg *core.Message, args string) {
+				ctx := context.Background()
+				// Parse the first token as a subcommand for manifests that
+				// declare subcommand groups.
+				subcommand := ""
+				if parts := strings.Fields(strings.TrimSpace(args)); len(parts) > 0 {
+					subcommand = parts[0]
+				}
+				icx := plugin.InvokeContext{
+					Command:    slashName,
+					Subcommand: subcommand,
+					Args:       strings.TrimSpace(args),
+					TenantID:   msg.TenantID,
+					Platform:   msg.Platform,
+					UserID:     msg.UserID,
+					ChatID:     msg.ChatID,
+					Metadata:   msg.Metadata,
+				}
+				res, err := registry.Dispatch(ctx, icx)
+				if err != nil {
+					if err == plugin.ErrNotFound {
+						_ = pl.Reply(ctx, msg.ReplyCtx, "该命令未在插件中注册。")
+						return
+					}
+					_ = pl.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("插件 %s 执行失败: %v", cmdID, err))
+					return
+				}
+				if res == nil {
+					return
+				}
+				if res.Err != "" {
+					_ = pl.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("插件 %s: %s", cmdID, res.Err))
+					return
+				}
+				if res.Text != "" {
+					_ = pl.Reply(ctx, msg.ReplyCtx, res.Text)
+				}
+			})
+		}
+	}
+}
+
+// buildTenantManifest produces the {id: projectId} list shipped in the
+// registration payload so the backend can index bridges by tenant.
+func buildTenantManifest(res *core.TenantLoadResult) []client.TenantBinding {
+	if res == nil || res.Registry == nil {
+		return nil
+	}
+	all := res.Registry.All()
+	out := make([]client.TenantBinding, 0, len(all))
+	for _, t := range all {
+		out = append(out, client.TenantBinding{ID: t.ID, ProjectID: t.ProjectID})
+	}
+	return out
+}
+
+func registerCommandHandlers(engine *core.Engine, factory client.ClientProvider, bridgeID string, stateStore *state.Store) {
+	commands.RegisterTaskCommands(engine, factory)
+	commands.RegisterAgentCommands(engine, factory)
+	commands.RegisterCostCommands(engine, factory)
+	commands.RegisterReviewCommands(engine, factory)
+	commands.RegisterSprintCommands(engine, factory)
+	commands.RegisterQueueCommands(engine, factory)
+	commands.RegisterTeamCommands(engine, factory)
+	commands.RegisterMemoryCommands(engine, factory)
+	commands.RegisterLoginCommands(engine, factory)
+	commands.RegisterProjectCommands(engine, factory)
+	commands.RegisterToolsCommands(engine, factory)
+	commands.RegisterDocumentCommands(engine, factory)
 	commands.RegisterHelpCommand(engine)
+
+	// Session store: persisted when stateStore is available, in-memory
+	// otherwise. The backing store is keyed by (tenantID, sessionKey) so
+	// intent/NLU context survives restarts without bleeding across tenants.
+	sessionStore := state.NewSessionStore(stateStore)
 
 	engine.SetFallback(func(p core.Platform, msg *core.Message) {
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext(bridgeID, msg.ReplyTarget)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform).WithBridgeContext(bridgeID, msg.ReplyTarget)
 		if resolved := commands.ResolveDirectRuntimeMention(msg.Content); resolved != "" {
 			log.WithFields(log.Fields{
 				"component": "main",
@@ -596,14 +934,11 @@ func registerCommandHandlers(engine *core.Engine, apiClient *client.AgentForgeCl
 		if historyKey == "" {
 			historyKey = fmt.Sprintf("%s:%s:%s", msg.Platform, msg.ChatID, msg.UserID)
 		}
-		historyMu.Lock()
-		history := append([]string(nil), historyBySession[historyKey]...)
-		history = append(history, msg.Content)
-		if len(history) > 5 {
-			history = append([]string(nil), history[len(history)-5:]...)
-		}
-		historyBySession[historyKey] = append([]string(nil), history...)
-		historyMu.Unlock()
+		// Append the current message and fetch the most-recent window used
+		// by the intent classifier. The underlying store is persistent when
+		// durable state is enabled so restart does not reset history.
+		_ = sessionStore.Append(msg.TenantID, historyKey, msg.Content)
+		history := sessionStore.Recent(msg.TenantID, historyKey, 5)
 
 		classified, classifyErr := scopedClient.ClassifyMentionIntent(ctx, client.MentionIntentRequest{
 			Text:       msg.Content,

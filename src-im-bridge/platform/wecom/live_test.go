@@ -180,6 +180,12 @@ func TestLive_MetadataDeclaresWeComCallbackAndRenderingCapabilities(t *testing.T
 	if len(metadata.Rendering.NativeSurfaces) != 1 || metadata.Rendering.NativeSurfaces[0] != core.NativeSurfaceWeComCard {
 		t.Fatalf("NativeSurfaces = %+v", metadata.Rendering.NativeSurfaces)
 	}
+	if metadata.Capabilities.ReadinessTier != core.ReadinessTierFullNativeLifecycle {
+		t.Fatalf("ReadinessTier = %q, want %q", metadata.Capabilities.ReadinessTier, core.ReadinessTierFullNativeLifecycle)
+	}
+	if metadata.Capabilities.MutableUpdateMethod != "template_card_update" {
+		t.Fatalf("MutableUpdateMethod = %q, want template_card_update", metadata.Capabilities.MutableUpdateMethod)
+	}
 }
 
 func TestLive_SendNativeUsesWeComCardPayload(t *testing.T) {

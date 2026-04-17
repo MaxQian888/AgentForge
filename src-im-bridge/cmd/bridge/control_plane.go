@@ -31,6 +31,23 @@ type bridgeRuntimeControl struct {
 
 	cursorMu   sync.Mutex
 	lastCursor int64
+
+	tenantsMu      sync.RWMutex
+	tenantIDs      []string
+	tenantManifest []client.TenantBinding
+}
+
+// SetTenants installs the tenant binding list sent in the registration and
+// heartbeat payload. Calling with empty slices preserves the legacy
+// single-tenant registration shape.
+func (c *bridgeRuntimeControl) SetTenants(ids []string, manifest []client.TenantBinding) {
+	if c == nil {
+		return
+	}
+	c.tenantsMu.Lock()
+	c.tenantIDs = append([]string(nil), ids...)
+	c.tenantManifest = append([]client.TenantBinding(nil), manifest...)
+	c.tenantsMu.Unlock()
 }
 
 type callbackPathProvider interface {
@@ -52,11 +69,18 @@ func (c *bridgeRuntimeControl) Start(ctx context.Context) error {
 	}
 	metadata := c.provider.Metadata()
 
+	c.tenantsMu.RLock()
+	tenantIDs := append([]string(nil), c.tenantIDs...)
+	tenantManifest := append([]client.TenantBinding(nil), c.tenantManifest...)
+	c.tenantsMu.RUnlock()
+
 	registration := client.BridgeRegistration{
-		BridgeID:   c.bridgeID,
-		Platform:   metadata.Source,
-		Transport:  c.provider.TransportMode,
-		ProjectIDs: []string{strings.TrimSpace(c.cfg.ProjectID)},
+		BridgeID:       c.bridgeID,
+		Platform:       metadata.Source,
+		Transport:      c.provider.TransportMode,
+		ProjectIDs:     []string{strings.TrimSpace(c.cfg.ProjectID)},
+		Tenants:        tenantIDs,
+		TenantManifest: tenantManifest,
 		Capabilities: map[string]bool{
 			"supports_deferred_reply":  metadata.Capabilities.SupportsDeferredReply,
 			"supports_rich_messages":   metadata.Capabilities.SupportsRichMessages,

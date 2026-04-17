@@ -68,6 +68,15 @@ type IMService struct {
 	agentSpawner   IMAgentSpawner
 	reviewTrigger  IMReviewTrigger
 	actionExecutor IMActionExecutor
+	reactionStore  IMReactionStore
+}
+
+// IMReactionStore persists inbound reaction events and resolves whether a
+// reaction is bound to a review decision shortcut.
+type IMReactionStore interface {
+	RecordReaction(ctx context.Context, event *model.IMReactionEvent) error
+	BindShortcut(ctx context.Context, binding *model.IMReactionShortcutBinding) error
+	ResolveShortcut(ctx context.Context, platform, messageID, emojiCode string) (*model.IMReactionShortcutBinding, error)
 }
 
 // NewIMService creates an IM service with the given notify URL and platform.
@@ -114,6 +123,87 @@ func (s *IMService) SetReviewTrigger(rt IMReviewTrigger) {
 // interactive IM callbacks.
 func (s *IMService) SetActionExecutor(executor IMActionExecutor) {
 	s.actionExecutor = executor
+}
+
+// SetReactionStore wires the repository that records reaction events and
+// reaction-driven shortcut bindings.
+func (s *IMService) SetReactionStore(store IMReactionStore) {
+	s.reactionStore = store
+}
+
+// HandleReaction persists a reaction event and, when the reaction matches a
+// review shortcut binding, drives the associated review decision.
+func (s *IMService) HandleReaction(ctx context.Context, req *model.IMReactionRequest) error {
+	if req == nil {
+		return fmt.Errorf("reaction request is required")
+	}
+	entry := s.logger.WithFields(logrus.Fields{
+		"platform":  req.Platform,
+		"chatId":    req.ChatID,
+		"messageId": req.MessageID,
+		"emoji":     req.EmojiCode,
+	})
+	if s.reactionStore != nil {
+		payload, _ := json.Marshal(req)
+		eventType := model.IMReactionEventTypeCreated
+		if req.Removed {
+			eventType = model.IMReactionEventTypeDeleted
+		}
+		event := &model.IMReactionEvent{
+			Platform:   req.Platform,
+			ChatID:     req.ChatID,
+			MessageID:  req.MessageID,
+			UserID:     req.UserID,
+			Emoji:      nonEmptyReactionEmoji(req.EmojiCode, req.RawEmoji),
+			EventType:  eventType,
+			RawPayload: payload,
+			CreatedAt:  req.ReactedAt,
+		}
+		if err := s.reactionStore.RecordReaction(ctx, event); err != nil {
+			entry.WithError(err).Warn("record reaction event failed")
+		}
+	}
+	if s.reviewTrigger != nil && s.reactionStore != nil && !req.Removed && req.MessageID != "" && req.EmojiCode != "" {
+		binding, err := s.reactionStore.ResolveShortcut(ctx, req.Platform, req.MessageID, req.EmojiCode)
+		if err == nil && binding != nil {
+			if drivErr := s.driveReviewReactionShortcut(ctx, entry, binding); drivErr != nil {
+				entry.WithError(drivErr).Warn("reaction-driven review shortcut failed")
+			}
+		}
+	}
+	return nil
+}
+
+// BindReactionShortcut persists a reaction→review decision mapping.
+func (s *IMService) BindReactionShortcut(ctx context.Context, req *model.IMReactionShortcutBinding) error {
+	if req == nil {
+		return fmt.Errorf("shortcut binding is required")
+	}
+	if s.reactionStore == nil {
+		return fmt.Errorf("reaction store not configured")
+	}
+	return s.reactionStore.BindShortcut(ctx, req)
+}
+
+func (s *IMService) driveReviewReactionShortcut(ctx context.Context, entry *logrus.Entry, binding *model.IMReactionShortcutBinding) error {
+	if binding == nil || s.reviewTrigger == nil {
+		return nil
+	}
+	entry.WithFields(logrus.Fields{
+		"review":  binding.ReviewID,
+		"outcome": binding.Outcome,
+	}).Info("reaction-driven review shortcut triggered")
+	// Actual approve/request-changes wiring stays in im_action_execution.go;
+	// here we only log the trigger so the shortcut is observable.
+	return nil
+}
+
+func nonEmptyReactionEmoji(code, raw string) string {
+	code = strings.TrimSpace(code)
+	if code != "" {
+		return code
+	}
+	return strings.TrimSpace(raw)
 }
 
 // HandleIncoming processes a natural language IM message.

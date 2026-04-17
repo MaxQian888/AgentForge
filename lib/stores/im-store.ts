@@ -27,6 +27,11 @@ export interface IMChannel {
   active: boolean;
 }
 
+export interface IMBridgeTenantBinding {
+  id: string;
+  projectId: string;
+}
+
 export interface IMBridgeProviderDetail {
   platform: string;
   capabilityMatrix?: Record<string, unknown>;
@@ -38,6 +43,12 @@ export interface IMBridgeProviderDetail {
   recentDowngrades: number;
   lastDeliveryAt?: string | null;
   diagnostics?: Record<string, string>;
+  /** Tenant ids this provider advertises to the control plane. */
+  tenants?: string[];
+  /** Opaque manifest mapping tenant id → backend projectId. */
+  tenantManifest?: IMBridgeTenantBinding[];
+  /** Stable bridge identifier this provider detail belongs to. */
+  bridgeId?: string;
 }
 
 export interface IMBridgeStatus {
@@ -186,6 +197,25 @@ function normalizeProviderDetail(
       detail.diagnostics && typeof detail.diagnostics === "object"
         ? { ...(detail.diagnostics as Record<string, string>) }
         : undefined,
+    tenants: Array.isArray(detail.tenants)
+      ? detail.tenants.filter((t): t is string => typeof t === "string")
+      : undefined,
+    tenantManifest: Array.isArray(detail.tenantManifest)
+      ? detail.tenantManifest
+          .map((binding) =>
+            binding &&
+            typeof binding === "object" &&
+            typeof (binding as IMBridgeTenantBinding).id === "string" &&
+            typeof (binding as IMBridgeTenantBinding).projectId === "string"
+              ? {
+                  id: (binding as IMBridgeTenantBinding).id,
+                  projectId: (binding as IMBridgeTenantBinding).projectId,
+                }
+              : null,
+          )
+          .filter((t): t is IMBridgeTenantBinding => t !== null)
+      : undefined,
+    bridgeId: typeof detail.bridgeId === "string" ? detail.bridgeId : undefined,
   };
 }
 

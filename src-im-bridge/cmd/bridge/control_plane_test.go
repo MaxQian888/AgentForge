@@ -428,7 +428,7 @@ func TestBridgeRuntimeControl_StartIncludesWeComCallbackPathInRegistration(t *te
 	if seen.lastReg.Capabilities["requires_public_callback"] != true {
 		t.Fatalf("capabilities = %+v", seen.lastReg.Capabilities)
 	}
-	if seen.lastReg.Metadata["readiness_tier"] != string(core.ReadinessTierNativeSendWithFallback) {
+	if seen.lastReg.Metadata["readiness_tier"] != string(core.ReadinessTierFullNativeLifecycle) {
 		t.Fatalf("register metadata = %+v", seen.lastReg.Metadata)
 	}
 	if seen.lastReg.Metadata["preferred_async_update_mode"] != string(core.AsyncUpdateSessionWebhook) {
@@ -587,13 +587,13 @@ func TestBridgeRuntimeControl_StartIncludesQQBotCallbackPathInRegistration(t *te
 	if seen.lastReg.CapabilityMatrix["commandSurface"] != "mixed" {
 		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
 	}
-	if seen.lastReg.Metadata["readiness_tier"] != string(core.ReadinessTierMarkdownFirst) {
+	if seen.lastReg.Metadata["readiness_tier"] != string(core.ReadinessTierNativeSendWithFallback) {
 		t.Fatalf("register metadata = %+v", seen.lastReg.Metadata)
 	}
 	if seen.lastReg.Metadata["preferred_async_update_mode"] != string(core.AsyncUpdateReply) {
 		t.Fatalf("register metadata = %+v", seen.lastReg.Metadata)
 	}
-	if seen.lastReg.CapabilityMatrix["readinessTier"] != string(core.ReadinessTierMarkdownFirst) {
+	if seen.lastReg.CapabilityMatrix["readinessTier"] != string(core.ReadinessTierNativeSendWithFallback) {
 		t.Fatalf("capability matrix = %+v", seen.lastReg.CapabilityMatrix)
 	}
 	if seen.lastReg.CapabilityMatrix["preferredAsyncUpdateMode"] != string(core.AsyncUpdateReply) {

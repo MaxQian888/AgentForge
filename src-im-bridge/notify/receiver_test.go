@@ -628,7 +628,7 @@ func TestReceiver_HealthReportsNormalizedWeComSourceAndCapabilities(t *testing.T
 	if payload["source"] != "wecom" {
 		t.Fatalf("source = %v", payload["source"])
 	}
-	if payload["readiness_tier"] != string(core.ReadinessTierNativeSendWithFallback) {
+	if payload["readiness_tier"] != string(core.ReadinessTierFullNativeLifecycle) {
 		t.Fatalf("readiness_tier = %v", payload["readiness_tier"])
 	}
 	if payload["supports_rich_messages"] != true {
@@ -638,7 +638,7 @@ func TestReceiver_HealthReportsNormalizedWeComSourceAndCapabilities(t *testing.T
 	if !ok {
 		t.Fatalf("capability_matrix = %#v", payload["capability_matrix"])
 	}
-	if matrix["readinessTier"] != string(core.ReadinessTierNativeSendWithFallback) {
+	if matrix["readinessTier"] != string(core.ReadinessTierFullNativeLifecycle) {
 		t.Fatalf("capability_matrix = %#v", matrix)
 	}
 	if matrix["structuredSurface"] != "cards" {
@@ -770,7 +770,7 @@ func TestReceiver_HealthReportsNormalizedQQBotSourceAndCapabilities(t *testing.T
 	if payload["source"] != "qqbot" {
 		t.Fatalf("source = %v", payload["source"])
 	}
-	if payload["readiness_tier"] != string(core.ReadinessTierMarkdownFirst) {
+	if payload["readiness_tier"] != string(core.ReadinessTierNativeSendWithFallback) {
 		t.Fatalf("readiness_tier = %v", payload["readiness_tier"])
 	}
 	if payload["supports_rich_messages"] != false {
@@ -780,7 +780,7 @@ func TestReceiver_HealthReportsNormalizedQQBotSourceAndCapabilities(t *testing.T
 	if !ok {
 		t.Fatalf("capability_matrix = %#v", payload["capability_matrix"])
 	}
-	if matrix["readinessTier"] != string(core.ReadinessTierMarkdownFirst) {
+	if matrix["readinessTier"] != string(core.ReadinessTierNativeSendWithFallback) {
 		t.Fatalf("capability_matrix = %#v", matrix)
 	}
 

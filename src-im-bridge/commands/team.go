@@ -10,7 +10,7 @@ import (
 )
 
 // RegisterTeamCommands registers /team sub-commands on the engine.
-func RegisterTeamCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterTeamCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/team", func(p core.Platform, msg *core.Message, args string) {
 		parts := strings.Fields(strings.TrimSpace(args))
 		if len(parts) == 0 {
@@ -19,7 +19,7 @@ func RegisterTeamCommands(engine *core.Engine, apiClient *client.AgentForgeClien
 		}
 
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		switch canonicalSubcommand("/team", parts[0]) {
 		case "list":
 			members, err := scopedClient.ListProjectMembers(ctx)

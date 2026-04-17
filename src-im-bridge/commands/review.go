@@ -12,7 +12,7 @@ import (
 var reviewUsage = commandUsage("/review")
 
 // RegisterReviewCommands registers /review sub-commands on the engine.
-func RegisterReviewCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterReviewCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/review", func(p core.Platform, msg *core.Message, args string) {
 		trimmed := strings.TrimSpace(args)
 		if trimmed == "" {
@@ -21,7 +21,7 @@ func RegisterReviewCommands(engine *core.Engine, apiClient *client.AgentForgeCli
 		}
 
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		parts := strings.Fields(trimmed)
 		if len(parts) == 0 {
 			_ = p.Reply(ctx, msg.ReplyCtx, reviewUsage)
@@ -37,10 +37,40 @@ func RegisterReviewCommands(engine *core.Engine, apiClient *client.AgentForgeCli
 			handleReviewApprove(ctx, p, msg, scopedClient, strings.TrimSpace(strings.TrimPrefix(trimmed, "approve")))
 		case "request-changes":
 			handleReviewRequestChanges(ctx, p, msg, scopedClient, strings.TrimSpace(strings.TrimPrefix(trimmed, "request-changes")))
+		case "approve-reaction":
+			handleReviewReactionShortcut(ctx, p, msg, scopedClient, strings.TrimSpace(strings.TrimPrefix(trimmed, "approve-reaction")), "approve")
+		case "reject-reaction":
+			handleReviewReactionShortcut(ctx, p, msg, scopedClient, strings.TrimSpace(strings.TrimPrefix(trimmed, "reject-reaction")), "request-changes")
 		default:
 			handleReviewTrigger(ctx, p, msg, scopedClient, trimmed)
 		}
 	})
+}
+
+// handleReviewReactionShortcut binds a reaction-driven shortcut against a
+// review. Once bound, the backend treats the configured unified emoji code on
+// the bound message as approve / request-changes, so humans can approve by
+// reacting with a thumbs up instead of typing the command.
+// Usage: /review approve-reaction <review-id> [emoji-code=thumbs_up]
+func handleReviewReactionShortcut(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, args string, outcome string) {
+	fields := strings.Fields(strings.TrimSpace(args))
+	if len(fields) == 0 {
+		_ = p.Reply(ctx, msg.ReplyCtx, "Usage: /review "+outcome+"-reaction <review-id> [emoji-code]")
+		return
+	}
+	reviewID := strings.TrimSpace(fields[0])
+	code := "thumbs_up"
+	if outcome == "request-changes" {
+		code = "thumbs_down"
+	}
+	if len(fields) >= 2 && strings.TrimSpace(fields[1]) != "" {
+		code = strings.TrimSpace(fields[1])
+	}
+	if err := c.BindReviewReactionShortcut(ctx, reviewID, outcome, code, msg.ReplyTarget); err != nil {
+		replyError(ctx, p, msg.ReplyCtx, "绑定 reaction 快捷键失败", fmt.Sprintf("%v", err), "请确认 review id 有效")
+		return
+	}
+	_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("已绑定 reaction 快捷键：对本消息添加 %s 将会执行 %s (review=%s)", code, outcome, shortID(reviewID)))
 }
 
 func handleReviewTrigger(ctx context.Context, p core.Platform, msg *core.Message, c *client.AgentForgeClient, prURL string) {

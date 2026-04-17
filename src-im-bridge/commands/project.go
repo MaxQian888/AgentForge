@@ -10,7 +10,7 @@ import (
 )
 
 // RegisterProjectCommands registers /project sub-commands on the engine.
-func RegisterProjectCommands(engine *core.Engine, apiClient *client.AgentForgeClient) {
+func RegisterProjectCommands(engine *core.Engine, factory client.ClientProvider) {
 	engine.RegisterCommand("/project", func(p core.Platform, msg *core.Message, args string) {
 		parts := strings.SplitN(strings.TrimSpace(args), " ", 2)
 		if len(parts) == 0 || parts[0] == "" {
@@ -19,7 +19,7 @@ func RegisterProjectCommands(engine *core.Engine, apiClient *client.AgentForgeCl
 		}
 
 		ctx := context.Background()
-		scopedClient := apiClient.WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
+		scopedClient := factory.For(msg.TenantID).WithSource(msg.Platform).WithBridgeContext("", msg.ReplyTarget)
 		switch canonicalSubcommand("/project", parts[0]) {
 		case "list":
 			projects, err := scopedClient.ListProjects(ctx)
@@ -79,7 +79,12 @@ func RegisterProjectCommands(engine *core.Engine, apiClient *client.AgentForgeCl
 				_ = p.Reply(ctx, msg.ReplyCtx, err.Error())
 				return
 			}
-			apiClient.SetProjectScope(project.ID)
+			// Mutate the underlying factory client so the scope persists
+			// across subsequent messages. In legacy single-client mode
+			// factory.For(_) returns the process-wide client; in multi-
+			// tenant mode it returns a per-tenant clone whose mutation is
+			// correctly ephemeral (tenant projectId is authoritative).
+			factory.For(msg.TenantID).SetProjectScope(project.ID)
 			_ = p.Reply(ctx, msg.ReplyCtx, formatProjectScopeSet(project))
 		case "create":
 			if len(parts) < 2 || strings.TrimSpace(parts[1]) == "" {
@@ -98,7 +103,12 @@ func RegisterProjectCommands(engine *core.Engine, apiClient *client.AgentForgeCl
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("创建项目失败: %v", err))
 				return
 			}
-			apiClient.SetProjectScope(project.ID)
+			// Mutate the underlying factory client so the scope persists
+			// across subsequent messages. In legacy single-client mode
+			// factory.For(_) returns the process-wide client; in multi-
+			// tenant mode it returns a per-tenant clone whose mutation is
+			// correctly ephemeral (tenant projectId is authoritative).
+			factory.For(msg.TenantID).SetProjectScope(project.ID)
 			_ = p.Reply(ctx, msg.ReplyCtx, formatProjectCreated(project))
 		case "rename":
 			tokens := strings.Fields(strings.TrimSpace(parts[1]))
@@ -152,8 +162,8 @@ func RegisterProjectCommands(engine *core.Engine, apiClient *client.AgentForgeCl
 				_ = p.Reply(ctx, msg.ReplyCtx, fmt.Sprintf("删除项目失败: %v", err))
 				return
 			}
-			if apiClient.ProjectScope() == project.ID {
-				apiClient.SetProjectScope("")
+			if factory.For(msg.TenantID).ProjectScope() == project.ID {
+				factory.For(msg.TenantID).SetProjectScope("")
 			}
 			_ = p.Reply(ctx, msg.ReplyCtx, formatProjectDeleted(project))
 		default:
