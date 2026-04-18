@@ -15,6 +15,7 @@
     "customFields": "自定义字段",
     "forms": "表单",
     "automations": "自动化",
+    "auditLog": "审计日志",
     "advanced": "高级",
     "runtimes": "运行时",
     "runtimeClaudeCode": "Claude Code",

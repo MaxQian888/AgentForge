@@ -36,20 +36,41 @@ type MarketplaceWorkflowTemplateRepo interface {
 	ListTemplatesByName(ctx context.Context, name string) ([]*model.WorkflowDefinition, error)
 }
 
+// MarketplaceProjectTemplateInstaller is the narrow contract the marketplace
+// install seam needs to persist a project_template. Main backend wires in
+// service.ProjectTemplateService via MaterializeMarketplaceInstall.
+type MarketplaceProjectTemplateInstaller interface {
+	MaterializeMarketplaceInstall(
+		ctx context.Context,
+		installer uuid.UUID,
+		name, description, snapshotJSON string,
+		snapshotVersion int,
+	) (*model.ProjectTemplate, error)
+}
+
 // MarketplaceHandler handles marketplace install integration endpoints on the src-go backend.
 type MarketplaceHandler struct {
-	pluginSvc            *service.PluginService
-	marketURL            string
-	httpClient           *http.Client
-	pluginsDir           string
-	rolesDir             string
-	imBridgePluginDir    string
-	workflowTemplateRepo MarketplaceWorkflowTemplateRepo
+	pluginSvc             *service.PluginService
+	marketURL             string
+	httpClient            *http.Client
+	pluginsDir            string
+	rolesDir              string
+	imBridgePluginDir     string
+	workflowTemplateRepo  MarketplaceWorkflowTemplateRepo
+	projectTemplateInst   MarketplaceProjectTemplateInstaller
 }
 
 // WithWorkflowTemplateRepo wires the workflow template repository for marketplace installs.
 func (h *MarketplaceHandler) WithWorkflowTemplateRepo(repo MarketplaceWorkflowTemplateRepo) *MarketplaceHandler {
 	h.workflowTemplateRepo = repo
+	return h
+}
+
+// WithProjectTemplateInstaller wires the main backend's project template
+// service so this handler can materialize marketplace-sourced project
+// templates into project_templates (source=marketplace).
+func (h *MarketplaceHandler) WithProjectTemplateInstaller(inst MarketplaceProjectTemplateInstaller) *MarketplaceHandler {
+	h.projectTemplateInst = inst
 	return h
 }
 
@@ -93,6 +114,12 @@ func (h *MarketplaceHandler) Install(c echo.Context) error {
 
 	authHeader := c.Request().Header.Get("Authorization")
 	ctx := c.Request().Context()
+	// Stash the installer's user id on ctx so sub-install paths
+	// (e.g. project_template) can materialize their rows against the right
+	// owner without expanding every helper's signature.
+	if uid, err := claimsUserID(c); err == nil && uid != nil {
+		ctx = withMarketplaceInstallerUserID(ctx, *uid)
+	}
 
 	if strings.TrimSpace(h.marketURL) == "" {
 		return c.JSON(http.StatusServiceUnavailable, map[string]any{
@@ -485,6 +512,8 @@ func (h *MarketplaceHandler) completeInstall(
 		return h.installSkillArtifact(itemMeta, destDir, installState)
 	case model.MarketplaceItemTypeWorkflowTemplate:
 		return h.installWorkflowTemplateArtifact(ctx, itemMeta, destDir, installState)
+	case model.MarketplaceItemTypeProjectTemplate:
+		return h.installProjectTemplateArtifact(ctx, itemMeta, destDir, installState)
 	default:
 		stagingDir, err := h.extractZipPackage(filepath.Join(destDir, "artifact"), destDir)
 		if err != nil {
@@ -886,6 +915,10 @@ func marketplaceItemType(itemType string) model.MarketplaceItemType {
 		return model.MarketplaceItemTypeSkill
 	case string(model.MarketplaceItemTypeRole):
 		return model.MarketplaceItemTypeRole
+	case string(model.MarketplaceItemTypeWorkflowTemplate):
+		return model.MarketplaceItemTypeWorkflowTemplate
+	case string(model.MarketplaceItemTypeProjectTemplate):
+		return model.MarketplaceItemTypeProjectTemplate
 	default:
 		return model.MarketplaceItemTypePlugin
 	}
@@ -899,6 +932,8 @@ func marketplaceConsumerSurface(itemType string) model.MarketplaceConsumerSurfac
 		return model.MarketplaceConsumerSurfaceRoleSkillCatalog
 	case model.MarketplaceItemTypeWorkflowTemplate:
 		return model.MarketplaceConsumerSurfaceWorkflowTemplateLibrary
+	case model.MarketplaceItemTypeProjectTemplate:
+		return model.MarketplaceConsumerSurfaceProjectTemplateLibrary
 	default:
 		return model.MarketplaceConsumerSurfacePluginManagementPanel
 	}
@@ -1245,4 +1280,100 @@ func (h *MarketplaceHandler) Updates(c echo.Context) error {
 		updates = []MarketplaceUpdateInfo{}
 	}
 	return c.JSON(http.StatusOK, map[string]any{"items": updates})
+}
+
+// --- project template marketplace install seam ---
+
+// marketplaceInstallerUserIDKey is the ctx key used to hand the installer's
+// user id from the Install entrypoint down to sub-install helpers that need
+// to know who owns the materialized row.
+type marketplaceInstallerUserIDKey struct{}
+
+func withMarketplaceInstallerUserID(ctx context.Context, id uuid.UUID) context.Context {
+	return context.WithValue(ctx, marketplaceInstallerUserIDKey{}, id)
+}
+
+func marketplaceInstallerUserIDFromContext(ctx context.Context) (uuid.UUID, bool) {
+	v, ok := ctx.Value(marketplaceInstallerUserIDKey{}).(uuid.UUID)
+	if !ok || v == uuid.Nil {
+		return uuid.Nil, false
+	}
+	return v, true
+}
+
+// projectTemplateArtifact is the on-disk payload shape we expect inside a
+// marketplace `project_template` package: either a bare JSON file named
+// project-template.json at the root of the zip, or the same file under a
+// single subdirectory (mirrors the workflow template layout).
+type projectTemplateArtifact struct {
+	Name            string          `json:"name"`
+	Description     string          `json:"description,omitempty"`
+	SnapshotVersion int             `json:"snapshotVersion"`
+	Snapshot        json.RawMessage `json:"snapshot"`
+}
+
+func (h *MarketplaceHandler) installProjectTemplateArtifact(
+	ctx context.Context,
+	itemMeta *marketplaceItemMetadata,
+	destDir string,
+	installState *model.MarketplaceConsumptionRecord,
+) error {
+	if h.projectTemplateInst == nil {
+		return fmt.Errorf("project template install not available: installer not configured")
+	}
+	userID, ok := marketplaceInstallerUserIDFromContext(ctx)
+	if !ok {
+		return fmt.Errorf("project template install: missing installer user context")
+	}
+
+	stagingDir, err := h.extractZipPackage(filepath.Join(destDir, "artifact"), destDir)
+	if err != nil {
+		return err
+	}
+	templateFile := filepath.Join(stagingDir, "project-template.json")
+	if _, statErr := os.Stat(templateFile); os.IsNotExist(statErr) {
+		entries, _ := os.ReadDir(stagingDir)
+		for _, e := range entries {
+			if e.IsDir() {
+				candidate := filepath.Join(stagingDir, e.Name(), "project-template.json")
+				if _, err := os.Stat(candidate); err == nil {
+					templateFile = candidate
+					break
+				}
+			}
+		}
+	}
+	data, err := os.ReadFile(templateFile)
+	if err != nil {
+		return fmt.Errorf("read project-template.json: %w", err)
+	}
+	var pkg projectTemplateArtifact
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		return &marketplaceArtifactError{message: fmt.Sprintf("parse project-template.json: %v", err)}
+	}
+	name := strings.TrimSpace(pkg.Name)
+	if name == "" {
+		name = strings.TrimSpace(itemMeta.Name)
+	}
+	if name == "" {
+		return &marketplaceArtifactError{message: "project template has no name"}
+	}
+	snapshot := strings.TrimSpace(string(pkg.Snapshot))
+	if snapshot == "" {
+		return &marketplaceArtifactError{message: "project template snapshot is empty"}
+	}
+	tpl, err := h.projectTemplateInst.MaterializeMarketplaceInstall(
+		ctx, userID, name, pkg.Description, snapshot, pkg.SnapshotVersion,
+	)
+	if err != nil {
+		return fmt.Errorf("materialize project template: %w", err)
+	}
+	installState.Status = model.MarketplaceConsumptionStatusInstalled
+	installState.Installed = true
+	installState.Used = true
+	installState.RecordID = tpl.ID.String()
+	installState.LocalPath = destDir
+	installState.Provenance.RecordID = tpl.ID.String()
+	installState.Provenance.LocalPath = destDir
+	return nil
 }

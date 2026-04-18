@@ -16,6 +16,7 @@ import {
   FileText,
   Zap,
   Wrench,
+  ScrollText,
   Terminal,
   Sparkles,
   Code2,
@@ -59,6 +60,7 @@ export const SETTINGS_SECTIONS: SettingsSection[] = [
   { id: "custom-fields", labelKey: "nav.customFields", icon: ListTree, group: "project" },
   { id: "forms", labelKey: "nav.forms", icon: FileText, group: "project" },
   { id: "automations", labelKey: "nav.automations", icon: Zap, group: "project" },
+  { id: "audit-log", labelKey: "nav.auditLog", icon: ScrollText, group: "project" },
   { id: "advanced", labelKey: "nav.advanced", icon: Wrench, group: "project" },
 ];
 

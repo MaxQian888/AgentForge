@@ -97,6 +97,7 @@ type AutomationEngineService struct {
 	imChannels    IMEventChannelResolver
 	plugins       automationPluginInvoker
 	workflows     automationWorkflowStarter
+	projectLookup DispatchProjectStatusLookup
 	now           func() time.Time
 }
 
@@ -131,6 +132,13 @@ func (s *AutomationEngineService) SetIMChannelResolver(resolver IMEventChannelRe
 	s.imChannels = resolver
 }
 
+// SetProjectStatusLookup wires the project repo so rule evaluation can
+// short-circuit when the target project is archived. Reuses the narrow
+// lookup interface defined in the dispatch service to avoid redundant types.
+func (s *AutomationEngineService) SetProjectStatusLookup(lookup DispatchProjectStatusLookup) {
+	s.projectLookup = lookup
+}
+
 func (s *AutomationEngineService) EvaluateRules(ctx context.Context, event AutomationEvent) error {
 	_, err := s.EvaluateRulesWithSummary(ctx, event)
 	return err
@@ -143,6 +151,17 @@ func (s *AutomationEngineService) EvaluateRulesWithSummary(ctx context.Context, 
 	}
 	if event.ProjectID == uuid.Nil || strings.TrimSpace(event.EventType) == "" {
 		return summary, nil
+	}
+
+	// Archived projects silently skip automation: no rule evaluation, no
+	// action execution, no audit noise beyond this short-circuit. The
+	// handler-level archived_guard already rejects writes that originate
+	// from HTTP; this path covers internal callers (task progress events,
+	// scheduler, etc.) that fire automation outside the HTTP pipeline.
+	if s.projectLookup != nil {
+		if project, err := s.projectLookup.GetByID(ctx, event.ProjectID); err == nil && project != nil && project.Status == model.ProjectStatusArchived {
+			return summary, nil
+		}
 	}
 
 	if event.Task == nil && event.TaskID != nil && s.tasks != nil {

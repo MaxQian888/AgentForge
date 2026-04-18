@@ -9,6 +9,11 @@ const (
 	MarketplaceItemTypeSkill            MarketplaceItemType = "skill"
 	MarketplaceItemTypeRole             MarketplaceItemType = "role"
 	MarketplaceItemTypeWorkflowTemplate MarketplaceItemType = "workflow_template"
+	// MarketplaceItemTypeProjectTemplate is received by the main backend
+	// install seam and materialized into project_templates with
+	// source=marketplace, owner_user_id=installer. The marketplace side
+	// publish flow is a follow-up change.
+	MarketplaceItemTypeProjectTemplate MarketplaceItemType = "project_template"
 )
 
 type MarketplaceConsumerSurface string
@@ -18,6 +23,7 @@ const (
 	MarketplaceConsumerSurfaceRoleWorkspace            MarketplaceConsumerSurface = "roles-workspace"
 	MarketplaceConsumerSurfaceRoleSkillCatalog         MarketplaceConsumerSurface = "role-skill-catalog"
 	MarketplaceConsumerSurfaceWorkflowTemplateLibrary  MarketplaceConsumerSurface = "workflow-template-library"
+	MarketplaceConsumerSurfaceProjectTemplateLibrary   MarketplaceConsumerSurface = "project-template-library"
 )
 
 type MarketplaceConsumptionStatus string

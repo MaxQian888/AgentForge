@@ -15,10 +15,11 @@ import (
 )
 
 var (
-	ErrTeamNotFound      = errors.New("team not found")
-	ErrTeamAlreadyActive = errors.New("team already active for this task")
-	ErrTeamNotActive     = errors.New("team is not active")
-	ErrTeamTaskNotFound  = errors.New("team task not found")
+	ErrTeamNotFound         = errors.New("team not found")
+	ErrTeamAlreadyActive    = errors.New("team already active for this task")
+	ErrTeamNotActive        = errors.New("team is not active")
+	ErrTeamTaskNotFound     = errors.New("team task not found")
+	ErrProjectArchivedTeam  = errors.New("team start: project is archived")
 )
 
 // TeamRunRepository defines persistence for agent teams.
@@ -132,6 +133,9 @@ func (s *TeamService) StartTeam(ctx context.Context, input StartTeamInput) (*mod
 	project, err := s.projectRepo.GetByID(ctx, task.ProjectID)
 	if err != nil {
 		return nil, ErrAgentProjectNotFound
+	}
+	if project != nil && project.Status == model.ProjectStatusArchived {
+		return nil, ErrProjectArchivedTeam
 	}
 	selection, err := ResolveProjectCodingAgentSelection(project, input.Runtime, input.Provider, input.Model)
 	if err != nil {
@@ -451,6 +455,33 @@ func (s *TeamService) GetSummary(ctx context.Context, teamID uuid.UUID) (*model.
 // ListByProject returns all teams for a project, optionally filtered by status.
 func (s *TeamService) ListByProject(ctx context.Context, projectID uuid.UUID, status string) ([]*model.AgentTeam, error) {
 	return s.teamRepo.ListByProject(ctx, projectID, status)
+}
+
+// CancelAllActiveForProject cancels every non-terminal team in the project.
+// Used by the project lifecycle service as an archive cascade. Best-effort:
+// individual cancellation errors are logged; the method never fails the
+// caller solely because a cancel-step did.
+func (s *TeamService) CancelAllActiveForProject(ctx context.Context, projectID uuid.UUID, reason string) error {
+	teams, err := s.teamRepo.ListByProject(ctx, projectID, "")
+	if err != nil {
+		return fmt.Errorf("list teams for cascade cancel: %w", err)
+	}
+	if reason == "" {
+		reason = "project_archived"
+	}
+	for _, team := range teams {
+		if team == nil || model.IsTerminalTeamStatus(team.Status) {
+			continue
+		}
+		if err := s.CancelTeam(ctx, team.ID); err != nil {
+			log.WithError(err).WithFields(log.Fields{
+				"projectId": projectID.String(),
+				"teamId":    team.ID.String(),
+				"reason":    reason,
+			}).Warn("team service: cascade cancel for archived project failed (best-effort)")
+		}
+	}
+	return nil
 }
 
 // ListSummaries returns enriched team summaries for a project, optionally filtered by status.

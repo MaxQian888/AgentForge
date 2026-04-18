@@ -49,15 +49,18 @@ func (r *userRecord) toModel() *model.User {
 }
 
 type projectRecord struct {
-	ID            uuid.UUID `gorm:"column:id;primaryKey"`
-	Name          string    `gorm:"column:name"`
-	Slug          string    `gorm:"column:slug"`
-	Description   string    `gorm:"column:description"`
-	RepoURL       string    `gorm:"column:repo_url"`
-	DefaultBranch string    `gorm:"column:default_branch"`
-	Settings      jsonText  `gorm:"column:settings;type:jsonb"`
-	CreatedAt     time.Time `gorm:"column:created_at"`
-	UpdatedAt     time.Time `gorm:"column:updated_at"`
+	ID               uuid.UUID  `gorm:"column:id;primaryKey"`
+	Name             string     `gorm:"column:name"`
+	Slug             string     `gorm:"column:slug"`
+	Description      string     `gorm:"column:description"`
+	RepoURL          string     `gorm:"column:repo_url"`
+	DefaultBranch    string     `gorm:"column:default_branch"`
+	Settings         jsonText   `gorm:"column:settings;type:jsonb"`
+	Status           string     `gorm:"column:status"`
+	ArchivedAt       *time.Time `gorm:"column:archived_at"`
+	ArchivedByUserID *uuid.UUID `gorm:"column:archived_by_user_id"`
+	CreatedAt        time.Time  `gorm:"column:created_at"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at"`
 }
 
 func (projectRecord) TableName() string { return "projects" }
@@ -67,15 +70,18 @@ func newProjectRecord(project *model.Project) *projectRecord {
 		return nil
 	}
 	return &projectRecord{
-		ID:            project.ID,
-		Name:          project.Name,
-		Slug:          project.Slug,
-		Description:   project.Description,
-		RepoURL:       project.RepoURL,
-		DefaultBranch: project.DefaultBranch,
-		Settings:      newJSONText(project.Settings, "{}"),
-		CreatedAt:     project.CreatedAt,
-		UpdatedAt:     project.UpdatedAt,
+		ID:               project.ID,
+		Name:             project.Name,
+		Slug:             project.Slug,
+		Description:      project.Description,
+		RepoURL:          project.RepoURL,
+		DefaultBranch:    project.DefaultBranch,
+		Settings:         newJSONText(project.Settings, "{}"),
+		Status:           model.NormalizeProjectStatus(project.Status),
+		ArchivedAt:       cloneTimePointer(project.ArchivedAt),
+		ArchivedByUserID: cloneUUIDPointer(project.ArchivedByUserID),
+		CreatedAt:        project.CreatedAt,
+		UpdatedAt:        project.UpdatedAt,
 	}
 }
 
@@ -84,15 +90,18 @@ func (r *projectRecord) toModel() *model.Project {
 		return nil
 	}
 	return &model.Project{
-		ID:            r.ID,
-		Name:          r.Name,
-		Slug:          r.Slug,
-		Description:   r.Description,
-		RepoURL:       r.RepoURL,
-		DefaultBranch: r.DefaultBranch,
-		Settings:      r.Settings.String("{}"),
-		CreatedAt:     r.CreatedAt,
-		UpdatedAt:     r.UpdatedAt,
+		ID:               r.ID,
+		Name:             r.Name,
+		Slug:             r.Slug,
+		Description:      r.Description,
+		RepoURL:          r.RepoURL,
+		DefaultBranch:    r.DefaultBranch,
+		Settings:         r.Settings.String("{}"),
+		Status:           model.NormalizeProjectStatus(r.Status),
+		ArchivedAt:       cloneTimePointer(r.ArchivedAt),
+		ArchivedByUserID: cloneUUIDPointer(r.ArchivedByUserID),
+		CreatedAt:        r.CreatedAt,
+		UpdatedAt:        r.UpdatedAt,
 	}
 }
 
@@ -103,6 +112,7 @@ type memberRecord struct {
 	Name        string     `gorm:"column:name"`
 	Type        string     `gorm:"column:type"`
 	Role        string     `gorm:"column:role"`
+	ProjectRole string     `gorm:"column:project_role"`
 	Status      string     `gorm:"column:status"`
 	Email       string     `gorm:"column:email"`
 	IMPlatform  string     `gorm:"column:im_platform"`
@@ -129,6 +139,7 @@ func newMemberRecord(member *model.Member) *memberRecord {
 		Name:        member.Name,
 		Type:        member.Type,
 		Role:        member.Role,
+		ProjectRole: model.NormalizeProjectRole(member.ProjectRole),
 		Status:      status,
 		Email:       member.Email,
 		IMPlatform:  member.IMPlatform,
@@ -154,6 +165,7 @@ func (r *memberRecord) toModel() *model.Member {
 		Name:        r.Name,
 		Type:        r.Type,
 		Role:        r.Role,
+		ProjectRole: model.NormalizeProjectRole(r.ProjectRole),
 		Status:      status,
 		Email:       r.Email,
 		IMPlatform:  r.IMPlatform,
@@ -1251,5 +1263,92 @@ func (r *agentPoolQueueEntryRecord) toModel() *model.AgentPoolQueueEntry {
 		AgentRunID: cloneStringPointer(r.AgentRunID),
 		CreatedAt:  r.CreatedAt,
 		UpdatedAt:  r.UpdatedAt,
+	}
+}
+
+// invitationRecord is the GORM view of `project_invitations`.
+type invitationRecord struct {
+	ID                      uuid.UUID  `gorm:"column:id;primaryKey"`
+	ProjectID               uuid.UUID  `gorm:"column:project_id"`
+	InviterUserID           uuid.UUID  `gorm:"column:inviter_user_id"`
+	InvitedIdentity         jsonText   `gorm:"column:invited_identity;type:jsonb"`
+	InvitedUserID           *uuid.UUID `gorm:"column:invited_user_id"`
+	ProjectRole             string     `gorm:"column:project_role"`
+	Status                  string     `gorm:"column:status"`
+	TokenHash               *string    `gorm:"column:token_hash"`
+	Message                 string     `gorm:"column:message"`
+	ExpiresAt               time.Time  `gorm:"column:expires_at"`
+	CreatedAt               time.Time  `gorm:"column:created_at"`
+	UpdatedAt               time.Time  `gorm:"column:updated_at"`
+	AcceptedAt              *time.Time `gorm:"column:accepted_at"`
+	DeclineReason           string     `gorm:"column:decline_reason"`
+	RevokeReason            string     `gorm:"column:revoke_reason"`
+	LastDeliveryStatus      string     `gorm:"column:last_delivery_status"`
+	LastDeliveryAttemptedAt *time.Time `gorm:"column:last_delivery_attempted_at"`
+}
+
+func (invitationRecord) TableName() string { return "project_invitations" }
+
+func newInvitationRecord(invitation *model.Invitation) *invitationRecord {
+	if invitation == nil {
+		return nil
+	}
+	identityJSON := invitation.InvitedIdentity.JSON()
+	var tokenHash *string
+	if invitation.TokenHash != "" {
+		v := invitation.TokenHash
+		tokenHash = &v
+	}
+	return &invitationRecord{
+		ID:                      invitation.ID,
+		ProjectID:               invitation.ProjectID,
+		InviterUserID:           invitation.InviterUserID,
+		InvitedIdentity:         newJSONText(identityJSON, "{}"),
+		InvitedUserID:           cloneUUIDPointer(invitation.InvitedUserID),
+		ProjectRole:             model.NormalizeProjectRole(invitation.ProjectRole),
+		Status:                  invitation.Status,
+		TokenHash:               tokenHash,
+		Message:                 invitation.Message,
+		ExpiresAt:               invitation.ExpiresAt,
+		CreatedAt:               invitation.CreatedAt,
+		UpdatedAt:               invitation.UpdatedAt,
+		AcceptedAt:              cloneTimePointer(invitation.AcceptedAt),
+		DeclineReason:           invitation.DeclineReason,
+		RevokeReason:            invitation.RevokeReason,
+		LastDeliveryStatus:      invitation.LastDeliveryStatus,
+		LastDeliveryAttemptedAt: cloneTimePointer(invitation.LastDeliveryAttemptedAt),
+	}
+}
+
+func (r *invitationRecord) toModel() *model.Invitation {
+	if r == nil {
+		return nil
+	}
+	identity, err := model.ParseInvitedIdentity(r.InvitedIdentity.String("{}"))
+	if err != nil {
+		identity = model.InvitedIdentity{}
+	}
+	tokenHash := ""
+	if r.TokenHash != nil {
+		tokenHash = *r.TokenHash
+	}
+	return &model.Invitation{
+		ID:                      r.ID,
+		ProjectID:               r.ProjectID,
+		InviterUserID:           r.InviterUserID,
+		InvitedIdentity:         identity,
+		InvitedUserID:           cloneUUIDPointer(r.InvitedUserID),
+		ProjectRole:             model.NormalizeProjectRole(r.ProjectRole),
+		Status:                  r.Status,
+		TokenHash:               tokenHash,
+		Message:                 r.Message,
+		ExpiresAt:               r.ExpiresAt,
+		CreatedAt:               r.CreatedAt,
+		UpdatedAt:               r.UpdatedAt,
+		AcceptedAt:              cloneTimePointer(r.AcceptedAt),
+		DeclineReason:           r.DeclineReason,
+		RevokeReason:            r.RevokeReason,
+		LastDeliveryStatus:      r.LastDeliveryStatus,
+		LastDeliveryAttemptedAt: cloneTimePointer(r.LastDeliveryAttemptedAt),
 	}
 }

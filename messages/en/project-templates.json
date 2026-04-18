@@ -1,0 +1,47 @@
+{
+  "source": {
+    "system": "System templates",
+    "user": "My templates",
+    "marketplace": "From marketplace"
+  },
+  "newProject": {
+    "title": "Create a new project",
+    "description": "Start from scratch or clone a configuration template.",
+    "startFrom": "Start from",
+    "blank": "Blank project",
+    "fromTemplate": "Use a template",
+    "selectTemplate": "Choose a template",
+    "loading": "Loading templates…",
+    "noTemplates": "No templates available yet. Save an existing project as a template from its settings.",
+    "cancel": "Cancel",
+    "create": "Create project",
+    "creating": "Creating…"
+  },
+  "saveAs": {
+    "title": "Save project as template",
+    "description": "Captures the current project's settings, custom fields, saved views, dashboards, automations, workflow definitions, task statuses, and role placeholders. Business data (tasks, wiki pages, comments, runs) is not copied.",
+    "nameLabel": "Template name",
+    "descriptionLabel": "Description",
+    "descriptionPlaceholder": "Optional notes about when to use this template.",
+    "cancel": "Cancel",
+    "save": "Save as template",
+    "saving": "Saving…"
+  },
+  "page": {
+    "title": "Project templates",
+    "description": "Reusable project configuration snapshots you've saved or installed.",
+    "loading": "Loading templates…",
+    "empty": {
+      "user": "You haven't saved any projects as templates yet.",
+      "system": "No system templates are available in this environment.",
+      "marketplace": "No marketplace templates installed."
+    },
+    "edit": "Edit",
+    "delete": "Delete",
+    "editTitle": "Edit template",
+    "editDescription": "Rename or update the description. The underlying snapshot is not changed.",
+    "deleteTitle": "Delete template",
+    "deleteDescription": "This removes the template from your library. Projects already created from it are not affected.",
+    "versionLabel": "Snapshot version: {version}"
+  }
+}

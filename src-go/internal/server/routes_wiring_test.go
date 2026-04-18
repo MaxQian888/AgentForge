@@ -7,6 +7,38 @@ import (
 	"testing"
 )
 
+func TestRegisterRoutes_WiresProjectArchivalSurface(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("routes.go"))
+	if err != nil {
+		t.Fatalf("ReadFile(routes.go) error = %v", err)
+	}
+	source := string(content)
+	expected := []string{
+		`projectLifecycleSvc := service.NewProjectLifecycleService(projectRepo)`,
+		`WithLifecycleService(projectLifecycleSvc)`,
+		`appMiddleware.ArchivedProjectWriteGuard(appMiddleware.ArchivedProjectWriteGuardConfig{`,
+		`projectGroup.POST("/archive", projectH.Archive`,
+		`projectGroup.POST("/unarchive", projectH.Unarchive`,
+		`dagWorkflowSvc.SetProjectStatusLookup(projectRepo)`,
+		`automationEngine.SetProjectStatusLookup(projectRepo)`,
+		`dispatchSvc.WithProjectStatusLookup(projectRepo)`,
+		`projectLifecycleSvc.WithWorkflowCanceller(dagWorkflowSvc)`,
+	}
+	for _, snippet := range expected {
+		if !strings.Contains(source, snippet) {
+			t.Fatalf("expected RegisterRoutes to contain %q", snippet)
+		}
+	}
+	// Middleware ordering: the group-level ArchivedProjectWriteGuard must be
+	// declared before per-route POSTs so it wraps them. We enforce this
+	// structurally by comparing byte offsets.
+	guardIdx := strings.Index(source, "ArchivedProjectWriteGuard")
+	firstPostIdx := strings.Index(source, `projectGroup.POST("/archive"`)
+	if guardIdx < 0 || firstPostIdx < 0 || guardIdx >= firstPostIdx {
+		t.Fatalf("expected ArchivedProjectWriteGuard to be registered before project-group POST routes (guard=%d, post=%d)", guardIdx, firstPostIdx)
+	}
+}
+
 func TestRegisterRoutes_WiresReviewDocWriteback(t *testing.T) {
 	content, err := os.ReadFile(filepath.Join("routes.go"))
 	if err != nil {
@@ -65,7 +97,8 @@ func TestRegisterRoutes_WiresDispatchPreflightRoute(t *testing.T) {
 		t.Fatalf("ReadFile(routes.go) error = %v", err)
 	}
 	source := string(content)
-	if !strings.Contains(source, `projectGroup.GET("/dispatch/preflight", dispatchPreflightH.Get)`) {
+	// Allow optional trailing RBAC middleware; assert the route prefix only.
+	if !strings.Contains(source, `projectGroup.GET("/dispatch/preflight", dispatchPreflightH.Get`) {
 		t.Fatal("expected RegisterRoutes to wire project dispatch preflight endpoint")
 	}
 }
@@ -77,7 +110,7 @@ func TestRegisterRoutes_WiresDispatchObservabilityRoutes(t *testing.T) {
 	}
 	source := string(content)
 	expected := []string{
-		`projectGroup.GET("/dispatch/stats", dispatchStatsH.Get)`,
+		`projectGroup.GET("/dispatch/stats", dispatchStatsH.Get`,
 		`protected.GET("/tasks/:tid/dispatch/history", dispatchHistoryH.Get)`,
 	}
 	for _, route := range expected {
@@ -111,15 +144,16 @@ func TestRegisterRoutes_WiresMemoryExplorerRoutes(t *testing.T) {
 		t.Fatalf("ReadFile(routes.go) error = %v", err)
 	}
 	source := string(content)
+	// Allow optional trailing RBAC middleware; assert the call prefix only.
 	expectedRoutes := []string{
-		`projectGroup.POST("/memory", memoryH.Store)`,
-		`projectGroup.GET("/memory", memoryH.Search)`,
-		`projectGroup.GET("/memory/stats", memoryH.Stats)`,
-		`projectGroup.GET("/memory/export", memoryH.Export)`,
-		`projectGroup.POST("/memory/bulk-delete", memoryH.BulkDelete)`,
-		`projectGroup.POST("/memory/cleanup", memoryH.Cleanup)`,
-		`projectGroup.GET("/memory/:mid", memoryH.Get)`,
-		`projectGroup.DELETE("/memory/:mid", memoryH.Delete)`,
+		`projectGroup.POST("/memory", memoryH.Store`,
+		`projectGroup.GET("/memory", memoryH.Search`,
+		`projectGroup.GET("/memory/stats", memoryH.Stats`,
+		`projectGroup.GET("/memory/export", memoryH.Export`,
+		`projectGroup.POST("/memory/bulk-delete", memoryH.BulkDelete`,
+		`projectGroup.POST("/memory/cleanup", memoryH.Cleanup`,
+		`projectGroup.GET("/memory/:mid", memoryH.Get`,
+		`projectGroup.DELETE("/memory/:mid", memoryH.Delete`,
 	}
 	for _, route := range expectedRoutes {
 		if !strings.Contains(source, route) {

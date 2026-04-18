@@ -29,6 +29,13 @@ type AgentRuntimeService interface {
 type AgentHandler struct {
 	service    AgentRuntimeService
 	dispatcher agentTaskDispatcher
+	audit      AgentAuditEmitter
+}
+
+// AgentAuditEmitter is the narrow contract the handler uses to record
+// audit events on the success path. *service.AuditService satisfies it.
+type AgentAuditEmitter interface {
+	RecordEvent(ctx context.Context, event *model.AuditEvent) error
 }
 
 func NewAgentHandler(service AgentRuntimeService) *AgentHandler {
@@ -41,6 +48,15 @@ type agentTaskDispatcher interface {
 
 func (h *AgentHandler) WithDispatcher(dispatcher agentTaskDispatcher) *AgentHandler {
 	h.dispatcher = dispatcher
+	return h
+}
+
+// WithAudit wires the audit service so successful Spawn calls emit a
+// business-level event with the dispatch outcome and key request fields.
+// Without this seam the only audit record is the RBAC-layer "allowed"
+// event from middleware/rbac.go.
+func (h *AgentHandler) WithAudit(audit AgentAuditEmitter) *AgentHandler {
+	h.audit = audit
 	return h
 }
 
@@ -80,6 +96,13 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 			memberID = &parsedMemberID
 		}
 
+		// Plumb the initiating user from JWT claims into the service-layer
+		// Caller. Required by the typed contract introduced for RBAC §3;
+		// audit emission references this identity.
+		callerID, err := claimsUserID(c)
+		if err != nil || callerID == nil {
+			return localizedError(c, http.StatusUnauthorized, i18n.MsgUnauthorized)
+		}
 		result, err := h.dispatcher.Spawn(c.Request().Context(), service.DispatchSpawnInput{
 			TaskID:    taskID,
 			MemberID:  memberID,
@@ -88,6 +111,7 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 			Model:     req.Model,
 			RoleID:    req.RoleID,
 			BudgetUSD: req.MaxBudgetUsd,
+			Caller:    service.Caller{UserID: *callerID},
 		})
 		if err != nil {
 			switch {
@@ -104,6 +128,11 @@ func (h *AgentHandler) Spawn(c echo.Context) error {
 		} else if result.Dispatch.Status == model.DispatchStatusQueued {
 			statusCode = http.StatusAccepted
 		}
+		// Handler-level audit emission. The RBAC middleware already
+		// recorded the "allowed" attempt; this row carries the actual
+		// business outcome so /audit-events answers "what happened" not
+		// just "who tried."
+		h.emitSpawnAudit(c, *callerID, taskID, memberID, req, result)
 		return c.JSON(statusCode, result)
 	}
 
@@ -212,6 +241,59 @@ func (h *AgentHandler) Logs(c echo.Context) error {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToGetAgentLogs)
 	}
 	return c.JSON(http.StatusOK, logs)
+}
+
+// emitSpawnAudit records a business-level audit event for a successful
+// agent spawn. Best-effort: a failure here is logged inside the audit
+// service and never blocks the response.
+//
+// The payload focuses on the authoritative outcome — which task, which
+// member, what dispatch status. Sanitization happens inside RecordEvent.
+func (h *AgentHandler) emitSpawnAudit(
+	c echo.Context,
+	callerID uuid.UUID,
+	taskID uuid.UUID,
+	memberID *uuid.UUID,
+	req *SpawnAgentRequest,
+	result *model.TaskDispatchResponse,
+) {
+	if h.audit == nil || result == nil {
+		return
+	}
+	payload := map[string]any{
+		"outcome":        "spawned",
+		"taskId":         taskID.String(),
+		"runtime":        req.Runtime,
+		"provider":       req.Provider,
+		"model":          req.Model,
+		"roleId":         req.RoleID,
+		"dispatchStatus": string(result.Dispatch.Status),
+		"dispatchReason": result.Dispatch.Reason,
+	}
+	if memberID != nil {
+		payload["memberId"] = memberID.String()
+	}
+	caller := callerID
+	event := &model.AuditEvent{
+		ProjectID:           parseProjectIDOrNil(result.Task.ProjectID),
+		ActorUserID:         &caller,
+		ActionID:            "agent.spawn",
+		ResourceType:        model.AuditResourceTypeTask,
+		ResourceID:          taskID.String(),
+		PayloadSnapshotJSON: service.SanitizeAuditPayload(payload),
+	}
+	_ = h.audit.RecordEvent(c.Request().Context(), event)
+}
+
+// parseProjectIDOrNil parses the projectId string carried on the
+// dispatch response. Returns Nil on parse failure; the audit service
+// will reject rows with Nil project_id, surfacing the issue rather
+// than silently landing orphaned events.
+func parseProjectIDOrNil(s string) uuid.UUID {
+	if id, err := uuid.Parse(s); err == nil {
+		return id
+	}
+	return uuid.Nil
 }
 
 func (h *AgentHandler) updateStatus(c echo.Context, status string) error {

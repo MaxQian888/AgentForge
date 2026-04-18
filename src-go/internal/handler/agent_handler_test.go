@@ -13,9 +13,18 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/handler"
+	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
+
+// withSpawnClaims attaches a synthetic JWT claim to the test context so the
+// handler can resolve the initiating user. Tests that exercise the spawn
+// path need this — the production handler reads the caller from JWT.
+func withSpawnClaims(c echo.Context) echo.Context {
+	c.Set(appMiddleware.JWTContextKey, &service.Claims{UserID: uuid.NewString()})
+	return c
+}
 
 type agentTestValidator struct {
 	validator *validator.Validate
@@ -224,7 +233,7 @@ func TestAgentHandler_Spawn_ForwardsExplicitRuntime(t *testing.T) {
 	req := httptest.NewRequest(http.MethodPost, "/agents/spawn", strings.NewReader(`{"taskId":"`+uuid.New().String()+`","memberId":"`+uuid.New().String()+`","runtime":"codex","provider":"openai","model":"gpt-5-codex","roleId":"frontend-developer"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c := withSpawnClaims(e.NewContext(req, rec))
 
 	_ = h.Spawn(c)
 	if rec.Code != http.StatusCreated {
@@ -247,7 +256,7 @@ func TestAgentHandler_Spawn_AllowsMissingMemberIDWhenDispatcherCanResolveTaskAss
 	req := httptest.NewRequest(http.MethodPost, "/agents/spawn", strings.NewReader(`{"taskId":"`+taskID.String()+`","runtime":"codex","roleId":"frontend-developer"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c := withSpawnClaims(e.NewContext(req, rec))
 
 	_ = h.Spawn(c)
 	if rec.Code != http.StatusCreated {
@@ -285,7 +294,7 @@ func TestAgentHandler_Spawn_ReturnsAcceptedWhenDispatcherQueuesAdmission(t *test
 	req := httptest.NewRequest(http.MethodPost, "/agents/spawn", strings.NewReader(`{"taskId":"`+uuid.New().String()+`"}`))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
-	c := e.NewContext(req, rec)
+	c := withSpawnClaims(e.NewContext(req, rec))
 
 	_ = h.Spawn(c)
 	if rec.Code != http.StatusAccepted {

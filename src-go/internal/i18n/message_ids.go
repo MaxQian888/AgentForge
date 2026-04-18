@@ -129,6 +129,24 @@ const (
 	MsgFailedToUpdateMember       = "FailedToUpdateMember"
 	MsgFailedToFetchUpdatedMember = "FailedToFetchUpdatedMember"
 	MsgFailedToDeleteMember       = "FailedToDeleteMember"
+	MsgHumanMemberCreationMoved   = "HumanMemberCreationMovedToInvitationFlow"
+
+	// Invitation
+	MsgInvitationNotFound                 = "InvitationNotFound"
+	MsgInvitationAlreadyPendingForIdent   = "InvitationAlreadyPendingForIdentity"
+	MsgInvitationAlreadyProcessed         = "InvitationAlreadyProcessed"
+	MsgInvitationExpired                  = "InvitationExpired"
+	MsgInvitationIdentityMismatch         = "InvitationIdentityMismatch"
+	MsgInvitationInvalidIdentity          = "InvitationInvalidIdentity"
+	MsgInvitationInvalidRole              = "InvitationInvalidRole"
+	MsgFailedToCreateInvitation           = "FailedToCreateInvitation"
+	MsgFailedToListInvitations            = "FailedToListInvitations"
+	MsgFailedToRevokeInvitation           = "FailedToRevokeInvitation"
+	MsgFailedToResendInvitation           = "FailedToResendInvitation"
+	MsgFailedToAcceptInvitation           = "FailedToAcceptInvitation"
+	MsgFailedToDeclineInvitation          = "FailedToDeclineInvitation"
+	MsgInvalidInvitationID                = "InvalidInvitationID"
+	MsgInvalidInvitationToken             = "InvalidInvitationToken"
 
 	// Memory
 	MsgMemoryServiceUnavailable = "MemoryServiceUnavailable"
@@ -181,6 +199,21 @@ const (
 	MsgProjectNotFound                   = "ProjectNotFound"
 	MsgFailedToUpdateProject             = "FailedToUpdateProject"
 	MsgFailedToFetchUpdatedProject       = "FailedToFetchUpdatedProject"
+	MsgProjectArchived                   = "ProjectArchived"
+	MsgProjectNotArchived                = "ProjectNotArchived"
+	MsgProjectMustBeArchivedBeforeDelete = "ProjectMustBeArchivedBeforeDelete"
+	MsgFailedToArchiveProject            = "FailedToArchiveProject"
+	MsgFailedToUnarchiveProject          = "FailedToUnarchiveProject"
+
+	// Project templates
+	MsgProjectTemplateNotFound        = "ProjectTemplateNotFound"
+	MsgProjectTemplateImmutableSystem = "ProjectTemplateImmutableSystem"
+	MsgProjectTemplateOwnerMismatch   = "ProjectTemplateOwnerMismatch"
+	MsgProjectTemplateSnapshotInvalid = "ProjectTemplateSnapshotInvalid"
+	MsgProjectTemplateSnapshotTooBig  = "ProjectTemplateSnapshotTooLarge"
+	MsgFailedToListProjectTemplates   = "FailedToListProjectTemplates"
+	MsgFailedToSaveProjectTemplate    = "FailedToSaveProjectTemplate"
+	MsgFailedToCloneFromTemplate      = "FailedToCloneFromTemplate"
 
 	// Review
 	MsgReviewNotFound = "ReviewNotFound"
@@ -317,4 +350,12 @@ const (
 
 	// Middleware - Project
 	MsgProjectIDRequired = "ProjectIDRequired"
+
+	// Middleware - RBAC
+	MsgInsufficientProjectRole  = "InsufficientProjectRole"
+	MsgNotAProjectMember        = "NotAProjectMember"
+	MsgLastOwnerProtected       = "LastOwnerProtected"
+	MsgCannotModifyOwnerAsAdmin = "CannotModifyOwnerAsAdmin"
+	MsgInvalidProjectRole       = "InvalidProjectRole"
+	MsgUnknownProjectAction     = "UnknownProjectAction"
 )

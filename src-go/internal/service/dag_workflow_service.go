@@ -28,6 +28,7 @@ type DAGWorkflowExecutionRepo interface {
 	CreateExecution(ctx context.Context, exec *model.WorkflowExecution) error
 	GetExecution(ctx context.Context, id uuid.UUID) (*model.WorkflowExecution, error)
 	ListExecutions(ctx context.Context, workflowID uuid.UUID) ([]*model.WorkflowExecution, error)
+	ListActiveByProject(ctx context.Context, projectID uuid.UUID) ([]*model.WorkflowExecution, error)
 	UpdateExecution(ctx context.Context, id uuid.UUID, status string, currentNodes json.RawMessage, errorMessage string) error
 	UpdateExecutionDataStore(ctx context.Context, id uuid.UUID, dataStore json.RawMessage) error
 	CompleteExecution(ctx context.Context, id uuid.UUID, status string) error
@@ -66,16 +67,24 @@ type DAGWorkflowReviewRepo interface {
 
 // DAGWorkflowService orchestrates workflow DAG execution.
 type DAGWorkflowService struct {
-	defRepo     DAGWorkflowDefinitionRepo
-	execRepo    DAGWorkflowExecutionRepo
-	nodeRepo    DAGWorkflowNodeExecRepo
-	taskRepo    DAGWorkflowTaskRepo
-	mappingRepo DAGWorkflowRunMappingRepo
-	reviewRepo  DAGWorkflowReviewRepo
-	hub         *ws.Hub
-	bus         eventbus.Publisher
-	registry    *nodetypes.NodeTypeRegistry
-	applier     *nodetypes.EffectApplier
+	defRepo       DAGWorkflowDefinitionRepo
+	execRepo      DAGWorkflowExecutionRepo
+	nodeRepo      DAGWorkflowNodeExecRepo
+	taskRepo      DAGWorkflowTaskRepo
+	mappingRepo   DAGWorkflowRunMappingRepo
+	reviewRepo    DAGWorkflowReviewRepo
+	hub           *ws.Hub
+	bus           eventbus.Publisher
+	registry      *nodetypes.NodeTypeRegistry
+	applier       *nodetypes.EffectApplier
+	projectLookup DispatchProjectStatusLookup
+}
+
+// SetProjectStatusLookup wires the project repository used to reject
+// StartExecution on archived projects. Reuses the DispatchProjectStatusLookup
+// type to avoid duplicating the narrow interface.
+func (s *DAGWorkflowService) SetProjectStatusLookup(lookup DispatchProjectStatusLookup) {
+	s.projectLookup = lookup
 }
 
 // NewDAGWorkflowService creates a new DAG workflow execution service.
@@ -121,6 +130,13 @@ func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid
 	}
 	if def.Status != model.WorkflowDefStatusActive {
 		return nil, fmt.Errorf("workflow %s is not active (status: %s)", workflowID, def.Status)
+	}
+	if s.projectLookup != nil {
+		if project, projErr := s.projectLookup.GetByID(ctx, def.ProjectID); projErr == nil && project != nil {
+			if project.Status == model.ProjectStatusArchived {
+				return nil, fmt.Errorf("workflow execution rejected: project is archived")
+			}
+		}
 	}
 
 	var nodes []model.WorkflowNode
@@ -312,6 +328,36 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 	}
 
 	return s.AdvanceExecution(ctx, executionID)
+}
+
+// CancelAllActiveForProject cancels every non-terminal workflow execution in
+// the project. Used by the project lifecycle service as an archive cascade.
+// Best-effort: individual failures are logged; the method returns nil unless
+// the underlying list call itself fails.
+func (s *DAGWorkflowService) CancelAllActiveForProject(ctx context.Context, projectID uuid.UUID, reason string) error {
+	if s.execRepo == nil {
+		return nil
+	}
+	execs, err := s.execRepo.ListActiveByProject(ctx, projectID)
+	if err != nil {
+		return fmt.Errorf("list active workflow executions for cascade cancel: %w", err)
+	}
+	if reason == "" {
+		reason = "project_archived"
+	}
+	for _, exec := range execs {
+		if exec == nil {
+			continue
+		}
+		if err := s.CancelExecution(ctx, exec.ID); err != nil {
+			log.WithError(err).WithFields(log.Fields{
+				"projectId":   projectID.String(),
+				"executionId": exec.ID.String(),
+				"reason":      reason,
+			}).Warn("dag workflow service: cascade cancel for archived project failed (best-effort)")
+		}
+	}
+	return nil
 }
 
 // CancelExecution cancels a running execution.

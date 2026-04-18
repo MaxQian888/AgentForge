@@ -200,6 +200,7 @@ func main() {
 		cfg,
 		authSvc,
 		cacheRepo,
+		userRepo,
 		projectRepo,
 		memberRepo,
 		sprintRepo,
@@ -260,6 +261,12 @@ func main() {
 		scheduler.NewCostReconcileHandler(projectRepo, taskRepo, teamRepo, agentRunRepo),
 	)
 	schedulerSvc.RegisterHandler("scheduler-history-retention", scheduler.NewHistoryRetentionHandler(schedulerSvc))
+	if routeServices != nil && routeServices.Invitation != nil {
+		schedulerSvc.RegisterHandler(
+			"invitation-expire-sweeper",
+			scheduler.NewInvitationExpireSweeperHandler(routeServices.Invitation),
+		)
+	}
 	log.WithFields(log.Fields{
 		"bridgeUrl":         cfg.BridgeURL,
 		"rolesDir":          cfg.RolesDir,
@@ -284,6 +291,12 @@ func main() {
 		defer cancel()
 		if err := e.Shutdown(ctx); err != nil {
 			log.WithError(err).Error("server shutdown error")
+		}
+		// Drain audit sink before closing the DB so in-flight events
+		// either persist or spill cleanly. Bounded by 5s to avoid
+		// stalling shutdown.
+		if routeServices != nil && routeServices.AuditSink != nil {
+			routeServices.AuditSink.Stop(5 * time.Second)
 		}
 		if db != nil {
 			if err := database.ClosePostgres(db); err != nil {

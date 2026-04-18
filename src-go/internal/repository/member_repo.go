@@ -220,3 +220,63 @@ func (r *MemberRepository) GetByUserAndProject(ctx context.Context, userID, proj
 	}
 	return record.toModel(), nil
 }
+
+// CountOwners returns the number of members with project_role='owner' for the
+// given project. Used by last-owner protection to block role downgrades or
+// deletions that would leave the project without an owner.
+func (r *MemberRepository) CountOwners(ctx context.Context, projectID uuid.UUID) (int64, error) {
+	if r.db == nil {
+		return 0, ErrDatabaseUnavailable
+	}
+	var n int64
+	if err := r.db.WithContext(ctx).
+		Model(&memberRecord{}).
+		Where("project_id = ? AND project_role = ?", projectID, model.ProjectRoleOwner).
+		Count(&n).Error; err != nil {
+		return 0, fmt.Errorf("count owners: %w", err)
+	}
+	return n, nil
+}
+
+// HasIMIdentity reports whether the given user has a member row anywhere
+// in the system bound to (platform, imUserID). Used by the invitation
+// accept flow to verify an IM-kind identity match without introducing a
+// dedicated user-IM binding table.
+func (r *MemberRepository) HasIMIdentity(ctx context.Context, userID uuid.UUID, platform, imUserID string) (bool, error) {
+	if r.db == nil {
+		return false, ErrDatabaseUnavailable
+	}
+	if platform == "" || imUserID == "" {
+		return false, nil
+	}
+	var n int64
+	if err := r.db.WithContext(ctx).
+		Model(&memberRecord{}).
+		Where("user_id = ? AND im_platform = ? AND im_user_id = ?", userID, platform, imUserID).
+		Count(&n).Error; err != nil {
+		return false, fmt.Errorf("has im identity: %w", err)
+	}
+	return n > 0, nil
+}
+
+// UpdateProjectRole writes a new project role to a single member row.
+// Validation (last-owner protection, admin-cannot-modify-owner) is the
+// caller's responsibility — this method only persists.
+func (r *MemberRepository) UpdateProjectRole(ctx context.Context, id uuid.UUID, role string) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if !model.IsValidProjectRole(role) {
+		return fmt.Errorf("update project role: invalid role %q", role)
+	}
+	if err := r.db.WithContext(ctx).
+		Model(&memberRecord{}).
+		Where("id = ?", id).
+		Updates(map[string]any{
+			"project_role": role,
+			"updated_at":   time.Now().UTC(),
+		}).Error; err != nil {
+		return fmt.Errorf("update project role: %w", err)
+	}
+	return nil
+}

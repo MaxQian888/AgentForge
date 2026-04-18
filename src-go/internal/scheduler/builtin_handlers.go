@@ -312,6 +312,29 @@ func NewHistoryRetentionHandler(svc HistoryRetentionService) Handler {
 	}
 }
 
+// InvitationExpireSweeper is the narrow contract the scheduler consumes.
+// Implemented by *service.InvitationService.ExpireSweep.
+type InvitationExpireSweeper interface {
+	ExpireSweep(ctx context.Context) (int64, error)
+}
+
+func NewInvitationExpireSweeperHandler(sweeper InvitationExpireSweeper) Handler {
+	return func(ctx context.Context, _ *model.ScheduledJob, _ *model.ScheduledJobRun) (*RunResult, error) {
+		if sweeper == nil {
+			return nil, fmt.Errorf("invitation expire sweeper is required")
+		}
+		expired, err := sweeper.ExpireSweep(ctx)
+		if err != nil {
+			return nil, err
+		}
+		metrics, _ := json.Marshal(map[string]int64{"expired": expired})
+		return &RunResult{
+			Summary: fmt.Sprintf("expired %d pending invitations", expired),
+			Metrics: string(metrics),
+		}, nil
+	}
+}
+
 func sumAgentRunCost(runs []*model.AgentRun) float64 {
 	total := 0.0
 	for _, run := range runs {

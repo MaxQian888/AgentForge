@@ -62,6 +62,20 @@ type DispatchSpawnInput struct {
 	BudgetUSD     float64
 	RoleID        string
 	TriggerSource string
+	// Caller identifies the initiating user. Required for both
+	// human-initiated and system-initiated paths. Service-layer RBAC
+	// will reject any input whose Caller fails Validate().
+	Caller Caller
+}
+
+// DispatchProjectStatusLookup is the narrow contract the dispatch service
+// uses to re-check project lifecycle state at entry. Implemented by
+// *repository.ProjectRepository. Optional — when not wired the dispatch
+// service skips the archived check and relies on the middleware layer
+// alone. Service-level callers (scheduler, automation) should always wire
+// this to keep parity with the HTTP path.
+type DispatchProjectStatusLookup interface {
+	GetByID(ctx context.Context, id uuid.UUID) (*model.Project, error)
 }
 
 type TaskDispatchService struct {
@@ -76,6 +90,7 @@ type TaskDispatchService struct {
 	queueWriter   DispatchQueueWriter
 	budgetChecker DispatchBudgetChecker
 	attempts      DispatchAttemptRecorder
+	projectLookup DispatchProjectStatusLookup
 }
 
 func NewTaskDispatchService(
@@ -118,10 +133,20 @@ func (s *TaskDispatchService) WithRoleStore(store roleReferenceRoleStore) *TaskD
 	return s
 }
 
+// WithProjectStatusLookup wires the project repository used for the archived
+// project check. Bypassing this setter disables the service-level check.
+func (s *TaskDispatchService) WithProjectStatusLookup(lookup DispatchProjectStatusLookup) *TaskDispatchService {
+	s.projectLookup = lookup
+	return s
+}
+
 func (s *TaskDispatchService) Assign(ctx context.Context, taskID uuid.UUID, req *model.AssignRequest) (*model.TaskDispatchResponse, error) {
 	task, err := s.tasks.GetByID(ctx, taskID)
 	if err != nil {
 		return nil, ErrAgentTaskNotFound
+	}
+	if err := s.ensureProjectWritable(ctx, task.ProjectID); err != nil {
+		return nil, err
 	}
 
 	memberID, err := uuid.Parse(req.AssigneeID)
@@ -188,6 +213,9 @@ func (s *TaskDispatchService) Spawn(ctx context.Context, input DispatchSpawnInpu
 	task, err := s.tasks.GetByID(ctx, input.TaskID)
 	if err != nil {
 		return nil, ErrAgentTaskNotFound
+	}
+	if err := s.ensureProjectWritable(ctx, task.ProjectID); err != nil {
+		return nil, err
 	}
 
 	var memberID uuid.UUID
@@ -384,6 +412,45 @@ func resolveDispatchTriggerSource(value string, fallback string) string {
 	}
 	return fallback
 }
+
+// ensureProjectWritable returns a ProjectArchivedError if the project is
+// currently archived. Used by Assign and Spawn at the entry point so
+// service-layer callers (automation, scheduler) hit the same gate as HTTP
+// callers instead of relying on the middleware layer alone. Safe no-op
+// when the project lookup isn't wired.
+func (s *TaskDispatchService) ensureProjectWritable(ctx context.Context, projectID uuid.UUID) error {
+	if s.projectLookup == nil {
+		return nil
+	}
+	project, err := s.projectLookup.GetByID(ctx, projectID)
+	if err != nil {
+		// Missing project surfaces elsewhere; don't mask lookup errors with
+		// archive semantics.
+		return nil
+	}
+	if project != nil && project.Status == model.ProjectStatusArchived {
+		return &projectArchivedDispatchError{projectID: projectID, project: project}
+	}
+	return nil
+}
+
+// projectArchivedDispatchError is the dispatch-layer companion to
+// middleware.ProjectArchivedError. Internal callers can errors.Is against
+// ErrProjectArchivedDispatch to detect it structurally.
+type projectArchivedDispatchError struct {
+	projectID uuid.UUID
+	project   *model.Project
+}
+
+// ErrProjectArchivedDispatch is the sentinel error returned by dispatch
+// entry points when the project is archived.
+var ErrProjectArchivedDispatch = errors.New("dispatch: project is archived")
+
+func (e *projectArchivedDispatchError) Error() string {
+	return ErrProjectArchivedDispatch.Error()
+}
+
+func (e *projectArchivedDispatchError) Unwrap() error { return ErrProjectArchivedDispatch }
 
 func (s *TaskDispatchService) blockedResult(ctx context.Context, task *model.Task, reason string) *model.TaskDispatchResponse {
 	guardrailType, guardrailScope := inferDispatchGuardrail(reason)

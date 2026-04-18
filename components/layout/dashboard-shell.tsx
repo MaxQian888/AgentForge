@@ -21,6 +21,8 @@ import {
   type Notification,
 } from "@/lib/stores/notification-store";
 import { useWSStore } from "@/lib/stores/ws-store";
+import { useProjectStore } from "@/lib/stores/project-store";
+import { ArchivedProjectBanner } from "@/components/project/archived-project-banner";
 
 function resolveNotificationDeliveryPolicy(
   notification: Notification
@@ -65,6 +67,7 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
   const deliveryLedgerRef = useRef<
     Map<string, "delivered" | "failed" | "suppressed">
   >(new Map());
+  const currentProject = useProjectStore((s) => s.currentProject);
 
   const handleDesktopShellAction = useEffectEvent(
     (event: DesktopRuntimeEvent) => {
@@ -251,6 +254,11 @@ export function DashboardShell({ children }: { children: React.ReactNode }) {
             ) && "p-6",
           )}
         >
+          {currentProject?.status === "archived" ? (
+            <div className="mb-4">
+              <ArchivedProjectBanner project={currentProject} />
+            </div>
+          ) : null}
           {children}
         </div>
       </SidebarInset>

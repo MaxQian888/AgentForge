@@ -73,6 +73,15 @@ func BuiltInCatalog(cfg CatalogConfig) []CatalogEntry {
 			ExecutionMode: executionMode,
 			OverlapPolicy: model.ScheduledJobOverlapSkip,
 		},
+		{
+			JobKey:        "invitation-expire-sweeper",
+			Name:          "Invitation expire sweeper",
+			Scope:         model.ScheduledJobScopeSystem,
+			Schedule:      "*/15 * * * *",
+			Enabled:       true,
+			ExecutionMode: executionMode,
+			OverlapPolicy: model.ScheduledJobOverlapSkip,
+		},
 	}
 }
 

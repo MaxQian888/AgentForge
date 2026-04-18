@@ -15,7 +15,7 @@ import (
 )
 
 type MemberHandler struct {
-	repo memberRepository
+	repo      memberRepository
 	roleStore memberRoleStore
 }
 
@@ -26,6 +26,8 @@ type memberRepository interface {
 	BulkUpdateStatus(ctx context.Context, projectID uuid.UUID, memberIDs []uuid.UUID, status string) ([]model.BulkUpdateMemberResult, error)
 	GetByID(ctx context.Context, id uuid.UUID) (*model.Member, error)
 	Delete(ctx context.Context, id uuid.UUID) error
+	CountOwners(ctx context.Context, projectID uuid.UUID) (int64, error)
+	UpdateProjectRole(ctx context.Context, id uuid.UUID, role string) error
 }
 
 type memberRoleStore interface {
@@ -49,18 +51,37 @@ func (h *MemberHandler) Create(c echo.Context) error {
 	if err := c.Validate(req); err != nil {
 		return c.JSON(http.StatusUnprocessableEntity, model.ErrorResponse{Message: err.Error()})
 	}
+	// Human members must be onboarded via the invitation flow. The
+	// create-member endpoint is retained for agent creation only — see
+	// openspec/specs/member-invitation-flow/spec.md.
+	if req.Type != model.MemberTypeAgent {
+		return localizedError(c, http.StatusGone, i18n.MsgHumanMemberCreationMoved)
+	}
 	if validationErr := h.validateAgentRoleBinding(c.Request().Context(), req.Type, req.AgentConfig); validationErr != nil {
 		return c.JSON(http.StatusUnprocessableEntity, validationErr)
 	}
 
 	projectID := appMiddleware.GetProjectID(c)
 	status := model.NormalizeMemberStatus(req.Status, true)
+	projectRole := model.NormalizeProjectRole(req.ProjectRole)
+
+	var userID *uuid.UUID
+	if req.UserID != "" {
+		parsed, err := uuid.Parse(req.UserID)
+		if err != nil {
+			return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
+		}
+		userID = &parsed
+	}
+
 	member := &model.Member{
 		ID:          uuid.New(),
 		ProjectID:   projectID,
+		UserID:      userID,
 		Name:        req.Name,
 		Type:        req.Type,
 		Role:        req.Role,
+		ProjectRole: projectRole,
 		Status:      status,
 		Email:       req.Email,
 		IMPlatform:  req.IMPlatform,
@@ -81,8 +102,12 @@ func (h *MemberHandler) List(c echo.Context) error {
 	if err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToListMembers)
 	}
+	roleFilter := c.QueryParam("role")
 	dtos := make([]model.MemberDTO, 0, len(members))
 	for _, m := range members {
+		if roleFilter != "" && model.NormalizeProjectRole(m.ProjectRole) != roleFilter {
+			continue
+		}
 		dtos = append(dtos, m.ToDTO())
 	}
 	return c.JSON(http.StatusOK, dtos)
@@ -111,6 +136,46 @@ func (h *MemberHandler) Update(c echo.Context) error {
 		status := model.NormalizeMemberStatus("", *req.IsActive)
 		req.Status = &status
 	}
+
+	// Project-role transition guards. These run before any persistence so a
+	// rejected role change does not partially apply other field updates.
+	if req.ProjectRole != nil {
+		target, err := h.repo.GetByID(c.Request().Context(), id)
+		if err != nil {
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToFetchUpdatedMember)
+		}
+		newRole := model.NormalizeProjectRole(*req.ProjectRole)
+		oldRole := model.NormalizeProjectRole(target.ProjectRole)
+
+		// Admin cannot modify owners (only owner→owner-or-promote chain may).
+		callerRole := appMiddleware.GetCallerProjectRole(c)
+		if callerRole == model.ProjectRoleAdmin && oldRole == model.ProjectRoleOwner && newRole != oldRole {
+			return c.JSON(http.StatusForbidden, model.ErrorResponse{
+				Message: i18nForbidden(c, i18n.MsgCannotModifyOwnerAsAdmin),
+			})
+		}
+
+		// Last-owner protection: block downgrade of the only remaining owner.
+		if oldRole == model.ProjectRoleOwner && newRole != model.ProjectRoleOwner {
+			count, err := h.repo.CountOwners(c.Request().Context(), target.ProjectID)
+			if err != nil {
+				return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateMember)
+			}
+			if count <= 1 {
+				return c.JSON(http.StatusConflict, model.ErrorResponse{
+					Message: i18nForbidden(c, i18n.MsgLastOwnerProtected),
+				})
+			}
+		}
+
+		if err := h.repo.UpdateProjectRole(c.Request().Context(), id, newRole); err != nil {
+			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateMember)
+		}
+		// Strip from req so the generic Update below does not also try to
+		// touch the column with a stale value.
+		req.ProjectRole = nil
+	}
+
 	if err := h.repo.Update(c.Request().Context(), id, req); err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateMember)
 	}
@@ -155,6 +220,33 @@ func (h *MemberHandler) Delete(c echo.Context) error {
 	if err != nil {
 		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidMemberID)
 	}
+
+	target, err := h.repo.GetByID(c.Request().Context(), id)
+	if err != nil {
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteMember)
+	}
+	if target != nil {
+		// Admin cannot delete owners — same boundary as role-change.
+		callerRole := appMiddleware.GetCallerProjectRole(c)
+		if callerRole == model.ProjectRoleAdmin && model.NormalizeProjectRole(target.ProjectRole) == model.ProjectRoleOwner {
+			return c.JSON(http.StatusForbidden, model.ErrorResponse{
+				Message: i18nForbidden(c, i18n.MsgCannotModifyOwnerAsAdmin),
+			})
+		}
+		// Last-owner protection: block deleting the only remaining owner.
+		if model.NormalizeProjectRole(target.ProjectRole) == model.ProjectRoleOwner {
+			count, err := h.repo.CountOwners(c.Request().Context(), target.ProjectID)
+			if err != nil {
+				return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteMember)
+			}
+			if count <= 1 {
+				return c.JSON(http.StatusConflict, model.ErrorResponse{
+					Message: i18nForbidden(c, i18n.MsgLastOwnerProtected),
+				})
+			}
+		}
+	}
+
 	if err := h.repo.Delete(c.Request().Context(), id); err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToDeleteMember)
 	}
@@ -182,4 +274,10 @@ func (h *MemberHandler) validateAgentRoleBinding(ctx context.Context, memberType
 		}
 	}
 	return &model.ErrorResponse{Message: err.Error()}
+}
+
+// i18nForbidden returns the localized message string for a 403/409 response.
+func i18nForbidden(c echo.Context, messageID string) string {
+	loc := appMiddleware.GetLocalizer(c)
+	return i18n.Localize(loc, messageID)
 }

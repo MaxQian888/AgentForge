@@ -112,6 +112,8 @@ export interface Project {
   name: string;
   description: string;
   status: string;
+  archivedAt?: string;
+  archivedByUserId?: string;
   taskCount: number;
   agentCount: number;
   createdAt: string;
@@ -134,11 +136,22 @@ interface ProjectState {
   projects: Project[];
   currentProject: Project | null;
   loading: boolean;
-  fetchProjects: () => Promise<void>;
+  includeArchived: boolean;
+  fetchProjects: (opts?: { includeArchived?: boolean }) => Promise<void>;
+  setIncludeArchived: (value: boolean) => void;
   setCurrentProject: (id: string) => void;
-  createProject: (data: { name: string; description: string }) => Promise<Project | undefined>;
+  createProject: (
+    data: {
+      name: string;
+      description: string;
+      templateSource?: "system" | "user" | "marketplace";
+      templateId?: string;
+    },
+  ) => Promise<Project | undefined>;
   updateProject: (id: string, data: ProjectUpdateInput) => Promise<Project | undefined>;
   deleteProject: (id: string) => Promise<void>;
+  archiveProject: (id: string) => Promise<Project | undefined>;
+  unarchiveProject: (id: string) => Promise<Project | undefined>;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -411,6 +424,9 @@ function normalizeProject(raw: Record<string, unknown>): Project {
     name: String(raw.name ?? ""),
     description: String(raw.description ?? ""),
     status: String(raw.status ?? "active"),
+    archivedAt: typeof raw.archivedAt === "string" ? raw.archivedAt : undefined,
+    archivedByUserId:
+      typeof raw.archivedByUserId === "string" ? raw.archivedByUserId : undefined,
     taskCount: Number(raw.taskCount ?? 0),
     agentCount: Number(raw.agentCount ?? 0),
     createdAt:
@@ -427,14 +443,19 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
   projects: [],
   currentProject: null,
   loading: false,
+  includeArchived: false,
 
-  fetchProjects: async () => {
+  fetchProjects: async (opts) => {
     const token = useAuthStore.getState().accessToken;
     if (!token) return;
-    set({ loading: true });
+    const includeArchived = opts?.includeArchived ?? get().includeArchived;
+    set({ loading: true, includeArchived });
     try {
       const api = createApiClient(API_URL);
-      const { data } = await api.get<Record<string, unknown>[]>("/api/v1/projects", {
+      const path = includeArchived
+        ? "/api/v1/projects?includeArchived=true"
+        : "/api/v1/projects";
+      const { data } = await api.get<Record<string, unknown>[]>(path, {
         token,
       });
       const projects = data.map(normalizeProject);
@@ -448,6 +469,10 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
     } finally {
       set({ loading: false });
     }
+  },
+
+  setIncludeArchived: (value) => {
+    set({ includeArchived: value });
   },
 
   setCurrentProject: (id) => {
@@ -515,6 +540,54 @@ export const useProjectStore = create<ProjectState>()((set, get) => ({
       }));
     } catch (error) {
       toast.error("Failed to delete project", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
+    }
+  },
+
+  archiveProject: async (id) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<Record<string, unknown>>(
+        `/api/v1/projects/${id}/archive`,
+        {},
+        { token },
+      );
+      const updated = normalizeProject(data);
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === id ? updated : p)),
+        currentProject: s.currentProject?.id === id ? updated : s.currentProject,
+      }));
+      return updated;
+    } catch (error) {
+      toast.error("Failed to archive project", {
+        description: error instanceof Error ? error.message : "Unknown error",
+      });
+      throw error;
+    }
+  },
+
+  unarchiveProject: async (id) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+    try {
+      const api = createApiClient(API_URL);
+      const { data } = await api.post<Record<string, unknown>>(
+        `/api/v1/projects/${id}/unarchive`,
+        {},
+        { token },
+      );
+      const updated = normalizeProject(data);
+      set((s) => ({
+        projects: s.projects.map((p) => (p.id === id ? updated : p)),
+        currentProject: s.currentProject?.id === id ? updated : s.currentProject,
+      }));
+      return updated;
+    } catch (error) {
+      toast.error("Failed to unarchive project", {
         description: error instanceof Error ? error.message : "Unknown error",
       });
       throw error;

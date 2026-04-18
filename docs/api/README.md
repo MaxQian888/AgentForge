@@ -44,6 +44,21 @@
 - Postman import
 - API Gateway / MCP / integration tooling
 
+## Topical guides
+
+Long-form guides covering cross-cutting concerns:
+
+- [`rbac.md`](./rbac.md) — Project access control, action→role matrix,
+  permissions endpoint, last-owner protection, error codes.
+- [`audit.md`](./audit.md) — Project audit log: storage, query API,
+  emission model, sink degradation signals, redaction denylist.
+- [`project-templates.md`](./project-templates.md) — Project configuration
+  snapshots: storage, `POST /projects` clone params, save-as-template
+  endpoint, marketplace install seam, author guide.
+- [`invitations.md`](./invitations.md) — Member invitation flow: state
+  machine, endpoints, token semantics, identity matching, delivery
+  fallback, error codes.
+
 ## Source of Truth / 真相源
 
 如果代码和文档出现差异，以当前 Go 路由注册与 DTO 为准：

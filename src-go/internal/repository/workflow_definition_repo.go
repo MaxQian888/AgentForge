@@ -367,6 +367,32 @@ func (r *WorkflowExecutionRepository) ListExecutions(ctx context.Context, workfl
 	return result, nil
 }
 
+// ListActiveByProject returns every non-terminal workflow execution for the
+// given project. Used by the project lifecycle service to cascade-cancel
+// executions on archive.
+func (r *WorkflowExecutionRepository) ListActiveByProject(ctx context.Context, projectID uuid.UUID) ([]*model.WorkflowExecution, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	activeStatuses := []string{
+		model.WorkflowExecStatusPending,
+		model.WorkflowExecStatusRunning,
+		model.WorkflowExecStatusPaused,
+	}
+	var records []workflowExecutionRecord
+	if err := r.db.WithContext(ctx).
+		Where("project_id = ? AND status IN ?", projectID, activeStatuses).
+		Order("created_at DESC").
+		Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list active workflow executions by project: %w", err)
+	}
+	result := make([]*model.WorkflowExecution, len(records))
+	for i := range records {
+		result[i] = records[i].toModel()
+	}
+	return result, nil
+}
+
 func (r *WorkflowExecutionRepository) UpdateExecution(ctx context.Context, id uuid.UUID, status string, currentNodes json.RawMessage, errorMessage string) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable

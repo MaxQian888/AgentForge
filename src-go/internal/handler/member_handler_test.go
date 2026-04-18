@@ -138,6 +138,26 @@ func (f *fakeMemberRepo) Delete(context.Context, uuid.UUID) error {
 	return nil
 }
 
+func (f *fakeMemberRepo) CountOwners(_ context.Context, projectID uuid.UUID) (int64, error) {
+	var n int64
+	for _, member := range f.members {
+		if member != nil && member.ProjectID == projectID && member.ProjectRole == model.ProjectRoleOwner {
+			n++
+		}
+	}
+	return n, nil
+}
+
+func (f *fakeMemberRepo) UpdateProjectRole(_ context.Context, id uuid.UUID, role string) error {
+	for _, member := range f.members {
+		if member != nil && member.ID == id {
+			member.ProjectRole = role
+			return nil
+		}
+	}
+	return nil
+}
+
 func TestMemberHandlerListIncludesAgentConfig(t *testing.T) {
 	projectID := uuid.New()
 	memberID := uuid.New()
@@ -530,4 +550,59 @@ func asString(value any) string {
 		return text
 	}
 	return ""
+}
+
+// TestMemberHandlerCreateRejectsHumanType asserts that the direct member
+// create endpoint refuses to land a human member. Humans are now onboarded
+// via the invitation flow — the endpoint only accepts agents.
+func TestMemberHandlerCreateRejectsHumanType(t *testing.T) {
+	projectID := uuid.New()
+	repo := &fakeMemberRepo{}
+	e := echo.New()
+	e.Validator = validatorStub{}
+
+	body := `{"name":"Alice","type":"human","email":"alice@example.com"}`
+	req := httptest.NewRequest(http.MethodPost, "/members", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.Set(appMiddleware.ProjectIDContextKey, projectID)
+
+	h := handler.NewMemberHandler(repo)
+	if err := h.Create(ctx); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if rec.Code != http.StatusGone {
+		t.Fatalf("status = %d, want 410 Gone", rec.Code)
+	}
+	if len(repo.createdMembers) != 0 {
+		t.Fatalf("created members = %d, want 0", len(repo.createdMembers))
+	}
+}
+
+// TestMemberHandlerCreateAcceptsAgentType verifies the agent creation path
+// is still valid after the human restriction is in place.
+func TestMemberHandlerCreateAcceptsAgentType(t *testing.T) {
+	projectID := uuid.New()
+	repo := &fakeMemberRepo{}
+	e := echo.New()
+	e.Validator = validatorStub{}
+
+	body := `{"name":"Ops Agent","type":"agent","role":"operator","agentConfig":"{}"}`
+	req := httptest.NewRequest(http.MethodPost, "/members", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	ctx := e.NewContext(req, rec)
+	ctx.Set(appMiddleware.ProjectIDContextKey, projectID)
+
+	h := handler.NewMemberHandler(repo)
+	if err := h.Create(ctx); err != nil {
+		t.Fatalf("Create() error = %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want 201 Created", rec.Code)
+	}
+	if len(repo.createdMembers) != 1 {
+		t.Fatalf("created members = %d, want 1", len(repo.createdMembers))
+	}
 }

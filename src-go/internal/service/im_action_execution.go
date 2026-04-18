@@ -191,7 +191,15 @@ func (e *BackendIMActionExecutor) executeAssignAgent(ctx context.Context, req *m
 		}
 		result, err = e.dispatcher.Assign(ctx, taskID, assignReq)
 	} else {
-		result, err = e.dispatcher.Spawn(ctx, DispatchSpawnInput{TaskID: taskID, TriggerSource: "im"})
+		// IM-driven dispatch is system-initiated. The configured-by user
+		// identity is not yet plumbed through the IM pipeline; this
+		// follow-up is tracked alongside automation snapshot validation
+		// (see RBAC change Decision 3).
+		result, err = e.dispatcher.Spawn(ctx, DispatchSpawnInput{
+			TaskID:        taskID,
+			TriggerSource: "im",
+			Caller:        Caller{SystemInitiated: true},
+		})
 	}
 	if err != nil {
 		return newIMActionResponse(req, model.IMActionStatusFailed, fmt.Sprintf("Agent dispatch failed: %s", err.Error()), false)

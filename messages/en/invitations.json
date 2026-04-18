@@ -1,0 +1,63 @@
+{
+  "title": "Team Invitations",
+  "pendingTitle": "Pending Invitations",
+  "noPending": "No pending invitations.",
+  "dialog": {
+    "title": "Invite Team Member",
+    "description": "Send an invitation by email or IM identity. The invitee joins once they accept.",
+    "identityType": "Identity Type",
+    "identityEmail": "Email",
+    "identityIM": "IM (platform + user ID)",
+    "emailLabel": "Email",
+    "emailPlaceholder": "member@example.com",
+    "imPlatformLabel": "IM Platform",
+    "imPlatformPlaceholder": "feishu / lark / dingtalk",
+    "imUserIdLabel": "IM User ID",
+    "imDisplayNameLabel": "Display Name",
+    "roleLabel": "Project Role",
+    "messageLabel": "Message (optional)",
+    "sending": "Sending...",
+    "send": "Send Invitation",
+    "cancel": "Cancel",
+    "close": "Close",
+    "sendAnother": "Send another",
+    "createdHeading": "Invitation created. Share this link with the invitee if automatic delivery doesn't reach them:",
+    "errorEmailRequired": "Email is required",
+    "errorIMRequired": "IM platform and user ID are required"
+  },
+  "roster": {
+    "invitedIdentity": "Invited Identity",
+    "role": "Role",
+    "expires": "Expires",
+    "delivery": "Delivery",
+    "actions": "Actions",
+    "resend": "Resend",
+    "revoke": "Revoke"
+  },
+  "accept": {
+    "title": "Project Invitation",
+    "description": "Review the invitation details below and choose whether to accept or decline.",
+    "loading": "Loading invitation...",
+    "project": "Project",
+    "role": "Role",
+    "invitedBy": "Invited by",
+    "expires": "Expires",
+    "forIdentity": "For identity",
+    "notPending": "This invitation is {status} and cannot be actioned.",
+    "accept": "Accept",
+    "decline": "Decline",
+    "accepting": "Accepting...",
+    "declining": "Declining...",
+    "signInToAccept": "Sign in to accept",
+    "accepted": "Invitation accepted. You are now a member of the project.",
+    "declined": "Invitation declined.",
+    "goToDashboard": "Go to dashboard",
+    "close": "Close"
+  },
+  "decline": {
+    "title": "Decline Invitation",
+    "working": "Working...",
+    "done": "The invitation has been declined.",
+    "missingToken": "Missing invitation token"
+  }
+}

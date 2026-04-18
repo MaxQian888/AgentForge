@@ -49,6 +49,7 @@ func registerTestRoutesWithAgentService(e *echo.Echo, cfg *config.Config, authSv
 
 func registerTestRoutesWithDependencies(e *echo.Echo, cfg *config.Config, authSvc *service.AuthService, cache *repository.CacheRepository, pluginSvc *service.PluginService, agentSvc *service.AgentService) {
 	server.RegisterRoutes(e, cfg, authSvc, cache,
+		repository.NewUserRepository(nil),
 		repository.NewProjectRepository(nil),
 		repository.NewMemberRepository(nil),
 		repository.NewSprintRepository(nil),

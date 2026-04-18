@@ -19,6 +19,9 @@ import workflow from "./workflow.json";
 import forms from "./forms.json";
 import logs from "./logs.json";
 import documents from "./documents.json";
+import audit from "./audit.json";
+import projectTemplates from "./project-templates.json";
+import invitations from "./invitations.json";
 import { normalizeMessageBundle } from "../normalize";
 
 export default normalizeMessageBundle({
@@ -43,4 +46,7 @@ export default normalizeMessageBundle({
   forms,
   logs,
   documents,
+  audit,
+  projectTemplates,
+  invitations,
 });

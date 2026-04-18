@@ -1,0 +1,47 @@
+{
+  "source": {
+    "system": "系统模板",
+    "user": "我的模板",
+    "marketplace": "来自市场"
+  },
+  "newProject": {
+    "title": "创建新项目",
+    "description": "从空白开始，或基于某个项目模板快速克隆。",
+    "startFrom": "起始方式",
+    "blank": "空白项目",
+    "fromTemplate": "使用模板",
+    "selectTemplate": "选择一个模板",
+    "loading": "加载模板中…",
+    "noTemplates": "尚无可用模板。你可以在某个项目设置里把现有项目保存为模板。",
+    "cancel": "取消",
+    "create": "创建项目",
+    "creating": "创建中…"
+  },
+  "saveAs": {
+    "title": "将项目保存为模板",
+    "description": "会快照当前项目的设置、自定义字段、保存视图、看板、自动化规则、工作流定义、任务状态与角色占位。业务数据（任务、Wiki、评论、Run）不会被复制。",
+    "nameLabel": "模板名称",
+    "descriptionLabel": "描述",
+    "descriptionPlaceholder": "可选：这个模板适合什么场景？",
+    "cancel": "取消",
+    "save": "保存为模板",
+    "saving": "保存中…"
+  },
+  "page": {
+    "title": "项目模板",
+    "description": "你保存或安装的可复用项目配置快照。",
+    "loading": "加载模板中…",
+    "empty": {
+      "user": "你还没有把任何项目保存为模板。",
+      "system": "当前环境没有系统模板。",
+      "marketplace": "尚未从市场安装任何模板。"
+    },
+    "edit": "编辑",
+    "delete": "删除",
+    "editTitle": "编辑模板",
+    "editDescription": "重命名或更新描述。底层快照内容不会被修改。",
+    "deleteTitle": "删除模板",
+    "deleteDescription": "这只会从你的模板库中删除。已基于此模板创建的项目不会受影响。",
+    "versionLabel": "快照版本: {version}"
+  }
+}

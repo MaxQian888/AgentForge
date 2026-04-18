@@ -43,6 +43,7 @@ import type {
 } from "@/lib/stores/member-store";
 import type { RoleManifest } from "@/lib/stores/role-store";
 import type { AgentProfileDraft } from "@/lib/team/agent-profile";
+import { useProjectRole } from "@/hooks/use-project-role";
 import { getMemberStatusLabel, type MemberStatus } from "@/lib/team/member-status";
 import { cn } from "@/lib/utils";
 
@@ -334,6 +335,16 @@ export function TeamManagement({
   onBulkUpdateMembers,
   onClearBulkUpdateResult,
 }: TeamManagementProps) {
+  // Server-issued permissions for the active project. The hook returns
+  // `false` for any action while permissions load — buttons stay disabled
+  // rather than rendering optimistically. When no project is selected the
+  // hook short-circuits and `can()` always returns false.
+  const projectRole = useProjectRole(selectedProjectId ?? null);
+  const canCreateMember = projectRole.can("member.create");
+  const canUpdateMember = projectRole.can("member.update");
+  const canDeleteMember = projectRole.can("member.delete");
+  const canBulkUpdate = projectRole.can("member.bulk.update");
+
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [createForm, setCreateForm] = useState<MemberFormState>(() =>
     buildInitialCreateForm(),
@@ -691,8 +702,9 @@ export function TeamManagement({
           </div>
           <Button
             type="button"
-            disabled={!selectedProjectId}
+            disabled={!selectedProjectId || !canCreateMember}
             onClick={() => setShowCreateForm((value) => !value)}
+            title={!canCreateMember ? "Requires admin or owner role" : undefined}
           >
             <Plus className="mr-1 size-4" />
             Add Member
@@ -925,7 +937,7 @@ export function TeamManagement({
           <CardHeader className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
             <div className="flex flex-col gap-2">
               <CardTitle>Unified Roster</CardTitle>
-              {selectedMemberIds.length > 0 && onBulkUpdateMembers ? (
+              {selectedMemberIds.length > 0 && onBulkUpdateMembers && canBulkUpdate ? (
                 <div className="flex flex-wrap items-center gap-2">
                   <Badge variant="outline">{selectedMemberIds.length} selected</Badge>
                   <Button
@@ -1188,13 +1200,15 @@ export function TeamManagement({
                           size="sm"
                           variant="outline"
                           aria-label={`Edit ${member.name}`}
+                          disabled={!canUpdateMember}
+                          title={!canUpdateMember ? "Requires admin or owner role" : undefined}
                           onClick={() => {
                             openMemberEditor(member);
                           }}
                         >
                           Edit
                         </Button>
-                        {onDeleteMember && (
+                        {onDeleteMember && canDeleteMember && (
                           <Button
                             type="button"
                             size="sm"

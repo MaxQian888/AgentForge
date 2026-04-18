@@ -3,7 +3,14 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useTranslations } from "next-intl";
-import { FolderKanban, GitBranch, Pencil, Trash2 } from "lucide-react";
+import {
+  Archive,
+  ArchiveRestore,
+  FolderKanban,
+  GitBranch,
+  Pencil,
+  Trash2,
+} from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -21,16 +28,34 @@ interface ProjectCardProps {
   project: Project;
   onEdit: (project: Project) => void;
   onDelete: (id: string) => void;
+  onArchive?: (id: string) => void;
+  onUnarchive?: (id: string) => void;
 }
 
-export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
+export function ProjectCard({
+  project,
+  onEdit,
+  onDelete,
+  onArchive,
+  onUnarchive,
+}: ProjectCardProps) {
   const t = useTranslations("projects");
   const [confirmDelete, setConfirmDelete] = useState(false);
+  const [confirmArchive, setConfirmArchive] = useState(false);
+  const [archiveConfirmName, setArchiveConfirmName] = useState("");
+  const [confirmUnarchive, setConfirmUnarchive] = useState(false);
+  const isArchived = project.status === "archived";
 
   return (
     <>
       <Link href={buildProjectScopedHref("/", { projectId: project.id })}>
-        <Card className="transition-shadow hover:shadow-md">
+        <Card
+          className={
+            isArchived
+              ? "opacity-70 transition-shadow hover:shadow-md"
+              : "transition-shadow hover:shadow-md"
+          }
+        >
           <CardContent className="flex flex-col gap-3 py-4">
             {/* Header: icon + name + status + actions */}
             <div className="flex items-center justify-between gap-2">
@@ -47,18 +72,51 @@ export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
                 >
                   {t(`status.${project.status}` as Parameters<typeof t>[0])}
                 </Badge>
-                <Button
-                  variant="ghost"
-                  size="icon"
-                  className="size-7"
-                  onClick={(e) => {
-                    e.preventDefault();
-                    e.stopPropagation();
-                    onEdit(project);
-                  }}
-                >
-                  <Pencil className="size-3.5" />
-                </Button>
+                {!isArchived && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7"
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      onEdit(project);
+                    }}
+                  >
+                    <Pencil className="size-3.5" />
+                  </Button>
+                )}
+                {!isArchived && onArchive && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7"
+                    title={t("archive.action")}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setArchiveConfirmName("");
+                      setConfirmArchive(true);
+                    }}
+                  >
+                    <Archive className="size-3.5" />
+                  </Button>
+                )}
+                {isArchived && onUnarchive && (
+                  <Button
+                    variant="ghost"
+                    size="icon"
+                    className="size-7"
+                    title={t("unarchive.action")}
+                    onClick={(e) => {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      setConfirmUnarchive(true);
+                    }}
+                  >
+                    <ArchiveRestore className="size-3.5" />
+                  </Button>
+                )}
                 <Button
                   variant="ghost"
                   size="icon"
@@ -93,11 +151,19 @@ export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
             </div>
 
             {/* Footer */}
-            <p className="text-xs text-muted-foreground">
-              {t("card.created", {
-                date: new Date(project.createdAt).toLocaleDateString(),
-              })}
-            </p>
+            {isArchived && project.archivedAt ? (
+              <p className="text-xs text-muted-foreground">
+                {t("card.archivedOn", {
+                  date: new Date(project.archivedAt).toLocaleDateString(),
+                })}
+              </p>
+            ) : (
+              <p className="text-xs text-muted-foreground">
+                {t("card.created", {
+                  date: new Date(project.createdAt).toLocaleDateString(),
+                })}
+              </p>
+            )}
           </CardContent>
         </Card>
       </Link>
@@ -113,6 +179,43 @@ export function ProjectCard({ project, onEdit, onDelete }: ProjectCardProps) {
           onDelete(project.id);
         }}
         onCancel={() => setConfirmDelete(false)}
+      />
+
+      <ConfirmDialog
+        open={confirmArchive}
+        title={t("archive.title")}
+        description={t("archive.description", { name: project.name })}
+        confirmLabel={t("archive.confirm")}
+        confirmDisabled={archiveConfirmName !== project.name}
+        onConfirm={() => {
+          setConfirmArchive(false);
+          onArchive?.(project.id);
+        }}
+        onCancel={() => setConfirmArchive(false)}
+      >
+        <div className="flex flex-col gap-1">
+          <label className="text-xs text-muted-foreground">
+            {t("archive.typeNameHint")}
+          </label>
+          <input
+            className="h-9 rounded-md border bg-background px-3 text-sm"
+            value={archiveConfirmName}
+            onChange={(e) => setArchiveConfirmName(e.target.value)}
+            placeholder={project.name}
+          />
+        </div>
+      </ConfirmDialog>
+
+      <ConfirmDialog
+        open={confirmUnarchive}
+        title={t("unarchive.title")}
+        description={t("unarchive.description", { name: project.name })}
+        confirmLabel={t("unarchive.confirm")}
+        onConfirm={() => {
+          setConfirmUnarchive(false);
+          onUnarchive?.(project.id);
+        }}
+        onCancel={() => setConfirmUnarchive(false)}
       />
     </>
   );

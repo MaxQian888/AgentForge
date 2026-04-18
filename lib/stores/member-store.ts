@@ -3,9 +3,11 @@
 import { create } from "zustand";
 import { createApiClient } from "@/lib/api-client";
 import { useAuthStore } from "./auth-store";
+import { useProjectPermissionsStore } from "./project-permissions-store";
 import {
   normalizeTeamMember,
   type DashboardMemberSource,
+  type ProjectRole,
   type TeamMember,
 } from "@/lib/dashboard/summary";
 import {
@@ -20,6 +22,8 @@ export interface CreateMemberInput {
   name: string;
   type: "human" | "agent";
   role?: string;
+  projectRole?: ProjectRole;
+  userId?: string;
   status?: MemberStatus;
   email?: string;
   imPlatform?: string;
@@ -32,6 +36,7 @@ export interface CreateMemberInput {
 export interface UpdateMemberInput {
   name?: string;
   role?: string;
+  projectRole?: ProjectRole;
   status?: MemberStatus;
   email?: string;
   imPlatform?: string;
@@ -149,6 +154,8 @@ export const useMemberStore = create<MemberState>()((set) => ({
         name: input.name,
         type: input.type,
         role: input.role ?? "",
+        projectRole: input.projectRole,
+        userId: input.userId,
         status: input.status ?? "active",
         email: input.email ?? "",
         imPlatform: input.imPlatform ?? "",
@@ -166,6 +173,10 @@ export const useMemberStore = create<MemberState>()((set) => ({
         [projectId]: [...(state.membersByProject[projectId] ?? []), member],
       },
     }));
+    // A new member can change the caller's effective gating
+    // (e.g., they were just promoted). Drop the cached permissions so the
+    // next read forces a fresh fetch.
+    useProjectPermissionsStore.getState().invalidate(projectId);
     return member;
   },
 
@@ -200,6 +211,7 @@ export const useMemberStore = create<MemberState>()((set) => ({
       {
         name: input.name,
         role: input.role,
+        projectRole: input.projectRole,
         status: input.status,
         email: input.email,
         imPlatform: input.imPlatform,
@@ -220,6 +232,10 @@ export const useMemberStore = create<MemberState>()((set) => ({
         ),
       },
     }));
+    // Role change can shift the caller's gating; drop cached permissions.
+    if (input.projectRole !== undefined) {
+      useProjectPermissionsStore.getState().invalidate(projectId);
+    }
     return member;
   },
 

@@ -60,9 +60,11 @@ export interface DashboardAgentSource {
 export interface DashboardMemberSource {
   id: string;
   projectId: string;
+  userId?: string;
   name: string;
   type: DashboardMemberType;
   role: string;
+  projectRole?: ProjectRole;
   status?: MemberStatus;
   email: string;
   imPlatform?: string;
@@ -72,6 +74,18 @@ export interface DashboardMemberSource {
   skills: string[];
   isActive: boolean;
   createdAt: string;
+}
+
+export type ProjectRole = "owner" | "admin" | "editor" | "viewer";
+
+export const PROJECT_ROLES: ProjectRole[] = ["owner", "admin", "editor", "viewer"];
+
+export function isValidProjectRole(value: unknown): value is ProjectRole {
+  return typeof value === "string" && (PROJECT_ROLES as string[]).includes(value);
+}
+
+export function normalizeProjectRole(value: unknown): ProjectRole {
+  return isValidProjectRole(value) ? value : "editor";
 }
 
 export interface DashboardActivitySource {
@@ -93,10 +107,17 @@ export interface TeamMemberWorkload {
 export interface TeamMember {
   id: string;
   projectId: string;
+  userId?: string;
   name: string;
   type: DashboardMemberType;
   typeLabel: "Human" | "Agent";
   role: string;
+  /**
+   * Project-scoped human role. Always present for members hydrated via
+   * `normalizeTeamMember`; optional on the type so legacy fixtures and
+   * synthesized members (e.g. unit-test stubs) compile without ceremony.
+   */
+  projectRole?: ProjectRole;
   statusLabel?: string;
   email: string;
   imPlatform?: string;
@@ -274,10 +295,12 @@ export function normalizeTeamMember(member: DashboardMemberSource): TeamMember {
   return {
     id: member.id,
     projectId: member.projectId,
+    userId: member.userId,
     name: member.name,
     type: member.type,
     typeLabel: member.type === "human" ? "Human" : "Agent",
     role: member.role || (member.type === "human" ? "Contributor" : "Agent"),
+    projectRole: normalizeProjectRole(member.projectRole),
     statusLabel: getMemberStatusLabel(status),
     email: member.email,
     imPlatform: member.imPlatform ?? "",

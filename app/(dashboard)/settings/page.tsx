@@ -33,6 +33,7 @@ import { SectionCustomFields } from "./_components/section-custom-fields";
 import { SectionForms } from "./_components/section-forms";
 import { SectionAutomations } from "./_components/section-automations";
 import { SectionAdvanced } from "./_components/section-advanced";
+import { SectionAuditLog } from "./_components/section-audit-log";
 import { SectionRuntimeDetail } from "./_components/section-runtime-detail";
 
 const RUNTIME_KEYS = ["claude_code", "codex", "opencode", "cursor", "gemini", "qoder", "iflow"];
@@ -161,6 +162,8 @@ function SettingsOrchestrator({
         return <SectionForms {...projectProps} />;
       case "automations":
         return <SectionAutomations {...projectProps} />;
+      case "audit-log":
+        return <SectionAuditLog projectId={project.id} />;
       case "advanced":
         return <SectionAdvanced {...projectProps} />;
       default:

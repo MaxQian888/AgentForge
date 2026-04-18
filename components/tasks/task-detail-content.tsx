@@ -42,6 +42,7 @@ import { buildDocsHref } from "@/lib/route-hrefs";
 import { isMemberAvailable } from "@/lib/team/member-status";
 import type { Sprint } from "@/lib/stores/sprint-store";
 import { useTaskCommentStore } from "@/lib/stores/task-comment-store";
+import { useProjectRole } from "@/hooks/use-project-role";
 import {
   useAgentStore,
   type DispatchPreflightSummary,
@@ -205,6 +206,16 @@ export function TaskDetailContent({
   const dispatchHistory = useAgentStore(
     (state) => state.dispatchHistoryByTask[task.id] ?? EMPTY_DISPATCH_HISTORY,
   );
+  // Gate write affordances on the server-issued allowedActions set so
+  // viewers/editors don't see buttons whose backend would 403. The hook
+  // returns false during the initial fetch — buttons stay disabled until
+  // the permissions response arrives, which is the safer default than
+  // optimistically rendering them.
+  const projectRole = useProjectRole(task.projectId);
+  const canSpawn = projectRole.can("agent.spawn");
+  const canStartTeam = projectRole.can("team.run.start");
+  const canEditTask = projectRole.can("task.update");
+  const canDeleteTask = projectRole.can("task.delete");
   const initialDraft = getTaskDraft(task);
   const [title, setTitle] = useState(initialDraft.title);
   const [description, setDescription] = useState(initialDraft.description);
@@ -1083,8 +1094,9 @@ export function TaskDetailContent({
           <Button
             type="button"
             variant="outline"
-            disabled={!onSpawnAgent}
+            disabled={!onSpawnAgent || !canSpawn}
             onClick={() => setSpawnDialogOpen(true)}
+            title={!canSpawn ? "Requires editor or higher" : undefined}
           >
             <Bot className="mr-2 size-4" />
             {t("detail.startAgent")}
@@ -1092,7 +1104,9 @@ export function TaskDetailContent({
           <Button
             type="button"
             variant="outline"
+            disabled={!canStartTeam}
             onClick={() => setTeamDialogOpen(true)}
+            title={!canStartTeam ? "Requires editor or higher" : undefined}
           >
             <Network className="mr-2 size-4" />
             {t("detail.startTeam")}
@@ -1120,13 +1134,14 @@ export function TaskDetailContent({
       <div className="flex items-center gap-2">
         <Button
           type="button"
-          disabled={!onTaskSave}
+          disabled={!onTaskSave || !canEditTask}
           onClick={() => void handleSave()}
           className="flex-1"
+          title={!canEditTask ? "Requires editor or higher" : undefined}
         >
           {t("detail.saveChanges")}
         </Button>
-        {onTaskDelete ? (
+        {onTaskDelete && canDeleteTask ? (
           <Button
             type="button"
             variant="destructive"

@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"fmt"
+	"time"
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
@@ -37,6 +38,49 @@ func (r *ProjectRepository) Create(ctx context.Context, project *model.Project) 
 	return nil
 }
 
+// CreateWithOwner inserts a project and an owner-role member row for the
+// creating user inside a single transaction. Either both rows persist or
+// neither does — preventing the "project exists with no owner" state that
+// would lock the project out of all admin-gated writes.
+//
+// `ownerMember` carries the human-facing identity for the new member row.
+// The caller MUST set OwnerMember.UserID to the creating user. This method
+// stamps ProjectID, ProjectRole=owner, Type=human, and IDs/timestamps that
+// were left zero.
+func (r *ProjectRepository) CreateWithOwner(
+	ctx context.Context,
+	project *model.Project,
+	ownerMember *model.Member,
+) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	if project == nil || ownerMember == nil {
+		return fmt.Errorf("create project with owner: project and ownerMember are required")
+	}
+	if ownerMember.UserID == nil {
+		return fmt.Errorf("create project with owner: ownerMember.UserID is required")
+	}
+	ownerMember.ProjectID = project.ID
+	ownerMember.Type = model.MemberTypeHuman
+	ownerMember.ProjectRole = model.ProjectRoleOwner
+	ownerMember.Status = model.NormalizeMemberStatus(ownerMember.Status, true)
+	ownerMember.IsActive = model.IsMemberStatusActive(ownerMember.Status)
+	if ownerMember.ID == uuid.Nil {
+		ownerMember.ID = uuid.New()
+	}
+
+	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
+		if err := tx.Create(newProjectRecord(project)).Error; err != nil {
+			return fmt.Errorf("create project: %w", err)
+		}
+		if err := tx.Create(newMemberRecord(ownerMember)).Error; err != nil {
+			return fmt.Errorf("create owner member: %w", err)
+		}
+		return nil
+	})
+}
+
 func (r *ProjectRepository) GetByID(ctx context.Context, id uuid.UUID) (*model.Project, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
@@ -69,13 +113,38 @@ func (r *ProjectRepository) GetBySlug(ctx context.Context, slug string) (*model.
 	return applyProjectManagementSummary(record.toModel(), summaries[record.ID]), nil
 }
 
+// ProjectListFilter narrows what ProjectRepository.List returns. The zero
+// value (no statuses) defaults to "non-archived only" — the canonical API
+// contract for `GET /projects`.
+type ProjectListFilter struct {
+	// Statuses, when non-empty, restricts the result to the given statuses.
+	// When empty, the list returns only active + paused (archived hidden).
+	Statuses []string
+}
+
+// List returns non-archived projects (active + paused). For archive-aware
+// queries callers should use ListWithFilter instead.
 func (r *ProjectRepository) List(ctx context.Context) ([]*model.Project, error) {
+	return r.ListWithFilter(ctx, ProjectListFilter{})
+}
+
+// ListWithFilter returns projects matching the supplied filter. The zero
+// filter defaults to "non-archived only" — same behavior as List.
+func (r *ProjectRepository) ListWithFilter(ctx context.Context, filter ProjectListFilter) ([]*model.Project, error) {
 	if r.db == nil {
 		return nil, ErrDatabaseUnavailable
 	}
 
+	statuses := filter.Statuses
+	if len(statuses) == 0 {
+		statuses = []string{model.ProjectStatusActive, model.ProjectStatusPaused}
+	}
+
 	var records []projectRecord
-	if err := r.db.WithContext(ctx).Order("created_at DESC").Find(&records).Error; err != nil {
+	if err := r.db.WithContext(ctx).
+		Where("status IN ?", statuses).
+		Order("created_at DESC").
+		Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list projects: %w", err)
 	}
 
@@ -150,24 +219,71 @@ func (r *ProjectRepository) Delete(ctx context.Context, id uuid.UUID) error {
 	return nil
 }
 
+// SetArchived flips status to archived and stamps archived_at + archived_by_user_id.
+// Returns ErrNotFound if no row matched.
+func (r *ProjectRepository) SetArchived(ctx context.Context, id, archivedByUserID uuid.UUID, archivedAt time.Time) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	updates := map[string]any{
+		"status":              model.ProjectStatusArchived,
+		"archived_at":         archivedAt,
+		"archived_by_user_id": archivedByUserID,
+	}
+	result := r.db.WithContext(ctx).
+		Model(&projectRecord{}).
+		Where("id = ?", id).
+		Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("set project archived: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("set project archived: %w", ErrNotFound)
+	}
+	return nil
+}
+
+// SetUnarchived flips status back to active and clears archival bookkeeping.
+// Returns ErrNotFound if no row matched.
+func (r *ProjectRepository) SetUnarchived(ctx context.Context, id uuid.UUID) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	updates := map[string]any{
+		"status":              model.ProjectStatusActive,
+		"archived_at":         gorm.Expr("NULL"),
+		"archived_by_user_id": gorm.Expr("NULL"),
+	}
+	result := r.db.WithContext(ctx).
+		Model(&projectRecord{}).
+		Where("id = ?", id).
+		Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("set project unarchived: %w", result.Error)
+	}
+	if result.RowsAffected == 0 {
+		return fmt.Errorf("set project unarchived: %w", ErrNotFound)
+	}
+	return nil
+}
+
 func applyProjectManagementSummary(project *model.Project, summary projectManagementSummary) *model.Project {
 	if project == nil {
 		return nil
 	}
-	project.Status = summary.Status
+	project.Status = model.NormalizeProjectStatus(project.Status)
 	project.TaskCount = summary.TaskCount
 	project.AgentCount = summary.AgentCount
 	return project
 }
 
 type projectManagementSummary struct {
-	Status     string
 	TaskCount  int
 	AgentCount int
 }
 
 func defaultProjectManagementSummary() projectManagementSummary {
-	return projectManagementSummary{Status: model.ProjectStatusActive}
+	return projectManagementSummary{}
 }
 
 func (r *ProjectRepository) loadProjectSummaries(ctx context.Context, projectIDs []uuid.UUID) (map[uuid.UUID]projectManagementSummary, error) {

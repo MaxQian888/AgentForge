@@ -43,6 +43,38 @@ func (a wsHubAdapter) BroadcastEvent(eventType, projectID string, payload map[st
 	_ = eventbus.PublishLegacy(context.Background(), a.bus, eventType, projectID, payload)
 }
 
+// projectTemplateAuditEmitter adapts the AuditService to the narrow
+// ProjectCreatedFromTemplateEmitter contract the project handler consumes.
+// The wrapper builds the canonical AuditEvent and hands it to RecordEvent;
+// downstream sanitization / enqueue is the service's responsibility.
+type projectTemplateAuditEmitter struct {
+	svc *service.AuditService
+}
+
+func (p projectTemplateAuditEmitter) EmitProjectCreatedFromTemplate(
+	ctx context.Context,
+	projectID, actorUserID, templateID uuid.UUID,
+	templateVersion int,
+	templateSource string,
+) {
+	if p.svc == nil {
+		return
+	}
+	event := &model.AuditEvent{
+		ProjectID:    projectID,
+		OccurredAt:   time.Now().UTC(),
+		ActorUserID:  &actorUserID,
+		ActionID:     string(appMiddleware.ActionProjectCreatedFromTemplate),
+		ResourceType: model.AuditResourceTypeProject,
+		ResourceID:   projectID.String(),
+		PayloadSnapshotJSON: fmt.Sprintf(
+			`{"templateId":%q,"templateSource":%q,"snapshotVersion":%d}`,
+			templateID.String(), templateSource, templateVersion,
+		),
+	}
+	_ = p.svc.RecordEvent(ctx, event)
+}
+
 type bridgeIntentAdapter struct {
 	client *bridge.Client
 }
@@ -158,6 +190,8 @@ func (a knowledgeEventBusAdapter) PublishKnowledgeEvent(ctx context.Context, eve
 type RouteServices struct {
 	TaskProgress *service.TaskProgressService
 	Automation   *service.AutomationEngineService
+	AuditSink    *service.AuditSink
+	Invitation   *service.InvitationService
 }
 
 func RegisterRoutes(
@@ -165,6 +199,7 @@ func RegisterRoutes(
 	cfg *config.Config,
 	authSvc *service.AuthService,
 	cache *repository.CacheRepository,
+	userRepo *repository.UserRepository,
 	projectRepo *repository.ProjectRepository,
 	memberRepo *repository.MemberRepository,
 	sprintRepo *repository.SprintRepository,
@@ -208,6 +243,44 @@ func RegisterRoutes(
 ) *RouteServices {
 	jwtMw := appMiddleware.JWTMiddleware(cfg.JWTSecret, cache)
 	reviewTriggerMw := appMiddleware.ReviewTriggerAuthMiddleware(cfg.JWTSecret, cache, cfg.AgentForgeToken)
+
+	// Install the project-scoped RBAC member lookup. After this point any
+	// route wrapped in appMiddleware.Require(actionID) consults memberRepo
+	// to resolve the caller's projectRole.
+	appMiddleware.SetMemberLookup(memberRepo)
+
+	// Audit subsystem. The sink owns its own goroutine + retry queue +
+	// disk spill; the service is the seam handlers and the RBAC middleware
+	// emit through. Persistence is asynchronous and never blocks the
+	// originating request.
+	auditEventRepo := repository.NewAuditEventRepository(taskRepo.DB())
+	auditSink := service.NewAuditSink(auditEventRepo, service.AuditSinkConfig{})
+	auditSink.Start(context.Background())
+	auditSvc := service.NewAuditService(auditSink, auditEventRepo, func(actionID string) bool {
+		_, ok := appMiddleware.MinRoleFor(appMiddleware.ActionID(actionID))
+		return ok
+	})
+	// Register the RBAC emitter so allow + deny paths produce audit events.
+	appMiddleware.SetAuditEmitter(func(ctx context.Context, e appMiddleware.AuditEmission) {
+		event := &model.AuditEvent{
+			ProjectID:              e.ProjectID,
+			OccurredAt:             time.Now().UTC(),
+			ActorUserID:            e.ActorUserID,
+			ActorProjectRoleAtTime: e.ActorProjectRoleAtTime,
+			ActionID:               string(e.ActionID),
+			ResourceType:           model.AuditResourceTypeAuth,
+			RequestID:              e.RequestID,
+			IP:                     e.IP,
+			UserAgent:              e.UserAgent,
+			SystemInitiated:        false,
+		}
+		if !e.Allowed {
+			event.PayloadSnapshotJSON = service.SanitizeAuditPayload(map[string]any{"outcome": "denied"})
+		} else {
+			event.PayloadSnapshotJSON = service.SanitizeAuditPayload(map[string]any{"outcome": "allowed"})
+		}
+		_ = auditSvc.RecordEvent(ctx, event)
+	})
 
 	notificationSvc := service.NewNotificationService(notifRepo, hub, bus)
 	imControlPlane := service.NewIMControlPlane(service.IMControlPlaneConfig{
@@ -295,6 +368,11 @@ func RegisterRoutes(
 	users.PUT("/me", authH.UpdateMe)
 	users.PUT("/me/password", authH.ChangePassword)
 
+	// Per-project permissions endpoint. Frontend consumes this as the
+	// canonical "what can I do here" source rather than mirroring the matrix.
+	permissionsH := handler.NewPermissionsHandler(memberRepo)
+	v1.GET("/auth/me/projects/:pid/permissions", permissionsH.Get, jwtMw)
+
 	// WebSocket
 	wsH := ws.NewHandler(hub, cfg.JWTSecret)
 	e.GET("/ws", wsH.HandleWS)
@@ -303,9 +381,48 @@ func RegisterRoutes(
 	}
 	e.GET("/ws/im-bridge", ws.NewIMControlHandler(imControlPlaneWSAdapter{control: imControlPlane}).HandleWS)
 
+	// --- Project templates ---
+	// Service first so the project handler can consume it via WithTemplateClone.
+	projectTemplateRepo := repository.NewProjectTemplateRepository(taskRepo.DB())
+	projectTemplateSvc := service.NewProjectTemplateService(projectTemplateRepo, projectRepo)
+	// Register the built-in system templates bundle idempotently on startup.
+	if err := service.RegisterBuiltInProjectTemplates(context.Background(), projectTemplateRepo); err != nil {
+		// Non-fatal — templates can still be added by users; just log via stdout.
+		fmt.Printf("register built-in project templates: %v\n", err)
+	}
+	projectTemplateH := handler.NewProjectTemplateHandler(projectTemplateSvc)
+
+	// --- Project lifecycle (archive / unarchive / delete) ---
+	// TeamService and DAGWorkflowService cascades are wired later, after
+	// those services are constructed; the lifecycle service still gets
+	// consulted by the delete handler so it must exist here.
+	projectLifecycleSvc := service.NewProjectLifecycleService(projectRepo)
+
 	// --- New resource handlers ---
-	projectH := handler.NewProjectHandler(projectRepo, bridgeClient, wikiSvc)
+	projectH := handler.NewProjectHandler(projectRepo, bridgeClient, wikiSvc).
+		WithUserLookup(userRepo).
+		WithTemplateClone(projectTemplateSvc).
+		WithTemplateAuditEmitter(projectTemplateAuditEmitter{svc: auditSvc}).
+		WithLifecycleService(projectLifecycleSvc)
 	memberH := handler.NewMemberHandler(memberRepo)
+	// Invitation flow wiring. Repo + service + handler are constructed here
+	// so the audit emitter uses the same auditSvc the rest of the project
+	// already consumes. Delivery is left nil by default; UI fallback "copy
+	// accept link" path carries the plaintext token returned by Create.
+	invitationRepo := repository.NewInvitationRepository(taskRepo.DB())
+	invitationSvc := service.NewInvitationService(
+		invitationRepo,
+		memberRepo,
+		userRepo,
+		projectRepo,
+		service.InvitationServiceConfig{AcceptURLBase: cfg.FrontendAcceptInvitationURL},
+	).WithAuditEmitter(auditSvc)
+	if notificationSvc != nil {
+		invitationSvc = invitationSvc.WithDelivery(service.NewInvitationNotificationDelivery(
+			notificationSvc, invitationRepo, userRepo, projectRepo, cfg.FrontendAcceptInvitationURL,
+		))
+	}
+	invitationH := handler.NewInvitationHandler(invitationSvc)
 	sprintH := handler.NewSprintHandler(sprintRepo, taskRepo).WithHub(hub).WithBus(bus)
 	taskH := handler.NewTaskHandler(taskRepo, taskDecomposeSvc).WithProgress(taskProgressSvc).WithHub(hub).WithBus(bus)
 	// wikiH is kept for reference but routes have been migrated to knowledgeH.
@@ -365,6 +482,7 @@ func RegisterRoutes(
 	dagWorkflowSvc.SetTaskRepo(taskRepo)
 	dagWorkflowSvc.SetRunMappingRepo(dagRunMappingRepo)
 	dagWorkflowSvc.SetReviewRepo(wfReviewRepo)
+	dagWorkflowSvc.SetProjectStatusLookup(projectRepo)
 	if agentSvc != nil {
 		effectApplier.AgentSpawner = agentSvc
 		agentSvc.SetDAGWorkflowService(dagWorkflowSvc)
@@ -382,6 +500,13 @@ func RegisterRoutes(
 		agentSvc.SetTeamService(teamSvc)
 		agentSvc.SetMemoryService(memorySvc)
 	}
+	// Attach team + workflow cascade hooks to the lifecycle service now that
+	// both dependencies exist. Invitation revoke is left unwired pending the
+	// Wave 2 invitation service.
+	if teamSvc != nil {
+		projectLifecycleSvc.WithTeamCanceller(teamSvc)
+	}
+	projectLifecycleSvc.WithWorkflowCanceller(dagWorkflowSvc)
 	// Seed system templates on startup so CreateFromStrategy can resolve them.
 	go func() {
 		_ = templateSvc.SeedSystemTemplates(context.Background())
@@ -433,6 +558,7 @@ func RegisterRoutes(
 		pluginSvc,
 	)
 	automationEngine.SetIMChannelResolver(imControlPlane)
+	automationEngine.SetProjectStatusLookup(projectRepo)
 	taskH = taskH.WithAutomation(automationEngine)
 	customFieldH = customFieldH.WithAutomation(automationEngine)
 	reviewSvc.SetAutomationEvaluator(automationEngine)
@@ -460,6 +586,7 @@ func RegisterRoutes(
 		dispatchSvc = dispatchSvc.WithBudgetChecker(budgetSvc)
 		dispatchSvc = dispatchSvc.WithAttemptRecorder(dispatchAttemptRepo)
 		dispatchSvc = dispatchSvc.WithRoleStore(workflowRoleStore)
+		dispatchSvc = dispatchSvc.WithProjectStatusLookup(projectRepo)
 		dispatchPreflightH = handler.NewDispatchPreflightHandler(taskRepo, memberRepo, budgetSvc, agentSvc).WithRunReader(agentSvc).WithRoleStore(workflowRoleStore)
 		dispatchStatsH = handler.NewDispatchStatsHandler(dispatchAttemptRepo, agentPoolQueueRepo)
 		dispatchHistoryH = handler.NewDispatchHistoryHandler(dispatchAttemptRepo)
@@ -467,6 +594,7 @@ func RegisterRoutes(
 		budgetQueryH = handler.NewBudgetQueryHandler(budgetSvc)
 		taskH = taskH.WithDispatcher(dispatchSvc)
 		agentH = agentH.WithDispatcher(dispatchSvc)
+		agentH = agentH.WithAudit(auditSvc)
 	}
 	documentH := handler.NewDocumentHandler(documentSvc)
 
@@ -487,6 +615,7 @@ func RegisterRoutes(
 		knowledgeEventBusAdapter{bus: bus},
 	)
 	knowledgeH := handler.NewKnowledgeAssetHandler(knowledgeAssetSvc)
+	auditH := handler.NewAuditHandler(auditSvc)
 	_ = knowledgeBlobStorage // available for upload service wiring when implemented
 
 	// Live-artifact projector registry. The projection endpoint and WS
@@ -540,112 +669,146 @@ func RegisterRoutes(
 	protected.PUT("/projects/:id", projectH.Update)
 	protected.DELETE("/projects/:id", projectH.Delete)
 
+	// Project templates (user-library scope — not project-scoped).
+	// Authorization is caller == owner enforced at service layer.
+	protected.GET("/project-templates", projectTemplateH.List)
+	protected.GET("/project-templates/:id", projectTemplateH.Get)
+	protected.PUT("/project-templates/:id", projectTemplateH.Update)
+	protected.DELETE("/project-templates/:id", projectTemplateH.Delete)
+
 	// Project-scoped routes
 	projectMw := appMiddleware.ProjectMiddleware(projectRepo)
 	projectGroup := protected.Group("/projects/:pid", projectMw)
-	projectGroup.POST("/members", memberH.Create)
-	projectGroup.GET("/members", memberH.List)
-	projectGroup.POST("/members/bulk-update", memberH.BulkUpdate)
-	projectGroup.POST("/tasks", taskH.Create)
-	projectGroup.GET("/tasks", taskH.List)
-	projectGroup.POST("/links", entityLinkH.Create)
-	projectGroup.GET("/links", entityLinkH.List)
-	projectGroup.DELETE("/links/:linkId", entityLinkH.Delete)
-	projectGroup.GET("/tasks/:tid/comments", taskCommentH.List)
-	projectGroup.POST("/tasks/:tid/comments", taskCommentH.Create)
-	projectGroup.PATCH("/tasks/:tid/comments/:cid", taskCommentH.Update)
-	projectGroup.DELETE("/tasks/:tid/comments/:cid", taskCommentH.Delete)
-	projectGroup.GET("/fields", customFieldH.ListDefinitions)
-	projectGroup.POST("/fields", customFieldH.CreateDefinition)
-	projectGroup.PUT("/fields/reorder", customFieldH.ReorderDefinitions)
-	projectGroup.PUT("/fields/:fid", customFieldH.UpdateDefinition)
-	projectGroup.DELETE("/fields/:fid", customFieldH.DeleteDefinition)
-	projectGroup.GET("/tasks/:tid/fields", customFieldH.ListTaskValues)
-	projectGroup.PUT("/tasks/:tid/fields/:fid", customFieldH.SetTaskValue)
-	projectGroup.DELETE("/tasks/:tid/fields/:fid", customFieldH.ClearTaskValue)
-	projectGroup.GET("/views", savedViewH.List)
-	projectGroup.POST("/views", savedViewH.Create)
-	projectGroup.PUT("/views/:vid", savedViewH.Update)
-	projectGroup.DELETE("/views/:vid", savedViewH.Delete)
-	projectGroup.POST("/views/:vid/default", savedViewH.SetDefault)
-	projectGroup.GET("/forms", formH.List)
-	projectGroup.POST("/forms", formH.Create)
-	projectGroup.PUT("/forms/:formId", formH.Update)
-	projectGroup.DELETE("/forms/:formId", formH.Delete)
-	projectGroup.GET("/automations", automationH.ListRules)
-	projectGroup.POST("/automations", automationH.CreateRule)
-	projectGroup.PUT("/automations/:rid", automationH.UpdateRule)
-	projectGroup.DELETE("/automations/:rid", automationH.DeleteRule)
-	projectGroup.GET("/automations/logs", automationH.ListLogs)
-	projectGroup.GET("/dashboards", dashboardH.List)
-	projectGroup.POST("/dashboards", dashboardH.Create)
-	projectGroup.PUT("/dashboards/:did", dashboardH.Update)
-	projectGroup.DELETE("/dashboards/:did", dashboardH.Delete)
-	projectGroup.GET("/dashboards/:did/widgets", dashboardH.ListWidgets)
-	projectGroup.POST("/dashboards/:did/widgets", dashboardH.SaveWidget)
-	projectGroup.DELETE("/dashboards/:did/widgets/:wid", dashboardH.DeleteWidget)
-	projectGroup.GET("/dashboard/widgets/:type", dashboardH.WidgetData)
-	projectGroup.GET("/milestones", milestoneH.List)
-	projectGroup.POST("/milestones", milestoneH.Create)
-	projectGroup.PUT("/milestones/:mid", milestoneH.Update)
-	projectGroup.DELETE("/milestones/:mid", milestoneH.Delete)
-	projectGroup.POST("/sprints", sprintH.Create)
-	projectGroup.GET("/sprints", sprintH.List)
-	projectGroup.PUT("/sprints/:sid", sprintH.Update)
-	projectGroup.GET("/sprints/:sid/metrics", sprintH.Metrics)
-	projectGroup.GET("/workflow", workflowH.Get)
-	projectGroup.PUT("/workflow", workflowH.Put)
-	projectGroup.POST("/workflows", workflowH.CreateDefinition)
-	projectGroup.GET("/workflows", workflowH.ListDefinitions)
-	projectGroup.POST("/memory", memoryH.Store)
-	projectGroup.GET("/memory", memoryH.Search)
-	projectGroup.GET("/memory/stats", memoryH.Stats)
-	projectGroup.GET("/memory/export", memoryH.Export)
-	projectGroup.POST("/memory/bulk-delete", memoryH.BulkDelete)
-	projectGroup.POST("/memory/cleanup", memoryH.Cleanup)
-	projectGroup.GET("/memory/:mid", memoryH.Get)
-	projectGroup.PATCH("/memory/:mid", memoryH.Update)
-	projectGroup.DELETE("/memory/:mid", memoryH.Delete)
+	// Apply a group-level archived-project write guard. This sits AFTER the
+	// project middleware (project in context) and BEFORE per-route RBAC.
+	// The guard blocks any write (non-GET/HEAD/OPTIONS) on an archived
+	// project unless the path matches a whitelisted lifecycle suffix
+	// (/unarchive). Reads always pass so the archived project remains
+	// inspectable (audit, settings, knowledge assets). Archive itself is
+	// idempotent — the handler returns 409 AlreadyArchived if it runs on
+	// an already-archived project — so it does NOT need to be whitelisted
+	// here.
+	projectGroup.Use(appMiddleware.ArchivedProjectWriteGuard(appMiddleware.ArchivedProjectWriteGuardConfig{
+		WhitelistedSuffixes: []string{"/unarchive"},
+	}))
+	// Each route is tagged with its canonical ActionID via appMiddleware.Require.
+	// The matrix in middleware/rbac.go is the single source of "who can do what".
+	projectGroup.POST("/archive", projectH.Archive, appMiddleware.Require(appMiddleware.ActionProjectArchive))
+	projectGroup.POST("/unarchive", projectH.Unarchive, appMiddleware.Require(appMiddleware.ActionProjectUnarchive))
+	projectGroup.POST("/save-as-template", projectTemplateH.SaveAsTemplate, appMiddleware.Require(appMiddleware.ActionProjectSaveAsTemplate))
+	projectGroup.POST("/members", memberH.Create, appMiddleware.Require(appMiddleware.ActionMemberCreate))
+	projectGroup.GET("/members", memberH.List, appMiddleware.Require(appMiddleware.ActionMemberRead))
+	projectGroup.POST("/members/bulk-update", memberH.BulkUpdate, appMiddleware.Require(appMiddleware.ActionMemberBulkUpdate))
+	// Invitation endpoints — admin+ for every mutation; list gated by view.
+	projectGroup.POST("/invitations", invitationH.Create, appMiddleware.Require(appMiddleware.ActionInvitationCreate))
+	projectGroup.GET("/invitations", invitationH.List, appMiddleware.Require(appMiddleware.ActionInvitationView))
+	projectGroup.POST("/invitations/:id/revoke", invitationH.Revoke, appMiddleware.Require(appMiddleware.ActionInvitationRevoke))
+	projectGroup.POST("/invitations/:id/resend", invitationH.Resend, appMiddleware.Require(appMiddleware.ActionInvitationResend))
+	projectGroup.POST("/tasks", taskH.Create, appMiddleware.Require(appMiddleware.ActionTaskCreate))
+	projectGroup.GET("/tasks", taskH.List, appMiddleware.Require(appMiddleware.ActionTaskRead))
+	projectGroup.POST("/links", entityLinkH.Create, appMiddleware.Require(appMiddleware.ActionTaskUpdate))
+	projectGroup.GET("/links", entityLinkH.List, appMiddleware.Require(appMiddleware.ActionTaskRead))
+	projectGroup.DELETE("/links/:linkId", entityLinkH.Delete, appMiddleware.Require(appMiddleware.ActionTaskUpdate))
+	projectGroup.GET("/tasks/:tid/comments", taskCommentH.List, appMiddleware.Require(appMiddleware.ActionTaskRead))
+	projectGroup.POST("/tasks/:tid/comments", taskCommentH.Create, appMiddleware.Require(appMiddleware.ActionTaskComment))
+	projectGroup.PATCH("/tasks/:tid/comments/:cid", taskCommentH.Update, appMiddleware.Require(appMiddleware.ActionTaskComment))
+	projectGroup.DELETE("/tasks/:tid/comments/:cid", taskCommentH.Delete, appMiddleware.Require(appMiddleware.ActionTaskComment))
+	projectGroup.GET("/fields", customFieldH.ListDefinitions, appMiddleware.Require(appMiddleware.ActionCustomFieldRead))
+	projectGroup.POST("/fields", customFieldH.CreateDefinition, appMiddleware.Require(appMiddleware.ActionCustomFieldWrite))
+	projectGroup.PUT("/fields/reorder", customFieldH.ReorderDefinitions, appMiddleware.Require(appMiddleware.ActionCustomFieldWrite))
+	projectGroup.PUT("/fields/:fid", customFieldH.UpdateDefinition, appMiddleware.Require(appMiddleware.ActionCustomFieldWrite))
+	projectGroup.DELETE("/fields/:fid", customFieldH.DeleteDefinition, appMiddleware.Require(appMiddleware.ActionCustomFieldWrite))
+	projectGroup.GET("/tasks/:tid/fields", customFieldH.ListTaskValues, appMiddleware.Require(appMiddleware.ActionTaskRead))
+	projectGroup.PUT("/tasks/:tid/fields/:fid", customFieldH.SetTaskValue, appMiddleware.Require(appMiddleware.ActionTaskUpdate))
+	projectGroup.DELETE("/tasks/:tid/fields/:fid", customFieldH.ClearTaskValue, appMiddleware.Require(appMiddleware.ActionTaskUpdate))
+	projectGroup.GET("/views", savedViewH.List, appMiddleware.Require(appMiddleware.ActionTaskRead))
+	projectGroup.POST("/views", savedViewH.Create, appMiddleware.Require(appMiddleware.ActionSavedViewWrite))
+	projectGroup.PUT("/views/:vid", savedViewH.Update, appMiddleware.Require(appMiddleware.ActionSavedViewWrite))
+	projectGroup.DELETE("/views/:vid", savedViewH.Delete, appMiddleware.Require(appMiddleware.ActionSavedViewWrite))
+	projectGroup.POST("/views/:vid/default", savedViewH.SetDefault, appMiddleware.Require(appMiddleware.ActionSavedViewWrite))
+	projectGroup.GET("/forms", formH.List, appMiddleware.Require(appMiddleware.ActionTaskRead))
+	projectGroup.POST("/forms", formH.Create, appMiddleware.Require(appMiddleware.ActionFormWrite))
+	projectGroup.PUT("/forms/:formId", formH.Update, appMiddleware.Require(appMiddleware.ActionFormWrite))
+	projectGroup.DELETE("/forms/:formId", formH.Delete, appMiddleware.Require(appMiddleware.ActionFormWrite))
+	projectGroup.GET("/automations", automationH.ListRules, appMiddleware.Require(appMiddleware.ActionAutomationRead))
+	projectGroup.POST("/automations", automationH.CreateRule, appMiddleware.Require(appMiddleware.ActionAutomationWrite))
+	projectGroup.PUT("/automations/:rid", automationH.UpdateRule, appMiddleware.Require(appMiddleware.ActionAutomationWrite))
+	projectGroup.DELETE("/automations/:rid", automationH.DeleteRule, appMiddleware.Require(appMiddleware.ActionAutomationWrite))
+	projectGroup.GET("/automations/logs", automationH.ListLogs, appMiddleware.Require(appMiddleware.ActionAutomationRead))
+	projectGroup.GET("/dashboards", dashboardH.List, appMiddleware.Require(appMiddleware.ActionDashboardRead))
+	projectGroup.POST("/dashboards", dashboardH.Create, appMiddleware.Require(appMiddleware.ActionDashboardWrite))
+	projectGroup.PUT("/dashboards/:did", dashboardH.Update, appMiddleware.Require(appMiddleware.ActionDashboardWrite))
+	projectGroup.DELETE("/dashboards/:did", dashboardH.Delete, appMiddleware.Require(appMiddleware.ActionDashboardWrite))
+	projectGroup.GET("/dashboards/:did/widgets", dashboardH.ListWidgets, appMiddleware.Require(appMiddleware.ActionDashboardRead))
+	projectGroup.POST("/dashboards/:did/widgets", dashboardH.SaveWidget, appMiddleware.Require(appMiddleware.ActionDashboardWrite))
+	projectGroup.DELETE("/dashboards/:did/widgets/:wid", dashboardH.DeleteWidget, appMiddleware.Require(appMiddleware.ActionDashboardWrite))
+	projectGroup.GET("/dashboard/widgets/:type", dashboardH.WidgetData, appMiddleware.Require(appMiddleware.ActionDashboardRead))
+	projectGroup.GET("/milestones", milestoneH.List, appMiddleware.Require(appMiddleware.ActionTaskRead))
+	projectGroup.POST("/milestones", milestoneH.Create, appMiddleware.Require(appMiddleware.ActionMilestoneWrite))
+	projectGroup.PUT("/milestones/:mid", milestoneH.Update, appMiddleware.Require(appMiddleware.ActionMilestoneWrite))
+	projectGroup.DELETE("/milestones/:mid", milestoneH.Delete, appMiddleware.Require(appMiddleware.ActionMilestoneWrite))
+	projectGroup.POST("/sprints", sprintH.Create, appMiddleware.Require(appMiddleware.ActionSprintWrite))
+	projectGroup.GET("/sprints", sprintH.List, appMiddleware.Require(appMiddleware.ActionTaskRead))
+	projectGroup.PUT("/sprints/:sid", sprintH.Update, appMiddleware.Require(appMiddleware.ActionSprintWrite))
+	projectGroup.GET("/sprints/:sid/metrics", sprintH.Metrics, appMiddleware.Require(appMiddleware.ActionTaskRead))
+	projectGroup.GET("/workflow", workflowH.Get, appMiddleware.Require(appMiddleware.ActionWorkflowRead))
+	projectGroup.PUT("/workflow", workflowH.Put, appMiddleware.Require(appMiddleware.ActionWorkflowWrite))
+	projectGroup.POST("/workflows", workflowH.CreateDefinition, appMiddleware.Require(appMiddleware.ActionWorkflowWrite))
+	projectGroup.GET("/workflows", workflowH.ListDefinitions, appMiddleware.Require(appMiddleware.ActionWorkflowRead))
+	projectGroup.POST("/memory", memoryH.Store, appMiddleware.Require(appMiddleware.ActionMemoryWrite))
+	projectGroup.GET("/memory", memoryH.Search, appMiddleware.Require(appMiddleware.ActionMemoryRead))
+	projectGroup.GET("/memory/stats", memoryH.Stats, appMiddleware.Require(appMiddleware.ActionMemoryRead))
+	projectGroup.GET("/memory/export", memoryH.Export, appMiddleware.Require(appMiddleware.ActionMemoryRead))
+	projectGroup.POST("/memory/bulk-delete", memoryH.BulkDelete, appMiddleware.Require(appMiddleware.ActionMemoryWrite))
+	projectGroup.POST("/memory/cleanup", memoryH.Cleanup, appMiddleware.Require(appMiddleware.ActionMemoryWrite))
+	projectGroup.GET("/memory/:mid", memoryH.Get, appMiddleware.Require(appMiddleware.ActionMemoryRead))
+	projectGroup.PATCH("/memory/:mid", memoryH.Update, appMiddleware.Require(appMiddleware.ActionMemoryWrite))
+	projectGroup.DELETE("/memory/:mid", memoryH.Delete, appMiddleware.Require(appMiddleware.ActionMemoryWrite))
 	// Old /documents routes removed; ingested files are now served via /knowledge/assets.
 	_ = documentH
-	projectGroup.GET("/logs", logH.List)
-	projectGroup.POST("/logs", logH.Create)
+	projectGroup.GET("/logs", logH.List, appMiddleware.Require(appMiddleware.ActionLogRead))
+	projectGroup.POST("/logs", logH.Create, appMiddleware.Require(appMiddleware.ActionLogWrite))
 	if dispatchPreflightH != nil {
-		projectGroup.GET("/dispatch/preflight", dispatchPreflightH.Get)
+		projectGroup.GET("/dispatch/preflight", dispatchPreflightH.Get, appMiddleware.Require(appMiddleware.ActionTaskRead))
 	}
 	if dispatchStatsH != nil {
-		projectGroup.GET("/dispatch/stats", dispatchStatsH.Get)
+		projectGroup.GET("/dispatch/stats", dispatchStatsH.Get, appMiddleware.Require(appMiddleware.ActionTaskRead))
 	}
 	if queueManagementH != nil {
-		projectGroup.GET("/queue", queueManagementH.List)
-		projectGroup.DELETE("/queue/:entryId", queueManagementH.Cancel)
+		projectGroup.GET("/queue", queueManagementH.List, appMiddleware.Require(appMiddleware.ActionTaskRead))
+		projectGroup.DELETE("/queue/:entryId", queueManagementH.Cancel, appMiddleware.Require(appMiddleware.ActionTaskDispatch))
 	}
 	if budgetQueryH != nil {
-		projectGroup.GET("/budget/summary", budgetQueryH.ProjectSummary)
+		projectGroup.GET("/budget/summary", budgetQueryH.ProjectSummary, appMiddleware.Require(appMiddleware.ActionDashboardRead))
 	}
 	// Knowledge asset routes (unified: replaces /wiki and /documents).
-	projectGroup.GET("/knowledge/assets", knowledgeH.ListAssets)
-	projectGroup.POST("/knowledge/assets", knowledgeH.CreateAsset)
-	projectGroup.GET("/knowledge/assets/tree", knowledgeH.GetTree)
-	projectGroup.GET("/knowledge/search", knowledgeH.Search)
-	projectGroup.GET("/knowledge/assets/:id", knowledgeH.GetAsset)
-	projectGroup.PUT("/knowledge/assets/:id", knowledgeH.UpdateAsset)
-	projectGroup.DELETE("/knowledge/assets/:id", knowledgeH.DeleteAsset)
-	projectGroup.POST("/knowledge/assets/:id/restore", knowledgeH.RestoreAsset)
-	projectGroup.PATCH("/knowledge/assets/:id/move", knowledgeH.MoveAsset)
-	projectGroup.POST("/knowledge/assets/:id/reupload", knowledgeH.ReuploadAsset)
-	projectGroup.POST("/knowledge/assets/:id/materialize-as-wiki", knowledgeH.MaterializeAsWiki)
-	projectGroup.GET("/knowledge/assets/:id/versions", knowledgeH.ListVersions)
-	projectGroup.POST("/knowledge/assets/:id/versions", knowledgeH.CreateVersion)
-	projectGroup.GET("/knowledge/assets/:id/versions/:vid", knowledgeH.GetVersion)
-	projectGroup.POST("/knowledge/assets/:id/versions/:vid/restore", knowledgeH.RestoreVersion)
-	projectGroup.GET("/knowledge/assets/:id/comments", knowledgeH.ListComments)
-	projectGroup.POST("/knowledge/assets/:id/comments", knowledgeH.CreateComment)
-	projectGroup.PATCH("/knowledge/assets/:id/comments/:cid", knowledgeH.UpdateComment)
-	projectGroup.DELETE("/knowledge/assets/:id/comments/:cid", knowledgeH.DeleteComment)
-	projectGroup.POST("/knowledge/assets/:id/decompose-tasks", docDecomposeH.Decompose)
-	projectGroup.POST("/knowledge/assets/:id/live-artifacts/project", knowledgeH.ProjectLiveArtifacts)
-	projectGroup.POST("/knowledge/assets/:id/live-artifacts/:blockId/freeze", knowledgeH.FreezeLiveArtifact)
+	projectGroup.GET("/knowledge/assets", knowledgeH.ListAssets, appMiddleware.Require(appMiddleware.ActionWikiRead))
+	projectGroup.POST("/knowledge/assets", knowledgeH.CreateAsset, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+	projectGroup.GET("/knowledge/assets/tree", knowledgeH.GetTree, appMiddleware.Require(appMiddleware.ActionWikiRead))
+	projectGroup.GET("/knowledge/search", knowledgeH.Search, appMiddleware.Require(appMiddleware.ActionWikiRead))
+	projectGroup.GET("/knowledge/assets/:id", knowledgeH.GetAsset, appMiddleware.Require(appMiddleware.ActionWikiRead))
+	projectGroup.PUT("/knowledge/assets/:id", knowledgeH.UpdateAsset, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+	projectGroup.DELETE("/knowledge/assets/:id", knowledgeH.DeleteAsset, appMiddleware.Require(appMiddleware.ActionWikiDelete))
+	projectGroup.POST("/knowledge/assets/:id/restore", knowledgeH.RestoreAsset, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+	projectGroup.PATCH("/knowledge/assets/:id/move", knowledgeH.MoveAsset, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+	projectGroup.POST("/knowledge/assets/:id/reupload", knowledgeH.ReuploadAsset, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+	projectGroup.POST("/knowledge/assets/:id/materialize-as-wiki", knowledgeH.MaterializeAsWiki, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+	projectGroup.GET("/knowledge/assets/:id/versions", knowledgeH.ListVersions, appMiddleware.Require(appMiddleware.ActionWikiRead))
+	projectGroup.POST("/knowledge/assets/:id/versions", knowledgeH.CreateVersion, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+	projectGroup.GET("/knowledge/assets/:id/versions/:vid", knowledgeH.GetVersion, appMiddleware.Require(appMiddleware.ActionWikiRead))
+	projectGroup.POST("/knowledge/assets/:id/versions/:vid/restore", knowledgeH.RestoreVersion, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+	projectGroup.GET("/knowledge/assets/:id/comments", knowledgeH.ListComments, appMiddleware.Require(appMiddleware.ActionWikiRead))
+	projectGroup.POST("/knowledge/assets/:id/comments", knowledgeH.CreateComment, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+	projectGroup.PATCH("/knowledge/assets/:id/comments/:cid", knowledgeH.UpdateComment, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+	projectGroup.DELETE("/knowledge/assets/:id/comments/:cid", knowledgeH.DeleteComment, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+	projectGroup.POST("/knowledge/assets/:id/decompose-tasks", docDecomposeH.Decompose, appMiddleware.Require(appMiddleware.ActionTaskCreate))
+	projectGroup.POST("/knowledge/assets/:id/live-artifacts/project", knowledgeH.ProjectLiveArtifacts, appMiddleware.Require(appMiddleware.ActionWikiRead))
+	projectGroup.POST("/knowledge/assets/:id/live-artifacts/:blockId/freeze", knowledgeH.FreezeLiveArtifact, appMiddleware.Require(appMiddleware.ActionWikiWrite))
+
+	// Audit log query API. Both routes are gated by the canonical
+	// audit.read ActionID (admin+).
+	projectGroup.GET("/audit-events", auditH.List, appMiddleware.Require(appMiddleware.ActionAuditRead))
+	projectGroup.GET("/audit-events/:eventId", auditH.Get, appMiddleware.Require(appMiddleware.ActionAuditRead))
 
 	// Task operations (not project-scoped, task ID is unique)
 	protected.GET("/tasks/:id", taskH.Get)
@@ -661,6 +824,12 @@ func RegisterRoutes(
 	v1.GET("/forms/:slug", formH.GetBySlug)
 	v1.POST("/forms/:slug/submit", formH.Submit)
 
+	// Invitation public surface. by-token is anonymous read, decline is
+	// anonymous-allowed, accept requires auth.
+	v1.GET("/invitations/by-token/:token", invitationH.GetByToken)
+	v1.POST("/invitations/decline", invitationH.Decline)
+	protected.POST("/invitations/accept", invitationH.Accept)
+
 	// Workflow definitions & executions (not project-scoped, ID is unique)
 	protected.GET("/workflows/:id", workflowH.GetDefinition)
 	protected.PUT("/workflows/:id", workflowH.UpdateDefinition)
@@ -673,7 +842,7 @@ func RegisterRoutes(
 	protected.POST("/executions/:id/events", workflowH.HandleExternalEvent)
 
 	// Workflow reviews
-	projectGroup.GET("/workflow-reviews", workflowH.ListPendingReviews)
+	projectGroup.GET("/workflow-reviews", workflowH.ListPendingReviews, appMiddleware.Require(appMiddleware.ActionWorkflowRead))
 
 		// Workflow templates
 		protected.GET("/workflow-templates", workflowH.ListTemplates)
@@ -828,7 +997,8 @@ func RegisterRoutes(
 
 	// Marketplace integration
 	marketplaceH := handler.NewMarketplaceHandler(pluginSvc, cfg.MarketplaceURL, cfg.PluginsDir, cfg.RolesDir).
-		WithWorkflowTemplateRepo(dagDefRepo)
+		WithWorkflowTemplateRepo(dagDefRepo).
+		WithProjectTemplateInstaller(projectTemplateSvc)
 	protected.POST("/marketplace/install", marketplaceH.Install)
 	protected.POST("/marketplace/uninstall", marketplaceH.Uninstall)
 	protected.POST("/marketplace/sideload", marketplaceH.Sideload)
@@ -897,5 +1067,7 @@ func RegisterRoutes(
 	return &RouteServices{
 		TaskProgress: taskProgressSvc,
 		Automation:   automationEngine,
+		AuditSink:    auditSink,
+		Invitation:   invitationSvc,
 	}
 }

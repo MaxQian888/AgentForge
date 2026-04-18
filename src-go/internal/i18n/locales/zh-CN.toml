@@ -316,6 +316,55 @@ other = "获取更新后的成员信息失败"
 [FailedToDeleteMember]
 other = "删除成员失败"
 
+[HumanMemberCreationMovedToInvitationFlow]
+other = "不再支持直接创建人类成员，请通过邀请流程加入"
+
+# 邀请
+[InvitationNotFound]
+other = "邀请不存在"
+
+[InvitationAlreadyPendingForIdentity]
+other = "该身份已存在待处理的邀请"
+
+[InvitationAlreadyProcessed]
+other = "邀请已被处理"
+
+[InvitationExpired]
+other = "邀请已过期"
+
+[InvitationIdentityMismatch]
+other = "当前身份与受邀身份不匹配"
+
+[InvitationInvalidIdentity]
+other = "受邀身份格式无效"
+
+[InvitationInvalidRole]
+other = "邀请项目角色无效"
+
+[FailedToCreateInvitation]
+other = "创建邀请失败"
+
+[FailedToListInvitations]
+other = "获取邀请列表失败"
+
+[FailedToRevokeInvitation]
+other = "撤销邀请失败"
+
+[FailedToResendInvitation]
+other = "重新发送邀请失败"
+
+[FailedToAcceptInvitation]
+other = "接受邀请失败"
+
+[FailedToDeclineInvitation]
+other = "拒绝邀请失败"
+
+[InvalidInvitationID]
+other = "无效的邀请 ID"
+
+[InvalidInvitationToken]
+other = "无效的邀请令牌"
+
 # 记忆
 [MemoryServiceUnavailable]
 other = "记忆服务不可用"
@@ -428,6 +477,46 @@ other = "更新项目失败"
 
 [FailedToFetchUpdatedProject]
 other = "获取更新后的项目信息失败"
+
+[ProjectArchived]
+other = "项目已归档，当前为只读状态"
+
+[ProjectNotArchived]
+other = "项目未处于归档状态"
+
+[ProjectMustBeArchivedBeforeDelete]
+other = "必须先归档项目才能删除"
+
+[FailedToArchiveProject]
+other = "归档项目失败"
+
+[FailedToUnarchiveProject]
+other = "恢复项目失败"
+
+# 项目模板
+[ProjectTemplateNotFound]
+other = "项目模板未找到"
+
+[ProjectTemplateImmutableSystem]
+other = "系统项目模板不可修改"
+
+[ProjectTemplateOwnerMismatch]
+other = "当前用户不是该项目模板的所有者"
+
+[ProjectTemplateSnapshotInvalid]
+other = "项目模板快照无效"
+
+[ProjectTemplateSnapshotTooLarge]
+other = "项目模板快照超过大小限制"
+
+[FailedToListProjectTemplates]
+other = "获取项目模板列表失败"
+
+[FailedToSaveProjectTemplate]
+other = "保存项目为模板失败"
+
+[FailedToCloneFromTemplate]
+other = "根据模板创建项目失败"
 
 # 评审
 [ReviewNotFound]
@@ -740,3 +829,22 @@ other = "保存工作流配置失败"
 # 中间件 - 项目
 [ProjectIDRequired]
 other = "项目 ID 为必填项"
+
+# 中间件 - RBAC
+[InsufficientProjectRole]
+other = "insufficient_project_role"
+
+[NotAProjectMember]
+other = "not_a_project_member"
+
+[LastOwnerProtected]
+other = "last_owner_protected"
+
+[CannotModifyOwnerAsAdmin]
+other = "cannot_modify_owner_as_admin"
+
+[InvalidProjectRole]
+other = "无效的项目角色"
+
+[UnknownProjectAction]
+other = "未知的项目操作"

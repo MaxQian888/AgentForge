@@ -1,0 +1,56 @@
+{
+  "title": "审计日志",
+  "description": "项目范围的审计事件，覆盖每次受控写入尝试与成功业务变更。",
+  "filters": {
+    "actionId": "操作",
+    "actorUserId": "发起人",
+    "resourceType": "资源类型",
+    "resourceId": "资源 ID",
+    "from": "起始时间",
+    "to": "结束时间",
+    "anyAction": "全部操作",
+    "anyActor": "全部发起人",
+    "anyResource": "全部资源类型",
+    "apply": "应用",
+    "reset": "重置"
+  },
+  "table": {
+    "occurredAt": "时间",
+    "actor": "发起人",
+    "role": "角色",
+    "actionId": "操作",
+    "resourceType": "资源",
+    "resourceId": "资源 ID",
+    "outcome": "结果",
+    "system": "系统触发",
+    "viewDetail": "查看详情",
+    "loadMore": "加载更多",
+    "empty": "当前筛选条件下没有审计事件。"
+  },
+  "outcome": {
+    "allowed": "允许",
+    "denied": "拒绝"
+  },
+  "detail": {
+    "title": "审计事件详情",
+    "id": "事件 ID",
+    "occurredAt": "发生时间",
+    "actor": "发起人",
+    "actorRole": "事件时角色",
+    "actionId": "操作 ID",
+    "resourceType": "资源类型",
+    "resourceId": "资源 ID",
+    "systemInitiated": "系统触发",
+    "configuredBy": "配置人",
+    "requestId": "请求 ID",
+    "ip": "IP 地址",
+    "userAgent": "User Agent",
+    "payload": "载荷快照",
+    "close": "关闭"
+  },
+  "errors": {
+    "loadFailed": "加载审计事件失败",
+    "loadDetailFailed": "加载事件详情失败",
+    "forbidden": "需要管理员或所有者角色才能查看审计事件"
+  }
+}

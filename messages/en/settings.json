@@ -15,6 +15,7 @@
     "customFields": "Custom Fields",
     "forms": "Forms",
     "automations": "Automations",
+    "auditLog": "Audit Log",
     "advanced": "Advanced",
     "runtimes": "Runtimes",
     "runtimeClaudeCode": "Claude Code",

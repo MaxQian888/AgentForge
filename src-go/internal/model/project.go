@@ -16,6 +16,27 @@ const (
 	ProjectStatusArchived = "archived"
 )
 
+// IsValidProjectStatus returns true when v is one of the canonical status
+// values persisted in the projects.status column (matching the CHECK
+// constraint declared in migration 060_add_project_archival).
+func IsValidProjectStatus(v string) bool {
+	switch v {
+	case ProjectStatusActive, ProjectStatusPaused, ProjectStatusArchived:
+		return true
+	}
+	return false
+}
+
+// NormalizeProjectStatus coerces the argument to a known status. Anything
+// unrecognized (including empty) is remapped to active — this mirrors the
+// legacy default from when status was computed in application code.
+func NormalizeProjectStatus(v string) string {
+	if IsValidProjectStatus(v) {
+		return v
+	}
+	return ProjectStatusActive
+}
+
 type CodingAgentSelection struct {
 	Runtime  string `json:"runtime,omitempty"`
 	Provider string `json:"provider,omitempty"`
@@ -138,18 +159,20 @@ type CodingAgentCatalogDTO struct {
 }
 
 type Project struct {
-	ID            uuid.UUID `db:"id"`
-	Name          string    `db:"name"`
-	Slug          string    `db:"slug"`
-	Description   string    `db:"description"`
-	RepoURL       string    `db:"repo_url"`
-	DefaultBranch string    `db:"default_branch"`
-	Settings      string    `db:"settings"` // JSON string
-	Status        string    `db:"-"`
-	TaskCount     int       `db:"-"`
-	AgentCount    int       `db:"-"`
-	CreatedAt     time.Time `db:"created_at"`
-	UpdatedAt     time.Time `db:"updated_at"`
+	ID               uuid.UUID  `db:"id"`
+	Name             string     `db:"name"`
+	Slug             string     `db:"slug"`
+	Description      string     `db:"description"`
+	RepoURL          string     `db:"repo_url"`
+	DefaultBranch    string     `db:"default_branch"`
+	Settings         string     `db:"settings"` // JSON string
+	Status           string     `db:"status"`
+	ArchivedAt       *time.Time `db:"archived_at"`
+	ArchivedByUserID *uuid.UUID `db:"archived_by_user_id"`
+	TaskCount        int        `db:"-"`
+	AgentCount       int        `db:"-"`
+	CreatedAt        time.Time  `db:"created_at"`
+	UpdatedAt        time.Time  `db:"updated_at"`
 }
 
 type ProjectDTO struct {
@@ -160,6 +183,8 @@ type ProjectDTO struct {
 	RepoURL            string                 `json:"repoUrl"`
 	DefaultBranch      string                 `json:"defaultBranch"`
 	Status             string                 `json:"status"`
+	ArchivedAt         *time.Time             `json:"archivedAt,omitempty"`
+	ArchivedByUserID   *string                `json:"archivedByUserId,omitempty"`
 	TaskCount          int                    `json:"taskCount"`
 	AgentCount         int                    `json:"agentCount"`
 	Settings           ProjectSettingsDTO     `json:"settings"`
@@ -172,6 +197,12 @@ type CreateProjectRequest struct {
 	Slug        string `json:"slug" validate:"required,min=1,max=50"`
 	Description string `json:"description"`
 	RepoURL     string `json:"repoUrl"`
+	// Optional template parameters. When both are empty the blank-project
+	// path applies (unchanged behavior). When set, the server clones the
+	// referenced project template snapshot onto the new project inside the
+	// creation transaction. See openspec add-project-templates.
+	TemplateSource string `json:"templateSource,omitempty" validate:"omitempty,oneof=system user marketplace"`
+	TemplateID     string `json:"templateId,omitempty" validate:"omitempty,uuid"`
 }
 
 type UpdateProjectRequest struct {
@@ -183,19 +214,33 @@ type UpdateProjectRequest struct {
 }
 
 func (p *Project) ToDTO() ProjectDTO {
-	return ProjectDTO{
+	dto := ProjectDTO{
 		ID:            p.ID.String(),
 		Name:          p.Name,
 		Slug:          p.Slug,
 		Description:   p.Description,
 		RepoURL:       p.RepoURL,
 		DefaultBranch: p.DefaultBranch,
-		Status:        p.Status,
+		Status:        NormalizeProjectStatus(p.Status),
 		TaskCount:     p.TaskCount,
 		AgentCount:    p.AgentCount,
 		Settings:      p.SettingsDTO(),
 		CreatedAt:     p.CreatedAt,
 	}
+	if p.ArchivedAt != nil {
+		t := *p.ArchivedAt
+		dto.ArchivedAt = &t
+	}
+	if p.ArchivedByUserID != nil {
+		id := p.ArchivedByUserID.String()
+		dto.ArchivedByUserID = &id
+	}
+	return dto
+}
+
+// IsArchived reports whether the project is currently archived.
+func (p *Project) IsArchived() bool {
+	return p != nil && p.Status == ProjectStatusArchived
 }
 
 func (p *Project) ToDTOWithCatalog(catalog *CodingAgentCatalogDTO) ProjectDTO {

@@ -7,22 +7,23 @@ import (
 )
 
 type Member struct {
-	ID          uuid.UUID  `db:"id"`
-	ProjectID   uuid.UUID  `db:"project_id"`
-	UserID      *uuid.UUID `db:"user_id"` // nullable for agent members
-	Name        string     `db:"name"`
-	Type        string     `db:"type"` // "human" or "agent"
-	Role        string     `db:"role"`
-	Status      string     `db:"status"`
-	Email       string     `db:"email"`
-	IMPlatform  string     `db:"im_platform"`
-	IMUserID    string     `db:"im_user_id"`
-	AvatarURL   string     `db:"avatar_url"`
-	AgentConfig string     `db:"agent_config"` // JSON string
-	Skills      []string   `db:"skills"`
-	IsActive    bool       `db:"is_active"`
-	CreatedAt   time.Time  `db:"created_at"`
-	UpdatedAt   time.Time  `db:"updated_at"`
+	ID           uuid.UUID  `db:"id"`
+	ProjectID    uuid.UUID  `db:"project_id"`
+	UserID       *uuid.UUID `db:"user_id"` // nullable for agent members
+	Name         string     `db:"name"`
+	Type         string     `db:"type"` // "human" or "agent"
+	Role         string     `db:"role"`
+	ProjectRole  string     `db:"project_role"` // owner|admin|editor|viewer
+	Status       string     `db:"status"`
+	Email        string     `db:"email"`
+	IMPlatform   string     `db:"im_platform"`
+	IMUserID     string     `db:"im_user_id"`
+	AvatarURL    string     `db:"avatar_url"`
+	AgentConfig  string     `db:"agent_config"` // JSON string
+	Skills       []string   `db:"skills"`
+	IsActive     bool       `db:"is_active"`
+	CreatedAt    time.Time  `db:"created_at"`
+	UpdatedAt    time.Time  `db:"updated_at"`
 }
 
 const (
@@ -31,34 +32,85 @@ const (
 	MemberStatusActive    = "active"
 	MemberStatusInactive  = "inactive"
 	MemberStatusSuspended = "suspended"
+
+	// Project-scoped human roles. Hardcoded; custom roles are out of scope.
+	ProjectRoleOwner  = "owner"
+	ProjectRoleAdmin  = "admin"
+	ProjectRoleEditor = "editor"
+	ProjectRoleViewer = "viewer"
 )
 
+// IsValidProjectRole reports whether v is one of the four canonical roles.
+func IsValidProjectRole(v string) bool {
+	switch v {
+	case ProjectRoleOwner, ProjectRoleAdmin, ProjectRoleEditor, ProjectRoleViewer:
+		return true
+	}
+	return false
+}
+
+// NormalizeProjectRole returns the role if valid, otherwise the default editor role.
+// Empty input also normalizes to editor (matches DB default).
+func NormalizeProjectRole(v string) string {
+	if v == "" {
+		return ProjectRoleEditor
+	}
+	if IsValidProjectRole(v) {
+		return v
+	}
+	return ProjectRoleEditor
+}
+
+// ProjectRoleRank returns a numeric ordering: owner=4, admin=3, editor=2, viewer=1.
+// Unknown roles return 0 so any MinRole comparison fails closed.
+func ProjectRoleRank(v string) int {
+	switch v {
+	case ProjectRoleOwner:
+		return 4
+	case ProjectRoleAdmin:
+		return 3
+	case ProjectRoleEditor:
+		return 2
+	case ProjectRoleViewer:
+		return 1
+	}
+	return 0
+}
+
+// ProjectRoleAtLeast returns true when have ≥ need by canonical rank.
+func ProjectRoleAtLeast(have, need string) bool {
+	return ProjectRoleRank(have) >= ProjectRoleRank(need)
+}
+
 type MemberDTO struct {
-	ID        string   `json:"id"`
-	ProjectID string   `json:"projectId"`
-	UserID    *string  `json:"userId,omitempty"`
-	Name      string   `json:"name"`
-	Type      string   `json:"type"`
-	Role      string   `json:"role"`
-	Status    string   `json:"status"`
-	Email     string   `json:"email"`
-	IMPlatform string  `json:"imPlatform,omitempty"`
-	IMUserID  string   `json:"imUserId,omitempty"`
-	AvatarURL string   `json:"avatarUrl"`
-	AgentConfig string `json:"agentConfig,omitempty"`
-	Skills    []string `json:"skills"`
-	IsActive  bool     `json:"isActive"`
-	CreatedAt string   `json:"createdAt"`
+	ID          string   `json:"id"`
+	ProjectID   string   `json:"projectId"`
+	UserID      *string  `json:"userId,omitempty"`
+	Name        string   `json:"name"`
+	Type        string   `json:"type"`
+	Role        string   `json:"role"`
+	ProjectRole string   `json:"projectRole"`
+	Status      string   `json:"status"`
+	Email       string   `json:"email"`
+	IMPlatform  string   `json:"imPlatform,omitempty"`
+	IMUserID    string   `json:"imUserId,omitempty"`
+	AvatarURL   string   `json:"avatarUrl"`
+	AgentConfig string   `json:"agentConfig,omitempty"`
+	Skills      []string `json:"skills"`
+	IsActive    bool     `json:"isActive"`
+	CreatedAt   string   `json:"createdAt"`
 }
 
 type CreateMemberRequest struct {
 	Name        string   `json:"name" validate:"required,min=1,max=100"`
 	Type        string   `json:"type" validate:"required,oneof=human agent"`
 	Role        string   `json:"role"`
+	ProjectRole string   `json:"projectRole" validate:"omitempty,oneof=owner admin editor viewer"`
 	Status      string   `json:"status" validate:"omitempty,oneof=active inactive suspended"`
 	Email       string   `json:"email"`
 	IMPlatform  string   `json:"imPlatform"`
 	IMUserID    string   `json:"imUserId"`
+	UserID      string   `json:"userId"`
 	AgentConfig string   `json:"agentConfig"`
 	Skills      []string `json:"skills"`
 }
@@ -66,6 +118,7 @@ type CreateMemberRequest struct {
 type UpdateMemberRequest struct {
 	Name        *string   `json:"name"`
 	Role        *string   `json:"role"`
+	ProjectRole *string   `json:"projectRole" validate:"omitempty,oneof=owner admin editor viewer"`
 	Status      *string   `json:"status" validate:"omitempty,oneof=active inactive suspended"`
 	Email       *string   `json:"email"`
 	IMPlatform  *string   `json:"imPlatform"`
@@ -115,20 +168,21 @@ func IsMemberStatusActive(status string) bool {
 func (m *Member) ToDTO() MemberDTO {
 	status := NormalizeMemberStatus(m.Status, m.IsActive)
 	dto := MemberDTO{
-		ID:        m.ID.String(),
-		ProjectID: m.ProjectID.String(),
-		Name:      m.Name,
-		Type:      m.Type,
-		Role:      m.Role,
-		Status:    status,
-		Email:     m.Email,
-		IMPlatform: m.IMPlatform,
-		IMUserID:  m.IMUserID,
-		AvatarURL: m.AvatarURL,
+		ID:          m.ID.String(),
+		ProjectID:   m.ProjectID.String(),
+		Name:        m.Name,
+		Type:        m.Type,
+		Role:        m.Role,
+		ProjectRole: NormalizeProjectRole(m.ProjectRole),
+		Status:      status,
+		Email:       m.Email,
+		IMPlatform:  m.IMPlatform,
+		IMUserID:    m.IMUserID,
+		AvatarURL:   m.AvatarURL,
 		AgentConfig: m.AgentConfig,
-		Skills:    m.Skills,
-		IsActive:  IsMemberStatusActive(status),
-		CreatedAt: m.CreatedAt.Format(time.RFC3339),
+		Skills:      m.Skills,
+		IsActive:    IsMemberStatusActive(status),
+		CreatedAt:   m.CreatedAt.Format(time.RFC3339),
 	}
 	if m.UserID != nil {
 		s := m.UserID.String()

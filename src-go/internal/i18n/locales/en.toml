@@ -316,6 +316,55 @@ other = "failed to fetch updated member"
 [FailedToDeleteMember]
 other = "failed to delete member"
 
+[HumanMemberCreationMovedToInvitationFlow]
+other = "creating a human member directly is no longer supported; send an invitation instead"
+
+# Invitation
+[InvitationNotFound]
+other = "invitation not found"
+
+[InvitationAlreadyPendingForIdentity]
+other = "a pending invitation already exists for this identity"
+
+[InvitationAlreadyProcessed]
+other = "invitation has already been processed"
+
+[InvitationExpired]
+other = "invitation has expired"
+
+[InvitationIdentityMismatch]
+other = "your current identity does not match the invited identity"
+
+[InvitationInvalidIdentity]
+other = "invalid invited identity payload"
+
+[InvitationInvalidRole]
+other = "invalid project role for invitation"
+
+[FailedToCreateInvitation]
+other = "failed to create invitation"
+
+[FailedToListInvitations]
+other = "failed to list invitations"
+
+[FailedToRevokeInvitation]
+other = "failed to revoke invitation"
+
+[FailedToResendInvitation]
+other = "failed to resend invitation"
+
+[FailedToAcceptInvitation]
+other = "failed to accept invitation"
+
+[FailedToDeclineInvitation]
+other = "failed to decline invitation"
+
+[InvalidInvitationID]
+other = "invalid invitation id"
+
+[InvalidInvitationToken]
+other = "invalid invitation token"
+
 # Memory
 [MemoryServiceUnavailable]
 other = "memory service unavailable"
@@ -428,6 +477,46 @@ other = "failed to update project"
 
 [FailedToFetchUpdatedProject]
 other = "failed to fetch updated project"
+
+[ProjectArchived]
+other = "project is archived and read-only"
+
+[ProjectNotArchived]
+other = "project is not archived"
+
+[ProjectMustBeArchivedBeforeDelete]
+other = "project must be archived before it can be deleted"
+
+[FailedToArchiveProject]
+other = "failed to archive project"
+
+[FailedToUnarchiveProject]
+other = "failed to unarchive project"
+
+# Project templates
+[ProjectTemplateNotFound]
+other = "project template not found"
+
+[ProjectTemplateImmutableSystem]
+other = "system project templates are read-only"
+
+[ProjectTemplateOwnerMismatch]
+other = "caller is not the owner of this project template"
+
+[ProjectTemplateSnapshotInvalid]
+other = "project template snapshot is invalid"
+
+[ProjectTemplateSnapshotTooLarge]
+other = "project template snapshot exceeds the allowed size"
+
+[FailedToListProjectTemplates]
+other = "failed to list project templates"
+
+[FailedToSaveProjectTemplate]
+other = "failed to save project as template"
+
+[FailedToCloneFromTemplate]
+other = "failed to create project from template"
 
 # Review
 [ReviewNotFound]
@@ -740,3 +829,22 @@ other = "failed to save workflow config"
 # Middleware - Project
 [ProjectIDRequired]
 other = "project ID required"
+
+# Middleware - RBAC
+[InsufficientProjectRole]
+other = "insufficient_project_role"
+
+[NotAProjectMember]
+other = "not_a_project_member"
+
+[LastOwnerProtected]
+other = "last_owner_protected"
+
+[CannotModifyOwnerAsAdmin]
+other = "cannot_modify_owner_as_admin"
+
+[InvalidProjectRole]
+other = "invalid project role"
+
+[UnknownProjectAction]
+other = "unknown project action"

@@ -3,7 +3,7 @@
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { useTranslations } from "next-intl";
-import { Plus, FolderKanban, Search, ListChecks } from "lucide-react";
+import { Plus, FolderKanban, Search, ListChecks, Archive } from "lucide-react";
 import { Card, CardContent } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -21,6 +21,11 @@ import {
   DialogTitle,
   DialogTrigger,
 } from "@/components/ui/dialog";
+import {
+  Tabs,
+  TabsList,
+  TabsTrigger,
+} from "@/components/ui/tabs";
 import { ProjectCard } from "@/components/project/project-card";
 import { EditProjectDialog } from "@/components/project/edit-project-dialog";
 import {
@@ -113,21 +118,36 @@ function ProjectCardSkeleton() {
 export default function ProjectsPage() {
   useBreadcrumbs([{ label: "Workspace", href: "/" }, { label: "Projects" }]);
   const t = useTranslations("projects");
-  const { projects, fetchProjects, updateProject, deleteProject, loading } =
-    useProjectStore();
+  const {
+    projects,
+    fetchProjects,
+    updateProject,
+    deleteProject,
+    archiveProject,
+    unarchiveProject,
+    loading,
+  } = useProjectStore();
   const [searchQuery, setSearchQuery] = useState("");
   const [editingProject, setEditingProject] = useState<Project | null>(null);
+  const [viewMode, setViewMode] = useState<"active" | "archived">("active");
 
   useEffect(() => {
-    fetchProjects();
-  }, [fetchProjects]);
+    fetchProjects({ includeArchived: viewMode === "archived" });
+  }, [fetchProjects, viewMode]);
+
+  const viewFilteredProjects = useMemo(() => {
+    if (viewMode === "archived") {
+      return projects.filter((p) => p.status === "archived");
+    }
+    return projects.filter((p) => p.status !== "archived");
+  }, [projects, viewMode]);
 
   const filteredProjects = useMemo(
     () =>
-      projects.filter((p) =>
+      viewFilteredProjects.filter((p) =>
         p.name.toLowerCase().includes(searchQuery.toLowerCase())
       ),
-    [projects, searchQuery]
+    [viewFilteredProjects, searchQuery]
   );
 
   const activeCount = useMemo(
@@ -144,6 +164,14 @@ export default function ProjectsPage() {
     await updateProject(id, input);
   };
 
+  const handleArchive = async (id: string) => {
+    await archiveProject(id);
+  };
+
+  const handleUnarchive = async (id: string) => {
+    await unarchiveProject(id);
+  };
+
   return (
     <div className="flex flex-col gap-6">
       {/* Header */}
@@ -151,6 +179,20 @@ export default function ProjectsPage() {
         title={t("title")}
         actions={<CreateProjectDialog />}
       />
+
+      {/* View switch */}
+      <Tabs
+        value={viewMode}
+        onValueChange={(v) => setViewMode(v === "archived" ? "archived" : "active")}
+      >
+        <TabsList>
+          <TabsTrigger value="active">{t("tabs.active")}</TabsTrigger>
+          <TabsTrigger value="archived">
+            <Archive className="mr-1 size-3" />
+            {t("tabs.archived")}
+          </TabsTrigger>
+        </TabsList>
+      </Tabs>
 
       {/* Search */}
       <FilterBar
@@ -205,6 +247,8 @@ export default function ProjectsPage() {
               project={p}
               onEdit={setEditingProject}
               onDelete={deleteProject}
+              onArchive={handleArchive}
+              onUnarchive={handleUnarchive}
             />
           ))}
         </div>

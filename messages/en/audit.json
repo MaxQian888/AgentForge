@@ -1,0 +1,56 @@
+{
+  "title": "Audit Log",
+  "description": "Project-scoped audit events covering every gated write attempt and successful business mutation.",
+  "filters": {
+    "actionId": "Action",
+    "actorUserId": "Actor",
+    "resourceType": "Resource type",
+    "resourceId": "Resource ID",
+    "from": "From",
+    "to": "To",
+    "anyAction": "Any action",
+    "anyActor": "Any actor",
+    "anyResource": "Any resource",
+    "apply": "Apply",
+    "reset": "Reset"
+  },
+  "table": {
+    "occurredAt": "Time",
+    "actor": "Actor",
+    "role": "Role",
+    "actionId": "Action",
+    "resourceType": "Resource",
+    "resourceId": "Resource ID",
+    "outcome": "Outcome",
+    "system": "System-initiated",
+    "viewDetail": "View detail",
+    "loadMore": "Load more",
+    "empty": "No audit events match the current filters."
+  },
+  "outcome": {
+    "allowed": "Allowed",
+    "denied": "Denied"
+  },
+  "detail": {
+    "title": "Audit Event Detail",
+    "id": "Event ID",
+    "occurredAt": "Occurred at",
+    "actor": "Actor",
+    "actorRole": "Actor role at time",
+    "actionId": "Action ID",
+    "resourceType": "Resource type",
+    "resourceId": "Resource ID",
+    "systemInitiated": "System-initiated",
+    "configuredBy": "Configured by",
+    "requestId": "Request ID",
+    "ip": "IP address",
+    "userAgent": "User agent",
+    "payload": "Payload snapshot",
+    "close": "Close"
+  },
+  "errors": {
+    "loadFailed": "Failed to load audit events",
+    "loadDetailFailed": "Failed to load event detail",
+    "forbidden": "You need admin or owner role to view audit events"
+  }
+}

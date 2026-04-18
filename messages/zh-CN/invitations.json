@@ -1,0 +1,63 @@
+{
+  "title": "团队邀请",
+  "pendingTitle": "待处理邀请",
+  "noPending": "当前没有待处理的邀请。",
+  "dialog": {
+    "title": "邀请团队成员",
+    "description": "通过邮箱或 IM 身份发送邀请。受邀者接受后即成为正式成员。",
+    "identityType": "身份类型",
+    "identityEmail": "邮箱",
+    "identityIM": "IM（平台 + 用户 ID）",
+    "emailLabel": "邮箱",
+    "emailPlaceholder": "member@example.com",
+    "imPlatformLabel": "IM 平台",
+    "imPlatformPlaceholder": "feishu / lark / dingtalk",
+    "imUserIdLabel": "IM 用户 ID",
+    "imDisplayNameLabel": "显示名称",
+    "roleLabel": "项目角色",
+    "messageLabel": "留言（可选）",
+    "sending": "发送中...",
+    "send": "发送邀请",
+    "cancel": "取消",
+    "close": "关闭",
+    "sendAnother": "再发一条",
+    "createdHeading": "邀请已创建。如果自动投递未送达，可把下面的链接发给受邀者：",
+    "errorEmailRequired": "邮箱为必填项",
+    "errorIMRequired": "请同时填写 IM 平台和用户 ID"
+  },
+  "roster": {
+    "invitedIdentity": "受邀身份",
+    "role": "角色",
+    "expires": "过期时间",
+    "delivery": "投递状态",
+    "actions": "操作",
+    "resend": "重发",
+    "revoke": "撤销"
+  },
+  "accept": {
+    "title": "项目邀请",
+    "description": "查看邀请详情后，选择接受或拒绝。",
+    "loading": "加载邀请信息...",
+    "project": "项目",
+    "role": "角色",
+    "invitedBy": "邀请人",
+    "expires": "过期时间",
+    "forIdentity": "针对身份",
+    "notPending": "此邀请处于 {status} 状态，无法继续处理。",
+    "accept": "接受",
+    "decline": "拒绝",
+    "accepting": "接受中...",
+    "declining": "拒绝中...",
+    "signInToAccept": "登录后接受",
+    "accepted": "邀请已接受。你已成为该项目成员。",
+    "declined": "邀请已拒绝。",
+    "goToDashboard": "进入主面板",
+    "close": "关闭"
+  },
+  "decline": {
+    "title": "拒绝邀请",
+    "working": "处理中...",
+    "done": "邀请已被拒绝。",
+    "missingToken": "缺少邀请令牌"
+  }
+}

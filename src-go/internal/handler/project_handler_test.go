@@ -14,7 +14,10 @@ import (
 	"github.com/labstack/echo/v4"
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/handler"
+	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/repository"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type projectTestValidator struct {
@@ -30,6 +33,7 @@ type mockProjectRepo struct {
 	lastCreate   *model.Project
 	lastUpdateID uuid.UUID
 	lastUpdate   *model.UpdateProjectRequest
+	lastOwner    *model.Member
 }
 
 func (m *mockProjectRepo) Create(_ context.Context, project *model.Project) error {
@@ -58,6 +62,27 @@ func (m *mockProjectRepo) List(_ context.Context) ([]*model.Project, error) {
 		projects = append(projects, &cloned)
 	}
 	return projects, nil
+}
+
+func (m *mockProjectRepo) ListWithFilter(ctx context.Context, filter repository.ProjectListFilter) ([]*model.Project, error) {
+	all, err := m.List(ctx)
+	if err != nil {
+		return nil, err
+	}
+	if len(filter.Statuses) == 0 {
+		return all, nil
+	}
+	allowed := map[string]struct{}{}
+	for _, s := range filter.Statuses {
+		allowed[s] = struct{}{}
+	}
+	filtered := make([]*model.Project, 0, len(all))
+	for _, p := range all {
+		if _, ok := allowed[p.Status]; ok {
+			filtered = append(filtered, p)
+		}
+	}
+	return filtered, nil
 }
 
 func (m *mockProjectRepo) Update(_ context.Context, id uuid.UUID, req *model.UpdateProjectRequest) error {
@@ -91,6 +116,16 @@ func (m *mockProjectRepo) Update(_ context.Context, id uuid.UUID, req *model.Upd
 
 func (m *mockProjectRepo) Delete(_ context.Context, id uuid.UUID) error {
 	delete(m.projects, id)
+	return nil
+}
+
+func (m *mockProjectRepo) CreateWithOwner(ctx context.Context, project *model.Project, ownerMember *model.Member) error {
+	if err := m.Create(ctx, project); err != nil {
+		return err
+	}
+	// Tests rarely care about the owner row; we accept it for signature parity
+	// and stash it on the receiver so callers can assert if needed.
+	m.lastOwner = ownerMember
 	return nil
 }
 
@@ -369,6 +404,9 @@ func TestProjectHandler_CreateBootstrapsWikiSpace(t *testing.T) {
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	c := e.NewContext(req, rec)
+	// Project create now records the caller as the project's first owner.
+	// Inject claims so the handler can resolve initiatorUserID.
+	c.Set(appMiddleware.JWTContextKey, &service.Claims{UserID: uuid.New().String()})
 
 	h := handler.NewProjectHandler(repo, client, bootstrap)
 	if err := h.Create(c); err != nil {
