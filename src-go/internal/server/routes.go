@@ -558,6 +558,12 @@ func RegisterRoutes(
 	triggerH := handler.NewTriggerHandler(triggerRouter)
 	triggerH.RegisterRoutes(e)
 
+	// Start the schedule ticker in the background. It evaluates enabled
+	// source=schedule workflow_triggers every minute boundary and fires the
+	// router when a trigger's cron matches. Cancellation falls back to the
+	// server's shutdown context on main exit.
+	go trigger.NewScheduleTicker(triggerRepo, triggerRouter, nil).Run(context.Background())
+
 	workflowH = workflowH.WithDAGService(dagWorkflowSvc, dagDefRepo, dagExecRepo, dagNodeExecRepo)
 	// Template and review services
 	templateSvc := service.NewWorkflowTemplateService(dagDefRepo, dagWorkflowSvc)
