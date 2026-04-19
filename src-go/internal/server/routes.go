@@ -555,7 +555,7 @@ func RegisterRoutes(
 	triggerRegistrar := trigger.NewRegistrar(triggerRepo)
 	triggerRouter := trigger.NewRouter(triggerRepo, dagWorkflowSvc, trigger.NoopIdempotencyStore{})
 	workflowH.SetTriggerSyncer(triggerRegistrar)
-	triggerH := handler.NewTriggerHandler(triggerRouter)
+	triggerH := handler.NewTriggerHandler(triggerRouter).WithQueryRepo(triggerRepo)
 	triggerH.RegisterRoutes(e)
 
 	// Start the schedule ticker in the background. It evaluates enabled

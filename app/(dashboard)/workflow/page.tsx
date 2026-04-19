@@ -26,6 +26,7 @@ import { WorkflowEditor } from "@/components/workflow-editor";
 import { WorkflowExecutionView } from "@/components/workflow/workflow-execution-view";
 import { WorkflowReviewsTab } from "@/components/workflow/workflow-reviews-tab";
 import { WorkflowTemplatesTab } from "@/components/workflow/workflow-templates-tab";
+import { WorkflowTriggersSection } from "@/components/workflow/workflow-triggers-section";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
@@ -587,6 +588,36 @@ function ExecutionsTab({ projectId }: { projectId: string }) {
   );
 }
 
+function TriggersTab({ projectId }: { projectId: string }) {
+  const { definitions, fetchDefinitions } = useWorkflowStore();
+  const [selectedWorkflowId, setSelectedWorkflowId] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchDefinitions(projectId);
+  }, [projectId, fetchDefinitions]);
+
+  return (
+    <div className="space-y-4">
+      <div className="flex items-center gap-3">
+        <Label className="text-sm">Workflow:</Label>
+        <select
+          className="border rounded px-2 py-1 text-sm bg-background"
+          value={selectedWorkflowId ?? ""}
+          onChange={(e) => setSelectedWorkflowId(e.target.value || null)}
+        >
+          <option value="">Select a workflow</option>
+          {definitions.map((def) => (
+            <option key={def.id} value={def.id}>
+              {def.name}
+            </option>
+          ))}
+        </select>
+      </div>
+      <WorkflowTriggersSection workflowId={selectedWorkflowId} />
+    </div>
+  );
+}
+
 function WorkflowPageContent() {
   useBreadcrumbs([{ label: "Operations", href: "/" }, { label: "Workflow" }]);
   const t = useTranslations("workflow");
@@ -627,6 +658,7 @@ function WorkflowPageContent() {
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="workflows">Workflows</TabsTrigger>
           <TabsTrigger value="executions">Executions</TabsTrigger>
+          <TabsTrigger value="triggers">Triggers</TabsTrigger>
           <TabsTrigger value="reviews">Reviews</TabsTrigger>
           <TabsTrigger value="templates">Templates</TabsTrigger>
         </TabsList>
@@ -638,6 +670,9 @@ function WorkflowPageContent() {
         </TabsContent>
         <TabsContent value="executions" className="mt-4">
           <ExecutionsTab projectId={activeProjectId} />
+        </TabsContent>
+        <TabsContent value="triggers" className="mt-4">
+          <TriggersTab projectId={activeProjectId} />
         </TabsContent>
         <TabsContent value="reviews" className="mt-4">
           <WorkflowReviewsTab projectId={activeProjectId} />
