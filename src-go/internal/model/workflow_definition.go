@@ -59,6 +59,7 @@ type WorkflowExecution struct {
 	Context      json.RawMessage `db:"context" json:"context,omitempty" gorm:"type:jsonb"`  // runtime state
 	DataStore    json.RawMessage `db:"data_store" json:"dataStore,omitempty" gorm:"type:jsonb"` // accumulated node outputs keyed by node ID
 	ErrorMessage string          `db:"error_message" json:"errorMessage,omitempty"`
+	TriggeredBy  *uuid.UUID      `db:"triggered_by" json:"triggeredBy,omitempty"`
 	StartedAt    *time.Time      `db:"started_at" json:"startedAt,omitempty"`
 	CompletedAt  *time.Time      `db:"completed_at" json:"completedAt,omitempty"`
 	CreatedAt    time.Time       `db:"created_at" json:"createdAt"`

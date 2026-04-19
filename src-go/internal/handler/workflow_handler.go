@@ -111,7 +111,7 @@ func (h *WorkflowHandler) Get(c echo.Context) error {
 		return c.JSON(http.StatusOK, model.WorkflowConfigDTO{
 			ProjectID:   projectID.String(),
 			Transitions: make(map[string][]string),
-			Triggers:    make([]model.WorkflowTrigger, 0),
+			Triggers:    make([]model.TaskWorkflowTrigger, 0),
 		})
 	}
 	return c.JSON(http.StatusOK, wf.ToDTO())

@@ -17,8 +17,8 @@ type WorkflowConfig struct {
 	UpdatedAt   time.Time       `db:"updated_at"`
 }
 
-// WorkflowTrigger defines an automation rule that fires on a status transition.
-type WorkflowTrigger struct {
+// TaskWorkflowTrigger defines an automation rule that fires on a status transition.
+type TaskWorkflowTrigger struct {
 	FromStatus string `json:"fromStatus"`
 	ToStatus   string `json:"toStatus"`
 	Action     string `json:"action"` // e.g. "auto_assign", "notify", "dispatch_agent"
@@ -50,17 +50,17 @@ type WorkflowTriggerOutcome struct {
 }
 
 type WorkflowConfigDTO struct {
-	ID          string              `json:"id"`
-	ProjectID   string              `json:"projectId"`
-	Transitions map[string][]string `json:"transitions"`
-	Triggers    []WorkflowTrigger   `json:"triggers"`
-	CreatedAt   string              `json:"createdAt"`
-	UpdatedAt   string              `json:"updatedAt"`
+	ID          string                 `json:"id"`
+	ProjectID   string                 `json:"projectId"`
+	Transitions map[string][]string    `json:"transitions"`
+	Triggers    []TaskWorkflowTrigger  `json:"triggers"`
+	CreatedAt   string                 `json:"createdAt"`
+	UpdatedAt   string                 `json:"updatedAt"`
 }
 
 type UpdateWorkflowRequest struct {
-	Transitions map[string][]string `json:"transitions"`
-	Triggers    []WorkflowTrigger   `json:"triggers"`
+	Transitions map[string][]string   `json:"transitions"`
+	Triggers    []TaskWorkflowTrigger `json:"triggers"`
 }
 
 func (w *WorkflowConfig) ToDTO() WorkflowConfigDTO {
@@ -76,7 +76,7 @@ func (w *WorkflowConfig) ToDTO() WorkflowConfigDTO {
 		_ = json.Unmarshal(w.Transitions, &dto.Transitions)
 	}
 
-	dto.Triggers = make([]WorkflowTrigger, 0)
+	dto.Triggers = make([]TaskWorkflowTrigger, 0)
 	if len(w.Triggers) > 0 {
 		_ = json.Unmarshal(w.Triggers, &dto.Triggers)
 	}
