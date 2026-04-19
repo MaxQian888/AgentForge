@@ -34,7 +34,7 @@ CREATE TABLE workflow_triggers (
     config                   JSONB NOT NULL,
     input_mapping            JSONB NOT NULL DEFAULT '{}'::jsonb,
     idempotency_key_template TEXT,
-    dedupe_window_seconds    INTEGER NOT NULL DEFAULT 0,
+    dedupe_window_seconds    INTEGER NOT NULL DEFAULT 0 CHECK (dedupe_window_seconds >= 0),
     enabled                  BOOLEAN NOT NULL DEFAULT true,
     created_by               UUID REFERENCES members(id) ON DELETE SET NULL,
     created_at               TIMESTAMPTZ NOT NULL DEFAULT now(),
@@ -51,6 +51,10 @@ ALTER TABLE agent_runs
 CREATE INDEX agent_runs_employee_idx ON agent_runs(employee_id) WHERE employee_id IS NOT NULL;
 
 -- agent_memory: support an employee scope with dedicated employee_id column.
+-- NOTE: ON DELETE CASCADE is intentional — a memory row with scope='employee'
+-- has no meaningful owner once its employee is hard-deleted. State=archived
+-- is the normal retirement path and preserves memory; only hard-delete
+-- (privacy/GDPR-style erase) triggers cascade.
 ALTER TABLE agent_memory
     DROP CONSTRAINT IF EXISTS agent_memory_scope_check;
 ALTER TABLE agent_memory
