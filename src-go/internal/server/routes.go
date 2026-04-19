@@ -1151,7 +1151,7 @@ func RegisterRoutes(
 	if imReactionEventRepo != nil {
 		imSvc.SetReactionStore(service.NewIMReactionStoreAdapter(imReactionEventRepo))
 	}
-	imSvc.SetActionExecutor(service.NewBackendIMActionExecutor(
+	imActionExecutor := service.NewBackendIMActionExecutor(
 		dispatchSvc,
 		taskDecomposeSvc,
 		reviewSvc,
@@ -1162,7 +1162,11 @@ func RegisterRoutes(
 		wikiSvc,
 		imReactionEventRepo,
 		taskCommentRepo,
-	))
+	)
+	if dagWorkflowSvc != nil {
+		imActionExecutor = imActionExecutor.WithReviewWorkflow(dagWorkflowSvc, wfReviewRepo)
+	}
+	imSvc.SetActionExecutor(imActionExecutor)
 	automationEngine.SetIMSender(imSvc)
 	wikiSvc.WithIMForwarder(imSvc, cfg.IMNotifyPlatform, cfg.IMNotifyTargetChatID).WithIMChannelResolver(imControlPlane)
 	imH := handler.NewIMHandler(imSvc)
