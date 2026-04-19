@@ -30,6 +30,14 @@ type ReviewRepository interface {
 	ListAll(ctx context.Context, status, riskLevel string, limit int) ([]*model.Review, error)
 	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
 	UpdateResult(ctx context.Context, review *model.Review) error
+	SetExecutionID(ctx context.Context, id uuid.UUID, executionID uuid.UUID) error
+}
+
+// ReviewWorkflowLauncher starts a workflow execution from a named template.
+// In production implemented by *WorkflowTemplateService + *DAGWorkflowService
+// composed behind a thin adapter. Nil disables the workflow-backed path.
+type ReviewWorkflowLauncher interface {
+	LaunchReviewWorkflow(ctx context.Context, projectID uuid.UUID, seed map[string]any) (executionID uuid.UUID, err error)
 }
 
 type ReviewTaskRepository interface {
@@ -51,21 +59,23 @@ type ReviewBridgeClient interface {
 }
 
 type ReviewService struct {
-	reviews       ReviewRepository
-	tasks         ReviewTaskRepository
-	projects      ReviewProjectRepository
-	notifications ReviewNotificationCreator
-	hub           *ws.Hub
-	bus           eventbus.Publisher
-	bridge        ReviewBridgeClient
-	planner       *ReviewExecutionPlanner
-	progress      *TaskProgressService
-	imProgress    IMBoundProgressNotifier
-	aggregation   *ReviewAggregationService
-	automation    AutomationEventEvaluator
-	links         entityLinkRepository
-	pages         wikiPageRepository
-	versions      pageVersionRepository
+	reviews             ReviewRepository
+	tasks               ReviewTaskRepository
+	projects            ReviewProjectRepository
+	notifications       ReviewNotificationCreator
+	hub                 *ws.Hub
+	bus                 eventbus.Publisher
+	bridge              ReviewBridgeClient
+	planner             *ReviewExecutionPlanner
+	progress            *TaskProgressService
+	imProgress          IMBoundProgressNotifier
+	aggregation         *ReviewAggregationService
+	automation          AutomationEventEvaluator
+	links               entityLinkRepository
+	pages               wikiPageRepository
+	versions            pageVersionRepository
+	workflowLauncher    ReviewWorkflowLauncher
+	workflowLaunchFlag  func() bool
 }
 
 func reviewLogFields(review *model.Review, task *model.Task) log.Fields {
@@ -137,6 +147,60 @@ func (s *ReviewService) WithDocWriteback(links entityLinkRepository, pages wikiP
 	s.pages = pages
 	s.versions = versions
 	return s
+}
+
+// WithWorkflowLauncher attaches a workflow launcher. flag is the runtime
+// gate (typically returns USE_WORKFLOW_BACKED_REVIEW == "true"). Nil flag
+// is treated as always-off.
+func (s *ReviewService) WithWorkflowLauncher(launcher ReviewWorkflowLauncher, flag func() bool) *ReviewService {
+	s.workflowLauncher = launcher
+	s.workflowLaunchFlag = flag
+	return s
+}
+
+// launchWorkflowBackedReview is best-effort: any error is logged and the
+// legacy review flow continues. When it succeeds, review.ExecutionID is
+// stamped onto the row via SetExecutionID.
+//
+// The workflow runs in parallel with the existing bridge-based review.
+// Both paths eventually converge on the same `reviews` row; the workflow
+// path only writes execution_id.
+func (s *ReviewService) launchWorkflowBackedReview(ctx context.Context, review *model.Review, projectID uuid.UUID) {
+	if s.workflowLauncher == nil {
+		return
+	}
+	if s.workflowLaunchFlag == nil || !s.workflowLaunchFlag() {
+		return
+	}
+	if projectID == uuid.Nil {
+		log.WithField("reviewId", review.ID).Debug("workflow-backed review skipped: project id unknown")
+		return
+	}
+	seed := map[string]any{
+		"review_id": review.ID.String(),
+		"pr_url":    review.PRURL,
+		"pr_number": review.PRNumber,
+	}
+	execID, err := s.workflowLauncher.LaunchReviewWorkflow(ctx, projectID, seed)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"reviewId":  review.ID.String(),
+			"projectId": projectID.String(),
+		}).WithError(err).Warn("workflow-backed review launch failed")
+		return
+	}
+	if err := s.reviews.SetExecutionID(ctx, review.ID, execID); err != nil {
+		log.WithFields(log.Fields{
+			"reviewId":    review.ID.String(),
+			"executionId": execID.String(),
+		}).WithError(err).Warn("persist review.execution_id failed")
+		return
+	}
+	review.ExecutionID = &execID
+	log.WithFields(log.Fields{
+		"reviewId":    review.ID.String(),
+		"executionId": execID.String(),
+	}).Info("workflow-backed review launched")
 }
 
 func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewRequest) (*model.Review, error) {
@@ -218,6 +282,9 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	}
 	triggerFields["reviewId"] = review.ID.String()
 	log.WithFields(triggerFields).Info("review created")
+
+	// Workflow-backed path (opt-in, additive — legacy bridge flow continues below).
+	s.launchWorkflowBackedReview(ctx, review, projectID)
 
 	if task != nil && task.Status == model.TaskStatusInProgress {
 		if err := s.tasks.TransitionStatus(ctx, task.ID, model.TaskStatusInReview); err != nil {

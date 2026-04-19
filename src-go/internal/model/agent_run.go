@@ -12,6 +12,7 @@ type AgentRun struct {
 	TaskID          uuid.UUID               `db:"task_id"`
 	MemberID        uuid.UUID               `db:"member_id"`
 	RoleID          string                  `db:"role_id"`
+	EmployeeID      *uuid.UUID              `db:"employee_id"`
 	Status          string                  `db:"status"`
 	Runtime         string                  `db:"runtime"`
 	Provider        string                  `db:"provider"`

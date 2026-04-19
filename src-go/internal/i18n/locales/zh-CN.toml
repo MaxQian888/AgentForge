@@ -826,6 +826,22 @@ other = "无效的触发器"
 [FailedToSaveWorkflowConfig]
 other = "保存工作流配置失败"
 
+[InvalidWorkflowNodeID]
+other = "无效的工作流节点 ID"
+
+[FailedToHandleWorkflowEvent]
+other = "处理工作流事件失败"
+
+# 触发器
+[TriggerRouterUnavailable]
+other = "触发器路由不可用"
+
+[MissingIMPlatform]
+other = "platform 字段必填"
+
+[FailedToRouteIMEvent]
+other = "路由 IM 事件失败"
+
 # 中间件 - 项目
 [ProjectIDRequired]
 other = "项目 ID 为必填项"
@@ -845,6 +861,46 @@ other = "cannot_modify_owner_as_admin"
 
 [InvalidProjectRole]
 other = "无效的项目角色"
+
+# 员工
+[InvalidEmployeeRequest]
+other = "无效的员工请求体"
+
+[InvalidEmployeeID]
+other = "无效的员工 ID"
+
+[InvalidEmployeeState]
+other = "无效的员工状态；必须为 active、paused 或 archived"
+
+[EmployeeNotFound]
+other = "未找到员工"
+
+[EmployeeNameExists]
+other = "该项目中已存在同名员工"
+
+[RoleNotFoundForEmployee]
+other = "员工对应的角色不存在"
+
+[FailedToCreateEmployee]
+other = "创建员工失败"
+
+[FailedToListEmployees]
+other = "获取员工列表失败"
+
+[FailedToUpdateEmployee]
+other = "更新员工失败"
+
+[FailedToDeleteEmployee]
+other = "删除员工失败"
+
+[FailedToSetEmployeeState]
+other = "设置员工状态失败"
+
+[FailedToAddEmployeeSkill]
+other = "添加员工技能失败"
+
+[FailedToRemoveEmployeeSkill]
+other = "删除员工技能失败"
 
 [UnknownProjectAction]
 other = "未知的项目操作"

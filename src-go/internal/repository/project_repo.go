@@ -277,6 +277,14 @@ func applyProjectManagementSummary(project *model.Project, summary projectManage
 	return project
 }
 
+// ListActive returns all non-archived projects (status = active or paused).
+// Used by seed routines that need to apply defaults across every active project.
+func (r *ProjectRepository) ListActive(ctx context.Context) ([]*model.Project, error) {
+	return r.ListWithFilter(ctx, ProjectListFilter{
+		Statuses: []string{model.ProjectStatusActive, model.ProjectStatusPaused},
+	})
+}
+
 type projectManagementSummary struct {
 	TaskCount  int
 	AgentCount int

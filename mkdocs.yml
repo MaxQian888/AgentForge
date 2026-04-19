@@ -1,0 +1,112 @@
+site_name: AgentForge
+site_description: Agent-driven development management platform
+site_url: https://agentforge.dev
+docs_dir: docs
+repo_url: https://github.com/your-org/AgentForge
+repo_name: AgentForge
+
+theme:
+  name: material
+  palette:
+    - scheme: default
+      toggle:
+        icon: material/brightness-7
+        name: Switch to dark mode
+    - scheme: slate
+      toggle:
+        icon: material/brightness-4
+        name: Switch to light mode
+  features:
+    - navigation.tabs
+    - navigation.sections
+    - navigation.indexes
+    - navigation.top
+    - search.suggest
+    - search.highlight
+    - content.code.copy
+
+markdown_extensions:
+  - admonition
+  - pymdownx.details
+  - pymdownx.superfences
+  - pymdownx.highlight:
+      anchor_linenums: true
+  - pymdownx.tabbed:
+      alternate_style: true
+  - toc:
+      permalink: true
+
+nav:
+  - Home: index.md
+  - Product:
+      - product/prd.md
+  - Architecture:
+      - Agent Orchestration: architecture/agent-orchestration.md
+      - Data & Realtime: architecture/data-realtime-design.md
+      - Plugin System: architecture/plugin-system-design.md
+      - WASM Plugin Runtime: architecture/wasm-plugin-runtime.md
+      - Review Pipeline: architecture/review-pipeline-design.md
+      - Scheduler Modes: architecture/scheduler-deployment-modes.md
+      - Go Persistence: architecture/go-persistence-guide.md
+      - IM Bridge (cc-connect): architecture/cc-connect-reuse-guide.md
+      - Backend Tech Analysis: architecture/backend-tech-analysis.md
+      - Technical Challenges: architecture/technical-challenges.md
+  - API Reference:
+      - Overview: api/index.md
+      - Authentication: api/auth.md
+      - Users: api/users.md
+      - Projects: api/projects.md
+      - Project Templates: api/project-templates.md
+      - Agents: api/agents.md
+      - Tasks: api/tasks.md
+      - Reviews: api/reviews.md
+      - Plugins: api/plugins.md
+      - Automations: api/automations.md
+      - Invitations: api/invitations.md
+      - Audit: api/audit.md
+      - RBAC: api/rbac.md
+      - Errors: api/errors.md
+  - Guides:
+      - Plugin Development: guides/plugin-development.md
+      - Plugin (WASM): guides/plugin-wasm.md
+      - Plugin (MCP): guides/plugin-mcp.md
+      - Role Authoring: guides/role-authoring.md
+      - Role YAML Reference: guides/role-yaml-reference.md
+      - Frontend Components: guides/frontend-components.md
+      - State Management: guides/state-management.md
+      - Skill Governance: guides/internal-skill-governance.md
+      - Invitation Ops Runbook: guides/invitation-ops-runbook.md
+      - Project Archival Runbook: guides/project-archival-runbook.md
+  - Deployment:
+      - Docker: deployment/docker.md
+      - Desktop Build: deployment/desktop-build.md
+      - Environment Variables: deployment/environment-variables.md
+      - TLS: deployment/tls.md
+      - Desktop Updater Release: deployment/desktop-updater-release.md
+  - Security:
+      - Authentication: security/authentication.md
+      - Best Practices: security/best-practices.md
+      - Tauri Permissions: security/tauri-permissions.md
+  - Reference:
+      - Postgres Schema: reference/postgres-schema.md
+      - Redis Schema: reference/redis-schema.md
+  - ADRs:
+      - index: adr/index.md
+      - "0001 - Tauri vs Electron": adr/0001-why-tauri-not-electron.md
+      - "0002 - Go + Next.js Dual Stack": adr/0002-why-go-nextjs-dual-stack.md
+      - "0003 - WASM Plugin Runtime": adr/0003-why-wasm-plugin-runtime.md
+      - "0004 - JWT + Redis Auth": adr/0004-why-jwt-redis-auth.md
+      - "0005 - Bun TS Bridge": adr/0005-why-bun-ts-bridge.md
+      - Template: adr/template.md
+  - Research:
+      - Market Research: research/market-research.md
+      - Platform Comparison: research/platform-comparison.md
+      - Research Report: research/research-report.md
+      - Reusable Projects: research/reusable-projects.md
+      - Plugin Research (Platforms): research/plugin-research-platforms.md
+      - Plugin Research (Roles): research/plugin-research-roles.md
+      - Plugin Research (Tech): research/plugin-research-tech.md
+  - Dev (Internal):
+      - Plans: dev/plans/
+      - Specs: dev/specs/
+      - Roadmap: dev/roadmap/

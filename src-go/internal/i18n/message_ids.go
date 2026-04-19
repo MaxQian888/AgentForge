@@ -160,6 +160,21 @@ const (
 	MsgDocumentNotFound           = "DocumentNotFound"
 	MsgFailedToDeleteDocument     = "FailedToDeleteDocument"
 
+	// Employee
+	MsgInvalidEmployeeRequest      = "InvalidEmployeeRequest"
+	MsgInvalidEmployeeID           = "InvalidEmployeeID"
+	MsgInvalidEmployeeState        = "InvalidEmployeeState"
+	MsgEmployeeNotFound            = "EmployeeNotFound"
+	MsgEmployeeNameExists          = "EmployeeNameExists"
+	MsgRoleNotFoundForEmployee     = "RoleNotFoundForEmployee"
+	MsgFailedToCreateEmployee      = "FailedToCreateEmployee"
+	MsgFailedToListEmployees       = "FailedToListEmployees"
+	MsgFailedToUpdateEmployee      = "FailedToUpdateEmployee"
+	MsgFailedToDeleteEmployee      = "FailedToDeleteEmployee"
+	MsgFailedToSetEmployeeState    = "FailedToSetEmployeeState"
+	MsgFailedToAddEmployeeSkill    = "FailedToAddEmployeeSkill"
+	MsgFailedToRemoveEmployeeSkill = "FailedToRemoveEmployeeSkill"
+
 	// Milestone
 	MsgFailedToListMilestones      = "FailedToListMilestones"
 	MsgFailedToLoadMilestoneMetrics = "FailedToLoadMilestoneMetrics"
@@ -331,12 +346,18 @@ const (
 	MsgFailedToListRecentPages      = "FailedToListRecentPages"
 	MsgFailedToUpdatePinnedState    = "FailedToUpdatePinnedState"
 
+	// Trigger
+	MsgTriggerRouterUnavailable = "TriggerRouterUnavailable"
+	MsgMissingIMPlatform        = "MissingIMPlatform"
+	MsgFailedToRouteIMEvent     = "FailedToRouteIMEvent"
+
 	// Workflow
 	MsgInvalidTransitions          = "InvalidTransitions"
 	MsgInvalidTriggers             = "InvalidTriggers"
 	MsgFailedToSaveWorkflowConfig  = "FailedToSaveWorkflowConfig"
 	MsgInvalidWorkflowID           = "InvalidWorkflowID"
 	MsgInvalidExecutionID          = "InvalidExecutionID"
+	MsgInvalidWorkflowNodeID       = "InvalidWorkflowNodeID"
 	MsgWorkflowNotFound            = "WorkflowNotFound"
 	MsgExecutionNotFound           = "ExecutionNotFound"
 	MsgFailedToCreateWorkflow      = "FailedToCreateWorkflow"
@@ -346,6 +367,7 @@ const (
 	MsgFailedToStartExecution      = "FailedToStartExecution"
 	MsgFailedToListExecutions      = "FailedToListExecutions"
 	MsgFailedToCancelExecution     = "FailedToCancelExecution"
+	MsgFailedToHandleWorkflowEvent = "FailedToHandleWorkflowEvent"
 	MsgDAGWorkflowServiceUnavailable = "DAGWorkflowServiceUnavailable"
 
 	// Middleware - Project

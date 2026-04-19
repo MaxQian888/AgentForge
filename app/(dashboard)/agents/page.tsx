@@ -8,6 +8,7 @@ import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { useMemberStore } from "@/lib/stores/member-store";
 import { useTaskStore } from "@/lib/stores/task-store";
 import { AgentWorkspace } from "@/components/agents/agent-workspace";
+import { EmployeesSection } from "@/components/employees/employees-section";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 
 function AgentsPageInner() {
@@ -69,27 +70,30 @@ function AgentsPageInner() {
   ]);
 
   return (
-    <AgentWorkspace
-      agents={agents}
-      pool={pool}
-      runtimeCatalog={runtimeCatalog}
-      bridgeHealth={bridgeHealth}
-      dispatchStats={dispatchStats}
-      loading={loading}
-      requestedMemberId={requestedMemberId}
-      dispatchHistoryByTask={dispatchHistoryByTask}
-      fetchDispatchHistory={fetchDispatchHistory}
-      fetchAgent={fetchAgent}
-      selectedProjectId={selectedProjectId}
-      tasks={projectTasks}
-      members={projectMembers}
-      onSpawnAgent={(taskId, memberId, options) =>
-        void spawnAgent(taskId, memberId, options)
-      }
-      onPause={(id) => void pauseAgent(id)}
-      onResume={(id) => void resumeAgent(id)}
-      onKill={(id) => void killAgent(id)}
-    />
+    <div className="space-y-6">
+      <EmployeesSection projectId={selectedProjectId} />
+      <AgentWorkspace
+        agents={agents}
+        pool={pool}
+        runtimeCatalog={runtimeCatalog}
+        bridgeHealth={bridgeHealth}
+        dispatchStats={dispatchStats}
+        loading={loading}
+        requestedMemberId={requestedMemberId}
+        dispatchHistoryByTask={dispatchHistoryByTask}
+        fetchDispatchHistory={fetchDispatchHistory}
+        fetchAgent={fetchAgent}
+        selectedProjectId={selectedProjectId}
+        tasks={projectTasks}
+        members={projectMembers}
+        onSpawnAgent={(taskId, memberId, options) =>
+          void spawnAgent(taskId, memberId, options)
+        }
+        onPause={(id) => void pauseAgent(id)}
+        onResume={(id) => void resumeAgent(id)}
+        onKill={(id) => void killAgent(id)}
+      />
+    </div>
   );
 }
 

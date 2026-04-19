@@ -88,7 +88,7 @@ func TestTaskWorkflowService_EvaluateTransition_NoConfig(t *testing.T) {
 }
 
 func TestTaskWorkflowService_EvaluateTransition_MatchesTrigger(t *testing.T) {
-	triggers := []model.WorkflowTrigger{
+	triggers := []model.TaskWorkflowTrigger{
 		{FromStatus: "triaged", ToStatus: "assigned", Action: "notify"},
 		{FromStatus: "assigned", ToStatus: "in_progress", Action: "auto_assign_agent"},
 	}
@@ -118,7 +118,7 @@ func TestTaskWorkflowService_EvaluateTransition_MatchesTrigger(t *testing.T) {
 }
 
 func TestTaskWorkflowService_EvaluateTransition_NoMatch(t *testing.T) {
-	triggers := []model.WorkflowTrigger{
+	triggers := []model.TaskWorkflowTrigger{
 		{FromStatus: "in_progress", ToStatus: "done", Action: "notify"},
 	}
 	triggersJSON, _ := json.Marshal(triggers)
@@ -149,7 +149,7 @@ func TestTaskWorkflowService_EvaluateTransition_NilTask(t *testing.T) {
 }
 
 func TestTaskWorkflowService_EvaluateTransition_NormalizesLegacyDispatchAlias(t *testing.T) {
-	triggers := []model.WorkflowTrigger{
+	triggers := []model.TaskWorkflowTrigger{
 		{
 			FromStatus: "triaged",
 			ToStatus:   "assigned",
@@ -195,7 +195,7 @@ func TestTaskWorkflowService_EvaluateTransition_NormalizesLegacyDispatchAlias(t 
 }
 
 func TestTaskWorkflowService_EvaluateTransition_InvalidStartWorkflowConfigReturnsError(t *testing.T) {
-	triggers := []model.WorkflowTrigger{
+	triggers := []model.TaskWorkflowTrigger{
 		{
 			FromStatus: "assigned",
 			ToStatus:   "in_progress",
@@ -233,7 +233,7 @@ func TestTaskWorkflowService_EvaluateTransition_InvalidStartWorkflowConfigReturn
 }
 
 func TestTaskWorkflowService_EvaluateTransition_StartWorkflowUsesTaskTriggeredRuntime(t *testing.T) {
-	triggers := []model.WorkflowTrigger{
+	triggers := []model.TaskWorkflowTrigger{
 		{
 			FromStatus: "assigned",
 			ToStatus:   "in_progress",
@@ -289,7 +289,7 @@ func TestTaskWorkflowService_EvaluateTransition_StartWorkflowUsesTaskTriggeredRu
 }
 
 func TestTaskWorkflowService_EvaluateTransition_DuplicateWorkflowRunIsBlocked(t *testing.T) {
-	triggers := []model.WorkflowTrigger{
+	triggers := []model.TaskWorkflowTrigger{
 		{
 			FromStatus: "assigned",
 			ToStatus:   "in_progress",
@@ -329,7 +329,7 @@ func TestTaskWorkflowService_EvaluateTransition_DuplicateWorkflowRunIsBlocked(t 
 }
 
 func TestTaskWorkflowService_EvaluateTransition_QueuesTaskFollowUpForWorkflowOutcome(t *testing.T) {
-	triggers := []model.WorkflowTrigger{
+	triggers := []model.TaskWorkflowTrigger{
 		{
 			FromStatus: "assigned",
 			ToStatus:   "in_progress",

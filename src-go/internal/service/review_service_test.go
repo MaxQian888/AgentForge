@@ -88,6 +88,15 @@ func (m *mockReviewRepo) UpdateResult(_ context.Context, review *model.Review) e
 	return nil
 }
 
+func (m *mockReviewRepo) SetExecutionID(_ context.Context, id uuid.UUID, executionID uuid.UUID) error {
+	review, ok := m.byID[id]
+	if !ok {
+		return service.ErrReviewNotFound
+	}
+	review.ExecutionID = &executionID
+	return nil
+}
+
 type mockReviewTaskRepo struct {
 	task        *model.Task
 	transitions []string
@@ -1342,5 +1351,131 @@ func TestReviewService_TriggerAllowsStandaloneDeepReview(t *testing.T) {
 	}
 	if review.ExecutionMetadata == nil || review.ExecutionMetadata.ProjectID != projectID.String() {
 		t.Fatalf("execution metadata project = %+v, want %s", review.ExecutionMetadata, projectID)
+	}
+}
+
+// --- Workflow-backed review tests ---
+
+type mockReviewWorkflowLauncher struct {
+	called    bool
+	projectID uuid.UUID
+	seed      map[string]any
+	execID    uuid.UUID
+	err       error
+}
+
+func (m *mockReviewWorkflowLauncher) LaunchReviewWorkflow(_ context.Context, projectID uuid.UUID, seed map[string]any) (uuid.UUID, error) {
+	m.called = true
+	m.projectID = projectID
+	m.seed = seed
+	if m.err != nil {
+		return uuid.Nil, m.err
+	}
+	return m.execID, nil
+}
+
+func buildReviewServiceForWorkflowTest(t *testing.T) (*service.ReviewService, *mockReviewRepo, *mockReviewTaskRepo) {
+	t.Helper()
+	reviewRepo := newMockReviewRepo()
+	taskRepo := &mockReviewTaskRepo{
+		task: &model.Task{
+			ID:        uuid.New(),
+			ProjectID: uuid.New(),
+			Status:    model.TaskStatusInProgress,
+		},
+	}
+	svc := service.NewReviewService(reviewRepo, taskRepo, nil, nil, nil, nil)
+	return svc, reviewRepo, taskRepo
+}
+
+func TestReviewService_Trigger_WorkflowBackedPath(t *testing.T) {
+	svc, reviewRepo, taskRepo := buildReviewServiceForWorkflowTest(t)
+
+	execID := uuid.New()
+	launcher := &mockReviewWorkflowLauncher{execID: execID}
+	svc.WithWorkflowLauncher(launcher, func() bool { return true })
+
+	review, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
+		TaskID:  taskRepo.task.ID.String(),
+		PRURL:   "https://github.com/org/repo/pull/42",
+		Trigger: model.ReviewTriggerManual,
+	})
+	if err != nil {
+		t.Fatalf("Trigger() error = %v", err)
+	}
+
+	// Launcher must have been called with the project ID from the task.
+	if !launcher.called {
+		t.Fatal("expected launcher to be called")
+	}
+	if launcher.projectID != taskRepo.task.ProjectID {
+		t.Errorf("launcher.projectID = %s, want %s", launcher.projectID, taskRepo.task.ProjectID)
+	}
+	if launcher.seed["review_id"] != review.ID.String() {
+		t.Errorf("seed review_id = %v, want %s", launcher.seed["review_id"], review.ID.String())
+	}
+
+	// ExecutionID must be persisted on the review row in the mock repo.
+	stored := reviewRepo.byID[review.ID]
+	if stored == nil || stored.ExecutionID == nil {
+		t.Fatal("expected ExecutionID to be set on the review row")
+	}
+	if *stored.ExecutionID != execID {
+		t.Errorf("ExecutionID = %s, want %s", *stored.ExecutionID, execID)
+	}
+}
+
+func TestReviewService_Trigger_FlagOff_NoWorkflowLaunch(t *testing.T) {
+	svc, reviewRepo, taskRepo := buildReviewServiceForWorkflowTest(t)
+
+	launcher := &mockReviewWorkflowLauncher{execID: uuid.New()}
+	// Flag is explicitly off.
+	svc.WithWorkflowLauncher(launcher, func() bool { return false })
+
+	review, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
+		TaskID:  taskRepo.task.ID.String(),
+		PRURL:   "https://github.com/org/repo/pull/7",
+		Trigger: model.ReviewTriggerManual,
+	})
+	if err != nil {
+		t.Fatalf("Trigger() error = %v", err)
+	}
+
+	if launcher.called {
+		t.Error("expected launcher NOT to be called when flag is off")
+	}
+	stored := reviewRepo.byID[review.ID]
+	if stored != nil && stored.ExecutionID != nil {
+		t.Errorf("expected ExecutionID to be nil when flag is off, got %s", *stored.ExecutionID)
+	}
+}
+
+func TestReviewService_Trigger_LauncherError_DoesNotFailReview(t *testing.T) {
+	svc, reviewRepo, taskRepo := buildReviewServiceForWorkflowTest(t)
+
+	launcher := &mockReviewWorkflowLauncher{err: errors.New("workflow service unavailable")}
+	svc.WithWorkflowLauncher(launcher, func() bool { return true })
+
+	review, err := svc.Trigger(context.Background(), &model.TriggerReviewRequest{
+		TaskID:  taskRepo.task.ID.String(),
+		PRURL:   "https://github.com/org/repo/pull/99",
+		Trigger: model.ReviewTriggerManual,
+	})
+	// Trigger must still succeed even when the launcher errors.
+	if err != nil {
+		t.Fatalf("Trigger() error = %v, want nil (workflow error should not fail review)", err)
+	}
+	if review == nil {
+		t.Fatal("expected review to be returned")
+	}
+
+	// Launcher was attempted.
+	if !launcher.called {
+		t.Error("expected launcher to be called")
+	}
+	// ExecutionID must remain nil.
+	stored := reviewRepo.byID[review.ID]
+	if stored != nil && stored.ExecutionID != nil {
+		t.Errorf("expected ExecutionID to be nil after launcher error, got %s", *stored.ExecutionID)
 	}
 }

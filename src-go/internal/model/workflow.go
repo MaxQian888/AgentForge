@@ -12,13 +12,13 @@ type WorkflowConfig struct {
 	ID          uuid.UUID       `db:"id"`
 	ProjectID   uuid.UUID       `db:"project_id"`
 	Transitions json.RawMessage `db:"transitions"` // map[string][]string
-	Triggers    json.RawMessage `db:"triggers"`    // []WorkflowTrigger
+	Triggers    json.RawMessage `db:"triggers"`    // []TaskWorkflowTrigger
 	CreatedAt   time.Time       `db:"created_at"`
 	UpdatedAt   time.Time       `db:"updated_at"`
 }
 
-// WorkflowTrigger defines an automation rule that fires on a status transition.
-type WorkflowTrigger struct {
+// TaskWorkflowTrigger defines an automation rule that fires on a status transition.
+type TaskWorkflowTrigger struct {
 	FromStatus string `json:"fromStatus"`
 	ToStatus   string `json:"toStatus"`
 	Action     string `json:"action"` // e.g. "auto_assign", "notify", "dispatch_agent"
@@ -26,21 +26,21 @@ type WorkflowTrigger struct {
 }
 
 const (
-	WorkflowTriggerActionDispatchAgent  = "dispatch_agent"
-	WorkflowTriggerActionStartWorkflow  = "start_workflow"
-	WorkflowTriggerActionNotify         = "notify"
-	WorkflowTriggerActionAutoTransition = "auto_transition"
+	TaskWorkflowTriggerActionDispatchAgent  = "dispatch_agent"
+	TaskWorkflowTriggerActionStartWorkflow  = "start_workflow"
+	TaskWorkflowTriggerActionNotify         = "notify"
+	TaskWorkflowTriggerActionAutoTransition = "auto_transition"
 )
 
 const (
-	WorkflowTriggerOutcomeStarted   = "started"
-	WorkflowTriggerOutcomeCompleted = "completed"
-	WorkflowTriggerOutcomeBlocked   = "blocked"
-	WorkflowTriggerOutcomeSkipped   = "skipped"
-	WorkflowTriggerOutcomeFailed    = "failed"
+	TaskWorkflowTriggerOutcomeStarted   = "started"
+	TaskWorkflowTriggerOutcomeCompleted = "completed"
+	TaskWorkflowTriggerOutcomeBlocked   = "blocked"
+	TaskWorkflowTriggerOutcomeSkipped   = "skipped"
+	TaskWorkflowTriggerOutcomeFailed    = "failed"
 )
 
-type WorkflowTriggerOutcome struct {
+type TaskWorkflowTriggerOutcome struct {
 	Action           string `json:"action"`
 	Status           string `json:"status"`
 	Reason           string `json:"reason,omitempty"`
@@ -50,17 +50,17 @@ type WorkflowTriggerOutcome struct {
 }
 
 type WorkflowConfigDTO struct {
-	ID          string              `json:"id"`
-	ProjectID   string              `json:"projectId"`
-	Transitions map[string][]string `json:"transitions"`
-	Triggers    []WorkflowTrigger   `json:"triggers"`
-	CreatedAt   string              `json:"createdAt"`
-	UpdatedAt   string              `json:"updatedAt"`
+	ID          string                 `json:"id"`
+	ProjectID   string                 `json:"projectId"`
+	Transitions map[string][]string    `json:"transitions"`
+	Triggers    []TaskWorkflowTrigger  `json:"triggers"`
+	CreatedAt   string                 `json:"createdAt"`
+	UpdatedAt   string                 `json:"updatedAt"`
 }
 
 type UpdateWorkflowRequest struct {
-	Transitions map[string][]string `json:"transitions"`
-	Triggers    []WorkflowTrigger   `json:"triggers"`
+	Transitions map[string][]string   `json:"transitions"`
+	Triggers    []TaskWorkflowTrigger `json:"triggers"`
 }
 
 func (w *WorkflowConfig) ToDTO() WorkflowConfigDTO {
@@ -76,7 +76,7 @@ func (w *WorkflowConfig) ToDTO() WorkflowConfigDTO {
 		_ = json.Unmarshal(w.Transitions, &dto.Transitions)
 	}
 
-	dto.Triggers = make([]WorkflowTrigger, 0)
+	dto.Triggers = make([]TaskWorkflowTrigger, 0)
 	if len(w.Triggers) > 0 {
 		_ = json.Unmarshal(w.Triggers, &dto.Triggers)
 	}

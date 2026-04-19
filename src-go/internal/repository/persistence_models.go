@@ -812,6 +812,7 @@ type agentRunRecord struct {
 	UpdatedAt       time.Time  `gorm:"column:updated_at"`
 	TeamID           *uuid.UUID `gorm:"column:team_id"`
 	TeamRole         string     `gorm:"column:team_role"`
+	EmployeeID       *uuid.UUID `gorm:"column:employee_id"`
 	CostAccounting   rawJSON    `gorm:"column:cost_accounting;type:jsonb"`
 	StructuredOutput rawJSON    `gorm:"column:structured_output;type:jsonb"`
 }
@@ -843,6 +844,7 @@ func newAgentRunRecord(run *model.AgentRun) *agentRunRecord {
 		UpdatedAt:       run.UpdatedAt,
 		TeamID:           run.TeamID,
 		TeamRole:         run.TeamRole,
+		EmployeeID:       run.EmployeeID,
 		CostAccounting:   mustMarshalAgentRunCostAccounting(run.CostAccounting),
 		StructuredOutput: newRawJSON(run.StructuredOutput, "null"),
 	}
@@ -873,6 +875,7 @@ func (r *agentRunRecord) toModel() *model.AgentRun {
 		UpdatedAt:       r.UpdatedAt,
 		TeamID:           r.TeamID,
 		TeamRole:         r.TeamRole,
+		EmployeeID:       r.EmployeeID,
 		CostAccounting:   unmarshalAgentRunCostAccounting(r.CostAccounting),
 		StructuredOutput: unmarshalStructuredOutput(r.StructuredOutput),
 	}
@@ -1113,11 +1116,12 @@ type reviewRecord struct {
 	RiskLevel         string    `gorm:"column:risk_level"`
 	Findings          rawJSON   `gorm:"column:findings;type:jsonb"`
 	ExecutionMetadata rawJSON   `gorm:"column:execution_metadata;type:jsonb"`
-	Summary           string    `gorm:"column:summary"`
-	Recommendation    string    `gorm:"column:recommendation"`
-	CostUSD           float64   `gorm:"column:cost_usd"`
-	CreatedAt         time.Time `gorm:"column:created_at"`
-	UpdatedAt         time.Time `gorm:"column:updated_at"`
+	Summary           string     `gorm:"column:summary"`
+	Recommendation    string     `gorm:"column:recommendation"`
+	CostUSD           float64    `gorm:"column:cost_usd"`
+	ExecutionID       *uuid.UUID `gorm:"column:execution_id"`
+	CreatedAt         time.Time  `gorm:"column:created_at"`
+	UpdatedAt         time.Time  `gorm:"column:updated_at"`
 }
 
 func (reviewRecord) TableName() string { return "reviews" }
@@ -1153,6 +1157,7 @@ func newReviewRecord(review *model.Review) (*reviewRecord, error) {
 		Summary:           review.Summary,
 		Recommendation:    review.Recommendation,
 		CostUSD:           review.CostUSD,
+		ExecutionID:       review.ExecutionID,
 		CreatedAt:         review.CreatedAt,
 		UpdatedAt:         review.UpdatedAt,
 	}, nil
@@ -1173,6 +1178,7 @@ func (r *reviewRecord) toModel() (*model.Review, error) {
 		Summary:        r.Summary,
 		Recommendation: r.Recommendation,
 		CostUSD:        r.CostUSD,
+		ExecutionID:    r.ExecutionID,
 		CreatedAt:      r.CreatedAt,
 		UpdatedAt:      r.UpdatedAt,
 	}

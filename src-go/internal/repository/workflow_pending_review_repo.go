@@ -2,6 +2,7 @@ package repository
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -127,6 +128,31 @@ func (r *WorkflowPendingReviewRepository) FindPendingByExecutionAndNode(ctx cont
 	var record workflowPendingReviewRecord
 	if err := r.db.WithContext(ctx).Where("execution_id = ? AND node_id = ? AND decision = ?", executionID, nodeID, model.ReviewDecisionPending).Take(&record).Error; err != nil {
 		return nil, fmt.Errorf("find pending review: %w", normalizeRepositoryError(err))
+	}
+	return record.toModel(), nil
+}
+
+// FindPendingByExecution returns the single pending human_review row for
+// the given execution, or ErrNotFound if none is pending.
+//
+// The system:code-review template has exactly one human_review node per
+// execution. More sophisticated templates with multiple pending reviews
+// should use FindPendingByExecutionAndNode with a known node ID.
+func (r *WorkflowPendingReviewRepository) FindPendingByExecution(ctx context.Context, executionID uuid.UUID) (*model.WorkflowPendingReview, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	var record workflowPendingReviewRecord
+	err := r.db.WithContext(ctx).
+		Where("execution_id = ? AND decision = ?", executionID, model.ReviewDecisionPending).
+		Order("created_at ASC").
+		Limit(1).
+		Take(&record).Error
+	if err != nil {
+		if errors.Is(normalizeRepositoryError(err), ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("find pending review by execution: %w", err)
 	}
 	return record.toModel(), nil
 }

@@ -9,9 +9,10 @@ import (
 )
 
 const (
-	MemoryScopeGlobal  = "global"
-	MemoryScopeProject = "project"
-	MemoryScopeRole    = "role"
+	MemoryScopeGlobal    = "global"
+	MemoryScopeProject   = "project"
+	MemoryScopeRole      = "role"
+	MemoryScopeEmployee  = "employee"
 
 	MemoryCategoryEpisodic   = "episodic"
 	MemoryCategorySemantic   = "semantic"
@@ -32,6 +33,7 @@ type AgentMemory struct {
 	Metadata       string     `db:"metadata"`
 	RelevanceScore float64    `db:"relevance_score"`
 	AccessCount    int        `db:"access_count"`
+	EmployeeID     *uuid.UUID `db:"employee_id"`
 	LastAccessedAt *time.Time `db:"last_accessed_at"`
 	CreatedAt      time.Time  `db:"created_at"`
 	UpdatedAt      time.Time  `db:"updated_at"`

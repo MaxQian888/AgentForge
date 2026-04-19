@@ -118,6 +118,25 @@ func (r *ReviewRepository) UpdateStatus(ctx context.Context, id uuid.UUID, statu
 	return nil
 }
 
+// SetExecutionID links a review to its driving workflow execution.
+// Returns ErrNotFound when no row matches.
+func (r *ReviewRepository) SetExecutionID(ctx context.Context, id uuid.UUID, executionID uuid.UUID) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	res := r.db.WithContext(ctx).
+		Model(&reviewRecord{}).
+		Where("id = ?", id).
+		Update("execution_id", executionID)
+	if res.Error != nil {
+		return fmt.Errorf("set execution id: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *ReviewRepository) UpdateResult(ctx context.Context, review *model.Review) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable

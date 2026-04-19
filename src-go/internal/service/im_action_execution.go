@@ -9,6 +9,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	log "github.com/sirupsen/logrus"
 )
 
 type IMActionExecutor interface {
@@ -71,6 +72,18 @@ type IMActionTaskCommenter interface {
 	Create(ctx context.Context, comment *model.TaskComment) error
 }
 
+// ReviewWorkflowResolver bridges approve/request-changes card actions to
+// the workflow engine. Nil disables the workflow-backed path — the executor
+// will only drive the legacy review flow.
+type ReviewWorkflowResolver interface {
+	ResolveHumanReview(ctx context.Context, executionID uuid.UUID, nodeID string, decision string, comment string) error
+}
+
+// PendingReviewLookup resolves the pending node ID for a workflow-backed review.
+type PendingReviewLookup interface {
+	FindPendingByExecution(ctx context.Context, executionID uuid.UUID) (*model.WorkflowPendingReview, error)
+}
+
 var allowedSelectTargetActions = map[string]struct{}{
 	"assign-agent":    {},
 	"decompose":       {},
@@ -88,17 +101,19 @@ func isAllowedTargetAction(action string) bool {
 }
 
 type BackendIMActionExecutor struct {
-	dispatcher IMActionTaskDispatcher
-	decomposer IMActionTaskDecomposer
-	reviewer   IMActionReviewer
-	taskMaker  IMActionTaskCreator
-	taskMover  IMActionTaskTransitioner
-	binder     IMActionBindingWriter
-	progress   IMActionProgressRecorder
-	workflow   IMActionWorkflowEvaluator
-	wikiMaker  IMActionWikiCreator
-	reactions  IMReactionRecorder
-	commenter  IMActionTaskCommenter
+	dispatcher     IMActionTaskDispatcher
+	decomposer     IMActionTaskDecomposer
+	reviewer       IMActionReviewer
+	taskMaker      IMActionTaskCreator
+	taskMover      IMActionTaskTransitioner
+	binder         IMActionBindingWriter
+	progress       IMActionProgressRecorder
+	workflow       IMActionWorkflowEvaluator
+	wikiMaker      IMActionWikiCreator
+	reactions      IMReactionRecorder
+	commenter      IMActionTaskCommenter
+	reviewWorkflow ReviewWorkflowResolver
+	reviewPending  PendingReviewLookup
 }
 
 func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IMActionTaskDecomposer, reviewer IMActionReviewer, extras ...any) *BackendIMActionExecutor {
@@ -128,6 +143,15 @@ func NewBackendIMActionExecutor(dispatcher IMActionTaskDispatcher, decomposer IM
 		}
 	}
 	return executor
+}
+
+// WithReviewWorkflow wires the workflow resolver and pending-review lookup
+// into the executor so that approve/request-changes actions on workflow-backed
+// reviews also advance the DAG human_review node.
+func (e *BackendIMActionExecutor) WithReviewWorkflow(resolver ReviewWorkflowResolver, pending PendingReviewLookup) *BackendIMActionExecutor {
+	e.reviewWorkflow = resolver
+	e.reviewPending = pending
+	return e
 }
 
 func (e *BackendIMActionExecutor) Execute(ctx context.Context, req *model.IMActionRequest) (*model.IMActionResponse, error) {
@@ -401,10 +425,69 @@ func (e *BackendIMActionExecutor) executeReviewAction(ctx context.Context, req *
 		return newIMActionResponse(req, model.IMActionStatusFailed, "Review action returned no result.", false)
 	}
 
+	// Forward the decision to the workflow engine when this review is
+	// backed by a system:code-review workflow execution. Failures here
+	// are logged but do not turn a successful legacy action into a 500.
+	if updated.ExecutionID != nil {
+		e.advanceReviewWorkflow(ctx, updated, recommendation, firstMetadataValue(req.Metadata, "comment", "notes"))
+	}
+
 	resp := newIMActionResponse(req, model.IMActionStatusCompleted, describeReviewOutcome(updated), true)
 	dto := updated.ToDTO()
 	resp.Review = &dto
 	return resp
+}
+
+func (e *BackendIMActionExecutor) advanceReviewWorkflow(ctx context.Context, review *model.Review, recommendation, comment string) {
+	if e.reviewWorkflow == nil || e.reviewPending == nil {
+		return
+	}
+	execID := review.ExecutionID
+	if execID == nil {
+		return
+	}
+	pending, err := e.reviewPending.FindPendingByExecution(ctx, *execID)
+	if err != nil {
+		log.WithFields(log.Fields{
+			"reviewId":    review.ID.String(),
+			"executionId": execID.String(),
+		}).WithError(err).Warn("advance review workflow: no pending node found")
+		return
+	}
+	decision := mapRecommendationToWorkflowDecision(recommendation)
+	if decision == "" {
+		log.WithFields(log.Fields{
+			"reviewId":       review.ID.String(),
+			"recommendation": recommendation,
+		}).Warn("advance review workflow: unmapped recommendation")
+		return
+	}
+	if err := e.reviewWorkflow.ResolveHumanReview(ctx, *execID, pending.NodeID, decision, comment); err != nil {
+		log.WithFields(log.Fields{
+			"reviewId":    review.ID.String(),
+			"executionId": execID.String(),
+			"nodeId":      pending.NodeID,
+			"decision":    decision,
+		}).WithError(err).Warn("advance review workflow: resolve failed")
+		return
+	}
+	log.WithFields(log.Fields{
+		"reviewId":    review.ID.String(),
+		"executionId": execID.String(),
+		"nodeId":      pending.NodeID,
+		"decision":    decision,
+	}).Info("review workflow advanced via IM action")
+}
+
+func mapRecommendationToWorkflowDecision(recommendation string) string {
+	switch recommendation {
+	case model.ReviewRecommendationApprove:
+		return model.ReviewDecisionApproved
+	case model.ReviewRecommendationRequestChanges:
+		return model.ReviewDecisionRejected
+	default:
+		return ""
+	}
 }
 
 func (e *BackendIMActionExecutor) executeReact(ctx context.Context, req *model.IMActionRequest) *model.IMActionResponse {

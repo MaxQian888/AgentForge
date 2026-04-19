@@ -1,0 +1,16 @@
+apiVersion: agentforge/v1
+kind: Employee
+metadata:
+  id: default-code-reviewer
+  name: 默认代码评审员
+  displayName: Default Code Reviewer
+role_id: code-reviewer
+runtime_prefs:
+  runtime: claude_code
+  provider: anthropic
+  model: claude-opus-4-7
+  budgetUsd: 7.5
+config: {}
+extra_skills:
+  - path: skills/typescript
+    auto_load: true

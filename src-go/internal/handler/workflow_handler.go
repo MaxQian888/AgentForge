@@ -10,6 +10,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type workflowRepository interface {
@@ -19,7 +20,7 @@ type workflowRepository interface {
 
 // DAGWorkflowServiceInterface defines the DAG workflow execution methods needed by the handler.
 type DAGWorkflowServiceInterface interface {
-	StartExecution(ctx context.Context, workflowID uuid.UUID, taskID *uuid.UUID) (*model.WorkflowExecution, error)
+	StartExecution(ctx context.Context, workflowID uuid.UUID, taskID *uuid.UUID, opts service.StartOptions) (*model.WorkflowExecution, error)
 	AdvanceExecution(ctx context.Context, executionID uuid.UUID) error
 	CancelExecution(ctx context.Context, executionID uuid.UUID) error
 	ResolveHumanReview(ctx context.Context, executionID uuid.UUID, nodeID string, decision string, comment string) error
@@ -61,14 +62,22 @@ type WorkflowReviewRepoInterface interface {
 	ListPendingByProject(ctx context.Context, projectID uuid.UUID) ([]*model.WorkflowPendingReview, error)
 }
 
+// triggerSyncer is the subset of *trigger.Registrar the handler uses.
+// Keeping it local means main.go can wire any implementation that
+// matches, including a no-op for test configurations.
+type triggerSyncer interface {
+	SyncFromDefinition(ctx context.Context, workflowID, projectID uuid.UUID, nodes []model.WorkflowNode, createdBy *uuid.UUID) error
+}
+
 type WorkflowHandler struct {
-	repo        workflowRepository
-	dagSvc      DAGWorkflowServiceInterface
-	dagDefRepo  DAGWorkflowDefRepoInterface
-	dagExecRepo DAGWorkflowExecRepoInterface
-	dagNodeRepo DAGWorkflowNodeExecRepoInterface
-	templateSvc WorkflowTemplateServiceInterface
-	reviewRepo  WorkflowReviewRepoInterface
+	repo           workflowRepository
+	dagSvc         DAGWorkflowServiceInterface
+	dagDefRepo     DAGWorkflowDefRepoInterface
+	dagExecRepo    DAGWorkflowExecRepoInterface
+	dagNodeRepo    DAGWorkflowNodeExecRepoInterface
+	templateSvc    WorkflowTemplateServiceInterface
+	reviewRepo     WorkflowReviewRepoInterface
+	triggerSyncer  triggerSyncer
 }
 
 func NewWorkflowHandler(repo workflowRepository) *WorkflowHandler {
@@ -101,6 +110,12 @@ func (h *WorkflowHandler) WithReviewRepo(repo WorkflowReviewRepoInterface) *Work
 	return h
 }
 
+// SetTriggerSyncer wires the trigger syncer (called from Task 18 startup wiring).
+// Passing nil is safe — the handler skips sync when no syncer is wired.
+func (h *WorkflowHandler) SetTriggerSyncer(s triggerSyncer) {
+	h.triggerSyncer = s
+}
+
 // --- Existing workflow config endpoints ---
 
 func (h *WorkflowHandler) Get(c echo.Context) error {
@@ -111,7 +126,7 @@ func (h *WorkflowHandler) Get(c echo.Context) error {
 		return c.JSON(http.StatusOK, model.WorkflowConfigDTO{
 			ProjectID:   projectID.String(),
 			Transitions: make(map[string][]string),
-			Triggers:    make([]model.WorkflowTrigger, 0),
+			Triggers:    make([]model.TaskWorkflowTrigger, 0),
 		})
 	}
 	return c.JSON(http.StatusOK, wf.ToDTO())
@@ -171,6 +186,25 @@ func (h *WorkflowHandler) CreateDefinition(c echo.Context) error {
 
 	if err := h.dagDefRepo.Create(c.Request().Context(), def); err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateWorkflow)
+	}
+
+	// Sync trigger subscriptions from the saved definition's nodes.
+	if h.triggerSyncer != nil {
+		var nodes []model.WorkflowNode
+		if len(def.Nodes) > 0 {
+			if err := json.Unmarshal(def.Nodes, &nodes); err != nil {
+				// Don't fail the create over this — log and continue.
+				// Returning 500 after a successful DB insert would leave the
+				// caller with an orphan workflow they can't easily discover.
+				c.Logger().Errorf("workflow %s: parse nodes for trigger sync: %v", def.ID, err)
+			}
+		}
+		// TODO: thread createdBy from auth context
+		if syncErr := h.triggerSyncer.SyncFromDefinition(c.Request().Context(), def.ID, def.ProjectID, nodes, nil); syncErr != nil {
+			c.Logger().Errorf("workflow %s: sync triggers after create: %v", def.ID, syncErr)
+			// Same rationale: the workflow was created; trigger sync can be
+			// retried by re-saving. Don't roll back.
+		}
 	}
 
 	created, err := h.dagDefRepo.GetByID(c.Request().Context(), def.ID)
@@ -258,6 +292,23 @@ func (h *WorkflowHandler) UpdateDefinition(c echo.Context) error {
 	if err != nil {
 		return localizedError(c, http.StatusNotFound, i18n.MsgWorkflowNotFound)
 	}
+
+	// Only sync triggers when the node set changed; metadata-only updates skip sync.
+	if h.triggerSyncer != nil && req.Nodes != nil {
+		var nodes []model.WorkflowNode
+		if len(updated.Nodes) > 0 {
+			if err := json.Unmarshal(updated.Nodes, &nodes); err != nil {
+				// Don't fail the update over this — log and continue.
+				c.Logger().Errorf("workflow %s: parse nodes for trigger sync: %v", updated.ID, err)
+			}
+		}
+		// TODO: thread createdBy from auth context
+		if syncErr := h.triggerSyncer.SyncFromDefinition(c.Request().Context(), updated.ID, updated.ProjectID, nodes, nil); syncErr != nil {
+			c.Logger().Errorf("workflow %s: sync triggers after update: %v", updated.ID, syncErr)
+			// Trigger sync can be retried by re-saving. Don't roll back.
+		}
+	}
+
 	return c.JSON(http.StatusOK, updated.ToDTO())
 }
 
@@ -303,7 +354,7 @@ func (h *WorkflowHandler) StartExecution(c echo.Context) error {
 		taskID = &parsed
 	}
 
-	exec, err := h.dagSvc.StartExecution(c.Request().Context(), id, taskID)
+	exec, err := h.dagSvc.StartExecution(c.Request().Context(), id, taskID, service.StartOptions{})
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
 	}
@@ -567,6 +618,7 @@ func (h *WorkflowHandler) ResolveHumanReview(c echo.Context) error {
 }
 
 // HandleExternalEvent receives an external event to resume a waiting node.
+// Used by IM card callbacks waking wait_event nodes and by future webhook receivers.
 func (h *WorkflowHandler) HandleExternalEvent(c echo.Context) error {
 	if h.dagSvc == nil {
 		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
@@ -576,15 +628,26 @@ func (h *WorkflowHandler) HandleExternalEvent(c echo.Context) error {
 		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidExecutionID)
 	}
 	var body struct {
-		NodeID  string          `json:"nodeId" validate:"required"`
+		NodeID  string          `json:"nodeId"`
 		Payload json.RawMessage `json:"payload"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 
-	if err := h.dagSvc.HandleExternalEvent(c.Request().Context(), executionID, body.NodeID, body.Payload); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	// NodeID validation
+	if body.NodeID == "" {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidWorkflowNodeID)
 	}
-	return c.NoContent(http.StatusOK)
+
+	// Default empty payload to {}
+	if len(body.Payload) == 0 {
+		body.Payload = json.RawMessage("{}")
+	}
+
+	if err := h.dagSvc.HandleExternalEvent(c.Request().Context(), executionID, body.NodeID, body.Payload); err != nil {
+		c.Logger().Errorf("HandleExternalEvent exec=%s node=%s: %v", executionID, body.NodeID, err)
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToHandleWorkflowEvent)
+	}
+	return c.NoContent(http.StatusAccepted)
 }

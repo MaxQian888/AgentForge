@@ -250,3 +250,51 @@ func TestAgentDispatchHandler_ConfigSchema(t *testing.T) {
 		t.Errorf("ConfigSchema() returned invalid JSON: %s", schema)
 	}
 }
+
+func TestLLMAgentHandler_EmployeeIDPropagated(t *testing.T) {
+	empID := uuid.New()
+	taskID := uuid.New()
+	req := &NodeExecRequest{
+		Execution: &model.WorkflowExecution{TaskID: &taskID},
+		Config: map[string]any{
+			"runtime":    "claude_code",
+			"roleId":     "code-reviewer",
+			"employeeId": empID.String(),
+		},
+	}
+	res, err := LLMAgentHandler{}.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	if len(res.Effects) != 1 {
+		t.Fatalf("expected 1 effect, got %d", len(res.Effects))
+	}
+	var p SpawnAgentPayload
+	if err := json.Unmarshal(res.Effects[0].Payload, &p); err != nil {
+		t.Fatalf("unmarshal payload: %v", err)
+	}
+	if p.EmployeeID != empID.String() {
+		t.Errorf("expected EmployeeID=%s, got %q", empID, p.EmployeeID)
+	}
+}
+
+func TestLLMAgentHandler_EmployeeIDInvalidIgnored(t *testing.T) {
+	taskID := uuid.New()
+	req := &NodeExecRequest{
+		Execution: &model.WorkflowExecution{TaskID: &taskID},
+		Config: map[string]any{
+			"runtime":    "claude_code",
+			"roleId":     "code-reviewer",
+			"employeeId": "not-a-uuid",
+		},
+	}
+	res, err := LLMAgentHandler{}.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var p SpawnAgentPayload
+	_ = json.Unmarshal(res.Effects[0].Payload, &p)
+	if p.EmployeeID != "" {
+		t.Errorf("expected empty EmployeeID for invalid input, got %q", p.EmployeeID)
+	}
+}

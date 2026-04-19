@@ -1,0 +1,127 @@
+"use client";
+
+import { useEffect } from "react";
+import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
+import { Badge } from "@/components/ui/badge";
+import { Switch } from "@/components/ui/switch";
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table";
+import {
+  useWorkflowTriggerStore,
+  type WorkflowTrigger,
+} from "@/lib/stores/workflow-trigger-store";
+
+interface WorkflowTriggersSectionProps {
+  workflowId: string | null;
+}
+
+export function WorkflowTriggersSection({ workflowId }: WorkflowTriggersSectionProps) {
+  const triggersByWorkflow = useWorkflowTriggerStore((s) => s.triggersByWorkflow);
+  const loading = useWorkflowTriggerStore((s) => s.loading);
+  const fetchTriggers = useWorkflowTriggerStore((s) => s.fetchTriggers);
+  const setEnabled = useWorkflowTriggerStore((s) => s.setEnabled);
+
+  useEffect(() => {
+    if (workflowId) void fetchTriggers(workflowId);
+  }, [workflowId, fetchTriggers]);
+
+  if (!workflowId) {
+    return (
+      <Card>
+        <CardHeader>
+          <CardTitle>触发器 (Triggers)</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <p className="text-sm text-muted-foreground">请选择工作流以查看触发器。</p>
+        </CardContent>
+      </Card>
+    );
+  }
+
+  const triggers = triggersByWorkflow[workflowId] ?? [];
+  const isLoading = loading[workflowId] ?? false;
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle>触发器 (Triggers)</CardTitle>
+        <p className="text-sm text-muted-foreground mt-1">
+          这里展示工作流 DAG 中定义的触发器节点的运行时状态。保存工作流时会自动同步。
+          可以临时停用单个触发器而无需编辑 DAG。
+        </p>
+      </CardHeader>
+      <CardContent>
+        {isLoading ? (
+          <p className="text-sm text-muted-foreground">加载中...</p>
+        ) : triggers.length === 0 ? (
+          <div className="text-center py-8">
+            <p className="text-sm text-muted-foreground">
+              此工作流没有注册任何触发器。在 DAG 编辑器里给 trigger 节点配置 source=im 或 schedule 后保存即可。
+            </p>
+          </div>
+        ) : (
+          <Table>
+            <TableHeader>
+              <TableRow>
+                <TableHead>Source</TableHead>
+                <TableHead>配置摘要</TableHead>
+                <TableHead>幂等窗口</TableHead>
+                <TableHead>启用</TableHead>
+                <TableHead>创建时间</TableHead>
+              </TableRow>
+            </TableHeader>
+            <TableBody>
+              {triggers.map((t) => (
+                <TableRow key={t.id}>
+                  <TableCell>
+                    <Badge variant={t.source === "im" ? "default" : "secondary"}>
+                      {t.source}
+                    </Badge>
+                  </TableCell>
+                  <TableCell className="max-w-sm">
+                    <code className="text-xs bg-muted px-1 py-0.5 rounded block truncate">
+                      {configSummary(t)}
+                    </code>
+                  </TableCell>
+                  <TableCell className="text-sm">
+                    {t.dedupeWindowSeconds > 0 ? `${t.dedupeWindowSeconds}s` : "—"}
+                  </TableCell>
+                  <TableCell>
+                    <Switch
+                      checked={t.enabled}
+                      onCheckedChange={(enabled) => setEnabled(workflowId, t.id, enabled)}
+                    />
+                  </TableCell>
+                  <TableCell className="text-xs text-muted-foreground">
+                    {new Date(t.createdAt).toLocaleString()}
+                  </TableCell>
+                </TableRow>
+              ))}
+            </TableBody>
+          </Table>
+        )}
+      </CardContent>
+    </Card>
+  );
+}
+
+function configSummary(t: WorkflowTrigger): string {
+  const cfg = t.config as Record<string, unknown>;
+  if (t.source === "im") {
+    const platform = (cfg.platform as string) ?? "?";
+    const command = (cfg.command as string) ?? "";
+    return `${platform} ${command}`.trim();
+  }
+  if (t.source === "schedule") {
+    const cron = (cfg.cron as string) ?? "?";
+    const tz = (cfg.timezone as string) ?? "UTC";
+    return `${cron} (${tz})`;
+  }
+  return JSON.stringify(cfg);
+}

@@ -72,8 +72,12 @@ type Review struct {
 	Summary           string                   `db:"summary"`
 	Recommendation    string                   `db:"recommendation"`
 	CostUSD           float64                  `db:"cost_usd"`
-	CreatedAt         time.Time                `db:"created_at"`
-	UpdatedAt         time.Time                `db:"updated_at"`
+	// ExecutionID links this review to a workflow_executions row when the
+	// review was launched through the system:code-review template path.
+	// Nil on legacy reviews created before the workflow-backed refactor.
+	ExecutionID *uuid.UUID `db:"execution_id" json:"executionId,omitempty"`
+	CreatedAt   time.Time  `db:"created_at"`
+	UpdatedAt   time.Time  `db:"updated_at"`
 }
 
 const (

@@ -14,6 +14,7 @@ import (
 	"github.com/google/uuid"
 	bridgeclient "github.com/react-go-quick-starter/server/internal/bridge"
 	eventbus "github.com/react-go-quick-starter/server/internal/eventbus"
+	"github.com/react-go-quick-starter/server/internal/employee"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/pool"
 	"github.com/react-go-quick-starter/server/internal/repository"
@@ -323,8 +324,11 @@ func (s *AgentService) TeamArtifactService() *TeamArtifactService {
 }
 
 type bridgeExecutionContext struct {
-	TeamID   *uuid.UUID
-	TeamRole string
+	TeamID               *uuid.UUID
+	TeamRole             string
+	EmployeeID           *uuid.UUID
+	ExtraSkills          []model.EmployeeSkill
+	SystemPromptOverride string
 }
 
 // Spawn creates a run, provisions a worktree, starts bridge execution, and publishes lifecycle updates.
@@ -336,6 +340,18 @@ func (s *AgentService) SpawnForTeam(ctx context.Context, teamID uuid.UUID, teamR
 	return s.spawnWithContext(ctx, taskID, memberID, runtime, provider, modelName, budgetUsd, roleID, &bridgeExecutionContext{
 		TeamID:   &teamID,
 		TeamRole: teamRole,
+	})
+}
+
+// SpawnForEmployee dispatches a run on behalf of a persistent Employee.
+// The resulting agent_run row carries employee_id for per-employee memory
+// and history. SystemPromptOverride and ExtraSkills are best-effort plumbed
+// onto the bridge request where the current request shape supports them.
+func (s *AgentService) SpawnForEmployee(ctx context.Context, in employee.SpawnForEmployeeInput) (*model.AgentRun, error) {
+	return s.spawnWithContext(ctx, in.TaskID, in.MemberID, in.Runtime, in.Provider, in.Model, in.BudgetUsd, in.RoleID, &bridgeExecutionContext{
+		EmployeeID:           &in.EmployeeID,
+		ExtraSkills:          in.ExtraSkills,
+		SystemPromptOverride: in.SystemPromptOverride,
 	})
 }
 
@@ -401,6 +417,9 @@ func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uu
 	if execCtx != nil {
 		run.TeamID = execCtx.TeamID
 		run.TeamRole = strings.TrimSpace(execCtx.TeamRole)
+		if execCtx.EmployeeID != nil {
+			run.EmployeeID = execCtx.EmployeeID
+		}
 	}
 	if s.pool != nil {
 		if err := s.pool.Acquire(run.ID.String(), taskID.String(), memberID.String()); err != nil {
@@ -456,6 +475,10 @@ func (s *AgentService) spawnWithContext(ctx context.Context, taskID, memberID uu
 	)
 	if memoryContext != "" {
 		bridgeReq.SystemPrompt = strings.TrimSpace(bridgeReq.SystemPrompt + "\n" + memoryContext)
+	}
+	// Inject employee system prompt override when the run is dispatched on behalf of an Employee.
+	if execCtx != nil && execCtx.SystemPromptOverride != "" {
+		bridgeReq.SystemPrompt = strings.TrimSpace(bridgeReq.SystemPrompt + "\n" + execCtx.SystemPromptOverride)
 	}
 	// Inject team artifact context for downstream agents.
 	if s.artifactSvc != nil && execCtx != nil && execCtx.TeamID != nil {

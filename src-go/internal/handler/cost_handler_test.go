@@ -163,6 +163,7 @@ func TestCostHandler_GetStats_ProjectSummaryIncludesAuthoritativeBreakdowns(t *t
 				updated_at DATETIME,
 				team_id TEXT,
 				team_role TEXT,
+				employee_id TEXT,
 				cost_accounting JSON,
 				structured_output JSON
 			)`,

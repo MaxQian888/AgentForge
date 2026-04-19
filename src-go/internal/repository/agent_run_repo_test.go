@@ -32,22 +32,32 @@ func TestAgentRunRepositoryGetByIDNilDB(t *testing.T) {
 	}
 }
 
+func TestAgentRunRepository_SetEmployeeID_NilDB(t *testing.T) {
+	repo := NewAgentRunRepository(nil)
+	err := repo.SetEmployeeID(context.Background(), uuid.New(), uuid.New())
+	if err != ErrDatabaseUnavailable {
+		t.Errorf("expected ErrDatabaseUnavailable, got %v", err)
+	}
+}
+
 func TestAgentRunRecordPreservesRoleAndTeamFields(t *testing.T) {
 	teamID := uuid.New()
+	emp := uuid.New()
 	now := time.Now().UTC()
 
 	run := &model.AgentRun{
-		ID:       uuid.New(),
-		TaskID:   uuid.New(),
-		MemberID: uuid.New(),
-		RoleID:   "frontend-developer",
-		Status:   model.AgentRunStatusRunning,
-		Runtime:  "codex",
-		Provider: "openai",
-		Model:    "gpt-5.4",
-		TeamID:   &teamID,
-		TeamRole: model.TeamRoleCoder,
-		StartedAt: now,
+		ID:         uuid.New(),
+		TaskID:     uuid.New(),
+		MemberID:   uuid.New(),
+		RoleID:     "frontend-developer",
+		Status:     model.AgentRunStatusRunning,
+		Runtime:    "codex",
+		Provider:   "openai",
+		Model:      "gpt-5.4",
+		TeamID:     &teamID,
+		TeamRole:   model.TeamRoleCoder,
+		EmployeeID: &emp,
+		StartedAt:  now,
 	}
 
 	record := newAgentRunRecord(run)
@@ -61,5 +71,8 @@ func TestAgentRunRecordPreservesRoleAndTeamFields(t *testing.T) {
 	}
 	if result.TeamRole != model.TeamRoleCoder {
 		t.Fatalf("TeamRole = %q, want %q", result.TeamRole, model.TeamRoleCoder)
+	}
+	if result.EmployeeID == nil || *result.EmployeeID != emp {
+		t.Errorf("EmployeeID: expected %v, got %v", emp, result.EmployeeID)
 	}
 }

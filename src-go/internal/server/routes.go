@@ -11,8 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
+	"github.com/react-go-quick-starter/server/internal/employee"
 	"github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/handler"
 	"github.com/react-go-quick-starter/server/internal/knowledge"
@@ -25,6 +28,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/service"
 	skillspkg "github.com/react-go-quick-starter/server/internal/skills"
 	"github.com/react-go-quick-starter/server/internal/storage"
+	"github.com/react-go-quick-starter/server/internal/trigger"
 	"github.com/react-go-quick-starter/server/internal/version"
 	"github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
 	"github.com/react-go-quick-starter/server/internal/ws"
@@ -185,6 +189,62 @@ type knowledgeEventBusAdapter struct {
 
 func (a knowledgeEventBusAdapter) PublishKnowledgeEvent(ctx context.Context, eventType string, projectID string, payload map[string]any) error {
 	return eventbus.PublishLegacy(ctx, a.bus, eventType, projectID, payload)
+}
+
+// employeeRoleRegistryAdapter bridges *role.FileStore (Get-based API) to the
+// employee.RoleRegistry.Has(string) bool interface.
+type employeeRoleRegistryAdapter struct {
+	store *role.FileStore
+}
+
+func (a employeeRoleRegistryAdapter) Has(roleID string) bool {
+	if a.store == nil || roleID == "" {
+		return false
+	}
+	_, err := a.store.Get(roleID)
+	return err == nil
+}
+
+// reviewWorkflowLauncherAdapter composes the template and DAG services into
+// the ReviewWorkflowLauncher interface. It clones the system:code-review
+// template once per project (idempotent — repeated calls reuse the existing
+// active workflow with the same name) then starts a new execution.
+type reviewWorkflowLauncherAdapter struct {
+	templates *service.WorkflowTemplateService
+	dag       *service.DAGWorkflowService
+	defRepo   *repository.WorkflowDefinitionRepository
+}
+
+func (a reviewWorkflowLauncherAdapter) LaunchReviewWorkflow(ctx context.Context, projectID uuid.UUID, seed map[string]any) (uuid.UUID, error) {
+	tmpl, err := a.templates.FindTemplateByName(ctx, service.TemplateSystemCodeReview)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("find code-review template: %w", err)
+	}
+
+	// Reuse an active clone with the same name in this project, if one exists.
+	var wfID uuid.UUID
+	existing, listErr := a.defRepo.ListByProject(ctx, projectID)
+	if listErr == nil {
+		for _, def := range existing {
+			if def.Name == tmpl.Name && def.Status == model.WorkflowDefStatusActive {
+				wfID = def.ID
+				break
+			}
+		}
+	}
+	if wfID == uuid.Nil {
+		clone, cloneErr := a.templates.CloneTemplate(ctx, tmpl.ID, projectID, nil)
+		if cloneErr != nil {
+			return uuid.Nil, fmt.Errorf("clone template: %w", cloneErr)
+		}
+		wfID = clone.ID
+	}
+
+	exec, startErr := a.dag.StartExecution(ctx, wfID, nil, service.StartOptions{Seed: seed})
+	if startErr != nil {
+		return uuid.Nil, fmt.Errorf("start execution: %w", startErr)
+	}
+	return exec.ID, nil
 }
 
 type RouteServices struct {
@@ -487,6 +547,23 @@ func RegisterRoutes(
 		effectApplier.AgentSpawner = agentSvc
 		agentSvc.SetDAGWorkflowService(dagWorkflowSvc)
 	}
+
+	// Trigger infrastructure: registrar materializes trigger-node config into
+	// workflow_triggers rows on workflow save; router matches incoming events
+	// and starts executions via StartOptions.
+	triggerRepo := repository.NewWorkflowTriggerRepository(taskRepo.DB())
+	triggerRegistrar := trigger.NewRegistrar(triggerRepo)
+	triggerRouter := trigger.NewRouter(triggerRepo, dagWorkflowSvc, trigger.NoopIdempotencyStore{})
+	workflowH.SetTriggerSyncer(triggerRegistrar)
+	triggerH := handler.NewTriggerHandler(triggerRouter).WithQueryRepo(triggerRepo)
+	triggerH.RegisterRoutes(e)
+
+	// Start the schedule ticker in the background. It evaluates enabled
+	// source=schedule workflow_triggers every minute boundary and fires the
+	// router when a trigger's cron matches. Cancellation falls back to the
+	// server's shutdown context on main exit.
+	go trigger.NewScheduleTicker(triggerRepo, triggerRouter, nil).Run(context.Background())
+
 	workflowH = workflowH.WithDAGService(dagWorkflowSvc, dagDefRepo, dagExecRepo, dagNodeExecRepo)
 	// Template and review services
 	templateSvc := service.NewWorkflowTemplateService(dagDefRepo, dagWorkflowSvc)
@@ -530,6 +607,48 @@ func RegisterRoutes(
 	reviewH := handler.NewReviewHandler(reviewSvc).WithAggregationService(reviewAggSvc)
 	workflowRoleStore := role.NewFileStore(cfg.RolesDir)
 	memberH = memberH.WithRoleStore(workflowRoleStore)
+
+	// Employee runtime: persistent agent entity with role binding, skill overrides,
+	// memory namespace, and lifecycle state.
+	employeeRepo := repository.NewEmployeeRepository(taskRepo.DB())
+	employeeRoleReg := employeeRoleRegistryAdapter{store: workflowRoleStore}
+	var agentSpawnerForEmployee employee.AgentSpawner
+	if agentSvc != nil {
+		agentSpawnerForEmployee = agentSvc
+	}
+	employeeSvc := employee.NewService(employeeRepo, employeeRoleReg, agentSpawnerForEmployee)
+	effectApplier.EmployeeSpawner = employee.ApplierAdapter{Svc: employeeSvc}
+
+	// Seed YAML-defined Employees into every active project.
+	go func() {
+		seedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		projects, err := projectRepo.ListActive(seedCtx)
+		if err != nil {
+			log.WithError(err).Warn("employee seed: list active projects")
+			return
+		}
+		if len(projects) == 0 {
+			return
+		}
+		projectIDs := make([]uuid.UUID, 0, len(projects))
+		for _, p := range projects {
+			projectIDs = append(projectIDs, p.ID)
+		}
+		empRegistry := employee.NewRegistry(employeeSvc)
+		report, err := empRegistry.SeedFromDir(seedCtx, "employees", projectIDs)
+		if err != nil {
+			log.WithError(err).Warn("employee seed: seed from dir")
+			return
+		}
+		log.WithFields(log.Fields{
+			"upserted": report.Upserted,
+			"skipped":  report.Skipped,
+			"errors":   len(report.Errors),
+		}).Info("employee seed complete")
+	}()
+
 	if pluginSvc == nil {
 		pluginSvc = service.NewPluginService(
 			repository.NewPluginRegistryRepository(),
@@ -566,6 +685,19 @@ func RegisterRoutes(
 		agentSvc.SetAutomationEvaluator(automationEngine)
 	}
 	reviewSvc.WithExecutionPlanner(service.NewReviewExecutionPlanner(pluginSvc))
+	// Wire the optional workflow-backed review path. When USE_WORKFLOW_BACKED_REVIEW
+	// is unset or false (the default) the adapter is present but the flag gate
+	// keeps launchWorkflowBackedReview a no-op, so the legacy flow is unchanged.
+	if templateSvc != nil && dagWorkflowSvc != nil {
+		reviewSvc.WithWorkflowLauncher(
+			reviewWorkflowLauncherAdapter{
+				templates: templateSvc,
+				dag:       dagWorkflowSvc,
+				defRepo:   dagDefRepo,
+			},
+			func() bool { return cfg.UseWorkflowBackedReview },
+		)
+	}
 	recommendSvc := service.NewAssignmentRecommender(taskRepo, memberRepo, agentRunRepo)
 	taskH = taskH.WithRecommender(recommendSvc)
 	var dispatchSvc *service.TaskDispatchService
@@ -844,6 +976,10 @@ func RegisterRoutes(
 	// Workflow reviews
 	projectGroup.GET("/workflow-reviews", workflowH.ListPendingReviews, appMiddleware.Require(appMiddleware.ActionWorkflowRead))
 
+	// Employee resource (persistent agent entities with role binding and lifecycle state).
+	employeeH := handler.NewEmployeeHandler(employeeSvc)
+	employeeH.Register(projectGroup)
+
 		// Workflow templates
 		protected.GET("/workflow-templates", workflowH.ListTemplates)
 		protected.POST("/workflows/:id/publish-template", workflowH.PublishTemplate)
@@ -1021,7 +1157,7 @@ func RegisterRoutes(
 	if imReactionEventRepo != nil {
 		imSvc.SetReactionStore(service.NewIMReactionStoreAdapter(imReactionEventRepo))
 	}
-	imSvc.SetActionExecutor(service.NewBackendIMActionExecutor(
+	imActionExecutor := service.NewBackendIMActionExecutor(
 		dispatchSvc,
 		taskDecomposeSvc,
 		reviewSvc,
@@ -1032,7 +1168,11 @@ func RegisterRoutes(
 		wikiSvc,
 		imReactionEventRepo,
 		taskCommentRepo,
-	))
+	)
+	if dagWorkflowSvc != nil {
+		imActionExecutor = imActionExecutor.WithReviewWorkflow(dagWorkflowSvc, wfReviewRepo)
+	}
+	imSvc.SetActionExecutor(imActionExecutor)
 	automationEngine.SetIMSender(imSvc)
 	wikiSvc.WithIMForwarder(imSvc, cfg.IMNotifyPlatform, cfg.IMNotifyTargetChatID).WithIMChannelResolver(imControlPlane)
 	imH := handler.NewIMHandler(imSvc)
