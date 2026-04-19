@@ -2,6 +2,7 @@ package employee_test
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"testing"
 	"time"
@@ -602,6 +603,42 @@ func TestService_Invoke_EmployeeNotFound(t *testing.T) {
 	}
 	if spawner.called {
 		t.Error("spawner should NOT have been called")
+	}
+}
+
+func TestService_Invoke_ZeroBudgetOverrideFallsThrough(t *testing.T) {
+	ctx := context.Background()
+	projectID := uuid.New()
+
+	repo := newMockEmployeeRepo()
+	repo.employees[uuid.UUID{}] = nil // no-op; ensure map initialized
+	roles := &mockRoleRegistry{known: map[string]bool{"code-reviewer": true}}
+
+	// Create an Employee with prefs.BudgetUsd = 7.
+	spawner := &fakeSpawner{result: &model.AgentRun{ID: uuid.New()}}
+	svc := employee.NewService(repo, roles, spawner)
+	emp, err := svc.Create(ctx, employee.CreateInput{
+		ProjectID:    projectID,
+		Name:         "zero-budget-fallthrough",
+		RoleID:       "code-reviewer",
+		RuntimePrefs: json.RawMessage(`{"budgetUsd":7}`),
+	})
+	if err != nil {
+		t.Fatalf("Create: %v", err)
+	}
+
+	// Invoke with an explicit zero BudgetOverride — must fall through to prefs.
+	zero := 0.0
+	_, err = svc.Invoke(ctx, employee.InvokeInput{
+		EmployeeID:     emp.ID,
+		TaskID:         uuid.New(),
+		BudgetOverride: &zero,
+	})
+	if err != nil {
+		t.Fatalf("Invoke: %v", err)
+	}
+	if spawner.last.BudgetUsd != 7 {
+		t.Errorf("expected budget 7 from prefs (override was zero), got %v", spawner.last.BudgetUsd)
 	}
 }
 
