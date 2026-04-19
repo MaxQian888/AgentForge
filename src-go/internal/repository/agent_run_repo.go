@@ -158,6 +158,25 @@ func (r *AgentRunRepository) ListByRole(ctx context.Context, roleID string, limi
 	return runs, nil
 }
 
+// SetEmployeeID updates the employee_id on an existing run.
+// Returns ErrNotFound when no row matches.
+func (r *AgentRunRepository) SetEmployeeID(ctx context.Context, id uuid.UUID, employeeID uuid.UUID) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	res := r.db.WithContext(ctx).
+		Model(&agentRunRecord{}).
+		Where("id = ?", id).
+		Update("employee_id", employeeID)
+	if res.Error != nil {
+		return fmt.Errorf("set employee id: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
+	}
+	return nil
+}
+
 func (r *AgentRunRepository) SetTeamFields(ctx context.Context, id uuid.UUID, teamID uuid.UUID, teamRole string) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable

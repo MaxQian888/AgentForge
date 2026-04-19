@@ -32,6 +32,14 @@ func TestAgentRunRepositoryGetByIDNilDB(t *testing.T) {
 	}
 }
 
+func TestAgentRunRepository_SetEmployeeID_NilDB(t *testing.T) {
+	repo := NewAgentRunRepository(nil)
+	err := repo.SetEmployeeID(context.Background(), uuid.New(), uuid.New())
+	if err != ErrDatabaseUnavailable {
+		t.Errorf("expected ErrDatabaseUnavailable, got %v", err)
+	}
+}
+
 func TestAgentRunRecordPreservesRoleAndTeamFields(t *testing.T) {
 	teamID := uuid.New()
 	now := time.Now().UTC()

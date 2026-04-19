@@ -812,6 +812,7 @@ type agentRunRecord struct {
 	UpdatedAt       time.Time  `gorm:"column:updated_at"`
 	TeamID           *uuid.UUID `gorm:"column:team_id"`
 	TeamRole         string     `gorm:"column:team_role"`
+	EmployeeID       *uuid.UUID `gorm:"column:employee_id"`
 	CostAccounting   rawJSON    `gorm:"column:cost_accounting;type:jsonb"`
 	StructuredOutput rawJSON    `gorm:"column:structured_output;type:jsonb"`
 }
@@ -843,6 +844,7 @@ func newAgentRunRecord(run *model.AgentRun) *agentRunRecord {
 		UpdatedAt:       run.UpdatedAt,
 		TeamID:           run.TeamID,
 		TeamRole:         run.TeamRole,
+		EmployeeID:       run.EmployeeID,
 		CostAccounting:   mustMarshalAgentRunCostAccounting(run.CostAccounting),
 		StructuredOutput: newRawJSON(run.StructuredOutput, "null"),
 	}
@@ -873,6 +875,7 @@ func (r *agentRunRecord) toModel() *model.AgentRun {
 		UpdatedAt:       r.UpdatedAt,
 		TeamID:           r.TeamID,
 		TeamRole:         r.TeamRole,
+		EmployeeID:       r.EmployeeID,
 		CostAccounting:   unmarshalAgentRunCostAccounting(r.CostAccounting),
 		StructuredOutput: unmarshalStructuredOutput(r.StructuredOutput),
 	}

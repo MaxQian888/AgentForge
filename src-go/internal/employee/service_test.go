@@ -3,7 +3,6 @@ package employee_test
 import (
 	"context"
 	"errors"
-	"strings"
 	"testing"
 	"time"
 
@@ -156,6 +155,10 @@ func (m *mockRoleRegistry) Has(roleID string) bool {
 
 func newService(repo *mockEmployeeRepo, roles *mockRoleRegistry) *employee.Service {
 	return employee.NewService(repo, roles, nil)
+}
+
+func newServiceWithSpawner(repo *mockEmployeeRepo, roles *mockRoleRegistry, spawner employee.AgentSpawner) *employee.Service {
+	return employee.NewService(repo, roles, spawner)
 }
 
 func seedEmployee(repo *mockEmployeeRepo, projectID uuid.UUID, roleID string) *model.Employee {
@@ -414,22 +417,210 @@ func TestService_RemoveSkill_Passthrough(t *testing.T) {
 	}
 }
 
-func TestService_Invoke_StubReturnsNotImplementedError(t *testing.T) {
+func TestService_Invoke_ArchivedRejected(t *testing.T) {
 	repo := newMockEmployeeRepo()
-	roles := newMockRoleRegistry()
-	svc := newService(repo, roles)
+	roles := newMockRoleRegistry("dev-role")
+	spawner := &fakeSpawner{}
+	svc := newServiceWithSpawner(repo, roles, spawner)
 
-	result, err := svc.Invoke(context.Background(), employee.InvokeInput{
-		EmployeeID: uuid.New(),
+	projectID := uuid.New()
+	emp := seedEmployee(repo, projectID, "dev-role")
+	emp.State = model.EmployeeStateArchived
+	repo.employees[emp.ID] = emp
+
+	_, err := svc.Invoke(context.Background(), employee.InvokeInput{
+		EmployeeID: emp.ID,
 		TaskID:     uuid.New(),
 	})
-	if err == nil {
-		t.Fatal("expected non-nil error from Invoke stub")
+	if !errors.Is(err, employee.ErrEmployeeArchived) {
+		t.Fatalf("expected ErrEmployeeArchived, got %v", err)
 	}
-	if result != nil {
-		t.Error("expected nil result from Invoke stub")
+	if spawner.called {
+		t.Error("spawner should NOT have been called for archived employee")
 	}
-	if !strings.Contains(err.Error(), "not implemented") {
-		t.Errorf("expected 'not implemented' in error message, got: %v", err)
+}
+
+func TestService_Invoke_PausedRejected(t *testing.T) {
+	repo := newMockEmployeeRepo()
+	roles := newMockRoleRegistry("dev-role")
+	spawner := &fakeSpawner{}
+	svc := newServiceWithSpawner(repo, roles, spawner)
+
+	projectID := uuid.New()
+	emp := seedEmployee(repo, projectID, "dev-role")
+	emp.State = model.EmployeeStatePaused
+	repo.employees[emp.ID] = emp
+
+	_, err := svc.Invoke(context.Background(), employee.InvokeInput{
+		EmployeeID: emp.ID,
+		TaskID:     uuid.New(),
+	})
+	if !errors.Is(err, employee.ErrEmployeePaused) {
+		t.Fatalf("expected ErrEmployeePaused, got %v", err)
 	}
+	if spawner.called {
+		t.Error("spawner should NOT have been called for paused employee")
+	}
+}
+
+func TestService_Invoke_ActiveSpawns(t *testing.T) {
+	repo := newMockEmployeeRepo()
+	roles := newMockRoleRegistry("dev-role")
+
+	runID := uuid.New()
+	spawner := &fakeSpawner{result: &model.AgentRun{ID: runID}}
+	svc := newServiceWithSpawner(repo, roles, spawner)
+
+	projectID := uuid.New()
+	emp := seedEmployee(repo, projectID, "dev-role")
+	// Seed runtime prefs
+	emp.RuntimePrefs = []byte(`{"runtime":"claude_code","provider":"anthropic","model":"claude-3-5-sonnet","budgetUsd":12.0}`)
+	repo.employees[emp.ID] = emp
+	// Seed skills
+	repo.skills[emp.ID] = []model.EmployeeSkill{
+		{SkillPath: "skill/alpha", AutoLoad: true},
+	}
+
+	taskID := uuid.New()
+	result, err := svc.Invoke(context.Background(), employee.InvokeInput{
+		EmployeeID: emp.ID,
+		TaskID:     taskID,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if result.AgentRunID != runID {
+		t.Errorf("expected AgentRunID=%s, got %s", runID, result.AgentRunID)
+	}
+	if !spawner.called {
+		t.Fatal("spawner was not called")
+	}
+	if spawner.last.EmployeeID != emp.ID {
+		t.Errorf("EmployeeID mismatch: got %s", spawner.last.EmployeeID)
+	}
+	if spawner.last.TaskID != taskID {
+		t.Errorf("TaskID mismatch: got %s", spawner.last.TaskID)
+	}
+	if spawner.last.Runtime != "claude_code" {
+		t.Errorf("Runtime mismatch: got %s", spawner.last.Runtime)
+	}
+	if spawner.last.BudgetUsd != 12.0 {
+		t.Errorf("BudgetUsd mismatch: got %f", spawner.last.BudgetUsd)
+	}
+	if len(spawner.last.ExtraSkills) != 1 || spawner.last.ExtraSkills[0].SkillPath != "skill/alpha" {
+		t.Errorf("ExtraSkills mismatch: got %v", spawner.last.ExtraSkills)
+	}
+}
+
+func TestService_Invoke_BudgetOverride(t *testing.T) {
+	repo := newMockEmployeeRepo()
+	roles := newMockRoleRegistry("dev-role")
+	runID := uuid.New()
+	spawner := &fakeSpawner{result: &model.AgentRun{ID: runID}}
+	svc := newServiceWithSpawner(repo, roles, spawner)
+
+	projectID := uuid.New()
+	emp := seedEmployee(repo, projectID, "dev-role")
+	emp.RuntimePrefs = []byte(`{"budgetUsd":5.0}`)
+	repo.employees[emp.ID] = emp
+
+	override := 10.0
+	_, err := svc.Invoke(context.Background(), employee.InvokeInput{
+		EmployeeID:     emp.ID,
+		TaskID:         uuid.New(),
+		BudgetOverride: &override,
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spawner.last.BudgetUsd != 10.0 {
+		t.Errorf("expected BudgetUsd=10.0, got %f", spawner.last.BudgetUsd)
+	}
+}
+
+func TestService_Invoke_DefaultBudgetWhenPrefsEmpty(t *testing.T) {
+	repo := newMockEmployeeRepo()
+	roles := newMockRoleRegistry("dev-role")
+	runID := uuid.New()
+	spawner := &fakeSpawner{result: &model.AgentRun{ID: runID}}
+	svc := newServiceWithSpawner(repo, roles, spawner)
+
+	projectID := uuid.New()
+	emp := seedEmployee(repo, projectID, "dev-role")
+	// Empty RuntimePrefs — no budget set
+	emp.RuntimePrefs = nil
+	repo.employees[emp.ID] = emp
+
+	_, err := svc.Invoke(context.Background(), employee.InvokeInput{
+		EmployeeID: emp.ID,
+		TaskID:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spawner.last.BudgetUsd != 5.0 {
+		t.Errorf("expected default BudgetUsd=5.0, got %f", spawner.last.BudgetUsd)
+	}
+}
+
+func TestService_Invoke_SystemPromptOverrideExtracted(t *testing.T) {
+	repo := newMockEmployeeRepo()
+	roles := newMockRoleRegistry("dev-role")
+	runID := uuid.New()
+	spawner := &fakeSpawner{result: &model.AgentRun{ID: runID}}
+	svc := newServiceWithSpawner(repo, roles, spawner)
+
+	projectID := uuid.New()
+	emp := seedEmployee(repo, projectID, "dev-role")
+	emp.Config = []byte(`{"system_prompt_override":"Be formal"}`)
+	repo.employees[emp.ID] = emp
+
+	_, err := svc.Invoke(context.Background(), employee.InvokeInput{
+		EmployeeID: emp.ID,
+		TaskID:     uuid.New(),
+	})
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if spawner.last.SystemPromptOverride != "Be formal" {
+		t.Errorf("expected SystemPromptOverride='Be formal', got %q", spawner.last.SystemPromptOverride)
+	}
+}
+
+func TestService_Invoke_EmployeeNotFound(t *testing.T) {
+	repo := newMockEmployeeRepo()
+	roles := newMockRoleRegistry("dev-role")
+	spawner := &fakeSpawner{}
+	svc := newServiceWithSpawner(repo, roles, spawner)
+
+	_, err := svc.Invoke(context.Background(), employee.InvokeInput{
+		EmployeeID: uuid.New(), // does not exist
+		TaskID:     uuid.New(),
+	})
+	if !errors.Is(err, repository.ErrNotFound) {
+		t.Fatalf("expected ErrNotFound, got %v", err)
+	}
+	if spawner.called {
+		t.Error("spawner should NOT have been called")
+	}
+}
+
+// ---------------------------------------------------------------------------
+// fakeSpawner
+// ---------------------------------------------------------------------------
+
+type fakeSpawner struct {
+	called bool
+	last   employee.SpawnForEmployeeInput
+	result *model.AgentRun
+	err    error
+}
+
+func (f *fakeSpawner) SpawnForEmployee(_ context.Context, in employee.SpawnForEmployeeInput) (*model.AgentRun, error) {
+	f.called = true
+	f.last = in
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.result, nil
 }

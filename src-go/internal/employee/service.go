@@ -208,7 +208,77 @@ func (s *Service) RemoveSkill(ctx context.Context, employeeID uuid.UUID, skillPa
 	return s.repo.RemoveSkill(ctx, employeeID, skillPath)
 }
 
-// Invoke is a stub for Task 6. Task 7 will replace this with full agent-spawn logic.
-func (s *Service) Invoke(_ context.Context, _ InvokeInput) (*InvokeResult, error) {
-	return nil, errors.New("employee.Service.Invoke: not implemented (see Task 7)")
+// Invoke resolves the Employee's runtime preferences and skills, then delegates
+// to agentSpawner.SpawnForEmployee to create an agent run on its behalf.
+func (s *Service) Invoke(ctx context.Context, in InvokeInput) (*InvokeResult, error) {
+	emp, err := s.repo.Get(ctx, in.EmployeeID)
+	if err != nil {
+		return nil, err // pass through repository.ErrNotFound etc.
+	}
+	switch emp.State {
+	case model.EmployeeStateArchived:
+		return nil, ErrEmployeeArchived
+	case model.EmployeeStatePaused:
+		return nil, ErrEmployeePaused
+	}
+
+	prefs, err := decodePrefs(emp.RuntimePrefs)
+	if err != nil {
+		return nil, fmt.Errorf("decode runtime prefs: %w", err)
+	}
+	skills, err := s.repo.ListSkills(ctx, emp.ID)
+	if err != nil {
+		return nil, fmt.Errorf("list employee skills: %w", err)
+	}
+	systemPromptOverride := extractSystemPromptOverride(emp.Config)
+
+	budget := prefs.BudgetUsd
+	if budget <= 0 {
+		budget = 5.0 // same default as the LLMAgentHandler
+	}
+	if in.BudgetOverride != nil && *in.BudgetOverride > 0 {
+		budget = *in.BudgetOverride
+	}
+
+	run, err := s.agentSpawner.SpawnForEmployee(ctx, SpawnForEmployeeInput{
+		EmployeeID:           emp.ID,
+		TaskID:               in.TaskID,
+		MemberID:             uuid.Nil, // employee-sourced runs are not attributed to a human member
+		Runtime:              prefs.Runtime,
+		Provider:             prefs.Provider,
+		Model:                prefs.Model,
+		RoleID:               emp.RoleID,
+		BudgetUsd:            budget,
+		SystemPromptOverride: systemPromptOverride,
+		ExtraSkills:          skills,
+	})
+	if err != nil {
+		return nil, err
+	}
+	return &InvokeResult{AgentRunID: run.ID}, nil
+}
+
+func decodePrefs(raw json.RawMessage) (model.RuntimePrefs, error) {
+	var p model.RuntimePrefs
+	if len(raw) == 0 {
+		return p, nil
+	}
+	if err := json.Unmarshal(raw, &p); err != nil {
+		return p, err
+	}
+	return p, nil
+}
+
+func extractSystemPromptOverride(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var m map[string]any
+	if json.Unmarshal(raw, &m) != nil {
+		return ""
+	}
+	if v, ok := m["system_prompt_override"].(string); ok {
+		return v
+	}
+	return ""
 }
