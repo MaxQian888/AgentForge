@@ -160,7 +160,10 @@ func (r *EmployeeRepository) Get(ctx context.Context, id uuid.UUID) (*model.Empl
 	}
 	var rec employeeRecord
 	if err := r.db.WithContext(ctx).Where("id = ?", id).Take(&rec).Error; err != nil {
-		return nil, fmt.Errorf("get employee: %w", normalizeRepositoryError(err))
+		if normalized := normalizeRepositoryError(err); errors.Is(normalized, ErrNotFound) {
+			return nil, ErrNotFound
+		}
+		return nil, fmt.Errorf("get employee: %w", err)
 	}
 	emp := rec.toModel()
 	skills, err := r.ListSkills(ctx, id)
@@ -204,11 +207,15 @@ func (r *EmployeeRepository) Update(ctx context.Context, e *model.Employee) erro
 		"config":        newJSONText(rawMessageToString(e.Config), "{}"),
 		"updated_at":    time.Now().UTC(),
 	}
-	if err := r.db.WithContext(ctx).
+	res := r.db.WithContext(ctx).
 		Model(&employeeRecord{}).
 		Where("id = ?", e.ID).
-		Updates(updates).Error; err != nil {
-		return fmt.Errorf("update employee: %w", err)
+		Updates(updates)
+	if res.Error != nil {
+		return fmt.Errorf("update employee: %w", res.Error)
+	}
+	if res.RowsAffected == 0 {
+		return ErrNotFound
 	}
 	return nil
 }

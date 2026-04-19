@@ -16,32 +16,6 @@ import (
 // Note: TestMain is defined in user_repo_integration_test.go and runs
 // migrations once for the entire package. Do NOT redefine it here.
 
-func insertTestProject(t *testing.T, db interface{ Exec(sql string, values ...interface{}) interface{ Error error } }, projectID uuid.UUID) {
-	t.Helper()
-	// db is *gorm.DB — use a type assertion via the raw DB handle
-	// We cast using the Exec method available on *gorm.DB
-	type execer interface {
-		Exec(sql string, values ...interface{}) interface{ Error error }
-	}
-	_ = db
-	_ = projectID
-}
-
-// openTestDB opens a GORM *gorm.DB for integration tests.
-func openTestDB(t *testing.T) interface{} {
-	t.Helper()
-	url := os.Getenv("TEST_POSTGRES_URL")
-	if url == "" {
-		t.Skip("TEST_POSTGRES_URL not set — skipping integration test")
-	}
-	db, err := database.NewPostgres(url)
-	if err != nil {
-		t.Fatalf("NewPostgres() error: %v", err)
-	}
-	t.Cleanup(func() { _ = database.ClosePostgres(db) })
-	return db
-}
-
 func TestEmployeeRepository_Integration_CreateAndGet(t *testing.T) {
 	url := os.Getenv("TEST_POSTGRES_URL")
 	if url == "" {
