@@ -59,13 +59,21 @@ func (LLMAgentHandler) Execute(_ context.Context, req *NodeExecRequest) (*NodeEx
 		}
 	}
 
+	employeeID := ""
+	if eid, ok := req.Config["employeeId"].(string); ok && eid != "" {
+		if _, err := uuid.Parse(eid); err == nil {
+			employeeID = eid
+		}
+	}
+
 	payload, _ := json.Marshal(SpawnAgentPayload{
-		Runtime:   runtime,
-		Provider:  provider,
-		Model:     modelName,
-		RoleID:    roleID,
-		MemberID:  memberID.String(),
-		BudgetUsd: budgetUsd,
+		Runtime:    runtime,
+		Provider:   provider,
+		Model:      modelName,
+		RoleID:     roleID,
+		MemberID:   memberID.String(),
+		EmployeeID: employeeID,
+		BudgetUsd:  budgetUsd,
 	})
 	return &NodeExecResult{
 		Effects: []Effect{{Kind: EffectSpawnAgent, Payload: payload}},
@@ -82,6 +90,7 @@ func (LLMAgentHandler) ConfigSchema() json.RawMessage {
     "model":     {"type": "string"},
     "roleId":    {"type": "string"},
     "memberId":  {"type": "string", "format": "uuid"},
+    "employeeId": {"type": "string", "format": "uuid"},
     "budgetUsd": {"type": "number", "minimum": 0}
   }
 }`)

@@ -34,12 +34,13 @@ type Effect struct {
 // Per-effect payload structs.
 
 type SpawnAgentPayload struct {
-	Runtime   string  `json:"runtime"`
-	Provider  string  `json:"provider"`
-	Model     string  `json:"model"`
-	RoleID    string  `json:"roleId"`
-	MemberID  string  `json:"memberId,omitempty"`
-	BudgetUsd float64 `json:"budgetUsd"`
+	Runtime    string  `json:"runtime"`
+	Provider   string  `json:"provider"`
+	Model      string  `json:"model"`
+	RoleID     string  `json:"roleId"`
+	MemberID   string  `json:"memberId,omitempty"`
+	EmployeeID string  `json:"employeeId,omitempty"`
+	BudgetUsd  float64 `json:"budgetUsd"`
 }
 
 type RequestReviewPayload struct {
