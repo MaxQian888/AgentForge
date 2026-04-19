@@ -62,14 +62,22 @@ type WorkflowReviewRepoInterface interface {
 	ListPendingByProject(ctx context.Context, projectID uuid.UUID) ([]*model.WorkflowPendingReview, error)
 }
 
+// triggerSyncer is the subset of *trigger.Registrar the handler uses.
+// Keeping it local means main.go can wire any implementation that
+// matches, including a no-op for test configurations.
+type triggerSyncer interface {
+	SyncFromDefinition(ctx context.Context, workflowID, projectID uuid.UUID, nodes []model.WorkflowNode, createdBy *uuid.UUID) error
+}
+
 type WorkflowHandler struct {
-	repo        workflowRepository
-	dagSvc      DAGWorkflowServiceInterface
-	dagDefRepo  DAGWorkflowDefRepoInterface
-	dagExecRepo DAGWorkflowExecRepoInterface
-	dagNodeRepo DAGWorkflowNodeExecRepoInterface
-	templateSvc WorkflowTemplateServiceInterface
-	reviewRepo  WorkflowReviewRepoInterface
+	repo           workflowRepository
+	dagSvc         DAGWorkflowServiceInterface
+	dagDefRepo     DAGWorkflowDefRepoInterface
+	dagExecRepo    DAGWorkflowExecRepoInterface
+	dagNodeRepo    DAGWorkflowNodeExecRepoInterface
+	templateSvc    WorkflowTemplateServiceInterface
+	reviewRepo     WorkflowReviewRepoInterface
+	triggerSyncer  triggerSyncer
 }
 
 func NewWorkflowHandler(repo workflowRepository) *WorkflowHandler {
@@ -100,6 +108,12 @@ func (h *WorkflowHandler) WithTemplateService(svc WorkflowTemplateServiceInterfa
 func (h *WorkflowHandler) WithReviewRepo(repo WorkflowReviewRepoInterface) *WorkflowHandler {
 	h.reviewRepo = repo
 	return h
+}
+
+// SetTriggerSyncer wires the trigger syncer (called from Task 18 startup wiring).
+// Passing nil is safe — the handler skips sync when no syncer is wired.
+func (h *WorkflowHandler) SetTriggerSyncer(s triggerSyncer) {
+	h.triggerSyncer = s
 }
 
 // --- Existing workflow config endpoints ---
@@ -172,6 +186,25 @@ func (h *WorkflowHandler) CreateDefinition(c echo.Context) error {
 
 	if err := h.dagDefRepo.Create(c.Request().Context(), def); err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateWorkflow)
+	}
+
+	// Sync trigger subscriptions from the saved definition's nodes.
+	if h.triggerSyncer != nil {
+		var nodes []model.WorkflowNode
+		if len(def.Nodes) > 0 {
+			if err := json.Unmarshal(def.Nodes, &nodes); err != nil {
+				// Don't fail the create over this — log and continue.
+				// Returning 500 after a successful DB insert would leave the
+				// caller with an orphan workflow they can't easily discover.
+				c.Logger().Errorf("workflow %s: parse nodes for trigger sync: %v", def.ID, err)
+			}
+		}
+		// TODO: thread createdBy from auth context
+		if syncErr := h.triggerSyncer.SyncFromDefinition(c.Request().Context(), def.ID, def.ProjectID, nodes, nil); syncErr != nil {
+			c.Logger().Errorf("workflow %s: sync triggers after create: %v", def.ID, syncErr)
+			// Same rationale: the workflow was created; trigger sync can be
+			// retried by re-saving. Don't roll back.
+		}
 	}
 
 	created, err := h.dagDefRepo.GetByID(c.Request().Context(), def.ID)
@@ -259,6 +292,23 @@ func (h *WorkflowHandler) UpdateDefinition(c echo.Context) error {
 	if err != nil {
 		return localizedError(c, http.StatusNotFound, i18n.MsgWorkflowNotFound)
 	}
+
+	// Only sync triggers when the node set changed; metadata-only updates skip sync.
+	if h.triggerSyncer != nil && req.Nodes != nil {
+		var nodes []model.WorkflowNode
+		if len(updated.Nodes) > 0 {
+			if err := json.Unmarshal(updated.Nodes, &nodes); err != nil {
+				// Don't fail the update over this — log and continue.
+				c.Logger().Errorf("workflow %s: parse nodes for trigger sync: %v", updated.ID, err)
+			}
+		}
+		// TODO: thread createdBy from auth context
+		if syncErr := h.triggerSyncer.SyncFromDefinition(c.Request().Context(), updated.ID, updated.ProjectID, nodes, nil); syncErr != nil {
+			c.Logger().Errorf("workflow %s: sync triggers after update: %v", updated.ID, syncErr)
+			// Trigger sync can be retried by re-saving. Don't roll back.
+		}
+	}
+
 	return c.JSON(http.StatusOK, updated.ToDTO())
 }
 

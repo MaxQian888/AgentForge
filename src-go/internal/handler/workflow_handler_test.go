@@ -193,6 +193,194 @@ func TestWorkflowHandler_Put_RepoError(t *testing.T) {
 	}
 }
 
+// --- DAG def repo stub used by trigger-sync tests ---
+
+type fakeDAGDefRepo struct {
+	created  *model.WorkflowDefinition
+	updated  *model.WorkflowDefinition
+	createErr error
+	updateErr error
+	getByIDFn func(id uuid.UUID) (*model.WorkflowDefinition, error)
+}
+
+func (f *fakeDAGDefRepo) Create(_ context.Context, def *model.WorkflowDefinition) error {
+	if f.createErr != nil {
+		return f.createErr
+	}
+	f.created = def
+	return nil
+}
+
+func (f *fakeDAGDefRepo) GetByID(_ context.Context, id uuid.UUID) (*model.WorkflowDefinition, error) {
+	if f.getByIDFn != nil {
+		return f.getByIDFn(id)
+	}
+	// Return the created or updated record if one is stored.
+	if f.created != nil && f.created.ID == id {
+		return f.created, nil
+	}
+	if f.updated != nil && f.updated.ID == id {
+		return f.updated, nil
+	}
+	return &model.WorkflowDefinition{ID: id}, nil
+}
+
+func (f *fakeDAGDefRepo) ListByProject(_ context.Context, _ uuid.UUID) ([]*model.WorkflowDefinition, error) {
+	return nil, nil
+}
+
+func (f *fakeDAGDefRepo) Update(_ context.Context, id uuid.UUID, def *model.WorkflowDefinition) error {
+	if f.updateErr != nil {
+		return f.updateErr
+	}
+	def.ID = id
+	f.updated = def
+	return nil
+}
+
+func (f *fakeDAGDefRepo) Delete(_ context.Context, _ uuid.UUID) error {
+	return nil
+}
+
+// --- Recording trigger syncer ---
+
+type syncCall struct {
+	WorkflowID uuid.UUID
+	ProjectID  uuid.UUID
+	Nodes      []model.WorkflowNode
+}
+
+type recordingTriggerSyncer struct {
+	calls []syncCall
+	err   error
+}
+
+func (r *recordingTriggerSyncer) SyncFromDefinition(_ context.Context, wid, pid uuid.UUID, nodes []model.WorkflowNode, _ *uuid.UUID) error {
+	r.calls = append(r.calls, syncCall{wid, pid, nodes})
+	return r.err
+}
+
+// --- Trigger sync tests ---
+
+func TestCreateDefinition_TriggersSyncAfterCreate(t *testing.T) {
+	projectID := uuid.New()
+
+	triggerNodeConfig := `{"source":"schedule","schedule":{"cron":"0 9 * * 1"}}`
+	nodes := []model.WorkflowNode{
+		{ID: "t1", Type: model.NodeTypeTrigger, Label: "Every Monday", Config: json.RawMessage(triggerNodeConfig)},
+	}
+	nodesJSON, _ := json.Marshal(nodes)
+
+	defRepo := &fakeDAGDefRepo{}
+	// GetByID returns the created def with its full node JSON.
+	defRepo.getByIDFn = func(id uuid.UUID) (*model.WorkflowDefinition, error) {
+		return &model.WorkflowDefinition{ID: id, ProjectID: projectID, Nodes: nodesJSON}, nil
+	}
+
+	syncer := &recordingTriggerSyncer{}
+
+	e := echo.New()
+	body := `{"name":"My Workflow","nodes":[{"id":"t1","type":"trigger","label":"Every Monday","config":{"source":"schedule","schedule":{"cron":"0 9 * * 1"}}}],"edges":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(appMiddleware.ProjectIDContextKey, projectID)
+
+	h := handler.NewWorkflowHandler(&fakeWorkflowRepo{})
+	h.WithDAGService(nil, defRepo, nil, nil)
+	h.SetTriggerSyncer(syncer)
+
+	if err := h.CreateDefinition(c); err != nil {
+		t.Fatalf("CreateDefinition() error: %v", err)
+	}
+	if rec.Code != http.StatusCreated {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusCreated, rec.Body.String())
+	}
+
+	if len(syncer.calls) != 1 {
+		t.Fatalf("SyncFromDefinition call count = %d, want 1", len(syncer.calls))
+	}
+	call := syncer.calls[0]
+	if call.ProjectID != projectID {
+		t.Fatalf("sync projectID = %s, want %s", call.ProjectID, projectID)
+	}
+	if len(call.Nodes) != 1 || call.Nodes[0].Type != model.NodeTypeTrigger {
+		t.Fatalf("sync nodes = %+v, want 1 trigger node", call.Nodes)
+	}
+}
+
+func TestUpdateDefinition_TriggersSyncWhenNodesChange(t *testing.T) {
+	projectID := uuid.New()
+	workflowID := uuid.New()
+
+	triggerNodeConfig := `{"source":"im","im":{"channel":"#dev"}}`
+	nodes := []model.WorkflowNode{
+		{ID: "t2", Type: model.NodeTypeTrigger, Label: "IM trigger", Config: json.RawMessage(triggerNodeConfig)},
+	}
+	nodesJSON, _ := json.Marshal(nodes)
+
+	defRepo := &fakeDAGDefRepo{}
+	defRepo.getByIDFn = func(id uuid.UUID) (*model.WorkflowDefinition, error) {
+		return &model.WorkflowDefinition{ID: id, ProjectID: projectID, Nodes: nodesJSON}, nil
+	}
+
+	syncer := &recordingTriggerSyncer{}
+
+	e := echo.New()
+
+	// --- Sub-test A: nodes are in the request body → sync must be called ---
+	t.Run("nodes_present_syncs", func(t *testing.T) {
+		body := `{"nodes":[{"id":"t2","type":"trigger","label":"IM trigger","config":{"source":"im","im":{"channel":"#dev"}}}]}`
+		req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(workflowID.String())
+
+		h := handler.NewWorkflowHandler(&fakeWorkflowRepo{})
+		h.WithDAGService(nil, defRepo, nil, nil)
+		h.SetTriggerSyncer(syncer)
+
+		if err := h.UpdateDefinition(c); err != nil {
+			t.Fatalf("UpdateDefinition() error: %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		if len(syncer.calls) != 1 {
+			t.Fatalf("SyncFromDefinition call count = %d, want 1", len(syncer.calls))
+		}
+	})
+
+	// --- Sub-test B: nodes absent (metadata-only update) → sync must NOT be called ---
+	t.Run("nodes_absent_no_sync", func(t *testing.T) {
+		syncer2 := &recordingTriggerSyncer{}
+		body := `{"name":"Renamed Workflow"}`
+		req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
+		req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+		rec := httptest.NewRecorder()
+		c := e.NewContext(req, rec)
+		c.SetParamNames("id")
+		c.SetParamValues(workflowID.String())
+
+		h := handler.NewWorkflowHandler(&fakeWorkflowRepo{})
+		h.WithDAGService(nil, defRepo, nil, nil)
+		h.SetTriggerSyncer(syncer2)
+
+		if err := h.UpdateDefinition(c); err != nil {
+			t.Fatalf("UpdateDefinition() error: %v", err)
+		}
+		if rec.Code != http.StatusOK {
+			t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusOK, rec.Body.String())
+		}
+		if len(syncer2.calls) != 0 {
+			t.Fatalf("SyncFromDefinition call count = %d, want 0 (metadata-only update)", len(syncer2.calls))
+		}
+	})
+}
+
 func TestWorkflowHandler_TemplateManagementEndpoints(t *testing.T) {
 	projectID := uuid.New()
 	templateID := uuid.New()
