@@ -60,3 +60,14 @@ func (s *RedisIdempotencyStore) SeenWithin(ctx context.Context, key string, wind
 	// inserted=false → key already existed → seen within window → return true
 	return !inserted, nil
 }
+
+// NoopIdempotencyStore is a no-op implementation of IdempotencyStore used when
+// Redis is unavailable. It always reports that the key has not been seen, which
+// disables deduplication. Triggers that declare an idempotency_key_template but
+// have no Redis will fire on every matching event.
+type NoopIdempotencyStore struct{}
+
+// SeenWithin always returns (false, nil) — every event appears fresh.
+func (NoopIdempotencyStore) SeenWithin(_ context.Context, _ string, _ time.Duration) (bool, error) {
+	return false, nil
+}

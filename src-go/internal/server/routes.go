@@ -11,8 +11,11 @@ import (
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 	echomiddleware "github.com/labstack/echo/v4/middleware"
+	log "github.com/sirupsen/logrus"
+
 	"github.com/react-go-quick-starter/server/internal/bridge"
 	"github.com/react-go-quick-starter/server/internal/config"
+	"github.com/react-go-quick-starter/server/internal/employee"
 	"github.com/react-go-quick-starter/server/internal/eventbus"
 	"github.com/react-go-quick-starter/server/internal/handler"
 	"github.com/react-go-quick-starter/server/internal/knowledge"
@@ -25,6 +28,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/service"
 	skillspkg "github.com/react-go-quick-starter/server/internal/skills"
 	"github.com/react-go-quick-starter/server/internal/storage"
+	"github.com/react-go-quick-starter/server/internal/trigger"
 	"github.com/react-go-quick-starter/server/internal/version"
 	"github.com/react-go-quick-starter/server/internal/workflow/nodetypes"
 	"github.com/react-go-quick-starter/server/internal/ws"
@@ -185,6 +189,20 @@ type knowledgeEventBusAdapter struct {
 
 func (a knowledgeEventBusAdapter) PublishKnowledgeEvent(ctx context.Context, eventType string, projectID string, payload map[string]any) error {
 	return eventbus.PublishLegacy(ctx, a.bus, eventType, projectID, payload)
+}
+
+// employeeRoleRegistryAdapter bridges *role.FileStore (Get-based API) to the
+// employee.RoleRegistry.Has(string) bool interface.
+type employeeRoleRegistryAdapter struct {
+	store *role.FileStore
+}
+
+func (a employeeRoleRegistryAdapter) Has(roleID string) bool {
+	if a.store == nil || roleID == "" {
+		return false
+	}
+	_, err := a.store.Get(roleID)
+	return err == nil
 }
 
 type RouteServices struct {
@@ -487,6 +505,16 @@ func RegisterRoutes(
 		effectApplier.AgentSpawner = agentSvc
 		agentSvc.SetDAGWorkflowService(dagWorkflowSvc)
 	}
+
+	// Trigger infrastructure: registrar materializes trigger-node config into
+	// workflow_triggers rows on workflow save; router matches incoming events
+	// and starts executions via StartOptions.
+	triggerRepo := repository.NewWorkflowTriggerRepository(taskRepo.DB())
+	triggerRegistrar := trigger.NewRegistrar(triggerRepo)
+	triggerRouter := trigger.NewRouter(triggerRepo, dagWorkflowSvc, trigger.NoopIdempotencyStore{})
+	_ = triggerRouter // reserved for Plan 2 IM/schedule handler wiring
+	workflowH.SetTriggerSyncer(triggerRegistrar)
+
 	workflowH = workflowH.WithDAGService(dagWorkflowSvc, dagDefRepo, dagExecRepo, dagNodeExecRepo)
 	// Template and review services
 	templateSvc := service.NewWorkflowTemplateService(dagDefRepo, dagWorkflowSvc)
@@ -530,6 +558,48 @@ func RegisterRoutes(
 	reviewH := handler.NewReviewHandler(reviewSvc).WithAggregationService(reviewAggSvc)
 	workflowRoleStore := role.NewFileStore(cfg.RolesDir)
 	memberH = memberH.WithRoleStore(workflowRoleStore)
+
+	// Employee runtime: persistent agent entity with role binding, skill overrides,
+	// memory namespace, and lifecycle state.
+	employeeRepo := repository.NewEmployeeRepository(taskRepo.DB())
+	employeeRoleReg := employeeRoleRegistryAdapter{store: workflowRoleStore}
+	var agentSpawnerForEmployee employee.AgentSpawner
+	if agentSvc != nil {
+		agentSpawnerForEmployee = agentSvc
+	}
+	employeeSvc := employee.NewService(employeeRepo, employeeRoleReg, agentSpawnerForEmployee)
+	effectApplier.EmployeeSpawner = employee.ApplierAdapter{Svc: employeeSvc}
+
+	// Seed YAML-defined Employees into every active project.
+	go func() {
+		seedCtx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+
+		projects, err := projectRepo.ListActive(seedCtx)
+		if err != nil {
+			log.WithError(err).Warn("employee seed: list active projects")
+			return
+		}
+		if len(projects) == 0 {
+			return
+		}
+		projectIDs := make([]uuid.UUID, 0, len(projects))
+		for _, p := range projects {
+			projectIDs = append(projectIDs, p.ID)
+		}
+		empRegistry := employee.NewRegistry(employeeSvc)
+		report, err := empRegistry.SeedFromDir(seedCtx, "employees", projectIDs)
+		if err != nil {
+			log.WithError(err).Warn("employee seed: seed from dir")
+			return
+		}
+		log.WithFields(log.Fields{
+			"upserted": report.Upserted,
+			"skipped":  report.Skipped,
+			"errors":   len(report.Errors),
+		}).Info("employee seed complete")
+	}()
+
 	if pluginSvc == nil {
 		pluginSvc = service.NewPluginService(
 			repository.NewPluginRegistryRepository(),
@@ -843,6 +913,10 @@ func RegisterRoutes(
 
 	// Workflow reviews
 	projectGroup.GET("/workflow-reviews", workflowH.ListPendingReviews, appMiddleware.Require(appMiddleware.ActionWorkflowRead))
+
+	// Employee resource (persistent agent entities with role binding and lifecycle state).
+	employeeH := handler.NewEmployeeHandler(employeeSvc)
+	employeeH.Register(projectGroup)
 
 		// Workflow templates
 		protected.GET("/workflow-templates", workflowH.ListTemplates)
