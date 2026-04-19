@@ -908,6 +908,7 @@ func registerCommandHandlers(engine *core.Engine, factory client.ClientProvider,
 	commands.RegisterProjectCommands(engine, factory)
 	commands.RegisterToolsCommands(engine, factory)
 	commands.RegisterDocumentCommands(engine, factory)
+	commands.RegisterWorkflowCommands(engine, factory)
 	commands.RegisterHelpCommand(engine)
 
 	// Session store: persisted when stateStore is available, in-memory

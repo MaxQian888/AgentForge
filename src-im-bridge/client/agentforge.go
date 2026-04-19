@@ -1945,3 +1945,51 @@ type IMActionResponse struct {
 	Structured    *core.StructuredMessage    `json:"structured,omitempty"`
 	Native        *core.NativeMessage        `json:"native,omitempty"`
 }
+
+// TriggerIMEventRequest is the payload shape for POST /api/v1/triggers/im/events.
+// It mirrors the Go handler's imEventRequest struct (src-go/internal/handler/trigger_handler.go).
+type TriggerIMEventRequest struct {
+	Platform    string            `json:"platform"`
+	Command     string            `json:"command"`
+	Content     string            `json:"content,omitempty"`
+	Args        []any             `json:"args,omitempty"`
+	ChatID      string            `json:"chatId,omitempty"`
+	ThreadID    string            `json:"threadId,omitempty"`
+	UserID      string            `json:"userId,omitempty"`
+	UserName    string            `json:"userName,omitempty"`
+	TenantID    string            `json:"tenantId,omitempty"`
+	MessageID   string            `json:"messageId,omitempty"`
+	ReplyTarget *core.ReplyTarget `json:"replyTarget,omitempty"`
+	Extra       map[string]any    `json:"extra,omitempty"`
+}
+
+// TriggerIMEventResponse is the 202/404 JSON body.
+type TriggerIMEventResponse struct {
+	Started int    `json:"started"`
+	Message string `json:"message,omitempty"`
+}
+
+// TriggerIMEvent posts a normalized IM event to the backend router.
+// Returns the count of executions started and an error. Callers distinguish
+// "no matching trigger" (404, started=0) from transport errors — a 404 is
+// returned with a nil error and Started=0, so callers can reply to the user
+// accordingly rather than treating it as an error.
+func (c *AgentForgeClient) TriggerIMEvent(ctx context.Context, req TriggerIMEventRequest) (*TriggerIMEventResponse, error) {
+	resp, err := c.doRequest(ctx, http.MethodPost, "/api/v1/triggers/im/events", req)
+	if err != nil {
+		return nil, fmt.Errorf("trigger im event: %w", err)
+	}
+	defer resp.Body.Close()
+
+	switch resp.StatusCode {
+	case http.StatusAccepted, http.StatusNotFound:
+		var decoded TriggerIMEventResponse
+		if err := json.NewDecoder(resp.Body).Decode(&decoded); err != nil {
+			return nil, fmt.Errorf("decode trigger response: %w", err)
+		}
+		return &decoded, nil
+	default:
+		body, _ := io.ReadAll(resp.Body)
+		return nil, fmt.Errorf("trigger im event: unexpected status %d: %s", resp.StatusCode, strings.TrimSpace(string(body)))
+	}
+}
