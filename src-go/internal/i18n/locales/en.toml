@@ -846,5 +846,45 @@ other = "cannot_modify_owner_as_admin"
 [InvalidProjectRole]
 other = "invalid project role"
 
+# Employee
+[InvalidEmployeeRequest]
+other = "invalid employee request body"
+
+[InvalidEmployeeID]
+other = "invalid employee ID"
+
+[InvalidEmployeeState]
+other = "invalid employee state; must be active, paused, or archived"
+
+[EmployeeNotFound]
+other = "employee not found"
+
+[EmployeeNameExists]
+other = "an employee with that name already exists in this project"
+
+[RoleNotFoundForEmployee]
+other = "role not found for employee"
+
+[FailedToCreateEmployee]
+other = "failed to create employee"
+
+[FailedToListEmployees]
+other = "failed to list employees"
+
+[FailedToUpdateEmployee]
+other = "failed to update employee"
+
+[FailedToDeleteEmployee]
+other = "failed to delete employee"
+
+[FailedToSetEmployeeState]
+other = "failed to set employee state"
+
+[FailedToAddEmployeeSkill]
+other = "failed to add employee skill"
+
+[FailedToRemoveEmployeeSkill]
+other = "failed to remove employee skill"
+
 [UnknownProjectAction]
 other = "unknown project action"
