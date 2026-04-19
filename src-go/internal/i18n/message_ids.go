@@ -346,6 +346,11 @@ const (
 	MsgFailedToListRecentPages      = "FailedToListRecentPages"
 	MsgFailedToUpdatePinnedState    = "FailedToUpdatePinnedState"
 
+	// Trigger
+	MsgTriggerRouterUnavailable = "TriggerRouterUnavailable"
+	MsgMissingIMPlatform        = "MissingIMPlatform"
+	MsgFailedToRouteIMEvent     = "FailedToRouteIMEvent"
+
 	// Workflow
 	MsgInvalidTransitions          = "InvalidTransitions"
 	MsgInvalidTriggers             = "InvalidTriggers"

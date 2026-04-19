@@ -894,3 +894,13 @@ other = "failed to remove employee skill"
 
 [UnknownProjectAction]
 other = "unknown project action"
+
+# Trigger
+[TriggerRouterUnavailable]
+other = "trigger router is not available"
+
+[MissingIMPlatform]
+other = "platform is required"
+
+[FailedToRouteIMEvent]
+other = "failed to route IM event"

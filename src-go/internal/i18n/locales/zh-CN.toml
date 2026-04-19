@@ -832,6 +832,16 @@ other = "无效的工作流节点 ID"
 [FailedToHandleWorkflowEvent]
 other = "处理工作流事件失败"
 
+# 触发器
+[TriggerRouterUnavailable]
+other = "触发器路由不可用"
+
+[MissingIMPlatform]
+other = "platform 字段必填"
+
+[FailedToRouteIMEvent]
+other = "路由 IM 事件失败"
+
 # 中间件 - 项目
 [ProjectIDRequired]
 other = "项目 ID 为必填项"

@@ -512,8 +512,9 @@ func RegisterRoutes(
 	triggerRepo := repository.NewWorkflowTriggerRepository(taskRepo.DB())
 	triggerRegistrar := trigger.NewRegistrar(triggerRepo)
 	triggerRouter := trigger.NewRouter(triggerRepo, dagWorkflowSvc, trigger.NoopIdempotencyStore{})
-	_ = triggerRouter // reserved for Plan 2 IM/schedule handler wiring
 	workflowH.SetTriggerSyncer(triggerRegistrar)
+	triggerH := handler.NewTriggerHandler(triggerRouter)
+	triggerH.RegisterRoutes(e)
 
 	workflowH = workflowH.WithDAGService(dagWorkflowSvc, dagDefRepo, dagExecRepo, dagNodeExecRepo)
 	// Template and review services
