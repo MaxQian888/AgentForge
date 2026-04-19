@@ -95,7 +95,7 @@ func (s *TaskWorkflowService) SetFollowUpNotifier(notifier TaskWorkflowFollowUpN
 type TriggerResult struct {
 	Trigger model.TaskWorkflowTrigger
 	Fired   bool
-	Outcome model.WorkflowTriggerOutcome
+	Outcome model.TaskWorkflowTriggerOutcome
 	Error   error
 }
 
@@ -141,9 +141,9 @@ func (s *TaskWorkflowService) EvaluateTransition(ctx context.Context, task *mode
 		result := TriggerResult{
 			Trigger: normalizedTrigger,
 			Fired:   true,
-			Outcome: model.WorkflowTriggerOutcome{
+			Outcome: model.TaskWorkflowTriggerOutcome{
 				Action: normalizedTrigger.Action,
-				Status: model.WorkflowTriggerOutcomeSkipped,
+				Status: model.TaskWorkflowTriggerOutcomeSkipped,
 			},
 		}
 		log.WithFields(triggerFields).Info("workflow trigger matched")
@@ -170,7 +170,7 @@ func matchesTrigger(trigger model.TaskWorkflowTrigger, fromStatus, toStatus stri
 	return trigger.FromStatus != "" || trigger.ToStatus != ""
 }
 
-func (s *TaskWorkflowService) executeTrigger(ctx context.Context, task *model.Task, trigger model.TaskWorkflowTrigger) (model.WorkflowTriggerOutcome, error) {
+func (s *TaskWorkflowService) executeTrigger(ctx context.Context, task *model.Task, trigger model.TaskWorkflowTrigger) (model.TaskWorkflowTriggerOutcome, error) {
 	fields := log.Fields{
 		"taskId":     task.ID.String(),
 		"projectId":  task.ProjectID.String(),
@@ -178,26 +178,26 @@ func (s *TaskWorkflowService) executeTrigger(ctx context.Context, task *model.Ta
 		"fromStatus": trigger.FromStatus,
 		"toStatus":   trigger.ToStatus,
 	}
-	outcome := model.WorkflowTriggerOutcome{
+	outcome := model.TaskWorkflowTriggerOutcome{
 		Action: trigger.Action,
-		Status: model.WorkflowTriggerOutcomeSkipped,
+		Status: model.TaskWorkflowTriggerOutcomeSkipped,
 	}
 
 	switch trigger.Action {
-	case model.WorkflowTriggerActionNotify:
+	case model.TaskWorkflowTriggerActionNotify:
 		log.WithFields(fields).Info("workflow trigger: notify")
 		err := s.executeNotify(ctx, task, trigger)
 		if err != nil {
-			outcome.Status = model.WorkflowTriggerOutcomeFailed
+			outcome.Status = model.TaskWorkflowTriggerOutcomeFailed
 			outcome.Reason = err.Error()
 			outcome.ReasonCode = "notify_failed"
 		} else {
-			outcome.Status = model.WorkflowTriggerOutcomeCompleted
+			outcome.Status = model.TaskWorkflowTriggerOutcomeCompleted
 		}
 		s.broadcastTriggerFired(task, trigger, outcome)
 		return outcome, err
 
-	case model.WorkflowTriggerActionDispatchAgent:
+	case model.TaskWorkflowTriggerActionDispatchAgent:
 		log.WithFields(fields).Info("workflow trigger: dispatch_agent")
 		dispatchOutcome, err := s.executeAutoAssignAgent(ctx, task, trigger)
 		outcome.Status = dispatchOutcome.Status
@@ -205,20 +205,20 @@ func (s *TaskWorkflowService) executeTrigger(ctx context.Context, task *model.Ta
 		s.broadcastTriggerFired(task, trigger, outcome)
 		return outcome, err
 
-	case model.WorkflowTriggerActionAutoTransition:
+	case model.TaskWorkflowTriggerActionAutoTransition:
 		log.WithFields(fields).Info("workflow trigger: auto_transition")
 		err := s.executeAutoTransition(ctx, task, trigger)
 		if err != nil {
-			outcome.Status = model.WorkflowTriggerOutcomeFailed
+			outcome.Status = model.TaskWorkflowTriggerOutcomeFailed
 			outcome.Reason = err.Error()
 			outcome.ReasonCode = "transition_failed"
 		} else {
-			outcome.Status = model.WorkflowTriggerOutcomeCompleted
+			outcome.Status = model.TaskWorkflowTriggerOutcomeCompleted
 		}
 		s.broadcastTriggerFired(task, trigger, outcome)
 		return outcome, err
 
-	case model.WorkflowTriggerActionStartWorkflow:
+	case model.TaskWorkflowTriggerActionStartWorkflow:
 		log.WithFields(fields).Info("workflow trigger: start_workflow")
 		startOutcome, err := s.executeStartWorkflow(ctx, task, trigger)
 		s.broadcastTriggerFired(task, trigger, startOutcome)
@@ -226,7 +226,7 @@ func (s *TaskWorkflowService) executeTrigger(ctx context.Context, task *model.Ta
 
 	default:
 		log.WithFields(fields).Warn("unknown workflow trigger action")
-		outcome.Status = model.WorkflowTriggerOutcomeFailed
+		outcome.Status = model.TaskWorkflowTriggerOutcomeFailed
 		outcome.Reason = fmt.Sprintf("unknown workflow trigger action %q", trigger.Action)
 		outcome.ReasonCode = "unknown_action"
 		s.broadcastTriggerFired(task, trigger, outcome)
@@ -238,13 +238,13 @@ func normalizeWorkflowTrigger(trigger model.TaskWorkflowTrigger) model.TaskWorkf
 	normalized := trigger
 	switch trigger.Action {
 	case "auto_assign", "auto_assign_agent":
-		normalized.Action = model.WorkflowTriggerActionDispatchAgent
-	case model.WorkflowTriggerActionNotify:
-		normalized.Action = model.WorkflowTriggerActionNotify
-	case model.WorkflowTriggerActionAutoTransition:
-		normalized.Action = model.WorkflowTriggerActionAutoTransition
-	case model.WorkflowTriggerActionStartWorkflow:
-		normalized.Action = model.WorkflowTriggerActionStartWorkflow
+		normalized.Action = model.TaskWorkflowTriggerActionDispatchAgent
+	case model.TaskWorkflowTriggerActionNotify:
+		normalized.Action = model.TaskWorkflowTriggerActionNotify
+	case model.TaskWorkflowTriggerActionAutoTransition:
+		normalized.Action = model.TaskWorkflowTriggerActionAutoTransition
+	case model.TaskWorkflowTriggerActionStartWorkflow:
+		normalized.Action = model.TaskWorkflowTriggerActionStartWorkflow
 	}
 	return normalized
 }
@@ -271,10 +271,10 @@ func triggerConfigMap(trigger model.TaskWorkflowTrigger) map[string]any {
 	}
 }
 
-func (s *TaskWorkflowService) executeAutoAssignAgent(ctx context.Context, task *model.Task, trigger model.TaskWorkflowTrigger) (model.WorkflowTriggerOutcome, error) {
-	outcome := model.WorkflowTriggerOutcome{
+func (s *TaskWorkflowService) executeAutoAssignAgent(ctx context.Context, task *model.Task, trigger model.TaskWorkflowTrigger) (model.TaskWorkflowTriggerOutcome, error) {
+	outcome := model.TaskWorkflowTriggerOutcome{
 		Action: trigger.Action,
-		Status: model.WorkflowTriggerOutcomeSkipped,
+		Status: model.TaskWorkflowTriggerOutcomeSkipped,
 	}
 	if s.dispatcher == nil {
 		log.WithField("taskId", task.ID.String()).Warn("workflow dispatch_agent: dispatcher not available")
@@ -295,7 +295,7 @@ func (s *TaskWorkflowService) executeAutoAssignAgent(ctx context.Context, task *
 
 	if req.AssigneeID == "" {
 		log.WithField("taskId", task.ID.String()).Warn("workflow dispatch_agent: no assignee_id in trigger config")
-		outcome.Status = model.WorkflowTriggerOutcomeFailed
+		outcome.Status = model.TaskWorkflowTriggerOutcomeFailed
 		outcome.Reason = "workflow dispatch_agent: no assignee_id in trigger config"
 		outcome.ReasonCode = "missing_assignee_id"
 		return outcome, fmt.Errorf("workflow dispatch_agent: no assignee_id in trigger config")
@@ -303,12 +303,12 @@ func (s *TaskWorkflowService) executeAutoAssignAgent(ctx context.Context, task *
 
 	resp, err := s.dispatcher.Assign(ctx, task.ID, req)
 	if err != nil {
-		outcome.Status = model.WorkflowTriggerOutcomeFailed
+		outcome.Status = model.TaskWorkflowTriggerOutcomeFailed
 		outcome.Reason = err.Error()
 		outcome.ReasonCode = "dispatch_failed"
 		return outcome, fmt.Errorf("workflow dispatch_agent: %w", err)
 	}
-	outcome.Status = model.WorkflowTriggerOutcomeCompleted
+	outcome.Status = model.TaskWorkflowTriggerOutcomeCompleted
 	if resp != nil && resp.Dispatch.Status != "" {
 		outcome.Status = resp.Dispatch.Status
 		outcome.Reason = resp.Dispatch.Reason
@@ -316,11 +316,11 @@ func (s *TaskWorkflowService) executeAutoAssignAgent(ctx context.Context, task *
 	return outcome, nil
 }
 
-func (s *TaskWorkflowService) recordTriggerActivity(ctx context.Context, task *model.Task, outcome model.WorkflowTriggerOutcome) {
+func (s *TaskWorkflowService) recordTriggerActivity(ctx context.Context, task *model.Task, outcome model.TaskWorkflowTriggerOutcome) {
 	if s.progress == nil || task == nil {
 		return
 	}
-	if outcome.Status != model.WorkflowTriggerOutcomeStarted && outcome.Status != model.WorkflowTriggerOutcomeCompleted {
+	if outcome.Status != model.TaskWorkflowTriggerOutcomeStarted && outcome.Status != model.TaskWorkflowTriggerOutcomeCompleted {
 		return
 	}
 	_, _ = s.progress.RecordActivity(ctx, task.ID, TaskActivityInput{
@@ -329,11 +329,11 @@ func (s *TaskWorkflowService) recordTriggerActivity(ctx context.Context, task *m
 	})
 }
 
-func (s *TaskWorkflowService) notifyTriggerFollowUp(ctx context.Context, task *model.Task, trigger model.TaskWorkflowTrigger, outcome model.WorkflowTriggerOutcome) {
+func (s *TaskWorkflowService) notifyTriggerFollowUp(ctx context.Context, task *model.Task, trigger model.TaskWorkflowTrigger, outcome model.TaskWorkflowTriggerOutcome) {
 	if s.followUp == nil || task == nil {
 		return
 	}
-	if outcome.Status == "" || outcome.Status == model.WorkflowTriggerOutcomeSkipped {
+	if outcome.Status == "" || outcome.Status == model.TaskWorkflowTriggerOutcomeSkipped {
 		return
 	}
 
@@ -410,10 +410,10 @@ func (s *TaskWorkflowService) executeAutoTransition(ctx context.Context, task *m
 	return nil
 }
 
-func (s *TaskWorkflowService) executeStartWorkflow(ctx context.Context, task *model.Task, trigger model.TaskWorkflowTrigger) (model.WorkflowTriggerOutcome, error) {
-	outcome := model.WorkflowTriggerOutcome{
+func (s *TaskWorkflowService) executeStartWorkflow(ctx context.Context, task *model.Task, trigger model.TaskWorkflowTrigger) (model.TaskWorkflowTriggerOutcome, error) {
+	outcome := model.TaskWorkflowTriggerOutcome{
 		Action: trigger.Action,
-		Status: model.WorkflowTriggerOutcomeSkipped,
+		Status: model.TaskWorkflowTriggerOutcomeSkipped,
 	}
 	cfg := triggerConfigMap(trigger)
 	pluginID, _ := cfg["plugin_id"].(string)
@@ -421,21 +421,21 @@ func (s *TaskWorkflowService) executeStartWorkflow(ctx context.Context, task *mo
 		pluginID, _ = cfg["pluginId"].(string)
 	}
 	if pluginID == "" {
-		outcome.Status = model.WorkflowTriggerOutcomeFailed
+		outcome.Status = model.TaskWorkflowTriggerOutcomeFailed
 		outcome.Reason = "workflow start trigger requires plugin_id"
 		outcome.ReasonCode = "missing_plugin_id"
 		return outcome, fmt.Errorf("workflow start trigger requires plugin_id")
 	}
 	profile, _ := cfg["profile"].(string)
 	if profile == "" {
-		outcome.Status = model.WorkflowTriggerOutcomeFailed
+		outcome.Status = model.TaskWorkflowTriggerOutcomeFailed
 		outcome.Reason = "workflow start trigger requires profile"
 		outcome.ReasonCode = "missing_profile"
 		outcome.WorkflowPluginID = pluginID
 		return outcome, fmt.Errorf("workflow start trigger requires profile")
 	}
 	if s.workflow == nil {
-		outcome.Status = model.WorkflowTriggerOutcomeFailed
+		outcome.Status = model.TaskWorkflowTriggerOutcomeFailed
 		outcome.Reason = "workflow runtime is unavailable"
 		outcome.ReasonCode = "runtime_unavailable"
 		outcome.WorkflowPluginID = pluginID
@@ -449,9 +449,9 @@ func (s *TaskWorkflowService) executeStartWorkflow(ctx context.Context, task *mo
 		Trigger: triggerPayload,
 	})
 	if err != nil {
-		outcome.Status = model.WorkflowTriggerOutcomeFailed
+		outcome.Status = model.TaskWorkflowTriggerOutcomeFailed
 		if strings.Contains(err.Error(), "active workflow run") {
-			outcome.Status = model.WorkflowTriggerOutcomeBlocked
+			outcome.Status = model.TaskWorkflowTriggerOutcomeBlocked
 			outcome.ReasonCode = "duplicate_active_run"
 		}
 		outcome.Reason = err.Error()
@@ -461,7 +461,7 @@ func (s *TaskWorkflowService) executeStartWorkflow(ctx context.Context, task *mo
 		outcome.WorkflowPluginID = pluginID
 		return outcome, fmt.Errorf("workflow start trigger %s: %w", pluginID, err)
 	}
-	outcome.Status = model.WorkflowTriggerOutcomeStarted
+	outcome.Status = model.TaskWorkflowTriggerOutcomeStarted
 	outcome.WorkflowPluginID = pluginID
 	if run != nil {
 		outcome.WorkflowRunID = run.ID.String()
@@ -501,7 +501,7 @@ func (s *TaskWorkflowService) executeNotify(ctx context.Context, task *model.Tas
 	return s.notifier.Create(ctx, notif)
 }
 
-func (s *TaskWorkflowService) broadcastTriggerFired(task *model.Task, trigger model.TaskWorkflowTrigger, outcome model.WorkflowTriggerOutcome) {
+func (s *TaskWorkflowService) broadcastTriggerFired(task *model.Task, trigger model.TaskWorkflowTrigger, outcome model.TaskWorkflowTriggerOutcome) {
 	_ = eventbus.PublishLegacy(context.Background(), s.bus, ws.EventWorkflowTriggerFired, task.ProjectID.String(), map[string]any{
 		"taskId":  task.ID.String(),
 		"action":  trigger.Action,

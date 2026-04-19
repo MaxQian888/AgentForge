@@ -26,21 +26,21 @@ type TaskWorkflowTrigger struct {
 }
 
 const (
-	WorkflowTriggerActionDispatchAgent  = "dispatch_agent"
-	WorkflowTriggerActionStartWorkflow  = "start_workflow"
-	WorkflowTriggerActionNotify         = "notify"
-	WorkflowTriggerActionAutoTransition = "auto_transition"
+	TaskWorkflowTriggerActionDispatchAgent  = "dispatch_agent"
+	TaskWorkflowTriggerActionStartWorkflow  = "start_workflow"
+	TaskWorkflowTriggerActionNotify         = "notify"
+	TaskWorkflowTriggerActionAutoTransition = "auto_transition"
 )
 
 const (
-	WorkflowTriggerOutcomeStarted   = "started"
-	WorkflowTriggerOutcomeCompleted = "completed"
-	WorkflowTriggerOutcomeBlocked   = "blocked"
-	WorkflowTriggerOutcomeSkipped   = "skipped"
-	WorkflowTriggerOutcomeFailed    = "failed"
+	TaskWorkflowTriggerOutcomeStarted   = "started"
+	TaskWorkflowTriggerOutcomeCompleted = "completed"
+	TaskWorkflowTriggerOutcomeBlocked   = "blocked"
+	TaskWorkflowTriggerOutcomeSkipped   = "skipped"
+	TaskWorkflowTriggerOutcomeFailed    = "failed"
 )
 
-type WorkflowTriggerOutcome struct {
+type TaskWorkflowTriggerOutcome struct {
 	Action           string `json:"action"`
 	Status           string `json:"status"`
 	Reason           string `json:"reason,omitempty"`
