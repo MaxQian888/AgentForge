@@ -9,11 +9,12 @@ import (
 
 // System template names — used as stable identifiers for upsert.
 const (
-	TemplatePlanCodeReview  = "plan-code-review"
-	TemplatePipeline        = "pipeline"
-	TemplateSwarm           = "swarm"
-	TemplateContentCreation = "content-creation"
-	TemplateCustomerService = "customer-service"
+	TemplatePlanCodeReview    = "plan-code-review"
+	TemplatePipeline          = "pipeline"
+	TemplateSwarm             = "swarm"
+	TemplateContentCreation   = "content-creation"
+	TemplateCustomerService   = "customer-service"
+	TemplateSystemCodeReview  = "system:code-review"
 )
 
 // buildNodes / buildEdges are helpers to avoid repetitive json.Marshal calls.
@@ -361,6 +362,67 @@ func CustomerServiceTemplate() *model.WorkflowDefinition {
 	}
 }
 
+// SystemCodeReviewTemplate returns the minimal code-review workflow the
+// event-driven /reviews/trigger path runs inside. The review employee
+// analyses the PR, a human approves or requests changes, and the
+// status_transition node maps the outcome back to the reviews row.
+//
+// Structure:
+//
+//	trigger → llm_agent(employee=default-code-reviewer) → human_review → status_transition → (end)
+//
+// Demo spec extensions (automated code fix, extra stages) attach additional
+// nodes after human_review; no basic-infrastructure change required.
+func SystemCodeReviewTemplate() *model.WorkflowDefinition {
+	nodes := []model.WorkflowNode{
+		{ID: "trigger", Type: model.NodeTypeTrigger, Label: "PR received", Position: model.WorkflowPos{X: 0, Y: 200}},
+		{ID: "review", Type: model.NodeTypeLLMAgent, Label: "Automated review", Position: model.WorkflowPos{X: 300, Y: 200},
+			Config: buildConfig(map[string]any{
+				// The Employee carries its own runtime/provider/model prefs.
+				// roleId stays as a fallback identity for environments where
+				// default-code-reviewer has not yet been seeded.
+				"employeeId": "{{default_code_reviewer_id}}",
+				"roleId":     "code-reviewer",
+				"prompt":     "Review the pull request at {{$event.pr_url}}. Provide structured feedback.",
+				"budgetUsd":  5.0,
+			})},
+		{ID: "decision", Type: model.NodeTypeHumanReview, Label: "Approve or request changes", Position: model.WorkflowPos{X: 600, Y: 200},
+			Config: buildConfig(map[string]any{
+				"prompt":         "Review the automated analysis and approve or request changes.",
+				"decision_field": "decision",
+			})},
+		{ID: "finalize", Type: model.NodeTypeStatusTransition, Label: "Finalize review", Position: model.WorkflowPos{X: 900, Y: 200},
+			Config: buildConfig(map[string]any{
+				// status_transition node: carry the human decision into
+				// downstream systems (reviews row, notifications).
+				"from":   "pending",
+				"to":     "{{decision.output.decision}}",
+				"reason": "{{decision.output.comment}}",
+			})},
+	}
+	edges := []model.WorkflowEdge{
+		{ID: "e1", Source: "trigger", Target: "review"},
+		{ID: "e2", Source: "review", Target: "decision"},
+		{ID: "e3", Source: "decision", Target: "finalize"},
+	}
+	templateVars, _ := json.Marshal(map[string]any{
+		// default_code_reviewer_id is resolved per-project at workflow-clone
+		// time. If unresolved, the llm_agent falls back to the roleId path.
+		"default_code_reviewer_id": "",
+	})
+	return &model.WorkflowDefinition{
+		ID:           uuid.New(),
+		Name:         TemplateSystemCodeReview,
+		Description:  "System code-review workflow backing /reviews/trigger.",
+		Status:       model.WorkflowDefStatusTemplate,
+		Category:     model.WorkflowCategorySystem,
+		Nodes:        buildNodes(nodes),
+		Edges:        buildEdges(edges),
+		TemplateVars: templateVars,
+		Version:      1,
+	}
+}
+
 // AllSystemTemplates returns all built-in system templates.
 func AllSystemTemplates() []*model.WorkflowDefinition {
 	return []*model.WorkflowDefinition{
@@ -369,5 +431,6 @@ func AllSystemTemplates() []*model.WorkflowDefinition {
 		SwarmTemplate(),
 		ContentCreationTemplate(),
 		CustomerServiceTemplate(),
+		SystemCodeReviewTemplate(),
 	}
 }
