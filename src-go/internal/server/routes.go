@@ -205,6 +205,48 @@ func (a employeeRoleRegistryAdapter) Has(roleID string) bool {
 	return err == nil
 }
 
+// reviewWorkflowLauncherAdapter composes the template and DAG services into
+// the ReviewWorkflowLauncher interface. It clones the system:code-review
+// template once per project (idempotent — repeated calls reuse the existing
+// active workflow with the same name) then starts a new execution.
+type reviewWorkflowLauncherAdapter struct {
+	templates *service.WorkflowTemplateService
+	dag       *service.DAGWorkflowService
+	defRepo   *repository.WorkflowDefinitionRepository
+}
+
+func (a reviewWorkflowLauncherAdapter) LaunchReviewWorkflow(ctx context.Context, projectID uuid.UUID, seed map[string]any) (uuid.UUID, error) {
+	tmpl, err := a.templates.FindTemplateByName(ctx, service.TemplateSystemCodeReview)
+	if err != nil {
+		return uuid.Nil, fmt.Errorf("find code-review template: %w", err)
+	}
+
+	// Reuse an active clone with the same name in this project, if one exists.
+	var wfID uuid.UUID
+	existing, listErr := a.defRepo.ListByProject(ctx, projectID)
+	if listErr == nil {
+		for _, def := range existing {
+			if def.Name == tmpl.Name && def.Status == model.WorkflowDefStatusActive {
+				wfID = def.ID
+				break
+			}
+		}
+	}
+	if wfID == uuid.Nil {
+		clone, cloneErr := a.templates.CloneTemplate(ctx, tmpl.ID, projectID, nil)
+		if cloneErr != nil {
+			return uuid.Nil, fmt.Errorf("clone template: %w", cloneErr)
+		}
+		wfID = clone.ID
+	}
+
+	exec, startErr := a.dag.StartExecution(ctx, wfID, nil, service.StartOptions{Seed: seed})
+	if startErr != nil {
+		return uuid.Nil, fmt.Errorf("start execution: %w", startErr)
+	}
+	return exec.ID, nil
+}
+
 type RouteServices struct {
 	TaskProgress *service.TaskProgressService
 	Automation   *service.AutomationEngineService
@@ -637,6 +679,19 @@ func RegisterRoutes(
 		agentSvc.SetAutomationEvaluator(automationEngine)
 	}
 	reviewSvc.WithExecutionPlanner(service.NewReviewExecutionPlanner(pluginSvc))
+	// Wire the optional workflow-backed review path. When USE_WORKFLOW_BACKED_REVIEW
+	// is unset or false (the default) the adapter is present but the flag gate
+	// keeps launchWorkflowBackedReview a no-op, so the legacy flow is unchanged.
+	if templateSvc != nil && dagWorkflowSvc != nil {
+		reviewSvc.WithWorkflowLauncher(
+			reviewWorkflowLauncherAdapter{
+				templates: templateSvc,
+				dag:       dagWorkflowSvc,
+				defRepo:   dagDefRepo,
+			},
+			func() bool { return cfg.UseWorkflowBackedReview },
+		)
+	}
 	recommendSvc := service.NewAssignmentRecommender(taskRepo, memberRepo, agentRunRepo)
 	taskH = taskH.WithRecommender(recommendSvc)
 	var dispatchSvc *service.TaskDispatchService

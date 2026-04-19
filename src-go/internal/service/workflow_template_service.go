@@ -219,6 +219,22 @@ func maxWorkflowVersion(value int, fallback int) int {
 	return fallback
 }
 
+// FindTemplateByName returns the first system template definition matching the
+// given name. Used by callers (like ReviewService) that need to instantiate a
+// specific named template rather than a user-chosen UUID.
+func (s *WorkflowTemplateService) FindTemplateByName(ctx context.Context, name string) (*model.WorkflowDefinition, error) {
+	templates, err := s.repo.ListTemplatesByName(ctx, name)
+	if err != nil {
+		return nil, err
+	}
+	for _, t := range templates {
+		if t.Category == model.WorkflowCategorySystem && t.Status == model.WorkflowDefStatusTemplate {
+			return t, nil
+		}
+	}
+	return nil, ErrWorkflowTemplateNotFound
+}
+
 // SeedSystemTemplates inserts or updates all built-in system templates.
 // Templates are matched by name; existing ones are updated if the version is newer.
 func (s *WorkflowTemplateService) SeedSystemTemplates(ctx context.Context) error {

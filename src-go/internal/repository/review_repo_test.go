@@ -32,6 +32,14 @@ func TestReviewRepositoryUpdateResultNilDB(t *testing.T) {
 	}
 }
 
+func TestReviewRepositorySetExecutionIDNilDB(t *testing.T) {
+	repo := NewReviewRepository(nil)
+	err := repo.SetExecutionID(context.Background(), uuid.New(), uuid.New())
+	if err != ErrDatabaseUnavailable {
+		t.Errorf("SetExecutionID() error = %v, want %v", err, ErrDatabaseUnavailable)
+	}
+}
+
 func TestNewReviewRecordEmptyFindings(t *testing.T) {
 	record, err := newReviewRecord(&model.Review{
 		ID:     uuid.New(),

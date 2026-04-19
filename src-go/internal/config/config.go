@@ -44,6 +44,10 @@ type Config struct {
 	// accept-invitation tokens are appended to. Used in delivery messages
 	// and the Create response's `acceptUrl` field.
 	FrontendAcceptInvitationURL string
+	// UseWorkflowBackedReview enables the experimental path in ReviewService.Trigger
+	// that launches a system:code-review workflow execution in parallel with the
+	// legacy bridge-based review. Off by default.
+	UseWorkflowBackedReview bool
 }
 
 func Load() *Config {
@@ -86,6 +90,7 @@ func Load() *Config {
 	viper.SetDefault("IM_BRIDGE_PROGRESS_INTERVAL", "30s")
 	viper.SetDefault("MARKETPLACE_URL", "http://localhost:7781")
 	viper.SetDefault("FRONTEND_ACCEPT_INVITATION_URL", "http://localhost:3000/invitations/accept")
+	viper.SetDefault("USE_WORKFLOW_BACKED_REVIEW", false)
 
 	accessTTL, _ := time.ParseDuration(viper.GetString("JWT_ACCESS_TTL"))
 	refreshTTL, _ := time.ParseDuration(viper.GetString("JWT_REFRESH_TTL"))
@@ -142,5 +147,6 @@ func Load() *Config {
 		IMBridgeProgressInterval:     imBridgeProgressInterval,
 		MarketplaceURL:               viper.GetString("MARKETPLACE_URL"),
 		FrontendAcceptInvitationURL:  viper.GetString("FRONTEND_ACCEPT_INVITATION_URL"),
+		UseWorkflowBackedReview:      viper.GetBool("USE_WORKFLOW_BACKED_REVIEW"),
 	}
 }
