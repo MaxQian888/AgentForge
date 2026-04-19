@@ -826,6 +826,12 @@ other = "invalid triggers"
 [FailedToSaveWorkflowConfig]
 other = "failed to save workflow config"
 
+[InvalidWorkflowNodeID]
+other = "invalid workflow node ID"
+
+[FailedToHandleWorkflowEvent]
+other = "failed to handle workflow event"
+
 # Middleware - Project
 [ProjectIDRequired]
 other = "project ID required"

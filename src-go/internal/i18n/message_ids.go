@@ -352,6 +352,7 @@ const (
 	MsgFailedToSaveWorkflowConfig  = "FailedToSaveWorkflowConfig"
 	MsgInvalidWorkflowID           = "InvalidWorkflowID"
 	MsgInvalidExecutionID          = "InvalidExecutionID"
+	MsgInvalidWorkflowNodeID       = "InvalidWorkflowNodeID"
 	MsgWorkflowNotFound            = "WorkflowNotFound"
 	MsgExecutionNotFound           = "ExecutionNotFound"
 	MsgFailedToCreateWorkflow      = "FailedToCreateWorkflow"
@@ -361,6 +362,7 @@ const (
 	MsgFailedToStartExecution      = "FailedToStartExecution"
 	MsgFailedToListExecutions      = "FailedToListExecutions"
 	MsgFailedToCancelExecution     = "FailedToCancelExecution"
+	MsgFailedToHandleWorkflowEvent = "FailedToHandleWorkflowEvent"
 	MsgDAGWorkflowServiceUnavailable = "DAGWorkflowServiceUnavailable"
 
 	// Middleware - Project

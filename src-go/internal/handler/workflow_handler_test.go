@@ -1,6 +1,7 @@
 package handler_test
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -14,6 +15,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/handler"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type fakeWorkflowRepo struct {
@@ -458,5 +460,187 @@ func TestWorkflowHandler_TemplateManagementEndpoints(t *testing.T) {
 	}
 	if templateSvc.deletedTemplateID != templateID {
 		t.Fatalf("deletedTemplateID = %s, want %s", templateSvc.deletedTemplateID, templateID)
+	}
+}
+
+// --- DAG service fake used by execution event tests ---
+
+type fakeDAGService struct {
+	startExecErr         error
+	advanceExecErr       error
+	cancelExecErr        error
+	resolveReviewErr     error
+	handleEventErr       error
+	handleEventNodeID    string
+	handleEventPayload   json.RawMessage
+	handleEventExecID    uuid.UUID
+}
+
+func (f *fakeDAGService) StartExecution(_ context.Context, workflowID uuid.UUID, taskID *uuid.UUID, opts service.StartOptions) (*model.WorkflowExecution, error) {
+	if f.startExecErr != nil {
+		return nil, f.startExecErr
+	}
+	return &model.WorkflowExecution{
+		ID:         uuid.New(),
+		WorkflowID: workflowID,
+		Status:     model.WorkflowExecStatusPending,
+	}, nil
+}
+
+func (f *fakeDAGService) AdvanceExecution(_ context.Context, executionID uuid.UUID) error {
+	if f.advanceExecErr != nil {
+		return f.advanceExecErr
+	}
+	return nil
+}
+
+func (f *fakeDAGService) CancelExecution(_ context.Context, executionID uuid.UUID) error {
+	if f.cancelExecErr != nil {
+		return f.cancelExecErr
+	}
+	return nil
+}
+
+func (f *fakeDAGService) ResolveHumanReview(_ context.Context, executionID uuid.UUID, nodeID string, decision string, comment string) error {
+	if f.resolveReviewErr != nil {
+		return f.resolveReviewErr
+	}
+	return nil
+}
+
+func (f *fakeDAGService) HandleExternalEvent(_ context.Context, executionID uuid.UUID, nodeID string, payload json.RawMessage) error {
+	if f.handleEventErr != nil {
+		return f.handleEventErr
+	}
+	f.handleEventExecID = executionID
+	f.handleEventNodeID = nodeID
+	f.handleEventPayload = payload
+	return nil
+}
+
+// --- HandleExternalEvent tests ---
+
+func TestHandleExternalEvent_InvalidExecutionID(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"nodeId":"n1","payload":{}}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues("not-a-uuid")
+
+	dagSvc := &fakeDAGService{}
+	h := handler.NewWorkflowHandler(&fakeWorkflowRepo{}).WithDAGService(dagSvc, nil, nil, nil)
+
+	if err := h.HandleExternalEvent(c); err != nil {
+		t.Fatalf("HandleExternalEvent() error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestHandleExternalEvent_MissingNodeID(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"payload":{}}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	execID := uuid.New()
+	c.SetParamNames("id")
+	c.SetParamValues(execID.String())
+
+	dagSvc := &fakeDAGService{}
+	h := handler.NewWorkflowHandler(&fakeWorkflowRepo{}).WithDAGService(dagSvc, nil, nil, nil)
+
+	if err := h.HandleExternalEvent(c); err != nil {
+		t.Fatalf("HandleExternalEvent() error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+}
+
+func TestHandleExternalEvent_EmptyPayload_Defaults(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"nodeId":"n1"}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	execID := uuid.New()
+	c.SetParamNames("id")
+	c.SetParamValues(execID.String())
+
+	dagSvc := &fakeDAGService{}
+	h := handler.NewWorkflowHandler(&fakeWorkflowRepo{}).WithDAGService(dagSvc, nil, nil, nil)
+
+	if err := h.HandleExternalEvent(c); err != nil {
+		t.Fatalf("HandleExternalEvent() error: %v", err)
+	}
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+
+	if dagSvc.handleEventExecID != execID {
+		t.Fatalf("execID = %s, want %s", dagSvc.handleEventExecID, execID)
+	}
+	if dagSvc.handleEventNodeID != "n1" {
+		t.Fatalf("nodeID = %q, want %q", dagSvc.handleEventNodeID, "n1")
+	}
+	if string(dagSvc.handleEventPayload) != "{}" {
+		t.Fatalf("payload = %q, want %q", string(dagSvc.handleEventPayload), "{}")
+	}
+}
+
+func TestHandleExternalEvent_Success(t *testing.T) {
+	payload := json.RawMessage(`{"key":"value"}`)
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"nodeId":"wait_node","payload":{"key":"value"}}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	execID := uuid.New()
+	c.SetParamNames("id")
+	c.SetParamValues(execID.String())
+
+	dagSvc := &fakeDAGService{}
+	h := handler.NewWorkflowHandler(&fakeWorkflowRepo{}).WithDAGService(dagSvc, nil, nil, nil)
+
+	if err := h.HandleExternalEvent(c); err != nil {
+		t.Fatalf("HandleExternalEvent() error: %v", err)
+	}
+	if rec.Code != http.StatusAccepted {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusAccepted, rec.Body.String())
+	}
+
+	if dagSvc.handleEventExecID != execID {
+		t.Fatalf("execID = %s, want %s", dagSvc.handleEventExecID, execID)
+	}
+	if dagSvc.handleEventNodeID != "wait_node" {
+		t.Fatalf("nodeID = %q, want %q", dagSvc.handleEventNodeID, "wait_node")
+	}
+	if !bytes.Equal(dagSvc.handleEventPayload, payload) {
+		t.Fatalf("payload = %q, want %q", string(dagSvc.handleEventPayload), string(payload))
+	}
+}
+
+func TestHandleExternalEvent_ServiceError(t *testing.T) {
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(`{"nodeId":"n1","payload":{}}`))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	execID := uuid.New()
+	c.SetParamNames("id")
+	c.SetParamValues(execID.String())
+
+	dagSvc := &fakeDAGService{handleEventErr: errors.New("node not found")}
+	h := handler.NewWorkflowHandler(&fakeWorkflowRepo{}).WithDAGService(dagSvc, nil, nil, nil)
+
+	if err := h.HandleExternalEvent(c); err != nil {
+		t.Fatalf("HandleExternalEvent() error: %v", err)
+	}
+	if rec.Code != http.StatusInternalServerError {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusInternalServerError, rec.Body.String())
 	}
 }

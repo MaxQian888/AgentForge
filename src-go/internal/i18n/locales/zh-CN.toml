@@ -826,6 +826,12 @@ other = "无效的触发器"
 [FailedToSaveWorkflowConfig]
 other = "保存工作流配置失败"
 
+[InvalidWorkflowNodeID]
+other = "无效的工作流节点 ID"
+
+[FailedToHandleWorkflowEvent]
+other = "处理工作流事件失败"
+
 # 中间件 - 项目
 [ProjectIDRequired]
 other = "项目 ID 为必填项"

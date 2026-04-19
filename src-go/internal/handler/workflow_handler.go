@@ -618,6 +618,7 @@ func (h *WorkflowHandler) ResolveHumanReview(c echo.Context) error {
 }
 
 // HandleExternalEvent receives an external event to resume a waiting node.
+// Used by IM card callbacks waking wait_event nodes and by future webhook receivers.
 func (h *WorkflowHandler) HandleExternalEvent(c echo.Context) error {
 	if h.dagSvc == nil {
 		return localizedError(c, http.StatusServiceUnavailable, i18n.MsgDAGWorkflowServiceUnavailable)
@@ -627,15 +628,26 @@ func (h *WorkflowHandler) HandleExternalEvent(c echo.Context) error {
 		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidExecutionID)
 	}
 	var body struct {
-		NodeID  string          `json:"nodeId" validate:"required"`
+		NodeID  string          `json:"nodeId"`
 		Payload json.RawMessage `json:"payload"`
 	}
 	if err := c.Bind(&body); err != nil {
 		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidRequestBody)
 	}
 
-	if err := h.dagSvc.HandleExternalEvent(c.Request().Context(), executionID, body.NodeID, body.Payload); err != nil {
-		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
+	// NodeID validation
+	if body.NodeID == "" {
+		return localizedError(c, http.StatusBadRequest, i18n.MsgInvalidWorkflowNodeID)
 	}
-	return c.NoContent(http.StatusOK)
+
+	// Default empty payload to {}
+	if len(body.Payload) == 0 {
+		body.Payload = json.RawMessage("{}")
+	}
+
+	if err := h.dagSvc.HandleExternalEvent(c.Request().Context(), executionID, body.NodeID, body.Payload); err != nil {
+		c.Logger().Errorf("HandleExternalEvent exec=%s node=%s: %v", executionID, body.NodeID, err)
+		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToHandleWorkflowEvent)
+	}
+	return c.NoContent(http.StatusAccepted)
 }
