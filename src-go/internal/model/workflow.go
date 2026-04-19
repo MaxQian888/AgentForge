@@ -12,7 +12,7 @@ type WorkflowConfig struct {
 	ID          uuid.UUID       `db:"id"`
 	ProjectID   uuid.UUID       `db:"project_id"`
 	Transitions json.RawMessage `db:"transitions"` // map[string][]string
-	Triggers    json.RawMessage `db:"triggers"`    // []WorkflowTrigger
+	Triggers    json.RawMessage `db:"triggers"`    // []TaskWorkflowTrigger
 	CreatedAt   time.Time       `db:"created_at"`
 	UpdatedAt   time.Time       `db:"updated_at"`
 }
