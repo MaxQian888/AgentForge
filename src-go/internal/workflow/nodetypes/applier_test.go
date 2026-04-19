@@ -645,6 +645,192 @@ func TestApplier_InvokeSubWorkflow_StubParks(t *testing.T) {
 	}
 }
 
+// ── EmployeeSpawner fake ────────────────────────────────────────────────
+
+type fakeEmployeeSpawner struct {
+	called    bool
+	lastIn    EmployeeInvokeInput
+	runID     uuid.UUID
+	invokeErr error
+}
+
+func (f *fakeEmployeeSpawner) Invoke(_ context.Context, in EmployeeInvokeInput) (*EmployeeInvokeResult, error) {
+	f.called = true
+	f.lastIn = in
+	if f.invokeErr != nil {
+		return nil, f.invokeErr
+	}
+	return &EmployeeInvokeResult{AgentRunID: f.runID}, nil
+}
+
+// ── Employee-spawner routing tests ─────────────────────────────────────
+
+func TestApplier_SpawnAgent_RoutesThroughEmployeeSpawner(t *testing.T) {
+	empRunID := uuid.New()
+	empSpawner := &fakeEmployeeSpawner{runID: empRunID}
+	agentSpawner := &fakeAgentSpawner{}
+	mappingRepo := &fakeRunMappingRepo{}
+	applier := &EffectApplier{
+		AgentSpawner:    agentSpawner,
+		EmployeeSpawner: empSpawner,
+		MappingRepo:     mappingRepo,
+	}
+
+	exec := newExecWithTask()
+	empID := uuid.New()
+	node := &model.WorkflowNode{ID: "n-emp"}
+
+	effects := []Effect{
+		{
+			Kind: EffectSpawnAgent,
+			Payload: mustJSON(SpawnAgentPayload{
+				EmployeeID: empID.String(),
+				BudgetUsd:  3.0,
+			}),
+		},
+	}
+
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), node, effects)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !parked {
+		t.Fatal("expected parked=true")
+	}
+	// EmployeeSpawner must have been called.
+	if !empSpawner.called {
+		t.Fatal("expected EmployeeSpawner.Invoke to be called")
+	}
+	if empSpawner.lastIn.EmployeeID != empID {
+		t.Errorf("EmployeeID = %s, want %s", empSpawner.lastIn.EmployeeID, empID)
+	}
+	if empSpawner.lastIn.TaskID != *exec.TaskID {
+		t.Errorf("TaskID = %s, want %s", empSpawner.lastIn.TaskID, *exec.TaskID)
+	}
+	if empSpawner.lastIn.ExecutionID != exec.ID {
+		t.Errorf("ExecutionID = %s, want %s", empSpawner.lastIn.ExecutionID, exec.ID)
+	}
+	if empSpawner.lastIn.NodeID != node.ID {
+		t.Errorf("NodeID = %q, want %q", empSpawner.lastIn.NodeID, node.ID)
+	}
+	if empSpawner.lastIn.BudgetUsd != 3.0 {
+		t.Errorf("BudgetUsd = %v, want 3.0", empSpawner.lastIn.BudgetUsd)
+	}
+	// Raw AgentSpawner must NOT have been called.
+	if len(agentSpawner.calls) != 0 {
+		t.Errorf("AgentSpawner.Spawn should not have been called, got %d call(s)", len(agentSpawner.calls))
+	}
+	// Mapping must have been persisted with the returned run ID.
+	if len(mappingRepo.created) != 1 {
+		t.Fatalf("expected 1 mapping create, got %d", len(mappingRepo.created))
+	}
+	m := mappingRepo.created[0]
+	if m.ExecutionID != exec.ID {
+		t.Errorf("mapping.ExecutionID = %s, want %s", m.ExecutionID, exec.ID)
+	}
+	if m.NodeID != node.ID {
+		t.Errorf("mapping.NodeID = %q, want %q", m.NodeID, node.ID)
+	}
+	if m.AgentRunID != empRunID {
+		t.Errorf("mapping.AgentRunID = %s, want %s", m.AgentRunID, empRunID)
+	}
+}
+
+func TestApplier_SpawnAgent_FallsBackToAgentSpawnerWhenNoEmployeeID(t *testing.T) {
+	empSpawner := &fakeEmployeeSpawner{}
+	agentSpawner := &fakeAgentSpawner{}
+	mappingRepo := &fakeRunMappingRepo{}
+	applier := &EffectApplier{
+		AgentSpawner:    agentSpawner,
+		EmployeeSpawner: empSpawner,
+		MappingRepo:     mappingRepo,
+	}
+
+	exec := newExecWithTask()
+	node := &model.WorkflowNode{ID: "n-raw"}
+
+	effects := []Effect{
+		{
+			Kind: EffectSpawnAgent,
+			Payload: mustJSON(SpawnAgentPayload{
+				Runtime:  "claude_code",
+				Provider: "anthropic",
+				Model:    "claude-opus-4-6",
+			}),
+		},
+	}
+
+	parked, err := applier.Apply(context.Background(), exec, uuid.New(), node, effects)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if !parked {
+		t.Fatal("expected parked=true")
+	}
+	if len(agentSpawner.calls) != 1 {
+		t.Fatalf("expected AgentSpawner.Spawn to be called once, got %d", len(agentSpawner.calls))
+	}
+	if empSpawner.called {
+		t.Fatal("EmployeeSpawner.Invoke should NOT have been called when EmployeeID is empty")
+	}
+}
+
+func TestApplier_SpawnAgent_NilEmployeeSpawnerWhenNeededErrors(t *testing.T) {
+	agentSpawner := &fakeAgentSpawner{}
+	applier := &EffectApplier{
+		AgentSpawner:    agentSpawner,
+		EmployeeSpawner: nil, // explicitly nil
+	}
+
+	exec := newExecWithTask()
+	empID := uuid.New()
+
+	effects := []Effect{
+		{
+			Kind: EffectSpawnAgent,
+			Payload: mustJSON(SpawnAgentPayload{
+				EmployeeID: empID.String(),
+			}),
+		},
+	}
+
+	_, err := applier.Apply(context.Background(), exec, uuid.New(), &model.WorkflowNode{ID: "n"}, effects)
+	if err == nil {
+		t.Fatal("expected error when EmployeeSpawner is nil but payload has employeeId")
+	}
+	if !contains(err.Error(), "EmployeeSpawner is nil") {
+		t.Errorf("error = %q, want it to mention 'EmployeeSpawner is nil'", err.Error())
+	}
+}
+
+func TestApplier_SpawnAgent_InvalidEmployeeIDReturnsError(t *testing.T) {
+	empSpawner := &fakeEmployeeSpawner{}
+	agentSpawner := &fakeAgentSpawner{}
+	applier := &EffectApplier{
+		AgentSpawner:    agentSpawner,
+		EmployeeSpawner: empSpawner,
+	}
+
+	exec := newExecWithTask()
+
+	effects := []Effect{
+		{
+			Kind: EffectSpawnAgent,
+			Payload: mustJSON(SpawnAgentPayload{
+				EmployeeID: "not-a-uuid",
+			}),
+		},
+	}
+
+	_, err := applier.Apply(context.Background(), exec, uuid.New(), &model.WorkflowNode{ID: "n"}, effects)
+	if err == nil {
+		t.Fatal("expected error for malformed employeeId")
+	}
+	if !contains(err.Error(), "invalid employeeId") {
+		t.Errorf("error = %q, want it to mention 'invalid employeeId'", err.Error())
+	}
+}
+
 func TestApplier_UnknownEffect_ReturnsError(t *testing.T) {
 	applier := &EffectApplier{}
 

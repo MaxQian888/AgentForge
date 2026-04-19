@@ -38,6 +38,29 @@ type AgentSpawner interface {
 	Spawn(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string) (*model.AgentRun, error)
 }
 
+// EmployeeSpawner dispatches agent runs on behalf of persistent Employees.
+// When a spawn_agent effect carries a non-empty EmployeeID, the applier
+// prefers this seam over the raw AgentSpawner so the resulting agent_run
+// row's employee_id and all employee-specific setup (skills, runtime prefs,
+// system prompt override) are resolved inside the Employee service.
+type EmployeeSpawner interface {
+	Invoke(ctx context.Context, in EmployeeInvokeInput) (*EmployeeInvokeResult, error)
+}
+
+// EmployeeInvokeInput carries parameters for the EmployeeSpawner.Invoke call.
+type EmployeeInvokeInput struct {
+	EmployeeID  uuid.UUID
+	TaskID      uuid.UUID
+	ExecutionID uuid.UUID
+	NodeID      string
+	BudgetUsd   float64
+}
+
+// EmployeeInvokeResult is returned by a successful EmployeeSpawner.Invoke call.
+type EmployeeInvokeResult struct {
+	AgentRunID uuid.UUID
+}
+
 // RunMappingRepo persists workflow-to-agent-run mappings so async agent completion
 // callbacks can resume the originating node.
 type RunMappingRepo interface {
@@ -59,9 +82,10 @@ type EffectApplier struct {
 	NodeRepo NodeExecDeleter
 	ExecRepo ExecutionDataStoreWriter
 	// Park-effect deps (Task 4)
-	AgentSpawner AgentSpawner
-	MappingRepo  RunMappingRepo
-	ReviewRepo   ReviewRepo
+	AgentSpawner    AgentSpawner
+	EmployeeSpawner EmployeeSpawner
+	MappingRepo     RunMappingRepo
+	ReviewRepo      ReviewRepo
 }
 
 // Apply iterates effects in order and executes each one.
@@ -206,6 +230,40 @@ func (a *EffectApplier) applySpawnAgent(ctx context.Context, exec *model.Workflo
 	var p SpawnAgentPayload
 	if err := json.Unmarshal(raw, &p); err != nil {
 		return fmt.Errorf("unmarshal payload: %w", err)
+	}
+
+	// Employee-backed spawn: route through EmployeeSpawner when EmployeeID is set.
+	if p.EmployeeID != "" {
+		if a.EmployeeSpawner == nil {
+			return fmt.Errorf("EmployeeSpawner is nil but spawn payload carries employeeId")
+		}
+		empID, err := uuid.Parse(p.EmployeeID)
+		if err != nil {
+			return fmt.Errorf("invalid employeeId %q: %w", p.EmployeeID, err)
+		}
+		res, invokeErr := a.EmployeeSpawner.Invoke(ctx, EmployeeInvokeInput{
+			EmployeeID:  empID,
+			TaskID:      *exec.TaskID,
+			ExecutionID: exec.ID,
+			NodeID:      node.ID,
+			BudgetUsd:   p.BudgetUsd,
+		})
+		if invokeErr != nil {
+			return fmt.Errorf("employee invoke: %w", invokeErr)
+		}
+		// Persist the mapping so the node can be awoken when the run finishes.
+		if a.MappingRepo != nil {
+			if err := a.MappingRepo.Create(ctx, &model.WorkflowRunMapping{
+				ID:          uuid.New(),
+				ExecutionID: exec.ID,
+				NodeID:      node.ID,
+				AgentRunID:  res.AgentRunID,
+			}); err != nil {
+				// Mirror existing behavior: warn but don't fail the spawn.
+				log.Printf("[WARN] EffectApplier: failed to create run mapping for node %s: %v", node.ID, err)
+			}
+		}
+		return nil
 	}
 
 	memberID := uuid.Nil
