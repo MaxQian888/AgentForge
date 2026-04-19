@@ -3,8 +3,6 @@ package repository
 
 import (
 	"context"
-	"crypto/md5" //nolint:gosec // MD5 is used only for config dedup hashing, not cryptography.
-	"encoding/hex"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -95,15 +93,20 @@ func (r *workflowTriggerRecord) toModel() *model.WorkflowTrigger {
 // ---------------------------------------------------------------------------
 
 // Upsert inserts a new trigger row or updates the existing one that shares
-// the same (workflow_id, source, md5(config::text)) fingerprint.
+// the same (workflow_id, source, config) jsonb value.
 //
-// Because the unique constraint is expression-based, Postgres does not allow
-// INSERT … ON CONFLICT against it directly.  We do a manual find-then-insert
-// (or find-then-update) inside a transaction so the operation is atomic
-// relative to concurrent writers on the same constraint.
+// Postgres' jsonb equality canonicalizes both sides (keys sorted, whitespace
+// normalized), so callers may pass arbitrarily-shaped input JSON and still
+// deduplicate correctly.
 //
-// On return, t.ID, t.CreatedAt, and t.UpdatedAt are always set to the
-// canonical values stored in the database.
+// The unique index is expression-based on md5(config::text), so INSERT
+// ON CONFLICT against it is not available. We do a find-then-insert under
+// a transaction; the unique constraint plus a bounded retry (see retries
+// parameter on upsertTriggerTx) handle the narrow race where two writers
+// both see "no existing row" and both attempt INSERT.
+//
+// On return, t.ID, t.CreatedAt, and t.UpdatedAt carry the canonical values
+// stored in the database.
 func (r *WorkflowTriggerRepository) Upsert(ctx context.Context, t *model.WorkflowTrigger) error {
 	if r.db == nil {
 		return ErrDatabaseUnavailable
@@ -112,21 +115,22 @@ func (r *WorkflowTriggerRepository) Upsert(ctx context.Context, t *model.Workflo
 		t.ID = uuid.New()
 	}
 
-	// Compute the MD5 hex of the canonical config JSON so we can query with it.
-	md5Hex := configMD5(t.Config)
-
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
-		return upsertTriggerTx(ctx, tx, t, md5Hex)
+		return upsertTriggerTx(ctx, tx, t, 1)
 	})
 }
 
 // upsertTriggerTx performs the find-then-insert-or-update inside tx.
-// It is extracted so it can be called recursively once on a unique-violation race.
-func upsertTriggerTx(ctx context.Context, tx *gorm.DB, t *model.WorkflowTrigger, md5Hex string) error {
+// It is extracted so it can be called recursively with bounded retries on unique-violation race.
+func upsertTriggerTx(ctx context.Context, tx *gorm.DB, t *model.WorkflowTrigger, retries int) error {
+	if retries < 0 {
+		return fmt.Errorf("upsert workflow trigger: unique-violation retry exhausted")
+	}
+
 	var existing workflowTriggerRecord
 	err := tx.WithContext(ctx).
-		Where("workflow_id = ? AND source = ? AND md5(config::text) = ?",
-			t.WorkflowID, string(t.Source), md5Hex).
+		Where("workflow_id = ? AND source = ? AND config = ?::jsonb",
+			t.WorkflowID, string(t.Source), rawMessageToString(t.Config)).
 		Take(&existing).Error
 
 	switch {
@@ -165,7 +169,7 @@ func upsertTriggerTx(ctx context.Context, tx *gorm.DB, t *model.WorkflowTrigger,
 			// Race: another writer inserted the same config between our SELECT
 			// and our INSERT.  Retry the find-and-update path once.
 			if isUniqueViolation(insErr) {
-				return upsertTriggerTx(ctx, tx, t, md5Hex)
+				return upsertTriggerTx(ctx, tx, t, retries-1)
 			}
 			return fmt.Errorf("upsert workflow trigger (insert): %w", insErr)
 		}
@@ -260,14 +264,3 @@ func (r *WorkflowTriggerRepository) Delete(ctx context.Context, id uuid.UUID) er
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
-
-// configMD5 returns the lowercase hex MD5 digest of the raw JSON bytes.
-// This must produce the same value as Postgres' md5(config::text).
-// We pass the raw JSON through — any whitespace differences between what we
-// stored and what Postgres casts back are fine because the index is built on
-// the stored column value, not the Go-side representation.
-func configMD5(raw json.RawMessage) string {
-	//nolint:gosec // Not used for cryptographic purposes.
-	sum := md5.Sum([]byte(raw)) //nolint:gosec
-	return hex.EncodeToString(sum[:])
-}

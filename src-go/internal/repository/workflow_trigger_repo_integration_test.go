@@ -342,3 +342,77 @@ func TestWorkflowTriggerRepository_Integration_SetEnabledAndDelete(t *testing.T)
 		t.Errorf("expected 0 triggers after delete, got %d", len(list))
 	}
 }
+
+func TestWorkflowTriggerRepository_Integration_UpsertCanonicalizesJSONOrder(t *testing.T) {
+	url := os.Getenv("TEST_POSTGRES_URL")
+	if url == "" {
+		t.Skip("TEST_POSTGRES_URL not set — skipping integration test")
+	}
+
+	db, err := database.NewPostgres(url)
+	if err != nil {
+		t.Fatalf("NewPostgres() error: %v", err)
+	}
+	defer func() { _ = database.ClosePostgres(db) }()
+
+	ctx := context.Background()
+	projectID := uuid.New()
+	workflowID := uuid.New()
+
+	if err := db.WithContext(ctx).Exec(
+		"INSERT INTO projects (id, name, slug) VALUES (?, ?, ?)",
+		projectID, "trig-proj5-"+projectID.String(), "trig-slug5-"+projectID.String(),
+	).Error; err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if err := db.WithContext(ctx).Exec(
+		"INSERT INTO workflow_definitions (id, project_id) VALUES (?, ?)",
+		workflowID, projectID,
+	).Error; err != nil {
+		t.Fatalf("insert workflow_definition: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = db.WithContext(ctx).Exec("DELETE FROM workflow_triggers WHERE workflow_id = ?", workflowID).Error
+		_ = db.WithContext(ctx).Exec("DELETE FROM workflow_definitions WHERE id = ?", workflowID).Error
+		_ = db.WithContext(ctx).Exec("DELETE FROM projects WHERE id = ?", projectID).Error
+	})
+
+	repo := repository.NewWorkflowTriggerRepository(db)
+
+	t1 := &model.WorkflowTrigger{
+		WorkflowID:    workflowID,
+		ProjectID:     projectID,
+		Source:        model.TriggerSourceIM,
+		Config:        []byte(`{"b":1,"a":2}`),
+		InputMapping:  []byte(`{}`),
+		Enabled:       true,
+	}
+	if err := repo.Upsert(ctx, t1); err != nil {
+		t.Fatalf("Upsert 1: %v", err)
+	}
+
+	t2 := &model.WorkflowTrigger{
+		WorkflowID:    workflowID,
+		ProjectID:     projectID,
+		Source:        model.TriggerSourceIM,
+		Config:        []byte(`{"a":2,"b":1}`), // same logical JSON, different byte order
+		InputMapping:  []byte(`{}`),
+		Enabled:       true,
+	}
+	if err := repo.Upsert(ctx, t2); err != nil {
+		t.Fatalf("Upsert 2: %v", err)
+	}
+
+	if t1.ID != t2.ID {
+		t.Fatalf("expected same canonical row for equivalent JSON; got %s vs %s", t1.ID, t2.ID)
+	}
+
+	all, err := repo.ListByWorkflow(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("ListByWorkflow() error: %v", err)
+	}
+	if len(all) != 1 {
+		t.Fatalf("expected 1 canonical row, got %d", len(all))
+	}
+}
