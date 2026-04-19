@@ -10,6 +10,7 @@ import (
 	"github.com/react-go-quick-starter/server/internal/i18n"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/service"
 )
 
 type workflowRepository interface {
@@ -19,7 +20,7 @@ type workflowRepository interface {
 
 // DAGWorkflowServiceInterface defines the DAG workflow execution methods needed by the handler.
 type DAGWorkflowServiceInterface interface {
-	StartExecution(ctx context.Context, workflowID uuid.UUID, taskID *uuid.UUID) (*model.WorkflowExecution, error)
+	StartExecution(ctx context.Context, workflowID uuid.UUID, taskID *uuid.UUID, opts service.StartOptions) (*model.WorkflowExecution, error)
 	AdvanceExecution(ctx context.Context, executionID uuid.UUID) error
 	CancelExecution(ctx context.Context, executionID uuid.UUID) error
 	ResolveHumanReview(ctx context.Context, executionID uuid.UUID, nodeID string, decision string, comment string) error
@@ -303,7 +304,7 @@ func (h *WorkflowHandler) StartExecution(c echo.Context) error {
 		taskID = &parsed
 	}
 
-	exec, err := h.dagSvc.StartExecution(c.Request().Context(), id, taskID)
+	exec, err := h.dagSvc.StartExecution(c.Request().Context(), id, taskID, service.StartOptions{})
 	if err != nil {
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
 	}

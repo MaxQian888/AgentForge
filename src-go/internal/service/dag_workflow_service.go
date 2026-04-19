@@ -122,8 +122,33 @@ func (s *DAGWorkflowService) SetReviewRepo(r DAGWorkflowReviewRepo) { s.reviewRe
 // Execution lifecycle
 // ---------------------------------------------------------------------------
 
+// StartOptions is the optional-controls struct for StartExecution.
+// Seed pre-populates the execution DataStore under the "$event" key so
+// the first node advancement can consume external event data (IM payload,
+// cron context, webhook body). TriggeredBy stamps the execution with the
+// WorkflowTrigger id that fired it.
+type StartOptions struct {
+	Seed        map[string]any
+	TriggeredBy *uuid.UUID
+}
+
+// buildInitialDataStore constructs the DataStore JSON for a new execution.
+// If seed is non-empty it is placed under the reserved "$event" key.
+func buildInitialDataStore(seed map[string]any) json.RawMessage {
+	if len(seed) == 0 {
+		return json.RawMessage("{}")
+	}
+	seeded := map[string]any{"$event": seed}
+	raw, err := json.Marshal(seeded)
+	if err != nil {
+		log.WithError(err).Warn("workflow start: failed to marshal seed data; proceeding with empty DataStore")
+		return json.RawMessage("{}")
+	}
+	return raw
+}
+
 // StartExecution creates a new execution and advances from trigger nodes.
-func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid.UUID, taskID *uuid.UUID) (*model.WorkflowExecution, error) {
+func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid.UUID, taskID *uuid.UUID, opts StartOptions) (*model.WorkflowExecution, error) {
 	def, err := s.defRepo.GetByID(ctx, workflowID)
 	if err != nil {
 		return nil, fmt.Errorf("load workflow definition: %w", err)
@@ -169,6 +194,7 @@ func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid
 		execContext, _ = json.Marshal(map[string]any{"taskId": taskID.String()})
 	}
 	currentNodesJSON, _ := json.Marshal(triggerNodeIDs)
+	dataStore := buildInitialDataStore(opts.Seed)
 
 	exec := &model.WorkflowExecution{
 		ID:           uuid.New(),
@@ -178,8 +204,11 @@ func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid
 		Status:       model.WorkflowExecStatusRunning,
 		CurrentNodes: currentNodesJSON,
 		Context:      execContext,
-		DataStore:    json.RawMessage("{}"),
+		DataStore:    dataStore,
 		StartedAt:    &now,
+	}
+	if opts.TriggeredBy != nil {
+		exec.TriggeredBy = opts.TriggeredBy
 	}
 	if err := s.execRepo.CreateExecution(ctx, exec); err != nil {
 		return nil, fmt.Errorf("create execution: %w", err)

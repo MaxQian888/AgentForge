@@ -164,7 +164,7 @@ func (s *WorkflowTemplateService) CreateFromTemplate(ctx context.Context, templa
 	if err != nil {
 		return nil, err
 	}
-	return s.dagSvc.StartExecution(ctx, clone.ID, taskID)
+	return s.dagSvc.StartExecution(ctx, clone.ID, taskID, StartOptions{})
 }
 
 // CreateFromStrategy resolves a team-strategy name to a system workflow template

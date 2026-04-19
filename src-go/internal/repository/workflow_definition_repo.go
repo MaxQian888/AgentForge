@@ -63,6 +63,7 @@ type workflowExecutionRecord struct {
 	Context      rawJSON    `gorm:"column:context;type:jsonb"`
 	DataStore    rawJSON    `gorm:"column:data_store;type:jsonb"`
 	ErrorMessage string     `gorm:"column:error_message"`
+	TriggeredBy  *uuid.UUID `gorm:"column:triggered_by"`
 	StartedAt    *time.Time `gorm:"column:started_at"`
 	CompletedAt  *time.Time `gorm:"column:completed_at"`
 	CreatedAt    time.Time  `gorm:"column:created_at"`
@@ -85,6 +86,7 @@ func (r *workflowExecutionRecord) toModel() *model.WorkflowExecution {
 		Context:      r.Context.Bytes("{}"),
 		DataStore:    r.DataStore.Bytes("{}"),
 		ErrorMessage: r.ErrorMessage,
+		TriggeredBy:  r.TriggeredBy,
 		StartedAt:    r.StartedAt,
 		CompletedAt:  r.CompletedAt,
 		CreatedAt:    r.CreatedAt,
@@ -332,6 +334,7 @@ func (r *WorkflowExecutionRepository) CreateExecution(ctx context.Context, exec 
 		Context:      newRawJSON(exec.Context, "{}"),
 		DataStore:    newRawJSON(exec.DataStore, "{}"),
 		ErrorMessage: exec.ErrorMessage,
+		TriggeredBy:  exec.TriggeredBy,
 		StartedAt:    exec.StartedAt,
 		CompletedAt:  exec.CompletedAt,
 	}
