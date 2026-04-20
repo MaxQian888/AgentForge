@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect } from "react";
+import { useEffect, useMemo, type ReactNode } from "react";
 import { Card, CardHeader, CardTitle, CardContent } from "@/components/ui/card";
 import { Badge } from "@/components/ui/badge";
 import { Switch } from "@/components/ui/switch";
@@ -16,20 +16,51 @@ import {
   useWorkflowTriggerStore,
   type WorkflowTrigger,
 } from "@/lib/stores/workflow-trigger-store";
+import { useEmployeeStore, type Employee } from "@/lib/stores/employee-store";
 
 interface WorkflowTriggersSectionProps {
   workflowId: string | null;
+  projectId?: string | null;
 }
 
-export function WorkflowTriggersSection({ workflowId }: WorkflowTriggersSectionProps) {
+// Machine-readable disabled-reason codes emitted by the trigger registrar and
+// surfaced on WorkflowTrigger.disabledReason. Keep in sync with
+// src-go/internal/trigger/registrar.go DisabledReason* constants.
+const DISABLED_REASON_LABELS: Record<string, string> = {
+  dag_workflow_not_found: "DAG 工作流未找到",
+  dag_workflow_inactive: "DAG 工作流非激活",
+  plugin_not_found: "插件未找到",
+  plugin_disabled: "插件已禁用",
+  plugin_not_workflow_kind: "插件不是工作流类型",
+  plugin_process_not_executable: "插件流程不可执行",
+  plugin_target_missing_plugin_id: "插件目标缺少 plugin_id",
+  acting_employee_not_found: "数字员工未找到",
+  acting_employee_cross_project: "数字员工跨项目引用",
+  acting_employee_archived: "数字员工已归档",
+};
+
+export function WorkflowTriggersSection({ workflowId, projectId }: WorkflowTriggersSectionProps) {
   const triggersByWorkflow = useWorkflowTriggerStore((s) => s.triggersByWorkflow);
   const loading = useWorkflowTriggerStore((s) => s.loading);
   const fetchTriggers = useWorkflowTriggerStore((s) => s.fetchTriggers);
   const setEnabled = useWorkflowTriggerStore((s) => s.setEnabled);
 
+  const employeesByProject = useEmployeeStore((s) => s.employeesByProject);
+  const fetchEmployees = useEmployeeStore((s) => s.fetchEmployees);
+
   useEffect(() => {
     if (workflowId) void fetchTriggers(workflowId);
   }, [workflowId, fetchTriggers]);
+
+  useEffect(() => {
+    if (projectId) void fetchEmployees(projectId);
+  }, [projectId, fetchEmployees]);
+
+  const employeesByID = useMemo(() => {
+    if (!projectId) return new Map<string, Employee>();
+    const rows = employeesByProject[projectId] ?? [];
+    return new Map(rows.map((e) => [e.id, e]));
+  }, [employeesByProject, projectId]);
 
   if (!workflowId) {
     return (
@@ -70,7 +101,9 @@ export function WorkflowTriggersSection({ workflowId }: WorkflowTriggersSectionP
             <TableHeader>
               <TableRow>
                 <TableHead>Source</TableHead>
+                <TableHead>Engine</TableHead>
                 <TableHead>配置摘要</TableHead>
+                <TableHead>扮演员工</TableHead>
                 <TableHead>幂等窗口</TableHead>
                 <TableHead>启用</TableHead>
                 <TableHead>创建时间</TableHead>
@@ -84,10 +117,28 @@ export function WorkflowTriggersSection({ workflowId }: WorkflowTriggersSectionP
                       {t.source}
                     </Badge>
                   </TableCell>
+                  <TableCell>
+                    <Badge
+                      variant={t.targetKind === "plugin" ? "outline" : "default"}
+                      title={t.targetKind === "plugin"
+                        ? "Fires a legacy workflow plugin run"
+                        : "Fires a DAG workflow execution"}
+                    >
+                      {t.targetKind}
+                    </Badge>
+                  </TableCell>
                   <TableCell className="max-w-sm">
                     <code className="text-xs bg-muted px-1 py-0.5 rounded block truncate">
                       {configSummary(t)}
                     </code>
+                    {t.disabledReason ? (
+                      <p className="mt-1 text-xs text-amber-600 dark:text-amber-400">
+                        触发器被禁用：{DISABLED_REASON_LABELS[t.disabledReason] ?? t.disabledReason}
+                      </p>
+                    ) : null}
+                  </TableCell>
+                  <TableCell className="text-xs">
+                    {renderActingEmployee(t, employeesByID)}
                   </TableCell>
                   <TableCell className="text-sm">
                     {t.dedupeWindowSeconds > 0 ? `${t.dedupeWindowSeconds}s` : "—"}
@@ -111,17 +162,41 @@ export function WorkflowTriggersSection({ workflowId }: WorkflowTriggersSectionP
   );
 }
 
+function renderActingEmployee(
+  t: WorkflowTrigger,
+  employeesByID: Map<string, Employee>,
+): ReactNode {
+  if (!t.actingEmployeeId) {
+    return <span className="text-muted-foreground">—</span>;
+  }
+  const emp = employeesByID.get(t.actingEmployeeId);
+  if (emp) {
+    return (
+      <span title={t.actingEmployeeId}>
+        {emp.displayName || emp.name}
+        {emp.state !== "active" ? (
+          <Badge variant="outline" className="ml-1 text-[10px]">
+            {emp.state}
+          </Badge>
+        ) : null}
+      </span>
+    );
+  }
+  return <code className="text-[11px]">{t.actingEmployeeId.slice(0, 8)}…</code>;
+}
+
 function configSummary(t: WorkflowTrigger): string {
   const cfg = t.config as Record<string, unknown>;
+  const target = t.targetKind === "plugin" && t.pluginId ? ` → ${t.pluginId}` : "";
   if (t.source === "im") {
     const platform = (cfg.platform as string) ?? "?";
     const command = (cfg.command as string) ?? "";
-    return `${platform} ${command}`.trim();
+    return `${platform} ${command}${target}`.trim();
   }
   if (t.source === "schedule") {
     const cron = (cfg.cron as string) ?? "?";
     const tz = (cfg.timezone as string) ?? "UTC";
-    return `${cron} (${tz})`;
+    return `${cron} (${tz})${target}`;
   }
-  return JSON.stringify(cfg);
+  return JSON.stringify(cfg) + target;
 }

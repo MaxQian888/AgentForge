@@ -25,6 +25,7 @@ import { WorkflowConfigPanel } from "@/components/workflow/workflow-config-panel
 import { WorkflowEditor } from "@/components/workflow-editor";
 import { WorkflowExecutionView } from "@/components/workflow/workflow-execution-view";
 import { WorkflowReviewsTab } from "@/components/workflow/workflow-reviews-tab";
+import { WorkflowRunsTab } from "@/components/workflow/workflow-runs-tab";
 import { WorkflowTemplatesTab } from "@/components/workflow/workflow-templates-tab";
 import { WorkflowTriggersSection } from "@/components/workflow/workflow-triggers-section";
 import { PageHeader } from "@/components/shared/page-header";
@@ -613,7 +614,7 @@ function TriggersTab({ projectId }: { projectId: string }) {
           ))}
         </select>
       </div>
-      <WorkflowTriggersSection workflowId={selectedWorkflowId} />
+      <WorkflowTriggersSection workflowId={selectedWorkflowId} projectId={projectId} />
     </div>
   );
 }
@@ -657,6 +658,7 @@ function WorkflowPageContent() {
         <TabsList>
           <TabsTrigger value="config">Config</TabsTrigger>
           <TabsTrigger value="workflows">Workflows</TabsTrigger>
+          <TabsTrigger value="runs">Runs</TabsTrigger>
           <TabsTrigger value="executions">Executions</TabsTrigger>
           <TabsTrigger value="triggers">Triggers</TabsTrigger>
           <TabsTrigger value="reviews">Reviews</TabsTrigger>
@@ -667,6 +669,9 @@ function WorkflowPageContent() {
         </TabsContent>
         <TabsContent value="workflows" className="mt-4">
           <WorkflowListTab projectId={activeProjectId} setActiveTab={handleActiveTabChange} />
+        </TabsContent>
+        <TabsContent value="runs" className="mt-4">
+          <WorkflowRunsTab projectId={activeProjectId} />
         </TabsContent>
         <TabsContent value="executions" className="mt-4">
           <ExecutionsTab projectId={activeProjectId} />

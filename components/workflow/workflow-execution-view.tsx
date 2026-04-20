@@ -31,6 +31,24 @@ import {
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
+// Parent↔child linkage envelope surfaced by GET /api/v1/executions/:id after
+// bridge-sub-workflow-invocation. `childEngineKind` is "dag" or "plugin".
+interface SubWorkflowLinkDTO {
+  id: string;
+  parentExecutionId: string;
+  parentNodeId: string;
+  childEngineKind: string;
+  childRunId: string;
+  status: string;
+}
+
+interface ExecutionDetailResponse {
+  execution: WorkflowExecution;
+  nodeExecutions?: WorkflowNodeExecution[];
+  subInvocations?: SubWorkflowLinkDTO[];
+  invokedByParent?: SubWorkflowLinkDTO | null;
+}
+
 const nodeStatusIcons: Record<string, React.ElementType> = {
   pending: Clock,
   running: Loader2,
@@ -311,14 +329,26 @@ interface WorkflowExecutionViewProps {
   executionId: string;
   nodes: WorkflowNodeData[];
   edges?: WorkflowEdgeData[];
+  // engine discriminator from bridge-unified-run-view. When omitted or "dag"
+  // the component renders the DAG execution content below. When "plugin" it
+  // returns early — callers should use a plugin-body component (e.g.
+  // WorkflowPluginRunBody) instead. Kept here so the unified detail route
+  // can pass the engine without knowing which component to mount.
+  engine?: "dag" | "plugin";
 }
 
 export function WorkflowExecutionView({
   executionId,
   nodes,
+  engine = "dag",
 }: WorkflowExecutionViewProps) {
+  if (engine !== "dag") {
+    return null;
+  }
   const [execution, setExecution] = useState<WorkflowExecution | null>(null);
   const [nodeExecs, setNodeExecs] = useState<WorkflowNodeExecution[]>([]);
+  const [subInvocations, setSubInvocations] = useState<SubWorkflowLinkDTO[]>([]);
+  const [invokedByParent, setInvokedByParent] = useState<SubWorkflowLinkDTO | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -329,10 +359,26 @@ export function WorkflowExecutionView({
     try {
       const api = createApiClient(API_URL);
       const { data } = await api.get<
-        WorkflowExecution & { nodeExecutions?: WorkflowNodeExecution[] }
+        ExecutionDetailResponse | (WorkflowExecution & { nodeExecutions?: WorkflowNodeExecution[] })
       >(`/api/v1/executions/${executionId}`, { token });
-      setExecution(data);
-      setNodeExecs(data?.nodeExecutions ?? []);
+      // The backend returns a wrapped envelope (execution + nodeExecutions +
+      // subInvocations + invokedByParent). Legacy deployments may still return
+      // the flat WorkflowExecution shape, so we handle both.
+      const wrapped = (data as ExecutionDetailResponse).execution !== undefined
+        ? (data as ExecutionDetailResponse)
+        : null;
+      if (wrapped) {
+        setExecution(wrapped.execution);
+        setNodeExecs(wrapped.nodeExecutions ?? []);
+        setSubInvocations(wrapped.subInvocations ?? []);
+        setInvokedByParent(wrapped.invokedByParent ?? null);
+      } else {
+        const legacy = data as WorkflowExecution & { nodeExecutions?: WorkflowNodeExecution[] };
+        setExecution(legacy);
+        setNodeExecs(legacy.nodeExecutions ?? []);
+        setSubInvocations([]);
+        setInvokedByParent(null);
+      }
       setError(null);
     } catch {
       setError("Unable to load execution");
@@ -425,6 +471,51 @@ export function WorkflowExecutionView({
       {execution.errorMessage && (
         <div className="rounded-lg border border-destructive/50 bg-destructive/10 p-3 text-sm text-destructive">
           {execution.errorMessage}
+        </div>
+      )}
+
+      {/* Sub-workflow linkage strip. Shows "invoked by parent" when this
+          execution is a child run, and "sub-invocations" when this execution
+          started one or more children. Hidden entirely when neither applies. */}
+      {(invokedByParent || subInvocations.length > 0) && (
+        <div
+          className="flex flex-wrap items-center gap-2 rounded-lg border bg-muted/30 p-3 text-xs"
+          data-testid="sub-workflow-linkage-strip"
+        >
+          {invokedByParent && (
+            <Badge variant="outline" className="gap-1">
+              <span className="text-muted-foreground">Invoked by parent</span>
+              <span className="font-mono">
+                {invokedByParent.parentExecutionId.slice(0, 8)}
+              </span>
+              <span className="text-muted-foreground">·</span>
+              <span>{invokedByParent.parentNodeId}</span>
+            </Badge>
+          )}
+          {subInvocations.length > 0 && (
+            <Badge variant="outline" className="gap-1">
+              <span className="text-muted-foreground">Sub-invocations</span>
+              <span className="font-mono">{subInvocations.length}</span>
+            </Badge>
+          )}
+          {subInvocations.map((inv) => (
+            <Badge
+              key={inv.id}
+              variant="secondary"
+              className="gap-1 font-normal"
+              data-testid="sub-invocation-badge"
+            >
+              <span className="text-muted-foreground">{inv.parentNodeId}</span>
+              <span className="text-muted-foreground">→</span>
+              <span className="uppercase text-[10px] tracking-wide">
+                {inv.childEngineKind}
+              </span>
+              <span className="font-mono">
+                {inv.childRunId.slice(0, 8)}
+              </span>
+              <span className="text-muted-foreground">({inv.status})</span>
+            </Badge>
+          ))}
         </div>
       )}
 

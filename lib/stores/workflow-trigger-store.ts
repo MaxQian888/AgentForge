@@ -8,17 +8,27 @@ import { useAuthStore } from "./auth-store";
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
 
 export type TriggerSource = "im" | "schedule";
+export type TriggerTargetKind = "dag" | "plugin";
 
 export interface WorkflowTrigger {
   id: string;
-  workflowId: string;
+  workflowId?: string;
+  pluginId?: string;
   projectId: string;
   source: TriggerSource;
+  targetKind: TriggerTargetKind;
   config: Record<string, unknown>;
   inputMapping?: Record<string, unknown>;
   idempotencyKeyTemplate?: string;
   dedupeWindowSeconds: number;
   enabled: boolean;
+  disabledReason?: string;
+  /**
+   * Optional Digital Employee id that the trigger attributes its dispatched
+   * runs to (run-level acting-employee default). See change
+   * bridge-employee-attribution-legacy.
+   */
+  actingEmployeeId?: string;
   createdBy?: string | null;
   createdAt: string;
   updatedAt: string;
