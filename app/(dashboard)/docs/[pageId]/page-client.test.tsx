@@ -501,7 +501,7 @@ describe("DocsPageDetailClient", () => {
     });
     expect(createVersion).toHaveBeenCalledWith({
       projectId: "project-2",
-      pageId: "page-1",
+      assetId: "page-1",
       name: expect.stringContaining("Snapshot"),
     });
     expect(createTemplateFromPage).toHaveBeenCalledWith({
@@ -530,13 +530,13 @@ describe("DocsPageDetailClient", () => {
     expect(deleteLink).toHaveBeenCalledWith("project-2", "wiki_page", "page-1", "link-1");
     expect(createComment).toHaveBeenCalledWith({
       projectId: "project-2",
-      pageId: "page-1",
+      assetId: "page-1",
       body: "Investigate",
       mentions: "[]",
     });
     expect(setCommentResolved).toHaveBeenCalledWith({
       projectId: "project-2",
-      pageId: "page-1",
+      assetId: "page-1",
       commentId: "comment-1",
       resolved: false,
     });
@@ -548,11 +548,11 @@ describe("DocsPageDetailClient", () => {
     });
     expect(restoreVersion).toHaveBeenCalledWith({
       projectId: "project-2",
-      pageId: "page-1",
+      assetId: "page-1",
       versionId: "version-1",
     });
     expect(apiPost).toHaveBeenCalledWith(
-      "/api/v1/projects/project-2/wiki/pages/page-1/decompose-tasks",
+      "/api/v1/projects/project-2/knowledge/assets/page-1/decompose-tasks",
       {
         blockIds: ["block-1"],
         parentTaskId: "task-1",

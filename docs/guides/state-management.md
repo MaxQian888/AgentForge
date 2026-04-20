@@ -15,6 +15,12 @@ Representative stores:
 - Docs/wiki: `docs-store.ts`
 - Scheduler: `scheduler-store.ts`
 - Realtime fan-in: `ws-store.ts`
+- Employee: `employee-store.ts`, `employee-runs-store.ts`, `employee-trigger-store.ts`
+- Knowledge: `knowledge-store.ts`
+- Ads platform (Qianchuan): `qianchuan-bindings-store.ts`, `qianchuan-strategies-store.ts`
+- Secrets: `secrets-store.ts`
+- VCS integrations: `vcs-integrations-store.ts`
+- Workflow triggers: `workflow-trigger-store.ts`
 
 ## Patterns Used In This Repo
 
@@ -94,7 +100,7 @@ operator-facing diagnostics.
 - add a new store only when a domain truly owns its own API/realtime boundary
 - keep persisted state minimal
 - keep cross-store writes explicit through `getState()` rather than hidden global mutation
-- centralize websocket event projection in `useWSStore`
+- centralize websocket event projection in `useWSStore`; dedicated projection files (e.g., `ws-store.employee-runs.ts` for employee run events) live alongside `ws-store.ts` and are imported by it
 - avoid duplicating the same backend resource in multiple stores with conflicting normalization rules
 
 ## Primitive → Store Pairings

@@ -1152,6 +1152,18 @@ func (c *Client) ActivateToolPlugin(ctx context.Context, pluginID string) (*mode
 	return pluginRuntimeStatusFromRecord(record), nil
 }
 
+// DisableToolPlugin asks the TS bridge to disconnect the MCP transport
+// for the given plugin and release the child process. The Go control
+// plane calls this during Disable/Deactivate/Uninstall so the child
+// never outlives its registry record.
+func (c *Client) DisableToolPlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
+	record, err := c.doPluginRequest(ctx, http.MethodPost, "/bridge/plugins/"+pluginID+"/disable", nil)
+	if err != nil {
+		return nil, err
+	}
+	return pluginRuntimeStatusFromRecord(record), nil
+}
+
 func (c *Client) CheckToolPluginHealth(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
 	record, err := c.doPluginRequest(ctx, http.MethodGet, "/bridge/plugins/"+pluginID+"/health", nil)
 	if err != nil {

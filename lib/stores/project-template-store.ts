@@ -76,7 +76,7 @@ function normalizeTemplate(raw: unknown): ProjectTemplate | null {
   };
 }
 
-export const useProjectTemplateStore = create<ProjectTemplateState>((set, get) => ({
+export const useProjectTemplateStore = create<ProjectTemplateState>((set) => ({
   templates: [],
   detailsById: {},
   loading: false,

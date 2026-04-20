@@ -40,6 +40,7 @@ import {
   type PluginRecord,
 } from "@/lib/stores/plugin-store";
 import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
+import { toast } from "sonner";
 
 const EMPTY_RUNTIME_STATUS: DesktopRuntimeStatus = {
   overall: "stopped",
@@ -75,6 +76,7 @@ export default function PluginsPage() {
   const error = usePluginStore((s) => s.error);
   const fetchPlugins = usePluginStore((s) => s.fetchPlugins);
   const discoverBuiltins = usePluginStore((s) => s.discoverBuiltins);
+  const rescanBuiltins = usePluginStore((s) => s.rescanBuiltins);
   const fetchMarketplace = usePluginStore((s) => s.fetchMarketplace);
   const fetchRemoteMarketplace = usePluginStore((s) => s.fetchRemoteMarketplace);
   const installFromCatalog = usePluginStore((s) => s.installFromCatalog);
@@ -217,6 +219,19 @@ export default function PluginsPage() {
     void fetchMarketplace();
     void fetchRemoteMarketplace();
   }, [fetchPlugins, discoverBuiltins, fetchMarketplace, fetchRemoteMarketplace]);
+
+  // handleRescan hot-reloads the plugins/ directory. Newly-appeared
+  // manifests are upserted into the registry in "installed" state;
+  // existing operator-managed records are untouched.
+  const handleRescan = useCallback(async () => {
+    const added = await rescanBuiltins();
+    void discoverBuiltins();
+    if (added > 0) {
+      toast.success(`${added} new plugin${added === 1 ? "" : "s"} registered`);
+    } else {
+      toast.message("No new plugins found on disk");
+    }
+  }, [rescanBuiltins, discoverBuiltins]);
 
   /* ── Filtering ── */
   const filteredInstalled = useMemo(() => filterPluginRecords(plugins, filters), [plugins, filters]);
@@ -440,6 +455,7 @@ export default function PluginsPage() {
         remoteCount={filteredRemoteMarketplace.length}
         loading={loading}
         onRefresh={handleRefresh}
+        onRescan={() => void handleRescan()}
         onInstallLocal={() => setInstallOpen(true)}
       />
 

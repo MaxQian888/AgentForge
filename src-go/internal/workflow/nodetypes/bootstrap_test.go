@@ -42,12 +42,12 @@ var builtinNames = []string{
 	"sub_workflow",
 	"http_call",
 	"im_send",
-	"qianchuan_metrics_fetcher",
-	"qianchuan_strategy_runner",
-	"qianchuan_action_executor",
+	// qianchuan_* node types moved to plugins/qianchuan-ads/workflow and
+	// are registered by the plugin's Install() before LockGlobal runs.
+	// Core bootstrap no longer owns them.
 }
 
-func TestRegisterBuiltins_RegistersAllNineteen(t *testing.T) {
+func TestRegisterBuiltins_RegistersAllCoreBuiltins(t *testing.T) {
 	reg := NewRegistry(nil)
 
 	if err := RegisterBuiltins(reg, BuiltinDeps{}); err != nil {

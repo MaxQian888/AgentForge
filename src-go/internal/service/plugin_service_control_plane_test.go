@@ -35,6 +35,14 @@ func (controlPlanePluginRuntimeClient) ActivateToolPlugin(_ context.Context, plu
 	}, nil
 }
 
+func (controlPlanePluginRuntimeClient) DisableToolPlugin(_ context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
+	return &model.PluginRuntimeStatus{
+		PluginID:       pluginID,
+		LifecycleState: model.PluginStateDisabled,
+		Host:           model.PluginHostTSBridge,
+	}, nil
+}
+
 func (controlPlanePluginRuntimeClient) CheckToolPluginHealth(_ context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
 	return &model.PluginRuntimeStatus{
 		PluginID:       pluginID,
@@ -58,6 +66,8 @@ type controlPlaneGoRuntime struct {
 	payload   map[string]any
 	result    map[string]any
 }
+
+func (r *controlPlaneGoRuntime) DeactivatePlugin(_ context.Context, _ string) error { return nil }
 
 func (r *controlPlaneGoRuntime) ActivatePlugin(_ context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error) {
 	return &model.PluginRuntimeStatus{

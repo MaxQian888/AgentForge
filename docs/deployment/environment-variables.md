@@ -45,6 +45,7 @@ Loaded from `src-go/.env` and process env by `src-go/internal/config/config.go`.
 | `IM_CONTROL_SHARED_SECRET` | Optional | empty | IM bridge delivery/auth secret |
 | `IM_BRIDGE_HEARTBEAT_TTL` | No | `2m` | Bridge heartbeat TTL |
 | `IM_BRIDGE_PROGRESS_INTERVAL` | No | `30s` | IM progress heartbeat interval |
+| `MARKETPLACE_URL` | No | `http://localhost:7781` | Marketplace service base URL |
 
 ## TS Bridge (`src-bridge/.env.example`)
 
@@ -61,6 +62,13 @@ Loaded from `src-go/.env` and process env by `src-go/internal/config/config.go`.
 | `CODEX_RUNTIME_MODEL` | Optional | Default Codex model |
 | `OPENCODE_RUNTIME_COMMAND` | Required for OpenCode runtime | OpenCode command/path |
 | `OPENCODE_RUNTIME_MODEL` | Optional | Default OpenCode model |
+| `CURSOR_RUNTIME_COMMAND` | Required for Cursor runtime | Cursor Agent CLI command/path |
+| `CURSOR_API_KEY` | Optional | Cursor API key for agent auth |
+| `GEMINI_RUNTIME_COMMAND` | Required for Gemini runtime | Gemini CLI command/path |
+| `GEMINI_API_KEY` / `GOOGLE_API_KEY` | Required for Gemini runtime | Gemini CLI authentication |
+| `QODER_RUNTIME_COMMAND` | Required for Qoder runtime | Qoder CLI command/path |
+| `IFLOW_RUNTIME_COMMAND` | Required for iFlow runtime | iFlow CLI command/path — **iFlow is in a published shutdown window; migration target is Qoder** |
+| `IFLOW_API_KEY` | Required for iFlow runtime | iFlow API key |
 | `MAX_CONCURRENT_AGENTS` | No | Bridge concurrency cap |
 | `LOG_LEVEL` | No | Runtime log verbosity |
 

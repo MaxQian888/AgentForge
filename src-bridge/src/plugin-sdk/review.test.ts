@@ -1,5 +1,12 @@
 import { describe, expect, test } from "bun:test";
 import { createReviewFinding, createReviewResult } from "./index.js";
+import type { ReviewFinding } from "../review/types.js";
+
+interface FindingsPayload {
+  format: string;
+  summary: string;
+  findings: ReviewFinding[];
+}
 
 function firstTextContent(result: { content: Array<{ type: string; text?: string }> }): string | undefined {
   const item = result.content.find((entry) => entry.type === "text");
@@ -68,7 +75,7 @@ describe("plugin SDK review helpers", () => {
       ],
     });
 
-    const sc = result.structuredContent as any;
+    const sc = result.structuredContent as unknown as FindingsPayload;
     expect(sc.format).toBe("findings/v2");
     expect(sc.findings[0].suggested_patch).toBe(patch);
   });
@@ -86,7 +93,7 @@ describe("plugin SDK review helpers", () => {
       ],
     });
 
-    const sc = result.structuredContent as any;
+    const sc = result.structuredContent as unknown as FindingsPayload;
     expect(sc.format).toBe("findings/v1");
   });
 
@@ -109,7 +116,7 @@ describe("plugin SDK review helpers", () => {
       ],
     });
 
-    const sc = result.structuredContent as any;
+    const sc = result.structuredContent as unknown as FindingsPayload;
     expect(sc.format).toBe("findings/v2");
     expect(sc.findings[0].suggested_patch).toBeTruthy();
     expect(sc.findings[1].suggested_patch).toBeNull();

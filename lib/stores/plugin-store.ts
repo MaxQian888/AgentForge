@@ -513,6 +513,7 @@ interface PluginState {
   selectMarketplaceEntry: (id: string | null) => void;
   fetchPlugins: () => Promise<void>;
   discoverBuiltins: () => Promise<void>;
+  rescanBuiltins: () => Promise<number>;
   fetchMarketplace: () => Promise<void>;
   fetchRemoteMarketplace: () => Promise<void>;
   installLocal: (path: string) => Promise<void>;
@@ -639,6 +640,34 @@ export const usePluginStore = create<PluginState>()((set, get) => ({
       set({ builtins: data ?? [], error: null });
     } catch {
       set({ error: "Unable to discover built-in plugins" });
+    } finally {
+      set({ loading: false });
+    }
+  },
+
+  // rescanBuiltins hot-reloads new on-disk manifests into the registry.
+  // Returns the count of plugins that were newly registered this pass so
+  // the UI can surface a toast like "2 plugins added".
+  rescanBuiltins: async () => {
+    const token = getToken();
+    if (!token) return 0;
+
+    set({ loading: true, error: null });
+    try {
+      const api = getApi();
+      const { data } = await api.post<{ added: PluginRecord[]; count: number }>(
+        "/api/v1/plugins/rescan",
+        {},
+        { token }
+      );
+      const count = data?.count ?? 0;
+      if (count > 0) {
+        await get().fetchPlugins();
+      }
+      return count;
+    } catch (error) {
+      set({ error: getErrorMessage(error, "Unable to rescan plugin directory") });
+      return 0;
     } finally {
       set({ loading: false });
     }

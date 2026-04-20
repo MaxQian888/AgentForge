@@ -336,12 +336,16 @@ function getApi() {
 }
 
 function toKnowledgeAsset(raw: Record<string, unknown>): KnowledgeAsset {
-  const kind = (["wiki_page", "ingested_file", "template"].includes(String(raw.kind))
-    ? String(raw.kind)
-    : "wiki_page") as KnowledgeAssetKind;
-
+  const rawKindIsValid = ["wiki_page", "ingested_file", "template"].includes(
+    String(raw.kind),
+  );
   const isSystem = Boolean(raw.isSystem ?? raw.isSystemTemplate);
-  const isTemplate = Boolean(raw.isTemplate) || kind === "template";
+  const isTemplate = Boolean(raw.isTemplate);
+  const kind = (rawKindIsValid
+    ? String(raw.kind)
+    : isTemplate
+      ? "template"
+      : "wiki_page") as KnowledgeAssetKind;
 
   return {
     id: String(raw.id ?? ""),

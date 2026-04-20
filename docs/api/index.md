@@ -12,12 +12,21 @@
 - 健康检查 / Health
 - Auth / Users
 - Projects / Members / Tasks
-- Custom Fields / Views / Forms / Automations
-- Dashboards / Milestones / Sprints / Workflow
-- Memory / Logs / Wiki
+- Custom Fields / Views / Forms / Automations / Saved Views
+- Dashboards / Milestones / Sprints / Workflow / Workflow Run History
+- Memory / Logs / Wiki / Documents
 - Agents / Bridge / Teams / Notifications
 - Scheduler / Reviews / Stats
 - Roles / Plugins / Marketplace / IM
+- Employees / Employee Runs / Employee Triggers
+- VCS Integrations / VCS Webhooks
+- Secrets
+- Knowledge Assets
+- Triggers / Automation Rules
+- Queue Management
+- Dispatch Observability / Dispatch Preflight
+- Budget Queries / Cost
+- Project Templates
 - Internal HTTP endpoints
 - WebSocket 握手入口
 

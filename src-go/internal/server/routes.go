@@ -17,19 +17,15 @@ import (
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/employee"
 	"github.com/react-go-quick-starter/server/internal/eventbus"
-	"github.com/react-go-quick-starter/server/internal/adsplatform"
-	qianchuanprov "github.com/react-go-quick-starter/server/internal/adsplatform/qianchuan"
 	"github.com/react-go-quick-starter/server/internal/handler"
-	qianchuanoauth "github.com/react-go-quick-starter/server/internal/qianchuan"
 	"github.com/react-go-quick-starter/server/internal/imcards"
 	"github.com/react-go-quick-starter/server/internal/knowledge"
 	"github.com/react-go-quick-starter/server/internal/knowledge/liveartifact"
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
-	"github.com/react-go-quick-starter/server/internal/qianchuan/strategy"
-	"github.com/react-go-quick-starter/server/internal/qianchuanbinding"
 	"github.com/react-go-quick-starter/server/internal/repository"
+	qianchuanads "github.com/react-go-quick-starter/server/plugins/qianchuan-ads"
 	"github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/secrets"
 	"github.com/react-go-quick-starter/server/internal/service"
@@ -90,37 +86,12 @@ func (p projectTemplateAuditEmitter) EmitProjectCreatedFromTemplate(
 	_ = p.svc.RecordEvent(ctx, event)
 }
 
-// qianchuanBindingsAuditEmitter adapts service.AuditService to the narrow
-// handler.QianchuanBindingsAuditEmitter contract.
-type qianchuanBindingsAuditEmitter struct{ svc *service.AuditService }
-
-func (e qianchuanBindingsAuditEmitter) Emit(
-	ctx context.Context,
-	projectID, actorUserID, bindingID uuid.UUID,
-	action, payload string,
-) {
-	if e.svc == nil {
-		return
-	}
-	var actor *uuid.UUID
-	if actorUserID != uuid.Nil {
-		a := actorUserID
-		actor = &a
-	}
-	if payload == "" {
-		payload = "{}"
-	}
-	event := &model.AuditEvent{
-		ID:                  uuid.New(),
-		ProjectID:           projectID,
-		OccurredAt:          time.Now().UTC(),
-		ActorUserID:         actor,
-		ActionID:            action,
-		ResourceType:        model.AuditResourceTypeQianchuanBinding,
-		ResourceID:          bindingID.String(),
-		PayloadSnapshotJSON: payload,
-	}
-	_ = e.svc.RecordEvent(ctx, event)
+// BackgroundRunner is the minimal contract for goroutines that a first-party
+// plugin contributes to the server's supervision tree. main.go starts each
+// runner and cancels them as a group on shutdown. Keeping this surface
+// generic lets core routing stay agnostic to any specific plugin.
+type BackgroundRunner interface {
+	Run(ctx context.Context)
 }
 
 // secretsAuditEmitter adapts service.AuditService to the narrow
@@ -372,11 +343,15 @@ func (a reviewWorkflowLauncherAdapter) LaunchReviewWorkflow(ctx context.Context,
 }
 
 type RouteServices struct {
-	TaskProgress        *service.TaskProgressService
-	Automation          *service.AutomationEngineService
-	AuditSink           *service.AuditSink
-	Invitation          *service.InvitationService
-	QianchuanRefresher  *qianchuanoauth.Refresher
+	TaskProgress *service.TaskProgressService
+	Automation   *service.AutomationEngineService
+	AuditSink    *service.AuditSink
+	Invitation   *service.InvitationService
+	// PluginBackgroundRunners are long-running goroutines contributed by
+	// first-party plugins (e.g. the qianchuan token refresher). main.go
+	// supervises them uniformly, so core routing has no compile-time
+	// dependency on any specific plugin.
+	PluginBackgroundRunners []BackgroundRunner
 }
 
 func RegisterRoutes(
@@ -691,7 +666,9 @@ func RegisterRoutes(
 		bus.Register(outboundDispatcher)
 	}
 
-	// Build node-type registry and seed with built-ins.
+	// Build node-type registry and seed with built-ins. LockGlobal is
+	// deferred until after first-party plugin installs so plugin handlers
+	// (e.g. qianchuan_*_executor) land alongside core builtins.
 	nodeRegistry := nodetypes.NewRegistry(nil)
 	if err := nodetypes.RegisterBuiltins(nodeRegistry, nodetypes.BuiltinDeps{
 		TaskRepo: taskRepo,
@@ -699,7 +676,6 @@ func RegisterRoutes(
 	}); err != nil {
 		panic(fmt.Errorf("register built-in node types: %w", err))
 	}
-	nodeRegistry.LockGlobal()
 
 	// Build effect applier with all back-end deps.
 	effectApplier := &nodetypes.EffectApplier{
@@ -1273,44 +1249,6 @@ func RegisterRoutes(
 		bus.Register(vcsOutbound)
 	}
 
-	// Qianchuan bindings CRUD (spec3 §6.1). Project-scoped list/create on
-	// projectGroup; id-scoped patch/delete/sync/test on protected. Provider
-	// is constructed via env-driven Register(); auth probe runs on Create.
-	qcBindingRepo := qianchuanbinding.NewGormRepo(taskRepo.DB())
-	qcRegistry := adsplatform.NewRegistry()
-	qianchuanprov.Register(qcRegistry)
-	qcProvider, qcProviderErr := qcRegistry.Resolve("qianchuan")
-	if qcProviderErr != nil {
-		log.WithError(qcProviderErr).Fatal("qianchuan provider not registered")
-	}
-	qcBindingSvc := qianchuanbinding.NewService(qcBindingRepo, secretsSvc, qcProvider)
-	qcBindingH := handler.NewQianchuanBindingsHandler(qcBindingSvc, qianchuanBindingsAuditEmitter{svc: auditSvc})
-	qcBindingH.Register(projectGroup)
-	qcBindingH.RegisterFlat(e)
-
-	// Qianchuan OAuth bind flow (Plan 3B). State repo + handler.
-	qcOAuthStateRepo := qianchuanoauth.NewOAuthStateRepo(taskRepo.DB())
-	qcPublicBase := cfg.PublicBaseURL
-	if qcPublicBase == "" {
-		qcPublicBase = "http://localhost:7777"
-		log.Warn("AGENTFORGE_PUBLIC_BASE_URL not set — qianchuan OAuth callbacks won't work over the public internet")
-	}
-	qcFEBase := os.Getenv("AGENTFORGE_FE_PUBLIC_BASE_URL")
-	if qcFEBase == "" {
-		qcFEBase = "http://localhost:3000"
-	}
-	qcOAuthH := &handler.QianchuanOAuthHandler{
-		States:       qcOAuthStateRepo,
-		Registry:     qcRegistry,
-		Secrets:      secretsSvc,
-		Bindings:     qcBindingSvc,
-		Audit:        qianchuanBindingsAuditEmitter{svc: auditSvc},
-		PublicBase:   qcPublicBase,
-		FEPublicBase: qcFEBase,
-	}
-	projectGroup.POST("/qianchuan/oauth/bind/initiate", qcOAuthH.Initiate, appMiddleware.Require(appMiddleware.ActionQianchuanBindWrite))
-	e.GET("/api/v1/qianchuan/oauth/callback", qcOAuthH.Callback) // No RBAC — state token is the trust anchor
-
 	// Per-employee unified runs feed (workflow_executions ∪ agent_runs).
 	// Route is global (not project-scoped) because the employee id is
 	// self-disambiguating and the FE drills down from the employee detail
@@ -1447,6 +1385,7 @@ func RegisterRoutes(
 	// Plugins
 	protected.GET("/plugins/discover", pluginH.DiscoverBuiltIns)
 	protected.POST("/plugins/discover/builtin", pluginH.DiscoverBuiltIns)
+	protected.POST("/plugins/rescan", pluginH.RescanBuiltIns)
 	protected.POST("/plugins/install", pluginH.InstallLocal)
 	protected.GET("/plugins/catalog", pluginH.SearchCatalog)
 	protected.POST("/plugins/catalog/install", pluginH.InstallCatalogEntry)
@@ -1454,6 +1393,8 @@ func RegisterRoutes(
 	protected.GET("/plugins/marketplace/remote", pluginH.ListRemotePlugins)
 	protected.POST("/plugins/marketplace/:id/install-remote", pluginH.InstallRemotePlugin)
 	protected.GET("/plugins", pluginH.List)
+	protected.GET("/plugins/:id", pluginH.GetByID)
+	protected.GET("/plugins/:id/status", pluginH.Status)
 	protected.DELETE("/plugins/:id", pluginH.Uninstall)
 	protected.POST("/plugins/:id/update", pluginH.Update)
 	protected.PUT("/plugins/:id/config", pluginH.UpdateConfig)
@@ -1548,34 +1489,35 @@ func RegisterRoutes(
 	// Bridge-to-registry runtime sync
 	e.POST("/internal/plugins/runtime-state", pluginH.SyncRuntimeState)
 
-	// --- Qianchuan strategy library (Spec 3C) ---
-	// Repo + service backing the strategy library; system seeds run after
-	// migrations so a fresh DB ships with read-only baselines.
-	qianchuanRepo := repository.NewQianchuanStrategyRepository(taskRepo.DB())
-	qianchuanSvc := service.NewQianchuanStrategyService(qianchuanRepo)
-	qianchuanH := handler.NewQianchuanStrategiesHandler(qianchuanSvc)
-	handler.RegisterQianchuanStrategyRoutes(protected, qianchuanH)
-	if err := strategy.SeedSystemStrategies(context.Background(), qianchuanRepo); err != nil {
-		// Non-fatal — strategies can still be authored without seeds.
-		log.WithError(err).Warn("seed qianchuan system strategies")
+	// First-party integration plugins. Each plugin owns its routes, services,
+	// workflow node handlers, and background loops; each Install call
+	// gates itself behind an env flag and returns nil when disabled. See
+	// plugins/qianchuan-ads/plugin.go and the manifest at
+	// plugins/integrations/qianchuan-ads/manifest.yaml.
+	var pluginRunners []BackgroundRunner
+	if r := qianchuanads.Install(qianchuanads.InstallDeps{
+		DB:           taskRepo.DB(),
+		Cfg:          cfg,
+		Secrets:      secretsSvc,
+		Audit:        auditSvc,
+		Bus:          bus,
+		Echo:         e,
+		Protected:    protected,
+		ProjectGroup: projectGroup,
+		NodeRegistry: nodeRegistry,
+		PluginSvc:    pluginSvc,
+	}); r != nil {
+		pluginRunners = append(pluginRunners, r)
 	}
-
-	// Qianchuan token refresher (Plan 3B §5-6). Started in cmd/server/main.go.
-	qcRefresher := &qianchuanoauth.Refresher{
-		Bindings:    qcBindingRepo,
-		Secrets:     secretsSvc,
-		Registry:    qcRegistry,
-		Bus:         bus,
-		Audit:       qianchuanBindingsAuditEmitter{svc: auditSvc},
-		TickEvery:   60 * time.Second,
-		EarlyWindow: 10 * time.Minute,
-	}
+	// Plugin contributions landed — lock the registry so no further
+	// global-scope builtins can be added at runtime.
+	nodeRegistry.LockGlobal()
 
 	return &RouteServices{
-		TaskProgress:       taskProgressSvc,
-		Automation:         automationEngine,
-		AuditSink:          auditSink,
-		Invitation:         invitationSvc,
-		QianchuanRefresher: qcRefresher,
+		TaskProgress:            taskProgressSvc,
+		Automation:              automationEngine,
+		AuditSink:               auditSink,
+		Invitation:              invitationSvc,
+		PluginBackgroundRunners: pluginRunners,
 	}
 }

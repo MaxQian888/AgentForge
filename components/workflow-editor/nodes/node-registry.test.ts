@@ -3,12 +3,12 @@ import { NODE_REGISTRY, getNodeMeta, getNodesByCategory } from "./node-registry"
 const ALL_NODE_TYPES = [
   "trigger", "condition", "agent_dispatch", "notification", "status_transition",
   "gate", "parallel_split", "parallel_join", "llm_agent", "function",
-  "loop", "human_review", "wait_event", "sub_workflow",
+  "loop", "human_review", "wait_event", "sub_workflow", "http_call", "im_send",
 ];
 
 describe("node-registry", () => {
-  it("registers all 14 node types", () => {
-    expect(NODE_REGISTRY).toHaveLength(14);
+  it("registers all node types", () => {
+    expect(NODE_REGISTRY).toHaveLength(ALL_NODE_TYPES.length);
     const types = NODE_REGISTRY.map((n) => n.type);
     for (const t of ALL_NODE_TYPES) {
       expect(types).toContain(t);

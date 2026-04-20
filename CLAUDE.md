@@ -113,9 +113,14 @@ Current marketplace delivery notes:
 
 - `app/` - Next.js App Router (layout.tsx, page.tsx, globals.css)
 - `app/(auth)` - Login and registration pages
-- `app/(dashboard)` - Dashboard route group covering: overview, projects, agents, teams, reviews, cost, scheduler, memory, roles, plugins, marketplace, settings, IM, docs, workflow, sprints
+- `app/(dashboard)` - Dashboard route group covering: overview, projects, agents, employees, teams, reviews, cost, scheduler, memory, roles, plugins, marketplace, settings, IM, docs, workflow, sprints, documents, skills
+- `app/(dashboard)/employees/[id]` - Per-agent profile, run history (`/runs/`), and trigger configuration (`/triggers/`)
+- `app/(dashboard)/projects/[id]/integrations/vcs` - Per-project VCS provider connections
+- `app/(dashboard)/projects/[id]/secrets` - Per-project secret management
+- `app/(dashboard)/projects/[id]/qianchuan` - Ads-platform bindings and strategy surfaces
 - `components/ui/` - shadcn/ui components using Radix UI + class-variance-authority
-- `lib/stores/` - Zustand stores (30+ stores covering all domain surfaces)
+- `components/knowledge/` - Knowledge base UI (IngestedFilesPane, KnowledgeSearch, MaterializedFromPill, SourceUpdatedBanner)
+- `lib/stores/` - Zustand stores (40+ stores covering all domain surfaces)
 - `lib/i18n/` - Internationalization (next-intl)
 - `hooks/` - Frontend hooks (use-mobile, use-backend-url, use-breadcrumbs, use-breakpoint, use-keyboard-navigation, use-platform-capability)
 - `lib/utils.ts` - `cn()` utility (clsx + tailwind-merge)
@@ -137,6 +142,22 @@ Go orchestrator using Echo framework with layered architecture:
 - `internal/cost` - Cost tracking
 - `internal/memory` - Project memory
 - `internal/pool` - Agent pool management
+- `internal/trigger` - Automation trigger engine (CRUD, idempotency, routing, schedule ticker, dry-run)
+- `internal/automation` - Declarative automation rules evaluated by the trigger engine
+- `internal/vcs` - VCS provider registry (GitHub, GitLab, Gitea) with webhook router
+- `internal/knowledge` - Knowledge asset management, chunked ingestion, vector search, live-artifact materialization
+- `internal/secrets` - Per-project secret storage
+- `internal/employee` - Agent identity (employee) management
+- `internal/adsplatform` - Ads-platform provider registry (Qianchuan bindings and strategies)
+- `internal/queue` - Agent work queue and priority controls
+- `internal/skills` - Governed skill catalog operations
+- `internal/document` - Document management (global, distinct from project wiki)
+- `internal/eventbus` - Internal event publish/subscribe bus
+- `internal/instruction` - Agent instruction/prompt management
+- `internal/storage` - Blob storage abstraction
+- `internal/imcards` - IM rich-card payload formatters
+- `internal/version` - Service version metadata
+- `internal/integration` - External integration trigger flow tests
 
 ### Marketplace Structure (src-marketplace/)
 

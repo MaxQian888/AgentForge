@@ -31,7 +31,25 @@ const eslintConfig = defineConfig([
     "coverage/**",
     "src-tauri/target/**",
     "next-env.d.ts",
+    // Worktrees are isolated working copies; they have their own lint pass.
+    ".worktrees/**",
   ]),
+  {
+    // Allow intentionally-unused identifiers when prefixed with `_` (e.g.,
+    // destructuring drops: `const { [key]: _drop, ...rest } = obj`).
+    rules: {
+      "@typescript-eslint/no-unused-vars": [
+        "warn",
+        {
+          argsIgnorePattern: "^_",
+          varsIgnorePattern: "^_",
+          caughtErrorsIgnorePattern: "^_",
+          destructuredArrayIgnorePattern: "^_",
+          ignoreRestSiblings: true,
+        },
+      ],
+    },
+  },
   {
     // Dashboard-page spacing contract per ui-design-consistency spec.
     // JSX roots under app/(dashboard)/**/page.tsx must use design-token

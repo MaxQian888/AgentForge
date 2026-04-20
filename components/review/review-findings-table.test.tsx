@@ -21,7 +21,7 @@ jest.mock("react-diff-viewer-continued", () => ({
 
 const mockDecideFinding = jest.fn();
 jest.mock("@/lib/stores/review-store", () => ({
-  useReviewStore: (selector: (s: any) => any) =>
+  useReviewStore: <T,>(selector: (s: unknown) => T): T =>
     selector({ decideFinding: mockDecideFinding }),
 }));
 

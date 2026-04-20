@@ -1,7 +1,6 @@
 "use client";
 
 import React, { useRef } from "react";
-import { useTranslations } from "next-intl";
 import { FileUp, RotateCcw, Loader2, ExternalLink } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -41,7 +40,6 @@ export function IngestedFilesPane({
   projectId: string;
   onMaterializeAsWiki?: (assetId: string) => void;
 }) {
-  const t = useTranslations("knowledge");
   const { ingestedFiles, uploading, saving, uploadFile, reuploadFile } = useKnowledgeStore();
   const uploadRef = useRef<HTMLInputElement>(null);
   const reuploadRefs = useRef<Map<string, HTMLInputElement>>(new Map());

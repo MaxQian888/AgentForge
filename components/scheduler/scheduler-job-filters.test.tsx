@@ -50,8 +50,10 @@ describe("SchedulerJobFilters", () => {
       />,
     );
 
-    // Reset button is only visible when filters are active
-    await user.click(screen.getByRole("button", { name: /reset/i }));
+    // Reset button is rendered for multiple breakpoints (desktop/mobile); any
+    // one of them invokes onReset — pick the first to avoid ambiguity.
+    const [resetButton] = screen.getAllByRole("button", { name: /reset/i });
+    await user.click(resetButton);
     expect(onReset).toHaveBeenCalled();
   });
 

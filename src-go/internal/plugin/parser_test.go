@@ -89,6 +89,45 @@ spec:
 	}
 }
 
+func TestParse_FirstpartyInprocIntegrationPluginManifest(t *testing.T) {
+	data := []byte(`
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: qianchuan-ads
+  name: Qianchuan Ads
+  version: 0.1.0
+spec:
+  runtime: firstparty-inproc
+  capabilities: ["health", "bind_oauth"]
+`)
+
+	manifest, err := plugin.Parse(data)
+	if err != nil {
+		t.Fatalf("firstparty-inproc integration manifest should parse without module/binary: %v", err)
+	}
+	if manifest.Spec.Runtime != model.PluginRuntimeFirstpartyInproc {
+		t.Fatalf("expected firstparty-inproc runtime, got %s", manifest.Spec.Runtime)
+	}
+}
+
+func TestParse_FirstpartyInprocRejectedForToolPlugin(t *testing.T) {
+	data := []byte(`
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: t
+  name: t
+  version: 0.1.0
+spec:
+  runtime: firstparty-inproc
+`)
+
+	if _, err := plugin.Parse(data); err == nil {
+		t.Fatal("ToolPlugin must not accept firstparty-inproc runtime")
+	}
+}
+
 func TestParse_WASMIntegrationPluginRequiresModuleAndABIVersion(t *testing.T) {
 	data := []byte(`
 apiVersion: agentforge/v1

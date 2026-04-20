@@ -224,6 +224,14 @@ func (handlerRuntimeClient) ActivateToolPlugin(_ context.Context, pluginID strin
 	}, nil
 }
 
+func (handlerRuntimeClient) DisableToolPlugin(_ context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
+	return &model.PluginRuntimeStatus{
+		PluginID:       pluginID,
+		Host:           model.PluginHostTSBridge,
+		LifecycleState: model.PluginStateDisabled,
+	}, nil
+}
+
 func (handlerRuntimeClient) CheckToolPluginHealth(_ context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
 	return &model.PluginRuntimeStatus{
 		PluginID:       pluginID,
@@ -252,6 +260,8 @@ func (h *handlerGoRuntime) ActivatePlugin(_ context.Context, record model.Plugin
 		},
 	}, nil
 }
+
+func (h *handlerGoRuntime) DeactivatePlugin(_ context.Context, _ string) error { return nil }
 
 func (h *handlerGoRuntime) CheckPluginHealth(_ context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error) {
 	return &model.PluginRuntimeStatus{

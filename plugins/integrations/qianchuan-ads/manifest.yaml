@@ -1,0 +1,40 @@
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: qianchuan-ads
+  name: Qianchuan Ads (Live-commerce)
+  version: 0.1.0
+  description: >-
+    Built-in first-party integration plugin for ByteDance Qianchuan
+    (live-streaming e-commerce ads). Provides OAuth account binding,
+    strategy library, metric snapshots, action audit log, and the
+    scheduled strategy-execution loop. The physical implementation
+    currently lives in the Go monolith; activation gating is enforced
+    at `src-go/internal/server/qianchuan_plugin.go` so the feature can
+    be fully disabled without editing core code.
+  tags:
+    - builtin
+    - integration
+    - ads
+    - ecommerce
+spec:
+  runtime: firstparty-inproc
+  capabilities:
+    - health
+    - bind_oauth
+    - refresh_token
+    - fetch_metrics
+    - run_strategy
+    - execute_action
+  config:
+    hook: src-go/internal/server/qianchuan_plugin.go:installQianchuanPlugin
+permissions:
+  network:
+    required: true
+    domains:
+      - ad.oceanengine.com
+      - open.oceanengine.com
+      - qianchuan.jinritemai.com
+source:
+  type: builtin
+  path: ./plugins/integrations/qianchuan-ads/manifest.yaml

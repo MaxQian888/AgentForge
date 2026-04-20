@@ -38,9 +38,9 @@ export function useProjectRole(projectId: string | null | undefined): UseProject
 
   useEffect(() => {
     if (!projectId) return;
-    if (permissions || loading) return;
+    if (permissions || loading || error) return;
     void fetchPermissions(projectId);
-  }, [projectId, permissions, loading, fetchPermissions]);
+  }, [projectId, permissions, loading, error, fetchPermissions]);
 
   const allowedSet = useMemo(() => {
     return new Set<ProjectActionId>(permissions?.allowedActions ?? []);

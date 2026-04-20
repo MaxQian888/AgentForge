@@ -115,7 +115,9 @@ func isAllowedRuntime(kind model.PluginKind, runtime model.PluginRuntime) bool {
 	case model.PluginKindWorkflow:
 		return runtime == model.PluginRuntimeWASM
 	case model.PluginKindIntegration:
-		return runtime == model.PluginRuntimeGoPlugin || runtime == model.PluginRuntimeWASM
+		return runtime == model.PluginRuntimeGoPlugin ||
+			runtime == model.PluginRuntimeWASM ||
+			runtime == model.PluginRuntimeFirstpartyInproc
 	case model.PluginKindReview:
 		return runtime == model.PluginRuntimeMCP
 	default:

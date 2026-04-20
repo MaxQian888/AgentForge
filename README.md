@@ -72,7 +72,7 @@ One important example: the PRD v2 notes that Go-to-TS communication has moved to
 
 ## Implementation Snapshot
 
-As of `2026-03-31`, the repository has already moved beyond a thin starter shell in these concrete areas:
+As of `2026-04-20`, the repository has already moved beyond a thin starter shell in these concrete areas:
 
 - `Overview dashboard`: `app/(dashboard)/page.tsx` now renders summary cards, activity feed, fleet/team/budget widgets, and quick actions grounded in the current project context.
 - `Project task workspace`: `app/(dashboard)/project/page.tsx` now hosts one shared Board / List / Timeline / Calendar workspace with a persistent context rail, realtime health state, bulk actions, sprint-aware filtering, task detail editing, and doc/comment linkage surfaces.
@@ -92,18 +92,42 @@ As of `2026-03-31`, the repository has already moved beyond a thin starter shell
 - `IM operator UI`: the current frontend contract covers `feishu`, `dingtalk`, `slack`, `telegram`, `discord`, `wecom`, `qq`, and `qqbot`, with backend-driven event types, richer delivery diagnostics, payload preview, and platform-specific config fields.
 - `Marketplace`: `app/(dashboard)/marketplace/page.tsx` now provides a unified Skills/Plugin/Role marketplace with search, category filtering, featured items, detail views with version history and reviews, publish workflows, and install confirmation. The backend is a standalone Go microservice in `src-marketplace/` with its own database migrations, handler/service/repository layers, and admin moderation endpoints.
 - `Desktop shell`: the Tauri app now includes shared desktop window chrome with frameless titlebar controls, bounded sidecar supervision, runtime status queries, shell actions, and window-state synchronization through `lib/platform-runtime.ts`.
+- `Employee workspace`: `app/(dashboard)/employees/[id]/` provides per-employee (agent identity) profile, execution run history (`/employees/[id]/runs/`), and trigger configuration (`/employees/[id]/triggers/`) surfaces backed by dedicated Zustand stores (`employee-store`, `employee-runs-store`, `employee-trigger-store`).
+- `Project VCS integrations`: `app/(dashboard)/projects/[id]/integrations/vcs/` exposes per-project VCS connection management (GitHub, GitLab, Gitea) backed by `vcs-integrations-store` and the Go VCS service with webhook routing through `vcs_webhook_handler`.
+- `Project secrets management`: `app/(dashboard)/projects/[id]/secrets/` provides per-project secret CRUD backed by `secrets-store` and the Go secrets handler.
+- `Qianchuan ads platform`: `app/(dashboard)/projects/[id]/qianchuan/` exposes an ads-platform operator surface including channel bindings (`/bindings/`) and strategy management (`/strategies/` and `/strategies/[sid]/edit/`) backed by `qianchuan-bindings-store`, `qianchuan-strategies-store`, and the Go adsplatform provider registry.
+- `Knowledge base`: `components/knowledge/` provides ingested-file browsing (`IngestedFilesPane`), semantic search (`KnowledgeSearch`), materialization provenance pills, and live-artifact staleness banners. The Go knowledge module in `src-go/internal/knowledge/` covers asset management, chunked ingestion pipeline, vector search, comment threading, and live-artifact materialization.
+- `Trigger system`: `src-go/internal/trigger/` provides the automation trigger engine with a CRUD service, idempotency guarantees, rule routing, schedule ticker, dry-run support, and flow integration tests. The frontend `workflow-trigger-store` manages trigger state for the workflow surfaces.
+- `Automation rules`: `src-go/internal/automation/` hosts declarative automation rules (e.g. `review_completed_rule`) evaluated by the trigger engine. The `automation_handler` exposes CRUD for rule definitions.
+- `Cost workspace`: `app/(dashboard)/cost/page.tsx` provides a full cost analytics dashboard with per-agent, per-project, and per-team breakdowns backed by `cost_handler` and `budget_query_handler`.
+- `Agents workspace`: `app/(dashboard)/agents/page.tsx` provides the global agent fleet view with status, run stats, and quick-action controls backed by `agent_handler`.
+- `Documents workspace`: `app/(dashboard)/documents/page.tsx` provides a global cross-project document browser (distinct from the project-scoped docs/wiki) backed by `document_handler`.
+- `Dispatch observability`: `dispatch_observability_handler` and `dispatch_preflight_handler` expose structured agent-dispatch readiness checks and live execution telemetry through the Go API, covering capability matrix validation before a dispatch is accepted.
+- `Custom fields`: `custom_field_handler` provides per-project custom field schema management used by tasks, reviews, and sprints.
+- `Milestones`: `milestone_handler` provides project milestone CRUD integrated with sprint and task filtering.
+- `Notifications`: `notification_handler` covers workspace-level notification fan-out backed by the event bus.
+- `Project templates`: `project_template_handler` and `project-template-store` provide template CRUD and instantiation for creating pre-configured project workspaces.
+- `Saved views`: `saved_view_handler` provides per-user saved filter/sort view persistence for task and review lists.
+- `Queue management`: `queue_management_handler` exposes bounded agent queue inspection and priority controls through the Go API.
+- `Workflow run history`: `workflow_run_view_handler` provides structured run history and event replay for completed workflow executions.
 
 ## Feature Matrix
 
 | Surface | Current truth | Primary commands / entrypoints |
 | --- | --- | --- |
-| Web dashboard | Next.js 16 app-router workspace with auth, project/task/review/team/role/plugin/settings/docs surfaces | `pnpm dev`, `pnpm build` |
-| Go orchestrator | Echo API, persistence, scheduling, realtime hub, review and plugin control plane | `cd src-go && go run ./cmd/server`, `go test ./...` |
+| Web dashboard | Next.js 16 app-router workspace with auth, project/task/review/team/role/plugin/settings/docs/cost/agents surfaces | `pnpm dev`, `pnpm build` |
+| Go orchestrator | Echo API, persistence, scheduling, realtime hub, review and plugin control plane, trigger/automation engine, VCS integration, knowledge, secrets, cost, dispatch observability | `cd src-go && go run ./cmd/server`, `go test ./...` |
 | TS bridge | Bun service for coding runtimes, AI helpers, MCP plugin hosting | `cd src-bridge && bun run dev`, `bun run typecheck` |
 | IM bridge | cc-connect-based platform bridge with backend control-plane integration | `cd src-im-bridge && go run ./cmd/bridge` |
 | Desktop shell | Tauri 2 wrapper with sidecar supervision and updater plumbing | `pnpm tauri:dev`, `pnpm tauri:build` |
 | Marketplace | Standalone Go microservice + Next.js frontend for publishing, discovering, and installing plugins, skills, and roles | `cd src-marketplace && go run ./cmd/server`, browse `app/(dashboard)/marketplace/` |
 | Plugins | Built-in/local/catalog/remote plugin management plus MCP and workflow runs | `pnpm create-plugin`, `pnpm plugin:verify` |
+| Employee workspace | Per-agent identity profile with run history and trigger configuration | browse `app/(dashboard)/employees/` |
+| VCS integrations | Per-project GitHub/GitLab/Gitea connection management with webhook routing | browse `app/(dashboard)/projects/[id]/integrations/vcs/` |
+| Secrets management | Per-project secret CRUD with Go-backed storage | browse `app/(dashboard)/projects/[id]/secrets/` |
+| Qianchuan (ads platform) | Ads-platform channel bindings and strategy management per project | browse `app/(dashboard)/projects/[id]/qianchuan/` |
+| Knowledge base | Asset ingestion pipeline, semantic search, live-artifact materialization, and comment threading | `src-go/internal/knowledge/`, `components/knowledge/` |
+| Trigger / automation | Event-driven trigger routing, idempotent rule evaluation, schedule ticker, and declarative automation rules | `src-go/internal/trigger/`, `src-go/internal/automation/` |
 
 ### TS Bridge OpenCode control-plane notes
 
@@ -138,8 +162,12 @@ AgentForge/
 Notable frontend route groups already present:
 
 - `app/(auth)` for login and registration
-- `app/(dashboard)` for overview, projects, project dashboard/task workspaces, team/team-run orchestration, agents, sprints, reviews, cost, scheduler, memory, roles, plugins, marketplace, settings, IM, docs, and workflow operations
+- `app/(dashboard)` for overview, projects, project dashboard/task workspaces, team/team-run orchestration, agents, sprints, reviews, cost, scheduler, memory, roles, plugins, marketplace, settings, IM, docs, workflow operations, and global document browser
 - `app/(dashboard)/skills` for governed internal skill inventory, diagnostics, mirror sync, and skill-package preview
+- `app/(dashboard)/employees/[id]` for per-agent (employee) profile, run history (`/runs/`), and trigger configuration (`/triggers/`)
+- `app/(dashboard)/projects/[id]/integrations/vcs` for per-project VCS provider connections (GitHub, GitLab, Gitea) and webhook management
+- `app/(dashboard)/projects/[id]/secrets` for per-project secret CRUD
+- `app/(dashboard)/projects/[id]/qianchuan` for ads-platform operator surfaces including channel bindings and strategy editing
 
 ## Documentation Guide
 

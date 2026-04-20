@@ -10,19 +10,31 @@ jest.mock("remark-gfm", () => ({
   default: () => null,
 }));
 
-jest.mock("@/lib/stores/marketplace-store", () => ({
-  useMarketplaceStore: (selector: (state: Record<string, unknown>) => unknown) =>
-    selector({
-      selectedItemReviews: [],
-      uploadVersion: jest.fn(),
-      deleteItem: jest.fn(),
-      verifyItem: jest.fn(),
-      featureItem: jest.fn(),
-      sideloadItem: jest.fn(),
-      uninstallLoading: false,
-      sideloadLoading: false,
-    }),
-}));
+jest.mock("@/lib/stores/marketplace-store", () => {
+  const labels: Record<string, string> = {
+    plugin: "Plugin",
+    skill: "Skill",
+    role: "Role",
+    workflow_template: "Workflow",
+  };
+  return {
+    useMarketplaceStore: (
+      selector: (state: Record<string, unknown>) => unknown,
+    ) =>
+      selector({
+        selectedItemReviews: [],
+        uploadVersion: jest.fn(),
+        deleteItem: jest.fn(),
+        verifyItem: jest.fn(),
+        featureItem: jest.fn(),
+        sideloadItem: jest.fn(),
+        uninstallLoading: false,
+        sideloadLoading: false,
+      }),
+    typeDisplayLabel: (type: string) => labels[type] ?? type,
+    resolveMarketplaceConsumptionRecord: () => null,
+  };
+});
 
 import { MarketplaceItemDetail } from "./marketplace-item-detail";
 

@@ -178,6 +178,19 @@ func main() {
 	if cfg.PluginRegistryURL != "" {
 		pluginSvc.SetRemoteRegistry(service.NewHTTPRemoteRegistryClient(http.DefaultClient), cfg.PluginRegistryURL)
 	}
+	// Seed the plugin registry with on-disk builtin manifests so the
+	// control plane reflects disk state without waiting for a manual
+	// /plugins/discover call. Failures are non-fatal — the feature
+	// remains usable via the reactive discover endpoint.
+	if created, err := pluginSvc.SyncBuiltIns(context.Background()); err != nil {
+		log.WithError(err).Warn("builtin plugin sync failed at boot")
+	} else if len(created) > 0 {
+		ids := make([]string, 0, len(created))
+		for _, rec := range created {
+			ids = append(ids, rec.Metadata.ID)
+		}
+		log.WithField("plugins", ids).Info("seeded builtin plugins into registry")
+	}
 	schedulerRegistry := scheduler.NewRegistry(scheduledJobRepo, scheduler.BuiltInCatalog(scheduler.CatalogConfig{
 		TaskProgressDetectorInterval: cfg.TaskProgressDetectorInterval,
 		ExecutionMode:                schedulerExecutionMode(cfg.SchedulerExecutionMode),
@@ -278,12 +291,36 @@ func main() {
 	defer schedulerCancel()
 	go scheduler.RunLoop(schedulerCtx, 15*time.Second, schedulerSvc)
 
-	// Qianchuan token refresher (Plan 3B). Single-instance goroutine; see
-	// spec3 §11 for the double-refresh idempotency argument.
-	qcRefresherCtx, qcRefresherCancel := context.WithCancel(context.Background())
-	defer qcRefresherCancel()
-	// TODO(spec3-multi-instance): leader-elect this loop before scaling backend horizontally.
-	go routeServices.QianchuanRefresher.Run(qcRefresherCtx)
+	// Plugin health heartbeat. Active + degraded plugins are probed on an
+	// interval so crashed MCP children / WASM-invocation failures are
+	// reflected in /api/v1/plugins without requiring a manual health call.
+	// Configurable via AGENTFORGE_PLUGIN_HEALTH_INTERVAL (Go duration).
+	pluginHealthCtx, pluginHealthCancel := context.WithCancel(context.Background())
+	defer pluginHealthCancel()
+	pluginHealthInterval := 60 * time.Second
+	if raw := os.Getenv("AGENTFORGE_PLUGIN_HEALTH_INTERVAL"); raw != "" {
+		if parsed, err := time.ParseDuration(raw); err == nil && parsed > 0 {
+			pluginHealthInterval = parsed
+		} else {
+			log.WithField("raw", raw).Warn("AGENTFORGE_PLUGIN_HEALTH_INTERVAL unparseable; using 60s default")
+		}
+	}
+	go pluginSvc.RunHealthLoop(pluginHealthCtx, pluginHealthInterval)
+
+	// First-party plugin background goroutines (qianchuan token refresher,
+	// future siblings). Each plugin gates its own registration behind an
+	// env flag; we supervise whatever it chose to return.
+	// TODO(spec3-multi-instance): leader-elect these loops before scaling backend horizontally.
+	pluginRunnerCtx, pluginRunnerCancel := context.WithCancel(context.Background())
+	defer pluginRunnerCancel()
+	if routeServices != nil {
+		for _, r := range routeServices.PluginBackgroundRunners {
+			if r == nil {
+				continue
+			}
+			go r.Run(pluginRunnerCtx)
+		}
+	}
 
 	// Graceful shutdown on SIGINT / SIGTERM
 	quit := make(chan os.Signal, 1)
@@ -292,7 +329,8 @@ func main() {
 	go func() {
 		<-quit
 		log.Info("shutting down server...")
-		qcRefresherCancel()
+		pluginRunnerCancel()
+		pluginHealthCancel()
 		bridgeHealthCancel()
 		schedulerCancel()
 		ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)

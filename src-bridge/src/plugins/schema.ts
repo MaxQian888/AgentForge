@@ -8,7 +8,13 @@ export const PluginKindSchema = z.enum([
   "ReviewPlugin",
 ]);
 
-export const PluginRuntimeSchema = z.enum(["declarative", "mcp", "go-plugin", "wasm"]);
+export const PluginRuntimeSchema = z.enum([
+  "declarative",
+  "mcp",
+  "go-plugin",
+  "wasm",
+  "firstparty-inproc",
+]);
 export const PluginTrustStateSchema = z.enum(["unknown", "verified", "untrusted"]);
 export const PluginApprovalStateSchema = z.enum(["not-required", "pending", "approved", "rejected"]);
 export const PluginLifecycleOperationSchema = z.enum([
@@ -122,6 +128,7 @@ export const PluginManifestSchema = z
       abiVersion: z.string().optional(),
       capabilities: z.array(z.string()).optional(),
       config: z.record(z.string(), z.unknown()).optional(),
+      configSchema: z.record(z.string(), z.unknown()).optional(),
       env: z.record(z.string(), z.string()).optional(),
       workflow: WorkflowSpecSchema.optional(),
       review: ReviewSpecSchema.optional(),
@@ -137,10 +144,14 @@ export const PluginManifestSchema = z
         path: ["spec", "runtime"],
       });
     }
-    if (manifest.kind === "IntegrationPlugin" && !["go-plugin", "wasm"].includes(manifest.spec.runtime)) {
+    if (
+      manifest.kind === "IntegrationPlugin" &&
+      !["go-plugin", "wasm", "firstparty-inproc"].includes(manifest.spec.runtime)
+    ) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
-        message: "IntegrationPlugin manifests must use a Go-hosted runtime (go-plugin or wasm)",
+        message:
+          "IntegrationPlugin manifests must use a Go-hosted runtime (go-plugin, wasm, or firstparty-inproc)",
         path: ["spec", "runtime"],
       });
     }

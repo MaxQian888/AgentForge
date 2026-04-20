@@ -54,6 +54,14 @@ func (internalPluginRuntimeClient) ActivateToolPlugin(_ context.Context, pluginI
 	}, nil
 }
 
+func (internalPluginRuntimeClient) DisableToolPlugin(_ context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
+	return &model.PluginRuntimeStatus{
+		PluginID:       pluginID,
+		Host:           model.PluginHostTSBridge,
+		LifecycleState: model.PluginStateDisabled,
+	}, nil
+}
+
 func (internalPluginRuntimeClient) CheckToolPluginHealth(_ context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
 	return &model.PluginRuntimeStatus{
 		PluginID:       pluginID,

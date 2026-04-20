@@ -5,6 +5,7 @@ import (
 	"errors"
 	"net/http"
 	"strconv"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -50,6 +51,20 @@ func (h *PluginHandler) DiscoverBuiltIns(c echo.Context) error {
 	return c.JSON(http.StatusOK, records)
 }
 
+// RescanBuiltIns hot-reloads manifests dropped into the plugins
+// directory after boot. It is the dynamic-loading entry point: drop a
+// new plugin tree under plugins/**/manifest.yaml, POST here, and the
+// new plugin appears in the control plane without restarting the
+// server. Existing records are preserved so operator state survives.
+// Response: {"added": [...new PluginRecords...]}
+func (h *PluginHandler) RescanBuiltIns(c echo.Context) error {
+	added, err := h.service.SyncBuiltIns(c.Request().Context())
+	if err != nil {
+		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, map[string]any{"added": added, "count": len(added)})
+}
+
 func (h *PluginHandler) InstallLocal(c echo.Context) error {
 	var req struct {
 		Path    string              `json:"path"`
@@ -89,6 +104,43 @@ func (h *PluginHandler) SearchCatalog(c echo.Context) error {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
 	}
 	return c.JSON(http.StatusOK, entries)
+}
+
+// GetByID returns a single plugin record by ID. 404 when the plugin is
+// not installed/registered — useful as a feature-gate probe.
+func (h *PluginHandler) GetByID(c echo.Context) error {
+	record, err := h.service.GetByID(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusNotFound, model.ErrorResponse{Message: err.Error()})
+	}
+	return c.JSON(http.StatusOK, record)
+}
+
+// Status returns the minimal projection of a plugin's state that a FE
+// feature-gate needs: whether the plugin is registered, its lifecycle
+// state, and the host runtime. 404 signals "not installed". This is
+// intentionally cheaper than /plugins/:id which returns the full record
+// and hydration overhead.
+func (h *PluginHandler) Status(c echo.Context) error {
+	record, err := h.service.GetByID(c.Request().Context(), c.Param("id"))
+	if err != nil {
+		return c.JSON(http.StatusNotFound, map[string]any{
+			"id":      c.Param("id"),
+			"enabled": false,
+			"error":   err.Error(),
+		})
+	}
+	state := record.LifecycleState
+	enabled := state == model.PluginStateActive ||
+		state == model.PluginStateEnabled ||
+		state == model.PluginStateActivating
+	return c.JSON(http.StatusOK, map[string]any{
+		"id":              record.Metadata.ID,
+		"version":         record.Metadata.Version,
+		"enabled":         enabled,
+		"lifecycle_state": state,
+		"runtime_host":    record.RuntimeHost,
+	})
 }
 
 func (h *PluginHandler) List(c echo.Context) error {
@@ -238,10 +290,19 @@ func (h *PluginHandler) Uninstall(c echo.Context) error {
 	if id == "" {
 		return localizedError(c, http.StatusBadRequest, i18n.MsgPluginIDRequired)
 	}
-	if err := h.service.Uninstall(c.Request().Context(), id); err != nil {
+	// ?purge=true asks the service to also delete the on-disk manifest
+	// directory so the plugin doesn't re-register on the next
+	// SyncBuiltIns sweep. Defaults to false — conservative by design.
+	opts := service.UninstallOptions{
+		Purge: strings.EqualFold(c.QueryParam("purge"), "true") || c.QueryParam("purge") == "1",
+	}
+	if err := h.service.UninstallOpts(c.Request().Context(), id, opts); err != nil {
 		return c.JSON(http.StatusInternalServerError, model.ErrorResponse{Message: err.Error()})
 	}
-	return c.JSON(http.StatusOK, map[string]string{"message": "plugin uninstalled"})
+	return c.JSON(http.StatusOK, map[string]any{
+		"message": "plugin uninstalled",
+		"purged":  opts.Purge,
+	})
 }
 
 func (h *PluginHandler) Update(c echo.Context) error {

@@ -5,7 +5,12 @@ export type PluginKind =
   | "IntegrationPlugin"
   | "ReviewPlugin";
 
-export type PluginRuntime = "declarative" | "mcp" | "go-plugin" | "wasm";
+export type PluginRuntime =
+  | "declarative"
+  | "mcp"
+  | "go-plugin"
+  | "wasm"
+  | "firstparty-inproc";
 export type PluginSourceType = "builtin" | "local" | "git" | "npm" | "catalog";
 export type PluginTrustState = "unknown" | "verified" | "untrusted";
 export type PluginApprovalState = "not-required" | "pending" | "approved" | "rejected";

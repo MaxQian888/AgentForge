@@ -25,6 +25,7 @@ import {
   FolderOpen,
   RefreshCw,
   Search,
+  ScanLine,
   SlidersHorizontal,
   X,
 } from "lucide-react";
@@ -37,6 +38,7 @@ interface PluginSearchBarProps {
   loading: boolean;
   onRefresh: () => void;
   onInstallLocal: () => void;
+  onRescan?: () => void;
 }
 
 export function PluginSearchBar({
@@ -47,6 +49,7 @@ export function PluginSearchBar({
   loading,
   onRefresh,
   onInstallLocal,
+  onRescan,
 }: PluginSearchBarProps) {
   const t = useTranslations("plugins");
   const filters = usePluginStore((s) => s.filters);
@@ -214,9 +217,24 @@ export function PluginSearchBar({
           className="h-8 w-8 p-0"
           onClick={onRefresh}
           disabled={loading}
+          title="Refresh plugin list"
         >
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
         </Button>
+
+        {onRescan ? (
+          <Button
+            variant="outline"
+            size="sm"
+            className="h-8 gap-1.5 text-xs"
+            onClick={onRescan}
+            disabled={loading}
+            title="Rescan plugins/ on disk for newly-added manifests"
+          >
+            <ScanLine className="size-3.5" />
+            Rescan
+          </Button>
+        ) : null}
 
         <Button
           size="sm"

@@ -88,6 +88,20 @@ jest.mock("next-intl", () => ({
     },
 }));
 
+// Default to a permissive project-role hook for UI tests. Permission matrix
+// behavior has dedicated backend tests; frontend component tests should focus
+// on interaction flow and not on permission gating. Individual tests can still
+// override this mock with jest.mock("@/hooks/use-project-role", …).
+jest.mock("@/hooks/use-project-role", () => ({
+  useProjectRole: () => ({
+    projectRole: "owner",
+    loading: false,
+    error: null,
+    can: () => true,
+    refresh: async () => {},
+  }),
+}));
+
 class MockResizeObserver {
   observe() {}
   unobserve() {}

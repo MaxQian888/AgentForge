@@ -58,7 +58,9 @@ export function AuditLogPanel({ projectId }: AuditLogPanelProps) {
   const [openDetailId, setOpenDetailId] = useState<string | null>(null);
 
   useEffect(() => {
-    void fetchEvents(projectId, filters);
+    // Mount / project-switch fetch only. Filter changes are applied via the
+    // Apply button (handleApply) so the list doesn't refetch on every keystroke.
+    void fetchEvents(projectId, {});
   }, [projectId, fetchEvents]);
 
   const events = page?.events ?? [];

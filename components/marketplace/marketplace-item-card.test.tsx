@@ -31,7 +31,7 @@ describe("MarketplaceItemCard", () => {
     render(<MarketplaceItemCard item={mockItem} />);
 
     expect(screen.getByText("Test Plugin")).toBeInTheDocument();
-    expect(screen.getByText("plugin")).toBeInTheDocument();
+    expect(screen.getByText("Plugin")).toBeInTheDocument();
     expect(screen.getByText("100")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "Install" })).toBeInTheDocument();
   });

@@ -237,16 +237,24 @@ type EffectApplier struct {
 	// AuditSink records applier-level audit events (e.g. http_call executions).
 	AuditSink AuditRecorder
 
-	// Qianchuan deps (Spec 3D). All may be nil in builds/tests that don't
-	// compile in the qianchuan provider; in that case the applier surfaces a
-	// structured "qianchuan: not configured" error.
-	QianchuanProvider   QianchuanProvider
-	QianchuanSecrets    QianchuanSecretsResolver
-	QianchuanSnapshots  QianchuanSnapshotRepo
-	QianchuanActions    QianchuanActionLogRepo
-	QianchuanStrategies QianchuanStrategyLoader
-	QianchuanEvaluator  QianchuanStrategyEvaluator
-	QianchuanBindings   QianchuanBindingLookup
+	// Qianchuan is the plugin-provided hook bundle for Spec 3D effects
+	// (FetchQianchuanMetrics, RunQianchuanStrategy, ExecuteQianchuanAction).
+	// Nil when the qianchuan plugin is disabled; Apply() returns
+	// "qianchuan: not configured" for those effect kinds in that case.
+	// The plugin constructs EffectHooks with all of the QianchuanProvider
+	// / QianchuanSecrets / QianchuanSnapshots / etc. dependencies wired
+	// in and assigns it onto EffectApplier from its Install() function.
+	Qianchuan QianchuanEffectHooks
+}
+
+// QianchuanEffectHooks is the plugin-provided contract the EffectApplier
+// dispatches Spec 3D qianchuan effects through. Implementations live in
+// plugins/qianchuan-ads/workflow; leaving this field nil cleanly
+// disables the three effect kinds.
+type QianchuanEffectHooks interface {
+	FetchMetrics(ctx context.Context, merger WaitEventDataStoreMerger, exec *model.WorkflowExecution, node *model.WorkflowNode, raw json.RawMessage) error
+	RunStrategy(ctx context.Context, merger WaitEventDataStoreMerger, exec *model.WorkflowExecution, node *model.WorkflowNode, raw json.RawMessage) error
+	ExecuteAction(ctx context.Context, merger WaitEventDataStoreMerger, exec *model.WorkflowExecution, node *model.WorkflowNode, raw json.RawMessage) error
 }
 
 // Apply iterates effects in order and executes each one.
@@ -310,17 +318,26 @@ func (a *EffectApplier) Apply(
 			}
 
 		case EffectFetchQianchuanMetrics:
-			if err := a.applyFetchQianchuanMetrics(ctx, exec, node, e.Payload); err != nil {
+			if a.Qianchuan == nil {
+				return false, fmt.Errorf("fetch_qianchuan_metrics: qianchuan: not configured")
+			}
+			if err := a.Qianchuan.FetchMetrics(ctx, a.DataStoreMerger, exec, node, e.Payload); err != nil {
 				return false, fmt.Errorf("fetch_qianchuan_metrics: %w", err)
 			}
 
 		case EffectRunQianchuanStrategy:
-			if err := a.applyRunQianchuanStrategy(ctx, exec, node, e.Payload); err != nil {
+			if a.Qianchuan == nil {
+				return false, fmt.Errorf("run_qianchuan_strategy: qianchuan: not configured")
+			}
+			if err := a.Qianchuan.RunStrategy(ctx, a.DataStoreMerger, exec, node, e.Payload); err != nil {
 				return false, fmt.Errorf("run_qianchuan_strategy: %w", err)
 			}
 
 		case EffectExecuteQianchuanAction:
-			if err := a.applyExecuteQianchuanAction(ctx, exec, node, e.Payload); err != nil {
+			if a.Qianchuan == nil {
+				return false, fmt.Errorf("execute_qianchuan_action: qianchuan: not configured")
+			}
+			if err := a.Qianchuan.ExecuteAction(ctx, a.DataStoreMerger, exec, node, e.Payload); err != nil {
 				return false, fmt.Errorf("execute_qianchuan_action: %w", err)
 			}
 

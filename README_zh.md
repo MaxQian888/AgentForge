@@ -72,7 +72,7 @@ flowchart LR
 
 ## 当前实现快照
 
-截至 `2026-03-31`，仓库已经不只是一个 starter 外壳，以下能力已经有真实落地：
+截至 `2026-04-20`，仓库已经不只是一个 starter 外壳，以下能力已经有真实落地：
 
 - `总览 Dashboard`：`app/(dashboard)/page.tsx` 已提供汇总指标卡、活动流、agent/team/budget widget，以及基于当前项目上下文的快捷操作。
 - `项目任务工作区`：`app/(dashboard)/project/page.tsx` 已经收敛为统一的 Board / List / Timeline / Calendar 工作区，带持久右侧 context rail、实时健康态、批量操作、Sprint 过滤、任务详情编辑以及文档/评论关联入口。
@@ -89,18 +89,42 @@ flowchart LR
 - `IM 运维界面`：当前前端合同已经覆盖 `feishu`、`dingtalk`、`slack`、`telegram`、`discord`、`wecom`、`qq`、`qqbot`，并具备后端驱动事件类型、投递降级诊断、payload 预览和平台特有配置字段。
 - `桌面壳`：Tauri 桌面模式已经具备共享 frameless titlebar、sidecar 有界监督、runtime 状态查询、shell actions，以及通过 `lib/platform-runtime.ts` 暴露的窗口状态同步能力。
 - `Marketplace 市场`：`app/(dashboard)/marketplace/page.tsx` 已提供统一的 Skills/Plugin/Role 市场，支持搜索、分类过滤、精选推荐、详情查看（含版本历史和评价）、发布流程以及安装确认。后端为独立 Go 微服务 `src-marketplace/`，具备独立的数据库迁移、handler/service/repository 分层和管理员审核端点。
+- `Employee 工作区`：`app/(dashboard)/employees/[id]/` 提供每个员工（Agent 身份）的档案、执行运行历史（`/employees/[id]/runs/`）和触发器配置（`/employees/[id]/triggers/`）界面，由专属的 Zustand stores（`employee-store`、`employee-runs-store`、`employee-trigger-store`）支撑。
+- `Project VCS 集成`：`app/(dashboard)/projects/[id]/integrations/vcs/` 暴露每个项目的 VCS 连接管理（GitHub、GitLab、Gitea），由 `vcs-integrations-store` 和 Go VCS 服务（含 `vcs_webhook_handler` Webhook 路由）支撑。
+- `Project Secrets 管理`：`app/(dashboard)/projects/[id]/secrets/` 提供每个项目的 secret CRUD，由 `secrets-store` 和 Go secrets handler 支撑。
+- `千川广告平台`：`app/(dashboard)/projects/[id]/qianchuan/` 暴露广告平台运营界面，包括渠道绑定（`/bindings/`）和策略管理（`/strategies/` 与 `/strategies/[sid]/edit/`），由 `qianchuan-bindings-store`、`qianchuan-strategies-store` 和 Go adsplatform provider registry 支撑。
+- `知识库`：`components/knowledge/` 提供已摄取文件浏览（`IngestedFilesPane`）、语义搜索（`KnowledgeSearch`）、物化来源标签和实时产物陈旧提醒。Go knowledge 模块位于 `src-go/internal/knowledge/`，涵盖资产管理、分块摄取流水线、向量搜索、评论线程和实时产物物化。
+- `触发器系统`：`src-go/internal/trigger/` 提供自动化触发引擎，包含 CRUD 服务、幂等性保证、规则路由、调度计时器、试运行支持和集成测试。前端 `workflow-trigger-store` 管理工作流界面的触发器状态。
+- `自动化规则`：`src-go/internal/automation/` 托管由触发引擎求值的声明式自动化规则（如 `review_completed_rule`）。`automation_handler` 提供规则定义的 CRUD。
+- `成本工作区`：`app/(dashboard)/cost/page.tsx` 提供完整的成本分析看板，支持按 Agent、项目和团队维度的成本明细，由 `cost_handler` 和 `budget_query_handler` 支撑。
+- `Agents 工作区`：`app/(dashboard)/agents/page.tsx` 提供全局 Agent 舰队视图，含状态、运行统计和快捷操作，由 `agent_handler` 支撑。
+- `Documents 工作区`：`app/(dashboard)/documents/page.tsx` 提供跨项目的全局文档浏览器（独立于项目级 docs/wiki），由 `document_handler` 支撑。
+- `分发可观测性`：`dispatch_observability_handler` 和 `dispatch_preflight_handler` 通过 Go API 暴露结构化的 Agent 分发就绪检查和实时执行遥测，在接受分发前做能力矩阵验证。
+- `自定义字段`：`custom_field_handler` 提供每个项目的自定义字段 Schema 管理，供任务、审查和 Sprint 使用。
+- `里程碑`：`milestone_handler` 提供项目里程碑 CRUD，与 Sprint 和任务过滤集成。
+- `通知`：`notification_handler` 负责工作区级通知 fan-out，由事件总线支撑。
+- `项目模板`：`project_template_handler` 和 `project-template-store` 提供模板 CRUD 和实例化，用于创建预配置项目工作区。
+- `保存视图`：`saved_view_handler` 为任务和审查列表提供每用户的过滤/排序视图持久化。
+- `队列管理`：`queue_management_handler` 通过 Go API 暴露有界 Agent 队列检查和优先级控制。
+- `工作流运行历史`：`workflow_run_view_handler` 为已完成的工作流执行提供结构化运行历史和事件回放。
 
 ## 功能矩阵
 
 | Surface         | 当前真相                                                                                           | 主要命令 / 入口                                                                      |
 | --------------- | -------------------------------------------------------------------------------------------------- | ------------------------------------------------------------------------------------ |
-| Web Dashboard   | Next.js 16 app-router 工作区，覆盖 auth、project/task/review/team/role/plugin/settings/docs 等页面 | `pnpm dev`、`pnpm build`                                                         |
-| Go Orchestrator | Echo API、持久化、调度、实时 hub、review 与 plugin control plane                                   | `cd src-go && go run ./cmd/server`、`go test ./...`                              |
+| Web Dashboard   | Next.js 16 app-router 工作区，`app/(dashboard)` 覆盖 auth、project/task/review/team/role/plugin/settings/docs/cost/agents/employees 等页面 | `pnpm dev`、`pnpm build`                                                         |
+| Go Orchestrator | Echo API、持久化、调度、实时 hub、review 与 plugin control plane、触发器/自动化引擎、VCS 集成、知识库、secrets、成本、分发可观测性 | `cd src-go && go run ./cmd/server`、`go test ./...`                              |
 | TS Bridge       | Bun 服务，负责 coding runtime、AI helper、MCP 插件托管                                             | `cd src-bridge && bun run dev`、`bun run typecheck`                              |
 | IM Bridge       | 基于 cc-connect 的平台桥接层，接入后端控制面                                                       | `cd src-im-bridge && go run ./cmd/bridge`                                          |
 | Desktop Shell   | Tauri 2 桌面壳，含 sidecar supervision 与 updater plumbing                                         | `pnpm tauri:dev`、`pnpm tauri:build`                                             |
 | Marketplace     | 独立 Go 微服务 + Next.js 前端，用于发布、发现和安装插件/Skills/角色                                | `cd src-marketplace && go run ./cmd/server`，浏览 `app/(dashboard)/marketplace/` |
 | Plugins         | built-in/local/catalog/remote 插件管理，加上 MCP 与 workflow run 支持                              | `pnpm create-plugin`、`pnpm plugin:verify`                                       |
+| Employee 工作区 | 每个 Agent 身份的档案、运行历史和触发器配置 | 浏览 `app/(dashboard)/employees/` |
+| VCS 集成 | 每个项目的 GitHub/GitLab/Gitea 连接管理，含 Webhook 路由 | 浏览 `app/(dashboard)/projects/[id]/integrations/vcs/` |
+| Secrets 管理 | 每个项目的 secret CRUD，Go 后端存储 | 浏览 `app/(dashboard)/projects/[id]/secrets/` |
+| 千川广告平台 | 每个项目的广告渠道绑定和策略管理 | 浏览 `app/(dashboard)/projects/[id]/qianchuan/` |
+| 知识库 | 资产摄取流水线、语义搜索、实时产物物化和评论线程 | `src-go/internal/knowledge/`、`components/knowledge/` |
+| 触发器 / 自动化 | 事件驱动触发路由、幂等规则求值、调度计时器和声明式自动化规则 | `src-go/internal/trigger/`、`src-go/internal/automation/` |
 
 ## 仓库结构
 
@@ -126,6 +150,10 @@ AgentForge/
 
 - `app/(auth)`：登录、注册
 - `app/(dashboard)`：总览、projects、项目 dashboard/任务工作区、team/teams 编排、agents、sprints、reviews、cost、scheduler、memory、roles、plugins、marketplace、settings、IM、docs 与 workflow 运维页面
+- `app/(dashboard)/employees/[id]`：每个 Agent 档案、运行历史（`/runs/`）和触发器配置（`/triggers/`）
+- `app/(dashboard)/projects/[id]/integrations/vcs`：每个项目的 VCS 提供商连接
+- `app/(dashboard)/projects/[id]/secrets`：每个项目的 secret 管理
+- `app/(dashboard)/projects/[id]/qianchuan`：广告平台绑定和策略界面
 
 ## 文档导航
 

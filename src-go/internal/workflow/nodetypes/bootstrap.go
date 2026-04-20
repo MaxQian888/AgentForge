@@ -39,10 +39,13 @@ func RegisterBuiltins(r *NodeTypeRegistry, deps BuiltinDeps) error {
 		{"wait_event", WaitEventHandler{}},
 		{"http_call", HTTPCallHandler{}},
 		{"im_send", IMSendHandler{}},
-		{"qianchuan_metrics_fetcher", QianchuanMetricsFetcherHandler{}},
-		{"qianchuan_strategy_runner", QianchuanStrategyRunnerHandler{}},
-		{"qianchuan_action_executor", QianchuanActionExecutorHandler{}},
 	}
+	// Qianchuan node-type handlers (qianchuan_metrics_fetcher,
+	// qianchuan_strategy_runner, qianchuan_action_executor) live in the
+	// first-party plugin at plugins/qianchuan-ads/workflow and register
+	// themselves via QianchuanWorkflowHandlers(). The plugin's install
+	// function appends them into the same registry before LockGlobal
+	// runs.
 
 	for _, e := range entries {
 		if err := r.RegisterBuiltin(e.name, e.handler); err != nil {

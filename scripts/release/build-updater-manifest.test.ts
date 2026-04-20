@@ -73,7 +73,7 @@ describe("build-updater-manifest", () => {
       "utf8",
     );
     const updaterDoc = fs.readFileSync(
-      path.join(process.cwd(), "docs", "desktop-updater-release.md"),
+      path.join(process.cwd(), "docs", "deployment", "desktop-updater-release.md"),
       "utf8",
     );
 

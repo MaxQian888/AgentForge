@@ -17,19 +17,21 @@ import (
 type fakePluginRuntimeClient struct {
 	registered []string
 	activated  []string
+	disabled   []string
 	restarted  []string
 	status     model.PluginRuntimeStatus
 }
 
 type fakeGoPluginRuntime struct {
-	activated []string
-	checked   []string
-	restarted []string
-	invoked   []string
-	operation string
-	payload   map[string]any
-	result    map[string]any
-	status    model.PluginRuntimeStatus
+	activated   []string
+	deactivated []string
+	checked     []string
+	restarted   []string
+	invoked     []string
+	operation   string
+	payload     map[string]any
+	result      map[string]any
+	status      model.PluginRuntimeStatus
 }
 
 type fakePluginEventBroadcaster struct {
@@ -93,6 +95,15 @@ func (f *fakePluginRuntimeClient) ActivateToolPlugin(_ context.Context, pluginID
 		}
 	}
 	return &status, nil
+}
+
+func (f *fakePluginRuntimeClient) DisableToolPlugin(_ context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
+	f.disabled = append(f.disabled, pluginID)
+	return &model.PluginRuntimeStatus{
+		PluginID:       pluginID,
+		LifecycleState: model.PluginStateDisabled,
+		Host:           model.PluginHostTSBridge,
+	}, nil
 }
 
 func (f *fakePluginRuntimeClient) CheckToolPluginHealth(_ context.Context, pluginID string) (*model.PluginRuntimeStatus, error) {
@@ -178,6 +189,11 @@ func (f *fakeGoPluginRuntime) ActivatePlugin(_ context.Context, record model.Plu
 		}
 	}
 	return &status, nil
+}
+
+func (f *fakeGoPluginRuntime) DeactivatePlugin(_ context.Context, pluginID string) error {
+	f.deactivated = append(f.deactivated, pluginID)
+	return nil
 }
 
 func (f *fakeGoPluginRuntime) CheckPluginHealth(_ context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error) {
@@ -1622,5 +1638,176 @@ spec:
 	_, err = svc.Enable(ctx, record.Metadata.ID)
 	if err == nil || !strings.Contains(err.Error(), "unknown workflow role reference: reviewer") {
 		t.Fatalf("Enable() error = %v, want stale reviewer role failure", err)
+	}
+}
+
+func TestPluginService_SyncBuiltInsPersistsNewManifestsAtInstalledState(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	writeManifest(t, pluginsDir, "tools/web-search/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: web-search
+  name: Web Search
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["tool.js"]
+`)
+	writeManifest(t, pluginsDir, "integrations/feishu/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: IntegrationPlugin
+metadata:
+  id: feishu
+  name: Feishu
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/feishu.wasm
+  abiVersion: v1
+`)
+
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, nil, pluginsDir)
+
+	created, err := svc.SyncBuiltIns(ctx)
+	if err != nil {
+		t.Fatalf("sync built-ins: %v", err)
+	}
+	if len(created) != 2 {
+		t.Fatalf("expected 2 newly-registered plugins, got %d", len(created))
+	}
+
+	listed, err := svc.List(ctx, service.PluginListFilter{})
+	if err != nil {
+		t.Fatalf("list after sync: %v", err)
+	}
+	if len(listed) != 2 {
+		t.Fatalf("expected registry to contain 2 synced records, got %d", len(listed))
+	}
+	for _, rec := range listed {
+		if rec.LifecycleState != model.PluginStateInstalled {
+			t.Errorf("plugin %s: lifecycle_state = %s, want installed", rec.Metadata.ID, rec.LifecycleState)
+		}
+	}
+}
+
+func TestPluginService_SyncBuiltInsPreservesExistingRecords(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	writeManifest(t, pluginsDir, "tools/web-search/manifest.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: web-search
+  name: Web Search
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["tool.js"]
+`)
+
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, nil, pluginsDir)
+
+	// First sync creates the record in "installed" state.
+	if _, err := svc.SyncBuiltIns(ctx); err != nil {
+		t.Fatalf("initial sync: %v", err)
+	}
+	// Operator progresses the lifecycle.
+	if _, err := svc.Enable(ctx, "web-search"); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+
+	// Second sync must not clobber the enabled state.
+	created, err := svc.SyncBuiltIns(ctx)
+	if err != nil {
+		t.Fatalf("resync: %v", err)
+	}
+	if len(created) != 0 {
+		t.Fatalf("expected resync to skip existing record, got %d new", len(created))
+	}
+	rec, err := svc.GetByID(ctx, "web-search")
+	if err != nil {
+		t.Fatalf("get: %v", err)
+	}
+	if rec.LifecycleState != model.PluginStateEnabled {
+		t.Fatalf("lifecycle_state = %s, want enabled (resync clobbered operator state)", rec.LifecycleState)
+	}
+}
+
+func TestPluginService_DisableTearsDownToolPluginRuntime(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	localPath := writeManifest(t, pluginsDir, "local/tool.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: repo-search
+  name: Repo Search
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["tool.js"]
+`)
+	runtime := &fakePluginRuntimeClient{}
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), runtime, nil, pluginsDir)
+
+	if _, err := svc.RegisterLocalPath(ctx, localPath); err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := svc.Disable(ctx, "repo-search"); err != nil {
+		t.Fatalf("disable: %v", err)
+	}
+
+	if len(runtime.disabled) != 1 || runtime.disabled[0] != "repo-search" {
+		t.Fatalf("expected DisableToolPlugin invoked for repo-search, got %+v", runtime.disabled)
+	}
+}
+
+func TestPluginService_UninstallTearsDownRuntimeBeforeDeletingRecord(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	localPath := writeManifest(t, pluginsDir, "local/tool.yaml", `
+apiVersion: agentforge/v1
+kind: ToolPlugin
+metadata:
+  id: repo-search
+  name: Repo Search
+  version: 1.0.0
+spec:
+  runtime: mcp
+  transport: stdio
+  command: node
+  args: ["tool.js"]
+`)
+	runtime := &fakePluginRuntimeClient{}
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), runtime, nil, pluginsDir)
+
+	rec, err := svc.RegisterLocalPath(ctx, localPath)
+	if err != nil {
+		t.Fatalf("register: %v", err)
+	}
+	if _, err := svc.Enable(ctx, rec.Metadata.ID); err != nil {
+		t.Fatalf("enable: %v", err)
+	}
+	if _, err := svc.Activate(ctx, rec.Metadata.ID); err != nil {
+		t.Fatalf("activate: %v", err)
+	}
+
+	if err := svc.Uninstall(ctx, rec.Metadata.ID); err != nil {
+		t.Fatalf("uninstall: %v", err)
+	}
+
+	if len(runtime.disabled) == 0 || runtime.disabled[len(runtime.disabled)-1] != rec.Metadata.ID {
+		t.Fatalf("expected runtime teardown during uninstall, got %+v", runtime.disabled)
+	}
+	if _, err := svc.GetByID(ctx, rec.Metadata.ID); err == nil {
+		t.Fatalf("expected uninstalled record to be gone, but GetByID succeeded")
 	}
 }

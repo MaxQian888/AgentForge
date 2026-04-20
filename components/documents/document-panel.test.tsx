@@ -1,17 +1,29 @@
 import { render, screen } from "@testing-library/react";
 import { DocumentPanel } from "./document-panel";
 
-const loadDocuments = jest.fn().mockResolvedValue(undefined);
+const fetchIngestedFiles = jest.fn().mockResolvedValue(undefined);
 
-const storeState = {
-  documents: [],
+interface DocumentPanelStoreState {
+  ingestedFiles: unknown[];
+  loading: boolean;
+  uploading: boolean;
+  error: string | null;
+  currentProjectId: string;
+  fetchIngestedFiles: jest.Mock;
+  uploadFile: jest.Mock;
+  deleteIngestedFile: jest.Mock;
+  clearError: jest.Mock;
+}
+
+const storeState: DocumentPanelStoreState = {
+  ingestedFiles: [],
   loading: false,
   uploading: false,
   error: null,
   currentProjectId: "project-1",
-  loadDocuments,
-  uploadDocument: jest.fn().mockResolvedValue(undefined),
-  deleteDocument: jest.fn().mockResolvedValue(undefined),
+  fetchIngestedFiles,
+  uploadFile: jest.fn().mockResolvedValue(undefined),
+  deleteIngestedFile: jest.fn().mockResolvedValue(undefined),
   clearError: jest.fn(),
 };
 
@@ -50,7 +62,7 @@ jest.mock("sonner", () => ({
 describe("DocumentPanel", () => {
   beforeEach(() => {
     jest.clearAllMocks();
-    storeState.documents = [];
+    storeState.ingestedFiles = [];
     storeState.loading = false;
     storeState.error = null;
   });
@@ -67,9 +79,9 @@ describe("DocumentPanel", () => {
     expect(screen.getByTestId("empty-state")).toHaveTextContent("documents.noDocuments");
   });
 
-  it("calls loadDocuments on mount", () => {
+  it("calls fetchIngestedFiles on mount", () => {
     render(<DocumentPanel projectId="project-1" />);
 
-    expect(loadDocuments).toHaveBeenCalledWith("project-1");
+    expect(fetchIngestedFiles).toHaveBeenCalledWith("project-1");
   });
 });

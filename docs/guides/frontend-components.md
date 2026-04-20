@@ -31,6 +31,15 @@ surfaces.
 | `ReviewDecisionActions` | `components/review/review-decision-actions.tsx` | `reviewId`, `onApprove`, `onRequestChanges`, `compact` | inline decision controls |
 | `ReviewFindingsTable` | `components/review/review-findings-table.tsx` | findings list props | structured finding display |
 
+## Knowledge Components
+
+| Component | Path | Key props | Notes |
+| --- | --- | --- | --- |
+| `IngestedFilesPane` | `components/knowledge/IngestedFilesPane.tsx` | `projectId`, asset list props | browse ingested knowledge assets with status |
+| `KnowledgeSearch` | `components/knowledge/KnowledgeSearch.tsx` | `projectId`, search query props | semantic search over knowledge assets |
+| `MaterializedFromPill` | `components/knowledge/MaterializedFromPill.tsx` | `sourceId`, `sourceType` | provenance badge linking a materialized artifact to its source |
+| `SourceUpdatedBanner` | `components/knowledge/SourceUpdatedBanner.tsx` | `assetId`, `updatedAt` | banner prompting re-materialization when source has changed |
+
 ## Form Components
 
 | Component | Path | Key contract | Notes |

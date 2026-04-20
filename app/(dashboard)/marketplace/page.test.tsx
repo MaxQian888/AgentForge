@@ -226,7 +226,7 @@ describe("MarketplacePage", () => {
     render(<MarketplacePage />);
 
     expect(screen.getByText("Remote marketplace unavailable")).toBeInTheDocument();
-    expect(screen.getByText("Built-in skills")).toBeInTheDocument();
+    expect(screen.getByText("Built-in items")).toBeInTheDocument();
     expect(screen.getByText("React")).toBeInTheDocument();
   });
 

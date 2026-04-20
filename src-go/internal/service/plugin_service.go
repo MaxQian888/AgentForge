@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	log "github.com/sirupsen/logrus"
 	"github.com/react-go-quick-starter/server/internal/model"
 	pluginparser "github.com/react-go-quick-starter/server/internal/plugin"
 	"github.com/react-go-quick-starter/server/internal/repository"
@@ -45,6 +46,13 @@ type PluginEventBroadcaster interface {
 type ToolPluginRuntimeClient interface {
 	RegisterToolPlugin(ctx context.Context, manifest model.PluginManifest) (*model.PluginRuntimeStatus, error)
 	ActivateToolPlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error)
+	// DisableToolPlugin signals the tool-plugin host (TS bridge) to
+	// disconnect the MCP transport and release the child process. It is
+	// invoked from Disable/Deactivate/Uninstall to prevent orphan
+	// processes. Implementations MAY return the resulting runtime
+	// status. Nil returns (or unimplemented mocks) are tolerated by the
+	// caller so older test doubles keep working.
+	DisableToolPlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error)
 	CheckToolPluginHealth(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error)
 	RestartToolPlugin(ctx context.Context, pluginID string) (*model.PluginRuntimeStatus, error)
 	RefreshToolPluginMCPSurface(ctx context.Context, pluginID string) (*model.PluginMCPRefreshResult, error)
@@ -55,6 +63,12 @@ type ToolPluginRuntimeClient interface {
 
 type GoPluginRuntime interface {
 	ActivatePlugin(ctx context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error)
+	// DeactivatePlugin releases any cached resources (compiled WASM
+	// modules, runtime handles) for the plugin. Called during
+	// Disable/Deactivate/Uninstall so memory doesn't leak across the
+	// plugin's lifecycle. Implementations that hold no state MAY return
+	// nil with no effect.
+	DeactivatePlugin(ctx context.Context, pluginID string) error
 	CheckPluginHealth(ctx context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error)
 	RestartPlugin(ctx context.Context, record model.PluginRecord) (*model.PluginRuntimeStatus, error)
 	Invoke(ctx context.Context, record model.PluginRecord, operation string, payload map[string]any) (map[string]any, error)
@@ -420,6 +434,112 @@ func (s *PluginService) RegisterLocalPath(ctx context.Context, path string) (*mo
 	})
 }
 
+// SyncBuiltIns walks the built-ins directory and upserts a PluginRecord
+// for every manifest.yaml it finds, so the control-plane registry
+// reflects on-disk state as soon as the server boots — callers no
+// longer need to hit GET /api/v1/plugins/discover before the list is
+// populated.
+//
+// Existing records are preserved: if an operator has already installed
+// a plugin with the same id, we leave its lifecycle_state alone. New
+// manifests land in the "installed" state so activation remains an
+// explicit operator action. No runtime (Tool/bridge/WASM) calls are
+// made — activation runs later through the normal lifecycle endpoints.
+//
+// Returns the list of NEW records persisted this pass (empty slice on
+// no-op). Errors bubble up; per-manifest parse failures short-circuit.
+func (s *PluginService) SyncBuiltIns(ctx context.Context) ([]*model.PluginRecord, error) {
+	discovered, err := s.DiscoverBuiltIns(ctx)
+	if err != nil {
+		return nil, err
+	}
+	created := make([]*model.PluginRecord, 0, len(discovered))
+	for _, record := range discovered {
+		if record == nil {
+			continue
+		}
+		if existing, getErr := s.repo.GetByID(ctx, record.Metadata.ID); getErr == nil && existing != nil {
+			continue
+		}
+		fresh := &model.PluginRecord{
+			PluginManifest:     record.PluginManifest,
+			LifecycleState:     model.PluginStateInstalled,
+			RuntimeHost:        record.RuntimeHost,
+			RestartCount:       0,
+			ResolvedSourcePath: record.ResolvedSourcePath,
+			RuntimeMetadata:    record.RuntimeMetadata,
+			BuiltIn:            record.BuiltIn,
+		}
+		if err := s.persistRecordWithEvent(ctx, fresh, model.PluginEventInstalled, model.PluginEventSourceControlPlane, "builtin plugin synced from disk", map[string]any{
+			"source_type": string(fresh.Source.Type),
+			"source_path": fresh.Source.Path,
+			"runtime":     string(fresh.Spec.Runtime),
+		}); err != nil {
+			return created, fmt.Errorf("sync builtin %s: %w", fresh.Metadata.ID, err)
+		}
+		created = append(created, s.hydrateRecord(ctx, fresh))
+	}
+	return created, nil
+}
+
+// RegisterFirstPartyInProc upserts a plugin record for a first-party,
+// in-proc integration whose implementation ships inside the Go binary
+// (runtime: firstparty-inproc). Unlike Install, this method skips all
+// external runtime interactions and lands the record directly in the
+// active lifecycle state so it mirrors how the feature actually runs:
+// wired into the server at boot, with no separate activation step.
+//
+// Callers are expected to invoke this from their registration hook
+// (e.g. installQianchuanPlugin) right after the plugin's routes and
+// background loops have been attached, so FE/API consumers see a
+// coherent picture of "plugin is active ⇔ feature is enabled".
+func (s *PluginService) RegisterFirstPartyInProc(
+	ctx context.Context,
+	manifestPath string,
+) (*model.PluginRecord, error) {
+	resolvedPath, err := resolveInstallManifestPath(manifestPath)
+	if err != nil {
+		return nil, err
+	}
+	manifest, err := pluginparser.ParseFile(resolvedPath)
+	if err != nil {
+		return nil, err
+	}
+	if manifest.Spec.Runtime != model.PluginRuntimeFirstpartyInproc {
+		return nil, fmt.Errorf(
+			"plugin %s: RegisterFirstPartyInProc requires spec.runtime=firstparty-inproc (got %q)",
+			manifest.Metadata.ID, manifest.Spec.Runtime,
+		)
+	}
+	manifest.Source = normalizePluginSource(
+		manifest.Metadata.ID,
+		manifest.Source,
+		&model.PluginSource{Type: model.PluginSourceBuiltin, Path: resolvedPath},
+		resolvedPath,
+	)
+
+	record := buildPluginRecordFromManifest(*manifest)
+	record.LifecycleState = model.PluginStateActive
+	record.RuntimeHost = model.PluginHostGoOrchestrator
+	record.LastError = ""
+
+	eventType := model.PluginEventActivated
+	summary := "first-party in-proc plugin registered"
+	if existing, getErr := s.repo.GetByID(ctx, record.Metadata.ID); getErr == nil && existing != nil {
+		eventType = model.PluginEventUpdated
+		summary = "first-party in-proc plugin re-registered on boot"
+	}
+
+	if err := s.persistRecordWithEvent(ctx, record, eventType, model.PluginEventSourceControlPlane, summary, map[string]any{
+		"source_type": manifest.Source.Type,
+		"source_path": resolvedPath,
+		"runtime":     string(manifest.Spec.Runtime),
+	}); err != nil {
+		return nil, err
+	}
+	return s.hydrateRecord(ctx, record), nil
+}
+
 func (s *PluginService) Install(ctx context.Context, req PluginInstallRequest) (*model.PluginRecord, error) {
 	resolvedPath, err := resolveInstallManifestPath(req.Path)
 	if err != nil {
@@ -581,6 +701,7 @@ func (s *PluginService) Disable(ctx context.Context, pluginID string) (*model.Pl
 	if err != nil {
 		return nil, err
 	}
+	s.tearDownRuntime(ctx, record, "disable")
 	record.LifecycleState = model.PluginStateDisabled
 	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventDisabled, model.PluginEventSourceOperator, "plugin disabled", nil); err != nil {
 		return nil, err
@@ -593,12 +714,51 @@ func (s *PluginService) Deactivate(ctx context.Context, pluginID string) (*model
 	if err != nil {
 		return nil, err
 	}
+	s.tearDownRuntime(ctx, record, "deactivate")
 	record.LifecycleState = model.PluginStateEnabled
 	record.LastError = ""
 	if err := s.persistRecordWithEvent(ctx, record, model.PluginEventDeactivated, model.PluginEventSourceOperator, "plugin deactivated", nil); err != nil {
 		return nil, err
 	}
 	return s.hydrateRecord(ctx, record), nil
+}
+
+// tearDownRuntime signals the owning runtime to release whatever
+// resources (MCP child processes, WASM module instances, in-proc
+// goroutines) the plugin is currently holding. It is safe to call on
+// any record — no-op for firstparty-inproc / declarative / inactive
+// plugins. Failures are logged and swallowed so administrative state
+// changes (disable/deactivate/uninstall) never hang on a sick runtime.
+func (s *PluginService) tearDownRuntime(ctx context.Context, record *model.PluginRecord, op string) {
+	if record == nil {
+		return
+	}
+	switch record.Kind {
+	case model.PluginKindTool:
+		if s.runtimeClient == nil {
+			return
+		}
+		if _, err := s.runtimeClient.DisableToolPlugin(ctx, record.Metadata.ID); err != nil {
+			log.WithError(err).WithFields(log.Fields{
+				"plugin_id": record.Metadata.ID,
+				"operation": op,
+			}).Warn("tool plugin runtime teardown failed")
+		}
+	case model.PluginKindIntegration, model.PluginKindWorkflow:
+		// WASM-backed plugins cache a compiled module + runtime between
+		// invocations; release it so memory doesn't leak past the
+		// lifecycle transition. firstparty-inproc holds no cached
+		// resource — the GoPluginRuntime implementation should noop.
+		if s.goRuntime == nil {
+			return
+		}
+		if err := s.goRuntime.DeactivatePlugin(ctx, record.Metadata.ID); err != nil {
+			log.WithError(err).WithFields(log.Fields{
+				"plugin_id": record.Metadata.ID,
+				"operation": op,
+			}).Warn("go plugin runtime teardown failed")
+		}
+	}
 }
 
 func (s *PluginService) Activate(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
@@ -713,6 +873,75 @@ func (s *PluginService) CheckHealth(ctx context.Context, pluginID string) (*mode
 		return nil, err
 	}
 	return s.hydrateRecord(ctx, record), nil
+}
+
+// ReconcileHealth walks every active or degraded plugin once and updates
+// its lifecycle_state based on a runtime probe. Active plugins whose
+// MCP child died transition to "degraded"; degraded plugins that have
+// recovered transition back to "active" via CheckHealth's normal
+// applyRuntimeStatus path. Per-plugin failures are absorbed (already
+// recorded as PluginEventFailed) so one sick plugin doesn't stall the
+// sweep.
+//
+// This is the single-shot primitive that RunHealthLoop drives on a
+// ticker; exposing it separately lets tests drive the reconciler
+// deterministically without sleeping.
+func (s *PluginService) ReconcileHealth(ctx context.Context) {
+	targets, err := s.repo.List(ctx, model.PluginFilter{LifecycleState: model.PluginStateActive})
+	if err != nil {
+		log.WithError(err).Warn("plugin health reconcile: list active failed")
+		return
+	}
+	degraded, err := s.repo.List(ctx, model.PluginFilter{LifecycleState: model.PluginStateDegraded})
+	if err != nil {
+		log.WithError(err).Warn("plugin health reconcile: list degraded failed")
+	} else {
+		targets = append(targets, degraded...)
+	}
+
+	for _, record := range targets {
+		if record == nil {
+			continue
+		}
+		// Skip kinds the reconciler can't probe. firstparty-inproc has no
+		// out-of-proc runtime handle, so its state is authoritative as-is.
+		if record.Kind == model.PluginKindTool && s.runtimeClient == nil {
+			continue
+		}
+		if isGoHostedHealthPlugin(record) && s.goRuntime == nil {
+			continue
+		}
+		if record.Spec.Runtime == model.PluginRuntimeFirstpartyInproc ||
+			record.Spec.Runtime == model.PluginRuntimeDeclarative {
+			continue
+		}
+		if _, err := s.CheckHealth(ctx, record.Metadata.ID); err != nil {
+			// CheckHealth already persisted the failure; nothing to do.
+			continue
+		}
+	}
+}
+
+// RunHealthLoop starts the background heartbeat ticker. Blocks until
+// ctx is canceled. Safe to call as `go svc.RunHealthLoop(ctx, 60*time.Second)`.
+// Intervals <= 0 fall back to one minute so misconfiguration doesn't
+// turn the loop into a hot spin.
+func (s *PluginService) RunHealthLoop(ctx context.Context, interval time.Duration) {
+	if interval <= 0 {
+		interval = time.Minute
+	}
+	ticker := time.NewTicker(interval)
+	defer ticker.Stop()
+	log.WithField("interval", interval).Info("plugin health heartbeat started")
+	for {
+		select {
+		case <-ctx.Done():
+			log.Info("plugin health heartbeat stopped")
+			return
+		case <-ticker.C:
+			s.ReconcileHealth(ctx)
+		}
+	}
 }
 
 func (s *PluginService) Restart(ctx context.Context, pluginID string) (*model.PluginRecord, error) {
@@ -961,6 +1190,20 @@ func (s *PluginService) Update(ctx context.Context, pluginID string, req PluginI
 }
 
 func (s *PluginService) Uninstall(ctx context.Context, id string) error {
+	return s.UninstallOpts(ctx, id, UninstallOptions{})
+}
+
+// UninstallOptions tunes Uninstall's behaviour. Purge=true also removes
+// the plugin's on-disk manifest directory so a subsequent SyncBuiltIns
+// sweep doesn't re-register it. Use with care — the directory delete
+// is recursive and is only executed for manifests that live beneath
+// the plugin-service's builtInsDir, so an attacker-controlled path
+// can't escape the plugins tree.
+type UninstallOptions struct {
+	Purge bool
+}
+
+func (s *PluginService) UninstallOpts(ctx context.Context, id string, opts UninstallOptions) error {
 	rec, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return fmt.Errorf("plugin not found: %w", err)
@@ -970,6 +1213,8 @@ func (s *PluginService) Uninstall(ctx context.Context, id string) error {
 			return err
 		}
 	}
+	s.tearDownRuntime(ctx, rec, "uninstall")
+
 	if err := s.withWriteStores(ctx, func(stores *pluginWriteStores) error {
 		if err := stores.deletePlugin(ctx, id); err != nil {
 			return fmt.Errorf("delete plugin: %w", err)
@@ -978,14 +1223,66 @@ func (s *PluginService) Uninstall(ctx context.Context, id string) error {
 	}); err != nil {
 		return err
 	}
-	s.broadcastOnly(rec, model.PluginEventUninstalled, model.PluginEventSourceOperator, "plugin uninstalled", nil)
+
+	purged := false
+	if opts.Purge {
+		if err := s.purgeManifestDir(rec); err != nil {
+			log.WithError(err).WithField("plugin_id", id).Warn("plugin uninstall: manifest purge failed")
+		} else {
+			purged = true
+		}
+	}
+
+	payload := map[string]any{"purged": purged}
+	s.broadcastOnly(rec, model.PluginEventUninstalled, model.PluginEventSourceOperator, "plugin uninstalled", payload)
 	return nil
+}
+
+// purgeManifestDir removes the directory containing the plugin's
+// manifest.yaml, but ONLY if the path lives beneath s.builtInsDir or
+// the resolved source path. Refuses to touch paths outside the
+// plugins root to prevent directory-traversal abuses when the source
+// path is operator-supplied.
+func (s *PluginService) purgeManifestDir(rec *model.PluginRecord) error {
+	manifestPath := strings.TrimSpace(rec.Source.Path)
+	if manifestPath == "" {
+		manifestPath = strings.TrimSpace(rec.ResolvedSourcePath)
+	}
+	if manifestPath == "" {
+		return fmt.Errorf("no manifest path on record")
+	}
+	absManifest, err := filepath.Abs(manifestPath)
+	if err != nil {
+		return fmt.Errorf("resolve manifest path: %w", err)
+	}
+	dir := filepath.Dir(absManifest)
+
+	builtInsDir := strings.TrimSpace(s.builtInsDir)
+	if builtInsDir != "" {
+		absRoot, err := filepath.Abs(builtInsDir)
+		if err != nil {
+			return fmt.Errorf("resolve plugins root: %w", err)
+		}
+		rel, err := filepath.Rel(absRoot, dir)
+		if err != nil || strings.HasPrefix(rel, "..") || rel == "." {
+			return fmt.Errorf("manifest dir %s is not under plugins root %s — refusing purge", dir, absRoot)
+		}
+	}
+	return os.RemoveAll(dir)
 }
 
 func (s *PluginService) UpdateConfig(ctx context.Context, id string, config map[string]interface{}) (*model.PluginRecord, error) {
 	rec, err := s.repo.GetByID(ctx, id)
 	if err != nil {
 		return nil, fmt.Errorf("plugin not found: %w", err)
+	}
+	// If the manifest declared a config schema, validate the incoming
+	// config against it before persisting. Empty/nil schema accepts
+	// anything — this is a strictly additive safety net.
+	if rec.Spec.ConfigSchema != nil {
+		if err := pluginparser.ValidateConfig(rec.Spec.ConfigSchema, config); err != nil {
+			return nil, fmt.Errorf("config schema violation: %w", err)
+		}
 	}
 	rec.Spec.Config = config
 	if err := s.persistRecord(ctx, rec); err != nil {

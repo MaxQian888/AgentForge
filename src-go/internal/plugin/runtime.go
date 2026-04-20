@@ -26,12 +26,25 @@ const (
 type WASMRuntimeManager struct {
 	mu      sync.Mutex
 	plugins map[string]*wasmPluginState
+	// cache keeps one (runtime, compiled-module) pair per plugin so the
+	// expensive wazero.NewRuntime + wasi Instantiate + CompileModule
+	// work runs once per module build, not once per Invoke. Entries
+	// invalidate when the underlying .wasm file's mtime changes, and
+	// are torn down explicitly by DeactivatePlugin.
+	cache map[string]*wasmCachedRuntime
 }
 
 type wasmPluginState struct {
 	RestartCount       int
 	ResolvedSourcePath string
 	RuntimeMetadata    *model.PluginRuntimeMetadata
+}
+
+type wasmCachedRuntime struct {
+	runtime     wazero.Runtime
+	compiled    wazero.CompiledModule
+	modulePath  string
+	moduleMtime time.Time
 }
 
 type wasmEnvelope struct {
@@ -48,6 +61,7 @@ type wasmEnvelope struct {
 func NewWASMRuntimeManager() *WASMRuntimeManager {
 	return &WASMRuntimeManager{
 		plugins: make(map[string]*wasmPluginState),
+		cache:   make(map[string]*wasmCachedRuntime),
 	}
 }
 
@@ -152,11 +166,31 @@ type DebugExecutionResult struct {
 	ABIVersion string         `json:"abiVersion,omitempty"`
 }
 
-func (m *WASMRuntimeManager) runEnvelope(ctx context.Context, record model.PluginRecord, operation string, payload map[string]any) (*executionResult, error) {
+// obtainOrCompile returns a cached (runtime, compiled-module) pair for
+// the plugin, compiling on cache miss or stale-mtime. Callers must NOT
+// close the returned runtime — only instances created via InstantiateModule.
+// Cache eviction happens here (stale mtime) or via DeactivatePlugin.
+func (m *WASMRuntimeManager) obtainOrCompile(ctx context.Context, record model.PluginRecord) (*wasmCachedRuntime, error) {
 	modulePath := resolveModulePath(record)
 	if modulePath == "" {
 		return nil, fmt.Errorf("plugin %s is missing a wasm module path", record.Metadata.ID)
 	}
+	info, err := os.Stat(modulePath)
+	if err != nil {
+		return nil, fmt.Errorf("stat wasm module %s: %w", modulePath, err)
+	}
+
+	m.mu.Lock()
+	if existing, ok := m.cache[record.Metadata.ID]; ok {
+		if existing.modulePath == modulePath && existing.moduleMtime.Equal(info.ModTime()) {
+			m.mu.Unlock()
+			return existing, nil
+		}
+		// stale — evict and recompile below.
+		_ = existing.runtime.Close(ctx)
+		delete(m.cache, record.Metadata.ID)
+	}
+	m.mu.Unlock()
 
 	wasmBytes, err := os.ReadFile(modulePath)
 	if err != nil {
@@ -164,17 +198,59 @@ func (m *WASMRuntimeManager) runEnvelope(ctx context.Context, record model.Plugi
 	}
 
 	runtime := wazero.NewRuntime(ctx)
-	defer runtime.Close(ctx) //nolint:errcheck
-
 	if _, err := wasi_snapshot_preview1.Instantiate(ctx, runtime); err != nil {
+		_ = runtime.Close(ctx)
 		return nil, fmt.Errorf("instantiate wasi: %w", err)
 	}
-
 	compiled, err := runtime.CompileModule(ctx, wasmBytes)
 	if err != nil {
+		_ = runtime.Close(ctx)
 		return nil, fmt.Errorf("compile wasm module %s: %w", modulePath, err)
 	}
 	if err := ensureRequiredExports(compiled.ExportedFunctions(), record.Metadata.ID); err != nil {
+		_ = runtime.Close(ctx)
+		return nil, err
+	}
+
+	cached := &wasmCachedRuntime{
+		runtime:     runtime,
+		compiled:    compiled,
+		modulePath:  modulePath,
+		moduleMtime: info.ModTime(),
+	}
+
+	m.mu.Lock()
+	// Another goroutine may have raced us; drop our copy if so.
+	if winner, ok := m.cache[record.Metadata.ID]; ok {
+		m.mu.Unlock()
+		_ = runtime.Close(ctx)
+		return winner, nil
+	}
+	m.cache[record.Metadata.ID] = cached
+	m.mu.Unlock()
+	return cached, nil
+}
+
+// DeactivatePlugin releases the cached wazero runtime and compiled
+// module for a plugin. Safe to call on plugins that were never
+// activated. Called by the control plane's teardown path so memory
+// doesn't leak after Disable/Deactivate/Uninstall.
+func (m *WASMRuntimeManager) DeactivatePlugin(ctx context.Context, pluginID string) error {
+	m.mu.Lock()
+	cached, ok := m.cache[pluginID]
+	if ok {
+		delete(m.cache, pluginID)
+	}
+	m.mu.Unlock()
+	if !ok {
+		return nil
+	}
+	return cached.runtime.Close(ctx)
+}
+
+func (m *WASMRuntimeManager) runEnvelope(ctx context.Context, record model.PluginRecord, operation string, payload map[string]any) (*executionResult, error) {
+	cached, err := m.obtainOrCompile(ctx, record)
+	if err != nil {
 		return nil, err
 	}
 
@@ -187,17 +263,20 @@ func (m *WASMRuntimeManager) runEnvelope(ctx context.Context, record model.Plugi
 	moduleConfig := wazero.NewModuleConfig().
 		WithStdout(&stdout).
 		WithStderr(&stderr).
-		WithName(record.Metadata.ID).
+		// Give each invocation a unique module name so wazero doesn't
+		// reject a second instantiation on the shared runtime.
+		WithName(fmt.Sprintf("%s-%d", record.Metadata.ID, time.Now().UnixNano())).
 		WithEnv("AGENTFORGE_AUTORUN", "true").
 		WithEnv("AGENTFORGE_OPERATION", operation).
 		WithEnv("AGENTFORGE_CONFIG", string(configJSON)).
 		WithEnv("AGENTFORGE_CAPABILITIES", string(capabilitiesJSON)).
 		WithEnv("AGENTFORGE_PAYLOAD", string(payloadJSON))
 
-	_, err = runtime.InstantiateModule(ctx, compiled, moduleConfig)
+	instance, err := cached.runtime.InstantiateModule(ctx, cached.compiled, moduleConfig)
 	if err != nil {
-		return nil, fmt.Errorf("instantiate wasm module %s: %w: %s", modulePath, err, stderr.String())
+		return nil, fmt.Errorf("instantiate wasm module %s: %w: %s", cached.modulePath, err, stderr.String())
 	}
+	defer instance.Close(ctx) //nolint:errcheck
 
 	var envelope wasmEnvelope
 	if err := json.Unmarshal(bytes.TrimSpace(stdout.Bytes()), &envelope); err != nil {
@@ -213,7 +292,7 @@ func (m *WASMRuntimeManager) runEnvelope(ctx context.Context, record model.Plugi
 
 	return &executionResult{
 		data:       envelope.Data,
-		modulePath: modulePath,
+		modulePath: cached.modulePath,
 		abiVersion: abiVersion,
 		stdout:     stdout.String(),
 		stderr:     stderr.String(),

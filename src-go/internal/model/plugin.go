@@ -15,10 +15,16 @@ const (
 type PluginRuntime string
 
 const (
-	PluginRuntimeDeclarative PluginRuntime = "declarative"
-	PluginRuntimeMCP         PluginRuntime = "mcp"
-	PluginRuntimeGoPlugin    PluginRuntime = "go-plugin"
-	PluginRuntimeWASM        PluginRuntime = "wasm"
+	PluginRuntimeDeclarative      PluginRuntime = "declarative"
+	PluginRuntimeMCP              PluginRuntime = "mcp"
+	PluginRuntimeGoPlugin         PluginRuntime = "go-plugin"
+	PluginRuntimeWASM             PluginRuntime = "wasm"
+	// PluginRuntimeFirstpartyInproc marks integration plugins whose code
+	// ships inside the Go monolith and is wired via an in-proc
+	// registration hook (e.g. src-go/internal/server/qianchuan_plugin.go).
+	// They declare their manifest on disk so the control plane surfaces
+	// them consistently, but need no external binary/module.
+	PluginRuntimeFirstpartyInproc PluginRuntime = "firstparty-inproc"
 )
 
 type PluginSourceType string
@@ -107,9 +113,26 @@ type PluginSpec struct {
 	ABIVersion   string              `yaml:"abiVersion,omitempty" json:"abiVersion,omitempty"`
 	Capabilities []string            `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
 	Config       map[string]any      `yaml:"config,omitempty" json:"config,omitempty"`
+	ConfigSchema *PluginConfigSchema `yaml:"configSchema,omitempty" json:"configSchema,omitempty"`
 	Workflow     *WorkflowPluginSpec `yaml:"workflow,omitempty" json:"workflow,omitempty"`
 	Review       *ReviewPluginSpec   `yaml:"review,omitempty" json:"review,omitempty"`
 	Extra        map[string]any      `yaml:",inline" json:"extra,omitempty"`
+}
+
+// PluginConfigSchema is a minimal JSON-Schema subset that plugin
+// manifests can declare to validate their spec.config at UpdateConfig
+// time. Supported fields: type (string/integer/number/boolean/object/array),
+// required (required keys when type=object), properties (nested schemas
+// keyed by field name), enum (allowed literal values),
+// additionalProperties (reject unknown keys when false). Unsupported
+// JSON Schema features are ignored — keep schemas small and explicit.
+type PluginConfigSchema struct {
+	Type                 string                         `yaml:"type,omitempty" json:"type,omitempty"`
+	Required             []string                       `yaml:"required,omitempty" json:"required,omitempty"`
+	Properties           map[string]*PluginConfigSchema `yaml:"properties,omitempty" json:"properties,omitempty"`
+	Items                *PluginConfigSchema            `yaml:"items,omitempty" json:"items,omitempty"`
+	Enum                 []any                          `yaml:"enum,omitempty" json:"enum,omitempty"`
+	AdditionalProperties *bool                          `yaml:"additionalProperties,omitempty" json:"additionalProperties,omitempty"`
 }
 
 type WorkflowProcessMode string
