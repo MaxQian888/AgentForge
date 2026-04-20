@@ -904,3 +904,19 @@ other = "platform is required"
 
 [FailedToRouteIMEvent]
 other = "failed to route IM event"
+
+# Qianchuan bindings
+[QianchuanAdvertiserAlreadyBound]
+other = "advertiser is already bound for this project"
+
+[QianchuanSecretMissing]
+other = "referenced secret was not found"
+
+[QianchuanBindingNotFound]
+other = "qianchuan binding not found"
+
+[QianchuanAuthExpired]
+other = "qianchuan access token expired"
+
+[QianchuanRateLimited]
+other = "qianchuan API rate limited"

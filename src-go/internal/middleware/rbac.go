@@ -129,6 +129,16 @@ const (
 	ActionVCSIntegrationDelete ActionID = "vcs.integration.delete"
 	ActionVCSIntegrationSync   ActionID = "vcs.integration.sync"
 
+	// Qianchuan (巨量千川) advertiser bindings (Spec 3 §6.1). Per-(project,
+	// advertiser, aweme) ad-platform bindings; tokens live in the secrets
+	// store. Sync/test re-probe the upstream live-room metrics endpoint.
+	ActionQianchuanBindingRead   ActionID = "qianchuan_binding.read"
+	ActionQianchuanBindingCreate ActionID = "qianchuan_binding.create"
+	ActionQianchuanBindingUpdate ActionID = "qianchuan_binding.update"
+	ActionQianchuanBindingDelete ActionID = "qianchuan_binding.delete"
+	ActionQianchuanBindingSync   ActionID = "qianchuan_binding.sync"
+	ActionQianchuanBindingTest   ActionID = "qianchuan_binding.test"
+
 	// Project templates. `save_as_template` is a project-scoped action (gated
 	// via projectGroup + Require). The CRUD actions on /project-templates are
 	// NOT project-scoped — they apply to a user's personal template library —
@@ -247,6 +257,16 @@ var matrix = func() map[ActionID]string {
 		ActionVCSIntegrationUpdate: model.ProjectRoleAdmin,
 		ActionVCSIntegrationDelete: model.ProjectRoleAdmin,
 		ActionVCSIntegrationSync:   model.ProjectRoleEditor,
+
+		// Qianchuan bindings — read is metadata-only; create/delete
+		// require admin (binding governs spend); update/sync/test are
+		// editor-class operations.
+		ActionQianchuanBindingRead:   model.ProjectRoleViewer,
+		ActionQianchuanBindingCreate: model.ProjectRoleAdmin,
+		ActionQianchuanBindingUpdate: model.ProjectRoleEditor,
+		ActionQianchuanBindingDelete: model.ProjectRoleAdmin,
+		ActionQianchuanBindingSync:   model.ProjectRoleEditor,
+		ActionQianchuanBindingTest:   model.ProjectRoleEditor,
 
 		// Project templates — save-as-template is admin+ (design decision
 		// #2 in add-project-templates/design.md).

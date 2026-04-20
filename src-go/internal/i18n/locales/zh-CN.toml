@@ -904,3 +904,19 @@ other = "删除员工技能失败"
 
 [UnknownProjectAction]
 other = "未知的项目操作"
+
+# 千川绑定
+[QianchuanAdvertiserAlreadyBound]
+other = "该广告主已在本项目中绑定"
+
+[QianchuanSecretMissing]
+other = "引用的密钥不存在"
+
+[QianchuanBindingNotFound]
+other = "未找到千川绑定"
+
+[QianchuanAuthExpired]
+other = "千川 access_token 已过期"
+
+[QianchuanRateLimited]
+other = "千川 API 请求被限流"

@@ -380,4 +380,11 @@ const (
 	MsgCannotModifyOwnerAsAdmin = "CannotModifyOwnerAsAdmin"
 	MsgInvalidProjectRole       = "InvalidProjectRole"
 	MsgUnknownProjectAction     = "UnknownProjectAction"
+
+	// Qianchuan bindings (Spec 3 §6.1)
+	MsgQianchuanAdvertiserAlreadyBound = "QianchuanAdvertiserAlreadyBound"
+	MsgQianchuanSecretMissing          = "QianchuanSecretMissing"
+	MsgQianchuanBindingNotFound        = "QianchuanBindingNotFound"
+	MsgQianchuanAuthExpired            = "QianchuanAuthExpired"
+	MsgQianchuanRateLimited            = "QianchuanRateLimited"
 )

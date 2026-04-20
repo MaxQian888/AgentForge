@@ -1896,7 +1896,7 @@
 
 ## Task 8 — Handler: REST endpoints + audit + RBAC wiring
 
-- [ ] Step 8.1 — failing handler tests
+- [x] Step 8.1 — failing handler tests
   - File: `src-go/internal/handler/qianchuan_bindings_handler_test.go`
     ```go
     package handler_test
@@ -1946,7 +1946,7 @@
     ```
   - Add the helper construction in `helpers_test.go` next to existing test helpers.
 
-- [ ] Step 8.2 — implement handler
+- [x] Step 8.2 — implement handler
   - File: `src-go/internal/handler/qianchuan_bindings_handler.go`
     ```go
     package handler
@@ -2208,7 +2208,7 @@
     var _ = model.AuditResourceTypeQianchuanBinding // ensure constant lands
     ```
 
-- [ ] Step 8.3 — extend `internal/middleware/rbac.go` and `internal/i18n` with new ActionIDs + message keys
+- [x] Step 8.3 — extend `internal/middleware/rbac.go` and `internal/i18n` with new ActionIDs + message keys
   - Add to `middleware/rbac.go`:
     - `ActionQianchuanBindingRead = "qianchuan_binding.read"` → viewer+
     - `ActionQianchuanBindingCreate = "qianchuan_binding.create"` → admin+
@@ -2220,7 +2220,7 @@
     - `MsgQianchuanAdvertiserAlreadyBound`, `MsgQianchuanSecretMissing`, `MsgQianchuanBindingNotFound`, `MsgQianchuanAuthExpired`, `MsgQianchuanRateLimited`
   - Add corresponding entries to `lib/i18n/locales/{en,zh-CN}.json`.
 
-- [ ] Step 8.4 — wire into `internal/server/routes.go`
+- [x] Step 8.4 — wire into `internal/server/routes.go`
   - In the bootstrap section, after secrets/service is constructed (Plan 1B owns that), add:
     ```go
     bindingRepo := qianchuanbinding.NewGormRepo(db)
@@ -2244,11 +2244,11 @@
     ```
   - Define `bindingsAuditEmitter` adapter at the bottom of `routes.go` (mirror `projectTemplateAuditEmitter`).
 
-- [ ] Step 8.5 — verify
+- [x] Step 8.5 — verify
   - `rtk go test ./internal/handler/...` — handler tests pass.
   - `rtk go build ./...` — compile.
 
-- [ ] Step 8.6 — commit `feat(qianchuan): bindings handler + REST endpoints + audit + rbac`
+- [x] Step 8.6 — commit `feat(qianchuan): bindings handler + REST endpoints + audit + rbac`
 
 ---
 

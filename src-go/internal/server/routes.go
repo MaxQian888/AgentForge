@@ -639,6 +639,20 @@ func RegisterRoutes(
 	dagRunMappingRepo := repository.NewWorkflowRunMappingRepository(taskRepo.DB())
 	wfReviewRepo := repository.NewWorkflowPendingReviewRepository(taskRepo.DB())
 
+	// Outbound dispatcher (spec §5): subscribes to terminal workflow events
+	// and posts a default ProviderNeutralCard to the IM Bridge unless the
+	// workflow opted out via system_metadata.im_dispatched. Registered on
+	// the bus before any HTTP request can publish.
+	if cfg != nil && strings.TrimSpace(cfg.IMNotifyURL) != "" {
+		feBase := strings.TrimSpace(cfg.FrontendBaseURL)
+		if feBase == "" {
+			feBase = "http://localhost:3000"
+		}
+		outboundDispatcher := service.NewOutboundDispatcher(dagExecRepo, cfg.IMNotifyURL, feBase, bus)
+		outboundDispatcher.SetWorkflowLoader(dagDefRepo)
+		bus.Register(outboundDispatcher)
+	}
+
 	// Build node-type registry and seed with built-ins.
 	nodeRegistry := nodetypes.NewRegistry(nil)
 	if err := nodetypes.RegisterBuiltins(nodeRegistry, nodetypes.BuiltinDeps{
