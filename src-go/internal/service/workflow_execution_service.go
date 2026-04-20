@@ -31,6 +31,20 @@ type WorkflowStepExecutor interface {
 
 type WorkflowExecutionRequest struct {
 	Trigger map[string]any
+	// ActingEmployeeID, when non-nil, is the run-level acting-employee
+	// attribution that every subsequent step inherits unless it declares its
+	// own explicit employee id (see change bridge-employee-attribution-legacy).
+	ActingEmployeeID *uuid.UUID
+	// ProjectID scopes the run to its originating project. Populated by the
+	// trigger adapter from the WorkflowTrigger row; zero UUID means the run
+	// was started outside a project-scoped entry point. Used by the unified
+	// workflow-run view (bridge-unified-run-view) to filter plugin runs by
+	// project without requiring a cross-table join.
+	ProjectID uuid.UUID
+	// TriggerID is the WorkflowTrigger.ID that dispatched this run, when
+	// applicable. Mirrors run.TriggerID so the unified view can filter plugin
+	// runs by trigger without walking the trigger payload map.
+	TriggerID *uuid.UUID
 }
 
 type WorkflowStepExecutionRequest struct {
@@ -42,19 +56,47 @@ type WorkflowStepExecutionRequest struct {
 	Attempt     int
 	Input       map[string]any
 	StartedAt   time.Time
+	// RunActingEmployeeID is the workflow plugin run's run-level acting-employee
+	// attribution default. When a step omits an explicit `trigger.employeeId`,
+	// the step router uses this id (see change bridge-employee-attribution-legacy).
+	RunActingEmployeeID *uuid.UUID
+	// RunProjectID scopes the run to its originating project. Used by the
+	// `workflow` action's DAG branch so cross-engine child invocations can
+	// enforce same-project and carry project attribution onto the new
+	// execution (bridge-legacy-to-dag-invocation).
+	RunProjectID uuid.UUID
 }
 
 type WorkflowStepExecutionResult struct {
 	Output map[string]any
 }
 
-type WorkflowExecutionService struct {
-	plugins  WorkflowPluginCatalog
-	runs     WorkflowRunStore
-	roles    PluginRoleStore
-	executor WorkflowStepExecutor
-	now      func() time.Time
+// WorkflowPluginTerminalObserver is called whenever a WorkflowPluginRun reaches
+// a terminal state (completed, failed, cancelled). The plugin runtime invokes
+// each registered observer sequentially; observer errors are logged but never
+// propagate back to the run's own transition, so terminal-state emission is
+// best-effort. Wired by the sub-workflow invocation bridge so a plugin run
+// that started as a DAG sub_workflow child resumes the parent DAG node.
+type WorkflowPluginTerminalObserver interface {
+	OnPluginRunTerminal(ctx context.Context, run *model.WorkflowPluginRun)
 }
+
+type WorkflowExecutionService struct {
+	plugins   WorkflowPluginCatalog
+	runs      WorkflowRunStore
+	roles     PluginRoleStore
+	executor  WorkflowStepExecutor
+	now       func() time.Time
+	observers []WorkflowPluginTerminalObserver
+	// runEmitter publishes canonical workflow.run.* events alongside the
+	// legacy per-run observers so the workflow workspace UI can consume one
+	// cross-engine channel (bridge-unified-run-view).
+	runEmitter *WorkflowRunEventEmitter
+}
+
+// SetRunEmitter wires the unified workflow.run.* emitter. Nil keeps the
+// emission disabled for legacy test wiring.
+func (s *WorkflowExecutionService) SetRunEmitter(e *WorkflowRunEventEmitter) { s.runEmitter = e }
 
 type workflowRoleSkillRootProvider interface {
 	SkillsDir() string
@@ -82,12 +124,109 @@ func (s *WorkflowExecutionService) WithClock(now func() time.Time) *WorkflowExec
 	return s
 }
 
+// RegisterTerminalObserver appends an observer invoked when any workflow plugin
+// run reaches a terminal state. Observers are called in registration order
+// after the run has been persisted; their errors are not propagated to the
+// run's transition itself. Safe to call from wiring at startup; NOT safe to
+// call concurrently while runs are in flight.
+func (s *WorkflowExecutionService) RegisterTerminalObserver(o WorkflowPluginTerminalObserver) {
+	if o == nil {
+		return
+	}
+	s.observers = append(s.observers, o)
+}
+
+// emitTerminal invokes every registered observer for a just-terminated run.
+// Observer panics are isolated to protect the run's own transition.
+func (s *WorkflowExecutionService) emitTerminal(ctx context.Context, run *model.WorkflowPluginRun) {
+	if run == nil || len(s.observers) == 0 {
+		return
+	}
+	for _, o := range s.observers {
+		func(observer WorkflowPluginTerminalObserver) {
+			defer func() {
+				if r := recover(); r != nil {
+					log.Printf("[WARN] workflow plugin runtime: terminal observer panic: %v", r)
+				}
+			}()
+			observer.OnPluginRunTerminal(ctx, run)
+		}(o)
+	}
+}
+
 func (s *WorkflowExecutionService) Start(ctx context.Context, pluginID string, req WorkflowExecutionRequest) (*model.WorkflowPluginRun, error) {
 	record, err := s.loadExecutableWorkflowRecord(ctx, pluginID)
 	if err != nil {
 		return nil, err
 	}
 	return s.startWithRecord(ctx, record, req)
+}
+
+// StartTriggered is the entry point the unified trigger router uses to start a
+// workflow plugin run in response to an external trigger event (IM command,
+// schedule tick, future webhook). It wraps the existing plugin runtime start
+// path with trigger-flavoured provenance tags (source="workflow.trigger",
+// triggerId) so downstream run listings can distinguish trigger-initiated
+// runs from task/manual starts.
+//
+// seed becomes the workflow plugin run's trigger payload under "$event" to
+// keep parity with the DAG adapter's StartOptions.Seed contract.
+//
+// This seam intentionally stays narrow — it does not introduce new execution
+// semantics; it only supplies a trigger-aware entry point so plugin runs are
+// first-class trigger targets.
+func (s *WorkflowExecutionService) StartTriggered(
+	ctx context.Context,
+	pluginID string,
+	seed map[string]any,
+	triggerID uuid.UUID,
+) (*model.WorkflowPluginRun, error) {
+	return s.StartTriggeredWithEmployee(ctx, pluginID, seed, triggerID, nil)
+}
+
+// StartTriggeredWithEmployee extends StartTriggered by stamping an optional
+// run-level acting-employee identifier onto the new WorkflowPluginRun. Called
+// by PluginEngineAdapter when a trigger row carries acting_employee_id.
+func (s *WorkflowExecutionService) StartTriggeredWithEmployee(
+	ctx context.Context,
+	pluginID string,
+	seed map[string]any,
+	triggerID uuid.UUID,
+	actingEmployeeID *uuid.UUID,
+) (*model.WorkflowPluginRun, error) {
+	return s.StartTriggeredForProject(ctx, pluginID, seed, triggerID, actingEmployeeID, uuid.Nil)
+}
+
+// StartTriggeredForProject is the project-scoped variant used by the unified
+// trigger router once the WorkflowTrigger row's ProjectID is known. A zero
+// projectID falls back to the pre-unified-view behavior (no project scope on
+// the resulting plugin run).
+func (s *WorkflowExecutionService) StartTriggeredForProject(
+	ctx context.Context,
+	pluginID string,
+	seed map[string]any,
+	triggerID uuid.UUID,
+	actingEmployeeID *uuid.UUID,
+	projectID uuid.UUID,
+) (*model.WorkflowPluginRun, error) {
+	record, err := s.loadExecutableWorkflowRecord(ctx, pluginID)
+	if err != nil {
+		return nil, err
+	}
+	trigger := map[string]any{
+		"source":    "workflow.trigger",
+		"triggerId": triggerID.String(),
+	}
+	if seed != nil {
+		trigger["$event"] = cloneWorkflowPayload(seed)
+	}
+	triggerIDCopy := triggerID
+	return s.startWithRecord(ctx, record, WorkflowExecutionRequest{
+		Trigger:          trigger,
+		ActingEmployeeID: actingEmployeeID,
+		ProjectID:        projectID,
+		TriggerID:        &triggerIDCopy,
+	})
 }
 
 func (s *WorkflowExecutionService) StartTaskTriggered(
@@ -181,17 +320,21 @@ func (s *WorkflowExecutionService) loadExecutableWorkflowRecord(ctx context.Cont
 
 func (s *WorkflowExecutionService) startWithRecord(ctx context.Context, record *model.PluginRecord, req WorkflowExecutionRequest) (*model.WorkflowPluginRun, error) {
 	run := &model.WorkflowPluginRun{
-		ID:        uuid.New(),
-		PluginID:  record.Metadata.ID,
-		Process:   record.Spec.Workflow.Process,
-		Status:    model.WorkflowRunStatusRunning,
-		Trigger:   cloneWorkflowPayload(req.Trigger),
-		Steps:     initializeWorkflowSteps(record.Spec.Workflow.Steps),
-		StartedAt: s.now(),
+		ID:               uuid.New(),
+		PluginID:         record.Metadata.ID,
+		ProjectID:        req.ProjectID,
+		Process:          record.Spec.Workflow.Process,
+		Status:           model.WorkflowRunStatusRunning,
+		Trigger:          cloneWorkflowPayload(req.Trigger),
+		Steps:            initializeWorkflowSteps(record.Spec.Workflow.Steps),
+		ActingEmployeeID: req.ActingEmployeeID,
+		TriggerID:        req.TriggerID,
+		StartedAt:        s.now(),
 	}
 	if err := s.runs.Create(ctx, run); err != nil {
 		return nil, err
 	}
+	s.runEmitter.EmitPluginStatusChanged(ctx, run)
 
 	maxRetries := 0
 	if record.Spec.Workflow.Limits != nil && record.Spec.Workflow.Limits.MaxRetries > 0 {
@@ -277,11 +420,12 @@ func (s *WorkflowExecutionService) executeSequential(ctx context.Context, run *m
 		if err != nil {
 			return result, err
 		}
-		// If the step produced an awaiting_approval status, pause the run.
-		if run.Steps[index].Output != nil {
-			if status, _ := run.Steps[index].Output["status"].(string); status == "awaiting_approval" {
-				return s.pauseRun(ctx, run)
-			}
+		// If the step produced a parking status (awaiting_approval or
+		// awaiting_sub_workflow), pause the run. A parked awaiting_sub_workflow
+		// step stamps that status on the step record itself so resume hooks
+		// can find it.
+		if parkedRun, parked, parkErr := s.handleParkedStep(ctx, run, index); parked {
+			return parkedRun, parkErr
 		}
 	}
 
@@ -299,14 +443,39 @@ func (s *WorkflowExecutionService) executeHierarchical(ctx context.Context, run 
 		if err != nil {
 			return result, err
 		}
-		if run.Steps[index].Output != nil {
-			if status, _ := run.Steps[index].Output["status"].(string); status == "awaiting_approval" {
-				return s.pauseRun(ctx, run)
-			}
+		if parkedRun, parked, parkErr := s.handleParkedStep(ctx, run, index); parked {
+			return parkedRun, parkErr
 		}
 	}
 
 	return s.completeRun(ctx, run)
+}
+
+// handleParkedStep inspects a just-executed step for a parking status and
+// transitions the run accordingly. Returns (run, true, err) when the step
+// caused the run to pause and the caller should stop advancing; (nil, false,
+// nil) otherwise. Pulled into a helper so every execution mode can share the
+// awaiting_approval / awaiting_sub_workflow handling.
+func (s *WorkflowExecutionService) handleParkedStep(ctx context.Context, run *model.WorkflowPluginRun, index int) (*model.WorkflowPluginRun, bool, error) {
+	output := run.Steps[index].Output
+	if output == nil {
+		return nil, false, nil
+	}
+	status, _ := output["status"].(string)
+	switch status {
+	case "awaiting_approval":
+		paused, err := s.pauseRun(ctx, run)
+		return paused, true, err
+	case string(model.WorkflowStepRunStatusAwaitingSubWorkflow):
+		// Stamp the parking status on the step itself so the resume hook can
+		// find it. completedAt is intentionally cleared — the step is not
+		// done until the DAG child terminates.
+		run.Steps[index].Status = model.WorkflowStepRunStatusAwaitingSubWorkflow
+		run.Steps[index].CompletedAt = nil
+		paused, err := s.pauseRun(ctx, run)
+		return paused, true, err
+	}
+	return nil, false, nil
 }
 
 // executeEventDriven is a simplified event-driven mode. It iterates all steps
@@ -335,10 +504,8 @@ func (s *WorkflowExecutionService) executeEventDriven(ctx context.Context, run *
 		if err != nil {
 			return result, err
 		}
-		if run.Steps[index].Output != nil {
-			if status, _ := run.Steps[index].Output["status"].(string); status == "awaiting_approval" {
-				return s.pauseRun(ctx, run)
-			}
+		if parkedRun, parked, parkErr := s.handleParkedStep(ctx, run, index); parked {
+			return parkedRun, parkErr
 		}
 	}
 
@@ -369,11 +536,10 @@ func (s *WorkflowExecutionService) executeWave(ctx context.Context, run *model.W
 			if err != nil {
 				return result, err
 			}
-			if run.Steps[indices[0]].Output != nil {
-				if status, _ := run.Steps[indices[0]].Output["status"].(string); status == "awaiting_approval" {
-					return s.pauseRun(ctx, run)
-				}
+			if parkedRun, parked, parkErr := s.handleParkedStep(ctx, run, indices[0]); parked {
+				return parkedRun, parkErr
 			}
+			_ = result
 			continue
 		}
 
@@ -406,12 +572,10 @@ func (s *WorkflowExecutionService) executeWave(ctx context.Context, run *model.W
 				return res.run, res.err
 			}
 		}
-		// Check for approval pauses.
+		// Check for parking states (awaiting_approval or awaiting_sub_workflow).
 		for _, idx := range indices {
-			if run.Steps[idx].Output != nil {
-				if status, _ := run.Steps[idx].Output["status"].(string); status == "awaiting_approval" {
-					return s.pauseRun(ctx, run)
-				}
+			if parkedRun, parked, parkErr := s.handleParkedStep(ctx, run, idx); parked {
+				return parkedRun, parkErr
 			}
 		}
 	}
@@ -474,14 +638,16 @@ func (s *WorkflowExecutionService) executeStep(
 
 		attemptStartedAt := s.now()
 		result, execErr := s.executor.Execute(ctx, WorkflowStepExecutionRequest{
-			RunID:       run.ID,
-			PluginID:    run.PluginID,
-			Process:     run.Process,
-			Step:        stepDef,
-			RoleProfile: roleProfile,
-			Attempt:     attempt,
-			Input:       cloneWorkflowPayload(stepInput),
-			StartedAt:   attemptStartedAt,
+			RunID:               run.ID,
+			PluginID:            run.PluginID,
+			Process:             run.Process,
+			Step:                stepDef,
+			RoleProfile:         roleProfile,
+			Attempt:             attempt,
+			Input:               cloneWorkflowPayload(stepInput),
+			StartedAt:           attemptStartedAt,
+			RunActingEmployeeID: run.ActingEmployeeID,
+			RunProjectID:        run.ProjectID,
 		})
 		attemptCompletedAt := s.now()
 
@@ -590,7 +756,13 @@ func (s *WorkflowExecutionService) completeRun(ctx context.Context, run *model.W
 	if err := s.runs.Update(ctx, run); err != nil {
 		return nil, err
 	}
-	return s.runs.GetByID(ctx, run.ID)
+	stored, err := s.runs.GetByID(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	s.emitTerminal(ctx, stored)
+	s.runEmitter.EmitPluginTerminal(ctx, stored)
+	return stored, nil
 }
 
 func (s *WorkflowExecutionService) pauseRun(ctx context.Context, run *model.WorkflowPluginRun) (*model.WorkflowPluginRun, error) {
@@ -598,7 +770,12 @@ func (s *WorkflowExecutionService) pauseRun(ctx context.Context, run *model.Work
 	if err := s.runs.Update(ctx, run); err != nil {
 		return nil, err
 	}
-	return s.runs.GetByID(ctx, run.ID)
+	stored, err := s.runs.GetByID(ctx, run.ID)
+	if err != nil {
+		return nil, err
+	}
+	s.runEmitter.EmitPluginStatusChanged(ctx, stored)
+	return stored, nil
 }
 
 // extractTriggerEvents reads a "events" key from the trigger payload and
@@ -716,6 +893,8 @@ func (s *WorkflowExecutionService) failRun(ctx context.Context, run *model.Workf
 	if err != nil {
 		return nil, err
 	}
+	s.emitTerminal(ctx, stored)
+	s.runEmitter.EmitPluginTerminal(ctx, stored)
 	return stored, cause
 }
 
@@ -731,7 +910,205 @@ func (s *WorkflowExecutionService) cancelRun(ctx context.Context, run *model.Wor
 	if err != nil {
 		return nil, err
 	}
+	s.emitTerminal(ctx, stored)
+	s.runEmitter.EmitPluginTerminal(ctx, stored)
 	return stored, cause
+}
+
+// ResumeParkedDAGChild transitions a plugin run's `workflow` step parked with
+// status awaiting_sub_workflow into a terminal step status based on the
+// supplied outcome, then resumes the run by executing remaining steps. Invoked
+// by the DAG service's terminal-state hook when a child run linked via
+// parent_kind='plugin_run' reaches completion/failure/cancellation.
+//
+// Idempotent: a run whose parked step has already been transitioned is left
+// unchanged. A plugin run that is no longer Paused (e.g. already failed for
+// another reason) is not resumed.
+func (s *WorkflowExecutionService) ResumeParkedDAGChild(
+	ctx context.Context,
+	parentRunID, childRunID uuid.UUID,
+	outcome string,
+	childOutputs map[string]any,
+) error {
+	if s.runs == nil {
+		return fmt.Errorf("workflow run store is not configured")
+	}
+	run, err := s.runs.GetByID(ctx, parentRunID)
+	if err != nil {
+		return err
+	}
+	if run.Status != model.WorkflowRunStatusPaused {
+		return nil // run is no longer parked; nothing to do
+	}
+	parkedIdx := findParkedDAGChildStep(run, childRunID)
+	if parkedIdx < 0 {
+		return nil
+	}
+
+	now := s.now()
+	step := &run.Steps[parkedIdx]
+	if step.Output == nil {
+		step.Output = map[string]any{}
+	}
+	step.Output["child_outcome"] = outcome
+	if childOutputs != nil {
+		step.Output["child_outputs"] = cloneWorkflowPayload(childOutputs)
+	}
+
+	switch outcome {
+	case model.SubWorkflowLinkStatusCompleted:
+		step.Status = model.WorkflowStepRunStatusCompleted
+		step.Output["status"] = string(model.WorkflowStepRunStatusCompleted)
+		step.CompletedAt = &now
+	case model.SubWorkflowLinkStatusFailed, model.SubWorkflowLinkStatusCancelled:
+		step.Status = model.WorkflowStepRunStatusFailed
+		step.CompletedAt = &now
+		step.Error = fmt.Sprintf("dag child %s terminated with outcome %s", childRunID, outcome)
+	default:
+		return fmt.Errorf("unknown resume outcome %q for plugin run %s", outcome, parentRunID)
+	}
+
+	if err := s.runs.Update(ctx, run); err != nil {
+		return err
+	}
+
+	if step.Status == model.WorkflowStepRunStatusFailed {
+		_, _ = s.failRun(ctx, run, step, fmt.Errorf("%s", step.Error))
+		return nil
+	}
+
+	// Step completed — continue executing remaining steps sequentially.
+	record, err := s.loadExecutableWorkflowRecord(ctx, run.PluginID)
+	if err != nil {
+		return err
+	}
+	maxRetries := 0
+	if record.Spec.Workflow.Limits != nil && record.Spec.Workflow.Limits.MaxRetries > 0 {
+		maxRetries = record.Spec.Workflow.Limits.MaxRetries
+	}
+
+	run.Status = model.WorkflowRunStatusRunning
+	if err := s.runs.Update(ctx, run); err != nil {
+		return err
+	}
+
+	stepOutputs := make(map[string]map[string]any, len(run.Steps))
+	for _, st := range run.Steps {
+		if st.Status == model.WorkflowStepRunStatusCompleted && st.Output != nil {
+			stepOutputs[st.StepID] = cloneWorkflowPayload(st.Output)
+		}
+	}
+
+	for i := parkedIdx + 1; i < len(run.Steps); i++ {
+		if _, execErr := s.executeStep(ctx, run, record, i, maxRetries, stepOutputs); execErr != nil {
+			return execErr
+		}
+		if _, parked, parkErr := s.handleParkedStep(ctx, run, i); parked {
+			return parkErr
+		}
+	}
+
+	_, err = s.completeRun(ctx, run)
+	return err
+}
+
+// CancelRun cancels a plugin run identified by id. Satisfies PluginRunResumer
+// so the DAG service's cross-engine cancellation cascade can stop a plugin
+// parent when its invoking DAG ancestor is cancelled.
+func (s *WorkflowExecutionService) CancelRun(ctx context.Context, runID uuid.UUID) error {
+	if s.runs == nil {
+		return fmt.Errorf("workflow run store is not configured")
+	}
+	run, err := s.runs.GetByID(ctx, runID)
+	if err != nil {
+		return err
+	}
+	if !isWorkflowRunActive(run.Status) {
+		return nil
+	}
+	// Cancellation cascade: if a `workflow` step is parked on a DAG child,
+	// cancel that child first so its resources release before the parent
+	// transitions. Failures are logged but do not block the parent's cancel.
+	s.cancelParkedDAGChildren(ctx, run)
+	if _, err := s.cancelRun(ctx, run, fmt.Errorf("workflow plugin run cancelled")); err != nil {
+		// cancelRun returns the cancel cause as its error on success; surface
+		// only store/persistence errors as a hard failure from CancelRun.
+		if err.Error() != "workflow plugin run cancelled" {
+			return err
+		}
+	}
+	return nil
+}
+
+// cancelParkedDAGChildren walks the run's parked `workflow` steps and calls
+// the step router's DAG cancel seam (when wired) for each. Idempotent: a
+// child that has already reached a terminal state is left to the engine's
+// own handling.
+func (s *WorkflowExecutionService) cancelParkedDAGChildren(ctx context.Context, run *model.WorkflowPluginRun) {
+	if run == nil {
+		return
+	}
+	starter := s.resolveDAGChildStarter()
+	if starter == nil {
+		return
+	}
+	for _, step := range run.Steps {
+		if step.Status != model.WorkflowStepRunStatusAwaitingSubWorkflow || step.Output == nil {
+			continue
+		}
+		engine, _ := step.Output["child_engine"].(string)
+		if engine != "dag" {
+			continue
+		}
+		raw, _ := step.Output["child_run_id"].(string)
+		if raw == "" {
+			continue
+		}
+		childID, err := uuid.Parse(raw)
+		if err != nil {
+			continue
+		}
+		if err := starter.Cancel(ctx, childID); err != nil {
+			log.Printf("[WARN] cancel parked DAG child %s for plugin run %s: %v", childID, run.ID, err)
+		}
+	}
+}
+
+// resolveDAGChildStarter returns the DAG child starter wired into the step
+// executor (if any). Kept as a method on the service so tests can stub it by
+// swapping the executor.
+func (s *WorkflowExecutionService) resolveDAGChildStarter() WorkflowDAGChildStarter {
+	if s.executor == nil {
+		return nil
+	}
+	if provider, ok := s.executor.(interface {
+		DAGChildStarter() WorkflowDAGChildStarter
+	}); ok {
+		return provider.DAGChildStarter()
+	}
+	return nil
+}
+
+// findParkedDAGChildStep scans run.Steps for the single `workflow` step parked
+// on the given DAG child run id. Returns -1 if no parked step references it.
+func findParkedDAGChildStep(run *model.WorkflowPluginRun, childRunID uuid.UUID) int {
+	if run == nil {
+		return -1
+	}
+	target := childRunID.String()
+	for i, step := range run.Steps {
+		if step.Status != model.WorkflowStepRunStatusAwaitingSubWorkflow {
+			continue
+		}
+		if step.Output == nil {
+			continue
+		}
+		raw, _ := step.Output["child_run_id"].(string)
+		if raw == target {
+			return i
+		}
+	}
+	return -1
 }
 
 func initializeWorkflowSteps(steps []model.WorkflowStepDefinition) []model.WorkflowStepRun {

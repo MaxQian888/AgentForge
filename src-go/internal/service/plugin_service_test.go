@@ -1159,6 +1159,123 @@ spec:
 	}
 }
 
+// Manifest authors invoking DAG children via the `workflow` step action must
+// supply a valid `targetKind='dag'` + `targetWorkflowId` shape. The following
+// tests exercise accepted and rejected manifest fixtures (change
+// bridge-legacy-to-dag-invocation).
+
+func TestPluginService_RegisterWorkflowAcceptsDAGTargetShape(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	localPath := writeManifest(t, pluginsDir, "local/dag-orchestrator.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: dag-orchestrator
+  name: DAG Orchestrator
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/orchestrator.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: coder
+    steps:
+      - id: run-dag
+        role: coder
+        action: workflow
+        config:
+          targetKind: dag
+          targetWorkflowId: 00000000-0000-0000-0000-000000000001
+`)
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, pluginsDir).
+		WithRoleStore(&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"coder": {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+			},
+		})
+	if _, err := svc.RegisterLocalPath(ctx, localPath); err != nil {
+		t.Fatalf("RegisterLocalPath() error = %v, want success for DAG target shape", err)
+	}
+}
+
+func TestPluginService_RegisterWorkflowRejectsMixedTargetShape(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	localPath := writeManifest(t, pluginsDir, "local/mixed-target.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: mixed-target
+  name: Mixed Target
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/orchestrator.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: coder
+    steps:
+      - id: run-mixed
+        role: coder
+        action: workflow
+        config:
+          targetKind: dag
+          targetWorkflowId: 00000000-0000-0000-0000-000000000001
+          pluginId: legacy-plugin
+`)
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, pluginsDir).
+		WithRoleStore(&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"coder": {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+			},
+		})
+	if _, err := svc.RegisterLocalPath(ctx, localPath); err == nil {
+		t.Fatal("expected mixed target shape (targetKind=dag + pluginId) to fail validation")
+	}
+}
+
+func TestPluginService_RegisterWorkflowRejectsUnknownTargetKind(t *testing.T) {
+	ctx := context.Background()
+	pluginsDir := t.TempDir()
+	localPath := writeManifest(t, pluginsDir, "local/unknown-target.yaml", `
+apiVersion: agentforge/v1
+kind: WorkflowPlugin
+metadata:
+  id: unknown-target
+  name: Unknown Target
+  version: 1.0.0
+spec:
+  runtime: wasm
+  module: ./dist/orchestrator.wasm
+  abiVersion: v1
+  workflow:
+    process: sequential
+    roles:
+      - id: coder
+    steps:
+      - id: run-unknown
+        role: coder
+        action: workflow
+        config:
+          targetKind: mystery
+          targetWorkflowId: 00000000-0000-0000-0000-000000000001
+`)
+	svc := service.NewPluginService(repository.NewPluginRegistryRepository(), &fakePluginRuntimeClient{}, &fakeGoPluginRuntime{}, pluginsDir).
+		WithRoleStore(&fakePluginRoleStore{
+			roles: map[string]*rolepkg.Manifest{
+				"coder": {Metadata: model.RoleMetadata{ID: "coder", Name: "Coder"}},
+			},
+		})
+	if _, err := svc.RegisterLocalPath(ctx, localPath); err == nil {
+		t.Fatal("expected unknown targetKind to fail validation")
+	}
+}
+
 func TestPluginService_RegisterWorkflowRejectsTaskDrivenTriggerWithoutProfile(t *testing.T) {
 	ctx := context.Background()
 	pluginsDir := t.TempDir()

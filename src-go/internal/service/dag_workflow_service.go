@@ -65,6 +65,33 @@ type DAGWorkflowReviewRepo interface {
 	FindPendingByExecutionAndNode(ctx context.Context, executionID uuid.UUID, nodeID string) (*model.WorkflowPendingReview, error)
 }
 
+// DAGWorkflowParentLinkRepo persists sub-workflow parent↔child linkage.
+// Injected lazily via SetParentLinkRepo; when nil, sub-workflow resume paths
+// become no-ops so legacy test wiring continues to build without this dep.
+type DAGWorkflowParentLinkRepo interface {
+	GetByChild(ctx context.Context, engineKind string, childRunID uuid.UUID) (*model.WorkflowRunParentLink, error)
+	ListByParentExecution(ctx context.Context, parentExecutionID uuid.UUID) ([]*model.WorkflowRunParentLink, error)
+	UpdateStatus(ctx context.Context, id uuid.UUID, status string) error
+}
+
+// PluginRunResumer is the narrow contract the DAG engine's terminal-state hook
+// calls when a DAG child's parent link has parent_kind='plugin_run'. The
+// implementation (WorkflowExecutionService) transitions the parked plugin step
+// and continues the plugin run. Kept on the DAG side as an interface so the
+// two services stay decoupled — the wiring layer injects the concrete
+// runtime at startup.
+//
+// Introduced by bridge-legacy-to-dag-invocation so a legacy plugin invoking a
+// DAG child can resume synchronously with the DAG engine's terminal path.
+type PluginRunResumer interface {
+	ResumeParkedDAGChild(ctx context.Context, parentRunID, childRunID uuid.UUID, outcome string, childOutputs map[string]any) error
+	// CancelRun cancels the plugin run identified by runID. Invoked by the
+	// cancellation cascade hook when the plugin parent needs to be stopped
+	// because an invoking DAG ancestor was cancelled. A nil implementation is
+	// permitted — it means the cascade drops the cancel silently.
+	CancelRun(ctx context.Context, runID uuid.UUID) error
+}
+
 // DAGWorkflowService orchestrates workflow DAG execution.
 type DAGWorkflowService struct {
 	defRepo       DAGWorkflowDefinitionRepo
@@ -73,12 +100,24 @@ type DAGWorkflowService struct {
 	taskRepo      DAGWorkflowTaskRepo
 	mappingRepo   DAGWorkflowRunMappingRepo
 	reviewRepo    DAGWorkflowReviewRepo
+	linkRepo      DAGWorkflowParentLinkRepo
+	pluginResumer PluginRunResumer
 	hub           *ws.Hub
 	bus           eventbus.Publisher
 	registry      *nodetypes.NodeTypeRegistry
 	applier       *nodetypes.EffectApplier
 	projectLookup DispatchProjectStatusLookup
+	// runEmitter publishes canonical workflow.run.* events alongside the
+	// engine-native workflow.execution.* channel. Nil turns the fan-out off
+	// for legacy test wiring; production wiring constructs one in routes.go.
+	runEmitter *WorkflowRunEventEmitter
 }
+
+// SetRunEmitter wires the unified workflow-run WS fan-out emitter. The
+// emitter is consulted inside every broadcastEvent site that represents a
+// lifecycle transition; setting it to nil (the default) keeps the
+// engine-native channel intact and simply skips the unified emission.
+func (s *DAGWorkflowService) SetRunEmitter(e *WorkflowRunEventEmitter) { s.runEmitter = e }
 
 // SetProjectStatusLookup wires the project repository used to reject
 // StartExecution on archived projects. Reuses the DispatchProjectStatusLookup
@@ -118,6 +157,31 @@ func (s *DAGWorkflowService) SetRunMappingRepo(r DAGWorkflowRunMappingRepo) { s.
 // SetReviewRepo sets the pending review repository for human review nodes.
 func (s *DAGWorkflowService) SetReviewRepo(r DAGWorkflowReviewRepo) { s.reviewRepo = r }
 
+// SetParentLinkRepo wires the sub-workflow parent-link repository used by the
+// resume path. Must be set before the first sub_workflow invocation can
+// complete successfully; nil at construction time is safe.
+func (s *DAGWorkflowService) SetParentLinkRepo(r DAGWorkflowParentLinkRepo) { s.linkRepo = r }
+
+// SetPluginRunResumer wires the plugin-runtime resume hook used when a DAG
+// child's parent link has parent_kind='plugin_run'. Nil falls back to
+// DAG-only behavior, skipping the cross-engine resume (introduced by
+// bridge-legacy-to-dag-invocation).
+func (s *DAGWorkflowService) SetPluginRunResumer(r PluginRunResumer) { s.pluginResumer = r }
+
+// GetExecutionWorkflowID resolves a parent execution id to its workflow id.
+// Satisfies nodetypes.WorkflowExecutionLookup so the sub-workflow recursion
+// guard can walk the parent chain without pulling the full execution struct.
+func (s *DAGWorkflowService) GetExecutionWorkflowID(ctx context.Context, executionID uuid.UUID) (uuid.UUID, error) {
+	if s.execRepo == nil {
+		return uuid.Nil, fmt.Errorf("dag workflow service: execution repo is not configured")
+	}
+	exec, err := s.execRepo.GetExecution(ctx, executionID)
+	if err != nil {
+		return uuid.Nil, err
+	}
+	return exec.WorkflowID, nil
+}
+
 // ---------------------------------------------------------------------------
 // Execution lifecycle
 // ---------------------------------------------------------------------------
@@ -126,10 +190,14 @@ func (s *DAGWorkflowService) SetReviewRepo(r DAGWorkflowReviewRepo) { s.reviewRe
 // Seed pre-populates the execution DataStore under the "$event" key so
 // the first node advancement can consume external event data (IM payload,
 // cron context, webhook body). TriggeredBy stamps the execution with the
-// WorkflowTrigger id that fired it.
+// WorkflowTrigger id that fired it. ActingEmployeeID, when non-nil, is the
+// run-level acting-employee default; nodes that do not override it attribute
+// their spawned agent runs to this employee (see change
+// bridge-employee-attribution-legacy).
 type StartOptions struct {
-	Seed        map[string]any
-	TriggeredBy *uuid.UUID
+	Seed             map[string]any
+	TriggeredBy      *uuid.UUID
+	ActingEmployeeID *uuid.UUID
 }
 
 // buildInitialDataStore constructs the DataStore JSON for a new execution.
@@ -210,6 +278,9 @@ func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid
 	if opts.TriggeredBy != nil {
 		exec.TriggeredBy = opts.TriggeredBy
 	}
+	if opts.ActingEmployeeID != nil {
+		exec.ActingEmployeeID = opts.ActingEmployeeID
+	}
 	if err := s.execRepo.CreateExecution(ctx, exec); err != nil {
 		return nil, fmt.Errorf("create execution: %w", err)
 	}
@@ -218,6 +289,7 @@ func (s *DAGWorkflowService) StartExecution(ctx context.Context, workflowID uuid
 		"executionId": exec.ID.String(),
 		"workflowId":  workflowID.String(),
 	})
+	s.runEmitter.EmitDAGStatusChanged(ctx, exec)
 
 	// Mark trigger nodes as completed
 	for _, nodeID := range triggerNodeIDs {
@@ -286,7 +358,11 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 			completedNodes[ne.NodeID] = true
 		case model.NodeExecRunning:
 			runningNodes[ne.NodeID] = true
-		case model.NodeExecWaiting:
+		case model.NodeExecWaiting, model.NodeExecAwaitingSubWorkflow:
+			// Sub-workflow parks use a distinct status so operators can
+			// distinguish them from human-review parks, but for the purposes of
+			// the advance loop both are "the node is holding and must not be
+			// re-dispatched" — treat them identically.
 			waitingNodes[ne.NodeID] = true
 		}
 	}
@@ -329,6 +405,14 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 			"workflowId":  exec.WorkflowID.String(),
 			"status":      model.WorkflowExecStatusCompleted,
 		})
+		if terminated, terminatedErr := s.execRepo.GetExecution(ctx, executionID); terminatedErr == nil {
+			s.runEmitter.EmitDAGTerminal(ctx, terminated)
+		} else {
+			s.runEmitter.EmitDAGTerminal(ctx, exec)
+		}
+		// If this DAG execution is a child of a parked sub_workflow node,
+		// resume the parent with the child's outputs.
+		s.tryResumeParentFromDAGChild(ctx, exec, model.SubWorkflowLinkStatusCompleted)
 		return nil
 	}
 
@@ -341,6 +425,7 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 		"executionId":  exec.ID.String(),
 		"currentNodes": nextNodeIDs,
 	})
+	s.runEmitter.EmitDAGStatusChanged(ctx, exec)
 
 	for _, nodeID := range nextNodeIDs {
 		node := nodeMap[nodeID]
@@ -352,6 +437,8 @@ func (s *DAGWorkflowService) AdvanceExecution(ctx context.Context, executionID u
 			if updateErr := s.execRepo.UpdateExecution(ctx, executionID, model.WorkflowExecStatusFailed, currentNodesJSON, err.Error()); updateErr != nil {
 				log.WithError(updateErr).Warn("failed to update execution status to failed")
 			}
+			// Child failure must also unblock any parent that is parked.
+			s.tryResumeParentFromDAGChild(ctx, exec, model.SubWorkflowLinkStatusFailed)
 			return err
 		}
 	}
@@ -406,6 +493,14 @@ func (s *DAGWorkflowService) CancelExecution(ctx context.Context, executionID uu
 		"workflowId":  exec.WorkflowID.String(),
 		"status":      model.WorkflowExecStatusCancelled,
 	})
+	if cancelled, cerr := s.execRepo.GetExecution(ctx, exec.ID); cerr == nil {
+		s.runEmitter.EmitDAGTerminal(ctx, cancelled)
+	} else {
+		s.runEmitter.EmitDAGTerminal(ctx, exec)
+	}
+	// Cancellation of a child DAG run must fail-resume the parent node so the
+	// parent doesn't hang indefinitely in awaiting_sub_workflow.
+	s.tryResumeParentFromDAGChild(ctx, exec, model.SubWorkflowLinkStatusCancelled)
 	return nil
 }
 
@@ -549,8 +644,15 @@ func (s *DAGWorkflowService) executeNode(ctx context.Context, exec *model.Workfl
 			_ = s.execRepo.UpdateExecution(ctx, exec.ID, model.WorkflowExecStatusPaused, exec.CurrentNodes, "")
 		case nodetypes.EffectWaitEvent:
 			_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecWaiting, nil, "")
-		case nodetypes.EffectSpawnAgent, nodetypes.EffectInvokeSubWorkflow:
-			// Stays running — async callback (HandleAgentRunCompletion / sub-workflow completion) will resume.
+		case nodetypes.EffectInvokeSubWorkflow:
+			// Parent parks in a distinct awaiting_sub_workflow status so
+			// operators can visually distinguish agent-driven parks from
+			// sub-workflow-driven parks. The resume path (tryResumeParentFromDAGChild
+			// or ResumeParentFromPluginChild) flips the status back.
+			_ = s.nodeRepo.UpdateNodeExecution(ctx, nodeExec.ID, model.NodeExecAwaitingSubWorkflow, nil, "")
+			_ = s.execRepo.UpdateExecution(ctx, exec.ID, model.WorkflowExecStatusPaused, exec.CurrentNodes, "")
+		case nodetypes.EffectSpawnAgent:
+			// Stays running — async callback (HandleAgentRunCompletion) will resume.
 		}
 		return nil
 	}
@@ -757,4 +859,201 @@ func (s *DAGWorkflowService) storeNodeResult(ctx context.Context, executionID uu
 
 func (s *DAGWorkflowService) broadcastEvent(ctx context.Context, eventType, projectID string, payload map[string]any) {
 	_ = eventbus.PublishLegacy(ctx, s.bus, eventType, projectID, payload)
+}
+
+// ---------------------------------------------------------------------------
+// Sub-workflow resume paths
+// ---------------------------------------------------------------------------
+
+// tryResumeParentFromDAGChild is the best-effort hook called from every DAG
+// terminal-state transition (complete, fail, cancel). If the completing
+// execution is a child registered in workflow_run_parent_link, this resumes
+// the parent with the child's outcome. Idempotent: already-terminated links
+// are skipped silently. Never returns an error to the caller — the child
+// transition has already happened; resume is a side effect.
+func (s *DAGWorkflowService) tryResumeParentFromDAGChild(ctx context.Context, childExec *model.WorkflowExecution, linkStatus string) {
+	if s.linkRepo == nil || childExec == nil {
+		return
+	}
+	link, err := s.linkRepo.GetByChild(ctx, model.SubWorkflowEngineDAG, childExec.ID)
+	if err != nil || link == nil {
+		return // not a sub-workflow child; nothing to do.
+	}
+	if link.Status != model.SubWorkflowLinkStatusRunning {
+		return // already resumed (idempotent)
+	}
+
+	outcome := outcomeForLinkStatus(linkStatus)
+	// Route based on parent_kind. When the parent is a legacy plugin run, hand
+	// off to the plugin runtime's resume hook; otherwise fall through to the
+	// DAG-native resume that mutates parent node state and advances the DAG.
+	parentKind := link.ParentKind
+	if parentKind == "" {
+		parentKind = model.SubWorkflowParentKindDAGExecution
+	}
+	switch parentKind {
+	case model.SubWorkflowParentKindPluginRun:
+		if s.pluginResumer != nil {
+			childOutputs := map[string]any{}
+			if len(childExec.DataStore) > 0 {
+				_ = json.Unmarshal(childExec.DataStore, &childOutputs)
+			}
+			if err := s.pluginResumer.ResumeParkedDAGChild(ctx, link.ParentExecutionID, childExec.ID, outcome, childOutputs); err != nil {
+				log.WithError(err).WithFields(log.Fields{
+					"parentRunId": link.ParentExecutionID.String(),
+					"parentStep":  link.ParentNodeID,
+					"childRunId":  childExec.ID.String(),
+				}).Warn("sub_workflow: plugin parent resume failed")
+			}
+		}
+	default:
+		if err := s.resumeParentDAG(ctx, link, outcome, childExec); err != nil {
+			log.WithError(err).WithFields(log.Fields{
+				"parentExecutionId": link.ParentExecutionID.String(),
+				"parentNodeId":      link.ParentNodeID,
+				"childRunId":        childExec.ID.String(),
+			}).Warn("sub_workflow: parent resume failed")
+		}
+	}
+	if err := s.linkRepo.UpdateStatus(ctx, link.ID, linkStatus); err != nil {
+		log.WithError(err).Warn("sub_workflow: update parent link status failed")
+	}
+}
+
+// ResumeParentFromPluginChild is the plugin-runtime's counterpart to
+// tryResumeParentFromDAGChild. Called from workflow_execution_service on
+// terminal transitions of a workflow plugin run. The caller supplies the
+// child's final outputs as a JSON envelope.
+func (s *DAGWorkflowService) ResumeParentFromPluginChild(ctx context.Context, childRunID uuid.UUID, linkStatus string, childOutputs json.RawMessage) {
+	if s.linkRepo == nil {
+		return
+	}
+	link, err := s.linkRepo.GetByChild(ctx, model.SubWorkflowEnginePlugin, childRunID)
+	if err != nil || link == nil {
+		return
+	}
+	if link.Status != model.SubWorkflowLinkStatusRunning {
+		return
+	}
+
+	outcome := outcomeForLinkStatus(linkStatus)
+	if err := s.resumeParentWithOutputs(ctx, link, outcome, childOutputs, map[string]any{
+		"runId":  childRunID.String(),
+		"engine": model.SubWorkflowEnginePlugin,
+	}); err != nil {
+		log.WithError(err).WithFields(log.Fields{
+			"parentExecutionId": link.ParentExecutionID.String(),
+			"parentNodeId":      link.ParentNodeID,
+			"childRunId":        childRunID.String(),
+		}).Warn("sub_workflow: plugin parent resume failed")
+	}
+	if err := s.linkRepo.UpdateStatus(ctx, link.ID, linkStatus); err != nil {
+		log.WithError(err).Warn("sub_workflow: update plugin parent link status failed")
+	}
+}
+
+// resumeParentDAG materializes a child DAG execution's outputs into the parent
+// datastore, marks the parent node complete/failed, and advances the parent.
+// The "outputs" envelope is the child's final DataStore (the accumulated node
+// outputs) so downstream parent nodes can read `$.dataStore[<sub>].subWorkflow.outputs.*`.
+func (s *DAGWorkflowService) resumeParentDAG(ctx context.Context, link *model.WorkflowRunParentLink, outcome string, childExec *model.WorkflowExecution) error {
+	var outputs json.RawMessage
+	if childExec != nil {
+		outputs = childExec.DataStore
+	}
+	return s.resumeParentWithOutputs(ctx, link, outcome, outputs, map[string]any{
+		"runId":  childExec.ID.String(),
+		"engine": model.SubWorkflowEngineDAG,
+	})
+}
+
+func (s *DAGWorkflowService) resumeParentWithOutputs(ctx context.Context, link *model.WorkflowRunParentLink, outcome string, outputs json.RawMessage, extra map[string]any) error {
+	parentExec, err := s.execRepo.GetExecution(ctx, link.ParentExecutionID)
+	if err != nil {
+		return fmt.Errorf("load parent execution: %w", err)
+	}
+
+	// Find the parked node execution.
+	nodeExecs, err := s.nodeRepo.ListNodeExecutions(ctx, link.ParentExecutionID)
+	if err != nil {
+		return fmt.Errorf("list parent node executions: %w", err)
+	}
+	var parked *model.WorkflowNodeExecution
+	for _, ne := range nodeExecs {
+		if ne.NodeID == link.ParentNodeID && (ne.Status == model.NodeExecAwaitingSubWorkflow || ne.Status == model.NodeExecRunning) {
+			parked = ne
+			break
+		}
+	}
+	if parked == nil {
+		// Parent may have been cancelled or otherwise resolved elsewhere.
+		return nil
+	}
+
+	// Build subWorkflow outputs envelope keyed under parent node id.
+	var outputsVal any
+	if len(outputs) > 0 {
+		_ = json.Unmarshal(outputs, &outputsVal)
+	}
+	envelope := map[string]any{
+		"subWorkflow": mergeMaps(extra, map[string]any{
+			"outputs": outputsVal,
+			"outcome": outcome,
+		}),
+	}
+	envelopeJSON, _ := json.Marshal(envelope)
+	s.storeNodeResult(ctx, link.ParentExecutionID, link.ParentNodeID, envelopeJSON)
+
+	nodeStatus := model.NodeExecCompleted
+	errMsg := ""
+	if outcome != model.SubWorkflowLinkStatusCompleted {
+		nodeStatus = model.NodeExecFailed
+		errMsg = fmt.Sprintf("child sub-workflow run terminated with outcome: %s", outcome)
+	}
+	if err := s.nodeRepo.UpdateNodeExecution(ctx, parked.ID, nodeStatus, envelopeJSON, errMsg); err != nil {
+		return fmt.Errorf("update parent node execution: %w", err)
+	}
+
+	s.broadcastEvent(ctx, ws.EventWorkflowNodeCompleted, parentExec.ProjectID.String(), map[string]any{
+		"executionId": link.ParentExecutionID.String(),
+		"nodeId":      link.ParentNodeID,
+		"status":      nodeStatus,
+	})
+
+	if nodeStatus == model.NodeExecFailed {
+		if err := s.execRepo.UpdateExecution(ctx, link.ParentExecutionID, model.WorkflowExecStatusFailed, nil, errMsg); err != nil {
+			log.WithError(err).Warn("sub_workflow: mark parent failed")
+		}
+		return nil
+	}
+
+	// Flip back to running if the parent was paused (e.g. awaiting sub-workflow).
+	if parentExec.Status != model.WorkflowExecStatusRunning {
+		_ = s.execRepo.UpdateExecution(ctx, link.ParentExecutionID, model.WorkflowExecStatusRunning, nil, "")
+	}
+	return s.AdvanceExecution(ctx, link.ParentExecutionID)
+}
+
+func outcomeForLinkStatus(status string) string {
+	switch status {
+	case model.SubWorkflowLinkStatusCompleted:
+		return model.SubWorkflowLinkStatusCompleted
+	case model.SubWorkflowLinkStatusFailed:
+		return model.SubWorkflowLinkStatusFailed
+	case model.SubWorkflowLinkStatusCancelled:
+		return model.SubWorkflowLinkStatusCancelled
+	default:
+		return status
+	}
+}
+
+func mergeMaps(a, b map[string]any) map[string]any {
+	out := make(map[string]any, len(a)+len(b))
+	for k, v := range a {
+		out[k] = v
+	}
+	for k, v := range b {
+		out[k] = v
+	}
+	return out
 }

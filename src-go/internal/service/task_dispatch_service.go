@@ -62,6 +62,11 @@ type DispatchSpawnInput struct {
 	BudgetUSD     float64
 	RoleID        string
 	TriggerSource string
+	// EmployeeID, when non-nil, attributes the dispatched run to the given
+	// Digital Employee. Used by the legacy workflow step router to forward a
+	// step-level or run-level acting_employee_id onto the spawned agent_runs
+	// row (see change bridge-employee-attribution-legacy).
+	EmployeeID *uuid.UUID
 	// Caller identifies the initiating user. Required for both
 	// human-initiated and system-initiated paths. Service-layer RBAC
 	// will reject any input whose Caller fails Validate().

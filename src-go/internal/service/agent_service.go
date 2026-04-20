@@ -343,6 +343,21 @@ func (s *AgentService) SpawnForTeam(ctx context.Context, teamID uuid.UUID, teamR
 	})
 }
 
+// SpawnWithEmployee spawns an agent run and attributes it to an optional
+// acting employee. When employeeID is nil, behaves identically to Spawn.
+// Added in change bridge-employee-attribution-legacy so the legacy workflow
+// step router can forward run-level / step-level acting_employee_id onto the
+// spawned agent_runs row.
+func (s *AgentService) SpawnWithEmployee(ctx context.Context, taskID, memberID uuid.UUID, runtime, provider, modelName string, budgetUsd float64, roleID string, employeeID *uuid.UUID) (*model.AgentRun, error) {
+	if employeeID == nil {
+		return s.spawnWithContext(ctx, taskID, memberID, runtime, provider, modelName, budgetUsd, roleID, nil)
+	}
+	eid := *employeeID
+	return s.spawnWithContext(ctx, taskID, memberID, runtime, provider, modelName, budgetUsd, roleID, &bridgeExecutionContext{
+		EmployeeID: &eid,
+	})
+}
+
 // SpawnForEmployee dispatches a run on behalf of a persistent Employee.
 // The resulting agent_run row carries employee_id for per-employee memory
 // and history. SystemPromptOverride and ExtraSkills are best-effort plumbed

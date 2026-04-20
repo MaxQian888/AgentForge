@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
 	pluginparser "github.com/react-go-quick-starter/server/internal/plugin"
 	"github.com/react-go-quick-starter/server/internal/repository"
@@ -1380,6 +1381,17 @@ func (s *PluginService) validateWorkflowManifest(manifest *model.PluginManifest)
 			roleIDs[roleID] = struct{}{}
 		}
 		stepIDs[stepID] = struct{}{}
+
+		// Validate `workflow` action target-kind discriminator shape
+		// (bridge-legacy-to-dag-invocation). A workflow step may reference
+		// either a plugin id (legacy default) or a DAG workflow UUID; mixing
+		// the two shapes is rejected here so manifest authors get an early
+		// error rather than a runtime dispatch failure.
+		if step.Action == model.WorkflowActionWorkflow {
+			if err := validateWorkflowStepTarget(stepID, step.Config); err != nil {
+				return err
+			}
+		}
 	}
 
 	for _, step := range workflow.Steps {
@@ -1399,6 +1411,66 @@ func (s *PluginService) validateWorkflowManifest(manifest *model.PluginManifest)
 		}
 	}
 	return nil
+}
+
+// validateWorkflowStepTarget inspects a `workflow` action step's config for
+// the engine-aware discriminator introduced by bridge-legacy-to-dag-invocation
+// and rejects conflicting or malformed shapes. Accepted inputs:
+//   - pluginId / plugin_id (legacy; implicit targetKind='plugin').
+//   - targetKind='plugin' paired with pluginId / plugin_id.
+//   - targetKind='dag' paired with targetWorkflowId / target_workflow_id (UUID).
+//
+// Any other combination — unknown targetKind, mixed shapes, missing target —
+// returns a structured error naming the offending step.
+func validateWorkflowStepTarget(stepID string, config map[string]any) error {
+	if config == nil {
+		return nil
+	}
+	pluginID := firstNonEmptyString(config, "pluginId", "plugin_id")
+	targetWorkflowID := firstNonEmptyString(config, "targetWorkflowId", "target_workflow_id")
+	rawKind := firstNonEmptyString(config, "targetKind", "target_kind")
+	kind := strings.ToLower(strings.TrimSpace(rawKind))
+
+	switch kind {
+	case "":
+		// Legacy shape: must declare a plugin id, must not declare a DAG target.
+		if targetWorkflowID != "" && pluginID == "" {
+			return fmt.Errorf("workflow step %s sets targetWorkflowId but omits targetKind; declare targetKind='dag' to invoke a DAG child", stepID)
+		}
+	case "plugin":
+		if targetWorkflowID != "" {
+			return fmt.Errorf("workflow step %s declares targetKind='plugin' but also sets targetWorkflowId; plugin targets must use pluginId", stepID)
+		}
+	case "dag":
+		if pluginID != "" {
+			return fmt.Errorf("workflow step %s declares targetKind='dag' alongside pluginId; a DAG target must not set pluginId", stepID)
+		}
+		if targetWorkflowID == "" {
+			return fmt.Errorf("workflow step %s declares targetKind='dag' but omits targetWorkflowId", stepID)
+		}
+		if _, err := uuid.Parse(targetWorkflowID); err != nil {
+			return fmt.Errorf("workflow step %s targetWorkflowId %q is not a valid UUID: %w", stepID, targetWorkflowID, err)
+		}
+	default:
+		return fmt.Errorf("workflow step %s declares unknown targetKind %q (expected \"plugin\" or \"dag\")", stepID, kind)
+	}
+	return nil
+}
+
+// firstNonEmptyString scans a config map for the first key in keys that maps
+// to a non-empty string value. Used to accept both camelCase and snake_case
+// spellings of discriminator keys.
+func firstNonEmptyString(config map[string]any, keys ...string) string {
+	for _, k := range keys {
+		v, ok := config[k]
+		if !ok {
+			continue
+		}
+		if s, ok := v.(string); ok && strings.TrimSpace(s) != "" {
+			return strings.TrimSpace(s)
+		}
+	}
+	return ""
 }
 
 func isSupportedWorkflowAction(action model.WorkflowActionType) bool {
