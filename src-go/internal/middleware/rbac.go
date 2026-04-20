@@ -115,6 +115,11 @@ const (
 	// Audit log (gates the audit-log query API; see add-project-audit-log spec).
 	ActionAuditRead ActionID = "audit.read"
 
+	// Project-scoped secrets store. Read = list metadata only (no values);
+	// write covers create, rotate, delete.
+	ActionSecretRead  ActionID = "secret.read"
+	ActionSecretWrite ActionID = "secret.write"
+
 	// Project templates. `save_as_template` is a project-scoped action (gated
 	// via projectGroup + Require). The CRUD actions on /project-templates are
 	// NOT project-scoped — they apply to a user's personal template library —
@@ -219,6 +224,11 @@ var matrix = func() map[ActionID]string {
 
 		// Audit.
 		ActionAuditRead: model.ProjectRoleAdmin,
+
+		// Secrets — read is metadata-only (no plaintext); write covers
+		// create/rotate/delete and requires editor or higher.
+		ActionSecretRead:  model.ProjectRoleViewer,
+		ActionSecretWrite: model.ProjectRoleEditor,
 
 		// Project templates — save-as-template is admin+ (design decision
 		// #2 in add-project-templates/design.md).

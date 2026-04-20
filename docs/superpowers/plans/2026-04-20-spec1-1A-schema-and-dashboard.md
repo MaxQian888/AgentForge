@@ -268,7 +268,7 @@
 
 ## Task 3 — EmployeeRunsRepository: UNION query
 
-- [ ] Step 3.1 — write failing repo test (nil DB short-circuit + DTO shape)
+- [x] Step 3.1 — write failing repo test (nil DB short-circuit + DTO shape)
   - File: `src-go/internal/repository/employee_runs_repo_test.go` (new)
   - Content:
     ```go
@@ -309,9 +309,9 @@
     }
     ```
 
-- [ ] Step 3.2 — run `cd src-go && go test ./internal/repository/ -run TestEmployeeRunsRepository` — expect compile error: `NewEmployeeRunsRepository`, `EmployeeRunKindAll`, `normalizeRunsPage`, `normalizeRunsSize` undefined
+- [x] Step 3.2 — run `cd src-go && go test ./internal/repository/ -run TestEmployeeRunsRepository` — expect compile error: `NewEmployeeRunsRepository`, `EmployeeRunKindAll`, `normalizeRunsPage`, `normalizeRunsSize` undefined
 
-- [ ] Step 3.3 — implement the repository
+- [x] Step 3.3 — implement the repository
   - File: `src-go/internal/repository/employee_runs_repo.go` (new)
   - Content:
     ```go
@@ -476,9 +476,9 @@
     }
     ```
 
-- [ ] Step 3.4 — run `cd src-go && go test ./internal/repository/ -run TestEmployeeRunsRepository` — expect green
+- [x] Step 3.4 — run `cd src-go && go test ./internal/repository/ -run TestEmployeeRunsRepository` — expect green
 
-- [ ] Step 3.5 — run `rtk git add src-go/internal/repository/employee_runs_repo.go src-go/internal/repository/employee_runs_repo_test.go && rtk git commit -m "feat(workflow): EmployeeRunsRepository.ListByEmployee UNION query (spec1 §7 S5)"`
+- [x] Step 3.5 — run `rtk git add src-go/internal/repository/employee_runs_repo.go src-go/internal/repository/employee_runs_repo_test.go && rtk git commit -m "feat(workflow): EmployeeRunsRepository.ListByEmployee UNION query (spec1 §7 S5)"`
 
 ---
 

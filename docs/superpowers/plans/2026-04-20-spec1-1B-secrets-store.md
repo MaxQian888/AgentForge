@@ -827,7 +827,7 @@
 
 ## Task 5 — RBAC ActionIDs + audit-recorder adapter
 
-- [ ] Step 5.1 — extend RBAC matrix with `secret.read|write`
+- [x] Step 5.1 — extend RBAC matrix with `secret.read|write`
   - File: `src-go/internal/middleware/rbac.go`
   - Add at line 116 (after `ActionAuditRead`):
     ```go
@@ -842,7 +842,7 @@
     ActionSecretWrite: model.ProjectRoleEditor,
     ```
 
-- [ ] Step 5.2 — write audit-recorder adapter test
+- [x] Step 5.2 — write audit-recorder adapter test
   - File: `src-go/internal/secrets/audit_adapter_test.go`
     ```go
     package secrets_test
@@ -889,7 +889,7 @@
     ```
   - Run `rtk go test ./internal/secrets/...` — fails (`NewAuditServiceAdapter` undefined).
 
-- [ ] Step 5.3 — implement adapter forwarding into `service.AuditService`
+- [x] Step 5.3 — implement adapter forwarding into `service.AuditService`
   - File: `src-go/internal/secrets/audit_adapter.go`
     ```go
     package secrets
@@ -936,7 +936,7 @@
   - Note: the production wiring (Task 8) injects a thin shim that calls `auditSvc.RecordEvent(ctx, e)` and adapts the return signature.
   - Run `rtk go test ./internal/secrets/... ./internal/middleware/...` — all pass.
 
-- [ ] Step 5.4 — commit: `feat(secrets): wire RBAC matrix entries and audit-service adapter`
+- [x] Step 5.4 — commit: `feat(secrets): wire RBAC matrix entries and audit-service adapter`
 
 ---
 
