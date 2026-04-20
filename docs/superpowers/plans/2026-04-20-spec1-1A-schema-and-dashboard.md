@@ -484,7 +484,7 @@
 
 ## Task 4 — Handler: GET /api/v1/employees/:id/runs
 
-- [ ] Step 4.1 — write failing handler test
+- [x] Step 4.1 — write failing handler test
   - File: `src-go/internal/handler/employee_runs_handler_test.go` (new)
   - Content:
     ```go
@@ -573,9 +573,9 @@
     }
     ```
 
-- [ ] Step 4.2 — run `cd src-go && go test ./internal/handler/ -run TestEmployeeRunsHandler` — expect compile error: `NewEmployeeRunsHandler` undefined
+- [x] Step 4.2 — run `cd src-go && go test ./internal/handler/ -run TestEmployeeRunsHandler` — expect compile error: `NewEmployeeRunsHandler` undefined
 
-- [ ] Step 4.3 — implement the handler
+- [x] Step 4.3 — implement the handler
   - File: `src-go/internal/handler/employee_runs_handler.go` (new)
   - Content:
     ```go
@@ -670,9 +670,9 @@
     }
     ```
 
-- [ ] Step 4.4 — run `cd src-go && go test ./internal/handler/ -run TestEmployeeRunsHandler` — expect green
+- [x] Step 4.4 — run `cd src-go && go test ./internal/handler/ -run TestEmployeeRunsHandler` — expect green
 
-- [ ] Step 4.5 — run `rtk git add src-go/internal/handler/employee_runs_handler.go src-go/internal/handler/employee_runs_handler_test.go && rtk git commit -m "feat(employees): GET /api/v1/employees/:id/runs handler (spec1 §7 S5)"`
+- [x] Step 4.5 — run `rtk git add src-go/internal/handler/employee_runs_handler.go src-go/internal/handler/employee_runs_handler_test.go && rtk git commit -m "feat(employees): GET /api/v1/employees/:id/runs handler (spec1 §7 S5)"`
 
 ---
 
