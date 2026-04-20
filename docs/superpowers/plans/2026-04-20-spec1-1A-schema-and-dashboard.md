@@ -1159,7 +1159,7 @@
 
 ## Task 8 — RunRow component (presentational)
 
-- [ ] Step 8.1 — write failing component test
+- [x] Step 8.1 — write failing component test
   - File: `components/employees/employee-run-row.test.tsx` (new)
   - Content:
     ```tsx
@@ -1206,9 +1206,9 @@
     });
     ```
 
-- [ ] Step 8.2 — run `pnpm test -- employee-run-row` — expect failure (module not found)
+- [x] Step 8.2 — run `pnpm test -- employee-run-row` — expect failure (module not found)
 
-- [ ] Step 8.3 — implement the component
+- [x] Step 8.3 — implement the component
   - File: `components/employees/employee-run-row.tsx` (new)
   - Content:
     ```tsx
@@ -1282,9 +1282,9 @@
     }
     ```
 
-- [ ] Step 8.4 — run `pnpm test -- employee-run-row` — expect green
+- [x] Step 8.4 — run `pnpm test -- employee-run-row` — expect green
 
-- [ ] Step 8.5 — run `rtk git add components/employees/employee-run-row.tsx components/employees/employee-run-row.test.tsx && rtk git commit -m "feat(fe): EmployeeRunRow presentational component for runs dashboard"`
+- [x] Step 8.5 — run `rtk git add components/employees/employee-run-row.tsx components/employees/employee-run-row.test.tsx && rtk git commit -m "feat(fe): EmployeeRunRow presentational component for runs dashboard"`
 
 ---
 
