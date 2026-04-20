@@ -162,7 +162,7 @@ func (r *Router) RouteWithOutcomes(ctx context.Context, ev Event) ([]Outcome, er
 	outcomes := make([]Outcome, 0, len(triggers))
 
 	for _, trigger := range triggers {
-		if !matchesTrigger(trigger, ev) {
+		if !MatchesTrigger(trigger, ev) {
 			continue
 		}
 
@@ -221,7 +221,7 @@ func (r *Router) RouteWithOutcomes(ctx context.Context, ev Event) ([]Outcome, er
 		}
 
 		// Step b: Input mapping.
-		seed, mappingErr := renderInputMapping(trigger.InputMapping, ev.Data)
+		seed, mappingErr := RenderInputMapping(trigger.InputMapping, ev.Data)
 		if mappingErr != nil {
 			lastErr = mappingErr
 			outcomes = append(outcomes, Outcome{
@@ -269,8 +269,10 @@ func (r *Router) RouteWithOutcomes(ctx context.Context, ev Event) ([]Outcome, er
 	return outcomes, lastErr
 }
 
-// matchesTrigger returns true if ev satisfies the trigger's filter conditions.
-func matchesTrigger(trigger *model.WorkflowTrigger, ev Event) bool {
+// MatchesTrigger returns true if ev satisfies the trigger's filter conditions.
+// Exported in Spec 1C so the trigger CRUD service's dry-run endpoint can
+// reuse the exact same matching logic the live router uses.
+func MatchesTrigger(trigger *model.WorkflowTrigger, ev Event) bool {
 	switch trigger.Source {
 	case model.TriggerSourceIM:
 		return matchesIMTrigger(trigger, ev)
@@ -392,9 +394,11 @@ func lookupPath(root map[string]any, path string) any {
 	return cur
 }
 
-// renderInputMapping renders each string value in the mapping as a template,
-// passing through non-string values unchanged.
-func renderInputMapping(mappingRaw json.RawMessage, data map[string]any) (map[string]any, error) {
+// RenderInputMapping renders each string value in the mapping as a template,
+// passing through non-string values unchanged. Exported in Spec 1C so the
+// trigger CRUD service's dry-run endpoint can preview the input the engine
+// would receive without actually dispatching.
+func RenderInputMapping(mappingRaw json.RawMessage, data map[string]any) (map[string]any, error) {
 	if len(mappingRaw) == 0 {
 		return map[string]any{}, nil
 	}

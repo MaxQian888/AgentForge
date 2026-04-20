@@ -169,7 +169,7 @@
 
 ## Task 3 — Trigger CRUD service layer
 
-- [ ] Step 3.1 — write failing service test for `TriggerService.Create` validation matrix
+- [x] Step 3.1 — write failing service test for `TriggerService.Create` validation matrix
   - New file: `src-go/internal/service/trigger_service_test.go`
   - Cover four cases via mocks:
     - happy path returns the row;
@@ -177,7 +177,14 @@
     - `acting_employee_id` archived → returns `ErrTriggerActingEmployeeArchived`;
     - `acting_employee_id` cross-project → returns `ErrTriggerActingEmployeeArchived`-or-similar (decide one sentinel per spec).
 
-- [ ] Step 3.2 — implement service
+- [x] Step 3.2 — implement service
+
+  **Note (deviation)**: the service lives in `internal/trigger/crud_service.go`
+  (type `*trigger.CRUDService`) instead of `internal/service/trigger_service.go`.
+  Reason: `internal/trigger/engines.go` already imports
+  `internal/service` for the engine adapters, so the inverse direction is
+  forbidden by Go's import-cycle check. The handler boundary is unchanged —
+  callers see `trigger.CRUDService` instead of `service.TriggerService`.
   - New file: `src-go/internal/service/trigger_service.go`:
     ```go
     package service
@@ -265,8 +272,9 @@
     - `Patch` loads via `GetByID`, applies non-nil pointer fields among `Config / InputMapping / ActingEmployeeID / DisplayName / Description / Enabled`, RE-RUNS the `acting_employee_id` validation if changed, calls `Update`. Disallow editing `WorkflowID/Source/CreatedVia` (silently ignored at this layer; the handler enforces the contract).
     - `Delete` loads, returns `ErrTriggerCannotDeleteDAGManaged` if `CreatedVia != "manual"`, else `repo.Delete`.
 
-- [ ] Step 3.3 — verify
-  - Run `rtk go test ./internal/service/... -run TestTrigger` — passes.
+- [x] Step 3.3 — verify
+  - Run `rtk go test ./internal/trigger/... -run TestTriggerService` — passes
+    (path adjusted because service moved into the trigger package).
 
 ---
 
@@ -321,7 +329,13 @@
     - Mock service returns `{matched: true, would_dispatch: true, rendered_input: {"text":"hi"}, skip_reason: ""}`.
     - Assert 200 + JSON shape.
 
-- [ ] Step 5.2 — add `Test(ctx, id, eventPayload)` to TriggerService
+- [x] Step 5.2 — add `Test(ctx, id, eventPayload)` to TriggerService
+
+  **Note (deviation)**: `MatchesTrigger` and `RenderInputMapping` were
+  exported from `internal/trigger/router.go`; `DryRun` + `DryRunResult`
+  live in a new sibling file `internal/trigger/dryrun.go` so the matching
+  logic stays one package away from the live router. The CRUD service's
+  `Test` method delegates straight to `DryRun`.
   - File: `src-go/internal/service/trigger_service.go` add:
     ```go
     type DryRunResult struct {
