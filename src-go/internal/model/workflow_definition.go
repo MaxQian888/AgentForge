@@ -58,6 +58,7 @@ type WorkflowExecution struct {
 	CurrentNodes json.RawMessage `db:"current_nodes" json:"currentNodes" gorm:"type:jsonb"` // array of node IDs currently active
 	Context      json.RawMessage `db:"context" json:"context,omitempty" gorm:"type:jsonb"`  // runtime state
 	DataStore    json.RawMessage `db:"data_store" json:"dataStore,omitempty" gorm:"type:jsonb"` // accumulated node outputs keyed by node ID
+	SystemMetadata   json.RawMessage `db:"system_metadata" json:"systemMetadata,omitempty" gorm:"type:jsonb"`
 	ErrorMessage     string          `db:"error_message" json:"errorMessage,omitempty"`
 	TriggeredBy      *uuid.UUID      `db:"triggered_by" json:"triggeredBy,omitempty"`
 	ActingEmployeeID *uuid.UUID      `db:"acting_employee_id" json:"actingEmployeeId,omitempty"`

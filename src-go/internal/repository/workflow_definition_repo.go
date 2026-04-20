@@ -62,6 +62,7 @@ type workflowExecutionRecord struct {
 	CurrentNodes     rawJSON    `gorm:"column:current_nodes;type:jsonb"`
 	Context          rawJSON    `gorm:"column:context;type:jsonb"`
 	DataStore        rawJSON    `gorm:"column:data_store;type:jsonb"`
+	SystemMetadata   rawJSON    `gorm:"column:system_metadata;type:jsonb"`
 	ErrorMessage     string     `gorm:"column:error_message"`
 	TriggeredBy      *uuid.UUID `gorm:"column:triggered_by"`
 	ActingEmployeeID *uuid.UUID `gorm:"column:acting_employee_id"`
@@ -86,6 +87,7 @@ func (r *workflowExecutionRecord) toModel() *model.WorkflowExecution {
 		CurrentNodes:     r.CurrentNodes.Bytes("[]"),
 		Context:          r.Context.Bytes("{}"),
 		DataStore:        r.DataStore.Bytes("{}"),
+		SystemMetadata:   r.SystemMetadata.Bytes("{}"),
 		ErrorMessage:     r.ErrorMessage,
 		TriggeredBy:      r.TriggeredBy,
 		ActingEmployeeID: r.ActingEmployeeID,
@@ -335,6 +337,7 @@ func (r *WorkflowExecutionRepository) CreateExecution(ctx context.Context, exec 
 		CurrentNodes:     newRawJSON(exec.CurrentNodes, "[]"),
 		Context:          newRawJSON(exec.Context, "{}"),
 		DataStore:        newRawJSON(exec.DataStore, "{}"),
+		SystemMetadata:   newRawJSON(exec.SystemMetadata, "{}"),
 		ErrorMessage:     exec.ErrorMessage,
 		TriggeredBy:      exec.TriggeredBy,
 		ActingEmployeeID: exec.ActingEmployeeID,
@@ -537,6 +540,26 @@ func (r *WorkflowExecutionRepository) UpdateExecutionDataStore(ctx context.Conte
 	result := r.db.WithContext(ctx).Model(&workflowExecutionRecord{}).Where("id = ?", id).Updates(updates)
 	if result.Error != nil {
 		return fmt.Errorf("update workflow execution data_store: %w", result.Error)
+	}
+	return nil
+}
+
+// UpdateExecutionSystemMetadata replaces the system_metadata jsonb document
+// for the execution. Callers MUST pass the full document; this is a
+// last-write-wins replacement intended for backend-internal flags
+// (reply_target, im_dispatched, final_output) that are never written by DAG
+// node code (see spec §6.3).
+func (r *WorkflowExecutionRepository) UpdateExecutionSystemMetadata(ctx context.Context, id uuid.UUID, systemMetadata json.RawMessage) error {
+	if r.db == nil {
+		return ErrDatabaseUnavailable
+	}
+	updates := map[string]any{
+		"system_metadata": newRawJSON(systemMetadata, "{}"),
+		"updated_at":      gorm.Expr("NOW()"),
+	}
+	result := r.db.WithContext(ctx).Model(&workflowExecutionRecord{}).Where("id = ?", id).Updates(updates)
+	if result.Error != nil {
+		return fmt.Errorf("update workflow execution system_metadata: %w", result.Error)
 	}
 	return nil
 }

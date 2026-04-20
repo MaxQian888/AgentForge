@@ -27,7 +27,7 @@
 
 ## Task 1 — Migration 067: workflow_executions.system_metadata
 
-- [ ] Step 1.1 — write failing repo test asserting `system_metadata` round-trips through the workflow execution record
+- [x] Step 1.1 — write failing repo test asserting `system_metadata` round-trips through the workflow execution record
   - File: `src-go/internal/repository/workflow_execution_system_metadata_test.go` (new)
   - Content:
     ```go
@@ -60,16 +60,16 @@
     }
     ```
 
-- [ ] Step 1.2 — run `cd src-go && go test ./internal/repository/ -run TestWorkflowExecutionRecord_SystemMetadataRoundTrip` — expect compile error: `workflowExecutionRecord` has no field `SystemMetadata`, model.WorkflowExecution has no field `SystemMetadata`
+- [x] Step 1.2 — run `cd src-go && go test ./internal/repository/ -run TestWorkflowExecutionRecord_SystemMetadataRoundTrip` — expect compile error: `workflowExecutionRecord` has no field `SystemMetadata`, model.WorkflowExecution has no field `SystemMetadata`
 
-- [ ] Step 1.3 — add `SystemMetadata` to the model
+- [x] Step 1.3 — add `SystemMetadata` to the model
   - File: `src-go/internal/model/workflow_definition.go`
   - In the `WorkflowExecution` struct (lines 52–68), add this field directly after `DataStore` (line 60):
     ```go
     SystemMetadata   json.RawMessage `db:"system_metadata" json:"systemMetadata,omitempty" gorm:"type:jsonb"`
     ```
 
-- [ ] Step 1.4 — extend repository record + mapper
+- [x] Step 1.4 — extend repository record + mapper
   - File: `src-go/internal/repository/workflow_definition_repo.go`
   - In `workflowExecutionRecord` (lines 56–72), add directly after the `DataStore` line (line 64):
     ```go
@@ -84,7 +84,7 @@
     SystemMetadata:   newRawJSON(exec.SystemMetadata, "{}"),
     ```
 
-- [ ] Step 1.5 — add an `UpdateExecutionSystemMetadata` repo method (used by 1D's outbound dispatcher to flip `im_dispatched`; we land it here so 1D can wire without touching the repo)
+- [x] Step 1.5 — add an `UpdateExecutionSystemMetadata` repo method (used by 1D's outbound dispatcher to flip `im_dispatched`; we land it here so 1D can wire without touching the repo)
   - File: `src-go/internal/repository/workflow_definition_repo.go`
   - Add this method directly after `UpdateExecutionDataStore` (after line 542):
     ```go
@@ -109,7 +109,7 @@
     }
     ```
 
-- [ ] Step 1.6 — write the migration
+- [x] Step 1.6 — write the migration
   - File: `src-go/migrations/067_add_workflow_execution_system_metadata.up.sql` (new)
   - Content:
     ```sql
@@ -127,16 +127,16 @@
         ADD COLUMN system_metadata JSONB NOT NULL DEFAULT '{}'::jsonb;
     ```
 
-- [ ] Step 1.7 — write the matching down migration
+- [x] Step 1.7 — write the matching down migration
   - File: `src-go/migrations/067_add_workflow_execution_system_metadata.down.sql` (new)
   - Content:
     ```sql
     ALTER TABLE workflow_executions DROP COLUMN IF EXISTS system_metadata;
     ```
 
-- [ ] Step 1.8 — run `cd src-go && go test ./internal/repository/ -run TestWorkflowExecutionRecord_SystemMetadataRoundTrip` — expect green
+- [x] Step 1.8 — run `cd src-go && go test ./internal/repository/ -run TestWorkflowExecutionRecord_SystemMetadataRoundTrip` — expect green
 
-- [ ] Step 1.9 — run `rtk git add src-go/migrations/067_add_workflow_execution_system_metadata.up.sql src-go/migrations/067_add_workflow_execution_system_metadata.down.sql src-go/internal/model/workflow_definition.go src-go/internal/repository/workflow_definition_repo.go src-go/internal/repository/workflow_execution_system_metadata_test.go && rtk git commit -m "feat(workflow): add system_metadata jsonb column to workflow_executions (spec1 §6.3)"`
+- [x] Step 1.9 — run `rtk git add src-go/migrations/067_add_workflow_execution_system_metadata.up.sql src-go/migrations/067_add_workflow_execution_system_metadata.down.sql src-go/internal/model/workflow_definition.go src-go/internal/repository/workflow_definition_repo.go src-go/internal/repository/workflow_execution_system_metadata_test.go && rtk git commit -m "feat(workflow): add system_metadata jsonb column to workflow_executions (spec1 §6.3)"`
 
 ---
 
