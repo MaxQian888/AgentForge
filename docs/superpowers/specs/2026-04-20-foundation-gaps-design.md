@@ -32,6 +32,7 @@ The "数字员工" (digital employee) surface has CRUD and trigger plumbing, but
 - 多租户密钥层级（org/team/user-scoped secrets） → 后续
 - KMS / Vault 集成；本 Spec 用进程级 master key（env `AGENTFORGE_SECRETS_KEY`） + key_version 字段为后续轮换留口
 - "员工档案"统一活动流（workflow + agent + review 时间线合一） → 后续
+- **Plugin run 出站回写** — 本 Spec 只覆盖 DAG execution 的自动回帖；legacy plugin run 的回帖路径继续沿用现有 review 通道
 
 ## 4. Validated Design Decisions (Q&A trail consolidated)
 
@@ -64,7 +65,7 @@ The "数字员工" (digital employee) surface has CRUD and trigger plumbing, but
 │                                                                │
 │  S2 outbound_dispatcher (新)                                  │
 │      ←── EventWorkflowExecutionCompleted/Failed (现有)         │
-│      └─ 检查 execution metadata 里 "im_dispatched" 标记       │
+│      └─ 检查 execution.system_metadata.im_dispatched 标记       │
 │           ├─ 是 → 跳过                                         │
 │           └─ 否 → render 默认卡片 → IM Bridge.Send(replyTarget)│
 │                                                                │
@@ -145,6 +146,21 @@ ALTER TABLE workflow_triggers
 
 **Registrar 行为变更**：从"删后全插"→"按 (workflow_id, source, config_hash) upsert，仅作用于 `created_via='dag_node'` 行"。FE 创建的 `manual` 行不受 DAG 保存影响。
 
+### 6.3 workflow_executions 字段扩展
+
+调查显示 `WorkflowExecution` 当前结构为 `currentNodes[] / dataStore{} / status`，无系统级元数据袋。新增：
+
+```sql
+ALTER TABLE workflow_executions
+  ADD COLUMN system_metadata jsonb NOT NULL DEFAULT '{}'::jsonb;
+  -- 系统保留键：
+  --   reply_target          {provider, chat_id, thread_id, message_id, tenant_id}
+  --   im_dispatched         bool   ← im_send 节点执行成功后置 true，抑制 outbound_dispatcher 默认回帖
+  --   final_output          jsonb  ← 可选；workflow 作者显式声明的"完成态摘要"
+```
+
+**为什么单独开 `system_metadata` 而不是塞 `dataStore`**：dataStore 是节点 I/O 缓存，作者可读写；系统标记必须与作者数据隔离（避免命名冲突 + 防止作者代码误改 im_dispatched）。trigger_handler 在创建 execution 时把 replyTarget 写入此字段。
+
 ## 7. API Endpoints (new)
 
 ```
@@ -218,12 +234,12 @@ export type CardAction =
 [Feishu] 用户发 "/echo hello"
      IM Bridge inbound → POST /api/v1/triggers/im/events {…, replyTarget}
      trigger_handler.router 匹配 → workflow start
-     execution.metadata.replyTarget = <Feishu thread ref>
+     execution.system_metadata.reply_target = <Feishu thread ref>  # trigger_handler 写入
 
 [DAG runner] 完成 → broadcast EventWorkflowExecutionCompleted
 
 [outbound_dispatcher]
-     execution.metadata.im_dispatched ? skip : continue
+     execution.system_metadata.im_dispatched ? skip : continue
      last node output → ProviderNeutralCard{title, status:'success', summary, footer:exec_id,
        actions:[{type:url, label:'查看详情', url:'/runs/<id>'}]}
      POST IM Bridge /im/send {replyTarget, card}
@@ -244,7 +260,7 @@ DAG: trigger → http_call → im_send(callback buttons) → wait_event → cond
 [im_send] 渲染 card.actions:[{id:'approve', type:'callback', payload:{}}, {id:'reject', ...}]
      对每 callback action 调 card_action_correlations.Create(execution_id, wait_event_node_id, action_id)
         → correlation_token → 写进 button payload
-     execution.metadata.im_dispatched = true   # 抑制 outbound_dispatcher 默认回帖
+     execution.system_metadata.im_dispatched = true   # 抑制 outbound_dispatcher 默认回帖
      POST IM Bridge /im/send
 
 [wait_event] park execution (status=waiting)
@@ -353,6 +369,7 @@ FE Jest
 - **Card payload size 限制**：Feishu 单卡片 JSON 有大小上限；执行 metadata + correlation 信息全塞按钮可能溢出。缓解：correlation_token 是 uuid（36 字节），payload 不放完整 dataStore 而只放 action_id + 用户透传字段。
 - **wait_event resumer 存在性**：调查报告说 `wait_event` 节点已注册但实现"minimal stubs"。本 Spec 假定 resumer 接口已可用；若需补完，纳入本 Spec 实现成本（标记为前置任务）。
 - **Registrar 迁移**：把 "删后全插" 改成 merge 涉及现有数据；需要一个一次性 backfill 脚本把存量行标记 `created_via='dag_node'`。
+- **`system_metadata` 字段尺寸**：默认 jsonb 无硬上限但 reply_target + final_output 期望 < 4 KB；DAG 节点禁止写此字段（在 dataStore 模板引擎里 reject `system_metadata` 引用）。
 
 ## 15. Successor Spec Hooks
 

@@ -3,7 +3,9 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
+	"strings"
 
 	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
@@ -11,6 +13,7 @@ import (
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
+	"github.com/react-go-quick-starter/server/internal/trigger"
 )
 
 type workflowRepository interface {
@@ -66,7 +69,16 @@ type WorkflowReviewRepoInterface interface {
 // Keeping it local means main.go can wire any implementation that
 // matches, including a no-op for test configurations.
 type triggerSyncer interface {
-	SyncFromDefinition(ctx context.Context, workflowID, projectID uuid.UUID, nodes []model.WorkflowNode, createdBy *uuid.UUID) error
+	SyncFromDefinition(ctx context.Context, workflowID, projectID uuid.UUID, nodes []model.WorkflowNode, createdBy *uuid.UUID) ([]trigger.SyncOutcome, error)
+}
+
+// subWorkflowLinkReader is the read-only view of the parent-link repository the
+// handler uses to surface sub-workflow linkage on the execution read DTO. Kept
+// local so main.go can wire any implementation (production repo, in-memory
+// fake) without tying the handler to a concrete package.
+type subWorkflowLinkReader interface {
+	GetByChild(ctx context.Context, engineKind string, childRunID uuid.UUID) (*model.WorkflowRunParentLink, error)
+	ListByParentExecution(ctx context.Context, parentExecutionID uuid.UUID) ([]*model.WorkflowRunParentLink, error)
 }
 
 type WorkflowHandler struct {
@@ -78,6 +90,7 @@ type WorkflowHandler struct {
 	templateSvc    WorkflowTemplateServiceInterface
 	reviewRepo     WorkflowReviewRepoInterface
 	triggerSyncer  triggerSyncer
+	linkReader     subWorkflowLinkReader
 }
 
 func NewWorkflowHandler(repo workflowRepository) *WorkflowHandler {
@@ -114,6 +127,145 @@ func (h *WorkflowHandler) WithReviewRepo(repo WorkflowReviewRepoInterface) *Work
 // Passing nil is safe — the handler skips sync when no syncer is wired.
 func (h *WorkflowHandler) SetTriggerSyncer(s triggerSyncer) {
 	h.triggerSyncer = s
+}
+
+// WithParentLinkReader wires the sub-workflow parent-link reader used by the
+// execution read DTO to expose parent↔child linkage. Passing nil is safe —
+// the handler omits linkage fields when no reader is wired (useful for tests
+// and for deployments where linkage is not yet enabled).
+func (h *WorkflowHandler) WithParentLinkReader(r subWorkflowLinkReader) *WorkflowHandler {
+	h.linkReader = r
+	return h
+}
+
+// --- Sub-workflow save-time validation -------------------------------------
+
+// Rejection reasons emitted by validateSubWorkflowNodes. Machine-readable so
+// clients can render a targeted message per failure mode without parsing the
+// human-facing sentence. See bridge-sub-workflow-invocation task 7.2.
+const (
+	subWorkflowRejectInvalidTargetKind = "invalid_target_kind"
+	subWorkflowRejectUnknownTarget     = "unknown_target"
+	subWorkflowRejectCrossProject      = "cross_project"
+	subWorkflowRejectTrivialSelfLoop   = "trivial_self_loop"
+	subWorkflowRejectMissingTarget     = "missing_target"
+)
+
+// subWorkflowRejection is the JSON body returned on a save-time rejection.
+// Fields are deliberately narrow so the frontend's error surface can drive
+// per-reason UI (e.g. highlighting the offending node in the canvas).
+type subWorkflowRejection struct {
+	Error  string `json:"error"`
+	Reason string `json:"reason"`
+	NodeID string `json:"nodeId,omitempty"`
+	Target string `json:"target,omitempty"`
+}
+
+// validateSubWorkflowNodes walks nodes in the incoming save payload and
+// rejects any `sub_workflow` node whose target is unresolvable, cross-project,
+// or a trivial self-loop. Called before the DB write so bad configs never
+// persist. Deep plugin-runtime validation (e.g. plugin not currently enabled)
+// stays at dispatch time in the applier; save-time validation only enforces
+// invariants the handler can check without pulling the plugin control plane.
+func (h *WorkflowHandler) validateSubWorkflowNodes(ctx context.Context, workflowID uuid.UUID, projectID uuid.UUID, nodes []model.WorkflowNode) *subWorkflowRejection {
+	for i := range nodes {
+		node := &nodes[i]
+		if node.Type != model.NodeTypeSubWorkflow {
+			continue
+		}
+		rej := h.validateSubWorkflowNode(ctx, workflowID, projectID, node)
+		if rej != nil {
+			return rej
+		}
+	}
+	return nil
+}
+
+// validateSubWorkflowNode validates a single sub_workflow node's config.
+func (h *WorkflowHandler) validateSubWorkflowNode(ctx context.Context, workflowID uuid.UUID, projectID uuid.UUID, node *model.WorkflowNode) *subWorkflowRejection {
+	var cfg struct {
+		TargetKind            string `json:"targetKind"`
+		TargetKindSnake       string `json:"target_kind"`
+		TargetWorkflowID      string `json:"targetWorkflowId"`
+		TargetWorkflowIDSnake string `json:"target_workflow_id"`
+		WorkflowID            string `json:"workflowId"`
+	}
+	if len(node.Config) > 0 {
+		_ = json.Unmarshal(node.Config, &cfg)
+	}
+
+	kind := strings.ToLower(strings.TrimSpace(cfg.TargetKind))
+	if kind == "" {
+		kind = strings.ToLower(strings.TrimSpace(cfg.TargetKindSnake))
+	}
+	if kind == "" {
+		kind = "dag"
+	}
+	if kind != "dag" && kind != "plugin" {
+		return &subWorkflowRejection{
+			Error:  fmt.Sprintf("sub_workflow node %q declares unknown targetKind %q", node.ID, kind),
+			Reason: subWorkflowRejectInvalidTargetKind,
+			NodeID: node.ID,
+		}
+	}
+
+	target := strings.TrimSpace(cfg.TargetWorkflowID)
+	if target == "" {
+		target = strings.TrimSpace(cfg.TargetWorkflowIDSnake)
+	}
+	if target == "" {
+		target = strings.TrimSpace(cfg.WorkflowID)
+	}
+	if target == "" {
+		return &subWorkflowRejection{
+			Error:  fmt.Sprintf("sub_workflow node %q is missing targetWorkflowId", node.ID),
+			Reason: subWorkflowRejectMissingTarget,
+			NodeID: node.ID,
+		}
+	}
+
+	if kind == "dag" {
+		targetID, err := uuid.Parse(target)
+		if err != nil {
+			return &subWorkflowRejection{
+				Error:  fmt.Sprintf("sub_workflow node %q has invalid DAG target %q: %v", node.ID, target, err),
+				Reason: subWorkflowRejectUnknownTarget,
+				NodeID: node.ID,
+				Target: target,
+			}
+		}
+		if workflowID != uuid.Nil && targetID == workflowID {
+			return &subWorkflowRejection{
+				Error:  fmt.Sprintf("sub_workflow node %q targets its own workflow", node.ID),
+				Reason: subWorkflowRejectTrivialSelfLoop,
+				NodeID: node.ID,
+				Target: target,
+			}
+		}
+		if h.dagDefRepo != nil {
+			def, err := h.dagDefRepo.GetByID(ctx, targetID)
+			if err != nil || def == nil {
+				return &subWorkflowRejection{
+					Error:  fmt.Sprintf("sub_workflow node %q targets unknown DAG workflow %s", node.ID, target),
+					Reason: subWorkflowRejectUnknownTarget,
+					NodeID: node.ID,
+					Target: target,
+				}
+			}
+			if def.ProjectID != projectID {
+				return &subWorkflowRejection{
+					Error:  fmt.Sprintf("sub_workflow node %q targets cross-project workflow %s", node.ID, target),
+					Reason: subWorkflowRejectCrossProject,
+					NodeID: node.ID,
+					Target: target,
+				}
+			}
+		}
+	}
+	// Plugin-kind targets intentionally skip deep resolution here — the applier
+	// rejects unknown plugins and cross-project plugins at dispatch time with
+	// the same reason taxonomy.
+	return nil
 }
 
 // --- Existing workflow config endpoints ---
@@ -184,6 +336,15 @@ func (h *WorkflowHandler) CreateDefinition(c echo.Context) error {
 		Edges:       edgesJSON,
 	}
 
+	// Validate sub_workflow node targets before persisting. Same-project,
+	// resolvable, no trivial self-loop (uuid.Nil is passed for workflowID
+	// because the def doesn't exist yet — the self-loop check degrades to a
+	// no-op on create, which is correct: a brand-new workflow can't target
+	// itself yet).
+	if rej := h.validateSubWorkflowNodes(c.Request().Context(), uuid.Nil, projectID, req.Nodes); rej != nil {
+		return c.JSON(http.StatusBadRequest, rej)
+	}
+
 	if err := h.dagDefRepo.Create(c.Request().Context(), def); err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToCreateWorkflow)
 	}
@@ -200,7 +361,7 @@ func (h *WorkflowHandler) CreateDefinition(c echo.Context) error {
 			}
 		}
 		// TODO: thread createdBy from auth context
-		if syncErr := h.triggerSyncer.SyncFromDefinition(c.Request().Context(), def.ID, def.ProjectID, nodes, nil); syncErr != nil {
+		if _, syncErr := h.triggerSyncer.SyncFromDefinition(c.Request().Context(), def.ID, def.ProjectID, nodes, nil); syncErr != nil {
 			c.Logger().Errorf("workflow %s: sync triggers after create: %v", def.ID, syncErr)
 			// Same rationale: the workflow was created; trigger sync can be
 			// retried by re-saving. Don't roll back.
@@ -284,6 +445,19 @@ func (h *WorkflowHandler) UpdateDefinition(c echo.Context) error {
 		updates.Edges = edgesJSON
 	}
 
+	// Validate sub_workflow node targets on node-set changes. The current
+	// workflow's project id must be looked up so cross-project checks use the
+	// persistent project, not a caller-supplied override.
+	if req.Nodes != nil {
+		existing, lookupErr := h.dagDefRepo.GetByID(c.Request().Context(), id)
+		if lookupErr != nil {
+			return localizedError(c, http.StatusNotFound, i18n.MsgWorkflowNotFound)
+		}
+		if rej := h.validateSubWorkflowNodes(c.Request().Context(), id, existing.ProjectID, *req.Nodes); rej != nil {
+			return c.JSON(http.StatusBadRequest, rej)
+		}
+	}
+
 	if err := h.dagDefRepo.Update(c.Request().Context(), id, updates); err != nil {
 		return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToUpdateWorkflow)
 	}
@@ -303,7 +477,7 @@ func (h *WorkflowHandler) UpdateDefinition(c echo.Context) error {
 			}
 		}
 		// TODO: thread createdBy from auth context
-		if syncErr := h.triggerSyncer.SyncFromDefinition(c.Request().Context(), updated.ID, updated.ProjectID, nodes, nil); syncErr != nil {
+		if _, syncErr := h.triggerSyncer.SyncFromDefinition(c.Request().Context(), updated.ID, updated.ProjectID, nodes, nil); syncErr != nil {
 			c.Logger().Errorf("workflow %s: sync triggers after update: %v", updated.ID, syncErr)
 			// Trigger sync can be retried by re-saving. Don't roll back.
 		}
@@ -400,6 +574,31 @@ func (h *WorkflowHandler) GetExecution(c echo.Context) error {
 
 	execDTO := exec.ToDTO()
 
+	// Resolve sub-workflow linkage when a reader is wired:
+	//   - subInvocations: parent-link rows originating at this execution
+	//     (this exec started zero or more child runs).
+	//   - invokedByParent: single parent-link row where this exec is the child
+	//     (this exec was started by a parent's sub_workflow node).
+	// Missing reader is a graceful no-op so legacy deployments still respond.
+	var subInvocations []model.WorkflowRunParentLinkDTO
+	var invokedByParent *model.WorkflowRunParentLinkDTO
+	if h.linkReader != nil {
+		ctx := c.Request().Context()
+		if links, listErr := h.linkReader.ListByParentExecution(ctx, id); listErr == nil {
+			subInvocations = make([]model.WorkflowRunParentLinkDTO, 0, len(links))
+			for _, l := range links {
+				if l == nil {
+					continue
+				}
+				subInvocations = append(subInvocations, l.ToDTO())
+			}
+		}
+		if parentLink, getErr := h.linkReader.GetByChild(ctx, model.SubWorkflowEngineDAG, id); getErr == nil && parentLink != nil {
+			dto := parentLink.ToDTO()
+			invokedByParent = &dto
+		}
+	}
+
 	// Also include node executions if available
 	if h.dagNodeRepo != nil {
 		nodeExecs, err := h.dagNodeRepo.ListNodeExecutions(c.Request().Context(), id)
@@ -409,13 +608,19 @@ func (h *WorkflowHandler) GetExecution(c echo.Context) error {
 				nodeExecDTOs[i] = ne.ToDTO()
 			}
 			return c.JSON(http.StatusOK, map[string]any{
-				"execution":      execDTO,
-				"nodeExecutions": nodeExecDTOs,
+				"execution":       execDTO,
+				"nodeExecutions":  nodeExecDTOs,
+				"subInvocations":  subInvocations,
+				"invokedByParent": invokedByParent,
 			})
 		}
 	}
 
-	return c.JSON(http.StatusOK, execDTO)
+	return c.JSON(http.StatusOK, map[string]any{
+		"execution":       execDTO,
+		"subInvocations":  subInvocations,
+		"invokedByParent": invokedByParent,
+	})
 }
 
 // CancelExecution cancels a running execution.

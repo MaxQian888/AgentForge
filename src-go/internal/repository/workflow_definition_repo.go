@@ -54,20 +54,21 @@ func (r *workflowDefinitionRecord) toModel() *model.WorkflowDefinition {
 }
 
 type workflowExecutionRecord struct {
-	ID           uuid.UUID  `gorm:"column:id;primaryKey"`
-	WorkflowID   uuid.UUID  `gorm:"column:workflow_id"`
-	ProjectID    uuid.UUID  `gorm:"column:project_id"`
-	TaskID       *uuid.UUID `gorm:"column:task_id"`
-	Status       string     `gorm:"column:status"`
-	CurrentNodes rawJSON    `gorm:"column:current_nodes;type:jsonb"`
-	Context      rawJSON    `gorm:"column:context;type:jsonb"`
-	DataStore    rawJSON    `gorm:"column:data_store;type:jsonb"`
-	ErrorMessage string     `gorm:"column:error_message"`
-	TriggeredBy  *uuid.UUID `gorm:"column:triggered_by"`
-	StartedAt    *time.Time `gorm:"column:started_at"`
-	CompletedAt  *time.Time `gorm:"column:completed_at"`
-	CreatedAt    time.Time  `gorm:"column:created_at"`
-	UpdatedAt    time.Time  `gorm:"column:updated_at"`
+	ID               uuid.UUID  `gorm:"column:id;primaryKey"`
+	WorkflowID       uuid.UUID  `gorm:"column:workflow_id"`
+	ProjectID        uuid.UUID  `gorm:"column:project_id"`
+	TaskID           *uuid.UUID `gorm:"column:task_id"`
+	Status           string     `gorm:"column:status"`
+	CurrentNodes     rawJSON    `gorm:"column:current_nodes;type:jsonb"`
+	Context          rawJSON    `gorm:"column:context;type:jsonb"`
+	DataStore        rawJSON    `gorm:"column:data_store;type:jsonb"`
+	ErrorMessage     string     `gorm:"column:error_message"`
+	TriggeredBy      *uuid.UUID `gorm:"column:triggered_by"`
+	ActingEmployeeID *uuid.UUID `gorm:"column:acting_employee_id"`
+	StartedAt        *time.Time `gorm:"column:started_at"`
+	CompletedAt      *time.Time `gorm:"column:completed_at"`
+	CreatedAt        time.Time  `gorm:"column:created_at"`
+	UpdatedAt        time.Time  `gorm:"column:updated_at"`
 }
 
 func (workflowExecutionRecord) TableName() string { return "workflow_executions" }
@@ -77,20 +78,21 @@ func (r *workflowExecutionRecord) toModel() *model.WorkflowExecution {
 		return nil
 	}
 	return &model.WorkflowExecution{
-		ID:           r.ID,
-		WorkflowID:   r.WorkflowID,
-		ProjectID:    r.ProjectID,
-		TaskID:       r.TaskID,
-		Status:       r.Status,
-		CurrentNodes: r.CurrentNodes.Bytes("[]"),
-		Context:      r.Context.Bytes("{}"),
-		DataStore:    r.DataStore.Bytes("{}"),
-		ErrorMessage: r.ErrorMessage,
-		TriggeredBy:  r.TriggeredBy,
-		StartedAt:    r.StartedAt,
-		CompletedAt:  r.CompletedAt,
-		CreatedAt:    r.CreatedAt,
-		UpdatedAt:    r.UpdatedAt,
+		ID:               r.ID,
+		WorkflowID:       r.WorkflowID,
+		ProjectID:        r.ProjectID,
+		TaskID:           r.TaskID,
+		Status:           r.Status,
+		CurrentNodes:     r.CurrentNodes.Bytes("[]"),
+		Context:          r.Context.Bytes("{}"),
+		DataStore:        r.DataStore.Bytes("{}"),
+		ErrorMessage:     r.ErrorMessage,
+		TriggeredBy:      r.TriggeredBy,
+		ActingEmployeeID: r.ActingEmployeeID,
+		StartedAt:        r.StartedAt,
+		CompletedAt:      r.CompletedAt,
+		CreatedAt:        r.CreatedAt,
+		UpdatedAt:        r.UpdatedAt,
 	}
 }
 
@@ -325,18 +327,19 @@ func (r *WorkflowExecutionRepository) CreateExecution(ctx context.Context, exec 
 		return ErrDatabaseUnavailable
 	}
 	record := &workflowExecutionRecord{
-		ID:           exec.ID,
-		WorkflowID:   exec.WorkflowID,
-		ProjectID:    exec.ProjectID,
-		TaskID:       exec.TaskID,
-		Status:       exec.Status,
-		CurrentNodes: newRawJSON(exec.CurrentNodes, "[]"),
-		Context:      newRawJSON(exec.Context, "{}"),
-		DataStore:    newRawJSON(exec.DataStore, "{}"),
-		ErrorMessage: exec.ErrorMessage,
-		TriggeredBy:  exec.TriggeredBy,
-		StartedAt:    exec.StartedAt,
-		CompletedAt:  exec.CompletedAt,
+		ID:               exec.ID,
+		WorkflowID:       exec.WorkflowID,
+		ProjectID:        exec.ProjectID,
+		TaskID:           exec.TaskID,
+		Status:           exec.Status,
+		CurrentNodes:     newRawJSON(exec.CurrentNodes, "[]"),
+		Context:          newRawJSON(exec.Context, "{}"),
+		DataStore:        newRawJSON(exec.DataStore, "{}"),
+		ErrorMessage:     exec.ErrorMessage,
+		TriggeredBy:      exec.TriggeredBy,
+		ActingEmployeeID: exec.ActingEmployeeID,
+		StartedAt:        exec.StartedAt,
+		CompletedAt:      exec.CompletedAt,
 	}
 	if err := r.db.WithContext(ctx).Create(record).Error; err != nil {
 		return fmt.Errorf("create workflow execution: %w", err)
@@ -362,6 +365,98 @@ func (r *WorkflowExecutionRepository) ListExecutions(ctx context.Context, workfl
 	var records []workflowExecutionRecord
 	if err := r.db.WithContext(ctx).Where("workflow_id = ?", workflowID).Order("created_at DESC").Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list workflow executions: %w", err)
+	}
+	result := make([]*model.WorkflowExecution, len(records))
+	for i := range records {
+		result[i] = records[i].toModel()
+	}
+	return result, nil
+}
+
+// ListExecutionsByActingEmployee returns every workflow execution whose
+// acting_employee_id matches the given employee, ordered by created_at DESC.
+// Used by the attribution read surface so "list runs acting as employee X"
+// needs no agent_run JOIN.
+func (r *WorkflowExecutionRepository) ListExecutionsByActingEmployee(ctx context.Context, employeeID uuid.UUID) ([]*model.WorkflowExecution, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	var records []workflowExecutionRecord
+	if err := r.db.WithContext(ctx).
+		Where("acting_employee_id = ?", employeeID).
+		Order("created_at DESC").
+		Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list workflow executions by acting employee: %w", err)
+	}
+	result := make([]*model.WorkflowExecution, len(records))
+	for i := range records {
+		result[i] = records[i].toModel()
+	}
+	return result, nil
+}
+
+// WorkflowExecutionListFilter narrows a project-scoped DAG workflow execution
+// listing. All fields are optional; zero values mean "no filter on this
+// dimension". Used by the unified workflow-run view service so DAG execution
+// filtering happens at the SQL layer before the cross-engine merge.
+type WorkflowExecutionListFilter struct {
+	Statuses         []string
+	ActingEmployeeID *uuid.UUID
+	TriggerID        *uuid.UUID
+	TriggeredByKind  string
+	StartedAfter     *time.Time
+	StartedBefore    *time.Time
+}
+
+// ListByProjectFiltered returns DAG workflow executions for the given project,
+// newest-first (started_at DESC, id DESC as tiebreaker), narrowed by the
+// supplied filter. A zero or negative limit returns every match; callers pass
+// their per-engine fetch budget.
+func (r *WorkflowExecutionRepository) ListByProjectFiltered(ctx context.Context, projectID uuid.UUID, filter WorkflowExecutionListFilter, limit int) ([]*model.WorkflowExecution, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	q := r.db.WithContext(ctx).Model(&workflowExecutionRecord{}).Where("project_id = ?", projectID)
+	if len(filter.Statuses) > 0 {
+		q = q.Where("status IN ?", filter.Statuses)
+	}
+	if filter.ActingEmployeeID != nil {
+		q = q.Where("acting_employee_id = ?", *filter.ActingEmployeeID)
+	}
+	if filter.TriggerID != nil {
+		q = q.Where("triggered_by = ?", *filter.TriggerID)
+	}
+	if filter.TriggeredByKind != "" {
+		switch filter.TriggeredByKind {
+		case "trigger":
+			q = q.Where("triggered_by IS NOT NULL")
+		case "manual":
+			q = q.Where("triggered_by IS NULL")
+		case "sub_workflow":
+			// Sub-workflow children are materialized by the parent-link table;
+			// the DAG execution itself doesn't carry a "sub_workflow" flag, so
+			// we filter on the link table via a subquery.
+			q = q.Where("id IN (?)", r.db.WithContext(ctx).
+				Table("workflow_run_parent_link").
+				Select("child_run_id").
+				Where("child_engine_kind = ?", model.SubWorkflowEngineDAG))
+		default:
+			q = q.Where("1 = 0")
+		}
+	}
+	if filter.StartedAfter != nil {
+		q = q.Where("started_at > ?", *filter.StartedAfter)
+	}
+	if filter.StartedBefore != nil {
+		q = q.Where("started_at < ?", *filter.StartedBefore)
+	}
+	q = q.Order("started_at DESC NULLS LAST").Order("id DESC")
+	if limit > 0 {
+		q = q.Limit(limit)
+	}
+	var records []workflowExecutionRecord
+	if err := q.Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list workflow executions by project filtered: %w", err)
 	}
 	result := make([]*model.WorkflowExecution, len(records))
 	for i := range records {

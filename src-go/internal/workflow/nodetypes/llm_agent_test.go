@@ -298,3 +298,109 @@ func TestLLMAgentHandler_EmployeeIDInvalidIgnored(t *testing.T) {
 		t.Errorf("expected empty EmployeeID for invalid input, got %q", p.EmployeeID)
 	}
 }
+
+// ---------------------------------------------------------------------------
+// Section 5.3 — fallback precedence tests for acting_employee_id
+// (change bridge-employee-attribution-legacy).
+// ---------------------------------------------------------------------------
+
+// Node-level override beats run-level acting_employee_id.
+func TestLLMAgentHandler_NodeConfigOverridesRunLevelActingEmployee(t *testing.T) {
+	taskID := uuid.New()
+	runEmp := uuid.New()
+	nodeEmp := uuid.New()
+	req := &NodeExecRequest{
+		Execution: &model.WorkflowExecution{
+			TaskID:           &taskID,
+			ActingEmployeeID: &runEmp,
+		},
+		Config: map[string]any{
+			"runtime":    "claude_code",
+			"roleId":     "code-reviewer",
+			"employeeId": nodeEmp.String(),
+		},
+	}
+	res, err := LLMAgentHandler{}.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var p SpawnAgentPayload
+	_ = json.Unmarshal(res.Effects[0].Payload, &p)
+	if p.EmployeeID != nodeEmp.String() {
+		t.Errorf("expected node override EmployeeID=%s, got %q", nodeEmp, p.EmployeeID)
+	}
+}
+
+// Run-level default applies when node config has no employeeId.
+func TestLLMAgentHandler_FallsBackToRunLevelActingEmployee(t *testing.T) {
+	taskID := uuid.New()
+	runEmp := uuid.New()
+	req := &NodeExecRequest{
+		Execution: &model.WorkflowExecution{
+			TaskID:           &taskID,
+			ActingEmployeeID: &runEmp,
+		},
+		Config: map[string]any{
+			"runtime": "claude_code",
+			"roleId":  "code-reviewer",
+			// no employeeId
+		},
+	}
+	res, err := LLMAgentHandler{}.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var p SpawnAgentPayload
+	_ = json.Unmarshal(res.Effects[0].Payload, &p)
+	if p.EmployeeID != runEmp.String() {
+		t.Errorf("expected run-level EmployeeID=%s, got %q", runEmp, p.EmployeeID)
+	}
+}
+
+// Both absent → EmployeeID remains empty, preserving current behavior.
+func TestLLMAgentHandler_BothAbsentEmployeeIDRemainsEmpty(t *testing.T) {
+	taskID := uuid.New()
+	req := &NodeExecRequest{
+		Execution: &model.WorkflowExecution{TaskID: &taskID},
+		Config: map[string]any{
+			"runtime": "claude_code",
+			"roleId":  "code-reviewer",
+		},
+	}
+	res, err := LLMAgentHandler{}.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var p SpawnAgentPayload
+	_ = json.Unmarshal(res.Effects[0].Payload, &p)
+	if p.EmployeeID != "" {
+		t.Errorf("expected empty EmployeeID, got %q", p.EmployeeID)
+	}
+}
+
+// Invalid node-config employeeId with run-level fallback available:
+// invalid node value is ignored, run-level wins.
+func TestLLMAgentHandler_InvalidNodeIDFallsBackToRunLevel(t *testing.T) {
+	taskID := uuid.New()
+	runEmp := uuid.New()
+	req := &NodeExecRequest{
+		Execution: &model.WorkflowExecution{
+			TaskID:           &taskID,
+			ActingEmployeeID: &runEmp,
+		},
+		Config: map[string]any{
+			"runtime":    "claude_code",
+			"roleId":     "code-reviewer",
+			"employeeId": "not-a-uuid",
+		},
+	}
+	res, err := LLMAgentHandler{}.Execute(context.Background(), req)
+	if err != nil {
+		t.Fatalf("Execute: %v", err)
+	}
+	var p SpawnAgentPayload
+	_ = json.Unmarshal(res.Effects[0].Payload, &p)
+	if p.EmployeeID != runEmp.String() {
+		t.Errorf("expected fallback EmployeeID=%s, got %q", runEmp, p.EmployeeID)
+	}
+}

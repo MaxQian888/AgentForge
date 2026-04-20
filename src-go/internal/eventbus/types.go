@@ -80,6 +80,12 @@ const (
 	EventWorkflowNodeWaiting        = "workflow.node.waiting"
 	EventWorkflowReviewRequested    = "workflow.review.requested"
 	EventWorkflowReviewResolved     = "workflow.review.resolved"
+
+	// Unified cross-engine workflow-run events (bridge-unified-run-view).
+	// Emitted alongside the engine-native channels; payload is a
+	// service.UnifiedRunRow so frontend subscribers stay engine-agnostic.
+	EventWorkflowRunStatusChanged = "workflow.run.status_changed"
+	EventWorkflowRunTerminal      = "workflow.run.terminal"
 )
 
 // Event types pushed from the TS bridge into Go orchestration.

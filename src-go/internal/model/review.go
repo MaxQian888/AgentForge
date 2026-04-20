@@ -133,6 +133,11 @@ type TriggerReviewRequest struct {
 	Dimensions   []string `json:"dimensions"`
 	ChangedFiles []string `json:"changedFiles"`
 	Diff         string   `json:"diff"`
+	// ActingEmployeeID is the UUID of the Digital Employee this review should
+	// be attributed to (empty when unattributed). Set by the legacy workflow
+	// step router when its `review` step declares an `employee_id` or inherits
+	// the run-level acting_employee_id (change bridge-employee-attribution-legacy).
+	ActingEmployeeID string `json:"actingEmployeeId,omitempty"`
 }
 
 type CIReviewRequest struct {

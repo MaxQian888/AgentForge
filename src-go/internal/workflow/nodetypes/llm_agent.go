@@ -59,11 +59,19 @@ func (LLMAgentHandler) Execute(_ context.Context, req *NodeExecRequest) (*NodeEx
 		}
 	}
 
+	// Effective employee id resolution (change bridge-employee-attribution-legacy):
+	// precedence is node-config override > run-level acting_employee_id > null.
+	// An explicit node-config override always wins, even if the run record
+	// carries a different acting employee. When the node config is absent or
+	// malformed, fall back to the run's run-level default.
 	employeeID := ""
 	if eid, ok := req.Config["employeeId"].(string); ok && eid != "" {
 		if _, err := uuid.Parse(eid); err == nil {
 			employeeID = eid
 		}
+	}
+	if employeeID == "" && req.Execution != nil && req.Execution.ActingEmployeeID != nil {
+		employeeID = req.Execution.ActingEmployeeID.String()
 	}
 
 	payload, _ := json.Marshal(SpawnAgentPayload{

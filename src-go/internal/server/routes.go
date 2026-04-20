@@ -543,6 +543,20 @@ func RegisterRoutes(
 	dagWorkflowSvc.SetRunMappingRepo(dagRunMappingRepo)
 	dagWorkflowSvc.SetReviewRepo(wfReviewRepo)
 	dagWorkflowSvc.SetProjectStatusLookup(projectRepo)
+
+	// Sub-workflow wiring: persist parent↔child linkage rows, install the
+	// recursion guard (walks the parent chain via the link repo), and wire
+	// the DAG engine adapter. Plugin engine adapter is registered later,
+	// once the workflow plugin runtime is constructed.
+	parentLinkRepo := repository.NewWorkflowRunParentLinkRepository(taskRepo.DB())
+	dagWorkflowSvc.SetParentLinkRepo(parentLinkRepo)
+	linkRepoAdapter := service.NewSubWorkflowLinkRepoAdapter(parentLinkRepo)
+	effectApplier.SubWorkflowLinks = linkRepoAdapter
+	effectApplier.SubWorkflowGuard = nodetypes.NewRecursionGuard(linkRepoAdapter, dagWorkflowSvc, nodetypes.MaxSubWorkflowDepth)
+	effectApplier.SubWorkflowEngines = nodetypes.NewSubWorkflowEngineRegistry(
+		service.NewDAGSubWorkflowEngine(dagWorkflowSvc, dagDefRepo),
+	)
+
 	if agentSvc != nil {
 		effectApplier.AgentSpawner = agentSvc
 		agentSvc.SetDAGWorkflowService(dagWorkflowSvc)
@@ -552,8 +566,13 @@ func RegisterRoutes(
 	// workflow_triggers rows on workflow save; router matches incoming events
 	// and starts executions via StartOptions.
 	triggerRepo := repository.NewWorkflowTriggerRepository(taskRepo.DB())
-	triggerRegistrar := trigger.NewRegistrar(triggerRepo)
-	triggerRouter := trigger.NewRouter(triggerRepo, dagWorkflowSvc, trigger.NoopIdempotencyStore{})
+	triggerRegistrar := trigger.NewRegistrar(triggerRepo).
+		WithDAGResolver(dagDefRepo)
+	triggerRouter := trigger.NewRouter(
+		triggerRepo,
+		trigger.NoopIdempotencyStore{},
+		trigger.NewDAGEngineAdapter(dagWorkflowSvc),
+	)
 	workflowH.SetTriggerSyncer(triggerRegistrar)
 	triggerH := handler.NewTriggerHandler(triggerRouter).WithQueryRepo(triggerRepo)
 	triggerH.RegisterRoutes(e)
@@ -564,7 +583,8 @@ func RegisterRoutes(
 	// server's shutdown context on main exit.
 	go trigger.NewScheduleTicker(triggerRepo, triggerRouter, nil).Run(context.Background())
 
-	workflowH = workflowH.WithDAGService(dagWorkflowSvc, dagDefRepo, dagExecRepo, dagNodeExecRepo)
+	workflowH = workflowH.WithDAGService(dagWorkflowSvc, dagDefRepo, dagExecRepo, dagNodeExecRepo).
+		WithParentLinkReader(parentLinkRepo)
 	// Template and review services
 	templateSvc := service.NewWorkflowTemplateService(dagDefRepo, dagWorkflowSvc)
 	workflowH = workflowH.WithTemplateService(templateSvc)
@@ -771,13 +791,43 @@ func RegisterRoutes(
 	costQuerySvc := service.NewCostQueryService(taskRepo, sprintRepo, agentRunRepo, budgetSvc)
 	costH := handler.NewCostHandler(costQuerySvc)
 	workflowRunRepo := repository.NewWorkflowPluginRunRepository()
+	stepRouter := service.NewWorkflowStepRouterExecutor(agentSvc, reviewSvc, dispatchSvc).
+		WithDAGChildStarter(service.NewWorkflowStepDAGChildAdapter(dagWorkflowSvc), parentLinkRepo).
+		WithCrossEngineRecursionGuard(effectApplier.SubWorkflowGuard)
 	workflowExec := service.NewWorkflowExecutionService(
 		pluginSvc,
 		workflowRunRepo,
 		workflowRoleStore,
-		service.NewWorkflowStepRouterExecutor(agentSvc, reviewSvc, dispatchSvc),
+		stepRouter,
 	)
+	// Wire the plugin-runtime resumer so the DAG service's terminal-state hook
+	// can resume a parked plugin parent when a DAG child with parent_kind
+	// ='plugin_run' terminates (bridge-legacy-to-dag-invocation).
+	dagWorkflowSvc.SetPluginRunResumer(workflowExec)
+	// Unified workflow.run.* WS fan-out. Both engines publish lifecycle
+	// transitions through this emitter in addition to their existing
+	// engine-native channels (bridge-unified-run-view).
+	workflowRunEmitter := service.NewWorkflowRunEventEmitter(bus)
+	workflowExec.SetRunEmitter(workflowRunEmitter)
+	dagWorkflowSvc.SetRunEmitter(workflowRunEmitter)
+	// Cross-engine workflow run view — composes DAG executions and plugin
+	// runs into a single project-scoped read surface (bridge-unified-run-view).
+	workflowRunViewSvc := service.NewWorkflowRunViewService(dagExecRepo, workflowRunRepo, dagDefRepo).
+		WithNodeRepo(dagNodeExecRepo).
+		WithParentLinkRepo(parentLinkRepo)
+	workflowRunViewH := handler.NewWorkflowRunViewHandler(workflowRunViewSvc)
 	automationEngine.SetWorkflowStarter(workflowExec)
+	// Register the plugin engine adapter now that the workflow plugin runtime
+	// is wired. Trigger rows whose target_kind is "plugin" will dispatch here.
+	triggerRouter.RegisterEngine(trigger.NewPluginEngineAdapter(workflowExec))
+	triggerRegistrar.WithPluginResolver(pluginSvc)
+	// Register the plugin sub-workflow engine so DAG sub_workflow nodes
+	// targeting legacy workflow plugins dispatch through the same start seam
+	// the trigger router uses. Also wire the terminal-state bridge so a plugin
+	// run that started as a sub-workflow child resumes the parent DAG node
+	// when it reaches completed/failed/cancelled.
+	effectApplier.SubWorkflowEngines.Register(service.NewPluginSubWorkflowEngine(workflowExec, pluginSvc))
+	workflowExec.RegisterTerminalObserver(&service.PluginSubWorkflowTerminalBridge{DAG: dagWorkflowSvc})
 	taskWorkflowSvc := service.NewTaskWorkflowService(workflowRepo, hub, bus)
 	taskWorkflowSvc.SetTaskRepository(taskRepo)
 	taskWorkflowSvc.SetNotifier(notifRepo)
@@ -787,7 +837,9 @@ func RegisterRoutes(
 		taskWorkflowSvc.SetDispatcher(dispatchSvc)
 	}
 	taskH = taskH.WithWorkflowService(taskWorkflowSvc)
-	pluginH := handler.NewPluginHandler(pluginSvc).WithWorkflowExecution(workflowExec)
+	pluginH := handler.NewPluginHandler(pluginSvc).
+		WithWorkflowExecution(workflowExec).
+		WithParentLinkReader(parentLinkRepo)
 	schedulerH := handler.NewSchedulerHandler(schedulerSvc)
 
 	// JWT protected routes
@@ -975,6 +1027,11 @@ func RegisterRoutes(
 
 	// Workflow reviews
 	projectGroup.GET("/workflow-reviews", workflowH.ListPendingReviews, appMiddleware.Require(appMiddleware.ActionWorkflowRead))
+
+	// Unified workflow-run list + detail (cross-engine: DAG executions and
+	// legacy workflow plugin runs through the same project-scoped lens).
+	projectGroup.GET("/workflow-runs", workflowRunViewH.List, appMiddleware.Require(appMiddleware.ActionWorkflowRead))
+	projectGroup.GET("/workflow-runs/:engine/:id", workflowRunViewH.Detail, appMiddleware.Require(appMiddleware.ActionWorkflowRead))
 
 	// Employee resource (persistent agent entities with role binding and lifecycle state).
 	employeeH := handler.NewEmployeeHandler(employeeSvc)

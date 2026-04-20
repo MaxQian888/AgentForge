@@ -16,6 +16,7 @@ import (
 	appMiddleware "github.com/react-go-quick-starter/server/internal/middleware"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/service"
+	"github.com/react-go-quick-starter/server/internal/trigger"
 )
 
 type fakeWorkflowRepo struct {
@@ -257,9 +258,9 @@ type recordingTriggerSyncer struct {
 	err   error
 }
 
-func (r *recordingTriggerSyncer) SyncFromDefinition(_ context.Context, wid, pid uuid.UUID, nodes []model.WorkflowNode, _ *uuid.UUID) error {
+func (r *recordingTriggerSyncer) SyncFromDefinition(_ context.Context, wid, pid uuid.UUID, nodes []model.WorkflowNode, _ *uuid.UUID) ([]trigger.SyncOutcome, error) {
 	r.calls = append(r.calls, syncCall{wid, pid, nodes})
-	return r.err
+	return nil, r.err
 }
 
 // --- Trigger sync tests ---
@@ -381,6 +382,232 @@ func TestUpdateDefinition_TriggersSyncWhenNodesChange(t *testing.T) {
 			t.Fatalf("SyncFromDefinition call count = %d, want 0 (metadata-only update)", len(syncer2.calls))
 		}
 	})
+}
+
+// --- Sub_workflow linkage exposure on GetExecution ---
+
+// fakeParentLinkReader implements subWorkflowLinkReader (package-local) via
+// two closure fields. Enough for the two scenarios covered below.
+type fakeParentLinkReader struct {
+	byChild func(engineKind string, childRunID uuid.UUID) (*model.WorkflowRunParentLink, error)
+	byParent func(parentExecutionID uuid.UUID) ([]*model.WorkflowRunParentLink, error)
+}
+
+func (f *fakeParentLinkReader) GetByChild(_ context.Context, engineKind string, childRunID uuid.UUID) (*model.WorkflowRunParentLink, error) {
+	if f.byChild == nil {
+		return nil, errors.New("not configured")
+	}
+	return f.byChild(engineKind, childRunID)
+}
+
+func (f *fakeParentLinkReader) ListByParentExecution(_ context.Context, parentExecutionID uuid.UUID) ([]*model.WorkflowRunParentLink, error) {
+	if f.byParent == nil {
+		return nil, nil
+	}
+	return f.byParent(parentExecutionID)
+}
+
+// fakeDAGExecRepo satisfies DAGWorkflowExecRepoInterface for the linkage tests.
+type fakeDAGExecRepo struct {
+	exec *model.WorkflowExecution
+}
+
+func (r *fakeDAGExecRepo) GetExecution(_ context.Context, _ uuid.UUID) (*model.WorkflowExecution, error) {
+	if r.exec == nil {
+		return nil, errors.New("not found")
+	}
+	return r.exec, nil
+}
+
+func (r *fakeDAGExecRepo) ListExecutions(_ context.Context, _ uuid.UUID) ([]*model.WorkflowExecution, error) {
+	return nil, nil
+}
+
+func TestGetExecution_ExposesSubInvocationsAndInvokedByParent(t *testing.T) {
+	execID := uuid.New()
+	parentExecID := uuid.New()
+	childRunID := uuid.New()
+
+	execRepo := &fakeDAGExecRepo{exec: &model.WorkflowExecution{
+		ID:        execID,
+		ProjectID: uuid.New(),
+		Status:    model.WorkflowExecStatusPaused,
+	}}
+
+	reader := &fakeParentLinkReader{
+		byChild: func(engineKind string, cid uuid.UUID) (*model.WorkflowRunParentLink, error) {
+			if engineKind == model.SubWorkflowEngineDAG && cid == execID {
+				return &model.WorkflowRunParentLink{
+					ID:                uuid.New(),
+					ParentExecutionID: parentExecID,
+					ParentNodeID:      "sub-1",
+					ChildEngineKind:   model.SubWorkflowEngineDAG,
+					ChildRunID:        execID,
+					Status:            model.SubWorkflowLinkStatusRunning,
+				}, nil
+			}
+			return nil, errors.New("not found")
+		},
+		byParent: func(pid uuid.UUID) ([]*model.WorkflowRunParentLink, error) {
+			if pid == execID {
+				return []*model.WorkflowRunParentLink{
+					{
+						ID:                uuid.New(),
+						ParentExecutionID: execID,
+						ParentNodeID:      "downstream-sub",
+						ChildEngineKind:   model.SubWorkflowEnginePlugin,
+						ChildRunID:        childRunID,
+						Status:            model.SubWorkflowLinkStatusCompleted,
+					},
+				}, nil
+			}
+			return nil, nil
+		},
+	}
+
+	h := handler.NewWorkflowHandler(&fakeWorkflowRepo{}).
+		WithDAGService(nil, nil, execRepo, nil).
+		WithParentLinkReader(reader)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(execID.String())
+
+	if err := h.GetExecution(c); err != nil {
+		t.Fatalf("GetExecution error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+
+	invokedByParent, ok := parsed["invokedByParent"].(map[string]any)
+	if !ok {
+		t.Fatalf("invokedByParent missing or wrong shape: %v", parsed)
+	}
+	if got, _ := invokedByParent["parentExecutionId"].(string); got != parentExecID.String() {
+		t.Errorf("invokedByParent.parentExecutionId = %v, want %s", invokedByParent["parentExecutionId"], parentExecID)
+	}
+
+	subInvocations, ok := parsed["subInvocations"].([]any)
+	if !ok {
+		t.Fatalf("subInvocations missing or wrong shape: %v", parsed)
+	}
+	if len(subInvocations) != 1 {
+		t.Fatalf("subInvocations len = %d, want 1", len(subInvocations))
+	}
+	first, _ := subInvocations[0].(map[string]any)
+	if got, _ := first["childRunId"].(string); got != childRunID.String() {
+		t.Errorf("subInvocations[0].childRunId = %v, want %s", got, childRunID)
+	}
+}
+
+// --- Sub_workflow save-time validation tests ------------------------------
+
+func TestUpdateDefinition_RejectsCrossProjectSubWorkflow(t *testing.T) {
+	projectA := uuid.New()
+	projectB := uuid.New()
+	parentWorkflowID := uuid.New()
+	targetWorkflowID := uuid.New()
+
+	defRepo := &fakeDAGDefRepo{}
+	defRepo.getByIDFn = func(id uuid.UUID) (*model.WorkflowDefinition, error) {
+		switch id {
+		case parentWorkflowID:
+			return &model.WorkflowDefinition{ID: id, ProjectID: projectA}, nil
+		case targetWorkflowID:
+			return &model.WorkflowDefinition{ID: id, ProjectID: projectB}, nil
+		}
+		return nil, errors.New("not found")
+	}
+
+	e := echo.New()
+	body := `{"nodes":[{"id":"sub-x","type":"sub_workflow","config":{"targetKind":"dag","targetWorkflowId":"` + targetWorkflowID.String() + `"}}]}`
+	req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(parentWorkflowID.String())
+
+	h := handler.NewWorkflowHandler(&fakeWorkflowRepo{}).WithDAGService(nil, defRepo, nil, nil)
+
+	if err := h.UpdateDefinition(c); err != nil {
+		t.Fatalf("UpdateDefinition() error: %v", err)
+	}
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var parsed map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &parsed)
+	if parsed["reason"] != "cross_project" {
+		t.Fatalf("reason = %v, want cross_project; body: %s", parsed["reason"], rec.Body.String())
+	}
+}
+
+func TestUpdateDefinition_RejectsTrivialSelfLoop(t *testing.T) {
+	projectID := uuid.New()
+	parentWorkflowID := uuid.New()
+
+	defRepo := &fakeDAGDefRepo{}
+	defRepo.getByIDFn = func(id uuid.UUID) (*model.WorkflowDefinition, error) {
+		return &model.WorkflowDefinition{ID: id, ProjectID: projectID}, nil
+	}
+
+	e := echo.New()
+	body := `{"nodes":[{"id":"self","type":"sub_workflow","config":{"targetKind":"dag","targetWorkflowId":"` + parentWorkflowID.String() + `"}}]}`
+	req := httptest.NewRequest(http.MethodPut, "/", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("id")
+	c.SetParamValues(parentWorkflowID.String())
+
+	h := handler.NewWorkflowHandler(&fakeWorkflowRepo{}).WithDAGService(nil, defRepo, nil, nil)
+
+	_ = h.UpdateDefinition(c)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var parsed map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &parsed)
+	if parsed["reason"] != "trivial_self_loop" {
+		t.Fatalf("reason = %v, want trivial_self_loop; body: %s", parsed["reason"], rec.Body.String())
+	}
+}
+
+func TestCreateDefinition_RejectsUnknownTargetKind(t *testing.T) {
+	projectID := uuid.New()
+
+	defRepo := &fakeDAGDefRepo{}
+	e := echo.New()
+	body := `{"name":"wf","nodes":[{"id":"sub-bad","type":"sub_workflow","config":{"targetKind":"martian","targetWorkflowId":"ignored"}}],"edges":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set(echo.HeaderContentType, echo.MIMEApplicationJSON)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.Set(appMiddleware.ProjectIDContextKey, projectID)
+
+	h := handler.NewWorkflowHandler(&fakeWorkflowRepo{}).WithDAGService(nil, defRepo, nil, nil)
+
+	_ = h.CreateDefinition(c)
+	if rec.Code != http.StatusBadRequest {
+		t.Fatalf("status = %d, want %d; body: %s", rec.Code, http.StatusBadRequest, rec.Body.String())
+	}
+	var parsed map[string]any
+	_ = json.Unmarshal(rec.Body.Bytes(), &parsed)
+	if parsed["reason"] != "invalid_target_kind" {
+		t.Fatalf("reason = %v, want invalid_target_kind; body: %s", parsed["reason"], rec.Body.String())
+	}
+	if defRepo.created != nil {
+		t.Fatalf("workflow definition was persisted despite invalid sub_workflow config")
+	}
 }
 
 func TestWorkflowHandler_TemplateManagementEndpoints(t *testing.T) {

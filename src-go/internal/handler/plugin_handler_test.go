@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -18,6 +19,180 @@ import (
 	rolepkg "github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/service"
 )
+
+// fakeWorkflowExecutionRuntime is a minimal WorkflowExecutionRuntime for the
+// plugin run DTO test. It returns a canned plugin run by id; other methods
+// are no-ops since GetWorkflowRun is the only seam exercised.
+type fakeWorkflowExecutionRuntime struct {
+	run *model.WorkflowPluginRun
+}
+
+func (f *fakeWorkflowExecutionRuntime) Start(_ context.Context, _ string, _ service.WorkflowExecutionRequest) (*model.WorkflowPluginRun, error) {
+	return nil, errors.New("not implemented")
+}
+
+func (f *fakeWorkflowExecutionRuntime) GetRun(_ context.Context, id uuid.UUID) (*model.WorkflowPluginRun, error) {
+	if f.run == nil || f.run.ID != id {
+		return nil, repository.ErrNotFound
+	}
+	return f.run, nil
+}
+
+func (f *fakeWorkflowExecutionRuntime) ListRuns(_ context.Context, _ string, _ int) ([]*model.WorkflowPluginRun, error) {
+	return nil, nil
+}
+
+// fakePluginLinkReader satisfies the plugin handler's subWorkflowLinkReader
+// via a single byChild closure. ListByParentExecution defaults to empty
+// unless the test provides byParent for the outgoing-children path.
+type fakePluginLinkReader struct {
+	byChild  func(engineKind string, childRunID uuid.UUID) (*model.WorkflowRunParentLink, error)
+	byParent func(parentExecutionID uuid.UUID) ([]*model.WorkflowRunParentLink, error)
+}
+
+func (f *fakePluginLinkReader) GetByChild(_ context.Context, engineKind string, childRunID uuid.UUID) (*model.WorkflowRunParentLink, error) {
+	return f.byChild(engineKind, childRunID)
+}
+
+func (f *fakePluginLinkReader) ListByParentExecution(_ context.Context, parentExecutionID uuid.UUID) ([]*model.WorkflowRunParentLink, error) {
+	if f.byParent != nil {
+		return f.byParent(parentExecutionID)
+	}
+	return nil, nil
+}
+
+// When a plugin run's `workflow` step invokes a DAG child, the plugin run
+// detail envelope exposes an `invokedChildren` slice listing the parent↔child
+// linkage rows so the unified run view can stitch the cross-engine graph
+// (bridge-legacy-to-dag-invocation).
+func TestGetWorkflowRun_ExposesInvokedChildren(t *testing.T) {
+	runID := uuid.New()
+	childRunID := uuid.New()
+
+	runtime := &fakeWorkflowExecutionRuntime{
+		run: &model.WorkflowPluginRun{
+			ID:       runID,
+			PluginID: "plug-1",
+			Status:   model.WorkflowRunStatusCompleted,
+		},
+	}
+	reader := &fakePluginLinkReader{
+		byChild: func(_ string, _ uuid.UUID) (*model.WorkflowRunParentLink, error) {
+			return nil, errors.New("not a child")
+		},
+		byParent: func(parentID uuid.UUID) ([]*model.WorkflowRunParentLink, error) {
+			if parentID != runID {
+				return nil, nil
+			}
+			return []*model.WorkflowRunParentLink{{
+				ID:                uuid.New(),
+				ParentExecutionID: runID,
+				ParentKind:        model.SubWorkflowParentKindPluginRun,
+				ParentNodeID:      "invoke-dag",
+				ChildEngineKind:   model.SubWorkflowEngineDAG,
+				ChildRunID:        childRunID,
+				Status:            model.SubWorkflowLinkStatusCompleted,
+			}}, nil
+		},
+	}
+
+	h := handler.NewPluginHandler(nil).
+		WithWorkflowExecution(runtime).
+		WithParentLinkReader(reader)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("runId")
+	c.SetParamValues(runID.String())
+
+	if err := h.GetWorkflowRun(c); err != nil {
+		t.Fatalf("GetWorkflowRun error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+	var parsed map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	children, ok := parsed["invokedChildren"].([]any)
+	if !ok {
+		t.Fatalf("invokedChildren missing or wrong shape: %v", parsed)
+	}
+	if len(children) != 1 {
+		t.Fatalf("invokedChildren length = %d, want 1", len(children))
+	}
+	entry, _ := children[0].(map[string]any)
+	if got, _ := entry["parentKind"].(string); got != model.SubWorkflowParentKindPluginRun {
+		t.Errorf("invokedChildren[0].parentKind = %v, want plugin_run", entry["parentKind"])
+	}
+	if got, _ := entry["childEngineKind"].(string); got != model.SubWorkflowEngineDAG {
+		t.Errorf("invokedChildren[0].childEngineKind = %v, want dag", entry["childEngineKind"])
+	}
+	if got, _ := entry["childRunId"].(string); got != childRunID.String() {
+		t.Errorf("invokedChildren[0].childRunId = %v, want %s", entry["childRunId"], childRunID)
+	}
+}
+
+func TestGetWorkflowRun_ExposesInvokedByParent(t *testing.T) {
+	runID := uuid.New()
+	parentExecID := uuid.New()
+
+	runtime := &fakeWorkflowExecutionRuntime{
+		run: &model.WorkflowPluginRun{
+			ID:       runID,
+			PluginID: "plug-1",
+			Status:   model.WorkflowRunStatusCompleted,
+		},
+	}
+	reader := &fakePluginLinkReader{
+		byChild: func(engineKind string, cid uuid.UUID) (*model.WorkflowRunParentLink, error) {
+			if engineKind == model.SubWorkflowEnginePlugin && cid == runID {
+				return &model.WorkflowRunParentLink{
+					ID:                uuid.New(),
+					ParentExecutionID: parentExecID,
+					ParentNodeID:      "sub-plugin",
+					ChildEngineKind:   model.SubWorkflowEnginePlugin,
+					ChildRunID:        runID,
+					Status:            model.SubWorkflowLinkStatusCompleted,
+				}, nil
+			}
+			return nil, errors.New("not found")
+		},
+	}
+
+	h := handler.NewPluginHandler(nil).
+		WithWorkflowExecution(runtime).
+		WithParentLinkReader(reader)
+
+	e := echo.New()
+	req := httptest.NewRequest(http.MethodGet, "/", nil)
+	rec := httptest.NewRecorder()
+	c := e.NewContext(req, rec)
+	c.SetParamNames("runId")
+	c.SetParamValues(runID.String())
+
+	if err := h.GetWorkflowRun(c); err != nil {
+		t.Fatalf("GetWorkflowRun error: %v", err)
+	}
+	if rec.Code != http.StatusOK {
+		t.Fatalf("status = %d, want 200; body: %s", rec.Code, rec.Body.String())
+	}
+
+	var parsed map[string]any
+	if err := json.Unmarshal(rec.Body.Bytes(), &parsed); err != nil {
+		t.Fatalf("unmarshal body: %v", err)
+	}
+	ibp, ok := parsed["invokedByParent"].(map[string]any)
+	if !ok {
+		t.Fatalf("invokedByParent missing or wrong shape: %v", parsed)
+	}
+	if got, _ := ibp["parentExecutionId"].(string); got != parentExecID.String() {
+		t.Errorf("invokedByParent.parentExecutionId = %v, want %s", got, parentExecID)
+	}
+}
 
 type handlerRuntimeClient struct{}
 

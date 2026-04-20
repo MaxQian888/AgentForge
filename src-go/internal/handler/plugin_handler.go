@@ -15,8 +15,9 @@ import (
 )
 
 type PluginHandler struct {
-	service  *service.PluginService
-	workflow WorkflowExecutionRuntime
+	service    *service.PluginService
+	workflow   WorkflowExecutionRuntime
+	linkReader subWorkflowLinkReader
 }
 
 type WorkflowExecutionRuntime interface {
@@ -31,6 +32,13 @@ func NewPluginHandler(service *service.PluginService) *PluginHandler {
 
 func (h *PluginHandler) WithWorkflowExecution(workflow WorkflowExecutionRuntime) *PluginHandler {
 	h.workflow = workflow
+	return h
+}
+
+// WithParentLinkReader wires the sub-workflow parent-link reader used by the
+// plugin run read DTO to expose `invokedByParent`. Nil is a no-op.
+func (h *PluginHandler) WithParentLinkReader(r subWorkflowLinkReader) *PluginHandler {
+	h.linkReader = r
 	return h
 }
 
@@ -358,7 +366,34 @@ func (h *PluginHandler) GetWorkflowRun(c echo.Context) error {
 		}
 		return c.JSON(http.StatusBadRequest, model.ErrorResponse{Message: err.Error()})
 	}
-	return c.JSON(http.StatusOK, run)
+	// Surface `invokedByParent` linkage when the run was started as a child of
+	// a parent DAG sub_workflow node. Absent reader or no-link is a silent skip
+	// so legacy callers keep their shape.
+	var invokedByParent *model.WorkflowRunParentLinkDTO
+	// Also surface outgoing `invokedChildren` — DAG runs that this plugin run
+	// started via its `workflow` action (parent_kind='plugin_run'). Empty
+	// slice when there are none; absent reader skips the field silently.
+	// Introduced by bridge-legacy-to-dag-invocation.
+	var invokedChildren []model.WorkflowRunParentLinkDTO
+	if h.linkReader != nil {
+		if link, getErr := h.linkReader.GetByChild(c.Request().Context(), model.SubWorkflowEnginePlugin, run.ID); getErr == nil && link != nil {
+			dto := link.ToDTO()
+			invokedByParent = &dto
+		}
+		if outgoing, listErr := h.linkReader.ListByParentExecution(c.Request().Context(), run.ID); listErr == nil {
+			for _, l := range outgoing {
+				if l == nil {
+					continue
+				}
+				invokedChildren = append(invokedChildren, l.ToDTO())
+			}
+		}
+	}
+	return c.JSON(http.StatusOK, map[string]any{
+		"run":             run,
+		"invokedByParent": invokedByParent,
+		"invokedChildren": invokedChildren,
+	})
 }
 
 func (h *PluginHandler) ListRemotePlugins(c echo.Context) error {
