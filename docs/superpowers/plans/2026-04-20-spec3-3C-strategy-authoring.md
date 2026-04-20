@@ -274,7 +274,7 @@
 
 ## Task 7 — HTTP handler
 
-- [ ] Step 7.1 — write failing handler tests
+- [x] Step 7.1 — write failing handler tests
   - File: `src-go/internal/handler/qianchuan_strategies_handler_test.go`
   - Use the existing `httptest` harness; cases:
     - `GET /api/v1/projects/:pid/qianchuan/strategies` returns paginated + filterable by `status`
@@ -287,12 +287,12 @@
     - `POST /api/v1/qianchuan/strategies/:id/test` with snapshot body → 200 + `{actions: [...]}`; with invalid JSON body → 400
     - All write endpoints reject when caller targets a system strategy (project_id IS NULL) → 403
 
-- [ ] Step 7.2 — implement handler
+- [x] Step 7.2 — implement handler
   - File: `src-go/internal/handler/qianchuan_strategies_handler.go`
   - Routes registered in the existing handler-wiring file (find via `Grep "RegisterRoutes" src-go/internal/handler`); add a `RegisterQianchuanStrategyRoutes(g *echo.Group, svc *service.QianchuanStrategyService)`
   - RBAC: write endpoints gate on project membership (use the existing middleware); read endpoints follow the standard project-scoped guard
 
-- [ ] Step 7.3 — green
+- [x] Step 7.3 — green
 
 ---
 
