@@ -142,7 +142,7 @@
 
 ## Task 2 — Migration 068: workflow_triggers source-of-truth columns
 
-- [ ] Step 2.1 — write failing repo test asserting `created_via / display_name / description` round-trip
+- [x] Step 2.1 — write failing repo test asserting `created_via / display_name / description` round-trip
   - File: `src-go/internal/repository/workflow_trigger_metadata_test.go` (new)
   - Content:
     ```go
@@ -178,9 +178,9 @@
     }
     ```
 
-- [ ] Step 2.2 — run `cd src-go && go test ./internal/repository/ -run TestWorkflowTriggerRecord_CreatedViaAndDisplayMetadata` — expect compile error
+- [x] Step 2.2 — run `cd src-go && go test ./internal/repository/ -run TestWorkflowTriggerRecord_CreatedViaAndDisplayMetadata` — expect compile error
 
-- [ ] Step 2.3 — add `TriggerCreatedVia` enum + struct fields to the model
+- [x] Step 2.3 — add `TriggerCreatedVia` enum + struct fields to the model
   - File: `src-go/internal/model/workflow_trigger.go`
   - After the existing `TriggerTargetKind` constants block (after line 25), add:
     ```go
@@ -203,7 +203,7 @@
     Description      string            `db:"description"  json:"description,omitempty"`
     ```
 
-- [ ] Step 2.4 — extend the repository record + mapper
+- [x] Step 2.4 — extend the repository record + mapper
   - File: `src-go/internal/repository/workflow_trigger_repo.go`
   - Locate the `workflowTriggerRecord` struct (search for `type workflowTriggerRecord struct`). Add after the `DisabledReason` column line:
     ```go
@@ -223,7 +223,7 @@
     ```
     (If the function uses `return &model.WorkflowTrigger{...}` literal form, refactor to assign to a local `out := &model.WorkflowTrigger{...}` first, then `return out`. If a `newWorkflowTriggerRecord(*model.WorkflowTrigger)` constructor exists, mirror by copying `CreatedVia` (with same default), `DisplayName`, `Description` into the record.)
 
-- [ ] Step 2.5 — write the migration
+- [x] Step 2.5 — write the migration
   - File: `src-go/migrations/068_extend_workflow_triggers_metadata.up.sql` (new)
   - Content:
     ```sql
@@ -250,7 +250,7 @@
         ON workflow_triggers(acting_employee_id);
     ```
 
-- [ ] Step 2.6 — write the matching down migration
+- [x] Step 2.6 — write the matching down migration
   - File: `src-go/migrations/068_extend_workflow_triggers_metadata.down.sql` (new)
   - Content:
     ```sql
@@ -260,9 +260,9 @@
     ALTER TABLE workflow_triggers DROP COLUMN IF EXISTS created_via;
     ```
 
-- [ ] Step 2.7 — run `cd src-go && go test ./internal/repository/ -run TestWorkflowTriggerRecord_CreatedViaAndDisplayMetadata` — expect green
+- [x] Step 2.7 — run `cd src-go && go test ./internal/repository/ -run TestWorkflowTriggerRecord_CreatedViaAndDisplayMetadata` — expect green
 
-- [ ] Step 2.8 — run `rtk git add src-go/migrations/068_extend_workflow_triggers_metadata.up.sql src-go/migrations/068_extend_workflow_triggers_metadata.down.sql src-go/internal/model/workflow_trigger.go src-go/internal/repository/workflow_trigger_repo.go src-go/internal/repository/workflow_trigger_metadata_test.go && rtk git commit -m "feat(workflow): add created_via/display_name/description columns to workflow_triggers (spec1 §6.2)"`
+- [x] Step 2.8 — run `rtk git add src-go/migrations/068_extend_workflow_triggers_metadata.up.sql src-go/migrations/068_extend_workflow_triggers_metadata.down.sql src-go/internal/model/workflow_trigger.go src-go/internal/repository/workflow_trigger_repo.go src-go/internal/repository/workflow_trigger_metadata_test.go && rtk git commit -m "feat(workflow): add created_via/display_name/description columns to workflow_triggers (spec1 §6.2)"`
 
 ---
 

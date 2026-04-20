@@ -24,6 +24,18 @@ const (
 	TriggerTargetPlugin TriggerTargetKind = "plugin"
 )
 
+// TriggerCreatedVia distinguishes how a workflow_triggers row was authored.
+// 'dag_node' rows are upserted by the registrar from a workflow definition's
+// trigger node and may be replaced when the DAG is re-saved. 'manual' rows
+// are authored via the trigger CRUD API (Spec 1C) and are NEVER touched by
+// the registrar's merge pass.
+type TriggerCreatedVia string
+
+const (
+	TriggerCreatedViaDAGNode TriggerCreatedVia = "dag_node"
+	TriggerCreatedViaManual  TriggerCreatedVia = "manual"
+)
+
 // WorkflowTrigger is the materialized form of a trigger-node subscription.
 // Rows are upserted when a workflow definition is saved (see trigger.Registrar.SyncFromDefinition)
 // and consulted at runtime by trigger.EventRouter and the scheduler adapter.
@@ -44,6 +56,9 @@ type WorkflowTrigger struct {
 	DedupeWindowSeconds    int               `db:"dedupe_window_seconds" json:"dedupeWindowSeconds"`
 	Enabled                bool              `db:"enabled" json:"enabled"`
 	DisabledReason         string            `db:"disabled_reason" json:"disabledReason,omitempty"`
+	CreatedVia             TriggerCreatedVia `db:"created_via"  json:"createdVia"`
+	DisplayName            string            `db:"display_name" json:"displayName,omitempty"`
+	Description            string            `db:"description"  json:"description,omitempty"`
 	ActingEmployeeID       *uuid.UUID        `db:"acting_employee_id" json:"actingEmployeeId,omitempty"`
 	CreatedBy              *uuid.UUID        `db:"created_by" json:"createdBy,omitempty"`
 	CreatedAt              time.Time         `db:"created_at" json:"createdAt"`

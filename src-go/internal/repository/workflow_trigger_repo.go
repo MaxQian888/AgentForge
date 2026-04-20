@@ -40,6 +40,9 @@ type workflowTriggerRecord struct {
 	DedupeWindowSeconds    int        `gorm:"column:dedupe_window_seconds"`
 	Enabled                bool       `gorm:"column:enabled"`
 	DisabledReason         string     `gorm:"column:disabled_reason"`
+	CreatedVia             string     `gorm:"column:created_via"`
+	DisplayName            string     `gorm:"column:display_name"`
+	Description            string     `gorm:"column:description"`
 	ActingEmployeeID       *uuid.UUID `gorm:"column:acting_employee_id"`
 	CreatedBy              *uuid.UUID `gorm:"column:created_by"`
 	CreatedAt              time.Time  `gorm:"column:created_at"`
@@ -65,6 +68,10 @@ func newWorkflowTriggerRecord(t *model.WorkflowTrigger) *workflowTriggerRecord {
 		pid := t.PluginID
 		pluginPtr = &pid
 	}
+	createdVia := string(t.CreatedVia)
+	if createdVia == "" {
+		createdVia = string(model.TriggerCreatedViaDAGNode)
+	}
 	return &workflowTriggerRecord{
 		ID:                     t.ID,
 		WorkflowID:             t.WorkflowID,
@@ -78,6 +85,9 @@ func newWorkflowTriggerRecord(t *model.WorkflowTrigger) *workflowTriggerRecord {
 		DedupeWindowSeconds:    t.DedupeWindowSeconds,
 		Enabled:                t.Enabled,
 		DisabledReason:         t.DisabledReason,
+		CreatedVia:             createdVia,
+		DisplayName:            t.DisplayName,
+		Description:            t.Description,
 		ActingEmployeeID:       t.ActingEmployeeID,
 		CreatedBy:              t.CreatedBy,
 		CreatedAt:              t.CreatedAt,
@@ -97,6 +107,10 @@ func (r *workflowTriggerRecord) toModel() *model.WorkflowTrigger {
 	if r.PluginID != nil {
 		pluginID = *r.PluginID
 	}
+	createdVia := model.TriggerCreatedVia(r.CreatedVia)
+	if createdVia == "" {
+		createdVia = model.TriggerCreatedViaDAGNode
+	}
 	return &model.WorkflowTrigger{
 		ID:                     r.ID,
 		WorkflowID:             r.WorkflowID,
@@ -110,6 +124,9 @@ func (r *workflowTriggerRecord) toModel() *model.WorkflowTrigger {
 		DedupeWindowSeconds:    r.DedupeWindowSeconds,
 		Enabled:                r.Enabled,
 		DisabledReason:         r.DisabledReason,
+		CreatedVia:             createdVia,
+		DisplayName:            r.DisplayName,
+		Description:            r.Description,
 		ActingEmployeeID:       r.ActingEmployeeID,
 		CreatedBy:              r.CreatedBy,
 		CreatedAt:              r.CreatedAt,
