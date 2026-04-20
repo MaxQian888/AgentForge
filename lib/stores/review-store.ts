@@ -32,6 +32,8 @@ export interface ExecutionMetadata {
   decisions?: ReviewDecision[];
 }
 
+export type FindingDecision = "pending" | "approved" | "dismissed" | "deferred" | "needs_manual_fix";
+
 export interface ReviewFinding {
   id?: string;
   category: string;
@@ -41,6 +43,8 @@ export interface ReviewFinding {
   line?: number;
   message: string;
   suggestion?: string;
+  suggestedPatch?: string | null;
+  decision?: FindingDecision;
   cwe?: string;
   sources?: string[];
   dismissed?: boolean;
@@ -88,6 +92,11 @@ interface ReviewState {
     id: string,
     findingIds: string[],
     reason: string,
+  ) => Promise<void>;
+  decideFinding: (
+    findingId: string,
+    action: "approve" | "dismiss" | "defer",
+    comment?: string,
   ) => Promise<void>;
   updateReview: (review: ReviewDTO) => void;
 }
@@ -264,6 +273,23 @@ export const useReviewStore = create<ReviewState>()((set, get) => ({
       set({ error: "Unable to mark false positive finding" });
     } finally {
       set({ loading: false });
+    }
+  },
+
+  decideFinding: async (findingId, action, comment) => {
+    const token = useAuthStore.getState().accessToken;
+    if (!token) return;
+
+    try {
+      const api = createApiClient(API_URL);
+      await api.post(
+        `/api/v1/findings/${findingId}/decision`,
+        { action, comment },
+        { token },
+      );
+      toast.success(`Finding ${action === "approve" ? "approved" : action === "dismiss" ? "dismissed" : "deferred"}`);
+    } catch {
+      toast.error("Unable to update finding decision");
     }
   },
 

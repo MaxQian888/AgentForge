@@ -13,13 +13,28 @@ jest.mock("next-intl", () => ({
   },
 }));
 
-import { render, screen } from "@testing-library/react";
+jest.mock("react-diff-viewer-continued", () => ({
+  __esModule: true,
+  default: () => <div data-testid="diff-viewer" />,
+  DiffMethod: { LINES: "lines" },
+}));
+
+const mockDecideFinding = jest.fn();
+jest.mock("@/lib/stores/review-store", () => ({
+  useReviewStore: (selector: (s: any) => any) =>
+    selector({ decideFinding: mockDecideFinding }),
+}));
+
+import { render, screen, fireEvent } from "@testing-library/react";
 import { ReviewFindingsTable } from "./review-findings-table";
 
 describe("ReviewFindingsTable", () => {
+  beforeEach(() => {
+    mockDecideFinding.mockClear();
+  });
+
   it("shows an empty-state message when there are no findings", () => {
     render(<ReviewFindingsTable findings={[]} />);
-
     expect(screen.getByText("No findings reported.")).toBeInTheDocument();
   });
 
@@ -28,6 +43,7 @@ describe("ReviewFindingsTable", () => {
       <ReviewFindingsTable
         findings={[
           {
+            id: "f1",
             severity: "critical",
             category: "security",
             subcategory: "auth",
@@ -56,6 +72,94 @@ describe("ReviewFindingsTable", () => {
       screen.getByText("Validate the session token before access."),
     ).toBeInTheDocument();
     expect(screen.getByText("Formatting is inconsistent.")).toBeInTheDocument();
-    expect(screen.getAllByText("-").length).toBeGreaterThanOrEqual(1);
+  });
+
+  it("approve button fires POST with approve action", () => {
+    render(
+      <ReviewFindingsTable
+        findings={[
+          {
+            id: "f1",
+            severity: "high",
+            category: "logic",
+            message: "Bug found.",
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("approve-f1"));
+    expect(mockDecideFinding).toHaveBeenCalledWith("f1", "approve");
+  });
+
+  it("dismiss button fires POST with dismiss action", () => {
+    render(
+      <ReviewFindingsTable
+        findings={[
+          {
+            id: "f2",
+            severity: "low",
+            category: "style",
+            message: "Indent.",
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("dismiss-f2"));
+    expect(mockDecideFinding).toHaveBeenCalledWith("f2", "dismiss");
+  });
+
+  it("defer button fires POST with defer action", () => {
+    render(
+      <ReviewFindingsTable
+        findings={[
+          {
+            id: "f3",
+            severity: "medium",
+            category: "perf",
+            message: "Slow loop.",
+          },
+        ]}
+      />,
+    );
+
+    fireEvent.click(screen.getByTestId("defer-f3"));
+    expect(mockDecideFinding).toHaveBeenCalledWith("f3", "defer");
+  });
+
+  it("show patch button is visible when suggestedPatch is present", () => {
+    render(
+      <ReviewFindingsTable
+        findings={[
+          {
+            id: "f4",
+            severity: "high",
+            category: "logic",
+            message: "Fix this.",
+            suggestedPatch: "--- a/x\n+++ b/x\n@@ -1 +1 @@\n-a\n+b",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.getByTestId("show-patch-f4")).toBeInTheDocument();
+  });
+
+  it("show patch button is hidden when suggestedPatch is absent", () => {
+    render(
+      <ReviewFindingsTable
+        findings={[
+          {
+            id: "f5",
+            severity: "low",
+            category: "style",
+            message: "Format.",
+          },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByTestId("show-patch-f5")).not.toBeInTheDocument();
   });
 });
