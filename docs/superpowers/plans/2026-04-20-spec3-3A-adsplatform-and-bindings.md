@@ -912,7 +912,7 @@
 
 ## Task 5 — Qianchuan provider implementation (Provider methods + mapping)
 
-- [ ] Step 5.1 — failing tests for each Provider method
+- [x] Step 5.1 — failing tests for each Provider method
   - File: `src-go/internal/adsplatform/qianchuan/provider_test.go`
     ```go
     package qianchuan_test
@@ -1001,7 +1001,7 @@
     }
     ```
 
-- [ ] Step 5.2 — implement provider + mapping
+- [x] Step 5.2 — implement provider + mapping
   - File: `src-go/internal/adsplatform/qianchuan/provider.go`
     ```go
     package qianchuan
@@ -1303,7 +1303,7 @@
     ```
   - Run `rtk go test ./internal/adsplatform/qianchuan/...` — green.
 
-- [ ] Step 5.3 — register Qianchuan in a default registry constructor
+- [x] Step 5.3 — register Qianchuan in a default registry constructor
   - File: `src-go/internal/adsplatform/qianchuan/register.go`
     ```go
     package qianchuan
@@ -1330,7 +1330,7 @@
     }
     ```
 
-- [ ] Step 5.4 — commit `feat(qianchuan): provider impl + neutral mapping + registry hook`
+- [x] Step 5.4 — commit `feat(qianchuan): provider impl + neutral mapping + registry hook`
 
 ---
 
