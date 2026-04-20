@@ -1,8 +1,9 @@
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import type { ReviewFinding } from "../review/types.js";
 
-export type ReviewFindingInput = Omit<ReviewFinding, "sources"> & {
+export type ReviewFindingInput = Omit<ReviewFinding, "sources" | "suggested_patch"> & {
   sources?: string[];
+  suggestedPatch?: string;
 };
 
 export type ReviewResultInput = {
@@ -12,7 +13,7 @@ export type ReviewResultInput = {
 };
 
 type FindingsPayload = {
-  format: "findings/v1";
+  format: "findings/v1" | "findings/v2";
   summary: string;
   findings: ReviewFinding[];
 };
@@ -26,9 +27,11 @@ export function createReviewFinding(
     sources.add(options.pluginId);
   }
 
+  const { suggestedPatch, ...rest } = input;
   return {
-    ...input,
+    ...rest,
     sources: Array.from(sources),
+    suggested_patch: suggestedPatch ?? null,
   };
 }
 
@@ -36,8 +39,23 @@ export function createReviewResult(input: ReviewResultInput): CallToolResult {
   const findings = input.findings.map((finding) =>
     createReviewFinding(finding, { pluginId: input.pluginId }),
   );
+
+  const hasPatch = findings.some(
+    (f) => f.suggested_patch != null && f.suggested_patch !== "",
+  );
+  const format = hasPatch ? "findings/v2" : "findings/v1";
+
+  // On v2 envelope, normalize missing patches to null.
+  if (format === "findings/v2") {
+    for (const f of findings) {
+      if (f.suggested_patch === undefined) {
+        f.suggested_patch = null;
+      }
+    }
+  }
+
   const structuredContent: FindingsPayload = {
-    format: "findings/v1",
+    format,
     summary: input.summary,
     findings,
   };

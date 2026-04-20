@@ -17,6 +17,7 @@ export interface ReviewFinding {
   line?: number;
   message: string;
   suggestion?: string;
+  suggested_patch?: string | null;
   cwe?: string;
   sources?: string[];
 }
