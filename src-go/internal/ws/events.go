@@ -99,6 +99,11 @@ const (
 	EventWorkflowReviewRequested    = "workflow.review.requested"
 	EventWorkflowReviewResolved     = "workflow.review.resolved"
 
+	// Emitted by outbound_dispatcher after retry exhaustion when it could
+	// not deliver the default reply card to the IM Bridge. Payload:
+	//   {executionId: string, lastError: string, attempts: int}
+	EventOutboundDeliveryFailed = "workflow.outbound_delivery.failed"
+
 	// Unified cross-engine workflow-run events (bridge-unified-run-view).
 	// Emitted alongside the engine-native channels for the workflow workspace
 	// UI. Payload is service.UnifiedRunRow — keyed on the shared envelope.

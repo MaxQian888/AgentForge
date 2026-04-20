@@ -4,6 +4,12 @@ import (
 	"testing"
 )
 
+func TestEventOutboundDeliveryFailedConstantStable(t *testing.T) {
+	if EventOutboundDeliveryFailed != "workflow.outbound_delivery.failed" {
+		t.Fatalf("EventOutboundDeliveryFailed name must match eventbus value, got %q", EventOutboundDeliveryFailed)
+	}
+}
+
 func TestBridgeAgentEventDecodeData(t *testing.T) {
 	event := &BridgeAgentEvent{
 		Type: BridgeEventCostUpdate,

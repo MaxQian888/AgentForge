@@ -736,7 +736,7 @@
 
 ## Task 6 — Backend: register `EventOutboundDeliveryFailed` event type
 
-- [ ] Step 6.1 — failing assertion test
+- [x] Step 6.1 — failing assertion test
   - File: `src-go/internal/eventbus/types_test.go` (extend or add)
     ```go
     func TestEventOutboundDeliveryFailedConstantStable(t *testing.T) {
@@ -747,7 +747,7 @@
     ```
   - Mirror in `src-go/internal/ws/events.go` if a similar test file exists.
 
-- [ ] Step 6.2 — add the constant
+- [x] Step 6.2 — add the constant
   - File: `src-go/internal/eventbus/types.go`, in the `// Workflow DAG execution events` block (line 74-89), add:
     ```go
     // Emitted by outbound_dispatcher after retry exhaustion when it could
@@ -757,7 +757,7 @@
     ```
   - File: `src-go/internal/ws/events.go`, mirror the same constant in the workflow block (line 92-100). Use the same string value so the FE only subscribes to one type.
 
-- [ ] Step 6.3 — verify
+- [x] Step 6.3 — verify
   - `rtk go test ./internal/eventbus/... ./internal/ws/...` — passes.
 
 ---
