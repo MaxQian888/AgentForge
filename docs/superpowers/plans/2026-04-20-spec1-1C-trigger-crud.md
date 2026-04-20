@@ -430,7 +430,7 @@
 
 ## Task 8 — Frontend store: employee-trigger CRUD
 
-- [ ] Step 8.1 — write failing Jest test for CRUD store
+- [x] Step 8.1 — write failing Jest test for CRUD store
   - New file: `lib/stores/employee-trigger-store.test.ts`
   - Cases:
     1. `fetchByEmployee("emp-1")` calls `GET /api/v1/employees/emp-1/triggers` with token, hydrates `triggersByEmployee["emp-1"]`.
@@ -439,7 +439,7 @@
     4. `deleteTrigger("trg-1")` DELETEs, removes from local list.
     5. `testTrigger("trg-1", {platform:"feishu",command:"/echo"})` POSTs `/api/v1/triggers/trg-1/test`, returns the dry-run object without mutating store.
 
-- [ ] Step 8.2 — implement store
+- [x] Step 8.2 — implement store
   - New file: `lib/stores/employee-trigger-store.ts` mirroring `employee-store.ts` shape:
     ```ts
     "use client";
