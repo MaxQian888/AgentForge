@@ -58,7 +58,7 @@ describe("QianchuanStrategiesListPage", () => {
       fetchList: jest.fn(),
     });
     render(<QianchuanStrategiesListPage />);
-    expect(screen.getByText(/尚未创建任何策略|no strategies/i)).toBeInTheDocument();
+    expect(screen.getByText(/no strategies yet/i)).toBeInTheDocument();
   });
 
   it("renders rows with name, version, status badge", () => {
@@ -70,7 +70,7 @@ describe("QianchuanStrategiesListPage", () => {
     render(<QianchuanStrategiesListPage />);
     expect(screen.getByText("my-strategy")).toBeInTheDocument();
     expect(screen.getByText("v1")).toBeInTheDocument();
-    expect(screen.getAllByText(/草稿|draft/i).length).toBeGreaterThan(0);
+    expect(screen.getAllByText(/draft/i).length).toBeGreaterThan(0);
   });
 
   it("shows system badge on system rows", () => {
@@ -97,8 +97,8 @@ describe("QianchuanStrategiesListPage", () => {
     expect(screen.getByText("my-strategy")).toBeInTheDocument();
     expect(screen.getByText("other")).toBeInTheDocument();
 
-    // Click the "已发布" filter chip (the first/topmost button by that label).
-    const matches = screen.getAllByRole("button", { name: /已发布/ });
+    // Click the "Published" filter chip (the first/topmost button by that label).
+    const matches = screen.getAllByRole("button", { name: /published/i });
     fireEvent.click(matches[0]);
 
     expect(screen.queryByText("my-strategy")).not.toBeInTheDocument();

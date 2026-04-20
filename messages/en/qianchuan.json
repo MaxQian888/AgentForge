@@ -1,0 +1,58 @@
+{
+  "title": "Qianchuan Strategy Library",
+  "description": "Declarative strategies — YAML defining triggers, rules, and actions. System strategies are read-only.",
+  "newStrategy": "New Strategy",
+  "list": {
+    "title": "Strategies",
+    "description": "Filter by status; edit/publish/archive only apply to project strategies.",
+    "empty": "No strategies yet",
+    "columnName": "Name",
+    "columnVersion": "Version",
+    "columnStatus": "Status",
+    "columnSource": "Source",
+    "columnActions": "Actions",
+    "actionEdit": "Edit",
+    "actionView": "View"
+  },
+  "filters": {
+    "all": "All",
+    "draft": "Draft",
+    "published": "Published",
+    "archived": "Archived"
+  },
+  "status": {
+    "draft": "Draft",
+    "published": "Published",
+    "archived": "Archived",
+    "system": "system",
+    "project": "project"
+  },
+  "buttons": {
+    "save": "Save",
+    "publish": "Publish",
+    "archive": "Archive",
+    "run": "Run",
+    "delete": "Delete"
+  },
+  "edit": {
+    "newPlaceholder": "New strategy",
+    "metaSystem": "system strategy",
+    "metaProject": "project strategy",
+    "metaVersion": "Version v{version}",
+    "editorTitle": "YAML Editor",
+    "editorDescription": "Server-side validation on save; errors are placed at the offending line.",
+    "testTitle": "Test Panel",
+    "testDescription": "Provide a snapshot JSON to preview which actions the strategy would emit (dry-run, no writes).",
+    "snapshotLabel": "snapshot (JSON)",
+    "firedRulesLabel": "Fired rules",
+    "firedRulesNone": "(none)",
+    "snapshotJSONError": "JSON parse failed: {message}"
+  },
+  "toasts": {
+    "createdSuccess": "Strategy {name} created (v{version})",
+    "updatedSuccess": "Strategy updated",
+    "publishedSuccess": "Strategy published",
+    "archivedSuccess": "Strategy archived",
+    "deletedSuccess": "Strategy deleted"
+  }
+}

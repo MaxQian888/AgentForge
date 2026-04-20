@@ -22,6 +22,7 @@ import documents from "./documents.json";
 import audit from "./audit.json";
 import projectTemplates from "./project-templates.json";
 import invitations from "./invitations.json";
+import qianchuan from "./qianchuan.json";
 import { normalizeMessageBundle } from "../normalize";
 
 export default normalizeMessageBundle({
@@ -49,4 +50,5 @@ export default normalizeMessageBundle({
   audit,
   projectTemplates,
   invitations,
+  qianchuan,
 });

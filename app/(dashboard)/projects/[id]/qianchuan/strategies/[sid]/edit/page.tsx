@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import dynamic from "next/dynamic";
 import { Save, Send, Archive, Play } from "lucide-react";
 import { Button } from "@/components/ui/button";
@@ -28,33 +29,35 @@ interface MonacoLikeNS {
   editor: { setModelMarkers: (model: unknown, owner: string, markers: unknown[]) => void };
 }
 
-function statusBadge(status: StrategyStatus) {
-  switch (status) {
-    case "draft":
-      return <Badge variant="secondary">草稿</Badge>;
-    case "published":
-      return <Badge>已发布</Badge>;
-    case "archived":
-      return <Badge variant="outline">已归档</Badge>;
-  }
-}
-
 export default function QianchuanStrategyEditPage() {
   const params = useParams<{ id: string; sid: string }>();
   const router = useRouter();
   const projectId = params?.id ?? "";
   const sid = params?.sid ?? "";
   const isNew = sid === "new";
+  const t = useTranslations("qianchuan");
 
   useBreadcrumbs([
     { label: "Projects", href: "/projects" },
     { label: projectId, href: `/projects/${projectId}` },
-    { label: "Qianchuan Strategies", href: `/projects/${projectId}/qianchuan/strategies` },
-    { label: isNew ? "新建" : sid },
+    { label: t("title"), href: `/projects/${projectId}/qianchuan/strategies` },
+    { label: isNew ? t("edit.newPlaceholder") : sid },
   ]);
 
   const { selected, lastError, lastTestResult, fetchOne, update, publish, archive, testRun, clearError } =
     useQianchuanStrategiesStore();
+
+  function statusBadge(status: StrategyStatus) {
+    const label = t(`status.${status}` as `status.${StrategyStatus}`);
+    switch (status) {
+      case "draft":
+        return <Badge variant="secondary">{label}</Badge>;
+      case "published":
+        return <Badge>{label}</Badge>;
+      case "archived":
+        return <Badge variant="outline">{label}</Badge>;
+    }
+  }
 
   const [yamlSource, setYamlSource] = useState<string | null>(null);
   const [snapshotJSON, setSnapshotJSON] = useState("{\n  \"metrics\": { \"cost\": 0 }\n}");
@@ -122,7 +125,7 @@ export default function QianchuanStrategyEditPage() {
     try {
       parsed = JSON.parse(snapshotJSON);
     } catch (err) {
-      setSnapshotParseError(`JSON 解析失败: ${(err as Error).message}`);
+      setSnapshotParseError(t("edit.snapshotJSONError", { message: (err as Error).message }));
       return;
     }
     setSnapshotParseError(null);
@@ -130,34 +133,36 @@ export default function QianchuanStrategyEditPage() {
     await testRun(selected.id, parsed);
   };
 
+  const description = selected
+    ? `${t("edit.metaVersion", { version: selected.version })} · ${
+        selected.isSystem ? t("edit.metaSystem") : t("edit.metaProject")
+      }`
+    : t("description");
+
   return (
     <div className="flex flex-col gap-[var(--space-section-gap)]">
       <PageHeader
-        title={selected?.name ?? "新建策略"}
-        description={
-          selected
-            ? `版本 v${selected.version} · ${selected.isSystem ? "系统策略" : "项目策略"}`
-            : "撰写 YAML 后保存为草稿。"
-        }
+        title={selected?.name ?? t("edit.newPlaceholder")}
+        description={description}
         actions={
           <div className="flex gap-2 items-center">
             {selected ? statusBadge(selected.status) : null}
             {selected && !selected.isSystem && selected.status === "draft" ? (
               <Button onClick={onPublish} size="sm">
                 <Send className="mr-1 size-4" />
-                发布
+                {t("buttons.publish")}
               </Button>
             ) : null}
             {selected && !selected.isSystem && selected.status === "published" ? (
               <Button onClick={onArchive} size="sm" variant="outline">
                 <Archive className="mr-1 size-4" />
-                归档
+                {t("buttons.archive")}
               </Button>
             ) : null}
             {!isReadOnly ? (
               <Button onClick={onSave} size="sm" variant="default">
                 <Save className="mr-1 size-4" />
-                保存
+                {t("buttons.save")}
               </Button>
             ) : null}
           </div>
@@ -165,7 +170,7 @@ export default function QianchuanStrategyEditPage() {
       />
 
       <div className="grid grid-cols-1 lg:grid-cols-2 gap-[var(--space-section-gap)]">
-        <SectionCard title="YAML 编辑器" description="保存时服务端校验，错误会标记在对应行。">
+        <SectionCard title={t("edit.editorTitle")} description={t("edit.editorDescription")}>
           <div className="h-[480px] border-t border-border">
             <MonacoEditor
               height="100%"
@@ -181,10 +186,10 @@ export default function QianchuanStrategyEditPage() {
           </div>
         </SectionCard>
 
-        <SectionCard title="测试面板" description="提供快照 JSON，预览策略会触发哪些动作（dry-run，不写库）。">
+        <SectionCard title={t("edit.testTitle")} description={t("edit.testDescription")}>
           <div className="flex flex-col gap-3 p-4">
             <div className="flex flex-col gap-1.5">
-              <Label htmlFor="snapshot">snapshot 快照 (JSON)</Label>
+              <Label htmlFor="snapshot">{t("edit.snapshotLabel")}</Label>
               <Textarea
                 id="snapshot"
                 value={snapshotJSON}
@@ -198,13 +203,14 @@ export default function QianchuanStrategyEditPage() {
             </div>
             <Button onClick={onRunTest} size="sm" variant="default" className="self-start">
               <Play className="mr-1 size-4" />
-              运行
+              {t("buttons.run")}
             </Button>
 
             {lastTestResult ? (
               <div className="flex flex-col gap-2 mt-2">
                 <p className="text-xs text-muted-foreground">
-                  触发规则: {(lastTestResult.fired_rules ?? []).join(", ") || "(无)"}
+                  {t("edit.firedRulesLabel")}:{" "}
+                  {(lastTestResult.fired_rules ?? []).join(", ") || t("edit.firedRulesNone")}
                 </p>
                 <ul className="flex flex-col gap-2">
                   {(lastTestResult.actions ?? []).map((a, idx) => (

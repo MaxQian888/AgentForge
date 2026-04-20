@@ -124,7 +124,7 @@ describe("Qianchuan strategy EditPage", () => {
   it("calls update on save and shows success toast on green response", async () => {
     update.mockResolvedValue(baseStrategy);
     render(<EditPage />);
-    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
     await waitFor(() => expect(update).toHaveBeenCalledWith("strategy-1", "name: my-strategy"));
   });
 
@@ -132,7 +132,7 @@ describe("Qianchuan strategy EditPage", () => {
     update.mockResolvedValue(null);
     storeState.lastError = { line: 3, col: 5, field: "rules[0].condition", msg: "bad" };
     render(<EditPage />);
-    fireEvent.click(screen.getByRole("button", { name: /保存/ }));
+    fireEvent.click(screen.getByRole("button", { name: /save/i }));
     await waitFor(() => expect(setModelMarkers).toHaveBeenCalled());
     const lastCall = setModelMarkers.mock.calls.at(-1);
     expect(lastCall?.[2]?.[0]).toMatchObject({ startLineNumber: 3, message: expect.stringContaining("bad") });
@@ -146,7 +146,7 @@ describe("Qianchuan strategy EditPage", () => {
     render(<EditPage />);
     const textarea = screen.getByLabelText(/snapshot|快照/i);
     fireEvent.change(textarea, { target: { value: '{"metrics":{"cost":1}}' } });
-    fireEvent.click(screen.getByRole("button", { name: /^运行$/ }));
+    fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
     await waitFor(() =>
       expect(testRun).toHaveBeenCalledWith("strategy-1", { metrics: { cost: 1 } }),
     );
@@ -165,8 +165,8 @@ describe("Qianchuan strategy EditPage", () => {
     render(<EditPage />);
     const textarea = screen.getByLabelText(/snapshot|快照/i);
     fireEvent.change(textarea, { target: { value: "not json" } });
-    fireEvent.click(screen.getByRole("button", { name: /^运行$/ }));
-    expect(screen.getByText(/JSON 解析失败/)).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("button", { name: /^run$/i }));
+    expect(screen.getByText(/JSON parse failed/i)).toBeInTheDocument();
     expect(testRun).not.toHaveBeenCalled();
   });
 
@@ -185,7 +185,7 @@ describe("Qianchuan strategy EditPage", () => {
   it("publish button is visible only on draft and redirects to list", async () => {
     publish.mockResolvedValue({ ...baseStrategy, status: "published" });
     render(<EditPage />);
-    const publishBtn = screen.getByRole("button", { name: /发布/ });
+    const publishBtn = screen.getByRole("button", { name: /publish/i });
     fireEvent.click(publishBtn);
     await waitFor(() => expect(publish).toHaveBeenCalledWith("strategy-1"));
     await waitFor(() =>
@@ -196,6 +196,6 @@ describe("Qianchuan strategy EditPage", () => {
   it("publish button is hidden on already-published rows", () => {
     storeState.selected = { ...baseStrategy, status: "published" };
     render(<EditPage />);
-    expect(screen.queryByRole("button", { name: /发布/ })).not.toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /publish/i })).not.toBeInTheDocument();
   });
 });

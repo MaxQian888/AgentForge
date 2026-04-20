@@ -435,12 +435,12 @@
 
 ## Task 12 — FE i18n + smoke
 
-- [ ] Step 12.1 — i18n keys
+- [x] Step 12.1 — i18n keys
   - Add Chinese + English copies for: page titles, status labels (draft/published/archived/system), button labels (Save / Publish / Archive / Run), error toast templates, empty state copy
   - Use the existing `next-intl` message catalogs (find via `Grep "useTranslations" app/(dashboard) | head`)
   - Run `pnpm exec ts-node scripts/i18n-audit.ts` (or whatever the existing audit script is) to confirm no missing keys
 
-- [ ] Step 12.2 — manual smoke
+- [x] Step 12.2 — manual smoke
   - `pnpm dev:backend` + `pnpm dev`
   - Navigate to `/projects/<id>/qianchuan/strategies`
   - Verify both system seeds appear with the `system` badge and disabled actions
@@ -452,19 +452,20 @@
 
 ## Task 13 — Verification + final lint/test sweep
 
-- [ ] Step 13.1 — Go side
+- [x] Step 13.1 — Go side
   - `cd src-go && go test ./internal/qianchuan/strategy/... ./internal/repository/... ./internal/service/... ./internal/handler/...`
   - `cd src-go && go vet ./...`
 
-- [ ] Step 13.2 — FE side
+- [x] Step 13.2 — FE side
   - `pnpm lint`
   - `pnpm test -- qianchuan-strategies`
   - `pnpm exec tsc --noEmit`
 
-- [ ] Step 13.3 — confirm scope
+- [x] Step 13.3 — confirm scope
   - No file outside `src-go/internal/qianchuan/strategy/`, `src-go/internal/repository/qianchuan_strategy_repo*`, `src-go/internal/service/qianchuan_strategy_service*`, `src-go/internal/handler/qianchuan_strategies_handler*`, `src-go/migrations/0XX_create_qianchuan_strategies.*`, `qianchuan-strategies/`, `lib/stores/qianchuan-strategies-store*`, `app/(dashboard)/projects/[id]/qianchuan/strategies/**`, project-sidebar component, i18n catalogs, and `package.json`/`pnpm-lock.yaml` was modified
   - No changes to existing migrations, no changes to `nodetypes/expr.go`, no changes to other Spec 3 plans' surfaces
 
 - [ ] Step 13.4 — request code review
   - Use `superpowers:requesting-code-review` against the diff
   - Address any findings before declaring done
+  - SKIPPED per implementation directive 2026-04-20: user opted out of subagent code-review for this run; verified locally via `go test`, `pnpm test`, `pnpm lint`, `pnpm exec tsc --noEmit`.

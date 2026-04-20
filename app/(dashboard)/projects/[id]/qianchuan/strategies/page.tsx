@@ -2,6 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
+import { useTranslations } from "next-intl";
 import { Plus, ScrollText } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
@@ -26,32 +27,17 @@ import {
 
 type StatusFilter = StrategyStatus | "all";
 
-const STATUS_FILTERS: { id: StatusFilter; label: string }[] = [
-  { id: "all", label: "全部" },
-  { id: "draft", label: "草稿" },
-  { id: "published", label: "已发布" },
-  { id: "archived", label: "已归档" },
-];
-
-function statusBadge(status: StrategyStatus) {
-  switch (status) {
-    case "draft":
-      return <Badge variant="secondary">草稿</Badge>;
-    case "published":
-      return <Badge>已发布</Badge>;
-    case "archived":
-      return <Badge variant="outline">已归档</Badge>;
-  }
-}
+const STATUS_FILTER_IDS: StatusFilter[] = ["all", "draft", "published", "archived"];
 
 export default function QianchuanStrategiesListPage() {
   const params = useParams<{ id: string }>();
   const router = useRouter();
   const projectId = params?.id ?? "";
+  const t = useTranslations("qianchuan");
   useBreadcrumbs([
     { label: "Projects", href: "/projects" },
     { label: projectId, href: `/projects/${projectId}` },
-    { label: "Qianchuan Strategies" },
+    { label: t("title") },
   ]);
 
   const { strategies, loading, fetchList } = useQianchuanStrategiesStore();
@@ -66,11 +52,23 @@ export default function QianchuanStrategiesListPage() {
     return strategies.filter((row) => row.status === filter);
   }, [strategies, filter]);
 
+  function statusBadge(status: StrategyStatus) {
+    const label = t(`status.${status}` as `status.${StrategyStatus}`);
+    switch (status) {
+      case "draft":
+        return <Badge variant="secondary">{label}</Badge>;
+      case "published":
+        return <Badge>{label}</Badge>;
+      case "archived":
+        return <Badge variant="outline">{label}</Badge>;
+    }
+  }
+
   return (
     <div className="flex flex-col gap-[var(--space-section-gap)]">
       <PageHeader
-        title="千川策略库"
-        description="声明式策略 — YAML 定义触发节奏、规则和动作。系统策略只读。"
+        title={t("title")}
+        description={t("description")}
         actions={
           <Button
             size="sm"
@@ -79,21 +77,21 @@ export default function QianchuanStrategiesListPage() {
             }
           >
             <Plus className="mr-1 size-4" />
-            新建策略
+            {t("newStrategy")}
           </Button>
         }
       />
 
-      <SectionCard title="策略列表" description="按状态筛选；编辑、发布、归档操作只对项目策略生效。">
+      <SectionCard title={t("list.title")} description={t("list.description")}>
         <div className="flex flex-wrap gap-2 px-4 pt-4">
-          {STATUS_FILTERS.map((f) => (
+          {STATUS_FILTER_IDS.map((id) => (
             <Button
-              key={f.id}
-              variant={filter === f.id ? "default" : "outline"}
+              key={id}
+              variant={filter === id ? "default" : "outline"}
               size="sm"
-              onClick={() => setFilter(f.id)}
+              onClick={() => setFilter(id)}
             >
-              {f.label}
+              {t(`filters.${id}` as `filters.${StatusFilter}`)}
             </Button>
           ))}
         </div>
@@ -105,16 +103,16 @@ export default function QianchuanStrategiesListPage() {
             ))}
           </div>
         ) : visible.length === 0 ? (
-          <EmptyState icon={ScrollText} title="尚未创建任何策略" />
+          <EmptyState icon={ScrollText} title={t("list.empty")} />
         ) : (
           <Table>
             <TableHeader>
               <TableRow>
-                <TableHead>名称</TableHead>
-                <TableHead>版本</TableHead>
-                <TableHead>状态</TableHead>
-                <TableHead>来源</TableHead>
-                <TableHead className="w-[120px]">操作</TableHead>
+                <TableHead>{t("list.columnName")}</TableHead>
+                <TableHead>{t("list.columnVersion")}</TableHead>
+                <TableHead>{t("list.columnStatus")}</TableHead>
+                <TableHead>{t("list.columnSource")}</TableHead>
+                <TableHead className="w-[120px]">{t("list.columnActions")}</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>
@@ -124,7 +122,11 @@ export default function QianchuanStrategiesListPage() {
                   <TableCell>v{row.version}</TableCell>
                   <TableCell>{statusBadge(row.status)}</TableCell>
                   <TableCell>
-                    {row.isSystem ? <Badge variant="outline">system</Badge> : <Badge variant="secondary">project</Badge>}
+                    {row.isSystem ? (
+                      <Badge variant="outline">{t("status.system")}</Badge>
+                    ) : (
+                      <Badge variant="secondary">{t("status.project")}</Badge>
+                    )}
                   </TableCell>
                   <TableCell>
                     <Button
@@ -134,7 +136,7 @@ export default function QianchuanStrategiesListPage() {
                         router.push(`/projects/${projectId}/qianchuan/strategies/${row.id}/edit`)
                       }
                     >
-                      {row.isSystem ? "查看" : "编辑"}
+                      {row.isSystem ? t("list.actionView") : t("list.actionEdit")}
                     </Button>
                   </TableCell>
                 </TableRow>

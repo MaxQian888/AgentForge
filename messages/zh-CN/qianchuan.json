@@ -1,0 +1,58 @@
+{
+  "title": "千川策略库",
+  "description": "声明式策略 — YAML 定义触发节奏、规则和动作。系统策略只读。",
+  "newStrategy": "新建策略",
+  "list": {
+    "title": "策略列表",
+    "description": "按状态筛选；编辑、发布、归档操作只对项目策略生效。",
+    "empty": "尚未创建任何策略",
+    "columnName": "名称",
+    "columnVersion": "版本",
+    "columnStatus": "状态",
+    "columnSource": "来源",
+    "columnActions": "操作",
+    "actionEdit": "编辑",
+    "actionView": "查看"
+  },
+  "filters": {
+    "all": "全部",
+    "draft": "草稿",
+    "published": "已发布",
+    "archived": "已归档"
+  },
+  "status": {
+    "draft": "草稿",
+    "published": "已发布",
+    "archived": "已归档",
+    "system": "system",
+    "project": "project"
+  },
+  "buttons": {
+    "save": "保存",
+    "publish": "发布",
+    "archive": "归档",
+    "run": "运行",
+    "delete": "删除"
+  },
+  "edit": {
+    "newPlaceholder": "新建策略",
+    "metaSystem": "系统策略",
+    "metaProject": "项目策略",
+    "metaVersion": "版本 v{version}",
+    "editorTitle": "YAML 编辑器",
+    "editorDescription": "保存时服务端校验，错误会标记在对应行。",
+    "testTitle": "测试面板",
+    "testDescription": "提供快照 JSON，预览策略会触发哪些动作（dry-run，不写库）。",
+    "snapshotLabel": "snapshot 快照 (JSON)",
+    "firedRulesLabel": "触发规则",
+    "firedRulesNone": "(无)",
+    "snapshotJSONError": "JSON 解析失败：{message}"
+  },
+  "toasts": {
+    "createdSuccess": "策略 {name} 已创建（v{version}）",
+    "updatedSuccess": "策略已更新",
+    "publishedSuccess": "策略已发布",
+    "archivedSuccess": "策略已归档",
+    "deletedSuccess": "策略已删除"
+  }
+}
