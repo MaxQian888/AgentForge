@@ -367,28 +367,28 @@
 
 ## Task 9 — Frontend Zustand store
 
-- [ ] Step 9.1 — add Monaco dependency
+- [x] Step 9.1 — add Monaco dependency
   - `pnpm add @monaco-editor/react`
   - Confirm pnpm-lock.yaml updated; commit lockfile in same PR
 
-- [ ] Step 9.2 — write failing store test
+- [x] Step 9.2 — write failing store test
   - File: `lib/stores/qianchuan-strategies-store.test.ts`
   - Cases: `fetchList(projectId)` populates `strategies`; `create(projectId, payload)` appends on success and surfaces `StrategyParseError` on 400; `publish(id)` flips status; `archive(id)` flips status; `testRun(id, snapshot)` returns `{actions}` and stores last result
 
-- [ ] Step 9.3 — implement store
+- [x] Step 9.3 — implement store
   - File: `lib/stores/qianchuan-strategies-store.ts`
   - Mirror the shape of an existing Zustand store (e.g. `lib/stores/secrets-store.ts` if present, otherwise pick any thin store under `lib/stores/`)
   - State: `strategies`, `selected`, `loading`, `lastError`, `lastTestResult`
   - Actions: `fetchList`, `fetchOne`, `create`, `update`, `publish`, `archive`, `delete`, `testRun`
   - Use `lib/api/client.ts` (or whatever the existing pattern is) so backend URL resolution is reused
 
-- [ ] Step 9.4 — green
+- [x] Step 9.4 — green
 
 ---
 
 ## Task 10 — FE list page
 
-- [ ] Step 10.1 — write failing component test
+- [x] Step 10.1 — write failing component test
   - File: `app/(dashboard)/projects/[id]/qianchuan/strategies/page.test.tsx`
   - Render with mocked store; cases:
     - Empty state shows "no strategies yet"
@@ -397,18 +397,18 @@
     - Status filter chip narrows the list
     - `New strategy` button navigates to the editor route
 
-- [ ] Step 10.2 — implement page
+- [x] Step 10.2 — implement page
   - File: `app/(dashboard)/projects/[id]/qianchuan/strategies/page.tsx`
   - Use shadcn `Table`, `Badge`, `Input` (search), `Button`
   - Add a sidebar entry under the project nav (find existing project sidebar — likely `components/projects/sidebar.tsx` or under `app/(dashboard)/projects/[id]/layout.tsx`); add a `Strategies` link
 
-- [ ] Step 10.3 — green
+- [x] Step 10.3 — green
 
 ---
 
 ## Task 11 — FE Monaco editor + test panel
 
-- [ ] Step 11.1 — write failing component test
+- [x] Step 11.1 — write failing component test
   - File: `app/(dashboard)/projects/[id]/qianchuan/strategies/[sid]/edit/page.test.tsx`
   - Cases:
     - Editor mounts and loads `yaml_source` for an existing strategy
@@ -419,7 +419,7 @@
     - Editor is read-only when the strategy is system (project_id is null) or status='archived'
     - Publish button visible only on draft; clicking calls `publish` then redirects to list
 
-- [ ] Step 11.2 — implement page
+- [x] Step 11.2 — implement page
   - File: `app/(dashboard)/projects/[id]/qianchuan/strategies/[sid]/edit/page.tsx`
   - Layout: split pane — Monaco YAML editor on the left, Test panel on the right
   - Editor:
@@ -429,7 +429,7 @@
   - Test panel: textarea + `Run` button + actions list (`Type`, `Target`, `Params`)
   - Header: status badge, version, `Publish` button (drafts only), `Archive` button (published only)
 
-- [ ] Step 11.3 — green
+- [x] Step 11.3 — green
 
 ---
 
