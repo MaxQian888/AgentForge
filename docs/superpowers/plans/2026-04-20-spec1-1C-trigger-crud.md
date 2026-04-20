@@ -280,7 +280,7 @@
 
 ## Task 4 — Trigger CRUD HTTP handlers (POST/PATCH/DELETE/GET-by-employee)
 
-- [ ] Step 4.1 — write failing handler test for create + delete-of-dag-managed
+- [x] Step 4.1 — write failing handler test for create + delete-of-dag-managed
   - File: `src-go/internal/handler/trigger_handler_test.go`
   - Add a `mockTriggerService` implementing the interface from Step 4.2 with controllable returns.
   - Tests:
@@ -289,7 +289,7 @@
     - `TestTriggerHandler_Delete_DAGManagedReturns409` service returns `ErrTriggerCannotDeleteDAGManaged` → 409 with code `trigger:cannot_delete_dag_managed`.
     - `TestTriggerHandler_ListByEmployee_OK` returns array.
 
-- [ ] Step 4.2 — extend `TriggerHandler`
+- [x] Step 4.2 — extend `TriggerHandler`
   - File: `src-go/internal/handler/trigger_handler.go`
   - Add a new interface above `triggerQueryRepo`:
     ```go
@@ -316,14 +316,14 @@
     - reject `workflow_id / source / created_via` in PATCH body (return 400).
   - Reuse `localizedError` for unknown errors.
 
-- [ ] Step 4.3 — verify
+- [x] Step 4.3 — verify
   - Run `rtk go test ./internal/handler/... -run TestTriggerHandler` — all new + existing tests pass.
 
 ---
 
 ## Task 5 — Trigger dry-run `/test` endpoint
 
-- [ ] Step 5.1 — write failing handler test
+- [x] Step 5.1 — write failing handler test
   - Same file as Task 4. `TestTriggerHandler_Test_DryRun`:
     - POST `/api/v1/triggers/{id}/test` with body `{"event":{"platform":"feishu","command":"/echo","content":"/echo hi","chat_id":"c-1","args":["hi"]}}`.
     - Mock service returns `{matched: true, would_dispatch: true, rendered_input: {"text":"hi"}, skip_reason: ""}`.
@@ -355,17 +355,17 @@
     6. Else `{Matched:true, WouldDispatch:true, RenderedInput:mapped}`.
     - Critical: the dry-run NEVER calls `engine.Start` and NEVER touches the idempotency store.
 
-- [ ] Step 5.3 — handler `Test` method
+- [x] Step 5.3 — handler `Test` method
   - In `trigger_handler.go` add `Test` that parses body `{"event": map[string]any}`, calls `h.crud.Test(...)`, returns 200 + struct. Register `g.POST("/:id/test", h.Test)`.
 
-- [ ] Step 5.4 — verify
+- [x] Step 5.4 — verify
   - Run `rtk go test ./internal/...` — all green; the rename of `matchesTrigger`→`MatchesTrigger` may cascade through `router.go` — fix call sites.
 
 ---
 
 ## Task 6 — Wire CRUD service in routes.go
 
-- [ ] Step 6.1 — extend route construction
+- [x] Step 6.1 — extend route construction
   - File: `src-go/internal/server/routes.go`, around line 568 right after `triggerRepo := repository.NewWorkflowTriggerRepository(taskRepo.DB())`:
     ```go
     triggerSvc := service.NewTriggerService(triggerRepo, dagDefRepo, employeeRepo)
@@ -378,9 +378,12 @@
     ```
   - The `employeeRepo` variable already exists upstream; if not, locate the `repository.NewEmployeeRepository(...)` line and store its result in a local var named `employeeRepo`.
 
-- [ ] Step 6.2 — verify
-  - `rtk go build ./cmd/server` succeeds.
-  - `rtk go test ./internal/server/...` passes.
+- [x] Step 6.2 — verify
+  - `rtk go build ./cmd/server` succeeds for trigger-related code; the
+    parallel 3A `qianchuan_bindings_handler.go` references unmerged i18n
+    constants — that is unrelated WIP and outside this plan's scope.
+  - `rtk go test ./internal/server/...` passes for trigger paths once 3A
+    lands its missing constants; no trigger-specific server tests added.
 
 ---
 
