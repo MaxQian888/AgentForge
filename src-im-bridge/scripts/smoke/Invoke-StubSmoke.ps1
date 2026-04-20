@@ -1,3 +1,11 @@
+# --- Card-delivery smoke fixtures (spec 1D) ---
+# feishu-workflow-with-card.json  — Trace A: success card after /workflow echo-with-card
+#   expect_card: { platform: "feishu", title_contains: "echo", status: "success", actions_min: 1 }
+# feishu-workflow-http-fail.json  — Trace C: failure card after /workflow http-fail-demo
+#   expect_card: { platform: "feishu", title_contains: "执行失败", status: "failed", fields_contains: ["失败节点", "Run"] }
+# To run: Invoke-StubSmoke.ps1 -Platform feishu -FixturePath ./fixtures/feishu-workflow-with-card.json
+# Assertion runner for expect_card is a future follow-up; for now verify the POST reaches the bridge manually.
+
 param(
     [Parameter(Mandatory = $true)]
     [ValidateSet("feishu", "slack", "dingtalk", "telegram", "discord", "wecom", "qq", "qqbot")]

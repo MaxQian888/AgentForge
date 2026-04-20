@@ -1,0 +1,13 @@
+{
+  "content": "/workflow http-fail-demo",
+  "user_id": "feishu-user-1",
+  "chat_id": "feishu-chat-1",
+  "is_group": true,
+  "stub_http_node_response": { "status": 401, "body": "unauthorized" },
+  "expect_card": {
+    "platform": "feishu",
+    "title_contains": "执行失败",
+    "status": "failed",
+    "fields_contains": ["失败节点", "Run"]
+  }
+}

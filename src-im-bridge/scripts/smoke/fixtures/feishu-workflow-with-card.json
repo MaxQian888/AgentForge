@@ -1,0 +1,13 @@
+{
+  "content": "/workflow echo-with-card",
+  "user_id": "feishu-user-1",
+  "user_name": "Feishu Smoke",
+  "chat_id": "feishu-chat-1",
+  "is_group": true,
+  "expect_card": {
+    "platform": "feishu",
+    "title_contains": "echo",
+    "status": "success",
+    "actions_min": 1
+  }
+}
