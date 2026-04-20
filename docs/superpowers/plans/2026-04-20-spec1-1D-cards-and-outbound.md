@@ -173,7 +173,7 @@
 
 ## Task 2 — Card renderer dispatch (`core/card_renderer.go`)
 
-- [ ] Step 2.1 — failing test: dispatch routes by ReplyTarget.Platform
+- [x] Step 2.1 — failing test: dispatch routes by ReplyTarget.Platform
   - File: `src-im-bridge/core/card_renderer_test.go` (new)
     ```go
     package core_test
@@ -214,7 +214,7 @@
     }
     ```
 
-- [ ] Step 2.2 — implement `core/card_renderer.go`
+- [x] Step 2.2 — implement `core/card_renderer.go`
   - File: `src-im-bridge/core/card_renderer.go` (new)
     ```go
     package core
@@ -280,14 +280,14 @@
     }
     ```
 
-- [ ] Step 2.3 — verify
+- [x] Step 2.3 — verify
   - `rtk go test ./core/...` — three new tests pass; existing tests still green.
 
 ---
 
 ## Task 3 — Text fallback renderer
 
-- [ ] Step 3.1 — failing snapshot test
+- [x] Step 3.1 — failing snapshot test
   - File: `src-im-bridge/core/card_renderer_text_test.go` (new)
     ```go
     package core_test
@@ -325,7 +325,7 @@
     }
     ```
 
-- [ ] Step 3.2 — implement
+- [x] Step 3.2 — implement
   - In `src-im-bridge/core/card_renderer.go` append:
     ```go
     func RenderTextFallback(c ProviderNeutralCard) RenderedPayload {
@@ -357,7 +357,7 @@
     }
     ```
 
-- [ ] Step 3.3 — verify
+- [x] Step 3.3 — verify
   - `rtk go test ./core/...` — both snapshot tests pass.
 
 ---
