@@ -413,7 +413,7 @@ export default function PluginsPage() {
   };
 
   return (
-    <div className="flex h-[calc(100vh-4rem)] flex-col gap-3">
+    <div className="flex h-[calc(100vh-var(--header-height))] flex-col gap-[var(--space-stack-sm)]">
       {error ? <ErrorBanner message={error} /> : null}
 
       {/* ── Runtime status bar ── */}

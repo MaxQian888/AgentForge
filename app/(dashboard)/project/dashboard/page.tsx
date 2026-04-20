@@ -11,6 +11,7 @@ import { useBreadcrumbs } from "@/hooks/use-breadcrumbs";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { ErrorBanner } from "@/components/shared/error-banner";
+import { SectionCard } from "@/components/shared/section-card";
 import { FolderOpen, LayoutDashboard } from "lucide-react";
 
 const EMPTY_DASHBOARDS: DashboardConfig[] = [];
@@ -135,7 +136,7 @@ function ProjectDashboardView() {
   }
 
   return (
-    <div className="space-y-4">
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
       <PageHeader title={t("projectDashboard.title")} />
       {!selectedDashboard ? (
         <EmptyState
@@ -148,9 +149,11 @@ function ProjectDashboardView() {
         />
       ) : (
         <>
-          <div className="flex flex-col gap-3 rounded-lg border bg-card p-4 shadow-sm md:flex-row md:items-end md:justify-between">
-            <div className="flex flex-col gap-3 md:flex-row md:items-end">
-              <div className="flex min-w-[220px] flex-col gap-1.5">
+          <SectionCard
+            bodyClassName="flex flex-col gap-[var(--space-stack-sm)] md:flex-row md:items-end md:justify-between"
+          >
+            <div className="flex flex-col gap-[var(--space-stack-sm)] md:flex-row md:items-end">
+              <div className="flex min-w-[220px] flex-col gap-[var(--space-stack-xs)]">
                 <label
                   htmlFor="project-dashboard-selector"
                   className="text-sm font-medium"
@@ -173,7 +176,7 @@ function ProjectDashboardView() {
                 </select>
               </div>
               {isEditingName ? (
-                <div className="flex flex-col gap-1.5">
+                <div className="flex flex-col gap-[var(--space-stack-xs)]">
                   <label
                     htmlFor="project-dashboard-name"
                     className="text-sm font-medium"
@@ -188,7 +191,7 @@ function ProjectDashboardView() {
                 </div>
               ) : null}
             </div>
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap gap-[var(--space-stack-sm)]">
               {isEditingName ? (
                 <>
                   <Button
@@ -243,7 +246,7 @@ function ProjectDashboardView() {
                 {t("projectDashboard.delete")}
               </Button>
             </div>
-          </div>
+          </SectionCard>
           <DashboardGrid projectId={projectId} dashboard={selectedDashboard} />
         </>
       )}

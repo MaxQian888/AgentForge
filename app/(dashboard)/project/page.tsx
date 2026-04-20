@@ -391,7 +391,7 @@ function ProjectView() {
   if (!projectId) return null;
 
   return (
-    <div className="-m-6 h-[calc(100vh-3.5rem)]">
+    <div className="-m-[var(--space-page-inline)] h-[calc(100vh-var(--header-height))]">
       <CreateTaskDialog
         projectId={projectId}
         sprints={sprints}

@@ -37,4 +37,27 @@ describe("PageHeader", () => {
     expect(container.firstChild).toHaveClass("sticky");
     expect(container.firstChild).toHaveClass("custom-header");
   });
+
+  it("renders the status slot next to the title", () => {
+    render(
+      <PageHeader
+        title="Agents"
+        status={<span data-testid="status-ribbon">3 running</span>}
+      />,
+    );
+
+    expect(screen.getByTestId("status-ribbon")).toHaveTextContent("3 running");
+    expect(screen.getByRole("heading", { name: "Agents" })).toBeInTheDocument();
+  });
+
+  it("renders the filters slot below the header row", () => {
+    render(
+      <PageHeader
+        title="Tasks"
+        filters={<div data-testid="filters-row">filters go here</div>}
+      />,
+    );
+
+    expect(screen.getByTestId("filters-row")).toBeInTheDocument();
+  });
 });

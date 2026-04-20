@@ -22,6 +22,15 @@ jest.mock("@/components/ui/select", () => ({
   ),
 }));
 
+jest.mock("@/components/ui/sheet", () => ({
+  Sheet: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  SheetTrigger: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  SheetContent: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  SheetHeader: ({ children }: { children?: React.ReactNode }) => <>{children}</>,
+  SheetTitle: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
+  SheetDescription: ({ children }: { children?: React.ReactNode }) => <span>{children}</span>,
+}));
+
 import { fireEvent, render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { FilterBar } from "./filter-bar";
@@ -61,8 +70,9 @@ describe("FilterBar", () => {
     });
     expect(onSearch).toHaveBeenCalledWith("agent");
 
-    expect(screen.getByText("Extra action")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Reset" }));
+    expect(screen.getAllByText("Extra action").length).toBeGreaterThan(0);
+    const resetButtons = screen.getAllByRole("button", { name: "Reset" });
+    await user.click(resetButtons[0]);
     expect(onReset).toHaveBeenCalled();
   });
 
@@ -84,5 +94,27 @@ describe("FilterBar", () => {
     );
 
     expect(screen.queryByRole("button", { name: "Reset" })).not.toBeInTheDocument();
+  });
+
+  it("renders the mobile overflow trigger when filters exist", () => {
+    render(
+      <FilterBar
+        searchValue=""
+        onSearch={jest.fn()}
+        moreFiltersLabel="More filters"
+        filters={[
+          {
+            key: "status",
+            label: "Status",
+            value: "all",
+            onChange: jest.fn(),
+            options: [{ value: "active", label: "Active" }],
+          },
+        ]}
+      />,
+    );
+
+    const triggers = screen.getAllByRole("button", { name: "More filters" });
+    expect(triggers.length).toBeGreaterThan(0);
   });
 });

@@ -11,17 +11,11 @@ import {
   TrendingUp,
 } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { MetricCard } from "@/components/shared/metric-card";
 import { ErrorBanner } from "@/components/shared/error-banner";
+import { SectionCard } from "@/components/shared/section-card";
 import {
   Table,
   TableBody,
@@ -226,7 +220,7 @@ export default function CostPage() {
 
   if (!selectedProjectId) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-[var(--space-section-gap)]">
         <PageHeader title={t("title")} />
         {projectOptions.length > 0 ? (
           <div className="flex justify-end">
@@ -245,18 +239,19 @@ export default function CostPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader title={t("title")} />
-
-      <div className="flex justify-end">
-        <CostProjectFilter
-          projects={projectOptions}
-          selectedProjectId={selectedProjectId}
-          onChange={(next) =>
-            useDashboardStore.setState({ selectedProjectId: next })
-          }
-        />
-      </div>
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
+      <PageHeader
+        title={t("title")}
+        actions={
+          <CostProjectFilter
+            projects={projectOptions}
+            selectedProjectId={selectedProjectId}
+            onChange={(next) =>
+              useDashboardStore.setState({ selectedProjectId: next })
+            }
+          />
+        }
+      />
 
       {overspendingAlerts.length > 0 ? (
         <OverspendingAlertBanner alerts={overspendingAlerts} />
@@ -264,7 +259,7 @@ export default function CostPage() {
 
       {costError ? <ErrorBanner message={costError} /> : null}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-6">
+      <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-6">
         <MetricCard
           label={t("totalSpend")}
           value={renderMetric(hasSummary, projectCost?.totalCostUsd, (value) => `$${value.toFixed(2)}`)}
@@ -299,78 +294,64 @@ export default function CostPage() {
 
       <BudgetForecastCard input={forecastInput} />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("spendingTrend")}</CardTitle>
-          <CardDescription>{t("spendingTrendDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          <SpendingTrendChart data={chartData} />
-        </CardContent>
-      </Card>
+      <SectionCard
+        title={t("spendingTrend")}
+        description={t("spendingTrendDesc")}
+      >
+        <SpendingTrendChart data={chartData} />
+      </SectionCard>
 
-      <div className="grid gap-6 lg:grid-cols-2">
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("budgetAllocation")}</CardTitle>
-            <CardDescription>{t("budgetAllocationDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <BudgetAllocationChart data={allocationData} />
-          </CardContent>
-        </Card>
+      <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] md:grid-cols-1 lg:grid-cols-2 xl:grid-cols-2">
+        <SectionCard
+          title={t("budgetAllocation")}
+          description={t("budgetAllocationDesc")}
+        >
+          <BudgetAllocationChart data={allocationData} />
+        </SectionCard>
 
-        <Card>
-          <CardHeader>
-            <CardTitle>{t("agentCostComparison")}</CardTitle>
-            <CardDescription>{t("agentCostComparisonDesc")}</CardDescription>
-          </CardHeader>
-          <CardContent>
-            <AgentCostBarChart data={agentCostEntries} />
-          </CardContent>
-        </Card>
+        <SectionCard
+          title={t("agentCostComparison")}
+          description={t("agentCostComparisonDesc")}
+        >
+          <AgentCostBarChart data={agentCostEntries} />
+        </SectionCard>
       </div>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("externalRuntimeCoverage")}</CardTitle>
-          <CardDescription>{t("externalRuntimeCoverageDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent className="space-y-4">
-          <div className="grid gap-4 md:grid-cols-3">
-            <MetricCard
-              label={t("authoritativeSpend")}
-              value={`$${(costCoverage?.authoritativeCostUsd ?? 0).toFixed(2)}`}
-              icon={DollarSign}
-            />
-            <MetricCard
-              label={t("estimatedSpend")}
-              value={`$${(costCoverage?.estimatedCostUsd ?? 0).toFixed(2)}`}
-              icon={TrendingUp}
-            />
-            <MetricCard
-              label={t("unpricedRuns")}
-              value={String(
-                (costCoverage?.unpricedRunCount ?? 0) +
-                  (costCoverage?.planIncludedRunCount ?? 0),
-              )}
-              icon={Hash}
-            />
-          </div>
+      <SectionCard
+        title={t("externalRuntimeCoverage")}
+        description={t("externalRuntimeCoverageDesc")}
+      >
+        <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3">
+          <MetricCard
+            label={t("authoritativeSpend")}
+            value={`$${(costCoverage?.authoritativeCostUsd ?? 0).toFixed(2)}`}
+            icon={DollarSign}
+          />
+          <MetricCard
+            label={t("estimatedSpend")}
+            value={`$${(costCoverage?.estimatedCostUsd ?? 0).toFixed(2)}`}
+            icon={TrendingUp}
+          />
+          <MetricCard
+            label={t("unpricedRuns")}
+            value={String(
+              (costCoverage?.unpricedRunCount ?? 0) +
+                (costCoverage?.planIncludedRunCount ?? 0),
+            )}
+            icon={Hash}
+          />
+        </div>
 
-          {costCoverage?.hasCoverageGap ? (
-            <ErrorBanner message={t("coverageGapWarning")} />
-          ) : null}
-        </CardContent>
-      </Card>
+        {costCoverage?.hasCoverageGap ? (
+          <ErrorBanner message={t("coverageGapWarning")} />
+        ) : null}
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("runtimeCostBreakdown")}</CardTitle>
-          <CardDescription>{t("runtimeCostBreakdownDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {runtimeBreakdown.length > 0 ? (
+      <SectionCard
+        title={t("runtimeCostBreakdown")}
+        description={t("runtimeCostBreakdownDesc")}
+      >
+        {runtimeBreakdown.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -410,51 +391,42 @@ export default function CostPage() {
                 ))}
               </TableBody>
             </Table>
-          ) : (
-            <p className="text-sm text-muted-foreground">{t("noRuntimeBreakdownData")}</p>
-          )}
-        </CardContent>
-      </Card>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t("noRuntimeBreakdownData")}</p>
+        )}
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("costOverTime")}</CardTitle>
-          <CardDescription>{t("costOverTimeDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {chartData.length > 0 ? (
-            <CostChart data={chartData} />
-          ) : (
-            <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
-              {costLoading ? t("loadingChart") : t("noChartData")}
-            </div>
-          )}
-        </CardContent>
-      </Card>
-
-      <Card>
-        <CardHeader className="flex flex-row items-start justify-between gap-2 space-y-0">
-          <div>
-            <CardTitle>{t("costBreakdown")}</CardTitle>
-            <CardDescription>{t("costBreakdownDesc")}</CardDescription>
+      <SectionCard
+        title={t("costOverTime")}
+        description={t("costOverTimeDesc")}
+      >
+        {chartData.length > 0 ? (
+          <CostChart data={chartData} />
+        ) : (
+          <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
+            {costLoading ? t("loadingChart") : t("noChartData")}
           </div>
+        )}
+      </SectionCard>
+
+      <SectionCard
+        title={t("costBreakdown")}
+        description={t("costBreakdownDesc")}
+        actions={
           <CostCsvExport
             data={breakdownEntries}
             fileName={`cost-breakdown-${selectedProjectId}.csv`}
           />
-        </CardHeader>
-        <CardContent>
-          <CostBreakdownTable data={breakdownEntries} />
-        </CardContent>
-      </Card>
+        }
+      >
+        <CostBreakdownTable data={breakdownEntries} />
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("sprintCostComparison")}</CardTitle>
-          <CardDescription>{t("sprintCostDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {sprintCosts.length > 0 ? (
+      <SectionCard
+        title={t("sprintCostComparison")}
+        description={t("sprintCostDesc")}
+      >
+        {sprintCosts.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -490,51 +462,42 @@ export default function CostPage() {
                 })}
               </TableBody>
             </Table>
-          ) : (
-            <p className="text-sm text-muted-foreground">{t("noSprintCostData")}</p>
-          )}
-        </CardContent>
-      </Card>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t("noSprintCostData")}</p>
+        )}
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("teamVelocity")}</CardTitle>
-          <CardDescription>{t("teamVelocityDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {velocityLoading && velocity.length === 0 ? (
-            <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
-              {t("loadingVelocity")}
-            </div>
-          ) : (
-            <VelocityChart data={velocity} />
-          )}
-        </CardContent>
-      </Card>
+      <SectionCard
+        title={t("teamVelocity")}
+        description={t("teamVelocityDesc")}
+      >
+        {velocityLoading && velocity.length === 0 ? (
+          <div className="flex h-[200px] items-center justify-center text-sm text-muted-foreground">
+            {t("loadingVelocity")}
+          </div>
+        ) : (
+          <VelocityChart data={velocity} />
+        )}
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("agentPerformance")}</CardTitle>
-          <CardDescription>{t("agentPerformanceDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {performanceLoading && agentPerformance.length === 0 ? (
-            <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
-              {t("loadingPerformance")}
-            </div>
-          ) : (
-            <AgentPerformanceTable data={agentPerformance} />
-          )}
-        </CardContent>
-      </Card>
+      <SectionCard
+        title={t("agentPerformance")}
+        description={t("agentPerformanceDesc")}
+      >
+        {performanceLoading && agentPerformance.length === 0 ? (
+          <div className="flex h-[120px] items-center justify-center text-sm text-muted-foreground">
+            {t("loadingPerformance")}
+          </div>
+        ) : (
+          <AgentPerformanceTable data={agentPerformance} />
+        )}
+      </SectionCard>
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("perTaskCost")}</CardTitle>
-          <CardDescription>{t("perTaskCostDesc")}</CardDescription>
-        </CardHeader>
-        <CardContent>
-          {taskCosts.length > 0 ? (
+      <SectionCard
+        title={t("perTaskCost")}
+        description={t("perTaskCostDesc")}
+      >
+        {taskCosts.length > 0 ? (
             <Table>
               <TableHeader>
                 <TableRow>
@@ -563,11 +526,10 @@ export default function CostPage() {
                 ))}
               </TableBody>
             </Table>
-          ) : (
-            <p className="text-sm text-muted-foreground">{t("noTaskCostData")}</p>
-          )}
-        </CardContent>
-      </Card>
+        ) : (
+          <p className="text-sm text-muted-foreground">{t("noTaskCostData")}</p>
+        )}
+      </SectionCard>
     </div>
   );
 }

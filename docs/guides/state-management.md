@@ -96,3 +96,35 @@ operator-facing diagnostics.
 - keep cross-store writes explicit through `getState()` rather than hidden global mutation
 - centralize websocket event projection in `useWSStore`
 - avoid duplicating the same backend resource in multiple stores with conflicting normalization rules
+
+## Primitive → Store Pairings
+
+The shared page primitives documented in `docs/guides/frontend-components.md`
+assume specific store patterns. When you reach for a primitive, wire it to the
+matching store seam below — don't invent a parallel path.
+
+| Primitive | Canonical hook | Pattern |
+| --- | --- | --- |
+| `PageHeader` breadcrumbs | `useBreadcrumbs` from `hooks/use-breadcrumbs.ts` | call once in the page `useEffect`; also pass to `PageHeader.breadcrumbs` prop |
+| `PageHeader` actions | domain store action or `useLayoutStore` | primary actions dispatch through the owning domain store; global actions (command palette open) come from `useLayoutStore` |
+| `FilterBar` search + filters | domain filter slice (e.g., `useSchedulerStore.listFilters`, `useMarketplaceStore.filters`) | set via `set*Filters`, reset via `reset*Filters`; keep the URL sync in the page, not the store |
+| `FilterBar` reset | same filter slice | expose a single `reset*Filters()` action so the primitive can call it through `onReset` |
+| `MetricCard` (value) | derived selector on the domain store | memoize on the store; never recompute in render |
+| `MetricCard` (sparkline) | `lib/dashboard/metric-sparkline.ts` helpers | pass normalized `{timestamp, amount}` rows from the store |
+| `MetricCard` (loading) | domain store `loading` flag | pair with the skeleton layout while the store resolves |
+| `SectionCard` | section-local presentational state | no store dependency required; if a section needs persistence, expose it through the owning domain store |
+| `ResponsiveTabs` | URL param + store `selected*` action | read `value` from `useSearchParams`, dispatch `onValueChange` to both the URL and the store's `select*` action |
+| `EmptyState` | domain store `items` length | render when the list is empty and no filters are active |
+| `ErrorBanner` | domain store `error` field | show above the affected section; `onRetry` calls the same fetch action that produced the error |
+| `skeleton-layouts/*` | domain store `loading` flag | match the footprint of the loaded primitive so layout doesn't shift |
+
+### When adding a new page
+
+1. Pick a layout template (`OverviewLayout` / `ListLayout` / `SettingsLayout` /
+   `WorkspaceLayout`).
+2. Identify the domain store that owns the page data. Reuse an existing store
+   where possible (a new sibling slice beats a whole new store).
+3. Wire the primitives above to that store's actions — not to ad-hoc local
+   state.
+4. Update both `docs/guides/frontend-components.md` (audit row) and this guide
+   if you introduce a new primitive.

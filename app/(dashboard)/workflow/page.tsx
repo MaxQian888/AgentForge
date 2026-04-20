@@ -644,7 +644,7 @@ function WorkflowPageContent() {
 
   if (!activeProjectId) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-[var(--space-section-gap)]">
         <PageHeader title={t("title")} />
         <EmptyState icon={FolderOpen} title={t("selectProject")} />
       </div>
@@ -652,7 +652,7 @@ function WorkflowPageContent() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
       <PageHeader title={t("title")} />
       <Tabs value={activeTab} onValueChange={handleActiveTabChange} className="w-full">
         <TabsList>

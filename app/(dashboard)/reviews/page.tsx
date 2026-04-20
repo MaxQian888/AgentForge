@@ -146,7 +146,7 @@ export default function ReviewsPage({ searchParams }: ReviewsPageProps) {
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
       <PageHeader title={t("title")} />
 
       <FilterBar

@@ -17,7 +17,7 @@ export default function MemoryPage() {
 
   if (!memoryExplorerEnabled) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-[var(--space-section-gap)]">
         <PageHeader title={t("title")} />
         <EmptyState
           icon={Lock}
@@ -29,7 +29,7 @@ export default function MemoryPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
       <PageHeader title={t("title")} />
       {selectedProjectId ? (
         <MemoryPanel projectId={selectedProjectId} />

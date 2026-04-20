@@ -21,6 +21,8 @@ interface PageHeaderProps {
   title: string;
   description?: string;
   actions?: React.ReactNode;
+  status?: React.ReactNode;
+  filters?: React.ReactNode;
   sticky?: boolean;
   className?: string;
 }
@@ -30,6 +32,8 @@ export function PageHeader({
   title,
   description,
   actions,
+  status,
+  filters,
   sticky,
   className,
 }: PageHeaderProps) {
@@ -65,11 +69,14 @@ export function PageHeader({
           </BreadcrumbList>
         </Breadcrumb>
       )}
-      <div className="flex items-center justify-between gap-[var(--space-grid-gap)]">
-        <div className="min-w-0">
-          <h1 className="text-fluid-title truncate font-semibold tracking-tight">
-            {title}
-          </h1>
+      <div className="flex flex-col gap-[var(--space-stack-sm)] sm:flex-row sm:items-center sm:justify-between sm:gap-[var(--space-grid-gap)]">
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-[var(--space-stack-sm)]">
+            <h1 className="text-fluid-title truncate font-semibold tracking-tight">
+              {title}
+            </h1>
+            {status && <div className="shrink-0">{status}</div>}
+          </div>
           {description && (
             <p className="mt-[var(--space-stack-xs)] text-fluid-body text-muted-foreground">
               {description}
@@ -77,11 +84,12 @@ export function PageHeader({
           )}
         </div>
         {actions && (
-          <div className="flex shrink-0 items-center gap-[var(--space-stack-sm)]">
+          <div className="flex shrink-0 flex-wrap items-center gap-[var(--space-stack-sm)] sm:flex-nowrap">
             {actions}
           </div>
         )}
       </div>
+      {filters && <div className="mt-[var(--space-stack-sm)]">{filters}</div>}
     </div>
   );
 }

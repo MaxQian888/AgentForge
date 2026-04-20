@@ -14,7 +14,7 @@ export default function DocumentsPage() {
   const selectedProjectId = useDashboardStore((s) => s.selectedProjectId);
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
       <PageHeader title={t("title")} />
       {selectedProjectId ? (
         <DocumentPanel projectId={selectedProjectId} />

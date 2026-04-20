@@ -9,6 +9,7 @@ import { FileText, FolderOpen, Plus } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
+import { SectionCard } from "@/components/shared/section-card";
 import { useDashboardStore } from "@/lib/stores/dashboard-store";
 import { flattenKnowledgeTree, useKnowledgeStore } from "@/lib/stores/knowledge-store";
 import { buildDocsHref } from "@/lib/route-hrefs";
@@ -85,19 +86,16 @@ export default function DocsLandingPage() {
 
   if (!activeProjectId) {
     return (
-      <div className="flex flex-col gap-4">
+      <div className="flex flex-col gap-[var(--space-stack-md)]">
         <PageHeader title={t("title")} />
-        <EmptyState
-          icon={FolderOpen}
-          title={t("selectProject")}
-        />
+        <EmptyState icon={FolderOpen} title={t("selectProject")} />
       </div>
     );
   }
 
   return (
-    <div className="grid gap-6 xl:grid-cols-[320px_minmax(0,1fr)]">
-      <div className="flex flex-col gap-4">
+    <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] xl:grid-cols-[320px_minmax(0,1fr)]">
+      <div className="flex flex-col gap-[var(--space-stack-md)]">
         <KnowledgeSearch projectId={activeProjectId} />
         <DocsSidebarPanel
           query={query}
@@ -124,7 +122,7 @@ export default function DocsLandingPage() {
         />
       </div>
 
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-[var(--space-section-gap)]">
         <PageHeader
           title={t("title")}
           description={t("subtitle")}
@@ -148,56 +146,65 @@ export default function DocsLandingPage() {
           }
         />
 
-        <div className="grid gap-4 lg:grid-cols-3">
-          <section className="rounded-2xl border border-border/60 bg-card/70 p-4">
-            <h2 className="text-base font-semibold">{t("pinned")}</h2>
-            <div className="mt-3 flex flex-col gap-2">
+        <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3">
+          <SectionCard title={t("pinned")}>
+            <div className="flex flex-col gap-[var(--space-stack-sm)]">
               {pinnedPages.map((page) => (
-                <Link key={page.id} href={buildDocsHref(page.id)} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
+                <Link
+                  key={page.id}
+                  href={buildDocsHref(page.id)}
+                  className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40"
+                >
                   {page.title}
                 </Link>
               ))}
               {pinnedPages.length === 0 ? (
-                <EmptyState icon={FileText} title={t("noPinned")} className="py-6" />
+                <EmptyState icon={FileText} title={t("noPinned")} className="py-[var(--space-card-padding)]" />
               ) : null}
             </div>
-          </section>
+          </SectionCard>
 
-          <section className="rounded-2xl border border-border/60 bg-card/70 p-4">
-            <h2 className="text-base font-semibold">{t("favorites")}</h2>
-            <div className="mt-3 flex flex-col gap-2">
+          <SectionCard title={t("favorites")}>
+            <div className="flex flex-col gap-[var(--space-stack-sm)]">
               {favorites.map((favorite) => {
                 const page = allPages.find((item) => item.id === favorite.assetId);
                 if (!page) return null;
                 return (
-                  <Link key={favorite.assetId} href={buildDocsHref(favorite.assetId)} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
+                  <Link
+                    key={favorite.assetId}
+                    href={buildDocsHref(favorite.assetId)}
+                    className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40"
+                  >
                     {page.title}
                   </Link>
                 );
               })}
               {favorites.length === 0 ? (
-                <EmptyState icon={FileText} title={t("noFavorites")} className="py-6" />
+                <EmptyState icon={FileText} title={t("noFavorites")} className="py-[var(--space-card-padding)]" />
               ) : null}
             </div>
-          </section>
+          </SectionCard>
 
-          <section className="rounded-2xl border border-border/60 bg-card/70 p-4">
-            <h2 className="text-base font-semibold">{t("recent")}</h2>
-            <div className="mt-3 flex flex-col gap-2">
+          <SectionCard title={t("recent")}>
+            <div className="flex flex-col gap-[var(--space-stack-sm)]">
               {recentAccess.map((access) => {
                 const page = allPages.find((item) => item.id === access.assetId);
                 if (!page) return null;
                 return (
-                  <Link key={`${access.assetId}-${access.accessedAt}`} href={buildDocsHref(access.assetId)} className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40">
+                  <Link
+                    key={`${access.assetId}-${access.accessedAt}`}
+                    href={buildDocsHref(access.assetId)}
+                    className="rounded-lg border border-border/60 px-3 py-2 hover:bg-accent/40"
+                  >
                     {page.title}
                   </Link>
                 );
               })}
               {recentAccess.length === 0 ? (
-                <EmptyState icon={FileText} title={t("noRecent")} className="py-6" />
+                <EmptyState icon={FileText} title={t("noRecent")} className="py-[var(--space-card-padding)]" />
               ) : null}
             </div>
-          </section>
+          </SectionCard>
         </div>
 
         <TemplateCenter
@@ -233,12 +240,15 @@ export default function DocsLandingPage() {
           }
         />
 
-        <section className="rounded-2xl border border-border/60 bg-card/70 p-4">
-          <div className="flex items-center gap-2">
-            <FileText className="size-4 text-muted-foreground" />
-            <h2 className="text-base font-semibold">{t("allPages")}</h2>
-          </div>
-          <div className="mt-3 grid gap-3 md:grid-cols-2 xl:grid-cols-3">
+        <SectionCard
+          title={
+            <span className="flex items-center gap-2">
+              <FileText className="size-4 text-muted-foreground" />
+              {t("allPages")}
+            </span>
+          }
+        >
+          <div className="grid grid-cols-1 gap-[var(--space-stack-sm)] sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
             {allPages.map((page) => (
               <Link
                 key={page.id}
@@ -250,7 +260,7 @@ export default function DocsLandingPage() {
               </Link>
             ))}
           </div>
-        </section>
+        </SectionCard>
       </div>
 
       <TemplatePicker

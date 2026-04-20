@@ -58,4 +58,29 @@ describe("MetricCard", () => {
     expect(screen.getByTestId("metric-sparkline-chart")).toBeInTheDocument();
     expect(screen.getByTestId("metric-sparkline-area")).toBeInTheDocument();
   });
+
+  it("renders the loading skeleton when loading is true", () => {
+    render(<MetricCard label="Queued" value={0} loading />);
+
+    // No value rendered when loading
+    expect(screen.queryByText("Queued")).not.toBeInTheDocument();
+    expect(screen.queryByText("0")).not.toBeInTheDocument();
+  });
+
+  it("suppresses the sparkline in compact mode", () => {
+    render(
+      <MetricCard
+        label="Weekly Cost"
+        value="$42.00"
+        compact
+        sparkline={[
+          { label: "2026-03-30", value: 4 },
+          { label: "2026-03-31", value: 5 },
+        ]}
+      />,
+    );
+
+    expect(screen.queryByTestId("metric-sparkline-chart")).not.toBeInTheDocument();
+    expect(screen.getByText("$42.00")).toBeInTheDocument();
+  });
 });

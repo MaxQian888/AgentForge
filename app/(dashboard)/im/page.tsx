@@ -5,8 +5,8 @@ import { useTranslations } from "next-intl";
 import { RefreshCw } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
+import { SectionCard } from "@/components/shared/section-card";
 import { Label } from "@/components/ui/label";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { IMChannelConfig } from "@/components/im/im-channel-config";
@@ -127,7 +127,7 @@ export default function IMBridgePage() {
   };
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
       <PageHeader
         title={t("title")}
         actions={
@@ -164,11 +164,10 @@ export default function IMBridgePage() {
         onSendTest={handleBridgeSendTest}
       />
 
-      <Card>
-        <CardHeader>
-          <CardTitle>{t("testSendTitle")}</CardTitle>
-        </CardHeader>
-        <CardContent className="grid gap-4 md:grid-cols-[160px,1fr,1fr,auto]">
+      <SectionCard
+        title={t("testSendTitle")}
+        bodyClassName="grid gap-4 md:grid-cols-[160px,1fr,1fr,auto]"
+      >
           <div className="flex flex-col gap-1.5">
             <Label htmlFor="im-test-platform">{t("testSendPlatform")}</Label>
             <select
@@ -235,8 +234,7 @@ export default function IMBridgePage() {
               ) : null}
             </div>
           ) : null}
-        </CardContent>
-      </Card>
+      </SectionCard>
 
       <ConfirmDialog
         open={testConfirmOpen}

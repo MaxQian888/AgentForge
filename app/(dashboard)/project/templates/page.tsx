@@ -70,10 +70,10 @@ export default function ProjectTemplatesPage() {
   };
 
   return (
-    <div className="flex flex-col gap-6 p-6">
+    <div className="flex flex-col gap-[var(--space-section-gap)] p-[var(--space-page-inline)]">
       <header className="flex flex-col gap-1">
-        <h1 className="text-2xl font-semibold">{t("page.title")}</h1>
-        <p className="text-sm text-muted-foreground">{t("page.description")}</p>
+        <h1 className="text-fluid-title font-semibold tracking-tight">{t("page.title")}</h1>
+        <p className="text-fluid-body text-muted-foreground">{t("page.description")}</p>
       </header>
 
       {loading ? (

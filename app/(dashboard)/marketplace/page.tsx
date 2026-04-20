@@ -244,7 +244,7 @@ export default function MarketplacePage() {
               ) : null}
 
               {builtInLoading ? (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
                   {Array.from({ length: 3 }).map((_, i) => (
                     <Skeleton key={i} className="h-40 rounded-lg" />
                   ))}
@@ -254,7 +254,7 @@ export default function MarketplacePage() {
                   <h2 className="mb-2 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                     {filters.type !== "all" ? `Built-in ${filters.type === "workflow_template" ? "workflows" : `${filters.type}s`}` : "Built-in items"}
                   </h2>
-                  <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                  <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
                     {filteredBuiltInItems.map((item) => (
                       <MarketplaceItemCard
                         key={item.id}
@@ -299,7 +299,7 @@ export default function MarketplacePage() {
                   Remote marketplace items are temporarily unavailable.
                 </div>
               ) : loading ? (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
                   {Array.from({ length: 6 }).map((_, i) => (
                     <Skeleton key={i} className="h-40 rounded-lg" />
                   ))}
@@ -312,7 +312,7 @@ export default function MarketplacePage() {
                   action={{ label: "Publish", onClick: () => setPublishDialogOpen(true) }}
                 />
               ) : (
-                <div className="grid grid-cols-1 gap-3 sm:grid-cols-2 xl:grid-cols-3">
+                <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
                   {items.map((item) => (
                     <MarketplaceItemCard
                       key={item.id}

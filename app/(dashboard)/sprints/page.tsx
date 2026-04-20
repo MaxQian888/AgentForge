@@ -9,6 +9,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
+import { SectionCard } from "@/components/shared/section-card";
 import {
   Select,
   SelectContent,
@@ -318,7 +319,7 @@ function SprintsPageContent() {
 
   if (!projectId) {
     return (
-      <div className="flex flex-col gap-6">
+      <div className="flex flex-col gap-[var(--space-section-gap)]">
         <PageHeader title={t("title")} />
         <p className="text-sm text-muted-foreground">
           {t("selectProjectPrompt")}
@@ -328,7 +329,7 @@ function SprintsPageContent() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
       <PageHeader
         title={t("title")}
         actions={
@@ -348,7 +349,7 @@ function SprintsPageContent() {
         <p className="text-sm text-muted-foreground">{t("loading")}</p>
       )}
 
-      <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+      <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
         {sprints.map((sprint) => (
           <SprintCard
             key={sprint.id}
@@ -368,11 +369,9 @@ function SprintsPageContent() {
       </div>
 
       {selectedSprint && (
-        <Card>
-          <CardHeader className="flex flex-row items-center justify-between gap-4">
-            <CardTitle>
-              {t("burndown.title")} &mdash; {selectedSprint.name}
-            </CardTitle>
+        <SectionCard
+          title={`${t("burndown.title")} — ${selectedSprint.name}`}
+          actions={
             <Button
               type="button"
               variant="outline"
@@ -387,8 +386,9 @@ function SprintsPageContent() {
             >
               {t("actions.openTasks")}
             </Button>
-          </CardHeader>
-          <CardContent className="space-y-4">
+          }
+          bodyClassName="flex flex-col gap-[var(--space-stack-md)] p-[var(--space-card-padding)]"
+        >
             <div className="flex flex-wrap gap-4 text-sm">
               <Badge variant="secondary">
                 {t("burndown.completed", {
@@ -471,8 +471,7 @@ function SprintsPageContent() {
                 <p className="text-sm text-muted-foreground">{t("detail.budgetEmpty")}</p>
               )}
             </div>
-          </CardContent>
-        </Card>
+        </SectionCard>
       )}
 
       {/* Create Dialog */}

@@ -9,10 +9,10 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
-import { PageHeader } from "@/components/shared/page-header";
 import { EmptyState } from "@/components/shared/empty-state";
 import { MetricCard } from "@/components/shared/metric-card";
 import { FilterBar } from "@/components/shared/filter-bar";
+import { ListLayout } from "@/components/layout/templates/list-layout";
 import {
   Dialog,
   DialogContent,
@@ -172,15 +172,8 @@ export default function ProjectsPage() {
     await unarchiveProject(id);
   };
 
-  return (
-    <div className="flex flex-col gap-6">
-      {/* Header */}
-      <PageHeader
-        title={t("title")}
-        actions={<CreateProjectDialog />}
-      />
-
-      {/* View switch */}
+  const toolbar = (
+    <div className="flex flex-col gap-[var(--space-stack-sm)]">
       <Tabs
         value={viewMode}
         onValueChange={(v) => setViewMode(v === "archived" ? "archived" : "active")}
@@ -193,66 +186,74 @@ export default function ProjectsPage() {
           </TabsTrigger>
         </TabsList>
       </Tabs>
-
-      {/* Search */}
       <FilterBar
         searchValue={searchQuery}
         searchPlaceholder={t("search.placeholder")}
         onSearch={setSearchQuery}
         onReset={() => setSearchQuery("")}
       />
+    </div>
+  );
 
-      {/* Stats */}
-      {!loading && projects.length > 0 && (
-        <div className="grid gap-4 sm:grid-cols-3">
-          <MetricCard
-            label={t("stats.total")}
-            value={projects.length}
-            icon={FolderKanban}
-          />
-          <MetricCard
-            label={t("stats.active")}
-            value={activeCount}
-          />
-          <MetricCard
-            label={t("stats.totalTasks")}
-            value={totalTasks}
-            icon={ListChecks}
-          />
-        </div>
-      )}
-
-      {/* Content */}
-      {loading ? (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {Array.from({ length: 3 }).map((_, i) => (
-            <ProjectCardSkeleton key={i} />
-          ))}
-        </div>
-      ) : projects.length === 0 ? (
-        <EmptyState
-          icon={FolderKanban}
-          title={t("empty.icon")}
-        />
-      ) : filteredProjects.length === 0 ? (
-        <EmptyState
-          icon={Search}
-          title={t("empty.noSearchResults")}
-        />
-      ) : (
-        <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
-          {filteredProjects.map((p) => (
-            <ProjectCard
-              key={p.id}
-              project={p}
-              onEdit={setEditingProject}
-              onDelete={deleteProject}
-              onArchive={handleArchive}
-              onUnarchive={handleUnarchive}
+  return (
+    <ListLayout
+      title={t("title")}
+      actions={<CreateProjectDialog />}
+      toolbar={toolbar}
+    >
+      <div className="flex flex-col gap-[var(--space-section-gap)]">
+        {/* Stats */}
+        {!loading && projects.length > 0 && (
+          <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-3 xl:grid-cols-3">
+            <MetricCard
+              label={t("stats.total")}
+              value={projects.length}
+              icon={FolderKanban}
             />
-          ))}
-        </div>
-      )}
+            <MetricCard
+              label={t("stats.active")}
+              value={activeCount}
+            />
+            <MetricCard
+              label={t("stats.totalTasks")}
+              value={totalTasks}
+              icon={ListChecks}
+            />
+          </div>
+        )}
+
+        {/* Content */}
+        {loading ? (
+          <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+            {Array.from({ length: 3 }).map((_, i) => (
+              <ProjectCardSkeleton key={i} />
+            ))}
+          </div>
+        ) : projects.length === 0 ? (
+          <EmptyState
+            icon={FolderKanban}
+            title={t("empty.icon")}
+          />
+        ) : filteredProjects.length === 0 ? (
+          <EmptyState
+            icon={Search}
+            title={t("empty.noSearchResults")}
+          />
+        ) : (
+          <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] sm:grid-cols-2 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-3">
+            {filteredProjects.map((p) => (
+              <ProjectCard
+                key={p.id}
+                project={p}
+                onEdit={setEditingProject}
+                onDelete={deleteProject}
+                onArchive={handleArchive}
+                onUnarchive={handleUnarchive}
+              />
+            ))}
+          </div>
+        )}
+      </div>
 
       {/* Edit dialog */}
       {editingProject && (
@@ -263,6 +264,6 @@ export default function ProjectsPage() {
           onClose={() => setEditingProject(null)}
         />
       )}
-    </div>
+    </ListLayout>
   );
 }

@@ -4,14 +4,8 @@ import { useEffect, useMemo, useState } from "react";
 import { useTranslations } from "next-intl";
 import { Plus, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import {
-  Card,
-  CardContent,
-  CardDescription,
-  CardHeader,
-  CardTitle,
-} from "@/components/ui/card";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { SectionCard } from "@/components/shared/section-card";
 import {
   filterSchedulerJobs,
   useSchedulerStore,
@@ -87,12 +81,12 @@ export default function SchedulerPage() {
   const runs = selectedJob ? runsByJobKey[selectedJob.jobKey] ?? [] : [];
 
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-[var(--space-section-gap)]">
       <PageHeader
         title={t("title")}
         description={t("subtitle")}
         actions={
-          <div className="flex items-center gap-2">
+          <div className="flex items-center gap-[var(--space-stack-sm)]">
             <Button
               size="sm"
               className="gap-2"
@@ -130,13 +124,19 @@ export default function SchedulerPage() {
 
       <SchedulerStatsCards stats={stats} loading={loading && !stats} />
 
-      <Tabs defaultValue="queue" className="flex flex-col gap-4">
+      <Tabs
+        defaultValue="queue"
+        className="flex flex-col gap-[var(--space-stack-md)]"
+      >
         <TabsList>
           <TabsTrigger value="queue">{t("tabs.queue")}</TabsTrigger>
           <TabsTrigger value="calendar">{t("tabs.calendar")}</TabsTrigger>
         </TabsList>
 
-        <TabsContent value="queue" className="flex flex-col gap-4">
+        <TabsContent
+          value="queue"
+          className="flex flex-col gap-[var(--space-stack-md)]"
+        >
           <SchedulerJobFilters
             jobs={jobs}
             filters={listFilters}
@@ -144,63 +144,54 @@ export default function SchedulerPage() {
             onReset={resetListFilters}
           />
 
-          <div className="grid gap-6 lg:grid-cols-[1.3fr_0.9fr]">
-            <Card>
-              <CardHeader>
-                <CardTitle>{t("registeredJobs")}</CardTitle>
-                <CardDescription>{t("registeredJobsDesc")}</CardDescription>
-              </CardHeader>
-              <CardContent>
-                <SchedulerJobTable
-                  jobs={filteredJobs}
-                  selectedJobKey={selectedJob?.jobKey ?? null}
-                  loading={loading}
-                  onSelectJob={selectJob}
-                />
-              </CardContent>
-            </Card>
+          <div className="grid grid-cols-1 gap-[var(--space-grid-gap)] lg:grid-cols-[1.3fr_0.9fr]">
+            <SectionCard
+              title={t("registeredJobs")}
+              description={t("registeredJobsDesc")}
+            >
+              <SchedulerJobTable
+                jobs={filteredJobs}
+                selectedJobKey={selectedJob?.jobKey ?? null}
+                loading={loading}
+                onSelectJob={selectJob}
+              />
+            </SectionCard>
 
-            <Card>
-              <CardHeader>
-                <CardTitle>{t("jobDetails")}</CardTitle>
-                <CardDescription>{t("jobDetailsDesc")}</CardDescription>
-              </CardHeader>
-              <CardContent className="flex flex-col gap-4">
-                {selectedJob ? (
-                  <SchedulerJobDetail
-                    job={selectedJob}
-                    runs={runs}
-                    draftSchedule={draftSchedules[selectedJob.jobKey] ?? selectedJob.schedule}
-                    actionLoading={actionJobKey === selectedJob.jobKey}
-                    onUpdateJob={(input) => void updateJob(selectedJob.jobKey, input)}
-                    onTriggerJob={() => void triggerJob(selectedJob.jobKey)}
-                    onPauseJob={() => void pauseJob(selectedJob.jobKey)}
-                    onResumeJob={() => void resumeJob(selectedJob.jobKey)}
-                    onCancelJob={() => void cancelJob(selectedJob.jobKey)}
-                    onCleanupRuns={() => void cleanupRuns(selectedJob.jobKey, { retainRecent: 10 })}
-                    onFetchRuns={(filters) => void fetchRuns(selectedJob.jobKey, filters)}
-                    onSetDraftSchedule={(schedule) =>
-                      setDraftSchedule(selectedJob.jobKey, schedule)
-                    }
-                  />
-                ) : (
-                  <SchedulerJobDetailEmpty />
-                )}
-              </CardContent>
-            </Card>
+            <SectionCard
+              title={t("jobDetails")}
+              description={t("jobDetailsDesc")}
+            >
+              {selectedJob ? (
+                <SchedulerJobDetail
+                  job={selectedJob}
+                  runs={runs}
+                  draftSchedule={draftSchedules[selectedJob.jobKey] ?? selectedJob.schedule}
+                  actionLoading={actionJobKey === selectedJob.jobKey}
+                  onUpdateJob={(input) => void updateJob(selectedJob.jobKey, input)}
+                  onTriggerJob={() => void triggerJob(selectedJob.jobKey)}
+                  onPauseJob={() => void pauseJob(selectedJob.jobKey)}
+                  onResumeJob={() => void resumeJob(selectedJob.jobKey)}
+                  onCancelJob={() => void cancelJob(selectedJob.jobKey)}
+                  onCleanupRuns={() => void cleanupRuns(selectedJob.jobKey, { retainRecent: 10 })}
+                  onFetchRuns={(filters) => void fetchRuns(selectedJob.jobKey, filters)}
+                  onSetDraftSchedule={(schedule) =>
+                    setDraftSchedule(selectedJob.jobKey, schedule)
+                  }
+                />
+              ) : (
+                <SchedulerJobDetailEmpty />
+              )}
+            </SectionCard>
           </div>
         </TabsContent>
 
         <TabsContent value="calendar">
-          <Card>
-            <CardHeader>
-              <CardTitle>{t("calendar.title")}</CardTitle>
-              <CardDescription>{t("calendar.description")}</CardDescription>
-            </CardHeader>
-            <CardContent>
-              <SchedulerUpcomingCalendar jobs={jobs} />
-            </CardContent>
-          </Card>
+          <SectionCard
+            title={t("calendar.title")}
+            description={t("calendar.description")}
+          >
+            <SchedulerUpcomingCalendar jobs={jobs} />
+          </SectionCard>
         </TabsContent>
       </Tabs>
 
