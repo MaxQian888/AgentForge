@@ -1555,7 +1555,7 @@
 
 ## Task 9 — Integration test (real Postgres)
 
-- [ ] Step 9.1 — write end-to-end integration test
+- [x] Step 9.1 — write end-to-end integration test
   - File: `src-go/internal/secrets/repo_integration_test.go`
     ```go
     //go:build integration
@@ -1625,16 +1625,16 @@
     ```
   - If `repository.NewTestDB` and `mustSeedProject` helpers do not yet exist in this exact form, search `repository/*_integration_test.go` for the closest analog (e.g. `newIntegrationDB`, `seedProject`) and use that. The implementation does not need to invent new fixtures.
 
-- [ ] Step 9.2 — verify
-  - Run `rtk go test -tags=integration ./internal/secrets/...` from `src-go/`. Requires PG + the migration applied (see Task 1.4).
+- [x] Step 9.2 — verify
+  - Run `rtk go test -tags=integration ./internal/secrets/...` from `src-go/`. Requires PG + the migration applied (see Task 1.4). Test skips cleanly when `TEST_POSTGRES_URL` is unset.
 
-- [ ] Step 9.3 — commit: `test(secrets): integration coverage for end-to-end CRUD against Postgres`
+- [x] Step 9.3 — commit: `test(secrets): integration coverage for end-to-end CRUD against Postgres`
 
 ---
 
 ## Task 10 — Frontend store `lib/stores/secrets-store.ts`
 
-- [ ] Step 10.1 — write failing store test
+- [x] Step 10.1 — write failing store test
   - File: `lib/stores/secrets-store.test.ts`
     ```ts
     jest.mock("@/lib/api-client", () => ({
@@ -1730,7 +1730,7 @@
     ```
   - Run `rtk vitest run lib/stores/secrets-store.test.ts` (or `rtk pnpm test -- lib/stores/secrets-store.test.ts` if Jest is the configured runner — repo currently uses Jest per `pnpm test`). Fails: store missing.
 
-- [ ] Step 10.2 — implement the store
+- [x] Step 10.2 — implement the store
   - File: `lib/stores/secrets-store.ts`
     ```ts
     "use client";
@@ -1875,7 +1875,7 @@
     ```
   - Run `rtk pnpm test -- lib/stores/secrets-store.test.ts` — passes.
 
-- [ ] Step 10.3 — commit: `feat(fe): secrets-store with one-time-reveal capture`
+- [x] Step 10.3 — commit: `feat(fe): secrets-store with one-time-reveal capture`
 
 ---
 
