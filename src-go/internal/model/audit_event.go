@@ -24,6 +24,7 @@ const (
 	AuditResourceTypeDashboard  = "dashboard"
 	AuditResourceTypeAuth       = "auth"
 	AuditResourceTypeInvitation = "invitation"
+	AuditResourceTypeSecret     = "secret"
 )
 
 // IsValidAuditResourceType reports whether v is one of the allowed types.
@@ -32,7 +33,7 @@ func IsValidAuditResourceType(v string) bool {
 	case AuditResourceTypeProject, AuditResourceTypeMember, AuditResourceTypeTask,
 		AuditResourceTypeTeamRun, AuditResourceTypeWorkflow, AuditResourceTypeWiki,
 		AuditResourceTypeSettings, AuditResourceTypeAutomation, AuditResourceTypeDashboard,
-		AuditResourceTypeAuth, AuditResourceTypeInvitation:
+		AuditResourceTypeAuth, AuditResourceTypeInvitation, AuditResourceTypeSecret:
 		return true
 	}
 	return false

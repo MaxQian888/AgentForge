@@ -18,7 +18,7 @@
 
 ## Coordination notes (read before starting)
 
-- **Migration number**: 067 is the next free slot (066 is the latest applied — `workflow_run_parent_link_parent_kind`). If 1A also lands a migration, sync numbers — 1A and 1B touch disjoint tables so a number-shift renumber is mechanical.
+- **Migration number**: 069 is used (Plan 1A claims 067 + 068 in parallel; 069 is next free after that). All migration references in this plan should be read as 069.
 - **Audit hook**: existing audit emission goes through `service.AuditService.RecordEvent` (see `src-go/internal/service/audit_service.go`). 1B reuses that service; the new `secret.*` ActionIDs are added to the central `middleware/rbac.go` matrix so RBAC `Require()` can gate them and the audit validator accepts them. Do NOT bypass `auditSvc.RecordEvent` — it sanitizes payloads.
 - **Resource type**: this plan introduces `AuditResourceTypeSecret = "secret"` to the existing enum AND extends the SQL CHECK constraint via the same migration. Without that the audit insert will be rejected at the DB layer.
 - **Master key handling**: env var `AGENTFORGE_SECRETS_KEY` MUST be exactly 32 raw bytes (decoded base64 is acceptable; we accept either 32 raw chars OR a 44-char base64 string). Cipher constructor returns an error so callers (server bootstrap) can `log.Fatal` — the secrets subsystem is the only one that exits early.
@@ -28,10 +28,10 @@
 
 ---
 
-## Task 1 — Migration 067 secrets table + audit resource_type extension
+## Task 1 — Migration 069 secrets table + audit resource_type extension
 
-- [ ] Step 1.1 — write the up migration
-  - File: `src-go/migrations/067_create_secrets.up.sql`
+- [x] Step 1.1 — write the up migration
+  - File: `src-go/migrations/069_create_secrets.up.sql`
     ```sql
     -- Project-scoped encrypted secrets store. Plaintext NEVER persisted.
     -- ciphertext + nonce produced by AES-256-GCM (see internal/secrets/cipher.go).
@@ -69,8 +69,8 @@
         ));
     ```
 
-- [ ] Step 1.2 — write the down migration
-  - File: `src-go/migrations/067_create_secrets.down.sql`
+- [x] Step 1.2 — write the down migration
+  - File: `src-go/migrations/069_create_secrets.down.sql`
     ```sql
     DROP TRIGGER IF EXISTS set_secrets_updated_at ON secrets;
     DROP INDEX IF EXISTS secrets_project_idx;
@@ -86,7 +86,7 @@
         ));
     ```
 
-- [ ] Step 1.3 — extend audit resource type enum to include `secret`
+- [x] Step 1.3 — extend audit resource type enum to include `secret`
   - File: `src-go/internal/model/audit_event.go`
   - Add at line 27 (after `AuditResourceTypeInvitation`):
     ```go
@@ -94,9 +94,9 @@
     ```
   - In `IsValidAuditResourceType` (line 30), append `AuditResourceTypeSecret` to the matched case list so `case ... AuditResourceTypeAuth, AuditResourceTypeInvitation, AuditResourceTypeSecret:`.
 
-- [ ] Step 1.4 — verify
+- [x] Step 1.4 — verify
   - Run `rtk go test ./internal/model/...` to confirm enum update compiles + existing audit-event tests pass.
-  - Apply migration locally: `rtk pnpm dev:backend:restart go-orchestrator` and confirm logs show `067_create_secrets.up.sql` applied without error.
+  - Apply migration locally: `rtk pnpm dev:backend:restart go-orchestrator` and confirm logs show `069_create_secrets.up.sql` applied without error.
 
 ---
 
