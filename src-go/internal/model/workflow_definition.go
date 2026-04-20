@@ -123,8 +123,11 @@ const (
 	NodeTypeWaitEvent        = "wait_event"
 	NodeTypeLoop             = "loop"
 	NodeTypeSubWorkflow      = "sub_workflow"
-	NodeTypeHTTPCall         = "http_call"
-	NodeTypeIMSend           = "im_send"
+	NodeTypeHTTPCall                  = "http_call"
+	NodeTypeIMSend                    = "im_send"
+	NodeTypeQianchuanMetricsFetcher   = "qianchuan_metrics_fetcher"
+	NodeTypeQianchuanStrategyRunner   = "qianchuan_strategy_runner"
+	NodeTypeQianchuanActionExecutor   = "qianchuan_action_executor"
 )
 
 // Workflow node execution status constants.

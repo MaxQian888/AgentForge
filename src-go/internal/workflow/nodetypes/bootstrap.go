@@ -14,7 +14,7 @@ type BuiltinDeps struct {
 	DefRepo  LoopDefResolver       // required for loop nodes to compute reset topology
 }
 
-// RegisterBuiltins registers the 14 built-in node-type handlers into r.
+// RegisterBuiltins registers the 19 built-in node-type handlers into r.
 //
 // Returns the first error encountered. Callers typically invoke r.LockGlobal()
 // afterward to prevent further built-in registration in the running process.
@@ -39,6 +39,9 @@ func RegisterBuiltins(r *NodeTypeRegistry, deps BuiltinDeps) error {
 		{"wait_event", WaitEventHandler{}},
 		{"http_call", HTTPCallHandler{}},
 		{"im_send", IMSendHandler{}},
+		{"qianchuan_metrics_fetcher", QianchuanMetricsFetcherHandler{}},
+		{"qianchuan_strategy_runner", QianchuanStrategyRunnerHandler{}},
+		{"qianchuan_action_executor", QianchuanActionExecutorHandler{}},
 	}
 
 	for _, e := range entries {

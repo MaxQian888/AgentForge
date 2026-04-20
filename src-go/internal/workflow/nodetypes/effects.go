@@ -1,6 +1,8 @@
 package nodetypes
 
-import "encoding/json"
+import (
+	"encoding/json"
+)
 
 // EffectKind is the closed enumeration of effect types handlers may emit.
 type EffectKind string
@@ -15,6 +17,13 @@ const (
 	EffectResetNodes        EffectKind = "reset_nodes"
 	EffectExecuteHTTPCall   EffectKind = "execute_http_call"
 	EffectExecuteIMSend     EffectKind = "execute_im_send"
+
+	// Qianchuan effect kinds (Spec 3D). They are NOT park-effects — appliers
+	// run synchronously inside the dispatcher's worker, write to the DataStore
+	// under the node's id, and return.
+	EffectFetchQianchuanMetrics  EffectKind = "fetch_qianchuan_metrics"
+	EffectRunQianchuanStrategy   EffectKind = "run_qianchuan_strategy"
+	EffectExecuteQianchuanAction EffectKind = "execute_qianchuan_action"
 )
 
 // IsPark reports whether the effect parks the node (node enters `waiting` state).
@@ -134,4 +143,25 @@ type IMSendExplicit struct {
 	Provider string `json:"provider"`
 	ChatID   string `json:"chatId"`
 	ThreadID string `json:"threadId,omitempty"`
+}
+
+// ── Qianchuan effect payloads (Spec 3D) ─────────────────────────────────
+
+type FetchQianchuanMetricsPayload struct {
+	BindingID  string   `json:"bindingId"`
+	Dimensions []string `json:"dimensions,omitempty"`
+	NodeID     string   `json:"nodeId"`
+}
+
+type RunQianchuanStrategyPayload struct {
+	StrategyID  string          `json:"strategyId"`
+	SnapshotRef json.RawMessage `json:"snapshotRef"`
+	BindingID   string          `json:"bindingId"`
+	NodeID      string          `json:"nodeId"`
+}
+
+type ExecuteQianchuanActionPayload struct {
+	ActionLogID string `json:"actionLogId"`
+	BindingID   string `json:"bindingId"`
+	NodeID      string `json:"nodeId"`
 }

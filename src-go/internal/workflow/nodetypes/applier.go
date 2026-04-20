@@ -8,8 +8,88 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+
 	"github.com/react-go-quick-starter/server/internal/model"
 )
+
+// ── Qianchuan applier interfaces (Spec 3D) ──────────────────────────────
+
+// QianchuanProvider is the subset of adsplatform.Provider used by the
+// metrics_fetcher and action_executor appliers. The qianchuan package's
+// *Provider satisfies this structurally.
+type QianchuanProvider interface {
+	FetchMetrics(ctx context.Context, bindingRef QianchuanBindingRef, dims []string) (json.RawMessage, time.Time, error)
+	ApplyAction(ctx context.Context, bindingRef QianchuanBindingRef, action QianchuanActionRequest) error
+}
+
+// QianchuanBindingRef carries the per-call binding context for the provider.
+type QianchuanBindingRef struct {
+	AdvertiserID string
+	AwemeID      string
+	AccessToken  string
+}
+
+// QianchuanActionRequest carries a single action to apply.
+type QianchuanActionRequest struct {
+	Kind       string          `json:"kind"`
+	TargetAdID string          `json:"target_ad_id"`
+	Params     json.RawMessage `json:"params"`
+}
+
+// QianchuanSecretsResolver is the subset of secrets.Service the appliers call.
+type QianchuanSecretsResolver interface {
+	Resolve(ctx context.Context, projectID uuid.UUID, name string) (string, error)
+}
+
+// QianchuanSnapshotRepo is the snapshot persistence contract for the applier.
+type QianchuanSnapshotRepo interface {
+	Upsert(ctx context.Context, bindingID uuid.UUID, bucket time.Time, payload json.RawMessage) error
+}
+
+// QianchuanActionLogRepo is the action log persistence contract for the applier.
+type QianchuanActionLogRepo interface {
+	Create(ctx context.Context, log *model.QianchuanActionLog) error
+	GetByID(ctx context.Context, id uuid.UUID) (*model.QianchuanActionLog, error)
+	MarkApplied(ctx context.Context, id uuid.UUID) error
+	MarkFailed(ctx context.Context, id uuid.UUID, msg string) error
+}
+
+// QianchuanStrategyLoader loads the parsed spec for a strategy by ID.
+type QianchuanStrategyLoader interface {
+	Load(ctx context.Context, id uuid.UUID) (parsedSpec json.RawMessage, err error)
+}
+
+// QianchuanStrategyEvaluator evaluates strategy rules against a snapshot.
+type QianchuanStrategyEvaluator interface {
+	Evaluate(ctx context.Context, parsedSpec, snapshot json.RawMessage) ([]QianchuanRuleMatch, error)
+}
+
+// QianchuanRuleMatch is the output of evaluating a single rule.
+type QianchuanRuleMatch struct {
+	RuleName string                   `json:"rule_name"`
+	Actions  []QianchuanEmittedAction `json:"actions"`
+}
+
+// QianchuanEmittedAction is a single action emitted by a rule evaluation.
+type QianchuanEmittedAction struct {
+	Type   string          `json:"type"`
+	Target string          `json:"target"`
+	Params json.RawMessage `json:"params"`
+}
+
+// QianchuanBindingLookup loads a binding record by ID.
+type QianchuanBindingLookup interface {
+	Get(ctx context.Context, id uuid.UUID) (*QianchuanBindingRecord, error)
+}
+
+// QianchuanBindingRecord is the minimal binding data the applier needs.
+type QianchuanBindingRecord struct {
+	ID                   uuid.UUID
+	ProjectID            uuid.UUID
+	AdvertiserID         string
+	AwemeID              string
+	AccessTokenSecretRef string
+}
 
 // ── Local interfaces (Go convention: keep import tree clean) ────────────
 
@@ -156,6 +236,17 @@ type EffectApplier struct {
 
 	// AuditSink records applier-level audit events (e.g. http_call executions).
 	AuditSink AuditRecorder
+
+	// Qianchuan deps (Spec 3D). All may be nil in builds/tests that don't
+	// compile in the qianchuan provider; in that case the applier surfaces a
+	// structured "qianchuan: not configured" error.
+	QianchuanProvider   QianchuanProvider
+	QianchuanSecrets    QianchuanSecretsResolver
+	QianchuanSnapshots  QianchuanSnapshotRepo
+	QianchuanActions    QianchuanActionLogRepo
+	QianchuanStrategies QianchuanStrategyLoader
+	QianchuanEvaluator  QianchuanStrategyEvaluator
+	QianchuanBindings   QianchuanBindingLookup
 }
 
 // Apply iterates effects in order and executes each one.
@@ -216,6 +307,21 @@ func (a *EffectApplier) Apply(
 		case EffectExecuteIMSend:
 			if err := a.applyExecuteIMSend(ctx, exec, node, e.Payload); err != nil {
 				return false, fmt.Errorf("execute_im_send: %w", err)
+			}
+
+		case EffectFetchQianchuanMetrics:
+			if err := a.applyFetchQianchuanMetrics(ctx, exec, node, e.Payload); err != nil {
+				return false, fmt.Errorf("fetch_qianchuan_metrics: %w", err)
+			}
+
+		case EffectRunQianchuanStrategy:
+			if err := a.applyRunQianchuanStrategy(ctx, exec, node, e.Payload); err != nil {
+				return false, fmt.Errorf("run_qianchuan_strategy: %w", err)
+			}
+
+		case EffectExecuteQianchuanAction:
+			if err := a.applyExecuteQianchuanAction(ctx, exec, node, e.Payload); err != nil {
+				return false, fmt.Errorf("execute_qianchuan_action: %w", err)
 			}
 
 		default:

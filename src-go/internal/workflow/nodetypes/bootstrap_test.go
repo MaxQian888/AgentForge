@@ -40,9 +40,14 @@ var builtinNames = []string{
 	"wait_event",
 	"loop",
 	"sub_workflow",
+	"http_call",
+	"im_send",
+	"qianchuan_metrics_fetcher",
+	"qianchuan_strategy_runner",
+	"qianchuan_action_executor",
 }
 
-func TestRegisterBuiltins_RegistersAllFourteen(t *testing.T) {
+func TestRegisterBuiltins_RegistersAllNineteen(t *testing.T) {
 	reg := NewRegistry(nil)
 
 	if err := RegisterBuiltins(reg, BuiltinDeps{}); err != nil {
