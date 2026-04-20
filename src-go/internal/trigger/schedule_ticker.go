@@ -174,6 +174,15 @@ func (t *ScheduleTicker) dispatchOne(ctx context.Context, tr *model.WorkflowTrig
 	if tr.PluginID != "" {
 		data["plugin_id"] = tr.PluginID
 	}
+	// Spec 3D: propagate binding_id and strategy_id from trigger config
+	// so that $context templates in the system:qianchuan_strategy_loop
+	// DAG can resolve them via input_mapping → {{$event.binding_id}}.
+	if bindingID := extractBindingID(tr.Config); bindingID != "" {
+		data["binding_id"] = bindingID
+	}
+	if strategyID := extractStrategyID(tr.Config); strategyID != "" {
+		data["strategy_id"] = strategyID
+	}
 	_, _ = t.dispatcher.Route(ctx, Event{
 		Source: model.TriggerSourceSchedule,
 		Data:   data,
@@ -195,6 +204,20 @@ func extractBindingID(raw json.RawMessage) string {
 		return ""
 	}
 	return cfg.BindingID
+}
+
+// extractStrategyID reads strategy_id from a trigger's config JSON if present.
+func extractStrategyID(raw json.RawMessage) string {
+	if len(raw) == 0 {
+		return ""
+	}
+	var cfg struct {
+		StrategyID string `json:"strategy_id"`
+	}
+	if err := json.Unmarshal(raw, &cfg); err != nil {
+		return ""
+	}
+	return cfg.StrategyID
 }
 
 // extractCronExpr reads the cron string from a schedule trigger's Config
