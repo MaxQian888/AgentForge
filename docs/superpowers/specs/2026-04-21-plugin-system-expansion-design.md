@@ -23,14 +23,24 @@ AgentForge's plugin system currently supports 5 plugin types with a solid founda
 Three coordinated additions, all within existing packages:
 
 ```
+src-go/internal/model/plugin.go        ← add ChannelPluginSpec, hierarchical/event-driven fields
 src-go/internal/plugin/
-  channel_adapter.go       ← new: ChannelAdapter interface
-  workflow_executor.go     ← new: WorkflowExecutor interface + mode routing
-  toolchain_executor.go    ← new: ToolChainExecutor
-  toolchain_resolver.go    ← new: template variable resolver
+  channel_adapter.go                   ← new: Go-side ChannelAdapter wrapper interface
+  workflow_executor.go                 ← new: WorkflowExecutor interface + mode routing
+  toolchain_executor.go                ← new: ToolChainExecutor
+  toolchain_resolver.go                ← new: template variable resolver
+src-go/internal/service/
+  hierarchical_executor.go             ← new: HierarchicalExecutor
+  event_driven_executor.go             ← new: EventDrivenExecutor (background subscriber)
 ```
 
-No changes to external APIs, DB schema, or TS Bridge protocol.
+No changes to external APIs, TS Bridge protocol, or DB schema.
+
+**Key existing facts that constrain this design:**
+- `WorkflowProcessMode` and `WorkflowPluginSpec.Process` already exist — do not re-define them
+- `IMMessageRequest.Platform` enum already includes all target IM platforms — new adapters must use matching platform identifiers
+- MCP tool invocation available as `PluginService.CallMCPTool()` Go function — use directly, not via HTTP
+- Trigger Engine = one-time dispatch; EventDrivenExecutor = persistent subscriber — these are distinct, non-overlapping
 
 ---
 
@@ -38,10 +48,14 @@ No changes to external APIs, DB schema, or TS Bridge protocol.
 
 ### 3.1 Interface
 
+`ChannelAdapter` is a **Go-side wrapper interface** over the existing WASM operation-based invocation model. WASM plugins do not implement a Go interface directly; they declare capability names and handle them inside `Invoke()`. The Go runtime wraps each WASM plugin in a `ChannelAdapter` adapter that translates interface method calls to `Invoke` operations.
+
 ```go
+// src-go/internal/plugin/channel_adapter.go
+// Go-side abstraction over WASM operation routing
 type ChannelAdapter interface {
     Capabilities() ChannelCapabilities
-    HandleInbound(ctx context.Context, event Event) (*InboundResult, error)
+    HandleInbound(ctx context.Context, payload map[string]any) (*InboundResult, error)
     SendOutbound(ctx context.Context, msg OutboundMessage) (*OutboundResult, error)
     HealthCheck(ctx context.Context) error
 }
@@ -56,17 +70,47 @@ type ChannelCapabilities struct {
 }
 ```
 
+**WASM plugin side contract** — the plugin declares these operation names in its manifest `capabilities` list and routes them in `Invoke()`:
+
+| Go interface method | WASM `Invocation.Operation` value |
+|---------------------|------------------------------------|
+| `HealthCheck()`     | `health`                           |
+| `HandleInbound()`   | `handle_inbound`                   |
+| `SendOutbound()`    | `send_outbound`                    |
+| `Capabilities()`    | `capabilities` (optional, for self-description) |
+
+The Go-side `WASMChannelAdapter` struct implements `ChannelAdapter` by calling `runtime.Invoke()` with the corresponding operation name.
+
 ### 3.2 Manifest Extension
 
-`IntegrationPlugin` manifests gain a `channel` section:
+`PluginSpec` in `src-go/internal/model/plugin.go` gains a formal `Channel *ChannelPluginSpec` field (not via the `Extra` catch-all):
+
+```go
+// src-go/internal/model/plugin.go
+type ChannelPluginSpec struct {
+    Capabilities  []string `yaml:"capabilities,omitempty" json:"capabilities,omitempty"`
+    InboundEvents []string `yaml:"inboundEvents,omitempty" json:"inboundEvents,omitempty"`
+    OutboundFmts  []string `yaml:"outboundFormats,omitempty" json:"outboundFormats,omitempty"`
+    Platform      string   `yaml:"platform,omitempty" json:"platform,omitempty"`
+}
+
+// Added to PluginSpec:
+Channel *ChannelPluginSpec `yaml:"channel,omitempty" json:"channel,omitempty"`
+```
+
+`Channel.Platform` must match an existing value from the `IMMessageRequest.Platform` enum (`feishu`, `dingtalk`, `slack`, `discord`, `wecom`, `email`, etc.) so that inbound events and outbound sends route correctly through the existing IM message model.
+
+Example manifest:
 
 ```yaml
 kind: IntegrationPlugin
 spec:
+  capabilities: [health, handle_inbound, send_outbound]
   channel:
+    platform: slack
     capabilities: [inbound, outbound, threading, rich_cards]
-    inbound_events: [message.received, mention.received]
-    outbound_formats: [text, markdown, card]
+    inboundEvents: [message.received, mention.received]
+    outboundFormats: [text, markdown, card]
 ```
 
 ### 3.3 Data Flow
@@ -74,20 +118,22 @@ spec:
 ```
 External message / webhook
     ↓
-Integration Plugin WASM (ChannelAdapter.HandleInbound)
+Integration Plugin WASM  (operation: handle_inbound)
+via WASMChannelAdapter.HandleInbound()
     ↓
-Go EventBus  →  integration.im.message_received (etc.)
+Go EventBus  →  integration.im.message_received  (domain.entity.action pattern)
     ↓
-Trigger Engine (rule matching)
+Trigger Engine (one-time triggers) OR EventDrivenExecutor (persistent listeners)
     ↓
 Workflow / Agent execution
     ↓
-ChannelAdapter.SendOutbound
+WASMChannelAdapter.SendOutbound()  (operation: send_outbound)
+→ maps to IMSendRequest using existing IM message model
 ```
 
 ### 3.4 Feishu Refactor
 
-Feishu's existing WASM module is refactored to implement `ChannelAdapter`. The public manifest and plugin ID stay unchanged; the Go-side runtime wraps it via the new interface. This validates the interface before new adapters are built.
+The Go-side runtime wraps the existing Feishu WASM plugin in a `WASMChannelAdapter`. The Feishu WASM itself gains a new `handle_inbound` capability alongside the existing `send_message` (kept for backward compatibility; `send_outbound` is the new canonical name). Manifest and plugin ID stay unchanged.
 
 ### 3.5 Integration Plugin Roadmap
 
@@ -117,38 +163,69 @@ Feishu's existing WASM module is refactored to implement `ChannelAdapter`. The p
 
 ## 4. WorkflowExecutor Framework
 
-### 4.1 Interface
+### 4.1 Existing Model (Important — Do Not Duplicate)
+
+`WorkflowProcessMode` and `WorkflowPluginSpec.Process` **already exist** in `src-go/internal/model/plugin.go`:
 
 ```go
+type WorkflowProcessMode string
+const (
+    WorkflowProcessSequential   WorkflowProcessMode = "sequential"
+    WorkflowProcessHierarchical WorkflowProcessMode = "hierarchical"
+    WorkflowProcessEventDriven  WorkflowProcessMode = "event-driven"
+    WorkflowProcessWave         WorkflowProcessMode = "wave"
+)
+
+type WorkflowPluginSpec struct {
+    Process  WorkflowProcessMode      `yaml:"process" json:"process"`
+    Roles    []WorkflowRoleBinding    `yaml:"roles,omitempty" json:"roles,omitempty"`
+    Steps    []WorkflowStepDefinition `yaml:"steps,omitempty" json:"steps,omitempty"`
+    Triggers []PluginWorkflowTrigger  `yaml:"triggers,omitempty" json:"triggers,omitempty"`
+    Limits   *WorkflowExecutionLimits `yaml:"limits,omitempty" json:"limits,omitempty"`
+}
+```
+
+What does **not** exist: the executor interface and routing logic. The current `WorkflowExecutionService` has sequential logic inlined with no mode dispatch.
+
+### 4.2 Interface
+
+```go
+// src-go/internal/plugin/workflow_executor.go
 type WorkflowExecutor interface {
-    Mode() WorkflowMode
+    Mode() WorkflowProcessMode
     Execute(ctx context.Context, plan WorkflowPlan, input WorkflowInput) (<-chan WorkflowEvent, error)
     Cancel(ctx context.Context, instanceID string) error
 }
-
-type WorkflowMode string
-const (
-    ModeSequential   WorkflowMode = "sequential"   // existing
-    ModeHierarchical WorkflowMode = "hierarchical" // new
-    ModeEventDriven  WorkflowMode = "event_driven" // new
-)
 ```
 
-WorkflowEngine becomes a router: it reads `process_mode` from the manifest and delegates to the registered executor. SequentialExecutor is extracted from existing inline logic.
+`WorkflowExecutionService` is extended to route by `spec.Workflow.Process` to the registered executor. `SequentialExecutor` is extracted from the existing inline logic (no behavior change).
 
-### 4.2 Hierarchical Mode
+### 4.3 New Manifest Fields for Hierarchical Mode
 
-Manager Role decomposes the task, dispatches to Worker Roles in parallel or serial, then aggregates results.
+The following optional fields are added to `WorkflowPluginSpec` (backward compatible — existing `sequential` manifests omit them):
 
-**Manifest:**
+```go
+type WorkflowPluginSpec struct {
+    // existing fields ...
+    ManagerRole         string              `yaml:"managerRole,omitempty" json:"managerRole,omitempty"`
+    WorkerRoles         []string            `yaml:"workerRoles,omitempty" json:"workerRoles,omitempty"`
+    MaxParallelWorkers  int                 `yaml:"maxParallelWorkers,omitempty" json:"maxParallelWorkers,omitempty"`
+    WorkerFailurePolicy string              `yaml:"workerFailurePolicy,omitempty" json:"workerFailurePolicy,omitempty"`
+    Aggregation         string              `yaml:"aggregation,omitempty" json:"aggregation,omitempty"`
+}
+```
+
+**Manifest example:**
 ```yaml
-process_mode: hierarchical
+kind: WorkflowPlugin
 spec:
-  manager_role: project-assistant
-  worker_roles: [coding-agent, test-engineer, doc-writer]
-  max_parallel_workers: 3
-  worker_failure_policy: best_effort   # fail_fast | best_effort
-  aggregation: manager_summarize
+  workflow:
+    process: hierarchical
+    managerRole: project-assistant
+    workerRoles: [coding-agent, test-engineer, doc-writer]
+    maxParallelWorkers: 3
+    workerFailurePolicy: best_effort   # fail_fast | best_effort
+    aggregation: manager_summarize
 ```
 
 **Execution flow:**
@@ -156,80 +233,77 @@ spec:
 WorkflowInput
     ↓
 Manager Role  →  decomposes into N SubTasks via task-control MCP tool
-    ↓ dispatch
-Worker Roles  (parallel agent runs, max_parallel_workers cap)
-    ↓ results
+    ↓ dispatch (uses existing TaskDispatchService.Spawn(), AdmissionController)
+Worker Roles  (parallel agent runs, capped by maxParallelWorkers)
+    ↓ results (poll WorkflowRunStore until all complete)
 Manager Role  →  aggregates, produces final WorkflowOutput
 ```
 
 **Constraints:**
-- Manager uses existing `task-control` MCP tool to create subtasks — no new channel
+- Manager uses existing `task-control` MCP tool to create subtasks — no new dispatch channel
 - Manager dispatches at most once (no recursive manager delegation)
 - `fail_fast`: abort all workers on first failure; `best_effort`: collect all completed results
+- Worker dispatch reuses existing `TaskDispatchService.Spawn()` and `AdmissionController` — no new queue primitives
 
-### 4.3 Event-Driven Mode
+### 4.4 Event-Driven Mode
 
-Workflow declares triggers; when matching events arrive, the assigned Role responds. The workflow lifecycle is persistent (active as long as the plugin is enabled).
+**Boundary: Trigger Engine vs EventDrivenExecutor**
 
-**Manifest:**
+The existing `Trigger Engine` fires **one-time, on-demand runs** (manual, schedule, or external push). `EventDrivenExecutor` is a **persistent subscriber** that lives as a background goroutine for the duration the plugin is enabled. They share the same EventBus but serve different lifecycles and are not duplicates.
+
+**New manifest fields added to `PluginWorkflowTrigger`:**
+
+```go
+type PluginWorkflowTrigger struct {
+    // existing fields ...
+    Filter       map[string]any `yaml:"filter,omitempty" json:"filter,omitempty"`
+    Role         string         `yaml:"role,omitempty" json:"role,omitempty"`
+    Action       string         `yaml:"action,omitempty" json:"action,omitempty"`
+    MaxConcurrent int           `yaml:"maxConcurrent,omitempty" json:"maxConcurrent,omitempty"`
+}
+```
+
+**Manifest example:**
 ```yaml
-process_mode: event_driven
+kind: WorkflowPlugin
 spec:
-  triggers:
-    - event: integration.im.message_received
-      filter:
-        channel: "general"
-        contains_mention: true
-      role: project-assistant
-      action: reply
-      max_concurrent: 2
+  workflow:
+    process: event-driven
+    triggers:
+      - event: integration.im.message_received
+        filter:
+          channel: "general"
+          contains_mention: true
+        role: project-assistant
+        action: reply
+        maxConcurrent: 2
 
-    - event: vcs.pull_request.opened
-      filter:
-        base_branch: "main"
-      role: code-reviewer
-      action: review
-      max_concurrent: 1
+      - event: vcs.pull_request.opened
+        filter:
+          base_branch: "main"
+        role: code-reviewer
+        action: review
+        maxConcurrent: 1
 ```
 
 **Execution flow:**
 ```
+Plugin enabled  →  EventDrivenExecutor subscribes to EventBus (as Mod or goroutine)
+    ↓
 EventBus receives event
     ↓
-Trigger Engine matches event_driven Workflow rules
+EventDrivenExecutor matches against this workflow's trigger list + filter
     ↓
-EventDrivenExecutor finds matching trigger
+If matched and under maxConcurrent cap:
+    Creates agent run (role + action + event payload as input)
     ↓
-Creates agent run (role + action + event payload as input)
-    ↓
-Result returned via ChannelAdapter.SendOutbound (if configured)
+Plugin disabled  →  EventDrivenExecutor unsubscribes / goroutine cancelled
 ```
 
 **Constraints:**
-- Shares event matching logic with existing Trigger Engine — no duplicate implementation
-- `max_concurrent` per trigger prevents event flooding
-- Persistent lifecycle: enabled state = listening; disabled state = paused
-
-### 4.4 Manifest `process_mode` Summary
-
-```yaml
-kind: WorkflowPlugin
-spec:
-  process_mode: hierarchical          # sequential | hierarchical | event_driven
-
-  # hierarchical-only
-  manager_role: project-assistant
-  worker_roles: [coding-agent, test-engineer]
-  worker_failure_policy: best_effort
-
-  # event_driven-only
-  triggers:
-    - event: "..."
-      filter: {}
-      role: "..."
-      action: "..."
-      max_concurrent: 2
-```
+- EventDrivenExecutor does NOT go through the Trigger Engine — it subscribes to EventBus directly
+- `maxConcurrent` per trigger enforced via a per-trigger semaphore
+- Persistent lifecycle: plugin enable/disable controls subscription; no DB schema change required (no new workflow run row needed per subscription)
 
 ---
 
@@ -303,7 +377,9 @@ WorkflowEngine continues to next Workflow Step
 
 ### 5.6 Reuse of Existing Infrastructure
 
-ToolChainExecutor calls the existing `POST /api/v1/plugins/:id/mcp/tools/call` internally — no new protocol. It is a Go-side orchestration loop over the existing tool invocation path.
+ToolChainExecutor calls `PluginService.CallMCPTool(ctx, pluginID, toolName, args)` **directly as a Go function** — not via the HTTP endpoint. The HTTP handler `POST /api/v1/plugins/:id/mcp/tools/call` is the external API entry point; internally, both the HTTP handler and ToolChainExecutor share the same service method. This avoids an HTTP round-trip and preserves the existing audit trail (the service method already logs interactions).
+
+`env.*` template resolution calls `secrets.Service.GetPlaintext(ctx, projectID, name)` directly. The project ID is available from the workflow execution context.
 
 ### 5.7 Intentional Constraints (YAGNI)
 
@@ -362,8 +438,21 @@ ToolChainExecutor calls the existing `POST /api/v1/plugins/:id/mcp/tools/call` i
 
 - Go ↔ TS Bridge protocol (HTTP + WS heartbeat)
 - Plugin lifecycle state machine
-- MCP tool invocation path
-- EventBus implementation (stays in-memory)
+- MCP tool invocation path (ToolChainExecutor calls it as a Go function, not a replacement)
+- EventBus implementation (stays in-memory; EventDrivenExecutor subscribes as a goroutine)
 - DB schema
-- Existing Sequential workflow manifests (fully backward compatible)
+- Existing Sequential workflow manifests (fully backward compatible; `process: sequential` unchanged)
 - Plugin permission/security model
+- `WorkflowProcessMode` type (already defined; this spec adds executor implementations, not new enum values)
+- `IMMessageRequest.Platform` enum values (new adapters declare matching platform identifiers in manifest)
+
+## 9. Audit Notes (2026-04-21)
+
+Corrections applied after codebase audit:
+
+1. **ChannelAdapter** — Go-side wrapper pattern over WASM Invoke, not a Go interface WASM plugins implement directly
+2. **`process_mode`** — Field already exists as `spec.workflow.process` (type `WorkflowProcessMode`); spec only adds executor implementations and new config fields
+3. **ToolChain invocation** — Uses `PluginService.CallMCPTool()` Go function directly, not the HTTP endpoint
+4. **IM platform enum** — New adapters must declare `channel.platform` matching the existing `IMMessageRequest.Platform` enum values
+5. **EventDrivenExecutor boundary** — Does not go through Trigger Engine; subscribes to EventBus directly as a persistent goroutine
+6. **`channel` section** — Formalized as `Channel *ChannelPluginSpec` in `PluginSpec` struct, not via the `Extra` inline catch-all
