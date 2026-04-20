@@ -147,7 +147,7 @@ func (r *ReviewRepository) UpdateResult(ctx context.Context, review *model.Revie
 		return fmt.Errorf("update review result: %w", err)
 	}
 
-	if err := r.db.WithContext(ctx).Model(&reviewRecord{}).Where("id = ?", review.ID).Updates(map[string]any{
+	updates := map[string]any{
 		"status":             rec.Status,
 		"risk_level":         rec.RiskLevel,
 		"findings":           rec.Findings,
@@ -156,7 +156,11 @@ func (r *ReviewRepository) UpdateResult(ctx context.Context, review *model.Revie
 		"recommendation":     rec.Recommendation,
 		"cost_usd":           rec.CostUSD,
 		"updated_at":         gorm.Expr("NOW()"),
-	}).Error; err != nil {
+	}
+	if review.LastReviewedSHA != "" {
+		updates["last_reviewed_sha"] = review.LastReviewedSHA
+	}
+	if err := r.db.WithContext(ctx).Model(&reviewRecord{}).Where("id = ?", review.ID).Updates(updates).Error; err != nil {
 		return fmt.Errorf("update review result: %w", err)
 	}
 	return nil

@@ -361,6 +361,93 @@ func (s *ReviewService) Trigger(ctx context.Context, req *model.TriggerReviewReq
 	})
 }
 
+// TriggerIncremental runs a diff-of-diff re-review scoped to ChangedFiles.
+// Inserts a NEW reviews row with parent_review_id linked to the previous
+// review; the parent's head_sha is the base for this diff (set by caller).
+func (s *ReviewService) TriggerIncremental(ctx context.Context, req *model.TriggerIncrementalReviewRequest) (*model.Review, error) {
+	if req == nil || len(req.ChangedFiles) == 0 {
+		return nil, fmt.Errorf("triggerIncremental: changed_files required")
+	}
+	parentID, err := uuid.Parse(req.ParentReviewID)
+	if err != nil {
+		return nil, fmt.Errorf("invalid parent review id: %w", err)
+	}
+	parent, err := s.reviews.GetByID(ctx, parentID)
+	if err != nil {
+		return nil, ErrReviewNotFound
+	}
+
+	plan, err := s.planner.BuildIncrementalPlan(ctx, req)
+	if err != nil {
+		return nil, fmt.Errorf("build incremental plan: %w", err)
+	}
+
+	review := &model.Review{
+		ID:             uuid.New(),
+		TaskID:         parent.TaskID,
+		PRURL:          req.PRURL,
+		PRNumber:       parent.PRNumber,
+		Layer:          parent.Layer,
+		Status:         model.ReviewStatusInProgress,
+		RiskLevel:      model.ReviewRiskLevelLow,
+		ParentReviewID: &parentID,
+		HeadSHA:        req.HeadSHA,
+		BaseSHA:        req.BaseSHA,
+	}
+	if req.IntegrationID != "" {
+		if intID, parseErr := uuid.Parse(req.IntegrationID); parseErr == nil {
+			review.IntegrationID = &intID
+		}
+	}
+
+	if err := s.reviews.Create(ctx, review); err != nil {
+		return nil, fmt.Errorf("create incremental review: %w", err)
+	}
+
+	log.WithFields(log.Fields{
+		"reviewId":       review.ID.String(),
+		"parentReviewId": parentID.String(),
+		"headSha":        req.HeadSHA,
+		"baseSha":        req.BaseSHA,
+		"changedFiles":   len(req.ChangedFiles),
+	}).Info("incremental review created")
+
+	if s.bridge == nil {
+		return review, nil
+	}
+
+	taskID := ""
+	if parent.TaskID != uuid.Nil {
+		taskID = parent.TaskID.String()
+	}
+
+	result, err := s.bridge.Review(ctx, bridgeclient.ReviewRequest{
+		ReviewID:      review.ID.String(),
+		TaskID:        taskID,
+		PRURL:         req.PRURL,
+		PRNumber:      parent.PRNumber,
+		Diff:          "",
+		Dimensions:    plan.Dimensions,
+		TriggerEvent:  plan.TriggerEvent,
+		ChangedFiles:  plan.ChangedFiles,
+		ReviewPlugins: reviewPluginRequestsFromPlan(plan),
+	})
+	if err != nil {
+		_ = s.reviews.UpdateStatus(ctx, review.ID, model.ReviewStatusFailed)
+		return nil, fmt.Errorf("bridge incremental review: %w", err)
+	}
+
+	executionMetadata := reviewExecutionMetadataFromBridge(plan, result)
+	return s.Complete(ctx, review.ID, &model.CompleteReviewRequest{
+		RiskLevel:         result.RiskLevel,
+		Findings:          result.Findings,
+		ExecutionMetadata: executionMetadata,
+		Summary:           result.Summary,
+		Recommendation:    result.Recommendation,
+		CostUSD:           result.CostUSD,
+	})
+}
+
 func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.CompleteReviewRequest) (*model.Review, error) {
 	review, err := s.reviews.GetByID(ctx, id)
 	if err != nil {
@@ -397,6 +484,10 @@ func (s *ReviewService) Complete(ctx context.Context, id uuid.UUID, req *model.C
 	review.Summary = req.Summary
 	review.Recommendation = req.Recommendation
 	review.CostUSD = req.CostUSD
+	// Advance last_reviewed_sha so incremental re-reviews know the baseline.
+	if review.HeadSHA != "" {
+		review.LastReviewedSHA = review.HeadSHA
+	}
 	fields := reviewLogFields(review, task)
 	fields["findingCount"] = len(req.Findings)
 	fields["costUsd"] = req.CostUSD
@@ -668,6 +759,7 @@ func (s *ReviewService) RequestHumanApproval(ctx context.Context, reviewID uuid.
 
 var _ interface {
 	Trigger(context.Context, *model.TriggerReviewRequest) (*model.Review, error)
+	TriggerIncremental(context.Context, *model.TriggerIncrementalReviewRequest) (*model.Review, error)
 	Complete(context.Context, uuid.UUID, *model.CompleteReviewRequest) (*model.Review, error)
 	ApproveReview(context.Context, uuid.UUID, string, string) (*model.Review, error)
 	RequestChangesReview(context.Context, uuid.UUID, string, string) (*model.Review, error)
