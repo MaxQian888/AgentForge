@@ -1881,7 +1881,7 @@
 
 ## Task 11 — Frontend page `app/(dashboard)/projects/[id]/secrets/page.tsx`
 
-- [ ] Step 11.1 — write the page
+- [x] Step 11.1 — write the page
   - File: `app/(dashboard)/projects/[id]/secrets/page.tsx`
     ```tsx
     "use client";
@@ -2189,7 +2189,7 @@
     }
     ```
 
-- [ ] Step 11.2 — write smoke test for the page (one-time-reveal flow)
+- [x] Step 11.2 — write smoke test for the page (one-time-reveal flow)
   - File: `app/(dashboard)/projects/[id]/secrets/page.test.tsx`
     ```tsx
     import { render, screen, fireEvent, waitFor } from "@testing-library/react";
@@ -2263,14 +2263,14 @@
     ```
   - Run `rtk pnpm test -- app/(dashboard)/projects/[id]/secrets` — passes.
 
-- [ ] Step 11.3 — note nav-wiring follow-up
+- [x] Step 11.3 — note nav-wiring follow-up
   - This slice does NOT add a sidebar entry because `app/(dashboard)/projects/[id]/layout.tsx` does not yet exist (Glob confirmed). Add a TODO comment at the top of `page.tsx`:
     ```tsx
     // TODO(spec1-1A): once projects/[id]/layout.tsx ships, add a "Secrets"
     // entry to the sidebar that links here.
     ```
 
-- [ ] Step 11.4 — commit: `feat(fe): project secrets page with create/rotate/delete + one-time reveal`
+- [x] Step 11.4 — commit: `feat(fe): project secrets page with create/rotate/delete + one-time reveal`
 
 ---
 
