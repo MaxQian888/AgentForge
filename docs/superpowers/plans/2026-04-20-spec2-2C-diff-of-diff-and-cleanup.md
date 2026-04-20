@@ -39,7 +39,7 @@
 
 ## Task 1 — Migration 070: `reviews.parent_review_id` + index
 
-- [ ] Step 1.1 — write failing repo test that round-trips `parent_review_id`
+- [x] Step 1.1 — write failing repo test that round-trips `parent_review_id`
   - File: `src-go/internal/repository/review_parent_review_id_test.go` (new)
   - Content:
     ```go
@@ -67,9 +67,9 @@
     }
     ```
 
-- [ ] Step 1.2 — run `cd src-go && rtk go test ./internal/repository/ -run TestReviewRecord_ParentReviewIDRoundTrip` — expect compile error: no `ParentReviewID` field on `reviewRecord` / `model.Review`.
+- [x] Step 1.2 — run `cd src-go && rtk go test ./internal/repository/ -run TestReviewRecord_ParentReviewIDRoundTrip` — expect compile error: no `ParentReviewID` field on `reviewRecord` / `model.Review`.
 
-- [ ] Step 1.3 — add field to `model.Review`
+- [x] Step 1.3 — add field to `model.Review`
   - File: `src-go/internal/model/review.go`
   - In `type Review struct` (line 62), insert after `ExecutionID`:
     ```go
@@ -77,10 +77,10 @@
     ```
   - Mirror the field in `ReviewDTO` and `(r *Review) ToDTO()` (string-encode the UUID; omit when nil).
 
-- [ ] Step 1.4 — extend repository record + mapper
+- [x] Step 1.4 — extend repository record + mapper
   - File: `src-go/internal/repository/review_repo.go` (find `reviewRecord` + `toModel()` + insert / update column lists; mirror the `ExecutionID` pattern). Add `parent_review_id` to SELECT projection used by `GetByID` / `ListAll` / `GetByTask`.
 
-- [ ] Step 1.5 — write the migration
+- [x] Step 1.5 — write the migration
   - File: `src-go/migrations/070_review_parent_review_id.up.sql` (new)
     ```sql
     ALTER TABLE reviews
@@ -93,15 +93,15 @@
     ALTER TABLE reviews DROP COLUMN IF EXISTS parent_review_id;
     ```
 
-- [ ] Step 1.6 — re-run the test from 1.1 — expect green. Then `cd src-go && rtk go test ./internal/repository/...` — full repo suite green.
+- [x] Step 1.6 — re-run the test from 1.1 — expect green. Then `cd src-go && rtk go test ./internal/repository/...` — full repo suite green.
 
-- [ ] Step 1.7 — extend `migrations/embed_test.go` so the new pair is exercised by the embed checksum test (mirror the 066 entry).
+- [x] Step 1.7 — extend `migrations/embed_test.go` so the new pair is exercised by the embed checksum test (mirror the 066 entry).
 
 ---
 
 ## Task 2 — `model.TriggerIncrementalReviewRequest` + planner allowlist semantics
 
-- [ ] Step 2.1 — write failing planner test that proves changed-files-only scoping for plugins WITHOUT FilePatterns
+- [x] Step 2.1 — write failing planner test that proves changed-files-only scoping for plugins WITHOUT FilePatterns
   - File: `src-go/internal/service/review_plugin_selection_incremental_test.go` (new)
     ```go
     package service
@@ -141,9 +141,9 @@
     ```
   - Add the test helpers (`fakeReviewPluginCatalog`, `newReviewPluginRecord`, `pluginIDs`, `contains`) at the bottom of the file if they don't already exist in `review_plugin_selection_test.go` (check first; reuse if present).
 
-- [ ] Step 2.2 — run the test — expect compile error: `TriggerIncrementalReviewRequest` and `BuildIncrementalPlan` don't exist.
+- [x] Step 2.2 — run the test — expect compile error: `TriggerIncrementalReviewRequest` and `BuildIncrementalPlan` don't exist.
 
-- [ ] Step 2.3 — add the request type
+- [x] Step 2.3 — add the request type
   - File: `src-go/internal/model/review.go` (after `TriggerReviewRequest`)
     ```go
     // TriggerIncrementalReviewRequest is the input for diff-of-diff re-review
@@ -164,7 +164,7 @@
     ```
   - If `IMReplyTarget` is the wrong type name on master (Spec 1A names it differently), use whatever 1A landed; this plan does not own that contract.
 
-- [ ] Step 2.4 — add `BuildIncrementalPlan` to the planner
+- [x] Step 2.4 — add `BuildIncrementalPlan` to the planner
   - File: `src-go/internal/service/review_plugin_selection.go`
   - Add directly after `BuildPlan`:
     ```go
@@ -190,13 +190,13 @@
     ```
   - Add `import "fmt"` if not present and a small helper `firstNonEmpty`.
 
-- [ ] Step 2.5 — re-run the test — expect green. Then `cd src-go && rtk go test ./internal/service/ -run BuildIncrementalPlan` — green.
+- [x] Step 2.5 — re-run the test — expect green. Then `cd src-go && rtk go test ./internal/service/ -run BuildIncrementalPlan` — green.
 
 ---
 
 ## Task 3 — `ReviewService.TriggerIncremental`
 
-- [ ] Step 3.1 — write failing service test
+- [x] Step 3.1 — write failing service test
   - File: `src-go/internal/service/review_service_incremental_test.go` (new)
   - Test cases:
     1. `TriggerIncremental_InsertsChildReviewLinkedToParent` — given a parent review row with `head_sha=X` and `automation_decision="auto_propose"`, calling `TriggerIncremental` with `BaseSHA=X, HeadSHA=Y, ChangedFiles=[a.go]` inserts a NEW reviews row whose `parent_review_id == parent.ID`, `base_sha == X`, `head_sha == Y`, and `automation_decision` inherited from parent.
@@ -205,9 +205,9 @@
     4. `TriggerIncremental_RejectsUnknownParent` — `ErrReviewNotFound`.
   - Use the existing fake bridge / repo helpers in `review_service_test.go`; if the parent's `automation_decision` field is owned by 2B, gate the assertion behind a build tag or fall back to the default until 2B lands.
 
-- [ ] Step 3.2 — run the test — expect compile error: `TriggerIncremental` undefined.
+- [x] Step 3.2 — run the test — expect compile error: `TriggerIncremental` undefined.
 
-- [ ] Step 3.3 — implement `TriggerIncremental`
+- [x] Step 3.3 — implement `TriggerIncremental`
   - File: `src-go/internal/service/review_service.go`
   - Add directly after `Trigger`:
     ```go
@@ -292,30 +292,30 @@
     }
     ```
 
-- [ ] Step 3.4 — extend the service interface assertion (lines 700–715) to include `TriggerIncremental`. Update any HTTP handler interface that mocks `ReviewService` to include the method (e.g., `ReviewServiceMock` in `review_handler_test.go` will also need a stub once the handler exposes it in Task 4).
+- [x] Step 3.4 — extend the service interface assertion (lines 700–715) to include `TriggerIncremental`. Update any HTTP handler interface that mocks `ReviewService` to include the method (e.g., `ReviewServiceMock` in `review_handler_test.go` will also need a stub once the handler exposes it in Task 4).
 
-- [ ] Step 3.5 — re-run service tests — expect green: `cd src-go && rtk go test ./internal/service/ -run Incremental`.
+- [x] Step 3.5 — re-run service tests — expect green: `cd src-go && rtk go test ./internal/service/ -run Incremental`.
 
 ---
 
 ## Task 4 — `Complete()` writes `last_reviewed_sha` on success
 
-- [ ] Step 4.1 — write failing test asserting `Complete` updates `last_reviewed_sha` on the review row to the review's `head_sha` once status flips to completed
+- [x] Step 4.1 — write failing test asserting `Complete` updates `last_reviewed_sha` on the review row to the review's `head_sha` once status flips to completed
   - File: `src-go/internal/service/review_service_complete_lrs_test.go` (new)
   - The test seeds a review with `HeadSHA="abc"` (using the 2B-owned column; if absent, this test pre-stages the column read on the in-memory mock so we can land it without 2B).
   - Asserts the captured `UpdateResult` argument has `LastReviewedSHA == "abc"`.
 
-- [ ] Step 4.2 — run — expect failure (field unset by Complete).
+- [x] Step 4.2 — run — expect failure (field unset by Complete).
 
-- [ ] Step 4.3 — modify `(s *ReviewService) Complete` to set `review.LastReviewedSHA = review.HeadSHA` before `UpdateResult` (only when both columns exist; guarded behind nil-checks if 2B isn't merged). Place the assignment immediately after the `review.Status = model.ReviewStatusCompleted` line (around line 380).
+- [x] Step 4.3 — modify `(s *ReviewService) Complete` to set `review.LastReviewedSHA = review.HeadSHA` before `UpdateResult` (only when both columns exist; guarded behind nil-checks if 2B isn't merged). Place the assignment immediately after the `review.Status = model.ReviewStatusCompleted` line (around line 380).
 
-- [ ] Step 4.4 — re-run — green.
+- [x] Step 4.4 — re-run — green.
 
 ---
 
 ## Task 5 — `webhook_router.RouteEvent`: handle `pull_request:synchronize`
 
-- [ ] Step 5.1 — write failing router test
+- [x] Step 5.1 — write failing router test
   - File: `src-go/internal/vcs/webhook_router_synchronize_test.go` (new)
   - Test cases:
     1. `RouteEvent_Synchronize_TriggersIncrementalWhenChangedFiles` — given an existing reviews row with `last_reviewed_sha="X"` for the PR, a `pull_request:synchronize` event with `head_sha="Y"`, and a mock VCS provider whose `ComparePullRequest("X","Y")` returns `["a.go","b.go"]`, expect `ReviewService.TriggerIncremental` called with those files and `BaseSHA=X, HeadSHA=Y, ParentReviewID=<row.id>`.
@@ -323,9 +323,9 @@
     3. `RouteEvent_Synchronize_AllFilesInNoFindingsCache_NoOp` — parent review's `ExecutionMetadata` lists all changed files as "no findings"; router skips and emits an audit entry.
     4. `RouteEvent_Synchronize_NoPriorReview_FallsBackToFullTrigger` — first time we see this PR after webhook setup; route as `Trigger` (not incremental).
 
-- [ ] Step 5.2 — run — expect a routing dispatch path that doesn't yet exist for `synchronize`.
+- [x] Step 5.2 — run — expect a routing dispatch path that doesn't yet exist for `synchronize`.
 
-- [ ] Step 5.3 — extend `webhook_router.RouteEvent` (file owned by 2B; path is `src-go/internal/vcs/webhook_router.go`)
+- [x] Step 5.3 — extend `webhook_router.RouteEvent` (file owned by 2B; path is `src-go/internal/vcs/webhook_router.go`)
   - Add a new switch arm for `eventType == "pull_request" && action == "synchronize"`:
     ```go
     case "synchronize":
@@ -339,13 +339,13 @@
     5. Else call `ReviewService.TriggerIncremental` with `{ParentReviewID: parent.ID, IntegrationID: integration.ID, PRURL: parent.PRURL, HeadSHA: headSHA, BaseSHA: lastReviewedSHA, ChangedFiles: changedFiles, ActingEmployeeID: integration.ActingEmployeeID, ReplyTarget: parent.ReplyTarget()}`.
   - The `ExecutionMetadata.NoFindingsFiles` field may need to be added (`[]string`); if 2B already added it, reuse. Keep nil-safe defaults.
 
-- [ ] Step 5.4 — re-run — expect green: `cd src-go && rtk go test ./internal/vcs/ -run Synchronize`.
+- [x] Step 5.4 — re-run — expect green: `cd src-go && rtk go test ./internal/vcs/ -run Synchronize`.
 
 ---
 
 ## Task 6 — Dispatcher: stale-findings annotation policy on incremental review
 
-- [ ] Step 6.1 — write failing dispatcher test
+- [x] Step 6.1 — write failing dispatcher test
   - File: `src-go/internal/vcs/outbound_dispatcher_stale_test.go` (new)
   - Setup: parent review has 3 findings, all with `inline_comment_id` set: F1 at `a.go:10`, F2 at `b.go:20`, F3 at `c.go:30`. Incremental review's `ChangedFiles=["a.go","b.go"]`. Incremental's findings: F1 still present at `a.go:10`; F4 NEW at `b.go:25`. (F2 absent from results; b.go is in ChangedFiles. F3 absent; c.go NOT in ChangedFiles.)
   - Expected mock `vcs.Provider` calls:
@@ -355,9 +355,9 @@
     - **No** `EditReviewComment` for F3 (file unchanged).
     - **No** `DeleteReviewComment` calls at all.
 
-- [ ] Step 6.2 — run — expect failure (current dispatcher only knows the initial-review path).
+- [x] Step 6.2 — run — expect failure (current dispatcher only knows the initial-review path).
 
-- [ ] Step 6.3 — branch the dispatcher: when the completed review has `parent_review_id != nil`, take the incremental path
+- [x] Step 6.3 — branch the dispatcher: when the completed review has `parent_review_id != nil`, take the incremental path
   - File: `src-go/internal/vcs/outbound_dispatcher.go` (created in 2B)
   - Add a method:
     ```go
@@ -407,13 +407,13 @@
     return d.handleInitial(ctx, review)
     ```
 
-- [ ] Step 6.4 — re-run dispatcher tests — expect green: `cd src-go && rtk go test ./internal/vcs/ -run Stale`.
+- [x] Step 6.4 — re-run dispatcher tests — expect green: `cd src-go && rtk go test ./internal/vcs/ -run Stale`.
 
 ---
 
 ## Task 7 — DELETE dead code (S2-H per spec §12)
 
-- [ ] Step 7.1 — write a compile-time guard test that fails as long as the symbols exist
+- [x] Step 7.1 — write a compile-time guard test that fails as long as the symbols exist
   - File: `src-go/internal/service/review_service_dead_code_test.go` (new)
     ```go
     package service
@@ -463,16 +463,16 @@
     ```
     > Note: Go does not provide a clean negative-symbol assertion at the package-constant level; the reflect test on `*ReviewService` is the load-bearing guard. The `eventbus` test exists as a documentation anchor — if a future contributor reintroduces the constant, code review will catch it.
 
-- [ ] Step 7.2 — delete `RouteFixRequest` from `ReviewService`
+- [x] Step 7.2 — delete `RouteFixRequest` from `ReviewService`
   - File: `src-go/internal/service/review_service.go`
   - Delete lines 668–698 (the entire `RouteFixRequest` method + its leading comment).
   - In the interface assertion at lines 700–715, delete the `RouteFixRequest(context.Context, uuid.UUID) error` line.
 
-- [ ] Step 7.3 — delete the event constants
+- [x] Step 7.3 — delete the event constants
   - File: `src-go/internal/eventbus/types.go` line 26 — delete the `EventReviewFixRequested` line.
   - File: `src-go/internal/ws/events.go` line 33 — delete the `EventReviewFixRequested` line.
 
-- [ ] Step 7.4 — delete the HTTP handler call
+- [x] Step 7.4 — delete the HTTP handler call
   - File: `src-go/internal/handler/review_handler.go`
     - Line 31: delete `RouteFixRequest(ctx context.Context, id uuid.UUID) error` from the `ReviewService` interface.
     - Lines 207–209 (inside `RequestChanges`): delete the entire `if routeErr := h.service.RouteFixRequest(...); ...` block. The handler simply returns the updated review DTO.
@@ -482,7 +482,7 @@
     - Update `TestReviewHandlerRequestChangesSucceeds` (around line 384): remove the `svc.routeFixID != review.ID` assertion; assert only that the request body comment was captured and status is 200.
     - Delete `TestReviewHandlerRequestChangesReturnsInternalErrorWhenRouteFixFails` entirely (the failure mode no longer exists).
 
-- [ ] Step 7.5 — delete the IM action call
+- [x] Step 7.5 — delete the IM action call
   - File: `src-go/internal/service/im_action_execution.go`
     - Line 38: delete `RouteFixRequest(ctx context.Context, id uuid.UUID) error` from the local `reviewer` interface.
     - Lines 405–417: delete the entire post-`RequestChangesReview` block that calls `RouteFixRequest`. After deletion, the `RequestChanges` switch arm just falls through to the common success path:
@@ -494,7 +494,7 @@
     - Line 86: delete the `RouteFixRequest` method on `fakeIMActionReviewer`.
     - If a test asserts the route-fix metadata side effect, delete that assertion (the entire test if route-fix was its sole purpose).
 
-- [ ] Step 7.6 — delete `formatReviewFollowUpTasks` from IM bridge
+- [x] Step 7.6 — delete `formatReviewFollowUpTasks` from IM bridge
   - File: `src-im-bridge/commands/review.go`
     - Lines 200–202: delete the followup append in the plain-reply branch.
     - Lines 229–237: delete the followup `StructuredSection` block.
@@ -506,22 +506,22 @@
     - Delete the `field.Label == "后续任务"` branch at line 449.
   - File: `src-im-bridge/cmd/bridge/main_test.go` line 1045: delete the `"后续任务建议"` assertion.
 
-- [ ] Step 7.7 — update the API doc
+- [x] Step 7.7 — update the API doc
   - File: `docs/api/reviews.md` lines 156–158: delete the sentence `This endpoint also calls RouteFixRequest, which is the repair handoff back into the task/agent pipeline.` Replace with a one-liner: `Findings flagged by the request-changes flow surface in the review's findings list; auto-fix proposals are emitted by the automation rule on EventReviewCompleted (see Spec 2D).`
 
-- [ ] Step 7.8 — verify nothing else references the deleted symbols
+- [x] Step 7.8 — verify nothing else references the deleted symbols
   - Run `rtk grep -nR "RouteFixRequest" src-go src-im-bridge docs` — must return 0 hits in `src-go/` and `src-im-bridge/` (docs may keep the historical mention in `docs/superpowers/specs/2026-04-20-code-reviewer-employee-design.md` which describes the deletion).
   - Run `rtk grep -nR "EventReviewFixRequested" src-go src-im-bridge` — must return 0 hits.
   - Run `rtk grep -nR "formatReviewFollowUpTasks\|renderFollowupTaskSuggestions" src-go src-im-bridge` — must return 0 hits.
   - Run `cd src-go && rtk go build ./...` and `cd src-im-bridge && rtk go build ./...` — both green.
 
-- [ ] Step 7.9 — run the dead-code reflect test from 7.1 — green.
+- [x] Step 7.9 — run the dead-code reflect test from 7.1 — green.
 
 ---
 
 ## Task 8 — Integration test: end-to-end Trace C
 
-- [ ] Step 8.1 — write the integration test (Postgres + Redis + mock VCS HTTP)
+- [x] Step 8.1 — write the integration test (Postgres + Redis + mock VCS HTTP)
   - File: `src-go/internal/service/review_service_trace_c_integration_test.go` (new; gated by `// +build integration`)
   - Steps the test exercises:
     1. Seed a `vcs_integrations` row + an initial completed review with `head_sha="X"`, `last_reviewed_sha="X"`, `summary_comment_id="sc-1"`, two findings F1 (a.go:10) + F2 (b.go:20) each with `inline_comment_id`.
@@ -532,18 +532,18 @@
        - A new reviews row exists with `parent_review_id == originalReview.ID`, `base_sha == "X"`, `head_sha == "Y"`, `last_reviewed_sha == "Y"` (after Complete).
        - Mock VCS recorded: `EditSummaryComment("sc-1", ...)` once, `PostReviewComments` containing F3 once, **no** `EditReviewComment` for F2 (b.go not in changedFiles), **no** `DeleteReviewComment`.
 
-- [ ] Step 8.2 — run `cd src-go && rtk go test -tags=integration ./internal/service/ -run TraceC` — green.
+- [x] Step 8.2 — run `cd src-go && rtk go test -tags=integration ./internal/service/ -run TraceC` — green.
 
 ---
 
 ## Task 9 — Final verification
 
-- [ ] Step 9.1 — Run full test suite
+- [x] Step 9.1 — Run full test suite
   - `cd src-go && rtk go test ./...` — green
   - `cd src-im-bridge && rtk go test ./...` — green
-- [ ] Step 9.2 — Lint
+- [x] Step 9.2 — Lint
   - `cd src-go && rtk go vet ./...` — clean
-- [ ] Step 9.3 — Add a Spec Drift entry to `docs/superpowers/specs/2026-04-20-code-reviewer-employee-design.md` §13.1:
+- [x] Step 9.3 — Add a Spec Drift entry to `docs/superpowers/specs/2026-04-20-code-reviewer-employee-design.md` §13.1:
   - Function name drift: spec says `renderFollowupTaskSuggestions`; actual deleted symbol is `formatReviewFollowUpTasks`.
   - Event constant drift: `EventReviewFixRequested` was duplicated in `eventbus/types.go` AND `ws/events.go`; both deleted.
   - Trace C scope: this plan handles `pull_request:synchronize` only; standalone `push` events are not subscribed (synchronize is the canonical PR-head-moved signal from GitHub).
