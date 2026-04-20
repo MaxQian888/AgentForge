@@ -238,6 +238,10 @@ interface WorkflowState {
   pendingReviews: WorkflowPendingReview[];
   pendingReviewsLoading: boolean;
   fetchPendingReviews: (projectId: string) => Promise<void>;
+
+  // Outbound delivery failure tracking (spec §10)
+  outboundDeliveryFailedExecIds: Set<string>;
+  markOutboundDeliveryFailed: (executionId: string) => void;
 }
 
 const API_URL = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:7777";
@@ -279,6 +283,15 @@ export const useWorkflowStore = create<WorkflowState>()((set) => ({
   nodeExecutions: [],
   pendingReviews: [],
   pendingReviewsLoading: false,
+
+  outboundDeliveryFailedExecIds: new Set<string>(),
+  markOutboundDeliveryFailed: (executionId: string) => {
+    set((state) => {
+      const next = new Set(state.outboundDeliveryFailedExecIds);
+      next.add(executionId);
+      return { outboundDeliveryFailedExecIds: next };
+    });
+  },
 
   fetchWorkflow: async (projectId) => {
     const token = useAuthStore.getState().accessToken;

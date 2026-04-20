@@ -346,6 +346,9 @@ export function WorkflowExecutionView({
   const [nodeExecs, setNodeExecs] = useState<WorkflowNodeExecution[]>([]);
   const [subInvocations, setSubInvocations] = useState<SubWorkflowLinkDTO[]>([]);
   const [invokedByParent, setInvokedByParent] = useState<SubWorkflowLinkDTO | null>(null);
+  const outboundDeliveryFailed = useWorkflowStore(
+    (s) => s.outboundDeliveryFailedExecIds.has(executionId)
+  );
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -451,6 +454,15 @@ export function WorkflowExecutionView({
             <div className="flex items-center gap-2">
               <span className="font-medium">Execution</span>
               <ExecutionStatusBadge status={execution.status} />
+              {outboundDeliveryFailed && (
+                <Badge
+                  variant="destructive"
+                  className="text-[10px]"
+                  title="后端尝试 3 次仍未把结果回帖到 IM 线程"
+                >
+                  回帖失败
+                </Badge>
+              )}
             </div>
             <span className="text-xs text-muted-foreground">
               Started{" "}

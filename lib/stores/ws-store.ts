@@ -582,6 +582,13 @@ export const useWSStore = create<WSState>()((set) => ({
       });
     });
 
+    client.on("workflow.outbound_delivery.failed", (data) => {
+      const payload = extractPayload<{ executionId?: string }>(data);
+      if (typeof payload?.executionId === "string") {
+        useWorkflowStore.getState().markOutboundDeliveryFailed(payload.executionId);
+      }
+    });
+
     client.on("workflow.trigger_fired", (data) => {
       const envelope =
         data && typeof data === "object"
