@@ -383,17 +383,20 @@ func (r *Receiver) handleNotify(w http.ResponseWriter, req *http.Request) {
 	r.emitDelivered("/im/notify", deliveryID, n.Type, chatID, n.TargetIMUserID, core.DeliveryReceipt{Type: "text"}, start)
 }
 
-// SendRequest is the payload for the /im/send endpoint.
+// SendRequest is the payload for the /im/send endpoint. Exactly one of
+// `content`, `structured`, `native`, or `card` may be set; mixing these
+// fields (or combining `card` with attachments) returns 400.
 type SendRequest struct {
-	Platform    string                  `json:"platform"`
-	ChatID      string                  `json:"chat_id"`
-	Content     string                  `json:"content"`
-	Structured  *core.StructuredMessage `json:"structured,omitempty"`
-	Native      *core.NativeMessage     `json:"native,omitempty"`
-	Attachments []AttachmentRequest     `json:"attachments,omitempty"`
-	Metadata    map[string]string       `json:"metadata,omitempty"`
-	ThreadID    string                  `json:"thread_id,omitempty"`
-	ReplyTarget *core.ReplyTarget       `json:"replyTarget,omitempty"`
+	Platform    string                   `json:"platform"`
+	ChatID      string                   `json:"chat_id"`
+	Content     string                   `json:"content"`
+	Structured  *core.StructuredMessage  `json:"structured,omitempty"`
+	Native      *core.NativeMessage      `json:"native,omitempty"`
+	Card        *core.ProviderNeutralCard `json:"card,omitempty"`
+	Attachments []AttachmentRequest      `json:"attachments,omitempty"`
+	Metadata    map[string]string        `json:"metadata,omitempty"`
+	ThreadID    string                   `json:"thread_id,omitempty"`
+	ReplyTarget *core.ReplyTarget        `json:"replyTarget,omitempty"`
 }
 
 // AttachmentRequest is the wire shape for an egress attachment reference. The
@@ -439,6 +442,46 @@ func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
+	ctx := context.Background()
+
+	// Card path: spec §8 ProviderNeutralCard. Mutually exclusive with the
+	// content/structured/native/attachments envelope.
+	if s.Card != nil {
+		if s.Content != "" || s.Structured != nil || s.Native != nil || len(s.Attachments) > 0 {
+			http.Error(w, "card cannot be combined with content/structured/native/attachments", http.StatusBadRequest)
+			r.emitFailed("/im/send", deliveryID, "send", chatID, "", "exclusive_card", start)
+			return
+		}
+		target := s.ReplyTarget
+		if target == nil {
+			target = &core.ReplyTarget{Platform: r.metadata.Source, ChatID: chatID}
+		} else if strings.TrimSpace(target.Platform) == "" {
+			target.Platform = r.metadata.Source
+		}
+		rendered, err := core.DispatchCard(*s.Card, target)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			r.emitFailed("/im/send", deliveryID, "send", chatID, "", err.Error(), start)
+			return
+		}
+		sender, ok := r.platform.(core.RawCardSender)
+		if !ok {
+			http.Error(w, "platform does not support raw card delivery", http.StatusNotImplemented)
+			r.emitFailed("/im/send", deliveryID, "send", chatID, "", "raw_card_unsupported", start)
+			return
+		}
+		if err := sender.SendRawCard(ctx, chatID, rendered.ContentType, rendered.Body, target); err != nil {
+			log.WithField("component", "notify").WithField("chat_id", chatID).WithError(err).Error("Failed to send card")
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			r.emitFailed("/im/send", deliveryID, "send", chatID, "", err.Error(), start)
+			return
+		}
+		receipt := core.DeliveryReceipt{Type: "card"}
+		writeDeliveryReceipt(w, receipt)
+		r.emitDelivered("/im/send", deliveryID, "send", chatID, "", receipt, start)
+		return
+	}
+
 	attachments, attErr := r.resolveAttachments(s.Attachments)
 	if attErr != nil {
 		http.Error(w, attErr.Error(), http.StatusBadRequest)
@@ -446,7 +489,6 @@ func (r *Receiver) handleSend(w http.ResponseWriter, req *http.Request) {
 		return
 	}
 
-	ctx := context.Background()
 	receipt, err := core.DeliverEnvelope(ctx, r.platform, r.metadata, chatID, &core.DeliveryEnvelope{
 		Content:     s.Content,
 		Structured:  s.Structured,

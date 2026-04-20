@@ -288,6 +288,32 @@ func (l *Live) Send(ctx context.Context, chatID string, content string) error {
 	})
 }
 
+// SendRawCard implements core.RawCardSender for the new ProviderNeutralCard
+// path. The body is a `{"blocks":[...]}` JSON when contentType is "blocks";
+// "text" falls back to a plain text post.
+func (l *Live) SendRawCard(ctx context.Context, chatID, contentType, body string, target *core.ReplyTarget) error {
+	channel := strings.TrimSpace(chatID)
+	if channel == "" && target != nil {
+		channel = strings.TrimSpace(target.ChannelID)
+	}
+	if channel == "" {
+		return errors.New("slack raw card send requires channel id")
+	}
+	if contentType == "text" {
+		return l.messages.PostMessage(ctx, slackOutgoingMessage{ChannelID: channel, Text: body})
+	}
+	var wrapper struct {
+		Blocks goslack.Blocks `json:"blocks"`
+	}
+	if err := json.Unmarshal([]byte(body), &wrapper); err != nil {
+		return fmt.Errorf("slack raw card decode: %w", err)
+	}
+	return l.messages.PostMessage(ctx, slackOutgoingMessage{
+		ChannelID: channel,
+		Blocks:    wrapper.Blocks.BlockSet,
+	})
+}
+
 func (l *Live) SendCard(ctx context.Context, chatID string, card *core.Card) error {
 	if strings.TrimSpace(chatID) == "" {
 		return errors.New("slack card send requires channel id")

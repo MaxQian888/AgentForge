@@ -30,6 +30,7 @@ var (
 	_ core.MessageUpdater        = (*Live)(nil)
 	_ core.StructuredSender      = (*Live)(nil)
 	_ core.ReplyStructuredSender = (*Live)(nil)
+	_ core.RawCardSender         = (*Live)(nil)
 )
 
 var liveMetadata = core.PlatformMetadata{
@@ -464,6 +465,29 @@ func (l *Live) Send(ctx context.Context, chatID string, content string) error {
 		return err
 	}
 	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, chatID, larkim.MsgTypeText, payload)
+}
+
+// SendRawCard implements core.RawCardSender for the new ProviderNeutralCard
+// path. The body is already a Feishu interactive card JSON when contentType
+// is "interactive"; "text" falls back to a plain text send.
+func (l *Live) SendRawCard(ctx context.Context, chatID, contentType, body string, target *core.ReplyTarget) error {
+	if strings.TrimSpace(chatID) == "" && (target == nil || strings.TrimSpace(target.MessageID) == "") {
+		return errors.New("feishu raw card send requires chat id or reply target")
+	}
+	msgType := larkim.MsgTypeInteractive
+	payload := body
+	if contentType == "text" {
+		var err error
+		payload, err = renderTextPayload(body)
+		if err != nil {
+			return err
+		}
+		msgType = larkim.MsgTypeText
+	}
+	if target != nil && strings.TrimSpace(target.MessageID) != "" {
+		return l.messages.Reply(ctx, target.MessageID, msgType, payload)
+	}
+	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, chatID, msgType, payload)
 }
 
 func (l *Live) SendCard(ctx context.Context, chatID string, card *core.Card) error {

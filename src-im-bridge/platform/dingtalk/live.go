@@ -376,6 +376,47 @@ func (l *Live) ReplyStructured(ctx context.Context, rawReplyCtx any, message *co
 	return l.Reply(ctx, rawReplyCtx, renderStructuredFallback(message))
 }
 
+// SendRawCard implements core.RawCardSender for the new ProviderNeutralCard
+// path. The body is an ActionCard JSON when contentType is "actioncard";
+// "text" falls back to a plain text reply via the webhook/messenger.
+func (l *Live) SendRawCard(ctx context.Context, chatID, contentType, body string, target *core.ReplyTarget) error {
+	dest := strings.TrimSpace(chatID)
+	if dest == "" && target != nil {
+		dest = strings.TrimSpace(target.SessionWebhook)
+		if dest == "" {
+			dest = strings.TrimSpace(target.ChatID)
+		}
+	}
+	if dest == "" {
+		return errors.New("dingtalk raw card send requires chat id or session webhook")
+	}
+	if contentType == "text" {
+		return l.Send(ctx, dest, body)
+	}
+	// Rebuild the webhook payload from the rendered ActionCard JSON.
+	var card struct {
+		Title    string              `json:"title"`
+		Markdown string              `json:"markdown"`
+		Buttons  []map[string]string `json:"buttons"`
+	}
+	if err := json.Unmarshal([]byte(body), &card); err != nil {
+		return fmt.Errorf("dingtalk raw card decode: %w", err)
+	}
+	payload := map[string]any{
+		"msgtype": "actionCard",
+		"actionCard": map[string]any{
+			"title": card.Title,
+			"text":  card.Markdown,
+			"btns":  card.Buttons,
+		},
+	}
+	if isWebhookTarget(dest) {
+		return l.webhook.ReplyMessage(ctx, dest, payload)
+	}
+	// No webhook → degrade to text via existing send path.
+	return l.Send(ctx, dest, card.Markdown)
+}
+
 func (l *Live) SendCard(ctx context.Context, chatID string, card *core.Card) error {
 	if isWebhookTarget(chatID) {
 		if err := l.sendActionCardViaWebhook(ctx, chatID, card); err != nil {

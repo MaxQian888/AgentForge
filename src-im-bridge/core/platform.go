@@ -20,6 +20,15 @@ type CardSender interface {
 	ReplyCard(ctx context.Context, replyCtx any, card *Card) error
 }
 
+// RawCardSender is an optional interface for platforms that can send a
+// pre-rendered ProviderNeutralCard payload (the output of DispatchCard).
+// ContentType is platform-meaningful — "interactive" for Feishu cards,
+// "blocks" for Slack, "actioncard" for DingTalk, "text" for fallback.
+// Implementations decide whether to send-via-chatID or reply-to-target.
+type RawCardSender interface {
+	SendRawCard(ctx context.Context, chatID, contentType, body string, target *ReplyTarget) error
+}
+
 // StructuredSender is an optional interface for platforms that can natively
 // render structured message payloads without first converting to legacy cards.
 type StructuredSender interface {

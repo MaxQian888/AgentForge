@@ -673,7 +673,7 @@
 
 ## Task 5 — Extend `/im/send` to accept `ProviderNeutralCard`
 
-- [ ] Step 5.1 — failing test for new request shape
+- [x] Step 5.1 — failing test for new request shape
   - File: `src-im-bridge/notify/receiver_card_test.go` (new) — boots `Receiver` with a stub platform that records the last `Send` payload. Posts:
     ```json
     {"platform":"feishu","chat_id":"c1",
@@ -681,14 +681,14 @@
     ```
     Assert: stub got `MsgTypeInteractive` with body containing `"green"`. Then post the same body but with both `text` and `card` set — expect HTTP 400 ("send requires exactly one of text or card").
 
-- [ ] Step 5.2 — extend `SendRequest`
+- [x] Step 5.2 — extend `SendRequest`
   - File: `src-im-bridge/notify/receiver.go`, in the `SendRequest` struct (around line 387) add:
     ```go
     Card *core.ProviderNeutralCard `json:"card,omitempty"`
     ```
     Update the `// SendRequest is the payload for the /im/send endpoint.` doc comment to note: "Exactly one of `content`, `structured`, `native`, or `card` may be set; mixing returns 400."
 
-- [ ] Step 5.3 — wire `card` through dispatch in `handleSend`
+- [x] Step 5.3 — wire `card` through dispatch in `handleSend`
   - In `handleSend` (line 416), after `s.ChatID` validation and before the existing `core.DeliverEnvelope`:
     ```go
     if s.Card != nil {
@@ -726,10 +726,10 @@
     ```
   - Move the existing `attachments`/`DeliverEnvelope` block into an `else` branch so the two paths are mutually exclusive.
 
-- [ ] Step 5.4 — make platform adapters honour `card_content_type` metadata
+- [x] Step 5.4 — make platform adapters honour `card_content_type` metadata
   - File: `src-im-bridge/core/delivery.go` (or `delivery_attachments_test.go` neighbouring file — find the existing dispatch). Add a routing branch: when `Metadata["card_content_type"]` is `"interactive"`, send via the platform's `CardSender` raw-payload entrypoint; for `"blocks"` route to slack's blocks send; for `"actioncard"` route to dingtalk's ActionCard send. Provide a new minimal interface `core.RawCardSender { SendRawCard(ctx, chatID, contentType, body string, target *ReplyTarget) error }` that each platform's `live.go` implements (3-line wrapper around the existing `messages.Send` / `webhook.Post` calls).
 
-- [ ] Step 5.5 — verify
+- [x] Step 5.5 — verify
   - `rtk go test ./notify/... ./core/... ./platform/feishu/...` — new test passes; existing pass.
 
 ---
