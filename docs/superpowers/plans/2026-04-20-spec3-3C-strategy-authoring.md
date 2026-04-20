@@ -84,11 +84,11 @@
 
 ## Task 2 — Strategy YAML schema (Go structs)
 
-- [ ] Step 2.1 — write failing test for the in-memory shape
+- [x] Step 2.1 — write failing test for the in-memory shape
   - File: `src-go/internal/qianchuan/strategy/schema_test.go`
   - Test asserts the `Strategy` zero-value round-trips through `yaml.Marshal` / `yaml.Unmarshal` and that the action type enum matches the documented allowlist exactly.
 
-- [ ] Step 2.2 — implement schema types
+- [x] Step 2.2 — implement schema types
   - File: `src-go/internal/qianchuan/strategy/schema.go`
     ```go
     package strategy
@@ -130,7 +130,7 @@
     }
     ```
 
-- [ ] Step 2.3 — green the test
+- [x] Step 2.3 — green the test
   - Run `cd src-go && go test ./internal/qianchuan/strategy/...`
   - All passes
 
@@ -138,14 +138,14 @@
 
 ## Task 3 — ParsedSpec (compiled form for runtime)
 
-- [ ] Step 3.1 — write failing test for ParsedSpec round-trip
+- [x] Step 3.1 — write failing test for ParsedSpec round-trip
   - File: `src-go/internal/qianchuan/strategy/parsed_spec_test.go`
   - Cases:
     - `ParsedSpec.MarshalJSON` produces stable, sorted-key JSON suitable for jsonb storage
     - A round-trip through `json.Marshal` → `json.Unmarshal` preserves all fields including `ScheduleSeconds`, `Rules[].ConditionRaw`, action params
     - `ParsedSpec.SchemaVersion` is `1` so future format bumps can be detected
 
-- [ ] Step 3.2 — implement ParsedSpec
+- [x] Step 3.2 — implement ParsedSpec
   - File: `src-go/internal/qianchuan/strategy/parsed_spec.go`
     ```go
     type ParsedSpec struct {
@@ -172,13 +172,13 @@
     ```
   - No expression AST is precomputed — `EvaluateExpression` is itself fast and stateless. SchemaVersion=1 is the only forward-compat hook.
 
-- [ ] Step 3.3 — green the test
+- [x] Step 3.3 — green the test
 
 ---
 
 ## Task 4 — Action params validators (per-type)
 
-- [ ] Step 4.1 — write failing test table
+- [x] Step 4.1 — write failing test table
   - File: `src-go/internal/qianchuan/strategy/action_validators_test.go`
   - Table-driven cases per action type:
     - `adjust_bid`: requires exactly one of `pct` (float -100..100, non-zero) or `to` (positive float); both → reject; neither → reject
@@ -189,13 +189,13 @@
     - `record_event`: requires `event_name` (non-empty)
     - Unknown type → reject with clear message
 
-- [ ] Step 4.2 — implement
+- [x] Step 4.2 — implement
   - File: `src-go/internal/qianchuan/strategy/action_validators.go`
   - Export `ValidateAction(a StrategyAction) error`
   - Internally a `map[string]func(map[string]any) error` keyed by type
   - Errors include the action type for FE display
 
-- [ ] Step 4.3 — green
+- [x] Step 4.3 — green
 
 ---
 
