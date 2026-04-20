@@ -490,39 +490,79 @@ func (l *Live) SendRawCard(ctx context.Context, chatID, contentType, body string
 	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, chatID, msgType, payload)
 }
 
+// legacyCardToNeutral converts the older *core.Card payload (Title +
+// Fields + Buttons) into the new ProviderNeutralCard so SendCard/ReplyCard
+// can route through core.DispatchCard. Per spec §12 the old hand-rolled
+// renderInteractiveCard is removed in this PR; this adapter is the bridge.
+func legacyCardToNeutral(c *core.Card) core.ProviderNeutralCard {
+	if c == nil {
+		return core.ProviderNeutralCard{}
+	}
+	out := core.ProviderNeutralCard{Title: c.Title}
+	for _, f := range c.Fields {
+		out.Fields = append(out.Fields, core.CardField{Label: f.Label, Value: f.Value})
+	}
+	for _, b := range c.Buttons {
+		a := core.CardAction{ID: b.Action, Label: b.Text, Style: core.CardStyle(b.Style)}
+		if a.ID == "" {
+			a.ID = "btn"
+		}
+		if strings.HasPrefix(b.Action, "link:") {
+			a.Type = core.CardActionTypeURL
+			a.URL = strings.TrimPrefix(b.Action, "link:")
+		} else {
+			a.Type = core.CardActionTypeCallback
+			a.CorrelationToken = b.Action
+			if a.CorrelationToken == "" {
+				a.CorrelationToken = a.ID
+			}
+		}
+		out.Actions = append(out.Actions, a)
+	}
+	return out
+}
+
 func (l *Live) SendCard(ctx context.Context, chatID string, card *core.Card) error {
 	if strings.TrimSpace(chatID) == "" {
 		return errors.New("feishu card send requires chat id")
 	}
-	payload, err := renderInteractiveCard(card)
+	if card == nil {
+		return errors.New("feishu card send requires non-nil card")
+	}
+	rendered, err := core.DispatchCard(legacyCardToNeutral(card), &core.ReplyTarget{Platform: liveMetadata.Source, ChatID: chatID})
 	if err != nil {
 		return err
 	}
-	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, chatID, larkim.MsgTypeInteractive, payload)
+	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, chatID, larkim.MsgTypeInteractive, rendered.Body)
 }
 
 func (l *Live) ReplyCard(ctx context.Context, replyCtx any, card *core.Card) error {
-	payload, err := renderInteractiveCard(card)
+	if card == nil {
+		return errors.New("feishu reply card requires non-nil card")
+	}
+	replyTarget := toReplyContext(replyCtx)
+	rendered, err := core.DispatchCard(legacyCardToNeutral(card), &core.ReplyTarget{Platform: liveMetadata.Source, ChatID: replyTarget.ChatID, MessageID: replyTarget.MessageID})
 	if err != nil {
 		return err
 	}
-
-	replyTarget := toReplyContext(replyCtx)
 	if replyTarget.MessageID != "" {
-		return l.messages.Reply(ctx, replyTarget.MessageID, larkim.MsgTypeInteractive, payload)
+		return l.messages.Reply(ctx, replyTarget.MessageID, larkim.MsgTypeInteractive, rendered.Body)
 	}
 	if replyTarget.ChatID == "" {
 		return errors.New("feishu reply card requires message id or chat id")
 	}
-	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, replyTarget.ChatID, larkim.MsgTypeInteractive, payload)
+	return l.messages.Send(ctx, larkim.ReceiveIdTypeChatId, replyTarget.ChatID, larkim.MsgTypeInteractive, rendered.Body)
 }
 
-// SendStructured implements core.StructuredSender.
+// SendStructured implements core.StructuredSender. The structured renderer
+// remains separate from the new ProviderNeutralCard path because it handles
+// richer section types (image/divider/context/columns) that the neutral
+// schema does not model — see card_render_structured.go.
 func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.StructuredMessage) error {
 	if strings.TrimSpace(chatID) == "" {
 		return errors.New("feishu structured send requires chat id")
 	}
-	payload, err := renderStructuredMessage(message)
+	payload, err := renderStructured(message)
 	if err != nil {
 		return err
 	}
@@ -531,7 +571,7 @@ func (l *Live) SendStructured(ctx context.Context, chatID string, message *core.
 
 // ReplyStructured implements core.ReplyStructuredSender.
 func (l *Live) ReplyStructured(ctx context.Context, replyCtx any, message *core.StructuredMessage) error {
-	payload, err := renderStructuredMessage(message)
+	payload, err := renderStructured(message)
 	if err != nil {
 		return err
 	}
@@ -1115,7 +1155,7 @@ func renderCallbackResponseCardFromStructuredMessage(message *core.StructuredMes
 	if message == nil {
 		return nil, nil
 	}
-	payload, err := renderStructuredMessage(message)
+	payload, err := renderStructured(message)
 	if err != nil {
 		return nil, err
 	}
@@ -1296,62 +1336,6 @@ func renderTextPayload(content string) (string, error) {
 	body, err := json.Marshal(map[string]string{
 		"text": content,
 	})
-	if err != nil {
-		return "", err
-	}
-	return string(body), nil
-}
-
-func renderInteractiveCard(card *core.Card) (string, error) {
-	if card == nil {
-		return "", errors.New("card is required")
-	}
-
-	elements := make([]map[string]any, 0, len(card.Fields)+1)
-	for _, field := range card.Fields {
-		elements = append(elements, map[string]any{
-			"tag": "div",
-			"text": map[string]any{
-				"tag":     "lark_md",
-				"content": fmt.Sprintf("**%s**\n%s", field.Label, field.Value),
-			},
-		})
-	}
-	if len(card.Buttons) > 0 {
-		actions := make([]map[string]any, 0, len(card.Buttons))
-		for _, button := range card.Buttons {
-			action := map[string]any{
-				"tag":  "button",
-				"text": map[string]any{"tag": "plain_text", "content": button.Text},
-				"type": normalizeButtonStyle(button.Style),
-			}
-			if strings.HasPrefix(button.Action, "link:") {
-				action["url"] = strings.TrimPrefix(button.Action, "link:")
-			} else if button.Action != "" {
-				action["value"] = map[string]any{"action": button.Action}
-			}
-			actions = append(actions, action)
-		}
-		elements = append(elements, map[string]any{
-			"tag":     "action",
-			"actions": actions,
-		})
-	}
-
-	payload := map[string]any{
-		"config": map[string]any{
-			"wide_screen_mode": true,
-		},
-		"header": map[string]any{
-			"title": map[string]any{
-				"tag":     "plain_text",
-				"content": card.Title,
-			},
-		},
-		"elements": elements,
-	}
-
-	body, err := json.Marshal(payload)
 	if err != nil {
 		return "", err
 	}
