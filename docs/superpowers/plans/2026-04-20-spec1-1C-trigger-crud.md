@@ -389,7 +389,7 @@
 
 ## Task 7 — Backfill script for existing rows
 
-- [ ] Step 7.1 — write `cmd/backfill-trigger-source/main.go`
+- [x] Step 7.1 — write `cmd/backfill-trigger-source/main.go`
   - New directory `src-go/cmd/backfill-trigger-source/`
   - File `main.go`:
     ```go
@@ -420,10 +420,10 @@
     ```
   - If `repository.OpenPostgres` does not exist, mirror the helper used in `cmd/migrate-once/main.go` for opening a connection.
 
-- [ ] Step 7.2 — document invocation in plan note
+- [x] Step 7.2 — document invocation in plan note
   - Plan note (no file change): "The migration in 1A sets `DEFAULT 'dag_node'` so existing inserts get the value automatically. This script handles any pre-migration rows where the column was added with a NULL backfill (defensive). Invoke via `cd src-go && go run ./cmd/backfill-trigger-source` after migrations."
 
-- [ ] Step 7.3 — smoke test
+- [x] Step 7.3 — smoke test
   - `rtk go build ./cmd/backfill-trigger-source` succeeds.
 
 ---
