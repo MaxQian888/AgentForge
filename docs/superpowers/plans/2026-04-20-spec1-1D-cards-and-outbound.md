@@ -364,7 +364,7 @@
 
 ## Task 4 — Per-platform renderers (feishu / slack / dingtalk)
 
-- [ ] Step 4.1 — failing snapshot tests
+- [x] Step 4.1 — failing snapshot tests
   - File: `src-im-bridge/platform/feishu/card_render_test.go` (new)
     ```go
     package feishu_test
@@ -435,7 +435,7 @@
     ```
   - Mirror analogous tests in `src-im-bridge/platform/slack/card_render_test.go` and `src-im-bridge/platform/dingtalk/card_render_test.go` (success + failed + callback). For slack, assert payload starts with `{"blocks":[`; for dingtalk, assert `card_type=ActionCard` and buttons array present.
 
-- [ ] Step 4.2 — implement Feishu renderer
+- [x] Step 4.2 — implement Feishu renderer
   - File: `src-im-bridge/platform/feishu/card_render.go` (new)
     ```go
     package feishu
@@ -546,7 +546,7 @@
     }
     ```
 
-- [ ] Step 4.3 — implement Slack renderer
+- [x] Step 4.3 — implement Slack renderer
   - File: `src-im-bridge/platform/slack/card_render.go` (new) — uses `slack-go/slack` blocks. Header → `header` block; Summary → markdown section; Fields → 2-col section with `*label*\nvalue`; Footer → context block; Actions → action block with button elements (URL action sets `URL`, callback action sets `Value` to `correlation_token` JSON-encoded with `payload` and `action_id`).
     ```go
     package slack
@@ -614,7 +614,7 @@
     }
     ```
 
-- [ ] Step 4.4 — implement DingTalk renderer
+- [x] Step 4.4 — implement DingTalk renderer
   - File: `src-im-bridge/platform/dingtalk/card_render.go` (new)
     ```go
     package dingtalk
@@ -666,7 +666,7 @@
     }
     ```
 
-- [ ] Step 4.5 — verify
+- [x] Step 4.5 — verify
   - `rtk go test ./core/... ./platform/feishu/... ./platform/slack/... ./platform/dingtalk/...` — all snapshot tests pass.
 
 ---
