@@ -23,7 +23,6 @@ const (
 	EventReviewCompleted             = "review.completed"
 	EventReviewUpdated               = "review.updated"
 	EventReviewPendingHuman          = "review.pending_human"
-	EventReviewFixRequested          = "review.fix_requested"
 	EventNotification                = "notification"
 	EventBudgetWarning               = "budget.warning"
 	EventBudgetExceeded              = "budget.exceeded"
@@ -102,6 +101,10 @@ const (
 	//          {integration_id, reason} for auth expired.
 	EventVCSDeliveryFailed = "vcs.delivery.failed"
 	EventVCSAuthExpired    = "vcs.auth.expired"
+
+	// Emitted when a review finding is dismissed by a user or automation.
+	// Payload: {finding_id, actor}
+	EventFindingDismissed = "finding.dismissed"
 )
 
 // Event types pushed from the TS bridge into Go orchestration.

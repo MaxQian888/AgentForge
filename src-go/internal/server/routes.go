@@ -1413,6 +1413,10 @@ func RegisterRoutes(
 	protected.POST("/reviews/:id/false-positive", reviewH.MarkFalsePositive)
 	v1.POST("/reviews/ci-result", reviewH.IngestCIResult, reviewTriggerMw)
 
+	// Findings Decision (Spec 2D)
+	findingsDecisionH := handler.NewFindingsDecisionHandler(nil, nil, nil, nil, nil)
+	protected.POST("/findings/:id/decision", findingsDecisionH.Decide)
+
 	// Cost & Stats
 	protected.GET("/stats/cost", costH.GetStats)
 	statsSvc := service.NewStatsService(taskRepo, agentRunRepo)
