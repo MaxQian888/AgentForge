@@ -30,7 +30,7 @@
 
 ## Task E1 — Migration: card_action_correlations table
 
-- [ ] Step 1.1 — write the up migration
+- [x] Step 1.1 — write the up migration
   - File: `src-go/migrations/067_card_action_correlations.up.sql`
   - Content (numbering follows the latest `066_*` migration in the repo):
     ```sql
@@ -52,14 +52,14 @@
     CREATE INDEX idx_cac_execution
       ON card_action_correlations (execution_id);
     ```
-- [ ] Step 1.2 — write the down migration
+- [x] Step 1.2 — write the down migration
   - File: `src-go/migrations/067_card_action_correlations.down.sql`
     ```sql
     DROP INDEX IF EXISTS idx_cac_execution;
     DROP INDEX IF EXISTS idx_cac_active;
     DROP TABLE IF EXISTS card_action_correlations;
     ```
-- [ ] Step 1.3 — verify the migration compiles via the embed test
+- [x] Step 1.3 — verify the migration compiles via the embed test
   - `rtk cargo test -p server -- migrations` (or whichever embed-style test the repo uses; the existing `migrations/embed_test.go` walks files via `embed.FS` and rejects non-monotonic prefixes).
   - Acceptance: green; new file is picked up; numeric sequence intact.
 
@@ -69,7 +69,7 @@
 
 > **Stop-and-check first.** Run `rtk grep "func.*Resume.*WaitEvent\|WaitEventHandler.*Resume\|ResumeWaitEvent" src-go/internal`. If any hit lives outside this plan's diff, the resumer is already done — scrub Steps 2.1–2.3 and only run Step 2.4 (tests).
 
-- [ ] Step 2.1 — write failing tests for the resumer entry
+- [x] Step 2.1 — write failing tests for the resumer entry
   - File: `src-go/internal/workflow/nodetypes/wait_event_resume_test.go`
     ```go
     package nodetypes
@@ -186,7 +186,7 @@
     ```
   - Run: `rtk cargo test -p workflow/nodetypes -run WaitEventResumer` — confirm both fail with "WaitEventResumer not defined" / "ErrWaitEventNotWaiting not defined".
 
-- [ ] Step 2.2 — implement the resumer
+- [x] Step 2.2 — implement the resumer
   - File: `src-go/internal/workflow/nodetypes/wait_event_resumer.go`
     ```go
     package nodetypes
@@ -331,7 +331,7 @@
     ```
   - Run the failing tests again: `rtk cargo test -p workflow/nodetypes -run WaitEventResumer` — expect green.
 
-- [ ] Step 2.3 — wire the resumer into DAGWorkflowService
+- [x] Step 2.3 — wire the resumer into DAGWorkflowService
   - File: `src-go/internal/service/dag_workflow_service.go` — add an adapter near the top of the file (after `PluginRunResumer` interface):
     ```go
     // WaitEventDataStoreAdapter merges a resume payload into the parent
@@ -378,7 +378,7 @@
     ```
   - Note: `*DAGWorkflowService` already exposes `AdvanceExecution(ctx, id)` matching `WaitEventAdvancer`. `nodeRepo` already satisfies both `ListNodeExecutions` and `UpdateNodeExecution`. `execRepo` satisfies `GetExecution`.
 
-- [ ] Step 2.4 — add a regression test that the existing wait_event handler and the new resumer agree on `model.NodeExecWaiting`
+- [x] Step 2.4 — add a regression test that the existing wait_event handler and the new resumer agree on `model.NodeExecWaiting`
   - File: `src-go/internal/workflow/nodetypes/wait_event_test.go` — append:
     ```go
     func TestWaitEventResumer_StatusConstantStability(t *testing.T) {
@@ -396,7 +396,7 @@
 
 ## Task E3 — `card_action_correlations` repository, service, and HTTP handler
 
-- [ ] Step 3.1 — write failing repo tests
+- [x] Step 3.1 — write failing repo tests
   - File: `src-go/internal/imcards/correlations_repo_test.go`
     ```go
     package imcards
@@ -452,7 +452,7 @@
     ```
   - Run: `rtk cargo test -p imcards` — fails (package missing).
 
-- [ ] Step 3.2 — implement the repo
+- [x] Step 3.2 — implement the repo
   - File: `src-go/internal/imcards/correlations_repo.go`
     ```go
     package imcards
@@ -577,7 +577,7 @@
     ```
   - Run repo tests — green.
 
-- [ ] Step 3.3 — write failing router tests
+- [x] Step 3.3 — write failing router tests
   - File: `src-go/internal/imcards/router_test.go`
     ```go
     package imcards
@@ -683,7 +683,7 @@
     ```
   - Run: fails (no Router yet).
 
-- [ ] Step 3.4 — implement the router
+- [x] Step 3.4 — implement the router
   - File: `src-go/internal/imcards/router.go`
     ```go
     package imcards
@@ -882,7 +882,7 @@
     ```
   - Run: `rtk cargo test -p imcards` — green.
 
-- [ ] Step 3.5 — HTTP handler `POST /api/v1/im/card-actions`
+- [x] Step 3.5 — HTTP handler `POST /api/v1/im/card-actions`
   - File: `src-go/internal/handler/im_card_actions_handler.go`
     ```go
     package handler
@@ -977,7 +977,7 @@
 
 ## Task E4 — `http_call` node type (handler + applier)
 
-- [ ] Step 4.1 — write failing handler test
+- [x] Step 4.1 — write failing handler test
   - File: `src-go/internal/workflow/nodetypes/http_call_test.go`
     ```go
     package nodetypes
@@ -1040,7 +1040,7 @@
     ```
   - Run: fails — `HTTPCallHandler` undefined.
 
-- [ ] Step 4.2 — implement handler + payload + new effect kind
+- [x] Step 4.2 — implement handler + payload + new effect kind
   - File: `src-go/internal/workflow/nodetypes/effects.go` — append the new effect kind:
     ```go
     const (
@@ -1199,7 +1199,7 @@
     ```
   - Run handler tests — green.
 
-- [ ] Step 4.3 — register `http_call` (and prepare for `im_send`) in bootstrap
+- [x] Step 4.3 — register `http_call` (and prepare for `im_send`) in bootstrap
   - File: `src-go/internal/workflow/nodetypes/bootstrap.go` — extend the `entries` slice:
     ```go
     {"http_call", HTTPCallHandler{}},
@@ -1207,7 +1207,7 @@
     ```
   - This must come AFTER E5 lands `IMSendHandler`. If executing tasks strictly in order, leave only the `http_call` line for now and add `im_send` in E5 Step 5.2.
 
-- [ ] Step 4.4 — write failing applier test
+- [x] Step 4.4 — write failing applier test
   - File: `src-go/internal/workflow/nodetypes/applier_http_call_test.go`
     ```go
     package nodetypes
@@ -1335,7 +1335,7 @@
     ```
   - Run: fails (applier method + interface fields don't exist).
 
-- [ ] Step 4.5 — extend the applier
+- [x] Step 4.5 — extend the applier
   - File: `src-go/internal/workflow/nodetypes/applier.go`
   - Add the two new applier-side seams to the `EffectApplier` struct:
     ```go
@@ -1585,7 +1585,7 @@
 
 ## Task E5 — `im_send` node type (handler + applier)
 
-- [ ] Step 5.1 — write failing handler test
+- [x] Step 5.1 — write failing handler test
   - File: `src-go/internal/workflow/nodetypes/im_send_test.go`
     ```go
     package nodetypes
@@ -1634,7 +1634,7 @@
     ```
   - Run: fails.
 
-- [ ] Step 5.2 — implement handler + register in bootstrap
+- [x] Step 5.2 — implement handler + register in bootstrap
   - File: `src-go/internal/workflow/nodetypes/im_send.go`
     ```go
     package nodetypes
@@ -1719,7 +1719,7 @@
     ```
   - File: `src-go/internal/workflow/nodetypes/bootstrap.go` — confirm or add the `{"im_send", IMSendHandler{}}` entry; remove the placeholder if E4 Step 4.3 left one out.
 
-- [ ] Step 5.3 — write failing applier test
+- [x] Step 5.3 — write failing applier test
   - File: `src-go/internal/workflow/nodetypes/applier_im_send_test.go`
     ```go
     package nodetypes
@@ -1828,7 +1828,7 @@
     ```
   - Run: fails.
 
-- [ ] Step 5.4 — implement applier
+- [x] Step 5.4 — implement applier
   - File: `src-go/internal/workflow/nodetypes/applier_im_send.go`
     ```go
     package nodetypes
@@ -1975,7 +1975,7 @@
     ```
     Note: 1D may also touch this column (it reads `im_dispatched`); coordinate so the migration lands exactly once. If 1D has already added it, drop this migration file from this plan.
 
-- [ ] Step 5.5 — implement `ExecutionMetaWriter` adapter
+- [x] Step 5.5 — implement `ExecutionMetaWriter` adapter
   - File: `src-go/internal/repository/workflow_execution_meta_repo.go`
     ```go
     package repository
@@ -2018,7 +2018,7 @@
 
 > **Where to insert.** 1D will have removed `renderInteractiveCard` / `renderStructuredMessage` from `live.go`. The inbound parsing helpers (`normalizeCardActionRequest` etc., currently lines ~835-1010 of `live.go`) stay. We attach the new forwarder in the existing `handleCardAction` callback path.
 
-- [ ] Step 6.1 — write failing TS test
+- [x] Step 6.1 — write failing TS test
   - File: `src-im-bridge/platform/feishu/card_action_forward.test.ts`
     ```ts
     import { describe, expect, it, mock } from "bun:test";
@@ -2061,7 +2061,7 @@
     ```
   - Run: `rtk bun test src-im-bridge/platform/feishu/card_action_forward.test.ts` — fails.
 
-- [ ] Step 6.2 — implement the forwarder helper
+- [x] Step 6.2 — implement the forwarder helper
   - File: `src-im-bridge/platform/feishu/card_action_forward.ts`
     ```ts
     /**
@@ -2152,7 +2152,7 @@
     ```
   - Run TS test — green.
 
-- [ ] Step 6.3 — wire into `handleCardAction`
+- [x] Step 6.3 — wire into `handleCardAction`
   - File: `src-im-bridge/platform/feishu/live.go` — locate `handleCardAction` (~line 835). After `normalizeCardActionRequest` succeeds and BEFORE the existing `l.actionHandler.HandleAction(...)` call, insert a token-bearing branch:
     ```go
     // Workflow-minted buttons carry a correlation_token in act.Value. When
@@ -2186,7 +2186,7 @@
 
 ## Task E7 — Frontend: `http_call` + `im_send` config panels + palette entries
 
-- [ ] Step 7.1 — write failing config-panel test for http_call
+- [x] Step 7.1 — write failing config-panel test for http_call
   - File: `components/workflow-editor/config-panel/node-configs/http-call-config.test.tsx`
     ```tsx
     import { render, screen, fireEvent } from "@testing-library/react";
@@ -2214,7 +2214,7 @@
     ```
   - Run: `rtk vitest run components/workflow-editor/config-panel/node-configs/http-call-config.test.tsx` — fails.
 
-- [ ] Step 7.2 — implement http-call-config.tsx
+- [x] Step 7.2 — implement http-call-config.tsx
   - File: `components/workflow-editor/config-panel/node-configs/http-call-config.tsx`
     ```tsx
     "use client";
@@ -2366,7 +2366,7 @@
     ```
   - Run http-call-config tests — green.
 
-- [ ] Step 7.3 — write failing config-panel test for im_send
+- [x] Step 7.3 — write failing config-panel test for im_send
   - File: `components/workflow-editor/config-panel/node-configs/im-send-config.test.tsx`
     ```tsx
     import { render, screen, fireEvent } from "@testing-library/react";
@@ -2398,7 +2398,7 @@
     ```
   - Run: fails.
 
-- [ ] Step 7.4 — implement im-send-config.tsx
+- [x] Step 7.4 — implement im-send-config.tsx
   - File: `components/workflow-editor/config-panel/node-configs/im-send-config.tsx`
     ```tsx
     "use client";
@@ -2618,7 +2618,7 @@
     ```
   - Run im-send-config tests — green.
 
-- [ ] Step 7.5 — register node icons + types in `nodes/node-types.tsx`
+- [x] Step 7.5 — register node icons + types in `nodes/node-types.tsx`
   - Add icons + node types:
     ```tsx
     import { Globe, MessageSquare } from "lucide-react"; // add to existing import block
@@ -2646,7 +2646,7 @@
     ```
   - Add a matching style entry in `nodes/node-styles.ts`. Mirror the `notification` entry's shape; recommended colors: `#0ea5e9` for http_call, `#14b8a6` for im_send.
 
-- [ ] Step 7.6 — register palette entries in `nodes/node-registry.ts`
+- [x] Step 7.6 — register palette entries in `nodes/node-registry.ts`
   - In the `// ── Action ──` section append:
     ```ts
     {
@@ -2671,7 +2671,7 @@
     },
     ```
   - And import `Globe, MessageSquare` at the top.
-- [ ] Step 7.7 — wire custom override in `node-config-panel.tsx`
+- [x] Step 7.7 — wire custom override in `node-config-panel.tsx`
   - Extend the `hasCustomOverride` check + the conditional render:
     ```tsx
     const hasCustomOverride =
@@ -2701,7 +2701,7 @@
 
 ## Task E8 — Integration test + E2E smoke fixture (Trace B)
 
-- [ ] Step 8.1 — Go integration: end-to-end Trace B with real DB and stub IM Bridge
+- [x] Step 8.1 — Go integration: end-to-end Trace B with real DB and stub IM Bridge
   - File: `src-go/internal/service/dag_workflow_card_action_e2e_test.go`
     ```go
     package service
@@ -2795,7 +2795,7 @@
     ```
   - The `buildTraceBEnv(...)` helper assembles registry + repos + applier + DAG svc + router pointing at the test DB. Mirror the wiring pattern already used in `dag_workflow_service_test.go`.
 
-- [ ] Step 8.2 — IM Bridge smoke fixture
+- [x] Step 8.2 — IM Bridge smoke fixture
   - File: `src-im-bridge/scripts/smoke/fixtures/feishu-workflow-button-resume.json`
     ```json
     {
