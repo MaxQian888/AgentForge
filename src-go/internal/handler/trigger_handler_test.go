@@ -9,6 +9,7 @@ import (
 	"net/http/httptest"
 	"testing"
 
+	"github.com/google/uuid"
 	"github.com/labstack/echo/v4"
 
 	"github.com/react-go-quick-starter/server/internal/handler"
@@ -20,11 +21,31 @@ type mockTriggerRouter struct {
 	lastEvent trigger.Event
 	started   int
 	err       error
+	outcomes  []trigger.Outcome
 }
 
 func (m *mockTriggerRouter) Route(_ context.Context, ev trigger.Event) (int, error) {
 	m.lastEvent = ev
 	return m.started, m.err
+}
+
+func (m *mockTriggerRouter) RouteWithOutcomes(_ context.Context, ev trigger.Event) ([]trigger.Outcome, error) {
+	m.lastEvent = ev
+	if m.outcomes != nil {
+		return m.outcomes, m.err
+	}
+	// Default: synthesize one Started outcome per recorded `started` count.
+	out := make([]trigger.Outcome, 0, m.started)
+	for i := 0; i < m.started; i++ {
+		runID := uuid.New()
+		out = append(out, trigger.Outcome{
+			TriggerID:  uuid.New(),
+			TargetKind: model.TriggerTargetDAG,
+			Status:     trigger.OutcomeStarted,
+			RunID:      &runID,
+		})
+	}
+	return out, m.err
 }
 
 func setupTriggerHandler(router *mockTriggerRouter) *echo.Echo {

@@ -55,7 +55,7 @@ func TestWorkflowTriggerRepository_Integration_UpsertIdempotent(t *testing.T) {
 	repo := repository.NewWorkflowTriggerRepository(db)
 
 	trig := &model.WorkflowTrigger{
-		WorkflowID: workflowID,
+		WorkflowID: &workflowID,
 		ProjectID:  projectID,
 		Source:     model.TriggerSourceIM,
 		Config:     []byte(`{"channel":"#general"}`),
@@ -74,7 +74,7 @@ func TestWorkflowTriggerRepository_Integration_UpsertIdempotent(t *testing.T) {
 	// Second upsert — same config, different enabled value → should UPDATE and
 	// return the same row ID.
 	trig2 := &model.WorkflowTrigger{
-		WorkflowID: workflowID,
+		WorkflowID: &workflowID,
 		ProjectID:  projectID,
 		Source:     model.TriggerSourceIM,
 		Config:     []byte(`{"channel":"#general"}`),
@@ -138,14 +138,14 @@ func TestWorkflowTriggerRepository_Integration_UpsertDifferentConfigCreatesNewRo
 	repo := repository.NewWorkflowTriggerRepository(db)
 
 	t1 := &model.WorkflowTrigger{
-		WorkflowID: workflowID,
+		WorkflowID: &workflowID,
 		ProjectID:  projectID,
 		Source:     model.TriggerSourceIM,
 		Config:     []byte(`{"channel":"#alpha"}`),
 		Enabled:    true,
 	}
 	t2 := &model.WorkflowTrigger{
-		WorkflowID: workflowID,
+		WorkflowID: &workflowID,
 		ProjectID:  projectID,
 		Source:     model.TriggerSourceIM,
 		Config:     []byte(`{"channel":"#beta"}`),
@@ -209,14 +209,14 @@ func TestWorkflowTriggerRepository_Integration_ListEnabledBySource_FiltersDisabl
 	repo := repository.NewWorkflowTriggerRepository(db)
 
 	enabledTrig := &model.WorkflowTrigger{
-		WorkflowID: workflowID,
+		WorkflowID: &workflowID,
 		ProjectID:  projectID,
 		Source:     model.TriggerSourceSchedule,
 		Config:     []byte(`{"cron":"0 * * * *"}`),
 		Enabled:    true,
 	}
 	disabledTrig := &model.WorkflowTrigger{
-		WorkflowID: workflowID,
+		WorkflowID: &workflowID,
 		ProjectID:  projectID,
 		Source:     model.TriggerSourceSchedule,
 		Config:     []byte(`{"cron":"30 * * * *"}`),
@@ -292,7 +292,7 @@ func TestWorkflowTriggerRepository_Integration_SetEnabledAndDelete(t *testing.T)
 	repo := repository.NewWorkflowTriggerRepository(db)
 
 	trig := &model.WorkflowTrigger{
-		WorkflowID: workflowID,
+		WorkflowID: &workflowID,
 		ProjectID:  projectID,
 		Source:     model.TriggerSourceIM,
 		Config:     []byte(`{"channel":"#ops"}`),
@@ -343,6 +343,117 @@ func TestWorkflowTriggerRepository_Integration_SetEnabledAndDelete(t *testing.T)
 	}
 }
 
+// TestWorkflowTriggerRepository_Integration_TargetKindDefaultsAndDistinct verifies
+// that the target_kind column defaults to "dag" for legacy Upsert callers and that
+// two triggers differing only in target_kind coexist as separate rows.
+func TestWorkflowTriggerRepository_Integration_TargetKindDefaultsAndDistinct(t *testing.T) {
+	url := os.Getenv("TEST_POSTGRES_URL")
+	if url == "" {
+		t.Skip("TEST_POSTGRES_URL not set — skipping integration test")
+	}
+
+	db, err := database.NewPostgres(url)
+	if err != nil {
+		t.Fatalf("NewPostgres() error: %v", err)
+	}
+	defer func() { _ = database.ClosePostgres(db) }()
+
+	ctx := context.Background()
+	projectID := uuid.New()
+	workflowID := uuid.New()
+
+	if err := db.WithContext(ctx).Exec(
+		"INSERT INTO projects (id, name, slug) VALUES (?, ?, ?)",
+		projectID, "trig-proj6-"+projectID.String(), "trig-slug6-"+projectID.String(),
+	).Error; err != nil {
+		t.Fatalf("insert project: %v", err)
+	}
+	if err := db.WithContext(ctx).Exec(
+		"INSERT INTO workflow_definitions (id, project_id) VALUES (?, ?)",
+		workflowID, projectID,
+	).Error; err != nil {
+		t.Fatalf("insert workflow_definition: %v", err)
+	}
+
+	t.Cleanup(func() {
+		_ = db.WithContext(ctx).Exec("DELETE FROM workflow_triggers WHERE workflow_id = ?", workflowID).Error
+		_ = db.WithContext(ctx).Exec("DELETE FROM workflow_definitions WHERE id = ?", workflowID).Error
+		_ = db.WithContext(ctx).Exec("DELETE FROM projects WHERE id = ?", projectID).Error
+	})
+
+	repo := repository.NewWorkflowTriggerRepository(db)
+
+	// Legacy-shaped insert (TargetKind left empty) should default to "dag".
+	legacy := &model.WorkflowTrigger{
+		WorkflowID: &workflowID,
+		ProjectID:  projectID,
+		Source:     model.TriggerSourceIM,
+		Config:     []byte(`{"command":"/review"}`),
+		Enabled:    true,
+	}
+	if err := repo.Upsert(ctx, legacy); err != nil {
+		t.Fatalf("Upsert legacy: %v", err)
+	}
+
+	pluginTrig := &model.WorkflowTrigger{
+		WorkflowID: &workflowID,
+		ProjectID:  projectID,
+		Source:     model.TriggerSourceIM,
+		TargetKind: model.TriggerTargetPlugin,
+		Config:     []byte(`{"command":"/review"}`), // same config, different engine
+		Enabled:    true,
+	}
+	if err := repo.Upsert(ctx, pluginTrig); err != nil {
+		t.Fatalf("Upsert plugin: %v", err)
+	}
+
+	if legacy.ID == pluginTrig.ID {
+		t.Fatalf("expected distinct IDs for DAG vs plugin targets")
+	}
+
+	rows, err := repo.ListByWorkflow(ctx, workflowID)
+	if err != nil {
+		t.Fatalf("ListByWorkflow error: %v", err)
+	}
+	if len(rows) != 2 {
+		t.Fatalf("expected 2 rows (one per target_kind), got %d", len(rows))
+	}
+
+	var sawDAG, sawPlugin bool
+	for _, row := range rows {
+		switch row.TargetKind {
+		case model.TriggerTargetDAG:
+			sawDAG = true
+		case model.TriggerTargetPlugin:
+			sawPlugin = true
+		}
+	}
+	if !sawDAG || !sawPlugin {
+		t.Errorf("expected both dag and plugin rows, sawDAG=%v sawPlugin=%v", sawDAG, sawPlugin)
+	}
+
+	// ListEnabledBySourceAndKind must scope to the requested kind.
+	pluginOnly, err := repo.ListEnabledBySourceAndKind(ctx, model.TriggerSourceIM, model.TriggerTargetPlugin)
+	if err != nil {
+		t.Fatalf("ListEnabledBySourceAndKind error: %v", err)
+	}
+	found := false
+	for _, row := range pluginOnly {
+		if row.ID == pluginTrig.ID {
+			found = true
+			if row.TargetKind != model.TriggerTargetPlugin {
+				t.Errorf("plugin row returned with TargetKind=%q", row.TargetKind)
+			}
+		}
+		if row.ID == legacy.ID {
+			t.Errorf("dag row leaked into plugin scoped list")
+		}
+	}
+	if !found {
+		t.Errorf("plugin row missing from ListEnabledBySourceAndKind result")
+	}
+}
+
 func TestWorkflowTriggerRepository_Integration_UpsertCanonicalizesJSONOrder(t *testing.T) {
 	url := os.Getenv("TEST_POSTGRES_URL")
 	if url == "" {
@@ -381,7 +492,7 @@ func TestWorkflowTriggerRepository_Integration_UpsertCanonicalizesJSONOrder(t *t
 	repo := repository.NewWorkflowTriggerRepository(db)
 
 	t1 := &model.WorkflowTrigger{
-		WorkflowID:    workflowID,
+		WorkflowID:    &workflowID,
 		ProjectID:     projectID,
 		Source:        model.TriggerSourceIM,
 		Config:        []byte(`{"b":1,"a":2}`),
@@ -393,7 +504,7 @@ func TestWorkflowTriggerRepository_Integration_UpsertCanonicalizesJSONOrder(t *t
 	}
 
 	t2 := &model.WorkflowTrigger{
-		WorkflowID:    workflowID,
+		WorkflowID:    &workflowID,
 		ProjectID:     projectID,
 		Source:        model.TriggerSourceIM,
 		Config:        []byte(`{"a":2,"b":1}`), // same logical JSON, different byte order

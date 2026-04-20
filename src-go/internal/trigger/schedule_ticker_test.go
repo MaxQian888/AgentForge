@@ -36,11 +36,13 @@ func (f *fakeScheduleDispatcher) Route(_ context.Context, ev trigger.Event) (int
 
 func scheduleTrigger(cronExpr string) *model.WorkflowTrigger {
 	cfg, _ := json.Marshal(map[string]any{"cron": cronExpr})
+	wfID := uuid.New()
 	return &model.WorkflowTrigger{
 		ID:         uuid.New(),
-		WorkflowID: uuid.New(),
+		WorkflowID: &wfID,
 		ProjectID:  uuid.New(),
 		Source:     model.TriggerSourceSchedule,
+		TargetKind: model.TriggerTargetDAG,
 		Config:     cfg,
 		Enabled:    true,
 	}
@@ -109,9 +111,10 @@ func TestScheduleTicker_InvalidCronSkipped(t *testing.T) {
 
 func TestScheduleTicker_EmptyCronSkipped(t *testing.T) {
 	cfg, _ := json.Marshal(map[string]any{}) // no cron key
+	wfID := uuid.New()
 	tr := &model.WorkflowTrigger{
-		ID: uuid.New(), WorkflowID: uuid.New(), ProjectID: uuid.New(),
-		Source: model.TriggerSourceSchedule, Config: cfg, Enabled: true,
+		ID: uuid.New(), WorkflowID: &wfID, ProjectID: uuid.New(),
+		Source: model.TriggerSourceSchedule, TargetKind: model.TriggerTargetDAG, Config: cfg, Enabled: true,
 	}
 	clock := &fakeClock{t: time.Date(2026, 4, 19, 14, 30, 0, 0, time.UTC)}
 	lister := &fakeScheduleLister{triggers: []*model.WorkflowTrigger{tr}}

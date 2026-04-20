@@ -3,6 +3,7 @@ package trigger
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"regexp"
 	"strings"
@@ -10,16 +11,9 @@ import (
 
 	"github.com/google/uuid"
 
+	"github.com/react-go-quick-starter/server/internal/employee"
 	"github.com/react-go-quick-starter/server/internal/model"
-	"github.com/react-go-quick-starter/server/internal/service"
 )
-
-// Starter is the minimum dependency Router needs from the workflow engine.
-// In production satisfied by *service.DAGWorkflowService (Task 10 made its
-// StartExecution take a StartOptions arg).
-type Starter interface {
-	StartExecution(ctx context.Context, workflowID uuid.UUID, taskID *uuid.UUID, opts service.StartOptions) (*model.WorkflowExecution, error)
-}
 
 // ListRepository is the read side of workflow_triggers that Router needs.
 type ListRepository interface {
@@ -34,6 +28,45 @@ type Event struct {
 	Data map[string]any
 }
 
+// OutcomeStatus is the normalized status of a dispatch attempt, shared across
+// trigger sources so IM, schedule, and future sources emit the same shape.
+type OutcomeStatus string
+
+const (
+	// OutcomeStarted: the adapter started a workflow run successfully.
+	OutcomeStarted OutcomeStatus = "started"
+	// OutcomeSkippedIdempotent: the idempotency key collided inside the
+	// dedupe window; no run was started.
+	OutcomeSkippedIdempotent OutcomeStatus = "skipped_idempotent"
+	// OutcomeFailedUnknownTarget: the trigger declared a target kind for
+	// which no adapter is registered.
+	OutcomeFailedUnknownTarget OutcomeStatus = "failed_unknown_target"
+	// OutcomeFailedMapping: input_mapping templating failed to render.
+	OutcomeFailedMapping OutcomeStatus = "failed_mapping"
+	// OutcomeFailedEngineStart: the engine adapter returned an error when
+	// attempting to start the run.
+	OutcomeFailedEngineStart OutcomeStatus = "failed_engine_start"
+	// OutcomeFailedIdempotencyStore: the idempotency store returned an
+	// error; the trigger was skipped defensively.
+	OutcomeFailedIdempotencyStore OutcomeStatus = "failed_idempotency_store"
+	// OutcomeFailedActingEmployee: the trigger declared an acting_employee_id
+	// that failed dispatch-time validation (e.g. archived or deleted).
+	// The idempotency key is NOT consumed so re-dispatch is possible once the
+	// author re-binds the trigger.
+	OutcomeFailedActingEmployee OutcomeStatus = "failed_acting_employee"
+)
+
+// Outcome is the structured result of dispatching a single matched trigger.
+// The key invariant: every matched trigger produces exactly one Outcome,
+// regardless of success or engine kind.
+type Outcome struct {
+	TriggerID  uuid.UUID               `json:"triggerId"`
+	TargetKind model.TriggerTargetKind `json:"targetKind"`
+	Status     OutcomeStatus           `json:"status"`
+	RunID      *uuid.UUID              `json:"runId,omitempty"`
+	Reason     string                  `json:"reason,omitempty"`
+}
+
 // imTriggerConfig is the typed shape of a trigger's Config JSON for IM source.
 type imTriggerConfig struct {
 	Platform      string   `json:"platform"`
@@ -42,79 +75,198 @@ type imTriggerConfig struct {
 	ChatAllowlist []string `json:"chat_allowlist"`
 }
 
+// AttributionValidator is the dispatch-time employee guard the Router consults
+// when a trigger row carries a non-nil acting_employee_id. Satisfied in
+// production by *employee.AttributionGuard; tests may substitute a fake.
+// Left unset when attribution validation is disabled (e.g. unit tests that
+// predate the guard).
+type AttributionValidator interface {
+	ValidateNotArchived(ctx context.Context, employeeID uuid.UUID) error
+}
+
 // Router dispatches an incoming Event to every matching, enabled trigger
-// and starts one workflow execution per match.
+// and invokes the target engine registered for the trigger's TargetKind.
 type Router struct {
 	repo    ListRepository
-	starter Starter
+	engines map[model.TriggerTargetKind]TargetEngine
 	idem    IdempotencyStore
+	guard   AttributionValidator
 }
 
-// NewRouter returns a new Router backed by the provided dependencies.
-func NewRouter(repo ListRepository, starter Starter, idem IdempotencyStore) *Router {
-	return &Router{repo: repo, starter: starter, idem: idem}
+// NewRouter returns a new Router backed by the provided dependencies. Each
+// entry in engines keys its adapter by TargetEngine.Kind(); duplicate Kinds
+// produce a single adapter keyed by the last entry (caller responsibility).
+func NewRouter(repo ListRepository, idem IdempotencyStore, engines ...TargetEngine) *Router {
+	registry := make(map[model.TriggerTargetKind]TargetEngine, len(engines))
+	for _, eng := range engines {
+		if eng == nil {
+			continue
+		}
+		registry[eng.Kind()] = eng
+	}
+	return &Router{repo: repo, engines: registry, idem: idem}
 }
 
-// Route returns the number of executions started. Errors encountered while
-// starting individual executions are logged and counted but do NOT abort the
-// remaining dispatches — only the LAST error is returned so the caller sees
-// something went wrong at the batch level.
+// WithAttributionGuard attaches a dispatch-time guard that validates each
+// trigger's acting_employee_id (if any) before the engine adapter is called.
+// When the guard returns an error, the Router emits
+// OutcomeFailedActingEmployee and does NOT consume the idempotency key so the
+// operator can re-bind the trigger and retry.
+func (r *Router) WithAttributionGuard(guard AttributionValidator) *Router {
+	r.guard = guard
+	return r
+}
+
+// RegisterEngine attaches or replaces the adapter for a TargetEngine.Kind().
+// This is useful when an engine is constructed after the Router (e.g. the
+// plugin runtime becomes available later in wiring). Callers that supply all
+// engines at construction time do not need this.
+func (r *Router) RegisterEngine(engine TargetEngine) {
+	if engine == nil {
+		return
+	}
+	if r.engines == nil {
+		r.engines = make(map[model.TriggerTargetKind]TargetEngine)
+	}
+	r.engines[engine.Kind()] = engine
+}
+
+// Route returns the number of executions started and the last non-idempotent
+// error observed across the dispatched triggers. Use RouteWithOutcomes for
+// per-trigger structured outcomes.
 func (r *Router) Route(ctx context.Context, ev Event) (int, error) {
+	outcomes, err := r.RouteWithOutcomes(ctx, ev)
+	started := 0
+	for _, out := range outcomes {
+		if out.Status == OutcomeStarted {
+			started++
+		}
+	}
+	return started, err
+}
+
+// RouteWithOutcomes evaluates every enabled trigger for ev.Source against
+// the event's match filter, applies idempotency + input mapping, and
+// dispatches through the registered TargetEngine. Errors on individual
+// triggers do not abort the batch; each matched trigger yields exactly one
+// Outcome in the returned slice. The returned error is the last engine or
+// idempotency-store error encountered (nil on full success) — outcomes
+// remain the authoritative per-trigger record.
+func (r *Router) RouteWithOutcomes(ctx context.Context, ev Event) ([]Outcome, error) {
 	triggers, err := r.repo.ListEnabledBySource(ctx, ev.Source)
 	if err != nil {
-		return 0, err
+		return nil, err
 	}
 
 	var lastErr error
-	started := 0
+	outcomes := make([]Outcome, 0, len(triggers))
 
 	for _, trigger := range triggers {
-		// Step a: Match filter.
 		if !matchesTrigger(trigger, ev) {
 			continue
 		}
 
-		// Step b: Idempotency check.
+		targetKind := trigger.TargetKind
+		if targetKind == "" {
+			targetKind = model.TriggerTargetDAG
+		}
+
+		// Step 0: Attribution guard (pre-idempotency so the key is not consumed
+		// on guard failure; operators can re-bind and retry).
+		if trigger.ActingEmployeeID != nil && r.guard != nil {
+			if guardErr := r.guard.ValidateNotArchived(ctx, *trigger.ActingEmployeeID); guardErr != nil {
+				reason := guardErr.Error()
+				if errors.Is(guardErr, employee.ErrEmployeeArchived) {
+					reason = fmt.Sprintf("acting employee %s is archived", trigger.ActingEmployeeID)
+				} else if errors.Is(guardErr, employee.ErrEmployeeNotFound) {
+					reason = fmt.Sprintf("acting employee %s not found", trigger.ActingEmployeeID)
+				}
+				outcomes = append(outcomes, Outcome{
+					TriggerID:  trigger.ID,
+					TargetKind: targetKind,
+					Status:     OutcomeFailedActingEmployee,
+					Reason:     reason,
+				})
+				continue
+			}
+		}
+
+		// Step a: Idempotency check (engine-agnostic per Decision 4).
 		if trigger.IdempotencyKeyTemplate != "" && trigger.DedupeWindowSeconds > 0 {
 			rendered := renderTemplate(trigger.IdempotencyKeyTemplate, ev.Data)
 			var key string
-			if rendered == nil {
-				key = ""
-			} else {
+			if rendered != nil {
 				key = fmt.Sprint(rendered)
 			}
 			seen, idemErr := r.idem.SeenWithin(ctx, key, time.Duration(trigger.DedupeWindowSeconds)*time.Second)
 			if idemErr != nil {
 				lastErr = idemErr
+				outcomes = append(outcomes, Outcome{
+					TriggerID:  trigger.ID,
+					TargetKind: targetKind,
+					Status:     OutcomeFailedIdempotencyStore,
+					Reason:     idemErr.Error(),
+				})
 				continue
 			}
 			if seen {
+				outcomes = append(outcomes, Outcome{
+					TriggerID:  trigger.ID,
+					TargetKind: targetKind,
+					Status:     OutcomeSkippedIdempotent,
+					Reason:     "idempotency key already seen within dedupe window",
+				})
 				continue
 			}
 		}
 
-		// Step c: Input mapping.
+		// Step b: Input mapping.
 		seed, mappingErr := renderInputMapping(trigger.InputMapping, ev.Data)
 		if mappingErr != nil {
 			lastErr = mappingErr
+			outcomes = append(outcomes, Outcome{
+				TriggerID:  trigger.ID,
+				TargetKind: targetKind,
+				Status:     OutcomeFailedMapping,
+				Reason:     mappingErr.Error(),
+			})
 			continue
 		}
 
-		// Step d: Start execution.
-		triggerID := trigger.ID
-		_, execErr := r.starter.StartExecution(ctx, trigger.WorkflowID, nil, service.StartOptions{
-			Seed:        seed,
-			TriggeredBy: &triggerID,
-		})
+		// Step c: Engine lookup + dispatch.
+		engine, ok := r.engines[targetKind]
+		if !ok {
+			outcomes = append(outcomes, Outcome{
+				TriggerID:  trigger.ID,
+				TargetKind: targetKind,
+				Status:     OutcomeFailedUnknownTarget,
+				Reason:     fmt.Sprintf("no adapter registered for target_kind=%q", targetKind),
+			})
+			continue
+		}
+
+		run, execErr := engine.Start(ctx, trigger, seed)
 		if execErr != nil {
 			lastErr = execErr
+			outcomes = append(outcomes, Outcome{
+				TriggerID:  trigger.ID,
+				TargetKind: targetKind,
+				Status:     OutcomeFailedEngineStart,
+				Reason:     execErr.Error(),
+			})
 			continue
 		}
 
-		started++
+		runID := run.RunID
+		outcomes = append(outcomes, Outcome{
+			TriggerID:  trigger.ID,
+			TargetKind: run.Engine,
+			Status:     OutcomeStarted,
+			RunID:      &runID,
+		})
 	}
 
-	return started, lastErr
+	return outcomes, lastErr
 }
 
 // matchesTrigger returns true if ev satisfies the trigger's filter conditions.

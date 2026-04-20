@@ -3,10 +3,12 @@ package trigger_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/google/uuid"
 
+	"github.com/react-go-quick-starter/server/internal/employee"
 	"github.com/react-go-quick-starter/server/internal/model"
 	"github.com/react-go-quick-starter/server/internal/trigger"
 )
@@ -39,7 +41,7 @@ func (m *mockTriggerRepo) Upsert(_ context.Context, t *model.WorkflowTrigger) er
 func (m *mockTriggerRepo) ListByWorkflow(_ context.Context, workflowID uuid.UUID) ([]*model.WorkflowTrigger, error) {
 	var out []*model.WorkflowTrigger
 	for _, r := range m.rows {
-		if r.WorkflowID == workflowID {
+		if r.WorkflowID != nil && *r.WorkflowID == workflowID {
 			cp := *r
 			out = append(out, &cp)
 		}
@@ -101,7 +103,7 @@ func TestRegistrar_SyncFromDefinition_UpsertsIMAndScheduleTriggers(t *testing.T)
 		}),
 	}
 
-	if err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil); err != nil {
+	if _, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -135,16 +137,18 @@ func TestRegistrar_SyncFromDefinition_DeletesStaleTriggers(t *testing.T) {
 
 	// Pre-populate a stale row.
 	staleID := uuid.New()
+	wfRef := wfID
 	repo.rows[staleID] = &model.WorkflowTrigger{
 		ID:         staleID,
-		WorkflowID: wfID,
+		WorkflowID: &wfRef,
 		ProjectID:  projID,
 		Source:     model.TriggerSourceIM,
+		TargetKind: model.TriggerTargetDAG,
 		Config:     json.RawMessage(`{}`),
 	}
 
 	// Sync with empty node list — nothing to keep.
-	if err := reg.SyncFromDefinition(context.Background(), wfID, projID, nil, nil); err != nil {
+	if _, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nil, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -172,7 +176,7 @@ func TestRegistrar_SyncFromDefinition_SkipsManualAndMissingConfig(t *testing.T) 
 		{ID: "n2", Type: model.NodeTypeTrigger},
 	}
 
-	if err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil); err != nil {
+	if _, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -201,7 +205,7 @@ func TestRegistrar_SyncFromDefinition_ErrorsOnUnsupportedSource(t *testing.T) {
 		makeNode("n1", model.NodeTypeTrigger, map[string]any{"source": "webhook"}),
 	}
 
-	err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil)
+	_, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil)
 	if err == nil {
 		t.Fatal("expected an error for unsupported source, got nil")
 	}
@@ -228,7 +232,7 @@ func TestRegistrar_SyncFromDefinition_EnabledDefaultsTrue(t *testing.T) {
 		}),
 	}
 
-	if err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil); err != nil {
+	if _, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -264,7 +268,7 @@ func TestRegistrar_SyncFromDefinition_PropagatesInputMappingAndIdempotency(t *te
 		}),
 	}
 
-	if err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil); err != nil {
+	if _, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
 
@@ -289,5 +293,366 @@ func TestRegistrar_SyncFromDefinition_PropagatesInputMappingAndIdempotency(t *te
 		if im["task_id"] != "{{event.task_id}}" {
 			t.Errorf("InputMapping[task_id]: got %v, want {{event.task_id}}", im["task_id"])
 		}
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Target-kind aware tests (Task 3.4)
+// ---------------------------------------------------------------------------
+
+type stubDAGResolver struct {
+	defs map[uuid.UUID]*model.WorkflowDefinition
+}
+
+func (s *stubDAGResolver) GetByID(_ context.Context, id uuid.UUID) (*model.WorkflowDefinition, error) {
+	if def, ok := s.defs[id]; ok {
+		return def, nil
+	}
+	return nil, errors.New("not found")
+}
+
+type stubPluginResolver struct {
+	records map[string]*model.PluginRecord
+}
+
+func (s *stubPluginResolver) GetByID(_ context.Context, id string) (*model.PluginRecord, error) {
+	if rec, ok := s.records[id]; ok {
+		return rec, nil
+	}
+	return nil, errors.New("not found")
+}
+
+// Plugin-target trigger syncs with plugin_id and defaults Enabled=true when
+// no resolver is wired.
+func TestRegistrar_SyncFromDefinition_PluginTargetNoResolver(t *testing.T) {
+	repo := newMockTriggerRepo()
+	reg := trigger.NewRegistrar(repo)
+
+	wfID := uuid.New()
+	projID := uuid.New()
+
+	nodes := []model.WorkflowNode{
+		makeNode("n1", model.NodeTypeTrigger, map[string]any{
+			"source":      "im",
+			"target_kind": "plugin",
+			"plugin_id":   "workflow-plugin-x",
+			"im":          map[string]any{"command": "/review"},
+		}),
+	}
+
+	outcomes, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outcomes) != 1 {
+		t.Fatalf("expected 1 outcome, got %d", len(outcomes))
+	}
+	if outcomes[0].TargetKind != model.TriggerTargetPlugin {
+		t.Errorf("expected target_kind=plugin, got %s", outcomes[0].TargetKind)
+	}
+	if !outcomes[0].Enabled {
+		t.Errorf("expected enabled=true when no resolver validates")
+	}
+	for _, row := range repo.rows {
+		if row.PluginID != "workflow-plugin-x" {
+			t.Errorf("plugin_id not propagated: %q", row.PluginID)
+		}
+		if row.WorkflowID != nil {
+			t.Errorf("plugin-target row should not carry workflow_id")
+		}
+	}
+}
+
+// Plugin-target trigger missing plugin_id is persisted with a disabled reason.
+func TestRegistrar_SyncFromDefinition_PluginTargetMissingPluginID(t *testing.T) {
+	repo := newMockTriggerRepo()
+	reg := trigger.NewRegistrar(repo)
+
+	wfID := uuid.New()
+	projID := uuid.New()
+
+	nodes := []model.WorkflowNode{
+		makeNode("n1", model.NodeTypeTrigger, map[string]any{
+			"source":      "im",
+			"target_kind": "plugin",
+			// plugin_id deliberately omitted
+			"im": map[string]any{"command": "/review"},
+		}),
+	}
+
+	outcomes, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outcomes) != 1 || outcomes[0].Enabled {
+		t.Fatalf("expected 1 disabled outcome, got %+v", outcomes)
+	}
+	if outcomes[0].DisabledReason != trigger.DisabledReasonPluginMissingID {
+		t.Errorf("expected disabled_reason=%s, got %s",
+			trigger.DisabledReasonPluginMissingID, outcomes[0].DisabledReason)
+	}
+}
+
+// Plugin-target trigger with a disabled plugin is persisted disabled.
+func TestRegistrar_SyncFromDefinition_PluginTargetDisabledPlugin(t *testing.T) {
+	repo := newMockTriggerRepo()
+	resolver := &stubPluginResolver{records: map[string]*model.PluginRecord{
+		"plug-a": {
+			PluginManifest: model.PluginManifest{
+				Kind:     model.PluginKindWorkflow,
+				Metadata: model.PluginMetadata{ID: "plug-a"},
+				Spec:     model.PluginSpec{Workflow: &model.WorkflowPluginSpec{}},
+			},
+			LifecycleState: model.PluginStateDisabled,
+		},
+	}}
+	reg := trigger.NewRegistrar(repo).WithPluginResolver(resolver)
+
+	wfID := uuid.New()
+	projID := uuid.New()
+
+	nodes := []model.WorkflowNode{
+		makeNode("n1", model.NodeTypeTrigger, map[string]any{
+			"source":      "im",
+			"target_kind": "plugin",
+			"plugin_id":   "plug-a",
+			"im":          map[string]any{"command": "/review"},
+		}),
+	}
+
+	outcomes, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outcomes) != 1 || outcomes[0].Enabled {
+		t.Fatalf("expected 1 disabled outcome, got %+v", outcomes)
+	}
+	if outcomes[0].DisabledReason != trigger.DisabledReasonPluginDisabled {
+		t.Errorf("expected disabled_reason=%s, got %s",
+			trigger.DisabledReasonPluginDisabled, outcomes[0].DisabledReason)
+	}
+}
+
+// DAG-target trigger referencing a missing workflow is persisted disabled.
+func TestRegistrar_SyncFromDefinition_DAGTargetMissingWorkflow(t *testing.T) {
+	repo := newMockTriggerRepo()
+	resolver := &stubDAGResolver{defs: map[uuid.UUID]*model.WorkflowDefinition{}}
+	reg := trigger.NewRegistrar(repo).WithDAGResolver(resolver)
+
+	wfID := uuid.New() // not registered in resolver
+	projID := uuid.New()
+
+	nodes := []model.WorkflowNode{
+		makeNode("n1", model.NodeTypeTrigger, map[string]any{
+			"source": "im",
+			"im":     map[string]any{"command": "/review"},
+		}),
+	}
+
+	outcomes, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outcomes) != 1 || outcomes[0].Enabled {
+		t.Fatalf("expected 1 disabled outcome, got %+v", outcomes)
+	}
+	if outcomes[0].DisabledReason != trigger.DisabledReasonDAGWorkflowMissing {
+		t.Errorf("expected disabled_reason=%s, got %s",
+			trigger.DisabledReasonDAGWorkflowMissing, outcomes[0].DisabledReason)
+	}
+}
+
+// ---------------------------------------------------------------------------
+// Acting-employee author-time validation tests (Section 4.3)
+// ---------------------------------------------------------------------------
+
+type stubActingEmployeeGuard struct {
+	// key: employeeID. Rows belong to expectedProject; everything else is
+	// treated as cross-project. A zero-value expectedProject disables
+	// cross-project checks and only employee lookup succeeds/fails.
+	known          map[uuid.UUID]uuid.UUID // employeeID → projectID
+	archivedSet    map[uuid.UUID]struct{}
+}
+
+func (s *stubActingEmployeeGuard) ValidateForProject(_ context.Context, employeeID uuid.UUID, projectID uuid.UUID) error {
+	proj, ok := s.known[employeeID]
+	if !ok {
+		return employee.ErrEmployeeNotFound
+	}
+	if _, archived := s.archivedSet[employeeID]; archived {
+		return employee.ErrEmployeeArchived
+	}
+	if proj != projectID {
+		return employee.ErrEmployeeCrossProject
+	}
+	return nil
+}
+
+// Cross-project employee reference: registrar disables the row with the
+// acting_employee_cross_project reason.
+func TestRegistrar_SyncFromDefinition_CrossProjectEmployeeDisables(t *testing.T) {
+	repo := newMockTriggerRepo()
+
+	empID := uuid.New()
+	empProject := uuid.New()
+	workflowProject := uuid.New()
+
+	guard := &stubActingEmployeeGuard{
+		known: map[uuid.UUID]uuid.UUID{empID: empProject},
+	}
+	reg := trigger.NewRegistrar(repo).WithAttributionGuard(guard)
+
+	wfID := uuid.New()
+	nodes := []model.WorkflowNode{
+		makeNode("n1", model.NodeTypeTrigger, map[string]any{
+			"source":             "im",
+			"im":                 map[string]any{"command": "/review"},
+			"acting_employee_id": empID.String(),
+		}),
+	}
+
+	outcomes, err := reg.SyncFromDefinition(context.Background(), wfID, workflowProject, nodes, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outcomes) != 1 {
+		t.Fatalf("expected 1 outcome, got %d", len(outcomes))
+	}
+	if outcomes[0].Enabled {
+		t.Errorf("expected row disabled for cross-project employee, got enabled")
+	}
+	if outcomes[0].DisabledReason != trigger.DisabledReasonActingEmployeeCross {
+		t.Errorf("expected reason %q, got %q",
+			trigger.DisabledReasonActingEmployeeCross, outcomes[0].DisabledReason)
+	}
+}
+
+// Unknown employee reference: registrar disables the row with the
+// acting_employee_not_found reason.
+func TestRegistrar_SyncFromDefinition_UnknownEmployeeDisables(t *testing.T) {
+	repo := newMockTriggerRepo()
+
+	guard := &stubActingEmployeeGuard{
+		known: map[uuid.UUID]uuid.UUID{}, // empty: every lookup returns not-found
+	}
+	reg := trigger.NewRegistrar(repo).WithAttributionGuard(guard)
+
+	wfID := uuid.New()
+	projID := uuid.New()
+	nodes := []model.WorkflowNode{
+		makeNode("n1", model.NodeTypeTrigger, map[string]any{
+			"source":             "im",
+			"im":                 map[string]any{"command": "/review"},
+			"acting_employee_id": uuid.New().String(),
+		}),
+	}
+
+	outcomes, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outcomes) != 1 {
+		t.Fatalf("expected 1 outcome, got %d", len(outcomes))
+	}
+	if outcomes[0].Enabled {
+		t.Errorf("expected row disabled for unknown employee, got enabled")
+	}
+	if outcomes[0].DisabledReason != trigger.DisabledReasonActingEmployeeMissing {
+		t.Errorf("expected reason %q, got %q",
+			trigger.DisabledReasonActingEmployeeMissing, outcomes[0].DisabledReason)
+	}
+}
+
+// Same-project active employee: row is enabled and carries the acting id.
+func TestRegistrar_SyncFromDefinition_ActiveSameProjectEmployeeEnables(t *testing.T) {
+	repo := newMockTriggerRepo()
+
+	empID := uuid.New()
+	projID := uuid.New()
+	guard := &stubActingEmployeeGuard{
+		known: map[uuid.UUID]uuid.UUID{empID: projID},
+	}
+	reg := trigger.NewRegistrar(repo).WithAttributionGuard(guard)
+
+	wfID := uuid.New()
+	nodes := []model.WorkflowNode{
+		makeNode("n1", model.NodeTypeTrigger, map[string]any{
+			"source":             "im",
+			"im":                 map[string]any{"command": "/review"},
+			"acting_employee_id": empID.String(),
+		}),
+	}
+
+	outcomes, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outcomes) != 1 || !outcomes[0].Enabled {
+		t.Fatalf("expected enabled outcome, got %+v", outcomes)
+	}
+	// Verify acting_employee_id round-trips through the upserted row.
+	for _, row := range repo.rows {
+		if row.ActingEmployeeID == nil || *row.ActingEmployeeID != empID {
+			t.Errorf("expected row.ActingEmployeeID=%s, got %v", empID, row.ActingEmployeeID)
+		}
+	}
+}
+
+// Malformed UUID string: row disabled with missing reason, row still persisted.
+func TestRegistrar_SyncFromDefinition_InvalidEmployeeUUID(t *testing.T) {
+	repo := newMockTriggerRepo()
+
+	reg := trigger.NewRegistrar(repo) // no guard: invalid UUID must be caught regardless
+
+	wfID := uuid.New()
+	projID := uuid.New()
+	nodes := []model.WorkflowNode{
+		makeNode("n1", model.NodeTypeTrigger, map[string]any{
+			"source":             "im",
+			"im":                 map[string]any{"command": "/review"},
+			"acting_employee_id": "not-a-uuid",
+		}),
+	}
+
+	outcomes, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outcomes) != 1 || outcomes[0].Enabled {
+		t.Fatalf("expected disabled outcome, got %+v", outcomes)
+	}
+	if outcomes[0].DisabledReason != trigger.DisabledReasonActingEmployeeMissing {
+		t.Errorf("expected reason %q, got %q",
+			trigger.DisabledReasonActingEmployeeMissing, outcomes[0].DisabledReason)
+	}
+}
+
+// Happy path: DAG resolver finds an active definition → row enabled, no reason.
+func TestRegistrar_SyncFromDefinition_DAGTargetActiveEnables(t *testing.T) {
+	repo := newMockTriggerRepo()
+	wfID := uuid.New()
+	resolver := &stubDAGResolver{defs: map[uuid.UUID]*model.WorkflowDefinition{
+		wfID: {ID: wfID, Status: model.WorkflowDefStatusActive},
+	}}
+	reg := trigger.NewRegistrar(repo).WithDAGResolver(resolver)
+
+	projID := uuid.New()
+
+	nodes := []model.WorkflowNode{
+		makeNode("n1", model.NodeTypeTrigger, map[string]any{
+			"source": "im",
+			"im":     map[string]any{"command": "/review"},
+		}),
+	}
+
+	outcomes, err := reg.SyncFromDefinition(context.Background(), wfID, projID, nodes, nil)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if len(outcomes) != 1 || !outcomes[0].Enabled {
+		t.Fatalf("expected enabled outcome, got %+v", outcomes)
+	}
+	if outcomes[0].DisabledReason != "" {
+		t.Errorf("expected no disabled reason, got %q", outcomes[0].DisabledReason)
 	}
 }

@@ -136,10 +136,16 @@ func (t *ScheduleTicker) shouldFire(tr *model.WorkflowTrigger, minute time.Time)
 
 func (t *ScheduleTicker) dispatchOne(ctx context.Context, tr *model.WorkflowTrigger, minute time.Time) {
 	data := map[string]any{
-		"trigger_id": tr.ID.String(),
-		"workflow_id": tr.WorkflowID.String(),
+		"trigger_id":  tr.ID.String(),
+		"target_kind": string(tr.TargetKind),
 		"project_id":  tr.ProjectID.String(),
 		"fired_at":    minute.Format(time.RFC3339),
+	}
+	if tr.WorkflowID != nil {
+		data["workflow_id"] = tr.WorkflowID.String()
+	}
+	if tr.PluginID != "" {
+		data["plugin_id"] = tr.PluginID
 	}
 	_, _ = t.dispatcher.Route(ctx, Event{
 		Source: model.TriggerSourceSchedule,

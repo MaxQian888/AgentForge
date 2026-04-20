@@ -29,14 +29,18 @@ func NewWorkflowTriggerRepository(db *gorm.DB) *WorkflowTriggerRepository {
 
 type workflowTriggerRecord struct {
 	ID                     uuid.UUID  `gorm:"column:id;primaryKey"`
-	WorkflowID             uuid.UUID  `gorm:"column:workflow_id"`
+	WorkflowID             *uuid.UUID `gorm:"column:workflow_id"`
+	PluginID               *string    `gorm:"column:plugin_id"`
 	ProjectID              uuid.UUID  `gorm:"column:project_id"`
 	Source                 string     `gorm:"column:source"`
+	TargetKind             string     `gorm:"column:target_kind"`
 	Config                 jsonText   `gorm:"column:config;type:jsonb"`
 	InputMapping           jsonText   `gorm:"column:input_mapping;type:jsonb"`
 	IdempotencyKeyTemplate string     `gorm:"column:idempotency_key_template"`
 	DedupeWindowSeconds    int        `gorm:"column:dedupe_window_seconds"`
 	Enabled                bool       `gorm:"column:enabled"`
+	DisabledReason         string     `gorm:"column:disabled_reason"`
+	ActingEmployeeID       *uuid.UUID `gorm:"column:acting_employee_id"`
 	CreatedBy              *uuid.UUID `gorm:"column:created_by"`
 	CreatedAt              time.Time  `gorm:"column:created_at"`
 	UpdatedAt              time.Time  `gorm:"column:updated_at"`
@@ -52,16 +56,29 @@ func newWorkflowTriggerRecord(t *model.WorkflowTrigger) *workflowTriggerRecord {
 	if t == nil {
 		return nil
 	}
+	targetKind := string(t.TargetKind)
+	if targetKind == "" {
+		targetKind = string(model.TriggerTargetDAG)
+	}
+	var pluginPtr *string
+	if t.PluginID != "" {
+		pid := t.PluginID
+		pluginPtr = &pid
+	}
 	return &workflowTriggerRecord{
 		ID:                     t.ID,
 		WorkflowID:             t.WorkflowID,
+		PluginID:               pluginPtr,
 		ProjectID:              t.ProjectID,
 		Source:                 string(t.Source),
+		TargetKind:             targetKind,
 		Config:                 newJSONText(rawMessageToString(t.Config), "{}"),
 		InputMapping:           newJSONText(rawMessageToString(t.InputMapping), "{}"),
 		IdempotencyKeyTemplate: t.IdempotencyKeyTemplate,
 		DedupeWindowSeconds:    t.DedupeWindowSeconds,
 		Enabled:                t.Enabled,
+		DisabledReason:         t.DisabledReason,
+		ActingEmployeeID:       t.ActingEmployeeID,
 		CreatedBy:              t.CreatedBy,
 		CreatedAt:              t.CreatedAt,
 		UpdatedAt:              t.UpdatedAt,
@@ -72,16 +89,28 @@ func (r *workflowTriggerRecord) toModel() *model.WorkflowTrigger {
 	if r == nil {
 		return nil
 	}
+	targetKind := model.TriggerTargetKind(r.TargetKind)
+	if targetKind == "" {
+		targetKind = model.TriggerTargetDAG
+	}
+	var pluginID string
+	if r.PluginID != nil {
+		pluginID = *r.PluginID
+	}
 	return &model.WorkflowTrigger{
 		ID:                     r.ID,
 		WorkflowID:             r.WorkflowID,
+		PluginID:               pluginID,
 		ProjectID:              r.ProjectID,
 		Source:                 model.TriggerSource(r.Source),
+		TargetKind:             targetKind,
 		Config:                 json.RawMessage(r.Config.String("{}")),
 		InputMapping:           json.RawMessage(r.InputMapping.String("{}")),
 		IdempotencyKeyTemplate: r.IdempotencyKeyTemplate,
 		DedupeWindowSeconds:    r.DedupeWindowSeconds,
 		Enabled:                r.Enabled,
+		DisabledReason:         r.DisabledReason,
+		ActingEmployeeID:       r.ActingEmployeeID,
 		CreatedBy:              r.CreatedBy,
 		CreatedAt:              r.CreatedAt,
 		UpdatedAt:              r.UpdatedAt,
@@ -114,6 +143,9 @@ func (r *WorkflowTriggerRepository) Upsert(ctx context.Context, t *model.Workflo
 	if t.ID == uuid.Nil {
 		t.ID = uuid.New()
 	}
+	if t.TargetKind == "" {
+		t.TargetKind = model.TriggerTargetDAG
+	}
 
 	return r.db.WithContext(ctx).Transaction(func(tx *gorm.DB) error {
 		return upsertTriggerTx(ctx, tx, t, 1)
@@ -128,10 +160,18 @@ func upsertTriggerTx(ctx context.Context, tx *gorm.DB, t *model.WorkflowTrigger,
 	}
 
 	var existing workflowTriggerRecord
-	err := tx.WithContext(ctx).
-		Where("workflow_id = ? AND source = ? AND config = ?::jsonb",
-			t.WorkflowID, string(t.Source), rawMessageToString(t.Config)).
-		Take(&existing).Error
+	var lookup *gorm.DB
+	switch t.TargetKind {
+	case model.TriggerTargetPlugin:
+		lookup = tx.WithContext(ctx).
+			Where("target_kind = ? AND plugin_id = ? AND source = ? AND config = ?::jsonb",
+				string(model.TriggerTargetPlugin), t.PluginID, string(t.Source), rawMessageToString(t.Config))
+	default:
+		lookup = tx.WithContext(ctx).
+			Where("target_kind = ? AND workflow_id = ? AND source = ? AND config = ?::jsonb",
+				string(model.TriggerTargetDAG), t.WorkflowID, string(t.Source), rawMessageToString(t.Config))
+	}
+	err := lookup.Take(&existing).Error
 
 	switch {
 	case err == nil:
@@ -142,6 +182,8 @@ func upsertTriggerTx(ctx context.Context, tx *gorm.DB, t *model.WorkflowTrigger,
 			"idempotency_key_template":  t.IdempotencyKeyTemplate,
 			"dedupe_window_seconds":     t.DedupeWindowSeconds,
 			"enabled":                   t.Enabled,
+			"disabled_reason":           t.DisabledReason,
+			"acting_employee_id":        t.ActingEmployeeID,
 			"updated_at":                now,
 		}
 		if updErr := tx.WithContext(ctx).
@@ -195,6 +237,53 @@ func (r *WorkflowTriggerRepository) ListEnabledBySource(ctx context.Context, sou
 		Order("created_at ASC").
 		Find(&records).Error; err != nil {
 		return nil, fmt.Errorf("list enabled workflow triggers by source: %w", err)
+	}
+	out := make([]*model.WorkflowTrigger, 0, len(records))
+	for i := range records {
+		out = append(out, records[i].toModel())
+	}
+	return out, nil
+}
+
+// ListEnabledBySourceAndKind returns enabled triggers for a (source, target_kind)
+// pair, ordered by created_at ASC. Useful for engine-scoped observability.
+func (r *WorkflowTriggerRepository) ListEnabledBySourceAndKind(
+	ctx context.Context,
+	source model.TriggerSource,
+	targetKind model.TriggerTargetKind,
+) ([]*model.WorkflowTrigger, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	var records []workflowTriggerRecord
+	if err := r.db.WithContext(ctx).
+		Where("source = ? AND target_kind = ? AND enabled = true",
+			string(source), string(targetKind)).
+		Order("created_at ASC").
+		Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list enabled workflow triggers by source and kind: %w", err)
+	}
+	out := make([]*model.WorkflowTrigger, 0, len(records))
+	for i := range records {
+		out = append(out, records[i].toModel())
+	}
+	return out, nil
+}
+
+// ListByActingEmployee returns every trigger row whose acting_employee_id
+// matches the given employee identifier, ordered by created_at ASC.
+// Used by observability / admin flows that need to surface "all triggers
+// dispatching as this employee".
+func (r *WorkflowTriggerRepository) ListByActingEmployee(ctx context.Context, employeeID uuid.UUID) ([]*model.WorkflowTrigger, error) {
+	if r.db == nil {
+		return nil, ErrDatabaseUnavailable
+	}
+	var records []workflowTriggerRecord
+	if err := r.db.WithContext(ctx).
+		Where("acting_employee_id = ?", employeeID).
+		Order("created_at ASC").
+		Find(&records).Error; err != nil {
+		return nil, fmt.Errorf("list workflow triggers by acting employee: %w", err)
 	}
 	out := make([]*model.WorkflowTrigger, 0, len(records))
 	for i := range records {

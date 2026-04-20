@@ -19,6 +19,7 @@ import (
 // Keeping this local keeps the handler unit-testable with a mock.
 type triggerRouter interface {
 	Route(ctx context.Context, ev trigger.Event) (int, error)
+	RouteWithOutcomes(ctx context.Context, ev trigger.Event) ([]trigger.Outcome, error)
 }
 
 // triggerQueryRepo is the read/toggle subset of the trigger repository that
@@ -110,10 +111,16 @@ func (h *TriggerHandler) HandleIMEvent(c echo.Context) error {
 		data["extra"] = req.Extra
 	}
 
-	started, err := h.router.Route(c.Request().Context(), trigger.Event{
+	outcomes, err := h.router.RouteWithOutcomes(c.Request().Context(), trigger.Event{
 		Source: model.TriggerSourceIM,
 		Data:   data,
 	})
+	started := 0
+	for _, o := range outcomes {
+		if o.Status == trigger.OutcomeStarted {
+			started++
+		}
+	}
 	if err != nil {
 		c.Logger().Errorf("trigger router: im event dispatch: %v", err)
 		// Partial success is possible — err is the last error but started > 0
@@ -123,15 +130,19 @@ func (h *TriggerHandler) HandleIMEvent(c echo.Context) error {
 			return localizedError(c, http.StatusInternalServerError, i18n.MsgFailedToRouteIMEvent)
 		}
 	}
-	if started == 0 {
+	if len(outcomes) == 0 {
 		// No matching trigger; not an error but the bridge needs to know
 		// so it can reply "unknown command" to the user.
 		return c.JSON(http.StatusNotFound, map[string]any{
-			"started": 0,
-			"message": "no matching workflow trigger",
+			"started":  0,
+			"outcomes": []trigger.Outcome{},
+			"message":  "no matching workflow trigger",
 		})
 	}
-	return c.JSON(http.StatusAccepted, map[string]any{"started": started})
+	return c.JSON(http.StatusAccepted, map[string]any{
+		"started":  started,
+		"outcomes": outcomes,
+	})
 }
 
 // ListByWorkflow returns the materialized workflow_triggers rows for a workflow.
