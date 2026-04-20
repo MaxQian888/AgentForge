@@ -31,7 +31,7 @@
 
 ## Task 1 — Migration 072: `qianchuan_metric_snapshots` (minute-bucketed time series)
 
-- [ ] Step 1.1 — write the up migration
+- [x] Step 1.1 — write the up migration
   - File: `src-go/migrations/072_create_qianchuan_metric_snapshots.up.sql`
     ```sql
     -- Per-binding minute-bucketed metric snapshots.
@@ -48,20 +48,20 @@
     CREATE INDEX IF NOT EXISTS idx_qms_binding_time
         ON qianchuan_metric_snapshots (binding_id, minute_bucket DESC);
     ```
-- [ ] Step 1.2 — write the down migration
+- [x] Step 1.2 — write the down migration
   - File: `src-go/migrations/072_create_qianchuan_metric_snapshots.down.sql`
     ```sql
     DROP INDEX IF EXISTS idx_qms_binding_time;
     DROP TABLE IF EXISTS qianchuan_metric_snapshots;
     ```
-- [ ] Step 1.3 — extend `migrations/embed_test.go` if it asserts a fixed count (search `TestEmbed` for length assertions and bump). Run `rtk cargo test -p server -run TestMigrations` to confirm sequence intact.
+- [x] Step 1.3 — extend `migrations/embed_test.go` if it asserts a fixed count (search `TestEmbed` for length assertions and bump). Run `rtk cargo test -p server -run TestMigrations` to confirm sequence intact.
   - Acceptance: green; both files picked up by the embed FS.
 
 ---
 
 ## Task 2 — Migration 073: `qianchuan_action_logs` (per-action audit trail)
 
-- [ ] Step 2.1 — write the up migration
+- [x] Step 2.1 — write the up migration
   - File: `src-go/migrations/073_create_qianchuan_action_logs.up.sql`
     ```sql
     -- Per-action audit row. status enum:
@@ -90,20 +90,20 @@
     CREATE INDEX IF NOT EXISTS idx_qal_run
         ON qianchuan_action_logs (strategy_run_id);
     ```
-- [ ] Step 2.2 — write the down migration
+- [x] Step 2.2 — write the down migration
   - File: `src-go/migrations/073_create_qianchuan_action_logs.down.sql`
     ```sql
     DROP INDEX IF EXISTS idx_qal_run;
     DROP INDEX IF EXISTS idx_qal_binding_time;
     DROP TABLE IF EXISTS qianchuan_action_logs;
     ```
-- [ ] Step 2.3 — `rtk cargo test -p server -run TestMigrations` (or repo equivalent). Acceptance: green.
+- [x] Step 2.3 — `rtk cargo test -p server -run TestMigrations` (or repo equivalent). Acceptance: green.
 
 ---
 
 ## Task 3 — Repos for snapshot + action_log (wire to existing `pkg/db` style)
 
-- [ ] Step 3.1 — write failing repo tests for snapshot UPSERT and action_log create
+- [x] Step 3.1 — write failing repo tests for snapshot UPSERT and action_log create
   - File: `src-go/internal/repository/qianchuan_snapshot_repo_test.go`
     ```go
     package repository
@@ -135,10 +135,10 @@
     }
     ```
   - Run: `rtk cargo test -p server -run TestQianchuanSnapshotRepo` → red.
-- [ ] Step 3.2 — implement `internal/repository/qianchuan_snapshot_repo.go`
+- [x] Step 3.2 — implement `internal/repository/qianchuan_snapshot_repo.go`
   - Struct fields: `BindingID uuid.UUID`, `MinuteBucket time.Time`, `Payload json.RawMessage`, `CreatedAt time.Time`.
   - Methods: `Upsert(ctx, bindingID, minuteBucket, payload) error` using `INSERT ... ON CONFLICT (binding_id, minute_bucket) DO UPDATE SET payload = EXCLUDED.payload`; `ListByBinding(ctx, bindingID, limit) ([]Snapshot, error)`; `Latest(ctx, bindingID) (*Snapshot, error)`.
-- [ ] Step 3.3 — write failing repo tests for action_log
+- [x] Step 3.3 — write failing repo tests for action_log
   - File: `src-go/internal/repository/qianchuan_action_log_repo_test.go`
     ```go
     func TestQianchuanActionLogRepo_CreatePending_AndUpdateApplied(t *testing.T) {
@@ -162,14 +162,14 @@
         }
     }
     ```
-- [ ] Step 3.4 — implement `internal/repository/qianchuan_action_log_repo.go` and the matching `internal/model/qianchuan_action_log.go` model file (mirror the column shape; jsonb fields use `json.RawMessage`). Methods: `Create`, `GetByID`, `MarkApplied(id)`, `MarkFailed(id, errMsg)`, `MarkGated(id, reason)`, `ListByRun(runID)`, `ListByBinding(bindingID, limit)`.
-- [ ] Step 3.5 — `rtk cargo test -p server -run TestQianchuan` → green.
+- [x] Step 3.4 — implement `internal/repository/qianchuan_action_log_repo.go` and the matching `internal/model/qianchuan_action_log.go` model file (mirror the column shape; jsonb fields use `json.RawMessage`). Methods: `Create`, `GetByID`, `MarkApplied(id)`, `MarkFailed(id, errMsg)`, `MarkGated(id, reason)`, `ListByRun(runID)`, `ListByBinding(bindingID, limit)`.
+- [x] Step 3.5 — `rtk cargo test -p server -run TestQianchuan` → green.
 
 ---
 
 ## Task 4 — New node type `qianchuan_metrics_fetcher` (handler + effect kind)
 
-- [ ] Step 4.1 — extend `nodetypes/effects.go` with the new effect kind + payload
+- [x] Step 4.1 — extend `nodetypes/effects.go` with the new effect kind + payload
   - File: `src-go/internal/workflow/nodetypes/effects.go`
   - Append after the existing `EffectResetNodes` line:
     ```go
@@ -203,7 +203,7 @@
     ```
   - The three kinds must NOT be added to `IsPark()` — leave that switch as-is so they default to non-park.
 
-- [ ] Step 4.2 — write failing handler test
+- [x] Step 4.2 — write failing handler test
   - File: `src-go/internal/workflow/nodetypes/qianchuan_metrics_fetcher_test.go`
     ```go
     func TestQianchuanMetricsFetcher_EmitsEffect_WithResolvedBindingID(t *testing.T) {
@@ -234,7 +234,7 @@
     }
     ```
   - Run: `rtk cargo test -p server -run TestQianchuanMetricsFetcher` → red.
-- [ ] Step 4.3 — implement the handler
+- [x] Step 4.3 — implement the handler
   - File: `src-go/internal/workflow/nodetypes/qianchuan_metrics_fetcher.go`
     ```go
     package nodetypes
@@ -293,13 +293,13 @@
         return []EffectKind{EffectFetchQianchuanMetrics}
     }
     ```
-- [ ] Step 4.4 — re-run handler test → green. Run `rtk cargo build -p server` to confirm no `IsPark` regressions.
+- [x] Step 4.4 — re-run handler test → green. Run `rtk cargo build -p server` to confirm no `IsPark` regressions.
 
 ---
 
 ## Task 5 — Applier branch for `EffectFetchQianchuanMetrics`
 
-- [ ] Step 5.1 — wire deps into `EffectApplier` (fields only, no behavior yet)
+- [x] Step 5.1 — wire deps into `EffectApplier` (fields only, no behavior yet)
   - File: `src-go/internal/workflow/nodetypes/applier.go`
   - Add to `EffectApplier` (after `SubWorkflowGuard`):
     ```go
@@ -365,14 +365,14 @@
     ```
   - These local interfaces let 3D's tests inject fakes without importing `internal/qianchuan` (which 3A owns). The same shim shape mirrors how `EmployeeSpawner` is wired today.
 
-- [ ] Step 5.2 — write failing applier test for the fetch effect
+- [x] Step 5.2 — write failing applier test for the fetch effect
   - File: `src-go/internal/workflow/nodetypes/qianchuan_metrics_fetcher_applier_test.go`
     - Use a fake `QianchuanProvider` that returns a fixed snapshot `{"ads":[{"ad_id":"AD7","roi":1.2}]}` and bucket `2026-04-20T10:00:00Z`.
     - Use a fake `SecretsResolver` that returns `"tok-A"` for the binding's access_token.
     - Use an in-memory `QianchuanSnapshotRepo` capturing the UPSERT.
     - Assert: snapshot row written; `dataStore[nodeID]["snapshot"]` populated; `Resolve` was called with `fieldPath == "qianchuan.fetch.token"` and the binding-templated string.
 
-- [ ] Step 5.3 — extend the applier dispatch (the switch over `Effect.Kind`)
+- [x] Step 5.3 — extend the applier dispatch (the switch over `Effect.Kind`)
   - Add a new branch `case EffectFetchQianchuanMetrics:` in the applier's effect-dispatch switch (the one used by `Apply`/`ApplyAll` — locate by `rtk grep "case Effect" src-go/internal/workflow/nodetypes/applier`*).
   - Implementation:
     1. Decode `FetchQianchuanMetricsPayload`.
@@ -382,66 +382,66 @@
     5. `snapJSON, _ := json.Marshal(snapshot)`. `bucket = bucket.UTC().Truncate(time.Minute)`.
     6. `a.SnapshotRepo.Upsert(ctx, binding.ID, bucket, snapJSON)`.
     7. Write `dataStore[payload.NodeID] = map[string]any{"snapshot": rawSnapshot, "bucket": bucket.Format(time.RFC3339)}` via the existing dataStore-write helper used by other appliers.
-- [ ] Step 5.4 — add `qianchuan.fetch.token` to 1B's secret-resolver allowlist
+- [x] Step 5.4 — add `qianchuan.fetch.token` to 1B's secret-resolver allowlist
   - File: `src-go/internal/secrets/resolver.go` (or wherever 1B parks the const). Append `"qianchuan.fetch.token"` and `"qianchuan.action.token"` to the `allowedFieldPaths` slice/set.
   - Add a regression unit test in 1B's resolver test file asserting both new paths resolve successfully (template `{{secrets.foo}}` works) and a sibling path like `qianchuan.unrelated` rejects with `secret:not_allowed_field`.
-- [ ] Step 5.5 — re-run applier test → green. Confirm no other applier branch broke: `rtk cargo test -p server ./internal/workflow/nodetypes/...`.
+- [x] Step 5.5 — re-run applier test → green. Confirm no other applier branch broke: `rtk cargo test -p server ./internal/workflow/nodetypes/...`.
 
 ---
 
 ## Task 6 — New node type `qianchuan_strategy_runner` (handler + applier)
 
-- [ ] Step 6.1 — write failing handler test asserting effect emission and dataStore-template resolution for `snapshot_ref`
+- [x] Step 6.1 — write failing handler test asserting effect emission and dataStore-template resolution for `snapshot_ref`
   - File: `src-go/internal/workflow/nodetypes/qianchuan_strategy_runner_test.go`
     - Assert: handler resolves `strategy_id_template` and `snapshot_ref` against dataStore; emits exactly one `EffectRunQianchuanStrategy` whose payload carries the parsed strategy id and the **resolved snapshot JSON** (not the template string).
-- [ ] Step 6.2 — implement the handler
+- [x] Step 6.2 — implement the handler
   - File: `src-go/internal/workflow/nodetypes/qianchuan_strategy_runner.go`
     - `Config`: `{strategy_id_template, snapshot_ref, binding_id_template}` (binding id propagates through to applier so action_log rows can be inserted without a separate lookup).
     - Use `ResolveTemplateVars` for all three template fields. For `snapshot_ref`, the resolved string is a JSON value (object) — pass it through `json.RawMessage` into the payload.
     - Capability: `[]EffectKind{EffectRunQianchuanStrategy}`.
-- [ ] Step 6.3 — write failing applier test
+- [x] Step 6.3 — write failing applier test
   - File: `src-go/internal/workflow/nodetypes/qianchuan_strategy_runner_applier_test.go`
     - Fake `StrategyLoader` returns a fixed `parsedSpec` blob.
     - Fake `StrategyEvaluator` returns one rule match `roi-degradation` with two actions `adjust_bid` (target `AD7`) + `notify_im`.
     - Fake `ActionLogRepo` captures all `Create` calls.
     - Assert: 2 action_log rows persisted with `status='pending'`, `strategy_run_id` is the same UUID across both rows and is also written into `dataStore[nodeID].strategy_run_id`; `dataStore[nodeID].actions` is a slice of `{action_log_id, action_type, target}` records suitable for the loop node downstream.
-- [ ] Step 6.4 — implement the applier branch `case EffectRunQianchuanStrategy:`
+- [x] Step 6.4 — implement the applier branch `case EffectRunQianchuanStrategy:`
   1. Decode payload.
   2. `parsedSpec, err := a.StrategyLoader.Load(ctx, parsed.StrategyID)`. Wrap errors `"qianchuan: load strategy: %w"`.
   3. `matches, err := a.StrategyEvaluator.Evaluate(ctx, parsedSpec, parsed.SnapshotRef)`. **Drift handling** (per spec §11): if err is non-nil, write a single `record_event` action_log row with `status='failed', error_message=err.Error()` and emit empty actions list — do NOT short-circuit the whole DAG.
   4. `runID := uuid.New()`. For each match rule, for each action: build a `model.QianchuanActionLog{BindingID, StrategyID, StrategyRunID: runID, RuleName: match.RuleName, ActionType: action.Type, TargetAdID: action.Target, Params: action.Params, Status: "pending"}`, call `a.ActionLogRepo.Create`, append `{action_log_id: log.ID, action_type, target}` to a slice.
   5. Write `dataStore[payload.NodeID] = {"strategy_run_id": runID, "actions": [...]}`.
-- [ ] Step 6.5 — re-run tests → green. Run `rtk cargo build -p server` to confirm interface methods line up.
+- [x] Step 6.5 — re-run tests → green. Run `rtk cargo build -p server` to confirm interface methods line up.
 
 ---
 
 ## Task 7 — New node type `qianchuan_action_executor` (handler + applier)
 
-- [ ] Step 7.1 — write failing handler test
+- [x] Step 7.1 — write failing handler test
   - File: `src-go/internal/workflow/nodetypes/qianchuan_action_executor_test.go`
     - Assert: handler resolves `action_log_id_template` against the loop's per-iteration dataStore (typically `{{$dataStore.run_strategy.actions[$iter].action_log_id}}`) and emits a single `EffectExecuteQianchuanAction` with the resolved id.
-- [ ] Step 7.2 — implement handler
+- [x] Step 7.2 — implement handler
   - File: `src-go/internal/workflow/nodetypes/qianchuan_action_executor.go`
   - `Config`: `{action_log_id_template, binding_id_template}`. Capability: `[]EffectKind{EffectExecuteQianchuanAction}`.
-- [ ] Step 7.3 — write failing applier test for success + failure paths
+- [x] Step 7.3 — write failing applier test for success + failure paths
   - File: `src-go/internal/workflow/nodetypes/qianchuan_action_executor_applier_test.go`
     - Pre-seed `ActionLogRepo` with a `pending` row of `action_type='adjust_bid'`, `params={"delta_pct":-10}`, `target_ad_id='AD7'`.
     - Fake provider asserts the action method dispatches by action_type (success path returns `{"ok":true}`).
     - Assert: log row's `status` flips to `applied` and `applied_at` is non-nil; `dataStore[nodeID] = {success: true}`.
     - Add a second test where the provider returns an error: log row goes `status='failed', error_message=...`; `dataStore[nodeID] = {success: false, error: "..."}`; the applier returns nil error (so the DAG keeps going for sibling actions).
-- [ ] Step 7.4 — implement applier branch `case EffectExecuteQianchuanAction:`
+- [x] Step 7.4 — implement applier branch `case EffectExecuteQianchuanAction:`
   1. Load `log` by id; load `binding` by `log.BindingID`.
   2. Resolve token via `a.SecretsResolver.Resolve(ctx, binding.ProjectID, "qianchuan.action.token", "{{secrets.qianchuan."+binding.ID+".access_token}}")`.
   3. Build a generic `Action` value (map: `{kind: log.ActionType, target_ref: log.TargetAdID, params: log.Params}`) and call `a.QianchuanProvider.ApplyAction(ctx, tok, BindingRef{...}, action)`. (Per coord note: 3A's `Provider.ApplyAction` is the single entry; per-kind dispatch lives inside the qianchuan package's `mapping.go`.)
   4. On success: `a.ActionLogRepo.MarkApplied(ctx, log.ID)`; write `dataStore[nodeID] = {success: true}`.
   5. On error: `a.ActionLogRepo.MarkFailed(ctx, log.ID, err.Error())`; write `dataStore[nodeID] = {success: false, error: err.Error()}`; return nil.
-- [ ] Step 7.5 — re-run tests → green.
+- [x] Step 7.5 — re-run tests → green.
 
 ---
 
 ## Task 8 — Register the three new node types in `bootstrap.go`
 
-- [ ] Step 8.1 — extend `RegisterBuiltins`
+- [x] Step 8.1 — extend `RegisterBuiltins`
   - File: `src-go/internal/workflow/nodetypes/bootstrap.go`
   - Append three entries to the slice:
     ```go
@@ -449,15 +449,15 @@
     {"qianchuan_strategy_runner", QianchuanStrategyRunnerHandler{}},
     {"qianchuan_action_executor", QianchuanActionExecutorHandler{}},
     ```
-- [ ] Step 8.2 — write failing registry-bootstrap test asserting all three names resolve from the global scope
+- [x] Step 8.2 — write failing registry-bootstrap test asserting all three names resolve from the global scope
   - File: `src-go/internal/workflow/nodetypes/bootstrap_test.go` — extend `TestRegisterBuiltins_*` (or add `TestRegisterBuiltins_RegistersQianchuanNodes`) asserting `r.Resolve(uuid.Nil, "qianchuan_metrics_fetcher")` etc. all return non-zero entries with the expected `Capabilities()` set.
-- [ ] Step 8.3 — `rtk cargo test -p server -run TestRegisterBuiltins` → green.
+- [x] Step 8.3 — `rtk cargo test -p server -run TestRegisterBuiltins` → green.
 
 ---
 
 ## Task 9 — Canonical DAG seed `system:qianchuan_strategy_loop`
 
-- [ ] Step 9.1 — create the seed package with the workflow definition constant
+- [x] Step 9.1 — create the seed package with the workflow definition constant
   - File: `src-go/internal/workflow/system/qianchuan_strategy_loop.go`
   - Export a `Definition` (type `*model.WorkflowDefinition`) named `QianchuanStrategyLoopDefinition` with:
     - `Name: "system:qianchuan_strategy_loop"`, `IsSystem: true` (or whatever the existing `WorkflowDefinition` flag is — confirm by `rtk grep "IsSystem\|System " src-go/internal/model/workflow_definition.go`).
@@ -471,11 +471,11 @@
       - `id: "summary_card"`, `type: "im_send"`, `config: {...templated card body referencing strategy_run_id + applied/failed counts...}` — keep `card_template` minimal in 3D (a plain `ProviderNeutralCard` with title/summary); 3E enriches.
     - Edges: `trigger → fetch_metrics → run_strategy → has_actions`; `has_actions --true--> actions_loop → execute_action → actions_loop` (loop self-edge is the standard pattern from existing loop tests); `has_actions --false--> end-of-DAG`; `actions_loop --exit--> summary_card → end-of-DAG`.
     - **DOCSTRING REQUIREMENT**: the file's package doc comment MUST contain the literal sentence: "Spec 3E inserts a `qianchuan_policy_gate` node on the `run_strategy → actions_loop` edge; do not add it here." This is the load-bearing handoff signal for 3E — sub-agents grep for it.
-- [ ] Step 9.2 — write failing test for the seed
+- [x] Step 9.2 — write failing test for the seed
   - File: `src-go/internal/workflow/system/qianchuan_strategy_loop_test.go`
     - Validate: definition has exactly 7 nodes by id; every node type appears in `nodetypes.RegisterBuiltins`'s registered set (test imports the registry, registers builtins with `BuiltinDeps{DefRepo: nil}` is OK for this test since it only resolves names); edges form a DAG (no cycles except the explicit loop self-edge); `binding_id_template` and `strategy_id_template` reference `$context` (so the trigger router must populate them).
-- [ ] Step 9.3 — implement; test → green.
-- [ ] Step 9.4 — wire seed into server bootstrap
+- [x] Step 9.3 — implement; test → green.
+- [x] Step 9.4 — wire seed into server bootstrap
   - File: `src-go/internal/server/bootstrap.go` (or wherever `RegisterBuiltins` is currently invoked at startup — confirm by `rtk grep "RegisterBuiltins" src-go`).
   - After `LockGlobal()`, add `if err := system.SeedQianchuanStrategyLoop(ctx, deps.WorkflowDefRepo); err != nil { log.Fatalf(...) }`.
   - `SeedQianchuanStrategyLoop` is an idempotent UPSERT-by-name function in the same `system/` package: looks up by `name='system:qianchuan_strategy_loop'`, creates if missing, replaces nodes/edges if present (the spec keeps the seed authoritative across upgrades).
@@ -484,12 +484,12 @@
 
 ## Task 10 — Per-binding schedule trigger materialization endpoint
 
-- [ ] Step 10.1 — write failing handler test
+- [x] Step 10.1 — write failing handler test
   - File: `src-go/internal/handler/qianchuan_strategy_assign_test.go`
     - `POST /api/v1/qianchuan/bindings/:id/strategy` body `{strategy_id, schedule_override?}`. Assert: a `workflow_triggers` row is created with `source='schedule'`, `created_via='manual'`, `target_kind='dag'`, `workflow_id=<resolved id of system:qianchuan_strategy_loop>`, `Config.cron == strategy.Schedule || schedule_override`, `Config.binding_id`, `Config.strategy_id`. Binding row's `strategy_id` and `trigger_id` are updated.
     - Re-POST with a different `strategy_id`: same trigger row is reused (UPDATE), no second row.
     - `DELETE /api/v1/qianchuan/bindings/:id/strategy`: trigger row deleted, binding's `strategy_id` and `trigger_id` cleared.
-- [ ] Step 10.2 — implement the handler in a new file
+- [x] Step 10.2 — implement the handler in a new file
   - File: `src-go/internal/handler/qianchuan_strategy_handler.go`
   - Use the existing `RequireProjectRole("editor")` middleware (per spec §12) to gate both endpoints.
   - For schedule cron: read from the strategy's `parsed_spec.schedule.cron` (Spec 3 §9 schema; 3C ships this). If `schedule_override` is non-empty it wins. Validate via `cron.NewParser` (same parser as the ticker in `internal/trigger/schedule_ticker.go`). Reject with `qianchuan:invalid_cron` on parse failure.
@@ -498,12 +498,12 @@
     {"cron": "*/1 * * * *", "binding_id": "...", "strategy_id": "...", "timezone": "UTC"}
     ```
     — `binding_id` and `strategy_id` are the keys the trigger router will copy into the execution's `$context` so `system:qianchuan_strategy_loop` node templates can resolve them.
-- [ ] Step 10.3 — extend the trigger router's schedule-source `$context` population
+- [x] Step 10.3 — extend the trigger router's schedule-source `$context` population
   - File: `src-go/internal/trigger/router.go` (or wherever the `Route` method assembles execution seed) — look for the schedule-source case.
   - When `tr.Source == TriggerSourceSchedule`, copy `Config.binding_id` and `Config.strategy_id` into the spawned execution's `$context` map. Add a unit test (`router_schedule_context_test.go`) asserting the propagation.
-- [ ] Step 10.4 — register the two new routes in the router setup
+- [x] Step 10.4 — register the two new routes in the router setup
   - File: `src-go/internal/server/router.go` (or equivalent — `rtk grep "RequireProjectRole.*editor" src-go/internal/server` to confirm location).
-- [ ] Step 10.5 — `rtk cargo test -p server -run TestQianchuanStrategyHandler` → green.
+- [x] Step 10.5 — `rtk cargo test -p server -run TestQianchuanStrategyHandler` → green.
 
 ---
 
@@ -542,9 +542,9 @@
 
 ## Task 13 — Wiring + smoke
 
-- [ ] Step 13.1 — confirm `cmd/server` constructs the `EffectApplier` with the new fields populated when the qianchuan provider is compiled in. Check `internal/server/dependency_injection.go` (or whichever file currently builds the applier struct literal — `rtk grep "EffectApplier{" src-go/internal/server`).
+- [x] Step 13.1 — confirm `cmd/server` constructs the `EffectApplier` with the new fields populated when the qianchuan provider is compiled in. Check `internal/server/dependency_injection.go` (or whichever file currently builds the applier struct literal — `rtk grep "EffectApplier{" src-go/internal/server`).
   - Acceptance: `rtk cargo build -p server` clean; `rtk cargo test -p server` end-to-end clean; no `nil` deref on the new applier branches at startup.
-- [ ] Step 13.2 — run `rtk lint` over touched files (`pnpm exec tsc --noEmit` is irrelevant here; this slice is Go-only). Acceptance: zero new lint regressions.
+- [x] Step 13.2 — run `rtk lint` over touched files (`pnpm exec tsc --noEmit` is irrelevant here; this slice is Go-only). Acceptance: zero new lint regressions.
 - [ ] Step 13.3 — verification before completion
   - `rtk cargo test -p server -run "TestQianchuan|TestRegisterBuiltins|TestMigrations"` → green
   - `rtk cargo test -p server -tags=integration -run TestQianchuan_Trace` → green
@@ -554,6 +554,6 @@
 
 ## §14 Drifts (fill at end of execution)
 
-- [ ] If 3C did NOT land the strategy_evaluator drift fix (spec §11 unresolved-template hardening), record here that 3D's strategy_runner applier currently treats unresolved templates as `noop` rule failures. 3E should add a regression test once 3C's fix lands.
-- [ ] If 3A's `Provider.ApplyAction` signature drifted from the spec §8 shape, record the actual signature and how the local `QianchuanProvider` shim in `applier.go` adapts.
-- [ ] If the schedule ticker proves unable to fire faster than 60s and a binding's strategy specified `schedule.cron='* * * * * *'` (sub-minute), record here per spec §14 row 3.
+- [x] 3C did NOT land a hardened evaluator wrapper; 3D's strategy_runner applier treats `Evaluate` errors as noop (writes a `status='failed'` action_log row with error_message). 3E should add a regression test once 3C's fix lands.
+- [x] 3A's Provider does NOT have a single `ApplyAction` method. Instead it has 5 discrete methods (`AdjustBid`, `AdjustBudget`, `PauseAd`, `ResumeAd`, `ApplyMaterial`). The local `QianchuanProvider` interface in `applier.go` defines `ApplyAction(ctx, bindingRef, actionReq) error` — the production adapter (wired in 3E) must dispatch by `actionReq.Kind` to the appropriate Provider method. This is documented in the interface comment.
+- [x] Migration numbering drifted: plan specified 072/073, actual is 077/078 (076 claimed by review_parent_review_id). Ticker is 5-field cron (minute granularity only); sub-minute expressions are NOT supported per spec §14 row 3.
