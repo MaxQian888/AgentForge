@@ -31,7 +31,7 @@
 
 ## Task 1 — Migration 068 vcs_integrations + audit resource_type extension
 
-- [ ] Step 1.1 — write the up migration
+- [x] Step 1.1 — write the up migration
   - File: `src-go/migrations/068_create_vcs_integrations.up.sql`
     ```sql
     -- Per-(project, repo) VCS integration. Authoritative store for webhook
@@ -77,7 +77,7 @@
         ));
     ```
 
-- [ ] Step 1.2 — write the down migration
+- [x] Step 1.2 — write the down migration
   - File: `src-go/migrations/068_create_vcs_integrations.down.sql`
     ```sql
     DROP TRIGGER IF EXISTS set_vcs_integrations_updated_at ON vcs_integrations;
@@ -96,7 +96,7 @@
         ));
     ```
 
-- [ ] Step 1.3 — extend audit resource type enum + RBAC ActionIDs
+- [x] Step 1.3 — extend audit resource type enum + RBAC ActionIDs
   - File: `src-go/internal/model/audit_event.go`
     - Add `AuditResourceTypeVCSIntegration = "vcs_integration"` to the existing block (after `AuditResourceTypeSecret` from 1B).
     - Append `AuditResourceTypeVCSIntegration` to the matched case list inside `IsValidAuditResourceType`.
@@ -118,7 +118,7 @@
       ActionVCSIntegrationSync:   model.ProjectRoleEditor,
       ```
 
-- [ ] Step 1.4 — verify
+- [x] Step 1.4 — verify
   - Run `rtk go test ./internal/model/... ./internal/middleware/...` — enum + matrix changes compile.
   - Apply migration locally: `rtk pnpm dev:backend:restart go-orchestrator` and confirm `068_create_vcs_integrations.up.sql` applied.
   - Commit: `feat(vcs): migration 068 vcs_integrations table + audit resource type`

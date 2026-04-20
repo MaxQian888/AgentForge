@@ -120,6 +120,15 @@ const (
 	ActionSecretRead  ActionID = "secret.read"
 	ActionSecretWrite ActionID = "secret.write"
 
+	// VCS integrations (Spec 2 §7). Per-(project, repo) source-control
+	// host bindings; read returns metadata, create/update/delete mutate
+	// the binding + side-effect a host webhook, sync re-pulls open PRs.
+	ActionVCSIntegrationRead   ActionID = "vcs.integration.read"
+	ActionVCSIntegrationCreate ActionID = "vcs.integration.create"
+	ActionVCSIntegrationUpdate ActionID = "vcs.integration.update"
+	ActionVCSIntegrationDelete ActionID = "vcs.integration.delete"
+	ActionVCSIntegrationSync   ActionID = "vcs.integration.sync"
+
 	// Project templates. `save_as_template` is a project-scoped action (gated
 	// via projectGroup + Require). The CRUD actions on /project-templates are
 	// NOT project-scoped — they apply to a user's personal template library —
@@ -229,6 +238,15 @@ var matrix = func() map[ActionID]string {
 		// create/rotate/delete and requires editor or higher.
 		ActionSecretRead:  model.ProjectRoleViewer,
 		ActionSecretWrite: model.ProjectRoleEditor,
+
+		// VCS integrations — read is metadata-only; create/update/delete
+		// require admin (binding side-effects host webhooks); sync is
+		// editor-class because it only re-pulls existing PRs.
+		ActionVCSIntegrationRead:   model.ProjectRoleViewer,
+		ActionVCSIntegrationCreate: model.ProjectRoleAdmin,
+		ActionVCSIntegrationUpdate: model.ProjectRoleAdmin,
+		ActionVCSIntegrationDelete: model.ProjectRoleAdmin,
+		ActionVCSIntegrationSync:   model.ProjectRoleEditor,
 
 		// Project templates — save-as-template is admin+ (design decision
 		// #2 in add-project-templates/design.md).
