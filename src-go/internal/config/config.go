@@ -48,6 +48,16 @@ type Config struct {
 	// that launches a system:code-review workflow execution in parallel with the
 	// legacy bridge-based review. Off by default.
 	UseWorkflowBackedReview bool
+	// PublicBaseURL is the externally reachable base URL of the AgentForge
+	// backend (e.g. https://agentforge.acme.corp). Used to compute webhook
+	// callback URLs handed to VCS hosts. Empty in dev triggers a startup
+	// warning; production deployments MUST set it.
+	PublicBaseURL string
+	// FrontendBaseURL is the canonical FE origin used by the
+	// outbound_dispatcher (spec §5) to construct workflow run links inside
+	// default reply cards (`<base>/runs/<exec_id>`). Defaults to
+	// http://localhost:3000.
+	FrontendBaseURL string
 }
 
 func Load() *Config {
@@ -91,6 +101,8 @@ func Load() *Config {
 	viper.SetDefault("MARKETPLACE_URL", "http://localhost:7781")
 	viper.SetDefault("FRONTEND_ACCEPT_INVITATION_URL", "http://localhost:3000/invitations/accept")
 	viper.SetDefault("USE_WORKFLOW_BACKED_REVIEW", false)
+	viper.SetDefault("AGENTFORGE_PUBLIC_BASE_URL", "")
+	viper.SetDefault("FRONTEND_BASE_URL", "http://localhost:3000")
 
 	accessTTL, _ := time.ParseDuration(viper.GetString("JWT_ACCESS_TTL"))
 	refreshTTL, _ := time.ParseDuration(viper.GetString("JWT_REFRESH_TTL"))
@@ -148,5 +160,6 @@ func Load() *Config {
 		MarketplaceURL:               viper.GetString("MARKETPLACE_URL"),
 		FrontendAcceptInvitationURL:  viper.GetString("FRONTEND_ACCEPT_INVITATION_URL"),
 		UseWorkflowBackedReview:      viper.GetBool("USE_WORKFLOW_BACKED_REVIEW"),
+		PublicBaseURL:                viper.GetString("AGENTFORGE_PUBLIC_BASE_URL"),
 	}
 }

@@ -138,6 +138,32 @@ func TestRegisterRoutes_DoesNotWireInstructionIntrospectionRoutes(t *testing.T) 
 	}
 }
 
+// TestRegisterRoutes_WiresVCSIntegrations asserts spec2 2A wires the
+// vcs registry, providers, service, and CRUD handler into both
+// projectGroup and the id-scoped protected group.
+func TestRegisterRoutes_WiresVCSIntegrations(t *testing.T) {
+	content, err := os.ReadFile(filepath.Join("routes.go"))
+	if err != nil {
+		t.Fatalf("ReadFile(routes.go) error = %v", err)
+	}
+	source := string(content)
+	expected := []string{
+		`vcsRegistry := vcs.NewRegistry()`,
+		`vcsRegistry.Register("github"`,
+		`vcsRegistry.Register("gitlab", gitlab.NewStub)`,
+		`vcsRegistry.Register("gitea", gitea.NewStub)`,
+		`vcsIntegrationRepo := repository.NewVCSIntegrationRepo(taskRepo.DB())`,
+		`vcsSvc := vcs.NewService(`,
+		`vcsIntegrationsH := handler.NewVCSIntegrationsHandler(vcsSvc)`,
+		`vcsIntegrationsH.Register(projectGroup, protected)`,
+	}
+	for _, snippet := range expected {
+		if !strings.Contains(source, snippet) {
+			t.Fatalf("expected RegisterRoutes to contain %q", snippet)
+		}
+	}
+}
+
 // TestRegisterRoutes_WiresSecretsRoutes asserts the project-scoped secrets
 // CRUD endpoints are mounted on projectGroup with RBAC gating. Spec1 1B §7.
 func TestRegisterRoutes_WiresSecretsRoutes(t *testing.T) {

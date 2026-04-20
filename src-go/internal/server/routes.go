@@ -17,6 +17,8 @@ import (
 	"github.com/react-go-quick-starter/server/internal/config"
 	"github.com/react-go-quick-starter/server/internal/employee"
 	"github.com/react-go-quick-starter/server/internal/eventbus"
+	"github.com/react-go-quick-starter/server/internal/adsplatform"
+	"github.com/react-go-quick-starter/server/internal/adsplatform/qianchuan"
 	"github.com/react-go-quick-starter/server/internal/handler"
 	"github.com/react-go-quick-starter/server/internal/knowledge"
 	"github.com/react-go-quick-starter/server/internal/knowledge/liveartifact"
@@ -24,10 +26,15 @@ import (
 	"github.com/react-go-quick-starter/server/internal/model"
 	pluginruntime "github.com/react-go-quick-starter/server/internal/plugin"
 	"github.com/react-go-quick-starter/server/internal/qianchuan/strategy"
+	"github.com/react-go-quick-starter/server/internal/qianchuanbinding"
 	"github.com/react-go-quick-starter/server/internal/repository"
 	"github.com/react-go-quick-starter/server/internal/role"
 	"github.com/react-go-quick-starter/server/internal/secrets"
 	"github.com/react-go-quick-starter/server/internal/service"
+	"github.com/react-go-quick-starter/server/internal/vcs"
+	ghimpl "github.com/react-go-quick-starter/server/internal/vcs/github"
+	"github.com/react-go-quick-starter/server/internal/vcs/gitea"
+	"github.com/react-go-quick-starter/server/internal/vcs/gitlab"
 	skillspkg "github.com/react-go-quick-starter/server/internal/skills"
 	"github.com/react-go-quick-starter/server/internal/storage"
 	"github.com/react-go-quick-starter/server/internal/trigger"
@@ -81,6 +88,39 @@ func (p projectTemplateAuditEmitter) EmitProjectCreatedFromTemplate(
 	_ = p.svc.RecordEvent(ctx, event)
 }
 
+// qianchuanBindingsAuditEmitter adapts service.AuditService to the narrow
+// handler.QianchuanBindingsAuditEmitter contract.
+type qianchuanBindingsAuditEmitter struct{ svc *service.AuditService }
+
+func (e qianchuanBindingsAuditEmitter) Emit(
+	ctx context.Context,
+	projectID, actorUserID, bindingID uuid.UUID,
+	action, payload string,
+) {
+	if e.svc == nil {
+		return
+	}
+	var actor *uuid.UUID
+	if actorUserID != uuid.Nil {
+		a := actorUserID
+		actor = &a
+	}
+	if payload == "" {
+		payload = "{}"
+	}
+	event := &model.AuditEvent{
+		ID:                  uuid.New(),
+		ProjectID:           projectID,
+		OccurredAt:          time.Now().UTC(),
+		ActorUserID:         actor,
+		ActionID:            action,
+		ResourceType:        model.AuditResourceTypeQianchuanBinding,
+		ResourceID:          bindingID.String(),
+		PayloadSnapshotJSON: payload,
+	}
+	_ = e.svc.RecordEvent(ctx, event)
+}
+
 // secretsAuditEmitter adapts service.AuditService to the narrow
 // secrets.AuditEventEmitter contract so the secrets audit-recorder
 // adapter can forward into the central audit pipeline.
@@ -91,6 +131,39 @@ func (e secretsAuditEmitter) Record(ctx context.Context, ev *model.AuditEvent) e
 		return nil
 	}
 	return e.svc.RecordEvent(ctx, ev)
+}
+
+// vcsSecretsResolverAdapter forwards vcs.SecretsResolver.Resolve into
+// the 1B secrets.Service. Plaintext lifetime is bounded by the call —
+// the adapter holds no state beyond the *secrets.Service pointer.
+type vcsSecretsResolverAdapter struct{ svc *secrets.Service }
+
+func (a vcsSecretsResolverAdapter) Resolve(ctx context.Context, projectID uuid.UUID, name string) (string, error) {
+	if a.svc == nil {
+		return "", secrets.ErrSecretNotFound
+	}
+	return a.svc.Resolve(ctx, projectID, name)
+}
+
+// vcsAuditAdapter implements vcs.AuditRecorder by forwarding into the
+// central audit pipeline with ResourceType=vcs_integration. Payloads
+// arrive pre-sanitized from vcs.Service (no tokens, no webhook ids).
+type vcsAuditAdapter struct{ svc *service.AuditService }
+
+func (a vcsAuditAdapter) Record(ctx context.Context, projectID uuid.UUID, action, resourceID, payload string, actor *uuid.UUID) {
+	if a.svc == nil {
+		return
+	}
+	ev := &model.AuditEvent{
+		ProjectID:           projectID,
+		OccurredAt:          time.Now().UTC(),
+		ActorUserID:         actor,
+		ActionID:            action,
+		ResourceType:        model.AuditResourceTypeVCSIntegration,
+		ResourceID:          resourceID,
+		PayloadSnapshotJSON: payload,
+	}
+	_ = a.svc.RecordEvent(ctx, ev)
 }
 
 type bridgeIntentAdapter struct {
@@ -349,6 +422,28 @@ func RegisterRoutes(
 	secretsAuditAdapter := secrets.NewAuditServiceAdapter(secretsAuditEmitter{svc: auditSvc})
 	secretsSvc := secrets.NewService(secretsRepo, secretsCipher, secretsAuditAdapter)
 
+	// VCS subsystem (spec2 §5 S2-G + §7 + §8). Provider registry is wired
+	// once at boot; constructors are pure (host, token) -> Provider so
+	// PAT plaintext stays bounded to the single outbound call frame.
+	vcsRegistry := vcs.NewRegistry()
+	vcsRegistry.Register("github", func(host, token string) (vcs.Provider, error) {
+		base := ""
+		if host != "" && host != "github.com" {
+			base = "https://" + host + "/api/v3/"
+		}
+		return ghimpl.NewClient(base, token)
+	})
+	vcsRegistry.Register("gitlab", gitlab.NewStub)
+	vcsRegistry.Register("gitea", gitea.NewStub)
+	vcsCallbackURL := ""
+	if cfg.PublicBaseURL != "" {
+		vcsCallbackURL = strings.TrimRight(cfg.PublicBaseURL, "/") + "/api/v1/vcs/github/webhook"
+	} else {
+		log.Warn("AGENTFORGE_PUBLIC_BASE_URL not set — vcs integration creates will fail with vcs:public_base_url_not_configured until configured")
+	}
+	vcsIntegrationRepo := repository.NewVCSIntegrationRepo(taskRepo.DB())
+	vcsSvc := vcs.NewService(vcsIntegrationRepo, vcsRegistry, vcsSecretsResolverAdapter{svc: secretsSvc}, vcsCallbackURL, vcsAuditAdapter{svc: auditSvc})
+
 	// Register the RBAC emitter so allow + deny paths produce audit events.
 	appMiddleware.SetAuditEmitter(func(ctx context.Context, e appMiddleware.AuditEmission) {
 		event := &model.AuditEvent{
@@ -603,7 +698,15 @@ func RegisterRoutes(
 		trigger.NewDAGEngineAdapter(dagWorkflowSvc),
 	)
 	workflowH.SetTriggerSyncer(triggerRegistrar)
-	triggerH := handler.NewTriggerHandler(triggerRouter).WithQueryRepo(triggerRepo)
+	// Spec 1C trigger CRUD: needs employeeRepo for acting-employee
+	// validation; the same handle is reused later by employeeSvc below
+	// (this constructor is side-effect free, so calling it twice is
+	// safe but kept once for cleanliness — see also line ~660).
+	triggerEmployeeRepo := repository.NewEmployeeRepository(taskRepo.DB())
+	triggerCRUDSvc := trigger.NewCRUDService(triggerRepo, dagDefRepo, triggerEmployeeRepo)
+	triggerH := handler.NewTriggerHandler(triggerRouter).
+		WithQueryRepo(triggerRepo).
+		WithCRUDService(triggerCRUDSvc)
 	triggerH.RegisterRoutes(e)
 
 	// Start the schedule ticker in the background. It evaluates enabled
@@ -1069,6 +1172,26 @@ func RegisterRoutes(
 	// Project-scoped secrets store (spec1 §6.1 / §7 / §11).
 	secretsH := handler.NewSecretsHandler(&handler.EchoSecretsServiceAdapter{S: secretsSvc})
 	secretsH.Register(projectGroup)
+
+	// VCS integrations CRUD (spec2 §6.1 + §7). Project-scoped reads/creates;
+	// id-scoped patch/delete/sync on protected.
+	vcsIntegrationsH := handler.NewVCSIntegrationsHandler(vcsSvc)
+	vcsIntegrationsH.Register(projectGroup, protected)
+
+	// Qianchuan bindings CRUD (spec3 §6.1). Project-scoped list/create on
+	// projectGroup; id-scoped patch/delete/sync/test on protected. Provider
+	// is constructed via env-driven Register(); auth probe runs on Create.
+	qcBindingRepo := qianchuanbinding.NewGormRepo(taskRepo.DB())
+	qcRegistry := adsplatform.NewRegistry()
+	qianchuan.Register(qcRegistry)
+	qcProvider, qcProviderErr := qcRegistry.Resolve("qianchuan")
+	if qcProviderErr != nil {
+		log.WithError(qcProviderErr).Fatal("qianchuan provider not registered")
+	}
+	qcBindingSvc := qianchuanbinding.NewService(qcBindingRepo, secretsSvc, qcProvider)
+	qcBindingH := handler.NewQianchuanBindingsHandler(qcBindingSvc, qianchuanBindingsAuditEmitter{svc: auditSvc})
+	qcBindingH.Register(projectGroup)
+	qcBindingH.RegisterFlat(e)
 
 	// Per-employee unified runs feed (workflow_executions ∪ agent_runs).
 	// Route is global (not project-scoped) because the employee id is

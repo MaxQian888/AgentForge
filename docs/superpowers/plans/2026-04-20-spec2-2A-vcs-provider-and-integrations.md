@@ -1747,7 +1747,7 @@
 
 ## Task 10 — `internal/handler/vcs_integrations_handler.go` HTTP CRUD
 
-- [ ] Step 10.1 — write failing handler test
+- [x] Step 10.1 — write failing handler test
   - File: `src-go/internal/handler/vcs_integrations_handler_test.go`
     ```go
     package handler_test
@@ -1819,7 +1819,7 @@
   - File: `src-go/internal/handler/vcs_integrations_handler_helpers_test.go` — define `newFakeIntegSvc()` returning a stub satisfying the handler's narrow service interface. Stub responds with valid records / nil errors so the negative cases assert on the handler's own validation paths.
   - Run `rtk go test ./internal/handler/...` — fails (handler missing).
 
-- [ ] Step 10.2 — implement handler
+- [x] Step 10.2 — implement handler
   - File: `src-go/internal/handler/vcs_integrations_handler.go`
     ```go
     package handler
@@ -1992,15 +1992,15 @@
     ```
   - Run `rtk go test ./internal/handler/...` (-run VCSIntegrations) — passes.
 
-- [ ] Step 10.3 — audit emission: in service Create / Patch / Delete / Sync, emit audit events via the existing `service.AuditService` (use the same adapter pattern 1B uses for `secret.*` actions). Use `ResourceType=AuditResourceTypeVCSIntegration` and `ResourceID=integration.ID.String()`. Payload JSON includes `{provider, host, owner, repo, op}` only — never tokens or webhook IDs.
+- [x] Step 10.3 — audit emission: in service Create / Patch / Delete / Sync, emit audit events via the existing `service.AuditService` (use the same adapter pattern 1B uses for `secret.*` actions). Use `ResourceType=AuditResourceTypeVCSIntegration` and `ResourceID=integration.ID.String()`. Payload JSON includes `{provider, host, owner, repo, op}` only — never tokens or webhook IDs.
 
-- [ ] Step 10.4 — commit: `feat(handler): vcs-integrations CRUD with audit + sync stub`
+- [x] Step 10.4 — commit: `feat(handler): vcs-integrations CRUD with audit + sync stub`
 
 ---
 
 ## Task 11 — Wire registry, service, handler in `internal/server/routes.go`
 
-- [ ] Step 11.1 — register providers + service at bootstrap
+- [x] Step 11.1 — register providers + service at bootstrap
   - File: `src-go/internal/server/server.go` (or wherever the server-level wiring helper lives)
     - Construct `vcs.NewRegistry()` once.
     - Register concrete providers:
@@ -2018,15 +2018,15 @@
       ```
     - Build `vcs.NewService(vcsIntegrationRepo, vcsRegistry, secretsResolverAdapter, callbackURL)` where `callbackURL = strings.TrimRight(cfg.PublicBaseURL, "/") + "/api/v1/vcs/github/webhook"`.
     - `secretsResolverAdapter` is a tiny in-package wrapper that calls `secretsSvc.Resolve(ctx, projectID, name)` (1B's Service).
-- [ ] Step 11.2 — wire routes
+- [x] Step 11.2 — wire routes
   - File: `src-go/internal/server/routes.go` (after the `employeeH.Register(projectGroup)` line, ~1038)
     ```go
     vcsIntegrationH := handler.NewVCSIntegrationsHandler(vcsIntegrationSvc)
     vcsIntegrationH.Register(projectGroup, protected)
     ```
-- [ ] Step 11.3 — add config field
+- [x] Step 11.3 — add config field
   - File: `src-go/internal/config/config.go` (or equivalent) — add `PublicBaseURL string` reading env `AGENTFORGE_PUBLIC_BASE_URL`. Default `http://localhost:7777` for dev with a `log.Warn` if the env is unset (real deployments must set it).
-- [ ] Step 11.4 — verify route wiring test
+- [x] Step 11.4 — verify route wiring test
   - Update `src-go/internal/server/routes_wiring_test.go` — assert the four new routes exist:
     - `GET /api/v1/projects/:pid/vcs-integrations`
     - `POST /api/v1/projects/:pid/vcs-integrations`
@@ -2034,7 +2034,7 @@
     - `DELETE /api/v1/vcs-integrations/:id`
     - `POST /api/v1/vcs-integrations/:id/sync`
   - Run `rtk go test ./internal/server/...` — passes.
-- [ ] Step 11.5 — commit: `feat(server): wire vcs registry, providers, service, and integrations handler`
+- [x] Step 11.5 — commit: `feat(server): wire vcs registry, providers, service, and integrations handler`
 
 ---
 
