@@ -702,11 +702,11 @@
 
 ## Task 6 — Add `go-github` dep + `internal/vcs/github/client.go` GitHub provider
 
-- [ ] Step 6.1 — add dep
+- [x] Step 6.1 — add dep
   - Run: `cd src-go && go get github.com/google/go-github/v60/github && go mod tidy` (use `rtk` wrapper).
   - Verify `go.mod` now lists `github.com/google/go-github/v60` and `golang.org/x/oauth2` (transitive — accept).
 
-- [ ] Step 6.2 — write failing GitHub client test using `httptest`
+- [x] Step 6.2 — write failing GitHub client test using `httptest`
   - File: `src-go/internal/vcs/github/client_test.go`
     ```go
     package github_test
@@ -826,7 +826,7 @@
     ```
   - Run `rtk go test ./internal/vcs/github/...` — fails (client missing).
 
-- [ ] Step 6.3 — implement GitHub client
+- [x] Step 6.3 — implement GitHub client
   - File: `src-go/internal/vcs/github/client.go`
     ```go
     // Package github implements vcs.Provider for GitHub.com and GitHub
@@ -1079,7 +1079,7 @@
     ```
   - Run `rtk go test ./internal/vcs/github/...` — passes.
 
-- [ ] Step 6.4 — commit: `feat(vcs/github): GitHub provider via go-github v60 with typed error mapping`
+- [x] Step 6.4 — commit: `feat(vcs/github): GitHub provider via go-github v60 with typed error mapping`
 
 ---
 
