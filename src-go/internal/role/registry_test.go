@@ -279,3 +279,30 @@ func writeRoleFile(t *testing.T, dir, name, content string) {
 func stringsReplace(input, old, new string) string {
 	return strings.NewReplacer(old, new).Replace(input)
 }
+
+func TestRegistry_LoadsDefaultCodeFixer(t *testing.T) {
+	// Load from the real roles directory in the repository root.
+	rolesDir := filepath.Join("..", "..", "..", "..", "roles")
+	if _, err := os.Stat(filepath.Join(rolesDir, "default-code-fixer", "role.yaml")); err != nil {
+		t.Skipf("roles directory not found at %s: %v", rolesDir, err)
+	}
+
+	registry := role.NewRegistry()
+	if err := registry.LoadDir(rolesDir); err != nil {
+		t.Fatalf("LoadDir() error = %v", err)
+	}
+
+	m, ok := registry.Get("default-code-fixer")
+	if !ok {
+		t.Fatal("Get(default-code-fixer) ok = false, want true")
+	}
+	if m.Metadata.ID != "default-code-fixer" {
+		t.Errorf("metadata.id = %q", m.Metadata.ID)
+	}
+	if m.SystemPrompt == "" {
+		t.Error("system_prompt is empty")
+	}
+	if m.Capabilities.MaxBudgetUsd > 2.0 {
+		t.Errorf("max_budget_usd = %f, want <= 2.0", m.Capabilities.MaxBudgetUsd)
+	}
+}

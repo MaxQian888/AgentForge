@@ -5,6 +5,7 @@ import (
 
 	"github.com/google/uuid"
 	"github.com/react-go-quick-starter/server/internal/model"
+	"github.com/react-go-quick-starter/server/internal/workflow/system"
 )
 
 // System template names — used as stable identifiers for upsert.
@@ -15,6 +16,7 @@ const (
 	TemplateContentCreation   = "content-creation"
 	TemplateCustomerService   = "customer-service"
 	TemplateSystemCodeReview  = "system:code-review"
+	TemplateCodeFixer         = "code_fixer"
 )
 
 // buildNodes / buildEdges are helpers to avoid repetitive json.Marshal calls.
@@ -432,5 +434,6 @@ func AllSystemTemplates() []*model.WorkflowDefinition {
 		ContentCreationTemplate(),
 		CustomerServiceTemplate(),
 		SystemCodeReviewTemplate(),
+		system.CodeFixerDefinition(),
 	}
 }
