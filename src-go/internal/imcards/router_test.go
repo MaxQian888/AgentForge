@@ -120,6 +120,97 @@ func TestRouter_NotFoundFallsBack(t *testing.T) {
 	}
 }
 
+type stubAutomation struct {
+	calls []struct {
+		FindingID uuid.UUID
+		Action    string
+		Actor     string
+	}
+}
+
+func (s *stubAutomation) Decide(_ context.Context, findingID uuid.UUID, action string, actor string) error {
+	s.calls = append(s.calls, struct {
+		FindingID uuid.UUID
+		Action    string
+		Actor     string
+	}{findingID, action, actor})
+	return nil
+}
+
+func TestRouter_AutomationBranchDispatchesToHandler(t *testing.T) {
+	findingID := uuid.New()
+	token := uuid.New()
+	corr := &stubCorrelations{c: &Correlation{
+		Token:       token,
+		ExecutionID: uuid.Nil, // null execution_id → automation branch
+		NodeID:      "(automation)",
+		ActionID:    "apply",
+		Payload:     map[string]any{"finding_id": findingID.String(), "action": "apply"},
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}}
+	auto := &stubAutomation{}
+	r := &Router{
+		Correlations: corr,
+		Resumer:      &stubResumer{},
+		Fallback:     &stubFallback{},
+		Audit:        &stubAudit{},
+		Automation:   auto,
+	}
+	out, err := r.Route(context.Background(), RouteInput{Token: token, ActionID: "apply", UserID: "user-1"})
+	if err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	if out.Outcome != OutcomeAutomationDispatched {
+		t.Errorf("outcome = %s, want automation_dispatched", out.Outcome)
+	}
+	if len(auto.calls) != 1 {
+		t.Fatalf("automation calls = %d, want 1", len(auto.calls))
+	}
+	if auto.calls[0].FindingID != findingID {
+		t.Errorf("finding_id mismatch")
+	}
+	if auto.calls[0].Action != "apply" {
+		t.Errorf("action = %q, want apply", auto.calls[0].Action)
+	}
+	if auto.calls[0].Actor != "user-1" {
+		t.Errorf("actor = %q, want user-1", auto.calls[0].Actor)
+	}
+	if len(corr.marked) != 1 {
+		t.Error("token not consumed")
+	}
+}
+
+func TestRouter_AutomationBranch_DismissAction(t *testing.T) {
+	findingID := uuid.New()
+	token := uuid.New()
+	corr := &stubCorrelations{c: &Correlation{
+		Token:       token,
+		ExecutionID: uuid.Nil,
+		NodeID:      "(automation)",
+		ActionID:    "dismiss",
+		Payload:     map[string]any{"finding_id": findingID.String(), "action": "dismiss"},
+		ExpiresAt:   time.Now().Add(time.Hour),
+	}}
+	auto := &stubAutomation{}
+	r := &Router{
+		Correlations: corr,
+		Resumer:      &stubResumer{},
+		Fallback:     &stubFallback{},
+		Audit:        &stubAudit{},
+		Automation:   auto,
+	}
+	out, err := r.Route(context.Background(), RouteInput{Token: token, ActionID: "dismiss", UserID: "user-2"})
+	if err != nil {
+		t.Fatalf("Route: %v", err)
+	}
+	if out.Outcome != OutcomeAutomationDispatched {
+		t.Errorf("outcome = %s", out.Outcome)
+	}
+	if len(auto.calls) != 1 || auto.calls[0].Action != "dismiss" {
+		t.Errorf("unexpected calls: %+v", auto.calls)
+	}
+}
+
 func TestRouter_ResumerNotWaiting(t *testing.T) {
 	token := uuid.New()
 	corr := &stubCorrelations{c: &Correlation{

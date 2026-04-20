@@ -28,8 +28,9 @@ var (
 type RouteOutcome string
 
 const (
-	OutcomeResumed  RouteOutcome = "resumed"
-	OutcomeFallback RouteOutcome = "fallback_triggered"
+	OutcomeResumed              RouteOutcome = "resumed"
+	OutcomeFallback             RouteOutcome = "fallback_triggered"
+	OutcomeAutomationDispatched RouteOutcome = "automation_dispatched"
 )
 
 // CorrelationsStore is the narrow interface the router consumes from
@@ -57,12 +58,20 @@ type AuditSink interface {
 	Record(ctx context.Context, kind string, payload map[string]any) error
 }
 
+// AutomationActionHandler dispatches actions for correlations with no
+// execution_id (null). These originate from automation rules rather than
+// active workflow executions.
+type AutomationActionHandler interface {
+	Decide(ctx context.Context, findingID uuid.UUID, action string, actor string) error
+}
+
 // Router is the central card-action decision point.
 type Router struct {
 	Correlations CorrelationsStore
 	Resumer      WaitEventResumer
 	Fallback     FallbackTriggerRouter
 	Audit        AuditSink
+	Automation   AutomationActionHandler
 	Now          func() time.Time // override for tests
 }
 
@@ -131,6 +140,34 @@ func (r *Router) Route(ctx context.Context, in RouteInput) (*RouteResult, error)
 	}
 	if corr.ExpiresAt.Before(now) {
 		return nil, ErrCardActionExpired
+	}
+
+	// Automation branch: correlation with nil ExecutionID was minted by
+	// an automation rule (e.g. review_completed_rule). Dispatch to the
+	// AutomationActionHandler instead of the wait_event resumer.
+	if corr.ExecutionID == uuid.Nil && r.Automation != nil {
+		// Extract finding_id from correlation payload
+		findingIDStr, _ := corr.Payload["finding_id"].(string)
+		findingID, _ := uuid.Parse(findingIDStr)
+		actionID, _ := corr.Payload["action"].(string)
+		if actionID == "" {
+			actionID = in.ActionID
+		}
+		if err := r.Automation.Decide(ctx, findingID, actionID, in.UserID); err != nil {
+			return nil, fmt.Errorf("automation dispatch: %w", err)
+		}
+		if err := r.Correlations.MarkConsumed(ctx, in.Token); err != nil {
+			r.audit(ctx, "card_action_mark_consumed_failed", map[string]any{
+				"token": in.Token.String(), "error": err.Error(),
+			})
+		}
+		r.audit(ctx, "card_action_automation", map[string]any{
+			"token":     in.Token.String(),
+			"actionId":  actionID,
+			"userId":    in.UserID,
+			"findingId": findingIDStr,
+		})
+		return &RouteResult{Outcome: OutcomeAutomationDispatched}, nil
 	}
 
 	// Build the payload visible to the wait_event node.
