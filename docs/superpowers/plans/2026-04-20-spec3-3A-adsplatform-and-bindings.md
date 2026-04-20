@@ -32,10 +32,10 @@
 
 ## Task 1 — Migration: qianchuan_bindings table + audit resource_type extension
 
-- [ ] Step 1.1 — pick migration number
-  - Run `rtk ls src-go/migrations/*.up.sql | sort | tail -1` → take the trailing `NNN`, set `MIG = NNN+1`. The plan text below uses `MIG` as a placeholder; substitute the real number when committing.
+- [x] Step 1.1 — pick migration number
+  - Run `rtk ls src-go/migrations/*.up.sql | sort | tail -1` → take the trailing `NNN`, set `MIG = NNN+1`. The plan text below uses `MIG` as a placeholder; substitute the real number when committing. **Used MIG = 071** (070 was claimed by Plan 3C qianchuan_strategies).
 
-- [ ] Step 1.2 — write the up migration
+- [x] Step 1.2 — write the up migration
   - File: `src-go/migrations/MIG_create_qianchuan_bindings.up.sql`
     ```sql
     -- Project-scoped Qianchuan (巨量千川) advertiser bindings.
