@@ -391,7 +391,7 @@
 
 ## Task 3 — Mock provider for tests (`internal/adsplatform/mock`)
 
-- [ ] Step 3.1 — failing tests
+- [x] Step 3.1 — failing tests
   - File: `src-go/internal/adsplatform/mock/provider_test.go`
     ```go
     package mock_test
@@ -436,7 +436,7 @@
     }
     ```
 
-- [ ] Step 3.2 — implement
+- [x] Step 3.2 — implement
   - File: `src-go/internal/adsplatform/mock/provider.go`
     ```go
     // Package mock provides an in-memory adsplatform.Provider that records
@@ -592,7 +592,7 @@
     ```
   - Run `rtk go test ./internal/adsplatform/mock/...` — green.
 
-- [ ] Step 3.3 — commit `feat(adsplatform): add mock provider for tests`
+- [x] Step 3.3 — commit `feat(adsplatform): add mock provider for tests`
 
 ---
 
