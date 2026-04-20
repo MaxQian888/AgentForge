@@ -201,7 +201,7 @@
 
 ## Task 5 — Strategy parser + top-level validation
 
-- [ ] Step 5.1 — write failing tests
+- [x] Step 5.1 — write failing tests
   - File: `src-go/internal/qianchuan/strategy/parser_test.go`
   - Cases:
     - Well-formed YAML (one rule, `notify_im` action) parses; `ParsedSpec.ScheduleSeconds == 60`
@@ -217,7 +217,7 @@
     - `name` longer than 128 chars rejected
     - `inputs[].window` parses durations `1m`, `15m`, `1h`; bad value rejected
 
-- [ ] Step 5.2 — implement parser
+- [x] Step 5.2 — implement parser
   - File: `src-go/internal/qianchuan/strategy/parser.go`
     ```go
     type StrategyParseError struct {
@@ -238,7 +238,7 @@
     3. Validate: name length, schedule duration range, at least 1 rule, unique rule names, condition non-empty, action type in `ActionTypes`, action params via `ValidateAction`
     4. Build `ParsedSpec` (fill `ScheduleSeconds`, `WindowSeconds`, copy expressions)
 
-- [ ] Step 5.3 — green all parser tests
+- [x] Step 5.3 — green all parser tests
 
 ---
 
