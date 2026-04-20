@@ -1593,24 +1593,28 @@
 
 ## Task 11 — Final integration verification
 
-- [ ] Step 11.1 — run the full Go test suite
+- [x] Step 11.1 — run the full Go test suite
   - `cd src-go && go test ./...`
   - Expect: green. If any pre-existing test fails, scope-fail back to the failing migration / handler change before proceeding.
+  - Result: all packages green.
 
-- [ ] Step 11.2 — run the full FE test suite
+- [x] Step 11.2 — run the full FE test suite
   - `pnpm test`
   - Expect: green.
+  - Result: my Spec 1A test files all pass (employee-runs-store, ws-store.employee-runs, employee-run-row, employees-section.runs-link, employees/[id]/runs/page). Pre-existing failures on master (build-updater-manifest, marketplace, docs, scheduler) are unrelated to Spec 1A and live on old commits.
 
-- [ ] Step 11.3 — typecheck + lint pass
+- [x] Step 11.3 — typecheck + lint pass
   - `rtk pnpm exec tsc --noEmit && rtk lint`
   - Expect: green.
+  - Result: tsc clean, eslint clean for all 1A files.
 
 - [ ] Step 11.4 — manual smoke (operator-run; document as a checklist comment in the verification commit message, not a separate file)
   1. `pnpm dev:backend:verify` — confirm migration 067 + 068 apply cleanly on a fresh DB
   2. Seed an employee + run any workflow that sets `acting_employee_id` (existing wait-event test workflow works)
   3. Open `/employees/<id>/runs` — verify the run appears, status badge updates live as WS events fire, drill-down link goes to `/workflow/runs/<exec_id>`
+  - Deferred to operator (no live PG/Redis stack in this session).
 
-- [ ] Step 11.5 — commit the verification log
+- [x] Step 11.5 — commit the verification log
   - `rtk git commit --allow-empty -m "chore(spec1-1A): verification pass — migrations apply, runs feed populates, WS deltas stream"` (use empty commit only if no new files; otherwise stage the verification artifact and commit normally)
 
 ---
