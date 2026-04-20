@@ -2276,7 +2276,7 @@
 
 ## Task 12 — Self-review + spec coverage check
 
-- [ ] Step 12.1 — confirm spec §6.1 / §7 / §11 coverage
+- [x] Step 12.1 — confirm spec §6.1 / §7 / §11 coverage
   - Re-read `docs/superpowers/specs/2026-04-20-foundation-gaps-design.md` §6.1, §7, §11.
   - Tick:
     - [x] secrets table matches §6.1 column-by-column (`id`, `project_id`, `name`, `ciphertext`, `nonce`, `key_version`, `description`, `last_used_at`, `created_by`, `created_at`, `updated_at`, `UNIQUE (project_id, name)`)
@@ -2284,18 +2284,18 @@
     - [x] §11: AES-256-GCM, plaintext NEVER in dataStore/log/err/audit (test in 4.1 captures logs); `{{secrets.X}}` whitelist enforced both at save AND execution time; `AGENTFORGE_SECRETS_KEY` fail-fast; CRUD audited via `RecordEvent`
     - [x] §14 last bullet: `{{system_metadata.*}}` rejected from author-controlled templates (resolver test in 6.1)
 
-- [ ] Step 12.2 — run the full Go test suite
+- [x] Step 12.2 — run the full Go test suite
   - Run `rtk go test ./...` from `src-go/` — must be green (excluding `-tags=integration` which needs PG).
   - Run `rtk go test -tags=integration ./internal/secrets/...` if PG is available locally.
 
-- [ ] Step 12.3 — run the FE test slice
+- [x] Step 12.3 — run the FE test slice
   - Run `rtk pnpm test -- secrets-store secrets/page` — green.
 
-- [ ] Step 12.4 — final check: nothing in this plan accidentally:
+- [x] Step 12.4 — final check: nothing in this plan accidentally:
   - logs plaintext (search the diff for any `log.*plain` / `log.*value` reference in the secrets package)
   - serializes `Ciphertext` / `Nonce` in any DTO returned from the handler (confirm `secretMetadataDTO` has neither field)
   - touches `system_metadata` from author code
   - bypasses `Require(ActionSecretWrite)` on any mutating route
   - Note any deviation under `## 14 Open Risks` of the spec instead of silently fixing.
 
-- [ ] Step 12.5 — commit: `chore(secrets): self-review pass; ready for 1E HTTP-node integration`
+- [x] Step 12.5 — commit: `chore(secrets): self-review pass; ready for 1E HTTP-node integration`
