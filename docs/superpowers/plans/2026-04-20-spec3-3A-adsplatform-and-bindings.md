@@ -1336,7 +1336,7 @@
 
 ## Task 6 — Repository: `internal/qianchuanbinding/repo.go`
 
-- [ ] Step 6.1 — failing repo tests (in-memory contract test)
+- [x] Step 6.1 — failing repo tests (in-memory contract test)
   - File: `src-go/internal/qianchuanbinding/repo_test.go`
     ```go
     package qianchuanbinding_test
@@ -1427,7 +1427,7 @@
     }
     ```
 
-- [ ] Step 6.2 — implement record + Repository interface + GORM impl
+- [x] Step 6.2 — implement record + Repository interface + GORM impl
   - File: `src-go/internal/qianchuanbinding/repo.go`
     ```go
     // Package qianchuanbinding owns persistence + business operations for
@@ -1623,7 +1623,7 @@
     }
     ```
 
-- [ ] Step 6.3 — commit `feat(qianchuanbinding): repository + record + gorm impl`
+- [x] Step 6.3 — commit `feat(qianchuanbinding): repository + record + gorm impl`
 
 ---
 
