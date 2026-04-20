@@ -32,7 +32,7 @@
 
 ## Task 1 — Migration: `qianchuan_oauth_states` table
 
-- [ ] Step 1.1 — write the up migration
+- [x] Step 1.1 — write the up migration
   - File: `src-go/migrations/<NEXT>_create_qianchuan_oauth_states.up.sql`
     ```sql
     -- Spec 3 §6.5 — short-lived CSRF nonces for Qianchuan OAuth bind flow.
@@ -57,14 +57,14 @@
     - `acting_employee_id` is nullable + `ON DELETE SET NULL`: an employee may be archived between initiate and callback; we still want the binding to land (under no employee) rather than 500.
     - `display_name` is optional — when omitted the callback synthesizes `Qianchuan <advertiser_id>` so the binding row's NOT NULL constraint never fires.
 
-- [ ] Step 1.2 — write the down migration
+- [x] Step 1.2 — write the down migration
   - File: `src-go/migrations/<NEXT>_create_qianchuan_oauth_states.down.sql`
     ```sql
     DROP INDEX IF EXISTS idx_qoauth_active;
     DROP TABLE IF EXISTS qianchuan_oauth_states;
     ```
 
-- [ ] Step 1.3 — verify
+- [x] Step 1.3 — verify
   - `rtk pnpm dev:backend:restart go-orchestrator` and confirm the up migration applies cleanly.
   - Manually `INSERT` one row in psql, then `SELECT * FROM qianchuan_oauth_states WHERE expires_at < now() + interval '11 minutes'` and confirm the partial index is used (`EXPLAIN` shows `Index Scan using idx_qoauth_active`).
 
@@ -72,7 +72,7 @@
 
 ## Task 2 — `qianchuan_oauth_states` repository
 
-- [ ] Step 2.1 — write failing repo tests
+- [x] Step 2.1 — write failing repo tests
   - File: `src-go/internal/qianchuan/oauth_state_repo_test.go`
     - `TestRepo_CreateAndLookup` — insert via `Create`, fetch via `Lookup`, assert all fields preserved.
     - `TestRepo_LookupConsumed` — insert + `MarkConsumed`, `Lookup` returns `ErrStateConsumed`.
@@ -80,7 +80,7 @@
     - `TestRepo_LookupMissing` — random uuid → `ErrStateNotFound`.
     - `TestRepo_DeleteExpired` — sweeper helper: insert 3 expired + 1 fresh, `DeleteExpired(ctx, now())` returns 3 and the fresh row remains.
 
-- [ ] Step 2.2 — implement
+- [x] Step 2.2 — implement
   - File: `src-go/internal/qianchuan/oauth_state_repo.go`
     ```go
     package qianchuan
@@ -123,21 +123,21 @@
     ```
   - All errors map to spec error code `qianchuan:oauth_state_invalid` at the handler boundary.
 
-- [ ] Step 2.3 — verify
+- [x] Step 2.3 — verify
   - `rtk go test ./internal/qianchuan/... -run TestRepo_` — all 5 cases green.
 
 ---
 
 ## Task 3 — OAuth bind initiate handler
 
-- [ ] Step 3.1 — write failing handler tests
+- [x] Step 3.1 — write failing handler tests
   - File: `src-go/internal/handler/qianchuan_oauth_handler_test.go`
     - `TestInitiate_Success` — POST with body `{display_name:"店铺A", acting_employee_id:<uuid>}` → 200, response has `authorize_url` (containing `state=<uuid>` and `redirect_uri=<callback>`) and `state_token`.
     - `TestInitiate_RequiresProjectAdmin` — viewer/editor → 403; admin/owner → 200. (Spec §12 RBAC matrix: admin or owner can OAuth bind.)
     - `TestInitiate_BodyValidation` — missing required fields, malformed `acting_employee_id` → 400 with structured error code.
     - `TestInitiate_PersistsStateRow` — after a successful call, the `qianchuan_oauth_states` table contains exactly one row with the returned `state_token` and `consumed_at IS NULL`.
 
-- [ ] Step 3.2 — implement
+- [x] Step 3.2 — implement
   - File: `src-go/internal/handler/qianchuan_oauth_handler.go`
     ```go
     package handler
@@ -170,12 +170,12 @@
     5. `provider := h.Providers.MustGet("qianchuan")`; `authorizeURL := provider.OAuthAuthorizeURL(state.String(), redirectURI, []string{ /* default scopes from config */ })`.
     6. Return `200 initiateResp{authorizeURL, state}`.
 
-- [ ] Step 3.3 — wire route
+- [x] Step 3.3 — wire route
   - File: `src-go/internal/server/routes.go`
   - Register: `g.POST("/projects/:pid/qianchuan/oauth/bind/initiate", h.QianchuanOAuth.Initiate, appMiddleware.Require(appMiddleware.ActionQianchuanBindWrite))`
   - Add the new ActionID `ActionQianchuanBindWrite` to `middleware/rbac.go` mapped to `admin` + `owner` per spec §12.
 
-- [ ] Step 3.4 — verify
+- [x] Step 3.4 — verify
   - `rtk go test ./internal/handler/... -run TestInitiate_` — all 4 cases green.
   - `rtk go test ./internal/middleware/... -run TestRBAC_QianchuanBind` — covers the role gating.
 
@@ -183,7 +183,7 @@
 
 ## Task 4 — OAuth callback handler
 
-- [ ] Step 4.1 — write failing callback tests
+- [x] Step 4.1 — write failing callback tests
   - File: `src-go/internal/handler/qianchuan_oauth_callback_test.go`
     - `TestCallback_HappyPath` — seed state row + mock `OAuthExchange` returning a `TokenSet` with one advertiser; GET callback with `code=abc&state=<uuid>` → 302 redirect to `/projects/<pid>/qianchuan/bindings?bind=success&advertiser=<id>`. Assert: 2 secrets created (`qianchuan.<id>.access_token`, `qianchuan.<id>.refresh_token`), 1 binding row inserted, oauth_state `consumed_at` is set.
     - `TestCallback_MissingState` — GET without `state` → 400 HTML error page (server-rendered template).
@@ -194,7 +194,7 @@
     - `TestCallback_AdvertiserAmbiguous` — token returns 2 advertiser ids → 400 page "Multiple advertisers granted; bind one at a time".
     - `TestCallback_Idempotency` — replaying the same `(code, state)` after success → 400 (state already consumed); the binding row is NOT duplicated.
 
-- [ ] Step 4.2 — implement
+- [x] Step 4.2 — implement
   - File: `src-go/internal/handler/qianchuan_oauth_handler.go` (extend)
     ```go
     // Callback handles GET /api/v1/qianchuan/oauth/callback?code=...&state=...
@@ -216,13 +216,13 @@
     10. Audit: `auditSvc.RecordEvent(...)` with `resource_type='qianchuan_binding'`, `action='qianchuan.binding.oauth_completed'`, payload `{advertiser_id, display_name}` — do NOT include token plaintext or secret ids.
     11. Redirect to `${PUBLIC_BASE_FE}/projects/<row.ProjectID>/qianchuan/bindings?bind=success&advertiser=<id>`.
 
-- [ ] Step 4.3 — error HTML template
+- [x] Step 4.3 — error HTML template
   - File: `src-go/internal/handler/templates/qianchuan_oauth_error.html`
     - Minimal hand-rolled HTML (no framework): centered card, error code, error message, and a "Back to AgentForge" link to `${PUBLIC_BASE_FE}`.
     - Embed via `//go:embed` into `qianchuan_oauth_handler.go`.
     - i18n: render in English by default; pass `?lang=zh` if Spec 1's i18n cookie can be read (best-effort, fall back to English).
 
-- [ ] Step 4.4 — wire route + verify
+- [x] Step 4.4 — wire route + verify
   - Register `e.GET("/api/v1/qianchuan/oauth/callback", h.QianchuanOAuth.Callback)` (NO RBAC middleware — Qianchuan posts back as the user's browser; the state token is the trust anchor).
   - `rtk go test ./internal/handler/... -run TestCallback_` — all 8 cases green.
 
@@ -230,13 +230,13 @@
 
 ## Task 5 — Background token refresher: scaffold + scan loop
 
-- [ ] Step 5.1 — write failing scan-loop tests
+- [x] Step 5.1 — write failing scan-loop tests
   - File: `src-go/internal/qianchuan/refresher_test.go`
     - `TestRefresher_PicksDueBindings` — seed 3 bindings: A active expiring in 5min, B active expiring in 30min, C status='paused' expiring in 5min. Run one tick. Assert refresher attempted refresh on A only (B too far in future, C wrong status).
     - `TestRefresher_QueryUsesIndex` — `EXPLAIN ANALYZE` the scan query; assert plan contains `qianchuan_bindings_status_idx` (skip on non-PG test backends).
     - `TestRefresher_TickerStartsAndStops` — start refresher in goroutine with mock clock; cancel context → goroutine returns within 100ms.
 
-- [ ] Step 5.2 — implement scan loop
+- [x] Step 5.2 — implement scan loop
   - File: `src-go/internal/qianchuan/refresher.go`
     ```go
     package qianchuan
@@ -295,14 +295,14 @@
     SQL: `SELECT ... FROM qianchuan_bindings WHERE status='active' AND access_expires_at < $1`
     — confirms partial index is used.
 
-- [ ] Step 5.3 — verify
+- [x] Step 5.3 — verify
   - `rtk go test ./internal/qianchuan/... -run TestRefresher_` — 3 tests green.
 
 ---
 
 ## Task 6 — Background token refresher: per-binding refresh + auth_expired transition
 
-- [ ] Step 6.1 — write failing tests
+- [x] Step 6.1 — write failing tests
   - File: `src-go/internal/qianchuan/refresher_test.go` (extend)
     - `TestRefreshOne_Success` — mock provider returns new TokenSet; assert: `Secrets.RotateSecret` called twice (access + refresh) with correct names, binding `access_expires_at` updated, audit row written with `action='qianchuan.token.refreshed'` (no plaintext in payload), no event emitted.
     - `TestRefreshOne_RefreshInvalid_401` — mock provider returns HTTP 401; assert: binding marked `status='auth_expired'`, `EventAdsPlatformAuthExpired` published, audit row `action='qianchuan.token.refresh_failed'` with reason.
@@ -311,7 +311,7 @@
     - `TestRefreshOne_NetworkTimeout` — mock provider call panics with `context.DeadlineExceeded`; refresher logs + treats as transient (counter increment).
     - `TestRefreshOne_SecretsResolveFails` — `Secrets.Resolve("...refresh_token")` returns `secret:not_found` → mark `auth_expired` (the binding is unsalvageable without the refresh secret).
 
-- [ ] Step 6.2 — implement
+- [x] Step 6.2 — implement
   - File: `src-go/internal/qianchuan/refresher.go` (extend)
     ```go
     func (r *Refresher) refreshOne(ctx context.Context, b Binding) {
@@ -377,7 +377,7 @@
     MarkAuthExpired(ctx context.Context, id uuid.UUID, reason string) error
     ```
 
-- [ ] Step 6.3 — verify
+- [x] Step 6.3 — verify
   - `rtk go test ./internal/qianchuan/... -run TestRefreshOne_` — 6 tests green.
   - Manual log review: tail backend logs and confirm refresher logs are structured JSON with `binding_id` field, never `access_token` / `refresh_token`.
 
@@ -385,7 +385,7 @@
 
 ## Task 7 — `EventAdsPlatformAuthExpired` event + subscriber
 
-- [ ] Step 7.1 — register event type
+- [x] Step 7.1 — register event type
   - File: `src-go/internal/eventbus/types.go` (or whatever the central event-name list is)
   - Add constant: `EventAdsPlatformAuthExpired = "adsplatform.auth_expired"`.
   - File: `src-go/internal/qianchuan/events.go` (new)
@@ -416,7 +416,7 @@
     - Three side effects (in this order, all best-effort): WS fanout (already wired by `mods/ws_fanout.go` if the event is in the registry — confirm), audit event, optional Feishu alert via 1D's outbound channel resolver if `project.settings.system_notification_chat_id` is set.
     - Wire in `cmd/server/main.go` next to other subscribers.
 
-- [ ] Step 7.4 — runtime gate on schedule trigger
+- [x] Step 7.4 — runtime gate on schedule trigger
   - File: `src-go/internal/trigger/schedule_trigger.go` (or the equivalent entry-point used by Spec 1's schedule trigger)
   - Before spawning a workflow execution for a trigger whose `target_workflow_id` is the canonical `qianchuan_strategy_loop`, look up the binding referenced by the trigger's input mapping (`binding_id` is in `trigger.config`). If `binding.status != 'active'`, skip the spawn and emit a debug log. Do NOT mark the trigger paused (3D / 3E own that flow).
   - Add a unit test `TestScheduleTrigger_SkipsWhenAuthExpired` that asserts the spawn is short-circuited.
@@ -429,7 +429,7 @@
 
 ## Task 8 — Bootstrap refresher in `cmd/server/main.go`
 
-- [ ] Step 8.1 — wire refresher
+- [x] Step 8.1 — wire refresher
   - File: `src-go/cmd/server/main.go`
   - After the existing `go scheduler.RunLoop(...)` line (~279):
     ```go
@@ -450,7 +450,7 @@
   - In the SIGTERM handler (`<-quit` block) call `qcRefresherCancel()` before `bridgeHealthCancel()`.
   - Also wire the auth_expired subscriber: `qianchuan.NewAuthExpiredSubscriber(deps...).Start(ctx)`.
 
-- [ ] Step 8.2 — wire OAuth handler
+- [x] Step 8.2 — wire OAuth handler
   - In the route-builder block: instantiate `QianchuanOAuthHandler` and pass to `routes.go`.
   - `PublicBase` resolution: env `BACKEND_PUBLIC_BASE_URL` if set, else fall back to `cfg.PublicBaseURL`, else use `http://localhost:7777` (and log a warning that OAuth callbacks won't work over the public internet without a configured base).
 
@@ -497,7 +497,7 @@
     - `success toast on ?bind=success` — render page with `useSearchParams` returning `bind=success&advertiser=AD1`; assert sonner `toast.success` invoked with localized success copy.
     - `failure toast on ?bind=error` — symmetric; renders error toast with the error code echoed in URL.
 
-- [ ] Step 10.2 — implement
+- [x] Step 10.2 — implement
   - File: `app/(dashboard)/projects/[id]/qianchuan/bindings/page.tsx`
   - Add a `<BindOAuthButton>` component:
     ```tsx
@@ -546,7 +546,7 @@
 
 ## Task 11 — WS reactivity: FE picks up auth_expired without refresh
 
-- [ ] Step 11.1 — extend the bindings store
+- [x] Step 11.1 — extend the bindings store
   - File: `lib/stores/qianchuan-bindings-store.ts` (3A surface)
   - Subscribe to WS event `adsplatform.auth_expired` filtered by current `projectId`. On message, mutate the matching binding row in the store: `status='auth_expired'`, `status_reason=<payload.reason>`.
 
