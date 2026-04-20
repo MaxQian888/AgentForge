@@ -72,7 +72,7 @@ const getToken = () => {
 };
 
 export const useVCSIntegrationsStore = create<VCSIntegrationsStoreState>()(
-  (set, get) => ({
+  (set) => ({
     integrationsByProject: {},
     loadingByProject: {},
 

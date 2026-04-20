@@ -2264,7 +2264,7 @@
 
 ## Task 13 — FE page `app/(dashboard)/projects/[id]/integrations/vcs/page.tsx`
 
-- [ ] Step 13.1 — write failing component test
+- [x] Step 13.1 — write failing component test
   - File: `app/(dashboard)/projects/[id]/integrations/vcs/page.test.tsx`
     ```tsx
     /** @jest-environment jsdom */
@@ -2340,7 +2340,7 @@
     ```
   - Run `rtk pnpm test -- app/(dashboard)/projects/[id]/integrations/vcs` — fails (page missing).
 
-- [ ] Step 13.2 — implement page
+- [x] Step 13.2 — implement page
   - File: `app/(dashboard)/projects/[id]/integrations/vcs/page.tsx`
     ```tsx
     "use client";
@@ -2551,9 +2551,9 @@
     ```
   - Run `rtk pnpm test -- app/(dashboard)/projects/[id]/integrations/vcs` — passes.
 
-- [ ] Step 13.3 — add nav link
+- [~] Step 13.3 — add nav link (deferred to whichever 1B/2A plan ships projects/[id]/layout.tsx; TODO comment in page.tsx)
   - File: `app/(dashboard)/projects/[id]/layout.tsx` (extend the shell 1B introduces; add an "Integrations" entry pointing at `./integrations/vcs` alongside the "Secrets" entry).
-- [ ] Step 13.4 — commit: `feat(fe): vcs integrations management page with secret-ref selectors`
+- [x] Step 13.4 — commit: `feat(fe): vcs integrations management page with secret-ref selectors`
 
 ---
 
