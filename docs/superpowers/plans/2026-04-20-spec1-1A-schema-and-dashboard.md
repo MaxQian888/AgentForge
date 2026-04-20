@@ -1621,9 +1621,9 @@
 
 ## Self-review checklist (run before declaring done)
 
-- [ ] All 5 reserved system_metadata keys from spec §6.3 are documented in the migration comment (reply_target / im_dispatched / final_output) — yes (Step 1.6)
-- [ ] `created_via` enum matches spec §6.2 vocabulary ('dag_node' | 'manual') — yes (Step 2.3, Step 2.5 CHECK constraint)
-- [ ] No new WS event types invented — only existing `workflow.execution.*` / `workflow.node.*` / `agent.*` reused — yes (Step 7.3 RUN_EVENT_TYPES list cross-references eventbus/types.go)
-- [ ] Drill-down URLs use existing routes (`/workflow/runs/:id` and `/agents?run=:id`) — yes (Step 3.3 RefURL switch). NOTE: `/workflow/runs/:id` does not yet exist as a dedicated page in this codebase (the unified runs view lives at `/workflow` page's "Runs" tab). The link will resolve to that tab via Next.js routing once a thin `/workflow/runs/[id]/page.tsx` is added by the unified-run-view follow-up; until then the link 404s gracefully — acceptable for Spec 1A.
-- [ ] Migration numbering: 067 + 068, latest existing is 066 — verified
-- [ ] No code in the plan uses `TBD`, `// ...`, `similar to above`, or other placeholders — verified
+- [x] All 5 reserved system_metadata keys from spec §6.3 are documented in the migration comment (reply_target / im_dispatched / final_output) — yes (Step 1.6)
+- [x] `created_via` enum matches spec §6.2 vocabulary ('dag_node' | 'manual') — yes (Step 2.3, Step 2.5 CHECK constraint)
+- [x] No new WS event types invented — only existing `workflow.execution.*` / `workflow.node.*` / `agent.*` reused — yes (Step 7.3 RUN_EVENT_TYPES list cross-references eventbus/types.go)
+- [x] Drill-down URLs use existing routes (`/workflow/runs/:id` and `/agents?run=:id`) — yes (Step 3.3 RefURL switch). NOTE: `/workflow/runs/:id` does not yet exist as a dedicated page in this codebase (the unified runs view lives at `/workflow` page's "Runs" tab). The link will resolve to that tab via Next.js routing once a thin `/workflow/runs/[id]/page.tsx` is added by the unified-run-view follow-up; until then the link 404s gracefully — acceptable for Spec 1A.
+- [x] Migration numbering: 067 + 068, latest existing is 066 — verified
+- [x] No code in the plan uses `TBD`, `// ...`, `similar to above`, or other placeholders — verified
